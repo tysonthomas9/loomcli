@@ -1,3 +1,9 @@
+// Package workspace implements the workspace-facing commands — `loom init`,
+// `loom workspace` (create/add/list/remove/status in fleet-db), `loom workspace
+// ops` runtime repair, and `loom status` — and owns ResolveAgentTarget, which
+// maps a CLI name/repo argument to the worktree directory and agent name an
+// agent should run under. The commands self-register from init(); the daemon
+// supervisor and `loom plan`/`loom task` import the package for ResolveAgentTarget.
 package workspace
 
 import (

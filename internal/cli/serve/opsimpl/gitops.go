@@ -1,3 +1,10 @@
+// Package opsimpl holds the cli-side concrete implementations of the
+// internal/ops interfaces, which exist to keep webui from importing cli. GitOps
+// resolves workspace roots and agent/repo worktree paths and runs push, pull,
+// create-PR and checkout repair via git and gh; BackendOps reports install and
+// health status for the registered agent CLI backends (codex, claude, ...).
+// Instantiated by internal/cli/serve and handed to the web UI server, which
+// only ever sees the ops interfaces.
 package opsimpl
 
 import (

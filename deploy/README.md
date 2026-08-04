@@ -1,19 +1,28 @@
 # deploy/ — Production deployment reference
 
-After Phase 5, the loom API server and the static frontend build are
-independent artifacts. This directory is the canonical production
-reference: two Dockerfiles and a compose file that wire them together
-the way a real deployment would.
+> **Status:** Current · *audited 2026-07-24*
+
+The loom API server and the static frontend build are independent artifacts:
+`loom serve` registers no `/` handler unless `--frontend-dir` is set
+(`internal/webui/app/frontend.go:11-15`). This directory is the canonical
+production reference — two Dockerfiles and a compose file that wire them
+together the way a real deployment would.
 
 ```
 deploy/
 ├── docker-compose.yml       # Same-origin compose (recommended)
 ├── server/
 │   └── Dockerfile           # Pure Go API — no Node
-└── frontend/
-    ├── Dockerfile           # Static SPA + nginx — no Go
-    └── nginx.conf           # Serves dist, proxies /api/*, SSE + WS upgrade
+├── frontend/
+│   ├── Dockerfile           # Static SPA + nginx — no Go
+│   ├── nginx.conf           # Serves dist, proxies /api/*, SSE + WS upgrade
+│   └── 99-render-nginx-resolver.sh
+├── podman-stack/            # Local distributed-topology e2e stack (own README)
+└── agents/a1-github-review/ # Provisioning scripts for the GitHub review agent
 ```
+
+`podman-stack/` is a **test** topology, not a deployment target — see
+[`podman-stack/README.md`](podman-stack/README.md).
 
 ## Shape 1: Same-origin (recommended)
 
@@ -69,6 +78,17 @@ Ingress controller's annotations.
 
 Run `loom serve --frontend-url https://yourhost` on the API host and
 copy the `loomcli-frontend_<version>.tar.gz` release tarball's `dist/`
-directory onto the frontend host's static root. Configure your reverse
-proxy (nginx, caddy, HAProxy) using the rules in `nginx.conf` as a
-starting point.
+directory onto the frontend host's static root. That archive is built by
+goreleaser (`.goreleaser.yml:36-40`). Configure your reverse proxy (nginx,
+caddy, HAProxy) using the rules in `nginx.conf` as a starting point.
+
+## Related
+
+- [`../README.md`](../README.md) — CLI overview and `loom serve` flags
+- [`podman-stack/README.md`](podman-stack/README.md) — local distributed-topology
+  stack for platform e2e (not a deployment target)
+- [`../docs/security.md`](../docs/security.md) — auth modes, bind-address and
+  CORS posture
+- [`../docs/api.md`](../docs/api.md) — the HTTP API the `/api/*` proxy fronts
+- [`../desktop/README.md`](../desktop/README.md) — the single-machine desktop
+  packaging of the same server

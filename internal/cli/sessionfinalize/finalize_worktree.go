@@ -1,3 +1,9 @@
+// Package sessionfinalize closes out one agent run's session record: it
+// computes the worktree's git diff stats and patch against a before-ref, pulls
+// the backend-native transcript (codex rollout or claude transcript) into the
+// session, and writes exit code, error class, token usage, and cost through
+// sessions.Finalize. Called by internal/cli/agent, internal/cli/automode, and
+// the daemon supervisor at the end of every task attempt.
 package sessionfinalize
 
 import (

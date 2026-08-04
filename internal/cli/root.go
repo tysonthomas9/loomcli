@@ -1,3 +1,9 @@
+// Package cli owns the loom root cobra command and the plumbing every
+// subcommand shares: the RegisterCommand registry that each internal/cli/*
+// package calls from init(), the Deps container (git/exec runners, filesystem,
+// agent invoker, issue backend), agent-backend selection (--backend), issue-backend
+// (fleet-db vs api) resolution, worktree resolution, and agent lock files.
+// Entered from cmd/loom/main.go via Execute().
 package cli
 
 import (
@@ -6,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -289,6 +296,35 @@ func registerPendingCommands() {
 // GetRootCmd returns the root cobra command for sub-packages that need
 // to add command groups or other root-level configuration.
 func GetRootCmd() *cobra.Command {
+	return rootCmd
+}
+
+// assembleOnce guards the one-time attachment of pending subcommands to rootCmd
+// so AssembleRootCmd is idempotent: a second call must not append the same
+// subcommands again (cobra's AddCommand would duplicate them).
+var assembleOnce sync.Once
+
+// AssembleRootCmd returns the fully-wired root command with every registered
+// subcommand attached. It exists for tools that need to introspect the complete
+// command tree without running the CLI — notably scripts/loomdoc, which
+// generates the CLI reference doc.
+//
+// GetRootCmd returns the bare root: its persistent flags and groups are set in
+// init(), but subcommands are attached lazily by registerPendingCommands, which
+// normally runs only inside Execute (alongside tracing and signal-handler setup
+// that a doc generator must not trigger). AssembleRootCmd performs just that
+// attachment step, exactly once.
+//
+// The pending list is populated by each internal/cli/* sub-package's init(), so
+// a caller only sees a complete tree if it has imported those packages. Both
+// cmd/loom/main.go and scripts/loomdoc/cli.go blank-import the full set and
+// additionally register the sdk-only internal/cli/data sub-tree (which cannot
+// import internal/cli, so it cannot self-register via init()).
+//
+// Idempotent and free of side effects beyond wiring the in-memory tree, so it is
+// safe to call repeatedly within one process.
+func AssembleRootCmd() *cobra.Command {
+	assembleOnce.Do(registerPendingCommands)
 	return rootCmd
 }
 

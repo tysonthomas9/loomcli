@@ -1,3 +1,7 @@
+// Package atomicfile persists a file via write-temp-then-rename in the target
+// directory, so a concurrent reader never observes a half-written file. Used
+// wherever loom saves state that another process may be tailing or reloading:
+// the bootstrap state cache, stackstore, session transcripts, and CLI lockfiles.
 package atomicfile
 
 import (

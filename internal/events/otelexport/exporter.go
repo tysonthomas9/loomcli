@@ -1,3 +1,9 @@
+// Package otelexport subscribes to an events.Bus and turns loom lifecycle
+// events into OpenTelemetry spans and metrics pushed to an OTLP collector,
+// re-rooting each span under the W3C trace context the event carried so
+// event-driven spans join the originating request's trace. Constructed by
+// internal/cli/daemon when loom.yaml's daemon.otel section enables it, and by
+// internal/cli for the interactive agent event bus.
 package otelexport
 
 import (

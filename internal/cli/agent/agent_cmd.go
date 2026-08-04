@@ -1,3 +1,10 @@
+// Package agent registers the worker-agent cobra commands — `loom plan`,
+// `loom task`, `loom agent`, `loom claim`, `loom complete`, `loom list`,
+// `loom recover` — and owns worker prompt generation from workspace/role
+// config plus per-worktree crash recovery (stale lock and process-group
+// cleanup). Blank-imported by cmd/loom for command registration; the daemon
+// supervisor calls its exported RecoverWorktree, ResumeTTL, and archive-log
+// helpers directly.
 package agent
 
 import (

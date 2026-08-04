@@ -1,3 +1,9 @@
+// Package automode runs the continuous worker-agent loop behind `--auto`:
+// poll the issue-tracker backend (internal/backend) for ready work, invoke the
+// AI CLI backend once per task, record the session, and decide whether to
+// retry, back off, or exit on idle-timeout, max-tasks, or a tripped rate-limit
+// breaker. Entry points RunAutoModeLoop and RunAutoModeTmux are called by
+// `loom plan`/`task`/`agent` (internal/cli/agent) and by `loom worker`.
 package automode
 
 import (

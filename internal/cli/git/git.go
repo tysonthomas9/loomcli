@@ -1,3 +1,8 @@
+// Package git runs loom's git and gh operations against agent worktrees —
+// push, pull, PR create, reset, sync, diff and porcelain status — validating
+// refs and shelling out to the binaries. Exposed both as the `loom
+// push/pull/pr/reset/sync` commands and as a *Result API called by
+// internal/cli/agent, automode, sessionfinalize and serve/opsimpl.
 package git
 
 import (

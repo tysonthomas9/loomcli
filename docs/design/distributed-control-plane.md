@@ -1,9 +1,24 @@
 # Distributed Control Plane Architecture
 
-**Status:** Draft
+> **Status:** Partially implemented — the conceptual model is still current;
+> the concrete data model and phase plan below were superseded on 2026-06-03 by
+> `docs/design/fleetdb-agent-platform-v2-proposal.md` and by shipped code in
+> `internal/domain/platform.go`, `internal/domain/control_plane.go`,
+> `internal/store/control_plane_store.go`, and `internal/driver`.
+> *audited 2026-07-23*
+
 **Date:** 2026-04-30
 **Related:** `loomcli-26v50`, `loomcli-37h1h`,
-`docs/design/distributed-control-plane-data-model.md`
+`docs/design/distributed-control-plane-data-model.md`,
+`docs/design/fleetdb-agent-platform-v2-proposal.md`,
+`docs/design/2026-07-23-control-plane-as-built.md`
+
+Read this document for the *shape* of the system: what is global vs local vs
+observed, why execution is pull-authoritative, what a lease must guarantee,
+and which failure modes to design against. Those sections verified clean on
+audit. Do not read it for record shapes, command names, or phase status —
+for those, see the as-built map
+(`docs/design/2026-07-23-control-plane-as-built.md`) and the code it cites.
 
 ## Purpose
 
@@ -31,10 +46,10 @@ target architecture, see
 
 | Term | Meaning |
 |---|---|
-| Control plane | The shared API and database that stores intent, metadata, leases, runs, audit, and observed status. |
-| Node | A machine or sandbox capable of running work. Examples: a laptop, CI runner, E2B sandbox, Kubernetes pod. |
-| Worker | A process on a node that asks for work and executes task runs. |
-| Runtime provider | The mechanism used to run work: local loomd, E2B, Kubernetes, bare metal, etc. |
+| Control plane | The shared API and database that stores intent, metadata, leases, runs, audit, and observed status. In this document, unqualified "control plane" means fleet-db plus the `loom serve` layer above it; see `docs/loom-glossary.md`. |
+| Node | A machine or sandbox capable of running work. Examples: a laptop, CI runner, remote sandbox, Kubernetes pod. |
+| Worker | **Worker-as-process** — a process on a node that asks for work and executes task runs. This is one of several senses of "worker" in the repo (role kind, agent mode, the `loom worker` command); see `docs/loom-glossary.md` before reusing the word. |
+| Runtime provider | The mechanism used to run work: local loomd, remote sandbox, Kubernetes, bare metal, etc. |
 | Desired state | User/team intent, such as "run task ACME-123" or "profile falcon is enabled". |
 | Observed state | Node-reported fact, such as "run is running on node X" or "checkout is dirty". |
 | Lease | Time-bounded ownership with a fencing token. Only the holder may mutate the owned run/task. |
@@ -134,12 +149,21 @@ laptop
 Behavior:
 
 1. `loom workspace add ACME` creates global metadata in local fleet-db.
-2. `loom checkout create ACME` creates or binds local repo paths.
+   *(Shipped.)*
+2. Local repo paths are bound. *(No `loom checkout` command exists — see
+   "Local Checkout Commands" below. Local paths live in
+   `internal/bootstrap/statecache.go:33-52` and are resolved by
+   `internal/localworkspace/localworkspace.go:28-30`.)*
 3. `loom worker profile add falcon --role task --repo backend` creates
-   a global profile.
-4. `loom task run ACME-123` creates a task run and lease.
+   a global profile. *(Shipped, scoped to the active workspace:
+   `internal/cli/serve/worker/profile_cmd.go`.)*
+4. A task run and lease are created. *(There is no `loom task run` verb —
+   `loom task` takes a worktree/workspace name. Task runs are created by
+   `internal/driver` via `store.TaskRunStore.Create` /
+   `ClaimQueued`, `internal/store/platform_store.go:762-773`.)*
 5. local `loomd` claims the run, performs local effects, and reports
-   observed state.
+   observed state. *(Shipped as the driver executor / task worker:
+   `internal/driver/executor.go`, `internal/driver/task_worker.go`.)*
 
 Local mode may use:
 
@@ -158,7 +182,7 @@ shared fleet-db/control plane
   Alice laptop: loomd node-alice
   Bob workstation: loomd node-bob
   CI runner: loomd node-ci
-  E2B sandbox: ephemeral node per run
+  remote sandbox: ephemeral node per run
 ```
 
 Behavior:
@@ -186,28 +210,49 @@ local checkout materialization.
 
 ### Control-Plane Commands
 
-These mutate global state in fleet-db:
+These mutate global state in fleet-db. The shipped surface is
+**workspace-scoped, not workspace-positional** — `repo`, `role`, and
+`worker profile` operate on the active workspace, so the workspace name is
+not an argument. The active workspace comes from `--workspace` or
+`LOOM_WORKSPACE` only: `loom workspace use <KEY>` persists a *UI selection
+hint* in `~/.loom/state.json` and its own help says "Runtime commands no
+longer use this as an implicit default"
+(`internal/cli/workspace/workspacev2_cmd.go:47-55`).
 
 ```bash
-loom workspace add ACME
+loom workspace add <KEY>           # create in fleet-db
 loom workspace list
-loom workspace show ACME
-loom workspace delete ACME
+loom workspace show [KEY]          # defaults to active
+loom workspace set <KEY>           # update settings
+loom workspace status [KEY]        # lifecycle state
+loom workspace use <KEY>           # UI selection hint only
+loom workspace remove <NAME>       # removes workspace AND its worktrees
+                                   #   (--keep-worktrees for metadata only)
 
-loom repo add ACME backend git@github.com:org/backend.git
-loom repo list ACME
-loom repo remove ACME backend
+loom repo add <NAME> <REMOTE_URL>  # active workspace
+loom repo list
+loom repo show <NAME>
+loom repo remove <NAME>
 
-loom role add ACME task
-loom worker profile add ACME/falcon --role task --repo backend
-loom worker profile list ACME
+loom role add <NAME>               # active workspace
+loom worker profile add <NAME> --role task --repo backend
+loom worker profile list
+loom worker profile show|set|unset|remove
 ```
 
-### Local Checkout Commands
+Verified against `loom workspace --help`, `loom repo add --help`,
+`loom role add --help`, `loom worker profile --help`;
+`internal/cli/serve/worker/profile_cmd.go`.
 
-These mutate local state and local files:
+### Local Checkout Commands — NOT IMPLEMENTED
+
+**Status: proposed, never built.** There is no `loom checkout` command in
+`loom --help`. This block is retained because splitting local
+materialization from control-plane metadata is still an open intention
+(Phase 2 below), and because it records the intended separation.
 
 ```bash
+# NOT IMPLEMENTED — proposed surface only
 loom checkout create ACME
 loom checkout bind ACME backend /path/to/backend
 loom checkout list
@@ -215,30 +260,22 @@ loom checkout doctor ACME
 loom checkout delete ACME
 ```
 
+What exists instead: local paths are read and written through
+`bootstrap.StateCache` (`internal/bootstrap/statecache.go:33-52` —
+`WorkspaceLocalState{Path, Repos, Agents}`) and resolved by
+`internal/localworkspace` (`localworkspace.go:28-30`, `RepoPath`). The cache
+is explicitly documented as regenerable and "never load-bearing for
+correctness" (`statecache.go:30-32`).
+
 Deleting global metadata and deleting local files must be separate
-operations.
-
-Safe default:
-
-```bash
-loom workspace delete ACME
-```
-
-Deletes fleet-db metadata only.
-
-Local cleanup:
-
-```bash
-loom checkout delete ACME
-```
-
-Deletes local checkout/worktree state.
-
-Convenience can exist, but must be explicit:
-
-```bash
-loom workspace delete ACME --delete-local --force
-```
+operations. **Partially honored, with the default inverted.** There is no
+`loom workspace delete`; the destructive command is `loom workspace remove
+<name>`, whose help is "Remove a workspace and its worktrees" — by default it
+does both at once. The metadata-only path exists but is opt-*out*, not
+opt-in: `--keep-worktrees` ("only remove from config") is the escape hatch,
+where this design asked for metadata-only by default plus an explicit
+`--delete-local` opt-in. There is no `--delete-local` flag
+(`internal/cli/workspace/workspace_cmd.go:86-99`).
 
 ## Task-Driven Execution
 
@@ -343,7 +380,7 @@ Pull-based ownership:
 - gives natural backpressure
 - lets nodes advertise capacity
 - centralizes lease/fencing checks
-- fits E2B and local nodes
+- fits remote sandboxes and local nodes
 
 ### Push Notifications
 
@@ -397,9 +434,29 @@ Gotchas:
 
 Runtime providers perform local effects for a run.
 
-Suggested interface:
+**The interface proposed here was never built.** There is no
+`RuntimeProvider` Go interface anywhere in `internal/`. `domain.RuntimeProvider`
+(`internal/domain/control_plane.go:21-29`) is a *string enum*
+(`local | e2b | kubernetes | ci | other`) recorded on a `Node`, not a
+behavioural contract. The shipped abstraction is much narrower:
+
+- `sandbox.SandboxLauncher` (`internal/driver/sandbox/launcher.go:83`) —
+  one method, `Launch(ctx, LaunchSpec) (SandboxProcess, error)`.
+- `sandbox.SandboxProcess` (`launcher.go:106`) — `Wait` / `Kill`.
+- `sandbox.IsolatingLauncher` (`internal/driver/sandbox/policy.go:43`) —
+  marks launchers whose runtimes actually isolate.
+- Selected at `internal/driver/executor.go:69`, `ResolveSandboxLauncher()`.
+
+Exec / OpenPTY / ListFiles / ReadFile / WriteFile / GetDiff have no
+provider-level equivalent. They are served by separate web UI modules
+against the node's own filesystem, not routed through a runtime provider.
+
+The original proposal is kept below as history, because the *scope* it
+sketched — what a runtime abstraction would eventually have to cover — is
+still the open question.
 
 ```go
+// PROPOSED 2026-04-30, NEVER IMPLEMENTED
 type RuntimeProvider interface {
     StartRun(ctx context.Context, spec RunSpec) (*RunHandle, error)
     Exec(ctx context.Context, runID string, cmd CommandSpec) (*CommandResult, error)
@@ -414,18 +471,32 @@ type RuntimeProvider interface {
 
 Initial providers:
 
-| Provider | Purpose |
-|---|---|
-| local | Interactive local development and local daemon execution. |
-| e2b | Ephemeral isolated cloud task runs. |
-| future:kubernetes | Team/cloud worker pools. |
+| Provider | Purpose | Status |
+|---|---|---|
+| local | Interactive local development and local daemon execution. | Shipped. `domain.RuntimeProviderLocal` is what `internal/driver` registers nodes with (`executor.go:447`, `task_worker.go:195`). |
+| e2b | Ephemeral isolated cloud task runs. | Never built. See below. |
+| future:kubernetes | Team/cloud worker pools. | Not built; enum value only. |
 
-## E2B Sandbox Provider
+## Ephemeral Remote Sandboxes (proposed as E2B; shipped as Daytona)
 
-E2B is a good fit as an ephemeral remote runtime provider, especially
-for task-driven execution.
+**E2B was never implemented.** The only occurrence of E2B in the Go tree is
+the unused enum value `RuntimeProviderE2B` at
+`internal/domain/control_plane.go:25`. The remote sandbox provider that
+actually shipped is **Daytona** — `internal/driver/bundled_runner.go:16-20`
+(`DaytonaTaskRunnerEntrypoint = "daytona-task-runner"`, which provisions a
+Daytona sandbox, clones the repo, and runs the agent inside it),
+`internal/driver/task_bridge.go`, `internal/runtimepreflight/preflight.go`,
+and the TypeScript runner `internal/workflows/builtin/daytona-task-runner.ts`.
+Local isolation shipped separately as rootless containers
+(`internal/driver/sandbox/container.go`; see AGENTS.md "Workflow Sandbox").
 
-Use E2B for:
+Everything below is **provider-agnostic guidance** — it applies to Daytona
+and to any future ephemeral remote runtime. Read "E2B" as "the ephemeral
+remote sandbox provider".
+
+An ephemeral remote sandbox is a good fit for task-driven execution.
+
+Use one for:
 
 - isolated task execution
 - CI-like validation
@@ -434,15 +505,16 @@ Use E2B for:
 - browser/computer-use tasks
 - clean environment runs
 
-Do not make E2B the control plane. Fleet-db remains the control plane.
-E2B sandboxes perform local effects for a specific run.
+Do not make the sandbox provider the control plane. Fleet-db remains the
+control-plane data service. Sandboxes perform local effects for a specific
+run.
 
-### E2B Run Flow
+### Sandbox Run Flow
 
 ```text
 1. Scheduler creates TaskRun.
-2. Scheduler chooses runtime_provider=e2b.
-3. Control plane creates or requests an E2B sandbox.
+2. Scheduler chooses the runtime provider.
+3. Control plane creates or requests a sandbox.
 4. Sandbox worker starts with task_run_id and bootstrap token.
 5. Worker pulls/accepts assigned run lease.
 6. Worker clones repo or restores cached template.
@@ -453,12 +525,12 @@ E2B sandboxes perform local effects for a specific run.
 11. Sandbox is killed or returned to a warm pool.
 ```
 
-### E2B Global vs Local
+### Sandbox Global vs Local
 
 Global in fleet-db:
 
 ```text
-runtime_provider=e2b
+runtime_provider
 sandbox_id
 task_run_id
 repo remote URL
@@ -478,7 +550,7 @@ PTY process
 installed dependencies
 ```
 
-### E2B Gotchas
+### Sandbox Gotchas
 
 - Use short-lived GitHub App tokens or scoped deploy tokens.
 - Inject only scoped secrets needed for the run.
@@ -596,7 +668,7 @@ Represent placement as labels and capabilities early:
 
 ```text
 node labels: os=linux, pool=ci, user=alice
-capabilities: git,codex,claude,browser,e2b
+capabilities: git,codex,claude,browser,daytona
 profile requires: backend=codex, repo=backend
 ```
 
@@ -741,10 +813,10 @@ small subset.
 
 ### Runtime Provider Lock-In
 
-E2B, local loomd, and future Kubernetes providers should sit behind the
-same runtime abstraction. Do not let E2B-specific concepts become core
-task/run semantics. `sandbox_id` is runtime metadata, not the identity
-of the work.
+Remote sandboxes, local loomd, and future Kubernetes providers should sit
+behind the same runtime abstraction. Do not let provider-specific concepts
+become core task/run semantics. `sandbox_id` is runtime metadata, not the
+identity of the work.
 
 ## Current Codebase Audit
 
@@ -764,21 +836,29 @@ enforce this architecture.
 
 ### Main Problems
 
-| Problem | Impact |
-|---|---|
-| `loom workspace` mixes YAML and fleet-db subcommands. | Users can list/delete a different world than they created. |
-| `workspace create/list/remove` still mutates `~/.loom/config.yaml`. | Control-plane metadata and local checkout effects are coupled. |
-| `agentdef` writes fleet-db, but `agent/task/plan` resolve YAML worktrees. | Agent definitions do not drive execution. |
-| Daemon boots from `loom.yaml` and watches YAML files. | No distributed desired-state reconciler exists. |
-| Web UI falls back from store errors to runtime config. | Fleet-db outages can look like stale data or 404. |
-| Workspace middleware validates but does not canonicalize `{ws}`. | Name/key ambiguity leaks into backend routing. |
-| Fleet worker claim path still uses local daemon RPC pool. | Redis claim primitives are not the authoritative execution lease. |
-| Worker JWT claims are not consistently enforced in handlers. | Valid workers may impersonate other worker IDs. |
-| `DaemonProfile` mixes global policy with local PID/log paths. | Per-node runtime settings are not cleanly separated. |
+Audited 2026-07-23. Rows are marked FIXED, STILL TRUE, or UNVERIFIED.
+
+| Problem | Impact | 2026-07-23 status |
+|---|---|---|
+| `loom workspace` mixes YAML and fleet-db subcommands. | Users can list/delete a different world than they created. | STILL TRUE as a UX problem, but not a YAML one: `loom workspace` exposes both `add` ("Create a new workspace in fleet-db") and `create` ("Create a new workspace with git worktrees") as separate verbs, and `remove` deletes both metadata and worktrees. |
+| ~~`workspace create/list/remove` still mutates `~/.loom/config.yaml`.~~ | ~~Control-plane metadata and local checkout effects are coupled.~~ | FIXED. `config.yaml` is gone as a runtime source. `internal/cli/config/config.go:22-23` — "LoomConfig is a FleetDB-backed workspace view"; `LoadConfig` (`config.go:120-134`) opens the fleet-db store and overlays machine-local paths from `bootstrap.LoadStateCache` (`config.go:180`). No non-test writer of `config.yaml` remains. |
+| ~~`agentdef` writes fleet-db, but `agent/task/plan` resolve YAML worktrees.~~ | Agent definitions do not drive execution. | HALF FIXED. The YAML half is gone — worktree paths now come from `bootstrap.StateCache` / `internal/localworkspace`, not YAML. The surface split is not: `loom agentdef` is still a separate top-level command whose own help says "Distinct from 'loom agent <worktree>' which runs an actual agent process. Phase 6 will unify these surfaces" — a different phase numbering than this document's Phase 3, so the two plans have diverged. |
+| ~~Daemon boots from `loom.yaml` and watches YAML files.~~ | No distributed desired-state reconciler exists. | FIXED. The daemon runs a fleet-db polling reconciler: `internal/cli/daemon/daemon.go:140-141` starts `configReconciler`, which polls every 30 s (`internal/cli/daemon/daemon_reconciler.go:28-40`) and reloads via `config.LoadDaemonConfig` → `bootstrap.OpenStore` → `loadDaemonConfigFromStore` (`internal/cli/config/project.go:165-190`). |
+| ~~Web UI falls back from store errors to runtime config.~~ | Fleet-db outages can look like stale data or 404. | FIXED. `internal/webui/handlers/workspace/workspace.go:30-36` returns `handler.HandleServiceError(w, err)` with no YAML/runtime-config fallback. |
+| ~~Workspace middleware validates but does not canonicalize `{ws}`.~~ | Name/key ambiguity leaks into backend routing. | FIXED. `internal/webui/server/middleware/workspace.go:18-21` defines `WorkspaceRef{RequestedID, CanonicalID}`; `WorkspaceResolved` (`:77`) resolves the raw route value and `WithWorkspaceRef` (`:54-62`) injects `CanonicalID` as the context workspace. |
+| Fleet worker claim path still uses local daemon RPC pool. | Redis claim primitives are not the authoritative execution lease. | STILL TRUE. `internal/webui/fleet/handlers_claim.go:13-15` imports `internal/rpc` and `internal/webui/daemon`; `Module` carries a `daemon.Pool` (`internal/webui/fleet/module.go:20`). The Redis-backed result subsystem is still there too (`internal/webui/fleet/result.go:9`). The authoritative execution lease lives elsewhere — on `domain.TaskRun.LeaseID`/`FencingToken` (`internal/domain/platform.go:513-514`). |
+| Worker JWT claims are not consistently enforced in handlers. | Valid workers may impersonate other worker IDs. | UNVERIFIED — not re-checked in the 2026-07-23 audit. Do not treat as either fixed or broken without reading `internal/webui/fleet` and `internal/webui/server/middleware/auth_routes.go`. |
+| `DaemonProfile` mixes global policy with local PID/log paths. | Per-node runtime settings are not cleanly separated. | STILL TRUE, and now deliberate. `internal/domain/daemon_profile.go:13-26` still carries `PIDFile`, `LogDir`, `EventsDir` on a fleet-db record; its docstring (`:9-12`) argues the split is intentional — "workspace-scoped daemon installs may want to override defaults" — and draws the line at per-host bootstrap config instead. That contradicts the "global state must be machine-agnostic" rule above; it is an unresolved disagreement, not an oversight. |
 
 ## Migration Plan
 
-### Phase 1: Make Fleet-db Mode Honest
+Phase status audited 2026-07-23. This plan was written 2026-04-30 and has
+since diverged from the 2026-06-03 V2 plan
+(`docs/design/fleetdb-agent-platform-v2-phased-delivery.md`), which uses its
+own phase numbering. When two docs say "Phase 3" they do not mean the same
+thing. Where the two disagree, V2 wins.
+
+### Phase 1: Make Fleet-db Mode Honest — LARGELY DONE
 
 - In fleet-db mode, do not silently fall back to YAML.
 - Fix `/api/workspaces/active`, repo listing, delete, and create.
@@ -786,7 +866,13 @@ enforce this architecture.
 - Make `loom workspace list/delete` fleet-db-backed.
 - File or fix UI regression gaps for workspace creation and switching.
 
-### Phase 2: Split Checkout From Workspace Metadata
+Done: the store-error fallback (`internal/webui/handlers/workspace/workspace.go:30-36`),
+`{ws}` canonicalization (`internal/webui/server/middleware/workspace.go:18-21`),
+and the fleet-db-backed workspace view (`internal/cli/config/config.go:120-134`).
+Not done: `loom workspace` still has both `add` (fleet-db) and `create`
+(worktrees) verbs.
+
+### Phase 2: Split Checkout From Workspace Metadata — NOT DONE
 
 - Add checkout commands and local path binding model.
 - Move repo and agent worktree paths into `state.json` or node-local
@@ -794,43 +880,92 @@ enforce this architecture.
 - Keep `workspace delete` metadata-only by default.
 - Quarantine or rename old worktree commands.
 
-### Phase 3: Unify Agent/Worker Surface
+The middle bullet shipped — paths live in `bootstrap.StateCache`
+(`internal/bootstrap/statecache.go:33-52`). The command surface did not:
+there is no `loom checkout`, and `loom workspace remove` still deletes
+metadata and worktrees together *by default* — `--keep-worktrees` gives the
+metadata-only path this bullet asked for, but as an opt-out rather than the
+default. Still an open intention.
 
-- Retire public `agentdef`.
-- Introduce worker profiles or make `loom agent` a parent command.
-- Make `loom task/plan/agent` resolve fleet-db profiles first.
-- Bind profiles to local checkout state.
+### Phase 3: Unify Agent/Worker Surface — PARTIALLY DONE
 
-### Phase 4: Add Distributed Runtime Primitives
+- Retire public `agentdef`. — **Not done.** `loom agentdef` is still a
+  top-level command under "Workspace Commands", and its help says
+  "Phase 6 will unify these surfaces" (a different plan's Phase 6).
+- Introduce worker profiles or make `loom agent` a parent command. —
+  **Done for profiles**: `loom worker profile add|list|show|set|unset|remove`
+  (`internal/cli/serve/worker/profile_cmd.go`), backed by
+  `domain.WorkerProfile` (`internal/domain/platform.go:104`). Added
+  *alongside* `agentdef`, not instead of it.
+- Make `loom task/plan/agent` resolve fleet-db profiles first. — UNVERIFIED.
+- Bind profiles to local checkout state. — UNVERIFIED.
 
-- Add node registration and heartbeat.
-- Add task run records.
-- Add lease acquire/renew/complete/release with fencing tokens.
-- Add runtime provider abstraction.
-- Implement local provider first.
+### Phase 4: Add Distributed Runtime Primitives — DONE
 
-### Phase 5: Rewrite Daemon as a Reconciler
+- Add node registration and heartbeat. — `domain.Node`
+  (`internal/domain/control_plane.go:39`), `store.NodeStore`
+  (`internal/store/control_plane_store.go:37`), registered at
+  `internal/driver/executor.go:452` and `internal/driver/task_worker.go:200`,
+  heartbeat at `executor.go:467` and `task_worker.go:217`.
+- Add task run records. — `domain.TaskRun`
+  (`internal/domain/platform.go:498`), `store.TaskRunStore`
+  (`internal/store/platform_store.go:762-773`).
+- Add lease acquire/renew/complete/release with fencing tokens. —
+  `TaskRun.LeaseID` / `TaskRun.FencingToken` (`platform.go:513-514`) plus
+  `domain.AgentLease` (`control_plane.go:167`) and
+  `domain.AgentOwnershipLease` (`control_plane.go:182`). Claim/heartbeat/
+  complete/requeue are `TaskRunStore.ClaimQueued`/`Heartbeat`/`Complete`/
+  `Requeue`.
+- Add runtime provider abstraction. — **Not as specified.** See
+  "Runtime Providers" above: what shipped is `sandbox.SandboxLauncher`
+  (`internal/driver/sandbox/launcher.go:83`), a launch-only seam.
+- Implement local provider first. — Done; `domain.RuntimeProviderLocal` is
+  what nodes register with (`executor.go:447`).
 
-- Stop booting from `loom.yaml`.
-- Daemon registers as a node.
-- Daemon pulls eligible task runs.
-- Daemon acquires leases.
-- Daemon starts local processes.
-- Daemon reports observed state and artifacts.
+### Phase 5: Rewrite Daemon as a Reconciler — PARTIALLY DONE
 
-### Phase 6: Add E2B Provider
+- Stop booting from `loom.yaml`. — **Done.** Daemon config now loads from
+  fleet-db (`internal/cli/config/project.go:165-190`) and is reconciled on a
+  30 s poll (`internal/cli/daemon/daemon_reconciler.go:28-40`, started at
+  `internal/cli/daemon/daemon.go:140-141`).
+- Daemon registers as a node. — Done for the driver executor and task
+  worker (see Phase 4); the supervisor also runs a node-heartbeat goroutine
+  (`internal/cli/daemon/supervisor/control_plane.go:47-49`).
+- Daemon pulls eligible task runs. — Done via `TaskRuns().ClaimQueued`
+  (`internal/driver/task_request.go:308`, `:561`).
+- Daemon acquires leases. — Done (lease/fencing ride on the claim).
+- Daemon starts local processes. — Done.
+- Daemon reports observed state and artifacts. — Done; artifacts via
+  `store.ArtifactStore` (`internal/store/control_plane_store.go:225`) and
+  the task-run artifact ops (`internal/webui/handlers/taskrunapi/module.go:106-117`).
 
-- Create E2B runtime provider.
+### Phase 6: Add E2B Provider — SUPERSEDED
+
+E2B was never built. The ephemeral remote provider that shipped is Daytona
+(`internal/driver/bundled_runner.go:16-20`,
+`internal/workflows/builtin/daytona-task-runner.ts`), plus rootless-container
+sandboxing for local isolation (`internal/driver/sandbox/container.go`). The
+sub-bullets below still describe real requirements for any remote provider;
+read "E2B" as "the remote sandbox provider".
+
+- ~~Create E2B runtime provider.~~ Create the remote runtime provider.
 - Add sandbox templates and bootstrap.
 - Upload patches, logs, transcripts, and test artifacts.
 - Enforce cost, timeout, and concurrency limits.
 
-### Phase 7: Remove YAML Runtime Config
+### Phase 7: Remove YAML Runtime Config — PARTIALLY DONE
 
 - Complete `loomcli-37h1h`.
-- Move daemon config to fleet-db or node-local config as appropriate.
-- Delete or quarantine `internal/cli/config` runtime paths.
-- Drop `gopkg.in/yaml.v3` once remaining YAML readers are gone.
+- Move daemon config to fleet-db or node-local config as appropriate. —
+  **Done** (`internal/cli/config/project.go:165-190`).
+- Delete or quarantine `internal/cli/config` runtime paths. — Partially:
+  `internal/cli/config` still exists but is fleet-db-backed
+  (`config.go:22-23`).
+- Drop `gopkg.in/yaml.v3` once remaining YAML readers are gone. —
+  **Not done.** `go.mod:39` still lists `gopkg.in/yaml.v3 v3.0.1` as a
+  direct dependency, and `config.WorkspaceConfig` / `RepoConfig` still carry
+  `yaml:` struct tags (`internal/cli/config/config.go:47-65`), as does
+  `config.DaemonSettings` (`internal/cli/config/project.go:19-28`).
 
 ## Design Checklist
 
@@ -871,4 +1006,24 @@ interactive capabilities: routed to the owning node
 
 Local mode and distributed mode should share this model. Local mode
 uses one embedded control plane and one node. Distributed mode adds
-auth, node placement, leases, and runtime providers such as E2B.
+auth, node placement, leases, and remote runtime providers.
+
+## Related
+
+- `docs/design/2026-07-23-control-plane-as-built.md` — where the shipped
+  control plane actually lives: domain types → store contracts →
+  `internal/driver` call sites → HTTP surface. Start here if you are
+  looking for code.
+- `docs/design/distributed-control-plane-data-model.md` — the companion
+  record-shape proposal. Superseded; read it for reasoning, not field names.
+- `docs/design/fleetdb-agent-platform-v2-proposal.md` and
+  `docs/design/fleetdb-agent-platform-v2-phased-delivery.md` — the
+  2026-06-03 correction that supersedes this document's concrete plan.
+- `docs/design/fleetdb-agent-platform-v2-execution-topology-addendum.md` —
+  execution topology addendum to V2.
+- `docs/product/local-mode-product-spec.md` — the single-user local-mode
+  product surface.
+- `docs/product/orchestrator-worker-model.md` — the orchestrator/worker
+  split in product terms.
+- `docs/loom-glossary.md` — disambiguates "worker", "control plane",
+  "lead", "fleet".

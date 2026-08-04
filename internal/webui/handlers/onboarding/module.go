@@ -1,3 +1,6 @@
+// Package onboarding serves the web UI's one-shot "first task" route, which
+// creates a starter issue and immediately starts an agent on it, compensating by
+// deleting the issue again if that start fails. Registered by internal/webui/app.
 package onboarding
 
 import (

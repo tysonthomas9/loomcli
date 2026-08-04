@@ -1,5 +1,9 @@
 # Empty FleetDB UI Stack
 
+> **Status:** Current · *audited 2026-07-24*. Ports, env overrides, and the
+> compose-provider auto-select checked against
+> `test/fleetdb/docker-compose.empty.yml:75,119,140` and `Makefile:131-158`.
+
 This stack models a new user setup: fleet-db starts with an empty Redis store,
 Loom runs in fleet mode, the UI is served through Caddy, and a small daemon
 manager starts a workspace-scoped `loom daemon` whenever a UI-created workspace
@@ -56,6 +60,8 @@ LOOM_REPOS_DIR=/path/to/repos docker compose -f test/fleetdb/docker-compose.empt
 - fleet-db: `http://localhost:8090`
 
 Override them with `LOOM_UI_PORT`, `LOOM_API_PORT`, and `FLEET_DB_PORT`.
+These defaults collide with `test/distributed/`'s (8090–8094) — do not run
+both stacks at once.
 
 ## Reset
 
@@ -63,5 +69,17 @@ Override them with `LOOM_UI_PORT`, `LOOM_API_PORT`, and `FLEET_DB_PORT`.
 docker compose -f test/fleetdb/docker-compose.empty.yml down -v
 ```
 
-Use `podman-compose` instead of `docker compose` if that is how you started the
-stack.
+`make fleetdb-empty-down` does the same and picks the compose provider for you
+(`Makefile:146-158`). Use `podman-compose` instead of `docker compose` if that
+is how you started the stack.
+
+## Related
+
+- [`../../docs/testing/README.md`](../../docs/testing/README.md) — index of all
+  test surfaces
+- [`../../docs/product/web-onboarding-spec.md`](../../docs/product/web-onboarding-spec.md)
+  — the new-user flow this stack exists to exercise
+- [`../local-mode/README.md`](../local-mode/README.md) — the seeded counterpart
+  (workspace, repo, agents, and tasks already created)
+- [`../distributed/README.md`](../distributed/README.md) — two-server fleet
+  smoke; note the port overlap above

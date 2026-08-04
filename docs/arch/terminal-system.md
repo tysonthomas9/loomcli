@@ -1,58 +1,75 @@
 # Terminal System Architecture (Epic uffak)
 
+> **Status:** Current · rewritten 2026-07-23 against the post-tmux tree
+> (`54b03ac10`, #226, 2026-07-20 "standardize terminals on xterm with
+> persistent scrollback"). The previous revision described a tmux-backed
+> manager, flat `/api/terminal/*` routes and a slash-command subsystem; none of
+> those exist. *audited 2026-08-03*
+
 ## Overview
 
-The Terminal System provides an integrated terminal experience within the web UI, supporting multiple AI backend sessions (Claude, Codex, OpenCode) and plain shell tabs. It spans from the NavRail entry point through a tabbed terminal view with WebSocket-relayed PTY connections to tmux sessions on the backend.
+The web UI terminal is a tabbed xterm.js surface relayed over a WebSocket to a
+**PTY** on the server. It is not tmux-backed.
 
-The system supports workspace-scoped tab isolation, drag-and-drop tab reordering, split-pane viewing, slash commands, crash recovery, session scrollback persistence, and issue-linked terminal sessions.
+There are **two independent terminal paths**, with different lifetimes and
+different handlers. Confusing them is the single most common mistake when
+reading this code:
+
+| | Main web terminal | Agent terminal viewer |
+|---|---|---|
+| Backend | `PTYManager` / `MultiPTYManager` (`internal/webui/terminal/pty_manager.go`, `multi_pty_manager.go`) | `AgentTmuxManager` (`internal/webui/terminal/agent_tmux.go`) |
+| Who creates the process | the web server, on first attach | the CLI — `loom task --auto` / `loom plan --auto`, and only when tmux is installed (`internal/cli/agent/task.go:97-99`, `plan.go:107`); the session is created by `startTmuxSession` (`internal/cli/automode/automode_tmux_session.go:14`) |
+| Session lifetime | outlives the WebSocket; detach-not-kill | outlives everything; the web UI only attaches |
+| Direction | read/write | read-only attach (`agent_tmux.go:51` "never creates tmux sessions — only attaches") |
+| Route | `GET /api/workspaces/{ws}/terminal/ws` | `GET /api/workspaces/{ws}/agents/{name}/terminal/ws` |
+| Scrollback | in-process ring buffer, replayed on attach | `tmux capture-pane` |
+
+tmux survived the migration *only* because auto-mode agent processes must
+outlive the CLI invocation that spawned them
+(`internal/webui/handlers/terminal/agent.go:140-144`).
 
 ---
 
 ## 1. Component Hierarchy
 
 ```
-NavRail (NavRail.tsx)
-  +-- "terminal" view button (position 3, shows active-session badge)
+NavRail (components/NavRail/NavRail.tsx:137 id: "terminal")
 
-TerminalView (TerminalView.tsx)            <- orchestrator
-  +-- useWorkspaceTabState                 <- workspace-scoped tab isolation
-  +-- useTerminalMetadata                  <- Redis-backed tab persistence
-  +-- useSessionRestore                    <- active-tab restore on refresh
-  +-- useTabInit                           <- cold-start tab creation
-  +-- useSplitView                         <- split-pane state
-  +-- useClipboard                         <- copy/paste with confirmation
-  +-- useTabActions                        <- close/duplicate/rename
-  +-- useTabOrdering                       <- pin/reorder/close-others
-  +-- useSessionManagement                 <- issue-linked tab creation + close-all
+TerminalView (components/TerminalView/TerminalView.tsx)   <- orchestrator
+  +-- useWorkspaceTabState   (tabs/)      <- per-workspace tab set isolation
+  +-- useTabInit             (tabs/)      <- cold-start tab creation from metadata
+  +-- useTabActions          (tabs/)      <- close / duplicate / rename
+  +-- useTabOrdering         (tabs/)      <- pin / reorder / close-others
+  +-- useUnreadTracking      (tabs/)      <- per-tab unread output flags
+  +-- useTabEditorGroups     (layout/)    <- VS Code-style editor columns
+  +-- useSplitView           (layout/)    <- split ratio + right-pane tab
+  +-- useSessionSeeding      (instances/) <- issue-context and agent-tab seeding
+  +-- useConnectionState     (instances/) <- per-tab connection state fan-in
+  +-- useSessionRestore      (hooks/terminal/) <- restore active tab on load
+  +-- useTerminalMetadata    (hooks/terminal/) <- Redis tab metadata + SSE refetch
   |
-  +-- TerminalTabBar (TerminalTabBar.tsx)   <- WAI-ARIA tablist
-  |    +-- SortableTab (dnd-kit)           <- drag-and-drop per tab
-  |    +-- TabContextMenu                  <- right-click: duplicate/rename/pin/close
+  +-- TerminalTabBar (tabs/)              <- WAI-ARIA tablist
+  |    +-- SortableTab (dnd-kit)
+  |    +-- TabContextMenu
   |
-  +-- [per tab] TerminalInstance           <- single xterm.js + WebSocket pane
-  |    +-- xterm.js DOM renderer
-  |    +-- Native DOM selection/copy/paste
-  |    +-- Auto-resize via FitAddon
+  +-- TerminalPaneArea (instances/)       <- group/split layout host
+  |    +-- TerminalPane (instances/)
+  |         +-- TerminalInstance (instances/)
+  |              +-- XTermRenderer        <- xterm.js mount + FitAddon
+  |              +-- terminalConnection   <- token fetch, WS lifecycle, resize
+  |              +-- TerminalConnectionOverlay / ReconnectingOverlay / CrashOverlay
   |
-  +-- [per tab overlays]
-  |    +-- TerminalConnectionOverlay       <- connecting/disconnected/error states
-  |    +-- ReconnectingOverlay             <- exponential backoff countdown
-  |    +-- CrashOverlay                    <- backend exited (ws close 4001)
-  |    +-- WelcomeBanner                   <- first-time onboarding per backend
-  |    +-- NotesBar                        <- collapsible per-tab notes
-  |
-  +-- SearchBar                            <- Ctrl+F overlay (VS Code style)
-  +-- BackendPickerPrompt                  <- modal for "+" new tab
-  +-- PasteConfirmDialog                   <- multi-line paste confirmation
-  +-- CopyToast                            <- 1.5s copy notification
-  +-- TerminalContextMenu                  <- right-click: copy/paste/select-all
-  +-- HelpPopover                          <- keyboard shortcut reference
-  +-- SplitDivider                         <- draggable resize handle
-  +-- SplitPaneSelector                    <- right-pane tab picker
+  +-- layout/: BackendPickerPrompt, NewTerminalTabMenu, NoBackendsEmptyState,
+  |            SessionNamePrompt, SplitDivider, SplitPaneSelector
+  +-- controls/: HelpPopover, NotesBar
 
-EmbeddedTerminal (EmbeddedTerminal.tsx)    <- reuses TerminalInstance in issue panels
-  +-- TerminalHeader                       <- backend info + git actions
+EmbeddedTerminal (components/EmbeddedTerminal/)  <- reuses TerminalInstance in issue panels
+  +-- TerminalHeader
 ```
+
+`TerminalView` also renders inside the Agents view with `hideTabs` set, where
+the parent supplies agent selection and split controls
+(`TerminalView.tsx` `hideTabs` / `onSplitControlsChange` props).
 
 ---
 
@@ -61,518 +78,662 @@ EmbeddedTerminal (EmbeddedTerminal.tsx)    <- reuses TerminalInstance in issue p
 ### Tab Model
 
 ```typescript
+// components/TerminalView/tabs/terminalTabUtils.ts:22
 interface TabState {
-  id: string;           // == sessionName
-  label: string;        // display label, e.g. "lead-claude-1"
-  sessionName: string;  // tmux session name, e.g. "myws--lead-claude-1"
+  id: string;            // == sessionName
+  label: string;         // display label, e.g. "lead-claude-1"
+  sessionName: string;   // PTY session key, e.g. "myws--lead-claude-1"
   connectionState: ConnectionState;
   backendName: string;
   pinned?: boolean;
   crashReason?: string | null;
+  kind?: string;         // "agent" for agent-harness PTYs
+  role?: string;
+  agentName?: string;
+  writable?: boolean;
 }
 ```
 
+`MAX_TABS = 40` (`terminalTabUtils.ts:14`) — deliberately equal to the PTY
+manager's default per-workspace cap, `defaultPTYMaxSessions = 40`
+(`internal/webui/terminal/pty_manager.go:50`).
+
+`isAgentTab` / `isAgentMetadata` (`terminalTabUtils.ts:43,56`) classify a tab as
+an agent PTY from persisted `kind`/`agent_id`, falling back to an `agent-`
+session-name prefix. The user-editable label is deliberately never consulted.
+
 ### TerminalTabBar
 
-`TerminalTabBar` implements the WAI-ARIA `tablist` pattern. Each tab is a `SortableTab` (dnd-kit `useSortable`) wrapping a `div[role="tab"]`.
+`TerminalTabBar` implements the WAI-ARIA `tablist` pattern; each tab is a
+`SortableTab` (dnd-kit `useSortable`) wrapping a `div[role="tab"]`.
 
-**Tab Reordering and Pinning:** Drag-and-drop uses `@dnd-kit/core` with `SortableContext` and `horizontalListSortingStrategy`. Collision detection is zone-restricted: pinned tabs can only be reordered among pinned tabs; unpinned tabs among unpinned tabs. The drop handler calls `onReorderTabs` which triggers `reorderTabMeta` (parallel `PATCH sort_order` calls to Redis). Pinned tabs always sort before unpinned tabs (sorted by `Pinned DESC, SortOrder ASC`).
+**Reordering and pinning:** the drop handler calls `reorderTabMeta`
+(`tabs/useTabOrdering.ts:69`), which issues parallel `PATCH … {sort_order: i}`
+calls (`hooks/terminal/useTerminalMetadata.ts:216-224`). Listings come back
+sorted pinned-first then by sort order (`internal/webui/tabmeta/store.go:176-179`).
 
-**Tab Overflow:** `ResizeObserver` on the tab list container detects overflow. Scroll arrows appear at boundaries, clicking scrolls by 150px with `{ behavior: 'smooth' }`. New tabs auto-scroll the list to the right.
+**Overflow:** a `ResizeObserver` on the tab list (`TerminalTabBar.tsx:205`)
+drives scroll arrows that scroll by 150 px (`TerminalTabBar.tsx:566,582`).
 
-### Keyboard Shortcuts
+### Keyboard
 
-Handled at the `TerminalView` level via `document.addEventListener('keydown')`:
+There is **no global terminal keyboard-shortcut layer**. `TerminalView` installs
+no `keydown` listener; keys go to xterm.js and the browser. The only in-app
+keyboard handling is Escape-to-close inside `TabContextMenu` and `HelpPopover`,
+plus WAI-ARIA arrow navigation inside `TerminalTabBar`.
 
-| Shortcut | Action |
-|----------|--------|
-| Ctrl+Tab / Alt+ArrowRight | Next tab |
-| Ctrl+Shift+Tab / Alt+ArrowLeft | Previous tab |
-| Ctrl+1..9 / Cmd+1..9 | Switch to tab by index |
-| Ctrl+T / Cmd+T | Open BackendPickerPrompt |
-| Ctrl+W / Cmd+W | Close active tab |
-| Ctrl+F / Cmd+F | Toggle search |
-| Escape | Exit search / return to previous view |
-
-Within the tab list, WAI-ARIA keyboard navigation (ArrowLeft/ArrowRight/Home/End/Delete) is handled by `handleKeyDown` inside `TerminalTabBar`.
+`HelpPopover` advertises exactly three shortcuts
+(`controls/HelpPopover.tsx:15-19`), all handled by the browser or xterm.js, not
+by loom: Ctrl+F (browser find-in-page), Ctrl+Shift+C, Ctrl+Shift+V. The two
+slash commands it lists (`/help`, `/clear`, `HelpPopover.tsx:21-24`) are the
+*shell's* — loom does not intercept terminal input.
 
 ### Backend Brand Color Dots
 
-Each tab renders a `span.statusDot` with `data-status={connectionState}`. If the tab has a `brandColor`, it is set as the CSS custom property `--brand-color`.
+Each tab renders `span.statusDot` with `data-status={connectionState}` and, when
+known, a `--brand-color` custom property. The palette lives outside the terminal
+component graph so non-terminal consumers can import it —
+`BACKEND_BRAND_COLORS` is defined in `utils/workspace` and re-exported from
+`tabs/terminalTabUtils.ts:11`.
 
-```typescript
-const BACKEND_BRAND_COLORS: Record<string, string> = {
-  claude:    "#D97706",  // amber
-  codex:     "#22c55e",  // green
-  opencode:  "#3B82F6",  // blue
-  shell:     "#6b7280",  // gray
-};
-```
-
-The dot also shows `hasUnread` as a pulsing indicator (`span.unreadDot`) when the tab is inactive and has received output.
+`hasUnread` renders a pulsing `span.unreadDot` on inactive tabs with new output.
 
 ### Tab Context Menu
 
-`TabContextMenu` is a positioned `div[role="menu"]` rendered inline. Closes on click-outside, Escape, or scroll. Actions:
-
-- **Duplicate**: creates new tab with label `"{base} (N)"` and session `"{sanitized-base}-N"`. Disabled if MAX_TABS (8) reached.
-- **Rename**: enters inline edit mode in the tab label.
-- **Pin / Unpin**: reorders tab to start/end of pinned zone.
-- **Close**: removes tab, switches active tab to adjacent.
-- **Close Others**: removes all other tabs, calls `deleteTabMetadata` for each.
-- **Close All**: calls `POST /api/terminal/sessions/close-all`.
+`TabContextMenu` is a positioned `div[role="menu"]`, closed by click-outside,
+Escape, or scroll. Actions: Duplicate (`getNextDuplicateName`, returns null at
+`MAX_TABS` — `terminalTabUtils.ts:150-154`), Rename, Pin/Unpin, Close, Close
+Others. There is no "Close All" server call: the close-all endpoint was removed
+with tmux.
 
 ---
 
 ## 3. Backend Selection
 
-### BackendPickerPrompt
+`BackendPickerPrompt` / `NewTerminalTabMenu` (`layout/`) take an
+`availableBackends` prop. `TerminalView` passes `selectableBackends`, built as
+`["shell", ...config.available.filter(b => b !== "shell")]`
+(`TerminalView.tsx:611-614`, handed to the two components at `:863` and `:967`).
+`config` comes from `useBackendConfig` (`TerminalView.tsx:159`), which fetches
+`GET /api/workspaces/{ws}/config/backend`
+(`hooks/workspace/useBackendConfig.ts:42`, registered at
+`internal/webui/app/routes.go:155`). The server-side allow-list is
+`terminal.ValidBackends = ["claude", "codex", "opencode", "gemini", "cursor"]`
+(`internal/webui/terminal/session_command.go:13`); `shell` is additionally
+selectable in the UI.
 
-Modal (`role="dialog" aria-modal="true"`) that appears when the user clicks "+" or presses Ctrl+T. Shows a `<select>` populated from `config.available` (the `available` field from `/api/config/backend`).
+`GET /api/config/terminal` (`internal/webui/app/routes.go:47`) is a different
+endpoint and carries no backend list. It returns
+`TerminalLifecycleConfig{grace_period_ms, idle_timeout_ms, max_sessions}`
+(`internal/webui/handlers/terminal/terminal_config.go:12-16`), and its only
+frontend consumer is `TerminalInstance`, which uses the grace period to bound
+auto-reconnect retries (`api/common/terminalConfig.ts:38-41`,
+`instances/TerminalInstance.tsx:166`).
 
-On submit, `handleBackendSelect` fires:
-- For `shell` backend: `spawnTerminalSession(sessionName, 'shell')` pre-creates tmux session before WS connects.
-- For AI backends: session creation is deferred to `TerminalManager.Attach` on first WS connect.
+There is no spawn request. The command for a session is resolved at attach time
+by `launchSpecForTerminalSession` (`handlers/terminal/ws.go:370-399`), which has
+two sources and a strict precedence:
 
-### Default Tabs from Backend Config
+1. **Persisted `tabmeta.LaunchSpec`** (`{Argv, Env, Cwd}`,
+   `internal/webui/tabmeta/store.go:56-62`). Its doc comment states the intent:
+   "Agent tabs persist this instead of deriving behavior from the human-facing
+   tab name." Used whenever the tab's metadata carries a non-empty spec. For
+   `kind == "agent"` tabs it is **mandatory** — a missing spec is
+   `errAgentLaunchSpecMissing` (`ws.go:29,388-392`), never a name-derived
+   fallback. `HandleEnsureAgentTerminalSession` writes it
+   (`agent_session.go:122,127`) and refreshes it when stale (`:141-156`).
+2. **Name derivation, legacy only.** `ArgvForSession`
+   (`internal/webui/terminal/session_command.go:62`, reached through the
+   deliberately named `legacyLaunchSpecForSession`, `ws.go:406-412`) strips an
+   optional `{workspace}--` prefix and a trailing `-{n}` counter, matches
+   `lead-{backend}` against `ValidBackends`, and returns the shell argv. It is
+   consulted only for non-agent tabs with no persisted spec. UUID-style
+   `term_*` session names (`isUUIDTerminalSession`, `ws.go:402-404`) are
+   excluded outright: without metadata they fail with
+   `errTerminalLaunchMetaMissing` rather than falling back to the name.
 
-On cold start, `useTabInit` creates exactly one tab: the configured default backend (from `config.backend`, falling back to `backends[0]`). The `shell` backend is excluded from auto-creation. Session name follows `{wsPrefix}lead-{backend}-1`.
+`ArgvForSession` returning nil yields a nil `LaunchSpec`, and the session starts
+under `PTYManager`'s default argv (the login shell).
 
-`validBackends` (Go): `["claude", "codex", "opencode", "gemini", "cursor"]`
-The `available` list also includes `"shell"`.
+So the session name still selects the backend for ordinary `lead-{backend}-{n}`
+tabs, but it is the fallback, not the mechanism. Do not reason about agent tabs
+from their names.
+
+On cold start `useTabInit` creates one tab for the configured default backend.
 
 ---
 
-## 4. Session Lifecycle
+## 4. Session Lifecycle (main web terminal)
+
+### Ownership model
+
+`internal/webui/terminal/pty_manager.go:1-23` is the authoritative statement.
+Summarized:
+
+- A PTY is owned by `(workspace, session)`, **not** by a WebSocket.
+- WebSocket disconnect **detaches**, it does not kill. A grace timer is armed.
+- Re-attach within the grace window cancels the timer; the client receives a
+  screen reset followed by the session's scrollback, then live output.
+- A session dies when: the grace timer fires with nothing attached; the idle
+  reaper finds no output and no attachment; the child exits; or `Kill` is called.
+
+Defaults matter here and are **not** what the package prose implies for local
+use: `defaultGracePeriod = 0` and `defaultIdleTimeout = 0`
+(`pty_manager.go:56-57`) — local `loom serve` keeps detached sessions alive
+indefinitely, on purpose (one developer per server; a leaked PTY beats a killed
+shell). Remote `loom-agentd` sets non-zero values through `SetGracePeriod` /
+`SetIdleTimeout` (`pty_manager.go:216,224`).
+
+`MultiPTYManager` (`multi_pty_manager.go:62`) holds one `PTYManager` per
+registered workspace, each rooted at that workspace's directory. It is what
+`internal/webui/app/server_app.go:195` constructs. Unregistered or
+invalid-path workspaces produce `ErrWorkspaceNotRegistered` /
+`ErrInvalidWorkspacePath` (`multi_pty_manager.go:17,22`), which the WS handler
+turns into a clean error rather than a panic.
+
+The handler talks to the backend only through the `PTYSource` interface
+(`internal/webui/terminal/source.go:20-22`) — `AttachSession` / `Detach` / `Kill` —
+so a remote agentd client can be substituted without touching
+`handlers/terminal/ws.go`.
+
+### Scrollback
+
+Each session owns a `ringBuffer` (`pty_session.go:89,126`) of
+`defaultRingCapacity = 256 * 1024` bytes (`ringbuf.go:12` — ~2000 lines; 40
+sessions ≈ 10 MB). Because PTY output is stateful, the ring keeps a checkpoint
+of persistent private modes (alternate buffer, mouse protocols) at its head so a
+fresh browser emulator can replay a long-lived TUI correctly
+(`ringbuf.go:14-25`). `ReplaySnapshot` returns `(checkpoint, body)` and the
+attach path emits `checkpoint + screen-reset + body`
+(`pty_session.go:206-215`).
 
 ### Session Naming Convention
 
 ```
-Pattern:  {wsPrefix}lead-{backend}-{n}
-wsPrefix: "{workspaceName}--"  (omitted for "default" workspace)
-
-Examples:
-  lead-claude-1              (default workspace)
-  myws--lead-claude-2        (workspace "myws")
-  myws--lead-shell-1         (plain shell)
-  issue-loomcli-fghge-1      (issue-linked session)
+{wsPrefix}lead-{backend}-{n}     wsPrefix = "{workspaceName}--" (omitted for "default")
+agent-…                          agent harness PTYs
+issue-{sanitized-issueId}        issue-linked tabs (sanitizeSessionName)
 ```
 
-The workspace prefix prevents cross-workspace leakage when multiple workspaces share a tmux server.
+Names are validated server-side against `^[a-zA-Z0-9_-]+$`
+(`internal/webui/terminal/service_impl.go:15`,
+`internal/webui/tabmeta/store.go:26`).
 
-### Session Spawn Flow
-
-```
-User presses Ctrl+T, selects "claude"
-  -> handleBackendSelect("claude")
-  -> generateTabName("claude", tabs, workspace)
-      returns { sessionName: "myws--lead-claude-2", label: "lead-claude-2" }
-  -> setTabs([...tabs, newTab])
-  -> setActiveTabId("myws--lead-claude-2")
-  -> createTab("myws--lead-claude-2", "lead-claude-2", tabs.length)
-      -> PUT /api/terminal/tabs/myws--lead-claude-2
-          -> tabmeta.Store.Set() -> HSET terminal:meta:myws:myws--lead-claude-2 ...
-          -> hub.Broadcast({ type: "terminal_metadata" })
-```
-
-### WebSocket Connection
+### WebSocket connection
 
 ```
-TerminalInstance mounts with sessionName="myws--lead-claude-2"
-  -> connectWebSocket("myws--lead-claude-2", ...)
-  -> GET /api/terminal/token?session=myws--lead-claude-2
-      -> terminalAuth.GenerateToken() -> HMAC-SHA256 token
-  -> new WebSocket("ws://.../api/terminal/ws?session=myws--lead-claude-2&token=...")
+TerminalInstance mounts with sessionName
+  -> GET /api/workspaces/{ws}/terminal/token?session=…
+         (internal/webui/handlers/terminal/module.go:93)
+  -> new WebSocket(".../api/workspaces/{ws}/terminal/ws?session=…&token=…")
+         (module.go:96 -> HandleTerminalWS, handlers/terminal/ws.go:98)
 
-Server: handleTerminalWS
-  -> auth.ValidateToken(token, session)  [one-time check]
-  -> manager.Attach("myws--lead-claude-2", "", 80, 24)
-      -> tmuxHasSession? No -> tmuxNewSession(internalName, "loom lead --backend claude", 80, 24)
-          -> tmux new-session -d -s {name} -x 80 -y 24 loom lead --backend claude
-          -> tmux set-option mouse on
-          -> tmux set-option history-limit {scrollbackMaxLines}
-      -> tmuxAttach(internalName) -> pty.Start(tmux attach-session -t {name})
-      -> pty.Setsize(PTY, 80x24)
-  -> go ptyToWS(ctx, conn, session, manager, scrollback)
-  -> wsToPTY(ctx, conn, session, manager, connID)   [blocks]
-
-Client ws.onopen:
-  -> setConnectionState("connected")
-  -> fitAddon.fit()
-  -> ws.send(encodeResize(cols, rows))  [binary 5-byte frame]
+Server: HandleTerminalWS
+  -> TerminalAuth.ValidateToken(token, session, workspace)   [single use]
+  -> PTYSource.AttachSession(key, cols, rows, launchSpec)
+       reattached==true  -> replay scrollback
+       reattached==false -> start the child from the resolved LaunchSpec (§3)
+  -> realtime.AttachmentToWS  (binary output frames)   ws.go:334
+  -> realtime.WSToPTY         (text input frames)      ws.go:340  [blocks]
 ```
 
-### Resize Protocol
+The agent-terminal path uses the older `realtime.PtyToWS`
+(`terminal_relay.go:90`, called from `handlers/terminal/agent.go:340`) because
+it reads a tmux PTY directly. The main path uses `AttachmentToWS`
+(`terminal_relay.go:204`), which consumes the session's fan-out channel rather
+than the fd — the session's own drain goroutine is the sole PTY reader.
 
-When connected, terminal dimensions are sent as a binary frame:
+### Resize protocol
+
+Resize is an **in-band text control message**, not a binary frame:
+
 ```
-Byte 0: 0x01 (resize marker)
-Bytes 1-2: cols (uint16 big-endian)
-Bytes 3-4: rows (uint16 big-endian)
+"\x1b[RESIZE:<cols>;<rows>]"
 ```
-The server's `wsToPTY` detects `len(data) == 5 && data[0] == 0x01` and calls `manager.Resize(connID, cols, rows)` which calls both `pty.Setsize` and `tmux resize-window`.
+
+Client: `encodeResize` (`instances/terminalConnection.ts:67`).
+Server: `resizeRE` (`internal/webui/server/realtime/terminal_relay.go:57`),
+dispatched at `terminal_relay.go:156`.
+
+### Banners written into the PTY on attach
+
+Two server-side banners are written into the session on attach. Neither is a UI
+element — both are bytes in the terminal stream, so they appear in scrollback
+replay like any other output.
+
+**Project-context banner.** A session named exactly `talk-to-lead` gets a
+project-status banner written ahead of the shell prompt, but only on a *fresh*
+spawn and only when `loomServerURL` is set (`handlers/terminal/ws.go:309-311`);
+on re-attach the banner is already in the replayed ring.
+`injectTerminalContextBanner` (`ws.go:465`) calls
+`webuterminal.FetchTerminalContext` (`internal/webui/terminal/context.go:50`),
+which GETs **`/api/monitor/status`** with a 3 s timeout (`context.go:13,54`) —
+note the path, an earlier revision of this doc said `/api/status`. The result
+is rendered by `FormatContextBanner` (`context.go:78`) as Unicode box-drawing
+borders around three lines built in `buildBannerLines` (`context.go:95-122`):
+`Tasks:` open/blocked/review/in-progress counts, `Agents:` name (status) pairs
+or "none active", and `Planning:` need-plans / ready-to-implement counts. A
+fetch failure is logged and the banner skipped; it never blocks the attach.
+
+**Stale-restart notice.** `maybeEmitStaleRestartBanner` (`ws.go:317,450-461`)
+compares the tab's stored `CreatedAt` against `serverStartedAt`; if the tab
+predates the current server process it writes the yellow line
+`[loom] Previous shell did not survive a server restart. This is a fresh
+session.` The tab metadata survived the restart (§7) but the PTY did not.
+
+This banner is the *fallback* signal, not the primary one. The tab DTO carries
+`pty_alive` (`internal/webui/tabmeta/store.go:52`, computed at read time by
+`ptyAttachable`, `internal/webui/terminal/service_impl.go:63-68`, and annotated
+onto every tab at `service_tabs.go:34,55,76`). When it is `false` the frontend
+never opens the WebSocket at all: `TerminalInstance` skips auto-connect and
+forces `session_ended` (`instances/TerminalInstance.tsx:344-345,362-366`, fed
+from `TerminalView.tsx:789,795-796`), and `TerminalConnectionOverlay` explains
+the loss in words (`TerminalConnectionOverlay.tsx:42-50`). `ws.go:446-449` calls
+that gate "the authoritative block" and this banner "the reliable fallback", for
+clients that reached the attach anyway — browsers drop app-defined WebSocket
+close codes right after upgrade.
 
 ---
 
 ## 5. WebSocket Connection State Machine
 
 ```
-disconnected
-  -> connect() called
-connecting
-  <- WebSocket.open
-connected
-  <- WebSocket.close (normal, code 1000)
-disconnected
-  <- WebSocket.close (code 4001: backend exited)
-crashed
-  <- WebSocket.error or abnormal close
-disconnected -> startAutoReconnect
+disconnected --connect()--> connecting --open--> connected
+connected --close 1000 (child exited / detach)--> session_ended  (no auto-reconnect)
+connected --close 4002 (session killed)---------> session_ended  (no auto-reconnect)
+connected --close 1001 "workspace unavailable"--> error
+connected --close 4001 (agent path only, below)-> crashed        (no auto-reconnect)
+connected --error / abnormal close--------------> disconnected -> startAutoReconnect
 ```
 
-`ConnectionState` type: `"disconnected" | "connecting" | "connected" | "error" | "crashed"`
+`ConnectionState` = `"disconnected" | "connecting" | "connected" | "error" |
+"crashed" | "session_ended"` (`instances/TerminalInstance.tsx:67-76`).
+`session_ended` exists because tab metadata outlives the PTY across a server
+restart; the overlay prompts before opening a fresh shell so scrollback loss is
+explicit rather than silent (`TerminalInstance.tsx:73-75`).
 
-The `hasConnected` flag tracks whether the WebSocket has ever been open:
-- First connection failure: `INITIAL_CONNECT_CONFIG` (maxAttempts=3, baseDelay=3000ms, maxDelay=15000ms).
-- Reconnection after successful first connect: `DEFAULT_RECONNECT_CONFIG` (maxAttempts=10, baseDelay=1000ms, maxDelay=30000ms).
+Close codes are declared on both sides and must stay in sync:
+`instances/terminalConnection.ts:72-79` and
+`internal/webui/server/realtime/terminal_relay.go:37,43`.
 
-Exponential backoff formula: `min(baseDelay * 2^attempt, maxDelay) * jitter` where jitter is `[0.75, 1.25]` for `jitterFactor=0.5`.
+| Code | Meaning | Source |
+|---|---|---|
+| 1000 | clean server-side close | standard |
+| 1001 | workspace runtime unavailable | `terminalConnection.ts:78-79` |
+| 4001 | backend process exited — **agent-terminal path only** | `WSCloseBackendExited` |
+| 4002 | session explicitly killed | `WSCloseSessionKilled` |
 
-### Token Security
+The server picks the code from the attachment's exit reason —
+`ExitReasonKilled` / `ExitReasonExited` / `ExitReasonShutdown`
+(`internal/webui/terminal/pty_session.go:26-28`), matched as string literals at
+`terminal_relay.go:215-223` (deliberately not imported: `terminal` already
+imports `realtime`).
 
-Terminal WebSocket connections are protected by a one-time HMAC-SHA256 token (60s expiry, 16-byte random nonce):
-1. `fetchTerminalToken(sessionName)` -> `GET /api/terminal/token?session={name}` (requires API key auth)
-2. Token embedded in WebSocket URL: `wss://.../api/terminal/ws?session={name}&token={token}`
-3. Server validates before WebSocket upgrade: signature, expiry, session name match, nonce not already used
-4. Used nonces stored in-memory with 2-minute expiry, cleaned up every 5 minutes
+**4001 is unreachable on the main web terminal.** `AttachmentToWS` maps
+`"killed"` to 4002 and `"exited"` to `websocket.StatusNormalClosure` (1000),
+returning `CrashInfo{Killed: true}` or `CrashInfo{}` — never
+`CrashInfo{Crashed: true}` (`terminal_relay.go:215-223`) — and the handler's
+close code is `(<-crashCh).WSClose()` (`handlers/terminal/ws.go:346`,
+`CrashInfo.WSClose` at `terminal_relay.go:70-82`). A child process that simply
+exits therefore closes 1000 → `session_ended`, not 4001 → `crashed`. The sole
+producer of `CrashInfo{Crashed: true}` is `PtyToWS`, when its tmux monitor
+reports the session gone or the pane dead (`terminal_relay.go:111-118`) — the
+agent-terminal viewer. The client still branches on 4001
+(`terminalConnection.ts:233-237`) and `CrashOverlay` still ships, but nothing on
+the main path triggers them.
+
+Reconnect backoff (`utils/reconnectBackoff.ts`): first-connect failures use a
+tighter config than post-connect reconnects; delay is
+`min(baseDelay * 2^attempt, maxDelay) * jitter`.
+
+### Token security
+
+One-time HMAC-SHA256 token, `TerminalTokenExpiry = 60s`
+(`internal/webui/server/realtime/terminal_auth.go:17-18`), 16-byte random nonce
+(`:62`). `ValidateToken` (`:91`) checks signature, expiry, workspace/session
+match and single use; used nonces are swept by a background cleanup loop
+(`:156-179`).
 
 ---
 
-## 6. Terminal Features
+## 6. Copy / paste and search
 
-### Slash Commands
+xterm.js and the browser own these. Selection, copy, paste and find-in-page are
+native; loom installs no clipboard interception, no copy-on-select debounce, no
+paste-confirmation dialog and no terminal context menu in the main terminal view
+(`useClipboard`, `TerminalContextMenu`, `SearchBar` and `WelcomeBanner` are all
+absent from `internal/webui/frontend/src` — the only surviving mention is a
+stale header comment in `components/TerminalView/__tests__/TerminalView.test.tsx:6`).
 
-`SlashCommandInterceptor` is a pure TypeScript class instantiated per `TerminalInstance`. It hooks into the `onInput` callback in `connectWebSocket`.
+The slash-command subsystem (`SlashCommandInterceptor`, `parseSlashCommand`, the
+`/create-issue`, `/assign`, `/status` registry) was removed with the tmux
+migration and has no replacement.
 
-State machine:
-```
-IDLE
-  '/' received -> enter COMMAND_MODE, buffer = ""
-  other -> passthrough to WebSocket
+### Unread output indicator
 
-COMMAND_MODE
-  printable char -> buffer += char, echo to terminal
-  Backspace -> buffer.slice(0,-1), erase on screen; if empty -> IDLE
-  Ctrl+C -> write "^C\r\n" -> IDLE
-  Enter -> EXECUTING: parseSlashCommand(buffer), run, write result -> IDLE
-  ESC sequences -> skip 2 remaining bytes (CSI/SS3 sequences)
-```
+`useUnreadTracking` (`tabs/useUnreadTracking.ts`) flags inactive tabs that
+receive output; `TerminalTabBar` renders the pulsing dot and `TerminalView`
+reports aggregate unread via `onUnreadChange` to drive the NavRail badge.
 
-Command registry:
+Separately, `TerminalView` reports the *connected tab count* via
+`onActiveSessionCountChange` (`TerminalView.tsx:336`, reset to 0 at `:350`).
+`App.tsx` holds it in `activeSessionCount` (`:485`), passes it to
+`TerminalView` (`:1427`) and down to `NavRail` as `sessionCount` (`:1378`).
+`NavRail` renders a numeric badge on the terminal item when the count is
+non-zero, and sets an `aria-label` of "N active sessions"
+(`NavRail.tsx:244,259-261`). This is a different indicator from the unread dot
+and both can be present at once.
 
-| Command | Arguments | Action |
-|---------|-----------|--------|
-| `/create-issue` | `<title> [--priority 0-4] [--type task\|bug\|...]` | `POST /api/issues` |
-| `/assign` | `<issue-id> <assignee>` | `PATCH /api/issues/{id}` |
-| `/status` | `[issue-id]` | `GET /api/issues/{id}` or `/api/stats` |
-| `/help` | `[command]` | Lists commands or shows usage |
-
-Results are written with ANSI coloring (`\x1b[32m` green for success, `\x1b[31m` red for error, `\x1b[36m` cyan for info) prefixed with `[system]`.
-
-### Terminal Search
-
-Search uses the browser's native find-in-page against xterm.js DOM-rendered cells.
-The app does not intercept Cmd/Ctrl+F.
-
-Search decorations use orange for active match (`#EE8B17`) and gray for other matches (`#515C6A`).
-
-### Copy/Paste/Text Selection
-
-**Copy-on-select**: `terminal.onSelectionChange` fires on any selection change. After a 100ms debounce, selected text is ANSI-stripped and written to `navigator.clipboard`. `CopyToast` shows for 1.5s.
-
-**Ctrl+C smart behavior**: If text is selected, copies it (suppresses SIGINT). If no selection, sends SIGINT to the shell.
-
-**Paste**: `Ctrl+V` calls `onPasteRequest`. If clipboard text contains newlines, `PasteConfirmDialog` shows a preview with Confirm/Cancel. Single-line text pastes immediately via `terminal.paste(text)`.
-
-**Right-click context menu**: `TerminalContextMenu` rendered via `createPortal`. Shows Copy (disabled if no selection), Paste, Select All.
-
-### Unread Output Indicator
-
-`handleOutput` in `TerminalView` is called by each `TerminalInstance` via `onOutput`. If the tab is not active, `tabUnread.get(tabId) = true`. This flows to `TerminalTabBar` as `hasUnread: true`, rendering a pulsing `span.unreadDot`.
-
-`hasAnyUnread` is reported to the parent via `onUnreadChange` and drives the `badges.terminal` dot on the NavRail.
+`components/TalkToLeadButton/` (the floating action button and its
+`SessionBadge`) still exists on disk and is re-exported from
+`components/index.ts:60`, but nothing renders it — `App.test.tsx:2450,2461`
+asserts it is absent from both the app shell and the terminal view under Aether
+V3. Treat it as dead code, not as a documented surface.
 
 ---
 
-## 7. Session Persistence
+## 7. Persistence
 
-### Active Tab Persistence
-
-Active tab is persisted on every tab switch (debounced 300ms):
-1. **sessionStorage**: `sessionStorage.setItem('terminal-active-tab', tabId)` — survives page navigation
-2. **Redis**: `PATCH /api/terminal/state` -> `HSET terminal:ui-state:{ws} active_tab {tabId}` — survives browser close
-
-On startup, `useSessionRestore` fetches `GET /api/terminal/state` (Redis). Falls back to `sessionStorage`.
-
-### Tab Metadata
-
-Tab metadata (labels, notes, sort order, pinned state, issue linkage) is stored per workspace in Redis:
-```
-terminal:meta:{workspace}:{session_name}  (Redis Hash)
-```
-Metadata survives session death — tabs remember custom labels even after the tmux process exits.
-
-### Workspace-Scoped Tab Isolation
-
-`useWorkspaceTabState` subscribes to `WorkspaceContext`. When workspace changes:
-1. Saves current tab set to in-memory map keyed by workspace name
-2. Restores saved tab set for the new workspace (or resets to empty)
-3. Sets `initializedRef.current = false` to allow re-initialization
-
-### Session Restore on Browser Refresh
+### Tab metadata (Redis)
 
 ```
-useSessionRestore mounts
-  -> GET /api/terminal/state
-      -> client.HGetAll("terminal:ui-state:{ws}") -> { active_tab: "myws--lead-claude-2" }
-  -> setActiveTabId("myws--lead-claude-2")
-
-useTabInit runs (after metaLoading=false, configLoading=false, isViewActive=true)
-  -> GET /api/terminal/tabs?workspace=myws (via useTerminalMetadata)
-      -> store.EnsureDefaults(ctx, "myws", [active tmux sessions])
-      -> returns TabMetadata[] sorted by Pinned DESC, SortOrder ASC
-  -> restoredTabs = tabMetadata.map(m => TabState)
-  -> setTabs(restoredTabs)
+terminal:meta:{workspace}:{session_name}     (hash)
 ```
+
+`internal/webui/tabmeta/store.go:3,24`. Fields: label, notes, sort_order,
+created_at, updated_at, plus agent linkage. `pty_alive` and `attached_clients`
+ride the same DTO but are **not** persisted — the service layer fills them in at
+read time from the in-process `PTYManager` (`store.go:31-35,52-53`). Metadata
+survives session death, so a tab remembers its label after the PTY is gone.
+*Note:* the package comment at
+`tabmeta/store.go:3` still says "Each tmux session" — that wording is a
+leftover; the key is per PTY session now.
+
+### Terminal UI state (Redis)
+
+```
+terminal:ui-state:{workspaceID}              (hash, currently just active_tab)
+```
+
+`internal/webui/terminal/service_tabs.go:17-18`.
+
+### Issue tab state (Redis)
+
+```
+ws:{workspaceID}:issue:tabs:{issueId}        (JSON blob, 24h TTL)
+```
+
+`internal/webui/issuetabs/store.go:1-5`. Owned by the issue detail view — see
+[issue-detail-view.md](issue-detail-view.md).
+
+### Browser storage
+
+| State | Key | Scope |
+|---|---|---|
+| Active tab (fast path) | `sessionStorage["terminal-active-tab"]` | Browser tab |
+| Split view on/off | `sessionStorage["terminal-split-view"]` | Browser tab |
+| Split ratio | `sessionStorage["terminal-split-ratio"]` | Browser tab |
+| Split right-pane tab | `sessionStorage["terminal-split-right-tab"]` | Browser tab |
+
+The three split keys are owned by
+`components/TerminalView/layout/useSplitView.ts:21-58`.
+`terminal-active-tab` lives elsewhere: written by `TerminalView.tsx:319,543`,
+read by `tabs/useTabInit.ts:117,256` and `hooks/terminal/useSessionRestore.ts:43`.
+
+### Restore on refresh
+
+`useSessionRestore` (`hooks/terminal/useSessionRestore.ts:35`) reads
+`GET /api/workspaces/{ws}/terminal/state` and falls back to `sessionStorage`
+(`:42-43`). `useTabInit` then rebuilds `TabState[]` from
+`GET /api/workspaces/{ws}/terminal/tabs`.
+
+### Workspace-scoped isolation
+
+`useWorkspaceTabState` saves the current tab set into an in-memory map keyed by
+workspace and restores the incoming workspace's set, re-arming initialization.
+The server side is already isolated: `MultiPTYManager` keeps one manager per
+workspace.
 
 ---
 
-## 8. Talk to Lead
+## 8. Crash Recovery
 
-### First-Time Onboarding
+**Server:** when the PTY output channel closes, `AttachmentToWS` consults
+`Attachment.ExitReason()` and writes the close frame *before* cancelling the
+context — cancelling first would poison the websocket state and the browser
+would see 1006 instead of the intended 4002 or clean 1000
+(`internal/webui/server/realtime/terminal_relay.go:198-203,215-223`).
 
-`WelcomeBanner` appears as a full-width overlay inside the terminal pane after the session first connects and is not yet dismissed globally. Dismissal stored in `localStorage["terminal-onboarding-dismissed"]`.
+**Client:** `terminalConnection.ts:233-247` branches on the close code; 4001
+sets `crashed` and surfaces `CrashOverlay`, 4002 and 1000 set `session_ended`.
+None of the three auto-reconnect. On the main terminal only 4002 and 1000 ever
+arrive; 4001 comes from the agent-terminal relay (§5).
 
-Each backend has custom description and example prompts. Clicking an example calls `instance.pasteText(example)` and dismisses the banner.
+`CrashOverlay` (`instances/CrashOverlay.tsx`) offers **Restart** and **Close
+Tab**. Restart is purely client-side: `handleCrashRestart`
+(`instances/useConnectionState.ts:102-112`) clears `crashReason` and calls
+`instance.reconnect()`. There is no restart endpoint — a fresh WebSocket
+attaches, and because the old session is gone the server spawns a fresh shell.
 
-### Project Context Banner
-
-When a new talk-to-lead session is created, the server injects a context banner via `FetchTerminalContext(loomServerURL)` against `/api/status`. The banner uses Unicode box-drawing characters and shows workspace name, task counts, agent statuses, and planning pipeline counts.
-
-### Active Session Badge
-
-`TerminalView` reports connected tab count via `onActiveSessionCountChange`:
-- `NavRail`: numeric badge on Terminal button when `sessionCount > 0`
-- `TalkToLeadButton`: `SessionBadge` inside the FAB
-- Both update `aria-label` for screen reader announcement
-
----
-
-## 9. Crash Recovery and Staleness Detection
-
-### Backend Crash Detection
-
-**Server-side**: `ptyToWS` reads from the PTY. On read error, it checks:
-1. `!manager.tmuxHasSession(session.Name)` — session is completely gone
-2. `manager.paneDead(session.Name)` — `tmux list-panes -F #{pane_dead}` returns `1`
-
-If either is true, closes WebSocket with code `4001` and captures the last 10 lines of pane output as the close reason (truncated to 123 bytes at UTF-8 boundaries).
-
-**Client-side**: `ws.onclose` checks `event.code === 4001`:
-```typescript
-const WS_CLOSE_BACKEND_EXITED = 4001;
-if (event.code === WS_CLOSE_BACKEND_EXITED) {
-    setConnectionState("crashed");
-    onBackendCrash?.(event.reason);
-    return;  // do NOT auto-reconnect
-}
-```
-
-### CrashOverlay Actions
-
-- **Restart**: `restartTerminalSession(sessionName, token)` (POST /api/terminal/restart). Server kills old session, updates manager's default command, responds. Then `instance.reconnect()` creates a new WebSocket.
-- **Close Tab**: `handleTabClose`.
-
-### Session Scrollback
-
-On reconnect, `fetchScrollback(sessionName)` calls `GET /api/terminal/sessions/{session}/scrollback` which runs `tmux capture-pane -p -S -5000`. Terminal is cleared and scrollback is written before new WebSocket connects, giving continuity.
-
-Scrollback files are persisted to `~/.loom/session-scrollback/{sessionName}.log` when a session is killed (last 10,000 lines via `tmux capture-pane -S -10000`).
-
-Export (`GET /api/terminal/sessions/{session}/export?format=txt|md`) runs `tmux capture-pane -p -S -` (full history), ANSI codes stripped via `StripANSI`.
+Session scrollback is **not** written to disk and there is no export endpoint.
+Continuity comes from the in-process ring replayed on re-attach (§4).
 
 ---
 
-## 10. Issue-Linked Sessions
+## 9. Issue-linked and agent-linked tabs
 
-When `issueId` prop is passed to `TerminalView`, `useSessionManagement` creates a tab with session name `issue-{sanitized-issueId}`.
+`useSessionSeeding` (`instances/useSessionSeeding.ts`) handles both:
 
-When `pendingIssueContext` is passed, `TerminalView` calls `POST /api/terminal/sessions/{name}/seed` once the tab connects, which uses `tmux send-keys` to inject the issue context prompt:
-```
-I need help with issue {issue_id}: {title}
+- `pendingIssueContext` → creates/focuses a tab named
+  `issue-{sanitizedIssueId}` (`sanitizeSessionName`,
+  `tabs/terminalTabUtils.ts:129`). If the tab already exists the user is
+  switched to it.
+- `pendingAgentName` → calls `ensureAgentTerminalSession`
+  (`POST /api/workspaces/{ws}/agents/{name}/terminal/session`,
+  `handlers/terminal/module.go:85`) and focuses the resulting agent tab.
 
-Description: {description (max 800 chars)}
+The agent launch command is built server-side, flags **before** the subcommand:
+`loom --workspace <ws> [--backend <b>] lead [--prompt <file>]` —
+`agentLaunchBaseArgs` (`handlers/terminal/agent_session.go:379-388`) emits the
+global flags, `agentLaunchCommandArgs` (`:390-396`) appends the subcommand. The
+backend is resolved in three steps — `agent.Backend` → `role.Backend` → daemon
+profile `AgentBackend` — `agentLaunchBackend`, `agent_session.go:361-377`. It is
+never hardcoded.
 
-Design: {design (max 500 chars)}
-
-Blockers:
-- {id}: {title}
-```
-
-If the issue tab already exists, the user is switched to it without re-seeding.
-
----
-
-## 11. Split View
-
-`SplitDivider` uses pointer capture events:
-```
-onPointerDown -> setPointerCapture -> listen to document pointermove/pointerup
-pointermove   -> compute ratio = (x - rect.left) / rect.width, clamp [0.2, 0.8]
-pointerup     -> cleanup, release capture
-doubleClick   -> reset to DEFAULT_SPLIT_RATIO (0.5)
-```
-
-Split ratio persisted to `sessionStorage["terminal-split-ratio"]`. Split view disabled below `MIN_SPLIT_WIDTH_PX = 900px` via `window.matchMedia`.
+`POST /api/workspaces/{ws}/terminal/setup` (`tab_module.go:41`,
+`handlers/terminal/setup.go:17-21`) starts a *typed* setup command in a
+workspace PTY; it never accepts arbitrary shell input.
 
 ---
 
-## 12. SSE Integration
+## 10. Split view and editor groups
 
-`useTerminalMetadata.handleMutation` listens for SSE events of type `"terminal_metadata"`. On receipt, a 100ms debounced refetch is triggered. This enables multi-browser-tab sync.
+`useTabEditorGroups` (`layout/useTabEditorGroups.ts:1-3`) implements VS
+Code-style columns: split moves the active tab into a new right column, and
+tabs drag between columns. It mirrors `views/AgentEditorGroups.tsx`.
 
-The server broadcasts `"terminal_metadata"` events from:
-- `handlePutTerminalTab` (new tab created)
-- `handlePatchTerminalTab` (label/notes/pin/sort updated)
-- `handleDeleteTerminalTab` (tab removed)
-
-A separate `"terminal_session_change"` event is broadcast when issue linkage changes or sessions are closed/reconnected.
-
----
-
-## 13. State Persistence Model
-
-| State | Storage | Scope | Lifetime |
-|-------|---------|-------|---------|
-| Active tab ID | Redis `terminal:ui-state:{ws}` hash | Per workspace | Until overwritten |
-| Active tab ID (fast) | `sessionStorage["terminal-active-tab"]` | Browser tab | Browser tab close |
-| Tab metadata | Redis `terminal:meta:{ws}:{session}` | Per workspace | Until DELETE |
-| Onboarding dismissed | `localStorage["terminal-onboarding-dismissed"]` | Browser profile | Until cleared |
-| Split view state | `sessionStorage["terminal-split-view"]` | Browser tab | Browser tab close |
-| Split ratio | `sessionStorage["terminal-split-ratio"]` | Browser tab | Browser tab close |
-| Search term | React state | Component | Navigation away |
-| Tab unread flags | React state | Component | Navigation away |
+`useSplitView` owns the older two-pane split: ratio clamped to
+`[MIN_SPLIT_RATIO, MAX_SPLIT_RATIO]` = `[0.2, 0.8]` with default `0.5`
+(`tabs/terminalTabUtils.ts:17-19`), auto-disabled below
+`MIN_SPLIT_WIDTH_PX = 900` via `matchMedia`
+(`terminalTabUtils.ts:20`, `layout/useSplitView.ts:34-37`).
 
 ---
 
-## 14. Backend APIs
+## 11. SSE Integration
 
-### Terminal Core
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/terminal/token` | Generate one-time HMAC-SHA256 WS auth token |
-| GET | `/api/terminal/ws` | WebSocket upgrade for terminal relay |
-| POST | `/api/terminal/spawn` | Pre-create tmux session for shell tabs |
-| POST | `/api/terminal/restart` | Kill + recreate tmux session |
-| POST | `/api/terminal/kill` | Kill terminal session |
-
-### Tab Metadata
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/terminal/tabs` | List tab metadata for workspace |
-| PUT | `/api/terminal/tabs/{session}` | Create/replace tab metadata |
-| PATCH | `/api/terminal/tabs/{session}` | Update individual metadata fields |
-| DELETE | `/api/terminal/tabs/{session}` | Remove tab metadata |
-
-### Session Management
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/terminal/sessions` | List active tmux sessions |
-| POST | `/api/terminal/sessions/{session}/seed` | Inject issue context via send-keys |
-| POST | `/api/terminal/sessions/{session}/schedule-kill` | Deferred session kill |
-| POST | `/api/terminal/sessions/close-all` | Kill all sessions |
-| GET | `/api/terminal/sessions/{session}/scrollback` | Capture pane scrollback |
-| GET | `/api/terminal/sessions/{session}/scrollback-info` | Scrollback line counts |
-| GET | `/api/terminal/sessions/{session}/export` | ANSI-stripped scrollback download |
-| GET | `/api/terminal/session-status` | Check if session alive / pane dead |
-| GET | `/api/terminal/sessions/by-issue` | List sessions linked to an issue |
-
-### UI State
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/terminal/state` | Fetch persisted active tab from Redis |
-| PATCH | `/api/terminal/state` | Save active tab to Redis |
+`useTerminalMetadata` refetches on SSE mutations of type `terminal_metadata`,
+debounced 100 ms (`hooks/terminal/useTerminalMetadata.ts:37,303-305`). The
+server broadcasts that type from the tab create/update/delete service methods
+(`internal/webui/terminal/service_tabs.go:82-83,133-134,169-170`), which is what
+keeps multiple browser tabs in sync.
 
 ---
 
-## 15. File Map
+## 12. HTTP API
 
-### Frontend Components
+Route shapes and payloads are documented in [../api.md](../api.md); the list
+below is derived from the mux registrations and is the authority on *which*
+routes exist. The two now agree: `api/openapi.yaml` declares exactly the seven
+live terminal paths — token, ws, tabs, tabs/{session}, sessions/by-issue, state,
+setup (`api/openapi.yaml:1933,1952,1984,2007,2113,2133,2177`) — so the generated
+reference lists no removed tmux-era lifecycle endpoint and its drift table reads
+`| Documented but not registered | 0 |` (`docs/api.md:6627`). The appendix
+section "Endpoints removed from the server but still in the spec"
+(`docs/api.appendix.md:127`) has outlived its premise: the endpoints it names
+are now gone from the spec as well as from the server.
+
+### Main web terminal — `internal/webui/handlers/terminal/module.go`
+
+| Method | Path | Registered at |
+|---|---|---|
+| GET | `/api/workspaces/{ws}/terminal/token` | `module.go:93` |
+| GET | `/api/workspaces/{ws}/terminal/ws` | `module.go:96` |
+
+### Agent terminal viewer — same file
+
+| Method | Path | Registered at |
+|---|---|---|
+| GET | `/api/workspaces/{ws}/agents/{name}/terminal/info` | `module.go:79` |
+| GET | `/api/workspaces/{ws}/agents/{name}/terminal/token` | `module.go:81` |
+| POST | `/api/workspaces/{ws}/agents/{name}/terminal/session` | `module.go:85` |
+| GET | `/api/workspaces/{ws}/agents/{name}/terminal/ws` | `module.go:88` |
+
+### Tabs, state, setup — `internal/webui/handlers/terminal/tab_module.go`
+
+| Method | Path | Registered at |
+|---|---|---|
+| GET | `/api/workspaces/{ws}/terminal/tabs` | `tab_module.go:27` |
+| GET | `/api/workspaces/{ws}/terminal/tabs/{session}` | `tab_module.go:28` |
+| PUT | `/api/workspaces/{ws}/terminal/tabs/{session}` | `tab_module.go:29` |
+| PATCH | `/api/workspaces/{ws}/terminal/tabs/{session}` | `tab_module.go:30` |
+| DELETE | `/api/workspaces/{ws}/terminal/tabs/{session}` | `tab_module.go:31` |
+| GET | `/api/workspaces/{ws}/terminal/sessions/by-issue` | `tab_module.go:34` |
+| GET | `/api/workspaces/{ws}/terminal/state` | `tab_module.go:37` |
+| PATCH | `/api/workspaces/{ws}/terminal/state` | `tab_module.go:38` |
+| POST | `/api/workspaces/{ws}/terminal/setup` | `tab_module.go:41` |
+
+### Config
+
+| Method | Path | Registered at |
+|---|---|---|
+| GET | `/api/config/terminal` | `internal/webui/app/routes.go:47` |
+
+### Removed
+
+`spawn`, `restart`, `kill`, `close-all`, `schedule-kill`, `seed`,
+`lead-session`, `scrollback`, `scrollback-info`, `export`, `session-status` and
+`GET /api/terminal/sessions` no longer exist under **any terminal prefix**
+(`/api/terminal/...` or `/api/workspaces/{ws}/terminal/...`). Other subsystems
+still use the same words: the issue-detail session history serves
+`GET /api/workspaces/{ws}/issues/{issueId}/sessions/{recordId}/scrollback`
+(`internal/webui/handlers/issues/session_module.go:52`), documented in
+[issue-detail-view.md](issue-detail-view.md). The rationale is
+stated at `handlers/terminal/module.go:25-28`: each WebSocket attaches to a
+PTY session using the terminal wire protocol, so there is no separate session
+lifecycle to expose. `internal/webui/app/routes_test.go:673-693` asserts the
+old flat paths return 404.
+
+No stale spec or generated-client artifact survives either:
+`grep -nE 'terminal/spawn|spawnTerminalSession|scheduleSessionKill|schedule-kill'`
+over `api/openapi.yaml` and
+`internal/webui/frontend/src/types/generated/openapi.ts` returns nothing.
+
+---
+
+## 13. File Map
+
+### Frontend components (`internal/webui/frontend/src/`)
 
 | File | Responsibility |
-|------|---------------|
-| `components/TerminalView/TerminalView.tsx` | Root orchestrator; tab state, unread tracking |
-| `components/TerminalView/tabs/TerminalTabBar.tsx` | WAI-ARIA tablist with dnd-kit drag-and-drop |
-| `components/TerminalView/tabs/SortableTab.tsx` | dnd-kit `useSortable` wrapper for tab elements |
-| `components/TerminalView/tabs/TabContextMenu.tsx` | Right-click context menu |
-| `components/TerminalView/instances/TerminalInstance.tsx` | Single xterm.js terminal with WebSocket |
-| `components/TerminalView/instances/terminalConnection.ts` | WebSocket lifecycle: token fetch, URL build, `encodeResize` |
-| `components/TerminalView/tabs/terminalTabUtils.ts` | Constants, TabState type, session name generators |
-| `components/TerminalView/layout/BackendPickerPrompt.tsx` | Modal for selecting backend for new tab |
-| `components/TerminalView/layout/WelcomeBanner.tsx` | First-time onboarding overlay |
-| `components/TerminalView/controls/HelpPopover.tsx` | Terminal help popover |
-| `components/TerminalView/controls/NotesBar.tsx` | Per-tab notes editor |
-| `components/TerminalView/CrashOverlay.tsx` | Backend-exited overlay with Restart / Close |
-| `components/TerminalView/ReconnectingOverlay.tsx` | Reconnect countdown overlay |
-| `components/TerminalView/TerminalConnectionOverlay.tsx` | Connecting/disconnected/error overlays |
-| `components/TerminalView/SearchBar.tsx` | VS Code-style search with N-of-M counter |
-| `components/TerminalView/NotesBar.tsx` | Collapsible per-tab notes with auto-save |
-| `components/TerminalView/TerminalContextMenu.tsx` | Right-click terminal menu via createPortal |
-| `components/TerminalView/HelpPopover.tsx` | Keyboard shortcut reference popover |
-| `components/TerminalView/SplitDivider.tsx` | Draggable vertical divider |
-| `components/TerminalView/SplitPaneSelector.tsx` | Right split pane tab picker |
-| `components/EmbeddedTerminal/EmbeddedTerminal.tsx` | TerminalInstance wrapper for issue panels |
+|---|---|
+| `components/TerminalView/TerminalView.tsx` | Root orchestrator: tabs, groups, seeding, setup flow |
+| `components/TerminalView/tabs/TerminalTabBar.tsx` | WAI-ARIA tablist with dnd-kit reorder |
+| `components/TerminalView/tabs/SortableTab.tsx` | dnd-kit `useSortable` wrapper |
+| `components/TerminalView/tabs/TabContextMenu.tsx` | Right-click tab menu |
+| `components/TerminalView/tabs/terminalTabUtils.ts` | `TabState`, `MAX_TABS`, session-name helpers, split constants |
+| `components/TerminalView/instances/TerminalInstance.tsx` | One terminal: xterm + connection + overlays |
+| `components/TerminalView/instances/XTermRenderer.tsx` | xterm.js mount, FitAddon, theming |
+| `components/TerminalView/instances/terminalConnection.ts` | Token fetch, WS lifecycle, `encodeResize`, close codes |
+| `components/TerminalView/instances/TerminalPane.tsx` | Single pane wrapper |
+| `components/TerminalView/instances/TerminalPaneArea.tsx` | Group/split layout host |
+| `components/TerminalView/instances/CrashOverlay.tsx` | Backend-exited overlay |
+| `components/TerminalView/instances/ReconnectingOverlay.tsx` | Reconnect countdown |
+| `components/TerminalView/instances/TerminalConnectionOverlay.tsx` | Connecting/disconnected/error overlays |
+| `components/TerminalView/layout/BackendPickerPrompt.tsx` | Backend picker modal |
+| `components/TerminalView/layout/NewTerminalTabMenu.tsx` | "+" menu |
+| `components/TerminalView/layout/NoBackendsEmptyState.tsx` | Empty state when no CLI is installed |
+| `components/TerminalView/layout/SessionNamePrompt.tsx` | Name prompt for new sessions |
+| `components/TerminalView/layout/SplitDivider.tsx` | Draggable divider |
+| `components/TerminalView/layout/SplitPaneSelector.tsx` | Right-pane tab picker |
+| `components/TerminalView/controls/HelpPopover.tsx` | Keyboard/slash reference popover |
+| `components/TerminalView/controls/NotesBar.tsx` | Collapsible per-tab notes with auto-save |
+| `components/EmbeddedTerminal/EmbeddedTerminal.tsx` | `TerminalInstance` wrapper for issue panels |
 | `components/EmbeddedTerminal/TerminalHeader.tsx` | Backend info + git actions header |
 
-### Frontend Hooks
+### Frontend hooks and API
 
 | File | Responsibility |
-|------|---------------|
-| `components/TerminalView/useTabInit.ts` | Initialize tabs from Redis or create default |
-| `components/TerminalView/useWorkspaceTabState.ts` | Save/restore tab sets on workspace switch |
-| `components/TerminalView/useTabActions.ts` | Tab close, duplicate, rename handlers |
-| `components/TerminalView/useTabOrdering.ts` | Pin, reorder, close-others handlers |
-| `components/TerminalView/useCloseAllSessions.ts` | Issue-linked tab creation + close-all |
-| `components/TerminalView/useClipboard.ts` | Copy toast, multi-line paste confirmation |
-| `components/TerminalView/useSplitView.ts` | Split-pane state: ratio, right tab, media query |
-| `hooks/useTerminalMetadata.ts` | Redis-backed tab metadata CRUD with SSE debounce |
-| `hooks/useTerminalSessions.ts` | List active tmux sessions |
-| `hooks/useSessionRestore.ts` | Fetch persisted active tab from server |
-| `hooks/useTerminalFont.ts` | Font family/size preferences |
-| `api/terminal.ts` | All terminal REST API calls |
+|---|---|
+| `components/TerminalView/tabs/useTabInit.ts` | Build tabs from metadata or create the default |
+| `components/TerminalView/tabs/useWorkspaceTabState.ts` | Save/restore tab sets across workspace switches |
+| `components/TerminalView/tabs/useTabActions.ts` | Close, duplicate, rename |
+| `components/TerminalView/tabs/useTabOrdering.ts` | Pin, reorder, close-others |
+| `components/TerminalView/tabs/useUnreadTracking.ts` | Per-tab unread flags |
+| `components/TerminalView/layout/useSplitView.ts` | Split ratio, right tab, media query |
+| `components/TerminalView/layout/useTabEditorGroups.ts` | VS Code-style editor columns |
+| `components/TerminalView/instances/useConnectionState.ts` | Connection-state fan-in |
+| `components/TerminalView/instances/useSessionSeeding.ts` | Issue-context and agent-tab seeding |
+| `hooks/terminal/useTerminalMetadata.ts` | Tab metadata CRUD + SSE-debounced refetch |
+| `hooks/terminal/useSessionRestore.ts` | Restore the active tab on load |
+| `hooks/terminal/useTerminalFont.ts` | Font family/size preferences |
+| `api/terminal/terminal.ts` | Terminal REST calls |
+| `api/terminal/sessions.ts` | Session audit-trail queries |
+| `api/terminal/sessionHistory.ts` | Issue session history |
+| `api/terminal/logs.ts` | Log-streaming endpoints |
 | `utils/reconnectBackoff.ts` | `startAutoReconnect` with exponential backoff + jitter |
+
+Also under `hooks/terminal/`: `useTaskSessions.ts`, `useSessionTranscript.ts`,
+`useSessionDiff.ts`, `useDiff.ts`, `useTaskLogPolling.ts` — these serve the
+issue/session surfaces, not the terminal itself.
 
 ### Backend (Go)
 
 | File | Responsibility |
-|------|---------------|
-| `internal/webui/terminal.go` | TerminalManager struct, `ErrTmuxNotFound`, `ErrMaxSessionsReached`, core fields |
-| `internal/webui/terminal_lifecycle.go` | Shutdown, deferred kill cancellation, session cleanup |
-| `internal/webui/terminal_auth.go` | HMAC-SHA256 one-time token (60s expiry, single-use nonce) |
-| `internal/webui/terminal_context.go` | FetchTerminalContext + FormatContextBanner |
-| `internal/webui/terminal_health.go` | SessionAlive, PaneDead, CapturePane |
-| `internal/webui/terminal_sessions.go` | KillAllSessions, CaptureScrollback, captureScrollbackToFile |
-| `internal/webui/handlers_terminal.go` | `handleTerminalToken`, `handleTerminalRestart`, `handleTerminalKill`, `handleTerminalSessionStatus`, constants |
-| `internal/webui/handlers_terminal_ws.go` | WebSocket relay (`handleTerminalWS`), `ptyToWS`, `wsToPTY`, `crashInfo` |
-| `internal/webui/handlers_terminal_tabs.go` | REST: GET/PUT/PATCH/DELETE /api/terminal/tabs |
-| `internal/webui/handlers_terminal_sessions.go` | REST: list sessions, seed, schedule-kill, close-all |
-| `internal/webui/handlers_terminal_spawn.go` | REST: POST /api/terminal/spawn |
-| `internal/webui/handlers_terminal_state.go` | REST: GET/PATCH /api/terminal/state |
-| `internal/webui/handlers_terminal_scrollback.go` | REST: GET scrollback |
-| `internal/webui/handlers_terminal_export.go` | REST: GET export (ANSI-stripped download) |
-| `internal/webui/tabmeta/store.go` | Redis-backed TabMetadata store |
-| `internal/webui/handlers_config.go` | attachCommandForSession, shellCommand, validBackends |
+|---|---|
+| `internal/webui/terminal/pty_manager.go` | `PTYManager`: session ownership, grace timer, idle reaper, caps |
+| `internal/webui/terminal/multi_pty_manager.go` | One `PTYManager` per registered workspace |
+| `internal/webui/terminal/pty_session.go` | PTY fd + child + attachments; `ExitReason*` constants |
+| `internal/webui/terminal/ringbuf.go` | 256 KB scrollback ring with private-mode checkpointing |
+| `internal/webui/terminal/session_command.go` | `ValidBackends`, `ArgvForSession`, shell argv construction |
+| `internal/webui/terminal/source.go` | `PTYSource` interface — the backend seam |
+| `internal/webui/terminal/agent_tmux.go` | `AgentTmuxManager`: attach to CLI auto-mode tmux sessions |
+| `internal/webui/terminal/context.go` | `TerminalContext` project-status fetch + banner formatting |
+| `internal/webui/terminal/service_impl.go` | `TerminalService` core, session-name validation |
+| `internal/webui/terminal/service_tabs.go` | Tab metadata + `terminal:ui-state:{ws}` |
+| `internal/webui/terminal/service_setup.go` | Typed setup-command runner |
+| `internal/webui/handlers/terminal/module.go` | Terminal + agent-terminal route registration |
+| `internal/webui/handlers/terminal/tab_module.go` | Tab/state/setup route registration |
+| `internal/webui/handlers/terminal/ws.go` | `HandleTerminalWS`, WS spans, disconnect-reason enum |
+| `internal/webui/handlers/terminal/terminal.go` | Token handler |
+| `internal/webui/handlers/terminal/tabs.go` | Tab CRUD handlers + SSE broadcast |
+| `internal/webui/handlers/terminal/state.go` | UI-state handlers |
+| `internal/webui/handlers/terminal/setup.go` | `HandleStartTerminalSetup` |
+| `internal/webui/handlers/terminal/agent.go` | Agent terminal info/token/WS |
+| `internal/webui/handlers/terminal/agent_session.go` | Agent launch spec + backend resolution |
+| `internal/webui/handlers/terminal/sessions_by_issue.go` | Sessions linked to an issue |
+| `internal/webui/handlers/terminal/terminal_config.go` | `GET /api/config/terminal` payload |
+| `internal/webui/server/realtime/terminal_relay.go` | `PtyToWS` / `WSToPTY`, resize parsing, close codes |
+| `internal/webui/server/realtime/terminal_auth.go` | One-time HMAC token issue/validate |
+| `internal/webui/tabmeta/store.go` | Redis tab metadata store |
+
+---
+
+## Related
+
+- [file-explorer.md](file-explorer.md), [issue-detail-view.md](issue-detail-view.md)
+  — the other two web-UI subsystem maps.
+- [../api.md](../api.md) — HTTP request/response payloads (its terminal section
+  predates the PTY migration).
+- [../loom-glossary.md](../loom-glossary.md) — "session" has five distinct
+  meanings in this repo; this doc uses *terminal session* throughout.

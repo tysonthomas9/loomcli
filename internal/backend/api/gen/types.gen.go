@@ -4,15 +4,101 @@
 package gen
 
 import (
+	"encoding/json"
 	"time"
 )
 
 const (
-	BearerAuthScopes  = "BearerAuth.Scopes"
-	FleetApiKeyScopes = "FleetApiKey.Scopes"
-	FleetJWTScopes    = "FleetJWT.Scopes"
-	WorkerTokenScopes = "WorkerToken.Scopes"
+	BearerAuthScopes   = "BearerAuth.Scopes"
+	FleetApiKeyScopes  = "FleetApiKey.Scopes"
+	FleetJWTScopes     = "FleetJWT.Scopes"
+	TaskRunLeaseScopes = "TaskRunLease.Scopes"
+	WorkerTokenScopes  = "WorkerToken.Scopes"
 )
+
+// Defines values for AgentDesiredState.
+const (
+	AgentDesiredStateDraining AgentDesiredState = "draining"
+	AgentDesiredStateIdle     AgentDesiredState = "idle"
+	AgentDesiredStateRunning  AgentDesiredState = "running"
+	AgentDesiredStateStopped  AgentDesiredState = "stopped"
+)
+
+// Valid indicates whether the value is a known member of the AgentDesiredState enum.
+func (e AgentDesiredState) Valid() bool {
+	switch e {
+	case AgentDesiredStateDraining:
+		return true
+	case AgentDesiredStateIdle:
+		return true
+	case AgentDesiredStateRunning:
+		return true
+	case AgentDesiredStateStopped:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AgentLiveStatus.
+const (
+	AgentLiveStatusIdle    AgentLiveStatus = "idle"
+	AgentLiveStatusWorking AgentLiveStatus = "working"
+)
+
+// Valid indicates whether the value is a known member of the AgentLiveStatus enum.
+func (e AgentLiveStatus) Valid() bool {
+	switch e {
+	case AgentLiveStatusIdle:
+		return true
+	case AgentLiveStatusWorking:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AgentMode.
+const (
+	Ephemeral AgentMode = "ephemeral"
+	Service   AgentMode = "service"
+)
+
+// Valid indicates whether the value is a known member of the AgentMode enum.
+func (e AgentMode) Valid() bool {
+	switch e {
+	case Ephemeral:
+		return true
+	case Service:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AgentState.
+const (
+	AgentStateActive             AgentState = "active"
+	AgentStateBackendUnavailable AgentState = "backend_unavailable"
+	AgentStateIdle               AgentState = "idle"
+	AgentStateStopped            AgentState = "stopped"
+)
+
+// Valid indicates whether the value is a known member of the AgentState enum.
+func (e AgentState) Valid() bool {
+	switch e {
+	case AgentStateActive:
+		return true
+	case AgentStateBackendUnavailable:
+		return true
+	case AgentStateIdle:
+		return true
+	case AgentStateStopped:
+		return true
+	default:
+		return false
+	}
+}
 
 // Defines values for AgentStatusResponseAgentState.
 const (
@@ -862,16 +948,16 @@ func (e SessionHistoryRecordLauncher) Valid() bool {
 
 // Defines values for SessionHistoryRecordStatus.
 const (
-	Active    SessionHistoryRecordStatus = "active"
-	Completed SessionHistoryRecordStatus = "completed"
+	SessionHistoryRecordStatusActive    SessionHistoryRecordStatus = "active"
+	SessionHistoryRecordStatusCompleted SessionHistoryRecordStatus = "completed"
 )
 
 // Valid indicates whether the value is a known member of the SessionHistoryRecordStatus enum.
 func (e SessionHistoryRecordStatus) Valid() bool {
 	switch e {
-	case Active:
+	case SessionHistoryRecordStatusActive:
 		return true
-	case Completed:
+	case SessionHistoryRecordStatusCompleted:
 		return true
 	default:
 		return false
@@ -925,34 +1011,34 @@ func (e TranscriptEntryType) Valid() bool {
 
 // Defines values for TreeNodeAgentState.
 const (
-	Dead     TreeNodeAgentState = "dead"
-	Done     TreeNodeAgentState = "done"
-	Idle     TreeNodeAgentState = "idle"
-	Running  TreeNodeAgentState = "running"
-	Spawning TreeNodeAgentState = "spawning"
-	Stopped  TreeNodeAgentState = "stopped"
-	Stuck    TreeNodeAgentState = "stuck"
-	Working  TreeNodeAgentState = "working"
+	TreeNodeAgentStateDead     TreeNodeAgentState = "dead"
+	TreeNodeAgentStateDone     TreeNodeAgentState = "done"
+	TreeNodeAgentStateIdle     TreeNodeAgentState = "idle"
+	TreeNodeAgentStateRunning  TreeNodeAgentState = "running"
+	TreeNodeAgentStateSpawning TreeNodeAgentState = "spawning"
+	TreeNodeAgentStateStopped  TreeNodeAgentState = "stopped"
+	TreeNodeAgentStateStuck    TreeNodeAgentState = "stuck"
+	TreeNodeAgentStateWorking  TreeNodeAgentState = "working"
 )
 
 // Valid indicates whether the value is a known member of the TreeNodeAgentState enum.
 func (e TreeNodeAgentState) Valid() bool {
 	switch e {
-	case Dead:
+	case TreeNodeAgentStateDead:
 		return true
-	case Done:
+	case TreeNodeAgentStateDone:
 		return true
-	case Idle:
+	case TreeNodeAgentStateIdle:
 		return true
-	case Running:
+	case TreeNodeAgentStateRunning:
 		return true
-	case Spawning:
+	case TreeNodeAgentStateSpawning:
 		return true
-	case Stopped:
+	case TreeNodeAgentStateStopped:
 		return true
-	case Stuck:
+	case TreeNodeAgentStateStuck:
 		return true
-	case Working:
+	case TreeNodeAgentStateWorking:
 		return true
 	default:
 		return false
@@ -1034,6 +1120,105 @@ func (e TreeNodeStatus) Valid() bool {
 	}
 }
 
+// Defines values for TriggerDeliveryStatus.
+const (
+	TriggerDeliveryStatusAccepted   TriggerDeliveryStatus = "accepted"
+	TriggerDeliveryStatusDispatched TriggerDeliveryStatus = "dispatched"
+	TriggerDeliveryStatusDuplicate  TriggerDeliveryStatus = "duplicate"
+	TriggerDeliveryStatusFailed     TriggerDeliveryStatus = "failed"
+	TriggerDeliveryStatusHeld       TriggerDeliveryStatus = "held"
+	TriggerDeliveryStatusQueued     TriggerDeliveryStatus = "queued"
+	TriggerDeliveryStatusRejected   TriggerDeliveryStatus = "rejected"
+	TriggerDeliveryStatusReplayed   TriggerDeliveryStatus = "replayed"
+	TriggerDeliveryStatusSuperseded TriggerDeliveryStatus = "superseded"
+)
+
+// Valid indicates whether the value is a known member of the TriggerDeliveryStatus enum.
+func (e TriggerDeliveryStatus) Valid() bool {
+	switch e {
+	case TriggerDeliveryStatusAccepted:
+		return true
+	case TriggerDeliveryStatusDispatched:
+		return true
+	case TriggerDeliveryStatusDuplicate:
+		return true
+	case TriggerDeliveryStatusFailed:
+		return true
+	case TriggerDeliveryStatusHeld:
+		return true
+	case TriggerDeliveryStatusQueued:
+		return true
+	case TriggerDeliveryStatusRejected:
+		return true
+	case TriggerDeliveryStatusReplayed:
+		return true
+	case TriggerDeliveryStatusSuperseded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TriggerEventOrigin.
+const (
+	External TriggerEventOrigin = "external"
+	System   TriggerEventOrigin = "system"
+	Workflow TriggerEventOrigin = "workflow"
+)
+
+// Valid indicates whether the value is a known member of the TriggerEventOrigin enum.
+func (e TriggerEventOrigin) Valid() bool {
+	switch e {
+	case External:
+		return true
+	case System:
+		return true
+	case Workflow:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TriggerRouteDeliveryStatus.
+const (
+	TriggerRouteDeliveryStatusAccepted   TriggerRouteDeliveryStatus = "accepted"
+	TriggerRouteDeliveryStatusDispatched TriggerRouteDeliveryStatus = "dispatched"
+	TriggerRouteDeliveryStatusDuplicate  TriggerRouteDeliveryStatus = "duplicate"
+	TriggerRouteDeliveryStatusFailed     TriggerRouteDeliveryStatus = "failed"
+	TriggerRouteDeliveryStatusHeld       TriggerRouteDeliveryStatus = "held"
+	TriggerRouteDeliveryStatusQueued     TriggerRouteDeliveryStatus = "queued"
+	TriggerRouteDeliveryStatusRejected   TriggerRouteDeliveryStatus = "rejected"
+	TriggerRouteDeliveryStatusReplayed   TriggerRouteDeliveryStatus = "replayed"
+	TriggerRouteDeliveryStatusSuperseded TriggerRouteDeliveryStatus = "superseded"
+)
+
+// Valid indicates whether the value is a known member of the TriggerRouteDeliveryStatus enum.
+func (e TriggerRouteDeliveryStatus) Valid() bool {
+	switch e {
+	case TriggerRouteDeliveryStatusAccepted:
+		return true
+	case TriggerRouteDeliveryStatusDispatched:
+		return true
+	case TriggerRouteDeliveryStatusDuplicate:
+		return true
+	case TriggerRouteDeliveryStatusFailed:
+		return true
+	case TriggerRouteDeliveryStatusHeld:
+		return true
+	case TriggerRouteDeliveryStatusQueued:
+		return true
+	case TriggerRouteDeliveryStatusRejected:
+		return true
+	case TriggerRouteDeliveryStatusReplayed:
+		return true
+	case TriggerRouteDeliveryStatusSuperseded:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for WorkspaceDesignFormatPatchRequestDesignFormat.
 const (
 	WorkspaceDesignFormatPatchRequestDesignFormatHtml     WorkspaceDesignFormatPatchRequestDesignFormat = "html"
@@ -1070,6 +1255,69 @@ func (e WorkspaceResponseDesignFormat) Valid() bool {
 	}
 }
 
+// Defines values for UpdateAgentJSONBodyDesiredState.
+const (
+	Draining UpdateAgentJSONBodyDesiredState = "draining"
+	Idle     UpdateAgentJSONBodyDesiredState = "idle"
+	Running  UpdateAgentJSONBodyDesiredState = "running"
+	Stopped  UpdateAgentJSONBodyDesiredState = "stopped"
+)
+
+// Valid indicates whether the value is a known member of the UpdateAgentJSONBodyDesiredState enum.
+func (e UpdateAgentJSONBodyDesiredState) Valid() bool {
+	switch e {
+	case Draining:
+		return true
+	case Idle:
+		return true
+	case Running:
+		return true
+	case Stopped:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for UpdateAgentJSONBodyState.
+const (
+	UpdateAgentJSONBodyStateActive  UpdateAgentJSONBodyState = "active"
+	UpdateAgentJSONBodyStateIdle    UpdateAgentJSONBodyState = "idle"
+	UpdateAgentJSONBodyStateStopped UpdateAgentJSONBodyState = "stopped"
+)
+
+// Valid indicates whether the value is a known member of the UpdateAgentJSONBodyState enum.
+func (e UpdateAgentJSONBodyState) Valid() bool {
+	switch e {
+	case UpdateAgentJSONBodyStateActive:
+		return true
+	case UpdateAgentJSONBodyStateIdle:
+		return true
+	case UpdateAgentJSONBodyStateStopped:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PostWorkspaceApprovalJSONBodyDecision.
+const (
+	PostWorkspaceApprovalJSONBodyDecisionApproved PostWorkspaceApprovalJSONBodyDecision = "approved"
+	PostWorkspaceApprovalJSONBodyDecisionRejected PostWorkspaceApprovalJSONBodyDecision = "rejected"
+)
+
+// Valid indicates whether the value is a known member of the PostWorkspaceApprovalJSONBodyDecision enum.
+func (e PostWorkspaceApprovalJSONBodyDecision) Valid() bool {
+	switch e {
+	case PostWorkspaceApprovalJSONBodyDecisionApproved:
+		return true
+	case PostWorkspaceApprovalJSONBodyDecisionRejected:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ListBlockedParamsType.
 const (
 	ListBlockedParamsTypeBug     ListBlockedParamsType = "bug"
@@ -1091,6 +1339,66 @@ func (e ListBlockedParamsType) Valid() bool {
 	case ListBlockedParamsTypeFeature:
 		return true
 	case ListBlockedParamsTypeTask:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DispatchDriverOpParamsOp.
+const (
+	ActiveTaskRuns            DispatchDriverOpParamsOp = "active-task-runs"
+	AgentOrchestrationSession DispatchDriverOpParamsOp = "agent-orchestration-session"
+	ClaimReady                DispatchDriverOpParamsOp = "claim-ready"
+	CompleteTask              DispatchDriverOpParamsOp = "complete-task"
+	ConnectorDispatch         DispatchDriverOpParamsOp = "connector-dispatch"
+	DeliverAgentMessage       DispatchDriverOpParamsOp = "deliver-agent-message"
+	DeliverLeadAssignment     DispatchDriverOpParamsOp = "deliver-lead-assignment"
+	EmitEvent                 DispatchDriverOpParamsOp = "emit-event"
+	EpicGet                   DispatchDriverOpParamsOp = "epic-get"
+	EpicSnapshot              DispatchDriverOpParamsOp = "epic-snapshot"
+	ExecTask                  DispatchDriverOpParamsOp = "exec-task"
+	ListAgents                DispatchDriverOpParamsOp = "list-agents"
+	RecoverStaleTasks         DispatchDriverOpParamsOp = "recover-stale-tasks"
+	ReleaseTask               DispatchDriverOpParamsOp = "release-task"
+	TaskRunGet                DispatchDriverOpParamsOp = "task-run-get"
+	UpdateAgentParent         DispatchDriverOpParamsOp = "update-agent-parent"
+)
+
+// Valid indicates whether the value is a known member of the DispatchDriverOpParamsOp enum.
+func (e DispatchDriverOpParamsOp) Valid() bool {
+	switch e {
+	case ActiveTaskRuns:
+		return true
+	case AgentOrchestrationSession:
+		return true
+	case ClaimReady:
+		return true
+	case CompleteTask:
+		return true
+	case ConnectorDispatch:
+		return true
+	case DeliverAgentMessage:
+		return true
+	case DeliverLeadAssignment:
+		return true
+	case EmitEvent:
+		return true
+	case EpicGet:
+		return true
+	case EpicSnapshot:
+		return true
+	case ExecTask:
+		return true
+	case ListAgents:
+		return true
+	case RecoverStaleTasks:
+		return true
+	case ReleaseTask:
+		return true
+	case TaskRunGet:
+		return true
+	case UpdateAgentParent:
 		return true
 	default:
 		return false
@@ -1448,6 +1756,30 @@ func (e GetGraphParamsStatus) Valid() bool {
 	}
 }
 
+// Defines values for ListWorkspacePullRequestsParamsState.
+const (
+	All    ListWorkspacePullRequestsParamsState = "all"
+	Merged ListWorkspacePullRequestsParamsState = "merged"
+	Open   ListWorkspacePullRequestsParamsState = "open"
+	Review ListWorkspacePullRequestsParamsState = "review"
+)
+
+// Valid indicates whether the value is a known member of the ListWorkspacePullRequestsParamsState enum.
+func (e ListWorkspacePullRequestsParamsState) Valid() bool {
+	switch e {
+	case All:
+		return true
+	case Merged:
+		return true
+	case Open:
+		return true
+	case Review:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ListReadyParamsType.
 const (
 	ListReadyParamsTypeBug     ListReadyParamsType = "bug"
@@ -1517,6 +1849,48 @@ func (e ListReadyParamsSort) Valid() bool {
 	}
 }
 
+// Defines values for TaskRunOpParamsOp.
+const (
+	ArtifactDeclare   TaskRunOpParamsOp = "artifact-declare"
+	ArtifactFinalize  TaskRunOpParamsOp = "artifact-finalize"
+	ArtifactGet       TaskRunOpParamsOp = "artifact-get"
+	ArtifactList      TaskRunOpParamsOp = "artifact-list"
+	Complete          TaskRunOpParamsOp = "complete"
+	Get               TaskRunOpParamsOp = "get"
+	Heartbeat         TaskRunOpParamsOp = "heartbeat"
+	LogAppend         TaskRunOpParamsOp = "log-append"
+	RuntimeCredential TaskRunOpParamsOp = "runtime-credential"
+	TaskGet           TaskRunOpParamsOp = "task-get"
+)
+
+// Valid indicates whether the value is a known member of the TaskRunOpParamsOp enum.
+func (e TaskRunOpParamsOp) Valid() bool {
+	switch e {
+	case ArtifactDeclare:
+		return true
+	case ArtifactFinalize:
+		return true
+	case ArtifactGet:
+		return true
+	case ArtifactList:
+		return true
+	case Complete:
+		return true
+	case Get:
+		return true
+	case Heartbeat:
+		return true
+	case LogAppend:
+		return true
+	case RuntimeCredential:
+		return true
+	case TaskGet:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for StartTerminalSetupJSONBodyAction.
 const (
 	Configure StartTerminalSetupJSONBodyAction = "configure"
@@ -1541,11 +1915,95 @@ func (e StartTerminalSetupJSONBodyAction) Valid() bool {
 	}
 }
 
+// Defines values for ListTriggerDeliveriesParamsStatus.
+const (
+	ListTriggerDeliveriesParamsStatusAccepted   ListTriggerDeliveriesParamsStatus = "accepted"
+	ListTriggerDeliveriesParamsStatusDispatched ListTriggerDeliveriesParamsStatus = "dispatched"
+	ListTriggerDeliveriesParamsStatusDuplicate  ListTriggerDeliveriesParamsStatus = "duplicate"
+	ListTriggerDeliveriesParamsStatusFailed     ListTriggerDeliveriesParamsStatus = "failed"
+	ListTriggerDeliveriesParamsStatusHeld       ListTriggerDeliveriesParamsStatus = "held"
+	ListTriggerDeliveriesParamsStatusQueued     ListTriggerDeliveriesParamsStatus = "queued"
+	ListTriggerDeliveriesParamsStatusRejected   ListTriggerDeliveriesParamsStatus = "rejected"
+	ListTriggerDeliveriesParamsStatusReplayed   ListTriggerDeliveriesParamsStatus = "replayed"
+	ListTriggerDeliveriesParamsStatusSuperseded ListTriggerDeliveriesParamsStatus = "superseded"
+)
+
+// Valid indicates whether the value is a known member of the ListTriggerDeliveriesParamsStatus enum.
+func (e ListTriggerDeliveriesParamsStatus) Valid() bool {
+	switch e {
+	case ListTriggerDeliveriesParamsStatusAccepted:
+		return true
+	case ListTriggerDeliveriesParamsStatusDispatched:
+		return true
+	case ListTriggerDeliveriesParamsStatusDuplicate:
+		return true
+	case ListTriggerDeliveriesParamsStatusFailed:
+		return true
+	case ListTriggerDeliveriesParamsStatusHeld:
+		return true
+	case ListTriggerDeliveriesParamsStatusQueued:
+		return true
+	case ListTriggerDeliveriesParamsStatusRejected:
+		return true
+	case ListTriggerDeliveriesParamsStatusReplayed:
+		return true
+	case ListTriggerDeliveriesParamsStatusSuperseded:
+		return true
+	default:
+		return false
+	}
+}
+
 // AddDependencyRequest defines model for AddDependencyRequest.
 type AddDependencyRequest struct {
 	DepType     *string `json:"dep_type,omitempty"`
 	DependsOnId string  `json:"depends_on_id"`
 }
+
+// Agent Full agent assignment (domain.Agent). Richer than WorkspaceAgentInfo. live_status/active_task_id/active_phase/last_error_class are DERIVED, read-only fields carried from fleet-db.
+type Agent struct {
+	// ActivePhase Derived; set only when live_status is working.
+	ActivePhase *string `json:"active_phase,omitempty"`
+
+	// ActiveTaskId Derived; set only when live_status is working.
+	ActiveTaskId     *string            `json:"active_task_id,omitempty"`
+	Auto             *bool              `json:"auto,omitempty"`
+	Backend          *string            `json:"backend,omitempty"`
+	BudgetPolicy     *string            `json:"budget_policy,omitempty"`
+	CreatedAt        time.Time          `json:"created_at"`
+	CrossRepo        *bool              `json:"cross_repo,omitempty"`
+	DesiredState     *AgentDesiredState `json:"desired_state,omitempty"`
+	FallbackBackends *[]string          `json:"fallback_backends,omitempty"`
+
+	// LastErrorClass Derived; error_class of the most recent failed terminal session, surfaced while idle.
+	LastErrorClass *string `json:"last_error_class,omitempty"`
+
+	// LiveStatus Derived read-only liveness from fleet-db.
+	LiveStatus     *AgentLiveStatus `json:"live_status,omitempty"`
+	MaxConcurrency *int             `json:"max_concurrency,omitempty"`
+	Mode           *AgentMode       `json:"mode,omitempty"`
+	Name           string           `json:"name"`
+	Parent         *string          `json:"parent,omitempty"`
+	RepoGroups     *[]string        `json:"repo_groups,omitempty"`
+	Repos          *[]string        `json:"repos,omitempty"`
+	RoleName       string           `json:"role_name"`
+	State          *AgentState      `json:"state,omitempty"`
+	TaskFilter     *string          `json:"task_filter,omitempty"`
+	UpdatedAt      time.Time        `json:"updated_at"`
+	WorkspaceKey   string           `json:"workspace_key"`
+}
+
+// AgentDesiredState defines model for Agent.DesiredState.
+type AgentDesiredState string
+
+// AgentLiveStatus Derived read-only liveness from fleet-db.
+type AgentLiveStatus string
+
+// AgentMode defines model for Agent.Mode.
+type AgentMode string
+
+// AgentState defines model for Agent.State.
+type AgentState string
 
 // AgentBackendOverride defines model for AgentBackendOverride.
 type AgentBackendOverride struct {
@@ -1559,6 +2017,17 @@ type AgentControlEntry struct {
 	Name   string `json:"name"`
 	Role   string `json:"role"`
 	Status string `json:"status"`
+}
+
+// AgentQueueEntry A single scored candidate issue in an agent's ranked queue.
+type AgentQueueEntry struct {
+	IssueId  string   `json:"issue_id"`
+	Labels   []string `json:"labels"`
+	Parent   *string  `json:"parent,omitempty"`
+	Priority int      `json:"priority"`
+	Reason   string   `json:"reason"`
+	Score    int      `json:"score"`
+	Title    string   `json:"title"`
 }
 
 // AgentStatusResponse Agent entity from dto.AgentStatusResponse
@@ -1578,6 +2047,14 @@ type AgentStatusResponse struct {
 
 // AgentStatusResponseAgentState defines model for AgentStatusResponse.AgentState.
 type AgentStatusResponseAgentState string
+
+// ApprovalError Error envelope for the approvals endpoint (distinct from ErrorResponse).
+type ApprovalError struct {
+	Error struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	} `json:"error"`
+}
 
 // BackendConfigResponse defines model for BackendConfigResponse.
 type BackendConfigResponse struct {
@@ -1748,6 +2225,45 @@ type DependencyRef struct {
 
 	// Type Dependency type (e.g. "blocks")
 	Type string `json:"type"`
+}
+
+// DriverOpError Structured v2 error envelope for the driver SDK transport ({error:{code,message,retryable,details?}}). Distinct from ErrorResponse.
+type DriverOpError struct {
+	Error struct {
+		Code string `json:"code"`
+
+		// Details Optional additive machine-readable context.
+		Details   *map[string]interface{} `json:"details,omitempty"`
+		Message   string                  `json:"message"`
+		Retryable bool                    `json:"retryable"`
+	} `json:"error"`
+}
+
+// DriverRun One execution request for a driver version (domain.DriverRun).
+type DriverRun struct {
+	DriverId        string             `json:"driver_id"`
+	DriverVersionId string             `json:"driver_version_id"`
+	Entrypoint      *string            `json:"entrypoint,omitempty"`
+	EpicId          *string            `json:"epic_id,omitempty"`
+	ErrorClass      *string            `json:"error_class,omitempty"`
+	FencingToken    *int64             `json:"fencing_token,omitempty"`
+	FinishedAt      *time.Time         `json:"finished_at,omitempty"`
+	IdempotencyKey  *string            `json:"idempotency_key,omitempty"`
+	LastHeartbeat   *time.Time         `json:"last_heartbeat,omitempty"`
+	LeaseId         *string            `json:"lease_id,omitempty"`
+	NodeId          *string            `json:"node_id,omitempty"`
+	Output          *map[string]string `json:"output,omitempty"`
+	ParentRunId     *string            `json:"parent_run_id,omitempty"`
+
+	// Payload Opaque driver run payload (raw JSON).
+	Payload      *map[string]interface{} `json:"payload,omitempty"`
+	RunId        string                  `json:"run_id"`
+	SourceKind   *string                 `json:"source_kind,omitempty"`
+	SourceRef    *string                 `json:"source_ref,omitempty"`
+	StartedAt    *time.Time              `json:"started_at,omitempty"`
+	Status       string                  `json:"status"`
+	Summary      *string                 `json:"summary,omitempty"`
+	WorkspaceKey string                  `json:"workspace_key"`
 }
 
 // EditorInfo defines model for EditorInfo.
@@ -2011,6 +2527,26 @@ type FileWriteRequest struct {
 	Repo *string `json:"repo,omitempty"`
 }
 
+// GitPullRequest A pull request aggregated across a workspace's repos (gh-backed).
+type GitPullRequest struct {
+	Additions      *int    `json:"additions,omitempty"`
+	AuthorLogin    *string `json:"author_login,omitempty"`
+	BaseRefName    string  `json:"base_ref_name"`
+	ChangedFiles   *int    `json:"changed_files,omitempty"`
+	CreatedAt      *string `json:"created_at,omitempty"`
+	Deletions      *int    `json:"deletions,omitempty"`
+	HeadRefName    string  `json:"head_ref_name"`
+	IsDraft        bool    `json:"is_draft"`
+	Number         int     `json:"number"`
+	RepoName       string  `json:"repo_name"`
+	ReviewDecision *string `json:"review_decision,omitempty"`
+	SourceRepo     *string `json:"source_repo,omitempty"`
+	State          string  `json:"state"`
+	Title          string  `json:"title"`
+	UpdatedAt      *string `json:"updated_at,omitempty"`
+	Url            string  `json:"url"`
+}
+
 // HourlyBucket defines model for HourlyBucket.
 type HourlyBucket struct {
 	AvgDuration float64   `json:"avg_duration"`
@@ -2172,6 +2708,37 @@ type IssueTabState struct {
 	IssueId     string     `json:"issue_id"`
 	Tabs        []IssueTab `json:"tabs"`
 	UpdatedAt   time.Time  `json:"updated_at"`
+}
+
+// LocalSettingsPatchRequest All top-level fields are optional partial patches (nil = leave unchanged).
+type LocalSettingsPatchRequest struct {
+	AgentRuntime *struct {
+		Default *string `json:"default,omitempty"`
+	} `json:"agent_runtime,omitempty"`
+	FleetdbRedis *struct {
+		Addr          *string `json:"addr,omitempty"`
+		ClearPassword *bool   `json:"clear_password,omitempty"`
+		Db            *int    `json:"db,omitempty"`
+		Enabled       *bool   `json:"enabled,omitempty"`
+		Password      *string `json:"password,omitempty"`
+		RedisUrl      *string `json:"redis_url,omitempty"`
+		Tls           *bool   `json:"tls,omitempty"`
+	} `json:"fleetdb_redis,omitempty"`
+	LocalTaskRunner *struct {
+		OpencodeModel *string `json:"opencode_model,omitempty"`
+	} `json:"local_task_runner,omitempty"`
+	RuntimeCredentials *struct {
+		Daytona *RuntimeCredentialPatch `json:"daytona,omitempty"`
+		Github  *RuntimeCredentialPatch `json:"github,omitempty"`
+	} `json:"runtime_credentials,omitempty"`
+}
+
+// LocalSettingsResponse defines model for LocalSettingsResponse.
+type LocalSettingsResponse struct {
+	Data    *SanitizedLocalSettings `json:"data,omitempty"`
+	Error   *string                 `json:"error,omitempty"`
+	Message *string                 `json:"message,omitempty"`
+	Success bool                    `json:"success"`
 }
 
 // MessageResponse defines model for MessageResponse.
@@ -2519,6 +3086,26 @@ type PatchIssueRequestDesignFormat string
 // PatchIssueRequestStatus defines model for PatchIssueRequest.Status.
 type PatchIssueRequestStatus string
 
+// PlatformEvent One control-plane platform event (domain.PlatformEvent).
+type PlatformEvent struct {
+	Action      string             `json:"action"`
+	Actor       string             `json:"actor"`
+	After       *string            `json:"after,omitempty"`
+	Before      *string            `json:"before,omitempty"`
+	EntityId    string             `json:"entity_id"`
+	EntityType  string             `json:"entity_type"`
+	Id          string             `json:"id"`
+	Metadata    *map[string]string `json:"metadata,omitempty"`
+	Timestamp   time.Time          `json:"timestamp"`
+	WorkspaceId string             `json:"workspace_id"`
+}
+
+// PlatformEventsPage A paginated page of platform events (domain.PlatformEventsPage).
+type PlatformEventsPage struct {
+	Cursor string          `json:"cursor"`
+	Events []PlatformEvent `json:"events"`
+}
+
 // PullRequestDetail defines model for PullRequestDetail.
 type PullRequestDetail struct {
 	BaseRefName string `json:"base_ref_name"`
@@ -2601,6 +3188,13 @@ type ReviewerMessageResult struct {
 	State  string `json:"state"`
 }
 
+// RuntimeCredentialPatch defines model for RuntimeCredentialPatch.
+type RuntimeCredentialPatch struct {
+	ApiKey *string `json:"api_key,omitempty"`
+	Clear  *bool   `json:"clear,omitempty"`
+	Token  *string `json:"token,omitempty"`
+}
+
 // RuntimeReadyResponse defines model for RuntimeReadyResponse.
 type RuntimeReadyResponse struct {
 	Mode      RuntimeReadyResponseMode `json:"mode"`
@@ -2612,16 +3206,32 @@ type RuntimeReadyResponse struct {
 // RuntimeReadyResponseMode defines model for RuntimeReadyResponse.Mode.
 type RuntimeReadyResponseMode string
 
-// SeedRequest defines model for SeedRequest.
-type SeedRequest struct {
-	Blockers *[]struct {
-		Id    string `json:"id"`
-		Title string `json:"title"`
-	} `json:"blockers,omitempty"`
-	Description *string `json:"description,omitempty"`
-	Design      *string `json:"design,omitempty"`
-	IssueId     string  `json:"issue_id"`
-	Title       string  `json:"title"`
+// SanitizedLocalSettings defines model for SanitizedLocalSettings.
+type SanitizedLocalSettings struct {
+	AgentRuntime struct {
+		Default string `json:"default"`
+	} `json:"agent_runtime"`
+	FleetdbRedis struct {
+		Addr        *string `json:"addr,omitempty"`
+		Db          int     `json:"db"`
+		Enabled     bool    `json:"enabled"`
+		PasswordSet bool    `json:"password_set"`
+		Tls         bool    `json:"tls"`
+	} `json:"fleetdb_redis"`
+	LocalTaskRunner struct {
+		OpencodeModel *string `json:"opencode_model,omitempty"`
+	} `json:"local_task_runner"`
+	RuntimeCredentials struct {
+		Daytona SanitizedRuntimeCredential `json:"daytona"`
+		Github  SanitizedRuntimeCredential `json:"github"`
+	} `json:"runtime_credentials"`
+	Version int `json:"version"`
+}
+
+// SanitizedRuntimeCredential defines model for SanitizedRuntimeCredential.
+type SanitizedRuntimeCredential struct {
+	Configured bool    `json:"configured"`
+	UpdatedAt  *string `json:"updated_at,omitempty"`
 }
 
 // SessionHistoryRecord Session history record (Redis-backed, per-issue)
@@ -2741,27 +3351,39 @@ type TabPutRequest struct {
 	SortOrder int    `json:"sort_order"`
 }
 
-// TerminalSessionInfo defines model for TerminalSessionInfo.
-type TerminalSessionInfo struct {
-	// Created Unix timestamp
-	Created int64   `json:"created"`
-	IssueId *string `json:"issue_id,omitempty"`
-	Label   string  `json:"label"`
-	Name    string  `json:"name"`
+// TaskRunArtifact camelCase wire view of a task-run artifact (artifactResult).
+type TaskRunArtifact struct {
+	ArtifactId      string             `json:"artifactId"`
+	Checksum        *string            `json:"checksum,omitempty"`
+	ContentHash     *string            `json:"contentHash,omitempty"`
+	CreatedAt       *time.Time         `json:"createdAt,omitempty"`
+	DurableStatus   *string            `json:"durableStatus,omitempty"`
+	FinalizedAt     *time.Time         `json:"finalizedAt,omitempty"`
+	Metadata        *map[string]string `json:"metadata,omitempty"`
+	MimeType        *string            `json:"mimeType,omitempty"`
+	OwnerId         *string            `json:"ownerId,omitempty"`
+	OwnerType       *string            `json:"ownerType,omitempty"`
+	RedactionStatus *string            `json:"redactionStatus,omitempty"`
+	SizeBytes       *int64             `json:"sizeBytes,omitempty"`
+	Summary         *string            `json:"summary,omitempty"`
+	TaskId          *string            `json:"taskId,omitempty"`
+	Type            string             `json:"type"`
+	UpdatedAt       *time.Time         `json:"updatedAt,omitempty"`
+	Uri             *string            `json:"uri,omitempty"`
+	Visibility      *string            `json:"visibility,omitempty"`
+	WorkspaceKey    *string            `json:"workspaceKey,omitempty"`
 }
 
-// TerminalSpawnData defines model for TerminalSpawnData.
-type TerminalSpawnData struct {
-	Backend     string `json:"backend"`
-	Command     string `json:"command"`
-	Created     bool   `json:"created"`
-	SessionName string `json:"session_name"`
-}
+// TaskRunOpError Structured error envelope for the task-run SDK transport ({error:{code,message,retryable,details?}}). Distinct from ErrorResponse.
+type TaskRunOpError struct {
+	Error struct {
+		Code string `json:"code"`
 
-// TerminalSpawnRequest defines model for TerminalSpawnRequest.
-type TerminalSpawnRequest struct {
-	Backend     string `json:"backend"`
-	SessionName string `json:"session_name"`
+		// Details Optional additive machine-readable context.
+		Details   *map[string]interface{} `json:"details,omitempty"`
+		Message   string                  `json:"message"`
+		Retryable bool                    `json:"retryable"`
+	} `json:"error"`
 }
 
 // TranscriptEntry Single transcript entry from a session
@@ -2848,6 +3470,64 @@ type TreeNodeIssueType string
 // are not settable via the API and excluded from this enum.
 type TreeNodeStatus string
 
+// TriggerDelivery Links a TriggerEvent to the binding that matched it and the DriverRun it enqueued (domain.TriggerDelivery).
+type TriggerDelivery struct {
+	Attempt          int                   `json:"attempt"`
+	CreatedAt        time.Time             `json:"created_at"`
+	DeliveryId       string                `json:"delivery_id"`
+	DriverRunId      *string               `json:"driver_run_id,omitempty"`
+	ErrorClass       *string               `json:"error_class,omitempty"`
+	NextRetryAt      *time.Time            `json:"next_retry_at,omitempty"`
+	RejectionReason  *string               `json:"rejection_reason,omitempty"`
+	Status           TriggerDeliveryStatus `json:"status"`
+	SubjectKey       *string               `json:"subject_key,omitempty"`
+	TriggerBindingId string                `json:"trigger_binding_id"`
+	TriggerEventId   string                `json:"trigger_event_id"`
+	UpdatedAt        time.Time             `json:"updated_at"`
+	WorkspaceKey     string                `json:"workspace_key"`
+}
+
+// TriggerDeliveryStatus defines model for TriggerDelivery.Status.
+type TriggerDeliveryStatus string
+
+// TriggerEvent A persisted inbound trigger event (domain.TriggerEvent).
+type TriggerEvent struct {
+	ActorRef       *string   `json:"actor_ref,omitempty"`
+	EventId        string    `json:"event_id"`
+	EventType      string    `json:"event_type"`
+	HopDepth       *int      `json:"hop_depth,omitempty"`
+	IdempotencyKey *string   `json:"idempotency_key,omitempty"`
+	OccurredAt     time.Time `json:"occurred_at"`
+
+	// Origin Server-stamped provenance; empty normalizes to external on read.
+	Origin           *TriggerEventOrigin `json:"origin,omitempty"`
+	RawPayloadDigest *string             `json:"raw_payload_digest,omitempty"`
+	RawPayloadRef    *string             `json:"raw_payload_ref,omitempty"`
+	ReceivedAt       time.Time           `json:"received_at"`
+	ReplayOfEventId  *string             `json:"replay_of_event_id,omitempty"`
+	SignatureStatus  *string             `json:"signature_status,omitempty"`
+	SourceEventId    *string             `json:"source_event_id,omitempty"`
+	SourceKind       string              `json:"source_kind"`
+	SubjectRef       *string             `json:"subject_ref,omitempty"`
+	TriggerBindingId *string             `json:"trigger_binding_id,omitempty"`
+	WorkspaceKey     string              `json:"workspace_key"`
+}
+
+// TriggerEventOrigin Server-stamped provenance; empty normalizes to external on read.
+type TriggerEventOrigin string
+
+// TriggerRouteDelivery One fan-out leg of a trigger-route dispatch (store.TriggerRouteDelivery), as returned inline by the webhook receive endpoint.
+type TriggerRouteDelivery struct {
+	DeliveryId       string                     `json:"delivery_id"`
+	DriverRunId      string                     `json:"driver_run_id"`
+	RejectionReason  *string                    `json:"rejection_reason,omitempty"`
+	Status           TriggerRouteDeliveryStatus `json:"status"`
+	TriggerBindingId string                     `json:"trigger_binding_id"`
+}
+
+// TriggerRouteDeliveryStatus defines model for TriggerRouteDelivery.Status.
+type TriggerRouteDeliveryStatus string
+
 // UsageAgentSummary defines model for UsageAgentSummary.
 type UsageAgentSummary struct {
 	InputTokens  int64   `json:"input_tokens"`
@@ -2918,6 +3598,17 @@ type WorkerStateRequest struct {
 	State     *string `json:"state,omitempty"`
 	TaskId    *string `json:"task_id,omitempty"`
 	TaskTitle *string `json:"task_title,omitempty"`
+}
+
+// WorkspaceAddReposRequest Body for POST /api/workspaces/{ws}/repos. The ws path param supplies the workspace; no workspace id field is read from the body.
+type WorkspaceAddReposRequest struct {
+	Branch *string `json:"branch,omitempty"`
+
+	// CloneUrls Remote git URLs to clone into the workspace.
+	CloneUrls *[]string `json:"clone_urls,omitempty"`
+
+	// Repos Existing local repo paths to attach.
+	Repos *[]string `json:"repos,omitempty"`
 }
 
 // WorkspaceAgentInfo defines model for WorkspaceAgentInfo.
@@ -3079,6 +3770,26 @@ type CreateAgentJSONBody struct {
 	WorkspaceKey *string   `json:"workspace_key,omitempty"`
 }
 
+// UpdateAgentJSONBody defines parameters for UpdateAgent.
+type UpdateAgentJSONBody struct {
+	Auto             *bool                            `json:"auto,omitempty"`
+	Backend          *string                          `json:"backend,omitempty"`
+	CrossRepo        *bool                            `json:"cross_repo,omitempty"`
+	DesiredState     *UpdateAgentJSONBodyDesiredState `json:"desired_state,omitempty"`
+	FallbackBackends *[]string                        `json:"fallback_backends,omitempty"`
+	Parent           *string                          `json:"parent,omitempty"`
+	RepoGroups       *[]string                        `json:"repo_groups,omitempty"`
+	Repos            *[]string                        `json:"repos,omitempty"`
+	RoleName         *string                          `json:"role_name,omitempty"`
+	State            *UpdateAgentJSONBodyState        `json:"state,omitempty"`
+}
+
+// UpdateAgentJSONBodyDesiredState defines parameters for UpdateAgent.
+type UpdateAgentJSONBodyDesiredState string
+
+// UpdateAgentJSONBodyState defines parameters for UpdateAgent.
+type UpdateAgentJSONBodyState string
+
 // GetDiffFileParams defines parameters for GetDiffFile.
 type GetDiffFileParams struct {
 	Path string `form:"path" json:"path"`
@@ -3120,6 +3831,24 @@ type ConnectAgentTerminalWSParams struct {
 	Token string `form:"token" json:"token"`
 }
 
+// PostWorkspaceApprovalJSONBody defines parameters for PostWorkspaceApproval.
+type PostWorkspaceApprovalJSONBody struct {
+	// Decision Approval decision. Defaults to "approved".
+	Decision *PostWorkspaceApprovalJSONBodyDecision `json:"decision,omitempty"`
+
+	// EventType Await event type. Defaults to "approval".
+	EventType *string `json:"eventType,omitempty"`
+
+	// Note Optional free-form reviewer note carried on the payload.
+	Note *string `json:"note,omitempty"`
+
+	// SubjectRef Rendered subject the approval targets, e.g. "acme/widgets#7@shaA".
+	SubjectRef string `json:"subjectRef"`
+}
+
+// PostWorkspaceApprovalJSONBodyDecision defines parameters for PostWorkspaceApproval.
+type PostWorkspaceApprovalJSONBodyDecision string
+
 // ListBlockedParams defines parameters for ListBlocked.
 type ListBlockedParams struct {
 	ParentId *string                `form:"parent_id,omitempty" json:"parent_id,omitempty"`
@@ -3131,6 +3860,132 @@ type ListBlockedParams struct {
 
 // ListBlockedParamsType defines parameters for ListBlocked.
 type ListBlockedParamsType string
+
+// AwaitDriverEventJSONBody defines parameters for AwaitDriverEvent.
+type AwaitDriverEventJSONBody struct {
+	// Actor Optional eligible-resolver allow-list; accepts a single string or an array of strings.
+	Actor *AwaitDriverEventJSONBody_Actor `json:"actor,omitempty"`
+
+	// AwaitIndex 1-based ordinal of this await within the run.
+	AwaitIndex int `json:"awaitIndex"`
+
+	// Pattern Fully rendered subject-scoped key to wait for (eventType:subject, exact equality, no glob).
+	Pattern *string `json:"pattern,omitempty"`
+
+	// TimeoutMs Mandatory await timeout in milliseconds.
+	TimeoutMs int64 `json:"timeoutMs"`
+}
+
+// AwaitDriverEventParams defines parameters for AwaitDriverEvent.
+type AwaitDriverEventParams struct {
+	// XLoomDriverRunId Parent DriverRun id. Required on the legacy header-quad transport; omitted when authenticating with a run-scoped Bearer token. A value conflicting with the token is rejected 401 identity_mismatch.
+	XLoomDriverRunId *string `json:"X-Loom-Driver-Run-Id,omitempty"`
+
+	// XLoomDriverNodeId Parent DriverRun node id (legacy header transport only).
+	XLoomDriverNodeId *string `json:"X-Loom-Driver-Node-Id,omitempty"`
+
+	// XLoomDriverLeaseId Parent DriverRun lease id (legacy header transport only).
+	XLoomDriverLeaseId *string `json:"X-Loom-Driver-Lease-Id,omitempty"`
+
+	// XLoomDriverFencingToken Positive int64 fencing token as a decimal string (legacy header transport only).
+	XLoomDriverFencingToken *string `json:"X-Loom-Driver-Fencing-Token,omitempty"`
+}
+
+// AwaitDriverEventJSONBodyActor0 defines parameters for AwaitDriverEvent.
+type AwaitDriverEventJSONBodyActor0 = string
+
+// AwaitDriverEventJSONBodyActor1 defines parameters for AwaitDriverEvent.
+type AwaitDriverEventJSONBodyActor1 = []string
+
+// AwaitDriverEventJSONBody_Actor defines parameters for AwaitDriverEvent.
+type AwaitDriverEventJSONBody_Actor struct {
+	union json.RawMessage
+}
+
+// ListDriverEventAwaitsParams defines parameters for ListDriverEventAwaits.
+type ListDriverEventAwaitsParams struct {
+	// XLoomDriverRunId Parent DriverRun id (legacy header transport; omitted with a run-scoped Bearer token).
+	XLoomDriverRunId        *string `json:"X-Loom-Driver-Run-Id,omitempty"`
+	XLoomDriverNodeId       *string `json:"X-Loom-Driver-Node-Id,omitempty"`
+	XLoomDriverLeaseId      *string `json:"X-Loom-Driver-Lease-Id,omitempty"`
+	XLoomDriverFencingToken *string `json:"X-Loom-Driver-Fencing-Token,omitempty"`
+}
+
+// WatchDriverEpicParams defines parameters for WatchDriverEpic.
+type WatchDriverEpicParams struct {
+	// EpicId Epic to scope the stream to. Falls back to the parent DriverRun's epic id; required if neither is present (400).
+	EpicId *string `form:"epicId,omitempty" json:"epicId,omitempty"`
+
+	// AfterSeq Exclusive int64 Seq resume cursor (alternative to the Last-Event-ID header). 0/absent streams from the start of the journal.
+	AfterSeq *int64 `form:"afterSeq,omitempty" json:"afterSeq,omitempty"`
+
+	// LastEventID SSE reconnect cursor (exclusive int64 Seq); takes precedence over afterSeq.
+	LastEventID *string `json:"Last-Event-ID,omitempty"`
+
+	// XLoomDriverRunId Parent DriverRun id (legacy header transport; omitted with a run-scoped Bearer token).
+	XLoomDriverRunId        *string `json:"X-Loom-Driver-Run-Id,omitempty"`
+	XLoomDriverNodeId       *string `json:"X-Loom-Driver-Node-Id,omitempty"`
+	XLoomDriverLeaseId      *string `json:"X-Loom-Driver-Lease-Id,omitempty"`
+	XLoomDriverFencingToken *string `json:"X-Loom-Driver-Fencing-Token,omitempty"`
+}
+
+// AwaitDriverWorkflowJSONBody defines parameters for AwaitDriverWorkflow.
+type AwaitDriverWorkflowJSONBody struct {
+	// AwaitIndex 1-based await ordinal (consumes a normal await slot).
+	AwaitIndex int    `json:"awaitIndex"`
+	ChildRunId string `json:"childRunId"`
+
+	// TimeoutMs Mandatory await timeout in milliseconds.
+	TimeoutMs int64 `json:"timeoutMs"`
+}
+
+// AwaitDriverWorkflowParams defines parameters for AwaitDriverWorkflow.
+type AwaitDriverWorkflowParams struct {
+	// XLoomDriverRunId Parent DriverRun id (legacy header transport; omitted with a run-scoped Bearer token).
+	XLoomDriverRunId        *string `json:"X-Loom-Driver-Run-Id,omitempty"`
+	XLoomDriverNodeId       *string `json:"X-Loom-Driver-Node-Id,omitempty"`
+	XLoomDriverLeaseId      *string `json:"X-Loom-Driver-Lease-Id,omitempty"`
+	XLoomDriverFencingToken *string `json:"X-Loom-Driver-Fencing-Token,omitempty"`
+}
+
+// StartDriverWorkflowJSONBody defines parameters for StartDriverWorkflow.
+type StartDriverWorkflowJSONBody struct {
+	// IdempotencyKey Keys the deterministic child identity. When absent, startIndex is required.
+	IdempotencyKey *string `json:"idempotencyKey,omitempty"`
+
+	// Input Child's initial payload (raw JSON); empty means {}.
+	Input interface{} `json:"input,omitempty"`
+
+	// StartIndex SDK 1-based per-run start counter; required when idempotencyKey is absent.
+	StartIndex *int `json:"startIndex,omitempty"`
+
+	// WorkflowName Registered workflow (driver) to run.
+	WorkflowName string `json:"workflowName"`
+}
+
+// StartDriverWorkflowParams defines parameters for StartDriverWorkflow.
+type StartDriverWorkflowParams struct {
+	// XLoomDriverRunId Parent DriverRun id (legacy header transport; omitted with a run-scoped Bearer token).
+	XLoomDriverRunId        *string `json:"X-Loom-Driver-Run-Id,omitempty"`
+	XLoomDriverNodeId       *string `json:"X-Loom-Driver-Node-Id,omitempty"`
+	XLoomDriverLeaseId      *string `json:"X-Loom-Driver-Lease-Id,omitempty"`
+	XLoomDriverFencingToken *string `json:"X-Loom-Driver-Fencing-Token,omitempty"`
+}
+
+// DispatchDriverOpJSONBody defines parameters for DispatchDriverOp.
+type DispatchDriverOpJSONBody map[string]interface{}
+
+// DispatchDriverOpParams defines parameters for DispatchDriverOp.
+type DispatchDriverOpParams struct {
+	// XLoomDriverRunId Parent DriverRun id (legacy header transport; omitted with a run-scoped Bearer token).
+	XLoomDriverRunId        *string `json:"X-Loom-Driver-Run-Id,omitempty"`
+	XLoomDriverNodeId       *string `json:"X-Loom-Driver-Node-Id,omitempty"`
+	XLoomDriverLeaseId      *string `json:"X-Loom-Driver-Lease-Id,omitempty"`
+	XLoomDriverFencingToken *string `json:"X-Loom-Driver-Fencing-Token,omitempty"`
+}
+
+// DispatchDriverOpParamsOp defines parameters for DispatchDriverOp.
+type DispatchDriverOpParamsOp string
 
 // SubscribeEventsParams defines parameters for SubscribeEvents.
 type SubscribeEventsParams struct {
@@ -3369,6 +4224,21 @@ type GetGraphParams struct {
 // GetGraphParamsStatus defines parameters for GetGraph.
 type GetGraphParamsStatus string
 
+// SearchIssuesParams defines parameters for SearchIssues.
+type SearchIssuesParams struct {
+	// Q Full-text search query, forwarded to the issue backend
+	Q string `form:"q" json:"q"`
+
+	// Limit Max results. Defaults to 100 and is clamped to a maximum of 500; invalid or non-positive values fall back to 100.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// ReopenIssueJSONBody defines parameters for ReopenIssue.
+type ReopenIssueJSONBody struct {
+	// Reason Optional reason, recorded as a comment (best-effort)
+	Reason *string `json:"reason,omitempty"`
+}
+
 // SaveIssueTabsJSONBody defines parameters for SaveIssueTabs.
 type SaveIssueTabsJSONBody struct {
 	ActiveTabId string     `json:"active_tab_id"`
@@ -3384,6 +4254,15 @@ type RunOnboardingFirstTaskJSONBody struct {
 	SourceRepo  *string `json:"source_repo,omitempty"`
 	Title       string  `json:"title"`
 }
+
+// ListWorkspacePullRequestsParams defines parameters for ListWorkspacePullRequests.
+type ListWorkspacePullRequestsParams struct {
+	// State Filter by PR state; defaults to all when omitted.
+	State *ListWorkspacePullRequestsParamsState `form:"state,omitempty" json:"state,omitempty"`
+}
+
+// ListWorkspacePullRequestsParamsState defines parameters for ListWorkspacePullRequests.
+type ListWorkspacePullRequestsParamsState string
 
 // ListReadyParams defines parameters for ListReady.
 type ListReadyParams struct {
@@ -3417,6 +4296,57 @@ type ListReadyParamsMolType string
 // ListReadyParamsSort defines parameters for ListReady.
 type ListReadyParamsSort string
 
+// GetWorkflowRunEventsParams defines parameters for GetWorkflowRunEvents.
+type GetWorkflowRunEventsParams struct {
+	// After Opaque cursor; return events after this position.
+	After *string `form:"after,omitempty" json:"after,omitempty"`
+
+	// Limit Page size; defaults to 100.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// StreamWorkflowRunEventsParams defines parameters for StreamWorkflowRunEvents.
+type StreamWorkflowRunEventsParams struct {
+	// After Opaque cursor; stream events after this position. Defaults to "0".
+	After *string `form:"after,omitempty" json:"after,omitempty"`
+}
+
+// UploadTaskRunArtifactContentParams defines parameters for UploadTaskRunArtifactContent.
+type UploadTaskRunArtifactContentParams struct {
+	// XLoomTaskRunId Task-run identity (mirrors LOOM_TASK_RUN_ID)
+	XLoomTaskRunId string `json:"X-Loom-Task-Run-Id"`
+
+	// XLoomTaskRunFencingToken Monotonic lease fencing token; must be a positive integer
+	XLoomTaskRunFencingToken int64 `json:"X-Loom-Task-Run-Fencing-Token"`
+
+	// XLoomTaskRunNodeId Node identity for the fenced ownership check (mirrors LOOM_TASK_RUN_NODE_ID)
+	XLoomTaskRunNodeId *string `json:"X-Loom-Task-Run-Node-Id,omitempty"`
+
+	// XLoomTaskRunLeaseId Lease identity for the fenced ownership check (mirrors LOOM_TASK_RUN_LEASE_ID)
+	XLoomTaskRunLeaseId *string `json:"X-Loom-Task-Run-Lease-Id,omitempty"`
+}
+
+// TaskRunOpJSONBody defines parameters for TaskRunOp.
+type TaskRunOpJSONBody map[string]interface{}
+
+// TaskRunOpParams defines parameters for TaskRunOp.
+type TaskRunOpParams struct {
+	// XLoomTaskRunId Task-run identity (mirrors LOOM_TASK_RUN_ID)
+	XLoomTaskRunId string `json:"X-Loom-Task-Run-Id"`
+
+	// XLoomTaskRunFencingToken Monotonic lease fencing token; must be a positive integer
+	XLoomTaskRunFencingToken int64 `json:"X-Loom-Task-Run-Fencing-Token"`
+
+	// XLoomTaskRunNodeId Node identity for the fenced ownership check (mirrors LOOM_TASK_RUN_NODE_ID)
+	XLoomTaskRunNodeId *string `json:"X-Loom-Task-Run-Node-Id,omitempty"`
+
+	// XLoomTaskRunLeaseId Lease identity for the fenced ownership check (mirrors LOOM_TASK_RUN_LEASE_ID)
+	XLoomTaskRunLeaseId *string `json:"X-Loom-Task-Run-Lease-Id,omitempty"`
+}
+
+// TaskRunOpParamsOp defines parameters for TaskRunOp.
+type TaskRunOpParamsOp string
+
 // GetTaskLogParams defines parameters for GetTaskLog.
 type GetTaskLogParams struct {
 	// Lines Number of lines to return
@@ -3424,11 +4354,6 @@ type GetTaskLogParams struct {
 
 	// BeforeLine Read lines before this line number (for pagination)
 	BeforeLine *int64 `form:"before_line,omitempty" json:"before_line,omitempty"`
-}
-
-// GetTerminalSessionStatusParams defines parameters for GetTerminalSessionStatus.
-type GetTerminalSessionStatusParams struct {
-	Session *string `form:"session,omitempty" json:"session,omitempty"`
 }
 
 // ListSessionsByIssueParams defines parameters for ListSessionsByIssue.
@@ -3460,6 +4385,60 @@ type ConnectTerminalWSParams struct {
 	Session *string `form:"session,omitempty" json:"session,omitempty"`
 }
 
+// ListTriggerDeliveriesParams defines parameters for ListTriggerDeliveries.
+type ListTriggerDeliveriesParams struct {
+	// TriggerEventId Filter by the originating trigger event
+	TriggerEventId *string `form:"trigger_event_id,omitempty" json:"trigger_event_id,omitempty"`
+
+	// TriggerBindingId Filter by the trigger binding that produced the delivery
+	TriggerBindingId *string `form:"trigger_binding_id,omitempty" json:"trigger_binding_id,omitempty"`
+
+	// Status Filter by delivery lifecycle status
+	Status *ListTriggerDeliveriesParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+
+	// Limit Max rows to return (1-1000)
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// ListTriggerDeliveriesParamsStatus defines parameters for ListTriggerDeliveries.
+type ListTriggerDeliveriesParamsStatus string
+
+// ListTriggerEventsParams defines parameters for ListTriggerEvents.
+type ListTriggerEventsParams struct {
+	// SourceKind Filter by event source kind (e.g. github)
+	SourceKind *string `form:"source_kind,omitempty" json:"source_kind,omitempty"`
+
+	// TriggerBindingId Filter by the trigger binding that matched the event
+	TriggerBindingId *string `form:"trigger_binding_id,omitempty" json:"trigger_binding_id,omitempty"`
+
+	// Limit Max rows to return (1-1000)
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// ReceiveWebhookJSONBody defines parameters for ReceiveWebhook.
+type ReceiveWebhookJSONBody map[string]interface{}
+
+// CreateWorkflowRunJSONBody defines parameters for CreateWorkflowRun.
+type CreateWorkflowRunJSONBody map[string]interface{}
+
+// CreateWorkflowRunParams defines parameters for CreateWorkflowRun.
+type CreateWorkflowRunParams struct {
+	// IdempotencyKey Optional idempotency key for run creation.
+	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
+}
+
+// CreateWorkflowVersionJSONBody defines parameters for CreateWorkflowVersion.
+type CreateWorkflowVersionJSONBody struct {
+	// Activate Activate this version after registering. Defaults to true.
+	Activate *bool `json:"activate,omitempty"`
+
+	// Entrypoint Entry file path; defaults to workflows/{name}.ts.
+	Entrypoint *string `json:"entrypoint,omitempty"`
+
+	// Files Map of workspace-relative file path to file source.
+	Files map[string]string `json:"files"`
+}
+
 // ReportClientErrorJSONRequestBody defines body for ReportClientError for application/json ContentType.
 type ReportClientErrorJSONRequestBody = ReportClientErrorJSONBody
 
@@ -3478,6 +4457,9 @@ type PushWorkerLogsJSONRequestBody = PushWorkerLogsJSONBody
 // UpdateWorkerStateJSONRequestBody defines body for UpdateWorkerState for application/json ContentType.
 type UpdateWorkerStateJSONRequestBody = WorkerStateRequest
 
+// PatchLocalSettingsJSONRequestBody defines body for PatchLocalSettings for application/json ContentType.
+type PatchLocalSettingsJSONRequestBody = LocalSettingsPatchRequest
+
 // NotifySessionChangeJSONRequestBody defines body for NotifySessionChange for application/json ContentType.
 type NotifySessionChangeJSONRequestBody NotifySessionChangeJSONBody
 
@@ -3493,6 +4475,9 @@ type ReorderWorkspacesJSONRequestBody ReorderWorkspacesJSONBody
 // CreateAgentJSONRequestBody defines body for CreateAgent for application/json ContentType.
 type CreateAgentJSONRequestBody CreateAgentJSONBody
 
+// UpdateAgentJSONRequestBody defines body for UpdateAgent for application/json ContentType.
+type UpdateAgentJSONRequestBody UpdateAgentJSONBody
+
 // GitPullJSONRequestBody defines body for GitPull for application/json ContentType.
 type GitPullJSONRequestBody GitPullJSONBody
 
@@ -3505,11 +4490,26 @@ type UpdateGitTargetJSONRequestBody UpdateGitTargetJSONBody
 // StopAgentJSONRequestBody defines body for StopAgent for application/json ContentType.
 type StopAgentJSONRequestBody StopAgentJSONBody
 
+// PostWorkspaceApprovalJSONRequestBody defines body for PostWorkspaceApproval for application/json ContentType.
+type PostWorkspaceApprovalJSONRequestBody PostWorkspaceApprovalJSONBody
+
 // PatchWorkspaceBackendJSONRequestBody defines body for PatchWorkspaceBackend for application/json ContentType.
 type PatchWorkspaceBackendJSONRequestBody = WorkspaceBackendPatchRequest
 
 // PatchWorkspaceDesignFormatJSONRequestBody defines body for PatchWorkspaceDesignFormat for application/json ContentType.
 type PatchWorkspaceDesignFormatJSONRequestBody = WorkspaceDesignFormatPatchRequest
+
+// AwaitDriverEventJSONRequestBody defines body for AwaitDriverEvent for application/json ContentType.
+type AwaitDriverEventJSONRequestBody AwaitDriverEventJSONBody
+
+// AwaitDriverWorkflowJSONRequestBody defines body for AwaitDriverWorkflow for application/json ContentType.
+type AwaitDriverWorkflowJSONRequestBody AwaitDriverWorkflowJSONBody
+
+// StartDriverWorkflowJSONRequestBody defines body for StartDriverWorkflow for application/json ContentType.
+type StartDriverWorkflowJSONRequestBody StartDriverWorkflowJSONBody
+
+// DispatchDriverOpJSONRequestBody defines body for DispatchDriverOp for application/json ContentType.
+type DispatchDriverOpJSONRequestBody DispatchDriverOpJSONBody
 
 // WriteScopedFileJSONRequestBody defines body for WriteScopedFile for application/json ContentType.
 type WriteScopedFileJSONRequestBody = FileWriteRequest
@@ -3547,6 +4547,9 @@ type AddDependencyJSONRequestBody = AddDependencyRequest
 // MoveIssueJSONRequestBody defines body for MoveIssue for application/json ContentType.
 type MoveIssueJSONRequestBody = MoveIssueRequest
 
+// ReopenIssueJSONRequestBody defines body for ReopenIssue for application/json ContentType.
+type ReopenIssueJSONRequestBody ReopenIssueJSONBody
+
 // SaveIssueTabsJSONRequestBody defines body for SaveIssueTabs for application/json ContentType.
 type SaveIssueTabsJSONRequestBody SaveIssueTabsJSONBody
 
@@ -3562,14 +4565,14 @@ type PostPullRequestReviewerMessageJSONRequestBody = ReviewerMessageRequest
 // PostPullRequestReviewJSONRequestBody defines body for PostPullRequestReview for application/json ContentType.
 type PostPullRequestReviewJSONRequestBody = PullRequestReviewRequest
 
-// SeedTerminalSessionJSONRequestBody defines body for SeedTerminalSession for application/json ContentType.
-type SeedTerminalSessionJSONRequestBody = SeedRequest
+// AddWorkspaceReposJSONRequestBody defines body for AddWorkspaceRepos for application/json ContentType.
+type AddWorkspaceReposJSONRequestBody = WorkspaceAddReposRequest
+
+// TaskRunOpJSONRequestBody defines body for TaskRunOp for application/json ContentType.
+type TaskRunOpJSONRequestBody TaskRunOpJSONBody
 
 // StartTerminalSetupJSONRequestBody defines body for StartTerminalSetup for application/json ContentType.
 type StartTerminalSetupJSONRequestBody StartTerminalSetupJSONBody
-
-// SpawnTerminalSessionJSONRequestBody defines body for SpawnTerminalSession for application/json ContentType.
-type SpawnTerminalSessionJSONRequestBody = TerminalSpawnRequest
 
 // PatchTerminalStateJSONRequestBody defines body for PatchTerminalState for application/json ContentType.
 type PatchTerminalStateJSONRequestBody PatchTerminalStateJSONBody
@@ -3579,3 +4582,12 @@ type PatchTerminalTabJSONRequestBody = TabPatchRequest
 
 // PutTerminalTabJSONRequestBody defines body for PutTerminalTab for application/json ContentType.
 type PutTerminalTabJSONRequestBody = TabPutRequest
+
+// ReceiveWebhookJSONRequestBody defines body for ReceiveWebhook for application/json ContentType.
+type ReceiveWebhookJSONRequestBody ReceiveWebhookJSONBody
+
+// CreateWorkflowRunJSONRequestBody defines body for CreateWorkflowRun for application/json ContentType.
+type CreateWorkflowRunJSONRequestBody CreateWorkflowRunJSONBody
+
+// CreateWorkflowVersionJSONRequestBody defines body for CreateWorkflowVersion for application/json ContentType.
+type CreateWorkflowVersionJSONRequestBody CreateWorkflowVersionJSONBody

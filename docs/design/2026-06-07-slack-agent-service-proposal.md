@@ -1,5 +1,64 @@
 # Slack AgentService Proposal
 
+> **Status:** Aspirational — proposed 2026-06-07, not implemented as of
+> 2026-07-24. A different Slack path shipped instead.
+
+The **inbound** half of this proposal does not exist. The **outbound** half was
+solved by a different mechanism (connectors). Before implementing from this
+doc, reconcile it against the connector design; the two paths overlap and this
+one has not been re-decided.
+
+## What is not built
+
+The "Missing" list below is still substantially accurate:
+
+- `domain.AgentService` has **no** `driver_id` / `driver_version_id` fields
+  (`internal/domain/platform.go:147-168`), so nothing pins executable code to a
+  service. Implementation-plan step 1 is untouched.
+- There is **no AgentService controller**. The only non-store code that touches
+  `AgentServices()` is CRUD — `loom serve worker service add|list|show|set|rm`
+  (`internal/cli/serve/worker/service_cmd.go:166,207,233,252,267,277` — the
+  only `AgentServices()` call sites outside the store layer) and a tracing wrapper
+  (`internal/cli/cmdstore/store_tracing_platform.go:134`). Nothing claims a
+  lease, starts a long-lived runtime, or heartbeats one. Step 2 is untouched.
+- **No Socket Mode anywhere.** Grep finds no socket-mode client, no Slack event
+  ingestion, no Slack normalized-payload type, and no Slack idempotency-key
+  builder. The only registered webhook adapter is `github`
+  (`internal/webui/handlers/webhooks/adapter.go:77-79`,
+  `internal/webui/handlers/webhooks/github.go`). Steps 3 and 5 are untouched.
+- The `slack_post_message` / `slack_update_message` / `slack_add_reaction`
+  action-ledger types of step 4 **do not exist**.
+
+`always_on` is a real `AgentServiceKind`
+(`internal/domain/platform.go:133`), so the YAML shape above is at least
+type-valid — but `driver_id`, `driver_version_id`, and `metadata.mode` are not
+fields the model has (`metadata` is a free `map[string]string`,
+`platform.go:165`).
+
+## What shipped instead
+
+**Slack as a connector provider**, for *outbound* egress only:
+`internal/connector/providers/slack.go` wraps `chat.postMessage`
+(`slack.go:131`) and `conversations.history` (`slack.go:190`) behind the
+connector grant/dispatch layer.
+
+Two corrections to note when reading the proposal against that code:
+
+- The action constants are `slack.chat.post` and `slack.conversations.read`
+  (`internal/connector/providers/slack.go:29,32`) — **not**
+  `slack.chat.post_message`. (`domain.ConnectorGrant.Action`'s doc comment uses
+  `slack.chat.post_message` as its example, `internal/domain/connector.go:159`;
+  that example string does not match any registered action.)
+- The "Slack replies are idempotent" acceptance criterion is met, but by
+  connector idempotency rather than an ActionLedger: `chat.postMessage` requires
+  an idempotency key and derives Slack's `client_msg_id` from it, so a retry
+  reuses the message identity instead of minting a new one
+  (`slack.go:20-28,126,151,334-338`).
+
+Adjacent risk the proposal did not consider, now documented in the code: the
+pre-egress `conversations.info` freshness check has an accepted TOCTOU window
+(`slack.go:22-26`).
+
 ## Summary
 
 Use `AgentService` for a long-lived Slack agent runtime. The Slack agent should be registered as a `DriverVersion`, then run by an `AgentService` controller as a desired-state service that maintains the Slack connection, receives events, and dispatches durable work.
@@ -184,3 +243,17 @@ E2E test:
 - Slack replies are idempotent through ActionLedger.
 - Duplicate Slack retries and controller restarts do not duplicate work or messages.
 - Direct workflow invocation and GitHub trigger workflows remain independent of this Slack AgentService path.
+
+## Related
+
+- [`2026-06-07-trigger-workflow-proposal.md`](2026-06-07-trigger-workflow-proposal.md)
+  — the sibling ingestion proposal, which *was* built. Step 5 of this doc
+  ("HTTP Events API can later use TriggerBinding/Event/Delivery like the GitHub
+  webhook proposal") is now the cheaper path: adding a `slack` adapter next to
+  `github` would reuse the whole durable dispatch layer and needs no
+  AgentService controller.
+- [`workflow-driver-authoring-guide.md`](workflow-driver-authoring-guide.md) —
+  the `DriverRun` / `TaskRun` lifecycle this proposal builds on, and
+  `loom.connectors.*` as the egress surface
+- [`../loom-glossary.md`](../loom-glossary.md) — connector, driver version,
+  trigger binding

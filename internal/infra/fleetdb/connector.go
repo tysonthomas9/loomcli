@@ -24,6 +24,7 @@
 // ResolveWebhookSecret pattern). Get/List decode fleet-db's already-redacted
 // responses. Plaintext outbound credentials never transit this client:
 // serve's vault layer seals BEFORE Create/RotateSecrets.
+
 package fleetdb
 
 import (

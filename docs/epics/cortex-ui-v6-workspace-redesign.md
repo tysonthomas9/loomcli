@@ -1,7 +1,46 @@
 # Epic: Cortex UI V6 — Workspace-Centric Redesign
 
-**Design Reference**: https://designs.magicpath.ai/v1/swift-year-6949
-**Status**: Draft
+> **Status:** Aspirational — proposed 2026-03-14, **never implemented under
+> these names** as of 2026-07-23. Every component this epic specifies
+> (`WorkspaceSidebar`, `WorkspaceGroup`, `WorkQueue`, `WorkspaceCreateModal`,
+> `DesignSidebar`, `BlockedBySection`, `TaskTerminalTabs`, `TaskTerminalTab`,
+> `hooks/useAgents.ts`) is absent from `internal/webui/frontend/src`.
+> *audited 2026-07-23*
+>
+> Kept because it is the only record of the T1–T8 breakdown and its Open
+> Questions, and because it is the origin of the "cortex" name. The body below
+> is unedited; read it as history, not as a plan.
+>
+> **Glossary safety:** "cortex" is a dead UI codename. Every remaining
+> occurrence under `internal/webui/frontend/src` is a browser storage key —
+> `hooks/ui/useTheme.ts:11` `cortex:theme`,
+> `hooks/ui/useSplitRatio.ts:8` `cortex:detail-panel-split-ratio`,
+> `hooks/terminal/useTerminalFont.ts:12-13` `cortex:terminal-font-{family,size}`,
+> `hooks/issues/useRecentAssignees.ts:8` `cortex:recent-assignees`,
+> `api/common/config.ts:28` `cortex:config:backend`, and
+> `utils/migrateLocalStorage.ts:7` `cortex-version`. It names
+> no package, route, or component. Do not use it in new prose.
+>
+> **What happened instead:**
+>
+> | Epic ticket | What actually shipped |
+> |---|---|
+> | T1 hierarchical workspace sidebar | `components/WorkspaceTree/` — `WorkspaceTree.tsx` plus `ReposSection`, `RunningSection`, `AgentSection`, `QueueStatsBar`, `TerminalSection`, `OtherWorkspacesSection`, `CollapsedAgentRail`, `CollapsedRepoRail`. A different design; the one mapped by [../design/aether-wireframe-mapping.md](../design/aether-wireframe-mapping.md). |
+> | T2 workspace-creation modal | `components/CreateWorkspaceModal/` → `POST /api/workspaces` (`internal/webui/app/routes.go:147` → `handlermux.HandleWorkspaceCreate`, body `internal/webui/service/workspace_types.go:9-10`). It **registers a fleet-db workspace**; it does not shell out to `git worktree add`. `internal/webui/handlers_workspace.go` does not exist. |
+> | T3 / T5 two-column task detail + terminal tabs | Shipped as `components/IssueDetailPanel/sections/DesignPanel.tsx`, `BlockingBanner` + `sections/DependencySection.tsx`, and the generic TabBar + `components/EmbeddedTerminal/` — see [../arch/issue-detail-view.md](../arch/issue-detail-view.md) §2–§5. |
+> | T6 dark mode | `hooks/ui/useTheme.ts` + `components/ThemeToggle/`. |
+> | T7 agent role labels | fleet-db `role.kind`, not a config file. `.loom.yaml` returns zero hits under `internal/`. See [../loom-glossary.md](../loom-glossary.md) "Role Kind". |
+>
+> Newer design assets exist that this epic predates and does not reference:
+> `docs/design/cortex-v7/*.png` (2026-07-07). They have an asset index
+> ([../design/cortex-v7/README.md](../design/cortex-v7/README.md)) but no
+> design document — nobody recorded which parts were accepted.
+
+**Design Reference**: https://designs.magicpath.ai/v1/swift-year-6949 —
+external, third-party, unarchived and unverifiable. The in-repo design assets
+the shipped UI actually followed are `docs/design/cortex-v7/*.png` and
+[../design/aether-wireframe-mapping.md](../design/aether-wireframe-mapping.md).
+**Status**: Draft (never advanced past Draft)
 **Date**: 2026-03-14
 
 ---
@@ -483,3 +522,16 @@ Acceptance criteria:
 2. Should this epic absorb existing `3wsub` workspace tickets or be parallel?
 3. Are the agent backend options (Claude, Codex, Gemini, Cursor, Browser) fixed or configurable?
 4. Should the "Review Changes" button in terminal header trigger a PR flow?
+
+---
+
+## Related
+
+- [../design/aether-wireframe-mapping.md](../design/aether-wireframe-mapping.md)
+  — the wireframe delta table the shipped sidebar/board were actually built
+  against.
+- [../arch/issue-detail-view.md](../arch/issue-detail-view.md) — what T3/T5
+  became.
+- [../arch/terminal-system.md](../arch/terminal-system.md) — the terminal model
+  T5 assumed (since replaced by PTY sessions).
+- [../loom-glossary.md](../loom-glossary.md) — "cortex" is not a Loom concept.

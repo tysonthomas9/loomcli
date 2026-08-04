@@ -1,3 +1,8 @@
+// Package observability serves the /api/observability metrics and events
+// endpoints of `loom serve`. It replays the JSONL event log written by
+// internal/events into a metrics snapshot (TTL-cached, singleflighted) and
+// returns filtered, paginated raw events for the web UI. Wired by
+// internal/cli/serve.
 package observability
 
 import (

@@ -1,7 +1,29 @@
 # Long-running Orchestrators and Ephemeral Workers — PRD
 
-**Status:** Draft
-**Date:** 2026-05-07
+> **Status:** Partially implemented — phase 1 shipped, phases 2–4 never built,
+> phase 5 overtaken. *audited 2026-07-23*
+>
+> - **Phase 1 shipped**, minus `Agent.OrchestratorSessionID`, which was added
+>   and then deliberately removed (tombstone at
+>   `internal/domain/agent.go:53-55`).
+> - **Phases 2–4 were never built.** There is no `/orchestrators` API, no
+>   `OrchestratorsPanel`, no `/swarm` route, no `SwarmPage`, no spawn-worker
+>   modal. `grep -ri orchestrators internal/` returns no route or handler.
+>   Read the Wireframes and phase 2–4 sections as a proposal, never as a
+>   description of the UI.
+> - **Phase 5 was overtaken.** The generic runner shipped as `DriverRun`
+>   (`internal/domain/platform.go:396`) + `TaskRun` (`:498`) + Flue workflows,
+>   with the epic-dag policy realised as
+>   `internal/workflows/builtin/epic-runner.ts` — not as
+>   `Run`/`RunTask`/`WorkflowStep`/`ActionLedger`, none of which exist. See
+>   [docs/design/epic-runner-workflow-architecture.md](../design/epic-runner-workflow-architecture.md).
+> - **Still canonical:** the Glossary and Conceptual model sections are the
+>   clearest statement of the interactive/worker (role `kind`) vs
+>   ephemeral/service (`AgentMode`) two-axis split, and they agree with
+>   [docs/loom-glossary.md](../loom-glossary.md).
+
+**Originally written:** 2026-05-07
+**Last updated:** 2026-07-23
 **Owner:** Tyson
 **Related:**
 - `docs/product/agent-execution-prd.md`
@@ -9,6 +31,7 @@
 - `docs/product/agent-run-ux-spec.md`
 - `docs/product/daemon-agent-runtime-architecture.md`
 - `docs/design/distributed-control-plane.md`
+- `docs/design/epic-runner-workflow-architecture.md`
 - Aether Orchestrator Wireframes (external design ref)
 
 ---
@@ -32,8 +55,11 @@ This PRD proposes a small, additive split:
 - **Linkage** — every worker carries an `OrchestratorSessionID` pointing
   back to the lead session that spawned it, so the UI can group
   "this orchestrator and its workers" without inventing new identity.
+  *As built the linkage exists but is not a field on `Agent`; see
+  Data model additions → Domain.*
 
-The user-visible result is two new things:
+The user-visible result is two new things — **neither of which was built**
+(see the Wireframes banner):
 
 1. A **Monitor → Orchestrators** panel that shows each active lead
    session, its sprint context, and the workers it currently coordinates.
@@ -124,12 +150,12 @@ nothing currently *uses* these fields. This PRD makes them load-bearing.
 
 | Term | Definition |
 |---|---|
-| **Orchestrator** | Any role with `kind=interactive` runs as an interactive terminal/orchestrator agent, persisted as `AgentSession{Kind: orchestration}`. The built-in `lead` is the default; custom ones can cover jobs like PR review. This interactive/worker split is by role `kind` and complements the ephemeral/service `AgentMode` axis. |
-| **Worker** | A `domain.Agent` with `Mode = ephemeral`. Spawned to handle a specific task and exits when that task completes. |
-| **Lead session** | The tmux + AI process that backs an orchestrator. Already exists; this PRD just gives it an identity. |
+| **Orchestrator** | *Category sense.* Any role with `kind=interactive` runs as an interactive terminal/orchestrator agent, persisted as `AgentSession{Kind: orchestration}`. The built-in `lead` is the default; custom ones can cover jobs like PR review. This interactive/worker split is by role `kind` and complements the ephemeral/service `AgentMode` axis. **This category is not a capability grant:** only the two literal role names `lead` and `orchestrator` gain epic ownership (`epicrunner.IsLeadRole`, `internal/epicrunner/start.go:71-79`). See the **Orchestrator** entry in [docs/loom-glossary.md](../loom-glossary.md) for both senses. |
+| **Worker** | *Agent-mode sense only, throughout this PRD.* A `domain.Agent` with `Mode = ephemeral` (`internal/domain/control_plane.go:8`). Spawned to handle a specific task and exits when that task completes. This is **not** the role-kind sense (`role.kind=worker`, `internal/domain/role.go:12`), nor the `loom worker` process; the two axes are orthogonal. See the **Worker** entry in [docs/loom-glossary.md](../loom-glossary.md). |
+| **Lead session** | The terminal + AI process that backs an orchestrator. Already exists; this PRD just gives it an identity. (This is the "lead session" sense in the glossary's five senses of *session*.) |
 | **Service agent** | A `domain.Agent` with `Mode = service` (or no mode). Today's default behavior: loops forever. Unchanged by this PRD. |
-| **Sprint context** | A short user-supplied string ("Harden auth + ship API spec") attached to an orchestrator session for display. |
-| **Spawned-by** | The `OrchestratorSessionID` field on a `domain.Agent`. Empty for unattached agents. |
+| **Sprint context** | A short user-supplied string ("Harden auth + ship API spec") attached to an orchestrator session for display. **NEVER BUILT** — `createLeadSession` writes `Metadata{"actor", "lead_workdir"}` only (`internal/cli/agent/lead/lead.go:344-347`); no `sprint` key is ever written or read. |
+| **Spawned-by** | Proposed as an `OrchestratorSessionID` field on `domain.Agent`. **The field was added and then removed** — tombstone at `internal/domain/agent.go:53-55`. Attribution now flows through the `LOOM_ORCHESTRATOR_SESSION_ID` env var and the `AgentCommand` payload; see *Data model additions → Domain*. |
 
 ---
 
@@ -161,9 +187,18 @@ nothing currently *uses* these fields. This PRD makes them load-bearing.
             (no restart)            for triage             (no restart)
 ```
 
+Two details of the diagram differ from what shipped. The orchestration
+session's metadata is `{actor, lead_workdir}`
+(`internal/cli/agent/lead/lead.go:344-347`) — `terminal_id` is a first-class
+`AgentSession` field rather than a metadata key, and `sprint` was never built.
+The `OrchestratorSessionID` edge is real but is not a column on `Agent`: it is
+carried by the `LOOM_ORCHESTRATOR_SESSION_ID` env var and the `AgentCommand`
+payload (see *Data model additions → Domain*).
+
 A worker that completes its task **does not restart**. The supervisor
-sees `Mode = ephemeral`, a clean exit, and a successful task claim, and
-returns `false` from `shouldRestart`. The agent record stays in fleet-db
+sees `Mode = ephemeral`, a clean exit, and a claimed task, and stops the
+supervisor loop (`stopAfterEphemeralTask`,
+`internal/cli/daemon/supervisor/restart.go:98-108`). The agent record stays in fleet-db
 in `state = stopped` for audit (and so the orchestrator panel can show
 "completed: 2" for a few minutes before fading).
 
@@ -186,6 +221,16 @@ restart-loop behavior. This PRD adds nothing to its lifecycle.
 5. The lead AI runs `loom agentdef add bolt-auth-3 --role task --mode ephemeral --auto`.
 6. `runAgentAdd` reads `LOOM_ORCHESTRATOR_SESSION_ID` from env and
    stamps it onto the new agent record.
+   *As built:* `runAgentAdd` does read the env var, with `--orchestrator`
+   overriding it (`internal/cli/agentdef/agentdef_cmd.go:115,130-132`), but it
+   is **not** stamped on the agent record — `agentCreateFromFlags`
+   (`:152-173`) has no such field. It goes into the queued start command's
+   payload as `parent_session_id` (`enqueueAgentAddTaskStart`, `:175-181`) —
+   but **only when `--task` is also passed**: `enqueueAgentAddTaskStart`
+   returns immediately when `agentAddTask == ""` (`:176-178`). The step-5
+   command above has no `--task`, so for that exact invocation the
+   orchestrator id is read and then dropped; the spawned agent carries no
+   attribution at all.
 7. Within 30s the daemon reconciler picks up bolt-auth-3 and starts
    supervising it. Bolt-auth-3 claims auth-3, writes a session, and
    begins working.
@@ -218,8 +263,12 @@ restart-loop behavior. This PRD adds nothing to its lifecycle.
 ### F4 — Worker completes cleanly
 
 1. v4-api-2 finishes work, commits, pushes, and exits zero.
-2. The supervisor checks `Mode == ephemeral` + `LastExitOK` +
-   `LastClaimedTask` → returns `false` from `shouldRestart`.
+2. The supervisor checks `Mode == ephemeral` + clean exit + a claimed
+   task and stops the supervisor loop. *As built:* `stopAfterEphemeralTask`
+   gates on `ap.Entry.Mode == AgentModeEphemeral && ap.LastExitCode == 0 &&
+   ap.LastError == nil && ap.AssignedTaskID != ""`
+   (`internal/cli/daemon/supervisor/restart.go:98-108`). The proposed
+   `LastExitOK` / `LastClaimedTask` fields were never added.
 3. The supervisor sets `agent.DesiredState = stopped` and removes
    the agent from supervision.
 4. The worker card transitions to green border, `100%`, action button
@@ -239,6 +288,18 @@ restart-loop behavior. This PRD adds nothing to its lifecycle.
 ---
 
 ## Wireframes
+
+> **NOT BUILT — read W1–W6 as a proposal, not as a description of the UI.**
+> None of these surfaces exist. There is no `OrchestratorsPanel`, no
+> `SwarmPage`, no `/swarm` route
+> (`internal/webui/frontend/src/router.tsx:87-166` registers kanban, list,
+> table, graph, monitor, observability, terminal, agents, prs, settings,
+> workspace, files, `issues/:issueId`, `agents/:agentName` and nothing else),
+> no spawn-worker modal, and no conditional Swarm icon in the NavRail. The
+> word "orchestrators" appears nowhere as a route or handler under
+> `internal/`. The nearest shipped surface is the lead-scoped `<WorkerHistory>`
+> block inside `AgentWorkPanel`
+> (`internal/webui/frontend/src/components/AgentWorkPanel/AgentWorkPanel.tsx:573`).
 
 ### W1 — Monitor view with new Orchestrators panel
 
@@ -465,6 +526,9 @@ turned on see the existing nav unchanged.
 
 ## Information architecture
 
+> **NOT BUILT.** Every surface in this table except *Agent detail panel* is
+> part of the unbuilt phase 3–4 UI (see the Wireframes banner).
+
 | Surface | Audience | Density | Refresh |
 |---|---|---|---|
 | **Monitor → Orchestrators panel** | "I sometimes drive workers" | Low — one card per orch + collapsed worker grid | 5 s polling (existing) |
@@ -479,6 +543,18 @@ both feel more enterprise; Swarm is concrete. Locking on Swarm.
 ---
 
 ## Future foundation — policy and workflow runtime
+
+> **Overtaken, not abandoned.** The problem this section frames — a generic
+> policy/workflow runner over the same primitives — was solved, but with a
+> different vocabulary. `DriverRun` (`internal/domain/platform.go:396`) is the
+> run; `TaskRun` (`:498`) is the per-task attempt; the workflow itself is a
+> Flue TypeScript program, and the `epic-dag` policy below is
+> `internal/workflows/builtin/epic-runner.ts`. None of `Run`, `RunTask`,
+> `WorkflowStep`, `ActionLedger`, `WorkArtifact`, `RepoRequirement`,
+> `TaskAttemptPlacement` or `WorkerRuntime` exists in `internal/`. The
+> separation-of-concerns argument below (task selection vs delivery workflow)
+> is the part that survived and is worth reading. See
+> [docs/design/epic-runner-workflow-architecture.md](../design/epic-runner-workflow-architecture.md).
 
 The MVP above is intentionally human-driven: a lead session talks to the
 user and spawns one-shot workers. The same primitives should also support
@@ -1261,6 +1337,15 @@ loom run start \
   --max-concurrency 2
 ```
 
+There is no `loom run` command. The shipped equivalent is:
+
+```bash
+loom epic run --parent auth-epic --workflow epic-runner --max-concurrency 2
+```
+
+`internal/cli/epic/run.go:74,76,81` — the `--policy` axis collapsed into
+`--workflow`, because the policy *is* the workflow.
+
 Acceptance scenario:
 
 ```text
@@ -1286,6 +1371,22 @@ in the first increment.
 
 ### Domain (`internal/domain/agent.go`)
 
+> **Proposed, built, then reversed.** The field below was added and later
+> removed. Tombstone at `internal/domain/agent.go:53-55`: "OrchestratorSessionID
+> was here historically as a cache of the lead-to-orchestration AgentSession
+> join. AgentSession is the single source of truth; use
+> `store.OrchestrationSessionIDFor`" (`internal/store/orchestration.go:57`).
+>
+> Attribution instead flows two ways, neither of them a column on `Agent`:
+> the `LOOM_ORCHESTRATOR_SESSION_ID` env var, injected by `loom lead`
+> (`internal/cli/agent/lead/lead.go:364`), by the web terminal
+> (`internal/webui/handlers/terminal/agent_session.go:441`) and by the
+> supervisor (`internal/cli/daemon/supervisor/spawn.go:193`); and the
+> `AgentCommand` payload key `parent_session_id`
+> (`internal/cli/agentdef/agentdef_cmd.go:175-181`). For epic-runner child
+> work it rides as `parentSessionId` on the task-run request
+> (`internal/workflows/builtin/epic-runner.ts:87,281`).
+
 Add one field to `Agent`:
 
 ```go
@@ -1296,6 +1397,12 @@ No other domain changes. `Mode` already exists. `AgentSessionKindOrchestration`
 already exists.
 
 ### Store (`internal/store/store.go` + drivers)
+
+> **NOT BUILT.** There is no `Agents().ListByOrchestrator`. With the
+> `OrchestratorSessionID` column gone there is nothing to filter on; the join
+> goes the other way, from a lead to its session, via
+> `store.OrchestrationSessionIDFor` (`internal/store/orchestration.go:57`).
+> The `AgentSessions().List` reuse below is real.
 
 Extend `AgentCreate` and `AgentUpdate` with the new field. Two new
 filter methods:
@@ -1311,6 +1418,11 @@ filter methods:
 explicit flag `--orchestrator <session-id>` is also accepted (overrides
 env). Empty → unattached agent (today's behavior).
 
+**Shipped**, with one difference: the resolved id is not written to the agent
+record — it is put on the queued `start` command's payload as
+`parent_session_id` (`internal/cli/agentdef/agentdef_cmd.go:115,130-132,175-181`),
+and only when `--task` pins a first cycle.
+
 ### Lead
 
 `loom lead` on startup:
@@ -1325,7 +1437,30 @@ env). Empty → unattached agent (today's behavior).
 5. On exit (signal / error / clean): `Update(Status: completed,
    FinishedAt: now)`.
 
+**Shipped**, except the metadata. `createLeadSession`
+(`internal/cli/agent/lead/lead.go:334-352`) writes
+`Metadata = {"actor": <$USER>, "lead_workdir": <dir>}` and passes the terminal
+id as the first-class `TerminalID` field; there is no `sprint` or
+`tmux_session` key. Registration is `registerLeadOrchestratorSession`
+(`:291`), env injection `:364`, heartbeat `leadHeartbeatInterval = 30 *
+time.Second` (`:41`, ticker at `:415`), finalizer `:377`.
+
 ### Supervisor
+
+> **Shipped with different field names.** `AgentProcess` never gained
+> `LastExitOK` or `LastClaimedTask`. The real branch is `stopAfterEphemeralTask`
+> (`internal/cli/daemon/supervisor/restart.go:97-108`):
+>
+> ```go
+> if ap.Entry.Mode != domain.AgentModeEphemeral || ap.LastExitCode != 0 ||
+>    ap.LastError != nil || ap.AssignedTaskID == "" {
+>     return false
+> }
+> ```
+>
+> `AssignedTaskID` is `internal/cli/daemon/supervisor/types.go:41`;
+> `StopReasonEphemeralDone` is `types.go:86`; the desired-state stop is in
+> `control_plane.go:123`.
 
 `internal/cli/daemon/supervisor/restart.go::shouldRestart` gets one
 new branch:
@@ -1350,6 +1485,9 @@ Set after each subprocess exit cycle.
 
 ### Webui handlers
 
+> **NOT BUILT.** None of the three routes below exist; there is no
+> `/orchestrators` handler anywhere under `internal/`.
+
 Two new endpoints, both workspace-scoped:
 
 | Method | Path | Returns |
@@ -1369,6 +1507,9 @@ Two new endpoints, both workspace-scoped:
 ```
 
 ### Frontend types
+
+> **NOT BUILT.** `src/api/agents/agents.ts` has no `Orchestrator` type and no
+> `fetchOrchestrators` / `spawnWorker` / `fetchOrchestratorTimeline`.
 
 `src/api/agents/agents.ts`:
 
@@ -1503,28 +1644,33 @@ border-style and a small badge.
 
 ## Phasing
 
-### Phase 1 — Backend semantics (1–2 days)
+### Phase 1 — Backend semantics (1–2 days) — SHIPPED
 
 - `Agent.OrchestratorSessionID` field + store update
+  — *shipped then reverted; see Data model additions → Domain*
 - Supervisor ephemeral-exit branch + `StopReasonEphemeralDone`
+  — *shipped, `restart.go:97-108`, `types.go:86`*
 - `loom lead` registers/finalizes `AgentSession{Kind: orchestration}`
+  — *shipped, `internal/cli/agent/lead/lead.go:291-392`*
 - `loom agentdef add` reads env var, stamps field
+  — *env read shipped; the id goes onto the start command payload, not the
+  agent record (`agentdef_cmd.go:175-181`)*
 - Unit tests for ephemeral exit, lead session lifecycle
 
-### Phase 2 — API + status JSON (~1 day)
+### Phase 2 — API + status JSON (~1 day) — NOT BUILT
 
 - Extend `LoomAgentStatus` with `mode`, `orchestrator_session_id`
 - New endpoints: GET `/orchestrators`, POST `/orchestrators/{id}/workers`,
   GET `/orchestrators/{id}/timeline`
 - Heartbeat-staleness logic for stale orchestrators
 
-### Phase 3 — Monitor panel + AgentCard variant (~1 day)
+### Phase 3 — Monitor panel + AgentCard variant (~1 day) — NOT BUILT
 
 - `OrchestratorsPanel` component
 - AgentCard ephemeral variant (dashed border + `[E]` badge)
 - AgentDetailPanel "Spawned by" lineage line
 
-### Phase 4 — Swarm view + spawn dialog (~2 days)
+### Phase 4 — Swarm view + spawn dialog (~2 days) — NOT BUILT
 
 - `/swarm` route + `SwarmPage`
 - Embedded TerminalView attached to lead session
@@ -1533,7 +1679,16 @@ border-style and a small badge.
 - Spawn worker modal + form
 - NavRail conditional Swarm icon
 
-### Phase 5 — Generic runner vertical slice (future)
+### Phase 5 — Generic runner vertical slice (future) — OVERTAKEN
+
+Shipped, under other names. `Run`/`RunTask` became `DriverRun`
+(`internal/domain/platform.go:396`) and `TaskRun` (`:498`); the `epic-dag`
+policy became the `epic-runner` Flue workflow
+(`internal/workflows/builtin/epic-runner.ts`); exact-task dispatch with
+idempotency became deterministic task-run ids (`epic-runner.ts:626-628`) plus
+conflict-tolerant enqueue (`:296-302`). `WorkflowStep` and `ActionLedger` were
+never built as types. Details:
+[docs/design/epic-runner-workflow-architecture.md](../design/epic-runner-workflow-architecture.md).
 
 - `Run`, `RunTask`, `WorkflowStep`, and `ActionLedger` persistence
 - `epic-dag` policy backed by `Ready(parent)` / `Blocked(parent)`
@@ -1589,7 +1744,7 @@ finally mean something) even without the UI.
 
 | Primitive | Path | What we reuse |
 |---|---|---|
-| `loom lead` | `internal/cli/agent/lead.go` | The orchestrator chat itself |
+| `loom lead` | `internal/cli/agent/lead/` | The orchestrator chat itself |
 | `loom agentdef add/rm` | `internal/cli/agentdef/agentdef_cmd.go` | Spawn/despawn primitive — already supports `--mode ephemeral`, `--parent` |
 | Daemon reconciler | `internal/cli/daemon/daemon_reconciler.go` | Picks up new agentdefs in 30 s — works as-is |
 | Per-agent supervisor goroutine | `internal/cli/daemon/supervisor/supervisor.go` | One restart-loop branch added; rest unchanged |
@@ -1598,8 +1753,8 @@ finally mean something) even without the UI.
 | `AgentCard` | `internal/webui/frontend/src/components/AgentCard/` | Worker card; small CSS variant for ephemeral |
 | `AgentDetailPanel` | `internal/webui/frontend/src/components/AgentDetailPanel/` | Worker drill-in; one new info line |
 | `MonitorDashboard` | `internal/webui/frontend/src/components/MonitorDashboard/` | New `OrchestratorsPanel` slot at top |
-| `TerminalView` | `internal/webui/frontend/src/components/Terminal/` | Embedded in Swarm view's left pane |
-| `TaskTimeline` | `internal/webui/frontend/src/components/Observability/TaskTimeline.tsx` | Retargeted to per-worker for swarm timeline |
+| `TerminalView` | `internal/webui/frontend/src/components/TerminalView/` | Embedded in Swarm view's left pane (`components/EmbeddedTerminal/` for embedded use) |
+| `TaskTimeline` | `internal/webui/frontend/src/components/ObservabilityDashboard/TaskTimeline.tsx` | Retargeted to per-worker for swarm timeline. As built it renders 24h completion buckets (`HourlyBucket[]`), not per-worker rows, so "retargeted" means rewritten. |
 | Status dot tokens | `--color-status-*` CSS vars | Worker status colors |
 | `IssueBackend.Ready/Blocked` | `internal/backend/issuebackend.go` | Future DAG runner frontier/stuck-set queries |
 | `IssueBackend.Close` | `internal/backend/issuebackend.go` | Future workflow unblock signal after delivery succeeds |
@@ -1612,3 +1767,22 @@ finally mean something) even without the UI.
 The new code is small relative to the codebase. The big win is making
 fields that already exist on the schema actually mean something to
 users and operators.
+
+---
+
+## Related
+
+- [docs/loom-glossary.md](../loom-glossary.md) — canonical dictionary. This
+  doc's Glossary table is the longer prose form of the *orchestrator* /
+  *worker* / *ephemeral* / *service* entries; the glossary wins on conflict.
+- [docs/product/lead-agent-epic-runner-spec.md](lead-agent-epic-runner-spec.md)
+  — canonical for the lead↔epic product rules (one epic per lead, conflict
+  outcomes, `agent.parent` as the lock).
+- [docs/design/epic-runner-workflow-architecture.md](../design/epic-runner-workflow-architecture.md)
+  — the generic runner that phase 5 became.
+- [docs/design/lead-runtime-delivery.md](../design/lead-runtime-delivery.md) —
+  how work reaches a live orchestrator's conversation.
+- [docs/design/epic-runner-lead-control.md](../design/epic-runner-lead-control.md)
+  — historical design + validation record for the deleted Go epic runner.
+- [docs/design/distributed-control-plane.md](../design/distributed-control-plane.md)
+  — the *worker-as-process* sense of "worker".

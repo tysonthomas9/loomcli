@@ -1,5 +1,100 @@
 # Trigger-Driven Driver Workflows Proposal
 
+> **Status:** Implemented — historical. *Audited 2026-07-24.*
+
+Read this for the **design rationale** — why the trigger layer persists before
+dispatch and never executes TypeScript inside the webhook handler. Do not read
+it as a work plan: the "Missing" and "Deferred" lists are both out of date.
+
+The webhook handler still holds the line this doc drew. `dispatchWebhook`'s own
+comment says it "only persists + enqueues — it never executes work inline"
+(`internal/webui/handlers/webhooks/module.go:120-123`).
+
+## As built (2026-07-24)
+
+Five of the seven items under "Missing" below have shipped. The two that have
+not are called out after the list.
+
+- **Webhook adapter route.** `POST /api/workspaces/{ws}/webhooks/{name}`
+  (`internal/webui/handlers/webhooks/module.go:45`) — generic over adapters,
+  with `github` registered as one
+  (`internal/webui/handlers/webhooks/github.go:20`). The doc's literal
+  `/webhooks/github` is that route with `name=github`.
+- **Signature verification.** `X-GitHub-Event` / `X-GitHub-Delivery` /
+  `X-Hub-Signature-256` constants at
+  `internal/webui/handlers/webhooks/github.go:23-25`; HMAC-SHA256 verify at
+  `github.go:171-193` (same file). Ordering matches the proposal: normalize → require a
+  delivery id → resolve the enabled binding → verify → dispatch
+  (`module.go:71-89`). A missing delivery id is a `400` before persistence
+  (`module.go:79-82`), and a disabled binding is rejected without dispatch
+  (`module.go:109-112`).
+- **Dedupe keyed by delivery id.** The idempotency key is
+  `name + ":" + event.DeliveryID` — i.e. `github:{delivery_id}` exactly as
+  proposed (`module.go:131`).
+- **Route-key mapping.** `githubRouteKey(event, action)`
+  (`internal/webui/handlers/webhooks/github.go`), plus
+  glob `event_type_patterns` on the binding
+  (`internal/domain/platform.go:225`, `internal/trigger/pattern.go`).
+- **Read API for events and deliveries.** `GET /api/workspaces/{ws}/trigger-events`,
+  `.../trigger-events/{eventId}`, `.../trigger-deliveries`,
+  `.../trigger-deliveries/{deliveryId}` (`module.go:46-49`). Read-only, and
+  scoped to events/deliveries — not bindings; see the two gaps below.
+- **Dispatch client.** `DispatchTriggerRouteV2`
+  (`internal/infra/fleetdb/trigger_route.go:40`) posts
+  `POST /api/v1/{ws}/trigger-routes/{route_key}` and decodes a fan-out
+  `{"deliveries":[...]}` response.
+- **E2E.** `TestE2E_GitHubWebhookDispatchesDriverRunWithEphemeralStack` and
+  `TestE2E_GitHubWebhookRunsDriverAgainstLiveGitHubPR`
+  (`internal/webui/handlers/webhooks/webhooks_e2e_test.go:33,55`). The PR-review workflow is
+  `internal/workflows/builtin/github-review-agent.ts`.
+
+Two "Missing" items did **not** ship as written:
+
+- **"UI/API for managing trigger bindings."** No REST route and no web UI
+  manages bindings — the only binding-management surface is the CLI,
+  `loom trigger bindings create|update|list|show`
+  (`internal/cli/trigger/trigger_cmd.go:33,60,67,74,81`), which writes through
+  the store directly. "UI for editing trigger bindings" is also still on the
+  Deferred list, consistently.
+- **"Replay and redelivery tooling for persisted TriggerEvents."** See the
+  UNVERIFIED note below; no replay CLI or API surface was located.
+
+Two items the doc lists under **Deferred** shipped, plus one restriction from
+the Binding-shape section that was dropped rather than kept:
+
+- **Fan-out beyond one delivery per binding.** `DispatchTriggerRouteV2` returns
+  a delivery list; coverage is `TestRouterE2EWebhookFanOutTraceAndOrigin`
+  (`internal/webui/handlers/webhooks/webhooks_router_e2e_test.go:201`).
+- **Schedule runner.** `internal/trigger/cron.go` fires synthetic `cron.tick`
+  events for `source_kind=cron` bindings into the same dispatch path;
+  `TriggerBinding.Schedule` is a 5-field cron expression
+  (`internal/domain/platform.go:250-253`). Coverage:
+  `TestRouterE2ECronTickDispatchAndReplicaDedup`
+  (`internal/webui/handlers/webhooks/webhooks_router_e2e_test.go:504`).
+- **`concurrency_policy`.** Five policies exist — `allow`, `forbid`, `replace`,
+  `queue`, `one_active_per_epic` (`internal/domain/platform.go:204-211`), with
+  a `SubjectKeyTemplate` for the concurrency subject key
+  (`platform.go:237-241`). Note this is **broader** than the "one active run per
+  idempotency key for GitHub v1" the Binding-shape section proposes; that
+  restriction was not kept. Coverage: `TestRouterE2EReplaceSupersedeStorm` and
+  `TestRouterE2EForbidRejectsAndQueuePromotesViaSweeper`
+  (`internal/webui/handlers/webhooks/webhooks_router_e2e_test.go:347,420`).
+
+Later additions this doc does not anticipate: per-source connector secrets with
+a dual-secret rotation window replaced the per-binding
+`webhook_secret` as the primary signature source
+(`module.go:96-102`, `internal/webui/handlers/webhooks/secret_resolve.go`);
+delivery retry with a sweeper (`RetryMaxAttempts` / `RetryBackoffSeconds`,
+`platform.go:245-249`, `internal/trigger/delivery_sweeper.go`); an internal
+event source and issue-journal bridge (`internal/trigger/internal_source.go`,
+`internal/trigger/issue_journal_bridge.go`); and await dispatch
+(`internal/trigger/await_matcher.go`).
+
+**Not verified in this audit:** the replay path. `ReplayOfEventID` is carried on
+the dispatch wire (`internal/infra/fleetdb/trigger_route.go:52`), but whether a
+replay CLI/API exists and preserves the audit distinction the plan requires was
+not established.
+
 ## Summary
 
 Use `TriggerBinding`, `TriggerEvent`, and `TriggerDelivery` as the durable event-ingestion layer for GitHub webhooks and similar external invocation surfaces. The trigger layer should not execute TypeScript directly. It should verify and persist the incoming event, resolve one or more pinned driver versions, create auditable delivery records, and enqueue `DriverRun` records that the existing Loom driver executor can claim and run.
@@ -157,3 +252,14 @@ E2E test:
 - Duplicate GitHub deliveries do not create duplicate effects.
 - The resulting run is inspectable with existing run GET/events/stream endpoints.
 - The first implementation does not require TriggerBinding/Event/Delivery for direct `POST /workflows/{name}` calls.
+
+## Related
+
+- [`../loom-glossary.md`](../loom-glossary.md) — trigger binding, connector,
+  await, driver run
+- [`workflow-driver-authoring-guide.md`](workflow-driver-authoring-guide.md) —
+  what the enqueued `DriverRun` executes
+- [`2026-06-07-slack-agent-service-proposal.md`](2026-06-07-slack-agent-service-proposal.md)
+  — the sibling Slack ingestion proposal, which went a different way
+- [`2026-06-18-stack-aware-pr-publisher.md`](2026-06-18-stack-aware-pr-publisher.md)
+  — the PR side of the GitHub loop

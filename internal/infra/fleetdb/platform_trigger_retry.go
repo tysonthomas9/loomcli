@@ -11,6 +11,7 @@
 // platform.go. The terminal-failure rule (failed at the binding's retry
 // budget forces error_class retries_exhausted) is enforced server-side; the
 // client only reports outcomes.
+
 package fleetdb
 
 import (

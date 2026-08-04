@@ -1,24 +1,16 @@
 # Frontend Tests
 
-Complete breakdown of all frontend test files (Vitest unit tests + Playwright E2E tests).
+> **Status:** Current · *audited 2026-08-03*
+
+Where the frontend tests live, how they are wired, and which entry points to
+read first. **This page deliberately does not enumerate individual test files.**
+It used to, and the inventory rotted: `src/` was reorganised into domain
+subdirectories and roughly 20 of 24 spot-checked paths in the old listing no
+longer existed. There are 369 Vitest files and 117 Playwright specs; a
+hand-maintained list of them cannot stay true. Run the `find` commands below
+instead.
 
 **Location**: `internal/webui/frontend/`
-
----
-
-## Table of Contents
-
-1. [Testing Framework](#testing-framework)
-2. [Unit Tests (Vitest)](#unit-tests-vitest)
-   - [API Layer](#api-layer-tests)
-   - [Custom Hooks](#custom-hook-tests)
-   - [Components](#component-tests)
-   - [Utilities & Types](#utility--type-tests)
-3. [E2E Tests (Playwright)](#e2e-tests-playwright)
-   - [Browser E2E](#browser-e2e-tests)
-   - [API E2E](#api-e2e-tests)
-   - [Integration Tests](#integration-tests)
-4. [Test Infrastructure](#test-infrastructure)
 
 ---
 
@@ -26,22 +18,40 @@ Complete breakdown of all frontend test files (Vitest unit tests + Playwright E2
 
 | Tool                  | Purpose                       | Version      |
 | --------------------- | ----------------------------- | ------------ |
-| Vitest                | Unit/integration test runner  | v4.0.18      |
-| React Testing Library | Component rendering/querying  | v16.3.2      |
-| Playwright            | Browser E2E automation        | v1.58.0      |
-| jsdom                 | DOM simulation for unit tests | (via Vitest) |
+| Vitest                | Unit/integration test runner  | ^4.0.18      |
+| React Testing Library | Component rendering/querying  | ^16.3.2      |
+| Playwright            | Browser E2E automation        | ^1.58.0      |
+| jsdom                 | DOM simulation, opted into per file | (via Vitest) |
 
 ### Configuration Files
 
-- **Vitest**: `vite.config.ts` (lines 60-64) - test environment, globals
-- **Playwright**: `playwright.config.ts` - projects, base URLs, CI settings
+- **Vitest**: `vite.config.ts:219-241` — `globals: true`,
+  `environment: "node"`, `pool: "forks"`,
+  `exclude: ["tests/e2e/**", "node_modules/**"]`, and a v8 coverage block with
+  all four thresholds at **60**.
+- **Playwright**: `playwright.config.ts` — projects, base URLs, webServer, CI settings.
+
+**The default Vitest environment is `node`, not jsdom.** Every test that needs a
+DOM opts in with a per-file docblock:
+
+```ts
+/**
+ * @vitest-environment jsdom
+ */
+```
+
+317 of the 369 unit test files carry that docblock. A component test failing on
+`document is not defined` is missing it.
 
 ### Test Commands
+
+From `package.json`, verbatim (test-related scripts only):
 
 ```json
 {
   "test": "vitest run && playwright test",
   "test:unit": "vitest run",
+  "test:coverage": "vitest run --coverage",
   "test:watch": "vitest",
   "test:e2e": "playwright test",
   "test:e2e:ui": "playwright test --ui",
@@ -50,642 +60,223 @@ Complete breakdown of all frontend test files (Vitest unit tests + Playwright E2
   "test:visual": "playwright test visual-regression",
   "test:visual:update": "playwright test visual-regression --update-snapshots",
   "test:e2e:integration": "RUN_INTEGRATION_TESTS=1 playwright test --project=integration",
-  "test:e2e:api": "RUN_INTEGRATION_TESTS=1 playwright test --project=api",
-  "test:e2e:real-smoke": "RUN_INTEGRATION_TESTS=1 playwright test --project=integration-smoke --project=api-smoke",
-  "test:e2e:real-regression": "RUN_INTEGRATION_TESTS=1 playwright test --project=integration-regression --project=api-regression"
+  "test:e2e:local-integration": "RUN_LOCAL_INTEGRATION_TESTS=1 playwright test --project=local-integration",
+  "test:e2e:api": "RUN_INTEGRATION_TESTS=1 playwright test --project=api"
 }
 ```
 
-The repository-level shortcuts are:
+The real-stack smoke and regression flows are **Makefile-only** — there is no
+`test:e2e:real-smoke` npm script. `make test-e2e-real-smoke` (`Makefile:417`)
+and `make test-e2e-real-regression` (`Makefile:427`) run
+`RUN_INTEGRATION_TESTS=1 npx playwright test` against the `*-smoke` / `*-regression`
+projects from this directory; the `-local` variants (`Makefile:422`, `:432`)
+add `LOOM_LOCAL_SERVER=1`.
 
-```bash
-make test-e2e-real-smoke
-make test-e2e-real-regression
-```
+`test-e2e-real-smoke` is the fast gate for the real fleet-db-backed browser and
+API paths: SSE connection, API-created issue delivery, and the Kanban card
+status move without reload or issue-list refetch. `test-e2e-real-regression`
+carries the slower cases. See
+[Dogfood to Playwright Coverage](dogfood-playwright-coverage.md) for which
+scenarios sit in which suite, and how a spec joins one (by `@smoke` /
+`@regression` tag, not by filename).
 
-`test-e2e-real-smoke` is the fast gate for the real FleetDB-backed browser and API paths. It includes SSE connection, API-created issue delivery, and the Kanban card status move without reload or issue-list refetch. `test-e2e-real-regression` keeps slower live-update cases such as rapid updates, close/removal behavior, non-critical mutation events, and deterministic regressions promoted from `dogfood-output/`. See [Dogfood to Playwright Coverage](dogfood-playwright-coverage.md) for the coverage matrix.
+The frontend half of `make gate` also runs `npm run check:arch`
+(`check:loc` + `check:no-raw-fetch` + `check:no-hardcoded-urls` +
+`check:boundaries`) and `npm run check:generated` — see
+[test-infrastructure.md](test-infrastructure.md).
 
 ---
 
 ## Unit Tests (Vitest)
 
-### API Layer Tests
-
-#### `src/api/__tests__/agents.test.ts`
-
-**Purpose**: Tests the agent API module (fetchAgents, agent status endpoints).
-
-**Why**: Agent data drives the monitoring dashboard.
-
-#### `src/api/__tests__/config.test.ts`
-
-**Purpose**: Tests the configuration API module (daemon config read/write).
-
-**Why**: Config API is used by the settings view.
-
-#### `src/api/issues.test.ts`
-
-**Purpose**: Tests the issues API module (CRUD operations, list filtering, dependency management).
-
-**Why**: Issues API is the core data layer for the entire frontend.
-
-#### `src/api/client.test.ts` (~750 lines)
-
-**Purpose**: Tests the HTTP client that communicates with the Loom API.
-
-| Test Area              | What It Validates                                    |
-| ---------------------- | ---------------------------------------------------- |
-| Basic requests         | GET, POST, PATCH, DELETE with correct headers        |
-| Authentication         | API key attached to requests, auth header format     |
-| Retry logic            | Automatic retry on 5xx errors, exponential backoff   |
-| Timeout handling       | Request timeout enforcement, AbortController cleanup |
-| AbortSignal support    | Request cancellation propagation                     |
-| Error responses        | 4xx/5xx error parsing and throwing                   |
-| Base URL configuration | Correct URL construction                             |
-
-**Why**: Every API call flows through this client. Auth, retry, and timeout bugs affect all API operations.
-
-#### `src/api/sse.test.ts` (~629 lines)
-
-**Purpose**: Tests the SSE client that handles real-time event streams.
-
-| Test Area             | What It Validates                     |
-| --------------------- | ------------------------------------- |
-| EventSource lifecycle | Connection open, close, error states  |
-| Event parsing         | Message format, event type extraction |
-| Reconnection logic    | Auto-reconnect with Last-Event-ID     |
-| Event ID tracking     | Tracks last event ID for resume       |
-| State management      | CONNECTING, OPEN, CLOSED states       |
-| Callback invocation   | onMutation, onError, onOpen callbacks |
-
-**Why**: SSE is the real-time update mechanism. Reconnection bugs cause the UI to show stale data after network blips.
-
-**Patterns**: Custom `MockEventSource` class with static constants (CONNECTING, OPEN, CLOSED), `simulateOpen()`, `simulateError()`, `simulateMutation()` helpers.
-
----
-
-### Custom Hook Tests
-
-#### `src/hooks/useAgents.test.ts` (~560 lines)
-
-**Purpose**: Tests the agent polling hook that fetches agent status.
-
-| Test Area                 | What It Validates                          |
-| ------------------------- | ------------------------------------------ |
-| Retry scheduling          | Exponential backoff timing                 |
-| Countdown timer           | Visual countdown between retries           |
-| Race condition prevention | Timer deduplication (no double-scheduling) |
-| Error handling            | Failed fetch recovery                      |
-| Cleanup                   | Timer cleanup on unmount                   |
-
-**Why**: Agent polling drives the monitoring dashboard. Race conditions cause memory leaks (orphaned timers) and duplicate requests.
-
-**Patterns**: `vi.useFakeTimers()`, `vi.advanceTimersByTime()`, spy on `setTimeout`/`setInterval`.
-
-#### `src/hooks/useBlockedChain.test.ts`
-
-**Purpose**: Tests dependency graph traversal for blocked issues.
-
-| Test Area                    | What It Validates               |
-| ---------------------------- | ------------------------------- |
-| Dependency graph traversal   | Finds all transitive blockers   |
-| Circular dependency handling | Doesn't infinite-loop on cycles |
-| Blocker/blocked computation  | Correct sets for each issue     |
-
-**Why**: Blocked chain visualization helps users understand why work is stuck. Graph bugs cause wrong or missing dependency information.
-
-#### `src/hooks/useIssues.test.ts` (~1000 lines)
-
-**Purpose**: Tests the primary data hook that manages issue state.
-
-| Test Area                 | What It Validates                            |
-| ------------------------- | -------------------------------------------- |
-| Issue fetching            | Initial load, error handling, loading states |
-| SSE integration           | Live updates merged into local state         |
-| Optimistic updates        | Immediate UI update before API response      |
-| Rollback on failure       | Reverts optimistic update if API fails       |
-| Race condition prevention | SSE mutations during refetch preserved       |
-| Functional state updates  | Prevents snapshot clobbering                 |
-
-**Why**: This is the most complex hook - it syncs server state, SSE events, and optimistic updates. Race conditions here cause data loss or stale UI.
-
-**Patterns**: `renderHook()`, `act()`, `waitFor()`, mock API + mock SSE.
-
-#### `src/hooks/useSSE.test.ts` (~744 lines)
-
-**Purpose**: Tests the SSE connection management hook.
-
-| Test Area         | What It Validates                 |
-| ----------------- | --------------------------------- |
-| Auto-connect      | Connects on mount                 |
-| State management  | Connection state transitions      |
-| Reconnection      | Auto-reconnect on error           |
-| Event dispatching | Routes events to correct handlers |
-| Cleanup           | Closes connection on unmount      |
-
-**Why**: SSE hook manages the persistent connection to the server. Cleanup bugs cause connection leaks.
-
-#### `src/hooks/useDragEnd.test.ts`
-
-**Purpose**: Tests drag-and-drop validation for Kanban board.
-
-| Test Area      | What It Validates                                 |
-| -------------- | ------------------------------------------------- |
-| Valid drops    | Card moved to valid column triggers status update |
-| Invalid drops  | Card dropped on same column is ignored            |
-| Status mapping | Column maps to correct issue status               |
-
-**Why**: Drag-and-drop is the primary Kanban interaction. Incorrect status mapping corrupts issue state.
-
-#### `src/hooks/useDebounce.test.ts`
-
-**Purpose**: Tests debouncing hook for search/filter inputs.
-
-**Why**: Debounce prevents excessive API calls while typing. Too short = wasted calls; too long = sluggish UI.
-
-#### `src/hooks/useSelection.test.ts`
-
-**Purpose**: Tests multi-select behavior for bulk operations.
-
-**Why**: Selection state must be consistent for bulk actions (close, move, delete).
-
-#### `src/hooks/useSort.test.ts`
-
-**Purpose**: Tests sort state management for table views.
-
-**Why**: Sort must be stable and handle all data types correctly.
-
-#### `src/hooks/useGraphData.test.ts`
-
-**Purpose**: Tests graph data transformation for dependency visualization.
-
-**Why**: Graph data must correctly represent issue relationships for the dependency graph view.
-
-#### Additional Hook Tests
-
-| File                                             | What It Tests                                  |
-| ------------------------------------------------ | ---------------------------------------------- |
-| `src/hooks/__tests__/useAgentContext.test.tsx`   | Agent context provider and consumer            |
-| `src/hooks/__tests__/useBackendConfig.test.ts`   | Backend configuration loading and caching      |
-| `src/hooks/__tests__/useFilterState.test.ts`     | Filter state management and URL sync           |
-| `src/hooks/__tests__/useRecentAssignees.test.ts` | Recently-used assignee tracking                |
-| `src/hooks/__tests__/useStats.test.ts`           | Project statistics fetching                    |
-| `src/hooks/__tests__/useToast.test.tsx`          | Toast notification context and dispatching     |
-| `src/hooks/__tests__/useRouteView.test.ts`       | Route-backed view state (Kanban/table/graph)   |
-| `src/hooks/useAutoLayout.test.ts`                | Graph auto-layout algorithm                    |
-| `src/hooks/useBlockedIssues.test.ts`             | Blocked issue filtering and display            |
-| `src/hooks/useBulkClose.test.ts`                 | Bulk close operation for multiple issues       |
-| `src/hooks/useBulkPriority.test.tsx`             | Bulk priority change operation                 |
-| `src/hooks/useFallbackPolling.test.ts`           | Fallback polling when SSE is unavailable       |
-| `src/hooks/useFilteredSelection.test.ts`         | Selection filtered by current view             |
-| `src/hooks/useIssueDetail.test.ts`               | Single issue detail fetching                   |
-| `src/hooks/useIssueFilter.test.ts`               | Issue filtering logic (status, priority, type) |
-| `src/hooks/useLogStream.test.ts`                 | Agent log streaming via WebSocket              |
-| `src/hooks/useOptimisticStatusUpdate.test.ts`    | Optimistic status updates with rollback        |
-
----
-
-### Component Tests
-
-#### `src/components/IssueCard/__tests__/IssueCard.test.tsx` (~987 lines)
-
-**Purpose**: Comprehensive tests for the issue card component displayed in Kanban columns.
-
-| Test Area        | What It Validates                                 |
-| ---------------- | ------------------------------------------------- |
-| Basic rendering  | Title, ID, priority badge, type badge             |
-| Priority display | P0-P4 with correct colors and labels              |
-| Accessibility    | ARIA labels, role attributes, keyboard navigation |
-| Blocked badge    | Shows when issue has blockers                     |
-| Review badge     | Shows when issue needs review                     |
-| Deferred state   | Visual distinction for deferred issues            |
-| Click handling   | Card selection, detail panel opening              |
-| Truncation       | Long titles truncated properly                    |
-
-**Why**: IssueCard is the most rendered component (appears for every issue). Visual bugs affect the entire UI.
-
-**Patterns**: `screen.getByRole()`, `screen.getByLabelText()` (accessibility-first queries), `userEvent` for interactions.
-
-#### `src/components/App.test.tsx`
-
-**Purpose**: Tests the root App component.
-
-| Test Area        | What It Validates                |
-| ---------------- | -------------------------------- |
-| Initial render   | App loads without crashing       |
-| Route handling   | Correct view rendered per route  |
-| Error boundaries | Errors caught and displayed      |
-| Loading states   | Skeleton shown during data fetch |
-
-**Why**: If App breaks, nothing works.
-
-**Patterns**: Heavy mocking (GraphView, MonitorDashboard, TerminalPanel mocked to avoid browser dependency issues in jsdom).
-
-#### `src/components/KanbanBoard.test.tsx` / `SwimLaneBoard.test.tsx`
-
-**Purpose**: Tests board view rendering and interaction.
-
-| Test Area        | What It Validates                 |
-| ---------------- | --------------------------------- |
-| Column rendering | Correct columns for status values |
-| Card placement   | Issues in correct columns         |
-| Empty columns    | Empty state display               |
-| Drag-and-drop    | DnD context and handlers          |
-
-**Why**: Board views are the primary work management interface.
-
-#### `src/components/IssueDetailPanel.test.tsx`
-
-**Purpose**: Tests the detail panel shown when clicking an issue.
-
-| Test Area          | What It Validates                     |
-| ------------------ | ------------------------------------- |
-| Field display      | All issue fields rendered correctly   |
-| Comment form       | Comment creation and submission       |
-| Dependency section | Blocked by / blocks lists             |
-| Markdown rendering | Description markdown parsed correctly |
-| Edit mode          | Inline editing of fields              |
-
-**Why**: Detail panel is the primary issue editing interface.
-
-#### `src/components/MonitorDashboard.test.tsx`
-
-**Purpose**: Tests the agent monitoring dashboard.
-
-| Test Area             | What It Validates                |
-| --------------------- | -------------------------------- |
-| Agent activity        | Active agent cards               |
-| Blocking dependencies | Canvas-rendered dependency graph |
-| Metrics display       | Stats and health indicators      |
-| Auto-refresh          | Data polling and update          |
-
-**Why**: Monitor dashboard is how users track agent progress.
-
-#### All Component Tests (Complete Listing)
-
-| Component               | Test File                                                        | What It Tests                                    |
-| ----------------------- | ---------------------------------------------------------------- | ------------------------------------------------ |
-| AgentCard               | `AgentCard/AgentCard.test.tsx`                                   | Agent status card rendering, activity indicators |
-| AgentRow                | `IssueCard/__tests__/AgentRow.test.tsx`                          | Agent row within issue cards                     |
-| AgentRow (issue)        | `IssueCard/__tests__/IssueCard.agentRow.test.tsx`                | Agent row integration in issue card context      |
-| AppLayout               | `AppLayout/__tests__/AppLayout.test.tsx`                         | Main layout structure, sidebar, content area     |
-| AssigneePrompt          | `AssigneePrompt/__tests__/AssigneePrompt.test.tsx`               | Assignee selection prompt/dropdown               |
-| BlockedBadge            | `BlockedBadge/__tests__/BlockedBadge.test.tsx`                   | Blocked status badge rendering                   |
-| BlockedSummary          | `BlockedSummary/__tests__/BlockedSummary.test.tsx`               | Summary of blocked issues                        |
-| BulkActionToolbar       | `BulkActionToolbar/__tests__/BulkActionToolbar.test.tsx`         | Bulk action buttons (close, priority, etc.)      |
-| ConnectionStatus        | `ConnectionStatus/__tests__/ConnectionStatus.test.tsx`           | SSE connection indicator                         |
-| DependencyEdge          | `DependencyEdge/__tests__/DependencyEdge.test.tsx`               | Graph edge rendering between nodes               |
-| DraggableIssueCard      | `DraggableIssueCard/__tests__/DraggableIssueCard.test.tsx`       | DnD wrapper for issue cards                      |
-| EditableTitle           | `EditableTitle/__tests__/EditableTitle.test.tsx`                 | Inline title editing                             |
-| EmptyColumn             | `EmptyColumn/__tests__/EmptyColumn.test.tsx`                     | Empty Kanban column state                        |
-| EmptyState              | `EmptyState/__tests__/EmptyState.test.tsx`                       | Empty state for no issues                        |
-| ErrorBoundary           | `ErrorBoundary/__tests__/ErrorBoundary.test.tsx`                 | React error boundary catch/display               |
-| ErrorDisplay            | `ErrorDisplay/__tests__/ErrorDisplay.test.tsx`                   | Error message component                          |
-| ErrorToast              | `ErrorToast/__tests__/ErrorToast.test.tsx`                       | Error toast notification                         |
-| FilterBar               | `FilterBar/__tests__/FilterBar.test.tsx`                         | Filter controls bar                              |
-| GraphControls           | `GraphControls/__tests__/GraphControls.test.tsx`                 | Graph zoom, pan, layout controls                 |
-| GraphLegend             | `GraphLegend/__tests__/GraphLegend.test.tsx`                     | Graph color/shape legend                         |
-| GraphView               | `GraphView/__tests__/GraphView.test.tsx`                         | Full dependency graph view                       |
-| GraphViewContainer      | `GraphViewContainer/__tests__/GraphViewContainer.test.tsx`       | Graph view wrapper/provider                      |
-| IssueCard               | `IssueCard/__tests__/IssueCard.test.tsx` (~987 lines)            | Comprehensive card tests (see above)             |
-| IssueDetailPanel        | `IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx`           | Full detail panel                                |
-| IssueHeader             | `IssueDetailPanel/__tests__/IssueHeader.test.tsx`                | Detail panel header section                      |
-| CommentForm             | `IssueDetailPanel/__tests__/CommentForm.test.tsx`                | Comment creation form                            |
-| CommentsSection         | `IssueDetailPanel/__tests__/CommentsSection.test.tsx`            | Comments list and display                        |
-| DependencySection       | `IssueDetailPanel/__tests__/DependencySection.test.tsx`          | Blocked by / blocks lists                        |
-| EditableDescription     | `IssueDetailPanel/__tests__/EditableDescription.test.tsx`        | Inline description editing                       |
-| MarkdownRenderer        | `IssueDetailPanel/__tests__/MarkdownRenderer.test.tsx`           | Markdown to HTML rendering                       |
-| PriorityDropdown        | `IssueDetailPanel/__tests__/PriorityDropdown.test.tsx`           | Priority selector                                |
-| RejectCommentForm       | `IssueDetailPanel/__tests__/RejectCommentForm.test.tsx`          | Review rejection comment                         |
-| TypeDropdown            | `IssueDetailPanel/__tests__/TypeDropdown.test.tsx`               | Issue type selector                              |
-| IssueNode               | `IssueNode/__tests__/IssueNode.test.tsx`                         | Graph node for issues                            |
-| KanbanBoard             | `KanbanBoard/__tests__/KanbanBoard.test.tsx`                     | Full Kanban board                                |
-| columnConfigs           | `KanbanBoard/__tests__/columnConfigs.test.ts`                    | Column configuration logic                       |
-| useDragEnd              | `KanbanBoard/__tests__/useDragEnd.test.ts`                       | Drag-end handler                                 |
-| LoadingSkeleton         | `LoadingSkeleton/__tests__/LoadingSkeleton.test.tsx`             | Loading placeholder                              |
-| MonitorDashboard        | `MonitorDashboard/__tests__/MonitorDashboard.test.tsx`           | Full monitor view                                |
-| AgentActivityPanel      | `MonitorDashboard/__tests__/AgentActivityPanel.test.tsx`         | Agent activity section                           |
-| BlockingDepsCanvas      | `MonitorDashboard/__tests__/BlockingDependenciesCanvas.test.tsx` | Blocking graph canvas                            |
-| BlockingEdge            | `MonitorDashboard/__tests__/BlockingEdge.test.tsx`               | Blocking graph edges                             |
-| BlockingNode            | `MonitorDashboard/__tests__/BlockingNode.test.tsx`               | Blocking graph nodes                             |
-| ConnectionBanner        | `MonitorDashboard/__tests__/ConnectionBanner.test.tsx`           | Connection status banner                         |
-| ProjectHealthPanel      | `MonitorDashboard/__tests__/ProjectHealthPanel.test.tsx`         | Project health metrics                           |
-| NavRail                 | `NavRail/__tests__/NavRail.test.tsx`                             | Navigation sidebar rail                          |
-| NodeTooltip             | `NodeTooltip/__tests__/NodeTooltip.test.tsx`                     | Graph node hover tooltip                         |
-| SearchInput             | `search/__tests__/SearchInput.test.tsx`                          | Text search input                                |
-| SettingsView            | `SettingsView/__tests__/SettingsView.test.tsx`                   | Settings page                                    |
-| StatusColumn            | `StatusColumn/__tests__/StatusColumn.test.tsx`                   | Kanban status column                             |
-| StatusDropdown          | `StatusDropdown/__tests__/StatusDropdown.test.tsx`               | Status selector                                  |
-| SwimLane                | `SwimLane/__tests__/SwimLane.test.tsx`                           | Individual swim lane                             |
-| SwimLaneBoard           | `SwimLaneBoard/__tests__/SwimLaneBoard.test.tsx`                 | Full swimlane board                              |
-| SwimLaneBoard (persist) | `SwimLaneBoard/__tests__/SwimLaneBoard.persistence.test.tsx`     | Swimlane collapse state persistence              |
-| groupingUtils           | `SwimLaneBoard/__tests__/groupingUtils.test.ts`                  | Grouping logic utilities                         |
-| TalkToLeadButton        | `TalkToLeadButton/TalkToLeadButton.test.tsx`                     | Lead communication button                        |
-| TerminalPanel           | `TerminalPanel/__tests__/TerminalPanel.test.tsx`                 | Terminal emulator panel                          |
-| Toast                   | `Toast/__tests__/Toast.test.tsx`                                 | Individual toast notification                    |
-| ToastContainer          | `Toast/__tests__/ToastContainer.test.tsx`                        | Toast stack container                            |
-| TypeIcon                | `TypeIcon/__tests__/TypeIcon.test.tsx`                           | Issue type icon                                  |
-| ViewSwitcher            | `ViewSwitcher/__tests__/ViewSwitcher.test.tsx`                   | Kanban/table/graph toggle                        |
-| IssueTable              | `table/IssueTable.test.tsx`                                      | Full table view                                  |
-| BlockedCell             | `table/__tests__/BlockedCell.test.tsx`                           | Table blocked indicator cell                     |
-| IssueRow                | `table/__tests__/IssueRow.test.tsx`                              | Table issue row                                  |
-| TableHeader             | `table/__tests__/TableHeader.test.tsx`                           | Table sortable headers                           |
-
----
-
-### Utility & Type Tests
-
-#### `src/styles/__tests__/colors.test.ts`
-
-**Purpose**: Tests color utility functions for priority/status colors.
-
-**Why**: Color consistency is important for visual priority identification.
-
-#### `src/types/__tests__/types.test.ts` / `graph.test.ts`
-
-**Purpose**: Tests type guard functions and type validation.
-
-**Why**: TypeScript type guards protect against runtime type errors.
-
-#### `src/test-utils/__tests__/chrome-visual-helpers.test.ts` (~516 lines)
-
-**Purpose**: Tests helper functions for Chrome automation visual testing.
-
-**Why**: These helpers are used in manual Chrome-based testing workflows.
-
-#### `src/utils/__tests__/reconnectBackoff.test.ts`
-
-**Purpose**: Tests exponential backoff calculation for SSE reconnection.
-
-**Why**: Backoff prevents overwhelming the server during outages.
-
-#### `src/utils/__tests__/openStatus.test.ts`
-
-**Purpose**: Tests open/closed status determination logic.
-
-**Why**: Status logic controls column placement and filtering.
-
-#### `src/utils/__tests__/ansiStrip.test.ts`
-
-**Purpose**: Tests ANSI escape code stripping from terminal output.
-
-**Why**: Raw terminal output needs ANSI codes removed for display in non-terminal contexts.
-
-#### `src/utils/__tests__/formatIssueId.test.ts`
-
-**Purpose**: Tests issue ID formatting (e.g., `loomcli-abc` display format).
-
-**Why**: Consistent ID display across all views.
-
-#### `src/utils/__tests__/reviewType.test.ts`
-
-**Purpose**: Tests review type determination (code review, plan review, etc.).
-
-**Why**: Review type controls badge display and available actions.
-
-#### `src/__tests__/e2e-infrastructure.test.ts`
-
-**Purpose**: Unit tests for the E2E test infrastructure itself (fixtures, helpers, page objects).
-
-**Why**: Ensures test infrastructure works correctly before running E2E tests.
+Most tests live in `__tests__/` directories beside the code they cover. 13 of
+the 369 sit directly next to their source instead (e.g.
+`src/components/AgentDetailMain/AgentDetailMain.test.tsx`); the `find` command
+below catches both.
+
+| Directory | Covers |
+| --- | --- |
+| `src/api/{common,issues,agents,workspace,terminal,workflows}/__tests__` | HTTP client, SSE client, per-domain API modules |
+| `src/hooks/{common,issues,ui,workspace,agents,terminal,workflows}/__tests__` | Custom hooks by domain |
+| `src/stores/__tests__` | Zustand stores — issue, agent, workspace, editor, backends, fileBrowser |
+| `src/components/<Component>/__tests__` | One directory per component (~90 of them) |
+| `src/contexts/__tests__`, `src/views/__tests__` | Context providers, route-level views |
+| `src/utils/__tests__`, `src/utils/{issue,workspace}/__tests__` | Pure helpers |
+| `src/types/__tests__`, `src/styles/__tests__`, `src/test-utils/__tests__` | Type guards, colour tokens, test helpers |
+| `src/__tests__` | App-level tests, including `App.test.tsx` |
+
+List them for real rather than trusting a table:
+
+```bash
+cd internal/webui/frontend
+find src -name '*.test.ts' -o -name '*.test.tsx' | sort
+find src -type d -name __tests__ | sort          # the structural view
+```
+
+### Entry points worth reading first
+
+| File | Why |
+| --- | --- |
+| `src/stores/__tests__/issueStore.test.ts` | The core issue state machine — optimistic updates, SSE mutations during refetch |
+| `src/api/common/__tests__/client.test.ts` | HTTP client: error mapping, retries, base-URL resolution |
+| `src/api/common/__tests__/sse.test.ts` | SSE client: reconnect/backoff, event dispatch |
+| `src/__tests__/App.test.tsx` | How the app is wired together, and what has to be mocked to render it |
+
+### Issue state is a Zustand store, not a hook
+
+`useIssues`, `useSSE` and `useAgents` no longer exist — earlier revisions of
+this page documented roughly 2300 lines of coverage for them. Issue state moved
+into a vanilla Zustand store: `src/App.tsx:241` reads "Issue state from Zustand
+store (replaces useIssues hook)", and `src/stores/issueStore.ts:1-4` says it
+"Replaces useState/useRef/useCallback composition from useIssues.ts with a
+single testable, framework-agnostic store." The tests moved with it, into
+`src/stores/__tests__/`.
 
 ---
 
 ## E2E Tests (Playwright)
 
-### Browser E2E Tests
+`playwright.config.ts:97` sets `testDir: "./tests/e2e"`. Three families:
 
-Located in `tests/e2e/`. These test the full UI in a real browser against mocked API responses.
+| Family | Path | Count | Backend |
+| --- | --- | --- | --- |
+| Browser E2E | `tests/e2e/*.spec.ts` | 92 | Route-mocked; no server |
+| API E2E | `tests/e2e/api/*.api.spec.ts` | 12 | Real `loom serve` |
+| Integration | `tests/e2e/integration/*.integration.spec.ts` | 13 | Real `loom serve` |
 
-#### Smoke & Core
+```bash
+ls tests/e2e/*.spec.ts tests/e2e/api/*.api.spec.ts tests/e2e/integration/*.integration.spec.ts
+```
 
-| File                     | What It Tests                            | Why                                   |
-| ------------------------ | ---------------------------------------- | ------------------------------------- |
-| `smoke.spec.ts`          | Fixtures, mocks, Page Object Models work | Foundation for all E2E tests          |
-| `app.spec.ts`            | Main app navigation and layout           | Basic app functionality               |
-| `error.spec.ts`          | Error handling and display               | Users see helpful error messages      |
-| `error-boundary.spec.ts` | React error boundary behavior            | App doesn't crash on component errors |
-| `skeleton.spec.ts`       | Loading state skeletons                  | Users see feedback during loading     |
+### API E2E
 
-#### Kanban Board
+`tests/e2e/api/api-client.ts` is a typed client wrapping Playwright's
+`APIRequestContext`: `health` (`:368`), `stats` (`:380`), `listIssues` (`:404`),
+`getIssue` (`:416`), `createIssue` (`:426`), `updateIssue` (`:438`),
+`closeIssue` (`:450`), `addComment` (`:468`), `addDependency` (`:484`),
+`removeDependency` (`:495`), `ready` (`:510`), `blocked` (`:522`),
+`graph` (`:534`), `deleteIssue` (`:550`), `cleanupIssue` (`:559`). It also
+exports `generateTestId()` (`:711`) for per-test isolation and `waitFor()`
+(`:719`) for polling until SSE propagation lands.
 
-| File                         | What It Tests                  | Why                          |
-| ---------------------------- | ------------------------------ | ---------------------------- |
-| `kanban.spec.ts`             | Core Kanban board interactions | Primary work management view |
-| `kanban-redesign.spec.ts`    | Redesigned Kanban features     | Updated UI elements          |
-| `kanban-ui-redesign.spec.ts` | Kanban UI polish               | Visual refinements           |
+The 12 spec files cover issue lifecycle and CRUD roundtrip, triage, dependency
+management, finding work, review workflow, team collaboration, agent
+monitoring, agent logs, task logs, project health, and realtime updates.
 
-#### Swimlane View
+API tests verify the backend contract independently of the UI, so an API
+regression is caught before it reaches the frontend.
 
-| File                        | What It Tests            | Why                              |
-| --------------------------- | ------------------------ | -------------------------------- |
-| `swimlane-board.spec.ts`    | Swimlane board rendering | Alternative board view           |
-| `swimlane-wiring.spec.ts`   | Swimlane data wiring     | Data flows correctly to swimlane |
-| `swimlane-collapse.spec.ts` | Swimlane collapse/expand | UX for large boards              |
+### Integration
 
-#### Filtering & Search
+The 13 integration specs cover concurrent ops, cross-workspace move, daemon
+recovery, dependency graph, dogfood regressions, kanban CRUD, lead epic runner,
+playground, SSE multiclient, SSE updates, terminal parity, workspace files, and
+workspace lifecycle.
 
-| File                      | What It Tests        | Why                            |
-| ------------------------- | -------------------- | ------------------------------ |
-| `filter.spec.ts`          | Filter functionality | Users can narrow issue list    |
-| `filter-bar.spec.ts`      | Filter bar UI        | Filter controls work correctly |
-| `filter-url-sync.spec.ts` | Filter state in URL  | Shareable filtered views       |
-| `search.spec.ts`          | Text search          | Quick issue finding            |
+### How the server gets provisioned
 
-#### Group By (8 files)
+`tests/e2e/global-setup.ts` returns immediately unless `RUN_INTEGRATION_TESTS`
+is set (`:41-45`), then takes one of three paths:
 
-| File                       | What It Tests                    |
-| -------------------------- | -------------------------------- |
-| `groupby-assignee.spec.ts` | Group by assignee                |
-| `groupby-epic.spec.ts`     | Group by epic                    |
-| `groupby-label.spec.ts`    | Group by label                   |
-| `groupby-priority.spec.ts` | Group by priority                |
-| `groupby-type.spec.ts`     | Group by type                    |
-| `groupby-none.spec.ts`     | No grouping (flat list)          |
-| + 2 more variants          | Additional group-by combinations |
+1. **local-server** — `LOOM_LOCAL_SERVER=1`: health-check the `loom serve` you
+   already started at `LOOM_BASE_URL` (default `http://localhost:8080`) and
+   return (`:47-66`).
+2. **webServer (default)** — logs "webServer mode — Playwright manages server
+   lifecycle", writes the state file and returns (`:68-81`). Playwright then
+   runs `bash ../../../scripts/start-e2e-server.sh` with `E2E_PORT` (default
+   8090, API) and `E2E_FRONTEND_PORT` (default 3100, Vite preview) and waits on
+   the preview URL (`playwright.config.ts:70-95`, `:26-28`).
+3. **Podman compose (legacy)** — only when `PODMAN_COMPOSE` is set: brings up
+   `compose.e2e.yml` and waits on `:8080` and `:9000` (`:82-101`). **That
+   compose file is not in this repo**, so this path only works if you supply
+   one.
 
-**Why**: Group-by is heavily used for different workflow perspectives. Each dimension has unique rendering logic.
+See [../testing-terminology.md](../testing-terminology.md) §Axis 3 for the
+provisioning vocabulary.
 
-#### Detail Panel
+### Playwright projects
 
-| File                                | What It Tests          | Why                        |
-| ----------------------------------- | ---------------------- | -------------------------- |
-| `issue-detail-panel.spec.ts`        | Detail panel UI        | Correct issue data display |
-| `issue-detail-panel-wiring.spec.ts` | Detail panel data flow | API integration works      |
+`playwright.config.ts` defines eight:
 
-#### Real-Time Updates
+| Project | Line | Selects |
+| --- | --- | --- |
+| `chromium` | `:128` | Route-mocked browser specs; ignores `*.integration.spec.ts` unless `RUN_INTEGRATION_TESTS` |
+| `integration` | `:138` | All `*.integration.spec.ts` |
+| `integration-smoke` | `:155` | Integration specs tagged `@smoke` (`:158`) |
+| `integration-regression` | `:173` | Integration specs tagged `@regression` (`:176`) |
+| `local-integration` | `:191` | Needs `RUN_LOCAL_INTEGRATION_TESTS=1` |
+| `api` | `:208` | All `*.api.spec.ts` |
+| `api-smoke` | `:220` | API specs tagged `@smoke` (`:224`) |
+| `api-regression` | `:233` | API specs tagged `@regression` (`:237`) |
 
-| File                              | What It Tests        | Why                                  |
-| --------------------------------- | -------------------- | ------------------------------------ |
-| `server-push.spec.ts`             | SSE push events      | Real-time updates render             |
-| `server-push-integration.spec.ts` | SSE + UI integration | Events update the correct components |
-
-#### Monitoring
-
-| File                                | What It Tests        | Why                               |
-| ----------------------------------- | -------------------- | --------------------------------- |
-| `monitor-dashboard.spec.ts`         | Dashboard rendering  | Agent status visible              |
-| `monitor-panels.spec.ts`            | Dashboard panels     | Individual metric panels          |
-| `monitor-degradation.spec.ts`       | Graceful degradation | Dashboard works with partial data |
-| `monitor-visual-regression.spec.ts` | Visual regression    | Dashboard appearance stable       |
-
-#### Detail Panel Components
-
-| File                           | What It Tests                   | Why                          |
-| ------------------------------ | ------------------------------- | ---------------------------- |
-| `comment-form.spec.ts`         | Comment form submission         | Users can add comments       |
-| `comments-section.spec.ts`     | Comments list rendering         | Comment display and ordering |
-| `dependencies-section.spec.ts` | Dependencies UI in detail panel | Dependency management UX     |
-| `editable-description.spec.ts` | Inline description editing      | Users can edit descriptions  |
-| `editable-title.spec.ts`       | Inline title editing            | Users can edit titles        |
-| `priority-dropdown.spec.ts`    | Priority selection dropdown     | Priority changes work        |
-| `status-dropdown.spec.ts`      | Status selection dropdown       | Status changes work          |
-| `type-dropdown.spec.ts`        | Type selection dropdown         | Type changes work            |
-
-#### Graph View
-
-| File                              | What It Tests                  | Why                                   |
-| --------------------------------- | ------------------------------ | ------------------------------------- |
-| `graph-status-filter.spec.ts`     | Status filtering in graph view | Graph responds to filters             |
-| `dependency-edge-styling.spec.ts` | Edge visual styling            | Dependency lines styled correctly     |
-| `dependency-type-filter.spec.ts`  | Filter by dependency type      | Users can filter graph edges          |
-| `issue-node-styling.spec.ts`      | Node visual styling            | Graph nodes styled by priority/status |
-
-#### Miscellaneous E2E
-
-| File                             | What It Tests                          | Why                               |
-| -------------------------------- | -------------------------------------- | --------------------------------- |
-| `assembled-views.spec.ts`        | Full view assembly with all components | Integration of all UI pieces      |
-| `backlog-column.spec.ts`         | Backlog column behavior                | Backlog-specific UX               |
-| `kanban-column-redesign.spec.ts` | Redesigned column layout               | Updated column visuals            |
-| `log-streaming.spec.ts`          | Agent log streaming in browser         | Real-time log display             |
-| `monitor-backlog-label.spec.ts`  | Monitor dashboard backlog labels       | Correct backlog data display      |
-| `show-closed-toggle.spec.ts`     | Show/hide closed issues toggle         | Closed issue visibility           |
-| `stats-header.spec.ts`           | Project stats in header                | Summary stats display             |
-| `task-log-tabs.spec.ts`          | Task log tab navigation                | Multiple log streams              |
-| `toast-notifications.spec.ts`    | Toast notification display             | User feedback for actions         |
-| `groupby-dropdown.spec.ts`       | Group-by dropdown UI                   | Group-by selector interaction     |
-| `groupby-url-sync.spec.ts`       | Group-by state in URL                  | Shareable grouped views           |
-| `table-sort.spec.ts`             | Table column sorting                   | Data ordering works               |
-| `view-switcher.spec.ts`          | Switching between views                | Kanban/table/graph transitions    |
-| `visual-regression.spec.ts`      | Screenshot comparison                  | Catches unintended visual changes |
-
----
-
-### API E2E Tests
-
-Located in `tests/e2e/api/`. These test the API directly using a typed client.
-
-#### `api-client.ts` (~600+ lines)
-
-**Purpose**: Typed API client wrapping Playwright's `APIRequestContext`.
-
-**Key methods**: `createIssue()`, `updateIssue()`, `closeIssue()`, `deleteIssue()`, `listIssues()`, `getIssue()`, `getReadyIssues()`, `getBlockedIssues()`, `addDependency()`, `removeDependency()`, `addComment()`, `getComments()`, `getStats()`, `healthCheck()`
-
-#### API Test Files
-
-| File                                | What It Tests              | Why                                  |
-| ----------------------------------- | -------------------------- | ------------------------------------ |
-| `issue-lifecycle.api.spec.ts`       | Issue CRUD lifecycle       | Core data operations work end-to-end |
-| `issue-triage.api.spec.ts`          | Issue triage workflows     | Prioritization and categorization    |
-| `dependency-management.api.spec.ts` | Dependency add/remove      | Blocking relationships correct       |
-| `finding-work.api.spec.ts`          | Work queue algorithms      | Ready work filtered correctly        |
-| `review-workflow.api.spec.ts`       | Code/plan review flows     | Review state transitions             |
-| `team-collaboration.api.spec.ts`    | Multi-user scenarios       | Concurrent user operations           |
-| `agent-monitoring.api.spec.ts`      | Agent monitoring endpoints | Agent status data correct            |
-| `agent-logs.api.spec.ts`            | Agent log streaming        | Log data accessible                  |
-| `task-logs.api.spec.ts`             | Task log retrieval         | Task-level logs work                 |
-| `daemon-config.api.spec.ts`         | Daemon configuration API   | Config read/write                    |
-| `project-health.api.spec.ts`        | Project health metrics     | Stats and health data                |
-| `realtime-updates.api.spec.ts`      | SSE event verification     | Events match API changes             |
-
-**Why**: API tests verify the backend contract independently of the UI. They catch API regressions before they reach the frontend.
-
----
-
-### Integration Tests
-
-Located in `tests/e2e/integration/`. These run against a real Podman Compose stack.
-
-#### Global Setup (`tests/e2e/global-setup.ts`)
-
-**What it does**:
-
-1. Starts Podman Compose stack (`compose.e2e.yml`)
-2. Waits for health checks on `localhost:8080` (consolidated server) and `localhost:9000` (Loom API)
-3. Timeout: 2 minutes for container builds
-4. Writes state file (`.e2e-state.json`) with URLs for tests
-
-#### Integration Test Files
-
-| File                                          | What It Tests                         | Why                                     |
-| --------------------------------------------- | ------------------------------------- | --------------------------------------- |
-| `dogfood-regressions.integration.spec.ts`     | Deterministic dogfood-promoted gaps   | Keeps manual dogfood regressions gated  |
-| `kanban-crud.integration.spec.ts`             | Kanban CRUD against real backend      | Full stack validation                   |
-| `sse-updates.integration.spec.ts`             | Real-time SSE with real backend       | SSE works end-to-end                    |
-
-**Why**: Integration tests are the final validation layer. They catch issues that mocked tests miss (serialization mismatches, timing issues, database constraints).
-
-### Playwright Configuration
-
-**Projects**:
-
-- `chromium` - Standard E2E tests (excludes integration by default)
-- `integration` - Real backend tests (requires `RUN_INTEGRATION_TESTS=1`)
-- `integration-smoke` - Fast tagged real backend smoke tests
-- `integration-regression` - Slower tagged real backend regression tests
-- `api` - API-level tests (requires `RUN_INTEGRATION_TESTS=1`)
-- `api-smoke` - Fast tagged API smoke tests
-- `api-regression` - Slower tagged API regression tests
-
-**CI Settings**: Single worker, 2 retries, GitHub reporter.
+**CI settings**: `retries: 3` (`:100`), `workers: 1` and `reporter: "github"`
+(`:101-102`), `timeout: 30000`, `forbidOnly`.
 
 ---
 
 ## Test Infrastructure
 
-### Fixtures (`tests/e2e/fixtures/`)
+Fixtures, page objects and helpers live under `tests/`, **one level above**
+`tests/e2e/`. `tests/e2e/helpers/` still exists but holds only `fleet.ts`.
+
+### Fixtures (`tests/fixtures/base.ts`)
+
+`test` extends Playwright's base with three fixtures (`base.ts:31-60`):
 
 | Fixture   | Purpose                                        |
 | --------- | ---------------------------------------------- |
-| `mockApi` | API response mocking with request tracking     |
-| `mockSSE` | SSE connection simulation with event injection |
-| `appPage` | Pre-configured page with auth and SSE setup    |
+| `mockApi` | API response mocking with request tracking (`:33-36`) |
+| `mockSSE` | SSE connection simulation with event injection (`:39-44`) |
+| `appPage` | Page with config + auth mocked, SSE intercepted, navigated and connected (`:47-60`) |
 
-**Why**: Fixtures provide consistent test setup. `mockApi` tracks requests for assertion, `mockSSE` injects events for testing real-time updates.
+Import `test`/`expect` from `../fixtures`, not from `@playwright/test`. Also in
+the directory: `index.ts`, `screenshot.ts`, `deterministic-terminal.sh`.
 
-### Page Object Models (`tests/e2e/pages/`)
+### Page Object Models (`tests/pages/`)
 
-| POM          | Purpose                                          |
-| ------------ | ------------------------------------------------ |
-| `AppPage`    | Main app navigation and connection status        |
-| `KanbanPage` | Column interaction, card counts, drag operations |
+`app.page.ts` (`AppPage` — navigation, connection status), `kanban.page.ts`
+(`KanbanPage:14` — column interaction, card counts, drag), `monitor.page.ts`,
+`table.page.ts`, re-exported from `index.ts`. POMs encapsulate selectors, so a
+UI change touches the POM rather than every spec.
 
-**Why**: POMs encapsulate DOM selectors and common actions. When UI changes, only POMs need updating.
+### Test Helpers (`tests/helpers/`)
 
-### Test Helpers (`tests/e2e/helpers/`)
-
-| Helper               | Purpose                                        |
-| -------------------- | ---------------------------------------------- |
-| `createIssue()`      | Factory for test issues with sensible defaults |
-| `createStats()`      | Mock statistics objects                        |
-| `createKanbanData()` | Complete Kanban board data set                 |
-| `resetIdCounter()`   | Reset ID generation between tests              |
+| File | Contents |
+| --- | --- |
+| `test-data.ts` | `resetIdCounter():23`, `createIssue():29`, `createStats():77`, `createKanbanData():148` |
+| `api-mock.ts` | `createApiMockHandler():87` — the `mockApi` implementation |
+| `sse-mock.ts` | `createSSEMock():36` — the `mockSSE` implementation |
+| `fixture-routes.ts`, `wait.ts`, `keyboard-setup.ts`, `terminal-seed.ts` | Route fixtures, waits, input setup, terminal seeding |
 
 ### Mocking Strategies
 
 | Strategy                      | Where Used      | Why                                                      |
 | ----------------------------- | --------------- | -------------------------------------------------------- |
-| `vi.mock('@/api')`            | Hook tests      | Isolate hooks from network calls                         |
-| Custom MockEventSource        | SSE tests       | Simulate browser EventSource API                         |
+| `vi.mock('@/api')`            | Hook and store tests | Isolate logic from network calls                    |
+| Custom MockEventSource        | SSE tests       | Simulate the browser EventSource API                     |
 | `vi.hoisted()` mock pattern   | Component tests | Consistent mock access across test files                 |
 | Heavy component mocking       | App tests       | Prevent ResizeObserver/terminal renderer issues in jsdom |
-| Playwright route interception | E2E tests       | Control API responses in browser                         |
+| Playwright route interception | Browser E2E     | Control API responses without a server                   |
 
 ### Key Testing Patterns
 
-1. **Race condition prevention**: `useAgents` tests verify timer deduplication; `useIssues` tests verify SSE mutations during refetch
-2. **Fake timers**: `vi.useFakeTimers()` / `vi.advanceTimersByTime()` for controlled async
-3. **Accessibility-first queries**: `getByRole()`, `getByLabelText()` over `getByTestId()`
-4. **Optimistic update testing**: Verify immediate UI update, then verify rollback on API failure
-5. **Functional state updates**: Tests verify `setState(prev => ...)` pattern prevents snapshot clobbering
+1. **Race condition prevention**: store tests verify SSE mutations arriving
+   during an in-flight refetch are not clobbered.
+2. **Fake timers**: `vi.useFakeTimers()` / `vi.advanceTimersByTime()` for
+   controlled async.
+3. **Accessibility-first queries**: `getByRole()`, `getByLabelText()` over
+   `getByTestId()`.
+4. **Optimistic update testing**: verify the immediate UI update, then verify
+   rollback on API failure.
+5. **Functional state updates**: `setState(prev => ...)` so a stale snapshot
+   cannot clobber a newer one.
+
+Full conventions with code examples: [test-patterns.md](test-patterns.md).
+
+## Related
+
+- [test-patterns.md](test-patterns.md) — how to write a test here
+- [test-infrastructure.md](test-infrastructure.md) — CI, Makefile targets, coverage thresholds
+- [dogfood-playwright-coverage.md](dogfood-playwright-coverage.md) — smoke/regression suite membership
+- [../testing-terminology.md](../testing-terminology.md) — depth / realness / provisioning / polarity
+- [README.md](README.md) — testing docs index

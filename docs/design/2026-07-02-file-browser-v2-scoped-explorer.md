@@ -1,11 +1,41 @@
 # File Browser v2 — Scoped Explorer with Editing
 
+> **Status:** Superseded — historical proposal, do NOT use as a behaviour
+> reference · *audited 2026-08-03*
+>
+> - Shipped security / containment / concurrency contract:
+>   [workspace-file-browser-security.md](workspace-file-browser-security.md).
+> - Shipped information architecture:
+>   [2026-07-07-file-explorer-v3-unified-tree.md](2026-07-07-file-explorer-v3-unified-tree.md)
+>   (its opening paragraph, under the status banner, explicitly supersedes this
+>   doc's IA).
+> - Shipped component architecture: [docs/arch/file-explorer.md](../arch/file-explorer.md).
+>
+> **The central "no policy guards" design stance of this document was REVERSED
+> before ship.** The Objective (§ below) and the whole of §5 *Accepted risks*
+> describe a system that never existed in `main`. In shipped code:
+> `.git` is denied for every operation, not merely display-hidden
+> (`internal/webui/svcimpl/rooted_file_store.go:141,146-151`); a sensitive-file
+> denylist gates `.env*`, keys and certs on the request's `sensitive` capability
+> (`internal/webui/fileaccess/access.go:42-77`,
+> `internal/webui/svcimpl/file_walk.go:348,376`); overlapping browser mutations
+> are serialized by per-scope path locks
+> (`internal/webui/svcimpl/file_versions.go:23-36`); and create/delete/move/
+> replace/restore carry `If-Match` / `If-None-Match` preconditions
+> (`internal/webui/handlers/misc/files.go:347,352-354,375`,
+> `internal/webui/svcimpl/file_service.go:324-345`).
+>
+> What is still worth reading here: *why* the scoped-root model and the unified
+> `/api/workspaces/{ws}/files/*` endpoint family exist (§1), and the rejected
+> alternatives in §6.
+
 **Date:** 2026-07-02
-**Status:** Proposal (rev 3 — no file guards, full CRUD, history exploration)
+**Status:** Proposal (rev 3 — no file guards, full CRUD, history exploration) —
+SUPERSEDED, see banner above
 **Verified against:** commit `75c2fa6c` (feat/workspace-file-browser)
-**Supersedes:** the 3-tier roadmap (`loom-file-browser-vscode-roadmap.md`) — Tier 1 of
-that doc shipped in `75c2fa6c`; this proposal replaces its Tiers 2–3 with a new
-objective.
+**Supersedes:** the 3-tier roadmap (`loom-file-browser-vscode-roadmap.md` — that
+file is not present in this repo) — Tier 1 of that doc shipped in `75c2fa6c`;
+this proposal replaces its Tiers 2–3 with a new objective.
 
 ## Objective
 
@@ -27,6 +57,9 @@ exploration features:
 7. Git gutter (changed-line marks), diff editor, blame
 8. Timeline view — per-file history of commits and saves
 9. Source-control panel with per-file diffs
+
+> SUPERSEDED: all four "no …" clauses below were reversed before ship. See the
+> banner at the top of this file.
 
 **Design stance:** this is a localhost, single-operator tool; the browser behaves
 like a plain filesystem editor. No sensitive-file denylist, no `.git` write denial,
@@ -52,6 +85,10 @@ policy to carry, no descriptor struct is needed:
 func (s *fileServiceImpl) resolveScopeRoot(wsID string, scope FileScope, target string) (string, error)
 ```
 
+> SUPERSEDED: the signature *did* change. v3 added the `repo` qualifier —
+> `internal/webui/svcimpl/file_service.go:145`
+> `func (s *fileServiceImpl) resolveScopeRoot(wsID string, scope service.FileScope, target, repo string) (string, error)`.
+
 | Scope | Target | Root |
 |---|---|---|
 | `workspace` | — | `ws.Path` (spans all repos + worktrees) |
@@ -60,7 +97,10 @@ func (s *fileServiceImpl) resolveScopeRoot(wsID string, scope FileScope, target 
 
 - `target` is validated against workspace state (repo list / agent registry), never
   path-joined from raw input.
-- **`.git` is display-hidden, nothing else.** Directory listings omit `.git`
+- > SUPERSEDED: `.git` is denied, not merely hidden. `rooted_file_store.go:141`
+  > returns `ErrForbidden` for any `.git` path at every operation, and
+  > `pathHasHiddenSegment` no longer exists in the repo.
+  **`.git` is display-hidden, nothing else.** Directory listings omit `.git`
   entries at every scope (the existing `hiddenScopeSegments` listing filter, kept
   for `.git` only) — matching VSCode's default `files.exclude`. This is rendering
   only: reads, writes, and CRUD to `.git` paths by explicit path still work — no
@@ -69,7 +109,12 @@ func (s *fileServiceImpl) resolveScopeRoot(wsID string, scope FileScope, target 
   from the FE reveal-skip list. Search and Quick Open apply *default exclude
   globs* for `.git`/`node_modules` — a signal/performance default the user can
   override per query, not a policy.
-- The sensitive-file denylist (`isDeniedPath`: keys, certs, `.env*`) is **removed
+- > SUPERSEDED: the denylist survived, renamed. `isDeniedPath` became
+  > `service.IsSensitiveFilePath` (`internal/webui/service/file_access.go:30`,
+  > tables at `internal/webui/fileaccess/access.go:42-77`) and is gated on
+  > the request's `Sensitive` capability (`svcimpl/file_walk.go:271-273,348,376`).
+  > Viewers cannot read `.env*`.
+  The sensitive-file denylist (`isDeniedPath`: keys, certs, `.env*`) is **removed
   from both read and write paths** — `.env` editing is an explicit requirement.
 
 **Endpoint unification.** The scoped family becomes the only family:
@@ -100,6 +145,12 @@ The existing agent-name-keyed routes (`/agents/{name}/files*`) become thin deleg
 to `scope=agent` and are deprecated. One endpoint family → one service core → one
 structural envelope (`ValidatePathWithinDir`, symlink skip).
 
+> SUPERSEDED: the agent-name-keyed routes were deleted outright, not delegated —
+> `internal/webui/app/routes_test.go:1864-1866` asserts 404 for
+> `GET|PUT /api/agents/{name}/files` and `/files/tree`. The shipped endpoint list
+> is `internal/webui/handlers/misc/module.go:35-50` (unversioned paths, plus two
+> checkout endpoints this proposal never anticipated).
+
 **Frontend.** One `FileBrowser` component parameterized by `{scope, target}`:
 
 - `FilesPage` hosts it with a scope switcher (workspace / per-repo / per-agent).
@@ -118,6 +169,14 @@ structural envelope (`ValidatePathWithinDir`, symlink skip).
 `PUT` on the shared scoped core: `ValidatePathWithinDir` → symlink refusals →
 `AtomicWriteFile` (existing perms preserved, 0644 for new files). Create = PUT to a
 nonexistent path (parent must exist — the tree's "New File" flows always have one).
+
+> SUPERSEDED: only the ordinary editor Save is last-writer-wins. Create and
+> Duplicate require `If-None-Match: *`; delete/move require the current version;
+> search-replace, conflict Overwrite and commit restore require `If-Match`
+> (`internal/webui/handlers/misc/files.go:347,352-354,375`,
+> `internal/webui/svcimpl/file_service.go:324-345`). Overlapping mutations are
+> serialized by `svcimpl/file_versions.go:23-36` `pathLockSet`.
+
 Writes are **last-writer-wins**: no lock check, no etag precondition. A save that
 races an agent or another save silently takes the file; accepted (§5). The FE still
 tracks *its own* dirty state (`useFileEditor`: dirty, Cmd+S, discard guard) — that's
@@ -349,7 +408,19 @@ independent and can swap by appetite.
 
 ---
 
-## 5. Accepted risks (explicit, by decision)
+## 5. Accepted risks (explicit, by decision) — NONE OF THESE APPLY TO SHIPPED CODE
+
+> SUPERSEDED — highest-risk section in this file. It reads as a deliberate
+> decision to ship without a security model; that decision was reversed. In
+> `main`: `.git` is refused for every operation
+> (`internal/webui/svcimpl/rooted_file_store.go:141`, recursive guards at
+> `:558,598-599,689,720,760`); overlapping browser mutations are serialized
+> (`svcimpl/file_versions.go:23-36`) and stale writes are rejected by
+> `If-Match`/`If-None-Match` (`handlers/misc/files.go:347,352-354,375`); and
+> `.env*`/keys/certs are withheld from anyone without the `sensitive` capability
+> (`svcimpl/file_walk.go:348,376`, `server/middleware/file_access.go:92-102`).
+> The authoritative statement is
+> [workspace-file-browser-security.md](workspace-file-browser-security.md).
 
 Recorded once, without mitigation plans — these follow from the no-guards stance and
 are accepted:
@@ -395,3 +466,11 @@ Engineering risks (mitigated in-design):
 Per-phase ≈ 1 developer-week (E ≈ 1.5), excluding review/QA; A and B are the
 confident estimates, C–E lean conservative because the walk core, workspace status
 fan-out, and history endpoints are net-new.
+
+## Related
+
+- [workspace-file-browser-security.md](workspace-file-browser-security.md) —
+  canonical for shipped behaviour.
+- [2026-07-07-file-explorer-v3-unified-tree.md](2026-07-07-file-explorer-v3-unified-tree.md)
+  — successor for information architecture.
+- [docs/arch/file-explorer.md](../arch/file-explorer.md) — component map.

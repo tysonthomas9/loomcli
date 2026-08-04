@@ -1,3 +1,9 @@
+// Package tsruntime provides an opt-in cli.AgentInvoker that routes a worker
+// agent's execution leaf through the bundled TypeScript task-runner (local or
+// Daytona entrypoint) instead of the Go in-process path, so both planes share
+// one execution and telemetry path. Enabled only when LOOM_DAEMON_LEAF=ts;
+// otherwise Invoker returns its fallback untouched. Used by `loom plan` and
+// `loom task` in internal/cli/agent.
 package tsruntime
 
 import (

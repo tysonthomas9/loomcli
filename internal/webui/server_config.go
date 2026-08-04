@@ -1,3 +1,8 @@
+// Package webui holds the web UI server's wiring contract and its cross-cutting
+// HTTP infrastructure: ServerConfig (assembled by internal/cli/serve, consumed by
+// internal/webui/app), Prometheus/OTel/Sentry middleware, the /api/auth reverse
+// proxy to the external auth service, SSRF-guarded dialing, and the daemon
+// circuit-breaker HealthDoctor. Route assembly itself lives in internal/webui/app.
 package webui
 
 import (

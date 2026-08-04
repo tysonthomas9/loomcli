@@ -1,3 +1,9 @@
+// Package lockfile provides loom's advisory file-locking primitives with
+// per-platform implementations (unix/windows/wasm), a liveness check on a PID,
+// and the daemon.lock protocol: its JSON metadata (PID, database, version) and
+// a cheap "is a daemon already running" probe callers use before paying for an
+// RPC timeout. Used by internal/cli/daemon and its supervisor, internal/rpc,
+// sessions, usage, and internal/configlock.
 package lockfile
 
 import (

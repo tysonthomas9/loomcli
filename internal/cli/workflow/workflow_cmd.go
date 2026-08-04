@@ -1,3 +1,8 @@
+// Package workflow implements `loom workflow`: cloning built-in Flue workflow
+// TypeScript sources, building them into DriverVersions, and approving,
+// activating, listing and running those versions against fleet-db. Registered
+// by cmd/loom; the build-and-register logic lives in internal/workflows and the
+// resulting versions are executed by the internal/driver engine.
 package workflow
 
 import (

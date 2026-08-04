@@ -1,3 +1,8 @@
+// Package localsettings serves the GET/PATCH HTTP endpoints for this machine's
+// desktop-local runtime settings — embedded fleet-db Redis connection, default
+// agent runtime, local task-runner model, and Daytona/GitHub runtime
+// credentials — persisting them via internal/localsettings and returning
+// secret-sanitized responses. Registered by internal/webui/modbuilder.
 package localsettings
 
 import (

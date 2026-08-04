@@ -1,10 +1,10 @@
 # Dogfood Agent Execution Test Plan
 
-**Status:** Draft
-**Date:** 2026-05-04
-**Related:** `docs/product/agent-execution-prd.md`,
-`docs/product/local-mode-product-spec.md`,
-`docs/product/container-runner-mvp-spec.md`
+> **Status:** Draft
+> **Date:** 2026-05-04
+> **Related:** `docs/product/agent-execution-prd.md`,
+> `docs/product/local-mode-product-spec.md`,
+> `docs/product/container-runner-mvp-spec.md`
 
 ## Purpose
 

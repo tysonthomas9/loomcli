@@ -1,3 +1,8 @@
+// Package envfilter decides which environment variables a spawned agent
+// subprocess inherits: an exact/prefix allowlist, overridden by a hard
+// blocklist, so agent CLIs never see unrelated host secrets. Used only by
+// internal/cli/exec.go, which builds the environment for every agent process
+// loom launches.
 package envfilter
 
 import (

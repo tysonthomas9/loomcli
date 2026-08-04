@@ -1,3 +1,7 @@
+// Package fileaccess carries the per-request file capabilities (read, write,
+// sensitive) for the web UI's file browser and classifies credential-like paths
+// (.env, .pem, .netrc, SSH keys) as sensitive. Capabilities are installed by
+// internal/webui/server/middleware and read by internal/webui/service.
 package fileaccess
 
 import (

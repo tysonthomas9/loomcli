@@ -1,9 +1,14 @@
 # loomcli E2E Test Container
 
+> **Status:** Current · *audited 2026-07-24*
+
 Alpine-based container for running loomcli E2E tests in isolation.
 Includes Go binaries, Chromium, Playwright, agent-browser, and stub backends.
 
 **Image size:** ~1.5GB | **Min Podman VM disk:** 14GB
+
+This container is self-contained. The **epic-runner lanes** at the bottom of
+this file are not — they need sibling `fleet-db` and `flue` checkouts.
 
 ## Quick Start
 
@@ -122,10 +127,10 @@ Stage 1: golang:bookworm (builder)
   └── Compiles loom as a static binary (CGO_ENABLED=0)
   └── Cache mounts: /go/pkg/mod, /root/.cache/go-build
 
-Stage 2: node:20-alpine (frontend)
+Stage 2: node:22-alpine (frontend)
   └── Builds frontend dist/ only (node_modules cache-mounted)
 
-Stage 3: node:20-alpine (runtime)
+Stage 3: node:22-alpine (runtime)
   └── Alpine chromium + agent-browser + @playwright/test
   └── Copies static binaries from builder
   └── Copies dist/ from frontend
@@ -178,3 +183,42 @@ Mount a real CLI binary to replace a stub:
 podman run --rm -v $(which claude):/usr/local/bin/claude \
   -e ANTHROPIC_API_KEY=sk-... loomcli-e2e
 ```
+
+## Epic-runner lanes (need sibling checkouts)
+
+Two extra podman drivers live here and are **not** covered by the phases above.
+Both build a real `fleet-db` binary from the sibling checkout and exit 1 when it
+is missing (`run_epic_runner_codex_podman.sh:18-23`). Supplying a prebuilt
+`FLEET_DB_BIN` skips the build and the checkout requirement.
+
+| Script | What it runs |
+|---|---|
+| `run_epic_runner_codex_podman.sh` | Codex-backed epic runner E2E in podman (`e2e/epic_runner_codex.sh` inside the image) |
+| `run_epic_runner_real_codex_octocat_podman.sh` | Real Codex against `octocat/Hello-World`; also needs `flue` and a `CODEX_HOME` |
+
+Their checkout defaults are inconsistent — set both env vars explicitly:
+
+- `run_epic_runner_codex_podman.sh:8` → `FLEET_DB_REPO=<repo>/../../fleet-db`
+- `run_epic_runner_real_codex_octocat_podman.sh:8,10` → `FLEET_DB_REPO=<repo>/../../fleet-db`
+  but `FLUE_REPO=<repo>/../flue` (different depth, same file)
+
+```bash
+FLEET_DB_REPO=/path/to/fleet-db FLUE_REPO=/path/to/flue \
+  ./e2e/run_epic_runner_codex_podman.sh
+```
+
+`e2e/Dockerfile.base` is a slower-moving toolchain base image (Go + Node +
+Playwright deps); rebuild it only when toolchain versions change.
+
+## Related
+
+- [`../docs/testing/README.md`](../docs/testing/README.md) — index of every test
+  surface and which one to reach for
+- [`../docs/testing-terminology.md`](../docs/testing-terminology.md) — mandatory
+  before running anything slow or irreversible; defines `real` vs `live` here
+- [`../test/local-mode/README.md`](../test/local-mode/README.md) — full-stack
+  dogfood stack (this container is not that)
+- [`../deploy/podman-stack/README.md`](../deploy/podman-stack/README.md) —
+  distributed-topology platform e2e
+- [`../AGENTS.md`](../AGENTS.md) — sibling-checkout setup and the terminology
+  handshake

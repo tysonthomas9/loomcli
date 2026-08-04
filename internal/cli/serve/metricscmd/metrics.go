@@ -1,3 +1,9 @@
+// Package metricscmd owns the monitoring HTTP surface of `loom serve`: the
+// /api/monitor/* JSON endpoints (status, agents, tasks, stats, sync,
+// workspaces) and the Prometheus text endpoint at /metrics. It also owns the
+// TTL cache and singleflight collector that keep the expensive issue-backend
+// (fleet-db) and daemon-RPC scans off the request path. Constructed and routed
+// by internal/cli/serve.
 package metricscmd
 
 import (

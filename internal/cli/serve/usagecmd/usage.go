@@ -1,3 +1,8 @@
+// Package usagecmd backs GET /api/monitor/usage for `loom serve`: it reads token
+// and cost records from an internal/usage store and aggregates them by agent, by
+// agent CLI backend (codex, claude, ...), and by day for the web UI dashboard.
+// The handler itself is path-agnostic: internal/cli/serve injects it as
+// webui.MonitorHandlers.Usage and internal/webui/app/routes.go picks the route.
 package usagecmd
 
 import (
@@ -10,7 +15,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
-// Response is the JSON response for /api/usage.
+// Response is the JSON response for GET /api/monitor/usage.
 type Response struct {
 	TotalInputTokens      int64                `json:"total_input_tokens"`
 	TotalOutputTokens     int64                `json:"total_output_tokens"`

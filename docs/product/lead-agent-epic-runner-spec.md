@@ -1,12 +1,28 @@
 # Lead Agent Epic Runner Product Spec
 
-**Status:** Draft
-**Date:** 2026-05-11
+> **Status:** Partially implemented — the product rules hold and are enforced,
+> but by a different mechanism than this doc describes. *audited 2026-07-23*
+>
+> The one-epic-per-lead rule, the three conflict outcomes and `agent.parent` as
+> the epic lock all survived and are now enforced inside the `epic-runner` Flue
+> workflow (`internal/workflows/builtin/epic-runner.ts:453-566`). **This doc is
+> canonical for those lead↔epic product rules.**
+>
+> What changed on 2026-06-09 (`553998a1d`): the Go in-process runner and the
+> `POST /api/workspaces/{ws}/epics/{id}/run` route were deleted. Child work is
+> now a `TaskRun` (`internal/domain/platform.go:498`), **not** an ephemeral
+> worker agent, so every "spawned worker" statement below describes a model
+> that no longer runs. See
+> [docs/design/epic-runner-workflow-architecture.md](../design/epic-runner-workflow-architecture.md).
+
+**Originally written:** 2026-05-11
+**Last updated:** 2026-07-23
 **Related:** `docs/product/agent-run-ux-spec.md`,
 `docs/product/daemon-agent-runtime-architecture.md`,
 `docs/product/agent-lifecycle-state-machine.md`,
 `docs/product/session-artifact-contract.md`,
-`docs/design/epic-runner-lead-control.md`
+`docs/design/epic-runner-workflow-architecture.md`,
+`docs/design/epic-runner-lead-control.md` (historical)
 
 ## Purpose
 
@@ -35,7 +51,7 @@ the right.
 | One epic per lead | A lead cannot run two different epics at the same time. |
 | Completion does not clear ownership | When the epic drains, `agent.parent` remains set until the user talks to the lead and clears or changes it. |
 | Backend enforces conflicts | Starting `loom epic run --parent X` from lead `A` is rejected if `A.parent` is non-empty and not `X`. |
-| Start from UI or terminal | Users can click "Run Epic" or type `loom epic run --parent <epic_id>` manually. Both paths use the same backend command path. |
+| Start from UI or terminal | Users can click "Run Epic" or type `loom epic run --parent <epic_id>` manually. Both paths create a `DriverRun` for the same `epic-runner` workflow (`internal/cli/epic/run.go:167`, `internal/webui/handlers/workflows/module.go:131`). **The UI no longer binds the selected lead**: it mints a fresh `lead-<epic-slug>` agent per epic (`internal/webui/frontend/src/hooks/workspace/startEpicRunnerForIssue.ts:33-47,112-118`) and deletes it if the workflow fails to start (`:144-152`), so the one-epic-per-lead conflict is rarely hit from the UI. |
 | No DAG visual in MVP | The right panel shows epic-grouped task cards, statuses, blockers, and current work. It does not need an arrow DAG first. |
 | Worker terminals are clickable | Clicking a spawned worker switches the center terminal to that worker. The right panel remains scoped to the lead's epic. |
 | Ephemeral worker is single-use | One ephemeral worker represents one task attempt. It may retry the same attempt after process failure, but it must not complete one task and then claim another. |
@@ -113,10 +129,22 @@ agent.name                      lead identity
 agent.role_name                 interactive role (default: lead)
 agent.state                     idle | active | stopped
 agent.parent                    active epic id, or empty
-agent.orchestrator_session_id   resumable lead terminal/session id
-agent.mode                      persistent or normal lead mode
+agent.mode                      ephemeral | service
 agent.desired_state             running when lead should be available
 ```
+
+`agent.orchestrator_session_id` was proposed here and **removed**. The
+tombstone is at `internal/domain/agent.go:53-55`: "AgentSession is the single
+source of truth; use `store.OrchestrationSessionIDFor`." Worker attribution
+now flows through the `LOOM_ORCHESTRATOR_SESSION_ID` env var — set by
+`loom lead` (`internal/cli/agent/lead/lead.go:364`), by the web terminal
+(`internal/webui/handlers/terminal/agent_session.go:441`) and by the supervisor
+(`internal/cli/daemon/supervisor/spawn.go:193`) — and through the
+`AgentCommand` payload as `parent_session_id`
+(`internal/cli/agentdef/agentdef_cmd.go:175-181`).
+
+`agent.mode` has exactly two values, `ephemeral` and `service`
+(`internal/domain/control_plane.go:8-9`). There is no "persistent" mode.
 
 `agent.parent` is the product-level epic lock:
 
@@ -265,6 +293,17 @@ if selectedLead.parent == "":
 
 ### Spawned Workers
 
+> **Superseded for the epic-runner path.** The epic runner creates no worker
+> agent: `enqueueChildTask` requests a `TaskRun`
+> (`internal/workflows/builtin/epic-runner.ts:275-316`) and serve-side task
+> workers execute it. `worker.orchestrator_session_id` no longer exists as a
+> field (see the tombstone note under *Lead Agent* above); the lead's
+> orchestration session id rides along as the `parentSessionId` on the task-run
+> request (`epic-runner.ts:87`). The ephemeral/service invariants below remain
+> accurate for workers started the other ways — `loom agentdef add --mode
+> ephemeral --task`, `loom agent`, `loom plan`, `loom task` — and are enforced
+> by the supervisor at `internal/cli/daemon/supervisor/restart.go:98-108`.
+
 Workers spawned by a lead-owned epic runner should be attributable to that lead.
 
 ```text
@@ -307,21 +346,47 @@ worker.mode == service
   worker remains a live/restartable agent
 ```
 
-Do not introduce a separate `TaskRun` entity for the MVP. Use existing
-control-plane primitives:
+**REVERSED 2026-06-09 (`553998a1d`).** The rule below was "do not introduce a
+separate `TaskRun` entity for the MVP". A first-class `TaskRun` now exists and
+is the epic runner's unit of child work: `domain.TaskRun` at
+`internal/domain/platform.go:498`, `TaskRunStatus` ∈
+queued|running|completed|failed|cancelled at `:482-486`. The epic-runner
+workflow enqueues one `TaskRun` per ready task
+(`internal/workflows/builtin/epic-runner.ts:97-111,275-316`) instead of
+creating an ephemeral worker agent. The original rule, kept for the record:
 
-```text
-Agent              lead/worker identity and lifecycle
-AgentCommand       start/stop/yield dispatch, including task_id
-AgentSession       task attempt lifecycle and artifact handle
-Issue              epic/task status, blocker graph, assignee
-TerminalSession    live PTY or archived terminal/log handle
-```
+> Do not introduce a separate `TaskRun` entity for the MVP. Use existing
+> control-plane primitives:
+>
+> ```text
+> Agent              lead/worker identity and lifecycle
+> AgentCommand       start/stop/yield dispatch, including task_id
+> AgentSession       task attempt lifecycle and artifact handle
+> Issue              epic/task status, blocker graph, assignee
+> TerminalSession    live PTY or archived terminal/log handle
+> ```
+>
+> If reporting later needs an aggregate read model, it should be derived from
+> these records first.
 
-If reporting later needs an aggregate read model, it should be derived from
-these records first.
+Those primitives are still real and still used elsewhere (service/task workers
+launched by `loom agent`, `loom plan`, `loom task`). They are simply no longer
+how the epic runner dispatches child work.
 
 ### Worker History Surfaces
+
+> **One of the three shipped.** The lead-scoped panel exists:
+> `WorkerHistoryItem` / `buildWorkerHistoryByEpic` / `<WorkerHistory>` at
+> `internal/webui/frontend/src/components/AgentWorkPanel/AgentWorkPanel.tsx:89,150,573,1115`.
+> The per-task attempt-history surface and the workspace cleanup route are
+> **NOT BUILT** — `internal/webui/frontend/src/router.tsx:87-166` registers
+> kanban, list, table, graph, monitor, observability, terminal, agents, prs,
+> settings, workspace, files, `issues/:issueId`, `agents/:agentName` and
+> nothing else. The evidence/cleanup contract these surfaces would consume is
+> owned by `docs/product/session-artifact-contract.md` and
+> `docs/product/agent-run-ux-spec.md`; with child work now being `TaskRun`s
+> rather than ephemeral worker agents, restate the requirement there before
+> building it.
 
 Ephemeral worker history must be visible in three places.
 
@@ -488,6 +553,16 @@ ephemeral worker.
 
 ### UI Run Epic Button
 
+> **As built, the UI mints a lead rather than reusing the selected one.**
+> `startEpicRunnerForIssue` creates a fresh `lead-<epic-slug>` agent with
+> `role_name: "lead"` (`nextEpicLeadName` at
+> `internal/webui/frontend/src/hooks/workspace/startEpicRunnerForIssue.ts:33-47`,
+> creation at `:112-118`), starts the workflow with that lead
+> (`:136-141`), and deletes the agent if the workflow start fails (`:144-152`).
+> The "same lead identity" guarantee below therefore holds only for the manual
+> `loom epic run` path. Whether one-lead-per-epic or one-lead-per-run is the
+> product intent is an open question this doc has not re-decided.
+
 The UI button and terminal command should use the same backend run semantics.
 A user may still type:
 
@@ -508,32 +583,30 @@ This guarantees the UI button and manual terminal command share:
 - the same backend conflict enforcement
 - the same observable terminal output
 
-Implementation status, 2026-05-17:
+Implementation status, audited 2026-07-23:
 
-- The CLI and UI now share the `internal/epicrunner` reconcile/dispatch path.
-- The UI run route validates backend, repo, epic, command channel, daemon node,
-  and lead ownership before mutating lead assignment.
-- The UI run route performs the first reconcile pass and queues real daemon
-  worker `start` commands for ready child tasks, then continues a backend loop
-  so newly unblocked child work can be scheduled.
-- Browser validation covered a fresh two-epic Slack mock workspace with
-  `atlas` and `nova` as separate leads. The no-repo case fails with a clear
-  setup error, repo-backed runs dispatch one worker per lead/epic, duplicate
-  active runs return `already_running`, and assigning a busy lead to a second
-  epic returns 409.
-- Lead startup and Claude hook delivery now share a compact backend assignment
-  context. `loom lead` starts with the assigned epic when `agent.parent` is set,
-  and Claude receives assignment `additionalContext` on session start, user
-  prompt, task-tool boundary, and stop. The UI now reports
-  `delivery_state: pending` separately from runner `run_state`.
-- Codex app-server delivery now launches Codex leads as controlled app-server
-  runtimes from startup. The visible TUI attaches through `codex --remote`, and
-  backend delivery uses provider `turn/start` on the recorded thread when the
-  thread is idle. If the runtime is still starting or busy, delivery remains
-  pending and retries instead of typing into the terminal.
-- Already-running raw Codex TUIs remain legacy/uncontrolled sessions. They are
-  not retrofitted with app-server control; users should reconnect/restart those
-  leads to get visible backend-originated Run Epic delivery.
+- Both paths create a `DriverRun` for the `epic-runner` Flue workflow. CLI:
+  `internal/cli/epic/run.go:167` (`queueEpicWorkflowRun` at `:192`,
+  `CreateDriverRun` at `:200`). UI: `startEpicRunnerForIssue.ts:136` → `POST` handled by
+  `internal/webui/handlers/workflows/module.go:131`.
+- Validation moved into the workflow. Epic existence/type, lead existence, lead
+  role, one-epic-per-lead and one-lead-per-epic are all checked in
+  `startEpicRun` (`internal/workflows/builtin/epic-runner.ts:453-566`); the
+  conflict message is at `:505`. A fail-closed backend-CLI preflight runs
+  *before* the run row is created, in both paths
+  (`internal/webui/handlers/workflows/preflight.go:23-31`,
+  `internal/cli/epic/run.go:131-135`).
+- Child work is a `TaskRun` per ready task, not a worker agent
+  (`epic-runner.ts:97-111`); the loop is edge-triggered off the epic watch
+  stream (`:129-195`), not a polling reconcile.
+- Assignment delivery is attempt-then-enqueue through a durable queue rather
+  than an inline retry loop. See
+  [docs/design/lead-runtime-delivery.md](../design/lead-runtime-delivery.md).
+- The Claude-hook assignment context described in the previous revision still
+  ships (`internal/cli/hooks/hooks_assignment_context.go:31-70`), but it never
+  blocks a tool call or a stop.
+- The `POST /api/workspaces/{ws}/epics/{id}/run` route and the deterministic
+  ephemeral workers the 2026-05-17 validation runs observed no longer exist.
 
 ## Terminal and Resume Requirements
 
@@ -676,7 +749,10 @@ Ship these first:
 8. Enforce single-task ephemeral worker lifecycle in backend start/claim/restart
    paths.
 9. Show completed ephemeral workers as history on the lead page and task detail.
+   *Lead page shipped (`AgentWorkPanel.tsx:573`); task detail NOT BUILT.*
 10. Provide workspace-level cleanup for completed ephemeral worker worktrees.
+    *NOT BUILT — no `/ws/:workspace/agents/history` route exists
+    (`internal/webui/frontend/src/router.tsx:87-166`).*
 
 Do not include in MVP:
 
@@ -685,7 +761,8 @@ Do not include in MVP:
 - multi-epic lead scheduling
 - automatic clearing of lead epic ownership
 - separate epic runner page
-- separate `TaskRun` write model
+- ~~separate `TaskRun` write model~~ — reversed; `domain.TaskRun`
+  (`internal/domain/platform.go:498`) is now the child-work unit
 
 ## Risks and Mitigations
 
@@ -695,7 +772,7 @@ Do not include in MVP:
 | Lead drains epic but still owns it | This is intentional. Show "drained, still assigned" and require user/lead action to clear. |
 | Terminal reconnect fails | Persist terminal/session metadata and show explicit disconnected state with retry. |
 | Worker click loses epic context | Store selected lead scope separately from selected terminal. |
-| Existing task workers are not attributable to a lead | Set `orchestrator_session_id` and `parent` on spawned workers. |
+| Existing task workers are not attributable to a lead | Propagate the lead's orchestration session id via `LOOM_ORCHESTRATOR_SESSION_ID` / the `AgentCommand` `parent_session_id` payload, and set `parent` on spawned workers. (The original mitigation named an `orchestrator_session_id` column; that field was removed — `internal/domain/agent.go:53-55`.) |
 | `agent.parent` is overloaded | Treat `parent` as active epic for lead/task orchestration and document the invariant clearly. |
 | Completed ephemeral workers look restartable | Remove them from the live agent rail and render them as read-only task attempts. |
 | Manual restart makes ephemeral worker claim another task | Require `task_id` for ephemeral start and reject restart after completed task session. |
@@ -714,3 +791,18 @@ Do not include in MVP:
   return lead, child workers, active epic, and scoped issues in one request.
 - Add a compact derived read model only if the UI cannot efficiently join
   agents, commands, sessions, terminal tabs, and issues for worker history.
+
+## Related
+
+- [docs/design/epic-runner-workflow-architecture.md](../design/epic-runner-workflow-architecture.md)
+  — how these rules are executed today (Flue workflow, `DriverRun`, `TaskRun`).
+- [docs/design/lead-runtime-delivery.md](../design/lead-runtime-delivery.md) —
+  how an assignment reaches the lead's live conversation.
+- [docs/design/epic-runner-lead-control.md](../design/epic-runner-lead-control.md)
+  — historical design + validation record for the deleted Go runner.
+- [docs/product/orchestrator-worker-model.md](orchestrator-worker-model.md) —
+  the orchestrator / worker / ephemeral / service vocabulary used here.
+- [docs/product/session-artifact-contract.md](session-artifact-contract.md) and
+  [docs/product/agent-run-ux-spec.md](agent-run-ux-spec.md) — own the worker
+  history / evidence / cleanup contract.
+- [docs/loom-glossary.md](../loom-glossary.md) — "lead", "worker", "role kind".

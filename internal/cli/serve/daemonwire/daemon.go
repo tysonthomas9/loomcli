@@ -1,3 +1,8 @@
+// Package daemonwire builds the callbacks that let `loom serve` reach the local
+// agent daemon and its sidecars: control-socket commands, daemon state/config
+// and agent-queue readers shaped for the web UI, the in-process Redis used for
+// terminal state, and fleet JWT key resolution. Imported only by
+// internal/cli/serve.
 package daemonwire
 
 import (

@@ -1,12 +1,11 @@
-package runtypes
-
-import "github.com/tysonthomas9/loomcli/internal/domain"
-
 // Package runtypes holds the driver's core execution-run contract (RunRequest /
 // RunResult). It lives in this neutral leaf package — imported by both the parent
 // driver package and the driver/sandbox package, and aliased back as
 // driver.RunRequest / driver.RunResult — so the run/orchestration types and the
 // sandbox launchers don't form an import cycle. domain is its only dependency.
+package runtypes
+
+import "github.com/tysonthomas9/loomcli/internal/domain"
 
 type RunRequest struct {
 	Run          *domain.DriverRun

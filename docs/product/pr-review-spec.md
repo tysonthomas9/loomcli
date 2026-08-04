@@ -1,10 +1,15 @@
 # Pull Request Review Spec
 
-**Status:** Draft
-**Date:** 2026-06-11
-**Related:** `docs/product/agent-run-ux-spec.md`,
-`docs/product/agent-lifecycle-state-machine.md`,
-`docs/design/aether-wireframe-mapping.md`
+> **Status:** Partially implemented · *audited 2026-07-23*. §1 (queue) and §4
+> (task/epic chrome) largely landed. **§2 (route), §3 (agent identity), §5
+> (GitHub transport), and §6 (API table) were built differently** and are
+> corrected below. The §5 reversal matters most: the shipped primary path
+> stores a GitHub PAT, which the original decision explicitly ruled out.
+
+**Last updated:** 2026-07-23
+**Related:** [`agent-run-ux-spec.md`](agent-run-ux-spec.md),
+[`agent-lifecycle-state-machine.md`](agent-lifecycle-state-machine.md),
+[`../design/aether-wireframe-mapping.md`](../design/aether-wireframe-mapping.md)
 
 ## Purpose
 
@@ -52,13 +57,13 @@ context rail beside the workspace, stacking the task panel over the review
 
 ## Primary Surfaces
 
-| Surface | Purpose |
-|---|---|
-| PRs page (`/ws/:ws/prs`) | Loom-first review queue across all workspace repos. |
-| PR page (`/ws/:ws/prs/:repo/:number`) | Full-screen GitHub-style review: diff, checks, decisions, agent CTA. |
-| Review agent workspace (Agents view) | Persisted PR review agent with terminal + standard tabs. |
-| Task card / issue detail panel | PR pill and PR section on linked tasks. |
-| Epic header / detail | "N PRs" rollup chip. |
+| Surface | Purpose | Status |
+|---|---|---|
+| PRs page (`/ws/:ws/prs`) | Loom-first review queue across all workspace repos. | Shipped (`internal/webui/frontend/src/router.tsx:131`) |
+| PR page (`/ws/:ws/prs/:repo/:number`) | Full-screen GitHub-style review: diff, checks, decisions, agent CTA. | **Not shipped as a route** — see §2 |
+| Review agent workspace (Agents view) | Persisted PR review agent with terminal + standard tabs. | Shipped, different identity — see §3 |
+| Task card / issue detail panel | PR pill and PR section on linked tasks. | Shipped |
+| Epic header / detail | "N PRs" rollup chip. | Shipped |
 
 ## 1. PRs Page (review queue)
 
@@ -98,13 +103,27 @@ PR-specific fields.
 
 ### Data
 
+> **Not built.** `ops.GitPullRequest` has no `checks` field
+> (`internal/ops/gitops.go:99-116`) and `statusCheckRollup` appears nowhere in
+> `internal/cli/git/pr_list.go`. The only `statusCheckRollup` in the repo is
+> the unrelated stack publisher's GraphQL query
+> (`internal/stackpublish/forge_github.go:188`).
+
 `GitPullRequest` gains `checks` (`passed | failed | running | none`),
 derived from `statusCheckRollup` added to the `gh pr list --json` field
-list. Additions/deletions/changed-files are already fetched.
+list. Additions/deletions/changed-files **are** already fetched
+(`internal/ops/gitops.go:113-115`).
 
 ## 2. PR Page (full-screen, GitHub-style)
 
 ### Route and entry
+
+> **Superseded.** No such route exists.
+> `internal/webui/frontend/src/router.tsx:131` registers only `prs` →
+> `PRsPage`, and `PRReviewWorkspace` is rendered as a **child component** of
+> `PRsPage` (`internal/webui/frontend/src/views/PRsPage.tsx:21,362,379`) —
+> that is, the entry this section proposed to replace is what shipped. There
+> is no deep link to an individual PR.
 
 `/ws/:ws/prs/:repo/:number` — deep-linkable, back button returns to the
 queue. Replaces both the wireframe slide-over and the current
@@ -154,21 +173,32 @@ decision actions. This generalizes to GitLab later
 
 ### Identity and lifecycle
 
-- Keyed by **`(owner, repo, number)`** — not by task — so task-less PRs are
-  fully supported. One review agent per PR: the CTA reopens an existing
-  agent rather than spawning a duplicate.
-- **Backing:** a real agent session (`kind = "review"`) in a **fresh
-  worktree** created by fetching `refs/pull/N/head` into a local branch
-  (e.g. `review/pr-N`) + `git worktree add`. Isolated from the author
-  agent's state; works for external/human PRs.
+**As shipped** (`internal/webui/handlers/prreview/reviewer.go`):
+
+- Keyed by `(owner, repo, number)`, as proposed — but the agent name is
+  collision-resistant, not the plain shape the draft implied:
+  `review-<owner>-<repo>-<sha256(owner/repo)[:8]>-pr-<N>`, capped at 100
+  chars (`reviewer.go:29-31,44-55`). Two earlier name shapes are still
+  migrated on encounter: `legacyReviewerAgentName` (`reviewer.go:76`) and
+  `intermediateReviewerAgentName` (`reviewer.go:64`), retired by
+  `ensureReviewerAgentAndRetireLegacy` (`reviewer.go:364`).
+- **Backing is not a session kind.** There is no `AgentSessionKind` `review`
+  — the kinds are `task|orchestration|terminal|maintenance|ad_hoc`
+  (`internal/domain/control_plane.go:56-64`). The reviewer is a **persisted
+  `domain.Agent`** on role `pr-reviewer` (`reviewer.go:32,344`), whose role
+  is reconciled to `kind=interactive` with prompt
+  `builtin:pr-review-checkout` (`reviewer.go:33,416-445`).
+- **The checkout is detached**, not a named `review/pr-N` branch:
+  `localworkspace.EnsureDetachedGitWorktreeAtPRHead`
+  (`internal/webui/handlers/prreview/module.go:76`).
 - **Persisted** in the agent store like task/lead agents: survives reload,
-  visible to the CLI, appears in the AGENTS sidebar roster as
-  "Review #N · PR Review · Live" with the PR avatar; the roster count
-  includes review agents; the collapsed rail shows their dots.
-- **Teardown:** on Approve & merge, on PR close/merge detected by polling,
-  or explicit dismissal — removes the session and its worktree. A reaper
-  cleans orphaned review worktrees whose PR has been closed for N days
-  (same posture as terminal-session liveness cleanup).
+  visible to the CLI, appears in the AGENTS sidebar roster.
+- **Teardown:** `retireLegacyReviewer` (`reviewer.go:383`) /
+  `retireReviewerAgent` (`reviewer.go:400`) stop the runtime and delete the
+  agent. **The
+  time-based reaper for orphaned review worktrees is UNVERIFIED** — no such
+  reaper was found under `internal/webui/handlers/prreview`. Treat the
+  "closed for N days" cleanup as unbuilt until located.
 
 ### Workspace UI
 
@@ -188,6 +218,13 @@ The agent launches on the workspace's default AI backend, primed with PR
 context (`loom pr review N` semantics: branch checked out, diff read).
 
 ### Decision semantics
+
+> **Partially built.** `POST …/review` posts a GitHub review with event
+> `APPROVE` or `REQUEST_CHANGES`
+> (`internal/webui/handlers/prreview/handlers.go:114-124,268-273`). There is
+> no merge call, no server-side CI gate, and no task-close/teardown chain in
+> that handler; `merged` is only read back from the response
+> (`handlers.go:229`).
 
 - **Approve & merge:** `gh pr review --approve` → `gh pr merge` (repo's
   default merge method) → close the linked loom task (skip if none) → tear
@@ -218,46 +255,62 @@ context (`loom pr review N` semantics: branch checked out, diff read).
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| GitHub transport | Keep **gh CLI** behind the `ops.GitOps` seam | Auth (SSO/2FA/enterprise) delegated to `gh auth login`; already a dependency; no token storage in loomcli. go-github remains possible behind the same interface. |
+| GitHub transport (**shipped, reversed**) | **Connector-backed with a stored GitHub PAT** | The `prreview` module is connector-primary: the GitHub PAT from local runtime settings, or the `LOOM_WEBUI_GITHUB_TOKEN` override, supplies the outer authority bound while connector grants provide defense in depth (`internal/webui/handlers/prreview/module.go:27,29-35`). The credential is sealed in the connector vault and re-resolved via `InvalidateCredentialSeeds` (`module.go:85-94`); the token is read from `LOOM_WEBUI_GITHUB_TOKEN` at `internal/webui/handlers/prreview/seed.go:128,150`. Read grants are seeded on read paths, write grants only on explicit review posts. |
+| GitHub transport (**fallback**) | gh CLI behind the `ops.GitOps` seam | Survives only for store-less `loom serve` (`internal/webui/handlers/git/pull_requests_module.go:9-12`). Auth delegated to `gh auth login`. |
+| ~~GitHub transport (original)~~ | ~~gh CLI only; no token storage in loomcli~~ | **Superseded 2026-07-23 audit.** The original rationale — SSO/2FA/enterprise auth delegated to `gh`, zero credential surface in loom — no longer describes the primary path. A contributor must not assume loom holds no GitHub credential; it does. |
 | Git operations | **Plain git / go-git** for fetch, worktrees, diffs | PR refs fetch over the git protocol (forks included); diff viewing works with zero GitHub API access; generalizes to GitLab refs. |
 | PR identity | `(owner, repo, number)` everywhere | Survives URL variants; makes tasks optional; already used for the queue join. |
 | Failure posture | Partial, never fatal | Per-repo warnings; read paths (queue, diff) keep working without gh; only metadata refresh and decisions require it. |
 | Decision authority | Human-only | Agents inform; only the user clicks Approve/Request changes. CI gate enforced server-side. |
 
-## 6. API Surface (new/changed)
+## 6. API Surface
+
+**As registered** (`internal/webui/handlers/prreview/module.go:102-109`). Note
+the `{owner}` path segment the original table omitted.
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /api/workspaces/{ws}/pull-requests?state=` | Existing; response gains `checks` per PR and already returns `warnings[]`. |
-| `GET /api/workspaces/{ws}/pull-requests/{repo}/{number}` | PR detail: metadata + refreshed checks. |
-| `GET …/pull-requests/{repo}/{number}/files` / `…/files/{path}` | Diff file list and per-file patch from the fetched PR ref (no worktree). |
-| `POST …/pull-requests/{repo}/{number}/review-agent` | Ensure (spawn-or-reopen) the persisted review agent; returns session info. |
-| `POST …/pull-requests/{repo}/{number}/approve` | Server-gated approve + merge + task close + teardown. |
-| `POST …/pull-requests/{repo}/{number}/request-changes` | Body: comment. Posts review; task restart per §3. |
+| `GET /api/workspaces/{ws}/pull-requests` | Queue listing. Returns `warnings[]`; no `checks` field. |
+| `GET …/pull-requests/{owner}/{repo}/{number}` | PR detail. |
+| `GET …/pull-requests/{owner}/{repo}/{number}/diff` | PR diff. |
+| `POST …/pull-requests/{owner}/{repo}/{number}/review` | Post a GitHub review. Approve, request-changes and comment are the `event` field, mapped to `APPROVE` / `REQUEST_CHANGES` / `COMMENT` (`internal/webui/handlers/prreview/handlers.go:268-277`) — not separate endpoints. |
+| `POST …/pull-requests/{owner}/{repo}/{number}/reviewer` | Ensure (spawn-or-reopen) the persisted reviewer agent. |
+| `POST …/pull-requests/{owner}/{repo}/{number}/messages` | Send a message to the reviewer agent. |
+| `GET …/pull-requests/{owner}/{repo}/{number}/stream` | SSE stream of reviewer activity. |
+| `GET …/pull-requests/{owner}/{repo}/{number}/conversation` | Reviewer conversation history. |
 
-Tab metadata for review sessions reuses the existing `TabMetadata`
-(`kind: "review"`, `agent_id`, plus `pr_number`/`repo` in launch metadata).
+Not built: `/files` and `/files/{path}`, `/review-agent`, `/approve`,
+`/request-changes`, and any merge endpoint. Merge state is only **read back**
+(`handlers.go:229`).
 
 ## 7. Build Order
 
 1. **Queue polish** (small): `statusCheckRollup` → `checks`; row branch +
    diff stats + checks badge; urgency sort; Changes-requested/Draft filter
    pills. All inside `PRsPage`/`pr_list.go`.
-2. **PR page** (medium): route + header + decisions UI (decisions can stub
-   to "approve only" until 4); PR-ref fetch + local diff endpoints;
-   inline/split CodeMirror viewer; "Create task from PR".
+   **NOT DONE** — no `statusCheckRollup` in `internal/cli/git/pr_list.go`, no
+   `checks` field on `ops.GitPullRequest` (`internal/ops/gitops.go:99-116`).
+2. **PR page** (medium): route + header + decisions UI; PR-ref fetch + local
+   diff endpoints; inline/split CodeMirror viewer; "Create task from PR".
+   **NOT DONE as specified** — no dedicated route
+   (`internal/webui/frontend/src/router.tsx:131`); a `/diff` endpoint exists
+   (`internal/webui/handlers/prreview/module.go:104`) but the `/files`
+   endpoints do not.
 3. **Decision actions** (medium): approve/request-changes endpoints with
    server-side CI gate, task close/restart wiring, loom-side event record.
-4. **Review agent** (large): `kind=review` sessions, worktree
-   ensure/teardown + reaper, roster/sidebar integration, workspace tabs,
-   PR-context priming, one-per-PR semantics.
+   **PARTIAL** — one `POST …/review` endpoint carrying an `event` field; no
+   CI gate, no merge, no task-close chain.
+4. **Review agent** (large): worktree ensure/teardown, roster/sidebar
+   integration, workspace tabs, PR-context priming, one-per-PR semantics.
+   **LANDED, differently** — see §3. Built as a persisted `pr-reviewer` agent,
+   not a `kind=review` session; the orphan-worktree reaper is unverified.
 5. **Task/epic chrome** (small): card PR pills, issue-panel PR section
-   alignment, epic rollup chips.
+   alignment, epic rollup chips. **LANDED.**
 6. **Dev-server preview** (future, out of scope here): `loom pr preview N`
    — isolated dev server from the review worktree with browser preview.
 
 Each step ships independently; 1–3 deliver a complete human review loop
-before any agent work lands.
+before any agent work lands. *(In practice step 4 landed ahead of 1–3.)*
 
 ## 8. Risks and Open Questions
 
@@ -275,3 +328,10 @@ before any agent work lands.
 - **Review feedback fidelity:** request-changes sends the comment to both
   GitHub and the author agent context; line-level review comments are out
   of scope for v1 (whole-PR comment only).
+
+## Related
+
+- [`README.md`](README.md) — index for this folder
+- [`agent-run-ux-spec.md`](agent-run-ux-spec.md) — the surrounding agent UI
+- [`agent-lifecycle-state-machine.md`](agent-lifecycle-state-machine.md) — session kinds and agent states
+- [`../design/aether-wireframe-mapping.md`](../design/aether-wireframe-mapping.md) — the wireframe this spec adapts

@@ -1,13 +1,21 @@
 # FleetDB Agent Platform V2 Execution Topology Addendum
 
-**Status:** Addendum for review
-**Date:** 2026-06-05
-**Related:**
-- `docs/design/fleetdb-agent-platform-v2-proposal.md`
-- `docs/design/fleetdb-agent-platform-v2-phased-delivery.md`
-- `docs/design/flue-daytona-fleetdb-v1-proposal.md`
-- `docs/design/flue-daytona-runtime-proposal.md`
-- `docs/product/loom-typescript-sdk-spec.md`
+> **Status:** Partially implemented — remediation Steps 1–4 and 6 shipped
+> (see "Remediation Plan" below); Steps 5 and 7 are still open.
+> *audited 2026-07-23*
+> **Date:** 2026-06-05
+> **Related:**
+> - [`workflow-driver-authoring-guide.md`](workflow-driver-authoring-guide.md) —
+>   the current platform contract; read this first for how a driver runs today.
+> - [`fleetdb-agent-platform-v2-proposal.md`](fleetdb-agent-platform-v2-proposal.md)
+> - [`fleetdb-agent-platform-v2-phased-delivery.md`](fleetdb-agent-platform-v2-phased-delivery.md)
+> - [`taskrun-queue-and-worker-pool.md`](taskrun-queue-and-worker-pool.md)
+> - [`driver-op-http-api.md`](driver-op-http-api.md)
+> - [`flue-daytona-fleetdb-v1-proposal.md`](flue-daytona-fleetdb-v1-proposal.md),
+>   [`flue-daytona-runtime-proposal.md`](flue-daytona-runtime-proposal.md), and
+>   [`../product/loom-typescript-sdk-spec.md`](../product/loom-typescript-sdk-spec.md)
+>   — the V1 predecessors. All three are pointer stubs: the full text lives only
+>   on the unmerged `origin/flue-runtime` branch.
 
 ## Purpose
 
@@ -24,40 +32,61 @@ The core rule does not change: FleetDB remains authoritative for task claim,
 task completion, and dependency unlocks. This addendum is about run lifecycle,
 executor placement, child-run visibility, recovery, and cloud runtime placement.
 
-## Current Implementation Facts
+## Implementation Facts (as of 2026-06-05, corrected 2026-07-23)
 
 ### DriverRun Creation
 
-`POST /epics/{epic_id}/runs` records a durable `DriverRun` pinned to the current
+The run-creation route records a durable `DriverRun` pinned to the current
 active `DriverVersion`. It does not execute the driver synchronously. The UI
 must treat this as recorded work awaiting an executor.
 
-The current implementation stores new registered endpoint runs as `running`,
-which is misleading because an unclaimed run may not have started. This is the
-source of "running forever" confusion when `LOOM_DRIVER_EXECUTOR` is disabled.
+Correction (2026-07-23): the route is
+`POST /api/workspaces/{ws}/workflows/{name}`, not `POST /epics/{epic_id}/runs`
+(`internal/webui/handlers/workflows/module.go:40`; the frontend calls it at
+`internal/webui/frontend/src/api/workflows/workflows.ts:44`). `/epics/{id}/runs`
+survives only as a fleet-db *client* call behind `DriverRunStore.CreateEpic`
+(`internal/infra/fleetdb/platform.go:283`, interface at
+`internal/store/platform_store.go:509`), which has no caller outside the store
+implementations and the CLI tracing wrapper. Every occurrence of
+`POST /epics/{epic_id}/runs` in this document should be read as the workflows
+route.
 
-This endpoint is also not a true registered product endpoint yet. Today the
-caller supplies a driver name and the handler binds the current active
+Correction (2026-07-23): runs are created `queued`, not `running`
+(`internal/infra/memstore/platform_driver_run.go:84`), and `Claim` refuses
+anything that is not `queued` (`:204`). The "running forever" defect this
+section described is fixed.
+
+This endpoint is still not a true registered product endpoint. The caller
+supplies a driver/workflow name and the handler binds the current active
 `DriverVersion` at request time. A true registered endpoint must persist the
 pinned version, auth policy, idempotency scope, and concurrency policy as
 registration data before users invoke it.
 
-Admission is currently scan-then-create. That is acceptable for a local proof,
-but cloud mode needs store-level constraints or transactions for:
+Admission is still scan-then-create in the memstore path
+(`internal/infra/memstore/platform_driver_run.go:63-69` scans for an active epic
+run before creating). That is acceptable for a local proof, but cloud mode needs
+store-level constraints or transactions for:
 
 - idempotency key uniqueness within its declared scope;
-- one active run per epic;
-- workspace/profile capacity reservation;
-- endpoint registration pinning.
+- one active run per epic — enforced, though by scan, not by constraint;
+- workspace/profile capacity reservation — still nothing reserves or releases
+  capacity;
+- endpoint registration pinning — still unbuilt.
 
 ### Driver Executor
 
-The driver executor is not a standalone binary today. It is an optional
-background loop inside `loom serve`, enabled only when:
+The driver executor is not a standalone binary today. It is a background loop
+inside `loom serve`.
 
-```bash
-LOOM_DRIVER_EXECUTOR=1 loom serve
-```
+Correction (2026-07-23): it is **on by default**, not opt-in.
+`driverExecutorEnabled` returns true unless `LOOM_DRIVER_EXECUTOR` is `0`,
+`false`, `off`, or `no` (`internal/cli/serve/serve.go:453-459`); serve's own help
+text says "DriverRun executor toggle (default: on; set 0/false/off/no to
+disable)" (`internal/cli/serve/serve.go:126`). The
+[authoring guide](workflow-driver-authoring-guide.md) already states the current
+behavior. Sentences elsewhere in this document about confusion "when
+`LOOM_DRIVER_EXECUTOR` is disabled" describe the opt-in era and no longer apply
+to a default install.
 
 The executor scans workspaces, finds recorded runs, claims them, launches the
 pinned driver bundle, heartbeats the run claim, and finalizes the run.
@@ -75,22 +104,41 @@ that match their profile.
 ### Driver Runtime
 
 The driver runtime is the published TypeScript bundle running as a child process
-under the executor or `loom driver run`. It uses the driver SDK to ask FleetDB
-for ready tasks, claim tasks, complete tasks, or release tasks.
+under the executor. (`loom driver run` only records a queued run; it does not
+launch a runtime — see Step 1 below.) It uses the driver SDK to ask FleetDB for
+ready tasks, claim tasks, complete tasks, or release tasks — over the driver-op
+HTTP API, not by spawning CLI subprocesses
+([`driver-op-http-api.md`](driver-op-http-api.md)).
 
 The driver runtime is not the privileged coding step. It orchestrates. The
-privileged coding step is `loom driver exec-task`.
+privileged coding step is the `exec-task` path described next.
 
-### `loom driver exec-task`
+### `exec-task`
 
-`loom driver exec-task` is a hidden trusted command invoked by
-`ctx.taskRuns.request(...)`. It runs one already-claimed task in the resolved
-worktree and exits with success or failure. It deliberately does not claim,
+Rewritten 2026-07-23: the name survived, the execution topology did not.
+
+`loom driver exec-task` still exists as a hidden trusted CLI command
+(`internal/cli/driver/exec_cmd.go:59-65`), but it is no longer what the SDK
+invokes. `ctx.taskRuns.request(...)` POSTs the `exec-task` **driver op** over
+HTTP (`sdk/driver.js:308` → `internal/webui/handlers/driverapi/module.go:150`,
+route at `:191`) with `enqueueOnly: true`. That records a `queued` `TaskRun` and
+returns immediately; a serve-side `TaskWorker` pool claims and executes it
+(`internal/cli/serve/serve.go:319`, `:349`). Same op name, completely different
+topology — see
+[`taskrun-queue-and-worker-pool.md`](taskrun-queue-and-worker-pool.md).
+
+What did not change: the task-execution step deliberately does not claim,
 complete, or release FleetDB tasks. The driver script owns those mutations
 through the SDK.
 
-The `--provider` flag is advisory in the current path. Actual Daytona use is
-selected by the backend/runtime configuration, such as the Flue Daytona mode.
+The flag is `--provider-profile`, not `--provider`
+(`internal/cli/driver/exec_cmd.go:82`), and it is enforced rather than advisory.
+`resolveTaskProviderProfile` (`internal/driver/task_scheduling.go:197-238`) maps
+`local-noop` to a local sandbox, maps `flue-daytona` to `runner=flue` +
+`sandbox=daytona` and errors without a configured host bridge, errors on an
+empty profile, and errors on an unknown profile that cannot resolve a sandbox
+provider. This closes the open decision and the checklist item at the bottom of
+this document.
 
 ### Daytona Local Mode
 
@@ -112,201 +160,160 @@ production path because it depends on a local worktree as the artifact sink.
 
 ### DriverRun States
 
-Introduce an honest `DriverRun` lifecycle:
+The honest `DriverRun` lifecycle this section asked for shipped
+(`internal/domain/platform.go:369-393`):
 
 ```text
 queued
   -> running
+  -> suspended_awaiting_event -> queued        (non-terminal)
   -> completed | failed | needs_review | cancelled
 ```
-
-Definitions:
 
 | State | Meaning |
 |---|---|
 | `queued` | The run record exists and is pinned, but no executor has claimed it. |
 | `running` | An executor has claimed the run and is heartbeating it. |
+| `suspended_awaiting_event` | The run registered an await and released its executor slot; non-terminal (`internal/domain/platform.go:378-381`, `:388-390`). |
 | `completed` | The driver exited successfully and finalized the run. |
 | `failed` | The driver, bundle verification, executor, or recovery path failed the run. |
 | `needs_review` | The driver stopped intentionally and returned control to an operator, reviewer, or lead agent. |
 | `cancelled` | An operator or policy stopped the run before normal completion. |
 
-Implementation note: existing stored `running` records with empty `NodeID` are
-effectively `queued`. Migration can be explicit, or the read model can derive
-`queued` for `status=running && node_id=""` during a compatibility window.
+`suspended_awaiting_event` is the one state added since this document was
+written, and it was added with defined semantics rather than by overloading an
+existing status: `DriverRunStore.Suspend` / `ResumeAwaiting`
+(`internal/store/platform_store.go:526`, `:535`) are owner-fenced and keyed by
+an await instance (`runID#await-{n}`), with the await-timeout sweeper
+(`internal/driver/await_timeout_sweeper.go`) resuming expired awaits through a
+synthetic timeout event.
 
-Do not add more transient states until their behavior is defined. If a cancel
-endpoint or retry policy lands, introduce `cancelling`, `finalizing`, or `stale`
-with explicit fencing and operator semantics rather than overloading `failed`.
+The original rule still holds for anything further: do not add more transient
+states until their behavior is defined. If a retry policy lands, introduce
+`finalizing` or `stale` with explicit fencing and operator semantics rather than
+overloading `failed`. (Cancel did not need a state: it is a request marker,
+`DriverRun.CancelRequestedAt`, `internal/domain/platform.go:433`.)
 
 ### TaskRun States
 
-`TaskRun` must become the visible child attempt record promised by the phased
-proposal. `ctx.taskRuns.request(...)` should create and finalize a child
-`TaskRun` around `exec-task`:
+`TaskRun` became the visible child attempt record this section asked for.
+`domain.TaskRun` (`internal/domain/platform.go:498-539`) carries
+`DriverRunID`, `DriverStepID`, `LeaseID`, `FencingToken`, `RunnerPlacement`,
+`SandboxPlacement`, token accounting, `logs_ref`/`artifacts_ref`, and retry
+state; the worker back-links the parent `DriverStep` after claiming
+(`internal/driver/task_worker.go:133`).
+
+The flow shipped with one difference from what this section proposed — the
+create and the execute are separated by a queue:
 
 ```text
 DriverRun running
   -> claim FleetDB task
-  -> create TaskRun running
-  -> run exec-task
+  -> create TaskRun queued            (workflow, via the exec-task driver op)
+  -> serve TaskWorker claims it       (fenced: node + lease + fencing token)
+  -> execute in the resolved worktree
   -> finish TaskRun completed | failed
   -> complete or release FleetDB task
 ```
 
-The return value from `ctx.taskRuns.request(...)` must contain the real
-`taskRunId`, not the task id. Logs, usage, patch metadata, sandbox metadata, and
-exit code should attach to this child record or artifacts linked from it.
+`ctx.taskRuns.request(...)` therefore returns a real `taskRunId` for a run that
+has not executed yet. The workflow learns the outcome from the epic watch stream
+(preferred) or `taskRuns.await` polling; see
+[`taskrun-queue-and-worker-pool.md`](taskrun-queue-and-worker-pool.md). Logs,
+usage, patch metadata, sandbox metadata, and exit code attach to the child
+record or to artifacts linked from it.
 
-Until that is implemented, the current `ctx.taskRuns.request(...)` behavior
-should be described as a local exec attempt, not production FleetDB TaskRun V1:
-it shells out to `exec-task` and returns task id, status, and exit code, but does
-not yet create the durable child attempt record promised by the proposal.
+## Remediation Plan
 
-## Concrete Remediation Plan
+This was the work order. Steps 1–4 and 6 shipped; Steps 5 and 7 are still open.
+The shipped steps are recorded below as history plus the implementing citation —
+their original deliverable/proof lists were removed on 2026-07-23 because they
+read as future work that is no longer future.
 
-### Step 1: Make Run Recording Honest
+### Step 1: Make Run Recording Honest — SHIPPED
 
-Deliverables:
+`queued` is a real stored `DriverRun` status (`internal/domain/platform.go:372`)
+and runs are created in it (`internal/infra/memstore/platform_driver_run.go:84`).
+No compatibility window, no derived-from-`running` read model.
 
-- Add `queued` to the `DriverRun` status model.
-- Make `POST /epics/{epic_id}/runs` create `queued` runs.
-- Update the Epic Runs UI to display queued vs running distinctly.
-- Add an executor-disabled state: when no executor is active, the UI says the
-  run is recorded but will not execute until an executor or CLI run starts it.
-- Keep `loom driver run <driver> --epic <id>` as the direct local path that
-  creates and executes a run in one command.
+One deliverable was dropped rather than delivered: `loom driver run` was never
+made a synchronous create-and-execute path. Its short help is "Record a queued
+DriverRun for a published driver" (`internal/cli/driver/driver_cmd.go:69`) and
+it prints "Execution pending: start a driver executor/runtime to claim queued
+runs" (`:203`). Recording and executing stayed separate everywhere, which is the
+stronger version of this step's intent.
 
-Proof:
+### Step 2: Make Admission And Run Claim Atomic — SHIPPED
 
-- Clicking Run with `LOOM_DRIVER_EXECUTOR` disabled produces a visible `queued`
-  run, not a misleading permanently running run.
-- Starting `loom serve` with `LOOM_DRIVER_EXECUTOR=1` claims the queued run and
-  moves it to `running`.
+Claim moved into the store contract:
+`Claim(ws, runID, nodeID, leaseID)` / `Heartbeat(..., fencingToken)` / `Finish`
+(`internal/store/platform_store.go:512-514`), replacing the process-local mutex.
+Claim refuses any run that is not `queued`
+(`internal/infra/memstore/platform_driver_run.go:204`) and admission rejects a
+create while a `queued`-or-`running` run exists for the epic (`:65`). Heartbeat
+and finish are owner- and fence-checked, so a replaced executor cannot write.
 
-Non-goals:
+Stale-run recovery is fail-and-unblock, exactly as this step required, and the
+executor runs it before every claim attempt
+(`internal/cli/serve/serve.go:333`, `Executor.RecoverStaleOnce`).
 
-- Cloud workers.
-- Daytona bootstrap runners.
-- Automatic retries.
+Still open from this step: workspace/profile **capacity reservation**. Nothing
+reserves or releases capacity on terminal completion.
 
-### Step 2: Make Admission And Run Claim Atomic
+### Step 3: Add Real Child TaskRun Visibility — SHIPPED, RESHAPED
 
-Deliverables:
+Child `TaskRun`s are durable records with their own IDs, lease/fencing,
+placement, token accounting, logs/artifacts refs and retry state
+(`internal/domain/platform.go:498-539`), driven by
+`internal/driver/task_request.go` and `internal/driver/task_worker.go`.
+`providerProfile` is mapped or rejected, never silently treated as placement
+(`internal/driver/task_scheduling.go:197-238`).
 
-- Replace scan-then-create admission checks with store-level constraints or
-  transactions for idempotency, one-active-run-per-epic, and capacity
-  reservation.
-- Replace the process-local `ClaimRun` mutex with a store-level conditional
-  update:
+Reshaped: this step assumed `ctx.taskRuns.request(...)` would create *and*
+finalize the child in one call, shelling out to `loom driver exec-task`. What
+shipped splits those — `request()` enqueues, a serve-side worker pool executes.
+See [`taskrun-queue-and-worker-pool.md`](taskrun-queue-and-worker-pool.md).
 
-  ```text
-  claim run where run_id = ? and status = queued and node_id = ""
-  set status = running, node_id = ?, last_heartbeat = now
-  ```
+The paragraph this step wrote about cloud `TaskRun` semantics being stricter
+than the local SDK bridge is still the governing rule, and it is now partly
+enforced: run-scoped tokens exist (`internal/driver/run.go:253`) and non-local
+completions reject `file://`-class artifact URIs — a `TaskRun` whose
+`SandboxPlacement.Provider` is anything other than empty/`local`/`local-noop`/
+`noop`/`flue-local` must present cloud-safe artifact URIs
+(`internal/infra/memstore/platform_task_run.go:545-547`, `:566-583`).
 
-- Give every executor instance a stable unique `NodeID`, lease id, and fencing
-  token.
-- Make executor heartbeat and finish owner-checked and fence-checked. A stale
-  executor must not heartbeat or finalize a run after replacement.
-- Keep the stale-run reaper, but document its behavior as fail-and-unblock, not
-  resume.
-- Add tests for two executors racing to claim the same run using independent
-  store/client instances.
+### Step 4: Add Task-Level Stale Recovery — SHIPPED
 
-Proof:
+The chosen mechanism was the Loom-side recovery loop, made automatic rather than
+operator-triggered: `internal/driver/stale_task_sweeper.go` plus
+`store.RecoverStaleTaskRuns` (`internal/store/platform_store.go:516`), with a
+`recover-stale-tasks` driver op for ops use
+(`internal/webui/handlers/driverapi/module.go:153`). It fails heartbeat-expired
+`TaskRun`s and releases their task claims
+(`StaleTaskRunRecoveryResult.Released` / `ReleasedTaskIDs`,
+`internal/store/platform_store.go:491-505`).
 
-- Two executor processes cannot both run the same `DriverRun`.
-- Concurrent POSTs cannot admit duplicate active runs for one epic.
-- Capacity is reserved once and released on terminal run completion.
-- A crashed executor's claimed run becomes terminal after heartbeat expiry.
-- A run is never reaped while its owning executor is heartbeating.
+It is unconditional server policy, not a toggle: it runs "whenever serve has a
+store", and the code says so — "Workflows must not call recoverStale themselves"
+(`internal/cli/serve/serve_loops.go:25-30`).
 
-Non-goals:
+fleet-db still has no server-side reaper of its own; the explicit release
+endpoints remain real (`internal/backend/fleet/claim_release.go:36`, `:59`).
 
-- Transparent resume of a partially executed driver.
-- Task-level stale-claim recovery. That is Step 4.
+Note the non-goal was overtaken: automatic retry policy landed anyway, at the
+`TaskRun` level with attempt budget and backoff
+(`internal/driver/task_retry.go:31`, `:90-99`).
 
-### Step 3: Add Real Child TaskRun Visibility
-
-Deliverables:
-
-- Add server/SDK APIs needed for a driver to create and finish child `TaskRun`s,
-  or route `ctx.taskRuns.request(...)` through a Loom API that does this
-  atomically.
-- Change `ctx.taskRuns.request(...)` so it:
-  - creates a `TaskRun`;
-  - invokes `loom driver exec-task` with the `TaskRun` id in environment;
-  - maps `providerProfile` to an explicit backend/runtime configuration, or
-    rejects unsupported profiles instead of treating them as placement;
-  - records exit code, logs, usage, runtime metadata, and artifacts;
-  - finalizes the child record;
-  - returns `{ id: taskRunId, taskId, status, exitCode }`.
-- Keep FleetDB task completion separate: the driver script still calls
-  `ctx.tasks.complete(...)` only after the child attempt succeeds.
-
-Production cloud `TaskRun` semantics are stricter than the current local SDK
-bridge. Cloud mode must use scoped run/lease/fence tokens, durable artifact
-registration, and server-side `CompleteRun` acceptance. Direct issue
-claim/close from a driver script is a compatibility path for local phases, not
-the final cloud V1 boundary.
-
-Proof:
-
-- The Epic Runs view shows a parent `DriverRun` with child attempts.
-- A failed child attempt is visible even if the parent returns `needs_review`.
-- Completing a child `TaskRun` alone does not unlock dependencies; only FleetDB
-  task completion does.
-
-Non-goals:
-
-- Cloud artifact durability.
-- Remote sandbox bootstrap.
-
-### Step 4: Add Task-Level Stale Recovery
-
-Problem:
-
-Run-level stale reaping is not enough. If a driver crashes after claiming a task
-but before releasing or completing it, FleetDB may let the claim lock expire
-while the issue remains `in_progress` and absent from the ready frontier.
-Current FleetDB claim behavior around expired locks and `in_progress` takeover
-must be tested directly; the cloud contract cannot rely on inferred ready-query
-behavior.
-
-Deliverables:
-
-- Choose one explicit recovery mechanism before cloud scale-out:
-  - FleetDB server-side reaper that returns expired `in_progress` claims to the
-    ready frontier; or
-  - Loom operator recovery endpoint that releases stale task claims for a run;
-    or
-  - both, with server-side policy controlling automatic vs manual recovery.
-- Record stale-recovery events in the task/run timeline.
-- Ensure recovery does not complete or unlock a task without accepted artifacts
-  and explicit FleetDB close.
-
-Proof:
-
-- Kill the driver after task claim and before completion.
-- After recovery, the task is claimable again and dependents remain blocked.
-- No duplicate completion is accepted from the stale attempt.
-
-Non-goals:
-
-- Automatic retry policy. Recovery returns the task to a safe state; retry
-  policy can be added later.
-
-### Step 5: Split Local and Cloud Topologies
+### Step 5: Split Local and Cloud Topologies — OPEN
 
 Local topology remains:
 
 ```text
 browser
   -> loom serve API/UI
-  -> optional in-process driver executor
+  -> in-process driver executor (default on)
   -> driver runtime child process
-  -> exec-task
+  -> exec-task driver op -> queued TaskRun -> serve TaskWorker pool
   -> local backend or host-orchestrated Daytona
   -> local worktree patch-back
   -> FleetDB close/release
@@ -351,7 +358,17 @@ Capacity must be split into explicit controls:
 | Provider cap | How many remote runners or sandboxes a provider profile may hold. |
 | Budget cap | Model, token, time, or dollar limit for a workspace/run/profile. |
 
-### Step 6: Separate Runner Placement From Sandbox Placement
+### Step 6: Separate Runner Placement From Sandbox Placement — SHIPPED
+
+Shipped exactly as prescribed: `domain.TaskRunPlacement`
+(`internal/domain/platform.go:541-556`) is one struct instantiated twice on a
+`TaskRun`, as `runner_placement` and `sandbox_placement`
+(`internal/domain/platform.go:498-539`). No single `RuntimeProvider` field was
+overloaded. `resolveTaskProviderProfile` fills both independently, so
+`flue-daytona` becomes `runner=flue` + `sandbox=daytona`
+(`internal/driver/task_scheduling.go:207-217`).
+
+The conceptual guidance below is unchanged and still governs cloud review.
 
 Cloud review must use two placement concepts:
 
@@ -392,14 +409,23 @@ In Daytona cloud mode, scale primarily by:
 Do not describe cloud Daytona capacity as "N sandboxes inside one node" unless
 the deployment actually uses on-host containers.
 
-### Step 7: Make Cloud Artifacts and Credentials First-Class
+### Step 7: Make Cloud Artifacts and Credentials First-Class — OPEN
 
 Deliverables before cloud scale-out:
 
-- Move driver bundles from host-local `~/.loom/drivers/<digest>` to
-  content-addressed object storage or another worker-readable immutable store.
-- Require server-visible artifacts for cloud `TaskRun`s.
-- Reject `file://`, laptop-local, or Daytona-local artifact URIs in cloud mode.
+- Move driver bundles to content-addressed object storage or another
+  worker-readable immutable store. Still open — `safeBundleRoot` resolves the
+  bundle under the work dir with no object-store backend
+  (`internal/driver/executor.go:642`). Correction (2026-07-23): the current
+  location is not `~/.loom/drivers/<digest>`. Bundles stage under the
+  **workspace work dir**: `<workDir>/.loom/drivers/<driverID>/<versionID>`
+  (`internal/driver/register.go:413`, `:443`; also documented at
+  `internal/driver/task_bridge.go:77`).
+- Require server-visible artifacts for cloud `TaskRun`s. DONE for completion
+  admission (`internal/infra/memstore/platform_task_run.go:545-547`).
+- ~~Reject `file://`, laptop-local, or Daytona-local artifact URIs in cloud
+  mode.~~ DONE — enforced at task-run completion for any non-local sandbox
+  provider (`internal/infra/memstore/platform_task_run.go:566-583`).
 - Mint scoped runner tokens for one `TaskRun` or `DriverRun` action set.
 - Enforce fencing so stale attempts cannot write after replacement.
 - Persist sandbox metadata before model execution starts.
@@ -421,6 +447,10 @@ Proof:
 
 ## Phase Mapping
 
+These are the corrections this addendum applied to the phase definitions in the
+phased-delivery doc. For which phases actually shipped, read that document's
+"Phase Status" table, not this one.
+
 | Existing phase | Addendum correction |
 |---|---|
 | Phase 1 | No change: publish and run a local pinned driver. |
@@ -434,7 +464,7 @@ Proof:
 
 ### Queued Run Lifecycle
 
-- `POST /epics/{epic_id}/runs` creates `status=queued`.
+- `POST /api/workspaces/{ws}/workflows/{name}` creates `status=queued`.
 - With executor disabled, the run remains queued and UI shows executor-disabled
   copy.
 - With executor enabled, the run transitions `queued -> running -> completed`.
@@ -480,36 +510,63 @@ Proof:
 - Daytona patch-back verifies base ref and preserves patches on conflict.
 - Cloud Daytona preflight fails if the requested base ref is not reachable.
 
+## Decisions Resolved Since 2026-06-05
+
+| Decision | Answer | Citation |
+|---|---|---|
+| Automatic or operator-triggered task stale recovery? | Automatic and always-on; it is server policy, not workflow policy. | `internal/cli/serve/serve_loops.go:25-30` |
+| Is `needs_review` a first-class terminal status? | Yes, first-class and terminal. | `internal/domain/platform.go:376`, `:386` |
+| Migrate `queued` physically, or derive it? | Physically stored; no compatibility window was needed. | `internal/domain/platform.go:372`, `internal/infra/memstore/platform_driver_run.go:84` |
+| First `providerProfile` → backend/runtime/sandbox mapping? | `local-noop` → local sandbox; `flue-daytona` → runner `flue` + sandbox `daytona`; empty and unresolvable profiles error. | `internal/driver/task_scheduling.go:197-238` |
+
 ## Open Decisions
 
 - Should stale run recovery fail the run only, or optionally create a new queued
-  retry run?
-- Should task stale recovery be automatic by default or operator-triggered?
-- Should `needs_review` be a first-class terminal status now or deferred until
-  lead-agent handoff is implemented?
-- Should `queued` be physically migrated into storage immediately or derived
-  from existing `running && node_id=""` records during rollout?
-- Should ad hoc `POST /epics/{id}/runs` remain separate from true registered
+  retry run? (Answered at the `TaskRun` level — retry-then-park,
+  `internal/driver/task_retry.go` — but not at the `DriverRun` level.)
+- Should the ad hoc workflow-run route remain separate from true registered
   endpoint invocation, or should the ad hoc form be removed after registration
   lands?
 - In cloud Phase 4, is the first remote runner placement an executor pod that
   controls Daytona by API, or a bootstrap runner inside Daytona?
-- What is the first production-safe mapping from `providerProfile` to concrete
-  backend/runtime/sandbox configuration?
 
 ## Review Checklist
 
-Before claiming cloud readiness, the implementation must satisfy:
+Before claiming cloud readiness, the implementation must satisfy the following.
+Items marked SATISFIED were verified against source on 2026-07-23.
 
-- Run button creates a queued run, not a fake-running run.
+- SATISFIED — Run button creates a queued run, not a fake-running run
+  (`internal/infra/memstore/platform_driver_run.go:84`).
 - Executor placement is documented as same binary, separate role.
-- Driver runtime, exec-task, runner placement, and sandbox placement are named
-  separately.
-- Multi-node run claim is store-atomic.
-- Endpoint admission and idempotency are store-atomic.
-- Child TaskRuns are real records, not inferred from task ids.
-- Task-level stale recovery is defined and tested.
-- `providerProfile` is either wired to runtime placement or rejected.
+- SATISFIED — Driver runtime, exec-task, runner placement, and sandbox placement
+  are named separately (`internal/domain/platform.go:541-556`).
+- SATISFIED — Multi-node run claim is store-atomic
+  (`internal/store/platform_store.go:512-514`).
+- Endpoint admission and idempotency are store-atomic. (One-active-per-epic is
+  enforced by scan, not by a store constraint.)
+- SATISFIED — Child TaskRuns are real records, not inferred from task ids
+  (`internal/domain/platform.go:498-539`).
+- SATISFIED — Task-level stale recovery is defined and tested
+  (`internal/driver/stale_task_sweeper.go`,
+  `internal/driver/stale_task_sweeper_test.go`).
+- SATISFIED — `providerProfile` is wired to runtime placement or rejected
+  (`internal/driver/task_scheduling.go:197-238`).
 - Daytona cloud mode does not depend on a developer-local worktree.
 - Daytona patch-back verifies base refs and preserves failed patches.
 - Cloud artifacts and credentials are server-visible, scoped, and fenced.
+  (Partial: run-scoped tokens exist, `internal/driver/run.go:253`; bundle object
+  storage does not.)
+
+## Related
+
+- [`workflow-driver-authoring-guide.md`](workflow-driver-authoring-guide.md) —
+  the current platform contract.
+- [`taskrun-queue-and-worker-pool.md`](taskrun-queue-and-worker-pool.md) — the
+  queue that reshaped Step 3.
+- [`driver-op-http-api.md`](driver-op-http-api.md) — the runtime control surface.
+- [`fleetdb-agent-platform-v2-proposal.md`](fleetdb-agent-platform-v2-proposal.md)
+  — the vision this addendum reconciles.
+- [`fleetdb-agent-platform-v2-phased-delivery.md`](fleetdb-agent-platform-v2-phased-delivery.md)
+  — the phase ledger.
+- [`native-flue-driver-integration.md`](native-flue-driver-integration.md) —
+  driver registration.

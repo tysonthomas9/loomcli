@@ -1,16 +1,37 @@
 # Known E2E test issues
 
-Documented failures and their tracking tickets. Tests that hit these should NOT be reported as part of a passing run — they're either tracking debt or environment quirks.
+> **Status:** Current · *audited 2026-07-23*
+
+Register of defects the manual E2E plans have hit, with their regression guards.
+**All four entries below are fixed** — nothing here is currently an
+expected-failure. If a symptom reappears, the named guard is the first thing to
+run. New expected-failures go here, and the corresponding row in
+[e2e-cli.md](e2e-cli.md) / [e2e-ui.md](e2e-ui.md) must be marked at the same time.
 
 ## `loomcli-26v50.40` — fleet-db daemon PUT loses fields (FIXED)
 
-**Status:** fixed. `internal/projection/handlers.go:handleDaemonUpdate` now `Delete`s the daemon profile hash before `SetFields` when `event.Metadata["mode"] == "upsert"`. PATCH semantics (mode=patch or unset) preserved. D5 in `e2e-cli.md` should now PASS — PUT with empty body actually clears the storage hash. Regression guard: `TestProjectEvent_DaemonUpdate_{Upsert,Patch}*` in fleet-db's `internal/projection/projector_test.go`.
+**Status:** fixed. Fixed in the **fleet-db repository**, not this one:
+`(fleet-db repo) internal/projection/handlers.go:handleDaemonUpdate` now
+`Delete`s the daemon profile hash before `SetFields` when
+`event.Metadata["mode"] == "upsert"`. PATCH semantics (mode=patch or unset)
+preserved. D5 in [e2e-cli.md](e2e-cli.md) is a must-pass row — PUT with an empty
+body actually clears the storage hash. Regression guard:
+`TestProjectEvent_DaemonUpdate_{Upsert,Patch}*` in
+`(fleet-db repo) internal/projection/projector_test.go`. Grepping *this* repo
+for `internal/projection` finds nothing; that is expected.
+
+**UNVERIFIED (2026-07-23).** Nothing in this repo can confirm the above. The
+sibling `../fleet-db` checkout available at audit time was at 2026-05-05 and
+contains neither `handleDaemonUpdate` nor `internal/projection/projector_test.go`
+— so the symbol and file names here are from the original bug handoff, not from
+a build anyone has re-read. Before relying on D5 as a must-pass row, re-grep a
+current fleet-db checkout.
 
 ---
 
 ## `loomcli-26v50.41` — localredis dirty-flag skip ineffective for embedded CLI (FIXED)
 
-**Status:** fixed. `Manager.load()` now seeds `lastDumpHash` with the SHA-256 of the loaded `snap.Entries`, so the first post-load Dump short-circuits when the keyspace hasn't been mutated. C3 in `e2e-cli.md` should now PASS — read-only CLI invocations leave snapshot mtime stable. Regression guard: `TestDump_SkipsAfterReload` in `manager_perf_test.go`.
+**Status:** fixed. `Manager.load()` (`internal/webui/localredis/manager.go:667`) now seeds `lastDumpHash` with the SHA-256 of the loaded `snap.Entries` (`:703-712`), so the first post-load `Dump` short-circuits when the keyspace hasn't been mutated (the comparison is `:292-296`; the post-write update is `:337-341`; the field itself is declared at `:120-126`). C3 in [e2e-cli.md](e2e-cli.md) is a must-pass row — read-only CLI invocations leave snapshot mtime stable. Regression guard: `TestDump_SkipsAfterReload` (`internal/webui/localredis/manager_perf_test.go:66`).
 
 ---
 
@@ -22,22 +43,27 @@ Documented failures and their tracking tickets. Tests that hit these should NOT 
 
 ## RPC socket bind permission (FIXED)
 
-**Status:** fixed for embedded local mode. `bootstrap.StartEmbedded` passes `--rpc-enabled=false`, so the embedded fleet-db used by loom does not bind `/var/run/fleet-db.sock`.
+**Status:** fixed for embedded local mode. `bootstrap.StartEmbedded` (`internal/bootstrap/embedded.go:310`) passes `--rpc-enabled=false` (`:372-377`), so the embedded fleet-db used by loom does not bind `/var/run/fleet-db.sock`.
 
-If this warning reappears during embedded-mode tests, verify the command path is using `StartEmbedded` rather than launching `fleet-db` directly.
+If this warning reappears during embedded-mode tests, verify the command path is using `StartEmbedded` rather than launching `fleet-db` directly. The manual preflight sidesteps the same bind by passing `--rpc-socket=/tmp/loom-fleet-db.sock` ([e2e-preflight.md](e2e-preflight.md)).
 
 ---
 
 ## Test methodology pitfalls
 
-These are not bugs — they're documented gotchas the test runner must avoid. From the code-review pass on the test plan itself:
+Moved. The runner conventions (separate stdout/stderr capture, anchored success
+patterns, no CLI self-verification, process-leak detection) live once in
+[e2e-preflight.md](e2e-preflight.md) §Test-runner conventions. They were
+duplicated here and drifted; that section is canonical.
 
-1. **`grep -vE "level="` strips real errors.** Always capture stdout and stderr separately. Assert stderr is free of `level=ERROR` (with explicit allowlist for known startup noise).
+One rule was specific to this page and is retained: **a documented
+expected-failure is not coverage.** It tracks debt; it does not assert correct
+behavior. Never count an expected-failure's "pass" toward a success total. As of
+this audit there are no open expected-failures, so every row in
+[e2e-cli.md](e2e-cli.md) counts.
 
-2. **Don't trust the CLI to verify its own writes.** `loom role show` reads through the same client path as `loom role set` — a stale-cache or wrong-endpoint bug would silently round-trip. Always cross-check writes against fleet-db via curl.
+## Related
 
-3. **Anchor success patterns.** `grep -qE "^Created workspace ACME$"` not `grep -q Created` — the latter matches startup logs containing "Created embedded fleet-db".
-
-4. **Process leak detection.** After each embedded-mode test, `pgrep fleet-db` should return zero. A non-zero count indicates a defer didn't run (likely an `os.Exit` shortcut bypassing `cmdstore.WithStore`'s deferred Close).
-
-5. **D5 is not coverage.** A documented expected-failure tracks debt; it does not test correct behavior. Don't include D5's "pass" in success counts.
+- [e2e-preflight.md](e2e-preflight.md) — runner conventions and session setup
+- [e2e-cli.md](e2e-cli.md) — the CLI matrix these entries annotate
+- [README.md](README.md) — testing docs index

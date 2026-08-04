@@ -1,3 +1,9 @@
+// Package cleanup implements the `loom cleanup`, `loom sessions`, and
+// `loom usage` commands: retention purges over loom's JSONL runtime stores
+// (session directories plus index compaction, usage records, day-partitioned
+// event files) and token/cost reporting over recorded agent sessions. It
+// registers those commands on the root command from init(), so cmd/loom/main.go
+// imports it only for that side effect.
 package cleanup
 
 import (

@@ -1,6 +1,8 @@
 # Lead conversation resume — decision log & contract (in progress)
 
-**Status:** in progress — accreting one decision at a time.
+> **Status:** Draft · *audited 2026-08-03* — in progress, accreting one decision
+> at a time. Read settled decisions as current and open ones as unresolved.
+
 **Started:** 2026-07-22
 **Planning map:** `LOOMCLI-169` (wayfinder map, local fleet-db backend, workspace
 `LOOMCLI`). See `docs/agents/issue-tracker.md` for tracker operations.
@@ -26,6 +28,10 @@ as evidence, not as the contract.
 Host-local by design. Conversation content held in fleet-db so a lead resumes
 off-host is **out of scope** (a future map); the only in-scope obligation is that
 this contract must not foreclose it (`LOOMCLI-178`).
+
+**Defects found along the way** — pre-existing bugs this planning work walked
+into, owned by no ticket on the map — are recorded in
+`docs/design/2026-07-22-lead-resume-defects.md`.
 
 ---
 
@@ -548,6 +554,37 @@ channels; none needs a new one:
 | D5 §7 (`LOOMCLI-176`) | **Containerised leads are structurally non-resumable** — `/root/.codex` dies with the container and `sessions/` is never copied. Named honestly as `cannot_resume`, not reported as a failure |
 | D5 §9 (`LOOMCLI-176`) | What the operator sees when resume is refused |
 
+**Five requirements D2 attached to its hand-off**, absorbed here without
+amending any rule above — all five are consequences of §1's open vocabulary plus
+§6's render-at-the-edge:
+
+1. **`subject closed` is degraded-but-usable, not an error.** The lead does not
+   auto-start, but the UI must keep an explicit manual start, and on that start
+   the prior conversation **is** resumed with **no** review prompt sent — the
+   lead boots idle and waits. The renderer must express that difference: this is
+   an *affordance with an explanation*, not a failure state. It is the one
+   inherited surface where §4's "chrome, not conversation" still requires a
+   **button**, not just a banner.
+2. **Consume the freshness verdict; never re-derive it.** D2's ruling is "one
+   freshness function, two callers" — the web layer queries the same function
+   specifically so it can draw this affordance.
+3. **Never conflate `subject closed` with `check_failed`** (`LOOMCLI-196`:
+   freshness *undeterminable* — offline, git auth denied, connector
+   unreachable). Rendering the second as the first tells a user a live PR is
+   finished. Distinct cause tokens, visibly different treatments — precisely
+   what §1's open vocabulary exists to allow.
+4. **Reuse the vocabulary that already ships.** `prepareReviewerCheckout`
+   already emits `stale_subject` / HTTP 409
+   (`internal/webui/handlers/prreview/reviewer.go:285-289`). Cause tokens adopt
+   the existing names rather than minting synonyms; §1's tokens are open
+   precisely so they can align with what the code already says.
+5. **Notice delivery is not silent-failure-safe.** `LOOMCLI-197` decides when
+   the as-of snapshot advances relative to the notice actually landing. If that
+   delivery can fail, the user-visible story for *"we tried to warn the lead and
+   could not"* is this decision's: it is an outcome+cause like any other, and it
+   renders through §6 — **the failure of a notice is itself surfaced, never
+   swallowed**, which is the same principle as §2.
+
 #### 8. Hand-off to the contract
 
 **Unresumability is a static backend capability, knowable before launch** — not
@@ -573,7 +610,7 @@ than follow-on work.
 
 **Question.** Codex writes conversations under `$CODEX_HOME/sessions`, and loom
 never sets `CODEX_HOME` — the runtime inherits the ambient environment
-(`internal/leadcontrol/codex_runtime.go:126,158`). If `HOME` or `CODEX_HOME`
+(`internal/leadcontrol/codex_runtime.go:127,157`). If `HOME` or `CODEX_HOME`
 differs between restarts, resume degrades to a cold start with no error and no
 signal. Does a lead runtime pin its backend's conversation home, and to what?
 
@@ -677,7 +714,9 @@ until a use case exists.
 
 Local-mode mounts the host codex home at `/codex-host:ro` and copies **only**
 `auth.json` and `config.toml` into `/root/.codex`
-(`docs/testing/local-mode-podman-e2e.md:327-330`). `sessions/` is never copied and
+(`docs/testing/local-mode-podman-e2e.md:362-364`, "Codex Auth Fails";
+`test/local-mode/docker-compose.codex.yml:25`,
+`test/local-mode/local-mode-entrypoint:200-207`). `sessions/` is never copied and
 `/root/.codex` dies with the container, so a containerised lead has no
 conversation to resume — structurally, today.
 
@@ -729,3 +768,143 @@ prior-art line has been corrected so `LOOMCLI-177` does not synthesise from it.
 **Evidence class.** Deterministic (source reading) plus real (filesystem
 inspection of `~/.codex`, `~/.claude/projects`, and
 `~/Library/Caches/loom/codex-leads` on this host). Nothing live was run.
+
+---
+
+### D6 — Claude's resume-vs-fresh launch argv branch
+
+**Ticket:** `LOOMCLI-182` · **Decided:** 2026-07-22
+
+**Question.** How does a claude-backed lead choose between a cold-start launch and
+a resuming launch, given they are mutually exclusive argv shapes?
+
+**Decision — the runtime owns the branch, fed by the planner; the pin survives
+only on a cold start.**
+
+#### 1. The branch lives in the runtime
+
+`RunHarnessLeadRuntime` already holds Store, Workspace and SessionID — it is the
+only layer that can read prior metadata — and it takes the resume pointer as a
+config field so D2's prelaunch planner can override or veto. `harnessLeadInvocation`
+(`internal/cli/backends/harness_lead_runtime.go:98-108`) stays a **pure argv
+factory**: it takes no ctx and no store, and structurally cannot learn whether a
+prior conversation exists.
+
+This is `resolveResumeCodexThread` / `codexTUIArgs` (`internal/leadcontrol/codex_runtime.go:187-221`)
+generalised, not a new shape.
+
+#### 2. Pin on cold start only — and no write-back
+
+- **Cold start:** `--session-id <fresh uuid>`.
+- **Resume:** `--resume <stored id>`, and the pin is **dropped**.
+
+The two are a strict XOR at argv validation — `--session-id` with `--resume` is
+rejected unless `--fork-session` is also given (verified live, claude 2.1.218) —
+so there is no "pin one just in case". `-r/--resume` with **no value opens an
+interactive picker**, so the id is always passed explicitly or the lead boots
+into a menu.
+
+The stored id stays **authoritative**. An earlier proposal to reconcile it against
+a discovered id ("discovered id wins, write through") is **rejected**, on two
+verified findings from `LOOMCLI-181`:
+
+- harness-wrapper's session-id scrape **never fires for claude**.
+  `conv.HarnessSessionID()` returned empty at boot *and* after a completed turn;
+  the adapter keys on a `claude --resume <uuid>` hint that claude 2.1.218 does not
+  print during a normal interactive run. `backfillHarnessSessionID`
+  (`internal/leadcontrol/harness_runtime.go:415-418`) is therefore dead code on
+  the claude path — there is nothing to reconcile *from*.
+- **Session-id rotation is unevidenced.** A first boot that passed the
+  folder-trust dialog did **not** rotate: the transcript landed at exactly
+  `<pinned>.jsonl` and the resume **appended to the same file**.
+
+> **Rotation, recorded deliberately.** `harness_metadata.go:24-30` and
+> `harness_read.go:95-102` assert claude rotates its session id after the
+> folder-trust dialog, and `newestClaudeSessionSince` exists to compensate. That
+> claim now looks like a **misdiagnosis**: the compensation fires only on
+> `fs.ErrNotExist`, and there is a simpler cause for a transcript not being where
+> the pinned id says — `scripts/dev-container-start.sh:98` sets
+> `CLAUDE_CONFIG_DIR`, loom's own claude path honours it
+> (`backend_claude.go:137-140`), and the wrapper's transcript reader hardcodes
+> `~/.claude/projects`. Filed as a defect; the mtime scan should be revisited once
+> the locator is fixed. If rotation is ever demonstrated on a current claude, the
+> write-back can be added then — it is not built on a hypothesis.
+
+#### 3. Key write discipline: cold start, plus `prior_conversation_id`
+
+`RunHarnessLeadRuntime` currently writes a **freshly minted UUID** over
+`lead_harness_session_id` on **every** launch (`harness_runtime.go:104-116`,
+`harness_metadata.go:93-95`) — D1's clobber. The rule:
+
+- the durable key is written **when a conversation is created**, never rewritten
+  on a plain resume (symmetric with D5 §5's rule for the conversation home);
+- when a cold start **supersedes** a previous conversation, the abandoned id moves
+  to `prior_conversation_id` per D4 §2.
+
+Note this **builds** D4 §2 on the harness side rather than converting it: unlike
+codex (which has a destructive `ClearCodexThreadID` to replace), the harness path
+today neither clears nor rebinds — `UpdateHarnessRuntimeMetadata` is
+write-if-non-empty and nothing ever removes a stale key.
+
+#### 4. The role prompt is dropped at the argv seam
+
+`harnessLeadArgs` (`harness_runtime.go:222-231`) gains the resume branch, the
+literal counterpart of `codexTUIArgs` — and the same seam `codex_resume_test.go`
+already guards. Passing `Prompt: ""` from the caller was rejected: it parks a
+load-bearing invariant where nothing enforces it.
+
+What *replaces* the prompt on a resume (D2's staleness notice, or nothing) is
+`LOOMCLI-195`'s; this decision only guarantees the role prompt is not re-issued.
+
+#### 5. The finalized session row is revived in place
+
+Per D1 a plain restart reuses the same row, so `leadSessionFinalizer`'s
+`FinishedAt` is cleared and Status returns to running.
+
+**Gate before implementing:** whether the fleet-db server actually clears the
+column on a JSON `null` is **inferred, not verified** — the memstore honours a nil
+inner pointer and the client sends `finished_at: null`
+(`internal/infra/fleetdb/control_plane.go:474-475`), but the server side was not
+probed.
+
+**The sharp edge is two writers, not the revive.**
+`ensureTerminalOrchestratorLink` (`internal/webui/handlers/terminal/agent_session.go:200-215`)
+mints `"lead-" + uuid` in the **web layer, before `loom lead` ever runs**. Unless
+it consults `Agent.CurrentSessionID` first, the runtime revives a row nobody is
+launching against and the fix is inert.
+
+#### 6. The branch gates on provider equality, not key presence
+
+D3 §4 is inherited verbatim: resume requires `lead_runtime_provider` equality with
+the launch backend. `lead_harness_session_id` is **shared by every harness
+backend** (`harness_metadata.go:22`), so a branch keying on the stored id alone
+would cross-read a gemini id as claude's. The condition is
+`provider == "claude" && key != ""`.
+
+#### 7. Sequencing: 182 must not ship before `LOOMCLI-183`
+
+The existence probe belongs to 183 and sits **in front** of this branch as a
+planner step. This matters more than it reads: claude leads **never resume
+today** (`harnessLeadInvocation` always cold-starts), so this decision is what
+*introduces* the hard-fail-on-missing-transcript failure mode. Landing it without
+183's probe would brick any lead whose transcript has been swept — and claude's
+30-day `cleanupPeriodDays` sweep is demonstrably running.
+
+Ordering on the launch path: **D3 §4 provider equality → D5 home comparison →
+183 transcript probe → this argv branch.**
+
+#### 8. `--fork-session` has no role
+
+Its only unique power is combining a loom-pinned *new* id with a resume, which
+§2 abandons. More importantly a fork produces a **new conversation under the same
+session row**, and D1's advance rule has no case for a conversation key changing
+without a deliberate recreate. If fork is ever adopted (the plausible use is
+recovery from an "id already in use" refusal), it must ship **with** that identity
+rule, not before it.
+
+#### Shipped test that must be broken deliberately
+
+`internal/cli/backends/harness_lead_runtime_test.go:39-43` pins the exact argv
+`[--session-id <uuid> --dangerously-skip-permissions]` and asserts
+`HarnessSessionID` equals the `--session-id` value. It is the current
+contract-as-test; §2 and §3 change it on the resume path.

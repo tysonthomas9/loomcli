@@ -1,3 +1,8 @@
+// Package agents serves the workspace-scoped agent-assignment HTTP routes —
+// list/create/update/delete plus the start/stop/restart/yield lifecycle
+// commands — over service.AgentService (fleet-db), broadcasting each mutation
+// to the SSE hub. Registered by internal/webui/app; the daemon-socket variant
+// of the same lifecycle routes is internal/webui/handlers/agentcontrol.
 package agents
 
 import (

@@ -72,6 +72,18 @@ tags:
     description: Daemon monitor dashboard and metrics
   - name: observability
     description: Event metrics and paginated event log
+  - name: approvals
+    description: Await-approval resolution
+  - name: driver
+    description: Driver run SDK transport (run-scoped auth)
+  - name: workflows
+    description: Workflow and driver run management
+  - name: task-run
+    description: Task-run SDK transport (lease-scoped auth)
+  - name: triggers
+    description: Persisted trigger events and deliveries (webhook audit trail)
+  - name: webhooks
+    description: Inbound webhook ingestion
 
 security:
   - BearerAuth: []
@@ -152,6 +164,95 @@ paths:
             Retry-After:
               schema:
                 type: integer
+
+  /api/config/terminal:
+    get:
+      operationId: getTerminalConfig
+      tags: [terminal]
+      summary: Terminal session lifecycle configuration
+      responses:
+        "200":
+          description: Terminal lifecycle config snapshot
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                    const: true
+                  data:
+                    type: object
+                    required: [grace_period_ms, idle_timeout_ms, max_sessions]
+                    properties:
+                      grace_period_ms:
+                        type: integer
+                        format: int64
+                        description: >-
+                          Grace period (ms) a detached session is kept alive before
+                          auto-kill. Zero means disabled.
+                      idle_timeout_ms:
+                        type: integer
+                        format: int64
+                        description: Idle reap timeout (ms). Zero means disabled.
+                      max_sessions:
+                        type: integer
+                        description: Maximum concurrent terminal sessions.
+
+  /api/local/settings:
+    get:
+      operationId: getLocalSettings
+      tags: [config]
+      summary: Get desktop-local runtime settings (secret-sanitized)
+      responses:
+        "200":
+          description: Sanitized local settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LocalSettingsResponse"
+        "500":
+          description: Failed to load local settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: patchLocalSettings
+      tags: [config]
+      summary: Update desktop-local runtime settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LocalSettingsPatchRequest"
+      responses:
+        "200":
+          description: Settings saved (returns sanitized settings)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LocalSettingsResponse"
+        "400":
+          description: Invalid request body or validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: Request body too large
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Failed to load existing settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /api/backends:
     get:
@@ -303,6 +404,88 @@ paths:
                 $ref: "#/components/schemas/MessageResponse"
         "404":
           description: Workspace not found
+
+  /api/workspaces/{ws}/repos:
+    get:
+      operationId: listWorkspaceRepos
+      tags: [workspaces]
+      summary: List a workspace's repos
+      description: |
+        Lightweight endpoint returning only the workspace's repo list, for
+        clients that do not need the full workspace topology payload.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Repo list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, repos]
+                properties:
+                  success:
+                    type: boolean
+                  repos:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/WorkspaceRepo"
+        "400":
+          description: Missing workspace ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: addWorkspaceRepos
+      tags: [workspaces]
+      summary: Add repos to a workspace
+      description: |
+        Attaches existing local git repos and/or clones remote git URLs into
+        the workspace, then returns the refreshed workspace topology.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkspaceAddReposRequest"
+      responses:
+        "201":
+          description: Repos added; refreshed workspace topology
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: "#/components/schemas/WorkspaceResponse"
+                  warnings:
+                    type: array
+                    items:
+                      type: string
+        "400":
+          description: Missing workspace ID or invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: Request body too large
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /api/workspaces/{ws}/monitor/status:
     get:
@@ -677,6 +860,50 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/workspaces/{ws}/issues/search:
+    get:
+      operationId: searchIssues
+      tags: [issues]
+      summary: Full-text search issues in a workspace
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: q
+          in: query
+          required: true
+          description: Full-text search query, forwarded to the issue backend
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: >-
+            Max results. Defaults to 100 and is clamped to a maximum of 500;
+            invalid or non-positive values fall back to 100.
+          schema:
+            type: integer
+            default: 100
+            maximum: 500
+      responses:
+        "200":
+          description: Matching issues
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Issue"
+        "400":
+          description: Missing search query 'q'
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/workspaces/{ws}/issues/{id}:
     get:
       operationId: getIssue
@@ -783,6 +1010,52 @@ paths:
                     type: object
         "404":
           description: Issue not found
+
+  /api/workspaces/{ws}/issues/{id}/reopen:
+    post:
+      operationId: reopenIssue
+      tags: [issues]
+      summary: Reopen a closed issue
+      description: |
+        Transitions a closed issue back to open status. The request body is
+        optional; an empty body or {} yields a status-only reopen. When `reason`
+        is set the backend records it as a comment on the issue (best-effort).
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/IssueId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  description: Optional reason, recorded as a comment (best-effort)
+      responses:
+        "200":
+          description: Issue reopened
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+        "400":
+          description: Missing issue ID or invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Issue not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /api/workspaces/{ws}/issues/{id}/claim:
     post:
@@ -906,6 +1179,34 @@ paths:
 
   # ── Comments ────────────────────────────────────────────────────────────
   /api/workspaces/{ws}/issues/{id}/comments:
+    get:
+      operationId: listComments
+      tags: [comments]
+      summary: List comments for an issue
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/IssueId"
+      responses:
+        "200":
+          description: Issue comments (empty array when the issue has none)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Comment"
+        "400":
+          description: Missing issue ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
     post:
       operationId: addComment
       tags: [comments]
@@ -939,6 +1240,59 @@ paths:
 
   # ── Dependencies ────────────────────────────────────────────────────────
   /api/workspaces/{ws}/issues/{id}/dependencies:
+    get:
+      operationId: listDependencies
+      tags: [dependencies]
+      summary: List an issue's dependencies
+      description: |
+        Returns the issue's dependencies projected as the *related* issue plus a
+        dependency_type discriminator (the FE IssueWithDependencyMetadata shape),
+        not the raw types.Dependency relation. Each entry's `id` is the issue on
+        the other side of the edge, not the issue being viewed.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/IssueId"
+      responses:
+        "200":
+          description: Issue dependencies (empty array when the issue has none)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, title, status, priority, created_at, dependency_type]
+                      properties:
+                        id:
+                          type: string
+                          description: The related issue on the other side of the dependency edge
+                        title:
+                          type: string
+                        status:
+                          type: string
+                        priority:
+                          type: integer
+                        created_at:
+                          type: string
+                          format: date-time
+                        dependency_type:
+                          type: string
+                        issue_type:
+                          type: string
+                        created_by:
+                          type: string
+        "400":
+          description: Missing issue ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
     post:
       operationId: addDependency
       tags: [dependencies]
@@ -1211,10 +1565,14 @@ paths:
         `bonded`, `squashed`, `burned`, `refresh`, `terminal_metadata`,
         `terminal_session_change`, `issue_tabs`, `session_change`
 
-        **Authentication**: Accepts Bearer token via `Authorization` header or
-        one-time token via `token` query parameter (for EventSource which
-        cannot send custom headers). In external auth mode, use the
-        `/api/workspaces/{ws}/events/token` endpoint to obtain a one-time SSE token.
+        **Authentication**: One-time token via the `token` query parameter
+        only. The user JWT middleware treats this as a public route and the
+        handler does its own check, which never reads an `Authorization`
+        header. In external auth mode, obtain the one-time SSE token from
+        `GET /api/workspaces/{ws}/events/token`; anything else — including a
+        valid SSE token sent as a Bearer header — returns `401`. In open auth
+        mode no credential is required.
+      security: []
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - name: token
@@ -1576,32 +1934,6 @@ paths:
                         format: int64
 
   # ── Terminal ────────────────────────────────────────────────────────────
-  /api/workspaces/{ws}/terminal/sessions:
-    get:
-      operationId: listTerminalSessions
-      tags: [terminal]
-      summary: List active terminal sessions
-      parameters:
-        - $ref: "#/components/parameters/WorkspaceId"
-      responses:
-        "200":
-          description: Session list
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [success]
-                properties:
-                  success:
-                    type: boolean
-                  data:
-                    type: object
-                    properties:
-                      sessions:
-                        type: array
-                        items:
-                          $ref: "#/components/schemas/TerminalSessionInfo"
-
   /api/workspaces/{ws}/terminal/token:
     get:
       operationId: getTerminalToken
@@ -1632,8 +1964,11 @@ paths:
         for control messages. The frontend's `terminalConnection.ts`
         consumes this directly.
 
-        **Authentication**: One-time token via `token` query parameter,
-        generated by `GET /api/workspaces/{ws}/terminal/token`.
+        **Authentication**: One-time token via the `token` query parameter
+        only, generated by `GET /api/workspaces/{ws}/terminal/token`. The user
+        JWT middleware treats this as a public route and the handler does its
+        own check; an `Authorization` header is never read.
+      security: []
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - name: token
@@ -1651,219 +1986,6 @@ paths:
           description: Switching Protocols (WebSocket upgrade)
         "401":
           description: Invalid or expired token
-
-  /api/workspaces/{ws}/terminal/session-status:
-    get:
-      operationId: getTerminalSessionStatus
-      tags: [terminal]
-      summary: Check if a terminal session is alive
-      parameters:
-        - $ref: "#/components/parameters/WorkspaceId"
-        - name: session
-          in: query
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Session status
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  alive:
-                    type: boolean
-                  exit_reason:
-                    type: string
-
-  /api/workspaces/{ws}/terminal/spawn:
-    post:
-      operationId: spawnTerminalSession
-      tags: [terminal]
-      summary: Spawn a new terminal session
-      parameters:
-        - $ref: "#/components/parameters/WorkspaceId"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/TerminalSpawnRequest"
-      responses:
-        "200":
-          description: Session spawned
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [success]
-                properties:
-                  success:
-                    type: boolean
-                  data:
-                    $ref: "#/components/schemas/TerminalSpawnData"
-
-  /api/workspaces/{ws}/terminal/restart:
-    post:
-      operationId: restartTerminal
-      tags: [terminal]
-      summary: Restart the terminal backend process
-      parameters:
-        - $ref: "#/components/parameters/WorkspaceId"
-      responses:
-        "200":
-          description: Terminal restarted
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MessageResponse"
-
-  /api/workspaces/{ws}/terminal/kill:
-    post:
-      operationId: killTerminal
-      tags: [terminal]
-      summary: Kill the terminal backend process
-      parameters:
-        - $ref: "#/components/parameters/WorkspaceId"
-      responses:
-        "200":
-          description: Terminal killed
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MessageResponse"
-
-  /api/workspaces/{ws}/terminal/sessions/{name}/seed:
-    post:
-      operationId: seedTerminalSession
-      tags: [terminal]
-      summary: Seed a terminal session with issue context
-      parameters:
-        - $ref: "#/components/parameters/WorkspaceId"
-        - name: name
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/SeedRequest"
-      responses:
-        "200":
-          description: Session seeded
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MessageResponse"
-
-  /api/workspaces/{ws}/terminal/sessions/{session}/kill:
-    post:
-      operationId: scheduleSessionKill
-      tags: [terminal]
-      summary: Schedule a terminal session for graceful termination
-      parameters:
-        - $ref: "#/components/parameters/WorkspaceId"
-        - name: session
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Kill scheduled
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MessageResponse"
-
-  /api/workspaces/{ws}/terminal/sessions/close-all:
-    post:
-      operationId: closeAllTerminalSessions
-      tags: [terminal]
-      summary: Close all terminal sessions
-      parameters:
-        - $ref: "#/components/parameters/WorkspaceId"
-      responses:
-        "200":
-          description: All sessions closed
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MessageResponse"
-
-  /api/workspaces/{ws}/terminal/sessions/{session}/scrollback:
-    get:
-      operationId: getScrollback
-      tags: [terminal]
-      summary: Get scrollback buffer for a terminal session
-      parameters:
-        - $ref: "#/components/parameters/WorkspaceId"
-        - name: session
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Scrollback content
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [success]
-                properties:
-                  success:
-                    type: boolean
-                  data:
-                    type: object
-                    properties:
-                      content:
-                        type: string
-                      lines:
-                        type: integer
-
-  /api/workspaces/{ws}/terminal/sessions/{session}/export:
-    get:
-      operationId: exportSession
-      tags: [terminal]
-      summary: Export terminal session content
-      parameters:
-        - $ref: "#/components/parameters/WorkspaceId"
-        - name: session
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Session export
-          content:
-            text/plain:
-              schema:
-                type: string
-
-  /api/workspaces/{ws}/terminal/sessions/{session}/scrollback-info:
-    get:
-      operationId: getScrollbackInfo
-      tags: [terminal]
-      summary: Get scrollback metadata (line count, size)
-      parameters:
-        - $ref: "#/components/parameters/WorkspaceId"
-        - name: session
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Scrollback info
-          content:
-            application/json:
-              schema:
-                type: object
 
   # ── Terminal Tabs ───────────────────────────────────────────────────────
   /api/workspaces/{ws}/terminal/tabs:
@@ -2222,6 +2344,12 @@ paths:
         WebSocket endpoint for agent-specific terminal I/O. Uses the same
         binary/text frame protocol as the main terminal WebSocket.
         The frontend's `terminalConnection.ts` handles this directly.
+
+        **Authentication**: One-time token via the `token` query parameter
+        only, on the same terms as the main terminal WebSocket. The user JWT
+        middleware treats this as a public route and the handler does its own
+        check; an `Authorization` header is never read.
+      security: []
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/AgentName"
@@ -2236,7 +2364,163 @@ paths:
         "401":
           description: Invalid or expired token
 
-  # ── Agent Control ───────────────────────────────────────────────────────
+  /api/workspaces/{ws}/agents/{name}/terminal/session:
+    post:
+      operationId: ensureAgentTerminalSession
+      tags: [agent-terminal]
+      summary: Ensure a persisted terminal session for an agent
+      description: |
+        Resolves an agent name to a persisted UUID terminal session and
+        returns its tab metadata, creating or rebuilding the tab's launch spec
+        when needed. Takes no request body. The response wraps the tab metadata
+        in a `{success, data}` envelope; error cases set `success:false` with an
+        `error` message.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+      responses:
+        "200":
+          description: Ensured agent terminal session
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: "#/components/schemas/TabMetadata"
+                  error:
+                    type: string
+        "400":
+          description: Invalid agent name or agent has no launch spec
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Agent not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Terminal service or agent store not initialized
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, error]
+                properties:
+                  success:
+                    type: boolean
+                    const: false
+                  error:
+                    type: string
+
+  # ── Approvals ───────────────────────────────────────────────────────────
+  /api/workspaces/{ws}/approvals:
+    post:
+      operationId: postWorkspaceApproval
+      tags: [approvals]
+      summary: Record an approval or rejection decision for a pending await
+      description: >-
+        Records one approval/rejection by the VERIFIED session user and feeds it
+        to the await machinery (journal-first, then dispatch-time matching). The
+        actor is always the authenticated session identity, never request data.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subjectRef]
+              properties:
+                subjectRef:
+                  type: string
+                  description: Rendered subject the approval targets, e.g. "acme/widgets#7@shaA".
+                eventType:
+                  type: string
+                  description: Await event type. Defaults to "approval".
+                decision:
+                  type: string
+                  enum: [approved, rejected]
+                  description: Approval decision. Defaults to "approved".
+                note:
+                  type: string
+                  description: Optional free-form reviewer note carried on the payload.
+      responses:
+        "200":
+          description: Decision recorded (and any pending awaits resolved)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, eventId, actor, subjectKey, pendingMatched]
+                properties:
+                  status:
+                    type: string
+                    description: The recorded decision (approved | rejected).
+                  eventId:
+                    type: string
+                  actor:
+                    type: string
+                    description: Verified approver ref (session email, or user id when absent).
+                  subjectKey:
+                    type: string
+                    description: The rendered await key (eventType:subjectRef).
+                  pendingMatched:
+                    type: integer
+                    description: >-
+                      Count of pending awaits on the key at decision time (zero means
+                      the event was journaled for a future registration).
+                  resolutions:
+                    type: array
+                    items:
+                      type: object
+                      required: [instanceKey, runId, outcome]
+                      properties:
+                        instanceKey:
+                          type: string
+                        runId:
+                          type: string
+                        outcome:
+                          type: string
+        "400":
+          description: Invalid body, or subjectRef/eventType do not render a subject-scoped key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalError"
+        "401":
+          description: Missing verified session identity (fail closed)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalError"
+        "403":
+          description: Session actor is not an eligible approver for the subject key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalError"
+        "501":
+          description: Await store unavailable for this backend
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalError"
+        "500":
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalError"
+
+  # ── Agent Control───────────────────────────────────────────────────────
   /api/workspaces/{ws}/interactive-prompts:
     get:
       operationId: listInteractivePrompts
@@ -2352,6 +2636,159 @@ paths:
           description: Agent already exists
         "503":
           description: Agent service unavailable
+
+  /api/workspaces/{ws}/agents/{name}:
+    patch:
+      operationId: updateAgent
+      tags: [agent-control]
+      summary: Partial-update an agent assignment
+      description: |
+        Applies a partial update to an existing agent. Every field is
+        optional; only present fields are changed. `state` accepts
+        `idle`|`active`|`stopped` and `desired_state` accepts
+        `stopped`|`idle`|`running`|`draining` (an empty/omitted value leaves
+        the field unchanged). Broadcasts an `agent.refresh` mutation on success.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: All fields optional; only present fields are updated.
+              properties:
+                role_name:
+                  type: string
+                auto:
+                  type: boolean
+                backend:
+                  type: string
+                fallback_backends:
+                  type: array
+                  items:
+                    type: string
+                repos:
+                  type: array
+                  items:
+                    type: string
+                repo_groups:
+                  type: array
+                  items:
+                    type: string
+                cross_repo:
+                  type: boolean
+                parent:
+                  type: string
+                state:
+                  type: string
+                  enum: [idle, active, stopped]
+                desired_state:
+                  type: string
+                  enum: [stopped, idle, running, draining]
+      responses:
+        "200":
+          description: Updated agent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agent"
+        "400":
+          description: Invalid update (bad state, desired_state, or body)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Agent not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteAgent
+      tags: [agent-control]
+      summary: Delete an agent assignment
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+      responses:
+        "200":
+          description: Agent deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "404":
+          description: Agent not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/workspaces/{ws}/agents/{name}/queue:
+    get:
+      operationId: getAgentQueue
+      tags: [agent-control]
+      summary: Ranked task queue for a single agent (daemon-backed)
+      description: |
+        Returns the daemon's ranked candidate task queue for one agent.
+        Served by the daemon-control-socket module; in fleet-db store mode the
+        same path is instead served by a stub that returns 501 Not Implemented
+        ("agent-specific queue is not available in fleet-db store mode; use
+        monitor task queues").
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+      responses:
+        "200":
+          description: Ranked agent task queue
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data, total]
+                properties:
+                  success:
+                    type: boolean
+                    const: true
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AgentQueueEntry"
+                  total:
+                    type: integer
+        "404":
+          description: Agent not found in daemon config
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "501":
+          description: Not available in fleet-db store mode
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Daemon unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /api/workspaces/{ws}/agents/{name}/stop:
     post:
@@ -2600,6 +3037,58 @@ paths:
                 type: object
 
   # ── Pull Requests ───────────────────────────────────────────────────────
+  /api/workspaces/{ws}/pull-requests:
+    get:
+      operationId: listWorkspacePullRequests
+      tags: [pull-requests]
+      summary: List pull requests across the workspace's repos (gh-backed fallback)
+      description: |
+        Aggregates pull requests across every repo in the workspace via the
+        gh CLI. Registered only in serve modes without a store; store-backed
+        serve exposes the richer connector-primary listing at the same path.
+        Per-repo failures (non-GitHub remote, auth) are reported in warnings
+        without failing the whole listing.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: state
+          in: query
+          description: Filter by PR state; defaults to all when omitted.
+          schema:
+            type: string
+            enum: [all, open, merged, review]
+            default: all
+      responses:
+        "200":
+          description: Pull request list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    required: [pull_requests]
+                    properties:
+                      pull_requests:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/GitPullRequest"
+                      warnings:
+                        type: array
+                        items:
+                          type: string
+                  error:
+                    type: string
+        "502":
+          description: Upstream git/gh failure while listing pull requests
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}:
     get:
       operationId: getPullRequestDetail
@@ -3835,6 +4324,1467 @@ paths:
         "200":
           description: Notification received
 
+  # ── Workflows & Runs ────────────────────────────────────────────────────
+  /api/workspaces/{ws}/workflows/{name}:
+    post:
+      operationId: createWorkflowRun
+      tags: [workflows]
+      summary: Start a workflow run
+      description: |
+        Resolves the named workflow to a driver (self-healing builtins on
+        demand), runs an AI-CLI-backend preflight when the run would execute
+        locally, then creates and enqueues a driver run. The request body is
+        the opaque driver run payload passed through verbatim; an empty body
+        is treated as {}. A recognised convention is an optional epic_id.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: name
+          in: path
+          required: true
+          description: Workflow name
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Optional idempotency key for run creation.
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              description: |
+                Opaque workflow run payload, passed through to the driver run.
+                Free-form; may include epic_id. Empty body defaults to {}.
+              additionalProperties: true
+      responses:
+        "202":
+          description: Run accepted and enqueued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverRun"
+        "400":
+          description: Invalid payload or failed runner preflight
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Workflow not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Run creation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/workspaces/{ws}/workflows/{name}/versions:
+    post:
+      operationId: createWorkflowVersion
+      tags: [workflows]
+      summary: Register a workflow version from uploaded source
+      description: |
+        Builds the uploaded TypeScript source tree and registers it as a
+        driver version for the named workflow. Request body is limited to
+        4 MiB. When activate is omitted it defaults to true.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: name
+          in: path
+          required: true
+          description: Workflow name
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [files]
+              properties:
+                files:
+                  type: object
+                  description: Map of workspace-relative file path to file source.
+                  additionalProperties:
+                    type: string
+                entrypoint:
+                  type: string
+                  description: Entry file path; defaults to workflows/{name}.ts.
+                activate:
+                  type: boolean
+                  description: Activate this version after registering. Defaults to true.
+      responses:
+        "201":
+          description: Version registered (or reused)
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  [created_driver, created_version, reused_version, activated]
+                properties:
+                  driver:
+                    type: object
+                    description: The registered driver record (domain.Driver).
+                  version:
+                    type: object
+                    description: The registered driver version (domain.DriverVersion).
+                  bundle:
+                    type: object
+                    nullable: true
+                    description: The built bundle metadata, when present.
+                  created_driver:
+                    type: boolean
+                  created_version:
+                    type: boolean
+                  reused_version:
+                    type: boolean
+                  activated:
+                    type: boolean
+                  build_diagnostics:
+                    type: string
+                    description: Build output/diagnostics from the bundler.
+        "400":
+          description: Missing/invalid files, entrypoint, or build failure
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/workspaces/{ws}/runs/{runId}:
+    get:
+      operationId: getWorkflowRun
+      tags: [workflows]
+      summary: Get a workflow/driver run
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: runId
+          in: path
+          required: true
+          description: Driver run identifier
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Driver run
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverRun"
+        "404":
+          description: Run not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/workspaces/{ws}/runs/{runId}/events:
+    get:
+      operationId: getWorkflowRunEvents
+      tags: [workflows]
+      summary: List a run's events (paginated)
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: runId
+          in: path
+          required: true
+          description: Driver run identifier
+          schema:
+            type: string
+        - name: after
+          in: query
+          description: Opaque cursor; return events after this position.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: Page size; defaults to 100.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 100
+      responses:
+        "200":
+          description: Event page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformEventsPage"
+        "400":
+          description: Invalid limit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Run not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "501":
+          description: Run event stream unavailable for this store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/workspaces/{ws}/runs/{runId}/stream:
+    get:
+      operationId: streamWorkflowRunEvents
+      tags: [workflows]
+      summary: Stream a run's events (SSE)
+      description: |
+        Server-Sent Events stream of a run's events. Each new event is sent as
+        an SSE frame `event: event` whose data is a PlatformEvent JSON object;
+        reader errors are sent as `event: error` with a {error} payload. The
+        server polls roughly once per second until the client disconnects.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: runId
+          in: path
+          required: true
+          description: Driver run identifier
+          schema:
+            type: string
+        - name: after
+          in: query
+          description: Opaque cursor; stream events after this position. Defaults to "0".
+          schema:
+            type: string
+            default: "0"
+      responses:
+        "200":
+          description: SSE stream of run events
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: |
+                  SSE frames. `event: event` frames carry a PlatformEvent JSON
+                  object; `event: error` frames carry {"error": string}.
+        "404":
+          description: Run not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Streaming unavailable (response writer cannot flush)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "501":
+          description: Run event stream unavailable for this store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ── Driver API ──────────────────────────────────────────────────────────
+  /api/workspaces/{ws}/driver/events/await:
+    post:
+      operationId: awaitDriverEvent
+      tags: [driver]
+      summary: Register-and-check the run's next await (suspend or resolve inline)
+      description: >-
+        Register-and-check the calling run's next durable await. Responds
+        `satisfied`/`timed_out` inline (including idempotent replay of an
+        already-finished awaitIndex, with the recorded event) or suspends the
+        run and responds `suspended` (the runner then exits; resume re-runs
+        from the top). Authentication is run-scoped and enforced in-handler,
+        not by the user-JWT middleware: present a run-scoped Bearer token
+        (identity derived from its claims) OR the legacy X-Loom-Driver-*
+        header quad, optionally with a shared static Bearer token. The await
+        instance key is derived server-side from the verified run id, never
+        from the body.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: X-Loom-Driver-Run-Id
+          in: header
+          required: false
+          description: Parent DriverRun id. Required on the legacy header-quad transport; omitted when authenticating with a run-scoped Bearer token. A value conflicting with the token is rejected 401 identity_mismatch.
+          schema:
+            type: string
+        - name: X-Loom-Driver-Node-Id
+          in: header
+          required: false
+          description: Parent DriverRun node id (legacy header transport only).
+          schema:
+            type: string
+        - name: X-Loom-Driver-Lease-Id
+          in: header
+          required: false
+          description: Parent DriverRun lease id (legacy header transport only).
+          schema:
+            type: string
+        - name: X-Loom-Driver-Fencing-Token
+          in: header
+          required: false
+          description: Positive int64 fencing token as a decimal string (legacy header transport only).
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [timeoutMs, awaitIndex]
+              properties:
+                pattern:
+                  type: string
+                  description: Fully rendered subject-scoped key to wait for (eventType:subject, exact equality, no glob).
+                actor:
+                  description: Optional eligible-resolver allow-list; accepts a single string or an array of strings.
+                  oneOf:
+                    - type: string
+                    - type: array
+                      items:
+                        type: string
+                timeoutMs:
+                  type: integer
+                  format: int64
+                  description: Mandatory await timeout in milliseconds.
+                awaitIndex:
+                  type: integer
+                  description: 1-based ordinal of this await within the run.
+      responses:
+        "200":
+          description: Await outcome — suspended, or satisfied/timed_out with the recorded event inline.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [suspended, satisfied, timed_out, cancelled]
+                  instanceKey:
+                    type: string
+                    description: Canonical await identity runID#await-{n}.
+                  pattern:
+                    type: string
+                  deadline:
+                    type: string
+                    format: date-time
+                  event:
+                    type: object
+                    description: Recorded resolving event; present on terminal outcomes (absent when suspended).
+                    required: [id, occurredAt]
+                    properties:
+                      id:
+                        type: string
+                      payload:
+                        description: Size-capped resume payload (raw JSON), returned inline on first resolution and every replay.
+                      actor:
+                        type: string
+                        description: Resolving actor when the event is journaled; absent for synthetic timeout events.
+                      occurredAt:
+                        type: string
+                        format: date-time
+        "400":
+          description: Invalid request (e.g. unscoped pattern, missing timeout, malformed instance key).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverOpError"
+        "401":
+          description: Unauthenticated, expired run token, or identity_mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverOpError"
+        "403":
+          description: Caller does not own the parent run, or actor not permitted to resolve.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverOpError"
+        "404":
+          description: Parent DriverRun not found or no longer running.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverOpError"
+        "409":
+          description: Conflict (e.g. run already resumed).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverOpError"
+        "500":
+          description: Internal error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverOpError"
+
+  /api/workspaces/{ws}/driver/events/awaits:
+    get:
+      operationId: listDriverEventAwaits
+      tags: [driver]
+      summary: List the calling run's awaits in index order
+      description: >-
+        Returns the verified run's await registrations in instance-index order
+        (terminal rows carry their recorded event and inline resume payload;
+        pending rows are included) so a resumed workflow can rebuild context.
+        Run-scoped auth is enforced in-handler (run token or legacy
+        X-Loom-Driver-* header quad), not by the user-JWT middleware.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: X-Loom-Driver-Run-Id
+          in: header
+          required: false
+          description: Parent DriverRun id (legacy header transport; omitted with a run-scoped Bearer token).
+          schema:
+            type: string
+        - name: X-Loom-Driver-Node-Id
+          in: header
+          required: false
+          schema:
+            type: string
+        - name: X-Loom-Driver-Lease-Id
+          in: header
+          required: false
+          schema:
+            type: string
+        - name: X-Loom-Driver-Fencing-Token
+          in: header
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The run's awaits in index order.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [runId, awaits]
+                properties:
+                  runId:
+                    type: string
+                  awaits:
+                    type: array
+                    items:
+                      type: object
+                      required: [workspaceKey, instanceKey, runID, pattern, deadline, registeredAt, status]
+                      properties:
+                        workspaceKey:
+                          type: string
+                        instanceKey:
+                          type: string
+                          description: Canonical identity runID#await-{n}, n >= 1.
+                        runID:
+                          type: string
+                        pattern:
+                          type: string
+                          description: Fully rendered subject-scoped key matched by exact equality.
+                        actorAllow:
+                          type: array
+                          items:
+                            type: string
+                          description: Actors eligible to resolve this await; empty means any actor.
+                        deadline:
+                          type: string
+                          format: date-time
+                        registeredAt:
+                          type: string
+                          format: date-time
+                        status:
+                          type: string
+                          enum: [pending, satisfied, timed_out, cancelled]
+                        satisfiedByEventID:
+                          type: string
+                          description: Trigger event (or synthetic timeout event) that resolved the await.
+                        satisfiedPayload:
+                          description: Size-capped resume payload (raw JSON) persisted on the satisfied row.
+                        resumedAt:
+                          type: string
+                          format: date-time
+                          nullable: true
+        "401":
+          description: Unauthenticated, expired run token, or identity_mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverOpError"
+        "404":
+          description: Parent DriverRun not found or no longer running.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverOpError"
+        "500":
+          description: Internal error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverOpError"
+
+  /api/workspaces/{ws}/driver/watch/epic:
+    get:
+      operationId: watchDriverEpic
+      tags: [driver]
+      summary: SSE stream of TaskRun journal events for an epic
+      description: >-
+        Server-Sent Events stream of TaskRun journal events scoped to an epic.
+        Handshake frame `event: snapshot` carries the epic scheduling snapshot
+        plus the parent run's active task runs (id = cursor); each subsequent
+        `event: taskRun` frame carries one journal event (id = the event Seq).
+        Resume with the `Last-Event-ID` header or the `afterSeq` query param as
+        an exclusive int64 Seq cursor. Every reconciliation tick re-verifies
+        the parent run and re-sends a snapshot; when the parent is no longer
+        running the stream ends with `event: closed` {code:"parent_not_running"}.
+        Run-scoped auth is enforced in-handler; errors that occur before the
+        stream commits to text/event-stream use the driver JSON error envelope.
+        The epic id comes from the epicId query param, falling back to the
+        parent run's epic.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: epicId
+          in: query
+          required: false
+          description: Epic to scope the stream to. Falls back to the parent DriverRun's epic id; required if neither is present (400).
+          schema:
+            type: string
+        - name: afterSeq
+          in: query
+          required: false
+          description: Exclusive int64 Seq resume cursor (alternative to the Last-Event-ID header). 0/absent streams from the start of the journal.
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+        - name: Last-Event-ID
+          in: header
+          required: false
+          description: SSE reconnect cursor (exclusive int64 Seq); takes precedence over afterSeq.
+          schema:
+            type: string
+        - name: X-Loom-Driver-Run-Id
+          in: header
+          required: false
+          description: Parent DriverRun id (legacy header transport; omitted with a run-scoped Bearer token).
+          schema:
+            type: string
+        - name: X-Loom-Driver-Node-Id
+          in: header
+          required: false
+          schema:
+            type: string
+        - name: X-Loom-Driver-Lease-Id
+          in: header
+          required: false
+          schema:
+            type: string
+        - name: X-Loom-Driver-Fencing-Token
+          in: header
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: >-
+            SSE stream. Frames: `snapshot` (epic + active task runs),
+            `taskRun` (one journal event, id = Seq), `closed`
+            (terminal, e.g. {code:"parent_not_running"}).
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "400":
+          description: Missing epic id or malformed resume cursor.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverOpError"
+        "401":
+          description: Unauthenticated, expired run token, or identity_mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverOpError"
+        "404":
+          description: Parent DriverRun not found or no longer running.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverOpError"
+        "500":
+          description: Internal error or streaming unsupported.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverOpError"
+
+  /api/workspaces/{ws}/driver/workflows/await:
+    post:
+      operationId: awaitDriverWorkflow
+      tags: [driver]
+      summary: Await a child workflow run's completion
+      description: >-
+        Await sugar over the pattern `run.finished:{childRunId}`: validates the
+        child belongs to the caller, then runs the standard events/await flow
+        (same suspended / satisfied / timed_out wire shapes), consuming a
+        normal awaitIndex slot. A non-suspended response additionally carries
+        the child's terminal status, summary and errorClass so a resumed parent
+        branches without a second fetch. Run-scoped auth enforced in-handler.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: X-Loom-Driver-Run-Id
+          in: header
+          required: false
+          description: Parent DriverRun id (legacy header transport; omitted with a run-scoped Bearer token).
+          schema:
+            type: string
+        - name: X-Loom-Driver-Node-Id
+          in: header
+          required: false
+          schema:
+            type: string
+        - name: X-Loom-Driver-Lease-Id
+          in: header
+          required: false
+          schema:
+            type: string
+        - name: X-Loom-Driver-Fencing-Token
+          in: header
+          required: false
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [childRunId, timeoutMs, awaitIndex]
+              properties:
+                childRunId:
+                  type: string
+                timeoutMs:
+                  type: integer
+                  format: int64
+                  description: Mandatory await timeout in milliseconds.
+                awaitIndex:
+                  type: integer
+                  description: 1-based await ordinal (consumes a normal await slot).
+      responses:
+        "200":
+          description: Await outcome plus the awaited child's state (child absent when suspended).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [suspended, satisfied, timed_out, cancelled]
+                  instanceKey:
+                    type: string
+                  pattern:
+                    type: string
+                  deadline:
+                    type: string
+                    format: date-time
+                  event:
+                    type: object
+                    description: Recorded resolving event (present on terminal outcomes).
+                    required: [id, occurredAt]
+                    properties:
+                      id:
+                        type: string
+                      payload: {}
+                      actor:
+                        type: string
+                      occurredAt:
+                        type: string
+                        format: date-time
+                  child:
+                    type: object
+                    description: Awaited child outcome; present on non-suspended outcomes (a timed-out await reports the child's current, possibly non-terminal, state).
+                    required: [runId, status]
+                    properties:
+                      runId:
+                        type: string
+                      status:
+                        type: string
+                      summary:
+                        type: string
+                      errorClass:
+                        type: string
+        "400":
+          description: Invalid request (missing timeout, bad await index, malformed child reference).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverOpError"
+        "401":
+          description: Unauthenticated, expired run token, or identity_mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverOpError"
+        "403":
+          description: Caller does not own the parent run or the referenced child.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverOpError"
+        "404":
+          description: Parent DriverRun or child run not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverOpError"
+        "500":
+          description: Internal error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverOpError"
+
+  /api/workspaces/{ws}/driver/workflows/start:
+    post:
+      operationId: startDriverWorkflow
+      tags: [driver]
+      summary: Start (or idempotently re-read) a child workflow run
+      description: >-
+        Create — or idempotently re-read — the deterministic child run of the
+        verified caller: re-entry re-issuing the same start returns the same
+        childRunId, never a duplicate. Provide `idempotencyKey`, or omit it and
+        supply the SDK's 1-based per-run `startIndex`. Run-scoped auth enforced
+        in-handler.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: X-Loom-Driver-Run-Id
+          in: header
+          required: false
+          description: Parent DriverRun id (legacy header transport; omitted with a run-scoped Bearer token).
+          schema:
+            type: string
+        - name: X-Loom-Driver-Node-Id
+          in: header
+          required: false
+          schema:
+            type: string
+        - name: X-Loom-Driver-Lease-Id
+          in: header
+          required: false
+          schema:
+            type: string
+        - name: X-Loom-Driver-Fencing-Token
+          in: header
+          required: false
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [workflowName]
+              properties:
+                workflowName:
+                  type: string
+                  description: Registered workflow (driver) to run.
+                input:
+                  description: Child's initial payload (raw JSON); empty means {}.
+                idempotencyKey:
+                  type: string
+                  description: Keys the deterministic child identity. When absent, startIndex is required.
+                startIndex:
+                  type: integer
+                  description: SDK 1-based per-run start counter; required when idempotencyKey is absent.
+      responses:
+        "200":
+          description: The created (or replayed) child run.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [childRunId, workflowName, status, parentRunId]
+                properties:
+                  childRunId:
+                    type: string
+                  workflowName:
+                    type: string
+                  status:
+                    type: string
+                  parentRunId:
+                    type: string
+        "400":
+          description: Invalid request (missing workflowName, or neither idempotencyKey nor startIndex).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverOpError"
+        "401":
+          description: Unauthenticated, expired run token, or identity_mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverOpError"
+        "404":
+          description: Parent DriverRun not found or no longer running.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverOpError"
+        "409":
+          description: Conflict on deterministic child identity.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverOpError"
+        "500":
+          description: Internal error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverOpError"
+
+  /api/workspaces/{ws}/driver/{op}:
+    post:
+      operationId: dispatchDriverOp
+      tags: [driver]
+      summary: Driver-op dispatcher (opaque op path parameter)
+      description: >-
+        Single-segment driver-op dispatcher (SDK v2 transport). The `{op}` path
+        segment selects the operation; the request body is an op-specific
+        camelCase JSON object and the 200 response is an op-specific JSON object.
+        An empty body is treated as `{}`; bodies are capped at 8 MiB. Run-scoped
+        auth is enforced in-handler (run token or legacy X-Loom-Driver-* header
+        quad + optional shared static token); most ops additionally prove the
+        caller owns a running parent DriverRun. Errors use the driver envelope
+        {error:{code,message,retryable,details?}}; an unknown op returns 404
+        unknown_op. The op set is defined as the keys of the ops map in
+        driverapi.NewModule (internal/webui/handlers/driverapi/module.go). NOTE:
+        the two-segment paths events/await, events/awaits, workflows/start,
+        workflows/await and watch/epic are registered as their own routes and
+        are not dispatched here.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: op
+          in: path
+          required: true
+          description: The driver operation to invoke.
+          schema:
+            type: string
+            enum:
+              - claim-ready
+              - epic-get
+              - epic-snapshot
+              - list-agents
+              - agent-orchestration-session
+              - update-agent-parent
+              - deliver-lead-assignment
+              - deliver-agent-message
+              - exec-task
+              - task-run-get
+              - active-task-runs
+              - recover-stale-tasks
+              - complete-task
+              - release-task
+              - connector-dispatch
+              - emit-event
+        - name: X-Loom-Driver-Run-Id
+          in: header
+          required: false
+          description: Parent DriverRun id (legacy header transport; omitted with a run-scoped Bearer token).
+          schema:
+            type: string
+        - name: X-Loom-Driver-Node-Id
+          in: header
+          required: false
+          schema:
+            type: string
+        - name: X-Loom-Driver-Lease-Id
+          in: header
+          required: false
+          schema:
+            type: string
+        - name: X-Loom-Driver-Fencing-Token
+          in: header
+          required: false
+          schema:
+            type: string
+      requestBody:
+        required: false
+        description: Op-specific camelCase JSON parameters (decoded per op). Empty body is treated as {}.
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Op-specific result (each op returns its own JSON object).
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: Invalid request payload or op parameters.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverOpError"
+        "401":
+          description: Unauthenticated, expired run token, or identity_mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverOpError"
+        "403":
+          description: Caller does not own the parent run.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverOpError"
+        "404":
+          description: Unknown op, or a referenced resource / parent run not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverOpError"
+        "409":
+          description: Conflict (e.g. already claimed, invalid transition, unschedulable).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverOpError"
+        "500":
+          description: Internal error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverOpError"
+
+  # ── Task Run API ─────────────────────────────────────────────────────────
+  /api/workspaces/{ws}/task-run/artifacts/{artifactId}/content:
+    put:
+      operationId: uploadTaskRunArtifactContent
+      tags: [task-run]
+      summary: Upload raw content for a task-run artifact
+      description: |
+        Uploads the raw bytes of a task-run artifact declared earlier via the
+        `artifact-declare` op. The request body is the content itself (which is
+        why this cannot ride the JSON `{op}` route), and the request
+        `Content-Type` header is stored as the artifact's MIME type. The
+        artifact must belong to the caller's verified task run; a foreign or
+        unknown artifact is reported as `not_found`. Max body size: 64 MiB.
+      security:
+        - TaskRunLease: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: artifactId
+          in: path
+          required: true
+          description: Artifact identifier, scoped to the caller's task run
+          schema:
+            type: string
+        - name: X-Loom-Task-Run-Id
+          in: header
+          required: true
+          description: Task-run identity (mirrors LOOM_TASK_RUN_ID)
+          schema:
+            type: string
+        - name: X-Loom-Task-Run-Fencing-Token
+          in: header
+          required: true
+          description: Monotonic lease fencing token; must be a positive integer
+          schema:
+            type: integer
+            format: int64
+        - name: X-Loom-Task-Run-Node-Id
+          in: header
+          required: false
+          description: Node identity for the fenced ownership check (mirrors LOOM_TASK_RUN_NODE_ID)
+          schema:
+            type: string
+        - name: X-Loom-Task-Run-Lease-Id
+          in: header
+          required: false
+          description: Lease identity for the fenced ownership check (mirrors LOOM_TASK_RUN_LEASE_ID)
+          schema:
+            type: string
+      requestBody:
+        required: true
+        description: Raw artifact content. The request Content-Type is stored as the artifact MIME type.
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: Content uploaded; the updated artifact record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskRunArtifact"
+        "400":
+          description: Invalid request (unreadable body or over the size cap)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskRunOpError"
+        "401":
+          description: Missing/invalid lease credentials, or the lease is superseded or the run is terminal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskRunOpError"
+        "404":
+          description: Artifact does not exist or does not belong to the caller's task run
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskRunOpError"
+        "500":
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskRunOpError"
+
+  /api/workspaces/{ws}/task-run/{op}:
+    post:
+      operationId: taskRunOp
+      tags: [task-run]
+      summary: Task-run operation dispatcher (opaque op)
+      description: |
+        Opaque operation dispatcher for the task-runner API — the same transport
+        shape as the driver `{op}` route. `{op}` selects one of a fixed set of
+        operations; the request and response bodies are op-specific camelCase
+        JSON. The op set is defined in
+        `internal/webui/handlers/taskrunapi/module.go` (`NewModule`):
+        `get`, `task-get`, `heartbeat`, `log-append`, `complete`,
+        `runtime-credential`, `artifact-declare`, `artifact-get`,
+        `artifact-list`, `artifact-finalize`. An unknown op returns 404 with
+        code `unknown_op`. An empty request body is treated as `{}`. Read-only
+        and artifact ops first prove lease ownership via a fenced no-op
+        heartbeat; mutating ops (`heartbeat`, `log-append`, `complete`) pass the
+        lease credentials straight through to fleet-db's fenced task-run
+        methods. Errors use the structured envelope
+        `{error:{code,message,retryable,details}}`.
+      security:
+        - TaskRunLease: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: op
+          in: path
+          required: true
+          description: Task-run operation name
+          schema:
+            type: string
+            enum:
+              - get
+              - task-get
+              - heartbeat
+              - log-append
+              - complete
+              - runtime-credential
+              - artifact-declare
+              - artifact-get
+              - artifact-list
+              - artifact-finalize
+        - name: X-Loom-Task-Run-Id
+          in: header
+          required: true
+          description: Task-run identity (mirrors LOOM_TASK_RUN_ID)
+          schema:
+            type: string
+        - name: X-Loom-Task-Run-Fencing-Token
+          in: header
+          required: true
+          description: Monotonic lease fencing token; must be a positive integer
+          schema:
+            type: integer
+            format: int64
+        - name: X-Loom-Task-Run-Node-Id
+          in: header
+          required: false
+          description: Node identity for the fenced ownership check (mirrors LOOM_TASK_RUN_NODE_ID)
+          schema:
+            type: string
+        - name: X-Loom-Task-Run-Lease-Id
+          in: header
+          required: false
+          description: Lease identity for the fenced ownership check (mirrors LOOM_TASK_RUN_LEASE_ID)
+          schema:
+            type: string
+      requestBody:
+        required: false
+        description: |
+          Op-specific camelCase JSON parameters. The shape depends on `{op}`;
+          see the op handlers in
+          `internal/webui/handlers/taskrunapi/module.go` and `artifacts.go`.
+          An empty body is treated as `{}`. Max size: 8 MiB.
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: |
+            Op-specific result. Depending on `{op}` this is a task-run view
+            (`get`, `heartbeat`), a `{taskRun, task}` pair (`task-get`), a log
+            entry (`log-append`), a `{completion, taskRun}` pair (`complete`),
+            an artifact view or `{artifacts:[...]}` (artifact ops), or a
+            runtime-credential payload (`runtime-credential`).
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: Invalid op payload (code `invalid`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskRunOpError"
+        "401":
+          description: Missing/invalid lease credentials, or the lease is superseded, or the run is terminal (code `unauthenticated` or `lease_denied`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskRunOpError"
+        "403":
+          description: Fenced pass-through op rejected ownership (code `not_owner`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskRunOpError"
+        "404":
+          description: Unknown op or referenced resource not found (code `unknown_op` or `not_found`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskRunOpError"
+        "409":
+          description: Op-level conflict or invalid state transition (code `conflict` or `invalid_transition`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskRunOpError"
+        "500":
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskRunOpError"
+
+  # ── Triggers & Webhooks ──────────────────────────────────────────────────
+  /api/workspaces/{ws}/trigger-events:
+    get:
+      operationId: listTriggerEvents
+      tags: [triggers]
+      summary: List persisted trigger events (webhook ingest audit trail)
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: source_kind
+          in: query
+          description: Filter by event source kind (e.g. github)
+          schema:
+            type: string
+        - name: trigger_binding_id
+          in: query
+          description: Filter by the trigger binding that matched the event
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: Max rows to return (1-1000)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+      responses:
+        "200":
+          description: Trigger event list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [trigger_events, count]
+                properties:
+                  trigger_events:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TriggerEvent"
+                  count:
+                    type: integer
+        "400":
+          description: Invalid limit parameter (bare {error} body, not the standard ErrorResponse envelope)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+        "500":
+          description: List failed (bare {error} body)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+
+  /api/workspaces/{ws}/trigger-events/{eventId}:
+    get:
+      operationId: getTriggerEvent
+      tags: [triggers]
+      summary: Get a single persisted trigger event
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: eventId
+          in: path
+          required: true
+          description: Trigger event identifier
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Trigger event
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TriggerEvent"
+        "404":
+          description: Trigger event not found (bare {error} body, not the standard ErrorResponse envelope)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+
+  /api/workspaces/{ws}/trigger-deliveries:
+    get:
+      operationId: listTriggerDeliveries
+      tags: [triggers]
+      summary: List persisted trigger deliveries (fan-out dispatch audit trail)
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: trigger_event_id
+          in: query
+          description: Filter by the originating trigger event
+          schema:
+            type: string
+        - name: trigger_binding_id
+          in: query
+          description: Filter by the trigger binding that produced the delivery
+          schema:
+            type: string
+        - name: status
+          in: query
+          description: Filter by delivery lifecycle status
+          schema:
+            type: string
+            enum: [accepted, rejected, duplicate, queued, dispatched, failed, replayed, superseded, held]
+        - name: limit
+          in: query
+          description: Max rows to return (1-1000)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+      responses:
+        "200":
+          description: Trigger delivery list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [trigger_deliveries, count]
+                properties:
+                  trigger_deliveries:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TriggerDelivery"
+                  count:
+                    type: integer
+        "400":
+          description: Invalid limit parameter (bare {error} body, not the standard ErrorResponse envelope)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+        "500":
+          description: List failed (bare {error} body)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+
+  /api/workspaces/{ws}/trigger-deliveries/{deliveryId}:
+    get:
+      operationId: getTriggerDelivery
+      tags: [triggers]
+      summary: Get a single persisted trigger delivery
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: deliveryId
+          in: path
+          required: true
+          description: Trigger delivery identifier
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Trigger delivery
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TriggerDelivery"
+        "404":
+          description: Trigger delivery not found (bare {error} body, not the standard ErrorResponse envelope)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+
+  /api/workspaces/{ws}/webhooks/{name}:
+    post:
+      operationId: receiveWebhook
+      tags: [webhooks]
+      summary: Ingest an inbound webhook delivery for the named adapter
+      description: |
+        Public endpoint (no user-JWT). The request is authenticated inside the
+        handler by the named adapter's per-binding signature verification
+        (e.g. GitHub `X-Hub-Signature-256`). The adapter normalizes
+        adapter-specific HTTP headers (delivery id, event type, subject/actor)
+        into routing metadata; the JSON request body is the raw provider
+        payload and is not otherwise interpreted. On success the delivery is
+        durably dispatched (fan-out) and 202 is returned with one entry per
+        matched binding.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: name
+          in: path
+          required: true
+          description: Registered webhook adapter name (e.g. github)
+          schema:
+            type: string
+      requestBody:
+        required: true
+        description: |
+          Raw provider webhook payload. Must be valid JSON (an empty body is
+          treated as {}). Not decoded into a fixed schema; the concrete shape
+          depends on the adapter and provider event.
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "202":
+          description: Delivery accepted and durably dispatched
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, route_key, idempotency_key, deliveries]
+                properties:
+                  status:
+                    type: string
+                    const: accepted
+                  route_key:
+                    type: string
+                  idempotency_key:
+                    type: string
+                    description: "name:deliveryId, derived from the adapter delivery id"
+                  deliveries:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TriggerRouteDelivery"
+        "400":
+          description: Malformed payload, empty/invalid JSON, or missing adapter delivery id (bare {error} body)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+        "401":
+          description: Signature verification failed (bare {error} body)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+        "404":
+          description: No adapter registered for {name}, or no enabled trigger binding for the resolved route (bare {error} body)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+        "501":
+          description: Trigger dispatch is unavailable for this store (bare {error} body)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+
   # ── Fleet ───────────────────────────────────────────────────────────────
   /api/workspaces/{ws}/fleet/register:
     post:
@@ -3883,7 +5833,8 @@ paths:
       operationId: fleetDone
       tags: [fleet]
       summary: Mark a fleet task as done
-      security: []
+      security:
+        - FleetJWT: []
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - name: id
@@ -4031,6 +5982,126 @@ paths:
           description: Logs received
 
   # ── Monitor ─────────────────────────────────────────────────────────────
+  /api/daemon/config:
+    get:
+      operationId: getDaemonConfig
+      tags: [monitor]
+      summary: Effective resolved daemon config
+      responses:
+        "200":
+          description: Resolved daemon config
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                    const: true
+                  data:
+                    type: object
+                    description: >-
+                      Effective resolved daemon configuration, embedded verbatim
+                      as opaque JSON (json.RawMessage). Inner shape is not decoded
+                      by this handler.
+        "503":
+          description: Daemon config could not be loaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/daemon/supervisor:
+    get:
+      operationId: getDaemonSupervisor
+      tags: [monitor]
+      summary: Daemon supervisor state and supervised agents
+      responses:
+        "200":
+          description: Supervisor state
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                    const: true
+                  data:
+                    type: object
+                    required: [pid, started_at, uptime_seconds, agents]
+                    properties:
+                      pid:
+                        type: integer
+                      started_at:
+                        type: string
+                        format: date-time
+                      uptime_seconds:
+                        type: number
+                        format: double
+                      agents:
+                        type: array
+                        items:
+                          type: object
+                          required: [worktree, role, pid, status, restart_count]
+                          properties:
+                            worktree:
+                              type: string
+                            role:
+                              type: string
+                            repo:
+                              type: string
+                            pid:
+                              type: integer
+                            status:
+                              type: string
+                            task_id:
+                              type: string
+                            epic_id:
+                              type: string
+                            current_backend:
+                              type: string
+                            restart_count:
+                              type: integer
+                            last_start:
+                              type: string
+                              format: date-time
+                            last_exit:
+                              type: string
+                              format: date-time
+                            last_exit_code:
+                              type: integer
+                            stop_reason:
+                              type: string
+                            stopped_at:
+                              type: string
+                              format: date-time
+                            worktree_path:
+                              type: string
+                            last_error_class:
+                              type: string
+                            no_work_count:
+                              type: integer
+                            backoff_until:
+                              type: string
+                              format: date-time
+                            remote_branch:
+                              type: string
+        "503":
+          description: Daemon is not running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Failed to read daemon state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/monitor/status:
     get:
       operationId: getMonitorStatus
@@ -4293,6 +6364,17 @@ components:
       description: |
         JWT token for fleet claim/heartbeat endpoints. HMAC-SHA256 signed.
         Configured via `LOOM_FLEET_JWT_KEY` env var. Token expiry: 1 hour.
+
+    TaskRunLease:
+      type: http
+      scheme: bearer
+      description: |
+        Per-task-run lease-token Bearer auth for the task-run SDK transport,
+        verified in-handler (not by the user-JWT middleware) through fleet-db's
+        fenced task-run checks. The token is accompanied by `X-Loom-Task-Run-*`
+        identity headers (run id + fencing token, optional node/lease id); a
+        superseded lease or a terminal run is rejected. Not user-JWT, not
+        fleet-JWT.
 
   parameters:
     WorkspaceId:
@@ -5802,66 +7884,6 @@ components:
           type: string
 
     # ── Terminal Schemas ────────────────────────────────────────────────
-    TerminalSessionInfo:
-      type: object
-      required: [name, label, created]
-      properties:
-        name:
-          type: string
-        label:
-          type: string
-        created:
-          type: integer
-          format: int64
-          description: Unix timestamp
-        issue_id:
-          type: string
-
-    TerminalSpawnRequest:
-      type: object
-      required: [session_name, backend]
-      properties:
-        session_name:
-          type: string
-        backend:
-          type: string
-
-    TerminalSpawnData:
-      type: object
-      required: [session_name, backend, command, created]
-      properties:
-        session_name:
-          type: string
-        backend:
-          type: string
-        command:
-          type: string
-        created:
-          type: boolean
-
-    SeedRequest:
-      type: object
-      required: [issue_id, title]
-      properties:
-        issue_id:
-          type: string
-        title:
-          type: string
-        description:
-          type: string
-        design:
-          type: string
-        blockers:
-          type: array
-          items:
-            type: object
-            required: [id, title]
-            properties:
-              id:
-                type: string
-              title:
-                type: string
-
     TabMetadata:
       type: object
       description: Terminal tab metadata (Redis-backed)
@@ -6758,3 +8780,571 @@ components:
         data:
           type: object
           description: Event-type-specific data (JSON object)
+
+    # ── Gap-1 Schemas (agents, workflows, driver, task-run, triggers, local settings) ──
+    Agent:
+      type: object
+      description: >-
+        Full agent assignment (domain.Agent). Richer than WorkspaceAgentInfo.
+        live_status/active_task_id/active_phase/last_error_class are DERIVED,
+        read-only fields carried from fleet-db.
+      required: [workspace_key, name, role_name, created_at, updated_at]
+      properties:
+        workspace_key:
+          type: string
+        name:
+          type: string
+        role_name:
+          type: string
+        auto:
+          type: boolean
+        backend:
+          type: string
+        fallback_backends:
+          type: array
+          items:
+            type: string
+        repos:
+          type: array
+          items:
+            type: string
+        repo_groups:
+          type: array
+          items:
+            type: string
+        cross_repo:
+          type: boolean
+        parent:
+          type: string
+        state:
+          type: string
+          enum: [idle, active, stopped, backend_unavailable]
+        mode:
+          type: string
+          enum: [ephemeral, service]
+        task_filter:
+          type: string
+        max_concurrency:
+          type: integer
+        budget_policy:
+          type: string
+        desired_state:
+          type: string
+          enum: [stopped, idle, running, draining]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        live_status:
+          type: string
+          enum: [working, idle]
+          description: Derived read-only liveness from fleet-db.
+        active_task_id:
+          type: string
+          description: Derived; set only when live_status is working.
+        active_phase:
+          type: string
+          description: Derived; set only when live_status is working.
+        last_error_class:
+          type: string
+          description: Derived; error_class of the most recent failed terminal session, surfaced while idle.
+
+    AgentQueueEntry:
+      type: object
+      description: A single scored candidate issue in an agent's ranked queue.
+      required: [issue_id, title, priority, score, reason, labels]
+      properties:
+        issue_id:
+          type: string
+        title:
+          type: string
+        priority:
+          type: integer
+        score:
+          type: integer
+        reason:
+          type: string
+        labels:
+          type: array
+          items:
+            type: string
+        parent:
+          type: string
+
+    ApprovalError:
+      type: object
+      description: Error envelope for the approvals endpoint (distinct from ErrorResponse).
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+
+    DriverOpError:
+      type: object
+      description: >-
+        Structured v2 error envelope for the driver SDK transport
+        ({error:{code,message,retryable,details?}}). Distinct from ErrorResponse.
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, retryable]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            retryable:
+              type: boolean
+            details:
+              type: object
+              additionalProperties: true
+              description: Optional additive machine-readable context.
+
+    TaskRunOpError:
+      type: object
+      description: >-
+        Structured error envelope for the task-run SDK transport
+        ({error:{code,message,retryable,details?}}). Distinct from ErrorResponse.
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, retryable]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            retryable:
+              type: boolean
+            details:
+              type: object
+              additionalProperties: true
+              description: Optional additive machine-readable context.
+
+    TaskRunArtifact:
+      type: object
+      description: camelCase wire view of a task-run artifact (artifactResult).
+      required: [artifactId, type]
+      properties:
+        workspaceKey:
+          type: string
+        artifactId:
+          type: string
+        taskId:
+          type: string
+        ownerType:
+          type: string
+        ownerId:
+          type: string
+        type:
+          type: string
+        uri:
+          type: string
+        summary:
+          type: string
+        mimeType:
+          type: string
+        sizeBytes:
+          type: integer
+          format: int64
+        checksum:
+          type: string
+        contentHash:
+          type: string
+        visibility:
+          type: string
+        redactionStatus:
+          type: string
+        durableStatus:
+          type: string
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+        finalizedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    GitPullRequest:
+      type: object
+      description: A pull request aggregated across a workspace's repos (gh-backed).
+      required: [number, title, url, state, is_draft, head_ref_name, base_ref_name, repo_name]
+      properties:
+        number:
+          type: integer
+        title:
+          type: string
+        url:
+          type: string
+        state:
+          type: string
+        is_draft:
+          type: boolean
+        head_ref_name:
+          type: string
+        base_ref_name:
+          type: string
+        author_login:
+          type: string
+        created_at:
+          type: string
+        updated_at:
+          type: string
+        review_decision:
+          type: string
+        repo_name:
+          type: string
+        source_repo:
+          type: string
+        additions:
+          type: integer
+        deletions:
+          type: integer
+        changed_files:
+          type: integer
+
+    WorkspaceAddReposRequest:
+      type: object
+      description: >-
+        Body for POST /api/workspaces/{ws}/repos. The ws path param supplies the
+        workspace; no workspace id field is read from the body.
+      properties:
+        repos:
+          type: array
+          description: Existing local repo paths to attach.
+          items:
+            type: string
+        clone_urls:
+          type: array
+          description: Remote git URLs to clone into the workspace.
+          items:
+            type: string
+        branch:
+          type: string
+
+    DriverRun:
+      type: object
+      description: One execution request for a driver version (domain.DriverRun).
+      required: [workspace_key, run_id, driver_id, driver_version_id, status]
+      properties:
+        workspace_key:
+          type: string
+        run_id:
+          type: string
+        driver_id:
+          type: string
+        driver_version_id:
+          type: string
+        entrypoint:
+          type: string
+        source_kind:
+          type: string
+        source_ref:
+          type: string
+        epic_id:
+          type: string
+        status:
+          type: string
+        node_id:
+          type: string
+        lease_id:
+          type: string
+        fencing_token:
+          type: integer
+          format: int64
+        idempotency_key:
+          type: string
+        payload:
+          type: object
+          description: Opaque driver run payload (raw JSON).
+        output:
+          type: object
+          additionalProperties:
+            type: string
+        summary:
+          type: string
+        error_class:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        last_heartbeat:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+        parent_run_id:
+          type: string
+
+    PlatformEvent:
+      type: object
+      description: One control-plane platform event (domain.PlatformEvent).
+      required: [id, timestamp, actor, action, entity_type, entity_id, workspace_id]
+      properties:
+        id:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        actor:
+          type: string
+        action:
+          type: string
+        entity_type:
+          type: string
+        entity_id:
+          type: string
+        workspace_id:
+          type: string
+        before:
+          type: string
+        after:
+          type: string
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+
+    PlatformEventsPage:
+      type: object
+      description: A paginated page of platform events (domain.PlatformEventsPage).
+      required: [events, cursor]
+      properties:
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlatformEvent"
+        cursor:
+          type: string
+
+    TriggerEvent:
+      type: object
+      description: A persisted inbound trigger event (domain.TriggerEvent).
+      required: [workspace_key, event_id, source_kind, event_type, occurred_at, received_at]
+      properties:
+        workspace_key:
+          type: string
+        event_id:
+          type: string
+        trigger_binding_id:
+          type: string
+        source_kind:
+          type: string
+        source_event_id:
+          type: string
+        event_type:
+          type: string
+        subject_ref:
+          type: string
+        actor_ref:
+          type: string
+        origin:
+          type: string
+          enum: [external, workflow, system]
+          description: Server-stamped provenance; empty normalizes to external on read.
+        hop_depth:
+          type: integer
+        occurred_at:
+          type: string
+          format: date-time
+        received_at:
+          type: string
+          format: date-time
+        idempotency_key:
+          type: string
+        raw_payload_ref:
+          type: string
+        raw_payload_digest:
+          type: string
+        signature_status:
+          type: string
+        replay_of_event_id:
+          type: string
+
+    TriggerDelivery:
+      type: object
+      description: >-
+        Links a TriggerEvent to the binding that matched it and the DriverRun it
+        enqueued (domain.TriggerDelivery).
+      required: [workspace_key, delivery_id, trigger_event_id, trigger_binding_id, status, attempt, created_at, updated_at]
+      properties:
+        workspace_key:
+          type: string
+        delivery_id:
+          type: string
+        trigger_event_id:
+          type: string
+        trigger_binding_id:
+          type: string
+        status:
+          type: string
+          enum: [accepted, rejected, duplicate, queued, dispatched, failed, replayed, superseded, held]
+        subject_key:
+          type: string
+        rejection_reason:
+          type: string
+        driver_run_id:
+          type: string
+        attempt:
+          type: integer
+        next_retry_at:
+          type: string
+          format: date-time
+          nullable: true
+        error_class:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    TriggerRouteDelivery:
+      type: object
+      description: >-
+        One fan-out leg of a trigger-route dispatch (store.TriggerRouteDelivery),
+        as returned inline by the webhook receive endpoint.
+      required: [delivery_id, trigger_binding_id, driver_run_id, status]
+      properties:
+        delivery_id:
+          type: string
+        trigger_binding_id:
+          type: string
+        driver_run_id:
+          type: string
+        status:
+          type: string
+          enum: [accepted, rejected, duplicate, queued, dispatched, failed, replayed, superseded, held]
+        rejection_reason:
+          type: string
+
+    LocalSettingsResponse:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/SanitizedLocalSettings"
+        message:
+          type: string
+        error:
+          type: string
+
+    SanitizedLocalSettings:
+      type: object
+      required: [version, fleetdb_redis, agent_runtime, local_task_runner, runtime_credentials]
+      properties:
+        version:
+          type: integer
+        fleetdb_redis:
+          type: object
+          required: [enabled, db, tls, password_set]
+          properties:
+            enabled:
+              type: boolean
+            addr:
+              type: string
+            db:
+              type: integer
+            tls:
+              type: boolean
+            password_set:
+              type: boolean
+        agent_runtime:
+          type: object
+          required: [default]
+          properties:
+            default:
+              type: string
+        local_task_runner:
+          type: object
+          properties:
+            opencode_model:
+              type: string
+        runtime_credentials:
+          type: object
+          required: [daytona, github]
+          properties:
+            daytona:
+              $ref: "#/components/schemas/SanitizedRuntimeCredential"
+            github:
+              $ref: "#/components/schemas/SanitizedRuntimeCredential"
+
+    SanitizedRuntimeCredential:
+      type: object
+      required: [configured]
+      properties:
+        configured:
+          type: boolean
+        updated_at:
+          type: string
+
+    LocalSettingsPatchRequest:
+      type: object
+      description: All top-level fields are optional partial patches (nil = leave unchanged).
+      properties:
+        fleetdb_redis:
+          type: object
+          properties:
+            enabled:
+              type: boolean
+            redis_url:
+              type: string
+            addr:
+              type: string
+            password:
+              type: string
+            clear_password:
+              type: boolean
+            db:
+              type: integer
+            tls:
+              type: boolean
+        agent_runtime:
+          type: object
+          properties:
+            default:
+              type: string
+        local_task_runner:
+          type: object
+          properties:
+            opencode_model:
+              type: string
+        runtime_credentials:
+          type: object
+          properties:
+            daytona:
+              $ref: "#/components/schemas/RuntimeCredentialPatch"
+            github:
+              $ref: "#/components/schemas/RuntimeCredentialPatch"
+
+    RuntimeCredentialPatch:
+      type: object
+      properties:
+        api_key:
+          type: string
+        token:
+          type: string
+        clear:
+          type: boolean

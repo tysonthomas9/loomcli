@@ -1,9 +1,30 @@
 # Spike: connecting agent event spans to originating requests
 
+> **Status:** Decided and shipped (`fdb709d61`, 2026-05-07) · *audited 2026-07-23*
+>
+> Historical decision record. **Do not implement from the outline below** — it
+> describes the plan, not what was built. Option A shipped with two deviations:
+>
+> - `Bus.Emit(e Event)` kept its signature (`internal/events/emitter.go:46`).
+>   A separate `Bus.EmitCtx(ctx, e)` was added
+>   (`internal/events/trace_context.go:89`) plus a process-wide ambient context
+>   provider, `events.SetContextProvider` (`trace_context.go:23-31`), installed
+>   by the CLI at `internal/cli/root.go:192` pointing at `cmdstore.RootContext`.
+>   Emit sites were therefore **not** all audited — the ambient provider covers
+>   them.
+> - Baggage serialization (open question, below) was **rejected**, deliberately:
+>   `internal/events/trace_context.go:47-51` records that only TraceContext
+>   propagator output is captured, "so we don't accidentally bake
+>   high-cardinality values into the JSONL log". Baggage crosses process
+>   boundaries via env vars instead.
+>
+> Current behavior lives in [tracing.md](./tracing.md); the normative contract
+> is [tracing-contract.md](./tracing-contract.md).
+
 ## Status
-Phase 3 of the OTel rollout. Decision needed before Phase 9 (the full
-implementation). This document captures three options, scores them, and
-recommends one.
+Decided; implemented in Phase 9. This document captures three options, scores
+them, and records why Option A won. Kept for the rationale — the trade-offs
+against Options B and C are the expensive part to reconstruct.
 
 ## The problem
 
@@ -140,3 +161,20 @@ real-ctx propagation is work we'd have to do under any option.
   Recommend yes; same justification.
 - Do we replay-from-JSONL? Recommend NO in Phase 9 — keep the
   existing bus path. Replay is a separate, larger initiative.
+
+## How the open questions resolved
+
+- **`tracestate` alongside `traceparent`** — yes. Both are fields on
+  `events.Event` (`internal/events/event.go:77-78`) and both are captured by
+  `InjectTraceContext` (`internal/events/trace_context.go:52-60`).
+- **`BaggageHeader` for `loom.workspace` / `loom.actor`** — **no**, rejected.
+  See `internal/events/trace_context.go:47-51` for the reasoning
+  (high-cardinality values would be baked into the on-disk JSONL log).
+- **Replay-from-JSONL** — not adopted, as recommended.
+  `MetricsStore.ReplayFromFile` (`internal/events/replay.go:14`) feeds the metrics store, not the span exporter.
+
+## Related
+
+- [README.md](./README.md) — index and precedence for these three docs
+- [tracing.md](./tracing.md) — what is traced today
+- [tracing-contract.md](./tracing-contract.md) — normative span names and keys

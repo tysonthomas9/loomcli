@@ -4,7 +4,7 @@ package sandbox
 // argv construction is golden-tested and Launch runs against a fake engine
 // script. The real rootless-podman integration test is gated:
 //
-//	LOOM_SANDBOX_PODMAN_TEST=1 go test ./internal/driver -run TestContainerLauncherPodmanIntegration -v
+//	LOOM_SANDBOX_PODMAN_TEST=1 go test ./internal/driver/sandbox -run TestContainerLauncherPodmanIntegration -v
 //
 // Requirements: rootless podman on PATH (on macOS a running podman machine
 // with the default /Users + /var/folders shares); the first run pulls

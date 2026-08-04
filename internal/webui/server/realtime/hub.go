@@ -1,3 +1,8 @@
+// Package realtime owns the web UI's server-to-browser push plumbing: the Hub
+// that fans mutation events out over SSE (with Last-Event-ID catch-up), the
+// short-lived HMAC tokens authorizing SSE and terminal WebSocket upgrades, and
+// the PTY/tmux-to-WebSocket relay. Fed by internal/webui/subscription and
+// consumed by the handler packages under internal/webui/handlers.
 package realtime
 
 import (

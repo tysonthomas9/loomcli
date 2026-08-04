@@ -1,3 +1,8 @@
+// Package workflows serves the HTTP surface over internal/workflows and
+// internal/driver: registering a workflow version from uploaded source, creating
+// a driver run (fail-closed on an AI CLI backend preflight when an epic-runner
+// run would execute locally), and reading or SSE-streaming that run's events.
+// Registered by internal/webui/app.
 package workflows
 
 import (

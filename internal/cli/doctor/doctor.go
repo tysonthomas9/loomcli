@@ -1,3 +1,9 @@
+// Package doctor implements `loom doctor`, the environment and health preflight.
+// It runs the individual checks — git, tmux, redis, the configured agent-backend
+// CLI, fleet-db reachability and the resolved issue backend, plus stale locks,
+// stuck daemons, orphaned tmux sessions and transcripts — and reports them as
+// pass/warn/fail text or JSON. Registered on the root command from init(); only
+// cmd/loom/main.go imports it, for that side effect.
 package doctor
 
 import (

@@ -1,3 +1,8 @@
+// Package driver implements the `loom driver` command group: registering and
+// activating driver bundles, starting driver runs, and the runtime subcommands
+// a running driver shells back into against fleet-db (exec-task, claim-ready,
+// epic-get, deliver-lead-assignment, ...). Wired only by cmd/loom; the driver
+// engine and its domain types live in internal/driver.
 package driver
 
 import (

@@ -1,19 +1,37 @@
 # FleetDB-Backed Loom Agent Platform V2 Proposal
 
-**Status:** V2 proposal for review
+> **Status:** Historical vision doc (2026-06-03), partially implemented.
+> *audited 2026-07-23*
+
+The entity model proposed here largely SHIPPED — see `internal/domain/platform.go`.
+For how a driver actually runs today, read
+[`workflow-driver-authoring-guide.md`](workflow-driver-authoring-guide.md); for
+per-phase shipped status read
+[`fleetdb-agent-platform-v2-phased-delivery.md`](fleetdb-agent-platform-v2-phased-delivery.md).
+The SDK-surface, route, and "Gaps To Close" sections below have been annotated
+where they are stale; do not implement from an un-annotated code example in this
+document without checking it against `sdk/` first.
+
 **Date:** 2026-06-03
 **Related:**
-- `docs/design/fleetdb-agent-platform-v2-phased-delivery.md`
-- `docs/design/fleetdb-agent-platform-v2-execution-topology-addendum.md`
-- `docs/design/flue-daytona-fleetdb-v1-proposal.md`
-- `docs/design/flue-daytona-runtime-proposal.md`
+- [`workflow-driver-authoring-guide.md`](workflow-driver-authoring-guide.md) —
+  the current platform contract.
+- [`fleetdb-agent-platform-v2-phased-delivery.md`](fleetdb-agent-platform-v2-phased-delivery.md)
+- [`fleetdb-agent-platform-v2-execution-topology-addendum.md`](fleetdb-agent-platform-v2-execution-topology-addendum.md)
+- [`taskrun-queue-and-worker-pool.md`](taskrun-queue-and-worker-pool.md)
+- [`driver-op-http-api.md`](driver-op-http-api.md)
+- [`native-flue-driver-integration.md`](native-flue-driver-integration.md)
 - `docs/design/distributed-control-plane.md`
 - `docs/design/distributed-control-plane-data-model.md`
 - `docs/product/daemon-agent-runtime-architecture.md`
 - `docs/product/local-mode-product-spec.md`
 - `docs/product/orchestrator-worker-model.md`
 - `docs/product/session-artifact-contract.md`
-- `docs/product/loom-typescript-sdk-spec.md`
+- [`flue-daytona-fleetdb-v1-proposal.md`](flue-daytona-fleetdb-v1-proposal.md),
+  [`flue-daytona-runtime-proposal.md`](flue-daytona-runtime-proposal.md), and
+  [`../product/loom-typescript-sdk-spec.md`](../product/loom-typescript-sdk-spec.md)
+  — the V1 predecessors. All three are pointer stubs: the full text lives only
+  on the unmerged `origin/flue-runtime` branch.
 
 ## Purpose
 
@@ -111,7 +129,13 @@ many sources while FleetDB remains the durable data layer?
 2. **Loom is the control plane over FleetDB.**
    Loom validates auth, applies policy, dispatches work, manages runtime
    providers, exposes APIs and SDKs, and writes state through FleetDB-backed
-   contracts.
+   contracts. Terminology note: "control plane" is two layers in this repo —
+   **fleet-db** is the control-plane *data service* (state, leases, claims);
+   **`loom serve`** is the control-plane *service* above it (it holds the
+   connector vault key, `internal/connector/vault.go:26-27`, runs the driver
+   executor and outbox dispatcher, and is what remote workers register with,
+   `internal/cli/serve/worker/worker_cmd.go:42-46`). This principle means the
+   second sense. Unqualified, "the control plane" means both together.
 
 3. **Runtimes are adapters.**
    Flue, Daytona, local shells, CI, Kubernetes, and containers execute work.
@@ -210,12 +234,23 @@ If a runner dies mid-task today:
   returned to `queue:ready` — there is no server-side reaper today;
 - recovery is explicit: `POST /issues/{id}/release` returns the task to the
   ready frontier, `POST /issues/{id}/release-lock` frees only the lock, and
-  loom's daemon releases a claim when its agent exits.
+  loom's daemon releases a claim when its agent exits
+  (`internal/backend/fleet/claim_release.go:36`, `:59`).
 
 Narrow FleetDB dependency (not Loom orchestration): a later phase may add an
 optional server-side lease-expiry reaper that requeues `in_progress` tasks whose
-lock has expired. Until then, drivers and operators rely on the explicit release
-endpoints. Loom MUST NOT paper over this with a Loom-side scheduler.
+lock has expired. Loom MUST NOT paper over this with a Loom-side scheduler.
+
+Update (2026-07-23): fleet-db still has no reaper, but Loom now ships a
+server-side stale sweeper of its own, and it is not a scheduler — it is fault
+recovery. `internal/driver/stale_task_sweeper.go` plus
+`internal/cli/serve/serve_loops.go:25-30` fail heartbeat-expired `TaskRun`s and
+release their task claims
+(`store.StaleTaskRunRecoveryResult.Released` / `ReleasedTaskIDs`,
+`internal/store/platform_store.go:491-505`). It is unconditional: it runs
+whenever `serve` has a store, is NOT gated behind `LOOM_DRIVER_EXECUTOR`, and
+workflows must not call `recoverStale` themselves. This closes the recovery
+half of the question above without touching the claim contract.
 
 ### Minimal record set
 
@@ -706,10 +741,19 @@ user or lead agent writes TypeScript
   -> FleetDB stores the durable envelopes and action ledger
 ```
 
-The driver source can look Flue-native:
+The driver source can look Flue-native. **The sketch below is illustrative
+pseudo-API, not the shipped surface** — `@loom/sdk/flue` does not exist
+(`sdk/package.json:6-25` exports `.`, `./runner`, `./driver`,
+`./runtime-adapters`), there is no `loom.event(ctx)` and no `loom.actions.*`
+namespace. The real driver client is `createLoomDriverClient` from
+`@loom/sdk/driver` (`internal/driver/register.go:24`); its full typed surface is
+`sdk/driver.d.ts`, and a working driver is
+`internal/workflows/builtin/epic-runner.ts`. Read the sketch for the *shape of
+the idea* — a `.ts` file that branches on typed model output and emits
+platform actions — not for the identifiers.
 
 ```ts
-// .loom/workflows/triage.ts
+// illustrative pseudo-API — see sdk/driver.d.ts for the real one
 import { createAgent, type FlueContext } from "@flue/runtime";
 import { loom } from "@loom/sdk/flue";
 import * as v from "valibot";
@@ -833,7 +877,7 @@ TriggerBinding
   source_kind: http
   route_key: epics.runs.create
   method: POST
-  path_template: /epics/{epic_id}/runs
+  path_template: /epics/{epic_id}/runs   # NOT SHIPPED — see correction below
   driver_version_id: epic-runner@v3
   target_entrypoint: run
   auth_policy: workspace_user
@@ -867,10 +911,23 @@ TriggerBinding
   idempotency_policy: message_id
 ```
 
-`POST /epics/{epic_id}/runs` should be a Loom-owned route whose implementation
-is resolved by a binding. That keeps auth, UI semantics, idempotency, and
-active-run constraints stable while still allowing teams or lead agents to swap
-the underlying driver version.
+Run creation should be a Loom-owned route whose implementation is resolved by a
+binding. That keeps auth, UI semantics, idempotency, and active-run constraints
+stable while still allowing teams or lead agents to swap the underlying driver
+version.
+
+Correction (2026-07-23): the shipped route is
+`POST /api/workspaces/{ws}/workflows/{name}`, with version registration at
+`POST /api/workspaces/{ws}/workflows/{name}/versions`
+(`internal/webui/handlers/workflows/module.go:39-40`). `POST /epics/{epic_id}/runs`
+never became a Loom-owned route; it exists only as a fleet-db client call behind
+`DriverRunStore.CreateEpic` (`internal/infra/fleetdb/platform.go:283`,
+`internal/store/platform_store.go:509`), which has no caller outside the store
+implementations and the CLI tracing wrapper. The frontend starts an epic run
+with `POST /workflows/epic-runner`
+(`internal/webui/frontend/src/api/workflows/workflows.ts:44`). Resolution by
+binding is also not how that route works — the handler binds the current active
+`DriverVersion` at request time.
 
 ## Invocation Paths
 
@@ -967,7 +1024,13 @@ V2 needs three TypeScript surfaces.
 
 For users, teams, and lead agents writing dynamic workflow drivers.
 
+Same caveat as the earlier sketch: pseudo-API. The shipped import is
+`import { createLoomDriverClient } from '@loom/sdk/driver'`
+(`internal/workflows/builtin/epic-runner.ts:1`), and the typed surface is
+`sdk/driver.d.ts`.
+
 ```ts
+// illustrative pseudo-API — see sdk/driver.d.ts for the real one
 import { createAgent, type FlueContext } from "@flue/runtime";
 import { loom } from "@loom/sdk/flue";
 
@@ -998,6 +1061,18 @@ FleetDB stores the run envelope and action results, not the driver's internal
 control flow.
 
 ### App/Control SDK
+
+**UNBUILT as of 2026-07-23.** `sdk/index.js` re-exports exactly
+`TaskRunClient`/`ArtifactHandle`/`LoomAPIError`/`RunnerEnv` from `./runner.js`,
+the driver client from `./driver.js`, and transcript adapters from
+`./runtime-adapters.js`. There is no `Loom` class, no `drivers` namespace, and
+no `bindings` namespace. Driver registration today is the CLI
+(`loom driver register`, `internal/cli/driver/driver_cmd.go:51-65`) or the HTTP
+route `POST /api/workspaces/{ws}/workflows/{name}/versions`
+(`internal/webui/handlers/workflows/module.go:39`).
+
+The design below is retained as the intended shape, not as documentation of an
+existing API.
 
 For application code that registers drivers, manages bindings, or invokes
 driver runs.
@@ -1276,18 +1351,39 @@ warm-pool policy is introduced.
 
 ## Gaps To Close
 
-### FleetDB Data Model Gaps
+Rewritten 2026-07-23 into CLOSED / STILL OPEN. Most of this section describes
+gaps that closed between 2026-06-05 and 2026-06-28.
 
-- Add `Driver` and `DriverVersion` for dynamic `.ts` drivers.
-- Add `TriggerBinding`, `TriggerEvent`, and `TriggerDelivery`.
-- Add `DriverRun` and `DriverStep`.
-- Promote `TaskRun` to a first-class resource instead of overloading
-  `AgentSession`.
-- Add generic `Lease` with fencing for task runs, services, driver runs, and
-  artifact uploads.
-- Add `ActionLedger` for idempotent external side effects.
-- Define artifact metadata and upload/finalize states.
-- Split current agent definitions into `AgentService` and `WorkerProfile`.
+### FleetDB Data Model Gaps — CLOSED except two
+
+Closed. Every type below exists in `internal/domain/platform.go` with
+substantially the fields this document proposed:
+
+| Proposed | Shipped |
+|---|---|
+| `Driver`, `DriverVersion` | `:64`, `:87` |
+| `TriggerBinding`, `TriggerEvent`, `TriggerDelivery` | `:214`, `:277`, `:350` |
+| `DriverRun`, `DriverStep` | `:396`, `:462` |
+| `TaskRun` as a first-class resource | `:498` |
+| Artifact metadata and upload/finalize states | `domain.Artifact`, `internal/domain/control_plane.go:134` |
+| `AgentService` / `WorkerProfile` split | `:147`, `:104` |
+
+Still open:
+
+- **Generic `Lease` with fencing.** Never built. Leases are per-resource:
+  `domain.AgentLease` (`internal/domain/control_plane.go:167`),
+  `domain.AgentOwnershipLease` (`:182`), plus inline `LeaseID`/`FencingToken`
+  fields on `DriverRun` (`internal/domain/platform.go:407-408`) and `TaskRun`
+  (`:513-514`). There is no `Lease` type with a `resource_type`.
+- **`ActionLedger`.** Never built in this repo. Only the FK string
+  `DriverStep.ActionLedgerID` (`internal/domain/platform.go:469`) exists,
+  plumbed through memstore and the fleet-db client; there is no `ActionLedger`
+  type and no `ActionLedgerStore`. The shipped idempotent-side-effect mechanism
+  is instead `domain.ConnectorCallRecord`
+  (`internal/domain/connector.go:253`), appended by
+  `internal/connector/dispatch.go:310` for granted and refused outcomes alike.
+  Anything below that says "ActionLedger returns the existing result" should be
+  read as describing the connector call journal.
 
 ### API Gaps
 
@@ -1304,23 +1400,41 @@ warm-pool policy is introduced.
 ### Runtime Gaps
 
 - Isolated build workers for user-authored and lead-authored TypeScript.
-- Driver execution workers that can run a pinned bundle digest with scoped
-  capabilities.
+  (Partially closed: workflow bundles can run in rootless containers with egress
+  policy, `internal/driver/sandbox/`, selected by `LOOM_DRIVER_SANDBOX`.)
+- ~~Driver execution workers that can run a pinned bundle digest with scoped
+  capabilities.~~ CLOSED — the serve-side executor plus the TaskRun worker pool
+  ([`taskrun-queue-and-worker-pool.md`](taskrun-queue-and-worker-pool.md)),
+  gated by driver trust level (`internal/domain/platform.go:49-62`).
 - One canonical run command contract:
   `run_task`, `run_prompt`, `run_workflow`, `resume_session`, `cancel_run`.
-- Runner bootstrap that carries server URL, run ID, lease ID, fencing token, and
-  scoped token.
-- Separate runner placement and sandbox placement metadata.
+- ~~Runner bootstrap that carries server URL, run ID, lease ID, fencing token,
+  and scoped token.~~ CLOSED — run-scoped tokens carry the run/node/lease/fencing
+  identity in their claims (`internal/driver/run.go:253`); see
+  [`driver-op-http-api.md`](driver-op-http-api.md).
+- ~~Separate runner placement and sandbox placement metadata.~~ CLOSED —
+  `domain.TaskRunPlacement` instantiated twice per `TaskRun`
+  (`internal/domain/platform.go:541-556`, `:498-539`).
 - Remote artifact durability before sandbox cleanup.
+- **Bundle object storage.** STILL OPEN. Driver bundles stage under the
+  workspace work dir at `<workDir>/.loom/drivers/<driverID>/<versionID>`
+  (`internal/driver/register.go:413`, `:443`) and the executor resolves them
+  there (`internal/driver/executor.go:642`). A worker without the publisher's
+  disk still cannot execute a pinned driver.
 - Cleanup and retention policy for persistent services and ephemeral tasks.
 
 ### SDK Gaps
 
-- Driver authoring SDK for Flue-backed workflow code.
-- App/control SDK for driver publishing, binding management, and invocation.
-- Runner SDK for one scoped TaskRun.
+- ~~Driver authoring SDK for Flue-backed workflow code.~~ CLOSED —
+  `@loom/sdk/driver` (`sdk/driver.d.ts`, `internal/driver/register.go:24`).
+- **App/control SDK for driver publishing, binding management, and invocation.**
+  STILL OPEN — see the App/Control SDK section above.
+- ~~Runner SDK for one scoped TaskRun.~~ CLOSED — `@loom/sdk/runner`
+  (`sdk/runner.d.ts:243-282`).
 - Typed result schemas for driver steps.
-- Local and cloud auth modes with the same resource model.
+- ~~Local and cloud auth modes with the same resource model.~~ CLOSED —
+  run-scoped bearer tokens for drivers and per-TaskRun lease tokens for runners;
+  see [`driver-op-http-api.md`](driver-op-http-api.md).
 
 ### Security Gaps
 
@@ -1467,8 +1581,13 @@ Daytona, or Kubernetes.
 
 1. Should FleetDB expose the V2 control-plane API directly, or should Loom
    server expose it while writing through FleetDB internals?
-2. Should dynamic drivers use Flue project layout directly (`.flue/`) or a
-   Loom-owned layout (`.loom/workflows`) that compiles to Flue?
+2. ~~Should dynamic drivers use Flue project layout directly (`.flue/`) or a
+   Loom-owned layout (`.loom/workflows`) that compiles to Flue?~~
+   **ANSWERED: Flue-native `workflows/*.ts`.** `.loom/workflows` has zero hits
+   in code (only in prose, including this document); the removal is recorded in
+   [`native-flue-driver-integration.md`](native-flue-driver-integration.md).
+   `.loom/drivers` survives only as the staged bundle directory
+   (`internal/driver/register.go:413`).
 3. What approval policy is required before a lead-authored driver becomes
    active?
 4. Should `AutomationRun`, `EpicRun`, and `SupportRun` remain product-specific
@@ -1501,3 +1620,19 @@ Build V2 FleetDB-first:
 This gives Loom a scalable platform shape: teams can invoke agents however they
 want, FleetDB keeps the durable state and dependency semantics coherent, and
 runtime providers can be swapped without changing the product model.
+
+## Related
+
+- [`workflow-driver-authoring-guide.md`](workflow-driver-authoring-guide.md) —
+  the current platform contract. Authoritative where it disagrees with this doc.
+- [`fleetdb-agent-platform-v2-phased-delivery.md`](fleetdb-agent-platform-v2-phased-delivery.md)
+  — per-phase shipped status.
+- [`fleetdb-agent-platform-v2-execution-topology-addendum.md`](fleetdb-agent-platform-v2-execution-topology-addendum.md)
+  — executor placement, recovery, runner vs sandbox placement.
+- [`taskrun-queue-and-worker-pool.md`](taskrun-queue-and-worker-pool.md) — how
+  child tasks actually execute.
+- [`driver-op-http-api.md`](driver-op-http-api.md) — the runtime control surface.
+- [`native-flue-driver-integration.md`](native-flue-driver-integration.md) —
+  driver registration and the rejected generated-project layout.
+- [`2026-06-07-agent-service-driver-version-proposal.md`](2026-06-07-agent-service-driver-version-proposal.md)
+  — the unbuilt AgentService controller design.

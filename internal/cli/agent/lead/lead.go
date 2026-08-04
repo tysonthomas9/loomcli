@@ -1,3 +1,9 @@
+// Package lead implements `loom lead`, the interactive terminal-agent runtime
+// (role kind `interactive`). It resolves the startup prompt, registers the
+// session as an orchestrator so agents spawned from inside it inherit
+// OrchestratorSessionID, delivers any pending epicrunner lead assignment, and
+// hands off to the AI CLI backend (codex, claude, ...) via
+// internal/cli/backends. Blank-imported by cmd/loom; nothing else imports it.
 package lead
 
 import (

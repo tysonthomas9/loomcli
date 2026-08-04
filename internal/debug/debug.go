@@ -1,3 +1,7 @@
+// Package debug holds the loom CLI's process-global output-verbosity switches:
+// LOOM_DEBUG (or SetVerbose) gates Logf/Printf diagnostics, and quiet mode
+// suppresses PrintNormal. Only internal/rpc currently reads it, via Logf for
+// daemon-connection tracing; the verbose/quiet setters have no live callers.
 package debug
 
 import (

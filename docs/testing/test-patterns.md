@@ -1,5 +1,7 @@
 # Test Patterns & Conventions
 
+> **Status:** Current · *audited 2026-07-23*
+
 Common testing patterns, mocking strategies, and best practices used across the loomcli codebase.
 
 ---
@@ -278,6 +280,10 @@ test('retry with exponential backoff', async () => {
 
 ### Playwright E2E with Page Object Model
 
+The real page objects live in `internal/webui/frontend/tests/pages/`:
+`app.page.ts`, `kanban.page.ts` (`KanbanPage` at `tests/pages/kanban.page.ts:14`),
+`monitor.page.ts`, `table.page.ts`. The sketch below is the shape they follow.
+
 ```typescript
 // Page Object
 class KanbanPage {
@@ -306,8 +312,13 @@ test('move card between columns', async ({ page }) => {
 
 ### Playwright Fixture Pattern
 
+The real fixtures are defined in
+`internal/webui/frontend/tests/fixtures/base.ts:31-60` and re-exported from
+`tests/fixtures/index.ts`. Import `{ test, expect }` from `../fixtures`, not
+from `@playwright/test`.
+
 ```typescript
-// fixtures/index.ts
+// tests/fixtures/base.ts
 type TestFixtures = {
     mockApi: MockApi;
     mockSSE: MockSSE;
@@ -583,22 +594,29 @@ test('SSE mutation during refetch preserves data', async () => {
 | Helper | Location | Purpose |
 |--------|----------|---------|
 | `setupTest()` | Multiple packages | Create test client with dependencies |
-| `mustJSON()` | `internal/cli/automode_test.go` | Marshal to JSON or panic |
-| `runMake()` | `makefile_test.go` | Execute make target and return output |
-| `skipIfNoTmux()` | `internal/cli/automode_e2e_test.go` | Skip test if tmux unavailable |
-| `uniqueSessionName()` | E2E tests | Generate unique tmux session name |
-| `intPtr()` / `strPtr()` | Multiple | Create pointers to literals |
+| `mustJSON()` | `internal/cli/compat_test.go:29`, `internal/cli/automode/automode_test.go:508` (wrapped at `internal/cli/agent/testhelpers_test.go:54`) | Marshal to JSON or panic |
+| `runMake()` | `makefile_test.go:27` | Execute make target and return output |
+| `skipIfNoTmux()` | `internal/cli/automode_e2e_test.go:17` | Skip test if tmux unavailable |
+| `uniqueSessionName()` | `internal/cli/automode_e2e_test.go:25` | Generate unique tmux session name |
+| `intPtr()` / `strPtr()` | `internal/types/types_test.go:1227`, `internal/backend/api/params_test.go:11,13` | Create pointers to literals |
 
 ### Frontend Helpers
 
+Paths are relative to `internal/webui/frontend/`. Note the split: browser
+helpers live under `tests/`, not `tests/e2e/` — `tests/e2e/helpers/` holds only
+`fleet.ts`.
+
 | Helper | Location | Purpose |
 |--------|----------|---------|
-| `createIssue()` | `tests/e2e/helpers/` | Factory with sensible defaults |
-| `createStats()` | `tests/e2e/helpers/` | Mock statistics |
-| `createKanbanData()` | `tests/e2e/helpers/` | Complete board data |
-| `resetIdCounter()` | `tests/e2e/helpers/` | Reset between tests |
-| `generateTestId()` | `tests/e2e/api/api-client.ts` | Unique IDs: `test-{ts}-{random}` |
-| `waitFor()` | `tests/e2e/api/api-client.ts` | Polling with timeout and predicate |
+| `createIssue()` | `tests/helpers/test-data.ts:29` | Factory with sensible defaults |
+| `createStats()` | `tests/helpers/test-data.ts:77` | Mock statistics |
+| `createKanbanData()` | `tests/helpers/test-data.ts:148` | Complete board data |
+| `resetIdCounter()` | `tests/helpers/test-data.ts:23` | Reset between tests |
+| `generateTestId()` | `tests/e2e/api/api-client.ts:711` | Unique IDs: `test-{ts}-{random}` |
+| `waitFor()` | `tests/e2e/api/api-client.ts:719` | Polling with timeout and predicate |
+
+Other helper modules in `tests/helpers/`: `api-mock.ts`, `sse-mock.ts`,
+`fixture-routes.ts`, `keyboard-setup.ts`, `terminal-seed.ts`, `wait.ts`.
 
 ---
 
@@ -683,3 +701,28 @@ page.locator('.MuiButton-root.MuiButton-contained');
 // Good: semantic selector
 page.getByRole('button', { name: 'Create Issue' });
 ```
+
+### Mechanically enforced anti-patterns
+
+Some "don't do X" rules are not conventions any more — they fail the gate.
+They run as steps of `check-go` and `check-frontend` (`Makefile:486`, `:520`):
+
+| Rule | Enforced by |
+|---|---|
+| No raw `exec.Command` in production code | `scripts/check-no-raw-exec.sh` (check-go step 8) |
+| No `log.Printf` — use structured logging | `scripts/check-no-log-printf.sh` (step 9) |
+| No new production beads/`bd` references | `scripts/check-no-beads-prod.sh` (step 10) |
+| No raw `fetch()` in the frontend — use the API client | `npm run check:no-raw-fetch` (check-frontend step 4) |
+| No hardcoded URLs in the frontend | `npm run check:no-hardcoded-urls` (step 4) |
+| Component/layer boundaries | `npm run check:boundaries` (step 4); Go equivalent is `depguard` in `.golangci.yml` |
+
+See [test-infrastructure.md](test-infrastructure.md) for the full step lists.
+
+---
+
+## Related
+
+- [README.md](README.md) — testing docs index
+- [test-infrastructure.md](test-infrastructure.md) — CI, make targets, gate steps, coverage thresholds
+- [frontend-tests.md](frontend-tests.md) — where the frontend tests actually live
+- [../testing-terminology.md](../testing-terminology.md) — depth / realness / provisioning / polarity and the trap words

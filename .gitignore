@@ -7,6 +7,14 @@
 *.bak
 /logrouter
 tmp/
+# Doc generators: `go build ./scripts/...` drops these in the repo root.
+# Always run them via `go run` (see the docs-gen / gen-api-docs make targets).
+/loomdoc
+/openapi-to-md
+# Local scaffold for eyeballing the loomdoc CLI walk; development-only.
+/zz_loomdoc_verify/
+# AFT harness run outputs.
+tests/aft/reports/
 
 # Prebuilt workflow bundles are embedded into the Go binary for CI/runtime use.
 internal/workflows/builtin-dist/

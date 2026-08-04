@@ -1,3 +1,18 @@
+// Package middleware holds the net/http request-path wrappers the web UI server
+// composes around its routes: JWT/JWKS auth and user identity, workspace
+// resolution into the request context, file-access RBAC, CORS, security headers,
+// rate limiting, request logging, and panic recovery. Chained in
+// internal/webui/app and internal/cli/serve; handler packages under
+// internal/webui that need the caller identity or the resolved workspace read
+// them back out via its *FromContext helpers. Seven handler packages do not
+// import it at all, for three different reasons: driverapi, taskrunapi,
+// webhooks and workflows take the workspace straight from the route value
+// r.PathValue("ws"), which is the requested ID rather than the resolved
+// WorkspaceRef.CanonicalID that WorkspaceFromContext returns; agentcontrol
+// registers {ws}-shaped routes but ignores the segment entirely, forwarding to
+// the daemon control socket by agent name; localsettings is not
+// workspace-scoped (its routes carry no {ws} segment) and connectors has no
+// non-test source at all.
 package middleware
 
 import "net/http"

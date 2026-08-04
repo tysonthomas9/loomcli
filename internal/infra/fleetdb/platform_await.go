@@ -18,6 +18,7 @@
 // Responses are snake_case v1 wire shapes decoded into local DTOs; await
 // validation failures come back as structured await_* error codes that
 // classifyHTTPError maps onto the domain sentinels (see awaitErrSentinel).
+
 package fleetdb
 
 import (

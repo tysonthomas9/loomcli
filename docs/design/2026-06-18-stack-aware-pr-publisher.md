@@ -1,6 +1,69 @@
 # Stack-Aware PR Publisher — Design & Implementation Plan
 
-Status: Proposed · Branch: `feat/stack-aware-worktree-lifecycle` · Date: 2026-06-18
+> **Status:** Shipped — read as design rationale, not as an API reference.
+> *Audited 2026-07-24.*
+
+The original header read "Status: Proposed · Branch:
+`feat/stack-aware-worktree-lifecycle` · Date: 2026-06-18". It landed the same
+day (`git log`: "Add stack-aware PR publisher (loom stack)", "Support parallel
+chains (forest) in stack lineage", "Fix four stack-publisher review findings",
+all 2026-06-18).
+
+**What is durable.** The evidence section (spr's structural ghost-merge on
+reorder, git-town's `422` on a full swap), the six design principles, the
+two-phase reorder, the node state machine, and the edge-case table are why this
+document is worth keeping. The phase order survived intact:
+`internal/stackpublish/reconciler.go` still runs Phase 1 reparent-to-safe before
+any push (`reconciler.go:273,282,294,303`).
+
+**What drifted.** All four packages exist — `internal/stacklineage`,
+`internal/stackstore`, `internal/stackpublish`, `internal/cli/stack` — but every
+Go signature quoted below is the *planned* one, not the built one:
+
+- `Reconciler.Store` is `stackstore.Store`, not `stacklineage.Store`
+  (`internal/stackpublish/reconciler.go:13-16`). The `Store` interface lives in
+  `internal/stackstore/stackstore.go:29-40`.
+- The interface's method set is `EnsureStack` / `GetStack` / `ListStacks` /
+  `DeleteStack` / `ListNodes` / `AddNode` / `SetBase` / `RemoveNode` /
+  `UpdateNode` — not `PutStack` / `UpsertNode` / `DeleteNode`. `AddNode` takes
+  `(taskID, baseTaskID, mode)` and returns the node
+  (`stackstore.go:36`). `MoveNode` exists on the concrete `LocalStore`
+  (`stackstore.go:359`) but is **not** on the `Store` interface.
+- `Forge` is larger and differently shaped than planned
+  (`internal/stackpublish/forge.go:28-52`):
+  `ListStackPRs(ctx, owner, repo, headPrefix)` returns PRs in **any** state,
+  prefix-matched (not `ListOpenPRs`); `CreatePR(ctx, owner, repo, head, base,
+  title, body)` takes positional args, not a `PRSpec`; `UpdatePRBase` retargets
+  the base **only**. There is no `UpdatePR`, so the "skip `UpdatePR` when title,
+  body, and base are all unchanged" idempotency rule does not apply to
+  title/body — those are set at create time and never edited. Three methods the
+  plan did not anticipate: `QueuedPRNumbers`, `PRStatuses`, `UpdatePRBody`.
+  `PushBranches` takes `[]BranchPush{Branch, ExpectedSHA}`, not `[]RefSpec`.
+- `Publish` takes an explicit `repoPath` and returns a pointer:
+  `Publish(ctx, ws string, id sl.StackID, repoPath string, opts Options) (*Report, error)`
+  (`reconciler.go:155`). `PublishOpts` is `Options`, and it carries a
+  `ConflictResolver` and a `PRMetaFor` hook the plan does not mention
+  (`reconciler.go:18-30`).
+- There is a **Phase 5**: writing the stack listing into each live PR body,
+  idempotently (`reconciler.go:377`). The "Second-tier defaults" section already
+  notes this as implemented; the Phase list in "Reconciler lifecycle" stops at 4.
+- `internal/stackpublish/materialize.go` (build-order row 7) was never created.
+  Branch materialization lives in `internal/stackpublish/content.go` and
+  `internal/stackpublish/origin_checkout.go`.
+- CLI (`internal/cli/stack/stack_cmd.go`): `loom stack publish` has **no `--pr`
+  flag**. Its flags are `--repo-path`, `--dry-run`, `--auto-rebase`,
+  `--headless`, `--json` (`stack_cmd.go:549-553`). The shipped group is
+  `init`, `list`, `show`, `status`, `validate`, `add`, `move`, `set-base`,
+  `remove`, `restack`, `publish` — `list`, `remove`, and `restack` are not in
+  the plan. `add --root` / `add --after` are as designed
+  (`stack_cmd.go:359-360`), and are mutually exclusive (`stack_cmd.go:332-334`).
+
+**Dangling reference.** `STACKED-WORKTREE-PROPOSAL.md` (cited in Scope, and the
+only pointer to the execution-correctness half) does not exist anywhere in this
+repo and has no record in git history. If you need that half, start from the two
+files Scope names — `internal/driver/task_worktree_resolver.go` and
+`internal/workflows/builtin/local-task-runner.ts` — rather than looking for the
+document.
 
 ## Scope
 
@@ -371,3 +434,14 @@ unaffected), **name collision** (suffix applied).
 - Execution-correctness layer (resolver base-selection + de-double-wrap) is
   tracked separately; when it lands, the publisher's branch materialization uses
   source (1) and the patch-assembly path becomes bootstrap-only.
+
+## Related
+
+- [`../loom-glossary.md`](../loom-glossary.md) — **stack**, **stack node**,
+  **lineage** (stack lineage vs agent lineage), and why "stack" never means the
+  running system in Loom prose
+- [`2026-06-07-trigger-workflow-proposal.md`](2026-06-07-trigger-workflow-proposal.md)
+  — the inbound GitHub half of the loop this publishes into
+- [`workflow-driver-authoring-guide.md`](workflow-driver-authoring-guide.md) —
+  `taskRuns.request` carries `repoRef` and stack-lineage defaults into child
+  task runs (`internal/workflows/builtin/epic-runner.ts`)

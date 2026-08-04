@@ -1,5 +1,7 @@
 # E2E manual test plan — CLI + curl
 
+> **Status:** Current · *audited 2026-07-23*
+
 Covers the noun-verb CLI commands (`workspace`, `repo`, `role`, `agentdef`, `daemon profile`) end-to-end against a real fleet-db, and direct fleet-db API verification via curl.
 
 **Prerequisites:** complete `e2e-preflight.md` setup. Sections below assume cloud-mode env unless they explicitly switch to embedded.
@@ -51,7 +53,7 @@ Tests every error path produces an actionable, parseable message.
 |---|---|---|
 | C1 | `loom workspace add EMBED` (cold start) | `mode=local`; `pgrep fleet-db` shows exactly 1 process |
 | C2 | (C1 finishes) `loom workspace show EMBED` (separate CLI invocation) | data persists; entries=N>0 in snapshot load log |
-| **C3** | **Capture mtime, run `loom workspace show EMBED` twice (no mutations), capture mtime again** | **EXPECTED FAIL**: mtime changes per CLI run. See `known-issues.md` for `loomcli-26v50.41` (dirty-flag skip ineffective in embedded-CLI) |
+| **C3** | **Capture mtime, run `loom workspace show EMBED` twice (no mutations), capture mtime again** | mtime unchanged — `Manager.load()` seeds `lastDumpHash` so a clean keyspace short-circuits Dump (`internal/webui/localredis/manager.go:667,703-712`). Was `loomcli-26v50.41`, fixed; guard `TestDump_SkipsAfterReload` ([known-issues.md](known-issues.md)) |
 | C4 | `loom <any cmd> 2>&1 \| grep -E 'waitid\|exited unexpectedly'` | empty (the `.39` race is fixed) |
 | C5 | Add 3 workspaces, exit, re-run, verify all present | snapshot round-trip works for HASH+SET+STRING types |
 | **C6** | **`pgrep fleet-db` after each test exits** | exactly 0 (no leaked subprocesses) — required for CI |
@@ -71,7 +73,7 @@ Independent of loom CLI; verifies fleet-db schema additions work.
 | D4.clear | `PATCH /api/v1/DTEST/roles/d-role` | `{"clear_max_priority":true}` | GET response does NOT contain `max_priority` field |
 | D4b.budget | (analog) `PATCH …roles/d-role` | `{"max_budget_usd":10.5}` then `{"clear_max_budget_usd":true}` | symmetric set+clear works |
 | D4c.concurrency | (analog) `PATCH …roles/d-role` | set + clear `max_concurrency` via `clear_concurrency` | symmetric |
-| D5 | `PUT /api/v1/DTEST/daemon` (after setting max_agents=42) | `{}` | **EXPECTED FAIL**: GET still returns `max_agents:42`. See `known-issues.md` for `loomcli-26v50.40` |
+| D5 | `PUT /api/v1/DTEST/daemon` (after setting max_agents=42) | `{}` | GET no longer returns `max_agents` — upsert deletes the profile hash before writing. Was `loomcli-26v50.40`, reported fixed in fleet-db, **UNVERIFIED from this repo** ([known-issues.md](known-issues.md)) |
 | D6 | (no `X-Actor` header) `POST /api/v1/admin/workspaces` | any body | 401 `unauthorized` |
 | **D6b** | (X-Actor present, but role lacks PermDaemonUpdate when authz enabled) `PUT /api/v1/{ws}/daemon` | any | 403 forbidden — gated on production auth (skipped in dev mode) |
 
@@ -92,10 +94,21 @@ The CLI surface needs the same isolation guarantees the UI does.
 
 ## Pass/fail interpretation
 
-- **A1–A11, B1–B10, C1–C8 (except C3), D1–D4c, D6, F1–F8** must all pass — these gate the CLI surface and isolation guarantees
-- **C3 and D5** are documented expected-failures pending bugs `.41` and `.40` respectively. A future "true" pass requires those bugs to land first
+- **A1–A11, B1–B10, C1–C8, D1–D5, D6, F1–F8** must all pass — these gate the CLI surface and isolation guarantees. There are no open expected-failures. C3 and D5 were the last two: C3's fix and guard are verified in this repo; D5's fix lives in fleet-db and is **UNVERIFIED from here** — if D5 fails, check fleet-db's version before filing ([known-issues.md](known-issues.md))
 - **D6b** is skipped in `--auth-dev-mode` runs; document it as production-only
+- **C6** (`pgrep fleet-db` → 0) is the same leak check as [e2e-preflight.md](e2e-preflight.md) §Test-runner conventions
 
 ## Recommended automation
 
-This document is structured for execution by an agent. Each row's "command" can be run sequentially per phase. Failures should report `phase.id` (e.g., `A6.verify FAIL: …`) and continue, accumulating a final pass/fail summary. The pre-flight script in `e2e-preflight.md` should be invoked before phase A; cleanup after phase F.
+This document is structured for execution by an agent. Each row's "command" can be run sequentially per phase. Failures should report `phase.id` (e.g., `A6.verify FAIL: …`) and continue, accumulating a final pass/fail summary. The preflight in [e2e-preflight.md](e2e-preflight.md) should be run before phase A; cleanup after phase F.
+
+Evidence class for a full run of this plan: **real** — real `loom` binary, real
+fleet-db process, no AI backend. See
+[../testing-terminology.md](../testing-terminology.md).
+
+## Related
+
+- [e2e-preflight.md](e2e-preflight.md) — session setup this plan assumes
+- [e2e-ui.md](e2e-ui.md) — the browser half (phase E)
+- [known-issues.md](known-issues.md) — tracked defects and regression guards
+- [fleetdb-acceptance-gates.md](fleetdb-acceptance-gates.md) — G4 workspace lifecycle names this plan

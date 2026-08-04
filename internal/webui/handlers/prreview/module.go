@@ -1,3 +1,8 @@
+// Package prreview serves the web UI's pull request review routes: listing and
+// reading PRs and diffs via internal/connector's GitHub provider, posting reviews,
+// and provisioning the per-PR "pr-reviewer" agent — a detached git worktree at the
+// PR head plus a codex conversation streamed back to the client over SSE.
+// Registered by internal/webui/modbuilder.
 package prreview
 
 import (

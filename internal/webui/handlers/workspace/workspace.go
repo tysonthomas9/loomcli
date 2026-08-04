@@ -1,3 +1,8 @@
+// Package workspace serves the web UI's workspace management routes over
+// service.WorkspaceService: list, create, rename, delete, reorder, default and
+// active workspace selection, repo membership, async job status, and the
+// per-workspace agent CLI backend and design-format settings.
+// Registered by internal/webui/handlermux.
 package workspace
 
 import (

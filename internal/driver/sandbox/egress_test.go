@@ -9,7 +9,7 @@ package sandbox
 //
 // The rootless-podman integration test is gated like SB2's:
 //
-//	LOOM_SANDBOX_PODMAN_TEST=1 go test ./internal/driver -run TestContainerEgressPodmanIntegration -v
+//	LOOM_SANDBOX_PODMAN_TEST=1 go test ./internal/driver/sandbox -run TestContainerEgressPodmanIntegration -v
 //
 // Note: the relayed-serve reachability leg asserts only under native Linux
 // podman — host unix sockets do not cross the podman-machine VM boundary on

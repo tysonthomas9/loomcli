@@ -12,6 +12,7 @@
 // loomcli domain structs carry camelCase json tags for the driver/watch
 // wire. Responses are therefore decoded into local snake_case DTOs and
 // converted — never directly into the domain structs.
+
 package fleetdb
 
 import (

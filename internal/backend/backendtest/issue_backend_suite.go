@@ -1,3 +1,8 @@
+// Package backendtest holds the shared conformance suite that every
+// backend.IssueBackend implementation must pass — the issue-tracker backend
+// (local fleet-db, cloud fleet-db, direct fleet, Loom API), not the AI CLI
+// backends in internal/cli/backends. Imported only by tests; currently just
+// internal/cli/issue_backend_conformance_e2e_test.go.
 package backendtest
 
 import (

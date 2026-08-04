@@ -1,32 +1,42 @@
 # Desktop App Installation Runbook
 
-**Status:** Draft
-**Date:** 2026-05-06
-**Related:** `docs/product/desktop-app-runtime-spec.md`,
-`docs/product/local-mode-product-spec.md`,
-`desktop/README.md`
+> **Status:** Current — follow it. Every command, path, script, secret name and
+> make/npm target below was re-verified against the tree. The one systematic
+> error, `Loom.app` for the real bundle name `Loom Agents.app`, is fixed
+> throughout. The "Release Gaps" list at the bottom is still accurate.
+> *audited 2026-07-24*
+
+**Date:** 2026-05-06 · last substantive update 2026-06-22
+**Related:** see [Related](#related) at the bottom.
 
 This runbook documents how to build, install, verify, troubleshoot, and update
 the macOS Tauri app during development and early release packaging.
+
+The app bundle is named **`Loom Agents.app`** (`productName` in
+`desktop/src-tauri/tauri.conf.json:3`) — note the space. Quote it in shell
+commands. Its `Contents/MacOS/` holds three binaries: the Tauri shell
+`loom-desktop` and the two sidecars `loom` and `fleet-db`
+(`desktop/src-tauri/tauri.conf.json:32`).
 
 The desktop app is a shell around the same local runtime used by the CLI:
 
 - Tauri owns app windows, menus, and service controls.
 - The bundled `loom` sidecar owns `loom local service`.
-- The local service owns embedded FleetDB/miniredis, `loom serve`, workspace
-  daemons, and background agents.
-- FleetDB remains the source of truth for workspaces, repos, issues, agents,
+- The local service owns embedded fleet-db/miniredis, `loom serve`, workspace
+  daemons, and background agents (`internal/cli/local/local_cmd.go:241-249`,
+  `internal/cli/local/daemon.go:29-33`).
+- fleet-db remains the source of truth for workspaces, repos, issues, agents,
   sessions, leases, terminal sessions, commands, and artifacts.
 
 ## Build Prerequisites
 
 Install these tools on the build machine:
 
-- Go toolchain for the `loom` and FleetDB sidecars.
+- Go toolchain for the `loom` and fleet-db sidecars.
 - Rust toolchain for Tauri.
 - Node.js and npm for the Tauri shell and bundled web UI.
-- A sibling FleetDB checkout at `../fleet-db`, or set `FLEET_DB_REPO` to the
-  FleetDB repo path before building.
+- A sibling fleet-db checkout at `../fleet-db`, or set `FLEET_DB_REPO` to the
+  fleet-db repo path before building.
 
 From the `loomcli` repo root, install JavaScript dependencies once:
 
@@ -44,19 +54,41 @@ cd desktop
 npm run dev
 ```
 
-`npm run dev` runs `scripts/prepare-sidecar.sh` first. That script:
+`npm run dev` is `tauri dev` (`desktop/package.json:10`). Tauri's
+`beforeDevCommand` runs `npm run prepare-sidecar && npm run dev:frontend`
+(`desktop/src-tauri/tauri.conf.json:7`), so `scripts/prepare-sidecar.sh` runs
+first either way. `npm run build` gets the same treatment via
+`beforeBuildCommand` (`desktop/src-tauri/tauri.conf.json:8`).
 
+`scripts/prepare-sidecar.sh`:
+
+- requires `rustc` on PATH — it derives the target triple from `rustc -vV`
+  and exits 127 without it (`desktop/scripts/prepare-sidecar.sh:13-22`)
 - builds the web UI into `desktop/src-tauri/resources/webui`
 - builds `cmd/loom` into `desktop/src-tauri/binaries/loom-<target-triple>`
-- builds FleetDB into
-  `desktop/src-tauri/binaries/fleet-db-<target-triple>` when FleetDB is
-  available
+- builds fleet-db into
+  `desktop/src-tauri/binaries/fleet-db-<target-triple>` when fleet-db is
+  available; otherwise it warns and the local runtime will need `FLEET_DB_BIN`
+  (`desktop/scripts/prepare-sidecar.sh:57-68`)
 
-If FleetDB is not in `../fleet-db`, run:
+If fleet-db is not in `../fleet-db`, run:
 
 ```sh
 FLEET_DB_REPO=/path/to/fleet-db npm run dev
 ```
+
+### Faster inner loop
+
+After changing Go sidecar code or frontend code, rebuild and relaunch without a
+full cycle (`desktop/package.json:8-9`):
+
+```sh
+npm --prefix desktop run refresh:app     # rebuild bundle, stop + restart the app and its sidecars
+npm --prefix desktop run refresh:webui   # rebuild just the bundled web UI
+```
+
+`refresh:app` quits `Loom Agents.app`, kills the `loom` and `fleet-db` sidecars
+by bundle path, rebuilds, and reopens (`desktop/scripts/refresh-app.sh`).
 
 ## Local App Bundle
 
@@ -69,13 +101,13 @@ npm --prefix desktop run build
 From the repo root, open the built app with:
 
 ```sh
-open -n desktop/src-tauri/target/release/bundle/macos/Loom.app
+open -n "desktop/src-tauri/target/release/bundle/macos/Loom Agents.app"
 ```
 
 From inside `desktop/`, the same path is:
 
 ```sh
-open -n src-tauri/target/release/bundle/macos/Loom.app
+open -n "src-tauri/target/release/bundle/macos/Loom Agents.app"
 ```
 
 Build a local `.app` and `.dmg`:
@@ -136,9 +168,11 @@ layout (the `hdiutil` fallback already includes an `/Applications` symlink).
 app inside the mounted DMG or run it from `~/Downloads`: macOS **App
 Translocation** runs a freshly-downloaded (quarantined) app from a read-only,
 randomized path, and the bundled `loom` sidecar cannot start there. The app
-detects this and shows a "Move Loom to Applications" notice instead of hanging.
-Once it lives in `/Applications`, translocation no longer applies and the
-runtime starts normally (first launch shows the usual Gatekeeper consent).
+detects this and shows a "Move Loom to Applications" notice instead of hanging
+(`desktop/src-tauri/src/lib.rs:36-47` exposes the `needs_relocation` command;
+`desktop/src/main.ts:248-264` renders the notice). Once it lives in
+`/Applications`, translocation no longer applies and the runtime starts normally
+(first launch shows the usual Gatekeeper consent).
 
 ### Cutting a release candidate (local)
 
@@ -211,9 +245,9 @@ ARM) build is a future enhancement.
 For local manual testing:
 
 1. Build with `npm --prefix desktop run build`.
-2. Copy or drag `desktop/src-tauri/target/release/bundle/macos/Loom.app` into
+2. Copy or drag `desktop/src-tauri/target/release/bundle/macos/Loom Agents.app` into
    `/Applications`.
-3. Open `/Applications/Loom.app`.
+3. Open `/Applications/Loom Agents.app`.
 4. Let the app start the local runtime.
 5. Open a workspace window from the app once the runtime is healthy.
 
@@ -221,8 +255,8 @@ For DMG testing:
 
 1. Build with `npm --prefix desktop run build:dmg`.
 2. Open the DMG under `desktop/src-tauri/target/release/bundle/dmg/`.
-3. Drag `Loom.app` into `/Applications`.
-4. Launch `/Applications/Loom.app`.
+3. Drag `Loom Agents.app` into `/Applications`.
+4. Launch `/Applications/Loom Agents.app`.
 
 If macOS blocks the unsigned build, use a locally signed/notarized build for
 release testing. Avoid documenting a bypass as the supported install path.
@@ -235,14 +269,21 @@ The app-managed runtime uses an app-native data directory:
 ~/Library/Application Support/Loom/data
 ```
 
-The app and LaunchAgent set:
+The app and LaunchAgent set both of these
+(`internal/cli/local/launchagent.go:66-72`):
 
 ```text
 LOOM_CONFIG_DIR="$HOME/Library/Application Support/Loom/data"
 LOOM_DESKTOP_DATA_DIR="$HOME/Library/Application Support/Loom/data"
 ```
 
-Product data must not be stored inside `Loom.app` because app updates replace
+Resolution order when neither is set is `LOOM_DESKTOP_DATA_DIR` →
+`LOOM_CONFIG_DIR` → `~/Library/Application Support/Loom/data`
+(`internal/cli/local/runtime.go:106-128`). Inside it you will find
+`runtime.json`, `state.json`, `logs/{loom-serve,loom-local-service,loom-daemon}.log`,
+`fleet-db/redis-snapshot.json`, and `workspaces/<name>/`.
+
+Product data must not be stored inside `Loom Agents.app` because app updates replace
 the bundle. A standalone CLI install may still use `~/.loom`; do not silently
 merge or move that data into the app directory.
 
@@ -252,11 +293,11 @@ The desktop runtime can be controlled through the bundled CLI. When testing an
 installed app, use:
 
 ```sh
-/Applications/Loom.app/Contents/MacOS/loom local status --json
-/Applications/Loom.app/Contents/MacOS/loom local logs
-/Applications/Loom.app/Contents/MacOS/loom local drain
-/Applications/Loom.app/Contents/MacOS/loom local resume
-/Applications/Loom.app/Contents/MacOS/loom local stop
+"/Applications/Loom Agents.app/Contents/MacOS/loom" local status --json
+"/Applications/Loom Agents.app/Contents/MacOS/loom" local logs
+"/Applications/Loom Agents.app/Contents/MacOS/loom" local drain
+"/Applications/Loom Agents.app/Contents/MacOS/loom" local resume
+"/Applications/Loom Agents.app/Contents/MacOS/loom" local stop
 ```
 
 The persistent service is a per-user LaunchAgent:
@@ -268,18 +309,31 @@ The persistent service is a per-user LaunchAgent:
 Install or replace it:
 
 ```sh
-/Applications/Loom.app/Contents/MacOS/loom local install-service
+"/Applications/Loom Agents.app/Contents/MacOS/loom" local install-service
 ```
 
 Remove it:
 
 ```sh
-/Applications/Loom.app/Contents/MacOS/loom local uninstall-service
+"/Applications/Loom Agents.app/Contents/MacOS/loom" local uninstall-service
 ```
 
-The LaunchAgent runs `loom local service`, which starts `loom serve` and the
-workspace daemon manager. Background agents should survive closing all app
-windows and restart after user login.
+`install-service` boots out any existing plist, rewrites it, and bootstraps it
+with `launchctl bootstrap gui/$(id -u)`, falling back to `launchctl load`
+(`internal/cli/local/launchagent.go:79-113`). It records the *resolved* path of
+the currently running `loom` binary (symlinks evaluated,
+`internal/cli/local/launchagent.go:141-158`) — so reinstall the service after
+moving or replacing the app bundle.
+
+The LaunchAgent runs `loom local service`, which starts `loom serve --bind
+--port --fleet-mode` as a detached child (`internal/cli/local/local_cmd.go:241-249`)
+and supervises `loom daemon` with backoff (`internal/cli/local/daemon.go:29-45`).
+Background agents should survive closing all app windows and restart after user
+login.
+
+The full `loom local` command set is `service`, `start`, `status`, `stop`,
+`restart`, `install-service`, `uninstall-service`, `drain`, `resume`, `logs`
+(`internal/cli/local/local_cmd.go:128`).
 
 ## Verification
 
@@ -287,14 +341,17 @@ Run these checks after a local app build:
 
 ```sh
 npm --prefix desktop run build
-open -n desktop/src-tauri/target/release/bundle/macos/Loom.app
+open -n "desktop/src-tauri/target/release/bundle/macos/Loom Agents.app"
 ```
 
 Then verify:
 
 - The app window becomes visible and loads the workspace UI after runtime
   health.
-- `loom local status --json` reports `healthy: true`.
+- `loom local status --json` reports `healthy: true`
+  (`internal/cli/local/runtime.go:50-52`); the same payload carries `pid`,
+  `serve_pid`, `data_dir`, `url`, `port`, `executable`, `binary_hash`, `build`
+  and `claims_paused`.
 - Creating a workspace works.
 - Adding a repo works.
 - Adding an agent works.
@@ -307,12 +364,17 @@ Then verify:
 Useful status commands:
 
 ```sh
-/Applications/Loom.app/Contents/MacOS/loom local status
-/Applications/Loom.app/Contents/MacOS/loom local logs
+"/Applications/Loom Agents.app/Contents/MacOS/loom" local status
+"/Applications/Loom Agents.app/Contents/MacOS/loom" local logs
 launchctl print gui/$(id -u)/com.loom.local
 ```
 
 ## Updates
+
+**This flow is a target, not a procedure you can run.** There is no in-app
+updater and no update-channel metadata; see [Release Gaps](#release-gaps).
+Today, updating means building or downloading a new DMG and drag-replacing the
+bundle, then reinstalling the LaunchAgent (it records the resolved binary path).
 
 The release update flow must treat the app bundle and sidecars as one unit:
 
@@ -320,14 +382,14 @@ The release update flow must treat the app bundle and sidecars as one unit:
 2. Mark the local runtime as draining.
 3. Stop new task claims.
 4. Let active agents finish, or stop them according to the release policy.
-5. Flush FleetDB/miniredis and runtime metadata.
+5. Flush fleet-db/miniredis and runtime metadata.
 6. Stop the LaunchAgent.
-7. Replace `Loom.app`.
+7. Replace `Loom Agents.app`.
 8. Restart the LaunchAgent.
 9. Resume claims.
 10. Restore workspace windows.
 
-Do not hot-swap the bundled `loom` or FleetDB sidecar while agents are
+Do not hot-swap the bundled `loom` or fleet-db sidecar while agents are
 running. If a user also has a standalone CLI installed, the app update must not
 rewrite that CLI without explicit user consent.
 
@@ -336,18 +398,18 @@ rewrite that CLI without explicit user consent.
 If the app opens but the workspace never loads, check:
 
 ```sh
-/Applications/Loom.app/Contents/MacOS/loom local status --json
-/Applications/Loom.app/Contents/MacOS/loom local logs
+"/Applications/Loom Agents.app/Contents/MacOS/loom" local status --json
+"/Applications/Loom Agents.app/Contents/MacOS/loom" local logs
 ```
 
 If the app bundle path is missing after build, confirm the command was run from
 the expected directory:
 
 ```sh
-ls desktop/src-tauri/target/release/bundle/macos/Loom.app
+ls "desktop/src-tauri/target/release/bundle/macos/Loom Agents.app"
 ```
 
-If FleetDB is not bundled, make sure the sibling repo exists or set
+If fleet-db is not bundled, make sure the sibling repo exists or set
 `FLEET_DB_REPO`:
 
 ```sh
@@ -357,21 +419,26 @@ FLEET_DB_REPO=/path/to/fleet-db npm --prefix desktop run build
 If the LaunchAgent is stale after moving the app, reinstall it:
 
 ```sh
-/Applications/Loom.app/Contents/MacOS/loom local uninstall-service
-/Applications/Loom.app/Contents/MacOS/loom local install-service
+"/Applications/Loom Agents.app/Contents/MacOS/loom" local uninstall-service
+"/Applications/Loom Agents.app/Contents/MacOS/loom" local install-service
 ```
 
 If the local runtime appears stuck, drain and restart it:
 
 ```sh
-/Applications/Loom.app/Contents/MacOS/loom local drain
-/Applications/Loom.app/Contents/MacOS/loom local stop
-/Applications/Loom.app/Contents/MacOS/loom local start
-/Applications/Loom.app/Contents/MacOS/loom local resume
+"/Applications/Loom Agents.app/Contents/MacOS/loom" local drain
+"/Applications/Loom Agents.app/Contents/MacOS/loom" local stop
+"/Applications/Loom Agents.app/Contents/MacOS/loom" local start
+"/Applications/Loom Agents.app/Contents/MacOS/loom" local resume
 ```
 
+`loom local logs` prints paths, it does not tail. The three files are
+`<dataDir>/logs/loom-serve.log`, `loom-local-service.log` and `loom-daemon.log`
+(`internal/cli/local/runtime.go:146,207,211`).
+
 Keep service logs and `runtime.json` with bug reports, but redact secrets,
-tokens, API keys, and repo credentials before sharing diagnostics.
+tokens, API keys, and repo credentials before sharing diagnostics. There is no
+automatic redaction — do it by hand.
 
 ## Release Gaps
 
@@ -389,3 +456,21 @@ can produce a Developer ID–signed, notarized, stapled DMG (see
 - CLI install/link flow and PATH conflict warnings
 - diagnostics export with secret redaction
 - full visual regression coverage for desktop workflows
+- tray / menu-bar status item (only the File and Window "New Workspace Window"
+  menu items exist today, `desktop/src-tauri/src/lib.rs:158-186`)
+
+Re-verified 2026-07-24: all unstruck items above are still gaps.
+
+## Related
+
+- [`desktop-app-runtime-spec.md`](desktop-app-runtime-spec.md) — the product
+  contract this runbook operationalizes: LaunchAgent, data location, CLI
+  coexistence, multi-window, runtime modes, and which of them shipped.
+- [`local-mode-product-spec.md`](local-mode-product-spec.md) — the local-mode
+  topology the app packages.
+- [`daemon-agent-runtime-architecture.md`](daemon-agent-runtime-architecture.md)
+  — what the supervised `loom daemon` does.
+- `desktop/README.md` — the Tauri package README (shorter, same model).
+- `.github/workflows/desktop-release.yml` — the tag-triggered release job.
+- `docs/loom-glossary.md` — read before writing about "backend", "fleet-db" or
+  "local mode".

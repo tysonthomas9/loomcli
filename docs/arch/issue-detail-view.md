@@ -1,5 +1,23 @@
 # Issue Detail View Architecture (Epic fghge)
 
+> **Status:** Current · *audited 2026-08-03*
+>
+> The 2026-08-03 pass corrected four things the 2026-07-23 banner had wrongly
+> vouched for: the tab model (log tabs are auto-derived `task-log` tabs, not a
+> `"logs"` tab), the agent state layer (a zustand store, not a React context),
+> the panel's CSS positioning, and `AgentStatusBadge`, which is no longer
+> mounted by anything. The 2026-07-23 pass rewrote every route (all issue APIs
+> are now workspace-scoped), the deep-link URL, the Redis key names, and the
+> file map (components and hooks moved into subdirectories). The terminal rows
+> changed most — see [terminal-system.md](terminal-system.md) for why spawn/kill
+> no longer exist.
+>
+> **Not re-verified on 2026-08-03:** the remainder of §2's hierarchy, §3's tab
+> lifecycle, and §4's session-start flow. Spot checks found more drift there —
+> `addTab` no longer exists anywhere in the frontend, and the tab bar renders no
+> `+` adder (`IssueDetailPanel.tsx:1294-1349`) — so treat those sections as
+> stale until someone audits them properly.
+
 ## Overview
 
 The Issue Detail View subsystem renders full issue details in two modes: a slide-out panel overlay for quick inspection from list/kanban/graph views, and a full-page replacement view for deeper work. Both modes share the same underlying data hooks and many of the same sub-components.
@@ -23,13 +41,13 @@ handleIssueClick(issue)
 - Same type, different ID = immediate content swap (no animation)
 - Different types = 300ms close animation, then open
 
-The panel renders as `position: fixed` anchored right, width `min(100%, 840px)` (`--panel-width-max`). Focus management via `useFocusReturn`, `useFocusTrap`, and `useRegisterEscapeLayer`.
+The panel renders as `position: absolute` anchored right (`IssueDetailPanel.module.css:28-32`) inside a `position: fixed` overlay that is inset by the unified header height and nav-rail width (`:6-11`) — which is why the panel is absolute rather than fixed. Width is `min(100%, 840px)` — `IssueDetailPanel.module.css:33-34` against `--panel-width-max: 840px` (`styles/variables.css:218`). Focus management via `useFocusReturn`, `useFocusTrap`, and `useRegisterEscapeLayer` (all in `hooks/ui/`).
 
 ### IssueDetailView (Full-page)
 
-**Trigger:** route navigation to `/ws/:workspaceId/issue/:issueId` via `useRouteView`.
+**Trigger:** route navigation to `/ws/:workspaceId/issues/:issueId` (`router.tsx:154-155`, mounted under the `/ws/:workspaceId` layout).
 
-URL: `/ws/:workspaceId/issue/:issueId`
+URL: `/ws/:workspaceId/issues/:issueId` — plural `issues`.
 
 A lighter read-mostly component without the tabbed interface, embedded terminal, session history, or editable fields for owner/assignee. Includes "Open in Terminal" action that switches to Terminal view with issue context seeded via `pendingIssueContext`.
 
@@ -47,12 +65,13 @@ IssueDetailPanel (slide-out overlay)
       +-- TabBar (dynamic tab strip with "+" adder)
       +-- [activeTab === "details"] scrollable content
       |   +-- PriorityDropdown, TypeDropdown, AssigneeDropdown, RepoDropdown
-      |   +-- AgentStatusBadge (clickable, opens logs tab)
       |   +-- StartWorkButton (agent picker popover)
       |   +-- EditableDescription
       |   +-- DesignPanel (collapsible H2 sections, fullscreen mode)
       |   +-- Notes (CollapsibleSection)
       |   +-- DependencySection (editable, navigable chips)
+      |   +-- EpicRollup (epics only: progress + child tickets)
+      |   +-- PRSection (linked pull requests)
       |   +-- SessionHistorySection
       |   +-- ActivityLog (unified comment+event timeline)
       |   +-- CommentForm
@@ -65,7 +84,7 @@ IssueDetailPanel (slide-out overlay)
       |       +-- inner tab bar [Transcript | Diff]
       |       +-- transcript pane (role-labeled entries)
       |       +-- CodeMirrorEditor (language="diff", readOnly)
-      +-- [activeTab === "logs"] LogViewer
+      +-- [activeTab === "task-log-{phase}"] TaskPhaseLogPanel (one per phase)
       +-- [activeTab === "terminal-*"] split view
           +-- SplitDetailSummary (condensed detail in top pane)
           +-- ResizeDivider (draggable, keyboard-accessible)
@@ -89,7 +108,7 @@ IssueDetailView (full-page)
 ```typescript
 interface DetailTab {
   id: string;
-  type: "details" | "logs" | "terminal" | "sessions";
+  type: "details" | "terminal" | "sessions" | "task-log";
   label: string;
   closable: boolean;
   metadata?: {
@@ -102,9 +121,19 @@ interface DetailTab {
 }
 ```
 
+The union is declared at `IssueDetailPanel.tsx:257-264`.
+
 - Details tab: always `"details"`, permanent (`closable: false`)
 - Sessions tab: `"sessions"`, permanent (`closable: false`)
-- Logs tab: `"logs"` (only one allowed)
+- Task-log tabs: `"task-log"`, id `task-log-{phase}`, permanent
+  (`closable: false`). There is no `"logs"` tab type and no `LogViewer`
+  component. Log tabs are not user-added: `getTaskLogPhases(workspaceId,
+  issue.id)` is fetched for `task`-type issues and filtered to `planning` /
+  `implementation` (`IssueDetailPanel.tsx:506-523`), and the `visibleTabs` memo
+  derives one tab per returned phase and splices them in after Details
+  (`:717-731`). Both can therefore be present at once. They are stripped before
+  persistence (`:695`) and rendered by `TaskPhaseLogPanel`
+  (`:390-424`, mounted at `:1522-1528`), which polls the task log every 500ms.
 - Terminal tabs: `"terminal-{sessionName}"` — one per unique session
 
 ### Tab Lifecycle
@@ -114,14 +143,14 @@ interface DetailTab {
 **Closing connected terminal:**
 1. `handleTabClose(tabId)` checks `connectionState === "connected"`
 2. If connected: shows `ConfirmDialog`
-3. On confirm: `closeTab(tabId)` → `deleteTabMetadata(sessionName)` + `scheduleSessionKill(sessionName)`
+3. On confirm: `closeTab(tabId)` → `deleteTabMetadata(workspaceId, sessionName)` only. There is no server-side kill call — the PTY dies with its WebSocket (`IssueDetailPanel.tsx:541-543`).
 
 ### Tab Persistence (Redis)
 
-Tab state persisted per-issue via `useIssueTabPersistence`:
+Tab state persisted per-issue via `useIssueTabPersistence` (`hooks/issues/`):
 
-- **Write:** debounced 300ms → `PUT /api/issues/{id}/tabs` → Redis key `issue:tabs:{issueId}` (24h TTL)
-- **Read:** `GET /api/issues/{id}/tabs` → server-side `ValidateAndFilter` removes terminal tabs whose sessions no longer exist
+- **Write:** debounced 300ms → `PUT /api/workspaces/{ws}/issues/{issueId}/tabs` (`internal/webui/handlers/issues/tab_module.go:33`) → Redis key `ws:{workspaceID}:issue:tabs:{issueId}`, 24h TTL (`internal/webui/issuetabs/store.go:1-5`)
+- **Read:** `GET /api/workspaces/{ws}/issues/{issueId}/tabs` (`tab_module.go:32`) → server-side `ValidateAndFilter` removes terminal tabs whose sessions no longer exist
 - **SSE invalidation:** `mutation.type === "issue_tabs"` triggers refetch (debounced 100ms)
 
 ---
@@ -130,31 +159,34 @@ Tab state persisted per-issue via `useIssueTabPersistence`:
 
 ### EmbeddedTerminal Component
 
-`forwardRef` wrapper around `TerminalInstance` (xterm.js). Adds:
-- `TerminalHeader` — backend brand dot, connection dot, worktree breadcrumb, maximize button, git action buttons
-- Clipboard UX — `useClipboard`, `CopyToast`, `PasteConfirmDialog`, `TerminalContextMenu`
+`forwardRef` wrapper around `TerminalInstance` (xterm.js). Adds `TerminalHeader` — backend brand dot, connection dot, worktree breadcrumb, maximize button, git action buttons. Clipboard handling is native (xterm.js + browser); the `useClipboard` / `CopyToast` / `PasteConfirmDialog` / `TerminalContextMenu` layer no longer exists anywhere in the frontend.
 
-### Session Spawn Flow
+### Session Start Flow
+
+There is no spawn endpoint. A session is created implicitly by connecting:
 
 ```
 User clicks "New Terminal" or agent badge
-  -> spawnTerminalSession(sessionName, backend)    POST /api/terminal/spawn
-  -> addTab("terminal", { sessionName, ... })
+  -> addTab("terminal", { sessionName, backend, ... })
   -> EmbeddedTerminal renders
-  -> TerminalInstance connects via WebSocket        GET /api/terminal/ws
+  -> TerminalInstance fetches a one-time token
+         GET /api/workspaces/{ws}/terminal/token
+  -> connects                                     (internal/webui/handlers/terminal/module.go:93)
+         GET /api/workspaces/{ws}/terminal/ws     (module.go:96)
+  -> server attaches/creates the PTY; command derived from the session name
   -> onConnectionStateChange("connected")
   -> tab connection dot turns green
 ```
 
 ### Connection State Indicators
 
-`TerminalInstance` emits `ConnectionState` ("connected" | "disconnected" | "reconnecting"):
+`TerminalInstance` emits `ConnectionState` — `"disconnected" | "connecting" | "connected" | "error" | "crashed" | "session_ended"` (`components/TerminalView/instances/TerminalInstance.tsx:67-76`):
 1. `EmbeddedTerminal` stores local state for `TerminalHeader` display
 2. Bubbles up to `DefaultContent` → updates `tabs[i].connectionState` → tab bar renders colored dot
 
 ### Session History
 
-`SessionHistorySection` lists past sessions via `GET /api/issues/{id}/sessions`. Active sessions show "Jump to tab", completed sessions show "View scrollback" (fetches from `/api/issues/{id}/sessions/{recordId}/scrollback`).
+`SessionHistorySection` lists past sessions via `GET /api/workspaces/{ws}/issues/{issueId}/sessions` (`internal/webui/handlers/issues/session_module.go:51`). Active sessions show "Jump to tab", completed sessions show "View scrollback" (`.../sessions/{recordId}/scrollback`, `session_module.go:52`).
 
 ---
 
@@ -171,7 +203,7 @@ splitContainer (flex column)
       +-- EmbeddedTerminal
 ```
 
-Split ratio managed by `useSplitRatio` hook, persisted to `localStorage["cortex:detail-panel-split-ratio"]`. Bounds: 15%–85%, default 50%. Maximize drops ratio to 5%.
+Split ratio managed by `useSplitRatio` (`hooks/ui/useSplitRatio.ts`), persisted to `localStorage["cortex:detail-panel-split-ratio"]` (`:8`). Bounds 15%–85%, default 50%, maximize 5% (`:9-12`). (`cortex` here is a dead UI codename that survives only as a storage-key prefix — see `docs/loom-glossary.md`.)
 
 ---
 
@@ -185,17 +217,20 @@ try { await onSave(newValue) }
 catch { setOptimisticValue(previousValue); setError(msg) }
 ```
 
-| Field | Component | API |
-|-------|-----------|-----|
-| Title | `EditableTitle` | `PATCH /api/issues/{id}` with `title` |
-| Status | `StatusDropdown` | `PATCH /api/issues/{id}` with `status` |
-| Priority | `PriorityDropdown` | `PATCH /api/issues/{id}` with `priority` |
-| Type | `TypeDropdown` | `PATCH /api/issues/{id}` with `issue_type` |
-| Assignee | `AssigneeDropdown` | `PATCH /api/issues/{id}` with `assignee` |
-| Owner | `OwnerDropdown` | `PATCH /api/issues/{id}` with `owner` |
-| Repo | `RepoDropdown` | `PATCH /api/issues/{id}` with `repo:` label |
-| Description | `EditableDescription` | `PATCH /api/issues/{id}` with `description` |
-| Labels | `LabelEditor` | `PATCH /api/issues/{id}` with `add_labels`/`remove_labels` |
+Every field patches the same route, `PATCH /api/workspaces/{ws}/issues/{id}`
+(`internal/webui/handlers/issues/module.go:45`); only the body differs.
+
+| Field | Component | Patch body |
+|-------|-----------|------------|
+| Title | `EditableTitle` | `title` |
+| Status | `StatusDropdown` | `status` |
+| Priority | `fields/PriorityDropdown` | `priority` |
+| Type | `fields/TypeDropdown` | `issue_type` |
+| Assignee | `fields/AssigneeDropdown` | `assignee` |
+| Owner | `fields/OwnerDropdown` | `owner` |
+| Repo | `fields/RepoDropdown` | `repo:` label |
+| Description | `sections/EditableDescription` | `description` |
+| Labels | `fields/LabelEditor` | `add_labels` / `remove_labels` |
 
 All updates call `onIssueUpdate(updatedIssue)` → `App.updateIssueDetails()` to merge without re-fetching.
 
@@ -203,16 +238,25 @@ All updates call `onIssueUpdate(updatedIssue)` → `App.updateIssueDetails()` to
 
 ## 7. Agent Integration
 
-### AgentStatusBadge
+### AgentStatusBadge (not mounted)
 
-Shows real-time agent status for non-human assignees:
-- Uses `useAgentContext().getAgentByName()` (shared 5s polling)
-- Polls `fetchGitStatus(agentName)` every 30s independently
-- Clicking opens the "logs" tab
+The component still exists (`header/AgentStatusBadge.tsx`) and is re-exported
+from the `header/` barrel (`header/index.ts:8-9`), but no application component
+renders it: every JSX usage in the tree is in its own test file, and
+`IssueDetailPanel.tsx:70` imports only `IssueHeader` from `./header`. What it
+would do if mounted:
+
+- Reads `agents` off the shared agent store (`useAgentStoreInstance()` +
+  `useStore`, `AgentStatusBadge.tsx:41-42`) and resolves the row with the
+  module helper `resolveAgentByName(agents, agentName)` (`:48`)
+- Polls `fetchGitStatus(workspaceId, agentName)` every 30s
+  (`PR_POLL_INTERVAL`, `:30,64,74`) — for PR-branch link detection, not status
+- Clicking fires the optional `onOpenTerminal(agentName)` callback (`:26,83,90`);
+  no caller supplies it outside tests, so the click is a no-op
 
 ### StartWorkButton
 
-Visible for `open` issues with no assignee. Lists agents from `useAgentContext()`, categorized as available/warning/busy. Only shows `role === "task"` agents. Selecting calls `updateIssue(id, { assignee, status: "in_progress" })`.
+Visible for `open` issues with no assignee. Lists agents from its `agents` prop (`actions/StartWorkButton.tsx:27`), categorized as available/warning/busy. It prefers agents matching `preferredRole` (`"task" | "plan"`, defaulting to `"task"` — `actions/StartWorkButton.tsx:34-35`) but **falls back to the full roster when no agent matches**, so a plan-stage issue in a task-only workspace still gets a picker (`StartWorkButton.tsx:130-133`). Selecting calls `updateIssue(id, { assignee, status: "in_progress" })`.
 
 ### AssigneeDropdown
 
@@ -228,7 +272,7 @@ From `IssueDetailView`: `window.history.back()` returns to the previous route. S
 
 ### Deep-link URLs
 
-`/ws/:workspaceId/issue/:issueId` is built by `buildShareUrl()`. On page load, route params provide the issue id and `App.tsx` fetches the issue.
+`/ws/:workspaceId/issues/:issueId` is built by `buildShareUrl()` (`utils/buildShareUrl.ts:16,23`). On page load, route params provide the issue id and the view fetches the issue.
 
 ### Dependency Navigation
 
@@ -257,48 +301,65 @@ Renders markdown design content with:
 
 ---
 
-## 11. Backend APIs
+## 11. Server routes and APIs
 
-### Issue Data
+Every route below is workspace-scoped. There are no unscoped `/api/issues/*`
+or `/api/terminal/*` routes.
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/issues/{id}` | Full IssueDetails (comments, deps, dependents) |
-| PATCH | `/api/issues/{id}` | Update fields |
-| POST | `/api/issues/{id}/comments` | Add comment |
-| GET | `/api/issues/{id}/events` | Event log |
-| POST | `/api/issues/{id}/dependencies` | Add dependency |
-| DELETE | `/api/issues/{id}/dependencies/{depId}` | Remove dependency |
+### Issue data — `internal/webui/handlers/issues/module.go`
 
-### Tab Persistence
+| Method | Path (under `/api/workspaces/{ws}`) | Registered at |
+|--------|------|---------------|
+| GET | `/issues/{id}` | `module.go:42` |
+| GET | `/issues` | `module.go:43` |
+| PATCH | `/issues/{id}` | `module.go:45` |
+| POST | `/issues/{id}/close` · `/reopen` · `/claim` · `/move` | `module.go:46-49` |
+| DELETE | `/issues/{id}` | `module.go:50` |
+| GET/POST | `/issues/{id}/comments` | `module.go:53-54` |
+| GET | `/issues/{id}/events` | `module.go:57` |
+| GET/POST | `/issues/{id}/dependencies` | `module.go:60-61` |
+| DELETE | `/issues/{id}/dependencies/{depId}` | `module.go:62` |
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/issues/{id}/tabs` | Fetch persisted tab state from Redis |
-| PUT | `/api/issues/{id}/tabs` | Save tab state (24h TTL) |
-| DELETE | `/api/issues/{id}/tabs` | Delete tab state |
+### Tab persistence — `internal/webui/handlers/issues/tab_module.go`
 
-### Terminal
+| Method | Path | Registered at |
+|--------|------|---------------|
+| GET | `/api/workspaces/{ws}/issues/{issueId}/tabs` | `tab_module.go:32` |
+| PUT | `/api/workspaces/{ws}/issues/{issueId}/tabs` | `tab_module.go:33` |
+| DELETE | `/api/workspaces/{ws}/issues/{issueId}/tabs` | `tab_module.go:34` |
 
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/terminal/spawn` | Create tmux session |
-| GET | `/api/terminal/ws` | WebSocket upgrade for terminal relay |
-| DELETE | `/api/terminal/tabs/{session}` | Remove tab metadata |
-| POST | `/api/terminal/sessions/{session}/kill` | Deferred session kill |
-| GET | `/api/issues/{id}/sessions` | Session history records |
+### Session history — `internal/webui/handlers/issues/session_module.go`
 
-### Backend Registry
+| Method | Path | Registered at |
+|--------|------|---------------|
+| GET | `/api/workspaces/{ws}/issues/{issueId}/sessions` | `session_module.go:51` |
+| GET | `/api/workspaces/{ws}/issues/{issueId}/sessions/{recordId}/scrollback` | `session_module.go:52` |
+| GET | `/api/workspaces/{ws}/tasks/{taskId}/sessions[/{sessionId}[/transcript\|/diff]]` | `session_module.go:56-65` |
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/backends` | List backends with health status |
+### Terminal — `internal/webui/handlers/terminal/`
+
+| Method | Path | Registered at |
+|--------|------|---------------|
+| GET | `/api/workspaces/{ws}/terminal/token` | `module.go:93` |
+| GET | `/api/workspaces/{ws}/terminal/ws` | `module.go:96` |
+| DELETE | `/api/workspaces/{ws}/terminal/tabs/{session}` | `tab_module.go:31` |
+
+`POST /api/terminal/spawn` and `POST /api/terminal/sessions/{s}/kill` were
+deleted with the tmux removal; `spawnTerminalSession` and `scheduleSessionKill`
+have no server route behind them. See
+[terminal-system.md](terminal-system.md) §12.
+
+### Backend registry
+
+| Method | Path | Registered at |
+|--------|------|---------------|
+| GET | `/api/backends` | `internal/webui/app/routes.go:54` |
 
 ---
 
 ## 12. State Management
 
-- **Agent context:** `AgentProvider` single 5s polling loop shared by all consumers
+- **Agent store:** `StoreProvider` (`hooks/common/useStoreContext.tsx:207`) creates one zustand `agentStore` (`createAgentStore()`, `stores/agentStore.ts:196`) and drives a single polling loop at `AGENT_REFRESH_INTERVAL_MS = 30_000` (`useStoreContext.tsx:79,184`), shared by all consumers via `useAgentStoreInstance()` + `useStore(store, selector)`. There is no `AgentProvider` / `useAgentContext`; `getAgentByName` is a store action (`agentStore.ts:120,471`), not a context method.
 - **Panel exclusivity:** `usePanelManager` manages single `activePanel` with 300ms transition
 - **Issue loading:** `useIssueDetail` uses request counter to prevent race conditions
 - **Optimistic updates:** immediate local state change, rollback on error
@@ -308,48 +369,79 @@ Renders markdown design content with:
 
 ## 13. File Map
 
-### Frontend Components
+### Frontend components (`internal/webui/frontend/src/`)
 
 | Path | Description |
 |------|-------------|
 | `components/IssueDetailPanel/IssueDetailPanel.tsx` | Main panel + DefaultContent |
-| `components/IssueDetailPanel/IssueHeader.tsx` | Sticky header with status, title, PR links |
-| `components/IssueDetailPanel/DesignPanel.tsx` | Collapsible markdown with fullscreen |
-| `components/IssueDetailPanel/ActivityLog.tsx` | Comment + event timeline |
-| `components/IssueDetailPanel/AgentStatusBadge.tsx` | Real-time agent status pill |
-| `components/IssueDetailPanel/AssigneeDropdown.tsx` | Agent/human assignment |
-| `components/IssueDetailPanel/StartWorkButton.tsx` | Agent picker for "Start Work" |
-| `components/IssueDetailPanel/SessionHistorySection.tsx` | Past terminal sessions with scrollback |
-| `components/IssueDetailPanel/SessionsTab.tsx` | Agent session audit trail container |
-| `components/IssueDetailPanel/SessionTimeline.tsx` | Session list sorted newest-first |
-| `components/IssueDetailPanel/SessionTimelineRow.tsx` | Individual session row with status/cost |
-| `components/IssueDetailPanel/SessionDetailView.tsx` | Transcript + diff viewer |
-| `components/CodeMirrorEditor/CodeMirrorEditor.tsx` | CodeMirror 6 wrapper (diff syntax) |
 | `components/IssueDetailPanel/SplitDetailSummary.tsx` | Condensed detail for split view |
-| `components/IssueDetailPanel/ResizeDivider.tsx` | Draggable split divider |
-| `components/IssueDetailPanel/DependencySection.tsx` | Editable dependencies |
+| `components/IssueDetailPanel/CollapsibleSection.tsx` | Shared collapsible wrapper |
+| `components/IssueDetailPanel/PRFilesTab.tsx` | Changed-files tab for a linked PR |
+| `components/IssueDetailPanel/PRCompareDiffPane.tsx` | PR compare diff pane |
+| `components/IssueDetailPanel/header/IssueHeader.tsx` | Sticky header: status, title, PR links |
+| `components/IssueDetailPanel/header/AgentStatusBadge.tsx` | Real-time agent status pill — **not mounted anywhere**, see §7 |
+| `components/IssueDetailPanel/fields/AssigneeDropdown.tsx` | Agent/human assignment |
+| `components/IssueDetailPanel/fields/OwnerDropdown.tsx` | Owner assignment |
+| `components/IssueDetailPanel/fields/PriorityDropdown.tsx` | Priority picker |
+| `components/IssueDetailPanel/fields/TypeDropdown.tsx` | Issue-type picker |
+| `components/IssueDetailPanel/fields/RepoDropdown.tsx` | Repo label picker |
+| `components/IssueDetailPanel/fields/LabelEditor.tsx` | Label add/remove |
+| `components/IssueDetailPanel/actions/StartWorkButton.tsx` | Agent picker for "Start Work" |
+| `components/IssueDetailPanel/actions/ResizeDivider.tsx` | Draggable split divider |
+| `components/IssueDetailPanel/actions/MoveIssueDialog.tsx` | Move issue between workspaces/repos |
+| `components/IssueDetailPanel/sections/DesignPanel.tsx` | Collapsible markdown with fullscreen |
+| `components/IssueDetailPanel/sections/EditableDescription.tsx` | Inline description editor |
+| `components/IssueDetailPanel/sections/ActivityLog.tsx` | Comment + event timeline |
+| `components/IssueDetailPanel/sections/CommentsSection.tsx` / `CommentForm.tsx` / `RejectCommentForm.tsx` | Comment surfaces |
+| `components/IssueDetailPanel/sections/DependencySection.tsx` / `DependencySearchPicker.tsx` | Editable dependencies |
+| `components/IssueDetailPanel/sections/EpicRollup.tsx` | Epic progress roll-up + child tickets |
+| `components/IssueDetailPanel/sections/PRSection.tsx` | Linked pull requests |
+| `components/IssueDetailPanel/sections/MarkdownRenderer.tsx` / `HtmlDesignRenderer.tsx` | Sanitized renderers |
+| `components/IssueDetailPanel/sessions/SessionsTab.tsx` | Agent session audit trail container |
+| `components/IssueDetailPanel/sessions/SessionTimeline.tsx` / `SessionTimelineRow.tsx` | Session list, newest first |
+| `components/IssueDetailPanel/sessions/SessionDetailView.tsx` | Transcript + diff viewer |
+| `components/IssueDetailPanel/sessions/SessionHistorySection.tsx` | Past terminal sessions with scrollback |
+| `components/IssueDetailPanel/sessions/TaskSessionDiffPane.tsx` | Diff pane for one task session |
 | `components/IssueDetailView/IssueDetailView.tsx` | Full-page detail view |
 | `components/EmbeddedTerminal/EmbeddedTerminal.tsx` | Terminal wrapper for panel tabs |
 | `components/EmbeddedTerminal/TerminalHeader.tsx` | Terminal tab header |
+| `components/CodeMirrorEditor/CodeMirrorEditor.tsx` | CodeMirror 6 wrapper (diff syntax) |
 | `components/BackendSelectorDropdown/BackendSelectorDropdown.tsx` | Backend picker |
-| `components/BackendSelectorDropdown/backendDefaults.ts` | Brand metadata for known backends |
 
-### Frontend Hooks
+PR surfaces in this panel are specified by `docs/product/pr-review-spec.md`;
+this doc does not restate them.
 
-| Path | Description |
-|------|-------------|
-| `hooks/useIssueDetail.ts` | Fetch/cache issue details, race-safe |
-| `hooks/usePanelManager.ts` | Panel mutual exclusivity |
-| `hooks/useIssueTabPersistence.ts` | Redis tab state load/save |
-| `hooks/useSplitRatio.ts` | localStorage split ratio |
-| `hooks/useTaskSessions.ts` | Adaptive polling for session list (10s/3s) |
-| `hooks/useSessionTranscript.ts` | Transcript polling (3s when active) |
-| `hooks/useSessionDiff.ts` | Lazy one-shot diff fetch |
-
-### Backend
+### Frontend hooks
 
 | Path | Description |
 |------|-------------|
-| `internal/webui/handlers_terminal_spawn.go` | POST /api/terminal/spawn |
-| `internal/webui/issuetabs/store.go` | Redis store for tab state |
+| `hooks/issues/useIssueDetail.ts` | Fetch/cache issue details, race-safe |
+| `hooks/issues/useIssueTabPersistence.ts` | Redis tab state load/save |
+| `hooks/issues/useRecentAssignees.ts` | Recently used assignees |
+| `hooks/ui/usePanelManager.ts` | Panel mutual exclusivity |
+| `hooks/ui/useSplitRatio.ts` | localStorage split ratio |
+| `hooks/ui/useFocusReturn.ts` / `useFocusTrap.ts` | Focus management |
+| `hooks/terminal/useTaskSessions.ts` | Adaptive polling for session list |
+| `hooks/terminal/useSessionTranscript.ts` | Transcript polling |
+| `hooks/terminal/useSessionDiff.ts` | Lazy one-shot diff fetch |
+
+### Server
+
+| Path | Description |
+|------|-------------|
+| `internal/webui/handlers/issues/module.go` | Issue CRUD, comments, events, dependencies |
+| `internal/webui/handlers/issues/tab_module.go` | Issue tab state routes |
+| `internal/webui/handlers/issues/session_module.go` | Session history and task-session routes |
+| `internal/webui/handlers/terminal/module.go` | Terminal token + WebSocket |
+| `internal/webui/handlers/terminal/tab_module.go` | Terminal tab metadata routes |
+| `internal/webui/issuetabs/store.go` | Redis store for issue tab state |
 | `internal/webui/sessionhistory/store.go` | Redis store for session history |
+
+---
+
+## Related
+
+- [terminal-system.md](terminal-system.md) — the terminal subsystem this panel
+  embeds, including the PTY lifecycle and the removed session endpoints.
+- [file-explorer.md](file-explorer.md) — the third web-UI subsystem map.
+- `docs/product/pr-review-spec.md` — the PR surfaces referenced above.

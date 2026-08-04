@@ -1,5 +1,10 @@
 # Playground
 
+> **Status:** Current · *audited 2026-07-24*. Backend zoo, env knobs, and the
+> `make test-playground` entry point checked against the scripts in this
+> directory, `Makefile:73-86`, and
+> `internal/cli/daemon/supervisor/restart.go:378-395`.
+
 Daemon-lifecycle **failure-mode harness** for the loom supervisor: deterministic
 mock backends that crash, hang, or run slow on demand, plus scenario scripts
 that assert the supervisor classifies, kills, sweeps, and times them out
@@ -168,6 +173,7 @@ without the cost of bringing up Docker.
 | `loom-backend-playground-hang`         | Parent goes silent. No descendants.                                                                                   | Basic watchdog (single-pgroup case). Simplest template for "copy this when adding a new bug."      |
 | `loom-backend-playground-crash`        | Exits non-zero a few seconds after invoke.                                                                            | Failure classification + retry/backoff.                                                            |
 | `loom-backend-playground-slow`         | Writes one stdout line every `interval` seconds (less than the watchdog timeout).                                     | Regression guard: legitimate slow work must NOT trigger the watchdog.                              |
+| `loom-backend-playground-stall-task`   | Stalls **only** on a task whose title contains `[STALL]` (or whose id equals `LOOM_PLAYGROUND_STALL_TASK_ID`); every other task takes the happy path. | Task-level quarantine: the watchdog kills the run, recovery resets the task to open, the picker re-selects it — the boomerang quarantine must break. Knobs: `LOOM_PLAYGROUND_HANG_SECONDS` (default 120), `LOOM_PLAYGROUND_STALL_TASK_ID`, `LOOM_PLAYGROUND_HANG_MARKER_DIR`. |
 
 Each backend implements the same `meta`/`health`/`invoke` contract as
 `loom-backend-playground` and self-documents its failure mode in a header
@@ -186,10 +192,16 @@ go test -tags=playground -v ./test/playground/...
 
 # Run one
 go test -tags=playground -v -run TestPlaygroundSlowBackendNotKilled ./test/playground/...
+
+# Go scenarios + the Playwright kanban stage, with serve REQUIRED
+make test-playground
 ```
 
 `requireServe` skips the test if `loom serve` isn't reachable, so the
-suite is safe to run on machines that aren't set up.
+suite is safe to run on machines that aren't set up. `make test-playground`
+sets `LOOM_PLAYGROUND_REQUIRE_SERVE=1`, which turns that skip into a failure,
+and then runs a Playwright stage that re-creates the workspace and asserts the
+kanban renders the seed tasks (`Makefile:73-86`).
 
 ### Writing a new scenario
 
@@ -259,7 +271,23 @@ git checkout -                                                 # back to HEAD
 
 Scenarios that need to trip the daemon's output-timeout watchdog quickly
 export this env var before launching `loom daemon`. Read by
-`Supervisor.GetOutputTimeout` (`internal/cli/daemon/supervisor/restart.go`);
-the env var wins over fleet-db config because the wire schema does not
-currently persist this field. Pure testability — no production behavior
-change. The harness sets it to 15 seconds (vs. the 900s default).
+`Supervisor.GetOutputTimeout`
+(`internal/cli/daemon/supervisor/restart.go:384-395`); the env var wins over
+the fleet-db daemon profile because fleet-db's wire schema does not currently
+persist this field. Pure testability — no production behavior change. The
+harness sets it to 15 seconds; the default is 900 (15 minutes,
+`internal/cli/daemon/supervisor/restart.go:394`).
+
+## Related
+
+- [`../../docs/testing/README.md`](../../docs/testing/README.md) — index of all
+  test surfaces
+- [`../../docs/testing-terminology.md`](../../docs/testing-terminology.md) —
+  what "real" means for this harness (deterministic mock backends, real
+  daemon, real fleet-db)
+- [`../local-mode/README.md`](../local-mode/README.md) — the full-stack
+  counterpart; see § Comparison above for which to pick
+- [`../../docs/product/failure-modes-recovery-ux.md`](../../docs/product/failure-modes-recovery-ux.md)
+  — the product-side statement of the failure modes exercised here
+- [`../../docs/loom-glossary.md`](../../docs/loom-glossary.md) — **worker**,
+  **agent**, **session**, and **role kind**, all overloaded in these scripts

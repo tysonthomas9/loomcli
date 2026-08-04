@@ -1,3 +1,9 @@
+// Package events defines loom's telemetry event envelope (task, agent, epic and
+// system lifecycle records), a Bus that appends them to rotating per-day JSONL
+// files while fanning them out to in-process listeners, and a MetricsStore that
+// replays those files back into aggregate snapshots. Events are emitted by
+// internal/cli/daemon and internal/cli/automode, and read back by
+// internal/cli/serve/observability and internal/events/otelexport.
 package events
 
 import (

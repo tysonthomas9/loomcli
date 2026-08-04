@@ -1,3 +1,9 @@
+// Package monitor assembles the loom dashboard snapshot: per-worktree agent
+// state from lock files and daemon state, git ahead/behind and dirty status,
+// and task counts from the issue-tracker backend (internal/backend), rendered
+// by `loom monitor`. CollectMonitorData is the shared read model, also consumed
+// by `loom status` (internal/cli/workspace) and the serve /api/monitor and
+// /metrics endpoints; its box-drawing helpers are reused by `loom usage`.
 package monitor
 
 import (

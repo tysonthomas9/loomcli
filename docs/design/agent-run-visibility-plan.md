@@ -1,10 +1,46 @@
 # Agent Run Visibility Plan
 
-**Status:** Future plan
-**Date:** 2026-05-04
+> **Status:** Partially implemented — the primitives shipped, the unified UX did
+> not. *Audited 2026-07-24.*
+> **Date:** 2026-05-04
+
+Read this for the **product model** (the Unified Concepts table, the Target UX
+list, the Open Questions) — that part is still the intent. Do not read the
+phase plan as a to-do list; three of its four phases have been overtaken.
+
+Phase status as of 2026-07-24:
+
+| Phase | Verdict | Evidence |
+|---|---|---|
+| 1 — make local runs visible | Partial | `GET /api/monitor/agents` exists (`internal/webui/app/routes.go:99`). Not verified: whether direct `loom plan` / `loom task` runs register a server-visible run record, and whether the `review`/`blocked` transition bug was fixed. |
+| 2 — shared session store | Largely done | `ListTaskSessions` now prefers control-plane sessions and treats the file stores as enrichment/fallback (`internal/webui/svcimpl/session_service.go:121-137`). `domain.AgentSession` (`internal/domain/control_plane.go:81`) and its store (`internal/store/control_plane_store.go:95`) are the server-visible record. On-disk session records still exist alongside them. |
+| 3 — first-class container runner | Different shape shipped | No Podman *planner/coder* runner command. What exists is a container **sandbox launcher for driver bundles** — `LOOM_DRIVER_SANDBOX=container`, `driver.ResolveSandboxLauncher` (`internal/driver/executor.go:66-71`, `internal/driver/sandbox/container.go:67,88,105`) — plus the Daytona remote-sandbox task runner (`internal/driver/bundled_runner.go:20`). Neither is the "UI action to start a containerized planner" this phase describes. |
+| 4 — full distributed control plane | Shipped | Node identity, leases, fencing tokens, and runtime-provider metadata all exist (`internal/domain/control_plane.go`, `internal/domain/platform.go`). See [`2026-07-23-control-plane-as-built.md`](2026-07-23-control-plane-as-built.md), which supersedes this section entirely. |
+
+Two corrections to the body text:
+
+- The sessions route's path parameter is `{issueId}`, not `{issue}`:
+  `GET /api/workspaces/{ws}/issues/{issueId}/sessions`
+  (`internal/webui/handlers/issues/session_module.go:51`). A task-scoped
+  sibling also exists: `GET /api/workspaces/{ws}/tasks/{taskId}/sessions`
+  (`session_module.go:56`).
+- One Open Question is answered: "agent definition" and "worker profile" are
+  now separate first-class objects — `domain.WorkerProfile`
+  (`internal/domain/platform.go:104`) is distinct from `domain.Agent`
+  (`internal/domain/agent.go:42`). The UI question of whether to *show* the
+  distinction is still open.
+
+The "Current Findings" section is a dated 2026-05-04 observation log against a
+since-changed stack. Read it as history; do not cite it as present-day behavior.
+The acceptance criteria in the phase sections were not re-verified and remain
+unconfirmed.
+
 **Related:** `docs/product/agent-execution-prd.md`,
 `docs/design/distributed-control-plane.md`,
 `docs/design/distributed-control-plane-data-model.md`,
+`docs/design/2026-07-23-control-plane-as-built.md`,
+`docs/design/workflow-driver-authoring-guide.md`,
+`docs/design/generic-sse-envelope.md`,
 `docs/arch/terminal-system.md`
 
 ## Purpose

@@ -1,9 +1,50 @@
 # Distributed Control Plane Data Model Review
 
-**Status:** Draft for review
+> **Status:** Superseded — 2026-06-03 by
+> `docs/design/fleetdb-agent-platform-v2-proposal.md`, and since then by
+> shipped code. *audited 2026-07-23*
+>
+> **Read this file for the reasoning, not for the field names.** About two
+> thirds of the proposed *global* models exist today under different names
+> with different fields (see "Shipped As" below). Every proposed *local*
+> model (CheckoutBinding, WorktreeBinding, LocalNodeConfig, SecretBinding),
+> every proposed *observed* model (CheckoutStatus, RuntimeStatus,
+> DiffSummary), and every Campaign model was never built — zero non-test
+> occurrences in `internal/`. The unbuilt local/observed half is still the
+> only written record of that design, which is why this file survives
+> despite being wrong about names.
+
 **Date:** 2026-04-30
-**Related:** `docs/design/distributed-control-plane.md`, `loomcli-26v50`,
+**Related:** `docs/design/distributed-control-plane.md`,
+`docs/design/2026-07-23-control-plane-as-built.md`,
+`docs/design/fleetdb-agent-platform-v2-proposal.md`, `loomcli-26v50`,
 `loomcli-37h1h`
+
+## Shipped As
+
+Land on real code in one hop. Verified 2026-07-23.
+
+| Proposed here | Shipped as | Notes |
+|---|---|---|
+| `WorkerProfile` | `domain.WorkerProfile`, `internal/domain/platform.go:104` | Keyed by `ProfileID`. Gains `RuntimePolicy`, `Capabilities`, `Enabled`. Loses `desired_state`, `repo_groups`, `cross_repo`, `fallback_backends`, `parent_scope`, `schedule_ref`, `task_filter`, `placement`; `backend_override` shipped as `Backend`. |
+| `AgentService` | `domain.AgentService`, `internal/domain/platform.go:147` | Kind enum (`platform.go:123-136`) is larger than proposed. Fields: `ServiceID`, `TriggerRefs`, `PlacementPolicy`, `LeaseID`, `StateRef`, `BudgetPolicy`. |
+| `TaskRun` | `domain.TaskRun`, `internal/domain/platform.go:498` | `TaskRunID`; `Runner`/`RunnerKind`/`RunnerRef`/`ProviderProfile` instead of `runtime_provider`. No `branch`/`base_commit`/`final_commit`/`attempt`/`deadline_at`. |
+| `Lease` (one polymorphic record) | Three purpose-built mechanisms | `domain.AgentLease` (`internal/domain/control_plane.go:167`), `domain.AgentOwnershipLease` (`control_plane.go:182`), and task-run fencing inline on `TaskRun.LeaseID`/`FencingToken` (`platform.go:513-514`). There is no generic `resource_type` lease. |
+| `Node` | `domain.Node`, `internal/domain/control_plane.go:39` | Workspace-scoped. `OwnerActor`, not `owner_type`/`owner_id`. |
+| `NodeHeartbeat` (a record) | An *operation*, not a record | `NodeStore.Heartbeat` (`internal/store/control_plane_store.go:37`) advances `Node.LastHeartbeat`/`Node.ExpiresAt`. `ToolInventory` and `Capacity` are fields on `Node` itself. Callers: `internal/driver/executor.go:467`, `internal/driver/task_worker.go:217`. |
+| `Artifact` | `domain.Artifact`, `internal/domain/control_plane.go:134` | Store contract at `internal/store/control_plane_store.go:225`. |
+| `TerminalSession` | `domain.TerminalSession`, `internal/domain/control_plane.go:112` | Store contract at `internal/store/control_plane_store.go:146`. |
+| `Campaign`, `CampaignRun`, `CampaignStep` | — | Never built. The only trace is the enum value `AgentServiceKindCampaignOrchestrator` (`internal/domain/platform.go:136`). |
+| `CheckoutBinding`, `WorktreeBinding`, `LocalNodeConfig`, `SecretBinding` | — | Never built. The local layer is still `bootstrap.StateCache` (`internal/bootstrap/statecache.go:33-52`) plus `internal/localworkspace`. |
+| `CheckoutStatus`, `RuntimeStatus`, `DiffSummary` | — | Never built. Observed run state rides on `domain.TaskRun.Status`/`LastHeartbeat`/`ErrorClass` and `domain.AgentSession` (`internal/domain/control_plane.go:81`). |
+
+Store contracts for the shipped half live in
+`internal/store/control_plane_store.go` (`NodeStore:37`,
+`AgentSessionStore:95`, `TerminalSessionStore:146`, `ArtifactStore:225`,
+`AgentLeaseStore:258`, `AgentOwnershipLeaseStore:284`) and
+`internal/store/platform_store.go` (`TaskRunStore:762`). The code that
+drives them is `internal/driver` — a package this document never names.
+See `docs/design/2026-07-23-control-plane-as-built.md`.
 
 ## Purpose
 
@@ -63,18 +104,23 @@ Assessment:
 
 ### YAML Models
 
-These are the main distributed-design blocker.
+These were the main distributed-design blocker in April 2026. Most of the
+block has since been removed — the rows below are annotated with their
+2026-07-23 state.
 
-| Current type | Problem |
-|---|---|
-| `config.LoomConfig` | Stores global workspace list and local paths in `~/.loom/config.yaml`. |
-| `config.WorkspaceConfig` | Combines workspace identity, local path, repos, backend, lifecycle state. |
-| `config.RepoConfig` | Combines repo identity with local path. |
-| `config.ProjectFile` | Project-local `loom.yaml` still drives daemon runtime. |
-| `config.DaemonSettings` | Mixes runtime policy, local paths, backend config, Redis/fleet settings. |
-| `config.AgentEntry` | YAML agent assignment that still drives daemon/agent execution. |
+| Current type | Problem as written 2026-04-30 | 2026-07-23 |
+|---|---|---|
+| `config.LoomConfig` | Stores global workspace list and local paths in `~/.loom/config.yaml`. | **Wrong now.** `internal/cli/config/config.go:22-23`: "LoomConfig is a FleetDB-backed workspace view used by older command code while the internal DTOs are collapsed onto domain types." `LoadConfig` (`config.go:120-134`) opens the fleet-db store; local paths are overlaid from `bootstrap.LoadStateCache` (`config.go:180`). Nothing reads or writes `~/.loom/config.yaml` outside tests. |
+| `config.WorkspaceConfig` | Combines workspace identity, local path, repos, backend, lifecycle state. | Still combines them, and still carries `yaml:` struct tags (`internal/cli/config/config.go:46-56`), but it is now populated from fleet-db, not from a YAML file. |
+| `config.RepoConfig` | Combines repo identity with local path. | Same: still combined, still `yaml:`-tagged (`config.go:57-65`), no longer YAML-sourced. |
+| ~~`config.ProjectFile`~~ | ~~Project-local `loom.yaml` still drives daemon runtime.~~ | **No such type.** `grep -rn 'ProjectFile' internal --include='*.go'` returns nothing. Daemon config now loads from fleet-db via `config.LoadDaemonConfig` (`internal/cli/config/project.go:165-190`). |
+| `config.DaemonSettings` | Mixes runtime policy, local paths, backend config, Redis/fleet settings. | Still mixed, at `internal/cli/config/project.go:19-28`, and still `yaml:`-tagged — but sourced from fleet-db, not `loom.yaml`. |
+| `config.AgentEntry` | YAML agent assignment that still drives daemon/agent execution. | Type still exists (`internal/cli/config/project.go:96`). UNVERIFIED whether it still drives execution; do not restate either way without checking its callers. |
 
-These should not be the runtime source of truth in fleet-db mode.
+These should not be the runtime source of truth in fleet-db mode. As of
+2026-07-23 they no longer are: the last non-test YAML runtime readers are
+gone, though `gopkg.in/yaml.v3` is still a direct dependency (`go.mod:39`)
+and the struct tags remain.
 
 ### Fleet Worker Coordination
 
@@ -264,6 +310,16 @@ artifact, not a local-only prompt file path in distributed mode.
 
 ### WorkerProfile
 
+> Shipped, differently: `domain.WorkerProfile`,
+> `internal/domain/platform.go:104-121`. It did **not** replace `agentdef` —
+> `loom agentdef` is still a public command; `loom worker profile`
+> (`internal/cli/serve/worker/profile_cmd.go`) was added alongside it. The
+> shipped fields are `WorkspaceKey, ProfileID, Name, Role, Backend,
+> RuntimePolicy, Repos, MaxPriority, MaxParallel, ParentEpic, Labels,
+> Capabilities, Enabled, Metadata` — no `desired_state`, `repo_groups`,
+> `cross_repo`, `fallback_backends`, `parent_scope`, `schedule_ref`,
+> `task_filter`, or `placement`. `backend_override` shipped as `Backend`.
+
 Named queue/filter/profile for repeatable task execution. This replaces
 the public `agentdef` concept and is the non-runtime part of the current
 `domain.Agent`.
@@ -301,6 +357,14 @@ Current source:
   depending on whether it is finite-task or long-lived.
 
 ### AgentService
+
+> Shipped, differently: `domain.AgentService`,
+> `internal/domain/platform.go:147-168`. The kind enum
+> (`platform.go:123-136`) is larger than the one below: `lead`, `support`,
+> `triage`, `on_call`, `scheduled`, `maintenance`, `orchestrator`,
+> `always_on`, `cron`, `event`, `campaign_orchestrator`. Fields differ too:
+> `ServiceID`, `TriggerRefs`, `PlacementPolicy`, `LeaseID`, `StateRef`,
+> `BudgetPolicy`.
 
 Long-lived desired process for cron, on-call, event responders, and
 campaign orchestrators.
@@ -349,6 +413,12 @@ feature-orchestrator
 ```
 
 ### Campaign
+
+> **Never built.** No `Campaign`, `CampaignRun`, or `CampaignStep` type
+> exists in `internal/`. The only trace is the enum value
+> `AgentServiceKindCampaignOrchestrator` (`internal/domain/platform.go:136`)
+> and its two switch-statement uses. Applies to the `CampaignRun` and
+> `CampaignStep` sections below as well.
 
 Bounded orchestration goal, such as "complete this feature end-to-end
 for six hours".
@@ -417,6 +487,14 @@ CampaignStep
 
 ### TaskRun
 
+> Shipped: `domain.TaskRun`, `internal/domain/platform.go:498`, with the
+> store contract at `internal/store/platform_store.go:762-773`. It is no
+> longer "the main missing primitive". Field shape differs: `TaskRunID`,
+> and `Runner`/`RunnerKind`/`RunnerRef`/`ProviderProfile` in place of
+> `runtime_provider`; no `branch`, `base_commit`, `final_commit`,
+> `attempt`, or `deadline_at`. Fencing rides inline on
+> `LeaseID`/`FencingToken` (`platform.go:513-514`).
+
 Finite execution attempt for a task or campaign step.
 
 ```text
@@ -456,6 +534,15 @@ How it differs from `Session`:
 Session telemetry can attach to `TaskRun`.
 
 ### Lease
+
+> Shipped as three mechanisms, not one polymorphic record. There is no
+> generic `resource_type` lease. `domain.AgentLease`
+> (`internal/domain/control_plane.go:167`, keyed by `SessionID`),
+> `domain.AgentOwnershipLease` (`control_plane.go:182`, keyed by
+> `AgentID`), each with `Token` + `FencingToken int64` +
+> `Status(active|released|expired)`; and task-run fencing inline on
+> `domain.TaskRun.LeaseID`/`FencingToken`. Store contracts:
+> `internal/store/control_plane_store.go:258,284`.
 
 Time-bounded ownership for task runs, long-lived services, campaigns,
 terminals, or other exclusive resources.
@@ -508,6 +595,14 @@ run, or as runtime metadata under an E2B-specific provider. The core
 scheduler should not depend on E2B-specific fields.
 
 ### NodeHeartbeat
+
+> **Not a record.** Heartbeat shipped as an *operation* on `NodeStore`
+> (`internal/store/control_plane_store.go:37`) that advances
+> `Node.LastHeartbeat` / `Node.ExpiresAt`
+> (`internal/domain/control_plane.go:50-51`). `ToolInventory` and
+> `Capacity` are fields on `Node` itself, not on a separate observed
+> record. Callers: `internal/driver/executor.go:467`,
+> `internal/driver/task_worker.go:217`.
 
 Observed, expiring node status.
 
@@ -567,6 +662,17 @@ TerminalSession
 The PTY process and file descriptor are local to the node.
 
 ## Proposed Local Models
+
+> **None of these were built.** `CheckoutBinding`, `WorktreeBinding`,
+> `LocalNodeConfig`, and `SecretBinding` have zero occurrences in
+> `internal/`. The local layer is still `bootstrap.StateCache`
+> (`internal/bootstrap/statecache.go:33-52`) plus resolution helpers in
+> `internal/localworkspace`. In particular the `LocalNodeConfig` split
+> never happened: `domain.DaemonProfile` still mixes local `PIDFile`,
+> `LogDir`, `EventsDir` into a fleet-db record
+> (`internal/domain/daemon_profile.go:13-26`), and its docstring now argues
+> that is intentional. This section is the only written record of the
+> proposed split — keep it.
 
 ### CheckoutBinding
 
@@ -641,6 +747,14 @@ SecretBinding
 Global records should reference `secret_ref`, not secret values.
 
 ## Proposed Observed Models
+
+> **None of these were built.** No `CheckoutStatus`, `RuntimeStatus`, or
+> `DiffSummary` type exists. (The one `RuntimeStatus` in the tree is an
+> unrelated string field on a driver outbox payload,
+> `internal/driver/outbox_dispatcher.go:25`.) Observed run state is carried
+> on `domain.TaskRun.Status`/`LastHeartbeat`/`ErrorClass`
+> (`internal/domain/platform.go:511,533,535`) and `domain.AgentSession`
+> (`internal/domain/control_plane.go:81`).
 
 ### CheckoutStatus
 
@@ -774,12 +888,20 @@ This gives:
 
 ## E2B Mapping
 
+> **E2B was never implemented.** The only occurrence in the Go tree is the
+> unused enum value `RuntimeProviderE2B`
+> (`internal/domain/control_plane.go:25`). The ephemeral remote provider
+> that shipped is Daytona (`internal/driver/bundled_runner.go:16-20`,
+> `internal/workflows/builtin/daytona-task-runner.ts`). The mapping below
+> is still correct as *provider-agnostic* guidance — read "E2B" as "the
+> remote sandbox provider".
+
 E2B should be a runtime provider, not the control plane.
 
 | Concept | E2B mapping |
 |---|---|
 | Node | Ephemeral sandbox node or provider-specific runtime instance. |
-| RuntimeProvider | `e2b`. |
+| RuntimeProvider | `e2b`. *(Shipped value is `local`; there is no remote provider enum value in use.)* |
 | TaskRun | One sandbox run or one run inside a warm sandbox. |
 | Local checkout | Sandbox filesystem path. |
 | TerminalSession | E2B PTY attached to a run. |
@@ -820,6 +942,10 @@ context workspace = canonical key
 
 ### Checkout APIs
 
+> **Never built.** None of these routes are registered anywhere in
+> `internal/webui`, and there is no CLI equivalent — checkouts have no
+> surface at all. See "Proposed Local Models" above.
+
 Checkout routes should make locality explicit:
 
 ```text
@@ -829,6 +955,24 @@ GET /api/workspaces/{ws}/nodes/{node}/checkouts
 ```
 
 ### Run APIs
+
+> **Shipped in a different shape.** Task-run operations are a single
+> op-dispatch route, not one route per verb:
+> `POST /api/workspaces/{ws}/task-run/{op}`
+> (`internal/webui/handlers/taskrunapi/module.go:145`), with ops `get`,
+> `task-get`, `heartbeat`, `log-append`, `complete`, `runtime-credential`,
+> `artifact-declare`, `artifact-get`, `artifact-list`, `artifact-finalize`
+> (`module.go:106-117`), plus
+> `PUT /api/workspaces/{ws}/task-run/artifacts/{artifactId}/content`
+> (`module.go:148`). Auth is a per-task-run **lease-token bearer**, not a
+> fencing token in the request body (`module.go:151-159`,
+> `internal/webui/server/middleware/auth_routes.go`). The client contract
+> is `@loom/sdk/runner` — see `sdk/README.md` and
+> `docs/product/loom-typescript-sdk-spec.md`.
+>
+> `GET /api/workspaces/{ws}/runs/{runId}`, `/events`, and `/stream` do
+> exist (`internal/webui/handlers/workflows/module.go:41-43`) but belong to
+> the *workflow driver run*, a different concept from a task run.
 
 ```text
 POST /api/workspaces/{ws}/tasks/{task}/runs
@@ -843,6 +987,9 @@ All lease-protected mutations require the fencing token.
 
 ### Long-Lived Service APIs
 
+> **No HTTP surface.** Agent services are managed by CLI only:
+> `loom worker service` (`internal/cli/serve/worker/service_cmd.go`).
+
 ```text
 POST /api/workspaces/{ws}/services
 PATCH /api/workspaces/{ws}/services/{name}/desired-state
@@ -853,6 +1000,9 @@ GET  /api/workspaces/{ws}/services/{name}/runtime
 
 ### Campaign APIs
 
+> **Never built** — no routes, no CLI, no domain types. See the Campaign
+> note above.
+
 ```text
 POST /api/workspaces/{ws}/campaigns
 POST /api/workspaces/{ws}/campaigns/{id}/runs
@@ -862,6 +1012,17 @@ GET  /api/workspaces/{ws}/campaigns/{id}/steps
 ```
 
 ## Migration Order
+
+Step status audited 2026-07-23.
+
+| Step | Status |
+|---|---|
+| 1. Rename the concepts | Partially. `worker profile` and `agent service` both exist as domain types and CLI verbs; `agentdef` was not retired. "Worker" is still overloaded four ways — see `docs/loom-glossary.md`. |
+| 2. Split `domain.Agent` | Done for the new types (`WorkerProfile`, `AgentService`), not for the migration — `agentdef` CRUD still exists alongside. `AgentRuntime`/`RuntimeStatus` never appeared. |
+| 3. Add Node and Lease | Done, differently — see the Node/Lease/NodeHeartbeat notes above. |
+| 4. Add TaskRun | Done (`internal/domain/platform.go:498`, `internal/store/platform_store.go:762`). |
+| 5. Add Checkout/Worktree Bindings | Not done. `StateCache` was not evolved. |
+| 6. Add Campaign Models | Not done. |
 
 ### Step 1: Rename the Concepts in Code
 
@@ -975,6 +1136,20 @@ For each proposed model, verify:
 - E2B-specific details stay behind runtime metadata
 - local mode uses the same control flow as distributed mode
 - YAML migration has an explicit destination for every retained field
+
+## Related
+
+- `docs/design/2026-07-23-control-plane-as-built.md` — where the shipped
+  models are actually driven from (`internal/driver`) and the real HTTP
+  surface.
+- `docs/design/distributed-control-plane.md` — the conceptual companion to
+  this file; still current for the global/local/observed split, lease
+  semantics, and push-vs-pull.
+- `docs/design/fleetdb-agent-platform-v2-proposal.md` — the 2026-06-03
+  correction that supersedes this document.
+- `sdk/README.md` and `docs/product/loom-typescript-sdk-spec.md` — the
+  client contract for the task-run API that replaced the Run APIs proposed
+  here.
 
 ## Summary
 

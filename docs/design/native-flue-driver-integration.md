@@ -1,7 +1,8 @@
 # Native Flue Driver Integration
 
-**Status:** implementation note
-**Date:** 2026-06-06
+> **Status:** Current · implementation note, verified against
+> `internal/driver/register.go` *2026-07-23*
+> **Date:** 2026-06-06
 
 ## Direction
 
@@ -11,10 +12,10 @@ dependency resolution, build output, and runtime semantics. Loom and FleetDB own
 registration, immutable driver versions, driver runs, task runs, leases,
 artifacts, and orchestration state.
 
-Registration is an explicit deployment action. A built Flue Node artifact is
-registered into FleetDB as a `DriverVersion`; it is not self-registered by a
-runtime process on startup. The active driver version changes only when the
-registering operator explicitly activates the version.
+Registration is an explicit action by an operator or an API caller — never a
+side effect of a runtime process starting up. A built Flue Node artifact is
+registered into FleetDB as a `DriverVersion`. The active driver version changes
+only when the registering caller explicitly activates the version.
 
 For workflow authors, see
 [`workflow-driver-authoring-guide.md`](workflow-driver-authoring-guide.md) for
@@ -63,6 +64,32 @@ The first supported runtime is a stored Flue Node artifact:
 6. The existing Loom executor invokes the registered `server_ref` through the
    Flue local IPC launcher.
 
+## Second Registration Path (Shipped Later)
+
+`loom driver register --flue-dist` is no longer the only way a `DriverVersion`
+is created. Two more paths shipped after this note was written, and both
+converge on the same immutable `DriverVersion` + `dist/server.mjs` contract.
+
+**Server-side build from a file set.** `POST /api/workspaces/{ws}/workflows/{name}/versions`
+accepts `{files, entrypoint, activate}`
+(`internal/webui/handlers/workflows/module.go:39`, request shape at `:40-44`)
+and runs `flue build` itself in a temporary project root
+(`internal/workflows/workflows.go:313-316`, builder at `:732`). It does write a
+build root — a generated `package.json` plus symlinked `@loom/sdk` and
+`@flue/runtime` under `node_modules` (`writeWorkflowBuildProject`,
+`internal/workflows/workflows.go:620`) — but it stops there. The narrower rule
+above still holds: the workflow files are author-written and built as-is, and
+Loom never synthesizes wrapper or adapter *source*, no `.flue/loom-sources`
+copy, and no `.flue/loom-runtime/context.ts`.
+
+**Lazy builtin registration.** The workflows shipped inside the binary
+(`epic-runner`, the task runners, `github-review-agent`; `//go:embed` at
+`internal/workflows/workflows.go:35-51`) register themselves on first invocation
+through `EnsureBuiltinWorkflow` (`internal/workflows/workflows.go:140`). This is
+the one case where registration is triggered by a request rather than an
+operator, and it is bounded: a builtin's source is compiled into the binary, so
+"self-registering" cannot introduce unreviewed code.
+
 Hosted Flue endpoints are a later runtime variant. They need signed invocation,
 scoped credentials, cancellation propagation, and event/log attachment. They
 should use the same FleetDB `DriverVersion` model but a different runtime
@@ -85,3 +112,14 @@ manifest shape.
   through output metadata (`logs_ref`, captured tail, and event count). Child
   task logs/artifacts attach to child `TaskRun` records through existing
   `logs_ref`, `artifacts_ref`, and artifact IDs.
+
+## Related
+
+- [`workflow-driver-authoring-guide.md`](workflow-driver-authoring-guide.md) —
+  the current platform contract for authors.
+- [`taskrun-queue-and-worker-pool.md`](taskrun-queue-and-worker-pool.md) — how
+  child `TaskRun`s are enqueued and executed.
+- [`driver-op-http-api.md`](driver-op-http-api.md) — the HTTP surface a
+  registered bundle talks to at runtime.
+- [`fleetdb-agent-platform-v2-proposal.md`](fleetdb-agent-platform-v2-proposal.md)
+  — the V2 vision this note narrows.

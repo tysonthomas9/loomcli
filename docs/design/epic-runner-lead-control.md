@@ -1,7 +1,41 @@
 # Epic Runner Lead Control Direction
 
 Date: 2026-05-16
-Status: Design direction, Claude hooks and Codex app-server topology smoke-tested
+
+> **Status:** Superseded in part — historical design + validation record.
+> *audited 2026-07-23*
+>
+> - **The Go in-process epic runner** described in *Implementation Decisions*
+>   and exercised throughout the *Validation Log* was **removed** in
+>   `553998a1d` (2026-06-09, "Remove superseded in-process epic runner"). It
+>   deleted `internal/epicrunner/runner.go`, `internal/epicrunner/start.go`'s
+>   bind/dispatch flow, and the whole `internal/webui/handlers/epics` package.
+>   Epics now run as the `epic-runner` Flue workflow
+>   (`internal/workflows/builtin/epic-runner.ts`), queued as a `DriverRun` by
+>   `internal/cli/epic/run.go:167` and by the UI at
+>   `internal/webui/frontend/src/hooks/workspace/startEpicRunnerForIssue.ts:136`.
+>   See [epic-runner-workflow-architecture.md](epic-runner-workflow-architecture.md)
+>   for the architecture that runs today.
+> - **The `LeadAssignment` / `EpicRun` / `LeadSessionAdapter` model was never
+>   built.** No such type exists in `internal/`. `agent.parent` **is** the
+>   authoritative lead-to-epic lock (`internal/epicrunner/assignment_context.go:40,56`);
+>   assignment "version" is derived from `lead.UpdatedAt` formatted RFC3339Nano
+>   (`assignment_context.go:49-51`), never incremented explicitly; the mutual
+>   exclusion is a file lock at `~/.loom/epic-runner-locks`
+>   (`internal/epicrunner/start.go:87-100`). The as-built lead/epic ownership
+>   rules are owned by
+>   [docs/product/lead-agent-epic-runner-spec.md](../product/lead-agent-epic-runner-spec.md).
+> - **The controlled-Codex lead runtime DID ship** and lives in
+>   `internal/leadcontrol`. Its current contract is
+>   [docs/design/2026-07-22-lead-conversation-resume.md](2026-07-22-lead-conversation-resume.md);
+>   delivery is [docs/design/lead-runtime-delivery.md](lead-runtime-delivery.md).
+> - **Postdating this doc:** the harness (claude/gemini/opencode/cursor) lead
+>   runtime (`internal/cli/backends/harness_lead_runtime.go:41-75`) and the
+>   durable delivery queue (`internal/agentinbox/message.go:29`). Neither is
+>   described below.
+>
+> Everything below is preserved as the record of why the topology was chosen
+> and what was actually observed. Do not read it as current behavior.
 
 ## Goal
 
@@ -22,6 +56,15 @@ The current direction is:
   into the composer.
 
 ## Model
+
+> **NEVER BUILT.** Neither `LeadAssignment` nor `EpicRun` exists in
+> `internal/` (`grep 'type LeadAssignment|type EpicRun'` finds only
+> `epicrunner.LeadAssignmentContext`, a read-only view, and
+> `store.EpicRunCreate` at `internal/store/platform_store.go:423`, which
+> creates a `DriverRun` and is unrelated). What shipped instead is the
+> lead's `AgentSession.Metadata` keys in
+> `internal/leadcontrol/codex_metadata.go:15-37` plus `agent.parent` as the
+> lock. Kept here as the design direction the later work was measured against.
 
 Introduce an explicit assignment/run model instead of treating terminal text as
 truth.
@@ -77,10 +120,12 @@ Epic path cannot safely retrofit control onto an already-running raw Codex TUI,
 because the backend has no durable provider thread id and no reliable mutation
 channel for `turn/start`.
 
-The required Codex topology is:
+The required Codex topology is (`--backend codex` was never a flag: `loom lead`
+takes only `--message` and `--prompt`, `internal/cli/agent/lead/lead.go:79-80`,
+and resolves the backend from `cli.GetBackendName()` at `lead.go:104`):
 
 ```text
-loom lead --backend codex
+loom lead              # backend resolved from config, not a flag
   starts one lead-scoped Codex app-server
   starts the visible user TUI with codex --remote <app-server>
   records endpoint, pid, runtime home, and provider thread id on the lead session
@@ -105,6 +150,17 @@ clear reconnect/restart-required state instead of marking the assignment
 delivered.
 
 ### Source Of Truth
+
+> **NEVER BUILT — and the code went the other way.** `agent.parent` *is* the
+> authoritative lock: `internal/epicrunner/assignment_context.go:40` refuses to
+> produce an assignment when `lead.Parent` is empty and `:56` sets
+> `EpicID: lead.Parent`; the epic-runner workflow enforces one-epic-per-lead and
+> one-lead-per-epic off the same field
+> (`internal/workflows/builtin/epic-runner.ts:500-515`). "Version" is not
+> incremented per transition — it is `lead.UpdatedAt` formatted RFC3339Nano
+> (`assignment_context.go:49-51`). Mutual exclusion is a file lock under
+> `~/.loom/epic-runner-locks` (`internal/epicrunner/start.go:87-100`), not a
+> store record.
 
 Use a dedicated `LeadAssignment` store plus durable `EpicRun` records.
 
@@ -137,6 +193,17 @@ record real acknowledgment and future UI can distinguish "sent to lead" from
 "lead understood it".
 
 ### Lead Runtime Record
+
+> **SHIPPED, but not as a table.** The runtime record is a set of
+> `AgentSession.Metadata` keys on the lead's orchestration session:
+> `lead_runtime_provider`, `lead_runtime_controlled`, `lead_runtime_status`,
+> `codex_app_server_endpoint`, `codex_app_server_pid`, `codex_runtime_home`,
+> `codex_sqlite_home`, `codex_provider_thread_id`
+> (`internal/leadcontrol/codex_metadata.go:15-37`), with the harness
+> equivalents `lead_harness_*` at
+> `internal/leadcontrol/harness_metadata.go:19-30`. The status vocabulary below
+> shipped verbatim (`codex_metadata.go:32-38`, plus a `starting` state).
+> `status_version` and `controller_lease_id` were **never built**.
 
 Persist a provider-neutral runtime record for each lead session.
 
@@ -220,6 +287,14 @@ Assignment delivery uses queue-on-busy, not hard interrupt.
 
 ### Provider Adapter Boundary
 
+> **NEVER BUILT as `LeadSessionAdapter`.** The shipped seam is the unexported
+> `leadTurnDeliverer` interface (`internal/leadcontrol/delivery.go:61-77`) with
+> a codex implementation (`codex_delivery.go`) and a harness implementation
+> (`harness_delivery.go`), selected per session by `delivererForSession`
+> (`delivery.go:83-92`). It covers delivery only — runtime lifecycle
+> (`EnsureRuntime`/`Resume`/`Close`) is not behind the same interface; see
+> `internal/cli/backends/harness_lead_runtime.go:41-75`.
+
 Hide provider-specific control behind a lead-session adapter.
 
 ```text
@@ -272,6 +347,16 @@ Assignment state remains durable when provider runtime fails.
 
 ## Hook Strategy
 
+> **Partially built.** What shipped: `session-start`, `user-prompt-submit`,
+> `pre-task` (→ `PreToolUse`) and `stop` emit assignment `additionalContext` +
+> `sessionTitle` (`internal/cli/hooks/hooks_assignment_context.go:31-55`, event mapping at `:58-70`).
+> What did not: **no assignment hook ever blocks.** `runClaudeHook` always
+> exits 0 (`internal/cli/hooks/hooks_cmd.go:125-148`); the only blocking hook
+> in the tree is the yield guard, which exits 2 (`hooks_cmd.go:159`). The
+> registered Claude hook commands are session-start, user-prompt-submit, stop,
+> pre-task, post-task, session-end and yield-guard (`hooks_cmd.go:44-117`) —
+> there is no `StopFailure` or `PostToolUseFailure` handler.
+
 Claude hooks should synchronize backend state into the lead session.
 
 ### SessionStart
@@ -309,6 +394,13 @@ Example hook output:
 
 ### PreToolUse
 
+> **Shipped narrower than described.** The installed assignment `PreToolUse`
+> hook uses matcher `"Task"` (`internal/cli/hooks/hooks_install.go:47`), so it
+> fires only on the Task/subagent tool, not before every tool call. The only
+> all-tools `PreToolUse` hook installed is the yield guard
+> (`hooks_install.go:58`). Nothing in the "Expected behavior" list below that
+> depends on blocking was built.
+
 Check assignment before every tool call. This is the soft-interrupt point for a
 busy lead.
 
@@ -329,6 +421,13 @@ Expected behavior:
 
 ### PostToolUse / PostToolUseFailure
 
+> **NEVER BUILT.** There is no `PostToolUseFailure` handler. A `post-task`
+> command exists (`internal/cli/hooks/hooks_cmd.go:88-93`) and a `PostToolUse`
+> hook is installed with matcher `"Task"` (`hooks_install.go:48`), but it does
+> not carry assignment context: `claudeNativeHookEventName` maps only
+> session-start, user-prompt-submit, pre-task and stop
+> (`hooks_assignment_context.go:58-70`). None of the four uses below shipped.
+
 Record tool progress and feed backend feedback back into the turn when needed.
 
 Use for:
@@ -339,6 +438,12 @@ Use for:
 - nudging the lead after backend state changes caused by a tool result
 
 ### Stop
+
+> **Context injection shipped; blocking did not.** The stop hook emits
+> assignment context but always exits 0
+> (`internal/cli/hooks/hooks_cmd.go:125-148`), so "block stop once" below was
+> never implemented.
+
 
 Check assignment before Claude finishes a turn.
 
@@ -356,6 +461,9 @@ Expected behavior:
 - If the run is complete/cancelled, allow stop and update backend state.
 
 ### StopFailure
+
+> **NEVER BUILT.** No `StopFailure` handler exists anywhere in
+> `internal/cli/hooks`.
 
 Record API/auth/rate-limit failures and leave the run in a recoverable state.
 
@@ -520,6 +628,10 @@ Manual probes on 2026-05-16:
 
 These should be automated before treating the architecture as complete.
 
+> Every test below that asserts blocking (`PreToolUse` blocks, `Stop` blocks
+> once, `StopFailure` records) is untestable against the shipped code, which
+> never blocks. Treat this list as the wish list it was, not a checklist.
+
 ### Hook Unit Tests
 
 - `UserPromptSubmit` returns assignment `additionalContext` from backend state.
@@ -610,6 +722,17 @@ Use named `agent-browser --session` values to avoid collisions.
 
 ## Validation Log
 
+> **Historical: these runs exercised the deleted Go runner.** Every entry below
+> is a dated record of what was observed at the time. The runner, its HTTP
+> route (`POST /api/workspaces/{ws}/epics/{id}/run`) and the deterministic
+> ephemeral worker agents they describe (`slack-ui-1-slack-ui-3-6254cd2d` and
+> friends) were removed in `553998a1d` (2026-06-09). Child work is now a
+> `TaskRun` (`internal/domain/platform.go:498`) enqueued by
+> `internal/workflows/builtin/epic-runner.ts:97-111`; the epic-runner path
+> creates no worker agent. The entries are kept for the gotchas — codex thread
+> latching, `agent-browser` waits, FleetDB projection lag, podman/localhost
+> flakiness — which are still true.
+
 ### 2026-05-17 UTC: Correct Runner Implementation Pass
 
 Scope: replace the bind-only UI route with a real runner start path that reuses
@@ -689,7 +812,8 @@ Edge cases covered by tests:
 Verification notes:
 
 - Focused gates passed:
-  `GOCACHE=/tmp/go-build-cache go test ./internal/epicrunner ./internal/cli/hooks ./internal/cli/agent ./internal/webui/handlers/epics`,
+  `GOCACHE=/tmp/go-build-cache go test ./internal/epicrunner ./internal/cli/hooks ./internal/cli/agent ./internal/webui/handlers/epics`
+  (the last package no longer exists — deleted in `553998a1d`),
   `GOCACHE=/tmp/go-build-cache go build ./cmd/loom`, and frontend
   `npm run typecheck`.
 - A broad `GOCACHE=/tmp/go-build-cache go test ./...` run was attempted in the
@@ -989,6 +1113,12 @@ Implemented:
 - Delivery retries for up to two minutes when the controlled runtime is still
   starting or the Codex thread is busy. It does not type into the terminal or
   interrupt active provider work.
+  (That in-handler retry died with the HTTP route. Delivery is now
+  attempt-then-enqueue: one inline attempt, then a durable
+  `internal/agentinbox` row drained by the runtime and retried by the outbox
+  dispatcher. The surviving two-minute constant is the inbox claim lease TTL,
+  `internal/leadcontrol/delivery.go:298`. See
+  [lead-runtime-delivery.md](lead-runtime-delivery.md).)
 - Codex thread discovery now ignores historical threads and waits for a thread
   created after this lead runtime starts. This prevents a second lead in the
   same workspace/cwd from latching onto an older disconnected thread.
@@ -1207,3 +1337,16 @@ Important observations:
   working.
 - Reconsider shared app-server processes only after the per-lead implementation
   has multi-workspace and reconnect coverage.
+
+## Related
+
+- [epic-runner-workflow-architecture.md](epic-runner-workflow-architecture.md) —
+  how epics actually run today (Flue workflow + `DriverRun` + `TaskRun`).
+- [lead-runtime-delivery.md](lead-runtime-delivery.md) — the as-built controlled
+  lead runtime and the durable assignment/message delivery queue.
+- [2026-07-22-lead-conversation-resume.md](2026-07-22-lead-conversation-resume.md) —
+  the current contract for how a lead conversation survives a restart.
+- [../product/lead-agent-epic-runner-spec.md](../product/lead-agent-epic-runner-spec.md) —
+  canonical for the lead↔epic product rules.
+- [../product/orchestrator-worker-model.md](../product/orchestrator-worker-model.md) —
+  canonical for orchestrator / worker / ephemeral / service vocabulary.

@@ -1,3 +1,9 @@
+// Package sandbox is the isolation seam driver runs execute behind: it defines
+// the SandboxLauncher interface plus its local-process and container
+// implementations, the JSON-lines frame contract between host and flue runtime,
+// container egress policy, and the trust-based placement rule that refuses to
+// launch an untrusted driver bundle outside an isolating launcher. Consumed
+// only by internal/driver, which re-exports its types and constants.
 package sandbox
 
 // SandboxLauncher is the executor-level sandbox seam (§7 step 9, SB1):

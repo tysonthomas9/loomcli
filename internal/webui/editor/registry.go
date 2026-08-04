@@ -1,3 +1,7 @@
+// Package editor holds the registry of external editors and git clients (VS Code,
+// Cursor, Zed, JetBrains, Sourcetree, ...), detects which are installed on the
+// machine running loom, and launches one against a workspace path via a per-GOOS
+// implementation. Consumed by internal/webui/handlers/misc for the /api/editors routes.
 package editor
 
 import (

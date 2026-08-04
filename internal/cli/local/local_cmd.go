@@ -1,3 +1,8 @@
+// Package local implements `loom local`, the lifecycle of the desktop runtime
+// that Loom.app drives: it starts, stops and supervises a local `loom serve`
+// process and agent daemon under the app data directory, manages the macOS
+// LaunchAgent that keeps it running, and exports the runtime status readers
+// consumed by internal/cli/workspace ops commands.
 package local
 
 import (

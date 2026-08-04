@@ -1,12 +1,24 @@
 # @loom/sdk
 
-Workflow SDK for Loom. Two clients, one package:
+> **Status:** Current · *audited 2026-07-24*. This file is the authoritative
+> SDK reference; [`../docs/product/loom-typescript-sdk-spec.md`](../docs/product/loom-typescript-sdk-spec.md)
+> points here.
+
+Workflow SDK for Loom. Two clients plus a helper module, one package
+(`sdk/package.json` `exports`):
 
 - **`@loom/sdk/driver`** — the driver client used *inside* a workflow run. A
   workflow is an ES module executed under a registered driver bundle; it talks
   to the Loom serve driver-op HTTP API with a run-scoped token.
 - **`@loom/sdk/runner`** — the task-run client used by runner harnesses
   (claiming env, logs, artifacts, completion) against fleet-db.
+- **`@loom/sdk/runtime-adapters`** — flue-event → transcript/usage conversion
+  and redaction helpers (`createFlueTranscriptCollector`,
+  `flueEventToTranscriptEntries`, `flueEventsToTaskUsage`,
+  `redactTranscriptEntries`, `serializeTranscriptJSONL`). Used by runner
+  harnesses to turn a flue event stream into a session transcript.
+
+The root entry (`@loom/sdk`) re-exports all three (`sdk/index.js`).
 
 All wire fields are **camelCase**. The frozen v1 surface ships with the
 package as [`api-surface.v1.json`](./api-surface.v1.json) and is enforced by
@@ -216,7 +228,8 @@ Semver, with the wire contract as the compatibility unit:
 - **Patch**: fixes that change no wire bytes and no types.
 
 The frozen surface is machine-checked: `api-surface.v1.json` +
-`contract.test.mjs` (client) and `contract_test.go` (server) fail on drift.
+`sdk/contract.test.mjs` (client) and
+`internal/webui/handlers/driverapi/contract_test.go` (server) fail on drift.
 
 ## Publishing (maintainers)
 
@@ -232,3 +245,17 @@ Publishing is currently **deferred**. Manual steps, in order:
    `README.md`, which npm adds itself).
 4. `npm publish` from CI with provenance (`publishConfig.provenance` is set;
    publishing from a laptop without OIDC will fail by design).
+
+## Related
+
+- [`../docs/product/loom-typescript-sdk-spec.md`](../docs/product/loom-typescript-sdk-spec.md)
+  — the product spec, which defers to this file
+- [`../docs/design/workflow-driver-authoring-guide.md`](../docs/design/workflow-driver-authoring-guide.md)
+  — writing and registering a driver bundle
+- [`../docs/loom-glossary.md`](../docs/loom-glossary.md) — **driver**, **driver
+  version**, **driver run**, **task run**, **runner**, **connector**,
+  **await**, **flue**, each pinned to Go source
+- [`../AGENTS.md`](../AGENTS.md) — driver-runtime auth and sandbox deploy notes
+  (`LOOM_RUN_TOKEN`, `LOOM_DRIVER_LEGACY_AUTH_ENV`, `LOOM_DRIVER_SANDBOX`)
+- [`../deploy/podman-stack/README.md`](../deploy/podman-stack/README.md) — the
+  stack that exercises this SDK against a real serve + fleet-db pairing

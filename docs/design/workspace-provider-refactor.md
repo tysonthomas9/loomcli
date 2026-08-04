@@ -1,5 +1,14 @@
 # Workspace Provider Refactor — Router Loader + Layered Providers
 
+> **Status:** Implemented differently — shipped in `fe290c01b` (2026-04-12)
+> as a provider split + `flushSync`, **not** as the router-loader design
+> below. Read Problem / Root Cause / Why Not the Alternatives for context;
+> the Ordered Implementation Plan is historical and is annotated step by
+> step with what actually landed. *audited 2026-07-23*
+>
+> `internal/webui/frontend/src/hooks/workspace/useWorkspaceContext.tsx:5`
+> cites this file by path, which is why it survives.
+
 ## Problem
 
 Switching workspaces from the terminal view leaves the UI frozen on the old
@@ -9,24 +18,40 @@ does not have this bug. Confirmed on aether-dev via agent-browser.
 
 ## Root Cause
 
-`WorkspaceProvider` (`internal/webui/frontend/src/hooks/useWorkspaceContext.tsx`)
-derives state from its `workspaceId` prop by stuffing the derived values into
-`useState` and syncing them via `useEffect`. When the URL changes, the prop
-updates but the effect-synced state is stale for one render cycle — longer when
-the underlying `useWorkspace` SWR-style hook continues returning the
-previously-fetched data while refetching.
+**Historical.** At the time of writing, `WorkspaceProvider` derived state from
+its `workspaceId` prop by stuffing the derived values into `useState` and
+syncing them via `useEffect`. When the URL changed, the prop updated but the
+effect-synced state was stale for one render cycle — longer when the
+underlying `useWorkspace` SWR-style hook kept returning previously-fetched
+data while refetching.
 
-This directly violates the Vercel React rule
-[`rerender-derived-state-no-effect`](../../.claude/skills/react-best-practices/rules/rerender-derived-state-no-effect.md):
+That implementation no longer exists. The provider now lives at
+`internal/webui/frontend/src/hooks/workspace/useWorkspaceContext.tsx` and its
+header comment (`:7-12`) records the current design: workspace data is owned
+by a per-provider zustand store created at `useWorkspaceContext.tsx:149`
+(`createWorkspaceStore()`), and all workspace metadata is derived from store
+state via `useStore` selectors — no `useState`/`useEffect` mirroring.
+
+The rule this violated is the Vercel React best-practice rule
+`rerender-derived-state-no-effect`:
 
 > Do not set state in effects solely in response to prop changes; prefer
 > derived values or keyed resets instead.
 
-Compounding that, `WorkspaceLayout.tsx:30-80` runs its own async
+(The rule lives in a machine-local skill directory, not in this repo, so the
+quote above is the durable part. There is no `react-best-practices` skill
+under the repo's `.claude/skills/`.)
+
+Compounding that, `WorkspaceLayout.tsx` runs its own async
 `fetchWorkspace(workspaceId)` validation inside a `useEffect` and returns `null`
 while in flight — giving the component two failure modes for the same URL
 ("new params with stale data" and "new params with no data"). The right place
 for pre-render data loading is a React Router loader, not a component effect.
+
+**Still true.** That gate was never removed:
+`internal/webui/frontend/src/components/WorkspaceLayout/WorkspaceLayout.tsx:30-31`
+declares `validating` / `valid`, `:33` opens the validating `useEffect`, and
+`:83` is the `if (validating || !valid || !workspaceId) return null;` gate.
 
 Finally, `WorkspaceProvider` mixes four concerns with four distinct lifetimes:
 
@@ -38,12 +63,16 @@ Finally, `WorkspaceProvider` mixes four concerns with four distinct lifetimes:
 4. **Data fetching / polling** — should be router-driven, not hand-rolled
 
 Stuffing all four into one provider means you cannot key any one of them
-without breaking the others. The composition-patterns skill rules
+without breaking the others. The composition-patterns rules
 (`state-decouple-implementation`, `state-lift-state`,
 `state-context-interface`) all converge on the same answer: **split by
 lifetime.**
 
-## Target Architecture
+Concern 3 is now moot: `setDefaultWorkspace` throws
+("Default workspace selection has been removed",
+`useWorkspaceContext.tsx:185-187`).
+
+## Target Architecture (proposed — not what shipped)
 
 ```
 router loader (fetches workspace atomically with route param change)
@@ -73,130 +102,155 @@ Each provider has the correct lifetime:
 TerminalView lives outside the keyed boundary, so WebSockets and the
 `useWorkspaceTabState` ref-map survive across workspace switches as intended.
 
+**What shipped instead:** only the middle layer. `PerWorkspacePrefsProvider`
+exists (`hooks/workspace/PerWorkspacePrefsProvider.tsx:71`) and is mounted
+keyed on `workspaceId` at `useWorkspaceContext.tsx:288-294`. There is no
+loader, no `WorkspaceDataProvider`, and no `GlobalPrefsProvider`; the
+derived-data role stayed inside `WorkspaceProvider`, backed by the zustand
+store instead of the loader. The staleness that the loader was meant to
+eliminate is instead handled by `flushSync` — see Step 7.
+
 ## Why Not the Alternatives
 
 | Approach | Fixes root cause | Fast switches | Preserves tabs | Survives new state |
 |---|---|---|---|---|
-| `flushSync: true` everywhere | ❌ symptom only | ✅ | ✅ | ❌ |
+| `flushSync: true` everywhere | ❌ symptom only *(verdict overturned — see below)* | ✅ | ✅ | ❌ |
 | `key={workspaceId}` on layout | ⚠️ by nuking | ❌ full remount | ❌ | ✅ (by nuking) |
-| External store via `useSyncExternalStore` | ❌ wrong layer | ✅ | ✅ | ❌ |
-| **Loader + layered providers** | ✅ | ✅ | ✅ | ✅ |
+| External store via `useSyncExternalStore` | ❌ wrong layer *(verdict overturned — a zustand store is what shipped)* | ✅ | ✅ | ❌ |
+| **Loader + layered providers** | ✅ | ✅ | ✅ | ✅ *(never built)* |
 
-- `flushSync` is the symptom-layer escape hatch the codebase already uses in
-  `useRouteView.ts`. It works but does not prevent the next developer from
-  hitting the same class of bug when they add workspace-scoped state.
+- `flushSync` was assessed here as "the symptom-layer escape hatch". The
+  implementation reached the opposite conclusion. `useWorkspaceContext.tsx:193`
+  now states "flushSync: true is REQUIRED here, not optional", and the
+  surrounding comment (`:193-202`, mirrored at `:21-26`) gives the mechanism:
+  React Router v7 wraps `navigate()` in `startTransition` by default; on the
+  terminal view, renderer + WebSocket re-renders keep React's urgent-work
+  queue saturated, the transition is deferred indefinitely, `history.pushState`
+  updates the address bar but `useParams()` never commits, and
+  `WorkspaceLayout` keeps reading the old `workspaceId`. `flushSync` forces a
+  synchronous route commit. It is load-bearing, not belt-and-suspenders.
 - `key={workspaceId}` on `<WorkspaceLayout>` unmounts the entire tree
   including TerminalView, destroying terminal tab memory and re-establishing
-  every WebSocket on every switch. Unacceptable UX cost.
-- External store rewrites the wrong layer — the bug is provider staleness,
-  not WebSocket render pressure. The `setTabUnread`/`setShowNewOutputPill`
-  bailouts already limit re-render frequency to once per tab per session
-  transition.
-- Router loaders + layered providers is the only option that respects
-  React's data model, the skill rules, and the terminal's UX constraints
-  simultaneously.
+  every WebSocket on every switch. Unacceptable UX cost. (This assessment
+  still holds; the keyed remount was narrowed to `PerWorkspacePrefsProvider`
+  precisely to avoid it.)
+- External store was rejected as "the wrong layer". A per-provider zustand
+  store is nonetheless what the codebase settled on for workspace data
+  (`useWorkspaceContext.tsx:52,149`).
+- No evidence was found in the repo for *why* the loader approach was
+  abandoned. Do not assume; ask.
 
-## Rules Applied (from `~/.claude/skills/`)
+## Rules Applied
+
+These are rule names from machine-local skill packs (`react-best-practices`,
+`composition-patterns`). They are not checked into this repo, so the names are
+recorded without links.
 
 - **`rerender-derived-state-no-effect`** (react-best-practices) — the primary
-  rule. Derive, don't effect-sync.
+  rule. Derive, don't effect-sync. *Satisfied, via the zustand store rather
+  than a loader; cited in `useWorkspaceContext.tsx:12`.*
 - **`rerender-split-combined-hooks`** — split `useWorkspace`'s combined
-  "initial fetch + polling + visibility refetch" effect.
+  "initial fetch + polling + visibility refetch" effect. *Not done.*
 - **`rerender-lazy-state-init`** — `selectedRepoNames` initializer reads
   localStorage; use the function form of `useState`.
 - **`rerender-move-effect-to-event`** — `invalidateWorkspaceCache` in
   navigation events (already correct), not in effects.
 - **`async-suspense-boundaries`** — router loader + Suspense instead of
-  `useEffect(fetchWorkspace)` + `null` return.
+  `useEffect(fetchWorkspace)` + `null` return. *Not done.*
 - **`state-decouple-implementation`** (composition-patterns) — provider is
   the only place that knows how state is managed; UI consumes an interface
-  unchanged across the refactor.
+  unchanged across the refactor. *Satisfied; cited in
+  `useWorkspaceContext.tsx:28-30`.*
 - **`state-lift-state`** — lift per-workspace state into its own provider.
+  *Satisfied.*
 - **`state-context-interface`** — keep the public `useWorkspaceContext()` API
-  stable so no UI consumer needs to change.
+  stable so no UI consumer needs to change. *Satisfied.*
 
-## Ordered Implementation Plan
+## Ordered Implementation Plan (historical)
+
+Every path below has been corrected to its current location. The hooks moved
+from `src/hooks/` to `src/hooks/workspace/`. Original line numbers that no
+longer resolve have been dropped rather than guessed at.
 
 ### PR #1 — Architectural fix (Steps 1–4)
 
-**Step 1. Add the workspace loader.**
-- `internal/webui/frontend/src/router.tsx:57` — attach
-  `loader: workspaceLoader` to the `/ws/:workspaceId` route.
+**Step 1. Add the workspace loader.** — **NOT DONE.**
+- Proposed: attach `loader: workspaceLoader` to the `/ws/:workspaceId` route
+  in `internal/webui/frontend/src/router.tsx`.
 - Loader calls `fetchWorkspace(params.workspaceId!)` and returns `{ workspace }`.
-- `throw redirect("/")` on 404; `throw redirect("/")` with
-  `clearLastWorkspaceId` call on stale-localStorage 404 (mirror current
-  behavior in `WorkspaceLayout.tsx:56-66`).
+- `throw redirect("/")` on 404, including the stale-localStorage case.
+- Reality: `grep -rn 'workspaceLoader' internal/webui/frontend/src` returns
+  nothing, and the `/ws/:workspaceId` route (`router.tsx:175-176`) has no
+  `loader` key.
 
-**Step 2. Rewrite `WorkspaceLayout.tsx`.**
-- Delete `useEffect(fetchWorkspace)`, `validating`, `valid` state, and the
-  `null`-return gate (lines 33-80).
-- Use `const { workspace } = useLoaderData<typeof workspaceLoader>()`.
-- Optionally render a subtle loading indicator driven by
-  `useNavigation().state === "loading"` — React Router keeps the old UI
-  visible during loader transitions, which is the intended UX.
+**Step 2. Rewrite `WorkspaceLayout.tsx`.** — **NOT DONE.**
+- Proposed: delete `useEffect(fetchWorkspace)`, `validating`, `valid` state,
+  and the `null`-return gate; read `useLoaderData()` instead.
+- Reality: all of it is still there —
+  `components/WorkspaceLayout/WorkspaceLayout.tsx:30-31`, `:33`, `:83`.
 
-**Step 3. Split `WorkspaceProvider` into three providers.**
-- New `WorkspaceDataProvider`: takes `workspace` prop, exposes
-  `workspace`, `workspaceId`, `activeWorkspaceName`, `repos`, `groups`,
-  `agents`, `getRepoByName`, `getReposByGroup`, `getAgentByName`. All derived.
-  Zero `useState`, zero effects.
-- New `PerWorkspacePrefsProvider`: takes `workspaceId`, mounted with
-  `key={workspaceId}`. Holds `selectedRepoNames` (lazy `useState` initialized
-  from `wsGet(workspaceId, SK_SELECTED_REPOS)`). Exposes `selectRepos`,
-  `selectAll`, `toggleRepo`, `isAllSelected`, `activeRepos`,
-  `activeRepoNames`, `sourceReposFilter`, `isMultiRepo`.
-- New `GlobalPrefsProvider`: holds `defaultWorkspaceName`,
-  `setDefaultWorkspace`. Never keyed.
-- Public `useWorkspaceContext()` hook stays. It reads from all three
-  providers internally and returns the same `WorkspaceContextValue` shape —
-  no UI consumer needs to change.
+**Step 3. Split `WorkspaceProvider` into three providers.** — **PARTIALLY DONE.**
+- `WorkspaceDataProvider` — **not created.** Its role lives on inside
+  `WorkspaceProvider`, which derives everything from the zustand store
+  (`useWorkspaceContext.tsx:149` creates it; `:213+` are the derived
+  read-only values, explicitly "Zero useState").
+- `PerWorkspacePrefsProvider` — **created**, at
+  `hooks/workspace/PerWorkspacePrefsProvider.tsx:71`, taking
+  `{ workspaceId, repos, children }` and mounted with `key={workspaceId}` at
+  `useWorkspaceContext.tsx:288-294`.
+- `GlobalPrefsProvider` — **not created**, and no longer needed:
+  `defaultWorkspaceName` was removed from the product
+  (`useWorkspaceContext.tsx:185-187` throws).
+- Public `useWorkspaceContext()` hook — **kept**, and merges the two inner
+  contexts into the unchanged `WorkspaceContextValue` shape.
 
-**Step 4. Split `useWorkspace` polling.**
-- Delete the initial-fetch branch — the loader owns it.
-- Extract `useWorkspacePolling(workspaceId, pollInterval)`: one effect, calls
-  `useRevalidator().revalidate()` on interval.
-- Extract `useVisibilityRevalidate()`: one effect, calls `revalidate()` on
-  `visibilitychange`.
-- Both hooks mount inside `WorkspaceLayout` post-loader.
+**Step 4. Split `useWorkspace` polling.** — **NOT DONE.**
+- Proposed: delete the initial-fetch branch (loader owns it), extract
+  `useWorkspacePolling` and `useVisibilityRevalidate`.
+- Reality: `hooks/workspace/useWorkspace.ts:87` is still one combined effect
+  doing initial fetch, `setInterval` polling (`:166-172`), and the
+  `visibilitychange` listener (`:182`, removed at `:190`). Neither extracted
+  hook exists.
 
 ### PR #2 — Cleanup and consolidation (Steps 5–8)
 
-**Step 5. Bridge non-route callers via `useRevalidator`.**
-- `OtherWorkspacesSection.tsx:80`, `CreateWorkspaceModal` flow, and the
-  provider's `setDefaultWorkspace` currently call `refreshWorkspace()`
-  directly. Replace with `useRevalidator().revalidate()` so the loader is
-  the single source of truth.
+**Step 5. Bridge non-route callers via `useRevalidator`.** — **VOID.**
+- The premise was that `OtherWorkspacesSection`, the create-workspace flow,
+  and `setDefaultWorkspace` call `refreshWorkspace()` directly.
+  `refreshWorkspace` no longer exists anywhere under
+  `internal/webui/frontend/src` (zero non-test hits), so there is nothing to
+  bridge.
 
-**Step 6. Preserve `view=` on workspace switch.**
-- Build a tiny helper `buildWorkspaceSwitchUrl(id, currentSearch)` that
-  constructs `/ws/${id}/` and conditionally re-attaches `view=` from current
-  params. Whitelist `view=` only — do not preserve `issue=`, `repo=`, or
-  filter params (they leak stale IDs into the new workspace).
-- Apply at the 5 call sites:
-  - `useWorkspaceContext.tsx:236` (setActiveWorkspace)
-  - `App.tsx:641, 888, 900, 1350`
-  - `RedirectToWorkspace.tsx` (4 sites)
+**Step 6. Preserve `view=` on workspace switch.** — **DONE.**
+- `buildWorkspaceSwitchUrl(targetId, currentSearch)` shipped at
+  `utils/workspaceUrl.ts:22`. It copies only whitelisted params
+  (`PRESERVED_PARAMS`) from the current search into the new URL, dropping
+  `issue=`, `repo=`, and filter params so stale IDs do not leak into the new
+  workspace.
+- Call sites: `hooks/workspace/useWorkspaceContext.tsx:206` (`setActiveWorkspace`)
+  and `App.tsx:1112`, `:1125`, `:1503`.
 
-**Step 7. Reassess `flushSync` in `useRouteView.ts`.**
-- With the loader pattern, route transitions commit atomically regardless of
-  terminal render pressure. The `flushSync: true` may become dead defense.
-- Try deleting it. If the bug returns, leave it with a comment:
-  "belt-and-suspenders after loader refactor, not load-bearing."
+**Step 7. Reassess `flushSync` in `useRouteView.ts`.** — **INVERTED.**
+- Proposed: try deleting `flushSync: true` from `useRouteView.ts`; if the bug
+  returns, keep it as non-load-bearing defense.
+- Reality: `hooks/common/useRouteView.ts` has no `flushSync` at all — its
+  `navigate()` calls at `:94` and `:104` pass `{ replace: true }` / nothing.
+  `flushSync` moved *onto* the workspace-switch navigations and is documented
+  as mandatory (`useWorkspaceContext.tsx:193`, `:206`; `App.tsx:1112,1125,1503`).
 
-**Step 8. Update tests.**
-- Every test that mounts `WorkspaceProvider` directly (≈10 files) must now
-  provide mock loader data.
-- Export a `TestWorkspaceProviders` helper that wraps children in all three
-  providers with literal mock data — one place to update if the shape
-  changes.
+**Step 8. Update tests.** — **N/A as written.** There is no
+`TestWorkspaceProviders` helper and no loader mock data, because there is no
+loader. Tests live under `hooks/workspace/__tests__/`.
 
-## What Gets Deleted
+## What Gets Deleted (proposed — none of it was)
 
-- `WorkspaceLayout.tsx:33-80` — validating/valid gate
-- `useWorkspaceContext.tsx:166-186` — `activeWorkspaceName` useState + sync effect
-- `useWorkspaceContext.tsx:218-223` — `defaultWorkspaceName` sync effect
-- `useWorkspace.ts` — initial-fetch branch + visibility handler (loader + revalidator replace them)
-- `useRouteView.ts`'s `flushSync: true` (after Step 7 verification)
+- `WorkspaceLayout.tsx` validating/valid gate — **still present** (`:30-31`, `:83`).
+- `useWorkspaceContext.tsx` `activeWorkspaceName` useState + sync effect —
+  gone, but by the zustand-store rewrite, not by this plan.
+- `useWorkspaceContext.tsx` `defaultWorkspaceName` sync effect — gone, because
+  the feature was removed.
+- `useWorkspace.ts` initial-fetch branch + visibility handler — **still present**.
+- `useRouteView.ts`'s `flushSync: true` — never existed there; see Step 7.
 
 ## What Stays Unchanged
 
@@ -206,7 +260,7 @@ TerminalView lives outside the keyed boundary, so WebSockets and the
 - `WorkspaceContextValue` shape — public API unchanged
 - All UI consumers of `useWorkspaceContext()`
 
-## Tradeoffs
+## Tradeoffs (of the proposed design)
 
 1. **Refactor size**: PR #1 touches ~6-8 files. PR #2 touches ~8-10 files
    (mostly tests). Call it a focused day of work.
@@ -221,7 +275,8 @@ TerminalView lives outside the keyed boundary, so WebSockets and the
 
 ## Validation
 
-After PR #1:
+The manual repro that gated the shipped fix:
+
 1. Reproduce the bug on a local dev build via agent-browser:
    `/ws/A/?view=terminal` → click switcher → select ws B → confirm sidebar,
    tabs, agents all update to ws B. URL preserves `?view=terminal`.
@@ -229,23 +284,22 @@ After PR #1:
    pair in network tab).
 3. Confirm `useWorkspaceTabState` restores tab state when switching back to
    a workspace visited earlier in the session.
-4. Run the existing frontend test suite; update test fixtures per Step 8
-   in PR #2.
-
-After PR #2:
-1. Re-verify Step 7: if `flushSync` was removed from `useRouteView`, confirm
-   view switching in terminal view still works under heavy WebSocket load.
-2. Confirm non-route refreshers (create-workspace flow) still end up with
-   fresh data after completion.
+4. Run the existing frontend test suite.
 
 ## References
 
-- Rule files under `~/.claude/skills/react-best-practices/rules/`:
-  `rerender-derived-state-no-effect.md`, `rerender-split-combined-hooks.md`,
-  `rerender-lazy-state-init.md`, `rerender-move-effect-to-event.md`,
-  `async-suspense-boundaries.md`
-- Rule files under `~/.claude/skills/composition-patterns/rules/`:
-  `state-decouple-implementation.md`, `state-lift-state.md`,
-  `state-context-interface.md`
+- Rule names from the machine-local `react-best-practices` skill:
+  `rerender-derived-state-no-effect`, `rerender-split-combined-hooks`,
+  `rerender-lazy-state-init`, `rerender-move-effect-to-event`,
+  `async-suspense-boundaries`. Not checked into this repo.
+- Rule names from the machine-local `composition-patterns` skill:
+  `state-decouple-implementation`, `state-lift-state`,
+  `state-context-interface`. Not checked into this repo.
 - React Router v7 loader docs: https://reactrouter.com/en/main/route/loader
 - React "You Might Not Need an Effect": https://react.dev/learn/you-might-not-need-an-effect
+
+## Related
+
+- `internal/webui/frontend/src/hooks/workspace/useWorkspaceContext.tsx` —
+  the as-built provider; its header comment is the authoritative description.
+- `docs/design/aether-wireframe-mapping.md` — web UI surface map.

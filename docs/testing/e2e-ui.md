@@ -1,14 +1,14 @@
 # E2E manual test plan — Web UI (multi-workspace)
 
-Tests the loom webui as the user actually experiences it: opening a browser, creating workspaces, switching between them, and verifying state isolation.
+> **Status:** Current · *audited 2026-07-23*
 
-**Status:** validates the FleetDB-backed web UI path.
+Tests the loom webui as the user actually experiences it: opening a browser, creating workspaces, switching between them, and verifying state isolation. It exercises the fleet-db-backed web UI path.
 
-**Prerequisites:** complete `e2e-preflight.md` setup. The fleet-db should already have at least one workspace from the CLI test plan (`e2e-cli.md` → ACME), so the UI can render something.
+**Prerequisites:** complete [e2e-preflight.md](e2e-preflight.md) setup. The fleet-db should already have at least one workspace from the CLI test plan ([e2e-cli.md](e2e-cli.md) → ACME), so the UI can render something.
 
 ## Tooling
 
-Tests below use **agent-browser** (Playwright Chromium on CDP 9222). Setup per the agent-browser memory note: `~/.claude/projects/-home-admin-codebase-2-loomcli/memory/feedback_agent_browser.md`. Falls back to manual chrome if agent-browser is wedged.
+Tests below use **agent-browser** (Playwright Chromium on CDP 9222). The repo ships it as a skill at `.claude/skills/agent-browser/` and bakes it into the E2E container (`e2e/README.md:28`, usage notes at `e2e/README.md:79-96` — agent-browser requires a `navigate` before any other command). Falls back to manual Chrome if agent-browser is wedged.
 
 ```bash
 # Start loom serve in cloud mode (so the embedded fleet-db isn't an extra moving piece)
@@ -76,7 +76,7 @@ Each test = a navigation + assertion. Where possible, cross-check via curl again
 
 ## Pass/fail interpretation
 
-- **All of E1–E24** must pass post-Phase-4 to claim the migration is UI-complete
+- **All of E1–E24** must pass. (This plan was originally gated on "Phase 4" of the beads→FleetDB migration; that migration has landed — fleet-db is the canonical issue store, see [go-backend-tests.md](go-backend-tests.md) — so the matrix is now an unconditional requirement, not a migration checkpoint.)
 - E14 (concurrent sessions) and E18 (active-workspace deletion mid-session) are the most likely sources of subtle bugs — pay special attention to console errors during these
 - E12 cross-check is non-negotiable: if the UI shows the right thing but curl shows otherwise (or vice versa), there's a state-sync bug between UI client and server
 
@@ -87,3 +87,10 @@ kill "$(cat /tmp/loom-serve.pid 2>/dev/null)" 2>/dev/null
 rm -f /tmp/loom-serve.pid /tmp/loom-serve.log
 # then run e2e-preflight.md cleanup section
 ```
+
+## Related
+
+- [e2e-preflight.md](e2e-preflight.md) — session setup and cleanup
+- [e2e-cli.md](e2e-cli.md) — the CLI half of the same matrix
+- [fleetdb-acceptance-gates.md](fleetdb-acceptance-gates.md) — G2 browser regression, G4 workspace lifecycle
+- [dogfood-playwright-coverage.md](dogfood-playwright-coverage.md) — which of these journeys are automated

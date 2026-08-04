@@ -1,3 +1,9 @@
+// Package workspacemgr materializes a workspace on local disk when one is
+// created or gains repos: it resolves and validates the workspace directory,
+// adds git worktrees or clones repos into it, seeds built-in roles, and
+// persists the resulting workspace/repo records to the fleet-db-backed store.
+// Supplies the create/add-repos callbacks used by internal/cli/serve and
+// internal/cli/workspace.
 package workspacemgr
 
 import (

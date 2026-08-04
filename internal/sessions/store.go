@@ -1,3 +1,7 @@
+// Package sessions owns the local on-disk session record: one directory per agent
+// run under <runtimeDir>/sessions/ (metadata, prompt, transcript) plus the queryable
+// index.jsonl, and mirrors the agent CLI's own rollout/transcript file into it.
+// Written by the daemon supervisor and `loom agent`; read by cleanup, doctor, web UI.
 package sessions
 
 import (

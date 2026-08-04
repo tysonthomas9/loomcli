@@ -72,6 +72,41 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/config/terminal": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Terminal session lifecycle configuration */
+    get: operations["getTerminalConfig"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/local/settings": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get desktop-local runtime settings (secret-sanitized) */
+    get: operations["getLocalSettings"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /** Update desktop-local runtime settings */
+    patch: operations["patchLocalSettings"];
+    trace?: never;
+  };
   "/api/backends": {
     parameters: {
       query?: never;
@@ -171,6 +206,32 @@ export interface paths {
     post?: never;
     /** Delete a workspace */
     delete: operations["deleteWorkspace"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/repos": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List a workspace's repos
+     * @description Lightweight endpoint returning only the workspace's repo list, for
+     *     clients that do not need the full workspace topology payload.
+     */
+    get: operations["listWorkspaceRepos"];
+    put?: never;
+    /**
+     * Add repos to a workspace
+     * @description Attaches existing local git repos and/or clones remote git URLs into
+     *     the workspace, then returns the refreshed workspace topology.
+     */
+    post: operations["addWorkspaceRepos"];
+    delete?: never;
     options?: never;
     head?: never;
     patch?: never;
@@ -332,6 +393,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/issues/search": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Full-text search issues in a workspace */
+    get: operations["searchIssues"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/issues/{id}": {
     parameters: {
       query?: never;
@@ -362,6 +440,28 @@ export interface paths {
     put?: never;
     /** Close an issue with optional reason */
     post: operations["closeIssue"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/issues/{id}/reopen": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Reopen a closed issue
+     * @description Transitions a closed issue back to open status. The request body is
+     *     optional; an empty body or {} yields a status-only reopen. When `reason`
+     *     is set the backend records it as a comment on the issue (best-effort).
+     */
+    post: operations["reopenIssue"];
     delete?: never;
     options?: never;
     head?: never;
@@ -450,7 +550,8 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    get?: never;
+    /** List comments for an issue */
+    get: operations["listComments"];
     put?: never;
     /** Add a comment to an issue */
     post: operations["addComment"];
@@ -467,7 +568,14 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    get?: never;
+    /**
+     * List an issue's dependencies
+     * @description Returns the issue's dependencies projected as the *related* issue plus a
+     *     dependency_type discriminator (the FE IssueWithDependencyMetadata shape),
+     *     not the raw types.Dependency relation. Each entry's `id` is the issue on
+     *     the other side of the edge, not the issue being viewed.
+     */
+    get: operations["listDependencies"];
     put?: never;
     /** Add a dependency to an issue */
     post: operations["addDependency"];
@@ -598,10 +706,13 @@ export interface paths {
      *     `bonded`, `squashed`, `burned`, `refresh`, `terminal_metadata`,
      *     `terminal_session_change`, `issue_tabs`, `session_change`
      *
-     *     **Authentication**: Accepts Bearer token via `Authorization` header or
-     *     one-time token via `token` query parameter (for EventSource which
-     *     cannot send custom headers). In external auth mode, use the
-     *     `/api/workspaces/{ws}/events/token` endpoint to obtain a one-time SSE token.
+     *     **Authentication**: One-time token via the `token` query parameter
+     *     only. The user JWT middleware treats this as a public route and the
+     *     handler does its own check, which never reads an `Authorization`
+     *     header. In external auth mode, obtain the one-time SSE token from
+     *     `GET /api/workspaces/{ws}/events/token`; anything else — including a
+     *     valid SSE token sent as a Bearer header — returns `401`. In open auth
+     *     mode no credential is required.
      */
     get: operations["subscribeEvents"];
     put?: never;
@@ -782,23 +893,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/workspaces/{ws}/terminal/sessions": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** List active terminal sessions */
-    get: operations["listTerminalSessions"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/api/workspaces/{ws}/terminal/token": {
     parameters: {
       query?: never;
@@ -830,180 +924,12 @@ export interface paths {
      *     for control messages. The frontend's `terminalConnection.ts`
      *     consumes this directly.
      *
-     *     **Authentication**: One-time token via `token` query parameter,
-     *     generated by `GET /api/workspaces/{ws}/terminal/token`.
+     *     **Authentication**: One-time token via the `token` query parameter
+     *     only, generated by `GET /api/workspaces/{ws}/terminal/token`. The user
+     *     JWT middleware treats this as a public route and the handler does its
+     *     own check; an `Authorization` header is never read.
      */
     get: operations["connectTerminalWS"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/workspaces/{ws}/terminal/session-status": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Check if a terminal session is alive */
-    get: operations["getTerminalSessionStatus"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/workspaces/{ws}/terminal/spawn": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** Spawn a new terminal session */
-    post: operations["spawnTerminalSession"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/workspaces/{ws}/terminal/restart": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** Restart the terminal backend process */
-    post: operations["restartTerminal"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/workspaces/{ws}/terminal/kill": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** Kill the terminal backend process */
-    post: operations["killTerminal"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/workspaces/{ws}/terminal/sessions/{name}/seed": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** Seed a terminal session with issue context */
-    post: operations["seedTerminalSession"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/workspaces/{ws}/terminal/sessions/{session}/kill": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** Schedule a terminal session for graceful termination */
-    post: operations["scheduleSessionKill"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/workspaces/{ws}/terminal/sessions/close-all": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** Close all terminal sessions */
-    post: operations["closeAllTerminalSessions"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/workspaces/{ws}/terminal/sessions/{session}/scrollback": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Get scrollback buffer for a terminal session */
-    get: operations["getScrollback"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/workspaces/{ws}/terminal/sessions/{session}/export": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Export terminal session content */
-    get: operations["exportSession"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/workspaces/{ws}/terminal/sessions/{session}/scrollback-info": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Get scrollback metadata (line count, size) */
-    get: operations["getScrollbackInfo"];
     put?: never;
     post?: never;
     delete?: never;
@@ -1177,10 +1103,59 @@ export interface paths {
      * @description WebSocket endpoint for agent-specific terminal I/O. Uses the same
      *     binary/text frame protocol as the main terminal WebSocket.
      *     The frontend's `terminalConnection.ts` handles this directly.
+     *
+     *     **Authentication**: One-time token via the `token` query parameter
+     *     only, on the same terms as the main terminal WebSocket. The user JWT
+     *     middleware treats this as a public route and the handler does its own
+     *     check; an `Authorization` header is never read.
      */
     get: operations["connectAgentTerminalWS"];
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/agents/{name}/terminal/session": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Ensure a persisted terminal session for an agent
+     * @description Resolves an agent name to a persisted UUID terminal session and
+     *     returns its tab metadata, creating or rebuilding the tab's launch spec
+     *     when needed. Takes no request body. The response wraps the tab metadata
+     *     in a `{success, data}` envelope; error cases set `success:false` with an
+     *     `error` message.
+     */
+    post: operations["ensureAgentTerminalSession"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/approvals": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Record an approval or rejection decision for a pending await
+     * @description Records one approval/rejection by the VERIFIED session user and feeds it to the await machinery (journal-first, then dispatch-time matching). The actor is always the authenticated session identity, never request data.
+     */
+    post: operations["postWorkspaceApproval"];
     delete?: never;
     options?: never;
     head?: never;
@@ -1216,6 +1191,55 @@ export interface paths {
     put?: never;
     /** Create an agent assignment */
     post: operations["createAgent"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/agents/{name}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /** Delete an agent assignment */
+    delete: operations["deleteAgent"];
+    options?: never;
+    head?: never;
+    /**
+     * Partial-update an agent assignment
+     * @description Applies a partial update to an existing agent. Every field is
+     *     optional; only present fields are changed. `state` accepts
+     *     `idle`|`active`|`stopped` and `desired_state` accepts
+     *     `stopped`|`idle`|`running`|`draining` (an empty/omitted value leaves
+     *     the field unchanged). Broadcasts an `agent.refresh` mutation on success.
+     */
+    patch: operations["updateAgent"];
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/agents/{name}/queue": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Ranked task queue for a single agent (daemon-backed)
+     * @description Returns the daemon's ranked candidate task queue for one agent.
+     *     Served by the daemon-control-socket module; in fleet-db store mode the
+     *     same path is instead served by a stub that returns 501 Not Implemented
+     *     ("agent-specific queue is not available in fleet-db store mode; use
+     *     monitor task queues").
+     */
+    get: operations["getAgentQueue"];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -1425,6 +1449,30 @@ export interface paths {
     put?: never;
     /** Push all agent worktrees to remote */
     post: operations["gitPushAll"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/pull-requests": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List pull requests across the workspace's repos (gh-backed fallback)
+     * @description Aggregates pull requests across every repo in the workspace via the
+     *     gh CLI. Registered only in serve modes without a store; store-backed
+     *     serve exposes the richer connector-primary listing at the same path.
+     *     Per-repo failures (non-GitHub remote, auth) are reported in warnings
+     *     without failing the whole listing.
+     */
+    get: operations["listWorkspacePullRequests"];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -1928,6 +1976,382 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/workflows/{name}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Start a workflow run
+     * @description Resolves the named workflow to a driver (self-healing builtins on
+     *     demand), runs an AI-CLI-backend preflight when the run would execute
+     *     locally, then creates and enqueues a driver run. The request body is
+     *     the opaque driver run payload passed through verbatim; an empty body
+     *     is treated as {}. A recognised convention is an optional epic_id.
+     */
+    post: operations["createWorkflowRun"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/workflows/{name}/versions": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Register a workflow version from uploaded source
+     * @description Builds the uploaded TypeScript source tree and registers it as a
+     *     driver version for the named workflow. Request body is limited to
+     *     4 MiB. When activate is omitted it defaults to true.
+     */
+    post: operations["createWorkflowVersion"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/runs/{runId}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get a workflow/driver run */
+    get: operations["getWorkflowRun"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/runs/{runId}/events": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List a run's events (paginated) */
+    get: operations["getWorkflowRunEvents"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/runs/{runId}/stream": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Stream a run's events (SSE)
+     * @description Server-Sent Events stream of a run's events. Each new event is sent as
+     *     an SSE frame `event: event` whose data is a PlatformEvent JSON object;
+     *     reader errors are sent as `event: error` with a {error} payload. The
+     *     server polls roughly once per second until the client disconnects.
+     */
+    get: operations["streamWorkflowRunEvents"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/driver/events/await": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Register-and-check the run's next await (suspend or resolve inline)
+     * @description Register-and-check the calling run's next durable await. Responds `satisfied`/`timed_out` inline (including idempotent replay of an already-finished awaitIndex, with the recorded event) or suspends the run and responds `suspended` (the runner then exits; resume re-runs from the top). Authentication is run-scoped and enforced in-handler, not by the user-JWT middleware: present a run-scoped Bearer token (identity derived from its claims) OR the legacy X-Loom-Driver-* header quad, optionally with a shared static Bearer token. The await instance key is derived server-side from the verified run id, never from the body.
+     */
+    post: operations["awaitDriverEvent"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/driver/events/awaits": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List the calling run's awaits in index order
+     * @description Returns the verified run's await registrations in instance-index order (terminal rows carry their recorded event and inline resume payload; pending rows are included) so a resumed workflow can rebuild context. Run-scoped auth is enforced in-handler (run token or legacy X-Loom-Driver-* header quad), not by the user-JWT middleware.
+     */
+    get: operations["listDriverEventAwaits"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/driver/watch/epic": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * SSE stream of TaskRun journal events for an epic
+     * @description Server-Sent Events stream of TaskRun journal events scoped to an epic. Handshake frame `event: snapshot` carries the epic scheduling snapshot plus the parent run's active task runs (id = cursor); each subsequent `event: taskRun` frame carries one journal event (id = the event Seq). Resume with the `Last-Event-ID` header or the `afterSeq` query param as an exclusive int64 Seq cursor. Every reconciliation tick re-verifies the parent run and re-sends a snapshot; when the parent is no longer running the stream ends with `event: closed` {code:"parent_not_running"}. Run-scoped auth is enforced in-handler; errors that occur before the stream commits to text/event-stream use the driver JSON error envelope. The epic id comes from the epicId query param, falling back to the parent run's epic.
+     */
+    get: operations["watchDriverEpic"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/driver/workflows/await": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Await a child workflow run's completion
+     * @description Await sugar over the pattern `run.finished:{childRunId}`: validates the child belongs to the caller, then runs the standard events/await flow (same suspended / satisfied / timed_out wire shapes), consuming a normal awaitIndex slot. A non-suspended response additionally carries the child's terminal status, summary and errorClass so a resumed parent branches without a second fetch. Run-scoped auth enforced in-handler.
+     */
+    post: operations["awaitDriverWorkflow"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/driver/workflows/start": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Start (or idempotently re-read) a child workflow run
+     * @description Create — or idempotently re-read — the deterministic child run of the verified caller: re-entry re-issuing the same start returns the same childRunId, never a duplicate. Provide `idempotencyKey`, or omit it and supply the SDK's 1-based per-run `startIndex`. Run-scoped auth enforced in-handler.
+     */
+    post: operations["startDriverWorkflow"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/driver/{op}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Driver-op dispatcher (opaque op path parameter)
+     * @description Single-segment driver-op dispatcher (SDK v2 transport). The `{op}` path segment selects the operation; the request body is an op-specific camelCase JSON object and the 200 response is an op-specific JSON object. An empty body is treated as `{}`; bodies are capped at 8 MiB. Run-scoped auth is enforced in-handler (run token or legacy X-Loom-Driver-* header quad + optional shared static token); most ops additionally prove the caller owns a running parent DriverRun. Errors use the driver envelope {error:{code,message,retryable,details?}}; an unknown op returns 404 unknown_op. The op set is defined as the keys of the ops map in driverapi.NewModule (internal/webui/handlers/driverapi/module.go). NOTE: the two-segment paths events/await, events/awaits, workflows/start, workflows/await and watch/epic are registered as their own routes and are not dispatched here.
+     */
+    post: operations["dispatchDriverOp"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/task-run/artifacts/{artifactId}/content": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Upload raw content for a task-run artifact
+     * @description Uploads the raw bytes of a task-run artifact declared earlier via the
+     *     `artifact-declare` op. The request body is the content itself (which is
+     *     why this cannot ride the JSON `{op}` route), and the request
+     *     `Content-Type` header is stored as the artifact's MIME type. The
+     *     artifact must belong to the caller's verified task run; a foreign or
+     *     unknown artifact is reported as `not_found`. Max body size: 64 MiB.
+     */
+    put: operations["uploadTaskRunArtifactContent"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/task-run/{op}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Task-run operation dispatcher (opaque op)
+     * @description Opaque operation dispatcher for the task-runner API — the same transport
+     *     shape as the driver `{op}` route. `{op}` selects one of a fixed set of
+     *     operations; the request and response bodies are op-specific camelCase
+     *     JSON. The op set is defined in
+     *     `internal/webui/handlers/taskrunapi/module.go` (`NewModule`):
+     *     `get`, `task-get`, `heartbeat`, `log-append`, `complete`,
+     *     `runtime-credential`, `artifact-declare`, `artifact-get`,
+     *     `artifact-list`, `artifact-finalize`. An unknown op returns 404 with
+     *     code `unknown_op`. An empty request body is treated as `{}`. Read-only
+     *     and artifact ops first prove lease ownership via a fenced no-op
+     *     heartbeat; mutating ops (`heartbeat`, `log-append`, `complete`) pass the
+     *     lease credentials straight through to fleet-db's fenced task-run
+     *     methods. Errors use the structured envelope
+     *     `{error:{code,message,retryable,details}}`.
+     */
+    post: operations["taskRunOp"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/trigger-events": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List persisted trigger events (webhook ingest audit trail) */
+    get: operations["listTriggerEvents"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/trigger-events/{eventId}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get a single persisted trigger event */
+    get: operations["getTriggerEvent"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/trigger-deliveries": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List persisted trigger deliveries (fan-out dispatch audit trail) */
+    get: operations["listTriggerDeliveries"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/trigger-deliveries/{deliveryId}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get a single persisted trigger delivery */
+    get: operations["getTriggerDelivery"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/webhooks/{name}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Ingest an inbound webhook delivery for the named adapter
+     * @description Public endpoint (no user-JWT). The request is authenticated inside the
+     *     handler by the named adapter's per-binding signature verification
+     *     (e.g. GitHub `X-Hub-Signature-256`). The adapter normalizes
+     *     adapter-specific HTTP headers (delivery id, event type, subject/actor)
+     *     into routing metadata; the JSON request body is the raw provider
+     *     payload and is not otherwise interpreted. On success the delivery is
+     *     durably dispatched (fan-out) and 202 is returned with one entry per
+     *     matched binding.
+     */
+    post: operations["receiveWebhook"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/fleet/register": {
     parameters: {
       query?: never;
@@ -2075,6 +2499,40 @@ export interface paths {
     put?: never;
     /** Push log lines from a remote worker */
     post: operations["pushWorkerLogs"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/daemon/config": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Effective resolved daemon config */
+    get: operations["getDaemonConfig"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/daemon/supervisor": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Daemon supervisor state and supervised agents */
+    get: operations["getDaemonSupervisor"];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -3033,36 +3491,6 @@ export interface components {
       ended_at?: string | null;
       scrollback_path?: string;
     };
-    TerminalSessionInfo: {
-      name: string;
-      label: string;
-      /**
-       * Format: int64
-       * @description Unix timestamp
-       */
-      created: number;
-      issue_id?: string;
-    };
-    TerminalSpawnRequest: {
-      session_name: string;
-      backend: string;
-    };
-    TerminalSpawnData: {
-      session_name: string;
-      backend: string;
-      command: string;
-      created: boolean;
-    };
-    SeedRequest: {
-      issue_id: string;
-      title: string;
-      description?: string;
-      design?: string;
-      blockers?: {
-        id: string;
-        title: string;
-      }[];
-    };
     /** @description Terminal tab metadata (Redis-backed) */
     TabMetadata: {
       session_name: string;
@@ -3508,6 +3936,321 @@ export interface components {
       /** @description Event-type-specific data (JSON object) */
       data?: Record<string, never>;
     };
+    /** @description Full agent assignment (domain.Agent). Richer than WorkspaceAgentInfo. live_status/active_task_id/active_phase/last_error_class are DERIVED, read-only fields carried from fleet-db. */
+    Agent: {
+      workspace_key: string;
+      name: string;
+      role_name: string;
+      auto?: boolean;
+      backend?: string;
+      fallback_backends?: string[];
+      repos?: string[];
+      repo_groups?: string[];
+      cross_repo?: boolean;
+      parent?: string;
+      /** @enum {string} */
+      state?: "idle" | "active" | "stopped" | "backend_unavailable";
+      /** @enum {string} */
+      mode?: "ephemeral" | "service";
+      task_filter?: string;
+      max_concurrency?: number;
+      budget_policy?: string;
+      /** @enum {string} */
+      desired_state?: "stopped" | "idle" | "running" | "draining";
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+      /**
+       * @description Derived read-only liveness from fleet-db.
+       * @enum {string}
+       */
+      live_status?: "working" | "idle";
+      /** @description Derived; set only when live_status is working. */
+      active_task_id?: string;
+      /** @description Derived; set only when live_status is working. */
+      active_phase?: string;
+      /** @description Derived; error_class of the most recent failed terminal session, surfaced while idle. */
+      last_error_class?: string;
+    };
+    /** @description A single scored candidate issue in an agent's ranked queue. */
+    AgentQueueEntry: {
+      issue_id: string;
+      title: string;
+      priority: number;
+      score: number;
+      reason: string;
+      labels: string[];
+      parent?: string;
+    };
+    /** @description Error envelope for the approvals endpoint (distinct from ErrorResponse). */
+    ApprovalError: {
+      error: {
+        code: string;
+        message: string;
+      };
+    };
+    /** @description Structured v2 error envelope for the driver SDK transport ({error:{code,message,retryable,details?}}). Distinct from ErrorResponse. */
+    DriverOpError: {
+      error: {
+        code: string;
+        message: string;
+        retryable: boolean;
+        /** @description Optional additive machine-readable context. */
+        details?: {
+          [key: string]: unknown;
+        };
+      };
+    };
+    /** @description Structured error envelope for the task-run SDK transport ({error:{code,message,retryable,details?}}). Distinct from ErrorResponse. */
+    TaskRunOpError: {
+      error: {
+        code: string;
+        message: string;
+        retryable: boolean;
+        /** @description Optional additive machine-readable context. */
+        details?: {
+          [key: string]: unknown;
+        };
+      };
+    };
+    /** @description camelCase wire view of a task-run artifact (artifactResult). */
+    TaskRunArtifact: {
+      workspaceKey?: string;
+      artifactId: string;
+      taskId?: string;
+      ownerType?: string;
+      ownerId?: string;
+      type: string;
+      uri?: string;
+      summary?: string;
+      mimeType?: string;
+      /** Format: int64 */
+      sizeBytes?: number;
+      checksum?: string;
+      contentHash?: string;
+      visibility?: string;
+      redactionStatus?: string;
+      durableStatus?: string;
+      metadata?: {
+        [key: string]: string;
+      };
+      /** Format: date-time */
+      finalizedAt?: string | null;
+      /** Format: date-time */
+      createdAt?: string;
+      /** Format: date-time */
+      updatedAt?: string;
+    };
+    /** @description A pull request aggregated across a workspace's repos (gh-backed). */
+    GitPullRequest: {
+      number: number;
+      title: string;
+      url: string;
+      state: string;
+      is_draft: boolean;
+      head_ref_name: string;
+      base_ref_name: string;
+      author_login?: string;
+      created_at?: string;
+      updated_at?: string;
+      review_decision?: string;
+      repo_name: string;
+      source_repo?: string;
+      additions?: number;
+      deletions?: number;
+      changed_files?: number;
+    };
+    /** @description Body for POST /api/workspaces/{ws}/repos. The ws path param supplies the workspace; no workspace id field is read from the body. */
+    WorkspaceAddReposRequest: {
+      /** @description Existing local repo paths to attach. */
+      repos?: string[];
+      /** @description Remote git URLs to clone into the workspace. */
+      clone_urls?: string[];
+      branch?: string;
+    };
+    /** @description One execution request for a driver version (domain.DriverRun). */
+    DriverRun: {
+      workspace_key: string;
+      run_id: string;
+      driver_id: string;
+      driver_version_id: string;
+      entrypoint?: string;
+      source_kind?: string;
+      source_ref?: string;
+      epic_id?: string;
+      status: string;
+      node_id?: string;
+      lease_id?: string;
+      /** Format: int64 */
+      fencing_token?: number;
+      idempotency_key?: string;
+      /** @description Opaque driver run payload (raw JSON). */
+      payload?: Record<string, never>;
+      output?: {
+        [key: string]: string;
+      };
+      summary?: string;
+      error_class?: string;
+      /** Format: date-time */
+      started_at?: string;
+      /** Format: date-time */
+      last_heartbeat?: string;
+      /** Format: date-time */
+      finished_at?: string | null;
+      parent_run_id?: string;
+    };
+    /** @description One control-plane platform event (domain.PlatformEvent). */
+    PlatformEvent: {
+      id: string;
+      /** Format: date-time */
+      timestamp: string;
+      actor: string;
+      action: string;
+      entity_type: string;
+      entity_id: string;
+      workspace_id: string;
+      before?: string;
+      after?: string;
+      metadata?: {
+        [key: string]: string;
+      };
+    };
+    /** @description A paginated page of platform events (domain.PlatformEventsPage). */
+    PlatformEventsPage: {
+      events: components["schemas"]["PlatformEvent"][];
+      cursor: string;
+    };
+    /** @description A persisted inbound trigger event (domain.TriggerEvent). */
+    TriggerEvent: {
+      workspace_key: string;
+      event_id: string;
+      trigger_binding_id?: string;
+      source_kind: string;
+      source_event_id?: string;
+      event_type: string;
+      subject_ref?: string;
+      actor_ref?: string;
+      /**
+       * @description Server-stamped provenance; empty normalizes to external on read.
+       * @enum {string}
+       */
+      origin?: "external" | "workflow" | "system";
+      hop_depth?: number;
+      /** Format: date-time */
+      occurred_at: string;
+      /** Format: date-time */
+      received_at: string;
+      idempotency_key?: string;
+      raw_payload_ref?: string;
+      raw_payload_digest?: string;
+      signature_status?: string;
+      replay_of_event_id?: string;
+    };
+    /** @description Links a TriggerEvent to the binding that matched it and the DriverRun it enqueued (domain.TriggerDelivery). */
+    TriggerDelivery: {
+      workspace_key: string;
+      delivery_id: string;
+      trigger_event_id: string;
+      trigger_binding_id: string;
+      /** @enum {string} */
+      status:
+        | "accepted"
+        | "rejected"
+        | "duplicate"
+        | "queued"
+        | "dispatched"
+        | "failed"
+        | "replayed"
+        | "superseded"
+        | "held";
+      subject_key?: string;
+      rejection_reason?: string;
+      driver_run_id?: string;
+      attempt: number;
+      /** Format: date-time */
+      next_retry_at?: string | null;
+      error_class?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    /** @description One fan-out leg of a trigger-route dispatch (store.TriggerRouteDelivery), as returned inline by the webhook receive endpoint. */
+    TriggerRouteDelivery: {
+      delivery_id: string;
+      trigger_binding_id: string;
+      driver_run_id: string;
+      /** @enum {string} */
+      status:
+        | "accepted"
+        | "rejected"
+        | "duplicate"
+        | "queued"
+        | "dispatched"
+        | "failed"
+        | "replayed"
+        | "superseded"
+        | "held";
+      rejection_reason?: string;
+    };
+    LocalSettingsResponse: {
+      success: boolean;
+      data?: components["schemas"]["SanitizedLocalSettings"];
+      message?: string;
+      error?: string;
+    };
+    SanitizedLocalSettings: {
+      version: number;
+      fleetdb_redis: {
+        enabled: boolean;
+        addr?: string;
+        db: number;
+        tls: boolean;
+        password_set: boolean;
+      };
+      agent_runtime: {
+        default: string;
+      };
+      local_task_runner: {
+        opencode_model?: string;
+      };
+      runtime_credentials: {
+        daytona: components["schemas"]["SanitizedRuntimeCredential"];
+        github: components["schemas"]["SanitizedRuntimeCredential"];
+      };
+    };
+    SanitizedRuntimeCredential: {
+      configured: boolean;
+      updated_at?: string;
+    };
+    /** @description All top-level fields are optional partial patches (nil = leave unchanged). */
+    LocalSettingsPatchRequest: {
+      fleetdb_redis?: {
+        enabled?: boolean;
+        redis_url?: string;
+        addr?: string;
+        password?: string;
+        clear_password?: boolean;
+        db?: number;
+        tls?: boolean;
+      };
+      agent_runtime?: {
+        default?: string;
+      };
+      local_task_runner?: {
+        opencode_model?: string;
+      };
+      runtime_credentials?: {
+        daytona?: components["schemas"]["RuntimeCredentialPatch"];
+        github?: components["schemas"]["RuntimeCredentialPatch"];
+      };
+    };
+    RuntimeCredentialPatch: {
+      api_key?: string;
+      token?: string;
+      clear?: boolean;
+    };
   };
   responses: never;
   parameters: {
@@ -3617,6 +4360,123 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+    };
+  };
+  getTerminalConfig: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Terminal lifecycle config snapshot */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            /** @constant */
+            success: true;
+            data: {
+              /**
+               * Format: int64
+               * @description Grace period (ms) a detached session is kept alive before auto-kill. Zero means disabled.
+               */
+              grace_period_ms: number;
+              /**
+               * Format: int64
+               * @description Idle reap timeout (ms). Zero means disabled.
+               */
+              idle_timeout_ms: number;
+              /** @description Maximum concurrent terminal sessions. */
+              max_sessions: number;
+            };
+          };
+        };
+      };
+    };
+  };
+  getLocalSettings: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Sanitized local settings */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["LocalSettingsResponse"];
+        };
+      };
+      /** @description Failed to load local settings */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  patchLocalSettings: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["LocalSettingsPatchRequest"];
+      };
+    };
+    responses: {
+      /** @description Settings saved (returns sanitized settings) */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["LocalSettingsResponse"];
+        };
+      };
+      /** @description Invalid request body or validation error */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Request body too large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Failed to load existing settings */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
       };
     };
   };
@@ -3838,6 +4698,99 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+    };
+  };
+  listWorkspaceRepos: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Repo list */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            success: boolean;
+            repos: components["schemas"]["WorkspaceRepo"][];
+          };
+        };
+      };
+      /** @description Missing workspace ID */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Workspace not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  addWorkspaceRepos: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["WorkspaceAddReposRequest"];
+      };
+    };
+    responses: {
+      /** @description Repos added; refreshed workspace topology */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            success: boolean;
+            data?: components["schemas"]["WorkspaceResponse"];
+            warnings?: string[];
+          };
+        };
+      };
+      /** @description Missing workspace ID or invalid request body */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Request body too large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
       };
     };
   };
@@ -4248,6 +5201,46 @@ export interface operations {
       };
     };
   };
+  searchIssues: {
+    parameters: {
+      query: {
+        /** @description Full-text search query, forwarded to the issue backend */
+        q: string;
+        /** @description Max results. Defaults to 100 and is clamped to a maximum of 500; invalid or non-positive values fall back to 100. */
+        limit?: number;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Matching issues */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            success: boolean;
+            data: components["schemas"]["Issue"][];
+          };
+        };
+      };
+      /** @description Missing search query 'q' */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
   getIssue: {
     parameters: {
       query?: never;
@@ -4401,6 +5394,58 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+    };
+  };
+  reopenIssue: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Issue identifier */
+        id: components["parameters"]["IssueId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        "application/json": {
+          /** @description Optional reason, recorded as a comment (best-effort) */
+          reason?: string;
+        };
+      };
+    };
+    responses: {
+      /** @description Issue reopened */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            success: boolean;
+          };
+        };
+      };
+      /** @description Missing issue ID or invalid request body */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Issue not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
       };
     };
   };
@@ -4565,6 +5610,43 @@ export interface operations {
       };
     };
   };
+  listComments: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Issue identifier */
+        id: components["parameters"]["IssueId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Issue comments (empty array when the issue has none) */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            success: boolean;
+            data: components["schemas"]["Comment"][];
+          };
+        };
+      };
+      /** @description Missing issue ID */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
   addComment: {
     parameters: {
       query?: never;
@@ -4608,6 +5690,54 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+    };
+  };
+  listDependencies: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Issue identifier */
+        id: components["parameters"]["IssueId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Issue dependencies (empty array when the issue has none) */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            success: boolean;
+            data: {
+              /** @description The related issue on the other side of the dependency edge */
+              id: string;
+              title: string;
+              status: string;
+              priority: number;
+              /** Format: date-time */
+              created_at: string;
+              dependency_type: string;
+              issue_type?: string;
+              created_by?: string;
+            }[];
+          };
+        };
+      };
+      /** @description Missing issue ID */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
       };
     };
   };
@@ -5159,34 +6289,6 @@ export interface operations {
       };
     };
   };
-  listTerminalSessions: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Workspace identifier */
-        ws: components["parameters"]["WorkspaceId"];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Session list */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": {
-            success: boolean;
-            data?: {
-              sessions?: components["schemas"]["TerminalSessionInfo"][];
-            };
-          };
-        };
-      };
-    };
-  };
   getTerminalToken: {
     parameters: {
       query?: never;
@@ -5241,263 +6343,6 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
-      };
-    };
-  };
-  getTerminalSessionStatus: {
-    parameters: {
-      query?: {
-        session?: string;
-      };
-      header?: never;
-      path: {
-        /** @description Workspace identifier */
-        ws: components["parameters"]["WorkspaceId"];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Session status */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": {
-            alive?: boolean;
-            exit_reason?: string;
-          };
-        };
-      };
-    };
-  };
-  spawnTerminalSession: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Workspace identifier */
-        ws: components["parameters"]["WorkspaceId"];
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["TerminalSpawnRequest"];
-      };
-    };
-    responses: {
-      /** @description Session spawned */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": {
-            success: boolean;
-            data?: components["schemas"]["TerminalSpawnData"];
-          };
-        };
-      };
-    };
-  };
-  restartTerminal: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Workspace identifier */
-        ws: components["parameters"]["WorkspaceId"];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Terminal restarted */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["MessageResponse"];
-        };
-      };
-    };
-  };
-  killTerminal: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Workspace identifier */
-        ws: components["parameters"]["WorkspaceId"];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Terminal killed */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["MessageResponse"];
-        };
-      };
-    };
-  };
-  seedTerminalSession: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Workspace identifier */
-        ws: components["parameters"]["WorkspaceId"];
-        name: string;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["SeedRequest"];
-      };
-    };
-    responses: {
-      /** @description Session seeded */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["MessageResponse"];
-        };
-      };
-    };
-  };
-  scheduleSessionKill: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Workspace identifier */
-        ws: components["parameters"]["WorkspaceId"];
-        session: string;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Kill scheduled */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["MessageResponse"];
-        };
-      };
-    };
-  };
-  closeAllTerminalSessions: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Workspace identifier */
-        ws: components["parameters"]["WorkspaceId"];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description All sessions closed */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["MessageResponse"];
-        };
-      };
-    };
-  };
-  getScrollback: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Workspace identifier */
-        ws: components["parameters"]["WorkspaceId"];
-        session: string;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Scrollback content */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": {
-            success: boolean;
-            data?: {
-              content?: string;
-              lines?: number;
-            };
-          };
-        };
-      };
-    };
-  };
-  exportSession: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Workspace identifier */
-        ws: components["parameters"]["WorkspaceId"];
-        session: string;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Session export */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "text/plain": string;
-        };
-      };
-    };
-  };
-  getScrollbackInfo: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Workspace identifier */
-        ws: components["parameters"]["WorkspaceId"];
-        session: string;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Scrollback info */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": Record<string, never>;
-        };
       };
     };
   };
@@ -5930,6 +6775,165 @@ export interface operations {
       };
     };
   };
+  ensureAgentTerminalSession: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Agent worktree name */
+        name: components["parameters"]["AgentName"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Ensured agent terminal session */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            success: boolean;
+            data?: components["schemas"]["TabMetadata"];
+            error?: string;
+          };
+        };
+      };
+      /** @description Invalid agent name or agent has no launch spec */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Agent not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Terminal service or agent store not initialized */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            /** @constant */
+            success: false;
+            error: string;
+          };
+        };
+      };
+    };
+  };
+  postWorkspaceApproval: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": {
+          /** @description Rendered subject the approval targets, e.g. "acme/widgets#7@shaA". */
+          subjectRef: string;
+          /** @description Await event type. Defaults to "approval". */
+          eventType?: string;
+          /**
+           * @description Approval decision. Defaults to "approved".
+           * @enum {string}
+           */
+          decision?: "approved" | "rejected";
+          /** @description Optional free-form reviewer note carried on the payload. */
+          note?: string;
+        };
+      };
+    };
+    responses: {
+      /** @description Decision recorded (and any pending awaits resolved) */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            /** @description The recorded decision (approved | rejected). */
+            status: string;
+            eventId: string;
+            /** @description Verified approver ref (session email, or user id when absent). */
+            actor: string;
+            /** @description The rendered await key (eventType:subjectRef). */
+            subjectKey: string;
+            /** @description Count of pending awaits on the key at decision time (zero means the event was journaled for a future registration). */
+            pendingMatched: number;
+            resolutions?: {
+              instanceKey: string;
+              runId: string;
+              outcome: string;
+            }[];
+          };
+        };
+      };
+      /** @description Invalid body, or subjectRef/eventType do not render a subject-scoped key */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApprovalError"];
+        };
+      };
+      /** @description Missing verified session identity (fail closed) */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApprovalError"];
+        };
+      };
+      /** @description Session actor is not an eligible approver for the subject key */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApprovalError"];
+        };
+      };
+      /** @description Internal error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApprovalError"];
+        };
+      };
+      /** @description Await store unavailable for this backend */
+      501: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApprovalError"];
+        };
+      };
+    };
+  };
   listInteractivePrompts: {
     parameters: {
       query?: never;
@@ -6054,6 +7058,175 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+    };
+  };
+  deleteAgent: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Agent worktree name */
+        name: components["parameters"]["AgentName"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Agent deleted */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MessageResponse"];
+        };
+      };
+      /** @description Agent not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Internal error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  updateAgent: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Agent worktree name */
+        name: components["parameters"]["AgentName"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": {
+          role_name?: string;
+          auto?: boolean;
+          backend?: string;
+          fallback_backends?: string[];
+          repos?: string[];
+          repo_groups?: string[];
+          cross_repo?: boolean;
+          parent?: string;
+          /** @enum {string} */
+          state?: "idle" | "active" | "stopped";
+          /** @enum {string} */
+          desired_state?: "stopped" | "idle" | "running" | "draining";
+        };
+      };
+    };
+    responses: {
+      /** @description Updated agent */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Agent"];
+        };
+      };
+      /** @description Invalid update (bad state, desired_state, or body) */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Agent not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Internal error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  getAgentQueue: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Agent worktree name */
+        name: components["parameters"]["AgentName"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Ranked agent task queue */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            /** @constant */
+            success: true;
+            data: components["schemas"]["AgentQueueEntry"][];
+            total: number;
+          };
+        };
+      };
+      /** @description Agent not found in daemon config */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Not available in fleet-db store mode */
+      501: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Daemon unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
       };
     };
   };
@@ -6415,6 +7588,48 @@ export interface operations {
         };
         content: {
           "application/json": Record<string, never>;
+        };
+      };
+    };
+  };
+  listWorkspacePullRequests: {
+    parameters: {
+      query?: {
+        /** @description Filter by PR state; defaults to all when omitted. */
+        state?: "all" | "open" | "merged" | "review";
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Pull request list */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            success: boolean;
+            data: {
+              pull_requests: components["schemas"]["GitPullRequest"][];
+              warnings?: string[];
+            };
+            error?: string;
+          };
+        };
+      };
+      /** @description Upstream git/gh failure while listing pull requests */
+      502: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
         };
       };
     };
@@ -7639,6 +8854,1329 @@ export interface operations {
       };
     };
   };
+  createWorkflowRun: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional idempotency key for run creation. */
+        "Idempotency-Key"?: string;
+      };
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Workflow name */
+        name: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        "application/json": {
+          [key: string]: unknown;
+        };
+      };
+    };
+    responses: {
+      /** @description Run accepted and enqueued */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DriverRun"];
+        };
+      };
+      /** @description Invalid payload or failed runner preflight */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Workflow not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Run creation failed */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  createWorkflowVersion: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Workflow name */
+        name: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": {
+          /** @description Map of workspace-relative file path to file source. */
+          files: {
+            [key: string]: string;
+          };
+          /** @description Entry file path; defaults to workflows/{name}.ts. */
+          entrypoint?: string;
+          /** @description Activate this version after registering. Defaults to true. */
+          activate?: boolean;
+        };
+      };
+    };
+    responses: {
+      /** @description Version registered (or reused) */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            /** @description The registered driver record (domain.Driver). */
+            driver?: Record<string, never>;
+            /** @description The registered driver version (domain.DriverVersion). */
+            version?: Record<string, never>;
+            /** @description The built bundle metadata, when present. */
+            bundle?: Record<string, never> | null;
+            created_driver: boolean;
+            created_version: boolean;
+            reused_version: boolean;
+            activated: boolean;
+            /** @description Build output/diagnostics from the bundler. */
+            build_diagnostics?: string;
+          };
+        };
+      };
+      /** @description Missing/invalid files, entrypoint, or build failure */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  getWorkflowRun: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Driver run identifier */
+        runId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Driver run */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DriverRun"];
+        };
+      };
+      /** @description Run not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  getWorkflowRunEvents: {
+    parameters: {
+      query?: {
+        /** @description Opaque cursor; return events after this position. */
+        after?: string;
+        /** @description Page size; defaults to 100. */
+        limit?: number;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Driver run identifier */
+        runId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Event page */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PlatformEventsPage"];
+        };
+      };
+      /** @description Invalid limit */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Run not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Run event stream unavailable for this store */
+      501: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  streamWorkflowRunEvents: {
+    parameters: {
+      query?: {
+        /** @description Opaque cursor; stream events after this position. Defaults to "0". */
+        after?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Driver run identifier */
+        runId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description SSE stream of run events */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/event-stream": string;
+        };
+      };
+      /** @description Run not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Streaming unavailable (response writer cannot flush) */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Run event stream unavailable for this store */
+      501: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  awaitDriverEvent: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Parent DriverRun id. Required on the legacy header-quad transport; omitted when authenticating with a run-scoped Bearer token. A value conflicting with the token is rejected 401 identity_mismatch. */
+        "X-Loom-Driver-Run-Id"?: string;
+        /** @description Parent DriverRun node id (legacy header transport only). */
+        "X-Loom-Driver-Node-Id"?: string;
+        /** @description Parent DriverRun lease id (legacy header transport only). */
+        "X-Loom-Driver-Lease-Id"?: string;
+        /** @description Positive int64 fencing token as a decimal string (legacy header transport only). */
+        "X-Loom-Driver-Fencing-Token"?: string;
+      };
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": {
+          /** @description Fully rendered subject-scoped key to wait for (eventType:subject, exact equality, no glob). */
+          pattern?: string;
+          /** @description Optional eligible-resolver allow-list; accepts a single string or an array of strings. */
+          actor?: string | string[];
+          /**
+           * Format: int64
+           * @description Mandatory await timeout in milliseconds.
+           */
+          timeoutMs: number;
+          /** @description 1-based ordinal of this await within the run. */
+          awaitIndex: number;
+        };
+      };
+    };
+    responses: {
+      /** @description Await outcome — suspended, or satisfied/timed_out with the recorded event inline. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            /** @enum {string} */
+            status: "suspended" | "satisfied" | "timed_out" | "cancelled";
+            /** @description Canonical await identity runID#await-{n}. */
+            instanceKey?: string;
+            pattern?: string;
+            /** Format: date-time */
+            deadline?: string;
+            /** @description Recorded resolving event; present on terminal outcomes (absent when suspended). */
+            event?: {
+              id: string;
+              /** @description Size-capped resume payload (raw JSON), returned inline on first resolution and every replay. */
+              payload?: unknown;
+              /** @description Resolving actor when the event is journaled; absent for synthetic timeout events. */
+              actor?: string;
+              /** Format: date-time */
+              occurredAt: string;
+            };
+          };
+        };
+      };
+      /** @description Invalid request (e.g. unscoped pattern, missing timeout, malformed instance key). */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DriverOpError"];
+        };
+      };
+      /** @description Unauthenticated, expired run token, or identity_mismatch. */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DriverOpError"];
+        };
+      };
+      /** @description Caller does not own the parent run, or actor not permitted to resolve. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DriverOpError"];
+        };
+      };
+      /** @description Parent DriverRun not found or no longer running. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DriverOpError"];
+        };
+      };
+      /** @description Conflict (e.g. run already resumed). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DriverOpError"];
+        };
+      };
+      /** @description Internal error. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DriverOpError"];
+        };
+      };
+    };
+  };
+  listDriverEventAwaits: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Parent DriverRun id (legacy header transport; omitted with a run-scoped Bearer token). */
+        "X-Loom-Driver-Run-Id"?: string;
+        "X-Loom-Driver-Node-Id"?: string;
+        "X-Loom-Driver-Lease-Id"?: string;
+        "X-Loom-Driver-Fencing-Token"?: string;
+      };
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The run's awaits in index order. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            runId: string;
+            awaits: {
+              workspaceKey: string;
+              /** @description Canonical identity runID#await-{n}, n >= 1. */
+              instanceKey: string;
+              runID: string;
+              /** @description Fully rendered subject-scoped key matched by exact equality. */
+              pattern: string;
+              /** @description Actors eligible to resolve this await; empty means any actor. */
+              actorAllow?: string[];
+              /** Format: date-time */
+              deadline: string;
+              /** Format: date-time */
+              registeredAt: string;
+              /** @enum {string} */
+              status: "pending" | "satisfied" | "timed_out" | "cancelled";
+              /** @description Trigger event (or synthetic timeout event) that resolved the await. */
+              satisfiedByEventID?: string;
+              /** @description Size-capped resume payload (raw JSON) persisted on the satisfied row. */
+              satisfiedPayload?: unknown;
+              /** Format: date-time */
+              resumedAt?: string | null;
+            }[];
+          };
+        };
+      };
+      /** @description Unauthenticated, expired run token, or identity_mismatch. */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DriverOpError"];
+        };
+      };
+      /** @description Parent DriverRun not found or no longer running. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DriverOpError"];
+        };
+      };
+      /** @description Internal error. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DriverOpError"];
+        };
+      };
+    };
+  };
+  watchDriverEpic: {
+    parameters: {
+      query?: {
+        /** @description Epic to scope the stream to. Falls back to the parent DriverRun's epic id; required if neither is present (400). */
+        epicId?: string;
+        /** @description Exclusive int64 Seq resume cursor (alternative to the Last-Event-ID header). 0/absent streams from the start of the journal. */
+        afterSeq?: number;
+      };
+      header?: {
+        /** @description SSE reconnect cursor (exclusive int64 Seq); takes precedence over afterSeq. */
+        "Last-Event-ID"?: string;
+        /** @description Parent DriverRun id (legacy header transport; omitted with a run-scoped Bearer token). */
+        "X-Loom-Driver-Run-Id"?: string;
+        "X-Loom-Driver-Node-Id"?: string;
+        "X-Loom-Driver-Lease-Id"?: string;
+        "X-Loom-Driver-Fencing-Token"?: string;
+      };
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description SSE stream. Frames: `snapshot` (epic + active task runs), `taskRun` (one journal event, id = Seq), `closed` (terminal, e.g. {code:"parent_not_running"}). */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/event-stream": string;
+        };
+      };
+      /** @description Missing epic id or malformed resume cursor. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DriverOpError"];
+        };
+      };
+      /** @description Unauthenticated, expired run token, or identity_mismatch. */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DriverOpError"];
+        };
+      };
+      /** @description Parent DriverRun not found or no longer running. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DriverOpError"];
+        };
+      };
+      /** @description Internal error or streaming unsupported. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DriverOpError"];
+        };
+      };
+    };
+  };
+  awaitDriverWorkflow: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Parent DriverRun id (legacy header transport; omitted with a run-scoped Bearer token). */
+        "X-Loom-Driver-Run-Id"?: string;
+        "X-Loom-Driver-Node-Id"?: string;
+        "X-Loom-Driver-Lease-Id"?: string;
+        "X-Loom-Driver-Fencing-Token"?: string;
+      };
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": {
+          childRunId: string;
+          /**
+           * Format: int64
+           * @description Mandatory await timeout in milliseconds.
+           */
+          timeoutMs: number;
+          /** @description 1-based await ordinal (consumes a normal await slot). */
+          awaitIndex: number;
+        };
+      };
+    };
+    responses: {
+      /** @description Await outcome plus the awaited child's state (child absent when suspended). */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            /** @enum {string} */
+            status: "suspended" | "satisfied" | "timed_out" | "cancelled";
+            instanceKey?: string;
+            pattern?: string;
+            /** Format: date-time */
+            deadline?: string;
+            /** @description Recorded resolving event (present on terminal outcomes). */
+            event?: {
+              id: string;
+              payload?: unknown;
+              actor?: string;
+              /** Format: date-time */
+              occurredAt: string;
+            };
+            /** @description Awaited child outcome; present on non-suspended outcomes (a timed-out await reports the child's current, possibly non-terminal, state). */
+            child?: {
+              runId: string;
+              status: string;
+              summary?: string;
+              errorClass?: string;
+            };
+          };
+        };
+      };
+      /** @description Invalid request (missing timeout, bad await index, malformed child reference). */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DriverOpError"];
+        };
+      };
+      /** @description Unauthenticated, expired run token, or identity_mismatch. */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DriverOpError"];
+        };
+      };
+      /** @description Caller does not own the parent run or the referenced child. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DriverOpError"];
+        };
+      };
+      /** @description Parent DriverRun or child run not found. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DriverOpError"];
+        };
+      };
+      /** @description Internal error. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DriverOpError"];
+        };
+      };
+    };
+  };
+  startDriverWorkflow: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Parent DriverRun id (legacy header transport; omitted with a run-scoped Bearer token). */
+        "X-Loom-Driver-Run-Id"?: string;
+        "X-Loom-Driver-Node-Id"?: string;
+        "X-Loom-Driver-Lease-Id"?: string;
+        "X-Loom-Driver-Fencing-Token"?: string;
+      };
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": {
+          /** @description Registered workflow (driver) to run. */
+          workflowName: string;
+          /** @description Child's initial payload (raw JSON); empty means {}. */
+          input?: unknown;
+          /** @description Keys the deterministic child identity. When absent, startIndex is required. */
+          idempotencyKey?: string;
+          /** @description SDK 1-based per-run start counter; required when idempotencyKey is absent. */
+          startIndex?: number;
+        };
+      };
+    };
+    responses: {
+      /** @description The created (or replayed) child run. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            childRunId: string;
+            workflowName: string;
+            status: string;
+            parentRunId: string;
+          };
+        };
+      };
+      /** @description Invalid request (missing workflowName, or neither idempotencyKey nor startIndex). */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DriverOpError"];
+        };
+      };
+      /** @description Unauthenticated, expired run token, or identity_mismatch. */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DriverOpError"];
+        };
+      };
+      /** @description Parent DriverRun not found or no longer running. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DriverOpError"];
+        };
+      };
+      /** @description Conflict on deterministic child identity. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DriverOpError"];
+        };
+      };
+      /** @description Internal error. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DriverOpError"];
+        };
+      };
+    };
+  };
+  dispatchDriverOp: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Parent DriverRun id (legacy header transport; omitted with a run-scoped Bearer token). */
+        "X-Loom-Driver-Run-Id"?: string;
+        "X-Loom-Driver-Node-Id"?: string;
+        "X-Loom-Driver-Lease-Id"?: string;
+        "X-Loom-Driver-Fencing-Token"?: string;
+      };
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description The driver operation to invoke. */
+        op:
+          | "claim-ready"
+          | "epic-get"
+          | "epic-snapshot"
+          | "list-agents"
+          | "agent-orchestration-session"
+          | "update-agent-parent"
+          | "deliver-lead-assignment"
+          | "deliver-agent-message"
+          | "exec-task"
+          | "task-run-get"
+          | "active-task-runs"
+          | "recover-stale-tasks"
+          | "complete-task"
+          | "release-task"
+          | "connector-dispatch"
+          | "emit-event";
+      };
+      cookie?: never;
+    };
+    /** @description Op-specific camelCase JSON parameters (decoded per op). Empty body is treated as {}. */
+    requestBody?: {
+      content: {
+        "application/json": {
+          [key: string]: unknown;
+        };
+      };
+    };
+    responses: {
+      /** @description Op-specific result (each op returns its own JSON object). */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            [key: string]: unknown;
+          };
+        };
+      };
+      /** @description Invalid request payload or op parameters. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DriverOpError"];
+        };
+      };
+      /** @description Unauthenticated, expired run token, or identity_mismatch. */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DriverOpError"];
+        };
+      };
+      /** @description Caller does not own the parent run. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DriverOpError"];
+        };
+      };
+      /** @description Unknown op, or a referenced resource / parent run not found. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DriverOpError"];
+        };
+      };
+      /** @description Conflict (e.g. already claimed, invalid transition, unschedulable). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DriverOpError"];
+        };
+      };
+      /** @description Internal error. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DriverOpError"];
+        };
+      };
+    };
+  };
+  uploadTaskRunArtifactContent: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description Task-run identity (mirrors LOOM_TASK_RUN_ID) */
+        "X-Loom-Task-Run-Id": string;
+        /** @description Monotonic lease fencing token; must be a positive integer */
+        "X-Loom-Task-Run-Fencing-Token": number;
+        /** @description Node identity for the fenced ownership check (mirrors LOOM_TASK_RUN_NODE_ID) */
+        "X-Loom-Task-Run-Node-Id"?: string;
+        /** @description Lease identity for the fenced ownership check (mirrors LOOM_TASK_RUN_LEASE_ID) */
+        "X-Loom-Task-Run-Lease-Id"?: string;
+      };
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Artifact identifier, scoped to the caller's task run */
+        artifactId: string;
+      };
+      cookie?: never;
+    };
+    /** @description Raw artifact content. The request Content-Type is stored as the artifact MIME type. */
+    requestBody: {
+      content: {
+        "application/octet-stream": string;
+      };
+    };
+    responses: {
+      /** @description Content uploaded; the updated artifact record */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TaskRunArtifact"];
+        };
+      };
+      /** @description Invalid request (unreadable body or over the size cap) */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TaskRunOpError"];
+        };
+      };
+      /** @description Missing/invalid lease credentials, or the lease is superseded or the run is terminal */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TaskRunOpError"];
+        };
+      };
+      /** @description Artifact does not exist or does not belong to the caller's task run */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TaskRunOpError"];
+        };
+      };
+      /** @description Internal error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TaskRunOpError"];
+        };
+      };
+    };
+  };
+  taskRunOp: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description Task-run identity (mirrors LOOM_TASK_RUN_ID) */
+        "X-Loom-Task-Run-Id": string;
+        /** @description Monotonic lease fencing token; must be a positive integer */
+        "X-Loom-Task-Run-Fencing-Token": number;
+        /** @description Node identity for the fenced ownership check (mirrors LOOM_TASK_RUN_NODE_ID) */
+        "X-Loom-Task-Run-Node-Id"?: string;
+        /** @description Lease identity for the fenced ownership check (mirrors LOOM_TASK_RUN_LEASE_ID) */
+        "X-Loom-Task-Run-Lease-Id"?: string;
+      };
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Task-run operation name */
+        op:
+          | "get"
+          | "task-get"
+          | "heartbeat"
+          | "log-append"
+          | "complete"
+          | "runtime-credential"
+          | "artifact-declare"
+          | "artifact-get"
+          | "artifact-list"
+          | "artifact-finalize";
+      };
+      cookie?: never;
+    };
+    /**
+     * @description Op-specific camelCase JSON parameters. The shape depends on `{op}`;
+     *     see the op handlers in
+     *     `internal/webui/handlers/taskrunapi/module.go` and `artifacts.go`.
+     *     An empty body is treated as `{}`. Max size: 8 MiB.
+     */
+    requestBody?: {
+      content: {
+        "application/json": {
+          [key: string]: unknown;
+        };
+      };
+    };
+    responses: {
+      /**
+       * @description Op-specific result. Depending on `{op}` this is a task-run view
+       *     (`get`, `heartbeat`), a `{taskRun, task}` pair (`task-get`), a log
+       *     entry (`log-append`), a `{completion, taskRun}` pair (`complete`),
+       *     an artifact view or `{artifacts:[...]}` (artifact ops), or a
+       *     runtime-credential payload (`runtime-credential`).
+       */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            [key: string]: unknown;
+          };
+        };
+      };
+      /** @description Invalid op payload (code `invalid`) */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TaskRunOpError"];
+        };
+      };
+      /** @description Missing/invalid lease credentials, or the lease is superseded, or the run is terminal (code `unauthenticated` or `lease_denied`) */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TaskRunOpError"];
+        };
+      };
+      /** @description Fenced pass-through op rejected ownership (code `not_owner`) */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TaskRunOpError"];
+        };
+      };
+      /** @description Unknown op or referenced resource not found (code `unknown_op` or `not_found`) */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TaskRunOpError"];
+        };
+      };
+      /** @description Op-level conflict or invalid state transition (code `conflict` or `invalid_transition`) */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TaskRunOpError"];
+        };
+      };
+      /** @description Internal error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TaskRunOpError"];
+        };
+      };
+    };
+  };
+  listTriggerEvents: {
+    parameters: {
+      query?: {
+        /** @description Filter by event source kind (e.g. github) */
+        source_kind?: string;
+        /** @description Filter by the trigger binding that matched the event */
+        trigger_binding_id?: string;
+        /** @description Max rows to return (1-1000) */
+        limit?: number;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Trigger event list */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            trigger_events: components["schemas"]["TriggerEvent"][];
+            count: number;
+          };
+        };
+      };
+      /** @description Invalid limit parameter (bare {error} body, not the standard ErrorResponse envelope) */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            error: string;
+          };
+        };
+      };
+      /** @description List failed (bare {error} body) */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            error: string;
+          };
+        };
+      };
+    };
+  };
+  getTriggerEvent: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Trigger event identifier */
+        eventId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Trigger event */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TriggerEvent"];
+        };
+      };
+      /** @description Trigger event not found (bare {error} body, not the standard ErrorResponse envelope) */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            error: string;
+          };
+        };
+      };
+    };
+  };
+  listTriggerDeliveries: {
+    parameters: {
+      query?: {
+        /** @description Filter by the originating trigger event */
+        trigger_event_id?: string;
+        /** @description Filter by the trigger binding that produced the delivery */
+        trigger_binding_id?: string;
+        /** @description Filter by delivery lifecycle status */
+        status?:
+          | "accepted"
+          | "rejected"
+          | "duplicate"
+          | "queued"
+          | "dispatched"
+          | "failed"
+          | "replayed"
+          | "superseded"
+          | "held";
+        /** @description Max rows to return (1-1000) */
+        limit?: number;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Trigger delivery list */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            trigger_deliveries: components["schemas"]["TriggerDelivery"][];
+            count: number;
+          };
+        };
+      };
+      /** @description Invalid limit parameter (bare {error} body, not the standard ErrorResponse envelope) */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            error: string;
+          };
+        };
+      };
+      /** @description List failed (bare {error} body) */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            error: string;
+          };
+        };
+      };
+    };
+  };
+  getTriggerDelivery: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Trigger delivery identifier */
+        deliveryId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Trigger delivery */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TriggerDelivery"];
+        };
+      };
+      /** @description Trigger delivery not found (bare {error} body, not the standard ErrorResponse envelope) */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            error: string;
+          };
+        };
+      };
+    };
+  };
+  receiveWebhook: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Registered webhook adapter name (e.g. github) */
+        name: string;
+      };
+      cookie?: never;
+    };
+    /**
+     * @description Raw provider webhook payload. Must be valid JSON (an empty body is
+     *     treated as {}). Not decoded into a fixed schema; the concrete shape
+     *     depends on the adapter and provider event.
+     */
+    requestBody: {
+      content: {
+        "application/json": {
+          [key: string]: unknown;
+        };
+      };
+    };
+    responses: {
+      /** @description Delivery accepted and durably dispatched */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            /** @constant */
+            status: "accepted";
+            route_key: string;
+            /** @description name:deliveryId, derived from the adapter delivery id */
+            idempotency_key: string;
+            deliveries: components["schemas"]["TriggerRouteDelivery"][];
+          };
+        };
+      };
+      /** @description Malformed payload, empty/invalid JSON, or missing adapter delivery id (bare {error} body) */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            error: string;
+          };
+        };
+      };
+      /** @description Signature verification failed (bare {error} body) */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            error: string;
+          };
+        };
+      };
+      /** @description No adapter registered for {name}, or no enabled trigger binding for the resolved route (bare {error} body) */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            error: string;
+          };
+        };
+      };
+      /** @description Trigger dispatch is unavailable for this store (bare {error} body) */
+      501: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            error: string;
+          };
+        };
+      };
+    };
+  };
   fleetRegister: {
     parameters: {
       query?: never;
@@ -7865,6 +10403,113 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+    };
+  };
+  getDaemonConfig: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Resolved daemon config */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            /** @constant */
+            success: true;
+            /** @description Effective resolved daemon configuration, embedded verbatim as opaque JSON (json.RawMessage). Inner shape is not decoded by this handler. */
+            data: Record<string, never>;
+          };
+        };
+      };
+      /** @description Daemon config could not be loaded */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  getDaemonSupervisor: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Supervisor state */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            /** @constant */
+            success: true;
+            data: {
+              pid: number;
+              /** Format: date-time */
+              started_at: string;
+              /** Format: double */
+              uptime_seconds: number;
+              agents: {
+                worktree: string;
+                role: string;
+                repo?: string;
+                pid: number;
+                status: string;
+                task_id?: string;
+                epic_id?: string;
+                current_backend?: string;
+                restart_count: number;
+                /** Format: date-time */
+                last_start?: string;
+                /** Format: date-time */
+                last_exit?: string;
+                last_exit_code?: number;
+                stop_reason?: string;
+                /** Format: date-time */
+                stopped_at?: string;
+                worktree_path?: string;
+                last_error_class?: string;
+                no_work_count?: number;
+                /** Format: date-time */
+                backoff_until?: string;
+                remote_branch?: string;
+              }[];
+            };
+          };
+        };
+      };
+      /** @description Failed to read daemon state */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Daemon is not running */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
       };
     };
   };

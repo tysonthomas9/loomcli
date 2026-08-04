@@ -1,3 +1,8 @@
+// Package install implements `loom install-service`, which renders and
+// optionally installs a platform-native service definition — a systemd user
+// unit on Linux, a launchd user agent on macOS — that runs `loom serve` as a
+// persistent background service. Registered into the root command by cmd/loom
+// via a blank import.
 package install
 
 import (

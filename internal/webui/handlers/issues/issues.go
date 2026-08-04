@@ -1,3 +1,8 @@
+// Package issues serves the workspace-scoped issue-tracker HTTP routes over
+// service.IssueService (fleet-db): issue CRUD, close/reopen/claim/move,
+// comments, events, dependencies, search, the ready-issue queue, per-issue
+// terminal tab persistence, and session history. Registered by
+// internal/webui/modbuilder and internal/webui/handlermux.
 package issues
 
 import (

@@ -1,3 +1,8 @@
+// Package logroutercmd registers the hidden `loom log-router` command, which an
+// agent process is piped into: it fans stdin out to the per-agent log file and
+// the current task's log under ~/.loom/logs, re-targeting when the agent's
+// .agent.lock TaskID changes. Thin cobra wrapper over internal/logrouter; pulled
+// in only for its command registration by cmd/loom/main.go.
 package logroutercmd
 
 import (

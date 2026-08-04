@@ -1,3 +1,8 @@
+// Package serve implements the `loom serve` command: the control-plane service
+// that fronts fleet-db with a JSON/SSE/WebSocket API plus the web UI, and hosts
+// the always-on background loops (driver executor, stale-task and outbox
+// sweepers, cron triggers, issue-journal bridge). Registered into the root
+// command by cmd/loom via a blank import.
 package serve
 
 import (

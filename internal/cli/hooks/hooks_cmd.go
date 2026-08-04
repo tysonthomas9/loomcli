@@ -1,3 +1,8 @@
+// Package hooks implements the hidden `loom hooks` command group: it installs
+// loom's handlers into an agent backend's own hook config (Claude Code
+// settings.json) and, when those hooks fire mid-session, mirrors the backend's
+// native transcript, subagent transcripts and token usage into the loom session
+// store. Registered by cmd/loom; installation is driven by internal/cli/workspace.
 package hooks
 
 import (

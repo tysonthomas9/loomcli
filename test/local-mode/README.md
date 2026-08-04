@@ -1,5 +1,8 @@
 # Local Mode Dogfood Stack
 
+> **Status:** Current · *audited 2026-07-24*. Make targets, ports, and env knobs
+> checked against `Makefile:162-228` and `test/local-mode/docker-compose.yml`.
+
 This stack is the first shippable slice from the local-mode product docs:
 one machine, shared filesystem, one Loom server, and supervised local agent
 processes.
@@ -12,11 +15,15 @@ Run it from the repo root:
 make local-mode-up
 ```
 
-To run the same stack with real Codex CLI agents:
+Four variants share the same base compose file, each layering one override
+(`Makefile:168-195`):
 
-```sh
-make local-mode-codex-up
-```
+| Target | Agent backend | Extra requirement |
+|---|---|---|
+| `make local-mode-up` | `loom-backend-localdogfood` (deterministic) | none |
+| `make local-mode-codex-up` | real `codex` CLI | `~/.codex` auth on the host |
+| `make local-mode-claude-up` | real `claude` CLI | host `CLAUDE_HOME` (default `~/.claude`) mounted read-only; `~/.claude/.credentials.json` is often stale — see `docker-compose.claude.yml:10-15` for the fresh-token recipe and `LOCAL_MODE_CLAUDE_HOME` |
+| `make local-mode-daytona-up` | daemon TS leaf routed to a Daytona sandbox | `DAYTONA_API_KEY`, a network-reachable `DAYTONA_REPO_URL` (`Makefile:186-195`) |
 
 The Codex variant builds Codex into the Loom container, mounts
 `${HOME}/.codex` read-only at `/codex-host`, copies `auth.json` and
@@ -59,11 +66,26 @@ Expected dogfood flow:
 Useful commands:
 
 ```sh
-make local-mode-verify
-make local-mode-codex-verify
+make local-mode-verify            # test/local-mode/verify-local-mode.sh
+make local-mode-codex-verify      # same verifier, defaulted to the Codex stack's task ids
+make local-mode-routing-verify    # test/local-mode/verify-agent-routing.py
+make local-mode-webhook-verify    # test/local-mode/verify-webhook.sh
 make local-mode-logs
 make local-mode-down
 ```
+
+`make local-mode-routing-verify` asserts role-based task routing for
+UI-registered plan/task agents: it seeds a no-design task (must go to the plan
+agent) and a designed task (must go to the task agent), exercises the UI
+`POST /agents` endpoint, and checks the claims. Pair it with
+`LOOM_DAEMON_LEAF=ts make local-mode-codex-up` to prove UI agent creation maps
+to the TS execution path (`Makefile:214-215`).
+
+`make local-mode-webhook-verify` is the real-stack E2E for the trigger-driven
+GitHub webhook path: it signs a `pull_request.opened` delivery, asserts the
+durable TriggerEvent / Delivery / DriverRun records, and checks that
+redelivery is idempotent. Needs a running stack plus curl, openssl, and
+python3 (`Makefile:221-222`).
 
 `make local-mode-verify` polls the running stack and asserts that the seeded
 planner/coder tasks completed the daemon path, recorded sessions, exposed
@@ -127,3 +149,19 @@ Troubleshooting:
   errors. This is a Podman machine boot failure, not a local-mode app failure.
   Recreate or downgrade/fix the Podman machine before running
   `make local-mode-up`, or use Docker Compose when available.
+
+## Related
+
+- [`../../docs/testing/local-mode-podman-e2e.md`](../../docs/testing/local-mode-podman-e2e.md)
+  — the full E2E runbook for this stack
+- [`../../docs/product/local-mode-product-spec.md`](../../docs/product/local-mode-product-spec.md)
+  — the product spec this stack is the first slice of
+- [`../../docs/testing/README.md`](../../docs/testing/README.md) — index of all
+  test surfaces
+- [`../playground/README.md`](../playground/README.md) — the cheap single-host
+  daemon failure-mode harness; use it instead when you are testing the
+  supervisor, not the product
+- [`../../deploy/podman-stack/README.md`](../../deploy/podman-stack/README.md) —
+  the distributed-topology stack (this one is single-machine)
+- [`../../docs/loom-glossary.md`](../../docs/loom-glossary.md) — **local mode**
+  is not **local-only workspace**, and neither is **fleet mode**

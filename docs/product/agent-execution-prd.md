@@ -1,15 +1,21 @@
 # Agent Execution PRD
 
-**Status:** Draft
-**Date:** 2026-05-04
-**Related:** `docs/product/README.md`,
-`docs/product/local-mode-product-spec.md`,
-`docs/product/daemon-agent-runtime-architecture.md`,
-`docs/product/agent-run-ux-spec.md`,
-`docs/product/session-artifact-contract.md`,
-`docs/design/agent-run-visibility-plan.md`,
-`docs/design/distributed-control-plane.md`,
-`docs/design/distributed-control-plane-data-model.md`
+> **Status:** Partially implemented · *audited 2026-07-23*. Phases 1–2 are
+> partially delivered. The run-record model this PRD proposed was superseded
+> by `domain.AgentSession` — there is no `run` object. Sections corrected
+> against code are marked inline.
+
+**Last updated:** 2026-07-23
+**Related:** [`README.md`](README.md),
+[`session-stores.md`](session-stores.md),
+[`session-artifact-contract.md`](session-artifact-contract.md),
+[`agent-lifecycle-state-machine.md`](agent-lifecycle-state-machine.md),
+[`local-mode-product-spec.md`](local-mode-product-spec.md),
+[`daemon-agent-runtime-architecture.md`](daemon-agent-runtime-architecture.md),
+[`agent-run-ux-spec.md`](agent-run-ux-spec.md),
+[`../design/agent-run-visibility-plan.md`](../design/agent-run-visibility-plan.md),
+[`../design/distributed-control-plane.md`](../design/distributed-control-plane.md),
+[`../design/distributed-control-plane-data-model.md`](../design/distributed-control-plane-data-model.md)
 
 ## Summary
 
@@ -133,8 +139,11 @@ contract used later by containers.
 - Task Sessions tab populated for local direct and daemon-launched runs.
 - Basic transcript/log artifact attached to the run.
 - Preflight results for backend auth, required tools, worktree, gate
-  command, and git remote.
-- Clear run final states: completed, failed, blocked, preflight_failed.
+  command, and git remote. *(Only backend binary + auth shipped —
+  `internal/runtimepreflight/preflight.go:77`.)*
+- Clear session final states. The shipped terminal statuses are in
+  [`agent-lifecycle-state-machine.md`](agent-lifecycle-state-machine.md);
+  `preflight_failed` was never a state and is not an error class either.
 - Fix status transitions needed by the agent workflow: review and blocked.
 - Regression test for planner/coder local run visibility.
 
@@ -150,11 +159,17 @@ contract used later by containers.
 
 ### Agent Run Creation
 
-- The system must create a run record before invoking the AI backend.
-- The run record must include workspace ID, agent name, role, backend,
-  runtime provider, command, and start time.
-- The run must be associated with a session ID.
-- The run may start without a task ID, but task ID must be filled after
+> **Superseded.** There is no separate run record. The execution attempt *is*
+> the session; `session_id` is its identity. The field set is
+> `domain.AgentSession` / `sessions.SessionRecord`, tabulated in
+> [`session-artifact-contract.md`](session-artifact-contract.md). Notably the
+> create payload has no `role`, no `runtime_provider`, and no `command`
+> (`internal/infra/fleetdb/control_plane.go:93-124`), and `agent_id` is the
+> worktree name (`internal/cli/daemon/supervisor/supervisor.go:527`).
+
+- The system must create a session record before invoking the AI backend.
+- The session must be associated with a `session_id`.
+- The session may start without a task ID, but task ID must be filled after
   claim.
 
 ### Agent Identity
@@ -194,29 +209,30 @@ contract used later by containers.
 
 ### Preflight
 
-- Before model invocation, the system should check:
-  - backend CLI installed
-  - backend credentials usable
-  - workspace/repo path binding exists
-  - agent worktree exists or can be created
-  - required tools exist
-  - configured gate command exists
-  - git remote exists when push is required
-  - session publication is available
-- Failed preflight should create a failed run record and a visible task
-  note when task context exists.
+**Shipped.** `PreflightLocalTaskRunner`
+(`internal/runtimepreflight/preflight.go:77`) checks exactly two things via
+`backends.CheckBackendHealth`: backend binary on PATH, and backend auth. It is
+fail-closed — the run is never queued, so there is no failed record to render
+(`preflight.go:69-77`). Failure identifiers are `local_backend_unavailable`
+and `local_backend_auth_missing` (`preflight.go:94-101`); see
+[`error-class-reference.md`](error-class-reference.md).
+
+> **Unbuilt.** The remaining six checks below, and "failed preflight creates a
+> failed run record plus a visible task note".
+
+- workspace/repo path binding exists
+- agent worktree exists or can be created
+- required tools exist
+- configured gate command exists
+- git remote exists when push is required
+- session publication is available
 
 ### Artifacts
 
-- A run should be able to attach:
-  - transcript
-  - log tail
-  - diff patch
-  - changed files
-  - test/gate output
-  - commit ID
-  - push result
-  - error class and message
+The recorded artifact fields are defined once, in
+[`session-artifact-contract.md`](session-artifact-contract.md). A session
+should be able to attach: transcript, log tail, diff patch, changed files,
+test/gate output, commit ID, push result, and error class with message.
 
 ### Status Transitions
 
@@ -255,20 +271,45 @@ contract used later by containers.
 
 ### CLI
 
-- `loom plan` and `loom task` publish run/session data.
-- `loom agentdef` remains the assignment/config surface.
-- Future command: `loom run` or `loom agent run` for explicit run
-  lifecycle.
-- Doctor/preflight command for agent readiness.
+The registered entry points from `internal/cli/agent` (each via
+`cli.RegisterCommand`):
+
+| Command | Declared at |
+|---|---|
+| `loom agent <worktree> --prompt <path> [flags]` | `internal/cli/agent/agent_cmd.go:35` |
+| `loom plan [worktree\|workspace]` | `internal/cli/agent/plan.go:36` |
+| `loom task [worktree\|workspace]` | `internal/cli/agent/task.go:28` |
+| `loom claim <task-id>` | `internal/cli/agent/claim.go:17` |
+| `loom complete` | `internal/cli/agent/complete.go:14` |
+| `loom recover <worktree>` | `internal/cli/agent/recover.go:26` |
+| `loom list` | `internal/cli/agent/list.go:16` |
+
+There is no `loom run` and no `loom agent run` subcommand. `loom agentdef`
+(`internal/cli/agentdef/agentdef_cmd.go:50`) remains the assignment/config
+surface. `loom doctor` already exists (`internal/cli/doctor/doctor.go:71`,
+package present since 2026-04-05) and is the agent-readiness command this PRD
+listed as future work.
+
+`loom plan` and `loom task` publish **only** the filesystem session record
+(`internal/cli/agent/plan.go:245,263-274`), not the control-plane one. See
+[`session-stores.md`](session-stores.md).
 
 ### APIs
 
-- Create/update/finalize run
-- Append log/transcript event
-- Attach artifact
-- List runs by task
-- List active/stale agents
-- Record preflight result
+The control-plane surface for agent execution
+(`internal/infra/fleetdb/control_plane.go`):
+
+| Operation | Route |
+|---|---|
+| Create session | `POST /api/v1/{ws}/agent-sessions` (`:93`) |
+| Get session | `GET /api/v1/{ws}/agent-sessions/{id}` (`:126`) |
+| List sessions | `GET /api/v1/{ws}/agent-sessions` (`:134`) |
+| Heartbeat | `POST /api/v1/{ws}/agent-sessions/{id}/heartbeat` (`:198`) |
+| Update session | `PATCH /api/v1/{ws}/agent-sessions/{id}` (`:206`) |
+
+There is no run CRUD, no artifact-attach endpoint, and no preflight-result
+endpoint. Agent monitoring is `GET /api/monitor/agents`
+(`internal/webui/app/routes.go:99`).
 
 ## Success Metrics
 
@@ -286,9 +327,18 @@ contract used later by containers.
 ### Phase 1: Local Visibility
 
 - Add run/session registration to direct local `loom plan` and `loom task`.
+  **Partially delivered:** filesystem session only; neither command writes a
+  control-plane `AgentSession` (`internal/cli/agent/plan.go:245,263-274`;
+  the only `AgentSessions().Create` callers are
+  `internal/cli/daemon/supervisor/supervisor.go:524`,
+  `internal/cli/agent/lead/lead.go:337`,
+  `internal/driver/task_bridge_session.go:164`,
+  `internal/webui/handlers/terminal/agent_session.go:447`, and
+  `internal/cli/daemon/seed_transcript_cmd.go:74`).
 - Populate task Sessions for direct and daemon-launched local agents.
 - Fix FleetDB status transitions for review and blocked.
 - Make `/api/monitor/agents` include stored idle agents and active runs.
+  **Delivered:** route registered at `internal/webui/app/routes.go:99`.
 
 ### Phase 2: Local UX Polish
 
@@ -323,12 +373,36 @@ contract used later by containers.
 
 ## Open Questions
 
-- What is the product name for one execution attempt: run, session, job, or
-  task run?
+Still open:
+
 - Should direct CLI runs auto-create an ad hoc agent definition or only a
-  run record?
+  session record?
 - Where should durable transcripts and logs live long term?
-- How long should completed runs remain visible in the agent sidebar?
 - How should users configure the canonical gate command per repo?
-- Should a push failure close the task, block it, or complete the run with
-  a warning?
+- Should a push failure close the task, block it, or complete the session
+  with a warning?
+- How long should completed runs remain visible **in the agent sidebar**? No
+  code answers this. On-disk retention is defined (see below), but that is a
+  different question — nothing bounds how long a finished run stays rendered.
+
+Answered since this PRD was written:
+
+- *"What is the product name for one execution attempt?"* — **session**.
+  `session_id` is the attempt identity in both stores
+  (`internal/domain/control_plane.go:83`, `internal/sessions/types.go:35`);
+  `attempt` / `attempt_num` is a counter inside it.
+- *"How long do completed runs survive on disk?"* (not the sidebar question
+  above — this one is about the filesystem session store) — retention is
+  explicit: `Store.PurgeOlderThan` (`internal/sessions/purge.go:15`) behind
+  `loom cleanup sessions clean` (`internal/cli/cleanup/sessions_cmd.go:26`).
+  Filesystem sessions additionally self-heal to `aborted` after
+  `StaleSessionThreshold = 4h` (`internal/sessions/stale.go:12`).
+
+## Related
+
+- [`session-stores.md`](session-stores.md) — the two records called "session"
+- [`session-artifact-contract.md`](session-artifact-contract.md) — the evidence contract
+- [`agent-lifecycle-state-machine.md`](agent-lifecycle-state-machine.md) — state vocabularies
+- [`error-class-reference.md`](error-class-reference.md) — failure vocabularies
+- [`agent-run-ux-spec.md`](agent-run-ux-spec.md) — the UI surfaces
+- [`README.md`](README.md) — index for this folder

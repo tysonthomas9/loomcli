@@ -1,7 +1,8 @@
 # Local Mode Podman E2E Runbook
 
-**Status:** Draft
-**Date:** 2026-05-04
+> **Status:** Current · *audited 2026-07-23*
+
+**Date:** 2026-05-04 (task IDs and target list corrected 2026-07-23)
 **Related:** `docs/product/local-mode-product-spec.md`,
 `docs/product/dogfood-agent-execution-test-plan.md`,
 `test/local-mode/README.md`
@@ -36,12 +37,22 @@ Loom API: http://localhost:8282
 FleetDB:  http://localhost:8280
 Config:   http://localhost:8282/api/config
 Agents:   http://localhost:8282/api/monitor/agents?workspace=LOCALMODE
-Task 1 sessions: http://localhost:8282/api/workspaces/LOCALMODE/tasks/LOCALMODE-1/sessions
-Task 2 sessions: http://localhost:8282/api/workspaces/LOCALMODE/tasks/LOCALMODE-2/sessions
+Plan task sessions: http://localhost:8282/api/workspaces/LOCALMODE/tasks/LOCALMODE-2/sessions
+Code task sessions: http://localhost:8282/api/workspaces/LOCALMODE/tasks/LOCALMODE-3/sessions
 ```
 
-The deterministic `make local-mode-up` path uses the same services, but its
-seeded task IDs are `LM-PLAN-1` and `LM-CODE-1`.
+**Seeded task IDs are `LOCALMODE-2` (plan) and `LOCALMODE-3` (code)** in *both*
+the deterministic and the Codex stack — `test/local-mode/docker-compose.yml:88-89`
+and `test/local-mode/docker-compose.codex.yml:18-19`. `make local-mode-codex-verify`
+defaults to exactly those (`Makefile:224-227`), as does
+`test/local-mode/verify-local-mode.sh:6-7`.
+
+`LOCALMODE-1` is *not* a task: it is the seeded **epic** lane that -2 and -3
+hang off (`test/local-mode/README.md:52`), and it is the default
+`ROUTING_EPIC_ID` for `make local-mode-routing-verify`
+(`test/local-mode/verify-agent-routing.py:34`). Earlier revisions of this
+runbook used `LOCALMODE-1`/`LOCALMODE-2` for the plan/code pair; that is
+off-by-one and every such reference below has been corrected.
 
 Stop and remove the stack volumes:
 
@@ -116,11 +127,29 @@ but the override file installs Codex CLI and sets:
 LOOM_BACKEND=codex
 LOOM_LOCAL_MODE_PLAN_AGENT=codex-planner
 LOOM_LOCAL_MODE_CODE_AGENT=codex-coder
-LOOM_LOCAL_MODE_PLAN_TASK_ID=LOCALMODE-1
-LOOM_LOCAL_MODE_CODE_TASK_ID=LOCALMODE-2
+LOOM_LOCAL_MODE_PLAN_TASK_ID=LOCALMODE-2
+LOOM_LOCAL_MODE_CODE_TASK_ID=LOCALMODE-3
 ```
 
+(`test/local-mode/docker-compose.codex.yml:14-19`.)
+
 ## Commands
+
+All local-mode targets, with their evidence class (see
+[../testing-terminology.md](../testing-terminology.md)):
+
+| Target | Makefile | Compose overlay | Evidence class | Notes |
+| --- | --- | --- | --- | --- |
+| `local-mode-up` | `:168` | base only | deterministic | `loom-backend-localdogfood` stands in for the model |
+| `local-mode-codex-up` | `:174` | `docker-compose.codex.yml` | real | needs Codex credentials |
+| `local-mode-claude-up` | `:180` | `docker-compose.claude.yml` | real | needs Claude credentials |
+| `local-mode-daytona-up` | `:190` | `docker-compose.daytona.yml` | live | runs a claimed task in a real Daytona sandbox; needs `DAYTONA_API_KEY` on the host and a network-reachable `DAYTONA_REPO_URL`, paired with `LOOM_DAEMON_LEAF=ts` (`Makefile:186-194`) |
+| `local-mode-down` | `:196` | — | — | `down -v --remove-orphans` |
+| `local-mode-logs` | `:201` | — | — | follows `loom-local` and `ui-local` |
+| `local-mode-verify` | `:206` | — | — | `test/local-mode/verify-local-mode.sh` |
+| `local-mode-codex-verify` | `:224` | — | — | same script, plan/code task IDs pinned to `LOCALMODE-2`/`LOCALMODE-3` |
+| `local-mode-routing-verify` | `:214` | — | — | `test/local-mode/verify-agent-routing.py`: seeds a no-design task (must route to the plan agent) and a designed task (must route to the task agent), exercises the UI `POST /agents` endpoint, and asserts the claims |
+| `local-mode-webhook-verify` | `:221` | — | — | `test/local-mode/verify-webhook.sh`: signs a `pull_request.opened` delivery and asserts durable TriggerEvent/Delivery/DriverRun records plus redelivery idempotence. Needs a running `make local-mode-up` stack plus curl, openssl, python3 |
 
 Run the deterministic local dogfood path:
 
@@ -146,10 +175,12 @@ Use a different Codex home:
 LOCAL_MODE_CODEX_HOME=<codex-home> make local-mode-codex-up
 ```
 
-Use a different Codex CLI version:
+Use a different Codex CLI version. The default is `latest`
+(`test/local-mode/docker-compose.codex.yml:12`); pin it when a run must be
+reproducible:
 
 ```sh
-LOCAL_MODE_CODEX_CLI_VERSION=0.128.0 make local-mode-codex-up
+LOCAL_MODE_CODEX_CLI_VERSION=<version> make local-mode-codex-up
 ```
 
 Override ports when defaults are busy:
@@ -172,10 +203,14 @@ LOCAL_MODE_COMPOSE_UP_FLAGS="--build -d" \
 make local-mode-codex-up
 ```
 
-Verify the second stack through its API port:
+Verify the second stack through its API port. The verifier accepts either
+`LOCAL_MODE_API_URL` (a full base URL) or `LOCAL_MODE_API_PORT`
+(`test/local-mode/verify-local-mode.sh:4`):
 
 ```sh
 LOCAL_MODE_API_PORT=8382 make local-mode-codex-verify
+# or
+LOCAL_MODE_API_URL=http://localhost:8382 make local-mode-codex-verify
 ```
 
 Use the same project name for logs and teardown:
@@ -216,8 +251,8 @@ the actual `loom-local` container name.
 - Workspace: `LOCALMODE`
 - Planner agent: `codex-planner`
 - Coder agent: `codex-coder`
-- Planning task: `LOCALMODE-1`
-- Approved coding task: `LOCALMODE-2`
+- Planning task: `LOCALMODE-2`
+- Approved coding task: `LOCALMODE-3`
 - Source repo: `/workspace/source-repo`
 - Workspace repo: `/root/.loom/workspaces/LOCALMODE/source-repo`
 - Agent worktrees under
@@ -226,12 +261,12 @@ the actual `loom-local` container name.
 The expected run is:
 
 1. `codex-planner` starts through `loom daemon`.
-2. It claims `LOCALMODE-1`.
+2. It claims `LOCALMODE-2`.
 3. It runs Codex CLI through the supervised backend path.
-4. Loom records an agent session in FleetDB with `task_id=LOCALMODE-1`.
+4. Loom records an agent session in FleetDB with `task_id=LOCALMODE-2`.
 5. The planner writes a design and moves the task to review.
 6. `codex-coder` starts through the same daemon path.
-7. It claims `LOCALMODE-2`, which already has an approved design.
+7. It claims `LOCALMODE-3`, which already has an approved design.
 8. It writes `local-mode-agent-output.txt`, commits in its worktree, and
    closes the task.
 9. Loom finalizes the FleetDB agent session with transcript, log, diff, and
@@ -243,8 +278,8 @@ Use the UI to validate the product behavior, not just process exit codes.
 
 In the Kanban board:
 
-- `LOCALMODE-1` should leave planning evidence and move to review.
-- `LOCALMODE-2` should close after the coder completes.
+- `LOCALMODE-2` should leave planning evidence and move to review.
+- `LOCALMODE-3` should close after the coder completes.
 
 In the left agent panel:
 
@@ -268,8 +303,8 @@ Check the Loom API:
 ```sh
 curl -sS http://localhost:8282/api/config
 curl -sS 'http://localhost:8282/api/monitor/agents?workspace=LOCALMODE'
-curl -sS http://localhost:8282/api/workspaces/LOCALMODE/tasks/LOCALMODE-1/sessions
 curl -sS http://localhost:8282/api/workspaces/LOCALMODE/tasks/LOCALMODE-2/sessions
+curl -sS http://localhost:8282/api/workspaces/LOCALMODE/tasks/LOCALMODE-3/sessions
 ```
 
 Check the container logs:
@@ -299,7 +334,7 @@ This means the daemon did not publish a FleetDB `agent-sessions` record with
 the claimed task ID, or the UI/API could not query it. Check:
 
 ```sh
-curl -sS http://localhost:8282/api/workspaces/LOCALMODE/tasks/LOCALMODE-2/sessions
+curl -sS http://localhost:8282/api/workspaces/LOCALMODE/tasks/LOCALMODE-3/sessions
 make local-mode-logs
 ```
 
@@ -378,3 +413,10 @@ This runbook should remain aligned with distributed mode:
 - Containers provide packaging and isolation only.
 - Any missing endpoint or artifact should be fixed in the shared FleetDB or
   Loom API path, not by adding a local-only UI fallback.
+
+## Related
+
+- [../testing-terminology.md](../testing-terminology.md) — what "local", "real" and "deterministic" mean here; a `localdogfood` run is stack validation only
+- [dogfood-playwright-coverage.md](dogfood-playwright-coverage.md) — which findings from this harness are automated
+- [README.md](README.md) — testing docs index
+- `.agent-skills/loom-pr-test/SKILL.md` — the runbook that drives this stack for PR verification

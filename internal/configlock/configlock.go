@@ -1,3 +1,8 @@
+// Package configlock serializes load-mutate-save sequences over a loom config
+// directory by holding a blocking exclusive advisory lock on its config.lock
+// file, so two loom processes cannot interleave and clobber each other's
+// writes. Thin policy layer over internal/lockfile; callers are internal/bootstrap
+// (state cache), internal/stackstore, and epic reconcile.
 package configlock
 
 import (

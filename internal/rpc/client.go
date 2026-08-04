@@ -1,3 +1,9 @@
+// Package rpc is the client half and wire protocol of the local loom daemon's
+// unix-socket RPC — the issue-tracker operation family (create/close/list,
+// dependencies, gates, mutation streams), the request/response payload types,
+// socket-path resolution, token auth, and the daemon's request metrics.
+// Everything that reads or writes issues through the daemon goes via
+// rpc.Client, which internal/webui/daemon pools on the web UI's behalf.
 package rpc
 
 import (

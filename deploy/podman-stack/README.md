@@ -1,8 +1,16 @@
 # podman-stack — local distributed-topology e2e stack
 
+> **Status:** Current · *audited 2026-08-03*. Ports, env names, resource caps,
+> startup ordering, and the acceptance stages were checked against
+> `compose.yaml`, `compose.codex.yaml`, `env.template`, `build.sh`, and
+> `scripts/test-podman-stack.sh`. The one unverifiable claim (the "T3/T4
+> shape") is marked inline below.
+
 A LOCAL, resource-capped podman stack that emulates the DISTRIBUTED Loom
-topology (RUNTIME-AND-DEPLOYMENT.md T3/T4 shape) for real platform e2e
-testing — loom-dev deploys are off-limits for that. This is also the first
+topology for real platform e2e testing — loom-dev deploys are off-limits for
+that. (UNVERIFIED: this shape is cited elsewhere as the "T3/T4 shape" from
+`RUNTIME-AND-DEPLOYMENT.md`; that file does not exist in this repo, has no git
+history here, and the tiers are not defined anywhere in-tree.) This is also the first
 **codified** deployment of the serve + fleet-db pairing (the loom-dev box is
 hand-rolled binaries + systemd).
 
@@ -34,20 +42,48 @@ podman compose --env-file .env up -d
 podman compose --env-file .env down --volumes
 ```
 
-Prereqs: podman (machine running on macOS), Go toolchain, rsync, curl, jq,
-openssl, and a host-built flue dist (`cd flue && pnpm install && pnpm build`).
+Prereqs: `go`, `podman`, `rsync` (hard-required by `build.sh:36-38`), plus
+curl, jq and openssl for the driver script — and **sibling `fleet-db` and
+`flue` checkouts** with a host-built flue dist.
+
+`build.sh` resolves both siblings one level up from the loomcli repo —
+`$LOOMCLI_REPO/../fleet-db` and `$LOOMCLI_REPO/../flue`
+(`build.sh:28-29`) — and dies if either is missing (`build.sh:41-42`). Other
+harnesses in this repo default to `../../fleet-db`, so set the vars rather than
+relying on layout:
+
+```sh
+export FLEET_DB_REPO=/path/to/fleet-db
+export FLUE_REPO=/path/to/flue
+(cd "$FLUE_REPO" && pnpm install && pnpm build)   # build.sh:47-50 requires dist/flue.js
+```
 
 ## Startup ordering (fleet-db before loomcli)
 
 `depends_on` conditions enforce: `redis (healthy)` → `fleet-auth-seed
 (completed)` → `fleet-db (healthy /readyz)` → `loom-serve (healthy
-/api/health)` → `worker`, `stub-upstream`.
+/api/health)` → `worker` (`compose.yaml:66`, `:84`, `:115`, `:198`).
+`stub-upstream` is **not** in that chain — its service block carries no
+`depends_on` (`compose.yaml:214-234`), so it boots in parallel with redis.
+The real coupling runs the other way: `compose.e2e.yaml:33` points serve's
+`LOOM_CONNECTOR_GITHUB_BASE_URL` at `http://stub-upstream:8080`.
 
-**fleet-db MUST be ready before loom serve starts.** If `LOOM_FLEET_DB_URL`
-does not answer at serve startup, serve falls back to spawning an *embedded*
-fleet-db subprocess inside its own container — the stack then "works" but you
-are silently testing the wrong topology (and the embedded instance has no
-auth seeding). Never start `loom-serve` with `--no-deps`.
+**fleet-db MUST be ready before loom serve starts.** `compose.yaml:129` pins
+`LOOM_FLEET_DB_URL: http://fleet-db:8080` on loom-serve, which puts serve in
+**cloud mode** (`bootstrap.DetectMode` returns `ModeCloud` whenever that var
+is non-empty, `internal/bootstrap/mode.go:51-58`). In cloud mode serve is a
+pure fleet-db HTTP client (`internal/bootstrap/openstore.go:101-102`,
+`:112-120`) — it never spawns an embedded fleet-db, and
+`Containerfile.loom-serve` ships no fleet-db binary for it to spawn anyway.
+The client is built without a connectivity probe, so serve can come up and
+answer `/api/health` while fleet-db is down; every store-backed call
+(workspaces, issues, sweepers, worker registration) then fails with
+connection errors. Never start `loom-serve` with `--no-deps`: you get a
+serve that looks healthy but errors on all fleet-db traffic.
+(The embedded fleet-db fallback is real code, but only in **local mode** —
+`LOOM_FLEET_DB_URL` unset, `internal/bootstrap/openstore.go:122-143` — which
+this stack never enters, and where `StartEmbedded` is the sole embedded
+entry point, `internal/bootstrap/openstore.go:128`.)
 
 The one-shot `fleet-auth-seed` service writes the API key and the actor's
 global role directly into Redis (`fleet-db:auth:apikey:<key>`,
@@ -104,6 +140,18 @@ All secrets live in `.env` (gitignored, 0600), generated **per run** by
 | `LOOM_STACK_WORKER_BACKEND` | *(empty)* | AI backend for `loom worker` replicas |
 | `LOOM_STACK_FRONTEND_URL` | `http://127.0.0.1:18282` | CORS origin(s), comma-separated |
 | `FLEET_LOG_LEVEL` | `info` | fleet-db log level |
+| `LOOM_STACK_TASK_RUNNER_CMD_JSON` | *(empty)* | `LOOM_DRIVER_TASK_RUNNER_CMD_JSON` on serve — JSON argv for the driver task-runner invoker (`compose.yaml:162`). Empty = no runner wired |
+| `LOOM_STACK_CODEX_RW_DIR` | `/home/node/.codex-rw` | writable `CODEX_HOME` the serve entrypoint mirrors the read-only host `~/.codex` into (`compose.yaml:163`) |
+| `LOOM_STACK_FLUE_AGENT_MODEL` | *(empty)* | `LOOM_FLUE_AGENT_MODEL` on serve, for codex-backed runs (`compose.yaml:167`) |
+| `LOOM_STACK_CODEX_HOST_DIR` | **required** by `compose.codex.yaml` only | host `~/.codex` dir bind-mounted read-only at `/home/node/.codex`; declared `:?` so compose aborts if unset (`compose.codex.yaml:41`) |
+
+The last four are the A1 codex-review knobs. They are inert in the base
+stack (empty/defaulted) and are set for you by
+`scripts/test-a1-review-multi-container.sh:350-355`, which layers the
+A1-only overlay `compose.codex.yaml` on top of `compose.yaml` (`:59`).
+That overlay supplies the host `~/.codex` read-only bind and the codex
+runner command; the base stack and the acceptance suite must boot without
+any host `~/.codex` dependency (`compose.yaml:176-181`).
 
 Wiring inside compose (fixed, not in `.env`): serve gets
 `LOOM_ISSUE_BACKEND=fleetdb`, `LOOM_FLEET_DB_URL=http://fleet-db:8080`,
@@ -176,9 +224,12 @@ machine arch — no Go toolchain in any image):
 - **serve healthy but issues/workspaces 401/403** — the auth seed didn't run
   (e.g. you recreated the redis volume without re-running
   `fleet-auth-seed`): `podman compose --env-file .env up fleet-auth-seed`.
-- **serve "works" without fleet-db** — you started loom-serve with
-  `--no-deps` or fleet-db was down at serve start; serve spawned an embedded
-  fleet-db. Restart loom-serve after fleet-db is healthy.
+- **serve healthy but every issue/workspace call fails with connection
+  refused** — fleet-db is down or you started loom-serve with `--no-deps`.
+  Serve never falls back to an embedded fleet-db while `LOOM_FLEET_DB_URL`
+  is set (see [Startup ordering](#startup-ordering-fleet-db-before-loomcli));
+  the store client is created without a probe, so serve comes up regardless.
+  Bring fleet-db healthy, then restart loom-serve.
 - **flue build errors inside serve** (`dist/flue.js` missing at image build)
   — build flue on the host first: `cd flue && pnpm install && pnpm build`,
   then re-run `./build.sh`.
@@ -226,3 +277,19 @@ auth-denial to required network-denial once the exec plane moves to an
 internal network; `LOOM_STACK_REQUIRE_WORKER=0` downgrades worker
 registration evidence; `KEEP_STACK=1` keeps the stack and the suite's tmp
 workspace for post-mortem.
+
+## Related
+
+- [`../README.md`](../README.md) — the real production deployment reference
+  (this stack is a **test** topology, not a deployment target)
+- [`../../AGENTS.md`](../../AGENTS.md) — driver-runtime auth
+  (`LOOM_RUN_TOKEN`, `LOOM_DRIVER_LEGACY_AUTH_ENV`) and the sandbox / egress
+  posture this stack exercises
+- [`../../sdk/README.md`](../../sdk/README.md) — the token-only SDK the workflow
+  bundles here are built against
+- [`../../docs/testing/README.md`](../../docs/testing/README.md) — where this
+  stack sits among the other harnesses
+- [`../../docs/loom-glossary.md`](../../docs/loom-glossary.md) — **fleet mode**
+  vs **fleet-db**, **control plane**, **worker**, **task run**, **connector**
+- [`../../e2e/README.md`](../../e2e/README.md) — the single-container E2E image
+  (different job: no distributed topology)

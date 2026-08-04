@@ -1,3 +1,7 @@
+// Package agentinbox enqueues a message into a target agent's fleet-db inbox
+// (store.AgentInboxMessages) and derives content-hash dedupe keys so a redelivered
+// message collapses onto one row. Called by internal/leadcontrol to hand epic
+// assignments and replies to a lead, and by internal/driver's outbox dispatcher.
 package agentinbox
 
 import (

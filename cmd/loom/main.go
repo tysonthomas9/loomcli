@@ -1,3 +1,9 @@
+// Command loom is the CLI entrypoint. It blank-imports every internal/cli/*
+// sub-package so each one registers its subcommands via init(), additionally
+// registers the sdk-only internal/cli/data sub-tree (which cannot import
+// internal/cli, so it cannot self-register), and hands control to
+// cli.Execute. All behavior lives in internal/cli and its sub-packages;
+// this package only wires them together.
 package main
 
 import (

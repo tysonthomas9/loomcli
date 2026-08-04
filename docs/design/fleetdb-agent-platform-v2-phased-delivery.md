@@ -1,124 +1,121 @@
 # FleetDB Agent Platform V2 Phased Delivery Proposal
 
-**Status:** Phased proposal for review
-**Date:** 2026-06-03
-**Related:**
-- `docs/design/fleetdb-agent-platform-v2-proposal.md`
-- `docs/design/fleetdb-agent-platform-v2-execution-topology-addendum.md`
-- `docs/design/flue-daytona-fleetdb-v1-proposal.md`
-- `docs/design/flue-daytona-runtime-proposal.md`
-- `docs/product/loom-typescript-sdk-spec.md`
+> **Status:** Partially implemented — Phases 0–3 and 6 shipped, 5 shipped on a
+> different route, 4 partial. See the per-phase table below. *audited 2026-07-23*
+> **Date:** 2026-06-03
+> **Related:**
+> - [`workflow-driver-authoring-guide.md`](workflow-driver-authoring-guide.md) —
+>   the current platform contract; read this first.
+> - [`fleetdb-agent-platform-v2-proposal.md`](fleetdb-agent-platform-v2-proposal.md)
+> - [`fleetdb-agent-platform-v2-execution-topology-addendum.md`](fleetdb-agent-platform-v2-execution-topology-addendum.md)
+> - [`taskrun-queue-and-worker-pool.md`](taskrun-queue-and-worker-pool.md)
+> - [`driver-op-http-api.md`](driver-op-http-api.md)
+> - [`flue-daytona-fleetdb-v1-proposal.md`](flue-daytona-fleetdb-v1-proposal.md),
+>   [`flue-daytona-runtime-proposal.md`](flue-daytona-runtime-proposal.md), and
+>   [`../product/loom-typescript-sdk-spec.md`](../product/loom-typescript-sdk-spec.md)
+>   — the V1 predecessors. All three are pointer stubs: the full text lives only
+>   on the unmerged `origin/flue-runtime` branch.
 
-## Implementation Audit - 2026-06-06
+## Phase Status - 2026-07-23
 
-The current implementation is not yet the full V2 contract. Recent audit work
-closed the critical early-platform gaps:
+Every phase below was audited against source on 2026-07-23. Two phases shipped
+in a shape the phase text does not describe; read the RESHAPED notes before
+using this document as a spec.
 
-- FleetDB `CompleteTaskRun(close_task=true)` now writes the same `issue.close`
-  event shape used by manual issue close, and replaying the same completion does
-  not duplicate the event.
-- Loom now registers already-built native Flue artifacts with
-  `loom driver register --flue-dist ./dist`, records `dist/server.mjs` in
-  `server_ref`, and the default Node runner executes that built artifact
-  through a local IPC launcher. The removed `loom driver publish` path no longer
-  generates hidden Flue projects or adapters. An opt-in real Flue CLI smoke
-  exists for installed toolchains:
-  `LOOM_REAL_FLUE_TEST=1 go test ./internal/driver -run TestRealFlue`.
-  The default executor intentionally does not call `flue run`, because
-  `flue run` rebuilds at execution time and owns only process-local run history;
-  Loom's durable run path verifies and executes the already-registered
-  `server_ref` artifact.
-- FleetDB `TaskRun` now records `worker_profile_id`, `runner_placement`, and
-  `sandbox_placement` as durable fields; `WorkerProfile` records
-  `runtime_policy` and `max_parallel`.
-- FleetDB exposes an atomic queued `TaskRun` claim API with worker-profile
-  eligibility, node drain/expiry checks, node capacity enforcement,
-  `WorkerProfile.max_parallel` enforcement, runner placement, and sandbox
-  placement. Redis, Postgres, HTTP API, client, and OpenAPI surfaces are
-  covered.
-- Loom child task execution now creates queued task runs, claims them through
-  the TaskRun store contract, and executes/heartbeats/finishes with the claimed
-  node, lease, fencing token, and placement payload.
-- Loom worker runtimes can now claim an already queued FleetDB `TaskRun` and
-  execute it through the same host task-runner bridge via hidden
-  `loom driver work-task-run`. This gives cloud/remote workers a concrete
-  one-shot claim/heartbeat/finish surface without requiring parent DriverRun
-  credentials.
-- FleetDB exposes stale `DriverRun` recovery that fails heartbeat-expired
-  running runs without owner credentials and releases active-epic admission;
-  Redis and Postgres storage paths plus HTTP API/client surfaces are covered.
-  Loom's driver executor loop invokes that recovery before claiming queued
-  runs.
-- FleetDB stale `TaskRun` recovery re-checks Redis heartbeats immediately before
-  failing a run, which prevents a live heartbeat after the stale scan from being
-  overwritten by recovery.
-- Loom now preflights `providerProfile` before creating a child `TaskRun`.
-  Built-in noop profiles stay local, `flue-daytona` maps to explicit Flue runner
-  and Daytona sandbox placement when a host task-runner command is configured,
-  and unsupported/local profiles fail before a child attempt is persisted.
-- FleetDB now exposes a registered trigger-route ingress path that resolves an
-  enabled `TriggerBinding` by `route_key`, records a `TriggerEvent`, queues the
-  pinned `DriverRun`, and records a dispatched `TriggerDelivery`. The existing
-  epic-run endpoint shares this dispatcher.
-- Cloud/non-local `TaskRun` completion now rejects required artifacts with local
-  `file://`, `local:`, or Daytona-local URI schemes. Redis, Postgres, and Loom
-  memstore paths still allow local artifacts for local/noop runs but require
-  server-visible artifact refs for non-local sandbox providers.
-- Loom host task-runners can now return finalized artifact descriptors
-  (`artifacts`, `artifact_descriptors`, or `artifactDescriptors`) with
-  server-visible URI/hash metadata. Loom registers/finalizes those artifacts
-  before returning `TaskRunResult.artifactIds`, so the explicit Flue driver SDK
-  can pass them through the existing FleetDB artifact gates.
-- FleetDB artifact content uploads now support a configurable HTTP object
-  backend (`FLEETDB_ARTIFACT_CONTENT_BACKEND=http`) in addition to the local
-  file store. The HTTP backend writes content-addressed objects with PUT,
-  returns server-visible URI/hash metadata, and verifies finalized HTTP(S)
-  artifacts by re-reading and hashing the object.
-- Loom driver and host task-runner subprocesses now start from a scoped base
-  environment instead of inheriting the full parent process environment. Broad
-  FleetDB, model-provider, cloud-provider, GitHub, token, password, secret, and
-  git-config credentials are stripped before per-run protocol variables are
-  appended.
-- Loom driver runtimes now expose an explicit child-CLI FleetDB handoff
-  namespace (`LOOM_DRIVER_FLEET_DB_*`). The `@loom/sdk/flue` helper translates
-  that namespace back to the standard FleetDB bootstrap variables only for the
-  child `loom driver ...` command, so cloud-mode child commands do not depend on
-  broad parent environment inheritance.
-- Loom driver runtimes now preserve the configured host task-runner command
-  (`LOOM_DRIVER_TASK_RUNNER_CMD_JSON` or `LOOM_DRIVER_TASK_RUNNER_CMD`) inside
-  the scoped runtime environment. That lets a real Flue-executed driver request
-  non-noop child `TaskRun`s through the host bridge instead of silently losing
-  the runner command at the sandbox boundary.
-- Native Flue driver execution now attaches Flue runner output to the completed
-  `DriverRun.output` (`logs_ref`, captured log tail, and event count), while
-  child task logs/artifacts attach to the child `TaskRun` records.
-- `scripts/test-real-flue-epic-runner.sh` is an opt-in full-stack MVP harness:
-  it builds local `loom` and `fleet-db` binaries, starts real Redis and FleetDB,
-  seeds an `A -> B,C -> D` epic, registers a real Flue-built driver, runs
-  `loom serve` with the driver executor enabled, and asserts all child tasks and
-  child `TaskRun`s complete in dependency order.
+| Phase | Status | Evidence |
+|---|---|---|
+| 0 Contract lock | SHIPPED | Loom adds no scheduler — verified in this repo (no Loom-side task scheduler; recovery only, see "Genuinely open"). The fleet-db half (`fleet-db/internal/storage/claim.go`) is UNVERIFIED from this tree: fleet-db is a separate repository. |
+| 1 Local dynamic driver MVP | SHIPPED | `loom driver register --flue-dist` (`internal/cli/driver/driver_cmd.go:51-65`, flag at `:102`, `--activate` at `:109`); immutable versions (`internal/driver/register.go:460-478`). |
+| 2 One task end-to-end | SHIPPED, RESHAPED | `TaskRun` is durable (`internal/domain/platform.go:498-539`), but `taskRuns.request()` **enqueues** rather than executing (`sdk/driver.js:308`). |
+| 3 Epic loop + lead handoff | SHIPPED, RESHAPED | The builtin epic-runner is watch-driven, not a synchronous loop (`internal/workflows/builtin/epic-runner.ts:41-52`). |
+| 4 Cloud scale-out | PARTIAL | Run-scoped HS256 tokens shipped (`internal/driver/run.go:253`); bundle object storage did not (`internal/driver/executor.go:642`). |
+| 5 Registered endpoints | SHIPPED ON A DIFFERENT ROUTE | `POST /api/workspaces/{ws}/workflows/{name}` and `/versions` (`internal/webui/handlers/workflows/module.go:39-40`), not `POST /epics/{id}/runs`. Idempotency-key reuse (`internal/infra/memstore/platform_driver_run.go:55-62`) and one-active-run-per-epic (`:63-69`) are enforced in the store, not the route. |
+| 6 Hardening | SHIPPED BEYOND SPEC | Container sandbox + egress modes (`internal/driver/sandbox/`), driver trust levels (`internal/domain/platform.go:49-62`), connector grants and audit (`internal/connector/dispatch.go:310`). |
 
-Known remaining validation:
+### Why the executor never shells out to `flue run`
 
-- Run the opt-in real local Flue toolchain smoke in an environment with the
-  matching `flue` CLI and runtime dependencies installed. The default coverage
-  intentionally uses deterministic fake Flue builders and built-server runner
-  tests.
-- Run `scripts/test-real-flue-epic-runner.sh` with a built real Flue CLI
-  available on `PATH`, or with `LOOM_FLUE_BUILD_CMD_JSON` pointing at a built
-  Flue checkout. The local `../flue` checkout is not sufficient until
-  `packages/cli/dist/flue.js` has been generated.
-- Full V2 cloud readiness remains open: provider-specific runtime adapters
-  beyond the initial preflight mapping, managed cloud worker placement/capacity
-  beyond the one-shot queued worker command, webhook
-  signature/filter/schedule providers beyond generic route ingress, scoped
-  per-run credential minting, native cloud object-store adapters and operational
-  object-store configuration, UI/ops surfaces, and phase-level end-to-end
-  acceptance still need dedicated implementation and validation.
-- Server-side minting of short-lived per-run FleetDB tokens is still open. The
-  task-run claim path now creates and verifies per-run lease tokens for claim,
-  heartbeat, finish, and completion, but this is not yet FleetDB API-key
-  minting/revocation for remote worker bootstrap.
+Carried over from the 2026-06-06 implementation audit that this section
+replaced, and re-verified on 2026-07-24. `flue run` rebuilds the project at
+execution time and owns only process-local run history. Loom's durable run path
+needs the opposite: it verifies an *already registered* artifact and executes
+that exact bytes-on-disk. `loom driver register --flue-dist ./dist` records
+`dist/server.mjs` in the manifest's `server_ref`
+(`internal/driver/register.go:631`, rejected if it is anything else at `:685`),
+and at run time `verifyBundleManifest` re-hashes the whole bundle tree and
+fails on a digest mismatch before the server path is handed to the runner
+(`internal/driver/executor.go:611-639`). Shelling out to `flue run` would break
+that pin. The real-`flue` CLI path exists only as an opt-in smoke
+(`LOOM_REAL_FLUE_TEST=1`, `internal/driver/flue_integration_test.go:26`). The
+older `loom driver publish` command, which the 2026-06-06 audit records as
+generating hidden Flue projects and adapters, no longer exists — there is no
+`publish` subcommand under `internal/cli/driver/`.
+
+### What Phase 6 delivered that this document never asked for
+
+- Webhook HMAC verification (`domain.TriggerBinding.WebhookSecret`,
+  `internal/domain/platform.go:234-236`), cron bindings with timezone
+  (`:251-254`), and actor-filter loop protection with hop-depth accounting
+  (`:241-243`, `:290-292`). Routes at
+  `internal/webui/handlers/webhooks/module.go:45-49`.
+- Run-scoped bearer auth for the driver-op HTTP API — see
+  [`driver-op-http-api.md`](driver-op-http-api.md) and `AGENTS.md` § Driver Runtime Auth.
+- `TaskRun` retry-then-park with an attempt budget
+  (`internal/driver/task_retry.go`), and the always-on stale-task sweeper
+  (`internal/cli/serve/serve_loops.go:25-30`).
+
+### Genuinely open
+
+Three V2 data-model/runtime gaps are still open. This list is not the whole
+open set — the validation notes below, and Steps 5 and 7 of the
+[topology addendum](fleetdb-agent-platform-v2-execution-topology-addendum.md)
+(capacity reservation, endpoint registration pinning, cloud artifact
+durability), are also open. The three data-model/runtime gaps:
+
+- **Generic `Lease` resource.** Never built. Leases are per-resource:
+  `domain.AgentLease` (`internal/domain/control_plane.go:167`),
+  `domain.AgentOwnershipLease` (`:182`), plus inline `LeaseID`/`FencingToken`
+  fields on `DriverRun` (`internal/domain/platform.go:407-408`) and `TaskRun`
+  (`:513-514`).
+- **`ActionLedger`.** Never built in this repo. Only the FK string
+  `DriverStep.ActionLedgerID` exists (`internal/domain/platform.go:469`),
+  plumbed through memstore and the fleet-db client; there is no `ActionLedger`
+  type and no `ActionLedgerStore`. The shipped idempotent-side-effect mechanism
+  is `domain.ConnectorCallRecord` (`internal/domain/connector.go:253`), written
+  by `internal/connector/dispatch.go` for granted and refused outcomes alike.
+- **Bundle object storage.** Driver bundles still stage under the workspace work
+  dir (`internal/driver/register.go:413`, `:443`) with no object-store backend
+  (`internal/driver/executor.go:642`).
+
+### Validation notes still standing
+
+- The opt-in real local Flue toolchain smoke
+  (`LOOM_REAL_FLUE_TEST=1 go test ./internal/driver -run TestRealFlue`,
+  `internal/driver/flue_integration_test.go:25`) needs an environment with the
+  matching `flue` CLI installed. Default coverage uses deterministic fake Flue
+  builders and built-server runner tests.
+- `scripts/test-real-flue-epic-runner.sh` needs a built real Flue CLI on `PATH`
+  or `LOOM_FLUE_BUILD_CMD_JSON` pointing at a built Flue checkout
+  (`scripts/test-real-flue-epic-runner.sh:45-78`). It seeds the `A -> B,C -> D`
+  DAG (`:293-296`), registers with `--flue-dist` (`:321`), and runs with
+  `LOOM_DRIVER_EXECUTOR=1` (`:328`).
+- **fleet-db-side contract, not loomcli behavior:** artifact content uploads
+  support a configurable HTTP object backend
+  (`FLEETDB_ARTIFACT_CONTENT_BACKEND=http`) that writes content-addressed
+  objects with PUT and verifies finalized HTTP(S) artifacts by re-reading and
+  hashing. UNVERIFIED from this repo: no loomcli code reads that env var. The
+  only place it appears outside this document is the local-mode compose fixture,
+  which sets it to `local` (`test/local-mode/docker-compose.yml:49`).
+- **Re-scoped:** short-lived per-run token minting is no longer open on the Loom
+  side. Loom mints run-scoped HS256 JWTs at claim (`internal/driver/run.go:253`,
+  signing key at `:208`, TTL at `:215`), and the task-run claim path creates and
+  verifies per-run lease tokens. What remains open is **fleet-db API-key
+  minting and revocation for remote worker bootstrap**, which is a different
+  problem.
+- Cloud readiness still needs: provider-specific runtime adapters beyond the
+  preflight mapping, managed cloud worker placement/capacity beyond the one-shot
+  `loom driver work-task-run` command
+  (`internal/cli/driver/exec_cmd.go:67-72`), native cloud object-store adapters,
+  UI/ops surfaces, and phase-level end-to-end acceptance.
 
 ## Purpose
 
@@ -198,7 +195,7 @@ operator views only after the core flow is proven.
 | 2 | One task end-to-end | Driver claims one FleetDB task and completes it through Flue + Daytona patch-back |
 | 3 | Epic loop with lead handoff | Driver drains an epic through FleetDB dependencies, or returns control to lead |
 | 4 | Cloud scale-out | Cloud Loom/FleetDB provisions many Flue-Daytona task runs safely |
-| 5 | Registered endpoints | A pinned DriverVersion backs `POST /epics/{epic_id}/runs` |
+| 5 | Registered endpoints | A pinned DriverVersion backs a Loom-owned run-creation route (shipped as `POST /api/workspaces/{ws}/workflows/{name}`, not `/epics/{epic_id}/runs`) |
 | 6 | Hardening | Capabilities, approvals, operator recovery, and policy controls |
 
 ## Phase 0: Lock The Contract
@@ -317,12 +314,28 @@ the existing task-completion path.
 
   This delegates to FleetDB's existing claim behavior.
 
-- Driver SDK method (synchronous: it runs the agent + patch-back via the trusted
-  `loom` binary and returns a `TaskRunResult` — there is no separate `wait`):
+- Driver SDK method. **Corrected 2026-07-23:** this was written as synchronous
+  ("runs the agent + patch-back and returns a `TaskRunResult`, there is no
+  separate `wait`"). Commit `491222e25` inverted it. `request()` enqueues a
+  `queued` `TaskRun` and returns; a serve-side worker pool executes it:
 
   ```ts
-  const result = await loom.taskRuns.request({ taskId, providerProfile: "flue-daytona" });
+  // enqueues; does not execute. sdk/driver.js:308 sends enqueueOnly: true.
+  // `runner` is a runner NAME from the pinned driver version's manifest
+  // (the builtin epic-runner defaults to "local-task-runner",
+  // internal/workflows/builtin/epic-runner.ts:83) — NOT a provider profile.
+  const queued = await loom.taskRuns.request({ taskId, runner: "local-task-runner" });
+  // then either await the epic watch stream (preferred) or poll:
+  const result = await loom.taskRuns.await({ taskRunId: queued.taskRunId });
   ```
+
+  The public request field is `runner`, "the user-authored runner name declared
+  by the pinned driver version manifest ... the runtime strategy selector"
+  (`sdk/driver.d.ts:83-110`). `providerProfile` never made it into the public
+  SDK type; it survives Go-side only
+  (`internal/driver/task_request.go:206`, resolved at
+  `internal/driver/task_scheduling.go:197-238`). See
+  [`taskrun-queue-and-worker-pool.md`](taskrun-queue-and-worker-pool.md).
 
 - Child `TaskRun` linked to the parent `DriverRun`.
 - Flue + Daytona execution for the claimed task.
@@ -336,8 +349,9 @@ the existing task-completion path.
 DriverRun
   -> loom.tasks.claimReady(epic_id)
   -> FleetDB returns one claimed task or none
-  -> loom.taskRuns.request(task_id, flue-daytona)  # runs agent + patch-back
-  -> task agent produces patch/log artifacts, local Loom applies patch-back
+  -> loom.taskRuns.request(task_id)            # enqueues a queued TaskRun
+  -> serve TaskWorker claims it, runs agent + patch-back, finishes it
+  -> workflow observes the terminal TaskRun (epics.watch / taskRuns.await)
   -> loom.tasks.complete(task_id) -> FleetDB accepts completion
   -> dependency graph unlocks through existing FleetDB behavior
 ```
@@ -386,9 +400,13 @@ Prove the primary lead-agent workflow:
 ### Deliverables
 
 - Driver loop over `loom.tasks.claimReady({ epicId })`.
-- `loom.taskRuns.request({ taskId })` runs each task synchronously and returns
-  its `TaskRunResult` (status + exit code); the script then calls
-  `loom.tasks.complete` or `loom.tasks.release`.
+- **Corrected 2026-07-23:** `loom.taskRuns.request({ taskId })` does not run the
+  task synchronously. It enqueues. The shipped loop is edge-triggered: claim
+  ready tasks up to `maxConcurrency`, enqueue each as a `TaskRun`, and consume
+  the epic watch stream for terminal `TaskRun` events to top the pipeline back
+  up. There is no polling cadence and no per-batch barrier
+  (`internal/workflows/builtin/epic-runner.ts:41-52`). The script still calls
+  `loom.tasks.complete` or `loom.tasks.release` on the terminal event.
 - Parent-child visibility from `DriverRun` to child `TaskRun`s.
 - Driver terminal outcomes:
   - `completed`;
@@ -399,38 +417,20 @@ Prove the primary lead-agent workflow:
 
 ### Example Driver Shape
 
-```ts
-import { createLoomDriverClient } from "@loom/sdk/flue";
+The example that used to sit here was wrong in three ways at once — it imported
+from a subpath that does not exist (`@loom/sdk/flue`; the real one is
+`@loom/sdk/driver`, `internal/driver/register.go:24`), it passed
+`providerProfile` (not a public SDK field), and it treated `request()` as
+synchronous. Rather than maintain a second version of a working driver, read the
+shipped one:
 
-export async function run(ctx) {
-  const input = ctx.payload || {};
-  const loom = createLoomDriverClient({ input });
+- `internal/workflows/builtin/epic-runner.ts` — the epic drain loop, watch-driven.
+- `internal/workflows/builtin/github-review-agent.ts` — a non-epic driver.
 
-  while (true) {
-    const task = await loom.tasks.claimReady({ epicId: input.epicId });
-
-    if (!task) {
-      return loom.completed({ summary: "Epic drained" });
-    }
-
-    // request() runs the agent + patch-back and returns synchronously.
-    const result = await loom.taskRuns.request({
-      taskId: task.id,
-      providerProfile: "flue-daytona",
-    });
-
-    if (result.status === "completed") {
-      await loom.tasks.complete(task.id); // FleetDB unlocks dependents
-    } else {
-      await loom.tasks.release(task.id);
-      return loom.needsReview({
-        summary: `Task ${task.id} failed`,
-        taskRunId: result.id,
-      });
-    }
-  }
-}
-```
+Both begin `import { createLoomDriverClient } from '@loom/sdk/driver';`
+(`internal/workflows/builtin/epic-runner.ts:1`). The SDK's exported subpaths are
+`.`, `./runner`, `./driver`, and `./runtime-adapters` (`sdk/package.json:6-25`);
+there is no `./flue`.
 
 ### Proof
 
@@ -498,11 +498,27 @@ FleetDB and provisions many Flue-Daytona task runs.
 
 Allow a pinned dynamic driver to become an invocable product surface.
 
-Initial target:
+Initial target as written in 2026-06-03:
 
 ```text
 POST /epics/{epic_id}/runs
 ```
+
+**Corrected 2026-07-23:** that route was never registered in `loom serve`. What
+shipped is:
+
+```text
+POST /api/workspaces/{ws}/workflows/{name}           # create a run
+POST /api/workspaces/{ws}/workflows/{name}/versions  # register a version
+```
+
+(`internal/webui/handlers/workflows/module.go:39-40`; the frontend calls the
+first at `internal/webui/frontend/src/api/workflows/workflows.ts:44`.)
+`/epics/{id}/runs` survives only as a fleet-db client call behind
+`DriverRunStore.CreateEpic` (`internal/infra/fleetdb/platform.go:283`), which
+has no caller outside the store implementations and the CLI tracing wrapper.
+Read the `/epics/{epic_id}/runs` references in the rest of this phase as the
+workflows route.
 
 ### Deliverables
 
@@ -657,3 +673,17 @@ Only after that works should Loom expand into full epic loops, cloud scale,
 registered endpoints, and broad provider integrations. The guiding rule across
 all phases is that FleetDB remains the authority for task ownership and
 dependency unlocks.
+
+## Related
+
+- [`workflow-driver-authoring-guide.md`](workflow-driver-authoring-guide.md) —
+  the current platform contract for authors.
+- [`fleetdb-agent-platform-v2-proposal.md`](fleetdb-agent-platform-v2-proposal.md)
+  — the vision these phases decompose.
+- [`fleetdb-agent-platform-v2-execution-topology-addendum.md`](fleetdb-agent-platform-v2-execution-topology-addendum.md)
+  — executor placement, recovery, runner vs sandbox placement.
+- [`taskrun-queue-and-worker-pool.md`](taskrun-queue-and-worker-pool.md) — what
+  reshaped Phases 2 and 3.
+- [`driver-op-http-api.md`](driver-op-http-api.md) — the runtime control surface.
+- [`native-flue-driver-integration.md`](native-flue-driver-integration.md) —
+  Phase 1's registration contract.

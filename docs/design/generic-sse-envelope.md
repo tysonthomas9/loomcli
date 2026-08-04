@@ -1,6 +1,37 @@
 # Generic SSE Envelope Notes
 
-Date: 2026-05-15
+> **Status:** Current — implemented. *Audited 2026-07-24.*
+> Date: 2026-05-15
+
+Verified against source on 2026-07-24:
+
+- Envelope projection — `realtime.BackendMutationToPayload`
+  (`internal/webui/server/realtime/backend_adapter.go:19`) and
+  `realtime.RPCMutationToPayload`
+  (`internal/webui/server/realtime/handler.go:295`). The
+  byte-identical-output requirement is stated in the source comment
+  (`backend_adapter.go:16-18`) and enforced by
+  `internal/webui/server/realtime/backend_adapter_test.go`.
+- Browser stream and its token gate — `GET /api/workspaces/{ws}/events`
+  (`internal/webui/subscription/module.go:52`) and
+  `GET /api/workspaces/{ws}/events/token` (`module.go:55`).
+- fleet-db long-poll hop — `baseWorkspaceV2 + "/events/mutations"`
+  (`internal/backend/fleet/fleet.go:79`,
+  `internal/backend/fleet/fleet_batch_mutations.go:450`).
+- Embedded Redis pool defaults — `FLEET_REDIS_POOL_SIZE=100` /
+  `FLEET_REDIS_MIN_IDLE_CONNS=10` (`internal/bootstrap/embedded.go:37-41,597`);
+  the E2E harness raises the pool to 200
+  (`scripts/start-e2e-server.sh:100-101`).
+
+Scope note: this doc covers the *product browser* SSE stream only. Other SSE
+endpoints exist and are out of scope — e.g. driver-run streaming,
+`GET /api/workspaces/{ws}/runs/{runId}/stream`
+(`internal/webui/handlers/workflows/module.go:43`), and the driver SDK's epic
+watch stream (`sdk/driver.d.ts:403`).
+
+The "Validation" section at the end is a **2026-05-15 run log**, kept as
+evidence of what was checked then. Command lines and port numbers in it were not
+re-verified in this audit.
 
 ## Goal
 
@@ -38,12 +69,12 @@ The legacy `type` and `issue_id` fields remain for backward compatibility.
   the issue list.
 - There is one product browser SSE stream per workspace
   (`/api/workspaces/{ws}/events`). The server also keeps a backend mutation
-  long-poll open to FleetDB (`/api/v2/{ws}/events/mutations`) so it can feed
+  long-poll open to fleet-db (`/api/v2/{ws}/events/mutations`) so it can feed
   that browser stream. These are two different hops in one pipeline, not two
   browser SSE subscriptions.
 - Backend mutation long-polls are activated only after an authorized SSE token
   or stream request (`/events/token` or `/events`). Ordinary workspace REST
-  requests must validate workspace existence without starting a FleetDB mutation
+  requests must validate workspace existence without starting a fleet-db mutation
   subscriber. This keeps REST polling, page bootstrap calls, and background
   monitor refresh from opening idle backend long-polls for workspaces with no
   browser event stream.
@@ -54,16 +85,16 @@ The legacy `type` and `issue_id` fields remain for backward compatibility.
   mutation.
 - OpenAPI generated types need to match the SSE schema even though the stream is
   consumed directly by the browser client.
-- Embedded FleetDB needs a larger local Redis pool than FleetDB's production
+- Embedded fleet-db needs a larger local Redis pool than fleet-db's production
   default. The UI opens one browser SSE client but also performs ordinary
   workspace, monitor, and issue requests while the backend mutation long-poll is
-  active. Leaving FleetDB at its default pool of 10 caused `redis: connection
+  active. Leaving fleet-db at its default pool of 10 caused `redis: connection
   pool timeout` and 503 responses during agent-browser checks. Embedded startup
   now defaults `FLEET_REDIS_POOL_SIZE=100` and
   `FLEET_REDIS_MIN_IDLE_CONNS=10`; the E2E harness uses pool size 200.
 - When validating with `agent-browser`, use a named session and prefer UI-driven
   observations. Adding a second direct `EventSource` inside the same browser
-  session can create extra long polls against the embedded FleetDB stack; in the
+  session can create extra long polls against the embedded fleet-db stack; in the
   2026-05-15 check this produced Redis pool timeouts and the UI correctly showed
   its stale/reconnecting banner.
 
@@ -108,7 +139,7 @@ The legacy `type` and `issue_id` fields remain for backward compatibility.
     `/api/v2/E2E-WS/events/mutations`.
   - Opened `agent-browser --session sse-longterm` to the frontend and confirmed
     `/api/workspaces/E2E-WS/events/token` activated the backend subscriber and
-    started the FleetDB mutation long-poll.
+    started the fleet-db mutation long-poll.
   - Created issue `E2E-WS-1` through the UI. The Kanban and work queue showed
     `Open 1`, `Blocked 0`, and no stale/reconnect banner.
 - Multi-workspace and multi-client follow-up:
@@ -119,3 +150,13 @@ The legacy `type` and `issue_id` fields remain for backward compatibility.
     workspaces.
   - Re-ran app-level hub tests for duplicate issue IDs across workspaces and
     two-tab SSE independence.
+
+## Related
+
+- [`../loom-glossary.md`](../loom-glossary.md) — fleet-db vs fleet mode, and the
+  three senses of "backend"
+- [`../arch/README.md`](../arch/README.md) — as-built architecture index
+- [`workflow-driver-authoring-guide.md`](workflow-driver-authoring-guide.md) —
+  the separate driver-run event/stream endpoints
+- [`agent-run-visibility-plan.md`](agent-run-visibility-plan.md) — the operator
+  surfaces that consume these events

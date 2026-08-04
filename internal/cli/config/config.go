@@ -1,3 +1,10 @@
+// Package config projects fleet-db workspace, repo, agent, and daemon records
+// into the legacy LoomConfig/WorkspaceConfig DTOs that command code still reads,
+// overlaying machine-local checkout paths from bootstrap state and caching the
+// result for the duration of a command. It also resolves fleet server and
+// embedded fleet-db connection settings from env, and reads/writes the per-agent
+// checkpoint files kept in lock dirs. Read by most internal/cli/* subcommands
+// (daemon, agent, workspace, cleanup) and by the daemon supervisor.
 package config
 
 import (

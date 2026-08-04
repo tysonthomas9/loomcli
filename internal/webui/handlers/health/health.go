@@ -1,3 +1,9 @@
+// Package health serves the web UI's liveness, stats, metrics, and readiness
+// endpoints: /api/health (with a daemon-free variant), issue-count statistics,
+// SSE-hub and fleet claim metrics, and per-workspace runtime readiness — whether
+// a daemon or fleet runtime can actually run agent work right now. Stats and
+// readiness read either the daemon rpc pool or the fleet-db issue-tracker
+// backend (internal/backend). Registered by internal/webui/handlermux.
 package health
 
 import (

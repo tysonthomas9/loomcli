@@ -1,3 +1,8 @@
+// Package workspaceerrors defines the classified failure type for workspace
+// creation — a Code (AlreadyExists, PathNotFound, NotGitRepo, GitFailed,
+// ConfigFailed, SecurityViolation) plus message and wrapped cause — so callers
+// branch on the category instead of matching error strings. Produced by
+// internal/cli/serve/workspacemgr and mapped to HTTP status by internal/webui/service.
 package workspaceerrors
 
 import "fmt"

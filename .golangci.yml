@@ -219,17 +219,20 @@ linters:
       checks:
         - "all"
         - "-QF*"   # Disable quick-fix suggestions (stylistic, low value)
-        - "-ST1000" # Package comments are optional
         - "-ST1003" # Naming conventions are stylistic
         - "-ST1020" # Exported comment format is stylistic
         - "-ST1022" # Var/const comment format is stylistic
     revive:
       rules:
-        # Disable rules that are too noisy
+        # `exported` stays off: it is all-or-nothing across ~1115 exported structs and
+        # 105 interfaces, most of which never cross a package boundary. Documenting
+        # those would be filler. Cross-boundary types get a targeted check instead.
         - name: exported
           disabled: true
+        # `package-comments` is ON: every package under internal/ states what it owns
+        # and who calls it. Enabled once coverage was backfilled to 100%.
         - name: package-comments
-          disabled: true
+          disabled: false
         # Allow meaningful package names
         - name: var-naming
           arguments:
@@ -678,6 +681,11 @@ linters:
 
 issues:
   uniq-by-line: true
+  # golangci-lint defaults to max-same-issues=3 and max-issues-per-linter=50, which
+  # SILENTLY truncates. A gate that undercounts its own violations reports a smaller
+  # regression than actually exists, so report every one.
+  max-same-issues: 0
+  max-issues-per-linter: 0
 
 formatters:
   enable:

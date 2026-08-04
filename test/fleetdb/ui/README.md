@@ -1,8 +1,10 @@
 # UI FleetDB Regression Test Suite
 
 Side-by-side Playwright suite that proves the web UI renders identically
-when loom is backed by reference (`:8081`) vs fleet-db (`:8082`). Implements
-`docs/design/fleetdb-regression-report-2026-04-22/ui-test-plan.md`.
+when loom is backed by reference (`:8081`) vs fleet-db (`:8082`). Written
+against `docs/design/fleetdb-regression-report-2026-04-22/ui-test-plan.md`,
+which **is not in this repo** and has never been committed to it — the specs
+under this directory are the only surviving statement of the plan.
 
 ## What makes this different from the frontend e2e suite
 
@@ -28,8 +30,12 @@ checks, all must pass:
 8. `:8081/api/config` surfaces "reference" to the Settings page
 9. `:8082/api/config` surfaces "fleet" to the Settings page
 
-On every run the preflight rewrites the Step 0 table in
-`docs/design/fleetdb-regression-report-2026-04-22/webui-gaps.md` with actual results.
+On every run the preflight targets the Step 0 table in
+`docs/design/fleetdb-regression-report-2026-04-22/webui-gaps.md`
+(`_support/preflight.ts:23`) for rewriting with actual results. That file is
+**not in this repo either**; `writeStepZeroTable` returns early when it is
+missing, so the step is a no-op and the results land only in
+`artifacts/reports/preflight.json`.
 
 If the stack isn't up, preflight fails loudly with instructions — it
 NEVER "skips because no stack" (that's a silent-fallback vector; see
@@ -98,7 +104,7 @@ If ANY of the three shows zero on a write action, the test fails with
 
 ## Per-spec skeleton
 
-All 14 specs follow the shape in `_support/spec-harness.ts`:
+All 20 specs follow the shape in `_support/spec-harness.ts`:
 
 ```ts
 import { fleetdbTest as test, expect, useFleetDBHooks } from "./_support/spec-harness";
@@ -116,7 +122,7 @@ test("...", async ({ tabs, fleetSpy }) => {
 });
 ```
 
-## 14 spec files
+## 20 spec files
 
 | file | covers |
 |---|---|
@@ -130,10 +136,16 @@ test("...", async ({ tabs, fleetSpy }) => {
 | `08-dependencies.spec.ts` | add/remove dep, blocks chain |
 | `09-sse-realtime.spec.ts` | create in tab1, tab2 within 2x |
 | `10-create-flow.spec.ts` | full form submit |
+| `10-sse-reconnect.spec.ts` | catch-up after disconnect, 3 simultaneous clients reconnect |
 | `11-update-flow.spec.ts` | PATCH priority + description |
 | `12-close-reopen-flow.spec.ts` | close_reason display, reopen clears |
 | `13-search.spec.ts` | same query, same result set |
 | `14-error-handling.spec.ts` | 404, 422, 409 fleetdb-regression |
+| `15-issue-route-coverage.spec.ts` | every issue-backed view and API route is reachable |
+| `16-terminal-fleetdb.spec.ts` | terminal route, metadata, state, websocket attach |
+| `17-files-diff-fleetdb.spec.ts` | file tree/read/write + git diff on the fleet workspace mapping |
+| `18-agents-fleetdb.spec.ts` | agent monitor, sidebar, assignments, daemon-free controls |
+| `19-first-run-onboarding.spec.ts` | onboarding stays reachable through first-run detection |
 
 ## Known limitations
 

@@ -11,6 +11,7 @@
 //
 // FindLatestAgentSession matches that pattern; KillWorkspaceSessions sweeps
 // every session with a matching wsShort prefix.
+
 package terminal
 
 import (

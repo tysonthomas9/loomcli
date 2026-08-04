@@ -1,3 +1,9 @@
+// Package workspace resolves a workspace key (falling back to LOOM_WORKSPACE_ID)
+// and shortens it to the 8-character prefix that namespaces tmux session names,
+// so the CLI (internal/cli/automode) and the web UI (internal/webui/terminal,
+// appinfra) compute the same session name for the same workspace. Deliberately
+// dependency-free; not to be confused with internal/cli/workspace, which owns
+// agent/worktree target resolution.
 package workspace
 
 import "os"

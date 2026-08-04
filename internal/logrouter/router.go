@@ -1,3 +1,8 @@
+// Package logrouter tees an agent process's piped stdout into two size-rotating
+// log files at once: the agent's own log and the log for whichever task/phase
+// the agent's .agent.lock currently names, re-targeting as an fsnotify watcher
+// sees that lock change. Its only caller is internal/cli/serve/logroutercmd,
+// which exposes it as the hidden `loom log-router` command.
 package logrouter
 
 import (

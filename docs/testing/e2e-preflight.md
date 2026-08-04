@@ -1,14 +1,36 @@
 # E2E test preflight
 
-Shared setup for `e2e-cli.md` and `e2e-ui.md`. Run this once per testing session.
+> **Status:** Current · *audited 2026-08-03*
+
+Shared setup for [e2e-cli.md](e2e-cli.md) and [e2e-ui.md](e2e-ui.md). Run this
+once per testing session.
+
+This is the **manual** preflight. It is not what `make test-e2e-*` does — those
+targets are self-contained and provision their own server
+(`playwright.config.ts:65-92`). See
+[../testing-terminology.md](../testing-terminology.md) §Axis 3 for the
+distinction.
 
 ## Required binaries
 
+Both repos are built from source. `$LOOMCLI` is this checkout; `$FLEET_DB_REPO`
+is the fleet-db sibling checkout — the Makefile resolves it as
+`../fleet-db` or `../../fleet-db` and exports `FLEET_DB_BIN` when it finds a
+built binary there (`Makefile:475-481`).
+
+```bash
+LOOMCLI=$(git rev-parse --show-toplevel)
+FLEET_DB_REPO=${FLEET_DB_REPO:-$(cd "$LOOMCLI/.." && pwd)/fleet-db}
+```
+
 | Binary | How to build | Confirm |
 |---|---|---|
-| `loom` (CLI) | `cd /home/admin/codebase/2/loomcli && go build -o /tmp/loom-test ./cmd/loom` | `/tmp/loom-test --version` |
-| `fleet-db` | `cd /home/admin/codebase/fleet-db && go build -o /tmp/fleet-db ./cmd/fleet-db` | `/tmp/fleet-db --help \| head -1` |
+| `loom` (CLI) | `(cd "$LOOMCLI" && go build -o /tmp/loom-test ./cmd/loom)` | `/tmp/loom-test --version` |
+| `fleet-db` | `(cd "$FLEET_DB_REPO" && go build -o /tmp/fleet-db ./cmd/fleet-db)` | `/tmp/fleet-db --help \| head -1` |
 | `redis-server` (only for cloud-mode tests) | container image `redis:7-alpine` via podman | `podman --version` |
+
+Use a Go toolchain matching `go.mod` (currently `go 1.25.6`, `go.mod:3`); CI
+resolves it via `go-version-file` (`.github/workflows/ci.yml:27`).
 
 ## Cloud-mode infra (Phases A, B, D)
 
@@ -43,7 +65,6 @@ until curl -sf http://127.0.0.1:18095/healthz; do sleep 0.1; done; echo " ready"
 ## Loom env (cloud mode)
 
 ```bash
-export PATH=/home/admin/sdk/go1.25.6/bin:$PATH
 export LOOM_FLEET_DB_URL=http://127.0.0.1:18095
 export LOOM_FLEET_DB_ACTOR=tester
 export LOOM_CONFIG_DIR=/tmp/loom-e2e
@@ -63,9 +84,10 @@ LOOM=/tmp/loom-test
 
 ## Test-runner conventions
 
-Per the code-reviewer findings:
+This section is canonical for the manual E2E plans; [known-issues.md](known-issues.md)
+links here rather than repeating it.
 
-1. **Capture stdout and stderr separately** — `level=` log lines on stderr can leak into combined output and cause grep matches to silently pass on error paths. Pattern:
+1. **Capture stdout and stderr separately** — `level=` log lines on stderr can leak into combined output and cause grep matches to silently pass on error paths. Note that a blanket `grep -vE "level="` filter strips real errors too. Pattern:
 
     ```bash
     out_stdout=$($CMD 2>/tmp/test.err)
@@ -80,7 +102,9 @@ Per the code-reviewer findings:
 
 2. **Anchor success patterns** — `grep -qE "^Created workspace ACME$"` not `grep -q Created`.
 
-3. **Cross-check writes via curl** — don't trust the CLI's own read path to verify a CLI write. Always confirm against fleet-db's HTTP API.
+3. **Cross-check writes via curl** — don't trust the CLI's own read path to verify a CLI write. `loom role show` reads through the same client path as `loom role set`, so a stale-cache or wrong-endpoint bug round-trips silently. Always confirm against fleet-db's HTTP API.
+
+4. **Process-leak detection** — after each embedded-mode test, `pgrep fleet-db` must return zero. A non-zero count means a defer did not run (likely an `os.Exit` shortcut bypassing `cmdstore.WithStore`'s deferred `Close`). Same check as `e2e-cli.md` C6.
 
 ## Cleanup
 
@@ -92,3 +116,10 @@ rm -rf /tmp/loom-e2e /tmp/loom-e2e-embedded /tmp/loom-fdb.pid /tmp/loom-fleet-db
 # Sanity: no leaked subprocess fleet-db
 pgrep -a fleet-db || echo "no leaks"
 ```
+
+## Related
+
+- [e2e-cli.md](e2e-cli.md) — phases A/B/C/D/F, the CLI + curl matrix
+- [e2e-ui.md](e2e-ui.md) — phase E, the browser matrix
+- [known-issues.md](known-issues.md) — tracked defects and their regression guards
+- [../testing-terminology.md](../testing-terminology.md) — depth / realness / provisioning / polarity, and the trap words

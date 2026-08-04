@@ -20,7 +20,7 @@ export type UsageBackendSummary = components["schemas"]["UsageBackendSummary"];
 /** Daily cost entry. */
 export type UsageDailyCost = components["schemas"]["UsageDailyCost"];
 
-/** Full usage API response from GET /api/usage. */
+/** Full usage API response from GET /api/monitor/usage. */
 export type UsageResponse = components["schemas"]["UsageResponse"];
 
 /** Query parameters for the usage endpoint. */

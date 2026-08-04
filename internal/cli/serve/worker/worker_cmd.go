@@ -1,3 +1,8 @@
+// Package worker implements `loom worker`: the remote worker process that
+// registers with a `loom serve` control plane and runs tasks over HTTP-backed
+// lock, event and log interfaces, plus its `profile` and `service` subcommands
+// for editing WorkerProfile and agent-service records in the active workspace.
+// Registered into the root command by cmd/loom via a blank import.
 package worker
 
 import (

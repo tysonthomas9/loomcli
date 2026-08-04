@@ -1,3 +1,8 @@
+// Package daemon implements `loom daemon`: the long-running local supervisor
+// that reconciles a workspace's configured worker agents against running
+// processes, serves the control and agent-IPC Unix sockets, and brokers agent
+// task claim/update/complete calls to the issue backend. Launched from
+// cmd/loom; inspected by internal/cli/doctor and internal/cli/serve.
 package daemon
 
 import (

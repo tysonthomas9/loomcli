@@ -1,3 +1,9 @@
+// Package agentcontrol serves the workspace-scoped agent lifecycle HTTP routes
+// (start/stop/restart/yield, plus a bare agent list) by forwarding each one to
+// the local daemon's control socket through an injected callback. Wired only in
+// local-daemon serve mode, by internal/cli/serve/daemonwire and
+// internal/webui; the fleet-db-backed equivalents of the same routes live in
+// internal/webui/handlers/agents.
 package agentcontrol
 
 import "net/http"

@@ -1,10 +1,47 @@
 # Web Onboarding Spec
 
-**Status:** Draft
-**Date:** 2026-05-07
-**Related:** `docs/product/local-mode-product-spec.md`,
-`docs/product/agent-run-ux-spec.md`,
-`docs/product/desktop-app-runtime-spec.md`
+> **Status:** Aspirational — proposed 2026-05-07, not implemented as of
+> 2026-07-23. The server-driven onboarding described here was not built. What
+> shipped is a client-computed flow
+> (`internal/webui/frontend/src/components/OnboardingFlow/OnboardingFlow.tsx`)
+> over a prefilled sample repo. Of the 27 files in the File Plan, only
+> `OnboardingFlow.tsx` and its siblings exist; the entire server contract is
+> absent. Read this for the design rationale, not as a description of the
+> product. See "What actually shipped" below.
+
+**Last updated:** 2026-07-23
+**Related:** [`local-mode-product-spec.md`](local-mode-product-spec.md),
+[`agent-run-ux-spec.md`](agent-run-ux-spec.md),
+[`desktop-app-runtime-spec.md`](desktop-app-runtime-spec.md)
+
+## What actually shipped
+
+A client-computed onboarding flow, committed once (2026-05-07) and not
+revisited.
+
+- Step status enum is `complete | current | actionable | pending | blocked`
+  (`internal/webui/frontend/src/components/OnboardingFlow/OnboardingFlow.tsx:5-10`).
+  `pending` survived; `warning` / `error` / `unknown` were never added.
+- Step state is computed in the client (`App.tsx`), not server-side. There is
+  no `ComputeOnboardingStatus` and no `OnboardingStatusData` anywhere in the
+  repo.
+- The flow is prefilled against a sample repo: `octocat/Hello-World`,
+  workspace name `Hello-World`, agent `planner`, role `plan`
+  (`internal/webui/frontend/src/utils/onboardingDefaults.ts:1-7`).
+- The onboarding module registers exactly **one** route:
+  `POST /api/workspaces/{ws}/onboarding/first-task`
+  (`internal/webui/handlers/onboarding/module.go:26`). Neither
+  `GET /api/onboarding/status` nor
+  `GET /api/workspaces/{ws}/onboarding/status` exists.
+- `/api/backends` is unchanged. `ops.BackendHealth` is still `name`,
+  `display_name`, `available`, `installed`, `api_key_set`, `version`,
+  `message` (`internal/ops/backendops.go:10-19`), served verbatim at
+  `internal/webui/app/routes.go:54`. No `authenticated`, `ready`,
+  `install_actions`, `login_actions`, or `env_vars`.
+- Dismissal is workspace-scoped local storage plus a restart event:
+  `wsSet(workspaceId, "onboarding-dismissed", "1")` and
+  `loom:onboarding-restart`
+  (`internal/webui/frontend/src/utils/onboardingState.ts:3-4,14-26`).
 
 ## Purpose
 
@@ -32,20 +69,20 @@ The product outcome is not "the checklist is complete." The outcome is:
 
 ## Current Gaps
 
-The following are concrete frictions a new user hits today. File references
-are anchors for implementation.
+The following were concrete frictions a new user hit in 2026-05. Rechecked
+2026-07-23; three rows are no longer true and are marked.
 
-| Gap | Where |
-|---|---|
-| Bare "No workspaces" inline `<p>` with no context | `internal/webui/frontend/src/components/RedirectToWorkspace/RedirectToWorkspace.tsx` (lines 82-130) |
-| Two parallel zero-workspace surfaces with different copy and different CTAs | `RedirectToWorkspace` (inline `<p>`) vs. `EmptyState` "no-workspaces" variant (references CLI `loom init`); the latter is currently dead code |
-| Empty Kanban board names "New issue" but does not show the button | `internal/webui/frontend/src/components/EmptyWorkspaceBoard/EmptyWorkspaceBoard.tsx` |
-| `NoBackendsEmptyState` says "Configure a backend" but Settings has no add flow | `internal/webui/frontend/src/components/TerminalView/layout/NoBackendsEmptyState.tsx` |
-| Backend setup only reports status; it does not help install CLIs or run login flows | `/api/backends`, `useBackends()` |
-| `EmptyState` "no-workspaces" variant references CLI `loom init` but is unused in the zero-workspace flow | `internal/webui/frontend/src/components/EmptyState/EmptyState.tsx` (lines 22-110) |
-| `Template` workspace type is a permanent dead-end ("Coming soon" + disabled) | `internal/webui/frontend/src/components/CreateWorkspaceModal/CreateWorkspaceModal.tsx` (lines 636-643) |
-| No coordination of first-run state across the app — only two ad-hoc localStorage keys | `loom:last-workspace-id`, `terminal-onboarding-dismissed` |
-| Create issue / workspace / agent modal state is owned by `App`, but empty states live lower in the tree | `internal/webui/frontend/src/App.tsx`, `EmptyWorkspaceBoard.tsx` |
+| Gap | Where | 2026-07-23 |
+|---|---|---|
+| Bare "No workspaces" inline `<p>` with no context | `internal/webui/frontend/src/components/RedirectToWorkspace/RedirectToWorkspace.tsx` | **Changed.** The file is now 172 lines and imports the onboarding flow; the cited 82-130 range no longer identifies the described code. |
+| Two parallel zero-workspace surfaces with different copy and different CTAs | `RedirectToWorkspace` vs. `EmptyState` "no-workspaces" variant | Still two surfaces, and the `EmptyState` one is still dead code — see the row below. |
+| Empty Kanban board names "New issue" but does not show the button | `internal/webui/frontend/src/components/EmptyWorkspaceBoard/EmptyWorkspaceBoard.tsx` | Unverified. |
+| `NoBackendsEmptyState` says "Configure a backend" but Settings has no add flow | `internal/webui/frontend/src/components/TerminalView/layout/NoBackendsEmptyState.tsx` | Unverified. |
+| Backend setup only reports status; it does not help install CLIs or run login flows | `/api/backends`, `useBackends()` | Still true — `ops.BackendHealth` is unchanged (`internal/ops/backendops.go:10-19`). |
+| `EmptyState` "no-workspaces" variant references CLI `loom init` but is unused in the zero-workspace flow | `internal/webui/frontend/src/components/EmptyState/EmptyState.tsx` | **Still true.** The variant is declared (`EmptyState.tsx:8,23`) and still names `loom init` (`EmptyState.tsx:44`), but no component renders `<EmptyState variant="no-workspaces">`; the only references outside the component are in `__tests__/EmptyState.test.tsx`. |
+| `Template` workspace type is a permanent dead-end ("Coming soon" + disabled) | `internal/webui/frontend/src/components/CreateWorkspaceModal/CreateWorkspaceModal.tsx` | **Fixed.** The file is 320 lines and contains no "Template" or "Coming soon" string. |
+| No coordination of first-run state across the app — only two ad-hoc localStorage keys | `loom:last-workspace-id`, `terminal-onboarding-dismissed` | Partly addressed: onboarding dismissal is now workspace-scoped (`internal/webui/frontend/src/utils/onboardingState.ts:3`). |
+| Create issue / workspace / agent modal state is owned by `App`, but empty states live lower in the tree | `internal/webui/frontend/src/App.tsx`, `EmptyWorkspaceBoard.tsx` | Unverified. |
 
 ## Goals
 
@@ -77,8 +114,9 @@ are anchors for implementation.
   Backend setup metadata is curated per known backend and may start with the
   most common macOS/local-dev install path plus manual fallback instructions.
 - Cloud / shared-deployment onboarding (OIDC, invited-user flows).
-- A CLI `loom doctor` command. The server-side computation is factored to
-  enable this later, but it is out of scope here.
+- ~~A CLI `loom doctor` command.~~ **This non-goal was wrong when written.**
+  `loom doctor` already existed (`internal/cli/doctor/doctor.go:71`; the
+  package's first commit is 2026-04-05, a month before this doc's date).
 - Replacing or subsuming the per-tab `WelcomeBanner` in `TerminalView`.
   That banner is scoped to the terminal layer and is complementary.
 
@@ -192,6 +230,12 @@ missing tool, repo/worktree failure, gate failure, or daemon/runtime issue.
 
 ## Server Contract
 
+> **Not built.** Neither endpoint below exists. The onboarding module
+> registers only `POST /api/workspaces/{ws}/onboarding/first-task`
+> (`internal/webui/handlers/onboarding/module.go:26`), and the package
+> contains only `first_task.go` and `module.go`. Everything in this section
+> and the four that follow it is design rationale.
+
 Two endpoints derive step state from existing services. There is no new
 FleetDB schema change for step progress.
 
@@ -287,7 +331,12 @@ Step statuses:
 | `unknown` | The server cannot evaluate the step because a dependency is unavailable. | No |
 
 `actionable` replaces what an earlier draft called `pending`; the term is
-chosen to make it clear the user can act now. `warning` is the only non-
+chosen to make it clear the user can act now. **This substitution did not
+happen.** The shipped enum is
+`complete | current | actionable | pending | blocked`
+(`internal/webui/frontend/src/components/OnboardingFlow/OnboardingFlow.tsx:5-10`):
+`pending` survived, `current` was added, and `warning` / `error` / `unknown`
+were never introduced. `warning` is the only non-
 `complete` status that unblocks downstream steps — it represents a
 deliberate "good enough to continue" decision (e.g. local repo with no
 remote). `error` and `unknown` always block downstream steps and surface
@@ -309,6 +358,12 @@ the server has the workspace context, repo access, backend health, and run
 state needed to distinguish `blocked`, `warning`, `error`, and `unknown`.
 
 ### Backend Setup Metadata
+
+> **Not built.** `/api/backends` was never extended. `ops.BackendHealth` is
+> still `name`, `display_name`, `available`, `installed`, `api_key_set`,
+> `version`, `message` (`internal/ops/backendops.go:10-19`), served verbatim
+> by `internal/webui/handlers/misc/backends.go:18` at
+> `internal/webui/app/routes.go:54`.
 
 Backend setup needs metadata beyond the `/api/backends` health booleans
 (`installed`, `api_key_set`, `available`). The existing endpoint is
@@ -520,6 +575,16 @@ these guardrails:
 
 ## File Plan
 
+> **Not built.** Of the paths listed under "Created", only
+> `internal/webui/frontend/src/components/OnboardingFlow/OnboardingFlow.tsx`
+> exists (with its `.module.css`, `index.ts`, and test). The other checked
+> paths — `handlers/onboarding/onboarding.go`, `handlers/backends/setup.go`,
+> `types/onboarding.ts`, `api/onboarding/onboarding.ts`,
+> `hooks/onboarding/stepRegistry.ts`, `hooks/onboarding/useOnboardingStatus.ts`,
+> `contexts/OnboardingActionsContext.tsx`, `WorkspaceRepoWizard/`,
+> `RepoChecksPanel/`, `BackendSetupPanel/`, `BackendSetupTerminal/` — are
+> absent from the tree.
+
 ### Created
 
 ```
@@ -687,3 +752,10 @@ only on the list-summary shape.
 5. Should `loom init` print the URL of the new onboarding screen on
    completion, to bridge CLI-first users into the web flow? Decision
    deferred — handled by a future CLI-onboarding spec.
+
+## Related
+
+- [`README.md`](README.md) — index for this folder
+- [`local-mode-product-spec.md`](local-mode-product-spec.md) — the runtime this onboards into
+- [`agent-run-ux-spec.md`](agent-run-ux-spec.md) — what the user sees after the first run starts
+- [`desktop-app-runtime-spec.md`](desktop-app-runtime-spec.md) — the desktop packaging of the same flow

@@ -1,3 +1,7 @@
+// Package usage tallies token consumption and estimated cost for one agent run:
+// a Collector that de-duplicates the agent CLI's streamed usage events, per-agent-backend
+// pricing tiers, and a flock-serialized append-only .loom/usage.jsonl store with
+// filtered queries and purge. Fed by internal/cli/backends; read by `loom usage`.
 package usage
 
 import (

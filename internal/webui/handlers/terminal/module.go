@@ -1,3 +1,9 @@
+// Package terminal serves the web UI's workspace-scoped terminal HTTP routes:
+// the PTY-backed terminal WebSocket and its one-time auth token, the tmux-backed
+// attach path for CLI auto-mode agent sessions, and the terminal tab-metadata,
+// UI-state, sessions-by-issue and setup endpoints. Registered by
+// internal/webui/modbuilder and internal/webui/handlermux; the PTY and tmux
+// managers themselves live in internal/webui/terminal.
 package terminal
 
 import (

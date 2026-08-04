@@ -1,3 +1,9 @@
+// Package git serves the workspace-scoped git HTTP routes for agent worktrees
+// (push/pull/sync/PR/reset/status/target), the diff-stat, commit and file diff
+// endpoints, and the gh-backed pull-request list, over service.AgentService and
+// service.DiffService. It also carries the issue dependency-graph and
+// blocked-issue endpoints, which are not git work and sit here only for
+// historical reasons. Registered by internal/webui/app, handlermux, modbuilder.
 package git
 
 import (

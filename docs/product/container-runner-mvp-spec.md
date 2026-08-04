@@ -1,11 +1,36 @@
 # Container Runner MVP Spec
 
-**Status:** Draft
+> **Status:** Aspirational — proposed 2026-05-04, not implemented as of
+> 2026-07-24. No `loom-runner` binary, image, or entrypoint exists anywhere in
+> the tree; `cmd/` contains only `loom`, and `domain.RuntimeProvider` has no
+> `podman` value (`internal/domain/control_plane.go:23-29`). Loom *does* run
+> containers today, but through two different mechanisms — see
+> [What Shipped Instead](#what-shipped-instead). Read this document as the
+> recorded plan, not a description.
+
 **Date:** 2026-05-04
-**Related:** `docs/product/agent-execution-prd.md`,
-`docs/product/daemon-agent-runtime-architecture.md`,
-`docs/product/session-artifact-contract.md`,
-`docs/design/distributed-control-plane.md`
+**Related:** see [Related](#related) at the bottom.
+
+## What Shipped Instead
+
+Nothing in this spec was built. Two unrelated container paths did ship, and
+neither is "a Loom agent in a Podman container" as described below.
+
+| Shipped shape | What actually runs in the container | Where |
+|---|---|---|
+| **`loom worker`** — a remote agent worker | The same `loom` binary, different subcommand. It registers with a `loom serve` control plane over HTTP and runs the auto-mode loop with HTTP-backed lock/event/log bridges. Deliberately *not* a separate runner binary. | `internal/cli/serve/worker/worker_cmd.go:40-50`; container image `deploy/podman-stack/Containerfile.worker`; entrypoint `deploy/podman-stack/worker-entrypoint.sh` |
+| **Driver sandbox** — `LOOM_DRIVER_SANDBOX=container` | A workflow **driver / task run**, not an agent. Rootless, podman-first with docker fallback, read-only rootfs, `no-new-privileges`, mandatory memory/cpu/pids caps, four egress modes. | `internal/driver/sandbox/container.go:145-170`, `internal/driver/sandbox/egress.go` |
+
+The codified multi-container reference deployment is `deploy/podman-stack/`
+(serve + fleet-db + redis + workers + stub upstream on a podman machine). Read
+`deploy/podman-stack/README.md` for how to run it, and
+`docs/testing/local-mode-podman-e2e.md` for the test shape.
+
+Several ideas below did survive into `loom worker`, in adapted form: the runner
+registers with the control plane before doing work, heartbeats while running,
+and streams logs over HTTP rather than writing them into the container. What
+did **not** survive is the `loom-runner` binary, the golden image, the
+`podman` runtime-provider value, and the container-metadata record.
 
 ## Purpose
 
@@ -53,7 +78,9 @@ create container -> register runner -> create run/session
 
 Each run should record:
 
-- runtime provider: `podman`
+- runtime provider: `podman` — note this value was never added; the enum is
+  `local` | `e2b` | `kubernetes` | `ci` | `other`
+  (`internal/domain/control_plane.go:23-29`)
 - image name and digest/tag
 - container ID
 - container name
@@ -184,8 +211,31 @@ Actions: inspect logs, mark failed, release claim.
 
 ## Open Questions
 
+All three were left unanswered — the spec was never implemented. The first is
+partly answered by what shipped: for `loom worker`, containers are launched by
+the operator's compose file, not by `loom serve`
+(`deploy/podman-stack/compose.yaml`).
+
 - Should the server launch containers directly, or should a local runner
   daemon do it?
 - Should credentials be copied, mounted, or brokered through a secret
   provider?
 - Should artifact upload be streaming or final-only for MVP?
+
+## Related
+
+- [`daemon-agent-runtime-architecture.md`](daemon-agent-runtime-architecture.md)
+  — its "Container And Remote Placement" section is the current, verified map
+  of where agents and task runs can actually be placed. **Read that instead of
+  this document if you need facts.**
+- [`local-mode-product-spec.md`](local-mode-product-spec.md) — the
+  single-machine mode this was meant to follow.
+- [`session-artifact-contract.md`](session-artifact-contract.md) — what a
+  session must persist regardless of where it runs.
+- [`agent-execution-prd.md`](agent-execution-prd.md) — the parent PRD.
+- [`dogfood-agent-execution-test-plan.md`](dogfood-agent-execution-test-plan.md)
+  — the test plan that referenced this spec.
+- `deploy/podman-stack/README.md` — the codified multi-container deployment.
+- `docs/testing/local-mode-podman-e2e.md` — the podman e2e test shape.
+- `docs/design/flue-daytona-runtime-proposal.md` — the remote-sandbox
+  alternative that links here.

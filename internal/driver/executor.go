@@ -1,3 +1,10 @@
+// Package driver is the server-side execution engine for Loom's workflow
+// platform: it registers flue driver bundles as driver versions, creates and
+// leases driver runs and task runs, executes them behind the driver/sandbox
+// seam, and serves the driver-op API workflows call back into (await, child-run
+// composition, approvals, event emit) plus the outbox dispatcher and stale-run
+// sweepers. Driven by internal/cli/serve's loops, the loom driver/workflow/epic
+// commands, and internal/webui/handlers/driverapi.
 package driver
 
 import (

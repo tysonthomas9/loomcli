@@ -1,8 +1,24 @@
 # Test Coverage Gaps
 
+> **Status:** Stale snapshot — analysed 2026-02-11 against the pre-split
+> `internal/webui` layout. Commit `5e5bb06a3` (2026-04-06) split
+> `internal/webui` into sub-packages and the frontend `src/api/` and
+> `src/hooks/` trees were reorganised into domain subdirectories. **Most file
+> paths and every line number below are historical.** Two of the three Critical
+> findings are resolved (see the RESOLVED notes inline). Do not treat this as
+> the current gap list. *audited 2026-07-23*
+
 Untested scenarios identified by comparing production code against test files, organized by severity.
 
 **Last analyzed**: 2026-02-11
+
+**Live sources of truth instead of this page:**
+
+- `go test -coverprofile=coverage.out ./... && go tool cover -func=coverage.out`
+  for per-function coverage today.
+- The enforced gate: 60% (`Makefile:516`, `.github/workflows/ci.yml:89`) — see
+  [test-infrastructure.md](test-infrastructure.md) for the full threshold set.
+- [known-issues.md](known-issues.md) for tracked defects.
 
 ---
 
@@ -19,9 +35,14 @@ Untested scenarios identified by comparing production code against test files, o
 
 The highest-priority untested scenarios that could cause security issues, data loss, or production outages.
 
-### 1. WebUI: Comment Handler - ZERO TESTS
+### 1. WebUI: Comment Handler - ZERO TESTS — RESOLVED
 
-**File**: `internal/webui/handlers_comments.go`
+> **RESOLVED 2026-07-23.** The handler moved to
+> `internal/webui/handlers/issues/comments.go` and
+> `internal/webui/handlers/issues/comments_test.go` now sits beside it. Do not
+> redo this work.
+
+**File**: `internal/webui/handlers_comments.go` (no longer exists)
 
 No test file exists. The entire comment creation API is untested:
 - `handleAddComment()` - input validation, text length limits (64KB), empty text, missing issue ID
@@ -30,9 +51,18 @@ No test file exists. The entire comment creation API is untested:
 
 **Risk**: Comment creation bugs silently break a core user-facing feature.
 
-### 2. WebUI: Log Streaming Handlers - ZERO TESTS
+### 2. WebUI: Log Streaming Handlers - ZERO TESTS — PARTLY RESOLVED
 
-**File**: `internal/webui/handlers_logs.go`
+> **PARTLY RESOLVED 2026-07-23.** `internal/webui/handlers_logs.go` no longer
+> exists. The path-traversal concern named below is now centralised in
+> `internal/webui/log/paths.go` (`ValidatePathWithinDir:113`,
+> `pathWithinDir:166`) and covered by `internal/webui/log/paths_test.go`;
+> `ListTaskPhases` is `paths.go:175`. Where the five HTTP handlers themselves
+> now live is UNVERIFIED — `grep -rn Streamer internal/webui` finds only
+> `internal/webui/log/streamer.go` and a comment in
+> `internal/webui/handlers/misc/worker_api.go:178`.
+
+**File**: `internal/webui/handlers_logs.go` (no longer exists)
 
 Five handlers with zero test coverage:
 - `handleGetAgentLog()` - agent log retrieval
@@ -43,9 +73,13 @@ Five handlers with zero test coverage:
 
 **Risk**: **Path traversal prevention is untested** - malformed agent/task IDs could escape the log directory. FSNotify watcher and SSE debouncing logic are also uncovered.
 
-### 3. WebUI: Log Streamer - Mostly Untested
+### 3. WebUI: Log Streamer - Mostly Untested — RESOLVED
 
-**File**: `internal/webui/log_streamer.go`
+> **RESOLVED 2026-07-23.** The streamer moved to `internal/webui/log/streamer.go`
+> (plus `streamer_read.go`) and the package now carries `streamer_test.go`,
+> `open_test.go`, `paths_test.go` and `module_test.go`. Do not redo this work.
+
+**File**: `internal/webui/log_streamer.go` (no longer exists)
 
 Only basic file reading is tested. Missing:
 - `NewLogStreamer()` - fsnotify watcher creation
@@ -289,15 +323,24 @@ Three functions with no test coverage:
 | **Medium** | 40+ | Edge cases in tested code |
 | **Low** | 15+ | Minor edge cases |
 
-### Highest Priority Files to Add Tests
+### Highest Priority Files to Add Tests (as of 2026-02-11 — paths since moved)
 
-1. `internal/webui/handlers_comments.go` - Zero tests, user-facing
-2. `internal/webui/handlers_logs.go` - Zero tests, security-critical (path traversal)
-3. `internal/webui/log_streamer.go` - Mostly untested, complex concurrency
-4. `internal/webui/subscription.go` - External change loop untested
-5. `internal/webui/sse.go` - SSE handler reconnection untested
-6. `frontend/src/api/logs.ts` - Zero tests
-7. `frontend/src/api/issues.ts` - 4 functions untested
-8. `internal/rpc/socket_path.go` - Security checks untested
-9. `internal/webui/server.go` - Shutdown ordering untested
-10. `internal/webui/routes.go` - Conditional route registration untested
+Ranking preserved as written. Path status re-checked 2026-07-23; only #8 still
+resolves.
+
+1. `internal/webui/handlers_comments.go` - Zero tests, user-facing — **resolved**, now `internal/webui/handlers/issues/comments.go` + `comments_test.go`
+2. `internal/webui/handlers_logs.go` - Zero tests, security-critical (path traversal) — file gone; traversal checks now in `internal/webui/log/paths.go` + `paths_test.go`
+3. `internal/webui/log_streamer.go` - Mostly untested, complex concurrency — **resolved**, now `internal/webui/log/streamer.go` + `streamer_test.go`
+4. `internal/webui/subscription.go` - External change loop untested — now the package `internal/webui/subscription/`
+5. `internal/webui/sse.go` - SSE handler reconnection untested — now under `internal/webui/server/realtime/`
+6. `frontend/src/api/logs.ts` - Zero tests — moved in the `src/api/` reorg
+7. `frontend/src/api/issues.ts` - 4 functions untested — now the directory `src/api/issues/`, which carries `__tests__/issues.test.ts`
+8. `internal/rpc/socket_path.go` - Security checks untested — path still resolves
+9. `internal/webui/server.go` - Shutdown ordering untested — now under `internal/webui/app/`
+10. `internal/webui/routes.go` - Conditional route registration untested — now under `internal/webui/app/`
+
+## Related
+
+- [test-infrastructure.md](test-infrastructure.md) — coverage thresholds and how the gate measures them
+- [known-issues.md](known-issues.md) — tracked defects
+- [README.md](README.md) — testing docs index

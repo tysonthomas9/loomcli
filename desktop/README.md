@@ -1,5 +1,12 @@
 # Loom Desktop
 
+> **Status:** Partially implemented — the shell, sidecar build, signed-release
+> path, and `loom local` control surface are shipped
+> (`internal/cli/local/local_cmd.go:40-116`, `desktop/scripts/release-macos.sh`).
+> Updater wiring, real drain enforcement, workspace-daemon restoration, and
+> multi-window restoration are not built; see § Current Slice.
+> *audited 2026-07-24*
+
 Tauri shell for the Loom macOS desktop app.
 
 This package is intentionally a thin controller. The bundled `loom` sidecar owns
@@ -65,11 +72,17 @@ export, troubleshooting): `docs/product/desktop-installation-runbook.md`
 
 The Tauri config runs `scripts/prepare-sidecar.sh` before dev/build. That script
 builds the web UI into `src-tauri/resources/webui`, builds `../cmd/loom` into
-`src-tauri/binaries/loom-<target-triple>`, and, when the sibling FleetDB repo is
+`src-tauri/binaries/loom-<target-triple>`, and, when the sibling fleet-db repo is
 available, builds `src-tauri/binaries/fleet-db-<target-triple>`. The
-`loom local service` entrypoint discovers the bundled FleetDB sibling and web UI
+`loom local service` entrypoint discovers the bundled fleet-db sibling and web UI
 resources, then sets `FLEET_DB_BIN` and `LOOM_FRONTEND_DIR` for the local
 `loom serve` process.
+
+The fleet-db checkout is looked up at `<loomcli repo>/../fleet-db` and is
+overridable with `FLEET_DB_REPO` (`desktop/scripts/prepare-sidecar.sh:8`).
+Missing, the script only warns: the build succeeds without a bundled fleet-db
+and the local runtime then needs `FLEET_DB_BIN` supplied some other way
+(`desktop/scripts/prepare-sidecar.sh:68`).
 
 ## Current Slice
 
@@ -86,5 +99,13 @@ Updater wiring, real drain enforcement, workspace daemon restoration, and
 multi-window restoration are still tracked by
 `docs/product/desktop-app-runtime-spec.md`.
 
-For install, release packaging, verification, update, and troubleshooting
-steps, see `docs/product/desktop-installation-runbook.md`.
+## Related
+
+- [`../docs/product/desktop-installation-runbook.md`](../docs/product/desktop-installation-runbook.md)
+  — install, release packaging, verification, update, troubleshooting
+  (§ Signed Release Build covers the notarized DMG)
+- [`../docs/product/desktop-app-runtime-spec.md`](../docs/product/desktop-app-runtime-spec.md)
+  — the spec that owns the unbuilt slices above
+- [`../README.md`](../README.md) — the `loom` CLI the sidecar is built from
+- [`../deploy/README.md`](../deploy/README.md) — the multi-host packaging of the
+  same server

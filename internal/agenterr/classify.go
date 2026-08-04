@@ -1,3 +1,7 @@
+// Package agenterr classifies a failed agent-backend run into a single Outcome:
+// either a harness-wrapper error class parsed from the subprocess log/output, or
+// a loom-domain outcome (no work, lock conflict, spawn failure, agent CLI missing).
+// internal/agentpolicy and internal/cli/daemon/supervisor key retry-vs-quarantine on it.
 package agenterr
 
 import (

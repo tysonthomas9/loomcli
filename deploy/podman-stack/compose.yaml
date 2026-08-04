@@ -1,11 +1,17 @@
 # Local resource-capped podman stack emulating the DISTRIBUTED Loom topology
-# (RUNTIME-AND-DEPLOYMENT.md T3/T4 shape) for real e2e platform testing:
+# (cited elsewhere as the "T3/T4 shape" from RUNTIME-AND-DEPLOYMENT.md — that
+# file does not exist in this repo and the tiers are defined nowhere in-tree;
+# UNVERIFIED, see deploy/podman-stack/README.md) for real e2e platform testing:
 #
-#   redis -> fleet-auth-seed -> fleet-db -> loom-serve -> worker / stub-upstream
+#   redis -> fleet-auth-seed -> fleet-db -> loom-serve -> worker
+#   stub-upstream starts independently (it declares no depends_on)
 #
-# Startup is healthcheck-ordered (depends_on conditions); fleet-db MUST be
-# ready before loom serve starts or serve falls back to spawning an embedded
-# fleet-db subprocess (see README "ordering"). Every container carries
+# Startup is healthcheck-ordered (depends_on conditions). fleet-db must be
+# ready before loom serve starts, but NOT because serve would otherwise spawn
+# an embedded fleet-db: LOOM_FLEET_DB_URL is set here, and bootstrap.DetectMode
+# returns ModeCloud whenever it is set (internal/bootstrap/mode.go:51-54), so
+# the embedded path is unreachable in this stack — serve simply fails to reach
+# its store. Every container carries
 # explicit memory / cpu / pids caps — fork-bomb history; nothing runs
 # uncapped. Budget table in README.md.
 #

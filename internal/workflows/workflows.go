@@ -1,3 +1,9 @@
+// Package workflows owns Loom's built-in flue workflows — the embedded
+// TypeScript sources for the epic runner, the local/daytona/open-shell task
+// runners, and the GitHub review agent — and the path that turns workflow
+// source into a registered driver version: source-digest freshness checks,
+// `flue build` invocation, and registration through internal/driver.
+// Called by the loom workflow/epic commands and internal/webui/handlers/workflows.
 package workflows
 
 import (
