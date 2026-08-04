@@ -201,7 +201,10 @@ describe("PRReviewWorkspace", () => {
       head_sha: "sha-old",
       merged: false,
     });
-    mocks.createIssue.mockResolvedValue(makeIssue({ id: "TASK-99" }));
+    mocks.createIssue.mockResolvedValue({
+      issue: makeIssue({ id: "TASK-99" }),
+      softDuplicate: false,
+    });
     mocks.updateIssue.mockResolvedValue(makeIssue({ id: "TASK-99" }));
     mocks.actions.updateIssueStatus.mockResolvedValue(undefined);
   });
@@ -294,7 +297,10 @@ describe("PRReviewWorkspace", () => {
 
   it("creates and links a ticket for a ticketless pull request", async () => {
     const onLinkedTicket = vi.fn();
-    mocks.createIssue.mockResolvedValueOnce(makeIssue({ id: "TASK-99" }));
+    mocks.createIssue.mockResolvedValueOnce({
+      issue: makeIssue({ id: "TASK-99" }),
+      softDuplicate: false,
+    });
 
     renderWorkspace({ issue: null, onLinkedTicket });
 

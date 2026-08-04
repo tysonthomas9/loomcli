@@ -307,10 +307,10 @@ export function PRReviewWorkspace({
         priority: 3,
       });
       try {
-        await updateIssue(workspaceId, created.id, { status: "review" });
+        await updateIssue(workspaceId, created.issue.id, { status: "review" });
       } catch {
         showToast(
-          `Ticket ${created.id} created, but moving it to Review failed — set it manually`,
+          `Ticket ${created.issue.id} created, but moving it to Review failed — set it manually`,
           { type: "warning" },
         );
       }
@@ -319,8 +319,8 @@ export function PRReviewWorkspace({
       // App.handleCreateIssueSuccess). Without this the review gate misses the
       // not-yet-loaded issue and bounces back to the PR queue.
       await refetch();
-      showToast(`Created ${created.id} for this pull request`);
-      onLinkedTicket?.(created.id);
+      showToast(`Created ${created.issue.id} for this pull request`);
+      onLinkedTicket?.(created.issue.id);
     } catch (err) {
       showToast(
         err instanceof Error ? err.message : "Failed to create ticket",
