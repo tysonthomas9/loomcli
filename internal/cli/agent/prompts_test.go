@@ -1324,6 +1324,9 @@ func TestReadOnlyPreamble(t *testing.T) {
 		if !strings.Contains(result, "READ-ONLY") {
 			t.Errorf("ReadOnlyPreamble() = %q, want contains 'READ-ONLY'", result)
 		}
+		if !strings.Contains(result, "save requested designs") {
+			t.Errorf("ReadOnlyPreamble() = %q, want task-design write authorization", result)
+		}
 	})
 
 	t.Run("returns empty when LOOM_READ_ONLY not set", func(t *testing.T) {

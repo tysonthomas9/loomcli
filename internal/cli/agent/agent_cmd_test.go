@@ -309,8 +309,11 @@ func TestMakeCustomPromptGen_PrependsReadOnlyPolicy(t *testing.T) {
 
 	result := makeCustomPromptGen(promptFile)("falcon", nil)
 
-	if !strings.HasPrefix(result, "IMPORTANT: You are running in READ-ONLY mode.") {
+	if !strings.HasPrefix(result, "IMPORTANT: You are running in REPOSITORY READ-ONLY mode.") {
 		t.Fatalf("custom role prompt missing read-only preamble: %q", result)
+	}
+	if !strings.Contains(result, "Loom task-data operations required by the workflow remain authorized") {
+		t.Fatalf("custom role prompt missing task-data authorization: %q", result)
 	}
 	if !strings.Contains(result, "Inspect falcon.") {
 		t.Fatalf("custom role prompt missing role body: %q", result)

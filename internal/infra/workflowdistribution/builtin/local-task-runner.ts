@@ -1165,7 +1165,7 @@ export function applyRolePolicy(prompt) {
   const policy = ["## Loom role policy"];
   if (readOnly) {
     policy.push(
-      "This is a READ-ONLY run. Do not create, edit, delete, commit, or push files. Inspect the repository and report findings only.",
+      "This is a REPOSITORY READ-ONLY run. Do not create, edit, delete, commit, or push repository files. Loom task-data operations required by the workflow are still authorized: you MUST save a requested design, add requested comments, or perform requested task-status handoffs. Inspect the repository without changing it, then complete the workflow's task-data handoff.",
     );
   }
   if (allowed.length > 0) {

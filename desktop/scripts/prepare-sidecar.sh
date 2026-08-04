@@ -22,6 +22,8 @@ PACKAGED_BUILTIN_WORKFLOWS=(
 )
 NODE_VERSION_FILE="${DESKTOP_DIR}/NODE_VERSION"
 NODE_ENTITLEMENTS="${DESKTOP_DIR}/src-tauri/node-runtime.entitlements"
+VENDORED_FLEET_SPEC="${REPO_ROOT}/internal/infra/fleetdb/testdata/fleetdb-openapi.yaml"
+FLEET_SPEC="${FLEET_DB_REPO}/api/openapi.yaml"
 
 PINNED_NODE_VERSION="$(tr -d '[:space:]' < "${NODE_VERSION_FILE}")"
 if [[ ! "${PINNED_NODE_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -54,6 +56,25 @@ NODE_BIN="$("${NODE_BIN}" -p 'require("node:fs").realpathSync(process.execPath)'
 NODE_LICENSE="$(dirname "$(dirname "${NODE_BIN}")")/LICENSE"
 if [ ! -f "${NODE_LICENSE}" ]; then
   echo "Node.js license is missing at ${NODE_LICENSE}; refusing to package an incomplete runtime" >&2
+  exit 1
+fi
+
+# A packaged Loom and FleetDB are one contract-locked product. Fail before
+# rebuilding assets when the selected companion checkout is absent or does not
+# match Loom's vendored spec; otherwise a nearby old checkout (or a stale Fleet
+# binary left in src-tauri/binaries) can produce an app that starts and then
+# fails capability negotiation at runtime.
+if [ ! -d "${FLEET_DB_REPO}" ]; then
+  echo "fleet-db repo is required to package Desktop; set FLEET_DB_REPO to the contract-matched checkout" >&2
+  exit 1
+fi
+if [ ! -f "${FLEET_SPEC}" ]; then
+  echo "fleet-db OpenAPI spec is missing at ${FLEET_SPEC}" >&2
+  exit 1
+fi
+if ! cmp -s "${VENDORED_FLEET_SPEC}" "${FLEET_SPEC}"; then
+  echo "fleet-db contract mismatch: ${FLEET_SPEC} does not match ${VENDORED_FLEET_SPEC}" >&2
+  echo "set FLEET_DB_REPO to the companion checkout before packaging Desktop" >&2
   exit 1
 fi
 
@@ -171,17 +192,13 @@ echo "[desktop] building loom sidecar: ${OUT}"
 )
 chmod +x "${OUT}"
 
-if [ -d "${FLEET_DB_REPO}" ]; then
-  FLEET_BUILD="${FLEET_BUILD:-$(git -C "${FLEET_DB_REPO}" rev-parse --short HEAD 2>/dev/null || echo unknown)}"
-  echo "[desktop] building fleet-db sidecar: ${FLEET_OUT}"
-  (
-    cd "${FLEET_DB_REPO}"
-    go build \
-      -ldflags="-X main.commit=${FLEET_BUILD}" \
-      -o "${FLEET_OUT}" \
-      ./cmd/fleet-db
-  )
-  chmod +x "${FLEET_OUT}"
-else
-  echo "[desktop] warning: fleet-db repo not found at ${FLEET_DB_REPO}; local runtime will need FLEET_DB_BIN" >&2
-fi
+FLEET_BUILD="${FLEET_BUILD:-$(git -C "${FLEET_DB_REPO}" rev-parse --short HEAD 2>/dev/null || echo unknown)}"
+echo "[desktop] building fleet-db sidecar: ${FLEET_OUT}"
+(
+  cd "${FLEET_DB_REPO}"
+  go build \
+    -ldflags="-X main.commit=${FLEET_BUILD}" \
+    -o "${FLEET_OUT}" \
+    ./cmd/fleet-db
+)
+chmod +x "${FLEET_OUT}"

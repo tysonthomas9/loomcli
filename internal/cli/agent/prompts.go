@@ -515,7 +515,7 @@ func injectCheckpointContext(prompt string, cp *config.Checkpoint) string {
 	return prompt + sb.String()
 }
 
-const readOnlyPreamble = `IMPORTANT: You are running in READ-ONLY mode. You MUST NOT modify any files, create new files, or run destructive commands. You may only read files, search code, and provide analysis/comments. Use loom data commands to comment on tasks but do not make code changes.`
+const readOnlyPreamble = `IMPORTANT: You are running in REPOSITORY READ-ONLY mode. You MUST NOT modify any repository files, create new repository files, or run destructive commands. You may read files and search code. Loom task-data operations required by the workflow remain authorized: save requested designs, add requested comments, and perform requested task-status handoffs. Do not make code changes.`
 
 // ReadOnlyPreamble returns the read-only instruction preamble if LOOM_READ_ONLY is set.
 // Returns empty string if not in read-only mode.
