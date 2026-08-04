@@ -77,6 +77,13 @@ type StackLifecycle interface {
 	RemoveStackNode(context.Context, RemoveStackNodeCommand) error
 	ReconcileStack(context.Context, ReconcileStackCommand) (*ReconcileStackResult, error)
 	RecordStackNodePublication(context.Context, RecordStackNodePublicationCommand) error
+	ResolveTaskStackBinding(context.Context, string, string, string) (TaskStackBinding, bool, error)
+}
+
+// StackBindingResolver is the narrow read port used by Execution. It exposes
+// neither stack mutation commands nor the persistence store.
+type StackBindingResolver interface {
+	ResolveTaskStackBinding(context.Context, string, string, string) (TaskStackBinding, bool, error)
 }
 
 type TaskOutcomeCommand struct {

@@ -178,6 +178,84 @@ func (service *StackLifecycleService) RecordStackNodePublication(
 	)
 }
 
+func (service *StackLifecycleService) ResolveTaskStackBinding(
+	ctx context.Context,
+	workspace,
+	repository,
+	taskID string,
+) (TaskStackBinding, bool, error) {
+	if service == nil || service.store == nil {
+		return TaskStackBinding{}, false, ErrUnavailable
+	}
+	workspace = strings.TrimSpace(workspace)
+	repository = strings.TrimSpace(repository)
+	taskID = strings.TrimSpace(taskID)
+	if workspace == "" || repository == "" || taskID == "" {
+		return TaskStackBinding{}, false, nil
+	}
+	stacks, err := service.ListStacks(ctx, workspace)
+	if err != nil {
+		return TaskStackBinding{}, false, err
+	}
+	var foundStack Stack
+	var foundNode StackNode
+	var foundByTask map[string]StackNode
+	found := false
+	for _, stack := range stacks {
+		if stack.WorkspaceKey != workspace {
+			return TaskStackBinding{}, false, fmt.Errorf("stack %q escaped workspace %q: %w", stack.ID, workspace, ErrInvalidMaterialization)
+		}
+		if strings.TrimSpace(stack.Repository) == "" || stack.Repository != repository {
+			continue
+		}
+		nodes, err := service.ListStackNodes(ctx, workspace, stack.ID)
+		if err != nil {
+			return TaskStackBinding{}, false, err
+		}
+		byTask := make(map[string]StackNode, len(nodes))
+		for _, node := range nodes {
+			byTask[node.TaskID] = node
+		}
+		node, ok := byTask[taskID]
+		if !ok {
+			continue
+		}
+		if found {
+			return TaskStackBinding{}, false, nil
+		}
+		foundStack, foundNode, foundByTask = stack, node, byTask
+		found = true
+	}
+	if !found {
+		return TaskStackBinding{}, false, nil
+	}
+	base, err := slidingStackBase(foundStack, foundNode, foundByTask)
+	if err != nil {
+		return TaskStackBinding{}, false, err
+	}
+	return TaskStackBinding{
+		StackID: foundStack.ID, BaseRef: base, OutputBranch: foundNode.OutputBranch,
+	}, true, nil
+}
+
+func slidingStackBase(stack Stack, node StackNode, byTask map[string]StackNode) (string, error) {
+	current := node
+	for hops := 0; hops <= len(byTask); hops++ {
+		if current.BaseTaskID == "" {
+			return stack.RootBase, nil
+		}
+		base, ok := byTask[current.BaseTaskID]
+		if !ok {
+			return "", fmt.Errorf("stack task %q has missing predecessor %q: %w", current.TaskID, current.BaseTaskID, ErrInvalidMaterialization)
+		}
+		if strings.TrimSpace(base.OutputBranch) != "" && base.State != "empty" && base.State != "closed" {
+			return base.OutputBranch, nil
+		}
+		current = base
+	}
+	return "", fmt.Errorf("stack lineage contains a cycle: %w", ErrInvalidMaterialization)
+}
+
 //nolint:funlen // The reconciliation loop keeps idempotency and result projection in one auditable owner operation.
 func (service *StackLifecycleService) ReconcileStack(ctx context.Context, command ReconcileStackCommand) (*ReconcileStackResult, error) {
 	if service == nil || service.store == nil {

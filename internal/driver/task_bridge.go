@@ -17,7 +17,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
-	"github.com/tysonthomas9/loomcli/internal/stackstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -68,14 +67,11 @@ type HostBridgeTaskExecutor struct {
 	// WorktreeResolver maps bundled local task runs onto isolated per-run git
 	// worktrees. When nil, WorktreePath is used as supplied by the caller.
 	WorktreeResolver TaskWorktreeResolver
-	// StackStore is the finalize-barrier seam: after a stacked task completes
-	// (branch pushed, result reported) the executor records the task's stack node
-	// state/SHA here BEFORE returning — i.e. before the worker closes the task and
-	// unblocks successors — so a dependent's resolver reads a durable node. When
-	// nil (the pre-stacking sites and all tests), the barrier is inert.
-	StackStore stackstore.Store
+	// StackBindings is Source Control's narrow stack lookup used to inject the
+	// canonical branch and base into a task run. It exposes no persistence store
+	// or mutation command.
+	StackBindings sourcecontrol.StackBindingResolver
 	// TaskOutcomes is Source Control's narrow finalize-barrier mutation port.
-	// StackStore remains read-only for lineage lookup during Phase 6.
 	TaskOutcomes sourcecontrol.TaskOutcomeRecorder
 	// stackBinding is computed once per ExecuteTask after the worktree resolves:
 	// the task's stack id, canonical output branch, and base ref. When set, it is
@@ -241,13 +237,13 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 	// binding is exported as runner env (local) AND injected into the request
 	// Input (so a daytona sandbox, which has no host stack store, still receives
 	// the canonical branch + base ref). nil => not stacked => runner's old path.
-	if e.StackStore != nil {
+	if e.StackBindings != nil {
 		repoName := strings.TrimSpace(resolvedWorktree.RepoName)
 		if repoName == "" {
 			repoName = e.resolveStackRepoName(ctx, req)
 		}
 		if repoName != "" {
-			if binding, ok, berr := stackBindingForTask(ctx, e.StackStore, req.WorkspaceKey, repoName, req.TaskID); berr != nil {
+			if binding, ok, berr := stackBindingForTask(ctx, e.StackBindings, req.WorkspaceKey, repoName, req.TaskID); berr != nil {
 				slog.WarnContext(ctx, "stack binding lookup failed; runner keeps non-stacked behavior", "task", req.TaskID, "repo", repoName, "err", berr)
 			} else if ok {
 				e.stackBinding = &binding
@@ -257,10 +253,10 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 			}
 		}
 	}
-	// Finalize barrier: when this is a stacked task, record its node state in the
-	// stack store as ExecuteTask returns — the worker closes the task (unblocking
+	// Finalize barrier: when this is a stacked task, record its node state through
+	// Source Control as ExecuteTask returns — the worker closes the task (unblocking
 	// successors) only afterwards, so a dependent's resolver reads a durable node.
-	if e.StackStore != nil {
+	if e.StackBindings != nil {
 		defer func() { e.finalizeStackNode(ctx, req, resolvedWorktree, result, err) }()
 	}
 	runBridge, err := e.bridgeRunner(ctx, req)

@@ -7,11 +7,12 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver/taskworktree"
+	stackstoreadapter "github.com/tysonthomas9/loomcli/internal/infra/stackstoreadapter"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
-	"github.com/tysonthomas9/loomcli/internal/stackstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -53,26 +54,59 @@ func LineageFromInput(input json.RawMessage) (TaskLineage, bool) {
 	return taskworktree.LineageFromInput(input)
 }
 
-// StackLineageLookup adapts stackstore into the TaskLineageLookup consumed by
-// the worktree resolver.
-type StackLineageLookup = taskworktree.StackLineageLookup
+// StackLineageLookup narrows Source Control's stack binding query to the base
+// ref lookup consumed by the worktree resolver.
+type StackLineageLookup struct {
+	Bindings sourcecontrol.StackBindingResolver
+}
 
 var _ TaskLineageLookup = StackLineageLookup{}
+
+func (lookup StackLineageLookup) BaseRefForTask(
+	ctx context.Context,
+	workspaceKey,
+	repoName,
+	taskID string,
+) (string, bool, error) {
+	if lookup.Bindings == nil {
+		return "", false, nil
+	}
+	binding, ok, err := lookup.Bindings.ResolveTaskStackBinding(ctx, workspaceKey, repoName, taskID)
+	return binding.BaseRef, ok, err
+}
 
 // DefaultStackLineageLookup returns a lineage lookup backed by the per-user loom
 // stack store, or nil when the loom directory cannot be resolved.
 func DefaultStackLineageLookup() TaskLineageLookup {
-	lookup := taskworktree.DefaultStackLineageLookup()
-	if lookup == nil {
+	stacks := DefaultStackLifecycle()
+	if stacks == nil {
 		return nil
 	}
-	return *lookup
+	return StackLineageLookup{Bindings: stacks}
 }
 
-// DefaultStackStore returns the per-user loom stack store, or nil when the loom
-// directory cannot be resolved.
-func DefaultStackStore() stackstore.Store {
-	return taskworktree.DefaultStackStore()
+// DefaultStackLifecycle returns the Source Control owner API backed by the
+// per-user local stack adapter, or nil when local state cannot be resolved.
+func DefaultStackLifecycle() sourcecontrol.StackLifecycle {
+	adapter, err := stackstoreadapter.Default()
+	if err != nil {
+		return nil
+	}
+	stacks, err := sourcecontrol.NewStackLifecycle(adapter, time.Now)
+	if err != nil {
+		return nil
+	}
+	return stacks
+}
+
+// StackBindingResolverFor reuses the composed Source Control capability when
+// available and falls back to the local owner service for compatibility-only
+// construction sites.
+func StackBindingResolverFor(materializer sourcecontrol.Materializer) sourcecontrol.StackBindingResolver {
+	if resolver, ok := materializer.(sourcecontrol.StackBindingResolver); ok && resolver != nil {
+		return resolver
+	}
+	return DefaultStackLifecycle()
 }
 
 // resolveStackRepoName resolves the workspace repo Name a non-local task targets.
@@ -97,8 +131,23 @@ func (e HostBridgeTaskExecutor) resolveStackRepoName(ctx context.Context, req Ta
 
 // stackBindingForTask returns the task's stack binding when the task belongs to
 // a stack for repoName.
-func stackBindingForTask(ctx context.Context, store stackstore.Store, workspaceKey, repoName, taskID string) (TaskLineage, bool, error) {
-	return taskworktree.BindingForTask(ctx, store, workspaceKey, repoName, taskID)
+func stackBindingForTask(
+	ctx context.Context,
+	resolver sourcecontrol.StackBindingResolver,
+	workspaceKey,
+	repoName,
+	taskID string,
+) (TaskLineage, bool, error) {
+	if resolver == nil {
+		return TaskLineage{}, false, nil
+	}
+	binding, ok, err := resolver.ResolveTaskStackBinding(ctx, workspaceKey, repoName, taskID)
+	if err != nil || !ok {
+		return TaskLineage{}, ok, err
+	}
+	return TaskLineage{
+		StackID: binding.StackID, BaseRef: binding.BaseRef, OutputBranch: binding.OutputBranch,
+	}, true, nil
 }
 
 // finalizeStackNode records the completed task's stack node state/SHA before

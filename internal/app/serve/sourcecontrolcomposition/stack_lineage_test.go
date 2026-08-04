@@ -4,7 +4,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/driver/taskworktree"
 	infrastackstore "github.com/tysonthomas9/loomcli/internal/infra/stackstoreadapter"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/stacklineage"
@@ -32,7 +31,11 @@ func TestRecordTaskOutcomeOwnsFinalizeBarrier(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	capability := &SourceControlCapability{outcomes: outcomes}
+	stacks, err := sourcecontrol.NewStackLifecycle(adapter, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	capability := &SourceControlCapability{outcomes: outcomes, stacks: stacks}
 	recorded, err := capability.RecordTaskOutcome(ctx, sourcecontrol.TaskOutcomeCommand{
 		WorkspaceKey: workspace, Repository: repository, TaskID: "A",
 		Metadata: map[string]string{"delivery": "pull_request", "github_head_sha": "deadbeef"},
@@ -47,10 +50,9 @@ func TestRecordTaskOutcomeOwnsFinalizeBarrier(t *testing.T) {
 	if nodes[0].State != stacklineage.NodeStatePublished || nodes[0].OutputSHA != "deadbeef" || nodes[0].LastPublishedAt == nil {
 		t.Fatalf("published node = %+v", nodes[0])
 	}
-	lookup := taskworktree.StackLineageLookup{Store: lineage}
 	want := stacklineage.OutputBranchName("epic:E", "A")
-	if got, ok, err := lookup.BaseRefForTask(ctx, workspace, repository, "B"); err != nil || !ok || got != want {
-		t.Fatalf("dependent base = %q, %v, %v; want %q", got, ok, err, want)
+	if got, ok, err := capability.ResolveTaskStackBinding(ctx, workspace, repository, "B"); err != nil || !ok || got.BaseRef != want {
+		t.Fatalf("dependent binding = %+v, %v, %v; want base %q", got, ok, err, want)
 	}
 
 	recorded, err = capability.RecordTaskOutcome(ctx, sourcecontrol.TaskOutcomeCommand{
@@ -60,8 +62,8 @@ func TestRecordTaskOutcomeOwnsFinalizeBarrier(t *testing.T) {
 	if err != nil || !recorded {
 		t.Fatalf("RecordTaskOutcome empty = %v, %v", recorded, err)
 	}
-	if got, ok, err := lookup.BaseRefForTask(ctx, workspace, repository, "B"); err != nil || !ok || got != "main" {
-		t.Fatalf("empty predecessor base = %q, %v, %v", got, ok, err)
+	if got, ok, err := capability.ResolveTaskStackBinding(ctx, workspace, repository, "B"); err != nil || !ok || got.BaseRef != "main" {
+		t.Fatalf("empty predecessor binding = %+v, %v, %v", got, ok, err)
 	}
 }
 

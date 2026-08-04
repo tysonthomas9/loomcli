@@ -341,3 +341,11 @@ type StackNodePublicationMutation struct {
 	OutputSHA   string
 	PublishedAt *time.Time
 }
+
+// TaskStackBinding is the exact stack materialization input Execution needs
+// before creating a task worktree.
+type TaskStackBinding struct {
+	StackID      string
+	BaseRef      string
+	OutputBranch string
+}

@@ -19,7 +19,6 @@ import (
 	connectorsfleetdb "github.com/tysonthomas9/loomcli/internal/modules/connectors/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/stackstore"
 )
 
 const (
@@ -35,6 +34,7 @@ type SourceControlCapability struct {
 	issuer   *authority.Issuer
 	now      func() time.Time
 	outcomes sourcecontrol.TaskOutcomeRecorder
+	stacks   sourcecontrol.StackLifecycle
 }
 
 type API = sourcecontrol.API
@@ -351,7 +351,7 @@ func NewSourceControlCapability(
 		time.Now,
 	)
 	if capability != nil {
-		capability.outcomes = newDefaultTaskOutcomeRecorder()
+		capability.outcomes, capability.stacks = newDefaultStackServices(time.Now)
 	}
 	return capability, err
 }
@@ -382,25 +382,25 @@ func NewSourceControlCapabilityWithFleetDB(
 		time.Now,
 	)
 	if capability != nil {
-		capability.outcomes = newDefaultTaskOutcomeRecorder()
+		capability.outcomes, capability.stacks = newDefaultStackServices(time.Now)
 	}
 	return capability, err
 }
 
-func newDefaultTaskOutcomeRecorder() sourcecontrol.TaskOutcomeRecorder {
-	store, err := stackstore.Default()
+func newDefaultStackServices(now func() time.Time) (sourcecontrol.TaskOutcomeRecorder, sourcecontrol.StackLifecycle) {
+	adapter, err := infrastackstore.Default()
 	if err != nil {
-		return nil
+		return nil, nil
 	}
-	adapter, err := infrastackstore.New(store)
+	outcomes, err := sourcecontrol.NewTaskOutcomes(adapter, now)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
-	service, err := sourcecontrol.NewTaskOutcomes(adapter, time.Now)
+	stacks, err := sourcecontrol.NewStackLifecycle(adapter, now)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
-	return service
+	return outcomes, stacks
 }
 
 func newSourceControlCapability(

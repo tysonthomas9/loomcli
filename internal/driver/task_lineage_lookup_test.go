@@ -8,10 +8,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	stackstoreadapter "github.com/tysonthomas9/loomcli/internal/infra/stackstoreadapter"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	sl "github.com/tysonthomas9/loomcli/internal/stacklineage"
 	"github.com/tysonthomas9/loomcli/internal/stackstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -106,7 +109,7 @@ func setupLineageFixture(t *testing.T) lineageFixture {
 
 	return lineageFixture{
 		resolver: LocalTaskWorktreeResolver{
-			Store: st, Lineage: StackLineageLookup{Store: stacks},
+			Store: st, Lineage: StackLineageLookup{Bindings: mustTestStackLifecycle(t, stacks)},
 			SourceControl: testTaskSourceControl{},
 		},
 		mainHead: mainHead,
@@ -186,7 +189,7 @@ func TestStackLineageLookup_BaseRefForTask(t *testing.T) {
 	if _, err := stacks.AddNode(ctx, "TEST", "epic-E1", "task-b", "task-a", sl.CommitModeAgent); err != nil {
 		t.Fatalf("add task-b: %v", err)
 	}
-	lookup := StackLineageLookup{Store: stacks}
+	lookup := StackLineageLookup{Bindings: mustTestStackLifecycle(t, stacks)}
 
 	// AddNode assigns a deterministic OutputBranch at registration, so a dependent
 	// resolves to its predecessor's branch immediately (the name exists even before
@@ -248,7 +251,7 @@ func TestStackLineageLookup_RepoScopingAndAmbiguity(t *testing.T) {
 	mustNode("legacy", "shared-task", "")
 	mustStack("other-repo-stack", "backend", "main")
 	mustNode("other-repo-stack", "be-task", "")
-	lookup := StackLineageLookup{Store: stacks}
+	lookup := StackLineageLookup{Bindings: mustTestStackLifecycle(t, stacks)}
 
 	if ref, ok, err := lookup.BaseRefForTask(ctx, "TEST", "app", "shared-task"); err != nil || ok || ref != "" {
 		t.Fatalf("empty-RepoName stack hijack = (%q,%v,%v), want (\"\",false,nil)", ref, ok, err)
@@ -260,6 +263,12 @@ func TestStackLineageLookup_RepoScopingAndAmbiguity(t *testing.T) {
 	// Two stacks for the SAME repo both containing the same task id → ambiguous.
 	mustStack("epicA", "app", "main")
 	mustNode("epicA", "dup", "")
+	if err := stacks.UpdateNode(ctx, "TEST", "epicA", "dup", func(n *sl.Node) error {
+		n.BaseTaskID = "missing-in-epicA"
+		return nil
+	}); err != nil {
+		t.Fatalf("corrupt first ambiguous stack: %v", err)
+	}
 	mustStack("epicB", "app", "trunk")
 	mustNode("epicB", "dup", "")
 	if ref, ok, err := lookup.BaseRefForTask(ctx, "TEST", "app", "dup"); err != nil || ok || ref != "" {
@@ -270,7 +279,8 @@ func TestStackLineageLookup_RepoScopingAndAmbiguity(t *testing.T) {
 // Regression for the review's MEDIUM finding: graph-integrity corruption (a
 // dependent pointing at a predecessor absent from the stack) must surface as an
 // error, NOT be silently treated like an unknown task (which would rebase onto
-// the default branch invisibly). ErrNoOutputBranch stays a silent fall-open.
+// the default branch invisibly). Empty and closed predecessors slide to the
+// nearest usable ancestor under Source Control's owner policy.
 func TestStackLineageLookup_GraphCorruptionSurfaced(t *testing.T) {
 	ctx := context.Background()
 	stacks := stackstore.New(t.TempDir())
@@ -291,13 +301,26 @@ func TestStackLineageLookup_GraphCorruptionSurfaced(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("corrupt: %v", err)
 	}
-	_, ok, err := (StackLineageLookup{Store: stacks}).BaseRefForTask(ctx, "TEST", "app", "task-b")
+	_, ok, err := (StackLineageLookup{Bindings: mustTestStackLifecycle(t, stacks)}).BaseRefForTask(ctx, "TEST", "app", "task-b")
 	if ok {
 		t.Fatalf("corrupt graph returned ok=true, want surfaced error")
 	}
-	if !errors.Is(err, sl.ErrMissingPredecessor) {
-		t.Fatalf("corrupt graph err = %v, want ErrMissingPredecessor surfaced (not silent fall-open)", err)
+	if !errors.Is(err, sourcecontrol.ErrInvalidMaterialization) {
+		t.Fatalf("corrupt graph err = %v, want Source Control invalid materialization surfaced", err)
 	}
+}
+
+func mustTestStackLifecycle(t *testing.T, store stackstore.Store) sourcecontrol.StackLifecycle {
+	t.Helper()
+	adapter, err := stackstoreadapter.New(store)
+	if err != nil {
+		t.Fatalf("compose stack adapter: %v", err)
+	}
+	service, err := sourcecontrol.NewStackLifecycle(adapter, time.Now)
+	if err != nil {
+		t.Fatalf("compose stack lifecycle: %v", err)
+	}
+	return service
 }
 
 // errLineage is a TaskLineageLookup that always errors, modeling a corrupt/

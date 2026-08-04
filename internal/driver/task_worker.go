@@ -188,6 +188,7 @@ func (w *TaskWorker) runOnceInWorkspace(ctx context.Context, ws, workDir string)
 	}
 	executor := w.Executor
 	if executor == nil {
+		stacks := StackBindingResolverFor(w.SourceControl)
 		executor = HostBridgeTaskExecutor{
 			Store:               w.Store,
 			Artifacts:           w.Artifacts,
@@ -197,11 +198,11 @@ func (w *TaskWorker) runOnceInWorkspace(ctx context.Context, ws, workDir string)
 			LocalSettingsDir:    w.LocalSettingsDir,
 			WorktreeResolver: firstNonNilTaskWorktreeResolver(w.WorktreeResolver, LocalTaskWorktreeResolver{
 				Store:         w.Store,
-				Lineage:       DefaultStackLineageLookup(),
+				Lineage:       StackLineageLookup{Bindings: stacks},
 				SourceControl: w.SourceControl,
 			}),
-			StackStore:   DefaultStackStore(),
-			TaskOutcomes: taskOutcomeRecorder(w.SourceControl),
+			StackBindings: stacks,
+			TaskOutcomes:  taskOutcomeRecorder(w.SourceControl),
 		}
 	} else {
 		executor = withTaskWorkerArtifacts(executor, w.Artifacts, w.TaskRunAuthorities)

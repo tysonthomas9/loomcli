@@ -24,6 +24,14 @@ func New(store stackstore.Store) (*Adapter, error) {
 	return &Adapter{store: store}, nil
 }
 
+func Default() (*Adapter, error) {
+	store, err := stackstore.Default()
+	if err != nil {
+		return nil, err
+	}
+	return New(store)
+}
+
 func (adapter *Adapter) ListTaskStacks(ctx context.Context, workspace string) ([]sourcecontrol.TaskStack, error) {
 	values, err := adapter.store.ListStacks(ctx, workspace)
 	if err != nil {

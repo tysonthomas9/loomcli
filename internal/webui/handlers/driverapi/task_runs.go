@@ -94,6 +94,7 @@ func (p execTaskParams) requestOptions(ws string, id driverIdentity, fencingToke
 }
 
 func (m *Module) taskRequestExecutor() driverpkg.HostBridgeTaskExecutor {
+	stacks := driverpkg.StackBindingResolverFor(m.sourceControl)
 	return driverpkg.HostBridgeTaskExecutor{
 		Store:            m.store,
 		Artifacts:        m.artifacts,
@@ -102,11 +103,11 @@ func (m *Module) taskRequestExecutor() driverpkg.HostBridgeTaskExecutor {
 		LocalSettingsDir: m.localSettingsDir,
 		WorktreeResolver: driverpkg.LocalTaskWorktreeResolver{
 			Store:         m.store,
-			Lineage:       driverpkg.DefaultStackLineageLookup(),
+			Lineage:       driverpkg.StackLineageLookup{Bindings: stacks},
 			SourceControl: m.sourceControl,
 		},
-		StackStore:   driverpkg.DefaultStackStore(),
-		TaskOutcomes: taskOutcomeRecorder(m.sourceControl),
+		StackBindings: stacks,
+		TaskOutcomes:  taskOutcomeRecorder(m.sourceControl),
 	}
 }
 
