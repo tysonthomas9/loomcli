@@ -1,6 +1,9 @@
 package connectors
 
-import "errors"
+import (
+	"errors"
+	"strings"
+)
 
 type DispatchFailureKind string
 
@@ -23,6 +26,21 @@ type DispatchFailure struct {
 
 type dispatchFailureSource interface {
 	ConnectorFailure() DispatchFailure
+}
+
+type PreconditionRequired struct {
+	Action string
+	Fields []string
+}
+
+func (failure *PreconditionRequired) Error() string {
+	return "connectors: " + failure.Action + " requires precondition field(s) " + strings.Join(failure.Fields, ", ")
+}
+
+func (failure *PreconditionRequired) Unwrap() error { return ErrInvalid }
+
+func (failure *PreconditionRequired) ConnectorFailure() DispatchFailure {
+	return DispatchFailure{Kind: DispatchFailurePreconditionRequired}
 }
 
 // ClassifyDispatchError recognizes owner policy denials and structured

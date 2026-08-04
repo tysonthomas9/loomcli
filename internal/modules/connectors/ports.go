@@ -79,6 +79,29 @@ type CredentialVault interface {
 	Matches(sealed, plaintext, aad []byte) (bool, error)
 }
 
+// CredentialOpener is injected only into the Connectors dispatch service. It
+// is intentionally absent from the public Dispatcher API.
+type CredentialOpener interface {
+	Unseal(sealed, aad []byte) ([]byte, error)
+}
+
+type Provider interface {
+	Call(context.Context, ProviderCall) (ProviderResult, error)
+}
+
+type ProviderRegistry interface {
+	Get(ConnectorSourceKind) (Provider, error)
+}
+
+// DispatchStore is the exact durable surface required by one provider call.
+// ManagementStore satisfies it; no composite store reaches the owner service.
+type DispatchStore interface {
+	GetConnectorRecord(context.Context, string, string) (*Connector, error)
+	ResolveOutboundCredentialSealedRecord(context.Context, string, string) ([]byte, error)
+	ListGrantRecordsByBinding(context.Context, string, string) ([]*ConnectorGrant, error)
+	AppendConnectorCallRecord(context.Context, *ConnectorCallRecord) error
+}
+
 // GitReadExecutor is the Connectors-owned provider-dispatch port. Concrete
 // implementations may resolve a secret internally, but neither this port nor
 // its command/result types contain plaintext credential fields.

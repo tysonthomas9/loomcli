@@ -6,7 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/connector"
+	"github.com/tysonthomas9/loomcli/internal/infra/connectorscatalog"
+	"github.com/tysonthomas9/loomcli/internal/infra/connectorsproviders"
 	"github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 )
@@ -41,15 +42,25 @@ func (app *Server) buildConnectorDispatcher() connectorsmodule.Dispatcher {
 	if err != nil {
 		return nil
 	}
-	client := &http.Client{Timeout: connectorUpstreamTimeout()}
-	registry := connector.DefaultProviderRegistry(client)
-	return &connector.Dispatcher{
-		Connectors: app.config.Store.Connectors(),
-		Grants:     app.config.Store.ConnectorGrants(),
-		Audit:      app.config.Store.ConnectorCalls(),
-		Vault:      vault,
-		Providers:  registry,
+	catalog, err := connectorscatalog.New(
+		app.config.Store.Connectors(),
+		app.config.Store.ConnectorGrants(),
+		app.config.Store.ConnectorCalls(),
+	)
+	if err != nil {
+		return nil
 	}
+	client := &http.Client{Timeout: connectorUpstreamTimeout()}
+	dispatcher, err := connectorsmodule.NewDispatch(
+		catalog,
+		vault,
+		connectorsproviders.Default(client),
+		nil,
+	)
+	if err != nil {
+		return nil
+	}
+	return dispatcher
 }
 
 // connectorUpstreamTimeout resolves the provider HTTP client timeout from

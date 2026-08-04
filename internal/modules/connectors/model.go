@@ -2,6 +2,7 @@ package connectors
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 )
 
@@ -66,6 +67,41 @@ type DispatchResult struct {
 	Decision ConnectorCallDecision
 	Status   int
 	Body     map[string]any
+}
+
+func ConnectorCallID(runID string, action string, sequence int) string {
+	return runID + "#" + action + "#" + strconv.Itoa(sequence)
+}
+
+// CredentialAAD binds ciphertext to one exact workspace and connector. The
+// NUL separators make the encoding injective because canonical identifiers
+// cannot contain NUL.
+func CredentialAAD(workspaceKey string, connectorID string) []byte {
+	aad := make([]byte, 0, len("loom-connector-credential")+len(workspaceKey)+len(connectorID)+2)
+	aad = append(aad, "loom-connector-credential"...)
+	aad = append(aad, 0)
+	aad = append(aad, workspaceKey...)
+	aad = append(aad, 0)
+	aad = append(aad, connectorID...)
+	return aad
+}
+
+// ProviderCall is an owner-private egress port shape. Credential exists only
+// for the duration of this in-process call and never appears in the public
+// Dispatcher command/result API.
+type ProviderCall struct {
+	Action         string
+	Resource       string
+	Args           map[string]any
+	Preconditions  DispatchPreconditions
+	IdempotencyKey string
+	Credential     string
+}
+
+type ProviderResult struct {
+	Status   int
+	Body     map[string]any
+	Decision ConnectorCallDecision
 }
 
 type ConnectorSourceKind string

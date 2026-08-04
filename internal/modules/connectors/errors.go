@@ -45,4 +45,10 @@ var (
 	// ErrCredentialVaultMissing means credential synchronization was requested
 	// without the owner-private seal-and-compare vault seam.
 	ErrCredentialVaultMissing = errors.New("connectors: credential vault missing")
+	// ErrConnectorDisabled means egress was requested through a connector that
+	// is not active.
+	ErrConnectorDisabled = errors.New("connectors: connector disabled")
+	// ErrOutboundCredentialMissing means an active connector has no sealed
+	// outbound credential to authenticate a provider call.
+	ErrOutboundCredentialMissing = errors.New("connectors: outbound credential missing")
 )

@@ -1,6 +1,6 @@
 schema_version: 1
 status: complete
-source_head: 0216f55bdc599d5d4d2693071b55ca4dc9d9a444
+source_head: 9ad8d00a8b10f0d7136a5a88447cb0204ac2fee7
 adapter_roots:
   - internal/app
   - internal/cli
@@ -59,7 +59,7 @@ persistence_packages:
     receiver_names: [AdmissionStore, BindingStore, ManagedBindingStore, UnmanagedBindingStore]
     receiver_suffixes: []
   - path: github.com/tysonthomas9/loomcli/internal/modules/connectors
-    receiver_names: [ConnectorGrantStore, ManagementStore, SecretLifecycleStore]
+    receiver_names: [ConnectorGrantStore, DispatchStore, ManagementStore, SecretLifecycleStore]
     receiver_suffixes: []
   - path: github.com/tysonthomas9/loomcli/internal/modules/interaction
     receiver_names: [InboxStore, SessionStore, TerminalStore, TranscriptArtifactStore]
@@ -160,6 +160,9 @@ method_sets:
       - Workers
       - Workspaces
     mutating: []
+  - name: connectors_dispatch
+    read_only: [GetConnectorRecord, ListGrantRecordsByBinding, ResolveOutboundCredentialSealedRecord]
+    mutating: [AppendConnectorCallRecord]
   - name: connectors_grants
     read_only: [ListGrantsByBinding]
     mutating: [CreateGrant]
@@ -502,6 +505,10 @@ receiver_surfaces:
   - receiver: github.com/tysonthomas9/loomcli/internal/modules/connectors.ConnectorGrantStore
     package: github.com/tysonthomas9/loomcli/internal/modules/connectors
     method_set: connectors_grants
+    capability_owner: connectors
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/connectors.DispatchStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/connectors
+    method_set: connectors_dispatch
     capability_owner: connectors
   - receiver: github.com/tysonthomas9/loomcli/internal/modules/connectors.ManagementStore
     package: github.com/tysonthomas9/loomcli/internal/modules/connectors
@@ -865,6 +872,14 @@ function_surfaces:
     access: read-only
     capability_owner: connectors
   - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
+    function: ConnectorCallID
+    access: read-only
+    capability_owner: connectors
+  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
+    function: CredentialAAD
+    access: read-only
+    capability_owner: connectors
+  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
     function: DecisionForDispatchError
     access: read-only
     capability_owner: connectors
@@ -890,6 +905,10 @@ function_surfaces:
     capability_owner: connectors
   - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
     function: New
+    access: read-only
+    capability_owner: connectors
+  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
+    function: NewDispatch
     access: read-only
     capability_owner: connectors
   - package: github.com/tysonthomas9/loomcli/internal/modules/connectors

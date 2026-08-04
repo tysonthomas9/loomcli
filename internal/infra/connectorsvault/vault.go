@@ -202,13 +202,7 @@ func readVaultKeyFile(path string) ([]byte, error) {
 // splicing a ciphertext from one connector record into another. The NUL
 // separators make the encoding injective (identifiers never contain NUL).
 func CredentialAAD(workspaceKey, connectorID string) []byte {
-	aad := make([]byte, 0, len("loom-connector-credential")+len(workspaceKey)+len(connectorID)+2)
-	aad = append(aad, "loom-connector-credential"...)
-	aad = append(aad, 0)
-	aad = append(aad, workspaceKey...)
-	aad = append(aad, 0)
-	aad = append(aad, connectorID...)
-	return aad
+	return connectorsmodule.CredentialAAD(workspaceKey, connectorID)
 }
 
 // Seal encrypts plaintext under the vault key with a fresh random nonce and
