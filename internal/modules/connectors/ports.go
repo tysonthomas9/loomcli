@@ -1,6 +1,9 @@
 package connectors
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // ConnectorGrantStore is the Connectors-owned persistence port for the two
 // Fleet operations required by EnsureGrant. FleetDB has no Get-by-grant-ID
@@ -24,8 +27,8 @@ type CreateGrantMutation struct {
 // audit port. Secret reads, vault operations, and provider dispatch are
 // deliberately absent from this query/lifecycle slice.
 type ManagementStore interface {
+	SecretLifecycleStore
 	CreateConnectorRecord(context.Context, CreateConnectorMutation) (*Connector, error)
-	GetConnectorRecord(context.Context, string, string) (*Connector, error)
 	ListConnectorRecords(context.Context, string, ConnectorFilter) ([]*Connector, error)
 	CreateManagementGrant(context.Context, CreateGrantMutation) (*ConnectorGrant, error)
 	RevokeGrantRecord(context.Context, string, string) error
@@ -33,6 +36,12 @@ type ManagementStore interface {
 	ListGrantRecordsByConnector(context.Context, string, string) ([]*ConnectorGrant, error)
 	ListCallRecordsByRun(context.Context, string, string, ConnectorCallFilter) ([]*ConnectorCallRecord, error)
 	ListCallRecordsByBinding(context.Context, string, string, ConnectorCallFilter) ([]*ConnectorCallRecord, error)
+}
+
+type SecretLifecycleStore interface {
+	GetConnectorRecord(context.Context, string, string) (*Connector, error)
+	RotateConnectorSecretsRecord(context.Context, string, string, RotateConnectorSecretsMutation) (*Connector, error)
+	AppendConnectorCallRecord(context.Context, *ConnectorCallRecord) error
 }
 
 type CreateConnectorMutation struct {
@@ -45,6 +54,20 @@ type CreateConnectorMutation struct {
 	OutboundCredentialSealed []byte
 	Status                   ConnectorStatus
 	CreatedBy                string
+}
+
+type RotateConnectorSecretsMutation struct {
+	NewInboundSecret            string
+	PreviousSecretValidUntil    time.Time
+	ExpectedUpdatedAt           time.Time
+	NewOutboundCredentialSealed []byte
+}
+
+// CredentialSealer is the Connectors-owned write-only vault port used during
+// rotation. Plaintext enters this one method and is wiped by the service;
+// neither persistence nor the public result can receive it.
+type CredentialSealer interface {
+	Seal([]byte, []byte) ([]byte, error)
 }
 
 // GitReadExecutor is the Connectors-owned provider-dispatch port. Concrete

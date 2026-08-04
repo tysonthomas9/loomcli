@@ -3,6 +3,7 @@ package cmdstore
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/infra/connectorscatalog"
@@ -26,6 +27,30 @@ func ConnectorManagement(handle *bootstrap.StoreHandle) (connectorsmodule.Manage
 	management, err := connectorsmodule.NewManagement(adapter)
 	if err != nil {
 		return nil, fmt.Errorf("compose Connectors capability: %w", err)
+	}
+	return management, nil
+}
+
+// ConnectorManagementWithSecrets composes the same owner API with its
+// write-only vault seam for credential-resealing rotation commands.
+func ConnectorManagementWithSecrets(
+	handle *bootstrap.StoreHandle,
+	sealer connectorsmodule.CredentialSealer,
+) (connectorsmodule.Management, error) {
+	if handle == nil || handle.Store == nil || sealer == nil {
+		return nil, fmt.Errorf("compose Connectors secret lifecycle: %w", connectorsmodule.ErrUnavailable)
+	}
+	adapter, err := connectorscatalog.New(
+		handle.Store.Connectors(),
+		handle.Store.ConnectorGrants(),
+		handle.Store.ConnectorCalls(),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("compose Connectors secret lifecycle: %w", err)
+	}
+	management, err := connectorsmodule.NewManagementWithSecrets(adapter, sealer, time.Now)
+	if err != nil {
+		return nil, fmt.Errorf("compose Connectors secret lifecycle: %w", err)
 	}
 	return management, nil
 }

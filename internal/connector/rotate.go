@@ -1,243 +1,122 @@
-// rotate.go is the serve-side rotation ceremony (CV13) — the operational
-// answer to "the secret leaked" (S6). One Rotate call:
-//
-//   - installs a new inbound webhook signing secret, demoting the current one
-//     to PreviousInboundSecret with a bounded dual-validity window (default
-//     domain.DefaultConnectorSecretOverlap, capped at
-//     domain.MaxConnectorSecretOverlap) so in-flight deliveries keep
-//     verifying — the inbound verifier emits a stale-secret audit signal on
-//     every match against the previous secret;
-//   - optionally seals a replacement outbound credential through the Sealer
-//     seam (AAD-bound to the workspace+connector identity) and swaps it in
-//     the same store write, so stores only ever see ciphertext.
-//
-// The old outbound credential gets NO grace window: dispatch resolves and
-// unseals the credential fresh on every call (see Dispatcher.Dispatch step
-// 4), so the swap is effective for the very next egress. In-flight calls that
-// already unsealed the old credential complete with it — an accepted,
-// documented window, attributable in the audit trail via the connector's
-// RotatedAt timestamp on the rotation record.
-//
-// Both legs land in ONE ConnectorStore.RotateSecrets write, so a reader never
-// observes the new inbound secret without the new credential (or vice versa).
+// Package connector retains the legacy rotation entry point while callers
+// migrate to the Connectors owner API. Rotation policy and direct persistence
+// belong to internal/modules/connectors and internal/infra/connectorsrotation;
+// this file is deliberately a behavior-free compatibility facade.
 package connector
 
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/infra/connectorsrotation"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-// Rotation audit identifiers. A rotation is a control-plane ceremony, not an
-// egress call, but it reuses the connector-call journal (the CV13
-// decision-channel-reuse option) so one trail covers the whole connector
-// lifecycle. The synthetic binding id keeps rotation rows clearly apart from
-// real egress and makes ListByBinding(ws, RotationAuditBindingID) the query
-// handle for "every rotation in this workspace".
 const (
-	// RotationAuditBindingID is the synthetic BindingID rotation records are
-	// journaled under — rotations have no trigger binding.
-	RotationAuditBindingID = "connector-rotation"
-	// RotationAuditAction is the dotted action recorded for a rotation.
-	RotationAuditAction = "connector.rotate"
+	RotationAuditBindingID = connectorsmodule.RotationAuditBindingID
+	RotationAuditAction    = connectorsmodule.RotationAuditAction
 )
 
-// Rotation sentinel errors.
 var (
-	// ErrRotationConflict indicates the connector changed between the
-	// caller's read and this rotation (RotateRequest.ExpectedUpdatedAt
-	// mismatch): a concurrent rotation or update won, so this writer is
-	// rejected and must re-read before retrying.
-	ErrRotationConflict = fmt.Errorf("connector: rotation conflict: %w", domain.ErrConflict)
-
-	// ErrRotationSealerMissing indicates a replacement outbound credential
-	// was supplied without a Sealer to seal it. The rotation is refused
-	// before any store access so plaintext can never reach a store.
-	ErrRotationSealerMissing = fmt.Errorf("connector: rotation with a new outbound credential requires a sealer: %w", domain.ErrInvalid)
+	ErrRotationConflict = errors.Join(
+		connectorsmodule.ErrRotationConflict,
+		domain.ErrConflict,
+	)
+	ErrRotationSealerMissing = errors.Join(
+		connectorsmodule.ErrRotationSealerMissing,
+		domain.ErrInvalid,
+	)
 )
 
-// RotateRequest carries one rotation ceremony's inputs.
+// RotateRequest is the legacy transport shape for one credential-rotation
+// ceremony. NewCredential is plaintext and is wiped before Rotate returns.
 type RotateRequest struct {
-	WorkspaceKey string
-	ConnectorID  string
-
-	// NewInboundSecret replaces the inbound webhook signing secret. The
-	// current secret is demoted to PreviousInboundSecret for the dual-secret
-	// window instead of being dropped.
-	NewInboundSecret string
-
-	// NewCredential is the PLAINTEXT replacement outbound credential; nil
-	// leaves the existing sealed credential in place. Rotate seals it before
-	// any store write and wipes the slice before returning, so callers must
-	// not reuse the buffer.
-	NewCredential []byte
-
-	// InboundWindow bounds how long the previous inbound secret keeps
-	// verifying. Zero applies domain.DefaultConnectorSecretOverlap (15m);
-	// values above domain.MaxConnectorSecretOverlap (24h) are clamped to the
-	// cap; negative durations are invalid.
-	InboundWindow time.Duration
-
-	// ExpectedUpdatedAt, when non-zero, is an optimistic fence supplied by the
-	// caller. Rotate rechecks it before sealing, then always sends its fresh
-	// connector generation to the store's authoritative atomic CAS.
+	WorkspaceKey      string
+	ConnectorID       string
+	NewInboundSecret  string
+	NewCredential     []byte
+	InboundWindow     time.Duration
 	ExpectedUpdatedAt time.Time
-
-	// Now overrides the clock for deterministic tests; nil means time.Now.
-	Now func() time.Time
+	Now               func() time.Time
 }
 
-// validate checks request shape before any store or sealer access.
-// Violations wrap domain.ErrInvalid.
-func (r RotateRequest) validate() error {
-	if r.WorkspaceKey == "" {
-		return fmt.Errorf("connector rotate workspace_key required: %w", domain.ErrInvalid)
-	}
-	if r.ConnectorID == "" {
-		return fmt.Errorf("connector rotate connector_id required: %w", domain.ErrInvalid)
-	}
-	if r.NewInboundSecret == "" {
-		return fmt.Errorf("connector rotate new_inbound_secret required: %w", domain.ErrInvalid)
-	}
-	if r.InboundWindow < 0 {
-		return fmt.Errorf("connector rotate inbound_window %v negative: %w", r.InboundWindow, domain.ErrInvalid)
-	}
-	return nil
-}
-
-// Rotate performs one connector rotation ceremony end to end:
-//
-//  1. resolve the connector (existence, source kind for the audit row, and
-//     the UpdatedAt fence read — Get only ever returns a redacted copy),
-//  2. seal the replacement outbound credential, when supplied, through the
-//     Sealer seam (plaintext is wiped immediately after sealing),
-//  3. apply both legs in a single ConnectorStore.RotateSecrets write with
-//     PreviousSecretValidUntil = now + window (15m default, 24h cap),
-//  4. append a rotation record to the connector-call journal.
-//
-// On an audit-append failure the rotation has already landed, so Rotate
-// returns the rotated (redacted) connector TOGETHER WITH the error; callers
-// can act on the rotation while surfacing the journaling failure. audit may
-// be nil for callers without a journal; sealer is only required when
-// NewCredential is supplied.
-func Rotate(ctx context.Context, connectors store.ConnectorStore, audit store.ConnectorAuditStore, sealer Sealer, req RotateRequest) (*domain.Connector, error) {
+// Rotate delegates the complete ceremony to the Connectors owner. The
+// returned domain projection remains redacted for compatibility with callers
+// that have not yet switched to connectors.Management.
+func Rotate(
+	ctx context.Context,
+	connectors store.ConnectorStore,
+	audit store.ConnectorAuditStore,
+	sealer Sealer,
+	req RotateRequest,
+) (*domain.Connector, error) {
 	defer zeroBytes(req.NewCredential)
-	if err := req.validate(); err != nil {
-		return nil, err
-	}
-	if len(req.NewCredential) > 0 && sealer == nil {
-		return nil, ErrRotationSealerMissing
+
+	adapter, err := connectorsrotation.New(connectors, audit)
+	if err != nil {
+		return nil, translateRotationError(err)
 	}
 	now := time.Now
 	if req.Now != nil {
 		now = req.Now
 	}
-	validUntil := now().UTC().Add(overlapWindow(req.InboundWindow))
-
-	// (1) Resolve: not-found fails here, the source kind feeds the audit
-	// record, and UpdatedAt feeds the optimistic fence.
-	current, err := connectors.Get(ctx, req.WorkspaceKey, req.ConnectorID)
+	service, err := connectorsmodule.NewSecretLifecycle(adapter, sealer, now)
 	if err != nil {
-		return nil, fmt.Errorf("connector rotate resolve %q: %w", req.ConnectorID, err)
+		return nil, translateRotationError(err)
 	}
-	if !req.ExpectedUpdatedAt.IsZero() && !current.UpdatedAt.Equal(req.ExpectedUpdatedAt) {
-		return nil, fmt.Errorf("connector %q updated at %s, caller expected %s: %w",
-			req.ConnectorID,
-			current.UpdatedAt.UTC().Format(time.RFC3339Nano),
-			req.ExpectedUpdatedAt.UTC().Format(time.RFC3339Nano),
-			ErrRotationConflict)
-	}
-
-	rotation := store.ConnectorSecretRotation{
-		NewInboundSecret:         req.NewInboundSecret,
-		PreviousSecretValidUntil: validUntil,
-		ExpectedUpdatedAt:        current.UpdatedAt,
-	}
-	// (2) Seal before the store write; the plaintext buffer is wiped either
-	// way so it cannot outlive this call.
-	if len(req.NewCredential) > 0 {
-		sealed, serr := sealer.Seal(req.NewCredential, CredentialAAD(req.WorkspaceKey, req.ConnectorID))
-		zeroBytes(req.NewCredential)
-		if serr != nil {
-			return nil, fmt.Errorf("connector rotate seal credential for %q: %w", req.ConnectorID, serr)
-		}
-		rotation.NewOutboundCredentialSealed = sealed
-	}
-
-	// (3) Single store write applies both legs atomically.
-	rotated, err := connectors.RotateSecrets(ctx, req.WorkspaceKey, req.ConnectorID, rotation)
-	if err != nil {
-		return nil, rotationStoreError(req.ConnectorID, err)
-	}
-
-	// (4) Journal the ceremony.
-	if aerr := appendRotationAudit(ctx, audit, current.SourceKind, rotated, validUntil, rotation.NewOutboundCredentialSealed != nil, now); aerr != nil {
-		return rotated, aerr
-	}
-	return rotated, nil
+	rotated, err := service.RotateConnector(ctx, connectorsmodule.RotateConnectorCommand{
+		WorkspaceKey:      req.WorkspaceKey,
+		ConnectorID:       req.ConnectorID,
+		NewInboundSecret:  req.NewInboundSecret,
+		NewCredential:     req.NewCredential,
+		InboundWindow:     req.InboundWindow,
+		ExpectedUpdatedAt: req.ExpectedUpdatedAt,
+	})
+	return legacyConnectorProjection(rotated), translateRotationError(err)
 }
 
-func rotationStoreError(connectorID string, err error) error {
-	if errors.Is(err, domain.ErrConflict) {
-		err = errors.Join(ErrRotationConflict, err)
-	}
-	return fmt.Errorf("connector rotate %q: %w", connectorID, err)
-}
-
-// overlapWindow normalizes the requested dual-secret window: zero applies the
-// 15m default and anything above the 24h cap is clamped (negative values are
-// rejected by validate before this runs). Stores re-apply the same cap
-// defensively against their own clock.
-func overlapWindow(window time.Duration) time.Duration {
-	switch {
-	case window == 0:
-		return domain.DefaultConnectorSecretOverlap
-	case window > domain.MaxConnectorSecretOverlap:
-		return domain.MaxConnectorSecretOverlap
-	}
-	return window
-}
-
-// appendRotationAudit appends the rotation record to the connector-call
-// journal. The run id embeds the store-assigned monotonic UpdatedAt generation
-// so every rotation gets a distinct deterministic CallID even during clock
-// rollback; a duplicate append (retry) is treated as success exactly like
-// Dispatcher.appendAudit. The summary carries timestamps and flags only —
-// never secret material.
-func appendRotationAudit(ctx context.Context, audit store.ConnectorAuditStore, kind domain.ConnectorSourceKind, rotated *domain.Connector, validUntil time.Time, resealed bool, now func() time.Time) error {
-	if audit == nil {
+func translateRotationError(err error) error {
+	if err == nil {
 		return nil
 	}
-	occurredAt := now().UTC()
-	if rotated.RotatedAt != nil && !rotated.RotatedAt.IsZero() {
-		occurredAt = rotated.RotatedAt.UTC()
+	switch {
+	case errors.Is(err, connectorsmodule.ErrRotationConflict):
+		return errors.Join(ErrRotationConflict, err)
+	case errors.Is(err, connectorsmodule.ErrRotationSealerMissing):
+		return errors.Join(ErrRotationSealerMissing, err)
+	case errors.Is(err, connectorsmodule.ErrInvalid):
+		return errors.Join(domain.ErrInvalid, err)
+	default:
+		return err
 	}
-	generation := rotated.UpdatedAt.UTC()
-	if generation.IsZero() {
-		generation = occurredAt
+}
+
+func legacyConnectorProjection(value *connectorsmodule.Connector) *domain.Connector {
+	if value == nil {
+		return nil
 	}
-	runID := fmt.Sprintf("rotation-%s-%d", rotated.ConnectorID, generation.UnixNano())
-	rec := &domain.ConnectorCallRecord{
-		WorkspaceKey: rotated.WorkspaceKey,
-		CallID:       domain.ConnectorCallID(runID, RotationAuditAction, 0),
-		RunID:        runID,
-		BindingID:    RotationAuditBindingID,
-		ConnectorID:  rotated.ConnectorID,
-		SourceKind:   kind,
-		Action:       RotationAuditAction,
-		Resource:     "connector:" + rotated.ConnectorID,
-		Decision:     domain.ConnectorCallGranted,
-		SanitizedSummary: fmt.Sprintf(
-			"inbound secret rotated (previous secret valid until %s); outbound credential resealed=%t",
-			validUntil.UTC().Format(time.RFC3339), resealed),
-		OccurredAt: occurredAt,
+	return &domain.Connector{
+		WorkspaceKey:             value.WorkspaceKey,
+		ConnectorID:              value.ConnectorID,
+		SourceKind:               domain.ConnectorSourceKind(value.SourceKind),
+		DisplayName:              value.DisplayName,
+		InboundEndpointPath:      value.InboundEndpointPath,
+		PreviousSecretValidUntil: cloneRotationTime(value.PreviousSecretValidUntil),
+		Status:                   domain.ConnectorStatus(value.Status),
+		CreatedBy:                value.CreatedBy,
+		CreatedAt:                value.CreatedAt,
+		UpdatedAt:                value.UpdatedAt,
+		RotatedAt:                cloneRotationTime(value.RotatedAt),
 	}
-	if err := audit.Append(ctx, rec); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
-		return fmt.Errorf("connector rotate audit %q: %w", rec.CallID, err)
+}
+
+func cloneRotationTime(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
 	}
-	return nil
+	result := *value
+	return &result
 }

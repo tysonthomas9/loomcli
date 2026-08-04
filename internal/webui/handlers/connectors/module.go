@@ -29,8 +29,10 @@ import (
 
 	vault "github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/infra/connectorscatalog"
 	"github.com/tysonthomas9/loomcli/internal/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -45,6 +47,8 @@ const maxConnectorBodyBytes = 1 << 20
 // the localsettings data dir needed to bridge the Settings runtime credential.
 type Module struct {
 	store             store.Store
+	managementStore   connectorsmodule.ManagementStore
+	management        connectorsmodule.Management
 	localSettingsDir  string
 	grantSets         *vault.GrantSetReconciler
 	grantMu           sync.Mutex
@@ -62,6 +66,11 @@ func NewModule(
 		module.operatorAuthority = operatorAuthorities[0]
 	}
 	if st != nil {
+		adapter, adapterErr := connectorscatalog.New(st.Connectors(), st.ConnectorGrants(), st.ConnectorCalls())
+		if adapterErr == nil {
+			module.managementStore = adapter
+			module.management, _ = connectorsmodule.NewManagement(adapter)
+		}
 		module.grantSets = vault.NewGrantSetReconciler(
 			st.TriggerBindings(),
 			st.Connectors(),
@@ -72,7 +81,7 @@ func NewModule(
 }
 
 func (m *Module) Register(mux *http.ServeMux) {
-	if m.store == nil {
+	if m.store == nil || m.management == nil {
 		return
 	}
 	mux.HandleFunc("POST /api/workspaces/{ws}/connectors", m.createConnector)
@@ -129,24 +138,24 @@ func decodeCreateConnectorRequest(
 	w http.ResponseWriter,
 	r *http.Request,
 	ws string,
-) (createConnectorRequest, store.ConnectorCreate, bool) {
+) (createConnectorRequest, connectorsmodule.CreateConnectorCommand, bool) {
 	var req createConnectorRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxConnectorBodyBytes)).Decode(&req); err != nil {
 		handler.RespondError(w, http.StatusBadRequest, "invalid JSON body")
-		return createConnectorRequest{}, store.ConnectorCreate{}, false
+		return createConnectorRequest{}, connectorsmodule.CreateConnectorCommand{}, false
 	}
 
-	source := domain.ConnectorSourceKind(strings.TrimSpace(req.Source))
+	source := connectorsmodule.ConnectorSourceKind(strings.TrimSpace(req.Source))
 	if !source.Valid() {
 		handler.RespondError(w, http.StatusBadRequest, "source must be one of github, slack, datadog, internal")
-		return createConnectorRequest{}, store.ConnectorCreate{}, false
+		return createConnectorRequest{}, connectorsmodule.CreateConnectorCommand{}, false
 	}
 	connectorID := strings.TrimSpace(req.ConnectorID)
 	if connectorID == "" {
 		connectorID = string(source)
 	}
 
-	return req, store.ConnectorCreate{
+	return req, connectorsmodule.CreateConnectorCommand{
 		WorkspaceKey: ws,
 		ConnectorID:  connectorID,
 		SourceKind:   source,
@@ -157,7 +166,7 @@ func decodeCreateConnectorRequest(
 func (m *Module) respondWithExistingConnector(
 	w http.ResponseWriter,
 	r *http.Request,
-	in store.ConnectorCreate,
+	in connectorsmodule.CreateConnectorCommand,
 	requireCredential bool,
 ) bool {
 	// Exact idempotent ensure: the stable connector id may be reused only when
@@ -165,7 +174,9 @@ func (m *Module) respondWithExistingConnector(
 	// requested, already holds a nonempty sealed outbound credential. Returning
 	// an arbitrary/credential-less row here would let UI activation succeed and
 	// defer the real failure to the first workflow run.
-	existing, err := m.store.Connectors().Get(r.Context(), in.WorkspaceKey, in.ConnectorID)
+	existing, err := m.management.GetConnector(r.Context(), connectorsmodule.GetConnectorQuery{
+		WorkspaceKey: in.WorkspaceKey, ConnectorID: in.ConnectorID,
+	})
 	if err == nil {
 		ensured, ensureErr := m.ensureExistingConnector(r.Context(), existing, in, requireCredential)
 		if ensureErr != nil {
@@ -188,10 +199,10 @@ func (m *Module) respondWithExistingConnector(
 
 func (m *Module) ensureExistingConnector(
 	ctx context.Context,
-	existing *domain.Connector,
-	in store.ConnectorCreate,
+	existing *connectorsmodule.Connector,
+	in connectorsmodule.CreateConnectorCommand,
 	requireCredential bool,
-) (*domain.Connector, error) {
+) (*connectorsmodule.Connector, error) {
 	if err := validateExistingConnector(existing, in.SourceKind); err != nil {
 		return nil, err
 	}
@@ -201,13 +212,13 @@ func (m *Module) ensureExistingConnector(
 	return m.synchronizeRuntimeCredential(ctx, existing)
 }
 
-func validateExistingConnector(existing *domain.Connector, source domain.ConnectorSourceKind) error {
+func validateExistingConnector(existing *connectorsmodule.Connector, source connectorsmodule.ConnectorSourceKind) error {
 	switch {
 	case existing == nil:
 		return fmt.Errorf("connector store returned no record: %w", domain.ErrConflict)
 	case existing.SourceKind != source:
 		return fmt.Errorf("existing connector id belongs to a different source: %w", domain.ErrConflict)
-	case existing.Status != domain.ConnectorStatusActive:
+	case existing.Status != connectorsmodule.ConnectorStatusActive:
 		return fmt.Errorf("existing connector is not active: %w", domain.ErrConflict)
 	default:
 		return nil
@@ -216,12 +227,14 @@ func validateExistingConnector(existing *domain.Connector, source domain.Connect
 
 func (m *Module) synchronizeRuntimeCredential(
 	ctx context.Context,
-	existing *domain.Connector,
-) (*domain.Connector, error) {
+	existing *connectorsmodule.Connector,
+) (*connectorsmodule.Connector, error) {
 	m.credentialMu.Lock()
 	defer m.credentialMu.Unlock()
 	for attempt := 0; attempt < 3; attempt++ {
-		current, err := m.store.Connectors().Get(ctx, existing.WorkspaceKey, existing.ConnectorID)
+		current, err := m.management.GetConnector(ctx, connectorsmodule.GetConnectorQuery{
+			WorkspaceKey: existing.WorkspaceKey, ConnectorID: existing.ConnectorID,
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -241,8 +254,8 @@ func (m *Module) synchronizeRuntimeCredential(
 
 func (m *Module) synchronizeRuntimeCredentialOnce(
 	ctx context.Context,
-	existing *domain.Connector,
-) (*domain.Connector, error) {
+	existing *connectorsmodule.Connector,
+) (*connectorsmodule.Connector, error) {
 	settings, err := localsettings.Load(m.localSettingsDir)
 	if err != nil {
 		return nil, fmt.Errorf("load local settings: %w", err)
@@ -278,20 +291,21 @@ func (m *Module) synchronizeRuntimeCredentialOnce(
 
 func (m *Module) rotateRuntimeCredential(
 	ctx context.Context,
-	existing *domain.Connector,
+	existing *connectorsmodule.Connector,
 	inboundSecret string,
 	sealer vault.Sealer,
 	desired []byte,
-) (*domain.Connector, error) {
+) (*connectorsmodule.Connector, error) {
 	credential := append([]byte(nil), desired...)
 	zeroBytes(desired)
 	defer zeroBytes(credential)
-	rotated, err := vault.Rotate(
+	management, err := connectorsmodule.NewManagementWithSecrets(m.managementStore, sealer, time.Now)
+	if err != nil {
+		return nil, fmt.Errorf("compose connector secret lifecycle: %w", err)
+	}
+	rotated, err := management.RotateConnector(
 		ctx,
-		m.store.Connectors(),
-		m.store.ConnectorCalls(),
-		sealer,
-		vault.RotateRequest{
+		connectorsmodule.RotateConnectorCommand{
 			WorkspaceKey:      existing.WorkspaceKey,
 			ConnectorID:       existing.ConnectorID,
 			NewInboundSecret:  inboundSecret,
@@ -307,7 +321,7 @@ func (m *Module) rotateRuntimeCredential(
 
 func (m *Module) connectorRotationInboundSecret(
 	ctx context.Context,
-	existing *domain.Connector,
+	existing *connectorsmodule.Connector,
 ) (string, error) {
 	inbound, err := m.store.Connectors().ResolveInboundSecret(
 		ctx,
@@ -325,7 +339,7 @@ func (m *Module) connectorRotationInboundSecret(
 
 func (m *Module) connectorCredentialMatches(
 	ctx context.Context,
-	existing *domain.Connector,
+	existing *connectorsmodule.Connector,
 	desired []byte,
 	sealer vault.Sealer,
 ) (bool, error) {
@@ -371,10 +385,10 @@ func zeroBytes(value []byte) {
 func (m *Module) createNewConnector(
 	w http.ResponseWriter,
 	r *http.Request,
-	in store.ConnectorCreate,
+	in connectorsmodule.CreateConnectorCommand,
 	requireCredential bool,
 ) {
-	conn, err := m.store.Connectors().Create(r.Context(), in)
+	conn, err := m.management.CreateConnector(r.Context(), in)
 	if err == nil {
 		if requireCredential {
 			conn, err = m.synchronizeRuntimeCredential(r.Context(), conn)
@@ -387,7 +401,9 @@ func (m *Module) createNewConnector(
 		return
 	}
 	if errors.Is(err, domain.ErrAlreadyExists) || errors.Is(err, domain.ErrConflict) {
-		existing, fetchErr := m.store.Connectors().Get(r.Context(), in.WorkspaceKey, in.ConnectorID)
+		existing, fetchErr := m.management.GetConnector(r.Context(), connectorsmodule.GetConnectorQuery{
+			WorkspaceKey: in.WorkspaceKey, ConnectorID: in.ConnectorID,
+		})
 		if fetchErr != nil {
 			handler.WriteDomainError(w, fetchErr, "get concurrently created connector failed")
 			return

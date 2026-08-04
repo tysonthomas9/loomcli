@@ -25,9 +25,18 @@ var (
 	// ErrConflict means a requested definition or grant identity already
 	// exists with incompatible state.
 	ErrConflict = errors.New("connectors: conflict")
+	// ErrAlreadyExists is the replay-safe duplicate category used by append
+	// and first-writer-wins persistence operations.
+	ErrAlreadyExists = errors.New("connectors: already exists")
 	// ErrGrantRevoked means the requested grant was already revoked.
 	ErrGrantRevoked = errors.New("connectors: grant revoked")
 	// ErrInvalidPersistedState means Fleet returned a malformed, cross-scope,
 	// revoked, duplicate, or otherwise contradictory grant projection.
 	ErrInvalidPersistedState = errors.New("connectors: invalid persisted state")
+	// ErrRotationConflict means the Connector generation changed between the
+	// owner's read and atomic secret rotation.
+	ErrRotationConflict = errors.New("connectors: rotation conflict")
+	// ErrRotationSealerMissing means plaintext replacement credential input
+	// was supplied without a composed vault sealer.
+	ErrRotationSealerMissing = errors.New("connectors: rotation sealer missing")
 )

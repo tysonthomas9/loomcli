@@ -738,8 +738,8 @@
   },
   "ratchets": {
     "composite_store": {
-      "max_production_files": 66,
-      "max_outside_composition": 56,
+      "max_production_files": 65,
+      "max_outside_composition": 55,
       "composition_prefixes": [
         "internal/cli/serve/",
         "internal/infra/",
@@ -754,7 +754,6 @@
         "internal/cli/cmdstore/store_tracing.go",
         "internal/cli/config/cache.go",
         "internal/cli/config/config.go",
-        "internal/cli/connector/connector_cmd.go",
         "internal/cli/serve/metricscmd/handlers.go",
         "internal/cli/serve/metricscmd/monitor_store_data_source.go",
         "internal/cli/serve/opsimpl/gitops.go",

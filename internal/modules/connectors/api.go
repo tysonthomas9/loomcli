@@ -48,6 +48,7 @@ type GrantCommands interface {
 // results never contain inbound secrets or sealed credential bytes.
 type Management interface {
 	CreateConnector(context.Context, CreateConnectorCommand) (*Connector, error)
+	RotateConnector(context.Context, RotateConnectorCommand) (*Connector, error)
 	GetConnector(context.Context, GetConnectorQuery) (*Connector, error)
 	ListConnectors(context.Context, ListConnectorsQuery) ([]*Connector, error)
 	CreateGrant(context.Context, CreateGrantCommand) (*ConnectorGrant, error)

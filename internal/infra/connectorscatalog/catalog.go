@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/infra/connectorsrotation"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -17,6 +18,7 @@ type Catalog struct {
 	connectors store.ConnectorStore
 	grants     store.ConnectorGrantStore
 	audit      store.ConnectorAuditStore
+	rotation   *connectorsrotation.Adapter
 }
 
 var _ connectorsmodule.ManagementStore = (*Catalog)(nil)
@@ -29,7 +31,16 @@ func New(
 	if connectors == nil || grants == nil || audit == nil {
 		return nil, connectorsmodule.ErrUnavailable
 	}
-	return &Catalog{connectors: connectors, grants: grants, audit: audit}, nil
+	rotation, err := connectorsrotation.New(connectors, audit)
+	if err != nil {
+		return nil, err
+	}
+	return &Catalog{
+		connectors: connectors,
+		grants:     grants,
+		audit:      audit,
+		rotation:   rotation,
+	}, nil
 }
 
 func (catalog *Catalog) CreateConnectorRecord(
@@ -73,6 +84,15 @@ func (catalog *Catalog) ListConnectorRecords(
 		result[index] = connectorProjection(value)
 	}
 	return result, nil
+}
+
+func (catalog *Catalog) RotateConnectorSecretsRecord(
+	ctx context.Context,
+	workspace,
+	connectorID string,
+	mutation connectorsmodule.RotateConnectorSecretsMutation,
+) (*connectorsmodule.Connector, error) {
+	return catalog.rotation.RotateConnectorSecretsRecord(ctx, workspace, connectorID, mutation)
 }
 
 func (catalog *Catalog) CreateManagementGrant(
@@ -129,6 +149,16 @@ func (catalog *Catalog) ListCallRecordsByBinding(
 	return callProjections(values), translateError(err)
 }
 
+func (catalog *Catalog) AppendConnectorCallRecord(
+	ctx context.Context,
+	record *connectorsmodule.ConnectorCallRecord,
+) error {
+	if record == nil {
+		return connectorsmodule.ErrInvalid
+	}
+	return catalog.rotation.AppendConnectorCallRecord(ctx, record)
+}
+
 func connectorProjection(value *domain.Connector) *connectorsmodule.Connector {
 	if value == nil {
 		return nil
@@ -136,8 +166,10 @@ func connectorProjection(value *domain.Connector) *connectorsmodule.Connector {
 	return &connectorsmodule.Connector{
 		WorkspaceKey: value.WorkspaceKey, ConnectorID: value.ConnectorID,
 		SourceKind: connectorsmodule.ConnectorSourceKind(value.SourceKind), DisplayName: value.DisplayName,
-		InboundEndpointPath: value.InboundEndpointPath, Status: connectorsmodule.ConnectorStatus(value.Status),
-		CreatedBy: value.CreatedBy, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
+		InboundEndpointPath:      value.InboundEndpointPath,
+		PreviousSecretValidUntil: cloneTime(value.PreviousSecretValidUntil),
+		Status:                   connectorsmodule.ConnectorStatus(value.Status),
+		CreatedBy:                value.CreatedBy, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
 		RotatedAt: cloneTime(value.RotatedAt),
 	}
 }
@@ -197,7 +229,9 @@ func translateError(err error) error {
 		owner = connectorsmodule.ErrNotFound
 	case errors.Is(err, domain.ErrGrantRevoked):
 		owner = connectorsmodule.ErrGrantRevoked
-	case errors.Is(err, domain.ErrAlreadyExists), errors.Is(err, domain.ErrConflict):
+	case errors.Is(err, domain.ErrAlreadyExists):
+		owner = connectorsmodule.ErrAlreadyExists
+	case errors.Is(err, domain.ErrConflict):
 		owner = connectorsmodule.ErrConflict
 	case errors.Is(err, domain.ErrInvalid):
 		owner = connectorsmodule.ErrInvalid

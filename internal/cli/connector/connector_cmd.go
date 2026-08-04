@@ -29,7 +29,6 @@ import (
 	vault "github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 var connectorCmd = &cobra.Command{
@@ -281,7 +280,23 @@ func runRotate(cmd *cobra.Command, args []string) error {
 		jsonOut:     rotateJSON,
 	}
 	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		return rotateConnector(ctx, h.Store, ws, p, cmd.InOrStdin(), cmd.OutOrStdout())
+		var (
+			management connectorsmodule.Management
+			err        error
+		)
+		if p.credStdin {
+			sealer, sealErr := newConnectorVault()
+			if sealErr != nil {
+				return fmt.Errorf("connector vault: %w", sealErr)
+			}
+			management, err = cmdstore.ConnectorManagementWithSecrets(h, sealer)
+		} else {
+			management, err = cmdstore.ConnectorManagement(h)
+		}
+		if err != nil {
+			return err
+		}
+		return rotateConnector(ctx, management, ws, p, cmd.InOrStdin(), cmd.OutOrStdout())
 	})
 }
 
@@ -291,34 +306,33 @@ func runRotate(cmd *cobra.Command, args []string) error {
 // seals any replacement outbound credential through the vault seam before the
 // single store write, and journals a rotation record in the connector-call
 // audit trail.
-func rotateConnector(ctx context.Context, st store.Store, ws string, p rotateParams, stdin io.Reader, out io.Writer) error {
+func rotateConnector(
+	ctx context.Context,
+	management connectorsmodule.Management,
+	ws string,
+	p rotateParams,
+	stdin io.Reader,
+	out io.Writer,
+) error {
 	r := bufio.NewReader(stdin)
 	secret, err := readSecretLine(r, "new inbound secret")
 	if err != nil {
 		return err
 	}
-	req := vault.RotateRequest{
+	req := connectorsmodule.RotateConnectorCommand{
 		WorkspaceKey:     ws,
 		ConnectorID:      p.connectorID,
 		NewInboundSecret: secret,
 		InboundWindow:    p.window,
 	}
-	var sealer vault.Sealer
 	if p.credStdin {
 		cred, err := readSecretLine(r, "new outbound credential")
 		if err != nil {
 			return err
 		}
-		// The CLI and serve resolve the same vault from bootstrap.LoomDir;
-		// the key is only required when re-sealing a credential.
-		s, err := newConnectorVault()
-		if err != nil {
-			return fmt.Errorf("connector vault: %w", err)
-		}
-		sealer = s
 		req.NewCredential = []byte(cred)
 	}
-	conn, err := vault.Rotate(ctx, st.Connectors(), st.ConnectorCalls(), sealer, req)
+	conn, err := management.RotateConnector(ctx, req)
 	if err != nil {
 		return fmt.Errorf("rotate connector secrets: %w", err)
 	}

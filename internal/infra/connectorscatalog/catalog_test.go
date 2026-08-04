@@ -1,7 +1,9 @@
 package connectorscatalog_test
 
 import (
+	"bytes"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,17 +13,30 @@ import (
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 )
 
+type recordingSealer struct {
+	plaintext []byte
+	aad       []byte
+}
+
+func (sealer *recordingSealer) Seal(plaintext, aad []byte) ([]byte, error) {
+	sealer.plaintext = append([]byte(nil), plaintext...)
+	sealer.aad = append([]byte(nil), aad...)
+	return []byte("sealed-rotated"), nil
+}
+
 func TestManagementOwnsRedactedCatalogGrantAndAuditQueries(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	backend := memstore.New()
+	now := time.Now().UTC()
 	adapter, err := connectorscatalog.New(
 		backend.Connectors(), backend.ConnectorGrants(), backend.ConnectorCalls(),
 	)
 	if err != nil {
 		t.Fatalf("compose adapter: %v", err)
 	}
-	management, err := connectorsmodule.NewManagement(adapter)
+	sealer := &recordingSealer{}
+	management, err := connectorsmodule.NewManagementWithSecrets(adapter, sealer, func() time.Time { return now })
 	if err != nil {
 		t.Fatalf("compose management: %v", err)
 	}
@@ -48,6 +63,37 @@ func TestManagementOwnsRedactedCatalogGrantAndAuditQueries(t *testing.T) {
 	if err != nil || len(listed) != 1 || listed[0].ConnectorID != created.ConnectorID {
 		t.Fatalf("list connectors = %+v, %v", listed, err)
 	}
+	replacement := []byte("replacement-credential")
+	rotated, err := management.RotateConnector(ctx, connectorsmodule.RotateConnectorCommand{
+		WorkspaceKey: "WS", ConnectorID: "github-main", NewInboundSecret: "rotated-secret",
+		NewCredential: replacement, InboundWindow: 30 * time.Minute,
+	})
+	if err != nil || rotated.RotatedAt == nil {
+		t.Fatalf("rotate connector = %+v, %v", rotated, err)
+	}
+	if !bytes.Equal(replacement, make([]byte, len(replacement))) {
+		t.Fatalf("plaintext replacement was not wiped: %q", replacement)
+	}
+	if string(sealer.plaintext) != "replacement-credential" ||
+		string(sealer.aad) != "loom-connector-credential\x00WS\x00github-main" {
+		t.Fatalf("sealer input plaintext=%q aad=%q", sealer.plaintext, sealer.aad)
+	}
+	secrets, err := backend.Connectors().ResolveInboundSecret(ctx, "WS", "github-main")
+	if err != nil || secrets.Current != "rotated-secret" || secrets.Previous != "do-not-expose" ||
+		!secrets.PreviousValidUntil.Equal(now.Add(30*time.Minute)) {
+		t.Fatalf("rotated inbound secrets = %+v, %v", secrets, err)
+	}
+	sealed, err := backend.Connectors().ResolveOutboundCredentialSealed(ctx, "WS", "github-main")
+	if err != nil || string(sealed) != "sealed-rotated" {
+		t.Fatalf("rotated sealed credential = %q, %v", sealed, err)
+	}
+	rotations, err := management.ListCalls(ctx, connectorsmodule.ListCallsQuery{
+		WorkspaceKey: "WS", BindingID: connectorsmodule.RotationAuditBindingID,
+	})
+	if err != nil || len(rotations) != 1 || rotations[0].Action != connectorsmodule.RotationAuditAction ||
+		strings.Contains(rotations[0].SanitizedSummary, "replacement-credential") {
+		t.Fatalf("rotation audit = %+v, %v", rotations, err)
+	}
 
 	grant, err := management.CreateGrant(ctx, connectorsmodule.CreateGrantCommand{
 		WorkspaceKey: "WS", GrantID: "grant-review-read", ConnectorID: "github-main",
@@ -66,7 +112,6 @@ func TestManagementOwnsRedactedCatalogGrantAndAuditQueries(t *testing.T) {
 		}
 	}
 
-	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
 	call := &domain.ConnectorCallRecord{
 		WorkspaceKey: "WS", RunID: "run-1", BindingID: "review", ConnectorID: "github-main",
 		SourceKind: domain.ConnectorSourceGitHub, Action: "github.pulls.list", Seq: 1,

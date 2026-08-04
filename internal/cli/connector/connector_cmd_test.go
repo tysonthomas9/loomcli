@@ -41,6 +41,23 @@ func testConnectorManagement(t *testing.T, st store.Store) connectorsmodule.Mana
 	return management
 }
 
+func testConnectorSecretManagement(t *testing.T, st store.Store) connectorsmodule.Management {
+	t.Helper()
+	adapter, err := connectorscatalog.New(st.Connectors(), st.ConnectorGrants(), st.ConnectorCalls())
+	if err != nil {
+		t.Fatalf("compose connector adapter: %v", err)
+	}
+	sealer, err := newConnectorVault()
+	if err != nil {
+		t.Fatalf("compose connector vault: %v", err)
+	}
+	management, err := connectorsmodule.NewManagementWithSecrets(adapter, sealer, time.Now)
+	if err != nil {
+		t.Fatalf("compose connector secret management: %v", err)
+	}
+	return management
+}
+
 // setVaultKey installs a valid 32-byte vault key for the test's duration and
 // returns the raw key so assertions can unseal what the CLI sealed.
 func setVaultKey(t *testing.T) []byte {
@@ -351,7 +368,11 @@ func TestRotateConnector_SetsPreviousSecretWindow(t *testing.T) {
 				t.Fatalf("seed connector: %v", err)
 			}
 			var out bytes.Buffer
-			err := rotateConnector(ctx, st, testWS, rotateParams{
+			management := testConnectorManagement(t, st)
+			if tt.credStdin {
+				management = testConnectorSecretManagement(t, st)
+			}
+			err := rotateConnector(ctx, management, testWS, rotateParams{
 				connectorID: "gh-main",
 				credStdin:   tt.credStdin,
 				window:      tt.window,
@@ -409,7 +430,7 @@ func TestRotateConnector_JSONOutputRedacted(t *testing.T) {
 		t.Fatalf("seed connector: %v", err)
 	}
 	var out bytes.Buffer
-	err := rotateConnector(ctx, st, testWS, rotateParams{connectorID: "gh-main", jsonOut: true},
+	err := rotateConnector(ctx, testConnectorManagement(t, st), testWS, rotateParams{connectorID: "gh-main", jsonOut: true},
 		strings.NewReader(testRotatedSecret+"\n"), &out)
 	if err != nil {
 		t.Fatalf("rotateConnector: %v", err)
@@ -422,7 +443,8 @@ func TestRotateConnector_JSONOutputRedacted(t *testing.T) {
 
 func TestRotateConnector_NotFound(t *testing.T) {
 	var out bytes.Buffer
-	err := rotateConnector(context.Background(), memstore.New(), testWS, rotateParams{connectorID: "nope"},
+	st := memstore.New()
+	err := rotateConnector(context.Background(), testConnectorManagement(t, st), testWS, rotateParams{connectorID: "nope"},
 		strings.NewReader(testRotatedSecret+"\n"), &out)
 	if !errors.Is(err, domain.ErrConnectorNotFound) {
 		t.Fatalf("rotateConnector = %v, want ErrConnectorNotFound", err)

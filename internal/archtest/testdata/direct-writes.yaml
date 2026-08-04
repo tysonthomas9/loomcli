@@ -1,12 +1,13 @@
 schema_version: 1
 status: complete
-source_head: 66f1cbb40e5fcb221feda6d2bc231d678dbef75e
+source_head: 47d0d99e81cfa4841e32e0454ffcd65376d90b0c
 adapter_roots:
   - internal/app
   - internal/cli
   - internal/driver
   - internal/infra/agentsbootstrapstore
   - internal/infra/connectorscatalog
+  - internal/infra/connectorsrotation
   - internal/infra/stackstoreadapter
   - internal/infra/workspacecatalog
   - internal/modules
@@ -58,7 +59,7 @@ persistence_packages:
     receiver_names: [AdmissionStore, BindingStore, ManagedBindingStore, UnmanagedBindingStore]
     receiver_suffixes: []
   - path: github.com/tysonthomas9/loomcli/internal/modules/connectors
-    receiver_names: [ConnectorGrantStore, ManagementStore]
+    receiver_names: [ConnectorGrantStore, ManagementStore, SecretLifecycleStore]
     receiver_suffixes: []
   - path: github.com/tysonthomas9/loomcli/internal/modules/interaction
     receiver_names: [InboxStore, SessionStore, TerminalStore, TranscriptArtifactStore]
@@ -165,6 +166,9 @@ method_sets:
   - name: connectors_management
     read_only: [GetConnectorRecord, ListCallRecordsByBinding, ListCallRecordsByRun, ListConnectorRecords, ListGrantRecordsByBinding, ListGrantRecordsByConnector]
     mutating: [CreateConnectorRecord, CreateManagementGrant, RevokeGrantRecord]
+  - name: connectors_secret_lifecycle
+    read_only: [GetConnectorRecord]
+    mutating: [AppendConnectorCallRecord, RotateConnectorSecretsRecord]
   - name: fleetdb_agent_management_transport
     read_only: [GetAgentOwnership, GetAgentRole, GetAgentService, ListAgentOwnership, ListAgentRoles, ListAgentServices]
     mutating: [AcquireAgentOwnership, ApplyAgentServiceLifecycle, ArchiveAgentService, CreateAgentRole, CreateAgentService, DeleteAgentRole, ReleaseAgentOwnership, RenewAgentOwnership, SetAgentServiceDesiredState, SetAgentServiceDesiredStateOwned, UpdateAgentRole, UpdateAgentServiceIdentity]
@@ -502,6 +506,10 @@ receiver_surfaces:
   - receiver: github.com/tysonthomas9/loomcli/internal/modules/connectors.ManagementStore
     package: github.com/tysonthomas9/loomcli/internal/modules/connectors
     method_set: connectors_management
+    capability_owner: connectors
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/connectors.SecretLifecycleStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/connectors
+    method_set: connectors_secret_lifecycle
     capability_owner: connectors
   - receiver: github.com/tysonthomas9/loomcli/internal/modules/interaction.InboxStore
     package: github.com/tysonthomas9/loomcli/internal/modules/interaction
@@ -854,6 +862,14 @@ function_surfaces:
     capability_owner: connectors
   - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
     function: NewManagement
+    access: read-only
+    capability_owner: connectors
+  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
+    function: NewManagementWithSecrets
+    access: read-only
+    capability_owner: connectors
+  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
+    function: NewSecretLifecycle
     access: read-only
     capability_owner: connectors
   - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
@@ -2177,6 +2193,18 @@ writes:
       count: 1
       aggregate_owner: connectors
       expires_after_phase: 7
+    - file: internal/infra/connectorsrotation/adapter.go
+      receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorAuditStore
+      method: Append
+      count: 1
+      aggregate_owner: connectors
+      expires_after_phase: 7
+    - file: internal/infra/connectorsrotation/adapter.go
+      receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorStore
+      method: RotateSecrets
+      count: 1
+      aggregate_owner: connectors
+      expires_after_phase: 7
     - file: internal/infra/stackstoreadapter/adapter.go
       receiver: github.com/tysonthomas9/loomcli/internal/stackstore.Store
       method: AddNode
@@ -2257,12 +2285,6 @@ writes:
       expires_after_phase: 7
     - file: internal/webui/handlers/connectors/module.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorGrantStore
-      method: Create
-      count: 1
-      aggregate_owner: connectors
-      expires_after_phase: 7
-    - file: internal/webui/handlers/connectors/module.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorStore
       method: Create
       count: 1
       aggregate_owner: connectors

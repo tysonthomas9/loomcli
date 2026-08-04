@@ -2,6 +2,13 @@ package connectors
 
 import "time"
 
+const (
+	DefaultConnectorSecretOverlap = 15 * time.Minute
+	MaxConnectorSecretOverlap     = 24 * time.Hour
+	RotationAuditBindingID        = "connector-rotation"
+	RotationAuditAction           = "connector.rotate"
+)
+
 type ConnectorSourceKind string
 
 const (
@@ -35,16 +42,17 @@ func (status ConnectorStatus) Valid() bool {
 // signing-secret fields do not exist on the public model, so an adapter cannot
 // accidentally expose them through JSON, logs, or UI responses.
 type Connector struct {
-	WorkspaceKey        string              `json:"workspace_key"`
-	ConnectorID         string              `json:"connector_id"`
-	SourceKind          ConnectorSourceKind `json:"source_kind"`
-	DisplayName         string              `json:"display_name,omitempty"`
-	InboundEndpointPath string              `json:"inbound_endpoint_path,omitempty"`
-	Status              ConnectorStatus     `json:"status"`
-	CreatedBy           string              `json:"created_by,omitempty"`
-	CreatedAt           time.Time           `json:"created_at"`
-	UpdatedAt           time.Time           `json:"updated_at"`
-	RotatedAt           *time.Time          `json:"rotated_at,omitempty"`
+	WorkspaceKey             string              `json:"workspace_key"`
+	ConnectorID              string              `json:"connector_id"`
+	SourceKind               ConnectorSourceKind `json:"source_kind"`
+	DisplayName              string              `json:"display_name,omitempty"`
+	InboundEndpointPath      string              `json:"inbound_endpoint_path,omitempty"`
+	PreviousSecretValidUntil *time.Time          `json:"previous_secret_valid_until,omitempty"`
+	Status                   ConnectorStatus     `json:"status"`
+	CreatedBy                string              `json:"created_by,omitempty"`
+	CreatedAt                time.Time           `json:"created_at"`
+	UpdatedAt                time.Time           `json:"updated_at"`
+	RotatedAt                *time.Time          `json:"rotated_at,omitempty"`
 }
 
 type CreateConnectorCommand struct {
@@ -75,6 +83,17 @@ type ConnectorFilter struct {
 type ListConnectorsQuery struct {
 	WorkspaceKey string
 	Filter       ConnectorFilter
+}
+
+type RotateConnectorCommand struct {
+	WorkspaceKey     string
+	ConnectorID      string
+	NewInboundSecret string
+	// NewCredential is plaintext accepted only at the owner boundary. The
+	// service wipes this buffer after sealing and persistence sees ciphertext.
+	NewCredential     []byte
+	InboundWindow     time.Duration
+	ExpectedUpdatedAt time.Time
 }
 
 type CreateGrantCommand = EnsureGrantCommand

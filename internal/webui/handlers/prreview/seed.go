@@ -10,11 +10,14 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/connector/providers"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/infra/connectorscatalog"
 	"github.com/tysonthomas9/loomcli/internal/localsettings"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -189,12 +192,19 @@ func (m *Module) rotateConnectorCredentialIfChanged(
 			return fmt.Errorf("generate webui github rotation secret: %w", err)
 		}
 	}
-	if _, err := connector.Rotate(
+	adapter, err := connectorscatalog.New(
+		m.store.Connectors(), m.store.ConnectorGrants(), m.store.ConnectorCalls(),
+	)
+	if err != nil {
+		return fmt.Errorf("compose webui connector adapter: %w", err)
+	}
+	management, err := connectorsmodule.NewManagementWithSecrets(adapter, sealer, time.Now)
+	if err != nil {
+		return fmt.Errorf("compose webui connector secret lifecycle: %w", err)
+	}
+	if _, err := management.RotateConnector(
 		ctx,
-		m.store.Connectors(),
-		m.store.ConnectorCalls(),
-		sealer,
-		connector.RotateRequest{
+		connectorsmodule.RotateConnectorCommand{
 			WorkspaceKey:     ws,
 			ConnectorID:      connectorID,
 			NewInboundSecret: inboundSecret,

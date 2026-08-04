@@ -2,14 +2,21 @@ package connectors
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // ManagementService owns Connector definition validation plus grant and
 // audit query scoping. Persistence adapters receive exact owner mutations and
 // return credential-free projections.
-type ManagementService struct{ store ManagementStore }
+type ManagementService struct {
+	store       ManagementStore
+	secretStore SecretLifecycleStore
+	sealer      CredentialSealer
+	now         func() time.Time
+}
 
 var _ Management = (*ManagementService)(nil)
 
@@ -17,7 +24,97 @@ func NewManagement(store ManagementStore) (*ManagementService, error) {
 	if store == nil {
 		return nil, fmt.Errorf("compose Connectors management: %w", ErrUnavailable)
 	}
-	return &ManagementService{store: store}, nil
+	return &ManagementService{store: store, secretStore: store, now: time.Now}, nil
+}
+
+func NewSecretLifecycle(
+	store SecretLifecycleStore,
+	sealer CredentialSealer,
+	now func() time.Time,
+) (*ManagementService, error) {
+	if store == nil || now == nil {
+		return nil, fmt.Errorf("compose Connectors secret lifecycle: %w", ErrUnavailable)
+	}
+	return &ManagementService{secretStore: store, sealer: sealer, now: now}, nil
+}
+
+func NewManagementWithSecrets(
+	store ManagementStore,
+	sealer CredentialSealer,
+	now func() time.Time,
+) (*ManagementService, error) {
+	if sealer == nil || now == nil {
+		return nil, fmt.Errorf("compose Connectors secret lifecycle: %w", ErrUnavailable)
+	}
+	service, err := NewSecretLifecycle(store, sealer, now)
+	if err != nil {
+		return nil, err
+	}
+	service.store = store
+	return service, nil
+}
+
+// RotateConnector performs one atomic dual-secret rotation and appends its
+// redaction-safe audit record. On an audit failure the rotated Connector is
+// returned together with the error because the atomic secret write has landed.
+func (service *ManagementService) RotateConnector(
+	ctx context.Context,
+	command RotateConnectorCommand,
+) (*Connector, error) {
+	defer zeroBytes(command.NewCredential)
+	command, err := normalizeRotateConnector(command)
+	if err != nil {
+		return nil, err
+	}
+	if service == nil || service.secretStore == nil || service.now == nil {
+		return nil, ErrUnavailable
+	}
+	if len(command.NewCredential) > 0 && service.sealer == nil {
+		return nil, ErrRotationSealerMissing
+	}
+	current, err := service.secretStore.GetConnectorRecord(ctx, command.WorkspaceKey, command.ConnectorID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve connector for rotation: %w", err)
+	}
+	if err := validateConnectorProjection(current, command.WorkspaceKey, command.ConnectorID); err != nil {
+		return nil, err
+	}
+	if !command.ExpectedUpdatedAt.IsZero() && !current.UpdatedAt.Equal(command.ExpectedUpdatedAt) {
+		return nil, fmt.Errorf("connector generation changed before rotation: %w", ErrRotationConflict)
+	}
+	validUntil := service.now().UTC().Add(rotationOverlap(command.InboundWindow))
+	mutation := RotateConnectorSecretsMutation{
+		NewInboundSecret: command.NewInboundSecret, PreviousSecretValidUntil: validUntil,
+		ExpectedUpdatedAt: current.UpdatedAt,
+	}
+	if len(command.NewCredential) > 0 {
+		sealed, sealErr := service.sealer.Seal(
+			command.NewCredential,
+			credentialAAD(command.WorkspaceKey, command.ConnectorID),
+		)
+		zeroBytes(command.NewCredential)
+		if sealErr != nil {
+			return nil, fmt.Errorf("seal replacement connector credential: %w", sealErr)
+		}
+		mutation.NewOutboundCredentialSealed = sealed
+	}
+	rotated, err := service.secretStore.RotateConnectorSecretsRecord(
+		ctx, command.WorkspaceKey, command.ConnectorID, mutation,
+	)
+	if err != nil {
+		if errors.Is(err, ErrConflict) {
+			err = errors.Join(ErrRotationConflict, err)
+		}
+		return nil, fmt.Errorf("rotate connector %q: %w", command.ConnectorID, err)
+	}
+	if err := validateConnectorProjection(rotated, command.WorkspaceKey, command.ConnectorID); err != nil {
+		return nil, err
+	}
+	rotated = cloneConnector(rotated)
+	if err := service.appendRotationAudit(ctx, current.SourceKind, rotated, validUntil, mutation.NewOutboundCredentialSealed != nil); err != nil {
+		return rotated, err
+	}
+	return rotated, nil
 }
 
 func (service *ManagementService) CreateConnector(
@@ -232,6 +329,23 @@ func normalizeCreateConnector(command CreateConnectorCommand) (CreateConnectorCo
 	return command, nil
 }
 
+func normalizeRotateConnector(command RotateConnectorCommand) (RotateConnectorCommand, error) {
+	var err error
+	if command.WorkspaceKey, err = requireCanonical("workspace", command.WorkspaceKey); err != nil {
+		return RotateConnectorCommand{}, err
+	}
+	if command.ConnectorID, err = requireCanonical("connector id", command.ConnectorID); err != nil {
+		return RotateConnectorCommand{}, err
+	}
+	if strings.TrimSpace(command.NewInboundSecret) == "" {
+		return RotateConnectorCommand{}, fmt.Errorf("new inbound secret is required: %w", ErrInvalid)
+	}
+	if command.InboundWindow < 0 {
+		return RotateConnectorCommand{}, fmt.Errorf("rotation overlap cannot be negative: %w", ErrInvalid)
+	}
+	return command, nil
+}
+
 func normalizeConnectorFilter(filter ConnectorFilter) (ConnectorFilter, error) {
 	if filter.SourceKind != "" && !filter.SourceKind.Valid() {
 		return ConnectorFilter{}, fmt.Errorf("unknown connector source %q: %w", filter.SourceKind, ErrInvalid)
@@ -326,11 +440,81 @@ func connectorCallID(runID, action string, sequence int) string {
 	return fmt.Sprintf("%s#%s#%d", runID, action, sequence)
 }
 
+func rotationOverlap(window time.Duration) time.Duration {
+	switch {
+	case window == 0:
+		return DefaultConnectorSecretOverlap
+	case window > MaxConnectorSecretOverlap:
+		return MaxConnectorSecretOverlap
+	default:
+		return window
+	}
+}
+
+func credentialAAD(workspaceKey, connectorID string) []byte {
+	result := make([]byte, 0, len("loom-connector-credential")+len(workspaceKey)+len(connectorID)+2)
+	result = append(result, "loom-connector-credential"...)
+	result = append(result, 0)
+	result = append(result, workspaceKey...)
+	result = append(result, 0)
+	result = append(result, connectorID...)
+	return result
+}
+
+func (service *ManagementService) appendRotationAudit(
+	ctx context.Context,
+	source ConnectorSourceKind,
+	rotated *Connector,
+	validUntil time.Time,
+	resealed bool,
+) error {
+	occurredAt := service.now().UTC()
+	if rotated.RotatedAt != nil && !rotated.RotatedAt.IsZero() {
+		occurredAt = rotated.RotatedAt.UTC()
+	}
+	generation := rotated.UpdatedAt.UTC()
+	if generation.IsZero() {
+		generation = occurredAt
+	}
+	runID := fmt.Sprintf("rotation-%s-%d", rotated.ConnectorID, generation.UnixNano())
+	record := &ConnectorCallRecord{
+		WorkspaceKey: rotated.WorkspaceKey,
+		CallID:       connectorCallID(runID, RotationAuditAction, 0),
+		RunID:        runID,
+		BindingID:    RotationAuditBindingID,
+		ConnectorID:  rotated.ConnectorID,
+		SourceKind:   source,
+		Action:       RotationAuditAction,
+		Resource:     "connector:" + rotated.ConnectorID,
+		Decision:     ConnectorCallGranted,
+		SanitizedSummary: fmt.Sprintf(
+			"inbound secret rotated (previous secret valid until %s); outbound credential resealed=%t",
+			validUntil.UTC().Format(time.RFC3339),
+			resealed,
+		),
+		OccurredAt: occurredAt,
+	}
+	if err := service.secretStore.AppendConnectorCallRecord(ctx, record); err != nil && !errors.Is(err, ErrAlreadyExists) {
+		return fmt.Errorf("append connector rotation audit %q: %w", record.CallID, err)
+	}
+	return nil
+}
+
+func zeroBytes(value []byte) {
+	for index := range value {
+		value[index] = 0
+	}
+}
+
 func cloneConnector(value *Connector) *Connector {
 	if value == nil {
 		return nil
 	}
 	result := *value
+	if value.PreviousSecretValidUntil != nil {
+		validUntil := *value.PreviousSecretValidUntil
+		result.PreviousSecretValidUntil = &validUntil
+	}
 	if value.RotatedAt != nil {
 		rotatedAt := *value.RotatedAt
 		result.RotatedAt = &rotatedAt
