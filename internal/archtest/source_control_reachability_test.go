@@ -32,7 +32,7 @@ func TestPhase5SourceControlProductionReachabilityRatchet(t *testing.T) {
 			"SourceControlMaterializer",
 			"RepositoryAdmissionMaterializer",
 			"NewRepositoryAdmissionJournal",
-			"NewStoreBackedWorkspaceAdmissionOperations",
+			"NewStoreBackedWorkspaceAdmissionOperationsWithWorkspace",
 			"CreateWorkspace",
 			"AddWorkspaceRepos",
 			"RuntimeRegistrations",

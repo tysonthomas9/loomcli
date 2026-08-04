@@ -351,10 +351,10 @@ func TestPhase4LedgerDistinguishesReceiptsFromStateConvergence(t *testing.T) {
 	}
 
 	immutableReceiptMarkers := map[string]string{
-		"artifacts.declare":                             "An exact retry returns",
-		"artifacts.finalize":                            "Exact command-receipt replay",
+		"artifacts.declare":                             "an exact finalized digest returns without rewriting",
+		"artifacts.finalize":                            "returns an exact finalized match without rewriting",
 		"artifacts.reference":                           "immutable receipt",
-		"artifacts.upload":                              "Exact command-receipt replay",
+		"artifacts.upload":                              "a finalized exact match is returned without another upload",
 		"execution.append-log":                          "Exact request replay",
 		"execution.claim-driver-run":                    "Exact request replay",
 		"execution.claim-driver-run-work-item":          "Exact request replay",
