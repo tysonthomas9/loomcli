@@ -125,7 +125,7 @@ func updateLocalSettings(dataDir string, req patchRequest) (runtimesettings.Sett
 	}
 
 	var patchErr error
-	githubCredentialChanged := false
+	var githubCredentialChanged bool
 	settings, err := runtimesettings.Update(dataDir, func(settings *runtimesettings.Settings) error {
 		changed, err := applyPatchRequest(dataDir, settings, req)
 		if err != nil {

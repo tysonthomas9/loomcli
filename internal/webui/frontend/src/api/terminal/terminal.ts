@@ -2,7 +2,7 @@
  *
  * The tmux-era endpoints (spawn, restart, kill, session-status, seed,
  * lead-session, close-all, scrollback, scrollback-info, export,
- * list-sessions) were removed with the wterm migration. What remains is
+ * list-sessions) were removed during terminal simplification. What remains is
  * WebSocket auth, tab metadata CRUD (Redis), terminal UI state (Redis),
  * and the cross-workspace "sessions by issue" lookup.
  */

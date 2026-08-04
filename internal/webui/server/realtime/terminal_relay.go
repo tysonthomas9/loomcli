@@ -52,8 +52,8 @@ const (
 	WSReadLimit = 32768 // 32KB; explicit limit for defense-in-depth
 )
 
-// resizeRE matches the wterm in-band resize escape: \x1b[RESIZE:<cols>;<rows>]
-// (matches the wterm local example server/client wire format verbatim).
+// resizeRE matches Loom's in-band terminal resize control message:
+// \x1b[RESIZE:<cols>;<rows>].
 var resizeRE = regexp.MustCompile(`^\x1b\[RESIZE:(\d+);(\d+)\]$`)
 
 // CrashInfo communicates session-exit state from the relay so the handler
@@ -134,11 +134,10 @@ func PtyToWS(ctx context.Context, cancel context.CancelFunc, conn *websocket.Con
 
 // WSToPTY reads from the WebSocket and writes to the PTY.
 //
-// Mirrors wterm/examples/local/server.ts: every message is treated as a
-// UTF-8 string; a message starting with "\x1b[RESIZE:" is parsed as a
-// resize request (decimal cols;rows); anything else is written to the PTY
-// verbatim. No separate binary framing is used — wterm-react sends
-// keystrokes as strings and the resize escape is also a string.
+// Every message is treated as a UTF-8 string; a message starting with
+// "\x1b[RESIZE:" is parsed as a resize request (decimal cols;rows); anything
+// else is written to the PTY verbatim. Keystrokes and resize controls share
+// the same text framing.
 func WSToPTY(ctx context.Context, conn *websocket.Conn, pty io.Writer, resizer Resizer, connID string) {
 	for {
 		select {

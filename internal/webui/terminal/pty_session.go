@@ -204,8 +204,10 @@ func (s *ptySession) attachNew(connID string) *localAttachment {
 	s.attachMu.Unlock()
 
 	var replay []byte
-	if body := s.scrollback.Bytes(); len(body) > 0 {
-		replay = make([]byte, 0, len(screenResetSeq)+len(body))
+	checkpoint, body := s.scrollback.ReplaySnapshot()
+	if len(checkpoint) > 0 || len(body) > 0 {
+		replay = make([]byte, 0, len(checkpoint)+len(screenResetSeq)+len(body))
+		replay = append(replay, checkpoint...)
 		replay = append(replay, screenResetSeq...)
 		replay = append(replay, body...)
 	}

@@ -70,7 +70,7 @@ IssueDetailPanel (slide-out overlay)
           +-- ResizeDivider (draggable, keyboard-accessible)
           +-- EmbeddedTerminal
               +-- TerminalHeader (backend label, connection dot, git actions)
-              +-- TerminalInstance (wterm WebSocket terminal)
+              +-- TerminalInstance (xterm.js WebSocket terminal)
 
 IssueDetailView (full-page)
   +-- headerBar (back button, ID, status, title, "Open in Terminal", copy link)
@@ -129,7 +129,7 @@ Tab state persisted per-issue via `useIssueTabPersistence`:
 
 ### EmbeddedTerminal Component
 
-`forwardRef` wrapper around `TerminalInstance` (wterm). Adds:
+`forwardRef` wrapper around `TerminalInstance` (xterm.js). Adds:
 - `TerminalHeader` — backend brand dot, connection dot, worktree breadcrumb, maximize button, git action buttons
 - Clipboard UX — `useClipboard`, `CopyToast`, `PasteConfirmDialog`, `TerminalContextMenu`
 
