@@ -35,6 +35,30 @@ func (adapter *Adapter) GetConnectorRecord(
 	return connectorProjection(value), translateError(err)
 }
 
+func (adapter *Adapter) ResolveCurrentInboundSecretRecord(
+	ctx context.Context,
+	workspace,
+	connectorID string,
+) (string, error) {
+	value, err := adapter.connectors.ResolveInboundSecret(ctx, workspace, connectorID)
+	if err != nil {
+		return "", translateError(err)
+	}
+	if value == nil {
+		return "", connectorsmodule.ErrInvalidPersistedState
+	}
+	return value.Current, nil
+}
+
+func (adapter *Adapter) ResolveOutboundCredentialSealedRecord(
+	ctx context.Context,
+	workspace,
+	connectorID string,
+) ([]byte, error) {
+	value, err := adapter.connectors.ResolveOutboundCredentialSealed(ctx, workspace, connectorID)
+	return append([]byte(nil), value...), translateError(err)
+}
+
 func (adapter *Adapter) RotateConnectorSecretsRecord(
 	ctx context.Context,
 	workspace,

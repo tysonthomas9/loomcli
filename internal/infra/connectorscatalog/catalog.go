@@ -95,6 +95,22 @@ func (catalog *Catalog) RotateConnectorSecretsRecord(
 	return catalog.rotation.RotateConnectorSecretsRecord(ctx, workspace, connectorID, mutation)
 }
 
+func (catalog *Catalog) ResolveCurrentInboundSecretRecord(
+	ctx context.Context,
+	workspace,
+	connectorID string,
+) (string, error) {
+	return catalog.rotation.ResolveCurrentInboundSecretRecord(ctx, workspace, connectorID)
+}
+
+func (catalog *Catalog) ResolveOutboundCredentialSealedRecord(
+	ctx context.Context,
+	workspace,
+	connectorID string,
+) ([]byte, error) {
+	return catalog.rotation.ResolveOutboundCredentialSealedRecord(ctx, workspace, connectorID)
+}
+
 func (catalog *Catalog) CreateManagementGrant(
 	ctx context.Context,
 	mutation connectorsmodule.CreateGrantMutation,

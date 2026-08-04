@@ -9,8 +9,10 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/app/prreviewer"
 	"github.com/tysonthomas9/loomcli/internal/connector"
+	"github.com/tysonthomas9/loomcli/internal/infra/connectorscatalog"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
@@ -31,21 +33,23 @@ const (
 // grants provide defense in depth. Read grants are seeded on read paths; write
 // grants only on explicit review posts.
 type Module struct {
-	store                   store.Store
-	dispatcher              *connector.Dispatcher
-	agentSvc                service.AgentService
-	terminalSvc             service.TerminalService
-	reviewerProvisioning    prreviewer.Commands
-	reviewerAgents          agents.IdentityQueries
-	sourceControl           sourcecontrol.Materializer
-	interactionChat         interaction.ChatAPI
-	interactionMessenger    interaction.ChatMessenger
-	interactionAuthority    workflowcataloghttp.OperatorAuthorityResolver
-	localSettingsDir        string
-	checkoutReviewerPRHead  reviewerCheckoutFunc
-	recordReviewerPRContext reviewerRecordContextFunc
-	streamPollInterval      time.Duration
-	streamHeartbeatInterval time.Duration
+	store                    store.Store
+	connectorManagement      connectorsmodule.Management
+	connectorManagementStore connectorsmodule.ManagementStore
+	dispatcher               *connector.Dispatcher
+	agentSvc                 service.AgentService
+	terminalSvc              service.TerminalService
+	reviewerProvisioning     prreviewer.Commands
+	reviewerAgents           agents.IdentityQueries
+	sourceControl            sourcecontrol.Materializer
+	interactionChat          interaction.ChatAPI
+	interactionMessenger     interaction.ChatMessenger
+	interactionAuthority     workflowcataloghttp.OperatorAuthorityResolver
+	localSettingsDir         string
+	checkoutReviewerPRHead   reviewerCheckoutFunc
+	recordReviewerPRContext  reviewerRecordContextFunc
+	streamPollInterval       time.Duration
+	streamHeartbeatInterval  time.Duration
 	// seeded caches "connector+grants already ensured" by canonical resource
 	// and action set so read and write authority cannot share a cache hit.
 	seeded                     sync.Map
@@ -73,7 +77,7 @@ func NewModule(
 	interactionMessenger interaction.ChatMessenger,
 	interactionAuthority workflowcataloghttp.OperatorAuthorityResolver,
 ) *Module {
-	return &Module{
+	module := &Module{
 		store:                   st,
 		dispatcher:              disp,
 		agentSvc:                agentSvc,
@@ -90,6 +94,14 @@ func NewModule(
 		streamPollInterval:      reviewerStreamPollInterval,
 		streamHeartbeatInterval: reviewerStreamHeartbeatInterval,
 	}
+	if st != nil {
+		adapter, err := connectorscatalog.New(st.Connectors(), st.ConnectorGrants(), st.ConnectorCalls())
+		if err == nil {
+			module.connectorManagementStore = adapter
+			module.connectorManagement, _ = connectorsmodule.NewManagement(adapter)
+		}
+	}
+	return module
 }
 
 // InvalidateCredentialSeeds forces subsequent connector ensures to re-resolve

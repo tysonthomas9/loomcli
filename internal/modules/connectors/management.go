@@ -2,6 +2,8 @@ package connectors
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -15,6 +17,7 @@ type ManagementService struct {
 	store       ManagementStore
 	secretStore SecretLifecycleStore
 	sealer      CredentialSealer
+	vault       CredentialVault
 	now         func() time.Time
 }
 
@@ -52,6 +55,94 @@ func NewManagementWithSecrets(
 	}
 	service.store = store
 	return service, nil
+}
+
+func NewManagementWithCredentialVault(
+	store ManagementStore,
+	vault CredentialVault,
+	now func() time.Time,
+) (*ManagementService, error) {
+	if vault == nil || now == nil {
+		return nil, fmt.Errorf("compose Connectors credential vault: %w", ErrUnavailable)
+	}
+	service, err := NewManagementWithSecrets(store, vault, now)
+	if err != nil {
+		return nil, err
+	}
+	service.vault = vault
+	return service, nil
+}
+
+// SynchronizeConnectorCredential owns credential comparison, inbound-secret
+// preservation, conflict retries, and atomic resealing. Plaintext is wiped and
+// neither the stored ciphertext nor unsealed current value leaves Connectors.
+func (service *ManagementService) SynchronizeConnectorCredential(
+	ctx context.Context,
+	command SynchronizeConnectorCredentialCommand,
+) (*Connector, error) {
+	defer zeroBytes(command.DesiredCredential)
+	workspace, err := requireCanonical("workspace", command.WorkspaceKey)
+	if err != nil {
+		return nil, err
+	}
+	connectorID, err := requireCanonical("connector id", command.ConnectorID)
+	if err != nil {
+		return nil, err
+	}
+	if len(command.DesiredCredential) == 0 {
+		return nil, fmt.Errorf("desired credential is required: %w", ErrInvalid)
+	}
+	if service == nil || service.secretStore == nil || service.vault == nil {
+		return nil, ErrCredentialVaultMissing
+	}
+
+	for attempt := 0; attempt < 3; attempt++ {
+		current, getErr := service.secretStore.GetConnectorRecord(ctx, workspace, connectorID)
+		if getErr != nil {
+			return nil, getErr
+		}
+		if err := validateConnectorProjection(current, workspace, connectorID); err != nil {
+			return nil, err
+		}
+		sealed, resolveErr := service.secretStore.ResolveOutboundCredentialSealedRecord(ctx, workspace, connectorID)
+		if resolveErr != nil {
+			return nil, fmt.Errorf("resolve connector credential: %w", resolveErr)
+		}
+		if len(sealed) > 0 {
+			same, matchErr := service.vault.Matches(
+				sealed, command.DesiredCredential, credentialAAD(workspace, connectorID),
+			)
+			zeroBytes(sealed)
+			if matchErr != nil {
+				return nil, fmt.Errorf("compare connector credential: %w", matchErr)
+			}
+			if same {
+				return cloneConnector(current), nil
+			}
+		}
+		inbound, resolveErr := service.secretStore.ResolveCurrentInboundSecretRecord(ctx, workspace, connectorID)
+		if resolveErr != nil {
+			return nil, fmt.Errorf("resolve connector inbound secret: %w", resolveErr)
+		}
+		if inbound == "" {
+			inbound, err = randomInboundSecret()
+			if err != nil {
+				return nil, err
+			}
+		}
+		rotated, rotateErr := service.RotateConnector(ctx, RotateConnectorCommand{
+			WorkspaceKey: workspace, ConnectorID: connectorID, NewInboundSecret: inbound,
+			NewCredential:     append([]byte(nil), command.DesiredCredential...),
+			ExpectedUpdatedAt: current.UpdatedAt,
+		})
+		if rotateErr == nil {
+			return rotated, nil
+		}
+		if !errors.Is(rotateErr, ErrRotationConflict) {
+			return rotated, rotateErr
+		}
+	}
+	return nil, fmt.Errorf("connector credential changed during synchronization: %w", ErrRotationConflict)
 }
 
 // RotateConnector performs one atomic dual-secret rotation and appends its
@@ -459,6 +550,14 @@ func credentialAAD(workspaceKey, connectorID string) []byte {
 	result = append(result, 0)
 	result = append(result, connectorID...)
 	return result
+}
+
+func randomInboundSecret() (string, error) {
+	value := make([]byte, 32)
+	if _, err := rand.Read(value); err != nil {
+		return "", fmt.Errorf("generate connector inbound secret: %w", err)
+	}
+	return hex.EncodeToString(value), nil
 }
 
 func (service *ManagementService) appendRotationAudit(

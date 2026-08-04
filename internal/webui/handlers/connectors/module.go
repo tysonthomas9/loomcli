@@ -16,9 +16,6 @@ package connectors
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/subtle"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -30,6 +27,7 @@ import (
 	vault "github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/connectorscatalog"
+	"github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
 	"github.com/tysonthomas9/loomcli/internal/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
@@ -231,31 +229,6 @@ func (m *Module) synchronizeRuntimeCredential(
 ) (*connectorsmodule.Connector, error) {
 	m.credentialMu.Lock()
 	defer m.credentialMu.Unlock()
-	for attempt := 0; attempt < 3; attempt++ {
-		current, err := m.management.GetConnector(ctx, connectorsmodule.GetConnectorQuery{
-			WorkspaceKey: existing.WorkspaceKey, ConnectorID: existing.ConnectorID,
-		})
-		if err != nil {
-			return nil, err
-		}
-		if err := validateExistingConnector(current, existing.SourceKind); err != nil {
-			return nil, err
-		}
-		synchronized, err := m.synchronizeRuntimeCredentialOnce(ctx, current)
-		if err == nil {
-			return synchronized, nil
-		}
-		if !errors.Is(err, domain.ErrConflict) {
-			return nil, err
-		}
-	}
-	return nil, fmt.Errorf("connector credential changed during synchronization: %w", domain.ErrConflict)
-}
-
-func (m *Module) synchronizeRuntimeCredentialOnce(
-	ctx context.Context,
-	existing *connectorsmodule.Connector,
-) (*connectorsmodule.Connector, error) {
 	settings, err := localsettings.Load(m.localSettingsDir)
 	if err != nil {
 		return nil, fmt.Errorf("load local settings: %w", err)
@@ -274,106 +247,24 @@ func (m *Module) synchronizeRuntimeCredentialOnce(
 	if err != nil {
 		return nil, fmt.Errorf("open connector vault: %w", err)
 	}
-	same, err := m.connectorCredentialMatches(ctx, existing, desired, sealer)
+	vaultAdapter, err := connectorsvault.New(sealer)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("compose connector credential vault: %w", err)
 	}
-	if same {
-		return existing, nil
-	}
-
-	inboundSecret, err := m.connectorRotationInboundSecret(ctx, existing)
-	if err != nil {
-		return nil, err
-	}
-	return m.rotateRuntimeCredential(ctx, existing, inboundSecret, sealer, desired)
-}
-
-func (m *Module) rotateRuntimeCredential(
-	ctx context.Context,
-	existing *connectorsmodule.Connector,
-	inboundSecret string,
-	sealer vault.Sealer,
-	desired []byte,
-) (*connectorsmodule.Connector, error) {
-	credential := append([]byte(nil), desired...)
-	zeroBytes(desired)
-	defer zeroBytes(credential)
-	management, err := connectorsmodule.NewManagementWithSecrets(m.managementStore, sealer, time.Now)
-	if err != nil {
-		return nil, fmt.Errorf("compose connector secret lifecycle: %w", err)
-	}
-	rotated, err := management.RotateConnector(
-		ctx,
-		connectorsmodule.RotateConnectorCommand{
-			WorkspaceKey:      existing.WorkspaceKey,
-			ConnectorID:       existing.ConnectorID,
-			NewInboundSecret:  inboundSecret,
-			NewCredential:     credential,
-			ExpectedUpdatedAt: existing.UpdatedAt,
-		},
+	management, err := connectorsmodule.NewManagementWithCredentialVault(
+		m.managementStore, vaultAdapter, time.Now,
 	)
+	if err != nil {
+		return nil, fmt.Errorf("compose connector credential lifecycle: %w", err)
+	}
+	rotated, err := management.SynchronizeConnectorCredential(ctx, connectorsmodule.SynchronizeConnectorCredentialCommand{
+		WorkspaceKey: existing.WorkspaceKey, ConnectorID: existing.ConnectorID,
+		DesiredCredential: desired,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("synchronize connector runtime credential: %w", err)
 	}
 	return rotated, nil
-}
-
-func (m *Module) connectorRotationInboundSecret(
-	ctx context.Context,
-	existing *connectorsmodule.Connector,
-) (string, error) {
-	inbound, err := m.store.Connectors().ResolveInboundSecret(
-		ctx,
-		existing.WorkspaceKey,
-		existing.ConnectorID,
-	)
-	if err != nil {
-		return "", fmt.Errorf("resolve connector inbound secret: %w", err)
-	}
-	if inbound != nil && inbound.Current != "" {
-		return inbound.Current, nil
-	}
-	return randomConnectorSecret()
-}
-
-func (m *Module) connectorCredentialMatches(
-	ctx context.Context,
-	existing *connectorsmodule.Connector,
-	desired []byte,
-	sealer vault.Sealer,
-) (bool, error) {
-	sealed, err := m.store.Connectors().ResolveOutboundCredentialSealed(
-		ctx,
-		existing.WorkspaceKey,
-		existing.ConnectorID,
-	)
-	if err != nil {
-		return false, fmt.Errorf("resolve existing connector credential: %w", err)
-	}
-	if len(sealed) == 0 {
-		return false, nil
-	}
-	current, err := sealer.Unseal(
-		sealed,
-		vault.CredentialAAD(existing.WorkspaceKey, existing.ConnectorID),
-	)
-	if err != nil {
-		if errors.Is(err, vault.ErrUnseal) {
-			return false, nil
-		}
-		return false, fmt.Errorf("unseal existing connector credential: %w", err)
-	}
-	defer zeroBytes(current)
-	return subtle.ConstantTimeCompare(current, desired) == 1, nil
-}
-
-func randomConnectorSecret() (string, error) {
-	value := make([]byte, 32)
-	if _, err := rand.Read(value); err != nil {
-		return "", fmt.Errorf("generate connector rotation secret: %w", err)
-	}
-	return hex.EncodeToString(value), nil
 }
 
 func zeroBytes(value []byte) {
@@ -484,7 +375,7 @@ func (m *Module) createGrant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	grant, err := m.store.ConnectorGrants().Create(r.Context(), expected)
+	grant, err := m.management.CreateGrant(r.Context(), expected)
 	if err == nil {
 		handler.WriteJSON(w, http.StatusCreated, grant)
 		return
@@ -507,18 +398,18 @@ func decodeCreateGrantRequest(
 	r *http.Request,
 	ws string,
 	connectorID string,
-) (store.ConnectorGrantCreate, bool, bool) {
+) (connectorsmodule.CreateGrantCommand, bool, bool) {
 	var req createGrantRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxConnectorBodyBytes)).Decode(&req); err != nil {
 		handler.RespondError(w, http.StatusBadRequest, "invalid JSON body")
-		return store.ConnectorGrantCreate{}, false, false
+		return connectorsmodule.CreateGrantCommand{}, false, false
 	}
 	bindingID := strings.TrimSpace(req.BindingID)
 	action := strings.TrimSpace(req.Action)
 	resourcePattern := strings.TrimSpace(req.ResourcePattern)
 	if bindingID == "" || action == "" || resourcePattern == "" {
 		handler.RespondError(w, http.StatusBadRequest, "binding_id, action and resource_pattern are required")
-		return store.ConnectorGrantCreate{}, false, false
+		return connectorsmodule.CreateGrantCommand{}, false, false
 	}
 	grantID := strings.TrimSpace(req.GrantID)
 	explicitGrantID := grantID != ""
@@ -526,7 +417,7 @@ func decodeCreateGrantRequest(
 		grantID = "grant-" + bindingID + "-" + strings.ReplaceAll(action, ".", "-")
 	}
 
-	return store.ConnectorGrantCreate{
+	return connectorsmodule.CreateGrantCommand{
 		WorkspaceKey:    ws,
 		GrantID:         grantID,
 		ConnectorID:     connectorID,
@@ -539,8 +430,16 @@ func decodeCreateGrantRequest(
 // findGrant returns the active grant with the given id on the connector, or nil
 // if none exists (revoked grants are filtered out by ListByConnector). It backs
 // the idempotent "ensure" semantics so re-activating a template does not 409.
-func (m *Module) findGrant(ctx context.Context, ws, connectorID, grantID string) *domain.ConnectorGrant {
-	grants, err := m.store.ConnectorGrants().ListByConnector(ctx, ws, connectorID)
+func (m *Module) findGrant(
+	ctx context.Context,
+	ws,
+	connectorID,
+	grantID string,
+) *connectorsmodule.ConnectorGrant {
+	grants, err := m.management.ListGrants(ctx, connectorsmodule.ListGrantsQuery{
+		WorkspaceKey: ws,
+		ConnectorID:  connectorID,
+	})
 	if err != nil {
 		return nil
 	}
@@ -552,7 +451,11 @@ func (m *Module) findGrant(ctx context.Context, ws, connectorID, grantID string)
 	return nil
 }
 
-func (m *Module) writeExistingGrant(w http.ResponseWriter, existing *domain.ConnectorGrant, expected store.ConnectorGrantCreate) {
+func (m *Module) writeExistingGrant(
+	w http.ResponseWriter,
+	existing *connectorsmodule.ConnectorGrant,
+	expected connectorsmodule.CreateGrantCommand,
+) {
 	if existing.BindingID == expected.BindingID &&
 		existing.Action == expected.Action &&
 		existing.ResourcePattern == expected.ResourcePattern {

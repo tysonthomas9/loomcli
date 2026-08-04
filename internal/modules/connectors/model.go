@@ -96,6 +96,15 @@ type RotateConnectorCommand struct {
 	ExpectedUpdatedAt time.Time
 }
 
+// SynchronizeConnectorCredentialCommand asks Connectors to compare a desired
+// credential with the currently sealed value and atomically rotate only when
+// they differ. DesiredCredential is wiped before the command returns.
+type SynchronizeConnectorCredentialCommand struct {
+	WorkspaceKey      string
+	ConnectorID       string
+	DesiredCredential []byte
+}
+
 type CreateGrantCommand = EnsureGrantCommand
 
 type RevokeGrantCommand struct {

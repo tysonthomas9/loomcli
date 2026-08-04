@@ -70,7 +70,7 @@ func TestCheckedInManifestsAndRepository(t *testing.T) {
 	if got, want := len(report.CompositeStoreOutside), 55; got != want {
 		t.Fatalf("outside-composition Store file count = %d, want %d", got, want)
 	}
-	if got, want := len(report.LegacyHandlerImports), 80; got != want {
+	if got, want := len(report.LegacyHandlerImports), 79; got != want {
 		t.Fatalf("legacy handler imports = %d, want %d", got, want)
 	}
 	if got, want := report.ModuleRoots, checkedInModuleRoots; !slices.Equal(got, want) {
@@ -85,7 +85,7 @@ func TestCheckedInManifestsAndRepository(t *testing.T) {
 	if got, want := report.MutationCommands, 105; got != want {
 		t.Fatalf("mutation commands = %d, want %d", got, want)
 	}
-	if got, want := report.DirectPersistenceWrites, 212; got != want {
+	if got, want := report.DirectPersistenceWrites, 209; got != want {
 		t.Fatalf("direct persistence-write rows = %d, want %d", got, want)
 	}
 	if got, want := report.RuntimeComponents, 71; got != want {

@@ -11,11 +11,27 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/infra/connectorscatalog"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
+	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 type recordingSealer struct {
 	plaintext []byte
 	aad       []byte
+}
+
+type recordingVault struct {
+	recordingSealer
+	match         bool
+	matchedSealed []byte
+	matchedPlain  []byte
+	matchedAAD    []byte
+}
+
+func (vault *recordingVault) Matches(sealed, plaintext, aad []byte) (bool, error) {
+	vault.matchedSealed = append([]byte(nil), sealed...)
+	vault.matchedPlain = append([]byte(nil), plaintext...)
+	vault.matchedAAD = append([]byte(nil), aad...)
+	return vault.match, nil
 }
 
 func (sealer *recordingSealer) Seal(plaintext, aad []byte) ([]byte, error) {
@@ -174,5 +190,70 @@ func TestManagementMapsNotFoundAndRejectsAmbiguousQueries(t *testing.T) {
 		WorkspaceKey: "WS",
 	}); !errors.Is(err, connectorsmodule.ErrInvalid) {
 		t.Fatalf("missing call selector error = %v", err)
+	}
+}
+
+func TestManagementSynchronizesCredentialInsideOwnerBoundary(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	backend := memstore.New()
+	adapter, err := connectorscatalog.New(
+		backend.Connectors(), backend.ConnectorGrants(), backend.ConnectorCalls(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if _, err := backend.Connectors().Create(ctx, store.ConnectorCreate{
+		WorkspaceKey: "WS", ConnectorID: "github-main",
+		SourceKind: domain.ConnectorSourceGitHub, InboundSecret: "preserved-inbound",
+		OutboundCredentialSealed: []byte("sealed-old"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	vault := &recordingVault{}
+	management, err := connectorsmodule.NewManagementWithCredentialVault(
+		adapter, vault, func() time.Time { return now },
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	desired := []byte("desired-credential")
+	rotated, err := management.SynchronizeConnectorCredential(
+		ctx,
+		connectorsmodule.SynchronizeConnectorCredentialCommand{
+			WorkspaceKey: "WS", ConnectorID: "github-main", DesiredCredential: desired,
+		},
+	)
+	if err != nil || rotated == nil || rotated.RotatedAt == nil {
+		t.Fatalf("SynchronizeConnectorCredential = %+v, %v", rotated, err)
+	}
+	if !bytes.Equal(desired, make([]byte, len(desired))) {
+		t.Fatalf("desired credential was not wiped: %q", desired)
+	}
+	if string(vault.matchedSealed) != "sealed-old" ||
+		string(vault.matchedPlain) != "desired-credential" ||
+		string(vault.matchedAAD) != "loom-connector-credential\x00WS\x00github-main" {
+		t.Fatalf("vault comparison sealed=%q plain=%q aad=%q", vault.matchedSealed, vault.matchedPlain, vault.matchedAAD)
+	}
+	secrets, err := backend.Connectors().ResolveInboundSecret(ctx, "WS", "github-main")
+	if err != nil || secrets.Current != "preserved-inbound" {
+		t.Fatalf("inbound secret = %+v, %v", secrets, err)
+	}
+	sealed, err := backend.Connectors().ResolveOutboundCredentialSealed(ctx, "WS", "github-main")
+	if err != nil || string(sealed) != "sealed-rotated" {
+		t.Fatalf("sealed credential = %q, %v", sealed, err)
+	}
+
+	vault.match = true
+	before := rotated.UpdatedAt
+	unchanged, err := management.SynchronizeConnectorCredential(
+		ctx,
+		connectorsmodule.SynchronizeConnectorCredentialCommand{
+			WorkspaceKey: "WS", ConnectorID: "github-main", DesiredCredential: []byte("desired-credential"),
+		},
+	)
+	if err != nil || !unchanged.UpdatedAt.Equal(before) {
+		t.Fatalf("idempotent synchronization = %+v, %v; want generation %v", unchanged, err, before)
 	}
 }

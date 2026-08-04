@@ -49,6 +49,7 @@ type GrantCommands interface {
 type Management interface {
 	CreateConnector(context.Context, CreateConnectorCommand) (*Connector, error)
 	RotateConnector(context.Context, RotateConnectorCommand) (*Connector, error)
+	SynchronizeConnectorCredential(context.Context, SynchronizeConnectorCredentialCommand) (*Connector, error)
 	GetConnector(context.Context, GetConnectorQuery) (*Connector, error)
 	ListConnectors(context.Context, ListConnectorsQuery) ([]*Connector, error)
 	CreateGrant(context.Context, CreateGrantCommand) (*ConnectorGrant, error)

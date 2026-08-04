@@ -40,6 +40,8 @@ type ManagementStore interface {
 
 type SecretLifecycleStore interface {
 	GetConnectorRecord(context.Context, string, string) (*Connector, error)
+	ResolveCurrentInboundSecretRecord(context.Context, string, string) (string, error)
+	ResolveOutboundCredentialSealedRecord(context.Context, string, string) ([]byte, error)
 	RotateConnectorSecretsRecord(context.Context, string, string, RotateConnectorSecretsMutation) (*Connector, error)
 	AppendConnectorCallRecord(context.Context, *ConnectorCallRecord) error
 }
@@ -68,6 +70,13 @@ type RotateConnectorSecretsMutation struct {
 // neither persistence nor the public result can receive it.
 type CredentialSealer interface {
 	Seal([]byte, []byte) ([]byte, error)
+}
+
+// CredentialVault is the owner-private comparison seam. Implementations
+// unseal only inside the adapter and return equality, never plaintext.
+type CredentialVault interface {
+	CredentialSealer
+	Matches(sealed, plaintext, aad []byte) (bool, error)
 }
 
 // GitReadExecutor is the Connectors-owned provider-dispatch port. Concrete

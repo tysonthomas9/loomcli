@@ -39,4 +39,7 @@ var (
 	// ErrRotationSealerMissing means plaintext replacement credential input
 	// was supplied without a composed vault sealer.
 	ErrRotationSealerMissing = errors.New("connectors: rotation sealer missing")
+	// ErrCredentialVaultMissing means credential synchronization was requested
+	// without the owner-private seal-and-compare vault seam.
+	ErrCredentialVaultMissing = errors.New("connectors: credential vault missing")
 )
