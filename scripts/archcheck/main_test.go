@@ -132,7 +132,7 @@ func TestEncodeDirectWriteSnapshotIncludesProvenance(t *testing.T) {
 		AnalysisProfiles: []string{"linux-amd64", "race"},
 		Writes: []archtest.DirectWriteUse{{
 			File: "internal/cli/write.go", Receiver: "example/internal/store.WorkspaceStore",
-			Method: "Create", Count: 1, AggregateOwner: "workspace", ExpiresAfterPhase: 7,
+			Method: "Create", Count: 1, AggregateOwner: "workspace", Disposition: "transitional", ExpiresAfterPhase: 7,
 		}},
 	}
 	var output bytes.Buffer
@@ -176,7 +176,7 @@ legacy_driver:
 		SourceDirty: true,
 		Writes: []archtest.DirectWriteUse{{
 			File: "internal/app/new.go", Receiver: "new.Store", Method: "Save", Count: 2,
-			AggregateOwner: "execution", ExpiresAfterPhase: 7,
+			AggregateOwner: "execution", Disposition: "transitional", ExpiresAfterPhase: 7,
 		}},
 	}
 	refreshed, removed, err := refreshDirectWriteInventory(source, snapshot, &archtest.LegacyDirectWriteBaseline{Root: "internal/driver"})

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/infra/usageprojection"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -43,7 +44,7 @@ func recordSessionUsage(store *usage.Store, collector *usage.Collector, worktree
 	epicID = parentID
 
 	record := collector.Finalize(taskID, epicID, startedAt, endedAt, exitCode)
-	if err := store.Append(record); err != nil {
+	if err := usageprojection.Append(store, record); err != nil {
 		log.Printf("[auto] Warning: failed to record usage: %v", err)
 	}
 }

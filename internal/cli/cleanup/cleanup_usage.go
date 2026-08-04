@@ -4,13 +4,14 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/infra/usageprojection"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
 // cleanupUsage purges old records from usage.jsonl.
 // Returns (purged count, error).
 func cleanupUsage(runtimeDir string, maxAge time.Duration, dryRun bool) (int, error) {
-	store, err := usage.NewStore(runtimeDir)
+	store, err := usageprojection.New(runtimeDir)
 	if err != nil {
 		return 0, fmt.Errorf("open usage store: %w", err)
 	}
@@ -19,7 +20,7 @@ func cleanupUsage(runtimeDir string, maxAge time.Duration, dryRun bool) (int, er
 		return cleanupUsageDryRun(store, maxAge)
 	}
 
-	purged, err := store.PurgeOlderThan(maxAge)
+	purged, err := usageprojection.PurgeOlderThan(store, maxAge)
 	if err != nil {
 		return 0, fmt.Errorf("purge usage: %w", err)
 	}

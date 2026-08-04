@@ -19,6 +19,7 @@ type DirectWriteInventory struct {
 	Status                    string                       `yaml:"status"`
 	SourceHead                string                       `yaml:"source_head"`
 	AdapterRoots              []string                     `yaml:"adapter_roots"`
+	OwnerAdapters             []DirectWriteOwnerAdapter    `yaml:"owner_adapters"`
 	AnalysisProfiles          []string                     `yaml:"analysis_profiles"`
 	ClassificationPolicy      string                       `yaml:"classification_policy"`
 	CandidateReceiverSuffixes []string                     `yaml:"candidate_receiver_suffixes"`
@@ -29,6 +30,15 @@ type DirectWriteInventory struct {
 	Writes                    []DirectWriteUse             `yaml:"writes"`
 	GenericMechanisms         []GenericMechanismUse        `yaml:"generic_mechanisms"`
 	LegacyDriver              *LegacyDirectWriteBaseline   `yaml:"legacy_driver,omitempty"`
+}
+
+// DirectWriteOwnerAdapter declares the narrow composition or infrastructure
+// path where one aggregate owner's public port is implemented by concrete
+// persistence. These are target-architecture adapters, not migration debt.
+// Every other observed write remains transitional and must expire.
+type DirectWriteOwnerAdapter struct {
+	Path           string `yaml:"path"`
+	AggregateOwner string `yaml:"aggregate_owner"`
 }
 
 // LegacyDirectWriteBaseline is a strict digest ratchet for a legacy root too
@@ -92,8 +102,14 @@ type DirectWriteUse struct {
 	Method            string `yaml:"method"`
 	Count             int    `yaml:"count"`
 	AggregateOwner    string `yaml:"aggregate_owner"`
-	ExpiresAfterPhase int    `yaml:"expires_after_phase"`
+	Disposition       string `yaml:"disposition"`
+	ExpiresAfterPhase int    `yaml:"expires_after_phase,omitempty"`
 }
+
+const (
+	directWriteDispositionOwnerAdapter = "owner_adapter"
+	directWriteDispositionTransitional = "transitional"
+)
 
 type GenericMechanismUse struct {
 	Mechanism           string   `yaml:"mechanism"`
@@ -153,15 +169,16 @@ func (i DirectWriteInventory) Validate() error {
 	return i.validateGenericMechanisms()
 }
 
-// ValidateCompletedPhase makes the per-row expiry operational. A row may
-// remain only while its last permitted phase is still in the future; once that
-// phase is complete the baseline must be removed together with the write.
+// ValidateCompletedPhase makes transitional row expiry operational. A durable
+// owner adapter has no phase expiry because it is the required implementation
+// side of a public owner port; every other direct write must disappear by its
+// declared final phase.
 func (i DirectWriteInventory) ValidateCompletedPhase(completedPhase int) error {
 	if completedPhase < 1 || completedPhase > 7 {
 		return fmt.Errorf("direct-write completed phase must be between 1 and 7, got %d", completedPhase)
 	}
 	for _, use := range i.Writes {
-		if use.ExpiresAfterPhase <= completedPhase {
+		if use.Disposition == directWriteDispositionTransitional && use.ExpiresAfterPhase <= completedPhase {
 			return fmt.Errorf("direct-write row %s.%s in %s expired after Phase %d but completed_phase is %d", use.Receiver, use.Method, use.File, use.ExpiresAfterPhase, completedPhase)
 		}
 	}
@@ -227,13 +244,18 @@ func (i DirectWriteInventory) validateMetadata() error {
 		"internal/infra/agentsbootstrapstore",
 		"internal/infra/connectorscatalog",
 		"internal/infra/connectorsrotation",
+		"internal/infra/sessionstoreadapter",
 		"internal/infra/stackstoreadapter",
+		"internal/infra/usageprojection",
 		"internal/infra/workspacecatalog",
 		"internal/modules",
 		"internal/webui/handlers",
 	}
 	if !slices.Equal(i.AdapterRoots, wantRoots) {
 		return fmt.Errorf("direct-write adapter roots: got %v, want %v", i.AdapterRoots, wantRoots)
+	}
+	if err := i.validateOwnerAdapters(); err != nil {
+		return err
 	}
 	if err := validateSortedUnique("direct-write analysis profile", i.AnalysisProfiles); err != nil {
 		return err
@@ -251,7 +273,7 @@ func (i DirectWriteInventory) validateWrites() error {
 	classifier := newPersistenceClassifier(i)
 	keys := make([]string, 0, len(i.Writes))
 	for _, use := range i.Writes {
-		if use.File == "" || use.Receiver == "" || use.Method == "" || use.AggregateOwner == "" || use.Count <= 0 || use.ExpiresAfterPhase < 2 {
+		if use.File == "" || use.Receiver == "" || use.Method == "" || use.AggregateOwner == "" || use.Count <= 0 {
 			return fmt.Errorf("invalid direct-write row for %s", use.File)
 		}
 		if !underAnyRoot(use.File, i.AdapterRoots) {
@@ -264,9 +286,64 @@ func (i DirectWriteInventory) validateWrites() error {
 		if use.AggregateOwner == "unassigned_legacy" || use.AggregateOwner != owner {
 			return fmt.Errorf("direct-write row %s.%s owner %q must match declared capability owner %q", use.Receiver, use.Method, use.AggregateOwner, owner)
 		}
+		adapterOwner, isOwnerAdapter := i.ownerAdapterOwner(use.File)
+		switch use.Disposition {
+		case directWriteDispositionOwnerAdapter:
+			if use.ExpiresAfterPhase != 0 {
+				return fmt.Errorf("owner-adapter direct-write row %s must not declare an expiry", use.File)
+			}
+			if !isOwnerAdapter || adapterOwner != use.AggregateOwner {
+				return fmt.Errorf("owner-adapter direct-write row %s owner %q is not declared by owner_adapters", use.File, use.AggregateOwner)
+			}
+		case directWriteDispositionTransitional:
+			if use.ExpiresAfterPhase < 2 || use.ExpiresAfterPhase > 7 {
+				return fmt.Errorf("transitional direct-write row %s requires expires_after_phase between 2 and 7", use.File)
+			}
+			if isOwnerAdapter && adapterOwner == use.AggregateOwner {
+				return fmt.Errorf("direct-write row %s is a declared owner adapter and cannot be labeled transitional", use.File)
+			}
+		default:
+			return fmt.Errorf("direct-write row %s disposition %q must be owner_adapter or transitional", use.File, use.Disposition)
+		}
 		keys = append(keys, directWriteKey(use))
 	}
 	return validateSortedUnique("direct-write row", keys)
+}
+
+func (i DirectWriteInventory) validateOwnerAdapters() error {
+	keys := make([]string, 0, len(i.OwnerAdapters))
+	for index, adapter := range i.OwnerAdapters {
+		adapter.Path = cleanInventoryPath(adapter.Path)
+		if adapter.Path == "" || !underAnyRoot(adapter.Path, i.AdapterRoots) {
+			return fmt.Errorf("direct-write owner adapter path %q is outside the declared adapter roots", adapter.Path)
+		}
+		if !validPersistenceOwner(adapter.AggregateOwner) || adapter.AggregateOwner == "unassigned_legacy" {
+			return fmt.Errorf("direct-write owner adapter %s has unsupported owner %q", adapter.Path, adapter.AggregateOwner)
+		}
+		for previous := 0; previous < index; previous++ {
+			other := i.OwnerAdapters[previous]
+			if pathContains(adapter.Path, other.Path) || pathContains(other.Path, adapter.Path) {
+				return fmt.Errorf("direct-write owner adapter paths %s and %s overlap", other.Path, adapter.Path)
+			}
+		}
+		keys = append(keys, adapter.Path+"\x00"+adapter.AggregateOwner)
+	}
+	return validateSortedUnique("direct-write owner adapter", keys)
+}
+
+func (i DirectWriteInventory) ownerAdapterOwner(file string) (string, bool) {
+	for _, adapter := range i.OwnerAdapters {
+		if pathContains(adapter.Path, file) {
+			return adapter.AggregateOwner, true
+		}
+	}
+	return "", false
+}
+
+func pathContains(root, path string) bool {
+	root = cleanInventoryPath(root)
+	path = cleanInventoryPath(path)
+	return path == root || strings.HasPrefix(path, root+"/")
 }
 
 func (i DirectWriteInventory) validateGenericMechanisms() error {
@@ -497,6 +574,9 @@ func CheckDirectWrites(root string, matrix AnalysisMatrix, inventory DirectWrite
 		if baseline.AggregateOwner != use.AggregateOwner {
 			violations = append(violations, fmt.Sprintf("direct persistence write %s.%s owner changed to %s (baseline %s)", use.Receiver, use.Method, use.AggregateOwner, baseline.AggregateOwner))
 		}
+		if baseline.Disposition != use.Disposition || baseline.ExpiresAfterPhase != use.ExpiresAfterPhase {
+			violations = append(violations, fmt.Sprintf("direct persistence write %s.%s in %s lifecycle changed to %s/Phase %d (baseline %s/Phase %d)", use.Receiver, use.Method, use.File, use.Disposition, use.ExpiresAfterPhase, baseline.Disposition, baseline.ExpiresAfterPhase))
+		}
 	}
 	for _, use := range expected {
 		if _, ok := observedByKey[directWriteKey(use)]; !ok {
@@ -568,7 +648,7 @@ func snapshotDirectWritesAtRoots(
 	if err != nil {
 		return nil, err
 	}
-	return classifyDirectWriteCalls(calls, problems, classifier)
+	return classifyDirectWriteCalls(calls, problems, classifier, inventory)
 }
 
 func directWriteDigest(uses []DirectWriteUse) (int, int, string) {
@@ -696,6 +776,7 @@ func classifyDirectWriteCalls(
 	calls map[directWriteCallIdentity]directWriteCall,
 	problems map[directWriteProblemIdentity]directWriteProblem,
 	classifier persistenceClassifier,
+	inventory DirectWriteInventory,
 ) ([]DirectWriteUse, error) {
 	unclassified := directWriteProblemMessages(problems)
 	identities := make([]directWriteCallIdentity, 0, len(calls))
@@ -724,7 +805,7 @@ func classifyDirectWriteCalls(
 			strings.Join(unclassified, "\n- "),
 		)
 	}
-	return directWriteRows(counts), nil
+	return directWriteRows(counts, inventory), nil
 }
 
 // ownerCoreUsesOwnDeclaredPort distinguishes target architecture from a

@@ -18,6 +18,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/sessionfinalize"
 	"github.com/tysonthomas9/loomcli/internal/cli/workspace"
 	"github.com/tysonthomas9/loomcli/internal/events"
+	"github.com/tysonthomas9/loomcli/internal/infra/sessionstoreadapter"
+	"github.com/tysonthomas9/loomcli/internal/infra/usageprojection"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
@@ -181,12 +183,12 @@ func runPlanSingleTask(deps *cli.Deps, worktreePath, agentName string, routerChe
 
 // createAgentSession creates a new session for tracking.
 func createAgentSession(agentName, parentID, prompt, phase string) *sessions.Session {
-	sessStore, sessErr := sessions.NewStore(cli.GetWorkspaceRuntimeDir())
+	sessStore, sessErr := sessionstoreadapter.New(cli.GetWorkspaceRuntimeDir())
 	if sessErr != nil {
 		log.Printf("[agent] Warning: session store unavailable: %v", sessErr)
 		return nil
 	}
-	sess, _ := sessStore.CreateSession(sessions.CreateOptions{
+	sess, _ := sessionstoreadapter.Create(sessStore, sessions.CreateOptions{
 		AgentName: agentName, Backend: cli.ResolveBackendName(),
 		EpicID: parentID, Prompt: prompt, Phase: phase,
 	})
@@ -245,12 +247,12 @@ func exitCodeFromErr(invokeErr error) int {
 
 // appendUsageRecord persists a usage record to the workspace usage.jsonl.
 func appendUsageRecord(rec usage.SessionUsage) {
-	store, err := usage.NewStore(cli.GetWorkspaceRuntimeDir())
+	store, err := usageprojection.New(cli.GetWorkspaceRuntimeDir())
 	if err != nil {
 		log.Printf("[agent] Warning: usage store unavailable: %v", err)
 		return
 	}
-	if err := store.Append(rec); err != nil {
+	if err := usageprojection.Append(store, rec); err != nil {
 		log.Printf("[agent] Warning: failed to record usage: %v", err)
 	}
 }

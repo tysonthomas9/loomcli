@@ -9,7 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/sessions"
+	"github.com/tysonthomas9/loomcli/internal/infra/sessionstoreadapter"
 )
 
 var sessionsOlderThan string
@@ -31,12 +31,12 @@ var sessionsCleanCmd = &cobra.Command{
 			return fmt.Errorf("invalid --older-than value %q: %w", sessionsOlderThan, err)
 		}
 
-		store, err := sessions.NewStore(cli.GetWorkspaceRuntimeDir())
+		store, err := sessionstoreadapter.New(cli.GetWorkspaceRuntimeDir())
 		if err != nil {
 			return fmt.Errorf("open session store: %w", err)
 		}
 
-		count, err := store.PurgeOlderThan(dur)
+		count, err := sessionstoreadapter.PurgeOlderThan(store, dur)
 		if err != nil {
 			return fmt.Errorf("purge sessions: %w", err)
 		}

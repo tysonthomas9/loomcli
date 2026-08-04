@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/infra/sessionstoreadapter"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
@@ -194,7 +195,7 @@ func queryIndexedSessionIDs(store *sessions.Store) (map[string]bool, error) {
 }
 
 func checkStaleSessionRecords() CheckResult {
-	sessStore, err := sessions.NewStore(cli.GetWorkspaceRuntimeDir())
+	sessStore, err := sessionstoreadapter.New(cli.GetWorkspaceRuntimeDir())
 	if err != nil {
 		return CheckResult{} // skip — sessions store not available
 	}
@@ -279,7 +280,7 @@ func fixStaleSessionRecords(sessStore *sessions.Store, sessDir string, halfWritt
 			continue
 		}
 		meta.NormalizeAfterLoad()
-		if appendErr := sessStore.ReIndex(meta.SessionRecord); appendErr != nil {
+		if appendErr := sessionstoreadapter.ReIndex(sessStore, meta.SessionRecord); appendErr != nil {
 			failures = append(failures, fmt.Sprintf("re-index %s: %v", name, appendErr))
 		} else {
 			fixed++

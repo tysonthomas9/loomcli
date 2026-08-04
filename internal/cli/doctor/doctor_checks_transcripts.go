@@ -10,6 +10,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backendnames"
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/infra/sessionstoreadapter"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
@@ -30,7 +31,7 @@ type orphanSession struct {
 // Claude Code hooks installed — and, with --fix, backfills agent_transcript.jsonl
 // plus token usage from Claude Code's own ~/.claude/projects transcript.
 func checkOrphanedTranscripts() CheckResult {
-	sessStore, err := sessions.NewStore(cli.GetWorkspaceRuntimeDir())
+	sessStore, err := sessionstoreadapter.New(cli.GetWorkspaceRuntimeDir())
 	if err != nil {
 		return CheckResult{} // skip — sessions store not available
 	}
@@ -141,7 +142,7 @@ func fixOrphanedTranscripts(store *sessions.Store, orphans []orphanSession) Chec
 // backfillSession mirrors the transcript into the session and records token
 // usage, mirroring the hook-based captureTokenUsage path.
 func backfillSession(store *sessions.Store, o orphanSession, srcPath string) error {
-	if err := store.SyncNativeTranscript(o.sessionID, srcPath, sessions.TranscriptFormatRaw); err != nil {
+	if err := sessionstoreadapter.SyncNativeTranscript(store, o.sessionID, srcPath, sessions.TranscriptFormatRaw); err != nil {
 		return err
 	}
 	tok, err := sessions.SumTranscriptUsage(srcPath)
@@ -166,10 +167,10 @@ func backfillSession(store *sessions.Store, o orphanSession, srcPath string) err
 		CacheReadTokens:  tok.CacheReadTokens,
 		CacheWriteTokens: tok.CacheWriteTokens,
 	})
-	if err := store.SaveMetadata(o.sessionID, meta); err != nil {
+	if err := sessionstoreadapter.SaveMetadata(store, o.sessionID, meta); err != nil {
 		return err
 	}
-	return store.ReIndex(meta.SessionRecord)
+	return sessionstoreadapter.ReIndex(store, meta.SessionRecord)
 }
 
 type transcriptCandidate struct {

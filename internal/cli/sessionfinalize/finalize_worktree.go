@@ -5,6 +5,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backendnames"
 	"github.com/tysonthomas9/loomcli/internal/cli/git"
+	"github.com/tysonthomas9/loomcli/internal/infra/sessionstoreadapter"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
@@ -54,7 +55,7 @@ func WithWorktree(sess *sessions.Session, opts WithWorktreeOptions) (WithWorktre
 		return result, nil
 	}
 	syncNativeTranscript(sess, opts)
-	return result, sess.Finalize(sessions.FinalizeOptions{
+	return result, sessionstoreadapter.Finalize(sess, sessions.FinalizeOptions{
 		TaskID:       opts.TaskID,
 		ExitCode:     opts.ExitCode,
 		ErrorClass:   opts.ErrorClass,
@@ -72,7 +73,7 @@ func WithWorktree(sess *sessions.Session, opts WithWorktreeOptions) (WithWorktre
 
 func syncNativeTranscript(sess *sessions.Session, opts WithWorktreeOptions) {
 	if sess.Meta.Backend == backendnames.Codex {
-		path, err := sess.SyncLatestCodexRollout(opts.WorktreePath, sess.Meta.StartedAt)
+		path, err := sessionstoreadapter.SyncLatestCodexRollout(sess, opts.WorktreePath, sess.Meta.StartedAt)
 		if err != nil {
 			slog.Warn("codex transcript sync failed",
 				"session_id", sess.Meta.SessionID,
@@ -87,6 +88,6 @@ func syncNativeTranscript(sess *sessions.Session, opts WithWorktreeOptions) {
 		}
 	}
 	if sess.Meta.Backend == backendnames.Claude {
-		_, _ = sess.SyncLatestClaudeTranscript(opts.WorktreePath, opts.ClaudeSessionID, sess.Meta.StartedAt)
+		_, _ = sessionstoreadapter.SyncLatestClaudeTranscript(sess, opts.WorktreePath, opts.ClaudeSessionID, sess.Meta.StartedAt)
 	}
 }
