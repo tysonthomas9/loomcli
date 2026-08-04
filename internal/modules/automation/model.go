@@ -21,6 +21,7 @@ const (
 
 	SignatureStatusVerified = "verified"
 	SignatureStatusInternal = "internal"
+	SignatureStatusSession  = "session"
 
 	DropReasonHopDepthExceeded = "hop_depth_exceeded"
 	RejectionReasonActorFilter = "actor_filtered"

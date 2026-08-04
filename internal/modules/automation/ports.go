@@ -103,6 +103,14 @@ type EventReader interface {
 	ListEvents(ctx context.Context, workspace string, filter EventFilter) ([]*Event, error)
 }
 
+// ApprovalEventStore appends one already-authorized session decision to the
+// durable trigger-event journal without binding fanout. The legacy Store and
+// FleetDB implementations satisfy this narrow port directly because Event is
+// the canonical type behind the compatibility alias.
+type ApprovalEventStore interface {
+	AppendTriggerEvent(context.Context, *Event) (*Event, error)
+}
+
 type DeliveryReader interface {
 	GetDelivery(ctx context.Context, workspace, deliveryID string) (*Delivery, error)
 	ListDeliveries(ctx context.Context, workspace string, filter DeliveryFilter) ([]*Delivery, error)

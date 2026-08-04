@@ -20,6 +20,7 @@ const (
 	ActionDisableManagedBinding authority.Action = "automation.disable-managed-binding"
 	ActionDeleteManagedBinding  authority.Action = "automation.delete-managed-binding"
 	ActionEnsureManagedBinding  authority.Action = "automation.ensure-managed-binding"
+	ActionJournalApproval       authority.Action = "automation.journal-approval"
 	ActionAdmitEvent            authority.Action = "automation.admit-event"
 	ActionDispatchBinding       authority.Action = "automation.dispatch-binding"
 	ActionSweepCron             authority.Action = "automation.sweep-cron"
@@ -35,6 +36,7 @@ type API interface {
 	EventQueries
 	DeliveryQueries
 	EventAdmission
+	ApprovalJournal
 	ManualDispatch
 	RuntimeCommands
 }
@@ -100,6 +102,31 @@ type DeliveryQueries interface {
 
 type EventAdmission interface {
 	AdmitEvent(ctx context.Context, auth EventAuthority, command AdmitEventCommand) (*AdmissionResult, error)
+}
+
+// ApprovalJournal is the narrow, operator-authorized command used by the
+// session approval adapter. It persists the event before Execution attempts
+// await resolution, so later await registration cannot lose the decision.
+type ApprovalJournal interface {
+	JournalApproval(context.Context, authority.OperatorAuthority, JournalApprovalCommand) (*Event, error)
+}
+
+// ApprovalAuthorityProvider converts a session identity already verified by
+// the inbound adapter into one short-lived, approval-only authority.
+type ApprovalAuthorityProvider interface {
+	AuthorityForVerifiedSession(context.Context, string, string) (authority.OperatorAuthority, error)
+}
+
+// JournalApprovalCommand contains only the approval event envelope. Decision
+// content remains an opaque, bounded payload owned by the approval workflow.
+type JournalApprovalCommand struct {
+	WorkspaceKey string
+	EventID      string
+	EventType    string
+	SubjectRef   string
+	ActorRef     string
+	OccurredAt   time.Time
+	Payload      json.RawMessage
 }
 
 type ManualDispatch interface {

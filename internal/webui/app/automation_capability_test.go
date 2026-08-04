@@ -42,6 +42,10 @@ func (*agentRouteAutomationCapability) WebhookWorkflow() *webhookingestion.Workf
 }
 func (*agentRouteAutomationCapability) WorkflowBinding() *workflowbinding.Workflow   { return nil }
 func (*agentRouteAutomationCapability) WorkflowEventing() *workfloweventing.Workflow { return nil }
+func (*agentRouteAutomationCapability) ApprovalJournal() automation.ApprovalJournal  { return nil }
+func (*agentRouteAutomationCapability) ApprovalAuthorityProvider() automation.ApprovalAuthorityProvider {
+	return nil
+}
 func (*agentRouteAutomationCapability) IssueJournalEmitter() systemeventing.IssueJournalEmitter {
 	return nil
 }

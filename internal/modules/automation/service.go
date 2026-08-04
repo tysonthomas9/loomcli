@@ -15,6 +15,7 @@ type Service struct {
 	managedBindings   ManagedBindingStore
 	matcher           BindingMatcher
 	events            EventReader
+	approvalEvents    ApprovalEventStore
 	deliveries        DeliveryReader
 	admissions        AdmissionStore
 	execution         ExecutionPort
@@ -37,6 +38,7 @@ var (
 	_ EventQueries                = (*Service)(nil)
 	_ DeliveryQueries             = (*Service)(nil)
 	_ EventAdmission              = (*Service)(nil)
+	_ ApprovalJournal             = (*Service)(nil)
 	_ ManualDispatch              = (*Service)(nil)
 )
 
@@ -64,6 +66,16 @@ func WithEventHopDepthCap(cap int) Option {
 func WithEventTrustPolicy(policy EventTrustPolicy) Option {
 	return func(service *Service) {
 		service.eventTrustPolicy = policy
+	}
+}
+
+// WithApprovalEventStore supplies the journal-only persistence seam used by
+// authenticated approval decisions. It is deliberately separate from event
+// admission because approvals must remain durable even without a matching
+// trigger binding.
+func WithApprovalEventStore(events ApprovalEventStore) Option {
+	return func(service *Service) {
+		service.approvalEvents = events
 	}
 }
 

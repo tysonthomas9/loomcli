@@ -46,6 +46,8 @@ type Deps struct {
 	AutomationAudit               automation.AuditQueries
 	AutomationWebhook             *webhookingestion.Workflow
 	AutomationEventing            *workfloweventing.Workflow
+	AutomationApprovalJournal     automation.ApprovalJournal
+	AutomationApprovalAuthority   automation.ApprovalAuthorityProvider
 	AutomationOperator            workflowcataloghttp.OperatorAuthorityResolver
 	Agents                        agents.API
 	AgentsOperator                workflowcataloghttp.OperatorAuthorityResolver

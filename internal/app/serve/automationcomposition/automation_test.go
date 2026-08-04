@@ -69,6 +69,19 @@ type automationModuleTransportStub struct {
 	automationfleetdb.Transport
 }
 
+type automationApprovalStoreStub struct{}
+
+func (automationApprovalStoreStub) AppendTriggerEvent(
+	_ context.Context,
+	event *automation.Event,
+) (*automation.Event, error) {
+	if event == nil {
+		return nil, automation.ErrInvalid
+	}
+	result := *event
+	return &result, nil
+}
+
 func TestComposeAutomationCapabilityDisabledConstructsNothing(t *testing.T) {
 	capability, err := composeAutomationCapability(automationCapabilityConfig{}, automationCapabilityDependencies{})
 	if err != nil || capability != nil {
@@ -92,7 +105,8 @@ func TestComposeAutomationCapabilityExposesOnlyNarrowPortsAndTwoComponents(t *te
 	}, automationCapabilityDependencies{
 		bindings: adapter, unmanagedBindings: adapter, managedBindings: adapter,
 		matcher: adapter, events: adapter, deliveries: adapter,
-		admissions: adapter, execution: automationExecutionStub{}, cron: automationCronStub{},
+		admissions: adapter, approvalEvents: automationApprovalStoreStub{},
+		execution: automationExecutionStub{}, cron: automationCronStub{},
 		retries: adapter, awaits: automationAwaitNotifierStub{},
 		workspaces: automationWorkspaceListerStub{}, webhookVerifier: automationVerifierStub{},
 		workflowTargets: automationWorkflowTargetPreparerStub{},
@@ -103,7 +117,8 @@ func TestComposeAutomationCapabilityExposesOnlyNarrowPortsAndTwoComponents(t *te
 	if capability.BindingOperations() == nil || capability.AuditQueries() == nil ||
 		capability.WebhookWorkflow() == nil || capability.WorkflowEventing() == nil ||
 		capability.WorkflowBinding() == nil ||
-		capability.IssueJournalEmitter() == nil || capability.RunOutcomePublisher() == nil ||
+		capability.IssueJournalEmitter() == nil || capability.ApprovalJournal() == nil ||
+		capability.ApprovalAuthorityProvider() == nil || capability.RunOutcomePublisher() == nil ||
 		capability.OperatorAuthorityResolver() == nil {
 		t.Fatalf("capability has missing narrow port: %#v", capability)
 	}
@@ -118,6 +133,8 @@ func TestComposeAutomationCapabilityExposesOnlyNarrowPortsAndTwoComponents(t *te
 	}
 	if (*AutomationCapability)(nil).BindingOperations() != nil ||
 		(*AutomationCapability)(nil).WorkflowBinding() != nil ||
+		(*AutomationCapability)(nil).ApprovalJournal() != nil ||
+		(*AutomationCapability)(nil).ApprovalAuthorityProvider() != nil ||
 		(*AutomationCapability)(nil).RunOutcomePublisher() != nil ||
 		(*AutomationCapability)(nil).RuntimeRegistrations() != nil {
 		t.Fatal("nil capability accessors did not fail closed")
@@ -152,7 +169,8 @@ func TestComposeAutomationCapabilityRequiresEveryProductionPort(t *testing.T) {
 	valid := automationCapabilityDependencies{
 		bindings: adapter, unmanagedBindings: adapter, managedBindings: adapter,
 		matcher: adapter, events: adapter, deliveries: adapter,
-		admissions: adapter, execution: automationExecutionStub{}, cron: automationCronStub{},
+		admissions: adapter, approvalEvents: automationApprovalStoreStub{},
+		execution: automationExecutionStub{}, cron: automationCronStub{},
 		retries: adapter, awaits: automationAwaitNotifierStub{},
 		workspaces: automationWorkspaceListerStub{}, webhookVerifier: automationVerifierStub{},
 		workflowTargets: automationWorkflowTargetPreparerStub{},
@@ -168,6 +186,7 @@ func TestComposeAutomationCapabilityRequiresEveryProductionPort(t *testing.T) {
 		{"events", func(value *automationCapabilityDependencies) { value.events = nil }},
 		{"deliveries", func(value *automationCapabilityDependencies) { value.deliveries = nil }},
 		{"admissions", func(value *automationCapabilityDependencies) { value.admissions = nil }},
+		{"approval events", func(value *automationCapabilityDependencies) { value.approvalEvents = nil }},
 		{"execution", func(value *automationCapabilityDependencies) { value.execution = nil }},
 		{"cron", func(value *automationCapabilityDependencies) { value.cron = nil }},
 		{"retries", func(value *automationCapabilityDependencies) { value.retries = nil }},

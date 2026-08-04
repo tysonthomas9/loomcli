@@ -35,6 +35,8 @@ type Automation interface {
 	WebhookWorkflow() *webhookingestion.Workflow
 	WorkflowBinding() *workflowbinding.Workflow
 	WorkflowEventing() *workfloweventing.Workflow
+	ApprovalJournal() automation.ApprovalJournal
+	ApprovalAuthorityProvider() automation.ApprovalAuthorityProvider
 	OperatorAuthorityResolver() workflowcataloghttp.OperatorAuthorityResolver
 }
 

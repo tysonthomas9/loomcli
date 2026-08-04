@@ -46,6 +46,8 @@ func PopulateUnifiedAgentCapabilityDeps(
 		deps.AutomationAudit = capability.AuditQueries()
 		deps.AutomationWebhook = capability.WebhookWorkflow()
 		deps.AutomationEventing = capability.WorkflowEventing()
+		deps.AutomationApprovalJournal = capability.ApprovalJournal()
+		deps.AutomationApprovalAuthority = capability.ApprovalAuthorityProvider()
 		deps.AutomationOperator = capability.OperatorAuthorityResolver()
 	}
 	if capability := config.AgentsCapability; capability != nil {

@@ -11,6 +11,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/app/workflowbinding"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	automationfleetdb "github.com/tysonthomas9/loomcli/internal/modules/automation/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
@@ -138,6 +139,10 @@ func ComposeWorkflowCatalogAutomation(
 	if err != nil {
 		return nil, nil, fmt.Errorf("compose automation FleetDB adapter: %w", err)
 	}
+	approvalEvents, ok := config.FleetDBClient.TriggerEvents().(automation.ApprovalEventStore)
+	if !ok {
+		return nil, nil, fmt.Errorf("compose automation approval journal: %w", automation.ErrUnavailable)
+	}
 	workspaceLister := newAutomationWorkspaceLister(config.Workspaces)
 	awaitResolver := &ExecutionAwaitResolverBinding{}
 	awaitNotifier, err := driver.NewAutomationAwaitEventNotifierWithResolver(
@@ -161,7 +166,7 @@ func ComposeWorkflowCatalogAutomation(
 			bindings: automationAdapter, unmanagedBindings: automationAdapter,
 			managedBindings: automationAdapter, matcher: automationAdapter,
 			events: automationAdapter, deliveries: automationAdapter,
-			admissions: automationAdapter,
+			admissions: automationAdapter, approvalEvents: approvalEvents,
 			execution: newAutomationExecutionPort(
 				config.DriverRuns,
 				newAutomationFleetExecutionDispatch(config.FleetDBClient),

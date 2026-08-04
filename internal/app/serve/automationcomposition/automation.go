@@ -39,6 +39,8 @@ type AutomationCapability struct {
 	workflowBinding   *workflowbinding.Workflow
 	workflowEventing  *workfloweventing.Workflow
 	issueJournal      systemeventing.IssueJournalEmitter
+	approvalJournal   automation.ApprovalJournal
+	approvalAuthority ApprovalAuthorityProvider
 	runOutcomes       driver.RunOutcomePublisher
 	operatorResolver  workflowcataloghttp.OperatorAuthorityResolver
 	runtimeComponents []platformruntime.Registration
@@ -87,6 +89,20 @@ func (capability *AutomationCapability) IssueJournalEmitter() systemeventing.Iss
 		return nil
 	}
 	return capability.issueJournal
+}
+
+func (capability *AutomationCapability) ApprovalJournal() automation.ApprovalJournal {
+	if capability == nil {
+		return nil
+	}
+	return capability.approvalJournal
+}
+
+func (capability *AutomationCapability) ApprovalAuthorityProvider() ApprovalAuthorityProvider {
+	if capability == nil {
+		return nil
+	}
+	return capability.approvalAuthority
 }
 
 func (capability *AutomationCapability) RunOutcomePublisher() driver.RunOutcomePublisher {
@@ -147,6 +163,7 @@ type automationCapabilityDependencies struct {
 	events            automation.EventReader
 	deliveries        automation.DeliveryReader
 	admissions        automation.AdmissionStore
+	approvalEvents    automation.ApprovalEventStore
 	execution         automation.ExecutionPort
 	cron              automation.CronSweepPort
 	retries           automation.DeliveryRetryPort
@@ -181,6 +198,7 @@ func composeAutomationCapability(config automationCapabilityConfig, dependencies
 		authorityAdmission, automation.WithRuntimePorts(dependencies.cron, dependencies.retries),
 		automation.WithAwaitEventNotifier(dependencies.awaits),
 		automation.WithEventTrustPolicy(driver.AutomationEventTrustPolicy()),
+		automation.WithApprovalEventStore(dependencies.approvalEvents),
 	)
 	webhookWorkflow, err := webhookingestion.New(
 		dependencies.webhookVerifier, newAutomationWebhookAuthorityProvider(config.catalog.issuer), service,
@@ -221,7 +239,9 @@ func composeAutomationCapability(config automationCapabilityConfig, dependencies
 	}
 	return &AutomationCapability{
 		bindings: service, audit: service, webhookWorkflow: webhookWorkflow, workflowBinding: workflowBinding,
-		workflowEventing: workflowEvents, issueJournal: issueJournal, runOutcomes: runOutcomes,
+		workflowEventing: workflowEvents, issueJournal: issueJournal,
+		approvalJournal: service, approvalAuthority: newAutomationApprovalAuthorityProvider(config.catalog.issuer),
+		runOutcomes:       runOutcomes,
 		operatorResolver:  config.catalog.operatorResolver,
 		runtimeComponents: registrations,
 	}, nil
@@ -255,6 +275,8 @@ func validateAutomationCapabilityDependencies(
 		return fmt.Errorf("compose automation delivery reader: %w", automation.ErrUnavailable)
 	case dependencies.admissions == nil:
 		return fmt.Errorf("compose automation admission store: %w", automation.ErrUnavailable)
+	case dependencies.approvalEvents == nil:
+		return fmt.Errorf("compose automation approval event store: %w", automation.ErrUnavailable)
 	case dependencies.execution == nil:
 		return fmt.Errorf("compose automation execution port: %w", automation.ErrUnavailable)
 	case dependencies.cron == nil:

@@ -519,6 +519,20 @@ commands:
     retry_restart_behavior: Deterministic provisioning replay converges on one binding; same-ID divergent state is a permanent conflict and ordinary operator commands cannot take ownership.
     negative_tests: [divergent_binding, expired_system_authority, owner_mismatch, unauthenticated, wrong_action, wrong_component, wrong_workspace]
     fault_injection_tests: [concurrent_request, duplicate_request, lost_response_after_commit]
+  - id: automation.journal-approval
+    phase: 7
+    aggregate_owner: automation
+    coordinating_owner: automation
+    mechanism_discriminator: session_approval_journal
+    instance_owner: automation
+    accepted_authority: [operator]
+    durable_commands: ["POST /api/v1/{workspace}/trigger-events"]
+    transaction_or_saga_boundary: Automation validates the approval-only authority, exact verified-session actor, bounded payload, and immutable session-attested envelope before FleetDB atomically appends the journal event without requiring or dispatching a trigger binding.
+    idempotency_key: workspace_id:approval_event_id
+    semantic_events_or_read_models: [automation.event.v1, execution.await_event.v1]
+    retry_restart_behavior: FleetDB preserves the caller-minted event ID and idempotency key, so exact replay returns the same durable decision while a divergent duplicate conflicts; later await registration can discover the event even when no binding existed at decision time.
+    negative_tests: [expired_operator, forged_actor, invalid_event_type, oversized_payload, unauthenticated, wrong_action, wrong_workspace]
+    fault_injection_tests: [duplicate_request, lost_response_after_commit, register_await_after_commit]
   - id: automation.retry-deliveries
     phase: 3
     aggregate_owner: automation

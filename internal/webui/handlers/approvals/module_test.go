@@ -17,6 +17,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -76,6 +77,25 @@ func (approvalsSystemAuthorities) ResolveExecutionSystemAuthority(
 	return authority.SystemAuthority{}, nil
 }
 
+type approvalsAuthorityProvider struct {
+	issuer *authority.Issuer
+}
+
+func (provider approvalsAuthorityProvider) AuthorityForVerifiedSession(
+	_ context.Context,
+	workspace,
+	actor string,
+) (authority.OperatorAuthority, error) {
+	principal, err := provider.issuer.DeriveVerifiedPrincipal(authority.PrincipalClaims{
+		Subject: actor, Class: authority.ClassOperator, Workspace: workspace,
+		Actions: []authority.Action{automation.ActionJournalApproval}, ExpiresAt: time.Now().Add(time.Minute),
+	})
+	if err != nil {
+		return authority.OperatorAuthority{}, err
+	}
+	return provider.issuer.IssueOperator(principal, workspace, automation.ActionJournalApproval)
+}
+
 func newApprovalsHarnessWithExecution(t *testing.T, executionAvailable bool) *approvalsHarness {
 	t.Helper()
 	st := memstore.New()
@@ -111,8 +131,24 @@ func newApprovalsHarnessWithExecution(t *testing.T, executionAvailable bool) *ap
 		}
 		awaits = trigger.NewAwaitMatcherWithResolver(st.Awaits(), st.DriverRuns(), resolver)
 	}
+	issuer := authority.NewIssuer()
+	admission, err := issuer.NewAdmission(authority.OperatorOnly(automation.ActionJournalApproval))
+	if err != nil {
+		t.Fatalf("new approval admission: %v", err)
+	}
+	approvalEvents, ok := st.TriggerEvents().(automation.ApprovalEventStore)
+	if !ok {
+		t.Fatalf("memstore trigger events %T do not implement automation.ApprovalEventStore", st.TriggerEvents())
+	}
+	journal := automation.New(
+		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, admission,
+		automation.WithApprovalEventStore(approvalEvents),
+	)
 	mux := http.NewServeMux()
-	New(Config{Store: st, Awaits: awaits}).Register(mux)
+	New(Config{
+		Store: st, Awaits: awaits, Journal: journal,
+		Authority: approvalsAuthorityProvider{issuer: issuer},
+	}).Register(mux)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if user := r.Header.Get(testUserHeader); user != "" {
 			identity := middleware.UserIdentity{UserID: user, Email: r.Header.Get(testEmailHeader)}
