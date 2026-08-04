@@ -79,6 +79,7 @@ QA_TMUX=marathon-qa
 persistent_lead_start() {
   local lead_prompt="$PROMPTS/lead-persistent.md"
   [ "$VERIFY_ROLE" = "lead" ] && lead_prompt="$PROMPTS/lead-persistent-verifier.md"
+  [ "$VERIFY_ROLE" = "lead-ui" ] && lead_prompt="$PROMPTS/lead-persistent-verifier-ui.md"
   cat > "$LOGD/lead-launch.sh" <<LEOF
 #!/usr/bin/env bash
 . "$MH/env.sh"
@@ -656,11 +657,10 @@ while :; do
     VERIFY_INFO=" Integrated since last pass: ${INTEG_DELTA:-none}. Verification checkout: ${MARATHON_VERIFY_CHECKOUT}. Epic: ${EPIC_ID}."
   fi
   if [ "$LEAD_MODE" = "persistent" ]; then
-    if [ "$VERIFY_ROLE" = "lead" ]; then
-      persistent_pass lead "${PASS_MSG}${VERIFY_INFO}" >/dev/null
-    else
-      persistent_pass lead "$PASS_MSG" >/dev/null
-    fi
+    case "$VERIFY_ROLE" in
+      lead|lead-ui) persistent_pass lead "${PASS_MSG}${VERIFY_INFO}" >/dev/null ;;
+      *) persistent_pass lead "$PASS_MSG" >/dev/null ;;
+    esac
     if [ "$VERIFY_ROLE" = "qa" ]; then
       persistent_pass qa "QA pass $PASS. About $REMAIN_MIN minutes of work time remain.${VERIFY_INFO}" >/dev/null
     fi
@@ -749,9 +749,20 @@ if has_sub and not has_valid:
   OPEN=$(open_task_count)
   TOTAL=$(nonepic_task_count)
   if [ "$TOTAL" -gt 0 ] && [ "$OPEN" = "0" ]; then
-    FINALIZE_REASON=drained
-    log "epic drained: all $TOTAL tasks closed"
-    break
+    if [ "$VERIFY_ROLE" = "lead-ui" ]; then
+      # B2e: draining is not the end — the lead keeps verifying (including
+      # the UI walk) and refiling until the deadline reserve. B2c finalized
+      # here and threw away 43 minutes that the ux half needed.
+      if [ "${DRAIN_LOGGED:-0}" = "0" ]; then
+        record "DRAINED-CONTINUE all $TOTAL tasks closed; verification continues"
+        log "epic drained ($TOTAL tasks) — continuing verification passes until deadline"
+        DRAIN_LOGGED=1
+      fi
+    else
+      FINALIZE_REASON=drained
+      log "epic drained: all $TOTAL tasks closed"
+      break
+    fi
   fi
 
   NOW=$(date +%s)

@@ -222,6 +222,29 @@ judges the /app artifact. Scores computed as 0.5×correctness_binary +
 0.5×replica_ux and ALWAYS labeled "replica-ux"; tables must footnote which
 instrument judged each run. Runs 1–16 remain official-CUA-judged.
 
+### B2e. lead-verifier + UI walk + drain-continue — infrastructure COMMITTED
+The composition arm the fork pre-registered: B2c byte-identical except
+(1) two duty sentences in `lead-persistent-verifier-ui.md` — "including
+using the application through its web interface as a user would…" (B2d's
+winning behavior) and "when a corrective changes an interface, verify the
+user-facing behavior that depends on it still works…" (the fix for B2c's
+workspace-400 cascade) — and (2) draining no longer finalizes
+(`verify_role=lead-ui`): verification passes continue to the deadline
+reserve (B2c threw away 43 min here). Two changes, one pre-registered
+hypothesis: the ux half requires product-level verification attention.
+PREDICTION: gates ≥1/5 held, API ≥100, replica-ux ≥0.8 → blended 0.5–0.6.
+FALSIFIED IF: replica-ux ≤0.5 with the UI duty demonstrably exercised.
+First run under the replica-ux protocol amendment (no --env-file).
+
+```sh
+PYTHONPATH=loomcli/harbor harbor run -p tasks/slack-clone \
+  -a loom_harbor:LoomAgent -e docker \
+  --ak prompts_profile=generic --ak critic=off \
+  --ak lead_mode=persistent --ak verify_role=lead-ui \
+  --ak spend_cap_usd=200 --ak codex_npm_version=0.142.5 \
+  --artifact /app -o trials --job-name loom-generic-leadverify-ui-N -n 1 -y
+```
+
 ### B3. fractal-generic — infrastructure COMMITTED
 Mission mode `generic` (verbatim spec + finish sentence — the hardcoded
 preamble is bypassed; strip-vet #3); hidden reserve pinned to 0; concurrency
