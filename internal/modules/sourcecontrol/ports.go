@@ -71,4 +71,5 @@ type StackLifecycleStore interface {
 	MoveStackNodeRecord(context.Context, string, string, string, string) error
 	SetStackNodeBaseRecord(context.Context, string, string, string, string) error
 	RemoveStackNodeRecord(context.Context, string, string, string) error
+	UpdateStackNodePublicationRecord(context.Context, string, string, string, StackNodePublicationMutation) error
 }

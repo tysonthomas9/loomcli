@@ -1,6 +1,6 @@
 schema_version: 1
 status: complete
-source_head: 2488fe459c1013f28a08cfe90b1b53dac498e84b
+source_head: 79f910bccf016d40807de4181b0f7c0b3ec9e632
 adapter_roots:
   - internal/app
   - internal/cli
@@ -272,7 +272,7 @@ method_sets:
       - UpdatePrompt
   - name: sourcecontrol_stack_lifecycle
     read_only: [GetStackRecord, ListStackNodeRecords, ListStackRecords]
-    mutating: [AddStackNodeRecord, EnsureStackRecord, MoveStackNodeRecord, RemoveStackNodeRecord, SetStackNodeBaseRecord]
+    mutating: [AddStackNodeRecord, EnsureStackRecord, MoveStackNodeRecord, RemoveStackNodeRecord, SetStackNodeBaseRecord, UpdateStackNodePublicationRecord]
   - name: sourcecontrol_task_outcomes
     read_only: [ListTaskStackNodes, ListTaskStacks]
     mutating: [UpdateTaskStackOutcome]
@@ -2198,7 +2198,7 @@ writes:
     - file: internal/infra/stackstoreadapter/adapter.go
       receiver: github.com/tysonthomas9/loomcli/internal/stackstore.Store
       method: UpdateNode
-      count: 1
+      count: 2
       aggregate_owner: sourcecontrol
       expires_after_phase: 7
     - file: internal/infra/workspacecatalog/catalog.go

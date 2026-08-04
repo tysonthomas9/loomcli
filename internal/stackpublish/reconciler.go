@@ -3,16 +3,15 @@ package stackpublish
 import (
 	"context"
 	"fmt"
-	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	sl "github.com/tysonthomas9/loomcli/internal/stacklineage"
-	"github.com/tysonthomas9/loomcli/internal/stackstore"
 )
 
 // Reconciler publishes a stack's lineage as stacked PRs.
 type Reconciler struct {
-	Store stackstore.Store
-	Forge Forge
+	Stacks sourcecontrol.StackLifecycle
+	Forge  Forge
 }
 
 // Options tunes a publish run.
@@ -155,14 +154,16 @@ func queuedConflicts(targets []int, queued map[int]bool) []int {
 //
 //nolint:cyclop,funlen,gocognit // Publish coordinates preflight, restack safety, forge mutation, and reporting in one transaction.
 func (r *Reconciler) Publish(ctx context.Context, ws string, id sl.StackID, repoPath string, opts Options) (*Report, error) {
-	stack, err := r.Store.GetStack(ctx, ws, id)
+	stackProjection, err := r.Stacks.GetStack(ctx, ws, string(id))
 	if err != nil {
 		return nil, err
 	}
-	nodes, err := r.Store.ListNodes(ctx, ws, id)
+	nodeProjections, err := r.Stacks.ListStackNodes(ctx, ws, string(id))
 	if err != nil {
 		return nil, err
 	}
+	stack := legacyStack(*stackProjection)
+	nodes := legacyStackNodes(nodeProjections)
 	ordered, err := sl.Ordered(nodes)
 	if err != nil {
 		return nil, fmt.Errorf("invalid lineage: %w", err)
@@ -173,7 +174,7 @@ func (r *Reconciler) Publish(ctx context.Context, ws string, id sl.StackID, repo
 	// checked for branches present locally; missing ones surface at push time.
 	empty := map[string]bool{}
 	for _, n := range ordered {
-		base, berr := sl.BaseBranch(*stack, n, byTask)
+		base, berr := sl.BaseBranch(stack, n, byTask)
 		if berr != nil {
 			return nil, fmt.Errorf("base for %s: %w", n.TaskID, berr)
 		}
@@ -209,7 +210,7 @@ func (r *Reconciler) Publish(ctx context.Context, ws string, id sl.StackID, repo
 		prsByHead[p.Head] = p
 	}
 
-	plan := computePlan(*stack, ordered, prsByHead, empty)
+	plan := computePlan(stack, ordered, prsByHead, empty)
 
 	// Merge-queue pre-flight: a PR in GitHub's merge queue has an immutable base,
 	// so a reparent would 422. Detect it BEFORE any mutation and fail closed with
@@ -354,9 +355,8 @@ func (r *Reconciler) Publish(ctx context.Context, ws string, id sl.StackID, repo
 				report.PRURLs[a.TaskID] = a.PR.URL
 			}
 		case actMerged:
-			_ = r.Store.UpdateNode(ctx, ws, id, a.TaskID, func(n *sl.Node) error {
-				n.State = sl.NodeStateMerged
-				return nil
+			_ = r.Stacks.RecordStackNodePublication(ctx, sourcecontrol.RecordStackNodePublicationCommand{
+				WorkspaceKey: ws, StackID: string(id), TaskID: a.TaskID, State: sourcecontrol.StackPublicationMerged,
 			})
 			report.Merged = append(report.Merged, a.TaskID)
 		case actEmpty:
@@ -368,9 +368,8 @@ func (r *Reconciler) Publish(ctx context.Context, ws string, id sl.StackID, repo
 				}
 				report.Closed = append(report.Closed, a.Branch)
 			}
-			_ = r.Store.UpdateNode(ctx, ws, id, a.TaskID, func(n *sl.Node) error {
-				n.State = sl.NodeStateEmpty
-				return nil
+			_ = r.Stacks.RecordStackNodePublication(ctx, sourcecontrol.RecordStackNodePublicationCommand{
+				WorkspaceKey: ws, StackID: string(id), TaskID: a.TaskID, State: sourcecontrol.StackPublicationEmpty,
 			})
 			report.Empty = append(report.Empty, a.TaskID)
 		case actClose:
@@ -422,9 +421,8 @@ func (r *Reconciler) publishBranchesOnly(ctx context.Context, ws string, id sl.S
 	}
 	for _, n := range ordered {
 		if empty[n.OutputBranch] {
-			if err := r.Store.UpdateNode(ctx, ws, id, n.TaskID, func(node *sl.Node) error {
-				node.State = sl.NodeStateEmpty
-				return nil
+			if err := r.Stacks.RecordStackNodePublication(ctx, sourcecontrol.RecordStackNodePublicationCommand{
+				WorkspaceKey: ws, StackID: string(id), TaskID: n.TaskID, State: sourcecontrol.StackPublicationEmpty,
 			}); err != nil {
 				return report, fmt.Errorf("mark branch empty %s: %w", n.TaskID, err)
 			}
@@ -439,16 +437,9 @@ func (r *Reconciler) publishBranchesOnly(ctx context.Context, ws string, id sl.S
 
 func (r *Reconciler) markPublished(ctx context.Context, ws string, id sl.StackID, a action, repoPath string, pr PR) error {
 	sha, _ := headSHA(ctx, repoPath, a.Branch)
-	now := time.Now().UTC()
-	return r.Store.UpdateNode(ctx, ws, id, a.TaskID, func(n *sl.Node) error {
-		n.State = sl.NodeStatePublished
-		n.PRNumber = pr.Number
-		n.PRURL = pr.URL
-		if sha != "" {
-			n.OutputSHA = sha
-		}
-		n.LastPublishedAt = &now
-		return nil
+	return r.Stacks.RecordStackNodePublication(ctx, sourcecontrol.RecordStackNodePublicationCommand{
+		WorkspaceKey: ws, StackID: string(id), TaskID: a.TaskID,
+		State: sourcecontrol.StackPublicationPublished, PRNumber: pr.Number, PRURL: pr.URL, OutputSHA: sha,
 	})
 }
 

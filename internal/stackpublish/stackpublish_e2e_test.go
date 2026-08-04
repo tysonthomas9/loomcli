@@ -28,6 +28,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	stackstoreadapter "github.com/tysonthomas9/loomcli/internal/infra/stackstoreadapter"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	sl "github.com/tysonthomas9/loomcli/internal/stacklineage"
 	"github.com/tysonthomas9/loomcli/internal/stackpublish"
 	"github.com/tysonthomas9/loomcli/internal/stackstore"
@@ -117,7 +119,11 @@ func TestE2EStackPublisher(t *testing.T) {
 	out, err := exec.Command("gh", "repo", "clone", slug, repoPath).CombinedOutput() //nolint:norawexec
 	require.NoErrorf(t, err, "gh repo clone: %s", out)
 
-	rec := &stackpublish.Reconciler{Store: store, Forge: forge}
+	adapter, err := stackstoreadapter.New(store)
+	require.NoError(t, err)
+	stacks, err := sourcecontrol.NewStackLifecycle(adapter, time.Now)
+	require.NoError(t, err)
+	rec := &stackpublish.Reconciler{Stacks: stacks, Forge: forge}
 
 	// Cleanup: close all PRs and delete all branches under this run's namespace.
 	t.Cleanup(func() {

@@ -51,7 +51,7 @@ func TestPublishCreate_FallsBackToCommitSubject(t *testing.T) {
 	dir, store := repoWithOwnedCommit(t, ctx, id, "T1", "Add merge command (T1)")
 
 	forge := &fakeForge{createPR: PR{Number: 7, URL: "https://github.com/o/r/pull/7", Head: sl.OutputBranchName(id, "T1"), Base: "main", State: "open"}}
-	rec := &Reconciler{Store: store, Forge: forge}
+	rec := &Reconciler{Stacks: mustStackLifecycle(t, store), Forge: forge}
 
 	rep, err := rec.Publish(ctx, "WS", id, dir, Options{})
 	require.NoError(t, err)
@@ -73,7 +73,7 @@ func TestPublishCreate_PrefersIssueMetadata(t *testing.T) {
 	dir, store := repoWithOwnedCommit(t, ctx, id, "T1", "Add merge command (T1)")
 
 	forge := &fakeForge{createPR: PR{Number: 7, URL: "https://github.com/o/r/pull/7", Head: sl.OutputBranchName(id, "T1"), Base: "main", State: "open"}}
-	rec := &Reconciler{Store: store, Forge: forge}
+	rec := &Reconciler{Stacks: mustStackLifecycle(t, store), Forge: forge}
 
 	opts := Options{PRMetaFor: func(_ context.Context, taskID string) (PRMeta, bool) {
 		assert.Equal(t, "T1", taskID)

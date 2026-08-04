@@ -5,19 +5,23 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 )
 
 // StackLifecycleService owns stack input validation, default append behavior,
 // idempotent topology reconciliation, and lineage projection.
-type StackLifecycleService struct{ store StackLifecycleStore }
+type StackLifecycleService struct {
+	store StackLifecycleStore
+	now   func() time.Time
+}
 
 var _ StackLifecycle = (*StackLifecycleService)(nil)
 
-func NewStackLifecycle(store StackLifecycleStore) (*StackLifecycleService, error) {
-	if store == nil {
-		return nil, fmt.Errorf("compose Source Control stack lifecycle: %w", ErrUnavailable)
+func NewStackLifecycle(store StackLifecycleStore, now func() time.Time) (*StackLifecycleService, error) {
+	if store == nil || now == nil {
+		return nil, fmt.Errorf("compose Source Control stack lifecycle: store and clock are required: %w", ErrUnavailable)
 	}
-	return &StackLifecycleService{store: store}, nil
+	return &StackLifecycleService{store: store, now: now}, nil
 }
 
 func (service *StackLifecycleService) EnsureStack(ctx context.Context, command EnsureStackCommand) (*Stack, error) {
@@ -68,6 +72,15 @@ func (service *StackLifecycleService) ListStackNodes(ctx context.Context, worksp
 		return nil, err
 	}
 	return service.store.ListStackNodeRecords(ctx, workspace, stackID)
+}
+
+func (service *StackLifecycleService) ValidateStack(ctx context.Context, workspace, stackID string) error {
+	nodes, err := service.ListStackNodes(ctx, workspace, stackID)
+	if err != nil {
+		return err
+	}
+	_, err = orderStackNodes(nodes)
+	return err
 }
 
 func (service *StackLifecycleService) AddStackNode(ctx context.Context, command AddStackNodeCommand) (*StackNode, error) {
@@ -134,6 +147,35 @@ func (service *StackLifecycleService) RemoveStackNode(ctx context.Context, comma
 		return err
 	}
 	return service.store.RemoveStackNodeRecord(ctx, command.WorkspaceKey, command.StackID, command.TaskID)
+}
+
+func (service *StackLifecycleService) RecordStackNodePublication(
+	ctx context.Context,
+	command RecordStackNodePublicationCommand,
+) error {
+	if service == nil || service.store == nil || service.now == nil {
+		return ErrUnavailable
+	}
+	if err := validateStackNodeCoordinates(command.WorkspaceKey, command.StackID, command.TaskID); err != nil {
+		return err
+	}
+	mutation := StackNodePublicationMutation{
+		State: command.State, PRNumber: command.PRNumber, PRURL: command.PRURL, OutputSHA: command.OutputSHA,
+	}
+	switch command.State {
+	case StackPublicationPublished:
+		publishedAt := service.now().UTC()
+		mutation.PublishedAt = &publishedAt
+	case StackPublicationMerged, StackPublicationEmpty:
+		if command.PRNumber != 0 || strings.TrimSpace(command.PRURL) != "" || strings.TrimSpace(command.OutputSHA) != "" {
+			return fmt.Errorf("terminal stack publication carries published-only fields: %w", ErrInvalid)
+		}
+	default:
+		return fmt.Errorf("unsupported stack publication state %q: %w", command.State, ErrInvalid)
+	}
+	return service.store.UpdateStackNodePublicationRecord(
+		ctx, command.WorkspaceKey, command.StackID, command.TaskID, mutation,
+	)
 }
 
 //nolint:funlen // The reconciliation loop keeps idempotency and result projection in one auditable owner operation.

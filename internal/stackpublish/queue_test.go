@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	sl "github.com/tysonthomas9/loomcli/internal/stacklineage"
 	"github.com/tysonthomas9/loomcli/internal/stackstore"
 )
@@ -82,12 +83,12 @@ func (f *fakeForge) QueuedPRNumbers(context.Context, string, string) (map[int]bo
 	return f.queued, nil
 }
 
-type updateFailStore struct {
-	stackstore.Store
+type updateFailLifecycle struct {
+	sourcecontrol.StackLifecycle
 	err error
 }
 
-func (s updateFailStore) UpdateNode(context.Context, string, sl.StackID, string, func(*sl.Node) error) error {
+func (s updateFailLifecycle) RecordStackNodePublication(context.Context, sourcecontrol.RecordStackNodePublicationCommand) error {
 	return s.err
 }
 
@@ -131,7 +132,9 @@ func TestPublishReturnsErrorWhenMarkPublishedFails(t *testing.T) {
 
 	persistErr := errors.New("persist published state")
 	forge := &fakeForge{createPR: PR{Number: 42, URL: "https://github.com/o/r/pull/42", Head: sl.OutputBranchName(id, "A"), Base: "main", State: "open"}}
-	rec := &Reconciler{Store: updateFailStore{Store: store, err: persistErr}, Forge: forge}
+	rec := &Reconciler{
+		Stacks: updateFailLifecycle{StackLifecycle: mustStackLifecycle(t, store), err: persistErr}, Forge: forge,
+	}
 
 	_, err = rec.Publish(ctx, "WS", id, repoPath, Options{})
 	require.ErrorIs(t, err, persistErr)
@@ -159,7 +162,7 @@ func TestPublish_MergeQueuePreflightAborts(t *testing.T) {
 		},
 		queued: map[int]bool{102: true}, // the reparent target is queued
 	}
-	rec := &Reconciler{Store: store, Forge: ff}
+	rec := &Reconciler{Stacks: mustStackLifecycle(t, store), Forge: ff}
 
 	_, err = rec.Publish(ctx, "WS", id, repoPath, Options{})
 	require.Error(t, err)
@@ -186,7 +189,7 @@ func TestPublish_DryRunSkipsQueueCheck(t *testing.T) {
 		},
 		queued: map[int]bool{102: true},
 	}
-	rec := &Reconciler{Store: store, Forge: ff}
+	rec := &Reconciler{Stacks: mustStackLifecycle(t, store), Forge: ff}
 	rep, err := rec.Publish(ctx, "WS", id, repoPath, Options{DryRun: true})
 	require.NoError(t, err)
 	assert.True(t, rep.DryRun)

@@ -150,6 +150,32 @@ func (adapter *Adapter) RemoveStackNodeRecord(ctx context.Context, workspace, st
 	return adapter.store.RemoveNode(ctx, workspace, stacklineage.StackID(stackID), taskID)
 }
 
+func (adapter *Adapter) UpdateStackNodePublicationRecord(
+	ctx context.Context,
+	workspace,
+	stackID,
+	taskID string,
+	mutation sourcecontrol.StackNodePublicationMutation,
+) error {
+	return adapter.store.UpdateNode(
+		ctx, workspace, stacklineage.StackID(stackID), taskID,
+		func(node *stacklineage.Node) error {
+			node.State = stacklineage.NodeState(mutation.State)
+			if mutation.State == sourcecontrol.StackPublicationPublished {
+				node.PRNumber = mutation.PRNumber
+				node.PRURL = mutation.PRURL
+			}
+			if mutation.OutputSHA != "" {
+				node.OutputSHA = mutation.OutputSHA
+			}
+			if mutation.PublishedAt != nil {
+				node.LastPublishedAt = cloneTime(mutation.PublishedAt)
+			}
+			return nil
+		},
+	)
+}
+
 func stackProjection(value stacklineage.Stack) sourcecontrol.Stack {
 	return sourcecontrol.Stack{
 		ID: string(value.ID), WorkspaceKey: value.WorkspaceKey, Repository: value.RepoName,

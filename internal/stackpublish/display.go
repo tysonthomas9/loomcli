@@ -74,10 +74,11 @@ type StatusReport struct {
 // review / mergeable) and a next-to-merge marker. repoPath provides the owner/repo;
 // pass "" to skip the live fetch and return local state only.
 func (r *Reconciler) StackStatus(ctx context.Context, ws string, id sl.StackID, repoPath string) (*StatusReport, error) {
-	nodes, err := r.Store.ListNodes(ctx, ws, id)
+	nodeProjections, err := r.Stacks.ListStackNodes(ctx, ws, string(id))
 	if err != nil {
 		return nil, err
 	}
+	nodes := legacyStackNodes(nodeProjections)
 	ordered, err := sl.Ordered(nodes)
 	if err != nil {
 		return nil, fmt.Errorf("invalid lineage: %w", err)

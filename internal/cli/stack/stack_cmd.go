@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -64,7 +65,7 @@ func openStackLifecycle() (sourcecontrol.StackLifecycle, error) {
 	if err != nil {
 		return nil, err
 	}
-	return sourcecontrol.NewStackLifecycle(adapter)
+	return sourcecontrol.NewStackLifecycle(adapter, time.Now)
 }
 
 var shaRe = regexp.MustCompile(`^[0-9a-fA-F]{7,40}$`)
@@ -172,23 +173,23 @@ func listCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			st, err := openStore()
+			stacks, err := openStackLifecycle()
 			if err != nil {
 				return err
 			}
-			stacks, err := st.ListStacks(cmd.Context(), ws)
+			values, err := stacks.ListStacks(cmd.Context(), ws)
 			if err != nil {
 				return err
 			}
 			if jsonOut {
-				return cmdstore.WriteJSON(stacks)
+				return cmdstore.WriteJSON(values)
 			}
-			if len(stacks) == 0 {
+			if len(values) == 0 {
 				fmt.Println("no stacks")
 				return nil
 			}
-			for _, s := range stacks {
-				fmt.Printf("%s  repo=%s base=%s\n", s.ID, s.RepoName, s.RootBase)
+			for _, s := range values {
+				fmt.Printf("%s  repo=%s base=%s\n", s.ID, s.Repository, s.RootBase)
 			}
 			return nil
 		},
@@ -212,14 +213,14 @@ func showCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			nodes, err := st.ListNodes(cmd.Context(), ws, id)
+			nodes, err := st.ListStackNodes(cmd.Context(), ws, id)
 			if err != nil {
 				return err
 			}
 			if jsonOut {
 				return cmdstore.WriteJSON(map[string]any{"stack": stack, "nodes": nodes})
 			}
-			fmt.Printf("%s  repo=%s base=%s\n", stack.ID, stack.RepoName, stack.RootBase)
+			fmt.Printf("%s  repo=%s base=%s\n", stack.ID, stack.Repository, stack.RootBase)
 			for _, n := range nodes {
 				fmt.Printf("  %-16s base=%-16s branch=%s state=%s\n",
 					n.TaskID, baseOrRoot(n, stack.RootBase), n.OutputBranch, n.State)
@@ -249,7 +250,7 @@ func statusCmd() *cobra.Command {
 				return err
 			}
 			// Enrich with live PR health when a repo checkout + token resolve.
-			path, _ := resolveRepoPath(ws, stack.RepoName, repoPath)
+			path, _ := resolveRepoPath(ws, stack.Repository, repoPath)
 			token := resolveGitHubToken(cmd.Context())
 			rp := ""
 			forge := stackpublish.Forge(stackpublish.NewGitHubForge(token, nil, ""))
@@ -267,8 +268,8 @@ func statusCmd() *cobra.Command {
 					}
 				}
 			}
-			rec := &stackpublish.Reconciler{Store: st, Forge: forge}
-			report, err := rec.StackStatus(cmd.Context(), ws, id, rp)
+			rec := &stackpublish.Reconciler{Stacks: st, Forge: forge}
+			report, err := rec.StackStatus(cmd.Context(), ws, sl.StackID(id), rp)
 			if err != nil {
 				return err
 			}
@@ -320,11 +321,11 @@ func validateCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			nodes, err := st.ListNodes(cmd.Context(), ws, id)
+			nodes, err := st.ListStackNodes(cmd.Context(), ws, id)
 			if err != nil {
 				return err
 			}
-			_, oerr := sl.Ordered(nodes)
+			oerr := st.ValidateStack(cmd.Context(), ws, id)
 			if jsonOut {
 				res := map[string]any{"ok": oerr == nil}
 				if oerr != nil {
@@ -500,7 +501,7 @@ func restackCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			path, err := resolveRepoPath(ws, stack.RepoName, repoPath)
+			path, err := resolveRepoPath(ws, stack.Repository, repoPath)
 			if err != nil {
 				return err
 			}
@@ -508,8 +509,8 @@ func restackCmd() *cobra.Command {
 			if token == "" {
 				return errors.New("no GitHub token (set GITHUB_TOKEN/GH_TOKEN or run `gh auth login`)")
 			}
-			rec := &stackpublish.Reconciler{Store: st, Forge: stackpublish.NewGitHubForge(token, nil, "")}
-			report, err := rec.Restack(cmd.Context(), ws, id, path, newResolver(headless))
+			rec := &stackpublish.Reconciler{Stacks: st, Forge: stackpublish.NewGitHubForge(token, nil, "")}
+			report, err := rec.Restack(cmd.Context(), ws, sl.StackID(id), path, newResolver(headless))
 			if err != nil {
 				return err
 			}
@@ -543,7 +544,7 @@ func publishCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			path, err := resolveRepoPath(ws, stack.RepoName, repoPath)
+			path, err := resolveRepoPath(ws, stack.Repository, repoPath)
 			if err != nil {
 				return err
 			}
@@ -556,8 +557,8 @@ func publishCmd() *cobra.Command {
 				return errors.New("no GitHub token (set GITHUB_TOKEN/GH_TOKEN or run `gh auth login`)")
 			}
 			rec := &stackpublish.Reconciler{
-				Store: st,
-				Forge: forge,
+				Stacks: st,
+				Forge:  forge,
 			}
 			opts := stackpublish.Options{DryRun: dryRun}
 			// Seed PR titles/bodies from issue metadata when available; the
@@ -576,7 +577,7 @@ func publishCmd() *cobra.Command {
 			if autoRebase {
 				opts.Resolver = newResolver(headless)
 			}
-			report, err := rec.Publish(cmd.Context(), ws, id, path, opts)
+			report, err := rec.Publish(cmd.Context(), ws, sl.StackID(id), path, opts)
 			if err != nil {
 				return err
 			}
@@ -610,19 +611,19 @@ func publishCmd() *cobra.Command {
 
 // shared loaders -------------------------------------------------------------
 
-func loadCtx(stackID string) (string, *stackstore.LocalStore, sl.StackID, error) {
+func loadCtx(stackID string) (string, sourcecontrol.StackLifecycle, string, error) {
 	ws, err := activeWorkspace()
 	if err != nil {
 		return "", nil, "", err
 	}
-	st, err := openStore()
+	st, err := openStackLifecycle()
 	if err != nil {
 		return "", nil, "", err
 	}
-	return ws, st, sl.StackID(stackID), nil
+	return ws, st, stackID, nil
 }
 
-func baseOrRoot(n sl.Node, root string) string {
+func baseOrRoot(n sourcecontrol.StackNode, root string) string {
 	if n.BaseTaskID == "" {
 		return root
 	}

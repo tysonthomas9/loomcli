@@ -312,3 +312,32 @@ type ReconcileStackResult struct {
 	Reparented []string
 	Lineage    map[string]StackLineage
 }
+
+type StackPublicationState string
+
+const (
+	StackPublicationPublished StackPublicationState = "published"
+	StackPublicationMerged    StackPublicationState = "merged"
+	StackPublicationEmpty     StackPublicationState = "empty"
+)
+
+// RecordStackNodePublicationCommand is the bounded publication outcome a
+// Source Control publisher may record. Source Control supplies the timestamp
+// and persistence mapping.
+type RecordStackNodePublicationCommand struct {
+	WorkspaceKey string
+	StackID      string
+	TaskID       string
+	State        StackPublicationState
+	PRNumber     int
+	PRURL        string
+	OutputSHA    string
+}
+
+type StackNodePublicationMutation struct {
+	State       StackPublicationState
+	PRNumber    int
+	PRURL       string
+	OutputSHA   string
+	PublishedAt *time.Time
+}

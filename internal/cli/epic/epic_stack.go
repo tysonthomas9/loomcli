@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/fleet"
@@ -259,7 +260,7 @@ func projectEpicStackForRun(ctx context.Context, handle *bootstrap.StoreHandle, 
 	if err != nil {
 		return nil, err
 	}
-	stacks, err := sourcecontrol.NewStackLifecycle(adapter)
+	stacks, err := sourcecontrol.NewStackLifecycle(adapter, time.Now)
 	if err != nil {
 		return nil, err
 	}

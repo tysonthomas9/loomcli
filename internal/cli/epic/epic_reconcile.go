@@ -7,10 +7,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/stack"
 	"github.com/tysonthomas9/loomcli/internal/configlock"
+	stackstoreadapter "github.com/tysonthomas9/loomcli/internal/infra/stackstoreadapter"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	sl "github.com/tysonthomas9/loomcli/internal/stacklineage"
 	"github.com/tysonthomas9/loomcli/internal/stackpublish"
 	"github.com/tysonthomas9/loomcli/internal/stackstore"
@@ -45,9 +48,17 @@ func reconcileEpicStack(ctx context.Context, ws string, proj *EpicStackProjectio
 	if err != nil {
 		return fmt.Errorf("open stack store: %w", err)
 	}
+	adapter, err := stackstoreadapter.New(sstore)
+	if err != nil {
+		return err
+	}
+	stacks, err := sourcecontrol.NewStackLifecycle(adapter, time.Now)
+	if err != nil {
+		return err
+	}
 	rec := &stackpublish.Reconciler{
-		Store: sstore,
-		Forge: forge,
+		Stacks: stacks,
+		Forge:  forge,
 	}
 	opts := stackpublish.Options{Resolver: stack.HeadlessResolver()}
 

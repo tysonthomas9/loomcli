@@ -54,14 +54,16 @@ func (r *Reconciler) Restack(ctx context.Context, ws string, id sl.StackID, repo
 	if !forgeSupportsPullRequests(r.Forge) {
 		return nil, fmt.Errorf("stackpublish: restack requires a pull-request-capable forge")
 	}
-	stack, err := r.Store.GetStack(ctx, ws, id)
+	stackProjection, err := r.Stacks.GetStack(ctx, ws, string(id))
 	if err != nil {
 		return nil, err
 	}
-	nodes, err := r.Store.ListNodes(ctx, ws, id)
+	nodeProjections, err := r.Stacks.ListStackNodes(ctx, ws, string(id))
 	if err != nil {
 		return nil, err
 	}
+	stack := legacyStack(*stackProjection)
+	nodes := legacyStackNodes(nodeProjections)
 	ordered, err := sl.Ordered(nodes)
 	if err != nil {
 		return nil, fmt.Errorf("invalid lineage: %w", err)

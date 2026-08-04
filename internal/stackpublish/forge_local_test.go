@@ -134,7 +134,7 @@ func TestPublishLocalOriginPathPushesBranchesOnly(t *testing.T) {
 	require.Equal(t, OriginKindLocal, selected.Kind)
 	require.Equal(t, origin, selected.URL)
 
-	rec := &Reconciler{Store: store, Forge: forge}
+	rec := &Reconciler{Stacks: mustStackLifecycle(t, store), Forge: forge}
 	report, err := rec.Publish(ctx, ws, id, work, Options{})
 	require.NoError(t, err)
 	assert.Equal(t, "pushed branches to local origin (no PRs)", report.Message)

@@ -70,11 +70,13 @@ type StackLifecycle interface {
 	ListStacks(context.Context, string) ([]Stack, error)
 	GetStack(context.Context, string, string) (*Stack, error)
 	ListStackNodes(context.Context, string, string) ([]StackNode, error)
+	ValidateStack(context.Context, string, string) error
 	AddStackNode(context.Context, AddStackNodeCommand) (*StackNode, error)
 	MoveStackNode(context.Context, MoveStackNodeCommand) error
 	SetStackNodeBase(context.Context, SetStackNodeBaseCommand) error
 	RemoveStackNode(context.Context, RemoveStackNodeCommand) error
 	ReconcileStack(context.Context, ReconcileStackCommand) (*ReconcileStackResult, error)
+	RecordStackNodePublication(context.Context, RecordStackNodePublicationCommand) error
 }
 
 type TaskOutcomeCommand struct {

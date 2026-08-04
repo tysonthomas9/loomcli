@@ -3,6 +3,7 @@ package epic
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
@@ -289,7 +290,7 @@ func mustStackLifecycle(t *testing.T, store stackstore.Store) sourcecontrol.Stac
 	if err != nil {
 		t.Fatalf("compose stack adapter: %v", err)
 	}
-	service, err := sourcecontrol.NewStackLifecycle(adapter)
+	service, err := sourcecontrol.NewStackLifecycle(adapter, time.Now)
 	if err != nil {
 		t.Fatalf("compose stack lifecycle: %v", err)
 	}
