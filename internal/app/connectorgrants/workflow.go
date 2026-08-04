@@ -1,4 +1,8 @@
-package connector
+// Package connectorgrants coordinates an exact Automation binding snapshot
+// with the complete Connectors authority set for that binding. Neither
+// capability imports the other; this named application workflow owns the
+// cross-capability replacement ceremony.
+package connectorgrants
 
 import (
 	"context"
@@ -10,13 +14,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	"github.com/tysonthomas9/loomcli/internal/modules/connectors"
 )
 
-// ErrGrantSetUnavailable means the connector owner was composed without every
-// persistence port required for authoritative grant-set replacement.
-var ErrGrantSetUnavailable = errors.New("connector: grant-set reconciler unavailable")
+// ErrGrantSetUnavailable means the workflow was composed without every
+// capability port required for authoritative grant-set replacement.
+var ErrGrantSetUnavailable = errors.New("connector grants: replacement workflow unavailable")
 
 // DesiredGrant is one action/resource tuple in the complete authority set a
 // connector should expose to a binding.
@@ -39,29 +43,43 @@ type ReplaceGrantSetRequest struct {
 // ReplaceGrantSetResult reports the converged active set. Revoked counts only
 // rows changed by this call; exact retries therefore report zero.
 type ReplaceGrantSetResult struct {
-	BindingID        string                   `json:"binding_id"`
-	BindingCreatedAt time.Time                `json:"binding_created_at"`
-	BindingUpdatedAt time.Time                `json:"binding_updated_at"`
-	Grants           []*domain.ConnectorGrant `json:"grants"`
-	GrantsRevoked    int                      `json:"grants_revoked"`
+	BindingID        string                       `json:"binding_id"`
+	BindingCreatedAt time.Time                    `json:"binding_created_at"`
+	BindingUpdatedAt time.Time                    `json:"binding_updated_at"`
+	Grants           []*connectors.ConnectorGrant `json:"grants"`
+	GrantsRevoked    int                          `json:"grants_revoked"`
 }
 
-// GrantSetReconciler owns the restartable least-privilege replacement ceremony.
+// Workflow owns the restartable least-privilege replacement ceremony.
 // The mutex serializes calls through one serve process; exact binding snapshot
 // checks remain the authoritative generation/revision fence across modules.
-type GrantSetReconciler struct {
-	bindings   store.TriggerBindingStore
-	connectors store.ConnectorStore
-	grants     store.ConnectorGrantStore
-	mu         sync.Mutex
+type Workflow struct {
+	bindings BindingReader
+	grants   ConnectorManagement
+	mu       sync.Mutex
 }
 
-func NewGrantSetReconciler(
-	bindings store.TriggerBindingStore,
-	connectors store.ConnectorStore,
-	grants store.ConnectorGrantStore,
-) *GrantSetReconciler {
-	return &GrantSetReconciler{bindings: bindings, connectors: connectors, grants: grants}
+// BindingReader is the one Automation query required for the generation and
+// revision fence. The workflow cannot list or mutate bindings.
+type BindingReader interface {
+	GetBinding(context.Context, string, string) (*automation.Binding, error)
+}
+
+// ConnectorManagement is the exact Connectors public surface used by this
+// workflow. It excludes connector creation, credential lifecycle, calls, and
+// provider dispatch.
+type ConnectorManagement interface {
+	GetConnector(context.Context, connectors.GetConnectorQuery) (*connectors.Connector, error)
+	CreateGrant(context.Context, connectors.CreateGrantCommand) (*connectors.ConnectorGrant, error)
+	RevokeGrant(context.Context, connectors.RevokeGrantCommand) error
+	ListGrants(context.Context, connectors.ListGrantsQuery) ([]*connectors.ConnectorGrant, error)
+}
+
+func New(bindings BindingReader, grants ConnectorManagement) (*Workflow, error) {
+	if bindings == nil || grants == nil {
+		return nil, ErrGrantSetUnavailable
+	}
+	return &Workflow{bindings: bindings, grants: grants}, nil
 }
 
 // Replace installs the complete active authority set for one connector and one
@@ -70,12 +88,15 @@ func NewGrantSetReconciler(
 //
 // Replace deliberately does not enable the binding. Its caller may do so only
 // after success, which makes every partial/retry state inert.
-func (r *GrantSetReconciler) Replace(ctx context.Context, request ReplaceGrantSetRequest) (ReplaceGrantSetResult, error) {
+func (r *Workflow) Replace(ctx context.Context, request ReplaceGrantSetRequest) (ReplaceGrantSetResult, error) {
+	if ctx == nil {
+		return ReplaceGrantSetResult{}, fmt.Errorf("context is required: %w", connectors.ErrInvalid)
+	}
 	request, desired, err := prepareReplaceGrantSetRequest(request)
 	if err != nil {
 		return ReplaceGrantSetResult{}, err
 	}
-	if r == nil || r.bindings == nil || r.connectors == nil || r.grants == nil {
+	if r == nil || r.bindings == nil || r.grants == nil {
 		return ReplaceGrantSetResult{}, ErrGrantSetUnavailable
 	}
 
@@ -86,11 +107,15 @@ func (r *GrantSetReconciler) Replace(ctx context.Context, request ReplaceGrantSe
 	if err != nil {
 		return ReplaceGrantSetResult{}, err
 	}
-	if _, err := r.connectors.Get(ctx, request.WorkspaceKey, request.ConnectorID); err != nil {
+	if _, err := r.grants.GetConnector(ctx, connectors.GetConnectorQuery{
+		WorkspaceKey: request.WorkspaceKey, ConnectorID: request.ConnectorID,
+	}); err != nil {
 		return ReplaceGrantSetResult{}, fmt.Errorf("get connector %q: %w", request.ConnectorID, err)
 	}
 
-	current, err := r.grants.ListByBinding(ctx, request.WorkspaceKey, request.BindingID)
+	current, err := r.grants.ListGrants(ctx, connectors.ListGrantsQuery{
+		WorkspaceKey: request.WorkspaceKey, BindingID: request.BindingID,
+	})
 	if err != nil {
 		return ReplaceGrantSetResult{}, fmt.Errorf("list connector grants: %w", err)
 	}
@@ -131,13 +156,13 @@ func prepareReplaceGrantSetRequest(
 	if request.WorkspaceKey == "" || request.ConnectorID == "" || request.BindingID == "" {
 		return ReplaceGrantSetRequest{}, nil, fmt.Errorf(
 			"workspace, connector id and binding id are required: %w",
-			domain.ErrInvalid,
+			connectors.ErrInvalid,
 		)
 	}
 	if request.ExpectedBindingCreatedAt.IsZero() || request.ExpectedBindingUpdatedAt.IsZero() {
 		return ReplaceGrantSetRequest{}, nil, fmt.Errorf(
 			"expected binding generation and revision are required: %w",
-			domain.ErrInvalid,
+			connectors.ErrInvalid,
 		)
 	}
 	desired, err := normalizeDesiredGrants(request.Grants)
@@ -148,18 +173,18 @@ func prepareReplaceGrantSetRequest(
 }
 
 func classifyCurrentGrants(
-	current []*domain.ConnectorGrant,
+	current []*connectors.ConnectorGrant,
 	desired []DesiredGrant,
-	binding *domain.TriggerBinding,
+	binding *automation.Binding,
 	request ReplaceGrantSetRequest,
 	setToken string,
-) (map[string]*domain.ConnectorGrant, []*domain.ConnectorGrant, error) {
+) (map[string]*connectors.ConnectorGrant, []*connectors.ConnectorGrant, error) {
 	desiredByKey := make(map[string]DesiredGrant, len(desired))
 	for _, grant := range desired {
 		desiredByKey[grantKey(grant.Action, grant.ResourcePattern)] = grant
 	}
-	preserved := make(map[string]*domain.ConnectorGrant, len(desired))
-	obsolete := make([]*domain.ConnectorGrant, 0)
+	preserved := make(map[string]*connectors.ConnectorGrant, len(desired))
+	obsolete := make([]*connectors.ConnectorGrant, 0)
 	for _, grant := range current {
 		if grant == nil || grant.ConnectorID != request.ConnectorID {
 			continue
@@ -172,7 +197,7 @@ func classifyCurrentGrants(
 			return nil, nil, fmt.Errorf(
 				"trigger binding %q already has a different connector grant set for this revision: %w",
 				request.BindingID,
-				domain.ErrConflict,
+				connectors.ErrConflict,
 			)
 		}
 		if matchesDesiredRevision && preserved[key] == nil {
@@ -184,18 +209,20 @@ func classifyCurrentGrants(
 	return preserved, obsolete, nil
 }
 
-func (r *GrantSetReconciler) revokeObsoleteGrants(
+func (r *Workflow) revokeObsoleteGrants(
 	ctx context.Context,
 	request ReplaceGrantSetRequest,
-	obsolete []*domain.ConnectorGrant,
+	obsolete []*connectors.ConnectorGrant,
 ) (int, error) {
 	revoked := 0
 	for _, grant := range obsolete {
 		if _, err := r.requireExactDisabledBinding(ctx, request); err != nil {
 			return 0, err
 		}
-		if err := r.grants.Revoke(ctx, request.WorkspaceKey, grant.GrantID); err != nil {
-			if errors.Is(err, domain.ErrGrantRevoked) {
+		if err := r.grants.RevokeGrant(ctx, connectors.RevokeGrantCommand{
+			WorkspaceKey: request.WorkspaceKey, GrantID: grant.GrantID,
+		}); err != nil {
+			if errors.Is(err, connectors.ErrGrantRevoked) {
 				continue
 			}
 			return 0, fmt.Errorf("revoke stale connector grant %q: %w", grant.GrantID, err)
@@ -205,15 +232,15 @@ func (r *GrantSetReconciler) revokeObsoleteGrants(
 	return revoked, nil
 }
 
-func (r *GrantSetReconciler) resolveDesiredGrants(
+func (r *Workflow) resolveDesiredGrants(
 	ctx context.Context,
 	request ReplaceGrantSetRequest,
-	binding *domain.TriggerBinding,
+	binding *automation.Binding,
 	desired []DesiredGrant,
-	preserved map[string]*domain.ConnectorGrant,
+	preserved map[string]*connectors.ConnectorGrant,
 	setToken string,
-) ([]*domain.ConnectorGrant, error) {
-	resolved := make([]*domain.ConnectorGrant, 0, len(desired))
+) ([]*connectors.ConnectorGrant, error) {
+	resolved := make([]*connectors.ConnectorGrant, 0, len(desired))
 	for _, grant := range desired {
 		key := grantKey(grant.Action, grant.ResourcePattern)
 		if existing := preserved[key]; existing != nil {
@@ -234,18 +261,18 @@ func (r *GrantSetReconciler) resolveDesiredGrants(
 
 func normalizeDesiredGrants(requests []DesiredGrant) ([]DesiredGrant, error) {
 	if requests == nil {
-		return nil, fmt.Errorf("grants must be an array: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("grants must be an array: %w", connectors.ErrInvalid)
 	}
 	desired := make([]DesiredGrant, 0, len(requests))
 	seen := make(map[string]struct{}, len(requests))
 	for _, request := range requests {
-		action := strings.TrimSpace(request.Action)
-		resource := strings.TrimSpace(request.ResourcePattern)
-		if err := domain.ValidateConnectorAction(action); err != nil {
+		action, err := connectors.NormalizeAction(request.Action)
+		if err != nil {
 			return nil, err
 		}
+		resource := strings.TrimSpace(request.ResourcePattern)
 		if resource == "" {
-			return nil, fmt.Errorf("resource_pattern is required: %w", domain.ErrInvalid)
+			return nil, fmt.Errorf("resource_pattern is required: %w", connectors.ErrInvalid)
 		}
 		key := grantKey(action, resource)
 		if _, duplicate := seen[key]; duplicate {
@@ -257,43 +284,43 @@ func normalizeDesiredGrants(requests []DesiredGrant) ([]DesiredGrant, error) {
 	return desired, nil
 }
 
-func (r *GrantSetReconciler) requireExactDisabledBinding(
+func (r *Workflow) requireExactDisabledBinding(
 	ctx context.Context,
 	request ReplaceGrantSetRequest,
-) (*domain.TriggerBinding, error) {
-	binding, err := r.bindings.Get(ctx, request.WorkspaceKey, request.BindingID)
+) (*automation.Binding, error) {
+	binding, err := r.bindings.GetBinding(ctx, request.WorkspaceKey, request.BindingID)
 	if err != nil {
 		return nil, err
 	}
 	if binding == nil {
-		return nil, fmt.Errorf("trigger binding %q returned no record: %w", request.BindingID, domain.ErrConflict)
+		return nil, fmt.Errorf("trigger binding %q returned no record: %w", request.BindingID, automation.ErrInvalidPersistedState)
 	}
 	if !binding.CreatedAt.Equal(request.ExpectedBindingCreatedAt) ||
 		!binding.UpdatedAt.Equal(request.ExpectedBindingUpdatedAt) {
 		return nil, fmt.Errorf(
 			"trigger binding %q changed generation or revision while replacing grants: %w",
 			request.BindingID,
-			domain.ErrConflict,
+			automation.ErrConflict,
 		)
 	}
 	if binding.Enabled {
 		return nil, fmt.Errorf(
 			"trigger binding %q must be disabled while replacing grants: %w",
 			request.BindingID,
-			domain.ErrConflict,
+			automation.ErrConflict,
 		)
 	}
 	return binding, nil
 }
 
-func (r *GrantSetReconciler) createGrant(
+func (r *Workflow) createGrant(
 	ctx context.Context,
-	binding *domain.TriggerBinding,
+	binding *automation.Binding,
 	connectorID string,
 	grant DesiredGrant,
 	setToken string,
-) (*domain.ConnectorGrant, error) {
-	in := store.ConnectorGrantCreate{
+) (*connectors.ConnectorGrant, error) {
+	in := connectors.CreateGrantCommand{
 		WorkspaceKey:    binding.WorkspaceKey,
 		GrantID:         reconciledGrantID(binding, connectorID, grant, setToken),
 		ConnectorID:     connectorID,
@@ -301,11 +328,11 @@ func (r *GrantSetReconciler) createGrant(
 		Action:          grant.Action,
 		ResourcePattern: grant.ResourcePattern,
 	}
-	created, err := r.grants.Create(ctx, in)
+	created, err := r.grants.CreateGrant(ctx, in)
 	if err == nil {
 		return created, nil
 	}
-	if !errors.Is(err, domain.ErrAlreadyExists) && !errors.Is(err, domain.ErrConflict) {
+	if !errors.Is(err, connectors.ErrAlreadyExists) && !errors.Is(err, connectors.ErrConflict) {
 		return nil, fmt.Errorf("create replacement connector grant: %w", err)
 	}
 	// A lost successful response is reconciled by the active exact grant. A
@@ -320,21 +347,23 @@ func (r *GrantSetReconciler) createGrant(
 	}
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%d", in.GrantID, time.Now().UTC().UnixNano())))
 	in.GrantID = fmt.Sprintf("%s-n%x", in.GrantID, sum[:4])
-	created, err = r.grants.Create(ctx, in)
+	created, err = r.grants.CreateGrant(ctx, in)
 	if err != nil {
 		return nil, fmt.Errorf("create replacement connector grant: %w", err)
 	}
 	return created, nil
 }
 
-func (r *GrantSetReconciler) findMatchingRevisionGrant(
+func (r *Workflow) findMatchingRevisionGrant(
 	ctx context.Context,
-	binding *domain.TriggerBinding,
+	binding *automation.Binding,
 	connectorID string,
 	desired DesiredGrant,
 	setToken string,
-) (*domain.ConnectorGrant, error) {
-	grants, err := r.grants.ListByBinding(ctx, binding.WorkspaceKey, binding.BindingID)
+) (*connectors.ConnectorGrant, error) {
+	grants, err := r.grants.ListGrants(ctx, connectors.ListGrantsQuery{
+		WorkspaceKey: binding.WorkspaceKey, BindingID: binding.BindingID,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -354,7 +383,7 @@ func grantKey(action, resource string) string {
 	return action + "\x00" + resource
 }
 
-func bindingGenerationToken(binding *domain.TriggerBinding) string {
+func bindingGenerationToken(binding *automation.Binding) string {
 	if binding == nil {
 		return ""
 	}
@@ -365,7 +394,7 @@ func bindingGenerationToken(binding *domain.TriggerBinding) string {
 	return fmt.Sprintf("%x", sum[:6])
 }
 
-func bindingRevisionToken(binding *domain.TriggerBinding, connectorID string) string {
+func bindingRevisionToken(binding *automation.Binding, connectorID string) string {
 	if binding == nil {
 		return ""
 	}
@@ -389,8 +418,8 @@ func desiredGrantSetToken(grants []DesiredGrant) string {
 }
 
 func grantMatchesRevision(
-	grant *domain.ConnectorGrant,
-	binding *domain.TriggerBinding,
+	grant *connectors.ConnectorGrant,
+	binding *automation.Binding,
 	connectorID string,
 ) bool {
 	if grant == nil || binding == nil {
@@ -401,8 +430,8 @@ func grantMatchesRevision(
 }
 
 func grantMatchesDesiredRevision(
-	grant *domain.ConnectorGrant,
-	binding *domain.TriggerBinding,
+	grant *connectors.ConnectorGrant,
+	binding *automation.Binding,
 	connectorID string,
 	desired DesiredGrant,
 	setToken string,
@@ -415,7 +444,7 @@ func grantMatchesDesiredRevision(
 }
 
 func reconciledGrantID(
-	binding *domain.TriggerBinding,
+	binding *automation.Binding,
 	connectorID string,
 	grant DesiredGrant,
 	setToken string,

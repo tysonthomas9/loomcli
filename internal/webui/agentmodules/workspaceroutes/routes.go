@@ -65,7 +65,7 @@ func New(deps routecontracts.Deps, automationModules automationroutes.Modules) [
 			Store: deps.Store, Roles: deps.Agents, Authority: deps.AgentsOperator,
 		}),
 		automationModules.TriggerBindings,
-		connectors.NewModule(deps.Store, deps.LocalSettingsDir, deps.AutomationOperator),
+		connectors.NewModule(deps.Store, deps.LocalSettingsDir, deps.AutomationBindings, deps.AutomationOperator),
 		approvals.New(approvals.Config{Store: deps.Store, Awaits: automationModules.EventAwaits}),
 		taskrunapi.NewModule(taskrunapi.Config{
 			Store: deps.Store, FleetBaseURL: deps.FleetBaseURL,

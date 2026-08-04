@@ -1,6 +1,6 @@
 schema_version: 1
 status: complete
-source_head: 9ad8d00a8b10f0d7136a5a88447cb0204ac2fee7
+source_head: e6b84374b5f75c8c130864edd86c0beef8c16b57
 adapter_roots:
   - internal/app
   - internal/cli
@@ -929,6 +929,10 @@ function_surfaces:
     capability_owner: connectors
   - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
     function: NewWithGrants
+    access: read-only
+    capability_owner: connectors
+  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
+    function: NormalizeAction
     access: read-only
     capability_owner: connectors
   - package: github.com/tysonthomas9/loomcli/internal/modules/connectors

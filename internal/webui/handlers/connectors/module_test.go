@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/localsettings"
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -35,13 +37,42 @@ func newTestServerWithStore(t *testing.T, st store.Store) *httptest.Server {
 func newTestServerWithStoreAndSettings(t *testing.T, st store.Store, localSettingsDir string) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
-	NewModule(st, localSettingsDir, connectorTestOperatorResolver{}).Register(mux)
+	NewModule(st, localSettingsDir, &connectorBindingQueries{store: st.TriggerBindings()}, connectorTestOperatorResolver{}).Register(mux)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	return srv
 }
 
 type connectorTestOperatorResolver struct{}
+
+type connectorBindingQueries struct {
+	store store.TriggerBindingStore
+}
+
+func (queries *connectorBindingQueries) GetBinding(
+	ctx context.Context,
+	workspace, bindingID string,
+) (*automation.Binding, error) {
+	binding, err := queries.store.Get(ctx, workspace, bindingID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil, errors.Join(automation.ErrNotFound, err)
+		}
+		return nil, err
+	}
+	if binding == nil {
+		return nil, nil
+	}
+	raw, err := json.Marshal(binding)
+	if err != nil {
+		return nil, err
+	}
+	var projected automation.Binding
+	if err := json.Unmarshal(raw, &projected); err != nil {
+		return nil, err
+	}
+	return &projected, nil
+}
 
 func (connectorTestOperatorResolver) ResolveOperatorAuthority(
 	_ *http.Request,
@@ -518,7 +549,7 @@ func TestReplaceBindingGrantsRequiresExactDisabledRevisionBeforeMutation(t *test
 func TestReplaceBindingGrantsUsesCanonicalWorkspaceContext(t *testing.T) {
 	st, binding := seedGrantReplacementFixture(t)
 	mux := http.NewServeMux()
-	NewModule(st, "", connectorTestOperatorResolver{}).Register(mux)
+	NewModule(st, "", &connectorBindingQueries{store: st.TriggerBindings()}, connectorTestOperatorResolver{}).Register(mux)
 	raw, err := json.Marshal(replaceGrantSetBody(binding, "acme/alpha"))
 	if err != nil {
 		t.Fatalf("marshal request: %v", err)

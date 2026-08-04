@@ -24,7 +24,7 @@ import (
 	"sync"
 	"time"
 
-	legacyconnector "github.com/tysonthomas9/loomcli/internal/connector"
+	"github.com/tysonthomas9/loomcli/internal/app/connectorgrants"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/connectorscatalog"
 	"github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
@@ -48,7 +48,7 @@ type Module struct {
 	managementStore   connectorsmodule.ManagementStore
 	management        connectorsmodule.Management
 	localSettingsDir  string
-	grantSets         *legacyconnector.GrantSetReconciler
+	grantSets         *connectorgrants.Workflow
 	grantMu           sync.Mutex
 	credentialMu      sync.Mutex
 	operatorAuthority workflowcataloghttp.OperatorAuthorityResolver
@@ -57,6 +57,7 @@ type Module struct {
 func NewModule(
 	st store.Store,
 	localSettingsDir string,
+	automationBindings connectorgrants.BindingReader,
 	operatorAuthorities ...workflowcataloghttp.OperatorAuthorityResolver,
 ) *Module {
 	module := &Module{store: st, localSettingsDir: localSettingsDir}
@@ -69,11 +70,7 @@ func NewModule(
 			module.managementStore = adapter
 			module.management, _ = connectorsmodule.NewManagement(adapter)
 		}
-		module.grantSets = legacyconnector.NewGrantSetReconciler(
-			st.TriggerBindings(),
-			st.Connectors(),
-			st.ConnectorGrants(),
-		)
+		module.grantSets, _ = connectorgrants.New(automationBindings, module.management)
 	}
 	return module
 }
@@ -486,7 +483,7 @@ type replaceBindingGrantsRequest struct {
 	Grants                   []replaceBindingGrantRequest `json:"grants"`
 }
 
-type replaceBindingGrantsResponse = legacyconnector.ReplaceGrantSetResult
+type replaceBindingGrantsResponse = connectorgrants.ReplaceGrantSetResult
 
 // replaceBindingGrants decodes the exact binding snapshot and complete desired
 // set, then delegates the restartable replacement ceremony to Connectors.
@@ -511,46 +508,67 @@ func (m *Module) replaceBindingGrants(w http.ResponseWriter, r *http.Request) {
 	// performs exact persisted generation/revision checks around every write.
 	m.grantMu.Lock()
 	defer m.grantMu.Unlock()
+	if m.grantSets == nil {
+		handler.RespondError(w, http.StatusServiceUnavailable, "connector grant replacement is unavailable")
+		return
+	}
 	result, err := m.grantSets.Replace(r.Context(), replacement)
 	if err != nil {
-		handler.WriteDomainError(w, err, "replace connector grants failed")
+		writeGrantReplacementError(w, err)
 		return
 	}
 	handler.WriteJSON(w, http.StatusOK, result)
+}
+
+func writeGrantReplacementError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, connectorsmodule.ErrInvalid), errors.Is(err, automation.ErrInvalid):
+		handler.RespondError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, connectorsmodule.ErrNotFound), errors.Is(err, automation.ErrNotFound):
+		handler.RespondError(w, http.StatusNotFound, "replace connector grants failed")
+	case errors.Is(err, connectorsmodule.ErrConflict), errors.Is(err, connectorsmodule.ErrAlreadyExists),
+		errors.Is(err, automation.ErrConflict):
+		handler.RespondError(w, http.StatusConflict, err.Error())
+	case errors.Is(err, connectorgrants.ErrGrantSetUnavailable),
+		errors.Is(err, connectorsmodule.ErrUnavailable), errors.Is(err, automation.ErrUnavailable):
+		handler.RespondError(w, http.StatusServiceUnavailable, "connector grant replacement is unavailable")
+	default:
+		handler.RespondError(w, http.StatusInternalServerError, "replace connector grants failed")
+	}
 }
 
 func decodeReplaceBindingGrantsRequest(
 	w http.ResponseWriter,
 	r *http.Request,
 	ws, connectorID, bindingID string,
-) (legacyconnector.ReplaceGrantSetRequest, bool) {
+) (connectorgrants.ReplaceGrantSetRequest, bool) {
 	var req replaceBindingGrantsRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxConnectorBodyBytes)).Decode(&req); err != nil {
 		handler.RespondError(w, http.StatusBadRequest, "invalid JSON body")
-		return legacyconnector.ReplaceGrantSetRequest{}, false
+		return connectorgrants.ReplaceGrantSetRequest{}, false
 	}
 	expectedCreatedAt, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(req.ExpectedBindingCreatedAt))
 	if err != nil {
 		handler.RespondError(w, http.StatusBadRequest, "expected_binding_created_at must be an RFC3339 timestamp")
-		return legacyconnector.ReplaceGrantSetRequest{}, false
+		return connectorgrants.ReplaceGrantSetRequest{}, false
 	}
 	expectedUpdatedAt, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(req.ExpectedBindingUpdatedAt))
 	if err != nil {
 		handler.RespondError(w, http.StatusBadRequest, "expected_binding_updated_at must be an RFC3339 timestamp")
-		return legacyconnector.ReplaceGrantSetRequest{}, false
+		return connectorgrants.ReplaceGrantSetRequest{}, false
 	}
-	var desired []legacyconnector.DesiredGrant
+	var desired []connectorgrants.DesiredGrant
 	if req.Grants != nil {
-		desired = make([]legacyconnector.DesiredGrant, 0, len(req.Grants))
+		desired = make([]connectorgrants.DesiredGrant, 0, len(req.Grants))
 		for _, grant := range req.Grants {
-			desired = append(desired, legacyconnector.DesiredGrant{
+			desired = append(desired, connectorgrants.DesiredGrant{
 				Action:          grant.Action,
 				ResourcePattern: grant.ResourcePattern,
 			})
 		}
 	}
 
-	return legacyconnector.ReplaceGrantSetRequest{
+	return connectorgrants.ReplaceGrantSetRequest{
 		WorkspaceKey:             ws,
 		ConnectorID:              connectorID,
 		BindingID:                bindingID,

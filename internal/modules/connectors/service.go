@@ -412,6 +412,14 @@ func normalizeConnectorAction(value string) (string, error) {
 	return action, nil
 }
 
+// NormalizeAction validates and returns one canonical dotted provider action.
+// Application workflows use this before mutating a complete grant set so an
+// invalid later element cannot cause partial revocation before CreateGrant
+// performs its own command validation.
+func NormalizeAction(value string) (string, error) {
+	return normalizeConnectorAction(value)
+}
+
 func validatePersistedGrant(value *ConnectorGrant, workspace, bindingID string) error {
 	if value == nil || value.WorkspaceKey != workspace || value.BindingID != bindingID ||
 		value.CreatedAt.IsZero() || value.RevokedAt != nil {
