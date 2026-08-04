@@ -6,8 +6,8 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/tysonthomas9/loomcli/internal/connector/providers"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 )
 
 var errEgressUnavailable = errors.New("pull request review connector egress is unavailable")
@@ -27,25 +27,28 @@ func writeJSON(w http.ResponseWriter, data any) {
 }
 
 func writePRReviewError(w http.ResponseWriter, err error) {
-	var (
-		pre   *providers.PreconditionRequired
-		stale *providers.StaleSubject
-		rl    *providers.RateLimited
-		up    *providers.UpstreamError
-	)
-	switch {
-	case errors.Is(err, errEgressUnavailable):
+	if errors.Is(err, errEgressUnavailable) {
 		writePRReviewErrorCode(w, http.StatusServiceUnavailable, "egress_unavailable", err.Error(), false)
-	case errors.Is(err, domain.ErrGrantDenied):
-		writePRReviewErrorCode(w, http.StatusForbidden, "grant_denied", err.Error(), false)
-	case errors.As(err, &pre):
-		writePRReviewErrorCode(w, http.StatusPreconditionRequired, "precondition_required", err.Error(), false)
-	case errors.As(err, &stale):
-		writePRReviewErrorCode(w, http.StatusConflict, "stale_subject", err.Error(), false)
-	case errors.As(err, &rl):
-		writePRReviewErrorCode(w, http.StatusTooManyRequests, "rate_limited", err.Error(), true)
-	case errors.As(err, &up):
-		writePRReviewErrorCode(w, http.StatusBadGateway, "upstream_error", err.Error(), providers.Retryable(err))
+		return
+	}
+	if failure, ok := connectorsmodule.ClassifyDispatchError(err); ok {
+		switch failure.Kind {
+		case connectorsmodule.DispatchFailureGrantDenied:
+			writePRReviewErrorCode(w, http.StatusForbidden, string(failure.Kind), err.Error(), false)
+		case connectorsmodule.DispatchFailurePreconditionRequired:
+			writePRReviewErrorCode(w, http.StatusPreconditionRequired, string(failure.Kind), err.Error(), false)
+		case connectorsmodule.DispatchFailureStaleSubject:
+			writePRReviewErrorCode(w, http.StatusConflict, string(failure.Kind), err.Error(), false)
+		case connectorsmodule.DispatchFailureRateLimited:
+			writePRReviewErrorCode(w, http.StatusTooManyRequests, string(failure.Kind), err.Error(), true)
+		case connectorsmodule.DispatchFailureUpstream:
+			writePRReviewErrorCode(w, http.StatusBadGateway, string(failure.Kind), err.Error(), failure.Retryable)
+		default:
+			writePRReviewErrorCode(w, http.StatusInternalServerError, "internal", err.Error(), false)
+		}
+		return
+	}
+	switch {
 	case errors.Is(err, domain.ErrNotFound):
 		writePRReviewErrorCode(w, http.StatusNotFound, "not_found", err.Error(), false)
 	case errors.Is(err, domain.ErrInvalid):

@@ -138,7 +138,7 @@ func MatchGrantResource(pattern string, resource string) bool {
 // transport-specific freshness checks but cannot choose which actions require
 // them.
 var irreversiblePreconditions = map[string][]string{
-	"github.merge":              {"expectedHeadSha"},
+	ActionGitHubMerge:           {"expectedHeadSha"},
 	"github.branch.delete":      {"expectedHeadSha"},
 	"issues.set_priority":       {"expectedIssueRevision"},
 	"slack.chat.delete":         {"expectedMessageTs"},

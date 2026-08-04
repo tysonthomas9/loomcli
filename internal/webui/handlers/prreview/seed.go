@@ -12,25 +12,24 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/connector"
-	"github.com/tysonthomas9/loomcli/internal/connector/providers"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
 	"github.com/tysonthomas9/loomcli/internal/localsettings"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 )
 
-const prReviewWriteAction = providers.ActionGitHubReviewPost
+const prReviewWriteAction = connectorsmodule.ActionGitHubReviewPost
 
 const credentialSeedAttempts = 2
 
 var prReadActions = []string{
-	providers.ActionGitHubPullRequestRead,
-	providers.ActionGitHubPullsList,
-	providers.ActionGitHubCompareRead,
+	connectorsmodule.ActionGitHubPullRequestRead,
+	connectorsmodule.ActionGitHubPullsList,
+	connectorsmodule.ActionGitHubCompareRead,
 }
 
 var prReviewSubmissionActions = []string{
-	providers.ActionGitHubPullRequestRead,
+	connectorsmodule.ActionGitHubPullRequestRead,
 	prReviewWriteAction,
 }
 

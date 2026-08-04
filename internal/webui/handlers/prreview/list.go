@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/connector/providers"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/ops"
@@ -125,7 +124,7 @@ func (m *Module) connectorListPullRequestsForRepo(
 			RunID:        listRunID(r, owner, repo),
 			BindingID:    bindingID,
 			ConnectorID:  connectorID,
-			Action:       providers.ActionGitHubPullsList,
+			Action:       connectorsmodule.ActionGitHubPullsList,
 			Resource:     prResource(owner, repo),
 			Args: map[string]any{
 				"owner":   owner,
@@ -197,7 +196,7 @@ func listRunID(r *http.Request, owner, repo string) string {
 	if identity, ok := middleware.UserIdentityFromContext(r.Context()); ok && strings.TrimSpace(identity.UserID) != "" {
 		userID = strings.TrimSpace(identity.UserID)
 	}
-	return "webui-review:" + userID + ":" + owner + "/" + repo + ":list:" + providers.ActionGitHubPullsList
+	return "webui-review:" + userID + ":" + owner + "/" + repo + ":list:" + connectorsmodule.ActionGitHubPullsList
 }
 
 func pullRequestsFromBody(owner, repo, sourceRepo string, body map[string]any) []ops.GitPullRequest {

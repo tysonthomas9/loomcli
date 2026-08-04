@@ -17,40 +17,34 @@ import (
 	"unicode/utf8"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 )
 
 // GitHub connector actions (dotted snake_case per the CV1 action grammar —
 // field names stay camelCase, action segments do not).
 const (
 	// ActionGitHubPullRequestRead reads one pull request (read-only).
-	ActionGitHubPullRequestRead = "github.pull_request.read"
+	ActionGitHubPullRequestRead = connectorsmodule.ActionGitHubPullRequestRead
 	// ActionGitHubReviewPost posts a PR review after a pre-egress
 	// liveness read asserting the PR is open at the expected head sha
 	// (vet A1): the write is never issued against a moved or closed PR.
-	ActionGitHubReviewPost = "github.review.post"
+	ActionGitHubReviewPost = connectorsmodule.ActionGitHubReviewPost
 	// ActionGitHubMerge merges a PR using GitHub's native server-side sha
 	// precondition (vet A2): expectedHeadSha is sent as the merge API's
 	// sha field, so GitHub itself 409s when the head moved -> StaleSubject.
-	ActionGitHubMerge = "github.merge"
+	ActionGitHubMerge = connectorsmodule.ActionGitHubMerge
 	// ActionGitHubPullsList lists pull requests (merge-conflict agent,
 	// read-only).
-	ActionGitHubPullsList = "github.pulls.list"
+	ActionGitHubPullsList = connectorsmodule.ActionGitHubPullsList
 	// ActionGitHubCompareRead compares two refs (read-only).
-	ActionGitHubCompareRead = "github.compare.read"
+	ActionGitHubCompareRead = connectorsmodule.ActionGitHubCompareRead
 	// ActionGitHubIssueCommentPost posts an issue/PR comment.
-	ActionGitHubIssueCommentPost = "github.issue_comment.post"
+	ActionGitHubIssueCommentPost = connectorsmodule.ActionGitHubIssueCommentPost
 )
 
 // GitHubActions returns the actions the GitHub provider implements (a copy).
 func GitHubActions() []string {
-	return []string{
-		ActionGitHubPullRequestRead,
-		ActionGitHubReviewPost,
-		ActionGitHubMerge,
-		ActionGitHubPullsList,
-		ActionGitHubCompareRead,
-		ActionGitHubIssueCommentPost,
-	}
+	return connectorsmodule.ActionsForSource(connectorsmodule.ConnectorSourceGitHub)
 }
 
 // DefaultGitHubBaseURL is the public GitHub REST API endpoint.

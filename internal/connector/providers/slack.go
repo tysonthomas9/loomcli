@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 )
 
 // Slack connector actions (dotted snake_case per the CV1 action grammar).
@@ -26,18 +27,15 @@ const (
 	// documented because a posted message is reversible (deletable),
 	// unlike a merge. Idempotency rides as a client_msg_id derived from
 	// the runID-derived IdempotencyKey.
-	ActionSlackChatPost = "slack.chat.post"
+	ActionSlackChatPost = connectorsmodule.ActionSlackChatPost
 	// ActionSlackConversationsRead reads recent conversation history
 	// (read-only).
-	ActionSlackConversationsRead = "slack.conversations.read"
+	ActionSlackConversationsRead = connectorsmodule.ActionSlackConversationsRead
 )
 
 // SlackActions returns the actions the Slack provider implements (a copy).
 func SlackActions() []string {
-	return []string{
-		ActionSlackChatPost,
-		ActionSlackConversationsRead,
-	}
+	return connectorsmodule.ActionsForSource(connectorsmodule.ConnectorSourceSlack)
 }
 
 // DefaultSlackBaseURL is the public Slack Web API endpoint.

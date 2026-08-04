@@ -222,7 +222,7 @@ func (d *Dispatcher) journalOutcome(ctx context.Context, req Request, res Result
 	decision := callRes.Decision
 	if !decision.Valid() {
 		if callErr != nil {
-			decision = providers.DecisionForError(callErr)
+			decision = domain.ConnectorCallDecision(connectorsmodule.DecisionForDispatchError(callErr))
 		} else {
 			decision = domain.ConnectorCallGranted
 		}
@@ -284,13 +284,8 @@ func (d *Dispatcher) appendAudit(ctx context.Context, req Request, kind domain.C
 // upstream class for UpstreamError, "rate_limited" for RateLimited, empty
 // otherwise (refusals carry their reason in the summary instead).
 func errorClass(err error) string {
-	var up *providers.UpstreamError
-	if errors.As(err, &up) {
-		return up.Class
-	}
-	var rl *providers.RateLimited
-	if errors.As(err, &rl) {
-		return "rate_limited"
+	if failure, ok := connectorsmodule.ClassifyDispatchError(err); ok {
+		return failure.ErrorClass
 	}
 	return ""
 }

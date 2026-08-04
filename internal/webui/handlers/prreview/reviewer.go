@@ -17,7 +17,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/app/prreviewer"
 	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
-	"github.com/tysonthomas9/loomcli/internal/connector/providers"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
@@ -306,10 +305,10 @@ func (m *Module) fetchPullRequestHead(w http.ResponseWriter, r *http.Request, ws
 	}
 	res, err := m.dispatcher.Dispatch(r.Context(), connectorsmodule.DispatchCommand{
 		WorkspaceKey: ws,
-		RunID:        syntheticRunID(r, params, providers.ActionGitHubPullRequestRead),
+		RunID:        syntheticRunID(r, params, connectorsmodule.ActionGitHubPullRequestRead),
 		BindingID:    bindingID,
 		ConnectorID:  connectorID,
-		Action:       providers.ActionGitHubPullRequestRead,
+		Action:       connectorsmodule.ActionGitHubPullRequestRead,
 		Resource:     prResource(params.owner, params.repo),
 		Args:         pullRequestArgs(params),
 		CallSeq:      0,

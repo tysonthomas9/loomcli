@@ -11,14 +11,15 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 )
 
 // Datadog connector actions (dotted snake_case per the CV1 action grammar).
 const (
 	// ActionDatadogMonitorsRead lists monitors (read-only).
-	ActionDatadogMonitorsRead = "datadog.monitors.read"
+	ActionDatadogMonitorsRead = connectorsmodule.ActionDatadogMonitorsRead
 	// ActionDatadogAlertRead reads one monitor's alert state (read-only).
-	ActionDatadogAlertRead = "datadog.alert.read"
+	ActionDatadogAlertRead = connectorsmodule.ActionDatadogAlertRead
 	// ActionDatadogIncidentsWrite declares an incident, gated by a
 	// best-effort pre-egress alert-still-firing check on the source
 	// monitor: the POST is never issued when the alert is no longer
@@ -26,17 +27,13 @@ const (
 	// offers no native write precondition, so the check-to-post TOCTOU
 	// window is accepted and documented; an incident can be resolved or
 	// deleted afterwards.
-	ActionDatadogIncidentsWrite = "datadog.incidents.write"
+	ActionDatadogIncidentsWrite = connectorsmodule.ActionDatadogIncidentsWrite
 )
 
 // DatadogActions returns the actions the Datadog provider implements (a
 // copy).
 func DatadogActions() []string {
-	return []string{
-		ActionDatadogMonitorsRead,
-		ActionDatadogAlertRead,
-		ActionDatadogIncidentsWrite,
-	}
+	return connectorsmodule.ActionsForSource(connectorsmodule.ConnectorSourceDatadog)
 }
 
 // DefaultDatadogBaseURL is the public Datadog API endpoint (US1 site).

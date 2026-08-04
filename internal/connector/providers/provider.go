@@ -170,6 +170,10 @@ func (e *StaleSubject) Error() string {
 // Unwrap matches domain.ErrConflict via errors.Is.
 func (e *StaleSubject) Unwrap() error { return domain.ErrConflict }
 
+func (e *StaleSubject) ConnectorFailure() connectorsmodule.DispatchFailure {
+	return connectorsmodule.DispatchFailure{Kind: connectorsmodule.DispatchFailureStaleSubject}
+}
+
 // PreconditionRequired indicates the caller omitted a freshness field the
 // action demands; the call is refused before any egress. errors.Is matches
 // domain.ErrInvalid.
@@ -187,6 +191,10 @@ func (e *PreconditionRequired) Error() string {
 
 // Unwrap matches domain.ErrInvalid via errors.Is.
 func (e *PreconditionRequired) Unwrap() error { return domain.ErrInvalid }
+
+func (e *PreconditionRequired) ConnectorFailure() connectorsmodule.DispatchFailure {
+	return connectorsmodule.DispatchFailure{Kind: connectorsmodule.DispatchFailurePreconditionRequired}
+}
 
 // RateLimited indicates the provider throttled the call. Always retryable —
 // by the task-retry machinery above, never by the provider itself.
@@ -207,6 +215,12 @@ func (e *RateLimited) Unwrap() error { return ErrUpstream }
 
 // Retryable reports true: rate limits are always worth retrying later.
 func (e *RateLimited) Retryable() bool { return true }
+
+func (e *RateLimited) ConnectorFailure() connectorsmodule.DispatchFailure {
+	return connectorsmodule.DispatchFailure{
+		Kind: connectorsmodule.DispatchFailureRateLimited, Retryable: true, ErrorClass: "rate_limited",
+	}
+}
 
 // UpstreamError indicates the provider call failed for a non-freshness,
 // non-rate-limit reason. Summary is pre-sanitized: credential material is
@@ -237,6 +251,12 @@ func (e *UpstreamError) Retryable() bool {
 	return e.Class == ClassServerError || e.Class == ClassNetwork
 }
 
+func (e *UpstreamError) ConnectorFailure() connectorsmodule.DispatchFailure {
+	return connectorsmodule.DispatchFailure{
+		Kind: connectorsmodule.DispatchFailureUpstream, Retryable: e.Retryable(), ErrorClass: e.Class,
+	}
+}
+
 // Retryable reports whether err (anywhere in its chain) signals a transient
 // failure the retry machinery may safely re-attempt under the same
 // idempotency key.
@@ -255,15 +275,7 @@ func Retryable(err error) bool {
 // (including argument-validation failures) classifies as upstream_error so
 // the journal always records a valid decision.
 func DecisionForError(err error) domain.ConnectorCallDecision {
-	var stale *StaleSubject
-	if errors.As(err, &stale) {
-		return domain.ConnectorCallStaleSubject
-	}
-	var pre *PreconditionRequired
-	if errors.As(err, &pre) {
-		return domain.ConnectorCallPreconditionRequired
-	}
-	return domain.ConnectorCallUpstreamError
+	return domain.ConnectorCallDecision(connectorsmodule.DecisionForDispatchError(err))
 }
 
 // tokenPattern matches common credential shapes (bearer/token header echoes,
