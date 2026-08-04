@@ -49,3 +49,11 @@ type CheckoutInspector interface {
 	MatchRemote(context.Context, string, string, string) (CheckoutMatch, error)
 	ResolveCommit(context.Context, string, string) (string, error)
 }
+
+// TaskOutcomeStore is the Source Control persistence port for the narrow
+// stack-lineage transition used by Execution's finalize barrier.
+type TaskOutcomeStore interface {
+	ListTaskStacks(context.Context, string) ([]TaskStack, error)
+	ListTaskStackNodes(context.Context, string, string) ([]TaskStackNode, error)
+	UpdateTaskStackOutcome(context.Context, string, string, string, TaskStackOutcomeMutation) error
+}

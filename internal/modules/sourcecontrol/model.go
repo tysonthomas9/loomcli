@@ -1,5 +1,7 @@
 package sourcecontrol
 
+import "time"
+
 // MaterializeCommand contains only opaque Workspace-owned references. The
 // public Source Control API does not accept a remote URL, so embedded URL
 // credentials cannot cross this boundary even as a rejected request.
@@ -190,4 +192,31 @@ type PullRequestCheckout struct {
 	HeadCommit    string
 	BaseRef       string
 	BaseCommit    string
+}
+
+// TaskStack is the Source-Control-owned projection needed to locate one task's
+// stack without exposing the local stackstore representation to callers.
+type TaskStack struct {
+	StackID      string
+	WorkspaceKey string
+	Repository   string
+}
+
+type TaskStackNode struct {
+	TaskID string
+}
+
+type TaskOutcomeState string
+
+const (
+	TaskOutcomePublished TaskOutcomeState = "published"
+	TaskOutcomeEmpty     TaskOutcomeState = "empty"
+)
+
+// TaskStackOutcomeMutation is the exact lineage state transition derived from
+// trusted runner delivery evidence by Source Control.
+type TaskStackOutcomeMutation struct {
+	State       TaskOutcomeState
+	OutputSHA   string
+	PublishedAt *time.Time
 }

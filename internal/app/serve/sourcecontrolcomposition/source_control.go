@@ -14,6 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/gitauth"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	infralocalgit "github.com/tysonthomas9/loomcli/internal/infra/localgit"
+	infrastackstore "github.com/tysonthomas9/loomcli/internal/infra/stackstoreadapter"
 	"github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	connectorsfleetdb "github.com/tysonthomas9/loomcli/internal/modules/connectors/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
@@ -29,11 +30,11 @@ const (
 // Phase 5 checkout materializer. Consumers receive only the Source Control API;
 // the credential source and Connectors broker remain private.
 type SourceControlCapability struct {
-	api     sourcecontrol.API
-	grants  connectors.GrantCommands
-	issuer  *authority.Issuer
-	now     func() time.Time
-	lineage stackstore.Store
+	api      sourcecontrol.API
+	grants   connectors.GrantCommands
+	issuer   *authority.Issuer
+	now      func() time.Time
+	outcomes sourcecontrol.TaskOutcomeRecorder
 }
 
 type API = sourcecontrol.API
@@ -350,7 +351,7 @@ func NewSourceControlCapability(
 		time.Now,
 	)
 	if capability != nil {
-		capability.lineage, _ = stackstore.Default()
+		capability.outcomes = newDefaultTaskOutcomeRecorder()
 	}
 	return capability, err
 }
@@ -381,9 +382,25 @@ func NewSourceControlCapabilityWithFleetDB(
 		time.Now,
 	)
 	if capability != nil {
-		capability.lineage, _ = stackstore.Default()
+		capability.outcomes = newDefaultTaskOutcomeRecorder()
 	}
 	return capability, err
+}
+
+func newDefaultTaskOutcomeRecorder() sourcecontrol.TaskOutcomeRecorder {
+	store, err := stackstore.Default()
+	if err != nil {
+		return nil
+	}
+	adapter, err := infrastackstore.New(store)
+	if err != nil {
+		return nil
+	}
+	service, err := sourcecontrol.NewTaskOutcomes(adapter, time.Now)
+	if err != nil {
+		return nil
+	}
+	return service
 }
 
 func newSourceControlCapability(

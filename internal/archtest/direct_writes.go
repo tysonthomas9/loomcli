@@ -225,6 +225,7 @@ func (i DirectWriteInventory) validateMetadata() error {
 		"internal/cli",
 		"internal/driver",
 		"internal/infra/agentsbootstrapstore",
+		"internal/infra/stackstoreadapter",
 		"internal/infra/workspacecatalog",
 		"internal/modules",
 		"internal/webui/handlers",

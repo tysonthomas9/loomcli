@@ -1,11 +1,12 @@
 schema_version: 1
 status: complete
-source_head: 96ecdb8c2f40151534cda0f68ae9a976ebeb1df4
+source_head: be7b41a5e2bc213549d41c8425c2bc86ddeb0376
 adapter_roots:
   - internal/app
   - internal/cli
   - internal/driver
   - internal/infra/agentsbootstrapstore
+  - internal/infra/stackstoreadapter
   - internal/infra/workspacecatalog
   - internal/modules
   - internal/webui/handlers
@@ -60,6 +61,9 @@ persistence_packages:
     receiver_suffixes: []
   - path: github.com/tysonthomas9/loomcli/internal/modules/interaction
     receiver_names: [InboxStore, SessionStore, TerminalStore, TranscriptArtifactStore]
+    receiver_suffixes: []
+  - path: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
+    receiver_names: [TaskOutcomeStore]
     receiver_suffixes: []
   - path: github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog
     receiver_names: [AuthoringStore, VersionLifecycleStore]
@@ -266,6 +270,9 @@ method_sets:
       - SyncNativeTranscript
       - SyncSubagentTranscript
       - UpdatePrompt
+  - name: sourcecontrol_task_outcomes
+    read_only: [ListTaskStackNodes, ListTaskStacks]
+    mutating: [UpdateTaskStackOutcome]
   - name: stack_store
     read_only: [GetStack, ListNodes, ListStacks]
     mutating: [AddNode, DeleteStack, EnsureStack, MoveNode, RemoveNode, SetBase, UpdateNode]
@@ -501,6 +508,10 @@ receiver_surfaces:
     package: github.com/tysonthomas9/loomcli/internal/modules/interaction
     method_set: interaction_transcript
     capability_owner: interaction
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol.TaskOutcomeStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
+    method_set: sourcecontrol_task_outcomes
+    capability_owner: sourcecontrol
   - receiver: github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog.AuthoringStore
     package: github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog
     method_set: workflowcatalog_authoring
@@ -862,6 +873,46 @@ function_surfaces:
     function: SessionEnvelope
     access: read-only
     capability_owner: interaction
+  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
+    function: New
+    access: read-only
+    capability_owner: sourcecontrol
+  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
+    function: NewConnectorsGitReadBroker
+    access: read-only
+    capability_owner: sourcecontrol
+  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
+    function: NewTaskOutcomes
+    access: read-only
+    capability_owner: sourcecontrol
+  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
+    function: OperationRules
+    access: read-only
+    capability_owner: sourcecontrol
+  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
+    function: ParseRepositoryAdmissionMaterializationID
+    access: read-only
+    capability_owner: sourcecontrol
+  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
+    function: RepositoryAdmissionMaterializationID
+    access: read-only
+    capability_owner: sourcecontrol
+  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
+    function: ValidatePullRequestCheckoutCommand
+    access: read-only
+    capability_owner: sourcecontrol
+  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
+    function: ValidateRepositoryAdmissionCheckoutCommand
+    access: read-only
+    capability_owner: sourcecontrol
+  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
+    function: ValidateTaskCheckoutCommand
+    access: read-only
+    capability_owner: sourcecontrol
+  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
+    function: ValidateTokenFreeRemote
+    access: read-only
+    capability_owner: sourcecontrol
   - package: github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog
     function: BuiltinSourceRef
     access: read-only
@@ -1322,12 +1373,6 @@ writes:
       method: UpdateInteractionTerminal
       count: 1
       aggregate_owner: interaction
-      expires_after_phase: 7
-    - file: internal/app/serve/sourcecontrolcomposition/stack_lineage.go
-      receiver: github.com/tysonthomas9/loomcli/internal/stackstore.Store
-      method: UpdateNode
-      count: 1
-      aggregate_owner: sourcecontrol
       expires_after_phase: 7
     - file: internal/cli/agent/plan.go
       receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
@@ -2156,6 +2201,12 @@ writes:
       method: Create
       count: 1
       aggregate_owner: agents
+      expires_after_phase: 7
+    - file: internal/infra/stackstoreadapter/adapter.go
+      receiver: github.com/tysonthomas9/loomcli/internal/stackstore.Store
+      method: UpdateNode
+      count: 1
+      aggregate_owner: sourcecontrol
       expires_after_phase: 7
     - file: internal/infra/workspacecatalog/catalog.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.RepoStore

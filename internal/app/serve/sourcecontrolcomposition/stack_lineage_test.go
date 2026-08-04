@@ -2,8 +2,10 @@ package sourcecontrolcomposition
 
 import (
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/driver/taskworktree"
+	infrastackstore "github.com/tysonthomas9/loomcli/internal/infra/stackstoreadapter"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/stacklineage"
 	"github.com/tysonthomas9/loomcli/internal/stackstore"
@@ -22,7 +24,15 @@ func TestRecordTaskOutcomeOwnsFinalizeBarrier(t *testing.T) {
 	if _, err := lineage.AddNode(ctx, workspace, "epic:E", "B", "A", ""); err != nil {
 		t.Fatal(err)
 	}
-	capability := &SourceControlCapability{lineage: lineage}
+	adapter, err := infrastackstore.New(lineage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcomes, err := sourcecontrol.NewTaskOutcomes(adapter, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	capability := &SourceControlCapability{outcomes: outcomes}
 	recorded, err := capability.RecordTaskOutcome(ctx, sourcecontrol.TaskOutcomeCommand{
 		WorkspaceKey: workspace, Repository: repository, TaskID: "A",
 		Metadata: map[string]string{"delivery": "pull_request", "github_head_sha": "deadbeef"},
