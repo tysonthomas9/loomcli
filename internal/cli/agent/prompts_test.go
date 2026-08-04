@@ -94,6 +94,22 @@ func TestGenerateTaskPrompt(t *testing.T) {
 	}
 }
 
+func TestGeneratedPromptsRecognizeArtifactBackedDesigns(t *testing.T) {
+	planning := GeneratePlanningPrompt("planner", nil, "")
+	task := GenerateTaskPrompt("coder", nil, "", "claude")
+
+	for name, prompt := range map[string]string{"planning": planning, "task": task} {
+		for _, field := range []string{".has_design", ".design_artifact_id", ".design"} {
+			if !strings.Contains(prompt, field) {
+				t.Errorf("%s prompt missing artifact-aware filter field %q", name, field)
+			}
+		}
+	}
+	if strings.Contains(task, "select(.design) |") {
+		t.Error("task prompt still requires an inline design body")
+	}
+}
+
 func TestGeneratePlanningPrompt_WithParent(t *testing.T) {
 	prompt := GeneratePlanningPrompt("falcon", nil, "my-epic-abc")
 
@@ -1479,5 +1495,33 @@ func TestStepBuilders_CapabilityDriven(t *testing.T) {
 	}
 	if got := buildInspectReviewStep(none); got != "" {
 		t.Errorf("buildInspectReviewStep without inspect review should be empty, got: %q", got)
+	}
+}
+
+func TestGenerateTerminalPromptBuiltinPRReviewCheckout(t *testing.T) {
+	got, err := GenerateTerminalPrompt("builtin:pr-review-checkout")
+	if err != nil {
+		t.Fatalf("GenerateTerminalPrompt builtin pr-review-checkout: %v", err)
+	}
+	if !strings.Contains(got, "READ-ONLY") {
+		t.Fatalf("checkout review prompt missing read-only persona:\n%s", got)
+	}
+	// The whole point: no lead/backlog bootstrap that triggers startup commands.
+	for _, forbidden := range []string{"INTERACTIVE MODE: Project Lead", "loom data list", "On Startup"} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("checkout review prompt leaks lead bootstrap %q:\n%s", forbidden, got)
+		}
+	}
+	// Self-describing checkout: the prompt diffs via the recorded base config, so
+	// no PR-specific data is injected into the prompt itself.
+	if !strings.Contains(got, "loom.reviewBase") {
+		t.Fatalf("checkout review prompt must reference the recorded base (loom.reviewBase):\n%s", got)
+	}
+	// It must preserve the reviewed repo's AGENTS.md injection boundary.
+	if !strings.Contains(got, "AGENTS.md") {
+		t.Fatalf("checkout review prompt must mention AGENTS.md/onboarding:\n%s", got)
+	}
+	if lead := GenerateLeadPrompt(); got == lead {
+		t.Fatal("checkout review prompt must differ from the lead prompt")
 	}
 }

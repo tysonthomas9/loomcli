@@ -133,10 +133,17 @@ func (m *Module) createWorkflowRun(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(r.PathValue("name"))
 	driverID, err := m.resolveWorkflowDriverID(r.Context(), ws, name)
 	if err != nil {
-		// Surface the real cause: writeDomainError collapses any non-ErrNotFound error into a
-		// generic 500 "workflow not found", which hides builtin self-heal failures (EnsureBuiltinWorkflow).
 		slog.Error("createWorkflowRun: resolveWorkflowDriverID failed", "ws", ws, "workflow", name, "err", err.Error())
-		writeDomainError(w, err, "workflow not found")
+		// A genuine not-found is the ONLY case that is a 404 "workflow not found".
+		// Any other cause (builtin self-heal failure, a fleet-db rejection, a
+		// bundling error) must surface its real status/message instead of being
+		// collapsed into a misleading generic 500 "workflow not found", which
+		// hides the true failure in the serve log alone.
+		if errors.Is(err, domain.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "workflow not found")
+			return
+		}
+		writeDomainError(w, err, err.Error())
 		return
 	}
 	// Fail-closed BEFORE creating the run: when the epic-runner routes child

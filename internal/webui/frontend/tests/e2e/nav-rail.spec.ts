@@ -312,10 +312,12 @@ test.describe("NavRail rendering", () => {
     await expect(nav).toBeVisible();
 
     const buttons = nav.getByRole("button");
-    await expect(buttons).toHaveCount(3);
+    await expect(buttons).toHaveCount(5);
 
     await expect(getNavButton(page, "Workspaces")).toBeVisible();
-    await expect(getNavButton(page, "Monitor")).toBeVisible();
+    await expect(getNavButton(page, "Pull Requests")).toBeVisible();
+    await expect(getNavButton(page, "Terminal")).toBeVisible();
+    await expect(getNavButton(page, "Files")).toBeVisible();
     await expect(getNavButton(page, "Settings")).toBeVisible();
   });
 
@@ -323,10 +325,12 @@ test.describe("NavRail rendering", () => {
     const nav = getNavRail(page);
     const buttons = nav.getByRole("button");
 
-    // Verify DOM order: Workspaces, Monitor, Settings
+    // Verify DOM order: Workspaces, Pull Requests, Terminal, Files, Settings
     await expect(buttons.nth(0)).toHaveAttribute("aria-label", "Workspaces");
-    await expect(buttons.nth(1)).toHaveAttribute("aria-label", "Monitor");
-    await expect(buttons.nth(2)).toHaveAttribute("aria-label", "Settings");
+    await expect(buttons.nth(1)).toHaveAttribute("aria-label", "Pull Requests");
+    await expect(buttons.nth(2)).toHaveAttribute("aria-label", "Terminal");
+    await expect(buttons.nth(3)).toHaveAttribute("aria-label", "Files");
+    await expect(buttons.nth(4)).toHaveAttribute("aria-label", "Settings");
   });
 
   test("Workspaces button is active by default", async ({ page }) => {

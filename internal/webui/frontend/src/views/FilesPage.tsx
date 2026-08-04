@@ -1,10 +1,11 @@
 import { lazy, Suspense } from "react";
 import { ErrorBoundary, LoadingSkeleton } from "@/components";
 import { useRouteView } from "@/hooks";
+import styles from "./FilesPage.module.css";
 
-const FileExplorer = lazy(() =>
+const WorkspaceFileBrowser = lazy(() =>
   import("@/components/FileExplorer").then((m) => ({
-    default: m.FileExplorer,
+    default: m.WorkspaceFileBrowser,
   })),
 );
 
@@ -13,9 +14,11 @@ export function FilesPage() {
 
   return (
     <ErrorBoundary resetOnChange={[activeView]}>
-      <Suspense fallback={<LoadingSkeleton.FileExplorer />}>
-        <FileExplorer />
-      </Suspense>
+      <div className={styles.page}>
+        <Suspense fallback={<LoadingSkeleton.FileExplorer />}>
+          <WorkspaceFileBrowser mode="workspace" />
+        </Suspense>
+      </div>
     </ErrorBoundary>
   );
 }

@@ -86,6 +86,24 @@ func (e BlockedIssueAgentState) Valid() bool {
 	}
 }
 
+// Defines values for BlockedIssueDesignFormat.
+const (
+	BlockedIssueDesignFormatHtml     BlockedIssueDesignFormat = "html"
+	BlockedIssueDesignFormatMarkdown BlockedIssueDesignFormat = "markdown"
+)
+
+// Valid indicates whether the value is a known member of the BlockedIssueDesignFormat enum.
+func (e BlockedIssueDesignFormat) Valid() bool {
+	switch e {
+	case BlockedIssueDesignFormatHtml:
+		return true
+	case BlockedIssueDesignFormatMarkdown:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for BlockedIssueIssueType.
 const (
 	BlockedIssueIssueTypeBug     BlockedIssueIssueType = "bug"
@@ -203,6 +221,129 @@ func (e ErrorResponseSuccess) Valid() bool {
 	}
 }
 
+// Defines values for FileCheckoutKind.
+const (
+	FileCheckoutKindAgent FileCheckoutKind = "agent"
+	FileCheckoutKindRepo  FileCheckoutKind = "repo"
+)
+
+// Valid indicates whether the value is a known member of the FileCheckoutKind enum.
+func (e FileCheckoutKind) Valid() bool {
+	switch e {
+	case FileCheckoutKindAgent:
+		return true
+	case FileCheckoutKindRepo:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for FileCheckoutErrorKind.
+const (
+	FileCheckoutErrorKindAgent FileCheckoutErrorKind = "agent"
+	FileCheckoutErrorKindRepo  FileCheckoutErrorKind = "repo"
+)
+
+// Valid indicates whether the value is a known member of the FileCheckoutErrorKind enum.
+func (e FileCheckoutErrorKind) Valid() bool {
+	switch e {
+	case FileCheckoutErrorKindAgent:
+		return true
+	case FileCheckoutErrorKindRepo:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for FileCheckoutRepairRequestScope.
+const (
+	FileCheckoutRepairRequestScopeAgent FileCheckoutRepairRequestScope = "agent"
+	FileCheckoutRepairRequestScopeRepo  FileCheckoutRepairRequestScope = "repo"
+)
+
+// Valid indicates whether the value is a known member of the FileCheckoutRepairRequestScope enum.
+func (e FileCheckoutRepairRequestScope) Valid() bool {
+	switch e {
+	case FileCheckoutRepairRequestScopeAgent:
+		return true
+	case FileCheckoutRepairRequestScopeRepo:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for FileCheckoutRepairResponseMethod.
+const (
+	None      FileCheckoutRepairResponseMethod = "none"
+	Provision FileCheckoutRepairResponseMethod = "provision"
+	Recreate  FileCheckoutRepairResponseMethod = "recreate"
+	Repair    FileCheckoutRepairResponseMethod = "repair"
+)
+
+// Valid indicates whether the value is a known member of the FileCheckoutRepairResponseMethod enum.
+func (e FileCheckoutRepairResponseMethod) Valid() bool {
+	switch e {
+	case None:
+		return true
+	case Provision:
+		return true
+	case Recreate:
+		return true
+	case Repair:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for FileHistoryEntryKind.
+const (
+	Commit FileHistoryEntryKind = "commit"
+)
+
+// Valid indicates whether the value is a known member of the FileHistoryEntryKind enum.
+func (e FileHistoryEntryKind) Valid() bool {
+	switch e {
+	case Commit:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for FilePartialReason.
+const (
+	ByteLimit   FilePartialReason = "byte_limit"
+	Canceled    FilePartialReason = "canceled"
+	Deadline    FilePartialReason = "deadline"
+	FileCount   FilePartialReason = "file_count"
+	FileSize    FilePartialReason = "file_size"
+	ResultCount FilePartialReason = "result_count"
+)
+
+// Valid indicates whether the value is a known member of the FilePartialReason enum.
+func (e FilePartialReason) Valid() bool {
+	switch e {
+	case ByteLimit:
+		return true
+	case Canceled:
+		return true
+	case Deadline:
+		return true
+	case FileCount:
+		return true
+	case FileSize:
+		return true
+	case ResultCount:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for IssueAgentState.
 const (
 	IssueAgentStateDead     IssueAgentState = "dead"
@@ -233,6 +374,24 @@ func (e IssueAgentState) Valid() bool {
 	case IssueAgentStateStuck:
 		return true
 	case IssueAgentStateWorking:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for IssueDesignFormat.
+const (
+	IssueDesignFormatHtml     IssueDesignFormat = "html"
+	IssueDesignFormatMarkdown IssueDesignFormat = "markdown"
+)
+
+// Valid indicates whether the value is a known member of the IssueDesignFormat enum.
+func (e IssueDesignFormat) Valid() bool {
+	switch e {
+	case IssueDesignFormatHtml:
+		return true
+	case IssueDesignFormatMarkdown:
 		return true
 	default:
 		return false
@@ -290,6 +449,24 @@ func (e IssueStatus) Valid() bool {
 	case IssueStatusOpen:
 		return true
 	case IssueStatusReview:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for IssueResponseDesignFormat.
+const (
+	IssueResponseDesignFormatHtml     IssueResponseDesignFormat = "html"
+	IssueResponseDesignFormatMarkdown IssueResponseDesignFormat = "markdown"
+)
+
+// Valid indicates whether the value is a known member of the IssueResponseDesignFormat enum.
+func (e IssueResponseDesignFormat) Valid() bool {
+	switch e {
+	case IssueResponseDesignFormatHtml:
+		return true
+	case IssueResponseDesignFormatMarkdown:
 		return true
 	default:
 		return false
@@ -578,6 +755,24 @@ func (e PatchIssueRequestAgentState) Valid() bool {
 	}
 }
 
+// Defines values for PatchIssueRequestDesignFormat.
+const (
+	PatchIssueRequestDesignFormatHtml     PatchIssueRequestDesignFormat = "html"
+	PatchIssueRequestDesignFormatMarkdown PatchIssueRequestDesignFormat = "markdown"
+)
+
+// Valid indicates whether the value is a known member of the PatchIssueRequestDesignFormat enum.
+func (e PatchIssueRequestDesignFormat) Valid() bool {
+	switch e {
+	case PatchIssueRequestDesignFormatHtml:
+		return true
+	case PatchIssueRequestDesignFormatMarkdown:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PatchIssueRequestStatus.
 const (
 	PatchIssueRequestStatusBlocked    PatchIssueRequestStatus = "blocked"
@@ -602,6 +797,27 @@ func (e PatchIssueRequestStatus) Valid() bool {
 	case PatchIssueRequestStatusOpen:
 		return true
 	case PatchIssueRequestStatusReview:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PullRequestReviewRequestEvent.
+const (
+	PullRequestReviewRequestEventApprove        PullRequestReviewRequestEvent = "approve"
+	PullRequestReviewRequestEventComment        PullRequestReviewRequestEvent = "comment"
+	PullRequestReviewRequestEventRequestChanges PullRequestReviewRequestEvent = "request_changes"
+)
+
+// Valid indicates whether the value is a known member of the PullRequestReviewRequestEvent enum.
+func (e PullRequestReviewRequestEvent) Valid() bool {
+	switch e {
+	case PullRequestReviewRequestEventApprove:
+		return true
+	case PullRequestReviewRequestEventComment:
+		return true
+	case PullRequestReviewRequestEventRequestChanges:
 		return true
 	default:
 		return false
@@ -707,6 +923,24 @@ func (e TreeNodeAgentState) Valid() bool {
 	}
 }
 
+// Defines values for TreeNodeDesignFormat.
+const (
+	TreeNodeDesignFormatHtml     TreeNodeDesignFormat = "html"
+	TreeNodeDesignFormatMarkdown TreeNodeDesignFormat = "markdown"
+)
+
+// Valid indicates whether the value is a known member of the TreeNodeDesignFormat enum.
+func (e TreeNodeDesignFormat) Valid() bool {
+	switch e {
+	case TreeNodeDesignFormatHtml:
+		return true
+	case TreeNodeDesignFormatMarkdown:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for TreeNodeIssueType.
 const (
 	TreeNodeIssueTypeBug     TreeNodeIssueType = "bug"
@@ -764,6 +998,42 @@ func (e TreeNodeStatus) Valid() bool {
 	}
 }
 
+// Defines values for WorkspaceDesignFormatPatchRequestDesignFormat.
+const (
+	WorkspaceDesignFormatPatchRequestDesignFormatHtml     WorkspaceDesignFormatPatchRequestDesignFormat = "html"
+	WorkspaceDesignFormatPatchRequestDesignFormatMarkdown WorkspaceDesignFormatPatchRequestDesignFormat = "markdown"
+)
+
+// Valid indicates whether the value is a known member of the WorkspaceDesignFormatPatchRequestDesignFormat enum.
+func (e WorkspaceDesignFormatPatchRequestDesignFormat) Valid() bool {
+	switch e {
+	case WorkspaceDesignFormatPatchRequestDesignFormatHtml:
+		return true
+	case WorkspaceDesignFormatPatchRequestDesignFormatMarkdown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for WorkspaceResponseDesignFormat.
+const (
+	Html     WorkspaceResponseDesignFormat = "html"
+	Markdown WorkspaceResponseDesignFormat = "markdown"
+)
+
+// Valid indicates whether the value is a known member of the WorkspaceResponseDesignFormat enum.
+func (e WorkspaceResponseDesignFormat) Valid() bool {
+	switch e {
+	case Html:
+		return true
+	case Markdown:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ListBlockedParamsType.
 const (
 	ListBlockedParamsTypeBug     ListBlockedParamsType = "bug"
@@ -785,6 +1055,279 @@ func (e ListBlockedParamsType) Valid() bool {
 	case ListBlockedParamsTypeFeature:
 		return true
 	case ListBlockedParamsTypeTask:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DeleteScopedFileParamsScope.
+const (
+	DeleteScopedFileParamsScopeAgent     DeleteScopedFileParamsScope = "agent"
+	DeleteScopedFileParamsScopeRepo      DeleteScopedFileParamsScope = "repo"
+	DeleteScopedFileParamsScopeWorkspace DeleteScopedFileParamsScope = "workspace"
+)
+
+// Valid indicates whether the value is a known member of the DeleteScopedFileParamsScope enum.
+func (e DeleteScopedFileParamsScope) Valid() bool {
+	switch e {
+	case DeleteScopedFileParamsScopeAgent:
+		return true
+	case DeleteScopedFileParamsScopeRepo:
+		return true
+	case DeleteScopedFileParamsScopeWorkspace:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ReadScopedFileParamsScope.
+const (
+	ReadScopedFileParamsScopeAgent     ReadScopedFileParamsScope = "agent"
+	ReadScopedFileParamsScopeRepo      ReadScopedFileParamsScope = "repo"
+	ReadScopedFileParamsScopeWorkspace ReadScopedFileParamsScope = "workspace"
+)
+
+// Valid indicates whether the value is a known member of the ReadScopedFileParamsScope enum.
+func (e ReadScopedFileParamsScope) Valid() bool {
+	switch e {
+	case ReadScopedFileParamsScopeAgent:
+		return true
+	case ReadScopedFileParamsScopeRepo:
+		return true
+	case ReadScopedFileParamsScopeWorkspace:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for WriteScopedFileParamsScope.
+const (
+	WriteScopedFileParamsScopeAgent     WriteScopedFileParamsScope = "agent"
+	WriteScopedFileParamsScopeRepo      WriteScopedFileParamsScope = "repo"
+	WriteScopedFileParamsScopeWorkspace WriteScopedFileParamsScope = "workspace"
+)
+
+// Valid indicates whether the value is a known member of the WriteScopedFileParamsScope enum.
+func (e WriteScopedFileParamsScope) Valid() bool {
+	switch e {
+	case WriteScopedFileParamsScopeAgent:
+		return true
+	case WriteScopedFileParamsScopeRepo:
+		return true
+	case WriteScopedFileParamsScopeWorkspace:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetScopedFileBlameParamsScope.
+const (
+	GetScopedFileBlameParamsScopeAgent     GetScopedFileBlameParamsScope = "agent"
+	GetScopedFileBlameParamsScopeRepo      GetScopedFileBlameParamsScope = "repo"
+	GetScopedFileBlameParamsScopeWorkspace GetScopedFileBlameParamsScope = "workspace"
+)
+
+// Valid indicates whether the value is a known member of the GetScopedFileBlameParamsScope enum.
+func (e GetScopedFileBlameParamsScope) Valid() bool {
+	switch e {
+	case GetScopedFileBlameParamsScopeAgent:
+		return true
+	case GetScopedFileBlameParamsScopeRepo:
+		return true
+	case GetScopedFileBlameParamsScopeWorkspace:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetScopedFileDiffParamsScope.
+const (
+	GetScopedFileDiffParamsScopeAgent     GetScopedFileDiffParamsScope = "agent"
+	GetScopedFileDiffParamsScopeRepo      GetScopedFileDiffParamsScope = "repo"
+	GetScopedFileDiffParamsScopeWorkspace GetScopedFileDiffParamsScope = "workspace"
+)
+
+// Valid indicates whether the value is a known member of the GetScopedFileDiffParamsScope enum.
+func (e GetScopedFileDiffParamsScope) Valid() bool {
+	switch e {
+	case GetScopedFileDiffParamsScopeAgent:
+		return true
+	case GetScopedFileDiffParamsScopeRepo:
+		return true
+	case GetScopedFileDiffParamsScopeWorkspace:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetScopedFileGitStatusParamsScope.
+const (
+	GetScopedFileGitStatusParamsScopeAgent     GetScopedFileGitStatusParamsScope = "agent"
+	GetScopedFileGitStatusParamsScopeRepo      GetScopedFileGitStatusParamsScope = "repo"
+	GetScopedFileGitStatusParamsScopeWorkspace GetScopedFileGitStatusParamsScope = "workspace"
+)
+
+// Valid indicates whether the value is a known member of the GetScopedFileGitStatusParamsScope enum.
+func (e GetScopedFileGitStatusParamsScope) Valid() bool {
+	switch e {
+	case GetScopedFileGitStatusParamsScopeAgent:
+		return true
+	case GetScopedFileGitStatusParamsScopeRepo:
+		return true
+	case GetScopedFileGitStatusParamsScopeWorkspace:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetScopedFileHistoryParamsScope.
+const (
+	GetScopedFileHistoryParamsScopeAgent     GetScopedFileHistoryParamsScope = "agent"
+	GetScopedFileHistoryParamsScopeRepo      GetScopedFileHistoryParamsScope = "repo"
+	GetScopedFileHistoryParamsScopeWorkspace GetScopedFileHistoryParamsScope = "workspace"
+)
+
+// Valid indicates whether the value is a known member of the GetScopedFileHistoryParamsScope enum.
+func (e GetScopedFileHistoryParamsScope) Valid() bool {
+	switch e {
+	case GetScopedFileHistoryParamsScopeAgent:
+		return true
+	case GetScopedFileHistoryParamsScopeRepo:
+		return true
+	case GetScopedFileHistoryParamsScopeWorkspace:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetScopedFileIndexParamsScope.
+const (
+	GetScopedFileIndexParamsScopeAgent     GetScopedFileIndexParamsScope = "agent"
+	GetScopedFileIndexParamsScopeRepo      GetScopedFileIndexParamsScope = "repo"
+	GetScopedFileIndexParamsScopeWorkspace GetScopedFileIndexParamsScope = "workspace"
+)
+
+// Valid indicates whether the value is a known member of the GetScopedFileIndexParamsScope enum.
+func (e GetScopedFileIndexParamsScope) Valid() bool {
+	switch e {
+	case GetScopedFileIndexParamsScopeAgent:
+		return true
+	case GetScopedFileIndexParamsScopeRepo:
+		return true
+	case GetScopedFileIndexParamsScopeWorkspace:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MkdirScopedFileParamsScope.
+const (
+	MkdirScopedFileParamsScopeAgent     MkdirScopedFileParamsScope = "agent"
+	MkdirScopedFileParamsScopeRepo      MkdirScopedFileParamsScope = "repo"
+	MkdirScopedFileParamsScopeWorkspace MkdirScopedFileParamsScope = "workspace"
+)
+
+// Valid indicates whether the value is a known member of the MkdirScopedFileParamsScope enum.
+func (e MkdirScopedFileParamsScope) Valid() bool {
+	switch e {
+	case MkdirScopedFileParamsScopeAgent:
+		return true
+	case MkdirScopedFileParamsScopeRepo:
+		return true
+	case MkdirScopedFileParamsScopeWorkspace:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MoveScopedFileParamsScope.
+const (
+	MoveScopedFileParamsScopeAgent     MoveScopedFileParamsScope = "agent"
+	MoveScopedFileParamsScopeRepo      MoveScopedFileParamsScope = "repo"
+	MoveScopedFileParamsScopeWorkspace MoveScopedFileParamsScope = "workspace"
+)
+
+// Valid indicates whether the value is a known member of the MoveScopedFileParamsScope enum.
+func (e MoveScopedFileParamsScope) Valid() bool {
+	switch e {
+	case MoveScopedFileParamsScopeAgent:
+		return true
+	case MoveScopedFileParamsScopeRepo:
+		return true
+	case MoveScopedFileParamsScopeWorkspace:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SearchScopedFilesParamsScope.
+const (
+	SearchScopedFilesParamsScopeAgent     SearchScopedFilesParamsScope = "agent"
+	SearchScopedFilesParamsScopeRepo      SearchScopedFilesParamsScope = "repo"
+	SearchScopedFilesParamsScopeWorkspace SearchScopedFilesParamsScope = "workspace"
+)
+
+// Valid indicates whether the value is a known member of the SearchScopedFilesParamsScope enum.
+func (e SearchScopedFilesParamsScope) Valid() bool {
+	switch e {
+	case SearchScopedFilesParamsScopeAgent:
+		return true
+	case SearchScopedFilesParamsScopeRepo:
+		return true
+	case SearchScopedFilesParamsScopeWorkspace:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for StatScopedFileParamsScope.
+const (
+	StatScopedFileParamsScopeAgent     StatScopedFileParamsScope = "agent"
+	StatScopedFileParamsScopeRepo      StatScopedFileParamsScope = "repo"
+	StatScopedFileParamsScopeWorkspace StatScopedFileParamsScope = "workspace"
+)
+
+// Valid indicates whether the value is a known member of the StatScopedFileParamsScope enum.
+func (e StatScopedFileParamsScope) Valid() bool {
+	switch e {
+	case StatScopedFileParamsScopeAgent:
+		return true
+	case StatScopedFileParamsScopeRepo:
+		return true
+	case StatScopedFileParamsScopeWorkspace:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetScopedFileTreeParamsScope.
+const (
+	GetScopedFileTreeParamsScopeAgent     GetScopedFileTreeParamsScope = "agent"
+	GetScopedFileTreeParamsScopeRepo      GetScopedFileTreeParamsScope = "repo"
+	GetScopedFileTreeParamsScopeWorkspace GetScopedFileTreeParamsScope = "workspace"
+)
+
+// Valid indicates whether the value is a known member of the GetScopedFileTreeParamsScope enum.
+func (e GetScopedFileTreeParamsScope) Valid() bool {
+	switch e {
+	case GetScopedFileTreeParamsScopeAgent:
+		return true
+	case GetScopedFileTreeParamsScopeRepo:
+		return true
+	case GetScopedFileTreeParamsScopeWorkspace:
 		return true
 	default:
 		return false
@@ -1019,35 +1562,46 @@ type BlockedIssue struct {
 	Assignee           *string                 `json:"assignee,omitempty"`
 
 	// BlockedBy Dependency blocker IDs when known. May be empty for explicit status-only or parent-propagated blocking.
-	BlockedBy        []string               `json:"blocked_by"`
-	BlockedByCount   int                    `json:"blocked_by_count"`
-	BlockedByDetails *[]BlockerRef          `json:"blocked_by_details,omitempty"`
-	CloseReason      *string                `json:"close_reason,omitempty"`
-	ClosedAt         *time.Time             `json:"closed_at,omitempty"`
-	Comments         *[]Comment             `json:"comments,omitempty"`
-	CreatedAt        time.Time              `json:"created_at"`
-	CreatedBy        *string                `json:"created_by,omitempty"`
-	DeferUntil       *time.Time             `json:"defer_until,omitempty"`
-	Dependencies     *[]Dependency          `json:"dependencies,omitempty"`
-	Description      *string                `json:"description,omitempty"`
-	Design           *string                `json:"design,omitempty"`
-	DueAt            *time.Time             `json:"due_at,omitempty"`
-	EstimatedMinutes *int                   `json:"estimated_minutes,omitempty"`
-	ExternalRef      *string                `json:"external_ref,omitempty"`
-	Id               string                 `json:"id"`
-	IssueType        *BlockedIssueIssueType `json:"issue_type,omitempty"`
-	Labels           *[]string              `json:"labels,omitempty"`
-	LastActivity     *time.Time             `json:"last_activity,omitempty"`
-	MolType          *string                `json:"mol_type,omitempty"`
-	Notes            *string                `json:"notes,omitempty"`
-	Owner            *string                `json:"owner,omitempty"`
-	Parent           *string                `json:"parent,omitempty"`
-	Pinned           *bool                  `json:"pinned,omitempty"`
-	Priority         int                    `json:"priority"`
-	Rig              *string                `json:"rig,omitempty"`
-	RoleType         *string                `json:"role_type,omitempty"`
-	SourceRepo       *string                `json:"source_repo,omitempty"`
-	SourceSystem     *string                `json:"source_system,omitempty"`
+	BlockedBy        []string      `json:"blocked_by"`
+	BlockedByCount   int           `json:"blocked_by_count"`
+	BlockedByDetails *[]BlockerRef `json:"blocked_by_details,omitempty"`
+	CloseReason      *string       `json:"close_reason,omitempty"`
+	ClosedAt         *time.Time    `json:"closed_at,omitempty"`
+	Comments         *[]Comment    `json:"comments,omitempty"`
+	CreatedAt        time.Time     `json:"created_at"`
+	CreatedBy        *string       `json:"created_by,omitempty"`
+	DeferUntil       *time.Time    `json:"defer_until,omitempty"`
+	Dependencies     *[]Dependency `json:"dependencies,omitempty"`
+	Description      *string       `json:"description,omitempty"`
+
+	// Design Hydrated design body when available; collection responses may omit it.
+	Design *string `json:"design,omitempty"`
+
+	// DesignArtifactId Managed FleetDB artifact reference for the design body.
+	DesignArtifactId *string `json:"design_artifact_id,omitempty"`
+
+	// DesignFormat Durable format of the hydrated design body.
+	DesignFormat     *BlockedIssueDesignFormat `json:"design_format,omitempty"`
+	DueAt            *time.Time                `json:"due_at,omitempty"`
+	EstimatedMinutes *int                      `json:"estimated_minutes,omitempty"`
+	ExternalRef      *string                   `json:"external_ref,omitempty"`
+
+	// HasDesign True for either a legacy inline or artifact-backed design.
+	HasDesign    *bool                  `json:"has_design,omitempty"`
+	Id           string                 `json:"id"`
+	IssueType    *BlockedIssueIssueType `json:"issue_type,omitempty"`
+	Labels       *[]string              `json:"labels,omitempty"`
+	LastActivity *time.Time             `json:"last_activity,omitempty"`
+	MolType      *string                `json:"mol_type,omitempty"`
+	Notes        *string                `json:"notes,omitempty"`
+	Owner        *string                `json:"owner,omitempty"`
+	Parent       *string                `json:"parent,omitempty"`
+	Pinned       *bool                  `json:"pinned,omitempty"`
+	Priority     int                    `json:"priority"`
+	Rig          *string                `json:"rig,omitempty"`
+	RoleType     *string                `json:"role_type,omitempty"`
+	SourceRepo   *string                `json:"source_repo,omitempty"`
+	SourceSystem *string                `json:"source_system,omitempty"`
 
 	// Status User-facing statuses. Internal statuses (tombstone, pinned, hooked)
 	// are not settable via the API and excluded from this enum.
@@ -1058,6 +1612,9 @@ type BlockedIssue struct {
 
 // BlockedIssueAgentState defines model for BlockedIssue.AgentState.
 type BlockedIssueAgentState string
+
+// BlockedIssueDesignFormat Durable format of the hydrated design body.
+type BlockedIssueDesignFormat string
 
 // BlockedIssueIssueType defines model for BlockedIssue.IssueType.
 type BlockedIssueIssueType string
@@ -1173,14 +1730,250 @@ type EditorOpenRequest struct {
 
 // ErrorResponse defines model for ErrorResponse.
 type ErrorResponse struct {
-	Code    *string                 `json:"code,omitempty"`
-	Details *map[string]interface{} `json:"details,omitempty"`
-	Error   string                  `json:"error"`
-	Success ErrorResponseSuccess    `json:"success"`
+	Code      *string                 `json:"code,omitempty"`
+	Details   *map[string]interface{} `json:"details,omitempty"`
+	Error     string                  `json:"error"`
+	Retryable *bool                   `json:"retryable,omitempty"`
+	Success   ErrorResponseSuccess    `json:"success"`
 }
 
 // ErrorResponseSuccess defines model for ErrorResponse.Success.
 type ErrorResponseSuccess bool
+
+// FileBlameLine defines model for FileBlameLine.
+type FileBlameLine struct {
+	Author  string `json:"author"`
+	Line    int    `json:"line"`
+	Lines   int    `json:"lines"`
+	Sha     string `json:"sha"`
+	Summary string `json:"summary"`
+	Time    string `json:"time"`
+}
+
+// FileBlameResponse defines model for FileBlameResponse.
+type FileBlameResponse struct {
+	LimitHit bool            `json:"limit_hit"`
+	Lines    []FileBlameLine `json:"lines"`
+	Message  *string         `json:"message,omitempty"`
+	Partial  bool            `json:"partial"`
+	Path     string          `json:"path"`
+	Reason   *string         `json:"reason,omitempty"`
+	Skipped  bool            `json:"skipped"`
+}
+
+// FileCapabilitiesResponse defines model for FileCapabilitiesResponse.
+type FileCapabilitiesResponse struct {
+	Read      bool `json:"read"`
+	Sensitive bool `json:"sensitive"`
+	Write     bool `json:"write"`
+}
+
+// FileCheckout defines model for FileCheckout.
+type FileCheckout struct {
+	Agent       *string          `json:"agent,omitempty"`
+	Branch      *string          `json:"branch,omitempty"`
+	ChangeCount int              `json:"change_count"`
+	Error       *string          `json:"error,omitempty"`
+	Exists      bool             `json:"exists"`
+	Kind        FileCheckoutKind `json:"kind"`
+	LimitHit    *bool            `json:"limit_hit,omitempty"`
+	Partial     *bool            `json:"partial,omitempty"`
+	Repo        string           `json:"repo"`
+	StatusError *bool            `json:"status_error,omitempty"`
+}
+
+// FileCheckoutKind defines model for FileCheckout.Kind.
+type FileCheckoutKind string
+
+// FileCheckoutError defines model for FileCheckoutError.
+type FileCheckoutError struct {
+	Agent *string               `json:"agent,omitempty"`
+	Error string                `json:"error"`
+	Kind  FileCheckoutErrorKind `json:"kind"`
+	Repo  string                `json:"repo"`
+}
+
+// FileCheckoutErrorKind defines model for FileCheckoutError.Kind.
+type FileCheckoutErrorKind string
+
+// FileCheckoutRepairRequest defines model for FileCheckoutRepairRequest.
+type FileCheckoutRepairRequest struct {
+	Force *bool `json:"force,omitempty"`
+
+	// Repo Repo qualifier, valid when scope=agent.
+	Repo   *string                        `json:"repo,omitempty"`
+	Scope  FileCheckoutRepairRequestScope `json:"scope"`
+	Target string                         `json:"target"`
+}
+
+// FileCheckoutRepairRequestScope defines model for FileCheckoutRepairRequest.Scope.
+type FileCheckoutRepairRequestScope string
+
+// FileCheckoutRepairResponse defines model for FileCheckoutRepairResponse.
+type FileCheckoutRepairResponse struct {
+	BackupPath    *string                          `json:"backup_path,omitempty"`
+	Message       string                           `json:"message"`
+	Method        FileCheckoutRepairResponseMethod `json:"method"`
+	Repaired      bool                             `json:"repaired"`
+	RequiresForce *bool                            `json:"requires_force,omitempty"`
+}
+
+// FileCheckoutRepairResponseMethod defines model for FileCheckoutRepairResponse.Method.
+type FileCheckoutRepairResponseMethod string
+
+// FileCheckoutsResponse defines model for FileCheckoutsResponse.
+type FileCheckoutsResponse struct {
+	Checkouts []FileCheckout      `json:"checkouts"`
+	Errors    []FileCheckoutError `json:"errors"`
+	LimitHit  bool                `json:"limit_hit"`
+	Partial   bool                `json:"partial"`
+}
+
+// FileDiffResponse defines model for FileDiffResponse.
+type FileDiffResponse struct {
+	LimitHit bool   `json:"limit_hit"`
+	Partial  bool   `json:"partial"`
+	Patch    string `json:"patch"`
+	Path     string `json:"path"`
+}
+
+// FileGitStatusResponse defines model for FileGitStatusResponse.
+type FileGitStatusResponse struct {
+	Errors   []FileCheckoutError `json:"errors"`
+	LimitHit bool                `json:"limit_hit"`
+	Partial  bool                `json:"partial"`
+	Status   map[string]string   `json:"status"`
+}
+
+// FileHistoryEntry defines model for FileHistoryEntry.
+type FileHistoryEntry struct {
+	Author  string               `json:"author"`
+	Kind    FileHistoryEntryKind `json:"kind"`
+	Sha     string               `json:"sha"`
+	Summary string               `json:"summary"`
+	Time    string               `json:"time"`
+}
+
+// FileHistoryEntryKind defines model for FileHistoryEntry.Kind.
+type FileHistoryEntryKind string
+
+// FileHistoryResponse defines model for FileHistoryResponse.
+type FileHistoryResponse struct {
+	Entries  []FileHistoryEntry `json:"entries"`
+	LimitHit bool               `json:"limit_hit"`
+	Partial  bool               `json:"partial"`
+	Path     string             `json:"path"`
+}
+
+// FileIndexResponse defines model for FileIndexResponse.
+type FileIndexResponse struct {
+	PartialReasons []FilePartialReason `json:"partial_reasons"`
+	Paths          []string            `json:"paths"`
+	Truncated      bool                `json:"truncated"`
+}
+
+// FileMoveRequest defines model for FileMoveRequest.
+type FileMoveRequest struct {
+	// DestinationVersion Required when overwriting an existing regular file.
+	DestinationVersion *string `json:"destination_version,omitempty"`
+	From               string  `json:"from"`
+	Overwrite          *bool   `json:"overwrite,omitempty"`
+
+	// Repo Optional repo qualifier, valid only when scope=agent.
+	Repo *string `json:"repo,omitempty"`
+
+	// SourceVersion Required by the server; current strong version of the source path.
+	SourceVersion *string `json:"source_version,omitempty"`
+	To            string  `json:"to"`
+}
+
+// FileMutationResponse defines model for FileMutationResponse.
+type FileMutationResponse struct {
+	Success bool   `json:"success"`
+	Version string `json:"version"`
+}
+
+// FilePartialReason defines model for FilePartialReason.
+type FilePartialReason string
+
+// FileReadResponse defines model for FileReadResponse.
+type FileReadResponse struct {
+	Binary    bool    `json:"binary"`
+	Content   *string `json:"content,omitempty"`
+	Path      string  `json:"path"`
+	Size      int64   `json:"size"`
+	Truncated bool    `json:"truncated"`
+	Version   string  `json:"version"`
+}
+
+// FileRepoQualifierRequest defines model for FileRepoQualifierRequest.
+type FileRepoQualifierRequest struct {
+	// Repo Optional repo qualifier, valid only when scope=agent.
+	Repo *string `json:"repo,omitempty"`
+}
+
+// FileSearchFileResult defines model for FileSearchFileResult.
+type FileSearchFileResult struct {
+	Matches []FileSearchMatch `json:"matches"`
+	Path    string            `json:"path"`
+}
+
+// FileSearchMatch defines model for FileSearchMatch.
+type FileSearchMatch struct {
+	Col     int    `json:"col"`
+	Line    int    `json:"line"`
+	Preview string `json:"preview"`
+}
+
+// FileSearchRequest defines model for FileSearchRequest.
+type FileSearchRequest struct {
+	CaseSensitive *bool     `json:"caseSensitive,omitempty"`
+	Exclude       *[]string `json:"exclude,omitempty"`
+	Include       *[]string `json:"include,omitempty"`
+	Query         string    `json:"query"`
+	Regex         *bool     `json:"regex,omitempty"`
+
+	// Repo Optional repo qualifier, valid only when scope=agent.
+	Repo *string `json:"repo,omitempty"`
+}
+
+// FileSearchResponse defines model for FileSearchResponse.
+type FileSearchResponse struct {
+	LimitHit       bool                   `json:"limitHit"`
+	PartialReasons []FilePartialReason    `json:"partial_reasons"`
+	Results        []FileSearchFileResult `json:"results"`
+}
+
+// FileStatResponse defines model for FileStatResponse.
+type FileStatResponse struct {
+	IsDir   bool      `json:"is_dir"`
+	ModTime time.Time `json:"mod_time"`
+	Path    string    `json:"path"`
+	Size    int64     `json:"size"`
+	Version string    `json:"version"`
+}
+
+// FileTreeEntry defines model for FileTreeEntry.
+type FileTreeEntry struct {
+	IsDir   bool      `json:"is_dir"`
+	ModTime time.Time `json:"mod_time"`
+	Name    string    `json:"name"`
+	Size    int64     `json:"size"`
+}
+
+// FileTreeResponse defines model for FileTreeResponse.
+type FileTreeResponse struct {
+	Entries []FileTreeEntry `json:"entries"`
+	Path    string          `json:"path"`
+}
+
+// FileWriteRequest defines model for FileWriteRequest.
+type FileWriteRequest struct {
+	Content string `json:"content"`
+
+	// Repo Optional repo qualifier, valid only when scope=agent.
+	Repo *string `json:"repo,omitempty"`
+}
 
 // HourlyBucket defines model for HourlyBucket.
 type HourlyBucket struct {
@@ -1206,24 +1999,35 @@ type Issue struct {
 	DeferUntil         *time.Time       `json:"defer_until,omitempty"`
 	Dependencies       *[]Dependency    `json:"dependencies,omitempty"`
 	Description        *string          `json:"description,omitempty"`
-	Design             *string          `json:"design,omitempty"`
-	DueAt              *time.Time       `json:"due_at,omitempty"`
-	EstimatedMinutes   *int             `json:"estimated_minutes,omitempty"`
-	ExternalRef        *string          `json:"external_ref,omitempty"`
-	Id                 string           `json:"id"`
-	IssueType          *IssueIssueType  `json:"issue_type,omitempty"`
-	Labels             *[]string        `json:"labels,omitempty"`
-	LastActivity       *time.Time       `json:"last_activity,omitempty"`
-	MolType            *string          `json:"mol_type,omitempty"`
-	Notes              *string          `json:"notes,omitempty"`
-	Owner              *string          `json:"owner,omitempty"`
-	Parent             *string          `json:"parent,omitempty"`
-	Pinned             *bool            `json:"pinned,omitempty"`
-	Priority           int              `json:"priority"`
-	Rig                *string          `json:"rig,omitempty"`
-	RoleType           *string          `json:"role_type,omitempty"`
-	SourceRepo         *string          `json:"source_repo,omitempty"`
-	SourceSystem       *string          `json:"source_system,omitempty"`
+
+	// Design Hydrated design body when available; collection responses may omit it.
+	Design *string `json:"design,omitempty"`
+
+	// DesignArtifactId Managed FleetDB artifact reference for the design body.
+	DesignArtifactId *string `json:"design_artifact_id,omitempty"`
+
+	// DesignFormat Durable format of the hydrated design body.
+	DesignFormat     *IssueDesignFormat `json:"design_format,omitempty"`
+	DueAt            *time.Time         `json:"due_at,omitempty"`
+	EstimatedMinutes *int               `json:"estimated_minutes,omitempty"`
+	ExternalRef      *string            `json:"external_ref,omitempty"`
+
+	// HasDesign True for either a legacy inline or artifact-backed design.
+	HasDesign    *bool           `json:"has_design,omitempty"`
+	Id           string          `json:"id"`
+	IssueType    *IssueIssueType `json:"issue_type,omitempty"`
+	Labels       *[]string       `json:"labels,omitempty"`
+	LastActivity *time.Time      `json:"last_activity,omitempty"`
+	MolType      *string         `json:"mol_type,omitempty"`
+	Notes        *string         `json:"notes,omitempty"`
+	Owner        *string         `json:"owner,omitempty"`
+	Parent       *string         `json:"parent,omitempty"`
+	Pinned       *bool           `json:"pinned,omitempty"`
+	Priority     int             `json:"priority"`
+	Rig          *string         `json:"rig,omitempty"`
+	RoleType     *string         `json:"role_type,omitempty"`
+	SourceRepo   *string         `json:"source_repo,omitempty"`
+	SourceSystem *string         `json:"source_system,omitempty"`
 
 	// Status User-facing statuses. Internal statuses (tombstone, pinned, hooked)
 	// are not settable via the API and excluded from this enum.
@@ -1234,6 +2038,9 @@ type Issue struct {
 
 // IssueAgentState defines model for Issue.AgentState.
 type IssueAgentState string
+
+// IssueDesignFormat Durable format of the hydrated design body.
+type IssueDesignFormat string
 
 // IssueIssueType defines model for Issue.IssueType.
 type IssueIssueType string
@@ -1259,36 +2066,48 @@ type IssueEvent struct {
 
 // IssueResponse Full issue detail returned by get-single-issue endpoint. Includes dependency/dependent refs, comments, and counts.
 type IssueResponse struct {
-	AcceptanceCriteria *string                `json:"acceptance_criteria,omitempty"`
-	Assignee           *string                `json:"assignee,omitempty"`
-	CloseReason        *string                `json:"close_reason,omitempty"`
-	ClosedAt           *time.Time             `json:"closed_at,omitempty"`
-	Comments           []CommentResponse      `json:"comments"`
-	CreatedAt          time.Time              `json:"created_at"`
-	DeferUntil         *time.Time             `json:"defer_until,omitempty"`
-	Dependencies       []DependencyRef        `json:"dependencies"`
-	DependencyCount    int                    `json:"dependency_count"`
-	DependentCount     int                    `json:"dependent_count"`
-	Dependents         []DependencyRef        `json:"dependents"`
-	Description        *string                `json:"description,omitempty"`
-	Design             *string                `json:"design,omitempty"`
-	DueAt              *time.Time             `json:"due_at,omitempty"`
-	EstimatedMinutes   *int                   `json:"estimated_minutes,omitempty"`
-	ExternalRef        *string                `json:"external_ref,omitempty"`
-	Id                 string                 `json:"id"`
-	IssueType          IssueResponseIssueType `json:"issue_type"`
-	Labels             []string               `json:"labels"`
-	Notes              *string                `json:"notes,omitempty"`
-	Owner              *string                `json:"owner,omitempty"`
-	Parent             *string                `json:"parent,omitempty"`
-	ParentTitle        *string                `json:"parent_title,omitempty"`
-	Pinned             bool                   `json:"pinned"`
-	Priority           int                    `json:"priority"`
-	SourceRepo         *string                `json:"source_repo,omitempty"`
-	Status             IssueResponseStatus    `json:"status"`
-	Title              string                 `json:"title"`
-	UpdatedAt          time.Time              `json:"updated_at"`
+	AcceptanceCriteria *string           `json:"acceptance_criteria,omitempty"`
+	Assignee           *string           `json:"assignee,omitempty"`
+	CloseReason        *string           `json:"close_reason,omitempty"`
+	ClosedAt           *time.Time        `json:"closed_at,omitempty"`
+	Comments           []CommentResponse `json:"comments"`
+	CreatedAt          time.Time         `json:"created_at"`
+	DeferUntil         *time.Time        `json:"defer_until,omitempty"`
+	Dependencies       []DependencyRef   `json:"dependencies"`
+	DependencyCount    int               `json:"dependency_count"`
+	DependentCount     int               `json:"dependent_count"`
+	Dependents         []DependencyRef   `json:"dependents"`
+	Description        *string           `json:"description,omitempty"`
+	Design             *string           `json:"design,omitempty"`
+
+	// DesignArtifactId Managed FleetDB artifact reference for the design body.
+	DesignArtifactId *string `json:"design_artifact_id,omitempty"`
+
+	// DesignFormat Durable format of the hydrated design body.
+	DesignFormat     *IssueResponseDesignFormat `json:"design_format,omitempty"`
+	DueAt            *time.Time                 `json:"due_at,omitempty"`
+	EstimatedMinutes *int                       `json:"estimated_minutes,omitempty"`
+	ExternalRef      *string                    `json:"external_ref,omitempty"`
+
+	// HasDesign True for either a legacy inline or artifact-backed design.
+	HasDesign   *bool                  `json:"has_design,omitempty"`
+	Id          string                 `json:"id"`
+	IssueType   IssueResponseIssueType `json:"issue_type"`
+	Labels      []string               `json:"labels"`
+	Notes       *string                `json:"notes,omitempty"`
+	Owner       *string                `json:"owner,omitempty"`
+	Parent      *string                `json:"parent,omitempty"`
+	ParentTitle *string                `json:"parent_title,omitempty"`
+	Pinned      bool                   `json:"pinned"`
+	Priority    int                    `json:"priority"`
+	SourceRepo  *string                `json:"source_repo,omitempty"`
+	Status      IssueResponseStatus    `json:"status"`
+	Title       string                 `json:"title"`
+	UpdatedAt   time.Time              `json:"updated_at"`
 }
+
+// IssueResponseDesignFormat Durable format of the hydrated design body.
+type IssueResponseDesignFormat string
 
 // IssueResponseIssueType defines model for IssueResponse.IssueType.
 type IssueResponseIssueType string
@@ -1635,33 +2454,119 @@ type ObservabilityMetricsResponse struct {
 
 // PatchIssueRequest All fields are optional for partial update. Pointer types in Go map to nullable here.
 type PatchIssueRequest struct {
-	AcceptanceCriteria *string                      `json:"acceptance_criteria,omitempty"`
-	AddLabels          *[]string                    `json:"add_labels,omitempty"`
-	AgentState         *PatchIssueRequestAgentState `json:"agent_state,omitempty"`
-	Assignee           *string                      `json:"assignee,omitempty"`
-	DeferUntil         *string                      `json:"defer_until,omitempty"`
-	Description        *string                      `json:"description,omitempty"`
-	Design             *string                      `json:"design,omitempty"`
-	DueAt              *string                      `json:"due_at,omitempty"`
-	EstimatedMinutes   *int                         `json:"estimated_minutes,omitempty"`
-	ExternalRef        *string                      `json:"external_ref,omitempty"`
-	IssueType          *string                      `json:"issue_type,omitempty"`
-	Notes              *string                      `json:"notes,omitempty"`
-	Owner              *string                      `json:"owner,omitempty"`
-	Parent             *string                      `json:"parent,omitempty"`
-	Pinned             *bool                        `json:"pinned,omitempty"`
-	Priority           *int                         `json:"priority,omitempty"`
-	RemoveLabels       *[]string                    `json:"remove_labels,omitempty"`
-	SetLabels          *[]string                    `json:"set_labels,omitempty"`
-	Status             *PatchIssueRequestStatus     `json:"status,omitempty"`
-	Title              *string                      `json:"title,omitempty"`
+	AcceptanceCriteria *string                        `json:"acceptance_criteria,omitempty"`
+	AddLabels          *[]string                      `json:"add_labels,omitempty"`
+	AgentState         *PatchIssueRequestAgentState   `json:"agent_state,omitempty"`
+	Assignee           *string                        `json:"assignee,omitempty"`
+	DeferUntil         *string                        `json:"defer_until,omitempty"`
+	Description        *string                        `json:"description,omitempty"`
+	Design             *string                        `json:"design,omitempty"`
+	DesignFormat       *PatchIssueRequestDesignFormat `json:"design_format,omitempty"`
+	DueAt              *string                        `json:"due_at,omitempty"`
+	EstimatedMinutes   *int                           `json:"estimated_minutes,omitempty"`
+	ExternalRef        *string                        `json:"external_ref,omitempty"`
+	IssueType          *string                        `json:"issue_type,omitempty"`
+	Notes              *string                        `json:"notes,omitempty"`
+	Owner              *string                        `json:"owner,omitempty"`
+	Parent             *string                        `json:"parent,omitempty"`
+	Pinned             *bool                          `json:"pinned,omitempty"`
+	Priority           *int                           `json:"priority,omitempty"`
+	RemoveLabels       *[]string                      `json:"remove_labels,omitempty"`
+	SetLabels          *[]string                      `json:"set_labels,omitempty"`
+	Status             *PatchIssueRequestStatus       `json:"status,omitempty"`
+	Title              *string                        `json:"title,omitempty"`
 }
 
 // PatchIssueRequestAgentState defines model for PatchIssueRequest.AgentState.
 type PatchIssueRequestAgentState string
 
+// PatchIssueRequestDesignFormat defines model for PatchIssueRequest.DesignFormat.
+type PatchIssueRequestDesignFormat string
+
 // PatchIssueRequestStatus defines model for PatchIssueRequest.Status.
 type PatchIssueRequestStatus string
+
+// PullRequestDetail defines model for PullRequestDetail.
+type PullRequestDetail struct {
+	BaseRefName string `json:"base_ref_name"`
+	HeadRefName string `json:"head_ref_name"`
+	HeadSha     string `json:"head_sha"`
+	IsDraft     bool   `json:"is_draft"`
+	Merged      bool   `json:"merged"`
+	Number      int    `json:"number"`
+	State       string `json:"state"`
+	Title       string `json:"title"`
+}
+
+// PullRequestDiff defines model for PullRequestDiff.
+type PullRequestDiff struct {
+	Diff  string                `json:"diff"`
+	Files []PullRequestDiffFile `json:"files"`
+}
+
+// PullRequestDiffFile defines model for PullRequestDiffFile.
+type PullRequestDiffFile struct {
+	Additions int    `json:"additions"`
+	Deletions int    `json:"deletions"`
+	Patch     string `json:"patch"`
+	Path      string `json:"path"`
+	Status    string `json:"status"`
+}
+
+// PullRequestReviewRequest defines model for PullRequestReviewRequest.
+type PullRequestReviewRequest struct {
+	Body            *string                       `json:"body,omitempty"`
+	Event           PullRequestReviewRequestEvent `json:"event"`
+	ExpectedHeadSha string                        `json:"expected_head_sha"`
+}
+
+// PullRequestReviewRequestEvent defines model for PullRequestReviewRequest.Event.
+type PullRequestReviewRequestEvent string
+
+// PullRequestReviewResult defines model for PullRequestReviewResult.
+type PullRequestReviewResult struct {
+	ReviewId *int    `json:"review_id,omitempty"`
+	State    *string `json:"state,omitempty"`
+}
+
+// ReviewerConversation defines model for ReviewerConversation.
+type ReviewerConversation struct {
+	// Detail Human-readable context for failed/unsupported states.
+	Detail   *string           `json:"detail,omitempty"`
+	Messages []ReviewerMessage `json:"messages"`
+
+	// State starting | reconnecting | idle | running | failed | unsupported. failed: the reviewer runtime died or its conversation is unreadable. unsupported: the reviewer's backend has no readable conversation (the terminal tab still works); detail says why.
+	State string `json:"state"`
+}
+
+// ReviewerEnsureResult defines model for ReviewerEnsureResult.
+type ReviewerEnsureResult struct {
+	AgentName     string `json:"agent_name"`
+	CheckedOutSha string `json:"checked_out_sha"`
+	Seeded        bool   `json:"seeded"`
+}
+
+// ReviewerMessage defines model for ReviewerMessage.
+type ReviewerMessage struct {
+	ItemId string  `json:"item_id"`
+	Phase  *string `json:"phase,omitempty"`
+
+	// Role user | assistant
+	Role   string `json:"role"`
+	Text   string `json:"text"`
+	TurnId string `json:"turn_id"`
+}
+
+// ReviewerMessageRequest defines model for ReviewerMessageRequest.
+type ReviewerMessageRequest struct {
+	Text string `json:"text"`
+}
+
+// ReviewerMessageResult defines model for ReviewerMessageResult.
+type ReviewerMessageResult struct {
+	Reason string `json:"reason"`
+	State  string `json:"state"`
+}
 
 // RuntimeReadyResponse defines model for RuntimeReadyResponse.
 type RuntimeReadyResponse struct {
@@ -1839,25 +2744,36 @@ type TreeNode struct {
 	Dependencies       *[]Dependency       `json:"dependencies,omitempty"`
 	Depth              int                 `json:"depth"`
 	Description        *string             `json:"description,omitempty"`
-	Design             *string             `json:"design,omitempty"`
-	DueAt              *time.Time          `json:"due_at,omitempty"`
-	EstimatedMinutes   *int                `json:"estimated_minutes,omitempty"`
-	ExternalRef        *string             `json:"external_ref,omitempty"`
-	Id                 string              `json:"id"`
-	IssueType          *TreeNodeIssueType  `json:"issue_type,omitempty"`
-	Labels             *[]string           `json:"labels,omitempty"`
-	LastActivity       *time.Time          `json:"last_activity,omitempty"`
-	MolType            *string             `json:"mol_type,omitempty"`
-	Notes              *string             `json:"notes,omitempty"`
-	Owner              *string             `json:"owner,omitempty"`
-	Parent             *string             `json:"parent,omitempty"`
-	ParentId           string              `json:"parent_id"`
-	Pinned             *bool               `json:"pinned,omitempty"`
-	Priority           int                 `json:"priority"`
-	Rig                *string             `json:"rig,omitempty"`
-	RoleType           *string             `json:"role_type,omitempty"`
-	SourceRepo         *string             `json:"source_repo,omitempty"`
-	SourceSystem       *string             `json:"source_system,omitempty"`
+
+	// Design Hydrated design body when available; collection responses may omit it.
+	Design *string `json:"design,omitempty"`
+
+	// DesignArtifactId Managed FleetDB artifact reference for the design body.
+	DesignArtifactId *string `json:"design_artifact_id,omitempty"`
+
+	// DesignFormat Durable format of the hydrated design body.
+	DesignFormat     *TreeNodeDesignFormat `json:"design_format,omitempty"`
+	DueAt            *time.Time            `json:"due_at,omitempty"`
+	EstimatedMinutes *int                  `json:"estimated_minutes,omitempty"`
+	ExternalRef      *string               `json:"external_ref,omitempty"`
+
+	// HasDesign True for either a legacy inline or artifact-backed design.
+	HasDesign    *bool              `json:"has_design,omitempty"`
+	Id           string             `json:"id"`
+	IssueType    *TreeNodeIssueType `json:"issue_type,omitempty"`
+	Labels       *[]string          `json:"labels,omitempty"`
+	LastActivity *time.Time         `json:"last_activity,omitempty"`
+	MolType      *string            `json:"mol_type,omitempty"`
+	Notes        *string            `json:"notes,omitempty"`
+	Owner        *string            `json:"owner,omitempty"`
+	Parent       *string            `json:"parent,omitempty"`
+	ParentId     string             `json:"parent_id"`
+	Pinned       *bool              `json:"pinned,omitempty"`
+	Priority     int                `json:"priority"`
+	Rig          *string            `json:"rig,omitempty"`
+	RoleType     *string            `json:"role_type,omitempty"`
+	SourceRepo   *string            `json:"source_repo,omitempty"`
+	SourceSystem *string            `json:"source_system,omitempty"`
 
 	// Status User-facing statuses. Internal statuses (tombstone, pinned, hooked)
 	// are not settable via the API and excluded from this enum.
@@ -1869,6 +2785,9 @@ type TreeNode struct {
 
 // TreeNodeAgentState defines model for TreeNode.AgentState.
 type TreeNodeAgentState string
+
+// TreeNodeDesignFormat Durable format of the hydrated design body.
+type TreeNodeDesignFormat string
 
 // TreeNodeIssueType defines model for TreeNode.IssueType.
 type TreeNodeIssueType string
@@ -1962,6 +2881,14 @@ type WorkspaceBackendPatchRequest struct {
 	Backend string `json:"backend"`
 }
 
+// WorkspaceDesignFormatPatchRequest defines model for WorkspaceDesignFormatPatchRequest.
+type WorkspaceDesignFormatPatchRequest struct {
+	DesignFormat WorkspaceDesignFormatPatchRequestDesignFormat `json:"design_format"`
+}
+
+// WorkspaceDesignFormatPatchRequestDesignFormat defines model for WorkspaceDesignFormatPatchRequest.DesignFormat.
+type WorkspaceDesignFormatPatchRequestDesignFormat string
+
 // WorkspaceRenameRequest defines model for WorkspaceRenameRequest.
 type WorkspaceRenameRequest struct {
 	NewName string `json:"new_name"`
@@ -1980,16 +2907,20 @@ type WorkspaceRepo struct {
 
 // WorkspaceResponse defines model for WorkspaceResponse.
 type WorkspaceResponse struct {
-	Agents           []WorkspaceAgentInfo `json:"agents"`
-	DefaultWorkspace string               `json:"default_workspace"`
-	Groups           []string             `json:"groups"`
-	Id               string               `json:"id"`
-	Name             string               `json:"name"`
-	Path             string               `json:"path"`
-	Repos            []WorkspaceRepo      `json:"repos"`
-	WorkspaceOrder   *[]string            `json:"workspace_order,omitempty"`
-	Workspaces       []WorkspaceSummary   `json:"workspaces"`
+	Agents           []WorkspaceAgentInfo           `json:"agents"`
+	DefaultWorkspace string                         `json:"default_workspace"`
+	DesignFormat     *WorkspaceResponseDesignFormat `json:"design_format,omitempty"`
+	Groups           []string                       `json:"groups"`
+	Id               string                         `json:"id"`
+	Name             string                         `json:"name"`
+	Path             string                         `json:"path"`
+	Repos            []WorkspaceRepo                `json:"repos"`
+	WorkspaceOrder   *[]string                      `json:"workspace_order,omitempty"`
+	Workspaces       []WorkspaceSummary             `json:"workspaces"`
 }
+
+// WorkspaceResponseDesignFormat defines model for WorkspaceResponse.DesignFormat.
+type WorkspaceResponseDesignFormat string
 
 // WorkspaceSummary defines model for WorkspaceSummary.
 type WorkspaceSummary struct {
@@ -2096,21 +3027,6 @@ type GetDiffFileParams struct {
 	Path string `form:"path" json:"path"`
 }
 
-// ReadFileParams defines parameters for ReadFile.
-type ReadFileParams struct {
-	Path string `form:"path" json:"path"`
-}
-
-// WriteFileJSONBody defines parameters for WriteFile.
-type WriteFileJSONBody struct {
-	Content string `json:"content"`
-}
-
-// WriteFileParams defines parameters for WriteFile.
-type WriteFileParams struct {
-	Path string `form:"path" json:"path"`
-}
-
 // GitPullJSONBody defines parameters for GitPull.
 type GitPullJSONBody struct {
 	// Source Remote branch source
@@ -2164,6 +3080,173 @@ type SubscribeEventsParams struct {
 	// Token One-time SSE auth token (for EventSource clients)
 	Token *string `form:"token,omitempty" json:"token,omitempty"`
 }
+
+// DeleteScopedFileParams defines parameters for DeleteScopedFile.
+type DeleteScopedFileParams struct {
+	Scope  *DeleteScopedFileParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
+	Target *string                      `form:"target,omitempty" json:"target,omitempty"`
+
+	// Repo Optional repo qualifier, valid only when scope=agent.
+	Repo      *string `form:"repo,omitempty" json:"repo,omitempty"`
+	Path      string  `form:"path" json:"path"`
+	Recursive *bool   `form:"recursive,omitempty" json:"recursive,omitempty"`
+
+	// IfMatch Strong current source version from file stat/read.
+	IfMatch string `json:"If-Match"`
+}
+
+// DeleteScopedFileParamsScope defines parameters for DeleteScopedFile.
+type DeleteScopedFileParamsScope string
+
+// ReadScopedFileParams defines parameters for ReadScopedFile.
+type ReadScopedFileParams struct {
+	Scope  *ReadScopedFileParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
+	Target *string                    `form:"target,omitempty" json:"target,omitempty"`
+
+	// Repo Optional repo qualifier, valid only when scope=agent.
+	Repo *string `form:"repo,omitempty" json:"repo,omitempty"`
+	Path string  `form:"path" json:"path"`
+	Rev  *string `form:"rev,omitempty" json:"rev,omitempty"`
+}
+
+// ReadScopedFileParamsScope defines parameters for ReadScopedFile.
+type ReadScopedFileParamsScope string
+
+// WriteScopedFileParams defines parameters for WriteScopedFile.
+type WriteScopedFileParams struct {
+	Scope  *WriteScopedFileParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
+	Target *string                     `form:"target,omitempty" json:"target,omitempty"`
+	Path   string                      `form:"path" json:"path"`
+
+	// IfMatch Optional strong version for replace/restore callers. Ordinary editor saves omit it and remain last-write-wins.
+	IfMatch *string `json:"If-Match,omitempty"`
+
+	// IfNoneMatch Use * for create-only writes.
+	IfNoneMatch *string `json:"If-None-Match,omitempty"`
+}
+
+// WriteScopedFileParamsScope defines parameters for WriteScopedFile.
+type WriteScopedFileParamsScope string
+
+// GetScopedFileBlameParams defines parameters for GetScopedFileBlame.
+type GetScopedFileBlameParams struct {
+	Scope  *GetScopedFileBlameParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
+	Target *string                        `form:"target,omitempty" json:"target,omitempty"`
+
+	// Repo Optional repo qualifier, valid only when scope=agent.
+	Repo *string `form:"repo,omitempty" json:"repo,omitempty"`
+	Path string  `form:"path" json:"path"`
+}
+
+// GetScopedFileBlameParamsScope defines parameters for GetScopedFileBlame.
+type GetScopedFileBlameParamsScope string
+
+// GetScopedFileDiffParams defines parameters for GetScopedFileDiff.
+type GetScopedFileDiffParams struct {
+	Scope  *GetScopedFileDiffParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
+	Target *string                       `form:"target,omitempty" json:"target,omitempty"`
+
+	// Repo Optional repo qualifier, valid only when scope=agent.
+	Repo *string `form:"repo,omitempty" json:"repo,omitempty"`
+	Path string  `form:"path" json:"path"`
+	From *string `form:"from,omitempty" json:"from,omitempty"`
+	To   *string `form:"to,omitempty" json:"to,omitempty"`
+}
+
+// GetScopedFileDiffParamsScope defines parameters for GetScopedFileDiff.
+type GetScopedFileDiffParamsScope string
+
+// GetScopedFileGitStatusParams defines parameters for GetScopedFileGitStatus.
+type GetScopedFileGitStatusParams struct {
+	Scope  *GetScopedFileGitStatusParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
+	Target *string                            `form:"target,omitempty" json:"target,omitempty"`
+
+	// Repo Optional repo qualifier, valid only when scope=agent.
+	Repo *string `form:"repo,omitempty" json:"repo,omitempty"`
+}
+
+// GetScopedFileGitStatusParamsScope defines parameters for GetScopedFileGitStatus.
+type GetScopedFileGitStatusParamsScope string
+
+// GetScopedFileHistoryParams defines parameters for GetScopedFileHistory.
+type GetScopedFileHistoryParams struct {
+	Scope  *GetScopedFileHistoryParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
+	Target *string                          `form:"target,omitempty" json:"target,omitempty"`
+
+	// Repo Optional repo qualifier, valid only when scope=agent.
+	Repo *string `form:"repo,omitempty" json:"repo,omitempty"`
+	Path string  `form:"path" json:"path"`
+}
+
+// GetScopedFileHistoryParamsScope defines parameters for GetScopedFileHistory.
+type GetScopedFileHistoryParamsScope string
+
+// GetScopedFileIndexParams defines parameters for GetScopedFileIndex.
+type GetScopedFileIndexParams struct {
+	Scope  *GetScopedFileIndexParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
+	Target *string                        `form:"target,omitempty" json:"target,omitempty"`
+
+	// Repo Optional repo qualifier, valid only when scope=agent.
+	Repo *string `form:"repo,omitempty" json:"repo,omitempty"`
+}
+
+// GetScopedFileIndexParamsScope defines parameters for GetScopedFileIndex.
+type GetScopedFileIndexParamsScope string
+
+// MkdirScopedFileParams defines parameters for MkdirScopedFile.
+type MkdirScopedFileParams struct {
+	Scope  *MkdirScopedFileParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
+	Target *string                     `form:"target,omitempty" json:"target,omitempty"`
+
+	// Repo Optional repo qualifier, valid only when scope=agent.
+	Repo *string `form:"repo,omitempty" json:"repo,omitempty"`
+	Path string  `form:"path" json:"path"`
+}
+
+// MkdirScopedFileParamsScope defines parameters for MkdirScopedFile.
+type MkdirScopedFileParamsScope string
+
+// MoveScopedFileParams defines parameters for MoveScopedFile.
+type MoveScopedFileParams struct {
+	Scope  *MoveScopedFileParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
+	Target *string                    `form:"target,omitempty" json:"target,omitempty"`
+}
+
+// MoveScopedFileParamsScope defines parameters for MoveScopedFile.
+type MoveScopedFileParamsScope string
+
+// SearchScopedFilesParams defines parameters for SearchScopedFiles.
+type SearchScopedFilesParams struct {
+	Scope  *SearchScopedFilesParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
+	Target *string                       `form:"target,omitempty" json:"target,omitempty"`
+}
+
+// SearchScopedFilesParamsScope defines parameters for SearchScopedFiles.
+type SearchScopedFilesParamsScope string
+
+// StatScopedFileParams defines parameters for StatScopedFile.
+type StatScopedFileParams struct {
+	Scope  *StatScopedFileParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
+	Target *string                    `form:"target,omitempty" json:"target,omitempty"`
+	Repo   *string                    `form:"repo,omitempty" json:"repo,omitempty"`
+	Path   string                     `form:"path" json:"path"`
+}
+
+// StatScopedFileParamsScope defines parameters for StatScopedFile.
+type StatScopedFileParamsScope string
+
+// GetScopedFileTreeParams defines parameters for GetScopedFileTree.
+type GetScopedFileTreeParams struct {
+	Scope  *GetScopedFileTreeParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
+	Target *string                       `form:"target,omitempty" json:"target,omitempty"`
+
+	// Repo Optional repo qualifier, valid only when scope=agent.
+	Repo *string `form:"repo,omitempty" json:"repo,omitempty"`
+	Path *string `form:"path,omitempty" json:"path,omitempty"`
+}
+
+// GetScopedFileTreeParamsScope defines parameters for GetScopedFileTree.
+type GetScopedFileTreeParamsScope string
 
 // FleetRegisterJSONBody defines parameters for FleetRegister.
 type FleetRegisterJSONBody = map[string]interface{}
@@ -2350,9 +3433,6 @@ type ReorderWorkspacesJSONRequestBody ReorderWorkspacesJSONBody
 // CreateAgentJSONRequestBody defines body for CreateAgent for application/json ContentType.
 type CreateAgentJSONRequestBody CreateAgentJSONBody
 
-// WriteFileJSONRequestBody defines body for WriteFile for application/json ContentType.
-type WriteFileJSONRequestBody WriteFileJSONBody
-
 // GitPullJSONRequestBody defines body for GitPull for application/json ContentType.
 type GitPullJSONRequestBody GitPullJSONBody
 
@@ -2367,6 +3447,24 @@ type StopAgentJSONRequestBody StopAgentJSONBody
 
 // PatchWorkspaceBackendJSONRequestBody defines body for PatchWorkspaceBackend for application/json ContentType.
 type PatchWorkspaceBackendJSONRequestBody = WorkspaceBackendPatchRequest
+
+// PatchWorkspaceDesignFormatJSONRequestBody defines body for PatchWorkspaceDesignFormat for application/json ContentType.
+type PatchWorkspaceDesignFormatJSONRequestBody = WorkspaceDesignFormatPatchRequest
+
+// WriteScopedFileJSONRequestBody defines body for WriteScopedFile for application/json ContentType.
+type WriteScopedFileJSONRequestBody = FileWriteRequest
+
+// RepairFileCheckoutJSONRequestBody defines body for RepairFileCheckout for application/json ContentType.
+type RepairFileCheckoutJSONRequestBody = FileCheckoutRepairRequest
+
+// MkdirScopedFileJSONRequestBody defines body for MkdirScopedFile for application/json ContentType.
+type MkdirScopedFileJSONRequestBody = FileRepoQualifierRequest
+
+// MoveScopedFileJSONRequestBody defines body for MoveScopedFile for application/json ContentType.
+type MoveScopedFileJSONRequestBody = FileMoveRequest
+
+// SearchScopedFilesJSONRequestBody defines body for SearchScopedFiles for application/json ContentType.
+type SearchScopedFilesJSONRequestBody = FileSearchRequest
 
 // FleetRegisterJSONRequestBody defines body for FleetRegister for application/json ContentType.
 type FleetRegisterJSONRequestBody = FleetRegisterJSONBody
@@ -2397,6 +3495,12 @@ type RenameWorkspaceJSONRequestBody = WorkspaceRenameRequest
 
 // RunOnboardingFirstTaskJSONRequestBody defines body for RunOnboardingFirstTask for application/json ContentType.
 type RunOnboardingFirstTaskJSONRequestBody RunOnboardingFirstTaskJSONBody
+
+// PostPullRequestReviewerMessageJSONRequestBody defines body for PostPullRequestReviewerMessage for application/json ContentType.
+type PostPullRequestReviewerMessageJSONRequestBody = ReviewerMessageRequest
+
+// PostPullRequestReviewJSONRequestBody defines body for PostPullRequestReview for application/json ContentType.
+type PostPullRequestReviewJSONRequestBody = PullRequestReviewRequest
 
 // SeedTerminalSessionJSONRequestBody defines body for SeedTerminalSession for application/json ContentType.
 type SeedTerminalSessionJSONRequestBody = SeedRequest

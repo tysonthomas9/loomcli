@@ -4,6 +4,10 @@ import (
 	"bytes"
 	"encoding/base64"
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -224,6 +228,117 @@ func TestNewVaultFromEnv(t *testing.T) {
 				t.Fatalf("round trip = %q, want %q", got, "credential")
 			}
 		})
+	}
+}
+
+func TestNewVaultFromEnvOrKeyFilePersistsStableKey(t *testing.T) {
+	t.Setenv(VaultKeyEnvVar, "")
+	dataDir := t.TempDir()
+	first, err := NewVaultFromEnvOrKeyFile(dataDir)
+	if err != nil {
+		t.Fatalf("first NewVaultFromEnvOrKeyFile: %v", err)
+	}
+	aad := CredentialAAD("ws-1", "github-prod")
+	sealed, err := first.Seal([]byte("credential"), aad)
+	if err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
+
+	second, err := NewVaultFromEnvOrKeyFile(dataDir)
+	if err != nil {
+		t.Fatalf("second NewVaultFromEnvOrKeyFile: %v", err)
+	}
+	plain, err := second.Unseal(sealed, aad)
+	if err != nil {
+		t.Fatalf("Unseal with reconstructed vault: %v", err)
+	}
+	if string(plain) != "credential" {
+		t.Fatalf("unsealed credential = %q, want credential", plain)
+	}
+
+	keyPath := filepath.Join(dataDir, vaultKeyFileName)
+	info, err := os.Stat(keyPath)
+	if err != nil {
+		t.Fatalf("stat connector vault key: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0600 {
+		t.Fatalf("connector vault key mode = %o, want 600", got)
+	}
+	encoded, err := os.ReadFile(keyPath)
+	if err != nil {
+		t.Fatalf("read connector vault key: %v", err)
+	}
+	key, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(encoded)))
+	if err != nil || len(key) != vaultKeySize {
+		t.Fatalf("connector vault key is not base64-encoded %d-byte material: len=%d err=%v", vaultKeySize, len(key), err)
+	}
+	if info, err := os.Stat(dataDir); err != nil {
+		t.Fatalf("stat connector vault dir: %v", err)
+	} else if got := info.Mode().Perm(); got != 0700 {
+		t.Fatalf("connector vault dir mode = %o, want 700", got)
+	}
+}
+
+func TestLoadOrGenerateVaultKeyConcurrentFirstUse(t *testing.T) {
+	t.Setenv(VaultKeyEnvVar, "")
+	dataDir := filepath.Join(t.TempDir(), "vault")
+	const callers = 32
+	keys := make([][]byte, callers)
+	errs := make([]error, callers)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := range callers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			keys[i], errs[i] = loadOrGenerateVaultKey(dataDir)
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("loadOrGenerateVaultKey[%d]: %v", i, err)
+		}
+		if !bytes.Equal(keys[i], keys[0]) {
+			t.Fatalf("key[%d] differs from first generated key", i)
+		}
+	}
+	stored, err := readVaultKeyFile(filepath.Join(dataDir, vaultKeyFileName))
+	if err != nil {
+		t.Fatalf("read stored vault key: %v", err)
+	}
+	if !bytes.Equal(stored, keys[0]) {
+		t.Fatal("stored vault key differs from the key returned to callers")
+	}
+}
+
+func TestNewVaultFromEnvOrKeyFilePrefersEnv(t *testing.T) {
+	t.Setenv(VaultKeyEnvVar, base64.StdEncoding.EncodeToString(testKey(t, 0x42)))
+	dataDir := t.TempDir()
+	v, err := NewVaultFromEnvOrKeyFile(dataDir)
+	if err != nil {
+		t.Fatalf("NewVaultFromEnvOrKeyFile: %v", err)
+	}
+	aad := CredentialAAD("ws-1", "github-prod")
+	sealed, err := v.Seal([]byte("credential"), aad)
+	if err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
+	if _, err := testVault(t, 0x42).Unseal(sealed, aad); err != nil {
+		t.Fatalf("env-key vault did not use env override: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, vaultKeyFileName)); !os.IsNotExist(err) {
+		t.Fatalf("key file stat error = %v, want not exist", err)
+	}
+}
+
+func TestNewVaultFromEnvOrKeyFileFailsClosedWithoutSource(t *testing.T) {
+	t.Setenv(VaultKeyEnvVar, "")
+	if _, err := NewVaultFromEnvOrKeyFile(""); !errors.Is(err, ErrVaultKeyMissing) {
+		t.Fatalf("NewVaultFromEnvOrKeyFile error = %v, want ErrVaultKeyMissing", err)
 	}
 }
 

@@ -56,7 +56,7 @@ var createCmd = &cobra.Command{
 	Long: "Registers a named connector for one source kind. The inbound webhook secret and the\n" +
 		"outbound credential are read from stdin (first and second line respectively when both\n" +
 		"flags are set) — never from argv, which leaks through process listings. The outbound\n" +
-		"credential is sealed under " + vault.VaultKeyEnvVar + " before the store ever sees it,\n" +
+		"credential is sealed with the connector vault before the store ever sees it,\n" +
 		"and the printed result is always redacted.",
 	Args: cobra.NoArgs,
 	RunE: runCreate,
@@ -108,8 +108,8 @@ func (p *createParams) validate() error {
 
 // createConnector is the store-facing core: it reads any stdin-supplied
 // secrets, seals the outbound credential client-side-of-store (on the direct
-// store path the CLI is the control plane, so it holds the vault key exactly
-// like serve), creates the connector, and prints the redacted result.
+// store path the CLI is the control plane), creates the connector, and prints
+// the redacted result.
 func createConnector(ctx context.Context, st store.Store, ws string, p createParams, stdin io.Reader, out io.Writer) error {
 	id := p.connectorID
 	if id == "" {
@@ -284,10 +284,9 @@ func rotateConnector(ctx context.Context, st store.Store, ws string, p rotatePar
 		if err != nil {
 			return err
 		}
-		// On the direct store path the CLI is the control plane, so it holds
-		// the vault key exactly like serve; fails closed when the key is
-		// missing or malformed (the key is only required when re-sealing).
-		s, err := vault.NewVaultFromEnv()
+		// The CLI and serve resolve the same vault from bootstrap.LoomDir;
+		// the key is only required when re-sealing a credential.
+		s, err := newConnectorVault()
 		if err != nil {
 			return fmt.Errorf("connector vault: %w", err)
 		}
@@ -570,12 +569,11 @@ func readSecretLine(r *bufio.Reader, what string) (string, error) {
 }
 
 // sealCredential seals a plaintext outbound credential client-side-of-store:
-// on the direct store path the CLI process is the control plane, so it holds
-// the serve vault key and stores only ever see ciphertext (same invariant as
-// loomcli serve). Fails closed when LOOM_CONNECTOR_VAULT_KEY is missing or
-// malformed.
+// on the direct store path the CLI process is the control plane. The CLI and
+// serve share bootstrap.LoomDir as the fallback key directory, and stores only
+// ever see ciphertext.
 func sealCredential(plaintext []byte, ws, connectorID string) ([]byte, error) {
-	sealer, err := vault.NewVaultFromEnv()
+	sealer, err := newConnectorVault()
 	if err != nil {
 		return nil, fmt.Errorf("connector vault: %w", err)
 	}
@@ -584,6 +582,10 @@ func sealCredential(plaintext []byte, ws, connectorID string) ([]byte, error) {
 		return nil, fmt.Errorf("seal outbound credential: %w", err)
 	}
 	return sealed, nil
+}
+
+func newConnectorVault() (*vault.Vault, error) {
+	return vault.NewVaultFromEnvOrKeyFile(bootstrap.LoomDir())
 }
 
 // writeJSON encodes v as indented JSON to w. Unlike cmdstore.WriteJSON it

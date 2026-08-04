@@ -623,6 +623,29 @@ func (s *workspaceServiceImpl) PatchWorkspaceBackend(ctx context.Context, wsID s
 	return data, nil
 }
 
+func (s *workspaceServiceImpl) PatchWorkspaceDesignFormat(ctx context.Context, wsID string, designFormat string) (*ops.WorkspaceData, error) {
+	if !ValidWorkspaceDesignFormat(designFormat) {
+		return nil, ErrValidation("design format must be markdown or html")
+	}
+	if s.store == nil {
+		return nil, ErrUnavailable("workspace store unavailable")
+	}
+	ws, serr := s.resolveStoreWorkspaceForDefault(ctx, wsID)
+	if serr != nil {
+		return nil, serr
+	}
+	if _, err := s.store.Workspaces().Update(ctx, ws.Key, store.WorkspaceUpdate{DesignFormat: &designFormat}); err != nil {
+		return nil, ErrInternal("failed to save workspace design format", err)
+	}
+	s.invalidateWorkspaceCache()
+	data, err := s.loadWorkspaceByID(ctx, ws.Key)
+	if err != nil {
+		return nil, ErrInternal("failed to load workspace data", err)
+	}
+	normalizeWorkspaceData(data)
+	return data, nil
+}
+
 func (s *workspaceServiceImpl) invalidateWorkspaceCache() {
 	if s.workspaceCache != nil {
 		s.workspaceCache.invalidateAll()

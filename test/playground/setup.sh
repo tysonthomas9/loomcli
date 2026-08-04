@@ -16,6 +16,10 @@
 #   LOOM_DAEMON_OUTPUT_TIMEOUT_SECONDS — written into .runtime-<scenario>/env
 #     so the scenario daemon's watchdog trips quickly. Read by
 #     Supervisor.GetOutputTimeout (internal/cli/daemon/supervisor/restart.go).
+#   LOOM_TASK_QUARANTINE_THRESHOLD — written into .runtime-<scenario>/env so
+#     the scenario daemon quarantines a boomeranging task after that many
+#     no-progress kills. Read by Supervisor.quarantineThreshold
+#     (internal/cli/daemon/supervisor/quarantine.go).
 set -eu
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -58,6 +62,9 @@ materialize_runtime() {
     printf 'export LOOM_WORKSPACE=%s\n' "$WORKSPACE_KEY"
     if [ -n "${LOOM_DAEMON_OUTPUT_TIMEOUT_SECONDS:-}" ]; then
       printf 'export LOOM_DAEMON_OUTPUT_TIMEOUT_SECONDS=%s\n' "$LOOM_DAEMON_OUTPUT_TIMEOUT_SECONDS"
+    fi
+    if [ -n "${LOOM_TASK_QUARANTINE_THRESHOLD:-}" ]; then
+      printf 'export LOOM_TASK_QUARANTINE_THRESHOLD=%s\n' "$LOOM_TASK_QUARANTINE_THRESHOLD"
     fi
   } > "$RUNTIME/env"
 }

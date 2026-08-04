@@ -1619,7 +1619,10 @@ function DefaultContent({
                   className={styles.detailColumnRight}
                   data-testid="design-section"
                 >
-                  <DesignPanel content={issue.design} />
+                  <DesignPanel
+                    content={issue.design}
+                    format={issue.design_format}
+                  />
                 </div>
               )}
             </div>

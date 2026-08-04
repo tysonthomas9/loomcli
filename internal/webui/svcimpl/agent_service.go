@@ -274,7 +274,7 @@ func (s *agentServiceImpl) ListPullRequests(_ context.Context, wsID, state strin
 	if state == "" {
 		state = "all"
 	}
-	return s.gitOps.ListWorkspacePullRequests(wsID, state, 100)
+	return s.gitOps.ListWorkspacePullRequests(wsID, state, 500)
 }
 
 func (s *agentServiceImpl) CreatePR(_ context.Context, wsID, agentName, target string) (*ops.GitPRResult, error) {

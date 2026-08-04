@@ -116,6 +116,30 @@ func decideHarness(c wrapper.ErrorClass) Disposition {
 	}
 }
 
+// QuarantineEligible reports whether an Outcome counts toward TASK-level
+// quarantine (repeated no-progress kills of the same task, across agents).
+// Declared here in the policy seat; counted by the supervisor (mirrors how
+// BlockBudget is declared in the table and counted via ap.BlockCount).
+//
+// Eligible: the classes a watchdog/ownership kill of a silently-stalled
+// backend actually produces via the exit-code fallback (-1 → Unknown,
+// 137 → Timeout, 143 → Transient), plus ContextOverflow (FastFails the
+// agent, but the task returns to open and boomerangs across siblings).
+// Not eligible: domain outcomes (coordination signals, not task-fault),
+// RateLimited (backend-wide, not task-specific), and Auth/Billing/
+// ModelNotFound (operator-actionable; the agent stops anyway).
+func QuarantineEligible(o agenterr.Outcome) bool {
+	if o.IsDomain() {
+		return false
+	}
+	switch o.Harness {
+	case wrapper.ErrUnknown, wrapper.ErrTimeout, wrapper.ErrTransient, wrapper.ErrContextOverflow:
+		return true
+	default:
+		return false
+	}
+}
+
 func decideDomain(d agenterr.DomainOutcome) Disposition {
 	switch d {
 	case agenterr.NoWorkOutcome:

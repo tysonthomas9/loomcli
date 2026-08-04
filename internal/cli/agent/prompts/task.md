@@ -19,13 +19,13 @@ You are running in a parallel multi-agent environment. Follow these rules strict
 {{ .SafetyBlock }}
 ### Step 1: Select ONE Task
 - Run this command to find tasks ready to implement (has design, not needs-revision):
-  {{ .ReadyJSON }} | jq -r '.[] | select(.status == "open") | select((.issue_type == "epic") | not) | select(.design) | select((.design == "") | not) | select(((.labels // []) | index("needs-revision")) | not) | "\(.id) [\(.priority)] \(.title)"'
-- If jq fails, fallback: Run '{{ .ReadyFallback }}' and manually SKIP epics, tasks without a --design field, or tasks with 'needs-revision' label
+  {{ .ReadyJSON }} | jq -r '.[] | select(.status == "open") | select((.issue_type == "epic") | not) | select((.has_design == true) or ((.design_artifact_id // "") != "") or ((.design // "") != "")) | select(((.labels // []) | index("needs-revision")) | not) | "\(.id) [\(.priority)] \(.title)"'
+- If jq fails, fallback: Run '{{ .ReadyFallback }}' and manually SKIP epics, tasks without a design (the `has_design` flag, artifact reference, or inline body), or tasks with 'needs-revision' label
 - Run 'loom data list --status in_progress --output json' to check for stale tasks (updated_at >10 hours ago = abandoned, reclaim with 'loom data update <id> --status in_progress --assignee {{ .AgentName }}')
 - IGNORE existing assignees - if status is 'open', the task is available to claim
 - Pick the HIGHEST PRIORITY task (P0 > P1 > P2 > P3 > P4) that is not already in_progress
 - Run 'loom data show <id>' to understand the task requirements
-- If NO tasks have a --design field (or all have 'needs-revision' label):
+- If NO tasks have a design (or all have 'needs-revision' label):
   1. Print: "No planned tasks available. Run 'loom plan' first."
   2. Run: loom complete
   3. EXIT immediately

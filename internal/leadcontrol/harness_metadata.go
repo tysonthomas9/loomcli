@@ -21,6 +21,13 @@ const (
 	MetadataHarnessChatSessionID = "lead_harness_chat_session_id"
 	MetadataHarnessSessionID     = "lead_harness_session_id"
 	MetadataHarnessPID           = "lead_harness_pid"
+	// MetadataHarnessStartedAt is the RFC3339Nano wall-clock time this
+	// runtime launched its harness. Transcript readers use it to reconcile a
+	// launch-pinned session id against reality: when the harness rotated its
+	// session id (claude does on a first boot that passes the folder-trust
+	// dialog), only transcripts recorded after this instant can belong to
+	// this runtime.
+	MetadataHarnessStartedAt = "lead_harness_started_at"
 )
 
 // HarnessRuntimeMetadata mirrors CodexRuntimeMetadata for leads supervised by
@@ -34,6 +41,7 @@ type HarnessRuntimeMetadata struct {
 	PID              int
 	Status           string
 	Controlled       bool
+	StartedAt        time.Time
 }
 
 func HarnessRuntimeMetadataFromSession(session *domain.AgentSession) HarnessRuntimeMetadata {
@@ -42,6 +50,7 @@ func HarnessRuntimeMetadataFromSession(session *domain.AgentSession) HarnessRunt
 	}
 	m := session.Metadata
 	pid, _ := strconv.Atoi(strings.TrimSpace(m[MetadataHarnessPID]))
+	startedAt, _ := time.Parse(time.RFC3339Nano, strings.TrimSpace(m[MetadataHarnessStartedAt]))
 	return HarnessRuntimeMetadata{
 		Provider:         strings.TrimSpace(m[MetadataRuntimeProvider]),
 		HarnessName:      strings.TrimSpace(m[MetadataHarnessName]),
@@ -50,6 +59,7 @@ func HarnessRuntimeMetadataFromSession(session *domain.AgentSession) HarnessRunt
 		PID:              pid,
 		Status:           strings.TrimSpace(m[MetadataRuntimeStatus]),
 		Controlled:       strings.EqualFold(strings.TrimSpace(m[MetadataRuntimeControlled]), "true"),
+		StartedAt:        startedAt,
 	}
 }
 
@@ -85,6 +95,9 @@ func UpdateHarnessRuntimeMetadata(ctx context.Context, st store.Store, workspace
 	}
 	if runtime.PID > 0 {
 		metadata[MetadataHarnessPID] = strconv.Itoa(runtime.PID)
+	}
+	if !runtime.StartedAt.IsZero() {
+		metadata[MetadataHarnessStartedAt] = runtime.StartedAt.UTC().Format(time.RFC3339Nano)
 	}
 	if runtime.Status != "" {
 		metadata[MetadataRuntimeStatus] = runtime.Status

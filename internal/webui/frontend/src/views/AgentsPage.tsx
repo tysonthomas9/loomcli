@@ -84,9 +84,9 @@ import styles from "./AgentsPage.module.css";
 const DiffTab = lazy(() =>
   import("@/components/AgentDetailPanel").then((m) => ({ default: m.DiffTab })),
 );
-const FileEditorPanel = lazy(() =>
-  import("@/components/FileEditorPanel").then((m) => ({
-    default: m.FileEditorPanel,
+const WorkspaceFileBrowser = lazy(() =>
+  import("@/components/FileExplorer").then((m) => ({
+    default: m.WorkspaceFileBrowser,
   })),
 );
 
@@ -346,22 +346,30 @@ function AgentsPageInner(): JSX.Element {
     return { done, inProgress, review, blocked, queued };
   }, [issues]);
 
-  const infoStats = [
-    {
-      id: "completed",
-      label: "Tasks Completed",
-      value: counts.done,
-      tone: "success",
-    },
-    {
-      id: "progress",
-      label: "In Progress",
-      value: counts.inProgress,
-      tone: "warning",
-    },
-    { id: "blocked", label: "Blocked", value: counts.blocked, tone: "danger" },
-    { id: "queued", label: "Queued", value: counts.queued, tone: "info" },
-  ];
+  const infoStats = useMemo(
+    () => [
+      {
+        id: "completed",
+        label: "Tasks Completed",
+        value: counts.done,
+        tone: "success",
+      },
+      {
+        id: "progress",
+        label: "In Progress",
+        value: counts.inProgress,
+        tone: "warning",
+      },
+      {
+        id: "blocked",
+        label: "Blocked",
+        value: counts.blocked,
+        tone: "danger",
+      },
+      { id: "queued", label: "Queued", value: counts.queued, tone: "info" },
+    ],
+    [counts.blocked, counts.done, counts.inProgress, counts.queued],
+  );
 
   const statusType = parseLoomStatus(selected?.status ?? "").type;
   const roleName = selected?.role ?? statusType;
@@ -545,10 +553,9 @@ function AgentsPageInner(): JSX.Element {
                   <div className={styles.tabFallback}>Loading files…</div>
                 }
               >
-                <FileEditorPanel
+                <WorkspaceFileBrowser
+                  mode="agent"
                   agentName={selected.name}
-                  agentRole={selected.role}
-                  agentRepo={selected.repo}
                   isActive={isActive}
                 />
               </Suspense>

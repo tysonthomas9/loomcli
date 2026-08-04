@@ -2,8 +2,11 @@ package backends
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/google/uuid"
 
 	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
 )
@@ -33,20 +36,32 @@ func TestRunControlledLeadRuntimeDispatchesClaude(t *testing.T) {
 	if captured.Backend != "claude" || captured.BinaryPath != "claude" {
 		t.Fatalf("captured config = %+v, want claude backend/binary", captured)
 	}
-	if len(captured.Args) != 1 || captured.Args[0] != "--dangerously-skip-permissions" {
-		t.Fatalf("captured args = %#v", captured.Args)
+	if len(captured.Args) != 3 || captured.Args[0] != "--session-id" || captured.Args[2] != "--dangerously-skip-permissions" {
+		t.Fatalf("captured args = %#v, want [--session-id <uuid> --dangerously-skip-permissions]", captured.Args)
+	}
+	if captured.HarnessSessionID == "" || captured.HarnessSessionID != captured.Args[1] {
+		t.Fatalf("HarnessSessionID = %q, want the --session-id value %q", captured.HarnessSessionID, captured.Args[1])
+	}
+	if uuid.Validate(captured.HarnessSessionID) != nil {
+		t.Fatalf("HarnessSessionID = %q, want a valid UUID", captured.HarnessSessionID)
 	}
 	if captured.WorkDir != "/repo" || captured.Prompt != "prompt" {
 		t.Fatalf("captured workdir/prompt = %q/%q", captured.WorkDir, captured.Prompt)
 	}
-	var found bool
+	var foundWorktree, foundClaudeVirtualScroll bool
 	for _, kv := range captured.Env {
 		if kv == "LOOM_WORKTREE_PATH=/repo" {
-			found = true
+			foundWorktree = true
+		}
+		if kv == claudeVirtualScrollEnv {
+			foundClaudeVirtualScroll = true
 		}
 	}
-	if !found {
+	if !foundWorktree {
 		t.Fatalf("captured env missing LOOM_WORKTREE_PATH: %#v", captured.Env)
+	}
+	if !foundClaudeVirtualScroll {
+		t.Fatalf("captured env missing Claude virtual scroll mode: %#v", captured.Env)
 	}
 }
 
@@ -57,7 +72,7 @@ func TestRunControlledLeadRuntimeDispatchesGenericBackends(t *testing.T) {
 	}{
 		"gemini":   {[]string{"--approval-mode=yolo"}, "gemini"},
 		"cursor":   {[]string{"--force"}, "cursor-agent"},
-		"opencode": {[]string{"run", "--dir", "/repo"}, "opencode"},
+		"opencode": {nil, "opencode"},
 	}
 	for backend, want := range cases {
 		captured := installFakeHarnessLead(t)
@@ -71,9 +86,16 @@ func TestRunControlledLeadRuntimeDispatchesGenericBackends(t *testing.T) {
 		if captured.Backend != backend || captured.BinaryPath != want.binary {
 			t.Fatalf("%s: captured config = %+v", backend, captured)
 		}
-		got := strings.Join(captured.Args, " ")
-		if !strings.HasPrefix(got, strings.Join(want.args, " ")) {
-			t.Fatalf("%s: captured args = %q, want prefix %q", backend, got, strings.Join(want.args, " "))
+		if !slices.Equal(captured.Args, want.args) {
+			t.Fatalf("%s: captured args = %q, want %q", backend, captured.Args, want.args)
+		}
+		if backend == "opencode" && captured.PromptFlag != "--prompt" {
+			t.Fatalf("opencode: PromptFlag = %q, want --prompt", captured.PromptFlag)
+		}
+		for _, kv := range captured.Env {
+			if strings.HasPrefix(kv, "CLAUDE_CODE_NO_FLICKER=") {
+				t.Fatalf("%s: Claude-only virtual scroll mode leaked into env: %#v", backend, captured.Env)
+			}
 		}
 	}
 }

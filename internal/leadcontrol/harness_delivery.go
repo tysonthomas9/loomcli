@@ -42,9 +42,28 @@ const (
 type leadConversationHandle struct {
 	conv harnessConversation
 
-	mu            sync.Mutex
-	inFlight      bool
-	inFlightSince time.Time
+	mu             sync.Mutex
+	inFlight       bool
+	inFlightSince  time.Time
+	inputPending   bool
+	inputRequestID string
+	// stagedText is the message body already typed into the TUI composer by
+	// a send attempt whose submit never fired (the harness wasn't accepting
+	// input before the send timeout). A retry of the SAME message must skip
+	// re-staging or the composer accumulates duplicate copies.
+	stagedText string
+}
+
+func (h *leadConversationHandle) staged() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.stagedText
+}
+
+func (h *leadConversationHandle) setStaged(text string) {
+	h.mu.Lock()
+	h.stagedText = text
+	h.mu.Unlock()
 }
 
 func (h *leadConversationHandle) markTurnStarted() {
@@ -61,9 +80,46 @@ func (h *leadConversationHandle) markTurnDone() {
 	h.mu.Unlock()
 }
 
-// observeTurnEvent updates in-flight bookkeeping from a chat turn event.
+// Turn activity must NOT clear inputPending. harness-wrapper treats
+// interactive input prompts as independent of turn state (see pkg/chat
+// conversation.go handleTurnsEvent: "Interactive input prompts are independent
+// of turn state"), so a turn Pending/Streaming/Complete event can fire while a
+// trust/permission dialog is genuinely open. Clearing inputPending on a turn
+// event would drop that guard and let a queued assignment be pasted into the
+// open dialog. Event state is refreshed authoritatively under the conversation
+// control token immediately before staging, so dropped request/resolve events
+// cannot make this hint unsafe or wedge delivery permanently.
+
+// observeConversationEvent updates delivery bookkeeping from the chat event
+// stream. Input request lifecycle events do not describe turn progress, but
+// they must pause raw PTY staging so a queued assignment cannot be pasted into
+// an interactive harness dialog.
 // Called by the lead runtime's event watcher goroutine.
-func (h *leadConversationHandle) observeTurnEvent(ev chat.TurnEvent) {
+func (h *leadConversationHandle) observeConversationEvent(ev chat.ConversationEvent) {
+	switch ev.Type {
+	case chat.EventInputRequest:
+		h.mu.Lock()
+		h.inputPending = true
+		if ev.Input != nil {
+			h.inputRequestID = ev.Input.ID
+		} else {
+			h.inputRequestID = ""
+		}
+		h.mu.Unlock()
+		return
+	case chat.EventInputResolved:
+		h.mu.Lock()
+		if h.inputPending && (ev.Input == nil || ev.Input.ID == "" || h.inputRequestID == "" || ev.Input.ID == h.inputRequestID) {
+			h.inputPending = false
+			h.inputRequestID = ""
+		}
+		h.mu.Unlock()
+		return
+	case chat.EventTurn:
+		// Continue below.
+	default:
+		return
+	}
 	if ev.Turn.Role != chat.RoleAssistant {
 		return
 	}
@@ -73,6 +129,54 @@ func (h *leadConversationHandle) observeTurnEvent(ev chat.TurnEvent) {
 	case chat.TurnStateComplete, chat.TurnStateErrored:
 		h.markTurnDone()
 	}
+}
+
+func (h *leadConversationHandle) hasPendingInput() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.inputPending
+}
+
+// refreshInputPending replaces the lossy event-stream hint with authoritative
+// chat state. The caller must hold the conversation control token; production's
+// InputPending implementation uses Conversation.Answer's request-ID validation
+// without writing any bytes to the PTY.
+func (h *leadConversationHandle) refreshInputPending(ctx context.Context) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.refreshInputPendingLocked(ctx)
+}
+
+func (h *leadConversationHandle) refreshInputPendingLocked(ctx context.Context) error {
+	pending, err := h.conv.InputPending(ctx)
+	if err != nil {
+		return err
+	}
+	h.inputPending = pending
+	if !pending {
+		h.inputRequestID = ""
+	}
+	if pending {
+		return chat.ErrInputPending
+	}
+	return nil
+}
+
+// writeStdinUnlessInputPending serializes a raw PTY write with input-request
+// event observation. Without this critical section a dialog could arrive
+// after delivery's pending-input check but before the assignment bytes were
+// staged, causing the assignment to be pasted into the dialog.
+func (h *leadConversationHandle) writeStdinUnlessInputPending(ctx context.Context, p []byte) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	// Probe again in the same critical section as the raw write. The earlier
+	// refresh in sendHarnessTurn handles dropped events; this second check
+	// narrows the request-arrival race before bytes reach the PTY.
+	if err := h.refreshInputPendingLocked(ctx); err != nil {
+		return err
+	}
+	_, err := h.conv.WriteStdin(p)
+	return err
 }
 
 func (h *leadConversationHandle) turnInFlight() bool {
@@ -214,7 +318,7 @@ func (d *harnessTurnDeliverer) deliverTurn(
 	}
 	defer release()
 
-	if err := sendHarnessTurn(ctx, handle.conv, message); err != nil {
+	if err := sendHarnessTurn(ctx, handle, message); err != nil {
 		if errors.Is(err, chat.ErrTurnInFlight) {
 			result.Reason = "lead harness assistant turn is in flight"
 		} else {
@@ -257,24 +361,73 @@ func (d *harnessTurnDeliverer) turnBlockReason(handle *leadConversationHandle, s
 // the CR must land as its own key event after the TUI has ingested the text.
 const harnessSubmitDelay = 300 * time.Millisecond
 
+// harnessSendTimeout bounds one stage+submit attempt. Generous enough for a
+// slow TUI redraw, short enough that a not-ready harness fails the attempt
+// and the 2s drain ticker retries instead of wedging forever. A var so tests
+// can exercise the timeout without a 10s wait.
+var harnessSendTimeout = 10 * time.Second
+
 // sendHarnessTurn stages the message into the TUI input and submits it.
 // Multi-line bodies are framed as a bracketed paste so embedded newlines are
 // content rather than per-line submits. The final empty Send writes a bare
 // carriage return in a separate chunk (the submit keystroke) and registers
 // the assistant turn with the chat layer.
-func sendHarnessTurn(ctx context.Context, conv harnessConversation, message string) error {
-	payload := message
-	if strings.ContainsAny(message, "\r\n") {
-		payload = "\x1b[200~" + message + "\x1b[201~"
-	}
-	if _, err := conv.WriteStdin([]byte(payload)); err != nil {
+//
+// The whole call is bounded by harnessSendTimeout: the wrapper's Send blocks
+// until its prompt-readiness heuristic matches the screen, and for a busy
+// harness that can be indefinitely (claude's boot banner scrolls away and the
+// heuristic never re-matches mid-run). An unbounded Send here permanently
+// wedges the single drain goroutine — the exact live failure this guards
+// against. On timeout the already-staged text is remembered on the handle so
+// the retry submits it without typing a duplicate copy into the composer.
+func sendHarnessTurn(ctx context.Context, handle *leadConversationHandle, message string) error {
+	// Refresh from authoritative chat state after acquiring the control token.
+	// Conversation.Events is intentionally lossy, so its request/resolved hints
+	// cannot be the final safety decision before a raw PTY write.
+	if err := handle.refreshInputPending(ctx); err != nil {
 		return err
 	}
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-time.After(harnessSubmitDelay):
+	if handle.staged() != message {
+		payload := message
+		if strings.ContainsAny(message, "\r\n") {
+			payload = "\x1b[200~" + message + "\x1b[201~"
+		}
+		if err := handle.writeStdinUnlessInputPending(ctx, []byte(payload)); err != nil {
+			return err
+		}
+		handle.setStaged(message)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(harnessSubmitDelay):
+		}
 	}
-	_, err := conv.Send(ctx, "")
-	return err
+	// The timeout bounds only the submit: Send blocks in the wrapper's
+	// prompt-readiness wait, which is the piece that can hang indefinitely.
+	sendCtx, cancel := context.WithTimeout(ctx, harnessSendTimeout)
+	defer cancel()
+	if _, err := handle.conv.Send(sendCtx, ""); err != nil {
+		if !errors.Is(err, context.DeadlineExceeded) {
+			return err
+		}
+		// The wrapper's claude readiness heuristic only matches the boot
+		// screen ("Claude Code" banner + composer prompt); once real output
+		// scrolls the banner away it never re-matches, and Send times out
+		// even at a live, idle composer. Delivery was already gated on the
+		// PTY quiet window before this call, so the composer is not
+		// mid-stream — submit the staged text directly. CSI 13u is the
+		// unmodified Enter in claude's enhanced-keyboard mode, which is
+		// always active under --dangerously-skip-permissions (the only mode
+		// loom launches harness leads in).
+		if werr := handle.writeStdinUnlessInputPending(ctx, []byte(harnessEnterKeystroke)); werr != nil {
+			return werr
+		}
+	}
+	handle.setStaged("")
+	return nil
 }
+
+// harnessEnterKeystroke is CSI 13 u — the unmodified Enter key event in the
+// kitty keyboard protocol claude's TUI enables. A bare \r would be swallowed
+// as a paste fragment in that mode.
+const harnessEnterKeystroke = "\x1b[13u"

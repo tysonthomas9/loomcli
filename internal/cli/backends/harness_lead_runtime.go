@@ -5,6 +5,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -13,6 +15,11 @@ import (
 // Set LOOM_LEAD_CONTROLLED=0 to launch leads as plain interactive processes
 // (no PTY supervision, no queued message delivery).
 const envLeadControlled = "LOOM_LEAD_CONTROLLED"
+
+// Claude's fullscreen renderer only advertises mouse tracking when its
+// virtualized scrollback mode is enabled. Keep this scoped to controlled
+// interactive leads; background Claude workers do not render in web xterm.
+const claudeVirtualScrollEnv = "CLAUDE_CODE_NO_FLICKER=1"
 
 func leadControlDisabled() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(envLeadControlled))) {
@@ -48,40 +55,70 @@ func RunControlledLeadRuntime(
 	if backend == NameCodex {
 		return true, RunCodexLeadRuntime(ctx, st, workspace, leadName, sessionID, workDir, prompt)
 	}
-	binary, args, env, ok := harnessLeadInvocation(backend, workDir)
+	inv, ok := harnessLeadInvocation(backend, workDir)
 	if !ok {
 		return false, nil
 	}
 	return true, runHarnessLead(ctx, leadcontrol.HarnessLeadRuntimeConfig{
-		Store:      st,
-		Workspace:  workspace,
-		LeadName:   leadName,
-		SessionID:  sessionID,
-		WorkDir:    workDir,
-		Prompt:     prompt,
-		Backend:    backend,
-		BinaryPath: binary,
-		Args:       args,
-		Env:        env,
+		Store:            st,
+		Workspace:        workspace,
+		LeadName:         leadName,
+		SessionID:        sessionID,
+		WorkDir:          workDir,
+		Prompt:           prompt,
+		Backend:          backend,
+		BinaryPath:       inv.binary,
+		Args:             inv.args,
+		PromptFlag:       inv.promptFlag,
+		Env:              inv.env,
+		HarnessSessionID: inv.harnessSessionID,
 	})
 }
+
+// harnessLeadLaunch is a controlled lead backend's launch spec. (Distinct
+// from harnessInvocation, the one-shot wrapper-run spec in backend_wrapper.go.)
+// harnessSessionID is non-empty when the args pin the harness's own session id
+// at launch (claude --session-id), making the transcript location knowable
+// from boot instead of waiting for the runtime to scrape it off the TUI.
+type harnessLeadLaunch struct {
+	binary           string
+	args             []string
+	env              []string
+	promptFlag       string
+	harnessSessionID string
+}
+
+// newHarnessSessionID is a seam for tests; production generates a UUIDv4,
+// the format claude's --session-id requires.
+var newHarnessSessionID = uuid.NewString
 
 // harnessLeadInvocation mirrors each backend's InvokeInteractive command
 // construction (binary, args, env) for use under harness-wrapper supervision.
 // The prompt is appended by the runtime as the final positional argument.
-func harnessLeadInvocation(backend, workDir string) (string, []string, []string, bool) {
+func harnessLeadInvocation(backend, workDir string) (harnessLeadLaunch, bool) {
 	switch backend {
 	case "claude":
-		return "claude", []string{"--dangerously-skip-permissions"}, buildClaudeEnv(workDir, ""), true
+		sessionID := newHarnessSessionID()
+		env := append(buildClaudeEnv(workDir, ""), claudeVirtualScrollEnv)
+		return harnessLeadLaunch{
+			binary:           "claude",
+			args:             []string{"--session-id", sessionID, "--dangerously-skip-permissions"},
+			env:              env,
+			harnessSessionID: sessionID,
+		}, true
 	case "gemini":
-		return "gemini", []string{"--approval-mode=yolo"}, buildBackendEnv(workDir, ""), true
+		return harnessLeadLaunch{binary: "gemini", args: []string{"--approval-mode=yolo"}, env: buildBackendEnv(workDir, "")}, true
 	case "opencode":
-		args := append([]string{"run", "--dir", workDir, "--dangerously-skip-permissions"}, openCodeModelArgs()...)
-		return "opencode", args, buildBackendEnv(workDir, ""), true
+		return harnessLeadLaunch{
+			binary:     "opencode",
+			args:       openCodeInteractiveArgs(),
+			promptFlag: "--prompt",
+			env:        buildBackendEnv(workDir, ""),
+		}, true
 	case "cursor":
 		// the headless agent CLI is `cursor-agent`; `cursor` is the IDE launcher.
-		return "cursor-agent", []string{"--force"}, buildBackendEnv(workDir, ""), true
+		return harnessLeadLaunch{binary: "cursor-agent", args: []string{"--force"}, env: buildBackendEnv(workDir, "")}, true
 	default:
-		return "", nil, nil, false
+		return harnessLeadLaunch{}, false
 	}
 }

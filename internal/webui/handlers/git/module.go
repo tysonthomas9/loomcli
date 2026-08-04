@@ -33,7 +33,6 @@ func (m *Module) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/git/pull", HandleGitPull(m.agentSvc))
 	mux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/git/sync", HandleGitSync(m.agentSvc))
 	mux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/git/pr", HandleGitPR(m.agentSvc))
-	mux.HandleFunc("GET /api/workspaces/{ws}/pull-requests", HandleListPullRequests(m.agentSvc))
 	mux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/git/reset", HandleGitReset(m.agentSvc))
 	mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/git/status", HandleGitStatus(m.agentSvc))
 	mux.HandleFunc("PATCH /api/workspaces/{ws}/agents/{name}/git/target", HandleGitTargetUpdate(m.agentSvc))

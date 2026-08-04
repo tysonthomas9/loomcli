@@ -45,7 +45,7 @@ test.describe("17 files and git diff fleet-db acceptance", () => {
     const content = `fleet-db file fleetdb-regression ${new Date().toISOString()}\n`;
 
     const root = await apiJson(
-      `${FLEETDB_URLS.fleet}/api/workspaces/${fleetWs}/agents/${AGENT}/files/tree`,
+      `${FLEETDB_URLS.fleet}/api/workspaces/${fleetWs}/files/tree?scope=agent&target=${encodeURIComponent(AGENT)}`,
       recordRouteHit,
     );
     expect(root.path, "file tree root path").toBe(".");
@@ -53,8 +53,8 @@ test.describe("17 files and git diff fleet-db acceptance", () => {
       root.entries?.some((entry: any) => entry.name === ".init"),
     ).toBeTruthy();
 
-    await apiJson(
-      `${FLEETDB_URLS.fleet}/api/workspaces/${fleetWs}/agents/${AGENT}/files?path=${encodeURIComponent(filePath)}`,
+    const writeResult = await apiJson(
+      `${FLEETDB_URLS.fleet}/api/workspaces/${fleetWs}/files?scope=agent&target=${encodeURIComponent(AGENT)}&path=${encodeURIComponent(filePath)}`,
       recordRouteHit,
       {
         method: "PUT",
@@ -62,16 +62,17 @@ test.describe("17 files and git diff fleet-db acceptance", () => {
         body: JSON.stringify({ content }),
       },
     );
+    expect(writeResult.version, "file write version").toContain("sha256:");
 
     const readBack = await apiJson(
-      `${FLEETDB_URLS.fleet}/api/workspaces/${fleetWs}/agents/${AGENT}/files?path=${encodeURIComponent(filePath)}`,
+      `${FLEETDB_URLS.fleet}/api/workspaces/${fleetWs}/files?scope=agent&target=${encodeURIComponent(AGENT)}&path=${encodeURIComponent(filePath)}`,
       recordRouteHit,
     );
     expect(readBack.content, "file read content").toBe(content);
     expect(readBack.binary, "file read binary flag").toBe(false);
 
     const rootAfterWrite = await apiJson(
-      `${FLEETDB_URLS.fleet}/api/workspaces/${fleetWs}/agents/${AGENT}/files/tree`,
+      `${FLEETDB_URLS.fleet}/api/workspaces/${fleetWs}/files/tree?scope=agent&target=${encodeURIComponent(AGENT)}`,
       recordRouteHit,
     );
     expect(

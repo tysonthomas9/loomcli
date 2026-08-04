@@ -7,6 +7,8 @@ describe("issueCategory parity with Go taskfilter.go", () => {
     it(`case: ${c.id}`, () => {
       const issue = {
         design: c.issue.design,
+        has_design: c.issue.has_design,
+        design_artifact_id: c.issue.design_artifact_id,
         labels: c.issue.labels,
       };
       expect(hasNeedsRevision(issue)).toBe(c.expected.has_needs_revision);

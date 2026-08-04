@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -15,8 +13,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -342,19 +340,8 @@ func agentLaunchCwd(workspace string, agent *domain.Agent) string {
 	if agent == nil {
 		return ""
 	}
-	cache, err := bootstrap.LoadStateCache()
-	if err != nil || cache == nil {
-		return ""
-	}
-	local := cache.Workspaces[workspace]
-	worktree := strings.TrimSpace(local.Agents[agent.Name].Worktree)
-	if worktree == "" {
-		return ""
-	}
-	if info, err := os.Stat(worktree); err != nil || !info.IsDir() {
-		return ""
-	}
-	if _, err := os.Stat(filepath.Join(worktree, ".git")); err != nil {
+	worktree, ok := localworkspace.RememberedAgentWorktree(workspace, agent.Name)
+	if !ok {
 		return ""
 	}
 	return worktree

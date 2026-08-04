@@ -177,7 +177,7 @@ Depends on: T3
 Design shows:
 - Tab bar with "Details" + agent tabs (e.g., "claude", "codex", "gemini")
 - "+" dropdown to add new terminal tab — shows same agent backend list as T4
-- Each tab renders a full terminal (wterm) connected to that agent's tmux session
+- Each tab renders a full xterm.js terminal connected to that agent's tmux session
 - Terminal shows breadcrumb: `superset / cloud-ws` with `claude` badge + `merge` + `Review Changes` buttons
 
 Scope:
@@ -419,7 +419,7 @@ Acceptance criteria:
 Acceptance criteria:
 - "+" button next to "Details" tab opens a dropdown of available agent backends
 - Selecting one creates a new tab with the agent's name
-- Tab renders a live wterm terminal connected to the agent's tmux session
+- Tab renders a live xterm.js terminal connected to the agent's tmux session
 - Multiple terminal tabs can be open simultaneously
 - Switching between "Details" and terminal tabs preserves state in both
 

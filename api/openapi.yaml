@@ -52,6 +52,8 @@ tags:
     description: Agent lifecycle (start/stop/restart/yield)
   - name: git
     description: Git operations (status, push, pull, sync, PR, reset)
+  - name: pull-requests
+    description: Pull request review read APIs
   - name: diff
     description: Diff and commit inspection
   - name: files
@@ -431,6 +433,33 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MessageResponse"
+
+  /api/workspaces/{ws}/config/design-format:
+    patch:
+      operationId: patchWorkspaceDesignFormat
+      tags: [config]
+      summary: Set the workspace planner design format
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkspaceDesignFormatPatchRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "400":
+          description: Invalid design format
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /api/workspaces/{ws}/readyz:
     get:
@@ -2478,6 +2507,422 @@ paths:
               schema:
                 type: object
 
+  # ── Pull Requests ───────────────────────────────────────────────────────
+  /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}:
+    get:
+      operationId: getPullRequestDetail
+      tags: [pull-requests]
+      summary: Get pull request detail via the GitHub connector
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: owner
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repo
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: number
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Pull request detail
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                    const: true
+                  data:
+                    $ref: "#/components/schemas/PullRequestDetail"
+        "400":
+          description: Invalid path parameter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Repository is not registered in the workspace
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Connector egress unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/diff:
+    get:
+      operationId: getPullRequestDiff
+      tags: [pull-requests]
+      summary: Get pull request diff via the GitHub connector
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: owner
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repo
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: number
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Pull request diff
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                    const: true
+                  data:
+                    $ref: "#/components/schemas/PullRequestDiff"
+        "400":
+          description: Invalid path parameter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Repository is not registered in the workspace
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Connector egress unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/review:
+    post:
+      operationId: postPullRequestReview
+      tags: [pull-requests]
+      summary: Post a pull request review via the GitHub connector
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: owner
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repo
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: number
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PullRequestReviewRequest"
+      responses:
+        "200":
+          description: Pull request review result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                    const: true
+                  data:
+                    $ref: "#/components/schemas/PullRequestReviewResult"
+        "400":
+          description: Invalid request body or path parameter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Connector grant denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Repository is not registered in the workspace
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Pull request head changed before review was posted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "428":
+          description: Expected head SHA precondition is required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Connector egress unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/reviewer:
+    post:
+      operationId: ensurePullRequestReviewer
+      tags: [pull-requests]
+      summary: Ensure a per-PR terminal reviewer agent
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: owner
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repo
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: number
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Reviewer agent and checkout
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                    const: true
+                  data:
+                    $ref: "#/components/schemas/ReviewerEnsureResult"
+        "400":
+          description: Invalid path parameter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Repository is not registered or not checked out locally
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Pull request head changed while preparing the reviewer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Worktree or reviewer setup failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Upstream pull request metadata was incomplete
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Connector egress unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/messages:
+    post:
+      operationId: postPullRequestReviewerMessage
+      tags: [pull-requests]
+      summary: Send a message to a per-PR terminal reviewer agent
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: owner
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repo
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: number
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReviewerMessageRequest"
+      responses:
+        "200":
+          description: Reviewer message delivery result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                    const: true
+                  data:
+                    $ref: "#/components/schemas/ReviewerMessageResult"
+        "400":
+          description: Invalid request body or path parameter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Repository is not registered or reviewer was not started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Reviewer message delivery failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/stream:
+    get:
+      operationId: streamPullRequestReviewer
+      tags: [pull-requests]
+      summary: Stream the per-PR reviewer conversation
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: owner
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repo
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: number
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: SSE event stream of reviewer status and messages
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: Newline-delimited SSE status, message, and heartbeat events
+        "400":
+          description: Invalid path parameter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Repository is not registered or reviewer was not started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/conversation:
+    get:
+      operationId: getPullRequestReviewerConversation
+      tags: [pull-requests]
+      summary: Snapshot of the per-PR reviewer conversation (poll target)
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: owner
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repo
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: number
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Reviewer conversation snapshot
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                    const: true
+                  data:
+                    $ref: "#/components/schemas/ReviewerConversation"
+        "400":
+          description: Invalid path parameter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Repository is not registered or reviewer was not started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/workspaces/{ws}/agents/{name}/git/diff-stat:
     get:
       operationId: getAgentDiffStat
@@ -2548,31 +2993,30 @@ paths:
               schema:
                 type: object
 
-  # ── Files ───────────────────────────────────────────────────────────────
-  /api/workspaces/{ws}/agents/{name}/files/tree:
+  /api/workspaces/{ws}/files/stat:
     get:
-      operationId: getFileTree
+      operationId: statScopedFile
       tags: [files]
-      summary: Get file tree for an agent worktree
+      summary: Get mutation metadata and a strong version for a scoped path
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
-        - $ref: "#/components/parameters/AgentName"
-      responses:
-        "200":
-          description: File tree
-          content:
-            application/json:
-              schema:
-                type: object
-
-  /api/workspaces/{ws}/agents/{name}/files:
-    get:
-      operationId: readFile
-      tags: [files]
-      summary: Read a file from an agent worktree
-      parameters:
-        - $ref: "#/components/parameters/WorkspaceId"
-        - $ref: "#/components/parameters/AgentName"
+        - name: scope
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [workspace, repo, agent]
+            default: workspace
+        - name: target
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: repo
+          in: query
+          required: false
+          schema:
+            type: string
         - name: path
           in: query
           required: true
@@ -2580,26 +3024,120 @@ paths:
             type: string
       responses:
         "200":
-          description: File content
+          description: Path metadata
+          headers:
+            ETag:
+              description: Strong current path version.
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  content:
-                    type: string
-        "404":
-          description: File not found
-    put:
-      operationId: writeFile
+                $ref: "#/components/schemas/FileStatResponse"
+  # ── Files ───────────────────────────────────────────────────────────────
+  /api/workspaces/{ws}/files/capabilities:
+    get:
+      operationId: getFileCapabilities
       tags: [files]
-      summary: Write a file to an agent worktree
+      summary: Get effective workspace file-browser capabilities
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
-        - $ref: "#/components/parameters/AgentName"
+      responses:
+        "200":
+          description: Effective file-browser capabilities
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileCapabilitiesResponse"
+
+  /api/workspaces/{ws}/files/tree:
+    get:
+      operationId: getScopedFileTree
+      tags: [files]
+      summary: Get file tree for a scoped file browser root
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: scope
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [workspace, repo, agent]
+            default: workspace
+        - name: target
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: repo
+          in: query
+          required: false
+          description: Optional repo qualifier, valid only when scope=agent.
+          schema:
+            type: string
         - name: path
           in: query
-          required: true
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: File tree
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileTreeResponse"
+
+  /api/workspaces/{ws}/files/index:
+    get:
+      operationId: getScopedFileIndex
+      tags: [files]
+      summary: Get quick-open file index for a scoped file browser root
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: scope
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [workspace, repo, agent]
+            default: workspace
+        - name: target
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: repo
+          in: query
+          required: false
+          description: Optional repo qualifier, valid only when scope=agent.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Quick-open file index
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileIndexResponse"
+
+  /api/workspaces/{ws}/files/search:
+    post:
+      operationId: searchScopedFiles
+      tags: [files]
+      summary: Search files in a scoped file browser root
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: scope
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [workspace, repo, agent]
+            default: workspace
+        - name: target
+          in: query
+          required: false
           schema:
             type: string
       requestBody:
@@ -2607,18 +3145,443 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required: [content]
-              properties:
-                content:
-                  type: string
+              $ref: "#/components/schemas/FileSearchRequest"
+      responses:
+        "200":
+          description: File search results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileSearchResponse"
+
+  /api/workspaces/{ws}/files/git-status:
+    get:
+      operationId: getScopedFileGitStatus
+      tags: [files]
+      summary: Get git status decorations for a scoped file browser root
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: scope
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [workspace, repo, agent]
+            default: workspace
+        - name: target
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: repo
+          in: query
+          required: false
+          description: Optional repo qualifier, valid only when scope=agent.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Root-relative file paths mapped to raw git porcelain XY codes
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileGitStatusResponse"
+
+  /api/workspaces/{ws}/files/checkouts:
+    get:
+      operationId: getFileCheckouts
+      tags: [files]
+      summary: List workspace file checkouts and local change counts
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Known file checkouts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileCheckoutsResponse"
+
+  /api/workspaces/{ws}/files/checkouts/repair:
+    post:
+      operationId: repairFileCheckout
+      tags: [files]
+      summary: Repair or provision a known workspace file checkout
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FileCheckoutRepairRequest"
+      responses:
+        "200":
+          description: Checkout repair result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileCheckoutRepairResponse"
+        "400":
+          description: Unknown or disallowed checkout target
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/workspaces/{ws}/files/diff:
+    get:
+      operationId: getScopedFileDiff
+      tags: [files]
+      summary: Get unified diff for a file in a scoped file browser root
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: scope
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [workspace, repo, agent]
+            default: workspace
+        - name: target
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: repo
+          in: query
+          required: false
+          description: Optional repo qualifier, valid only when scope=agent.
+          schema:
+            type: string
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Unified file diff
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileDiffResponse"
+
+  /api/workspaces/{ws}/files/history:
+    get:
+      operationId: getScopedFileHistory
+      tags: [files]
+      summary: Get bounded commit history for a file
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: scope
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [workspace, repo, agent]
+            default: workspace
+        - name: target
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: repo
+          in: query
+          required: false
+          description: Optional repo qualifier, valid only when scope=agent.
+          schema:
+            type: string
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: File timeline
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileHistoryResponse"
+
+  /api/workspaces/{ws}/files/blame:
+    get:
+      operationId: getScopedFileBlame
+      tags: [files]
+      summary: Get bounded git blame data for a file
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: scope
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [workspace, repo, agent]
+            default: workspace
+        - name: target
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: repo
+          in: query
+          required: false
+          description: Optional repo qualifier, valid only when scope=agent.
+          schema:
+            type: string
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: File blame data or skip signal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileBlameResponse"
+
+  /api/workspaces/{ws}/files:
+    get:
+      operationId: readScopedFile
+      tags: [files]
+      summary: Read a file from a scoped file browser root
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: scope
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [workspace, repo, agent]
+            default: workspace
+        - name: target
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: repo
+          in: query
+          required: false
+          description: Optional repo qualifier, valid only when scope=agent.
+          schema:
+            type: string
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: rev
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: File content
+          headers:
+            ETag:
+              description: Strong SHA-256 version for the current file (not revision reads).
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileReadResponse"
+    put:
+      operationId: writeScopedFile
+      tags: [files]
+      summary: Create or update a file in a scoped file browser root
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: scope
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [workspace, repo, agent]
+            default: workspace
+        - name: target
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: If-Match
+          in: header
+          required: false
+          description: Optional strong version for replace/restore callers. Ordinary editor saves omit it and remain last-write-wins.
+          schema:
+            type: string
+        - name: If-None-Match
+          in: header
+          required: false
+          description: Use * for create-only writes.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FileWriteRequest"
       responses:
         "200":
           description: File written
           content:
             application/json:
               schema:
+                $ref: "#/components/schemas/FileMutationResponse"
+        "412":
+          description: A supplied file precondition no longer matches
+    delete:
+      operationId: deleteScopedFile
+      tags: [files]
+      summary: Delete a file or directory in a scoped file browser root
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: scope
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [workspace, repo, agent]
+            default: workspace
+        - name: target
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: repo
+          in: query
+          required: false
+          description: Optional repo qualifier, valid only when scope=agent.
+          schema:
+            type: string
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: recursive
+          in: query
+          required: false
+          schema:
+            type: boolean
+        - name: If-Match
+          in: header
+          required: true
+          description: Strong current source version from file stat/read.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: File or directory deleted
+          content:
+            application/json:
+              schema:
                 $ref: "#/components/schemas/MessageResponse"
+        "412":
+          description: Source version no longer matches
+        "428":
+          description: Source version is required
+
+  /api/workspaces/{ws}/files/mkdir:
+    post:
+      operationId: mkdirScopedFile
+      tags: [files]
+      summary: Create a directory in a scoped file browser root
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: scope
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [workspace, repo, agent]
+            default: workspace
+        - name: target
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: repo
+          in: query
+          required: false
+          description: Optional repo qualifier, valid only when scope=agent.
+          schema:
+            type: string
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FileRepoQualifierRequest"
+      responses:
+        "200":
+          description: Directory created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /api/workspaces/{ws}/files/move:
+    patch:
+      operationId: moveScopedFile
+      tags: [files]
+      summary: Move or rename a path in a scoped file browser root
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: scope
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [workspace, repo, agent]
+            default: workspace
+        - name: target
+          in: query
+          required: false
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FileMoveRequest"
+      responses:
+        "200":
+          description: Path moved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileMutationResponse"
+        "412":
+          description: Source or destination version no longer matches
+        "428":
+          description: A required source or destination version is missing
 
   # ── Editors ─────────────────────────────────────────────────────────────
   /api/editors:
@@ -3277,6 +4240,8 @@ components:
           type: string
         code:
           type: string
+        retryable:
+          type: boolean
         details:
           type: object
 
@@ -3289,6 +4254,395 @@ components:
           const: true
         message:
           type: string
+
+    FileMutationResponse:
+      type: object
+      required: [success, version]
+      properties:
+        success:
+          type: boolean
+        version:
+          type: string
+
+    FileStatResponse:
+      type: object
+      required: [path, is_dir, size, mod_time, version]
+      properties:
+        path:
+          type: string
+        is_dir:
+          type: boolean
+        size:
+          type: integer
+          format: int64
+        mod_time:
+          type: string
+          format: date-time
+        version:
+          type: string
+
+    FileTreeEntry:
+      type: object
+      required: [name, is_dir, size, mod_time]
+      properties:
+        name:
+          type: string
+        is_dir:
+          type: boolean
+        size:
+          type: integer
+          format: int64
+        mod_time:
+          type: string
+          format: date-time
+
+    FileCapabilitiesResponse:
+      type: object
+      required: [read, write, sensitive]
+      properties:
+        read:
+          type: boolean
+        write:
+          type: boolean
+        sensitive:
+          type: boolean
+
+    FileTreeResponse:
+      type: object
+      required: [path, entries]
+      properties:
+        path:
+          type: string
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/FileTreeEntry"
+
+    FileReadResponse:
+      type: object
+      required: [path, size, binary, truncated, version]
+      properties:
+        path:
+          type: string
+        content:
+          type: string
+        size:
+          type: integer
+          format: int64
+        binary:
+          type: boolean
+        truncated:
+          type: boolean
+        version:
+          type: string
+
+    FileIndexResponse:
+      type: object
+      required: [paths, truncated, partial_reasons]
+      properties:
+        paths:
+          type: array
+          items:
+            type: string
+        truncated:
+          type: boolean
+        partial_reasons:
+          type: array
+          items:
+            $ref: "#/components/schemas/FilePartialReason"
+
+    FilePartialReason:
+      type: string
+      enum: [file_count, result_count, byte_limit, file_size, deadline, canceled]
+
+    FileSearchRequest:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+        repo:
+          type: string
+          description: Optional repo qualifier, valid only when scope=agent.
+        regex:
+          type: boolean
+          default: false
+        include:
+          type: array
+          items:
+            type: string
+        exclude:
+          type: array
+          nullable: true
+          items:
+            type: string
+        caseSensitive:
+          type: boolean
+          default: false
+
+    FileSearchMatch:
+      type: object
+      required: [line, col, preview]
+      properties:
+        line:
+          type: integer
+        col:
+          type: integer
+        preview:
+          type: string
+
+    FileSearchFileResult:
+      type: object
+      required: [path, matches]
+      properties:
+        path:
+          type: string
+        matches:
+          type: array
+          items:
+            $ref: "#/components/schemas/FileSearchMatch"
+
+    FileSearchResponse:
+      type: object
+      required: [results, limitHit, partial_reasons]
+      properties:
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/FileSearchFileResult"
+        limitHit:
+          type: boolean
+        partial_reasons:
+          type: array
+          items:
+            $ref: "#/components/schemas/FilePartialReason"
+
+    FileGitStatusResponse:
+      type: object
+      required: [status, partial, limit_hit, errors]
+      properties:
+        status:
+          type: object
+          additionalProperties:
+            type: string
+            minLength: 2
+            maxLength: 2
+        partial:
+          type: boolean
+        limit_hit:
+          type: boolean
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/FileCheckoutError"
+
+    FileCheckoutError:
+      type: object
+      required: [kind, repo, error]
+      properties:
+        kind:
+          type: string
+          enum: [agent, repo]
+        agent:
+          type: string
+        repo:
+          type: string
+        error:
+          type: string
+
+    FileCheckout:
+      type: object
+      required: [kind, repo, exists, change_count]
+      properties:
+        kind:
+          type: string
+          enum: [agent, repo]
+        agent:
+          type: string
+        repo:
+          type: string
+        exists:
+          type: boolean
+        branch:
+          type: string
+        change_count:
+          type: integer
+        status_error:
+          type: boolean
+        error:
+          type: string
+        partial:
+          type: boolean
+        limit_hit:
+          type: boolean
+
+    FileCheckoutsResponse:
+      type: object
+      required: [checkouts, partial, limit_hit, errors]
+      properties:
+        checkouts:
+          type: array
+          items:
+            $ref: "#/components/schemas/FileCheckout"
+        partial:
+          type: boolean
+        limit_hit:
+          type: boolean
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/FileCheckoutError"
+
+    FileCheckoutRepairRequest:
+      type: object
+      required: [scope, target]
+      properties:
+        scope:
+          type: string
+          enum: [agent, repo]
+        target:
+          type: string
+        repo:
+          type: string
+          description: Repo qualifier, valid when scope=agent.
+        force:
+          type: boolean
+
+    FileCheckoutRepairResponse:
+      type: object
+      required: [repaired, method, message]
+      properties:
+        repaired:
+          type: boolean
+        method:
+          type: string
+          enum: [repair, recreate, provision, none]
+        requires_force:
+          type: boolean
+        backup_path:
+          type: string
+        message:
+          type: string
+
+    FileDiffResponse:
+      type: object
+      required: [path, patch, partial, limit_hit]
+      properties:
+        path:
+          type: string
+        patch:
+          type: string
+        partial:
+          type: boolean
+        limit_hit:
+          type: boolean
+
+    FileBlameLine:
+      type: object
+      required: [line, lines, sha, author, time, summary]
+      properties:
+        line:
+          type: integer
+        lines:
+          type: integer
+        sha:
+          type: string
+        author:
+          type: string
+        time:
+          type: string
+        summary:
+          type: string
+
+    FileBlameResponse:
+      type: object
+      required: [path, skipped, lines, partial, limit_hit]
+      properties:
+        path:
+          type: string
+        skipped:
+          type: boolean
+        reason:
+          type: string
+        message:
+          type: string
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/FileBlameLine"
+        partial:
+          type: boolean
+        limit_hit:
+          type: boolean
+
+    FileHistoryEntry:
+      type: object
+      required: [kind, sha, author, time, summary]
+      properties:
+        kind:
+          type: string
+          enum: [commit]
+        sha:
+          type: string
+        author:
+          type: string
+        time:
+          type: string
+        summary:
+          type: string
+
+    FileHistoryResponse:
+      type: object
+      required: [path, entries, partial, limit_hit]
+      properties:
+        path:
+          type: string
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/FileHistoryEntry"
+        partial:
+          type: boolean
+        limit_hit:
+          type: boolean
+
+    FileWriteRequest:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+        repo:
+          type: string
+          description: Optional repo qualifier, valid only when scope=agent.
+
+    FileRepoQualifierRequest:
+      type: object
+      properties:
+        repo:
+          type: string
+          description: Optional repo qualifier, valid only when scope=agent.
+
+    FileMoveRequest:
+      type: object
+      required: [from, to]
+      properties:
+        from:
+          type: string
+        to:
+          type: string
+        repo:
+          type: string
+          description: Optional repo qualifier, valid only when scope=agent.
+        overwrite:
+          type: boolean
+          default: false
+        source_version:
+          type: string
+          description: Required by the server; current strong version of the source path.
+        destination_version:
+          type: string
+          description: Required when overwriting an existing regular file.
 
     RuntimeReadyResponse:
       type: object
@@ -3303,6 +4657,147 @@ components:
           type: string
         reason:
           type: string
+
+    # ── Pull Request Schemas ────────────────────────────────────────────
+    PullRequestDetail:
+      type: object
+      required:
+        - number
+        - state
+        - title
+        - is_draft
+        - head_ref_name
+        - base_ref_name
+        - head_sha
+        - merged
+      properties:
+        number:
+          type: integer
+        state:
+          type: string
+        title:
+          type: string
+        is_draft:
+          type: boolean
+        head_ref_name:
+          type: string
+        base_ref_name:
+          type: string
+        head_sha:
+          type: string
+        merged:
+          type: boolean
+
+    PullRequestDiff:
+      type: object
+      required: [files, diff]
+      properties:
+        files:
+          type: array
+          items:
+            $ref: "#/components/schemas/PullRequestDiffFile"
+        diff:
+          type: string
+
+    PullRequestDiffFile:
+      type: object
+      required: [path, status, additions, deletions, patch]
+      properties:
+        path:
+          type: string
+        status:
+          type: string
+        additions:
+          type: integer
+        deletions:
+          type: integer
+        patch:
+          type: string
+
+    PullRequestReviewRequest:
+      type: object
+      required: [event, expected_head_sha]
+      properties:
+        event:
+          type: string
+          enum: [approve, request_changes, comment]
+        body:
+          type: string
+        expected_head_sha:
+          type: string
+
+    PullRequestReviewResult:
+      type: object
+      properties:
+        review_id:
+          type: integer
+        state:
+          type: string
+
+    ReviewerEnsureResult:
+      type: object
+      required: [agent_name, checked_out_sha, seeded]
+      properties:
+        agent_name:
+          type: string
+        checked_out_sha:
+          type: string
+        seeded:
+          type: boolean
+
+    ReviewerMessageRequest:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+
+    ReviewerMessageResult:
+      type: object
+      required: [state, reason]
+      properties:
+        state:
+          type: string
+        reason:
+          type: string
+
+    ReviewerMessage:
+      type: object
+      required: [turn_id, item_id, role, text]
+      properties:
+        turn_id:
+          type: string
+        item_id:
+          type: string
+        role:
+          type: string
+          # user | assistant. Deliberately NOT an enum: oapi-codegen resolves
+          # enum value-name collisions globally, so an enum here renames the
+          # unrelated TranscriptEntryRole* constants in the generated package.
+          description: user | assistant
+        text:
+          type: string
+        phase:
+          type: string
+
+    ReviewerConversation:
+      type: object
+      required: [state, messages]
+      properties:
+        state:
+          type: string
+          description: >
+            starting | reconnecting | idle | running | failed | unsupported.
+            failed: the reviewer runtime died or its conversation is
+            unreadable. unsupported: the reviewer's backend has no readable
+            conversation (the terminal tab still works); detail says why.
+        detail:
+          type: string
+          description: Human-readable context for failed/unsupported states.
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReviewerMessage"
 
     # ── Issue Schemas ───────────────────────────────────────────────────
     Issue:
@@ -3322,6 +4817,17 @@ components:
           type: string
         design:
           type: string
+          description: Hydrated design body when available; collection responses may omit it.
+        design_artifact_id:
+          type: string
+          description: Managed FleetDB artifact reference for the design body.
+        design_format:
+          type: string
+          enum: [markdown, html]
+          description: Durable format of the hydrated design body.
+        has_design:
+          type: boolean
+          description: True for either a legacy inline or artifact-backed design.
         acceptance_criteria:
           type: string
         notes:
@@ -3426,6 +4932,16 @@ components:
           type: string
         design:
           type: string
+        design_artifact_id:
+          type: string
+          description: Managed FleetDB artifact reference for the design body.
+        design_format:
+          type: string
+          enum: [markdown, html]
+          description: Durable format of the hydrated design body.
+        has_design:
+          type: boolean
+          description: True for either a legacy inline or artifact-backed design.
         acceptance_criteria:
           type: string
         notes:
@@ -3766,6 +5282,9 @@ components:
           type: [string, "null"]
         design:
           type: [string, "null"]
+        design_format:
+          type: [string, "null"]
+          enum: [markdown, html, null]
         acceptance_criteria:
           type: [string, "null"]
         notes:
@@ -3885,6 +5404,9 @@ components:
             type: string
         default_workspace:
           type: string
+        design_format:
+          type: string
+          enum: [markdown, html]
 
     WorkspaceSummary:
       type: object
@@ -3959,6 +5481,14 @@ components:
       properties:
         backend:
           type: string
+
+    WorkspaceDesignFormatPatchRequest:
+      type: object
+      required: [design_format]
+      properties:
+        design_format:
+          type: string
+          enum: [markdown, html]
 
     # ── Config Schemas ──────────────────────────────────────────────────
     BackendConfigResponse:

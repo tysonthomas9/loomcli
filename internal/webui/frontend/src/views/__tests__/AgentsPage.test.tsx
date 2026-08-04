@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { existsSync } from "node:fs";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom";
@@ -19,7 +20,15 @@ const mocks = vi.hoisted(() => {
     startWorkflowRun: vi.fn(),
     localSettings: { settings: null },
     workspaceContext: { repos: [] },
-    agents: [] as Array<Record<string, unknown>>,
+    agents: [] as Array<{
+      name: string;
+      role?: string;
+      repo?: string;
+      status?: string;
+      branch?: string;
+      cross_repo?: boolean;
+      worktree_path?: string;
+    }>,
     agentStore: {
       getState: () => ({ fetchData }),
     },
@@ -39,7 +48,7 @@ vi.mock("react-router-dom", async (importOriginal) => {
 vi.mock("zustand", () => ({
   useStore: <T,>(
     _: unknown,
-    selector: (state: { agents: Array<Record<string, unknown>> }) => T,
+    selector: (state: { agents: typeof mocks.agents }) => T,
   ) => selector({ agents: mocks.agents }),
 }));
 
@@ -126,22 +135,6 @@ vi.mock("@/components/AgentDetailPanel", () => ({
   ),
 }));
 
-vi.mock("@/components/FileEditorPanel", () => ({
-  FileEditorPanel: ({
-    agentName,
-    isActive,
-  }: {
-    agentName: string;
-    isActive: boolean;
-  }) => (
-    <div
-      data-testid="file-editor-panel"
-      data-agent={agentName}
-      data-active={String(isActive)}
-    />
-  ),
-}));
-
 vi.mock("@/components/OpenInEditor", () => ({
   OpenInEditor: ({ path }: { path: string }) => (
     <div data-testid="open-in-editor" data-path={path} />
@@ -172,6 +165,25 @@ vi.mock("@/components/AgentWorkPanel/AgentWorkPanel", () => ({
 
 vi.mock("@/components/IssueDetailPanel/IssueDetailPanel", () => ({
   IssueDetailPanel: () => <div data-testid="issue-detail" />,
+}));
+
+vi.mock("@/components/FileExplorer", () => ({
+  WorkspaceFileBrowser: ({
+    mode,
+    agentName,
+    isActive,
+  }: {
+    mode?: string;
+    agentName?: string;
+    isActive?: boolean;
+  }) => (
+    <div
+      data-testid="workspace-file-browser"
+      data-mode={mode}
+      data-agent={agentName}
+      data-active={String(isActive)}
+    />
+  ),
 }));
 
 describe("AgentsPage", () => {
@@ -344,5 +356,40 @@ describe("AgentsPage", () => {
 
     const openInEditor = await screen.findByTestId("open-in-editor");
     expect(openInEditor).toHaveAttribute("data-path", "/tmp/loomcli/lead-1");
+  });
+
+  it("renders the files tab with the agent-rooted v3 browser and gates shortcuts while inactive", async () => {
+    mocks.agents = [
+      {
+        name: "lead-1",
+        role: "lead",
+        repo: "loomcli",
+        status: "ready",
+        branch: "agent/lead-1",
+      },
+    ];
+
+    render(<AgentsPage />);
+
+    const browser = await screen.findByTestId("workspace-file-browser");
+    expect(browser.getAttribute("data-mode")).toBe("agent");
+    expect(browser.getAttribute("data-agent")).toBe("lead-1");
+    expect(browser.getAttribute("data-active")).toBe("false");
+
+    fireEvent.click(screen.getByRole("button", { name: "Files" }));
+    await waitFor(() => {
+      expect(
+        screen
+          .getByTestId("workspace-file-browser")
+          .getAttribute("data-active"),
+      ).toBe("true");
+    });
+  });
+
+  it("does not leave the retired legacy file editor module in source", () => {
+    const retiredModule = ["File", "Editor", "Panel"].join("");
+    expect(
+      existsSync(new URL(`../../components/${retiredModule}`, import.meta.url)),
+    ).toBe(false);
   });
 });

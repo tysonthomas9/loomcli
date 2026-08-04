@@ -55,6 +55,42 @@ func TestDecide_Golden(t *testing.T) {
 	}
 }
 
+// TestQuarantineEligible pins the task-quarantine eligibility for every
+// Outcome the supervisor can observe — like TestDecide_Golden, this table IS
+// the contract; changes are deliberate behavior changes.
+func TestQuarantineEligible(t *testing.T) {
+	cases := []struct {
+		name string
+		in   agenterr.Outcome
+		want bool
+	}{
+		// harness-output classes
+		{"none → not eligible (clean)", agenterr.OutcomeFromHarness(wrapper.ErrNone), false},
+		{"rate-limited → not eligible (backend-wide)", agenterr.OutcomeFromHarness(wrapper.ErrRateLimited), false},
+		{"auth → not eligible (operator-actionable)", agenterr.OutcomeFromHarness(wrapper.ErrAuth), false},
+		{"billing → not eligible (operator-actionable)", agenterr.OutcomeFromHarness(wrapper.ErrBilling), false},
+		{"model-not-found → not eligible (operator-actionable)", agenterr.OutcomeFromHarness(wrapper.ErrModelNotFound), false},
+		{"context-overflow → eligible (task boomerangs across siblings)", agenterr.OutcomeFromHarness(wrapper.ErrContextOverflow), true},
+		{"timeout → eligible (137 watchdog kill)", agenterr.OutcomeFromHarness(wrapper.ErrTimeout), true},
+		{"transient → eligible (143 watchdog kill)", agenterr.OutcomeFromHarness(wrapper.ErrTransient), true},
+		{"unknown → eligible (-1 signal death)", agenterr.OutcomeFromHarness(wrapper.ErrUnknown), true},
+		// loom-domain outcomes: coordination signals, never task-fault
+		{"no-work → not eligible", agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome), false},
+		{"lock-conflict → not eligible", agenterr.OutcomeFromDomain(agenterr.LockConflictOutcome), false},
+		{"spawn-failure → not eligible", agenterr.OutcomeFromDomain(agenterr.SpawnFailureOutcome), false},
+		{"backend-unavailable → not eligible", agenterr.OutcomeFromDomain(agenterr.BackendUnavailableOutcome), false},
+		// zero value (clean success)
+		{"zero outcome → not eligible", agenterr.Outcome{}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := QuarantineEligible(tc.in); got != tc.want {
+				t.Fatalf("QuarantineEligible(%s) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestDecide_DeterministicNeverBlocks is the headline behavior guard (the bug
 // behind PR #124's review): genuinely-deterministic classes must NOT land in
 // an unbounded block — they fast-fail (directly, or after a capped block / after

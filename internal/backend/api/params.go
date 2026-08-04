@@ -97,6 +97,7 @@ func updateParamsToPatchRequest(params backend.UpdateParams) gen.PatchIssueReque
 		Description:        params.Description,
 		Priority:           params.Priority,
 		Design:             params.Design,
+		DesignFormat:       (*gen.PatchIssueRequestDesignFormat)(params.DesignFormat),
 		AcceptanceCriteria: params.AcceptanceCriteria,
 		Notes:              params.Notes,
 		Assignee:           params.Assignee,
