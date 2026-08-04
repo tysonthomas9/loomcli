@@ -1,6 +1,6 @@
 schema_version: 1
 status: complete
-source_head: 36f71a9068a76599f5706d4d67c44668a3681e84
+source_head: a038ea011bb5062c0fac52195ccabf0419dcb398
 adapter_roots:
   - internal/app
   - internal/cli
@@ -432,7 +432,7 @@ receiver_surfaces:
   - receiver: github.com/tysonthomas9/loomcli/internal/app/agentprovisioning.ProgressStore
     package: github.com/tysonthomas9/loomcli/internal/app/agentprovisioning
     method_set: agentprovisioning_progress
-    capability_owner: agents
+    capability_owner: named_application_workflow
   - receiver: github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr/admissionstore.Store
     package: github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr/admissionstore
     method_set: workspace_admission_store
@@ -1127,18 +1127,6 @@ function_surfaces:
     access: read-only
     capability_owner: interaction
 writes:
-    - file: internal/app/agentprovisioning/manager.go
-      receiver: github.com/tysonthomas9/loomcli/internal/app/agentprovisioning.ProgressStore
-      method: Begin
-      count: 1
-      aggregate_owner: agents
-      expires_after_phase: 7
-    - file: internal/app/agentprovisioning/manager.go
-      receiver: github.com/tysonthomas9/loomcli/internal/app/agentprovisioning.ProgressStore
-      method: Save
-      count: 1
-      aggregate_owner: agents
-      expires_after_phase: 7
     - file: internal/app/serve/agentcomposition/agents_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/agentmanagement.AgentManagementTransport
       method: AcquireAgentOwnership

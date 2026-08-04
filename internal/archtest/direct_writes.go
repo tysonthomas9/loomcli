@@ -463,7 +463,7 @@ func splitReceiver(receiver string) (string, string, bool) {
 func validPersistenceOwner(owner string) bool {
 	return slices.Contains([]string{
 		"agents", "artifacts", "automation", "connectors", "execution", "fleet-db",
-		"interaction", "legacy_tombstone", "read_projection", "sourcecontrol",
+		"interaction", "legacy_tombstone", "named_application_workflow", "read_projection", "sourcecontrol",
 		"workflowcatalog", "workitems", "workspace",
 	}, owner)
 }
@@ -736,6 +736,9 @@ func ownerCoreUsesOwnDeclaredPort(call directWriteCall, owner string) bool {
 	if owner == "" {
 		return false
 	}
+	if owner == "named_application_workflow" {
+		return namedWorkflowCoreUsesOwnDeclaredPort(call)
+	}
 	prefix := "internal/modules/" + owner + "/"
 	if !strings.HasPrefix(call.file, prefix) {
 		return false
@@ -746,6 +749,28 @@ func ownerCoreUsesOwnDeclaredPort(call directWriteCall, owner string) bool {
 	}
 	receiver := strings.TrimPrefix(call.receiver, "*")
 	return strings.HasPrefix(receiver, modulePath+"/internal/modules/"+owner+".")
+}
+
+// namedWorkflowCoreUsesOwnDeclaredPort applies the same owner-core exemption
+// to an explicitly classified application workflow. The workflow directory
+// name is the aggregate discriminator: a workflow may invoke only a port
+// declared by its own root package, while concrete fleetdb/http adapters stay
+// visible in the direct-write inventory.
+func namedWorkflowCoreUsesOwnDeclaredPort(call directWriteCall) bool {
+	const appPrefix = "internal/app/"
+	if !strings.HasPrefix(call.file, appPrefix) {
+		return false
+	}
+	relative := strings.TrimPrefix(call.file, appPrefix)
+	workflow, remainder, found := strings.Cut(relative, "/")
+	if !found || workflow == "" || remainder == "" {
+		return false
+	}
+	if segment, _, nested := strings.Cut(remainder, "/"); nested && isConcreteAdapterSegment(segment) {
+		return false
+	}
+	receiver := strings.TrimPrefix(call.receiver, "*")
+	return strings.HasPrefix(receiver, modulePath+"/internal/app/"+workflow+".")
 }
 
 func directWriteProblemMessages(problems map[directWriteProblemIdentity]directWriteProblem) []string {

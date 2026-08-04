@@ -14,15 +14,15 @@ func TestCheckedInDirectWriteInventoryStrictCounts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(inventory.Writes) != 125 {
-		t.Fatalf("direct-write rows = %d, want current migration ratchet of 125", len(inventory.Writes))
+	if len(inventory.Writes) != 123 {
+		t.Fatalf("direct-write rows = %d, want current migration ratchet of 123", len(inventory.Writes))
 	}
 	totalSites := 0
 	for _, use := range inventory.Writes {
 		totalSites += use.Count
 	}
-	if totalSites != 129 {
-		t.Fatalf("direct-write sites = %d, want current migration ratchet of 129", totalSites)
+	if totalSites != 127 {
+		t.Fatalf("direct-write sites = %d, want current migration ratchet of 127", totalSites)
 	}
 }
 
@@ -194,6 +194,45 @@ func apply(port workflowcatalog.VersionLifecycleStore) error { return port.Appro
 	}
 	if len(uses) != 1 || uses[0].File != "internal/modules/workflowcatalog/fleetdb/adapter.go" || uses[0].Method != "ApproveVersion" {
 		t.Fatalf("direct writes = %+v, want only the concrete adapter call retained", uses)
+	}
+}
+
+func TestSnapshotDirectWritesAllowsNamedWorkflowCoreThroughOwnDeclaredPortOnly(t *testing.T) {
+	root := t.TempDir()
+	writeDirectWriteModule(t, root)
+	writeGoFile(t, root, "internal/app/agentprovisioning/ports.go", `package agentprovisioning
+type ProgressStore interface { Save() error }
+`)
+	writeGoFile(t, root, "internal/app/agentprovisioning/manager.go", `package agentprovisioning
+func persist(port ProgressStore) error { return port.Save() }
+`)
+	writeGoFile(t, root, "internal/app/agentprovisioning/fleetdb/adapter.go", `package fleetdb
+import "github.com/tysonthomas9/loomcli/internal/app/agentprovisioning"
+func persist(port agentprovisioning.ProgressStore) error { return port.Save() }
+`)
+
+	matrix := oneDirectWriteProfile()
+	inventory := DirectWriteInventory{
+		AdapterRoots:              []string{"internal/app"},
+		AnalysisProfiles:          directWriteProfileNames(matrix),
+		CandidateReceiverSuffixes: []string{"Repository", "Store"},
+		PersistencePackages: []PersistencePackage{{
+			Path: modulePath + "/internal/app/agentprovisioning", ReceiverNames: []string{"ProgressStore"}, ReceiverSuffixes: []string{},
+		}},
+		MethodSets: []PersistenceMethodSet{{
+			Name: "progress", ReadOnly: []string{}, Mutating: []string{"Save"},
+		}},
+		ReceiverSurfaces: []PersistenceReceiverSurface{{
+			Receiver: modulePath + "/internal/app/agentprovisioning.ProgressStore",
+			Package:  modulePath + "/internal/app/agentprovisioning", MethodSet: "progress", CapabilityOwner: "named_application_workflow",
+		}},
+	}
+	uses, err := SnapshotDirectWrites(root, matrix, inventory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(uses) != 1 || uses[0].File != "internal/app/agentprovisioning/fleetdb/adapter.go" || uses[0].Method != "Save" {
+		t.Fatalf("direct writes = %+v, want only the concrete workflow adapter call retained", uses)
 	}
 }
 
