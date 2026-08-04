@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/appinfra"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlermux"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
@@ -55,51 +54,6 @@ func wrapWorkspaceCreateFn(
 		// routes so ordinary REST traffic does not start FleetDB long-polls.
 
 		return result, nil
-	}
-}
-
-// wrapWorkspaceDeleteFn wraps a workspace deletion function with post-deletion
-// cleanup. After the inner delete succeeds, it deregisters the workspace from
-// the WorkspaceRegistry (closing pools and stopping subscribers) and the
-// FleetStoreRegistry (stopping fleet Store and TimeoutEnforcer).
-func wrapWorkspaceDeleteFn(
-	innerDelete func(name string) error,
-	registry *appinfra.WorkspaceRegistry,
-	resolveID webui.WorkspaceIDResolverFn,
-) func(name string) error {
-	if innerDelete == nil {
-		return nil
-	}
-	return func(name string) error {
-		// Prefer the argument as the cleanup key. Store-backed workspace
-		// delete passes the stable fleet-db key here, so resolver failures
-		// must not leak runtime pools/subscribers/terminal managers.
-		wsID := name
-		if resolveID != nil {
-			if id, err := resolveID(name); err != nil {
-				logger.Warn("failed to resolve workspace ID for deletion cleanup; using delete key",
-					"workspace", name, "err", err)
-			} else if id == "" {
-				logger.Warn("workspace ID resolver returned empty ID for deletion cleanup; using delete key",
-					"workspace", name)
-			} else {
-				wsID = id
-			}
-		}
-
-		// 2. Perform the config deletion (the critical path — always proceed).
-		if err := innerDelete(name); err != nil {
-			return err
-		}
-
-		// 3. Clean up pool, subscriber, and fleet state atomically.
-		if wsID != "" && registry != nil {
-			registry.Deregister(wsID)
-			logger.Info("workspace cleaned up after deletion",
-				"workspace", name, "id", wsID)
-		}
-
-		return nil
 	}
 }
 

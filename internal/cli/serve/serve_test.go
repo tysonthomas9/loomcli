@@ -253,9 +253,6 @@ func TestApplyWorkspaceConfig_NilStoreDoesNotWireWorkspaceFns(t *testing.T) {
 	if cfg.WorkspaceIDResolverFn != nil {
 		t.Fatal("WorkspaceIDResolverFn should be nil without store")
 	}
-	if cfg.WorkspaceDeleteFn != nil {
-		t.Fatal("WorkspaceDeleteFn should be nil without store")
-	}
 	if cfg.WorkspaceDeleteCleanupFn != nil {
 		t.Fatal("WorkspaceDeleteCleanupFn should be nil without store")
 	}
@@ -278,9 +275,6 @@ func TestApplyWorkspaceConfig_StoreWiresStoreBackedFns(t *testing.T) {
 
 	if cfg.WorkspaceIDResolverFn == nil {
 		t.Fatal("WorkspaceIDResolverFn was nil")
-	}
-	if cfg.WorkspaceDeleteFn == nil {
-		t.Fatal("WorkspaceDeleteFn was nil")
 	}
 	if cfg.WorkspaceDeleteCleanupFn == nil {
 		t.Fatal("WorkspaceDeleteCleanupFn was nil")

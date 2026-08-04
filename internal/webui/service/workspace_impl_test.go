@@ -135,30 +135,20 @@ func TestGetWorkspaceRejectsCanonicalAgentWithMissingRole(t *testing.T) {
 	}
 }
 
-func TestDeleteWorkspace_StoreBackedUsesWorkspaceKey(t *testing.T) {
+func TestDeleteWorkspaceFailsClosedWithoutWorkspaceCapability(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha Project"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
 
-	var deletedKey string
-	svc := NewWorkspaceService(WorkspaceServiceConfig{
-		Store: st,
-		DeleteFn: func(key string) error {
-			deletedKey = key
-			return st.Workspaces().Delete(ctx, key)
-		},
-	})
+	svc := NewWorkspaceService(WorkspaceServiceConfig{Store: st})
 
-	if _, err := svc.DeleteWorkspace(ctx, "ALPHA"); err != nil {
-		t.Fatalf("DeleteWorkspace returned error: %v", err)
+	if _, err := svc.DeleteWorkspace(ctx, "ALPHA"); err == nil {
+		t.Fatal("DeleteWorkspace succeeded without Workspace capability")
 	}
-	if deletedKey != "ALPHA" {
-		t.Fatalf("deleted key = %q, want ALPHA", deletedKey)
-	}
-	if _, err := st.Workspaces().Get(ctx, "ALPHA"); !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("workspace still exists or unexpected error: %v", err)
+	if _, err := st.Workspaces().Get(ctx, "ALPHA"); err != nil {
+		t.Fatalf("workspace was mutated despite fail-closed delete: %v", err)
 	}
 }
 
@@ -168,7 +158,6 @@ func TestDeleteWorkspaceUsesOwnerCommandThenLocalCleanup(t *testing.T) {
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha Project"}); err != nil {
 		t.Fatal(err)
 	}
-	legacyCalls := 0
 	cleanupKey := ""
 	capability := &workspaceCapabilityStub{deleteFn: func(ctx context.Context, command workspacemodule.DeleteCommand) (*workspacemodule.Reference, error) {
 		if command.Reference != "Alpha Project" {
@@ -182,10 +171,6 @@ func TestDeleteWorkspaceUsesOwnerCommandThenLocalCleanup(t *testing.T) {
 	svc := NewWorkspaceService(WorkspaceServiceConfig{
 		Store:     st,
 		Workspace: capability,
-		DeleteFn: func(string) error {
-			legacyCalls++
-			return nil
-		},
 		DeleteCleanupFn: func(key string) error {
 			cleanupKey = key
 			return nil
@@ -195,8 +180,8 @@ func TestDeleteWorkspaceUsesOwnerCommandThenLocalCleanup(t *testing.T) {
 	if _, err := svc.DeleteWorkspace(ctx, "Alpha Project"); err != nil {
 		t.Fatal(err)
 	}
-	if legacyCalls != 0 || cleanupKey != "ALPHA" {
-		t.Fatalf("legacy calls=%d cleanup key=%q", legacyCalls, cleanupKey)
+	if cleanupKey != "ALPHA" {
+		t.Fatalf("cleanup key=%q", cleanupKey)
 	}
 	if _, err := st.Workspaces().Get(ctx, "ALPHA"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("workspace still exists: %v", err)

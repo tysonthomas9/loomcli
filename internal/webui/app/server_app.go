@@ -287,7 +287,6 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	}
 
 	app.wrappedCreateFn = wrapWorkspaceCreateFn(config.WorkspaceCreateFn, app.registry)
-	app.wrappedDeleteFn = wrapWorkspaceDeleteFn(config.WorkspaceDeleteFn, app.registry, config.WorkspaceIDResolverFn)
 	app.wrappedDeleteCleanupFn = wrapWorkspaceDeleteCleanupFn(config.WorkspaceDeleteCleanupFn, app.registry)
 
 	// Async job store for clone workspace creation (202 + polling).
@@ -347,7 +346,6 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 		Workspace:            app.workspaceCatalog,
 		CreateFn:             app.wrappedCreateFn,
 		AddReposFn:           config.WorkspaceAddReposFn,
-		DeleteFn:             app.wrappedDeleteFn,
 		DeleteCleanupFn:      app.wrappedDeleteCleanupFn,
 		JobStore:             app.jobStore,
 		AdmissionCoordinator: config.WorkspaceAdmissions,

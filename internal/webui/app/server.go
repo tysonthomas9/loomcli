@@ -103,7 +103,6 @@ type Server struct {
 
 	// Wrapped workspace lifecycle functions
 	wrappedCreateFn        service.WorkspaceCreateFn
-	wrappedDeleteFn        func(string) error
 	wrappedDeleteCleanupFn func(string) error
 
 	// Async workspace creation jobs

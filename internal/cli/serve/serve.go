@@ -871,7 +871,6 @@ func applyWorkspaceConfigWithAdmission(
 	cfg.WorkspaceIDResolverFn = serveadapter.BuildWorkspaceIDResolverFn(cfg.Store)
 	cfg.InitialWorkspaceID = serveadapter.ResolveInitialWorkspaceID(cfg.Store)
 	applyFleetInitialWorkspaceFallback(cfg, false)
-	cfg.WorkspaceDeleteFn = serveadapter.BuildWorkspaceDeleteFn(cfg.Store)
 	cfg.WorkspaceDeleteCleanupFn = serveadapter.BuildWorkspaceDeleteCleanupFn()
 	cfg.SetDefaultWorkspaceFn = nil
 	cfg.ClearDefaultWorkspaceFn = nil
