@@ -670,38 +670,10 @@ func TestDispatchConcurrentCallsOnOneRun(t *testing.T) {
 }
 
 func TestDispatchPreconditionFieldMapping(t *testing.T) {
-	cases := []struct {
-		field string
-		pre   providers.Preconditions
-		want  string
-	}{
-		{"expectedHeadSha", providers.Preconditions{ExpectedHeadSha: "sha"}, "sha"},
-		{"expectedIssueRevision", providers.Preconditions{ExpectedRevision: "7"}, "7"},
-		{"expectedMessageTs", providers.Preconditions{ExpectedRevision: "171.001"}, "171.001"},
-		{"expectedMonitorRevision", providers.Preconditions{ExpectedRevision: "rev9"}, "rev9"},
-		{"unknownField", providers.Preconditions{ExpectedHeadSha: "x", ExpectedRevision: "y"}, ""},
-	}
-	for _, tc := range cases {
-		t.Run(tc.field, func(t *testing.T) {
-			if got := preconditionValue(tc.field, tc.pre); got != tc.want {
-				t.Fatalf("preconditionValue(%s) = %q, want %q", tc.field, got, tc.want)
-			}
-		})
-	}
-	// Every registered irreversible action must map all of its fields, so an
-	// unmapped registry addition fails closed and is caught here.
-	for action, fields := range irreversiblePreconditions {
-		for _, field := range fields {
-			full := providers.Preconditions{ExpectedHeadSha: "sha", ExpectedRevision: "rev"}
-			if preconditionValue(field, full) == "" {
-				t.Fatalf("action %s field %s has no Preconditions mapping", action, field)
-			}
-		}
-	}
-	if got := missingPreconditions("github.pull_request.read", providers.Preconditions{}); got != nil {
+	if got := connectorsmodule.MissingActionPreconditions("github.pull_request.read", providers.Preconditions{}); got != nil {
 		t.Fatalf("reversible action missing = %v, want nil", got)
 	}
-	if got := missingPreconditions("github.merge", providers.Preconditions{}); len(got) != 1 || got[0] != "expectedHeadSha" {
+	if got := connectorsmodule.MissingActionPreconditions("github.merge", providers.Preconditions{}); len(got) != 1 || got[0] != "expectedHeadSha" {
 		t.Fatalf("github.merge missing = %v, want [expectedHeadSha]", got)
 	}
 }

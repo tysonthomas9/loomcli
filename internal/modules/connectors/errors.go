@@ -19,6 +19,9 @@ var (
 	// exact immutable grant requested, or a create race could not be resolved
 	// to that exact active grant.
 	ErrGrantConflict = errors.New("connectors: grant conflict")
+	// ErrGrantDenied means no active binding-scoped grant authorizes the
+	// requested connector action and resource.
+	ErrGrantDenied = errors.New("connectors: grant denied")
 	// ErrNotFound means a Connector or binding referenced by a grant does not
 	// exist in the workspace.
 	ErrNotFound = errors.New("connectors: not found")

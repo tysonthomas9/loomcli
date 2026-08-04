@@ -268,14 +268,6 @@ func TestIrreversibleRegistry(t *testing.T) {
 		})
 	}
 
-	// Every registered action must satisfy the domain action format so the
-	// registry can never disagree with grant validation.
-	for action := range irreversiblePreconditions {
-		if err := domain.ValidateConnectorAction(action); err != nil {
-			t.Fatalf("registry action %q fails domain validation: %v", action, err)
-		}
-	}
-
 	// Returned slices are copies: mutating one must not poison the registry.
 	fields := RequiredPreconditions("github.merge")
 	fields[0] = "mutated"

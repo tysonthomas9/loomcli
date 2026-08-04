@@ -1,6 +1,6 @@
 schema_version: 1
 status: complete
-source_head: e6c8dadcb23268dd6fbff4df63a36210386eea5c
+source_head: 54d70b30ae9b84ad65418476e6f242d0007f6a49
 adapter_roots:
   - internal/app
   - internal/cli
@@ -861,6 +861,22 @@ function_surfaces:
     access: read-only
     capability_owner: connectors
   - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
+    function: EvaluateGrantAuthorization
+    access: read-only
+    capability_owner: connectors
+  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
+    function: IsIrreversibleAction
+    access: read-only
+    capability_owner: connectors
+  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
+    function: MatchGrantResource
+    access: read-only
+    capability_owner: connectors
+  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
+    function: MissingActionPreconditions
+    access: read-only
+    capability_owner: connectors
+  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
     function: New
     access: read-only
     capability_owner: connectors
@@ -886,6 +902,10 @@ function_surfaces:
     capability_owner: connectors
   - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
     function: OperationRules
+    access: read-only
+    capability_owner: connectors
+  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
+    function: RequiredActionPreconditions
     access: read-only
     capability_owner: connectors
   - package: github.com/tysonthomas9/loomcli/internal/modules/interaction

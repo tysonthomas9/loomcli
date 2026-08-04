@@ -167,17 +167,23 @@ func (d *Dispatcher) authorizeCall(ctx context.Context, req Request, res Result,
 	if err != nil {
 		return nil, fmt.Errorf("connector dispatch grants for binding %q: %w", req.BindingID, err)
 	}
-	scoped := make([]*domain.ConnectorGrant, 0, len(grants))
+	scoped := make([]*connectorsmodule.ConnectorGrant, 0, len(grants))
 	for _, g := range grants {
 		if g != nil && g.ConnectorID == req.ConnectorID {
-			scoped = append(scoped, g)
+			scoped = append(scoped, ownerGrant(g))
 		}
 	}
-	if decision := Evaluate(req.BindingID, scoped, req.Action, req.Resource); !decision.Allowed {
-		refused, rerr := d.refuse(ctx, req, res, kind, domain.ConnectorCallDenied, decision.Denied)
+	if decision := connectorsmodule.EvaluateGrantAuthorization(req.BindingID, scoped, req.Action, req.Resource); !decision.Allowed {
+		denyErr := error(decision.Denied)
+		if errors.Is(denyErr, connectorsmodule.ErrGrantRevoked) {
+			denyErr = errors.Join(denyErr, domain.ErrGrantDenied, domain.ErrGrantRevoked)
+		} else {
+			denyErr = errors.Join(denyErr, domain.ErrGrantDenied)
+		}
+		refused, rerr := d.refuse(ctx, req, res, kind, domain.ConnectorCallDenied, denyErr)
 		return &refused, rerr
 	}
-	if missing := missingPreconditions(req.Action, req.Preconditions); len(missing) > 0 {
+	if missing := connectorsmodule.MissingActionPreconditions(req.Action, req.Preconditions); len(missing) > 0 {
 		perr := &providers.PreconditionRequired{Action: req.Action, Fields: missing}
 		refused, rerr := d.refuse(ctx, req, res, kind, domain.ConnectorCallPreconditionRequired, perr)
 		return &refused, rerr
@@ -272,33 +278,6 @@ func (d *Dispatcher) appendAudit(ctx context.Context, req Request, kind domain.C
 		return fmt.Errorf("connector dispatch audit %q: %w", rec.CallID, err)
 	}
 	return nil
-}
-
-// missingPreconditions returns the registered precondition fields the request
-// failed to supply for an irreversible action; empty for reversible actions
-// and for fully pinned irreversible ones.
-func missingPreconditions(action string, p providers.Preconditions) []string {
-	var missing []string
-	for _, field := range RequiredPreconditions(action) {
-		if preconditionValue(field, p) == "" {
-			missing = append(missing, field)
-		}
-	}
-	return missing
-}
-
-// preconditionValue maps a registry field name (camelCase, per wire
-// convention) to its value on the request. Unknown field names report empty
-// so an unmapped registry entry fails closed rather than slipping through.
-func preconditionValue(field string, p providers.Preconditions) string {
-	switch field {
-	case "expectedHeadSha":
-		return p.ExpectedHeadSha
-	case "expectedIssueRevision", "expectedMessageTs", "expectedMonitorRevision":
-		return p.ExpectedRevision
-	default:
-		return ""
-	}
 }
 
 // errorClass extracts the audit ErrorClass from a provider error: the
