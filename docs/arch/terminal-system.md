@@ -29,10 +29,10 @@ TerminalView (TerminalView.tsx)            <- orchestrator
   |    +-- SortableTab (dnd-kit)           <- drag-and-drop per tab
   |    +-- TabContextMenu                  <- right-click: duplicate/rename/pin/close
   |
-  +-- [per tab] TerminalInstance           <- single wterm + WebSocket pane
-  |    +-- wterm DOM renderer
+  +-- [per tab] TerminalInstance           <- single xterm.js + WebSocket pane
+  |    +-- xterm.js DOM renderer
   |    +-- Native DOM selection/copy/paste
-  |    +-- Auto-resize via wterm
+  |    +-- Auto-resize via FitAddon
   |
   +-- [per tab overlays]
   |    +-- TerminalConnectionOverlay       <- connecting/disconnected/error states
@@ -281,7 +281,7 @@ Results are written with ANSI coloring (`\x1b[32m` green for success, `\x1b[31m`
 
 ### Terminal Search
 
-Search uses the browser's native find-in-page against wterm's DOM-rendered cells.
+Search uses the browser's native find-in-page against xterm.js DOM-rendered cells.
 The app does not intercept Cmd/Ctrl+F.
 
 Search decorations use orange for active match (`#EE8B17`) and gray for other matches (`#515C6A`).
@@ -519,7 +519,7 @@ A separate `"terminal_session_change"` event is broadcast when issue linkage cha
 | `components/TerminalView/tabs/TerminalTabBar.tsx` | WAI-ARIA tablist with dnd-kit drag-and-drop |
 | `components/TerminalView/tabs/SortableTab.tsx` | dnd-kit `useSortable` wrapper for tab elements |
 | `components/TerminalView/tabs/TabContextMenu.tsx` | Right-click context menu |
-| `components/TerminalView/instances/TerminalInstance.tsx` | Single wterm terminal with WebSocket |
+| `components/TerminalView/instances/TerminalInstance.tsx` | Single xterm.js terminal with WebSocket |
 | `components/TerminalView/instances/terminalConnection.ts` | WebSocket lifecycle: token fetch, URL build, `encodeResize` |
 | `components/TerminalView/tabs/terminalTabUtils.ts` | Constants, TabState type, session name generators |
 | `components/TerminalView/layout/BackendPickerPrompt.tsx` | Modal for selecting backend for new tab |

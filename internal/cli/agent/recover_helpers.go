@@ -148,7 +148,9 @@ func closeTask(deps *cli.Deps, taskID, reason string) {
 
 // resetTask resets a task to open status, but only if it's still in_progress.
 // Tasks that have already reached review or closed status were successfully
-// processed and should not be reset.
+// processed and should not be reset; a blocked task was quarantined by the
+// daemon (or blocked by a human) and must not be flipped back to open by a
+// crash-recovery pass.
 func resetTask(deps *cli.Deps, taskID string) {
 	ib := deps.IssueBackend
 	ctx := cmdstore.RootContext()
@@ -156,7 +158,7 @@ func resetTask(deps *cli.Deps, taskID string) {
 	// Check current status before resetting
 	detail, err := ib.Get(ctx, taskID)
 	if err == nil && detail != nil {
-		if detail.Status == "review" || detail.Status == "closed" {
+		if detail.Status == "review" || detail.Status == "closed" || detail.Status == "blocked" {
 			fmt.Printf("✓ Task %s already %s, skipping reset\n", taskID, detail.Status)
 			return
 		}

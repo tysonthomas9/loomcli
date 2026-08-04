@@ -147,6 +147,7 @@ linters:
             - "**/internal/usage/**"
             - "**/internal/logrouter/**"
             - "**/internal/atomicfile/**"
+            - "**/internal/gitbranch/**"
             - "**/internal/workspace/**"
             - "**/internal/debug/**"
             - "**/internal/testutil/**"

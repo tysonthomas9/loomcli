@@ -105,7 +105,9 @@ func (d *Datadog) monitorsRead(ctx context.Context, spec CallSpec) (CallResult, 
 			d.upstreamError(spec, res)
 	}
 	var raw []map[string]any
-	_ = json.Unmarshal(res.body, &raw)
+	if err := decodeResponseJSON(spec, res.status, res.body, &raw); err != nil {
+		return CallResult{Status: res.status, Decision: domain.ConnectorCallUpstreamError}, err
+	}
 	monitors := make([]map[string]any, 0, len(raw))
 	for _, m := range raw {
 		monitors = append(monitors, monitorSummary(m))
@@ -131,9 +133,13 @@ func (d *Datadog) alertRead(ctx context.Context, spec CallSpec) (CallResult, err
 		return CallResult{Status: res.status, Decision: domain.ConnectorCallUpstreamError},
 			d.upstreamError(spec, res)
 	}
+	obj, err := decodeResponseObject(spec, res.status, res.body)
+	if err != nil {
+		return CallResult{Status: res.status, Decision: domain.ConnectorCallUpstreamError}, err
+	}
 	return CallResult{
 		Status:   res.status,
-		Body:     monitorSummary(decodeObject(res.body)),
+		Body:     monitorSummary(obj),
 		Decision: domain.ConnectorCallGranted,
 	}, nil
 }
@@ -180,7 +186,10 @@ func (d *Datadog) incidentsWrite(ctx context.Context, spec CallSpec) (CallResult
 		return CallResult{Status: res.status, Decision: domain.ConnectorCallUpstreamError},
 			d.upstreamError(spec, res)
 	}
-	obj := decodeObject(res.body)
+	obj, err := decodeResponseObject(spec, res.status, res.body)
+	if err != nil {
+		return CallResult{Status: res.status, Decision: domain.ConnectorCallUpstreamError}, err
+	}
 	data, _ := obj["data"].(map[string]any)
 	return CallResult{
 		Status: res.status,
@@ -214,7 +223,10 @@ func (d *Datadog) monitorFreshnessCheck(ctx context.Context, spec CallSpec, id i
 		return CallResult{Status: res.status, Decision: domain.ConnectorCallUpstreamError},
 			d.upstreamError(spec, res)
 	}
-	monitor := decodeObject(res.body)
+	monitor, err := decodeResponseObject(spec, res.status, res.body)
+	if err != nil {
+		return CallResult{Status: res.status, Decision: domain.ConnectorCallUpstreamError}, err
+	}
 	state, _ := monitor["overall_state"].(string)
 	if !d.alertActionable(state, monitor) {
 		return CallResult{Decision: domain.ConnectorCallStaleSubject},

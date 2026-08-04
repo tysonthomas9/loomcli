@@ -8,20 +8,22 @@ import "fmt"
 type ErrorKind string
 
 const (
-	KindNotFound        ErrorKind = "not_found"
-	KindValidation      ErrorKind = "validation_error"
-	KindUnavailable     ErrorKind = "unavailable"
-	KindTimeout         ErrorKind = "timeout"
-	KindConflict        ErrorKind = "conflict"
-	KindInternal        ErrorKind = "internal"
-	KindForbidden       ErrorKind = "forbidden"
-	KindUnauthorized    ErrorKind = "unauthorized"
-	KindLocked          ErrorKind = "locked"
-	KindPayloadTooLarge ErrorKind = "payload_too_large"
-	KindRateLimited     ErrorKind = "rate_limited"
-	KindBadGateway      ErrorKind = "bad_gateway"
-	KindNotImplemented  ErrorKind = "not_implemented"
-	KindStarting        ErrorKind = "starting"
+	KindNotFound             ErrorKind = "not_found"
+	KindValidation           ErrorKind = "validation_error"
+	KindUnavailable          ErrorKind = "unavailable"
+	KindTimeout              ErrorKind = "timeout"
+	KindConflict             ErrorKind = "conflict"
+	KindInternal             ErrorKind = "internal"
+	KindForbidden            ErrorKind = "forbidden"
+	KindUnauthorized         ErrorKind = "unauthorized"
+	KindLocked               ErrorKind = "locked"
+	KindPayloadTooLarge      ErrorKind = "payload_too_large"
+	KindRateLimited          ErrorKind = "rate_limited"
+	KindBadGateway           ErrorKind = "bad_gateway"
+	KindNotImplemented       ErrorKind = "not_implemented"
+	KindStarting             ErrorKind = "starting"
+	KindPreconditionFailed   ErrorKind = "precondition_failed"
+	KindPreconditionRequired ErrorKind = "precondition_required"
 )
 
 // ServiceError represents a typed service-layer error.
@@ -101,4 +103,12 @@ func ErrNotImplemented(msg string) *ServiceError {
 
 func ErrStarting(msg string) *ServiceError {
 	return &ServiceError{Kind: KindStarting, Message: msg}
+}
+
+func ErrPreconditionFailed(msg string) *ServiceError {
+	return &ServiceError{Kind: KindPreconditionFailed, Message: msg}
+}
+
+func ErrPreconditionRequired(msg string) *ServiceError {
+	return &ServiceError{Kind: KindPreconditionRequired, Message: msg}
 }

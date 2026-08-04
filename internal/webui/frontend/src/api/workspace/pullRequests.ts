@@ -17,6 +17,7 @@ export interface GitPullRequest {
   updated_at?: string;
   review_decision?: string;
   repo_name: string;
+  source_repo?: string;
   additions?: number;
   deletions?: number;
   changed_files?: number;

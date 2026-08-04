@@ -20,6 +20,21 @@
     }
   },
   {
+    "id": "artifact-design-no-inline-body",
+    "issue": {
+      "design": "",
+      "design_artifact_id": "design-task-1-hash",
+      "has_design": true,
+      "labels": []
+    },
+    "expected": {
+      "has_needs_revision": false,
+      "needs_plan": false,
+      "ready_to_implement": true,
+      "ts_open_status": "ready"
+    }
+  },
+  {
     "id": "has-design-needs-revision",
     "issue": { "design": "some plan", "labels": ["needs-revision"] },
     "expected": {

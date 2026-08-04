@@ -154,6 +154,19 @@ func TestResetTask_AlreadyClosed(t *testing.T) {
 	}
 }
 
+func TestResetTask_SkipsBlocked(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, tracker := NewTestDeps(t)
+
+	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{ID: "task-789", Status: "blocked"}}
+
+	resetTask(deps, "task-789")
+
+	if tracker.Called("Update") {
+		t.Error("UpdateIssue should not be called for a blocked task (daemon quarantine / human block must not be flipped back to open)")
+	}
+}
+
 func TestResetTask_GetIssueFails(t *testing.T) {
 	t.Parallel()
 	deps, _, _, _, tracker := NewTestDeps(t)

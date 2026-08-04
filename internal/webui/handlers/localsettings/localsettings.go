@@ -56,6 +56,11 @@ type runtimeCredentialPatch struct {
 	Clear  bool    `json:"clear,omitempty"`
 }
 
+// PatchOptions configures post-save notifications for local settings changes.
+type PatchOptions struct {
+	OnGitHubRuntimeCredentialChanged func()
+}
+
 // HandleGet returns sanitized desktop-local runtime settings.
 func HandleGet(dataDir string) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
@@ -71,17 +76,24 @@ func HandleGet(dataDir string) http.HandlerFunc {
 
 // HandlePatch updates desktop-local runtime settings. Redis changes require
 // restarting the local runtime because embedded fleet-db reads them at startup.
-func HandlePatch(dataDir string) http.HandlerFunc {
+func HandlePatch(dataDir string, options ...PatchOptions) http.HandlerFunc {
+	var opts PatchOptions
+	if len(options) > 0 {
+		opts = options[0]
+	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		req, ok := decodePatchRequest(w, r)
 		if !ok {
 			return
 		}
 
-		settings, status, err := updateLocalSettings(dataDir, req)
+		settings, githubCredentialChanged, status, err := updateLocalSettings(dataDir, req)
 		if err != nil {
 			handler.WriteJSON(w, status, response{Success: false, Error: err.Error()})
 			return
+		}
+		if githubCredentialChanged && opts.OnGitHubRuntimeCredentialChanged != nil {
+			opts.OnGitHubRuntimeCredentialChanged()
 		}
 		sanitized := runtimesettings.Sanitize(settings)
 		handler.WriteJSON(w, http.StatusOK, response{
@@ -107,45 +119,46 @@ func decodePatchRequest(w http.ResponseWriter, r *http.Request) (patchRequest, b
 	return req, true
 }
 
-func updateLocalSettings(dataDir string, req patchRequest) (runtimesettings.Settings, int, error) {
+func updateLocalSettings(dataDir string, req patchRequest) (runtimesettings.Settings, bool, int, error) {
 	if strings.TrimSpace(dataDir) == "" {
-		return runtimesettings.Settings{}, http.StatusInternalServerError, errors.New("local settings data dir is not configured")
+		return runtimesettings.Settings{}, false, http.StatusInternalServerError, errors.New("local settings data dir is not configured")
 	}
 
 	var patchErr error
+	var githubCredentialChanged bool
 	settings, err := runtimesettings.Update(dataDir, func(settings *runtimesettings.Settings) error {
-		if err := applyPatchRequest(dataDir, settings, req); err != nil {
+		changed, err := applyPatchRequest(dataDir, settings, req)
+		if err != nil {
 			patchErr = err
 			return err
 		}
+		githubCredentialChanged = changed
 		return nil
 	})
 	if err != nil {
-		return runtimesettings.Settings{}, localSettingsErrorStatus(err, patchErr), err
+		return runtimesettings.Settings{}, false, localSettingsErrorStatus(err, patchErr), err
 	}
-	return settings, http.StatusOK, nil
+	return settings, githubCredentialChanged, http.StatusOK, nil
 }
 
-func applyPatchRequest(dataDir string, settings *runtimesettings.Settings, req patchRequest) error {
+func applyPatchRequest(dataDir string, settings *runtimesettings.Settings, req patchRequest) (bool, error) {
 	if req.FleetDBRedis != nil {
 		if err := applyRedisPatch(settings, *req.FleetDBRedis); err != nil {
-			return err
+			return false, err
 		}
 	}
 	if req.AgentRuntime != nil {
 		if err := applyAgentRuntimePatch(settings, *req.AgentRuntime); err != nil {
-			return err
+			return false, err
 		}
 	}
 	if req.LocalTaskRunner != nil {
 		applyLocalTaskRunnerPatch(settings, *req.LocalTaskRunner)
 	}
-	if req.RuntimeCredentials != nil {
-		if err := applyRuntimeCredentialsPatch(dataDir, settings, *req.RuntimeCredentials); err != nil {
-			return err
-		}
+	if req.RuntimeCredentials == nil {
+		return false, nil
 	}
-	return nil
+	return applyRuntimeCredentialsPatch(dataDir, settings, *req.RuntimeCredentials)
 }
 
 func localSettingsErrorStatus(err, patchErr error) int {
@@ -219,12 +232,13 @@ func applyLocalTaskRunnerPatch(settings *runtimesettings.Settings, patch localTa
 	settings.LocalTaskRunner = cfg
 }
 
-func applyRuntimeCredentialsPatch(dataDir string, settings *runtimesettings.Settings, patch runtimeCredentialsPatch) error {
+func applyRuntimeCredentialsPatch(dataDir string, settings *runtimesettings.Settings, patch runtimeCredentialsPatch) (bool, error) {
 	now := time.Now().UTC()
+	githubBefore := settings.RuntimeCredentials.GitHub
 	if patch.Daytona != nil {
 		credential, clear, err := runtimeCredentialFromPatch(dataDir, runtimesettings.RuntimeCredentialProviderDaytona, *patch.Daytona, now)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if clear {
 			settings.RuntimeCredentials.Daytona = runtimesettings.RuntimeCredentialConfig{}
@@ -235,7 +249,7 @@ func applyRuntimeCredentialsPatch(dataDir string, settings *runtimesettings.Sett
 	if patch.GitHub != nil {
 		credential, clear, err := runtimeCredentialFromPatch(dataDir, runtimesettings.RuntimeCredentialProviderGitHub, *patch.GitHub, now)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if clear {
 			settings.RuntimeCredentials.GitHub = runtimesettings.RuntimeCredentialConfig{}
@@ -243,7 +257,7 @@ func applyRuntimeCredentialsPatch(dataDir string, settings *runtimesettings.Sett
 			settings.RuntimeCredentials.GitHub = credential
 		}
 	}
-	return nil
+	return settings.RuntimeCredentials.GitHub != githubBefore, nil
 }
 
 func runtimeCredentialFromPatch(dataDir, provider string, patch runtimeCredentialPatch, now time.Time) (runtimesettings.RuntimeCredentialConfig, bool, error) {

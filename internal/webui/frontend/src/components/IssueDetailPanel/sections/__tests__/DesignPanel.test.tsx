@@ -20,7 +20,49 @@ describe("DesignPanel", () => {
         content={'<h2>Plan</h2>\n<p class="safe">Ship it</p>'}
       />,
     );
-    expect(screen.getByText("Ship it")).toHaveClass("safe");
+    const frame = screen.getByTitle("HTML design artifact");
+    expect(frame).toHaveAttribute("sandbox", "allow-same-origin");
+    expect(frame.getAttribute("srcdoc")).toContain(
+      '<p class="safe">Ship it</p>',
+    );
+  });
+
+  it("renders safe inline SVG and strips executable SVG content", () => {
+    render(
+      <DesignPanel
+        format="html"
+        content={
+          '<svg width="40" height="40" viewBox="0 0 40 40"><script>window.bad=1</script><rect width="40" height="40" fill="none" onload="window.bad=2"/></svg>'
+        }
+      />,
+    );
+    const frame = screen.getByTestId("design-html-content");
+    const srcDoc = frame.getAttribute("srcdoc") ?? "";
+    expect(srcDoc).toContain("<svg");
+    expect(srcDoc).toContain("<rect");
+    expect(srcDoc).not.toContain("<script");
+    expect(srcDoc).not.toContain("onload");
+    expect(srcDoc).not.toContain("window.bad");
+  });
+
+  it("keeps embedded artifact styles in one isolated document", () => {
+    render(
+      <DesignPanel
+        format="html"
+        content={
+          '<style>.card{display:grid}</style>\n<h2>Plan</h2>\n<div class="card">Ship it</div>'
+        }
+      />,
+    );
+
+    const frames = screen.getAllByTitle("HTML design artifact");
+    expect(frames).toHaveLength(1);
+    expect(frames[0]?.getAttribute("srcdoc")).toContain(
+      "<style>.card{display:grid}</style>",
+    );
+    expect(
+      screen.queryByTestId("design-panel-section"),
+    ).not.toBeInTheDocument();
   });
 
   it("keeps explicit markdown authoritative even when it starts with HTML", () => {

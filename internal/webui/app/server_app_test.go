@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 	"time"
 
@@ -110,6 +111,61 @@ func TestNewServer_FleetClientSkipsDaemonPoolAndHealthProbe(t *testing.T) {
 	if _, ok := body["pool"]; ok {
 		t.Fatal("/api/health should not report daemon pool stats in FleetDB-backed mode")
 	}
+}
+
+func TestAddBundledLoopbackFrontendOrigins(t *testing.T) {
+	t.Run("bundled loopback open mode", func(t *testing.T) {
+		cfg := webui.ServerConfig{
+			BindAddress: "127.0.0.1",
+			FrontendDir: t.TempDir(),
+		}
+		addBundledLoopbackFrontendOrigins(&cfg, 49152)
+		want := []string{"http://localhost:49152", "http://127.0.0.1:49152"}
+		if !reflect.DeepEqual(cfg.FrontendOrigins, want) {
+			t.Fatalf("FrontendOrigins = %v, want %v", cfg.FrontendOrigins, want)
+		}
+	})
+
+	t.Run("loopback bind detection", func(t *testing.T) {
+		for _, bindAddress := range []string{"localhost", "127.0.0.1", "::1"} {
+			if !isLoopbackBindAddress(bindAddress) {
+				t.Errorf("isLoopbackBindAddress(%q) = false, want true", bindAddress)
+			}
+		}
+		for _, bindAddress := range []string{"", "0.0.0.0", "::", "192.0.2.10"} {
+			if isLoopbackBindAddress(bindAddress) {
+				t.Errorf("isLoopbackBindAddress(%q) = true, want false", bindAddress)
+			}
+		}
+	})
+
+	t.Run("explicit frontend origin is preserved", func(t *testing.T) {
+		cfg := webui.ServerConfig{
+			BindAddress:     "127.0.0.1",
+			FrontendDir:     t.TempDir(),
+			FrontendOrigins: []string{"https://app.example.com"},
+		}
+		addBundledLoopbackFrontendOrigins(&cfg, 49152)
+		want := []string{"https://app.example.com"}
+		if !reflect.DeepEqual(cfg.FrontendOrigins, want) {
+			t.Fatalf("FrontendOrigins = %v, want %v", cfg.FrontendOrigins, want)
+		}
+	})
+
+	t.Run("remote and non-loopback are not widened", func(t *testing.T) {
+		for _, cfg := range []webui.ServerConfig{
+			{BindAddress: "127.0.0.1", FrontendDir: t.TempDir(), ExtAuthURL: "https://auth.example.com"},
+			{BindAddress: "", FrontendDir: t.TempDir()},
+			{BindAddress: "0.0.0.0", FrontendDir: t.TempDir()},
+			{BindAddress: "192.0.2.10", FrontendDir: t.TempDir()},
+			{BindAddress: "127.0.0.1"},
+		} {
+			addBundledLoopbackFrontendOrigins(&cfg, 49152)
+			if len(cfg.FrontendOrigins) != 0 {
+				t.Fatalf("FrontendOrigins = %v, want none", cfg.FrontendOrigins)
+			}
+		}
+	})
 }
 
 // TestServer_ConfigDefaults_Port verifies that NewServer applies the

@@ -2,6 +2,7 @@ package opsimpl
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -81,6 +83,74 @@ func TestResolveWorkspaceConfigName_NilWorkspacesMap(t *testing.T) {
 	got := resolveWorkspaceConfigName(cfg, "dev")
 	if got != "" {
 		t.Errorf("resolveWorkspaceConfigName(cfg, 'dev') = %q, want empty", got)
+	}
+}
+
+func TestDedupeRepoPRQueriesUsesRemoteURLIdentity(t *testing.T) {
+	repos := []ops.WorkspaceRepo{
+		{Name: "one", Path: "/tmp/one", Remote: "origin", RemoteURL: "https://github.com/acme/one.git"},
+		{Name: "two", Path: "/tmp/two", Remote: "origin", RemoteURL: "https://github.com/acme/two.git"},
+	}
+
+	queries := dedupeRepoPRQueries(repos)
+	if len(queries) != 2 {
+		t.Fatalf("queries = %d, want one per remote URL", len(queries))
+	}
+}
+
+func TestDedupeRepoPRQueriesNormalizesGitHubRemoteURL(t *testing.T) {
+	repos := []ops.WorkspaceRepo{
+		{Name: "one", Path: "/tmp/one", RemoteURL: "https://github.com/Acme/Repo.git"},
+		{Name: "two", Path: "/tmp/two", RemoteURL: "https://github.com/acme/repo"},
+	}
+
+	queries := dedupeRepoPRQueries(repos)
+	if len(queries) != 1 {
+		t.Fatalf("queries = %d, want equivalent GitHub URLs deduplicated", len(queries))
+	}
+}
+
+func TestCollectRepoQueryPRsAddsWorkspaceSourceRepo(t *testing.T) {
+	queries := []*prRepoQuery{{
+		repo: ops.WorkspaceRepo{
+			Name:      "loomcli",
+			RemoteURL: "https://github.com/tysonthomas9/loomcli.git",
+		},
+		prs: []ops.GitPullRequest{{
+			Number: 205,
+			URL:    "https://github.com/tysonthomas9/loomcli/pull/205",
+		}},
+	}}
+
+	got := collectRepoQueryPRs(queries, &ops.GitPullRequestList{})
+	if len(got) != 1 {
+		t.Fatalf("pull requests = %+v, want one", got)
+	}
+	if got[0].RepoName != "tysonthomas9/loomcli" {
+		t.Fatalf("repo_name = %q, want GitHub owner/repo", got[0].RepoName)
+	}
+	if got[0].SourceRepo != "loomcli" {
+		t.Fatalf("source_repo = %q, want workspace repo name", got[0].SourceRepo)
+	}
+}
+
+func TestCollectRepoQueryPRsLeavesSourceRepoEmptyWhenWorkspaceRepoUnknown(t *testing.T) {
+	queries := []*prRepoQuery{{
+		prs: []ops.GitPullRequest{{
+			Number: 7,
+			URL:    "https://github.com/octocat/hello/pull/7",
+		}},
+	}}
+
+	got := collectRepoQueryPRs(queries, &ops.GitPullRequestList{})
+	if len(got) != 1 {
+		t.Fatalf("pull requests = %+v, want one", got)
+	}
+	if got[0].RepoName != "octocat/hello" {
+		t.Fatalf("repo_name = %q, want GitHub owner/repo derived from PR URL", got[0].RepoName)
+	}
+	if got[0].SourceRepo != "" {
+		t.Fatalf("source_repo = %q, want empty for unknown workspace repo", got[0].SourceRepo)
 	}
 }
 
@@ -228,6 +298,162 @@ func TestResolveAgentWorktree_StoreBackedFleetDB(t *testing.T) {
 	}
 }
 
+func TestResolveAgentWorktreeForRepo_StoreBackedFleetDB(t *testing.T) {
+	ctx := context.Background()
+	loomDir := t.TempDir()
+	wsRoot := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", loomDir)
+
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "Workspace One"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	for _, repo := range []store.RepoCreate{
+		{WorkspaceKey: "WS1", Name: "api", DefaultBranch: "main", Remote: "origin", Groups: []string{"backend"}},
+		{WorkspaceKey: "WS1", Name: "docs", DefaultBranch: "main", Remote: "origin", Groups: []string{"docs"}},
+	} {
+		if _, err := st.Repos().Create(ctx, repo); err != nil {
+			t.Fatalf("create repo %s: %v", repo.Name, err)
+		}
+	}
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: "WS1", Name: "task"}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "WS1",
+		Name:         "nova",
+		RoleName:     "task",
+		RepoGroups:   []string{"backend"},
+	}); err != nil {
+		t.Fatalf("create nova: %v", err)
+	}
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "WS1",
+		Name:         "any",
+		RoleName:     "task",
+	}); err != nil {
+		t.Fatalf("create any: %v", err)
+	}
+
+	novaAPIPath := filepath.Join(wsRoot, "worktrees", "api", "nova")
+	if err := runGit(t, novaAPIPath, "init", "-b", "feature/nova"); err != nil {
+		t.Fatalf("git init nova api: %v", err)
+	}
+	anyDocsPath := filepath.Join(wsRoot, "worktrees", "docs", "any")
+	if err := runGit(t, anyDocsPath, "init", "-b", "feature/any-docs"); err != nil {
+		t.Fatalf("git init any docs: %v", err)
+	}
+	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
+		sc.LastWorkspace = "WS1"
+		sc.Workspaces["WS1"] = bootstrap.WorkspaceLocalState{
+			Path: wsRoot,
+			Repos: map[string]string{
+				"api":  filepath.Join(wsRoot, "api"),
+				"docs": filepath.Join(wsRoot, "docs"),
+			},
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("save state cache: %v", err)
+	}
+
+	g := NewGitOps().WithStore(st)
+	got, err := g.ResolveAgentWorktreeForRepo("WS1", "nova", "api")
+	if err != nil {
+		t.Fatalf("ResolveAgentWorktreeForRepo nova/api: %v", err)
+	}
+	if got.Path != novaAPIPath || got.RepoName != "api" || got.Branch != "feature/nova" {
+		t.Fatalf("nova/api = %+v, want path %q repo api branch feature/nova", got, novaAPIPath)
+	}
+
+	got, err = g.ResolveAgentWorktreeForRepo("WS1", "any", "docs")
+	if err != nil {
+		t.Fatalf("ResolveAgentWorktreeForRepo any/docs: %v", err)
+	}
+	if got.Path != anyDocsPath || got.RepoName != "docs" {
+		t.Fatalf("any/docs = %+v, want path %q repo docs", got, anyDocsPath)
+	}
+
+	if _, err := g.ResolveAgentWorktreeForRepo("WS1", "nova", "docs"); !errors.Is(err, ops.ErrAgentRepoNotAllowed) {
+		t.Fatalf("nova/docs err = %v, want ErrAgentRepoNotAllowed", err)
+	}
+	if _, err := g.ResolveAgentWorktreeForRepo("WS1", "nova", "missing"); !errors.Is(err, ops.ErrAgentRepoNotAllowed) {
+		t.Fatalf("nova/missing err = %v, want ErrAgentRepoNotAllowed", err)
+	}
+	if _, err := g.ResolveAgentWorktreeForRepo("WS1", "any", "api"); !errors.Is(err, ops.ErrAgentWorktreeNotFound) {
+		t.Fatalf("any/api err = %v, want ErrAgentWorktreeNotFound", err)
+	}
+}
+
+func TestResolveAgentWorktree_BrokenGitMetadataReturnsUnknownBranch(t *testing.T) {
+	ctx := context.Background()
+	loomDir := t.TempDir()
+	wsRoot := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", loomDir)
+
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "Workspace One"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := st.Repos().Create(ctx, store.RepoCreate{
+		WorkspaceKey:  "WS1",
+		Name:          "api",
+		DefaultBranch: "main",
+		Remote:        "origin",
+		Groups:        []string{"backend"},
+	}); err != nil {
+		t.Fatalf("create repo: %v", err)
+	}
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: "WS1", Name: "task"}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "WS1",
+		Name:         "broken",
+		RoleName:     "task",
+		RepoGroups:   []string{"backend"},
+	}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	wtPath := filepath.Join(wsRoot, "worktrees", "api", "broken")
+	if err := os.MkdirAll(wtPath, 0755); err != nil {
+		t.Fatalf("mkdir worktree: %v", err)
+	}
+	missingAdminDir := filepath.Join(wsRoot, ".git", "worktrees", "broken")
+	if err := os.WriteFile(filepath.Join(wtPath, ".git"), []byte("gitdir: "+missingAdminDir+"\n"), 0644); err != nil {
+		t.Fatalf("write broken git pointer: %v", err)
+	}
+	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
+		sc.LastWorkspace = "WS1"
+		sc.Workspaces["WS1"] = bootstrap.WorkspaceLocalState{
+			Path:  wsRoot,
+			Repos: map[string]string{"api": filepath.Join(wsRoot, "api")},
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("save state cache: %v", err)
+	}
+
+	g := NewGitOps().WithStore(st)
+	for name, resolve := range map[string]func() (*ops.AgentWorktree, error){
+		"ResolveAgentWorktree": func() (*ops.AgentWorktree, error) {
+			return g.ResolveAgentWorktree("WS1", "broken")
+		},
+		"ResolveAgentWorktreeForRepo": func() (*ops.AgentWorktree, error) {
+			return g.ResolveAgentWorktreeForRepo("WS1", "broken", "api")
+		},
+	} {
+		got, err := resolve()
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got.Path != wtPath || got.Branch != "unknown" || got.RepoName != "api" {
+			t.Fatalf("%s = %+v, want path %q branch unknown repo api", name, got, wtPath)
+		}
+	}
+}
+
 func runGit(t *testing.T, dir string, args ...string) error {
 	t.Helper()
 	if args[0] == "init" {
@@ -244,88 +470,32 @@ func runGit(t *testing.T, dir string, args ...string) error {
 	return err
 }
 
-// TestResolveAgentWorktreeOrPrimary_LeadFallsBackToPrimaryRepo verifies that a
-// lead agent (which has no local worktree) resolves to the workspace's primary
-// repo worktree via ResolveAgentWorktreeOrPrimary, while a non-lead agent with
-// no worktree still errors (so non-lead behavior is unchanged). ResolveAgentWorktree
-// itself keeps erroring for the lead — only the lead-aware resolver falls back.
-func TestResolveAgentWorktreeOrPrimary_LeadFallsBackToPrimaryRepo(t *testing.T) {
-	ctx := context.Background()
-	loomDir := t.TempDir()
-	wsRoot := t.TempDir()
-	t.Setenv("LOOM_CONFIG_DIR", loomDir)
-
-	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "Workspace One"}); err != nil {
-		t.Fatalf("create workspace: %v", err)
-	}
-	if _, err := st.Repos().Create(ctx, store.RepoCreate{
-		WorkspaceKey:  "WS1",
-		Name:          "api",
-		DefaultBranch: "main",
-		Remote:        "origin",
-	}); err != nil {
-		t.Fatalf("create repo: %v", err)
-	}
-	if _, err := st.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: "WS1", Name: "lead"}); err != nil {
-		t.Fatalf("create lead role: %v", err)
-	}
-	if _, err := st.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: "WS1", Name: "task"}); err != nil {
-		t.Fatalf("create task role: %v", err)
-	}
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{
-		WorkspaceKey: "WS1",
-		Name:         "lead-b",
-		RoleName:     "lead",
-	}); err != nil {
-		t.Fatalf("create lead agent: %v", err)
-	}
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{
-		WorkspaceKey: "WS1",
-		Name:         "nova",
-		RoleName:     "task",
-	}); err != nil {
-		t.Fatalf("create task agent: %v", err)
-	}
-
-	// Primary repo worktree exists at <wsRoot>/api, but NO agent worktrees are
-	// checked out (leads get none; nova's is also missing here).
-	primaryPath := filepath.Join(wsRoot, "api")
-	if err := runGit(t, primaryPath, "init", "-b", "main"); err != nil {
-		t.Fatalf("git init primary: %v", err)
-	}
-	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
-		sc.LastWorkspace = "WS1"
-		sc.Workspaces["WS1"] = bootstrap.WorkspaceLocalState{
-			Path:  wsRoot,
-			Repos: map[string]string{"api": primaryPath},
+func TestGitShowFileAtRevPreservesNotFoundKind(t *testing.T) {
+	repo := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "-b", "main"},
+		{"config", "user.email", "test@example.com"},
+		{"config", "user.name", "Test"},
+	} {
+		if err := runGit(t, repo, args...); err != nil {
+			t.Fatalf("git %v: %v", args, err)
 		}
-		return nil
-	}); err != nil {
-		t.Fatalf("save state cache: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "tracked.txt"), []byte("tracked\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", "tracked.txt"}, {"commit", "-m", "seed"}} {
+		if err := runGit(t, repo, args...); err != nil {
+			t.Fatalf("git %v: %v", args, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(repo, "untracked.txt"), []byte("untracked\n"), 0600); err != nil {
+		t.Fatal(err)
 	}
 
-	g := NewGitOps().WithStore(st)
-
-	// ResolveAgentWorktree still 404s for the lead (no agent worktree on disk).
-	if _, err := g.ResolveAgentWorktree("WS1", "lead-b"); err == nil {
-		t.Fatal("ResolveAgentWorktree(lead-b): expected error, got nil")
-	}
-
-	// OrPrimary falls back to the primary repo worktree for the lead.
-	got, err := g.ResolveAgentWorktreeOrPrimary("WS1", "lead-b")
-	if err != nil {
-		t.Fatalf("ResolveAgentWorktreeOrPrimary(lead-b): %v", err)
-	}
-	if got.Path != primaryPath {
-		t.Fatalf("Path = %q, want %q", got.Path, primaryPath)
-	}
-	if got.RepoName != "api" || got.DefaultBranch != "main" || !got.IsWorkspace {
-		t.Fatalf("unexpected primary worktree: %+v", got)
-	}
-
-	// Non-lead agent with no worktree: OrPrimary still errors (no fallback).
-	if _, err := g.ResolveAgentWorktreeOrPrimary("WS1", "nova"); err == nil {
-		t.Fatal("ResolveAgentWorktreeOrPrimary(nova): expected error for non-lead, got nil")
+	_, err := NewGitOps().GitShowFileAtRev(context.Background(), repo, "HEAD", "untracked.txt", 1024)
+	var inspectionErr interface{ InspectionKind() string }
+	if !errors.As(err, &inspectionErr) || inspectionErr.InspectionKind() != "not_found" {
+		t.Fatalf("error = %T %v, want preserved not_found inspection kind", err, err)
 	}
 }

@@ -515,6 +515,37 @@ func TestPatchWorkspaceBackend_StoreBackedWritesDaemonProfile(t *testing.T) {
 	}
 }
 
+func TestPatchWorkspaceDesignFormat_StoreBackedUpdatesWorkspace(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha Project", DesignFormat: "markdown"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+
+	svc := NewWorkspaceService(WorkspaceServiceConfig{Store: st})
+	data, err := svc.PatchWorkspaceDesignFormat(ctx, "ALPHA", "html")
+	if err != nil {
+		t.Fatalf("PatchWorkspaceDesignFormat: %v", err)
+	}
+	if data.ID != "ALPHA" || data.DesignFormat != "html" {
+		t.Fatalf("workspace data = %+v", data)
+	}
+	ws, err := st.Workspaces().Get(ctx, "ALPHA")
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	if ws.DesignFormat != "html" {
+		t.Fatalf("DesignFormat = %q, want html", ws.DesignFormat)
+	}
+}
+
+func TestPatchWorkspaceDesignFormat_RejectsInvalidFormat(t *testing.T) {
+	svc := NewWorkspaceService(WorkspaceServiceConfig{Store: memstore.New()})
+	if _, err := svc.PatchWorkspaceDesignFormat(context.Background(), "ALPHA", "svg"); err == nil {
+		t.Fatal("expected validation error")
+	}
+}
+
 func TestGetWorkspaceJob_StoreFallbackSurvivesJobStoreLoss(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()

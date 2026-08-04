@@ -169,6 +169,31 @@ func TestBuildAgentLaunchSpecIncludesBuiltinPromptForInteractiveRole(t *testing.
 	}
 }
 
+func TestBuildAgentLaunchSpecIncludesCheckoutPromptForPRReviewerRole(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{
+		WorkspaceKey: "E2E",
+		Name:         "pr-reviewer",
+		Kind:         string(domain.RoleKindInteractive),
+		PromptFile:   "builtin:pr-review-checkout",
+	}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	agent := &domain.Agent{WorkspaceKey: "E2E", Name: "review-nova-pr-7", RoleName: "pr-reviewer"}
+
+	launch, _, err := buildAgentLaunchSpec(ctx, st, "E2E", "term_review", agent, "lead-1")
+	if err != nil {
+		t.Fatalf("buildAgentLaunchSpec: %v", err)
+	}
+	cmd := strings.Join(launch.Argv, " ")
+	for _, want := range []string{"'lead'", "'--prompt' 'builtin:pr-review-checkout'"} {
+		if !strings.Contains(cmd, want) {
+			t.Fatalf("launch command %q missing %q", cmd, want)
+		}
+	}
+}
+
 func TestBuildAgentLaunchSpecInlinePromptOmitsRolePromptFile(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()

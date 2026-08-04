@@ -13,6 +13,7 @@ import {
 import { useWorkspaceContext } from "./useWorkspaceContext";
 
 const POLL_INTERVAL = 30_000;
+const MAX_POLL_INTERVAL = 5 * 60_000;
 
 export interface UsePullRequestsOptions {
   state?: PullRequestListState;
@@ -44,6 +45,12 @@ export function usePullRequests({
   // Dedupes overlapping polls for the same workspace/state without blocking
   // the first fetch after a switch.
   const inFlightKeyRef = useRef<string | null>(null);
+  const pollDelayRef = useRef(POLL_INTERVAL);
+
+  const invalidatePendingRequest = useCallback(() => {
+    requestSeqRef.current++;
+    inFlightKeyRef.current = null;
+  }, []);
 
   const doFetch = useCallback(async () => {
     if (!enabled) return;
@@ -59,10 +66,15 @@ export function usePullRequests({
         setPullRequests(result.pullRequests);
         setWarnings(result.warnings);
         setError(null);
+        pollDelayRef.current = POLL_INTERVAL;
       }
     } catch (err) {
       if (seq === requestSeqRef.current) {
         setError(err instanceof Error ? err : new Error(String(err)));
+        pollDelayRef.current = Math.min(
+          pollDelayRef.current * 2,
+          MAX_POLL_INTERVAL,
+        );
       }
     } finally {
       if (inFlightKeyRef.current === key) {
@@ -78,21 +90,48 @@ export function usePullRequests({
     setPullRequests([]);
     setWarnings([]);
     setError(null);
+    pollDelayRef.current = POLL_INTERVAL;
   }, [workspaceId, state]);
 
   useEffect(() => {
     if (!enabled) return;
 
-    void doFetch();
-    const intervalId = setInterval(doFetch, POLL_INTERVAL);
+    let stopped = false;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const clearPoll = (): void => {
+      if (timeoutId !== null) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+    };
+    const schedulePoll = (): void => {
+      clearPoll();
+      if (stopped || document.hidden) return;
+      timeoutId = setTimeout(() => {
+        void runPoll();
+      }, pollDelayRef.current);
+    };
+    const runPoll = async (): Promise<void> => {
+      await doFetch();
+      schedulePoll();
+    };
+    const handleVisibilityChange = (): void => {
+      clearPoll();
+      if (!document.hidden) void runPoll();
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    if (!document.hidden) void runPoll();
     return () => {
-      clearInterval(intervalId);
+      stopped = true;
+      clearPoll();
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       // Invalidate any in-flight response for the old workspace/state and
       // let the next key's fetch start immediately.
-      requestSeqRef.current++;
-      inFlightKeyRef.current = null;
+      invalidatePendingRequest();
     };
-  }, [enabled, doFetch]);
+  }, [enabled, doFetch, invalidatePendingRequest]);
 
   return { pullRequests, warnings, loading, error, refetch: doFetch };
 }

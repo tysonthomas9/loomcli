@@ -107,6 +107,7 @@ export interface WorkspaceData {
   workspaces: WorkspaceSummary[];
   workspace_order?: string[];
   default_workspace: string;
+  design_format?: "markdown" | "html";
 }
 
 // ============= Response Types =============

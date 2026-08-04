@@ -4,6 +4,8 @@ import type { GitPullRequest } from "@/api/workspace";
 import type { Issue } from "@/types";
 import {
   buildPullRequestRows,
+  groupKeyFor,
+  prReviewRef,
   prStateFromGithub,
   rowState,
 } from "@/views/PRsPage";
@@ -46,6 +48,30 @@ describe("prStateFromGithub", () => {
         review_decision: "CHANGES_REQUESTED",
       }).label,
     ).toBe("Changes");
+  });
+});
+
+describe("prReviewRef", () => {
+  const base: GitPullRequest = {
+    number: 7,
+    title: "Fix bug",
+    url: "https://github.com/octocat/hello/pull/7",
+    state: "OPEN",
+    is_draft: false,
+    head_ref_name: "feat",
+    base_ref_name: "main",
+    repo_name: "octocat/hello",
+  };
+
+  it("builds the review route ref from repo name and number", () => {
+    expect(prReviewRef(base)).toBe("octocat/hello#7");
+  });
+
+  it("returns null when repo name or number is missing", () => {
+    expect(prReviewRef({ ...base, repo_name: "" })).toBeNull();
+    expect(
+      prReviewRef({ ...base, number: undefined as unknown as number }),
+    ).toBeNull();
   });
 });
 
@@ -96,6 +122,30 @@ describe("buildPullRequestRows (loom-first queue)", () => {
     expect(rows).toHaveLength(2);
     const unlinked = rows.find((r) => !r.issue);
     expect(unlinked?.pr?.number).toBe(3);
+  });
+
+  it("deduplicates registry duplicates for the same unlinked PR URL", () => {
+    const duplicate = ghPr(3, { title: "Duplicate registry row" });
+    const rows = buildPullRequestRows([], [ghPr(3), duplicate]);
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.pr?.number).toBe(3);
+  });
+
+  it("groups loom-only and enriched rows by the workspace repo name", () => {
+    const loomOnly: Parameters<typeof groupKeyFor>[0] = {
+      issue: makeIssue({ repo: "loomcli" }),
+    };
+    const enriched: Parameters<typeof groupKeyFor>[0] = {
+      issue: makeIssue({ repo: "loomcli" }),
+      pr: ghPr(7, {
+        repo_name: "tysonthomas9/loomcli",
+        source_repo: "loomcli",
+      }),
+    };
+
+    expect(groupKeyFor(loomOnly, "repo")).toBe("loomcli");
+    expect(groupKeyFor(enriched, "repo")).toBe("loomcli");
   });
 
   it("excludes issues that are neither in review nor PR-linked", () => {

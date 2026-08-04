@@ -2,14 +2,16 @@ package domain
 
 // BuiltinInteractivePrompt is a selectable built-in terminal-agent prompt.
 type BuiltinInteractivePrompt struct {
-	ID    string `json:"id"`
-	Label string `json:"label"`
+	ID     string `json:"id"`
+	Label  string `json:"label"`
+	Hidden bool   `json:"-"`
 }
 
 // ordered; ID must match an embedded internal/cli/agent/prompts/<ID>.md
 var builtinInteractivePrompts = []BuiltinInteractivePrompt{
 	{ID: "lead", Label: "Lead"},
 	{ID: "pr-review", Label: "PR Review"},
+	{ID: "pr-review-checkout", Label: "PR Review (checkout)", Hidden: true},
 }
 
 // BuiltinInteractivePrompts returns the built-in interactive terminal prompts.

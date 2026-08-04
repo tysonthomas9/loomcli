@@ -42,6 +42,12 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    environment:
+      # fleet-db requires an explicit artifact content backend when issue-design
+      # storage is artifact-backed (v5 DYNAMIC-WORKFLOWS-18). local keeps the
+      # dogfood stack self-contained; without it fleet-db exits on startup.
+      FLEETDB_ARTIFACT_CONTENT_BACKEND: local
+      FLEETDB_ARTIFACT_CONTENT_DIR: /tmp/fleet-db-artifacts
     command:
       - "--redis-addr"
       - "redis:6379"
@@ -76,6 +82,9 @@ services:
       LOOM_WEBUI_URL: http://127.0.0.1:8080
       LOCAL_MODE_API_URL: "http://localhost:${LOCAL_MODE_API_PORT:-8282}"
       LOCAL_MODE_UI_URL: "http://localhost:${LOCAL_MODE_UI_PORT:-8283}"
+      # File-browser routes fail closed unless the loopback frontend origin
+      # is explicitly allowed; Caddy preserves the browser's Host header.
+      LOOM_FRONTEND_URL: "http://localhost:${LOCAL_MODE_UI_PORT:-8283},http://127.0.0.1:${LOCAL_MODE_UI_PORT:-8283}"
       LOOM_LOCAL_MODE_PLAN_TASK_ID: LOCALMODE-2
       LOOM_LOCAL_MODE_CODE_TASK_ID: LOCALMODE-3
       LOOM_LOCAL_MODE_STEP_DELAY: "2"
