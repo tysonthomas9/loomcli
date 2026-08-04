@@ -4,8 +4,9 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { GitPullRequest, WorkspaceAgentInfo } from "@/api/workspace";
+import type { WorkspaceAgentInfo } from "@/api/workspace";
 import type { Issue, LoomAgentStatus } from "@/types";
+import type { GitPullRequest } from "../api/pullRequests";
 
 import {
   PRReviewWorkspace,
@@ -44,29 +45,28 @@ vi.mock("react-router-dom", async (importOriginal) => {
   return {
     ...actual,
     useNavigate: () => mocks.navigate,
+    useOutletContext: () => ({
+      sourceControl: {
+        workspaceId: mocks.workspaceContext.workspaceId,
+        repos: mocks.workspaceContext.repos,
+        agents: mocks.data.agents,
+        issues: mocks.data.issues,
+        refetchIssues: mocks.actions.refetch,
+        showToast: mocks.actions.showToast,
+        openIssue: mocks.actions.handleIssueClick,
+      },
+    }),
   };
 });
 
 vi.mock("@/api", () => ({
   createIssue: mocks.createIssue,
   updateIssue: mocks.updateIssue,
-}));
-
-vi.mock("@/api/workspace/prReview", () => ({
-  getPullRequestDetail: mocks.getPullRequestDetail,
-}));
-
-vi.mock("@/hooks/api", () => ({
   startAgent: mocks.startAgent,
 }));
 
-vi.mock("@/hooks/workspace", () => ({
-  useWorkspaceContext: () => mocks.workspaceContext,
-}));
-
-vi.mock("@/contexts/WorkspaceViewContext", () => ({
-  useWorkspaceViewData: () => mocks.data,
-  useWorkspaceViewActions: () => mocks.actions,
+vi.mock("../api/prReview", () => ({
+  getPullRequestDetail: mocks.getPullRequestDetail,
 }));
 
 vi.mock("@/components/CreateAgentModal/CreateAgentModal", () => ({
@@ -98,7 +98,7 @@ vi.mock("@/components/CreateAgentModal/CreateAgentModal", () => ({
   },
 }));
 
-vi.mock("@/components/PRDiscussionPanel", () => ({
+vi.mock("../components/PRDiscussionPanel", () => ({
   PRDiscussionPanel: ({
     onStaleSubject,
   }: {
@@ -116,11 +116,14 @@ vi.mock("@/components/PRDiscussionPanel", () => ({
   ),
 }));
 
-vi.mock("@/components/IssueDetailPanel", () => ({
+vi.mock("../components/PRCompareDiffPane", () => ({
   PRCompareDiffPane: ({ refreshKey }: { refreshKey?: number }) => {
     mocks.diffRefreshKeys.push(refreshKey);
     return <div data-testid="pr-compare-diff-pane" />;
   },
+}));
+
+vi.mock("@/components/IssueDetailPanel", () => ({
   PRFilesTab: () => <div data-testid="pr-files-tab" />,
 }));
 

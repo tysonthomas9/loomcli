@@ -11,14 +11,14 @@
 import { useMemo, useState, type KeyboardEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 
-import type { GitPullRequest } from "@/api/workspace";
 import type { Issue } from "@/types";
-import { useWorkspaceViewData } from "@/contexts/WorkspaceViewContext";
-import { usePullRequests } from "@/hooks/workspace";
 import { getReviewType, isPRUrl, prKeyFromRef } from "@/utils/issue";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 
+import type { GitPullRequest } from "./api/pullRequests";
+import { useSourceControlContext } from "./context";
 import { PRReviewWorkspace } from "./PRReviewWorkspace";
+import { usePullRequests } from "./usePullRequests";
 import styles from "./PRsPage.module.css";
 
 type PRFilter = "all" | "review" | "open" | "merged";
@@ -204,8 +204,9 @@ function Avatar({ name }: { name: string }): JSX.Element {
 }
 
 export function PRsPage(): JSX.Element {
-  const { issues } = useWorkspaceViewData();
+  const { issues, workspaceId } = useSourceControlContext();
   const { pullRequests, warnings, loading, error } = usePullRequests({
+    workspaceId,
     state: "all",
   });
   const [filter, setFilter] = useState<PRFilter>("all");

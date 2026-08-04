@@ -10,12 +10,8 @@ const mocks = vi.hoisted(() => ({
   workspaceId: "WS",
 }));
 
-vi.mock("@/api/workspace/pullRequests", () => ({
+vi.mock("../api/pullRequests", () => ({
   fetchPullRequests: mocks.fetchPullRequests,
-}));
-
-vi.mock("../useWorkspaceContext", () => ({
-  useWorkspaceContext: () => ({ workspaceId: mocks.workspaceId }),
 }));
 
 let documentHidden = false;
@@ -54,7 +50,7 @@ describe("usePullRequests polling", () => {
   });
 
   it("pauses while hidden and refreshes immediately when visible", async () => {
-    renderHook(() => usePullRequests());
+    renderHook(() => usePullRequests({ workspaceId: mocks.workspaceId }));
     await flushPromises();
     expect(mocks.fetchPullRequests).toHaveBeenCalledTimes(1);
 
@@ -71,7 +67,7 @@ describe("usePullRequests polling", () => {
 
   it("backs off after failure and resets after success", async () => {
     mocks.fetchPullRequests.mockRejectedValueOnce(new Error("upstream down"));
-    renderHook(() => usePullRequests());
+    renderHook(() => usePullRequests({ workspaceId: mocks.workspaceId }));
     await flushPromises();
     expect(mocks.fetchPullRequests).toHaveBeenCalledTimes(1);
 

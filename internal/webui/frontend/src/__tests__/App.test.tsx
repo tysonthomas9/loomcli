@@ -2606,6 +2606,19 @@ describe("App", () => {
       expect(await screen.findByTestId("terminal-view")).toBeInTheDocument();
     });
 
+    it("preserves the same TerminalView instance when the Source Control route opens", async () => {
+      mockStoreState = createMockUseIssuesReturn({});
+      mockUseRouteView.mockReturnValue(createViewStateReturn("kanban"));
+
+      const { rerender } = render(<App />);
+      const before = await screen.findByTestId("terminal-view");
+
+      mockUseRouteView.mockReturnValue(createViewStateReturn("prs"));
+      rerender(<App />);
+
+      expect(await screen.findByTestId("terminal-view")).toBe(before);
+    });
+
     it("TerminalView wrapper has display:none when view is not terminal", async () => {
       const mockReturn = createMockUseIssuesReturn({});
       mockStoreState = mockReturn;

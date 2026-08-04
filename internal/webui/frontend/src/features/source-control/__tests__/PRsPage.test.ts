@@ -1,14 +1,14 @@
 import { describe, it, expect } from "vitest";
 
-import type { GitPullRequest } from "@/api/workspace";
 import type { Issue } from "@/types";
+import type { GitPullRequest } from "../api/pullRequests";
 import {
   buildPullRequestRows,
   groupKeyFor,
   prReviewRef,
   prStateFromGithub,
   rowState,
-} from "@/views/PRsPage";
+} from "../PRsPage";
 
 function makeIssue(overrides: Partial<Issue>): Issue {
   return {

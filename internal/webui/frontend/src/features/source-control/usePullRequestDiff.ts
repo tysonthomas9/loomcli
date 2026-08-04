@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { getPullRequestDiff, type PullRequestDiff } from "@/api/workspace";
+import { getPullRequestDiff, type PullRequestDiff } from "./api/prReview";
 
 export interface UsePullRequestDiffParams {
   workspaceId: string;

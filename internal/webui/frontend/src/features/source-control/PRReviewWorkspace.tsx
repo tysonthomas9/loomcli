@@ -13,29 +13,25 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { createIssue, updateIssue } from "@/api";
-import { getPullRequestDetail } from "@/api/workspace/prReview";
-import { startAgent } from "@/hooks/api";
+import { createIssue, startAgent, updateIssue } from "@/api";
 import { CreateAgentModal } from "@/components/CreateAgentModal/CreateAgentModal";
 import {
   buildWorkerByTaskId,
   isWorkerTerminalOpenable,
 } from "@/components/AgentWorkPanel/AgentWorkPanel";
-import { PRDiscussionPanel } from "@/components/PRDiscussionPanel";
-import { PRCompareDiffPane, PRFilesTab } from "@/components/IssueDetailPanel";
+import { PRFilesTab } from "@/components/IssueDetailPanel";
 import { TaskSessionDiffPane } from "@/components/IssueDetailPanel/sessions/TaskSessionDiffPane";
-import {
-  useWorkspaceViewData,
-  useWorkspaceViewActions,
-} from "@/contexts/WorkspaceViewContext";
-import { useWorkspaceContext } from "@/hooks/workspace";
-import type { GitPullRequest } from "@/api/workspace";
 import type { Issue, LoomAgentStatus } from "@/types";
 import { parseLoomStatus } from "@/types";
 import { isInteractiveAgent, isWorkerRole } from "@/utils/agentRole";
 import { isPRUrl } from "@/utils/issue";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 
+import type { GitPullRequest } from "./api/pullRequests";
+import { getPullRequestDetail } from "./api/prReview";
+import { PRCompareDiffPane } from "./components/PRCompareDiffPane";
+import { PRDiscussionPanel } from "./components/PRDiscussionPanel";
+import { useSourceControlContext } from "./context";
 import styles from "./PRReviewWorkspace.module.css";
 
 export interface PRReviewWorkspaceProps {
@@ -145,9 +141,15 @@ export function PRReviewWorkspace({
   onLinkedTicket,
 }: PRReviewWorkspaceProps): JSX.Element {
   const navigate = useNavigate();
-  const { agents, issues } = useWorkspaceViewData();
-  const { refetch, showToast, handleIssueClick } = useWorkspaceViewActions();
-  const { repos, workspaceId } = useWorkspaceContext();
+  const {
+    agents,
+    issues,
+    refetchIssues,
+    showToast,
+    openIssue,
+    repos,
+    workspaceId,
+  } = useSourceControlContext();
 
   const [agentMenuOpen, setAgentMenuOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
@@ -298,7 +300,7 @@ export function PRReviewWorkspace({
           type: "warning",
         });
       }
-      refetch();
+      refetchIssues();
       showToast(`${agentName} is reviewing ${issue.id}`);
     } catch (err) {
       showToast(
@@ -334,7 +336,7 @@ export function PRReviewWorkspace({
       // the issues list when the parent switches to ?review=<newId> (matches
       // App.handleCreateIssueSuccess). Without this the review gate misses the
       // not-yet-loaded issue and bounces back to the PR queue.
-      await refetch();
+      await refetchIssues();
       showToast(`Created ${created.id} for this pull request`);
       onLinkedTicket?.(created.id);
     } catch (err) {
@@ -394,7 +396,7 @@ export function PRReviewWorkspace({
                 <button
                   type="button"
                   className={styles.ticketLink}
-                  onClick={() => handleIssueClick(issue)}
+                  onClick={() => openIssue(issue)}
                 >
                   Open ticket
                 </button>

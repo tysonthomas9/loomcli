@@ -8,14 +8,13 @@ import {
   fetchPullRequests,
   type GitPullRequest,
   type PullRequestListState,
-} from "@/api/workspace/pullRequests";
-
-import { useWorkspaceContext } from "./useWorkspaceContext";
+} from "./api/pullRequests";
 
 const POLL_INTERVAL = 30_000;
 const MAX_POLL_INTERVAL = 5 * 60_000;
 
 export interface UsePullRequestsOptions {
+  workspaceId: string;
   state?: PullRequestListState;
   enabled?: boolean;
 }
@@ -30,10 +29,10 @@ export interface UsePullRequestsReturn {
 }
 
 export function usePullRequests({
+  workspaceId,
   state = "all",
   enabled = true,
-}: UsePullRequestsOptions = {}): UsePullRequestsReturn {
-  const { workspaceId } = useWorkspaceContext();
+}: UsePullRequestsOptions): UsePullRequestsReturn {
   const [pullRequests, setPullRequests] = useState<GitPullRequest[]>([]);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);

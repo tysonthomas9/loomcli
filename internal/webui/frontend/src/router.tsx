@@ -130,7 +130,9 @@ const viewRoutes = [
   {
     path: "prs",
     lazy: () =>
-      import("@/views/PRsPage").then((m) => ({ Component: m.PRsPage })),
+      import("@/features/source-control").then((m) => ({
+        Component: m.SourceControlPage,
+      })),
   },
   {
     path: "settings",

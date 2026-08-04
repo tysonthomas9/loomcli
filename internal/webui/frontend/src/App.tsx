@@ -1315,6 +1315,31 @@ function App() {
     ],
   );
 
+  // Source Control receives one narrow route-scoped composition object rather
+  // than importing the shell's broad WorkspaceViewContext. React Router keeps
+  // this value available only to the active child route; the Terminal remains
+  // mounted independently below the Outlet.
+  const sourceControlRouteContext = useMemo(
+    () => ({
+      workspaceId,
+      repos: workspaceRepos,
+      issues,
+      agents,
+      refetchIssues: refetch,
+      openIssue: handleIssueClick,
+      showToast,
+    }),
+    [
+      workspaceId,
+      workspaceRepos,
+      issues,
+      agents,
+      refetch,
+      handleIssueClick,
+      showToast,
+    ],
+  );
+
   // Whether the current view depends on issue data (for stale banner suppression)
   const isIssueBasedView =
     activeView === "kanban" ||
@@ -1490,7 +1515,9 @@ function App() {
                 actions={workspaceViewActions}
               >
                 <Suspense fallback={<LoadingSkeleton.Column />}>
-                  <Outlet />
+                  <Outlet
+                    context={{ sourceControl: sourceControlRouteContext }}
+                  />
                 </Suspense>
               </WorkspaceViewProvider>
               {activeView !== "agents" && (

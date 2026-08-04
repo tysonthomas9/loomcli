@@ -1,8 +1,8 @@
 import { useState } from "react";
 
-import { TerminalView } from "@/components/TerminalView";
-import { usePRReviewConversation } from "@/hooks/workspace";
+import { TerminalView } from "@/components/TerminalView/TerminalView";
 
+import { usePRReviewConversation } from "../usePRReviewConversation";
 import styles from "./PRDiscussionPanel.module.css";
 
 interface PRDiscussionPanelProps {

@@ -6,11 +6,11 @@ import "@testing-library/jest-dom";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { getPullRequestDiff, type PullRequestDiff } from "@/api/workspace";
+import { getPullRequestDiff, type PullRequestDiff } from "../../api/prReview";
 
 import { PRCompareDiffPane } from "../PRCompareDiffPane";
 
-vi.mock("@/api/workspace", () => ({
+vi.mock("../../api/prReview", () => ({
   getPullRequestDiff: vi.fn(),
 }));
 

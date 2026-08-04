@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 
 import type { DiffFilePatch } from "@/api/issues";
-import type { PullRequestDiff } from "@/api/workspace";
 import { DiffFileViewer } from "@/components/AgentDetailPanel";
-import { usePullRequestDiff } from "@/hooks/workspace";
 
+import type { PullRequestDiff } from "../api/prReview";
+import { usePullRequestDiff } from "../usePullRequestDiff";
 import styles from "./PRCompareDiffPane.module.css";
 
 export interface PRCompareDiffPaneProps {

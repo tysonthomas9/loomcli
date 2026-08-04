@@ -5,7 +5,7 @@ import {
   getReviewerConversation,
   sendReviewerMessage,
   type ReviewerMessage,
-} from "@/api/workspace/prReview";
+} from "./api/prReview";
 import { ApiError } from "@/types/common/errors";
 
 const POLL_INTERVAL = 1_500;

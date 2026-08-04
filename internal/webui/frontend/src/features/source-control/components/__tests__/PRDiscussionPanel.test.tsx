@@ -18,7 +18,7 @@ const mocks = vi.hoisted(() => ({
   sendReviewerMessage: vi.fn(),
 }));
 
-vi.mock("@/api/workspace/prReview", () => ({
+vi.mock("../../api/prReview", () => ({
   ensureReviewer: mocks.ensureReviewer,
   getReviewerConversation: mocks.getReviewerConversation,
   sendReviewerMessage: mocks.sendReviewerMessage,
