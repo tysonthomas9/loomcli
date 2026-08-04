@@ -24,6 +24,10 @@ type fakeCatalogAPI struct {
 	repoListQuery workspacemodule.ListRepositoriesQuery
 }
 
+func (f *fakeCatalogAPI) Create(context.Context, workspacemodule.CreateCommand) (*workspacemodule.Reference, error) {
+	return f.value, f.err
+}
+
 func (f *fakeCatalogAPI) Resolve(_ context.Context, query workspacemodule.ResolveQuery) (*workspacemodule.Reference, error) {
 	f.resolveQuery = query
 	return f.value, f.err
@@ -43,6 +47,10 @@ func (f *fakeCatalogAPI) SetDesignFormat(_ context.Context, command workspacemod
 	return f.value, f.err
 }
 
+func (f *fakeCatalogAPI) SetLifecycle(context.Context, workspacemodule.SetLifecycleCommand) (*workspacemodule.Reference, error) {
+	return f.value, f.err
+}
+
 func (f *fakeCatalogAPI) Delete(context.Context, workspacemodule.DeleteCommand) (*workspacemodule.Reference, error) {
 	return f.value, f.err
 }
@@ -54,6 +62,14 @@ func (f *fakeCatalogAPI) GetRepository(context.Context, workspacemodule.GetRepos
 func (f *fakeCatalogAPI) ListRepositories(_ context.Context, query workspacemodule.ListRepositoriesQuery) ([]workspacemodule.Repository, error) {
 	f.repoListQuery = query
 	return f.repoValues, f.err
+}
+
+func (f *fakeCatalogAPI) RegisterRepository(context.Context, workspacemodule.RegisterRepositoryCommand) (*workspacemodule.Repository, error) {
+	return nil, f.err
+}
+
+func (f *fakeCatalogAPI) UnregisterRepository(context.Context, workspacemodule.UnregisterRepositoryCommand) (*workspacemodule.Repository, error) {
+	return nil, f.err
 }
 
 type fakeCatalogProjection struct {

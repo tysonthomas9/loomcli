@@ -67,3 +67,41 @@ func TestWorkspaceCapabilityListsOwnedRepositoryCatalog(t *testing.T) {
 		t.Fatalf("unexpected repositories: values=%#v err=%v", values, err)
 	}
 }
+
+func TestWorkspaceCapabilityPersistsOwnedWorkspaceAndRepositoryCommands(t *testing.T) {
+	st := memstore.New()
+	ctx := context.Background()
+	api, err := NewWorkspaceCapability(st.Workspaces(), st.Repos())
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := api.Create(ctx, workspace.CreateCommand{
+		Key: "HELLO", Name: "Hello", DefaultBranch: "main",
+	})
+	if err != nil || created.Key != "HELLO" {
+		t.Fatalf("create value=%#v err=%v", created, err)
+	}
+	branch := "trunk"
+	updated, err := api.SetLifecycle(ctx, workspace.SetLifecycleCommand{
+		Reference: "Hello", State: workspace.StateReady, DefaultBranch: &branch,
+	})
+	if err != nil || updated.State != workspace.StateReady || updated.DefaultBranch != "trunk" {
+		t.Fatalf("lifecycle value=%#v err=%v", updated, err)
+	}
+	repository, err := api.RegisterRepository(ctx, workspace.RegisterRepositoryCommand{
+		WorkspaceReference: "Hello", Name: "loom", RemoteURL: "https://example.invalid/loom.git",
+		Remote: "origin", DefaultBranch: "main", Groups: []string{"core"},
+	})
+	if err != nil || repository.WorkspaceKey != "HELLO" || repository.Groups[0] != "core" {
+		t.Fatalf("register repository value=%#v err=%v", repository, err)
+	}
+	deleted, err := api.UnregisterRepository(ctx, workspace.UnregisterRepositoryCommand{
+		WorkspaceReference: "HELLO", Name: "loom",
+	})
+	if err != nil || deleted.Name != "loom" {
+		t.Fatalf("unregister repository value=%#v err=%v", deleted, err)
+	}
+	if _, err := st.Repos().Get(ctx, "HELLO", "loom"); err == nil {
+		t.Fatal("repository still exists after owner command")
+	}
+}

@@ -128,6 +128,10 @@ type stubWorkspaceCatalog struct {
 	repositoryWorkspace string
 }
 
+func (*stubWorkspaceCatalog) Create(context.Context, workspacemodule.CreateCommand) (*workspacemodule.Reference, error) {
+	return nil, nil
+}
+
 func (s *stubWorkspaceCatalog) Resolve(_ context.Context, query workspacemodule.ResolveQuery) (*workspacemodule.Reference, error) {
 	s.reference = query.Reference
 	return &workspacemodule.Reference{Key: "ALPHA", Name: "Alpha"}, nil
@@ -142,6 +146,10 @@ func (*stubWorkspaceCatalog) Rename(context.Context, workspacemodule.RenameComma
 }
 
 func (*stubWorkspaceCatalog) SetDesignFormat(context.Context, workspacemodule.SetDesignFormatCommand) (*workspacemodule.Reference, error) {
+	return nil, nil
+}
+
+func (*stubWorkspaceCatalog) SetLifecycle(context.Context, workspacemodule.SetLifecycleCommand) (*workspacemodule.Reference, error) {
 	return nil, nil
 }
 
@@ -160,6 +168,14 @@ func (s *stubWorkspaceCatalog) ListRepositories(_ context.Context, query workspa
 		Name:         "loom",
 		RemoteURL:    "https://example.com/loom.git",
 	}}, nil
+}
+
+func (*stubWorkspaceCatalog) RegisterRepository(context.Context, workspacemodule.RegisterRepositoryCommand) (*workspacemodule.Repository, error) {
+	return nil, nil
+}
+
+func (*stubWorkspaceCatalog) UnregisterRepository(context.Context, workspacemodule.UnregisterRepositoryCommand) (*workspacemodule.Repository, error) {
+	return nil, nil
 }
 
 type stubWorkspaceCatalogProjection struct {

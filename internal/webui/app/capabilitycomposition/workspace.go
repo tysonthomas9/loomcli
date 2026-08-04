@@ -42,6 +42,18 @@ type workspaceRepositoryCatalogStore struct {
 	store store.RepoStore
 }
 
+func (s workspaceRepositoryCatalogStore) Create(ctx context.Context, input workspace.RepositoryInput) (*workspace.Repository, error) {
+	value, err := s.store.Create(ctx, store.RepoCreate{
+		WorkspaceKey: input.WorkspaceKey, Name: input.Name,
+		RemoteURL: input.RemoteURL, Remote: input.Remote, DefaultBranch: input.DefaultBranch,
+		Groups: append([]string(nil), input.Groups...), SourceRepoID: input.SourceRepoID,
+	})
+	if err != nil {
+		return nil, translateWorkspaceStoreError(err)
+	}
+	return workspaceRepository(value), nil
+}
+
 func (s workspaceRepositoryCatalogStore) Get(ctx context.Context, workspaceKey, name string) (*workspace.Repository, error) {
 	value, err := s.store.Get(ctx, workspaceKey, name)
 	if err != nil {
@@ -64,6 +76,21 @@ func (s workspaceRepositoryCatalogStore) List(ctx context.Context, workspaceKey 
 		out[index] = *mapped
 	}
 	return out, nil
+}
+
+func (s workspaceRepositoryCatalogStore) Delete(ctx context.Context, workspaceKey, name string) error {
+	return translateWorkspaceStoreError(s.store.Delete(ctx, workspaceKey, name))
+}
+
+func (s workspaceCatalogStore) Create(ctx context.Context, input workspace.CreateInput) (*workspace.Reference, error) {
+	value, err := s.store.Create(ctx, store.WorkspaceCreate{
+		Key: input.Key, Name: input.Name, Description: input.Description,
+		DefaultBranch: input.DefaultBranch, DesignFormat: input.DesignFormat,
+	})
+	if err != nil {
+		return nil, translateWorkspaceStoreError(err)
+	}
+	return workspaceReference(value), nil
 }
 
 func (s workspaceCatalogStore) GetByKey(ctx context.Context, key string) (*workspace.Reference, error) {
@@ -114,6 +141,21 @@ func (s workspaceCatalogStore) SetDesignFormat(ctx context.Context, key, format 
 	return workspaceReference(value), nil
 }
 
+func (s workspaceCatalogStore) SetLifecycle(ctx context.Context, key string, update workspace.LifecycleUpdate) (*workspace.Reference, error) {
+	state := domain.WorkspaceState(update.State)
+	message := update.ErrorMessage
+	patch := store.WorkspaceUpdate{State: &state, ErrorMessage: &message}
+	if update.DefaultBranch != nil {
+		branch := *update.DefaultBranch
+		patch.DefaultBranch = &branch
+	}
+	value, err := s.store.Update(ctx, key, patch)
+	if err != nil {
+		return nil, translateWorkspaceStoreError(err)
+	}
+	return workspaceReference(value), nil
+}
+
 func (s workspaceCatalogStore) Delete(ctx context.Context, key string) error {
 	return translateWorkspaceStoreError(s.store.Delete(ctx, key))
 }
@@ -148,6 +190,8 @@ func translateWorkspaceStoreError(err error) error {
 	case errors.Is(err, domain.ErrInvalid):
 		return fmt.Errorf("%s: %w", err.Error(), workspace.ErrInvalid)
 	case errors.Is(err, domain.ErrConflict):
+		return fmt.Errorf("%s: %w", err.Error(), workspace.ErrConflict)
+	case errors.Is(err, domain.ErrAlreadyExists):
 		return fmt.Errorf("%s: %w", err.Error(), workspace.ErrConflict)
 	case errors.Is(err, domain.ErrUnavailable):
 		return fmt.Errorf("%s: %w", err.Error(), workspace.ErrUnavailable)

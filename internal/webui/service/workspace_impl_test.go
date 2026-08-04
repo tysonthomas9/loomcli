@@ -27,6 +27,10 @@ type workspaceCapabilityStub struct {
 	deleteFn          func(context.Context, workspacemodule.DeleteCommand) (*workspacemodule.Reference, error)
 }
 
+func (stub *workspaceCapabilityStub) Create(context.Context, workspacemodule.CreateCommand) (*workspacemodule.Reference, error) {
+	return nil, workspacemodule.ErrUnavailable
+}
+
 func (stub *workspaceCapabilityStub) Resolve(context.Context, workspacemodule.ResolveQuery) (*workspacemodule.Reference, error) {
 	return nil, workspacemodule.ErrNotFound
 }
@@ -46,6 +50,10 @@ func (stub *workspaceCapabilityStub) SetDesignFormat(ctx context.Context, comman
 	return stub.setDesignFormatFn(ctx, command)
 }
 
+func (stub *workspaceCapabilityStub) SetLifecycle(context.Context, workspacemodule.SetLifecycleCommand) (*workspacemodule.Reference, error) {
+	return nil, workspacemodule.ErrUnavailable
+}
+
 func (stub *workspaceCapabilityStub) Delete(ctx context.Context, command workspacemodule.DeleteCommand) (*workspacemodule.Reference, error) {
 	if stub.deleteFn == nil {
 		return nil, workspacemodule.ErrUnavailable
@@ -58,6 +66,14 @@ func (stub *workspaceCapabilityStub) GetRepository(context.Context, workspacemod
 }
 
 func (stub *workspaceCapabilityStub) ListRepositories(context.Context, workspacemodule.ListRepositoriesQuery) ([]workspacemodule.Repository, error) {
+	return nil, workspacemodule.ErrUnavailable
+}
+
+func (stub *workspaceCapabilityStub) RegisterRepository(context.Context, workspacemodule.RegisterRepositoryCommand) (*workspacemodule.Repository, error) {
+	return nil, workspacemodule.ErrUnavailable
+}
+
+func (stub *workspaceCapabilityStub) UnregisterRepository(context.Context, workspacemodule.UnregisterRepositoryCommand) (*workspacemodule.Repository, error) {
 	return nil, workspacemodule.ErrUnavailable
 }
 

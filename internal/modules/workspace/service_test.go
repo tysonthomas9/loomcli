@@ -7,22 +7,27 @@ import (
 )
 
 type fakeCatalog struct {
-	byKey      *Reference
-	byName     *Reference
-	listed     []Reference
-	updated    *Reference
-	keyErr     error
-	nameErr    error
-	listErr    error
-	updateErr  error
-	keyQuery   string
-	nameQuery  string
-	renameKey  string
-	renameTo   string
-	formatKey  string
-	formatTo   string
-	deletedKey string
-	deleteErr  error
+	created         *Reference
+	createIn        CreateInput
+	createErr       error
+	byKey           *Reference
+	byName          *Reference
+	listed          []Reference
+	updated         *Reference
+	keyErr          error
+	nameErr         error
+	listErr         error
+	updateErr       error
+	keyQuery        string
+	nameQuery       string
+	renameKey       string
+	renameTo        string
+	formatKey       string
+	formatTo        string
+	lifecycleKey    string
+	lifecycleUpdate LifecycleUpdate
+	deletedKey      string
+	deleteErr       error
 }
 
 type fakeRepositoryCatalog struct {
@@ -31,6 +36,13 @@ type fakeRepositoryCatalog struct {
 	err          error
 	workspaceKey string
 	name         string
+	created      RepositoryInput
+	deleted      string
+}
+
+func (f *fakeRepositoryCatalog) Create(_ context.Context, input RepositoryInput) (*Repository, error) {
+	f.created = input
+	return f.value, f.err
 }
 
 func (f *fakeRepositoryCatalog) Get(_ context.Context, workspaceKey, name string) (*Repository, error) {
@@ -41,6 +53,16 @@ func (f *fakeRepositoryCatalog) Get(_ context.Context, workspaceKey, name string
 func (f *fakeRepositoryCatalog) List(_ context.Context, workspaceKey string) ([]Repository, error) {
 	f.workspaceKey = workspaceKey
 	return f.values, f.err
+}
+
+func (f *fakeRepositoryCatalog) Delete(_ context.Context, workspaceKey, name string) error {
+	f.workspaceKey, f.deleted = workspaceKey, name
+	return f.err
+}
+
+func (f *fakeCatalog) Create(_ context.Context, input CreateInput) (*Reference, error) {
+	f.createIn = input
+	return f.created, f.createErr
 }
 
 func (f *fakeCatalog) GetByKey(_ context.Context, key string) (*Reference, error) {
@@ -67,9 +89,40 @@ func (f *fakeCatalog) SetDesignFormat(_ context.Context, key, format string) (*R
 	return f.updated, f.updateErr
 }
 
+func (f *fakeCatalog) SetLifecycle(_ context.Context, key string, update LifecycleUpdate) (*Reference, error) {
+	f.lifecycleKey, f.lifecycleUpdate = key, update
+	return f.updated, f.updateErr
+}
+
 func (f *fakeCatalog) Delete(_ context.Context, key string) error {
 	f.deletedKey = key
 	return f.deleteErr
+}
+
+func TestCreateOwnsValidationAndReturnsPersistedReference(t *testing.T) {
+	catalog := &fakeCatalog{created: &Reference{Key: "HELLO", Name: "Hello"}}
+	service, _ := New(catalog)
+	value, err := service.Create(context.Background(), CreateCommand{
+		Key: " HELLO ", Name: " Hello ", Description: " demo ",
+		DefaultBranch: " main ", DesignFormat: " markdown ",
+	})
+	if err != nil || value.Key != "HELLO" {
+		t.Fatalf("create value=%#v err=%v", value, err)
+	}
+	if catalog.createIn.Key != "HELLO" || catalog.createIn.Name != "Hello" ||
+		catalog.createIn.Description != "demo" || catalog.createIn.DefaultBranch != "main" ||
+		catalog.createIn.DesignFormat != DesignFormatMarkdown {
+		t.Fatalf("create input=%#v", catalog.createIn)
+	}
+	if _, err := service.Create(context.Background(), CreateCommand{Name: "Hello"}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("missing key err=%v", err)
+	}
+	if _, err := service.Create(context.Background(), CreateCommand{Key: "HELLO", Name: "bad name"}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("invalid name err=%v", err)
+	}
+	if _, err := service.Create(context.Background(), CreateCommand{Key: "HELLO", Name: "Hello", DesignFormat: "pdf"}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("invalid design format err=%v", err)
+	}
 }
 
 func TestResolvePrefersKeyAndReturnsCopy(t *testing.T) {
@@ -191,6 +244,27 @@ func TestSetDesignFormatOwnsValidationAndNoOp(t *testing.T) {
 	}
 }
 
+func TestSetLifecycleResolvesCanonicalKeyAndOwnsStateValidation(t *testing.T) {
+	branch := " trunk "
+	catalog := &fakeCatalog{
+		keyErr: ErrNotFound, byName: &Reference{Key: "HELLO", Name: "Hello"},
+		updated: &Reference{Key: "HELLO", Name: "Hello", State: StateReady, DefaultBranch: "trunk"},
+	}
+	service, _ := New(catalog)
+	value, err := service.SetLifecycle(context.Background(), SetLifecycleCommand{
+		Reference: "Hello", State: StateReady, ErrorMessage: " cleared ", DefaultBranch: &branch,
+	})
+	if err != nil || value.State != StateReady || catalog.lifecycleKey != "HELLO" {
+		t.Fatalf("lifecycle value=%#v err=%v catalog=%#v", value, err, catalog)
+	}
+	if catalog.lifecycleUpdate.ErrorMessage != "cleared" || catalog.lifecycleUpdate.DefaultBranch == nil || *catalog.lifecycleUpdate.DefaultBranch != "trunk" {
+		t.Fatalf("lifecycle update=%#v", catalog.lifecycleUpdate)
+	}
+	if _, err := service.SetLifecycle(context.Background(), SetLifecycleCommand{Reference: "Hello", State: "unknown"}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("invalid state err=%v", err)
+	}
+}
+
 func TestDeleteResolvesCanonicalWorkspaceBeforeOwnerWrite(t *testing.T) {
 	catalog := &fakeCatalog{keyErr: ErrNotFound, byName: &Reference{Key: "HELLO", Name: "Hello"}}
 	service, err := New(catalog)
@@ -250,5 +324,37 @@ func TestRepositoryQueriesFailClosedForMissingPortAndInvalidOwnership(t *testing
 	)
 	if _, err := service.GetRepository(context.Background(), GetRepositoryQuery{WorkspaceReference: "HELLO", Name: "loom"}); !errors.Is(err, ErrInvalidPersistedState) {
 		t.Fatalf("expected invalid persisted ownership, got %v", err)
+	}
+}
+
+func TestRepositoryCommandsResolveWorkspaceAndOwnDefensiveInputs(t *testing.T) {
+	repositories := &fakeRepositoryCatalog{value: &Repository{
+		WorkspaceKey: "HELLO", Name: "loom", Groups: []string{"core"},
+	}}
+	service, err := New(
+		&fakeCatalog{byKey: &Reference{Key: "HELLO", Name: "Hello"}},
+		WithRepositoryCatalog(repositories),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	groups := []string{"core"}
+	value, err := service.RegisterRepository(context.Background(), RegisterRepositoryCommand{
+		WorkspaceReference: "HELLO", Name: " loom ", RemoteURL: " git@example ",
+		Remote: " origin ", DefaultBranch: " main ", Groups: groups, SourceRepoID: " source ",
+	})
+	if err != nil || value.Name != "loom" {
+		t.Fatalf("register value=%#v err=%v", value, err)
+	}
+	groups[0] = "mutated"
+	if repositories.created.WorkspaceKey != "HELLO" || repositories.created.Name != "loom" ||
+		repositories.created.Groups[0] != "core" || repositories.created.RemoteURL != "git@example" {
+		t.Fatalf("repository input=%#v", repositories.created)
+	}
+	deleted, err := service.UnregisterRepository(context.Background(), UnregisterRepositoryCommand{
+		WorkspaceReference: "HELLO", Name: "loom",
+	})
+	if err != nil || deleted.Name != "loom" || repositories.deleted != "loom" {
+		t.Fatalf("unregister value=%#v err=%v repositories=%#v", deleted, err, repositories)
 	}
 }
