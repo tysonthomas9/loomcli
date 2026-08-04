@@ -1,6 +1,33 @@
 import { test, expect, Page } from "@playwright/test"
 
 /**
+ * Workspace fixture for Monitor Dashboard visual regression tests. Shape
+ * matches the WorkspaceData interface. WorkspaceLayout calls
+ * fetchWorkspaceApi() before rendering children, so the mock must return
+ * an object with a non-empty id under `{ success: true, data: ... }`.
+ */
+const mockWorkspaceData = {
+  id: "default",
+  name: "default",
+  path: "/test",
+  repos: [],
+  groups: [],
+  agents: [],
+  workspaces: [
+    {
+      id: "default",
+      name: "default",
+      path: "/test",
+      active: true,
+      repo_count: 0,
+      is_default: true,
+    },
+  ],
+  workspace_order: ["default"],
+  default_workspace: "default",
+}
+
+/**
  * Mock issues for Monitor Dashboard visual regression tests.
  * Consistent data ensures deterministic screenshots.
  */
@@ -46,7 +73,7 @@ const mockAllAgents = [
     name: "dev1",
     status: "working",
     branch: "feature-x",
-    task: "bd-001",
+    task: "loom-001",
     ahead: 0,
     behind: 0,
     last_seen: "2026-01-24T12:00:00Z",
@@ -64,7 +91,7 @@ const mockAllAgents = [
     name: "dev3",
     status: "error",
     branch: "bugfix-y",
-    task: "bd-003",
+    task: "loom-003",
     ahead: 0,
     behind: 0,
     last_seen: "2026-01-24T11:00:00Z",
@@ -73,7 +100,7 @@ const mockAllAgents = [
     name: "dev4",
     status: "planning",
     branch: "feature-z",
-    task: "bd-004",
+    task: "loom-004",
     ahead: 2,
     behind: 0,
     last_seen: "2026-01-24T12:05:00Z",
@@ -81,9 +108,9 @@ const mockAllAgents = [
 ]
 
 const mockAllAgentTasks: Record<string, { id: string; title: string; priority: number }> = {
-  dev1: { id: "bd-001", title: "Implement feature X", priority: 2 },
-  dev3: { id: "bd-003", title: "Fix critical bug in authentication module", priority: 0 },
-  dev4: { id: "bd-004", title: "Plan architecture redesign for scalability improvements", priority: 1 },
+  dev1: { id: "loom-001", title: "Implement feature X", priority: 2 },
+  dev3: { id: "loom-003", title: "Fix critical bug in authentication module", priority: 0 },
+  dev4: { id: "loom-004", title: "Plan architecture redesign for scalability improvements", priority: 1 },
 }
 
 const mockLoomStatus = {
@@ -113,19 +140,19 @@ const mockLoomStatus = {
 
 const mockLoomTasks = {
   needs_planning: [
-    { id: "bd-010", title: "Plan new feature", priority: 2 },
-    { id: "bd-011", title: "Design API", priority: 1 },
+    { id: "loom-010", title: "Plan new feature", priority: 2 },
+    { id: "loom-011", title: "Design API", priority: 1 },
   ],
   ready_to_implement: [
-    { id: "bd-020", title: "Implement login", priority: 1 },
-    { id: "bd-021", title: "Add tests", priority: 2 },
-    { id: "bd-022", title: "Fix bug", priority: 3 },
+    { id: "loom-020", title: "Implement login", priority: 1 },
+    { id: "loom-021", title: "Add tests", priority: 2 },
+    { id: "loom-022", title: "Fix bug", priority: 3 },
   ],
-  in_progress: [{ id: "bd-001", title: "Implement feature X", priority: 2 }],
-  needs_review: [{ id: "bd-030", title: "Review PR", priority: 2 }],
+  in_progress: [{ id: "loom-001", title: "Implement feature X", priority: 2 }],
+  needs_review: [{ id: "loom-030", title: "Review PR", priority: 2 }],
   blocked: [
-    { id: "bd-040", title: "Blocked task A", priority: 1 },
-    { id: "bd-041", title: "Blocked task B", priority: 2 },
+    { id: "loom-040", title: "Blocked task A", priority: 1 },
+    { id: "loom-041", title: "Blocked task B", priority: 2 },
   ],
 }
 
@@ -206,8 +233,11 @@ const emptyLoomTasks = {
 
 /**
  * Set up all API mocks for Monitor Dashboard visual regression tests.
- * The app uses /api/issues (kanban mode) not /api/ready, and
- * loom endpoints are proxied via /api/loom/* not localhost:9000.
+ *
+ * Uses workspace-scoped routing: the monitor view lives at
+ * /ws/default/monitor, and issue/stats/blocked endpoints are served under
+ * /api/workspaces/:id/.... The loom /api/monitor/* endpoints are NOT
+ * workspace-scoped, so those mocks remain un-scoped.
  */
 async function setupMocks(
   page: Page,
@@ -222,6 +252,71 @@ async function setupMocks(
 ) {
   const { loomServerAvailable = true, emptyAgents = false, customAgents, customAgentTasks, customBlockedIssues, emptyStats = false } = options ?? {}
 
+  // Neutralize AbortController signals in fetch. React StrictMode (dev mode)
+  // double-fires effects; the cleanup aborts in-flight fetches before they
+  // reach the network. openapi-fetch bakes the signal into the Request
+  // object, so stripping `init.signal` is not enough — we must also
+  // reconstruct Request inputs without their signal. Otherwise page.route
+  // never sees the workspace-scoped issue requests because they're aborted
+  // pre-dispatch.
+  //
+  // Note: the openapi-fetch middleware may have attached a `_timeoutController`
+  // to the incoming Request for its onResponse cleanup. We preserve that
+  // reference on the reconstructed Request so the middleware's timeout
+  // cleanup still runs and doesn't leak 30s timers.
+  await page.addInitScript(() => {
+    const origFetch = window.fetch
+    window.fetch = function (input: RequestInfo | URL, init?: RequestInit) {
+      const strippedInit: RequestInit = init ? { ...init } : {}
+      if ("signal" in strippedInit) delete strippedInit.signal
+      if (input instanceof Request) {
+        const req = input
+        const newInit: RequestInit = {
+          method: req.method,
+          headers: req.headers,
+          credentials: req.credentials,
+          cache: req.cache,
+          redirect: req.redirect,
+          referrer: req.referrer,
+          referrerPolicy: req.referrerPolicy,
+          integrity: req.integrity,
+          keepalive: req.keepalive,
+        }
+        const preserveTimeout = (target: Request) => {
+          const tc = (req as unknown as { _timeoutController?: unknown })
+            ._timeoutController
+          if (tc) {
+            ;(target as unknown as { _timeoutController: unknown })._timeoutController =
+              tc
+          }
+        }
+        if (req.method !== "GET" && req.method !== "HEAD") {
+          return req
+            .clone()
+            .blob()
+            .then((blob) => {
+              const newReq = new Request(req.url, { ...newInit, body: blob })
+              preserveTimeout(newReq)
+              return origFetch.call(this, newReq, {})
+            })
+        }
+        const newReq = new Request(req.url, newInit)
+        preserveTimeout(newReq)
+        return origFetch.call(this, newReq, {})
+      }
+      return origFetch.call(this, input, strippedInit)
+    }
+  })
+
+  // Mock app config endpoint (boot process requires this before rendering)
+  await page.route("**/api/config", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ mode: "open" }),
+    })
+  })
+
   // Mock auth token endpoint (required before any API call)
   await page.route("**/api/auth/token", async (route) => {
     await route.fulfill({
@@ -231,61 +326,123 @@ async function setupMocks(
     })
   })
 
-  // Mock /api/ready endpoint (monitor view uses mode='ready' → getReadyIssues → /api/ready)
-  await page.route("**/api/ready**", async (route) => {
+  // Mock global health endpoint (App shell fetches on mount)
+  await page.route("**/api/health", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ success: true, data: emptyStats ? [] : mockIssues }),
+      body: JSON.stringify({ status: "ok", daemon: true }),
     })
   })
 
-  // Mock /api/issues endpoint (fallback for any kanban-mode requests)
-  await page.route("**/api/issues?**", async (route) => {
+  // Mock global backend config endpoint
+  await page.route("**/api/workspaces/*/config/backend", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ success: true, data: emptyStats ? [] : mockIssues }),
+      body: JSON.stringify({
+        success: true,
+        data: {
+          backend: "shell",
+          source: "default",
+          available: ["shell"],
+          agents: [],
+        },
+      }),
     })
   })
 
-  await page.route("**/api/blocked", async (route) => {
-    const blockedData = emptyStats
-      ? { success: true, data: [] }
-      : (customBlockedIssues ?? mockBlockedIssues)
+  // Mock all /api/workspaces/* endpoints. Dispatches on pathname so a single
+  // handler covers workspace metadata, ready/issues, stats, blocked, graph,
+  // and SSE abort — all workspace-scoped.
+  await page.route("**/api/workspaces/**", async (route) => {
+    const url = new URL(route.request().url())
+    const pathname = url.pathname
+
+    // SSE events — abort so we don't hang waitForLoadState("networkidle")
+    if (/\/api\/workspaces\/[^/]+\/events/.test(pathname)) {
+      await route.abort()
+      return
+    }
+
+    // /api/workspaces/{id}/ready — monitor view hits this via getReadyIssues
+    if (/\/api\/workspaces\/[^/]+\/ready$/.test(pathname)) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true, data: emptyStats ? [] : mockIssues }),
+      })
+      return
+    }
+
+    // /api/workspaces/{id}/stats
+    if (/\/api\/workspaces\/[^/]+\/stats$/.test(pathname)) {
+      const statsData = emptyStats
+        ? { open: 0, closed: 0, total: 0, completion: 0 }
+        : { open: 10, closed: 5, total: 15, completion: 33 }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true, data: statsData }),
+      })
+      return
+    }
+
+    // /api/workspaces/{id}/blocked
+    if (/\/api\/workspaces\/[^/]+\/blocked$/.test(pathname)) {
+      const blockedData = emptyStats
+        ? { success: true, data: [] }
+        : (customBlockedIssues ?? mockBlockedIssues)
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(blockedData),
+      })
+      return
+    }
+
+    // /api/workspaces/{id}/issues/graph
+    if (/\/api\/workspaces\/[^/]+\/issues\/graph$/.test(pathname)) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true, data: emptyStats ? [] : mockIssues }),
+      })
+      return
+    }
+
+    // /api/workspaces/{id}/issues — fallback kanban-mode requests
+    if (/\/api\/workspaces\/[^/]+\/issues$/.test(pathname)) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true, data: emptyStats ? [] : mockIssues }),
+      })
+      return
+    }
+
+    // /api/workspaces/{id} — workspace metadata. Must return an object with
+    // a non-empty id, otherwise WorkspaceLayout redirects to "/" and loops.
+    if (/^\/api\/workspaces\/[^/]+\/?$/.test(pathname)) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true, data: mockWorkspaceData }),
+      })
+      return
+    }
+
+    // Anything else under /api/workspaces/* — return empty success.
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify(blockedData),
+      body: JSON.stringify({ success: true, data: [] }),
     })
   })
 
-  await page.route("**/api/issues/graph", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ success: true, data: emptyStats ? [] : mockIssues }),
-    })
-  })
-
-  await page.route("**/api/events**", async (route) => {
-    await route.abort()
-  })
-
-  await page.route("**/api/stats", async (route) => {
-    const statsData = emptyStats
-      ? { open: 0, closed: 0, total: 0, completion: 0 }
-      : { open: 10, closed: 5, total: 15, completion: 33 }
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ success: true, data: statsData }),
-    })
-  })
-
-  // Mock loom server API (proxied via /api/loom/*)
+  // Mock monitor server API (/api/monitor/*)
   if (loomServerAvailable) {
-    await page.route("**/api/loom/api/status", async (route) => {
+    await page.route("**/api/monitor/status", async (route) => {
       if (emptyStats) {
         await route.fulfill({
           status: 200,
@@ -304,7 +461,7 @@ async function setupMocks(
       })
     })
 
-    await page.route("**/api/loom/api/tasks", async (route) => {
+    await page.route("**/api/monitor/tasks", async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -312,8 +469,8 @@ async function setupMocks(
       })
     })
 
-    // Mock /api/loom/api/agents - returns { agents: [...] }
-    await page.route("**/api/loom/api/agents", async (route) => {
+    // Mock /api/monitor/agents - returns { agents: [...] }
+    await page.route("**/api/monitor/agents", async (route) => {
       const agents = (emptyAgents || emptyStats) ? [] : (customAgents ?? mockAllAgents)
       await route.fulfill({
         status: 200,
@@ -322,21 +479,21 @@ async function setupMocks(
       })
     })
   } else {
-    await page.route("**/api/loom/api/status", async (route) => {
+    await page.route("**/api/monitor/status", async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
         body: "invalid json{",
       })
     })
-    await page.route("**/api/loom/api/tasks", async (route) => {
+    await page.route("**/api/monitor/tasks", async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
         body: "invalid json{",
       })
     })
-    await page.route("**/api/loom/api/agents", async (route) => {
+    await page.route("**/api/monitor/agents", async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -352,9 +509,12 @@ async function setupMocks(
 async function navigateAndWait(page: Page) {
   const [response] = await Promise.all([
     page.waitForResponse(
-      (res) => res.url().includes("/api/ready") && res.status() === 200
+      (res) =>
+        res.url().includes("/api/workspaces/") &&
+        res.url().includes("/ready") &&
+        res.status() === 200
     ),
-    page.goto("/?view=monitor"),
+    page.goto("/ws/default/monitor"),
   ])
   expect(response.ok()).toBe(true)
 }
@@ -382,11 +542,11 @@ test.describe("Visual Regression - Monitor Dashboard Layout", () => {
 
       // Wait for loom API responses so panels are populated
       await page.waitForResponse(
-        (res) => res.url().includes("/api/loom/api/status") && res.status() === 200,
+        (res) => res.url().includes("/api/monitor/status") && res.status() === 200,
         { timeout: 10000 }
       )
       await page.waitForResponse(
-        (res) => res.url().includes("/api/loom/api/tasks") && res.status() === 200,
+        (res) => res.url().includes("/api/monitor/tasks") && res.status() === 200,
         { timeout: 10000 }
       )
 
@@ -400,9 +560,7 @@ test.describe("Visual Regression - Monitor Dashboard Layout", () => {
         page.getByRole("heading", { name: "Agent Activity" })
       ).toBeVisible()
 
-      await expect(page).toHaveScreenshot("monitor-vertical-stack.png", {
-        maxDiffPixels: 500,
-      })
+      await expect(page).toHaveScreenshot("monitor-vertical-stack.png")
     })
   })
 
@@ -424,11 +582,11 @@ test.describe("Visual Regression - Monitor Dashboard Layout", () => {
 
       // Wait for loom API responses
       await page.waitForResponse(
-        (res) => res.url().includes("/api/loom/api/status") && res.status() === 200,
+        (res) => res.url().includes("/api/monitor/status") && res.status() === 200,
         { timeout: 10000 }
       )
       await page.waitForResponse(
-        (res) => res.url().includes("/api/loom/api/tasks") && res.status() === 200,
+        (res) => res.url().includes("/api/monitor/tasks") && res.status() === 200,
         { timeout: 10000 }
       )
 
@@ -443,9 +601,7 @@ test.describe("Visual Regression - Monitor Dashboard Layout", () => {
         page.getByRole("heading", { name: "Agent Activity" })
       ).toBeVisible()
 
-      await expect(page).toHaveScreenshot("monitor-responsive-1024.png", {
-        maxDiffPixels: 500,
-      })
+      await expect(page).toHaveScreenshot("monitor-responsive-1024.png")
     })
   })
 
@@ -462,11 +618,11 @@ test.describe("Visual Regression - Monitor Dashboard Layout", () => {
 
       // Wait for loom API responses
       await page.waitForResponse(
-        (res) => res.url().includes("/api/loom/api/status") && res.status() === 200,
+        (res) => res.url().includes("/api/monitor/status") && res.status() === 200,
         { timeout: 10000 }
       )
       await page.waitForResponse(
-        (res) => res.url().includes("/api/loom/api/tasks") && res.status() === 200,
+        (res) => res.url().includes("/api/monitor/tasks") && res.status() === 200,
         { timeout: 10000 }
       )
 
@@ -482,9 +638,7 @@ test.describe("Visual Regression - Monitor Dashboard Layout", () => {
       ).toBeVisible()
 
       await expect(page).toHaveScreenshot("monitor-responsive-768.png", {
-        // Full page to capture all stacked panels
         fullPage: true,
-        maxDiffPixels: 500,
       })
     })
   })
@@ -499,11 +653,11 @@ test.describe("Visual Regression - Agent Activity Panel", () => {
 
     // Wait for both loom APIs to load
     await page.waitForResponse(
-      (res) => res.url().includes("/api/loom/api/status") && res.status() === 200,
+      (res) => res.url().includes("/api/monitor/status") && res.status() === 200,
       { timeout: 10000 }
     )
     await page.waitForResponse(
-      (res) => res.url().includes("/api/loom/api/tasks") && res.status() === 200,
+      (res) => res.url().includes("/api/monitor/tasks") && res.status() === 200,
       { timeout: 10000 }
     )
     await page.waitForTimeout(500)
@@ -518,8 +672,7 @@ test.describe("Visual Regression - Agent Activity Panel", () => {
     await expect(agentPanel.getByText("need push", { exact: true })).toBeVisible()
 
     await expect(page).toHaveScreenshot(
-      "monitor-agent-activity-multiple-states.png",
-      { maxDiffPixels: 500 }
+      "monitor-agent-activity-multiple-states.png"
     )
   })
 
@@ -528,11 +681,11 @@ test.describe("Visual Regression - Agent Activity Panel", () => {
     await navigateAndWait(page)
 
     await page.waitForResponse(
-      (res) => res.url().includes("/api/loom/api/status") && res.status() === 200,
+      (res) => res.url().includes("/api/monitor/status") && res.status() === 200,
       { timeout: 10000 }
     )
     await page.waitForResponse(
-      (res) => res.url().includes("/api/loom/api/tasks") && res.status() === 200,
+      (res) => res.url().includes("/api/monitor/tasks") && res.status() === 200,
       { timeout: 10000 }
     )
     await page.waitForTimeout(500)
@@ -543,8 +696,7 @@ test.describe("Visual Regression - Agent Activity Panel", () => {
     await expect(agentPanel.getByText("No agents found")).toBeVisible()
 
     await expect(page).toHaveScreenshot(
-      "monitor-agent-activity-no-agents.png",
-      { maxDiffPixels: 500 }
+      "monitor-agent-activity-no-agents.png"
     )
   })
 
@@ -552,20 +704,20 @@ test.describe("Visual Regression - Agent Activity Panel", () => {
     await setupMocks(page, { loomServerAvailable: false })
     await navigateAndWait(page)
 
-    // Wait for the loom status fetch to complete (returns invalid JSON, triggering error state)
-    await page.waitForResponse(
-      (res) => res.url().includes("/api/loom/api/status"),
-      { timeout: 10000 }
-    )
-    await page.waitForTimeout(500)
+    // With invalid-JSON mocks, the agent store bails on the first failure
+    // and does not poll again, so waitForResponse for /api/monitor/status
+    // here is racy — the only response fires during navigateAndWait. Wait
+    // for the rendered "Loom server not running" state instead, which is
+    // deterministic once the failure lands.
+    const agentPanel = page.getByTestId("agent-activity-panel")
+    await expect(agentPanel).toBeVisible({ timeout: 10000 })
+    await expect(agentPanel.getByText("Loom server not running")).toBeVisible({
+      timeout: 10000,
+    })
     await waitForStableContent(page)
 
-    const agentPanel = page.getByTestId("agent-activity-panel")
-    await expect(agentPanel).toBeVisible()
-
     await expect(page).toHaveScreenshot(
-      "monitor-agent-activity-loom-unavailable.png",
-      { maxDiffPixels: 500 }
+      "monitor-agent-activity-loom-unavailable.png"
     )
   })
 
@@ -584,11 +736,11 @@ test.describe("Visual Regression - Agent Activity Panel", () => {
     await navigateAndWait(page)
 
     await page.waitForResponse(
-      (res) => res.url().includes("/api/loom/api/status") && res.status() === 200,
+      (res) => res.url().includes("/api/monitor/status") && res.status() === 200,
       { timeout: 10000 }
     )
     await page.waitForResponse(
-      (res) => res.url().includes("/api/loom/api/tasks") && res.status() === 200,
+      (res) => res.url().includes("/api/monitor/tasks") && res.status() === 200,
       { timeout: 10000 }
     )
     await page.waitForTimeout(500)
@@ -604,8 +756,7 @@ test.describe("Visual Regression - Agent Activity Panel", () => {
     ).toBeVisible()
 
     await expect(page).toHaveScreenshot(
-      "monitor-agent-cards-with-tasks.png",
-      { maxDiffPixels: 500 }
+      "monitor-agent-cards-with-tasks.png"
     )
   })
 })
@@ -619,11 +770,11 @@ test.describe("Visual Regression - Project Health Panel", () => {
     await navigateAndWait(page)
 
     await page.waitForResponse(
-      (res) => res.url().includes("/api/loom/api/status") && res.status() === 200,
+      (res) => res.url().includes("/api/monitor/status") && res.status() === 200,
       { timeout: 10000 }
     )
     await page.waitForResponse(
-      (res) => res.url().includes("/api/loom/api/tasks") && res.status() === 200,
+      (res) => res.url().includes("/api/monitor/tasks") && res.status() === 200,
       { timeout: 10000 }
     )
     await page.waitForTimeout(500)
@@ -636,8 +787,7 @@ test.describe("Visual Regression - Project Health Panel", () => {
     await expect(healthPanel.getByText("blocks 3")).toBeVisible()
 
     await expect(healthPanel).toHaveScreenshot(
-      "monitor-health-progress-bottlenecks.png",
-      { maxDiffPixels: 100 }
+      "monitor-health-progress-bottlenecks.png"
     )
   })
 
@@ -648,11 +798,11 @@ test.describe("Visual Regression - Project Health Panel", () => {
     await navigateAndWait(page)
 
     await page.waitForResponse(
-      (res) => res.url().includes("/api/loom/api/status") && res.status() === 200,
+      (res) => res.url().includes("/api/monitor/status") && res.status() === 200,
       { timeout: 10000 }
     )
     await page.waitForResponse(
-      (res) => res.url().includes("/api/loom/api/tasks") && res.status() === 200,
+      (res) => res.url().includes("/api/monitor/tasks") && res.status() === 200,
       { timeout: 10000 }
     )
     await page.waitForTimeout(500)
@@ -665,8 +815,7 @@ test.describe("Visual Regression - Project Health Panel", () => {
     await expect(healthPanel.getByText("No bottlenecks detected")).toBeVisible()
 
     await expect(healthPanel).toHaveScreenshot(
-      "monitor-health-empty.png",
-      { maxDiffPixels: 100 }
+      "monitor-health-empty.png"
     )
   })
 })
@@ -680,11 +829,11 @@ test.describe("Visual Regression - Interactions", () => {
     await navigateAndWait(page)
 
     await page.waitForResponse(
-      (res) => res.url().includes("/api/loom/api/status") && res.status() === 200,
+      (res) => res.url().includes("/api/monitor/status") && res.status() === 200,
       { timeout: 10000 }
     )
     await page.waitForResponse(
-      (res) => res.url().includes("/api/loom/api/tasks") && res.status() === 200,
+      (res) => res.url().includes("/api/monitor/tasks") && res.status() === 200,
       { timeout: 10000 }
     )
     await page.waitForTimeout(500)
@@ -699,8 +848,7 @@ test.describe("Visual Regression - Interactions", () => {
     await page.waitForTimeout(200)
 
     await expect(healthPanel).toHaveScreenshot(
-      "monitor-bottleneck-hover.png",
-      { maxDiffPixels: 100 }
+      "monitor-bottleneck-hover.png"
     )
   })
 
@@ -709,11 +857,11 @@ test.describe("Visual Regression - Interactions", () => {
     await navigateAndWait(page)
 
     await page.waitForResponse(
-      (res) => res.url().includes("/api/loom/api/status") && res.status() === 200,
+      (res) => res.url().includes("/api/monitor/status") && res.status() === 200,
       { timeout: 10000 }
     )
     await page.waitForResponse(
-      (res) => res.url().includes("/api/loom/api/tasks") && res.status() === 200,
+      (res) => res.url().includes("/api/monitor/tasks") && res.status() === 200,
       { timeout: 10000 }
     )
     await page.waitForTimeout(500)
@@ -728,8 +876,7 @@ test.describe("Visual Regression - Interactions", () => {
     await page.waitForTimeout(200)
 
     await expect(agentPanel).toHaveScreenshot(
-      "monitor-agent-card-hover.png",
-      { maxDiffPixels: 100 }
+      "monitor-agent-card-hover.png"
     )
   })
 })
@@ -742,11 +889,11 @@ test.describe("Visual Regression - Degradation Scenarios", () => {
     await navigateAndWait(page)
 
     await page.waitForResponse(
-      (res) => res.url().includes("/api/loom/api/status") && res.status() === 200,
+      (res) => res.url().includes("/api/monitor/status") && res.status() === 200,
       { timeout: 10000 }
     )
     await page.waitForResponse(
-      (res) => res.url().includes("/api/loom/api/tasks") && res.status() === 200,
+      (res) => res.url().includes("/api/monitor/tasks") && res.status() === 200,
       { timeout: 10000 }
     )
     await page.waitForTimeout(500)
@@ -758,8 +905,7 @@ test.describe("Visual Regression - Degradation Scenarios", () => {
     await expect(dashboard.getByText("No bottlenecks detected")).toBeVisible()
 
     await expect(page).toHaveScreenshot(
-      "monitor-degradation-empty.png",
-      { maxDiffPixels: 500 }
+      "monitor-degradation-empty.png"
     )
   })
 
@@ -772,35 +918,35 @@ test.describe("Visual Regression - Degradation Scenarios", () => {
     await navigateAndWait(page)
 
     await page.waitForResponse(
-      (res) => res.url().includes("/api/loom/api/status") && res.status() === 200,
+      (res) => res.url().includes("/api/monitor/status") && res.status() === 200,
       { timeout: 10000 }
     )
     await page.waitForResponse(
-      (res) => res.url().includes("/api/loom/api/tasks") && res.status() === 200,
+      (res) => res.url().includes("/api/monitor/tasks") && res.status() === 200,
       { timeout: 10000 }
     )
     await page.waitForTimeout(500)
     await waitForStableContent(page)
 
     // Switch all loom endpoints to unavailable mid-test
-    await page.unroute("**/api/loom/api/status")
-    await page.unroute("**/api/loom/api/tasks")
-    await page.unroute("**/api/loom/api/agents")
-    await page.route("**/api/loom/api/agents", async (route) => {
+    await page.unroute("**/api/monitor/status")
+    await page.unroute("**/api/monitor/tasks")
+    await page.unroute("**/api/monitor/agents")
+    await page.route("**/api/monitor/agents", async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
         body: "invalid json{",
       })
     })
-    await page.route("**/api/loom/api/status", async (route) => {
+    await page.route("**/api/monitor/status", async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
         body: "invalid json{",
       })
     })
-    await page.route("**/api/loom/api/tasks", async (route) => {
+    await page.route("**/api/monitor/tasks", async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -810,7 +956,7 @@ test.describe("Visual Regression - Degradation Scenarios", () => {
 
     // Wait for next poll cycle to fail and trigger disconnected state
     await page.waitForResponse(
-      (res) => res.url().includes("/api/loom/api/agents"),
+      (res) => res.url().includes("/api/monitor/agents"),
       { timeout: 15000 }
     )
     await page.waitForTimeout(1000)
@@ -822,8 +968,7 @@ test.describe("Visual Regression - Degradation Scenarios", () => {
     await expect(banner.getByRole("button", { name: "Retry connection now" })).toBeVisible()
 
     await expect(page).toHaveScreenshot(
-      "monitor-degradation-stale-banner.png",
-      { maxDiffPixels: 500 }
+      "monitor-degradation-stale-banner.png"
     )
   })
 })

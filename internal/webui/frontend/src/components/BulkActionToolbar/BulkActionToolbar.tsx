@@ -4,29 +4,12 @@
  * action buttons and a selection count.
  */
 
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef } from "react";
+
+import type { BulkAction } from "@/types/common";
+import { useAnnounce } from "@/hooks/ui";
 
 import styles from "./BulkActionToolbar.module.css";
-
-/**
- * Action configuration for the bulk action toolbar.
- */
-export interface BulkAction {
-  /** Unique identifier for the action */
-  id: string;
-  /** Display label for the button */
-  label: string;
-  /** Icon component or null for text-only */
-  icon?: React.ReactNode;
-  /** Handler called with selected IDs when clicked */
-  onClick: (selectedIds: Set<string>) => void | Promise<void>;
-  /** Whether the action is currently loading */
-  loading?: boolean;
-  /** Whether the action is disabled */
-  disabled?: boolean;
-  /** Button variant: primary (filled), secondary (outline), or danger (red) */
-  variant?: "primary" | "secondary" | "danger";
-}
 
 /**
  * Props for the BulkActionToolbar component.
@@ -63,6 +46,20 @@ export function BulkActionToolbar({
   actions = [],
   className,
 }: BulkActionToolbarProps): JSX.Element | null {
+  const { announce } = useAnnounce();
+  const prevCountRef = useRef(selectedIds.size);
+
+  // Announce selection count changes
+  useEffect(() => {
+    const count = selectedIds.size;
+    if (count !== prevCountRef.current) {
+      if (count > 0) {
+        announce(`${count} issue${count !== 1 ? "s" : ""} selected`);
+      }
+      prevCountRef.current = count;
+    }
+  }, [selectedIds.size, announce]);
+
   // Handle action button click - defined before early return to satisfy rules-of-hooks
   const handleActionClick = useCallback(
     (action: BulkAction) => {

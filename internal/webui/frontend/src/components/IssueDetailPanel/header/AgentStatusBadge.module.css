@@ -1,0 +1,78 @@
+/**
+ * AgentStatusBadge styles.
+ * Pill-shaped badge showing agent status next to assignee field.
+ */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-card);
+  font-size: 0.75rem;
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease;
+  white-space: nowrap;
+}
+
+.badge:hover {
+  background: var(--color-bg-hover);
+  border-color: var(--color-border-light);
+}
+
+.badge:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 1px;
+}
+
+.statusDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.statusLabel {
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.duration {
+  color: var(--color-text-tertiary);
+  font-size: 0.7rem;
+}
+
+.prIcon {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 2px;
+  color: var(--color-text-secondary);
+}
+
+.badge[data-status="error"] {
+  border-color: var(--color-status-error, #ef4444);
+  background: color-mix(
+    in srgb,
+    var(--color-status-error, #ef4444) 8%,
+    transparent
+  );
+}
+
+.badge[data-status="working"],
+.badge[data-status="planning"] {
+  border-color: var(--color-status-working, #3b82f6);
+}
+
+.badge[data-status="done"] {
+  border-color: var(--color-status-done, #22c55e);
+}
+
+.badge[data-status="review"] {
+  border-color: var(--color-status-review, #3b82f6);
+}

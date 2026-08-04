@@ -2,8 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -284,16 +282,9 @@ func TestResolveBackendName_FlagPrecedence(t *testing.T) {
 	origFlag := backendFlag
 	t.Cleanup(func() { backendFlag = origFlag })
 
-	// Set all three sources: flag, env, config
+	// Set both override sources; the flag should win.
 	backendFlag = "codex"
 	SetupTestEnv(t, map[string]string{"LOOM_BACKEND": "opencode"})
-
-	tmpDir := t.TempDir()
-	SetupTestEnv(t, map[string]string{"LOOM_CONFIG_DIR": tmpDir})
-	configData := []byte("backend: aider\n")
-	if err := os.WriteFile(filepath.Join(tmpDir, "config.yaml"), configData, 0644); err != nil {
-		t.Fatalf("failed to write config: %v", err)
-	}
 
 	got := ResolveBackendName()
 	if got != "codex" {
@@ -308,16 +299,9 @@ func TestResolveBackendName_EnvPrecedence(t *testing.T) {
 	origFlag := backendFlag
 	t.Cleanup(func() { backendFlag = origFlag })
 
-	// No flag set, but env and config are set
+	// No flag set, but env is set.
 	backendFlag = ""
 	SetupTestEnv(t, map[string]string{"LOOM_BACKEND": "opencode"})
-
-	tmpDir := t.TempDir()
-	SetupTestEnv(t, map[string]string{"LOOM_CONFIG_DIR": tmpDir})
-	configData := []byte("backend: aider\n")
-	if err := os.WriteFile(filepath.Join(tmpDir, "config.yaml"), configData, 0644); err != nil {
-		t.Fatalf("failed to write config: %v", err)
-	}
 
 	got := ResolveBackendName()
 	if got != "opencode" {
@@ -325,27 +309,20 @@ func TestResolveBackendName_EnvPrecedence(t *testing.T) {
 	}
 }
 
-func TestResolveBackendName_ConfigFallback(t *testing.T) {
+func TestResolveBackendName_IgnoresLocalConfig(t *testing.T) {
 	resetBackendState(t)
 
 	// Save and restore backendFlag
 	origFlag := backendFlag
 	t.Cleanup(func() { backendFlag = origFlag })
 
-	// No flag, no env, but config is set
+	// Backend settings are no longer read from local config files.
 	backendFlag = ""
 	SetupTestEnv(t, map[string]string{"LOOM_BACKEND": ""})
 
-	tmpDir := t.TempDir()
-	SetupTestEnv(t, map[string]string{"LOOM_CONFIG_DIR": tmpDir})
-	configData := []byte("backend: aider\n")
-	if err := os.WriteFile(filepath.Join(tmpDir, "config.yaml"), configData, 0644); err != nil {
-		t.Fatalf("failed to write config: %v", err)
-	}
-
 	got := ResolveBackendName()
-	if got != "aider" {
-		t.Fatalf("expected config value 'aider', got %q", got)
+	if got != "codex" {
+		t.Fatalf("expected default 'codex', got %q", got)
 	}
 }
 
@@ -356,17 +333,13 @@ func TestResolveBackendName_Default(t *testing.T) {
 	origFlag := backendFlag
 	t.Cleanup(func() { backendFlag = origFlag })
 
-	// No flag, no env, no config file
+	// No flag and no env uses the code default.
 	backendFlag = ""
 	SetupTestEnv(t, map[string]string{"LOOM_BACKEND": ""})
 
-	tmpDir := t.TempDir()
-	SetupTestEnv(t, map[string]string{"LOOM_CONFIG_DIR": tmpDir})
-	// No config.yaml in tmpDir, so LoadConfig returns (nil, nil)
-
 	got := ResolveBackendName()
-	if got != "claude" {
-		t.Fatalf("expected default 'claude', got %q", got)
+	if got != "codex" {
+		t.Fatalf("expected default 'codex', got %q", got)
 	}
 }
 
@@ -498,18 +471,15 @@ func TestResolveAndSetBackendDefault(t *testing.T) {
 	origFlag := backendFlag
 	t.Cleanup(func() { backendFlag = origFlag })
 
-	RegisterBackend(&mockBackend{name: "claude"})
+	RegisterBackend(&mockBackend{name: "codex"})
 	backendFlag = ""
 	SetupTestEnv(t, map[string]string{"LOOM_BACKEND": ""})
-
-	tmpDir := t.TempDir()
-	SetupTestEnv(t, map[string]string{"LOOM_CONFIG_DIR": tmpDir})
 
 	err := ResolveAndSetBackend()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got := GetBackendName(); got != "claude" {
-		t.Fatalf("expected default 'claude', got %q", got)
+	if got := GetBackendName(); got != "codex" {
+		t.Fatalf("expected default 'codex', got %q", got)
 	}
 }

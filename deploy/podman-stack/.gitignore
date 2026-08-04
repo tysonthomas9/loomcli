@@ -1,0 +1,3 @@
+# Per-run generated secrets — never committed.
+.env
+*.local

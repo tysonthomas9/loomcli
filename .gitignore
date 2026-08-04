@@ -1,19 +1,35 @@
 
 # Build artifacts
-loom
-loomcli
+/loom
+/loomcli
+/bin/
 *.test
+*.bak
 /logrouter
 tmp/
+
+# Prebuilt workflow bundles are embedded into the Go binary for CI/runtime use.
+internal/workflows/builtin-dist/
 
 # Frontend dependencies
 internal/webui/frontend/node_modules/
 internal/webui/frontend/dist/
 internal/webui/frontend/playwright-report/
 internal/webui/frontend/test-results/
+internal/webui/frontend/coverage/
+desktop/node_modules/
+desktop/dist/
+desktop/dist-release/
+desktop/src-tauri/target/
+desktop/src-tauri/binaries/
+desktop/src-tauri/resources/webui/
 
 # E2E test artifacts
 internal/webui/frontend/tests/e2e/.e2e-state.json
+reports/scratch-*.jsonl
+reports/validation-*.json
+reports/*-verification.md
+docs/design/parity-report-*/
 
 # Loom config (may contain credentials)
 .loom/
@@ -21,11 +37,25 @@ loom.yaml
 
 # Runtime / dev artifacts
 .agent.lock
-.beads/rpc-token
+.beads/
 .loom-dev.log
 .loom-dev.pid
 .make-dev.log
 .make-dev.pid
+usage.jsonl
+/sessions/
+internal/cli/sessions/
+internal/cli/agent/sessions/
+internal/cli/automode/sessions/
+internal/cli/daemon/supervisor/sessions/
+notify.token
+
+# Auth service
+services/auth/node_modules/
+services/auth/dist/
 
 # Local worktrees
 worktrees/
+.agent.yield
+node_modules/
+*.agent.lock.flock

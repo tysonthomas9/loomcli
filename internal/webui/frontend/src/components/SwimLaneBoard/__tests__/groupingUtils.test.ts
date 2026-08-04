@@ -117,7 +117,59 @@ describe("groupIssuesByField", () => {
       expect(ungroupedLane?.id).toBe("lane-epic-__ungrouped__");
     });
 
-    it("uses parent ID as title when parent_title is not available", () => {
+    it("uses epic issues as lane metadata instead of ungrouped cards", () => {
+      const issues = [
+        createMockIssue({
+          id: "epic-1",
+          title: "Epic One",
+          issue_type: "epic",
+        }),
+        createMockIssue({
+          id: "task-1",
+          title: "Child Task",
+          parent: "epic-1",
+          parent_title: "Epic One",
+        }),
+        createMockIssue({
+          id: "task-2",
+          title: "Orphan Task",
+          parent: undefined,
+        }),
+      ];
+
+      const result = groupIssuesByField(issues, "epic");
+
+      const epicLane = result.find((lane) => lane.id === "lane-epic-epic-1");
+      expect(epicLane).toBeDefined();
+      expect(epicLane?.title).toBe("Epic One");
+      expect(epicLane?.groupIssue?.id).toBe("epic-1");
+      expect(epicLane?.issues.map((issue) => issue.id)).toEqual(["task-1"]);
+
+      const ungroupedLane = result.find((lane) => lane.title === "Ungrouped");
+      expect(ungroupedLane?.issues.map((issue) => issue.id)).toEqual([
+        "task-2",
+      ]);
+    });
+
+    it("creates an empty clickable lane for an epic without children", () => {
+      const issues = [
+        createMockIssue({
+          id: "epic-empty",
+          title: "Empty Epic",
+          issue_type: "epic",
+        }),
+      ];
+
+      const result = groupIssuesByField(issues, "epic");
+
+      expect(result).toHaveLength(1);
+      expect(result[0].id).toBe("lane-epic-epic-empty");
+      expect(result[0].title).toBe("Empty Epic");
+      expect(result[0].issues).toHaveLength(0);
+      expect(result[0].groupIssue?.id).toBe("epic-empty");
+    });
+
+    it("falls back to a friendly 'Untitled epic' label (not the raw parent ID) when parent_title is not available", () => {
       const issues = [
         createMockIssue({ id: "issue-1", parent: "epic-id-123" }),
       ];
@@ -125,7 +177,9 @@ describe("groupIssuesByField", () => {
       const result = groupIssuesByField(issues, "epic");
 
       expect(result).toHaveLength(1);
-      expect(result[0].title).toBe("epic-id-123");
+      // The raw internal parent ID must never surface as a user-facing lane
+      // title; show a friendly placeholder instead.
+      expect(result[0].title).toBe("Untitled epic");
     });
   });
 
@@ -347,14 +401,60 @@ describe("groupIssuesByField", () => {
     });
   });
 
+  describe("groupBy=repo", () => {
+    it("groups issues by repo", () => {
+      const issues = [
+        createMockIssue({ id: "issue-1", repo: "frontend" }),
+        createMockIssue({ id: "issue-2", repo: "frontend" }),
+        createMockIssue({ id: "issue-3", repo: "backend" }),
+      ];
+
+      const result = groupIssuesByField(issues, "repo");
+
+      expect(result).toHaveLength(2);
+
+      const frontendLane = result.find((lane) => lane.title === "frontend");
+      const backendLane = result.find((lane) => lane.title === "backend");
+
+      expect(frontendLane).toBeDefined();
+      expect(frontendLane?.issues).toHaveLength(2);
+      expect(frontendLane?.id).toBe("lane-repo-frontend");
+
+      expect(backendLane).toBeDefined();
+      expect(backendLane?.issues).toHaveLength(1);
+      expect(backendLane?.id).toBe("lane-repo-backend");
+    });
+
+    it('creates "No Repository" lane for issues without repo field', () => {
+      const issues = [
+        createMockIssue({ id: "issue-1", repo: "frontend" }),
+        createMockIssue({ id: "issue-2", repo: undefined }),
+        createMockIssue({ id: "issue-3" }),
+      ];
+
+      const result = groupIssuesByField(issues, "repo");
+
+      expect(result).toHaveLength(2);
+
+      const noRepoLane = result.find((lane) => lane.title === "No Repository");
+      expect(noRepoLane).toBeDefined();
+      expect(noRepoLane?.issues).toHaveLength(2);
+      expect(noRepoLane?.id).toBe("lane-repo-__no_repo__");
+    });
+  });
+
   describe("empty issues", () => {
-    it.each<GroupByField>(["epic", "assignee", "priority", "type", "label"])(
-      "returns empty array when grouping empty issues by %s",
-      (groupBy) => {
-        const result = groupIssuesByField([], groupBy);
-        expect(result).toHaveLength(0);
-      },
-    );
+    it.each<GroupByField>([
+      "epic",
+      "assignee",
+      "priority",
+      "type",
+      "label",
+      "repo",
+    ])("returns empty array when grouping empty issues by %s", (groupBy) => {
+      const result = groupIssuesByField([], groupBy);
+      expect(result).toHaveLength(0);
+    });
   });
 });
 
@@ -397,6 +497,7 @@ describe("sortLanes", () => {
         "No Priority",
         "No Type",
         "No Labels",
+        "No Repository",
       ];
       const lanes: LaneGroup[] = [
         { id: "regular", title: "Regular Lane", issues: [] },
@@ -445,6 +546,20 @@ describe("sortLanes", () => {
 
       expect(result[2].title).toBe("Small");
       expect(result[2].issues).toHaveLength(1);
+    });
+
+    it("places No Repository lane at the end", () => {
+      const lanes: LaneGroup[] = [
+        { id: "1", title: "No Repository", issues: [createMockIssue()] },
+        { id: "2", title: "frontend", issues: [createMockIssue()] },
+        { id: "3", title: "backend", issues: [createMockIssue()] },
+      ];
+
+      const result = sortLanes(lanes, "title");
+
+      expect(result[0].title).toBe("backend");
+      expect(result[1].title).toBe("frontend");
+      expect(result[2].title).toBe("No Repository");
     });
 
     it("places special lanes at the end regardless of count", () => {

@@ -1,0 +1,284 @@
+/**
+ * IssueHeader component styles.
+ * Header area with ID, status badge, priority, and close button.
+ */
+
+.issueHeader {
+  min-width: 0;
+  max-width: 100%;
+  padding: 0 var(--panel-padding-md) var(--panel-padding-md);
+}
+
+/* Sticky mode - no bottom border, handled by wrapper */
+.issueHeader.sticky {
+  border-bottom: none;
+}
+
+.topRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: nowrap;
+  min-width: 0;
+  min-height: 40px;
+  margin: 0 calc(var(--panel-padding-md) * -1) 20px;
+  padding: 0 var(--panel-padding-md);
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.topRowMain {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.topRowActions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+
+.issueId {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  font-family: var(--font-family-mono);
+  line-height: 1;
+}
+
+.statusBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+}
+
+.statusBadge[data-status="open"] {
+  background-color: var(--color-info-bg);
+  color: var(--color-info);
+}
+
+.statusBadge[data-status="in_progress"] {
+  background-color: var(--color-warning-bg);
+  color: var(--color-warning);
+}
+
+.statusBadge[data-status="closed"] {
+  background-color: var(--color-success-bg);
+  color: var(--color-success);
+}
+
+.statusBadge[data-status="blocked"] {
+  background-color: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+
+.statusBadge[data-status="deferred"] {
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-muted);
+}
+
+/* PR view link */
+.prViewLink {
+  font-size: 11px;
+  font-family: var(--font-family-mono);
+  color: var(--color-primary);
+  text-decoration: none;
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.prViewLink:hover {
+  background-color: var(--color-primary-bg);
+  text-decoration: underline;
+}
+
+.prViewLink:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* PR merge link */
+.prMergeLink {
+  font-size: 11px;
+  font-family: var(--font-family-mono);
+  color: var(--color-success);
+  text-decoration: none;
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.prMergeLink:hover {
+  background-color: var(--color-success-bg);
+  text-decoration: underline;
+}
+
+.prMergeLink:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.runEpicButton {
+  min-width: 86px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  background: var(--color-primary);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.runEpicButton:hover:not(:disabled) {
+  background-color: color-mix(in srgb, var(--color-primary) 88%, black);
+}
+
+.runEpicButton:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
+.runEpicButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.copyLinkButton {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.copyLinkButton:hover {
+  background-color: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+.copyLinkButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.moveButton {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.moveButton:hover {
+  background-color: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+.moveButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.maximizeButton {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.maximizeButton:hover {
+  background-color: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+.maximizeButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.closeButton {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.closeButton:hover {
+  background-color: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+.closeButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.title {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  margin: 0;
+  line-height: 1.25;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}

@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -19,11 +20,12 @@ func TestDaemonShouldTrip(t *testing.T) {
 		{"daemon not running", ErrDaemonNotRunning, true},
 		{"connection timeout", ErrConnectionTimeout, true},
 		{"daemon unhealthy", ErrDaemonUnhealthy, true},
-		{"pool exhausted", ErrPoolExhausted, true},
+		{"pool exhausted", ErrPoolExhausted, false},
 		{"pool closed", ErrPoolClosed, false},
 		{"invalid socket path", ErrInvalidSocketPath, false},
 		{"context canceled", context.Canceled, false},
 		{"context deadline exceeded", context.DeadlineExceeded, false},
+		{"daemon starting", ErrDaemonStarting, false},
 		{"unknown error", errors.New("something else"), false},
 	}
 
@@ -41,6 +43,13 @@ func TestDaemonShouldTrip_WrappedErrors(t *testing.T) {
 	wrapped := errors.Join(errors.New("connection failed"), ErrDaemonNotRunning)
 	if !DaemonShouldTrip(wrapped) {
 		t.Error("expected wrapped ErrDaemonNotRunning to trip")
+	}
+}
+
+func TestDaemonShouldTrip_WrappedDaemonStarting(t *testing.T) {
+	wrapped := fmt.Errorf("pool connect: %w", ErrDaemonStarting)
+	if DaemonShouldTrip(wrapped) {
+		t.Error("wrapped ErrDaemonStarting should NOT trip the breaker")
 	}
 }
 
@@ -139,6 +148,7 @@ func TestIsRetryable_WithCircuitOpen(t *testing.T) {
 		{"daemon not running", ErrDaemonNotRunning, true},
 		{"connection timeout", ErrConnectionTimeout, true},
 		{"daemon unhealthy", ErrDaemonUnhealthy, true},
+		{"daemon starting", ErrDaemonStarting, true},
 		{"pool exhausted", ErrPoolExhausted, false},
 		{"pool closed", ErrPoolClosed, false},
 		{"nil", nil, false},
@@ -207,6 +217,34 @@ func TestProtectedPool_Discard(t *testing.T) {
 	}
 	if stats.Created != 0 {
 		t.Errorf("stats.Created = %v after Discard, want 0", stats.Created)
+	}
+}
+
+func TestProtectedPool_PutAfterError(t *testing.T) {
+	socketPath := startMockDaemonServer(t)
+	pool, err := NewConnectionPool(socketPath, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+
+	breaker := circuitbreaker.NewBreaker("daemon", circuitbreaker.Config{
+		ShouldTrip: DaemonShouldTrip,
+	})
+	pp := NewProtectedPool(pool, breaker)
+
+	ctx := context.Background()
+	client, err := pp.Get(ctx)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+
+	// Mock daemon responds to Ping, so the connection should be returned to pool
+	pp.PutAfterError(client)
+
+	stats := pp.Stats()
+	if stats.Available != 1 {
+		t.Errorf("stats.Available = %v after PutAfterError, want 1", stats.Available)
 	}
 }
 

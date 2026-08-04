@@ -1,4 +1,4 @@
-// Package types defines core data structures for the bd issue tracker.
+// Package types defines core issue-tracking data structures.
 package types
 
 import "time"
@@ -64,7 +64,7 @@ type IssueFilter struct {
 	LabelsAny   []string // OR semantics: issue must have AT LEAST ONE of these labels
 	TitleSearch string
 	IDs         []string // Filter by specific issue IDs
-	IDPrefix    string   // Filter by ID prefix (e.g., "bd-" to match "bd-abc123")
+	IDPrefix    string   // Filter by ID prefix
 	Limit       int
 
 	// Pattern matching
@@ -139,9 +139,6 @@ type WorkFilter struct {
 
 	// Molecule type filtering
 	MolType *MolType // Filter by molecule type (nil = any, swarm/patrol/work)
-
-	// Time-based deferral filtering (GH#820)
-	IncludeDeferred bool // If true, include issues with future defer_until timestamps
 
 	// Molecule step filtering
 	// By default, GetReadyWork excludes mol/wisp steps (IDs containing -mol- or -wisp-)

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
 )
 
 func TestClassifyClaude(t *testing.T) {
@@ -56,6 +58,18 @@ func TestClassifyClaude(t *testing.T) {
 			wantClass: ModelNotFound,
 		},
 		{
+			name:      "model not found selected model wording",
+			log:       `There's an issue with the selected model (definitely-not-a-real-model). It may not exist or you may not have access to it. Run --model to pick a different model.`,
+			exitCode:  1,
+			wantClass: ModelNotFound,
+		},
+		{
+			name:      "generic access wording is not model not found",
+			log:       `You may not have access to it in your current region.`,
+			exitCode:  1,
+			wantClass: Unknown,
+		},
+		{
 			name:      "context overflow",
 			log:       "Error: context_length_exceeded: max tokens 200000",
 			exitCode:  1,
@@ -98,29 +112,44 @@ func TestClassifyClaude(t *testing.T) {
 			exitCode:  1,
 			wantClass: Unknown,
 		},
+		// User-evidence strings from the 2026-05-21 dead-agents incident.
+		// These previously fell through to Unknown and burned the entire
+		// retry budget; the shared rate-limit patterns now catch them.
+		{
+			name:      "session limit prose with reset time",
+			log:       "You've hit your session limit · resets 6:40pm (Europe/Warsaw)",
+			exitCode:  1,
+			wantClass: RateLimited,
+		},
+		{
+			name:      "usage limit prose with try again at",
+			log:       "You've hit your usage limit. Upgrade to Pro or try again at May 21st, 2026 1:32 AM.",
+			exitCode:  1,
+			wantClass: RateLimited,
+		},
+		{
+			name:      "usage limit JSON envelope",
+			log:       `{"type":"error","message":"You've hit your usage limit."}`,
+			exitCode:  1,
+			wantClass: RateLimited,
+		},
+		{
+			name:      "generic try-again-at with time",
+			log:       "Error: try again at 6:40pm",
+			exitCode:  1,
+			wantClass: RateLimited,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			result := classifyClaude(tt.log)
-			if tt.wantClass == Unknown && tt.log == "" {
-				if result != nil {
-					t.Errorf("expected nil for empty log, got %v", result)
-				}
-				return
+			aerr := ClassifyFromOutput(tt.log, tt.exitCode, "claude")
+			if aerr.Class != tt.wantClass {
+				t.Errorf("class = %s, want %s", aerr.Class, tt.wantClass)
 			}
-			if tt.wantClass == Unknown && result == nil {
-				return
-			}
-			if result == nil {
-				t.Fatalf("expected class %s, got nil", tt.wantClass)
-			}
-			if result.Class != tt.wantClass {
-				t.Errorf("class = %s, want %s", result.Class, tt.wantClass)
-			}
-			if result.RetryAfter != tt.wantRetry {
-				t.Errorf("retryAfter = %v, want %v", result.RetryAfter, tt.wantRetry)
+			if aerr.RetryAfter != tt.wantRetry {
+				t.Errorf("retryAfter = %v, want %v", aerr.RetryAfter, tt.wantRetry)
 			}
 		})
 	}
@@ -217,23 +246,32 @@ func TestClassifyCodex(t *testing.T) {
 			exitCode:  1,
 			wantClass: Unknown,
 		},
+		// User-evidence strings: codex emits the same prose envelopes
+		// when a usage limit is hit, so the shared rate-limit patterns
+		// must apply to codex too.
+		{
+			name:      "session limit prose with reset time",
+			log:       "You've hit your session limit · resets 6:40pm (Europe/Warsaw)",
+			exitCode:  1,
+			wantClass: RateLimited,
+		},
+		{
+			name:      "usage limit JSON envelope",
+			log:       `{"type":"error","message":"You've hit your usage limit."}`,
+			exitCode:  1,
+			wantClass: RateLimited,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			result := classifyCodex(tt.log)
-			if tt.wantClass == Unknown && result == nil {
-				return
+			aerr := ClassifyFromOutput(tt.log, tt.exitCode, "codex")
+			if aerr.Class != tt.wantClass {
+				t.Errorf("class = %s, want %s", aerr.Class, tt.wantClass)
 			}
-			if result == nil {
-				t.Fatalf("expected class %s, got nil", tt.wantClass)
-			}
-			if result.Class != tt.wantClass {
-				t.Errorf("class = %s, want %s", result.Class, tt.wantClass)
-			}
-			if result.RetryAfter != tt.wantRetry {
-				t.Errorf("retryAfter = %v, want %v", result.RetryAfter, tt.wantRetry)
+			if aerr.RetryAfter != tt.wantRetry {
+				t.Errorf("retryAfter = %v, want %v", aerr.RetryAfter, tt.wantRetry)
 			}
 		})
 	}
@@ -316,18 +354,174 @@ func TestClassifyOpenCode(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			result := classifyOpenCode(tt.log)
-			if tt.wantClass == Unknown && result == nil {
-				return
+			aerr := ClassifyFromOutput(tt.log, tt.exitCode, "opencode")
+			if aerr.Class != tt.wantClass {
+				t.Errorf("class = %s, want %s", aerr.Class, tt.wantClass)
 			}
-			if result == nil {
-				t.Fatalf("expected class %s, got nil", tt.wantClass)
+			if aerr.RetryAfter != tt.wantRetry {
+				t.Errorf("retryAfter = %v, want %v", aerr.RetryAfter, tt.wantRetry)
 			}
-			if result.Class != tt.wantClass {
-				t.Errorf("class = %s, want %s", result.Class, tt.wantClass)
+		})
+	}
+}
+
+func TestClassifyGemini(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		log       string
+		exitCode  int
+		wantClass ErrorClass
+		wantRetry time.Duration
+	}{
+		{
+			name:      "rate limit",
+			log:       "Error: 429 RESOURCE_EXHAUSTED: rate limit exceeded",
+			exitCode:  1,
+			wantClass: RateLimited,
+		},
+		{
+			name:      "rate limit with retry-after",
+			log:       "Error: too many requests\nretry-after: 25",
+			exitCode:  1,
+			wantClass: RateLimited,
+			wantRetry: 25 * time.Second,
+		},
+		{
+			name:      "auth failure env var",
+			log:       "Error: GEMINI_API_KEY is not set",
+			exitCode:  1,
+			wantClass: AuthFailure,
+		},
+		{
+			name:      "billing error",
+			log:       "Error: quota exceeded for billing project",
+			exitCode:  1,
+			wantClass: BillingError,
+		},
+		{
+			name:      "model not found",
+			log:       "Error: unsupported model gemini-99",
+			exitCode:  1,
+			wantClass: ModelNotFound,
+		},
+		{
+			name:      "context length",
+			log:       "Error: prompt too long, max tokens exceeded",
+			exitCode:  1,
+			wantClass: ContextOverflow,
+		},
+		{
+			name:      "timeout",
+			log:       "Error: deadline exceeded",
+			exitCode:  1,
+			wantClass: Timeout,
+		},
+		{
+			name:      "server error",
+			log:       "Error: backend error",
+			exitCode:  1,
+			wantClass: Transient,
+		},
+		{
+			name:      "unknown",
+			log:       "bus error",
+			exitCode:  1,
+			wantClass: Unknown,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			aerr := ClassifyFromOutput(tt.log, tt.exitCode, "gemini")
+			if aerr.Class != tt.wantClass {
+				t.Errorf("class = %s, want %s", aerr.Class, tt.wantClass)
 			}
-			if result.RetryAfter != tt.wantRetry {
-				t.Errorf("retryAfter = %v, want %v", result.RetryAfter, tt.wantRetry)
+			if aerr.RetryAfter != tt.wantRetry {
+				t.Errorf("retryAfter = %v, want %v", aerr.RetryAfter, tt.wantRetry)
+			}
+		})
+	}
+}
+
+func TestClassifyCursor(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		log       string
+		exitCode  int
+		wantClass ErrorClass
+		wantRetry time.Duration
+	}{
+		{
+			name:      "rate limit",
+			log:       "Error: 429 too many requests",
+			exitCode:  1,
+			wantClass: RateLimited,
+		},
+		{
+			name:      "rate limit with retry-after",
+			log:       "Error: rate limit exceeded\nretry-after: 15",
+			exitCode:  1,
+			wantClass: RateLimited,
+			wantRetry: 15 * time.Second,
+		},
+		{
+			name:      "auth failure env var",
+			log:       "Error: CURSOR_API_KEY is invalid",
+			exitCode:  1,
+			wantClass: AuthFailure,
+		},
+		{
+			name:      "billing error",
+			log:       "Error: insufficient credits",
+			exitCode:  1,
+			wantClass: BillingError,
+		},
+		{
+			name:      "model not found",
+			log:       "Error: invalid model selected",
+			exitCode:  1,
+			wantClass: ModelNotFound,
+		},
+		{
+			name:      "context length",
+			log:       "Error: token limit reached",
+			exitCode:  1,
+			wantClass: ContextOverflow,
+		},
+		{
+			name:      "timeout",
+			log:       "Error: connection timed out",
+			exitCode:  1,
+			wantClass: Timeout,
+		},
+		{
+			name:      "server error",
+			log:       "Error: service unavailable",
+			exitCode:  1,
+			wantClass: Transient,
+		},
+		{
+			name:      "unknown",
+			log:       "bus error",
+			exitCode:  1,
+			wantClass: Unknown,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			aerr := ClassifyFromOutput(tt.log, tt.exitCode, "cursor")
+			if aerr.Class != tt.wantClass {
+				t.Errorf("class = %s, want %s", aerr.Class, tt.wantClass)
+			}
+			if aerr.RetryAfter != tt.wantRetry {
+				t.Errorf("retryAfter = %v, want %v", aerr.RetryAfter, tt.wantRetry)
 			}
 		})
 	}
@@ -351,7 +545,7 @@ func TestClassifyByExitCode(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := classifyByExitCode(tt.exitCode)
+			got := OutcomeFromHarness(classifyByExitCode(tt.exitCode))
 			if got != tt.wantClass {
 				t.Errorf("classifyByExitCode(%d) = %s, want %s", tt.exitCode, got, tt.wantClass)
 			}
@@ -424,9 +618,8 @@ func TestClassifyFromLog(t *testing.T) {
 		if aerr.Class != AuthFailure {
 			t.Errorf("class = %s, want AuthFailure", aerr.Class)
 		}
-		if !aerr.IsFatal() {
-			t.Error("expected IsFatal() == true for AuthFailure")
-		}
+		// Fatality of AuthFailure is policy, asserted by the agentpolicy
+		// golden table (Decide -> StopFatal).
 	})
 
 	t.Run("missing log file", func(t *testing.T) {
@@ -434,6 +627,36 @@ func TestClassifyFromLog(t *testing.T) {
 		aerr := ClassifyFromLog("/nonexistent/log.txt", 1, "claude")
 		if aerr.Class != Unknown {
 			t.Errorf("class = %s, want Unknown", aerr.Class)
+		}
+	})
+
+	t.Run("backend binary not on PATH marker classifies as BackendUnavailable", func(t *testing.T) {
+		t.Parallel()
+		// The marker is emitted by the loom-side wrapper translator
+		// when the configured CLI is missing. It outranks per-backend
+		// patterns because it's a cross-cutting wrapper signal —
+		// without this branch, the supervisor would burn restart
+		// budget on a binary that won't appear on its own (LOOM-4).
+		dir := t.TempDir()
+		logPath := filepath.Join(dir, "agent.log")
+		body := "Starting agent...\n" + BackendUnavailableMarker + `: wrapper: binary not found: exec: "codex": executable file not found in $PATH` + "\n"
+		if err := os.WriteFile(logPath, []byte(body), 0600); err != nil {
+			t.Fatalf("write log: %v", err)
+		}
+
+		aerr := ClassifyFromLog(logPath, 1, "codex")
+		if aerr.Class != BackendUnavailable {
+			t.Errorf("class = %s, want BackendUnavailable", aerr.Class)
+		}
+		// Backend-specific rate-limit / billing patterns must NOT win
+		// against the wrapper-level marker.
+		body2 := BackendUnavailableMarker + ": rate limit and 429 sprinkled in for distraction"
+		if err := os.WriteFile(logPath, []byte(body2), 0600); err != nil {
+			t.Fatalf("write log: %v", err)
+		}
+		aerr = ClassifyFromLog(logPath, 1, "codex")
+		if aerr.Class != BackendUnavailable {
+			t.Errorf("class = %s, want BackendUnavailable (marker outranks backend patterns)", aerr.Class)
 		}
 	})
 
@@ -518,42 +741,6 @@ func TestClassifyFromLog(t *testing.T) {
 			t.Fatal("ClassifyFromLog must never return nil")
 		}
 	})
-}
-
-func TestIsRetryable(t *testing.T) {
-	t.Parallel()
-
-	retryable := []ErrorClass{RateLimited, Timeout, Transient}
-	notRetryable := []ErrorClass{AuthFailure, BillingError, ModelNotFound, ContextOverflow, NoWork, Unknown}
-
-	for _, c := range retryable {
-		if !c.IsRetryable() {
-			t.Errorf("%s.IsRetryable() = false, want true", c)
-		}
-	}
-	for _, c := range notRetryable {
-		if c.IsRetryable() {
-			t.Errorf("%s.IsRetryable() = true, want false", c)
-		}
-	}
-}
-
-func TestIsFatal(t *testing.T) {
-	t.Parallel()
-
-	fatal := []ErrorClass{AuthFailure, BillingError}
-	notFatal := []ErrorClass{RateLimited, ModelNotFound, ContextOverflow, Timeout, Transient, NoWork, Unknown}
-
-	for _, c := range fatal {
-		if !c.IsFatal() {
-			t.Errorf("%s.IsFatal() = false, want true", c)
-		}
-	}
-	for _, c := range notFatal {
-		if c.IsFatal() {
-			t.Errorf("%s.IsFatal() = true, want false", c)
-		}
-	}
 }
 
 func TestErrorString(t *testing.T) {
@@ -650,6 +837,194 @@ func TestReadLogTail(t *testing.T) {
 	})
 }
 
+func TestClassifyFromOutput(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		output    string
+		exitCode  int
+		backend   string
+		wantClass ErrorClass
+		wantRetry time.Duration
+	}{
+		{
+			name:      "claude rate limit with message",
+			output:    "Error: 429 Too Many Requests: rate_limit_error",
+			exitCode:  1,
+			backend:   "claude",
+			wantClass: RateLimited,
+		},
+		{
+			name:      "claude rate limit with retry-after",
+			output:    "Error: rate limit exceeded\nretry-after: 30",
+			exitCode:  1,
+			backend:   "claude",
+			wantClass: RateLimited,
+			wantRetry: 30 * time.Second,
+		},
+		{
+			name:      "claude auth failure",
+			output:    "Error: 401 Unauthorized: invalid api key",
+			exitCode:  1,
+			backend:   "claude",
+			wantClass: AuthFailure,
+		},
+		{
+			name:      "claude billing error",
+			output:    "Error: 402 Payment Required: billing error",
+			exitCode:  1,
+			backend:   "claude",
+			wantClass: BillingError,
+		},
+		{
+			name:      "claude model not found",
+			output:    "Error: 404 model claude-99 does not exist",
+			exitCode:  1,
+			backend:   "claude",
+			wantClass: ModelNotFound,
+		},
+		{
+			name:      "claude selected model wording",
+			output:    `{"type":"assistant","message":{"content":[{"type":"text","text":"There's an issue with the selected model (definitely-not-a-real-model). It may not exist or you may not have access to it. Run --model to pick a different model."}]},"error":"invalid_request"}`,
+			exitCode:  1,
+			backend:   "claude",
+			wantClass: ModelNotFound,
+		},
+		{
+			name:      "claude context overflow",
+			output:    "Error: context_length_exceeded: max tokens 200000",
+			exitCode:  1,
+			backend:   "claude",
+			wantClass: ContextOverflow,
+		},
+		{
+			name:      "claude server error 500",
+			output:    "Error: 500 internal server error",
+			exitCode:  1,
+			backend:   "claude",
+			wantClass: Transient,
+		},
+		{
+			name:      "claude overloaded with retry-after",
+			output:    "Error: 529 overloaded_error: API is temporarily overloaded\nretry-after: 45",
+			exitCode:  1,
+			backend:   "claude",
+			wantClass: RateLimited,
+			wantRetry: 45 * time.Second,
+		},
+		{
+			name:      "codex rate limit",
+			output:    "Error: 429 rate_limit: too many requests",
+			exitCode:  1,
+			backend:   "codex",
+			wantClass: RateLimited,
+		},
+		{
+			name:      "opencode auth failure",
+			output:    "Error: 401 unauthorized",
+			exitCode:  1,
+			backend:   "opencode",
+			wantClass: AuthFailure,
+		},
+		{
+			name:      "gemini rate limit",
+			output:    "Error: 429 RESOURCE_EXHAUSTED: rate limit exceeded",
+			exitCode:  1,
+			backend:   "gemini",
+			wantClass: RateLimited,
+		},
+		{
+			name:      "cursor auth failure",
+			output:    "Error: CURSOR_API_KEY is invalid",
+			exitCode:  1,
+			backend:   "cursor",
+			wantClass: AuthFailure,
+		},
+		{
+			name:      "unknown output falls back to exit code",
+			output:    "Segmentation fault",
+			exitCode:  137,
+			backend:   "claude",
+			wantClass: Timeout,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			aerr := ClassifyFromOutput(tt.output, tt.exitCode, tt.backend)
+			if aerr == nil {
+				t.Fatal("ClassifyFromOutput must never return nil")
+			}
+			if aerr.Class != tt.wantClass {
+				t.Errorf("class = %s, want %s", aerr.Class, tt.wantClass)
+			}
+			if aerr.RetryAfter != tt.wantRetry {
+				t.Errorf("retryAfter = %v, want %v", aerr.RetryAfter, tt.wantRetry)
+			}
+			if aerr.Backend != tt.backend {
+				t.Errorf("backend = %q, want %q", aerr.Backend, tt.backend)
+			}
+			if aerr.ExitCode != tt.exitCode {
+				t.Errorf("exitCode = %d, want %d", aerr.ExitCode, tt.exitCode)
+			}
+		})
+	}
+}
+
+func TestClassifyFromOutput_EmptyOutput(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		exitCode  int
+		wantClass ErrorClass
+	}{
+		{"exit code 1 with empty output", 1, Unknown},
+		{"exit code 137 with empty output", 137, Timeout},
+		{"exit code 143 with empty output", 143, Transient},
+		{"exit code 0 with empty output", 0, Unknown},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			aerr := ClassifyFromOutput("", tt.exitCode, "claude")
+			if aerr == nil {
+				t.Fatal("ClassifyFromOutput must never return nil")
+			}
+			if aerr.Class != tt.wantClass {
+				t.Errorf("class = %s, want %s", aerr.Class, tt.wantClass)
+			}
+		})
+	}
+}
+
+func TestClassifyFromOutput_NeverReturnsNil(t *testing.T) {
+	t.Parallel()
+
+	// Verify ClassifyFromOutput never returns nil across a range of inputs.
+	cases := []struct {
+		output   string
+		exitCode int
+		backend  string
+	}{
+		{"", 0, ""},
+		{"", 1, "claude"},
+		{"random text", 42, "codex"},
+		{"Error: something", 1, "opencode"},
+		{"", 137, "unknown-backend"},
+	}
+
+	for _, c := range cases {
+		aerr := ClassifyFromOutput(c.output, c.exitCode, c.backend)
+		if aerr == nil {
+			t.Errorf("ClassifyFromOutput(%q, %d, %q) returned nil", c.output, c.exitCode, c.backend)
+		}
+	}
+}
+
 func TestErrorClassString(t *testing.T) {
 	t.Parallel()
 
@@ -666,15 +1041,26 @@ func TestErrorClassString(t *testing.T) {
 		{Transient, "Transient"},
 		{NoWork, "NoWork"},
 		{Unknown, "Unknown"},
-		{ErrorClass(99), "Unknown"},
+		{Outcome{Harness: wrapper.ErrorClass(99)}, "Unknown"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.want, func(t *testing.T) {
 			t.Parallel()
 			if got := tt.class.String(); got != tt.want {
-				t.Errorf("ErrorClass(%d).String() = %q, want %q", tt.class, got, tt.want)
+				t.Errorf("Outcome(%v).String() = %q, want %q", tt.class, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestClassifyFromOutput_IncompatibleBackendCLIIsTerminalModelFailure(t *testing.T) {
+	message := `The 'gpt-5.6-sol' model requires a newer version of Codex. Please upgrade to the latest app or CLI and try again.`
+	got := ClassifyFromOutput(message, 1, "codex")
+	if got.Class != ModelNotFound {
+		t.Fatalf("class = %s, want ModelNotFound", got.Class)
+	}
+	if got.Message != "backend CLI is incompatible with the selected model" {
+		t.Fatalf("message = %q", got.Message)
 	}
 }

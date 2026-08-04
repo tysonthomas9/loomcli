@@ -6,15 +6,19 @@
 
 import { useState, useEffect } from "react";
 
-import { fetchDiffCommits } from "@/api/diff";
-import type { DiffCommit } from "@/api/diff";
-import { useGitStatus } from "@/hooks/useGitStatus";
-import { useGitActions } from "@/hooks/useGitActions";
+import { fetchDiffCommits } from "@/hooks/api";
+import type { DiffCommit } from "@/api/issues";
+import {
+  useGitStatus,
+  useGitActions,
+  useWorkspaceContext,
+} from "@/hooks/workspace";
 import type { LoomAgentStatus } from "@/types";
 import { parseLoomStatus } from "@/types";
+import { getAvatarColor } from "@/utils/colorUtils";
 
 import panelStyles from "./AgentDetailPanel.module.css";
-import { GitActionBar } from "./GitActionBar";
+import { useCreatePRAction } from "./CreatePRAction";
 import { TargetBranchSelector } from "./TargetBranchSelector";
 import styles from "./GitTab.module.css";
 
@@ -25,22 +29,94 @@ interface GitTabProps {
 
 const INITIAL_COMMIT_LIMIT = 10;
 
-/** Format an ISO date string into a relative time label. */
-function relativeTime(iso: string): string {
-  const now = Date.now();
-  const then = new Date(iso).getTime();
-  if (isNaN(then)) return "";
-  const diffSec = Math.floor((now - then) / 1000);
-  if (diffSec < 60) return "just now";
-  const diffMin = Math.floor(diffSec / 60);
-  if (diffMin < 60) return `${diffMin}m ago`;
-  const diffHr = Math.floor(diffMin / 60);
-  if (diffHr < 24) return `${diffHr}h ago`;
-  const diffDay = Math.floor(diffHr / 24);
-  return `${diffDay}d ago`;
+/** Format an ISO date string for commit metadata (e.g. "May 19, 2026 07:13"). */
+function formatCommitDate(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const datePart = new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(d);
+  const timePart = new Intl.DateTimeFormat("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(d);
+  return `${datePart} ${timePart}`;
+}
+
+type CommitEntry = DiffCommit | NonNullable<LoomAgentStatus["commits"]>[number];
+
+interface DisplayCommit {
+  key: string;
+  shortHash: string;
+  message: string;
+  author: string;
+  dateLabel: string;
+  url?: string;
+  dotColor: string;
+}
+
+function toDisplayCommit(
+  commit: CommitEntry,
+  agentName: string,
+  githubBaseUrl?: string,
+): DisplayCommit {
+  const isDiff = "short_hash" in commit;
+  const shortHash = isDiff
+    ? (commit as DiffCommit).short_hash
+    : commit.hash.slice(0, 7);
+  const fullHash = isDiff ? (commit as DiffCommit).hash : commit.hash;
+  const message = isDiff ? (commit as DiffCommit).subject : commit.message;
+  const author = isDiff
+    ? (commit as DiffCommit).author || agentName
+    : agentName;
+  const date = isDiff ? (commit as DiffCommit).date : undefined;
+  const url = isDiff
+    ? githubBaseUrl && fullHash
+      ? `${githubBaseUrl}/commit/${fullHash}`
+      : undefined
+    : commit.url;
+
+  const display: DisplayCommit = {
+    key: fullHash,
+    shortHash,
+    message,
+    author,
+    dateLabel: date ? formatCommitDate(date) : "",
+    dotColor: getAvatarColor(author || shortHash),
+  };
+  if (url) {
+    display.url = url;
+  }
+  return display;
+}
+
+function GitBranchIcon(): JSX.Element {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      fill="none"
+      aria-hidden="true"
+    >
+      <circle cx="4" cy="4" r="2" fill="currentColor" />
+      <circle cx="4" cy="12" r="2" fill="currentColor" />
+      <circle cx="12" cy="8" r="2" fill="currentColor" />
+      <path
+        d="M4 6v4M4 4c0 2.2 3.6 2.2 8 0"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
 }
 
 export function GitTab({ agent, isActive }: GitTabProps): JSX.Element {
+  const { workspaceId } = useWorkspaceContext();
   const {
     status: gitStatus,
     error: gitError,
@@ -50,12 +126,21 @@ export function GitTab({ agent, isActive }: GitTabProps): JSX.Element {
     enabled: isActive ?? true,
   });
 
+  const parsedStatus = parseLoomStatus(agent.status);
+
   const actions = useGitActions({
     agentName: agent.name,
+    taskId: parsedStatus.taskId || agent.task_id || null,
     onStatusChange: refetch,
   });
 
-  const parsedStatus = parseLoomStatus(agent.status);
+  // Derive GitHub base URL from agent's monitor commit URLs (e.g., ".../commit/abc123" → "...")
+  const githubBaseUrl = (() => {
+    const url = agent.commits?.[0]?.url;
+    if (!url) return undefined;
+    const idx = url.lastIndexOf("/commit/");
+    return idx > 0 ? url.slice(0, idx) : undefined;
+  })();
 
   // Rich commit data from diff endpoint
   const [diffCommits, setDiffCommits] = useState<DiffCommit[] | null>(null);
@@ -67,7 +152,7 @@ export function GitTab({ agent, isActive }: GitTabProps): JSX.Element {
     setDiffCommits(null);
     setShowAllCommits(false);
 
-    fetchDiffCommits(agent.name)
+    fetchDiffCommits(workspaceId, agent.name)
       .then((commits) => {
         if (!cancelled) setDiffCommits(commits);
       })
@@ -78,7 +163,7 @@ export function GitTab({ agent, isActive }: GitTabProps): JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, [agent.name]);
+  }, [agent.name, workspaceId]);
 
   // Determine data sources — prefer gitStatus, fall back to agent data
   const branch = gitStatus?.branch ?? agent.branch;
@@ -95,61 +180,21 @@ export function GitTab({ agent, isActive }: GitTabProps): JSX.Element {
     ? commits
     : commits.slice(0, INITIAL_COMMIT_LIMIT);
   const hasMoreCommits = commits.length > INITIAL_COMMIT_LIMIT;
+  const displayCommits = visibleCommits.map((commit) =>
+    toDisplayCommit(commit, agent.name, githubBaseUrl),
+  );
 
-  // Build change list — prefer gitStatus changed_files, fall back to agent.changes
-  const agentChanges = agent.changes ?? [];
-  const gitChangedFiles = gitStatus?.changed_files ?? [];
+  const createPR = useCreatePRAction({
+    targetBranch,
+    ahead,
+    agentStatus: parsedStatus,
+    actions,
+  });
 
   return (
-    <>
-      {/* Git Action Bar */}
-      <GitActionBar
-        agentName={agent.name}
-        gitStatus={gitStatus}
-        agentStatus={parsedStatus}
-        actions={actions}
-      />
-
-      {/* Branch Header */}
-      <div className={panelStyles.section}>
-        <h3 className={panelStyles.sectionTitle}>Branch</h3>
-        <div className={styles.branchHeader}>
-          <span className={styles.branchName}>{branch}</span>
-          <span className={styles.branchArrow}>&rarr;</span>
-          <TargetBranchSelector
-            currentTarget={targetBranch}
-            isWorkspace={false}
-            onUpdate={actions.updateTarget}
-            loading={actions.targetState.isLoading}
-          />
-        </div>
-        <div className={styles.badgeRow}>
-          {ahead > 0 && (
-            <span className={panelStyles.commitBadge} data-type="ahead">
-              +{ahead} ahead
-            </span>
-          )}
-          {behind > 0 && (
-            <span className={panelStyles.commitBadge} data-type="behind">
-              -{behind} behind
-            </span>
-          )}
-          {ahead === 0 && behind === 0 && (
-            <span className={panelStyles.commitBadge} data-type="synced">
-              In sync
-            </span>
-          )}
-        </div>
-        {usingFallback && (
-          <p className={styles.fallbackNote}>
-            Git status unavailable — showing cached data.
-          </p>
-        )}
-      </div>
-
-      {/* Conflict Warning */}
+    <div className={styles.gitTab}>
       {hasConflicts && conflictedFiles.length > 0 && (
-        <div className={panelStyles.section}>
+        <div className={styles.conflictSection}>
           <div className={styles.conflictBanner}>
             <p className={styles.conflictTitle}>Merge conflicts detected</p>
             {conflictedFiles.map((file) => (
@@ -161,111 +206,109 @@ export function GitTab({ agent, isActive }: GitTabProps): JSX.Element {
         </div>
       )}
 
-      {/* Commit Log */}
-      <div className={panelStyles.section}>
-        <h3 className={panelStyles.sectionTitle}>Commits</h3>
-        {commits.length > 0 ? (
-          <>
-            <div className={panelStyles.commitList}>
-              {visibleCommits.map((commit) => {
-                // Handle both DiffCommit and LoomCommitDetail shapes
-                const isDiff = "short_hash" in commit;
-                const hash = isDiff
-                  ? (commit as DiffCommit).short_hash
-                  : commit.hash;
-                const message = isDiff
-                  ? (commit as DiffCommit).subject
-                  : commit.message;
-                const url = isDiff ? undefined : commit.url;
-                const date = isDiff ? (commit as DiffCommit).date : undefined;
-
-                return (
-                  <div
-                    key={isDiff ? (commit as DiffCommit).hash : commit.hash}
-                    className={panelStyles.commitItem}
-                  >
-                    {url ? (
-                      <a
-                        href={url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className={panelStyles.commitHashLink}
-                      >
-                        {hash}
-                      </a>
-                    ) : (
-                      <span className={panelStyles.commitHash}>{hash}</span>
-                    )}
-                    <span className={panelStyles.commitMessage}>{message}</span>
-                    {date && (
-                      <span className={styles.commitTime}>
-                        {relativeTime(date)}
-                      </span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-            {hasMoreCommits && !showAllCommits && (
-              <button
-                type="button"
-                className={styles.commitExpandBtn}
-                onClick={() => setShowAllCommits(true)}
-              >
-                Show all {commits.length} commits
-              </button>
-            )}
-          </>
-        ) : ahead === 0 ? (
-          <span className={panelStyles.emptyState}>
-            In sync with {targetBranch}
+      <div className={styles.historyCard}>
+        <header className={styles.historyHeader}>
+          <span className={styles.historyIcon}>
+            <GitBranchIcon />
           </span>
-        ) : (
-          <span className={panelStyles.emptyState}>No commit data</span>
-        )}
-      </div>
+          <div className={styles.historyHeaderMain}>
+            <h3 className={styles.historyTitle}>Git history</h3>
+            <div className={styles.branchLine}>
+              <span className={styles.branchName}>{branch}</span>
+              <span className={styles.branchArrow}>&rarr;</span>
+              <TargetBranchSelector
+                currentTarget={targetBranch}
+                isWorkspace={false}
+                onUpdate={actions.updateTarget}
+                loading={actions.targetState.isLoading}
+              />
+            </div>
+            <div className={styles.badgeRow}>
+              {ahead > 0 && (
+                <span className={panelStyles.commitBadge} data-type="ahead">
+                  +{ahead} ahead
+                </span>
+              )}
+              {behind > 0 && (
+                <span className={panelStyles.commitBadge} data-type="behind">
+                  -{behind} behind
+                </span>
+              )}
+              {ahead === 0 && behind === 0 && (
+                <span className={panelStyles.commitBadge} data-type="synced">
+                  In sync
+                </span>
+              )}
+            </div>
+            {usingFallback && (
+              <p className={styles.fallbackNote}>
+                Git status unavailable — showing cached data.
+              </p>
+            )}
+          </div>
+          <div className={styles.historyHeaderAction}>{createPR.button}</div>
+        </header>
 
-      {/* Working Tree Changes */}
-      <div className={panelStyles.section}>
-        <h3 className={panelStyles.sectionTitle}>Working Tree</h3>
-        {agentChanges.length > 0 ? (
-          <div className={panelStyles.changesList}>
-            {agentChanges.map((change) => (
-              <div key={change.path} className={panelStyles.changeItem}>
-                <span
-                  className={panelStyles.changeStatus}
-                  data-status={change.status}
+        {createPR.form}
+
+        <div className={styles.historyBody}>
+          {commits.length > 0 ? (
+            <>
+              <ul className={styles.historyList}>
+                {displayCommits.map((commit) => (
+                  <li key={commit.key} className={styles.historyRow}>
+                    <span
+                      className={styles.commitDot}
+                      style={{ backgroundColor: commit.dotColor }}
+                      aria-hidden="true"
+                    />
+                    <div className={styles.commitBody}>
+                      <span className={styles.commitSubject}>
+                        {commit.message}
+                      </span>
+                      {(commit.author || commit.dateLabel) && (
+                        <span className={styles.commitMeta}>
+                          {commit.author}
+                          {commit.author && commit.dateLabel && (
+                            <span className={styles.metaSep}> · </span>
+                          )}
+                          {commit.dateLabel}
+                        </span>
+                      )}
+                    </div>
+                    <span className={styles.hashPill}>
+                      {commit.url ? (
+                        <a
+                          href={commit.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          {commit.shortHash}
+                        </a>
+                      ) : (
+                        commit.shortHash
+                      )}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              {hasMoreCommits && !showAllCommits && (
+                <button
+                  type="button"
+                  className={styles.commitExpandBtn}
+                  onClick={() => setShowAllCommits(true)}
                 >
-                  {change.status === "M"
-                    ? "M"
-                    : change.status === "A"
-                      ? "+"
-                      : change.status === "D"
-                        ? "-"
-                        : change.status === "??"
-                          ? "?"
-                          : change.status}
-                </span>
-                <span className={panelStyles.changePath}>{change.path}</span>
-              </div>
-            ))}
-          </div>
-        ) : gitChangedFiles.length > 0 ? (
-          // Fallback: git status returns flat file list without status type
-          <div className={panelStyles.changesList}>
-            {gitChangedFiles.map((file) => (
-              <div key={file} className={panelStyles.changeItem}>
-                <span className={panelStyles.changeStatus} data-status="M">
-                  M
-                </span>
-                <span className={panelStyles.changePath}>{file}</span>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <span className={panelStyles.emptyState}>Clean working tree</span>
-        )}
+                  Show all {commits.length} commits
+                </button>
+              )}
+            </>
+          ) : ahead === 0 ? (
+            <p className={styles.emptyState}>In sync with {targetBranch}</p>
+          ) : (
+            <p className={styles.emptyState}>No commit data</p>
+          )}
+        </div>
       </div>
-    </>
+    </div>
   );
 }

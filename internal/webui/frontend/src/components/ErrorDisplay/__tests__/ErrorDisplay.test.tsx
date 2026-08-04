@@ -236,6 +236,112 @@ describe("ErrorDisplay", () => {
     });
   });
 
+  describe("loading variant", () => {
+    it("renders spinner icon instead of error icon", () => {
+      const { container } = render(<ErrorDisplay variant="loading" />);
+      const svg = container.querySelector("svg");
+      expect(svg).toBeInTheDocument();
+      // Spinner SVG uses a single <path>, not <circle> + <line> like DefaultIcon
+      expect(svg!.querySelector("path")).toBeInTheDocument();
+      expect(svg!.querySelector("circle")).not.toBeInTheDocument();
+    });
+
+    it("renders default loading title and description", () => {
+      render(<ErrorDisplay variant="loading" />);
+      expect(
+        screen.getByRole("heading", { name: "Workspace loading..." }),
+      ).toBeInTheDocument();
+      expect(screen.getByText(/starting up/)).toBeInTheDocument();
+    });
+
+    it('uses role="status" instead of role="alert"', () => {
+      render(<ErrorDisplay variant="loading" />);
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      expect(screen.getByRole("status")).toBeInTheDocument();
+    });
+
+    it('uses aria-live="polite" instead of "assertive"', () => {
+      render(<ErrorDisplay variant="loading" />);
+      expect(screen.getByTestId("error-display")).toHaveAttribute(
+        "aria-live",
+        "polite",
+      );
+    });
+
+    it("sets data-variant to loading", () => {
+      render(<ErrorDisplay variant="loading" />);
+      expect(screen.getByTestId("error-display")).toHaveAttribute(
+        "data-variant",
+        "loading",
+      );
+    });
+
+    it("fires onRetry automatically at 5-second intervals", () => {
+      vi.useFakeTimers();
+      const handleRetry = vi.fn();
+
+      render(<ErrorDisplay variant="loading" onRetry={handleRetry} />);
+
+      // Not called immediately
+      expect(handleRetry).not.toHaveBeenCalled();
+
+      // Advance 5 seconds -> first auto-retry
+      vi.advanceTimersByTime(5000);
+      expect(handleRetry).toHaveBeenCalledTimes(1);
+
+      // Advance another 5 seconds -> second auto-retry
+      vi.advanceTimersByTime(5000);
+      expect(handleRetry).toHaveBeenCalledTimes(2);
+
+      vi.useRealTimers();
+    });
+
+    it("does not fire auto-retry when variant is not loading", () => {
+      vi.useFakeTimers();
+      const handleRetry = vi.fn();
+
+      render(<ErrorDisplay variant="fetch-error" onRetry={handleRetry} />);
+
+      vi.advanceTimersByTime(15000);
+      expect(handleRetry).not.toHaveBeenCalled();
+
+      vi.useRealTimers();
+    });
+
+    it("does not fire auto-retry when onRetry is not provided", () => {
+      vi.useFakeTimers();
+
+      // Should not throw even without onRetry
+      const { unmount } = render(<ErrorDisplay variant="loading" />);
+
+      vi.advanceTimersByTime(15000);
+      unmount();
+
+      vi.useRealTimers();
+    });
+
+    it("cleans up interval on unmount", () => {
+      vi.useFakeTimers();
+      const handleRetry = vi.fn();
+
+      const { unmount } = render(
+        <ErrorDisplay variant="loading" onRetry={handleRetry} />,
+      );
+
+      // Advance 5s -> one retry
+      vi.advanceTimersByTime(5000);
+      expect(handleRetry).toHaveBeenCalledTimes(1);
+
+      unmount();
+
+      // Advance another 10s -> no more retries after unmount
+      vi.advanceTimersByTime(10000);
+      expect(handleRetry).toHaveBeenCalledTimes(1);
+
+      vi.useRealTimers();
+    });
+  });
+
   describe("edge cases", () => {
     it("renders with empty description when variant has empty default", () => {
       const { container } = render(<ErrorDisplay variant="custom" />);

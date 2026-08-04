@@ -28,16 +28,22 @@ function makeAgent(overrides: Partial<LoomAgentStatus> = {}): LoomAgentStatus {
 
 describe("AgentCard", () => {
   describe("avatar", () => {
-    it("renders the first letter of the agent name", () => {
-      render(<AgentCard agent={makeAgent({ name: "nova" })} />);
+    it("renders two-letter initials for segmented agent names", () => {
+      render(<AgentCard agent={makeAgent({ name: "lead-b" })} />);
 
-      expect(screen.getByLabelText("nova avatar")).toHaveTextContent("n");
+      expect(screen.getByLabelText("lead-b avatar")).toHaveTextContent("LB");
     });
 
-    it("renders uppercase initial for uppercase name", () => {
+    it("renders two-letter initials for single-segment names", () => {
+      render(<AgentCard agent={makeAgent({ name: "nova" })} />);
+
+      expect(screen.getByLabelText("nova avatar")).toHaveTextContent("NO");
+    });
+
+    it("renders two-letter initials for uppercase names", () => {
       render(<AgentCard agent={makeAgent({ name: "Falcon" })} />);
 
-      expect(screen.getByLabelText("Falcon avatar")).toHaveTextContent("F");
+      expect(screen.getByLabelText("Falcon avatar")).toHaveTextContent("FA");
     });
 
     it("applies a background color style", () => {
@@ -88,7 +94,7 @@ describe("AgentCard", () => {
 
     it("has a background color style", () => {
       const { container } = render(
-        <AgentCard agent={makeAgent({ status: "working: bd-123 (5m)" })} />,
+        <AgentCard agent={makeAgent({ status: "working: loom-123 (5m)" })} />,
       );
 
       const dot = container.querySelector('[aria-hidden="true"]');
@@ -135,6 +141,36 @@ describe("AgentCard", () => {
       expect(screen.getByText("Ready")).toBeInTheDocument();
     });
 
+    it('hides "Idle" for lead agents', () => {
+      render(
+        <AgentCard
+          agent={makeAgent({
+            status: "idle",
+            role: "lead",
+            branch: "dev",
+          })}
+        />,
+      );
+
+      expect(screen.queryByText("Idle")).not.toBeInTheDocument();
+    });
+
+    it('still shows "Working" for idle lead agents with live working status', () => {
+      render(
+        <AgentCard
+          agent={makeAgent({
+            status: "idle",
+            live_status: "working",
+            active_task_id: "loom-42",
+            role: "lead",
+            branch: "b",
+          })}
+        />,
+      );
+
+      expect(screen.getByText("Working")).toBeInTheDocument();
+    });
+
     it('shows "Idle" for idle status', () => {
       render(
         <AgentCard agent={makeAgent({ status: "idle", branch: "dev" })} />,
@@ -154,7 +190,7 @@ describe("AgentCard", () => {
     it('shows "Working" for working with task ID', () => {
       render(
         <AgentCard
-          agent={makeAgent({ status: "working: bd-123 (5m)", branch: "b" })}
+          agent={makeAgent({ status: "working: loom-123 (5m)", branch: "b" })}
         />,
       );
 
@@ -172,11 +208,76 @@ describe("AgentCard", () => {
     it('shows "Planning" for planning with task ID', () => {
       render(
         <AgentCard
-          agent={makeAgent({ status: "planning: bd-456 (2m)", branch: "b" })}
+          agent={makeAgent({ status: "planning: loom-456 (2m)", branch: "b" })}
         />,
       );
 
       expect(screen.getByText("Planning")).toBeInTheDocument();
+    });
+
+    it('shows "Working" from live_status when the lock-derived status reads idle', () => {
+      // Serve-only deployments: the monitor status stays "idle", but fleet-db's
+      // live_status proves the agent is working. The badge must flip.
+      render(
+        <AgentCard
+          agent={makeAgent({
+            status: "idle",
+            live_status: "working",
+            active_task_id: "loom-42",
+            branch: "b",
+          })}
+        />,
+      );
+
+      expect(screen.getByText("Working")).toBeInTheDocument();
+    });
+
+    it('shows "Planning" from live_status for a plan-role agent that reads idle', () => {
+      render(
+        <AgentCard
+          agent={makeAgent({
+            status: "idle",
+            live_status: "working",
+            active_task_id: "loom-43",
+            role: "plan",
+            branch: "b",
+          })}
+        />,
+      );
+
+      expect(screen.getByText("Planning")).toBeInTheDocument();
+    });
+
+    it('keeps "Idle" when live_status is idle', () => {
+      render(
+        <AgentCard
+          agent={makeAgent({
+            status: "idle",
+            live_status: "idle",
+            branch: "b",
+          })}
+        />,
+      );
+
+      expect(screen.getByText("Idle")).toBeInTheDocument();
+    });
+
+    it("does not let live_status override a more specific status (review)", () => {
+      // live_status="working" must not mask a meaningful lock-derived status:
+      // a review badge wins (the override only applies to idle-like statuses).
+      render(
+        <AgentCard
+          agent={makeAgent({
+            status: "review: loom-50 (3m)",
+            live_status: "working",
+            active_task_id: "loom-50",
+            branch: "b",
+          })}
+        />,
+      );
+
+      expect(screen.getByText("Review")).toBeInTheDocument();
+      expect(screen.queryByText("Working")).not.toBeInTheDocument();
     });
 
     it('shows "Done" for done status', () => {
@@ -238,75 +339,6 @@ describe("AgentCard", () => {
     });
   });
 
-  describe("commit count", () => {
-    it("shows +N when agent.ahead > 0", () => {
-      render(<AgentCard agent={makeAgent({ ahead: 3 })} />);
-
-      expect(screen.getByText("+3")).toBeInTheDocument();
-    });
-
-    it("shows correct title tooltip for commit count when only ahead", () => {
-      render(<AgentCard agent={makeAgent({ ahead: 5 })} />);
-
-      expect(screen.getByTitle("5 commits ahead")).toBeInTheDocument();
-    });
-
-    it("does not show commit count when ahead is 0", () => {
-      render(<AgentCard agent={makeAgent({ ahead: 0 })} />);
-
-      expect(screen.queryByText(/^\+/)).not.toBeInTheDocument();
-    });
-
-    it("shows +1 for single commit ahead", () => {
-      render(<AgentCard agent={makeAgent({ ahead: 1 })} />);
-
-      expect(screen.getByText("+1")).toBeInTheDocument();
-      expect(screen.getByTitle("1 commits ahead")).toBeInTheDocument();
-    });
-  });
-
-  describe("behind count", () => {
-    it("shows -N when agent.behind > 0", () => {
-      render(<AgentCard agent={makeAgent({ behind: 3 })} />);
-
-      expect(screen.getByText("-3")).toBeInTheDocument();
-    });
-
-    it("shows correct title tooltip for behind count when only behind", () => {
-      render(<AgentCard agent={makeAgent({ behind: 5 })} />);
-
-      expect(screen.getByTitle("5 commits behind")).toBeInTheDocument();
-    });
-
-    it("does not show behind count when behind is 0", () => {
-      render(<AgentCard agent={makeAgent({ behind: 0 })} />);
-
-      expect(screen.queryByText(/^-\d+/)).not.toBeInTheDocument();
-    });
-
-    it("shows -1 for single commit behind", () => {
-      render(<AgentCard agent={makeAgent({ behind: 1 })} />);
-
-      expect(screen.getByText("-1")).toBeInTheDocument();
-      expect(screen.getByTitle("1 commits behind")).toBeInTheDocument();
-    });
-
-    it("shows both ahead and behind counts side by side when both > 0", () => {
-      render(<AgentCard agent={makeAgent({ ahead: 3, behind: 2 })} />);
-
-      expect(screen.getByText("+3")).toBeInTheDocument();
-      expect(screen.getByText("-2")).toBeInTheDocument();
-    });
-
-    it("shows combined tooltip when both ahead and behind", () => {
-      render(<AgentCard agent={makeAgent({ ahead: 4, behind: 7 })} />);
-
-      expect(
-        screen.getByTitle("4 commits ahead and 7 commits behind"),
-      ).toBeInTheDocument();
-    });
-  });
-
   describe("data-status attribute", () => {
     it("sets data-status to the parsed status type", () => {
       const { container } = render(
@@ -318,7 +350,7 @@ describe("AgentCard", () => {
 
     it("sets data-status to working for working status", () => {
       const { container } = render(
-        <AgentCard agent={makeAgent({ status: "working: bd-123 (5m)" })} />,
+        <AgentCard agent={makeAgent({ status: "working: loom-123 (5m)" })} />,
       );
 
       expect(container.firstChild).toHaveAttribute("data-status", "working");
@@ -330,6 +362,33 @@ describe("AgentCard", () => {
       );
 
       expect(container.firstChild).toHaveAttribute("data-status", "changes");
+    });
+  });
+
+  describe("selected state", () => {
+    it("sets data-selected when selected is true", () => {
+      const { container } = render(
+        <AgentCard agent={makeAgent()} selected onClick={() => {}} />,
+      );
+
+      expect(container.firstChild).toHaveAttribute("data-selected", "true");
+    });
+
+    it("does not set data-selected when selected is false", () => {
+      const { container } = render(
+        <AgentCard agent={makeAgent()} onClick={() => {}} />,
+      );
+
+      expect(container.firstChild).not.toHaveAttribute("data-selected");
+    });
+
+    it("sets aria-current=page when selected and clickable", () => {
+      render(<AgentCard agent={makeAgent()} selected onClick={() => {}} />);
+
+      expect(screen.getByRole("button")).toHaveAttribute(
+        "aria-current",
+        "page",
+      );
     });
   });
 
@@ -412,7 +471,7 @@ describe("AgentCard", () => {
     it("uses taskTitle as title attribute on status line when provided", () => {
       render(
         <AgentCard
-          agent={makeAgent({ status: "working: bd-123 (5m)", branch: "b" })}
+          agent={makeAgent({ status: "working: loom-123 (5m)", branch: "b" })}
           taskTitle="Fix the login bug"
         />,
       );
@@ -426,6 +485,55 @@ describe("AgentCard", () => {
       );
 
       expect(screen.getByTitle("Ready")).toBeInTheDocument();
+    });
+  });
+
+  describe("repo badge", () => {
+    it("renders RepoBadge when agent.repo is set", () => {
+      render(<AgentCard agent={makeAgent({ repo: "api" })} />);
+
+      expect(screen.getByLabelText("Repository: api")).toBeInTheDocument();
+      expect(screen.getByText("api")).toBeInTheDocument();
+    });
+
+    it("does not render repo line when agent.repo is undefined", () => {
+      render(<AgentCard agent={makeAgent({ repo: undefined })} />);
+
+      expect(screen.queryByLabelText(/^Repository:/)).not.toBeInTheDocument();
+    });
+  });
+
+  describe("cross_repo indicator", () => {
+    it("renders cross_repo indicator when agent.cross_repo is true", () => {
+      render(
+        <AgentCard agent={makeAgent({ repo: "api", cross_repo: true })} />,
+      );
+
+      expect(screen.getByText("↔")).toBeInTheDocument();
+    });
+
+    it("does not render cross_repo indicator when agent.cross_repo is false", () => {
+      render(
+        <AgentCard agent={makeAgent({ repo: "api", cross_repo: false })} />,
+      );
+
+      expect(screen.queryByText("↔")).not.toBeInTheDocument();
+    });
+
+    it("does not render cross_repo indicator when agent.cross_repo is undefined", () => {
+      render(<AgentCard agent={makeAgent({ repo: "api" })} />);
+
+      expect(screen.queryByText("↔")).not.toBeInTheDocument();
+    });
+
+    it("cross_repo indicator has correct aria-label", () => {
+      render(
+        <AgentCard agent={makeAgent({ repo: "api", cross_repo: true })} />,
+      );
+
+      expect(
+        screen.getByLabelText("Works across multiple repositories"),
+      ).toBeInTheDocument();
     });
   });
 
@@ -449,12 +557,6 @@ describe("AgentCard", () => {
 
       expect(container.firstChild).toHaveAttribute("data-status", "ready");
       expect(screen.getByText("Ready")).toBeInTheDocument();
-    });
-
-    it("handles large ahead count", () => {
-      render(<AgentCard agent={makeAgent({ ahead: 999 })} />);
-
-      expect(screen.getByText("+999")).toBeInTheDocument();
     });
   });
 });

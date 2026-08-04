@@ -22,12 +22,11 @@ func TestFilterEnv_AllowsExactMatches(t *testing.T) {
 func TestFilterEnv_AllowsPrefixMatches(t *testing.T) {
 	input := []string{
 		"LOOM_WORKTREE_PATH=/foo",
-		"BD_ACTOR=agent1",
-		"BEADS_DB=/bar",
+		"LOOM_AGENT_NAME=agent1",
 	}
 	got := FilterEnv(input)
-	if len(got) != 3 {
-		t.Fatalf("FilterEnv() returned %d entries, want 3", len(got))
+	if len(got) != 2 {
+		t.Fatalf("FilterEnv() returned %d entries, want 2", len(got))
 	}
 	for i, want := range input {
 		if got[i] != want {
@@ -56,14 +55,14 @@ func TestFilterEnv_MixedInput(t *testing.T) {
 		"DB_PASSWORD=pass123",
 		"HOME=/root",
 		"UNKNOWN_VAR=hello",
-		"BD_ACTOR=agent1",
+		"LOOM_AGENT_NAME=agent1",
 	}
 	got := FilterEnv(input)
 	want := []string{
 		"PATH=/usr/bin",
 		"LOOM_WORKTREE_PATH=/foo",
 		"HOME=/root",
-		"BD_ACTOR=agent1",
+		"LOOM_AGENT_NAME=agent1",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("FilterEnv() returned %d entries, want %d; got %v", len(got), len(want), got)
@@ -122,6 +121,81 @@ func TestFilterEnv_MalformedEntries(t *testing.T) {
 		if got[i] != want[i] {
 			t.Errorf("got[%d] = %q, want %q", i, got[i], want[i])
 		}
+	}
+}
+
+func TestFilterEnv_BlocksDangerousGitVars(t *testing.T) {
+	blockedVars := []string{
+		"GIT_DIR=/tmp",
+		"GIT_WORK_TREE=/tmp",
+		"GIT_INDEX_FILE=/tmp/index",
+		"GIT_OBJECT_DIRECTORY=/tmp/objects",
+		"GIT_ALTERNATE_OBJECT_DIRECTORIES=/tmp/alt",
+		"GIT_CEILING_DIRECTORIES=/tmp",
+		"GIT_COMMON_DIR=/tmp/common",
+		"GIT_EXEC_PATH=/tmp/exec",
+		"GIT_TEMPLATE_DIR=/tmp/tpl",
+		"GIT_ASKPASS=/tmp/askpass",
+		"GIT_HOOKS_PATH=/tmp/hooks",
+		"GIT_CONFIG=/tmp/config",
+		"GIT_CONFIG_GLOBAL=/tmp/global",
+		"GIT_CONFIG_SYSTEM=/tmp/system",
+		"GIT_CONFIG_COUNT=2",
+		"GIT_CONFIG_KEY_0=core.hooksPath",
+		"GIT_CONFIG_VALUE_0=/tmp/evil",
+		"GIT_CONFIG_KEY_1=safe.directory",
+		"GIT_CONFIG_VALUE_1=*",
+	}
+	got := FilterEnv(blockedVars)
+	if len(got) != 0 {
+		t.Errorf("FilterEnv() returned %d entries, want 0; got %v", len(got), got)
+	}
+}
+
+func TestFilterEnv_BlocklistOverridesAllowlist(t *testing.T) {
+	input := []string{
+		"GIT_DIR=/tmp",     // blocked
+		"PATH=/usr/bin",    // allowed
+		"GIT_ASKPASS=/tmp", // blocked
+	}
+	got := FilterEnv(input)
+	if len(got) != 1 {
+		t.Fatalf("FilterEnv() returned %d entries, want 1; got %v", len(got), got)
+	}
+	if got[0] != "PATH=/usr/bin" {
+		t.Errorf("got[0] = %q, want %q", got[0], "PATH=/usr/bin")
+	}
+}
+
+func TestFilterEnv_AllowsSafeGitVars(t *testing.T) {
+	input := []string{
+		"GIT_SSH_COMMAND=ssh -i key",
+		"GIT_TERMINAL_PROMPT=0",
+		"GIT_AUTHOR_NAME=Test",
+		"GIT_AUTHOR_EMAIL=test@example.com",
+		"GIT_COMMITTER_NAME=Test",
+		"GIT_COMMITTER_EMAIL=test@example.com",
+	}
+	got := FilterEnv(input)
+	if len(got) != len(input) {
+		t.Fatalf("FilterEnv() returned %d entries, want %d; got %v", len(got), len(input), got)
+	}
+	for i := range input {
+		if got[i] != input[i] {
+			t.Errorf("got[%d] = %q, want %q", i, got[i], input[i])
+		}
+	}
+}
+
+func TestFilterEnv_BlocksEmptyValueGitVars(t *testing.T) {
+	// GIT_DIR="" can cause different behavior than unset — must still block
+	input := []string{"GIT_DIR=", "PATH=/usr/bin"}
+	got := FilterEnv(input)
+	if len(got) != 1 {
+		t.Fatalf("FilterEnv() returned %d entries, want 1; got %v", len(got), got)
+	}
+	if got[0] != "PATH=/usr/bin" {
+		t.Errorf("got[0] = %q, want %q", got[0], "PATH=/usr/bin")
 	}
 }
 

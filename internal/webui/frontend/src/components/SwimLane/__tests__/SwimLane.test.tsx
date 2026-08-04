@@ -11,7 +11,8 @@ import "@testing-library/jest-dom";
 import { render, screen, within, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-import type { BlockedInfo, KanbanColumnConfig } from "@/components/KanbanBoard";
+import type { KanbanColumnConfig } from "@/components/KanbanBoard";
+import type { BlockedInfo } from "@/types/issue";
 import type { Issue, Status } from "@/types";
 
 import { SwimLane } from "../SwimLane";
@@ -54,9 +55,9 @@ function createMockIssues(statuses: Status[]): Issue[] {
 
 /**
  * Helper to convert statuses to column configs for testing.
- * Handles undefined status as 'open' for backward compatibility.
+ * Handles undefined status as 'open'
  */
-function statusesToColumns(statuses: Status[]): KanbanColumnConfig[] {
+function columnsFromStatuses(statuses: Status[]): KanbanColumnConfig[] {
   return statuses.map((s) => ({
     id: s,
     label: s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
@@ -69,9 +70,9 @@ function statusesToColumns(statuses: Status[]): KanbanColumnConfig[] {
 }
 
 /**
- * Default columns for testing (3-status layout for backward compatibility).
+ * Default columns for testing (configured three-column layout).
  */
-const defaultColumns = statusesToColumns(["open", "in_progress", "closed"]);
+const defaultColumns = columnsFromStatuses(["open", "in_progress", "closed"]);
 
 describe("SwimLane", () => {
   beforeEach(() => {
@@ -92,6 +93,164 @@ describe("SwimLane", () => {
       expect(
         screen.getByRole("heading", { name: "Epic: User Authentication" }),
       ).toBeInTheDocument();
+    });
+
+    it("calls onHeaderIssueClick when clickable lane title is clicked", () => {
+      const handleHeaderIssueClick = vi.fn();
+      const epic = createMockIssue({
+        id: "HELLO-WORLD-2",
+        title: "Epic: User Authentication",
+        issue_type: "epic",
+      });
+
+      renderWithDndContext(
+        <SwimLane
+          id="test-lane"
+          title="Build the Hello World web app"
+          issues={[]}
+          columns={defaultColumns}
+          headerIssue={epic}
+          onHeaderIssueClick={handleHeaderIssueClick}
+        />,
+      );
+
+      expect(screen.getByText("HELLO-WORLD-2")).toBeInTheDocument();
+      expect(
+        screen.getByText("Build the Hello World web app"),
+      ).toBeInTheDocument();
+
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: "Open epic HELLO-WORLD-2: Build the Hello World web app",
+        }),
+      );
+
+      expect(handleHeaderIssueClick).toHaveBeenCalledTimes(1);
+      expect(handleHeaderIssueClick).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "HELLO-WORLD-2" }),
+      );
+    });
+
+    it("does not render epic id when headerIssue is absent", () => {
+      renderWithDndContext(
+        <SwimLane
+          id="test-lane"
+          title="alice"
+          issues={[]}
+          columns={defaultColumns}
+        />,
+      );
+
+      expect(screen.getByText("alice")).toBeInTheDocument();
+      expect(screen.queryByTestId("lane-title-button")).not.toBeInTheDocument();
+    });
+
+    it("renders a runner badge when a lead has claimed the epic lane", () => {
+      renderWithDndContext(
+        <SwimLane
+          id="test-lane"
+          title="Epic: User Authentication"
+          issues={[]}
+          columns={defaultColumns}
+          epicRunner="atlas"
+        />,
+      );
+
+      const badge = screen.getByTestId("lane-runner-badge");
+      expect(badge).toHaveTextContent("atlas");
+      expect(
+        screen.queryByTestId("lane-unclaimed-badge"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("renders an Unclaimed badge when no lead runs the epic lane", () => {
+      renderWithDndContext(
+        <SwimLane
+          id="test-lane"
+          title="Epic: User Authentication"
+          issues={[]}
+          columns={defaultColumns}
+          epicRunner={null}
+        />,
+      );
+
+      expect(screen.getByTestId("lane-unclaimed-badge")).toHaveTextContent(
+        "Unclaimed",
+      );
+    });
+
+    it("renders a run button for unclaimed epic lanes when onRunEpic is provided", () => {
+      const onRunEpic = vi.fn();
+      const epic = {
+        id: "HELLO-WORLD-2",
+        title: "Build the Hello World web app",
+        issue_type: "epic" as const,
+        status: "open" as const,
+        priority: 2,
+        created_at: "",
+        updated_at: "",
+      };
+
+      renderWithDndContext(
+        <SwimLane
+          id="lane-epic-HELLO-WORLD-2"
+          title={epic.title}
+          issues={[]}
+          columns={defaultColumns}
+          headerIssue={epic}
+          epicRunner={null}
+          onRunEpic={onRunEpic}
+        />,
+      );
+
+      const runButton = screen.getByTestId("lane-run-epic-button");
+      expect(runButton).toHaveTextContent("Run");
+      runButton.click();
+      expect(onRunEpic).toHaveBeenCalledTimes(1);
+    });
+
+    it("hides the run button when the epic lane is already claimed", () => {
+      const epic = {
+        id: "HELLO-WORLD-2",
+        title: "Build the Hello World web app",
+        issue_type: "epic" as const,
+        status: "open" as const,
+        priority: 2,
+        created_at: "",
+        updated_at: "",
+      };
+
+      renderWithDndContext(
+        <SwimLane
+          id="lane-epic-HELLO-WORLD-2"
+          title={epic.title}
+          issues={[]}
+          columns={defaultColumns}
+          headerIssue={epic}
+          epicRunner="lead-a"
+          onRunEpic={vi.fn()}
+        />,
+      );
+
+      expect(
+        screen.queryByTestId("lane-run-epic-button"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("hides the runner badge entirely for non-epic groupings", () => {
+      renderWithDndContext(
+        <SwimLane
+          id="test-lane"
+          title="P1 (High)"
+          issues={[]}
+          columns={defaultColumns}
+        />,
+      );
+
+      expect(screen.queryByTestId("lane-runner-badge")).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("lane-unclaimed-badge"),
+      ).not.toBeInTheDocument();
     });
 
     it("shows correct issue count", () => {
@@ -117,7 +276,7 @@ describe("SwimLane", () => {
     });
 
     it("renders all status columns", () => {
-      const columns = statusesToColumns([
+      const columns = columnsFromStatuses([
         "open",
         "in_progress",
         "closed",
@@ -310,9 +469,7 @@ describe("SwimLane", () => {
       );
 
       // When onIssueClick is provided, IssueCard has role="button"
-      const card = screen.getByRole("button", {
-        name: /Issue: Clickable Issue/i,
-      });
+      const card = screen.getByLabelText(/Issue: Clickable Issue/i);
       fireEvent.click(card);
 
       expect(handleIssueClick).toHaveBeenCalledTimes(1);
@@ -342,8 +499,8 @@ describe("SwimLane", () => {
         />,
       );
 
-      const cardA = screen.getByRole("button", { name: /Issue: Issue A/i });
-      const cardB = screen.getByRole("button", { name: /Issue: Issue B/i });
+      const cardA = screen.getByLabelText(/Issue: Issue A/i);
+      const cardB = screen.getByLabelText(/Issue: Issue B/i);
 
       fireEvent.click(cardB);
       expect(handleIssueClick).toHaveBeenLastCalledWith(
@@ -492,6 +649,74 @@ describe("SwimLane", () => {
     });
   });
 
+  describe("column layout", () => {
+    it("uses a single shared grid for header cells and body columns", () => {
+      const columns = columnsFromStatuses([
+        "open",
+        "in_progress",
+        "review",
+        "closed",
+      ]);
+
+      const { container } = renderWithDndContext(
+        <SwimLane
+          id="test-lane"
+          title="Test Lane"
+          issues={[]}
+          columns={columns}
+        />,
+      );
+
+      const laneContent = screen.getByTestId("lane-content");
+      expect(laneContent).toHaveStyle({
+        gridTemplateColumns: "repeat(4, minmax(260px, 1fr))",
+      });
+
+      const columnTitles = laneContent!.querySelectorAll("h3");
+      expect(columnTitles).toHaveLength(4);
+
+      const bodyColumns = laneContent!.querySelectorAll("section[data-status]");
+      expect(bodyColumns).toHaveLength(4);
+
+      columnTitles.forEach((header, index) => {
+        const headerCell = header.parentElement;
+        const bodyColumn = bodyColumns[index];
+        expect(headerCell).toHaveStyle({ gridColumn: String(index + 1) });
+        expect(bodyColumn).toHaveStyle({ gridColumn: String(index + 1) });
+      });
+
+      expect(container.querySelector('[class*="columnHeaderRow"]')).toBeNull();
+      expect(container.querySelector('[class*="columnBodyRow"]')).toBeNull();
+    });
+
+    it("keeps lane content constrained for horizontal scrolling when columns exceed viewport", () => {
+      const columns = columnsFromStatuses([
+        "open",
+        "ready",
+        "in_progress",
+        "review",
+        "closed",
+      ]);
+
+      renderWithDndContext(
+        <div style={{ width: "800px" }}>
+          <SwimLane
+            id="test-lane"
+            title="Test Lane"
+            issues={[]}
+            columns={columns}
+          />
+        </div>,
+      );
+
+      const laneContent = screen.getByTestId("lane-content");
+      expect(laneContent).toHaveStyle({
+        gridTemplateColumns: "repeat(5, minmax(260px, 1fr))",
+      });
+      expect(laneContent.style.minWidth).toBe("");
+    });
+  });
+
   describe("props", () => {
     it("applies custom className", () => {
       const { container } = renderWithDndContext(
@@ -506,6 +731,30 @@ describe("SwimLane", () => {
 
       const section = container.querySelector("section");
       expect(section).toHaveClass("custom-lane-class");
+    });
+
+    it("hides empty columns when compactColumns is enabled", () => {
+      const issues = [createMockIssue({ id: "issue-1", status: "open" })];
+
+      renderWithDndContext(
+        <SwimLane
+          id="test-lane"
+          title="Test Lane"
+          issues={issues}
+          columns={defaultColumns}
+          compactColumns
+        />,
+      );
+
+      const laneContent = screen.getByTestId("lane-content");
+      expect(laneContent).toHaveStyle({
+        gridTemplateColumns: "repeat(1, minmax(260px, 1fr))",
+      });
+      expect(within(laneContent).getByText("Open")).toBeInTheDocument();
+      expect(
+        within(laneContent).queryByText("In Progress"),
+      ).not.toBeInTheDocument();
+      expect(within(laneContent).queryByText("Closed")).not.toBeInTheDocument();
     });
 
     it("has correct data-testid based on id prop", () => {
@@ -671,7 +920,7 @@ describe("SwimLane", () => {
     });
 
     it("works with multiple SwimLanes in same DndContext", () => {
-      const twoColumns = statusesToColumns(["open", "closed"]);
+      const twoColumns = columnsFromStatuses(["open", "closed"]);
       render(
         <DndContext>
           <SwimLane
@@ -698,7 +947,7 @@ describe("SwimLane", () => {
   describe("backlog column (Pending→Backlog rename)", () => {
     it('passes columnType="backlog" to StatusColumn for backlog column', () => {
       const columns: KanbanColumnConfig[] = [
-        ...statusesToColumns(["open", "in_progress"]),
+        ...columnsFromStatuses(["open", "in_progress"]),
         {
           id: "backlog",
           label: "Backlog",
@@ -732,7 +981,7 @@ describe("SwimLane", () => {
       });
 
       const columns: KanbanColumnConfig[] = [
-        ...statusesToColumns(["open", "in_progress"]),
+        ...columnsFromStatuses(["open", "in_progress"]),
         {
           id: "backlog",
           label: "Backlog",
@@ -766,7 +1015,7 @@ describe("SwimLane", () => {
       });
 
       const columns: KanbanColumnConfig[] = [
-        ...statusesToColumns(["open", "in_progress"]),
+        ...columnsFromStatuses(["open", "in_progress"]),
         {
           id: "backlog",
           label: "Backlog",
@@ -792,7 +1041,7 @@ describe("SwimLane", () => {
 
     it("renders EmptyColumn with backlog status for empty backlog column", () => {
       const columns: KanbanColumnConfig[] = [
-        ...statusesToColumns(["open"]),
+        ...columnsFromStatuses(["open"]),
         {
           id: "backlog",
           label: "Backlog",

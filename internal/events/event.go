@@ -30,29 +30,46 @@ func (d *Duration) UnmarshalJSON(b []byte) error {
 type EventType string
 
 const (
-	TaskClaimed      EventType = "task_claimed"
-	TaskStarted      EventType = "task_started"
-	TaskCompleted    EventType = "task_completed"
-	TaskFailed       EventType = "task_failed"
-	AgentStarted     EventType = "agent_started"
-	AgentRestarted   EventType = "agent_restarted"
-	AgentStopped     EventType = "agent_stopped"
-	EpicAssigned     EventType = "epic_assigned"
-	EpicExhausted    EventType = "epic_exhausted"
-	PRCreated        EventType = "pr_created"
-	ConflictResolved EventType = "conflict_resolved"
-	HealthCheck      EventType = "health_check"
+	TaskClaimed      EventType = "task.claimed"
+	TaskStarted      EventType = "task.started"
+	TaskCompleted    EventType = "task.completed"
+	TaskFailed       EventType = "task.failed"
+	TaskStuck        EventType = "task.stuck"
+	AgentStarted     EventType = "agent.started"
+	AgentRestarted   EventType = "agent.restarted"
+	AgentStopped     EventType = "agent.stopped"
+	EpicAssigned     EventType = "epic.assigned"
+	EpicExhausted    EventType = "epic.exhausted"
+	PRCreated        EventType = "pr.created"
+	ConflictResolved EventType = "conflict.resolved"
+	HealthCheck      EventType = "system.health_check"
+	ConfigReloaded   EventType = "system.config_reloaded"
+	CircuitOpened    EventType = "circuit.opened"
+	CircuitClosed    EventType = "circuit.closed"
 )
 
 // Event is the envelope written to JSONL files. Data is stored as json.RawMessage
 // so that JSON round-trips preserve typed data without losing type information.
+//
+// Trace fields:
+//   - TraceParent / TraceState: W3C trace-context captured at emit time. Empty
+//     when the emitter had no active span (or tracing was disabled). The
+//     otelexport consumer rebuilds the parent span context from these so
+//     event-driven spans (loom.task, loom.agent.lifecycle) connect to the
+//     originating request rather than fragmenting into their own traces.
+//
+// Older JSONL records without these fields decode normally — the otelexport
+// consumer treats absent fields as "no parent, use the existing
+// context.Background() path" so backward compatibility is preserved.
 type Event struct {
-	Type      EventType       `json:"type"`
-	Timestamp time.Time       `json:"timestamp"`
-	Agent     string          `json:"agent,omitempty"`
-	Role      string          `json:"role,omitempty"`
-	EpicID    string          `json:"epic_id,omitempty"`
-	Data      json.RawMessage `json:"data,omitempty"`
+	Type        EventType       `json:"type"`
+	Timestamp   time.Time       `json:"timestamp"`
+	Agent       string          `json:"agent,omitempty"`
+	Role        string          `json:"role,omitempty"`
+	EpicID      string          `json:"epic_id,omitempty"`
+	Data        json.RawMessage `json:"data,omitempty"`
+	TraceParent string          `json:"traceparent,omitempty"`
+	TraceState  string          `json:"tracestate,omitempty"`
 }
 
 // NewEvent creates an Event, marshaling v into the Data field.
@@ -92,6 +109,8 @@ func (e *Event) DecodeData() (interface{}, error) {
 		target = &TaskCompletedData{}
 	case TaskFailed:
 		target = &TaskFailedData{}
+	case TaskStuck:
+		target = &TaskStuckData{}
 	case AgentStarted:
 		target = &AgentStartedData{}
 	case AgentRestarted:
@@ -108,6 +127,12 @@ func (e *Event) DecodeData() (interface{}, error) {
 		target = &ConflictResolvedData{}
 	case HealthCheck:
 		target = &HealthCheckData{}
+	case ConfigReloaded:
+		target = &ConfigReloadedData{}
+	case CircuitOpened:
+		target = &CircuitOpenedData{}
+	case CircuitClosed:
+		target = &CircuitClosedData{}
 	default:
 		return nil, fmt.Errorf("unknown event type: %s", e.Type)
 	}
@@ -137,8 +162,19 @@ type TaskCompletedData struct {
 }
 
 type TaskFailedData struct {
-	TaskID string `json:"task_id"`
-	Error  string `json:"error"`
+	TaskID     string `json:"task_id"`
+	Error      string `json:"error"`
+	ErrorClass string `json:"error_class,omitempty"`
+	RetryAfter string `json:"retry_after,omitempty"`
+}
+
+// TaskStuckData reports a task that failed repeatedly across consecutive
+// auto-mode invocations and was skipped to allow the loop to make progress on
+// other tasks.
+type TaskStuckData struct {
+	TaskID              string `json:"task_id"`
+	ConsecutiveFailures int    `json:"consecutive_failures"`
+	LastError           string `json:"last_error"`
 }
 
 type AgentStartedData struct {
@@ -151,8 +187,9 @@ type AgentRestartedData struct {
 }
 
 type AgentStoppedData struct {
-	PID      int `json:"pid"`
-	ExitCode int `json:"exit_code"`
+	PID        int    `json:"pid"`
+	ExitCode   int    `json:"exit_code"`
+	StopReason string `json:"stop_reason,omitempty"`
 }
 
 type EpicAssignedData struct {
@@ -176,4 +213,25 @@ type ConflictResolvedData struct {
 type HealthCheckData struct {
 	AgentCount   int `json:"agent_count"`
 	HealthyCount int `json:"healthy_count"`
+}
+
+type ConfigReloadedData struct {
+	Added    int    `json:"added"`
+	Removed  int    `json:"removed"`
+	Modified int    `json:"modified"`
+	Error    string `json:"error,omitempty"`
+}
+
+// CircuitOpenedData reports that a rate-limit circuit breaker has tripped and
+// work is being paused for a cooldown period.
+type CircuitOpenedData struct {
+	RateLimitCount   int      `json:"rate_limit_count"`
+	WindowDuration   Duration `json:"window_duration"`
+	CooldownDuration Duration `json:"cooldown_duration"`
+}
+
+// CircuitClosedData reports that a rate-limit circuit breaker has reset after
+// a successful probe invocation.
+type CircuitClosedData struct {
+	Reason string `json:"reason,omitempty"`
 }

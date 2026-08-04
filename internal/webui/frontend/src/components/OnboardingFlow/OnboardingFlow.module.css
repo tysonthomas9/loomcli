@@ -1,0 +1,328 @@
+.onboardingFlow {
+  width: min(960px, calc(100vw - 40px));
+  margin: 0 auto;
+  padding: var(--space-8);
+  color: var(--color-text-primary);
+}
+
+.header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-6);
+  align-items: start;
+  margin-bottom: var(--space-5);
+}
+
+.kicker {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.title {
+  margin: 0;
+  font-size: 1.5rem;
+  line-height: var(--line-height-tight);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0;
+}
+
+.subtitle {
+  max-width: 680px;
+  margin: var(--space-2) 0 0;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-normal);
+  color: var(--color-text-secondary);
+}
+
+.progress {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  min-width: 96px;
+  padding-top: var(--space-1);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.progress strong {
+  color: var(--color-text-primary);
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.headerAside {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-3);
+}
+
+.dismissButton {
+  height: 32px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+}
+
+.steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.step {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  gap: var(--space-4);
+  align-items: center;
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+}
+
+.stepIndex {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+}
+
+.stepBody {
+  min-width: 0;
+}
+
+.stepTitleRow {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.stepTitle {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-tight);
+}
+
+.stepDescription {
+  margin: var(--space-1) 0 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-normal);
+}
+
+.stepDetail {
+  margin-top: var(--space-3);
+}
+
+.statusBadge {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+}
+
+.stepAction {
+  min-width: 132px;
+  padding: 8px 12px;
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-md);
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+}
+
+.stepAction:disabled {
+  border-color: var(--color-border);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-muted);
+  cursor: not-allowed;
+}
+
+.complete {
+  border-color: color-mix(
+    in srgb,
+    var(--color-success) 32%,
+    var(--color-border)
+  );
+}
+
+.complete .stepIndex {
+  background: color-mix(in srgb, var(--color-success) 16%, transparent);
+  color: var(--color-success);
+}
+
+.complete .statusBadge {
+  background: color-mix(in srgb, var(--color-success) 14%, transparent);
+  color: var(--color-success);
+}
+
+.current {
+  border-color: color-mix(
+    in srgb,
+    var(--color-primary) 44%,
+    var(--color-border)
+  );
+  box-shadow: 0 0 0 1px
+    color-mix(in srgb, var(--color-primary) 18%, transparent);
+}
+
+.current .stepIndex,
+.actionable .stepIndex,
+.pending .stepIndex {
+  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  color: var(--color-primary);
+}
+
+.current .statusBadge,
+.actionable .statusBadge,
+.pending .statusBadge {
+  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  color: var(--color-primary);
+}
+
+.pending {
+  border-color: color-mix(
+    in srgb,
+    var(--color-primary) 36%,
+    var(--color-border)
+  );
+}
+
+.blocked {
+  opacity: 0.68;
+}
+
+.panel {
+  width: 100%;
+  margin: 0;
+  padding: var(--space-3);
+}
+
+.panel .header {
+  grid-template-columns: 1fr;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.panel .kicker {
+  margin-bottom: 2px;
+}
+
+.panel .title {
+  font-size: 1rem;
+}
+
+.panel .subtitle {
+  margin-top: var(--space-1);
+  font-size: var(--font-size-xs);
+  line-height: 1.35;
+}
+
+.panel .headerAside,
+.panel .progress {
+  align-items: flex-start;
+}
+
+.panel .steps {
+  gap: var(--space-2);
+}
+
+.panel .step {
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-2);
+  padding: var(--space-2);
+}
+
+.panel .stepIndex {
+  width: 24px;
+  height: 24px;
+  font-size: var(--font-size-xs);
+}
+
+.panel .stepTitleRow {
+  align-items: flex-start;
+}
+
+.panel .stepAction {
+  grid-column: 2;
+  width: fit-content;
+  min-width: 0;
+  padding: 6px 10px;
+  font-size: var(--font-size-xs);
+}
+
+.panel .stepDescription {
+  font-size: var(--font-size-xs);
+  line-height: 1.35;
+}
+
+.panel .stepDetail {
+  margin-top: var(--space-2);
+}
+
+.panel .complete,
+.panel .blocked {
+  align-items: center;
+}
+
+.panel .complete .stepDescription,
+.panel .blocked .stepDescription {
+  display: none;
+}
+
+@media (width <= 720px) {
+  .onboardingFlow {
+    width: 100%;
+    padding: var(--space-5) var(--space-4);
+  }
+
+  .header {
+    grid-template-columns: 1fr;
+  }
+
+  .progress {
+    align-items: flex-start;
+  }
+
+  .headerAside {
+    align-items: flex-start;
+  }
+
+  .step {
+    grid-template-columns: 32px minmax(0, 1fr);
+  }
+
+  .stepAction {
+    grid-column: 2;
+    width: fit-content;
+    min-width: 0;
+  }
+}

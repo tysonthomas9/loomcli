@@ -3,7 +3,8 @@
  * Renders column headers with interactive sort indicators.
  */
 
-import { KeyboardEvent, useCallback } from "react";
+import type { KeyboardEvent } from "react";
+import { useCallback } from "react";
 
 import type { ColumnDef } from "./columns";
 

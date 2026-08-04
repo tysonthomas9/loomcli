@@ -3,9 +3,9 @@
  */
 
 /**
- * Unit tests for columnConfigs – verifies the Backlog/Blocked/Review column
- * filter logic. Backlog only contains deferred issues, Blocked contains
- * dependency-blocked and status=blocked issues.
+ * Unit tests for columnConfigs – verifies Backlog/Open/Blocked/Review column
+ * filter logic. Computed kanban flags from FleetDB win when present, with raw
+ * status fallback for older payloads.
  */
 
 import { describe, it, expect } from "vitest";
@@ -13,7 +13,7 @@ import { describe, it, expect } from "vitest";
 import type { Issue } from "@/types";
 
 import { DEFAULT_COLUMNS, createColumns } from "../columnConfigs";
-import type { BlockedInfo } from "../KanbanBoard";
+import type { BlockedInfo } from "@/types/issue";
 
 /**
  * Create a mock issue for testing column filters.
@@ -58,13 +58,18 @@ describe("columnConfigs", () => {
   });
 
   // ---------------------------------------------------------------
-  // 2-5. Backlog filter (only deferred status)
+  // 2-5. Backlog filter (canonical deferred)
   // ---------------------------------------------------------------
   describe("Backlog filter", () => {
     const backlog = getColumn("backlog");
 
     it("matches issues with status=deferred", () => {
       const issue = createMockIssue({ status: "deferred" });
+      expect(backlog.filter(issue, notBlocked)).toBe(true);
+    });
+
+    it("matches open issues flagged as currently deferred", () => {
+      const issue = createMockIssue({ status: "open", is_deferred: true });
       expect(backlog.filter(issue, notBlocked)).toBe(true);
     });
 
@@ -85,7 +90,7 @@ describe("columnConfigs", () => {
   });
 
   // ---------------------------------------------------------------
-  // Blocked filter (dependency-blocked + status=blocked)
+  // Blocked filter (canonical blocked + fallback status)
   // ---------------------------------------------------------------
   describe("Blocked filter", () => {
     const blockedCol = getColumn("blocked");
@@ -102,6 +107,11 @@ describe("columnConfigs", () => {
 
     it("matches issues with status=blocked", () => {
       const issue = createMockIssue({ status: "blocked" });
+      expect(blockedCol.filter(issue, notBlocked)).toBe(true);
+    });
+
+    it("matches issues flagged blocked even without blocker details", () => {
+      const issue = createMockIssue({ status: "open", is_blocked: true });
       expect(blockedCol.filter(issue, notBlocked)).toBe(true);
     });
 
@@ -127,19 +137,19 @@ describe("columnConfigs", () => {
   });
 
   // ---------------------------------------------------------------
-  // 6-8. Needs Review column (id: 'review', label: 'Needs Review')
+  // 6-8. Review column (id: 'review', label: 'Review')
   // ---------------------------------------------------------------
-  describe("Needs Review column identity", () => {
+  describe("Review column identity", () => {
     it('has id "review" at index 4', () => {
       expect(DEFAULT_COLUMNS[4].id).toBe("review");
     });
 
-    it('has label "Needs Review" at index 4', () => {
-      expect(DEFAULT_COLUMNS[4].label).toBe("Needs Review");
+    it('has label "Review" at index 4', () => {
+      expect(DEFAULT_COLUMNS[4].label).toBe("Review");
     });
   });
 
-  describe("Needs Review filter", () => {
+  describe("Review filter", () => {
     const review = getColumn("review");
 
     it("does NOT match status=blocked issues", () => {
@@ -152,7 +162,7 @@ describe("columnConfigs", () => {
       expect(review.filter(issue, notBlocked)).toBe(true);
     });
 
-    it("does NOT match open issues with [Need Review] in title (legacy prefix removed)", () => {
+    it("does NOT match open issues with [Need Review] in title", () => {
       const issue = createMockIssue({
         title: "[Need Review] Update docs",
         status: "open",
@@ -182,6 +192,17 @@ describe("columnConfigs", () => {
       expect(open.filter(issue, notBlocked)).toBe(true);
     });
 
+    it("matches open issues flagged canonically ready", () => {
+      const issue = createMockIssue({ status: "open", is_ready: true });
+      expect(open.filter(issue, blocked)).toBe(false);
+      expect(open.filter(issue, notBlocked)).toBe(true);
+    });
+
+    it("matches open issues flagged not ready when unblocked", () => {
+      const issue = createMockIssue({ status: "open", is_ready: false });
+      expect(open.filter(issue, notBlocked)).toBe(true);
+    });
+
     it("matches issues with undefined status (treated as open)", () => {
       const issue = createMockIssue({ status: undefined });
       expect(open.filter(issue, notBlocked)).toBe(true);
@@ -192,7 +213,12 @@ describe("columnConfigs", () => {
       expect(open.filter(issue, blocked)).toBe(false);
     });
 
-    it("matches open issues even with [Need Review] in title (legacy prefix no longer used)", () => {
+    it("rejects review issues even if a stale ready flag is present", () => {
+      const issue = createMockIssue({ status: "review", is_ready: true });
+      expect(open.filter(issue, notBlocked)).toBe(false);
+    });
+
+    it("matches open issues even with [Need Review] in title", () => {
       const issue = createMockIssue({
         title: "[Need Review] Refactor API",
         status: "open",
@@ -205,7 +231,7 @@ describe("columnConfigs", () => {
   // Column style configuration
   // ---------------------------------------------------------------
   describe("Column style configuration", () => {
-    it('Needs Review column has style "normal" (not highlighted)', () => {
+    it('Review column has style "normal" (not highlighted)', () => {
       const review = getColumn("review");
       expect(review.style).toBe("normal");
     });
@@ -267,7 +293,7 @@ describe("columnConfigs", () => {
       expect(getColumn("in_progress").filter(issue, notBlocked)).toBe(false);
     });
 
-    it("excludes epics from Needs Review (status)", () => {
+    it("excludes epics from Review (status)", () => {
       const issue = createMockIssue({ issue_type: "epic", status: "review" });
       expect(getColumn("review").filter(issue, notBlocked)).toBe(false);
     });
@@ -385,7 +411,7 @@ describe("columnConfigs", () => {
         expect(inProgress.filter(epicIssue, notBlocked)).toBe(false);
       });
 
-      it("filters out epics from Needs Review", () => {
+      it("filters out epics from Review", () => {
         const columns = createColumns();
         const review = getColumnFrom(columns, "review");
         const epicIssue = createMockIssue({
@@ -507,7 +533,7 @@ describe("columnConfigs", () => {
         expect(inProgress.filter(epicIssue, notBlocked)).toBe(true);
       });
 
-      it("allows epics in Needs Review (status)", () => {
+      it("allows epics in Review (status)", () => {
         const columns = createColumns({ includeEpics: true });
         const review = getColumnFrom(columns, "review");
         const epicIssue = createMockIssue({
@@ -629,9 +655,9 @@ describe("columnConfigs", () => {
   });
 
   // ---------------------------------------------------------------
-  // DEFAULT_COLUMNS backward compatibility
+  // DEFAULT_COLUMNS existing behavior
   // ---------------------------------------------------------------
-  describe("DEFAULT_COLUMNS backward compatibility", () => {
+  describe("DEFAULT_COLUMNS existing behavior", () => {
     it("DEFAULT_COLUMNS is defined as createColumns() with no args", () => {
       // DEFAULT_COLUMNS should produce the same column IDs and labels
       const freshDefault = createColumns();

@@ -18,6 +18,7 @@ linters:
     - misspell
     - revive
     - staticcheck
+    - depguard
     - unconvert
     - unparam
 
@@ -49,13 +50,171 @@ linters:
     cyclop:
       max-complexity: 20
     funlen:
-      lines: 100
+      lines: 50
       statements: -1
       ignore-comments: true
     gocognit:
       min-complexity: 30
     misspell:
       locale: US
+    depguard:
+      rules:
+        handler-layer-isolation:
+          list-mode: lax
+          files:
+            - "**/handler/**"
+          deny:
+            - pkg: github.com/tysonthomas9/loomcli/internal/webui/daemon
+              desc: "Handlers must not import daemon directly; use the service layer (internal/webui/service)"
+            - pkg: github.com/tysonthomas9/loomcli/internal/backend
+              desc: "Handlers must not import backend directly; use the service layer (internal/webui/service)"
+            - pkg: github.com/tysonthomas9/loomcli/internal/notify
+              desc: "Handlers must not import notify directly; use the service layer (internal/webui/service)"
+            - pkg: github.com/tysonthomas9/loomcli/internal/webui/store
+              desc: "Handlers must not import store directly; use the service layer (internal/webui/service)"
+            - pkg: github.com/tysonthomas9/loomcli/internal/store
+              desc: "Handlers must not import store directly; use the service layer (internal/webui/service)"
+        # Module boundary rules — dependency direction: sdk → infra → web → cli
+        # When adding new internal packages, add them to the appropriate rule below.
+        # See /Users/tyson/.claude/plans/purrfect-weaving-stream.md for layer definitions.
+        sdk-leaf:
+          list-mode: lax
+          files:
+            - "**/internal/types/**"
+            - "**/internal/entity/**"
+            - "**/internal/backend/*.go"       # root only — sub-packages are infra
+            - "**/internal/notify/**"
+            - "**/internal/agenterr/**"
+            - "**/internal/authmode/**"
+            - "**/internal/workspaceerrors/**"
+            - "**/internal/events/*.go"        # root only — otelexport is infra
+            - "**/internal/ops/**"             # future: created by loomcli-rir82.2
+            - "**/internal/httpclient/**"      # auth-aware HTTP client — sdk layer
+          deny:
+            # Infra-layer packages (SDK must not import infra)
+            - pkg: github.com/tysonthomas9/loomcli/internal/rpc
+              desc: "SDK-layer packages must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/sessions
+              desc: "SDK-layer packages must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/lockfile
+              desc: "SDK-layer packages must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/circuitbreaker
+              desc: "SDK-layer packages must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/kv
+              desc: "SDK-layer packages must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/configlock
+              desc: "SDK-layer packages must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/usage
+              desc: "SDK-layer packages must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/logrouter
+              desc: "SDK-layer packages must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/atomicfile
+              desc: "SDK-layer packages must not import infra packages"
+            # NOTE: internal/workspace omitted — depguard prefix matching
+            # falsely matches internal/workspaceerrors (SDK). No SDK package
+            # imports workspace today; relies on code review if one ever does.
+            - pkg: github.com/tysonthomas9/loomcli/internal/debug
+              desc: "SDK-layer packages must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/testutil
+              desc: "SDK-layer packages must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/backend/beads
+              desc: "SDK-layer packages must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/backend/fleet
+              desc: "SDK-layer packages must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/backend/agentipc
+              desc: "SDK-layer packages must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/backend/api
+              desc: "SDK-layer packages must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/events/otelexport
+              desc: "SDK-layer packages must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/backend/mapping
+              desc: "SDK-layer packages must not import infra packages"
+            # Web-layer (SDK must not import webui)
+            - pkg: github.com/tysonthomas9/loomcli/internal/webui
+              desc: "SDK-layer packages must not import webui"
+            # CLI-layer (SDK must not import cli)
+            - pkg: github.com/tysonthomas9/loomcli/internal/cli
+              desc: "SDK-layer packages must not import cli"
+        infra-isolation:
+          list-mode: lax
+          files:
+            - "**/internal/rpc/**"
+            - "**/internal/sessions/**"
+            - "**/internal/lockfile/**"
+            - "**/internal/circuitbreaker/**"
+            - "**/internal/kv/**"
+            - "**/internal/configlock/**"
+            - "**/internal/usage/**"
+            - "**/internal/logrouter/**"
+            - "**/internal/atomicfile/**"
+            - "**/internal/gitbranch/**"
+            - "**/internal/workspace/**"
+            - "**/internal/debug/**"
+            - "**/internal/testutil/**"
+            - "**/internal/backend/mapping/**"
+            - "**/internal/backend/beads/**"
+            - "**/internal/backend/fleet/**"
+            - "**/internal/backend/agentipc/**"
+            - "**/internal/backend/api/**"
+            - "**/internal/events/otelexport/**"
+          deny:
+            - pkg: github.com/tysonthomas9/loomcli/internal/webui
+              desc: "Infra packages must not import webui"
+            - pkg: github.com/tysonthomas9/loomcli/internal/cli
+              desc: "Infra packages must not import cli"
+        webui-isolation:
+          list-mode: lax
+          files:
+            - "**/internal/webui/**"
+          deny:
+            - pkg: github.com/tysonthomas9/loomcli/internal/cli
+              desc: "WebUI must not import cli"
+        # cli/data is an sdk-only command package. It talks to a loom server over
+        # HTTP exclusively using the generated OpenAPI client via api.APIBackend
+        # and internal/httpclient for auth. It MUST NOT import cli root, cli
+        # sub-packages, webui, or any infra package. Enforced by prefix match —
+        # see the flat-layout note in loomcli-rir82.24 design.
+        data-isolation:
+          list-mode: lax
+          files:
+            - "**/internal/cli/data/**"
+          deny:
+            - pkg: github.com/tysonthomas9/loomcli/internal/cli
+              desc: "cli/data must not import cli root or cli sub-packages (sdk-only; flat layout prevents prefix-match self-collision)"
+            - pkg: github.com/tysonthomas9/loomcli/internal/webui
+              desc: "cli/data must not import webui"
+            - pkg: github.com/tysonthomas9/loomcli/internal/rpc
+              desc: "cli/data must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/sessions
+              desc: "cli/data must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/lockfile
+              desc: "cli/data must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/circuitbreaker
+              desc: "cli/data must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/kv
+              desc: "cli/data must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/configlock
+              desc: "cli/data must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/usage
+              desc: "cli/data must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/logrouter
+              desc: "cli/data must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/atomicfile
+              desc: "cli/data must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/debug
+              desc: "cli/data must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/testutil
+              desc: "cli/data must not import infra packages"
+            - pkg: github.com/tysonthomas9/loomcli/internal/backend/beads
+              desc: "cli/data must not use the beads backend (HTTP only)"
+            - pkg: github.com/tysonthomas9/loomcli/internal/backend/fleet
+              desc: "cli/data must not use the fleet backend (HTTP only)"
+            - pkg: github.com/tysonthomas9/loomcli/internal/backend/agentipc
+              desc: "cli/data must not use the agentipc backend (HTTP only)"
+            - pkg: github.com/tysonthomas9/loomcli/internal/backend/mapping
+              desc: "cli/data must not import infra backend mapping"
+            - pkg: github.com/tysonthomas9/loomcli/internal/events/otelexport
+              desc: "cli/data must not import infra packages"
     staticcheck:
       checks:
         - "all"
@@ -81,7 +240,26 @@ linters:
   exclusions:
     paths:
       - third_party
+      - internal/backend/api/gen
     rules:
+      # === Package naming exclusions ===
+      # "misc" is a domain sub-package name within the webui handler hierarchy.
+      - path: 'internal/webui/handlers/misc/'
+        linters:
+          - revive
+        text: "var-naming: avoid meaningless package names"
+      # "api" is the HTTP-API backend implementation, sibling to backend/beads,
+      # backend/fleet, etc. The full import path is self-describing.
+      - path: 'internal/backend/api/'
+        linters:
+          - revive
+        text: "var-naming: avoid meaningless package names"
+      # "log" is a domain sub-package (log streaming), distinct from stdlib log.
+      - path: 'internal/webui/log/'
+        linters:
+          - revive
+        text: "var-naming: avoid package names that conflict"
+
       # === Existing loomcli-specific exclusions ===
 
       # G104: Unhandled errors for cleanup operations (Close, Remove) are acceptable
@@ -93,17 +271,17 @@ linters:
           - gosec
         text: "G301"
       # G302: File/directory permissions - intentional for cross-process access and security hardening
-      - path: 'internal/(cli/(lock|daemon_cmd)|rpc/socket_path)\.go'
+      - path: 'internal/(cli/(lock|daemon/daemon_cmd)|rpc/socket_path)\.go'
         linters:
           - gosec
         text: "G302"
       # G304: File inclusion via variable - these are intentional file operations
-      - path: 'internal/(cli/(automode|automode_tmux|lock|agent_cmd|config|daemon|daemon_cmd|daemon_config|daemon_spawn|daemon_supervisor|monitor|workspace_cmd)|rpc/auth|webui/(auth|handlers_config|log_open_unix|log_streamer))\.go'
+      - path: 'internal/(cli/(automode/automode(_tmux)?|lock|agent/agent_cmd|config/(config|project)|daemon/daemon(_cmd|_config|_spawn|_supervisor)?|monitor/monitor|workspace/workspace_cmd)|rpc/auth|webui/(handlers/(misc/config|terminal/backend_config)|log/(open_unix|streamer)))\.go'
         linters:
           - gosec
         text: "G304"
       # G204: Subprocess launches are intentional for tmux, claude, bd, loom commands
-      - path: 'internal/(cli/(automode|automode_tmux|recover|daemon|daemon_spawn|daemon_supervisor)|kv/reconcile|webui/terminal)\.go'
+      - path: 'internal/(cli/(automode/automode(_tmux)?|agent/recover|daemon/daemon(_spawn|_supervisor)?|migrate/)|kv/reconcile\.go|webui/terminal/)'
         linters:
           - gosec
         text: "G204"
@@ -112,15 +290,23 @@ linters:
           - gosec
         text: "G306"
       # G204: Subprocess launches for AI agent backends and daemon
-      - path: 'internal/cli/(backend_claude|backend_codex|backend_opencode|backend_external|daemon|daemon_spawn|daemon_supervisor)\.go'
+      - path: 'internal/cli/(backends/backend_(claude|codex|opencode|external)|daemon/daemon(_spawn|_supervisor)?)\.go'
         linters:
           - gosec
         text: "G204"
       # G602: False positive - buf[0] access is after successful Read
-      - path: 'internal/cli/automode(_tmux)?\.go'
+      - path: 'internal/cli/automode/automode(_tmux)?\.go'
         linters:
           - gosec
         text: "G602"
+      # var-naming: both driver packages (internal/driver epic-runner drivers,
+      # internal/cli/driver CLI surface) intentionally share the name "driver";
+      # the stdlib conflict (database/sql/driver) is nested and never imported
+      # alongside these. Renaming would churn every importer for no clarity win.
+      - path: '(internal/driver|internal/cli/driver)/.*\.go'
+        linters:
+          - revive
+        text: "var-naming: avoid package names that conflict with Go standard library"
       # funlen/cyclop/gocognit: Large files with dedicated cleanup tasks
       # Remove exclusions as cleanup tasks complete
       # handlers split files — tracked by loomcli-6yk.5
@@ -142,18 +328,23 @@ linters:
           - funlen
           - cyclop
           - gocognit
-      # automode_tmux.go — same patterns as automode.go
-      - path: "internal/cli/automode_tmux\\.go"
+      # automode_tmux*.go — same patterns as automode.go
+      - path: "internal/cli/automode_tmux(_session)?\\.go"
         linters:
           - funlen
           - cyclop
           - gocognit
-      # monitor.go — tracked by loomcli-6yk.8
-      - path: "internal/cli/monitor\\.go"
+      # monitor*.go — tracked by loomcli-6yk.8
+      - path: "internal/cli/monitor(_collect)?\\.go"
         linters:
           - funlen
           - cyclop
           - gocognit
+      # task.go/plan.go — session lifecycle wrappers added complexity
+      - path: "internal/cli/task\\.go"
+        linters: [funlen, gocognit, cyclop]
+      - path: "internal/cli/plan\\.go"
+        linters: [funlen, gocognit, cyclop]
       # Existing complexity violations — TODO: address in follow-up cleanup
       - path: "internal/cli/agent_cmd\\.go"
         linters: [funlen]
@@ -169,18 +360,18 @@ linters:
         linters: [funlen, cyclop, gocognit]
       - path: "internal/cli/workspace_cmd\\.go"
         linters: [funlen, cyclop, gocognit]
-      - path: "internal/cli/worktree\\.go"
-        linters: [cyclop, gocognit]
-      - path: "internal/webui/cors\\.go"
-        linters: [gocognit]
-      - path: "internal/webui/fleet_handlers\\.go"
+      - path: "internal/cli/worktree(_branch)?\\.go"
+        linters: [funlen, cyclop, gocognit]
+      - path: "internal/webui/server/middleware/cors\\.go"
+        linters: [funlen, gocognit]
+      - path: "internal/webui/fleet_handlers(_done|_claim)?\\.go"
         linters: [funlen, cyclop, gocognit]
       - path: "internal/webui/handlers_comments\\.go"
         linters: [funlen, cyclop, gocognit]
       - path: "internal/webui/handlers_logs\\.go"
         linters: [funlen, gocognit]
-      - path: "internal/webui/handlers_terminal\\.go"
-        linters: [funlen, gocognit]
+      - path: "internal/webui/handlers_terminal(_ws)?\\.go"
+        linters: [funlen, gocognit, staticcheck]
       - path: "internal/webui/handlers_agent_terminal\\.go"
         linters: [funlen]
       - path: "internal/cli/monitor_display\\.go"
@@ -191,6 +382,80 @@ linters:
         linters: [funlen, cyclop, gocognit]
       - path: "internal/webui/sse\\.go"
         linters: [gocognit]
+      # stack-aware PR publisher + epic-stack feature — pre-existing complexity,
+      # cleanup tracked with the feature (introduced before the TS-leaf work).
+      - path: "internal/stackpublish/reconciler\\.go"
+        linters: [funlen, cyclop, gocognit]
+      - path: "internal/cli/epic/epic_stack\\.go"
+        linters: [funlen, cyclop, gocognit]
+      - path: "internal/cli/epic/run\\.go"
+        linters: [funlen, cyclop, gocognit]
+      - path: "internal/cli/stack/stack_cmd\\.go"
+        linters: [funlen, cyclop, gocognit]
+      - path: "internal/driver/task_worktree_resolver\\.go"
+        linters: [funlen, cyclop, gocognit, unparam]
+      - path: "internal/driver/task_bridge\\.go"
+        linters: [funlen, cyclop, gocognit]
+      # funlen: Existing functions exceeding 50-line limit — cleanup tracked separately
+      - path: "internal/cli/backend_.*\\.go"
+        linters: [funlen]
+      - path: "internal/cli/config(_cmd)?\\.go"
+        linters: [funlen]
+      - path: "internal/cli/daemon_(config|config_display|reconciler|spawn)\\.go"
+        linters: [funlen]
+      - path: "internal/cli/git_(api|diff)\\.go"
+        linters: [funlen]
+      - path: "internal/cli/hooks_(install|parse)\\.go"
+        linters: [funlen]
+      - path: "internal/cli/init(_helpers)?\\.go"
+        linters: [funlen]
+      - path: "internal/cli/recover(_helpers)?\\.go"
+        linters: [funlen]
+      - path: "internal/cli/serve_(observability|usage|workspace|workspace_info)\\.go"
+        linters: [funlen]
+      - path: "internal/cli/(doctor|fleetdb_server|pr|pull|push_helpers|reset|setup|status|task_router|usage_cmd|worker_cmd)\\.go"
+        linters: [funlen]
+      - path: "internal/events/otelexport/exporter\\.go"
+        linters: [funlen]
+      - path: "internal/kv/stale\\.go"
+        linters: [funlen]
+      - path: "internal/rpc/(client|metrics)\\.go"
+        linters: [funlen]
+      - path: "internal/sessions/(finalize|transcript_usage)\\.go"
+        linters: [funlen]
+      # Pre-existing funlen/gocognit in the native transcript capture paths.
+      # These are shaped by backend JSONL formats and carry their own
+      # branchiness; refactoring tracked as follow-up.
+      - path: "internal/sessions/subagent_transcript\\.go"
+        linters: [funlen]
+      - path: "internal/sessions/transcript/claude/claude\\.go"
+        linters: [funlen]
+      - path: "internal/sessions/transcript/codex/codex\\.go"
+        linters: [funlen]
+      - path: "internal/sessions/transcript/opencode/opencode\\.go"
+        linters: [funlen]
+      - path: "internal/sessions/redact/redact\\.go"
+        linters: [funlen, gocognit]
+      - path: "internal/types/issue_hash\\.go"
+        linters: [funlen]
+      - path: "internal/webui/server/realtime/sse_token\\.go"
+        linters: [funlen]
+      - path: "internal/webui/handlers_(client_errors|config|csp|editors|graph|issue_tabs|issues_parse|ready|worker_api)\\.go"
+        linters: [funlen]
+      - path: "internal/webui/fleet_handlers_heartbeat\\.go"
+        linters: [funlen]
+      - path: "internal/webui/(agent_service_impl|file_service_impl|server_workspace|session_service_impl|terminal|terminal_context|terminal_service_impl|workspace_registry)\\.go"
+        linters: [funlen]
+      - path: "internal/webui/subscription(_poll)?\\.go"
+        linters: [funlen]
+      - path: "internal/webui/daemon/pool\\.go"
+        linters: [funlen]
+      - path: "internal/webui/server/middleware/(auth|jwks)\\.go"
+        linters: [funlen]
+      - path: "internal/webui/server/realtime/(handler|hub)\\.go"
+        linters: [funlen]
+      - path: "internal/webui/service/issue_move\\.go"
+        linters: [funlen]
 
       # === Test file relaxations (matching beads patterns) ===
 
@@ -305,6 +570,11 @@ linters:
         linters:
           - errcheck
         text: 'Fprintf'
+      # errcheck: cli/data formatters write to os.Stdout; write errors are non-actionable
+      - path: 'internal/cli/data/'
+        linters:
+          - errcheck
+        text: 'Fprint'
       # errcheck: Terminal session cleanup is best-effort
       - path: 'internal/webui/handlers_terminal\.go'
         linters:
@@ -361,7 +631,11 @@ linters:
           - staticcheck
         text: "SA4032"
       # SA1019: Deprecated websocket library - migration tracked separately
-      - path: 'internal/webui/handlers_(agent_)?terminal\.go'
+      - path: 'internal/webui/handlers_(agent_)?terminal'
+        linters:
+          - staticcheck
+        text: "SA1019"
+      - path: 'internal/webui/server/realtime/terminal_relay\.go'
         linters:
           - staticcheck
         text: "SA1019"
@@ -415,3 +689,4 @@ formatters:
   exclusions:
     paths:
       - third_party
+      - internal/backend/api/gen

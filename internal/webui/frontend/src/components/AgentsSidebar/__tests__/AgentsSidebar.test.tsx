@@ -7,11 +7,12 @@
  * Focuses on the viewSwitcher slot behavior and sync status rendering.
  */
 
-import { render, screen, fireEvent, within } from "@testing-library/react";
-import { describe, it, expect, vi } from "vitest";
+import { render, screen, fireEvent, within, act } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import "@testing-library/jest-dom";
-import { AgentsSidebar } from "../AgentsSidebar";
+import type { LoomAgentStatus } from "@/types";
+import { AgentsSidebar, groupAgentsByRepo } from "../AgentsSidebar";
 
 // Default mock context value (used by most tests)
 const defaultMockContext = {
@@ -50,36 +51,97 @@ const defaultMockContext = {
   },
   isLoading: false,
   isConnected: true,
+  wasEverConnected: true,
   lastUpdated: new Date(),
 };
 
 // Mutable override – tests can replace this before rendering
 let mockContextOverride: Partial<typeof defaultMockContext> = {};
 
+// Mock zustand's useStore — apply selector to the merged mock context
+vi.mock("zustand", () => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  useStore: (_store: unknown, selector: (s: any) => unknown) =>
+    selector({ ...defaultMockContext, ...mockContextOverride }),
+}));
+
 // Mock the hooks to prevent API calls in tests
+let mockSelectedRepos: string[] = [];
+const TEST_WS_ID = "test-ws-uuid-1234";
+
 vi.mock("@/hooks", () => ({
-  useAgentContext: () => ({ ...defaultMockContext, ...mockContextOverride }),
+  useAgentStoreInstance: () => ({}), // dummy — useStore mock ignores store arg
+  useRepoFilter: () => [mockSelectedRepos, vi.fn()],
+  useWorkspaceContext: () => ({ workspaceId: TEST_WS_ID }),
+  useAgentDiffStat: () => ({
+    data: null,
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
+  useFocusReturn: vi.fn(),
+  useFocusTrap: vi.fn(),
+  useRegisterEscapeLayer: vi.fn(),
+  useKeyboardShortcuts: vi.fn(() => ({
+    isCheatsheetOpen: false,
+    toggleCheatsheet: vi.fn(),
+    closeCheatsheet: vi.fn(),
+  })),
+  KeyboardShortcutProvider: ({ children }: { children: React.ReactNode }) =>
+    children,
+  LAYER_CONFIRM_DIALOG: 60,
+  LAYER_TOAST: 50,
+  LAYER_CHEATSHEET: 45,
+  LAYER_MODAL: 40,
+  LAYER_TERMINAL_PANEL: 30,
+  LAYER_AGENT_PANEL: 20,
+  LAYER_ISSUE_PANEL: 10,
 }));
 
 const mockGitPushAll = vi.fn();
-vi.mock("@/api/git", () => ({
-  gitPushAll: (...args: unknown[]) => mockGitPushAll(...args),
-}));
+const mockGitPush = vi.fn();
+vi.mock(import("@/api/workspace"), async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    gitPush: (...args: unknown[]) => mockGitPush(...args),
+    gitPushAll: (...args: unknown[]) => mockGitPushAll(...args),
+  };
+});
 
-vi.mock("@/api/client", () => ({
-  ApiError: class ApiError extends Error {
-    statusText: string;
-    constructor(status: number, statusText: string) {
-      super(statusText);
-      this.statusText = statusText;
-    }
-  },
-}));
+vi.mock(import("@/api/common"), async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    ApiError: class ApiError extends Error {
+      statusText: string;
+      constructor(status: number, statusText: string) {
+        super(statusText);
+        this.statusText = statusText;
+      }
+    },
+  };
+});
+
+vi.mock("@/hooks/workspace", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/workspace")>(
+      "@/hooks/workspace",
+    );
+  return {
+    ...actual,
+    useWorkspaceContext: () => ({ workspaceId: TEST_WS_ID }),
+  };
+});
 
 describe("AgentsSidebar", () => {
   beforeEach(() => {
     localStorage.clear();
+    localStorage.setItem("loom:last-workspace-id", TEST_WS_ID);
     mockContextOverride = {};
+    mockSelectedRepos = [];
+    mockGitPush.mockReset();
+    mockGitPush.mockResolvedValue({ success: true });
   });
 
   describe("viewSwitcher slot", () => {
@@ -228,7 +290,49 @@ describe("AgentsSidebar", () => {
       expect(title).toContain("ahead");
     });
 
-    it("push button calls POST /api/git/push-all on click", async () => {
+    it("Push All button opens confirmation dialog instead of pushing immediately", () => {
+      mockContextOverride = {
+        sync: {
+          db_synced: true,
+          db_last_sync: "",
+          git_needs_push: 1,
+          git_needs_pull: 0,
+        },
+      };
+
+      render(<AgentsSidebar />);
+
+      const pushButton = screen.getByRole("button", { name: /push all/i });
+      fireEvent.click(pushButton);
+
+      // Dialog should appear, push should NOT be called yet
+      expect(screen.getByText("Push all branches?")).toBeInTheDocument();
+      expect(mockGitPushAll).not.toHaveBeenCalled();
+    });
+
+    it("confirmation dialog lists branches with commit counts", () => {
+      mockContextOverride = {
+        sync: {
+          db_synced: true,
+          db_last_sync: "",
+          git_needs_push: 2,
+          git_needs_pull: 0,
+          git_push_details: [
+            { name: "nova", count: 3 },
+            { name: "falcon", count: 1 },
+          ],
+        },
+      };
+
+      render(<AgentsSidebar />);
+
+      fireEvent.click(screen.getByRole("button", { name: /push all/i }));
+
+      expect(screen.getByText(/nova: 3 commits/)).toBeInTheDocument();
+      expect(screen.getByText(/falcon: 1 commit$/)).toBeInTheDocument();
+    });
+
+    it("confirming the dialog triggers the push", async () => {
       mockContextOverride = {
         sync: {
           db_synced: true,
@@ -246,12 +350,82 @@ describe("AgentsSidebar", () => {
 
       render(<AgentsSidebar />);
 
-      const pushButton = screen.getByRole("button", { name: /push all/i });
-      fireEvent.click(pushButton);
+      fireEvent.click(screen.getByRole("button", { name: /push all/i }));
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("confirm-dialog-confirm"));
+      });
 
       expect(mockGitPushAll).toHaveBeenCalled();
 
       mockGitPushAll.mockReset();
+    });
+
+    it("canceling the dialog does not trigger push", () => {
+      mockContextOverride = {
+        sync: {
+          db_synced: true,
+          db_last_sync: "",
+          git_needs_push: 1,
+          git_needs_pull: 0,
+        },
+      };
+
+      render(<AgentsSidebar />);
+
+      fireEvent.click(screen.getByRole("button", { name: /push all/i }));
+      fireEvent.click(screen.getByTestId("confirm-dialog-cancel"));
+
+      expect(mockGitPushAll).not.toHaveBeenCalled();
+      // Dialog should be closed
+      expect(screen.queryByText("Push all branches?")).not.toBeInTheDocument();
+    });
+
+    it("dialog closes after confirming", async () => {
+      mockContextOverride = {
+        sync: {
+          db_synced: true,
+          db_last_sync: "",
+          git_needs_push: 1,
+          git_needs_pull: 0,
+        },
+      };
+
+      mockGitPushAll.mockResolvedValueOnce({
+        results: [],
+        pushed: 1,
+        failed: 0,
+      });
+
+      render(<AgentsSidebar />);
+
+      fireEvent.click(screen.getByRole("button", { name: /push all/i }));
+      expect(screen.getByText("Push all branches?")).toBeInTheDocument();
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("confirm-dialog-confirm"));
+      });
+      expect(screen.queryByText("Push all branches?")).not.toBeInTheDocument();
+
+      mockGitPushAll.mockReset();
+    });
+
+    it("fallback message when no push details available", () => {
+      mockContextOverride = {
+        sync: {
+          db_synced: true,
+          db_last_sync: "",
+          git_needs_push: 3,
+          git_needs_pull: 0,
+        },
+      };
+
+      render(<AgentsSidebar />);
+
+      fireEvent.click(screen.getByRole("button", { name: /push all/i }));
+
+      expect(
+        screen.getByText("Push 3 branches to remote?"),
+      ).toBeInTheDocument();
     });
   });
 
@@ -398,6 +572,897 @@ describe("AgentsSidebar", () => {
         selector: 'button span[data-highlight="true"]',
       });
       expect(countSpan).toHaveAttribute("data-highlight", "true");
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // groupAgentsByRepo utility (pure function)
+  // ---------------------------------------------------------------------------
+
+  describe("groupAgentsByRepo utility", () => {
+    function makeAgent(name: string, repo?: string): LoomAgentStatus {
+      return {
+        name,
+        branch: "main",
+        status: "idle",
+        ahead: 0,
+        behind: 0,
+        ...(repo !== undefined && { repo }),
+      };
+    }
+
+    it("groups agents correctly by matching repo to selectedRepos", () => {
+      const agents = [
+        makeAgent("a1", "repo-a"),
+        makeAgent("a2", "repo-b"),
+        makeAgent("a3", "repo-a"),
+      ];
+
+      const { grouped, other } = groupAgentsByRepo(agents, [
+        "repo-a",
+        "repo-b",
+      ]);
+
+      expect(grouped.get("repo-a")).toHaveLength(2);
+      expect(grouped.get("repo-a")!.map((a) => a.name)).toEqual(["a1", "a3"]);
+      expect(grouped.get("repo-b")).toHaveLength(1);
+      expect(grouped.get("repo-b")![0]!.name).toBe("a2");
+      expect(other).toHaveLength(0);
+    });
+
+    it('puts agents without repo field into "other"', () => {
+      const agents = [
+        makeAgent("a1", "repo-a"),
+        makeAgent("a2"), // no repo
+      ];
+
+      const { grouped, other } = groupAgentsByRepo(agents, ["repo-a"]);
+
+      expect(grouped.get("repo-a")).toHaveLength(1);
+      expect(other).toHaveLength(1);
+      expect(other[0]!.name).toBe("a2");
+    });
+
+    it('puts agents with non-matching repo into "other"', () => {
+      const agents = [makeAgent("a1", "repo-x"), makeAgent("a2", "repo-a")];
+
+      const { grouped, other } = groupAgentsByRepo(agents, ["repo-a"]);
+
+      expect(grouped.get("repo-a")).toHaveLength(1);
+      expect(other).toHaveLength(1);
+      expect(other[0]!.name).toBe("a1");
+    });
+
+    it("returns empty grouped Map and all agents in other when selectedRepos is empty", () => {
+      const agents = [makeAgent("a1", "repo-a"), makeAgent("a2")];
+
+      const { grouped, other } = groupAgentsByRepo(agents, []);
+
+      expect(grouped.size).toBe(0);
+      expect(other).toHaveLength(2);
+    });
+
+    it("preserves order of selectedRepos in grouped Map keys", () => {
+      const agents = [
+        makeAgent("a1", "repo-c"),
+        makeAgent("a2", "repo-a"),
+        makeAgent("a3", "repo-b"),
+      ];
+
+      const { grouped } = groupAgentsByRepo(agents, [
+        "repo-c",
+        "repo-a",
+        "repo-b",
+      ]);
+
+      const keys = Array.from(grouped.keys());
+      expect(keys).toEqual(["repo-c", "repo-a", "repo-b"]);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Grouped rendering (RepoGroupedList via AgentsSidebar)
+  // ---------------------------------------------------------------------------
+
+  describe("grouped rendering", () => {
+    function makeAgentStatus(name: string, repo?: string): LoomAgentStatus {
+      return {
+        name,
+        branch: "main",
+        status: "idle",
+        ahead: 0,
+        behind: 0,
+        ...(repo !== undefined && { repo }),
+      };
+    }
+
+    it("renders repo group headers with correct names when filter active", () => {
+      mockSelectedRepos = ["repo-a", "repo-b"];
+      mockContextOverride = {
+        agents: [
+          makeAgentStatus("alpha", "repo-a"),
+          makeAgentStatus("beta", "repo-b"),
+        ],
+      };
+
+      const { container } = render(<AgentsSidebar collapsible={false} />);
+
+      // Find group header elements specifically (not the RepoBadge inside AgentCard)
+      const headers = container.querySelectorAll('[class*="repoGroupHeader"]');
+      const headerTexts = Array.from(headers).map((h) => {
+        const nameSpan = h.querySelector('[class*="repoGroupName"]');
+        return nameSpan?.textContent;
+      });
+      expect(headerTexts).toContain("repo-a");
+      expect(headerTexts).toContain("repo-b");
+    });
+
+    it("shows agent counts in group header badges", () => {
+      mockSelectedRepos = ["repo-a", "repo-b"];
+      mockContextOverride = {
+        agents: [
+          makeAgentStatus("alpha", "repo-a"),
+          makeAgentStatus("gamma", "repo-a"),
+          makeAgentStatus("beta", "repo-b"),
+        ],
+      };
+
+      const { container } = render(<AgentsSidebar collapsible={false} />);
+
+      // Find the header for repo-a – its sibling count badge should show 2
+      const headers = container.querySelectorAll('[class*="repoGroupHeader"]');
+      expect(headers.length).toBeGreaterThanOrEqual(2);
+
+      // repo-a header: contains "repo-a" text and count "2"
+      const repoAHeader = Array.from(headers).find((h) =>
+        h.textContent?.includes("repo-a"),
+      )!;
+      expect(repoAHeader).toBeDefined();
+      expect(
+        within(repoAHeader as HTMLElement).getByText("2"),
+      ).toBeInTheDocument();
+
+      // repo-b header: count "1"
+      const repoBHeader = Array.from(headers).find((h) =>
+        h.textContent?.includes("repo-b"),
+      )!;
+      expect(repoBHeader).toBeDefined();
+      expect(
+        within(repoBHeader as HTMLElement).getByText("1"),
+      ).toBeInTheDocument();
+    });
+
+    it('"Other" section appears when agents have no or non-matching repo', () => {
+      mockSelectedRepos = ["repo-a"];
+      mockContextOverride = {
+        agents: [
+          makeAgentStatus("alpha", "repo-a"),
+          makeAgentStatus("beta"), // no repo
+          makeAgentStatus("gamma", "repo-x"), // non-matching
+        ],
+      };
+
+      render(<AgentsSidebar collapsible={false} />);
+
+      expect(screen.getByText("Other")).toBeInTheDocument();
+
+      // The "Other" header badge should show 2
+      const { container } = render(<AgentsSidebar collapsible={false} />);
+      const headers = container.querySelectorAll('[class*="repoGroupHeader"]');
+      const otherHeader = Array.from(headers).find((h) =>
+        h.textContent?.includes("Other"),
+      )!;
+      expect(otherHeader).toBeDefined();
+      expect(
+        within(otherHeader as HTMLElement).getByText("2"),
+      ).toBeInTheDocument();
+    });
+
+    it('"Other" section is hidden when all agents match selected repos', () => {
+      mockSelectedRepos = ["repo-a", "repo-b"];
+      mockContextOverride = {
+        agents: [
+          makeAgentStatus("alpha", "repo-a"),
+          makeAgentStatus("beta", "repo-b"),
+        ],
+      };
+
+      render(<AgentsSidebar collapsible={false} />);
+
+      expect(screen.queryByText("Other")).not.toBeInTheDocument();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Flat list preservation (no grouping when no repos selected)
+  // ---------------------------------------------------------------------------
+
+  describe("flat list preservation", () => {
+    it("renders agents without group headers when mockSelectedRepos is empty", () => {
+      mockSelectedRepos = [];
+      mockContextOverride = {
+        agents: [
+          {
+            name: "alpha",
+            branch: "main",
+            status: "idle",
+            ahead: 0,
+            behind: 0,
+            repo: "repo-a",
+          },
+          {
+            name: "beta",
+            branch: "main",
+            status: "idle",
+            ahead: 0,
+            behind: 0,
+          },
+        ],
+      };
+
+      const { container } = render(<AgentsSidebar collapsible={false} />);
+
+      // Agent names should render
+      expect(screen.getByText("alpha")).toBeInTheDocument();
+      expect(screen.getByText("beta")).toBeInTheDocument();
+
+      // No group headers should exist
+      const groupHeaders = container.querySelectorAll(
+        '[class*="repoGroupHeader"]',
+      );
+      expect(groupHeaders).toHaveLength(0);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Collapsible group behavior
+  // ---------------------------------------------------------------------------
+
+  describe("collapsible group behavior", () => {
+    it("clicking a group header hides agents in that group", () => {
+      mockSelectedRepos = ["repo-a"];
+      mockContextOverride = {
+        agents: [
+          {
+            name: "alpha",
+            branch: "main",
+            status: "idle",
+            ahead: 0,
+            behind: 0,
+            repo: "repo-a",
+          },
+        ],
+      };
+
+      const { container } = render(<AgentsSidebar collapsible={false} />);
+
+      // Agent should be visible initially
+      expect(screen.getByText("alpha")).toBeInTheDocument();
+
+      // Click the repo-a group header to collapse it
+      const header = container.querySelector(
+        '[class*="repoGroupHeader"]',
+      ) as HTMLElement;
+      expect(header).toBeDefined();
+      fireEvent.click(header);
+
+      // Agent should now be hidden
+      expect(screen.queryByText("alpha")).not.toBeInTheDocument();
+    });
+
+    it("clicking a collapsed group header re-expands it", () => {
+      mockSelectedRepos = ["repo-a"];
+      mockContextOverride = {
+        agents: [
+          {
+            name: "alpha",
+            branch: "main",
+            status: "idle",
+            ahead: 0,
+            behind: 0,
+            repo: "repo-a",
+          },
+        ],
+      };
+
+      const { container } = render(<AgentsSidebar collapsible={false} />);
+
+      const header = container.querySelector(
+        '[class*="repoGroupHeader"]',
+      ) as HTMLElement;
+
+      // Collapse
+      fireEvent.click(header);
+      expect(screen.queryByText("alpha")).not.toBeInTheDocument();
+
+      // Re-expand
+      fireEvent.click(header);
+      expect(screen.getByText("alpha")).toBeInTheDocument();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Workspace grouping
+  // ---------------------------------------------------------------------------
+
+  describe("workspace grouping", () => {
+    function makeWsAgent(name: string, workspace?: string): LoomAgentStatus {
+      return {
+        name,
+        branch: "main",
+        status: "idle",
+        ahead: 0,
+        behind: 0,
+        ...(workspace !== undefined && { workspace }),
+      };
+    }
+
+    it("groups agents correctly by workspace field", () => {
+      mockContextOverride = {
+        agents: [
+          makeWsAgent("alpha", "frontend"),
+          makeWsAgent("beta", "backend"),
+          makeWsAgent("gamma", "frontend"),
+        ],
+      };
+
+      const { container } = render(<AgentsSidebar collapsible={false} />);
+
+      // Should render workspace headers (use button selector to avoid matching child spans)
+      const headers = container.querySelectorAll(
+        'button[class*="workspaceHeader"]',
+      );
+      expect(headers.length).toBe(2);
+
+      // All agents should be rendered
+      expect(screen.getByText("alpha")).toBeInTheDocument();
+      expect(screen.getByText("beta")).toBeInTheDocument();
+      expect(screen.getByText("gamma")).toBeInTheDocument();
+    });
+
+    it('agents with no workspace appear in "(default)" group', () => {
+      mockContextOverride = {
+        agents: [
+          makeWsAgent("alpha", "frontend"),
+          makeWsAgent("beta"), // no workspace
+          makeWsAgent("gamma", ""), // empty workspace
+        ],
+      };
+
+      const { container } = render(<AgentsSidebar collapsible={false} />);
+
+      // Should have workspace headers for "frontend" and "(default)"
+      const headers = container.querySelectorAll(
+        'button[class*="workspaceHeader"]',
+      );
+      expect(headers.length).toBe(2);
+
+      // "(default)" group should exist
+      const headerTexts = Array.from(headers).map((h) => {
+        const textSpan = h.querySelector('[class*="workspaceHeaderText"]');
+        return textSpan?.textContent;
+      });
+      expect(headerTexts).toContain("(default)");
+      expect(headerTexts).toContain("frontend");
+    });
+
+    it('groups sorted alphabetically with "(default)" last', () => {
+      mockContextOverride = {
+        agents: [
+          makeWsAgent("alpha", "zebra"),
+          makeWsAgent("beta"), // (default)
+          makeWsAgent("gamma", "alpha-ws"),
+        ],
+      };
+
+      const { container } = render(<AgentsSidebar collapsible={false} />);
+
+      const headers = container.querySelectorAll(
+        'button[class*="workspaceHeader"]',
+      );
+      const headerTexts = Array.from(headers).map((h) => {
+        const textSpan = h.querySelector('[class*="workspaceHeaderText"]');
+        return textSpan?.textContent;
+      });
+
+      // alpha-ws < zebra < (default)
+      expect(headerTexts).toEqual(["alpha-ws", "zebra", "(default)"]);
+    });
+
+    it("clicking workspace header toggles collapse", () => {
+      mockContextOverride = {
+        agents: [
+          makeWsAgent("alpha", "frontend"),
+          makeWsAgent("beta", "backend"),
+        ],
+      };
+
+      const { container } = render(<AgentsSidebar collapsible={false} />);
+
+      // Both agents visible initially
+      expect(screen.getByText("alpha")).toBeInTheDocument();
+      expect(screen.getByText("beta")).toBeInTheDocument();
+
+      // Click the first workspace header (frontend comes before backend alphabetically: "backend" < "frontend")
+      const headers = container.querySelectorAll(
+        'button[class*="workspaceHeader"]',
+      );
+      const backendHeader = Array.from(headers).find((h) =>
+        h.textContent?.includes("backend"),
+      ) as HTMLElement;
+      fireEvent.click(backendHeader);
+
+      // beta should be hidden, alpha still visible
+      expect(screen.getByText("alpha")).toBeInTheDocument();
+      expect(screen.queryByText("beta")).not.toBeInTheDocument();
+    });
+
+    it("collapsed group hides its agent cards", () => {
+      mockContextOverride = {
+        agents: [
+          makeWsAgent("alpha", "ws-a"),
+          makeWsAgent("beta", "ws-a"),
+          makeWsAgent("gamma", "ws-b"),
+        ],
+      };
+
+      const { container } = render(<AgentsSidebar collapsible={false} />);
+
+      // Click ws-a header
+      const headers = container.querySelectorAll(
+        'button[class*="workspaceHeader"]',
+      );
+      const wsAHeader = Array.from(headers).find((h) =>
+        h.textContent?.includes("ws-a"),
+      ) as HTMLElement;
+      fireEvent.click(wsAHeader);
+
+      // alpha and beta hidden, gamma still visible
+      expect(screen.queryByText("alpha")).not.toBeInTheDocument();
+      expect(screen.queryByText("beta")).not.toBeInTheDocument();
+      expect(screen.getByText("gamma")).toBeInTheDocument();
+    });
+
+    it("single workspace renders flat without group header", () => {
+      mockContextOverride = {
+        agents: [
+          makeWsAgent("alpha", "only-ws"),
+          makeWsAgent("beta", "only-ws"),
+        ],
+      };
+
+      const { container } = render(<AgentsSidebar collapsible={false} />);
+
+      // No workspace headers should be rendered
+      const headers = container.querySelectorAll(
+        'button[class*="workspaceHeader"]',
+      );
+      expect(headers).toHaveLength(0);
+
+      // Agents should still be visible
+      expect(screen.getByText("alpha")).toBeInTheDocument();
+      expect(screen.getByText("beta")).toBeInTheDocument();
+    });
+
+    it("single workspace with all agents in (default) renders flat", () => {
+      mockContextOverride = {
+        agents: [
+          makeWsAgent("alpha"), // no workspace -> (default)
+          makeWsAgent("beta", ""), // empty workspace -> (default)
+        ],
+      };
+
+      const { container } = render(<AgentsSidebar collapsible={false} />);
+
+      const headers = container.querySelectorAll(
+        'button[class*="workspaceHeader"]',
+      );
+      expect(headers).toHaveLength(0);
+
+      expect(screen.getByText("alpha")).toBeInTheDocument();
+      expect(screen.getByText("beta")).toBeInTheDocument();
+    });
+
+    it("workspace header shows agent count badge", () => {
+      mockContextOverride = {
+        agents: [
+          makeWsAgent("alpha", "ws-a"),
+          makeWsAgent("beta", "ws-a"),
+          makeWsAgent("gamma", "ws-b"),
+        ],
+      };
+
+      const { container } = render(<AgentsSidebar collapsible={false} />);
+
+      const headers = container.querySelectorAll(
+        'button[class*="workspaceHeader"]',
+      );
+      const wsAHeader = Array.from(headers).find((h) =>
+        h.textContent?.includes("ws-a"),
+      ) as HTMLElement;
+
+      // ws-a has 2 agents
+      expect(within(wsAHeader).getByText("2")).toBeInTheDocument();
+
+      const wsBHeader = Array.from(headers).find((h) =>
+        h.textContent?.includes("ws-b"),
+      ) as HTMLElement;
+
+      // ws-b has 1 agent
+      expect(within(wsBHeader).getByText("1")).toBeInTheDocument();
+    });
+
+    it("persists collapsed state to localStorage", () => {
+      mockContextOverride = {
+        agents: [
+          makeWsAgent("alpha", "frontend"),
+          makeWsAgent("beta", "backend"),
+        ],
+      };
+
+      const { container } = render(<AgentsSidebar collapsible={false} />);
+
+      // Click a workspace header to collapse it
+      const headers = container.querySelectorAll(
+        'button[class*="workspaceHeader"]',
+      );
+      const backendHeader = Array.from(headers).find((h) =>
+        h.textContent?.includes("backend"),
+      ) as HTMLElement;
+      fireEvent.click(backendHeader);
+
+      // localStorage should have the collapsed state
+      const stored = localStorage.getItem(
+        `loom:${TEST_WS_ID}:agents-sidebar-ws-collapsed`,
+      );
+      expect(stored).toBeTruthy();
+      const parsed = JSON.parse(stored!);
+      expect(parsed["backend"]).toBe(true);
+    });
+
+    it("re-expanding clears collapsed state in localStorage", () => {
+      mockContextOverride = {
+        agents: [
+          makeWsAgent("alpha", "frontend"),
+          makeWsAgent("beta", "backend"),
+        ],
+      };
+
+      const { container } = render(<AgentsSidebar collapsible={false} />);
+
+      const headers = container.querySelectorAll(
+        'button[class*="workspaceHeader"]',
+      );
+      const backendHeader = Array.from(headers).find((h) =>
+        h.textContent?.includes("backend"),
+      ) as HTMLElement;
+
+      // Collapse then re-expand
+      fireEvent.click(backendHeader);
+      fireEvent.click(backendHeader);
+
+      const stored = localStorage.getItem(
+        `loom:${TEST_WS_ID}:agents-sidebar-ws-collapsed`,
+      );
+      expect(stored).toBeTruthy();
+      const parsed = JSON.parse(stored!);
+      expect(parsed["backend"]).toBe(false);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Push details expandable list
+  // ---------------------------------------------------------------------------
+
+  describe("push details expandable list", () => {
+    const pushDetailsSyncOverride = {
+      sync: {
+        db_synced: true,
+        db_last_sync: "",
+        git_needs_push: 2,
+        git_needs_pull: 0,
+        git_push_details: [
+          { name: "nova", count: 3 },
+          { name: "falcon", count: 1 },
+        ],
+      },
+    };
+
+    it('clicking "N need push" text expands the agent push list when git_push_details is available', () => {
+      mockContextOverride = pushDetailsSyncOverride;
+
+      render(<AgentsSidebar />);
+
+      const pushButton = screen.getByRole("button", { name: /push details/i });
+      fireEvent.click(pushButton);
+
+      // Agent names from push details should be visible in the expanded list
+      expect(screen.getByText("nova")).toBeInTheDocument();
+      expect(screen.getByText("falcon")).toBeInTheDocument();
+    });
+
+    it("expanded list shows each agent name and commit count from git_push_details", () => {
+      mockContextOverride = pushDetailsSyncOverride;
+
+      render(<AgentsSidebar />);
+
+      // Expand the list
+      fireEvent.click(screen.getByRole("button", { name: /push details/i }));
+
+      // Check agent names
+      expect(screen.getByText("nova")).toBeInTheDocument();
+      expect(screen.getByText("falcon")).toBeInTheDocument();
+
+      // Check commit counts
+      expect(screen.getByText("3 commits")).toBeInTheDocument();
+      expect(screen.getByText("1 commit")).toBeInTheDocument();
+    });
+
+    it("each agent row has a Push button", () => {
+      mockContextOverride = pushDetailsSyncOverride;
+
+      render(<AgentsSidebar />);
+
+      // Expand the list
+      fireEvent.click(screen.getByRole("button", { name: /push details/i }));
+
+      // Should have individual Push buttons (plus the Push All button)
+      const pushButtons = screen.getAllByRole("button", { name: /^Push$/i });
+      expect(pushButtons).toHaveLength(2);
+    });
+
+    it('clicking "N need push" again collapses the list', () => {
+      mockContextOverride = pushDetailsSyncOverride;
+
+      render(<AgentsSidebar />);
+
+      const pushToggle = screen.getByRole("button", { name: /push details/i });
+
+      // Expand
+      fireEvent.click(pushToggle);
+      expect(screen.getByText("nova")).toBeInTheDocument();
+
+      // Collapse
+      fireEvent.click(pushToggle);
+      expect(screen.queryByText("nova")).not.toBeInTheDocument();
+      expect(screen.queryByText("falcon")).not.toBeInTheDocument();
+    });
+
+    it("list is NOT rendered when git_push_details is empty/undefined (text is static, not a button)", () => {
+      mockContextOverride = {
+        sync: {
+          db_synced: true,
+          db_last_sync: "",
+          git_needs_push: 2,
+          git_needs_pull: 0,
+        },
+      };
+
+      const { container } = render(<AgentsSidebar />);
+
+      // The "need push" text should be present but not as a button
+      expect(screen.getByText(/2 need push/)).toBeInTheDocument();
+
+      // It should be a static span with syncBannerTextStatic class
+      const staticElement = container.querySelector(
+        '[class*="syncBannerTextStatic"]',
+      );
+      expect(staticElement).toBeInTheDocument();
+
+      // Should NOT be a button
+      const pushButtons = screen.queryAllByRole("button", {
+        name: /need push/i,
+      });
+      expect(pushButtons).toHaveLength(0);
+    });
+
+    it("individual Push button calls gitPush with correct agent name", async () => {
+      mockContextOverride = pushDetailsSyncOverride;
+
+      render(<AgentsSidebar />);
+
+      // Expand the list
+      fireEvent.click(screen.getByRole("button", { name: /push details/i }));
+
+      // Click the first individual Push button (for "nova")
+      const pushButtons = screen.getAllByRole("button", { name: /^Push$/i });
+      await act(async () => {
+        fireEvent.click(pushButtons[0]!);
+      });
+
+      expect(mockGitPush).toHaveBeenCalledWith(TEST_WS_ID, "nova");
+    });
+
+    it('Push button shows "Pushing..." while in progress', async () => {
+      mockContextOverride = pushDetailsSyncOverride;
+
+      // Create a promise that we control (never resolves during the test)
+      let resolvePush!: (value: { success: boolean }) => void;
+      mockGitPush.mockImplementation(
+        () =>
+          new Promise<{ success: boolean }>((resolve) => {
+            resolvePush = resolve;
+          }),
+      );
+
+      render(<AgentsSidebar />);
+
+      // Expand the list
+      fireEvent.click(screen.getByRole("button", { name: /push details/i }));
+
+      // Click the first individual Push button
+      const pushButtons = screen.getAllByRole("button", { name: /^Push$/i });
+      await act(async () => {
+        fireEvent.click(pushButtons[0]!);
+      });
+
+      // The button should now show "Pushing..."
+      expect(screen.getByText("Pushing...")).toBeInTheDocument();
+
+      // Resolve to clean up
+      await act(async () => {
+        resolvePush({ success: true });
+      });
+    });
+
+    it("banner text is a <button> element with aria-expanded attribute when details are available", () => {
+      mockContextOverride = pushDetailsSyncOverride;
+
+      render(<AgentsSidebar />);
+
+      const pushToggle = screen.getByRole("button", { name: /push details/i });
+      expect(pushToggle.tagName).toBe("BUTTON");
+      expect(pushToggle).toHaveAttribute("aria-expanded", "false");
+
+      // After clicking, aria-expanded should be true
+      fireEvent.click(pushToggle);
+      expect(pushToggle).toHaveAttribute("aria-expanded", "true");
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Responsive layout breakpoint (auto-collapse at <1024px)
+  // ---------------------------------------------------------------------------
+
+  describe("responsive layout breakpoint", () => {
+    let originalMatchMedia: typeof window.matchMedia;
+
+    // Helper to create a mock matchMedia for the max-width:1024px query
+    function createMockMatchMedia(matches: boolean) {
+      const listeners: Array<(e: MediaQueryListEvent) => void> = [];
+      const mql = {
+        matches,
+        media: "(max-width: 1024px)",
+        addEventListener: vi.fn(
+          (_event: string, handler: (e: MediaQueryListEvent) => void) => {
+            listeners.push(handler);
+          },
+        ),
+        removeEventListener: vi.fn(
+          (_event: string, handler: (e: MediaQueryListEvent) => void) => {
+            const idx = listeners.indexOf(handler);
+            if (idx >= 0) listeners.splice(idx, 1);
+          },
+        ),
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      };
+      const matchMediaMock = vi.fn(() => mql);
+      return { matchMediaMock, mql, listeners };
+    }
+
+    beforeEach(() => {
+      originalMatchMedia = window.matchMedia;
+    });
+
+    afterEach(() => {
+      window.matchMedia = originalMatchMedia;
+    });
+
+    it("auto-collapses the sidebar when viewport is below 1024px on mount", () => {
+      const { matchMediaMock } = createMockMatchMedia(true);
+      window.matchMedia = matchMediaMock as unknown as typeof window.matchMedia;
+
+      render(
+        <AgentsSidebar
+          viewSwitcher={<div data-testid="sidebar-content">Content</div>}
+        />,
+      );
+
+      // Sidebar should be collapsed — viewSwitcher hidden when collapsed
+      expect(screen.queryByTestId("sidebar-content")).not.toBeInTheDocument();
+
+      // The expand button should be visible (collapsed state)
+      expect(
+        screen.getByRole("button", { name: /expand agents sidebar/i }),
+      ).toBeInTheDocument();
+    });
+
+    it("does not auto-collapse when viewport is at or above 1024px on mount", () => {
+      const { matchMediaMock } = createMockMatchMedia(false);
+      window.matchMedia = matchMediaMock as unknown as typeof window.matchMedia;
+
+      render(
+        <AgentsSidebar
+          viewSwitcher={<div data-testid="sidebar-content">Content</div>}
+        />,
+      );
+
+      // Sidebar should remain expanded — viewSwitcher visible
+      expect(screen.getByTestId("sidebar-content")).toBeInTheDocument();
+
+      // The collapse button should be visible (expanded state)
+      expect(
+        screen.getByRole("button", { name: /collapse agents sidebar/i }),
+      ).toBeInTheDocument();
+    });
+
+    it("collapses when matchMedia change event fires with matches=true", () => {
+      const { matchMediaMock, listeners } = createMockMatchMedia(false);
+      window.matchMedia = matchMediaMock as unknown as typeof window.matchMedia;
+
+      render(
+        <AgentsSidebar
+          viewSwitcher={<div data-testid="sidebar-content">Content</div>}
+        />,
+      );
+
+      // Initially expanded
+      expect(screen.getByTestId("sidebar-content")).toBeInTheDocument();
+
+      // Simulate viewport shrinking below 1024px
+      act(() => {
+        for (const listener of listeners) {
+          listener({ matches: true } as MediaQueryListEvent);
+        }
+      });
+
+      // Sidebar should now be collapsed
+      expect(screen.queryByTestId("sidebar-content")).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /expand agents sidebar/i }),
+      ).toBeInTheDocument();
+    });
+
+    it("registers and cleans up the matchMedia event listener", () => {
+      const { matchMediaMock, mql } = createMockMatchMedia(false);
+      window.matchMedia = matchMediaMock as unknown as typeof window.matchMedia;
+
+      const { unmount } = render(<AgentsSidebar />);
+
+      // addEventListener should have been called with "change"
+      expect(mql.addEventListener).toHaveBeenCalledWith(
+        "change",
+        expect.any(Function),
+      );
+
+      unmount();
+
+      // removeEventListener should have been called on cleanup
+      expect(mql.removeEventListener).toHaveBeenCalledWith(
+        "change",
+        expect.any(Function),
+      );
+    });
+
+    it("does not crash when matchMedia is not available", () => {
+      // Remove matchMedia entirely to simulate environments without it
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).matchMedia = undefined;
+
+      // Should not throw
+      expect(() => {
+        render(
+          <AgentsSidebar
+            viewSwitcher={<div data-testid="sidebar-content">Content</div>}
+          />,
+        );
+      }).not.toThrow();
+
+      // Sidebar should render normally (expanded by default)
+      expect(screen.getByTestId("sidebar-content")).toBeInTheDocument();
     });
   });
 });

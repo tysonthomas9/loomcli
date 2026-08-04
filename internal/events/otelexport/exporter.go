@@ -182,7 +182,12 @@ func (e *Exporter) handleTaskClaimed(ev events.Event) {
 		return
 	}
 
-	_, span := e.tracer.Start(context.Background(), "loom.task",
+	// Rebuild the parent span context from ev.TraceParent if present.
+	// Falls back to context.Background() for older records / events emitted
+	// without context. See docs/observability/events-tracing-spike.md.
+	parent := ev.ExtractTraceContext(context.Background())
+
+	_, span := e.tracer.Start(parent, "loom.task",
 		trace.WithAttributes(
 			AttrAgent.String(ev.Agent),
 			AttrRole.String(ev.Role),
@@ -256,7 +261,9 @@ func (e *Exporter) handleAgentStarted(ev events.Event) {
 		return
 	}
 
-	_, span := e.tracer.Start(context.Background(), "loom.agent.lifecycle",
+	parent := ev.ExtractTraceContext(context.Background())
+
+	_, span := e.tracer.Start(parent, "loom.agent.lifecycle",
 		trace.WithAttributes(
 			AttrAgent.String(ev.Agent),
 			AttrRole.String(ev.Role),
@@ -303,7 +310,7 @@ func (e *Exporter) handleAgentRestarted(ev events.Event) {
 	e.mu.Unlock()
 
 	if taskSpan != nil {
-		taskSpan.SetStatus(codes.Error, "agent_restarted")
+		taskSpan.SetStatus(codes.Error, "agent.restarted")
 		taskSpan.End()
 	}
 }

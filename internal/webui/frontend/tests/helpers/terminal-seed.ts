@@ -1,8 +1,8 @@
-import { execFile as execFileCallback } from 'child_process';
-import { createHash } from 'crypto';
-import { fileURLToPath } from 'url';
-import * as path from 'path';
-import { promisify } from 'util';
+import { execFile as execFileCallback } from "child_process";
+import { createHash } from "crypto";
+import { fileURLToPath } from "url";
+import * as path from "path";
+import { promisify } from "util";
 
 const execFile = promisify(execFileCallback);
 const currentFilePath = fileURLToPath(import.meta.url);
@@ -10,7 +10,7 @@ const currentDir = path.dirname(currentFilePath);
 
 const DETERMINISTIC_SCRIPT = path.resolve(
   currentDir,
-  '../fixtures/deterministic-terminal.sh'
+  "../fixtures/deterministic-terminal.sh",
 );
 
 const DEFAULT_COLS = 120;
@@ -21,26 +21,28 @@ function shellEscape(value: string): string {
 }
 
 async function runTmux(args: string[]): Promise<string> {
-  const { stdout } = await execFile('tmux', args, {
-    env: { ...process.env, TERM: 'xterm-256color' },
+  const { stdout } = await execFile("tmux", args, {
+    env: { ...process.env, TERM: "xterm-256color" },
   });
-  return stdout ?? '';
+  return stdout ?? "";
 }
 
 function isNoServerError(error: unknown): boolean {
-  const stderr = String((error as { stderr?: string })?.stderr ?? '').toLowerCase();
-  const message = String((error as Error)?.message ?? '').toLowerCase();
+  const stderr = String(
+    (error as { stderr?: string })?.stderr ?? "",
+  ).toLowerCase();
+  const message = String((error as Error)?.message ?? "").toLowerCase();
   return (
-    stderr.includes('failed to connect to server') ||
-    stderr.includes('no server running') ||
-    message.includes('failed to connect to server') ||
-    message.includes('no server running')
+    stderr.includes("failed to connect to server") ||
+    stderr.includes("no server running") ||
+    message.includes("failed to connect to server") ||
+    message.includes("no server running")
   );
 }
 
 export async function isTmuxAvailable(): Promise<boolean> {
   try {
-    await execFile('tmux', ['-V']);
+    await execFile("tmux", ["-V"]);
     return true;
   } catch {
     return false;
@@ -49,9 +51,9 @@ export async function isTmuxAvailable(): Promise<boolean> {
 
 export async function listSessions(): Promise<string[]> {
   try {
-    const out = await runTmux(['list-sessions', '-F', '#{session_name}']);
+    const out = await runTmux(["list-sessions", "-F", "#{session_name}"]);
     return out
-      .split('\n')
+      .split("\n")
       .map((entry) => entry.trim())
       .filter((entry) => entry.length > 0);
   } catch (error) {
@@ -64,7 +66,7 @@ export async function listSessions(): Promise<string[]> {
 
 export async function cleanupSession(sessionName: string): Promise<void> {
   try {
-    await runTmux(['kill-session', '-t', sessionName]);
+    await runTmux(["kill-session", "-t", sessionName]);
   } catch {
     // Session may not exist.
   }
@@ -82,35 +84,46 @@ export async function cleanupSessionsMatching(pattern: RegExp): Promise<void> {
 export async function seedDeterministicSession(
   sessionName: string,
   cols = DEFAULT_COLS,
-  rows = DEFAULT_ROWS
+  rows = DEFAULT_ROWS,
 ): Promise<void> {
   await cleanupSession(sessionName);
 
   await runTmux([
-    'new-session',
-    '-d',
-    '-s',
+    "new-session",
+    "-d",
+    "-s",
     sessionName,
-    '-x',
+    "-x",
     String(cols),
-    '-y',
+    "-y",
     String(rows),
     `bash ${shellEscape(DETERMINISTIC_SCRIPT)}`,
   ]);
-  await runTmux(['set-option', '-t', sessionName, 'status', 'off']);
-  await runTmux(['set-option', '-t', sessionName, 'mouse', 'off']);
-  await runTmux(['resize-window', '-t', sessionName, '-x', String(cols), '-y', String(rows)]);
+  await runTmux(["set-option", "-t", sessionName, "status", "off"]);
+  await runTmux(["set-option", "-t", sessionName, "mouse", "off"]);
+  await runTmux([
+    "resize-window",
+    "-t",
+    sessionName,
+    "-x",
+    String(cols),
+    "-y",
+    String(rows),
+  ]);
 }
 
 export async function seedParitySessions(
-  prefix = '8080',
-  agentName = 'ember'
+  prefix = "8080",
+  agentName = "ember",
+  workspaceShort = "default",
 ): Promise<{ talkSession: string; agentSession: string }> {
   const talkSession = `${prefix}-talk-to-lead`;
-  const agentSession = `loom-plan0-${agentName}-12345`;
+  const agentSession = `loom-${workspaceShort}-plan0-${agentName}-12345`;
 
   // Remove competing agent sessions so server discovery picks the seeded session.
-  await cleanupSessionsMatching(new RegExp(`^loom-[a-zA-Z0-9_-]+-${agentName}-[0-9]+$`));
+  await cleanupSessionsMatching(
+    new RegExp(`^loom-[a-zA-Z0-9_-]+-[a-zA-Z0-9_-]+-${agentName}-[0-9]+$`),
+  );
 
   await seedDeterministicSession(talkSession);
   await seedDeterministicSession(agentSession);
@@ -118,19 +131,21 @@ export async function seedParitySessions(
 }
 
 export async function capturePane(sessionName: string): Promise<string> {
-  return runTmux(['capture-pane', '-p', '-t', sessionName, '-S', '-200']);
+  return runTmux(["capture-pane", "-p", "-t", sessionName, "-S", "-200"]);
 }
 
 function normalizePane(text: string): string {
   return text
-    .replace(/\r\n/g, '\n')
-    .split('\n')
-    .map((line) => line.replace(/\s+$/g, ''))
-    .join('\n')
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => line.replace(/\s+$/g, ""))
+    .join("\n")
     .trim();
 }
 
-export async function capturePaneChecksum(sessionName: string): Promise<string> {
+export async function capturePaneChecksum(
+  sessionName: string,
+): Promise<string> {
   const pane = await capturePane(sessionName);
-  return createHash('sha256').update(normalizePane(pane)).digest('hex');
+  return createHash("sha256").update(normalizePane(pane)).digest("hex");
 }

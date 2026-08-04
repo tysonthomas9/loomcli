@@ -10,9 +10,26 @@ import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom";
 
+import type { KanbanColumnConfig } from "@/components/KanbanBoard";
 import type { Issue, Status } from "@/types";
+import { formatStatusLabel } from "@/utils/issue";
 
 import { SwimLaneBoard } from "../SwimLaneBoard";
+
+// Test workspace ID for scoped storage keys
+const TEST_WS_ID = "test-ws-uuid-1234";
+
+// Mock useWorkspaceContext to provide workspace ID
+vi.mock("@/hooks/workspace", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/workspace")>(
+      "@/hooks/workspace",
+    );
+  return {
+    ...actual,
+    useWorkspaceContext: () => ({ workspaceId: TEST_WS_ID }),
+  };
+});
 
 /**
  * Create a mock issue for testing.
@@ -34,6 +51,19 @@ function createMockIssue(overrides: Partial<Issue> = {}): Issue {
  * Default statuses for testing.
  */
 const defaultStatuses: Status[] = ["open", "in_progress", "closed"];
+const defaultColumns = columnsFromStatuses(defaultStatuses);
+
+function columnsFromStatuses(statuses: Status[]): KanbanColumnConfig[] {
+  return statuses.map((status) => ({
+    id: status,
+    label: formatStatusLabel(status),
+    filter: (issue: Issue) =>
+      status === "open"
+        ? issue.status === status || issue.status === undefined
+        : issue.status === status,
+    targetStatus: status,
+  }));
+}
 
 /**
  * Mock localStorage implementation for testing.
@@ -72,6 +102,9 @@ describe("SwimLaneBoard persistence", () => {
 
     // Create fresh mock storage
     mockStorage = createMockLocalStorage();
+
+    // Pre-populate with workspace ID for scoped storage reads
+    mockStorage.store.set("loom:last-workspace-id", TEST_WS_ID);
 
     // Replace localStorage with mock
     Object.defineProperty(window, "localStorage", {
@@ -116,7 +149,7 @@ describe("SwimLaneBoard persistence", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -129,7 +162,7 @@ describe("SwimLaneBoard persistence", () => {
 
       // Verify localStorage was called with the correct key and value
       expect(mockStorage.setItem).toHaveBeenCalledWith(
-        "swimlane-collapsed-assignee",
+        `loom:${TEST_WS_ID}:swimlane-collapsed-assignee`,
         expect.any(String),
       );
 
@@ -153,7 +186,7 @@ describe("SwimLaneBoard persistence", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -182,7 +215,7 @@ describe("SwimLaneBoard persistence", () => {
 
       // Pre-populate localStorage with a collapsed lane (lane IDs use "lane-" prefix)
       mockStorage.store.set(
-        "swimlane-collapsed-assignee",
+        `loom:${TEST_WS_ID}:swimlane-collapsed-assignee`,
         JSON.stringify(["lane-assignee-alice"]),
       );
 
@@ -190,7 +223,7 @@ describe("SwimLaneBoard persistence", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -206,7 +239,7 @@ describe("SwimLaneBoard persistence", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -239,7 +272,7 @@ describe("SwimLaneBoard persistence", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -249,7 +282,7 @@ describe("SwimLaneBoard persistence", () => {
 
       // Verify assignee storage was updated
       expect(mockStorage.setItem).toHaveBeenCalledWith(
-        "swimlane-collapsed-assignee",
+        `loom:${TEST_WS_ID}:swimlane-collapsed-assignee`,
         expect.any(String),
       );
 
@@ -261,7 +294,7 @@ describe("SwimLaneBoard persistence", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="priority"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -271,7 +304,7 @@ describe("SwimLaneBoard persistence", () => {
 
       // Verify priority storage was updated (not assignee)
       expect(mockStorage.setItem).toHaveBeenCalledWith(
-        "swimlane-collapsed-priority",
+        `loom:${TEST_WS_ID}:swimlane-collapsed-priority`,
         expect.any(String),
       );
     });
@@ -294,11 +327,11 @@ describe("SwimLaneBoard persistence", () => {
 
       // Pre-populate both storages with different collapsed lanes (lane IDs use "lane-" prefix)
       mockStorage.store.set(
-        "swimlane-collapsed-assignee",
+        `loom:${TEST_WS_ID}:swimlane-collapsed-assignee`,
         JSON.stringify(["lane-assignee-alice"]),
       );
       mockStorage.store.set(
-        "swimlane-collapsed-priority",
+        `loom:${TEST_WS_ID}:swimlane-collapsed-priority`,
         JSON.stringify(["lane-priority-2"]),
       );
 
@@ -307,7 +340,7 @@ describe("SwimLaneBoard persistence", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -322,7 +355,7 @@ describe("SwimLaneBoard persistence", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="priority"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -351,7 +384,7 @@ describe("SwimLaneBoard persistence", () => {
           <SwimLaneBoard
             issues={issues}
             groupBy="assignee"
-            statuses={defaultStatuses}
+            columns={defaultColumns}
           />,
         );
       }).not.toThrow();
@@ -375,7 +408,7 @@ describe("SwimLaneBoard persistence", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -396,7 +429,7 @@ describe("SwimLaneBoard persistence", () => {
 
       // Pre-populate with invalid JSON
       mockStorage.store.set(
-        "swimlane-collapsed-assignee",
+        `loom:${TEST_WS_ID}:swimlane-collapsed-assignee`,
         "not valid json {{{",
       );
 
@@ -406,7 +439,7 @@ describe("SwimLaneBoard persistence", () => {
           <SwimLaneBoard
             issues={issues}
             groupBy="assignee"
-            statuses={defaultStatuses}
+            columns={defaultColumns}
           />,
         );
       }).not.toThrow();
@@ -423,7 +456,7 @@ describe("SwimLaneBoard persistence", () => {
 
       // Pre-populate with valid JSON but wrong type
       mockStorage.store.set(
-        "swimlane-collapsed-assignee",
+        `loom:${TEST_WS_ID}:swimlane-collapsed-assignee`,
         JSON.stringify({ invalid: "object" }),
       );
 
@@ -433,7 +466,7 @@ describe("SwimLaneBoard persistence", () => {
           <SwimLaneBoard
             issues={issues}
             groupBy="assignee"
-            statuses={defaultStatuses}
+            columns={defaultColumns}
           />,
         );
       }).not.toThrow();
@@ -450,7 +483,7 @@ describe("SwimLaneBoard persistence", () => {
 
       // Pre-populate with array containing non-strings
       mockStorage.store.set(
-        "swimlane-collapsed-assignee",
+        `loom:${TEST_WS_ID}:swimlane-collapsed-assignee`,
         JSON.stringify([1, 2, 3]),
       );
 
@@ -460,7 +493,7 @@ describe("SwimLaneBoard persistence", () => {
           <SwimLaneBoard
             issues={issues}
             groupBy="assignee"
-            statuses={defaultStatuses}
+            columns={defaultColumns}
           />,
         );
       }).not.toThrow();
@@ -481,7 +514,7 @@ describe("SwimLaneBoard persistence", () => {
 
       // Pre-populate with some collapsed lanes (lane IDs use "lane-" prefix)
       mockStorage.store.set(
-        "swimlane-collapsed-assignee",
+        `loom:${TEST_WS_ID}:swimlane-collapsed-assignee`,
         JSON.stringify(["lane-assignee-alice", "lane-assignee-bob"]),
       );
 
@@ -489,7 +522,7 @@ describe("SwimLaneBoard persistence", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -521,7 +554,7 @@ describe("SwimLaneBoard persistence", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -550,7 +583,7 @@ describe("SwimLaneBoard persistence", () => {
 
       // Pre-populate with collapsed lanes (lane IDs use "lane-" prefix)
       mockStorage.store.set(
-        "swimlane-collapsed-assignee",
+        `loom:${TEST_WS_ID}:swimlane-collapsed-assignee`,
         JSON.stringify(["lane-assignee-alice", "lane-assignee-bob"]),
       );
 
@@ -558,7 +591,7 @@ describe("SwimLaneBoard persistence", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -585,7 +618,7 @@ describe("SwimLaneBoard persistence", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -613,7 +646,7 @@ describe("SwimLaneBoard persistence", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
           defaultCollapsed={true}
         />,
       );
@@ -642,7 +675,7 @@ describe("SwimLaneBoard persistence", () => {
       // Pre-populate with expanded lanes (when defaultCollapsed=true, these are in toggled set)
       // Lane IDs use "lane-" prefix
       mockStorage.store.set(
-        "swimlane-collapsed-assignee",
+        `loom:${TEST_WS_ID}:swimlane-collapsed-assignee`,
         JSON.stringify(["lane-assignee-alice", "lane-assignee-bob"]),
       );
 
@@ -650,7 +683,7 @@ describe("SwimLaneBoard persistence", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
           defaultCollapsed={true}
         />,
       );
@@ -677,7 +710,7 @@ describe("SwimLaneBoard persistence", () => {
 
       // Pre-populate localStorage
       mockStorage.store.set(
-        "swimlane-collapsed-none",
+        `loom:${TEST_WS_ID}:swimlane-collapsed-none`,
         JSON.stringify(["some-id"]),
       );
 
@@ -685,15 +718,15 @@ describe("SwimLaneBoard persistence", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="none"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
-      // Should render KanbanBoard, not swim lanes
-      expect(screen.queryByTestId("swim-lane-board")).not.toBeInTheDocument();
-
-      // localStorage should not be accessed for the 'none' key
-      // (it may be accessed during initial render check, but we verify no swim lanes rendered)
+      // Renders the flat KanbanBoard (now wrapped in a swim-lane-board div for
+      // the compact toolbar), NOT swim lanes — so the per-lane collapse
+      // localStorage (swimlane-collapsed-none) is never consumed. Absence of any
+      // lane collapse toggle confirms no lanes were rendered.
+      expect(screen.queryByTestId("collapse-toggle")).not.toBeInTheDocument();
     });
   });
 });

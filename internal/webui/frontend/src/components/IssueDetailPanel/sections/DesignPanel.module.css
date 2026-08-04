@@ -1,0 +1,164 @@
+/**
+ * DesignPanel component styles.
+ * Design content viewer with collapsible H2 sections and fullscreen toggle.
+ */
+
+.designPanel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* Header bar */
+.designHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 0 8px;
+}
+
+.designTitle {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin: 0;
+}
+
+.fullscreenButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: none;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.fullscreenButton:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+.fullscreenButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.fullscreenButton svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Scroll container */
+.scrollContainer {
+  /* No inner cap in the normal (non-fullscreen) layout — the detail column
+     owns the scroll. The 50vh cap clipped ~128px behind a redundant nested
+     scrollbar while the column above had room. Fullscreen overrides below. */
+  overflow-y: visible;
+  padding: 12px;
+  background-color: var(--color-bg-subtle);
+  border-radius: var(--radius-sm);
+}
+
+/* Fullscreen overlay — portaled to document.body */
+.fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-modal) + 10);
+  background: var(--color-panel-bg);
+  display: flex;
+  flex-direction: column;
+  padding: 24px;
+  box-sizing: border-box;
+}
+
+.fullscreen .designHeader {
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--color-border-light);
+  margin-bottom: 16px;
+}
+
+.fullscreen .scrollContainer {
+  max-height: none;
+  flex: 1;
+  overflow-y: auto;
+}
+
+/* Collapsible sections */
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 8px 0;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--color-border-light);
+  cursor: pointer;
+  text-align: left;
+  transition: background-color var(--transition-fast);
+}
+
+.sectionHeader:hover {
+  background: var(--color-bg-hover);
+}
+
+.sectionHeader:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.sectionHeadingText {
+  font-size: var(--font-size-base);
+  font-weight: 600;
+  color: var(--color-text);
+  margin: 0;
+  line-height: 1.3;
+}
+
+.chevron {
+  width: 16px;
+  height: 16px;
+  transition: transform 200ms ease;
+  color: var(--color-text-muted);
+  transform: rotate(0deg);
+  flex-shrink: 0;
+}
+
+.chevronExpanded {
+  transform: rotate(90deg);
+}
+
+.sectionContent {
+  padding: 4px 0 12px;
+}
+
+/* Empty placeholder */
+.emptyPlaceholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 32px 16px;
+  color: var(--color-text-muted);
+}
+
+.emptyPlaceholder svg {
+  width: 32px;
+  height: 32px;
+  opacity: 0.4;
+}
+
+.emptyText {
+  font-size: var(--font-size-base);
+  font-style: italic;
+  margin: 0;
+}

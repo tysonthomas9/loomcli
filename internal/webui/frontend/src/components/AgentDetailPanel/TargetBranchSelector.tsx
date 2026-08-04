@@ -1,6 +1,6 @@
 /**
  * TargetBranchSelector - Inline editor for the target/integration branch.
- * Read-only in legacy mode, editable in workspace mode.
+ * Editable only when the agent is scoped to a workspace.
  */
 
 import { useState, useCallback } from "react";

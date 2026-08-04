@@ -1,12 +1,13 @@
-export { NotesBar } from "./NotesBar";
-export type { NotesBarProps } from "./NotesBar";
-export { TerminalInstance } from "./TerminalInstance";
-export type {
-  TerminalInstanceProps,
-  TerminalInstanceHandle,
-} from "./TerminalInstance";
-export { TerminalTabBar } from "./TerminalTabBar";
-export type { TerminalTabBarProps, TerminalTab } from "./TerminalTabBar";
-export { TerminalView } from "./TerminalView";
-export { SessionNamePrompt } from "./SessionNamePrompt";
-export type { SessionNamePromptProps } from "./SessionNamePrompt";
+/**
+ * TerminalView barrel export.
+ */
+
+export {
+  TerminalView,
+  type TerminalInputRequest,
+  type TerminalSplitControls,
+} from "./TerminalView";
+export * from "./controls";
+export * from "./instances";
+export * from "./layout";
+export * from "./tabs";

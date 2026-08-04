@@ -3,13 +3,20 @@
  * Uses CSS variables from styles/variables.css.
  */
 
-/* Wrapper for horizontal scrolling on narrow viewports */
+/* Wrapper for horizontal + vertical scrolling with sticky headers */
 .issue-table__wrapper {
   width: 100%;
-  overflow-x: auto;
+  overflow: auto;
+  max-height: 80vh;
   border: 1px solid var(--color-border);
   border-radius: 12px;
   background: var(--color-bg-card);
+}
+
+/* Applied when table uses virtualized rendering (>100 rows) */
+.issue-table__wrapper--virtualized {
+  overflow-y: auto;
+  max-height: 80vh;
 }
 
 /* Main table */
@@ -23,7 +30,7 @@
 
 /* Table header */
 .issue-table__head {
-  background-color: #ece9df;
+  background-color: var(--color-bg-tertiary);
   border-bottom: 1px solid var(--color-border);
 }
 
@@ -35,6 +42,10 @@
   font-size: var(--font-size-xs);
   letter-spacing: 0.05em;
   white-space: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky, 10);
+  background-color: var(--color-bg-tertiary);
 }
 
 /* Sortable header styles */
@@ -48,7 +59,7 @@
 
 .issue-table__header-cell--sortable:hover {
   color: var(--color-text);
-  background-color: #e6e1d4;
+  background-color: var(--color-bg-active);
 }
 
 .issue-table__header-cell--sortable:focus {
@@ -101,16 +112,24 @@
 }
 
 .issue-table__row:hover {
-  background-color: #eeebe2;
+  background-color: var(--color-bg-hover);
 }
 
 .issue-table__row--clickable {
   cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.issue-table__row--clickable:hover {
+  background-color: var(--color-bg-hover);
+  box-shadow: inset 3px 0 0 var(--color-primary);
 }
 
 .issue-table__row--clickable:focus {
   outline: none;
-  background-color: #e9e4d7;
+  background-color: var(--color-bg-active);
 }
 
 .issue-table__row--clickable:focus-visible {
@@ -119,11 +138,146 @@
 }
 
 .issue-table__row--selected {
-  background-color: #e9e4d7;
+  background-color: var(--color-bg-active);
 }
 
 .issue-table__row--selected:hover {
-  background-color: #e9e4d7;
+  background-color: var(--color-bg-active);
+}
+
+/* Epic grouping */
+.issue-table__group-row {
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border-light);
+  background: var(--color-bg-secondary);
+}
+
+.issue-table__group-row--clickable {
+  cursor: pointer;
+}
+
+.issue-table__group-row--clickable:hover {
+  background: var(--color-bg-hover);
+}
+
+.issue-table__group-row--clickable:focus {
+  outline: none;
+}
+
+.issue-table__group-row--clickable:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.issue-table__group-cell {
+  padding: var(--space-3) var(--space-4);
+}
+
+.issue-table__group-content {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+/* Epic runner badge (Aether design, pin 10) — mirrors SwimLane headers. */
+.issue-table__runner-badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px var(--space-2);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+}
+
+.issue-table__runner-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--color-status-working);
+  flex-shrink: 0;
+}
+
+.issue-table__unclaimed-badge {
+  flex-shrink: 0;
+  padding: 1px var(--space-2);
+  font-size: var(--font-size-xs);
+  font-style: italic;
+  color: var(--color-text-muted);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-full);
+}
+
+.issue-table__group-label,
+.issue-table__group-priority,
+.issue-table__group-status {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  white-space: nowrap;
+}
+
+.issue-table__group-label {
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  text-transform: uppercase;
+}
+
+.issue-table__group-id {
+  color: var(--color-text-muted);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+
+.issue-table__group-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text);
+  font-weight: var(--font-weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.issue-table__group-priority {
+  color: var(--color-text);
+  background: var(--color-priority-2);
+}
+
+.issue-table__group-status {
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+}
+
+.issue-table__group-summary {
+  margin-left: auto;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+
+.issue-table__row--group-child .issue-table__cell[data-column="title"] {
+  padding-left: calc(var(--space-4) + var(--space-6));
+}
+
+.issue-table__group-empty-cell {
+  padding: var(--space-3) var(--space-4) var(--space-3)
+    calc(var(--space-4) + var(--space-6));
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  font-style: italic;
 }
 
 /* Table cells */
@@ -178,7 +332,7 @@
 
 .issue-table__priority.priority-2 {
   background-color: var(--color-priority-2);
-  color: var(--color-text); /* Dark text for WCAG AA contrast */
+  color: #171717; /* dark text on amber for WCAG AA (--color-text resolves light in dark theme) */
 }
 
 .issue-table__priority.priority-3 {
@@ -197,6 +351,13 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--color-text);
+  transition: color var(--transition-fast);
+}
+
+/* Underline title on clickable row hover to signal interactivity */
+.issue-table__row--clickable:hover .issue-table__title {
+  color: var(--color-primary);
+  text-decoration: underline;
 }
 
 /* Status badges */
@@ -258,6 +419,18 @@
 .issue-table__assignee {
   color: var(--color-text-secondary);
   font-size: var(--font-size-sm);
+}
+
+/* Repo */
+.issue-table__repo {
+  display: inline-block;
+  max-width: 100px;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  font-family: var(--font-family-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Date */
@@ -369,19 +542,21 @@
   z-index: var(--z-sticky);
 }
 
-/* Header sticky cells need explicit background */
+/* Header sticky cells need explicit background and elevated z-index for dual-axis sticking.
+   Match the non-sticky header surface so the left columns don't form a darker stripe. */
 .issue-table__header-cell[data-column="id"] {
-  background-color: var(--color-bg-secondary);
+  background-color: var(--color-bg-tertiary);
+  z-index: calc(var(--z-sticky, 10) + 1);
 }
 
-/* Body sticky cells need opaque background */
+/* Body sticky cells need opaque background — match the row/table surface. */
 .issue-table__cell[data-column="id"] {
-  background-color: var(--color-bg);
+  background-color: var(--color-bg-card);
 }
 
 /* Match hover state background for sticky cells */
 .issue-table__row:hover .issue-table__cell[data-column="id"] {
-  background-color: var(--color-bg-secondary);
+  background-color: var(--color-bg-hover);
 }
 
 /* Match selected state background for sticky cells */
@@ -412,16 +587,17 @@
 }
 
 .issue-table__header-cell--checkbox {
-  background-color: var(--color-bg-secondary);
+  background-color: var(--color-bg-tertiary);
+  z-index: calc(var(--z-sticky, 10) + 2);
 }
 
 .issue-table__cell--checkbox {
-  background-color: var(--color-bg);
+  background-color: var(--color-bg-card);
 }
 
 /* Match hover state for checkbox cells */
 .issue-table__row:hover .issue-table__cell--checkbox {
-  background-color: var(--color-bg-secondary);
+  background-color: var(--color-bg-hover);
 }
 
 /* Match selected state for checkbox cells */

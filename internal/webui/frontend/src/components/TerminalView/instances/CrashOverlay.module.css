@@ -1,0 +1,115 @@
+/**
+ * CrashOverlay styles.
+ * Inline error overlay displayed over the terminal when the backend process crashes.
+ */
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(30, 30, 30, 0.92);
+  z-index: 6;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  background: #1e1e1e;
+  border: 1px solid #ef4444;
+  border-radius: 8px;
+  padding: 24px 32px;
+  max-width: 480px;
+  width: 90%;
+}
+
+.heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #ef4444;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.errorIcon {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #ef4444;
+  color: #1e1e1e;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.reason {
+  background: #2a2a2a;
+  border: 1px solid #444;
+  border-radius: 4px;
+  padding: 12px;
+  width: 100%;
+  max-height: 120px;
+  overflow-y: auto;
+  color: #d4d4d4;
+  font-family: Menlo, Monaco, "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.actions {
+  display: flex;
+  gap: 12px;
+}
+
+.restartButton {
+  padding: 8px 20px;
+  border: none;
+  border-radius: 4px;
+  background: #22c55e;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 150ms;
+}
+
+.restartButton:hover {
+  background: #16a34a;
+}
+
+.restartButton:focus-visible {
+  outline: 2px solid #22c55e;
+  outline-offset: 2px;
+}
+
+.closeButton {
+  padding: 8px 20px;
+  border: 1px solid #555;
+  border-radius: 4px;
+  background: transparent;
+  color: #aaa;
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    background-color 150ms,
+    color 150ms;
+}
+
+.closeButton:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.closeButton:focus-visible {
+  outline: 2px solid var(--color-primary, #3b82f6);
+  outline-offset: 2px;
+}

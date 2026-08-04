@@ -1,0 +1,264 @@
+package monitor
+
+import (
+	"fmt"
+	"sort"
+	"strings"
+
+	"github.com/mattn/go-runewidth"
+)
+
+// truncateToWidth truncates s to fit within maxWidth display columns,
+// appending "..." if truncated. Uses display width (not byte length)
+// so multi-byte unicode characters are handled correctly.
+func TruncateToWidth(s string, maxWidth int) string {
+	if runewidth.StringWidth(s) <= maxWidth {
+		return s
+	}
+	return runewidth.Truncate(s, maxWidth, "...")
+}
+
+// padRight pads s with spaces to exactly width display columns.
+// Unlike fmt.Sprintf("%-Ns"), this uses display width so multi-byte
+// unicode characters are handled correctly.
+func PadRight(s string, width int) string {
+	sw := runewidth.StringWidth(s)
+	if sw >= width {
+		return s
+	}
+	return s + strings.Repeat(" ", width-sw)
+}
+
+// Rendering functions
+
+func renderDashboard(data *MonitorData) string {
+	var sb strings.Builder
+
+	renderDashboardHeader(&sb, data)
+	renderDashboardAgents(&sb, data)
+	renderDashboardTasks(&sb, data)
+	renderDashboardSync(&sb, data)
+	renderDashboardStats(&sb, data)
+	sb.WriteString(RenderBoxBottom())
+
+	return sb.String()
+}
+
+func renderDashboardHeader(sb *strings.Builder, data *MonitorData) {
+	sb.WriteString(RenderBoxTop())
+	sb.WriteString(RenderBoxLine(CenterText("LOOM", DashboardWidth-4)))
+	sb.WriteString(RenderBoxLine(CenterText(fmt.Sprintf("Last updated: %s", data.Timestamp.Format("15:04:05")), DashboardWidth-4)))
+}
+
+func renderDashboardAgents(sb *strings.Builder, data *MonitorData) {
+	sb.WriteString(RenderBoxSeparator())
+	sb.WriteString(RenderBoxLine(" AGENTS"))
+	sb.WriteString(RenderBoxSeparator())
+
+	renderAgentsWorkspace(sb, data.Agents)
+	if len(data.Agents) == 0 {
+		sb.WriteString(RenderBoxLine("  No agents found"))
+	}
+}
+
+func renderDashboardTasks(sb *strings.Builder, data *MonitorData) {
+	sb.WriteString(RenderBoxSeparator())
+	sb.WriteString(RenderBoxLine(" WORK QUEUE"))
+	sb.WriteString(RenderBoxSeparator())
+	taskSummary := fmt.Sprintf("  Plan: %-3d  Impl: %-3d  Review: %-3d  Active: %-3d  Backlog: %-3d",
+		data.Tasks.NeedsPlanning, data.Tasks.ReadyToImplement, data.Tasks.NeedReview, data.Tasks.InProgress, data.Tasks.Backlog)
+	sb.WriteString(RenderBoxLine(taskSummary))
+
+	sb.WriteString(RenderBoxLine(""))
+	sb.WriteString(RenderBoxLine(fmt.Sprintf("  NEEDS PLANNING (%d):", data.Tasks.NeedsPlanning)))
+	renderTaskSection(sb, data.NeedsPlanningTasks)
+	sb.WriteString(RenderBoxLine(""))
+	sb.WriteString(RenderBoxLine(fmt.Sprintf("  NEEDS REVIEW (%d):", data.Tasks.NeedReview)))
+	renderTaskSection(sb, data.ReviewTasks)
+	sb.WriteString(RenderBoxLine(""))
+	sb.WriteString(RenderBoxLine(fmt.Sprintf("  READY TO IMPLEMENT (%d):", data.Tasks.ReadyToImplement)))
+	renderTaskSection(sb, data.ReadyToImplement)
+	sb.WriteString(RenderBoxLine(""))
+	sb.WriteString(RenderBoxLine(fmt.Sprintf("  IN PROGRESS (%d):", data.Tasks.InProgress)))
+	renderTaskSection(sb, data.InProgressTasks)
+}
+
+func renderDashboardSync(sb *strings.Builder, data *MonitorData) {
+	sb.WriteString(RenderBoxSeparator())
+	sb.WriteString(RenderBoxLine(" SYNC STATUS"))
+	sb.WriteString(RenderBoxSeparator())
+
+	dbStatus := "✓ synced"
+	if !data.SyncStatus.DBSynced {
+		dbStatus = "⚠ " + data.SyncStatus.DBError
+	}
+	sb.WriteString(RenderBoxLine(fmt.Sprintf("  Database:  %s", dbStatus)))
+	sb.WriteString(RenderBoxLine(fmt.Sprintf("  Git:       %s", formatGitSyncStatus(data.SyncStatus))))
+}
+
+func formatGitSyncStatus(sync SyncInfo) string {
+	if sync.GitNeedsPush == 0 && sync.GitNeedsPull == 0 {
+		return "✓ all synced"
+	}
+	var parts []string
+	if sync.GitNeedsPush > 0 {
+		parts = append(parts, fmt.Sprintf("%d need push", sync.GitNeedsPush))
+	}
+	if sync.GitNeedsPull > 0 {
+		parts = append(parts, fmt.Sprintf("%d need pull", sync.GitNeedsPull))
+	}
+	return "⚠ " + strings.Join(parts, ", ")
+}
+
+func renderDashboardStats(sb *strings.Builder, data *MonitorData) {
+	sb.WriteString(RenderBoxSeparator())
+	sb.WriteString(RenderBoxLine(" STATS"))
+	sb.WriteString(RenderBoxSeparator())
+	statsLine := fmt.Sprintf("  Remaining: %-4d  Closed: %-4d  Total: %-4d  Done: %.0f%%",
+		data.Stats.Remaining, data.Stats.Closed, data.Stats.Total, data.Stats.Completion)
+	sb.WriteString(RenderBoxLine(statsLine))
+}
+
+// renderTaskSection renders a list of tasks, showing at most 10 in the CLI.
+// Tasks beyond the limit are summarized as "and N more...".
+func renderTaskSection(sb *strings.Builder, tasks []TaskInfo) {
+	if len(tasks) == 0 {
+		sb.WriteString(RenderBoxLine("    (none)"))
+		return
+	}
+	const displayLimit = 10
+	display := tasks
+	if len(tasks) > displayLimit {
+		display = tasks[:displayLimit]
+	}
+	for _, task := range display {
+		renderTaskLine(sb, task)
+	}
+	if remaining := len(tasks) - displayLimit; remaining > 0 {
+		sb.WriteString(RenderBoxLine(fmt.Sprintf("    ... and %d more", remaining)))
+	}
+}
+
+func renderTaskLine(sb *strings.Builder, task TaskInfo) {
+	prefix := fmt.Sprintf("    [P%d] %s: ", task.Priority, task.ID)
+	maxTitle := DashboardWidth - 4 - DisplayWidth(prefix) // content area (66) minus prefix
+	title := TruncateToWidth(task.Title, maxTitle)
+	sb.WriteString(RenderBoxLine(prefix + title))
+}
+
+func RenderAgentLine(sb *strings.Builder, agent AgentStatus, indent string) {
+	statusIcon := "✓"
+	if strings.HasPrefix(agent.Status, "planning:") ||
+		strings.HasPrefix(agent.Status, "working:") ||
+		strings.HasPrefix(agent.Status, "done:") ||
+		strings.HasPrefix(agent.Status, "review:") ||
+		strings.HasPrefix(agent.Status, "error:") {
+		statusIcon = "●"
+	} else if strings.Contains(agent.Status, "changes") || agent.Status == "dirty" {
+		statusIcon = "●"
+	}
+
+	// Build agent name with [D] prefix if daemon-managed
+	displayName := agent.Name
+	if agent.DaemonManaged {
+		displayName = "[D] " + agent.Name
+	}
+
+	// Build sync indicator (↑ahead ↓behind)
+	syncIndicator := ""
+	if agent.Ahead > 0 {
+		syncIndicator += fmt.Sprintf("↑%d", agent.Ahead)
+	}
+	if agent.Behind > 0 {
+		if syncIndicator != "" {
+			syncIndicator += " "
+		}
+		syncIndicator += fmt.Sprintf("↓%d", agent.Behind)
+	}
+
+	// Calculate available width for status dynamically to ensure the line fits
+	contentWidth := DashboardWidth - 4 // 66
+	nameCol := PadRight(TruncateToWidth(displayName, 14), 14)
+	branchCol := PadRight(TruncateToWidth(agent.Branch, 18), 18)
+	syncWidth := DisplayWidth(syncIndicator)
+	fixedCols := DisplayWidth(indent) + 14 + 1 + 18 + 1 + 1 + 1 // indent + name + sp + branch + sp + icon + sp
+	maxStatusWidth := contentWidth - fixedCols - syncWidth
+	if maxStatusWidth < 0 {
+		maxStatusWidth = 0
+	}
+	status := TruncateToWidth(agent.Status, maxStatusWidth)
+
+	leftPart := indent + nameCol + " " + branchCol + " " + statusIcon + " " + status
+
+	// Right-align sync indicator
+	leftWidth := DisplayWidth(leftPart)
+	padding := contentWidth - leftWidth - syncWidth
+	if padding < 0 {
+		padding = 0
+	}
+	line := leftPart + strings.Repeat(" ", padding) + syncIndicator
+	sb.WriteString(RenderBoxLine(line))
+}
+
+func renderAgentsWorkspace(sb *strings.Builder, agents []AgentStatus) {
+	// Group agents by workspace
+	groups := make(map[string][]AgentStatus)
+	for _, agent := range agents {
+		ws := agent.Workspace
+		if ws == "" {
+			ws = "unassigned"
+		}
+		groups[ws] = append(groups[ws], agent)
+	}
+
+	// Sort workspace names
+	var wsNames []string
+	for name := range groups {
+		wsNames = append(wsNames, name)
+	}
+	sort.Strings(wsNames)
+
+	for _, ws := range wsNames {
+		sb.WriteString(RenderBoxLine(fmt.Sprintf("  [%s]", ws)))
+		for _, agent := range groups[ws] {
+			RenderAgentLine(sb, agent, "   ")
+		}
+	}
+}
+
+func RenderBoxTop() string {
+	return "╔" + strings.Repeat("═", DashboardWidth-2) + "╗\n"
+}
+
+func RenderBoxBottom() string {
+	return "╚" + strings.Repeat("═", DashboardWidth-2) + "╝\n"
+}
+
+func RenderBoxSeparator() string {
+	return "╠" + strings.Repeat("═", DashboardWidth-2) + "╣\n"
+}
+
+// DisplayWidth returns the terminal display width of a string
+// accounting for Unicode characters that may display as double width.
+func DisplayWidth(s string) int {
+	return runewidth.StringWidth(s)
+}
+
+func RenderBoxLine(content string) string {
+	// Use display width instead of byte length for padding calculation
+	contentWidth := DisplayWidth(content)
+	padding := DashboardWidth - 4 - contentWidth
+	if padding < 0 {
+		padding = 0
+	}
+	return "║ " + content + strings.Repeat(" ", padding) + " ║\n"
+}
+
+func CenterText(text string, width int) string {
+	textWidth := DisplayWidth(text)
+	if textWidth >= width {
+		return text
+	}
+	padding := (width - textWidth) / 2
+	return strings.Repeat(" ", padding) + text + strings.Repeat(" ", width-textWidth-padding)
+}

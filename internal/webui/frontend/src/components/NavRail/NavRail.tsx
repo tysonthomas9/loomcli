@@ -3,22 +3,52 @@
  * Icon-only navigation rail for switching between views.
  */
 
-import type { ViewMode } from "@/components/ViewSwitcher";
+import { useEffect, useRef } from "react";
+
+import type { ViewMode } from "@/types";
+import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
+
+import { CompactRailHost } from "@/components/CompactRail";
+import { getCompactAvatarInitials } from "@/utils/compactAvatarInitials";
 
 import styles from "./NavRail.module.css";
+
+/** Aether wireframe pin 5: ~5 workspace dots visible, then scroll. */
+export const WORKSPACE_SWITCHER_LIST_MAX_HEIGHT_PX = 210;
+
+export interface NavRailWorkspace {
+  id: string;
+  name: string;
+}
 
 export interface NavRailProps {
   activeView: ViewMode;
   onChange: (view: ViewMode) => void;
   className?: string;
+  sessionCount?: number;
+  badges?: Partial<Record<ViewMode, boolean>>;
+  /** Workspaces shown as switcher avatars at the rail bottom. */
+  workspaces?: NavRailWorkspace[];
+  /** Currently active workspace id (highlighted avatar). */
+  activeWorkspaceId?: string;
+  /** Switch to a workspace by id. */
+  onWorkspaceSwitch?: (id: string) => void;
+  /** Open the create-workspace flow. */
+  onAddWorkspace?: () => void;
 }
 
-type NavItem = { id: ViewMode; label: string; icon: JSX.Element };
+type NavItem = {
+  id: ViewMode;
+  label: string;
+  icon: JSX.Element;
+  activeForViews?: ViewMode[];
+};
 
 const TOP_ITEMS: NavItem[] = [
   {
     id: "kanban",
-    label: "Kanban",
+    label: "Workspaces",
+    activeForViews: ["kanban", "table"],
     icon: (
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <rect
@@ -65,69 +95,40 @@ const TOP_ITEMS: NavItem[] = [
     ),
   },
   {
-    id: "table",
-    label: "List",
+    id: "prs",
+    label: "Pull Requests",
     icon: (
       <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle
+          cx="6"
+          cy="6"
+          r="2.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        />
+        <circle
+          cx="6"
+          cy="18"
+          r="2.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        />
+        <circle
+          cx="18"
+          cy="18"
+          r="2.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        />
         <path
-          d="M4 6h16M4 12h16M4 18h16"
+          d="M6 8.5v7M18 15.5V12a3 3 0 00-3-3h-3"
           fill="none"
           stroke="currentColor"
           strokeWidth="2"
           strokeLinecap="round"
-        />
-      </svg>
-    ),
-  },
-  {
-    id: "observability",
-    label: "Observability",
-    icon: (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <rect
-          x="4"
-          y="14"
-          width="4"
-          height="6"
-          rx="1"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        />
-        <rect
-          x="10"
-          y="8"
-          width="4"
-          height="12"
-          rx="1"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        />
-        <rect
-          x="16"
-          y="4"
-          width="4"
-          height="16"
-          rx="1"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        />
-      </svg>
-    ),
-  },
-  {
-    id: "files",
-    label: "Files",
-    icon: (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path
-          d="M3 7V5a2 2 0 012-2h4l2 2h6a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinejoin="round"
         />
       </svg>
     ),
@@ -141,28 +142,51 @@ const TOP_ITEMS: NavItem[] = [
           x="2"
           y="3"
           width="20"
-          height="18"
+          height="14"
           rx="2"
           fill="none"
           stroke="currentColor"
           strokeWidth="2"
         />
-        <polyline
-          points="6 9 10 12 6 15"
-          fill="none"
+        <line
+          x1="8"
+          y1="21"
+          x2="16"
+          y2="21"
           stroke="currentColor"
           strokeWidth="2"
           strokeLinecap="round"
-          strokeLinejoin="round"
         />
         <line
           x1="12"
-          y1="15"
-          x2="18"
-          y2="15"
+          y1="17"
+          x2="12"
+          y2="21"
           stroke="currentColor"
           strokeWidth="2"
           strokeLinecap="round"
+        />
+      </svg>
+    ),
+  },
+  {
+    id: "files",
+    label: "Files",
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path
+          d="M6 2h8l4 4v15a1 1 0 01-1 1H6a1 1 0 01-1-1V3a1 1 0 011-1z"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M14 2v4h4"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinejoin="round"
         />
       </svg>
     ),
@@ -200,11 +224,25 @@ export function NavRail({
   activeView,
   onChange,
   className,
+  sessionCount,
+  badges,
+  workspaces,
+  activeWorkspaceId,
+  onWorkspaceSwitch,
+  onAddWorkspace,
 }: NavRailProps): JSX.Element {
   const rootClassName = [styles.navRail, className].filter(Boolean).join(" ");
+  const activeWorkspaceRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    activeWorkspaceRef.current?.scrollIntoView?.({ block: "nearest" });
+  }, [activeWorkspaceId, workspaces]);
 
   const renderButton = (item: NavItem) => {
-    const isActive = activeView === item.id;
+    const isActive = (item.activeForViews ?? [item.id]).includes(activeView);
+    const showBadge =
+      item.id === "terminal" && sessionCount != null && sessionCount > 0;
+    const showUnread = !isActive && badges?.[item.id] === true;
     return (
       <button
         key={item.id}
@@ -215,6 +253,21 @@ export function NavRail({
         aria-label={item.label}
       >
         <span className={styles.icon}>{item.icon}</span>
+        {showBadge && (
+          <span
+            className={styles.badge}
+            aria-label={`${sessionCount} active sessions`}
+          >
+            {sessionCount}
+          </span>
+        )}
+        {showUnread && (
+          <span
+            role="img"
+            className={styles.unreadIndicator}
+            aria-label="has unread output"
+          />
+        )}
         <span className={styles.tooltip} role="tooltip">
           {item.label}
         </span>
@@ -222,10 +275,65 @@ export function NavRail({
     );
   };
 
+  const hasWorkspaceAvatars =
+    (workspaces && workspaces.length > 0) || Boolean(onAddWorkspace);
+
   return (
     <nav className={rootClassName} aria-label="Primary">
       {TOP_ITEMS.map(renderButton)}
       <div className={styles.spacer} />
+      {hasWorkspaceAvatars && (
+        <>
+          <div className={styles.wsDivider} aria-hidden="true" />
+          <section
+            className={styles.workspaceSwitcher}
+            aria-label="Workspace selector"
+          >
+            <div className={styles.workspaceList}>
+              {workspaces?.map((ws) => {
+                const color = getAvatarColor(ws.name);
+                const isActive = ws.id === activeWorkspaceId;
+                return (
+                  <CompactRailHost
+                    key={ws.id}
+                    as="button"
+                    type="button"
+                    label={ws.name}
+                    aria-label={`Switch to ${ws.name}`}
+                    hostRef={isActive ? activeWorkspaceRef : undefined}
+                    className={styles.wsAvatar}
+                    data-active={isActive || undefined}
+                    onClick={() => onWorkspaceSwitch?.(ws.id)}
+                  >
+                    <span
+                      className={styles.wsAvatarCircle}
+                      style={{
+                        backgroundColor: color,
+                        color: shouldUseWhiteText(color) ? "#fff" : "#171717",
+                      }}
+                      aria-hidden="true"
+                    >
+                      {getCompactAvatarInitials(ws.name)}
+                    </span>
+                  </CompactRailHost>
+                );
+              })}
+            </div>
+            {onAddWorkspace && (
+              <CompactRailHost
+                as="button"
+                type="button"
+                label="Add workspace"
+                className={styles.wsAdd}
+                onClick={onAddWorkspace}
+              >
+                +
+              </CompactRailHost>
+            )}
+          </section>
+          <div className={styles.wsDivider} aria-hidden="true" />
+        </>
+      )}
       {BOTTOM_ITEMS.map(renderButton)}
     </nav>
   );

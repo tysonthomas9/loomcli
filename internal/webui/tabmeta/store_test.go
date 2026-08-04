@@ -9,6 +9,8 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+const testWorkspace = "default"
+
 func setupTest(t *testing.T) (*Store, *miniredis.Miniredis) {
 	t.Helper()
 	mr := miniredis.RunT(t)
@@ -19,7 +21,7 @@ func setupTest(t *testing.T) (*Store, *miniredis.Miniredis) {
 
 func TestGet_NotFound(t *testing.T) {
 	store, _ := setupTest(t)
-	meta, err := store.Get(context.Background(), "nonexistent")
+	meta, err := store.Get(context.Background(), testWorkspace, "nonexistent")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -30,7 +32,7 @@ func TestGet_NotFound(t *testing.T) {
 
 func TestGet_InvalidName(t *testing.T) {
 	store, _ := setupTest(t)
-	_, err := store.Get(context.Background(), "invalid name!")
+	_, err := store.Get(context.Background(), testWorkspace, "invalid name!")
 	if err == nil {
 		t.Fatal("expected error for invalid session name")
 	}
@@ -43,6 +45,7 @@ func TestSetAndGet(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	meta := &TabMetadata{
 		SessionName: "test-session",
+		Workspace:   testWorkspace,
 		Label:       "My Session",
 		Notes:       "Some notes",
 		SortOrder:   5,
@@ -54,7 +57,7 @@ func TestSetAndGet(t *testing.T) {
 		t.Fatalf("Set: %v", err)
 	}
 
-	got, err := store.Get(ctx, "test-session")
+	got, err := store.Get(ctx, testWorkspace, "test-session")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -63,6 +66,9 @@ func TestSetAndGet(t *testing.T) {
 	}
 	if got.SessionName != "test-session" {
 		t.Errorf("SessionName = %q, want %q", got.SessionName, "test-session")
+	}
+	if got.Workspace != testWorkspace {
+		t.Errorf("Workspace = %q, want %q", got.Workspace, testWorkspace)
 	}
 	if got.Label != "My Session" {
 		t.Errorf("Label = %q, want %q", got.Label, "My Session")
@@ -77,7 +83,7 @@ func TestSetAndGet(t *testing.T) {
 
 func TestList_Empty(t *testing.T) {
 	store, _ := setupTest(t)
-	tabs, err := store.List(context.Background())
+	tabs, err := store.List(context.Background(), testWorkspace)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -94,6 +100,7 @@ func TestList_Multiple(t *testing.T) {
 	for i, name := range []string{"session-c", "session-a", "session-b"} {
 		if err := store.Set(ctx, &TabMetadata{
 			SessionName: name,
+			Workspace:   testWorkspace,
 			Label:       name,
 			SortOrder:   3 - i, // c=3, a=2, b=1
 			CreatedAt:   now,
@@ -103,7 +110,7 @@ func TestList_Multiple(t *testing.T) {
 		}
 	}
 
-	tabs, err := store.List(ctx)
+	tabs, err := store.List(ctx, testWorkspace)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -129,6 +136,7 @@ func TestPatch_PartialUpdate(t *testing.T) {
 
 	if err := store.Set(ctx, &TabMetadata{
 		SessionName: "test",
+		Workspace:   testWorkspace,
 		Label:       "original",
 		Notes:       "original notes",
 		SortOrder:   1,
@@ -139,7 +147,7 @@ func TestPatch_PartialUpdate(t *testing.T) {
 	}
 
 	// Patch only the label
-	got, err := store.Patch(ctx, "test", map[string]string{"label": "updated"})
+	got, err := store.Patch(ctx, testWorkspace, "test", map[string]string{"label": "updated"})
 	if err != nil {
 		t.Fatalf("Patch: %v", err)
 	}
@@ -153,7 +161,7 @@ func TestPatch_PartialUpdate(t *testing.T) {
 
 func TestPatch_NotFound(t *testing.T) {
 	store, _ := setupTest(t)
-	_, err := store.Patch(context.Background(), "nonexistent", map[string]string{"label": "x"})
+	_, err := store.Patch(context.Background(), testWorkspace, "nonexistent", map[string]string{"label": "x"})
 	if err == nil {
 		t.Fatal("expected error for patching nonexistent session")
 	}
@@ -166,6 +174,7 @@ func TestDelete(t *testing.T) {
 
 	if err := store.Set(ctx, &TabMetadata{
 		SessionName: "to-delete",
+		Workspace:   testWorkspace,
 		Label:       "delete me",
 		SortOrder:   1,
 		CreatedAt:   now,
@@ -174,11 +183,11 @@ func TestDelete(t *testing.T) {
 		t.Fatalf("Set: %v", err)
 	}
 
-	if err := store.Delete(ctx, "to-delete"); err != nil {
+	if err := store.Delete(ctx, testWorkspace, "to-delete"); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 
-	got, err := store.Get(ctx, "to-delete")
+	got, err := store.Get(ctx, testWorkspace, "to-delete")
 	if err != nil {
 		t.Fatalf("Get after delete: %v", err)
 	}
@@ -189,7 +198,7 @@ func TestDelete(t *testing.T) {
 
 func TestDelete_InvalidName(t *testing.T) {
 	store, _ := setupTest(t)
-	err := store.Delete(context.Background(), "")
+	err := store.Delete(context.Background(), testWorkspace, "")
 	if err == nil {
 		t.Fatal("expected error for empty session name")
 	}
@@ -199,7 +208,7 @@ func TestEnsureDefaults_CreatesNewSessions(t *testing.T) {
 	store, _ := setupTest(t)
 	ctx := context.Background()
 
-	tabs, err := store.EnsureDefaults(ctx, []string{"session-a", "session-b"})
+	tabs, err := store.EnsureDefaults(ctx, testWorkspace, []string{"session-a", "session-b"})
 	if err != nil {
 		t.Fatalf("EnsureDefaults: %v", err)
 	}
@@ -230,6 +239,7 @@ func TestEnsureDefaults_PreservesExisting(t *testing.T) {
 	// Pre-create one session with custom label
 	if err := store.Set(ctx, &TabMetadata{
 		SessionName: "existing",
+		Workspace:   testWorkspace,
 		Label:       "Custom Label",
 		SortOrder:   5,
 		CreatedAt:   now,
@@ -238,7 +248,7 @@ func TestEnsureDefaults_PreservesExisting(t *testing.T) {
 		t.Fatalf("Set: %v", err)
 	}
 
-	tabs, err := store.EnsureDefaults(ctx, []string{"existing", "new-session"})
+	tabs, err := store.EnsureDefaults(ctx, testWorkspace, []string{"existing", "new-session"})
 	if err != nil {
 		t.Fatalf("EnsureDefaults: %v", err)
 	}
@@ -283,6 +293,7 @@ func TestEnsureDefaults_EmptyActiveSessions(t *testing.T) {
 	// Pre-create metadata for a dead session
 	if err := store.Set(ctx, &TabMetadata{
 		SessionName: "dead-session",
+		Workspace:   testWorkspace,
 		Label:       "Dead",
 		SortOrder:   1,
 		CreatedAt:   now,
@@ -292,7 +303,7 @@ func TestEnsureDefaults_EmptyActiveSessions(t *testing.T) {
 	}
 
 	// EnsureDefaults with no active sessions should still return stored metadata
-	tabs, err := store.EnsureDefaults(ctx, nil)
+	tabs, err := store.EnsureDefaults(ctx, testWorkspace, nil)
 	if err != nil {
 		t.Fatalf("EnsureDefaults: %v", err)
 	}
@@ -327,6 +338,108 @@ func TestValidateSessionName(t *testing.T) {
 		}
 		if !tt.valid && err == nil {
 			t.Errorf("ValidateSessionName(%q) = nil, want error", tt.name)
+		}
+	}
+}
+
+func TestStoreWorkspaceScoping(t *testing.T) {
+	store, _ := setupTest(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	// Set metadata in workspace "ws-a"
+	if err := store.Set(ctx, &TabMetadata{
+		SessionName: "session-1",
+		Workspace:   "ws-a",
+		Label:       "A session",
+		SortOrder:   1,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}); err != nil {
+		t.Fatalf("Set ws-a: %v", err)
+	}
+
+	// Set metadata in workspace "ws-b"
+	if err := store.Set(ctx, &TabMetadata{
+		SessionName: "session-1",
+		Workspace:   "ws-b",
+		Label:       "B session",
+		SortOrder:   1,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}); err != nil {
+		t.Fatalf("Set ws-b: %v", err)
+	}
+
+	// Get from ws-a should return "A session"
+	got, err := store.Get(ctx, "ws-a", "session-1")
+	if err != nil {
+		t.Fatalf("Get ws-a: %v", err)
+	}
+	if got.Label != "A session" {
+		t.Errorf("ws-a Label = %q, want %q", got.Label, "A session")
+	}
+
+	// Get from ws-b should return "B session"
+	got, err = store.Get(ctx, "ws-b", "session-1")
+	if err != nil {
+		t.Fatalf("Get ws-b: %v", err)
+	}
+	if got.Label != "B session" {
+		t.Errorf("ws-b Label = %q, want %q", got.Label, "B session")
+	}
+
+	// List ws-a should return only 1 entry
+	listA, err := store.List(ctx, "ws-a")
+	if err != nil {
+		t.Fatalf("List ws-a: %v", err)
+	}
+	if len(listA) != 1 {
+		t.Fatalf("ws-a list: expected 1, got %d", len(listA))
+	}
+
+	// ListAll should return 2 entries
+	all, err := store.ListAll(ctx)
+	if err != nil {
+		t.Fatalf("ListAll: %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("ListAll: expected 2, got %d", len(all))
+	}
+
+	// Delete from ws-a should not affect ws-b
+	if err := store.Delete(ctx, "ws-a", "session-1"); err != nil {
+		t.Fatalf("Delete ws-a: %v", err)
+	}
+	got, err = store.Get(ctx, "ws-b", "session-1")
+	if err != nil {
+		t.Fatalf("Get ws-b after ws-a delete: %v", err)
+	}
+	if got == nil {
+		t.Fatal("ws-b session should still exist after ws-a delete")
+	}
+}
+
+func TestValidateWorkspaceName(t *testing.T) {
+	tests := []struct {
+		name  string
+		valid bool
+	}{
+		{"default", true},
+		{"my-workspace", true},
+		{"workspace_1", true},
+		{"", false},
+		{"invalid name", false},
+		{"bad:name", false},
+	}
+
+	for _, tt := range tests {
+		err := ValidateWorkspaceName(tt.name)
+		if tt.valid && err != nil {
+			t.Errorf("ValidateWorkspaceName(%q) = error %v, want nil", tt.name, err)
+		}
+		if !tt.valid && err == nil {
+			t.Errorf("ValidateWorkspaceName(%q) = nil, want error", tt.name)
 		}
 	}
 }

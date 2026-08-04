@@ -1,0 +1,40 @@
+/**
+ * ActiveAllToggle styles.
+ * Segmented control with two options: Active and All.
+ */
+
+.toggle {
+  display: inline-flex;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md, 6px);
+  overflow: hidden;
+}
+
+.segment {
+  padding: 2px 8px;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-tertiary);
+  transition:
+    background-color var(--transition-fast, 0.15s ease),
+    color var(--transition-fast, 0.15s ease);
+}
+
+.segment:hover:not(.active) {
+  background: var(--color-bg-hover);
+}
+
+.segment:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: -2px;
+}
+
+.segment.active {
+  background: var(--color-bg-active, var(--color-bg-tertiary));
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-semibold, 600);
+}

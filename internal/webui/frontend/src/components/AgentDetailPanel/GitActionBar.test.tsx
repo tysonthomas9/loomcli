@@ -12,9 +12,9 @@ import { render, screen, fireEvent, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 
-import type { GitStatus } from "@/api/git";
+import type { GitStatus } from "@/api/workspace";
 import type { ParsedLoomStatus } from "@/types";
-import type { UseGitActionsReturn } from "@/hooks/useGitActions";
+import type { UseGitActionsReturn } from "@/hooks/workspace";
 
 import { GitActionBar } from "./GitActionBar";
 

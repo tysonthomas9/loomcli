@@ -1,0 +1,156 @@
+.root {
+  width: 100%;
+}
+
+.listVariant {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.cliRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  align-items: center;
+  padding: 6px 0;
+  border-top: 1px solid var(--color-border-light);
+}
+
+.cliRow:first-child {
+  border-top: none;
+}
+
+.cliMain {
+  min-width: 0;
+}
+
+.cliTitleRow,
+.backendName {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.cliTitleRow {
+  gap: var(--space-2);
+}
+
+.backendName {
+  gap: var(--space-2);
+}
+
+.backendDot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.cliName {
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.statusBadge {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+}
+
+.ready {
+  background: color-mix(in srgb, var(--color-success) 14%, transparent);
+  color: var(--color-success);
+}
+
+.warning {
+  background: color-mix(in srgb, var(--color-warning) 16%, transparent);
+  color: var(--color-warning);
+}
+
+.missing {
+  background: color-mix(in srgb, var(--color-error) 12%, transparent);
+  color: var(--color-error);
+}
+
+.neutral {
+  background: var(--color-bg-secondary);
+  color: var(--color-text-muted);
+}
+
+.actionButton {
+  height: 26px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.actionButton:hover:not(:disabled) {
+  border-color: var(--color-border-hover);
+  background: var(--color-bg-secondary);
+}
+
+.actionButton:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.actionButton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.emptyText {
+  margin: var(--space-2) 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.matrixVariant {
+  overflow-x: auto;
+}
+
+.matrix {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-base);
+}
+
+.matrix th {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border-light);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  letter-spacing: 0.05em;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.matrix td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border-light);
+  color: var(--color-text-primary);
+  vertical-align: middle;
+}
+
+.matrix tr:last-child td {
+  border-bottom: none;
+}
+
+.matrix .actionButton {
+  min-width: 88px;
+}

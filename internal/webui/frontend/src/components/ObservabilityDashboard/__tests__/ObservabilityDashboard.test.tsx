@@ -11,7 +11,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 
 import type { MetricsSnapshot } from "@/types";
-import type { UseObservabilityMetricsResult } from "@/hooks/useObservabilityMetrics";
+import type { UseObservabilityMetricsResult } from "@/hooks/agents";
+
+// vi.mock() is hoisted by Vitest above all imports, so the mock is guaranteed
+// to be in place before ObservabilityDashboard resolves its dependencies.
+// A dynamic await import() is unnecessary and introduces an async gap that
+// causes flakiness under CPU pressure.
+import { ObservabilityDashboard } from "../ObservabilityDashboard";
 
 /**
  * Create a complete mock MetricsSnapshot for testing.
@@ -57,6 +63,21 @@ let mockHookResult: UseObservabilityMetricsResult;
 
 vi.mock("@/hooks", () => ({
   useObservabilityMetrics: () => mockHookResult,
+  useRegisterEscapeLayer: vi.fn(),
+  useKeyboardShortcuts: vi.fn(() => ({
+    isCheatsheetOpen: false,
+    toggleCheatsheet: vi.fn(),
+    closeCheatsheet: vi.fn(),
+  })),
+  KeyboardShortcutProvider: ({ children }: { children: React.ReactNode }) =>
+    children,
+  LAYER_CONFIRM_DIALOG: 60,
+  LAYER_TOAST: 50,
+  LAYER_CHEATSHEET: 45,
+  LAYER_MODAL: 40,
+  LAYER_TERMINAL_PANEL: 30,
+  LAYER_AGENT_PANEL: 20,
+  LAYER_ISSUE_PANEL: 10,
 }));
 
 describe("ObservabilityDashboard", () => {
@@ -71,16 +92,13 @@ describe("ObservabilityDashboard", () => {
     };
   });
 
-  // Dynamic import to ensure mock is set up before module loads
-  async function renderDashboard(className?: string) {
-    const { ObservabilityDashboard } =
-      await import("../ObservabilityDashboard");
+  function renderDashboard(className?: string) {
     return render(<ObservabilityDashboard className={className} />);
   }
 
   describe("rendering all panels", () => {
-    it("renders MetricsCards values", async () => {
-      await renderDashboard();
+    it("renders MetricsCards values", () => {
+      renderDashboard();
 
       expect(screen.getByText("Tasks / Hour")).toBeInTheDocument();
       expect(screen.getByText("8")).toBeInTheDocument();
@@ -89,33 +107,33 @@ describe("ObservabilityDashboard", () => {
       expect(screen.getByText("Error Rate")).toBeInTheDocument();
     });
 
-    it("renders Task Timeline section", async () => {
-      await renderDashboard();
+    it("renders Task Timeline section", () => {
+      renderDashboard();
 
       expect(screen.getByText("Hourly Completions (24h)")).toBeInTheDocument();
     });
 
-    it("renders Agent Utilization section", async () => {
-      await renderDashboard();
+    it("renders Agent Utilization section", () => {
+      renderDashboard();
 
       expect(screen.getByLabelText("Agent Utilization")).toBeInTheDocument();
     });
 
-    it("renders Errors & Restarts section", async () => {
-      await renderDashboard();
+    it("renders Errors & Restarts section", () => {
+      renderDashboard();
 
       expect(screen.getByLabelText("Errors & Restarts")).toBeInTheDocument();
     });
 
-    it("renders Epic Progress section", async () => {
-      await renderDashboard();
+    it("renders Epic Progress section", () => {
+      renderDashboard();
 
       expect(screen.getByLabelText("Epic Progress")).toBeInTheDocument();
     });
   });
 
   describe("loading state", () => {
-    it("shows loading message when isLoading=true and no metrics yet", async () => {
+    it("shows LoadingSkeleton.Observability when isLoading=true and no metrics yet", () => {
       mockHookResult = {
         metrics: null,
         isLoading: true,
@@ -125,14 +143,14 @@ describe("ObservabilityDashboard", () => {
         refetch: vi.fn(),
       };
 
-      await renderDashboard();
+      renderDashboard();
 
       expect(
-        screen.getByText("Loading observability data..."),
+        screen.getByTestId("loading-skeleton-observability"),
       ).toBeInTheDocument();
     });
 
-    it("does not show loading state when metrics exist even if isLoading", async () => {
+    it("does not show skeleton when metrics exist even if isLoading", () => {
       mockHookResult = {
         metrics: createMetrics(),
         isLoading: true,
@@ -142,17 +160,17 @@ describe("ObservabilityDashboard", () => {
         refetch: vi.fn(),
       };
 
-      await renderDashboard();
+      renderDashboard();
 
       expect(
-        screen.queryByText("Loading observability data..."),
+        screen.queryByTestId("loading-skeleton-observability"),
       ).not.toBeInTheDocument();
       expect(screen.getByText("Tasks / Hour")).toBeInTheDocument();
     });
   });
 
   describe("error state", () => {
-    it("shows error message when error and no metrics", async () => {
+    it("shows ErrorDisplay when error and no metrics", () => {
       mockHookResult = {
         metrics: null,
         isLoading: false,
@@ -162,14 +180,30 @@ describe("ObservabilityDashboard", () => {
         refetch: vi.fn(),
       };
 
-      await renderDashboard();
+      renderDashboard();
 
+      expect(screen.getByTestId("error-display")).toBeInTheDocument();
       expect(
-        screen.getByText("Failed to load metrics: Network failure"),
+        screen.getByRole("button", { name: "Try again" }),
       ).toBeInTheDocument();
     });
 
-    it("does not show error state when metrics exist despite error", async () => {
+    it("shows error details with the error message", () => {
+      mockHookResult = {
+        metrics: null,
+        isLoading: false,
+        error: new Error("Network failure"),
+        isConnected: false,
+        lastUpdated: null,
+        refetch: vi.fn(),
+      };
+
+      renderDashboard();
+
+      expect(screen.getByText("Network failure")).toBeInTheDocument();
+    });
+
+    it("does not show error state when metrics exist despite error", () => {
       mockHookResult = {
         metrics: createMetrics(),
         isLoading: false,
@@ -179,17 +213,15 @@ describe("ObservabilityDashboard", () => {
         refetch: vi.fn(),
       };
 
-      await renderDashboard();
+      renderDashboard();
 
-      expect(
-        screen.queryByText(/Failed to load metrics/),
-      ).not.toBeInTheDocument();
+      expect(screen.queryByTestId("error-display")).not.toBeInTheDocument();
       expect(screen.getByText("Tasks / Hour")).toBeInTheDocument();
     });
   });
 
   describe("503 state", () => {
-    it("shows observability-not-configured message for 503 errors", async () => {
+    it("shows observability-not-configured ErrorDisplay for 503 errors", () => {
       mockHookResult = {
         metrics: null,
         isLoading: false,
@@ -199,16 +231,17 @@ describe("ObservabilityDashboard", () => {
         refetch: vi.fn(),
       };
 
-      await renderDashboard();
+      renderDashboard();
 
+      expect(screen.getByTestId("error-display")).toBeInTheDocument();
       expect(
-        screen.getByText(/Observability is not yet configured/),
+        screen.getByRole("heading", { name: /Observability not configured/i }),
       ).toBeInTheDocument();
     });
   });
 
   describe("stale data indicator", () => {
-    it("shows stale data indicator when disconnected but have metrics", async () => {
+    it("shows stale data indicator when disconnected but have metrics", () => {
       mockHookResult = {
         metrics: createMetrics(),
         isLoading: false,
@@ -218,7 +251,7 @@ describe("ObservabilityDashboard", () => {
         refetch: vi.fn(),
       };
 
-      await renderDashboard();
+      renderDashboard();
 
       expect(screen.getByText(/Data may be stale/)).toBeInTheDocument();
       expect(
@@ -226,7 +259,7 @@ describe("ObservabilityDashboard", () => {
       ).toBeInTheDocument();
     });
 
-    it("does not show stale indicator when connected", async () => {
+    it("does not show stale indicator when connected", () => {
       mockHookResult = {
         metrics: createMetrics(),
         isLoading: false,
@@ -236,15 +269,15 @@ describe("ObservabilityDashboard", () => {
         refetch: vi.fn(),
       };
 
-      await renderDashboard();
+      renderDashboard();
 
       expect(screen.queryByText(/Data may be stale/)).not.toBeInTheDocument();
     });
   });
 
   describe("className", () => {
-    it("applies custom className", async () => {
-      const { container } = await renderDashboard("my-custom-class");
+    it("applies custom className", () => {
+      const { container } = renderDashboard("my-custom-class");
 
       expect(container.firstChild).toHaveClass("my-custom-class");
     });

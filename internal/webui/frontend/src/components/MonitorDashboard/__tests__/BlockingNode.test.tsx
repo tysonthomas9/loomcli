@@ -88,7 +88,7 @@ describe("BlockingNode", () => {
   describe("rendering", () => {
     it("renders issue ID, title, and description", () => {
       const issue = createTestIssue({
-        id: "bd-short",
+        id: "loom-short",
         title: "My Task",
         description: "A detailed description",
       });
@@ -97,21 +97,22 @@ describe("BlockingNode", () => {
       });
       renderWithProvider(props);
 
-      expect(screen.getByText("bd-short")).toBeInTheDocument();
+      expect(screen.getByText("loom-short")).toBeInTheDocument();
       expect(
         screen.getByRole("heading", { name: "My Task" }),
       ).toBeInTheDocument();
       expect(screen.getByText("A detailed description")).toBeInTheDocument();
     });
 
-    it("renders shortened issue ID for long IDs", () => {
-      const issue = createTestIssue({ id: "beads-abc123def456" });
+    it("renders shortened issue ID for long IDs with prefix preserved", () => {
+      const issue = createTestIssue({ id: "issue-abc123def456" });
       const props = createTestProps({
         data: createTestNodeData({ issue }),
       });
       renderWithProvider(props);
 
-      expect(screen.getByText("3def456")).toBeInTheDocument();
+      // Should preserve prefix and truncate: "issue-abc12..."
+      expect(screen.getByText("issue-abc12...")).toBeInTheDocument();
     });
 
     it("renders Untitled for empty title", () => {

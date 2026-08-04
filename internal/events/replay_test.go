@@ -104,3 +104,71 @@ func TestReplayFromFile_NonexistentFile(t *testing.T) {
 		t.Error("expected error for nonexistent file")
 	}
 }
+
+func TestReplayFromFile_OldUnderscoreFormat(t *testing.T) {
+	ms := newTestStore()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+
+	// Write raw JSON lines with old underscore-format type strings.
+	// We cannot use NewEvent here because it would produce new dot-notation types.
+	rawLines := `{"type":"task_completed","timestamp":"2026-01-01T00:00:00Z","agent":"agent1","role":"dev","epic_id":"epic1","data":{"task_id":"t1","duration":"5m0s","files_changed":3,"lines_added":100,"lines_removed":20}}
+{"type":"task_failed","timestamp":"2026-01-01T00:00:00Z","agent":"agent2","role":"dev","epic_id":"epic1","data":{"task_id":"t2","error":"build failed"}}
+{"type":"agent_started","timestamp":"2026-01-01T00:00:00Z","agent":"agent1","data":{"pid":1234}}
+{"type":"agent_restarted","timestamp":"2026-01-01T00:00:00Z","agent":"agent1","data":{"pid":1235,"restart_count":1}}
+{"type":"agent_stopped","timestamp":"2026-01-01T00:00:00Z","agent":"agent1","data":{"pid":1234,"exit_code":0}}
+`
+	if err := os.WriteFile(path, []byte(rawLines), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	count, err := ms.ReplayFromFile(path)
+	if err != nil {
+		t.Fatalf("ReplayFromFile: %v", err)
+	}
+	if count != 5 {
+		t.Errorf("count = %d, want 5", count)
+	}
+
+	snap := ms.Snapshot()
+	if snap.TotalTasksCompleted != 1 {
+		t.Errorf("TotalTasksCompleted = %d, want 1", snap.TotalTasksCompleted)
+	}
+	if snap.TotalTasksFailed != 1 {
+		t.Errorf("TotalTasksFailed = %d, want 1", snap.TotalTasksFailed)
+	}
+	if snap.TotalRestarts != 1 {
+		t.Errorf("TotalRestarts = %d, want 1", snap.TotalRestarts)
+	}
+}
+
+func TestReplayFromFile_NewDotNotationFormat(t *testing.T) {
+	ms := newTestStore()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+
+	// Write raw JSON lines with new dot-notation format type strings.
+	rawLines := `{"type":"task.completed","timestamp":"2026-01-01T00:00:00Z","agent":"agent1","role":"dev","epic_id":"epic1","data":{"task_id":"t1","duration":"3m0s","files_changed":2,"lines_added":50,"lines_removed":10}}
+{"type":"task.failed","timestamp":"2026-01-01T00:00:00Z","agent":"agent2","role":"dev","data":{"task_id":"t2","error":"timeout"}}
+{"type":"agent.started","timestamp":"2026-01-01T00:00:00Z","agent":"agent1","data":{"pid":5678}}
+`
+	if err := os.WriteFile(path, []byte(rawLines), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	count, err := ms.ReplayFromFile(path)
+	if err != nil {
+		t.Fatalf("ReplayFromFile: %v", err)
+	}
+	if count != 3 {
+		t.Errorf("count = %d, want 3", count)
+	}
+
+	snap := ms.Snapshot()
+	if snap.TotalTasksCompleted != 1 {
+		t.Errorf("TotalTasksCompleted = %d, want 1", snap.TotalTasksCompleted)
+	}
+	if snap.TotalTasksFailed != 1 {
+		t.Errorf("TotalTasksFailed = %d, want 1", snap.TotalTasksFailed)
+	}
+}

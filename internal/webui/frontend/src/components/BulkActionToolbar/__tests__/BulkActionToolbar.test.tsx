@@ -10,7 +10,10 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 
-import { BulkActionToolbar, type BulkAction } from "../BulkActionToolbar";
+import { expectNoA11yViolations } from "@/test-utils/a11y-helpers";
+import type { BulkAction } from "@/types";
+
+import { BulkActionToolbar } from "../BulkActionToolbar";
 
 describe("BulkActionToolbar", () => {
   const defaultProps = {
@@ -263,6 +266,48 @@ describe("BulkActionToolbar", () => {
       render(<BulkActionToolbar {...defaultProps} actions={actions} />);
       const button = screen.getByTestId("bulk-action-action");
       expect(button.className).toMatch(/secondary/);
+    });
+  });
+
+  describe("axe accessibility", () => {
+    it("has no axe violations with default props", async () => {
+      const { container } = render(<BulkActionToolbar {...defaultProps} />);
+
+      await expectNoA11yViolations(container);
+    });
+
+    it("has no axe violations with action buttons", async () => {
+      const actions: BulkAction[] = [
+        { id: "close", label: "Close", onClick: vi.fn() },
+        { id: "priority", label: "Priority", onClick: vi.fn() },
+      ];
+      const { container } = render(
+        <BulkActionToolbar {...defaultProps} actions={actions} />,
+      );
+
+      await expectNoA11yViolations(container);
+    });
+
+    it("has no axe violations with disabled action button", async () => {
+      const actions: BulkAction[] = [
+        { id: "close", label: "Close", onClick: vi.fn(), disabled: true },
+      ];
+      const { container } = render(
+        <BulkActionToolbar {...defaultProps} actions={actions} />,
+      );
+
+      await expectNoA11yViolations(container);
+    });
+
+    it("has no axe violations with a single selected item", async () => {
+      const { container } = render(
+        <BulkActionToolbar
+          selectedIds={new Set(["issue-1"])}
+          onClearSelection={vi.fn()}
+        />,
+      );
+
+      await expectNoA11yViolations(container);
     });
   });
 

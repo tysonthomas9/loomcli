@@ -1,0 +1,54 @@
+/**
+ * WorkspaceStatusBadge styles.
+ * Compact inline pill that sits in the header actions area.
+ */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--radius-full, 9999px);
+  border: 1px solid var(--color-warning-border, #d97706);
+  background: var(--color-warning-subtle, rgba(217, 119, 6, 0.08));
+  color: var(--color-warning-text, #d97706);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--transition-fast);
+  line-height: 1;
+}
+
+.badge:hover {
+  background: var(--color-warning-subtle-hover, rgba(217, 119, 6, 0.15));
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-warning-text, #d97706);
+  animation: pulse 2s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dot {
+    animation: none;
+  }
+}
+
+.label {
+  line-height: 1;
+}

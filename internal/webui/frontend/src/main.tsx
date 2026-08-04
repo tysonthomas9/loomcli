@@ -1,67 +1,110 @@
 import { StrictMode } from "react";
-import { createRoot } from "react-dom/client";
+import { createRoot, type Root } from "react-dom/client";
+import { RouterProvider } from "react-router-dom";
 
 import "@/styles/index.css";
-import { initAuth, getAuthState } from "@/api";
-import App from "@/App";
+import { migrateLocalStorage } from "@/utils/migrateLocalStorage";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
-import { ToastProvider, AgentProvider } from "@/hooks";
+import { BootError } from "@/components/BootError";
+import { initErrorReporter, reportError } from "@/api/common/errorReporter";
+import { ToastProvider } from "@/hooks/ui/useToast";
+import { router } from "@/router";
 import {
-  IssueDetailPanelFixture,
-  ErrorTriggerFixture,
-  ToastTestFixture,
-} from "@/TestFixtures";
+  fetchAppConfig,
+  AppConfigError,
+  AUTH_MODE_OIDC,
+  type AppConfig,
+} from "@/api/common/appConfig";
+import { initExternalAuth } from "@/api/common/authClient";
+import { ExternalAuthProvider, NoAuthProvider } from "@/contexts/AuthContext";
+import { AuthGate } from "@/components/AuthGate";
+
+// Run localStorage migration before anything reads storage.
+migrateLocalStorage();
+
+// Install global error handlers early, before auth/render initialization.
+initErrorReporter();
 
 const rootElement = document.getElementById("root");
 if (!rootElement) {
   throw new Error("Failed to find root element");
 }
 
-// Simple path-based routing for test fixtures (development only)
-function getComponent() {
-  const path = window.location.pathname;
+// Reuse root across retries — React errors if createRoot is called twice on the same element.
+let root: Root | null = null;
 
-  // Test fixture routes - only available in development
-  if (import.meta.env.DEV && path === "/test/issue-detail-panel") {
-    return <IssueDetailPanelFixture />;
-  }
-
-  if (import.meta.env.DEV && path === "/test/error-boundary") {
-    return <ErrorTriggerFixture />;
-  }
-
-  if (import.meta.env.DEV && path === "/test/toast") {
-    return <ToastTestFixture />;
-  }
-
-  // Default: render main app
-  return <App />;
+function getRoot(): Root {
+  if (!root) root = createRoot(rootElement!);
+  return root;
 }
 
-// Initialize auth before rendering to ensure token is available for API calls.
-// App renders even if auth fails (server may have auth disabled).
-initAuth()
-  .then(() => {
-    const state = getAuthState();
-    if (state === "failed") {
-      console.error(
-        "[Auth] Failed to initialize authentication — API calls will fail",
-      );
-    } else if (state === "disabled") {
-      console.info("[Auth] Authentication disabled by server");
-    }
-  })
-  .catch((error) => {
-    console.error("[Auth] Unexpected error during initialization:", error);
-  })
-  .finally(() => {
-    createRoot(rootElement).render(
-      <StrictMode>
-        <ErrorBoundary>
-          <ToastProvider>
-            <AgentProvider>{getComponent()}</AgentProvider>
-          </ToastProvider>
-        </ErrorBoundary>
-      </StrictMode>,
+function renderBootError(error: unknown): void {
+  getRoot().render(
+    <StrictMode>
+      <BootError error={error} onRetry={bootAndRender} />
+    </StrictMode>,
+  );
+}
+
+function renderApp(config: AppConfig): void {
+  const routerElement = <RouterProvider router={router} />;
+
+  const authWrapped =
+    config.mode === AUTH_MODE_OIDC ? (
+      <ExternalAuthProvider>
+        <AuthGate>{routerElement}</AuthGate>
+      </ExternalAuthProvider>
+    ) : (
+      <NoAuthProvider>{routerElement}</NoAuthProvider>
     );
-  });
+
+  getRoot().render(
+    <StrictMode>
+      <ErrorBoundary
+        onError={(error, errorInfo) => {
+          reportError("react-error", error, {
+            componentStack: errorInfo.componentStack ?? undefined,
+          });
+        }}
+      >
+        <ToastProvider>{authWrapped}</ToastProvider>
+      </ErrorBoundary>
+    </StrictMode>,
+  );
+}
+
+const BOOT_TIMEOUT_MS = 10_000;
+
+async function doBootAndRender(): Promise<void> {
+  const config = await fetchAppConfig();
+
+  if (config.mode === AUTH_MODE_OIDC) {
+    initExternalAuth(config.auth_url);
+  }
+
+  renderApp(config);
+}
+
+async function bootAndRender(): Promise<void> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+  try {
+    await Promise.race([
+      doBootAndRender(),
+      new Promise<never>((_resolve, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new AppConfigError("Application boot timed out"));
+        }, BOOT_TIMEOUT_MS);
+      }),
+    ]);
+  } catch (error) {
+    renderBootError(error);
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  }
+}
+
+bootAndRender().catch((error) => {
+  console.error("[Boot] Fatal error:", error);
+  renderBootError(error);
+});

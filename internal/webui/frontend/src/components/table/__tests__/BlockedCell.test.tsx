@@ -21,7 +21,10 @@ describe("BlockedCell", () => {
 
     it("renders badge with count when blockedByCount > 0", () => {
       render(
-        <BlockedCell blockedByCount={3} blockedBy={["bd-1", "bd-2", "bd-3"]} />,
+        <BlockedCell
+          blockedByCount={3}
+          blockedBy={["loom-1", "loom-2", "loom-3"]}
+        />,
       );
       expect(screen.getByText("3")).toBeInTheDocument();
       expect(screen.getByText("⛔")).toBeInTheDocument();
@@ -33,12 +36,14 @@ describe("BlockedCell", () => {
     });
 
     it("has correct aria-label when blocked", () => {
-      render(<BlockedCell blockedByCount={2} blockedBy={["bd-1", "bd-2"]} />);
+      render(
+        <BlockedCell blockedByCount={2} blockedBy={["loom-1", "loom-2"]} />,
+      );
       expect(screen.getByLabelText("Blocked by 2 issues")).toBeInTheDocument();
     });
 
     it("has singular aria-label when blocked by 1 issue", () => {
-      render(<BlockedCell blockedByCount={1} blockedBy={["bd-1"]} />);
+      render(<BlockedCell blockedByCount={1} blockedBy={["loom-1"]} />);
       expect(screen.getByLabelText("Blocked by 1 issue")).toBeInTheDocument();
     });
   });
@@ -46,33 +51,33 @@ describe("BlockedCell", () => {
   describe("tooltip", () => {
     it("shows blocker IDs in title attribute", () => {
       render(
-        <BlockedCell blockedByCount={2} blockedBy={["bd-abc", "bd-def"]} />,
+        <BlockedCell blockedByCount={2} blockedBy={["loom-abc", "loom-def"]} />,
       );
       const button = screen.getByRole("button");
-      expect(button.title).toContain("bd-abc");
-      expect(button.title).toContain("bd-def");
+      expect(button.title).toContain("loom-abc");
+      expect(button.title).toContain("loom-def");
     });
 
     it('truncates tooltip at 5 blockers with "and N more"', () => {
       const blockedBy = [
-        "bd-1",
-        "bd-2",
-        "bd-3",
-        "bd-4",
-        "bd-5",
-        "bd-6",
-        "bd-7",
+        "loom-1",
+        "loom-2",
+        "loom-3",
+        "loom-4",
+        "loom-5",
+        "loom-6",
+        "loom-7",
       ];
       render(<BlockedCell blockedByCount={7} blockedBy={blockedBy} />);
       const button = screen.getByRole("button");
-      expect(button.title).toContain("bd-1");
-      expect(button.title).toContain("bd-5");
+      expect(button.title).toContain("loom-1");
+      expect(button.title).toContain("loom-5");
       expect(button.title).toContain("and 2 more...");
-      expect(button.title).not.toContain("bd-6");
+      expect(button.title).not.toContain("loom-6");
     });
 
     it('does not show "and more" when 5 or fewer blockers', () => {
-      const blockedBy = ["bd-1", "bd-2", "bd-3"];
+      const blockedBy = ["loom-1", "loom-2", "loom-3"];
       render(<BlockedCell blockedByCount={3} blockedBy={blockedBy} />);
       const button = screen.getByRole("button");
       expect(button.title).not.toContain("and");
@@ -85,7 +90,7 @@ describe("BlockedCell", () => {
       render(
         <BlockedCell
           blockedByCount={1}
-          blockedBy={["bd-1"]}
+          blockedBy={["loom-1"]}
           onClick={handleClick}
         />,
       );
@@ -102,7 +107,7 @@ describe("BlockedCell", () => {
         <div onClick={parentClick}>
           <BlockedCell
             blockedByCount={1}
-            blockedBy={["bd-1"]}
+            blockedBy={["loom-1"]}
             onClick={handleClick}
           />
         </div>,
@@ -114,7 +119,7 @@ describe("BlockedCell", () => {
     });
 
     it("does not throw when onClick is not provided", () => {
-      render(<BlockedCell blockedByCount={1} blockedBy={["bd-1"]} />);
+      render(<BlockedCell blockedByCount={1} blockedBy={["loom-1"]} />);
 
       expect(() => fireEvent.click(screen.getByRole("button"))).not.toThrow();
     });
@@ -128,7 +133,7 @@ describe("BlockedCell", () => {
     });
 
     it("has --active modifier class when blocked", () => {
-      render(<BlockedCell blockedByCount={1} blockedBy={["bd-1"]} />);
+      render(<BlockedCell blockedByCount={1} blockedBy={["loom-1"]} />);
       const button = screen.getByRole("button");
       expect(button.className).toContain("issue-table__blocked--active");
     });

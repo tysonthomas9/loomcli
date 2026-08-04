@@ -130,7 +130,8 @@ export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(
         <input
           ref={ref}
           id={inputId}
-          type="search"
+          type="text"
+          role="searchbox"
           className={styles.input}
           value={currentValue}
           onChange={handleChange}

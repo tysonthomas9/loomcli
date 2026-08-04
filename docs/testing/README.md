@@ -14,10 +14,22 @@ Comprehensive documentation of all tests in the loomcli project.
 
 ## Documents
 
-- **[Go Backend Tests](go-backend-tests.md)** - All Go test files organized by package, every test function, and what it validates
+- **[Go Backend Tests](go-backend-tests.md)** - Current Go test surfaces and FleetDB-focused backend gates
 - **[Frontend Tests](frontend-tests.md)** - Vitest unit tests, Playwright E2E tests, component tests, API tests
+- **[Dogfood to Playwright Coverage](dogfood-playwright-coverage.md)** - Maps `dogfood-output/` findings to automated smoke/regression coverage and pending gaps
 - **[Test Infrastructure](test-infrastructure.md)** - CI/CD, scripts, Makefile targets, configuration files, coverage
 - **[Test Patterns & Conventions](test-patterns.md)** - Common patterns, mocking strategies, helpers, and best practices
+
+### Manual E2E plans (loomcli ↔ fleet-db migration)
+
+Reproducible end-to-end plans for the fleet-db-backed architecture. Designed to be runnable by an agent or by hand.
+
+- **[E2E preflight](e2e-preflight.md)** - shared setup (binaries, podman Redis, fleet-db subprocess, env vars, runner conventions, cleanup)
+- **[E2E CLI + curl](e2e-cli.md)** - CLI noun-verb commands, failure modes, embedded mode, direct fleet-db API, multi-workspace isolation
+- **[E2E Web UI](e2e-ui.md)** - multi-workspace lifecycle via agent-browser (gated on Phase 4 of the migration)
+- **[Local Mode Podman E2E](local-mode-podman-e2e.md)** - one-command Podman stack for FleetDB-backed local planner/coder dogfood runs, including the Codex CLI variant
+- **[Known issues](known-issues.md)** - documented expected-failures + bug references + test-methodology pitfalls. Read before claiming a clean run
+- **[Fleet-DB acceptance gates](fleetdb-acceptance-gates.md)** - named gates for backend/CLI, browser, SSE, workspace, supervisor, embedded local, remote distributed, and deletion lint checks
 
 ## Running Tests
 
@@ -116,7 +128,6 @@ Tests
 │   ├── internal/circuitbreaker/ # 1 test file - State machine, concurrency
 │   ├── internal/lockfile/     # 1 test file - File locking, PID management
 │   ├── internal/debug/        # 1 test file - Debug/verbose/quiet modes
-│   ├── third_party/beads/     # 100+ test files - Beads daemon, storage, doctor
 │   └── makefile_test.go       # Meta-test for build system
 │
 └── Frontend (Vitest + Playwright)

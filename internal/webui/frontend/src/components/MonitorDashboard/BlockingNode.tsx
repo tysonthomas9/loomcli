@@ -7,7 +7,7 @@ import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { memo } from "react";
 
 import type { IssueNode as IssueNodeType } from "@/types";
-import { formatIssueId } from "@/utils/formatIssueId";
+import { formatIssueId } from "@/utils/issue";
 
 import styles from "./BlockingNode.module.css";
 
@@ -65,7 +65,9 @@ function BlockingNodeComponent({
       />
 
       <header className={styles.header}>
-        <span className={styles.issueId}>{displayId}</span>
+        <span className={styles.issueId} title={issue.id}>
+          {displayId}
+        </span>
         <span className={styles.statusBadge} data-status={nodeStatus}>
           {nodeStatus === "blocked"
             ? "Waiting"

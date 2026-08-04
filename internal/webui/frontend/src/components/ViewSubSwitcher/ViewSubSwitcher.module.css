@@ -1,0 +1,46 @@
+/**
+ * ViewSubSwitcher styles.
+ */
+
+.subSwitcher {
+  display: inline-flex;
+  gap: var(--space-2);
+  padding: 0;
+  background-color: transparent;
+  border-radius: 10px;
+  margin-bottom: 0;
+  flex-shrink: 0;
+}
+
+.subSwitcher[data-embedded="true"] {
+  margin-bottom: 0;
+}
+
+.tab {
+  padding: 6px 12px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.tab:hover {
+  color: var(--color-text-primary);
+}
+
+.tab[data-active="true"] {
+  background-color: var(--color-bg-card);
+  color: var(--color-text-primary);
+  font-weight: 900;
+}
+
+.tab:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}

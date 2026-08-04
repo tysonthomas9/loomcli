@@ -36,6 +36,9 @@ export function isExcluded(relPath) {
   if (parts.includes("test-utils")) return true;
   if (base === "TestFixtures.tsx") return true;
 
+  // Generated files (e.g., openapi-typescript output)
+  if (parts.includes("generated")) return true;
+
   return false;
 }
 

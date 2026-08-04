@@ -1,7 +1,12 @@
-import { test, expect } from "@playwright/test"
+import { test, expect, type Page } from "@playwright/test"
+import {
+  setupFleetMocks,
+  waitForWorkspaceIssues,
+  workspacePath,
+} from "./helpers/fleet"
 
 /**
- * E2E tests for the Kanban Board UI Redesign (bd-spq5).
+ * E2E tests for the Kanban Board UI Redesign (loom-spq5).
  *
  * Covers card styling, hover/selection states, priority badges,
  * Talk to Lead FAB, sidebar rendering, and review column features.
@@ -25,53 +30,21 @@ function makeIssue(overrides: Record<string, unknown>) {
 }
 
 async function setupMocks(
-  page: import("@playwright/test").Page,
+  page: Page,
   options: {
     issues: Record<string, unknown>[]
     blockedIssues?: Record<string, unknown>[]
   }
 ) {
-  await page.route("**/api/ready", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ success: true, data: options.issues }),
-    })
-  })
-
-  await page.route("**/api/blocked", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        success: true,
-        data: options.blockedIssues ?? [],
-      }),
-    })
-  })
-
-  await page.route("**/api/stats", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        success: true,
-        data: { open: 0, closed: 0, in_progress: 0, blocked: 0, total: 0 },
-      }),
-    })
-  })
-
-  await page.route("**/api/events", async (route) => {
-    await route.abort()
+  await setupFleetMocks(page, options.issues, undefined, {
+    blockedIssues: options.blockedIssues,
   })
 }
 
-async function navigateToKanban(page: import("@playwright/test").Page) {
+async function navigateToKanban(page: Page) {
   const [response] = await Promise.all([
-    page.waitForResponse(
-      (res) => res.url().includes("/api/ready") && res.status() === 200
-    ),
-    page.goto("/?groupBy=none"),
+    waitForWorkspaceIssues(page),
+    page.goto(workspacePath("/?groupBy=none")),
   ])
   expect(response.ok()).toBe(true)
 }
@@ -97,7 +70,7 @@ test.describe("Card Styling: in-progress blue border", () => {
     await expect(card).toHaveAttribute("data-priority", "2")
   })
 
-  test("in-progress card has blue left border override", async ({ page }) => {
+  test("in-progress card keeps standard card border width", async ({ page }) => {
     const issues = [
       makeIssue({
         id: "ip-2",
@@ -114,12 +87,11 @@ test.describe("Card Styling: in-progress blue border", () => {
     )
     await expect(card).toBeVisible()
 
-    // CSS rule: .issueCard[data-column='in_progress'][data-priority] { border-left: 3px solid var(--color-primary) }
     const borderLeft = await card.evaluate((el) => {
       const style = window.getComputedStyle(el)
       return style.borderLeftWidth
     })
-    expect(borderLeft).toBe("3px")
+    expect(borderLeft).toBe("1px")
   })
 })
 
@@ -215,10 +187,8 @@ test.describe("Card Styling: hover and selection", () => {
     const detailPanel = page.getByTestId("issue-detail-panel").or(
       page.locator('[class*="issueDetailPanel"]')
     )
-    // Fallback: check that some detail content appears
-    await expect(
-      detailPanel.or(page.getByText("Selectable Card").nth(1))
-    ).toBeVisible({ timeout: 3000 })
+    await expect(detailPanel.first()).toBeVisible({ timeout: 3000 })
+    await expect(detailPanel.first()).toContainText("Selectable Card")
   })
 })
 
@@ -305,7 +275,7 @@ test.describe("Priority Badges", () => {
     }
   })
 
-  test("P0 card has red-tinted background and 3px left border", async ({
+  test("P0 card keeps standard card border width", async ({
     page,
   }) => {
     const issues = [
@@ -325,7 +295,7 @@ test.describe("Priority Badges", () => {
     const borderLeftWidth = await card.evaluate(
       (el) => window.getComputedStyle(el).borderLeftWidth
     )
-    expect(borderLeftWidth).toBe("3px")
+    expect(borderLeftWidth).toBe("1px")
   })
 })
 
@@ -377,7 +347,7 @@ test.describe("Talk to Lead FAB", () => {
     await expect(fab).toHaveText(/Talk to Lead/)
   })
 
-  test("FAB has coral background color", async ({ page }) => {
+  test("FAB uses coral gradient background", async ({ page }) => {
     const issues = [
       makeIssue({ id: "f-2", title: "Some Task", status: "open" }),
     ]
@@ -387,11 +357,12 @@ test.describe("Talk to Lead FAB", () => {
     const fab = page.getByTestId("talk-to-lead-button")
     await expect(fab).toBeVisible()
 
-    const bgColor = await fab.evaluate(
-      (el) => window.getComputedStyle(el).backgroundColor
+    const backgroundImage = await fab.evaluate(
+      (el) => window.getComputedStyle(el).backgroundImage
     )
-    // #f05d46 → rgb(240, 93, 70)
-    expect(bgColor).toBe("rgb(240, 93, 70)")
+    expect(backgroundImage).toContain("linear-gradient")
+    expect(backgroundImage).toContain("rgb(240, 111, 79)")
+    expect(backgroundImage).toContain("rgb(232, 92, 66)")
   })
 
   test("FAB has aria-label for accessibility", async ({ page }) => {
@@ -413,8 +384,8 @@ test.describe("Sidebar Rendering", () => {
     ]
     await setupMocks(page, { issues })
 
-    // Also mock loom endpoint to prevent connection errors
-    await page.route("**/api/loom/**", async (route) => {
+    // Also mock monitor endpoint to prevent connection errors
+    await page.route("**/api/monitor/**", async (route) => {
       await route.abort()
     })
     await page.route("**/loom/**", async (route) => {

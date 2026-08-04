@@ -1,4 +1,5 @@
 import { test, expect, Page } from "@playwright/test"
+import { setupFleetMocks, WS_API, WORKSPACE_ID } from "./helpers/fleet"
 
 /**
  * Mock issues for testing IssueNode status styling.
@@ -56,13 +57,7 @@ const mockIssues = [
  * Set up API mocks for IssueNode styling tests.
  */
 async function setupMocks(page: Page, issues: object[] = mockIssues) {
-  await page.route("**/api/issues/graph**", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ success: true, issues }),
-    })
-  })
+  await setupFleetMocks(page, issues)
 }
 
 /**
@@ -71,9 +66,11 @@ async function setupMocks(page: Page, issues: object[] = mockIssues) {
 async function navigateToGraphView(page: Page) {
   const [response] = await Promise.all([
     page.waitForResponse(
-      (res) => res.url().includes("/api/issues/graph") && res.status() === 200
+      (res) =>
+        new URL(res.url()).pathname === `${WS_API}/issues/graph` &&
+        res.status() === 200
     ),
-    page.goto("/?view=graph"),
+    page.goto(`/ws/${WORKSPACE_ID}/graph`),
   ])
   expect(response.ok()).toBe(true)
   await expect(page.getByTestId("graph-view")).toBeVisible()

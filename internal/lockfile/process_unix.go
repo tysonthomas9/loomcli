@@ -3,6 +3,7 @@
 package lockfile
 
 import (
+	"errors"
 	"syscall"
 )
 
@@ -11,5 +12,6 @@ func IsProcessRunning(pid int) bool {
 	if pid <= 0 {
 		return false // Invalid PID (0 would signal our process group, not a specific process)
 	}
-	return syscall.Kill(pid, 0) == nil
+	err := syscall.Kill(pid, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
 }

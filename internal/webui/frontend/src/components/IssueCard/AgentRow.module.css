@@ -26,7 +26,7 @@
   justify-content: center;
   font-size: 9px;
   font-weight: 600;
-  color: #1f2937;
+  color: var(--color-text-primary);
   line-height: 1;
 }
 
@@ -55,4 +55,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
+}
+
+/* Red treatment for "agent missing" — the only colored state in v1.
+   Healthy timestamps stay neutral until we have data-driven thresholds. */
+.activity[data-state="missing"] {
+  color: var(--color-danger, #dc2626);
+  font-weight: 500;
 }

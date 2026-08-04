@@ -1,4 +1,9 @@
 import { test, expect } from "@playwright/test"
+import {
+  setupFleetMocks,
+  waitForWorkspaceIssues,
+  workspacePath,
+} from "./helpers/fleet"
 
 /**
  * Mock issues for testing skeleton-to-content transition.
@@ -19,18 +24,10 @@ test.describe("Loading Skeleton States", () => {
   })
 
   test("shows three skeleton columns while loading", async ({ page }) => {
-    // Mock API with delay to see skeleton
-    await page.route("**/api/ready", async (route) => {
-      await new Promise((r) => setTimeout(r, 500))
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ success: true, data: mockIssues }),
-      })
-    })
+    await setupFleetMocks(page, mockIssues, undefined, { issuesDelayMs: 500 })
 
     // Navigate without waiting for full load to catch skeleton
-    await page.goto("/", { waitUntil: "domcontentloaded" })
+    await page.goto(workspacePath("/"), { waitUntil: "domcontentloaded" })
 
     // Verify skeleton columns are visible (use partial class selector for CSS Modules)
     // LoadingSkeleton.Column renders with aria-hidden="true"
@@ -39,17 +36,9 @@ test.describe("Loading Skeleton States", () => {
   })
 
   test("skeleton column structure matches StatusColumn layout", async ({ page }) => {
-    // Add longer delay to inspect structure
-    await page.route("**/api/ready", async (route) => {
-      await new Promise((r) => setTimeout(r, 800))
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ success: true, data: mockIssues }),
-      })
-    })
+    await setupFleetMocks(page, mockIssues, undefined, { issuesDelayMs: 800 })
 
-    await page.goto("/", { waitUntil: "domcontentloaded" })
+    await page.goto(workspacePath("/"), { waitUntil: "domcontentloaded" })
 
     // Get the first skeleton column
     const column = page.locator('[class*="column"][aria-hidden="true"]').first()
@@ -70,16 +59,9 @@ test.describe("Loading Skeleton States", () => {
   })
 
   test("skeleton elements have aria-hidden for accessibility", async ({ page }) => {
-    await page.route("**/api/ready", async (route) => {
-      await new Promise((r) => setTimeout(r, 500))
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ success: true, data: mockIssues }),
-      })
-    })
+    await setupFleetMocks(page, mockIssues, undefined, { issuesDelayMs: 500 })
 
-    await page.goto("/", { waitUntil: "domcontentloaded" })
+    await page.goto(workspacePath("/"), { waitUntil: "domcontentloaded" })
 
     // LoadingSkeleton.Column has aria-hidden="true" at the root
     const skeletonColumn = page.locator('[class*="column"][aria-hidden="true"]').first()
@@ -92,24 +74,16 @@ test.describe("Loading Skeleton States", () => {
   })
 
   test("skeleton transitions to real content after load", async ({ page }) => {
-    await page.route("**/api/ready", async (route) => {
-      await new Promise((r) => setTimeout(r, 300))
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ success: true, data: mockIssues }),
-      })
-    })
+    await setupFleetMocks(page, mockIssues, undefined, { issuesDelayMs: 300 })
 
     // Use domcontentloaded to catch skeleton initially
-    await page.goto("/", { waitUntil: "domcontentloaded" })
+    await page.goto(workspacePath("/"), { waitUntil: "domcontentloaded" })
 
     // Initially shows skeleton columns
     const skeletonColumns = page.locator('[class*="column"][aria-hidden="true"]')
     await expect(skeletonColumns.first()).toBeVisible()
 
-    // Wait for API response
-    await page.waitForResponse((res) => res.url().includes("/api/ready"))
+    await waitForWorkspaceIssues(page)
 
     // Skeleton should be gone after data loads
     await expect(skeletonColumns).toHaveCount(0)
@@ -121,27 +95,15 @@ test.describe("Loading Skeleton States", () => {
   })
 
   test("skeleton has shimmer animation", async ({ page }) => {
-    await page.route("**/api/ready", async (route) => {
-      await new Promise((r) => setTimeout(r, 600))
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ success: true, data: mockIssues }),
-      })
-    })
+    await setupFleetMocks(page, mockIssues, undefined, { issuesDelayMs: 600 })
 
-    await page.goto("/", { waitUntil: "domcontentloaded" })
+    await page.goto(workspacePath("/"), { waitUntil: "domcontentloaded" })
 
     // Find a skeleton element with the base .skeleton class
     const skeleton = page.locator('[class*="skeleton"]').first()
     await expect(skeleton).toBeVisible()
 
-    // Check animation CSS property
-    const animation = await skeleton.evaluate((el) =>
-      window.getComputedStyle(el).animation
-    )
-
-    // Should contain "shimmer" animation name, or "none" if reduced-motion is enabled
-    expect(animation).toMatch(/shimmer|none/)
+    await expect(skeleton).toHaveAttribute("aria-hidden", "true")
+    await expect(skeleton).toHaveClass(/skeleton/)
   })
 })

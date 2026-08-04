@@ -15,7 +15,7 @@
   display: flex;
   align-items: center;
   border: none;
-  border-right: 1px solid #000;
+  border-right: 1px solid var(--color-border);
   font-family: var(--font-family-base);
   font-size: 14px;
   font-weight: var(--font-weight-medium);
@@ -26,7 +26,7 @@
 }
 
 .tab:hover:not(:disabled) {
-  background-color: #f5f5f5;
+  background-color: var(--color-bg-hover);
 }
 
 .tab:focus {
@@ -39,13 +39,13 @@
 }
 
 .tab.active {
-  background-color: #5d87ff;
+  background-color: var(--color-primary);
   color: white;
   border-right: none;
 }
 
 .tab.active:hover:not(:disabled) {
-  background-color: #5d87ff;
+  background-color: var(--color-primary);
 }
 
 .tab:disabled {
@@ -65,7 +65,7 @@
   height: auto;
   padding: 10px 16px;
   border-right: none;
-  border-bottom: 1px solid #000;
+  border-bottom: 1px solid var(--color-border);
   justify-content: flex-start;
 }
 

@@ -1,27 +1,18 @@
 /**
  * Column definitions for IssueTable.
  * Provides typed column configuration and cell rendering helpers.
+ *
+ * ColumnDef and getCellValue live in src/types/table.ts and
+ * src/utils/tableCells.ts respectively so hooks can reference them
+ * without the frontend layer DAG forbidding hooks → components. This
+ * file re-exports them for convenience of nearby table components.
  */
 
 import type { Issue, Status, Priority, IssueType } from "@/types";
+import type { ColumnDef } from "@/types/common";
 
-/**
- * Column definition for IssueTable.
- */
-export interface ColumnDef<T> {
-  /** Unique column identifier */
-  id: string;
-  /** Header text displayed in table header */
-  header: string;
-  /** Property key or accessor function to get cell value */
-  accessor: keyof T | ((row: T) => unknown);
-  /** Column width (CSS value, e.g., '100px', '1fr', 'auto') */
-  width?: string;
-  /** Text alignment for cell content */
-  align?: "left" | "center" | "right";
-  /** Whether column is sortable (for future TableHeader integration) */
-  sortable?: boolean;
-}
+export type { ColumnDef } from "@/types/common";
+export { getCellValue } from "@/utils/tableCells";
 
 /**
  * Format a priority value as a display string (P0-P4).
@@ -151,6 +142,14 @@ export const DEFAULT_ISSUE_COLUMNS: ColumnDef<Issue>[] = [
     sortable: true,
   },
   {
+    id: "repo",
+    header: "Repo",
+    accessor: "repo",
+    width: "100px",
+    align: "left",
+    sortable: true,
+  },
+  {
     id: "updated_at",
     header: "Updated",
     accessor: "updated_at",
@@ -159,13 +158,3 @@ export const DEFAULT_ISSUE_COLUMNS: ColumnDef<Issue>[] = [
     sortable: true,
   },
 ];
-
-/**
- * Get cell value from a row using the column accessor.
- */
-export function getCellValue<T>(row: T, column: ColumnDef<T>): unknown {
-  if (typeof column.accessor === "function") {
-    return column.accessor(row);
-  }
-  return row[column.accessor];
-}

@@ -1,13 +1,17 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/backend"
 )
 
 func TestAcquireLock(t *testing.T) {
@@ -104,14 +108,14 @@ func TestUpdateLockTask(t *testing.T) {
 	}
 	defer ReleaseLock(tmpDir)
 
-	err = UpdateLockTask(tmpDir, "bd-123", "Test Task")
+	err = UpdateLockTask(tmpDir, "loom-123", "Test Task")
 	if err != nil {
 		t.Fatalf("UpdateLockTask failed: %v", err)
 	}
 
 	info, _, _ := CheckLock(tmpDir)
-	if info.TaskID != "bd-123" {
-		t.Errorf("Expected TaskID 'bd-123', got '%s'", info.TaskID)
+	if info.TaskID != "loom-123" {
+		t.Errorf("Expected TaskID 'loom-123', got '%s'", info.TaskID)
 	}
 	if info.TaskTitle != "Test Task" {
 		t.Errorf("Expected TaskTitle 'Test Task', got '%s'", info.TaskTitle)
@@ -122,7 +126,7 @@ func TestUpdateLockTaskNoLock(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Should fail when no lock exists
-	err := UpdateLockTask(tmpDir, "bd-123", "Test Task")
+	err := UpdateLockTask(tmpDir, "loom-123", "Test Task")
 	if err == nil {
 		t.Error("Expected error when updating non-existent lock")
 	}
@@ -179,7 +183,7 @@ func TestGetLockStatus(t *testing.T) {
 	}
 
 	// With task
-	UpdateLockTask(tmpDir, "bd-123", "Test Task")
+	UpdateLockTask(tmpDir, "loom-123", "Test Task")
 	status = GetLockStatus(tmpDir)
 	if status == "" {
 		t.Error("Expected non-empty status with task")
@@ -212,9 +216,10 @@ func TestGetLockStatus_WorkingAgentNoTaskID(t *testing.T) {
 	defer ReleaseLock(tmpDir)
 
 	status := GetLockStatus(tmpDir)
-	// Implementation agent without TaskID should show "working: ..."
-	if !strings.HasPrefix(status, "working: ...") {
-		t.Errorf("Expected 'working: ...' prefix, got '%s'", status)
+	// Implementation agent without TaskID is not actually working on anything,
+	// so the status surfaces as idle rather than "working: ...".
+	if !strings.HasPrefix(status, "idle (") {
+		t.Errorf("Expected 'idle (' prefix, got '%s'", status)
 	}
 }
 
@@ -227,12 +232,12 @@ func TestGetLockStatus_PlanningAgentWithTaskID(t *testing.T) {
 	}
 	defer ReleaseLock(tmpDir)
 
-	UpdateLockTask(tmpDir, "bd-test", "Test Task")
+	UpdateLockTask(tmpDir, "loom-test", "Test Task")
 	status := GetLockStatus(tmpDir)
 
-	// Should contain the task ID (actual prefix depends on task status from bd)
-	if !strings.Contains(status, "bd-test") {
-		t.Errorf("Expected status to contain 'bd-test', got '%s'", status)
+	// Should contain the task ID; the status prefix depends on issue status.
+	if !strings.Contains(status, "loom-test") {
+		t.Errorf("Expected status to contain 'loom-test', got '%s'", status)
 	}
 }
 
@@ -245,12 +250,12 @@ func TestGetLockStatus_WorkingAgentWithTaskID(t *testing.T) {
 	}
 	defer ReleaseLock(tmpDir)
 
-	UpdateLockTask(tmpDir, "bd-test", "Test Task")
+	UpdateLockTask(tmpDir, "loom-test", "Test Task")
 	status := GetLockStatus(tmpDir)
 
 	// Should contain the task ID
-	if !strings.Contains(status, "bd-test") {
-		t.Errorf("Expected status to contain 'bd-test', got '%s'", status)
+	if !strings.Contains(status, "loom-test") {
+		t.Errorf("Expected status to contain 'loom-test', got '%s'", status)
 	}
 }
 
@@ -366,7 +371,7 @@ func TestGetLockStatus_IdleOverridesTaskID(t *testing.T) {
 	defer ReleaseLock(tmpDir)
 
 	// Set task then idle state
-	UpdateLockTask(tmpDir, "bd-123", "Test Task")
+	UpdateLockTask(tmpDir, "loom-123", "Test Task")
 	err = UpdateLockState(tmpDir, StateIdle)
 	if err != nil {
 		t.Fatalf("UpdateLockState failed: %v", err)
@@ -393,15 +398,15 @@ func TestClearLockTaskID(t *testing.T) {
 	defer ReleaseLock(tmpDir)
 
 	// Set a task first
-	err = UpdateLockTask(tmpDir, "bd-123", "Test Task")
+	err = UpdateLockTask(tmpDir, "loom-123", "Test Task")
 	if err != nil {
 		t.Fatalf("UpdateLockTask failed: %v", err)
 	}
 
 	// Verify task is set
 	info, _ := ReadLockFile(tmpDir)
-	if info.TaskID != "bd-123" {
-		t.Fatalf("Expected TaskID 'bd-123', got '%s'", info.TaskID)
+	if info.TaskID != "loom-123" {
+		t.Fatalf("Expected TaskID 'loom-123', got '%s'", info.TaskID)
 	}
 
 	// Clear task ID
@@ -447,7 +452,7 @@ func TestClearLockTaskIDDifferentPID(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create lock file owned by a different process
-	otherLock := `{"pid":999999999,"command":"plan","agent_name":"falcon","started_at":"2024-01-01T00:00:00Z","task_id":"bd-123","task_title":"Test"}`
+	otherLock := `{"pid":999999999,"command":"plan","agent_name":"falcon","started_at":"2024-01-01T00:00:00Z","task_id":"loom-123","task_title":"Test"}`
 	lockPath := filepath.Join(tmpDir, LockFileName)
 	if err := os.WriteFile(lockPath, []byte(otherLock), 0644); err != nil {
 		t.Fatalf("failed to write lock: %v", err)
@@ -463,7 +468,7 @@ func TestClearLockTaskIDDifferentPID(t *testing.T) {
 
 	// Verify task ID was NOT cleared
 	info, _ := ReadLockFile(tmpDir)
-	if info.TaskID != "bd-123" {
+	if info.TaskID != "loom-123" {
 		t.Errorf("TaskID should not be cleared when PID doesn't match, got '%s'", info.TaskID)
 	}
 }
@@ -539,13 +544,13 @@ func TestReadLockFile(t *testing.T) {
 		{
 			name: "valid lock file with all fields",
 			setup: func(tmpDir string) {
-				lockData := `{"pid":12345,"command":"task","agent_name":"nova","started_at":"2024-01-01T00:00:00Z","task_id":"bd-123","task_title":"Test Task","task_started_at":"2024-01-01T01:00:00Z","state":"active"}`
+				lockData := `{"pid":12345,"command":"task","agent_name":"nova","started_at":"2024-01-01T00:00:00Z","task_id":"loom-123","task_title":"Test Task","task_started_at":"2024-01-01T01:00:00Z","state":"active"}`
 				os.WriteFile(filepath.Join(tmpDir, LockFileName), []byte(lockData), 0644)
 			},
 			wantErr: false,
 			checkInfo: func(t *testing.T, info *LockInfo) {
-				if info.TaskID != "bd-123" {
-					t.Errorf("expected task_id 'bd-123', got %q", info.TaskID)
+				if info.TaskID != "loom-123" {
+					t.Errorf("expected task_id 'loom-123', got %q", info.TaskID)
 				}
 				if info.TaskTitle != "Test Task" {
 					t.Errorf("expected task_title 'Test Task', got %q", info.TaskTitle)
@@ -647,17 +652,13 @@ func TestAcquireLockStale_ConcurrentRetry(t *testing.T) {
 		t.Fatalf("failed to write stale lock: %v", err)
 	}
 
-	go func() {
-		for {
-			_, err := os.Stat(lockPath)
-			if os.IsNotExist(err) {
-				secondStale := `{"pid":999999998,"command":"stale2","agent_name":"dead-agent-2","started_at":"2024-01-01T00:00:00Z"}`
-				os.WriteFile(lockPath, []byte(secondStale), 0644)
-				return
-			}
-			time.Sleep(time.Millisecond)
-		}
-	}()
+	// A racer goroutine simulates a SECOND process injecting another stale lock
+	// the moment AcquireLock has removed stale1 but not yet completed its own
+	// O_EXCL create. See spawnStaleLockRacer for why it injects with O_EXCL
+	// (never a truncating WriteFile) so it can't clobber the lock AcquireLock wins.
+	stop := make(chan struct{})
+	defer close(stop) // racer must not leak/busy-loop past the test (runs even on t.Fatal)
+	racerDone := spawnStaleLockRacer(lockPath, stop)
 
 	err := AcquireLock(tmpDir, "new-command", "new-agent")
 	if err != nil {
@@ -665,16 +666,73 @@ func TestAcquireLockStale_ConcurrentRetry(t *testing.T) {
 	}
 	defer ReleaseLock(tmpDir)
 
+	// Bounded wait for the racer to observe our PID and stop, so the post-acquire
+	// CheckLock can't see a transient injected lock. With O_EXCL injection the
+	// racer converges in a few ms; the timeout is a backstop that prevents the old
+	// 15-minute package wedge and fails fast on any regression.
+	select {
+	case <-racerDone:
+	case <-time.After(30 * time.Second):
+		t.Fatal("racer never observed our PID within 30s — lock file likely clobbered (regression of the WriteFile-clobber flake)")
+	}
+
 	info, running, err := CheckLock(tmpDir)
 	if err != nil {
 		t.Fatalf("CheckLock failed: %v", err)
 	}
 	if !running {
-		t.Error("expected running process after acquiring lock")
+		t.Fatal("expected running process after acquiring lock")
+	}
+	if info == nil {
+		t.Fatal("CheckLock returned nil info after AcquireLock succeeded")
 	}
 	if info.PID != os.Getpid() {
 		t.Errorf("expected PID %d, got %d", os.Getpid(), info.PID)
 	}
+}
+
+// spawnStaleLockRacer simulates a second process injecting another stale lock
+// during AcquireLock's stale-lock remove->recreate window. It injects with
+// O_EXCL (never a truncating WriteFile) so it can only create the lock while the
+// file is absent — it can NEVER clobber AcquireLock's own freshly-created lock.
+// (A blind WriteFile could land after AcquireLock's write, overwriting our PID
+// and leaving the racer's exit predicate permanently unsatisfiable — the old
+// 15-minute test-timeout hang.) injected flips only on a SUCCESSFUL create, so
+// the racer injects at most once and can't starve AcquireLock's bounded retries.
+// It stops on observing our PID or when stop is closed; the returned channel is
+// closed when the goroutine exits.
+func spawnStaleLockRacer(lockPath string, stop <-chan struct{}) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		secondStale := []byte(`{"pid":999999998,"command":"stale2","agent_name":"dead-agent-2","started_at":"2024-01-01T00:00:00Z"}`)
+		injected := false
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			data, err := os.ReadFile(lockPath)
+			switch {
+			case os.IsNotExist(err):
+				if !injected {
+					if f, e := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644); e == nil {
+						_, _ = f.Write(secondStale)
+						_ = f.Close()
+						injected = true
+					}
+				}
+			case err == nil:
+				var inf LockInfo
+				if json.Unmarshal(data, &inf) == nil && inf.PID == os.Getpid() {
+					return
+				}
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}()
+	return done
 }
 
 func TestAcquireLockStale_RetryFindsLiveAgent(t *testing.T) {
@@ -796,7 +854,7 @@ func TestUpdateLockTaskInvalidJSON(t *testing.T) {
 	}
 
 	// Should return error about invalid lock file
-	err := UpdateLockTask(tmpDir, "bd-123", "Test Task")
+	err := UpdateLockTask(tmpDir, "loom-123", "Test Task")
 	if err == nil {
 		t.Error("expected error for invalid JSON lock file")
 	}
@@ -881,66 +939,59 @@ func TestGetTaskStatus(t *testing.T) {
 	tests := []struct {
 		name       string
 		taskID     string
-		bdResponse string
-		bdError    error
+		issue      *backend.IssueDetailData
+		issueErr   error
 		wantStatus string
 	}{
 		{
 			name:       "closed task",
-			taskID:     "bd-123",
-			bdResponse: `[{"title":"Test Task","status":"closed"}]`,
+			taskID:     "loom-123",
+			issue:      &backend.IssueDetailData{IssueData: backend.IssueData{ID: "loom-123", Status: "closed"}},
 			wantStatus: "closed",
 		},
 		{
-			name:       "need review task",
-			taskID:     "bd-456",
-			bdResponse: `[{"title":"Design Feature","status":"review"}]`,
+			name:       "review task maps to needs_review",
+			taskID:     "loom-456",
+			issue:      &backend.IssueDetailData{IssueData: backend.IssueData{ID: "loom-456", Status: "review"}},
 			wantStatus: "needs_review",
 		},
 		{
 			name:       "open task",
-			taskID:     "bd-789",
-			bdResponse: `[{"title":"Test Task","status":"open"}]`,
+			taskID:     "loom-789",
+			issue:      &backend.IssueDetailData{IssueData: backend.IssueData{ID: "loom-789", Status: "open"}},
 			wantStatus: "open",
 		},
 		{
 			name:       "in progress task",
-			taskID:     "bd-101",
-			bdResponse: `[{"title":"Working on feature","status":"in_progress"}]`,
+			taskID:     "loom-101",
+			issue:      &backend.IssueDetailData{IssueData: backend.IssueData{ID: "loom-101", Status: "in_progress"}},
 			wantStatus: "in_progress",
 		},
 		{
-			name:       "bd command fails",
-			taskID:     "bd-error",
-			bdResponse: "",
-			bdError:    os.ErrNotExist,
+			name:       "GetIssue returns error",
+			taskID:     "loom-error",
+			issue:      nil,
+			issueErr:   errors.New("not found"),
 			wantStatus: "",
 		},
 		{
-			name:       "invalid JSON response",
-			taskID:     "bd-invalid",
-			bdResponse: `{invalid json}`,
-			wantStatus: "",
-		},
-		{
-			name:       "empty array response",
-			taskID:     "bd-empty",
-			bdResponse: `[]`,
+			name:       "GetIssue returns nil issue",
+			taskID:     "loom-empty",
+			issue:      nil,
+			issueErr:   nil,
 			wantStatus: "",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mock := NewCommandMock(t, []CommandStub{
-				{
-					Name:   "bd",
-					Args:   []string{"show", tt.taskID, "--json"},
-					Stdout: tt.bdResponse,
-					Err:    tt.bdError,
+			mock := &MockIssueBackend{
+				GetFn: func(ctx context.Context, id string) (*backend.IssueDetailData, error) {
+					return tt.issue, tt.issueErr
 				},
-			})
-			mock.Install()
+			}
+			setDefaultIssueBackend(mock)
+			t.Cleanup(func() { setDefaultIssueBackend(nil) })
 
 			status := getTaskStatus(tt.taskID)
 			if status != tt.wantStatus {
@@ -951,41 +1002,39 @@ func TestGetTaskStatus(t *testing.T) {
 }
 
 func TestGetTaskStatus_ReviewStatus(t *testing.T) {
-	// Test that review status is properly detected
 	tests := []struct {
 		name       string
-		status     string
+		rawStatus  string
 		wantStatus string
 	}{
 		{
-			name:       "review status",
-			status:     "review",
+			name:       "review status maps to needs_review",
+			rawStatus:  "review",
 			wantStatus: "needs_review",
 		},
 		{
-			name:       "open status",
-			status:     "open",
+			name:       "open status unchanged",
+			rawStatus:  "open",
 			wantStatus: "open",
 		},
 		{
-			name:       "in_progress status",
-			status:     "in_progress",
+			name:       "in_progress status unchanged",
+			rawStatus:  "in_progress",
 			wantStatus: "in_progress",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			bdResponse := `[{"title":"Test Feature","status":"` + tt.status + `"}]`
-			mock := NewCommandMock(t, []CommandStub{
-				{
-					Name:   "bd",
-					Stdout: bdResponse,
+			mock := &MockIssueBackend{
+				GetFn: func(ctx context.Context, id string) (*backend.IssueDetailData, error) {
+					return &backend.IssueDetailData{IssueData: backend.IssueData{ID: id, Status: tt.rawStatus}}, nil
 				},
-			})
-			mock.Install()
+			}
+			setDefaultIssueBackend(mock)
+			t.Cleanup(func() { setDefaultIssueBackend(nil) })
 
-			status := getTaskStatus("bd-test")
+			status := getTaskStatus("loom-test")
 			if status != tt.wantStatus {
 				t.Errorf("expected status %q, got %q", tt.wantStatus, status)
 			}
@@ -1174,5 +1223,79 @@ func TestSingleTaskModeLockStatePattern_Agent(t *testing.T) {
 	}
 	if readInfo.AgentName != "spark" {
 		t.Errorf("ReadLockFile: expected AgentName 'spark', got %q", readInfo.AgentName)
+	}
+}
+
+func TestUpdateLockClaudeSessionID(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	err := AcquireLock(tmpDir, "task", "agent1")
+	if err != nil {
+		t.Fatalf("AcquireLock failed: %v", err)
+	}
+	defer ReleaseLock(tmpDir)
+
+	if err := UpdateLockClaudeSessionID(tmpDir, "sess-abc-123"); err != nil {
+		t.Fatalf("UpdateLockClaudeSessionID: %v", err)
+	}
+
+	info, err := ReadLockFile(tmpDir)
+	if err != nil {
+		t.Fatalf("ReadLockFile: %v", err)
+	}
+	if info.ClaudeSessionID != "sess-abc-123" {
+		t.Errorf("ClaudeSessionID = %q, want %q", info.ClaudeSessionID, "sess-abc-123")
+	}
+}
+
+func TestUpdateLockClaudeSessionID_PIDMismatch(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	otherLock := `{"pid":999999999,"command":"task","agent_name":"agent1","started_at":"2024-01-01T00:00:00Z"}`
+	lockPath := filepath.Join(tmpDir, LockFileName)
+	if err := os.WriteFile(lockPath, []byte(otherLock), 0644); err != nil {
+		t.Fatalf("failed to write lock: %v", err)
+	}
+
+	err := UpdateLockClaudeSessionID(tmpDir, "sess-abc-123")
+	if err == nil {
+		t.Error("Expected error when PID doesn't match")
+	}
+	if !strings.Contains(err.Error(), "different process") {
+		t.Errorf("Expected 'different process' in error, got: %v", err)
+	}
+}
+
+func TestClearLockClaudeSessionID(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	err := AcquireLock(tmpDir, "task", "agent1")
+	if err != nil {
+		t.Fatalf("AcquireLock failed: %v", err)
+	}
+	defer ReleaseLock(tmpDir)
+
+	// Set then clear
+	if err := UpdateLockClaudeSessionID(tmpDir, "sess-abc-123"); err != nil {
+		t.Fatalf("UpdateLockClaudeSessionID: %v", err)
+	}
+	if err := ClearLockClaudeSessionID(tmpDir); err != nil {
+		t.Fatalf("ClearLockClaudeSessionID: %v", err)
+	}
+
+	info, err := ReadLockFile(tmpDir)
+	if err != nil {
+		t.Fatalf("ReadLockFile: %v", err)
+	}
+	if info.ClaudeSessionID != "" {
+		t.Errorf("ClaudeSessionID after clear = %q, want empty", info.ClaudeSessionID)
+	}
+
+	// Verify omitempty: field should not appear in JSON
+	data, _ := os.ReadFile(filepath.Join(tmpDir, LockFileName))
+	var raw map[string]interface{}
+	json.Unmarshal(data, &raw)
+	if _, exists := raw["claude_session_id"]; exists {
+		t.Error("claude_session_id should not be in JSON after clear (omitempty)")
 	}
 }

@@ -182,3 +182,211 @@
     grid-template-rows: repeat(4, minmax(150px, auto));
   }
 }
+
+/* ===========================
+ * DetailPanel Preset (matches IssueDetailPanel)
+ * =========================== */
+.detailPanel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  width: 100%;
+}
+
+.detailPanelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.detailPanelMeta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.detailPanelBody {
+  padding: var(--space-2) 0;
+}
+
+.detailPanelSection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border-light);
+}
+
+/* ===========================
+ * Table Preset (matches IssueTable)
+ * =========================== */
+.table {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: 200px;
+}
+
+.tableHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 2px solid var(--color-border);
+}
+
+.tableRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+/* ===========================
+ * FileExplorer Preset (matches FileExplorer)
+ * =========================== */
+.fileExplorer {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 400px;
+  gap: 1px;
+  background-color: var(--color-border-light);
+}
+
+.fileTree {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 260px;
+  min-width: 260px;
+  padding: var(--space-3);
+  background-color: var(--color-bg);
+}
+
+.fileTreeItem {
+  display: flex;
+  align-items: center;
+}
+
+.codeArea {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  background-color: var(--color-bg);
+}
+
+/* ===========================
+ * Terminal Preset (matches TerminalView)
+ * =========================== */
+.terminal {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 300px;
+  background-color: var(--color-bg);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.terminalTabBar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.terminalBody {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background-color: #1e1e1e;
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+}
+
+/* ===========================
+ * Observability Preset (matches ObservabilityDashboard)
+ * =========================== */
+.observability {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  width: 100%;
+}
+
+.observabilityCards {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-3);
+}
+
+.observabilityCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background-color: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-light);
+}
+
+.observabilityChart {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background-color: var(--color-bg-secondary);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border-light);
+}
+
+@media (width <= 768px) {
+  .observabilityCards {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* ===========================
+ * AgentDetail Preset (matches AgentDetailPanel)
+ * =========================== */
+.agentDetail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  width: 100%;
+}
+
+.agentDetailHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.agentDetailInfo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex: 1;
+}
+
+.agentDetailTabs {
+  display: flex;
+  gap: var(--space-2);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.agentDetailContent {
+  padding-top: var(--space-2);
+}

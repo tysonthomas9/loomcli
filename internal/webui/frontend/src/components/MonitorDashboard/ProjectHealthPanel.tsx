@@ -24,7 +24,7 @@ interface Bottleneck {
  * Props for the ProjectHealthPanel component.
  */
 export interface ProjectHealthPanelProps {
-  /** Project statistics from useAgents */
+  /** Project statistics from agent store */
   stats: LoomStats;
   /** Blocked issues for bottleneck detection */
   blockedIssues: BlockedIssue[] | null;

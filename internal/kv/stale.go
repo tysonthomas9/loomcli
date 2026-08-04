@@ -71,28 +71,26 @@ type StaleDetectorStatus struct {
 	IsLeader          bool      `json:"is_leader"`
 	LastCheck         time.Time `json:"last_check,omitempty"`
 	StaleWorkersFound int       `json:"stale_workers_found"`
-	TasksReconciled   int       `json:"tasks_reconciled"`
+	TasksReleased     int       `json:"tasks_released"`
 }
 
 // StaleDetector periodically scans for stale workers and cleans up their state.
 // Only one instance runs detection at a time via Redis leader election.
 type StaleDetector struct {
-	client     *Client
-	config     StaleDetectorConfig
-	serverID   string
-	reconciler *Reconciler
+	client   *Client
+	config   StaleDetectorConfig
+	serverID string
 
 	mu     sync.RWMutex
 	status StaleDetectorStatus
 }
 
 // NewStaleDetector creates a new stale detector.
-func NewStaleDetector(client *Client, config StaleDetectorConfig, serverID string, reconciler *Reconciler) *StaleDetector {
+func NewStaleDetector(client *Client, config StaleDetectorConfig, serverID string) *StaleDetector {
 	return &StaleDetector{
-		client:     client,
-		config:     config,
-		serverID:   serverID,
-		reconciler: reconciler,
+		client:   client,
+		config:   config,
+		serverID: serverID,
 		status: StaleDetectorStatus{
 			Enabled: true,
 		},
@@ -168,8 +166,9 @@ func (sd *StaleDetector) runCycle(ctx context.Context) {
 
 	log.Printf("Stale detector: found %d stale worker(s)", len(staleWorkers))
 
-	// Clean up each stale worker
-	var orphanedTasks []OrphanedTask
+	// Clean up each stale worker. FleetDB is canonical, so releasing Redis
+	// ownership is enough to make the task claimable again.
+	releasedTasks := 0
 	for _, sw := range staleWorkers {
 		if err := sd.cleanupWorker(ctx, sw); err != nil {
 			log.Printf("Stale detector: cleanup failed for worker %s: %v", sw.WorkerID, err)
@@ -178,31 +177,13 @@ func (sd *StaleDetector) runCycle(ctx context.Context) {
 		log.Printf("Stale detector: cleaned up worker %s (task=%s)", sw.WorkerID, sw.TaskID)
 
 		if sw.TaskID != "" {
-			orphanedTasks = append(orphanedTasks, OrphanedTask{
-				TaskID:     sw.TaskID,
-				TaskTitle:  sw.TaskTitle,
-				WorkerID:   sw.WorkerID,
-				StaleSince: sw.LastHeartbeat,
-			})
+			releasedTasks++
 		}
 	}
 
-	// Reconcile with beads
-	if sd.reconciler != nil && len(orphanedTasks) > 0 {
-		results := sd.reconciler.ResetOrphanedTasks(ctx, orphanedTasks)
-		reconciled := 0
-		for _, r := range results {
-			if r.Success {
-				reconciled++
-				log.Printf("Stale detector: reconciled task %s", r.TaskID)
-			} else {
-				log.Printf("Stale detector: reconcile failed for task %s: %v", r.TaskID, r.Error)
-			}
-		}
-		sd.mu.Lock()
-		sd.status.TasksReconciled = reconciled
-		sd.mu.Unlock()
-	}
+	sd.mu.Lock()
+	sd.status.TasksReleased = releasedTasks
+	sd.mu.Unlock()
 
 	// Renew leadership after doing work
 	if err := sd.renewLeadership(ctx); err != nil {

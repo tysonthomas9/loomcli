@@ -12,8 +12,9 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import "@testing-library/jest-dom";
 
-import { ColumnDef } from "../columns";
-import { TableHeader, SortState, SortDirection } from "../TableHeader";
+import type { ColumnDef } from "../columns";
+import type { SortState, SortDirection } from "../TableHeader";
+import { TableHeader } from "../TableHeader";
 
 // Helper type for test columns
 interface TestItem {

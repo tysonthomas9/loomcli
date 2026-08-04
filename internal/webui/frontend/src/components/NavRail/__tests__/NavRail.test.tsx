@@ -10,14 +10,15 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 
 import "@testing-library/jest-dom";
-import { NavRail } from "../NavRail";
+import { expectNoA11yViolations } from "@/test-utils/a11y-helpers";
+import { NavRail, WORKSPACE_SWITCHER_LIST_MAX_HEIGHT_PX } from "../NavRail";
 
 describe("NavRail", () => {
   describe("rendering", () => {
-    it("renders a Kanban button", () => {
+    it("renders a Workspaces button", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
-      expect(screen.getByLabelText("Kanban")).toBeInTheDocument();
+      expect(screen.getByLabelText("Workspaces")).toBeInTheDocument();
     });
 
     it("renders a Settings button", () => {
@@ -26,55 +27,77 @@ describe("NavRail", () => {
       expect(screen.getByLabelText("Settings")).toBeInTheDocument();
     });
 
-    it("renders an Observability button", () => {
-      render(<NavRail activeView="kanban" onChange={() => {}} />);
-
-      expect(screen.getByLabelText("Observability")).toBeInTheDocument();
-    });
-
-    it("does not render a Monitor button", () => {
-      render(<NavRail activeView="kanban" onChange={() => {}} />);
-
-      expect(screen.queryByLabelText("Monitor")).not.toBeInTheDocument();
-    });
-
-    it("renders a List button", () => {
-      render(<NavRail activeView="kanban" onChange={() => {}} />);
-
-      expect(screen.getByLabelText("List")).toBeInTheDocument();
-    });
-
     it("renders a Terminal button", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
       expect(screen.getByLabelText("Terminal")).toBeInTheDocument();
     });
 
-    it("renders exactly six navigation buttons", () => {
+    it("does not render an Agents button", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
-      const buttons = screen.getAllByRole("button");
-      expect(buttons).toHaveLength(6);
+      expect(screen.queryByLabelText("Agents")).not.toBeInTheDocument();
     });
 
-    it("renders a Files button", () => {
+    it("renders a Pull Requests button", () => {
+      render(<NavRail activeView="kanban" onChange={() => {}} />);
+
+      expect(screen.getByLabelText("Pull Requests")).toBeInTheDocument();
+    });
+
+    it("does not render a List button", () => {
+      render(<NavRail activeView="kanban" onChange={() => {}} />);
+
+      expect(screen.queryByLabelText("List")).not.toBeInTheDocument();
+    });
+
+    it("does not render a Monitor button (relabeled to Terminal)", () => {
+      render(<NavRail activeView="kanban" onChange={() => {}} />);
+
+      expect(screen.queryByLabelText("Monitor")).not.toBeInTheDocument();
+    });
+
+    it("does not render Observability or Workspace buttons", () => {
+      render(<NavRail activeView="kanban" onChange={() => {}} />);
+
+      expect(screen.queryByLabelText("Observability")).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("Workspace")).not.toBeInTheDocument();
+    });
+
+    it("renders a Files navigation button", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
       expect(screen.getByLabelText("Files")).toBeInTheDocument();
     });
 
+    it("renders exactly five navigation buttons", () => {
+      render(<NavRail activeView="kanban" onChange={() => {}} />);
+
+      const buttons = screen.getAllByRole("button");
+      expect(buttons).toHaveLength(5);
+    });
+
     it("renders tooltips for each button", () => {
+      const { container } = render(
+        <NavRail activeView="kanban" onChange={() => {}} />,
+      );
+
+      const tooltips = container.querySelectorAll(
+        "span.tooltip, [class*='tooltip']",
+      );
+      const tooltipTexts = Array.from(tooltips).map((t) => t.textContent);
+      expect(tooltipTexts).toContain("Workspaces");
+      expect(tooltipTexts).not.toContain("Agents");
+      expect(tooltipTexts).toContain("Pull Requests");
+      expect(tooltipTexts).toContain("Terminal");
+      expect(tooltipTexts).toContain("Settings");
+    });
+
+    it("each button exposes a hover tooltip with its label", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
       expect(
-        screen.getByRole("tooltip", { name: "Kanban" }),
-      ).toBeInTheDocument();
-      expect(screen.getByRole("tooltip", { name: "List" })).toBeInTheDocument();
-      expect(
-        screen.getByRole("tooltip", { name: "Observability" }),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByRole("tooltip", { name: "Files" }),
+        screen.getByRole("tooltip", { name: "Workspaces" }),
       ).toBeInTheDocument();
       expect(
         screen.getByRole("tooltip", { name: "Terminal" }),
@@ -82,6 +105,17 @@ describe("NavRail", () => {
       expect(
         screen.getByRole("tooltip", { name: "Settings" }),
       ).toBeInTheDocument();
+    });
+
+    it("renders buttons in correct order: Workspaces, Pull Requests, Terminal, Files, Settings", () => {
+      render(<NavRail activeView="kanban" onChange={() => {}} />);
+
+      const buttons = screen.getAllByRole("button");
+      expect(buttons[0]).toHaveAccessibleName("Workspaces");
+      expect(buttons[1]).toHaveAccessibleName("Pull Requests");
+      expect(buttons[2]).toHaveAccessibleName("Terminal");
+      expect(buttons[3]).toHaveAccessibleName("Files");
+      expect(buttons[4]).toHaveAccessibleName("Settings");
     });
 
     it("has navigation landmark with aria-label", () => {
@@ -96,20 +130,36 @@ describe("NavRail", () => {
       render(<NavRail activeView="settings" onChange={() => {}} />);
 
       const settingsButton = screen.getByLabelText("Settings");
-      const kanbanButton = screen.getByLabelText("Kanban");
+      const workspacesButton = screen.getByLabelText("Workspaces");
 
       expect(settingsButton).toHaveAttribute("data-active");
-      expect(kanbanButton).not.toHaveAttribute("data-active");
+      expect(workspacesButton).not.toHaveAttribute("data-active");
     });
 
-    it("marks kanban as active when activeView is kanban", () => {
+    it("marks Workspaces as active when activeView is kanban", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
-      const kanbanButton = screen.getByLabelText("Kanban");
+      const workspacesButton = screen.getByLabelText("Workspaces");
       const settingsButton = screen.getByLabelText("Settings");
 
-      expect(kanbanButton).toHaveAttribute("data-active");
+      expect(workspacesButton).toHaveAttribute("data-active");
       expect(settingsButton).not.toHaveAttribute("data-active");
+    });
+
+    it("marks Workspaces as active when activeView is table", () => {
+      render(<NavRail activeView="table" onChange={() => {}} />);
+
+      const workspacesButton = screen.getByLabelText("Workspaces");
+
+      expect(workspacesButton).toHaveAttribute("data-active");
+    });
+
+    it("marks Terminal as active when activeView is terminal", () => {
+      render(<NavRail activeView="terminal" onChange={() => {}} />);
+
+      const terminalButton = screen.getByLabelText("Terminal");
+
+      expect(terminalButton).toHaveAttribute("data-active");
     });
 
     it("applies custom className", () => {
@@ -126,24 +176,24 @@ describe("NavRail", () => {
   });
 
   describe("interactions", () => {
-    it('calls onChange with "kanban" when Kanban button is clicked', () => {
+    it('calls onChange with "kanban" when Workspaces button is clicked', () => {
       const onChange = vi.fn();
       render(<NavRail activeView="settings" onChange={onChange} />);
 
-      fireEvent.click(screen.getByLabelText("Kanban"));
+      fireEvent.click(screen.getByLabelText("Workspaces"));
 
       expect(onChange).toHaveBeenCalledTimes(1);
       expect(onChange).toHaveBeenCalledWith("kanban");
     });
 
-    it('calls onChange with "table" when List button is clicked', () => {
+    it('calls onChange with "terminal" when Terminal button is clicked', () => {
       const onChange = vi.fn();
       render(<NavRail activeView="kanban" onChange={onChange} />);
 
-      fireEvent.click(screen.getByLabelText("List"));
+      fireEvent.click(screen.getByLabelText("Terminal"));
 
       expect(onChange).toHaveBeenCalledTimes(1);
-      expect(onChange).toHaveBeenCalledWith("table");
+      expect(onChange).toHaveBeenCalledWith("terminal");
     });
 
     it('calls onChange with "settings" when Settings button is clicked', () => {
@@ -160,9 +210,215 @@ describe("NavRail", () => {
       const onChange = vi.fn();
       render(<NavRail activeView="kanban" onChange={onChange} />);
 
-      fireEvent.click(screen.getByLabelText("Kanban"));
+      fireEvent.click(screen.getByLabelText("Workspaces"));
 
       expect(onChange).toHaveBeenCalledWith("kanban");
+    });
+  });
+
+  describe("session badge", () => {
+    it("does not render badge when sessionCount is undefined", () => {
+      render(<NavRail activeView="kanban" onChange={() => {}} />);
+
+      expect(
+        screen.queryByLabelText(/active sessions/),
+      ).not.toBeInTheDocument();
+    });
+
+    it("does not render badge when sessionCount is 0", () => {
+      render(
+        <NavRail activeView="kanban" onChange={() => {}} sessionCount={0} />,
+      );
+
+      expect(
+        screen.queryByLabelText(/active sessions/),
+      ).not.toBeInTheDocument();
+    });
+
+    it("renders badge on Monitor button when sessionCount > 0", () => {
+      render(
+        <NavRail activeView="kanban" onChange={() => {}} sessionCount={3} />,
+      );
+
+      expect(screen.getByLabelText("3 active sessions")).toBeInTheDocument();
+    });
+
+    it("badge only appears on Terminal button, not other buttons", () => {
+      render(
+        <NavRail activeView="kanban" onChange={() => {}} sessionCount={2} />,
+      );
+
+      // Badge is inside the Terminal button
+      const badge = screen.getByLabelText("2 active sessions");
+      const terminalButton = screen.getByLabelText("Terminal");
+      expect(terminalButton).toContainElement(badge);
+
+      // Other buttons do not contain the badge
+      const workspacesButton = screen.getByLabelText("Workspaces");
+      expect(workspacesButton).not.toContainElement(badge);
+    });
+  });
+
+  describe("accessibility", () => {
+    it("has no axe violations", async () => {
+      const { container } = render(
+        <NavRail activeView="kanban" onChange={() => {}} />,
+      );
+
+      await expectNoA11yViolations(container);
+    });
+
+    it("has no axe violations with active session badge", async () => {
+      const { container } = render(
+        <NavRail activeView="kanban" onChange={() => {}} sessionCount={3} />,
+      );
+
+      await expectNoA11yViolations(container);
+    });
+
+    it("has no axe violations with unread indicator", async () => {
+      const { container } = render(
+        <NavRail
+          activeView="kanban"
+          onChange={() => {}}
+          badges={{ terminal: true }}
+        />,
+      );
+
+      await expectNoA11yViolations(container);
+    });
+  });
+
+  describe("workspace switcher", () => {
+    const manyWorkspaces = Array.from({ length: 8 }, (_, i) => ({
+      id: `ws-${i}`,
+      name: `Workspace ${i}`,
+    }));
+
+    it("uses the wireframe max-height for the scrollable workspace list", () => {
+      const { container } = render(
+        <NavRail
+          activeView="kanban"
+          onChange={() => {}}
+          workspaces={manyWorkspaces}
+          activeWorkspaceId="ws-0"
+          onWorkspaceSwitch={() => {}}
+        />,
+      );
+
+      const list = container.querySelector('[class*="workspaceList"]');
+      expect(list).toBeInTheDocument();
+      expect(WORKSPACE_SWITCHER_LIST_MAX_HEIGHT_PX).toBe(210);
+    });
+
+    it("renders workspace selector with dividers and pinned add button", () => {
+      render(
+        <NavRail
+          activeView="kanban"
+          onChange={() => {}}
+          workspaces={manyWorkspaces}
+          activeWorkspaceId="ws-1"
+          onWorkspaceSwitch={() => {}}
+          onAddWorkspace={() => {}}
+        />,
+      );
+
+      expect(
+        screen.getByRole("region", { name: "Workspace selector" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByLabelText("Switch to Workspace 7"),
+      ).toBeInTheDocument();
+      expect(screen.getByLabelText("Add workspace")).toBeInTheDocument();
+    });
+
+    it("shows workspace name in a hover tooltip", () => {
+      render(
+        <NavRail
+          activeView="kanban"
+          onChange={() => {}}
+          workspaces={[{ id: "hello", name: "Hello-World" }]}
+          activeWorkspaceId="hello"
+          onWorkspaceSwitch={() => {}}
+        />,
+      );
+
+      const workspaceButton = screen.getByLabelText("Switch to Hello-World");
+      expect(workspaceButton).toHaveTextContent("HW");
+      fireEvent.mouseEnter(workspaceButton);
+      expect(
+        screen.getByRole("tooltip", { name: "Hello-World" }),
+      ).toBeInTheDocument();
+    });
+  });
+
+  describe("unread indicator", () => {
+    it("renders unread indicator when badges={{ terminal: true }} and terminal is not active", () => {
+      render(
+        <NavRail
+          activeView="kanban"
+          onChange={() => {}}
+          badges={{ terminal: true }}
+        />,
+      );
+
+      const indicator = screen.getByLabelText("has unread output");
+      expect(indicator).toBeInTheDocument();
+
+      // Indicator should be inside the Terminal button
+      const terminalButton = screen.getByLabelText("Terminal");
+      expect(terminalButton).toContainElement(indicator);
+    });
+
+    it("does NOT render unread indicator when terminal IS the active view", () => {
+      render(
+        <NavRail
+          activeView="terminal"
+          onChange={() => {}}
+          badges={{ terminal: true }}
+        />,
+      );
+
+      expect(
+        screen.queryByLabelText("has unread output"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("does not render unread indicator without badges prop", () => {
+      render(<NavRail activeView="kanban" onChange={() => {}} />);
+
+      expect(
+        screen.queryByLabelText("has unread output"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("does not render unread indicator when badges={{ terminal: false }}", () => {
+      render(
+        <NavRail
+          activeView="kanban"
+          onChange={() => {}}
+          badges={{ terminal: false }}
+        />,
+      );
+
+      expect(
+        screen.queryByLabelText("has unread output"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("does not render unread indicator for non-terminal badges on their active view", () => {
+      render(
+        <NavRail
+          activeView="kanban"
+          onChange={() => {}}
+          badges={{ kanban: true }}
+        />,
+      );
+
+      // kanban is active, so its badge should not render
+      expect(
+        screen.queryByLabelText("has unread output"),
+      ).not.toBeInTheDocument();
     });
   });
 });

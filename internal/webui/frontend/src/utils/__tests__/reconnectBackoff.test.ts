@@ -121,7 +121,7 @@ describe("startAutoReconnect", () => {
     expect(connectFn).toHaveBeenCalledTimes(1);
   });
 
-  it("increments attempt counter on each failure", () => {
+  it("increments attempt counter on each failure", async () => {
     const connectFn = vi.fn().mockReturnValue(false);
     const onStateChange = vi.fn();
 
@@ -132,8 +132,8 @@ describe("startAutoReconnect", () => {
       expect.objectContaining({ attempt: 0, gaveUp: false }),
     );
 
-    // Advance past attempt 0 delay (1000ms)
-    vi.advanceTimersByTime(1000);
+    // Advance past attempt 0 delay (1000ms) — use async to flush microtasks
+    await vi.advanceTimersByTimeAsync(1000);
     expect(connectFn).toHaveBeenCalledTimes(1);
 
     // After failure, attempt increments to 1 and scheduleNext is called again
@@ -142,7 +142,7 @@ describe("startAutoReconnect", () => {
     );
 
     // Advance past attempt 1 delay (2000ms)
-    vi.advanceTimersByTime(2000);
+    await vi.advanceTimersByTimeAsync(2000);
     expect(connectFn).toHaveBeenCalledTimes(2);
 
     // After second failure, attempt increments to 2
@@ -170,7 +170,7 @@ describe("startAutoReconnect", () => {
     expect(connectFn).not.toHaveBeenCalled();
   });
 
-  it("state callback receives correct attempt numbers and nextRetryAt", () => {
+  it("state callback receives correct attempt numbers and nextRetryAt", async () => {
     const connectFn = vi.fn().mockReturnValue(false);
     const onStateChange = vi.fn();
 
@@ -186,8 +186,8 @@ describe("startAutoReconnect", () => {
     expect(firstState.nextRetryAt).toBe(Date.now() + 1000);
     expect(firstState.gaveUp).toBe(false);
 
-    // Trigger attempt 0
-    vi.advanceTimersByTime(1000);
+    // Trigger attempt 0 — use async to flush microtasks
+    await vi.advanceTimersByTimeAsync(1000);
 
     // Second call: attempt 1, nextRetryAt = now + 2000
     expect(onStateChange).toHaveBeenCalledTimes(2);
@@ -197,7 +197,7 @@ describe("startAutoReconnect", () => {
     expect(secondState.gaveUp).toBe(false);
   });
 
-  it("stops after maxAttempts and reports gaveUp=true", () => {
+  it("stops after maxAttempts and reports gaveUp=true", async () => {
     const connectFn = vi.fn().mockReturnValue(false);
     const onStateChange = vi.fn();
 
@@ -211,15 +211,15 @@ describe("startAutoReconnect", () => {
     startAutoReconnect(connectFn, onStateChange, config);
 
     // Attempt 0: delay 100ms
-    vi.advanceTimersByTime(100);
+    await vi.advanceTimersByTimeAsync(100);
     expect(connectFn).toHaveBeenCalledTimes(1);
 
     // Attempt 1: delay 200ms
-    vi.advanceTimersByTime(200);
+    await vi.advanceTimersByTimeAsync(200);
     expect(connectFn).toHaveBeenCalledTimes(2);
 
     // Attempt 2: delay 400ms
-    vi.advanceTimersByTime(400);
+    await vi.advanceTimersByTimeAsync(400);
     expect(connectFn).toHaveBeenCalledTimes(3);
 
     // After 3 failures, attempt is now 3 which equals maxAttempts
@@ -231,11 +231,11 @@ describe("startAutoReconnect", () => {
     expect(lastCall.gaveUp).toBe(true);
 
     // No more connectFn calls even after waiting
-    vi.advanceTimersByTime(100000);
+    await vi.advanceTimersByTimeAsync(100000);
     expect(connectFn).toHaveBeenCalledTimes(3);
   });
 
-  it("does not call connectFn after cancel", () => {
+  it("does not call connectFn after cancel", async () => {
     const connectFn = vi.fn().mockReturnValue(false);
     const onStateChange = vi.fn();
 
@@ -246,16 +246,143 @@ describe("startAutoReconnect", () => {
     );
 
     // Let the first attempt fire
-    vi.advanceTimersByTime(1000);
+    await vi.advanceTimersByTimeAsync(1000);
     expect(connectFn).toHaveBeenCalledTimes(1);
 
     // Cancel after first failure
     cancel();
 
     // Advance timers well past what any subsequent attempt would need
-    vi.advanceTimersByTime(100000);
+    await vi.advanceTimersByTimeAsync(100000);
 
     // connectFn should not have been called again
     expect(connectFn).toHaveBeenCalledTimes(1);
+  });
+
+  describe("async connectFn", () => {
+    it("async connectFn that resolves true stops the loop", async () => {
+      const connectFn = vi.fn().mockReturnValue(Promise.resolve(true));
+      const onStateChange = vi.fn();
+
+      startAutoReconnect(connectFn, onStateChange, deterministicConfig);
+
+      // Advance past attempt 0 delay (1000ms) — flush microtasks too
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(connectFn).toHaveBeenCalledTimes(1);
+
+      // Since connectFn resolved true, no next attempt should be scheduled
+      // onStateChange should only have been called once (for attempt 0)
+      expect(onStateChange).toHaveBeenCalledTimes(1);
+      expect(onStateChange).toHaveBeenCalledWith(
+        expect.objectContaining({ attempt: 0, gaveUp: false }),
+      );
+
+      // Advance well past any subsequent delay — no more calls
+      await vi.advanceTimersByTimeAsync(100000);
+      expect(connectFn).toHaveBeenCalledTimes(1);
+    });
+
+    it("async connectFn that resolves false schedules next attempt", async () => {
+      const connectFn = vi.fn().mockReturnValue(Promise.resolve(false));
+      const onStateChange = vi.fn();
+
+      startAutoReconnect(connectFn, onStateChange, deterministicConfig);
+
+      // Initial scheduleNext call: onStateChange with attempt=0
+      expect(onStateChange).toHaveBeenCalledTimes(1);
+      expect(onStateChange).toHaveBeenCalledWith(
+        expect.objectContaining({ attempt: 0, gaveUp: false }),
+      );
+
+      // Advance past attempt 0 delay (1000ms)
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(connectFn).toHaveBeenCalledTimes(1);
+
+      // After resolving false, attempt increments to 1 and scheduleNext fires
+      expect(onStateChange).toHaveBeenCalledTimes(2);
+      expect(onStateChange).toHaveBeenCalledWith(
+        expect.objectContaining({ attempt: 1, gaveUp: false }),
+      );
+
+      // Advance past attempt 1 delay (2000ms)
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(connectFn).toHaveBeenCalledTimes(2);
+
+      // Attempt increments to 2
+      expect(onStateChange).toHaveBeenCalledTimes(3);
+      expect(onStateChange).toHaveBeenCalledWith(
+        expect.objectContaining({ attempt: 2, gaveUp: false }),
+      );
+    });
+
+    it("async connectFn waits for resolution before scheduling next", async () => {
+      let resolveConnect!: (value: boolean) => void;
+      const pendingPromise = new Promise<boolean>((resolve) => {
+        resolveConnect = resolve;
+      });
+      const connectFn = vi.fn().mockReturnValue(pendingPromise);
+      const onStateChange = vi.fn();
+
+      startAutoReconnect(connectFn, onStateChange, deterministicConfig);
+
+      // Advance past attempt 0 delay — connectFn is called
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(connectFn).toHaveBeenCalledTimes(1);
+
+      // onStateChange still only called once (attempt 0 scheduled)
+      // because the promise hasn't resolved yet
+      expect(onStateChange).toHaveBeenCalledTimes(1);
+
+      // Advance more time — next attempt should NOT be scheduled yet
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(connectFn).toHaveBeenCalledTimes(1);
+      expect(onStateChange).toHaveBeenCalledTimes(1);
+
+      // Now resolve the promise with false
+      resolveConnect(false);
+      // Flush microtasks
+      await vi.advanceTimersByTimeAsync(0);
+
+      // Now attempt 1 should be scheduled
+      expect(onStateChange).toHaveBeenCalledTimes(2);
+      expect(onStateChange).toHaveBeenCalledWith(
+        expect.objectContaining({ attempt: 1, gaveUp: false }),
+      );
+    });
+
+    it("cancel during pending async connectFn prevents further scheduling", async () => {
+      let resolveConnect!: (value: boolean) => void;
+      const pendingPromise = new Promise<boolean>((resolve) => {
+        resolveConnect = resolve;
+      });
+      const connectFn = vi.fn().mockReturnValue(pendingPromise);
+      const onStateChange = vi.fn();
+
+      const cancel = startAutoReconnect(
+        connectFn,
+        onStateChange,
+        deterministicConfig,
+      );
+
+      // Advance past attempt 0 delay — connectFn is called, promise pending
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(connectFn).toHaveBeenCalledTimes(1);
+
+      // Cancel while the promise is still pending
+      cancel();
+
+      // Now resolve the promise with false
+      resolveConnect(false);
+      // Flush microtasks
+      await vi.advanceTimersByTimeAsync(0);
+
+      // onStateChange should only have been called once (for the initial scheduleNext)
+      // The cancelled check inside the .then() should prevent scheduling
+      expect(onStateChange).toHaveBeenCalledTimes(1);
+
+      // No further attempts
+      await vi.advanceTimersByTimeAsync(100000);
+      expect(connectFn).toHaveBeenCalledTimes(1);
+    });
   });
 });

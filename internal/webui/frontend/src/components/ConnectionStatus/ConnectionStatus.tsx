@@ -1,9 +1,9 @@
 /**
  * ConnectionStatus component displays the current connection state.
- * Provides visual feedback about whether the application is connected to the beads daemon.
+ * Provides visual feedback about whether the application is connected to the event stream.
  */
 
-import type { ConnectionState } from "@/api/sse";
+import type { ConnectionState } from "@/api/common";
 
 import styles from "./ConnectionStatus.module.css";
 
@@ -11,7 +11,7 @@ import styles from "./ConnectionStatus.module.css";
  * Props for the ConnectionStatus component.
  */
 export interface ConnectionStatusProps {
-  /** Current connection state from useSSE */
+  /** Current connection state */
   state: ConnectionState;
   /** Additional CSS class name */
   className?: string;
@@ -21,12 +21,14 @@ export interface ConnectionStatusProps {
   compact?: boolean;
   /** Show status text (default: true) */
   showText?: boolean;
-  /** Current reconnect attempt count (from useSSE) */
+  /** Current reconnect attempt count */
   reconnectAttempts?: number;
   /** Callback when retry button is clicked */
   onRetry?: () => void;
   /** Whether to show retry button when reconnecting (default: true) */
   showRetryButton?: boolean;
+  /** Whether the connection has been lost (max retries exceeded) */
+  connectionLost?: boolean;
 }
 
 /**
@@ -35,7 +37,11 @@ export interface ConnectionStatusProps {
 function getStatusText(
   state: ConnectionState,
   reconnectAttempts?: number,
+  connectionLost?: boolean,
 ): string {
+  if (connectionLost) {
+    return "Connection lost";
+  }
   switch (state) {
     case "connected":
       return "Connected";
@@ -66,20 +72,27 @@ export function ConnectionStatus({
   reconnectAttempts,
   onRetry,
   showRetryButton = true,
+  connectionLost = false,
 }: ConnectionStatusProps): JSX.Element {
-  const statusText = getStatusText(state, reconnectAttempts);
+  const statusText = getStatusText(state, reconnectAttempts, connectionLost);
 
   const rootClassName = [styles.connectionStatus, styles[variant], className]
     .filter(Boolean)
     .join(" ");
 
-  // Show retry button when reconnecting with attempts >= 1 and callback provided
+  // Show retry button when:
+  // - connectionLost and onRetry provided, OR
+  // - reconnecting with attempts >= 1 and callback provided
   const shouldShowRetry =
-    state === "reconnecting" &&
-    showRetryButton &&
-    onRetry !== undefined &&
-    reconnectAttempts !== undefined &&
-    reconnectAttempts >= 1;
+    (connectionLost && onRetry !== undefined) ||
+    (state === "reconnecting" &&
+      showRetryButton &&
+      onRetry !== undefined &&
+      reconnectAttempts !== undefined &&
+      reconnectAttempts >= 1);
+
+  // Use "connection-lost" data-state for distinct styling when connection is lost
+  const effectiveState = connectionLost ? "connection-lost" : state;
 
   return (
     <div
@@ -87,7 +100,7 @@ export function ConnectionStatus({
       role="status"
       aria-live="polite"
       aria-label={`Connection status: ${statusText}`}
-      data-state={state}
+      data-state={effectiveState}
       data-variant={variant}
       data-compact={compact ? "true" : undefined}
     >

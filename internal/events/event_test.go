@@ -12,18 +12,22 @@ func TestEventType_Constants(t *testing.T) {
 		et   EventType
 		want string
 	}{
-		{TaskClaimed, "task_claimed"},
-		{TaskStarted, "task_started"},
-		{TaskCompleted, "task_completed"},
-		{TaskFailed, "task_failed"},
-		{AgentStarted, "agent_started"},
-		{AgentRestarted, "agent_restarted"},
-		{AgentStopped, "agent_stopped"},
-		{EpicAssigned, "epic_assigned"},
-		{EpicExhausted, "epic_exhausted"},
-		{PRCreated, "pr_created"},
-		{ConflictResolved, "conflict_resolved"},
-		{HealthCheck, "health_check"},
+		{TaskClaimed, "task.claimed"},
+		{TaskStarted, "task.started"},
+		{TaskCompleted, "task.completed"},
+		{TaskFailed, "task.failed"},
+		{TaskStuck, "task.stuck"},
+		{AgentStarted, "agent.started"},
+		{AgentRestarted, "agent.restarted"},
+		{AgentStopped, "agent.stopped"},
+		{EpicAssigned, "epic.assigned"},
+		{EpicExhausted, "epic.exhausted"},
+		{PRCreated, "pr.created"},
+		{ConflictResolved, "conflict.resolved"},
+		{HealthCheck, "system.health_check"},
+		{ConfigReloaded, "system.config_reloaded"},
+		{CircuitOpened, "circuit.opened"},
+		{CircuitClosed, "circuit.closed"},
 	}
 	for _, tt := range tests {
 		if string(tt.et) != tt.want {
@@ -40,7 +44,7 @@ func TestNewEvent_And_DecodeData(t *testing.T) {
 		checkFn func(t *testing.T, decoded interface{})
 	}{
 		{
-			name: "task_claimed",
+			name: "task.claimed",
 			et:   TaskClaimed,
 			data: TaskClaimedData{TaskID: "t1", Title: "Fix bug"},
 			checkFn: func(t *testing.T, decoded interface{}) {
@@ -51,7 +55,7 @@ func TestNewEvent_And_DecodeData(t *testing.T) {
 			},
 		},
 		{
-			name: "task_completed",
+			name: "task.completed",
 			et:   TaskCompleted,
 			data: TaskCompletedData{TaskID: "t2", Duration: Duration{5 * time.Minute}, FilesChanged: 3, LinesAdded: 100, LinesRemoved: 20},
 			checkFn: func(t *testing.T, decoded interface{}) {
@@ -62,7 +66,7 @@ func TestNewEvent_And_DecodeData(t *testing.T) {
 			},
 		},
 		{
-			name: "agent_started",
+			name: "agent.started",
 			et:   AgentStarted,
 			data: AgentStartedData{PID: 1234},
 			checkFn: func(t *testing.T, decoded interface{}) {
@@ -73,12 +77,38 @@ func TestNewEvent_And_DecodeData(t *testing.T) {
 			},
 		},
 		{
-			name: "health_check",
+			name: "system.health_check",
 			et:   HealthCheck,
 			data: HealthCheckData{AgentCount: 5, HealthyCount: 4},
 			checkFn: func(t *testing.T, decoded interface{}) {
 				d := decoded.(*HealthCheckData)
 				if d.AgentCount != 5 || d.HealthyCount != 4 {
+					t.Errorf("unexpected: %+v", d)
+				}
+			},
+		},
+		{
+			name: "circuit.opened",
+			et:   CircuitOpened,
+			data: CircuitOpenedData{
+				RateLimitCount:   5,
+				WindowDuration:   Duration{10 * time.Minute},
+				CooldownDuration: Duration{5 * time.Minute},
+			},
+			checkFn: func(t *testing.T, decoded interface{}) {
+				d := decoded.(*CircuitOpenedData)
+				if d.RateLimitCount != 5 || d.WindowDuration.Duration != 10*time.Minute || d.CooldownDuration.Duration != 5*time.Minute {
+					t.Errorf("unexpected: %+v", d)
+				}
+			},
+		},
+		{
+			name: "circuit.closed",
+			et:   CircuitClosed,
+			data: CircuitClosedData{Reason: "probe_success"},
+			checkFn: func(t *testing.T, decoded interface{}) {
+				d := decoded.(*CircuitClosedData)
+				if d.Reason != "probe_success" {
 					t.Errorf("unexpected: %+v", d)
 				}
 			},

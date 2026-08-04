@@ -1,0 +1,125 @@
+{
+  "claude": [
+    {
+      "seq": 1,
+      "timestamp": "2026-06-23T16:07:40.132Z",
+      "role": "system",
+      "type": "session_meta",
+      "text": "local-cli-claude session"
+    },
+    {
+      "seq": 2,
+      "timestamp": "2026-06-23T16:07:40.132Z",
+      "role": "assistant",
+      "type": "reasoning",
+      "text": "let me plan the change"
+    },
+    {
+      "seq": 3,
+      "timestamp": "2026-06-23T16:07:40.132Z",
+      "role": "assistant",
+      "type": "text",
+      "text": "Working on it."
+    },
+    {
+      "seq": 4,
+      "timestamp": "2026-06-23T16:07:40.132Z",
+      "role": "assistant",
+      "type": "tool_use",
+      "tool_name": "Read",
+      "tool_use_id": "t1",
+      "tool_input": {
+        "file_path": "hello.md"
+      }
+    },
+    {
+      "seq": 5,
+      "timestamp": "2026-06-23T16:07:40.132Z",
+      "role": "tool",
+      "type": "tool_result",
+      "tool_use_id": "t1",
+      "output": "1\thello\n"
+    },
+    {
+      "seq": 6,
+      "timestamp": "2026-06-23T16:07:40.132Z",
+      "role": "system",
+      "type": "result",
+      "text": "completed | in=8000 out=300 cache_read=12 cache_write=7 cost=0.18 turns=3",
+      "output": "{\"input_tokens\":8000,\"output_tokens\":300,\"cache_read_tokens\":12,\"cache_write_tokens\":7,\"cost_usd\":0.18,\"num_turns\":3}"
+    }
+  ],
+  "codex": [
+    {
+      "seq": 1,
+      "timestamp": "2026-06-23T16:07:40.133Z",
+      "role": "system",
+      "type": "session_meta",
+      "text": "local-cli-codex session"
+    },
+    {
+      "seq": 2,
+      "timestamp": "2026-06-23T16:07:40.133Z",
+      "role": "assistant",
+      "type": "reasoning",
+      "text": "thinking about it"
+    },
+    {
+      "seq": 3,
+      "timestamp": "2026-06-23T16:07:40.133Z",
+      "role": "assistant",
+      "type": "text",
+      "text": "done"
+    },
+    {
+      "seq": 4,
+      "timestamp": "2026-06-23T16:07:40.133Z",
+      "role": "assistant",
+      "type": "tool_use",
+      "tool_name": "shell",
+      "tool_input": {
+        "command": "ls"
+      },
+      "output": "a\n"
+    },
+    {
+      "seq": 5,
+      "timestamp": "2026-06-23T16:07:40.133Z",
+      "role": "system",
+      "type": "result",
+      "text": "completed | in=123 out=45 cache_read=6 reasoning=3",
+      "output": "{\"input_tokens\":123,\"output_tokens\":45,\"cache_read_tokens\":6,\"reasoning_tokens\":3}"
+    }
+  ],
+  "cursor": [
+    {
+      "seq": 1,
+      "timestamp": "2026-06-23T16:07:40.133Z",
+      "role": "system",
+      "type": "session_meta",
+      "text": "local-cli-cursor session"
+    },
+    {
+      "seq": 2,
+      "timestamp": "2026-06-23T16:07:40.133Z",
+      "role": "user",
+      "type": "text",
+      "text": "please do X"
+    },
+    {
+      "seq": 3,
+      "timestamp": "2026-06-23T16:07:40.133Z",
+      "role": "assistant",
+      "type": "text",
+      "text": "ok"
+    },
+    {
+      "seq": 4,
+      "timestamp": "2026-06-23T16:07:40.133Z",
+      "role": "system",
+      "type": "result",
+      "text": "completed | in=10 out=2",
+      "output": "{\"input_tokens\":10,\"output_tokens\":2}"
+    }
+  ]
+}

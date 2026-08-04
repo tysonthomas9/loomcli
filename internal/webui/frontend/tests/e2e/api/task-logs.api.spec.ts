@@ -2,14 +2,16 @@
  * Task Logs API E2E Tests
  *
  * Endpoints Under Test:
- * - GET /api/tasks/{id}/logs - List available phases
- * - GET /api/tasks/{id}/logs/{phase} - Snapshot log content
+ * - GET /api/workspaces/{ws}/tasks/{id}/logs - List available phases
+ * - GET /api/workspaces/{ws}/tasks/{id}/logs/{phase} - Snapshot log content
  */
 
-import { test, expect, isIntegrationEnabled, generateTestId } from './api-client'
+import { test, expect, isIntegrationEnabled, generateTestId, resolvedApiBaseURL } from './api-client'
 
 // Skip if integration tests not enabled
 test.skip(!isIntegrationEnabled, 'API E2E tests require RUN_INTEGRATION_TESTS=1')
+
+const BASE_URL = resolvedApiBaseURL
 
 interface TaskPhasesResponse {
   success: boolean
@@ -28,13 +30,28 @@ interface LogContentResponse {
   error?: string
 }
 
+let cachedWorkspaceId: string | null = null
+
+async function getWorkspaceId(request: Parameters<Parameters<typeof test>[2]>[0]['request']): Promise<string> {
+  if (cachedWorkspaceId) return cachedWorkspaceId
+  const response = await request.get(`${BASE_URL}/api/workspaces`)
+  const body = (await response.json()) as { workspaces?: Array<{ id: string; active?: boolean }> }
+  const workspaces = body.workspaces ?? []
+  const active = workspaces.find(w => w.active)
+  const ws = active ?? workspaces[0]
+  if (!ws?.id) throw new Error('No workspace available for E2E tests')
+  cachedWorkspaceId = ws.id
+  return cachedWorkspaceId
+}
+
 test.describe('Task Logs API', () => {
-  const testTaskId = 'bd-test-task-logs'
+  const testTaskId = 'loom-test-task-logs'
   const invalidTaskId = '../../../etc/passwd'
 
   test.describe('Phase Listing', () => {
     test('GET /api/tasks/:id/logs lists available phases', async ({ request }) => {
-      const response = await request.get(`/api/tasks/${testTaskId}/logs`)
+      const wsId = await getWorkspaceId(request)
+      const response = await request.get(`${BASE_URL}/api/workspaces/${wsId}/tasks/${testTaskId}/logs`)
 
       expect(response.ok()).toBe(true)
 
@@ -50,8 +67,9 @@ test.describe('Task Logs API', () => {
     })
 
     test('returns empty phases array for task with no logs', async ({ request }) => {
+      const wsId = await getWorkspaceId(request)
       const noLogsTaskId = `no-logs-${generateTestId()}`
-      const response = await request.get(`/api/tasks/${noLogsTaskId}/logs`)
+      const response = await request.get(`${BASE_URL}/api/workspaces/${wsId}/tasks/${noLogsTaskId}/logs`)
 
       expect(response.ok()).toBe(true)
 
@@ -63,7 +81,8 @@ test.describe('Task Logs API', () => {
 
   test.describe('Snapshot Logs', () => {
     test('GET /api/tasks/:id/logs/:phase returns log snapshot', async ({ request }) => {
-      const response = await request.get(`/api/tasks/${testTaskId}/logs/planning`)
+      const wsId = await getWorkspaceId(request)
+      const response = await request.get(`${BASE_URL}/api/workspaces/${wsId}/tasks/${testTaskId}/logs/planning`)
 
       if (response.ok()) {
         const body = (await response.json()) as LogContentResponse
@@ -79,7 +98,8 @@ test.describe('Task Logs API', () => {
     })
 
     test('phase endpoint supports ?lines=N parameter', async ({ request }) => {
-      const response = await request.get(`/api/tasks/${testTaskId}/logs/implementation?lines=50`)
+      const wsId = await getWorkspaceId(request)
+      const response = await request.get(`${BASE_URL}/api/workspaces/${wsId}/tasks/${testTaskId}/logs/implementation?lines=50`)
 
       if (response.ok()) {
         const body = (await response.json()) as LogContentResponse
@@ -91,7 +111,8 @@ test.describe('Task Logs API', () => {
     })
 
     test('invalid phase name returns 400', async ({ request }) => {
-      const response = await request.get(`/api/tasks/${testTaskId}/logs/invalid-phase`)
+      const wsId = await getWorkspaceId(request)
+      const response = await request.get(`${BASE_URL}/api/workspaces/${wsId}/tasks/${testTaskId}/logs/invalid-phase`)
 
       expect(response.status()).toBe(400)
       const body = (await response.json()) as LogContentResponse
@@ -102,8 +123,9 @@ test.describe('Task Logs API', () => {
 
   test.describe('Input Validation', () => {
     test('invalid task ID returns 400', async ({ request }) => {
+      const wsId = await getWorkspaceId(request)
       const response = await request.get(
-        `/api/tasks/${encodeURIComponent(invalidTaskId)}/logs`
+        `${BASE_URL}/api/workspaces/${wsId}/tasks/${encodeURIComponent(invalidTaskId)}/logs`
       )
 
       expect(response.status()).toBe(400)
@@ -113,8 +135,9 @@ test.describe('Task Logs API', () => {
     })
 
     test('invalid task ID on phase endpoint returns 400', async ({ request }) => {
+      const wsId = await getWorkspaceId(request)
       const response = await request.get(
-        `/api/tasks/${encodeURIComponent(invalidTaskId)}/logs/planning`
+        `${BASE_URL}/api/workspaces/${wsId}/tasks/${encodeURIComponent(invalidTaskId)}/logs/planning`
       )
 
       expect(response.status()).toBe(400)

@@ -5,25 +5,9 @@
 
 import { useCallback, useRef } from "react";
 
+import type { ViewMode } from "@/types/common";
+
 import styles from "./ViewSwitcher.module.css";
-
-/**
- * Available view modes.
- */
-export type ViewMode =
-  | "kanban"
-  | "table"
-  | "graph"
-  | "monitor"
-  | "observability"
-  | "terminal"
-  | "settings"
-  | "files";
-
-/**
- * Default view when none is specified.
- */
-export const DEFAULT_VIEW: ViewMode = "kanban";
 
 /**
  * View configuration.

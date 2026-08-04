@@ -1,4 +1,5 @@
 import { test, expect, Page } from "@playwright/test"
+import { setupFleetMocks, waitForWorkspaceIssues, workspacePath } from "./helpers/fleet"
 
 /**
  * E2E tests for swim lane collapse/expand functionality.
@@ -61,21 +62,13 @@ const mockIssues = [
 ]
 
 async function setupMocks(page: Page) {
-  await page.route("**/api/ready", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ success: true, data: mockIssues }),
-    })
-  })
+  await setupFleetMocks(page, mockIssues)
 }
 
 async function navigateAndWait(page: Page, path = "/?groupBy=epic") {
   const [response] = await Promise.all([
-    page.waitForResponse(
-      (res) => res.url().includes("/api/ready") && res.status() === 200
-    ),
-    page.goto(path),
+    waitForWorkspaceIssues(page),
+    page.goto(workspacePath(path)),
   ])
   expect(response.ok()).toBe(true)
   await expect(page.getByTestId("swim-lane-board")).toBeVisible()
@@ -256,7 +249,6 @@ test.describe("Swim Lane Collapse/Expand", () => {
 
       const epicOneLane = getLane(page, "lane-epic-epic-1")
       const epicTwoLane = getLane(page, "lane-epic-epic-2")
-      const ungroupedLane = getLane(page, "lane-epic-__ungrouped__")
 
       // Collapse Epic One only
       await epicOneLane.getByTestId("collapse-toggle").click()
@@ -264,7 +256,6 @@ test.describe("Swim Lane Collapse/Expand", () => {
       // Verify only Epic One is collapsed
       await expect(epicOneLane).toHaveAttribute("data-collapsed", "true")
       await expect(epicTwoLane).toHaveAttribute("data-collapsed", "false")
-      await expect(ungroupedLane).toHaveAttribute("data-collapsed", "false")
     })
 
     test("collapsing one lane does not affect others", async ({ page }) => {

@@ -6,6 +6,34 @@ allowed-tools: Bash(npx agent-browser:*), Bash(agent-browser:*)
 
 # Browser Automation with agent-browser
 
+## Local Environment Setup (IMPORTANT)
+
+This machine is configured with a specific agent-browser setup — **do not use snap Chromium** (it was removed due to CDP hangs from cgroup isolation).
+
+**Default configuration:**
+- `~/.agent-browser/config.json` contains `{"cdp": "9222", "executablePath": "/home/admin/.cache/ms-playwright/chromium-1217/chrome-linux/chrome"}`
+- agent-browser connects to a long-running Playwright Chromium on port 9222 by default — no `--cdp` flag needed
+- Note: `cdp` must be a **string** in config, not an integer (silent parse failure otherwise)
+
+**Before running any agent-browser command, verify port 9222 is up:**
+```bash
+curl -s http://localhost:9222/json/version
+```
+
+**If Chrome is not running on 9222, launch it:**
+```bash
+/home/admin/.cache/ms-playwright/chromium-1217/chrome-linux/chrome \
+  --headless --no-sandbox --disable-gpu --remote-debugging-port=9222 &
+```
+
+Chrome on port 9222 does NOT auto-start on reboot — it must be relaunched manually each session (unless a systemd user service is added).
+
+**Troubleshooting:**
+- `"Chrome not found"` → Chromium isn't running on 9222, relaunch it
+- `"--executable-path ignored: daemon already running"` → run `agent-browser close` first
+- Daemon hangs / `Resource temporarily unavailable` → `kill -9` the `agent-browser-linux-*` pid, `rm -rf /tmp/agent-browser-chrome-*`, then retry
+- Never reinstall snap chromium — CDP hangs due to cgroup isolation
+
 ## Core Workflow
 
 Every browser automation follows this pattern:

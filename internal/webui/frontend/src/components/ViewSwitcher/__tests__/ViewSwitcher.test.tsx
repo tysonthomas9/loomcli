@@ -10,7 +10,9 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 
 import "@testing-library/jest-dom";
-import { ViewSwitcher, DEFAULT_VIEW } from "../ViewSwitcher";
+import { DEFAULT_VIEW } from "@/types";
+
+import { ViewSwitcher } from "../ViewSwitcher";
 
 describe("ViewSwitcher", () => {
   describe("rendering", () => {

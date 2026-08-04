@@ -6,7 +6,7 @@ import (
 )
 
 var (
-	enabled     = os.Getenv("BD_DEBUG") != ""
+	enabled     = os.Getenv("LOOM_DEBUG") != ""
 	verboseMode = false
 	quietMode   = false
 )
