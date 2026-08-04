@@ -8,9 +8,9 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -191,24 +191,26 @@ func (s *sessionServiceImpl) taskRunArtifactKinds(
 	ctx context.Context,
 	wsID, taskID string,
 ) taskRunArtifactKinds {
-	if s.store == nil || s.store.Artifacts() == nil {
+	if s.artifacts == nil {
 		return nil
 	}
-	artifacts, err := s.store.Artifacts().List(ctx, wsID, store.ArtifactFilter{
-		TaskID: taskID,
-		Status: "finalized",
+	artifactValues, err := s.artifacts.ListArtifacts(ctx, artifactsmodule.SearchQuery{
+		WorkspaceKey: wsID,
+		Filter: artifactsmodule.SearchFilter{
+			TaskID: taskID, DurableStatus: artifactsmodule.StatusFinalized,
+		},
 	})
 	if err != nil {
 		logger.Warn("failed to load execution task run artifact flags", "workspace_id", wsID, "task_id", taskID, "err", err)
 		return nil
 	}
 	kinds := make(taskRunArtifactKinds)
-	for _, artifact := range artifacts {
+	for _, artifact := range artifactValues {
 		if artifact == nil || strings.TrimSpace(artifact.WorkspaceKey) != strings.TrimSpace(wsID) ||
 			strings.TrimSpace(artifact.TaskID) != strings.TrimSpace(taskID) ||
-			strings.TrimSpace(artifact.OwnerType) != "task_run" ||
+			artifact.OwnerType != artifactsmodule.OwnerTaskRun ||
 			strings.TrimSpace(artifact.OwnerID) == "" ||
-			strings.TrimSpace(artifact.DurableStatus) != "finalized" {
+			artifact.DurableStatus != artifactsmodule.StatusFinalized {
 			continue
 		}
 		if kinds[artifact.OwnerID] == nil {
@@ -306,7 +308,7 @@ func (s *sessionServiceImpl) executionTaskRunDiff(
 		if errors.Is(err, domain.ErrNotFound) {
 			return "", service.ErrNotFound("diff not found")
 		}
-		if errors.Is(err, store.ErrArtifactContentUnavailable) {
+		if errors.Is(err, artifactsmodule.ErrContentUnavailable) {
 			return "", service.ErrUnavailable("diff content is temporarily unavailable")
 		}
 		return "", sessionControlPlaneReadError(
@@ -323,14 +325,15 @@ func (s *sessionServiceImpl) artifactIDForExecutionTaskRun(
 	run *domain.TaskRun,
 	artifactType string,
 ) (string, error) {
-	if run == nil || s.store == nil || s.store.Artifacts() == nil {
+	if run == nil || s.artifacts == nil {
 		return "", nil
 	}
-	artifacts, err := s.store.Artifacts().List(ctx, wsID, store.ArtifactFilter{
-		OwnerType: "task_run",
-		OwnerID:   run.TaskRunID,
-		Type:      artifactType,
-		Status:    "finalized",
+	artifactValues, err := s.artifacts.ListArtifacts(ctx, artifactsmodule.SearchQuery{
+		WorkspaceKey: wsID,
+		Filter: artifactsmodule.SearchFilter{
+			OwnerType: artifactsmodule.OwnerTaskRun, OwnerID: run.TaskRunID,
+			Type: artifactType, DurableStatus: artifactsmodule.StatusFinalized,
+		},
 	})
 	if err != nil {
 		return "", sessionControlPlaneReadError(
@@ -338,7 +341,7 @@ func (s *sessionServiceImpl) artifactIDForExecutionTaskRun(
 			err,
 		)
 	}
-	for _, artifact := range artifacts {
+	for _, artifact := range artifactValues {
 		if artifact == nil {
 			continue
 		}
@@ -360,10 +363,10 @@ func (s *sessionServiceImpl) readOwnedExecutionTaskRunArtifact(
 		return nil, domain.ErrNotFound
 	}
 	artifactID := strings.TrimSpace(strings.TrimPrefix(ref, "artifact://"))
-	if artifactID == "" || s.store == nil || s.store.Artifacts() == nil {
+	if artifactID == "" || s.artifacts == nil {
 		return nil, domain.ErrNotFound
 	}
-	artifact, err := s.store.Artifacts().Get(ctx, wsID, artifactID)
+	artifact, err := s.artifacts.GetArtifact(ctx, artifactsmodule.Query{WorkspaceKey: wsID, ArtifactID: artifactID})
 	if err != nil {
 		return nil, err
 	}
@@ -374,7 +377,7 @@ func (s *sessionServiceImpl) readOwnedExecutionTaskRunArtifact(
 }
 
 func executionTaskRunArtifactMatches(
-	artifact *domain.Artifact,
+	artifact *artifactsmodule.Artifact,
 	run *domain.TaskRun,
 	wsID, artifactID, artifactType string,
 ) bool {
@@ -383,8 +386,8 @@ func executionTaskRunArtifactMatches(
 		strings.TrimSpace(run.WorkspaceKey) == strings.TrimSpace(wsID) &&
 		strings.TrimSpace(artifact.ArtifactID) == strings.TrimSpace(artifactID) &&
 		strings.TrimSpace(artifact.TaskID) == strings.TrimSpace(run.TaskID) &&
-		strings.TrimSpace(artifact.OwnerType) == "task_run" &&
+		artifact.OwnerType == artifactsmodule.OwnerTaskRun &&
 		strings.TrimSpace(artifact.OwnerID) == strings.TrimSpace(run.TaskRunID) &&
 		strings.TrimSpace(artifact.Type) == strings.TrimSpace(artifactType) &&
-		strings.TrimSpace(artifact.DurableStatus) == "finalized"
+		artifact.DurableStatus == artifactsmodule.StatusFinalized
 }

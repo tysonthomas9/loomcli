@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -86,7 +86,7 @@ func (s *sessionServiceImpl) controlPlaneSessionDiff(ctx context.Context, wsID, 
 		if errors.Is(err, domain.ErrNotFound) {
 			return "", service.ErrNotFound("diff not found")
 		}
-		if errors.Is(err, store.ErrArtifactContentUnavailable) {
+		if errors.Is(err, artifactsmodule.ErrContentUnavailable) {
 			return "", service.ErrUnavailable("diff content is temporarily unavailable")
 		}
 		return "", sessionControlPlaneReadError(
@@ -119,15 +119,15 @@ func normalizeArtifactRef(ref string) string {
 
 func (s *sessionServiceImpl) diffArtifactIDForTaskRun(ctx context.Context, wsID, taskRunID string) (string, error) {
 	taskRunID = strings.TrimSpace(taskRunID)
-	if taskRunID == "" || s.store == nil {
+	if taskRunID == "" || s.artifacts == nil {
 		return "", nil
 	}
-	artifacts, err := s.store.Artifacts().List(ctx, wsID, store.ArtifactFilter{
-		OwnerType: "task_run",
-		OwnerID:   taskRunID,
-		Type:      "patch",
-		Status:    "finalized",
-		Limit:     1,
+	artifactValues, err := s.artifacts.ListArtifacts(ctx, artifactsmodule.SearchQuery{
+		WorkspaceKey: wsID,
+		Filter: artifactsmodule.SearchFilter{
+			OwnerType: artifactsmodule.OwnerTaskRun, OwnerID: taskRunID,
+			Type: "patch", DurableStatus: artifactsmodule.StatusFinalized, Limit: 1,
+		},
 	})
 	if err != nil {
 		return "", sessionControlPlaneReadError(
@@ -135,7 +135,7 @@ func (s *sessionServiceImpl) diffArtifactIDForTaskRun(ctx context.Context, wsID,
 			err,
 		)
 	}
-	for _, artifact := range artifacts {
+	for _, artifact := range artifactValues {
 		if artifact != nil && strings.TrimSpace(artifact.ArtifactID) != "" {
 			return artifact.ArtifactID, nil
 		}

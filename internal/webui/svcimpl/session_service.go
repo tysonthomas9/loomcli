@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/infra/artifactcatalog"
+	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript/backends"
@@ -37,7 +39,7 @@ func sessionControlPlaneReadError(message string, err error) error {
 			message,
 			err,
 		)
-	case errors.Is(err, domain.ErrUnavailable):
+	case errors.Is(err, domain.ErrUnavailable), errors.Is(err, artifactsmodule.ErrUnavailable):
 		return service.NewServiceError(
 			service.KindUnavailable,
 			message,
@@ -51,6 +53,7 @@ func sessionControlPlaneReadError(message string, err error) error {
 // sessionServiceImpl is the concrete implementation of SessionService.
 type sessionServiceImpl struct {
 	store      store.Store
+	artifacts  artifactsmodule.QueryAPI
 	histStore  *sessionhistory.Store
 	runtimeDir string
 }
@@ -63,7 +66,32 @@ func NewSessionService(st store.Store, histStore *sessionhistory.Store) service.
 // NewSessionServiceWithRuntimeDir creates a SessionService that also searches
 // the daemon/runtime session store used by local desktop mode.
 func NewSessionServiceWithRuntimeDir(st store.Store, histStore *sessionhistory.Store, runtimeDir string) service.SessionService {
-	return &sessionServiceImpl{store: st, histStore: histStore, runtimeDir: runtimeDir}
+	return NewSessionServiceWithArtifactQueries(st, histStore, runtimeDir, composeArtifactQueries(st))
+}
+
+// NewSessionServiceWithArtifactQueries composes session UI projections over
+// the Artifacts owner query surface. Production and boundary tests can inject
+// the capability directly; legacy constructors above retain compatibility by
+// adapting the composite Store once at composition time.
+func NewSessionServiceWithArtifactQueries(
+	st store.Store,
+	histStore *sessionhistory.Store,
+	runtimeDir string,
+	artifactQueries artifactsmodule.QueryAPI,
+) service.SessionService {
+	return &sessionServiceImpl{store: st, artifacts: artifactQueries, histStore: histStore, runtimeDir: runtimeDir}
+}
+
+func composeArtifactQueries(st store.Store) artifactsmodule.QueryAPI {
+	catalog, err := artifactcatalog.FromProvider(st)
+	if err != nil {
+		return nil
+	}
+	queries, err := artifactsmodule.NewQuery(catalog)
+	if err != nil {
+		return nil
+	}
+	return queries
 }
 
 // storesForWorkspace returns session stores for all repos in the workspace.

@@ -170,6 +170,15 @@ type SessionAPI interface {
 	CreateContent(context.Context, SessionContentAuthorities, SessionOwner, SessionContentCommand) (*Artifact, error)
 }
 
+// QueryAPI is the general read-only Artifacts surface consumed by product
+// projections. Metadata reads are workspace-scoped; callers must validate the
+// returned owner tuple before requesting bytes for a task or session view.
+type QueryAPI interface {
+	GetArtifact(context.Context, Query) (*Artifact, error)
+	ListArtifacts(context.Context, SearchQuery) ([]*Artifact, error)
+	ReadArtifactContent(context.Context, Query) ([]byte, error)
+}
+
 // API is the minimal Phase 4 Artifacts lifecycle surface.
 type API interface {
 	Create(context.Context, authority.ExecutionAuthority, ExecutionOwner, CreateCommand) (*Artifact, error)

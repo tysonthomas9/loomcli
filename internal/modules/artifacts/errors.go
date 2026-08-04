@@ -15,6 +15,9 @@ var (
 	ErrInvalidTransition = errors.New("artifacts: invalid transition")
 	// ErrUnavailable means the owner-scoped durable command port is unavailable.
 	ErrUnavailable = errors.New("artifacts: unavailable")
+	// ErrContentUnavailable means metadata is durable but the managed content
+	// plane cannot currently serve the artifact bytes.
+	ErrContentUnavailable = errors.New("artifacts: content unavailable")
 	// ErrInvalidPersistedState means durable storage returned data outside the
 	// execution-scoped ownership contract.
 	ErrInvalidPersistedState = errors.New("artifacts: invalid persisted state")

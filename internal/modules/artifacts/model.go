@@ -67,6 +67,34 @@ type ReferenceResult struct {
 	Reference *ArtifactReference
 }
 
+// Query identifies one Artifact within a workspace. Read-only callers never
+// provide an execution lease or session credential; their consuming feature
+// remains responsible for applying its own task/session visibility policy to
+// the returned owner projection before requesting content.
+type Query struct {
+	WorkspaceKey string
+	ArtifactID   string
+}
+
+// SearchFilter is the general read-only Artifacts query vocabulary used by UI
+// projections. Every nonempty field is an exact filter and is revalidated on
+// every returned row by the owner service.
+type SearchFilter struct {
+	AgentID       string
+	SessionID     string
+	TaskID        string
+	OwnerType     OwnerType
+	OwnerID       string
+	Type          string
+	DurableStatus DurableStatus
+	Limit         int
+}
+
+type SearchQuery struct {
+	WorkspaceKey string
+	Filter       SearchFilter
+}
+
 func cloneArtifact(in *Artifact) *Artifact {
 	if in == nil {
 		return nil

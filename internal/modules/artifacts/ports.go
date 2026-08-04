@@ -26,3 +26,12 @@ type SessionStore interface {
 	FinalizeSession(context.Context, SessionOwner, FinalizeCommand) (*Artifact, error)
 	GetSession(context.Context, SessionOwner, GetQuery) (*Artifact, error)
 }
+
+// QueryStore is the Artifacts-owned general read port. It is deliberately
+// separate from owner-fenced lifecycle stores so a UI reader cannot acquire a
+// mutation method or manufacture execution/session authority.
+type QueryStore interface {
+	GetArtifactRecord(context.Context, string, string) (*Artifact, error)
+	ListArtifactRecords(context.Context, string, SearchFilter) ([]*Artifact, error)
+	ReadArtifactContent(context.Context, string, string) ([]byte, error)
+}

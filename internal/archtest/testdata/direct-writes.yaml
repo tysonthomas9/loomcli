@@ -1,6 +1,6 @@
 schema_version: 1
 status: complete
-source_head: e6b84374b5f75c8c130864edd86c0beef8c16b57
+source_head: 9b588d1210c29cc11efec16707ba112ae4518311
 adapter_roots:
   - internal/app
   - internal/cli
@@ -53,7 +53,7 @@ persistence_packages:
     receiver_names: [AgentIdentityStore, BootstrapStore, DesiredStateStore, LifecycleStore, OwnershipStore, RolePromptRepairStore, RoleStore]
     receiver_suffixes: []
   - path: github.com/tysonthomas9/loomcli/internal/modules/artifacts
-    receiver_names: [SessionStore, Store]
+    receiver_names: [QueryStore, SessionStore, Store]
     receiver_suffixes: []
   - path: github.com/tysonthomas9/loomcli/internal/modules/automation
     receiver_names: [AdmissionStore, BindingStore, ManagedBindingStore, UnmanagedBindingStore]
@@ -123,6 +123,9 @@ method_sets:
   - name: artifacts_port
     read_only: [Get, List]
     mutating: [Create, Finalize, Reference, Upload]
+  - name: artifacts_query
+    read_only: [GetArtifactRecord, ListArtifactRecords, ReadArtifactContent]
+    mutating: []
   - name: artifacts_session_port
     read_only: [GetSession]
     mutating: [CreateSession, FinalizeSession, UploadSession]
@@ -478,6 +481,10 @@ receiver_surfaces:
     package: github.com/tysonthomas9/loomcli/internal/modules/agents
     method_set: agents_roles
     capability_owner: agents
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/artifacts.QueryStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/artifacts
+    method_set: artifacts_query
+    capability_owner: artifacts
   - receiver: github.com/tysonthomas9/loomcli/internal/modules/artifacts.SessionStore
     package: github.com/tysonthomas9/loomcli/internal/modules/artifacts
     method_set: artifacts_session_port
@@ -821,6 +828,10 @@ function_surfaces:
     capability_owner: agents
   - package: github.com/tysonthomas9/loomcli/internal/modules/artifacts
     function: New
+    access: read-only
+    capability_owner: artifacts
+  - package: github.com/tysonthomas9/loomcli/internal/modules/artifacts
+    function: NewQuery
     access: read-only
     capability_owner: artifacts
   - package: github.com/tysonthomas9/loomcli/internal/modules/artifacts

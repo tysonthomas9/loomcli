@@ -11,8 +11,8 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -146,7 +146,7 @@ func loadCanonicalTranscriptArtifact(
 		if errors.Is(err, os.ErrNotExist) || errors.Is(err, domain.ErrNotFound) {
 			return nil, service.ErrNotFound("transcript content is no longer available")
 		}
-		if errors.Is(err, store.ErrArtifactContentUnavailable) {
+		if errors.Is(err, artifactsmodule.ErrContentUnavailable) {
 			return nil, service.ErrUnavailable("transcript content is temporarily unavailable")
 		}
 		return nil, sessionControlPlaneReadError(
@@ -174,10 +174,10 @@ func (s *sessionServiceImpl) readOwnedAgentTranscriptArtifact(
 	if rec == nil || !ok {
 		return nil, domain.ErrNotFound
 	}
-	if artifactID == "" || s.store == nil || s.store.Artifacts() == nil {
+	if artifactID == "" || s.artifacts == nil {
 		return nil, domain.ErrNotFound
 	}
-	artifact, err := s.store.Artifacts().Get(ctx, wsID, artifactID)
+	artifact, err := s.artifacts.GetArtifact(ctx, artifactsmodule.Query{WorkspaceKey: wsID, ArtifactID: artifactID})
 	if err != nil {
 		return nil, err
 	}
@@ -187,19 +187,15 @@ func (s *sessionServiceImpl) readOwnedAgentTranscriptArtifact(
 		(strings.TrimSpace(artifact.AgentID) != "" &&
 			strings.TrimSpace(artifact.AgentID) != strings.TrimSpace(rec.AgentID)) ||
 		strings.TrimSpace(artifact.SessionID) != strings.TrimSpace(rec.SessionID) ||
-		strings.TrimSpace(artifact.OwnerType) != "session" ||
+		artifact.OwnerType != artifactsmodule.OwnerSession ||
 		strings.TrimSpace(artifact.OwnerID) != strings.TrimSpace(rec.SessionID) ||
 		strings.TrimSpace(artifact.Type) != "transcript" ||
-		strings.TrimSpace(artifact.DurableStatus) != "finalized" {
+		artifact.DurableStatus != artifactsmodule.StatusFinalized {
 		return nil, domain.ErrNotFound
 	}
-	if reader, ok := s.store.Artifacts().(store.ArtifactContentReader); ok {
-		// A content-capable store owns the managed blob lifecycle. Missing
-		// managed content is authoritative and must remain a clean 404; falling
-		// through to a stale URI can turn it into a misleading 500.
-		return reader.ReadContent(ctx, wsID, artifactID)
-	}
-	return nil, store.ErrArtifactContentUnavailable
+	// Missing managed content is authoritative and must remain a clean 404;
+	// falling through to a stale URI can turn it into a misleading 500.
+	return s.artifacts.ReadArtifactContent(ctx, artifactsmodule.Query{WorkspaceKey: wsID, ArtifactID: artifactID})
 }
 
 func (s *sessionServiceImpl) readOwnedTaskSessionTranscriptArtifact(
@@ -212,10 +208,10 @@ func (s *sessionServiceImpl) readOwnedTaskSessionTranscriptArtifact(
 	if rec == nil || !ok {
 		return nil, domain.ErrNotFound
 	}
-	if artifactID == "" || s.store == nil || s.store.Artifacts() == nil {
+	if artifactID == "" || s.artifacts == nil {
 		return nil, domain.ErrNotFound
 	}
-	artifact, err := s.store.Artifacts().Get(ctx, wsID, artifactID)
+	artifact, err := s.artifacts.GetArtifact(ctx, artifactsmodule.Query{WorkspaceKey: wsID, ArtifactID: artifactID})
 	if err != nil {
 		return nil, err
 	}
@@ -246,7 +242,7 @@ func transcriptArtifactID(ref string) (string, bool) {
 }
 
 func taskSessionTranscriptArtifactMatches(
-	artifact *domain.Artifact,
+	artifact *artifactsmodule.Artifact,
 	rec *domain.AgentSession,
 	wsID, artifactID, taskID string,
 ) bool {
@@ -255,23 +251,23 @@ func taskSessionTranscriptArtifactMatches(
 		strings.TrimSpace(artifact.ArtifactID) != artifactID ||
 		strings.TrimSpace(artifact.TaskID) != taskID ||
 		strings.TrimSpace(artifact.Type) != "transcript" ||
-		strings.TrimSpace(artifact.DurableStatus) != "finalized" {
+		artifact.DurableStatus != artifactsmodule.StatusFinalized {
 		return false
 	}
 	return taskSessionTranscriptArtifactOwnerMatches(artifact, rec)
 }
 
 func taskSessionTranscriptArtifactOwnerMatches(
-	artifact *domain.Artifact,
+	artifact *artifactsmodule.Artifact,
 	rec *domain.AgentSession,
 ) bool {
-	switch strings.TrimSpace(artifact.OwnerType) {
-	case "session":
+	switch artifact.OwnerType {
+	case artifactsmodule.OwnerSession:
 		return strings.TrimSpace(artifact.OwnerID) == strings.TrimSpace(rec.SessionID) &&
 			strings.TrimSpace(artifact.SessionID) == strings.TrimSpace(rec.SessionID) &&
 			(strings.TrimSpace(artifact.AgentID) == "" ||
 				strings.TrimSpace(artifact.AgentID) == strings.TrimSpace(rec.AgentID))
-	case "task_run":
+	case artifactsmodule.OwnerTaskRun:
 		return taskRunArtifactMatchesSession(artifact, rec)
 	default:
 		return false
@@ -285,14 +281,14 @@ func (s *sessionServiceImpl) readOwnedTaskRunArtifact(
 	artifactID, artifactType string,
 ) ([]byte, error) {
 	artifactID = strings.TrimSpace(artifactID)
-	if rec == nil || artifactID == "" || s.store == nil || s.store.Artifacts() == nil {
+	if rec == nil || artifactID == "" || s.artifacts == nil {
 		return nil, domain.ErrNotFound
 	}
 	taskID := agentSessionTaskID(rec)
 	if taskID == "" {
 		return nil, domain.ErrNotFound
 	}
-	artifact, err := s.store.Artifacts().Get(ctx, wsID, artifactID)
+	artifact, err := s.artifacts.GetArtifact(ctx, artifactsmodule.Query{WorkspaceKey: wsID, ArtifactID: artifactID})
 	if err != nil {
 		return nil, err
 	}
@@ -301,14 +297,14 @@ func (s *sessionServiceImpl) readOwnedTaskRunArtifact(
 		strings.TrimSpace(artifact.ArtifactID) != artifactID ||
 		strings.TrimSpace(artifact.TaskID) != taskID ||
 		strings.TrimSpace(artifact.Type) != artifactType ||
-		strings.TrimSpace(artifact.DurableStatus) != "finalized" ||
+		artifact.DurableStatus != artifactsmodule.StatusFinalized ||
 		!taskRunArtifactMatchesSession(artifact, rec) {
 		return nil, domain.ErrNotFound
 	}
 	return s.readManagedArtifactContent(ctx, wsID, artifactID)
 }
 
-func taskRunArtifactMatchesSession(artifact *domain.Artifact, rec *domain.AgentSession) bool {
+func taskRunArtifactMatchesSession(artifact *artifactsmodule.Artifact, rec *domain.AgentSession) bool {
 	if artifact == nil || rec == nil {
 		return false
 	}
@@ -317,7 +313,7 @@ func taskRunArtifactMatchesSession(artifact *domain.Artifact, rec *domain.AgentS
 		taskRunID = strings.TrimSpace(rec.Metadata["task_run_id"])
 	}
 	return taskRunID != "" &&
-		strings.TrimSpace(artifact.OwnerType) == "task_run" &&
+		artifact.OwnerType == artifactsmodule.OwnerTaskRun &&
 		strings.TrimSpace(artifact.OwnerID) == taskRunID &&
 		(artifact.SessionID == "" ||
 			strings.TrimSpace(artifact.SessionID) == strings.TrimSpace(rec.SessionID))
@@ -338,11 +334,10 @@ func (s *sessionServiceImpl) readManagedArtifactContent(
 	ctx context.Context,
 	wsID, artifactID string,
 ) ([]byte, error) {
-	reader, ok := s.store.Artifacts().(store.ArtifactContentReader)
-	if !ok {
-		return nil, store.ErrArtifactContentUnavailable
+	if s.artifacts == nil {
+		return nil, artifactsmodule.ErrContentUnavailable
 	}
-	return reader.ReadContent(ctx, wsID, artifactID)
+	return s.artifacts.ReadArtifactContent(ctx, artifactsmodule.Query{WorkspaceKey: wsID, ArtifactID: artifactID})
 }
 
 func parseCanonicalTranscriptBytes(data []byte) ([]transcript.Event, error) {

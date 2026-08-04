@@ -15,11 +15,17 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/sessions/eventstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
+
+func TestSessionControlPlaneReadErrorMapsArtifactsUnavailable(t *testing.T) {
+	err := sessionControlPlaneReadError("artifact query failed", artifactsmodule.ErrUnavailable)
+	assertServiceErrorKind(t, err, service.KindUnavailable)
+}
 
 func TestSessionServiceListTaskSessionsUsesControlPlane(t *testing.T) {
 	st := memstore.New()
