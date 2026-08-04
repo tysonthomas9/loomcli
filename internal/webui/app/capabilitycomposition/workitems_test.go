@@ -4,10 +4,30 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
+
+type claimOnlyBackend struct {
+	backend.IssueBackend
+	claimCalls int
+	getCalls   int
+}
+
+func (b *claimOnlyBackend) ClaimIssue(_ context.Context, id string, ttl time.Duration) error {
+	b.claimCalls++
+	if id != "TASK-1" || ttl != 0 {
+		return errors.New("unexpected claim input")
+	}
+	return nil
+}
+
+func (b *claimOnlyBackend) Get(_ context.Context, id string) (*backend.IssueDetailData, error) {
+	b.getCalls++
+	return &backend.IssueDetailData{IssueData: backend.IssueData{ID: id, Status: "in_progress", Labels: []string{}}}, nil
+}
 
 func TestNewWorkItemsWithoutProviderRemainsUnavailable(t *testing.T) {
 	api, err := NewWorkItems(nil)
@@ -45,5 +65,20 @@ func TestWorkItemsBackendStoreRejectsMissingBackend(t *testing.T) {
 	_, err := store.AddComment(context.Background(), workitems.AddCommentCommand{IssueID: "TASK-1", Text: "hello"})
 	if !errors.Is(err, workitems.ErrUnavailable) {
 		t.Fatalf("expected unavailable, got %v", err)
+	}
+}
+
+func TestWorkItemsClaimUsesOneAtomicMutationThenRead(t *testing.T) {
+	be := &claimOnlyBackend{}
+	api, err := NewWorkItems(func(context.Context) backend.IssueBackend { return be })
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := api.Claim(context.Background(), workitems.ClaimCommand{IssueID: "TASK-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "in_progress" || be.claimCalls != 1 || be.getCalls != 1 {
+		t.Fatalf("unexpected claim result=%#v claimCalls=%d getCalls=%d", result, be.claimCalls, be.getCalls)
 	}
 }

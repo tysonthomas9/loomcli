@@ -63,26 +63,26 @@ func (m *IssueModule) Register(mux *http.ServeMux) {
 	// Search — must register alongside {id} because Go 1.22+ ServeMux prefers
 	// the literal "search" segment over the {id} wildcard, so this will route
 	// correctly even though both patterns share the same prefix.
-	mux.HandleFunc("GET /api/workspaces/{ws}/issues/search", HandleSearchIssues(m.svc))
+	mux.HandleFunc("GET /api/workspaces/{ws}/issues/search", HandleSearchWorkItems(m.workItems))
 
 	// Issue CRUD
-	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}", HandleGetIssue(m.svc))
+	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}", HandleGetWorkItem(m.workItems))
 	mux.HandleFunc("GET /api/workspaces/{ws}/issues", HandleListIssues(m.svc))
 	mux.HandleFunc("POST /api/workspaces/{ws}/issues", HandleCreateIssue(m.svc))
 	mux.HandleFunc("PATCH /api/workspaces/{ws}/issues/{id}", HandlePatchIssue(m.svc))
 	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/close", HandleCloseIssue(m.svc))
-	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/reopen", HandleReopenIssue(m.svc))
+	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/reopen", HandleReopenWorkItem(m.workItems))
 	mux.HandleFunc("PUT /api/workspaces/{ws}/issues/{id}/repository", HandleSetIssueRepository(m.repositorySvc))
-	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/claim", HandleClaimIssue(m.svc))
+	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/claim", HandleClaimWorkItem(m.workItems))
 	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/move", HandleMoveIssue(m.svc, m.store))
-	mux.HandleFunc("DELETE /api/workspaces/{ws}/issues/{id}", HandleDeleteIssue(m.svc))
+	mux.HandleFunc("DELETE /api/workspaces/{ws}/issues/{id}", HandleDeleteWorkItem(m.workItems))
 
 	// Comments
 	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/comments", HandleListWorkItemComments(m.workItems))
 	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/comments", HandleAddWorkItemComment(m.workItems))
 
 	// Events
-	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/events", HandleGetIssueEvents(m.svc))
+	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/events", HandleGetWorkItemEvents(m.workItems))
 
 	// Dependencies
 	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/dependencies", HandleListWorkItemDependencies(m.workItems))

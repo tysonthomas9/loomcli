@@ -118,6 +118,37 @@ type routeWorkItems struct {
 	addDependencyCalls  int
 	removeDependencyIDs []string
 	listDependencyCalls int
+	searchCalls         int
+	getIDs              []string
+	claimIDs            []string
+	reopenIDs           []string
+	deleteIDs           []string
+	eventCalls          int
+}
+
+func (f *routeWorkItems) Search(context.Context, workitems.SearchQuery) ([]workitems.IssueSummary, error) {
+	f.searchCalls++
+	return []workitems.IssueSummary{}, nil
+}
+func (f *routeWorkItems) Get(_ context.Context, query workitems.GetQuery) (*workitems.IssueDetail, error) {
+	f.getIDs = append(f.getIDs, query.IssueID)
+	return &workitems.IssueDetail{ID: query.IssueID, Status: "open", Labels: []string{}, Dependencies: []workitems.Dependency{}, Dependents: []workitems.Dependency{}, Comments: []*workitems.Comment{}}, nil
+}
+func (f *routeWorkItems) Claim(_ context.Context, command workitems.ClaimCommand) (*workitems.IssueDetail, error) {
+	f.claimIDs = append(f.claimIDs, command.IssueID)
+	return &workitems.IssueDetail{ID: command.IssueID, Status: "in_progress", Labels: []string{}, Dependencies: []workitems.Dependency{}, Dependents: []workitems.Dependency{}, Comments: []*workitems.Comment{}}, nil
+}
+func (f *routeWorkItems) Reopen(_ context.Context, command workitems.ReopenCommand) error {
+	f.reopenIDs = append(f.reopenIDs, command.IssueID)
+	return nil
+}
+func (f *routeWorkItems) Delete(_ context.Context, command workitems.DeleteCommand) (workitems.DeleteResult, error) {
+	f.deleteIDs = append(f.deleteIDs, command.IssueID)
+	return workitems.DeleteResult{DeletedCount: 1, DeletedIDs: []string{command.IssueID}}, nil
+}
+func (f *routeWorkItems) ListEvents(context.Context, workitems.ListEventsQuery) ([]*workitems.Event, error) {
+	f.eventCalls++
+	return []*workitems.Event{}, nil
 }
 
 func (f *routeWorkItems) AddComment(_ context.Context, command workitems.AddCommentCommand) (*workitems.Comment, error) {
@@ -144,6 +175,30 @@ func (f *routeWorkItems) ListDependencies(context.Context, workitems.ListDepende
 
 func TestIssueModule_WorkItemRoutesUseCapability(t *testing.T) {
 	legacy := &mockIssueService{
+		getIssueFunc: func(context.Context, string) (json.RawMessage, error) {
+			t.Fatal("legacy IssueService get path was called")
+			return nil, nil
+		},
+		claimIssueFunc: func(context.Context, service.ClaimIssueParams) (json.RawMessage, error) {
+			t.Fatal("legacy IssueService claim path was called")
+			return nil, nil
+		},
+		searchIssuesFunc: func(context.Context, service.SearchIssuesParams) (json.RawMessage, error) {
+			t.Fatal("legacy IssueService search path was called")
+			return nil, nil
+		},
+		reopenIssueFunc: func(context.Context, service.ReopenIssueParams) error {
+			t.Fatal("legacy IssueService reopen path was called")
+			return nil
+		},
+		deleteIssueFunc: func(context.Context, string) (json.RawMessage, error) {
+			t.Fatal("legacy IssueService delete path was called")
+			return nil, nil
+		},
+		listEventsFunc: func(context.Context, service.EventListParams) ([]*types.Event, error) {
+			t.Fatal("legacy IssueService list-events path was called")
+			return nil, nil
+		},
 		addCommentFunc: func(context.Context, service.AddCommentParams) (*types.Comment, error) {
 			t.Fatal("legacy IssueService add-comment path was called")
 			return nil, nil
@@ -176,6 +231,12 @@ func TestIssueModule_WorkItemRoutesUseCapability(t *testing.T) {
 		body   string
 		status int
 	}{
+		{http.MethodGet, "/api/workspaces/ws/issues/search?q=proof", "", http.StatusOK},
+		{http.MethodGet, "/api/workspaces/ws/issues/TASK-1", "", http.StatusOK},
+		{http.MethodPost, "/api/workspaces/ws/issues/TASK-1/claim", "", http.StatusOK},
+		{http.MethodPost, "/api/workspaces/ws/issues/TASK-1/reopen", `{}`, http.StatusOK},
+		{http.MethodDelete, "/api/workspaces/ws/issues/TASK-1", "", http.StatusOK},
+		{http.MethodGet, "/api/workspaces/ws/issues/TASK-1/events", "", http.StatusOK},
 		{http.MethodPost, "/api/workspaces/ws/issues/TASK-1/comments", `{"text":" proof "}`, http.StatusCreated},
 		{http.MethodGet, "/api/workspaces/ws/issues/TASK-1/comments", "", http.StatusOK},
 		{http.MethodPost, "/api/workspaces/ws/issues/TASK-1/dependencies", `{"depends_on_id":"TASK-2"}`, http.StatusOK},
@@ -193,7 +254,7 @@ func TestIssueModule_WorkItemRoutesUseCapability(t *testing.T) {
 	if capability.comment.IssueID != "TASK-1" || capability.comment.Text != " proof " {
 		t.Fatalf("route did not invoke Work Items API: %#v", capability.comment)
 	}
-	if capability.listCommentsCalls != 1 || capability.addDependencyCalls != 1 || capability.listDependencyCalls != 1 || len(capability.removeDependencyIDs) != 1 || capability.removeDependencyIDs[0] != "TASK-2" {
+	if capability.searchCalls != 1 || len(capability.getIDs) != 1 || capability.getIDs[0] != "TASK-1" || len(capability.claimIDs) != 1 || capability.claimIDs[0] != "TASK-1" || len(capability.reopenIDs) != 1 || capability.reopenIDs[0] != "TASK-1" || len(capability.deleteIDs) != 1 || capability.deleteIDs[0] != "TASK-1" || capability.eventCalls != 1 || capability.listCommentsCalls != 1 || capability.addDependencyCalls != 1 || capability.listDependencyCalls != 1 || len(capability.removeDependencyIDs) != 1 || capability.removeDependencyIDs[0] != "TASK-2" {
 		t.Fatalf("unexpected Work Items route calls: %#v", capability)
 	}
 }

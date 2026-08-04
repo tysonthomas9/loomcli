@@ -5,9 +5,36 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
+
+// HandleGetWorkItem reads one aggregate through the Work Items public API.
+func HandleGetWorkItem(api workitems.API) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		issueID := r.PathValue("id")
+		if issueID == "" {
+			handler.RespondError(w, http.StatusBadRequest, "missing issue ID")
+			return
+		}
+		if api == nil {
+			handler.HandleWorkItemsError(w, workitems.ErrUnavailable)
+			return
+		}
+		value, err := api.Get(r.Context(), workitems.GetQuery{IssueID: issueID})
+		if err != nil {
+			handler.HandleWorkItemsError(w, err)
+			return
+		}
+		data, err := json.Marshal(value)
+		if err != nil {
+			writeIssuesError(w, http.StatusInternalServerError, "failed to encode response", "ENCODE_ERROR")
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, IssuesResponse{Success: true, Data: data})
+	}
+}
 
 // IssuesResponse represents the response structure for the issues endpoint.
 type IssuesResponse struct {

@@ -210,34 +210,24 @@ type Label struct {
 // New capability callers import internal/modules/workitems directly.
 type Comment = workitems.Comment
 
-// Event represents an audit trail entry
-type Event struct {
-	ID        int64     `json:"id"`
-	IssueID   string    `json:"issue_id"`
-	EventType EventType `json:"event_type"`
-	Actor     string    `json:"actor"`
-	OldValue  *string   `json:"old_value,omitempty"`
-	NewValue  *string   `json:"new_value,omitempty"`
-	Comment   *string   `json:"comment,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-}
-
-// EventType categorizes audit trail events
-type EventType string
+// Event and EventType are compatibility aliases for the Work Items-owned
+// audit projection and vocabulary.
+type Event = workitems.Event
+type EventType = workitems.EventType
 
 // Event type constants for audit trail
 const (
-	EventCreated           EventType = "issue.created"
-	EventUpdated           EventType = "issue.updated"
-	EventStatusChanged     EventType = "issue.status_changed"
-	EventCommented         EventType = "issue.commented"
-	EventClosed            EventType = "issue.closed"
-	EventReopened          EventType = "issue.reopened"
-	EventDependencyAdded   EventType = "issue.dependency_added"
-	EventDependencyRemoved EventType = "issue.dependency_removed"
-	EventLabelAdded        EventType = "issue.label_added"
-	EventLabelRemoved      EventType = "issue.label_removed"
-	EventCompacted         EventType = "issue.compacted"
+	EventCreated           = workitems.EventCreated
+	EventUpdated           = workitems.EventUpdated
+	EventStatusChanged     = workitems.EventStatusChanged
+	EventCommented         = workitems.EventCommented
+	EventClosed            = workitems.EventClosed
+	EventReopened          = workitems.EventReopened
+	EventDependencyAdded   = workitems.EventDependencyAdded
+	EventDependencyRemoved = workitems.EventDependencyRemoved
+	EventLabelAdded        = workitems.EventLabelAdded
+	EventLabelRemoved      = workitems.EventLabelRemoved
+	EventCompacted         = workitems.EventCompacted
 )
 
 // BondRef tracks compound molecule lineage.

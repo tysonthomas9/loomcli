@@ -1,12 +1,41 @@
 package issues
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
+
+// HandleSearchWorkItems routes full-text search through the Work Items public
+// query surface and preserves the established raw JSON response envelope.
+func HandleSearchWorkItems(api workitems.API) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query().Get("q")
+		if query == "" {
+			writeIssuesError(w, http.StatusBadRequest, "missing search query 'q'", "MISSING_QUERY")
+			return
+		}
+		if api == nil {
+			handler.HandleWorkItemsError(w, workitems.ErrUnavailable)
+			return
+		}
+		values, err := api.Search(r.Context(), workitems.SearchQuery{Query: query, Limit: parseSearchLimit(r)})
+		if err != nil {
+			handler.HandleWorkItemsError(w, err)
+			return
+		}
+		data, err := json.Marshal(values)
+		if err != nil {
+			writeIssuesError(w, http.StatusInternalServerError, "failed to encode response", "ENCODE_ERROR")
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, IssuesResponse{Success: true, Data: data})
+	}
+}
 
 // searchDefaultLimit is the default full-text search result cap when the
 // caller does not specify `limit`. Mirrors the tuning used by the list

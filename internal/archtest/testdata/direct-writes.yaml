@@ -348,8 +348,8 @@ method_sets:
     read_only: []
     mutating: [AuthorVersion]
   - name: workitems_port
-    read_only: [ListComments, ListDependencies]
-    mutating: [AddComment, AddDependency, RemoveDependency]
+    read_only: [Get, ListComments, ListDependencies, ListEvents, Search]
+    mutating: [AddComment, AddDependency, Claim, Delete, RemoveDependency, Reopen]
   - name: workspace_admission_store
     read_only: [AgentServices, Agents, Repos, Roles, Workspaces]
     mutating: []

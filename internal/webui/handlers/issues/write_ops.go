@@ -6,9 +6,66 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
+
+// HandleReopenWorkItem routes reopening through the Work Items owner command.
+func HandleReopenWorkItem(api workitems.API) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		issueID := r.PathValue("id")
+		if issueID == "" {
+			handler.WriteJSON(w, http.StatusBadRequest, ReopenResponse{Success: false, Error: "missing issue ID"})
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
+		var req ReopenRequest
+		if r.Body != nil && r.ContentLength > 0 {
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				var maxBytesErr *http.MaxBytesError
+				if errors.As(err, &maxBytesErr) {
+					handler.WriteJSON(w, http.StatusRequestEntityTooLarge, ReopenResponse{Success: false, Error: "request body too large (max 1MB)"})
+					return
+				}
+				slog.Warn("invalid request body in HandleReopenWorkItem", "err", err)
+				handler.WriteJSON(w, http.StatusBadRequest, ReopenResponse{Success: false, Error: "invalid request body"})
+				return
+			}
+		}
+		if api == nil {
+			handler.HandleWorkItemsError(w, workitems.ErrUnavailable)
+			return
+		}
+		if err := api.Reopen(r.Context(), workitems.ReopenCommand{IssueID: issueID, Reason: req.Reason}); err != nil {
+			handler.HandleWorkItemsError(w, err)
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, ReopenResponse{Success: true})
+	}
+}
+
+// HandleDeleteWorkItem routes permanent deletion through the Work Items owner
+// command and preserves the legacy deletion result envelope.
+func HandleDeleteWorkItem(api workitems.API) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		issueID := r.PathValue("id")
+		if issueID == "" {
+			handler.RespondError(w, http.StatusBadRequest, "missing issue ID")
+			return
+		}
+		if api == nil {
+			handler.HandleWorkItemsError(w, workitems.ErrUnavailable)
+			return
+		}
+		result, err := api.Delete(r.Context(), workitems.DeleteCommand{IssueID: issueID})
+		if err != nil {
+			handler.HandleWorkItemsError(w, err)
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, map[string]any{"success": true, "data": result})
+	}
+}
 
 // handleCreateIssue returns a handler that creates a new issue.
 func HandleCreateIssue(svc service.IssueService) http.HandlerFunc {
@@ -138,6 +195,34 @@ func HandleClaimIssue(svc service.IssueService) http.HandlerFunc {
 			Success: true,
 			Data:    data,
 		})
+	}
+}
+
+// HandleClaimWorkItem invokes the Work Items owner command. FleetDB performs
+// lock acquisition, assignment, and in_progress transition atomically; this
+// adapter only marshals the returned aggregate projection.
+func HandleClaimWorkItem(api workitems.API) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		issueID := r.PathValue("id")
+		if issueID == "" {
+			handler.RespondError(w, http.StatusBadRequest, "missing issue ID")
+			return
+		}
+		if api == nil {
+			handler.HandleWorkItemsError(w, workitems.ErrUnavailable)
+			return
+		}
+		value, err := api.Claim(r.Context(), workitems.ClaimCommand{IssueID: issueID})
+		if err != nil {
+			handler.HandleWorkItemsError(w, err)
+			return
+		}
+		data, err := json.Marshal(value)
+		if err != nil {
+			writeIssuesError(w, http.StatusInternalServerError, "failed to encode response", "ENCODE_ERROR")
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, IssuesResponse{Success: true, Data: data})
 	}
 }
 

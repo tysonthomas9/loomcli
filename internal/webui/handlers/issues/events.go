@@ -4,10 +4,32 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/types"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
+
+// HandleGetWorkItemEvents routes the audit query through the Work Items API.
+func HandleGetWorkItemEvents(api workitems.API) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		issueID := r.PathValue("id")
+		if issueID == "" {
+			handler.WriteJSON(w, http.StatusBadRequest, EventListResponse{Success: false, Error: "missing issue ID"})
+			return
+		}
+		if api == nil {
+			handler.HandleWorkItemsError(w, workitems.ErrUnavailable)
+			return
+		}
+		events, err := api.ListEvents(r.Context(), workitems.ListEventsQuery{IssueID: issueID, Limit: parseEventLimit(r)})
+		if err != nil {
+			handler.HandleWorkItemsError(w, err)
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, EventListResponse{Success: true, Data: events})
+	}
+}
 
 // EventListResponse wraps the event list data for JSON response.
 type EventListResponse struct {
