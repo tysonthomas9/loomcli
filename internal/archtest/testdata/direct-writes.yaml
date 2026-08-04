@@ -1,6 +1,6 @@
 schema_version: 1
 status: complete
-source_head: 1391bf8295abb0d7681328285015d7d51260a90d
+source_head: 89898aab81665154333c9b07ce70b977af3495ae
 adapter_roots:
   - internal/app
   - internal/cli
@@ -175,6 +175,7 @@ method_sets:
       - Awaits
       - Close
       - ConnectorCalls
+      - ConnectorGrantCommands
       - ConnectorGrants
       - Connectors
       - DriverRuns
@@ -1321,12 +1322,6 @@ writes:
       method: UpdateInteractionTerminal
       count: 1
       aggregate_owner: interaction
-      expires_after_phase: 7
-    - file: internal/app/serve/sourcecontrolcomposition/connectors_fleetdb.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorGrantStore
-      method: Create
-      count: 1
-      aggregate_owner: connectors
       expires_after_phase: 7
     - file: internal/app/serve/sourcecontrolcomposition/stack_lineage.go
       receiver: github.com/tysonthomas9/loomcli/internal/stackstore.Store

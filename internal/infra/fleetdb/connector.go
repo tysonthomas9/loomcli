@@ -75,6 +75,30 @@ func grantRevokeSentinel(err error) error {
 	return err
 }
 
+// mapConnectorGrantTransportError keeps legacy HTTP sentinel translation at
+// the existing compatibility edge while the narrow ConnectorGrantTransport
+// exposes only capability-neutral errors to composition.
+func mapConnectorGrantTransportError(operation string, err error) error {
+	if err == nil {
+		return nil
+	}
+	var sentinel error
+	switch {
+	case errors.Is(err, ErrConnectorGrantNotFound), errors.Is(err, ErrConnectorGrantInvalid),
+		errors.Is(err, ErrConnectorGrantConflict), errors.Is(err, ErrConnectorGrantUnavailable):
+		return err
+	case errors.Is(err, domain.ErrNotFound):
+		sentinel = ErrConnectorGrantNotFound
+	case errors.Is(err, domain.ErrInvalid):
+		sentinel = ErrConnectorGrantInvalid
+	case errors.Is(err, domain.ErrAlreadyExists), errors.Is(err, domain.ErrConflict):
+		sentinel = ErrConnectorGrantConflict
+	default:
+		sentinel = ErrConnectorGrantUnavailable
+	}
+	return fmt.Errorf("connector grant %s: %w", operation, errors.Join(sentinel, err))
+}
+
 // --- wire DTOs (fleet-db snake_case responses) ---
 
 // connectorWire mirrors fleet-db's models.Connector JSON shape. The sealed
