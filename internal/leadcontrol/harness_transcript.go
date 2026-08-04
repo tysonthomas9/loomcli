@@ -2,7 +2,6 @@ package leadcontrol
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -12,10 +11,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/olesho/harness-wrapper/pkg/chat"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 const (
@@ -70,12 +67,6 @@ type boundedHarnessOutputSnapshot struct {
 	limitBytes int
 }
 
-type harnessTranscriptTarget struct {
-	workspace string
-	sessionID string
-	session   *domain.AgentSession
-}
-
 type harnessTranscriptCollection struct {
 	events           []transcript.Event
 	history          boundedHarnessHistory
@@ -121,11 +112,9 @@ func captureHarnessInteractiveTranscriptWithUnavailableSource(
 	output *boundedHarnessOutput,
 	unavailableSourceCause string,
 ) error {
-	target, err := loadHarnessTranscriptTarget(ctx, cfg)
-	if err != nil {
-		return err
-	}
-	if target == nil {
+	workspace := strings.TrimSpace(cfg.Workspace)
+	sessionID := strings.TrimSpace(cfg.SessionID)
+	if workspace == "" || sessionID == "" {
 		return nil
 	}
 	collection, err := collectHarnessTranscript(
@@ -145,37 +134,7 @@ func captureHarnessInteractiveTranscriptWithUnavailableSource(
 	if err != nil {
 		return fmt.Errorf("marshal harness transcript: %w", err)
 	}
-	artifactID, err := uploadHarnessTranscriptArtifact(ctx, cfg, target, collection.history, capture)
-	if err != nil {
-		return err
-	}
-	return persistHarnessTranscriptReference(ctx, cfg, conv, target, artifactID)
-}
-
-func loadHarnessTranscriptTarget(
-	ctx context.Context,
-	cfg HarnessLeadRuntimeConfig,
-) (*harnessTranscriptTarget, error) {
-	if cfg.Store == nil || cfg.Store.AgentSessions() == nil || cfg.Store.Artifacts() == nil {
-		return nil, nil
-	}
-	workspace := strings.TrimSpace(cfg.Workspace)
-	sessionID := strings.TrimSpace(cfg.SessionID)
-	if workspace == "" || sessionID == "" {
-		return nil, nil
-	}
-	session, err := cfg.Store.AgentSessions().Get(ctx, workspace, sessionID)
-	if errors.Is(err, domain.ErrNotFound) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("load harness interactive session: %w", err)
-	}
-	return &harnessTranscriptTarget{
-		workspace: workspace,
-		sessionID: sessionID,
-		session:   session,
-	}, nil
+	return publishHarnessTranscript(ctx, cfg, collection.history, capture)
 }
 
 func collectHarnessTranscript(
@@ -313,13 +272,15 @@ func joinTranscriptSourceCauses(first, second string) string {
 	return first + "_and_" + second
 }
 
-func uploadHarnessTranscriptArtifact(
+func publishHarnessTranscript(
 	ctx context.Context,
 	cfg HarnessLeadRuntimeConfig,
-	target *harnessTranscriptTarget,
 	history boundedHarnessHistory,
 	capture canonicalTranscriptCapture,
-) (string, error) {
+) error {
+	if cfg.Runtime == nil {
+		return ErrSessionRuntimeUnavailable
+	}
 	artifactMetadata := transcriptArtifactMetadata(map[string]string{
 		"runtime": "interactive-harness",
 		"backend": cfg.Backend,
@@ -329,55 +290,13 @@ func uploadHarnessTranscriptArtifact(
 		artifactMetadata["transcript_native_history_limit_bytes"] =
 			strconv.Itoa(history.limitBytes)
 	}
-	finalized, err := store.UploadContentArtifact(ctx, cfg.Store.Artifacts(), store.ArtifactCreate{
-		WorkspaceKey:  target.workspace,
-		ArtifactID:    "transcript-" + target.sessionID,
-		AgentID:       target.session.AgentID,
-		SessionID:     target.sessionID,
-		TaskID:        target.session.TaskID,
-		OwnerType:     "session",
-		OwnerID:       target.sessionID,
-		Type:          "transcript",
-		Summary:       fmt.Sprintf("interactive %s session transcript", cfg.Backend),
-		MIMEType:      "application/x-ndjson",
-		DurableStatus: "declared",
-		Metadata:      artifactMetadata,
-	}, capture.content)
-	if err != nil {
-		return "", fmt.Errorf("upload harness transcript artifact: %w", err)
-	}
-	return finalized.ArtifactID, nil
-}
-
-func persistHarnessTranscriptReference(
-	ctx context.Context,
-	cfg HarnessLeadRuntimeConfig,
-	conv harnessConversation,
-	target *harnessTranscriptTarget,
-	artifactID string,
-) error {
-	if cfg.Runtime == nil {
-		return ErrSessionRuntimeUnavailable
-	}
-	artifactID = strings.TrimSpace(artifactID)
-	if artifactID == "" {
-		return errors.New("persist harness transcript ref: artifact ID is required")
-	}
-	metadata := map[string]string{}
-	harnessSessionID := strings.TrimSpace(cfg.HarnessSessionID)
-	if harnessSessionID == "" {
-		harnessSessionID = strings.TrimSpace(conv.HarnessSessionID())
-	}
-	if harnessSessionID != "" {
-		metadata[MetadataHarnessSessionID] = harnessSessionID
-	}
-	if err := cfg.Runtime.PatchSessionRuntimeContext(ctx, interaction.PatchSessionCommand{
-		WorkspaceKey:         target.workspace,
-		SessionID:            target.sessionID,
-		MetadataUpserts:      metadata,
-		TranscriptArtifactID: &artifactID,
+	if err := cfg.Runtime.PublishTranscript(ctx, interaction.PublishTranscriptCommand{
+		WorkspaceKey: strings.TrimSpace(cfg.Workspace),
+		SessionID:    strings.TrimSpace(cfg.SessionID),
+		Content:      capture.content,
+		Metadata:     artifactMetadata,
 	}); err != nil {
-		return fmt.Errorf("persist harness transcript ref: %w", err)
+		return fmt.Errorf("publish harness transcript: %w", err)
 	}
 	return nil
 }

@@ -799,6 +799,33 @@ func TestHistoryWithinRawLimitFailsClosedForExternallyIdentifiedGeminiSession(t 
 	}
 }
 
+func TestCaptureHarnessInteractiveTranscriptPublishesWithoutLegacyStore(t *testing.T) {
+	runtime := &storeBackedSessionRuntime{}
+	fake := newFakeHarnessConversation()
+	fake.history = []chat.Turn{
+		{ID: "user-1", Role: chat.RoleUser, State: chat.TurnStateComplete, Text: "document this"},
+		{ID: "assistant-1", Role: chat.RoleAssistant, State: chat.TurnStateComplete, Text: "done"},
+	}
+	cfg := HarnessLeadRuntimeConfig{
+		Runtime: runtime, Workspace: "WS", SessionID: "lead-session",
+		Prompt: "document this", Backend: "gemini", HarnessName: HarnessNameGemini,
+	}
+	if err := captureHarnessInteractiveTranscript(
+		t.Context(), cfg, fake, newBoundedHarnessOutput(1024),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if len(runtime.published) != 1 {
+		t.Fatalf("published transcript commands = %d, want 1", len(runtime.published))
+	}
+	command := runtime.published[0]
+	if command.WorkspaceKey != "WS" || command.SessionID != "lead-session" ||
+		!strings.Contains(string(command.Content), `"text":"done"`) ||
+		command.Metadata["runtime"] != "interactive-harness" || command.Metadata["backend"] != "gemini" {
+		t.Fatalf("published transcript command = %#v", command)
+	}
+}
+
 func TestCaptureHarnessInteractiveTranscriptNativeLimitSkipsUnboundedHistory(t *testing.T) {
 	st := memstore.New()
 	createAssignedLeadSessionWithBackend(t, st, "claude")

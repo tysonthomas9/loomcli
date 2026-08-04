@@ -13,7 +13,8 @@ import (
 // storeBackedSessionRuntime is a legacy-store test double only. Production
 // child code receives the owner-fenced HTTP client.
 type storeBackedSessionRuntime struct {
-	store store.Store
+	store     store.Store
+	published []interaction.PublishTranscriptCommand
 }
 
 func testSessionRuntime(st store.Store) SessionRuntime {
@@ -77,6 +78,10 @@ func (runtime *storeBackedSessionRuntime) PublishTranscript(
 	ctx context.Context,
 	command interaction.PublishTranscriptCommand,
 ) error {
+	runtime.published = append(runtime.published, command)
+	if runtime.store == nil {
+		return nil
+	}
 	session, err := runtime.store.AgentSessions().Get(ctx, command.WorkspaceKey, command.SessionID)
 	if err != nil {
 		return err
