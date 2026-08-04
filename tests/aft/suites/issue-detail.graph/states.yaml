@@ -112,11 +112,30 @@ states:
           count:
             selector: "section[data-status=ready] article[aria-label='Issue: aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}']"
             equals: 1
-      # The whole filtered board holds exactly this one card — proves the
-      # type filter is actually narrowing, not passing everything through.
+      # Every non-Done column of the filtered board holds exactly this one card
+      # — proves the type filter is actually narrowing, not passing everything
+      # through. Scoped past the Done column on purpose: suite teardown closes
+      # issues rather than deleting them, so earlier suites that create
+      # bug-type issues (filters, issue-create-ui) leave closed bug cards in
+      # Done that this board legitimately renders. A board-wide count here
+      # passes alone and fails in a full run — an order-dependent assertion.
+      #
+      # The columns are enumerated rather than written as
+      # `section:not([data-status=done]) article`, because the board nests the
+      # columns inside wrapper <section> elements that carry NO data-status:
+      # those wrappers satisfy :not([data-status=done]) as ancestors, so the
+      # negation form matches every card and silently excludes nothing.
+      # Column ids come from KanbanBoard/columnConfigs.tsx (`status: col.id`);
+      # note the Done column's id is `done`, while `closed` is the issue
+      # status its filter matches.
       - expect:
           count:
-            selector: "article[aria-label^='Issue: ']"
+            selector: >-
+              section[data-status=backlog] article[aria-label^='Issue: '],
+              section[data-status=ready] article[aria-label^='Issue: '],
+              section[data-status=blocked] article[aria-label^='Issue: '],
+              section[data-status=in_progress] article[aria-label^='Issue: '],
+              section[data-status=review] article[aria-label^='Issue: ']
             equals: 1
 
   description-editor-open:

@@ -41,12 +41,24 @@ tests:
             !!document.querySelector('[data-testid=board-toolbar]')
         intent: "Wait until the workspace board is ready"
       # the empty-state marker renders only after the (empty) issue fetch settles,
-      # and can blink through a skeleton re-render under load — wait until it is
-      # actually laid out, not just present
+      # and can blink through a skeleton re-render under load — so proving it is
+      # laid out at ONE instant is not enough: the following expect can still land
+      # inside a blink. Require it to stay laid out across samples before asserting.
       - wait:
           fn: >-
-            (() => { const el = document.querySelector('[data-testid=empty-workspace-board]'); return !!el && el.offsetParent !== null; })()
-        intent: "Wait until the new workspace empty board is visibly laid out"
+            (() => {
+              const el = document.querySelector('[data-testid=empty-workspace-board]');
+              if (!el || el.offsetParent === null) {
+                window.__aftEmptyBoardStableAt = 0;
+                return false;
+              }
+              if (!window.__aftEmptyBoardStableAt) {
+                window.__aftEmptyBoardStableAt = Date.now();
+                return false;
+              }
+              return Date.now() - window.__aftEmptyBoardStableAt >= 500;
+            })()
+        intent: "Wait until the new workspace empty board stays visibly laid out across a re-render window"
       - expect: { visible: { testid: empty-workspace-board } }
 
   # covers: LCLI-PS-002
