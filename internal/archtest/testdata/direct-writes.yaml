@@ -1,11 +1,12 @@
 schema_version: 1
 status: complete
-source_head: 9e88acce6be28f34d3c83bcdeed262bca8a10848
+source_head: 7512221558385208f511e87ca354071b2c53e9f9
 adapter_roots:
   - internal/app
   - internal/cli
   - internal/driver
   - internal/infra/agentsbootstrapstore
+  - internal/infra/workspacecatalog
   - internal/modules
   - internal/webui/handlers
 analysis_profiles:
@@ -876,6 +877,14 @@ function_surfaces:
     function: New
     access: read-only
     capability_owner: workitems
+  - package: github.com/tysonthomas9/loomcli/internal/modules/workspace
+    function: New
+    access: read-only
+    capability_owner: workspace
+  - package: github.com/tysonthomas9/loomcli/internal/modules/workspace
+    function: WithRepositoryCatalog
+    access: read-only
+    capability_owner: workspace
   - package: github.com/tysonthomas9/loomcli/internal/sessions
     function: EncodeDiffStatsMetadata
     access: read-only
@@ -2093,54 +2102,6 @@ writes:
       count: 1
       aggregate_owner: workspace
       expires_after_phase: 7
-    - file: internal/cli/serve/workspacemgr/workspace_store.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.RepoStore
-      method: Create
-      count: 1
-      aggregate_owner: workspace
-      expires_after_phase: 7
-    - file: internal/cli/serve/workspacemgr/workspace_store.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.WorkspaceStore
-      method: Create
-      count: 1
-      aggregate_owner: workspace
-      expires_after_phase: 7
-    - file: internal/cli/serve/workspacemgr/workspace_store.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.WorkspaceStore
-      method: Delete
-      count: 1
-      aggregate_owner: workspace
-      expires_after_phase: 7
-    - file: internal/cli/serve/workspacemgr/workspace_store_repository_materialization.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.RepoStore
-      method: Create
-      count: 1
-      aggregate_owner: workspace
-      expires_after_phase: 7
-    - file: internal/cli/serve/workspacemgr/workspace_store_repository_materialization.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.RepoStore
-      method: Delete
-      count: 2
-      aggregate_owner: workspace
-      expires_after_phase: 7
-    - file: internal/cli/serve/workspacemgr/workspace_store_repository_materialization.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.WorkspaceStore
-      method: Create
-      count: 1
-      aggregate_owner: workspace
-      expires_after_phase: 7
-    - file: internal/cli/serve/workspacemgr/workspace_store_repository_materialization.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.WorkspaceStore
-      method: Delete
-      count: 1
-      aggregate_owner: workspace
-      expires_after_phase: 7
-    - file: internal/cli/serve/workspacemgr/workspace_store_repository_materialization.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.WorkspaceStore
-      method: Update
-      count: 1
-      aggregate_owner: workspace
-      expires_after_phase: 7
     - file: internal/cli/sessionfinalize/finalize_worktree.go
       receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Session'
       method: Finalize
@@ -2230,6 +2191,36 @@ writes:
       method: Create
       count: 1
       aggregate_owner: agents
+      expires_after_phase: 7
+    - file: internal/infra/workspacecatalog/catalog.go
+      receiver: github.com/tysonthomas9/loomcli/internal/store.RepoStore
+      method: Create
+      count: 1
+      aggregate_owner: workspace
+      expires_after_phase: 7
+    - file: internal/infra/workspacecatalog/catalog.go
+      receiver: github.com/tysonthomas9/loomcli/internal/store.RepoStore
+      method: Delete
+      count: 1
+      aggregate_owner: workspace
+      expires_after_phase: 7
+    - file: internal/infra/workspacecatalog/catalog.go
+      receiver: github.com/tysonthomas9/loomcli/internal/store.WorkspaceStore
+      method: Create
+      count: 1
+      aggregate_owner: workspace
+      expires_after_phase: 7
+    - file: internal/infra/workspacecatalog/catalog.go
+      receiver: github.com/tysonthomas9/loomcli/internal/store.WorkspaceStore
+      method: Delete
+      count: 1
+      aggregate_owner: workspace
+      expires_after_phase: 7
+    - file: internal/infra/workspacecatalog/catalog.go
+      receiver: github.com/tysonthomas9/loomcli/internal/store.WorkspaceStore
+      method: Update
+      count: 3
+      aggregate_owner: workspace
       expires_after_phase: 7
     - file: internal/webui/handlers/approvals/module.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.TriggerEventAppender

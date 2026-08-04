@@ -118,6 +118,7 @@ type ServerConfig struct {
 	AgentProvisioning         AgentProvisioningCapability
 	SourceControl             servercapabilities.SourceControlMaterializer
 	WorkspaceSourceControl    servercapabilities.RepositoryAdmissionMaterializer
+	WorkspaceCatalog          servercapabilities.WorkspaceAPI
 	InteractionCapability     InteractionCapability
 	MonitorHandlers           MonitorHandlers             // Pre-built handlers for monitor/metrics endpoints (injected by cli)
 	GitOps                    ops.GitOps                  // Git operations interface (optional; nil disables git endpoints)

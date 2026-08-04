@@ -23,6 +23,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
+	"github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 )
 
@@ -111,4 +112,5 @@ type (
 	WorkflowCatalogVersionAuthoringAPI       = workflowcatalog.VersionAuthoringAPI
 	WorkflowCatalogDriver                    = workflowcatalog.Driver
 	WorkflowCatalogOperatorAuthorityResolver = workflowcataloghttp.OperatorAuthorityResolver
+	WorkspaceAPI                             = workspace.API
 )

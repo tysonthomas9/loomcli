@@ -13,6 +13,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/workspaceerrors"
 )
@@ -222,10 +223,11 @@ type addRepositoriesAdmissionPlan struct {
 func prepareAddReposToStoreBackedWorkspaceAdmission(
 	ctx context.Context,
 	s admissionstore.Store,
+	catalog workspacemodule.API,
 	req service.WorkspaceAddReposRequest,
 	process *repositoryAdmissionProcess,
 ) (addRepositoriesAdmissionPlan, error) {
-	key, workspace, err := resolveWorkspaceForAddRepos(ctx, s, req.WorkspaceID)
+	key, workspace, err := resolveWorkspaceForAddRepos(ctx, catalog, req.WorkspaceID)
 	if err != nil {
 		return addRepositoriesAdmissionPlan{}, err
 	}
@@ -237,7 +239,7 @@ func prepareAddReposToStoreBackedWorkspaceAdmission(
 	if err != nil {
 		return addRepositoriesAdmissionPlan{}, err
 	}
-	seen, err := dedupAddReposAgainstExisting(ctx, s, key, localRepos)
+	seen, err := dedupAddReposAgainstExisting(ctx, catalog, key, localRepos)
 	if err != nil {
 		return addRepositoriesAdmissionPlan{}, err
 	}
@@ -302,12 +304,14 @@ func prepareAddReposToStoreBackedWorkspaceAdmission(
 func addReposToStoreBackedWorkspaceAdmission(
 	ctx context.Context,
 	s admissionstore.Store,
+	catalog workspacemodule.API,
 	req service.WorkspaceAddReposRequest,
 	process *repositoryAdmissionProcess,
 ) (service.WorkspaceCreateResult, error) {
 	plan, err := prepareAddReposToStoreBackedWorkspaceAdmission(
 		ctx,
 		s,
+		catalog,
 		req,
 		process,
 	)

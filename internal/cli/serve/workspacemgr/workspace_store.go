@@ -14,8 +14,10 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr/admissionstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
+	"github.com/tysonthomas9/loomcli/internal/infra/workspacecatalog"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/roleprompts"
 	storepkg "github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
@@ -66,8 +68,13 @@ func BuildStoreBackedCreateWorkspaceWithAdmission(
 	journal *RepositoryAdmissionJournal,
 	materializer repositoryCheckoutMaterializer,
 ) service.WorkspaceCreateFn {
-	operations := NewStoreBackedWorkspaceAdmissionOperations(
+	catalog, err := workspacecatalog.New(s.Workspaces(), s.Repos())
+	if err != nil {
+		return nil
+	}
+	operations := NewStoreBackedWorkspaceAdmissionOperationsWithWorkspace(
 		s,
+		catalog,
 		admissions,
 		journal,
 		materializer,
@@ -109,8 +116,13 @@ func BuildStoreBackedAddReposWithAdmission(
 	journal *RepositoryAdmissionJournal,
 	materializer repositoryCheckoutMaterializer,
 ) service.WorkspaceAddReposFn {
-	operations := NewStoreBackedWorkspaceAdmissionOperations(
+	catalog, err := workspacecatalog.New(s.Workspaces(), s.Repos())
+	if err != nil {
+		return nil
+	}
+	operations := NewStoreBackedWorkspaceAdmissionOperationsWithWorkspace(
 		s,
+		catalog,
 		admissions,
 		journal,
 		materializer,
@@ -122,13 +134,25 @@ func BuildStoreBackedAddReposWithAdmission(
 }
 
 //nolint:cyclop,funlen,gocognit // Orchestrates filesystem, git, and store rollback steps for one workflow.
-func createStoreBackedEmptyWorkspace(ctx context.Context, s admissionstore.Store, req service.WorkspaceCreateRequest) (service.WorkspaceCreateResult, error) {
+func createStoreBackedEmptyWorkspace(
+	ctx context.Context,
+	s admissionstore.Store,
+	catalog workspacemodule.API,
+	req service.WorkspaceCreateRequest,
+) (service.WorkspaceCreateResult, error) {
 	if req.Type != "empty" {
 		return service.WorkspaceCreateResult{}, fmt.Errorf("unsupported workspace type: %s", req.Type)
 	}
-	if existing, err := s.Workspaces().GetByName(ctx, req.Name); err == nil && existing != nil {
+	if catalog == nil {
+		return service.WorkspaceCreateResult{}, workspaceerrors.New(
+			workspaceerrors.ConfigFailed,
+			"Workspace capability is unavailable",
+			workspacemodule.ErrUnavailable,
+		)
+	}
+	if existing, err := catalog.Resolve(ctx, workspacemodule.ResolveQuery{Reference: req.Name}); err == nil && existing != nil {
 		return service.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.AlreadyExists, fmt.Sprintf("workspace %q already exists", req.Name), nil)
-	} else if err != nil && !errors.Is(err, domain.ErrNotFound) {
+	} else if err != nil && !errors.Is(err, workspacemodule.ErrNotFound) {
 		return service.WorkspaceCreateResult{}, fmt.Errorf("check workspace name: %w", err)
 	}
 
@@ -150,9 +174,9 @@ func createStoreBackedEmptyWorkspace(ctx context.Context, s admissionstore.Store
 		branch = req.Name
 	}
 	key := service.WorkspaceKeyFromName(req.Name)
-	if _, err := s.Workspaces().Get(ctx, key); err == nil {
+	if _, err := catalog.Resolve(ctx, workspacemodule.ResolveQuery{Reference: key}); err == nil {
 		return service.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.AlreadyExists, fmt.Sprintf("workspace %q already exists", req.Name), nil)
-	} else if err != nil && !errors.Is(err, domain.ErrNotFound) {
+	} else if err != nil && !errors.Is(err, workspacemodule.ErrNotFound) {
 		return service.WorkspaceCreateResult{}, fmt.Errorf("check workspace key: %w", err)
 	}
 
@@ -169,20 +193,20 @@ func createStoreBackedEmptyWorkspace(ctx context.Context, s admissionstore.Store
 		}
 	}
 
-	if _, err := s.Workspaces().Create(ctx, storepkg.WorkspaceCreate{
+	if _, err := catalog.Create(ctx, workspacemodule.CreateCommand{
 		Key:           key,
 		Name:          req.Name,
 		DefaultBranch: branch,
 	}); err != nil {
 		cleanupWorktrees(wsPlan, created)
-		if errors.Is(err, domain.ErrAlreadyExists) {
+		if errors.Is(err, workspacemodule.ErrConflict) {
 			return service.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.AlreadyExists, fmt.Sprintf("workspace %q already exists", req.Name), err)
 		}
 		return service.WorkspaceCreateResult{}, fmt.Errorf("create workspace in store: %w", err)
 	}
 	rollbackStore := func() {
 		deleteLocalWorkspaceState(key)
-		if err := s.Workspaces().Delete(context.Background(), key); err != nil && !errors.Is(err, domain.ErrNotFound) {
+		if _, err := catalog.Delete(context.Background(), workspacemodule.DeleteCommand{Reference: key}); err != nil && !errors.Is(err, workspacemodule.ErrNotFound) {
 			slog.Warn("failed to rollback store workspace create", "workspace", key, "err", err)
 		}
 	}
@@ -203,13 +227,13 @@ func createStoreBackedEmptyWorkspace(ctx context.Context, s admissionstore.Store
 			cleanupWorktrees(wsPlan, created)
 			return service.WorkspaceCreateResult{}, err
 		}
-		if _, err := s.Repos().Create(ctx, storepkg.RepoCreate{
-			WorkspaceKey:  key,
-			Name:          r.Name,
-			RemoteURL:     remoteURL,
-			Remote:        remoteName,
-			DefaultBranch: branch,
-			SourceRepoID:  r.SourceRepoID,
+		if _, err := catalog.RegisterRepository(ctx, workspacemodule.RegisterRepositoryCommand{
+			WorkspaceReference: key,
+			Name:               r.Name,
+			RemoteURL:          remoteURL,
+			Remote:             remoteName,
+			DefaultBranch:      branch,
+			SourceRepoID:       r.SourceRepoID,
 		}); err != nil {
 			rollbackStore()
 			cleanupWorktrees(wsPlan, created)
@@ -222,7 +246,7 @@ func createStoreBackedEmptyWorkspace(ctx context.Context, s admissionstore.Store
 		cleanupWorktrees(wsPlan, created)
 		return service.WorkspaceCreateResult{}, err
 	}
-	if err := updateStoreWorkspaceState(ctx, s, key, domain.WorkspaceStateReady); err != nil {
+	if _, err := catalog.SetLifecycle(ctx, workspacemodule.SetLifecycleCommand{Reference: key, State: workspacemodule.StateReady}); err != nil {
 		rollbackStore()
 		cleanupWorktrees(wsPlan, created)
 		return service.WorkspaceCreateResult{}, fmt.Errorf("mark workspace ready: %w", err)
@@ -235,10 +259,11 @@ func createStoreBackedEmptyWorkspace(ctx context.Context, s admissionstore.Store
 func addReposToStoreBackedWorkspace(
 	ctx context.Context,
 	s admissionstore.Store,
+	catalog workspacemodule.API,
 	req service.WorkspaceAddReposRequest,
 	materializer repositoryCheckoutMaterializer,
 ) (service.WorkspaceCreateResult, error) {
-	key, ws, err := resolveWorkspaceForAddRepos(ctx, s, req.WorkspaceID)
+	key, ws, err := resolveWorkspaceForAddRepos(ctx, catalog, req.WorkspaceID)
 	if err != nil {
 		return service.WorkspaceCreateResult{}, err
 	}
@@ -251,7 +276,7 @@ func addReposToStoreBackedWorkspace(
 	if err != nil {
 		return service.WorkspaceCreateResult{}, err
 	}
-	seen, err := dedupAddReposAgainstExisting(ctx, s, key, resolved)
+	seen, err := dedupAddReposAgainstExisting(ctx, catalog, key, resolved)
 	if err != nil {
 		return service.WorkspaceCreateResult{}, err
 	}
@@ -281,7 +306,7 @@ func addReposToStoreBackedWorkspace(
 
 	if err := persistAddReposRecords(
 		ctx,
-		s,
+		catalog,
 		key,
 		wsDir,
 		branch,
@@ -299,20 +324,19 @@ func addReposToStoreBackedWorkspace(
 // resolveWorkspaceForAddRepos looks up the workspace by ID, then falls back
 // to lookup-by-name so callers can pass either. Returns the canonical key
 // (which may differ from the input when matched by name).
-func resolveWorkspaceForAddRepos(ctx context.Context, s admissionstore.Store, workspaceID string) (string, *domain.Workspace, error) {
+func resolveWorkspaceForAddRepos(ctx context.Context, catalog workspacemodule.API, workspaceID string) (string, *workspacemodule.Reference, error) {
 	key := strings.TrimSpace(workspaceID)
 	if key == "" {
 		return "", nil, workspaceerrors.New(workspaceerrors.PathNotFound, "workspace ID is required", nil)
 	}
-	ws, err := s.Workspaces().Get(ctx, key)
-	if err == nil {
-		return key, ws, nil
+	if catalog == nil {
+		return "", nil, workspaceerrors.New(workspaceerrors.ConfigFailed, "Workspace capability is unavailable", workspacemodule.ErrUnavailable)
 	}
-	byName, byNameErr := s.Workspaces().GetByName(ctx, key)
-	if byNameErr != nil {
+	workspace, err := catalog.Resolve(ctx, workspacemodule.ResolveQuery{Reference: key})
+	if err != nil {
 		return "", nil, fmt.Errorf("load workspace %q: %w", workspaceID, err)
 	}
-	return byName.Key, byName, nil
+	return workspace.Key, workspace, nil
 }
 
 // prepareWorkspaceDir resolves the workspace's on-disk path, validates it,
@@ -341,8 +365,11 @@ func resolveRequestRepos(reqRepos []string) ([]resolvedRepo, error) {
 // dedupAddReposAgainstExisting builds the set of repo names already present
 // in the workspace, then verifies the requested repos don't collide. Returns
 // the merged seen-set so downstream clone steps can extend it.
-func dedupAddReposAgainstExisting(ctx context.Context, s admissionstore.Store, key string, resolved []resolvedRepo) (map[string]bool, error) {
-	existing, err := s.Repos().List(ctx, key)
+func dedupAddReposAgainstExisting(ctx context.Context, catalog workspacemodule.API, key string, resolved []resolvedRepo) (map[string]bool, error) {
+	if catalog == nil {
+		return nil, workspaceerrors.New(workspaceerrors.ConfigFailed, "Workspace capability is unavailable", workspacemodule.ErrUnavailable)
+	}
+	existing, err := catalog.ListRepositories(ctx, workspacemodule.ListRepositoriesQuery{WorkspaceReference: key})
 	if err != nil {
 		return nil, fmt.Errorf("list workspace repos: %w", err)
 	}
@@ -363,7 +390,7 @@ func dedupAddReposAgainstExisting(ctx context.Context, s admissionstore.Store, k
 // request → workspace default → workspace name → workspace key. Same fallbacks
 // the inline code used; lifted out so the outer function isn't paying the
 // cognitive cost of three sequential ifs.
-func pickAddReposBranch(reqBranch string, ws *domain.Workspace, key string) string {
+func pickAddReposBranch(reqBranch string, ws *workspacemodule.Reference, key string) string {
 	if reqBranch != "" {
 		return reqBranch
 	}

@@ -9,6 +9,8 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr/admissionstore"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
+	"github.com/tysonthomas9/loomcli/internal/infra/workspacecatalog"
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
@@ -25,8 +27,9 @@ const (
 // synchronous WebUI admission seam and contributes restart recovery to the
 // platform runtime host while exposing neither FleetDB nor Source Control.
 type StoreBackedWorkspaceAdmissionOperations struct {
-	store   admissionstore.Store
-	process *repositoryAdmissionProcess
+	store     admissionstore.Store
+	workspace workspacemodule.API
+	process   *repositoryAdmissionProcess
 }
 
 func NewStoreBackedWorkspaceAdmissionOperations(
@@ -38,8 +41,27 @@ func NewStoreBackedWorkspaceAdmissionOperations(
 	if store == nil {
 		return nil
 	}
+	workspace, err := workspacecatalog.New(store.Workspaces(), store.Repos())
+	if err != nil {
+		return nil
+	}
+	return NewStoreBackedWorkspaceAdmissionOperationsWithWorkspace(
+		store, workspace, admissions, journal, materializer,
+	)
+}
+
+func NewStoreBackedWorkspaceAdmissionOperationsWithWorkspace(
+	store admissionstore.Store,
+	workspace workspacemodule.API,
+	admissions infrafleetdb.RepositoryAdmissionTransport,
+	journal *RepositoryAdmissionJournal,
+	materializer repositoryCheckoutMaterializer,
+) *StoreBackedWorkspaceAdmissionOperations {
+	if store == nil {
+		return nil
+	}
 	return &StoreBackedWorkspaceAdmissionOperations{
-		store:   store,
+		store: store, workspace: workspace,
 		process: newRepositoryAdmissionProcess(admissions, journal, materializer),
 	}
 }
@@ -62,7 +84,7 @@ func (operations *StoreBackedWorkspaceAdmissionOperations) CreateWorkspace(
 			operations.process,
 		)
 	}
-	return createStoreBackedEmptyWorkspace(ctx, operations.store, req)
+	return createStoreBackedEmptyWorkspace(ctx, operations.store, operations.workspace, req)
 }
 
 func (operations *StoreBackedWorkspaceAdmissionOperations) AddWorkspaceRepos(
@@ -79,6 +101,7 @@ func (operations *StoreBackedWorkspaceAdmissionOperations) AddWorkspaceRepos(
 		return addReposToStoreBackedWorkspace(
 			ctx,
 			operations.store,
+			operations.workspace,
 			req,
 			nil,
 		)
@@ -86,6 +109,7 @@ func (operations *StoreBackedWorkspaceAdmissionOperations) AddWorkspaceRepos(
 	return addReposToStoreBackedWorkspaceAdmission(
 		ctx,
 		operations.store,
+		operations.workspace,
 		req,
 		operations.process,
 	)
@@ -134,6 +158,7 @@ func (operations *StoreBackedWorkspaceAdmissionOperations) PrepareAddRepos(
 	plan, err := prepareAddReposToStoreBackedWorkspaceAdmission(
 		ctx,
 		operations.store,
+		operations.workspace,
 		req,
 		operations.process,
 	)
@@ -454,7 +479,7 @@ func (operations *StoreBackedWorkspaceAdmissionOperations) verifyRecoveryIntent(
 	case localRepositoryAdmissionAddRepositories:
 		workspaceKey, workspace, err := resolveWorkspaceForAddRepos(
 			ctx,
-			operations.store,
+			operations.workspace,
 			intent.WorkspaceKey,
 		)
 		if err != nil {
@@ -476,7 +501,7 @@ func (operations *StoreBackedWorkspaceAdmissionOperations) verifyRecoveryIntent(
 		}
 		seen, err := dedupAddReposAgainstExisting(
 			ctx,
-			operations.store,
+			operations.workspace,
 			workspaceKey,
 			localRepos,
 		)
