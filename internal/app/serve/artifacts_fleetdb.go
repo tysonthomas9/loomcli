@@ -132,7 +132,8 @@ func artifactFromInfra(value *infrafleetdb.Artifact) *artifacts.Artifact {
 	}
 	return &artifacts.Artifact{
 		WorkspaceKey: value.WorkspaceKey, ArtifactID: value.ArtifactID,
-		SessionID: value.SessionID, TaskID: value.TaskID, OwnerType: artifacts.OwnerType(value.OwnerType), OwnerID: value.OwnerID,
+		AgentID: value.AgentID, SessionID: value.SessionID, TaskID: value.TaskID,
+		OwnerType: artifacts.OwnerType(value.OwnerType), OwnerID: value.OwnerID,
 		Type: value.Type, URI: value.URI, Summary: value.Summary, MIMEType: value.MIMEType, SizeBytes: value.SizeBytes,
 		Checksum: value.Checksum, ContentHash: value.ContentHash, Visibility: value.Visibility,
 		RedactionStatus: value.RedactionStatus, DurableStatus: artifacts.DurableStatus(value.DurableStatus),

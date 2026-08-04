@@ -489,6 +489,12 @@ func TestPublishTranscriptUsesSessionAuthorityAndLinksExactGeneration(t *testing
 	if len(harness.transcripts.commands) != 1 {
 		t.Fatalf("transcript commands = %+v", harness.transcripts.commands)
 	}
+	if len(harness.transcripts.authorities) != 1 ||
+		harness.transcripts.authorities[0].Action() != ActionPublishTranscript ||
+		harness.transcripts.authorities[0].SessionID() != testSession ||
+		harness.transcripts.authorities[0].FencingToken() != 1 {
+		t.Fatalf("transcript authority = %+v", harness.transcripts.authorities)
+	}
 	command := harness.transcripts.commands[0]
 	if command.WorkspaceKey != testWorkspace || command.SessionID != testSession ||
 		command.AgentID != testAgent || command.TaskID != "task-1" ||
@@ -898,14 +904,17 @@ type fakeSessionStore struct {
 }
 
 type fakeTranscriptArtifactStore struct {
-	commands []TranscriptArtifactCreate
-	err      error
+	commands    []TranscriptArtifactCreate
+	authorities []authority.SessionAuthority
+	err         error
 }
 
 func (store *fakeTranscriptArtifactStore) CreateContent(
 	_ context.Context,
+	auth authority.SessionAuthority,
 	command TranscriptArtifactCreate,
 ) (string, error) {
+	store.authorities = append(store.authorities, auth)
 	store.commands = append(store.commands, command)
 	if store.err != nil {
 		return "", store.err

@@ -14,3 +14,15 @@ type Store interface {
 	Get(context.Context, ExecutionOwner, GetQuery) (*Artifact, error)
 	List(context.Context, ExecutionOwner, ListFilter) ([]*Artifact, error)
 }
+
+// SessionStore is the Artifacts-owned durable port for session content. Its
+// transport persists only the derived session owner; the module separately
+// verifies the issuer-bound live generation carried by SessionAuthority.
+// Interaction consumes the one-use lease credential only when it atomically
+// attaches the finalized Artifact to the AgentSession.
+type SessionStore interface {
+	CreateSession(context.Context, SessionOwner, CreateCommand) (*Artifact, error)
+	UploadSession(context.Context, SessionOwner, UploadCommand) (*Artifact, error)
+	FinalizeSession(context.Context, SessionOwner, FinalizeCommand) (*Artifact, error)
+	GetSession(context.Context, SessionOwner, GetQuery) (*Artifact, error)
+}

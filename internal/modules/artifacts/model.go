@@ -2,13 +2,14 @@ package artifacts
 
 import "time"
 
-// OwnerType identifies the aggregate that produced an artifact. Phase 4
-// exposes only task-run execution ownership; session ownership lands with
-// Interaction and uses a distinct authority contract.
+// OwnerType identifies the aggregate that produced an artifact. Execution and
+// Interaction use distinct typed authority contracts even though both retain
+// durable references to this Artifacts-owned aggregate.
 type OwnerType string
 
 const (
 	OwnerTaskRun OwnerType = "task_run"
+	OwnerSession OwnerType = "session"
 )
 
 // DurableStatus is the Artifacts-owned content lifecycle.
@@ -26,6 +27,7 @@ const (
 type Artifact struct {
 	WorkspaceKey    string
 	ArtifactID      string
+	AgentID         string
 	SessionID       string
 	TaskID          string
 	OwnerType       OwnerType

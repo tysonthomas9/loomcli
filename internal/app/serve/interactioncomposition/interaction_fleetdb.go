@@ -65,6 +65,9 @@ func newInteractionCapabilityWithFleetDB(
 	client *infrafleetdb.Client,
 	issuer *authority.Issuer,
 ) (*InteractionCapability, error) {
+	if issuer == nil {
+		issuer = authority.NewIssuer()
+	}
 	transport := newInteractionFleetDBAuthorityTransport(client)
 	if transport == nil {
 		return nil, fmt.Errorf("compose Interaction FleetDB transport: %w", interaction.ErrUnavailable)
@@ -73,16 +76,17 @@ func newInteractionCapabilityWithFleetDB(
 	if err != nil {
 		return nil, err
 	}
+	transcripts, err := newInteractionTranscriptArtifactStore(client.SessionArtifacts(), issuer)
+	if err != nil {
+		return nil, err
+	}
 	dependencies := InteractionDependencies{
 		Sessions: adapter, Terminals: adapter.Terminals(), Inbox: adapter,
 		Activity: adapter, SessionAuthority: adapter,
-		Transcripts:     newInteractionTranscriptArtifactStore(client.Artifacts()),
+		Transcripts:     transcripts,
 		WorkspaceLister: config.WorkspaceLister,
 	}
-	if issuer != nil {
-		return NewInteractionCapabilityWithIssuer(config, dependencies, issuer)
-	}
-	return NewInteractionCapability(config, dependencies)
+	return NewInteractionCapabilityWithIssuer(config, dependencies, issuer)
 }
 
 // NewInteractionSessionAuthorityResolver is retained for isolated inbound
