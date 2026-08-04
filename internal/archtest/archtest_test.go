@@ -64,13 +64,13 @@ func TestCheckedInManifestsAndRepository(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := len(report.CompositeStoreFiles), 67; got != want {
+	if got, want := len(report.CompositeStoreFiles), 66; got != want {
 		t.Fatalf("composite Store file count = %d, want %d; files = %v", got, want, report.CompositeStoreFiles)
 	}
-	if got, want := len(report.CompositeStoreOutside), 57; got != want {
+	if got, want := len(report.CompositeStoreOutside), 56; got != want {
 		t.Fatalf("outside-composition Store file count = %d, want %d", got, want)
 	}
-	if got, want := len(report.LegacyHandlerImports), 82; got != want {
+	if got, want := len(report.LegacyHandlerImports), 80; got != want {
 		t.Fatalf("legacy handler imports = %d, want %d", got, want)
 	}
 	if got, want := report.ModuleRoots, checkedInModuleRoots; !slices.Equal(got, want) {

@@ -24,9 +24,9 @@ func TestCheckedInSnapshotViolations(t *testing.T) {
 
 func checkedInSnapshotReport() Report {
 	return Report{
-		CompositeStoreFiles:        make([]string, 67),
-		CompositeStoreOutside:      make([]string, 57),
-		LegacyHandlerImports:       make([]LegacyImportUse, 82),
+		CompositeStoreFiles:        make([]string, 66),
+		CompositeStoreOutside:      make([]string, 56),
+		LegacyHandlerImports:       make([]LegacyImportUse, 80),
 		ModuleRoots:                append([]string(nil), checkedInModuleRoots...),
 		AnalysisProfilesEnforced:   11,
 		MutationCommands:           105,

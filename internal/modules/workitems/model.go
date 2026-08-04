@@ -1,6 +1,25 @@
 package workitems
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
+
+// CreatedIssue preserves create's durable-success behavior: a canonical full
+// projection is preferred, while Summary remains a valid fallback when the
+// post-create read is unavailable. Its JSON representation is the selected
+// issue itself, not a migration wrapper.
+type CreatedIssue struct {
+	Detail  *IssueDetail
+	Summary *IssueSummary
+}
+
+func (r CreatedIssue) MarshalJSON() ([]byte, error) {
+	if r.Detail != nil {
+		return json.Marshal(r.Detail)
+	}
+	return json.Marshal(r.Summary)
+}
 
 // IssueSummary is the Work Items-owned list/search projection. Repo mirrors
 // SourceRepo for the existing Web UI wire contract while callers migrate.
@@ -20,10 +39,19 @@ type IssueSummary struct {
 	DesignArtifactID string     `json:"design_artifact_id,omitempty"`
 	DesignFormat     string     `json:"design_format,omitempty"`
 	HasDesign        bool       `json:"has_design"`
+	Notes            string     `json:"notes,omitempty"`
+	CreatedBy        string     `json:"created_by,omitempty"`
 	CreatedAt        time.Time  `json:"created_at"`
 	UpdatedAt        time.Time  `json:"updated_at"`
+	ClosedAt         *time.Time `json:"closed_at,omitempty"`
+	CloseReason      string     `json:"close_reason,omitempty"`
+	ExternalRef      string     `json:"external_ref,omitempty"`
 	DueAt            *time.Time `json:"due_at,omitempty"`
 	DeferUntil       *time.Time `json:"defer_until,omitempty"`
+	DependencyCount  int        `json:"dependency_count"`
+	DependentCount   int        `json:"dependent_count"`
+	BlockedByCount   int        `json:"blocked_by_count,omitempty"`
+	BlockedBy        []string   `json:"blocked_by,omitempty"`
 }
 
 // IssueDetail is the stable Work Items aggregate projection returned after an
@@ -66,6 +94,41 @@ type IssueDetail struct {
 type DeleteResult struct {
 	DeletedCount int      `json:"deleted_count"`
 	DeletedIDs   []string `json:"deleted_ids"`
+}
+
+type CloseResult struct {
+	Closed    *IssueSummary  `json:"closed"`
+	Unblocked []IssueSummary `json:"unblocked"`
+}
+
+type RepositoryAdmissionResult struct {
+	Issue         *IssueSummary
+	Changed       bool
+	Replayed      bool
+	DispatchReady bool
+	Blocked       bool
+	Reopened      bool
+	Outcome       string
+}
+
+type ListResult struct {
+	Issues       []ListItem
+	KanbanIssues []KanbanItem
+}
+
+type ListItem struct {
+	IssueSummary
+	ParentTitle *string `json:"parent_title,omitempty"`
+}
+
+type KanbanItem struct {
+	IssueSummary
+	ParentTitle    *string  `json:"parent_title,omitempty"`
+	IsBlocked      bool     `json:"is_blocked"`
+	IsReady        bool     `json:"is_ready"`
+	IsDeferred     bool     `json:"is_deferred"`
+	BlockedByCount int      `json:"blocked_by_count"`
+	BlockedBy      []string `json:"blocked_by,omitempty"`
 }
 
 type Event struct {

@@ -5,13 +5,17 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
-const workItemOperationTimeout = 5 * time.Second
+const (
+	workItemOperationTimeout = 5 * time.Second
+	workItemCreateTimeout    = 30 * time.Second
+)
 
 // NewWorkItems wraps the existing workspace-aware FleetDB backend provider in
 // the narrow Work Items durable port. Persistence translation stays at
@@ -25,6 +29,150 @@ func NewWorkItems(provider func(context.Context) backend.IssueBackend) (workitem
 
 type workItemsBackendStore struct {
 	provider func(context.Context) backend.IssueBackend
+}
+
+func (s *workItemsBackendStore) RequireRepositoryAdmission(ctx context.Context) error {
+	be, err := s.backend(ctx)
+	if err != nil {
+		return err
+	}
+	if _, ok := be.(backend.RepositoryRequirementBackend); !ok {
+		return fmt.Errorf("issue backend does not support atomic repository-required admission: %w", workitems.ErrNotImplemented)
+	}
+	return nil
+}
+
+func (s *workItemsBackendStore) Create(ctx context.Context, command workitems.CreateCommand) (*workitems.IssueSummary, error) {
+	be, err := s.backend(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, workItemCreateTimeout)
+	defer cancel()
+	value, err := be.Create(ctx, backend.CreateParams{
+		ID: command.ID, Parent: command.Parent, Title: command.Title,
+		Description: command.Description, Status: command.Status, IssueType: command.IssueType,
+		Priority: command.Priority, Design: command.Design,
+		AcceptanceCriteria: command.AcceptanceCriteria, Notes: command.Notes,
+		Assignee: command.Assignee, Owner: command.Owner, CreatedBy: command.CreatedBy,
+		ExternalRef: command.ExternalRef, EstimatedMinutes: command.EstimatedMinutes,
+		Labels: command.Labels, Dependencies: command.Dependencies, SourceRepo: command.SourceRepo,
+		DueAt: command.DueAt, DeferUntil: command.DeferUntil,
+		IdempotencyKey: command.IdempotencyKey, Force: command.Force,
+	})
+	if err != nil {
+		return nil, translateWorkItemsBackendError(err)
+	}
+	if value == nil {
+		return nil, workitems.ErrInvalidPersistedState
+	}
+	out := workItemSummary(*value)
+	return &out, nil
+}
+
+func (s *workItemsBackendStore) BlockRepositoryRequired(ctx context.Context, issueID string) (*workitems.RepositoryAdmissionResult, error) {
+	be, err := s.backend(ctx)
+	if err != nil {
+		return nil, err
+	}
+	repositories, ok := be.(backend.RepositoryRequirementBackend)
+	if !ok {
+		return nil, fmt.Errorf("issue backend does not support atomic repository-required admission: %w", workitems.ErrNotImplemented)
+	}
+	ctx, cancel := context.WithTimeout(ctx, workItemOperationTimeout)
+	defer cancel()
+	value, err := repositories.BlockRepositoryRequired(ctx, issueID)
+	if err != nil {
+		return nil, translateWorkItemsBackendError(err)
+	}
+	if value == nil {
+		return nil, workitems.ErrInvalidPersistedState
+	}
+	out := &workitems.RepositoryAdmissionResult{
+		Changed: value.Changed, Replayed: value.Replayed, DispatchReady: value.DispatchReady,
+		Blocked: value.Blocked, Reopened: value.Reopened, Outcome: value.Outcome,
+	}
+	if value.Issue != nil {
+		issue := workItemSummary(*value.Issue)
+		out.Issue = &issue
+	}
+	return out, nil
+}
+
+func (s *workItemsBackendStore) List(ctx context.Context, filter workitems.ListFilter) ([]workitems.IssueSummary, error) {
+	be, err := s.backend(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, workItemOperationTimeout)
+	defer cancel()
+	values, err := be.List(ctx, backend.ListOpts{
+		Status: filter.Status, IssueType: filter.IssueType, Assignee: filter.Assignee,
+		Labels: filter.Labels, ParentID: filter.ParentID, Limit: filter.Limit,
+		SourceRepos: filter.SourceRepos,
+	})
+	if err != nil {
+		return nil, translateWorkItemsBackendError(err)
+	}
+	return workItemSummaries(values), nil
+}
+
+func (s *workItemsBackendStore) Blocked(ctx context.Context, query workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
+	be, err := s.backend(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, workItemOperationTimeout)
+	defer cancel()
+	values, err := be.Blocked(ctx, backend.BlockedOpts{
+		ParentID: query.ParentID, Assignee: query.Assignee, Priority: query.Priority,
+		Type: query.IssueType, Labels: query.Labels, SourceRepos: query.SourceRepos,
+		Limit: query.Limit,
+	})
+	if err != nil {
+		return nil, translateWorkItemsBackendError(err)
+	}
+	return workItemSummaries(values), nil
+}
+
+func (s *workItemsBackendStore) Ready(ctx context.Context, query workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
+	be, err := s.backend(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, workItemOperationTimeout)
+	defer cancel()
+	values, err := be.Ready(ctx, backend.ReadyOpts{
+		ParentID: query.ParentID, Assignee: query.Assignee, Priority: query.Priority,
+		Type: query.IssueType, Labels: query.Labels, SourceRepos: query.SourceRepos,
+		Limit: query.Limit,
+	})
+	if err != nil {
+		return nil, translateWorkItemsBackendError(err)
+	}
+	return workItemSummaries(values), nil
+}
+
+func (s *workItemsBackendStore) Deferred(ctx context.Context, query workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
+	be, err := s.backend(ctx)
+	if err != nil {
+		return nil, err
+	}
+	deferred, ok := be.(backend.DeferredIssueBackend)
+	if !ok {
+		return []workitems.IssueSummary{}, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, workItemOperationTimeout)
+	defer cancel()
+	values, err := deferred.Deferred(ctx, backend.DeferredOpts{
+		ParentID: query.ParentID, Assignee: query.Assignee, Priority: query.Priority,
+		Type: query.IssueType, Labels: query.Labels, SourceRepos: query.SourceRepos,
+		Limit: query.Limit,
+	})
+	if err != nil {
+		return nil, translateWorkItemsBackendError(err)
+	}
+	return workItemSummaries(values), nil
 }
 
 func (s *workItemsBackendStore) Search(ctx context.Context, query workitems.SearchQuery) ([]workitems.IssueSummary, error) {
@@ -60,6 +208,83 @@ func (s *workItemsBackendStore) Get(ctx context.Context, query workitems.GetQuer
 		return nil, workitems.ErrInvalidPersistedState
 	}
 	return workItemDetail(*value), nil
+}
+
+func (s *workItemsBackendStore) Patch(ctx context.Context, command workitems.PatchCommand) error {
+	be, err := s.backend(ctx)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, workItemOperationTimeout)
+	defer cancel()
+	err = be.Update(ctx, command.IssueID, backend.UpdateParams{
+		Title: command.Title, Description: command.Description, Status: command.Status,
+		Priority: command.Priority, Assignee: command.Assignee, Owner: command.Owner,
+		Design: command.Design, DesignFormat: command.DesignFormat,
+		AcceptanceCriteria: command.AcceptanceCriteria, Notes: command.Notes,
+		ExternalRef: command.ExternalRef, EstimatedMinutes: command.EstimatedMinutes,
+		IssueType: command.IssueType, AddLabels: command.AddLabels,
+		RemoveLabels: command.RemoveLabels, SetLabels: command.SetLabels,
+		Parent: command.Parent, DueAt: command.DueAt, DeferUntil: command.DeferUntil,
+		AgentState: command.AgentState,
+	})
+	if err != nil && strings.Contains(strings.ToLower(err.Error()), "cannot update template") {
+		return fmt.Errorf("%s: %w", err.Error(), workitems.ErrConflict)
+	}
+	return translateWorkItemsBackendError(err)
+}
+
+func (s *workItemsBackendStore) Close(ctx context.Context, command workitems.CloseCommand) (*workitems.CloseResult, error) {
+	be, err := s.backend(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, workItemOperationTimeout)
+	defer cancel()
+	value, err := be.Close(ctx, command.IssueID, backend.CloseParams{
+		Reason: command.Reason, Session: command.Session,
+		SuggestNext: command.SuggestNext, Force: command.Force,
+	})
+	if err != nil {
+		if backend.IsAlreadyClosedConflict(err) {
+			return nil, workitems.ErrAlreadyClosed
+		}
+		return nil, translateWorkItemsBackendError(err)
+	}
+	if value == nil {
+		return nil, workitems.ErrInvalidPersistedState
+	}
+	out := &workitems.CloseResult{Unblocked: make([]workitems.IssueSummary, 0, len(value.Unblocked))}
+	if value.Closed != nil {
+		closed := workItemSummary(*value.Closed)
+		out.Closed = &closed
+	}
+	for index := range value.Unblocked {
+		out.Unblocked = append(out.Unblocked, workItemSummary(value.Unblocked[index]))
+	}
+	return out, nil
+}
+
+func (s *workItemsBackendStore) AssignRepository(ctx context.Context, command workitems.AssignRepositoryCommand) (*workitems.IssueSummary, error) {
+	be, err := s.backend(ctx)
+	if err != nil {
+		return nil, err
+	}
+	repositories, ok := be.(backend.RepositoryRequirementBackend)
+	if !ok {
+		return nil, fmt.Errorf("issue backend does not support repository assignment: %w", workitems.ErrNotImplemented)
+	}
+	ctx, cancel := context.WithTimeout(ctx, workItemOperationTimeout)
+	defer cancel()
+	value, err := repositories.SetIssueRepository(ctx, command.IssueID, command.Repository)
+	if err != nil {
+		return nil, translateWorkItemsBackendError(err)
+	}
+	if value == nil {
+		return nil, workitems.ErrInvalidPersistedState
+	}
+	out := workItemSummary(*value)
+	return &out, nil
 }
 
 func (s *workItemsBackendStore) Claim(ctx context.Context, command workitems.ClaimCommand) (*workitems.IssueDetail, error) {
@@ -251,9 +476,21 @@ func workItemSummary(value backend.IssueData) workitems.IssueSummary {
 		Labels: append([]string(nil), value.Labels...), SourceRepo: value.SourceRepo,
 		Repo: value.SourceRepo, Parent: value.Parent, Design: value.Design,
 		DesignArtifactID: value.DesignArtifactID, DesignFormat: value.DesignFormat,
-		HasDesign: value.HasDesign || value.Design != "", CreatedAt: value.CreatedAt,
-		UpdatedAt: value.UpdatedAt, DueAt: value.DueAt, DeferUntil: value.DeferUntil,
+		HasDesign: value.HasDesign || value.Design != "", Notes: value.Notes,
+		CreatedBy: value.CreatedBy, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
+		ClosedAt: value.ClosedAt, CloseReason: value.CloseReason, ExternalRef: value.ExternalRef,
+		DueAt: value.DueAt, DeferUntil: value.DeferUntil,
+		DependencyCount: value.DependencyCount, DependentCount: value.DependentCount,
+		BlockedByCount: value.BlockedByCount, BlockedBy: append([]string(nil), value.BlockedBy...),
 	}
+}
+
+func workItemSummaries(values []backend.IssueData) []workitems.IssueSummary {
+	out := make([]workitems.IssueSummary, 0, len(values))
+	for index := range values {
+		out = append(out, workItemSummary(values[index]))
+	}
+	return out
 }
 
 func workItemDetail(value backend.IssueDetailData) *workitems.IssueDetail {

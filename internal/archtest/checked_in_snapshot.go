@@ -15,6 +15,7 @@ var checkedInModuleRoots = []string{
 	"sourcecontrol",
 	"workflowcatalog",
 	"workitems",
+	"workspace",
 }
 
 // checkedInSnapshotViolations keeps the current migration snapshot exact while
@@ -29,9 +30,9 @@ func checkedInSnapshotViolations(report Report) []string {
 		}
 	}
 
-	checkCount("composite Store files", len(report.CompositeStoreFiles), 67)
-	checkCount("outside-composition Store files", len(report.CompositeStoreOutside), 57)
-	checkCount("legacy handler imports", len(report.LegacyHandlerImports), 82)
+	checkCount("composite Store files", len(report.CompositeStoreFiles), 66)
+	checkCount("outside-composition Store files", len(report.CompositeStoreOutside), 56)
+	checkCount("legacy handler imports", len(report.LegacyHandlerImports), 80)
 	if !slices.Equal(report.ModuleRoots, checkedInModuleRoots) {
 		violations = append(violations, fmt.Sprintf("checked-in architecture snapshot module roots = %v, want %v", report.ModuleRoots, checkedInModuleRoots))
 	}

@@ -8,12 +8,53 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/app/workitemmove"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
+
+// HandleMoveWorkItem routes cross-workspace movement through the named
+// coordinator, which composes Workspace queries with Work Items commands.
+func HandleMoveWorkItem(mover workitemmove.Commands) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		issueID := r.PathValue("id")
+		if issueID == "" {
+			handler.WriteJSON(w, http.StatusBadRequest, MoveIssueResponse{Success: false, Error: "missing issue ID in path"})
+			return
+		}
+		req, ok := decodeMoveIssueRequest(w, r)
+		if !ok {
+			return
+		}
+		targetWorkspace := strings.TrimSpace(req.TargetWorkspace)
+		if targetWorkspace == "" {
+			handler.WriteJSON(w, http.StatusBadRequest, MoveIssueResponse{Success: false, Error: "target_workspace is required"})
+			return
+		}
+		if mover == nil {
+			handler.HandleWorkItemsError(w, workitems.ErrUnavailable)
+			return
+		}
+		currentWorkspace := middleware.WorkspaceFromContext(r.Context())
+		if currentWorkspace == "" {
+			currentWorkspace = r.PathValue("ws")
+		}
+		result, err := mover.Move(r.Context(), workitemmove.Command{
+			IssueID: issueID, SourceWorkspace: currentWorkspace, TargetWorkspace: targetWorkspace,
+		})
+		if err != nil {
+			handler.HandleWorkItemsError(w, err)
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, MoveIssueResponse{Success: true, Data: &MoveResult{
+			SourceID: result.SourceID, TargetID: result.TargetID, Warnings: result.Warnings,
+		}})
+	}
+}
 
 // MoveIssueRequest is the JSON body for POST /api/issues/{id}/move.
 type MoveIssueRequest struct {

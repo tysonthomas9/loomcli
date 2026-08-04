@@ -15,8 +15,10 @@ import (
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 
+	"github.com/tysonthomas9/loomcli/internal/app/workitemmove"
 	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
+	"github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/appinfra"
 	"github.com/tysonthomas9/loomcli/internal/webui/appstores"
@@ -53,15 +55,17 @@ type Server struct {
 	connectorDispatcher *connector.Dispatcher
 
 	// Service layer
-	issueSvc     service.IssueService
-	workItems    workitems.API
-	agentSvc     service.AgentService
-	agentRuntime service.InteractiveAgentRuntime
-	workspaceSvc service.WorkspaceService
-	termSvc      service.TerminalService // nil if termMgr is nil
-	diffSvc      service.DiffService     // nil if ops.GitOps is nil
-	fileSvc      service.FileService     // nil if ops.FileOps is nil
-	sessSvc      service.SessionService  // always constructed (stores may be nil internally)
+	issueSvc         service.IssueService
+	workItems        workitems.API
+	workspaceCatalog workspace.API
+	workItemMover    workitemmove.Commands
+	agentSvc         service.AgentService
+	agentRuntime     service.InteractiveAgentRuntime
+	workspaceSvc     service.WorkspaceService
+	termSvc          service.TerminalService // nil if termMgr is nil
+	diffSvc          service.DiffService     // nil if ops.GitOps is nil
+	fileSvc          service.FileService     // nil if ops.FileOps is nil
+	sessSvc          service.SessionService  // always constructed (stores may be nil internally)
 
 	// Real-time
 	hub               *appstores.Hub

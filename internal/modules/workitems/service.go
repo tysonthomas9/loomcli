@@ -2,15 +2,27 @@ package workitems
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+	"sync"
 )
 
-const maxCommentBytes = 64 * 1024
+const (
+	maxCommentBytes = 64 * 1024
+	maxLabels       = 50
+	maxDependencies = 100
+)
 
-// Service owns comment and dependency policy over a narrow durable port.
+var validIssueTypes = map[string]bool{
+	"bug": true, "feature": true, "task": true, "epic": true, "chore": true,
+}
+
+// Service owns Work Items lifecycle, availability, comment, and dependency
+// policy over a narrow durable port.
 type Service struct {
-	store Store
+	store           Store
+	labelMutationMu sync.Mutex
 }
 
 var _ API = (*Service)(nil)
@@ -20,6 +32,224 @@ func New(store Store) (*Service, error) {
 		return nil, fmt.Errorf("compose Work Items: durable port is required: %w", ErrUnavailable)
 	}
 	return &Service{store: store}, nil
+}
+
+func (s *Service) Create(ctx context.Context, command CreateCommand) (*CreatedIssue, error) {
+	if err := validateCreate(command); err != nil {
+		return nil, err
+	}
+	command.Labels = append([]string(nil), command.Labels...)
+	command.Dependencies = append([]string(nil), command.Dependencies...)
+	needsAdmission := createNeedsRepositoryAdmission(command)
+	if needsAdmission {
+		if err := s.store.RequireRepositoryAdmission(ctx); err != nil {
+			return nil, err
+		}
+	}
+	created, err := s.store.Create(ctx, command)
+	if err != nil {
+		return nil, err
+	}
+	if created == nil || strings.TrimSpace(created.ID) == "" {
+		return nil, fmt.Errorf("create returned an invalid issue: %w", ErrInvalidPersistedState)
+	}
+	canonical := cloneIssueSummary(*created)
+	if needsAdmission {
+		admission, err := s.blockRepositoryRequired(ctx, created.ID)
+		if err != nil {
+			return nil, err
+		}
+		if admission == nil || admission.Issue == nil || admission.Issue.ID != created.ID {
+			return nil, fmt.Errorf("repository admission for %q returned an invalid issue: %w", created.ID, ErrInvalidPersistedState)
+		}
+		canonical = cloneIssueSummary(*admission.Issue)
+	}
+	detail, getErr := s.store.Get(ctx, GetQuery{IssueID: created.ID})
+	if getErr == nil && detail != nil && detail.ID == created.ID {
+		mergeCanonicalSummary(detail, canonical)
+		return &CreatedIssue{Detail: cloneIssueDetail(detail)}, nil
+	}
+	return &CreatedIssue{Summary: &canonical}, nil
+}
+
+func (s *Service) List(ctx context.Context, query ListQuery) (*ListResult, error) {
+	if query.Filter.Limit < 0 {
+		return nil, fmt.Errorf("limit must be non-negative: %w", ErrInvalid)
+	}
+	query.Filter.Labels = append([]string(nil), query.Filter.Labels...)
+	query.Filter.LabelsAny = append([]string(nil), query.Filter.LabelsAny...)
+	query.Filter.SourceRepos = append([]string(nil), query.Filter.SourceRepos...)
+	query.ExcludeStatus = append([]string(nil), query.ExcludeStatus...)
+	issues, err := s.store.List(ctx, query.Filter)
+	if err != nil {
+		return nil, err
+	}
+	issues, err = validIssueSummaries(issues)
+	if err != nil {
+		return nil, err
+	}
+	issues = excludeIssuesByStatus(issues, query.ExcludeStatus)
+	if !query.IncludeBlocked {
+		out := make([]ListItem, len(issues))
+		for index := range issues {
+			out[index] = ListItem{IssueSummary: cloneIssueSummary(issues[index])}
+		}
+		return &ListResult{Issues: out}, nil
+	}
+	availability := availabilityFromFilter(query.Filter)
+	blocked, err := s.store.Blocked(ctx, availability)
+	if err != nil {
+		return nil, err
+	}
+	ready, err := s.store.Ready(ctx, availability)
+	if err != nil {
+		return nil, err
+	}
+	deferred, err := s.store.Deferred(ctx, availability)
+	if err != nil {
+		return nil, err
+	}
+	blocked, err = validIssueSummaries(blocked)
+	if err != nil {
+		return nil, err
+	}
+	ready, err = validIssueSummaries(ready)
+	if err != nil {
+		return nil, err
+	}
+	deferred, err = validIssueSummaries(deferred)
+	if err != nil {
+		return nil, err
+	}
+	blockedByID := summaryMap(blocked)
+	readyByID := summaryIDSet(ready)
+	deferredByID := summaryMap(deferred)
+	issues = appendMissingSummaries(issues, blockedByID)
+	issues = appendMissingSummaries(issues, deferredByID)
+	out := make([]KanbanItem, len(issues))
+	for index := range issues {
+		issue := cloneIssueSummary(issues[index])
+		blockedIssue, isBlocked := blockedByID[issue.ID]
+		_, isDeferred := deferredByID[issue.ID]
+		blockedBy := append([]string(nil), blockedIssue.BlockedBy...)
+		blockedCount := blockedIssue.BlockedByCount
+		deferredState := isDeferred || issue.Status == "deferred"
+		if isBlocked && blockedCount == 0 {
+			blockedCount = len(blockedBy)
+		}
+		out[index] = KanbanItem{
+			IssueSummary: issue, IsBlocked: isBlocked,
+			IsReady:        readyByID[issue.ID] && !isBlocked && !deferredState,
+			IsDeferred:     deferredState,
+			BlockedByCount: blockedCount, BlockedBy: blockedBy,
+		}
+	}
+	return &ListResult{KanbanIssues: out}, nil
+}
+
+func validIssueSummaries(values []IssueSummary) ([]IssueSummary, error) {
+	out := make([]IssueSummary, len(values))
+	for index := range values {
+		if strings.TrimSpace(values[index].ID) == "" {
+			return nil, fmt.Errorf("list returned an issue without an id: %w", ErrInvalidPersistedState)
+		}
+		out[index] = cloneIssueSummary(values[index])
+	}
+	return out, nil
+}
+
+func excludeIssuesByStatus(values []IssueSummary, excluded []string) []IssueSummary {
+	if len(excluded) == 0 {
+		return values
+	}
+	set := make(map[string]bool, len(excluded))
+	for _, status := range excluded {
+		set[status] = true
+	}
+	out := values[:0]
+	for _, value := range values {
+		if !set[value.Status] {
+			out = append(out, value)
+		}
+	}
+	return out
+}
+
+func availabilityFromFilter(filter ListFilter) AvailabilityQuery {
+	return AvailabilityQuery{
+		ParentID: filter.ParentID, Assignee: filter.Assignee, Priority: filter.Priority,
+		IssueType: filter.IssueType, Labels: append([]string(nil), filter.Labels...),
+		SourceRepos: append([]string(nil), filter.SourceRepos...), Limit: filter.Limit,
+	}
+}
+
+func summaryMap(values []IssueSummary) map[string]IssueSummary {
+	out := make(map[string]IssueSummary, len(values))
+	for _, value := range values {
+		out[value.ID] = value
+	}
+	return out
+}
+
+func summaryIDSet(values []IssueSummary) map[string]bool {
+	out := make(map[string]bool, len(values))
+	for _, value := range values {
+		out[value.ID] = true
+	}
+	return out
+}
+
+func appendMissingSummaries(values []IssueSummary, byID map[string]IssueSummary) []IssueSummary {
+	seen := make(map[string]bool, len(values))
+	for _, value := range values {
+		seen[value.ID] = true
+	}
+	for id, value := range byID {
+		if !seen[id] {
+			values = append(values, value)
+		}
+	}
+	return values
+}
+
+func (s *Service) blockRepositoryRequired(ctx context.Context, issueID string) (*RepositoryAdmissionResult, error) {
+	result, err := s.store.BlockRepositoryRequired(ctx, issueID)
+	if err == nil || ctx.Err() != nil || (!errors.Is(err, ErrUnavailable) && !errors.Is(err, ErrTimeout)) {
+		return result, err
+	}
+	return s.store.BlockRepositoryRequired(ctx, issueID)
+}
+
+func validateCreate(command CreateCommand) error {
+	if strings.TrimSpace(command.Title) == "" {
+		return fmt.Errorf("title is required: %w", ErrInvalid)
+	}
+	if command.IssueType == "" {
+		return fmt.Errorf("issue_type is required: %w", ErrInvalid)
+	}
+	if !validIssueTypes[command.IssueType] {
+		return fmt.Errorf("invalid issue_type: %s (must be bug, feature, task, epic, or chore): %w", command.IssueType, ErrInvalid)
+	}
+	if command.Priority < 0 || command.Priority > 4 {
+		return fmt.Errorf("priority must be between 0 and 4 (got %d): %w", command.Priority, ErrInvalid)
+	}
+	if command.Status != "" && command.Status != "open" && command.Status != "deferred" {
+		return fmt.Errorf("status must be open or deferred: %w", ErrInvalid)
+	}
+	if len(command.Labels) > maxLabels {
+		return fmt.Errorf("too many labels (max %d, got %d): %w", maxLabels, len(command.Labels), ErrInvalid)
+	}
+	if len(command.Dependencies) > maxDependencies {
+		return fmt.Errorf("too many dependencies (max %d, got %d): %w", maxDependencies, len(command.Dependencies), ErrInvalid)
+	}
+	return nil
+}
+
+func createNeedsRepositoryAdmission(command CreateCommand) bool {
+	status := strings.ToLower(strings.TrimSpace(command.Status))
+	return (status == "" || status == "open") &&
+		!strings.EqualFold(strings.TrimSpace(command.IssueType), "epic") &&
+		strings.TrimSpace(command.SourceRepo) == ""
 }
 
 func (s *Service) Search(ctx context.Context, query SearchQuery) ([]IssueSummary, error) {
@@ -58,6 +288,62 @@ func (s *Service) Get(ctx context.Context, query GetQuery) (*IssueDetail, error)
 		return nil, fmt.Errorf("get %q returned an invalid issue: %w", query.IssueID, ErrInvalidPersistedState)
 	}
 	return cloneIssueDetail(value), nil
+}
+
+func (s *Service) Patch(ctx context.Context, command PatchCommand) (*IssueDetail, error) {
+	var err error
+	command.IssueID, err = required("issue id", command.IssueID)
+	if err != nil {
+		return nil, err
+	}
+	if patchHasLabelMutation(command) {
+		s.labelMutationMu.Lock()
+		defer s.labelMutationMu.Unlock()
+	}
+	if err := s.store.Patch(ctx, clonePatchCommand(command)); err != nil {
+		return nil, err
+	}
+	return s.Get(ctx, GetQuery{IssueID: command.IssueID})
+}
+
+func (s *Service) Close(ctx context.Context, command CloseCommand) (*CloseResult, error) {
+	var err error
+	command.IssueID, err = required("issue id", command.IssueID)
+	if err != nil {
+		return nil, err
+	}
+	result, err := s.store.Close(ctx, command)
+	if err != nil {
+		if errors.Is(err, ErrAlreadyClosed) {
+			return &CloseResult{Closed: &IssueSummary{ID: command.IssueID, Status: "closed"}, Unblocked: []IssueSummary{}}, nil
+		}
+		return nil, err
+	}
+	if result == nil || result.Closed == nil || strings.TrimSpace(result.Closed.ID) != command.IssueID {
+		return nil, fmt.Errorf("close %q returned an invalid result: %w", command.IssueID, ErrInvalidPersistedState)
+	}
+	return cloneCloseResult(result), nil
+}
+
+func (s *Service) AssignRepository(ctx context.Context, command AssignRepositoryCommand) (*IssueSummary, error) {
+	var err error
+	command.IssueID, err = required("issue id", command.IssueID)
+	if err != nil {
+		return nil, err
+	}
+	command.Repository, err = required("repository", command.Repository)
+	if err != nil {
+		return nil, err
+	}
+	value, err := s.store.AssignRepository(ctx, command)
+	if err != nil {
+		return nil, err
+	}
+	if value == nil || strings.TrimSpace(value.ID) != command.IssueID || strings.TrimSpace(value.SourceRepo) != command.Repository {
+		return nil, fmt.Errorf("repository assignment for %q returned an invalid issue: %w", command.IssueID, ErrInvalidPersistedState)
+	}
+	copy := cloneIssueSummary(*value)
+	return &copy, nil
 }
 
 func (s *Service) Claim(ctx context.Context, command ClaimCommand) (*IssueDetail, error) {
@@ -244,6 +530,7 @@ func required(name, value string) (string, error) {
 
 func cloneIssueSummary(value IssueSummary) IssueSummary {
 	value.Labels = append([]string(nil), value.Labels...)
+	value.BlockedBy = append([]string(nil), value.BlockedBy...)
 	if value.DueAt != nil {
 		copy := *value.DueAt
 		value.DueAt = &copy
@@ -252,7 +539,37 @@ func cloneIssueSummary(value IssueSummary) IssueSummary {
 		copy := *value.DeferUntil
 		value.DeferUntil = &copy
 	}
+	if value.ClosedAt != nil {
+		copy := *value.ClosedAt
+		value.ClosedAt = &copy
+	}
 	return value
+}
+
+func patchHasLabelMutation(command PatchCommand) bool {
+	return len(command.AddLabels) > 0 || len(command.RemoveLabels) > 0 || len(command.SetLabels) > 0
+}
+
+func clonePatchCommand(command PatchCommand) PatchCommand {
+	command.AddLabels = append([]string(nil), command.AddLabels...)
+	command.RemoveLabels = append([]string(nil), command.RemoveLabels...)
+	command.SetLabels = append([]string(nil), command.SetLabels...)
+	return command
+}
+
+func cloneCloseResult(value *CloseResult) *CloseResult {
+	if value == nil {
+		return nil
+	}
+	out := &CloseResult{Unblocked: make([]IssueSummary, len(value.Unblocked))}
+	if value.Closed != nil {
+		closed := cloneIssueSummary(*value.Closed)
+		out.Closed = &closed
+	}
+	for index := range value.Unblocked {
+		out.Unblocked[index] = cloneIssueSummary(value.Unblocked[index])
+	}
+	return out
 }
 
 func cloneIssueDetail(value *IssueDetail) *IssueDetail {
@@ -289,4 +606,34 @@ func cloneIssueDetail(value *IssueDetail) *IssueDetail {
 		copy.DeferUntil = &deferUntil
 	}
 	return &copy
+}
+
+func mergeCanonicalSummary(detail *IssueDetail, summary IssueSummary) {
+	if detail == nil {
+		return
+	}
+	detail.ID = summary.ID
+	detail.Title = summary.Title
+	detail.Status = summary.Status
+	detail.Priority = summary.Priority
+	detail.IssueType = summary.IssueType
+	detail.Assignee = summary.Assignee
+	detail.Owner = summary.Owner
+	detail.Labels = append([]string(nil), summary.Labels...)
+	detail.SourceRepo = summary.SourceRepo
+	detail.Repo = summary.Repo
+	detail.Parent = summary.Parent
+	detail.Design = summary.Design
+	detail.DesignArtifactID = summary.DesignArtifactID
+	detail.DesignFormat = summary.DesignFormat
+	detail.HasDesign = summary.HasDesign
+	detail.Notes = summary.Notes
+	detail.CreatedBy = summary.CreatedBy
+	detail.CreatedAt = summary.CreatedAt
+	detail.UpdatedAt = summary.UpdatedAt
+	detail.ClosedAt = summary.ClosedAt
+	detail.CloseReason = summary.CloseReason
+	detail.ExternalRef = summary.ExternalRef
+	detail.DueAt = summary.DueAt
+	detail.DeferUntil = summary.DeferUntil
 }

@@ -420,7 +420,7 @@ func TestHandleListIssues_ParseListParams_Filters(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parseListParams error: %v", err)
 			}
-			tt.validate(t, args)
+			tt.validate(t, listFilterToLegacy(args))
 		})
 	}
 }

@@ -41,7 +41,7 @@ func (app *Server) buildModules() {
 
 	// Issue + session modules
 	app.wsModules = append(app.wsModules,
-		modbuilder.NewIssueModules(app.issueSvc, app.workItems, app.sessSvc, app.config.Store)...)
+		modbuilder.NewIssueModules(app.workItems, app.workItemMover, app.sessSvc)...)
 
 	// Log module (always added — handles nil agentSvc gracefully)
 	app.wsModules = append(app.wsModules, svcimpl.NewLogModule(app.agentSvc))

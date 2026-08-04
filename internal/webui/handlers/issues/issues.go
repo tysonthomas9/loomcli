@@ -159,6 +159,81 @@ func HandleGetIssue(svc service.IssueService) http.HandlerFunc {
 }
 
 // handleListIssues returns a handler that lists issues from the daemon.
+func HandleListWorkItems(api workitems.API) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		args, err := parseListParams(r)
+		if err != nil {
+			writeIssuesError(w, http.StatusBadRequest, err.Error(), "INVALID_PARAMS")
+			return
+		}
+		args.Lightweight = true
+		kp, err := parseKanbanParams(r)
+		if err != nil {
+			writeIssuesError(w, http.StatusBadRequest, err.Error(), "INVALID_PARAMS")
+			return
+		}
+		if api == nil {
+			handler.HandleWorkItemsError(w, workitems.ErrUnavailable)
+			return
+		}
+		result, err := api.List(r.Context(), workitems.ListQuery{
+			Filter: listFilterToWorkItems(args), ExcludeStatus: kp.ExcludeStatus,
+			IncludeBlocked: kp.IncludeBlocked,
+		})
+		if err != nil {
+			handler.HandleWorkItemsError(w, err)
+			return
+		}
+		var value any = result.Issues
+		if result.KanbanIssues != nil {
+			value = result.KanbanIssues
+		}
+		data, err := json.Marshal(value)
+		if err != nil {
+			slog.Error("failed to marshal work items", "err", err)
+			writeIssuesError(w, http.StatusInternalServerError, "failed to encode response", "ENCODE_ERROR")
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, IssuesResponse{Success: true, Data: data})
+	}
+}
+
+func listFilterToWorkItems(value *workitems.ListFilter) workitems.ListFilter {
+	if value == nil {
+		return workitems.ListFilter{}
+	}
+	return workitems.ListFilter{
+		Query: value.Query, Status: value.Status, Priority: value.Priority,
+		IssueType: value.IssueType, Assignee: value.Assignee,
+		Labels: append([]string(nil), value.Labels...), LabelsAny: append([]string(nil), value.LabelsAny...),
+		SourceRepos: append([]string(nil), value.SourceRepos...), Limit: value.Limit,
+		TitleContains: value.TitleContains, DescriptionContains: value.DescriptionContains,
+		NotesContains: value.NotesContains, CreatedAfter: value.CreatedAfter,
+		CreatedBefore: value.CreatedBefore, UpdatedAfter: value.UpdatedAfter,
+		UpdatedBefore: value.UpdatedBefore, EmptyDescription: value.EmptyDescription,
+		NoAssignee: value.NoAssignee, NoLabels: value.NoLabels, Pinned: value.Pinned,
+		ParentID: value.ParentID, Lightweight: value.Lightweight,
+	}
+}
+
+func listFilterToLegacy(value *workitems.ListFilter) *service.ListFilter {
+	if value == nil {
+		return &service.ListFilter{}
+	}
+	return &service.ListFilter{
+		Query: value.Query, Status: value.Status, Priority: value.Priority,
+		IssueType: value.IssueType, Assignee: value.Assignee,
+		Labels: append([]string(nil), value.Labels...), LabelsAny: append([]string(nil), value.LabelsAny...),
+		SourceRepos: append([]string(nil), value.SourceRepos...), Limit: value.Limit,
+		TitleContains: value.TitleContains, DescriptionContains: value.DescriptionContains,
+		NotesContains: value.NotesContains, CreatedAfter: value.CreatedAfter,
+		CreatedBefore: value.CreatedBefore, UpdatedAfter: value.UpdatedAfter,
+		UpdatedBefore: value.UpdatedBefore, EmptyDescription: value.EmptyDescription,
+		NoAssignee: value.NoAssignee, NoLabels: value.NoLabels, Pinned: value.Pinned,
+		ParentID: value.ParentID, Lightweight: value.Lightweight,
+	}
+}
+
 func HandleListIssues(svc service.IssueService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		args, err := parseListParams(r)
@@ -177,7 +252,7 @@ func HandleListIssues(svc service.IssueService) http.HandlerFunc {
 		}
 
 		result, svcErr := svc.ListIssues(r.Context(), service.ListIssuesParams{
-			Args:           args,
+			Args:           listFilterToLegacy(args),
 			ExcludeStatus:  kp.ExcludeStatus,
 			IncludeBlocked: kp.IncludeBlocked,
 		})

@@ -4,8 +4,11 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
+
+type issueListFilter = workitems.ListFilter
 
 // parseListParams extracts a service-owned issue filter from HTTP query parameters.
 func parseListParams(r *http.Request) (*issueListFilter, error) { //nolint:funlen

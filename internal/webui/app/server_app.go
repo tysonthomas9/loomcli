@@ -11,6 +11,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
+	"github.com/tysonthomas9/loomcli/internal/app/workitemmove"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/app/capabilitycomposition"
 	"github.com/tysonthomas9/loomcli/internal/webui/appinfra"
@@ -118,6 +119,18 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	app.workItems, err = capabilitycomposition.NewWorkItems(config.IssueBackendFn)
 	if err != nil {
 		return nil, fmt.Errorf("compose Work Items capability: %w", err)
+	}
+	if config.Store != nil {
+		app.workspaceCatalog, err = capabilitycomposition.NewWorkspaceCatalog(config.Store.Workspaces())
+		if err != nil {
+			return nil, fmt.Errorf("compose Workspace capability: %w", err)
+		}
+	}
+	if app.workItems != nil && app.workspaceCatalog != nil {
+		app.workItemMover, err = workitemmove.New(app.workItems, app.workspaceCatalog, middleware.WithWorkspace)
+		if err != nil {
+			return nil, fmt.Errorf("compose work item move workflow: %w", err)
+		}
 	}
 
 	// Create SSE hub for real-time push notifications

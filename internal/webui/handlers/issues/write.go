@@ -6,9 +6,41 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
+
+// HandlePatchWorkItem routes a partial aggregate update through the Work
+// Items owner and returns the canonical post-update projection.
+func HandlePatchWorkItem(api workitems.API) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		issueID, req, ok := validatePatchRequest(w, r)
+		if !ok {
+			return
+		}
+		if api == nil {
+			handler.HandleWorkItemsError(w, workitems.ErrUnavailable)
+			return
+		}
+		value, err := api.Patch(r.Context(), workitems.PatchCommand{
+			IssueID: issueID, Title: req.Title, Description: req.Description,
+			Status: req.Status, Priority: req.Priority, Assignee: req.Assignee,
+			Owner: req.Owner, Design: req.Design, DesignFormat: req.DesignFormat,
+			AcceptanceCriteria: req.AcceptanceCriteria, Notes: req.Notes,
+			ExternalRef: req.ExternalRef, EstimatedMinutes: req.EstimatedMinutes,
+			IssueType: req.IssueType, AddLabels: req.AddLabels,
+			RemoveLabels: req.RemoveLabels, SetLabels: req.SetLabels,
+			Pinned: req.Pinned, Parent: req.Parent, DueAt: req.DueAt,
+			DeferUntil: req.DeferUntil, AgentState: req.AgentState,
+		})
+		if err != nil {
+			handler.HandleWorkItemsError(w, err)
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, PatchIssueResponse{Success: true, Data: value})
+	}
+}
 
 // handlePatchIssue returns a handler that performs partial updates on an issue.
 func HandlePatchIssue(svc service.IssueService) http.HandlerFunc {

@@ -6,10 +6,15 @@ import "context"
 // surface. Commands use aggregate-specific inputs; callers never receive a
 // generic issue updater.
 type API interface {
+	Create(context.Context, CreateCommand) (*CreatedIssue, error)
+	List(context.Context, ListQuery) (*ListResult, error)
 	Search(context.Context, SearchQuery) ([]IssueSummary, error)
 	Get(context.Context, GetQuery) (*IssueDetail, error)
+	Patch(context.Context, PatchCommand) (*IssueDetail, error)
+	Close(context.Context, CloseCommand) (*CloseResult, error)
 	Claim(context.Context, ClaimCommand) (*IssueDetail, error)
 	Reopen(context.Context, ReopenCommand) error
+	AssignRepository(context.Context, AssignRepositoryCommand) (*IssueSummary, error)
 	Delete(context.Context, DeleteCommand) (DeleteResult, error)
 	ListEvents(context.Context, ListEventsQuery) ([]*Event, error)
 	AddComment(context.Context, AddCommentCommand) (*Comment, error)
@@ -17,6 +22,72 @@ type API interface {
 	AddDependency(context.Context, AddDependencyCommand) error
 	RemoveDependency(context.Context, RemoveDependencyCommand) error
 	ListDependencies(context.Context, ListDependenciesQuery) ([]Dependency, error)
+}
+
+type ListQuery struct {
+	Filter         ListFilter
+	ExcludeStatus  []string
+	IncludeBlocked bool
+}
+
+type ListFilter struct {
+	Query               string
+	Status              string
+	Priority            *int
+	IssueType           string
+	Assignee            string
+	Labels              []string
+	LabelsAny           []string
+	SourceRepos         []string
+	Limit               int
+	TitleContains       string
+	DescriptionContains string
+	NotesContains       string
+	CreatedAfter        string
+	CreatedBefore       string
+	UpdatedAfter        string
+	UpdatedBefore       string
+	EmptyDescription    bool
+	NoAssignee          bool
+	NoLabels            bool
+	Pinned              *bool
+	ParentID            string
+	Lightweight         bool
+}
+
+type AvailabilityQuery struct {
+	ParentID    string
+	Assignee    string
+	Priority    *int
+	IssueType   string
+	Labels      []string
+	SourceRepos []string
+	Limit       int
+}
+
+type CreateCommand struct {
+	Title              string
+	IssueType          string
+	Priority           int
+	ID                 string
+	Parent             string
+	Description        string
+	Status             string
+	Design             string
+	AcceptanceCriteria string
+	Notes              string
+	Assignee           string
+	Owner              string
+	CreatedBy          string
+	ExternalRef        string
+	EstimatedMinutes   *int
+	Labels             []string
+	Dependencies       []string
+	DueAt              string
+	DeferUntil         string
+	SourceRepo         string
+	IdempotencyKey     string
+	Force              bool
 }
 
 type SearchQuery struct {
@@ -28,6 +99,39 @@ type GetQuery struct {
 	IssueID string
 }
 
+type PatchCommand struct {
+	IssueID            string
+	Title              *string
+	Description        *string
+	Status             *string
+	Priority           *int
+	Assignee           *string
+	Owner              *string
+	Design             *string
+	DesignFormat       *string
+	AcceptanceCriteria *string
+	Notes              *string
+	ExternalRef        *string
+	EstimatedMinutes   *int
+	IssueType          *string
+	AddLabels          []string
+	RemoveLabels       []string
+	SetLabels          []string
+	Pinned             *bool
+	Parent             *string
+	DueAt              *string
+	DeferUntil         *string
+	AgentState         *string
+}
+
+type CloseCommand struct {
+	IssueID     string
+	Reason      string
+	Session     string
+	SuggestNext bool
+	Force       bool
+}
+
 type ClaimCommand struct {
 	IssueID string
 }
@@ -35,6 +139,11 @@ type ClaimCommand struct {
 type ReopenCommand struct {
 	IssueID string
 	Reason  string
+}
+
+type AssignRepositoryCommand struct {
+	IssueID    string
+	Repository string
 }
 
 type DeleteCommand struct {

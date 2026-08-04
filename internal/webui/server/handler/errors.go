@@ -89,6 +89,8 @@ func HandleWorkItemsError(w http.ResponseWriter, err error) {
 		status = http.StatusServiceUnavailable
 	case errors.Is(err, workitems.ErrTimeout):
 		status = http.StatusGatewayTimeout
+	case errors.Is(err, workitems.ErrNotImplemented):
+		status = http.StatusNotImplemented
 	}
 	slog.Error("work items error", "status", status, "err", err)
 	WriteJSON(w, status, map[string]string{"error": message})

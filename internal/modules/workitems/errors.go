@@ -11,6 +11,8 @@ var (
 	ErrConflict              = errors.New("work item conflict")
 	ErrUnavailable           = errors.New("work items unavailable")
 	ErrTimeout               = errors.New("work item operation timed out")
+	ErrAlreadyClosed         = errors.New("work item already closed")
+	ErrNotImplemented        = errors.New("work item operation not implemented")
 	ErrInvalidPersistedState = errors.New("invalid persisted work item state")
 )
 
@@ -21,7 +23,7 @@ func PublicErrorMessage(err error) string {
 		return ""
 	}
 	message := err.Error()
-	for _, sentinel := range []error{ErrInvalid, ErrNotFound, ErrConflict, ErrUnavailable, ErrTimeout} {
+	for _, sentinel := range []error{ErrInvalid, ErrNotFound, ErrConflict, ErrUnavailable, ErrTimeout, ErrNotImplemented} {
 		if errors.Is(err, sentinel) {
 			return strings.TrimSuffix(message, ": "+sentinel.Error())
 		}

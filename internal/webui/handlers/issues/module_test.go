@@ -2,23 +2,20 @@ package issues
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/app/workitemmove"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
-	"github.com/tysonthomas9/loomcli/internal/types"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // Compile-time assertion: *IssueModule implements Module.
 var _ Module = (*IssueModule)(nil)
 
 func TestIssueModule_RegisterRoutes(t *testing.T) {
-	svc := &mockIssueService{}
-	mod := NewIssueModule(svc, nil, nil)
+	mod := NewIssueModule(nil, nil)
 
 	mux := http.NewServeMux()
 	mod.Register(mux)
@@ -60,8 +57,7 @@ func TestIssueModule_RegisterRoutes(t *testing.T) {
 }
 
 func TestIssueModule_ExcludedRoutes_NotRegistered(t *testing.T) {
-	svc := &mockIssueService{}
-	mod := NewIssueModule(svc, nil, nil)
+	mod := NewIssueModule(nil, nil)
 
 	mux := http.NewServeMux()
 	mod.Register(mux)
@@ -90,8 +86,7 @@ func TestIssueModule_ExcludedRoutes_NotRegistered(t *testing.T) {
 }
 
 func TestIssueModule_WrongMethod_Returns405(t *testing.T) {
-	svc := &mockIssueService{}
-	mod := NewIssueModule(svc, nil, nil)
+	mod := NewIssueModule(nil, nil)
 
 	mux := http.NewServeMux()
 	mod.Register(mux)
@@ -106,13 +101,15 @@ func TestIssueModule_WrongMethod_Returns405(t *testing.T) {
 }
 
 func TestIssueModule_NilService(t *testing.T) {
-	mod := NewIssueModule(nil, nil, nil)
+	mod := NewIssueModule(nil, nil)
 
 	mux := http.NewServeMux()
 	mod.Register(mux) // must not panic during registration
 }
 
 type routeWorkItems struct {
+	createCalls         int
+	listCalls           int
 	comment             workitems.AddCommentCommand
 	listCommentsCalls   int
 	addDependencyCalls  int
@@ -124,6 +121,27 @@ type routeWorkItems struct {
 	reopenIDs           []string
 	deleteIDs           []string
 	eventCalls          int
+	patchIDs            []string
+	closeIDs            []string
+	repositoryIDs       []string
+}
+
+type routeMover struct {
+	calls int
+}
+
+func (m *routeMover) Move(_ context.Context, command workitemmove.Command) (*workitemmove.Result, error) {
+	m.calls++
+	return &workitemmove.Result{SourceID: command.IssueID, TargetID: "TARGET-1"}, nil
+}
+
+func (f *routeWorkItems) Create(_ context.Context, command workitems.CreateCommand) (*workitems.CreatedIssue, error) {
+	f.createCalls++
+	return &workitems.CreatedIssue{Summary: &workitems.IssueSummary{ID: "TASK-NEW", Title: command.Title, Status: "open"}}, nil
+}
+func (f *routeWorkItems) List(context.Context, workitems.ListQuery) (*workitems.ListResult, error) {
+	f.listCalls++
+	return &workitems.ListResult{Issues: []workitems.ListItem{}}, nil
 }
 
 func (f *routeWorkItems) Search(context.Context, workitems.SearchQuery) ([]workitems.IssueSummary, error) {
@@ -133,6 +151,18 @@ func (f *routeWorkItems) Search(context.Context, workitems.SearchQuery) ([]worki
 func (f *routeWorkItems) Get(_ context.Context, query workitems.GetQuery) (*workitems.IssueDetail, error) {
 	f.getIDs = append(f.getIDs, query.IssueID)
 	return &workitems.IssueDetail{ID: query.IssueID, Status: "open", Labels: []string{}, Dependencies: []workitems.Dependency{}, Dependents: []workitems.Dependency{}, Comments: []*workitems.Comment{}}, nil
+}
+func (f *routeWorkItems) Patch(_ context.Context, command workitems.PatchCommand) (*workitems.IssueDetail, error) {
+	f.patchIDs = append(f.patchIDs, command.IssueID)
+	return &workitems.IssueDetail{ID: command.IssueID, Status: "open", Labels: []string{}, Dependencies: []workitems.Dependency{}, Dependents: []workitems.Dependency{}, Comments: []*workitems.Comment{}}, nil
+}
+func (f *routeWorkItems) Close(_ context.Context, command workitems.CloseCommand) (*workitems.CloseResult, error) {
+	f.closeIDs = append(f.closeIDs, command.IssueID)
+	return &workitems.CloseResult{Closed: &workitems.IssueSummary{ID: command.IssueID, Status: "closed"}, Unblocked: []workitems.IssueSummary{}}, nil
+}
+func (f *routeWorkItems) AssignRepository(_ context.Context, command workitems.AssignRepositoryCommand) (*workitems.IssueSummary, error) {
+	f.repositoryIDs = append(f.repositoryIDs, command.IssueID)
+	return &workitems.IssueSummary{ID: command.IssueID, SourceRepo: command.Repository, Repo: command.Repository}, nil
 }
 func (f *routeWorkItems) Claim(_ context.Context, command workitems.ClaimCommand) (*workitems.IssueDetail, error) {
 	f.claimIDs = append(f.claimIDs, command.IssueID)
@@ -174,54 +204,9 @@ func (f *routeWorkItems) ListDependencies(context.Context, workitems.ListDepende
 }
 
 func TestIssueModule_WorkItemRoutesUseCapability(t *testing.T) {
-	legacy := &mockIssueService{
-		getIssueFunc: func(context.Context, string) (json.RawMessage, error) {
-			t.Fatal("legacy IssueService get path was called")
-			return nil, nil
-		},
-		claimIssueFunc: func(context.Context, service.ClaimIssueParams) (json.RawMessage, error) {
-			t.Fatal("legacy IssueService claim path was called")
-			return nil, nil
-		},
-		searchIssuesFunc: func(context.Context, service.SearchIssuesParams) (json.RawMessage, error) {
-			t.Fatal("legacy IssueService search path was called")
-			return nil, nil
-		},
-		reopenIssueFunc: func(context.Context, service.ReopenIssueParams) error {
-			t.Fatal("legacy IssueService reopen path was called")
-			return nil
-		},
-		deleteIssueFunc: func(context.Context, string) (json.RawMessage, error) {
-			t.Fatal("legacy IssueService delete path was called")
-			return nil, nil
-		},
-		listEventsFunc: func(context.Context, service.EventListParams) ([]*types.Event, error) {
-			t.Fatal("legacy IssueService list-events path was called")
-			return nil, nil
-		},
-		addCommentFunc: func(context.Context, service.AddCommentParams) (*types.Comment, error) {
-			t.Fatal("legacy IssueService add-comment path was called")
-			return nil, nil
-		},
-		listCommentsFunc: func(context.Context, string) ([]*types.Comment, error) {
-			t.Fatal("legacy IssueService list-comments path was called")
-			return nil, nil
-		},
-		addDependencyFunc: func(context.Context, service.AddDependencyParams) error {
-			t.Fatal("legacy IssueService add-dependency path was called")
-			return nil
-		},
-		removeDependencyFunc: func(context.Context, service.RemoveDependencyParams) error {
-			t.Fatal("legacy IssueService remove-dependency path was called")
-			return nil
-		},
-		listDependenciesFunc: func(context.Context, string) (json.RawMessage, error) {
-			t.Fatal("legacy IssueService list-dependencies path was called")
-			return nil, nil
-		},
-	}
 	capability := &routeWorkItems{}
-	mod := NewIssueModule(legacy, capability, nil)
+	mover := &routeMover{}
+	mod := NewIssueModule(capability, mover)
 	mux := http.NewServeMux()
 	mod.Register(mux)
 
@@ -237,6 +222,12 @@ func TestIssueModule_WorkItemRoutesUseCapability(t *testing.T) {
 		{http.MethodPost, "/api/workspaces/ws/issues/TASK-1/reopen", `{}`, http.StatusOK},
 		{http.MethodDelete, "/api/workspaces/ws/issues/TASK-1", "", http.StatusOK},
 		{http.MethodGet, "/api/workspaces/ws/issues/TASK-1/events", "", http.StatusOK},
+		{http.MethodPost, "/api/workspaces/ws/issues", `{"title":"new task","issue_type":"task","priority":2,"source_repo":"loomcli"}`, http.StatusCreated},
+		{http.MethodGet, "/api/workspaces/ws/issues", "", http.StatusOK},
+		{http.MethodPatch, "/api/workspaces/ws/issues/TASK-1", `{"title":"updated"}`, http.StatusOK},
+		{http.MethodPost, "/api/workspaces/ws/issues/TASK-1/close", `{"reason":"done"}`, http.StatusOK},
+		{http.MethodPut, "/api/workspaces/ws/issues/TASK-1/repository", `{"repo":"loomcli"}`, http.StatusOK},
+		{http.MethodPost, "/api/workspaces/ws/issues/TASK-1/move", `{"target_workspace":"target"}`, http.StatusOK},
 		{http.MethodPost, "/api/workspaces/ws/issues/TASK-1/comments", `{"text":" proof "}`, http.StatusCreated},
 		{http.MethodGet, "/api/workspaces/ws/issues/TASK-1/comments", "", http.StatusOK},
 		{http.MethodPost, "/api/workspaces/ws/issues/TASK-1/dependencies", `{"depends_on_id":"TASK-2"}`, http.StatusOK},
@@ -254,7 +245,10 @@ func TestIssueModule_WorkItemRoutesUseCapability(t *testing.T) {
 	if capability.comment.IssueID != "TASK-1" || capability.comment.Text != " proof " {
 		t.Fatalf("route did not invoke Work Items API: %#v", capability.comment)
 	}
-	if capability.searchCalls != 1 || len(capability.getIDs) != 1 || capability.getIDs[0] != "TASK-1" || len(capability.claimIDs) != 1 || capability.claimIDs[0] != "TASK-1" || len(capability.reopenIDs) != 1 || capability.reopenIDs[0] != "TASK-1" || len(capability.deleteIDs) != 1 || capability.deleteIDs[0] != "TASK-1" || capability.eventCalls != 1 || capability.listCommentsCalls != 1 || capability.addDependencyCalls != 1 || capability.listDependencyCalls != 1 || len(capability.removeDependencyIDs) != 1 || capability.removeDependencyIDs[0] != "TASK-2" {
+	if mover.calls != 1 {
+		t.Fatalf("move route did not invoke coordinator: %#v", mover)
+	}
+	if capability.createCalls != 1 || capability.listCalls != 1 || capability.searchCalls != 1 || len(capability.getIDs) != 1 || capability.getIDs[0] != "TASK-1" || len(capability.claimIDs) != 1 || capability.claimIDs[0] != "TASK-1" || len(capability.reopenIDs) != 1 || capability.reopenIDs[0] != "TASK-1" || len(capability.deleteIDs) != 1 || capability.deleteIDs[0] != "TASK-1" || capability.eventCalls != 1 || len(capability.patchIDs) != 1 || capability.patchIDs[0] != "TASK-1" || len(capability.closeIDs) != 1 || capability.closeIDs[0] != "TASK-1" || len(capability.repositoryIDs) != 1 || capability.repositoryIDs[0] != "TASK-1" || capability.listCommentsCalls != 1 || capability.addDependencyCalls != 1 || capability.listDependencyCalls != 1 || len(capability.removeDependencyIDs) != 1 || capability.removeDependencyIDs[0] != "TASK-2" {
 		t.Fatalf("unexpected Work Items route calls: %#v", capability)
 	}
 }

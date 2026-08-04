@@ -68,6 +68,38 @@ func HandleDeleteWorkItem(api workitems.API) http.HandlerFunc {
 }
 
 // handleCreateIssue returns a handler that creates a new issue.
+func HandleCreateWorkItem(api workitems.API) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
+		var req IssueCreateRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) {
+				writeIssuesError(w, http.StatusRequestEntityTooLarge, "request body too large (max 1MB)", "REQUEST_TOO_LARGE")
+				return
+			}
+			slog.Warn("invalid JSON body in HandleCreateWorkItem", "err", err)
+			writeIssuesError(w, http.StatusBadRequest, "invalid request body", "INVALID_JSON")
+			return
+		}
+		if api == nil {
+			handler.HandleWorkItemsError(w, workitems.ErrUnavailable)
+			return
+		}
+		value, err := api.Create(r.Context(), createWorkItemCommand(r, &req))
+		if err != nil {
+			handler.HandleWorkItemsError(w, err)
+			return
+		}
+		data, err := json.Marshal(value)
+		if err != nil {
+			writeIssuesError(w, http.StatusInternalServerError, "failed to encode response", "ENCODE_ERROR")
+			return
+		}
+		handler.WriteJSON(w, http.StatusCreated, IssuesResponse{Success: true, Data: data})
+	}
+}
+
 func HandleCreateIssue(svc service.IssueService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
@@ -94,6 +126,20 @@ func HandleCreateIssue(svc service.IssueService) http.HandlerFunc {
 			Success: true,
 			Data:    data,
 		})
+	}
+}
+
+func createWorkItemCommand(r *http.Request, req *IssueCreateRequest) workitems.CreateCommand {
+	return workitems.CreateCommand{
+		Title: req.Title, IssueType: req.IssueType, Priority: req.Priority,
+		ID: req.ID, Parent: req.Parent, Description: req.Description, Status: req.Status,
+		Design: req.Design, AcceptanceCriteria: req.AcceptanceCriteria, Notes: req.Notes,
+		Assignee: req.Assignee, Owner: req.Owner, CreatedBy: req.CreatedBy,
+		ExternalRef: req.ExternalRef, EstimatedMinutes: req.EstimatedMinutes,
+		Labels: req.Labels, Dependencies: req.Dependencies, DueAt: req.DueAt,
+		DeferUntil: req.DeferUntil, SourceRepo: req.SourceRepo,
+		IdempotencyKey: r.Header.Get("X-Idempotency-Key"),
+		Force:          r.Header.Get("X-Idempotency-Force") == "true",
 	}
 }
 
@@ -129,6 +175,38 @@ func createParamsFromRequest(r *http.Request, req *IssueCreateRequest) service.C
 }
 
 // handleCloseIssue returns a handler that closes an issue by ID.
+func HandleCloseWorkItem(api workitems.API) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		issueID := r.PathValue("id")
+		if issueID == "" {
+			handler.RespondError(w, http.StatusBadRequest, "missing issue ID")
+			return
+		}
+		req, ok := decodeCloseRequest(w, r)
+		if !ok {
+			return
+		}
+		if api == nil {
+			handler.HandleWorkItemsError(w, workitems.ErrUnavailable)
+			return
+		}
+		value, err := api.Close(r.Context(), workitems.CloseCommand{
+			IssueID: issueID, Reason: req.ResolvedReason(), Session: req.Session,
+			SuggestNext: req.SuggestNext, Force: req.Force,
+		})
+		if err != nil {
+			handler.HandleWorkItemsError(w, err)
+			return
+		}
+		data, err := json.Marshal(value)
+		if err != nil {
+			writeIssuesError(w, http.StatusInternalServerError, "failed to encode response", "ENCODE_ERROR")
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, CloseResponse{Success: true, Data: data})
+	}
+}
+
 func HandleCloseIssue(svc service.IssueService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		issueID := r.PathValue("id")
@@ -137,20 +215,9 @@ func HandleCloseIssue(svc service.IssueService) http.HandlerFunc {
 			return
 		}
 
-		r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
-
-		var req CloseRequest
-		if r.Body != nil && r.ContentLength > 0 {
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				var maxBytesErr *http.MaxBytesError
-				if errors.As(err, &maxBytesErr) {
-					handler.RespondError(w, http.StatusRequestEntityTooLarge, "request body too large (max 1MB)")
-					return
-				}
-				slog.Warn("invalid request body in handleCloseIssue", "err", err)
-				handler.RespondError(w, http.StatusBadRequest, "invalid request body")
-				return
-			}
+		req, ok := decodeCloseRequest(w, r)
+		if !ok {
+			return
 		}
 
 		params := service.CloseIssueParams{
@@ -172,6 +239,24 @@ func HandleCloseIssue(svc service.IssueService) http.HandlerFunc {
 			Data:    data,
 		})
 	}
+}
+
+func decodeCloseRequest(w http.ResponseWriter, r *http.Request) (CloseRequest, bool) {
+	r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
+	var req CloseRequest
+	if r.Body != nil && r.ContentLength > 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) {
+				handler.RespondError(w, http.StatusRequestEntityTooLarge, "request body too large (max 1MB)")
+				return CloseRequest{}, false
+			}
+			slog.Warn("invalid request body in close work item", "err", err)
+			handler.RespondError(w, http.StatusBadRequest, "invalid request body")
+			return CloseRequest{}, false
+		}
+	}
+	return req, true
 }
 
 // HandleClaimIssue returns a handler that atomically claims an issue by ID

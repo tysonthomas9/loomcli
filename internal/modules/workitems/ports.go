@@ -2,14 +2,24 @@ package workitems
 
 import "context"
 
-// Store is the consumer-owned durable port for the first Work Items slice.
-// It exposes semantic comment and dependency operations instead of generic
-// CRUD or a process-wide Store.
+// Store is the consumer-owned durable port for the Work Items capability. It
+// exposes aggregate-specific queries and commands instead of generic CRUD or
+// a process-wide Store.
 type Store interface {
+	RequireRepositoryAdmission(context.Context) error
+	Create(context.Context, CreateCommand) (*IssueSummary, error)
+	BlockRepositoryRequired(context.Context, string) (*RepositoryAdmissionResult, error)
+	List(context.Context, ListFilter) ([]IssueSummary, error)
+	Blocked(context.Context, AvailabilityQuery) ([]IssueSummary, error)
+	Ready(context.Context, AvailabilityQuery) ([]IssueSummary, error)
+	Deferred(context.Context, AvailabilityQuery) ([]IssueSummary, error)
 	Search(context.Context, SearchQuery) ([]IssueSummary, error)
 	Get(context.Context, GetQuery) (*IssueDetail, error)
+	Patch(context.Context, PatchCommand) error
+	Close(context.Context, CloseCommand) (*CloseResult, error)
 	Claim(context.Context, ClaimCommand) (*IssueDetail, error)
 	Reopen(context.Context, ReopenCommand) error
+	AssignRepository(context.Context, AssignRepositoryCommand) (*IssueSummary, error)
 	Delete(context.Context, DeleteCommand) (DeleteResult, error)
 	ListEvents(context.Context, ListEventsQuery) ([]*Event, error)
 	AddComment(context.Context, AddCommentCommand) (*Comment, error)

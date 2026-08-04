@@ -7,11 +7,27 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
 
 type issueRepositoryCommand interface {
 	SetIssueRepository(ctx context.Context, issueID, repo string) (json.RawMessage, error)
+}
+
+// HandleAssignWorkItemRepository delegates the atomic repository assignment
+// and conditional reopen to the Work Items owner.
+func HandleAssignWorkItemRepository(api workitems.API) http.HandlerFunc {
+	return handleSetIssueRepository(func(ctx context.Context, issueID, repo string) (json.RawMessage, error) {
+		if api == nil {
+			return nil, workitems.ErrUnavailable
+		}
+		value, err := api.AssignRepository(ctx, workitems.AssignRepositoryCommand{IssueID: issueID, Repository: repo})
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(value)
+	}, true)
 }
 
 // SetIssueRepositoryRequest is the Loom HTTP request body for assigning the
@@ -25,8 +41,15 @@ type SetIssueRepositoryRequest struct {
 // the conditional blocked-to-open recovery; this handler never reopens an
 // issue with a second mutation.
 func HandleSetIssueRepository(svc issueRepositoryCommand) http.HandlerFunc {
+	if svc == nil {
+		return handleSetIssueRepository(nil, false)
+	}
+	return handleSetIssueRepository(svc.SetIssueRepository, false)
+}
+
+func handleSetIssueRepository(command func(context.Context, string, string) (json.RawMessage, error), capabilityErrors bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if svc == nil {
+		if command == nil {
 			handler.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{
 				"error": "repository assignment service not configured",
 				"kind":  "unavailable",
@@ -55,9 +78,13 @@ func HandleSetIssueRepository(svc issueRepositoryCommand) http.HandlerFunc {
 			return
 		}
 
-		data, err := svc.SetIssueRepository(r.Context(), issueID, req.Repo)
+		data, err := command(r.Context(), issueID, req.Repo)
 		if err != nil {
-			handler.HandleServiceError(w, err)
+			if capabilityErrors {
+				handler.HandleWorkItemsError(w, err)
+			} else {
+				handler.HandleServiceError(w, err)
+			}
 			return
 		}
 

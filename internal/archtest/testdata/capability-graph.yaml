@@ -33,7 +33,7 @@ external_import_policy:
 capabilities:
   - name: workspace
     root: workspace
-    status: planned
+    status: active
   - name: workitems
     root: workitems
     status: active

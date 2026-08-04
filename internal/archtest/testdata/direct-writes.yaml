@@ -1,6 +1,6 @@
 schema_version: 1
 status: complete
-source_head: d78c7cf34081c6dc1457aef43eaf02004832368f
+source_head: a387de47c396fa7eb0628da66bbf9255d6e9beac
 adapter_roots:
   - internal/app
   - internal/cli
@@ -65,6 +65,9 @@ persistence_packages:
     receiver_suffixes: []
   - path: github.com/tysonthomas9/loomcli/internal/modules/workitems
     receiver_names: [Store]
+    receiver_suffixes: []
+  - path: github.com/tysonthomas9/loomcli/internal/modules/workspace
+    receiver_names: [CatalogStore]
     receiver_suffixes: []
   - path: github.com/tysonthomas9/loomcli/internal/sessions
     receiver_names: [Session, Store]
@@ -348,10 +351,13 @@ method_sets:
     read_only: []
     mutating: [AuthorVersion]
   - name: workitems_port
-    read_only: [Get, ListComments, ListDependencies, ListEvents, Search]
-    mutating: [AddComment, AddDependency, Claim, Delete, RemoveDependency, Reopen]
+    read_only: [Blocked, Deferred, Get, List, ListComments, ListDependencies, ListEvents, Ready, RequireRepositoryAdmission, Search]
+    mutating: [AddComment, AddDependency, AssignRepository, BlockRepositoryRequired, Claim, Close, Create, Delete, Patch, RemoveDependency, Reopen]
   - name: workspace_admission_store
     read_only: [AgentServices, Agents, Repos, Roles, Workspaces]
+    mutating: []
+  - name: workspace_catalog
+    read_only: [GetByKey, GetByName]
     mutating: []
 receiver_surfaces:
   - receiver: "*github.com/tysonthomas9/loomcli/internal/events.MetricsStore"
@@ -494,6 +500,10 @@ receiver_surfaces:
     package: github.com/tysonthomas9/loomcli/internal/modules/workitems
     method_set: workitems_port
     capability_owner: workitems
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/workspace.CatalogStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/workspace
+    method_set: workspace_catalog
+    capability_owner: workspace
   - receiver: github.com/tysonthomas9/loomcli/internal/stackstore.Store
     package: github.com/tysonthomas9/loomcli/internal/stackstore
     method_set: stack_store
