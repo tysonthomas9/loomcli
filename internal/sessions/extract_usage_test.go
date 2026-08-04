@@ -43,6 +43,31 @@ func TestExtractTranscriptUsage_PrefersResultOverCodex(t *testing.T) {
 	}
 }
 
+func TestExtractTranscriptUsage_ClaudeMessageUsageSumsAndDedupes(t *testing.T) {
+	// Raw Claude Code transcript: two distinct assistant messages, and a snapshot
+	// update repeating msg_001 with higher counts (last write wins per ID).
+	data := []byte(`{"type":"assistant","message":{"id":"msg_001","usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":10,"cache_creation_input_tokens":20}}}
+{"type":"user","message":{"role":"user"}}
+{"type":"assistant","message":{"id":"msg_002","usage":{"input_tokens":200,"output_tokens":80,"cache_read_input_tokens":30,"cache_creation_input_tokens":40}}}
+{"type":"assistant","message":{"id":"msg_001","usage":{"input_tokens":150,"output_tokens":60,"cache_read_input_tokens":15,"cache_creation_input_tokens":25}}}
+`)
+	u := ExtractTranscriptUsage(data)
+	// msg_001 (last snapshot) 150/60/15/25 + msg_002 200/80/30/40.
+	if u.InputTokens != 350 || u.OutputTokens != 140 || u.CacheReadTokens != 45 || u.CacheWriteTokens != 65 {
+		t.Fatalf("got %+v, want summed+deduped Claude usage", u)
+	}
+}
+
+func TestExtractTranscriptUsage_PrefersResultOverClaudeMessages(t *testing.T) {
+	data := []byte(`{"type":"assistant","message":{"id":"msg_001","usage":{"input_tokens":999,"output_tokens":99}}}
+{"role":"system","type":"result","output":"{\"input_tokens\":111,\"output_tokens\":22}"}
+`)
+	u := ExtractTranscriptUsage(data)
+	if u.InputTokens != 111 || u.OutputTokens != 22 {
+		t.Fatalf("got %+v, want result-entry usage to win", u)
+	}
+}
+
 func TestExtractTranscriptUsage_Empty(t *testing.T) {
 	if !ExtractTranscriptUsage(nil).IsZero() {
 		t.Fatal("nil data should be zero")

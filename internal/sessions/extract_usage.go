@@ -12,6 +12,8 @@ import (
 //  1. TS-leaf terminal `result` entry (usage serialized in `output`)
 //  2. Codex rollout last `event_msg`/`token_count` with cumulative total_token_usage
 //  3. Summed Codex/stream `turn.completed` usage objects
+//  4. Raw Claude Code transcript `assistant` `message.usage`, deduped by message
+//     ID and summed (daemon/fleet Claude sessions store this format verbatim)
 //
 // Returns the zero value when the transcript has no recoverable usage.
 func ExtractTranscriptUsage(data []byte) TokenUsage {
@@ -36,7 +38,24 @@ func ExtractTranscriptUsageWithCost(data []byte) (TokenUsage, float64) {
 	if u := extractCodexTokenCountUsage(data); !u.IsZero() {
 		return u, 0
 	}
-	return extractTurnCompletedUsage(data), 0
+	if u := extractTurnCompletedUsage(data); !u.IsZero() {
+		return u, 0
+	}
+	// Raw Claude Code transcripts (stored verbatim by SyncLatestClaudeTranscript)
+	// carry no `result`/Codex events; recover usage from their assistant
+	// message.usage records so daemon/fleet Claude sessions don't finalize at zero.
+	return extractClaudeMessageUsage(data), 0
+}
+
+// extractClaudeMessageUsage sums usage from a raw Claude Code transcript's
+// `assistant` `message.usage` records, deduped by message ID. Reuses the same
+// per-line accumulation as the streaming SumTranscriptUsage hook path.
+func extractClaudeMessageUsage(data []byte) TokenUsage {
+	seen := make(map[string]TokenUsage)
+	for line := range jsonLines(data) {
+		accumulateClaudeUsage(seen, line)
+	}
+	return sumClaudeUsage(seen)
 }
 
 // TranscriptUsage recovers token usage from a session's on-disk native
