@@ -15,6 +15,24 @@ type executionOutboxDeliveryAdapter struct {
 
 var _ execution.OutboxDeliveryPort = (*executionOutboxDeliveryAdapter)(nil)
 
+func (adapter *executionOutboxDeliveryAdapter) EnqueueOutboxDelivery(
+	ctx context.Context,
+	request execution.OutboxDeliveryEnqueue,
+) (*execution.OutboxDelivery, error) {
+	value, err := adapter.store.Create(ctx, store.OutboxCreate{
+		WorkspaceKey: request.WorkspaceKey,
+		Kind:         domain.OutboxKind(request.Kind),
+		EpicID:       request.EpicID,
+		DriverRunID:  request.DriverRunID,
+		TargetAgent:  request.TargetAgent,
+		DedupeKey:    request.DedupeKey,
+	})
+	if err != nil || value == nil {
+		return nil, err
+	}
+	return publicOutboxDelivery(value), nil
+}
+
 func (adapter *executionOutboxDeliveryAdapter) ListDueOutboxDeliveries(
 	ctx context.Context,
 	query execution.OutboxDeliveryQuery,
@@ -30,13 +48,7 @@ func (adapter *executionOutboxDeliveryAdapter) ListDueOutboxDeliveries(
 		if value == nil {
 			continue
 		}
-		out = append(out, execution.OutboxDelivery{
-			WorkspaceKey: value.WorkspaceKey, OutboxID: value.OutboxID,
-			Kind: execution.OutboxKind(value.Kind), DriverRunID: value.DriverRunID, TaskRunID: value.TaskRunID,
-			TargetAgent: value.TargetAgent, Body: value.Body, DedupeKey: value.DedupeKey,
-			Status: execution.OutboxDeliveryStatus(value.Status), Attempt: value.Attempt, NextRetryAt: cloneOutboxTime(value.NextRetryAt),
-			LastError: value.LastError, InboxMessageID: value.InboxMessageID,
-		})
+		out = append(out, *publicOutboxDelivery(value))
 	}
 	return out, nil
 }
@@ -52,13 +64,17 @@ func (adapter *executionOutboxDeliveryAdapter) RecordOutboxDeliveryResult(
 	if err != nil || value == nil {
 		return nil, err
 	}
+	return publicOutboxDelivery(value), nil
+}
+
+func publicOutboxDelivery(value *domain.OutboxRecord) *execution.OutboxDelivery {
 	return &execution.OutboxDelivery{
 		WorkspaceKey: value.WorkspaceKey, OutboxID: value.OutboxID,
-		Kind: execution.OutboxKind(value.Kind), DriverRunID: value.DriverRunID, TaskRunID: value.TaskRunID,
+		Kind: execution.OutboxKind(value.Kind), EpicID: value.EpicID, DriverRunID: value.DriverRunID, TaskRunID: value.TaskRunID,
 		TargetAgent: value.TargetAgent, Body: value.Body, DedupeKey: value.DedupeKey,
 		Status: execution.OutboxDeliveryStatus(value.Status), Attempt: value.Attempt, NextRetryAt: cloneOutboxTime(value.NextRetryAt),
 		LastError: value.LastError, InboxMessageID: value.InboxMessageID,
-	}, nil
+	}
 }
 
 func cloneOutboxTime(value *time.Time) *time.Time {

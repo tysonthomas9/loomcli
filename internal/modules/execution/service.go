@@ -218,6 +218,33 @@ func (service *Service) RecordOutboxDeliveryResult(
 	return service.dependencies.OutboxDeliveries.RecordOutboxDeliveryResult(ctx, result)
 }
 
+func (service *Service) EnqueueLeadAssignment(
+	ctx context.Context,
+	auth authority.ExecutionAuthority,
+	command EnqueueLeadAssignmentCommand,
+) (*OutboxDelivery, error) {
+	command.WorkspaceKey = strings.TrimSpace(command.WorkspaceKey)
+	command.EpicID = strings.TrimSpace(command.EpicID)
+	command.TargetAgent = strings.TrimSpace(command.TargetAgent)
+	if err := service.requireOwner(ActionEnqueueLeadAssignment, command.WorkspaceKey, command.Owner, auth); err != nil {
+		return nil, err
+	}
+	if command.Owner.ResourceKind != ResourceDriverRun || strings.TrimSpace(command.Owner.ResourceID) == "" || command.TargetAgent == "" {
+		return nil, ErrInvalid
+	}
+	if service.dependencies.OutboxDeliveries == nil {
+		return nil, ErrUnavailable
+	}
+	return service.dependencies.OutboxDeliveries.EnqueueOutboxDelivery(ctx, OutboxDeliveryEnqueue{
+		WorkspaceKey: command.WorkspaceKey,
+		EpicID:       command.EpicID,
+		Kind:         OutboxKindLeadAssignment,
+		DriverRunID:  command.Owner.ResourceID,
+		TargetAgent:  command.TargetAgent,
+		DedupeKey:    "lead-assignment:" + command.Owner.ResourceID + ":" + command.TargetAgent,
+	})
+}
+
 func (service *Service) requireSystem(action authority.Action, workspace string, auth authority.SystemAuthority) error {
 	workspace = strings.TrimSpace(workspace)
 	if workspace == "" {

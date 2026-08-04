@@ -1,6 +1,6 @@
 schema_version: 1
 status: complete
-source_head: 0c3c3df818975a1f5858f79f3b3324e524de8df3
+source_head: 2ccb739d81f79063347de72e3687670321af2184
 adapter_roots:
   - internal/app
   - internal/cli
@@ -1287,6 +1287,12 @@ writes:
       expires_after_phase: 7
     - file: internal/app/serve/execution_outbox_delivery.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.OutboxStore
+      method: Create
+      count: 1
+      aggregate_owner: execution
+      expires_after_phase: 7
+    - file: internal/app/serve/execution_outbox_delivery.go
+      receiver: github.com/tysonthomas9/loomcli/internal/store.OutboxStore
       method: MarkResult
       count: 1
       aggregate_owner: execution
@@ -1842,12 +1848,6 @@ writes:
       method: Update
       count: 3
       aggregate_owner: workspace
-      expires_after_phase: 7
-    - file: internal/webui/handlers/driverapi/module.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.OutboxStore
-      method: Create
-      count: 1
-      aggregate_owner: execution
       expires_after_phase: 7
     - file: internal/webui/handlers/issues/tabs.go
       receiver: '*github.com/tysonthomas9/loomcli/internal/webui/issuetabs.Store'

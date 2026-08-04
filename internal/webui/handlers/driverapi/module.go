@@ -748,7 +748,7 @@ func (m *Module) deliverLeadAssignment(ctx context.Context, ws string, id driver
 	if err != nil {
 		return nil, err
 	}
-	parent, err := m.verifyParent(ctx, ws, id)
+	parent, owner, err := m.verifyParentWithOwner(ctx, ws, id)
 	if err != nil {
 		return nil, err
 	}
@@ -766,13 +766,15 @@ func (m *Module) deliverLeadAssignment(ctx context.Context, ws string, id driver
 		return nil, fmt.Errorf("deliver lead assignment: %w", err)
 	}
 	if delivery.State != driverpkg.AgentMessageDeliveryStateDelivered && delivery.State != driverpkg.AgentMessageDeliveryStateUnsupported {
-		if _, err := m.store.Outbox().Create(ctx, store.OutboxCreate{
+		auth, err := m.executionAuthorities.ResolveDriverRunAuthority(ctx, ws, execution.ActionEnqueueLeadAssignment, owner)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := m.execution.EnqueueLeadAssignment(ctx, auth, execution.EnqueueLeadAssignmentCommand{
 			WorkspaceKey: ws,
-			Kind:         domain.OutboxKindLeadAssignment,
 			EpicID:       firstNonEmpty(parent.EpicID, driverpkg.DriverRunPayloadEpicID(parent.Payload)),
-			DriverRunID:  parent.RunID,
 			TargetAgent:  leadName,
-			DedupeKey:    "lead-assignment:" + parent.RunID + ":" + leadName,
+			Owner:        owner,
 		}); err != nil {
 			return nil, fmt.Errorf("enqueue lead assignment outbox: %w", err)
 		}

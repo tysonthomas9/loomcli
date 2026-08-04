@@ -11,14 +11,64 @@ import (
 )
 
 type outboxDeliveryPortStub struct {
-	listCalls   int
-	listQuery   OutboxDeliveryQuery
-	listResult  []OutboxDelivery
-	listErr     error
-	recordCalls int
-	recordInput OutboxDeliveryResult
-	recordValue *OutboxDelivery
-	recordErr   error
+	enqueueCalls int
+	enqueueInput OutboxDeliveryEnqueue
+	enqueueValue *OutboxDelivery
+	enqueueErr   error
+	listCalls    int
+	listQuery    OutboxDeliveryQuery
+	listResult   []OutboxDelivery
+	listErr      error
+	recordCalls  int
+	recordInput  OutboxDeliveryResult
+	recordValue  *OutboxDelivery
+	recordErr    error
+}
+
+func (stub *outboxDeliveryPortStub) EnqueueOutboxDelivery(
+	_ context.Context,
+	request OutboxDeliveryEnqueue,
+) (*OutboxDelivery, error) {
+	stub.enqueueCalls++
+	stub.enqueueInput = request
+	return stub.enqueueValue, stub.enqueueErr
+}
+
+func TestEnqueueLeadAssignmentRequiresExactDriverRunAuthority(t *testing.T) {
+	port := &outboxDeliveryPortStub{enqueueValue: &OutboxDelivery{OutboxID: "outbox-1"}}
+	service, issuer := newTestService(t, Dependencies{OutboxDeliveries: port})
+	owner := Owner{ResourceKind: ResourceDriverRun, ResourceID: "driver-1", NodeID: "node-1", LeaseID: "lease-1", LeaseToken: "secret", FencingToken: 7}
+	valid := EnqueueLeadAssignmentCommand{WorkspaceKey: " TEST ", EpicID: " EPIC-1 ", TargetAgent: " lead ", Owner: owner}
+
+	for name, test := range map[string]struct {
+		auth    authority.ExecutionAuthority
+		command EnqueueLeadAssignmentCommand
+		wantErr error
+	}{
+		"wrong action":    {issueExecution(t, issuer, ActionHeartbeatDriverRun, owner), valid, authority.ErrAdmissionDenied},
+		"wrong workspace": {issueExecution(t, issuer, ActionEnqueueLeadAssignment, owner), EnqueueLeadAssignmentCommand{WorkspaceKey: "OTHER", EpicID: "EPIC-1", TargetAgent: "lead", Owner: owner}, authority.ErrAdmissionDenied},
+		"wrong owner":     {issueExecution(t, issuer, ActionEnqueueLeadAssignment, owner), EnqueueLeadAssignmentCommand{WorkspaceKey: "TEST", EpicID: "EPIC-1", TargetAgent: "lead", Owner: Owner{ResourceKind: ResourceDriverRun, ResourceID: "driver-2", NodeID: "node-1", LeaseID: "lease-1", LeaseToken: "secret", FencingToken: 7}}, ErrFenceConflict},
+		"empty target":    {issueExecution(t, issuer, ActionEnqueueLeadAssignment, owner), EnqueueLeadAssignmentCommand{WorkspaceKey: "TEST", EpicID: "EPIC-1", Owner: owner}, ErrInvalid},
+	} {
+		t.Run(name, func(t *testing.T) {
+			before := port.enqueueCalls
+			if _, err := service.EnqueueLeadAssignment(t.Context(), test.auth, test.command); !errors.Is(err, test.wantErr) {
+				t.Fatalf("EnqueueLeadAssignment error = %v, want %v", err, test.wantErr)
+			}
+			if port.enqueueCalls != before {
+				t.Fatalf("enqueue port called for rejected command")
+			}
+		})
+	}
+
+	got, err := service.EnqueueLeadAssignment(t.Context(), issueExecution(t, issuer, ActionEnqueueLeadAssignment, owner), valid)
+	if err != nil {
+		t.Fatalf("EnqueueLeadAssignment valid command: %v", err)
+	}
+	wantInput := OutboxDeliveryEnqueue{WorkspaceKey: "TEST", EpicID: "EPIC-1", Kind: OutboxKindLeadAssignment, DriverRunID: "driver-1", TargetAgent: "lead", DedupeKey: "lead-assignment:driver-1:lead"}
+	if got != port.enqueueValue || port.enqueueCalls != 1 || port.enqueueInput != wantInput {
+		t.Fatalf("enqueue result/calls/input = %#v / %d / %#v, want %#v / 1 / %#v", got, port.enqueueCalls, port.enqueueInput, port.enqueueValue, wantInput)
+	}
 }
 
 func (stub *outboxDeliveryPortStub) ListDueOutboxDeliveries(
@@ -201,6 +251,13 @@ func TestRecordOutboxDeliveryResultRequiresExactAuthorityAndValidGeneration(t *t
 
 func TestOutboxDeliveryCommandsRequireConfiguredPort(t *testing.T) {
 	service, issuer := newTestService(t, Dependencies{})
+	owner := Owner{ResourceKind: ResourceDriverRun, ResourceID: "driver-1", NodeID: "node-1", LeaseID: "lease-1", LeaseToken: "secret", FencingToken: 7}
+	if _, err := service.EnqueueLeadAssignment(
+		t.Context(), issueExecution(t, issuer, ActionEnqueueLeadAssignment, owner),
+		EnqueueLeadAssignmentCommand{WorkspaceKey: "TEST", EpicID: "EPIC-1", TargetAgent: "lead", Owner: owner},
+	); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("EnqueueLeadAssignment without port error = %v, want ErrUnavailable", err)
+	}
 	if _, err := service.ListDueOutboxDeliveries(
 		t.Context(), issueSystem(t, issuer, ActionListDueOutboxDeliveries),
 		ListDueOutboxDeliveriesCommand{WorkspaceKey: "TEST", Now: time.Now().UTC(), Limit: 1},

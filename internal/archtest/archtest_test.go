@@ -205,7 +205,7 @@ func TestMutationLedgerMatchesProductionExecutionMutationInventory(t *testing.T)
 		t.Fatalf("Execution action exclusions observed = %v, want all documented exclusions %v", observedExclusions, exclusions)
 	}
 	slices.Sort(want)
-	if gotCount, wantCount := len(got), 42; gotCount != wantCount {
+	if gotCount, wantCount := len(got), 43; gotCount != wantCount {
 		t.Fatalf("Execution mutation commands = %d, want %d; commands = %v", gotCount, wantCount, got)
 	}
 	if !slices.Equal(got, want) {
@@ -494,8 +494,8 @@ func TestCheckedInPhase6ArchitectureContracts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ledger.Commands) != 106 {
-		t.Fatalf("mutation commands = %d, want 106", len(ledger.Commands))
+	if len(ledger.Commands) != 107 {
+		t.Fatalf("mutation commands = %d, want 107", len(ledger.Commands))
 	}
 }
 

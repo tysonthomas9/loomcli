@@ -83,6 +83,16 @@ type RecordOutboxDeliveryResultCommand struct {
 	InboxMessageID string
 }
 
+// EnqueueLeadAssignmentCommand asks Execution to durably deliver one lead
+// assignment on behalf of the exact live DriverRun owner. DriverRunID and the
+// dedupe identity are derived from Owner rather than accepted from callers.
+type EnqueueLeadAssignmentCommand struct {
+	WorkspaceKey string
+	EpicID       string
+	TargetAgent  string
+	Owner        Owner
+}
+
 type OutboxDeliveryQuery struct {
 	WorkspaceKey string
 	Now          time.Time
@@ -99,11 +109,21 @@ type OutboxDeliveryResult struct {
 	InboxMessageID string
 }
 
+type OutboxDeliveryEnqueue struct {
+	WorkspaceKey string
+	EpicID       string
+	Kind         OutboxKind
+	DriverRunID  string
+	TargetAgent  string
+	DedupeKey    string
+}
+
 // OutboxDelivery is the immutable runtime view needed to attempt one delivery.
 type OutboxDelivery struct {
 	WorkspaceKey   string
 	OutboxID       string
 	Kind           OutboxKind
+	EpicID         string
 	DriverRunID    string
 	TaskRunID      string
 	TargetAgent    string
@@ -118,6 +138,7 @@ type OutboxDelivery struct {
 
 // OutboxDeliveryPort is Execution's owner-private persistence boundary.
 type OutboxDeliveryPort interface {
+	EnqueueOutboxDelivery(context.Context, OutboxDeliveryEnqueue) (*OutboxDelivery, error)
 	ListDueOutboxDeliveries(context.Context, OutboxDeliveryQuery) ([]OutboxDelivery, error)
 	RecordOutboxDeliveryResult(context.Context, OutboxDeliveryResult) (*OutboxDelivery, error)
 }

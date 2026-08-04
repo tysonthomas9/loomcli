@@ -132,7 +132,7 @@ func driverRunExecutionAction(action authority.Action) bool {
 		execution.ActionStartChildDriverRun, execution.ActionCascadeChildDriverRuns,
 		execution.ActionClaimDriverRunWorkItem, execution.ActionReleaseDriverRunWorkItem,
 		execution.ActionHandoffDriverRunReviewWorkItem,
-		execution.ActionBindWorkerProfileParent,
+		execution.ActionBindWorkerProfileParent, execution.ActionEnqueueLeadAssignment,
 		execution.ActionRequestTaskRun, execution.ActionRecoverStaleChildTaskRuns:
 		return true
 	default:

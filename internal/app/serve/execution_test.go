@@ -130,6 +130,11 @@ func TestExecutionAuthorityResolversAdmitOnlyRegisteredChildCascadeLanes(t *test
 	); err != nil {
 		t.Fatalf("resolve live child cascade authority: %v", err)
 	}
+	if _, err := capability.DriverRunAuthorityResolver().ResolveDriverRunAuthority(
+		t.Context(), "WS", execution.ActionEnqueueLeadAssignment, owner,
+	); err != nil {
+		t.Fatalf("resolve lead-assignment enqueue authority: %v", err)
+	}
 	foreign := owner
 	foreign.ResourceKind = execution.ResourceTaskRun
 	if _, err := capability.DriverRunAuthorityResolver().ResolveDriverRunAuthority(

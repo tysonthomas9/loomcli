@@ -827,6 +827,20 @@ commands:
     retry_restart_behavior: Retry converges on absence; an unknown or already-removed profile is handled by the route's explicit not-found contract rather than a different mutation path.
     negative_tests: [expired_operator, unauthenticated, wrong_action, wrong_workspace]
     fault_injection_tests: [lost_response_after_commit, repeated_delete]
+  - id: execution.enqueue-lead-assignment
+    phase: 7
+    aggregate_owner: execution
+    coordinating_owner: execution
+    mechanism_discriminator: lead_assignment:driver_run_owner
+    instance_owner: execution
+    accepted_authority: [execution]
+    durable_commands: ["POST /api/v1/{workspace}/outbox"]
+    transaction_or_saga_boundary: Execution validates the exact DriverRun authority and derives the driver-run and dedupe identities before its private outbox port durably enqueues the lead assignment.
+    idempotency_key: workspace_id:driver_run_id:target_agent
+    semantic_events_or_read_models: [execution.lead_delivery_outbox.v1]
+    retry_restart_behavior: Exact replay converges on the same deduped pending row; the server-side dispatcher resumes delivery after restart without workflow-side retry loops.
+    negative_tests: [expired_execution, invalid_target_agent, owner_mismatch, stale_fence, unauthenticated, wrong_action, wrong_resource, wrong_workspace]
+    fault_injection_tests: [duplicate_request, lost_response_after_commit, process_stop_before_dispatch]
   - id: execution.exhaust-task-run-retries
     phase: 4
     aggregate_owner: execution
