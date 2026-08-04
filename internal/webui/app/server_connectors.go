@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/connector"
+	"github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 )
 
@@ -36,7 +37,7 @@ func (app *Server) buildConnectorDispatcher() connectorsmodule.Dispatcher {
 	if app.config.Store == nil {
 		return nil
 	}
-	vault, err := connector.NewVaultFromEnvOrKeyFile(app.config.LocalSettingsDir)
+	vault, err := connectorsvault.NewVaultFromEnvOrKeyFile(app.config.LocalSettingsDir)
 	if err != nil {
 		return nil
 	}

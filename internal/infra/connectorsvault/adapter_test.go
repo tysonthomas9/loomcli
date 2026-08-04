@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"testing"
 
-	legacyconnector "github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
 )
 
@@ -42,7 +41,7 @@ func TestMatchesDoesNotExposeAndWipesCurrentCredential(t *testing.T) {
 func TestMatchesTreatsAuthenticationFailureAsCredentialDrift(t *testing.T) {
 	t.Parallel()
 	adapter, err := connectorsvault.New(&vaultFake{
-		err: fmt.Errorf("wrong key: %w", legacyconnector.ErrUnseal),
+		err: fmt.Errorf("wrong key: %w", connectorsvault.ErrUnseal),
 	})
 	if err != nil {
 		t.Fatal(err)

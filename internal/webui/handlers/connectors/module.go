@@ -24,7 +24,7 @@ import (
 	"sync"
 	"time"
 
-	vault "github.com/tysonthomas9/loomcli/internal/connector"
+	legacyconnector "github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/connectorscatalog"
 	"github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
@@ -48,7 +48,7 @@ type Module struct {
 	managementStore   connectorsmodule.ManagementStore
 	management        connectorsmodule.Management
 	localSettingsDir  string
-	grantSets         *vault.GrantSetReconciler
+	grantSets         *legacyconnector.GrantSetReconciler
 	grantMu           sync.Mutex
 	credentialMu      sync.Mutex
 	operatorAuthority workflowcataloghttp.OperatorAuthorityResolver
@@ -69,7 +69,7 @@ func NewModule(
 			module.managementStore = adapter
 			module.management, _ = connectorsmodule.NewManagement(adapter)
 		}
-		module.grantSets = vault.NewGrantSetReconciler(
+		module.grantSets = legacyconnector.NewGrantSetReconciler(
 			st.TriggerBindings(),
 			st.Connectors(),
 			st.ConnectorGrants(),
@@ -243,7 +243,7 @@ func (m *Module) synchronizeRuntimeCredential(
 	}
 	defer zeroBytes(desired)
 
-	sealer, err := vault.NewVaultFromEnvOrKeyFile(m.localSettingsDir)
+	sealer, err := connectorsvault.NewVaultFromEnvOrKeyFile(m.localSettingsDir)
 	if err != nil {
 		return nil, fmt.Errorf("open connector vault: %w", err)
 	}
@@ -330,11 +330,11 @@ func (m *Module) bridgeRuntimeCredential(ws, connectorID, provider string) ([]by
 	// Use the same env-or-persisted-key resolution as serve's connector
 	// dispatcher. Otherwise local key-file mode could seal with material the
 	// runtime never opens (or reject a correctly configured local stack).
-	sealer, err := vault.NewVaultFromEnvOrKeyFile(m.localSettingsDir)
+	sealer, err := connectorsvault.NewVaultFromEnvOrKeyFile(m.localSettingsDir)
 	if err != nil {
 		return nil, http.StatusInternalServerError, fmt.Errorf("connector vault: %w", err)
 	}
-	sealed, err := sealer.Seal(plaintext, vault.CredentialAAD(ws, connectorID))
+	sealed, err := sealer.Seal(plaintext, connectorsvault.CredentialAAD(ws, connectorID))
 	if err != nil {
 		return nil, http.StatusInternalServerError, fmt.Errorf("seal outbound credential: %w", err)
 	}
@@ -486,7 +486,7 @@ type replaceBindingGrantsRequest struct {
 	Grants                   []replaceBindingGrantRequest `json:"grants"`
 }
 
-type replaceBindingGrantsResponse = vault.ReplaceGrantSetResult
+type replaceBindingGrantsResponse = legacyconnector.ReplaceGrantSetResult
 
 // replaceBindingGrants decodes the exact binding snapshot and complete desired
 // set, then delegates the restartable replacement ceremony to Connectors.
@@ -523,34 +523,34 @@ func decodeReplaceBindingGrantsRequest(
 	w http.ResponseWriter,
 	r *http.Request,
 	ws, connectorID, bindingID string,
-) (vault.ReplaceGrantSetRequest, bool) {
+) (legacyconnector.ReplaceGrantSetRequest, bool) {
 	var req replaceBindingGrantsRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxConnectorBodyBytes)).Decode(&req); err != nil {
 		handler.RespondError(w, http.StatusBadRequest, "invalid JSON body")
-		return vault.ReplaceGrantSetRequest{}, false
+		return legacyconnector.ReplaceGrantSetRequest{}, false
 	}
 	expectedCreatedAt, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(req.ExpectedBindingCreatedAt))
 	if err != nil {
 		handler.RespondError(w, http.StatusBadRequest, "expected_binding_created_at must be an RFC3339 timestamp")
-		return vault.ReplaceGrantSetRequest{}, false
+		return legacyconnector.ReplaceGrantSetRequest{}, false
 	}
 	expectedUpdatedAt, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(req.ExpectedBindingUpdatedAt))
 	if err != nil {
 		handler.RespondError(w, http.StatusBadRequest, "expected_binding_updated_at must be an RFC3339 timestamp")
-		return vault.ReplaceGrantSetRequest{}, false
+		return legacyconnector.ReplaceGrantSetRequest{}, false
 	}
-	var desired []vault.DesiredGrant
+	var desired []legacyconnector.DesiredGrant
 	if req.Grants != nil {
-		desired = make([]vault.DesiredGrant, 0, len(req.Grants))
+		desired = make([]legacyconnector.DesiredGrant, 0, len(req.Grants))
 		for _, grant := range req.Grants {
-			desired = append(desired, vault.DesiredGrant{
+			desired = append(desired, legacyconnector.DesiredGrant{
 				Action:          grant.Action,
 				ResourcePattern: grant.ResourcePattern,
 			})
 		}
 	}
 
-	return vault.ReplaceGrantSetRequest{
+	return legacyconnector.ReplaceGrantSetRequest{
 		WorkspaceKey:             ws,
 		ConnectorID:              connectorID,
 		BindingID:                bindingID,

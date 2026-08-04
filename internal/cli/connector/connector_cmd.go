@@ -26,8 +26,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
-	vault "github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	vault "github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 )
 

@@ -1,6 +1,6 @@
-// Package connectorsvault adapts the legacy local connector vault to the
-// Connectors owner's seal-and-compare port. Unsealed current credentials are
-// wiped inside this package and never returned to a caller.
+// Package connectorsvault owns the local connector vault adapter. Unsealed
+// current credentials are wiped inside this package and never returned to a
+// caller.
 package connectorsvault
 
 import (
@@ -8,17 +8,16 @@ import (
 	"errors"
 	"fmt"
 
-	legacyconnector "github.com/tysonthomas9/loomcli/internal/connector"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 )
 
 type Adapter struct {
-	vault legacyconnector.Sealer
+	vault Sealer
 }
 
 var _ connectorsmodule.CredentialVault = (*Adapter)(nil)
 
-func New(vault legacyconnector.Sealer) (*Adapter, error) {
+func New(vault Sealer) (*Adapter, error) {
 	if vault == nil {
 		return nil, connectorsmodule.ErrUnavailable
 	}
@@ -32,7 +31,7 @@ func (adapter *Adapter) Seal(plaintext, aad []byte) ([]byte, error) {
 func (adapter *Adapter) Matches(sealed, plaintext, aad []byte) (bool, error) {
 	current, err := adapter.vault.Unseal(sealed, aad)
 	if err != nil {
-		if errors.Is(err, legacyconnector.ErrUnseal) {
+		if errors.Is(err, ErrUnseal) {
 			return false, nil
 		}
 		return false, fmt.Errorf("unseal connector credential: %w", err)
