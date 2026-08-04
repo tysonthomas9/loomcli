@@ -51,16 +51,17 @@ func WithWorktree(sess *sessions.Session, opts WithWorktreeOptions) (WithWorktre
 	if sess == nil {
 		return result, nil
 	}
-	if sess.Meta.Backend == backendnames.Codex {
+	switch sess.Meta.Backend {
+	case backendnames.Codex:
 		_, _ = sess.SyncLatestCodexRollout(opts.WorktreePath, sess.Meta.StartedAt)
-		// Go-leaf daemon finalize often arrives with zeros because the worker was
-		// reaped before collector finalize. Recover usage from the synced rollout.
-		opts = recoverUsageFromNativeTranscript(sess, opts)
-	}
-	if sess.Meta.Backend == backendnames.Claude {
+	case backendnames.Claude:
 		_, _ = sess.SyncLatestClaudeTranscript(opts.WorktreePath, opts.ClaudeSessionID, sess.Meta.StartedAt)
-		opts = recoverUsageFromNativeTranscript(sess, opts)
 	}
+	// Go-leaf daemon finalize often arrives with zeros because the worker was
+	// reaped before collector finalize. Recover usage from the synced native
+	// transcript; the helper self-guards when usage is already present or nothing
+	// is recoverable, so it is safe to call for every backend.
+	opts = recoverUsageFromNativeTranscript(sess, opts)
 	return result, sess.Finalize(sessions.FinalizeOptions{
 		TaskID:       opts.TaskID,
 		ExitCode:     opts.ExitCode,

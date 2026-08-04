@@ -64,6 +64,12 @@ func (u TokenUsage) IsZero() bool {
 // (or its `output` does not decode), which is the signal to try another source.
 func extractResultEntryUsage(data []byte) (TokenUsage, float64, bool) {
 	for line := range jsonLinesReverse(data) {
+		// Cheap pre-filter: skip the JSON decode for lines that cannot be a
+		// `result` entry (the common case in Codex/Go-leaf transcripts, which
+		// have no terminal result at all).
+		if !bytes.Contains(line, []byte(`"result"`)) {
+			continue
+		}
 		var ev struct {
 			Type   string `json:"type"`
 			Output string `json:"output"`
@@ -92,10 +98,10 @@ func extractResultEntryUsage(data []byte) (TokenUsage, float64, bool) {
 }
 
 func extractCodexTokenCountUsage(data []byte) TokenUsage {
-	// Last token_count's total_token_usage is cumulative for the session.
-	var last TokenUsage
-	found := false
-	for line := range jsonLines(data) {
+	// The last token_count's total_token_usage is cumulative for the session, so
+	// scan newest-first and return the first one found instead of walking every
+	// line to keep the tail.
+	for line := range jsonLinesReverse(data) {
 		var ev struct {
 			Type    string `json:"type"`
 			Payload *struct {
@@ -120,18 +126,14 @@ func extractCodexTokenCountUsage(data []byte) TokenUsage {
 			continue
 		}
 		tu := ev.Payload.Info.TotalTokenUsage
-		last = TokenUsage{
+		return TokenUsage{
 			InputTokens:      tu.InputTokens,
 			OutputTokens:     tu.OutputTokens,
 			CacheReadTokens:  tu.CachedInputTokens,
 			CacheWriteTokens: tu.CacheCreationInput,
 		}
-		found = true
 	}
-	if !found {
-		return TokenUsage{}
-	}
-	return last
+	return TokenUsage{}
 }
 
 func extractTurnCompletedUsage(data []byte) TokenUsage {
