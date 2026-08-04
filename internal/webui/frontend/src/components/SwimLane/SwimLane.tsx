@@ -8,10 +8,12 @@ import { useMemo, useState } from "react";
 
 import { DraggableIssueCard } from "@/components/DraggableIssueCard";
 import { EmptyColumn } from "@/components/EmptyColumn";
-import type { BlockedInfo } from "@/components/KanbanBoard";
+import type { BlockedInfo } from "@/types/issue";
 import type { KanbanColumnConfig } from "@/components/KanbanBoard/types";
 import { StatusColumn } from "@/components/StatusColumn";
 import type { Issue } from "@/types";
+import { visibleKanbanColumns } from "@/components/KanbanBoard";
+import { formatIssueId, isPRUrl } from "@/utils/issue";
 
 import styles from "./SwimLane.module.css";
 
@@ -20,6 +22,9 @@ import styles from "./SwimLane.module.css";
  * When there are more than this many cards, a "Show all X" footer appears.
  */
 const DEFAULT_CARD_LIMIT = 5;
+
+/** Minimum kanban column width — keeps ticket keys, badges, and titles readable. */
+const SWIM_LANE_COLUMN_MIN_PX = 260;
 
 /**
  * Props for the SwimLane component.
@@ -39,6 +44,20 @@ export interface SwimLaneProps {
   onToggleCollapse?: () => void;
   /** Callback when an issue card is clicked */
   onIssueClick?: (issue: Issue) => void;
+  /** Issue represented by the lane header, when the title is clickable */
+  headerIssue?: Issue;
+  /** Callback when the clickable lane title is clicked */
+  onHeaderIssueClick?: (issue: Issue) => void;
+  /**
+   * Lead agent running this epic lane: a name renders a live runner badge,
+   * null renders an "Unclaimed" badge, undefined hides the badge entirely
+   * (non-epic groupings).
+   */
+  epicRunner?: string | null;
+  /** Start the epic-runner workflow for this lane's epic */
+  onRunEpic?: () => void;
+  /** True while an epic-runner start is in flight */
+  isRunningEpic?: boolean;
   /** Map of issue ID to blocked info */
   blockedIssues?: Map<string, BlockedInfo>;
   /** Whether to show blocked issues */
@@ -47,6 +66,10 @@ export interface SwimLaneProps {
   className?: string;
   /** Maximum cards to show per column (default: 5) */
   cardLimit?: number;
+  /** Set of issue IDs with pending optimistic updates */
+  pendingIds?: Set<string>;
+  /** Hide columns with no issues in this lane */
+  compactColumns?: boolean;
 }
 
 /**
@@ -62,10 +85,17 @@ export function SwimLane({
   isCollapsed = false,
   onToggleCollapse,
   onIssueClick,
+  headerIssue,
+  onHeaderIssueClick,
+  epicRunner,
+  onRunEpic,
+  isRunningEpic = false,
   blockedIssues,
   showBlocked = true,
   className,
   cardLimit = DEFAULT_CARD_LIMIT,
+  pendingIds,
+  compactColumns = false,
 }: SwimLaneProps): JSX.Element {
   // Track which columns are expanded to show all cards
   const [expandedColumns, setExpandedColumns] = useState<Set<string>>(
@@ -91,6 +121,13 @@ export function SwimLane({
     return issues.filter((issue) => !blockedIssues.has(issue.id));
   }, [issues, showBlocked, blockedIssues]);
 
+  // Roll up how many of this lane's tickets carry a linked pull request, so an
+  // epic lane can surface "N PRs" (design's epic-header PR rollup).
+  const prCount = useMemo(
+    () => filteredIssues.filter((issue) => isPRUrl(issue.external_ref)).length,
+    [filteredIssues],
+  );
+
   // Group issues by column using filter functions
   const issuesByColumn = useMemo(() => {
     const grouped = new Map<string, Issue[]>();
@@ -109,8 +146,56 @@ export function SwimLane({
     return grouped;
   }, [filteredIssues, columns, blockedIssues]);
 
+  const displayColumns = useMemo(
+    () => visibleKanbanColumns(columns, issuesByColumn, compactColumns),
+    [columns, issuesByColumn, compactColumns],
+  );
+
   const headerId = `lane-header-${id}`;
   const rootClassName = [styles.swimLane, className].filter(Boolean).join(" ");
+  const laneGridStyle = {
+    gridTemplateColumns: `repeat(${displayColumns.length}, minmax(${SWIM_LANE_COLUMN_MIN_PX}px, 1fr))`,
+  } as const;
+  const isHeaderClickable =
+    headerIssue !== undefined && onHeaderIssueClick !== undefined;
+  const handleHeaderIssueClick = (): void => {
+    if (headerIssue && onHeaderIssueClick) {
+      onHeaderIssueClick(headerIssue);
+    }
+  };
+  const epicDisplayId = headerIssue ? formatIssueId(headerIssue.id) : undefined;
+  const openEpicAriaLabel = epicDisplayId
+    ? `Open epic ${epicDisplayId}: ${title}`
+    : `Open epic: ${title}`;
+  const showRunEpic =
+    headerIssue?.issue_type === "epic" &&
+    headerIssue.status !== "closed" &&
+    onRunEpic !== undefined &&
+    epicRunner === null;
+  const runEpicLabel = epicDisplayId ? `Run epic ${epicDisplayId}` : "Run epic";
+
+  const laneTitleContent = (
+    <span className={styles.laneTitleContent}>
+      <span className={styles.laneTitleText}>{title}</span>
+      {epicDisplayId !== undefined && (
+        <span className={styles.laneTitleId} title={headerIssue?.id}>
+          {epicDisplayId}
+        </span>
+      )}
+    </span>
+  );
+
+  const columnHeaderClassName = (
+    col: KanbanColumnConfig,
+    columnIndex: number,
+  ): string =>
+    [
+      styles.columnHeaderCell,
+      columnIndex === displayColumns.length - 1 ? styles.lastColumn : undefined,
+      col.style === "highlighted" ? styles.highlightedColumn : undefined,
+    ]
+      .filter(Boolean)
+      .join(" ");
 
   return (
     <section
@@ -144,42 +229,155 @@ export function SwimLane({
             />
           </svg>
         </button>
-        <h3 className={styles.laneTitle}>{title}</h3>
+        <h3 className={styles.laneTitle}>
+          {isHeaderClickable ? (
+            <button
+              type="button"
+              className={styles.laneTitleButton}
+              onClick={handleHeaderIssueClick}
+              aria-label={openEpicAriaLabel}
+              data-testid="lane-title-button"
+            >
+              {laneTitleContent}
+            </button>
+          ) : (
+            laneTitleContent
+          )}
+        </h3>
+        {headerIssue && prCount > 0 && (
+          <span
+            className={styles.lanePrCount}
+            aria-label={`${prCount} open pull request${prCount === 1 ? "" : "s"}`}
+            title={`${prCount} open pull request${prCount === 1 ? "" : "s"}`}
+          >
+            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <circle
+                cx="4"
+                cy="4"
+                r="1.6"
+                stroke="currentColor"
+                strokeWidth="1.4"
+              />
+              <circle
+                cx="4"
+                cy="12"
+                r="1.6"
+                stroke="currentColor"
+                strokeWidth="1.4"
+              />
+              <circle
+                cx="12"
+                cy="12"
+                r="1.6"
+                stroke="currentColor"
+                strokeWidth="1.4"
+              />
+              <path
+                d="M4 5.6v4.8M12 10.4V8a2 2 0 0 0-2-2H7.5"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+              />
+            </svg>
+            {prCount} {prCount === 1 ? "PR" : "PRs"}
+          </span>
+        )}
         <span
           className={styles.laneCount}
           aria-label={`${filteredIssues.length} issues`}
         >
           {filteredIssues.length}
         </span>
+        {showRunEpic ? (
+          <button
+            type="button"
+            className={styles.runEpicButton}
+            onClick={(event) => {
+              event.stopPropagation();
+              onRunEpic();
+            }}
+            disabled={isRunningEpic}
+            aria-label={
+              isRunningEpic ? `Starting ${runEpicLabel}` : runEpicLabel
+            }
+            data-testid="lane-run-epic-button"
+          >
+            {isRunningEpic ? "Starting" : "Run"}
+          </button>
+        ) : null}
+        {epicRunner !== undefined &&
+          (epicRunner !== null ? (
+            <span
+              className={styles.runnerBadge}
+              title={`Epic run by ${epicRunner}`}
+              data-testid="lane-runner-badge"
+            >
+              <span className={styles.runnerDot} aria-hidden="true" />
+              {epicRunner}
+            </span>
+          ) : (
+            <span
+              className={styles.unclaimedBadge}
+              data-testid="lane-unclaimed-badge"
+            >
+              Unclaimed
+            </span>
+          ))}
       </header>
       <div
         className={styles.laneContent}
+        style={laneGridStyle}
         data-collapsed={isCollapsed}
+        data-testid="lane-content"
         aria-hidden={isCollapsed}
       >
-        {columns.map((col) => {
+        {/* Single shared grid: header cells (row 1) and body columns (row 2)
+            share column tracks so dividers stay aligned under their labels. */}
+        {displayColumns.map((col, columnIndex) => {
+          const colCount = issuesByColumn.get(col.id)?.length ?? 0;
+          return (
+            <div
+              key={`header-${col.id}`}
+              className={columnHeaderClassName(col, columnIndex)}
+              style={{ gridColumn: columnIndex + 1, gridRow: 1 }}
+            >
+              <h3
+                className={styles.columnTitle}
+                data-empty={colCount === 0 || undefined}
+              >
+                {col.label}
+              </h3>
+            </div>
+          );
+        })}
+
+        {displayColumns.map((col, columnIndex) => {
           const colIssues = issuesByColumn.get(col.id) ?? [];
           const columnClassName =
-            col.style === "muted"
-              ? styles.mutedColumn
-              : col.style === "highlighted"
-                ? styles.highlightedColumn
-                : undefined;
+            [
+              col.style === "muted"
+                ? styles.mutedColumn
+                : col.style === "highlighted"
+                  ? styles.highlightedColumn
+                  : undefined,
+              columnIndex === displayColumns.length - 1
+                ? styles.lastColumn
+                : undefined,
+            ]
+              .filter(Boolean)
+              .join(" ") || undefined;
 
-          // Determine column type for backlog/blocked columns
           const isBacklogColumn = col.id === "backlog";
           const isBlockedColumn = col.id === "blocked";
           const isMutedColumn = isBacklogColumn || isBlockedColumn;
           const columnType = isBacklogColumn ? ("backlog" as const) : undefined;
 
-          // Determine if column should show limited cards
           const isColumnExpanded = expandedColumns.has(col.id);
           const hasMoreCards = colIssues.length > cardLimit;
           const displayedIssues = isColumnExpanded
             ? colIssues
             : colIssues.slice(0, cardLimit);
 
-          // Build footer action if there are more cards to show
           const footerAction = hasMoreCards ? (
             <button
               type="button"
@@ -195,12 +393,12 @@ export function SwimLane({
             </button>
           ) : undefined;
 
-          // Build props conditionally to satisfy exactOptionalPropertyTypes
           const isDropDisabled = isCollapsed || col.droppableDisabled === true;
           const statusColumnProps = {
             status: col.id,
             statusLabel: col.label,
             count: colIssues.length,
+            hideHeader: true,
             ...(isDropDisabled && { droppableDisabled: true }),
             ...(columnClassName !== undefined && {
               className: columnClassName,
@@ -210,7 +408,11 @@ export function SwimLane({
           };
 
           return (
-            <StatusColumn key={col.id} {...statusColumnProps}>
+            <StatusColumn
+              key={col.id}
+              {...statusColumnProps}
+              style={{ gridColumn: columnIndex + 1, gridRow: 2 }}
+            >
               {colIssues.length === 0 ? (
                 <EmptyColumn status={col.id} />
               ) : (
@@ -230,6 +432,7 @@ export function SwimLane({
                       }),
                     }),
                     ...(isMutedColumn && { isBacklog: true }),
+                    ...(pendingIds?.has(issue.id) && { isPending: true }),
                   };
                   return <DraggableIssueCard key={issue.id} {...cardProps} />;
                 })

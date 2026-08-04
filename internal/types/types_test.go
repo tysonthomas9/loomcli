@@ -395,7 +395,7 @@ func TestValidateWithCustomStatuses(t *testing.T) {
 	}
 }
 
-// TestValidateForImport tests the federation trust model (bd-9ji4z):
+// TestValidateForImport tests the federation trust model (loom-9ji4z):
 // - Built-in types are validated (catch typos)
 // - Non-built-in types are trusted (child repo already validated)
 func TestValidateForImport(t *testing.T) {
@@ -614,7 +614,7 @@ func TestAgentStateIsValid(t *testing.T) {
 	}{
 		{"idle", StateIdle, true},
 		{"running", StateRunning, true},
-		{"empty", AgentState(""), true}, // empty allowed for non-agent beads
+		{"empty", AgentState(""), true}, // empty allowed for non-agent issues
 		{"invalid", AgentState("dormant"), false},
 	}
 	for _, tc := range cases {
@@ -762,6 +762,41 @@ func TestDependencyTypeAffectsReadyWork(t *testing.T) {
 		t.Run(string(tt.depType), func(t *testing.T) {
 			if got := tt.depType.AffectsReadyWork(); got != tt.affects {
 				t.Errorf("DependencyType(%q).AffectsReadyWork() = %v, want %v", tt.depType, got, tt.affects)
+			}
+		})
+	}
+}
+
+func TestDependencyTypeIsDirectBlocker(t *testing.T) {
+	tests := []struct {
+		depType       DependencyType
+		directBlocker bool
+	}{
+		{DepBlocks, true},
+		{DepParentChild, false},
+		{DepConditionalBlocks, true},
+		{DepWaitsFor, true},
+		{DepRelated, false},
+		{DepDiscoveredFrom, false},
+		{DepRepliesTo, false},
+		{DepRelatesTo, false},
+		{DepDuplicates, false},
+		{DepSupersedes, false},
+		{DepAuthoredBy, false},
+		{DepAssignedTo, false},
+		{DepApprovedBy, false},
+		{DepAttests, false},
+		{DepTracks, false},
+		{DepUntil, false},
+		{DepCausedBy, false},
+		{DepValidates, false},
+		{DependencyType("custom-type"), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.depType), func(t *testing.T) {
+			if got := tt.depType.IsDirectBlocker(); got != tt.directBlocker {
+				t.Errorf("DependencyType(%q).IsDirectBlocker() = %v, want %v", tt.depType, got, tt.directBlocker)
 			}
 		})
 	}
@@ -1133,7 +1168,7 @@ func TestIsExpired(t *testing.T) {
 			expired: false,
 		},
 		{
-			name: "negative TTL means immediately expired (bd-4q8 --hard mode)",
+			name: "negative TTL means immediately expired (loom-4q8 --hard mode)",
 			issue: Issue{
 				ID:        "test-14",
 				Title:     "(deleted)",
@@ -1256,7 +1291,7 @@ func TestSetDefaults(t *testing.T) {
 	}
 }
 
-// EntityRef tests (bd-nmch: HOP entity tracking foundation)
+// EntityRef tests (loom-nmch: HOP entity tracking foundation)
 
 func TestEntityRefIsEmpty(t *testing.T) {
 	tests := []struct {
@@ -1354,7 +1389,7 @@ func TestParseEntityURI(t *testing.T) {
 		},
 		{
 			name:      "wrong prefix",
-			uri:       "beads://hop/gastown/steveyegge/polecat-nux",
+			uri:       "invalid://hop/gastown/steveyegge/polecat-nux",
 			expectErr: true,
 		},
 		{
@@ -1423,7 +1458,7 @@ func TestEntityRefRoundTrip(t *testing.T) {
 }
 
 func TestComputeContentHashWithCreator(t *testing.T) {
-	// Test that Creator field affects the content hash (bd-m7ib)
+	// Test that Creator field affects the content hash (loom-m7ib)
 	issue1 := Issue{
 		Title:     "Test Issue",
 		Status:    StatusOpen,
@@ -1461,7 +1496,7 @@ func TestComputeContentHashWithCreator(t *testing.T) {
 	}
 }
 
-// Validation tests (bd-du9h: HOP proof-of-stake)
+// Validation tests (loom-du9h: HOP proof-of-stake)
 
 func TestValidationIsValidOutcome(t *testing.T) {
 	tests := []struct {
@@ -1486,7 +1521,7 @@ func TestValidationIsValidOutcome(t *testing.T) {
 }
 
 func TestComputeContentHashWithValidations(t *testing.T) {
-	// Test that Validations field affects the content hash (bd-du9h)
+	// Test that Validations field affects the content hash (loom-du9h)
 	ts := time.Date(2025, 12, 22, 10, 30, 0, 0, time.UTC)
 
 	issue1 := Issue{
@@ -1566,7 +1601,7 @@ func TestComputeContentHashWithValidations(t *testing.T) {
 
 // TestIssueDetailsJSONStructure verifies that IssueDetails JSON serialization
 // always includes labels, dependencies, dependents, and comments fields,
-// even when they are empty arrays (GH#bd-rrtu).
+// even when they are empty arrays (GH#loom-rrtu).
 //
 // This ensures consistent JSON structure for frontend type guards.
 // The omitempty directive was removed from these fields so they always appear.
@@ -1890,4 +1925,99 @@ func TestWorkType_IsValid(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestIssueSourceRepoJSONSerialization(t *testing.T) {
+	t.Parallel()
+
+	t.Run("marshal with SourceRepo set includes source_repo", func(t *testing.T) {
+		issue := Issue{
+			ID:         "test-1",
+			Title:      "Test issue",
+			Status:     StatusOpen,
+			Priority:   2,
+			IssueType:  TypeTask,
+			SourceRepo: "github.com/org/repo",
+		}
+
+		data, err := json.Marshal(issue)
+		if err != nil {
+			t.Fatalf("Marshal failed: %v", err)
+		}
+
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal(data, &raw); err != nil {
+			t.Fatalf("Unmarshal to map failed: %v", err)
+		}
+
+		val, exists := raw["source_repo"]
+		if !exists {
+			t.Fatal("expected source_repo key in JSON output, but it was missing")
+		}
+
+		var repo string
+		if err := json.Unmarshal(val, &repo); err != nil {
+			t.Fatalf("Unmarshal source_repo value failed: %v", err)
+		}
+		if repo != "github.com/org/repo" {
+			t.Errorf("source_repo = %q, want %q", repo, "github.com/org/repo")
+		}
+	})
+
+	t.Run("marshal with empty SourceRepo omits source_repo", func(t *testing.T) {
+		issue := Issue{
+			ID:        "test-2",
+			Title:     "Test issue",
+			Status:    StatusOpen,
+			Priority:  2,
+			IssueType: TypeTask,
+		}
+
+		data, err := json.Marshal(issue)
+		if err != nil {
+			t.Fatalf("Marshal failed: %v", err)
+		}
+
+		if strings.Contains(string(data), "source_repo") {
+			t.Errorf("expected source_repo to be omitted from JSON, but got: %s", data)
+		}
+	})
+
+	t.Run("unmarshal JSON with source_repo populates field", func(t *testing.T) {
+		input := `{"id":"test-3","title":"Test issue","status":"open","priority":2,"issue_type":"task","source_repo":"github.com/other/repo"}`
+
+		var issue Issue
+		if err := json.Unmarshal([]byte(input), &issue); err != nil {
+			t.Fatalf("Unmarshal failed: %v", err)
+		}
+
+		if issue.SourceRepo != "github.com/other/repo" {
+			t.Errorf("SourceRepo = %q, want %q", issue.SourceRepo, "github.com/other/repo")
+		}
+	})
+
+	t.Run("round-trip preserves SourceRepo", func(t *testing.T) {
+		original := Issue{
+			ID:         "test-4",
+			Title:      "Round-trip test",
+			Status:     StatusOpen,
+			Priority:   1,
+			IssueType:  TypeTask,
+			SourceRepo: "github.com/round/trip",
+		}
+
+		data, err := json.Marshal(original)
+		if err != nil {
+			t.Fatalf("Marshal failed: %v", err)
+		}
+
+		var decoded Issue
+		if err := json.Unmarshal(data, &decoded); err != nil {
+			t.Fatalf("Unmarshal failed: %v", err)
+		}
+
+		if decoded.SourceRepo != original.SourceRepo {
+			t.Errorf("SourceRepo after round-trip = %q, want %q", decoded.SourceRepo, original.SourceRepo)
+		}
+	})
 }

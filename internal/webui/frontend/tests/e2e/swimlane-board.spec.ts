@@ -1,4 +1,11 @@
 import { test, expect, Page } from "@playwright/test"
+import {
+  setupFleetMocks,
+  showMoreFilters,
+  waitForWorkspaceIssues,
+  WORKSPACE_ID,
+  WS_API,
+} from "./helpers/fleet"
 
 /**
  * Mock issues for testing SwimLaneBoard component.
@@ -73,45 +80,15 @@ const mockIssues = [
  * Set up API mocks for SwimLaneBoard tests.
  */
 async function setupMocks(page: Page, issues: object[] = mockIssues) {
-  await page.route("**/api/ready", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ success: true, data: issues }),
-    })
-  })
-
-  await page.route("**/api/issues/*", async (route) => {
-    if (route.request().method() === "PATCH") {
-      const url = route.request().url()
-      const issueId = url.split("/").pop()
-      const body = route.request().postDataJSON() as { status?: string }
-      const issue = issues.find(
-        (i) => (i as { id: string }).id === issueId
-      ) as object
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          success: true,
-          data: { ...issue, ...body, updated_at: new Date().toISOString() },
-        }),
-      })
-    } else {
-      await route.continue()
-    }
-  })
-
+  await setupFleetMocks(page, issues)
 }
 
 /**
  * Navigate to app and wait for API response.
  */
-async function navigateAndWait(page: Page, path = "/") {
+async function navigateAndWait(page: Page, path = `/ws/${WORKSPACE_ID}/kanban`) {
   const [response] = await Promise.all([
-    page.waitForResponse(
-      (res) => res.url().includes("/api/ready") && res.status() === 200
-    ),
+    waitForWorkspaceIssues(page),
     page.goto(path),
   ])
   expect(response.ok()).toBe(true)
@@ -121,13 +98,16 @@ async function navigateAndWait(page: Page, path = "/") {
  * Select a groupBy option and wait for lanes to render.
  */
 async function selectGroupBy(page: Page, value: string) {
-  await page.getByTestId("groupby-filter").selectOption(value)
+  await showMoreFilters(page)
+  await page.getByLabel("Group issues by").selectOption(value)
   if (value === "none") {
     // For 'none', swim lane board should not be visible
     await expect(page.getByTestId("swim-lane-board")).not.toBeVisible()
   } else {
     // For other values, swim lane board should be visible
-    await expect(page.getByTestId("swim-lane-board")).toBeVisible()
+    await expect(
+      page.getByTestId("swim-lane-board").or(page.getByText("No issues yet"))
+    ).toBeVisible()
   }
 }
 
@@ -144,7 +124,7 @@ test.describe("SwimLaneBoard", () => {
       page,
     }) => {
       await setupMocks(page)
-      await navigateAndWait(page)
+      await navigateAndWait(page, `/ws/${WORKSPACE_ID}/kanban?groupBy=none`)
 
       // Default groupBy is 'none' - verify no swim lane board
       await expect(page.getByTestId("swim-lane-board")).not.toBeVisible()
@@ -526,36 +506,7 @@ test.describe("SwimLaneBoard", () => {
       // Track API calls - inline mock setup needed for custom PATCH tracking
       const patchCalls: { url: string; body: object }[] = []
 
-      await page.route("**/api/ready", async (route) => {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({ success: true, data: mockIssues }),
-        })
-      })
-
-      await page.route("**/api/issues/*", async (route) => {
-        if (route.request().method() === "PATCH") {
-          const url = route.request().url()
-          const body = route.request().postDataJSON() as { status?: string }
-          patchCalls.push({ url, body })
-
-          await route.fulfill({
-            status: 200,
-            contentType: "application/json",
-            body: JSON.stringify({
-              success: true,
-              data: {
-                ...mockIssues[0],
-                status: body.status,
-                updated_at: new Date().toISOString(),
-              },
-            }),
-          })
-        } else {
-          await route.continue()
-        }
-      })
+      await setupFleetMocks(page, mockIssues, patchCalls)
 
       await navigateAndWait(page)
       await selectGroupBy(page, "epic")
@@ -638,7 +589,7 @@ test.describe("SwimLaneBoard", () => {
 
       await page.waitForTimeout(50)
 
-      // Release at target
+      // Release at target and wait for the assignee prompt that gates status changes.
       await page.dispatchEvent("body", "pointerup", {
         clientX: endX,
         clientY: endY,
@@ -649,12 +600,16 @@ test.describe("SwimLaneBoard", () => {
         isPrimary: true,
       })
 
-      // Wait for the PATCH API call
-      await page.waitForResponse(
+      const skipButton = page.getByRole("button", { name: "Skip" })
+      await expect(skipButton).toBeVisible()
+
+      const patchResponse = page.waitForResponse(
         (res) =>
-          res.url().includes("/api/issues/epic-issue-1") &&
+          new URL(res.url()).pathname === `${WS_API}/issues/epic-issue-1` &&
           res.request().method() === "PATCH"
       )
+      await skipButton.click()
+      await patchResponse
 
       // Verify API call was made correctly
       expect(patchCalls).toHaveLength(1)
@@ -685,7 +640,7 @@ test.describe("SwimLaneBoard", () => {
 
       // Reload page
       await page.reload()
-      await page.waitForResponse((res) => res.url().includes("/api/ready"))
+      await waitForWorkspaceIssues(page)
 
       // Verify still grouped by priority
       await expect(page.getByTestId("swim-lane-board")).toBeVisible()
@@ -698,7 +653,7 @@ test.describe("SwimLaneBoard", () => {
       page,
     }) => {
       await setupMocks(page)
-      await navigateAndWait(page, "/?groupBy=assignee")
+      await navigateAndWait(page, `/ws/${WORKSPACE_ID}/kanban?groupBy=assignee`)
 
       // Verify swim lanes grouped by assignee
       await expect(page.getByTestId("swim-lane-board")).toBeVisible()
@@ -710,8 +665,8 @@ test.describe("SwimLaneBoard", () => {
       ).toBeVisible()
 
       // Verify dropdown shows correct selection
-      const groupByFilter = page.getByTestId("groupby-filter")
-      await expect(groupByFilter).toHaveValue("assignee")
+      await showMoreFilters(page)
+      await expect(page.getByLabel("Group issues by")).toHaveValue("assignee")
     })
   })
 

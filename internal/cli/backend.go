@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/tysonthomas9/loomcli/internal/backendnames"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -24,7 +25,7 @@ type Backend interface {
 
 var (
 	backends      = make(map[string]Backend)
-	activeBackend = "claude"
+	activeBackend = backendnames.Codex
 	backendFlag   string // set by --backend persistent flag in root.go
 	backendMu     sync.RWMutex
 )
@@ -75,7 +76,9 @@ func listBackendsLocked() []string {
 }
 
 // ResolveBackendName returns the backend name using the precedence chain:
-// --backend flag > LOOM_BACKEND env > project-local loom.yaml > global config > default ("claude").
+// --backend flag > LOOM_BACKEND env > default backend. Persistent backend
+// settings now live in FleetDB daemon profiles and are applied by the daemon,
+// not read from local YAML during CLI startup.
 func ResolveBackendName() string {
 	// 1. --backend flag (highest priority)
 	if backendFlag != "" {
@@ -85,18 +88,7 @@ func ResolveBackendName() string {
 	if env := os.Getenv("LOOM_BACKEND"); env != "" {
 		return env
 	}
-	// 3. Project-local loom.yaml — use GetBeadsDir() so workspace mode
-	// resolves to workspace root, legacy mode uses CWD
-	if pf, err := LoadProjectFile(GetBeadsDir()); err == nil && pf != nil && pf.Backend != "" {
-		return pf.Backend
-	}
-	// 4. Global config file backend setting
-	cfg, err := LoadConfig()
-	if err == nil && cfg != nil && cfg.Backend != "" {
-		return cfg.Backend
-	}
-	// 5. Default
-	return "claude"
+	return backendnames.Codex
 }
 
 // ResolveAndSetBackend resolves the backend name from the precedence chain
@@ -153,8 +145,52 @@ func InvokeAgentNonInteractive(workDir, prompt, agentName string, shutdown <-cha
 	return b.InvokeNonInteractive(workDir, prompt, agentName, shutdown, collector)
 }
 
-// InvokeAgentForConflicts runs the active backend to resolve merge conflicts.
-func InvokeAgentForConflicts(workDir, sourceBranch, targetBranch string, conflicts []string) error {
-	prompt := GenerateConflictResolutionPrompt(sourceBranch, targetBranch, conflicts)
-	return InvokeAgent(workDir, prompt, "")
+// GetBackendFlag returns the current value of the --backend CLI flag.
+func GetBackendFlag() string { return backendFlag }
+
+// TestingBackendFlag returns a pointer to the backendFlag string for test packages.
+func TestingBackendFlag() *string { return &backendFlag }
+
+// TestingBackendMu returns the backend registry mutex for test packages.
+func TestingBackendMu() *sync.RWMutex { return &backendMu }
+
+// TestingBackends returns the backend registry map for test packages.
+func TestingBackends() map[string]Backend { return backends }
+
+// TestingActiveBackend returns a pointer to the activeBackend string for test packages.
+func TestingActiveBackend() *string { return &activeBackend }
+
+// TestingResetBackendState saves and restores backend registry state for tests.
+// It clears the current registry so the test starts with an empty map, and
+// restores the original entries on cleanup.
+func TestingResetBackendState(t interface {
+	Helper()
+	Cleanup(func())
+}) {
+	t.Helper()
+	backendMu.Lock()
+	origBackends := make(map[string]Backend, len(backends))
+	for k, v := range backends {
+		origBackends[k] = v
+	}
+	origActive := activeBackend
+	// Clear the map in-place so tests start with an empty registry.
+	for k := range backends {
+		delete(backends, k)
+	}
+	activeBackend = ""
+	backendMu.Unlock()
+	t.Cleanup(func() {
+		backendMu.Lock()
+		// Clear any test-added entries.
+		for k := range backends {
+			delete(backends, k)
+		}
+		// Restore original entries.
+		for k, v := range origBackends {
+			backends[k] = v
+		}
+		activeBackend = origActive
+		backendMu.Unlock()
+	})
 }

@@ -212,13 +212,17 @@ describe("E2E Infrastructure: LoomApiClient class", () => {
   it("can be instantiated with a mock request context", () => {
     // Provide a minimal mock that satisfies the constructor signature
     const mockRequest = {} as InstanceType<typeof Object>;
-    const client = new LoomApiClient(mockRequest as never);
+    const client = new LoomApiClient(mockRequest as never, "", "test-ws");
     expect(client).toBeInstanceOf(LoomApiClient);
   });
 
   it("accepts an optional baseURL parameter", () => {
     const mockRequest = {} as never;
-    const client = new LoomApiClient(mockRequest, "http://custom:9999");
+    const client = new LoomApiClient(
+      mockRequest,
+      "http://custom:9999",
+      "test-ws",
+    );
     expect(client).toBeInstanceOf(LoomApiClient);
   });
 });

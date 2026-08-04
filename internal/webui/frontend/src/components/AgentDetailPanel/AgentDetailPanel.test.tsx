@@ -7,34 +7,41 @@
  * Covers Path field rendering and OpenInEditor integration in the Agent Info section.
  */
 
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
+import { describe, it, expect, vi } from "vitest";
 import "@testing-library/jest-dom";
 
 import type { LoomAgentStatus, LoomTaskInfo } from "@/types";
 
 import { AgentDetailPanel } from "./AgentDetailPanel";
 
-// Mock the useAgentTerminalLogs hook to prevent WebSocket/API calls in tests
 vi.mock("@/hooks", () => ({
-  useAgentTerminalLogs: () => ({
-    mode: "idle",
-    chunks: [],
-    state: "disconnected",
-    error: null,
-    resetVersion: 0,
-    refresh: vi.fn(),
-    resize: vi.fn(),
-    sendInput: vi.fn(),
-    loadOlderLogs: vi.fn(),
-    hasMoreLines: false,
-    isLoadingMore: false,
+  useWorkspaceContext: () => ({
+    getAgentByName: () => undefined,
   }),
-}));
-
-// Mock LogViewer to avoid terminal rendering complexity
-vi.mock("../LogViewer", () => ({
-  LogViewer: () => <div data-testid="log-viewer-mock" />,
+  useAgentDiffStat: vi.fn(() => ({
+    data: null,
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+  })),
+  useFocusReturn: vi.fn(),
+  useFocusTrap: vi.fn(),
+  useRegisterEscapeLayer: vi.fn(),
+  useKeyboardShortcuts: vi.fn(() => ({
+    isCheatsheetOpen: false,
+    toggleCheatsheet: vi.fn(),
+    closeCheatsheet: vi.fn(),
+  })),
+  KeyboardShortcutProvider: ({ children }: { children: React.ReactNode }) =>
+    children,
+  LAYER_CONFIRM_DIALOG: 60,
+  LAYER_TOAST: 50,
+  LAYER_CHEATSHEET: 45,
+  LAYER_MODAL: 40,
+  LAYER_TERMINAL_PANEL: 30,
+  LAYER_AGENT_PANEL: 20,
+  LAYER_ISSUE_PANEL: 10,
 }));
 
 // Mock OpenInEditor to avoid its hook dependencies (useEditors)
@@ -51,15 +58,32 @@ vi.mock("./GitTab", () => ({
   ),
 }));
 
-// Mock fetchDiffCommits from @/api for "Show all commits" tests
-const mockFetchDiffCommits = vi.fn();
-vi.mock("@/api", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/api")>();
-  return {
-    ...actual,
-    fetchDiffCommits: (...args: unknown[]) => mockFetchDiffCommits(...args),
-  };
-});
+// Mock DiffTab to avoid its hook dependencies (useDiff)
+vi.mock("./DiffTab", () => ({
+  DiffTab: ({ agent }: { agent: { name: string } }) => (
+    <div data-testid="diff-tab-mock" data-agent={agent.name} />
+  ),
+}));
+
+// Mock the v3 file browser to avoid pulling in CodeMirror and editor stack.
+vi.mock("@/components/FileExplorer", () => ({
+  WorkspaceFileBrowser: ({
+    mode,
+    agentName,
+    isActive,
+  }: {
+    mode?: string;
+    agentName?: string;
+    isActive?: boolean;
+  }) => (
+    <div
+      data-testid="workspace-file-browser-mock"
+      data-mode={mode}
+      data-agent={agentName}
+      data-active={String(isActive)}
+    />
+  ),
+}));
 
 /** Helper to build a minimal agent object. */
 function makeAgent(overrides: Partial<LoomAgentStatus> = {}): LoomAgentStatus {
@@ -115,7 +139,7 @@ describe("AgentDetailPanel", () => {
       renderPanel({
         path: "worktrees/falcon",
         branch: "feature-branch",
-        status: "working: bd-123 (5m)",
+        status: "working: loom-123 (5m)",
       });
 
       // Path should be present
@@ -165,12 +189,13 @@ describe("AgentDetailPanel", () => {
       expect(gitTab).toBeInTheDocument();
     });
 
-    it("renders all three tabs: Info, Logs, Git", () => {
+    it("renders all four tabs: Info, Git, Diff, Files", () => {
       renderPanel();
 
       expect(screen.getByRole("tab", { name: "Info" })).toBeInTheDocument();
-      expect(screen.getByRole("tab", { name: "Logs" })).toBeInTheDocument();
       expect(screen.getByRole("tab", { name: "Git" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Diff" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Files" })).toBeInTheDocument();
     });
 
     it("Info tab is selected by default", () => {
@@ -245,218 +270,170 @@ describe("AgentDetailPanel", () => {
     });
   });
 
-  describe("Show all commits feature", () => {
-    beforeEach(() => {
-      mockFetchDiffCommits.mockReset();
+  describe("Diff tab in tab bar", () => {
+    it("renders Diff tab button in the tab bar", () => {
+      renderPanel();
+      const diffTab = screen.getByRole("tab", { name: "Diff" });
+      expect(diffTab).toBeInTheDocument();
     });
 
-    it("renders 'Show all' button when agent.ahead > 10", () => {
-      renderPanel({
-        ahead: 15,
-        commits: [
-          { hash: "abc1234", message: "Some commit message" },
-          { hash: "def5678", message: "Another commit" },
-        ],
-      });
+    it("Diff tab activates on click and shows DiffTab component", async () => {
+      renderPanel({ name: "nova" });
 
-      expect(screen.getByText("Show all 15 commits")).toBeInTheDocument();
-    });
-
-    it("does not render 'Show all' button when all commits are already shown", () => {
-      renderPanel({
-        ahead: 2,
-        commits: [
-          { hash: "abc1234", message: "Some commit message" },
-          { hash: "def5678", message: "Another commit" },
-        ],
-      });
-
-      expect(
-        screen.queryByText(/Show all \d+ commits/),
-      ).not.toBeInTheDocument();
-    });
-
-    it("renders 'Show all' button when commits shown is less than ahead count", () => {
-      renderPanel({
-        ahead: 10,
-        commits: [{ hash: "abc1234", message: "Some commit message" }],
-      });
-
-      expect(screen.getByText("Show all 10 commits")).toBeInTheDocument();
-    });
-
-    it("calls fetchDiffCommits with agent name when 'Show all' is clicked", async () => {
-      mockFetchDiffCommits.mockResolvedValue([
-        {
-          hash: "abc1234567890",
-          short_hash: "abc1234",
-          subject: "feat: something",
-          author: "test",
-          email: "test@test.com",
-          date: "2026-01-01T00:00:00Z",
-        },
-      ]);
-
-      renderPanel({
-        name: "falcon",
-        ahead: 15,
-        commits: [{ hash: "abc1234", message: "Some commit message" }],
-      });
-
-      fireEvent.click(screen.getByText("Show all 15 commits"));
-
-      await waitFor(() => {
-        expect(mockFetchDiffCommits).toHaveBeenCalledWith("falcon");
-      });
-    });
-
-    it("displays expanded commits and 'Show less' after successful fetch", async () => {
-      mockFetchDiffCommits.mockResolvedValue([
-        {
-          hash: "abc1234567890",
-          short_hash: "abc1234",
-          subject: "feat: something",
-          author: "test",
-          email: "test@test.com",
-          date: "2026-01-01T00:00:00Z",
-        },
-        {
-          hash: "def5678901234",
-          short_hash: "def5678",
-          subject: "fix: another thing",
-          author: "test",
-          email: "test@test.com",
-          date: "2026-01-02T00:00:00Z",
-        },
-      ]);
-
-      renderPanel({
-        ahead: 15,
-        commits: [{ hash: "abc1234", message: "Some commit message" }],
-      });
-
-      fireEvent.click(screen.getByText("Show all 15 commits"));
-
-      await waitFor(() => {
-        expect(screen.getByText("feat: something")).toBeInTheDocument();
-      });
-
-      expect(screen.getByText("fix: another thing")).toBeInTheDocument();
-      expect(screen.getByText("Show less")).toBeInTheDocument();
-      // The "Show all" button should no longer be visible
-      expect(
-        screen.queryByText(/Show all \d+ commits/),
-      ).not.toBeInTheDocument();
-    });
-
-    it("clicking 'Show less' reverts to original commits", async () => {
-      mockFetchDiffCommits.mockResolvedValue([
-        {
-          hash: "abc1234567890",
-          short_hash: "abc1234",
-          subject: "feat: expanded commit",
-          author: "test",
-          email: "test@test.com",
-          date: "2026-01-01T00:00:00Z",
-        },
-      ]);
-
-      renderPanel({
-        ahead: 15,
-        commits: [{ hash: "orig123", message: "Original commit message" }],
-      });
-
-      // Click "Show all" and wait for expanded commits
-      fireEvent.click(screen.getByText("Show all 15 commits"));
-
-      await waitFor(() => {
-        expect(screen.getByText("feat: expanded commit")).toBeInTheDocument();
-      });
-
-      // Original commit should no longer be visible (replaced by expanded)
-      expect(
-        screen.queryByText("Original commit message"),
-      ).not.toBeInTheDocument();
-
-      // Click "Show less" to revert
-      fireEvent.click(screen.getByText("Show less"));
-
-      // Original commits should be back
-      expect(screen.getByText("Original commit message")).toBeInTheDocument();
-      // Expanded commit message should be gone
-      expect(
-        screen.queryByText("feat: expanded commit"),
-      ).not.toBeInTheDocument();
-      // "Show all" button should reappear
-      expect(screen.getByText("Show all 15 commits")).toBeInTheDocument();
-    });
-
-    it("expanded commits render hashes as plain spans (no link) since url is undefined", async () => {
-      mockFetchDiffCommits.mockResolvedValue([
-        {
-          hash: "abc1234567890",
-          short_hash: "abc1234",
-          subject: "feat: something",
-          author: "test",
-          email: "test@test.com",
-          date: "2026-01-01T00:00:00Z",
-        },
-      ]);
-
-      renderPanel({
-        ahead: 15,
-        commits: [{ hash: "orig123", message: "Original commit" }],
-      });
-
-      fireEvent.click(screen.getByText("Show all 15 commits"));
-
-      await waitFor(() => {
-        expect(screen.getByText("abc1234")).toBeInTheDocument();
-      });
-
-      // The hash should be rendered as a <span>, not an <a> link
-      const hashElement = screen.getByText("abc1234");
-      expect(hashElement.tagName).toBe("SPAN");
-      expect(hashElement.closest("a")).toBeNull();
-    });
-
-    it("shows 'Loading...' while fetching commits", async () => {
-      // Create a promise that we can control resolution of
-      let resolvePromise!: (value: unknown[]) => void;
-      mockFetchDiffCommits.mockReturnValue(
-        new Promise((resolve) => {
-          resolvePromise = resolve;
-        }),
+      // Diff tab should not be selected initially
+      expect(screen.getByRole("tab", { name: "Diff" })).toHaveAttribute(
+        "aria-selected",
+        "false",
       );
 
-      renderPanel({
-        ahead: 15,
-        commits: [{ hash: "abc1234", message: "Some commit message" }],
-      });
+      // Click Diff tab
+      fireEvent.click(screen.getByRole("tab", { name: "Diff" }));
 
-      fireEvent.click(screen.getByText("Show all 15 commits"));
+      // Diff tab should be selected
+      expect(screen.getByRole("tab", { name: "Diff" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
 
-      // While loading, the button should show "Loading..."
-      await waitFor(() => {
-        expect(screen.getByText("Loading...")).toBeInTheDocument();
-      });
+      // DiffTab mock should render (lazy-loaded via Suspense)
+      const diffTabMock = await screen.findByTestId("diff-tab-mock");
+      expect(diffTabMock).toHaveAttribute("data-agent", "nova");
+    });
 
-      // Resolve the promise to clean up
-      resolvePromise([
-        {
-          hash: "abc1234567890",
-          short_hash: "abc1234",
-          subject: "feat: something",
-          author: "test",
-          email: "test@test.com",
-          date: "2026-01-01T00:00:00Z",
-        },
-      ]);
+    it("Diff tab panel has correct ARIA attributes", async () => {
+      renderPanel();
+      fireEvent.click(screen.getByRole("tab", { name: "Diff" }));
 
-      // After resolution, loading text should be gone
-      await waitFor(() => {
-        expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
-      });
+      // Wait for lazy load
+      await screen.findByTestId("diff-tab-mock");
+
+      const tabPanel = document.getElementById("agent-panel-tabpanel-diff");
+      expect(tabPanel).toBeInTheDocument();
+      expect(tabPanel).toHaveAttribute("role", "tabpanel");
+      expect(tabPanel).toHaveAttribute(
+        "aria-labelledby",
+        "agent-panel-tab-diff",
+      );
+    });
+
+    it("Diff tab button has correct ARIA attributes", () => {
+      renderPanel();
+      const diffTab = screen.getByRole("tab", { name: "Diff" });
+      expect(diffTab).toHaveAttribute("id", "agent-panel-tab-diff");
+      expect(diffTab).toHaveAttribute(
+        "aria-controls",
+        "agent-panel-tabpanel-diff",
+      );
+    });
+  });
+
+  describe("Files tab in tab bar", () => {
+    it("renders Files tab button in the tab bar", () => {
+      renderPanel();
+
+      const filesTab = screen.getByRole("tab", { name: "Files" });
+      expect(filesTab).toBeInTheDocument();
+    });
+
+    it("renders all four tabs: Info, Git, Diff, Files", () => {
+      renderPanel();
+
+      expect(screen.getByRole("tab", { name: "Info" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Git" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Diff" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Files" })).toBeInTheDocument();
+    });
+
+    it("Files tab activates on click", () => {
+      renderPanel();
+
+      // Files tab should not be selected initially
+      expect(screen.getByRole("tab", { name: "Files" })).toHaveAttribute(
+        "aria-selected",
+        "false",
+      );
+
+      // Click Files tab
+      fireEvent.click(screen.getByRole("tab", { name: "Files" }));
+
+      // Files tab should be selected
+      expect(screen.getByRole("tab", { name: "Files" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+
+      // The tabpanel should render
+      const tabPanel = document.getElementById("agent-panel-tabpanel-files");
+      expect(tabPanel).toBeInTheDocument();
+    });
+
+    it("passes correct props to WorkspaceFileBrowser", async () => {
+      renderPanel({ name: "nova" });
+
+      fireEvent.click(screen.getByRole("tab", { name: "Files" }));
+
+      const fileBrowserMock = await screen.findByTestId(
+        "workspace-file-browser-mock",
+      );
+      expect(fileBrowserMock).toHaveAttribute("data-mode", "agent");
+      expect(fileBrowserMock).toHaveAttribute("data-agent", "nova");
+      expect(fileBrowserMock).toHaveAttribute("data-active", "true");
+    });
+
+    it("Files tab panel has correct ARIA attributes", () => {
+      renderPanel();
+
+      // Click Files tab
+      fireEvent.click(screen.getByRole("tab", { name: "Files" }));
+
+      const tabPanel = document.getElementById("agent-panel-tabpanel-files");
+      expect(tabPanel).toBeInTheDocument();
+      expect(tabPanel).toHaveAttribute("role", "tabpanel");
+      expect(tabPanel).toHaveAttribute(
+        "aria-labelledby",
+        "agent-panel-tab-files",
+      );
+    });
+
+    it("Files tab button has correct ARIA attributes", () => {
+      renderPanel();
+
+      const filesTab = screen.getByRole("tab", { name: "Files" });
+      expect(filesTab).toHaveAttribute("id", "agent-panel-tab-files");
+      expect(filesTab).toHaveAttribute(
+        "aria-controls",
+        "agent-panel-tabpanel-files",
+      );
+    });
+  });
+
+  describe("repo info in Agent Info section", () => {
+    it('shows "Repos" row with RepoBadge when agent.repo is set', () => {
+      renderPanel({ repo: "api" });
+
+      expect(screen.getByText("Repos")).toBeInTheDocument();
+      expect(screen.getByLabelText("Repository: api")).toBeInTheDocument();
+      expect(screen.getByText("api")).toBeInTheDocument();
+    });
+
+    it('does not show "Repos" row when agent.repo is undefined', () => {
+      renderPanel({ repo: undefined });
+
+      expect(screen.queryByText("Repos")).not.toBeInTheDocument();
+    });
+
+    it('shows "All repos" label when agent.cross_repo is true', () => {
+      renderPanel({ repo: "api", cross_repo: true });
+
+      expect(screen.getByText("Repos")).toBeInTheDocument();
+      expect(screen.getByText("All repos")).toBeInTheDocument();
+    });
+
+    it('does not show "All repos" when agent.cross_repo is false', () => {
+      renderPanel({ repo: "api", cross_repo: false });
+
+      expect(screen.getByText("Repos")).toBeInTheDocument();
+      expect(screen.queryByText("All repos")).not.toBeInTheDocument();
     });
   });
 });

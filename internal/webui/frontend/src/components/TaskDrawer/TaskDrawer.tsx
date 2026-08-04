@@ -3,8 +3,14 @@
  * Opens from the right side, covering 50% of the screen.
  */
 
-import { useEffect, useCallback } from "react";
+import { useEffect, useRef } from "react";
 
+import {
+  useFocusReturn,
+  useFocusTrap,
+  useRegisterEscapeLayer,
+  LAYER_TERMINAL_PANEL,
+} from "@/hooks";
 import type { LoomTaskInfo } from "@/types";
 
 import styles from "./TaskDrawer.module.css";
@@ -66,20 +72,14 @@ export function TaskDrawer({
   tasks,
   onClose,
 }: TaskDrawerProps): JSX.Element | null {
-  // Handle escape key to close drawer
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent) => {
-      if (e.key === "Escape" && isOpen) {
-        onClose();
-      }
-    },
-    [isOpen, onClose],
-  );
+  const drawerRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [handleKeyDown]);
+  // Focus management
+  useFocusReturn(isOpen);
+  useFocusTrap(drawerRef, isOpen);
+
+  // Handle escape key to close drawer via global shortcut layer system
+  useRegisterEscapeLayer(LAYER_TERMINAL_PANEL, onClose, isOpen);
 
   // Prevent body scroll when drawer is open
   useEffect(() => {
@@ -104,10 +104,12 @@ export function TaskDrawer({
 
       {/* Drawer */}
       <div
+        ref={drawerRef}
         className={styles.drawer}
         role="dialog"
         aria-modal="true"
         aria-labelledby="drawer-title"
+        tabIndex={-1}
       >
         {/* Header */}
         <div className={styles.header}>

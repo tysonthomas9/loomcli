@@ -1,0 +1,143 @@
+# docker-compose.empty.yml - fleet-db-only Loom stack with no seed data.
+#
+# This is the clean "new user" stack:
+#   - redis       empty backing store for fleet-db
+#   - fleet-db    issue/workspace store API
+#   - loom        Loom API server plus a workspace daemon manager
+#   - ui          static web UI + reverse proxy to loom
+#
+# Usage from the loomcli repo root:
+#   npm --prefix internal/webui/frontend run build
+#   docker compose -f test/fleetdb/docker-compose.empty.yml up --build
+#   open http://localhost:8091
+#
+# The stack intentionally does not create workspaces or issues. To create an
+# empty workspace from the UI, mount host repos into /repos and enter their
+# container path in the "Repository Paths" field, for example:
+#   mkdir -p test/fleetdb/repos/demo
+#   git -C test/fleetdb/repos/demo init
+#   # UI repo path: /repos/demo
+#   # UI workspace location: /loom-config/workspaces/demo
+#
+# Override ports/paths:
+#   LOOM_UI_PORT=8092 LOOM_API_PORT=8093 LOOM_REPOS_DIR=/path/to/repos \
+#     docker compose -f test/fleetdb/docker-compose.empty.yml up --build
+
+name: loomcli-fleetdb-empty
+
+networks:
+  fleetdb-empty:
+    driver: bridge
+
+volumes:
+  redis-data:
+    driver: local
+  loom-config:
+    driver: local
+
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "no", "--save", ""]
+    networks: [fleetdb-empty]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 1s
+      retries: 20
+
+  fleet-db:
+    # Use an already-built fleet-db image by default. For local development,
+    # the regression stack usually creates loomcli-fleetdb-regression-fleet-db:latest.
+    # Override FLEET_DB_IMAGE to point at a release image or locally built tag.
+    image: ${FLEET_DB_IMAGE:-loomcli-fleetdb-regression-fleet-db:latest}
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      FLEETDB_REDIS_ADDR: redis:6379
+      FLEETDB_BIND: ":8080"
+    command:
+      - "--redis-addr"
+      - "redis:6379"
+      - "--addr"
+      - ":8080"
+      - "--auth-dev-mode"
+      - "--authz-enabled=false"
+      # Empty-stack tests exercise workspace/bootstrap behavior. fleet-db
+      # has dedicated rate-limit coverage, so keep this compose path stable
+      # under CLI/browser probe bursts.
+      - "--rate-limit-enabled=false"
+    networks: [fleetdb-empty]
+    ports:
+      - "${FLEET_DB_PORT:-8090}:8080"
+
+  loom:
+    build:
+      context: ../..
+      dockerfile: test/fleetdb/Dockerfile.regression
+    depends_on:
+      fleet-db:
+        condition: service_started
+    environment:
+      LOOM_CONFIG_DIR: /loom-config
+      LOOM_ISSUE_BACKEND: fleet
+      LOOM_FLEET_URL: http://fleet-db:8080
+      LOOM_FLEET_DB_URL: http://fleet-db:8080
+      LOOM_WORKSPACE: DEFAULT
+      LOOM_FLEET_ACTOR: local-user
+      LOOM_FLEET_DB_ACTOR: local-user
+      LOOM_AGENT_NAME: local-user
+      LOOM_FLEET_REQUIRED: "1"
+      LOOM_FRONTEND_URL: "http://localhost:${LOOM_UI_PORT:-8091}"
+      LOOM_DAEMON_SCAN_INTERVAL: "2"
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        echo "[loom-empty] checking fleet-db reachability at $$LOOM_FLEET_URL ..."
+        for i in $$(seq 1 30); do
+          if wget -qO- "$$LOOM_FLEET_URL/healthz" >/dev/null 2>&1; then
+            echo "[loom-empty] fleet-db OK"
+            break
+          fi
+          echo "[loom-empty] waiting for fleet-db ($$i/30)"
+          sleep 1
+        done
+        wget -qO- "$$LOOM_FLEET_URL/healthz" >/dev/null || { echo "[loom-empty] FATAL: fleet-db unreachable"; exit 1; }
+        loom-empty-daemon-manager >/tmp/loom-empty-daemon-manager.log 2>&1 &
+        manager_pid="$$!"
+        trap 'kill "$$manager_pid" "$$serve_pid" 2>/dev/null || true' INT TERM EXIT
+        loom serve --bind 0.0.0.0 --port 8080 --frontend-url "http://localhost:${LOOM_UI_PORT:-8091}" &
+        serve_pid="$$!"
+        wait "$$serve_pid"
+    networks: [fleetdb-empty]
+    ports:
+      - "${LOOM_API_PORT:-8092}:8080"
+    volumes:
+      - loom-config:/loom-config
+      - ${LOOM_REPOS_DIR:-./repos}:/repos
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/config >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
+
+  ui:
+    image: docker.io/library/caddy:2-alpine
+    depends_on:
+      loom:
+        condition: service_started
+    environment:
+      FRONTEND_PORT: "8080"
+      LOOM_UPSTREAM: http://loom:8080
+    networks: [fleetdb-empty]
+    ports:
+      - "${LOOM_UI_PORT:-8091}:8080"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../../internal/webui/frontend/dist:/srv:ro

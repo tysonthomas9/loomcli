@@ -1,4 +1,11 @@
 import { test, expect, Page } from "@playwright/test"
+import {
+  setupFleetMocks,
+  showMoreFilters,
+  waitForWorkspaceIssues,
+  WORKSPACE_ID,
+  WS_API,
+} from "./helpers/fleet"
 
 /**
  * Mock issues for testing groupBy Epic swim lanes.
@@ -88,83 +95,49 @@ const mockIssues = [
 
 /**
  * Set up API mocks for epic grouping tests.
- * Includes auth token, SSE events stream, and issue data endpoints.
- * Note: Default view is 'kanban', which fetches from /api/issues (not /api/ready).
+ * Includes workspace metadata, issue data endpoints, and mutation handling.
  */
-async function setupMocks(page: Page, issues: object[] = mockIssues) {
-  // Mock auth token endpoint (app calls this on mount)
-  await page.route("**/api/auth/token", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ token: "test-token-e2e" }),
-    })
-  })
-
-  // Mock SSE events endpoint (app connects for real-time updates)
-  await page.route("**/api/events**", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "text/event-stream",
-      headers: { "Cache-Control": "no-cache", Connection: "keep-alive" },
-      body: "event: connected\ndata: {\"message\":\"connected\"}\n\n",
-    })
-  })
-
-  // Mock /api/issues endpoint (kanban mode fetches from here, not /api/ready)
-  // Use function matcher to handle query params (/api/issues?exclude_status=tombstone&...)
-  await page.route(
-    (url) => url.pathname.endsWith("/api/issues") || url.pathname.endsWith("/api/ready"),
-    async (route) => {
-      if (route.request().method() === "GET") {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({ success: true, data: issues }),
-        })
-      } else {
-        await route.continue()
-      }
-    }
-  )
-
-  // Mock /api/issues/:id for PATCH (status updates via drag-and-drop)
-  await page.route("**/api/issues/*", async (route) => {
-    if (route.request().method() === "PATCH") {
-      const url = route.request().url()
-      const issueId = url.split("/").pop()?.split("?")[0]
-      const body = route.request().postDataJSON() as { status?: string }
-      const issue = issues.find(
-        (i) => (i as { id: string }).id === issueId
-      ) as object
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          success: true,
-          data: { ...issue, ...body, updated_at: new Date().toISOString() },
-        }),
-      })
-    } else {
-      await route.continue()
-    }
-  })
-
+async function setupMocks(
+  page: Page,
+  issues: object[] = mockIssues,
+  patchCalls?: { url: string; body: object }[]
+) {
+  await setupFleetMocks(page, issues, patchCalls)
 }
 
 /**
- * Navigate to app with groupBy=epic and wait for API response.
- * Default view is 'kanban' which fetches from /api/issues.
+ * Navigate to app with groupBy=epic and wait for the workspace issue response.
  */
 async function navigateToEpicView(page: Page) {
   const [response] = await Promise.all([
-    page.waitForResponse(
-      (res) => res.url().includes("/api/issues") && res.status() === 200
-    ),
-    page.goto("/?groupBy=epic"),
+    waitForWorkspaceIssues(page),
+    page.goto(`/ws/${WORKSPACE_ID}/kanban?groupBy=epic`),
   ])
   expect(response.ok()).toBe(true)
   await expect(page.getByTestId("swim-lane-board")).toBeVisible()
+}
+
+async function groupByControl(page: Page) {
+  if ((await page.getByTestId("groupby-filter").count()) > 0) {
+    return page.getByTestId("groupby-filter")
+  }
+  await showMoreFilters(page)
+  return page.getByLabel("Group issues by")
+}
+
+async function waitForIssuePatch(page: Page, issueID: string) {
+  return page.waitForResponse(
+    (res) =>
+      new URL(res.url()).pathname === `${WS_API}/issues/${issueID}` &&
+      res.request().method() === "PATCH"
+  )
+}
+
+async function skipClaimModalIfShown(page: Page) {
+  const skipButton = page.getByRole("button", { name: "Skip" })
+  if (await skipButton.isVisible({ timeout: 1000 }).catch(() => false)) {
+    await skipButton.click()
+  }
 }
 
 /**
@@ -426,32 +399,7 @@ test.describe("groupBy Epic Swim Lanes", () => {
     test("drag issue changes status within epic lane", async ({ page }) => {
       const patchCalls: { url: string; body: object }[] = []
 
-      await page.route("**/api/ready", async (route) => {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({ success: true, data: mockIssues }),
-        })
-      })
-
-      await page.route("**/api/issues/*", async (route) => {
-        if (route.request().method() === "PATCH") {
-          const url = route.request().url()
-          const body = route.request().postDataJSON() as { status?: string }
-          patchCalls.push({ url, body })
-
-          await route.fulfill({
-            status: 200,
-            contentType: "application/json",
-            body: JSON.stringify({
-              success: true,
-              data: { ...mockIssues[0], status: body.status },
-            }),
-          })
-        } else {
-          await route.continue()
-        }
-      })
+      await setupMocks(page, mockIssues, patchCalls)
 
       await navigateToEpicView(page)
 
@@ -516,6 +464,8 @@ test.describe("groupBy Epic Swim Lanes", () => {
       })
       await page.waitForTimeout(50)
 
+      const patchResponse = waitForIssuePatch(page, "epic-1-open")
+
       await page.dispatchEvent("body", "pointerup", {
         clientX: endX,
         clientY: endY,
@@ -526,11 +476,8 @@ test.describe("groupBy Epic Swim Lanes", () => {
         isPrimary: true,
       })
 
-      await page.waitForResponse(
-        (res) =>
-          res.url().includes("/api/issues/epic-1-open") &&
-          res.request().method() === "PATCH"
-      )
+      await skipClaimModalIfShown(page)
+      await patchResponse
 
       expect(patchCalls).toHaveLength(1)
       expect(patchCalls[0].body).toEqual({ status: "in_progress" })
@@ -550,32 +497,7 @@ test.describe("groupBy Epic Swim Lanes", () => {
 
       const patchCalls: { url: string; body: object }[] = []
 
-      await page.route("**/api/ready", async (route) => {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({ success: true, data: mockIssues }),
-        })
-      })
-
-      await page.route("**/api/issues/*", async (route) => {
-        if (route.request().method() === "PATCH") {
-          const url = route.request().url()
-          const body = route.request().postDataJSON() as Record<string, unknown>
-          patchCalls.push({ url, body })
-
-          await route.fulfill({
-            status: 200,
-            contentType: "application/json",
-            body: JSON.stringify({
-              success: true,
-              data: { ...mockIssues[0], ...body },
-            }),
-          })
-        } else {
-          await route.continue()
-        }
-      })
+      await setupMocks(page, mockIssues, patchCalls)
 
       await navigateToEpicView(page)
 
@@ -643,6 +565,8 @@ test.describe("groupBy Epic Swim Lanes", () => {
       })
       await page.waitForTimeout(50)
 
+      const patchResponse = waitForIssuePatch(page, "epic-1-open")
+
       await page.dispatchEvent("body", "pointerup", {
         clientX: endX,
         clientY: endY,
@@ -653,11 +577,8 @@ test.describe("groupBy Epic Swim Lanes", () => {
         isPrimary: true,
       })
 
-      await page.waitForResponse(
-        (res) =>
-          res.url().includes("/api/issues/epic-1-open") &&
-          res.request().method() === "PATCH"
-      )
+      await skipClaimModalIfShown(page)
+      await patchResponse
 
       // Verify ONLY status changed, NOT parent
       expect(patchCalls).toHaveLength(1)
@@ -670,11 +591,13 @@ test.describe("groupBy Epic Swim Lanes", () => {
     test("empty issues array shows no epic lanes", async ({ page }) => {
       await setupMocks(page, [])
       await Promise.all([
-        page.waitForResponse((res) => res.url().includes("/api/issues")),
-        page.goto("/?groupBy=epic"),
+        waitForWorkspaceIssues(page),
+        page.goto(`/ws/${WORKSPACE_ID}/kanban?groupBy=epic`),
       ])
 
-      await expect(page.getByTestId("swim-lane-board")).toBeVisible()
+      await expect(
+        page.getByTestId("swim-lane-board").or(page.getByText("No issues yet"))
+      ).toBeVisible()
       const lanes = page.locator('[data-testid^="swim-lane-lane-epic"]')
       await expect(lanes).toHaveCount(0)
     })
@@ -748,7 +671,7 @@ test.describe("groupBy Epic Swim Lanes", () => {
       ).toBeVisible()
 
       // Switch to assignee grouping
-      await page.getByTestId("groupby-filter").selectOption("assignee")
+      await (await groupByControl(page)).selectOption("assignee")
 
       // Epic lanes should be gone
       await expect(
@@ -769,15 +692,15 @@ test.describe("groupBy Epic Swim Lanes", () => {
     }) => {
       await setupMocks(page)
       await Promise.all([
-        page.waitForResponse((res) => res.url().includes("/api/issues")),
-        page.goto("/?groupBy=epic"),
+        waitForWorkspaceIssues(page),
+        page.goto(`/ws/${WORKSPACE_ID}/kanban?groupBy=epic`),
       ])
 
       // Verify swim lanes visible
       await expect(page.getByTestId("swim-lane-board")).toBeVisible()
 
       // Verify dropdown shows epic selected
-      await expect(page.getByTestId("groupby-filter")).toHaveValue("epic")
+      await expect(await groupByControl(page)).toHaveValue("epic")
 
       // Verify epic lanes present
       await expect(

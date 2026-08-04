@@ -4,24 +4,30 @@
  */
 
 .settingsView {
+  /* Aether settings: full-width column on the #111 backdrop */
   padding: var(--space-6);
   overflow: auto;
   height: 100%;
-  max-width: 860px;
+  width: 100%;
+  font-size: var(--font-size-base);
+  line-height: 1.55;
+  color: var(--color-text-secondary);
 }
 
 .pageTitle {
-  font-size: var(--font-size-xl);
-  font-weight: var(--font-weight-semibold);
+  font-size: var(--font-size-lg);
+  font-weight: 900;
+  letter-spacing: -0.01em;
   color: var(--color-text);
-  margin: 0 0 var(--space-6) 0;
+  margin: 0 0 var(--space-5) 0;
+  line-height: 1.25;
 }
 
-/* Panel */
+/* Panel — Aether settings card (#1e1e1e, rounded-lg, p-5) */
 .panel {
-  background-color: var(--color-bg-card);
+  background-color: var(--color-panel-bg);
   border: 1px solid var(--color-border);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   overflow: hidden;
   margin-bottom: var(--space-4);
 }
@@ -31,14 +37,21 @@
   align-items: center;
   padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--color-border-light);
-  background: #ece9df;
+  background: var(--color-bg-tertiary);
 }
 
 .panelTitle {
-  font-size: 0.95rem;
+  font-size: var(--font-size-base);
   font-weight: var(--font-weight-semibold);
   color: var(--color-text);
   margin: 0;
+}
+
+.cachedBadge {
+  font-size: var(--font-size-xs);
+  font-weight: normal;
+  color: var(--color-warning);
+  margin-left: 8px;
 }
 
 .panelContent {
@@ -56,7 +69,7 @@
 
 .label {
   display: block;
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-base);
   font-weight: var(--font-weight-medium);
   color: var(--color-text);
   margin-bottom: var(--space-1);
@@ -76,7 +89,7 @@
 
 .select {
   padding: var(--space-2) var(--space-3);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-base);
   font-family: var(--font-family-base);
   color: var(--color-text);
   background-color: var(--color-bg);
@@ -108,7 +121,7 @@
 /* Text input (custom font) */
 .input {
   padding: var(--space-2) var(--space-3);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-base);
   font-family: var(--font-family-base);
   color: var(--color-text);
   background-color: var(--color-bg);
@@ -128,10 +141,56 @@
   outline-offset: 2px;
 }
 
+.fieldGrid {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(96px, 120px) minmax(
+      220px,
+      1fr
+    );
+  gap: var(--space-3);
+  align-items: start;
+}
+
+.fieldGrid .formGroup {
+  margin-bottom: 0;
+}
+
+.fieldGrid .input {
+  width: 100%;
+  min-width: 0;
+  margin-top: 0;
+}
+
+.checkboxLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text);
+}
+
+.checkboxLabel input {
+  width: 16px;
+  height: 16px;
+}
+
+.errorText {
+  margin: 0 0 var(--space-3) 0;
+  color: var(--color-error);
+  font-size: var(--font-size-base);
+}
+
+.restartNote {
+  margin: var(--space-2) 0 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
 /* Save button */
 .saveButton {
   padding: var(--space-2) var(--space-4);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-base);
   font-family: var(--font-family-base);
   font-weight: var(--font-weight-medium);
   color: var(--color-text-inverse);
@@ -162,7 +221,7 @@
 .agentTable {
   width: 100%;
   border-collapse: collapse;
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-base);
 }
 
 .agentTable th {
@@ -192,13 +251,43 @@
 
 .emptyMessage {
   color: var(--color-text-muted);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-base);
   font-style: italic;
+}
+
+/* Navigation button */
+.navButton {
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--font-size-base);
+  font-family: var(--font-family-base);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text);
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.navButton:hover {
+  background-color: var(--color-bg-hover, #f0ede6);
+  border-color: var(--color-border-hover);
+}
+
+.navButton:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
 }
 
 /* Mobile */
 @media (width <= 768px) {
   .settingsView {
     padding: var(--space-4);
+  }
+
+  .fieldGrid {
+    grid-template-columns: 1fr;
   }
 }

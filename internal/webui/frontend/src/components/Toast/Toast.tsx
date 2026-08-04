@@ -5,7 +5,7 @@
 
 import { useCallback } from "react";
 
-import type { ToastType } from "@/hooks/useToast";
+import type { ToastType } from "@/hooks/ui";
 
 import styles from "./Toast.module.css";
 
@@ -21,6 +21,8 @@ export interface ToastProps {
   type: ToastType;
   /** Callback when dismissed */
   onDismiss: (id: string) => void;
+  /** Callback for undo action */
+  onUndo?: () => void;
   /** Additional CSS class */
   className?: string;
 }
@@ -148,11 +150,17 @@ export function Toast({
   message,
   type,
   onDismiss,
+  onUndo,
   className,
 }: ToastProps): JSX.Element {
   const handleDismiss = useCallback(() => {
     onDismiss(id);
   }, [id, onDismiss]);
+
+  const handleUndo = useCallback(() => {
+    onUndo?.();
+    onDismiss(id);
+  }, [id, onDismiss, onUndo]);
 
   const rootClassName = [styles.toast, styles[type], className]
     .filter(Boolean)
@@ -169,6 +177,16 @@ export function Toast({
       <span className={styles.message} title={message}>
         {message}
       </span>
+      {onUndo && (
+        <button
+          type="button"
+          className={styles.undoButton}
+          onClick={handleUndo}
+          aria-label="Undo action"
+        >
+          Undo
+        </button>
+      )}
       <button
         type="button"
         className={styles.dismissButton}

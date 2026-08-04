@@ -33,6 +33,11 @@ func (p *ProtectedPool) Put(client *rpc.Client) {
 	p.pool.Put(client)
 }
 
+// PutAfterError validates a connection before deciding to return it or discard it.
+func (p *ProtectedPool) PutAfterError(client *rpc.Client) {
+	p.pool.PutAfterError(client)
+}
+
 // Discard closes a connection without returning it to the pool.
 // Use this instead of Put when the connection is known to be in a bad state.
 func (p *ProtectedPool) Discard(client *rpc.Client) {
@@ -69,25 +74,36 @@ func (p *ProtectedPool) SocketPath() string {
 	return p.pool.SocketPath()
 }
 
+// ResetBreaker manually resets the circuit breaker to closed state.
+// Use this after a daemon restart to allow requests to flow again immediately.
+func (p *ProtectedPool) ResetBreaker() {
+	p.breaker.Reset()
+}
+
 // DaemonShouldTrip classifies daemon errors for the circuit breaker.
 // Transport/availability errors trip the breaker; application errors do not.
+// ErrPoolExhausted does NOT trip — it indicates the daemon is alive but
+// overloaded (semaphore full), not that it is unreachable.
 func DaemonShouldTrip(err error) bool {
 	if err == nil {
+		return false
+	}
+	// Daemon starting is a known transient state, not a failure — don't trip.
+	if errors.Is(err, ErrDaemonStarting) {
 		return false
 	}
 	// Trip on daemon availability errors
 	if errors.Is(err, ErrDaemonNotRunning) ||
 		errors.Is(err, ErrConnectionTimeout) ||
-		errors.Is(err, ErrDaemonUnhealthy) ||
-		errors.Is(err, ErrPoolExhausted) {
+		errors.Is(err, ErrDaemonUnhealthy) {
 		return true
 	}
 	// Don't trip on client-side cancellation
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false
 	}
-	// Don't trip on pool lifecycle errors
-	if errors.Is(err, ErrPoolClosed) || errors.Is(err, ErrInvalidSocketPath) {
+	// Don't trip on pool lifecycle or overload errors
+	if errors.Is(err, ErrPoolClosed) || errors.Is(err, ErrInvalidSocketPath) || errors.Is(err, ErrPoolExhausted) {
 		return false
 	}
 	return false

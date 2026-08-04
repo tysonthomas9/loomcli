@@ -1,5 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
+import { setupFleetMocks } from './helpers/fleet';
+
 const mockAgents = [
   {
     name: 'ember',
@@ -55,53 +57,23 @@ const mockStatus = {
 };
 
 async function setupBaseMocks(page: Page): Promise<void> {
-  await page.route('**/api/ready', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ success: true, data: [] }),
-    });
-  });
+  await setupFleetMocks(page, []);
 
-  await page.route('**/api/blocked', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ success: true, data: [] }),
-    });
-  });
-
-  await page.route('**/api/issues/graph', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ success: true, issues: [] }),
-    });
-  });
-
-  await page.route('**/api/stats', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        success: true,
-        data: { open: 1, closed: 5, total: 6, completion: 83 },
-      }),
-    });
-  });
-
-  await page.route('**/api/events', async (route) => {
-    await route.abort();
-  });
-
-  await page.route('**/api/loom/api/status', async (route) => {
+  await page.route('**/api/workspaces/*/monitor/status**', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify(mockStatus),
     });
   });
-  await page.route('**/localhost:9000/api/status', async (route) => {
+  await page.route('**/api/monitor/status**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(mockStatus),
+    });
+  });
+  await page.route('**/localhost:9000/api/status**', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -109,14 +81,14 @@ async function setupBaseMocks(page: Page): Promise<void> {
     });
   });
 
-  await page.route('**/api/loom/api/agents', async (route) => {
+  await page.route('**/api/monitor/agents**', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({ agents: mockAgents }),
     });
   });
-  await page.route('**/localhost:9000/api/agents', async (route) => {
+  await page.route('**/localhost:9000/api/agents**', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -124,7 +96,7 @@ async function setupBaseMocks(page: Page): Promise<void> {
     });
   });
 
-  await page.route('**/api/loom/api/tasks', async (route) => {
+  await page.route('**/api/monitor/tasks**', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -137,7 +109,7 @@ async function setupBaseMocks(page: Page): Promise<void> {
       }),
     });
   });
-  await page.route('**/localhost:9000/api/tasks', async (route) => {
+  await page.route('**/localhost:9000/api/tasks**', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -153,8 +125,8 @@ async function setupBaseMocks(page: Page): Promise<void> {
 }
 
 async function openEmberLogs(page: Page): Promise<void> {
-  await page.goto('/');
-  const emberAgent = page.getByRole('button', { name: 'Agent: ember' });
+  await page.goto('/ws/default/monitor');
+  const emberAgent = page.getByRole('button', { name: 'Agent: ember' }).first();
   await expect(emberAgent).toBeVisible({ timeout: 10000 });
   await emberAgent.click();
 
@@ -176,7 +148,7 @@ test.describe('Agent Logs Terminal Transport UI', () => {
 
   test('archive mode renders with refresh control', async ({ page }) => {
     await setupBaseMocks(page);
-    await page.route('**/api/agents/ember/terminal/info', async (route) => {
+    await page.route('**/api/workspaces/default/agents/ember/terminal/info', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -186,7 +158,7 @@ test.describe('Agent Logs Terminal Transport UI', () => {
         }),
       });
     });
-    await page.route('**/api/agents/ember/logs**', async (route) => {
+    await page.route('**/api/workspaces/default/agents/ember/logs**', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -205,11 +177,10 @@ test.describe('Agent Logs Terminal Transport UI', () => {
     await expect(panel.locator('[data-testid="log-viewer"] [data-state="connected"]')).toBeVisible();
   });
 
-  test('archive refresh triggers another archive fetch', async ({ page }) => {
+  test('archive mode log panel scrolls when the snapshot exceeds the viewport', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 });
     await setupBaseMocks(page);
-
-    let archiveRequests = 0;
-    await page.route('**/api/agents/ember/terminal/info', async (route) => {
+    await page.route('**/api/workspaces/default/agents/ember/terminal/info', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -219,7 +190,50 @@ test.describe('Agent Logs Terminal Transport UI', () => {
         }),
       });
     });
-    await page.route('**/api/agents/ember/logs**', async (route) => {
+    await page.route('**/api/workspaces/default/agents/ember/logs**', async (route) => {
+      const lines = Array.from(
+        { length: 120 },
+        (_, index) => `line ${String(index + 1).padStart(3, '0')} ${'x'.repeat(80)}`,
+      );
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          data: { lines, line_count: lines.length },
+        }),
+      });
+    });
+
+    await openEmberLogs(page);
+
+    const logPanel = page.locator('#agent-panel-tabpanel-logs');
+    await expect(logPanel).toBeVisible();
+    await expect
+      .poll(() => logPanel.evaluate((element) => element.scrollHeight - element.clientHeight))
+      .toBeGreaterThan(100);
+
+    await logPanel.hover();
+    await page.mouse.wheel(0, 900);
+
+    await expect.poll(() => logPanel.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  });
+
+  test('archive refresh triggers another archive fetch', async ({ page }) => {
+    await setupBaseMocks(page);
+
+    let archiveRequests = 0;
+    await page.route('**/api/workspaces/default/agents/ember/terminal/info', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          data: { agent: 'ember', mode: 'archive' },
+        }),
+      });
+    });
+    await page.route('**/api/workspaces/default/agents/ember/logs**', async (route) => {
       archiveRequests++;
       await route.fulfill({
         status: 200,
@@ -241,7 +255,7 @@ test.describe('Agent Logs Terminal Transport UI', () => {
     await setupBaseMocks(page);
 
     let tokenRequests = 0;
-    await page.route('**/api/agents/ember/terminal/info', async (route) => {
+    await page.route('**/api/workspaces/default/agents/ember/terminal/info', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -251,7 +265,7 @@ test.describe('Agent Logs Terminal Transport UI', () => {
         }),
       });
     });
-    await page.route('**/api/agents/ember/terminal/token', async (route) => {
+    await page.route('**/api/workspaces/default/agents/ember/terminal/token', async (route) => {
       tokenRequests++;
       await route.fulfill({
         status: 200,
@@ -271,7 +285,7 @@ test.describe('Agent Logs Terminal Transport UI', () => {
 
   test('archive mode handles null log payload without UI crash', async ({ page }) => {
     await setupBaseMocks(page);
-    await page.route('**/api/agents/ember/terminal/info', async (route) => {
+    await page.route('**/api/workspaces/default/agents/ember/terminal/info', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -281,7 +295,7 @@ test.describe('Agent Logs Terminal Transport UI', () => {
         }),
       });
     });
-    await page.route('**/api/agents/ember/logs**', async (route) => {
+    await page.route('**/api/workspaces/default/agents/ember/logs**', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',

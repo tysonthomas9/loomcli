@@ -1,5 +1,5 @@
 /**
- * Color constants for the beads-web-ui frontend.
+ * Color constants for the loom web UI frontend.
  *
  * These constants mirror the CSS custom properties defined in variables.css
  * and provide TypeScript-accessible color values for use in JavaScript/React

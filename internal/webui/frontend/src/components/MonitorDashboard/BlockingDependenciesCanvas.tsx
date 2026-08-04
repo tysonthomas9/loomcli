@@ -9,12 +9,9 @@ import { ReactFlow, Controls, type NodeMouseHandler } from "@xyflow/react";
 import { useMemo, useCallback } from "react";
 
 import "@xyflow/react/dist/style.css";
-import {
-  useAutoLayout,
-  type UseAutoLayoutOptions,
-} from "@/hooks/useAutoLayout";
-import { useBlockedIssues } from "@/hooks/useBlockedIssues";
-import { useGraphData, type UseGraphDataOptions } from "@/hooks/useGraphData";
+import { useAutoLayout, type UseAutoLayoutOptions } from "@/hooks/ui";
+import { useGraphData, type UseGraphDataOptions } from "@/hooks/ui";
+import { useBlockedIssues } from "@/hooks/issues";
 import type {
   Issue,
   IssueNode as IssueNodeType,
@@ -68,7 +65,9 @@ export function BlockingDependenciesCanvas({
   className,
 }: BlockingDependenciesCanvasProps): JSX.Element {
   // Fetch blocked issues for status calculation
-  const { data: blockedIssues } = useBlockedIssues({ enabled: true });
+  const { data: blockedIssues } = useBlockedIssues({
+    enabled: true,
+  });
 
   const blockedIssueIds = useMemo(() => {
     if (!blockedIssues) return new Set<string>();

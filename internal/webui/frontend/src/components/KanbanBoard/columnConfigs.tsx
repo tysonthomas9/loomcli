@@ -6,11 +6,12 @@
  * - Open: Open issues with no blockers (can be started immediately)
  * - Blocked: Issues blocked by dependencies or explicit 'blocked' status
  * - In Progress: Issues actively being worked on
- * - Needs Review: Issues needing human attention (status=review)
+ * - Review: Issues needing human attention (status=review)
  * - Done: Closed issues
  */
 
 import type { KanbanColumnConfig } from "./types";
+import type { BlockedInfo, Issue } from "@/types";
 
 const ClockIcon = (
   <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -33,6 +34,27 @@ const ClockIcon = (
   </svg>
 );
 
+function isDeferredIssue(issue: Issue): boolean {
+  return issue.is_deferred === true || issue.status === "deferred";
+}
+
+function isBlockedIssue(issue: Issue, blockedInfo?: BlockedInfo): boolean {
+  return (
+    issue.is_blocked === true ||
+    issue.status === "blocked" ||
+    (blockedInfo?.blockedByCount ?? 0) > 0
+  );
+}
+
+function isOpenColumnIssue(issue: Issue, blockedInfo?: BlockedInfo): boolean {
+  const hasOpenStatus = issue.status === "open" || issue.status === undefined;
+  return (
+    hasOpenStatus &&
+    !isDeferredIssue(issue) &&
+    !isBlockedIssue(issue, blockedInfo)
+  );
+}
+
 /**
  * Default kanban columns for multi-agent workflows.
  * Order matters: filter functions are evaluated in order, issue belongs to first match.
@@ -46,8 +68,7 @@ export function createColumns(options?: {
       id: "backlog",
       label: "Backlog",
       filter: (issue) =>
-        (includeEpics || issue.issue_type !== "epic") &&
-        issue.status === "deferred",
+        (includeEpics || issue.issue_type !== "epic") && isDeferredIssue(issue),
       droppableDisabled: true, // Cannot drop TO backlog (auto-calculated)
       allowedDropTargets: ["done"], // Can only drag FROM backlog to Done
       style: "muted",
@@ -58,8 +79,7 @@ export function createColumns(options?: {
       headerIcon: ClockIcon,
       filter: (issue, blockedInfo) =>
         (includeEpics || issue.issue_type !== "epic") &&
-        (issue.status === "open" || issue.status === undefined) &&
-        (!blockedInfo || blockedInfo.blockedByCount === 0),
+        isOpenColumnIssue(issue, blockedInfo),
       targetStatus: "open",
       allowedDropTargets: ["ready", "in_progress", "review", "done"],
       style: "normal",
@@ -69,10 +89,8 @@ export function createColumns(options?: {
       label: "Blocked",
       filter: (issue, blockedInfo) =>
         (includeEpics || issue.issue_type !== "epic") &&
-        (((issue.status === "open" || issue.status === undefined) &&
-          !!blockedInfo &&
-          blockedInfo.blockedByCount > 0) ||
-          issue.status === "blocked"),
+        !isDeferredIssue(issue) &&
+        isBlockedIssue(issue, blockedInfo),
       droppableDisabled: true, // Cannot drop TO blocked (auto-calculated)
       allowedDropTargets: ["done"], // Can only drag FROM blocked to Done
       style: "muted",
@@ -89,7 +107,7 @@ export function createColumns(options?: {
     },
     {
       id: "review",
-      label: "Needs Review",
+      label: "Review",
       filter: (issue) =>
         (includeEpics || issue.issue_type !== "epic") &&
         issue.status === "review",

@@ -4,17 +4,44 @@
  * Follows the same slide-out pattern as IssueDetailPanel.
  */
 
-import { useEffect, useRef, useCallback, useState } from "react";
+import {
+  useEffect,
+  useRef,
+  useCallback,
+  useState,
+  lazy,
+  Suspense,
+} from "react";
 
-import { useAgentTerminalLogs } from "@/hooks";
+import { ErrorDisplay } from "@/components";
+import {
+  useFocusReturn,
+  useFocusTrap,
+  useRegisterEscapeLayer,
+  useWorkspaceContext,
+  useAgentDiffStat,
+  LAYER_AGENT_PANEL,
+} from "@/hooks";
 import type { LoomAgentStatus, LoomTaskInfo } from "@/types";
-import { parseLoomStatus } from "@/types";
+import { parseLoomStatus, resolveAgentByName } from "@/types";
 
-import { LogViewer } from "../LogViewer";
+const WorkspaceFileBrowser = lazy(() =>
+  import("@/components/FileExplorer").then((m) => ({
+    default: m.WorkspaceFileBrowser,
+  })),
+);
+
+const DiffTab = lazy(() =>
+  import("./DiffTab").then((m) => ({
+    default: m.DiffTab,
+  })),
+);
+
 import { OpenInEditor } from "../OpenInEditor";
+import { RepoBadge } from "../RepoBadge";
 import styles from "./AgentDetailPanel.module.css";
+import { AgentLogsTab } from "./AgentLogsTab";
 import { GitTab } from "./GitTab";
-import { useExpandedCommits } from "./useExpandedCommits";
 import {
   getAvatarColor,
   shouldUseWhiteText,
@@ -44,7 +71,7 @@ export interface AgentDetailPanelProps {
 /**
  * AgentDetailPanel displays detailed agent information in a slide-out panel.
  */
-type TabType = "info" | "logs" | "git";
+type TabType = "info" | "logs" | "git" | "diff" | "files";
 
 export function AgentDetailPanel({
   isOpen,
@@ -56,42 +83,15 @@ export function AgentDetailPanel({
 }: AgentDetailPanelProps): JSX.Element {
   const panelRef = useRef<HTMLElement>(null);
   const [activeTab, setActiveTab] = useState<TabType>("info");
-
-  const {
-    mode: logMode,
-    chunks: logChunks,
-    state: logConnectionState,
-    error: logError,
-    resetVersion: logResetVersion,
-    refresh: refreshLogs,
-    resize: resizeLogs,
-    sendInput: sendLogInput,
-    loadOlderLogs,
-    hasMoreLines,
-    isLoadingMore,
-  } = useAgentTerminalLogs({
-    agentName,
-    enabled: isOpen && activeTab === "logs" && agentName !== null,
-  });
+  const { getAgentByName } = useWorkspaceContext();
 
   // Reset to info tab when agent changes
   useEffect(() => {
     setActiveTab("info");
   }, [agentName]);
 
-  // Handle Escape key
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        onClose();
-      }
-    };
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onClose]);
+  // Handle Escape key via global shortcut layer system
+  useRegisterEscapeLayer(LAYER_AGENT_PANEL, onClose, isOpen);
 
   // Lock body scroll when open
   useEffect(() => {
@@ -105,21 +105,8 @@ export function AgentDetailPanel({
   }, [isOpen]);
 
   // Focus management
-  useEffect(() => {
-    if (isOpen && panelRef.current) {
-      const previouslyFocused = document.activeElement as HTMLElement | null;
-      panelRef.current.focus();
-      return () => {
-        if (
-          previouslyFocused &&
-          document.contains(previouslyFocused) &&
-          previouslyFocused.focus
-        ) {
-          previouslyFocused.focus();
-        }
-      };
-    }
-  }, [isOpen]);
+  useFocusReturn(isOpen, { focusTarget: panelRef });
+  useFocusTrap(panelRef, isOpen);
 
   const handleTaskClick = useCallback(
     (taskId: string) => {
@@ -128,21 +115,33 @@ export function AgentDetailPanel({
     [onTaskClick],
   );
 
-  const {
-    expandedCommits,
-    loadingCommits,
-    handleShowAll: handleShowAllCommits,
-    handleShowLess,
-  } = useExpandedCommits(agentName);
-
   // Find the agent from the array
-  const agent = agentName
-    ? agents.find((a) => a.name === agentName)
+  const monitorAgent = agentName
+    ? resolveAgentByName(agents, agentName)
     : undefined;
+  const workspaceAgent = agentName ? getAgentByName(agentName) : undefined;
+  const agent =
+    monitorAgent ??
+    (workspaceAgent
+      ? ({
+          name: workspaceAgent.name,
+          branch: workspaceAgent.name,
+          status: "idle",
+          repo: workspaceAgent.repos[0],
+          cross_repo: workspaceAgent.cross_repo,
+        } as LoomAgentStatus)
+      : undefined);
   const parsed = agent ? parseLoomStatus(agent.status) : undefined;
   const task = agentName ? agentTasks[agentName] : undefined;
   const currentTaskId = parsed?.taskId;
   const isActive = parsed?.type === "working" || parsed?.type === "planning";
+  const { data: diffStat } = useAgentDiffStat({
+    agentName: agent?.name ?? "",
+    enabled: isOpen && !!agent,
+    pollInterval: 60000,
+  });
+  const hasDiffStat =
+    diffStat !== null && (diffStat.added > 0 || diffStat.removed > 0);
 
   const rootClassName = [styles.overlay, isOpen && styles.open]
     .filter(Boolean)
@@ -216,14 +215,25 @@ export function AgentDetailPanel({
                 </button>
               </div>
 
-              {/* Metadata Bar (hide when branch matches agent name to avoid duplicate label) */}
-              {agent.branch && agent.branch !== agent.name && (
+              {(agent.branch && agent.branch !== agent.name) || hasDiffStat ? (
                 <div className={styles.metadataBar}>
-                  <span className={styles.metadataItem}>
-                    <span className={styles.branchName}>{agent.branch}</span>
-                  </span>
+                  {agent.branch && agent.branch !== agent.name && (
+                    <span className={styles.metadataItem}>
+                      <span className={styles.branchName}>{agent.branch}</span>
+                    </span>
+                  )}
+                  {hasDiffStat && diffStat && (
+                    <span
+                      className={styles.metadataItem}
+                      title={`${diffStat.added} lines added, ${diffStat.removed} lines removed`}
+                    >
+                      {diffStat.added > 0 && <span>+{diffStat.added}</span>}
+                      {diffStat.added > 0 && diffStat.removed > 0 && " "}
+                      {diffStat.removed > 0 && <span>-{diffStat.removed}</span>}
+                    </span>
+                  )}
                 </div>
-              )}
+              ) : null}
 
               {/* Tab Bar */}
               <div
@@ -244,6 +254,17 @@ export function AgentDetailPanel({
                 </button>
                 <button
                   type="button"
+                  className={`${styles.tab} ${activeTab === "git" ? styles.activeTab : ""}`}
+                  onClick={() => setActiveTab("git")}
+                  aria-selected={activeTab === "git"}
+                  role="tab"
+                  id="agent-panel-tab-git"
+                  aria-controls="agent-panel-tabpanel-git"
+                >
+                  Git
+                </button>
+                <button
+                  type="button"
                   className={`${styles.tab} ${activeTab === "logs" ? styles.activeTab : ""}`}
                   onClick={() => setActiveTab("logs")}
                   aria-selected={activeTab === "logs"}
@@ -255,14 +276,25 @@ export function AgentDetailPanel({
                 </button>
                 <button
                   type="button"
-                  className={`${styles.tab} ${activeTab === "git" ? styles.activeTab : ""}`}
-                  onClick={() => setActiveTab("git")}
-                  aria-selected={activeTab === "git"}
+                  className={`${styles.tab} ${activeTab === "diff" ? styles.activeTab : ""}`}
+                  onClick={() => setActiveTab("diff")}
+                  aria-selected={activeTab === "diff"}
                   role="tab"
-                  id="agent-panel-tab-git"
-                  aria-controls="agent-panel-tabpanel-git"
+                  id="agent-panel-tab-diff"
+                  aria-controls="agent-panel-tabpanel-diff"
                 >
-                  Git
+                  Diff
+                </button>
+                <button
+                  type="button"
+                  className={`${styles.tab} ${activeTab === "files" ? styles.activeTab : ""}`}
+                  onClick={() => setActiveTab("files")}
+                  aria-selected={activeTab === "files"}
+                  role="tab"
+                  id="agent-panel-tab-files"
+                  aria-controls="agent-panel-tabpanel-files"
+                >
+                  Files
                 </button>
               </div>
             </div>
@@ -276,6 +308,38 @@ export function AgentDetailPanel({
                 role="tabpanel"
                 aria-labelledby="agent-panel-tab-info"
               >
+                {/* Overview stat cards. Derived from the agent's live state —
+                    per-agent historical totals aren't exposed to this panel yet. */}
+                <div className={styles.section}>
+                  <h3 className={styles.sectionTitle}>Overview</h3>
+                  <div className={styles.statGrid}>
+                    <div className={styles.statCard}>
+                      <span className={styles.statValue} data-tone="success">
+                        {parsed.type === "done" ? 1 : 0}
+                      </span>
+                      <span className={styles.statLabel}>Completed</span>
+                    </div>
+                    <div className={styles.statCard}>
+                      <span className={styles.statValue} data-tone="warning">
+                        {isActive ? 1 : 0}
+                      </span>
+                      <span className={styles.statLabel}>In Progress</span>
+                    </div>
+                    <div className={styles.statCard}>
+                      <span className={styles.statValue} data-tone="danger">
+                        {parsed.type === "error" ? 1 : 0}
+                      </span>
+                      <span className={styles.statLabel}>Blocked</span>
+                    </div>
+                    <div className={styles.statCard}>
+                      <span className={styles.statValue} data-tone="info">
+                        {task && !isActive ? 1 : 0}
+                      </span>
+                      <span className={styles.statLabel}>Queued</span>
+                    </div>
+                  </div>
+                </div>
+
                 {/* Current Task Section */}
                 <div className={styles.section}>
                   <h3 className={styles.sectionTitle}>Current Task</h3>
@@ -303,110 +367,6 @@ export function AgentDetailPanel({
                   )}
                 </div>
 
-                {/* Commit Status Section */}
-                <div className={styles.section}>
-                  <h3 className={styles.sectionTitle}>Commit Status</h3>
-                  <div className={styles.commitRow}>
-                    {agent.ahead > 0 ? (
-                      <span className={styles.commitBadge} data-type="ahead">
-                        +{agent.ahead} ahead
-                      </span>
-                    ) : null}
-                    {agent.behind > 0 ? (
-                      <span className={styles.commitBadge} data-type="behind">
-                        -{agent.behind} behind
-                      </span>
-                    ) : null}
-                    {agent.ahead === 0 && agent.behind === 0 && (
-                      <span className={styles.commitBadge} data-type="synced">
-                        In sync
-                      </span>
-                    )}
-                  </div>
-                  {agent.commits && agent.commits.length > 0 && (
-                    <div className={styles.commitList}>
-                      {(expandedCommits ?? agent.commits).map((commit) => (
-                        <div key={commit.hash} className={styles.commitItem}>
-                          {commit.url ? (
-                            <a
-                              href={commit.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className={styles.commitHashLink}
-                            >
-                              {commit.hash}
-                            </a>
-                          ) : (
-                            <span className={styles.commitHash}>
-                              {commit.hash}
-                            </span>
-                          )}
-                          <span className={styles.commitMessage}>
-                            {commit.message}
-                          </span>
-                        </div>
-                      ))}
-                      {agent.commits &&
-                        agent.commits.length < agent.ahead &&
-                        !expandedCommits && (
-                          <button
-                            type="button"
-                            className={styles.showAllCommitsBtn}
-                            onClick={handleShowAllCommits}
-                            disabled={loadingCommits}
-                          >
-                            {loadingCommits
-                              ? "Loading..."
-                              : `Show all ${agent.ahead} commits`}
-                          </button>
-                        )}
-                      {expandedCommits && (
-                        <button
-                          type="button"
-                          className={styles.showAllCommitsBtn}
-                          onClick={handleShowLess}
-                        >
-                          Show less
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* Changes Section */}
-                <div className={styles.section}>
-                  <h3 className={styles.sectionTitle}>Changes</h3>
-                  {agent.changes && agent.changes.length > 0 ? (
-                    <div className={styles.changesList}>
-                      {agent.changes.map((change) => (
-                        <div key={change.path} className={styles.changeItem}>
-                          <span
-                            className={styles.changeStatus}
-                            data-status={change.status}
-                          >
-                            {change.status === "M"
-                              ? "M"
-                              : change.status === "A"
-                                ? "+"
-                                : change.status === "D"
-                                  ? "-"
-                                  : change.status === "??"
-                                    ? "?"
-                                    : change.status}
-                          </span>
-                          <span className={styles.changePath}>
-                            {change.path}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <span className={styles.emptyState}>
-                      Clean working tree
-                    </span>
-                  )}
-                </div>
-
                 {/* Agent Info Section */}
                 <div className={styles.section}>
                   <h3 className={styles.sectionTitle}>Agent Info</h3>
@@ -419,8 +379,21 @@ export function AgentDetailPanel({
                     )}
                     <dt>Branch</dt>
                     <dd>{agent.branch}</dd>
+                    {agent.repo && (
+                      <>
+                        <dt>Repos</dt>
+                        <dd className={styles.repoDetail}>
+                          <RepoBadge repoName={agent.repo} />
+                          {agent.cross_repo && (
+                            <span className={styles.crossRepoLabel}>
+                              All repos
+                            </span>
+                          )}
+                        </dd>
+                      </>
+                    )}
                     <dt>Status</dt>
-                    <dd>{agent.status}</dd>
+                    <dd>{getStatusLabel(parsed.type)}</dd>
                     {parsed.taskId && (
                       <>
                         <dt>Task ID</dt>
@@ -441,54 +414,7 @@ export function AgentDetailPanel({
                   )}
                 </div>
               </div>
-            ) : activeTab === "logs" ? (
-              /* Logs Tab */
-              <div
-                className={styles.logsContainer}
-                id="agent-panel-tabpanel-logs"
-                role="tabpanel"
-                aria-labelledby="agent-panel-tab-logs"
-              >
-                <div className={styles.logsMetaRow}>
-                  <span className={styles.logsModeBadge} data-mode={logMode}>
-                    {logMode === "tmux"
-                      ? "Live (tmux)"
-                      : logMode === "archive"
-                        ? "Archive snapshot"
-                        : logMode === "loading"
-                          ? "Loading logs..."
-                          : "Idle"}
-                  </span>
-                  {logMode === "archive" && (
-                    <button
-                      type="button"
-                      className={styles.logsRefreshButton}
-                      onClick={refreshLogs}
-                    >
-                      Refresh
-                    </button>
-                  )}
-                </div>
-                <LogViewer
-                  chunks={logChunks}
-                  connectionState={logConnectionState}
-                  error={logError}
-                  height="100%"
-                  autoScroll={logMode !== "tmux"}
-                  resetVersion={logResetVersion}
-                  mode={logMode === "tmux" ? "interactive" : "static"}
-                  onTerminalResize={resizeLogs}
-                  onScrollToTop={
-                    logMode === "archive" ? loadOlderLogs : undefined
-                  }
-                  isLoadingMore={isLoadingMore}
-                  hasMoreOlder={logMode === "archive" ? hasMoreLines : false}
-                  {...(logMode === "tmux"
-                    ? { onTerminalData: sendLogInput }
-                    : {})}
-                />
-              </div>
-            ) : (
+            ) : activeTab === "git" ? (
               /* Git Tab */
               <div
                 className={styles.scrollableContent}
@@ -498,14 +424,67 @@ export function AgentDetailPanel({
               >
                 <GitTab agent={agent} isActive={activeTab === "git"} />
               </div>
+            ) : activeTab === "logs" ? (
+              <div
+                className={styles.scrollableContent}
+                id="agent-panel-tabpanel-logs"
+                role="tabpanel"
+                aria-labelledby="agent-panel-tab-logs"
+              >
+                <AgentLogsTab
+                  agentName={agent.name}
+                  isActive={activeTab === "logs"}
+                />
+              </div>
+            ) : activeTab === "diff" ? (
+              /* Diff Tab */
+              <div
+                className={styles.scrollableContent}
+                id="agent-panel-tabpanel-diff"
+                role="tabpanel"
+                aria-labelledby="agent-panel-tab-diff"
+              >
+                <Suspense
+                  fallback={
+                    <div className={styles.loadingFallback}>
+                      Loading diff viewer...
+                    </div>
+                  }
+                >
+                  <DiffTab agent={agent} isActive={activeTab === "diff"} />
+                </Suspense>
+              </div>
+            ) : (
+              /* Files Tab */
+              <div
+                className={styles.filesContainer}
+                id="agent-panel-tabpanel-files"
+                role="tabpanel"
+                aria-labelledby="agent-panel-tab-files"
+              >
+                <Suspense
+                  fallback={
+                    <div className={styles.loadingFallback}>
+                      Loading editor...
+                    </div>
+                  }
+                >
+                  <WorkspaceFileBrowser
+                    mode="agent"
+                    agentName={agent.name}
+                    isActive={activeTab === "files"}
+                  />
+                </Suspense>
+              </div>
             )}
           </>
         ) : agentName ? (
           /* Agent not found state */
-          <div className={styles.notFound}>
-            <span className={styles.notFoundIcon}>?</span>
-            <span>Agent disconnected or not found</span>
-          </div>
+          <ErrorDisplay
+            variant="connection-error"
+            title="Agent disconnected"
+            description="This agent is no longer connected or could not be found."
+          />
         ) : null}
       </aside>
     </div>

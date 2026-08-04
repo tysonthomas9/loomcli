@@ -22,7 +22,8 @@ import { test, expect, Page } from "@playwright/test"
  */
 
 // SSE endpoint pattern
-const SSE_ENDPOINT = "**/api/events**"
+const SSE_ENDPOINT = "**/workspaces/*/events**"
+const WORKSPACE_ID = "default"
 
 /**
  * Shared mock issues with varied statuses, priorities, types, and assignees.
@@ -98,31 +99,67 @@ const mockIssues = [
  * Route registration order matters: Playwright matches LIFO (last registered wins).
  */
 async function setupMocks(page: Page, issues = mockIssues) {
-  await page.route("**/api/ready", async (route) => {
+  // Boot-time mocks: /api/config and /api/auth/token must succeed for app to render
+  await page.route("**/api/config", async (route) => {
+    const url = new URL(route.request().url())
+    if (url.pathname !== "/api/config") {
+      await route.fallback()
+      return
+    }
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ success: true, data: issues }),
+      body: JSON.stringify({ mode: "open" }),
     })
   })
 
-  await page.route("**/api/stats", async (route) => {
+  await page.route("**/api/auth/token", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
-        success: true,
-        data: {
-          total: issues.length,
-          open: issues.filter((i) => i.status === "open").length,
-          in_progress: issues.filter((i) => i.status === "in_progress").length,
-          closed: issues.filter((i) => i.status === "closed").length,
-        },
-      }),
+      body: JSON.stringify({ token: "test-token" }),
     })
   })
 
-  await page.route("**/api/blocked", async (route) => {
+  await page.route("**/api/health", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ status: "ok", daemon: true }),
+    })
+  })
+
+  // Monitor endpoints
+  await page.route("**/api/monitor/**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({}),
+    })
+  })
+
+  const wsData = {
+    id: "default",
+    name: "default",
+    path: "/tmp/ws",
+    repos: [],
+    groups: [],
+    agents: [],
+    workspaces: [
+      {
+        id: "default",
+        name: "default",
+        path: "/tmp/ws",
+        active: true,
+        repo_count: 0,
+        is_default: true,
+      },
+    ],
+    workspace_order: ["default"],
+    default_workspace: "default",
+  }
+
+  await page.route("**/api/workspaces/*/issues/*/events", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -130,101 +167,195 @@ async function setupMocks(page: Page, issues = mockIssues) {
     })
   })
 
-  // Mock GET/PATCH /api/issues/{id} — register BEFORE /api/issues/graph
-  // so that the graph route (registered after) takes LIFO priority
-  await page.route("**/api/issues/*", async (route) => {
-    const url = route.request().url()
-    const method = route.request().method()
+  // Workspace-scoped routes — single handler with URL dispatch (proven pattern from agents-sidebar)
+  await page.route(
+    (url) => url.toString().includes("/api/workspaces/") && !url.toString().includes("/events"),
+    async (route) => {
+      const url = route.request().url()
+      const method = route.request().method()
 
-    // Let graph requests fall through (handled by the more specific route below)
-    if (url.includes("/api/issues/graph")) {
-      // This shouldn't fire since /api/issues/graph route is registered after
-      // and takes LIFO priority. Fallback just in case.
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ success: true, data: issues }),
-      })
-      return
-    }
+      // Workspace resolution: /api/workspaces/active
+      if (url.includes("/api/workspaces/active")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ success: true, data: wsData }),
+        })
+        return
+      }
 
-    if (method === "GET") {
-      const idMatch = url.match(/\/api\/issues\/([^/?]+)/)
-      const id = idMatch ? idMatch[1] : null
-      const issue = issues.find((i) => i.id === id)
-      if (issue) {
+      // Ready (issues)
+      if (url.includes("/ready")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ success: true, data: issues }),
+        })
+        return
+      }
+
+      // Stats
+      if (url.includes("/stats")) {
         await route.fulfill({
           status: 200,
           contentType: "application/json",
           body: JSON.stringify({
-            success: true,
-            data: {
-              ...issue,
-              dependencies: [],
-              dependents: [],
-            },
+            total_issues: issues.length,
+            open_issues: issues.filter((i) => i.status === "open").length,
+            in_progress_issues: issues.filter((i) => i.status === "in_progress").length,
+            closed_issues: issues.filter((i) => i.status === "closed").length,
+            blocked_issues: 0,
+            deferred_issues: 0,
+            ready_issues: issues.filter((i) => i.status === "open").length,
+            tombstone_issues: 0,
+            pinned_issues: 0,
+            epics_eligible_for_closure: 0,
+            average_lead_time_hours: 0,
           }),
         })
-      } else {
-        await route.fulfill({
-          status: 404,
-          contentType: "application/json",
-          body: JSON.stringify({ success: false, error: "Not found" }),
-        })
+        return
       }
-    } else if (method === "PATCH") {
-      const body = route.request().postDataJSON() as { status?: string }
-      const idMatch = url.match(/\/api\/issues\/([^/?]+)/)
-      const id = idMatch ? idMatch[1] : null
-      const issue = issues.find((i) => i.id === id)
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          success: true,
-          data: {
-            ...(issue ?? mockIssues[0]),
-            ...body,
-            updated_at: new Date().toISOString(),
-          },
-        }),
-      })
-    } else {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ success: true }),
-      })
-    }
-  })
 
-  // Mock /api/issues/graph — registered AFTER /api/issues/* so it wins LIFO
-  await page.route("**/api/issues/graph", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ success: true, data: issues }),
-    })
-  })
+      // Blocked
+      if (url.includes("/blocked")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ success: true, data: [] }),
+        })
+        return
+      }
+
+      // Terminal sessions
+      if (url.includes("/terminal/sessions")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ success: true, data: {} }),
+        })
+        return
+      }
+
+      // Terminal tabs
+      if (url.includes("/terminal/tabs")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ success: true, data: [] }),
+        })
+        return
+      }
+
+      // Terminal state
+      if (url.includes("/terminal/state")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ active_tab: "" }),
+        })
+        return
+      }
+
+      // Issues graph
+      if (url.includes("/issues/graph")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ success: true, issues: [] }),
+        })
+        return
+      }
+
+      // Issues by ID (GET/PATCH)
+      if (url.includes("/issues/")) {
+        const idMatch = url.match(/\/issues\/([^/?]+)/)
+        const id = idMatch ? idMatch[1] : null
+
+        if (method === "GET") {
+          const issue = issues.find((i) => i.id === id)
+          if (issue) {
+            await route.fulfill({
+              status: 200,
+              contentType: "application/json",
+              body: JSON.stringify({
+                success: true,
+                data: { ...issue, dependencies: [], dependents: [], labels: [], comments: [] },
+              }),
+            })
+          } else {
+            await route.fulfill({
+              status: 404,
+              contentType: "application/json",
+              body: JSON.stringify({ success: false, error: "Not found" }),
+            })
+          }
+          return
+        }
+
+        if (method === "PATCH") {
+          const body = route.request().postDataJSON() as { status?: string }
+          const issue = issues.find((i) => i.id === id)
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({
+              success: true,
+              data: {
+                ...(issue ?? mockIssues[0]),
+                ...body,
+                updated_at: new Date().toISOString(),
+              },
+            }),
+          })
+          return
+        }
+      }
+
+      // Issues list
+      if (url.includes("/issues")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ success: true, data: issues }),
+        })
+        return
+      }
+
+      // Default workspace data
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true, data: wsData }),
+      })
+    },
+  )
 }
 
 /**
  * Navigate and wait for API data to load.
  */
 async function navigateAndWait(page: Page, path = "/") {
-  const [response] = await Promise.all([
-    page.waitForResponse(
-      (res) => res.url().includes("/api/ready") && res.status() === 200
-    ),
-    page.goto(path),
-  ])
-  expect(response.ok()).toBe(true)
+  const target =
+    path === "/"
+      ? `/ws/${WORKSPACE_ID}/kanban`
+      : path.startsWith("/?")
+        ? `/ws/${WORKSPACE_ID}/kanban${path.slice(1)}`
+        : path
+  await page.goto(target)
+  // Wait for the kanban board to render with issue data
+  await page.locator("h1").waitFor({ timeout: 15000 })
+  // Wait for issues to load in the board
+  await page.getByText("Open Task Alpha").waitFor({ timeout: 15000 })
 }
 
 test.describe("API data flows through to all views", () => {
   test.beforeEach(async ({ page }) => {
-    // Abort SSE to keep tests deterministic
+    // Abort SSE to keep tests deterministic (but let events/token through)
     await page.route(SSE_ENDPOINT, async (route) => {
+      if (route.request().url().includes("/events/token")) {
+        await route.fulfill({ status: 404, body: "Not Found" })
+        return
+      }
       await route.abort()
     })
     await setupMocks(page)
@@ -236,10 +367,10 @@ test.describe("API data flows through to all views", () => {
     await navigateAndWait(page, "/?groupBy=none")
 
     // Verify Kanban columns
-    const readyColumn = page.locator('section[data-status="ready"]')
-    const inProgressColumn = page.locator('section[data-status="in_progress"]')
-    const reviewColumn = page.locator('section[data-status="review"]')
-    const doneColumn = page.locator('section[data-status="done"]')
+    const readyColumn = page.locator('section[aria-label="Open issues"]')
+    const inProgressColumn = page.locator('section[aria-label="In Progress issues"]')
+    const reviewColumn = page.locator('section[aria-label="Review issues"]')
+    const doneColumn = page.locator('section[aria-label="Done issues"]')
 
     await expect(readyColumn).toBeVisible()
     await expect(inProgressColumn).toBeVisible()
@@ -247,22 +378,22 @@ test.describe("API data flows through to all views", () => {
     await expect(doneColumn).toBeVisible()
 
     // Verify issues in correct columns
-    await expect(readyColumn.locator("article")).toHaveCount(3)
+    await expect(readyColumn.getByRole("list").locator("> [role='button']")).toHaveCount(3)
     await expect(readyColumn.getByText("Open Task Alpha")).toBeVisible()
     await expect(readyColumn.getByText("Open Bug Beta")).toBeVisible()
     await expect(readyColumn.getByText("Open Feature Epsilon")).toBeVisible()
 
-    await expect(inProgressColumn.locator("article")).toHaveCount(1)
+    await expect(inProgressColumn.getByRole("list").locator("> [role='button']")).toHaveCount(1)
     await expect(inProgressColumn.getByText("In Progress Feature")).toBeVisible()
 
-    await expect(reviewColumn.locator("article")).toHaveCount(1)
+    await expect(reviewColumn.getByRole("list").locator("> [role='button']")).toHaveCount(1)
     await expect(reviewColumn.getByText("Review Task Gamma")).toBeVisible()
 
-    await expect(doneColumn.locator("article")).toHaveCount(1)
+    await expect(doneColumn.getByRole("list").locator("> [role='button']")).toHaveCount(1)
     await expect(doneColumn.getByText("Closed Chore Delta")).toBeVisible()
 
     // Switch to Table view
-    const tableTab = page.getByTestId("view-tab-table")
+    const tableTab = page.getByRole("tab", { name: "List" })
     await tableTab.click()
 
     const issueTable = page.getByTestId("issue-table")
@@ -287,20 +418,20 @@ test.describe("API data flows through to all views", () => {
     await priorityFilter.selectOption("1")
 
     // Verify Kanban shows only P1 issues
-    const readyColumn = page.locator('section[data-status="ready"]')
-    const inProgressColumn = page.locator('section[data-status="in_progress"]')
+    const readyColumn = page.locator('section[aria-label="Open issues"]')
+    const inProgressColumn = page.locator('section[aria-label="In Progress issues"]')
 
     await expect(readyColumn.getByText("Open Task Alpha")).toBeVisible()
-    await expect(readyColumn.locator("article")).toHaveCount(1)
+    await expect(readyColumn.getByRole("list").locator("> [role='button']")).toHaveCount(1)
     await expect(inProgressColumn.getByText("In Progress Feature")).toBeVisible()
-    await expect(inProgressColumn.locator("article")).toHaveCount(1)
+    await expect(inProgressColumn.getByRole("list").locator("> [role='button']")).toHaveCount(1)
 
     // P2/P3/P0 issues should not be visible
     await expect(readyColumn.getByText("Open Bug Beta")).not.toBeVisible()
     await expect(readyColumn.getByText("Open Feature Epsilon")).not.toBeVisible()
 
     // Switch to Table view
-    const tableTab = page.getByTestId("view-tab-table")
+    const tableTab = page.getByRole("tab", { name: "List" })
     await tableTab.click()
 
     const issueTable = page.getByTestId("issue-table")
@@ -337,12 +468,12 @@ test.describe("View switching preserves state", () => {
     await page.waitForTimeout(350) // debounce
 
     // Verify filter applied in kanban
-    const readyColumn = page.locator('section[data-status="ready"]')
+    const readyColumn = page.locator('section[aria-label="Open issues"]')
     await expect(readyColumn.getByText("Open Task Alpha")).toBeVisible()
-    await expect(readyColumn.locator("article")).toHaveCount(1)
+    await expect(readyColumn.getByRole("list").locator("> [role='button']")).toHaveCount(1)
 
     // Switch to Table view
-    const tableTab = page.getByTestId("view-tab-table")
+    const tableTab = page.getByRole("tab", { name: "List" })
     await tableTab.click()
 
     const issueTable = page.getByTestId("issue-table")
@@ -358,14 +489,14 @@ test.describe("View switching preserves state", () => {
     await expect(issueTable.getByText("In Progress Feature")).not.toBeVisible()
 
     // Switch back to Kanban
-    const kanbanTab = page.getByTestId("view-tab-kanban")
+    const kanbanTab = page.getByRole("tab", { name: "Kanban" })
     await kanbanTab.click()
 
     // Verify filter still applied
     await expect(priorityFilter).toHaveValue("1")
     await expect(searchInput).toHaveValue("Alpha")
     await expect(readyColumn.getByText("Open Task Alpha")).toBeVisible()
-    await expect(readyColumn.locator("article")).toHaveCount(1)
+    await expect(readyColumn.getByRole("list").locator("> [role='button']")).toHaveCount(1)
   })
 
   test("drag-drop status change in kanban persists in table view", async ({
@@ -373,12 +504,12 @@ test.describe("View switching preserves state", () => {
   }) => {
     await navigateAndWait(page, "/?groupBy=none")
 
-    const readyColumn = page.locator('section[data-status="ready"]')
-    const reviewColumn = page.locator('section[data-status="review"]')
+    const readyColumn = page.locator('section[aria-label="Open issues"]')
+    const reviewColumn = page.locator('section[aria-label="Review issues"]')
 
     // Verify initial state
     await expect(readyColumn.getByText("Open Bug Beta")).toBeVisible()
-    await expect(reviewColumn.locator("article")).toHaveCount(1)
+    await expect(reviewColumn.getByRole("list").locator("> [role='button']")).toHaveCount(1)
 
     // Drag Open Bug Beta from Ready to Review (avoids AssigneePrompt)
     const draggable = page
@@ -448,17 +579,17 @@ test.describe("View switching preserves state", () => {
     // Wait for the PATCH to complete
     await page.waitForResponse(
       (res) =>
-        res.url().includes("/api/issues/asm-open-2") &&
+        res.url().includes("/issues/asm-open-2") &&
         res.request().method() === "PATCH"
     )
 
     // Verify card moved to Review in kanban
     await expect(reviewColumn.getByText("Open Bug Beta")).toBeVisible()
-    await expect(reviewColumn.locator("article")).toHaveCount(2)
+    await expect(reviewColumn.getByRole("list").locator("> [role='button']")).toHaveCount(2)
 
-    // Switch to Table view
-    const tableTab = page.getByTestId("view-tab-table")
-    await tableTab.click()
+    // Switch to Table view. Use route navigation here because the synthetic
+    // pointer drag can leave the next click focused without activating the tab.
+    await page.goto(`/ws/${WORKSPACE_ID}/table`)
 
     const issueTable = page.getByTestId("issue-table")
     await expect(issueTable).toBeVisible()
@@ -477,14 +608,12 @@ test.describe("View switching preserves state", () => {
     // Set up response waiter before clicking
     const responsePromise = page.waitForResponse(
       (res) =>
-        res.url().includes("/api/issues/asm-open-1") &&
+        res.url().includes("/issues/asm-open-1") &&
         res.request().method() === "GET"
     )
 
     // Click an issue in kanban view to open detail panel
-    const kanbanCard = page
-      .locator("article")
-      .filter({ hasText: "Open Task Alpha" })
+    const kanbanCard = page.getByRole("button", { name: "Issue: Open Task Alpha" }).first()
     await kanbanCard.click()
 
     // Wait for API call to complete
@@ -500,7 +629,7 @@ test.describe("View switching preserves state", () => {
     await expect(overlay).toHaveAttribute("aria-hidden", "true")
 
     // Switch to Table view
-    const tableTab = page.getByTestId("view-tab-table")
+    const tableTab = page.getByRole("tab", { name: "List" })
     await tableTab.click()
 
     const issueTable = page.getByTestId("issue-table")
@@ -509,7 +638,7 @@ test.describe("View switching preserves state", () => {
     // Set up response waiter before clicking table row
     const tableResponsePromise = page.waitForResponse(
       (res) =>
-        res.url().includes("/api/issues/asm-ip-1") &&
+        res.url().includes("/issues/asm-ip-1") &&
         res.request().method() === "GET"
     )
 

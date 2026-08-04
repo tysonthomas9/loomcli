@@ -1,0 +1,74 @@
+/**
+ * CommentsSection component styles.
+ */
+
+/* Section container - matches IssueDetailPanel section style */
+.section {
+  margin-bottom: 28px;
+}
+
+.sectionTitle {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  margin: 0 0 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* Comment list (no bullets) */
+.commentList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* Individual comment item */
+.commentItem {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.commentItem:last-child {
+  border-bottom: none;
+}
+
+/* Top row: avatar + author + timestamp */
+.commentHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.commentAuthor {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--color-text);
+  flex: 1;
+  min-width: 0;
+}
+
+.commentTime {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+/* Comment body with markdown */
+.commentBody {
+  font-size: var(--font-size-base);
+  color: var(--color-text-secondary);
+  line-height: 1.55;
+  word-break: break-word;
+  padding-left: 36px;
+}
+
+/* Empty state */
+.emptyState {
+  font-size: var(--font-size-base);
+  color: var(--color-text-muted);
+  margin: 0;
+  text-align: center;
+  padding: 12px 0;
+}

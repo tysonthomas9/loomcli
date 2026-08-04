@@ -1,4 +1,9 @@
-import { test, expect } from "@playwright/test"
+import { test, expect, type Page } from "@playwright/test"
+import {
+  setupFleetMocks,
+  waitForWorkspaceIssues,
+  workspacePath,
+} from "./helpers/fleet"
 
 /**
  * E2E tests for the Kanban Column Redesign (6-column layout).
@@ -24,64 +29,28 @@ function makeIssue(overrides: Record<string, unknown>) {
   }
 }
 
-/**
- * Set up common API route mocks.
- */
 async function setupMocks(
-  page: import("@playwright/test").Page,
+  page: Page,
   options: {
     issues: Record<string, unknown>[]
     blockedIssues?: Record<string, unknown>[]
   }
 ) {
-  await page.route("**/api/ready", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ success: true, data: options.issues }),
-    })
-  })
-
-  await page.route("**/api/blocked", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        success: true,
-        data: options.blockedIssues ?? [],
-      }),
-    })
-  })
-
-  await page.route("**/api/stats", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        success: true,
-        data: { open: 0, closed: 0, in_progress: 0, blocked: 0, total: 0 },
-      }),
-    })
-  })
-
-  await page.route("**/api/events", async (route) => {
-    await route.abort()
+  await setupFleetMocks(page, options.issues, undefined, {
+    blockedIssues: options.blockedIssues,
   })
 }
 
-/** Navigate to flat kanban view (groupBy=none) and wait for /api/ready */
-async function navigateToKanban(page: import("@playwright/test").Page) {
+async function navigateToKanban(page: Page) {
   const [response] = await Promise.all([
-    page.waitForResponse(
-      (res) => res.url().includes("/api/ready") && res.status() === 200
-    ),
-    page.goto("/?groupBy=none"),
+    waitForWorkspaceIssues(page),
+    page.goto(workspacePath("/?groupBy=none")),
   ])
   expect(response.ok()).toBe(true)
 }
 
 test.describe("Column Redesign: 6-column layout", () => {
-  test("renders 6 columns in order: Backlog, Open, Blocked, In Progress, Needs Review, Done", async ({
+  test("renders 6 columns in order: Backlog, Open, Blocked, In Progress, Review, Done", async ({
     page,
   }) => {
     const issues = [
@@ -137,7 +106,7 @@ test.describe("Column Redesign: 6-column layout", () => {
     await expect(openColumn.locator("h2")).toHaveText("Open")
     await expect(blockedColumn.locator("h2")).toHaveText("Blocked")
     await expect(inProgressColumn.locator("h2")).toHaveText("In Progress")
-    await expect(reviewColumn.locator("h2")).toHaveText("Needs Review")
+    await expect(reviewColumn.locator("h2")).toHaveText("Review")
     await expect(doneColumn.locator("h2")).toHaveText("Done")
   })
 
@@ -174,7 +143,7 @@ test.describe("Column Redesign: 6-column layout", () => {
     const openIcon = openColumn.locator("header svg[aria-hidden='true']").first()
     await expect(openIcon).toBeVisible()
 
-    // Backlog, Blocked, In Progress, Needs Review, Done headers should NOT have SVG icons
+    // Backlog, Blocked, In Progress, Review, Done headers should NOT have SVG icons
     const backlogColumn = page.locator('section[data-status="backlog"]')
     await expect(
       backlogColumn.locator("header svg[aria-hidden='true']")
@@ -237,7 +206,7 @@ test.describe("Column Redesign: issue distribution across all columns", () => {
       makeIssue({
         id: "review-1",
         title: "[Need Review] Review Task",
-        status: "open",
+        status: "review",
       }),
       // status=review → Needs Review
       makeIssue({
@@ -284,7 +253,7 @@ test.describe("Column Redesign: issue distribution across all columns", () => {
     await expect(inProgressColumn.locator("article")).toHaveCount(1)
     await expect(inProgressColumn.getByText("In Progress Task")).toBeVisible()
 
-    // Needs Review: 2 (title-based + status-based)
+    // Review: 2 (title-based + status-based)
     await expect(reviewColumn.locator("article")).toHaveCount(2)
     await expect(
       reviewColumn.getByText("[Need Review] Review Task")
@@ -348,7 +317,7 @@ test.describe("Column Redesign: issue distribution across all columns", () => {
     await expect(openColumn.locator("article")).toHaveCount(1)
     await expect(openColumn.getByText("Normal Task")).toBeVisible()
 
-    // Epics are excluded from Backlog, Open, Blocked, In Progress, Needs Review columns
+    // Epics are excluded from Backlog, Open, Blocked, In Progress, Review columns
     await expect(backlogColumn.locator("article")).toHaveCount(0)
     await expect(blockedColumn.locator("article")).toHaveCount(0)
     await expect(inProgressColumn.locator("article")).toHaveCount(0)
@@ -433,8 +402,8 @@ test.describe("Column Redesign: status badges and header accents", () => {
       makeIssue({ id: "ip-1", title: "IP 1", status: "in_progress" }),
       makeIssue({
         id: "rev-1",
-        title: "[Need Review] Rev 1",
-        status: "open",
+        title: "Rev 1",
+        status: "review",
       }),
       makeIssue({ id: "d-1", title: "Done 1", status: "closed" }),
       makeIssue({ id: "d-2", title: "Done 2", status: "closed" }),
@@ -459,7 +428,7 @@ test.describe("Column Redesign: status badges and header accents", () => {
     await expect(blockedColumn.getByLabel("1 issue")).toBeVisible()
     // In Progress: 1
     await expect(inProgressColumn.getByLabel("1 issue")).toBeVisible()
-    // Needs Review: 1 (title-based)
+    // Review: 1 (status=review)
     await expect(reviewColumn.getByLabel("1 issue")).toBeVisible()
     // Done: 3
     await expect(doneColumn.getByLabel("3 issues")).toBeVisible()
@@ -539,10 +508,8 @@ test.describe("Column Redesign: default group-by-epic view", () => {
     await setupMocks(page, { issues })
 
     const [response] = await Promise.all([
-      page.waitForResponse(
-        (res) => res.url().includes("/api/ready") && res.status() === 200
-      ),
-      page.goto("/?groupBy=epic"),
+      waitForWorkspaceIssues(page),
+      page.goto(workspacePath("/?groupBy=epic")),
     ])
     expect(response.ok()).toBe(true)
 
@@ -596,7 +563,7 @@ test.describe("Column Redesign: default group-by-epic view", () => {
       makeIssue({
         id: "e1-review",
         title: "[Need Review] Review Feature",
-        status: "open",
+        status: "review",
         parent: "epic-1",
         parent_title: "Test Epic",
       }),
@@ -612,10 +579,8 @@ test.describe("Column Redesign: default group-by-epic view", () => {
     await setupMocks(page, { issues })
 
     const [response] = await Promise.all([
-      page.waitForResponse(
-        (res) => res.url().includes("/api/ready") && res.status() === 200
-      ),
-      page.goto("/?groupBy=epic"),
+      waitForWorkspaceIssues(page),
+      page.goto(workspacePath("/?groupBy=epic")),
     ])
     expect(response.ok()).toBe(true)
     await expect(page.getByTestId("swim-lane-board")).toBeVisible()

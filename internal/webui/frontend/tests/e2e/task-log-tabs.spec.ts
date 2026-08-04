@@ -1,5 +1,7 @@
 import { test, expect, Page } from '@playwright/test'
 
+import { setupFleetMocks, workspaceApi } from './helpers/fleet'
+
 /**
  * E2E tests for IssueDetailPanel task log tabs using snapshot polling.
  */
@@ -30,15 +32,6 @@ const mockBugIssue = {
 
 const allMockIssues = [mockTaskIssue, mockBugIssue]
 
-function getMockIssueDetails(issue: (typeof allMockIssues)[0]) {
-  return {
-    ...issue,
-    dependencies: [],
-    dependents: [],
-    comments: [],
-  }
-}
-
 async function setupBaseMocks(
   page: Page,
   options?: {
@@ -49,6 +42,7 @@ async function setupBaseMocks(
   }
 ) {
   const phases = options?.phases ?? ['planning', 'implementation']
+  const api = workspaceApi()
 
   await page.route('**/api/auth/token', async (route) => {
     await route.fulfill({
@@ -58,89 +52,9 @@ async function setupBaseMocks(
     })
   })
 
-  await page.route('**/api/ready', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ success: true, data: allMockIssues }),
-    })
-  })
+  await setupFleetMocks(page, allMockIssues)
 
-  await page.route('**/api/blocked', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ success: true, data: [] }),
-    })
-  })
-
-  await page.route('**/api/issues/graph', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ success: true, issues: allMockIssues }),
-    })
-  })
-
-  await page.route(
-    (url) => url.pathname === '/api/issues',
-    async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ success: true, data: allMockIssues }),
-      })
-    }
-  )
-
-  await page.route('**/api/events', async (route) => {
-    await route.abort()
-  })
-
-  await page.route('**/api/stats', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        success: true,
-        data: { open: 2, closed: 0, total: 2, completion: 0 },
-      }),
-    })
-  })
-
-  await page.route('**/api/issues/*', async (route) => {
-    const request = route.request()
-    if (request.method() !== 'GET') {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ success: true }),
-      })
-      return
-    }
-
-    const url = request.url()
-    const idMatch = url.match(/\/api\/issues\/([^/?]+)/)
-    const id = idMatch ? idMatch[1] : null
-    const issue = allMockIssues.find((i) => i.id === id)
-
-    if (issue) {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ success: true, data: getMockIssueDetails(issue) }),
-      })
-      return
-    }
-
-    await route.fulfill({
-      status: 404,
-      contentType: 'application/json',
-      body: JSON.stringify({ success: false, error: 'Not found' }),
-    })
-  })
-
-  await page.route('**/api/loom/api/agents', async (route) => {
+  await page.route('**/api/monitor/agents', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -148,7 +62,7 @@ async function setupBaseMocks(
     })
   })
 
-  await page.route('**/api/loom/api/status', async (route) => {
+  await page.route('**/api/monitor/status', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -169,7 +83,7 @@ async function setupBaseMocks(
     })
   })
 
-  await page.route('**/api/loom/api/tasks', async (route) => {
+  await page.route('**/api/monitor/tasks', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -184,7 +98,7 @@ async function setupBaseMocks(
   })
 
   await page.route(
-    (url) => /^\/api\/tasks\/[^/]+\/logs$/.test(url.pathname),
+    (url) => url.pathname === `${api}/tasks/log-task-1/logs`,
     async (route) => {
       if (options?.phasesError) {
         await route.fulfill({
@@ -203,7 +117,7 @@ async function setupBaseMocks(
     }
   )
 
-  await page.route('**/api/tasks/log-task-1/logs/planning**', async (route) => {
+  await page.route(`**${api}/tasks/log-task-1/logs/planning**`, async (route) => {
     const status = options?.planningLogStatus ?? 200
     if (status !== 200) {
       await route.fulfill({
@@ -224,7 +138,7 @@ async function setupBaseMocks(
     })
   })
 
-  await page.route('**/api/tasks/log-task-1/logs/implementation**', async (route) => {
+  await page.route(`**${api}/tasks/log-task-1/logs/implementation**`, async (route) => {
     const status = options?.implementationLogStatus ?? 200
     if (status !== 200) {
       await route.fulfill({
@@ -247,7 +161,7 @@ async function setupBaseMocks(
 }
 
 async function navigateToApp(page: Page) {
-  await page.goto('/')
+  await page.goto('/ws/default/kanban')
   await expect(page.getByTestId('loading-container')).not.toBeVisible({ timeout: 5000 })
   await expect(page.locator('article').first()).toBeVisible({ timeout: 5000 })
 }
@@ -287,7 +201,7 @@ test.describe('Task Log Tabs', () => {
     let planningCalls = 0
     await setupBaseMocks(page)
 
-    await page.route('**/api/tasks/log-task-1/logs/planning**', async (route) => {
+    await page.route('**/api/workspaces/default/tasks/log-task-1/logs/planning**', async (route) => {
       planningCalls += 1
       await route.fulfill({
         status: 200,
@@ -317,7 +231,7 @@ test.describe('Task Log Tabs', () => {
 
     await setupBaseMocks(page)
 
-    await page.route('**/api/tasks/log-task-1/logs/planning**', async (route) => {
+    await page.route('**/api/workspaces/default/tasks/log-task-1/logs/planning**', async (route) => {
       planningCalls += 1
       await route.fulfill({
         status: 200,
@@ -329,7 +243,7 @@ test.describe('Task Log Tabs', () => {
       })
     })
 
-    await page.route('**/api/tasks/log-task-1/logs/implementation**', async (route) => {
+    await page.route('**/api/workspaces/default/tasks/log-task-1/logs/implementation**', async (route) => {
       implementationCalls += 1
       await route.fulfill({
         status: 200,

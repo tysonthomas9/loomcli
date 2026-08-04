@@ -17,7 +17,7 @@ func (m *mockIssueProvider) GetOpenIssues(ctx context.Context) ([]*Issue, error)
 
 func (m *mockIssueProvider) GetIssuePrefix() string {
 	if m.prefix == "" {
-		return "bd"
+		return "loom"
 	}
 	return m.prefix
 }
@@ -31,8 +31,8 @@ func TestIssueProvider_Interface(t *testing.T) {
 	// Test the mock implementation
 	provider := &mockIssueProvider{
 		issues: []*Issue{
-			{ID: "bd-1", Title: "Test 1", Status: StatusOpen},
-			{ID: "bd-2", Title: "Test 2", Status: StatusInProgress},
+			{ID: "loom-1", Title: "Test 1", Status: StatusOpen},
+			{ID: "loom-2", Title: "Test 2", Status: StatusInProgress},
 		},
 		prefix: "test",
 	}
@@ -57,9 +57,9 @@ func TestIssueProvider_DefaultPrefix(t *testing.T) {
 
 	provider := &mockIssueProvider{}
 
-	// Empty prefix should default to "bd"
-	if prefix := provider.GetIssuePrefix(); prefix != "bd" {
-		t.Errorf("GetIssuePrefix() = %q, want %q (default)", prefix, "bd")
+	// Empty prefix should default to "loom"
+	if prefix := provider.GetIssuePrefix(); prefix != "loom" {
+		t.Errorf("GetIssuePrefix() = %q, want %q (default)", prefix, "loom")
 	}
 }
 

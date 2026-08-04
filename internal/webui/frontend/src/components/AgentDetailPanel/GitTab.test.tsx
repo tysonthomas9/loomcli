@@ -12,7 +12,7 @@ import { render, screen, fireEvent, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 
-import type { GitStatus } from "@/api/git";
+import type { GitStatus } from "@/api/workspace";
 import type { LoomAgentStatus } from "@/types";
 
 import { GitTab } from "./GitTab";
@@ -27,13 +27,6 @@ let mockGitStatusReturn: {
 };
 
 const mockRefetch = vi.fn().mockResolvedValue(undefined);
-
-vi.mock("@/hooks/useGitStatus", () => ({
-  useGitStatus: (opts: { agentName: string | null; enabled: boolean }) => {
-    lastGitStatusOptions = opts;
-    return mockGitStatusReturn;
-  },
-}));
 
 // Mock useGitActions to provide a no-op actions object
 const mockActions = {
@@ -52,14 +45,25 @@ const mockActions = {
   anyLoading: false,
 };
 
-vi.mock("@/hooks/useGitActions", () => ({
-  useGitActions: () => mockActions,
-}));
+vi.mock("@/hooks/workspace", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/workspace")>(
+      "@/hooks/workspace",
+    );
+  return {
+    ...actual,
+    useGitStatus: (opts: { agentName: string | null; enabled: boolean }) => {
+      lastGitStatusOptions = opts;
+      return mockGitStatusReturn;
+    },
+    useGitActions: () => mockActions,
+  };
+});
 
 // Mock fetchDiffCommits to avoid real API calls
 let mockDiffCommitsResult: Promise<unknown>;
 
-vi.mock("@/api/diff", () => ({
+vi.mock("@/api/issues", () => ({
   fetchDiffCommits: () => mockDiffCommitsResult,
 }));
 
@@ -564,40 +568,14 @@ describe("GitTab", () => {
     });
   });
 
-  describe("working tree changes", () => {
-    it("renders agent changes", async () => {
-      mockGitStatusReturn = {
-        status: null,
-        loading: false,
-        error: null,
-      };
-
-      mockDiffCommitsResult = new Promise(() => {});
-
-      await renderGitTab(
-        makeAgent({
-          changes: [
-            { status: "M", path: "src/main.go" },
-            { status: "A", path: "src/new.go" },
-            { status: "D", path: "src/old.go" },
-            { status: "??", path: "src/untracked.go" },
-          ],
-        }),
-      );
-
-      expect(screen.getByText("src/main.go")).toBeInTheDocument();
-      expect(screen.getByText("src/new.go")).toBeInTheDocument();
-      expect(screen.getByText("src/old.go")).toBeInTheDocument();
-      expect(screen.getByText("src/untracked.go")).toBeInTheDocument();
-    });
-
-    it("shows 'Clean working tree' when no changes and no git changed files", async () => {
+  describe("create PR action", () => {
+    it("shows Create PR in the history header", async () => {
       mockGitStatusReturn = {
         status: {
           branch: "feature-x",
           target_branch: "main",
           is_clean: true,
-          ahead: 0,
+          ahead: 3,
           behind: 0,
           changed_files: [],
           conflicted_files: [],
@@ -608,32 +586,10 @@ describe("GitTab", () => {
         error: null,
       };
 
-      await renderGitTab(makeAgent({ changes: [] }));
+      await renderGitTab(makeAgent());
 
-      expect(screen.getByText("Clean working tree")).toBeInTheDocument();
-    });
-
-    it("falls back to git changed_files when agent.changes is empty", async () => {
-      mockGitStatusReturn = {
-        status: {
-          branch: "feature-x",
-          target_branch: "main",
-          is_clean: false,
-          ahead: 0,
-          behind: 0,
-          changed_files: ["src/fallback.go", "README.md"],
-          conflicted_files: [],
-          has_conflicts: false,
-          stash_count: 0,
-        },
-        loading: false,
-        error: null,
-      };
-
-      await renderGitTab(makeAgent({ changes: [] }));
-
-      expect(screen.getByText("src/fallback.go")).toBeInTheDocument();
-      expect(screen.getByText("README.md")).toBeInTheDocument();
+      expect(screen.getByText("Create PR")).toBeInTheDocument();
+      expect(screen.queryByText(/^Push/)).not.toBeInTheDocument();
     });
   });
 

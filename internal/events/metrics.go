@@ -81,6 +81,8 @@ func (ms *MetricsStore) handleEvent(e Event) {
 		ms.handleTaskCompleted(e)
 	case TaskFailed:
 		ms.handleTaskFailed(e)
+	case TaskStuck:
+		ms.handleTaskStuck(e)
 	case AgentStarted:
 		ms.handleAgentStarted(e)
 	case AgentStopped:
@@ -132,6 +134,17 @@ func (ms *MetricsStore) handleTaskFailed(e Event) {
 		TaskID:    data.TaskID,
 	})
 	ms.totalTasksFailed++
+}
+
+// handleTaskStuck is intentionally a no-op for totalTasksFailed / ms.tasks.
+// A task.stuck event is always preceded by the task.failed event that pushed
+// sameTaskFailures over the threshold — the underlying failure is already
+// recorded by handleTaskFailed, so double-counting here would inflate the
+// error rate. We still accept the event via the switch in handleEvent so
+// downstream listeners (web UI, replay, otelexport) can observe stuck
+// classifications separately.
+func (ms *MetricsStore) handleTaskStuck(e Event) {
+	_, _ = e.DecodeData()
 }
 
 func (ms *MetricsStore) handleAgentStarted(e Event) {

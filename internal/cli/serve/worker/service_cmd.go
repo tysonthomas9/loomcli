@@ -1,0 +1,466 @@
+package worker
+
+import (
+	"context"
+	"fmt"
+	"strconv"
+	"strings"
+
+	"github.com/spf13/cobra"
+
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
+	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/store"
+)
+
+var (
+	workerServiceAddName            string
+	workerServiceAddKind            string
+	workerServiceAddDesiredState    string
+	workerServiceAddRoleName        string
+	workerServiceAddProfileName     string
+	workerServiceAddScheduleID      string
+	workerServiceAddEventSources    []string
+	workerServiceAddTriggerRefs     []string
+	workerServiceAddPlacementPolicy string
+	workerServiceAddMaxInstances    int
+	workerServiceAddLeaseID         string
+	workerServiceAddRestartPolicy   string
+	workerServiceAddPermissions     []string
+	workerServiceAddBudgetPolicy    string
+	workerServiceAddStateRef        string
+	workerServiceAddMetadata        []string
+
+	workerServiceListKind         string
+	workerServiceListDesiredState string
+	workerServiceListRoleName     string
+	workerServiceListProfileName  string
+	workerServiceListLimit        int
+	workerServiceListJSON         bool
+	workerServiceShowJSON         bool
+)
+
+var workerServiceCmd = &cobra.Command{
+	Use:   "service",
+	Short: "Manage long-running agent services in the active workspace",
+}
+
+var workerServiceAddCmd = &cobra.Command{
+	Use:   "add <SERVICE_ID>",
+	Short: "Create an agent service",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runWorkerServiceAdd,
+}
+
+var workerServiceListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List agent services",
+	Args:  cobra.NoArgs,
+	RunE:  runWorkerServiceList,
+}
+
+var workerServiceShowCmd = &cobra.Command{
+	Use:   "show <SERVICE_ID>",
+	Short: "Show agent service details",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runWorkerServiceShow,
+}
+
+var workerServiceSetCmd = &cobra.Command{
+	Use:   "set <SERVICE_ID> <KEY> <VALUE>",
+	Short: "Set an agent service field",
+	Long: `Set an agent service field by key. Supported keys:
+  name              string
+  kind              lead|support|triage|on_call|scheduled|maintenance|orchestrator|always_on|cron|event|campaign_orchestrator
+  desired_state     running|stopped|paused
+  role_name         string
+  profile_name      string
+  schedule_id       string
+  placement_policy  string
+  max_instances     positive integer
+  lease_id          string
+  restart_policy    string
+  budget_policy     string
+  state_ref         string
+  event_sources     comma-separated list
+  trigger_refs      comma-separated list
+  permissions       comma-separated list
+  metadata          comma-separated key=value list`,
+	Args: cobra.ExactArgs(3),
+	RunE: runWorkerServiceSet,
+}
+
+var workerServiceUnsetCmd = &cobra.Command{
+	Use:   "unset <SERVICE_ID> <KEY>",
+	Short: "Clear an agent service field",
+	Long: `Clear an agent service field. Supported keys:
+  profile_name
+  schedule_id
+  placement_policy
+  lease_id
+  restart_policy
+  budget_policy
+  state_ref
+  event_sources
+  trigger_refs
+  permissions
+  metadata`,
+	Args: cobra.ExactArgs(2),
+	RunE: runWorkerServiceUnset,
+}
+
+var workerServiceRemoveCmd = &cobra.Command{
+	Use:   "remove <SERVICE_ID>",
+	Short: "Delete an agent service",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runWorkerServiceRemove,
+}
+
+func initWorkerServiceCommands() {
+	workerServiceAddCmd.Flags().StringVar(&workerServiceAddName, "name", "", "Display name (default: service ID)")
+	workerServiceAddCmd.Flags().StringVar(&workerServiceAddKind, "kind", "", "Service kind")
+	workerServiceAddCmd.Flags().StringVar(&workerServiceAddDesiredState, "desired-state", "", "Desired state running|stopped|paused (default: stopped)")
+	workerServiceAddCmd.Flags().StringVar(&workerServiceAddRoleName, "role", "", "Role name")
+	workerServiceAddCmd.Flags().StringVar(&workerServiceAddProfileName, "profile", "", "Worker profile name")
+	workerServiceAddCmd.Flags().StringVar(&workerServiceAddScheduleID, "schedule-id", "", "Schedule identifier")
+	workerServiceAddCmd.Flags().StringSliceVar(&workerServiceAddEventSources, "event-source", nil, "Event source (comma-separated or repeat flag)")
+	workerServiceAddCmd.Flags().StringSliceVar(&workerServiceAddTriggerRefs, "trigger-ref", nil, "Trigger binding reference (comma-separated or repeat flag)")
+	workerServiceAddCmd.Flags().StringVar(&workerServiceAddPlacementPolicy, "placement-policy", "", "Placement policy")
+	workerServiceAddCmd.Flags().IntVar(&workerServiceAddMaxInstances, "max-instances", 0, "Maximum instances (0 = default)")
+	workerServiceAddCmd.Flags().StringVar(&workerServiceAddLeaseID, "lease-id", "", "Service lease identifier")
+	workerServiceAddCmd.Flags().StringVar(&workerServiceAddRestartPolicy, "restart-policy", "", "Restart policy")
+	workerServiceAddCmd.Flags().StringSliceVar(&workerServiceAddPermissions, "permission", nil, "Permission (comma-separated or repeat flag)")
+	workerServiceAddCmd.Flags().StringVar(&workerServiceAddBudgetPolicy, "budget-policy", "", "Budget policy")
+	workerServiceAddCmd.Flags().StringVar(&workerServiceAddStateRef, "state-ref", "", "Persistent state reference")
+	workerServiceAddCmd.Flags().StringArrayVar(&workerServiceAddMetadata, "metadata", nil, "Metadata key=value (repeatable)")
+	_ = workerServiceAddCmd.MarkFlagRequired("kind")
+	_ = workerServiceAddCmd.MarkFlagRequired("role")
+
+	workerServiceListCmd.Flags().StringVar(&workerServiceListKind, "kind", "", "Filter by service kind")
+	workerServiceListCmd.Flags().StringVar(&workerServiceListDesiredState, "desired-state", "", "Filter by desired state")
+	workerServiceListCmd.Flags().StringVar(&workerServiceListRoleName, "role", "", "Filter by role name")
+	workerServiceListCmd.Flags().StringVar(&workerServiceListProfileName, "profile", "", "Filter by profile name")
+	workerServiceListCmd.Flags().IntVar(&workerServiceListLimit, "limit", 0, "Maximum rows")
+	workerServiceListCmd.Flags().BoolVar(&workerServiceListJSON, "json", false, "JSON output")
+	workerServiceShowCmd.Flags().BoolVar(&workerServiceShowJSON, "json", false, "JSON output")
+
+	workerServiceCmd.AddCommand(workerServiceAddCmd, workerServiceListCmd, workerServiceShowCmd, workerServiceSetCmd, workerServiceUnsetCmd, workerServiceRemoveCmd)
+	workerCmd.AddCommand(workerServiceCmd)
+}
+
+func runWorkerServiceAdd(_ *cobra.Command, args []string) error {
+	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+		metadata, err := parseWorkerProfileMetadata(workerServiceAddMetadata)
+		if err != nil {
+			return err
+		}
+		kind, err := parseAgentServiceKind(workerServiceAddKind)
+		if err != nil {
+			return err
+		}
+		desiredState, err := parseAgentServiceDesiredState(workerServiceAddDesiredState, true)
+		if err != nil {
+			return err
+		}
+		svc, err := h.Store.AgentServices().Create(ctx, store.AgentServiceCreate{
+			WorkspaceKey:    ws,
+			ServiceID:       args[0],
+			Name:            workerServiceAddName,
+			Kind:            kind,
+			DesiredState:    desiredState,
+			RoleName:        workerServiceAddRoleName,
+			ProfileName:     workerServiceAddProfileName,
+			ScheduleID:      workerServiceAddScheduleID,
+			EventSources:    workerServiceAddEventSources,
+			TriggerRefs:     workerServiceAddTriggerRefs,
+			PlacementPolicy: workerServiceAddPlacementPolicy,
+			MaxInstances:    workerServiceAddMaxInstances,
+			LeaseID:         workerServiceAddLeaseID,
+			RestartPolicy:   workerServiceAddRestartPolicy,
+			Permissions:     workerServiceAddPermissions,
+			BudgetPolicy:    workerServiceAddBudgetPolicy,
+			StateRef:        workerServiceAddStateRef,
+			Metadata:        metadata,
+		})
+		if err != nil {
+			return fmt.Errorf("create agent service: %w", err)
+		}
+		fmt.Printf("Created agent service %s/%s\n", svc.WorkspaceKey, svc.ServiceID)
+		return nil
+	})
+}
+
+func runWorkerServiceList(_ *cobra.Command, _ []string) error {
+	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+		desiredState, err := parseAgentServiceDesiredState(workerServiceListDesiredState, true)
+		if err != nil {
+			return err
+		}
+		var kind domain.AgentServiceKind
+		if strings.TrimSpace(workerServiceListKind) != "" {
+			kind, err = parseAgentServiceKind(workerServiceListKind)
+			if err != nil {
+				return err
+			}
+		}
+		services, err := h.Store.AgentServices().List(ctx, ws, store.AgentServiceFilter{
+			Kind:         kind,
+			DesiredState: desiredState,
+			RoleName:     workerServiceListRoleName,
+			ProfileName:  workerServiceListProfileName,
+			Limit:        workerServiceListLimit,
+		})
+		if err != nil {
+			return fmt.Errorf("list agent services: %w", err)
+		}
+		if workerServiceListJSON {
+			return cmdstore.WriteJSON(services)
+		}
+		if len(services) == 0 {
+			fmt.Printf("No agent services in workspace %s\n", ws)
+			return nil
+		}
+		for _, svc := range services {
+			fmt.Printf("%-24s %-14s %-10s %-14s %-14s %d\n", svc.ServiceID, svc.Kind, svc.DesiredState, svc.RoleName, svc.ProfileName, svc.MaxInstances)
+		}
+		return nil
+	})
+}
+
+func runWorkerServiceShow(_ *cobra.Command, args []string) error {
+	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+		svc, err := h.Store.AgentServices().Get(ctx, ws, args[0])
+		if err != nil {
+			return fmt.Errorf("get agent service: %w", err)
+		}
+		if workerServiceShowJSON {
+			return cmdstore.WriteJSON(svc)
+		}
+		printAgentService(svc)
+		return nil
+	})
+}
+
+func runWorkerServiceSet(_ *cobra.Command, args []string) error {
+	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+		serviceID, key, value := args[0], args[1], args[2]
+		patch, err := buildAgentServicePatch(key, value, false)
+		if err != nil {
+			return err
+		}
+		if _, err := h.Store.AgentServices().Update(ctx, ws, serviceID, patch); err != nil {
+			return fmt.Errorf("update agent service: %w", err)
+		}
+		fmt.Printf("Set %s/%s.%s = %s\n", ws, serviceID, key, value)
+		return nil
+	})
+}
+
+func runWorkerServiceUnset(_ *cobra.Command, args []string) error {
+	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+		serviceID, key := args[0], args[1]
+		patch, err := buildAgentServicePatch(key, "", true)
+		if err != nil {
+			return err
+		}
+		if _, err := h.Store.AgentServices().Update(ctx, ws, serviceID, patch); err != nil {
+			return fmt.Errorf("update agent service: %w", err)
+		}
+		fmt.Printf("Cleared %s/%s.%s\n", ws, serviceID, key)
+		return nil
+	})
+}
+
+func runWorkerServiceRemove(_ *cobra.Command, args []string) error {
+	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+		if err := h.Store.AgentServices().Delete(ctx, ws, args[0]); err != nil {
+			return fmt.Errorf("remove agent service: %w", err)
+		}
+		fmt.Printf("Removed agent service %s/%s\n", ws, args[0])
+		return nil
+	})
+}
+
+func printAgentService(svc *domain.AgentService) {
+	fmt.Printf("Workspace:      %s\n", svc.WorkspaceKey)
+	fmt.Printf("Service ID:     %s\n", svc.ServiceID)
+	fmt.Printf("Name:           %s\n", svc.Name)
+	fmt.Printf("Kind:           %s\n", svc.Kind)
+	fmt.Printf("Desired state:  %s\n", svc.DesiredState)
+	fmt.Printf("Role:           %s\n", svc.RoleName)
+	if svc.ProfileName != "" {
+		fmt.Printf("Profile:        %s\n", svc.ProfileName)
+	}
+	if svc.ScheduleID != "" {
+		fmt.Printf("Schedule ID:    %s\n", svc.ScheduleID)
+	}
+	if len(svc.EventSources) > 0 {
+		fmt.Printf("Event sources:  %s\n", strings.Join(svc.EventSources, ", "))
+	}
+	if len(svc.TriggerRefs) > 0 {
+		fmt.Printf("Trigger refs:   %s\n", strings.Join(svc.TriggerRefs, ", "))
+	}
+	if svc.PlacementPolicy != "" {
+		fmt.Printf("Placement:      %s\n", svc.PlacementPolicy)
+	}
+	fmt.Printf("Max instances:  %d\n", svc.MaxInstances)
+	if svc.LeaseID != "" {
+		fmt.Printf("Lease ID:       %s\n", svc.LeaseID)
+	}
+	if svc.RestartPolicy != "" {
+		fmt.Printf("Restart policy: %s\n", svc.RestartPolicy)
+	}
+	if len(svc.Permissions) > 0 {
+		fmt.Printf("Permissions:    %s\n", strings.Join(svc.Permissions, ", "))
+	}
+	if svc.BudgetPolicy != "" {
+		fmt.Printf("Budget policy:  %s\n", svc.BudgetPolicy)
+	}
+	if svc.StateRef != "" {
+		fmt.Printf("State ref:      %s\n", svc.StateRef)
+	}
+}
+
+func buildAgentServicePatch(key, value string, unset bool) (store.AgentServiceUpdate, error) {
+	switch key {
+	case "name", "role_name", "profile_name", "schedule_id", "placement_policy",
+		"lease_id", "restart_policy", "budget_policy", "state_ref":
+		return buildAgentServiceStringPatch(key, value, unset)
+	case "kind", "desired_state", "max_instances":
+		return buildAgentServiceTypedPatch(key, value, unset)
+	case "event_sources", "trigger_refs", "permissions", "metadata":
+		return buildAgentServiceListPatch(key, value, unset)
+	default:
+		var patch store.AgentServiceUpdate
+		return patch, fmt.Errorf("unsupported agent service field %q", key)
+	}
+}
+
+// buildAgentServiceStringPatch handles the plain string agent service
+// fields for buildAgentServicePatch.
+func buildAgentServiceStringPatch(key, value string, unset bool) (store.AgentServiceUpdate, error) {
+	var patch store.AgentServiceUpdate
+	switch key {
+	case "name":
+		if unset {
+			return patch, fmt.Errorf("name cannot be unset")
+		}
+		patch.Name = &value
+	case "role_name":
+		if unset {
+			return patch, fmt.Errorf("role_name cannot be unset")
+		}
+		patch.RoleName = &value
+	case "profile_name":
+		patch.ProfileName = &value
+	case "schedule_id":
+		patch.ScheduleID = &value
+	case "placement_policy":
+		patch.PlacementPolicy = &value
+	case "lease_id":
+		patch.LeaseID = &value
+	case "restart_policy":
+		patch.RestartPolicy = &value
+	case "budget_policy":
+		patch.BudgetPolicy = &value
+	case "state_ref":
+		patch.StateRef = &value
+	}
+	return patch, nil
+}
+
+// buildAgentServiceTypedPatch handles the agent service fields that parse
+// into typed values (enums, ints) for buildAgentServicePatch.
+func buildAgentServiceTypedPatch(key, value string, unset bool) (store.AgentServiceUpdate, error) {
+	var patch store.AgentServiceUpdate
+	switch key {
+	case "kind":
+		if unset {
+			return patch, fmt.Errorf("kind cannot be unset")
+		}
+		kind, err := parseAgentServiceKind(value)
+		if err != nil {
+			return patch, err
+		}
+		patch.Kind = &kind
+	case "desired_state":
+		if unset {
+			return patch, fmt.Errorf("desired_state cannot be unset")
+		}
+		state, err := parseAgentServiceDesiredState(value, false)
+		if err != nil {
+			return patch, err
+		}
+		patch.DesiredState = &state
+	case "max_instances":
+		if unset {
+			return patch, fmt.Errorf("max_instances cannot be unset")
+		}
+		n, err := strconv.Atoi(value)
+		if err != nil {
+			return patch, fmt.Errorf("max_instances must be an integer: %w", err)
+		}
+		if n < 1 {
+			return patch, fmt.Errorf("max_instances must be positive")
+		}
+		patch.MaxInstances = &n
+	}
+	return patch, nil
+}
+
+// buildAgentServiceListPatch handles the list- and map-valued agent service
+// fields for buildAgentServicePatch.
+func buildAgentServiceListPatch(key, value string, unset bool) (store.AgentServiceUpdate, error) {
+	var patch store.AgentServiceUpdate
+	switch key {
+	case "event_sources":
+		list := splitWorkerProfileList(value)
+		patch.EventSources = &list
+	case "trigger_refs":
+		list := splitWorkerProfileList(value)
+		patch.TriggerRefs = &list
+	case "permissions":
+		list := splitWorkerProfileList(value)
+		patch.Permissions = &list
+	case "metadata":
+		if unset {
+			metadata := map[string]string{}
+			patch.Metadata = &metadata
+			return patch, nil
+		}
+		metadata, err := parseWorkerProfileMetadata(strings.Split(value, ","))
+		if err != nil {
+			return patch, err
+		}
+		patch.Metadata = &metadata
+	}
+	return patch, nil
+}
+
+func parseAgentServiceKind(raw string) (domain.AgentServiceKind, error) {
+	kind := domain.AgentServiceKind(strings.TrimSpace(raw))
+	switch kind {
+	case domain.AgentServiceKindLead, domain.AgentServiceKindSupport, domain.AgentServiceKindTriage,
+		domain.AgentServiceKindOnCall, domain.AgentServiceKindScheduled, domain.AgentServiceKindMaintenance,
+		domain.AgentServiceKindOrchestrator, domain.AgentServiceKindAlwaysOn, domain.AgentServiceKindCron,
+		domain.AgentServiceKindEvent, domain.AgentServiceKindCampaignOrchestrator:
+		return kind, nil
+	default:
+		return "", fmt.Errorf("unsupported agent service kind %q", raw)
+	}
+}
+
+func parseAgentServiceDesiredState(raw string, allowEmpty bool) (domain.AgentServiceDesiredState, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" && allowEmpty {
+		return "", nil
+	}
+	state := domain.AgentServiceDesiredState(raw)
+	switch state {
+	case domain.AgentServiceDesiredRunning, domain.AgentServiceDesiredStopped, domain.AgentServiceDesiredPaused:
+		return state, nil
+	default:
+		return "", fmt.Errorf("unsupported agent service desired_state %q", raw)
+	}
+}

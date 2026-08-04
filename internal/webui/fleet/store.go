@@ -35,6 +35,8 @@ const (
 )
 
 // Redis key builders.
+// When a Store has a WorkspaceID set, keys are prefixed with fleet:{wsID}:
+// to namespace data per workspace. Otherwise, the global "fleet:" prefix is used.
 func claimedTaskKey(taskID string) string {
 	return keyPrefix + "tasks:claimed:" + taskID
 }
@@ -45,6 +47,30 @@ func workerClaimKey(workerID string) string {
 
 func workerRegistrationKey(workerID string) string {
 	return keyPrefix + "workers:" + workerID
+}
+
+// wsClaimedTaskKey returns a workspace-scoped claimed task key.
+func (s *Store) wsClaimedTaskKey(taskID string) string {
+	if s.workspaceID != "" {
+		return keyPrefix + s.workspaceID + ":tasks:claimed:" + taskID
+	}
+	return claimedTaskKey(taskID)
+}
+
+// wsWorkerClaimKey returns a workspace-scoped worker claim key.
+func (s *Store) wsWorkerClaimKey(workerID string) string {
+	if s.workspaceID != "" {
+		return keyPrefix + s.workspaceID + ":worker:claim:" + workerID
+	}
+	return workerClaimKey(workerID)
+}
+
+// wsWorkerRegistrationKey returns a workspace-scoped worker registration key.
+func (s *Store) wsWorkerRegistrationKey(workerID string) string {
+	if s.workspaceID != "" {
+		return keyPrefix + s.workspaceID + ":workers:" + workerID
+	}
+	return workerRegistrationKey(workerID)
 }
 
 // RedisConfig holds connection parameters for the Redis instance.
@@ -64,8 +90,10 @@ type ClaimResponse struct {
 
 // Store manages fleet-level Redis state for task claims and worker coordination.
 type Store struct {
-	client *redis.Client
-	logger *slog.Logger
+	client      *redis.Client
+	logger      *slog.Logger
+	workspaceID string // workspace ID for key namespacing; empty = global
+	clientOwned bool   // true if this Store owns the Redis client (should close it)
 
 	claimScript *redis.Script
 }
@@ -79,7 +107,7 @@ func NewStore(cfg RedisConfig, logger *slog.Logger) (*Store, error) {
 		logger = slog.Default()
 	}
 
-	// Resolve password: YAML config > FLEET_REDIS_PASSWORD > LOOM_REDIS_PASSWORD
+	// Resolve password: explicit config > FLEET_REDIS_PASSWORD > LOOM_REDIS_PASSWORD
 	password := cfg.Password
 	if password == "" {
 		if p := os.Getenv("FLEET_REDIS_PASSWORD"); p != "" {
@@ -102,11 +130,24 @@ func NewStore(cfg RedisConfig, logger *slog.Logger) (*Store, error) {
 	})
 
 	s := &Store{
-		client: client,
-		logger: logger,
+		client:      client,
+		logger:      logger,
+		clientOwned: true,
 	}
 	s.claimScript = redis.NewScript(claimLua)
 
+	return s, nil
+}
+
+// NewStoreForWorkspace creates a new fleet Store with workspace-scoped Redis keys.
+// All key builder methods will prefix keys with fleet:{wsID}: to isolate data
+// across workspaces sharing the same Redis instance.
+func NewStoreForWorkspace(cfg RedisConfig, wsID string, logger *slog.Logger) (*Store, error) {
+	s, err := NewStore(cfg, logger)
+	if err != nil {
+		return nil, err
+	}
+	s.workspaceID = wsID
 	return s, nil
 }
 
@@ -117,8 +158,27 @@ func NewStoreFromClient(client *redis.Client, logger *slog.Logger) *Store {
 		logger = slog.Default()
 	}
 	s := &Store{
-		client: client,
-		logger: logger,
+		client:      client,
+		logger:      logger,
+		clientOwned: true,
+	}
+	s.claimScript = redis.NewScript(claimLua)
+	return s
+}
+
+// NewStoreForClient creates a workspace-scoped Store from a shared redis.Client.
+// Unlike NewStoreFromClient, the Store does NOT own the client — calling Close()
+// on this Store is a no-op. The caller (typically StoreRegistry) manages the
+// client's lifecycle.
+func NewStoreForClient(client *redis.Client, wsID string, logger *slog.Logger) *Store {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	s := &Store{
+		client:      client,
+		logger:      logger,
+		workspaceID: wsID,
+		clientOwned: false,
 	}
 	s.claimScript = redis.NewScript(claimLua)
 	return s
@@ -141,8 +201,12 @@ func NewRedisClient(addr, password string, db int) *redis.Client {
 	})
 }
 
-// Close closes the underlying Redis connection.
+// Close closes the underlying Redis connection if the Store owns it.
+// Stores created via NewStoreForClient (shared client) are no-ops.
 func (s *Store) Close() error {
+	if !s.clientOwned {
+		return nil
+	}
 	return s.client.Close()
 }
 
@@ -196,7 +260,7 @@ func (s *Store) TryClaim(ctx context.Context, taskID, workerID string) (bool, er
 	ttlSec := int(defaultClaimTTL.Seconds())
 
 	result, err := s.claimScript.Run(ctx, s.client,
-		[]string{claimedTaskKey(taskID)},
+		[]string{s.wsClaimedTaskKey(taskID)},
 		workerID, ttlSec,
 	).Slice()
 	if err != nil {
@@ -226,13 +290,13 @@ func (s *Store) TryClaim(ctx context.Context, taskID, workerID string) (bool, er
 }
 
 // ExtendClaimTTL extends the TTL on a claimed task key.
-// This should be called after beads confirms the claim to keep it alive longer.
+// This should be called after the issue backend confirms the claim to keep it alive longer.
 func (s *Store) ExtendClaimTTL(ctx context.Context, taskID string, timeoutMin int) error {
 	if err := validateID(taskID, "taskID"); err != nil {
 		return err
 	}
 
-	key := claimedTaskKey(taskID)
+	key := s.wsClaimedTaskKey(taskID)
 	ttl := time.Duration(timeoutMin) * time.Minute
 
 	ok, err := s.client.Expire(ctx, key, ttl).Result()
@@ -253,7 +317,7 @@ func (s *Store) ReleaseClaim(ctx context.Context, taskID string) error {
 		return err
 	}
 
-	key := claimedTaskKey(taskID)
+	key := s.wsClaimedTaskKey(taskID)
 
 	err := s.client.Del(ctx, key).Err()
 	if err != nil {
@@ -281,7 +345,7 @@ func (s *Store) RecordWorkerClaim(ctx context.Context, workerID string, claim *C
 		return fmt.Errorf("marshal claim response: %w", err)
 	}
 
-	key := workerClaimKey(workerID)
+	key := s.wsWorkerClaimKey(workerID)
 	err = s.client.Set(ctx, key, data, defaultWorkerClaimTTL).Err()
 	if err != nil {
 		return fmt.Errorf("record worker claim failed: %w", err)
@@ -298,7 +362,7 @@ func (s *Store) GetWorkerClaim(ctx context.Context, workerID string) (*ClaimResp
 		return nil, err
 	}
 
-	key := workerClaimKey(workerID)
+	key := s.wsWorkerClaimKey(workerID)
 
 	data, err := s.client.Get(ctx, key).Bytes()
 	if err == redis.Nil {
@@ -323,7 +387,7 @@ func (s *Store) ClearWorkerClaim(ctx context.Context, workerID string) error {
 		return err
 	}
 
-	key := workerClaimKey(workerID)
+	key := s.wsWorkerClaimKey(workerID)
 	if err := s.client.Del(ctx, key).Err(); err != nil {
 		return fmt.Errorf("clear worker claim failed: %w", err)
 	}
@@ -351,7 +415,7 @@ func (s *Store) RegisterWorker(ctx context.Context, worker *Worker) error {
 		return fmt.Errorf("marshal worker: %w", err)
 	}
 
-	key := workerRegistrationKey(worker.WorkerID)
+	key := s.wsWorkerRegistrationKey(worker.WorkerID)
 	if err := s.client.Set(ctx, key, data, defaultWorkerRegistrationTTL).Err(); err != nil {
 		return fmt.Errorf("register worker failed: %w", err)
 	}
@@ -367,7 +431,7 @@ func (s *Store) GetWorker(ctx context.Context, workerID string) (*Worker, error)
 		return nil, err
 	}
 
-	key := workerRegistrationKey(workerID)
+	key := s.wsWorkerRegistrationKey(workerID)
 	data, err := s.client.Get(ctx, key).Bytes()
 	if err == redis.Nil {
 		return nil, nil
@@ -392,7 +456,7 @@ func (s *Store) UpdateHeartbeat(ctx context.Context, workerID string) (time.Time
 		return time.Time{}, err
 	}
 
-	key := workerRegistrationKey(workerID)
+	key := s.wsWorkerRegistrationKey(workerID)
 
 	// Refresh the TTL atomically - only if the key exists
 	ok, err := s.client.Expire(ctx, key, defaultWorkerRegistrationTTL).Result()

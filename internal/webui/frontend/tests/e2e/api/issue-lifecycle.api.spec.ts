@@ -273,9 +273,9 @@ test.describe('Issue Lifecycle', () => {
   })
 
   test.describe('Validation Errors', () => {
-    test('reject: missing title returns 400', async ({ request }) => {
-      // Attempt to create issue without title using raw request
-      const response = await request.post('/api/issues', {
+    test('reject: missing title returns 400', async ({ api, request }) => {
+      // Attempt to create issue without title using raw request — must use workspace-scoped route
+      const response = await request.post(`${api.wsPrefix}/issues`, {
         data: {
           title: '', // Empty title
           issue_type: 'task',
@@ -286,8 +286,9 @@ test.describe('Issue Lifecycle', () => {
       expect(response.status()).toBe(400)
 
       const body = await response.json()
-      expect(body.success).toBe(false)
-      expect(body.error).toContain('title')
+      // Error responses may omit `success` field — verify error message is present
+      expect(body.error).toBeDefined()
+      expect(body.error.toLowerCase()).toContain('title')
     })
 
     test('reject: invalid status value returns 400', async ({ api, request }) => {
@@ -299,8 +300,8 @@ test.describe('Issue Lifecycle', () => {
       })
       createdIssueIds.push(created.id)
 
-      // Try to update with invalid status using raw request
-      const response = await request.patch(`/api/issues/${created.id}`, {
+      // Try to update with invalid status using raw request — must use workspace-scoped route
+      const response = await request.patch(`${api.wsPrefix}/issues/${created.id}`, {
         data: {
           status: 'invalid_status',
         },
@@ -312,7 +313,8 @@ test.describe('Issue Lifecycle', () => {
       expect([400, 500]).toContain(response.status())
 
       const body = await response.json()
-      expect(body.success).toBe(false)
+      // Error responses may omit `success` field — verify error is present
+      expect(body.error).toBeDefined()
     })
   })
 })

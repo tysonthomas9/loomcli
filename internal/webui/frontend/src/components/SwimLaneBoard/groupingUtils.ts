@@ -4,6 +4,7 @@
  */
 
 import type { Issue } from "@/types";
+import { formatStatusLabel } from "@/utils/issue";
 
 /**
  * Field by which to group issues into swim lanes.
@@ -14,7 +15,8 @@ export type GroupByField =
   | "assignee"
   | "priority"
   | "type"
-  | "label";
+  | "label"
+  | "repo";
 
 /**
  * A group of issues forming a swim lane.
@@ -26,6 +28,8 @@ export interface LaneGroup {
   title: string;
   /** Issues in this lane */
   issues: Issue[];
+  /** Issue represented by the lane header, when the group is itself clickable */
+  groupIssue?: Issue;
 }
 
 /**
@@ -69,6 +73,10 @@ export function groupIssuesByField(
     ];
   }
 
+  if (groupBy === "epic") {
+    return groupIssuesByEpic(issues);
+  }
+
   const groupMap = new Map<string, Issue[]>();
 
   for (const issue of issues) {
@@ -91,6 +99,71 @@ export function groupIssuesByField(
       id: getLaneId(groupBy, key),
       title: getLaneTitle(groupBy, key, groupIssues),
       issues: groupIssues,
+    });
+  }
+
+  return lanes;
+}
+
+/**
+ * Group issues by epic while treating epic issues as lane headers, not cards.
+ */
+function groupIssuesByEpic(issues: Issue[]): LaneGroup[] {
+  const epicIssues = new Map<string, Issue>();
+  const childGroups = new Map<string, Issue[]>();
+  const parentTitles = new Map<string, string>();
+  const laneKeys: string[] = [];
+  const ungrouped: Issue[] = [];
+
+  const registerLaneKey = (key: string): void => {
+    if (!laneKeys.includes(key)) {
+      laneKeys.push(key);
+    }
+  };
+
+  for (const issue of issues) {
+    if (issue.issue_type === "epic") {
+      epicIssues.set(issue.id, issue);
+      registerLaneKey(issue.id);
+      continue;
+    }
+
+    const parent = issue.parent;
+    if (!parent) {
+      ungrouped.push(issue);
+      continue;
+    }
+
+    registerLaneKey(parent);
+    const existing = childGroups.get(parent);
+    if (existing) {
+      existing.push(issue);
+    } else {
+      childGroups.set(parent, [issue]);
+    }
+    if (issue.parent_title && !parentTitles.has(parent)) {
+      parentTitles.set(parent, issue.parent_title);
+    }
+  }
+
+  const lanes: LaneGroup[] = [];
+  for (const key of laneKeys) {
+    const groupIssue = epicIssues.get(key);
+    const groupIssues = childGroups.get(key) ?? [];
+    const title = groupIssue?.title ?? parentTitles.get(key) ?? "Untitled epic";
+    lanes.push({
+      id: getLaneId("epic", key),
+      title,
+      issues: groupIssues,
+      ...(groupIssue !== undefined && { groupIssue }),
+    });
+  }
+
+  if (ungrouped.length > 0) {
+    lanes.push({
+      id: getLaneId("epic", "__ungrouped__"),
+      title: "Ungrouped",
+      issues: ungrouped,
     });
   }
 
@@ -124,6 +197,10 @@ function getGroupKeys(issue: Issue, groupBy: GroupByField): string[] {
     case "label": {
       const labels = issue.labels;
       return labels && labels.length > 0 ? labels : ["__no_labels__"];
+    }
+    case "repo": {
+      const repo = issue.repo;
+      return repo ? [repo] : ["__no_repo__"];
     }
     default:
       return ["__ungrouped__"];
@@ -166,10 +243,14 @@ function getLaneTitle(
     case "type": {
       if (key === "__no_type__") return "No Type";
       // Capitalize first letter
-      return key.charAt(0).toUpperCase() + key.slice(1);
+      return formatStatusLabel(key);
     }
     case "label": {
       if (key === "__no_labels__") return "No Labels";
+      return key;
+    }
+    case "repo": {
+      if (key === "__no_repo__") return "No Repository";
       return key;
     }
     default:
@@ -197,7 +278,8 @@ export function sortLanes(
       lane.title === "Unassigned" ||
       lane.title === "No Priority" ||
       lane.title === "No Type" ||
-      lane.title === "No Labels"
+      lane.title === "No Labels" ||
+      lane.title === "No Repository"
     );
   };
 

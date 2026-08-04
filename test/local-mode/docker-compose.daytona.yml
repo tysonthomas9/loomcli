@@ -1,0 +1,40 @@
+# Daytona override for the local-mode dogfood stack.
+#
+# Routes the daemon TS leaf (LOOM_DAEMON_LEAF=ts) to the daytona-task-runner, so a
+# claimed task runs INSIDE a real Daytona sandbox instead of locally. Reuses the
+# codex image (codex CLI + Node 24 + ~/.codex for the host-side flue agent's model
+# auth). The runtime credential + artifact APIs are reached via LOOM_FLEET_DB_URL.
+#
+# Usage:
+#   DAYTONA_API_KEY=... LOOM_DAEMON_LEAF=ts make local-mode-daytona-up
+#
+# DAYTONA_REPO_URL must be a network-reachable git URL the cloud sandbox can clone
+# (the local-mode fixture repo is a local file remote and won't work). e2e-smoke
+# mode makes the sandbox agent do a self-contained marker-file task.
+
+services:
+  loom-local:
+    image: ${LOCAL_MODE_LOOM_CODEX_IMAGE:-loomcli-local-mode-loom-codex:latest}
+    build:
+      args:
+        INSTALL_CODEX: "true"
+        CODEX_CLI_VERSION: "${LOCAL_MODE_CODEX_CLI_VERSION:-latest}"
+    environment:
+      LOOM_BACKEND: codex
+      LOOM_LOCAL_MODE_BACKEND: codex
+      LOOM_LOCAL_MODE_PLAN_AGENT: codex-planner
+      LOOM_LOCAL_MODE_CODE_AGENT: codex-coder
+      LOOM_LOCAL_MODE_PLAN_TASK_ID: LOCALMODE-2
+      LOOM_LOCAL_MODE_CODE_TASK_ID: LOCALMODE-3
+      # Phase U: TS leaf, routed to the Daytona runner.
+      LOOM_DAEMON_LEAF: "${LOOM_DAEMON_LEAF:-ts}"
+      LOOM_DAEMON_LEAF_RUNNER: "daytona-task-runner"
+      # Daytona config (key staged to a credential file by the entrypoint).
+      DAYTONA_API_KEY: "${DAYTONA_API_KEY:-}"
+      DAYTONA_REPO_URL: "${DAYTONA_REPO_URL:-https://github.com/octocat/Hello-World.git}"
+      DAYTONA_TASK_MODE: "${DAYTONA_TASK_MODE:-e2e-smoke}"
+      LOOM_DAYTONA_TASK_RUNNER_ENABLE_DEMO_MODES: "1"
+      DAYTONA_AUTO_STOP_MINUTES: "${DAYTONA_AUTO_STOP_MINUTES:-10}"
+      DAYTONA_AUTO_DELETE_MINUTES: "${DAYTONA_AUTO_DELETE_MINUTES:-30}"
+    volumes:
+      - ${LOCAL_MODE_CODEX_HOME:-${HOME}/.codex}:/codex-host:ro

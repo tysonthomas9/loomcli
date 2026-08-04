@@ -7,8 +7,8 @@
 import { useReactFlow } from "@xyflow/react";
 import { useCallback } from "react";
 
-import { formatStatusLabel } from "@/utils/statusFormat";
-import type { Status } from "@/types/status";
+import { formatStatusLabel } from "@/utils/issue";
+import type { Status } from "@/types/issue";
 
 import styles from "./GraphControls.module.css";
 

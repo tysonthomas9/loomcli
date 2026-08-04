@@ -1,0 +1,40 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Loom Agents",
+  "version": "0.1.0",
+  "identifier": "com.loom.agents.local",
+  "build": {
+    "beforeDevCommand": "npm run prepare-sidecar && npm run dev:frontend",
+    "beforeBuildCommand": "npm run prepare-sidecar && npm run build:frontend",
+    "devUrl": "http://127.0.0.1:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Loom",
+        "width": 520,
+        "height": 300,
+        "minWidth": 420,
+        "minHeight": 260,
+        "contentProtected": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg"],
+    "externalBin": ["binaries/loom", "binaries/fleet-db"],
+    "resources": {
+      "resources/webui/": "webui/"
+    },
+    "macOS": {
+      "minimumSystemVersion": "12.0"
+    }
+  }
+}

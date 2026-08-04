@@ -1,4 +1,9 @@
-import { test, expect } from "@playwright/test"
+import { test, expect, type Page } from "@playwright/test"
+import {
+  setupFleetMocks,
+  waitForWorkspaceIssues,
+  workspacePath,
+} from "./helpers/fleet"
 
 /**
  * E2E tests for the Kanban Redesign CSS properties.
@@ -26,54 +31,44 @@ function makeIssue(overrides: Record<string, unknown>) {
   }
 }
 
+async function tokenValue(page: Page, token: string) {
+  return page.evaluate(
+    (name) =>
+      window
+        .getComputedStyle(document.documentElement)
+        .getPropertyValue(name)
+        .trim(),
+    token
+  )
+}
+
+async function tokenColor(page: Page, token: string) {
+  return page.evaluate((name) => {
+    const el = document.createElement("span")
+    el.style.color = `var(${name})`
+    document.body.appendChild(el)
+    const color = window.getComputedStyle(el).color
+    el.remove()
+    return color
+  }, token)
+}
+
 async function setupMocks(
-  page: import("@playwright/test").Page,
+  page: Page,
   options: {
     issues: Record<string, unknown>[]
     blockedIssues?: Record<string, unknown>[]
   }
 ) {
-  await page.route("**/api/ready", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ success: true, data: options.issues }),
-    })
-  })
-
-  await page.route("**/api/blocked", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        success: true,
-        data: options.blockedIssues ?? [],
-      }),
-    })
-  })
-
-  await page.route("**/api/stats", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        success: true,
-        data: { open: 0, closed: 0, in_progress: 0, blocked: 0, total: 0 },
-      }),
-    })
-  })
-
-  await page.route("**/api/events", async (route) => {
-    await route.abort()
+  await setupFleetMocks(page, options.issues, undefined, {
+    blockedIssues: options.blockedIssues,
   })
 }
 
-async function navigateToKanban(page: import("@playwright/test").Page) {
+async function navigateToKanban(page: Page) {
   const [response] = await Promise.all([
-    page.waitForResponse(
-      (res) => res.url().includes("/api/ready") && res.status() === 200
-    ),
-    page.goto("/?groupBy=none"),
+    waitForWorkspaceIssues(page),
+    page.goto(workspacePath("/?groupBy=none")),
   ])
   expect(response.ok()).toBe(true)
 }
@@ -110,8 +105,7 @@ test.describe("IssueCard CSS Styling", () => {
     const borderTopColor = await card.evaluate(
       (el) => window.getComputedStyle(el).borderTopColor
     )
-    // --color-border: #cccccc → rgb(204, 204, 204)
-    expect(borderTopColor).toBe("rgb(204, 204, 204)")
+    expect(borderTopColor).toBe(await tokenColor(page, "--color-border"))
   })
 
   test("card has dual-layer box-shadow", async ({ page }) => {
@@ -125,9 +119,7 @@ test.describe("IssueCard CSS Styling", () => {
     const shadow = await card.evaluate(
       (el) => window.getComputedStyle(el).boxShadow
     )
-    // CSS: box-shadow: 0 1px 0 rgba(0, 0, 0, 0.08), 0 2px 5px rgba(0, 0, 0, 0.12)
-    expect(shadow).toContain("0px 1px 0px")
-    expect(shadow).toContain("0px 2px 5px")
+    expect(shadow).toContain("0px 1px 2px")
   })
 
   test("card title has font-weight 400 (normal)", async ({ page }) => {
@@ -146,7 +138,7 @@ test.describe("IssueCard CSS Styling", () => {
     expect(fontWeight).toBe("400")
   })
 
-  test("P0 card title has font-weight 500 (medium)", async ({ page }) => {
+  test("P0 card title keeps normal font weight", async ({ page }) => {
     const issues = [
       makeIssue({
         id: "p0-fw",
@@ -164,7 +156,7 @@ test.describe("IssueCard CSS Styling", () => {
     const fontWeight = await title.evaluate(
       (el) => window.getComputedStyle(el).fontWeight
     )
-    expect(fontWeight).toBe("500")
+    expect(fontWeight).toBe("400")
   })
 
   test("card hover elevates shadow to 0 3px 8px", async ({ page }) => {
@@ -186,8 +178,7 @@ test.describe("IssueCard CSS Styling", () => {
     const shadow = await card.evaluate(
       (el) => window.getComputedStyle(el).boxShadow
     )
-    // CSS: box-shadow: 0 3px 8px rgba(0, 0, 0, 0.14)
-    expect(shadow).toContain("0px 3px 8px")
+    expect(shadow).toContain("0px 4px 10px")
   })
 
   test("in-progress card has same border as other cards (no special left border)", async ({
@@ -236,8 +227,7 @@ test.describe("Priority Badge CSS Colors", () => {
     const bgColor = await badge.evaluate(
       (el) => window.getComputedStyle(el).backgroundColor
     )
-    // --color-priority-0: #e24b3b → rgb(226, 75, 59)
-    expect(bgColor).toBe("rgb(226, 75, 59)")
+    expect(bgColor).toBe(await tokenColor(page, "--color-priority-0"))
   })
 
   test("P0 badge has white text", async ({ page }) => {
@@ -278,8 +268,7 @@ test.describe("Priority Badge CSS Colors", () => {
     const bgColor = await badge.evaluate(
       (el) => window.getComputedStyle(el).backgroundColor
     )
-    // --color-priority-1: #ef7f4a → rgb(239, 127, 74)
-    expect(bgColor).toBe("rgb(239, 127, 74)")
+    expect(bgColor).toBe(await tokenColor(page, "--color-priority-1"))
   })
 
   test("P2 badge has warm yellow background (#f0b24a)", async ({ page }) => {
@@ -300,8 +289,7 @@ test.describe("Priority Badge CSS Colors", () => {
     const bgColor = await badge.evaluate(
       (el) => window.getComputedStyle(el).backgroundColor
     )
-    // --color-priority-2: #f0b24a → rgb(240, 178, 74)
-    expect(bgColor).toBe("rgb(240, 178, 74)")
+    expect(bgColor).toBe(await tokenColor(page, "--color-priority-2"))
   })
 
   test("P2 badge has dark text (WCAG contrast)", async ({ page }) => {
@@ -320,8 +308,7 @@ test.describe("Priority Badge CSS Colors", () => {
     const textColor = await badge.evaluate(
       (el) => window.getComputedStyle(el).color
     )
-    // P2 uses dark text for contrast: var(--color-text) → #000000 → rgb(0, 0, 0)
-    expect(textColor).toBe("rgb(0, 0, 0)")
+    expect(textColor).toBe(await tokenColor(page, "--color-text"))
   })
 
   test("P3 badge has soft blue background (#5b85f7)", async ({ page }) => {
@@ -342,8 +329,7 @@ test.describe("Priority Badge CSS Colors", () => {
     const bgColor = await badge.evaluate(
       (el) => window.getComputedStyle(el).backgroundColor
     )
-    // --color-priority-3: #5b85f7 → rgb(91, 133, 247)
-    expect(bgColor).toBe("rgb(91, 133, 247)")
+    expect(bgColor).toBe(await tokenColor(page, "--color-priority-3"))
   })
 
   test("P4 badge has gray background (#6b7280)", async ({ page }) => {
@@ -380,18 +366,17 @@ test.describe("Header & Nav CSS Styling", () => {
     await navigateToKanban(page)
 
     // NavRail is used for view switching (not ViewSwitcher tabs)
-    // The active button has data-active="true" and aria-label="Kanban"
+    // The active button has data-active="true" and aria-label="Workspaces"
     const activeNavButton = page.locator(
       'nav[aria-label="Primary"] button[data-active="true"]'
     )
     await expect(activeNavButton).toBeVisible()
-    await expect(activeNavButton).toHaveAttribute("aria-label", "Kanban")
+    await expect(activeNavButton).toHaveAttribute("aria-label", "Workspaces")
 
     const bgColor = await activeNavButton.evaluate(
       (el) => window.getComputedStyle(el).backgroundColor
     )
-    // .navButton[data-active='true']: background-color: var(--color-priority-3) → #5b85f7 → rgb(91, 133, 247)
-    expect(bgColor).toBe("rgb(91, 133, 247)")
+    expect(bgColor).toBe(await tokenColor(page, "--color-status-open"))
   })
 
   test("active nav button has white text/icon color", async ({ page }) => {
@@ -427,8 +412,7 @@ test.describe("Header & Nav CSS Styling", () => {
     const borderRightColor = await navRail.evaluate(
       (el) => window.getComputedStyle(el).borderRightColor
     )
-    // .navRail: border-right: 1px solid var(--color-border) → #cccccc → rgb(204, 204, 204)
-    expect(borderRightColor).toBe("rgb(204, 204, 204)")
+    expect(borderRightColor).toBe(await tokenColor(page, "--color-border"))
   })
 
   test("unified header height is 56px", async ({ page }) => {
@@ -445,8 +429,7 @@ test.describe("Header & Nav CSS Styling", () => {
     const height = await header.evaluate(
       (el) => window.getComputedStyle(el).height
     )
-    // --unified-header-height: 56px
-    expect(height).toBe("56px")
+    expect(height).toBe(await tokenValue(page, "--unified-header-height"))
   })
 })
 
@@ -458,7 +441,7 @@ test.describe("Layout Structure CSS", () => {
     await setupMocks(page, { issues })
 
     // Mock loom endpoints to prevent connection errors
-    await page.route("**/api/loom/**", async (route) => {
+    await page.route("**/api/monitor/**", async (route) => {
       await route.abort()
     })
     await page.route("**/loom/**", async (route) => {
@@ -473,8 +456,7 @@ test.describe("Layout Structure CSS", () => {
     const width = await sidebar.evaluate(
       (el) => window.getComputedStyle(el).width
     )
-    // .sidebar: width: 240px
-    expect(width).toBe("240px")
+    expect(width).toBe("282px")
   })
 
   test("sidebar has min-width matching width for non-collapsible state", async ({
@@ -489,7 +471,7 @@ test.describe("Layout Structure CSS", () => {
     ]
     await setupMocks(page, { issues })
 
-    await page.route("**/api/loom/**", async (route) => {
+    await page.route("**/api/monitor/**", async (route) => {
       await route.abort()
     })
     await page.route("**/loom/**", async (route) => {
@@ -507,9 +489,8 @@ test.describe("Layout Structure CSS", () => {
       const style = window.getComputedStyle(el)
       return [style.width, style.minWidth]
     })
-    // .sidebar: width: 240px, min-width: 240px
-    expect(width).toBe("240px")
-    expect(minWidth).toBe("240px")
+    expect(width).toBe("282px")
+    expect(minWidth).toBe("282px")
   })
 
   test("Talk to Lead FAB has fixed positioning", async ({ page }) => {
@@ -534,7 +515,7 @@ test.describe("Layout Structure CSS", () => {
     ]
     await setupMocks(page, { issues })
 
-    await page.route("**/api/loom/**", async (route) => {
+    await page.route("**/api/monitor/**", async (route) => {
       await route.abort()
     })
     await page.route("**/loom/**", async (route) => {

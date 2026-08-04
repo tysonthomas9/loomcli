@@ -95,25 +95,25 @@ describe("IssueNode", () => {
       ).toBeInTheDocument();
     });
 
-    it("renders shortened issue ID", () => {
-      const issue = createTestIssue({ id: "beads-abc123def456" });
+    it("renders shortened issue ID with prefix preserved", () => {
+      const issue = createTestIssue({ id: "issue-abc123def456" });
       const props = createTestProps({
         data: createTestNodeData({ issue }),
       });
       renderWithProvider(props);
 
-      // Should show last 7 characters for long IDs
-      expect(screen.getByText("3def456")).toBeInTheDocument();
+      // Should preserve prefix and truncate: "issue-abc12..."
+      expect(screen.getByText("issue-abc12...")).toBeInTheDocument();
     });
 
     it("renders short ID as-is", () => {
-      const issue = createTestIssue({ id: "bd-xyz" });
+      const issue = createTestIssue({ id: "loom-xyz" });
       const props = createTestProps({
         data: createTestNodeData({ issue }),
       });
       renderWithProvider(props);
 
-      expect(screen.getByText("bd-xyz")).toBeInTheDocument();
+      expect(screen.getByText("loom-xyz")).toBeInTheDocument();
     });
 
     it("renders priority badge with correct text", () => {
@@ -287,7 +287,7 @@ describe("IssueNode", () => {
       expect(priorityBadge.className).toMatch(/priority2/);
     });
 
-    it("priority badge has data-priority attribute for backwards compatibility", () => {
+    it("priority badge has data-priority attribute for existing behavior", () => {
       const issue = createTestIssue({ priority: 1 });
       const props = createTestProps({
         data: createTestNodeData({ issue, priority: 1 }),

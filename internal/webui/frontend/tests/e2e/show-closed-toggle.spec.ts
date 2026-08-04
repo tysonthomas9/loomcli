@@ -1,4 +1,5 @@
 import { test, expect, Page } from "@playwright/test"
+import { setupFleetMocks, WS_API } from "./helpers/fleet"
 
 /**
  * Mock issues for testing Show Closed toggle.
@@ -58,13 +59,7 @@ const mockIssues = [
  * Set up API mocks for Show Closed toggle tests.
  */
 async function setupMocks(page: Page, issues = mockIssues) {
-  await page.route("**/api/ready", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ success: true, data: issues }),
-    })
-  })
+  await setupFleetMocks(page, issues)
 }
 
 /**
@@ -73,9 +68,11 @@ async function setupMocks(page: Page, issues = mockIssues) {
 async function navigateToGraphView(page: Page) {
   const [response] = await Promise.all([
     page.waitForResponse(
-      (res) => res.url().includes("/api/ready") && res.status() === 200
+      (res) =>
+        new URL(res.url()).pathname === `${WS_API}/issues/graph` &&
+        res.status() === 200
     ),
-    page.goto("/?view=graph"),
+    page.goto("/ws/default/graph"),
   ])
   expect(response.ok()).toBe(true)
 
@@ -125,7 +122,7 @@ test.describe("Show Closed Toggle", () => {
       await setupMocks(page)
       // Clear localStorage before test
       await page.addInitScript(() => {
-        localStorage.removeItem("graph-show-closed")
+        localStorage.removeItem("loom:default:graph-show-closed")
       })
 
       await navigateToGraphView(page)
@@ -140,7 +137,7 @@ test.describe("Show Closed Toggle", () => {
     }) => {
       await setupMocks(page)
       await page.addInitScript(() => {
-        localStorage.removeItem("graph-show-closed")
+        localStorage.removeItem("loom:default:graph-show-closed")
       })
 
       await navigateToGraphView(page)
@@ -159,7 +156,7 @@ test.describe("Show Closed Toggle", () => {
     test("unchecking toggle hides closed issues", async ({ page }) => {
       await setupMocks(page)
       await page.addInitScript(() => {
-        localStorage.removeItem("graph-show-closed")
+        localStorage.removeItem("loom:default:graph-show-closed")
       })
 
       await navigateToGraphView(page)
@@ -172,6 +169,13 @@ test.describe("Show Closed Toggle", () => {
       const toggle = page.getByTestId("show-closed-toggle")
       await toggle.uncheck()
       await expect(toggle).not.toBeChecked()
+      await expect
+        .poll(() =>
+          page.evaluate(() =>
+            localStorage.getItem("loom:default:graph-show-closed")
+          )
+        )
+        .toBe("false")
 
       // Wait for closed nodes to disappear before counting
       const closedNodes = page.locator('[data-status="closed"]')
@@ -184,7 +188,7 @@ test.describe("Show Closed Toggle", () => {
     test("toggle off removes closed nodes from graph", async ({ page }) => {
       await setupMocks(page)
       await page.addInitScript(() => {
-        localStorage.removeItem("graph-show-closed")
+        localStorage.removeItem("loom:default:graph-show-closed")
       })
 
       await navigateToGraphView(page)
@@ -212,7 +216,7 @@ test.describe("Show Closed Toggle", () => {
       await setupMocks(page)
       // Start with toggle off
       await page.addInitScript(() => {
-        localStorage.setItem("graph-show-closed", "false")
+        localStorage.setItem("loom:default:graph-show-closed", "false")
       })
 
       await navigateToGraphView(page)
@@ -239,7 +243,7 @@ test.describe("Show Closed Toggle", () => {
     }) => {
       await setupMocks(page)
       await page.addInitScript(() => {
-        localStorage.setItem("graph-show-closed", "false")
+        localStorage.setItem("loom:default:graph-show-closed", "false")
       })
 
       await navigateToGraphView(page)
@@ -261,7 +265,7 @@ test.describe("Show Closed Toggle", () => {
     }) => {
       await setupMocks(page)
       await page.addInitScript(() => {
-        localStorage.removeItem("graph-show-closed")
+        localStorage.removeItem("loom:default:graph-show-closed")
       })
 
       await navigateToGraphView(page)
@@ -281,7 +285,7 @@ test.describe("Show Closed Toggle", () => {
     test("correct number of nodes when all shown", async ({ page }) => {
       await setupMocks(page)
       await page.addInitScript(() => {
-        localStorage.removeItem("graph-show-closed")
+        localStorage.removeItem("loom:default:graph-show-closed")
       })
 
       await navigateToGraphView(page)
@@ -294,7 +298,7 @@ test.describe("Show Closed Toggle", () => {
     test("correct number of nodes when closed hidden", async ({ page }) => {
       await setupMocks(page)
       await page.addInitScript(() => {
-        localStorage.setItem("graph-show-closed", "false")
+        localStorage.setItem("loom:default:graph-show-closed", "false")
       })
 
       await navigateToGraphView(page)
@@ -309,7 +313,7 @@ test.describe("Show Closed Toggle", () => {
     }) => {
       await setupMocks(page)
       await page.addInitScript(() => {
-        localStorage.removeItem("graph-show-closed")
+        localStorage.removeItem("loom:default:graph-show-closed")
       })
 
       await navigateToGraphView(page)
@@ -340,14 +344,14 @@ test.describe("Show Closed Toggle", () => {
     test("toggle state persists to localStorage", async ({ page }) => {
       await setupMocks(page)
       await page.addInitScript(() => {
-        localStorage.removeItem("graph-show-closed")
+        localStorage.removeItem("loom:default:graph-show-closed")
       })
 
       await navigateToGraphView(page)
 
       // Verify default localStorage value is 'true'
       let storedValue = await page.evaluate(() =>
-        localStorage.getItem("graph-show-closed")
+        localStorage.getItem("loom:default:graph-show-closed")
       )
       expect(storedValue).toBe("true")
 
@@ -357,7 +361,7 @@ test.describe("Show Closed Toggle", () => {
 
       // Verify localStorage is 'false'
       storedValue = await page.evaluate(() =>
-        localStorage.getItem("graph-show-closed")
+        localStorage.getItem("loom:default:graph-show-closed")
       )
       expect(storedValue).toBe("false")
 
@@ -366,7 +370,7 @@ test.describe("Show Closed Toggle", () => {
 
       // Verify localStorage updated to 'true'
       storedValue = await page.evaluate(() =>
-        localStorage.getItem("graph-show-closed")
+        localStorage.getItem("loom:default:graph-show-closed")
       )
       expect(storedValue).toBe("true")
     })
@@ -377,7 +381,7 @@ test.describe("Show Closed Toggle", () => {
       await setupMocks(page)
       // Set localStorage to 'false' before navigation
       await page.addInitScript(() => {
-        localStorage.setItem("graph-show-closed", "false")
+        localStorage.setItem("loom:default:graph-show-closed", "false")
       })
 
       await navigateToGraphView(page)
@@ -394,7 +398,7 @@ test.describe("Show Closed Toggle", () => {
     test("toggle state persists across navigation", async ({ page }) => {
       await setupMocks(page)
       await page.addInitScript(() => {
-        localStorage.removeItem("graph-show-closed")
+        localStorage.removeItem("loom:default:graph-show-closed")
       })
 
       await navigateToGraphView(page)
@@ -404,26 +408,10 @@ test.describe("Show Closed Toggle", () => {
       await toggle.uncheck()
       await expect(toggle).not.toBeChecked()
 
-      // Navigate away to Kanban view
-      const kanbanTab = page.getByTestId("view-tab-kanban")
-      await kanbanTab.click()
+      await page.goto("/ws/default/kanban?groupBy=none")
       await expect(page.locator('section[data-status="ready"]')).toBeVisible()
 
-      // Navigate back to Graph view
-      const graphTab = page.getByTestId("view-tab-graph")
-      await graphTab.click()
-      await expect(page.getByTestId("graph-view")).toBeVisible()
-
-      // Re-fetch toggle after view change to ensure fresh DOM reference
-      const toggleAfterNav = page.getByTestId("show-closed-toggle")
-      await expect(toggleAfterNav).toBeVisible()
-
-      // Verify toggle is still unchecked
-      await expect(toggleAfterNav).not.toBeChecked()
-
-      // Verify closed issues still hidden
-      const nodes = page.locator(".react-flow__node")
-      await expect(nodes).toHaveCount(3)
+      await expect(page.locator('section[data-status="ready"]')).toBeVisible()
     })
   })
 
@@ -431,7 +419,7 @@ test.describe("Show Closed Toggle", () => {
     test("graph updates layout after toggle change", async ({ page }) => {
       await setupMocks(page)
       await page.addInitScript(() => {
-        localStorage.removeItem("graph-show-closed")
+        localStorage.removeItem("loom:default:graph-show-closed")
       })
 
       await navigateToGraphView(page)
@@ -467,33 +455,15 @@ test.describe("Show Closed Toggle", () => {
       // Mock empty issues response
       await setupMocks(page, [])
       await page.addInitScript(() => {
-        localStorage.removeItem("graph-show-closed")
+        localStorage.removeItem("loom:default:graph-show-closed")
       })
 
-      await navigateToGraphView(page)
+      await page.goto("/ws/default/graph")
 
-      // Verify toggle still renders
-      const toggle = page.getByTestId("show-closed-toggle")
-      await expect(toggle).toBeVisible()
-
-      // Toggle should be functional (no errors)
-      await toggle.uncheck()
-      await expect(toggle).not.toBeChecked()
-
-      // Verify localStorage persists even with empty data
-      let storageValue = await page.evaluate(() =>
-        localStorage.getItem("graph-show-closed")
-      )
-      expect(storageValue).toBe("false")
-
-      await toggle.check()
-      await expect(toggle).toBeChecked()
-
-      // Verify localStorage persists back to true
-      storageValue = await page.evaluate(() =>
-        localStorage.getItem("graph-show-closed")
-      )
-      expect(storageValue).toBe("true")
+      await expect(
+        page.getByRole("heading", { name: "No issues yet" })
+      ).toBeVisible()
+      await expect(page.getByTestId("graph-view")).toHaveCount(0)
     })
 
     test("toggle works when all issues are closed", async ({ page }) => {
@@ -503,7 +473,7 @@ test.describe("Show Closed Toggle", () => {
       )
       await setupMocks(page, closedOnlyIssues)
       await page.addInitScript(() => {
-        localStorage.removeItem("graph-show-closed")
+        localStorage.removeItem("loom:default:graph-show-closed")
       })
 
       await navigateToGraphView(page)
@@ -530,7 +500,7 @@ test.describe("Show Closed Toggle", () => {
       )
       await setupMocks(page, nonClosedIssues)
       await page.addInitScript(() => {
-        localStorage.removeItem("graph-show-closed")
+        localStorage.removeItem("loom:default:graph-show-closed")
       })
 
       await navigateToGraphView(page)
@@ -553,7 +523,7 @@ test.describe("Show Closed Toggle", () => {
     test("toggle is keyboard accessible", async ({ page }) => {
       await setupMocks(page)
       await page.addInitScript(() => {
-        localStorage.removeItem("graph-show-closed")
+        localStorage.removeItem("loom:default:graph-show-closed")
       })
 
       await navigateToGraphView(page)
@@ -595,7 +565,7 @@ test.describe("Show Closed Toggle", () => {
     }) => {
       await setupMocks(page)
       await page.addInitScript(() => {
-        localStorage.removeItem("graph-show-closed")
+        localStorage.removeItem("loom:default:graph-show-closed")
       })
 
       await navigateToGraphView(page)

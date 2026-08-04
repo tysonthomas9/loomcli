@@ -5,7 +5,7 @@
 
 import type { KeyboardEvent, ChangeEvent, MouseEvent } from "react";
 
-import type { BlockedInfo } from "@/components/KanbanBoard";
+import type { BlockedInfo } from "@/types/issue";
 import type { Issue } from "@/types";
 
 import { renderCellContent } from "./cellRenderers";
@@ -39,6 +39,8 @@ export interface IssueRowProps<T extends Issue> {
   isBlocked?: boolean | undefined;
   /** Blocked info for rendering the blocked cell */
   blockedInfo?: BlockedInfo | undefined;
+  /** Search term for title highlighting */
+  searchTerm?: string | undefined;
 }
 
 /**
@@ -56,6 +58,7 @@ export function IssueRow<T extends Issue>({
   onSelectionChange,
   isBlocked = false,
   blockedInfo,
+  searchTerm,
 }: IssueRowProps<T>) {
   const handleClick = () => {
     if (isClickable && onClick) {
@@ -125,7 +128,10 @@ export function IssueRow<T extends Issue>({
             style={{ textAlign: column.align ?? "left" }}
             data-column={column.id}
           >
-            {renderCellContent(column.id, value, issue, { blockedInfo })}
+            {renderCellContent(column.id, value, issue, {
+              blockedInfo,
+              searchTerm,
+            })}
           </td>
         );
       })}

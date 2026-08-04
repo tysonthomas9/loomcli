@@ -1,4 +1,34 @@
-import { test, expect, Page } from "@playwright/test"
+import { test, expect, Page } from "@playwright/test";
+
+const WORKSPACE_ID = "default";
+const WS_API = `/api/workspaces/${WORKSPACE_ID}`;
+
+function ok<T>(data: T) {
+  return { success: true, data };
+}
+
+function workspaceData() {
+  return {
+    id: WORKSPACE_ID,
+    name: "Default",
+    path: "/tmp/default",
+    repos: [],
+    groups: [],
+    agents: [],
+    workspaces: [
+      {
+        id: WORKSPACE_ID,
+        name: "Default",
+        path: "/tmp/default",
+        active: true,
+        repo_count: 0,
+        is_default: true,
+      },
+    ],
+    workspace_order: [WORKSPACE_ID],
+    default_workspace: "Default",
+  };
+}
 
 /**
  * E2E tests for IssueDetailPanel open/close behavior.
@@ -40,17 +70,17 @@ const mockIssues = [
     created_at: "2026-01-27T12:00:00Z",
     updated_at: "2026-01-27T12:00:00Z",
   },
-]
+];
 
 /**
- * Get IssueDetails for a mock issue (adds dependencies/dependents for GET /api/issues/{id}).
+ * Get IssueDetails for a mock issue (adds dependencies/dependents for issue detail GET).
  */
 function getMockIssueDetails(issue: (typeof mockIssues)[0]) {
   return {
     ...issue,
     dependencies: [],
     dependents: [],
-  }
+  };
 }
 
 /**
@@ -59,32 +89,77 @@ function getMockIssueDetails(issue: (typeof mockIssues)[0]) {
 async function setupMocks(
   page: Page,
   options?: {
-    getDelay?: number
-    getError?: boolean
-  }
+    getDelay?: number;
+    getError?: boolean;
+  },
 ) {
+  await page.route("**/*", async (route) => {
+    const request = route.request();
+    const method = request.method();
+    const pathname = new URL(request.url()).pathname;
 
-  // Mock /api/ready to return our test issues
-  await page.route("**/api/ready", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        success: true,
-        data: mockIssues,
-      }),
-    })
-  })
-
-  // Mock GET /api/issues/{id} to return issue details
-  await page.route("**/api/issues/*", async (route) => {
-    const request = route.request()
-    const method = request.method()
-    const url = request.url()
-
-    if (method === "GET") {
+    if (pathname === "/api/config") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ mode: "open" }),
+      });
+    } else if (
+      pathname === "/api/workspaces/active" ||
+      pathname === `/api/workspaces/${WORKSPACE_ID}`
+    ) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(ok(workspaceData())),
+      });
+    } else if (
+      pathname === `${WS_API}/issues` ||
+      pathname === `${WS_API}/ready`
+    ) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(ok(mockIssues)),
+      });
+    } else if (pathname === `${WS_API}/stats`) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          total_issues: mockIssues.length,
+          open_issues: mockIssues.filter((i) => i.status === "open").length,
+          in_progress_issues: mockIssues.filter(
+            (i) => i.status === "in_progress",
+          ).length,
+          closed_issues: mockIssues.filter((i) => i.status === "closed").length,
+          blocked_issues: 0,
+          deferred_issues: 0,
+          ready_issues: mockIssues.filter((i) => i.status === "open").length,
+          tombstone_issues: 0,
+          pinned_issues: 0,
+          epics_eligible_for_closure: 0,
+          average_lead_time_hours: 0,
+        }),
+      });
+    } else if (
+      pathname === `${WS_API}/blocked` ||
+      pathname === `${WS_API}/terminal/tabs`
+    ) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(ok([])),
+      });
+    } else if (pathname === `${WS_API}/terminal/state`) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ active_tab: "" }),
+      });
+    } else if (method === "GET" && pathname.startsWith(`${WS_API}/issues/`)) {
       if (options?.getDelay) {
-        await new Promise((r) => setTimeout(r, options.getDelay))
+        await new Promise((r) => setTimeout(r, options.getDelay));
       }
 
       if (options?.getError) {
@@ -92,48 +167,54 @@ async function setupMocks(
           status: 500,
           contentType: "application/json",
           body: JSON.stringify({ error: "Internal server error" }),
-        })
-        return
+        });
+        return;
       }
 
-      const idMatch = url.match(/\/api\/issues\/([^/?]+)/)
-      const id = idMatch ? idMatch[1] : null
-      const issue = mockIssues.find((i) => i.id === id)
+      const id = pathname.split("/").pop();
+      const issue = mockIssues.find((i) => i.id === id);
 
       if (issue) {
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify(getMockIssueDetails(issue)),
-        })
+          body: JSON.stringify(ok(getMockIssueDetails(issue))),
+        });
       } else {
         await route.fulfill({
           status: 404,
           contentType: "application/json",
-          body: JSON.stringify({ error: "Not found" }),
-        })
+          body: JSON.stringify({ success: false, error: "Not found" }),
+        });
       }
+    } else if (pathname.startsWith("/api/") && pathname.includes("/events")) {
+      await route.abort();
     } else {
-      await route.continue()
+      await route.continue();
     }
-  })
+  });
 }
 
 /**
  * Navigate to the app and wait for issues to load.
  */
 async function navigateToApp(page: Page, view?: "kanban" | "table") {
-  const url = view === "table" ? "/?view=table" : "/"
+  const url =
+    view === "table"
+      ? `/ws/${WORKSPACE_ID}/table`
+      : `/ws/${WORKSPACE_ID}/kanban`;
 
   await Promise.all([
-    page.waitForResponse((res) => res.url().includes("/api/ready")),
+    page.waitForResponse(
+      (res) => new URL(res.url()).pathname === `${WS_API}/issues`,
+    ),
     page.goto(url),
-  ])
+  ]);
 
   // Wait for loading to complete
   await expect(page.getByTestId("loading-container")).not.toBeVisible({
     timeout: 5000,
-  })
+  });
 }
 
 /**
@@ -147,482 +228,540 @@ function getPanel(page: Page) {
     issueId: page.getByTestId("issue-id"),
     loading: page.getByTestId("panel-loading"),
     error: page.getByTestId("panel-error"),
-  }
+  };
 }
 
 test.describe("IssueDetailPanel - Open from Kanban", () => {
   test("click issue card opens panel with slide animation", async ({
     page,
   }) => {
-    await setupMocks(page)
-    await navigateToApp(page)
+    await setupMocks(page);
+    await navigateToApp(page);
 
     // Find and click an issue card
-    const issueCard = page.locator("article").filter({ hasText: "First Test Issue" })
-    await expect(issueCard).toBeVisible()
-    await issueCard.click()
+    const issueCard = page
+      .locator("article")
+      .filter({ hasText: "First Test Issue" });
+    await expect(issueCard).toBeVisible();
+    await issueCard.click();
 
     // Wait for panel to be visible and have data-state="open"
-    const { panel, overlay } = getPanel(page)
-    await expect(panel).toBeVisible()
-    await expect(panel).toHaveAttribute("data-state", "open")
+    const { panel, overlay } = getPanel(page);
+    await expect(panel).toBeVisible();
+    await expect(panel).toHaveAttribute("data-state", "open");
 
     // Verify overlay is visible (dimmed background)
-    await expect(overlay).toBeVisible()
-  })
+    await expect(overlay).toBeVisible();
+  });
 
   test("panel shows loading then issue data", async ({ page }) => {
-    // Add delay to mock GET /api/issues/{id}
-    await setupMocks(page, { getDelay: 500 })
-    await navigateToApp(page)
+    // Add delay to mock issue detail GET.
+    await setupMocks(page, { getDelay: 500 });
+    await navigateToApp(page);
 
     // Click issue card
-    const issueCard = page.locator("article").filter({ hasText: "First Test Issue" })
-    await issueCard.click()
+    const issueCard = page
+      .locator("article")
+      .filter({ hasText: "First Test Issue" });
+    await issueCard.click();
 
     // Verify loading indicator appears
-    const { loading, panel } = getPanel(page)
-    await expect(panel).toHaveAttribute("data-loading", "true")
+    const { loading, panel } = getPanel(page);
+    await expect(panel).toHaveAttribute("data-loading", "true");
 
     // Wait for loading to complete
-    await expect(loading).not.toBeVisible({ timeout: 5000 })
-    await expect(panel).toHaveAttribute("data-loading", "false")
+    await expect(loading).not.toBeVisible({ timeout: 5000 });
+    await expect(panel).toHaveAttribute("data-loading", "false");
 
     // Verify issue data is displayed
-    await expect(page.getByTestId("issue-id")).toContainText("panel-test-1")
-  })
-})
+    await expect(page.getByTestId("issue-id")).toContainText("panel-test-1");
+  });
+});
 
 test.describe("IssueDetailPanel - Close with X Button", () => {
   test("clicking X button closes panel", async ({ page }) => {
-    await setupMocks(page)
-    await navigateToApp(page)
+    await setupMocks(page);
+    await navigateToApp(page);
 
     // Open panel
-    const issueCard = page.locator("article").filter({ hasText: "First Test Issue" })
-    await issueCard.click()
+    const issueCard = page
+      .locator("article")
+      .filter({ hasText: "First Test Issue" });
+    await issueCard.click();
 
-    const { panel, closeButton, overlay } = getPanel(page)
-    await expect(panel).toHaveAttribute("data-state", "open")
+    const { panel, closeButton, overlay } = getPanel(page);
+    await expect(panel).toHaveAttribute("data-state", "open");
 
     // Click close button
-    await closeButton.click()
+    await closeButton.click();
 
     // Verify panel closes (wait for animation)
-    await expect(panel).toHaveAttribute("data-state", "closed")
-    await expect(overlay).toHaveAttribute("aria-hidden", "true")
-  })
-})
+    await expect(panel).toHaveAttribute("data-state", "closed");
+    await expect(overlay).toHaveAttribute("aria-hidden", "true");
+  });
+});
 
 test.describe("IssueDetailPanel - Close with Escape", () => {
   test("pressing Escape closes panel", async ({ page }) => {
-    await setupMocks(page)
-    await navigateToApp(page)
+    await setupMocks(page);
+    await navigateToApp(page);
 
     // Open panel
-    const issueCard = page.locator("article").filter({ hasText: "First Test Issue" })
-    await issueCard.click()
+    const issueCard = page
+      .locator("article")
+      .filter({ hasText: "First Test Issue" });
+    await issueCard.click();
 
-    const { panel, overlay } = getPanel(page)
-    await expect(panel).toHaveAttribute("data-state", "open")
+    const { panel, overlay } = getPanel(page);
+    await expect(panel).toHaveAttribute("data-state", "open");
 
     // Press Escape
-    await page.keyboard.press("Escape")
+    await page.keyboard.press("Escape");
 
     // Verify panel closes
-    await expect(panel).toHaveAttribute("data-state", "closed")
-    await expect(overlay).toHaveAttribute("aria-hidden", "true")
-  })
-})
+    await expect(panel).toHaveAttribute("data-state", "closed");
+    await expect(overlay).toHaveAttribute("aria-hidden", "true");
+  });
+});
 
 test.describe("IssueDetailPanel - Close with Backdrop Click", () => {
   test("clicking backdrop overlay closes panel", async ({ page }) => {
-    await setupMocks(page)
-    await navigateToApp(page)
+    await setupMocks(page);
+    await navigateToApp(page);
 
     // Open panel
-    const issueCard = page.locator("article").filter({ hasText: "First Test Issue" })
-    await issueCard.click()
+    const issueCard = page
+      .locator("article")
+      .filter({ hasText: "First Test Issue" });
+    await issueCard.click();
 
-    const { panel, overlay } = getPanel(page)
-    await expect(panel).toHaveAttribute("data-state", "open")
+    const { panel, overlay } = getPanel(page);
+    await expect(panel).toHaveAttribute("data-state", "open");
 
     // Get panel bounding box to click outside of it
-    const panelBox = await panel.boundingBox()
-    if (!panelBox) throw new Error("Could not get panel bounding box")
+    const panelBox = await panel.boundingBox();
+    if (!panelBox) throw new Error("Could not get panel bounding box");
 
-    // Click to the left of the panel (on the overlay)
-    await page.mouse.click(10, panelBox.y + panelBox.height / 2)
+    // Click the overlay/backdrop directly.
+    await overlay.click({ position: { x: 10, y: panelBox.height / 2 } });
 
     // Verify panel closes
-    await expect(panel).toHaveAttribute("data-state", "closed")
-    await expect(overlay).toHaveAttribute("aria-hidden", "true")
-  })
+    await expect(panel).toHaveAttribute("data-state", "closed");
+    await expect(overlay).toHaveAttribute("aria-hidden", "true");
+  });
 
   test("clicking inside panel does NOT close it", async ({ page }) => {
-    await setupMocks(page)
-    await navigateToApp(page)
+    await setupMocks(page);
+    await navigateToApp(page);
 
     // Open panel
-    const issueCard = page.locator("article").filter({ hasText: "First Test Issue" })
-    await issueCard.click()
+    const issueCard = page
+      .locator("article")
+      .filter({ hasText: "First Test Issue" });
+    await issueCard.click();
 
-    const { panel } = getPanel(page)
-    await expect(panel).toHaveAttribute("data-state", "open")
+    const { panel } = getPanel(page);
+    await expect(panel).toHaveAttribute("data-state", "open");
 
     // Wait for issue data to load
-    await expect(page.getByTestId("issue-id")).toBeVisible()
+    await expect(page.getByTestId("issue-id")).toBeVisible();
 
     // Click inside panel content
-    await page.getByTestId("issue-id").click()
+    await page.getByTestId("issue-id").click();
 
     // Verify panel remains open
-    await expect(panel).toHaveAttribute("data-state", "open")
-  })
-})
+    await expect(panel).toHaveAttribute("data-state", "open");
+  });
+});
 
 test.describe("IssueDetailPanel - Issue Data Display", () => {
   test("panel displays correct issue ID and title", async ({ page }) => {
-    await setupMocks(page)
-    await navigateToApp(page)
+    await setupMocks(page);
+    await navigateToApp(page);
 
     // Open panel for specific issue
-    const issueCard = page.locator("article").filter({ hasText: "First Test Issue" })
-    await issueCard.click()
+    const issueCard = page
+      .locator("article")
+      .filter({ hasText: "First Test Issue" });
+    await issueCard.click();
 
     // Wait for data to load
-    await expect(page.getByTestId("issue-id")).toBeVisible()
+    await expect(page.getByTestId("issue-id")).toBeVisible();
 
     // Verify issue ID and title
     // Title is shown in EditableTitle component with "editable-title-display" test ID
-    await expect(page.getByTestId("issue-id")).toContainText("panel-test-1")
-    await expect(page.getByTestId("editable-title-display")).toContainText("First Test Issue")
-  })
+    await expect(page.getByTestId("issue-id")).toContainText("panel-test-1");
+    await expect(page.getByTestId("editable-title-display")).toContainText(
+      "First Test Issue",
+    );
+  });
 
   test("panel displays issue description", async ({ page }) => {
-    await setupMocks(page)
-    await navigateToApp(page)
+    await setupMocks(page);
+    await navigateToApp(page);
 
     // Open panel
-    const issueCard = page.locator("article").filter({ hasText: "First Test Issue" })
-    await issueCard.click()
+    const issueCard = page
+      .locator("article")
+      .filter({ hasText: "First Test Issue" });
+    await issueCard.click();
 
     // Wait for data to load
-    await expect(page.getByTestId("issue-id")).toBeVisible()
+    await expect(page.getByTestId("issue-id")).toBeVisible();
 
     // Verify description section is visible
-    await expect(page.getByText("Description for first issue")).toBeVisible()
-  })
-})
+    await expect(page.getByText("Description for first issue")).toBeVisible();
+  });
+});
 
 test.describe("IssueDetailPanel - Switch Issues", () => {
-  test("closing panel then clicking different issue shows new content", async ({ page }) => {
-    await setupMocks(page)
-    await navigateToApp(page)
+  test("closing panel then clicking different issue shows new content", async ({
+    page,
+  }) => {
+    await setupMocks(page);
+    await navigateToApp(page);
 
     // Open panel for first issue
-    const firstCard = page.locator("article").filter({ hasText: "First Test Issue" })
-    await firstCard.click()
+    const firstCard = page
+      .locator("article")
+      .filter({ hasText: "First Test Issue" });
+    await firstCard.click();
 
-    const { panel, closeButton } = getPanel(page)
-    await expect(panel).toHaveAttribute("data-state", "open")
-    await expect(page.getByTestId("issue-id")).toContainText("panel-test-1")
+    const { panel, closeButton } = getPanel(page);
+    await expect(panel).toHaveAttribute("data-state", "open");
+    await expect(page.getByTestId("issue-id")).toContainText("panel-test-1");
 
     // Close panel
-    await closeButton.click()
-    await expect(panel).toHaveAttribute("data-state", "closed")
+    await closeButton.click();
+    await expect(panel).toHaveAttribute("data-state", "closed");
 
     // Click different issue card
-    const secondCard = page.locator("article").filter({ hasText: "Second Test Issue" })
-    await secondCard.click()
+    const secondCard = page
+      .locator("article")
+      .filter({ hasText: "Second Test Issue" });
+    const secondIssueResponse = page.waitForResponse(
+      (res) => new URL(res.url()).pathname === `${WS_API}/issues/panel-test-2`,
+    );
+    await secondCard.click();
 
     // Wait for API call for second issue
-    await page.waitForResponse((res) =>
-      res.url().includes("/api/issues/panel-test-2")
-    )
+    await secondIssueResponse;
 
     // Verify panel shows second issue data
-    await expect(page.getByTestId("issue-id")).toContainText("panel-test-2")
-    await expect(page.getByTestId("editable-title-display")).toContainText("Second Test Issue")
+    await expect(page.getByTestId("issue-id")).toContainText("panel-test-2");
+    await expect(page.getByTestId("editable-title-display")).toContainText(
+      "Second Test Issue",
+    );
 
     // Panel should be open
-    await expect(panel).toHaveAttribute("data-state", "open")
-  })
+    await expect(panel).toHaveAttribute("data-state", "open");
+  });
 
-  test("reopening same issue after close does not refetch if cached", async ({ page }) => {
-    let fetchCount = 0
+  test("reopening same issue after close does not refetch if cached", async ({
+    page,
+  }) => {
+    let fetchCount = 0;
 
-    await setupMocks(page)
+    await setupMocks(page);
 
     // Override issues route to count fetches
-    await page.route("**/api/issues/panel-test-1", async (route) => {
-      fetchCount++
-      const issue = mockIssues.find((i) => i.id === "panel-test-1")
+    await page.route("**/*", async (route) => {
+      const pathname = new URL(route.request().url()).pathname;
+      if (pathname !== `${WS_API}/issues/panel-test-1`) {
+        await route.fallback();
+        return;
+      }
+      fetchCount++;
+      const issue = mockIssues.find((i) => i.id === "panel-test-1");
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify(getMockIssueDetails(issue!)),
-      })
-    })
+        body: JSON.stringify(ok(getMockIssueDetails(issue!))),
+      });
+    });
 
-    await navigateToApp(page)
+    await navigateToApp(page);
 
-    const { panel, closeButton, overlay } = getPanel(page)
+    const { panel, closeButton, overlay } = getPanel(page);
 
     // Open panel for first issue
-    const issueCard = page.locator("article").filter({ hasText: "First Test Issue" })
-    await issueCard.click()
+    const issueCard = page
+      .locator("article")
+      .filter({ hasText: "First Test Issue" });
+    await issueCard.click();
 
     // Wait for panel to open and data to load
-    await expect(page.getByTestId("issue-id")).toContainText("panel-test-1")
-    expect(fetchCount).toBe(1)
+    await expect(page.getByTestId("issue-id")).toContainText("panel-test-1");
+    expect(fetchCount).toBe(1);
 
     // Close the panel
-    await closeButton.click()
+    await closeButton.click();
 
     // Wait for panel to fully close using state-based assertion
-    await expect(panel).toHaveAttribute("data-state", "closed")
-    await expect(overlay).toHaveAttribute("aria-hidden", "true")
+    await expect(panel).toHaveAttribute("data-state", "closed");
+    await expect(overlay).toHaveAttribute("aria-hidden", "true");
 
     // Click the same issue again
-    await issueCard.click()
+    await issueCard.click();
 
     // Wait for panel to reopen
-    await expect(page.getByTestId("issue-id")).toContainText("panel-test-1")
+    await expect(page.getByTestId("issue-id")).toContainText("panel-test-1");
 
     // Note: Current implementation may refetch on each open.
     // The test verifies the panel reopens correctly with the correct issue.
-    expect(fetchCount).toBeGreaterThanOrEqual(1)
-  })
-
-})
+    expect(fetchCount).toBeGreaterThanOrEqual(1);
+  });
+});
 
 test.describe("IssueDetailPanel - Table View", () => {
   test("clicking table row opens panel", async ({ page }) => {
-    await setupMocks(page)
-    await navigateToApp(page, "table")
+    await setupMocks(page);
+    await navigateToApp(page, "table");
 
     // Find and click a row in the table
-    const tableRow = page.locator("tr").filter({ hasText: "First Test Issue" })
-    await expect(tableRow).toBeVisible()
-    await tableRow.click()
+    const tableRow = page.locator("tr").filter({ hasText: "First Test Issue" });
+    await expect(tableRow).toBeVisible();
+    await tableRow.click();
 
     // Verify panel opens with correct issue data
-    const { panel } = getPanel(page)
-    await expect(panel).toHaveAttribute("data-state", "open")
-    await expect(page.getByTestId("issue-id")).toContainText("panel-test-1")
-  })
+    const { panel } = getPanel(page);
+    await expect(panel).toHaveAttribute("data-state", "open");
+    await expect(page.getByTestId("issue-id")).toContainText("panel-test-1");
+  });
 
   test("all close methods work in table view", async ({ page }) => {
-    await setupMocks(page)
-    await navigateToApp(page, "table")
+    await setupMocks(page);
+    await navigateToApp(page, "table");
 
-    const { panel, closeButton } = getPanel(page)
+    const { panel, closeButton } = getPanel(page);
 
     // Test X button
-    const tableRow = page.locator("tr").filter({ hasText: "First Test Issue" })
-    await tableRow.click()
-    await expect(panel).toHaveAttribute("data-state", "open")
-    await closeButton.click()
-    await expect(panel).toHaveAttribute("data-state", "closed")
+    const tableRow = page.locator("tr").filter({ hasText: "First Test Issue" });
+    await tableRow.click();
+    await expect(panel).toHaveAttribute("data-state", "open");
+    await closeButton.click();
+    await expect(panel).toHaveAttribute("data-state", "closed");
 
     // Test Escape key
-    await tableRow.click()
-    await expect(panel).toHaveAttribute("data-state", "open")
-    await page.keyboard.press("Escape")
-    await expect(panel).toHaveAttribute("data-state", "closed")
+    await tableRow.click();
+    await expect(panel).toHaveAttribute("data-state", "open");
+    await page.keyboard.press("Escape");
+    await expect(panel).toHaveAttribute("data-state", "closed");
 
     // Test backdrop click
-    await tableRow.click()
-    await expect(panel).toHaveAttribute("data-state", "open")
-    const panelBox = await panel.boundingBox()
-    if (!panelBox) throw new Error("Could not get panel bounding box")
-    await page.mouse.click(10, panelBox.y + panelBox.height / 2)
-    await expect(panel).toHaveAttribute("data-state", "closed")
-  })
-})
+    await tableRow.click();
+    await expect(panel).toHaveAttribute("data-state", "open");
+    const panelBox = await panel.boundingBox();
+    if (!panelBox) throw new Error("Could not get panel bounding box");
+    await page
+      .getByTestId("issue-detail-overlay")
+      .click({ position: { x: 10, y: panelBox.height / 2 } });
+    await expect(panel).toHaveAttribute("data-state", "closed");
+  });
+});
 
 test.describe("IssueDetailPanel - Rapid Interactions", () => {
   test("rapid open/close maintains correct state", async ({ page }) => {
-    await setupMocks(page)
-    await navigateToApp(page)
+    await setupMocks(page);
+    await navigateToApp(page);
 
-    const { panel, closeButton, overlay } = getPanel(page)
-    const issueCard = page.locator("article").filter({ hasText: "First Test Issue" })
+    const { panel, closeButton, overlay } = getPanel(page);
+    const issueCard = page
+      .locator("article")
+      .filter({ hasText: "First Test Issue" });
 
     // Open panel
-    await issueCard.click()
-    await expect(panel).toHaveAttribute("data-state", "open")
+    await issueCard.click();
+    await expect(panel).toHaveAttribute("data-state", "open");
 
     // Immediately close
-    await closeButton.click()
+    await closeButton.click();
 
     // Wait for panel to fully close using state-based assertions
-    await expect(panel).toHaveAttribute("data-state", "closed")
-    await expect(overlay).toHaveAttribute("aria-hidden", "true")
+    await expect(panel).toHaveAttribute("data-state", "closed");
+    await expect(overlay).toHaveAttribute("aria-hidden", "true");
 
     // Immediately open different issue
-    const secondCard = page.locator("article").filter({ hasText: "Second Test Issue" })
-    await secondCard.click()
+    const secondCard = page
+      .locator("article")
+      .filter({ hasText: "Second Test Issue" });
+    await secondCard.click();
 
     // Verify final state is correct (second issue displayed)
-    await expect(panel).toHaveAttribute("data-state", "open")
-    await expect(page.getByTestId("issue-id")).toContainText("panel-test-2")
-  })
+    await expect(panel).toHaveAttribute("data-state", "open");
+    await expect(page.getByTestId("issue-id")).toContainText("panel-test-2");
+  });
 
-  test("opening issues sequentially shows each correctly", async ({
-    page,
-  }) => {
-    await setupMocks(page)
-    await navigateToApp(page)
+  test("opening issues sequentially shows each correctly", async ({ page }) => {
+    await setupMocks(page);
+    await navigateToApp(page);
 
-    const { panel, closeButton, overlay } = getPanel(page)
+    const { panel, closeButton, overlay } = getPanel(page);
 
     // Click first issue
-    const firstCard = page.locator("article").filter({ hasText: "First Test Issue" })
-    await firstCard.click()
-    await expect(panel).toHaveAttribute("data-state", "open")
-    await expect(page.getByTestId("issue-id")).toContainText("panel-test-1")
+    const firstCard = page
+      .locator("article")
+      .filter({ hasText: "First Test Issue" });
+    await firstCard.click();
+    await expect(panel).toHaveAttribute("data-state", "open");
+    await expect(page.getByTestId("issue-id")).toContainText("panel-test-1");
 
     // Close and wait for panel to fully close
-    await closeButton.click()
-    await expect(panel).toHaveAttribute("data-state", "closed")
-    await expect(overlay).toHaveAttribute("aria-hidden", "true")
+    await closeButton.click();
+    await expect(panel).toHaveAttribute("data-state", "closed");
+    await expect(overlay).toHaveAttribute("aria-hidden", "true");
 
     // Click second issue
-    const secondCard = page.locator("article").filter({ hasText: "Second Test Issue" })
-    await secondCard.click()
-    await expect(page.getByTestId("issue-id")).toContainText("panel-test-2")
+    const secondCard = page
+      .locator("article")
+      .filter({ hasText: "Second Test Issue" });
+    await secondCard.click();
+    await expect(page.getByTestId("issue-id")).toContainText("panel-test-2");
 
     // Close and wait for panel to fully close
-    await closeButton.click()
-    await expect(panel).toHaveAttribute("data-state", "closed")
-    await expect(overlay).toHaveAttribute("aria-hidden", "true")
+    await closeButton.click();
+    await expect(panel).toHaveAttribute("data-state", "closed");
+    await expect(overlay).toHaveAttribute("aria-hidden", "true");
 
     // Click third issue
-    const thirdCard = page.locator("article").filter({ hasText: "Third Test Issue" })
-    await thirdCard.click()
+    const thirdCard = page
+      .locator("article")
+      .filter({ hasText: "Third Test Issue" });
+    await thirdCard.click();
 
     // Verify panel shows the last clicked issue
-    await expect(panel).toHaveAttribute("data-state", "open")
-    await expect(page.getByTestId("issue-id")).toContainText("panel-test-3")
-  })
-
-})
+    await expect(panel).toHaveAttribute("data-state", "open");
+    await expect(page.getByTestId("issue-id")).toContainText("panel-test-3");
+  });
+});
 
 test.describe("IssueDetailPanel - Error Handling", () => {
   test("displays error when fetch fails", async ({ page }) => {
-    await setupMocks(page, { getError: true })
-    await navigateToApp(page)
+    await setupMocks(page, { getError: true });
+    await navigateToApp(page);
 
     // Click issue card
-    const issueCard = page.locator("article").filter({ hasText: "First Test Issue" })
-    await issueCard.click()
+    const issueCard = page
+      .locator("article")
+      .filter({ hasText: "First Test Issue" });
+    await issueCard.click();
 
     // Verify error state displayed in panel
-    const { panel, error } = getPanel(page)
-    await expect(panel).toHaveAttribute("data-state", "open")
-    await expect(panel).toHaveAttribute("data-error", "true")
-    await expect(error).toBeVisible()
-  })
-})
+    const { panel, error } = getPanel(page);
+    await expect(panel).toHaveAttribute("data-state", "open");
+    await expect(panel).toHaveAttribute("data-error", "true");
+    await expect(error).toBeVisible();
+  });
+});
 
 test.describe("IssueDetailPanel - Focus Management", () => {
   test("panel receives focus when opened", async ({ page }) => {
-    await setupMocks(page)
-    await navigateToApp(page)
+    await setupMocks(page);
+    await navigateToApp(page);
 
     // Open panel
-    const issueCard = page.locator("article").filter({ hasText: "First Test Issue" })
-    await issueCard.click()
+    const issueCard = page
+      .locator("article")
+      .filter({ hasText: "First Test Issue" });
+    await issueCard.click();
 
-    const { panel } = getPanel(page)
-    await expect(panel).toHaveAttribute("data-state", "open")
+    const { panel } = getPanel(page);
+    await expect(panel).toHaveAttribute("data-state", "open");
 
     // Verify panel has focus
-    await expect(panel).toBeFocused()
-  })
+    await expect(panel).toBeFocused();
+  });
 
   test("focus returns to page when panel closes", async ({ page }) => {
-    await setupMocks(page)
-    await navigateToApp(page)
+    await setupMocks(page);
+    await navigateToApp(page);
 
-    const issueCard = page.locator("article").filter({ hasText: "First Test Issue" })
+    const issueCard = page
+      .locator("article")
+      .filter({ hasText: "First Test Issue" });
 
     // Click card to open panel
-    await issueCard.click()
+    await issueCard.click();
 
-    const { panel, closeButton } = getPanel(page)
-    await expect(panel).toHaveAttribute("data-state", "open")
-    await expect(panel).toBeFocused()
+    const { panel, closeButton } = getPanel(page);
+    await expect(panel).toHaveAttribute("data-state", "open");
+    await expect(panel).toBeFocused();
 
     // Close panel
-    await closeButton.click()
-    await expect(panel).toHaveAttribute("data-state", "closed")
+    await closeButton.click();
+    await expect(panel).toHaveAttribute("data-state", "closed");
 
     // Focus should not be on the panel anymore
     // Note: The component attempts to restore focus to the previously focused element
-    const focusedElement = await page.evaluate(() => document.activeElement?.tagName)
-    expect(focusedElement).not.toBe("ASIDE") // Panel should not have focus
-  })
-})
+    const focusedElement = await page.evaluate(
+      () => document.activeElement?.tagName,
+    );
+    expect(focusedElement).not.toBe("ASIDE"); // Panel should not have focus
+  });
+});
 
 test.describe("IssueDetailPanel - Scroll Lock", () => {
   test("body scroll is locked when panel is open", async ({ page }) => {
-    await setupMocks(page)
-    await navigateToApp(page)
+    await setupMocks(page);
+    await navigateToApp(page);
 
     // Open panel
-    const issueCard = page.locator("article").filter({ hasText: "First Test Issue" })
-    await issueCard.click()
+    const issueCard = page
+      .locator("article")
+      .filter({ hasText: "First Test Issue" });
+    await issueCard.click();
 
-    const { panel } = getPanel(page)
-    await expect(panel).toHaveAttribute("data-state", "open")
+    const { panel } = getPanel(page);
+    await expect(panel).toHaveAttribute("data-state", "open");
 
     // Verify body overflow is hidden
-    const overflow = await page.evaluate(() => document.body.style.overflow)
-    expect(overflow).toBe("hidden")
-  })
+    const overflow = await page.evaluate(() => document.body.style.overflow);
+    expect(overflow).toBe("hidden");
+  });
 
   test("body scroll is restored when panel closes", async ({ page }) => {
-    await setupMocks(page)
-    await navigateToApp(page)
+    await setupMocks(page);
+    await navigateToApp(page);
 
     // Open panel
-    const issueCard = page.locator("article").filter({ hasText: "First Test Issue" })
-    await issueCard.click()
+    const issueCard = page
+      .locator("article")
+      .filter({ hasText: "First Test Issue" });
+    await issueCard.click();
 
-    const { panel, closeButton } = getPanel(page)
-    await expect(panel).toHaveAttribute("data-state", "open")
+    const { panel, closeButton } = getPanel(page);
+    await expect(panel).toHaveAttribute("data-state", "open");
 
     // Close panel
-    await closeButton.click()
-    await expect(panel).toHaveAttribute("data-state", "closed")
+    await closeButton.click();
+    await expect(panel).toHaveAttribute("data-state", "closed");
 
     // Verify body overflow is restored (empty string means default)
-    const overflow = await page.evaluate(() => document.body.style.overflow)
-    expect(overflow).toBe("")
-  })
-})
+    const overflow = await page.evaluate(() => document.body.style.overflow);
+    expect(overflow).toBe("");
+  });
+});
 
 test.describe("IssueDetailPanel - Accessibility", () => {
   test("panel has correct ARIA attributes", async ({ page }) => {
-    await setupMocks(page)
-    await navigateToApp(page)
+    await setupMocks(page);
+    await navigateToApp(page);
 
     // Open panel
-    const issueCard = page.locator("article").filter({ hasText: "First Test Issue" })
-    await issueCard.click()
+    const issueCard = page
+      .locator("article")
+      .filter({ hasText: "First Test Issue" });
+    await issueCard.click();
 
-    const { panel } = getPanel(page)
-    await expect(panel).toHaveAttribute("data-state", "open")
+    const { panel } = getPanel(page);
+    await expect(panel).toHaveAttribute("data-state", "open");
 
     // Wait for issue data to load
-    await expect(page.getByTestId("issue-id")).toBeVisible()
+    await expect(page.getByTestId("issue-id")).toBeVisible();
 
     // Verify ARIA attributes
-    await expect(panel).toHaveAttribute("role", "dialog")
-    await expect(panel).toHaveAttribute("aria-modal", "true")
-    await expect(panel).toHaveAttribute("aria-label", /Details for/)
-  })
-})
+    await expect(panel).toHaveAttribute("role", "dialog");
+    await expect(panel).toHaveAttribute("aria-modal", "true");
+    await expect(panel).toHaveAttribute("aria-label", /Details for/);
+  });
+});

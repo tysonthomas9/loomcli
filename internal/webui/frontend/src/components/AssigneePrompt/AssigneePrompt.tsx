@@ -6,6 +6,12 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 
+import {
+  useFocusReturn,
+  useFocusTrap,
+  useRegisterEscapeLayer,
+  LAYER_MODAL,
+} from "@/hooks";
 import styles from "./AssigneePrompt.module.css";
 
 /**
@@ -43,32 +49,22 @@ export function AssigneePrompt({
   const inputRef = useRef<HTMLInputElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
 
-  // Reset input and focus when opening
+  // Focus management
+  useFocusReturn(isOpen);
+  useFocusTrap(modalRef, isOpen, {
+    initialFocus: inputRef,
+    activationDelay: 100,
+  });
+
+  // Reset input when opening
   useEffect(() => {
     if (isOpen) {
       setInputValue("");
-      // Focus input after modal transition
-      const timer = setTimeout(() => {
-        inputRef.current?.focus();
-      }, 100);
-      return () => clearTimeout(timer);
     }
   }, [isOpen]);
 
-  // Handle Escape key to skip
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onSkip();
-      }
-    };
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onSkip]);
+  // Handle Escape key to skip via global shortcut layer system
+  useRegisterEscapeLayer(LAYER_MODAL, onSkip, isOpen);
 
   // Handle form submission
   const handleSubmit = useCallback(

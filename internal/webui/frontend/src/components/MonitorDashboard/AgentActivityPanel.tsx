@@ -21,7 +21,7 @@ import styles from "./AgentActivityPanel.module.css";
  * Props for the AgentActivityPanel component.
  */
 export interface AgentActivityPanelProps {
-  /** Agent status data from useAgents */
+  /** Agent status data from agent store */
   agents: LoomAgentStatus[];
   /** Task info keyed by agent name (for titles) */
   agentTasks: Record<string, LoomTaskInfo>;
@@ -109,8 +109,7 @@ export function AgentActivityPanel({
           <span className={styles.emptyIcon}>🔌</span>
           <span className={styles.emptyText}>Loom server not running</span>
           <span className={styles.emptyHint}>
-            Start with:{" "}
-            <code className={styles.code}>loom serve --port 8081</code>
+            Start with: <code className={styles.code}>loom serve</code>
           </span>
           {onRetry && (
             <button className={styles.retryButton} onClick={onRetry}>

@@ -9,8 +9,11 @@
 
 import { lazy, Suspense } from "react";
 
-import type { ViewMode } from "@/components/ViewSwitcher";
-import { useAgents, useBlockedIssues } from "@/hooks";
+import { LoadingSkeleton } from "@/components";
+import type { ViewMode } from "@/types";
+import { useStore } from "zustand";
+
+import { useAgentStoreInstance, useBlockedIssues } from "@/hooks";
 import type { Issue } from "@/types";
 
 import { AgentActivityPanel } from "./AgentActivityPanel";
@@ -46,19 +49,20 @@ export function MonitorDashboard({
   onIssueClick,
   onAgentClick,
 }: MonitorDashboardProps): JSX.Element {
-  // Fetch agent status and stats
-  const {
-    agents,
-    agentTasks,
-    sync,
-    stats,
-    isLoading,
-    isConnected,
-    connectionState,
-    retryCountdown,
-    lastUpdated,
-    retryNow,
-  } = useAgents({ pollInterval: 5000 });
+  // Agent state from shared store (single polling loop via StoreProvider)
+  const agentStore = useAgentStoreInstance();
+  const agents = useStore(agentStore, (s) => s.agents);
+  const agentTasks = useStore(agentStore, (s) => s.agentTasks);
+  const sync = useStore(agentStore, (s) => s.sync);
+  const stats = useStore(agentStore, (s) => s.stats);
+  const isLoading = useStore(agentStore, (s) => s.isLoading);
+  const isConnected = useStore(agentStore, (s) => s.isConnected);
+  const connectionState = useStore(agentStore, (s) => s.connectionState);
+  const retryCountdown = useStore(agentStore, (s) => s.retryCountdown);
+  const lastUpdated = useStore(agentStore, (s) =>
+    s.lastUpdated !== null ? new Date(s.lastUpdated) : null,
+  );
+  const retryNow = useStore(agentStore, (s) => s.retryNow);
 
   // Show stale data warning when disconnected but have cached data
   const showStaleBanner = !isConnected && agents.length > 0;
@@ -161,7 +165,11 @@ export function MonitorDashboard({
           </h2>
         </header>
         <div className={styles.panelContent}>
-          <Suspense fallback={<div>Loading usage...</div>}>
+          <Suspense
+            fallback={
+              <LoadingSkeleton shape="rect" width="100%" height={120} />
+            }
+          >
             <UsageDashboard />
           </Suspense>
         </div>

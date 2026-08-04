@@ -401,7 +401,7 @@ func TestFullClaimWorkflow(t *testing.T) {
 		t.Errorf("expected task-abc, got %s", retrieved.TaskID)
 	}
 
-	// 4. Extend TTL after beads confirms
+	// 4. Extend TTL after store confirmation
 	err = store.ExtendClaimTTL(ctx, "task-abc", 30)
 	if err != nil {
 		t.Fatalf("extend failed: %v", err)

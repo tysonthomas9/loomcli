@@ -10,10 +10,13 @@
   gap: 0;
   padding: 0;
   flex: 1;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   min-height: 0; /* Allow flex item to shrink below content height */
   overflow-x: auto;
   overflow-y: hidden;
-  background-color: #e6e4dc;
+  background-color: var(--color-bg-secondary);
 }
 
 .board > :last-child {
@@ -26,7 +29,16 @@
   background-color: transparent;
 }
 
-/* Highlighted column style (Review - needs human attention) */
+/* Highlighted column style (Review) */
 .highlightedColumn {
   border-left: 3px solid var(--color-status-review);
+}
+
+/* Responsive: touch scrolling and scroll snap on mobile */
+@media (width <= 768px) {
+  .board {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x proximity;
+  }
 }

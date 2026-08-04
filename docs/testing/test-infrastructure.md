@@ -99,25 +99,16 @@ TEST_VERBOSE=1 ./scripts/test.sh
 
 ### `scripts/dev.sh`
 
-**Purpose**: Hot-reload development environment with parallel Go + frontend servers.
+**Purpose**: The single dev entry point post-Phase 5. Hot-reload development
+environment with parallel Go + frontend servers.
 
 **Components**:
-1. **Air** (Go hot-reload): Watches Go files, rebuilds, runs `loom serve --dev --no-daemon`
-2. **Vite** (Frontend HMR): Watches frontend files, serves on port 3000
+1. **Air** (Go hot-reload): Watches Go files, rebuilds, runs `loom serve --no-daemon --frontend-url http://localhost:3000`
+2. **Vite** (Frontend HMR): Watches frontend files, serves on port 3000, proxies `/api/*` and `/health` to `:8080`
 
 **Dependency checks**: Validates `air`, `node`, `npm` exist with install instructions.
 
-**Cleanup**: Kills both processes on exit via trap; stops `bd` daemon if started.
-
-### `scripts/run-web-ui-with-loom.sh`
-
-**Purpose**: Runs `loom serve --dev` with automatic frontend `dist/` rebuilds.
-
-**Components**:
-1. **Air** (Go hot-reload): Watches Go files and restarts `loom serve --dev --no-daemon`
-2. **Vite build watcher**: Rebuilds `internal/webui/frontend/dist` on source changes
-
-**Use case**: Validate the same UI path users hit at `http://localhost:8080` while preserving auto-reload behavior.
+**Cleanup**: Kills both processes on exit via trap.
 
 ### `scripts/dev_test.sh`
 
@@ -136,7 +127,7 @@ echo "[pre-push] Running quality gate..."
 make gate
 ```
 
-**Installation**: `make hooks` copies to `.git/hooks/pre-push`
+**Installation**: `make hooks` copies to the git hooks directory (works in worktrees)
 
 ---
 
@@ -154,20 +145,11 @@ make gate
 
 | Target | Command | Purpose |
 |--------|---------|---------|
-| `dev` | `./scripts/run-web-ui-with-loom.sh` | Default Loom-served auto-reload environment |
-| `dev-loom` | `./scripts/run-web-ui-with-loom.sh` | Loom-served UI with frontend dist watcher |
-| `dev-vite` | `./scripts/dev.sh` | Air + Vite HMR workflow |
+| `dev` | `./scripts/dev.sh` | Go API server on `:8080` + Vite dev server on `:3000` (the canonical dev path post-Phase 5) |
+| `dev-loom` | `./scripts/dev.sh` | DEPRECATED alias for `make dev`; prints a warning and forwards |
+| `dev-vite` | `./scripts/dev.sh` | DEPRECATED alias for `make dev`; prints a warning and forwards |
 | `dev-check` | Validates air, node, npm | Check dev dependencies |
 | `hooks` | Copy pre-push hook | Install git hooks |
-
-### Beads Targets
-
-| Target | Command | Purpose |
-|--------|---------|---------|
-| `sync-beads` | `./scripts/sync-beads.sh` | Sync beads with git |
-| `update-beads` | `git subtree pull` + sync | Update beads subtree |
-
----
 
 ## Configuration Files
 
@@ -191,7 +173,7 @@ make gate
 | G301 (dir permissions) | General | 0755 is standard for directories |
 | G302 (file permissions) | `internal/cli/lock.go` | Lock file needs specific permissions |
 | G304 (file inclusion) | `automode.go`, `lock.go` | Variable paths are validated |
-| G204 (subprocess) | Multiple | tmux, claude, bd require subprocess exec |
+| G204 (subprocess) | Multiple | tmux and agent backends require subprocess exec |
 
 ### `.air.toml`
 
@@ -203,13 +185,13 @@ tmp_dir = "tmp"
 [build]
   bin = "./tmp/loom"
   cmd = "go build -o ./tmp/loom ./cmd/loom"
-  args_bin = ["serve", "--dev", "--no-daemon"]
+  args_bin = ["serve", "--no-daemon", "--frontend-url", "http://localhost:3000"]
   exclude_dir = ["tmp", "internal/webui/frontend", "node_modules",
-                 "vendor", "testdata", ".git", "third_party", ".beads"]
+                 "vendor", "testdata", ".git", "third_party"]
   exclude_regex = ["_test\\.go$"]
 ```
 
-**Key exclusions**: Test files, frontend (has its own HMR), third_party, .beads data.
+**Key exclusions**: Test files, frontend (has its own HMR), third_party.
 
 ### `.test-skip`
 
@@ -337,7 +319,7 @@ func TestE2E_Something(t *testing.T) {
 
 **Usage**: `go test -bench=. -tags=bench ./...`
 
-**Files**: 15 benchmark files, primarily in `third_party/beads/internal/storage/sqlite/`.
+**Files**: Benchmark files live with the packages they exercise.
 
 **Guard pattern**:
 ```go
@@ -362,10 +344,6 @@ func BenchmarkGetReadyWork_Large(b *testing.B) {
 
 ### Location
 
-Primarily in `third_party/beads/internal/storage/sqlite/`:
-- `sqlite_bench_test.go` - SQLite operation benchmarks
-
-Also in:
 - `internal/types/` - ID generation benchmarks
 - `internal/rpc/` - RPC performance benchmarks
 
@@ -374,9 +352,6 @@ Also in:
 ```bash
 # All benchmarks
 go test -bench=. -tags=bench ./...
-
-# Specific benchmark
-go test -bench=BenchmarkGetReadyWork -tags=bench ./third_party/beads/...
 
 # With memory allocation reporting
 go test -bench=. -benchmem -tags=bench ./...
@@ -404,9 +379,7 @@ func BenchmarkOperation(b *testing.B) {
 
 ### Recommended Workflow
 
-1. **Start dev servers**:
-   - `make dev` (default, Loom-served UI on :8080 with auto dist rebuild)
-   - `make dev-vite` (Vite HMR on :3000)
+1. **Start dev servers**: `make dev` (Go API on :8080 + Vite HMR on :3000)
 2. **Write tests first**: Create `*_test.go` or `*.test.ts(x)` files
 3. **Run tests in watch mode**:
    - Go: `go test -v ./internal/cli/... -run TestMyFeature`
@@ -417,9 +390,6 @@ func BenchmarkOperation(b *testing.B) {
 ### Test Data
 
 **Go fixtures**: `internal/cli/testdata/`
-- `bd_stats.json` - Mock `bd stats` output
-- `bd_blocked.json` - Mock `bd blocked` output
-- `bd_in_progress.json` - Mock `bd list --status=in_progress` output
 - `merge_conflict_files.txt` - Mock merge conflict file list
 
 **Frontend fixtures**: `tests/e2e/fixtures/`

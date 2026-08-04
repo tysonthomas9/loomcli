@@ -2,7 +2,6 @@ package lockfile
 
 import (
 	"encoding/json"
-	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -59,22 +58,6 @@ func TestReadLockInfo(t *testing.T) {
 		}
 	})
 
-	t.Run("old format (plain PID)", func(t *testing.T) {
-		lockPath := filepath.Join(tmpDir, "daemon.lock")
-		if err := os.WriteFile(lockPath, []byte("98765"), 0644); err != nil {
-			t.Fatalf("failed to write lock file: %v", err)
-		}
-
-		result, err := ReadLockInfo(tmpDir)
-		if err != nil {
-			t.Fatalf("ReadLockInfo failed: %v", err)
-		}
-
-		if result.PID != 98765 {
-			t.Errorf("PID mismatch: got %d, want %d", result.PID, 98765)
-		}
-	})
-
 	t.Run("file not found", func(t *testing.T) {
 		nonExistentDir := filepath.Join(tmpDir, "nonexistent")
 		_, err := ReadLockInfo(nonExistentDir)
@@ -92,22 +75,6 @@ func TestReadLockInfo(t *testing.T) {
 		_, err := ReadLockInfo(tmpDir)
 		if err == nil {
 			t.Error("expected error for invalid format")
-		}
-	})
-
-	t.Run("old format with trailing whitespace", func(t *testing.T) {
-		lockPath := filepath.Join(tmpDir, "daemon.lock")
-		if err := os.WriteFile(lockPath, []byte("  54321  \n"), 0644); err != nil {
-			t.Fatalf("failed to write lock file: %v", err)
-		}
-
-		result, err := ReadLockInfo(tmpDir)
-		if err != nil {
-			t.Fatalf("ReadLockInfo failed: %v", err)
-		}
-
-		if result.PID != 54321 {
-			t.Errorf("PID mismatch: got %d, want 54321", result.PID)
 		}
 	})
 
@@ -172,115 +139,6 @@ func TestReadLockInfo(t *testing.T) {
 
 		if result.PID != 0 {
 			t.Errorf("PID mismatch: got %d, want 0", result.PID)
-		}
-	})
-}
-
-func TestCheckPIDFile(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	t.Run("file not found", func(t *testing.T) {
-		running, pid := checkPIDFile(tmpDir)
-		if running {
-			t.Error("expected running=false when PID file doesn't exist")
-		}
-		if pid != 0 {
-			t.Errorf("expected pid=0, got %d", pid)
-		}
-	})
-
-	t.Run("invalid PID", func(t *testing.T) {
-		pidFile := filepath.Join(tmpDir, "daemon.pid")
-		if err := os.WriteFile(pidFile, []byte("not-a-number"), 0644); err != nil {
-			t.Fatalf("failed to write PID file: %v", err)
-		}
-
-		running, pid := checkPIDFile(tmpDir)
-		if running {
-			t.Error("expected running=false for invalid PID")
-		}
-		if pid != 0 {
-			t.Errorf("expected pid=0, got %d", pid)
-		}
-	})
-
-	t.Run("process not running", func(t *testing.T) {
-		pidFile := filepath.Join(tmpDir, "daemon.pid")
-		// Use PID 99999 which is unlikely to be running
-		if err := os.WriteFile(pidFile, []byte("99999"), 0644); err != nil {
-			t.Fatalf("failed to write PID file: %v", err)
-		}
-
-		running, pid := checkPIDFile(tmpDir)
-		if running {
-			t.Error("expected running=false for non-existent process")
-		}
-		if pid != 0 {
-			t.Errorf("expected pid=0 for non-running process, got %d", pid)
-		}
-	})
-
-	t.Run("current process is running", func(t *testing.T) {
-		pidFile := filepath.Join(tmpDir, "daemon.pid")
-		currentPID := os.Getpid()
-		if err := os.WriteFile(pidFile, []byte(fmt.Sprintf("%d", currentPID)), 0644); err != nil {
-			t.Fatalf("failed to write PID file: %v", err)
-		}
-
-		running, pid := checkPIDFile(tmpDir)
-		if !running {
-			t.Error("expected running=true for current process")
-		}
-		if pid != currentPID {
-			t.Errorf("expected pid=%d, got %d", currentPID, pid)
-		}
-	})
-
-	t.Run("PID at INT_MAX boundary", func(t *testing.T) {
-		pidFile := filepath.Join(tmpDir, "daemon.pid")
-		// math.MaxInt32 = 2147483647 — valid int, but no process runs at this PID
-		if err := os.WriteFile(pidFile, []byte("2147483647"), 0644); err != nil {
-			t.Fatalf("failed to write PID file: %v", err)
-		}
-
-		running, pid := checkPIDFile(tmpDir)
-		if running {
-			t.Error("expected running=false for PID at INT_MAX boundary")
-		}
-		if pid != 0 {
-			t.Errorf("expected pid=0, got %d", pid)
-		}
-	})
-
-	t.Run("PID overflow beyond int64", func(t *testing.T) {
-		pidFile := filepath.Join(tmpDir, "daemon.pid")
-		// Value exceeding int64 max causes strconv.Atoi to fail with overflow
-		if err := os.WriteFile(pidFile, []byte("99999999999999999999"), 0644); err != nil {
-			t.Fatalf("failed to write PID file: %v", err)
-		}
-
-		running, pid := checkPIDFile(tmpDir)
-		if running {
-			t.Error("expected running=false for PID overflow")
-		}
-		if pid != 0 {
-			t.Errorf("expected pid=0, got %d", pid)
-		}
-	})
-
-	t.Run("PID file with extra whitespace", func(t *testing.T) {
-		pidFile := filepath.Join(tmpDir, "daemon.pid")
-		currentPID := os.Getpid()
-		if err := os.WriteFile(pidFile, []byte(fmt.Sprintf("  %d  \n", currentPID)), 0644); err != nil {
-			t.Fatalf("failed to write PID file: %v", err)
-		}
-
-		running, pid := checkPIDFile(tmpDir)
-		if !running {
-			t.Error("expected running=true for current process with whitespace")
-		}
-		if pid != currentPID {
-			t.Errorf("expected pid=%d, got %d", currentPID, pid)
 		}
 	})
 }
@@ -360,49 +218,14 @@ func TestTryDaemonLock(t *testing.T) {
 		}
 	})
 
-	t.Run("lock file with old format (plain PID)", func(t *testing.T) {
+	t.Run("held lock with invalid content reports running without PID", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		lockPath := filepath.Join(tmpDir, "daemon.lock")
-
-		currentPID := os.Getpid()
-		if err := os.WriteFile(lockPath, []byte(fmt.Sprintf("%d", currentPID)), 0644); err != nil {
-			t.Fatalf("failed to write lock file: %v", err)
-		}
-
-		f, err := os.OpenFile(lockPath, os.O_RDWR, 0644)
-		if err != nil {
-			t.Fatalf("failed to open lock file: %v", err)
-		}
-		defer f.Close()
-
-		if err := FlockExclusiveBlocking(f); err != nil {
-			t.Fatalf("failed to acquire lock: %v", err)
-		}
-		defer FlockUnlock(f)
-
-		running, pid := TryDaemonLock(tmpDir)
-		if !running {
-			t.Error("expected running=true when lock is held")
-		}
-		if pid != currentPID {
-			t.Errorf("expected pid=%d, got %d", currentPID, pid)
-		}
-	})
-
-	t.Run("lock file with invalid content falls back to PID file", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		lockPath := filepath.Join(tmpDir, "daemon.lock")
-		pidFile := filepath.Join(tmpDir, "daemon.pid")
 
 		if err := os.WriteFile(lockPath, []byte("invalid content"), 0644); err != nil {
 			t.Fatalf("failed to write lock file: %v", err)
 		}
 
-		currentPID := os.Getpid()
-		if err := os.WriteFile(pidFile, []byte(fmt.Sprintf("%d", currentPID)), 0644); err != nil {
-			t.Fatalf("failed to write PID file: %v", err)
-		}
-
 		f, err := os.OpenFile(lockPath, os.O_RDWR, 0644)
 		if err != nil {
 			t.Fatalf("failed to open lock file: %v", err)
@@ -418,107 +241,8 @@ func TestTryDaemonLock(t *testing.T) {
 		if !running {
 			t.Error("expected running=true when lock is held")
 		}
-		if pid != currentPID {
-			t.Errorf("expected pid=%d from PID file fallback, got %d", currentPID, pid)
-		}
-	})
-
-	t.Run("falls back to PID file when no lock file exists", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		pidFile := filepath.Join(tmpDir, "daemon.pid")
-
-		currentPID := os.Getpid()
-		if err := os.WriteFile(pidFile, []byte(fmt.Sprintf("%d", currentPID)), 0644); err != nil {
-			t.Fatalf("failed to write PID file: %v", err)
-		}
-
-		running, pid := TryDaemonLock(tmpDir)
-		if !running {
-			t.Error("expected running=true when PID file has running process")
-		}
-		if pid != currentPID {
-			t.Errorf("expected pid=%d, got %d", currentPID, pid)
-		}
-	})
-
-	t.Run("no lock file with dead PID in PID file", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		pidFile := filepath.Join(tmpDir, "daemon.pid")
-
-		if err := os.WriteFile(pidFile, []byte("999999999"), 0644); err != nil {
-			t.Fatalf("failed to write PID file: %v", err)
-		}
-
-		running, pid := TryDaemonLock(tmpDir)
-		if running {
-			t.Error("expected running=false when PID file has dead process")
-		}
 		if pid != 0 {
-			t.Errorf("expected pid=0, got %d", pid)
-		}
-	})
-
-	t.Run("no lock file with invalid PID file content", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		pidFile := filepath.Join(tmpDir, "daemon.pid")
-
-		if err := os.WriteFile(pidFile, []byte("not-a-pid"), 0644); err != nil {
-			t.Fatalf("failed to write PID file: %v", err)
-		}
-
-		running, pid := TryDaemonLock(tmpDir)
-		if running {
-			t.Error("expected running=false when PID file has invalid content")
-		}
-		if pid != 0 {
-			t.Errorf("expected pid=0, got %d", pid)
-		}
-	})
-
-	t.Run("fallback to PID file with INT_MAX PID", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		pidFile := filepath.Join(tmpDir, "daemon.pid")
-
-		// No lock file, PID file contains INT_MAX — no process at that PID
-		if err := os.WriteFile(pidFile, []byte("2147483647"), 0644); err != nil {
-			t.Fatalf("failed to write PID file: %v", err)
-		}
-
-		running, pid := TryDaemonLock(tmpDir)
-		if running {
-			t.Error("expected running=false for INT_MAX PID in fallback")
-		}
-		if pid != 0 {
-			t.Errorf("expected pid=0, got %d", pid)
-		}
-	})
-
-	t.Run("lock file with restricted permissions falls back to PID file", func(t *testing.T) {
-		if os.Getuid() == 0 {
-			t.Skip("requires non-root")
-		}
-
-		tmpDir := t.TempDir()
-		lockPath := filepath.Join(tmpDir, "daemon.lock")
-		pidFile := filepath.Join(tmpDir, "daemon.pid")
-
-		// Create lock file with mode 0000 so os.OpenFile(..., O_RDWR) fails
-		if err := os.WriteFile(lockPath, []byte("{}"), 0000); err != nil {
-			t.Fatalf("failed to write lock file: %v", err)
-		}
-
-		// PID file with current process PID
-		currentPID := os.Getpid()
-		if err := os.WriteFile(pidFile, []byte(fmt.Sprintf("%d", currentPID)), 0644); err != nil {
-			t.Fatalf("failed to write PID file: %v", err)
-		}
-
-		running, pid := TryDaemonLock(tmpDir)
-		if !running {
-			t.Error("expected running=true when permissions fallback to PID file")
-		}
-		if pid != currentPID {
-			t.Errorf("expected pid=%d from PID file fallback, got %d", currentPID, pid)
+			t.Errorf("expected pid=0 when lock content is invalid, got %d", pid)
 		}
 	})
 

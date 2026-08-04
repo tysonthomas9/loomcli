@@ -32,8 +32,8 @@ function createTestProps(overrides: Partial<DependencyEdgeData> = {}) {
     data: {
       dependencyType: "blocks" as DependencyType,
       isBlocking: true,
-      sourceIssueId: "beads-123",
-      targetIssueId: "beads-456",
+      sourceIssueId: "issue-123",
+      targetIssueId: "issue-456",
       ...overrides,
     },
   };

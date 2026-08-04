@@ -20,7 +20,7 @@
 
 /* Position variants */
 .bottomright {
-  bottom: var(--space-4);
+  bottom: calc(var(--space-8, 2rem) + 56px);
   right: var(--space-4);
 }
 
@@ -101,6 +101,43 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Undo button */
+.undoButton {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  background-color: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: var(--radius-md);
+  color: currentcolor;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.undoButton:hover {
+  background-color: rgba(255, 255, 255, 0.25);
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
+.undoButton:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.5);
+  outline-offset: 2px;
+}
+
+/* Warning toast has dark text on amber — use dark overlay for contrast */
+.warning .undoButton {
+  background-color: rgba(0, 0, 0, 0.12);
+  border-color: rgba(0, 0, 0, 0.25);
+}
+
+.warning .undoButton:hover {
+  background-color: rgba(0, 0, 0, 0.22);
+  border-color: rgba(0, 0, 0, 0.35);
 }
 
 /* Dismiss button */

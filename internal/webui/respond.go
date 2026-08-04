@@ -2,7 +2,6 @@ package webui
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
 )
 
@@ -13,7 +12,7 @@ func respondJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(v); err != nil {
-		log.Printf("Failed to encode JSON response: %v", err)
+		logger.Error("failed to encode JSON response", "err", err)
 	}
 }
 

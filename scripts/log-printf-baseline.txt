@@ -1,0 +1,36 @@
+# Baseline of files using log.Printf (stdlib log package).
+# New code should use log/slog instead.
+# Remove entries as files are migrated to slog.
+internal/cli/agent/claim.go
+internal/cli/agent/plan.go
+internal/cli/agent/prompts.go
+internal/cli/automode/automode.go
+internal/cli/automode/automode_task.go
+internal/cli/automode/automode_usage.go
+internal/cli/config/config_fleetdb.go
+internal/cli/config/repos.go
+internal/cli/daemon/daemon_cmd.go
+internal/cli/daemon/daemon_run_helpers.go
+internal/cli/daemon/supervisor/backend.go
+internal/cli/daemon/supervisor/classify.go
+internal/cli/daemon/supervisor/concurrency.go
+internal/cli/daemon/supervisor/epic.go
+internal/cli/daemon/supervisor/restart.go
+internal/cli/daemon/supervisor/spawn.go
+internal/cli/logger.go
+internal/cli/serve/daemonwire/fleet.go
+internal/cli/serve/daemonwire/stale.go
+internal/cli/serve/metricscmd/handlers.go
+internal/cli/serve/metricscmd/metrics.go
+internal/cli/serve/observability/observability.go
+internal/cli/serve/serve.go
+internal/cli/serve/serve_auth.go
+internal/cli/serve/usagecmd/usage.go
+internal/cli/serve/worker/worker_cmd.go
+internal/cli/serve/workspacemgr/sessions.go
+internal/cli/task_router.go
+internal/events/otelexport/exporter.go
+internal/kv/stale.go
+internal/sessions/notify.go
+internal/sessions/query.go
+internal/usage/store.go

@@ -1,131 +1,180 @@
 # loomcli E2E Test Container
 
-Multi-stage Docker image for running loomcli E2E tests in isolation.
+Alpine-based container for running loomcli E2E tests in isolation.
+Includes Go binaries, Chromium, Playwright, agent-browser, and stub backends.
 
-## Build
+**Image size:** ~1.5GB | **Min Podman VM disk:** 14GB
+
+## Quick Start
 
 ```bash
-docker build -f e2e/Dockerfile -t loomcli-e2e .
+# Build (first time ~3min, rebuilds ~5s with cache)
+podman build -f e2e/Dockerfile -t loomcli-e2e .
+
+# Run all test phases
+podman run --rm loomcli-e2e
+
+# Run a specific phase
+podman run --rm loomcli-e2e run_test.sh --phase smoke
+podman run --rm loomcli-e2e run_test.sh --phase playwright
 ```
 
-## Run
+## What's in the Container
+
+| Tool | Purpose |
+|---|---|
+| `loom` | Static Go binary (CGO_ENABLED=0) |
+| `chromium-browser` | Alpine's Chromium package |
+| `agent-browser` | Browser automation CLI for AI agents |
+| `@playwright/test` | Playwright test runner |
+| `curl`, `jq`, `git`, `tmux` | CLI utilities |
+| `claude`, `codex`, `opencode` | Stub backend CLIs |
+
+## Test Phases
+
+The `run_test.sh` orchestrator runs four phases:
+
+| Phase | What it tests | Requirements |
+|---|---|---|
+| `smoke` | Binary existence, stub output, workspace setup, loom commands | Shell only |
+| `unit` | `go test ./...` | Go toolchain (skipped in Alpine image) |
+| `e2e` | `go test -tags e2e ./internal/cli/` per backend | Go or pre-compiled test binary (skipped if neither available) |
+| `playwright` | Mocked chromium tests + self-contained API e2e | Node.js + Chromium |
 
 ```bash
-# All E2E tests
-docker run loomcli-e2e
+# Run specific phase
+podman run --rm loomcli-e2e run_test.sh --phase smoke
+podman run --rm loomcli-e2e run_test.sh --phase playwright
 
-# Specific test
-docker run loomcli-e2e go test -tags e2e -v -run TestE2E_TmuxSessionLifecycle ./internal/cli/
+# E2E for one backend only
+podman run --rm loomcli-e2e run_test.sh --phase e2e --backend claude
+
+# Continue after failures
+podman run --rm loomcli-e2e run_test.sh --no-fail-fast
+
+# Pass extra flags
+podman run --rm loomcli-e2e run_test.sh -- -run TestE2E_TmuxSession
 ```
 
 ## Local Development (run_local.sh)
 
-The `run_local.sh` script wraps the build and run workflow with sensible defaults:
+Wraps build + run with sensible defaults:
 
 ```bash
-# Build and run all E2E tests
+# Build and run
 e2e/run_local.sh
 
-# Skip rebuild, run specific test
-e2e/run_local.sh --no-build -- go test -tags e2e -v -run TestE2E_Foo ./internal/cli/
+# Skip rebuild
+e2e/run_local.sh --no-build
 
 # Mount real CLI binaries from host
 e2e/run_local.sh --mount-clis
 
 # Set a specific backend
 e2e/run_local.sh --backend codex
-
-# See all options
-e2e/run_local.sh --help
 ```
 
-The script auto-detects and mounts auth config directories (`~/.claude/`, `~/.codex/`, `~/.config/opencode/`) read-only, and forwards `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and any `STUB_*` environment variables from the host.
+Auto-mounts auth configs (`~/.claude/`, `~/.codex/`, `~/.config/opencode/`) read-only and forwards `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and `STUB_*` env vars.
 
-## Smoke Test
+## Using agent-browser
 
-Run the built-in smoke test to verify the container is correctly configured:
+agent-browser requires a `navigate` before other commands:
 
 ```bash
-docker run loomcli-e2e verify_todo.sh
+podman run --rm loomcli-e2e bash -c '
+  # Start loom serve
+  mkdir -p /tmp/ws && cd /tmp/ws
+  git config --global user.email "test@test.com"
+  git config --global user.name "Test"
+  git init -q && git commit --allow-empty -m seed -q
+  loom serve --port 8099 &
+  sleep 2
+
+  # Use agent-browser
+  agent-browser navigate http://127.0.0.1:8099/health
+  agent-browser screenshot /tmp/health.png
+  agent-browser snapshot
+
+  kill %1
+'
 ```
 
-This verifies: binary existence, stub output, bd task CRUD, loom commands, lock files, and signal files.
-
-Use `-v` for detailed output or `-q` for summary only:
+## Podman Setup
 
 ```bash
-docker run loomcli-e2e verify_todo.sh -v
-docker run loomcli-e2e verify_todo.sh -q
+# Create VM (14GB minimum for Playwright builds)
+podman machine init --disk-size 14 --memory 4096
+podman machine start
+
+# Build
+podman build -f e2e/Dockerfile -t loomcli-e2e .
+
+# Clean up disk space
+podman system prune -a --force
 ```
 
-## Test Orchestrator
+## Architecture
 
-The container includes `run_test.sh` which runs the full test suite:
+The Dockerfile uses a 3-stage build with cache mounts to minimize image size:
 
-```bash
-# Full suite (smoke + unit + e2e across all backends)
-docker run loomcli-e2e
+```
+Stage 1: golang:bookworm (builder)
+  └── Compiles loom as a static binary (CGO_ENABLED=0)
+  └── Cache mounts: /go/pkg/mod, /root/.cache/go-build
 
-# E2E tests only
-docker run loomcli-e2e run_test.sh --phase e2e
+Stage 2: node:20-alpine (frontend)
+  └── Builds frontend dist/ only (node_modules cache-mounted)
 
-# Single backend
-docker run loomcli-e2e run_test.sh --backend claude
-
-# Pass extra go test flags
-docker run loomcli-e2e run_test.sh -- -run TestE2E_TmuxSession
+Stage 3: node:20-alpine (runtime)
+  └── Alpine chromium + agent-browser + @playwright/test
+  └── Copies static binaries from builder
+  └── Copies dist/ from frontend
+  └── Source tree for go test (when Go is available)
 ```
 
-## Go Test Harness
+Cache mounts keep Go modules (~500MB) and build cache (~500MB) out of committed layers. Alpine Chromium replaces Playwright's download + X11 deps, saving ~500MB.
 
-Run the container tests from the host using Go's test framework:
+## Smoke Tests
+
+Two verification scripts are included:
 
 ```bash
-# Run all container tests (builds image automatically)
+podman run --rm loomcli-e2e verify_todo.sh     # binaries, stubs, workspace setup, loom commands
+podman run --rm loomcli-e2e verify_list.sh     # loom list behavior
+```
+
+Use `-v` for verbose or `-q` for summary only.
+
+## Stub Configuration
+
+Each stub backend supports env vars for testing error paths:
+
+| Variable | Description | Default |
+|---|---|---|
+| `STUB_CLAUDE_EXIT_CODE` | Exit code for claude stub | `0` |
+| `STUB_CLAUDE_RESPONSE` | Custom response text | built-in |
+| `STUB_CLAUDE_DELAY` | Sleep seconds before responding | `0` |
+| `STUB_CODEX_*` | Same as above for codex | |
+| `STUB_OPENCODE_*` | Same as above for opencode | |
+
+```bash
+podman run --rm -e STUB_CLAUDE_EXIT_CODE=1 loomcli-e2e run_test.sh --phase smoke
+```
+
+## Go Test Harness (CI)
+
+Run container tests from the host via Go's test framework:
+
+```bash
 go test -tags container -v -timeout 15m ./e2e/
-
-# Run a specific test
-go test -tags container -v -timeout 15m -run TestContainer_SmokeTest ./e2e/
-
-# Skip image cleanup (for debugging)
-KEEP_IMAGE=1 go test -tags container -v -timeout 15m ./e2e/
+KEEP_IMAGE=1 go test -tags container -v -timeout 15m ./e2e/  # skip cleanup
 ```
-
-Note: Requires Docker to be installed and running. Tests are automatically
-skipped if Docker is unavailable.
 
 ## Real Backend CLIs
 
 Mount a real CLI binary to replace a stub:
 
 ```bash
-docker run -v $(which claude):/usr/local/bin/claude loomcli-e2e
-```
-
-Pass API keys via environment:
-
-```bash
-docker run -e ANTHROPIC_API_KEY=sk-... loomcli-e2e
-```
-
-## Stub Configuration
-
-Each stub backend supports environment variables for testing error paths and custom responses:
-
-| Variable | Description | Default |
-|---|---|---|
-| `STUB_CLAUDE_EXIT_CODE` | Exit code for claude stub | `0` |
-| `STUB_CLAUDE_RESPONSE` | Custom response text | built-in |
-| `STUB_CLAUDE_DELAY` | Seconds to sleep before responding | `0` |
-| `STUB_CODEX_EXIT_CODE` | Exit code for codex stub | `0` |
-| `STUB_CODEX_RESPONSE` | Custom response text | built-in |
-| `STUB_CODEX_DELAY` | Seconds to sleep before responding | `0` |
-| `STUB_OPENCODE_EXIT_CODE` | Exit code for opencode stub | `0` |
-| `STUB_OPENCODE_RESPONSE` | Custom response text | built-in |
-| `STUB_OPENCODE_DELAY` | Seconds to sleep before responding | `0` |
-
-Example:
-
-```bash
-docker run -e STUB_CLAUDE_EXIT_CODE=1 loomcli-e2e go test -tags e2e -v -run TestE2E_BackendError ./internal/cli/
+podman run --rm -v $(which claude):/usr/local/bin/claude \
+  -e ANTHROPIC_API_KEY=sk-... loomcli-e2e
 ```

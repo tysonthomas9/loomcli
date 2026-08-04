@@ -1,0 +1,67 @@
+package issues
+
+import (
+	"net/http"
+	"strconv"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
+)
+
+// searchDefaultLimit is the default full-text search result cap when the
+// caller does not specify `limit`. Mirrors the tuning used by the list
+// endpoint for parity between the two list-shaped responses.
+const searchDefaultLimit = 100
+
+// searchMaxLimit caps the caller-specified limit so a pathological request
+// cannot fan out an unbounded result set.
+const searchMaxLimit = 500
+
+// parseSearchLimit parses and clamps the limit query parameter.
+// Invalid or non-positive values fall back to searchDefaultLimit; values above
+// searchMaxLimit are clamped down.
+func parseSearchLimit(r *http.Request) int {
+	raw := r.URL.Query().Get("limit")
+	if raw == "" {
+		return searchDefaultLimit
+	}
+	parsed, err := strconv.Atoi(raw)
+	if err != nil || parsed <= 0 {
+		return searchDefaultLimit
+	}
+	if parsed > searchMaxLimit {
+		return searchMaxLimit
+	}
+	return parsed
+}
+
+// HandleSearchIssues returns a handler that performs full-text search across
+// the backend.IssueBackend and emits the list of matching issues in the same
+// JSON envelope as the issues list endpoint (`{success, data: [...]}`).
+//
+// Query parameters:
+//   - q: required search query (forwarded to IssueBackend.SearchIssues)
+//   - limit: optional, defaults to searchDefaultLimit, clamped to searchMaxLimit
+func HandleSearchIssues(svc service.IssueService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query().Get("q")
+		if query == "" {
+			writeIssuesError(w, http.StatusBadRequest, "missing search query 'q'", "MISSING_QUERY")
+			return
+		}
+
+		data, err := svc.SearchIssues(r.Context(), service.SearchIssuesParams{
+			Query: query,
+			Limit: parseSearchLimit(r),
+		})
+		if err != nil {
+			handler.HandleServiceError(w, err)
+			return
+		}
+
+		handler.WriteJSON(w, http.StatusOK, IssuesResponse{
+			Success: true,
+			Data:    data,
+		})
+	}
+}

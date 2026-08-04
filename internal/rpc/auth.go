@@ -15,7 +15,7 @@ func tokenFilePath(socketPath string) string {
 }
 
 // loadAuthToken reads the auth token from the token file next to the socket.
-// Returns empty string if the file doesn't exist or can't be read (backward compat with old server).
+// Returns empty string if the file doesn't exist or can't be read.
 func loadAuthToken(socketPath string) string {
 	path := tokenFilePath(socketPath)
 	data, err := os.ReadFile(path)

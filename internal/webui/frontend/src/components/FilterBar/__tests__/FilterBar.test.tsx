@@ -17,7 +17,7 @@ import {
 } from "vitest";
 import "@testing-library/jest-dom";
 
-import type { FilterState, FilterActions } from "@/hooks/useFilterState";
+import type { FilterState, FilterActions } from "@/hooks/issues";
 import type { IssueType } from "@/types";
 
 import { FilterBar } from "../FilterBar";
@@ -727,7 +727,7 @@ describe("FilterBar", () => {
 
       fireEvent.click(screen.getByTestId("label-filter-trigger"));
 
-      expect(screen.getByRole("group")).toBeInTheDocument();
+      expect(screen.getByRole("listbox")).toBeInTheDocument();
     });
 
     it("checkboxes reflect checked state correctly", () => {
@@ -966,13 +966,14 @@ describe("FilterBar", () => {
       const select = screen.getByTestId("groupby-filter");
       const options = select.querySelectorAll("option");
 
-      expect(options).toHaveLength(6);
+      expect(options).toHaveLength(7);
       expect(options[0]).toHaveTextContent("All");
       expect(options[1]).toHaveTextContent("Epic");
       expect(options[2]).toHaveTextContent("Assignee");
       expect(options[3]).toHaveTextContent("Priority");
       expect(options[4]).toHaveTextContent("Type");
       expect(options[5]).toHaveTextContent("Label");
+      expect(options[6]).toHaveTextContent("Repo");
     });
 
     it("shows selected groupBy value correctly", () => {
@@ -1016,6 +1017,7 @@ describe("FilterBar", () => {
         "priority",
         "type",
         "label",
+        "repo",
       ] as const;
 
       groupByValues.forEach((groupByValue) => {
@@ -1063,6 +1065,7 @@ describe("FilterBar", () => {
         "priority",
         "type",
         "label",
+        "repo",
       ] as const;
 
       groupByValues.forEach((groupByValue) => {

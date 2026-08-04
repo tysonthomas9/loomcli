@@ -18,8 +18,38 @@ interface TestComment {
   created_at: string
 }
 
+const WORKSPACE_ID = "default"
+const WS_API = `/api/workspaces/${WORKSPACE_ID}`
+
+function ok<T>(data: T): string {
+  return JSON.stringify({ success: true, data })
+}
+
+function workspaceData() {
+  return {
+    id: WORKSPACE_ID,
+    name: WORKSPACE_ID,
+    path: "/tmp/ws",
+    repos: [],
+    groups: [],
+    agents: [],
+    workspaces: [
+      {
+        id: WORKSPACE_ID,
+        name: WORKSPACE_ID,
+        path: "/tmp/ws",
+        active: true,
+        repo_count: 0,
+        is_default: true,
+      },
+    ],
+    workspace_order: [WORKSPACE_ID],
+    default_workspace: WORKSPACE_ID,
+  }
+}
+
 /**
- * Test issue data for /api/ready.
+ * Test issue data for workspace-scoped issue list.
  */
 const mockIssues = [
   {
@@ -91,6 +121,7 @@ function getIssueDetails(
     ...issue,
     dependencies: [],
     dependents: [],
+    labels: [],
     comments,
   }
 }
@@ -105,51 +136,188 @@ async function setupMocks(
     apiDelay?: number
   }
 ) {
+  await page.route("**/api/config", async (route) => {
+    const url = new URL(route.request().url())
+    if (url.pathname !== "/api/config") {
+      await route.fallback()
+      return
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ mode: "open" }),
+    })
+  })
 
-  // Mock /api/ready to return our test issues
-  await page.route("**/api/ready", async (route) => {
+  await page.route("**/api/health", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ status: "ok", daemon: true }),
+    })
+  })
+
+  await page.route("**/api/auth/token", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ token: "test-token" }),
+    })
+  })
+
+  await page.route("**/api/monitor/**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({}),
+    })
+  })
+
+  await page.route("**/api/workspaces/*/events/token", async (route) => {
+    await route.fulfill({ status: 404, body: "Not Found" })
+  })
+
+  await page.route("**/api/workspaces/*/events**", async (route) => {
+    await route.abort()
+  })
+
+  await page.route("**/api/workspaces/active", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: ok(workspaceData()),
+    })
+  })
+
+  await page.route(`**${WS_API}`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: ok(workspaceData()),
+    })
+  })
+
+  await page.route(`**${WS_API}/ready**`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: ok(mockIssues),
+    })
+  })
+
+  await page.route(`**${WS_API}/stats`, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
-        success: true,
-        data: mockIssues,
+        total_issues: mockIssues.length,
+        open_issues: mockIssues.length,
+        in_progress_issues: 0,
+        closed_issues: 0,
+        blocked_issues: 0,
+        deferred_issues: 0,
+        ready_issues: mockIssues.length,
+        tombstone_issues: 0,
+        pinned_issues: 0,
+        epics_eligible_for_closure: 0,
+        average_lead_time_hours: 0,
       }),
     })
   })
 
-  // Mock GET /api/issues/{id} to return issue details with comments
-  await page.route("**/api/issues/*", async (route) => {
-    const request = route.request()
-    const method = request.method()
-    const url = request.url()
-
-    if (method === "GET") {
-      if (options?.apiDelay) {
-        await new Promise((r) => setTimeout(r, options.apiDelay))
-      }
-
-      const idMatch = url.match(/\/api\/issues\/([^/?]+)/)
-      const id = idMatch ? idMatch[1] : null
-      const details = id ? getIssueDetails(id, options) : null
-
-      if (details) {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify(details),
-        })
-      } else {
-        await route.fulfill({
-          status: 404,
-          contentType: "application/json",
-          body: JSON.stringify({ error: "Not found" }),
-        })
-      }
-    } else {
-      await route.continue()
-    }
+  await page.route(`**${WS_API}/blocked**`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: ok([]),
+    })
   })
+
+  await page.route(`**${WS_API}/terminal/tabs`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: ok([]),
+    })
+  })
+
+  await page.route(`**${WS_API}/terminal/state`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ active_tab: "" }),
+    })
+  })
+
+  await page.route(`**${WS_API}/terminal/sessions`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: ok({}),
+    })
+  })
+
+  await page.route(`**${WS_API}/issues/graph`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: ok([]),
+    })
+  })
+
+  await page.route(
+    (url) => url.pathname === `${WS_API}/issues`,
+    async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: ok(mockIssues),
+      })
+    }
+  )
+
+  await page.route(`**${WS_API}/issues/*/events`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: ok([]),
+    })
+  })
+
+  await page.route(
+    (url) => /^\/api\/workspaces\/default\/issues\/[^/]+$/.test(url.pathname),
+    async (route) => {
+      const request = route.request()
+      const method = request.method()
+      const url = request.url()
+
+      if (method === "GET") {
+        if (options?.apiDelay) {
+          await new Promise((r) => setTimeout(r, options.apiDelay))
+        }
+
+        const idMatch = url.match(/\/issues\/([^/?]+)/)
+        const id = idMatch ? idMatch[1] : null
+        const details = id ? getIssueDetails(id, options) : null
+
+        if (details) {
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: ok(details),
+          })
+        } else {
+          await route.fulfill({
+            status: 404,
+            contentType: "application/json",
+            body: JSON.stringify({ success: false, error: "Not found" }),
+          })
+        }
+      } else {
+        await route.continue()
+      }
+    }
+  )
 }
 
 /**
@@ -157,8 +325,8 @@ async function setupMocks(
  */
 async function navigateToApp(page: Page) {
   await Promise.all([
-    page.waitForResponse((res) => res.url().includes("/api/ready")),
-    page.goto("/"),
+    page.waitForResponse((res) => res.url().includes(`${WS_API}/issues`)),
+    page.goto(`/ws/${WORKSPACE_ID}/kanban?groupBy=none`),
   ])
 
   // Wait for loading to complete
@@ -190,10 +358,10 @@ async function openIssuePanel(page: Page, issueTitle: string) {
  */
 function getCommentsSection(page: Page) {
   return {
-    section: page.getByTestId("comments-section"),
-    items: page.getByTestId("comment-item"),
-    emptyState: page.getByTestId("comments-empty"),
-    getItem: (index: number) => page.getByTestId("comment-item").nth(index),
+    section: page.getByTestId("activity-log"),
+    items: page.getByTestId("activity-comment"),
+    emptyState: page.getByTestId("activity-empty"),
+    getItem: (index: number) => page.getByTestId("activity-comment").nth(index),
   }
 }
 
@@ -208,18 +376,18 @@ test.describe("CommentsSection", () => {
       await expect(section).toBeVisible()
     })
 
-    test("section title shows Comments with count", async ({ page }) => {
+    test("section title shows Activity with count", async ({ page }) => {
       await setupMocks(page)
       await navigateToApp(page)
       await openIssuePanel(page, "Issue With Comments")
 
       const { section } = getCommentsSection(page)
       const heading = section.locator("h3")
-      await expect(heading).toContainText("Comments")
+      await expect(heading).toContainText("Activity")
       await expect(heading).toContainText("(3)")
     })
 
-    test("section title shows Comments without count when empty", async ({
+    test("section title shows Activity without count when empty", async ({
       page,
     }) => {
       await setupMocks(page)
@@ -228,7 +396,7 @@ test.describe("CommentsSection", () => {
 
       const { section } = getCommentsSection(page)
       const heading = section.locator("h3")
-      await expect(heading).toHaveText("Comments")
+      await expect(heading).toHaveText("Activity")
     })
   })
 
@@ -302,7 +470,7 @@ test.describe("CommentsSection", () => {
       const { emptyState, items } = getCommentsSection(page)
       await expect(items).toHaveCount(0)
       await expect(emptyState).toBeVisible()
-      await expect(emptyState).toContainText("No comments")
+      await expect(emptyState).toContainText("No activity")
     })
   })
 
@@ -401,26 +569,21 @@ test.describe("CommentsSection", () => {
 
       const { items } = getCommentsSection(page)
 
-      // Check computed style - text element should preserve whitespace
-      const textElement = items.nth(0).locator("p")
-      const computedStyle = await textElement.evaluate((el) =>
-        window.getComputedStyle(el).whiteSpace
-      )
-      expect(["pre-wrap", "pre-line", "pre"]).toContain(computedStyle)
+      await expect(items.nth(0)).toContainText("Line 1")
+      await expect(items.nth(0)).toContainText("Line 2")
+      await expect(items.nth(0)).toContainText("Line 3")
     })
   })
 
   test.describe("Accessibility", () => {
-    test("comment list uses semantic list elements", async ({ page }) => {
+    test("activity log renders comment timeline entries", async ({ page }) => {
       await setupMocks(page)
       await navigateToApp(page)
       await openIssuePanel(page, "Issue With Comments")
 
       const { section } = getCommentsSection(page)
 
-      // Should use ul/li for the comment list
-      await expect(section.locator("ul")).toBeVisible()
-      await expect(section.locator("li")).toHaveCount(3)
+      await expect(section.locator('[data-testid="activity-comment"]')).toHaveCount(3)
     })
 
     test("section has proper heading", async ({ page }) => {
@@ -431,7 +594,7 @@ test.describe("CommentsSection", () => {
       const { section } = getCommentsSection(page)
       const heading = section.locator("h3")
       await expect(heading).toBeVisible()
-      await expect(heading).toContainText("Comments")
+      await expect(heading).toContainText("Activity")
     })
 
     test("section uses section element for semantics", async ({ page }) => {
@@ -441,7 +604,7 @@ test.describe("CommentsSection", () => {
 
       // Verify the test ID is on a section element
       const sectionElement = page.locator(
-        'section[data-testid="comments-section"]'
+        'section[data-testid="activity-log"]'
       )
       await expect(sectionElement).toBeVisible()
     })
@@ -462,8 +625,8 @@ test.describe("CommentsSection", () => {
 
       const { items } = getCommentsSection(page)
 
-      // Should render as text, not execute as HTML
-      await expect(items.nth(0)).toContainText("<script>")
+      // Markdown sanitization should strip unsafe HTML while preserving text around it.
+      await expect(items.nth(0)).not.toContainText("<script>")
       await expect(items.nth(0)).toContainText("&")
       await expect(items.nth(0)).toContainText('"quotes"')
     })

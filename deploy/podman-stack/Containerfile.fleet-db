@@ -1,0 +1,23 @@
+# fleet-db runtime image for the local podman e2e stack.
+#
+# The linux fleet-db / fdb binaries are cross-compiled on the HOST by
+# build.sh (CGO_ENABLED=0, GOOS=linux, GOARCH = podman machine arch) and
+# copied in — no Go toolchain in the image. Alpine (not distroless) so the
+# compose healthcheck can use busybox `wget` against /healthz | /readyz.
+#
+# Build context: the staging dir assembled by build.sh, containing bin/.
+
+FROM docker.io/library/alpine:3.21
+
+RUN addgroup -g 65532 fleet \
+    && adduser -D -u 65532 -G fleet fleet \
+    && install -d -m 0755 -o 65532 -g 65532 /var/run/fleet-db
+
+COPY bin/fleet-db /usr/local/bin/fleet-db
+COPY bin/fdb /usr/local/bin/fdb
+
+USER fleet:fleet
+EXPOSE 8080
+
+ENTRYPOINT ["/usr/local/bin/fleet-db"]
+# Flags (redis addr, listen addr, auth posture) are supplied by compose.yaml.

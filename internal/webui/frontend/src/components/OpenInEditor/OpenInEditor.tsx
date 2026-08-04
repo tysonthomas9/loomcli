@@ -66,21 +66,15 @@ export function OpenInEditor({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isOpen]);
 
-  // Handle escape key to close
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setIsOpen(false);
-        setFocusedIndex(-1);
-        triggerRef.current?.focus();
-      }
-    };
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen]);
+  // Handle escape key to close (local handler with stopPropagation)
+  const handleDropdownKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      setIsOpen(false);
+      setFocusedIndex(-1);
+      triggerRef.current?.focus();
+    }
+  }, []);
 
   const isDisabled = isLoading || !!error || !path;
   const isLaunching = launchState.status === "launching";
@@ -217,6 +211,7 @@ export function OpenInEditor({
           role="listbox"
           aria-label="Select editor"
           data-testid="open-in-editor-menu"
+          onKeyDown={handleDropdownKeyDown}
         >
           {detectedEditors.length === 0 ? (
             <div className={styles.emptyOption}>No editors detected</div>

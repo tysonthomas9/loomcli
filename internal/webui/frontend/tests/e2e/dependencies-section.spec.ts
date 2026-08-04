@@ -8,6 +8,25 @@ import { test, expect, Page } from "@playwright/test"
  * for dependents.
  */
 
+const WORKSPACE_ID = "default"
+const WS_API = `/api/workspaces/${WORKSPACE_ID}`
+
+function ok<T>(data: T) {
+  return { success: true, data }
+}
+
+function workspaceData() {
+  return {
+    id: WORKSPACE_ID,
+    name: "Default",
+    type: "main",
+    path: "/tmp/loom",
+    is_active: true,
+    created_at: "2026-01-27T10:00:00Z",
+    updated_at: "2026-01-27T10:00:00Z",
+  }
+}
+
 // Mock issues with various dependency configurations
 const mockDependencies = [
   {
@@ -129,7 +148,7 @@ const mockIssues = {
   },
 }
 
-// All mock issues as array for /api/ready endpoint
+// All mock issues as array for the workspace issue list endpoint
 const allMockIssues = [
   mockIssues.withDependencies,
   mockIssues.withDependents,
@@ -220,30 +239,171 @@ async function setupMocks(
   // Track current issue details (mutable for add/remove operations)
   const issueDetailsCache: Record<string, ReturnType<typeof getMockIssueDetails>> = {}
 
-  // Mock /api/ready to return our test issues
-  await page.route("**/api/ready", async (route) => {
+  await page.route("**/api/config", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
-        success: true,
-        data: allMockIssues,
+        auth_required: false,
+        mode: "open",
+        store_mode: "fleetdb",
+        default_workspace_id: WORKSPACE_ID,
       }),
     })
   })
 
-  // Mock GET/POST/DELETE /api/issues/* endpoints
-  await page.route("**/api/issues/**", async (route) => {
+  await page.route("**/api/health", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ ok: true }),
+    })
+  })
+
+  await page.route("**/api/auth/token", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ token: "test-token" }),
+    })
+  })
+
+  await page.route("**/api/monitor/**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(ok([])),
+    })
+  })
+
+  await page.route("**/api/workspaces/active", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(ok(workspaceData())),
+    })
+  })
+
+  await page.route("**/api/workspaces/default", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(ok(workspaceData())),
+    })
+  })
+
+  await page.route("**/api/workspaces", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(ok([workspaceData()])),
+    })
+  })
+
+  await page.route(`**${WS_API}/stats`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        total: allMockIssues.length,
+        open: allMockIssues.filter((issue) => issue.status !== "closed").length,
+        closed: allMockIssues.filter((issue) => issue.status === "closed").length,
+      }),
+    })
+  })
+
+  await page.route(`**${WS_API}/blocked**`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(ok([])),
+    })
+  })
+
+  await page.route(`**${WS_API}/terminal/tabs`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(ok([])),
+    })
+  })
+
+  await page.route(`**${WS_API}/terminal/state`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ active_tab: "" }),
+    })
+  })
+
+  await page.route(`**${WS_API}/terminal/sessions`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(ok({})),
+    })
+  })
+
+  await page.route(`**${WS_API}/issues/graph**`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(ok([])),
+    })
+  })
+
+  await page.route(`**${WS_API}/issues/*/events`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(ok([])),
+    })
+  })
+
+  await page.route("**/api/stream**", async (route) => {
+    await route.abort()
+  })
+
+  // Mock GET/POST/DELETE workspace issue endpoints
+  await page.route(`**${WS_API}/issues**`, async (route) => {
     const request = route.request()
     const method = request.method()
     const url = request.url()
+    const pathname = new URL(url).pathname
+
+    if (method === "GET" && pathname === `${WS_API}/issues`) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(ok(allMockIssues)),
+      })
+      return
+    }
+
+    if (method === "GET" && pathname === `${WS_API}/issues/graph`) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(ok([])),
+      })
+      return
+    }
+
+    if (method === "GET" && pathname.endsWith("/events")) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(ok([])),
+      })
+      return
+    }
 
     // Extract issue ID from URL
-    const idMatch = url.match(/\/api\/issues\/([^/?]+)/)
+    const idMatch = url.match(/\/api\/workspaces\/[^/]+\/issues\/([^/?]+)/)
     const issueId = idMatch ? idMatch[1] : null
 
     if (method === "GET" && issueId && !url.includes("/dependencies")) {
-      // GET /api/issues/{id} - fetch issue details
+      // GET /api/workspaces/{ws}/issues/{id} - fetch issue details
       if (options?.getDelay) {
         await new Promise((r) => setTimeout(r, options.getDelay))
       }
@@ -264,7 +424,7 @@ async function setupMocks(
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify(issue),
+          body: JSON.stringify(ok(issue)),
         })
       } else {
         await route.fulfill({
@@ -274,7 +434,7 @@ async function setupMocks(
         })
       }
     } else if (method === "POST" && url.includes("/dependencies")) {
-      // POST /api/issues/{id}/dependencies - add dependency
+      // POST /api/workspaces/{ws}/issues/{id}/dependencies - add dependency
       if (options?.addError) {
         await route.fulfill({
           status: 400,
@@ -286,7 +446,7 @@ async function setupMocks(
 
       const body = JSON.parse(await request.postData() || "{}")
       const dependsOnId = body.depends_on_id
-      const depType = body.type || "blocks"
+      const depType = body.dep_type || "blocks"
 
       // Simulate successful add
       await route.fulfill({
@@ -298,7 +458,7 @@ async function setupMocks(
         }),
       })
     } else if (method === "DELETE" && url.includes("/dependencies")) {
-      // DELETE /api/issues/{id}/dependencies/{depId} - remove dependency
+      // DELETE /api/workspaces/{ws}/issues/{id}/dependencies/{depId} - remove dependency
       if (options?.removeError) {
         await route.fulfill({
           status: 400,
@@ -326,8 +486,8 @@ async function setupMocks(
  */
 async function navigateToApp(page: Page) {
   await Promise.all([
-    page.waitForResponse((res) => res.url().includes("/api/ready")),
-    page.goto("/"),
+    page.waitForResponse((res) => res.url().includes(`${WS_API}/issues`)),
+    page.goto(`/ws/${WORKSPACE_ID}/kanban?groupBy=none`),
   ])
 
   // Wait for loading to complete
@@ -360,7 +520,7 @@ function getDependencyElements(page: Page) {
     noDependencies: page.getByTestId("no-dependencies"),
     addButton: page.getByTestId("add-dependency-button"),
     addForm: page.getByTestId("add-dependency-form"),
-    dependencyInput: page.getByTestId("dependency-input"),
+    dependencyInput: page.getByTestId("dependency-search-input"),
     confirmAdd: page.getByTestId("confirm-add-dependency"),
     cancelAdd: page.getByTestId("cancel-add-dependency"),
     dependencyError: page.getByTestId("dependency-error"),
@@ -559,7 +719,7 @@ test.describe("Dependencies Section - Remove", () => {
     await setupMocks(page)
 
     // Add route listener to track DELETE call
-    await page.route("**/api/issues/test-with-deps/dependencies/dep-1", async (route) => {
+    await page.route(`**${WS_API}/issues/test-with-deps/dependencies/dep-1`, async (route) => {
       if (route.request().method() === "DELETE") {
         deleteEndpointCalled = true
         deletedDepId = "dep-1"
@@ -702,7 +862,7 @@ test.describe("Dependencies Section - Add", () => {
     await setupMocks(page)
 
     // Add route listener to track POST call
-    await page.route("**/api/issues/test-add-dep/dependencies", async (route) => {
+    await page.route(`**${WS_API}/issues/test-add-dep/dependencies`, async (route) => {
       if (route.request().method() === "POST") {
         postEndpointCalled = true
         await route.fulfill({
@@ -725,7 +885,7 @@ test.describe("Dependencies Section - Add", () => {
 
     // Set up response promise before pressing Enter
     const responsePromise = page.waitForResponse((res) =>
-      res.url().includes("/api/issues/test-add-dep/dependencies") &&
+      res.url().includes(`${WS_API}/issues/test-add-dep/dependencies`) &&
       res.request().method() === "POST"
     )
 

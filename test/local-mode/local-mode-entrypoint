@@ -1,0 +1,530 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+WORKSPACE="${LOOM_WORKSPACE:-LOCALMODE}"
+export LOOM_WORKSPACE="$WORKSPACE"
+export LOOM_WORKSPACE_ID="$WORKSPACE"
+SOURCE_REPO="${LOOM_LOCAL_MODE_SOURCE_REPO:-/workspace/source-repo}"
+ORIGIN_REPO="${LOOM_LOCAL_MODE_ORIGIN_REPO:-/workspace/source-repo-origin.git}"
+WORKSPACE_ROOT="${LOOM_LOCAL_MODE_WORKSPACE_ROOT:-/root/.loom/workspaces/${WORKSPACE}}"
+WORKSPACE_REPO="${WORKSPACE_ROOT}/source-repo"
+AGENT_BACKEND="${LOOM_LOCAL_MODE_BACKEND:-${LOOM_BACKEND:-localdogfood}}"
+case "$AGENT_BACKEND" in
+  codex)
+    DEFAULT_PLAN_AGENT="codex-planner"
+    DEFAULT_CODE_AGENT="codex-coder"
+    ;;
+  claude)
+    DEFAULT_PLAN_AGENT="claude-planner"
+    DEFAULT_CODE_AGENT="claude-coder"
+    ;;
+  *)
+    DEFAULT_PLAN_AGENT="local-planner"
+    DEFAULT_CODE_AGENT="local-coder"
+    ;;
+esac
+PLAN_AGENT="${LOOM_LOCAL_MODE_PLAN_AGENT:-$DEFAULT_PLAN_AGENT}"
+CODE_AGENT="${LOOM_LOCAL_MODE_CODE_AGENT:-$DEFAULT_CODE_AGENT}"
+PLAN_TASK_ID="${LOOM_LOCAL_MODE_PLAN_TASK_ID:-${WORKSPACE}-2}"
+CODE_TASK_ID="${LOOM_LOCAL_MODE_CODE_TASK_ID:-${WORKSPACE}-3}"
+LOOM_BIND="${LOOM_LOCAL_MODE_BIND:-0.0.0.0}"
+LOOM_PORT="${LOOM_LOCAL_MODE_API_PORT:-8080}"
+DAEMON_SCAN_INTERVAL="${LOOM_LOCAL_MODE_DAEMON_SCAN_INTERVAL:-5}"
+DAEMON_STDOUT_DIR="${LOOM_LOCAL_MODE_DAEMON_STDOUT_DIR:-/tmp/loom-local-mode-daemons}"
+export LOOM_BACKEND="$AGENT_BACKEND"
+
+http_get() {
+  url="$1"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsS --max-time 2 "$url"
+    return $?
+  fi
+  wget -qO- --timeout=2 --tries=1 "$url"
+}
+
+http_post_json() {
+  url="$1"
+  body="$2"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsS --max-time 5 -H "Content-Type: application/json" --data "$body" "$url"
+    return $?
+  fi
+  wget -qO- --timeout=5 --tries=1 --header="Content-Type: application/json" --post-data="$body" "$url"
+}
+
+wait_for_url() {
+  url="$1"
+  label="$2"
+  i=1
+  while [ "$i" -le 60 ]; do
+    if http_get "$url" >/dev/null 2>&1; then
+      return 0
+    fi
+    echo "[local-mode] waiting for ${label} (${i}/60)"
+    sleep 1
+    i=$((i + 1))
+  done
+  echo "[local-mode] FATAL: ${label} did not become reachable at ${url}" >&2
+  return 1
+}
+
+ensure_local_origin() {
+  if [ ! -d "$ORIGIN_REPO" ]; then
+    mkdir -p "$(dirname "$ORIGIN_REPO")"
+    git init -q --bare "$ORIGIN_REPO"
+  fi
+}
+
+configure_origin_remote() {
+  path="$1"
+  ensure_local_origin
+  if git -C "$path" remote get-url origin >/dev/null 2>&1; then
+    git -C "$path" remote set-url origin "$ORIGIN_REPO"
+  else
+    git -C "$path" remote add origin "$ORIGIN_REPO"
+  fi
+}
+
+push_current_branch() {
+  path="$1"
+  branch="$(git -C "$path" branch --show-current)"
+  if [ "$branch" != "" ]; then
+    git -C "$path" push -u origin "$branch" >/dev/null
+  fi
+}
+
+create_source_repo() {
+  if [ -d "${SOURCE_REPO}/.git" ]; then
+    configure_origin_remote "$SOURCE_REPO"
+    return 0
+  fi
+  mkdir -p "$SOURCE_REPO"
+  git -C "$SOURCE_REPO" init -q -b main
+  git -C "$SOURCE_REPO" config user.email "local-mode@fixture.local"
+  git -C "$SOURCE_REPO" config user.name "local-mode"
+  printf '# Local Mode Dogfood Repo\n' > "${SOURCE_REPO}/README.md"
+  cat > "${SOURCE_REPO}/Makefile" <<'EOF'
+gate:
+	@echo "local mode gate ok"
+EOF
+  git -C "$SOURCE_REPO" add README.md Makefile
+  git -C "$SOURCE_REPO" commit -q -m "Initial local mode fixture"
+  configure_origin_remote "$SOURCE_REPO"
+  push_current_branch "$SOURCE_REPO"
+}
+
+create_workspace() {
+  mkdir -p "$(dirname "$WORKSPACE_ROOT")"
+  if [ ! -e "${WORKSPACE_REPO}/.git" ]; then
+    loom workspace create "$WORKSPACE" --repos "$SOURCE_REPO" --path "$WORKSPACE_ROOT" --branch localmode
+  else
+    loom workspace list >/dev/null
+  fi
+  configure_origin_remote "$WORKSPACE_REPO"
+  push_current_branch "$WORKSPACE_REPO"
+}
+
+create_agent_worktree() {
+  agent="$1"
+  path="${WORKSPACE_ROOT}/worktrees/source-repo/${agent}"
+  mkdir -p "$(dirname "$path")"
+  if [ ! -e "${path}/.git" ]; then
+    if git -C "$WORKSPACE_REPO" show-ref --verify --quiet "refs/heads/${agent}"; then
+      git -C "$WORKSPACE_REPO" worktree add "$path" "$agent"
+    else
+      git -C "$WORKSPACE_REPO" worktree add "$path" -b "$agent"
+    fi
+  fi
+  git -C "$path" config user.email "local-mode@fixture.local"
+  git -C "$path" config user.name "local-mode"
+}
+
+toml_escape() {
+  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+trust_codex_project_path() {
+  path="$1"
+  config="/root/.codex/config.toml"
+  escaped_path="$(toml_escape "$path")"
+
+  mkdir -p /root/.codex
+  if [ -f "$config" ] && grep -Fqx "[projects.\"${escaped_path}\"]" "$config"; then
+    return 0
+  fi
+  {
+    printf '\n[projects."%s"]\n' "$escaped_path"
+    printf 'trust_level = "trusted"\n'
+  } >> "$config"
+}
+
+trust_codex_local_mode_paths() {
+  if [ "$AGENT_BACKEND" != "codex" ]; then
+    return 0
+  fi
+
+  trust_codex_project_path "$SOURCE_REPO"
+  trust_codex_project_path "$WORKSPACE_ROOT"
+  trust_codex_project_path "$WORKSPACE_REPO"
+  trust_codex_project_path "${WORKSPACE_ROOT}/worktrees/source-repo/${PLAN_AGENT}"
+  trust_codex_project_path "${WORKSPACE_ROOT}/worktrees/source-repo/${CODE_AGENT}"
+}
+
+register_agents() {
+  loom daemon profile set issue_backend fleetdb
+  loom daemon profile set log_dir "${WORKSPACE_ROOT}/.loom/daemon-logs"
+  loom daemon profile set events_dir "${WORKSPACE_ROOT}/.loom/events"
+  loom daemon profile set max_agents 2
+  loom daemon profile set startup_timeout 30
+
+  if [ "$AGENT_BACKEND" != "localdogfood" ]; then
+    [ "$PLAN_AGENT" = "local-planner" ] || loom agentdef remove local-planner >/dev/null 2>&1 || true
+    [ "$CODE_AGENT" = "local-coder" ] || loom agentdef remove local-coder >/dev/null 2>&1 || true
+  fi
+
+  loom agentdef remove "$PLAN_AGENT" >/dev/null 2>&1 || true
+  loom agentdef remove "$CODE_AGENT" >/dev/null 2>&1 || true
+  loom agentdef add "$PLAN_AGENT" --role plan --auto --backend "$AGENT_BACKEND" --repos source-repo
+  loom agentdef add "$CODE_AGENT" --role task --auto --backend "$AGENT_BACKEND" --repos source-repo
+}
+
+prepare_codex_credentials() {
+  if [ "$AGENT_BACKEND" != "codex" ]; then
+    return 0
+  fi
+  if ! command -v codex >/dev/null 2>&1; then
+    echo "[local-mode] FATAL: codex binary is not installed in the image" >&2
+    return 1
+  fi
+  mkdir -p /root/.codex
+  if [ -f /codex-host/auth.json ]; then
+    cp /codex-host/auth.json /root/.codex/auth.json
+    chmod 600 /root/.codex/auth.json
+  fi
+  if [ -f /codex-host/config.toml ]; then
+    cp /codex-host/config.toml /root/.codex/config.toml
+    chmod 600 /root/.codex/config.toml
+  fi
+  if [ ! -s /root/.codex/auth.json ]; then
+    echo "[local-mode] FATAL: codex auth missing. Mount local CODEX_HOME at /codex-host or set LOCAL_MODE_CODEX_HOME." >&2
+    return 1
+  fi
+  codex --version || true
+}
+
+prepare_claude_credentials() {
+  if [ "$AGENT_BACKEND" != "claude" ]; then
+    return 0
+  fi
+  if ! command -v claude >/dev/null 2>&1; then
+    echo "[local-mode] FATAL: claude binary is not installed in the image" >&2
+    return 1
+  fi
+  mkdir -p /root/.claude
+  # Claude Code stores its OAuth token in ~/.claude/.credentials.json. Copy it into
+  # the container's writable HOME so token refresh writes don't hit the RO mount.
+  if [ -f /claude-host/.credentials.json ]; then
+    cp /claude-host/.credentials.json /root/.claude/.credentials.json
+    chmod 600 /root/.claude/.credentials.json
+  fi
+  # Carry over model/permission settings if the host has them.
+  if [ -f /claude-host/settings.json ]; then
+    cp /claude-host/settings.json /root/.claude/settings.json
+  fi
+  if [ ! -s /root/.claude/.credentials.json ]; then
+    echo "[local-mode] FATAL: claude auth missing. Mount local CLAUDE_HOME at /claude-host or set LOCAL_MODE_CLAUDE_HOME (needs ~/.claude/.credentials.json)." >&2
+    return 1
+  fi
+  claude --version || true
+
+  # Claude Code keeps interactive onboarding state in ~/.claude.json, separate
+  # from ~/.claude/.credentials.json. A valid OAuth credential makes
+  # `claude auth status` report logged in, but the TUI still opens the login
+  # chooser until hasCompletedOnboarding is true. Preserve any existing state
+  # and initialize only that flag inside the container.
+  claude_state=/root/.claude.json
+  claude_state_tmp="${claude_state}.tmp.$$"
+  if [ -s "$claude_state" ] && jq -e 'type == "object"' "$claude_state" >/dev/null 2>&1; then
+    jq '.hasCompletedOnboarding = true' "$claude_state" > "$claude_state_tmp"
+  else
+    printf '{"hasCompletedOnboarding":true}\n' > "$claude_state_tmp"
+  fi
+  chmod 600 "$claude_state_tmp"
+  mv "$claude_state_tmp" "$claude_state"
+}
+
+prepare_daytona_credentials() {
+  # When the daemon leaf is routed to the Daytona runner, the runner resolves its
+  # API key via loom's runtime-credential API (LOOM_FLEET_DB_URL) or a credential
+  # file. Write the host-provided DAYTONA_API_KEY to a file and point the runner at
+  # it; the daemon subprocess inherits DAYTONA_CREDENTIAL_FILE from this shell.
+  if [ -z "${DAYTONA_API_KEY:-}" ]; then
+    return 0
+  fi
+  key_file="${LOOM_CONFIG_DIR:-/root/.loom}/daytona-key"
+  mkdir -p "$(dirname "$key_file")"
+  printf '%s' "$DAYTONA_API_KEY" > "$key_file"
+  chmod 600 "$key_file"
+  export DAYTONA_CREDENTIAL_FILE="$key_file"
+  echo "[local-mode] daytona credential file staged at ${key_file}"
+}
+
+issues_api() {
+  printf 'http://127.0.0.1:%s/api/workspaces/%s' "$LOOM_PORT" "$WORKSPACE"
+}
+
+issue_json_field() {
+  id="$1"
+  field="$2"
+  http_get "$(issues_api)/issues/${id}" |
+    jq -r ".data.${field} // .${field} // empty" 2>/dev/null
+}
+
+find_epic_id() {
+  http_get "$(issues_api)/issues" |
+    jq -r '.data[] | select(.issue_type == "epic") | .id' 2>/dev/null |
+    head -1
+}
+
+ensure_epic_id() {
+  existing="$(find_epic_id)"
+  if [ -n "$existing" ]; then
+    printf '%s' "$existing"
+    return 0
+  fi
+  epic_body='{"title":"Local mode dogfood epic","issue_type":"epic","priority":1,"source_repo":"source-repo","description":"End-to-end local-mode planner and coder validation."}'
+  resp="$(http_post_json "$(issues_api)/issues" "$epic_body")" || return 1
+  printf '%s' "$resp" | jq -r '.data.id // empty' 2>/dev/null
+}
+
+link_parent_child() {
+  child="$1"
+  parent="$2"
+  if [ -z "$child" ] || [ -z "$parent" ] || [ "$child" = "$parent" ]; then
+    return 0
+  fi
+  status="$(issue_json_field "$child" status)"
+  if [ "$status" = "closed" ]; then
+    return 0
+  fi
+  current_parent="$(issue_json_field "$child" parent)"
+  if [ "$current_parent" = "$parent" ]; then
+    return 0
+  fi
+  dep_body="$(printf '{"depends_on_id":"%s","dep_type":"parent-child"}' "$parent")"
+  if http_post_json "$(issues_api)/issues/${child}/dependencies" "$dep_body" >/dev/null 2>&1; then
+    echo "[local-mode] linked ${child} -> epic ${parent}"
+  fi
+}
+
+seed_issue_if_missing() {
+  id="$1"
+  body="$2"
+  api="$(issues_api)"
+  if http_get "${api}/issues/${id}" >/dev/null 2>&1; then
+    echo "[local-mode] task ${id} already exists"
+    return 0
+  fi
+  if http_post_json "${api}/issues" "$body" >/tmp/local-mode-seed.out 2>/tmp/local-mode-seed.err; then
+    echo "[local-mode] seeded task ${id}"
+    return 0
+  fi
+  echo "[local-mode] FATAL: failed to seed task ${id}" >&2
+  cat /tmp/local-mode-seed.err >&2 || true
+  cat /tmp/local-mode-seed.out >&2 || true
+  return 1
+}
+
+seed_issue_by_title_if_missing() {
+  title="$1"
+  body="$2"
+  api="$(issues_api)"
+  if http_get "${api}/issues" |
+    jq -e --arg title "$title" '.data[] | select(.title == $title)' >/dev/null 2>&1; then
+    echo "[local-mode] issue \"${title}\" already exists"
+    return 0
+  fi
+  if http_post_json "${api}/issues" "$body" >/tmp/local-mode-seed.out 2>/tmp/local-mode-seed.err; then
+    seeded_id="$(jq -r '.data.id // empty' /tmp/local-mode-seed.out 2>/dev/null)"
+    echo "[local-mode] seeded issue \"${title}\" (${seeded_id})"
+    return 0
+  fi
+  echo "[local-mode] warning: failed to seed issue \"${title}\"" >&2
+  cat /tmp/local-mode-seed.err >&2 || true
+  return 0
+}
+
+seed_tasks() {
+  epic_id="$(ensure_epic_id)" || {
+    echo "[local-mode] FATAL: could not create epic lane" >&2
+    return 1
+  }
+  echo "[local-mode] epic lane: ${epic_id}"
+
+  plan_body="$(printf '{"id":"%s","title":"Local mode planner dogfood","issue_type":"task","priority":0,"parent":"%s","source_repo":"source-repo","description":"Planner agent should claim this task and write an approved implementation design.","acceptance_criteria":"Design field is populated and the task moves to review."}' "$PLAN_TASK_ID" "$epic_id")"
+  code_body="$(printf '{"id":"%s","title":"Local mode coder dogfood","issue_type":"task","priority":0,"parent":"%s","source_repo":"source-repo","description":"Coder agent should claim this task and make a small committed fixture change.","design":"Approved design: append a short local-mode dogfood result to local-mode-agent-output.txt, commit it, then close the task.","acceptance_criteria":"A commit exists in the coder worktree and the task is closed."}' "$CODE_TASK_ID" "$epic_id")"
+  seed_issue_if_missing "$PLAN_TASK_ID" "$plan_body"
+  seed_issue_if_missing "$CODE_TASK_ID" "$code_body"
+  link_parent_child "$PLAN_TASK_ID" "$epic_id"
+  link_parent_child "$CODE_TASK_ID" "$epic_id"
+
+  # Extra board fixtures so the kanban shows multiple columns under the epic lane.
+  seed_issue_by_title_if_missing "Document local-mode runbook" \
+    "$(printf '{"title":"Document local-mode runbook","issue_type":"task","priority":2,"parent":"%s","source_repo":"source-repo","owner":"local-mode","description":"Add troubleshooting notes for Podman machine failures."}' "$epic_id")"
+  seed_issue_by_title_if_missing "Exercise epic swimlane UI" \
+    "$(printf '{"title":"Exercise epic swimlane UI","issue_type":"task","priority":2,"parent":"%s","source_repo":"source-repo","assignee":"%s","owner":"local-mode","description":"Verify epic grouping on the kanban board."}' "$epic_id" "$PLAN_AGENT")"
+  seed_issue_by_title_if_missing "Backlog grooming placeholder" \
+    "$(printf '{"title":"Backlog grooming placeholder","issue_type":"task","priority":4,"parent":"%s","status":"deferred","source_repo":"source-repo","owner":"local-mode","description":"Deferred task for backlog column demo."}' "$epic_id")"
+
+  swim_id="$(http_get "$(issues_api)/issues" |
+    jq -r --arg title "Exercise epic swimlane UI" '.data[] | select(.title == $title) | .id' 2>/dev/null |
+    head -1)"
+  if [ -n "$swim_id" ] && [ "$(issue_json_field "$swim_id" status)" = "open" ]; then
+    if command -v curl >/dev/null 2>&1; then
+      curl -fsS --max-time 5 -X PATCH -H "Content-Type: application/json" \
+        --data '{"status":"in_progress"}' "$(issues_api)/issues/${swim_id}" >/dev/null 2>&1 || true
+    fi
+  fi
+}
+
+start_serve() {
+  cd "$WORKSPACE_ROOT"
+  loom serve --bind "$LOOM_BIND" --port "$LOOM_PORT" --fleet-mode >/tmp/loom-serve.log 2>&1 &
+  serve_pid="$!"
+  wait_for_url "http://127.0.0.1:${LOOM_PORT}/api/config" "loom serve"
+}
+
+workspace_daemon_pid() {
+  ws_path="$1"
+  pid_file="${ws_path}/.loom/daemon.pid"
+  if [ ! -f "$pid_file" ]; then
+    return 1
+  fi
+
+  pid="$(tr -dc '0-9' < "$pid_file" || true)"
+  if [ "$pid" = "" ]; then
+    return 1
+  fi
+  if kill -0 "$pid" >/dev/null 2>&1; then
+    printf '%s\n' "$pid"
+    return 0
+  fi
+  return 1
+}
+
+workspace_has_auto_agents() {
+  ws_key="$1"
+  agents_json="$(LOOM_WORKSPACE="$ws_key" LOOM_WORKSPACE_ID="$ws_key" loom agentdef list --json 2>/tmp/local-mode-agentdef.err || true)"
+  if [ "$agents_json" = "" ]; then
+    return 1
+  fi
+  auto_count="$(printf '%s' "$agents_json" | jq '[.[] | select(.auto == true)] | length' 2>/dev/null || printf '0')"
+  [ "${auto_count:-0}" -gt 0 ]
+}
+
+start_workspace_daemon() {
+  ws_key="$1"
+  ws_path="$2"
+  mkdir -p "${ws_path}/.loom" "$DAEMON_STDOUT_DIR"
+
+  log_file="${DAEMON_STDOUT_DIR}/${ws_key}.log"
+  echo "[local-mode] starting daemon for workspace ${ws_key} (${ws_path})"
+  (
+    cd "$ws_path"
+    export LOOM_WORKSPACE="$ws_key"
+    export LOOM_WORKSPACE_ID="$ws_key"
+    export LOOM_BACKEND="$AGENT_BACKEND"
+    export LOOM_ISSUE_BACKEND=fleetdb
+    export LOOM_FLEET_DB_URL="${LOOM_FLEET_DB_URL:-http://fleet-db:8080}"
+    export LOOM_FLEET_URL="${LOOM_FLEET_URL:-http://fleet-db:8080}"
+    export LOOM_FLEET_DB_ACTOR="${LOOM_FLEET_DB_ACTOR:-local-mode-harness@fixture.local}"
+    export LOOM_FLEET_ACTOR="${LOOM_FLEET_ACTOR:-local-mode-harness@fixture.local}"
+    loom daemon
+  ) >>"$log_file" 2>&1 &
+}
+
+reconcile_workspace_daemons() {
+  workspace_json="$(loom workspace list --json 2>/tmp/local-mode-workspaces.err || true)"
+  if [ "$workspace_json" = "" ]; then
+    echo "[local-mode] workspace daemon manager: no workspaces returned"
+    return 0
+  fi
+
+  printf '%s' "$workspace_json" |
+    jq -r '.[] | select((.path // "") != "") | [.key, .path] | @tsv' 2>/tmp/local-mode-workspaces-jq.err |
+    while IFS="$(printf '\t')" read -r ws_key ws_path; do
+      if [ "$ws_key" = "" ] || [ "$ws_path" = "" ]; then
+        continue
+      fi
+      if ! workspace_has_auto_agents "$ws_key"; then
+        continue
+      fi
+      if workspace_daemon_pid "$ws_path" >/dev/null 2>&1; then
+        continue
+      fi
+      start_workspace_daemon "$ws_key" "$ws_path"
+    done
+}
+
+run_daemon_manager() {
+  echo "[local-mode] daemon manager: keeping daemons alive for workspaces with auto agents"
+  echo "[local-mode] daemon manager: scan interval ${DAEMON_SCAN_INTERVAL}s"
+  while true; do
+    reconcile_workspace_daemons || true
+    sleep "$DAEMON_SCAN_INTERVAL" &
+    wait "$!" || return 0
+  done
+}
+
+stop_workspace_daemons() {
+  workspace_json="$(loom workspace list --json 2>/dev/null || true)"
+  if [ "$workspace_json" = "" ]; then
+    return 0
+  fi
+
+  printf '%s' "$workspace_json" |
+    jq -r '.[] | select((.path // "") != "") | .path' 2>/dev/null |
+    while read -r ws_path; do
+      pid="$(workspace_daemon_pid "$ws_path" || true)"
+      if [ "$pid" != "" ]; then
+        kill "$pid" >/dev/null 2>&1 || true
+      fi
+    done
+}
+
+cleanup() {
+  stop_workspace_daemons || true
+  if [ "${serve_pid:-}" != "" ]; then
+    kill "$serve_pid" >/dev/null 2>&1 || true
+  fi
+}
+
+trap 'cleanup; exit 0' INT TERM
+trap cleanup EXIT
+
+mkdir -p "${HOME:-/root}" "${LOOM_CONFIG_DIR:-/root/.loom}"
+git config --global user.email "local-mode@fixture.local"
+git config --global user.name "local-mode"
+git config --global --add safe.directory "*" >/dev/null 2>&1 || true
+
+wait_for_url "${LOOM_FLEET_DB_URL:-http://fleet-db:8080}/healthz" "fleet-db"
+prepare_codex_credentials
+prepare_claude_credentials
+prepare_daytona_credentials
+create_source_repo
+create_workspace
+create_agent_worktree "$PLAN_AGENT"
+create_agent_worktree "$CODE_AGENT"
+trust_codex_local_mode_paths
+register_agents
+start_serve
+seed_tasks
+
+echo "[local-mode] ready"
+echo "[local-mode] UI:  ${LOCAL_MODE_UI_URL:-http://localhost:8283}/ws/${WORKSPACE}/kanban"
+echo "[local-mode] API: ${LOCAL_MODE_API_URL:-http://localhost:8282}"
+echo "[local-mode] epic lane:    $(find_epic_id)"
+echo "[local-mode] planner task: ${PLAN_TASK_ID}"
+echo "[local-mode] coder task:   ${CODE_TASK_ID}"
+
+run_daemon_manager

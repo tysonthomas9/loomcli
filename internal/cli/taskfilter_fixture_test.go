@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"os"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/backend"
 )
 
 func TestPlanStatusParity_JSONFixtureCases(t *testing.T) {
@@ -14,8 +16,10 @@ func TestPlanStatusParity_JSONFixtureCases(t *testing.T) {
 	var cases []struct {
 		ID    string `json:"id"`
 		Issue struct {
-			Design string   `json:"design"`
-			Labels []string `json:"labels"`
+			Design           string   `json:"design"`
+			DesignArtifactID string   `json:"design_artifact_id"`
+			HasDesign        bool     `json:"has_design"`
+			Labels           []string `json:"labels"`
 		} `json:"issue"`
 		Expected struct {
 			HasNeedsRevision bool   `json:"has_needs_revision"`
@@ -29,7 +33,7 @@ func TestPlanStatusParity_JSONFixtureCases(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.ID, func(t *testing.T) {
-			issue := BdIssue{Design: c.Issue.Design, Labels: c.Issue.Labels}
+			issue := backend.IssueData{Design: c.Issue.Design, DesignArtifactID: c.Issue.DesignArtifactID, HasDesign: c.Issue.HasDesign, Labels: c.Issue.Labels}
 			if got := HasNeedsRevision(issue); got != c.Expected.HasNeedsRevision {
 				t.Errorf("HasNeedsRevision()=%v, want %v", got, c.Expected.HasNeedsRevision)
 			}

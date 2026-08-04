@@ -1,4 +1,8 @@
 import { test, expect, Page } from "@playwright/test"
+import {
+  setupFleetMocks,
+  waitForWorkspaceIssues,
+} from "./helpers/fleet"
 
 /**
  * E2E tests for Table view column sorting.
@@ -45,26 +49,20 @@ const mockIssues = [
  * Set up API mocks for table sort tests.
  */
 async function setupMocks(page: Page) {
-  await page.route("**/api/ready", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ success: true, data: mockIssues }),
-    })
-  })
+  await setupFleetMocks(page, mockIssues)
 }
 
 /**
  * Navigate to Table view and wait for data to load.
  */
-async function navigateToTable(page: Page) {
+async function navigateToTable(page: Page, options?: { expectTable?: boolean }) {
   await Promise.all([
-    page.waitForResponse(
-      (res) => res.url().includes("/api/ready") && res.status() === 200
-    ),
-    page.goto("/?view=table"),
+    waitForWorkspaceIssues(page),
+    page.goto("/ws/default/table"),
   ])
-  await expect(page.getByTestId("issue-table")).toBeVisible()
+  if (options?.expectTable ?? true) {
+    await expect(page.getByTestId("issue-table")).toBeVisible()
+  }
 }
 
 /**
@@ -434,27 +432,22 @@ test.describe("Table Column Sorting", () => {
   })
 
   test.describe("Edge Cases", () => {
-    test("sorting with empty table displays empty message", async ({
+    test("empty issue list displays empty workspace message", async ({
       page,
     }) => {
       // Override mock to return empty data
-      await page.route("**/api/ready", async (route) => {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({ success: true, data: [] }),
-        })
-      })
+      await page.unroute("**/*")
+      await setupFleetMocks(page, [])
 
-      await navigateToTable(page)
+      await navigateToTable(page, { expectTable: false })
 
-      // Verify empty message is shown
-      await expect(page.getByTestId("issue-table-empty")).toBeVisible()
-
-      // Sorting should still work (no error)
-      const idHeader = getColumnHeader(page, "id")
-      await idHeader.click()
-      await expect(idHeader).toHaveAttribute("aria-sort", "ascending")
+      await expect(
+        page.getByRole("heading", { name: "No issues yet" })
+      ).toBeVisible()
+      await expect(
+        page.getByRole("status", { name: "No issues yet" })
+      ).toBeVisible()
+      await expect(page.getByTestId("issue-table")).toHaveCount(0)
     })
   })
 })

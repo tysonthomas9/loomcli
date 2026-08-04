@@ -2,7 +2,6 @@ package cli
 
 import (
 	"errors"
-	"os"
 	"path/filepath"
 	"testing"
 )
@@ -10,6 +9,9 @@ import (
 // --- Group 1: GetCurrentBranch() unit tests ---
 
 func TestGetCurrentBranch_NormalBranch(t *testing.T) {
+	t.Parallel()
+
+	deps, _, _, _, _ := NewTestDeps(t)
 	mock := NewCommandMock(t, []CommandStub{
 		{
 			Name:   "git",
@@ -17,11 +19,11 @@ func TestGetCurrentBranch_NormalBranch(t *testing.T) {
 			Stdout: "feature-x\n",
 		},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
-	branch, err := GetCurrentBranch("/some/repo")
+	branch, err := getCurrentBranchDeps(deps, "/some/repo")
 	if err != nil {
-		t.Fatalf("GetCurrentBranch: unexpected error: %v", err)
+		t.Fatalf("getCurrentBranchDeps: unexpected error: %v", err)
 	}
 	if branch != "feature-x" {
 		t.Errorf("expected 'feature-x', got %q", branch)
@@ -29,6 +31,9 @@ func TestGetCurrentBranch_NormalBranch(t *testing.T) {
 }
 
 func TestGetCurrentBranch_DetachedHEAD(t *testing.T) {
+	t.Parallel()
+
+	deps, _, _, _, _ := NewTestDeps(t)
 	// git branch --show-current returns empty string on detached HEAD
 	mock := NewCommandMock(t, []CommandStub{
 		{
@@ -37,11 +42,11 @@ func TestGetCurrentBranch_DetachedHEAD(t *testing.T) {
 			Stdout: "",
 		},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
-	branch, err := GetCurrentBranch("/some/repo")
+	branch, err := getCurrentBranchDeps(deps, "/some/repo")
 	if err != nil {
-		t.Fatalf("GetCurrentBranch: unexpected error: %v", err)
+		t.Fatalf("getCurrentBranchDeps: unexpected error: %v", err)
 	}
 	if branch != "" {
 		t.Errorf("expected empty string for detached HEAD, got %q", branch)
@@ -49,6 +54,9 @@ func TestGetCurrentBranch_DetachedHEAD(t *testing.T) {
 }
 
 func TestGetCurrentBranch_GitError(t *testing.T) {
+	t.Parallel()
+
+	deps, _, _, _, _ := NewTestDeps(t)
 	mock := NewCommandMock(t, []CommandStub{
 		{
 			Name:   "git",
@@ -57,9 +65,9 @@ func TestGetCurrentBranch_GitError(t *testing.T) {
 			Err:    errors.New("exit status 128"),
 		},
 	})
-	mock.Install()
+	mock.InstallOn(deps)
 
-	_, err := GetCurrentBranch("/not/a/repo")
+	_, err := getCurrentBranchDeps(deps, "/not/a/repo")
 	if err == nil {
 		t.Fatal("expected error when git command fails")
 	}
@@ -181,12 +189,12 @@ func TestDiscoverWorkspace_MultipleWorkspaces_SwitchAndDiscover(t *testing.T) {
 	if wt1[0].Name != "repo1" {
 		t.Errorf("expected repo1, got %q", wt1[0].Name)
 	}
-	if wt1[0].Workspace != "workspace1" {
-		t.Errorf("expected workspace 'workspace1', got %q", wt1[0].Workspace)
+	if wt1[0].Workspace != "WORKSPACE1" {
+		t.Errorf("expected workspace 'WORKSPACE1', got %q", wt1[0].Workspace)
 	}
 
 	// Switch to workspace2 and discover
-	if err := r.SetWorkspace("workspace2"); err != nil {
+	if err := r.SetWorkspace("WORKSPACE2"); err != nil {
 		t.Fatalf("SetWorkspace: %v", err)
 	}
 
@@ -200,99 +208,15 @@ func TestDiscoverWorkspace_MultipleWorkspaces_SwitchAndDiscover(t *testing.T) {
 	if wt2[0].Name != "repo2" {
 		t.Errorf("expected repo2, got %q", wt2[0].Name)
 	}
-	if wt2[0].Workspace != "workspace2" {
-		t.Errorf("expected workspace 'workspace2', got %q", wt2[0].Workspace)
+	if wt2[0].Workspace != "WORKSPACE2" {
+		t.Errorf("expected workspace 'WORKSPACE2', got %q", wt2[0].Workspace)
 	}
 }
 
-// --- Group 3: ResolveAgentTarget() legacy mode paths ---
-
-func TestResolveAgentTarget_LegacyMode_InvalidWorktree(t *testing.T) {
-	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
-
-	old := defaultResolver
-	defaultResolver = nil
-	defer func() { defaultResolver = old }()
-
-	tmpDir := t.TempDir()
-	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
-
-	origDir, _ := os.Getwd()
-	defer os.Chdir(origDir)
-	os.Chdir(tmpDir)
-
-	// Create worktrees directory but no worktree named "nonexistent"
-	os.MkdirAll(filepath.Join(tmpDir, "worktrees"), 0755)
-
-	_, err := ResolveAgentTarget("nonexistent")
-	if err == nil {
-		t.Fatal("expected error for nonexistent worktree in legacy mode")
-	}
-}
-
-func TestResolveAgentTarget_LegacyMode_AbsolutePath(t *testing.T) {
-	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
-
-	old := defaultResolver
-	defaultResolver = nil
-	defer func() { defaultResolver = old }()
-
-	tmpDir := t.TempDir()
-	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
-	absTarget := filepath.Join(tmpDir, "my-project")
-	os.MkdirAll(absTarget, 0755)
-
-	target, err := ResolveAgentTarget(absTarget)
-	if err != nil {
-		t.Fatalf("ResolveAgentTarget: %v", err)
-	}
-	if target.WorkDir != absTarget {
-		t.Errorf("expected WorkDir %q, got %q", absTarget, target.WorkDir)
-	}
-	if target.AgentName != "my-project" {
-		t.Errorf("expected AgentName 'my-project', got %q", target.AgentName)
-	}
-}
+// ResolveAgentTarget tests have been moved to internal/cli/workspace/workspace_resolve_test.go
+// where ResolveAgentTarget lives.
 
 // --- Group 4: DiscoverWorktrees() public API delegation ---
-
-func TestDiscoverWorktrees_PublicAPI_DelegatesLegacy(t *testing.T) {
-	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
-
-	old := defaultResolver
-	defaultResolver = nil
-	defer func() { defaultResolver = old }()
-
-	tmpDir := t.TempDir()
-	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
-
-	origDir, _ := os.Getwd()
-	defer os.Chdir(origDir)
-	os.Chdir(tmpDir)
-
-	// Create worktrees directory with a git repo
-	createGitRepo(t, filepath.Join(tmpDir, "worktrees", "falcon"))
-
-	// Call the package-level function
-	worktrees, err := DiscoverWorktrees()
-	if err != nil {
-		t.Fatalf("DiscoverWorktrees: %v", err)
-	}
-
-	if len(worktrees) != 1 {
-		t.Fatalf("expected 1 worktree, got %d", len(worktrees))
-	}
-	if worktrees[0].Name != "falcon" {
-		t.Errorf("expected name 'falcon', got %q", worktrees[0].Name)
-	}
-	// Legacy mode: Workspace and Repo should be empty/nil
-	if worktrees[0].Workspace != "" {
-		t.Errorf("expected empty Workspace in legacy mode, got %q", worktrees[0].Workspace)
-	}
-	if worktrees[0].Repo != nil {
-		t.Errorf("expected nil Repo in legacy mode, got %+v", worktrees[0].Repo)
-	}
-}
 
 func TestDiscoverWorktrees_PublicAPI_DelegatesWorkspace(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -331,8 +255,8 @@ func TestDiscoverWorktrees_PublicAPI_DelegatesWorkspace(t *testing.T) {
 		t.Errorf("expected name 'myrepo', got %q", worktrees[0].Name)
 	}
 	// Workspace mode: Workspace and Repo should be populated
-	if worktrees[0].Workspace != "ws" {
-		t.Errorf("expected Workspace 'ws', got %q", worktrees[0].Workspace)
+	if worktrees[0].Workspace != "WS" {
+		t.Errorf("expected Workspace 'WS', got %q", worktrees[0].Workspace)
 	}
 	if worktrees[0].Repo == nil {
 		t.Error("expected non-nil Repo in workspace mode")

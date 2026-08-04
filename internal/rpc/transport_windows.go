@@ -72,13 +72,6 @@ func dialRPC(socketPath string, timeout time.Duration) (net.Conn, error) {
 	switch info.Network {
 	case "pipe":
 		return winio.DialPipe(info.Address, &timeout)
-	case "tcp", "":
-		// Backward compatibility: connect to old TCP-based daemons
-		network := info.Network
-		if network == "" {
-			network = "tcp"
-		}
-		return net.DialTimeout(network, info.Address, timeout)
 	default:
 		return nil, fmt.Errorf("unsupported RPC network type: %q", info.Network)
 	}
@@ -90,10 +83,10 @@ func endpointExists(socketPath string) bool {
 }
 
 // pipeName derives a deterministic Named Pipe path from the socket path.
-// The workspace path is extracted from socketPath (parent of .beads directory),
+// The workspace path is extracted from socketPath (parent of .loom directory),
 // canonicalized, and hashed to produce a unique pipe name.
 func pipeName(socketPath string) string {
-	// socketPath is like /workspace/.beads/bd.sock
+	// socketPath is like /workspace/.loom/loom.sock
 	// workspace is two directories up
 	workspacePath := filepath.Dir(filepath.Dir(socketPath))
 
@@ -101,7 +94,7 @@ func pipeName(socketPath string) string {
 	hash := sha256.Sum256([]byte(canonical))
 	hashHex := hex.EncodeToString(hash[:8]) // 8 bytes = 16 hex chars
 
-	return `\\.\pipe\beads-` + hashHex
+	return `\\.\pipe\loom-` + hashHex
 }
 
 // normalizeWorkspacePath produces a canonical form of the workspace path

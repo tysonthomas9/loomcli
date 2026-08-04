@@ -49,9 +49,9 @@ type IssueWithCounts struct {
 }
 
 // IssueDetails extends Issue with labels, dependencies, dependents, and comments.
-// Used for JSON serialization in bd show and RPC responses.
+// Used for JSON serialization in detail and RPC responses.
 // Note: Labels, Dependencies, Dependents, and Comments do NOT use omitempty
-// to ensure consistent JSON structure for frontend type guards (GH#bd-rrtu).
+// to ensure consistent JSON structure for frontend type guards.
 type IssueDetails struct {
 	Issue
 	Labels       []string                       `json:"labels"`
@@ -124,6 +124,14 @@ func (d DependencyType) IsWellKnown() bool {
 // Only blocking types affect the ready work calculation.
 func (d DependencyType) AffectsReadyWork() bool {
 	return d == DepBlocks || d == DepParentChild || d == DepConditionalBlocks || d == DepWaitsFor
+}
+
+// IsDirectBlocker returns true if this dependency type directly creates blockage.
+// Unlike AffectsReadyWork(), this excludes parent-child which only propagates
+// existing blockage transitively (via blocked_issues_cache SQL) but does not
+// itself create a blocking relationship.
+func (d DependencyType) IsDirectBlocker() bool {
+	return d == DepBlocks || d == DepConditionalBlocks || d == DepWaitsFor
 }
 
 // WaitsForMeta holds metadata for waits-for dependencies (fanout gates).
@@ -222,17 +230,17 @@ type EventType string
 
 // Event type constants for audit trail
 const (
-	EventCreated           EventType = "created"
-	EventUpdated           EventType = "updated"
-	EventStatusChanged     EventType = "status_changed"
-	EventCommented         EventType = "commented"
-	EventClosed            EventType = "closed"
-	EventReopened          EventType = "reopened"
-	EventDependencyAdded   EventType = "dependency_added"
-	EventDependencyRemoved EventType = "dependency_removed"
-	EventLabelAdded        EventType = "label_added"
-	EventLabelRemoved      EventType = "label_removed"
-	EventCompacted         EventType = "compacted"
+	EventCreated           EventType = "issue.created"
+	EventUpdated           EventType = "issue.updated"
+	EventStatusChanged     EventType = "issue.status_changed"
+	EventCommented         EventType = "issue.commented"
+	EventClosed            EventType = "issue.closed"
+	EventReopened          EventType = "issue.reopened"
+	EventDependencyAdded   EventType = "issue.dependency_added"
+	EventDependencyRemoved EventType = "issue.dependency_removed"
+	EventLabelAdded        EventType = "issue.label_added"
+	EventLabelRemoved      EventType = "issue.label_removed"
+	EventCompacted         EventType = "issue.compacted"
 )
 
 // BondRef tracks compound molecule lineage.
@@ -254,11 +262,10 @@ const (
 
 // ID prefix constants for molecule/wisp instantiation.
 // These prefixes are inserted into issue IDs: <project>-<prefix>-<id>
-// Used by: cmd/bd/pour.go, cmd/bd/wisp.go (ID generation)
-// Exclusion from bd ready is config-driven via ready.exclude_id_patterns (default: -mol-,-wisp-)
+// Exclusion from ready queues is config-driven via ready.exclude_id_patterns.
 const (
-	IDPrefixMol  = "mol"  // Persistent molecules (bd-mol-xxx)
-	IDPrefixWisp = "wisp" // Ephemeral wisps (bd-wisp-xxx)
+	IDPrefixMol  = "mol"  // Persistent molecules
+	IDPrefixWisp = "wisp" // Ephemeral wisps
 )
 
 // EntityRef is a structured reference to an entity (human, agent, or org).

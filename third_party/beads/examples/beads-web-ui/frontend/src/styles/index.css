@@ -1,8 +1,0 @@
-/*
- * Main CSS Entry Point
- * Imports all stylesheets in the correct order.
- */
-
-@import './reset.css';
-@import './variables.css';
-@import './base.css';

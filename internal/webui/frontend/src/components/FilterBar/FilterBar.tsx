@@ -10,9 +10,10 @@ import {
   type FilterState,
   type FilterActions,
   isEmptyFilter,
-} from "@/hooks/useFilterState";
+} from "@/hooks/issues";
 import type { Priority, IssueType } from "@/types";
 
+import { RepoSelector } from "../RepoSelector";
 import styles from "./FilterBar.module.css";
 
 /**
@@ -70,7 +71,8 @@ export type GroupByOption =
   | "assignee"
   | "priority"
   | "type"
-  | "label";
+  | "label"
+  | "repo";
 
 /**
  * Group by option for the dropdown.
@@ -92,6 +94,7 @@ const GROUP_BY_OPTIONS: GroupByOptionItem[] = [
   { label: "Priority", value: "priority" },
   { label: "Type", value: "type" },
   { label: "Label", value: "label" },
+  { label: "Repo", value: "repo" },
 ];
 
 /**
@@ -120,8 +123,16 @@ export interface FilterBarProps {
   showLabels?: boolean;
   /** Show group-by selector (default: onGroupByChange is provided) */
   showGroupBy?: boolean;
+  /** Show repo selector (default: false) */
+  showRepos?: boolean;
+  /** Available repository names for repo filter */
+  availableRepos?: string[];
+  /** Currently selected repository names */
+  selectedRepos?: string[];
+  /** Callback when repo selection changes */
+  onRepoChange?: (repos: string[]) => void;
   /** Visual variant */
-  variant?: "header" | "panel";
+  variant?: "header" | "panel" | "menu";
   /** Testing id for the root element */
   testId?: string;
 }
@@ -147,6 +158,10 @@ export function FilterBar({
   showType = true,
   showLabels = true,
   showGroupBy,
+  showRepos = false,
+  availableRepos,
+  selectedRepos,
+  onRepoChange,
   variant = "panel",
   testId = "filter-bar",
 }: FilterBarProps): JSX.Element {
@@ -286,6 +301,15 @@ export function FilterBar({
           </div>
         )}
 
+        {/* Repo filter dropdown */}
+        {showRepos && availableRepos && onRepoChange && (
+          <RepoSelector
+            availableRepos={availableRepos}
+            selectedRepos={selectedRepos ?? []}
+            onChange={onRepoChange}
+          />
+        )}
+
         {/* Label filter dropdown */}
         {showLabels && availableLabels && availableLabels.length > 0 && (
           <div className={styles.filterGroup} ref={labelDropdownRef}>
@@ -310,7 +334,8 @@ export function FilterBar({
               {labelDropdownOpen && (
                 <div
                   className={styles.dropdownMenu}
-                  role="group"
+                  role="listbox"
+                  aria-multiselectable="true"
                   aria-label="Select labels"
                   data-testid="label-filter-menu"
                 >

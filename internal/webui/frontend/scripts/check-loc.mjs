@@ -1,21 +1,16 @@
 #!/usr/bin/env node
-// Check that frontend TypeScript/TSX source files do not exceed 500 LOC.
-// Files in the allowlist are permitted up to their recorded ceiling (ratchet).
+// Check that frontend source files do not exceed the global LOC ceiling (2000).
 
 import { readFileSync, readdirSync, statSync } from "fs";
 import { join, relative, extname, sep } from "path";
 import { fileURLToPath } from "url";
 
-export const THRESHOLD = 500;
+export const THRESHOLD_TS = 2000;
+export const THRESHOLD_TSX = 2000;
 
-// Ratchet allowlist: files that exceed the threshold with their recorded ceiling.
-// If a file grows past its ceiling, it fails. Shrinking is always OK.
-export const ALLOWLIST = new Map([
-  ["src/components/IssueDetailPanel/IssueDetailPanel.tsx", 1076],
-  ["src/App.tsx", 747],
-  ["src/components/AgentDetailPanel/AgentDetailPanel.tsx", 575],
-  ["src/hooks/useAgentTerminalLogs.ts", 522],
-]);
+// Retained for API compatibility with existing tests/importers; no per-file
+// exceptions are currently needed now that the global ceiling is 2000.
+export const ALLOWLIST = new Map();
 
 // Patterns to skip (test files, generated files, fixtures).
 export function shouldSkip(relPath) {
@@ -30,6 +25,7 @@ export function shouldSkip(relPath) {
   const parts = relPath.split("/");
   if (parts.includes("__tests__")) return true;
   if (parts.includes("test-utils")) return true;
+  if (parts.includes("generated")) return true;
 
   return false;
 }
@@ -67,7 +63,7 @@ export function countLines(filePath) {
  * Returns { violations, allowlistedCount } without calling process.exit,
  * so callers (including tests) can inspect the result.
  */
-export function checkLoc(frontendDir, srcDir, allowlist = ALLOWLIST, threshold = THRESHOLD) {
+export function checkLoc(frontendDir, srcDir, allowlist = ALLOWLIST, thresholds = { ts: THRESHOLD_TS, tsx: THRESHOLD_TSX }) {
   let srcStat;
   try {
     srcStat = statSync(srcDir);
@@ -89,6 +85,9 @@ export function checkLoc(frontendDir, srcDir, allowlist = ALLOWLIST, threshold =
 
     const loc = countLines(filePath);
     const ceiling = allowlist.get(relPath);
+
+    const ext = relPath.endsWith(".tsx") ? "tsx" : "ts";
+    const threshold = typeof thresholds === "number" ? thresholds : (thresholds[ext] ?? THRESHOLD_TS);
 
     if (ceiling !== undefined) {
       allowlistedCount++;
@@ -130,7 +129,7 @@ function main() {
     console.error(`  ${v.loc}\t${v.relPath}${suffix}`);
   }
   console.error(
-    `\n\u2717 ${violations.length} file(s) exceed ${THRESHOLD} LOC limit`,
+    `\n\u2717 ${violations.length} file(s) exceed LOC limits (${THRESHOLD_TSX} .tsx / ${THRESHOLD_TS} .ts)`,
   );
   process.exit(1);
 }

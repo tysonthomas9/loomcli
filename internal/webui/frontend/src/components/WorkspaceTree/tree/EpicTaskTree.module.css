@@ -1,0 +1,447 @@
+/**
+ * EpicTaskTree styles.
+ * Covers EpicTaskTree, EpicRow, TaskRow, TalkToLeadEntry components.
+ */
+
+/* Tree section container */
+.treeSection {
+  display: flex;
+  flex-direction: column;
+  margin-top: 4px;
+}
+
+/* Talk to Lead entry */
+.talkToLeadEntry {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  height: 32px;
+  padding: 0 1rem;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color var(--transition-fast, 0.15s ease);
+}
+
+.talkToLeadEntry:hover {
+  background: var(--color-bg-hover);
+}
+
+.talkToLeadEntry:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: -2px;
+}
+
+/* Epic group container */
+.epicGroup {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Epic row — container div with button + overflow */
+.epicRow {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 28px;
+  padding: 0 4px 0 0;
+  background: transparent;
+  transition: background-color var(--transition-fast, 0.15s ease);
+}
+
+.epicRow:hover {
+  background: var(--color-bg-hover);
+}
+
+/* Inner clickable button within epic row */
+.epicRowButton {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0 0 0 1rem;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+.epicRowButton:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: -2px;
+}
+
+/* Epic children indentation */
+.epicChildren {
+  padding-left: 12px;
+}
+
+/* Task row — container div with button + overflow */
+.taskRow {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 26px;
+  padding: 0 4px 0 0;
+  background: transparent;
+  transition: background-color var(--transition-fast, 0.15s ease);
+}
+
+.taskRow:hover {
+  background: var(--color-bg-hover);
+}
+
+/* Inner clickable button within task row */
+.taskRowButton {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0 0 0 calc(1rem + 12px);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+.taskRowButton:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: -2px;
+}
+
+.taskRowSelected {
+  background: color-mix(
+    in srgb,
+    var(--color-primary, #6366f1) 10%,
+    transparent
+  );
+}
+
+.taskRowSelected:hover {
+  background: color-mix(
+    in srgb,
+    var(--color-primary, #6366f1) 15%,
+    transparent
+  );
+}
+
+/* Icon containers */
+.epicIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--color-text-tertiary);
+}
+
+.taskIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--color-text-tertiary);
+}
+
+/* Title text with ellipsis truncation */
+.titleText {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.8125rem;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Branch / backend chip */
+.branchChip {
+  font-size: 0.6875rem;
+  font-family: var(--font-mono, monospace);
+  background: var(--color-bg-tertiary);
+  border-radius: 4px;
+  padding: 1px 5px;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  flex-shrink: 0;
+  max-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Diff stats */
+.diffStats {
+  display: flex;
+  gap: 0.25rem;
+  font-size: 0.6875rem;
+  font-family: var(--font-mono, monospace);
+  flex-shrink: 0;
+}
+
+.diffAdded {
+  color: var(--color-success, #22c55e);
+}
+
+.diffRemoved {
+  color: var(--color-error, #ef4444);
+}
+
+/* Status dot */
+.statusDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--color-text-tertiary);
+  opacity: 0.5;
+}
+
+.statusDot[data-status="in_progress"] {
+  background: var(--color-success, #22c55e);
+  opacity: 1;
+}
+
+.statusDot[data-status="review"] {
+  background: var(--color-primary, #6366f1);
+  opacity: 1;
+}
+
+.statusDot[data-status="open"] {
+  background: var(--color-text-tertiary);
+  opacity: 0.5;
+}
+
+.statusDot[data-status="blocked"] {
+  background: var(--color-error, #ef4444);
+  opacity: 1;
+}
+
+.statusDot[data-status="closed"] {
+  background: var(--color-text-tertiary);
+  opacity: 0.3;
+}
+
+.statusDot[data-status="active"] {
+  background: var(--color-success, #22c55e);
+  opacity: 1;
+}
+
+/* Collapse chevron — same pattern as WorkspaceTree */
+.collapseChevron {
+  width: 16px;
+  text-align: center;
+  font-family: monospace;
+  font-size: 0.875rem;
+  line-height: 1;
+  color: var(--color-text-tertiary);
+  transition: transform 0.15s ease;
+  cursor: pointer;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.collapseChevron[data-expanded="true"] {
+  transform: rotate(90deg);
+}
+
+/* Overflow button — hidden by default, shown on row hover */
+.overflowButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 0.15s ease,
+    background-color 0.15s ease;
+  flex-shrink: 0;
+  color: var(--color-text-tertiary);
+  font-size: 0.875rem;
+}
+
+.epicRow:hover .overflowButton,
+.taskRow:hover .overflowButton {
+  opacity: 1;
+}
+
+.overflowButton:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+.overflowButton:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--color-focus);
+  outline-offset: -2px;
+}
+
+/* Inline rename */
+.renameContainer {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.renameInput {
+  width: 100%;
+  padding: 2px 6px;
+  font-size: 0.8125rem;
+  font-family: inherit;
+  color: var(--color-text-primary);
+  background: var(--color-bg);
+  border: 1px solid var(--color-primary, #6366f1);
+  border-radius: 4px;
+  outline: none;
+}
+
+.renameInput:focus {
+  box-shadow: 0 0 0 2px
+    color-mix(in srgb, var(--color-primary, #6366f1) 20%, transparent);
+}
+
+.renameError {
+  font-size: 0.6875rem;
+  color: var(--color-error);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Empty state message */
+.emptyTree {
+  padding: 0.5rem 1rem;
+  font-size: 0.75rem;
+  color: var(--color-text-tertiary);
+  text-align: center;
+}
+
+/* Loading skeleton */
+.loadingSkeleton {
+  padding: 0.25rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.skeletonRow {
+  height: 22px;
+  background: var(--color-bg-tertiary);
+  border-radius: 4px;
+  animation: epicTreePulse 1.5s ease-in-out infinite;
+}
+
+@keyframes epicTreePulse {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 0.8;
+  }
+}
+
+/* Inline add button (idle state) */
+.addButton {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  width: 100%;
+  height: 24px;
+  padding: 0 1rem;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  font-size: 0.75rem;
+  color: var(--color-text-tertiary);
+  transition: color var(--transition-fast, 0.15s ease);
+}
+
+.addButton:hover {
+  color: var(--color-text-secondary);
+}
+
+/* Task-level add button needs extra indent to match TaskRow */
+.addButtonTask {
+  composes: addButton;
+  padding-left: calc(1rem + 12px);
+}
+
+/* Inline input for creating new item */
+.inlineAddInput {
+  display: flex;
+  flex-direction: column;
+  padding: 2px 1rem;
+}
+
+.inlineAddInputTask {
+  composes: inlineAddInput;
+  padding-left: calc(1rem + 12px);
+}
+
+.inlineAddInput input {
+  width: 100%;
+  height: 24px;
+  padding: 0 0.375rem;
+  font-size: 0.8125rem;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  color: var(--color-text-primary);
+  outline: none;
+}
+
+.inlineAddInput input:focus {
+  border-color: var(--color-primary, #6366f1);
+}
+
+.inlineAddInput input:disabled {
+  opacity: 0.6;
+}
+
+.inlineAddError {
+  font-size: 0.6875rem;
+  color: var(--color-error, #ef4444);
+  margin-top: 2px;
+}
+
+.inlineAddSaving {
+  font-size: 0.6875rem;
+  color: var(--color-text-tertiary);
+  margin-top: 2px;
+}
+
+/* Show/hide completed epics toggle */
+.showCompletedButton {
+  display: block;
+  width: 100%;
+  padding: var(--space-1, 4px) 1rem;
+  margin-top: var(--space-1, 4px);
+  font-size: 0.75rem;
+  color: var(--color-text-tertiary);
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.showCompletedButton:hover {
+  color: var(--color-text-secondary);
+}

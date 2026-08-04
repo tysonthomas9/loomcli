@@ -1,4 +1,9 @@
-import { test, expect, Page } from "@playwright/test"
+import { test, expect } from "@playwright/test"
+import type { Page } from "@playwright/test"
+import { ok, workspaceApi, workspaceData } from "./helpers/fleet"
+
+const FIXTURE_WORKSPACE_ID = "fixture-workspace"
+const FIXTURE_WS_API = workspaceApi(FIXTURE_WORKSPACE_ID)
 
 /**
  * E2E tests for TypeDropdown component.
@@ -86,40 +91,79 @@ async function setupMocks(
     patchDelay?: number
     patchError?: boolean
     onPatch?: (body: { issue_type?: string }) => void
-  }
+  },
 ) {
   // Track patch calls
   const patchCalls: { url: string; body: { issue_type?: string } }[] = []
 
-  // Mock GET and PATCH /api/issues/{id}
-  await page.route("**/api/issues/*", async (route) => {
+  await page.route("**/*", async (route) => {
     const request = route.request()
-    const url = request.url()
+    const pathname = new URL(request.url()).pathname
     const method = request.method()
 
+    if (pathname === "/api/config") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ mode: "open" }),
+      })
+      return
+    }
+
+    if (pathname === FIXTURE_WS_API) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(
+          ok(workspaceData(FIXTURE_WORKSPACE_ID, "Fixture Workspace")),
+        ),
+      })
+      return
+    }
+
+    if (
+      pathname.startsWith(`${FIXTURE_WS_API}/issues/`) &&
+      (pathname.endsWith("/tabs") || pathname.endsWith("/events"))
+    ) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(ok([])),
+      })
+      return
+    }
+
+    const issueMatch = pathname.match(
+      new RegExp(`^${FIXTURE_WS_API}/issues/([^/]+)$`),
+    )
+    if (!issueMatch) {
+      await route.continue()
+      return
+    }
+
     if (method === "GET") {
-      // GET /api/issues/{id} returns IssueDetails directly without wrapper
-      const idMatch = url.match(/\/api\/issues\/([^/?]+)/)
-      const id = idMatch ? idMatch[1] : null
+      const id = issueMatch[1]
       const issue = testIssues.find((i) => i.id === id)
 
       if (issue) {
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify({
-            ...issue,
-            created_at: "2026-01-27T10:00:00Z",
-            updated_at: "2026-01-27T10:00:00Z",
-            dependencies: [],
-            dependents: [],
-          }),
+          body: JSON.stringify(
+            ok({
+              ...issue,
+              created_at: "2026-01-27T10:00:00Z",
+              updated_at: "2026-01-27T10:00:00Z",
+              dependencies: [],
+              dependents: [],
+            }),
+          ),
         })
       } else {
         await route.fulfill({
           status: 404,
           contentType: "application/json",
-          body: JSON.stringify({ error: "Not found" }),
+          body: JSON.stringify({ success: false, error: "Not found" }),
         })
       }
     } else if (method === "PATCH") {
@@ -128,7 +172,7 @@ async function setupMocks(
       }
 
       const body = request.postDataJSON() as { issue_type?: string }
-      patchCalls.push({ url, body })
+      patchCalls.push({ url: request.url(), body })
       options?.onPatch?.(body)
 
       if (options?.patchError) {
@@ -140,8 +184,7 @@ async function setupMocks(
         return
       }
 
-      const idMatch = url.match(/\/api\/issues\/([^/?]+)/)
-      const id = idMatch ? idMatch[1] : null
+      const id = issueMatch[1]
       const issue = testIssues.find((i) => i.id === id)
 
       await route.fulfill({
@@ -311,7 +354,9 @@ test.describe("TypeDropdown", () => {
       await expect(menu).toBeVisible()
 
       // Click outside (on the panel title area)
-      await page.getByTestId("issue-detail-panel").click({ position: { x: 10, y: 10 } })
+      await page
+        .getByTestId("issue-detail-panel")
+        .click({ position: { x: 10, y: 10 } })
 
       // Menu should be hidden
       await expect(menu).not.toBeVisible()
@@ -366,7 +411,9 @@ test.describe("TypeDropdown", () => {
       }
     })
 
-    test("each option displays correct icon via data-type", async ({ page }) => {
+    test("each option displays correct icon via data-type", async ({
+      page,
+    }) => {
       await setupMocks(page)
       await openTestPanel(page, 0)
 
@@ -392,7 +439,10 @@ test.describe("TypeDropdown", () => {
       await expect(getOption("bug")).toHaveAttribute("aria-selected", "true")
 
       // Others should not be selected
-      await expect(getOption("feature")).toHaveAttribute("aria-selected", "false")
+      await expect(getOption("feature")).toHaveAttribute(
+        "aria-selected",
+        "false",
+      )
       await expect(getOption("task")).toHaveAttribute("aria-selected", "false")
     })
 
@@ -409,7 +459,9 @@ test.describe("TypeDropdown", () => {
   })
 
   test.describe("Selection", () => {
-    test("changing type calls API with correct parameters", async ({ page }) => {
+    test("changing type calls API with correct parameters", async ({
+      page,
+    }) => {
       const { patchCalls } = await setupMocks(page)
       await openTestPanel(page, 0) // bug issue
 
@@ -418,8 +470,8 @@ test.describe("TypeDropdown", () => {
       // Start waiting for the response BEFORE triggering the action
       const responsePromise = page.waitForResponse(
         (res) =>
-          res.url().includes("/api/issues/type-test-bug") &&
-          res.request().method() === "PATCH"
+          res.url().includes(`${FIXTURE_WS_API}/issues/type-test-bug`) &&
+          res.request().method() === "PATCH",
       )
 
       // Change from bug to feature
@@ -431,11 +483,15 @@ test.describe("TypeDropdown", () => {
 
       // Verify API call was made with correct parameters
       expect(patchCalls).toHaveLength(1)
-      expect(patchCalls[0].url).toContain("/api/issues/type-test-bug")
+      expect(patchCalls[0].url).toContain(
+        `${FIXTURE_WS_API}/issues/type-test-bug`,
+      )
       expect(patchCalls[0].body).toEqual({ issue_type: "feature" })
     })
 
-    test("UI updates immediately on selection (optimistic)", async ({ page }) => {
+    test("UI updates immediately on selection (optimistic)", async ({
+      page,
+    }) => {
       await setupMocks(page, { patchDelay: 500 })
       await openTestPanel(page, 0) // bug issue
 
@@ -484,8 +540,8 @@ test.describe("TypeDropdown", () => {
       // Start the type change
       const patchPromise = page.waitForResponse(
         (res) =>
-          res.url().includes("/api/issues/type-test-bug") &&
-          res.request().method() === "PATCH"
+          res.url().includes(`${FIXTURE_WS_API}/issues/type-test-bug`) &&
+          res.request().method() === "PATCH",
       )
       await trigger.click()
       await getOption("feature").click()
@@ -532,9 +588,9 @@ test.describe("TypeDropdown", () => {
       // Start waiting for the response BEFORE triggering the action
       const responsePromise = page.waitForResponse(
         (res) =>
-          res.url().includes("/api/issues/type-test-bug") &&
+          res.url().includes(`${FIXTURE_WS_API}/issues/type-test-bug`) &&
           res.request().method() === "PATCH" &&
-          res.status() === 500
+          res.status() === 500,
       )
 
       // Change from bug to feature (will fail)
@@ -558,9 +614,9 @@ test.describe("TypeDropdown", () => {
       // Start waiting for the response BEFORE triggering the action
       const responsePromise = page.waitForResponse(
         (res) =>
-          res.url().includes("/api/issues/type-test-bug") &&
+          res.url().includes(`${FIXTURE_WS_API}/issues/type-test-bug`) &&
           res.request().method() === "PATCH" &&
-          res.status() === 500
+          res.status() === 500,
       )
 
       // Change type (will fail)
@@ -583,9 +639,9 @@ test.describe("TypeDropdown", () => {
       // Start waiting for the response BEFORE triggering the action
       const responsePromise = page.waitForResponse(
         (res) =>
-          res.url().includes("/api/issues/type-test-bug") &&
+          res.url().includes(`${FIXTURE_WS_API}/issues/type-test-bug`) &&
           res.request().method() === "PATCH" &&
-          res.status() === 500
+          res.status() === 500,
       )
 
       // Change type (fails)
@@ -746,8 +802,8 @@ test.describe("TypeDropdown", () => {
       // Wait for PATCH call
       await page.waitForResponse(
         (res) =>
-          res.url().includes("/api/issues/type-test-bug") &&
-          res.request().method() === "PATCH"
+          res.url().includes(`${FIXTURE_WS_API}/issues/type-test-bug`) &&
+          res.request().method() === "PATCH",
       )
 
       // Verify type changed to feature
@@ -760,7 +816,9 @@ test.describe("TypeDropdown", () => {
   })
 
   test.describe("Edge Cases", () => {
-    test("displays different types correctly when navigating between issues", async ({ page }) => {
+    test("displays different types correctly when navigating between issues", async ({
+      page,
+    }) => {
       await setupMocks(page)
 
       // Test bug issue

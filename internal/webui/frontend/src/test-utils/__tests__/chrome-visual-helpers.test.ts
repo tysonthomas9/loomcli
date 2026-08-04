@@ -456,7 +456,7 @@ describe("NETWORK_PATTERNS", () => {
 
   it("sseEndpoint is a valid path string", () => {
     expect(typeof NETWORK_PATTERNS.sseEndpoint).toBe("string");
-    expect(NETWORK_PATTERNS.sseEndpoint).toBe("/api/events");
+    expect(NETWORK_PATTERNS.sseEndpoint).toBe("/api/workspaces/");
   });
 
   it("readyEndpoint is a valid path string", () => {
@@ -466,10 +466,10 @@ describe("NETWORK_PATTERNS", () => {
 
   it("issueEndpoint is a valid RegExp", () => {
     expect(NETWORK_PATTERNS.issueEndpoint).toBeInstanceOf(RegExp);
-    expect(NETWORK_PATTERNS.issueEndpoint.test("/api/issues/bd-123")).toBe(
+    expect(NETWORK_PATTERNS.issueEndpoint.test("/api/issues/loom-123")).toBe(
       true,
     );
-    expect(NETWORK_PATTERNS.issueEndpoint.test("/api/issues/bd-abcd")).toBe(
+    expect(NETWORK_PATTERNS.issueEndpoint.test("/api/issues/loom-abcd")).toBe(
       true,
     );
     expect(NETWORK_PATTERNS.issueEndpoint.test("/api/issues/")).toBe(false);
