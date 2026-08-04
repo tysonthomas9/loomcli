@@ -24,13 +24,13 @@ func TestCheckedInSnapshotViolations(t *testing.T) {
 
 func checkedInSnapshotReport() Report {
 	return Report{
-		CompositeStoreFiles:        make([]string, 65),
-		CompositeStoreOutside:      make([]string, 55),
+		CompositeStoreFiles:        make([]string, 64),
+		CompositeStoreOutside:      make([]string, 54),
 		LegacyHandlerImports:       make([]LegacyImportUse, 79),
 		ModuleRoots:                append([]string(nil), checkedInModuleRoots...),
 		AnalysisProfilesEnforced:   11,
 		MutationCommands:           105,
-		DirectPersistenceWrites:    209,
+		DirectPersistenceWrites:    125,
 		RuntimeComponents:          71,
 		RuntimeGoroutineLaunches:   80,
 		PerformanceMetrics:         6,

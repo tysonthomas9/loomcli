@@ -120,8 +120,6 @@ func LoadConfig() (*LoomConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open fleet-db store: %w", err)
 	}
-	// Apply store-level tracing (this path bypasses cmdstore.OpenStore).
-	handle.Store = cmdstore.WrapStoreWithTracing(handle.Store)
 	defer func() { _ = handle.Close() }()
 	return loadConfigFromStore(ctx, handle.Store)
 }
@@ -150,8 +148,6 @@ func ResolveActiveWorkspace() (*WorkspaceConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open fleet-db store: %w", err)
 	}
-	// Apply store-level tracing (this path bypasses cmdstore.OpenStore).
-	handle.Store = cmdstore.WrapStoreWithTracing(handle.Store)
 	defer func() { _ = handle.Close() }()
 
 	cfg, err := loadConfigFromStore(ctx, handle.Store)

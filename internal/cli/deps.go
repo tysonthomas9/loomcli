@@ -13,7 +13,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/fleet"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -275,8 +274,6 @@ func (b *fleetDBIssueBackend) withBackend(ctx context.Context, op string, fn fun
 	if err != nil {
 		return backend.ErrUnavailable(op, "open fleet-db store", err)
 	}
-	// Apply store-level tracing here (this path bypasses cmdstore.OpenStore).
-	handle.Store = cmdstore.WrapStoreWithTracing(handle.Store)
 	defer func() { _ = handle.Close() }()
 
 	ws, err := bootstrap.ResolveActiveWorkspaceKey(ctx, handle.Store.Workspaces())

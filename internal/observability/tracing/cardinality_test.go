@@ -100,16 +100,6 @@ var allowlistRegexes = []*regexp.Regexp{
 	// Two CamelCase identifiers joined by dots.
 	regexp.MustCompile(`^service\.[A-Z][a-zA-Z]+\.[A-Z][a-zA-Z]+$`),
 
-	// Composite-store sub-store methods (Tier L2 decorator): names like
-	// `service.Store.Workspaces.Get`, `service.Store.Repos.List`,
-	// `service.Store.AgentSessions.Heartbeat`. The middle segment is
-	// the sub-store name (Workspaces / Repos / Agents / Roles /
-	// AgentSessions / TerminalSessions / Artifacts / AgentLeases /
-	// AgentOwnershipLeases / AgentCommands / Nodes / Daemon); the
-	// trailing segment is the method. Mirrors the layout of the
-	// composite store.Store interface in internal/store/store.go.
-	regexp.MustCompile(`^service\.Store\.[A-Z][a-zA-Z]+\.[A-Z][a-zA-Z]+$`),
-
 	// Projector handler spans (fleet-db). Lowercase event-name segments
 	// like `service.Projector.workspace.upsert`,
 	// `service.Projector.issue.field_changed`.
@@ -233,21 +223,6 @@ func TestSpanNames_KnownNamesMatchAllowlist(t *testing.T) {
 		"service.IssueBackend.SearchIssues",
 		"service.IssueBackend.WaitForMutations",
 
-		// Composite-store sub-store methods (Tier L2).
-		"service.Store.Workspaces.Get",
-		"service.Store.Workspaces.List",
-		"service.Store.Repos.Update",
-		"service.Store.Agents.Create",
-		"service.Store.Roles.Delete",
-		"service.Store.AgentSessions.Heartbeat",
-		"service.Store.TerminalSessions.List",
-		"service.Store.Artifacts.Get",
-		"service.Store.AgentLeases.Release",
-		"service.Store.AgentOwnershipLeases.Acquire",
-		"service.Store.AgentCommands.Complete",
-		"service.Store.Nodes.Heartbeat",
-		"service.Store.Daemon.Upsert",
-
 		// Projector.
 		"service.Projector.workspace.upsert",
 		"service.Projector.issue.field_changed",
@@ -317,6 +292,8 @@ func TestSpanNames_KnownNamesMatchAllowlist(t *testing.T) {
 		{"pgx.query SELECT * FROM issues", "raw SQL in name"},
 		// service-shape but with hex ID jammed in.
 		{"service.IssueService.Claim.4f9c2a8b", "hex tail on service span"},
+		// The retired composite-store decorator must not be reintroduced.
+		{"service.Store.Workspaces.Get", "retired composite-store span"},
 		// Empty string.
 		{"", "empty span name"},
 		// Git span with branch name leaked in.

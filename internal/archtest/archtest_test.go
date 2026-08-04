@@ -64,10 +64,10 @@ func TestCheckedInManifestsAndRepository(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := len(report.CompositeStoreFiles), 65; got != want {
+	if got, want := len(report.CompositeStoreFiles), 64; got != want {
 		t.Fatalf("composite Store file count = %d, want %d; files = %v", got, want, report.CompositeStoreFiles)
 	}
-	if got, want := len(report.CompositeStoreOutside), 55; got != want {
+	if got, want := len(report.CompositeStoreOutside), 54; got != want {
 		t.Fatalf("outside-composition Store file count = %d, want %d", got, want)
 	}
 	if got, want := len(report.LegacyHandlerImports), 79; got != want {
@@ -85,7 +85,7 @@ func TestCheckedInManifestsAndRepository(t *testing.T) {
 	if got, want := report.MutationCommands, 105; got != want {
 		t.Fatalf("mutation commands = %d, want %d", got, want)
 	}
-	if got, want := report.DirectPersistenceWrites, 209; got != want {
+	if got, want := report.DirectPersistenceWrites, 125; got != want {
 		t.Fatalf("direct persistence-write rows = %d, want %d", got, want)
 	}
 	if got, want := report.RuntimeComponents, 71; got != want {
@@ -527,8 +527,7 @@ func TestPhase5InteractionOwnershipBlockerRatchet(t *testing.T) {
 		}
 		rel = filepath.ToSlash(rel)
 		if strings.HasPrefix(rel, "internal/infra/") ||
-			strings.HasPrefix(rel, "internal/modules/interaction/") ||
-			rel == "internal/cli/cmdstore/store_tracing_control_plane.go" {
+			strings.HasPrefix(rel, "internal/modules/interaction/") {
 			return nil
 		}
 		contents, err := os.ReadFile(path) // #nosec G122 -- WalkDir is rooted in the checked-out repository and does not follow symlinks.

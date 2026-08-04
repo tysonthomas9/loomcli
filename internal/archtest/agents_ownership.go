@@ -402,15 +402,10 @@ func isPhase5AgentsMutationAllowed(mutation phase5AgentsMutation) bool {
 		return mutation.file == "internal/infra/agentsbootstrapstore/adapter.go"
 	case legacyAgentServiceStoreReceiver, legacyRoleStoreReceiver:
 		// agentsbootstrapstore is the bounded role/service bootstrap adapter.
-		// FleetDB adapters remain owner-side
-		// transport implementations. cmdstore's exact files are transparent
-		// telemetry decorators: they forward an already-authorized call and do
-		// not originate an aggregate mutation.
+		// FleetDB adapters remain owner-side transport implementations.
 		return mutation.file == "internal/infra/agentsbootstrapstore/adapter.go" ||
 			strings.HasPrefix(mutation.file, "internal/modules/agents/fleetdb/") ||
-			strings.HasPrefix(mutation.file, "internal/infra/fleetdb/") ||
-			mutation.file == "internal/cli/cmdstore/store_tracing_core_entities.go" ||
-			mutation.file == "internal/cli/cmdstore/store_tracing_platform.go"
+			strings.HasPrefix(mutation.file, "internal/infra/fleetdb/")
 	default:
 		return false
 	}

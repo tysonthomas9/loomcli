@@ -551,8 +551,6 @@ func (r *Resolver) SetRepoDefaultBranch(repoName, branch string) error {
 	if err != nil {
 		return fmt.Errorf("open fleet-db store: %w", err)
 	}
-	// Apply store-level tracing (this path bypasses cmdstore.OpenStore).
-	handle.Store = cmdstore.WrapStoreWithTracing(handle.Store)
 	defer func() { _ = handle.Close() }()
 	workspace, err := cmdstore.WorkspaceCatalog(handle)
 	if err != nil {

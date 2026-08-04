@@ -42,12 +42,6 @@ func OpenStoreWithCapabilities(ctx context.Context, required []string) (*bootstr
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
-	// Wrap the store so every method call emits a
-	// `service.Store.<SubStore>.<Method>` span. nil-safe; no-op when
-	// tracing is disabled. Lives on the cmdstore side because
-	// internal/cli (where the spec asked for it) cannot be imported by
-	// cmdstore without a cycle. See store_tracing.go.
-	handle.Store = WrapStoreWithTracing(handle.Store)
 	return handle, nil
 }
 

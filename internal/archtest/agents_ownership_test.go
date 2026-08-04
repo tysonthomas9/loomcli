@@ -318,12 +318,6 @@ func TestPhase5AgentsMutationAllowlistIsReceiverAndPathSpecific(t *testing.T) {
 			method:   "Create",
 			file:     "internal/infra/agentsbootstrapstore/adapter.go",
 		},
-		{
-			name:     "legacy role tracing adapter",
-			receiver: legacyRoleStoreReceiver,
-			method:   "Update",
-			file:     "internal/cli/cmdstore/store_tracing_core_entities.go",
-		},
 	}
 	for _, family := range families {
 		t.Run(family.name, func(t *testing.T) {

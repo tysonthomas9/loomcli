@@ -14,15 +14,15 @@ func TestCheckedInDirectWriteInventoryStrictCounts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(inventory.Writes) != 209 {
-		t.Fatalf("direct-write rows = %d, want current migration ratchet of 209", len(inventory.Writes))
+	if len(inventory.Writes) != 125 {
+		t.Fatalf("direct-write rows = %d, want current migration ratchet of 125", len(inventory.Writes))
 	}
 	totalSites := 0
 	for _, use := range inventory.Writes {
 		totalSites += use.Count
 	}
-	if totalSites != 215 {
-		t.Fatalf("direct-write sites = %d, want current migration ratchet of 215", totalSites)
+	if totalSites != 129 {
+		t.Fatalf("direct-write sites = %d, want current migration ratchet of 129", totalSites)
 	}
 }
 
