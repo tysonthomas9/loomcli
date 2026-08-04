@@ -28,7 +28,7 @@ import {
 import type { IssueContext } from "@/api/terminal";
 import { buildShareUrl } from "@/utils/buildShareUrl";
 import { getReviewType } from "@/utils/issue";
-import { prReviewRefFromAgent } from "@/utils/agentDisplay";
+import { resolvePRReviewRef } from "@/utils/agentDisplay";
 import { ViewSubSwitcher } from "@/components/ViewSubSwitcher/ViewSubSwitcher";
 import {
   isOnboardingRepo,
@@ -176,6 +176,7 @@ function App() {
     sourceReposFilter,
     refetch: refetchWorkspace,
     upsertAgent: upsertWorkspaceAgent,
+    agents: workspaceConfigAgents,
   } = useWorkspaceContext();
   const {
     backends: aiBackends,
@@ -780,10 +781,13 @@ function App() {
   const handleAgentClick = useCallback(
     (agentName: string) => {
       closeAllPanels();
-      const agent = agents.find(
-        (a) => a.name.toLowerCase() === agentName.toLowerCase(),
+      // Resolve from the live store first, then the workspace-config agents so a
+      // configured-but-not-running PR reviewer still deep-links to its PR.
+      const reviewRef = resolvePRReviewRef(
+        agentName,
+        agents,
+        workspaceConfigAgents,
       );
-      const reviewRef = agent ? prReviewRefFromAgent(agent) : null;
       if (reviewRef) {
         navigate(
           `/ws/${encodeURIComponent(workspaceId)}/prs?${new URLSearchParams({
@@ -797,7 +801,7 @@ function App() {
         `/ws/${encodeURIComponent(workspaceId)}/agents/${encodeURIComponent(agentName)}`,
       );
     },
-    [navigate, workspaceId, closeAllPanels, agents],
+    [navigate, workspaceId, closeAllPanels, agents, workspaceConfigAgents],
   );
 
   // Handle agent panel close
