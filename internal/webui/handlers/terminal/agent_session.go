@@ -136,7 +136,7 @@ func ensureAgentTerminalSession(
 		}
 	}
 	if !agentTerminalLaunchAllowed(agent, roleKind) {
-		return inactiveAgentTerminalSession(ctx, svc, workspace, existing)
+		return inactiveAgentTerminalSession(existing)
 	}
 
 	sessionName, label, sortOrder := newAgentTerminalTabPlacement(tabs, existing, agentName)
@@ -201,11 +201,21 @@ func agentTerminalLaunchSpecStale(
 	return !slices.Equal(candidate.Argv, existing.Launch.Argv) || candidate.Cwd != existing.Launch.Cwd
 }
 
-func inactiveAgentTerminalSession(ctx context.Context, svc service.TerminalService, workspace string, existing *tabmeta.TabMetadata) (*tabmeta.TabMetadata, error) {
-	if existing != nil {
-		return disableStoredAgentLaunch(ctx, svc, workspace, existing)
+func inactiveAgentTerminalSession(existing *tabmeta.TabMetadata) (*tabmeta.TabMetadata, error) {
+	if existing == nil {
+		return nil, service.ErrValidation("agent is not running and has no terminal session")
 	}
-	return nil, service.ErrValidation("agent is not running and has no terminal session")
+
+	// Canonical agent tabs are Interaction-owned lifecycle records. Generic
+	// PutTab deliberately cannot replace them, and merely viewing a stopped
+	// agent must not erase the exact session/terminal/lease identity needed by
+	// history and recovery. Return a disabled response projection instead. The
+	// WebSocket path independently verifies desired state before any attach, so
+	// the retained launch spec cannot restart the stopped agent.
+	meta := *existing
+	meta.Launch = nil
+	meta.Writable = false
+	return &meta, nil
 }
 
 func newAgentTerminalTabPlacement(tabs []tabmeta.TabMetadata, existing *tabmeta.TabMetadata, agentName string) (string, string, int) {
@@ -268,22 +278,6 @@ func agentTerminalLaunchAllowed(agent *agents.RuntimeIdentity, kind domain.RoleK
 
 func isBackgroundWorker(agent *agents.RuntimeIdentity, kind domain.RoleKind) bool {
 	return agent != nil && kind != domain.RoleKindInteractive
-}
-
-func disableStoredAgentLaunch(ctx context.Context, svc service.TerminalService, workspace string, existing *tabmeta.TabMetadata) (*tabmeta.TabMetadata, error) {
-	if existing.Launch == nil && !existing.Writable {
-		return existing, nil
-	}
-
-	now := time.Now().UTC()
-	meta := *existing
-	meta.Launch = nil
-	meta.Writable = false
-	meta.UpdatedAt = now
-	if err := svc.PutTab(ctx, workspace, &meta); err != nil {
-		return nil, err
-	}
-	return svc.GetTab(ctx, workspace, existing.SessionName)
 }
 
 func selectAgentTerminalTab(tabs []tabmeta.TabMetadata, agentName string) *tabmeta.TabMetadata {

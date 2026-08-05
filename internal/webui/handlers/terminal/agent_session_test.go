@@ -949,6 +949,90 @@ func TestEnsureAgentTerminalSessionRejectsStoppedCustomInteractiveRole(t *testin
 	}
 }
 
+func TestEnsureAgentTerminalSessionReturnsDisabledViewForStoppedCanonicalTab(t *testing.T) {
+	ctx := context.Background()
+	st, tabStore, rdb := newAgentSessionTestDeps(t)
+	svc := webuiterminal.NewTerminalService(
+		nil,
+		tabStore,
+		nil,
+		rdb,
+		nil,
+		time.Now(),
+	)
+
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{
+		WorkspaceKey: "E2E",
+		Name:         "operator",
+		Kind:         string(domain.RoleKindInteractive),
+	}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	if _, err := terminalTestAgents(st).Create(ctx, terminalTestAgentCreate{
+		WorkspaceKey: "E2E",
+		Name:         "operator-stopped",
+		RoleName:     "operator",
+		DesiredState: agents.DesiredStopped,
+	}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	stopped := terminalTestAgentStateStopped
+	if _, err := terminalTestAgents(st).Update(ctx, "E2E", "operator-stopped", terminalTestAgentUpdate{State: &stopped}); err != nil {
+		t.Fatalf("stop agent: %v", err)
+	}
+
+	now := time.Now().UTC()
+	persisted := &tabmeta.TabMetadata{
+		SessionName:                  "term_operator_stopped",
+		Workspace:                    "E2E",
+		Label:                        "agent-operator-stopped",
+		Kind:                         "agent",
+		AgentID:                      "operator-stopped",
+		Role:                         "operator",
+		Backend:                      "codex",
+		Writable:                     true,
+		Launch:                       &tabmeta.LaunchSpec{Argv: []string{"sh", "-c", "loom lead"}},
+		InteractionSessionID:         "session-stopped",
+		InteractionTerminalID:        "terminal-stopped",
+		InteractionLeaseID:           "lease-stopped",
+		InteractionLeaseFencingToken: 7,
+		CreatedAt:                    now,
+		UpdatedAt:                    now,
+	}
+	if err := tabStore.Set(ctx, persisted); err != nil {
+		t.Fatalf("seed canonical tab: %v", err)
+	}
+	before, err := svc.GetTab(ctx, "E2E", persisted.SessionName)
+	if err != nil {
+		t.Fatalf("get canonical tab before ensure: %v", err)
+	}
+
+	meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "operator-stopped", terminalStoreIdentity{services: st.AgentServices()})
+	if err != nil {
+		t.Fatalf("ensure stopped canonical terminal: %v", err)
+	}
+	if meta == nil || meta.Launch != nil || meta.Writable {
+		t.Fatalf("stopped terminal response = %#v, want non-launchable view", meta)
+	}
+	if meta.InteractionSessionID != persisted.InteractionSessionID ||
+		meta.InteractionTerminalID != persisted.InteractionTerminalID ||
+		meta.InteractionLeaseID != persisted.InteractionLeaseID ||
+		meta.InteractionLeaseFencingToken != persisted.InteractionLeaseFencingToken {
+		t.Fatalf("stopped terminal response lost canonical identity: %#v", meta)
+	}
+
+	stored, err := svc.GetTab(ctx, "E2E", persisted.SessionName)
+	if err != nil {
+		t.Fatalf("get canonical tab: %v", err)
+	}
+	if stored.Launch == nil || !stored.Writable {
+		t.Fatalf("canonical owner state was mutated by read projection: %#v", stored)
+	}
+	if !stored.UpdatedAt.Equal(before.UpdatedAt) {
+		t.Fatalf("canonical UpdatedAt = %v, want unchanged %v", stored.UpdatedAt, before.UpdatedAt)
+	}
+}
+
 func TestEnsureAgentTerminalSessionAllowsEphemeralCustomInteractiveRole(t *testing.T) {
 	ctx := context.Background()
 	st, tabStore, rdb := newAgentSessionTestDeps(t)
