@@ -1,6 +1,7 @@
 package observability
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -102,6 +103,61 @@ func TestHandleObservabilityMetrics_EmptyDir(t *testing.T) {
 	}
 	if resp.Data.TasksCompleted24h != 0 {
 		t.Errorf("expected 0, got %d", resp.Data.TasksCompleted24h)
+	}
+}
+
+func TestHandleObservabilityMetrics_MergesDurableDriverRuns(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now().UTC()
+	legacy, _ := events.NewEvent(events.TaskCompleted, "legacy-agent", "legacy", "", events.TaskCompletedData{
+		TaskID: "legacy-task", Duration: events.Duration{Duration: 5 * time.Minute},
+	})
+	legacy.Timestamp = now.Add(-20 * time.Minute)
+	writeTestEvent(t, dir, legacy)
+
+	reader := DriverRunMetricsReader(func(_ context.Context, workspace string, limit int) ([]DriverRunMetric, error) {
+		if workspace != "TEST" || limit != 10000 {
+			t.Fatalf("durable reader = %q, %d", workspace, limit)
+		}
+		return []DriverRunMetric{
+			{
+				RunID: "run-1", TaskID: "TEST-1", Agent: "planner-1", Role: "prompt-agent", EpicID: "TEST-EPIC",
+				Status: "completed", StartedAt: now.Add(-12 * time.Minute), FinishedAt: now.Add(-10 * time.Minute),
+				FilesChanged: 2, LinesAdded: 12, LinesRemoved: 3,
+			},
+			{
+				RunID: "run-2", Agent: "coder-1", Role: "prompt-agent", Status: "failed",
+				StartedAt: now.Add(-8 * time.Minute), FinishedAt: now.Add(-7 * time.Minute),
+			},
+			{RunID: "run-live", Status: "running", StartedAt: now.Add(-time.Minute)},
+		}, nil
+	})
+
+	handler := HandleMetrics(dir, NewMetricsCacheWithDriverRuns(dir, "TEST", reader))
+	rec := httptest.NewRecorder()
+	handler(rec, httptest.NewRequest("GET", "/api/observability/metrics", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp MetricsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Data == nil {
+		t.Fatal("expected metrics data")
+	}
+	if resp.Data.TasksCompleted24h != 2 || resp.Data.TotalTasksFailed != 1 {
+		t.Fatalf("task totals = completed %d, failed %d", resp.Data.TasksCompleted24h, resp.Data.TotalTasksFailed)
+	}
+	if resp.Data.TasksByAgent["planner-1"] != 1 || resp.Data.TasksByRole["prompt-agent"] != 2 || resp.Data.TasksByEpic["TEST-EPIC"] != 1 {
+		t.Fatalf("durable dimensions = agents %#v roles %#v epics %#v", resp.Data.TasksByAgent, resp.Data.TasksByRole, resp.Data.TasksByEpic)
+	}
+	if resp.Data.LinesChangedLastHr != 15 {
+		t.Fatalf("lines changed = %d, want 15", resp.Data.LinesChangedLastHr)
+	}
+	if resp.Data.AvgTaskDurationSec != 210 {
+		t.Fatalf("average duration = %v, want 210", resp.Data.AvgTaskDurationSec)
 	}
 }
 

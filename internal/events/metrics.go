@@ -71,6 +71,16 @@ func NewMetricsStore(bus *Bus, retention time.Duration) *MetricsStore {
 	return ms
 }
 
+// Observe records one already-durable event in the metrics projection. It is
+// used by replay and compatibility adapters that do not own the live event
+// bus, including the serve observability projection over durable DriverRuns.
+func (ms *MetricsStore) Observe(event Event) {
+	if ms == nil {
+		return
+	}
+	ms.handleEvent(event)
+}
+
 // handleEvent is the Listener callback that records events into the store.
 func (ms *MetricsStore) handleEvent(e Event) {
 	ms.mu.Lock()

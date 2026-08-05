@@ -616,7 +616,7 @@ func buildMonitorHandlers(
 ) webui.MonitorHandlers {
 	return monitorwire.BuildHandlers(
 		collectDataFn, staleDetectorHandler, issueBackendFn, defaultWorkspace, usageHandler,
-		monitorStoreDataSource, metricscmd.HandleWorkspaces(st),
+		monitorStoreDataSource, metricscmd.HandleWorkspaces(st), st.DriverRuns(),
 	)
 }
 

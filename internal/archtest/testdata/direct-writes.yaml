@@ -287,7 +287,7 @@ method_sets:
     read_only: [Close, Get]
     mutating: [Delete, Save]
   - name: metrics_store
-    read_only: [Prune, ReplayFromFile, Snapshot]
+    read_only: [Observe, Prune, ReplayFromFile, Snapshot]
     mutating: []
   - name: session
     read_only: [SessionID]

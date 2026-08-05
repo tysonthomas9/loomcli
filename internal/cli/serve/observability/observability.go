@@ -2,6 +2,7 @@ package observability
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -109,14 +110,95 @@ func (c *CachedValue[T]) Get() T {
 
 // NewMetricsCache creates a TTL cache for observability metrics snapshots.
 func NewMetricsCache(eventsDir string) *CachedValue[*events.MetricsSnapshot] {
+	return newMetricsCache(eventsDir, "", nil)
+}
+
+// DriverRunMetric is the durable execution projection needed by the
+// observability read model. It deliberately omits leases, payloads, and other
+// execution internals.
+type DriverRunMetric struct {
+	RunID        string
+	TaskID       string
+	Agent        string
+	Role         string
+	EpicID       string
+	Status       string
+	StartedAt    time.Time
+	FinishedAt   time.Time
+	FilesChanged int
+	LinesAdded   int
+	LinesRemoved int
+}
+
+// DriverRunMetricsReader lists the newest durable execution results for one
+// workspace. Composition supplies the FleetDB-backed adapter.
+type DriverRunMetricsReader func(context.Context, string, int) ([]DriverRunMetric, error)
+
+// NewMetricsCacheWithDriverRuns creates the production observability cache.
+// Durable runs supplement the legacy JSONL journal so modular agent activity
+// remains visible after loom serve restarts.
+func NewMetricsCacheWithDriverRuns(
+	eventsDir, workspace string,
+	reader DriverRunMetricsReader,
+) *CachedValue[*events.MetricsSnapshot] {
+	return newMetricsCache(eventsDir, workspace, reader)
+}
+
+func newMetricsCache(
+	eventsDir, workspace string,
+	reader DriverRunMetricsReader,
+) *CachedValue[*events.MetricsSnapshot] {
 	return NewCachedValue[*events.MetricsSnapshot](30*time.Second, func() *events.MetricsSnapshot {
 		store := events.NewMetricsStore(nil, events.DefaultRetention)
 		if err := ReplayAllEvents(store, eventsDir); err != nil {
 			log.Printf("observability metrics: replay error: %v", err)
 		}
+		if reader != nil && workspace != "" {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			runs, err := reader(ctx, workspace, 10000)
+			cancel()
+			if err != nil {
+				log.Printf("observability metrics: durable DriverRun read error: %v", err)
+			} else {
+				observeDriverRuns(store, runs)
+			}
+		}
 		snap := store.Snapshot()
 		return &snap
 	})
+}
+
+func observeDriverRuns(store *events.MetricsStore, runs []DriverRunMetric) {
+	for _, run := range runs {
+		if run.FinishedAt.IsZero() {
+			continue
+		}
+		taskID := run.TaskID
+		if taskID == "" {
+			taskID = run.RunID
+		}
+		switch run.Status {
+		case "completed", "needs_review":
+			duration := time.Duration(0)
+			if !run.StartedAt.IsZero() && !run.FinishedAt.Before(run.StartedAt) {
+				duration = run.FinishedAt.Sub(run.StartedAt)
+			}
+			event, err := events.NewEvent(events.TaskCompleted, run.Agent, run.Role, run.EpicID, events.TaskCompletedData{
+				TaskID: taskID, Duration: events.Duration{Duration: duration}, FilesChanged: run.FilesChanged,
+				LinesAdded: run.LinesAdded, LinesRemoved: run.LinesRemoved,
+			})
+			if err == nil {
+				event.Timestamp = run.FinishedAt.UTC()
+				store.Observe(event)
+			}
+		case "failed", "cancelled":
+			event, err := events.NewEvent(events.TaskFailed, run.Agent, run.Role, run.EpicID, events.TaskFailedData{TaskID: taskID})
+			if err == nil {
+				event.Timestamp = run.FinishedAt.UTC()
+				store.Observe(event)
+			}
+		}
+	}
 }
 
 // HandleMetrics returns a MetricsSnapshot from a TTL cache,
