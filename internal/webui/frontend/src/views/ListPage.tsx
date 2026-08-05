@@ -296,6 +296,7 @@ export function ListPage(): JSX.Element {
                           type="button"
                           className={styles.row}
                           onClick={() => handleIssueClick(issue)}
+                          data-testid={`list-issue-row-${issue.id}`}
                         >
                           <span
                             className={styles.dot}
