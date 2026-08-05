@@ -86,9 +86,11 @@ describe("agentDisplay", () => {
 
     it("resolves from the live agent store when present", () => {
       expect(
-        resolvePRReviewRef("review-tysonthomas9-loomcli-3a8e1ebe-pr-220", [
-          liveReviewer,
-        ], []),
+        resolvePRReviewRef(
+          "review-tysonthomas9-loomcli-3a8e1ebe-pr-220",
+          [liveReviewer],
+          [],
+        ),
       ).toBe("tysonthomas9/loomcli#220");
     });
 
