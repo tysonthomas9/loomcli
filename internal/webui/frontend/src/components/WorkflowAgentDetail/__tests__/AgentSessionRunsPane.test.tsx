@@ -455,6 +455,33 @@ describe("AgentSessionRunsPane", () => {
     );
   });
 
+  it("renders an interrupted session as aborted rather than running", () => {
+    mocks.useAgentHistory.mockReturnValue({
+      runs: [],
+      sessions: [
+        historySession("session-1", undefined, {
+          kind: "interactive",
+          status: "interrupted",
+          summary: "server PTY killed",
+        }),
+      ],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    render(<AgentSessionRunsPane workspaceId="WS" agentName="coder" />);
+
+    expect(screen.getByTestId("session-run-detail")).toHaveAttribute(
+      "data-status",
+      "aborted",
+    );
+    expect(screen.getByTestId("session-run-detail")).toHaveAttribute(
+      "data-error",
+      "server PTY killed",
+    );
+  });
+
   it("projects patch-back and GitHub head evidence into fallback sessions", () => {
     mocks.useAgentHistory.mockReturnValue({
       runs: [],

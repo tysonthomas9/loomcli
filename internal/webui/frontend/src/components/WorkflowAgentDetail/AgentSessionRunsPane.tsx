@@ -43,6 +43,7 @@ function sessionStatus(session: AgentHistorySession): SessionRecord["status"] {
     case "expired":
       return "failed";
     case "cancelled":
+    case "interrupted":
       return "aborted";
     default:
       return "running";
