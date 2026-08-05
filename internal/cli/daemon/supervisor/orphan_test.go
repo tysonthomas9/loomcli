@@ -114,9 +114,22 @@ func runFakeBackendSleep(_ *testing.T) {
 }
 
 // helperLingerSleep is how long a fake worker/backend lingers awaiting the
-// signals the tests deliver. The test acceptance windows are ≤8s, so 15s is
-// ample headroom while keeping a leaked helper from squatting for minutes.
-const helperLingerSleep = 15 * time.Second
+// signals the tests deliver.
+//
+// The "≤8s acceptance windows, so 15s is ample" reasoning it used to carry
+// undercounted the startup-sweep test: that one spends up to 8s waiting for
+// the kernel to reparent the orphan to init BEFORE its own 5s kill window
+// opens, and the whole case measures 11–17s on an unloaded laptop. A loaded
+// runner pushed it past 15s, the orphan self-exited, and the sweep then
+// truthfully reported finding nothing — surfacing as
+// "startup sweep found no orphans (child PID N alive=false)", a failure of
+// the fixture rather than of the code under test.
+//
+// The bound exists only to stop a leaked helper squatting for minutes, and
+// every test kills its helpers in cleanup, so it can afford to sit well clear
+// of the slowest case. watchRootPID is the real safety net: a helper whose
+// test binary dies exits within a poll interval regardless of this value.
+const helperLingerSleep = 90 * time.Second
 
 // spawnFakeWorker starts the helper "worker" with Setpgid:true and returns the
 // *exec.Cmd plus the PID of the helper's isolated child (the codex stand-in).
@@ -300,6 +313,15 @@ func TestKillOrphanedWorktreeProcesses_StartupSweep(t *testing.T) {
 	}
 	if ppid := readPPID(t, childPID); ppid != 1 {
 		t.Fatalf("child PID %d not yet reparented to init: PPID=%d", childPID, ppid)
+	}
+
+	// A dead orphan means the FIXTURE expired, not that the sweep missed
+	// anything: there is nothing left to find. Say which failure this is, so
+	// the next reader does not go looking for a bug in the sweep.
+	if !processAlive(childPID) {
+		t.Fatalf("fixture expired before the sweep ran: orphan PID %d already exited "+
+			"(helperLingerSleep=%s elapsed too little for this run) — not a sweep failure",
+			childPID, helperLingerSleep)
 	}
 
 	killed := s.killOrphanedWorktreeProcesses([]string{worktreeDir})
