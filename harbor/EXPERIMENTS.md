@@ -215,10 +215,13 @@ From run 17 onward the ux half is scored by the claude-judge replica
 the official CUA within 1/16 on both calibration apps: b2c 0.3125 vs
 0.28125, b2d 0.9375 vs 1.0). The official CUA runs only on explicit
 operator request (e.g. for leaderboard-comparable claims). Mechanics:
-harbor launches WITHOUT --env-file — the correctness stage is key-free and
-stays official; the CUA stage hard-fails by design (trial records
-RewardFileNotFoundError; correctness metrics.json intact); the replica then
-judges the /app artifact. Scores computed as 0.5×correctness_binary +
+harbor launches with a DUMMY-key env file (ANTHROPIC_API_KEY=replica-policy-
+no-official-cua) — harbor preflights declared [verifier.env] vars and
+refuses to start without the variable (omission ≠ skip; proven 2026-08-04).
+The correctness stage is key-free and stays official; the CUA stage
+hard-fails on the invalid key (trial records RewardFileNotFoundError;
+correctness metrics.json intact; zero key spend); the replica then judges
+the /app artifact. Scores computed as 0.5×correctness_binary +
 0.5×replica_ux and ALWAYS labeled "replica-ux"; tables must footnote which
 instrument judged each run. Runs 1–16 remain official-CUA-judged.
 
@@ -234,7 +237,21 @@ reserve (B2c threw away 43 min here). Two changes, one pre-registered
 hypothesis: the ux half requires product-level verification attention.
 PREDICTION: gates ≥1/5 held, API ≥100, replica-ux ≥0.8 → blended 0.5–0.6.
 FALSIFIED IF: replica-ux ≤0.5 with the UI duty demonstrably exercised.
-First run under the replica-ux protocol amendment (no --env-file).
+First run under the replica-ux protocol amendment.
+
+AS-RUN (2026-08-04, loom-generic-leadverify-ui-1): **halves traded, not
+stacked — blended 0.46875 (replica-ux)**. The ux leg validated exactly as
+predicted: replica-ux 0.9375 (8 PASS + polish PARTIAL, identical shape to
+B2d), the B2c entry-flow crater fully absent, 23/23 tasks integrated,
+DRAINED-CONTINUE exercised (drained t+3h07, verified to the reserve). But
+the correctness legs FALSIFIED: 0/5 gates (B2c's chaos gate lost, crash
+back to 1/3), API 79/129 (vs B2c's 101) — the lead's verification budget
+went to browser walks instead of the fault-injection/contract probing that
+won B2c its gate. Conclusion: within ONE mind the two verification vantages
+compete for the same duty cycle. $180.24, 69 sessions. Candidate next
+shapes: B2f = lead-verifier + QA role simultaneously (fork union, two
+minds), or B2e + a deterministic contract gate (codex L2) so the mind
+spends itself on the UI while machines hold the contracts.
 
 ```sh
 PYTHONPATH=loomcli/harbor harbor run -p tasks/slack-clone \
