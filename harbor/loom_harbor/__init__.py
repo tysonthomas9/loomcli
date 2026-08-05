@@ -15,6 +15,7 @@ Design references: ~/.claude/plans/refactored-petting-steele.md (codex-vetted R1
 """
 
 import json
+import re
 import shlex
 import tarfile
 import tempfile
@@ -87,8 +88,10 @@ class LoomAgent(BaseInstalledAgent):
         result = await self.exec_as_root(environment, "uname -m")
         raw = (result.stdout or "").strip()
         # Executor wrappers can pollute stdout (e.g. podman's compose-provider
-        # banner, merged stderr) — scan tokens for a known arch, fail-closed.
-        for token in reversed(raw.split()):
+        # banner, merged stderr, ANSI escapes glued to the value) — strip
+        # escapes, then scan tokens for a known arch, fail-closed.
+        clean = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", raw)
+        for token in reversed(clean.split()):
             arch = _ARCH_MAP.get(token.strip())
             if arch:
                 return arch
