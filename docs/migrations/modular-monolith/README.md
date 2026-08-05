@@ -1,9 +1,10 @@
 # Modular Monolith Migration
 
-- **Status:** Phase 6 complete at `completed_phase: 6`, including source,
-  paired-service, daemon-free runtime, signed packaged-Desktop UI, and fresh
-  real-Codex planner/coder acceptance
-- **Date:** 2026-08-03
+- **Status:** Phase 7 complete at `completed_phase: 7`, including all ten
+  capability roots, Observability and Source Control frontend slices, signed
+  packaged-Desktop UI, and the fresh two-runs-per-local-template real-Codex
+  acceptance matrix
+- **Date:** 2026-08-05
 - **Scope:** `loom serve`, the operator CLI entry surfaces, the Vite frontend counterpart, and the fleet-db contracts those capabilities depend on
 - **Provenance:** [Phase 0 integration baseline](00-phase-0-baseline.md), final [Phase 1 evidence](06-phase-1-decisions-and-evidence.md) at Loom `7e8a6dd2`, [Phase 2 evidence](07-phase-2-decisions-and-evidence.md) at Loom `84cccb761` with FleetDB `430dce8d9`, [Phase 3 evidence](08-phase-3-decisions-and-evidence.md) at core implementation commits Loom `7f95b9bf1` and FleetDB `f1c4e1119`, final [Phase 4 evidence](09-phase-4-decisions-and-evidence.md) at Loom `53cbe2577` with FleetDB `afb688768`, and the appended reliability-validation record at Loom `67c45972f` with FleetDB `9ffa69f60`
 - **Related:** [Unified agent UX](../../design/2026-07-01-unified-agent-ux-proposal.md) · [Durable agent identity](../../design/2026-07-07-agent-identity-record.md) · [Workflow driver authoring](../../design/workflow-driver-authoring-guide.md)
@@ -40,6 +41,7 @@ This is not a package-count project. The pre-guardrail source snapshot already h
 | [11-phase-5-decisions-and-evidence.md](11-phase-5-decisions-and-evidence.md) | Which Phase 5 seams, ownership invariants, gates, and exact-head acceptance proofs closed the phase? |
 | [12-phase-5-real-codex-proof.md](12-phase-5-real-codex-proof.md) | How did the packaged-Desktop real-Codex matrix close with 20 local passes and four operator waivers? |
 | [13-phase-6-decisions-and-evidence.md](13-phase-6-decisions-and-evidence.md) | Which supervisor paths were deleted, what replaced them, and which exact gates prove Phase 6? |
+| [14-phase-7-decisions-and-evidence.md](14-phase-7-decisions-and-evidence.md) | Which remaining capability and frontend boundaries closed, and what exact packaged-product matrix completes the migration? |
 
 ## Scope boundaries
 
@@ -56,7 +58,7 @@ This is not a package-count project. The pre-guardrail source snapshot already h
 
 The migration does **not** introduce microservices, multiple `go.mod` files, feature npm packages, microfrontends, or a generic in-process event bus.
 
-## Phase 0 through current Phase 6 status
+## Phase 0 through current Phase 7 status
 
 The required base integration is complete and its validated code heads are pushed. The Phase 1 branch starts from Loom `122d4d79`, where `origin/v5` at `95e97289` is an ancestor; companion FleetDB is `8120c788`. The original divergence counts, semantic conflict ledger, gate results, and local-mode proof remain frozen in the [Phase 0 baseline](00-phase-0-baseline.md), while the machine-readable baseline records the refreshed heads and structural ratchets.
 
@@ -162,6 +164,19 @@ completed a fresh UI-created real-Codex planner/coder canary: task
 diff, local branch, exit-0 runs, and Review convergence without a GitHub
 mutation. See the [Phase 6 record](13-phase-6-decisions-and-evidence.md).
 
+Phase 7 completes the modular-monolith migration. All ten capability roots are
+active; Work Items, Workspace, Source Control, Connectors, and Artifacts own
+their remaining product surfaces; and Observability plus Source Control are
+full frontend feature slices. The final architecture inventory records Store
+`64/54`, 77 handler exceptions, 107 mutation commands, 102 primary direct
+writes, 71 runtime components, 80 goroutine launches, and all six performance
+rows measured. The signed packaged Desktop selected 16 passing real-Codex
+executions across the eight local creation templates, with four GitHub
+execution rows explicitly waived and three legacy Advanced templates retired.
+Product proof also corrected the Observability cache so modular DriverRun
+metrics survive restart. See the
+[Phase 7 record](14-phase-7-decisions-and-evidence.md).
+
 ## Approved architecture decisions
 
 | ID | Outcome |
@@ -183,4 +198,4 @@ historical Phase 1 through Phase 4 evidence remains immutable.
 
 ---
 
-[All migrations](../README.md) · Next: [Current-state evidence](01-current-state.md) · [Phase 6 evidence](13-phase-6-decisions-and-evidence.md)
+[All migrations](../README.md) · Next: [Current-state evidence](01-current-state.md) · [Phase 7 evidence](14-phase-7-decisions-and-evidence.md)
