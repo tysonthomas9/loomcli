@@ -47,8 +47,11 @@ func TestListIssueEvents(t *testing.T) {
 			limit:       50,
 			handler: func(t *testing.T, w http.ResponseWriter, r *http.Request) {
 				q := r.URL.Query()
-				if got := q.Get("entity_type"); got != "issue" {
-					t.Errorf("entity_type = %q, want issue", got)
+				// The reader must NOT pre-filter by entity_type: label
+				// writes are entity_type "label" on an issue's id, and an
+				// exact server-side filter would drop them.
+				if q.Has("entity_type") {
+					t.Errorf("entity_type = %q, want the param omitted entirely", q.Get("entity_type"))
 				}
 				if got := q.Get("since"); got != "1707001234560-0" {
 					t.Errorf("since = %q, want opaque cursor pass-through", got)
