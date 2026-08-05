@@ -463,6 +463,46 @@ func TestPhase5InteractionLedgerPinsDeliveryAuthorityAndAttemptFencing(t *testin
 	}
 }
 
+// TestCheckedInPhase6ArchitectureContracts keeps the completed Phase 6
+// contract monotonic after later migration phases advance the checked graph.
+// Historical acceptance required equality at Phase 6; current heads must keep
+// at least those roots and commands while allowing the Phase 7 ratchet to add
+// owners and commands.
+func TestCheckedInPhase6ArchitectureContracts(t *testing.T) {
+	graph, err := LoadCapabilityGraph(filepath.Join("testdata", "capability-graph.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if graph.CompletedPhase < 6 {
+		t.Fatalf("completed phase = %d, want at least 6", graph.CompletedPhase)
+	}
+	statusByCapability := make(map[string]string, len(graph.Capabilities))
+	for _, capability := range graph.Capabilities {
+		statusByCapability[capability.Name] = capability.Status
+	}
+	for _, capability := range []string{
+		"agents",
+		"artifacts",
+		"automation",
+		"connectors",
+		"execution",
+		"interaction",
+		"sourcecontrol",
+		"workflowcatalog",
+	} {
+		if statusByCapability[capability] != "active" {
+			t.Fatalf("Phase 6 capability %s status = %q, want active", capability, statusByCapability[capability])
+		}
+	}
+	ledger, err := LoadMutationLedger(filepath.Join("testdata", "mutation-ledger.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ledger.Commands) < 105 {
+		t.Fatalf("mutation commands = %d, want at least the 105 Phase 6 commands", len(ledger.Commands))
+	}
+}
+
 func TestCheckedInPhase7ArchitectureContracts(t *testing.T) {
 	graph, err := LoadCapabilityGraph(filepath.Join("testdata", "capability-graph.yaml"))
 	if err != nil {
