@@ -262,6 +262,53 @@ PYTHONPATH=loomcli/harbor harbor run -p tasks/slack-clone \
   --artifact /app -o trials --job-name loom-generic-leadverify-ui-N -n 1 -y
 ```
 
+### B2f-revised. verification-as-tasks (lead directs, QA executes) — PLANNED
+The post-B2e composition shape, POC-proven 2026-08-05 (all assertions A–F
+green; `scratchpad/b2fpoc/`). Resolves B2e's zero-sum finding by splitting
+verification INTENT (lead, cheap sentences) from EXECUTION (QA, expensive
+walks), coordinated purely through fleet-db tasks.
+
+Arm definition (`verify_role=tasks`), all deltas vs the B2b/B2d code paths:
+
+- **Lead**: `lead-persistent-verifier-tasks.md` — B2c's lead but it runs
+  and tests NOTHING; on every pass listing integrations it files
+  verification tasks (`--source-repo qa-verify`, spec-quoting, targeted at
+  the current head) BEFORE its other duties, then does normal
+  review-routing. Never closes.
+- **QA**: `qa-persistent-tasks.md` — B2d's persistent QA; each pass it
+  (1) drains open `qa-verify` tasks oldest-first (claim via
+  `--status in_progress --assignee qa`, execute, close + `QA-RESULT:`
+  comment), (2) when the queue is empty, runs its standing whole-spec duty
+  (independent vantage preserved), always verifying the CURRENT integrated
+  head (named in the pass message). Files correctives `--source-repo app`
+  (unlaned pool). Status changes permitted only on qa-verify tasks.
+- **Routing**: G12 strict source_repo matching — planner/coder (`--repos
+  app`) can never claim `qa-verify` tasks; POC-proven non-vacuously.
+  (Product-shaped replacement: docs/design/task-lanes-routing.md.)
+- **Pass messages**: both minds, every cadence tick, same mechanical info:
+  integrated delta + **`Current integrated head: <sha>`** (the POC's
+  multi-integration ambiguity fix) + checkout path + epic id. No
+  alternating cadence needed — only QA ever boots the app.
+- **Drain semantics**: `open_task_count` includes open qa-verify tasks, so
+  "drained" cannot fire while verification is outstanding (desirable);
+  drain-continue applies in this mode regardless (verification passes run
+  to the deadline reserve).
+- **Harness deltas**: orchestrate.sh gains the `tasks` value for
+  VERIFY_ROLE (lead-prompt selection, QA startup with the tasks prompt,
+  current-head line in VERIFY_INFO); bootstrap adds
+  `hide_rate_limit_model_nudge = true` to the container codex config (the
+  POC's modal-block lesson); verify-checkout + freeports unchanged
+  (QA-only). Everything else byte-identical to B2b/B2d.
+- **Judging**: replica-ux per the protocol amendment (dummy-key env file).
+- **Cost**: ~$150–200 cap $200; ~4h.
+
+PREDICTION (pre-registered): the lead's targeted verify-tasks direct QA
+into contract/fault probes (the B2c vantage) while QA's standing duty
+keeps the product walk (the B2d vantage) → gates ≥1/5 AND replica-ux ≥0.8
+→ blended ≥0.55. FALSIFIED IF either half lands below its fork-proven
+level — which would localize the constraint to single-executor
+verification bandwidth (QA can't drain both duties at integration pace).
+
 ### B3. fractal-generic — infrastructure COMMITTED
 Mission mode `generic` (verbatim spec + finish sentence — the hardcoded
 preamble is bypassed; strip-vet #3); hidden reserve pinned to 0; concurrency
