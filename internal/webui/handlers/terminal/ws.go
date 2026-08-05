@@ -17,6 +17,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"nhooyr.io/websocket" //nolint:staticcheck // SA1019: websocket migration tracked separately
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
@@ -678,7 +679,16 @@ func legacyLaunchSpecForSession(session string) *tabmeta.LaunchSpec {
 	if len(argv) == 0 {
 		return nil
 	}
-	return &tabmeta.LaunchSpec{Argv: argv}
+	launch := &tabmeta.LaunchSpec{Argv: argv}
+	// Generic workspace terminals predate durable agent-tab metadata, so they
+	// do not carry a persisted launch envelope. Re-add only the server-resolved
+	// local data directory; PTYManager separately binds LOOM_WORKSPACE from the
+	// workspace-scoped SessionKey. This keeps child `loom` commands on the same
+	// Desktop registry without admitting ambient credentials or product scope.
+	if configDir := strings.TrimSpace(bootstrap.LoomDir()); configDir != "" {
+		launch.Env = map[string]string{"LOOM_CONFIG_DIR": configDir}
+	}
+	return launch
 }
 
 func initialTerminalSizeFromRequest(r *http.Request) (uint16, uint16) {
