@@ -24,6 +24,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
+	"github.com/tysonthomas9/loomcli/internal/fleethttp"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
@@ -46,9 +47,13 @@ var _ backend.IssueBackend = (*APIBackend)(nil)
 // apiResponse is the JSON envelope returned by loom server endpoints that
 // follow the { success, data, error } convention.
 type apiResponse struct {
-	Success bool            `json:"success"`
-	Data    json.RawMessage `json:"data,omitempty"`
-	Error   string          `json:"error,omitempty"`
+	// RetryAfter carries the response's Retry-After hint so the classifier
+	// can attach it to a rate-limit error without threading headers through
+	// every request helper.
+	RetryAfter time.Duration   `json:"-"`
+	Success    bool            `json:"success"`
+	Data       json.RawMessage `json:"data,omitempty"`
+	Error      string          `json:"error,omitempty"`
 }
 
 // New creates an APIBackend with the given configuration. It does NOT
@@ -143,6 +148,7 @@ func (b *APIBackend) doRequestHeaders(ctx context.Context, method, path string, 
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
 		return nil, resp.StatusCode, fmt.Errorf("server returned non-JSON response (HTTP %d)", resp.StatusCode)
 	}
+	parsed.RetryAfter = fleethttp.RetryAfter(resp.Header, time.Now())
 	return &parsed, resp.StatusCode, nil
 }
 

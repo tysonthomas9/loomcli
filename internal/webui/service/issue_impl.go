@@ -130,6 +130,10 @@ func translateBackendError(err error) *ServiceError {
 		return ErrValidation(be.Message)
 	case backend.KindConflict:
 		return ErrConflict(be.Message)
+	case backend.KindRateLimited:
+		// 429 all the way through: a throttle is not a fault, and the UI's
+		// transient-banner path keys on this status.
+		return ErrRateLimited(be.Message)
 	case backend.KindUnavailable:
 		return ErrUnavailable(be.Message)
 	case backend.KindTimeout:

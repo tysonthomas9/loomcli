@@ -24,6 +24,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/fleethttp"
@@ -332,7 +333,7 @@ func (c *Client) doBytes(ctx context.Context, method, path string) ([]byte, erro
 		if readErr != nil {
 			return nil, fmt.Errorf("fleetdb: %s %s: HTTP %d (read body: %w)", method, path, resp.StatusCode, readErr)
 		}
-		return nil, classifyHTTPError(method, path, resp.StatusCode, respBody)
+		return nil, classifyHTTPError(method, path, resp.StatusCode, respBody, resp.Header)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody+1))
 	if err != nil {
@@ -361,7 +362,7 @@ func (c *Client) doRequest(req *http.Request, method, path string, out any) erro
 		if readErr != nil {
 			return fmt.Errorf("fleetdb: %s %s: HTTP %d (read body: %w)", method, path, resp.StatusCode, readErr)
 		}
-		return classifyHTTPError(method, path, resp.StatusCode, respBody)
+		return classifyHTTPError(method, path, resp.StatusCode, respBody, resp.Header)
 	}
 	if out == nil || resp.StatusCode == http.StatusNoContent {
 		return nil
@@ -377,12 +378,23 @@ func (c *Client) doRequest(req *http.Request, method, path string, out any) erro
 
 // classifyHTTPError maps an HTTP status + body into the appropriate
 // domain sentinel + descriptive wrap.
-func classifyHTTPError(method, path string, status int, body []byte) error {
+func classifyHTTPError(method, path string, status int, body []byte, header http.Header) error {
 	msg := extractErrorMessage(body)
 	code := extractErrorCode(body)
 	prefix := fmt.Sprintf("fleetdb: %s %s: HTTP %d", method, path, status)
 	if msg != "" {
 		prefix += ": " + msg
+	}
+	// The shared table owns the CLASS (fleethttp.ClassifyStatus); this switch
+	// owns only the mapping from class to this package's sentinels and the
+	// body-code refinements fleet-db layers on top of a status. Statuses the
+	// table does not cover fall through to the 4xx catch-all below, exactly
+	// as before.
+	if fleethttp.ClassifyStatus(status) == fleethttp.ClassRateLimited {
+		return &domain.RateLimitError{
+			RetryAfter: fleethttp.RetryAfter(header, time.Now()),
+			Detail:     prefix,
+		}
 	}
 	switch status {
 	case http.StatusNotFound:

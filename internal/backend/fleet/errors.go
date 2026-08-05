@@ -7,12 +7,22 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/fleethttp"
 )
 
 // classifyHTTPError maps an HTTP status code and response body to a
 // *backend.BackendError. For 2xx responses with success=false, the error
 // string in the body is matched against known patterns.
 func classifyHTTPError(op string, statusCode int, body apiResponse) error {
+	// A 429 is decided by the shared table (fleethttp), not by this switch:
+	// the two clients used to disagree about it — one mapped it to conflict
+	// via a 4xx catch-all, the other to unavailable with a "rate limited: "
+	// message prefix — so a routine backpressure signal reached the web UI
+	// as a server fault. It is checked before the string matcher because the
+	// status is authoritative here: no body wording changes what a 429 means.
+	if fleethttp.ClassifyStatus(statusCode) == fleethttp.ClassRateLimited {
+		return backend.ErrRateLimited(op, msgOrDefault(body.Error), body.RetryAfter)
+	}
 	// 2xx with success=true: no error.
 	if statusCode >= 200 && statusCode < 300 && body.Success {
 		return nil
@@ -52,8 +62,6 @@ func classifyHTTPError(op string, statusCode int, body apiResponse) error {
 		return attachMeta(backend.ErrNotFound(op, msg), body.Meta)
 	case 409:
 		return attachMeta(backend.ErrConflict(op, msg), body.Meta)
-	case 429:
-		return attachMeta(backend.ErrUnavailable(op, "rate limited: "+msg, nil), body.Meta)
 	case 503:
 		return attachMeta(backend.ErrUnavailable(op, msg, nil), body.Meta)
 	case 504:
@@ -148,4 +156,13 @@ func classifyTransportError(op string, err error) error {
 		return backend.ErrUnavailable(op, "fleet server unreachable: "+netErr.Error(), err)
 	}
 	return backend.ErrUnavailable(op, "fleet server communication failed: "+err.Error(), err)
+}
+
+// msgOrDefault mirrors the message fallback the switch below uses, for the
+// early rate-limit return.
+func msgOrDefault(msg string) string {
+	if msg == "" {
+		return "rate limited"
+	}
+	return msg
 }

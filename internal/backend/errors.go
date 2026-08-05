@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // ErrFilterNotSupported is a sentinel error indicating that a backend does not
@@ -17,7 +18,12 @@ var ErrFilterNotSupported = errors.New("filter not supported by backend")
 type ErrorKind string
 
 const (
-	KindNotFound       ErrorKind = "not_found"
+	KindNotFound ErrorKind = "not_found"
+	// KindRateLimited is fleet-db refusing a request for backpressure (429).
+	// Distinct from KindUnavailable, which the 429 arm used to borrow: an
+	// unavailable backend is a fault to report, a rate limit is pacing to
+	// obey — and only one of them should ever reach a user as a 5xx.
+	KindRateLimited    ErrorKind = "rate_limited"
 	KindValidation     ErrorKind = "validation_error"
 	KindConflict       ErrorKind = "conflict"
 	KindUnavailable    ErrorKind = "unavailable"
@@ -36,6 +42,10 @@ type BackendError struct {
 	Op      string // The backend operation that failed (e.g., "Get", "List").
 	Message string
 	Cause   error
+	// RetryAfter is the server's pacing hint on a KindRateLimited error
+	// (from the Retry-After response header). Zero means the server gave
+	// none — which is not "retry now": the caller's backoff owns that case.
+	RetryAfter time.Duration
 	// Meta carries optional structured details from the underlying transport.
 	// fleet-db responses populate it from the JSON error envelope's "meta"
 	// field (e.g., {"existing_owner": "..."} on a claim conflict). Empty when
@@ -136,6 +146,23 @@ func ErrNotImplemented(op, msg string) *BackendError {
 // ErrUnavailable creates a KindUnavailable error when the backend is unreachable.
 func ErrUnavailable(op, msg string, cause error) *BackendError {
 	return &BackendError{Kind: KindUnavailable, Op: op, Message: msg, Cause: cause}
+}
+
+// ErrRateLimited creates a KindRateLimited error carrying the server's pacing
+// hint. retryAfter may be zero when the response omitted Retry-After.
+func ErrRateLimited(op, msg string, retryAfter time.Duration) *BackendError {
+	return &BackendError{Kind: KindRateLimited, Op: op, Message: msg, RetryAfter: retryAfter}
+}
+
+// RateLimitRetryAfter returns the pacing hint carried by err and whether err
+// is a rate-limit error at all. Mirrors domain.RateLimitRetryAfter so callers
+// on either client side ask the same question the same way.
+func RateLimitRetryAfter(err error) (time.Duration, bool) {
+	var be *BackendError
+	if !errors.As(err, &be) || be.Kind != KindRateLimited {
+		return 0, false
+	}
+	return be.RetryAfter, true
 }
 
 // ErrTimeout creates a KindTimeout error when an operation exceeds its deadline.
