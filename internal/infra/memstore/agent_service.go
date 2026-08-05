@@ -220,7 +220,11 @@ func (s *agentServiceStore) hasRole(ws, roleName string) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for _, svc := range s.items[ws] {
-		if svc.RoleName == roleName {
+		// FleetDB's reference check uses the default agent-service listing,
+		// which excludes archived records. Mirror that behavior so a failed
+		// create can archive its provisional service and then compensate a
+		// role that never became runnable.
+		if svc.DeletedAt == nil && svc.RoleName == roleName {
 			return true
 		}
 	}

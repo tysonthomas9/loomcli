@@ -8,7 +8,7 @@ import { formatDate } from "@/components/table/columns";
 import type { Comment } from "@/types";
 
 import { AuthorAvatar } from "./AuthorAvatar";
-import { MarkdownRenderer } from "./MarkdownRenderer";
+import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import styles from "./CommentsSection.module.css";
 
 /**

@@ -1,12 +1,19 @@
 package leadcontrol
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
+	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 func TestNewestCodexThreadWaitsForThreadCreatedAfterRuntimeStart(t *testing.T) {
@@ -92,3 +99,369 @@ func TestCodexAppServerTimeoutErrorOmitsMissingLogTail(t *testing.T) {
 		t.Fatalf("timeout error included missing probe error:\n%s", got)
 	}
 }
+
+func TestCodexAppServerLifetimeSurvivesParentCancellationUntilExplicitStop(t *testing.T) {
+	type contextKey string
+	const key contextKey = "runtime-value"
+	parent, cancelParent := context.WithCancel(context.WithValue(context.Background(), key, "preserved"))
+	appCtx, cancelApp := codexAppServerLifetimeContext(parent)
+	cancelParent()
+
+	if got := appCtx.Value(key); got != "preserved" {
+		t.Fatalf("app-server context value = %v, want preserved", got)
+	}
+	select {
+	case <-appCtx.Done():
+		t.Fatal("app-server lifetime ended with parent context before transcript capture")
+	default:
+	}
+
+	cancelApp()
+	select {
+	case <-appCtx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("app-server lifetime ignored explicit stop")
+	}
+}
+
+func TestCodexThreadTranscriptEventsCanonicalizesMessages(t *testing.T) {
+	capturedAt := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
+	events := codexThreadTranscriptEvents(&CodexThread{
+		ID: "thread-1",
+		Turns: []CodexTurn{{
+			ID: "turn-1",
+			Items: []CodexTurnItem{
+				{
+					Type: "userMessage",
+					ID:   "user-1",
+					Content: []CodexContentBlock{
+						{Type: "text", Text: "Please review this."},
+						{Type: "image", Text: "ignored"},
+					},
+				},
+				{Type: "reasoning", ID: "reasoning-1", Text: "ignored"},
+				{Type: "agentMessage", ID: "agent-1", Text: "Review complete."},
+			},
+		}},
+	}, capturedAt)
+
+	if len(events) != 2 {
+		t.Fatalf("events = %+v, want user and assistant messages", events)
+	}
+	if events[0].Seq != 1 || events[0].Role != transcript.RoleUser ||
+		events[0].Type != transcript.EventText || events[0].Text != "Please review this." ||
+		events[0].UUID != "user-1" || !events[0].Timestamp.Equal(capturedAt) {
+		t.Fatalf("user event = %+v", events[0])
+	}
+	if events[1].Seq != 2 || events[1].Role != transcript.RoleAssistant ||
+		events[1].Text != "Review complete." || events[1].UUID != "agent-1" {
+		t.Fatalf("assistant event = %+v", events[1])
+	}
+}
+
+func TestMarshalCanonicalTranscriptWithinLimitAddsTruncationEvidence(t *testing.T) {
+	const captureLimit = 512
+	capturedAt := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
+	capture, err := marshalCanonicalTranscriptWithinLimit([]transcript.Event{
+		{
+			Seq:       1,
+			Timestamp: capturedAt,
+			Role:      transcript.RoleUser,
+			Type:      transcript.EventText,
+			Text:      "short event remains visible",
+		},
+		{
+			Seq:       2,
+			Timestamp: capturedAt,
+			Role:      transcript.RoleAssistant,
+			Type:      transcript.EventText,
+			Text:      strings.Repeat("x", captureLimit),
+		},
+	}, captureLimit)
+	if err != nil {
+		t.Fatalf("marshalCanonicalTranscriptWithinLimit() error = %v", err)
+	}
+	if !capture.truncated {
+		t.Fatal("capture was not marked truncated")
+	}
+	if len(capture.content) > captureLimit {
+		t.Fatalf("capture length = %d, exceeds %d", len(capture.content), captureLimit)
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(capture.content)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("capture lines = %d, want retained event plus truncation marker: %s", len(lines), capture.content)
+	}
+	var retained transcript.Event
+	if err := json.Unmarshal([]byte(lines[0]), &retained); err != nil {
+		t.Fatalf("decode retained event: %v", err)
+	}
+	if retained.Text != "short event remains visible" {
+		t.Fatalf("retained event = %+v", retained)
+	}
+	var marker transcript.Event
+	if err := json.Unmarshal([]byte(lines[1]), &marker); err != nil {
+		t.Fatalf("decode truncation marker: %v", err)
+	}
+	if marker.Seq != 2 || marker.Role != transcript.RoleSystem ||
+		marker.Type != transcript.EventSessionMeta ||
+		!strings.Contains(marker.Text, "Transcript truncated by Loom") {
+		t.Fatalf("truncation marker = %+v", marker)
+	}
+
+	metadata := transcriptArtifactMetadata(map[string]string{"backend": "codex"}, capture)
+	if metadata["transcript_truncated"] != "true" ||
+		metadata["transcript_capture_limit_bytes"] != "512" ||
+		metadata["transcript_truncation_reason"] != transcriptTruncationCanonical {
+		t.Fatalf("truncation metadata = %#v", metadata)
+	}
+}
+
+func TestMarshalCanonicalTranscriptEnforcesSharedEventLimit(t *testing.T) {
+	capturedAt := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
+	events := []transcript.Event{
+		{Seq: 1, Timestamp: capturedAt, Role: transcript.RoleUser, Type: transcript.EventText, Text: "one"},
+		{Seq: 2, Timestamp: capturedAt, Role: transcript.RoleAssistant, Type: transcript.EventText, Text: "two"},
+		{Seq: 3, Timestamp: capturedAt, Role: transcript.RoleAssistant, Type: transcript.EventText, Text: "three"},
+	}
+
+	atLimit, err := marshalCanonicalTranscriptWithinLimitsAndState(events[:2], 4096, 2, false)
+	if err != nil {
+		t.Fatalf("marshal exactly at event limit: %v", err)
+	}
+	if atLimit.truncated {
+		t.Fatal("transcript exactly at event limit was marked truncated")
+	}
+	if lines := strings.Split(strings.TrimSpace(string(atLimit.content)), "\n"); len(lines) != 2 {
+		t.Fatalf("exact-limit lines = %d, want 2", len(lines))
+	}
+
+	overLimit, err := marshalCanonicalTranscriptWithinLimitsAndState(events, 4096, 2, false)
+	if err != nil {
+		t.Fatalf("marshal over event limit: %v", err)
+	}
+	if !overLimit.truncated || overLimit.truncationReason != transcriptTruncationCanonical {
+		t.Fatalf("over-limit capture state = %+v", overLimit)
+	}
+	lines := strings.Split(strings.TrimSpace(string(overLimit.content)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("over-limit lines = %d, want retained event plus marker", len(lines))
+	}
+	var marker transcript.Event
+	if err := json.Unmarshal([]byte(lines[1]), &marker); err != nil {
+		t.Fatalf("decode event-limit marker: %v", err)
+	}
+	if marker.Seq != 2 || marker.Role != transcript.RoleSystem ||
+		marker.Type != transcript.EventSessionMeta ||
+		!strings.Contains(marker.Text, "Transcript truncated by Loom") {
+		t.Fatalf("event-limit marker = %+v", marker)
+	}
+}
+
+func TestMarshalCanonicalTranscriptPropagatesSourcePaginationTruncation(t *testing.T) {
+	capture, err := marshalCanonicalTranscriptWithSourceTruncation([]transcript.Event{{
+		Seq:       1,
+		Timestamp: time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC),
+		Role:      transcript.RoleAssistant,
+		Type:      transcript.EventText,
+		Text:      "retained prefix",
+	}}, true)
+	if err != nil {
+		t.Fatalf("marshalCanonicalTranscriptWithSourceTruncation() error = %v", err)
+	}
+	if !capture.truncated || capture.truncationReason != transcriptTruncationSource {
+		t.Fatalf("capture state = %+v", capture)
+	}
+	lines := strings.Split(strings.TrimSpace(string(capture.content)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("capture lines = %d, want event plus source truncation marker", len(lines))
+	}
+	var marker transcript.Event
+	if err := json.Unmarshal([]byte(lines[1]), &marker); err != nil {
+		t.Fatalf("decode source truncation marker: %v", err)
+	}
+	if marker.Role != transcript.RoleSystem || marker.Type != transcript.EventSessionMeta ||
+		!strings.Contains(marker.Text, "Transcript truncated by Loom") {
+		t.Fatalf("source truncation marker = %+v", marker)
+	}
+	metadata := transcriptArtifactMetadata(map[string]string{"backend": "codex"}, capture)
+	if metadata["transcript_truncation_reason"] != transcriptTruncationSource ||
+		metadata["transcript_source_limit_bytes"] != "50331648" ||
+		metadata["transcript_source_truncation_cause"] != transcriptSourceCauseCodexText {
+		t.Fatalf("source truncation metadata = %#v", metadata)
+	}
+}
+
+func TestMarshalCanonicalTranscriptPreservesTypedSourceLimitEvidence(t *testing.T) {
+	tests := []struct {
+		name         string
+		source       transcriptSourceTruncation
+		metadataKey  string
+		metadataWant string
+		markerWant   string
+	}{
+		{
+			name: "canonical events",
+			source: transcriptSourceTruncation{
+				truncated: true, limitEvents: 100_000,
+				cause: transcriptSourceCauseCodexEvents,
+			},
+			metadataKey:  "transcript_source_limit_events",
+			metadataWant: "100000",
+			markerWant:   "100000 events",
+		},
+		{
+			name: "scanned pages",
+			source: transcriptSourceTruncation{
+				truncated: true, limitPages: 100_000,
+				cause: transcriptSourceCauseCodexPages,
+			},
+			metadataKey:  "transcript_source_limit_pages",
+			metadataWant: "100000",
+			markerWant:   "100000 pages",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			capture, err := marshalCanonicalTranscriptWithSourceState([]transcript.Event{{
+				Seq: 1, Timestamp: time.Now().UTC(),
+				Role: transcript.RoleAssistant, Type: transcript.EventText, Text: "retained",
+			}}, test.source)
+			if err != nil {
+				t.Fatalf("marshal typed source truncation: %v", err)
+			}
+			metadata := transcriptArtifactMetadata(map[string]string{}, capture)
+			if metadata[test.metadataKey] != test.metadataWant ||
+				metadata["transcript_source_truncation_cause"] != test.source.cause ||
+				metadata["transcript_source_limit_bytes"] != "" {
+				t.Fatalf("typed truncation metadata = %#v", metadata)
+			}
+			if !strings.Contains(string(capture.content), test.markerWant) {
+				t.Fatalf("typed truncation marker = %s, want %q", capture.content, test.markerWant)
+			}
+		})
+	}
+}
+
+func TestCaptureCodexInteractiveTranscriptPersistsSessionArtifactAndRef(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "lead-session",
+		AgentID:      "local-review",
+		Kind:         domain.AgentSessionKindOrchestration,
+		Status:       domain.AgentSessionRunning,
+		Metadata:     map[string]string{"assignment": "preserve-me"},
+	}); err != nil {
+		t.Fatalf("create interactive session: %v", err)
+	}
+	if err := UpdateCodexRuntimeMetadata(ctx, st, "WS", "lead-session", CodexRuntimeMetadata{
+		Endpoint:   "ws://codex.test",
+		ThreadID:   "thread-1",
+		Status:     RuntimeStatusIdle,
+		Controlled: true,
+	}); err != nil {
+		t.Fatalf("persist runtime metadata: %v", err)
+	}
+
+	fake := &transcriptCodexClient{thread: &CodexThread{
+		ID:  "thread-1",
+		Cwd: "/repo",
+		Turns: []CodexTurn{{
+			ID: "turn-1",
+			Items: []CodexTurnItem{
+				{
+					Type:    "userMessage",
+					ID:      "user-1",
+					Content: []CodexContentBlock{{Type: "text", Text: "Review the branch."}},
+				},
+				{Type: "agentMessage", ID: "agent-1", Text: "No issues found."},
+			},
+		}},
+	}}
+	originalDial := dialCodexAppServerClient
+	dialCodexAppServerClient = func(context.Context, string) (codexAppServerClient, error) {
+		return fake, nil
+	}
+	t.Cleanup(func() { dialCodexAppServerClient = originalDial })
+
+	err := captureCodexInteractiveTranscript(ctx, CodexLeadRuntimeConfig{
+		Store: st, Workspace: "WS", LeadName: "local-review",
+		SessionID: "lead-session", WorkDir: "/repo",
+	}, CodexRuntimeMetadata{}, time.Now().Add(-time.Minute))
+	if err != nil {
+		t.Fatalf("captureCodexInteractiveTranscript() error = %v", err)
+	}
+
+	session, err := st.AgentSessions().Get(ctx, "WS", "lead-session")
+	if err != nil {
+		t.Fatalf("get captured session: %v", err)
+	}
+	if session.Metadata["transcript_ref"] != "artifact://transcript-lead-session" {
+		t.Fatalf("transcript_ref = %q", session.Metadata["transcript_ref"])
+	}
+	if session.Metadata["assignment"] != "preserve-me" {
+		t.Fatalf("concurrent metadata was lost: %#v", session.Metadata)
+	}
+
+	artifact, err := st.Artifacts().Get(ctx, "WS", "transcript-lead-session")
+	if err != nil {
+		t.Fatalf("get transcript artifact: %v", err)
+	}
+	if artifact.OwnerType != "session" || artifact.OwnerID != "lead-session" ||
+		artifact.SessionID != "lead-session" || artifact.AgentID != "local-review" ||
+		artifact.Type != "transcript" || artifact.MIMEType != "application/x-ndjson" ||
+		artifact.DurableStatus != "finalized" {
+		t.Fatalf("transcript artifact = %+v", artifact)
+	}
+	if artifact.Metadata["transcript_truncated"] != "" {
+		t.Fatalf("small transcript incorrectly marked truncated: %#v", artifact.Metadata)
+	}
+	reader, ok := st.Artifacts().(store.ArtifactContentReader)
+	if !ok {
+		t.Fatal("memstore artifacts do not implement ArtifactContentReader")
+	}
+	content, err := reader.ReadContent(ctx, "WS", artifact.ArtifactID)
+	if err != nil {
+		t.Fatalf("read transcript content: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(content)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("transcript lines = %q, want two", content)
+	}
+	var got transcript.Event
+	if err := json.Unmarshal([]byte(lines[1]), &got); err != nil {
+		t.Fatalf("decode assistant event: %v", err)
+	}
+	if got.Seq != 2 || got.Role != transcript.RoleAssistant || got.Text != "No issues found." {
+		t.Fatalf("assistant event = %+v", got)
+	}
+}
+
+type transcriptCodexClient struct {
+	thread *CodexThread
+}
+
+func (f *transcriptCodexClient) Close(string) error { return nil }
+
+func (f *transcriptCodexClient) ListThreads(context.Context, string, int) ([]CodexThread, error) {
+	if f.thread == nil {
+		return nil, nil
+	}
+	return []CodexThread{*f.thread}, nil
+}
+
+func (f *transcriptCodexClient) ReadThread(context.Context, string) (*CodexThread, error) {
+	return f.thread, nil
+}
+
+func (f *transcriptCodexClient) ReadThreadWithTurns(context.Context, string) (*CodexThread, error) {
+	return f.thread, nil
+}
+
+func (f *transcriptCodexClient) ReadThreadTranscript(context.Context, string) (*CodexThread, error) {
+	return f.thread, nil
+}
+
+func (f *transcriptCodexClient) StartTurn(context.Context, string, string) error { return nil }

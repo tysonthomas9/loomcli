@@ -1,14 +1,11 @@
 package driver
 
 import (
-	"context"
-	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // Retry-then-block policy support for claimed TaskRun execution: decide
@@ -47,30 +44,6 @@ func taskRunAttempt(run *domain.TaskRun) int {
 		return 0
 	}
 	return attempt
-}
-
-func requeueClaimedTaskRun(ctx context.Context, s store.Store, claimed *domain.TaskRun, opts executeClaimedTaskRunOptions, execResult TaskExecResult, completion taskExecCompletion, metadata map[string]string, retry taskRunRetryDecisionResult) (*domain.TaskRun, error) {
-	metadata = taskRunRetryMetadata(claimed, retry, completion, metadata)
-	requeued, err := s.TaskRuns().Requeue(ctx, claimed.WorkspaceKey, claimed.TaskRunID, store.TaskRunRequeue{
-		NodeID:          claimed.NodeID,
-		LeaseID:         claimed.LeaseID,
-		LeaseToken:      opts.LeaseToken,
-		FencingToken:    claimed.FencingToken,
-		RuntimeMetadata: metadata,
-		LogsRef:         execResult.LogsRef,
-		ArtifactsRef:    execResult.ArtifactsRef,
-		ErrorClass:      completion.ErrorClass,
-		ErrorMessage:    completion.ErrorMessage,
-		NextEligibleAt:  taskRunNow(opts.Now).Add(taskRunRetryBackoff(retry.Attempt)),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("requeue task run: %w", err)
-	}
-	appendTaskRunEvent(ctx, s, requeued, domain.TaskRunEventRequeued, completion, taskRunEventContext{
-		EpicID:     taskRunEpicID(ctx, s, requeued),
-		LeaseToken: opts.LeaseToken,
-	})
-	return requeued, nil
 }
 
 const (
@@ -132,53 +105,6 @@ func schedulerMetadata(metadata map[string]string, state string, attempt, maxAtt
 		out["scheduler_last_error_message"] = completion.ErrorMessage
 	}
 	return out
-}
-
-func requeueLinkedDriverStep(ctx context.Context, s store.Store, claimed, requeued *domain.TaskRun) error {
-	if claimed == nil || requeued == nil || claimed.DriverStepID == "" {
-		return nil
-	}
-	parent, err := s.DriverRuns().Get(ctx, requeued.WorkspaceKey, requeued.DriverRunID)
-	if err != nil {
-		return fmt.Errorf("get parent driver run for requeued task step update: %w", err)
-	}
-	if parent.Status != domain.DriverRunRunning {
-		return nil
-	}
-	status := domain.DriverStepQueued
-	outputRef := firstNonEmpty(requeued.ArtifactsRef, requeued.LogsRef)
-	_, err = s.DriverSteps().Update(ctx, requeued.WorkspaceKey, claimed.DriverStepID, store.DriverStepUpdate{
-		Status:       &status,
-		TaskRunID:    &requeued.TaskRunID,
-		OutputRef:    &outputRef,
-		NodeID:       parent.NodeID,
-		LeaseID:      parent.LeaseID,
-		FencingToken: parent.FencingToken,
-	})
-	if err != nil {
-		return fmt.Errorf("update linked driver step from requeued task run: %w", err)
-	}
-	return nil
-}
-
-func finishLinkedDriverStep(ctx context.Context, s store.Store, claimed *domain.TaskRun, opts executeClaimedTaskRunOptions, refs claimedTaskRunRefs, execResult TaskExecResult, status domain.TaskRunStatus) error {
-	if !opts.UpdateDriverStep || refs.DriverStepID == "" {
-		return nil
-	}
-	stepStatus := driverStepStatusForTaskRun(status)
-	outputRef := firstNonEmpty(execResult.ArtifactsRef, execResult.LogsRef)
-	_, err := s.DriverSteps().Update(ctx, refs.WorkspaceKey, refs.DriverStepID, store.DriverStepUpdate{
-		Status:       &stepStatus,
-		TaskRunID:    &claimed.TaskRunID,
-		OutputRef:    &outputRef,
-		NodeID:       opts.ParentNodeID,
-		LeaseID:      opts.ParentLeaseID,
-		FencingToken: opts.ParentFence,
-	})
-	if err != nil {
-		return fmt.Errorf("finish driver step: %w", err)
-	}
-	return nil
 }
 
 func driverStepStatusForTaskRun(status domain.TaskRunStatus) domain.DriverStepStatus {

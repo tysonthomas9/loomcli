@@ -16,14 +16,16 @@ import (
 // collectDaemonStatusForDir Tests
 // ============================================================================
 
-func TestStatusDaemonRunning(t *testing.T) {
+func TestStatusRejectsForeignLivePID(t *testing.T) {
 	tmpDir := t.TempDir()
 	loomDir := filepath.Join(tmpDir, ".loom")
 	if err := os.MkdirAll(loomDir, 0755); err != nil {
 		t.Fatal(err)
 	}
 
-	// Write PID file with current process PID (which is running)
+	// A live PID is not daemon authority: the PID may have been recycled by
+	// an unrelated process. Use the current Go test process to prove status
+	// rejects state/PID files whose exact Loom-daemon identity is absent.
 	pidFile := filepath.Join(loomDir, "daemon.pid")
 	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())+"\n"), 0644); err != nil {
 		t.Fatal(err)
@@ -43,17 +45,17 @@ func TestStatusDaemonRunning(t *testing.T) {
 
 	info := collectDaemonStatusForDir(tmpDir)
 
-	if !info.Running {
-		t.Error("expected daemon to be running")
+	if info.Running {
+		t.Error("foreign live PID was accepted as a Loom daemon")
 	}
-	if info.PID != os.Getpid() {
-		t.Errorf("pid = %d, want %d", info.PID, os.Getpid())
+	if info.PID != 0 {
+		t.Errorf("pid = %d, want 0", info.PID)
 	}
-	if info.Uptime == "" {
-		t.Error("expected non-empty uptime")
+	if info.Uptime != "" {
+		t.Errorf("uptime = %q, want empty", info.Uptime)
 	}
-	if info.StalePID {
-		t.Error("expected stale_pid to be false")
+	if !info.StalePID {
+		t.Error("expected stale_pid for rejected foreign PID metadata")
 	}
 }
 

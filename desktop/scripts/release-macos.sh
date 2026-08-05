@@ -27,6 +27,8 @@ SIGNING_IDENTITY="${SIGNING_IDENTITY:-Developer ID Application: Tyson Kuthur Tho
 APP_NAME="Loom Agents"
 APP_BUNDLE="${DESKTOP_DIR}/src-tauri/target/release/bundle/macos/${APP_NAME}.app"
 RELEASE_DIR="${DESKTOP_DIR}/dist-release"
+NODE_RUNTIME="${APP_BUNDLE}/Contents/Resources/runtime/node"
+PINNED_NODE_VERSION="$(tr -d '[:space:]' < "${DESKTOP_DIR}/NODE_VERSION")"
 
 log() { echo "[release] $*"; }
 die() { echo "[release] error: $*" >&2; exit 1; }
@@ -53,11 +55,11 @@ stop_running_app() {
     log "stopping any running ${APP_NAME}.app before rebuild"
     osascript -e "tell application \"${APP_NAME}\" to quit" >/dev/null 2>&1 || true
     sleep 2
-    for name in loom fleet-db loom-desktop; do
+    for name in loom fleet-db node loom-desktop; do
       pkill -TERM -f "${APP_BUNDLE}/Contents/MacOS/${name}" >/dev/null 2>&1 || true
     done
     sleep 1
-    for name in loom fleet-db loom-desktop; do
+    for name in loom fleet-db node loom-desktop; do
       pkill -KILL -f "${APP_BUNDLE}/Contents/MacOS/${name}" >/dev/null 2>&1 || true
     done
   fi
@@ -126,6 +128,16 @@ log "re-sealing app bundle"
 codesign --force --options runtime --timestamp \
   --sign "${SIGNING_IDENTITY}" "${APP_BUNDLE}"
 codesign --verify --deep --strict --verbose=2 "${APP_BUNDLE}"
+[[ -x "${NODE_RUNTIME}" ]] || die "packaged Node.js runtime is missing or not executable: ${NODE_RUNTIME}"
+codesign --verify --strict --verbose=2 "${NODE_RUNTIME}"
+if ! codesign -d --entitlements - "${NODE_RUNTIME}" 2>&1 | grep -q 'com.apple.security.cs.allow-jit'; then
+  die "packaged Node.js runtime is missing the hardened-runtime JIT entitlement"
+fi
+[[ "$("${NODE_RUNTIME}" --version)" == "v${PINNED_NODE_VERSION}" ]] || die "packaged Node.js version does not match ${PINNED_NODE_VERSION}"
+"${NODE_RUNTIME}" -e 'if (new Function("return 42")() !== 42) process.exit(1)' || die "packaged Node.js JIT smoke check failed after signing"
+node_team="$(codesign -dv --verbose=4 "${NODE_RUNTIME}" 2>&1 | awk -F= '/^TeamIdentifier=/{print $2}')"
+app_team="$(codesign -dv --verbose=4 "${APP_BUNDLE}" 2>&1 | awk -F= '/^TeamIdentifier=/{print $2}')"
+[[ -n "${node_team}" && "${node_team}" == "${app_team}" ]] || die "Node.js and app TeamIdentifier values do not match"
 
 # ---------------------------------------------------------------------------
 # 3. Notarize + staple the .app (so the app is offline-valid inside the DMG)

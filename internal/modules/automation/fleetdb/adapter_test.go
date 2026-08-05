@@ -353,6 +353,29 @@ func TestAdapterClaimUsesStableKeyAndRestoresRetryEnvelope(t *testing.T) {
 	}
 }
 
+func TestAdapterMapsRetryableFailureToTerminalDuplicateTransition(t *testing.T) {
+	now := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
+	fake := &transportFake{delivery: &automation.Delivery{
+		WorkspaceKey: "WS", DeliveryID: "delivery-1", TriggerEventID: "event-1", TriggerBindingID: "prompt-z",
+		Status: automation.DeliveryDuplicate, Attempt: 2, CreatedAt: now, UpdatedAt: now,
+	}}
+	adapter, err := New(fake)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	result, err := adapter.TransitionDelivery(t.Context(), automation.DeliveryTransition{
+		WorkspaceKey: "WS", DeliveryID: "delivery-1", IdempotencyKey: "delivery-1:failed:2:duplicate:2",
+		ExpectedStatus: automation.DeliveryFailed, ExpectedAttempt: 2, Status: automation.DeliveryDuplicate, Attempt: 2,
+	})
+	if err != nil || result.Status != automation.DeliveryDuplicate {
+		t.Fatalf("TransitionDelivery = %+v, %v", result, err)
+	}
+	if fake.transition.ExpectedStatus != automation.DeliveryFailed || fake.transition.ExpectedAttempt != 2 ||
+		fake.transition.Status != automation.DeliveryDuplicate || fake.transition.NextRetryAt != nil {
+		t.Fatalf("transport transition = %+v", fake.transition)
+	}
+}
+
 func TestAdapterCronPreservesClaimCompletionAndFailsClosed(t *testing.T) {
 	before := time.Date(2026, 7, 16, 12, 0, 0, 0, time.FixedZone("offset", -7*60*60))
 	claimUntil := before.Add(time.Minute)

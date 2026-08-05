@@ -374,6 +374,7 @@ type TaskRun struct {
 	RunnerEntrypoint string           `json:"runner_entrypoint,omitempty"`
 	RunnerVersionID  string           `json:"runner_driver_version_id,omitempty"`
 	ProviderProfile  string           `json:"provider_profile,omitempty"`
+	TargetNodeID     string           `json:"target_node_id,omitempty"`
 	Status           TaskRunStatus    `json:"status"`
 	NodeID           string           `json:"node_id,omitempty"`
 	LeaseID          string           `json:"lease_id,omitempty"`
@@ -398,10 +399,15 @@ type TaskRun struct {
 	StartedAt        time.Time         `json:"started_at,omitempty"`
 	LastHeartbeat    time.Time         `json:"last_heartbeat,omitempty"`
 	FinishedAt       *time.Time        `json:"finished_at,omitempty"`
-	ErrorClass       string            `json:"error_class,omitempty"`
-	ErrorMessage     string            `json:"error_message,omitempty"`
-	CreatedAt        time.Time         `json:"created_at"`
-	UpdatedAt        time.Time         `json:"updated_at"`
+	// TerminalConvergenceVersion is the highest Execution-owned projection
+	// protocol version durably completed for this terminal TaskRun. It is
+	// advanced only through the typed convergence completion command.
+	TerminalConvergenceVersion int        `json:"terminal_convergence_version,omitempty"`
+	TerminalConvergedAt        *time.Time `json:"terminal_converged_at,omitempty"`
+	ErrorClass                 string     `json:"error_class,omitempty"`
+	ErrorMessage               string     `json:"error_message,omitempty"`
+	CreatedAt                  time.Time  `json:"created_at"`
+	UpdatedAt                  time.Time  `json:"updated_at"`
 }
 
 type TaskRunPlacement struct {

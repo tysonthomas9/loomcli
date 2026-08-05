@@ -28,22 +28,41 @@ type DaemonRuntimeInfo struct {
 	Source  string // which source confirmed liveness: "lock", "state", ""
 }
 
+type daemonLockProbe uint8
+
+const (
+	daemonLockAbsent daemonLockProbe = iota
+	daemonLockUnlocked
+	daemonLockHeld
+)
+
+var daemonProcessIdentityFn = lockfile.IsLoomDaemonProcess
+var daemonProcessIdentitySupportedFn = lockfile.DaemonProcessIdentitySupported
+
 // DetectDaemonRuntime resolves daemon liveness from authoritative sources in
 // precedence order:
 //  1. Lock file (.loom/daemon.lock) — if a valid exclusive lock is held by a
-//     live process, the daemon is running.
+//     process, the daemon is running. Exact process identity determines
+//     whether its PID is safe to return for lifecycle signaling.
 //  2. State file (.loom/daemon-agents.json) — if the state file contains a PID
-//     that is alive, the daemon is running (covers the case where the PID file
-//     was removed but the daemon is still up).
+//     whose Loom-daemon identity can be verified, status may report the daemon
+//     running with an unknown PID (covers a removed lock path without granting
+//     state-only signal authority).
 //
-// A stale lock file with a dead PID is treated as "not running".
+// An existing unlocked lock is authoritative "not running" evidence. A held
+// lock with stale PID metadata remains running with an unknown PID.
 func DetectDaemonRuntime(projectDir string) DaemonRuntimeInfo {
 	loomDir := filepath.Join(projectDir, ".loom")
 
 	// --- 1. Lock file ---
 	lockPath := filepath.Join(loomDir, "daemon.lock")
-	if info, ok := detectFromLockFile(lockPath); ok {
+	if info, probe := probeDaemonLockFile(lockPath); probe == daemonLockHeld {
 		return info
+	} else if probe == daemonLockUnlocked {
+		// An existing lock file that we can lock is authoritative evidence
+		// that no daemon owns this workspace. Do not fall through to a stale
+		// state file whose PID may have been reused by an unrelated process.
+		return DaemonRuntimeInfo{}
 	}
 
 	// --- 2. State file ---
@@ -58,10 +77,15 @@ func DetectDaemonRuntime(projectDir string) DaemonRuntimeInfo {
 // detectFromLockFile attempts to probe the daemon lock file. If the lock is
 // held by a live process, returns (info, true). Otherwise returns (_, false).
 func detectFromLockFile(lockPath string) (DaemonRuntimeInfo, bool) {
+	info, probe := probeDaemonLockFile(lockPath)
+	return info, probe == daemonLockHeld
+}
+
+func probeDaemonLockFile(lockPath string) (DaemonRuntimeInfo, daemonLockProbe) {
 	// Try to open the lock file for exclusive locking probe
 	f, err := os.OpenFile(lockPath, os.O_RDWR, 0) //nolint:gosec // controlled path
 	if err != nil {
-		return DaemonRuntimeInfo{}, false
+		return DaemonRuntimeInfo{}, daemonLockAbsent
 	}
 	defer f.Close()
 
@@ -73,12 +97,14 @@ func detectFromLockFile(lockPath string) (DaemonRuntimeInfo, bool) {
 		// We got the lock — no daemon running. Release immediately so a
 		// daemon starting concurrently won't see our probe as contention.
 		_ = lockfile.FlockUnlock(f)
-		return DaemonRuntimeInfo{}, false
+		return DaemonRuntimeInfo{}, daemonLockUnlocked
 	}
 	if lockErr != lockfile.ErrLocked {
 		// Unexpected error — skip this source
-		return DaemonRuntimeInfo{}, false
+		return DaemonRuntimeInfo{}, daemonLockAbsent
 	}
+
+	info := DaemonRuntimeInfo{Running: true, Source: "lock"}
 
 	// Lock is held — read PID from JSON content
 	_, _ = f.Seek(0, 0)
@@ -86,20 +112,20 @@ func detectFromLockFile(lockPath string) (DaemonRuntimeInfo, bool) {
 	n, _ := f.Read(data)
 	if n == 0 {
 		// Lock held but no content — daemon is running, PID unknown
-		return DaemonRuntimeInfo{Running: true, Source: "lock"}, true
+		return info, daemonLockHeld
 	}
 
 	var li lockfile.LockInfo
 	if err := json.Unmarshal(data[:n], &li); err == nil && li.PID > 0 {
-		if lockfile.IsProcessRunning(li.PID) {
-			return DaemonRuntimeInfo{Running: true, PID: li.PID, Source: "lock"}, true
+		if daemonProcessIdentityFn(li.PID) ||
+			(!daemonProcessIdentitySupportedFn() && lockfile.IsProcessRunning(li.PID)) {
+			info.PID = li.PID
 		}
-		// Lock held but PID is dead — stale lock, treat as not running
-		return DaemonRuntimeInfo{}, false
 	}
 
-	// Couldn't parse — lock is held so assume running
-	return DaemonRuntimeInfo{Running: true, Source: "lock"}, true
+	// The flock itself is authoritative. Malformed, dead, or foreign PID
+	// metadata stays unknown so lifecycle commands never signal that PID.
+	return info, daemonLockHeld
 }
 
 // daemonStateMinimal is a minimal struct for reading the daemon state file
@@ -118,8 +144,11 @@ func detectFromStateFile(stateFilePath string) (DaemonRuntimeInfo, bool) {
 	if err := json.Unmarshal(data, &state); err != nil {
 		return DaemonRuntimeInfo{}, false
 	}
-	if state.PID > 0 && lockfile.IsProcessRunning(state.PID) {
-		return DaemonRuntimeInfo{Running: true, PID: state.PID, Source: "state"}, true
+	if state.PID > 0 && daemonProcessIdentitySupportedFn() && daemonProcessIdentityFn(state.PID) {
+		// State is not an ownership primitive and does not bind the process to
+		// this workspace. It may confirm liveness for status, but never return
+		// a signalable PID; lifecycle commands require the held lock source.
+		return DaemonRuntimeInfo{Running: true, Source: "state"}, true
 	}
 	return DaemonRuntimeInfo{}, false
 }

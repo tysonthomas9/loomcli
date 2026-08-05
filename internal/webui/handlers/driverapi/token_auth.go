@@ -71,6 +71,12 @@ func (m *Module) identityFromRunToken(w http.ResponseWriter, r *http.Request, cl
 		NodeID:  claims.NodeID,
 		LeaseID: claims.LeaseID,
 	}
+	leaseToken, err := driverpkg.DeriveDriverRunLeaseToken(m.runTokenKey, claims.WorkspaceKey, claims.RunID, claims.NodeID, claims.LeaseID)
+	if err != nil {
+		writeOpError(w, http.StatusUnauthorized, "identity_mismatch", "run token owner identity is incomplete", false)
+		return nil, false
+	}
+	id.LeaseToken = leaseToken
 	if claims.FencingToken > 0 {
 		id.fence = strconv.FormatInt(claims.FencingToken, 10)
 	}
@@ -87,6 +93,10 @@ func requestIdentity(w http.ResponseWriter, r *http.Request, tokenID *driverIden
 	id := driverIdentityFromHeaders(r)
 	if id.RunID == "" {
 		writeOpError(w, http.StatusUnauthorized, "unauthenticated", HeaderDriverRunID+" header required", false)
+		return driverIdentity{}, false
+	}
+	if id.LeaseToken == "" {
+		writeOpError(w, http.StatusUnauthorized, "unauthenticated", HeaderDriverLeaseToken+" header required", false)
 		return driverIdentity{}, false
 	}
 	return id, true

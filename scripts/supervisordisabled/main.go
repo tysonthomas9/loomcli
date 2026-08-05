@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -136,6 +137,10 @@ func run(ctx context.Context, args []string, out, errOut io.Writer, commandExecu
 	flags.SetOutput(errOut)
 	manifestPath := flags.String("manifest", defaultManifest, "path to the supervisor-disabled matrix")
 	validateOnly := flags.Bool("validate", false, "validate the matrix without running any rows")
+	fleetDBSourceRoot := flags.String("fleetdb-source-root", "", "explicit paired fleet-db source root")
+	fleetDBPort := flags.String("fleetdb-port", "", "isolated host FleetDB port")
+	apiPort := flags.String("api-port", "", "isolated host Loom API port")
+	uiPort := flags.String("ui-port", "", "isolated host Loom UI port")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -154,6 +159,15 @@ func run(ctx context.Context, args []string, out, errOut io.Writer, commandExecu
 		writeReport(out, "[supervisor-disabled] validation ok suite=%s rows=%d\n", m.Suite, len(m.Rows))
 		return nil
 	}
+	overrides, err := proofEnvironmentOverrides(*fleetDBSourceRoot, *fleetDBPort, *apiPort, *uiPort)
+	if err != nil {
+		return err
+	}
+	for index := range m.Rows {
+		for key, value := range overrides {
+			m.Rows[index].Env[key] = value
+		}
+	}
 	if commandExecutor == nil {
 		return errors.New("command executor is required")
 	}
@@ -162,6 +176,45 @@ func run(ctx context.Context, args []string, out, errOut io.Writer, commandExecu
 		return fmt.Errorf("resolve working directory: %w", err)
 	}
 	return executeMatrix(ctx, m, workDir, out, errOut, commandExecutor)
+}
+
+func proofEnvironmentOverrides(fleetDBSourceRoot, fleetDBPort, apiPort, uiPort string) (map[string]string, error) {
+	overrides := make(map[string]string, 4)
+	if sourceRoot := strings.TrimSpace(fleetDBSourceRoot); sourceRoot != "" {
+		info, err := os.Stat(sourceRoot)
+		if err != nil {
+			return nil, fmt.Errorf("fleetdb source root: %w", err)
+		}
+		if !info.IsDir() {
+			return nil, fmt.Errorf("fleetdb source root %q is not a directory", sourceRoot)
+		}
+		overrides["LOCAL_MODE_FLEETDB_SOURCE_ROOT"] = sourceRoot
+	}
+	ports := []struct {
+		key   string
+		value string
+	}{
+		{"LOCAL_MODE_FLEETDB_PORT", fleetDBPort},
+		{"LOCAL_MODE_API_PORT", apiPort},
+		{"LOCAL_MODE_UI_PORT", uiPort},
+	}
+	seen := make(map[string]string, len(ports))
+	for _, port := range ports {
+		value := strings.TrimSpace(port.value)
+		if value == "" {
+			continue
+		}
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed < 1024 || parsed > 65535 {
+			return nil, fmt.Errorf("%s must be an integer port between 1024 and 65535", port.key)
+		}
+		if prior, exists := seen[value]; exists {
+			return nil, fmt.Errorf("%s and %s must use different ports", prior, port.key)
+		}
+		seen[value] = port.key
+		overrides[port.key] = value
+	}
+	return overrides, nil
 }
 
 func loadMatrix(path string) (matrix, error) {

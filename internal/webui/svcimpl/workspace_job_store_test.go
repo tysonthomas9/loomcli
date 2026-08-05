@@ -55,6 +55,82 @@ func TestWorkspaceJobStore_GetRunningJob(t *testing.T) {
 	close(proceed)
 }
 
+func TestWorkspaceJobStore_StartAddReposRunsOutsideRequestAndUsesOpaqueJobID(t *testing.T) {
+	store := NewWorkspaceJobStore()
+	defer store.Stop()
+
+	started := make(chan struct{})
+	proceed := make(chan struct{})
+	addReposFn := func(ctx context.Context, req service.WorkspaceAddReposRequest) (service.WorkspaceCreateResult, error) {
+		if req.WorkspaceID != "ALPHA" {
+			t.Errorf("workspace ID = %q, want ALPHA", req.WorkspaceID)
+		}
+		close(started)
+		<-proceed
+		return service.WorkspaceCreateResult{WorkspaceID: "ALPHA"}, nil
+	}
+
+	id := store.StartAddRepos(service.WorkspaceAddReposRequest{
+		WorkspaceID: "ALPHA",
+		CloneURLs:   []string{"https://github.com/acme/slow.git"},
+	}, addReposFn)
+	if id == "" || id == "ALPHA" {
+		t.Fatalf("job ID = %q, want non-workspace opaque ID", id)
+	}
+
+	<-started
+	job := store.Get(id)
+	if job == nil || job.Status != service.JobStatusRunning {
+		t.Fatalf("job = %+v, want running while clone is blocked", job)
+	}
+
+	close(proceed)
+	deadline := time.Now().Add(time.Second)
+	for {
+		job = store.Get(id)
+		if job != nil && job.Status == service.JobStatusDone {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("job = %+v, want done", job)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if job.WorkspaceID != "ALPHA" {
+		t.Fatalf("workspace ID = %q, want ALPHA", job.WorkspaceID)
+	}
+}
+
+func TestWorkspaceJobStore_StartAddReposUsesAttachmentFailureMessage(t *testing.T) {
+	store := NewWorkspaceJobStore()
+	defer store.Stop()
+
+	done := make(chan struct{})
+	id := store.StartAddRepos(
+		service.WorkspaceAddReposRequest{WorkspaceID: "ALPHA"},
+		func(context.Context, service.WorkspaceAddReposRequest) (service.WorkspaceCreateResult, error) {
+			defer close(done)
+			return service.WorkspaceCreateResult{}, fmt.Errorf("unclassified clone failure")
+		},
+	)
+	<-done
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		job := store.Get(id)
+		if job != nil && job.Status == service.JobStatusFailed {
+			if job.Error != "repository attachment failed" {
+				t.Fatalf("error = %q, want sanitized attachment failure", job.Error)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("job %q did not fail", id)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 func TestWorkspaceJobStore_GetCompletedJob(t *testing.T) {
 	store := NewWorkspaceJobStore()
 	defer store.Stop()

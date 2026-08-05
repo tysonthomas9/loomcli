@@ -1,6 +1,8 @@
 package issues
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -17,17 +19,34 @@ import (
 // Register must be called at most once per mux; calling it twice on the same
 // mux will panic (duplicate route patterns in Go 1.22+ ServeMux).
 type IssueModule struct {
-	svc   service.IssueService
-	store store.Store
+	svc           service.IssueService
+	repositorySvc issueRepositoryCommand
+	store         store.Store
+}
+
+type issueRepositoryServiceAdapter struct {
+	svc service.IssueRepositoryService
+}
+
+func (a issueRepositoryServiceAdapter) SetIssueRepository(ctx context.Context, issueID, repo string) (json.RawMessage, error) {
+	if a.svc == nil {
+		return nil, service.ErrUnavailable("repository assignment service not configured")
+	}
+	return a.svc.SetIssueRepository(ctx, service.SetIssueRepositoryParams{
+		IssueID: issueID,
+		Repo:    repo,
+	})
 }
 
 // NewIssueModule returns an IssueModule that will register routes using the
 // given service and store handle. Nil values are accepted — the
 // underlying handler functions handle nil deps at request time.
 func NewIssueModule(svc service.IssueService, st store.Store) *IssueModule {
+	repositorySvc, _ := svc.(service.IssueRepositoryService)
 	return &IssueModule{
-		svc:   svc,
-		store: st,
+		svc:           svc,
+		repositorySvc: issueRepositoryServiceAdapter{svc: repositorySvc},
+		store:         st,
 	}
 }
 
@@ -45,6 +64,7 @@ func (m *IssueModule) Register(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /api/workspaces/{ws}/issues/{id}", HandlePatchIssue(m.svc))
 	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/close", HandleCloseIssue(m.svc))
 	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/reopen", HandleReopenIssue(m.svc))
+	mux.HandleFunc("PUT /api/workspaces/{ws}/issues/{id}/repository", HandleSetIssueRepository(m.repositorySvc))
 	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/claim", HandleClaimIssue(m.svc))
 	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/move", HandleMoveIssue(m.svc, m.store))
 	mux.HandleFunc("DELETE /api/workspaces/{ws}/issues/{id}", HandleDeleteIssue(m.svc))

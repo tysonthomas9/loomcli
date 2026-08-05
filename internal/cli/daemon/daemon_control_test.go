@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"net"
 	"os"
@@ -252,13 +253,44 @@ func TestControlServer_StopAlreadyStopped(t *testing.T) {
 		t.Fatalf("first stop failed: %s", resp.Error)
 	}
 
-	// Stop again — should fail
+	// Stop again — idempotent success lets a queued command converge even if
+	// the config reconciler drained the worker first.
 	resp = d.handleAgentControlStop("alpha", false)
-	if resp.Success {
-		t.Fatal("expected error when stopping already stopped agent")
+	if !resp.Success {
+		t.Fatalf("second stop failed: %s", resp.Error)
 	}
-	if !strings.Contains(resp.Error, "already stopped") {
-		t.Errorf("error = %q, want contains 'already stopped'", resp.Error)
+}
+
+func TestControlServer_StopConvergesDurableDrainingState(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "Workspace"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "WS",
+		Name:         "alpha",
+		RoleName:     "plan",
+		DesiredState: domain.AgentDesiredDraining,
+	}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	d := newTestDaemonWithAgents([]AgentEntry{{Worktree: "alpha", Role: "plan"}})
+	d.store = st
+	d.sup.WorkspaceID = "WS"
+	defer d.sup.ShutdownOnce.Do(func() { close(d.sup.Shutdown) })
+
+	resp := d.handleAgentControlStop("alpha", false)
+	if !resp.Success {
+		t.Fatalf("stop failed: %s", resp.Error)
+	}
+	agent, err := st.Agents().Get(ctx, "WS", "alpha")
+	if err != nil {
+		t.Fatalf("get stopped agent: %v", err)
+	}
+	if agent.State != domain.AgentStateStopped || agent.DesiredState != domain.AgentDesiredStopped {
+		t.Fatalf("durable agent = %s/%s, want stopped/stopped", agent.State, agent.DesiredState)
 	}
 }
 
@@ -337,6 +369,65 @@ func TestControlServer_EphemeralRestartRejected(t *testing.T) {
 	if !strings.Contains(resp.Error, "cannot be restarted") {
 		t.Fatalf("error = %q, want cannot be restarted", resp.Error)
 	}
+}
+
+func TestConfigDesiredStateUpdatePublishesImmutableSnapshot(t *testing.T) {
+	d := newTestDaemonWithAgents(nil)
+	d.config = makeDaemonConfig([]AgentEntry{{
+		Worktree:     "worker",
+		Role:         "task",
+		DesiredState: domain.AgentDesiredRunning,
+	}}, nil)
+
+	before := d.configSnapshot()
+	d.setConfigAgentDesiredState("worker", domain.AgentDesiredStopped)
+	after := d.configSnapshot()
+
+	if before == after {
+		t.Fatal("config pointer was mutated in place, want a new published snapshot")
+	}
+	if got := before.Agents[0].DesiredState; got != domain.AgentDesiredRunning {
+		t.Fatalf("old snapshot desired_state = %q, want %q", got, domain.AgentDesiredRunning)
+	}
+	if got := after.Agents[0].DesiredState; got != domain.AgentDesiredStopped {
+		t.Fatalf("new snapshot desired_state = %q, want %q", got, domain.AgentDesiredStopped)
+	}
+}
+
+func TestConfigReadsRaceWithDesiredStateUpdates(t *testing.T) {
+	d := newTestDaemonWithAgents(nil)
+	d.config = makeDaemonConfig([]AgentEntry{{
+		Worktree:     "worker",
+		Role:         "task",
+		DesiredState: domain.AgentDesiredRunning,
+	}}, nil)
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for range 2_000 {
+			if !d.agentExistsInConfig("worker") {
+				t.Error("agent disappeared from config")
+				return
+			}
+			if _, ok := d.findAgentEntry("worker"); !ok {
+				t.Error("agent entry disappeared from config")
+				return
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := range 2_000 {
+			desired := domain.AgentDesiredRunning
+			if i%2 == 0 {
+				desired = domain.AgentDesiredStopped
+			}
+			d.setConfigAgentDesiredState("worker", desired)
+		}
+	}()
+	wg.Wait()
 }
 
 func TestControlServer_UnknownAgent(t *testing.T) {
@@ -743,13 +834,10 @@ func TestControlServer_ForceStopAlreadyStopped(t *testing.T) {
 		t.Fatalf("first stop failed: %s", resp.Error)
 	}
 
-	// Force-stop again — should fail
+	// Force-stop again — stopping is idempotent across reconciler/command races.
 	resp = d.handleAgentControlStop("alpha", true)
-	if resp.Success {
-		t.Fatal("expected error when force-stopping already stopped agent")
-	}
-	if !strings.Contains(resp.Error, "already stopped") {
-		t.Errorf("error = %q, want contains 'already stopped'", resp.Error)
+	if !resp.Success {
+		t.Fatalf("idempotent force-stop failed: %s", resp.Error)
 	}
 }
 

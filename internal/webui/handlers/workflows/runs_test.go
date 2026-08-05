@@ -97,7 +97,7 @@ func TestListWorkflowRunsOrdersNewestFirst(t *testing.T) {
 	finishRun(t, ctx, st, c4, domain.DriverRunFailed)
 
 	mux := http.NewServeMux()
-	NewModule(st).Register(mux)
+	newWorkflowTestModule(st).Register(mux)
 
 	rec, resp := listRuns(t, mux, "demo", "")
 	if rec.Code != http.StatusOK {
@@ -124,7 +124,7 @@ func TestListWorkflowRunsFiltersByStatus(t *testing.T) {
 	startRun(t, ctx, st, "running-1")
 
 	mux := http.NewServeMux()
-	NewModule(st).Register(mux)
+	newWorkflowTestModule(st).Register(mux)
 
 	rec, resp := listRuns(t, mux, "demo", "?status=running")
 	if rec.Code != http.StatusOK {
@@ -147,7 +147,7 @@ func TestListWorkflowRunsLimit(t *testing.T) {
 		seedRun(t, ctx, st, fmt.Sprintf("run-%03d", i))
 	}
 	mux := http.NewServeMux()
-	NewModule(st).Register(mux)
+	newWorkflowTestModule(st).Register(mux)
 
 	// Above-cap limit is clamped to 200, not rejected.
 	if rec, resp := listRuns(t, mux, "demo", "?limit=1000"); rec.Code != http.StatusOK || len(resp.Runs) != maxRunsLimit {
@@ -167,7 +167,7 @@ func TestListWorkflowRunsValidation(t *testing.T) {
 	ctx := context.Background()
 	st := seededWorkflowStore(t, ctx)
 	mux := http.NewServeMux()
-	NewModule(st).Register(mux)
+	newWorkflowTestModule(st).Register(mux)
 
 	cases := []struct {
 		name     string

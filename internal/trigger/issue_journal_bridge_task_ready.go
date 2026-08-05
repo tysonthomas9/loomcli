@@ -53,15 +53,21 @@ const taskReadyEventIDSuffix = "-ready"
 const readyIssueStatus = "open"
 
 // taskReadyJournalActions are the journal actions that can mark a task becoming
-// ready: creation (ready on creation) and update (unblock/reopen to open).
+// ready: creation, update (including unblock), explicit reopen/undefer, and the
+// typed Work Item release emitted by terminal-parent recovery. Recovery can run
+// after the startup Ready snapshot, so omitting issue.release would strand the
+// newly reopened card until the next serve restart.
 var taskReadyJournalActions = map[string]bool{
-	"issue.create": true,
-	"issue.update": true,
+	"issue.create":  true,
+	"issue.release": true,
+	"issue.reopen":  true,
+	"issue.undefer": true,
+	"issue.update":  true,
 }
 
 // isTaskReadyEntry reports whether a journal entry marks a task entering the
-// ready-eligible (open) state: a create/update whose After snapshot status is
-// open. Close/block/claim transitions (status != open) are not ready.
+// ready-eligible (open) state: one of the actions above whose After snapshot is
+// open. Close/block/claim/assign transitions are not ready-entry actions.
 func isTaskReadyEntry(ev store.JournalEvent) bool {
 	if !taskReadyJournalActions[strings.ToLower(strings.TrimSpace(ev.Action))] {
 		return false
@@ -93,19 +99,70 @@ func journalSnapshotStatus(after json.RawMessage) string {
 // task.ready event. A no-listener dispatch (domain.ErrNotFound — no binding on
 // internal.task.ready) is NOT a failure: the cursor still advances so a missing
 // binding never stalls the bridge, mirroring emitOne. Any other Emit error is
-// returned so the drain stops and the entry is retried.
-func (b *IssueJournalBridge) emitTaskReady(ctx context.Context, ws string, ev store.JournalEvent) error {
-	_, err := b.Source.Emit(ctx, ws, b.toTaskReadyEvent(ctx, ws, ev))
+// returned so the drain stops and the entry is retried. The boolean reports
+// whether the event reached Source.Emit; live epics are deliberately suppressed
+// before that boundary because prompt-agent bindings must never claim epics.
+func (b *IssueJournalBridge) emitTaskReady(ctx context.Context, ws string, ev store.JournalEvent) (bool, bool, error) {
+	event, dispatch, snapshot, err := b.toTaskReadyEvent(ctx, ws, ev)
+	if err != nil {
+		return false, false, err
+	}
+	if !dispatch {
+		b.logger().Debug("issue journal bridge: suppressing task.ready event for ineligible or missing task",
+			"workspace", ws, "event_id", IssueJournalEventIDPrefix+ev.ID+taskReadyEventIDSuffix, "task_id", ev.EntityID)
+		return false, false, nil
+	}
+	// Every non-epic task without an explicit repository crosses the Work
+	// Items owner's commit-time admission command. RepositoryRequired is only a
+	// pre-read hint: a snapshot that observed the single-repository fallback can
+	// race deletion of that sole Repo before dispatch. The command serializes
+	// its repository-count decision with repository create/delete and either
+	// returns the canonical dispatchable task or blocks it.
+	if snapshot != nil && taskReadyNeedsRepositoryAdmission(*snapshot) && b.RepositoryRequiredBlocker != nil {
+		admission, blockErr := b.RepositoryRequiredBlocker(ctx, ws, snapshot.TaskID)
+		if blockErr != nil {
+			return false, false, fmt.Errorf("block repository-required task %q in workspace %q: %w", snapshot.TaskID, ws, blockErr)
+		}
+		if admission.DispatchReady == nil {
+			return false, admission.Blocked, nil
+		}
+		// The original ready snapshot raced a repository assignment or a
+		// workspace repository-count change. Rebuild the event from the atomic
+		// command's canonical projection: the stale payload may have an empty repo
+		// and the count change has no later issue.update event to trigger dispatch.
+		canonical := normalizeTaskReadySnapshot(*admission.DispatchReady)
+		canonical.RepositoryRequired = false
+		if canonical.Status != readyIssueStatus || strings.EqualFold(canonical.IssueType, "epic") {
+			return false, admission.Blocked, nil
+		}
+		event, err = rebuildTaskReadyEvent(event, canonical)
+		if err != nil {
+			return false, false, err
+		}
+		snapshot = &canonical
+	}
+	_, err = b.Source.Emit(ctx, ws, event)
 	switch {
 	case err == nil:
-		return nil
+		if snapshot != nil {
+			b.rememberTaskReadyGeneration(ws, *snapshot)
+		}
+		return true, false, nil
 	case errors.Is(err, domain.ErrNotFound):
+		if snapshot != nil {
+			b.rememberTaskReadyGeneration(ws, *snapshot)
+		}
 		b.logger().Debug("issue journal bridge: no binding for task.ready event, advancing past it",
 			"workspace", ws, "event_id", IssueJournalEventIDPrefix+ev.ID+taskReadyEventIDSuffix, "task_id", ev.EntityID)
-		return nil
+		return true, false, nil
 	default:
-		return fmt.Errorf("emit task.ready event %q in workspace %q: %w", ev.ID, ws, err)
+		return false, false, fmt.Errorf("emit task.ready event %q in workspace %q: %w", ev.ID, ws, err)
 	}
+}
+
+func taskReadyNeedsRepositoryAdmission(snapshot TaskReadySnapshot) bool {
+	snapshot = normalizeTaskReadySnapshot(snapshot)
+	return !strings.EqualFold(snapshot.IssueType, "epic") && snapshot.SourceRepo == ""
 }
 
 // toTaskReadyEvent maps a ready-marking journal entry to the loopback
@@ -113,8 +170,37 @@ func (b *IssueJournalBridge) emitTaskReady(ctx context.Context, ws string, ev st
 // so replay dedups; Origin is system (a depth-0 root); ActorRef is the journal
 // actor verbatim; SubjectRef is issue:{entityID}; Payload carries the task id
 // explicitly so the fired run can claim by id, plus the role-gating hints below.
-func (b *IssueJournalBridge) toTaskReadyEvent(ctx context.Context, ws string, ev store.JournalEvent) InternalEvent {
-	payload, _ := json.Marshal(b.taskReadyPayload(ctx, ws, ev))
+func (b *IssueJournalBridge) toTaskReadyEvent(ctx context.Context, ws string, ev store.JournalEvent) (InternalEvent, bool, *TaskReadySnapshot, error) {
+	payloadFields, snapshot, err := b.taskReadyPayload(ctx, ws, ev)
+	if err != nil {
+		// A deleted issue can still have an older open journal entry waiting
+		// behind the bridge cursor. That entry is durably stale: suppress it so
+		// one tombstoned task cannot poison the workspace cursor forever. Other
+		// lookup failures remain retryable and continue to pin the entry.
+		if errors.Is(err, domain.ErrNotFound) {
+			return InternalEvent{}, false, nil, nil
+		}
+		return InternalEvent{}, false, nil, err
+	}
+	// taskReadyPayload is sourced from the configured live IssueLookup when one
+	// is available, so this check covers both create and update journal entries
+	// without trusting a potentially stale/partial After snapshot. Alternate
+	// hosts without a lookup keep the compatibility path: a known epic is still
+	// suppressed, while an update delta with no type remains eligible because its
+	// type is unknowable rather than falsely assumed.
+	if issueType, _ := payloadFields["issueType"].(string); strings.EqualFold(strings.TrimSpace(issueType), "epic") {
+		return InternalEvent{}, false, snapshot, nil
+	}
+	// A journal After snapshot can say open long after the live task was
+	// claimed, closed, or blocked. Once a live lookup is configured, only its
+	// canonical open status may cross the dispatch boundary.
+	if snapshot != nil && snapshot.Status != readyIssueStatus {
+		return InternalEvent{}, false, snapshot, nil
+	}
+	payload, err := json.Marshal(payloadFields)
+	if err != nil {
+		return InternalEvent{}, false, nil, fmt.Errorf("marshal task.ready event %q in workspace %q: %w", ev.ID, ws, err)
+	}
 	return InternalEvent{
 		EventID:      IssueJournalEventIDPrefix + ev.ID + taskReadyEventIDSuffix,
 		EventType:    TaskReadyEventType,
@@ -123,7 +209,7 @@ func (b *IssueJournalBridge) toTaskReadyEvent(ctx context.Context, ws string, ev
 		SubjectRef:   IssueJournalSubjectRefPrefix + ev.EntityID,
 		Payload:      payload,
 		SubjectAttrs: issueSubjectAttrs(ev.After),
-	}
+	}, true, snapshot, nil
 }
 
 // taskReadyPayload assembles the task.ready emitter payload. Beyond the task id
@@ -137,12 +223,17 @@ func (b *IssueJournalBridge) toTaskReadyEvent(ctx context.Context, ws string, ev
 // After is the FULL card, so an absent key is a genuine zero value (fleet-db
 // omits an empty design). An issue.update entry's After is a DELTA — only the
 // changed fields — so an absent key means UNKNOWN, not false. For deltas the
-// gating hints are enriched from IssueLookup (the live card); when lookup is
-// unavailable/fails, unknowable keys are OMITTED so the claim gate falls back
-// to claim-then-check instead of trusting a lying false. Pinned contract with
-// the claim gate: { taskId, status, hasDesign?, labels?, issueType? } — an
-// absent gating key means unknown, never false.
-func (b *IssueJournalBridge) taskReadyPayload(ctx context.Context, ws string, ev store.JournalEvent) map[string]any {
+// gating hints are enriched from IssueLookup (the live card). When a configured
+// lookup fails, emission fails and is retried: silently dropping
+// repositoryRequired would let a repo-less multi-repo task cross the pre-claim
+// guard. When no lookup capability is configured, unknowable keys are omitted
+// for compatibility. Pinned contract with
+// the claim gate: { taskId, status, hasDesign?, labels?, issueType?,
+// sourceRepo?, repositoryRequired? } — an absent gating key means unknown,
+// never false/empty. RepositoryRequired is a workspace-level fact, so even a
+// full create snapshot uses the live lookup when available rather than guessing
+// from an empty sourceRepo (which is valid in a single-repo workspace).
+func (b *IssueJournalBridge) taskReadyPayload(ctx context.Context, ws string, ev store.JournalEvent) (map[string]any, *TaskReadySnapshot, error) {
 	fields := snapshotFields(ev.After)
 	payload := map[string]any{
 		"taskId": ev.EntityID,
@@ -151,15 +242,21 @@ func (b *IssueJournalBridge) taskReadyPayload(ctx context.Context, ws string, ev
 	_, designKnown := fields["design"]
 	_, labelsKnown := fields["labels"]
 	_, typeKnown := fields["type"]
+	repoValue, repoKnown := snapshotSourceRepo(fields)
 	fullSnapshot := ev.Action == "issue.create"
-	if !fullSnapshot && b.IssueLookup != nil && !(designKnown && labelsKnown && typeKnown) {
-		if design, labels, issueType, err := b.IssueLookup(ctx, ws, ev.EntityID); err == nil {
-			payload["hasDesign"] = strings.TrimSpace(design) != ""
-			payload["labels"] = normalizeLabelSlice(labels)
-			payload["issueType"] = issueType
-			return payload
+	if b.IssueLookup != nil {
+		issue, err := b.IssueLookup(ctx, ws, ev.EntityID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("look up current task %q for task.ready in workspace %q: %w", ev.EntityID, ws, err)
 		}
-		// lookup failed: fall through to the presence-aware partials below
+		issue = normalizeTaskReadySnapshot(issue)
+		payload["status"] = issue.Status
+		payload["hasDesign"] = issue.HasDesign
+		payload["labels"] = normalizeLabelSlice(issue.Labels)
+		payload["issueType"] = issue.IssueType
+		payload["sourceRepo"] = strings.TrimSpace(issue.SourceRepo)
+		payload["repositoryRequired"] = issue.RepositoryRequired
+		return payload, &issue, nil
 	}
 	if fullSnapshot || designKnown {
 		payload["hasDesign"] = snapshotFieldNonEmpty(fields, "design")
@@ -170,7 +267,46 @@ func (b *IssueJournalBridge) taskReadyPayload(ctx context.Context, ws string, ev
 	if fullSnapshot || typeKnown {
 		payload["issueType"] = snapshotFieldScalar(fields, "type")
 	}
-	return payload
+	if fullSnapshot || repoKnown {
+		payload["sourceRepo"] = repoValue
+	}
+	return payload, nil, nil
+}
+
+// rebuildTaskReadyEvent replaces every readiness-sensitive field on an event
+// with a canonical live snapshot while retaining the original journal-derived
+// identity and actor. It is used only after the Work Items owner returns a
+// commit-time DispatchReady result.
+func rebuildTaskReadyEvent(event InternalEvent, snapshot TaskReadySnapshot) (InternalEvent, error) {
+	payload, err := taskReadySnapshotPayload(snapshot)
+	if err != nil {
+		return InternalEvent{}, fmt.Errorf("marshal canonical task.ready payload for %q: %w", snapshot.TaskID, err)
+	}
+	event.Payload = payload
+	event.SubjectRef = IssueJournalSubjectRefPrefix + snapshot.TaskID
+	event.SubjectAttrs = map[string]string{"status": snapshot.Status}
+	if snapshot.SourceRepo != "" {
+		event.SubjectAttrs["repo"] = snapshot.SourceRepo
+	}
+	return event, nil
+}
+
+// snapshotSourceRepo resolves fleet-db's canonical repo key and the legacy
+// source_repo alias. The boolean distinguishes a known empty repo from an
+// absent field in an update delta.
+func snapshotSourceRepo(fields map[string]json.RawMessage) (string, bool) {
+	for _, key := range []string{"repo", "source_repo"} {
+		raw, ok := fields[key]
+		if !ok {
+			continue
+		}
+		value, scalar := scalarString(raw)
+		if !scalar {
+			return "", true
+		}
+		return strings.TrimSpace(value), true
+	}
+	return "", false
 }
 
 // normalizeLabelSlice mirrors snapshotStringSlice's stable-[] guarantee for

@@ -14,12 +14,14 @@ import {
 } from "@/api/agents"; // eslint-disable-line boundaries/dependencies -- Pending hook migration.
 import { AetherModal, aetherModalStyles } from "@/components/AetherModal";
 import type {
+  CreateRoleRequest,
   InteractivePromptInfo,
   RepoInfo,
+  RoleWithPrompt,
   WorkspaceAgentInfo,
   WorkspaceRole,
 } from "@/api/workspace";
-import { listWorkspaceRoles } from "@/api/workspace"; // eslint-disable-line boundaries/dependencies -- Pending hook migration.
+import { getWorkspaceRole, listWorkspaceRoles } from "@/api/workspace"; // eslint-disable-line boundaries/dependencies -- Pending hook migration.
 import {
   useCreateWorkspaceAgent,
   useEnsureWorkspaceRole,
@@ -42,17 +44,22 @@ import {
 import { AgentTemplateCard } from "./AgentTemplateCard";
 import {
   BUILTIN_ROLE_TEMPLATES,
+  LEGACY_BUG_TRIAGE_PROMPT,
+  LEGACY_BUG_TRIAGE_PROMPT_FILE_BASENAME,
   LEGACY_DAEMON_TEMPLATES,
   NEW_ROLE_TEMPLATE,
+  ROLE_TRIGGER_OPTIONS,
   SCRIPTED_WORKFLOW_TEMPLATES,
   customRoleTemplate,
   grantsForRepo,
+  roleTriggerOption,
   rolePromptFilename,
   supervisedTemplateForRole,
   templateForRole,
   TEMPLATE_SECTIONS,
   type AgentTemplate,
   type DefaultRole,
+  type RoleTrigger,
   type SupervisedRole,
 } from "./agentTemplates";
 import styles from "./CreateAgentModal.module.css";
@@ -69,6 +76,11 @@ const DEFAULT_CADENCE = CADENCE_OPTIONS[0].value;
 const BUILTIN_ROLE_NAMES = new Set(["lead", "plan", "task"]);
 
 const CUSTOM_PROMPT_ID = "custom";
+
+const BUG_TRIAGE_ROLE_NAME = "bug-triage";
+const BUG_TRIAGE_FALLBACK_ROLE_NAME = "loom-bug-triage-v2";
+const LEGACY_BUG_TRIAGE_DESCRIPTION =
+  "Reproduces and triages ready tickets; does not write fixes.";
 
 const INTERACTIVE_ACCENTS = {
   lead: "#db2777",
@@ -126,6 +138,111 @@ function isInteractiveWorkspaceRole(role: WorkspaceRole): boolean {
   return roleName === "lead" || roleName === "orchestrator";
 }
 
+function isPromptAgentTaskFilterSupported(
+  taskFilter: string | undefined,
+): boolean {
+  switch (taskFilter?.trim() ?? "") {
+    case "":
+    case "any":
+    case "needs_plan":
+    case "has_design":
+    case "review":
+    case "bug":
+      return true;
+    default:
+      return false;
+  }
+}
+
+function isCustomPromptAgentRoleCandidate(role: WorkspaceRole): boolean {
+  const roleName = role.name.trim();
+  return (
+    roleName !== "" &&
+    !BUILTIN_ROLE_NAMES.has(roleName.toLowerCase()) &&
+    !isInteractiveWorkspaceRole(role) &&
+    isPromptAgentTaskFilterSupported(role.task_filter) &&
+    (role.task_filter?.trim() !== "bug" || role.read_only === true) &&
+    (role.task_filter?.trim() !== "review" || role.read_only !== true)
+  );
+}
+
+function isEmptyRoleList(value: string[] | undefined): boolean {
+  return value === undefined || value.length === 0;
+}
+
+function isLegacyBugTriagePromptFile(promptFile: string | undefined): boolean {
+  const normalized = promptFile?.replace(/\\/g, "/") ?? "";
+  return ["bug-triage.md", LEGACY_BUG_TRIAGE_PROMPT_FILE_BASENAME].some(
+    (basename) =>
+      normalized === `.loom/prompts/${basename}` ||
+      normalized.endsWith(`/.loom/prompts/${basename}`),
+  );
+}
+
+/**
+ * Recognize only the exact role definition shipped by the previous built-in
+ * bug-triage card. This accepts both its original mutable prompt path and the
+ * later immutable path. A 409 for anything else is shared user authority and
+ * must remain a conflict rather than being bypassed by template provisioning.
+ */
+function isExactLegacyBugTriageRole(current: RoleWithPrompt): boolean {
+  const role = current.role;
+  const kind = role.kind?.trim() ?? "";
+  return (
+    role.name === BUG_TRIAGE_ROLE_NAME &&
+    (kind === "" || kind === "worker") &&
+    role.description === LEGACY_BUG_TRIAGE_DESCRIPTION &&
+    (role.prompt?.trim() ?? "") === "" &&
+    isLegacyBugTriagePromptFile(role.prompt_file) &&
+    role.task_filter === "any" &&
+    role.read_only === true &&
+    (role.model?.trim() ?? "") === "" &&
+    (role.backend?.trim() ?? "") === "" &&
+    (role.effort?.trim() ?? "") === "" &&
+    isEmptyRoleList(role.path_patterns) &&
+    isEmptyRoleList(role.skills) &&
+    isEmptyRoleList(role.allowed_tools) &&
+    isEmptyRoleList(role.denied_tools) &&
+    role.max_priority === undefined &&
+    role.max_concurrency === undefined &&
+    role.max_budget_usd === undefined &&
+    current.prompt === LEGACY_BUG_TRIAGE_PROMPT
+  );
+}
+
+async function ensureTemplateRole(
+  workspaceId: string,
+  request: CreateRoleRequest,
+  ensureRole: (req: CreateRoleRequest) => Promise<WorkspaceRole>,
+): Promise<WorkspaceRole> {
+  try {
+    return await ensureRole(request);
+  } catch (error) {
+    if (
+      !(error instanceof ApiError) ||
+      error.status !== 409 ||
+      request.name !== BUG_TRIAGE_ROLE_NAME
+    ) {
+      throw error;
+    }
+
+    const current = await getWorkspaceRole(workspaceId, request.name);
+    if (!isExactLegacyBugTriageRole(current)) {
+      throw error;
+    }
+
+    // Never rewrite the shared legacy name from the browser: role PATCH has no
+    // compare-and-swap precondition, so an operator edit racing this request
+    // could otherwise be lost. Exact-ensure a reserved successor instead. The
+    // server rejects an incompatible fallback collision, while an identical
+    // existing successor remains idempotent.
+    return ensureRole({
+      ...request,
+      name: BUG_TRIAGE_FALLBACK_ROLE_NAME,
+    });
+  }
+}
+
 /** Details of a workflow activation, surfaced to the caller on success. */
 export interface WorkflowActivationResult {
   /** The display name the user gave the trigger binding. */
@@ -145,6 +262,21 @@ function githubRepoSlug(repo: RepoInfo | undefined): string {
     return `${match[1]}/${match[2]}`;
   }
   return "";
+}
+
+function isBackendReady(
+  backend:
+    | {
+        available: boolean;
+        installed?: boolean;
+      }
+    | undefined,
+): boolean {
+  return backend?.available === true && backend.installed !== false;
+}
+
+function submissionErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "workflow activation failed";
 }
 
 export interface CreateAgentModalProps {
@@ -210,6 +342,7 @@ export function CreateAgentModal({
   const [cadence, setCadence] = useState<string>(DEFAULT_CADENCE);
   const [newRoleName, setNewRoleName] = useState<string>("");
   const [rolePrompt, setRolePrompt] = useState<string>("");
+  const [newRoleTrigger, setNewRoleTrigger] = useState<RoleTrigger>("ready");
   const [existingRoles, setExistingRoles] = useState<WorkspaceRole[]>([]);
   const [selectedBuiltinPromptID, setSelectedBuiltinPromptID] = useState<
     string | null
@@ -221,28 +354,33 @@ export function CreateAgentModal({
   const nameRef = useRef<HTMLInputElement>(null);
   const createAgent = useCreateWorkspaceAgent(workspaceId);
   const ensureRole = useEnsureWorkspaceRole(workspaceId);
-  const { backends } = useBackends();
-  // active=false: we only need createBinding here, not the automations catalog.
-  const { createBinding } = useAutomations(workspaceId, false);
-  const { ensureConnector, addGrant } = useConnectorProvisioning(workspaceId);
+  const {
+    backends,
+    isLoading: backendsLoading,
+    error: backendsError,
+  } = useBackends(isOpen);
+  // active=false: mutations do not require loading the automations catalog.
+  const { createBinding, updateBinding, setEnabled } = useAutomations(
+    workspaceId,
+    false,
+  );
+  const { preflightCredential, ensureConnector, replaceGrants } =
+    useConnectorProvisioning(workspaceId);
   // Fetch only while open: this modal is mounted (closed) on every page load.
   const { settings: localSettings } = useLocalSettings(isOpen);
-  const githubConfigured =
-    localSettings?.runtime_credentials?.github?.configured ?? false;
+  const githubCredentialStatus =
+    localSettings?.runtime_credentials?.github ?? null;
+  const githubConfigured = githubCredentialStatus?.configured ?? false;
+  // Older servers/tests may omit `usable`; submit-time preflight remains the
+  // authority, while the field lets current servers warn before submission.
+  const githubUsable = githubCredentialStatus?.usable ?? githubConfigured;
   const { prompts: fetchedInteractivePrompts, error: promptLoadError } =
-    useInteractivePrompts(workspaceId);
+    useInteractivePrompts(workspaceId, isOpen);
 
   const customRoleTemplates = useMemo(
     () =>
       existingRoles
-        .filter((role) => {
-          const roleName = role.name.trim();
-          return (
-            roleName !== "" &&
-            !BUILTIN_ROLE_NAMES.has(roleName.toLowerCase()) &&
-            !isInteractiveWorkspaceRole(role)
-          );
-        })
+        .filter(isCustomPromptAgentRoleCandidate)
         .sort((a, b) => a.name.localeCompare(b.name))
         .map(customRoleTemplate),
     [existingRoles],
@@ -288,12 +426,50 @@ export function CreateAgentModal({
       selectedTemplate.kind === "builtin-role" ||
       selectedTemplate.kind === "custom-role");
   const isWorkflow = !isInteractive && selectedTemplate.kind === "workflow";
+  const selectedRoleTrigger = isRoleCreate
+    ? newRoleTrigger
+    : (selectedTemplate.roleTrigger ?? "ready");
+  const selectedRoleTriggerOption = roleTriggerOption(selectedRoleTrigger);
   const workflowSpec = isWorkflow ? selectedTemplate.workflow : undefined;
   const needsConnector = (workflowSpec?.grants?.length ?? 0) > 0;
+  const needsGitHub = workflowSpec?.requiresGitHub === true;
   const showCadence = isWorkflow;
   const isActivation = isWorkflow || isRoleBehavior;
   const showBackend = isInteractive || isRoleBehavior || isLegacyDaemon;
+  // Interactive agents use the same explicit repository-scope contract as
+  // supervised agents: selected chips scope the agent to those repositories,
+  // while an empty selection grants workspace-wide scope. Keeping these
+  // controls visible prevents the default first repository from becoming an
+  // invisible, immutable choice.
   const showRepos = !isRoleBehavior;
+  // Scripted workflows do not expose a backend picker. Review/local-review
+  // require Codex explicitly; bug-fix intentionally keeps using the current
+  // workspace/default backend and only verifies that it is runnable.
+  const workflowBackendName = isWorkflow
+    ? workflowSpec?.requiredBackend?.trim() || resolvedDefaultBackend
+    : "";
+  const submissionBackendName = isWorkflow
+    ? workflowBackendName
+    : showBackend
+      ? backend.trim()
+      : "";
+  const needsBackendHealth = isWorkflow || showBackend;
+  const submissionBackend = backends.find(
+    (candidate) => candidate.name === submissionBackendName,
+  );
+  const backendReadinessMessage = !needsBackendHealth
+    ? null
+    : backendsLoading
+      ? "Checking AI backend availability. Wait before submitting."
+      : backendsError
+        ? `Could not verify AI backend availability: ${backendsError}`
+        : backends.length === 0
+          ? "No available AI backends were detected."
+          : !isBackendReady(submissionBackend)
+            ? `${submissionBackend?.displayName || submissionBackendName || "Selected backend"} is unavailable or not installed. Configure it before ${
+                isWorkflow ? "activating this workflow" : "creating this agent"
+              }.`
+            : null;
   const selectedRoleName = isRoleCreate
     ? normalizeStoredAgentName(newRoleName)
     : selectedTemplate.roleName.trim();
@@ -358,17 +534,30 @@ export function CreateAgentModal({
 
   const crossRepo = selectedRepos.length === 0;
   const toggleRepo = (repo: string): void =>
-    setSelectedRepos((prev) =>
-      prev.includes(repo) ? prev.filter((r) => r !== repo) : [...prev, repo],
-    );
+    setSelectedRepos((prev) => {
+      if (isWorkflow) {
+        return prev.length === 1 && prev[0] === repo ? [] : [repo];
+      }
+      return prev.includes(repo)
+        ? prev.filter((r) => r !== repo)
+        : [...prev, repo];
+    });
 
-  const backendOptions = useMemo(() => {
-    const opts = backends.map((b) => ({ value: b.name, label: b.displayName }));
-    if (backend && !opts.some((o) => o.value === backend)) {
-      opts.unshift({ value: backend, label: backend });
-    }
-    return opts.length > 0 ? opts : [{ value: backend, label: backend }];
-  }, [backend, backends]);
+  const readyBackends = useMemo(
+    () => backends.filter((candidate) => isBackendReady(candidate)),
+    [backends],
+  );
+  const backendOptions = useMemo(
+    () =>
+      readyBackends.map((candidate) => ({
+        value: candidate.name,
+        label: candidate.displayName,
+      })),
+    [readyBackends],
+  );
+  const selectedBackendIsVisible = backendOptions.some(
+    (option) => option.value === backend,
+  );
 
   const resetToDefaults = useCallback((): void => {
     setName(resolvedDefaultName);
@@ -382,6 +571,7 @@ export function CreateAgentModal({
     setCadence(DEFAULT_CADENCE);
     setNewRoleName("");
     setRolePrompt("");
+    setNewRoleTrigger("ready");
     setSelectedBuiltinPromptID(
       supervisedRole ? null : defaultRole === "lead" ? "lead" : null,
     );
@@ -394,14 +584,49 @@ export function CreateAgentModal({
     supervisedRole,
   ]);
 
-  // Fetch roles while the modal is open so the behavior grid can show every
-  // custom role in the workspace. Failure still leaves builtin cards usable.
+  // Fetch roles while the modal is open, then hydrate each candidate through
+  // the single-role endpoint. The list response intentionally omits prompt
+  // bodies, while prompt-agent refuses roles without a readable prompt or with
+  // an unsupported phase filter. Only publish cards that have passed the same
+  // observable preconditions so every selectable behavior can be activated.
+  // Failure still leaves builtin cards usable.
   useEffect(() => {
     if (!isOpen || supervisedRole) return;
     let cancelled = false;
+    // Never carry a previously hydrated role across workspace/open
+    // transitions while the new workspace's eligibility checks are pending.
+    setExistingRoles([]);
     listWorkspaceRoles(workspaceId)
-      .then((roles) => {
-        if (!cancelled) setExistingRoles(roles);
+      .then(async (roles) => {
+        const candidates = roles.filter(isCustomPromptAgentRoleCandidate);
+        const hydrated = await Promise.all(
+          candidates.map(async (listedRole) => {
+            try {
+              const detail = await getWorkspaceRole(
+                workspaceId,
+                listedRole.name,
+              );
+              const role = detail.role ?? listedRole;
+              if (
+                !isCustomPromptAgentRoleCandidate(role) ||
+                detail.prompt.trim() === "" ||
+                isExactLegacyBugTriageRole(detail)
+              ) {
+                return null;
+              }
+              return role;
+            } catch {
+              // A missing/unreadable role is not runnable by prompt-agent. Keep
+              // the rest of the gallery available and omit only this card.
+              return null;
+            }
+          }),
+        );
+        if (!cancelled) {
+          setExistingRoles(
+            hydrated.filter((role): role is WorkspaceRole => role !== null),
+          );
+        }
       })
       .catch(() => {
         if (!cancelled) setExistingRoles([]);
@@ -424,6 +649,31 @@ export function CreateAgentModal({
     setError(null);
   }, [isOpen, resetToDefaults]);
 
+  // Run after the open-transition reset above. If a configured/default backend
+  // is unavailable, move interactive, role-backed, and legacy-agent creation
+  // to the first healthy option. Workflows never take this fallback: their
+  // backend is explicitly required or remains the workspace/default backend.
+  useEffect(() => {
+    if (
+      !isOpen ||
+      !showBackend ||
+      backendsLoading ||
+      backendsError ||
+      selectedBackendIsVisible ||
+      readyBackends.length === 0
+    ) {
+      return;
+    }
+    setBackend(readyBackends[0]!.name);
+  }, [
+    backendsError,
+    backendsLoading,
+    isOpen,
+    readyBackends,
+    selectedBackendIsVisible,
+    showBackend,
+  ]);
+
   useEffect(() => {
     if (isOpen) {
       nameRef.current?.focus();
@@ -445,15 +695,27 @@ export function CreateAgentModal({
     (selectedBuiltinPromptID === CUSTOM_PROMPT_ID
       ? customPrompt.trim() !== ""
       : (selectedBuiltinPromptID?.trim() ?? "") !== "");
+  const legacyRepoReady = !isLegacyDaemon || repoOptions.length > 0;
+  const workflowRepoReady =
+    !isWorkflow || (selectedRepos.length === 1 && targetRepo !== undefined);
   const canSubmit =
     nameError === null &&
     roleCreateReady &&
     hasPromptSelection &&
+    legacyRepoReady &&
+    workflowRepoReady &&
+    backendReadinessMessage === null &&
     !isSubmitting;
 
   const selectTemplate = (templateID: string): void => {
     setSelectedBuiltinPromptID(null);
     setSelectedTemplateId(templateID);
+    const nextTemplate = allTemplates.find(
+      (template) => template.id === templateID,
+    );
+    if (nextTemplate?.kind === "workflow") {
+      setSelectedRepos((current) => current.slice(0, 1));
+    }
   };
 
   const selectInteractive = (promptID: string): void => {
@@ -468,6 +730,13 @@ export function CreateAgentModal({
     const nameError = validateStoredAgentName(name);
     if (nameError) {
       setError(nameError);
+      return;
+    }
+    // Defense in depth for programmatic form submission: the disabled submit
+    // button is not the authority. Backend readiness must be proven before any
+    // agent, role, binding, connector, or grant mutation.
+    if (backendReadinessMessage) {
+      setError(backendReadinessMessage);
       return;
     }
 
@@ -497,9 +766,7 @@ export function CreateAgentModal({
                     ...(selectedTemplate.roleCreate?.description
                       ? { description: selectedTemplate.roleCreate.description }
                       : {}),
-                    ...(selectedTemplate.roleCreate?.taskFilter
-                      ? { task_filter: selectedTemplate.roleCreate.taskFilter }
-                      : {}),
+                    task_filter: selectedRoleTriggerOption.taskFilter,
                     ...(trimmedBackend ? { backend: trimmedBackend } : {}),
                   },
                 }
@@ -507,7 +774,7 @@ export function CreateAgentModal({
           },
           trigger: {
             source_kind: "internal",
-            event_type_patterns: ["internal.task.ready"],
+            event_type_patterns: [selectedRoleTriggerOption.eventTypePattern],
           },
           enabled: true,
         };
@@ -525,10 +792,10 @@ export function CreateAgentModal({
         dispatchBindingsChanged(workspaceId);
         onClose();
         resetToDefaults();
-        // The detail resolver still accepts binding ids; a later wave switches
-        // this route to the durable agent record id returned as agentRecord.id.
+        // Route by the durable AgentService identity so its Runs tab can
+        // aggregate history across every attached trigger binding.
         navigate(
-          `/ws/${encodeURIComponent(workspaceId)}/agents/${encodeURIComponent(bindingId)}`,
+          `/ws/${encodeURIComponent(workspaceId)}/agents/${encodeURIComponent(agentRecord.id)}`,
         );
         return;
       }
@@ -538,6 +805,10 @@ export function CreateAgentModal({
       // loop additionally reaches GitHub through a connector that reuses the
       // Settings runtime credential.
       if (isWorkflow && workflowSpec) {
+        if (selectedRepos.length !== 1 || !targetRepo) {
+          setError("Select exactly one target repo for this workflow.");
+          return;
+        }
         const wf = workflowSpec;
         const cron =
           CADENCE_OPTIONS.find((c) => c.value === cadence)?.cron ??
@@ -546,49 +817,102 @@ export function CreateAgentModal({
         // The connector path needs both a Settings token and a concrete target
         // repo to scope its grants — fail fast rather than half-provision.
         let targetSlug = "";
-        if (needsConnector) {
+        if (needsGitHub) {
           if (!githubConfigured) {
             setError(
-              "Connect a GitHub token in Settings before activating the review loop.",
+              "Connect a GitHub token in Settings before activating this workflow.",
             );
             return;
           }
           targetSlug = githubRepoSlug(targetRepo);
           if (!targetSlug) {
             setError(
-              "Select a target repo with a GitHub remote for the review loop.",
+              "Select a target repo with a GitHub remote for this workflow.",
+            );
+            return;
+          }
+          const readiness = await preflightCredential("github");
+          if (!readiness.configured || !readiness.usable) {
+            setError(
+              "The GitHub token in Settings cannot be opened. Re-save it before activating this workflow.",
             );
             return;
           }
         }
+        const runInput: Record<string, unknown> = {};
+        if (targetRepo?.name) {
+          runInput.targetRepo = targetRepo.name;
+        }
+        if (targetSlug) {
+          runInput.githubRepo = targetSlug;
+        }
 
-        // No route_key: for a cron binding the backend derives it from the
-        // (unique) binding_id, so activating both S1 and S2 in one workspace no
-        // longer collides on a shared route.
-        await createBinding({
-          workflow: wf.workflow,
-          source_kind: "cron",
-          schedule: cron,
-          binding_id: wf.bindingId,
-          name: trimmedName,
-          enabled: true,
-        });
-
+        // Validate (or create) the exact active connector and usable sealed
+        // credential before touching the singleton binding. A connector
+        // collision or stale vault key therefore cannot leave an existing
+        // workflow disabled or partially retargeted.
         if (needsConnector) {
           await ensureConnector({
             source: "github",
             connector_id: GITHUB_CONNECTOR_ID,
             reuse_runtime_credential: true,
           });
-          await Promise.all(
-            grantsForRepo(wf, targetSlug).map((grant) =>
-              addGrant(GITHUB_CONNECTOR_ID, {
-                binding_id: wf.bindingId,
+        }
+
+        let bindingMustRemainDisabled = false;
+        try {
+          // Create/ensure disabled first. Repeated activation may return an
+          // existing singleton, so explicitly disable before reconciling
+          // mutable name/cadence/input. Any later failure is compensated with
+          // another disable before the error is surfaced.
+          await createBinding({
+            workflow: wf.workflow,
+            source_kind: "cron",
+            schedule: cron,
+            binding_id: wf.bindingId,
+            name: trimmedName,
+            run_input: runInput,
+            enabled: false,
+          });
+          bindingMustRemainDisabled = true;
+          await setEnabled(wf.bindingId, false);
+          const disabledBinding = await updateBinding(wf.bindingId, {
+            name: trimmedName,
+            schedule: cron,
+            run_input: runInput,
+          });
+
+          if (needsConnector) {
+            if (
+              !disabledBinding.created_at?.trim() ||
+              !disabledBinding.updated_at?.trim()
+            ) {
+              throw new Error(
+                "Updated workflow binding did not return its generation timestamps.",
+              );
+            }
+            await replaceGrants(GITHUB_CONNECTOR_ID, wf.bindingId, {
+              expected_binding_created_at: disabledBinding.created_at,
+              expected_binding_updated_at: disabledBinding.updated_at,
+              grants: grantsForRepo(wf, targetSlug).map((grant) => ({
                 action: grant.action,
                 resource_pattern: grant.resource,
-              }),
-            ),
-          );
+              })),
+            });
+          }
+          await setEnabled(wf.bindingId, true);
+          bindingMustRemainDisabled = false;
+        } catch (activationError) {
+          if (bindingMustRemainDisabled) {
+            try {
+              await setEnabled(wf.bindingId, false);
+            } catch (disableError) {
+              throw new Error(
+                `${submissionErrorMessage(activationError)}; additionally failed to leave binding disabled: ${submissionErrorMessage(disableError)}`,
+              );
+            }
+          }
+          throw activationError;
         }
 
         if (onWorkflowActivated) {
@@ -607,13 +931,14 @@ export function CreateAgentModal({
       // Custom-role templates provision their Role (and seed its prompt file)
       // on first use, before the agent that references the role is created.
       // The endpoint is idempotent, so re-creating the same template is safe.
+      let roleName = selectedTemplate.roleName;
       if (
         !isInteractive &&
         selectedTemplate.kind === "custom-role" &&
         selectedTemplate.customRole
       ) {
         const cr = selectedTemplate.customRole;
-        await ensureRole({
+        const roleRequest: CreateRoleRequest = {
           name: cr.roleName,
           prompt: cr.promptContent,
           prompt_filename: cr.promptFilename,
@@ -622,9 +947,14 @@ export function CreateAgentModal({
           ...(cr.readOnly !== undefined ? { read_only: cr.readOnly } : {}),
           ...(cr.allowedTools ? { allowed_tools: cr.allowedTools } : {}),
           ...(cr.deniedTools ? { denied_tools: cr.deniedTools } : {}),
-        });
+        };
+        const ensuredRole = await ensureTemplateRole(
+          workspaceId,
+          roleRequest,
+          ensureRole,
+        );
+        roleName = ensuredRole.name;
       }
-      let roleName = selectedTemplate.roleName;
       let interactiveFields: {
         kind?: "interactive";
         prompt?: string;
@@ -654,7 +984,11 @@ export function CreateAgentModal({
         // Non-interactive templates keep their canonical role name. Interactive
         // prompts use the built-in prompt id (or the agent name for inline text).
         role_name: roleName,
-        auto: false,
+        // Advanced workers have no browser-owned terminal or manual Start
+        // control: the local-mode daemon manager discovers their workspace
+        // only when at least one assignment is marked auto. Interactive agents
+        // remain browser-launched and must never be daemon-supervised.
+        auto: !isInteractive,
         cross_repo: crossRepo,
         repos: crossRepo ? [] : selectedRepos,
         ...interactiveFields,
@@ -663,7 +997,14 @@ export function CreateAgentModal({
         ...request,
         ...(trimmedBackend ? { backend: trimmedBackend } : {}),
       });
-      onSuccess(agent);
+      // The workspace-agent response predates role kinds and may omit them.
+      // Preserve the kind selected in this modal so the shell can immediately
+      // place every interactive template (not just legacy role names) in its
+      // Terminal without waiting for a workspace refetch.
+      onSuccess({
+        ...agent,
+        kind: isInteractive ? "interactive" : (agent.kind ?? "worker"),
+      });
       resetToDefaults();
     } catch (err) {
       if (err instanceof ApiError) {
@@ -953,11 +1294,23 @@ export function CreateAgentModal({
                 <select
                   id="agent-backend"
                   className={styles.select}
-                  value={backend}
+                  value={selectedBackendIsVisible ? backend : ""}
                   onChange={(event) => setBackend(event.target.value)}
-                  disabled={isSubmitting}
+                  disabled={
+                    isSubmitting ||
+                    backendsLoading ||
+                    backendsError !== null ||
+                    backendOptions.length === 0
+                  }
                   data-testid="create-agent-backend"
                 >
+                  {!selectedBackendIsVisible && (
+                    <option value="" disabled>
+                      {backendsLoading
+                        ? "Checking AI backends..."
+                        : "Select an available backend"}
+                    </option>
+                  )}
                   {backendOptions.map((option) => (
                     <option key={option.value} value={option.value}>
                       {option.label}
@@ -967,6 +1320,15 @@ export function CreateAgentModal({
               </div>
             ) : null}
           </div>
+
+          {needsBackendHealth && backendReadinessMessage && (
+            <p
+              className={styles.hint}
+              data-testid="create-agent-backend-readiness"
+            >
+              {backendReadinessMessage}
+            </p>
+          )}
 
           {isInteractive && selectedBuiltinPromptID === CUSTOM_PROMPT_ID && (
             <div className={`${styles.fieldGroup} ${styles.fieldGroupSpaced}`}>
@@ -990,10 +1352,39 @@ export function CreateAgentModal({
               className={`${styles.fieldGroup} ${styles.fieldGroupSpaced}`}
               data-testid="create-agent-role-trigger"
             >
-              <span className={styles.label}>Trigger</span>
-              <div className={styles.readOnlyField}>
-                Runs when a task becomes ready
-              </div>
+              {isRoleCreate ? (
+                <>
+                  <label
+                    className={styles.label}
+                    htmlFor="prompt-agent-role-trigger"
+                  >
+                    Runs when
+                  </label>
+                  <select
+                    id="prompt-agent-role-trigger"
+                    className={styles.select}
+                    value={newRoleTrigger}
+                    onChange={(event) =>
+                      setNewRoleTrigger(event.target.value as RoleTrigger)
+                    }
+                    disabled={isSubmitting}
+                    data-testid="create-agent-role-trigger-select"
+                  >
+                    {ROLE_TRIGGER_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </>
+              ) : (
+                <>
+                  <span className={styles.label}>Trigger</span>
+                  <div className={styles.readOnlyField}>
+                    {selectedRoleTriggerOption.readOnlyLabel}
+                  </div>
+                </>
+              )}
             </div>
           )}
 
@@ -1065,8 +1456,9 @@ export function CreateAgentModal({
                   className={styles.emptyHint}
                   data-testid="create-agent-no-repos"
                 >
-                  No repos yet — add one from the sidebar first. This agent will
-                  run with workspace scope.
+                  {isLegacyDaemon
+                    ? "No repos yet — add one from the sidebar before creating a legacy supervised agent."
+                    : "No repos yet — add one from the sidebar to give this agent repository scope."}
                 </p>
               ) : (
                 <div
@@ -1100,13 +1492,14 @@ export function CreateAgentModal({
             </div>
           )}
 
-          {isWorkflow && needsConnector && !githubConfigured && (
+          {isWorkflow && needsGitHub && !githubUsable && (
             <p
               className={styles.hint}
               data-testid="create-agent-review-needs-github"
             >
-              The review loop reuses your Settings GitHub token, which is not
-              configured yet.{" "}
+              {githubConfigured
+                ? "This workflow requires a usable Settings GitHub token. The saved token cannot be opened; re-save it."
+                : "This workflow requires your Settings GitHub token, which is not configured yet."}{" "}
               {onOpenSettings && (
                 <button
                   type="button"

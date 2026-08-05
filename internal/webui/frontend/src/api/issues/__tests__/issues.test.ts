@@ -18,6 +18,7 @@ import {
   getBlockedIssues,
   createIssue,
   updateIssue,
+  setIssueRepository,
   closeIssue,
   addDependency,
   removeDependency,
@@ -54,6 +55,7 @@ import { api } from "@/api/common";
 const mockApiGet = api.GET as ReturnType<typeof vi.fn>;
 const mockApiPost = api.POST as ReturnType<typeof vi.fn>;
 const mockApiPatch = api.PATCH as ReturnType<typeof vi.fn>;
+const mockApiPut = api.PUT as ReturnType<typeof vi.fn>;
 const mockApiDelete = api.DELETE as ReturnType<typeof vi.fn>;
 
 /**
@@ -1703,6 +1705,50 @@ describe("issues API", () => {
 
       await expect(
         updateIssue("test-ws-id", "issue-123", { title: "x" }),
+      ).rejects.toThrow(ApiError);
+    });
+  });
+
+  describe("setIssueRepository", () => {
+    it("uses the repository command and returns its canonical issue", async () => {
+      const canonicalIssue: Issue = {
+        id: "issue-123",
+        title: "Recovered task",
+        issue_type: "task",
+        priority: "medium",
+        status: "open",
+        source_repo: "github-hello-world",
+        created_at: "2024-01-01T00:00:00Z",
+        updated_at: "2024-01-15T00:00:00Z",
+      };
+      mockApiPut.mockResolvedValue(
+        okResponse({ success: true, data: canonicalIssue }),
+      );
+
+      const result = await setIssueRepository(
+        "test-ws-id",
+        "issue-123",
+        "hello-world",
+      );
+
+      expect(mockApiPut).toHaveBeenCalledWith(
+        "/api/workspaces/{ws}/issues/{id}/repository",
+        {
+          params: { path: { ws: "test-ws-id", id: "issue-123" } },
+          body: { repo: "hello-world" },
+        },
+      );
+      expect(result).toEqual({
+        ...canonicalIssue,
+        repo: "github-hello-world",
+      });
+    });
+
+    it("propagates command errors", async () => {
+      mockApiPut.mockResolvedValue(errorResponse(409, "Conflict"));
+
+      await expect(
+        setIssueRepository("test-ws-id", "issue-123", "hello-world"),
       ).rejects.toThrow(ApiError);
     });
   });

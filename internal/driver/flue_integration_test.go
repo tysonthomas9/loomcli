@@ -97,7 +97,8 @@ export default defineWorkflow({
 // mirrors the serve worker contract: exec-task executes immediately,
 // completes-and-closes (or blocks) the task server-side, and appends the
 // terminal journal event the watch stream delivers; the workflow's follow-up
-// complete-task gets the worker-conflict the real server would return.
+// Terminal watch events are observations of already-committed completion;
+// the workflow must not call complete-task or receive a worker lease token.
 //
 // The smoke runs under the §9.5 locked-down token-only env (TK5): the legacy
 // auth fallback is switched off, a run-scoped token is minted for the claimed
@@ -251,20 +252,8 @@ func TestRealFlueBuiltinEpicRunnerWatchLoopSmoke(t *testing.T) {
 					}
 				}
 			}
-			if len(completes) != len(tc.wantCompleted) {
-				t.Fatalf("complete-task calls = %+v, want one per completed task %v", completes, tc.wantCompleted)
-			}
-			for j, want := range tc.wantCompleted {
-				call := completes[j]
-				if call.TaskID != want {
-					t.Fatalf("complete[%d].TaskID = %q, want %q", j, call.TaskID, want)
-				}
-				if call.LeaseToken != "token-"+want {
-					t.Fatalf("complete[%d].LeaseToken = %q, want watch event lease token", j, call.LeaseToken)
-				}
-				if call.CompletionID != "complete-"+call.TaskRunID {
-					t.Fatalf("complete[%d].CompletionID = %q, want deterministic completion id for %q", j, call.CompletionID, call.TaskRunID)
-				}
+			if len(completes) != 0 {
+				t.Fatalf("complete-task calls = %+v, want none for committed terminal events", completes)
 			}
 			if tc.failTask != "" && fake.taskStatus(tc.failTask) != "blocked" {
 				t.Fatalf("task %s status = %q, want blocked", tc.failTask, fake.taskStatus(tc.failTask))
@@ -513,7 +502,6 @@ func (f *fakeEpicAPI) execTask(r *http.Request, params map[string]any) any {
 		"taskID":      taskID,
 		"taskRunID":   taskRunID,
 		"attempt":     0,
-		"leaseToken":  "token-" + taskID,
 		"logsRef":     "logs://" + taskRunID,
 	}
 	if task := f.tasks[taskID]; task != nil {

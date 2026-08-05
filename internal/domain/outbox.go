@@ -38,9 +38,9 @@ func TaskRunEventID(taskRunID string, attempt int, eventType TaskRunEventType) s
 
 // TaskRunEvent is one entry in the append-only task-run journal that
 // feeds watch streams. Seq is store-assigned and monotonically
-// increasing per workspace; consumers resume with AfterSeq. LeaseToken
-// is included so a watch consumer can call complete-task on behalf of
-// the run it observed.
+// increasing per workspace; consumers resume with AfterSeq. Events are
+// observations emitted after the server-owned transition and never carry
+// the TaskRun lease credential.
 type TaskRunEvent struct {
 	WorkspaceKey   string           `json:"workspaceKey"`
 	EventID        string           `json:"eventID"`
@@ -57,7 +57,6 @@ type TaskRunEvent struct {
 	ErrorMessage   string           `json:"errorMessage,omitempty"`
 	LogsRef        string           `json:"logsRef,omitempty"`
 	ArtifactsRef   string           `json:"artifactsRef,omitempty"`
-	LeaseToken     string           `json:"leaseToken,omitempty"`
 	// NextEligibleAt is set on taskRunRequeued events: the run is held by
 	// retry backoff and only becomes claimable at this time.
 	NextEligibleAt *time.Time `json:"nextEligibleAt,omitempty"`

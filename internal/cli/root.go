@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -111,6 +112,9 @@ func init() {
 	// then inject the Deps container into the command context.
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
 		if err := prepareCommandEnvironment(); err != nil {
+			return err
+		}
+		if err := runPreBackendCommandGuards(cmd); err != nil {
 			return err
 		}
 		if err := ResolveAndSetBackend(); err != nil {
@@ -290,6 +294,75 @@ func resolveCLIServiceName() string {
 
 // pendingCmds accumulates commands registered by sub-packages via init().
 var pendingCmds []*cobra.Command
+
+// PreBackendCommandGuard validates a parsed command after global flags have
+// been mirrored into the environment but before any issue backend or default
+// dependency container is resolved.
+type PreBackendCommandGuard func(*cobra.Command) error
+
+type registeredPreBackendCommandGuard struct {
+	id    uint64
+	guard PreBackendCommandGuard
+}
+
+var (
+	preBackendCommandGuardMu     sync.RWMutex
+	nextPreBackendCommandGuardID uint64
+	preBackendCommandGuards      []registeredPreBackendCommandGuard
+)
+
+// RegisterPreBackendCommandGuard installs a composition-root policy check and
+// returns an idempotent restore function. Production callers may discard the
+// restore function; package tests should defer it to avoid global leakage.
+func RegisterPreBackendCommandGuard(guard PreBackendCommandGuard) func() {
+	if guard == nil {
+		return func() {}
+	}
+
+	preBackendCommandGuardMu.Lock()
+	nextPreBackendCommandGuardID++
+	registration := registeredPreBackendCommandGuard{id: nextPreBackendCommandGuardID, guard: guard}
+	preBackendCommandGuards = append(preBackendCommandGuards, registration)
+	preBackendCommandGuardMu.Unlock()
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			unregisterPreBackendCommandGuard(registration.id)
+		})
+	}
+}
+
+func unregisterPreBackendCommandGuard(id uint64) {
+	preBackendCommandGuardMu.Lock()
+	defer preBackendCommandGuardMu.Unlock()
+
+	for index, registration := range preBackendCommandGuards {
+		if registration.id != id {
+			continue
+		}
+		copy(preBackendCommandGuards[index:], preBackendCommandGuards[index+1:])
+		preBackendCommandGuards[len(preBackendCommandGuards)-1] = registeredPreBackendCommandGuard{}
+		preBackendCommandGuards = preBackendCommandGuards[:len(preBackendCommandGuards)-1]
+		return
+	}
+}
+
+func runPreBackendCommandGuards(cmd *cobra.Command) error {
+	preBackendCommandGuardMu.RLock()
+	guards := make([]PreBackendCommandGuard, 0, len(preBackendCommandGuards))
+	for _, registration := range preBackendCommandGuards {
+		guards = append(guards, registration.guard)
+	}
+	preBackendCommandGuardMu.RUnlock()
+
+	for _, guard := range guards {
+		if err := guard(cmd); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 // RegisterCommand adds a command to the pending list.
 // Sub-packages call this in their init() functions.

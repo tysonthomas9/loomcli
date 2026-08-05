@@ -77,7 +77,7 @@ func seedExecutablePromptAgentDriver(t *testing.T, st store.Store) {
 		BundleDigest: "sha256:prompt-agent-test-bundle",
 		Runtime:      "node",
 		Manifest:     map[string]string{"runners": string(runners)},
-		CreatedBy:    "test",
+		CreatedBy:    "system",
 	}); err != nil {
 		t.Fatalf("create prompt-agent driver version fixture: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestPromptAgentCreateWithVanishedActiveBundleFailsAtomically(t *testing.T) 
 	body := `{
 		"kind":"prompt",
 		"name":"Docs assistant",
-		"behavior":{"role_name":"docs-assistant","role_create":{"description":"Docs"}},
+		"behavior":{"role_name":"docs-assistant","role_create":{"description":"Docs","prompt":"Complete the assigned documentation task.","task_filter":"has_design"}},
 		"trigger":{"source_kind":"internal"},
 		"enabled":true
 	}`
@@ -154,7 +154,7 @@ func TestPromptAgentCreateReusesExecutableActiveBundleWithoutBuildToolchain(t *t
 	body := `{
 		"kind":"prompt",
 		"name":"Docs assistant",
-		"behavior":{"role_name":"docs-assistant","role_create":{"description":"Docs"}},
+		"behavior":{"role_name":"docs-assistant","role_create":{"description":"Docs","prompt":"Complete the assigned documentation task.","task_filter":"has_design"}},
 		"trigger":{"source_kind":"internal"},
 		"enabled":true
 	}`

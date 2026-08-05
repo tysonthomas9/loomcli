@@ -2,16 +2,23 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -642,6 +649,102 @@ func TestFleetDBActorPreference(t *testing.T) {
 	if got := fleetDBActor(); got != "user-name" {
 		t.Fatalf("fleetDBActor() = %q, want user-name", got)
 	}
+}
+
+func TestFleetDBIssueBackend_LocalReuseUsesStoreHandleCredential(t *testing.T) {
+	const (
+		workspaceKey      = "SECURE"
+		ambientCredential = "ambient-credential-must-not-win"
+	)
+
+	dataDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", dataDir)
+	t.Setenv(bootstrap.EnvFleetDBURL, "")
+	t.Setenv(bootstrap.EnvFleetDBAPIKey, ambientCredential)
+	t.Setenv(bootstrap.EnvWorkspace, workspaceKey)
+	t.Setenv(bootstrap.EnvFleetDBBin, filepath.Join(t.TempDir(), "missing-fleet-db"))
+
+	serviceCredential, err := authority.LoadOrCreateLocalFleetDBServiceCredential(
+		filepath.Join(dataDir, "fleet-db", "auth"),
+	)
+	if err != nil {
+		t.Fatalf("create local FleetDB service credential: %v", err)
+	}
+
+	var workspaceRequests atomic.Int32
+	var issueRequests atomic.Int32
+	var issueUsedAmbientCredential atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hasServiceCredential := r.Header.Get("X-API-Key") == serviceCredential &&
+			r.Header.Get("X-Fleet-API-Key") == serviceCredential
+		if r.Header.Get("X-API-Key") == ambientCredential ||
+			r.Header.Get("X-Fleet-API-Key") == ambientCredential {
+			issueUsedAmbientCredential.Store(true)
+		}
+
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/healthz":
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/admin/workspaces/"+workspaceKey:
+			workspaceRequests.Add(1)
+			if !hasServiceCredential {
+				writeFleetDBTestUnauthorized(w)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"key":"SECURE","name":"Secure"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/"+workspaceKey+"/issues":
+			issueRequests.Add(1)
+			if !hasServiceCredential {
+				writeFleetDBTestUnauthorized(w)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[]`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	runtimeData, err := json.Marshal(struct {
+		PID       int       `json:"pid"`
+		URL       string    `json:"url"`
+		StartedAt time.Time `json:"started_at"`
+	}{
+		PID:       os.Getpid(),
+		URL:       server.URL,
+		StartedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("marshal embedded FleetDB runtime: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, "fleet-db", "runtime.json"), runtimeData, 0600); err != nil {
+		t.Fatalf("write embedded FleetDB runtime: %v", err)
+	}
+
+	issueBackend := newFleetDBIssueBackend()
+	if _, err := issueBackend.List(context.Background(), backend.ListOpts{}); err != nil {
+		t.Fatalf("List through reused local FleetDB runtime: %v; secondary client must use the StoreHandle credential, not the ambient key", err)
+	}
+	if got := workspaceRequests.Load(); got != 1 {
+		t.Fatalf("workspace validation requests = %d, want 1", got)
+	}
+	if got := issueRequests.Load(); got != 1 {
+		t.Fatalf("issue list requests = %d, want 1", got)
+	}
+	if issueUsedAmbientCredential.Load() {
+		t.Fatal("reused local FleetDB request used the wrong ambient credential")
+	}
+	if got := os.Getenv(bootstrap.EnvFleetDBAPIKey); got != ambientCredential {
+		t.Fatalf("%s was mutated while composing the local issue backend", bootstrap.EnvFleetDBAPIKey)
+	}
+}
+
+func writeFleetDBTestUnauthorized(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusUnauthorized)
+	_, _ = w.Write([]byte(`{"error":{"code":"UNAUTHORIZED","message":"authentication required"}}`))
 }
 
 func TestFleetDBIssueBackend_FailsClosedWhenStoreUnavailable(t *testing.T) {

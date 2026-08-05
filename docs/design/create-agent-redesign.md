@@ -41,6 +41,12 @@ isProject: false
 # Create Agent Redesign — Three Lanes, Phased
 
 > **Status of this rewrite.** The original proposal was a single-screen modal reskin that treated Lead / Plan / Task as peer roles. Verification against the codebase (four deep probes) showed the product reality is richer and the original made a few factual errors. This version corrects them and reframes the work around the three agent lanes that genuinely exist, phased by cost.
+>
+> **Current implemented contract (2026-07-25).** The gallery has since grown
+> to 12 clean-workspace templates across Behavior, Interactive, and Advanced
+> sections. See [Agent Creation Templates](../product/agent-creation-templates.md)
+> for the current Gherkin contracts and proof-status boundary. The phased
+> proposal below remains a historical design record.
 
 ---
 

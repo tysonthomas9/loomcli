@@ -19,6 +19,18 @@ type testDaemonState struct {
 	} `json:"agents"`
 }
 
+func stubDaemonProcessIdentity(t *testing.T, match func(int) bool) {
+	t.Helper()
+	original := daemonProcessIdentityFn
+	originalSupported := daemonProcessIdentitySupportedFn
+	daemonProcessIdentityFn = match
+	daemonProcessIdentitySupportedFn = func() bool { return true }
+	t.Cleanup(func() {
+		daemonProcessIdentityFn = original
+		daemonProcessIdentitySupportedFn = originalSupported
+	})
+}
+
 // ---------- IsProtectedRuntimePath ----------
 
 func TestIsProtectedRuntimePath(t *testing.T) {
@@ -95,6 +107,7 @@ func TestDetectFromLockFile_LockedLivePID(t *testing.T) {
 	lockPath := filepath.Join(dir, "daemon.lock")
 
 	livePID := os.Getpid()
+	stubDaemonProcessIdentity(t, func(pid int) bool { return pid == livePID })
 	li := lockfile.LockInfo{PID: livePID}
 	data, err := json.Marshal(li)
 	if err != nil {
@@ -154,12 +167,16 @@ func TestDetectFromLockFile_LockedDeadPID(t *testing.T) {
 	}
 
 	info, ok := detectFromLockFile(lockPath)
-	// Lock held but PID is dead → stale lock → not running
-	if ok {
-		t.Error("expected ok=false for stale lock (dead PID)")
+	// The held flock is authoritative, but the unverified PID must never be
+	// returned to a lifecycle command that could signal it.
+	if !ok {
+		t.Error("expected ok=true for held lock")
 	}
-	if info.Running {
-		t.Error("expected Running=false for dead PID")
+	if !info.Running {
+		t.Error("expected Running=true for held lock")
+	}
+	if info.PID != 0 {
+		t.Errorf("PID = %d, want 0 for unverified metadata", info.PID)
 	}
 }
 
@@ -209,6 +226,7 @@ func TestDetectFromStateFile_LivePID(t *testing.T) {
 	statePath := filepath.Join(dir, "daemon-agents.json")
 
 	livePID := os.Getpid()
+	stubDaemonProcessIdentity(t, func(pid int) bool { return pid == livePID })
 	state := testDaemonState{PID: livePID}
 	data, err := json.Marshal(state)
 	if err != nil {
@@ -225,8 +243,8 @@ func TestDetectFromStateFile_LivePID(t *testing.T) {
 	if !info.Running {
 		t.Error("expected Running=true")
 	}
-	if info.PID != livePID {
-		t.Errorf("PID = %d, want %d", info.PID, livePID)
+	if info.PID != 0 {
+		t.Errorf("PID = %d, want 0 because state-only evidence cannot authorize signals", info.PID)
 	}
 	if info.Source != "state" {
 		t.Errorf("Source = %q, want %q", info.Source, "state")
@@ -298,6 +316,7 @@ func TestDetectDaemonRuntime_LockTakesPrecedence(t *testing.T) {
 	}
 
 	livePID := os.Getpid()
+	stubDaemonProcessIdentity(t, func(pid int) bool { return pid == livePID })
 
 	// Create lock file with held flock
 	lockPath := filepath.Join(loomDir, "daemon.lock")
@@ -331,7 +350,7 @@ func TestDetectDaemonRuntime_LockTakesPrecedence(t *testing.T) {
 		t.Errorf("expected Source=%q (lock takes precedence), got %q", "lock", info.Source)
 	}
 	if info.PID != livePID {
-		t.Errorf("PID = %d, want %d", info.PID, livePID)
+		t.Errorf("PID = %d, want held-lock owner %d", info.PID, livePID)
 	}
 }
 
@@ -343,6 +362,7 @@ func TestDetectDaemonRuntime_StateFallback(t *testing.T) {
 	}
 
 	livePID := os.Getpid()
+	stubDaemonProcessIdentity(t, func(pid int) bool { return pid == livePID })
 
 	// No lock file — state file with live PID
 	statePath := filepath.Join(loomDir, "daemon-agents.json")
@@ -358,19 +378,19 @@ func TestDetectDaemonRuntime_StateFallback(t *testing.T) {
 	if info.Source != "state" {
 		t.Errorf("Source = %q, want %q", info.Source, "state")
 	}
-	if info.PID != livePID {
-		t.Errorf("PID = %d, want %d", info.PID, livePID)
+	if info.PID != 0 {
+		t.Errorf("PID = %d, want 0 because state-only evidence cannot authorize signals", info.PID)
 	}
 }
 
-func TestDetectDaemonRuntime_StaleLockFallsThrough(t *testing.T) {
+func TestDetectDaemonRuntime_UnlockedLockRejectsStaleStatePID(t *testing.T) {
 	dir := t.TempDir()
 	loomDir := filepath.Join(dir, ".loom")
 	if err := os.MkdirAll(loomDir, 0755); err != nil {
 		t.Fatal(err)
 	}
 
-	// Stale lock file (exists but not held) → falls through to state file
+	// An existing unlocked lock is authoritative not-running evidence.
 	lockPath := filepath.Join(loomDir, "daemon.lock")
 	if err := os.WriteFile(lockPath, []byte("{}"), 0644); err != nil {
 		t.Fatal(err)
@@ -384,12 +404,28 @@ func TestDetectDaemonRuntime_StaleLockFallsThrough(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	stubDaemonProcessIdentity(t, func(pid int) bool { return pid == livePID })
 	info := DetectDaemonRuntime(dir)
-	if !info.Running {
-		t.Fatal("expected Running=true via state file after stale lock")
+	if info.Running {
+		t.Fatal("unlocked lock fell through to stale state PID")
 	}
-	if info.Source != "state" {
-		t.Errorf("Source = %q, want %q", info.Source, "state")
+	if info.PID != 0 || info.Source != "" {
+		t.Fatalf("info = %+v, want authoritative not-running result", info)
+	}
+}
+
+func TestDetectFromStateFileRejectsForeignLivePID(t *testing.T) {
+	dir := t.TempDir()
+	statePath := filepath.Join(dir, "daemon-agents.json")
+	stateData, _ := json.Marshal(testDaemonState{PID: os.Getpid()})
+	if err := os.WriteFile(statePath, stateData, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stubDaemonProcessIdentity(t, func(int) bool { return false })
+
+	info, ok := detectFromStateFile(statePath)
+	if ok || info.Running || info.PID != 0 {
+		t.Fatalf("foreign live PID was accepted from state: info=%+v ok=%v", info, ok)
 	}
 }
 

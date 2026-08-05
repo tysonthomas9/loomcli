@@ -17,6 +17,46 @@ export type AgentTemplateKind =
 
 export type TemplateSection = "behavior" | "advanced";
 
+export type RoleTrigger = "ready" | "review";
+
+export interface RoleTriggerOption {
+  value: RoleTrigger;
+  label: string;
+  readOnlyLabel: string;
+  taskFilter: "has_design" | "review";
+  eventTypePattern: "internal.task.ready" | "internal.task.review";
+}
+
+export const ROLE_TRIGGER_OPTIONS: readonly RoleTriggerOption[] = [
+  {
+    value: "ready",
+    label: "Task becomes ready",
+    readOnlyLabel: "Runs when a task becomes ready",
+    taskFilter: "has_design",
+    eventTypePattern: "internal.task.ready",
+  },
+  {
+    value: "review",
+    label: "Task enters Review",
+    readOnlyLabel: "Runs when a task enters Review",
+    taskFilter: "review",
+    eventTypePattern: "internal.task.review",
+  },
+];
+
+export function roleTriggerOption(trigger: RoleTrigger): RoleTriggerOption {
+  return (
+    ROLE_TRIGGER_OPTIONS.find((option) => option.value === trigger) ??
+    ROLE_TRIGGER_OPTIONS[0]!
+  );
+}
+
+export function roleTriggerForTaskFilter(
+  taskFilter: string | undefined,
+): RoleTrigger {
+  return taskFilter?.trim() === "review" ? "review" : "ready";
+}
+
 /** Provisioning data for a legacy `custom-role` daemon template. */
 export interface CustomRoleSpec {
   /** Canonical role name to ensure (e.g. "bug-triage"). */
@@ -28,8 +68,8 @@ export interface CustomRoleSpec {
   /** Optional role description. */
   description?: string;
   /**
-   * Task-phase filter: "needs_plan" | "has_design" | "any" (defaults to
-   * "has_design"). Filters by task phase, not issue type.
+   * Task filter: phase filters "needs_plan" | "has_design" | "any", or the
+   * read-only issue-type filter "bug" (defaults to "has_design").
    */
   taskFilter?: string;
   /** Constrain the role to read-only tools. */
@@ -87,6 +127,10 @@ export interface WorkflowSpec {
    * key from this so scheduled workflows do not collide on a shared route.
    */
   bindingId: string;
+  /** Backend that must be healthy before this workflow can be activated. */
+  requiredBackend?: string;
+  /** The workflow cannot run usefully without the configured GitHub runtime credential and a GitHub target remote. */
+  requiresGitHub?: boolean;
   /**
    * When set, the submit path also provisions a github connector (reusing the
    * Settings runtime credential) plus these grants, scoped to the target repo.
@@ -109,6 +153,8 @@ export interface AgentTemplate {
   testId: string;
   /** Canonical role name for role and legacy daemon templates. */
   roleName: string;
+  /** Typed prompt-agent trigger; role-backed templates default to ready. */
+  roleTrigger?: RoleTrigger;
   /** Set when kind === "role-create". */
   roleCreate?: RoleCreateDefaults;
   /** Set when kind === "custom-role". */
@@ -156,7 +202,7 @@ const ACCENTS = {
  * Prompt seeded for the legacy bug-triage daemon role on first use. The main
  * behavior grid only shows bug triage when a workspace role exists for it.
  */
-export const BUG_TRIAGE_PROMPT = `# Bug triage agent
+export const LEGACY_BUG_TRIAGE_PROMPT = `# Bug triage agent
 
 You are a focused bug-triage agent. You claim incoming bug tickets, reproduce
 them, and write a crisp triage summary. You do NOT implement fixes.
@@ -169,6 +215,37 @@ For each bug ticket you claim:
 4. Assess severity and blast radius.
 5. Post a triage summary comment and set the ticket's labels/priority. Leave the
    ticket ready for an implementer — do not change product code yourself.
+
+Be concise and evidence-based. Prefer reading code and logs over speculation.
+`;
+
+/**
+ * Immutable prompt filename produced for the legacy role by the backend's
+ * roleprompts.ImmutablePromptFilename contract. This is intentionally pinned:
+ * the one-time migration must not overwrite a user role that merely retained
+ * the old prompt body while being repointed to an operator-owned prompt file.
+ */
+export const LEGACY_BUG_TRIAGE_PROMPT_FILE_BASENAME =
+  "bug-triage.c72a7d7efcff.3c7b7bb16b2d.md";
+
+export const BUG_TRIAGE_PROMPT = `# Bug triage agent
+
+You are a focused bug-triage agent. You investigate the ticket assigned by the
+supervisor and write a crisp triage summary. You do NOT implement fixes.
+
+For the supervisor-assigned bug ticket:
+1. Restate the report in one line and identify the affected area of the code.
+2. Attempt to reproduce. Record exact steps, expected vs actual, and the
+   smallest failing case you can find.
+3. Locate the most likely root cause in the code (file:line) and explain why.
+4. Assess severity and blast radius.
+5. Post a triage summary comment and set the ticket's labels/priority.
+6. Move the ticket to the Review column as the terminal triage handoff:
+   loom data update <assigned-task-id> --status review
+   Do not leave it Open: the daemon would otherwise select it for triage again.
+
+The ticket must be ready for a human to approve into the Planner → Coder path.
+Do not change product code yourself.
 
 Be concise and evidence-based. Prefer reading code and logs over speculation.
 `;
@@ -210,9 +287,10 @@ export const NEW_ROLE_TEMPLATE: AgentTemplate = {
   accentColor: ACCENTS.newRole,
   defaultName: "custom-agent",
   testId: "create-agent-template-new-role",
+  roleTrigger: "ready",
   roleCreate: {
     promptFilename: "custom-role.md",
-    taskFilter: "any",
+    taskFilter: "has_design",
   },
 };
 
@@ -231,6 +309,7 @@ const BUG_FIX_WORKFLOW_TEMPLATE: AgentTemplate = {
   workflow: {
     workflow: "bug-fix-agent",
     bindingId: "s1-bug-fix",
+    requiresGitHub: true,
   },
 };
 
@@ -249,6 +328,8 @@ const REVIEW_LOOP_WORKFLOW_TEMPLATE: AgentTemplate = {
   workflow: {
     workflow: "review-loop-agent",
     bindingId: "s2-review-loop",
+    requiredBackend: "codex",
+    requiresGitHub: true,
     grants: [
       { action: "github.pull_request.read", resource: "repo:<owner/name>" },
       { action: "github.compare.read", resource: "repo:<owner/name>" },
@@ -272,6 +353,7 @@ const LOCAL_REVIEW_WORKFLOW_TEMPLATE: AgentTemplate = {
   workflow: {
     workflow: "local-review-agent",
     bindingId: "s3-local-review",
+    requiredBackend: "codex",
   },
 };
 
@@ -317,7 +399,7 @@ const LEGACY_BUG_TRIAGE_TEMPLATE: AgentTemplate = {
     promptFilename: "bug-triage.md",
     promptContent: BUG_TRIAGE_PROMPT,
     description: "Reproduces and triages ready tickets; does not write fixes.",
-    taskFilter: "any",
+    taskFilter: "bug",
     readOnly: true,
   },
 };
@@ -396,8 +478,10 @@ export function templatesForSection(section: TemplateSection): AgentTemplate[] {
 export function customRoleTemplate(role: {
   name: string;
   description?: string;
+  task_filter?: string;
 }): AgentTemplate {
   const roleName = role.name.trim();
+  const trigger = roleTriggerForTaskFilter(role.task_filter);
   return {
     id: `role-${roleName}`,
     kind: "role",
@@ -406,11 +490,14 @@ export function customRoleTemplate(role: {
     title: roleName,
     description:
       role.description?.trim() ||
-      `Runs the ${roleName} role when a task becomes ready.`,
+      `Runs the ${roleName} role when a task ${
+        trigger === "review" ? "enters Review" : "becomes ready"
+      }.`,
     glyph: roleName.slice(0, 1).toUpperCase() || "R",
     accentColor: ACCENTS.custom,
     defaultName: roleName || "custom-agent",
     testId: `create-agent-template-role-${roleName}`,
+    roleTrigger: trigger,
   };
 }
 

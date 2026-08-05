@@ -573,12 +573,15 @@ func cloneEffective(in *workflowcatalog.EffectiveVersion) *workflowcatalog.Effec
 }
 
 type fakeCatalogAuthority struct {
+	mu    sync.Mutex
 	auth  authority.SystemAuthority
 	err   error
 	calls int
 }
 
 func (p *fakeCatalogAuthority) AuthorityForEffectiveVersion(_ context.Context, _, _ string) (authority.SystemAuthority, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.calls++
 	return p.auth, p.err
 }
@@ -596,6 +599,60 @@ type fakeExecution struct {
 	outcomes    map[string][]fakeDispatchOutcome
 	replays     map[string]fakeDispatchOutcome
 	persistence *fakePersistence
+}
+
+// idempotentTestExecution serializes the fake ExecutionPort and replays a
+// committed result by dispatch idempotency key. It models the production port's
+// concurrency contract for tests where two admission replays race to dispatch
+// the same newly reserved delivery.
+type idempotentTestExecution struct {
+	mu       sync.Mutex
+	delegate *fakeExecution
+	results  map[string]*ExecutionDispatchResult
+}
+
+func (e *idempotentTestExecution) EmissionContext(
+	ctx context.Context,
+	auth authority.ExecutionAuthority,
+) (*ExecutionEmissionContext, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.delegate.EmissionContext(ctx, auth)
+}
+
+func (e *idempotentTestExecution) Dispatch(
+	ctx context.Context,
+	request ExecutionDispatchRequest,
+) (*ExecutionDispatchResult, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.results == nil {
+		e.results = make(map[string]*ExecutionDispatchResult)
+	}
+	if result := e.results[request.IdempotencyKey]; result != nil {
+		return cloneExecutionDispatchResult(result), nil
+	}
+	result, err := e.delegate.Dispatch(ctx, request)
+	if err == nil && result != nil {
+		e.results[request.IdempotencyKey] = cloneExecutionDispatchResult(result)
+	}
+	return result, err
+}
+
+func (e *idempotentTestExecution) callCount() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return len(e.delegate.calls)
+}
+
+func cloneExecutionDispatchResult(in *ExecutionDispatchResult) *ExecutionDispatchResult {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	out.Delivery = cloneDelivery(in.Delivery)
+	out.RunSnapshot = cloneRawMessage(in.RunSnapshot)
+	return &out
 }
 
 func (e *fakeExecution) EmissionContext(_ context.Context, _ authority.ExecutionAuthority) (*ExecutionEmissionContext, error) {

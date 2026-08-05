@@ -8,8 +8,10 @@ import {
   bindingDotTooltip,
   bindingHealth,
   bindingKindLabel,
+  bindingRunNowUnavailableReason,
   describeCronSchedule,
   formatFireTime,
+  MANAGED_REVIEW_RUN_NOW_HINT,
 } from "../bindingDisplay";
 
 function binding(overrides: Partial<TriggerBinding> = {}): TriggerBinding {
@@ -83,6 +85,46 @@ describe("bindingKindLabel", () => {
     expect(bindingKindLabel(binding())).toBe("Scheduled");
     expect(bindingKindLabel(binding({ source_kind: "github" }))).toBe("Github");
     expect(bindingKindLabel(binding({ source_kind: "" }))).toBe("Event");
+  });
+});
+
+describe("bindingRunNowUnavailableReason", () => {
+  it("suppresses only the exact managed internal.task.review trigger", () => {
+    const managedReview = binding({
+      source_kind: "internal",
+      route_key: "",
+      schedule: undefined,
+      target_agent_service_id: "docs-agent",
+      event_type_patterns: ["internal.task.review"],
+    });
+
+    expect(bindingRunNowUnavailableReason(managedReview)).toBe(
+      MANAGED_REVIEW_RUN_NOW_HINT,
+    );
+    expect(
+      bindingRunNowUnavailableReason({
+        ...managedReview,
+        event_type_patterns: ["internal.task.ready"],
+      }),
+    ).toBeNull();
+    expect(
+      bindingRunNowUnavailableReason({
+        ...managedReview,
+        event_type_patterns: ["internal.task.review", "internal.task.ready"],
+      }),
+    ).toBeNull();
+    expect(
+      bindingRunNowUnavailableReason({
+        ...managedReview,
+        target_agent_service_id: undefined,
+      }),
+    ).toBe(MANAGED_REVIEW_RUN_NOW_HINT);
+    expect(
+      bindingRunNowUnavailableReason({
+        ...managedReview,
+        source_kind: "github",
+      }),
+    ).toBeNull();
   });
 });
 

@@ -2,6 +2,8 @@ package memstore
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
 	"fmt"
 	"math"
 	"sort"
@@ -17,7 +19,11 @@ type taskRunStore struct {
 	mu          sync.RWMutex
 	items       map[string]map[string]*domain.TaskRun
 	logs        map[string]map[string][]*domain.TaskRunLogEntry
+	logReceipts map[string]map[string]map[string]taskRunLogReceipt
 	completions map[string]map[string]string
+	// leaseTokenHashes gives memstore parity with FleetDB's opaque
+	// X-Lease-Token verification without putting the secret on TaskRun DTOs.
+	leaseTokenHashes map[string]map[string][sha256.Size]byte
 	// blockedTasks records task IDs blocked via TaskRunFinish.BlockTask.
 	// memstore has no issue model (issues live in fleet-db), so this is
 	// the in-memory stand-in tests use to observe the block signal.
@@ -29,21 +35,112 @@ type taskRunStore struct {
 	nodes        *nodeStore
 }
 
+type taskRunLogFingerprint struct {
+	NodeID         string
+	LeaseID        string
+	LeaseTokenHash [sha256.Size]byte
+	FencingToken   int64
+	Stream         string
+	Text           string
+	Timestamp      string
+}
+
+type taskRunLogReceipt struct {
+	fingerprint taskRunLogFingerprint
+	entry       *domain.TaskRunLogEntry
+}
+
 func newTaskRunStore(parent *driverRunStore, steps *driverStepStore, artifacts *artifactStore, profiles *workerProfileStore, nodes *nodeStore) *taskRunStore {
 	return &taskRunStore{
-		items:        make(map[string]map[string]*domain.TaskRun),
-		logs:         make(map[string]map[string][]*domain.TaskRunLogEntry),
-		completions:  make(map[string]map[string]string),
-		blockedTasks: make(map[string]map[string]bool),
-		parent:       parent,
-		steps:        steps,
-		artifacts:    artifacts,
-		profiles:     profiles,
-		nodes:        nodes,
+		items:            make(map[string]map[string]*domain.TaskRun),
+		logs:             make(map[string]map[string][]*domain.TaskRunLogEntry),
+		logReceipts:      make(map[string]map[string]map[string]taskRunLogReceipt),
+		completions:      make(map[string]map[string]string),
+		leaseTokenHashes: make(map[string]map[string][sha256.Size]byte),
+		blockedTasks:     make(map[string]map[string]bool),
+		parent:           parent,
+		steps:            steps,
+		artifacts:        artifacts,
+		profiles:         profiles,
+		nodes:            nodes,
 	}
 }
 
 var _ store.TaskRunStore = (*taskRunStore)(nil)
+var _ store.TaskRunTerminalConvergenceStore = (*taskRunStore)(nil)
+
+func (s *taskRunStore) ListTaskRunTerminalConvergenceCandidates(
+	_ context.Context,
+	query store.TaskRunTerminalConvergenceQuery,
+) (store.TaskRunTerminalConvergencePage, error) {
+	query.WorkspaceKey = strings.TrimSpace(query.WorkspaceKey)
+	query.After = strings.TrimSpace(query.After)
+	if query.WorkspaceKey == "" || query.RequiredVersion <= 0 {
+		return store.TaskRunTerminalConvergencePage{}, fmt.Errorf("terminal convergence workspace and positive version are required: %w", domain.ErrInvalid)
+	}
+	limit := query.Limit
+	if limit <= 0 || limit > 1000 {
+		limit = 100
+	}
+
+	s.mu.RLock()
+	ids := make([]string, 0)
+	for id, run := range s.items[query.WorkspaceKey] {
+		if id <= query.After || run == nil || !run.Status.IsTerminal() ||
+			taskRunTerminalConvergenceSatisfiedMem(run, query.RequiredVersion) {
+			continue
+		}
+		ids = append(ids, id)
+	}
+	s.mu.RUnlock()
+	sort.Strings(ids)
+
+	page := store.TaskRunTerminalConvergencePage{}
+	if len(ids) > limit {
+		page.TaskRunIDs = append([]string(nil), ids[:limit]...)
+		page.Next = page.TaskRunIDs[len(page.TaskRunIDs)-1]
+	} else {
+		page.TaskRunIDs = append([]string(nil), ids...)
+	}
+	return page, nil
+}
+
+func (s *taskRunStore) CompleteTaskRunTerminalConvergence(
+	_ context.Context,
+	command store.TaskRunTerminalConvergenceComplete,
+) (*store.TaskRunTerminalConvergenceResult, error) {
+	command.WorkspaceKey = strings.TrimSpace(command.WorkspaceKey)
+	command.TaskRunID = strings.TrimSpace(command.TaskRunID)
+	command.CompletedAt = command.CompletedAt.UTC()
+	if command.WorkspaceKey == "" || command.TaskRunID == "" || command.RequiredVersion <= 0 || command.CompletedAt.IsZero() {
+		return nil, fmt.Errorf("terminal convergence identity, positive version, and completion time are required: %w", domain.ErrInvalid)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	run, ok := s.items[command.WorkspaceKey][command.TaskRunID]
+	if !ok {
+		return nil, fmt.Errorf("task run %q in workspace %q: %w", command.TaskRunID, command.WorkspaceKey, domain.ErrNotFound)
+	}
+	if !run.Status.IsTerminal() {
+		return nil, fmt.Errorf("task run %q in workspace %q: %w", command.TaskRunID, command.WorkspaceKey, domain.ErrInvalidTransition)
+	}
+	if taskRunTerminalConvergenceSatisfiedMem(run, command.RequiredVersion) {
+		return &store.TaskRunTerminalConvergenceResult{TaskRun: cloneTaskRun(run), Replayed: true}, nil
+	}
+	if run.TerminalConvergenceVersion < 0 ||
+		(run.TerminalConvergenceVersion == 0) != (run.TerminalConvergedAt == nil) ||
+		run.TerminalConvergenceVersion >= command.RequiredVersion {
+		return nil, fmt.Errorf("task run %q in workspace %q has an invalid terminal convergence marker: %w", command.TaskRunID, command.WorkspaceKey, domain.ErrInvalidTransition)
+	}
+	run.TerminalConvergenceVersion = command.RequiredVersion
+	run.TerminalConvergedAt = &command.CompletedAt
+	return &store.TaskRunTerminalConvergenceResult{TaskRun: cloneTaskRun(run)}, nil
+}
+
+func taskRunTerminalConvergenceSatisfiedMem(run *domain.TaskRun, requiredVersion int) bool {
+	return run != nil && run.TerminalConvergenceVersion >= requiredVersion && run.TerminalConvergedAt != nil
+}
 
 func (s *taskRunStore) Create(ctx context.Context, in store.TaskRunCreate) (*domain.TaskRun, error) {
 	prepared, err := s.prepareTaskRunCreateMem(ctx, in)
@@ -60,6 +157,7 @@ func (s *taskRunStore) Create(ctx context.Context, in store.TaskRunCreate) (*dom
 	}
 	run := newTaskRunMem(prepared, time.Now().UTC())
 	s.items[prepared.WorkspaceKey][prepared.TaskRunID] = run
+	s.setTaskRunLeaseTokenLocked(prepared.WorkspaceKey, prepared.TaskRunID, prepared.LeaseToken)
 	return cloneTaskRun(run), nil
 }
 
@@ -108,6 +206,7 @@ func newTaskRunMem(in store.TaskRunCreate, now time.Time) *domain.TaskRun {
 		RunnerEntrypoint: in.RunnerEntrypoint,
 		RunnerVersionID:  in.RunnerVersionID,
 		ProviderProfile:  in.ProviderProfile,
+		TargetNodeID:     in.TargetNodeID,
 		Status:           status,
 		NodeID:           in.NodeID,
 		LeaseID:          in.LeaseID,
@@ -165,6 +264,7 @@ func (s *taskRunStore) ClaimQueued(ctx context.Context, ws string, claim store.T
 			return nil, fmt.Errorf("node %q capacity for task runs in workspace %q: %w", normalized.NodeID, ws, domain.ErrInvalidTransition)
 		}
 		applyTaskRunClaimMem(run, normalized, now)
+		s.setTaskRunLeaseTokenLocked(ws, run.TaskRunID, normalized.LeaseToken)
 		return cloneTaskRun(run), nil
 	}
 	if normalized.TaskRunID != "" {
@@ -310,6 +410,9 @@ func (s *taskRunStore) Finish(_ context.Context, ws, taskRunID string, finish st
 	if run.Status.IsTerminal() {
 		return nil, fmt.Errorf("task run %q in workspace %q: %w", taskRunID, ws, domain.ErrInvalidTransition)
 	}
+	if err := s.validateTaskRunLeaseTokenLocked(ws, taskRunID, finish.LeaseToken); err != nil {
+		return nil, err
+	}
 	if run.LeaseID != "" || run.FencingToken != 0 {
 		if finish.NodeID != run.NodeID || finish.LeaseID != run.LeaseID || finish.FencingToken != run.FencingToken {
 			return nil, fmt.Errorf("task run %q in workspace %q: %w", taskRunID, ws, domain.ErrNotOwner)
@@ -322,6 +425,17 @@ func (s *taskRunStore) Finish(_ context.Context, ws, taskRunID string, finish st
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
+	applyTaskRunFinishMem(run, finish, now)
+	if finish.BlockTask && strings.TrimSpace(run.TaskID) != "" {
+		if s.blockedTasks[ws] == nil {
+			s.blockedTasks[ws] = make(map[string]bool)
+		}
+		s.blockedTasks[ws][run.TaskID] = true
+	}
+	return cloneTaskRun(run), nil
+}
+
+func applyTaskRunFinishMem(run *domain.TaskRun, finish store.TaskRunFinish, now time.Time) {
 	run.Status = finish.Status
 	run.ExitCode = clonePtr(finish.ExitCode)
 	run.LogsRef = finish.LogsRef
@@ -336,13 +450,6 @@ func (s *taskRunStore) Finish(_ context.Context, ws, taskRunID string, finish st
 	run.ErrorMessage = finish.ErrorMessage
 	run.FinishedAt = &now
 	run.UpdatedAt = now
-	if finish.BlockTask && strings.TrimSpace(run.TaskID) != "" {
-		if s.blockedTasks[ws] == nil {
-			s.blockedTasks[ws] = make(map[string]bool)
-		}
-		s.blockedTasks[ws][run.TaskID] = true
-	}
-	return cloneTaskRun(run), nil
 }
 
 // TaskBlocked reports whether a BlockTask finish marked the given task ID
@@ -363,6 +470,9 @@ func (s *taskRunStore) Heartbeat(_ context.Context, ws, taskRunID string, heartb
 	}
 	if run.Status != domain.TaskRunRunning {
 		return nil, fmt.Errorf("task run %q in workspace %q: %w", taskRunID, ws, domain.ErrInvalidTransition)
+	}
+	if err := s.validateTaskRunLeaseTokenLocked(ws, taskRunID, heartbeat.LeaseToken); err != nil {
+		return nil, err
 	}
 	if run.LeaseID != "" || run.FencingToken != 0 {
 		if heartbeat.NodeID != run.NodeID || heartbeat.LeaseID != run.LeaseID || heartbeat.FencingToken != run.FencingToken {
@@ -395,6 +505,9 @@ func (s *taskRunStore) Requeue(_ context.Context, ws, taskRunID string, requeue 
 	if run.Status != domain.TaskRunRunning {
 		return nil, fmt.Errorf("task run %q in workspace %q: %w", taskRunID, ws, domain.ErrInvalidTransition)
 	}
+	if err := s.validateTaskRunLeaseTokenLocked(ws, taskRunID, requeue.LeaseToken); err != nil {
+		return nil, err
+	}
 	if run.LeaseID != "" || run.FencingToken != 0 {
 		if requeue.NodeID != run.NodeID || requeue.LeaseID != run.LeaseID || requeue.FencingToken != run.FencingToken {
 			return nil, fmt.Errorf("task run %q in workspace %q: %w", taskRunID, ws, domain.ErrNotOwner)
@@ -422,6 +535,7 @@ func (s *taskRunStore) Requeue(_ context.Context, ws, taskRunID string, requeue 
 	run.RuntimeMetadata = mergeStringMapMem(run.RuntimeMetadata, requeue.RuntimeMetadata)
 	run.NextEligibleAt = requeue.NextEligibleAt
 	run.UpdatedAt = now
+	delete(s.leaseTokenHashes[ws], taskRunID)
 	return cloneTaskRun(run), nil
 }
 
@@ -433,6 +547,9 @@ func (s *taskRunStore) Complete(ctx context.Context, ws, taskRunID string, compl
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.validateTaskRunLeaseTokenLocked(ws, taskRunID, complete.LeaseToken); err != nil {
+		return nil, err
+	}
 	if run, handled, err := s.completedTaskRunByCompletionIDLocked(ws, taskRunID, normalized.CompletionID); handled || err != nil {
 		return run, err
 	}
@@ -620,8 +737,18 @@ func taskRunUsageValuesValidMem(inputTokens, outputTokens, cacheReadTokens, cach
 }
 
 func (s *taskRunStore) AppendLog(_ context.Context, ws, taskRunID string, appendLog store.TaskRunLogAppend) (*domain.TaskRunLogEntry, error) {
+	appendLog, fingerprint, err := normalizeTaskRunLogAppendMem(appendLog)
+	if err != nil {
+		return nil, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if receipt, ok := s.logReceipts[ws][taskRunID][appendLog.RequestID]; ok {
+		if receipt.fingerprint != fingerprint {
+			return nil, fmt.Errorf("task run log request %q conflicts with its committed append: %w", appendLog.RequestID, domain.ErrConflict)
+		}
+		return cloneTaskRunLogEntry(receipt.entry), nil
+	}
 	run, ok := s.items[ws][taskRunID]
 	if !ok {
 		return nil, fmt.Errorf("task run %q in workspace %q: %w", taskRunID, ws, domain.ErrNotFound)
@@ -629,20 +756,43 @@ func (s *taskRunStore) AppendLog(_ context.Context, ws, taskRunID string, append
 	if run.Status != domain.TaskRunRunning {
 		return nil, fmt.Errorf("task run %q in workspace %q: %w", taskRunID, ws, domain.ErrInvalidTransition)
 	}
+	if err := s.validateTaskRunLeaseTokenLocked(ws, taskRunID, appendLog.LeaseToken); err != nil {
+		return nil, err
+	}
 	if run.LeaseID != "" || run.FencingToken != 0 {
 		if appendLog.NodeID != run.NodeID || appendLog.LeaseID != run.LeaseID || appendLog.FencingToken != run.FencingToken {
 			return nil, fmt.Errorf("task run %q in workspace %q: %w", taskRunID, ws, domain.ErrNotOwner)
 		}
 	}
+	return s.appendTaskRunLogEntryLocked(ws, taskRunID, appendLog, fingerprint), nil
+}
+
+func normalizeTaskRunLogAppendMem(appendLog store.TaskRunLogAppend) (store.TaskRunLogAppend, taskRunLogFingerprint, error) {
+	appendLog.RequestID = strings.TrimSpace(appendLog.RequestID)
+	appendLog.NodeID = strings.TrimSpace(appendLog.NodeID)
+	appendLog.LeaseID = strings.TrimSpace(appendLog.LeaseID)
+	appendLog.Stream = strings.TrimSpace(appendLog.Stream)
+	if appendLog.Stream == "" {
+		appendLog.Stream = "stdout"
+	}
+	if appendLog.RequestID == "" || appendLog.Timestamp.IsZero() {
+		return store.TaskRunLogAppend{}, taskRunLogFingerprint{}, fmt.Errorf("append task run log request_id and timestamp required: %w", domain.ErrInvalid)
+	}
+	appendLog.Timestamp = appendLog.Timestamp.UTC()
+	fingerprint := taskRunLogFingerprint{
+		NodeID:         appendLog.NodeID,
+		LeaseID:        appendLog.LeaseID,
+		LeaseTokenHash: sha256.Sum256([]byte(appendLog.LeaseToken)),
+		FencingToken:   appendLog.FencingToken,
+		Stream:         appendLog.Stream,
+		Text:           appendLog.Text,
+		Timestamp:      appendLog.Timestamp.Format(time.RFC3339Nano),
+	}
+	return appendLog, fingerprint, nil
+}
+
+func (s *taskRunStore) appendTaskRunLogEntryLocked(ws, taskRunID string, appendLog store.TaskRunLogAppend, fingerprint taskRunLogFingerprint) *domain.TaskRunLogEntry {
 	now := time.Now().UTC()
-	ts := appendLog.Timestamp
-	if ts.IsZero() {
-		ts = now
-	}
-	stream := appendLog.Stream
-	if stream == "" {
-		stream = "stdout"
-	}
 	if s.logs[ws] == nil {
 		s.logs[ws] = make(map[string][]*domain.TaskRunLogEntry)
 	}
@@ -650,16 +800,51 @@ func (s *taskRunStore) AppendLog(_ context.Context, ws, taskRunID string, append
 		WorkspaceKey: ws,
 		TaskRunID:    taskRunID,
 		Sequence:     int64(len(s.logs[ws][taskRunID]) + 1),
-		Stream:       stream,
+		Stream:       appendLog.Stream,
 		Text:         appendLog.Text,
 		NodeID:       appendLog.NodeID,
 		LeaseID:      appendLog.LeaseID,
 		FencingToken: appendLog.FencingToken,
-		Timestamp:    ts,
+		Timestamp:    appendLog.Timestamp,
 		CreatedAt:    now,
 	}
 	s.logs[ws][taskRunID] = append(s.logs[ws][taskRunID], entry)
-	return cloneTaskRunLogEntry(entry), nil
+	if s.logReceipts[ws] == nil {
+		s.logReceipts[ws] = make(map[string]map[string]taskRunLogReceipt)
+	}
+	if s.logReceipts[ws][taskRunID] == nil {
+		s.logReceipts[ws][taskRunID] = make(map[string]taskRunLogReceipt)
+	}
+	s.logReceipts[ws][taskRunID][appendLog.RequestID] = taskRunLogReceipt{
+		fingerprint: fingerprint,
+		entry:       cloneTaskRunLogEntry(entry),
+	}
+	return cloneTaskRunLogEntry(entry)
+}
+
+func (s *taskRunStore) setTaskRunLeaseTokenLocked(ws, taskRunID, token string) {
+	if strings.TrimSpace(token) == "" {
+		return
+	}
+	if s.leaseTokenHashes[ws] == nil {
+		s.leaseTokenHashes[ws] = make(map[string][sha256.Size]byte)
+	}
+	s.leaseTokenHashes[ws][taskRunID] = sha256.Sum256([]byte(token))
+}
+
+func (s *taskRunStore) validateTaskRunLeaseTokenLocked(ws, taskRunID, token string) error {
+	want, ok := s.leaseTokenHashes[ws][taskRunID]
+	if !ok {
+		// Legacy fixtures created before a claim do not have a token. Keep that
+		// compatibility shape unfenced by secret while every seeded/claimed run
+		// enforces the same opaque-token check as FleetDB.
+		return nil
+	}
+	got := sha256.Sum256([]byte(token))
+	if subtle.ConstantTimeCompare(want[:], got[:]) != 1 {
+		return fmt.Errorf("task run %q in workspace %q: %w", taskRunID, ws, domain.ErrNotOwner)
+	}
+	return nil
 }
 
 func (s *taskRunStore) ListLogs(_ context.Context, ws, taskRunID string, filter store.TaskRunLogFilter) ([]*domain.TaskRunLogEntry, error) {

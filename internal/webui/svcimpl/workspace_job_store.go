@@ -16,7 +16,7 @@ const (
 	jobCreateTimeout   = 5 * time.Minute
 )
 
-// WorkspaceJobStore manages async workspace creation jobs. Jobs are keyed by
+// WorkspaceJobStore manages async workspace mutation jobs. Jobs are keyed by
 // UUID in a sync.Map. Terminal jobs (done or failed) expire after
 // jobExpiryDuration. A background goroutine cleans up expired entries.
 //
@@ -36,16 +36,38 @@ func NewWorkspaceJobStore() *WorkspaceJobStore {
 	return s
 }
 
-// Start launches an async workspace creation job. It stores an initial
-// "running" entry, spawns a goroutine that calls createFn, and returns the
-// job ID immediately.
+// Start launches an async workspace creation job.
 func (s *WorkspaceJobStore) Start(req service.WorkspaceCreateRequest, createFn service.WorkspaceCreateFn) string {
 	id := uuid.New().String()
 	if req.Type == "clone" && req.Name != "" {
 		id = service.WorkspaceKeyFromName(req.Name)
 	}
+	return s.start(id, req.Name, "workspace creation failed", func(ctx context.Context) (service.WorkspaceCreateResult, error) {
+		return createFn(ctx, req)
+	})
+}
 
-	// Store initial running state.
+// StartAddRepos launches an async remote-repository attachment job. Add-repo
+// jobs use opaque UUIDs so repeated attachments to the same workspace do not
+// overwrite one another or collide with durable workspace-creation job IDs.
+func (s *WorkspaceJobStore) StartAddRepos(
+	req service.WorkspaceAddReposRequest,
+	addReposFn service.WorkspaceAddReposFn,
+) string {
+	id := uuid.New().String()
+	return s.start(id, req.WorkspaceID, "repository attachment failed", func(ctx context.Context) (service.WorkspaceCreateResult, error) {
+		return addReposFn(ctx, req)
+	})
+}
+
+type workspaceJobRun func(context.Context) (service.WorkspaceCreateResult, error)
+
+// start stores an initial running snapshot, executes run under the job timeout,
+// and replaces the snapshot exactly once with a terminal result.
+func (s *WorkspaceJobStore) start(
+	id, target, fallbackError string,
+	run workspaceJobRun,
+) string {
 	s.jobs.Store(id, &service.WorkspaceJob{
 		ID:       id,
 		Status:   service.JobStatusRunning,
@@ -56,17 +78,17 @@ func (s *WorkspaceJobStore) Start(req service.WorkspaceCreateRequest, createFn s
 		ctx, cancel := context.WithTimeout(context.Background(), jobCreateTimeout)
 		defer cancel()
 
-		result, err := createFn(ctx, req)
+		result, err := run(ctx)
 		if err != nil {
-			errMsg := sanitizeJobError(err)
+			errMsg := sanitizeJobError(err, fallbackError)
 			s.jobs.Store(id, &service.WorkspaceJob{
 				ID:          id,
 				Status:      service.JobStatusFailed,
 				Error:       errMsg,
 				CompletedAt: time.Now(),
 			})
-			logger.Warn("async workspace creation failed",
-				"job_id", id, "name", req.Name, "err", err)
+			logger.Warn("async workspace mutation failed",
+				"job_id", id, "target", target, "err", err)
 			return
 		}
 
@@ -76,8 +98,8 @@ func (s *WorkspaceJobStore) Start(req service.WorkspaceCreateRequest, createFn s
 			WorkspaceID: result.WorkspaceID,
 			CompletedAt: time.Now(),
 		})
-		logger.Info("async workspace creation completed",
-			"job_id", id, "name", req.Name, "workspace_id", result.WorkspaceID)
+		logger.Info("async workspace mutation completed",
+			"job_id", id, "target", target, "workspace_id", result.WorkspaceID)
 	}()
 
 	return id
@@ -129,7 +151,7 @@ func (s *WorkspaceJobStore) evictExpired() {
 // sanitizeJobError extracts a user-facing message from a creation error.
 // If the error implements the createErrorer interface (matching workspaceerrors.CreateError),
 // use its Message field. Otherwise return a generic message to avoid leaking internals.
-func sanitizeJobError(err error) string {
+func sanitizeJobError(err error, fallback string) string {
 	type createErrorer interface {
 		error
 		CreateMessage() string
@@ -146,5 +168,5 @@ func sanitizeJobError(err error) string {
 			break
 		}
 	}
-	return "workspace creation failed"
+	return fallback
 }

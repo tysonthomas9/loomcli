@@ -326,7 +326,12 @@ type TriggerBindingStore interface {
 type TriggerEventFilter struct {
 	SourceKind       string
 	TriggerBindingID string
-	Limit            int
+	// SubjectRef is the immutable subject association stamped at event
+	// admission (for issue journal events, "issue:<task-id>"). Exact matching
+	// lets read models join an event back to its task without inspecting the
+	// event payload.
+	SubjectRef string
+	Limit      int
 }
 
 // TriggerEventStore is a read-only view of persisted trigger events.
@@ -655,6 +660,25 @@ type DriverRunOutcomeStore interface {
 	RetryDriverRunOutcome(context.Context, DriverRunOutcomeRetry) error
 }
 
+// TerminalDriverRunWorkRecoveryClaim leases the same immutable terminal
+// snapshot through an independently acknowledged convergence lane. Keeping
+// these command types distinct prevents an ordinary outcome acknowledgement
+// from completing or rescheduling terminal-work recovery.
+type TerminalDriverRunWorkRecoveryClaim DriverRunOutcomeClaim
+
+type TerminalDriverRunWorkRecoveryCompletion DriverRunOutcomeCompletion
+
+type TerminalDriverRunWorkRecoveryRetry DriverRunOutcomeRetry
+
+// TerminalDriverRunWorkRecoveryQueueStore is the optional durable queue that
+// drives the atomic RecoverTerminalDriverRunWork command. Attempt belongs to
+// this lane and is independent from ordinary run-outcome delivery attempts.
+type TerminalDriverRunWorkRecoveryQueueStore interface {
+	ClaimTerminalDriverRunWorkRecoveries(context.Context, TerminalDriverRunWorkRecoveryClaim) ([]DriverRunOutcome, error)
+	CompleteTerminalDriverRunWorkRecovery(context.Context, TerminalDriverRunWorkRecoveryCompletion) error
+	RetryTerminalDriverRunWorkRecovery(context.Context, TerminalDriverRunWorkRecoveryRetry) error
+}
+
 // DriverRunCancelSupport is an OPTIONAL DriverRunStore capability (detected
 // via type assertion, like TriggerEventAppender) backing the composition
 // cancel cascade (AW10): when a parent run reaches a terminal status its
@@ -749,9 +773,14 @@ type TaskRunCreate struct {
 	RunnerEntrypoint string
 	RunnerVersionID  string
 	ProviderProfile  string
+	TargetNodeID     string
 	Status           domain.TaskRunStatus
 	NodeID           string
 	LeaseID          string
+	// LeaseToken is accepted only by compatibility stores that must seed a
+	// pre-running fenced TaskRun. Production claim/start transports carry the
+	// token as an opaque header and never persist or return it in the TaskRun.
+	LeaseToken       string
 	FencingToken     int64
 	RunnerPlacement  domain.TaskRunPlacement
 	SandboxPlacement domain.TaskRunPlacement
@@ -865,6 +894,7 @@ type TaskRunComplete struct {
 }
 
 type TaskRunLogAppend struct {
+	RequestID    string
 	NodeID       string
 	LeaseID      string
 	LeaseToken   string
@@ -877,6 +907,41 @@ type TaskRunLogAppend struct {
 type TaskRunLogFilter struct {
 	AfterSequence int64
 	Limit         int
+}
+
+// TaskRunTerminalConvergenceQuery selects terminal TaskRuns whose durable
+// Execution convergence marker is older than RequiredVersion. After is an
+// exclusive TaskRun-ID cursor; each periodic pass starts from an empty cursor.
+type TaskRunTerminalConvergenceQuery struct {
+	WorkspaceKey    string
+	RequiredVersion int
+	After           string
+	Limit           int
+}
+
+type TaskRunTerminalConvergencePage struct {
+	TaskRunIDs []string `json:"task_run_ids"`
+	Next       string   `json:"next,omitempty"`
+}
+
+type TaskRunTerminalConvergenceComplete struct {
+	WorkspaceKey    string
+	TaskRunID       string
+	RequiredVersion int
+	CompletedAt     time.Time
+}
+
+type TaskRunTerminalConvergenceResult struct {
+	TaskRun  *domain.TaskRun `json:"task_run"`
+	Replayed bool            `json:"replayed"`
+}
+
+// TaskRunTerminalConvergenceStore is the narrow Execution-owned checkpoint
+// port. It is intentionally separate from the general TaskRun lifecycle store
+// so callers cannot spoof the marker through runtime metadata.
+type TaskRunTerminalConvergenceStore interface {
+	ListTaskRunTerminalConvergenceCandidates(context.Context, TaskRunTerminalConvergenceQuery) (TaskRunTerminalConvergencePage, error)
+	CompleteTaskRunTerminalConvergence(context.Context, TaskRunTerminalConvergenceComplete) (*TaskRunTerminalConvergenceResult, error)
 }
 
 type TaskRunStore interface {

@@ -84,6 +84,123 @@ func TestLocalTaskWorktreeResolverCreatesIsolatedTaskRunWorktree(t *testing.T) {
 	}
 }
 
+func TestLocalTaskWorktreeResolverRequiresSelectorForMultipleRepos(t *testing.T) {
+	repos := []*domain.Repo{
+		{Name: "alpha", SourceRepoID: "source-alpha"},
+		{Name: "beta", SourceRepoID: "source-beta"},
+	}
+	resolver := LocalTaskWorktreeResolver{}
+
+	if _, err := resolver.selectRepo(context.Background(), "TEST", repos, TaskExecRequest{}); err == nil ||
+		!strings.Contains(err.Error(), "task repo selector required") {
+		t.Fatalf("selectRepo() error = %v, want explicit-selector requirement", err)
+	}
+
+	selected, err := resolver.selectRepo(context.Background(), "TEST", repos, TaskExecRequest{
+		RunnerPlacement: domain.TaskRunPlacement{RepoRef: "source-beta"},
+	})
+	if err != nil {
+		t.Fatalf("selectRepo() with selector: %v", err)
+	}
+	if selected.Name != "beta" {
+		t.Fatalf("selectRepo() = %q, want beta", selected.Name)
+	}
+}
+
+func TestLocalTaskWorktreeResolverKeepsSingleRepoFallback(t *testing.T) {
+	repo := &domain.Repo{Name: "only", SourceRepoID: "source-only"}
+	selected, err := (LocalTaskWorktreeResolver{}).selectRepo(
+		context.Background(), "TEST", []*domain.Repo{repo}, TaskExecRequest{},
+	)
+	if err != nil {
+		t.Fatalf("selectRepo() single repo: %v", err)
+	}
+	if selected != repo {
+		t.Fatalf("selectRepo() = %#v, want only repo", selected)
+	}
+}
+
+func TestLocalTaskWorktreeResolverTreatsWorkerProfileReposAsScope(t *testing.T) {
+	ctx := context.Background()
+	repos := []*domain.Repo{
+		{Name: "alpha", SourceRepoID: "source-alpha"},
+		{Name: "beta", SourceRepoID: "source-beta"},
+	}
+	st := memstore.New()
+	for _, profile := range []store.WorkerProfileCreate{
+		{WorkspaceKey: "TEST", ProfileID: "multi", Role: "task", Repos: []string{"alpha", "beta"}},
+		{WorkspaceKey: "TEST", ProfileID: "beta-only", Role: "task", Repos: []string{"source-beta"}},
+		{WorkspaceKey: "TEST", ProfileID: "alpha-only", Role: "task", Repos: []string{"alpha"}},
+	} {
+		if _, err := st.WorkerProfiles().Create(ctx, profile); err != nil {
+			t.Fatalf("create worker profile %q: %v", profile.ProfileID, err)
+		}
+	}
+	resolver := LocalTaskWorktreeResolver{Store: st}
+
+	if _, err := resolver.selectRepo(ctx, "TEST", repos, TaskExecRequest{WorkerProfileID: "multi"}); err == nil ||
+		!strings.Contains(err.Error(), "scope matches 2") {
+		t.Fatalf("multi-repo profile without task selector error = %v, want ambiguity", err)
+	}
+	selected, err := resolver.selectRepo(ctx, "TEST", repos, TaskExecRequest{WorkerProfileID: "beta-only"})
+	if err != nil || selected.Name != "beta" {
+		t.Fatalf("single-repo profile fallback = %+v, %v; want beta", selected, err)
+	}
+	selected, err = resolver.selectRepo(ctx, "TEST", repos, TaskExecRequest{
+		WorkerProfileID: "multi",
+		RunnerPlacement: domain.TaskRunPlacement{RepoRef: "source-beta"},
+	})
+	if err != nil || selected.Name != "beta" {
+		t.Fatalf("explicit selector within profile scope = %+v, %v; want beta", selected, err)
+	}
+	if _, err := resolver.selectRepo(ctx, "TEST", repos, TaskExecRequest{
+		WorkerProfileID: "alpha-only",
+		RunnerPlacement: domain.TaskRunPlacement{RepoRef: "source-beta"},
+	}); err == nil || !strings.Contains(err.Error(), "outside worker profile") {
+		t.Fatalf("explicit selector outside profile scope error = %v, want fail-closed scope error", err)
+	}
+}
+
+func TestLocalTaskWorktreeResolverDoesNotIgnoreInvalidExplicitSelectorInSingleRepoWorkspace(t *testing.T) {
+	repo := &domain.Repo{Name: "only", SourceRepoID: "source-only"}
+	if _, err := (LocalTaskWorktreeResolver{}).selectRepo(
+		context.Background(), "TEST", []*domain.Repo{repo}, TaskExecRequest{
+			RunnerPlacement: domain.TaskRunPlacement{RepoRef: "missing"},
+		},
+	); err == nil || !strings.Contains(err.Error(), "no workspace repo matches") {
+		t.Fatalf("invalid explicit selector error = %v, want no silent single-repo fallback", err)
+	}
+}
+
+func TestLocalTaskWorktreeResolverProfileScopeDoesNotAliasRemoteBasenames(t *testing.T) {
+	ctx := context.Background()
+	repos := []*domain.Repo{
+		{Name: "alpha-app", SourceRepoID: "source-alpha-app", RemoteURL: "https://github.com/org-a/app.git"},
+		{Name: "beta-app", SourceRepoID: "source-beta-app", RemoteURL: "git@github.com:org-b/app.git"},
+	}
+	st := memstore.New()
+	if _, err := st.WorkerProfiles().Create(ctx, store.WorkerProfileCreate{
+		WorkspaceKey: "TEST", ProfileID: "org-a-only", Role: "task", Repos: []string{"org-a/app"},
+	}); err != nil {
+		t.Fatalf("create worker profile: %v", err)
+	}
+	resolver := LocalTaskWorktreeResolver{Store: st}
+
+	selected, err := resolver.selectRepo(ctx, "TEST", repos, TaskExecRequest{WorkerProfileID: "org-a-only"})
+	if err != nil || selected.Name != "alpha-app" {
+		t.Fatalf("qualified profile scope fallback = %+v, %v; want alpha-app", selected, err)
+	}
+	if _, err := resolver.selectRepo(ctx, "TEST", repos, TaskExecRequest{
+		WorkerProfileID: "org-a-only",
+		RunnerPlacement: domain.TaskRunPlacement{RepoRef: "org-b/app"},
+	}); err == nil || !strings.Contains(err.Error(), "outside worker profile") {
+		t.Fatalf("same-basename cross-org selector error = %v, want exact scope denial", err)
+	}
+	if selected := findRepoBySelector(repos, "app"); selected != nil {
+		t.Fatalf("ambiguous basename selected %+v, want fail closed", selected)
+	}
+}
+
 func gitCmd(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	_ = testGitOutput(t, dir, args...)

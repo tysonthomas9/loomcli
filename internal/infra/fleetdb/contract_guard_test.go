@@ -15,8 +15,8 @@ package fleetdb
 //     template statically would need real data-flow analysis, which is
 //     disproportionate for ~130 routes that change rarely.
 //  2. The table cannot silently rot: TestFleetDBClientCallSiteCount counts
-//     the package's service-client and direct Client do/doWithHeaders/doRaw/
-//     doBytes call sites and
+//     the package's service-client and direct Client do/doWithHeaders/
+//     doWithHeadersStatus/doRaw/doBytes call sites and
 //     fails when the count drifts from expectedClientCallSites, forcing the
 //     editor of the client to revisit the table.
 //  3. The spec snapshot (testdata/fleetdb-openapi.yaml) cannot silently rot:
@@ -51,10 +51,11 @@ const (
 )
 
 // expectedClientCallSites pins the number of service-client and direct Client
-// do/doWithHeaders/doRaw/doBytes call sites in this package's non-test sources.
+// do/doWithHeaders/doWithHeadersStatus/doRaw/doBytes call sites in this
+// package's non-test sources.
 // When you add/remove/move a client call, update clientRoutes below FIRST, then
 // bump this constant.
-const expectedClientCallSites = 181
+const expectedClientCallSites = 206
 
 // clientRoute is one method+path template the client issues. Path params are
 // written as {} (already normalized).
@@ -152,6 +153,13 @@ var clientRoutes = []clientRoute{
 	{"GET", "/api/v1/{}/artifacts/{}/content"},
 	{"POST", "/api/v1/{}/artifacts/{}/finalize"},
 	{"PATCH", "/api/v1/{}/artifacts/{}"},
+	// artifact_commands.go — owner-fenced lifecycle and scoped queries.
+	{"POST", "/api/v1/{}/artifact-commands/create"},
+	{"POST", "/api/v1/{}/artifacts/{}/commands/upload"},
+	{"POST", "/api/v1/{}/artifacts/{}/commands/finalize"},
+	{"POST", "/api/v1/{}/artifacts/{}/commands/reference"},
+	{"GET", "/api/v1/{}/task-runs/{}/artifacts/{}"},
+	{"GET", "/api/v1/{}/task-runs/{}/artifacts"},
 	{"POST", "/api/v1/{}/agent-sessions/{}/leases"},
 	{"GET", "/api/v1/{}/agent-leases/{}"},
 	{"GET", "/api/v1/{}/agent-leases"},
@@ -196,6 +204,9 @@ var clientRoutes = []clientRoute{
 	{"POST", "/api/v1/{}/driver-run-outcomes/claim"},
 	{"POST", "/api/v1/{}/driver-run-outcomes/complete"},
 	{"POST", "/api/v1/{}/driver-run-outcomes/retry"},
+	{"POST", "/api/v1/{}/driver-run-outcomes/terminal-work/claim"},
+	{"POST", "/api/v1/{}/driver-run-outcomes/terminal-work/complete"},
+	{"POST", "/api/v1/{}/driver-run-outcomes/terminal-work/retry"},
 
 	// await_event_notification.go — durable generic-event await reconciliation.
 	{"POST", "/api/v1/{}/await-event-notifications/claim"},
@@ -233,6 +244,24 @@ var clientRoutes = []clientRoute{
 	{"POST", "/api/v1/{}/driver-runs/{}/finish"},
 	{"POST", "/api/v1/{}/driver-runs/recover-stale"},
 	{"POST", "/api/v1/{}/driver-runs/{}/recover-stale-tasks"},
+	// execution.go — atomic Phase-4 intent routes not represented by legacy
+	// CRUD-shaped client methods above.
+	{"POST", "/api/v1/{}/driver-runs/{}/task-runs/request"},
+	{"POST", "/api/v1/{}/driver-runs/{}/work-items/{}/claim"},
+	{"POST", "/api/v1/{}/driver-runs/{}/work-items/{}/release"},
+	{"POST", "/api/v1/{}/driver-runs/{}/work-items/{}/review-handoff"},
+	{"POST", "/api/v1/{}/task-runs/claim-next-and-start"},
+	{"POST", "/api/v1/{}/task-runs/{}/claim-and-start"},
+	{"POST", "/api/v1/{}/task-runs/{}/requeue-and-reset-step"},
+	{"POST", "/api/v1/{}/task-runs/{}/exhaust-retries"},
+	{"POST", "/api/v1/{}/task-runs/{}/work-item/design"},
+	{"GET", "/api/v1/{}/task-runs/terminal-convergence-candidates"},
+	{"POST", "/api/v1/{}/task-runs/{}/complete-terminal-convergence"},
+	{"POST", "/api/v1/{}/driver-steps/{}/repair-terminal"},
+	{"POST", "/api/v1/{}/driver-runs/{}/children/start"},
+	{"POST", "/api/v1/{}/driver-runs/{}/commands/cascade-children"},
+	{"POST", "/api/v1/{}/driver-runs/{}/commands/recover-child-cascade"},
+	{"POST", "/api/v1/{}/driver-runs/{}/commands/recover-terminal-work"},
 	{"POST", "/api/v1/{}/driver-steps"},
 	{"POST", "/api/v1/{}/driver-runs/{}/steps"},
 	{"GET", "/api/v1/{}/driver-steps/{}"},
@@ -385,8 +414,8 @@ func TestFleetDBClientCallSiteCount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("glob package sources: %v", err)
 	}
-	serviceCallRe := regexp.MustCompile(`\.client\.(do|doWithHeaders|doRaw|doBytes)\(ctx`)
-	directClientCallRe := regexp.MustCompile(`\bc\.(do|doWithHeaders|doRaw|doBytes)\(ctx`)
+	serviceCallRe := regexp.MustCompile(`\.client\.(do|doWithHeaders|doWithHeadersStatus|doRaw|doBytes)\(ctx`)
+	directClientCallRe := regexp.MustCompile(`\bc\.(do|doWithHeaders|doWithHeadersStatus|doRaw|doBytes)\(ctx`)
 	total := 0
 	perFile := make([]string, 0, len(files))
 	for _, f := range files {

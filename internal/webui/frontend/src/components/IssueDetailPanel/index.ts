@@ -12,8 +12,6 @@ export type { PRCompareDiffPaneProps } from "./PRCompareDiffPane";
 export type { CollapsibleSectionProps } from "./CollapsibleSection";
 export { SplitDetailSummary } from "./SplitDetailSummary";
 export type { SplitDetailSummaryProps } from "./SplitDetailSummary";
-export { default as sessionTabStyles } from "./sessions/SessionsTab.module.css";
-
 export * from "./actions";
 export * from "./fields";
 export * from "./header";

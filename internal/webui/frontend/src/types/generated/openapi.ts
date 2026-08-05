@@ -395,6 +395,29 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/issues/{id}/repository": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Assign an issue's canonical source repository
+     * @description Atomically assigns the workspace repository and conditionally restores
+     *     a repository-required blocked issue to open. The response is FleetDB's
+     *     authoritative post-command issue projection; clients must not issue a
+     *     separate reopen mutation.
+     */
+    put: operations["setIssueRepository"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/issues/{id}/move": {
     parameters: {
       query?: never;
@@ -675,6 +698,26 @@ export interface paths {
     };
     /** List sessions for a task */
     get: operations["listTaskSessions"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/tasks/{taskId}/workflow-runs": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List task workflow runs not represented by an agent session
+     * @description Returns trigger-admitted DriverRuns joined to the task by the exact immutable TriggerEvent subject_ref. Runs that already created an AgentSession row for this task are excluded because they are already represented by the task sessions endpoint. A TaskRun without an AgentSession remains visible here.
+     */
+    get: operations["listTaskWorkflowRuns"];
     put?: never;
     post?: never;
     delete?: never;
@@ -1258,8 +1301,13 @@ export interface paths {
     /**
      * Update one unified agent entry
      * @description The accepted fields depend on the stored kind. Supervised assignments
-     *     use assignment fields; prompt/scripted records use identity and
-     *     behavior fields; legacy binding entries only support `name`.
+     *     use assignment fields; prompt/scripted records accept mutable record
+     *     fields, while their behavior role is immutable after creation. A
+     *     prompt/scripted cron record also accepts an exact
+     *     attached `binding_id` with `schedule` and/or `schedule_timezone`;
+     *     schedule fields cannot be combined with record fields
+     *     in one request so a failed PATCH never commits a cross-aggregate prefix.
+     *     legacy binding entries only support `name`.
      */
     patch: operations["patchAgent"];
     trace?: never;
@@ -1325,8 +1373,28 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List runs attributed to a durable agent record */
+    /** List run or session history attributed to an agent */
     get: operations["listAgentRuns"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/agents/{id}/sessions/{session_id}/transcript": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get an agent-owned session transcript
+     * @description Returns the canonical transcript for a session owned by the selected agent. This route supports interactive sessions that do not have a task identifier. A session owned by another agent is reported as not found.
+     */
+    get: operations["getAgentSessionTranscript"];
     put?: never;
     post?: never;
     delete?: never;
@@ -1345,10 +1413,15 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * Stop an agent (yield by default, force with body)
-     * @description Without `force` (or empty body): sends `agent_yield` to the daemon,
-     *     returns 202 Accepted. With `{"force": true}`: sends `agent_stop(force=true)`,
-     *     returns 200.
+     * Stop an agent using its runtime owner
+     * @description In store-backed mode, supervised workers durably queue a stop command
+     *     for their daemon and return 202 while desired_state is draining. A
+     *     direct local-daemon deployment waits for the daemon's semantic result
+     *     and returns 200 only after the stop completes. By default the daemon
+     *     requests a cooperative yield before keeping the worker stopped;
+     *     `{"force": true}` skips that yield and terminates directly. Interactive
+     *     agents are owned by the web terminal runtime, so Stop terminates their
+     *     PTY synchronously and returns 200 without enqueueing a daemon command.
      */
     post: operations["stopAgent"];
     delete?: never;
@@ -1366,7 +1439,12 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Start an agent */
+    /**
+     * Start an agent
+     * @description Store-backed supervised workers return 202 after durably queueing the
+     *     start command. Interactive agents and direct local-daemon deployments
+     *     return 200 only after their runtime owner accepts the start.
+     */
     post: operations["startAgent"];
     delete?: never;
     options?: never;
@@ -1383,7 +1461,15 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Restart an agent */
+    /**
+     * Restart an agent
+     * @description Store-backed supervised workers return 202 after durably queueing the
+     *     restart command. A direct local-daemon deployment waits through the
+     *     configured cooperative-yield and SIGTERM escalation and returns 200
+     *     only after the daemon reports completion. Interactive agents return
+     *     200 after synchronously terminating the current PTY so a fresh
+     *     terminal can attach.
+     */
     post: operations["restartAgent"];
     delete?: never;
     options?: never;
@@ -1400,8 +1486,35 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Yield an agent (graceful stop at next safe point) */
+    /**
+     * Yield an agent (graceful stop at next safe point)
+     * @description Store-backed supervised workers return 202 after durably queueing the
+     *     yield command. A direct local-daemon deployment returns 200 after the
+     *     yield marker is written. Interactive agents reject Yield; use Stop.
+     */
     post: operations["yieldAgent"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/agents/{name}/lifecycle-commands/{command_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get durable lifecycle command status
+     * @description Returns the durable status of a lifecycle request. The command must
+     *     belong to the agent named in the route; cross-agent command IDs are
+     *     reported as not found.
+     */
+    get: operations["getAgentLifecycleCommand"];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -3093,6 +3206,42 @@ export interface components {
       };
       task_id?: string;
     };
+    AgentLifecycleResponse: {
+      message: string;
+      /** @description True when a supervised runtime owner accepted the command for asynchronous execution. */
+      pending: boolean;
+      /** @description Durable lifecycle command ID when pending; empty for a synchronous transition. */
+      command_id: string;
+      /** @enum {string} */
+      status:
+        | "queued"
+        | "acked"
+        | "running"
+        | "succeeded"
+        | "failed"
+        | "cancelled";
+    };
+    AgentLifecycleCommandResponse: {
+      command_id: string;
+      /** @enum {string} */
+      action: "start" | "stop" | "restart" | "yield";
+      /** @enum {string} */
+      status:
+        | "queued"
+        | "acked"
+        | "running"
+        | "succeeded"
+        | "failed"
+        | "cancelled";
+      result: string;
+      error_class: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+      /** Format: date-time */
+      acked_at: string | null;
+    };
     StopAgentRequest: components["schemas"]["AgentLifecycleRequest"] & {
       /** @default false */
       force: boolean;
@@ -3338,15 +3487,17 @@ export interface components {
     };
     /**
      * @description Kind-sensitive partial update. Durable records accept `name`,
-     *     `behavior`, and `budget_policy`; legacy binding entries accept only
+     *     `budget_policy`, and agent-owned cron schedule fields; their behavior
+     *     role is immutable after creation. Legacy binding entries accept only
      *     `name`; supervised assignments accept the remaining assignment fields.
      */
     PatchUnifiedAgentRequest: {
       name?: string;
-      behavior?: {
-        role_name?: string;
-      };
       budget_policy?: string;
+      /** @description Exact attached managed binding; required for cron schedule updates. Schedule updates cannot be combined with mutable record fields. */
+      binding_id?: string;
+      schedule?: string;
+      schedule_timezone?: string;
       role_name?: string;
       auto?: boolean;
       backend?: string;
@@ -3375,6 +3526,64 @@ export interface components {
     };
     AgentRunsResponse: {
       agent_id: string;
+      runs: components["schemas"]["DriverRun"][];
+      /** @description Task, terminal, and orchestration sessions for supervised or interactive agents. Durable record and workflow-binding agents return an empty array and use runs instead. */
+      sessions: components["schemas"]["AgentHistorySession"][];
+    };
+    AgentHistorySession: {
+      workspace_key: string;
+      session_id: string;
+      agent_id: string;
+      node_id?: string;
+      /** @enum {string} */
+      kind: "task" | "orchestration" | "terminal" | "maintenance" | "ad_hoc";
+      task_id?: string;
+      terminal_id?: string;
+      parent_session_id?: string;
+      /** @enum {string} */
+      status:
+        | "queued"
+        | "leased"
+        | "starting"
+        | "running"
+        | "idle"
+        | "yielded"
+        | "completed"
+        | "failed"
+        | "cancelled"
+        | "expired";
+      phase?: string;
+      attempt?: number;
+      /** Format: date-time */
+      started_at?: string;
+      /** Format: date-time */
+      last_heartbeat?: string;
+      /** Format: date-time */
+      finished_at?: string | null;
+      summary?: string;
+      error_class?: string;
+      exit_code?: number | null;
+      /** @description Allowlisted, non-sensitive execution metadata. */
+      metadata?: {
+        backend?: string;
+        runtime_strategy?: string;
+        delivery?: string;
+        patch_back_status?: string;
+        local_branch?: string;
+        head_sha?: string;
+        github_head_sha?: string;
+        patch_back_head_sha?: string;
+        github_branch?: string;
+        github_pr_url?: string;
+      };
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    TaskWorkflowRunsResponse: {
+      task_id: string;
+      subject_ref: string;
       runs: components["schemas"]["DriverRun"][];
     };
     DriverRun: {
@@ -3461,20 +3670,46 @@ export interface components {
       has_transcript: boolean;
       has_diff: boolean;
       last_error?: string;
+      runtime_strategy?: string;
+      delivery?: string;
+      patch_back_status?: string;
+      logs_ref?: string;
+      local_branch?: string;
+      head_sha?: string;
+      github_branch?: string;
+      github_pr_url?: string;
+    };
+    TranscriptResponse: {
+      success: boolean;
+      data?: components["schemas"]["TranscriptData"];
+      error?: string;
+    };
+    TranscriptData: {
+      session_id: string;
+      entries: components["schemas"]["TranscriptEntry"][];
     };
     /** @description Single transcript entry from a session */
     TranscriptEntry: {
       seq: number;
       /** Format: date-time */
-      ts: string;
+      timestamp: string;
       /** @enum {string} */
       role: "user" | "assistant" | "system" | "tool";
       /** @enum {string} */
-      type: "text" | "tool_use" | "tool_result";
-      content?: string;
+      type:
+        | "text"
+        | "reasoning"
+        | "tool_use"
+        | "tool_result"
+        | "result"
+        | "session_meta";
+      text?: string;
       tool_name?: string;
-      tool_input?: string;
-      raw?: string;
+      tool_use_id?: string;
+      /** @description Backend-specific tool arguments. */
+      tool_input?: unknown;
+      output?: string;
+      uuid?: string;
     };
     /** @description Session history record (Redis-backed, per-issue) */
     SessionHistoryRecord: {
@@ -3976,7 +4211,7 @@ export interface components {
     IssueId: string;
     /** @description Unified agent identifier or supervised assignment name */
     AgentName: string;
-    /** @description Durable agent record identifier */
+    /** @description Unified agent, supervised assignment, or legacy binding identifier */
     AgentId: string;
   };
   requestBodies: never;
@@ -4929,6 +5164,67 @@ export interface operations {
       };
     };
   };
+  setIssueRepository: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Issue identifier */
+        id: components["parameters"]["IssueId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": {
+          repo: string;
+        };
+      };
+    };
+    responses: {
+      /** @description Repository assigned and canonical issue returned */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            success: boolean;
+            data: components["schemas"]["Issue"];
+          };
+        };
+      };
+      /** @description Invalid issue or repository */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Issue or repository not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Issue changed concurrently or repository assignment conflicts */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
   moveIssue: {
     parameters: {
       query?: never;
@@ -5416,6 +5712,39 @@ export interface operations {
       };
     };
   };
+  listTaskWorkflowRuns: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        taskId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Task workflow run list */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TaskWorkflowRunsResponse"];
+        };
+      };
+      /** @description Invalid task identifier */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
   getSession: {
     parameters: {
       query?: never;
@@ -5471,13 +5800,16 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": {
-            success: boolean;
-            data?: {
-              session_id?: string;
-              entries?: components["schemas"]["TranscriptEntry"][];
-            };
-          };
+          "application/json": components["schemas"]["TranscriptResponse"];
+        };
+      };
+      /** @description Invalid task or session identifier */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TranscriptResponse"];
         };
       };
       /** @description Session not found */
@@ -5485,7 +5817,27 @@ export interface operations {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["TranscriptResponse"];
+        };
+      };
+      /** @description Session transcript retrieval failed */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TranscriptResponse"];
+        };
+      };
+      /** @description Session transcript service unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TranscriptResponse"];
+        };
       };
     };
   };
@@ -6790,7 +7142,7 @@ export interface operations {
       path: {
         /** @description Workspace identifier */
         ws: components["parameters"]["WorkspaceId"];
-        /** @description Durable agent record identifier */
+        /** @description Unified agent, supervised assignment, or legacy binding identifier */
         id: components["parameters"]["AgentId"];
       };
       cookie?: never;
@@ -6860,7 +7212,7 @@ export interface operations {
       path: {
         /** @description Workspace identifier */
         ws: components["parameters"]["WorkspaceId"];
-        /** @description Durable agent record identifier */
+        /** @description Unified agent, supervised assignment, or legacy binding identifier */
         id: components["parameters"]["AgentId"];
       };
       cookie?: never;
@@ -6932,7 +7284,7 @@ export interface operations {
       path: {
         /** @description Workspace identifier */
         ws: components["parameters"]["WorkspaceId"];
-        /** @description Durable agent record identifier */
+        /** @description Unified agent, supervised assignment, or legacy binding identifier */
         id: components["parameters"]["AgentId"];
       };
       cookie?: never;
@@ -6948,7 +7300,7 @@ export interface operations {
           "application/json": components["schemas"]["AgentRunsResponse"];
         };
       };
-      /** @description Unsupported agent kind or invalid limit */
+      /** @description Invalid limit */
       400: {
         headers: {
           [name: string]: unknown;
@@ -6957,7 +7309,7 @@ export interface operations {
           "application/json": components["schemas"]["AgentErrorResponse"];
         };
       };
-      /** @description Agent record not found */
+      /** @description Agent not found */
       404: {
         headers: {
           [name: string]: unknown;
@@ -6995,6 +7347,68 @@ export interface operations {
       };
     };
   };
+  getAgentSessionTranscript: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Unified agent, supervised assignment, or legacy binding identifier */
+        id: components["parameters"]["AgentId"];
+        session_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Canonical transcript */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TranscriptResponse"];
+        };
+      };
+      /** @description Invalid agent or session identifier */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TranscriptResponse"];
+        };
+      };
+      /** @description Session or transcript not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TranscriptResponse"];
+        };
+      };
+      /** @description Agent session transcript retrieval failed */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TranscriptResponse"];
+        };
+      };
+      /** @description Agent session transcript service unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TranscriptResponse"];
+        };
+      };
+    };
+  };
   stopAgent: {
     parameters: {
       query?: never;
@@ -7013,22 +7427,22 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Agent force-stopped */
+      /** @description Interactive or direct local-daemon agent stopped synchronously */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["MessageResponse"];
+          "application/json": components["schemas"]["AgentLifecycleResponse"];
         };
       };
-      /** @description Yield signal sent (graceful stop in progress) */
+      /** @description Supervised worker stop queued for its runtime owner */
       202: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["MessageResponse"];
+          "application/json": components["schemas"]["AgentLifecycleResponse"];
         };
       };
       /** @description Invalid lifecycle request */
@@ -7096,13 +7510,22 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Agent started */
+      /** @description Interactive or direct local-daemon agent started synchronously */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["MessageResponse"];
+          "application/json": components["schemas"]["AgentLifecycleResponse"];
+        };
+      };
+      /** @description Supervised worker start durably queued */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AgentLifecycleResponse"];
         };
       };
       /** @description Invalid lifecycle request */
@@ -7170,13 +7593,22 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Agent restarted */
+      /** @description Interactive or direct local-daemon restart completed synchronously */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["MessageResponse"];
+          "application/json": components["schemas"]["AgentLifecycleResponse"];
+        };
+      };
+      /** @description Supervised worker restart durably queued */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AgentLifecycleResponse"];
         };
       };
       /** @description Invalid lifecycle request */
@@ -7244,13 +7676,22 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Yield signal sent */
+      /** @description Direct local-daemon yield request completed synchronously */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AgentLifecycleResponse"];
+        };
+      };
+      /** @description Supervised worker yield durably queued */
       202: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["MessageResponse"];
+          "application/json": components["schemas"]["AgentLifecycleResponse"];
         };
       };
       /** @description Invalid lifecycle request */
@@ -7290,6 +7731,68 @@ export interface operations {
         };
       };
       /** @description Agent service unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AgentErrorResponse"];
+        };
+      };
+    };
+  };
+  getAgentLifecycleCommand: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Unified agent identifier or supervised assignment name */
+        name: components["parameters"]["AgentName"];
+        command_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Durable lifecycle command status */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AgentLifecycleCommandResponse"];
+        };
+      };
+      /** @description Invalid agent name or command ID */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AgentErrorResponse"];
+        };
+      };
+      /** @description Lifecycle command not found for this agent */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AgentErrorResponse"];
+        };
+      };
+      /** @description Agent command store operation failed */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AgentErrorResponse"];
+        };
+      };
+      /** @description Agent command store unavailable */
       503: {
         headers: {
           [name: string]: unknown;

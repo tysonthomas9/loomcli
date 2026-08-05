@@ -7,18 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/authmode"
-	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/httpclient"
-	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 )
 
 const triggerManagementResponseLimit = 4 << 20
@@ -34,7 +29,6 @@ type triggerManagementClient struct {
 	serverURL string
 	workspace string
 	doer      triggerHTTPDoer
-	bearer    string
 }
 
 type triggerBindingsAPIResponse struct {
@@ -130,32 +124,7 @@ func newTriggerManagementClient(_ context.Context) (*triggerManagementClient, er
 		workspace: workspace,
 		doer:      authClient,
 	}
-	if authClient.AuthMode().Mode == authmode.ModeOpen {
-		if err := validateOpenTriggerManagementEndpoint(parsed); err != nil {
-			return nil, err
-		}
-		credentialDir := filepath.Join(cli.GetWorkspaceRuntimeDir(), ".loom", "operator")
-		token, err := authority.ReadLocalOperatorToken(credentialDir)
-		if err != nil {
-			return nil, fmt.Errorf("trigger management local authentication: %w", err)
-		}
-		client.bearer = token
-	}
 	return client, nil
-}
-
-// validateOpenTriggerManagementEndpoint ensures a remote server cannot claim
-// open mode to make the CLI disclose the durable local operator credential.
-func validateOpenTriggerManagementEndpoint(parsed *url.URL) error {
-	if parsed == nil || parsed.Scheme != "http" || parsed.User != nil || parsed.Host == "" ||
-		parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.Path != "" && parsed.Path != "/") || parsed.Port() == "" {
-		return fmt.Errorf("trigger management open-mode endpoint must be an HTTP loopback IP with an explicit port")
-	}
-	ip := net.ParseIP(parsed.Hostname())
-	if ip == nil || !ip.IsLoopback() {
-		return fmt.Errorf("trigger management open-mode endpoint must use a loopback IP")
-	}
-	return nil
 }
 
 func (c *triggerManagementClient) listBindings(ctx context.Context) ([]*domain.TriggerBinding, error) {
@@ -309,9 +278,6 @@ func (c *triggerManagementClient) doJSON(ctx context.Context, method, path strin
 	req.Header.Set("Accept", "application/json")
 	if input != nil {
 		req.Header.Set("Content-Type", "application/json")
-	}
-	if c.bearer != "" {
-		req.Header.Set("Authorization", "Bearer "+c.bearer)
 	}
 
 	resp, err := c.doer.Do(req)

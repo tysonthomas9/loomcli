@@ -1,9 +1,9 @@
 /**
  * AgentSection displays every agent in the sidebar grouped by interaction mode
  * (Decision 5): Interactive (lead-style agents you talk to) on top, Autonomous
- * (background workers + all trigger bindings — scheduled and event-driven)
- * below. Role-agent rows stay drag-sortable; binding rows are clickable links
- * to the same detail route and are non-sortable for now.
+ * (background workers + durable agent records + legacy trigger bindings)
+ * below. Role-agent rows stay drag-sortable; record/binding rows are clickable
+ * links to the same detail route and are non-sortable for now.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -18,10 +18,8 @@ import {
   mergeAgentSectionOrder,
   parseStoredAgentSectionOrder,
 } from "@/utils/agentSectionOrder";
-import {
-  orderAgentsForEpicRunner,
-  splitAgentsByRuntime,
-} from "@/utils/agentRole";
+import { splitAgentsByRuntime } from "@/utils/agentRole";
+import { mergeAgentRoster } from "@/utils/agentRoster";
 import {
   bindingCadenceLabel,
   bindingDisplayName,
@@ -32,6 +30,13 @@ import { wsGet, wsSet } from "@/utils/scopedStorage";
 
 import styles from "./AgentSection.module.css";
 import { SortableAgentList } from "./SortableAgentList";
+import {
+  buildAgentAutomationRows,
+  durableRecordCadence,
+  durableRecordDotState,
+  durableRecordTooltip,
+  selectedDurableRecordID,
+} from "./agentSectionAutomationRows";
 
 export interface AgentSectionProps {
   onAgentClick?: ((agentName: string) => void) | undefined;
@@ -55,38 +60,28 @@ export function AgentSection({
   } = useWorkspaceContext();
   const [agentOrder, setAgentOrder] = useState<string[]>([]);
 
-  // Trigger-binding "agents" (scheduled and event-driven) never enter the agent
-  // store — they are workflow-plane agents. Surface ALL of them here (every
-  // source_kind) so activating any workflow template shows up in the sidebar as
-  // a first-class, clickable agent.
-  const { bindings } = useAutomations(workspaceId, !!workspaceId);
-  const workflowAgents = bindings;
+  // Durable records own attached trigger bindings and therefore own the rail
+  // identity. Render each record once, including records with zero bindings;
+  // only unattached compatibility bindings remain standalone rail entries.
+  const { agentRecords, bindings } = useAutomations(workspaceId, !!workspaceId);
+  const { durableRecords, legacyBindings } = useMemo(
+    () => buildAgentAutomationRows(agentRecords, bindings),
+    [agentRecords, bindings],
+  );
+  const selectedRecordID = useMemo(
+    () => selectedDurableRecordID(selectedAgentName, bindings),
+    [bindings, selectedAgentName],
+  );
 
-  // Merge fleet agents with workspace config agents.
-  // Config agents that aren't yet running appear as "configured" placeholders.
-  const agents = useMemo<LoomAgentStatus[]>(() => {
-    const orderedFleetAgents = orderAgentsForEpicRunner(fleetAgents);
-    if (workspaceConfigAgents.length === 0) return orderedFleetAgents;
-
-    const fleetNames = new Set(orderedFleetAgents.map((a) => a.name));
-    const configPlaceholders: LoomAgentStatus[] = workspaceConfigAgents
-      .filter((ca) => !fleetNames.has(ca.name))
-      .map((ca) => {
-        const entry: LoomAgentStatus = {
-          name: ca.name,
-          branch: "",
-          status: "configured",
-          ahead: 0,
-          behind: 0,
-          workspace: workspace?.name ?? "",
-          cross_repo: ca.cross_repo,
-        };
-        if (ca.repos?.[0]) entry.repo = ca.repos[0];
-        if (ca.role_name) entry.role = ca.role_name;
-        return entry;
-      });
-    return [...orderedFleetAgents, ...configPlaceholders];
-  }, [fleetAgents, workspaceConfigAgents, workspace?.name]);
+  const agents = useMemo<LoomAgentStatus[]>(
+    () =>
+      mergeAgentRoster(
+        fleetAgents,
+        workspaceConfigAgents,
+        workspace?.name ?? "",
+      ),
+    [fleetAgents, workspaceConfigAgents, workspace?.name],
+  );
 
   const agentNames = useMemo(() => agents.map((agent) => agent.name), [agents]);
   const agentNamesKey = agentNames.join("\0");
@@ -124,7 +119,10 @@ export function AgentSection({
   );
 
   const hasInteractive = interactive.length > 0;
-  const hasAutonomous = background.length > 0 || workflowAgents.length > 0;
+  const hasAutonomous =
+    background.length > 0 ||
+    durableRecords.length > 0 ||
+    legacyBindings.length > 0;
   // Label the primary Interactive list only when an Autonomous group also
   // exists (a lone interactive list under "Agents" needs no sublabel). Always
   // label the Autonomous group — it mixes background workers + bindings and
@@ -132,7 +130,12 @@ export function AgentSection({
   const showInteractiveHeader = hasInteractive && hasAutonomous;
   const showAutonomousHeader = hasAutonomous;
 
-  if (agents.length === 0 && workflowAgents.length === 0 && !onAddClick)
+  if (
+    agents.length === 0 &&
+    durableRecords.length === 0 &&
+    legacyBindings.length === 0 &&
+    !onAddClick
+  )
     return <></>;
 
   const interactiveList = (
@@ -183,31 +186,57 @@ export function AgentSection({
                 listClassName={styles.sortableList}
               />
             )}
-            {workflowAgents.map((b) => {
-              const selected =
-                selectedAgentName != null &&
-                b.binding_id.toLowerCase() === selectedAgentName.toLowerCase();
+            {durableRecords.map((row) => {
+              const selected = selectedRecordID === row.id;
               return (
                 <button
                   type="button"
-                  key={b.binding_id}
+                  key={row.id}
                   className={styles.workflowRow}
-                  data-testid={`autonomous-binding-${b.binding_id}`}
+                  data-testid={`autonomous-agent-${row.id}`}
                   data-selected={selected || undefined}
-                  onClick={() => onAgentClick?.(b.binding_id)}
-                  title={bindingDotTooltip(b)}
+                  onClick={() => onAgentClick?.(row.id)}
+                  title={durableRecordTooltip(row)}
                 >
                   <span
                     className={styles.workflowDot}
-                    data-state={bindingDotState(b)}
+                    data-state={durableRecordDotState(row)}
                     aria-hidden="true"
                   />
                   <span className={styles.workflowText}>
                     <span className={styles.workflowName}>
-                      {bindingDisplayName(b)}
+                      {row.record.name.trim() || row.record.id}
                     </span>
                     <span className={styles.workflowMeta}>
-                      {bindingCadenceLabel(b)}
+                      {durableRecordCadence(row)}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+            {legacyBindings.map((row) => {
+              const selected = selectedAgentName === row.id;
+              return (
+                <button
+                  type="button"
+                  key={row.id}
+                  className={styles.workflowRow}
+                  data-testid={`autonomous-binding-${row.id}`}
+                  data-selected={selected || undefined}
+                  onClick={() => onAgentClick?.(row.id)}
+                  title={bindingDotTooltip(row.binding)}
+                >
+                  <span
+                    className={styles.workflowDot}
+                    data-state={bindingDotState(row.binding)}
+                    aria-hidden="true"
+                  />
+                  <span className={styles.workflowText}>
+                    <span className={styles.workflowName}>
+                      {bindingDisplayName(row.binding)}
+                    </span>
+                    <span className={styles.workflowMeta}>
+                      {bindingCadenceLabel(row.binding)}
                     </span>
                   </span>
                 </button>

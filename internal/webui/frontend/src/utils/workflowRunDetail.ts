@@ -96,6 +96,15 @@ export function linkedSessionsForRun(run: WorkflowRun): LinkedRunSession[] {
   return links;
 }
 
+/** Resolve only canonical child TaskRun work-item identities for a run. */
+export function workedTaskIdsForRun(run: WorkflowRun): string[] {
+  const taskIds: string[] = [];
+  for (const step of run.steps ?? []) {
+    addUniqueString(taskIds, firstString(step.task_id));
+  }
+  return taskIds;
+}
+
 export function linkedRunSessionKey(link: LinkedRunSession): string {
   return firstString(link.taskRunId, link.sessionId, link.taskId);
 }
@@ -137,6 +146,10 @@ function addUniqueLink(
       (candidate.sessionId !== "" && link.sessionId === candidate.sessionId),
   );
   if (!duplicate) links.push(candidate);
+}
+
+function addUniqueString(values: string[], candidate: string): void {
+  if (candidate && !values.includes(candidate)) values.push(candidate);
 }
 
 function taskIdFromPayload(payload: unknown): string {

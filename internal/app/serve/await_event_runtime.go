@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/driver"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -33,28 +34,28 @@ func (component *awaitEventRuntimeComponent) RunOnce(ctx context.Context, now ti
 	return component.reconciler.RunOnce(ctx, now)
 }
 
-// NewAwaitEventRuntimeRegistration composes Execution's durable consumer for
-// every admitted trigger event. It is a required base-platform registration:
-// Automation feature flags affect event producers, never the await recovery
-// guarantee.
-func NewAwaitEventRuntimeRegistration(
-	events store.TriggerEventStore,
+func NewAwaitEventRuntimeRegistrationWithExecution(
 	awaits store.AwaitStore,
 	driverRuns store.DriverRunStore,
 	workspacesStore store.WorkspaceStore,
 	workspace string,
+	api execution.DriverRunAPI,
+	queue execution.AwaitEventNotificationAPI,
+	authorities execution.SystemAuthorityResolver,
 ) (platformruntime.Registration, error) {
-	if events == nil || awaits == nil || driverRuns == nil || workspacesStore == nil {
+	if api == nil || queue == nil || authorities == nil {
+		return platformruntime.Registration{}, fmt.Errorf("compose await event runtime: Execution await and queue APIs are unavailable")
+	}
+	resolver := &driver.ExecutionAwaitResolver{
+		API: api, Authorities: authorities, ComponentID: string(AwaitEventNotificationComponentID),
+	}
+	if awaits == nil || driverRuns == nil || workspacesStore == nil {
 		return platformruntime.Registration{}, fmt.Errorf("compose await event runtime: required dependency is unavailable")
 	}
-	outbox, ok := events.(store.AwaitEventNotificationStore)
-	if !ok {
-		return platformruntime.Registration{}, fmt.Errorf("compose await event runtime: TriggerEvent store lacks durable notification capability")
-	}
-	reconciler, err := driver.NewAwaitEventReconcilerFromStores(
-		outbox, awaits, driverRuns,
-		workspace,
-		driver.RunOutcomeWorkspaceLister(newAutomationWorkspaceLister(workspacesStore)),
+	reconciler, err := driver.NewAwaitEventReconcilerWithExecutionStores(
+		queue, authorities, awaits, driverRuns, resolver,
+		workspace, driver.RunOutcomeWorkspaceLister(newAutomationWorkspaceLister(workspacesStore)),
+		string(AwaitEventNotificationComponentID),
 	)
 	if err != nil {
 		return platformruntime.Registration{}, fmt.Errorf("compose await event runtime: %w", err)

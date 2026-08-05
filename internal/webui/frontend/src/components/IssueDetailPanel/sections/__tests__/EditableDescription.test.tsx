@@ -19,7 +19,7 @@ import "@testing-library/jest-dom";
 import { EditableDescription } from "../EditableDescription";
 
 // Mock MarkdownRenderer to avoid complexity
-vi.mock("../MarkdownRenderer", () => ({
+vi.mock("@/components/MarkdownRenderer", () => ({
   MarkdownRenderer: ({ content }: { content: string | undefined }) => (
     <div data-testid="markdown-renderer">{content ?? "No content"}</div>
   ),

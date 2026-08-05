@@ -15,16 +15,13 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver/eventpolicy"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/trigger"
 )
 
 const (
-	DefaultAwaitEventReconcileLimit = 50
-	AwaitEventClaimLease            = time.Minute
-	awaitEventRetryInitial          = time.Second
-	awaitEventRetryMaximum          = 5 * time.Minute
-	awaitEventErrorLimit            = 1024
+	DefaultAwaitEventReconcileLimit = execution.DefaultReconciliationQueueLimit
 )
 
 type awaitEventDispatcher interface {
@@ -41,16 +38,26 @@ type automationAwaitEventNotifier struct {
 
 var _ automation.AwaitEventNotifier = (*automationAwaitEventNotifier)(nil)
 
-// NewAutomationAwaitEventNotifier composes the synchronous compatibility
-// notifier from Execution-owned await and run stores.
+// NewAutomationAwaitEventNotifier is the retired Store-only compatibility
+// constructor. Mutation authority must be injected explicitly.
+//
+// Deprecated: use NewAutomationAwaitEventNotifierWithResolver.
 func NewAutomationAwaitEventNotifier(
+	_ store.AwaitStore,
+	_ store.DriverRunStore,
+) (automation.AwaitEventNotifier, error) {
+	return nil, fmt.Errorf("compose automation await notifier without Execution resolver: %w", automation.ErrUnavailable)
+}
+
+func NewAutomationAwaitEventNotifierWithResolver(
 	awaits store.AwaitStore,
 	driverRuns store.DriverRunStore,
+	resolver store.AtomicAwaitStore,
 ) (automation.AwaitEventNotifier, error) {
-	if awaits == nil || driverRuns == nil {
+	if awaits == nil || driverRuns == nil || resolver == nil {
 		return nil, fmt.Errorf("compose automation await notifier: %w", automation.ErrUnavailable)
 	}
-	return &automationAwaitEventNotifier{matcher: trigger.NewAwaitMatcher(awaits, driverRuns)}, nil
+	return &automationAwaitEventNotifier{matcher: trigger.NewAwaitMatcherWithResolver(awaits, driverRuns, resolver)}, nil
 }
 
 func (notifier *automationAwaitEventNotifier) NotifyAwaitEvent(
@@ -76,47 +83,61 @@ func (notifier *automationAwaitEventNotifier) NotifyAwaitEvent(
 // crash or lost response leaves a leased row that is reclaimed and replayed;
 // the atomic resolver makes that replay convergent.
 type AwaitEventReconciler struct {
-	outbox       store.AwaitEventNotificationStore
+	queue        execution.AwaitEventNotificationAPI
+	authorities  execution.SystemAuthorityResolver
 	dispatcher   awaitEventDispatcher
 	workspace    string
 	workspaces   RunOutcomeWorkspaceLister
+	componentID  string
 	claimPrefix  string
 	claimCounter atomic.Uint64
 	limit        int
 }
 
-func NewAwaitEventReconciler(
-	outbox store.AwaitEventNotificationStore,
+func NewAwaitEventReconcilerWithExecution(
+	queue execution.AwaitEventNotificationAPI,
+	authorities execution.SystemAuthorityResolver,
 	dispatcher awaitEventDispatcher,
 	workspace string,
 	workspaces RunOutcomeWorkspaceLister,
+	componentID string,
 ) (*AwaitEventReconciler, error) {
-	if outbox == nil || dispatcher == nil {
-		return nil, fmt.Errorf("await event outbox and dispatcher are required")
+	if queue == nil || authorities == nil || dispatcher == nil || strings.TrimSpace(componentID) == "" {
+		return nil, fmt.Errorf("await event queue, authority resolver, dispatcher, and component ID are required")
 	}
 	workspace = strings.TrimSpace(workspace)
 	if workspace == "" && workspaces == nil {
 		return nil, fmt.Errorf("await event workspace lister is required for an unscoped reconciler")
 	}
 	return &AwaitEventReconciler{
-		outbox: outbox, dispatcher: dispatcher, workspace: workspace, workspaces: workspaces,
+		queue: queue, authorities: authorities, dispatcher: dispatcher, workspace: workspace, workspaces: workspaces,
+		componentID: componentID,
 		claimPrefix: newAwaitEventClaimPrefix(), limit: DefaultAwaitEventReconcileLimit,
 	}, nil
 }
 
-// NewAwaitEventReconcilerFromStores keeps trigger matching inside Execution's
-// compatibility boundary so composition does not import the trigger package.
-func NewAwaitEventReconcilerFromStores(
-	outbox store.AwaitEventNotificationStore,
+// NewAwaitEventReconcilerWithExecutionStores is the composition facade for
+// the standard atomic Await matcher. Callers provide only Execution's queue
+// and authority ports plus the narrow legacy read stores; trigger matching
+// remains an implementation detail of the driver runtime.
+func NewAwaitEventReconcilerWithExecutionStores(
+	queue execution.AwaitEventNotificationAPI,
+	authorities execution.SystemAuthorityResolver,
 	awaits store.AwaitStore,
 	driverRuns store.DriverRunStore,
+	resolver store.AtomicAwaitStore,
 	workspace string,
 	workspaces RunOutcomeWorkspaceLister,
+	componentID string,
 ) (*AwaitEventReconciler, error) {
-	if awaits == nil || driverRuns == nil {
-		return nil, fmt.Errorf("await event stores are required")
-	}
-	return NewAwaitEventReconciler(outbox, trigger.NewAwaitMatcher(awaits, driverRuns), workspace, workspaces)
+	return NewAwaitEventReconcilerWithExecution(
+		queue,
+		authorities,
+		trigger.NewAwaitMatcherWithResolver(awaits, driverRuns, resolver),
+		workspace,
+		workspaces,
+		componentID,
+	)
 }
 
 func (reconciler *AwaitEventReconciler) RunOnce(ctx context.Context, now time.Time) error {
@@ -125,7 +146,7 @@ func (reconciler *AwaitEventReconciler) RunOnce(ctx context.Context, now time.Ti
 }
 
 func (reconciler *AwaitEventReconciler) DrainOnce(ctx context.Context, now time.Time) (int, error) {
-	if reconciler == nil || reconciler.outbox == nil || reconciler.dispatcher == nil {
+	if reconciler == nil || reconciler.queue == nil || reconciler.authorities == nil || reconciler.dispatcher == nil {
 		return 0, fmt.Errorf("await event reconciler is unavailable")
 	}
 	if now.IsZero() {
@@ -166,9 +187,14 @@ func (reconciler *AwaitEventReconciler) workspaceKeys(ctx context.Context) ([]st
 
 func (reconciler *AwaitEventReconciler) runWorkspace(ctx context.Context, workspace string, now time.Time) (int, error) { //nolint:cyclop,funlen,gocognit // Durable claim processing must classify, complete, or retry every notification in order.
 	claimID := fmt.Sprintf("%s-%d", reconciler.claimPrefix, reconciler.claimCounter.Add(1))
-	notifications, err := reconciler.outbox.ClaimAwaitEventNotifications(ctx, store.AwaitEventNotificationClaim{
-		WorkspaceKey: workspace, ClaimID: claimID, Before: now,
-		ClaimUntil: now.Add(AwaitEventClaimLease), Limit: reconciler.limit,
+	auth, err := reconciler.authorities.ResolveExecutionSystemAuthority(
+		ctx, workspace, execution.ActionClaimAwaitEventNotifications, reconciler.componentID,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("resolve await event notification claim authority in %q: %w", workspace, err)
+	}
+	notifications, err := reconciler.queue.ClaimAwaitEventNotifications(ctx, auth, execution.ClaimAwaitEventNotificationsCommand{
+		WorkspaceKey: workspace, ClaimID: claimID, Before: now, Limit: reconciler.limit,
 	})
 	if err != nil {
 		return 0, fmt.Errorf("claim await event notifications in %q: %w", workspace, err)
@@ -219,7 +245,7 @@ func (reconciler *AwaitEventReconciler) runWorkspace(ctx context.Context, worksp
 			continue
 		}
 		if !eventpolicy.EligibleForAwait(
-			event.EventType, string(event.Origin), event.SourceKind,
+			event.EventType, event.Origin, event.SourceKind,
 			event.ActorRef, canonicalID,
 		) {
 			// Provenance is immutable, so retry cannot heal this notification.
@@ -232,7 +258,7 @@ func (reconciler *AwaitEventReconciler) runWorkspace(ctx context.Context, worksp
 				"canonical_event_id", canonicalID,
 				"event_type", event.EventType,
 				"source_kind", event.SourceKind,
-				"origin", string(event.Origin),
+				"origin", event.Origin,
 				"actor_ref", event.ActorRef,
 			)
 			if completeErr := reconciler.complete(ctx, workspace, claimID, durableID, now); completeErr != nil {
@@ -286,7 +312,7 @@ func (reconciler *AwaitEventReconciler) runWorkspace(ctx context.Context, worksp
 		}
 		_, dispatchErr := reconciler.dispatcher.Dispatch(ctx, workspace, trigger.AwaitDispatchEvent{
 			EventID: canonicalID, EventType: event.EventType, SubjectRef: event.SubjectRef,
-			SourceKind: event.SourceKind, Origin: event.Origin,
+			SourceKind: event.SourceKind, Origin: domain.TriggerEventOrigin(event.Origin),
 			ActorRef: event.ActorRef, Payload: event.Payload,
 		})
 		if dispatchErr != nil {
@@ -319,7 +345,13 @@ func (reconciler *AwaitEventReconciler) complete(
 	workspace, claimID, eventID string,
 	now time.Time,
 ) error {
-	if err := reconciler.outbox.CompleteAwaitEventNotification(ctx, store.AwaitEventNotificationCompletion{
+	auth, err := reconciler.authorities.ResolveExecutionSystemAuthority(
+		ctx, workspace, execution.ActionCompleteAwaitEventNotification, reconciler.componentID,
+	)
+	if err != nil {
+		return fmt.Errorf("resolve await event notification completion authority: %w", err)
+	}
+	if err := reconciler.queue.CompleteAwaitEventNotification(ctx, auth, execution.CompleteAwaitEventNotificationCommand{
 		WorkspaceKey: workspace, EventID: eventID, ClaimID: claimID, CompletedAt: now,
 	}); err != nil {
 		return fmt.Errorf("complete await event notification %q: %w", eventID, err)
@@ -330,53 +362,30 @@ func (reconciler *AwaitEventReconciler) complete(
 func (reconciler *AwaitEventReconciler) retry(
 	ctx context.Context,
 	workspace, claimID string,
-	notification store.AwaitEventNotification,
+	notification execution.AwaitEventNotification,
 	now time.Time,
 	cause error,
 ) error {
-	retryAt := now.Add(awaitEventRetryDelay(notification.Attempt))
-	if err := reconciler.outbox.RetryAwaitEventNotification(ctx, store.AwaitEventNotificationRetry{
+	auth, err := reconciler.authorities.ResolveExecutionSystemAuthority(
+		ctx, workspace, execution.ActionRetryAwaitEventNotification, reconciler.componentID,
+	)
+	if err != nil {
+		return fmt.Errorf("resolve await event notification retry authority: %w", err)
+	}
+	if err := reconciler.queue.RetryAwaitEventNotification(ctx, auth, execution.RetryAwaitEventNotificationCommand{
 		WorkspaceKey: workspace, EventID: awaitEventNotificationDurableID(notification), ClaimID: claimID,
-		AvailableAt: retryAt, Error: boundedAwaitEventError(cause),
+		Attempt: notification.Attempt, FailedAt: now, Cause: cause.Error(),
 	}); err != nil {
 		return fmt.Errorf("schedule await event notification %q retry: %w", notification.Event.EventID, err)
 	}
 	return nil
 }
 
-func awaitEventNotificationDurableID(notification store.AwaitEventNotification) string {
+func awaitEventNotificationDurableID(notification execution.AwaitEventNotification) string {
 	if durableID := strings.TrimSpace(notification.DurableEventID); durableID != "" {
 		return durableID
 	}
 	return strings.TrimSpace(notification.Event.EventID)
-}
-
-func awaitEventRetryDelay(attempt int) time.Duration {
-	if attempt < 1 {
-		attempt = 1
-	}
-	delay := awaitEventRetryInitial
-	for current := 1; current < attempt && delay < awaitEventRetryMaximum; current++ {
-		if delay > awaitEventRetryMaximum/2 {
-			return awaitEventRetryMaximum
-		}
-		delay *= 2
-	}
-	if delay > awaitEventRetryMaximum {
-		return awaitEventRetryMaximum
-	}
-	return delay
-}
-
-func boundedAwaitEventError(err error) string {
-	if err == nil {
-		return ""
-	}
-	value := err.Error()
-	if len(value) > awaitEventErrorLimit {
-		return value[:awaitEventErrorLimit]
-	}
-	return value
 }
 
 func newAwaitEventClaimPrefix() string {
@@ -434,6 +443,9 @@ const maxAwaitTimeoutSweepPasses = 100
 // Store plus zero values is ready; loom serve drives RunOnce on a ticker.
 type AwaitTimeoutSweeper struct {
 	Store store.Store
+	// Resolver is the required, injected Execution-owned atomic mutation port.
+	// RunOnce fails closed when it is unavailable and never derives it from Store.
+	Resolver store.AtomicAwaitStore
 	// WorkspaceKey scopes the sweep to one workspace. Empty sweeps every
 	// workspace returned by Store.Workspaces().List.
 	WorkspaceKey string
@@ -471,6 +483,9 @@ type AwaitTimeoutSweepResult struct {
 func (s *AwaitTimeoutSweeper) RunOnce(ctx context.Context) (*AwaitTimeoutSweepResult, error) {
 	if s == nil || s.Store == nil {
 		return nil, fmt.Errorf("store required: %w", domain.ErrInvalid)
+	}
+	if s.Resolver == nil {
+		return nil, fmt.Errorf("execution await resolver is unavailable: %w", execution.ErrUnavailable)
 	}
 	now := s.now()
 	workspaces, err := s.workspaceKeys(ctx)
@@ -624,6 +639,7 @@ func awaitTimeoutRecord(res *trigger.AwaitDispatchResult, instanceKey string) (t
 func (s *AwaitTimeoutSweeper) matcher() *trigger.AwaitMatcher {
 	return &trigger.AwaitMatcher{
 		Store:             s.Store,
+		AtomicResolver:    s.Resolver,
 		Logger:            s.Logger,
 		SystemTimeoutLane: true,
 	}

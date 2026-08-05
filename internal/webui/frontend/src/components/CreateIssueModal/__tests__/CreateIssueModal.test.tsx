@@ -203,6 +203,38 @@ describe("CreateIssueModal", () => {
       expect(screen.getByTestId("create-issue-submit")).toBeEnabled();
     });
 
+    it("requires an explicit repo for non-epic issues in multi-repo workspaces", () => {
+      mockUseWorkspaceContext.mockReturnValue({
+        workspaceId: "test-ws-id",
+        repos: [
+          { name: "e2e-app", source_repo_id: "e2e-app" },
+          { name: "e2e-lib", source_repo_id: "e2e-lib" },
+        ],
+      } as ReturnType<typeof useWorkspaceContext>);
+
+      render(
+        <CreateIssueModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      fireEvent.change(screen.getByTestId("create-issue-title"), {
+        target: { value: "Repo-scoped task" },
+      });
+      expect(screen.getByTestId("create-issue-source-repo")).toHaveValue("");
+      expect(
+        screen.getByText("Select the repository where this issue should run."),
+      ).toBeInTheDocument();
+      expect(screen.getByTestId("create-issue-submit")).toBeDisabled();
+
+      fireEvent.change(screen.getByTestId("create-issue-source-repo"), {
+        target: { value: "e2e-app" },
+      });
+      expect(screen.getByTestId("create-issue-submit")).toBeEnabled();
+    });
+
     it("shows 'Creating...' text on submit button during submission", async () => {
       // Keep the promise pending so we can observe the submitting state
       let resolvePromise!: (value: Issue) => void;

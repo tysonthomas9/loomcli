@@ -19,7 +19,7 @@ import (
 func connectorTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	now := time.Date(2026, 6, 12, 10, 0, 0, 0, time.UTC)
-	validUntil := now.Add(15 * time.Minute)
+	validUntil := time.Now().UTC().Add(15 * time.Minute).Truncate(time.Second)
 	redactedConnector := map[string]any{
 		"workspace_key":         "WS",
 		"connector_id":          "gh-main",
@@ -104,6 +104,14 @@ func connectorTestServer(t *testing.T) *httptest.Server {
 				"previous_secret_valid_until": validUntil,
 				"outbound_credential_sealed":  []byte("sealed-ciphertext"),
 			})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/WS/connectors/gh-expired/secrets":
+			writeJSON(t, w, map[string]any{
+				"connector_id":                "gh-expired",
+				"inbound_secret":              "whsec-current",
+				"previous_inbound_secret":     "whsec-expired",
+				"previous_secret_valid_until": time.Now().UTC().Add(-time.Minute),
+				"outbound_credential_sealed":  []byte("sealed-ciphertext"),
+			})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/WS/connectors/missing/secrets":
 			w.WriteHeader(http.StatusNotFound)
 			writeJSON(t, w, map[string]any{"error": map[string]string{"code": "not_found", "message": "connector not found"}})
@@ -111,6 +119,7 @@ func connectorTestServer(t *testing.T) *httptest.Server {
 			var req struct {
 				NewInboundSecret            string     `json:"new_inbound_secret"`
 				PreviousSecretValidUntil    *time.Time `json:"previous_secret_valid_until"`
+				ExpectedUpdatedAt           *time.Time `json:"expected_updated_at"`
 				NewOutboundCredentialSealed []byte     `json:"new_outbound_credential_sealed"`
 			}
 			decodeJSONBody(t, r, &req)
@@ -119,6 +128,9 @@ func connectorTestServer(t *testing.T) *httptest.Server {
 			}
 			if req.PreviousSecretValidUntil != nil {
 				t.Errorf("rotate previous_secret_valid_until = %v, want absent for zero input", req.PreviousSecretValidUntil)
+			}
+			if req.ExpectedUpdatedAt == nil || !req.ExpectedUpdatedAt.Equal(now) {
+				t.Errorf("rotate expected_updated_at = %v, want %v", req.ExpectedUpdatedAt, now)
 			}
 			if req.NewOutboundCredentialSealed != nil {
 				t.Errorf("rotate new_outbound_credential_sealed = %q, want absent for nil input", req.NewOutboundCredentialSealed)
@@ -239,7 +251,8 @@ func TestConnectorClientConnectorRoutes(t *testing.T) {
 	}
 
 	rotated, err := client.Connectors().RotateSecrets(t.Context(), "WS", "gh-main", store.ConnectorSecretRotation{
-		NewInboundSecret: "whsec-2",
+		NewInboundSecret:  "whsec-2",
+		ExpectedUpdatedAt: now,
 	})
 	if err != nil {
 		t.Fatalf("RotateSecrets: %v", err)
@@ -256,14 +269,19 @@ func TestConnectorClientResolveSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	validUntil := time.Date(2026, 6, 12, 10, 15, 0, 0, time.UTC)
-
 	secrets, err := client.Connectors().ResolveInboundSecret(t.Context(), "WS", "gh-main")
 	if err != nil {
 		t.Fatalf("ResolveInboundSecret: %v", err)
 	}
-	if secrets.Current != "whsec-2" || secrets.Previous != "whsec-1" || !secrets.PreviousValidUntil.Equal(validUntil) {
+	if secrets.Current != "whsec-2" || secrets.Previous != "whsec-1" || !secrets.PreviousValidUntil.After(time.Now().UTC()) {
 		t.Fatalf("ResolveInboundSecret = %+v", secrets)
+	}
+	expired, err := client.Connectors().ResolveInboundSecret(t.Context(), "WS", "gh-expired")
+	if err != nil {
+		t.Fatalf("ResolveInboundSecret expired: %v", err)
+	}
+	if expired.Current != "whsec-current" || expired.Previous != "" || !expired.PreviousValidUntil.IsZero() {
+		t.Fatalf("ResolveInboundSecret expired = %+v, want current only", expired)
 	}
 
 	sealed, err := client.Connectors().ResolveOutboundCredentialSealed(t.Context(), "WS", "gh-main")

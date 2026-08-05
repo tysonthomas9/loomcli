@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -29,7 +28,7 @@ const (
 	roleTask          = "task"
 )
 
-var agentTerminalSessionLocks sync.Map
+var errDaemonSupervisedWorkerTerminal = errors.New("daemon-supervised worker terminals cannot be launched directly; use worker logs or task session history")
 
 // HandleEnsureAgentTerminalSession resolves an agent name to a persisted UUID
 // terminal session. The session's launch command lives in tab metadata; the
@@ -75,7 +74,7 @@ func HandleEnsureAgentTerminalSession(svc service.TerminalService, st store.Stor
 }
 
 func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService, st store.Store, workspace, agentName string) (*tabmeta.TabMetadata, error) {
-	unlock := lockAgentTerminalSession(workspace, agentName)
+	unlock := webuterminal.LockAgentLifecycle(workspace, agentName)
 	defer unlock()
 
 	agent, err := loadTerminalAgent(ctx, st, workspace, agentName)
@@ -88,8 +87,8 @@ func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService
 	}
 	roleKind := domain.ResolveRoleKind(role, agent.RoleName)
 
-	if isDaemonOwnedEphemeralWorker(agent, roleKind) {
-		return nil, service.ErrValidation("daemon-owned ephemeral worker terminals cannot be started from the agents page; use worker logs or task session history")
+	if isDaemonSupervisedWorker(agent, roleKind) {
+		return nil, service.ErrValidation(errDaemonSupervisedWorkerTerminal.Error())
 	}
 
 	tabs, err := svc.ListTabs(ctx, workspace)
@@ -230,29 +229,12 @@ func newAgentTerminalTabMetadata(workspace, sessionName, label string, sortOrder
 	return meta
 }
 
-func lockAgentTerminalSession(workspace, agentName string) func() {
-	key := workspace + "\x00" + agentName
-	actual, _ := agentTerminalSessionLocks.LoadOrStore(key, &sync.Mutex{})
-	mu := actual.(*sync.Mutex)
-	mu.Lock()
-	return mu.Unlock
-}
-
 func agentTerminalLaunchAllowed(agent *domain.Agent, kind domain.RoleKind) bool {
-	if agent == nil {
-		return false
-	}
-	if kind == domain.RoleKindInteractive {
-		return true
-	}
-	return agent.State != domain.AgentStateStopped && agent.DesiredState != domain.AgentDesiredStopped
+	return agent != nil && kind == domain.RoleKindInteractive
 }
 
-func isDaemonOwnedEphemeralWorker(agent *domain.Agent, kind domain.RoleKind) bool {
-	if agent == nil {
-		return false
-	}
-	return agent.Mode == domain.AgentModeEphemeral && kind != domain.RoleKindInteractive
+func isDaemonSupervisedWorker(agent *domain.Agent, kind domain.RoleKind) bool {
+	return agent != nil && kind != domain.RoleKindInteractive
 }
 
 func disableStoredAgentLaunch(ctx context.Context, svc service.TerminalService, workspace string, existing *tabmeta.TabMetadata) (*tabmeta.TabMetadata, error) {
@@ -314,6 +296,9 @@ func buildAgentLaunchSpec(ctx context.Context, st store.Store, workspace, sessio
 		return nil, "", err
 	}
 	roleKind := domain.ResolveRoleKind(role, agent.RoleName)
+	if isDaemonSupervisedWorker(agent, roleKind) {
+		return nil, "", service.ErrValidation(errDaemonSupervisedWorkerTerminal.Error())
+	}
 	backend := agentLaunchBackend(ctx, st, workspace, agent, role)
 	commandArgs, err := agentLaunchCommandArgs(roleKind, agent, role)
 	if err != nil {

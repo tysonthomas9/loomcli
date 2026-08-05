@@ -168,6 +168,18 @@ func (s *connectorStore) RotateSecrets(_ context.Context, ws, connectorID string
 	if !ok {
 		return nil, fmt.Errorf("connector %q in workspace %q: %w", connectorID, ws, domain.ErrConnectorNotFound)
 	}
+	if !in.ExpectedUpdatedAt.IsZero() && !conn.UpdatedAt.Equal(in.ExpectedUpdatedAt) {
+		return nil, fmt.Errorf(
+			"connector %q generation changed from %s to %s: %w",
+			connectorID,
+			in.ExpectedUpdatedAt.UTC().Format(time.RFC3339Nano),
+			conn.UpdatedAt.UTC().Format(time.RFC3339Nano),
+			domain.ErrConflict,
+		)
+	}
+	if !now.After(conn.UpdatedAt) {
+		now = conn.UpdatedAt.Add(time.Nanosecond)
+	}
 	if conn.InboundSecret != "" {
 		conn.PreviousInboundSecret = conn.InboundSecret
 		until := validUntil

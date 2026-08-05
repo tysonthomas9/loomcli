@@ -36,6 +36,11 @@ export interface WorkspaceAgentInfo {
   repos: string[];
   repo_groups: string[];
   cross_repo: boolean;
+  /**
+   * Creation-time role placement. Older workspace snapshots omit this field,
+   * so callers must continue to tolerate it being absent.
+   */
+  kind?: "interactive" | "worker" | "supervised";
   role_name?: string;
   backend?: string;
 }
@@ -43,7 +48,7 @@ export interface WorkspaceAgentInfo {
 export interface CreateAgentRequest {
   name: string;
   role_name: string;
-  kind?: string;
+  kind?: "interactive" | "worker" | "supervised";
   prompt?: string;
   prompt_file?: string;
   auto?: boolean;
@@ -250,6 +255,22 @@ export interface AddWorkspaceReposRequest {
   branch?: string;
 }
 
+/** 201 sync result: local repositories were attached immediately. */
+export interface WorkspaceAddReposSync {
+  kind: "sync";
+  data: WorkspaceData;
+}
+
+/** 202 async result: remote repositories are cloning; poll the job. */
+export interface WorkspaceAddReposAsync {
+  kind: "async";
+  jobId: string;
+}
+
+export type WorkspaceAddReposResult =
+  | WorkspaceAddReposSync
+  | WorkspaceAddReposAsync;
+
 /** 201 sync result: workspace was created immediately. */
 export interface WorkspaceCreateSync {
   kind: "sync";
@@ -312,12 +333,17 @@ export async function createWorkspace(
 export async function addWorkspaceRepos(
   workspaceId: string,
   req: AddWorkspaceReposRequest,
-): Promise<WorkspaceData> {
-  const response = await post<ApiResult<WorkspaceData>>(
-    `/api/workspaces/${encodeURIComponent(workspaceId)}/repos`,
-    req,
-  );
-  return unwrap(response);
+): Promise<WorkspaceAddReposResult> {
+  const response = await post<
+    ApiResult<WorkspaceData> | WorkspaceJobAcceptedResponse
+  >(`/api/workspaces/${encodeURIComponent(workspaceId)}/repos`, req);
+  if ("job_id" in response && typeof response.job_id === "string") {
+    return { kind: "async", jobId: response.job_id };
+  }
+  return {
+    kind: "sync",
+    data: unwrap(response as ApiResult<WorkspaceData>),
+  };
 }
 
 export async function createWorkspaceAgent(
@@ -365,10 +391,10 @@ export interface RoleWithPrompt {
 
 /**
  * Partial role update — every field is optional so the UI can PATCH just the
- * prompt without resending the whole role. Sending `prompt` rewrites the
- * role's prompt file (reusing its existing filename when `prompt_filename` is
- * omitted). Changes take effect on the agent's NEXT start/restart; a running
- * agent keeps the prompt it read at launch.
+ * prompt without resending the whole role. Sending `prompt` publishes a new
+ * immutable prompt file and repoints this role; `prompt_filename` optionally
+ * supplies its operator-facing base name. Changes take effect on the agent's
+ * NEXT start/restart; a running agent keeps the prompt it read at launch.
  */
 export interface UpdateRoleRequest {
   description?: string;
@@ -445,9 +471,10 @@ export async function getWorkspaceRole(
 }
 
 /**
- * Apply a partial edit to a role. Returns the updated role plus its (possibly
- * rewritten) prompt body. Sending `prompt` rewrites the prompt file; the change
- * takes effect on the agent's next start/restart, not on a running agent.
+ * Apply a partial edit to a role. Returns the updated role plus its current
+ * prompt body. Sending `prompt` publishes a new immutable file and repoints
+ * only this role; the change takes effect on the agent's next start/restart,
+ * not on a running agent.
  */
 export async function updateWorkspaceRole(
   workspaceId: string,

@@ -24,7 +24,16 @@ type localModeManifest struct {
 	RunID        string `json:"run_id"`
 	StartedAt    string `json:"started_at"`
 	Backend      string `json:"backend"`
+	Plane        string `json:"plane,omitempty"`
 	Workspace    string `json:"workspace"`
+	PlanAgentID  string `json:"plan_agent_record_id,omitempty"`
+	CodeAgentID  string `json:"code_agent_record_id,omitempty"`
+	PlanAgent    string `json:"plan_agent_name,omitempty"`
+	CodeAgent    string `json:"code_agent_name,omitempty"`
+	PlanRole     string `json:"plan_agent_role,omitempty"`
+	CodeRole     string `json:"code_agent_role,omitempty"`
+	PlanBinding  string `json:"plan_binding_id,omitempty"`
+	CodeBinding  string `json:"code_binding_id,omitempty"`
 	PlanTaskID   string `json:"plan_task_id"`
 	CodeTaskID   string `json:"code_task_id"`
 	PlanTaskName string `json:"plan_task_title"`
@@ -34,6 +43,8 @@ type localModeManifest struct {
 type localModeEvidence struct {
 	taskCreatedAt    string
 	sessionStartedAt string
+	agentCreatedAt   string
+	planAssignee     string
 }
 
 func TestVerifyLocalModeAcceptsOnlyManifestOwnedFreshEvidence(t *testing.T) {
@@ -47,6 +58,36 @@ func TestVerifyLocalModeAcceptsOnlyManifestOwnedFreshEvidence(t *testing.T) {
 	}
 	if !strings.Contains(out, "local-mode daemon, agent, transcript, and diff flow verified") {
 		t.Fatalf("verification success marker missing:\n%s", out)
+	}
+}
+
+func TestVerifyLocalModeAcceptsTSPromptAgentsSeededBeforeTasks(t *testing.T) {
+	manifest := tsTestManifest()
+	server := newLocalModeVerifyServer(t, manifest, freshEvidence())
+	defer server.Close()
+
+	out, err := runVerifier(t, server.URL, manifest, nil)
+	if err != nil {
+		t.Fatalf("verify TS prompt-agent run: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "local-mode TS prompt-agent, transcript, and diff flow verified") {
+		t.Fatalf("TS verification success marker missing:\n%s", out)
+	}
+}
+
+func TestVerifyLocalModeRejectsTSPromptAgentsCreatedAfterTasks(t *testing.T) {
+	manifest := tsTestManifest()
+	evidence := freshEvidence()
+	evidence.agentCreatedAt = "2026-07-15T03:00:02Z"
+	server := newLocalModeVerifyServer(t, manifest, evidence)
+	defer server.Close()
+
+	out, err := runVerifier(t, server.URL, manifest, nil)
+	if err == nil {
+		t.Fatalf("late prompt agents unexpectedly verified:\n%s", out)
+	}
+	if !strings.Contains(out, "public planner/coder prompt agents were seeded before tasks") {
+		t.Fatalf("late-agent failure was not explicit:\n%s", out)
 	}
 }
 
@@ -79,6 +120,22 @@ func TestVerifyLocalModeRejectsTasksOlderThanRun(t *testing.T) {
 	}
 	if !strings.Contains(out, "planner task belongs to this run") {
 		t.Fatalf("stale-task failure was not explicit:\n%s", out)
+	}
+}
+
+func TestVerifyLocalModeRejectsPlannerWithStaleAssignee(t *testing.T) {
+	manifest := testManifest()
+	evidence := freshEvidence()
+	evidence.planAssignee = "driver-run:stale"
+	server := newLocalModeVerifyServer(t, manifest, evidence)
+	defer server.Close()
+
+	out, err := runVerifier(t, server.URL, manifest, nil)
+	if err == nil {
+		t.Fatalf("planner with stale assignee unexpectedly verified:\n%s", out)
+	}
+	if !strings.Contains(out, "planner task released its assignee") {
+		t.Fatalf("stale-assignee failure was not explicit:\n%s", out)
 	}
 }
 
@@ -171,7 +228,22 @@ func testManifest() localModeManifest {
 }
 
 func freshEvidence() localModeEvidence {
-	return localModeEvidence{taskCreatedAt: freshAt, sessionStartedAt: freshAt}
+	return localModeEvidence{taskCreatedAt: freshAt, sessionStartedAt: freshAt, agentCreatedAt: runStartedAt}
+}
+
+func tsTestManifest() localModeManifest {
+	manifest := testManifest()
+	manifest.Backend = "localdogfood"
+	manifest.Plane = "ts"
+	manifest.PlanAgentID = "agt-local-mode-ts-planner"
+	manifest.CodeAgentID = "agt-local-mode-ts-coder"
+	manifest.PlanAgent = "Local mode TS planner"
+	manifest.CodeAgent = "Local mode TS coder"
+	manifest.PlanRole = "local-mode-ts-plan"
+	manifest.CodeRole = "local-mode-ts-task"
+	manifest.PlanBinding = "local-mode-ts-planner"
+	manifest.CodeBinding = "local-mode-ts-coder"
+	return manifest
 }
 
 func newLocalModeVerifyServer(t *testing.T, manifest localModeManifest, evidence localModeEvidence) *httptest.Server {
@@ -181,10 +253,15 @@ func newLocalModeVerifyServer(t *testing.T, manifest localModeManifest, evidence
 		switch r.URL.Path {
 		case "/api/config":
 			_, _ = w.Write([]byte(`{}`))
+		case "/api/workspaces/LOCALMODE/agents":
+			writeTestJSON(t, w, map[string]any{"data": []map[string]any{
+				promptAgentFixture(manifest.PlanAgentID, manifest.PlanAgent, manifest.PlanRole, manifest.PlanBinding, evidence.agentCreatedAt),
+				promptAgentFixture(manifest.CodeAgentID, manifest.CodeAgent, manifest.CodeRole, manifest.CodeBinding, evidence.agentCreatedAt),
+			}})
 		case "/api/workspaces/LOCALMODE/issues/" + manifest.PlanTaskID:
 			writeTestJSON(t, w, map[string]any{"data": map[string]any{
 				"id": manifest.PlanTaskID, "title": manifest.PlanTaskName, "status": "review",
-				"design": "Approved design", "created_at": evidence.taskCreatedAt,
+				"design": "Approved design", "assignee": evidence.planAssignee, "created_at": evidence.taskCreatedAt,
 			}})
 		case "/api/workspaces/LOCALMODE/issues/" + manifest.CodeTaskID:
 			writeTestJSON(t, w, map[string]any{"data": map[string]any{
@@ -194,12 +271,13 @@ func newLocalModeVerifyServer(t *testing.T, manifest localModeManifest, evidence
 		case "/api/workspaces/LOCALMODE/tasks/" + manifest.PlanTaskID + "/sessions":
 			writeTestJSON(t, w, map[string]any{"data": map[string]any{"sessions": []map[string]any{{
 				"session_id": "plan-session", "status": "completed", "is_active": false,
-				"has_transcript": true, "started_at": evidence.sessionStartedAt, "ended_at": evidence.sessionStartedAt,
+				"has_transcript": true, "backend": manifest.Backend, "exit_code": 0,
+				"started_at": evidence.sessionStartedAt, "ended_at": evidence.sessionStartedAt,
 			}}}})
 		case "/api/workspaces/LOCALMODE/tasks/" + manifest.CodeTaskID + "/sessions":
 			writeTestJSON(t, w, map[string]any{"data": map[string]any{"sessions": []map[string]any{{
 				"session_id": "code-session", "status": "completed", "is_active": false,
-				"has_transcript": true, "has_diff": true, "files_changed": 1,
+				"has_transcript": true, "has_diff": true, "files_changed": 1, "backend": manifest.Backend, "exit_code": 0,
 				"started_at": evidence.sessionStartedAt, "ended_at": evidence.sessionStartedAt,
 			}}}})
 		case "/api/workspaces/LOCALMODE/tasks/" + manifest.PlanTaskID + "/sessions/plan-session/transcript",
@@ -212,6 +290,17 @@ func newLocalModeVerifyServer(t *testing.T, manifest localModeManifest, evidence
 			http.Error(w, fmt.Sprintf("unexpected path %s", r.URL.Path), http.StatusNotFound)
 		}
 	}))
+}
+
+func promptAgentFixture(id, name, role, binding, createdAt string) map[string]any {
+	return map[string]any{
+		"id": id, "name": name, "kind": "prompt", "enabled": true, "created_at": createdAt,
+		"behavior": map[string]any{"role_name": role},
+		"bindings": []map[string]any{{
+			"binding_id": binding, "source_kind": "internal", "enabled": true,
+			"event_type_patterns": []string{"internal.task.ready"},
+		}},
+	}
 }
 
 func writeTestJSON(t *testing.T, w http.ResponseWriter, value any) {

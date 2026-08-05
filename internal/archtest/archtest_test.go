@@ -2,6 +2,7 @@ package archtest
 
 import (
 	"errors"
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"os"
@@ -10,7 +11,46 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 )
+
+func TestProductionAwaitDispatchDoesNotFallbackToRawAtomicStore(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "internal", "trigger", "await_matcher.go")
+	files := token.NewFileSet()
+	parsed, err := parser.ParseFile(files, path, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var rawFallbacks []string
+	ast.Inspect(parsed, func(node ast.Node) bool {
+		assertion, ok := node.(*ast.TypeAssertExpr)
+		if !ok {
+			return true
+		}
+		selector, ok := assertion.Type.(*ast.SelectorExpr)
+		if !ok || selector.Sel.Name != "AtomicAwaitStore" {
+			return true
+		}
+		qualifier, ok := selector.X.(*ast.Ident)
+		if !ok || qualifier.Name != "store" {
+			return true
+		}
+		rawFallbacks = append(rawFallbacks, files.Position(assertion.Pos()).String())
+		return true
+	})
+	if len(rawFallbacks) != 0 {
+		t.Fatalf("production Await dispatch must use its injected Execution resolver and fail closed when unavailable; raw store.AtomicAwaitStore fallback at %v", rawFallbacks)
+	}
+}
 
 func TestCheckedInManifestsAndRepository(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", ".."))
@@ -21,17 +61,17 @@ func TestCheckedInManifestsAndRepository(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := len(report.CompositeStoreFiles), 88; got != want {
+	if got, want := len(report.CompositeStoreFiles), 82; got != want {
 		t.Fatalf("composite Store file count = %d, want %d; files = %v", got, want, report.CompositeStoreFiles)
 	}
-	if got, want := len(report.CompositeStoreOutside), 77; got != want {
+	if got, want := len(report.CompositeStoreOutside), 71; got != want {
 		t.Fatalf("outside-composition Store file count = %d, want %d", got, want)
 	}
-	if got, want := len(report.LegacyHandlerImports), 91; got != want {
+	if got, want := len(report.LegacyHandlerImports), 90; got != want {
 		t.Fatalf("legacy handler imports = %d, want %d", got, want)
 	}
-	if got, want := report.ModuleRoots, []string{"automation", "workflowcatalog"}; !slices.Equal(got, want) {
-		t.Fatalf("module roots = %v, want active Phase 3 extractions %v", got, want)
+	if got, want := report.ModuleRoots, []string{"artifacts", "automation", "execution", "workflowcatalog"}; !slices.Equal(got, want) {
+		t.Fatalf("module roots = %v, want active Phase 4 extractions %v", got, want)
 	}
 	if got, want := len(report.PendingDecisions), 0; got != want {
 		t.Fatalf("pending decisions = %d, want %d", got, want)
@@ -39,13 +79,13 @@ func TestCheckedInManifestsAndRepository(t *testing.T) {
 	if got, want := report.AnalysisProfilesEnforced, 11; got != want {
 		t.Fatalf("enforced analysis profiles = %d, want %d", got, want)
 	}
-	if got, want := report.MutationCommands, 17; got != want {
+	if got, want := report.MutationCommands, 61; got != want {
 		t.Fatalf("mutation commands = %d, want %d", got, want)
 	}
-	if got, want := report.RuntimeComponents, 85; got != want {
+	if got, want := report.RuntimeComponents, 86; got != want {
 		t.Fatalf("runtime components = %d, want %d", got, want)
 	}
-	if got, want := report.RuntimeGoroutineLaunches, 107; got != want {
+	if got, want := report.RuntimeGoroutineLaunches, 105; got != want {
 		t.Fatalf("runtime goroutine launches = %d, want %d", got, want)
 	}
 	if got, want := report.PerformanceMetrics, 6; got != want {
@@ -96,33 +136,248 @@ func TestMutationLedgerRequiresEveryMigratedCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	ledger.Commands = ledger.Commands[1:]
-	if err := ledger.Validate(); err == nil || !strings.Contains(err.Error(), "missing required migrated command automation.admit-event") {
+	if err := ledger.Validate(); err == nil || !strings.Contains(err.Error(), "missing required migrated command artifacts.declare") {
 		t.Fatalf("Validate error = %v, want missing-migrated-command rejection", err)
 	}
 }
 
-func TestCheckedInPhase3ArchitectureContracts(t *testing.T) {
+func TestMutationLedgerMatchesProductionExecutionMutationInventory(t *testing.T) {
+	ledger, err := LoadMutationLedger(filepath.Join("testdata", "mutation-ledger.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var got []string
+	for _, command := range ledger.Commands {
+		if strings.HasPrefix(command.ID, "execution.") {
+			got = append(got, command.ID)
+		}
+	}
+
+	// These registered actions do not belong in a mutation ledger. Preflight's
+	// port contract explicitly forbids claiming product state, and Classifier
+	// only returns an ExitClassification value; neither has a durable command.
+	nonMutationEvidence := map[authority.Action]string{
+		execution.ActionPreflight: "PreflightPort validates readiness without claiming product state",
+		execution.ActionClassify:  "Classifier returns only an ExitClassification value",
+	}
+	// These original generic API actions remain compatibility scaffolds and are
+	// not wired by the production Phase 4 composition. Their exact composed
+	// replacements are represented by the other registered actions below.
+	uncomposedScaffolds := map[authority.Action]string{
+		execution.ActionAwait:          "replaced by exact DriverRun await actions",
+		execution.ActionClaimAndLaunch: "replaced by exact TaskRun claim and lifecycle actions",
+		execution.ActionRecover:        "replaced by exact DriverRun and TaskRun recovery actions",
+	}
+	exclusions := make(map[authority.Action]string, len(nonMutationEvidence)+len(uncomposedScaffolds))
+	for action, evidence := range nonMutationEvidence {
+		exclusions[action] = evidence
+	}
+	for action, evidence := range uncomposedScaffolds {
+		exclusions[action] = evidence
+	}
+
+	rules := append(execution.OperationRules(), execution.DriverRunOperationRules()...)
+	want := make([]string, 0, len(rules)-len(exclusions))
+	observedExclusions := make(map[authority.Action]struct{}, len(exclusions))
+	for _, rule := range rules {
+		if evidence, excluded := exclusions[rule.Action]; excluded {
+			observedExclusions[rule.Action] = struct{}{}
+			if evidence == "" {
+				t.Fatalf("excluded Execution action %q has no evidence", rule.Action)
+			}
+			if slices.Contains(got, string(rule.Action)) {
+				t.Fatalf("non-production-mutation Execution action %q appears in ledger; exclusion evidence: %s", rule.Action, evidence)
+			}
+			continue
+		}
+		want = append(want, string(rule.Action))
+	}
+	if len(observedExclusions) != len(exclusions) {
+		t.Fatalf("Execution action exclusions observed = %v, want all documented exclusions %v", observedExclusions, exclusions)
+	}
+	slices.Sort(want)
+	if gotCount, wantCount := len(got), 40; gotCount != wantCount {
+		t.Fatalf("Execution mutation commands = %d, want %d; commands = %v", gotCount, wantCount, got)
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("Execution mutation commands = %v, want exact production action inventory %v", got, want)
+	}
+}
+
+func TestExecutionLedgerDurableCommandsExistInFrozenFleetContract(t *testing.T) {
+	ledger, err := LoadMutationLedger(filepath.Join("testdata", "mutation-ledger.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents, err := os.ReadFile(filepath.Join("..", "infra", "fleetdb", "testdata", "fleetdb-openapi.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var contract struct {
+		Paths map[string]map[string]any `yaml:"paths"`
+	}
+	if err := yaml.Unmarshal(contents, &contract); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, command := range ledger.Commands {
+		if !strings.HasPrefix(command.ID, "execution.") {
+			continue
+		}
+		for _, durableCommand := range command.DurableCommands {
+			method, route, ok := strings.Cut(durableCommand, " ")
+			if !ok || method == "" || route == "" {
+				t.Fatalf("%s durable command %q is not an exact Fleet HTTP operation", command.ID, durableCommand)
+			}
+			operations, ok := contract.Paths[route]
+			if !ok {
+				t.Fatalf("%s durable command %q has no route in frozen Fleet contract", command.ID, durableCommand)
+			}
+			if _, ok := operations[strings.ToLower(method)]; !ok {
+				t.Fatalf("%s durable command %q has no matching method in frozen Fleet contract", command.ID, durableCommand)
+			}
+		}
+	}
+}
+
+func TestExecutionQueueLedgerDistinguishesLeaseRecoveryFromReceiptReplay(t *testing.T) {
+	ledger, err := LoadMutationLedger(filepath.Join("testdata", "mutation-ledger.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	commands := make(map[string]MutationCommand, len(ledger.Commands))
+	for _, command := range ledger.Commands {
+		commands[command.ID] = command
+	}
+
+	for _, id := range []string{
+		"execution.claim-await-event-notifications",
+		"execution.claim-driver-run-outcomes",
+		"execution.claim-terminal-driver-run-work-recoveries",
+	} {
+		command := commands[id]
+		if !strings.Contains(command.IdempotencyKey, "no exact claim replay receipt") ||
+			!strings.Contains(command.RetryRestartBehavior, "before claim_until returns no row") ||
+			slices.Contains(command.FaultInjectionTests, "duplicate_claim") {
+			t.Fatalf("%s must document lease-expiry recovery, not exact claim replay: %+v", id, command)
+		}
+	}
+	for _, id := range []string{
+		"execution.retry-await-event-notification",
+		"execution.retry-driver-run-outcome",
+		"execution.retry-terminal-driver-run-work-recovery",
+	} {
+		command := commands[id]
+		if !strings.Contains(command.IdempotencyKey, "no exact replay receipt") ||
+			!strings.Contains(command.RetryRestartBehavior, "ownership conflict") ||
+			slices.Contains(command.FaultInjectionTests, "duplicate_retry") {
+			t.Fatalf("%s must document state convergence after a cleared claim, not retry receipt replay: %+v", id, command)
+		}
+	}
+	for _, id := range []string{
+		"execution.complete-await-event-notification",
+		"execution.complete-driver-run-outcome",
+		"execution.complete-terminal-driver-run-work-recovery",
+	} {
+		command := commands[id]
+		if !strings.Contains(command.RetryRestartBehavior, "Exact completion replay is idempotent") {
+			t.Fatalf("%s must retain exact same-claim completion replay: %+v", id, command)
+		}
+	}
+}
+
+func TestPhase4LedgerDistinguishesReceiptsFromStateConvergence(t *testing.T) {
+	ledger, err := LoadMutationLedger(filepath.Join("testdata", "mutation-ledger.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	commands := make(map[string]MutationCommand, len(ledger.Commands))
+	for _, command := range ledger.Commands {
+		commands[command.ID] = command
+	}
+
+	immutableReceiptMarkers := map[string]string{
+		"artifacts.declare":                             "An exact retry returns",
+		"artifacts.finalize":                            "Exact command-receipt replay",
+		"artifacts.reference":                           "immutable receipt",
+		"artifacts.upload":                              "Exact command-receipt replay",
+		"execution.append-log":                          "Exact request replay",
+		"execution.claim-driver-run":                    "Exact request replay",
+		"execution.claim-driver-run-work-item":          "Exact request replay",
+		"execution.claim-task-run":                      "same TaskRun owner and action receipt",
+		"execution.exhaust-task-run-retries":            "Exact replay returns the committed exhaustion receipt",
+		"execution.finalize":                            "original terminal result",
+		"execution.finalize-driver-run":                 "Exact request replay",
+		"execution.handoff-driver-run-review-work-item": "Exact replay returns the committed handoff receipt",
+		"execution.request-task-run":                    "Exact request replay",
+		"execution.requeue-task-run":                    "Exact replay returns the committed retry receipt",
+		"execution.release-driver-run-work-item":        "Exact request replay",
+		"execution.start-child-driver-run":              "Exact replay",
+		"execution.submit-driver-run":                   "stable DriverRun identity and exact submitted definition",
+	}
+	for id, marker := range immutableReceiptMarkers {
+		command, ok := commands[id]
+		if !ok || !strings.Contains(command.RetryRestartBehavior, marker) {
+			t.Fatalf("%s must document immutable receipt replay with %q: %+v", id, marker, command)
+		}
+	}
+
+	stateConvergenceMarkers := map[string]string{
+		"execution.cascade-child-driver-runs":        "current projections",
+		"execution.converge-task-run":                "next scan resume",
+		"execution.create-worker-profile":            "converges on the stable profile identity",
+		"execution.delete-worker-profile":            "converges on absence",
+		"execution.heartbeat":                        "converge",
+		"execution.heartbeat-driver-run":             "converge on current liveness state",
+		"execution.heartbeat-worker-node":            "move liveness forward",
+		"execution.recover-child-driver-run-cascade": "current projections",
+		"execution.recover-driver-runs":              "current recovered ID set",
+		"execution.recover-stale-child-task-runs":    "fresh heartbeat or successor fence wins",
+		"execution.register-worker-node":             "updates the same registration",
+		"execution.repair-terminal-driver-step":      "converges",
+		"execution.set-worker-node-drain":            "converges on the same Node projection",
+		"execution.update-worker-profile":            "converges",
+	}
+	for id, marker := range stateConvergenceMarkers {
+		command, ok := commands[id]
+		if !ok || !strings.Contains(command.RetryRestartBehavior, marker) {
+			t.Fatalf("%s must document live state convergence with %q: %+v", id, marker, command)
+		}
+	}
+
+	await := commands["execution.await-driver-run"]
+	resolve := commands["execution.resolve-driver-await"]
+	if !strings.Contains(await.RetryRestartBehavior, "Registration replay") ||
+		!strings.Contains(resolve.RetryRestartBehavior, "cannot resume the parent twice") {
+		t.Fatalf("Await commands must document identity plus suspend/resume convergence: register=%+v resolve=%+v", await, resolve)
+	}
+}
+
+func TestCheckedInPhase4ArchitectureContracts(t *testing.T) {
 	graph, err := LoadCapabilityGraph(filepath.Join("testdata", "capability-graph.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if graph.CompletedPhase != 3 {
-		t.Fatalf("completed phase = %d, want 3", graph.CompletedPhase)
+	if graph.CompletedPhase != 4 {
+		t.Fatalf("completed phase = %d, want 4", graph.CompletedPhase)
 	}
 	statusByCapability := make(map[string]string, len(graph.Capabilities))
 	for _, capability := range graph.Capabilities {
 		statusByCapability[capability.Name] = capability.Status
 	}
-	if statusByCapability["automation"] != "active" || statusByCapability["workflowcatalog"] != "active" {
-		t.Fatalf("active capability statuses = automation:%q workflowcatalog:%q", statusByCapability["automation"], statusByCapability["workflowcatalog"])
+	if statusByCapability["automation"] != "active" || statusByCapability["workflowcatalog"] != "active" ||
+		statusByCapability["execution"] != "active" || statusByCapability["artifacts"] != "active" {
+		t.Fatalf("active capability statuses = automation:%q workflowcatalog:%q execution:%q artifacts:%q",
+			statusByCapability["automation"], statusByCapability["workflowcatalog"], statusByCapability["execution"], statusByCapability["artifacts"])
 	}
 
 	ledger, err := LoadMutationLedger(filepath.Join("testdata", "mutation-ledger.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ledger.Commands) != 17 {
-		t.Fatalf("mutation commands = %d, want 17", len(ledger.Commands))
+	if len(ledger.Commands) != 61 {
+		t.Fatalf("mutation commands = %d, want 61", len(ledger.Commands))
 	}
 }
 

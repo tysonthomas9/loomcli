@@ -44,6 +44,7 @@ func (h *testHarness) bindConfigHeaders(t *testing.T, bindingID, sourceConfigRef
 		HeaderDriverRunID:        claimed.RunID,
 		HeaderDriverNodeID:       claimed.NodeID,
 		HeaderDriverLeaseID:      claimed.LeaseID,
+		HeaderDriverLeaseToken:   "driver-test-token",
 		HeaderDriverFencingToken: fmt.Sprintf("%d", claimed.FencingToken),
 	}
 }

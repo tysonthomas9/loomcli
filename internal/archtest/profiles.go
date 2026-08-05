@@ -18,6 +18,13 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
+// repositoryScaleLoadConcurrency deliberately stays at one. A repository-wide
+// packages.Load with syntax and type information keeps a complete typed graph
+// live until the profile analysis returns. Running multiple profiles at once
+// multiplies peak memory without improving the type-checker's bounded
+// throughput enough to justify the cost.
+const repositoryScaleLoadConcurrency = 1
+
 // analyzeProfiles loads the complete package graph for each supported source
 // selection. go/packages is intentional here: direct AST scans cannot expose
 // transitive forbidden paths or profile-specific import cycles.
@@ -28,7 +35,7 @@ func analyzeProfiles(root string, matrix AnalysisMatrix, graph CapabilityGraph, 
 		err        error
 	}
 	results := make([]result, len(profiles))
-	semaphore := make(chan struct{}, 3)
+	semaphore := make(chan struct{}, repositoryScaleLoadConcurrency)
 	var wg sync.WaitGroup
 	for i, profile := range profiles {
 		i, profile := i, profile
@@ -52,36 +59,141 @@ func analyzeProfiles(root string, matrix AnalysisMatrix, graph CapabilityGraph, 
 }
 
 func analyzeProfile(root string, profile AnalysisProfile, graph CapabilityGraph, genericMechanisms []GenericMechanismUse) ([]string, error) {
-	tags := append([]string(nil), profile.Tags...)
-	if profile.Race {
-		// The matrix calls for race source selection, not execution. The implicit
-		// race build tag selects the same files without requiring cross-CGO builds.
-		tags = append(tags, "race")
+	violations, seenPackageErrors, err := analyzeProfileDependencyMetadata(root, profile, graph)
+	if err != nil {
+		return nil, err
 	}
-	cfg := &packages.Config{
-		Mode: packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles |
-			packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo |
-			packages.NeedImports | packages.NeedDeps | packages.NeedModule,
-		Dir:   root,
-		Env:   profileEnvironment(profile),
-		Tests: true,
+	typedViolations, genericMechanismPatterns, err := analyzeProfileTypedRoots(root, profile, graph, seenPackageErrors)
+	if err != nil {
+		return nil, err
 	}
-	if len(tags) > 0 {
-		cfg.BuildFlags = []string{"-tags=" + strings.Join(tags, ",")}
+	violations = append(violations, typedViolations...)
+	genericMechanismViolations, err := analyzeProfileGenericMechanisms(root, profile, genericMechanismPatterns, genericMechanisms, seenPackageErrors)
+	if err != nil {
+		return nil, err
 	}
-	loaded, err := packages.Load(cfg, "./...")
+	return append(violations, genericMechanismViolations...), nil
+}
+
+// analyzeProfileTypedRoots deliberately returns only strings and package patterns so
+// its package graph becomes unreachable before the focused TypesInfo load.
+func analyzeProfileTypedRoots(
+	root string,
+	profile AnalysisProfile,
+	graph CapabilityGraph,
+	seenPackageErrors map[string]struct{},
+) ([]string, []string, error) {
+	typedRoots, err := packages.Load(profilePackagesConfig(root, profile, profileTypedRootLoadMode), "./...")
+	if err != nil {
+		return nil, nil, err
+	}
+	violations := []string{}
+	for _, pkg := range typedRoots {
+		violations = append(violations, profilePackageErrorViolations(profile.Name, pkg, seenPackageErrors)...)
+		violations = append(violations, profilePackageViolations(profile.Name, pkg, graph)...)
+	}
+	violations = append(violations, requiredSourceViolations(root, profile, typedRoots)...)
+	genericMechanismPatterns, err := genericMechanismCandidatePatterns(root, typedRoots)
+	if err != nil {
+		return nil, nil, err
+	}
+	return violations, genericMechanismPatterns, nil
+}
+
+func analyzeProfileGenericMechanisms(
+	root string,
+	profile AnalysisProfile,
+	candidatePatterns []string,
+	policies []GenericMechanismUse,
+	seenPackageErrors map[string]struct{},
+) ([]string, error) {
+	if len(candidatePatterns) == 0 {
+		return nil, nil
+	}
+	packagesWithCandidates, err := packages.Load(
+		profilePackagesConfig(root, profile, profileGenericMechanismLoadMode),
+		candidatePatterns...,
+	)
 	if err != nil {
 		return nil, err
 	}
 	violations := []string{}
-	for _, pkg := range loaded {
-		for _, pkgErr := range pkg.Errors {
-			violations = append(violations, fmt.Sprintf("profile %s package %s: %s", profile.Name, pkg.PkgPath, pkgErr.Msg))
+	seenViolations := map[string]struct{}{}
+	for _, pkg := range packagesWithCandidates {
+		violations = append(violations, profilePackageErrorViolations(profile.Name, pkg, seenPackageErrors)...)
+		if !profilePackageChecked(pkg) {
+			continue
 		}
-		violations = append(violations, profilePackageViolations(root, profile.Name, pkg, graph, genericMechanisms)...)
+		for _, violation := range typedGenericMechanismViolations(root, profile.Name, pkg, policies) {
+			if _, seen := seenViolations[violation]; seen {
+				continue
+			}
+			seenViolations[violation] = struct{}{}
+			violations = append(violations, violation)
+		}
 	}
-	violations = append(violations, requiredSourceViolations(root, profile, loaded)...)
 	return violations, nil
+}
+
+func analyzeProfileDependencyMetadata(
+	root string,
+	profile AnalysisProfile,
+	graph CapabilityGraph,
+) ([]string, map[string]struct{}, error) {
+	dependencyRoots, err := packages.Load(profilePackagesConfig(root, profile, profileDependencyLoadMode), "./...")
+	if err != nil {
+		return nil, nil, err
+	}
+	violations := []string{}
+	seenPackageErrors := map[string]struct{}{}
+	for _, pkg := range dependencyRoots {
+		violations = append(violations, profilePackageErrorViolations(profile.Name, pkg, seenPackageErrors)...)
+		if !profilePackageChecked(pkg) {
+			continue
+		}
+		packageBoundary := classifyBoundaryPackage(pkg.PkgPath, graph)
+		if packageBoundary.kind == boundaryPackageCapabilityPublic || packageBoundary.kind == boundaryPackageCapabilityCore {
+			violations = append(violations, transitiveModuleViolations(profile.Name, pkg)...)
+		}
+	}
+	return violations, seenPackageErrors, nil
+}
+
+func profilePackageErrorViolations(profile string, pkg *packages.Package, seen map[string]struct{}) []string {
+	violations := []string{}
+	for _, pkgErr := range pkg.Errors {
+		message := fmt.Sprintf("profile %s package %s: %s", profile, pkg.PkgPath, pkgErr.Msg)
+		if _, exists := seen[message]; exists {
+			continue
+		}
+		seen[message] = struct{}{}
+		violations = append(violations, message)
+	}
+	return violations
+}
+
+const profileTypedRootLoadMode packages.LoadMode = packages.NeedName |
+	packages.NeedFiles |
+	packages.NeedCompiledGoFiles |
+	packages.NeedTypes |
+	packages.NeedImports
+
+const profileGenericMechanismLoadMode packages.LoadMode = profileTypedRootLoadMode |
+	packages.NeedSyntax |
+	packages.NeedTypesInfo
+
+const profileDependencyLoadMode packages.LoadMode = packages.NeedName |
+	packages.NeedImports |
+	packages.NeedDeps
+
+func profilePackagesConfig(root string, profile AnalysisProfile, mode packages.LoadMode) *packages.Config {
+	return &packages.Config{
+		Mode:       mode,
+		Dir:        root,
+		Env:        profileEnvironment(profile),
+		Tests:      true,
+		BuildFlags: profileBuildFlags(profile),
+	}
 }
 
 func requiredSourceViolations(root string, profile AnalysisProfile, loaded []*packages.Package) []string {
@@ -107,15 +219,8 @@ func requiredSourceViolations(root string, profile AnalysisProfile, loaded []*pa
 	return violations
 }
 
-func profilePackageViolations(root, profile string, pkg *packages.Package, graph CapabilityGraph, genericMechanisms []GenericMechanismUse) []string {
-	if !strings.HasPrefix(pkg.PkgPath, modulePath+"/internal/") {
-		return nil
-	}
-	// packages.Load(Tests: true) adds a synthetic test-main package whose path
-	// ends in ".test". Its imports are the test harness, not a production or
-	// test source boundary. The real package-under-test variants are loaded
-	// separately and remain fully checked, including their _test.go imports.
-	if strings.HasSuffix(pkg.PkgPath, ".test") {
+func profilePackageViolations(profile string, pkg *packages.Package, graph CapabilityGraph) []string {
+	if !profilePackageChecked(pkg) {
 		return nil
 	}
 	violations := []string{}
@@ -124,15 +229,25 @@ func profilePackageViolations(root, profile string, pkg *packages.Package, graph
 			violations = append(violations, fmt.Sprintf("profile %s package %s imports %s: %s", profile, pkg.PkgPath, importPath, reason))
 		}
 	}
-	violations = append(violations, typedGenericMechanismViolations(root, profile, pkg, genericMechanisms)...)
 	packageBoundary := classifyBoundaryPackage(pkg.PkgPath, graph)
 	if isCapabilityPackage(packageBoundary.kind) {
 		violations = append(violations, typedExportedSignatureViolations(profile, pkg, graph)...)
 	}
-	if packageBoundary.kind == boundaryPackageCapabilityPublic || packageBoundary.kind == boundaryPackageCapabilityCore {
-		violations = append(violations, transitiveModuleViolations(profile, pkg)...)
-	}
 	return violations
+}
+
+func profilePackageChecked(pkg *packages.Package) bool {
+	if !strings.HasPrefix(pkg.PkgPath, modulePath+"/internal/") {
+		return false
+	}
+	// packages.Load(Tests: true) adds a synthetic test-main package whose path
+	// ends in ".test". Its imports are the test harness, not a production or
+	// test source boundary. The real package-under-test variants are loaded
+	// separately and remain fully checked, including their _test.go imports.
+	if strings.HasSuffix(pkg.PkgPath, ".test") {
+		return false
+	}
+	return true
 }
 
 func typedExportedSignatureViolations(profile string, pkg *packages.Package, graph CapabilityGraph) []string {
@@ -316,6 +431,70 @@ func firstLeakedTypeParameters(parameters *types.TypeParamList, currentPackage s
 	return ""
 }
 
+func genericMechanismCandidatePatterns(root string, loaded []*packages.Package) ([]string, error) {
+	visited := map[string]struct{}{}
+	candidatePatterns := map[string]struct{}{}
+	for _, pkg := range loaded {
+		if !profilePackageChecked(pkg) {
+			continue
+		}
+		for _, path := range pkg.CompiledGoFiles {
+			if _, seen := visited[path]; seen {
+				continue
+			}
+			visited[path] = struct{}{}
+			rel, err := filepath.Rel(root, path)
+			if err != nil {
+				return nil, fmt.Errorf("resolve generic-mechanism candidate %s: %w", path, err)
+			}
+			rel = filepath.ToSlash(rel)
+			if !genericMechanismSourceChecked(rel) {
+				continue
+			}
+			candidate, err := sourceContainsGenericMechanismSelector(path)
+			if err != nil {
+				return nil, fmt.Errorf("prefilter generic-mechanism candidate %s: %w", rel, err)
+			}
+			if candidate {
+				candidatePatterns["./"+filepath.ToSlash(filepath.Dir(rel))] = struct{}{}
+			}
+		}
+	}
+	patterns := make([]string, 0, len(candidatePatterns))
+	for pattern := range candidatePatterns {
+		patterns = append(patterns, pattern)
+	}
+	slices.Sort(patterns)
+	return patterns, nil
+}
+
+func sourceContainsGenericMechanismSelector(path string) (bool, error) {
+	contents, err := os.ReadFile(path) //nolint:gosec // paths come from go/packages CompiledGoFiles
+	if err != nil {
+		return false, err
+	}
+	parsed, parseErr := parser.ParseFile(token.NewFileSet(), path, contents, parser.SkipObjectResolution)
+	if parseErr != nil {
+		// Fail closed by sending malformed selected source through the focused
+		// load too. The package error remains the authoritative diagnostic.
+		return true, nil
+	}
+	candidate := false
+	ast.Inspect(parsed, func(node ast.Node) bool {
+		selector, ok := node.(*ast.SelectorExpr)
+		if ok && isGenericMechanismSelector(selector.Sel.Name) {
+			candidate = true
+			return false
+		}
+		return !candidate
+	})
+	return candidate, nil
+}
+
+func genericMechanismSourceChecked(rel string) bool {
+	return underAnyRoot(rel, []string{"internal/app", "internal/cli", "internal/modules", "internal/webui/handlers"})
+}
+
 func typedGenericMechanismViolations(
 	root, profile string,
 	pkg *packages.Package,
@@ -330,7 +509,7 @@ func typedGenericMechanismViolations(
 			continue
 		}
 		rel = filepath.ToSlash(rel)
-		if !underAnyRoot(rel, []string{"internal/app", "internal/cli", "internal/modules", "internal/webui/handlers"}) {
+		if !genericMechanismSourceChecked(rel) {
 			continue
 		}
 		ast.Inspect(file, func(node ast.Node) bool {
@@ -493,7 +672,7 @@ func allFileBoundaryViolations(rel string, file *ast.File, graph CapabilityGraph
 }
 
 func genericMechanismBoundaryViolations(rel string, file *ast.File, policies []GenericMechanismUse) []string {
-	if !underAnyRoot(rel, []string{"internal/app", "internal/cli", "internal/modules", "internal/webui/handlers"}) {
+	if !genericMechanismSourceChecked(rel) {
 		return nil
 	}
 	violations := []string{}
@@ -647,215 +826,4 @@ func localLeakedTypeAliases(file *ast.File, aliases map[string]string, graph Cap
 		}
 	}
 	return leaked
-}
-
-// exportedSignatureExpressions returns only type/value expressions that are
-// observable through the package API. Function bodies, method receivers,
-// unexported receiver methods, and unexported struct/interface fields are
-// implementation details and must not turn an allowed private adapter field
-// into a public-signature violation.
-func exportedSignatureExpressions(decl ast.Decl) []ast.Expr {
-	switch value := decl.(type) {
-	case *ast.FuncDecl:
-		if !exportedFunctionDeclaration(value) {
-			return nil
-		}
-		return appendFieldListExpressions(nil, value.Type.TypeParams, value.Type.Params, value.Type.Results)
-	case *ast.GenDecl:
-		expressions := []ast.Expr{}
-		for _, spec := range value.Specs {
-			switch typed := spec.(type) {
-			case *ast.TypeSpec:
-				if typed.Name.IsExported() {
-					expressions = append(expressions, publicTypeExpressions(typed.Type)...)
-				}
-			case *ast.ValueSpec:
-				expressions = append(expressions, exportedValueExpressions(typed)...)
-			}
-		}
-		return expressions
-	default:
-		return nil
-	}
-}
-
-func appendFieldListExpressions(expressions []ast.Expr, lists ...*ast.FieldList) []ast.Expr {
-	for _, list := range lists {
-		if list == nil {
-			continue
-		}
-		for _, field := range list.List {
-			expressions = append(expressions, field.Type)
-		}
-	}
-	return expressions
-}
-
-func exportedValueExpressions(spec *ast.ValueSpec) []ast.Expr {
-	if spec == nil {
-		return nil
-	}
-	exported := make([]int, 0, len(spec.Names))
-	for index, name := range spec.Names {
-		if name.IsExported() {
-			exported = append(exported, index)
-		}
-	}
-	if len(exported) == 0 {
-		return nil
-	}
-	expressions := []ast.Expr{}
-	if spec.Type != nil {
-		expressions = append(expressions, spec.Type)
-	}
-	if len(spec.Values) != len(spec.Names) {
-		return append(expressions, spec.Values...)
-	}
-	for _, index := range exported {
-		expressions = append(expressions, spec.Values[index])
-	}
-	return expressions
-}
-
-// publicTypeExpressions mirrors the typed exported-signature check for files
-// outside the active build profile. Private struct fields and private explicit
-// interface methods are not package API. Embedded interface types remain part
-// of the public type identity and are therefore checked.
-func publicTypeExpressions(expression ast.Expr) []ast.Expr {
-	switch typed := expression.(type) {
-	case *ast.StructType:
-		return publicStructTypeExpressions(typed)
-	case *ast.InterfaceType:
-		return publicInterfaceTypeExpressions(typed)
-	default:
-		return []ast.Expr{expression}
-	}
-}
-
-func publicStructTypeExpressions(typed *ast.StructType) []ast.Expr {
-	expressions := []ast.Expr{}
-	if typed.Fields == nil {
-		return expressions
-	}
-	for _, field := range typed.Fields.List {
-		if len(field.Names) == 0 {
-			if embeddedFieldExported(field.Type) {
-				expressions = append(expressions, field.Type)
-			}
-			continue
-		}
-		if hasExportedFieldName(field.Names) {
-			expressions = append(expressions, field.Type)
-		}
-	}
-	return expressions
-}
-
-func publicInterfaceTypeExpressions(typed *ast.InterfaceType) []ast.Expr {
-	expressions := []ast.Expr{}
-	if typed.Methods == nil {
-		return expressions
-	}
-	for _, field := range typed.Methods.List {
-		if len(field.Names) == 0 || hasExportedFieldName(field.Names) {
-			expressions = append(expressions, field.Type)
-		}
-	}
-	return expressions
-}
-
-func hasExportedFieldName(names []*ast.Ident) bool {
-	for _, name := range names {
-		if name.IsExported() {
-			return true
-		}
-	}
-	return false
-}
-
-func embeddedFieldExported(expression ast.Expr) bool {
-	switch typed := expression.(type) {
-	case *ast.Ident:
-		return typed.IsExported()
-	case *ast.SelectorExpr:
-		return typed.Sel.IsExported()
-	case *ast.StarExpr:
-		return embeddedFieldExported(typed.X)
-	case *ast.IndexExpr:
-		return embeddedFieldExported(typed.X)
-	case *ast.IndexListExpr:
-		return embeddedFieldExported(typed.X)
-	case *ast.ParenExpr:
-		return embeddedFieldExported(typed.X)
-	default:
-		return false
-	}
-}
-
-func firstLeakedASTTypeImport(expression ast.Expr, aliases, localLeaks map[string]string, graph CapabilityGraph) string {
-	leaked := ""
-	ast.Inspect(expression, func(node ast.Node) bool {
-		if leaked != "" {
-			return false
-		}
-		switch typed := node.(type) {
-		case *ast.SelectorExpr:
-			if ident, ok := typed.X.(*ast.Ident); ok {
-				if importPath := aliases[ident.Name]; isLeakedSignatureImport(importPath, graph) {
-					leaked = importPath
-					return false
-				}
-			}
-		case *ast.Ident:
-			if importPath := localLeaks[typed.Name]; importPath != "" {
-				leaked = importPath
-				return false
-			}
-		}
-		return true
-	})
-	return leaked
-}
-
-func exportedDeclaration(decl ast.Decl) bool {
-	switch value := decl.(type) {
-	case *ast.FuncDecl:
-		return exportedFunctionDeclaration(value)
-	case *ast.GenDecl:
-		for _, spec := range value.Specs {
-			switch typed := spec.(type) {
-			case *ast.TypeSpec:
-				if typed.Name.IsExported() {
-					return true
-				}
-			case *ast.ValueSpec:
-				for _, name := range typed.Names {
-					if name.IsExported() {
-						return true
-					}
-				}
-			}
-		}
-	}
-	return false
-}
-
-func exportedFunctionDeclaration(function *ast.FuncDecl) bool {
-	if function == nil || !function.Name.IsExported() {
-		return false
-	}
-	if function.Recv == nil || len(function.Recv.List) == 0 {
-		return true
-	}
-	return embeddedFieldExported(function.Recv.List[0].Type)
-}
-
-func isLeakedSignatureImport(importPath string, graph CapabilityGraph) bool {
-	if isForbiddenModuleDependency(importPath) {
-		return true
-	}
-	if capabilityForImport(importPath, graph) != "" {
-		return !isCapabilityPublicRoot(importPath, graph)
-	}
-	return strings.Contains(importPath, "/adapter/") || strings.HasSuffix(importPath, "/adapter")
 }

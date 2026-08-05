@@ -104,6 +104,7 @@ func cloneTaskRun(r *domain.TaskRun) *domain.TaskRun {
 	out.RuntimeMetadata = cloneMap(r.RuntimeMetadata)
 	out.Input = cloneRawMessage(r.Input)
 	out.FinishedAt = clonePtr(r.FinishedAt)
+	out.TerminalConvergedAt = clonePtr(r.TerminalConvergedAt)
 	return &out
 }
 
@@ -200,7 +201,14 @@ func taskRunMatchesClaimMem(run *domain.TaskRun, profile *domain.WorkerProfile, 
 	if claim.TaskRunID != "" && run.TaskRunID != claim.TaskRunID {
 		return false
 	}
-	if run.NodeID != "" && run.NodeID != claim.NodeID {
+	targetNodeID := run.TargetNodeID
+	// Pre-Phase-4 queued fixtures used NodeID as a scheduling target. Preserve
+	// that read compatibility only when the explicit target field is absent;
+	// new queued records keep NodeID empty until ownership is atomically claimed.
+	if targetNodeID == "" {
+		targetNodeID = run.NodeID
+	}
+	if targetNodeID != "" && targetNodeID != claim.NodeID {
 		return false
 	}
 	if run.WorkerProfileID != "" {

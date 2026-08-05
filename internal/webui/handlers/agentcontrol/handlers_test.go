@@ -41,9 +41,43 @@ func serveRequest(handler http.HandlerFunc, method, path, body string) *httptest
 	return rec
 }
 
+func assertSynchronousLifecycleResponse(t *testing.T, rec *httptest.ResponseRecorder, messagePart string) {
+	t.Helper()
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode lifecycle response: %v", err)
+	}
+	for _, key := range []string{"message", "pending", "command_id", "status"} {
+		if _, ok := raw[key]; !ok {
+			t.Errorf("lifecycle response missing %q: %s", key, rec.Body.String())
+		}
+	}
+	if len(raw) != 4 {
+		t.Errorf("lifecycle response keys = %v, want exactly message, pending, command_id, status", raw)
+	}
+
+	var resp dto.AgentLifecycleResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode typed lifecycle response: %v", err)
+	}
+	if !strings.Contains(resp.Message, messagePart) {
+		t.Errorf("Message = %q, want to contain %q", resp.Message, messagePart)
+	}
+	if resp.Pending {
+		t.Error("Pending = true, want false for synchronous daemon control")
+	}
+	if resp.CommandID != "" {
+		t.Errorf("CommandID = %q, want empty for synchronous daemon control", resp.CommandID)
+	}
+	if resp.Status != "succeeded" {
+		t.Errorf("Status = %q, want succeeded", resp.Status)
+	}
+}
+
 // --- Stop tests ---
 
-func TestHandleAgentStop_NoForce_SendsYield_Returns202(t *testing.T) {
+func TestHandleAgentStop_NoForce_SendsGracefulStop_Returns200(t *testing.T) {
 	fn, calls := newMockControlFn(&AgentControlResult{Success: true}, nil)
 
 	mux := http.NewServeMux()
@@ -53,15 +87,15 @@ func TestHandleAgentStop_NoForce_SendsYield_Returns202(t *testing.T) {
 	req := httptest.NewRequest("POST", "/api/workspaces/ws1/agents/falcon/stop", nil)
 	mux.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusAccepted {
-		t.Errorf("status = %d, want 202", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", rec.Code)
 	}
 	if len(*calls) != 1 {
 		t.Fatalf("calls = %d, want 1", len(*calls))
 	}
 	c := (*calls)[0]
-	if c.op != "agent_yield" {
-		t.Errorf("op = %q, want agent_yield", c.op)
+	if c.op != "agent_stop" {
+		t.Errorf("op = %q, want agent_stop", c.op)
 	}
 	if c.agentName != "falcon" {
 		t.Errorf("agentName = %q, want falcon", c.agentName)
@@ -70,14 +104,7 @@ func TestHandleAgentStop_NoForce_SendsYield_Returns202(t *testing.T) {
 		t.Error("force = true, want false")
 	}
 
-	var resp dto.MessageResponse
-	json.NewDecoder(rec.Body).Decode(&resp)
-	if !resp.Success {
-		t.Error("Success = false")
-	}
-	if !strings.Contains(resp.Message, "yield requested") {
-		t.Errorf("Message = %q, want to contain 'yield requested'", resp.Message)
-	}
+	assertSynchronousLifecycleResponse(t, rec, "stopped")
 }
 
 func TestHandleAgentStop_Force_SendsStop_Returns200(t *testing.T) {
@@ -106,11 +133,7 @@ func TestHandleAgentStop_Force_SendsStop_Returns200(t *testing.T) {
 		t.Error("force = false, want true")
 	}
 
-	var resp dto.MessageResponse
-	json.NewDecoder(rec.Body).Decode(&resp)
-	if !strings.Contains(resp.Message, "force-stopped") {
-		t.Errorf("Message = %q, want to contain 'force-stopped'", resp.Message)
-	}
+	assertSynchronousLifecycleResponse(t, rec, "force-stopped")
 }
 
 func TestHandleAgentStop_EmptyBody_DefaultsNoForce(t *testing.T) {
@@ -123,14 +146,14 @@ func TestHandleAgentStop_EmptyBody_DefaultsNoForce(t *testing.T) {
 	req := httptest.NewRequest("POST", "/api/workspaces/ws1/agents/falcon/stop", nil)
 	mux.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusAccepted {
-		t.Errorf("status = %d, want 202", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", rec.Code)
 	}
 	if len(*calls) != 1 {
 		t.Fatalf("calls = %d, want 1", len(*calls))
 	}
-	if (*calls)[0].op != "agent_yield" {
-		t.Errorf("op = %q, want agent_yield", (*calls)[0].op)
+	if (*calls)[0].op != "agent_stop" {
+		t.Errorf("op = %q, want agent_stop", (*calls)[0].op)
 	}
 }
 
@@ -180,11 +203,12 @@ func TestHandleAgentStart_Success(t *testing.T) {
 	if (*calls)[0].agentName != "falcon" {
 		t.Errorf("agentName = %q, want falcon", (*calls)[0].agentName)
 	}
+	assertSynchronousLifecycleResponse(t, rec, "started")
 }
 
 // --- Restart test ---
 
-func TestHandleAgentRestart_Success(t *testing.T) {
+func TestHandleAgentRestart_Completed(t *testing.T) {
 	fn, calls := newMockControlFn(&AgentControlResult{Success: true}, nil)
 
 	mux := http.NewServeMux()
@@ -203,6 +227,7 @@ func TestHandleAgentRestart_Success(t *testing.T) {
 	if (*calls)[0].op != "agent_restart" {
 		t.Errorf("op = %q, want agent_restart", (*calls)[0].op)
 	}
+	assertSynchronousLifecycleResponse(t, rec, "restarted")
 }
 
 // --- Yield test ---
@@ -230,11 +255,7 @@ func TestHandleAgentYield_Success(t *testing.T) {
 		t.Errorf("agentName = %q, want falcon", (*calls)[0].agentName)
 	}
 
-	var resp dto.MessageResponse
-	json.NewDecoder(rec.Body).Decode(&resp)
-	if !strings.Contains(resp.Message, "yield requested") {
-		t.Errorf("Message = %q, want to contain 'yield requested'", resp.Message)
-	}
+	assertSynchronousLifecycleResponse(t, rec, "yield requested")
 }
 
 // --- List tests ---

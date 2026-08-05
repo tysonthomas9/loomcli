@@ -4,22 +4,113 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	appserve "github.com/tysonthomas9/loomcli/internal/app/serve"
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	runtimesettings "github.com/tysonthomas9/loomcli/internal/localsettings"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-// fakeIssueBackend embeds the interface so only Get needs a real
-// implementation; anything else panics loudly.
+type executionClaimPortStub struct{}
+
+func (executionClaimPortStub) ReplayTaskRunRequest(context.Context, execution.RequestTaskRunCommand) (execution.RequestTaskRunResult, error) {
+	return execution.RequestTaskRunResult{}, execution.ErrUnavailable
+}
+
+func (executionClaimPortStub) RequestTaskRun(context.Context, execution.RequestTaskRunCommand) (execution.RequestTaskRunResult, error) {
+	return execution.RequestTaskRunResult{}, execution.ErrUnavailable
+}
+
+func (executionClaimPortStub) ClaimTaskRun(context.Context, execution.ClaimTaskRunCommand) (execution.ClaimTaskRunResult, error) {
+	return execution.ClaimTaskRunResult{}, execution.ErrUnavailable
+}
+
+func (executionClaimPortStub) UpdateTaskRunWorkItemDesign(context.Context, execution.UpdateTaskRunWorkItemDesignCommand) (execution.UpdateTaskRunWorkItemDesignResult, error) {
+	return execution.UpdateTaskRunWorkItemDesignResult{}, execution.ErrUnavailable
+}
+
+func (executionClaimPortStub) RequeueTaskRun(context.Context, execution.RequeueTaskRunCommand) (execution.RequeueTaskRunResult, error) {
+	return execution.RequeueTaskRunResult{}, execution.ErrUnavailable
+}
+
+func (executionClaimPortStub) ExhaustTaskRunRetries(context.Context, execution.ExhaustTaskRunRetriesCommand) (execution.ExhaustTaskRunRetriesResult, error) {
+	return execution.ExhaustTaskRunRetriesResult{}, execution.ErrUnavailable
+}
+
+type taskRunWorkItemDesignPortStub struct {
+	mu       sync.Mutex
+	expected execution.Owner
+	calls    []execution.UpdateTaskRunWorkItemDesignCommand
+	applied  int
+}
+
+func (stub *taskRunWorkItemDesignPortStub) UpdateTaskRunWorkItemDesign(
+	_ context.Context,
+	command execution.UpdateTaskRunWorkItemDesignCommand,
+) (execution.UpdateTaskRunWorkItemDesignResult, error) {
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	stub.calls = append(stub.calls, command)
+	if command.WorkspaceKey != "WS" || command.Owner != stub.expected {
+		return execution.UpdateTaskRunWorkItemDesignResult{}, execution.ErrFenceConflict
+	}
+	stub.applied++
+	return execution.UpdateTaskRunWorkItemDesignResult{
+		WorkItemID: "TASK-1",
+		ActionID:   "task-run-work-item-design-update:" + command.RequestID,
+	}, nil
+}
+
+func (stub *taskRunWorkItemDesignPortStub) snapshot() (int, int, execution.UpdateTaskRunWorkItemDesignCommand) {
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	var last execution.UpdateTaskRunWorkItemDesignCommand
+	if len(stub.calls) > 0 {
+		last = stub.calls[len(stub.calls)-1]
+	}
+	return len(stub.calls), stub.applied, last
+}
+
+func executionDependenciesForTaskRunAPITest(
+	t *testing.T,
+	st store.Store,
+	designPorts ...execution.TaskRunWorkItemDesignPort,
+) appserve.ExecutionDependencies {
+	t.Helper()
+	var designs execution.TaskRunWorkItemDesignPort = executionClaimPortStub{}
+	if len(designPorts) > 0 && designPorts[0] != nil {
+		designs = designPorts[0]
+	}
+	repairs, ok := st.DriverSteps().(store.TerminalDriverStepRepairStore)
+	if !ok {
+		t.Fatal("test DriverStep store lacks terminal repair support")
+	}
+	return appserve.ExecutionDependencies{
+		TaskRuns: st.TaskRuns(), DriverRuns: st.DriverRuns(), DriverSteps: st.DriverSteps(),
+		TerminalStepRepairs: repairs, TaskRunEvents: st.TaskRunEvents(), Nodes: st.Nodes(),
+		WorkerProfiles: st.WorkerProfiles(), Agents: st.Agents(), Outbox: st.Outbox(), Awaits: st.Awaits(),
+		TriggerEvents: st.TriggerEvents(), Workspaces: st.Workspaces(),
+		AtomicTaskRunRequests: executionClaimPortStub{}, AtomicTaskRunClaims: executionClaimPortStub{},
+		AtomicTaskRunWorkItemDesign: designs,
+		AtomicTaskRunRequeues:       executionClaimPortStub{}, AtomicTaskRunRetryExhaustion: executionClaimPortStub{},
+		AllowLegacyStoreAdapters: true,
+	}
+}
+
+// fakeIssueBackend embeds the interface so only the exact-task read needs a
+// real implementation; any mutation attempt panics loudly.
 type fakeIssueBackend struct {
 	backend.IssueBackend
 	task  *backend.IssueDetailData
@@ -34,6 +125,8 @@ type testHarness struct {
 	server  *httptest.Server
 	store   store.Store
 	backend *fakeIssueBackend
+	designs *taskRunWorkItemDesignPortStub
+	module  *Module
 
 	taskRunID string
 	nodeID    string
@@ -58,6 +151,14 @@ func newHarnessWithConfig(t *testing.T, localSettingsDir, runner string) *testHa
 		token:     "lease-token-1",
 		fence:     42,
 	}
+	h.designs = &taskRunWorkItemDesignPortStub{expected: execution.Owner{
+		ResourceKind: execution.ResourceTaskRun,
+		ResourceID:   h.taskRunID,
+		NodeID:       h.nodeID,
+		LeaseID:      h.leaseID,
+		LeaseToken:   h.token,
+		FencingToken: h.fence,
+	}}
 	if _, err := st.TaskRuns().Create(context.Background(), store.TaskRunCreate{
 		WorkspaceKey: "WS",
 		TaskRunID:    h.taskRunID,
@@ -66,18 +167,27 @@ func newHarnessWithConfig(t *testing.T, localSettingsDir, runner string) *testHa
 		Status:       domain.TaskRunRunning,
 		NodeID:       h.nodeID,
 		LeaseID:      h.leaseID,
+		LeaseToken:   h.token,
 		FencingToken: h.fence,
 	}); err != nil {
 		t.Fatalf("Create task run: %v", err)
 	}
+	executionCapability, err := appserve.NewExecutionCapability(executionDependenciesForTaskRunAPITest(t, st, h.designs))
+	if err != nil {
+		t.Fatalf("compose Execution capability: %v", err)
+	}
 	module := NewModule(Config{
 		Store:            st,
+		Execution:        executionCapability.TaskRunAPI(),
+		Authorities:      executionCapability.TaskRunAuthorityResolver(),
 		LocalSettingsDir: localSettingsDir,
 		IssueBackends: func(_, actor string) (backend.IssueBackend, error) {
 			h.backend.actor = actor
 			return h.backend, nil
 		},
 	})
+	module.artifacts = newTaskRunArtifactAPIForTest(module)
+	h.module = module
 	mux := http.NewServeMux()
 	module.Register(mux)
 	h.server = httptest.NewServer(mux)
@@ -171,6 +281,7 @@ func TestTaskRunOpAuthRejections(t *testing.T) {
 		{"superseded lease", identity{leaseID: "lease-2"}, "lease_denied"},
 		{"foreign node", identity{nodeID: "node-2"}, "lease_denied"},
 		{"unknown task run", identity{taskRunID: "task-run-404"}, "lease_denied"},
+		{"wrong lease token", identity{token: "wrong-token"}, "lease_denied"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -223,6 +334,83 @@ func TestTaskRunGetAndTaskGet(t *testing.T) {
 	if h.backend.actor != "task-run:task-run-1" {
 		t.Fatalf("issue backend actor = %q, want task-run scoped actor", h.backend.actor)
 	}
+
+	resp, out = h.postOp(t, "task-get", map[string]any{"taskId": "TASK-2"}, identity{})
+	if resp.StatusCode != http.StatusForbidden || errorCode(t, out) != "not_owner" {
+		t.Fatalf("foreign task-get = %d %v, want 403 not_owner", resp.StatusCode, out)
+	}
+}
+
+func TestTaskRunDesignUpdateIsExactTaskAndFieldRestricted(t *testing.T) {
+	h := newHarness(t)
+	design := "# Plan\n\nShip it."
+	resp, out := h.postOp(t, "task-design-update", map[string]any{
+		"requestId": "design-1", "design": design, "designFormat": "markdown",
+	}, identity{})
+	if resp.StatusCode != http.StatusOK || out["taskId"] != "TASK-1" ||
+		out["actionId"] != "task-run-work-item-design-update:design-1" || out["replayed"] != false {
+		t.Fatalf("design update = %d %v, want TASK-1 success", resp.StatusCode, out)
+	}
+	calls, applied, command := h.designs.snapshot()
+	if calls != 1 || applied != 1 || command.RequestID != "design-1" || command.Owner.ResourceID != h.taskRunID ||
+		command.Design == nil || *command.Design != design || command.DesignFormat == nil || *command.DesignFormat != "markdown" {
+		t.Fatalf("design command = %+v calls=%d applied=%d", command, calls, applied)
+	}
+
+	tests := []struct {
+		name         string
+		body         map[string]any
+		id           identity
+		wantStatus   int
+		wantCode     string
+		wantPortCall bool
+	}{
+		{
+			name: "caller task ID rejected", body: map[string]any{"requestId": "design-foreign", "taskId": "TASK-2", "design": "nope"},
+			wantStatus: http.StatusBadRequest, wantCode: "invalid",
+		},
+		{
+			name: "unknown status field", body: map[string]any{"requestId": "design-field", "design": "nope", "status": "closed"},
+			wantStatus: http.StatusBadRequest, wantCode: "invalid",
+		},
+		{
+			name: "missing request ID", body: map[string]any{"design": "nope"},
+			wantStatus: http.StatusBadRequest, wantCode: "invalid",
+		},
+		{
+			name: "missing design", body: map[string]any{"requestId": "design-missing", "designFormat": "markdown"},
+			wantStatus: http.StatusBadRequest, wantCode: "invalid",
+		},
+		{
+			name: "blank design", body: map[string]any{"requestId": "design-blank", "design": "  "},
+			wantStatus: http.StatusBadRequest, wantCode: "invalid",
+		},
+		{
+			name: "invalid format", body: map[string]any{"requestId": "design-format", "design": "nope", "designFormat": "plaintext"},
+			wantStatus: http.StatusBadRequest, wantCode: "invalid",
+		},
+		{
+			name: "expired lease", body: map[string]any{"requestId": "design-stale", "design": "nope"}, id: identity{fence: "41"},
+			wantStatus: http.StatusForbidden, wantCode: "not_owner", wantPortCall: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			beforeCalls, beforeApplied, _ := h.designs.snapshot()
+			resp, decoded := h.postOp(t, "task-design-update", tt.body, tt.id)
+			if resp.StatusCode != tt.wantStatus || errorCode(t, decoded) != tt.wantCode {
+				t.Fatalf("response = %d %v, want %d %s", resp.StatusCode, decoded, tt.wantStatus, tt.wantCode)
+			}
+			afterCalls, afterApplied, _ := h.designs.snapshot()
+			wantCalls := beforeCalls
+			if tt.wantPortCall {
+				wantCalls++
+			}
+			if afterCalls != wantCalls || afterApplied != beforeApplied {
+				t.Fatalf("rejected request calls=%d applied=%d, want calls=%d applied=%d", afterCalls, afterApplied, wantCalls, beforeApplied)
+			}
+		})
+	}
 }
 
 func TestTaskRunHeartbeatAndLogs(t *testing.T) {
@@ -245,21 +433,48 @@ func TestTaskRunHeartbeatAndLogs(t *testing.T) {
 		t.Fatalf("stored runtime metadata = %v", stored.RuntimeMetadata)
 	}
 
-	resp, entry := h.postOp(t, "log-append", map[string]any{"stream": "stdout", "text": "hello\n"}, identity{})
+	logTimestamp := time.Date(2026, 7, 16, 20, 15, 0, 0, time.UTC)
+	resp, entry := h.postOp(t, "log-append", map[string]any{
+		"request_id": "task-run-log-1", "stream": "stdout", "text": "hello\n", "timestamp": logTimestamp,
+	}, identity{})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("log-append status = %d: %v", resp.StatusCode, entry)
 	}
 	if entry["taskRunId"] != "task-run-1" || entry["text"] != "hello\n" || entry["sequence"] != float64(1) {
 		t.Fatalf("log-append result = %v", entry)
 	}
+	resp, replayed := h.postOp(t, "log-append", map[string]any{
+		"requestId": "task-run-log-1", "stream": "stdout", "text": "hello\n", "timestamp": logTimestamp,
+	}, identity{})
+	if resp.StatusCode != http.StatusOK || replayed["sequence"] != entry["sequence"] {
+		t.Fatalf("log-append replay = %d %v, want committed sequence %v", resp.StatusCode, replayed, entry["sequence"])
+	}
 	logs, err := h.store.TaskRuns().ListLogs(context.Background(), "WS", h.taskRunID, store.TaskRunLogFilter{})
 	if err != nil || len(logs) != 1 || logs[0].Text != "hello\n" {
 		t.Fatalf("stored logs = %v err=%v, want the appended line", logs, err)
 	}
 
-	resp, decoded := h.postOp(t, "log-append", map[string]any{"stream": "stdout"}, identity{})
+	resp, decoded := h.postOp(t, "log-append", map[string]any{
+		"requestId": "task-run-log-1", "stream": "stdout", "text": "different\n", "timestamp": logTimestamp,
+	}, identity{})
+	if resp.StatusCode != http.StatusConflict || errorCode(t, decoded) != "conflict" {
+		t.Fatalf("conflicting log replay = %d %v, want 409 conflict", resp.StatusCode, decoded)
+	}
+
+	resp, decoded = h.postOp(t, "log-append", map[string]any{
+		"requestId": "camel", "request_id": "snake", "text": "line\n", "timestamp": logTimestamp,
+	}, identity{})
+	if resp.StatusCode != http.StatusBadRequest || errorCode(t, decoded) != "invalid" {
+		t.Fatalf("disagreeing request aliases = %d %v, want 400 invalid", resp.StatusCode, decoded)
+	}
+
+	resp, decoded = h.postOp(t, "log-append", map[string]any{"stream": "stdout"}, identity{})
 	if resp.StatusCode != http.StatusBadRequest || errorCode(t, decoded) != "invalid" {
 		t.Fatalf("log-append without text = %d %v, want 400 invalid", resp.StatusCode, decoded)
+	}
+	resp, decoded = h.postOp(t, "log-append", map[string]any{"stream": "stdout", "text": "missing identity\n"}, identity{})
+	if resp.StatusCode != http.StatusBadRequest || errorCode(t, decoded) != "invalid" {
+		t.Fatalf("log-append without replay identity = %d %v, want 400 invalid", resp.StatusCode, decoded)
 	}
 }
 
@@ -300,7 +515,11 @@ func TestTaskRunArtifactLifecycle(t *testing.T) {
 	h := newHarness(t)
 	resp, artifact := h.postOp(t, "artifact-declare", map[string]any{
 		"artifactId":  "artifact-1",
+		"sessionId":   "session-1",
+		"taskId":      "TASK-1",
 		"type":        "patch",
+		"uri":         "artifact://artifact-1",
+		"checksum":    "sha256:checksum",
 		"contentHash": "sha256:declared",
 		"sizeBytes":   10,
 		"metadata":    map[string]string{"idempotency_key": "artifact-key"},
@@ -315,8 +534,21 @@ func TestTaskRunArtifactLifecycle(t *testing.T) {
 	if artifact["artifactId"] != "artifact-1" || artifact["ownerType"] != "task_run" || artifact["ownerId"] != "task-run-1" {
 		t.Fatalf("declared artifact = %v, want task-run ownership forced", artifact)
 	}
+	if artifact["sessionId"] != "session-1" || artifact["taskId"] != "TASK-1" ||
+		artifact["uri"] != "artifact://artifact-1" || artifact["sizeBytes"] != float64(10) ||
+		artifact["checksum"] != "sha256:checksum" || artifact["contentHash"] != "sha256:declared" {
+		t.Fatalf("declared artifact lost semantic create fields: %v", artifact)
+	}
 	if artifact["durableStatus"] != "declared" {
 		t.Fatalf("declared artifact status = %v", artifact["durableStatus"])
+	}
+	persisted, err := h.store.Artifacts().Get(context.Background(), "WS", "artifact-1")
+	if err != nil {
+		t.Fatalf("get declared artifact: %v", err)
+	}
+	if persisted.SessionID != "session-1" || persisted.TaskID != "TASK-1" || persisted.URI != "artifact://artifact-1" ||
+		persisted.SizeBytes != 10 || persisted.Checksum != "sha256:checksum" || persisted.ContentHash != "sha256:declared" {
+		t.Fatalf("persisted declaration lost semantic fields: %#v", persisted)
 	}
 
 	// Raw content upload.
@@ -359,6 +591,20 @@ func TestTaskRunArtifactLifecycle(t *testing.T) {
 	artifacts, ok := listed["artifacts"].([]any)
 	if !ok || len(artifacts) != 1 {
 		t.Fatalf("artifact-list = %v, want exactly the declared artifact", listed)
+	}
+}
+
+func TestTaskRunArtifactMutationFailsClosedWithoutCapability(t *testing.T) {
+	h := newHarness(t)
+	h.module.artifacts = nil
+	resp, decoded := h.postOp(t, "artifact-declare", map[string]any{
+		"artifactId": "artifact-unavailable", "type": "patch",
+	}, identity{})
+	if resp.StatusCode != http.StatusServiceUnavailable || errorCode(t, decoded) != "unavailable" {
+		t.Fatalf("artifact-declare without capability = %d %v, want 503 unavailable", resp.StatusCode, decoded)
+	}
+	if _, err := h.store.Artifacts().Get(context.Background(), "WS", "artifact-unavailable"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("artifact persisted without capability, get error = %v", err)
 	}
 }
 
@@ -443,6 +689,31 @@ func TestModuleRegisterNilStore(t *testing.T) {
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("nil-store module registered routes: %d", rec.Code)
+	}
+}
+
+func TestExecutionDesignErrorsKeepStableTaskRunAPIStatus(t *testing.T) {
+	tests := []struct {
+		name   string
+		err    error
+		status int
+		code   string
+	}{
+		{name: "not found", err: fmt.Errorf("update task design: %w", execution.ErrNotFound), status: http.StatusNotFound, code: "not_found"},
+		{name: "invalid transition", err: fmt.Errorf("update task design: %w", execution.ErrInvalidTransition), status: http.StatusConflict, code: "invalid_transition"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			writeDomainOpError(recorder, test.err)
+			var body map[string]any
+			if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode error response: %v", err)
+			}
+			if recorder.Code != test.status || errorCode(t, body) != test.code {
+				t.Fatalf("response = %d %v, want %d %s", recorder.Code, body, test.status, test.code)
+			}
+		})
 	}
 }
 

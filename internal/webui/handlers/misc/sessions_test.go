@@ -1,14 +1,18 @@
 package misc
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/sessions"
+	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // newTestSessionStore creates a sessions.Store rooted in a temporary directory.
@@ -288,6 +292,67 @@ func TestGetSessionDiff_WithDiff(t *testing.T) {
 	if body == "" {
 		t.Error("body is empty, expected diff content")
 	}
+}
+
+func TestSessionContentHandlersPreserveUnavailable(t *testing.T) {
+	base := NewSessionService(nil, nil)
+	svc := &sessionContentErrorService{
+		SessionService: base,
+		err:            service.ErrUnavailable("managed content temporarily unavailable"),
+	}
+	for _, tc := range []struct {
+		name    string
+		handler http.HandlerFunc
+		path    string
+	}{
+		{
+			name:    "transcript",
+			handler: handleGetSessionTranscript(svc),
+			path:    "/api/tasks/TASK-1/sessions/session-1/transcript",
+		},
+		{
+			name:    "diff",
+			handler: handleGetSessionDiff(svc),
+			path:    "/api/tasks/TASK-1/sessions/session-1/diff",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			req.SetPathValue("taskId", "TASK-1")
+			req.SetPathValue("sessionId", "session-1")
+			rr := httptest.NewRecorder()
+			tc.handler.ServeHTTP(rr, req)
+			if rr.Code != http.StatusServiceUnavailable {
+				t.Fatalf("status = %d body=%s, want 503", rr.Code, rr.Body.String())
+			}
+			if !strings.Contains(rr.Body.String(), "managed content temporarily unavailable") {
+				t.Fatalf("body = %s", rr.Body.String())
+			}
+		})
+	}
+}
+
+type sessionContentErrorService struct {
+	service.SessionService
+	err error
+}
+
+func (s *sessionContentErrorService) GetSessionTranscript(
+	context.Context,
+	string,
+	string,
+	string,
+) ([]transcript.Event, error) {
+	return nil, s.err
+}
+
+func (s *sessionContentErrorService) GetSessionDiff(
+	context.Context,
+	string,
+	string,
+	string,
+) (string, error) {
+	return "", s.err
 }
 
 func TestNilStore_503(t *testing.T) {

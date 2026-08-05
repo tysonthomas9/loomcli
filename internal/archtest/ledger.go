@@ -33,6 +33,69 @@ type MutationCommand struct {
 	FaultInjectionTests    []string `yaml:"fault_injection_tests"`
 }
 
+var requiredMutationCommandIDs = []string{
+	"artifacts.declare",
+	"artifacts.finalize",
+	"artifacts.reference",
+	"artifacts.upload",
+	"automation.admit-event",
+	"automation.create-binding",
+	"automation.create-managed-binding",
+	"automation.delete-binding",
+	"automation.delete-managed-binding",
+	"automation.disable-binding",
+	"automation.disable-managed-binding",
+	"automation.dispatch-binding",
+	"automation.enable-binding",
+	"automation.enable-managed-binding",
+	"automation.retry-deliveries",
+	"automation.sweep-cron",
+	"automation.update-binding",
+	"automation.update-managed-binding",
+	"execution.append-log",
+	"execution.await-driver-run",
+	"execution.cascade-child-driver-runs",
+	"execution.claim-await-event-notifications",
+	"execution.claim-driver-run",
+	"execution.claim-driver-run-outcomes",
+	"execution.claim-driver-run-work-item",
+	"execution.claim-task-run",
+	"execution.claim-terminal-driver-run-work-recoveries",
+	"execution.complete-await-event-notification",
+	"execution.complete-driver-run-outcome",
+	"execution.complete-terminal-driver-run-work-recovery",
+	"execution.converge-task-run",
+	"execution.create-worker-profile",
+	"execution.delete-worker-profile",
+	"execution.exhaust-task-run-retries",
+	"execution.finalize",
+	"execution.finalize-driver-run",
+	"execution.handoff-driver-run-review-work-item",
+	"execution.heartbeat",
+	"execution.heartbeat-driver-run",
+	"execution.heartbeat-worker-node",
+	"execution.recover-child-driver-run-cascade",
+	"execution.recover-driver-runs",
+	"execution.recover-stale-child-task-runs",
+	"execution.recover-terminal-driver-run-work",
+	"execution.register-worker-node",
+	"execution.release-driver-run-work-item",
+	"execution.repair-terminal-driver-step",
+	"execution.request-task-run",
+	"execution.requeue-task-run",
+	"execution.resolve-driver-await",
+	"execution.retry-await-event-notification",
+	"execution.retry-driver-run-outcome",
+	"execution.retry-terminal-driver-run-work-recovery",
+	"execution.set-worker-node-drain",
+	"execution.start-child-driver-run",
+	"execution.submit-driver-run",
+	"execution.update-worker-profile",
+	"workflowcatalog.activate-version",
+	"workflowcatalog.approve-version",
+	"workflowcatalog.unapprove-version",
+}
+
 func LoadMutationLedger(path string) (MutationLedger, error) {
 	var value MutationLedger
 	if err := decodeYAML(path, &value); err != nil {
@@ -73,25 +136,7 @@ func validateMutationCommands(commands []MutationCommand) error {
 			return fmt.Errorf("duplicate mutation command %q", ids[i])
 		}
 	}
-	for _, required := range []string{
-		"automation.admit-event",
-		"automation.create-binding",
-		"automation.create-managed-binding",
-		"automation.delete-binding",
-		"automation.delete-managed-binding",
-		"automation.disable-binding",
-		"automation.disable-managed-binding",
-		"automation.dispatch-binding",
-		"automation.enable-binding",
-		"automation.enable-managed-binding",
-		"automation.retry-deliveries",
-		"automation.sweep-cron",
-		"automation.update-binding",
-		"automation.update-managed-binding",
-		"workflowcatalog.activate-version",
-		"workflowcatalog.approve-version",
-		"workflowcatalog.unapprove-version",
-	} {
+	for _, required := range requiredMutationCommandIDs {
 		if !slices.Contains(ids, required) {
 			return fmt.Errorf("mutation ledger is missing required migrated command %s", required)
 		}

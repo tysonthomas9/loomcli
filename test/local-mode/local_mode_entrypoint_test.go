@@ -10,8 +10,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
@@ -38,6 +41,226 @@ type runManifest struct {
 	CodeTaskID   string `json:"code_task_id"`
 	PlanTaskName string `json:"plan_task_title"`
 	CodeTaskName string `json:"code_task_title"`
+}
+
+func TestLocalModeTSPromptsLeaveLifecycleToHost(t *testing.T) {
+	raw, err := os.ReadFile("local-mode-entrypoint")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(raw)
+	for _, want := range []string{
+		"Do not change status or assignee; the workflow host moves it to review after the terminal receipt.",
+		"Do not close or release the task; the workflow host owns terminalization.",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("local-mode TS prompt missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		"move it to review, and make no repository changes",
+		"and complete the task.",
+	} {
+		if strings.Contains(source, forbidden) {
+			t.Fatalf("local-mode TS prompt still delegates lifecycle mutation: %q", forbidden)
+		}
+	}
+}
+
+func TestLocalModeProfileAllowsUIAgentCatalogProof(t *testing.T) {
+	raw, err := os.ReadFile("local-mode-entrypoint")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "loom daemon profile set max_agents 20") {
+		t.Fatal("local-mode profile must retain enough capacity to exercise every UI-created agent template")
+	}
+}
+
+func TestWorkspaceDaemonPIDRejectsReusedForeignProcess(t *testing.T) {
+	workspace := t.TempDir()
+	fakeBin := t.TempDir()
+	fakeLoom := filepath.Join(fakeBin, "loom")
+	fakeCodex := filepath.Join(fakeBin, "codex")
+	for _, path := range []string{fakeLoom, fakeCodex} {
+		if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(workspace, ".loom"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pid := os.Getpid()
+	if err := os.WriteFile(
+		filepath.Join(workspace, ".loom", "daemon.pid"),
+		[]byte(strconv.Itoa(pid)+"\n"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name    string
+		argv    []string
+		cwd     string
+		exe     string
+		wantPID bool
+	}{
+		{
+			name:    "matching workspace daemon",
+			argv:    []string{"/usr/local/bin/loom", "daemon"},
+			cwd:     workspace,
+			exe:     fakeLoom,
+			wantPID: true,
+		},
+		{
+			name: "foreign codex process reusing pid",
+			argv: []string{
+				"/usr/local/bin/codex",
+				"--remote",
+				"ws://127.0.0.1:8080/api/workspaces/LOCALMODE/terminal",
+			},
+			cwd: workspace,
+			exe: fakeCodex,
+		},
+		{
+			name: "different loom subcommand",
+			argv: []string{"/usr/local/bin/loom", "serve", "--fleet-mode"},
+			cwd:  workspace,
+			exe:  fakeLoom,
+		},
+		{
+			name: "different loom subcommand mentioning daemon later",
+			argv: []string{"/usr/local/bin/loom", "serve", "daemon"},
+			cwd:  workspace,
+			exe:  fakeLoom,
+		},
+		{
+			name: "daemon for another workspace",
+			argv: []string{"/usr/local/bin/loom", "daemon"},
+			cwd:  t.TempDir(),
+			exe:  fakeLoom,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			procRoot := t.TempDir()
+			procDir := filepath.Join(procRoot, strconv.Itoa(pid))
+			if err := os.MkdirAll(procDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(
+				filepath.Join(procDir, "cmdline"),
+				[]byte(strings.Join(tt.argv, "\x00")+"\x00"),
+				0o600,
+			); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(tt.cwd, filepath.Join(procDir, "cwd")); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(tt.exe, filepath.Join(procDir, "exe")); err != nil {
+				t.Fatal(err)
+			}
+
+			out, err := runWorkspaceDaemonPIDCheck(t, workspace, procRoot, fakeBin)
+			if tt.wantPID {
+				if err != nil {
+					t.Fatalf("workspace daemon pid check: %v\n%s", err, out)
+				}
+				if got := strings.TrimSpace(out); got != strconv.Itoa(pid) {
+					t.Fatalf("workspace daemon pid = %q, want %d", got, pid)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("foreign process was accepted as workspace daemon: %q", strings.TrimSpace(out))
+			}
+		})
+	}
+}
+
+func TestWorkspaceDaemonPIDFailsClosedWithoutProcessIdentity(t *testing.T) {
+	workspace := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(workspace, ".loom"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(workspace, ".loom", "daemon.pid"),
+		[]byte(strconv.Itoa(os.Getpid())+"\n"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	if out, err := runWorkspaceDaemonPIDCheck(t, workspace, t.TempDir(), t.TempDir()); err == nil {
+		t.Fatalf("missing process identity was accepted as workspace daemon: %q", strings.TrimSpace(out))
+	}
+}
+
+func TestWorkspaceDaemonPIDRejectsMalformedPID(t *testing.T) {
+	workspace := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(workspace, ".loom"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, malformed := range []string{"12x34\n", "12 34\n", "0\n", "-1\n"} {
+		t.Run(strings.TrimSpace(malformed), func(t *testing.T) {
+			if err := os.WriteFile(filepath.Join(workspace, ".loom", "daemon.pid"), []byte(malformed), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if out, err := runWorkspaceDaemonPIDCheck(t, workspace, t.TempDir(), t.TempDir()); err == nil {
+				t.Fatalf("malformed pid %q was accepted: %q", malformed, strings.TrimSpace(out))
+			}
+		})
+	}
+}
+
+func TestStopWorkspaceDaemonsLeavesReusedForeignProcessAlive(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("local-mode daemon manager validates process identity through Linux /proc")
+	}
+
+	foreign := exec.Command("/bin/sleep", "30") //nolint:norawexec // real foreign process for PID-reuse cleanup regression
+	if err := foreign.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = foreign.Process.Kill()
+		_ = foreign.Wait()
+	})
+
+	workspace := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(workspace, ".loom"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(workspace, ".loom", "daemon.pid"),
+		[]byte(strconv.Itoa(foreign.Process.Pid)+"\n"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	fakeBin := t.TempDir()
+	fakeLoom := filepath.Join(fakeBin, "loom")
+	if err := os.WriteFile(fakeLoom, []byte(`#!/bin/sh
+if [ "$1" = "workspace" ] && [ "$2" = "list" ]; then
+  printf '[{"path":"%s"}]\n' "$FAKE_WORKSPACE_PATH"
+  exit 0
+fi
+exit 1
+`), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runStopWorkspaceDaemons(t, workspace, fakeBin)
+	if err != nil {
+		t.Fatalf("stop workspace daemons: %v\n%s", err, out)
+	}
+	if err := foreign.Process.Signal(syscall.Signal(0)); err != nil {
+		t.Fatalf("foreign reused PID %d was killed by cleanup: %v", foreign.Process.Pid, err)
+	}
 }
 
 func TestLocalModeEntrypointProvenanceCreatesAndAcceptsMarker(t *testing.T) {
@@ -416,6 +639,58 @@ func runProvenanceCheck(t *testing.T, configDir string, marker provenanceMarker)
 		"LOCAL_MODE_RUN_ID":          "provenance-unit-test",
 	}
 	for key, value := range values {
+		cmd.Env = append(cmd.Env, key+"="+value)
+	}
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+func runWorkspaceDaemonPIDCheck(t *testing.T, workspace, procRoot, fakeBin string) (string, error) {
+	t.Helper()
+	cmd := exec.Command("bash", "local-mode-entrypoint", "--workspace-daemon-pid-only", workspace, procRoot) //nolint:norawexec -- exercise the real container entrypoint contract
+	cmd.Env = filteredEnvironment(
+		"HOME",
+		"PATH",
+		"LOCAL_MODE_CHECKOUT_ID",
+		"LOCAL_MODE_SOURCE_ROOT",
+		"LOCAL_MODE_COMPOSE_PROJECT",
+		"LOCAL_MODE_RUN_ID",
+	)
+	for key, value := range map[string]string{
+		"HOME":                       t.TempDir(),
+		"PATH":                       fakeBin + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"LOCAL_MODE_CHECKOUT_ID":     "checkout-daemon-pid",
+		"LOCAL_MODE_SOURCE_ROOT":     "/workspace/checkouts/daemon-pid",
+		"LOCAL_MODE_COMPOSE_PROJECT": "loomcli-daemon-pid",
+		"LOCAL_MODE_RUN_ID":          "daemon-pid-proof",
+	} {
+		cmd.Env = append(cmd.Env, key+"="+value)
+	}
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+func runStopWorkspaceDaemons(t *testing.T, workspace, fakeBin string) (string, error) {
+	t.Helper()
+	cmd := exec.Command("bash", "local-mode-entrypoint", "--stop-workspace-daemons-only") //nolint:norawexec -- exercise the real cleanup path
+	cmd.Env = filteredEnvironment(
+		"HOME",
+		"PATH",
+		"FAKE_WORKSPACE_PATH",
+		"LOCAL_MODE_CHECKOUT_ID",
+		"LOCAL_MODE_SOURCE_ROOT",
+		"LOCAL_MODE_COMPOSE_PROJECT",
+		"LOCAL_MODE_RUN_ID",
+	)
+	for key, value := range map[string]string{
+		"HOME":                       t.TempDir(),
+		"PATH":                       fakeBin + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"FAKE_WORKSPACE_PATH":        workspace,
+		"LOCAL_MODE_CHECKOUT_ID":     "checkout-daemon-cleanup",
+		"LOCAL_MODE_SOURCE_ROOT":     "/workspace/checkouts/daemon-cleanup",
+		"LOCAL_MODE_COMPOSE_PROJECT": "loomcli-daemon-cleanup",
+		"LOCAL_MODE_RUN_ID":          "daemon-cleanup-proof",
+	} {
 		cmd.Env = append(cmd.Env, key+"="+value)
 	}
 	out, err := cmd.CombinedOutput()

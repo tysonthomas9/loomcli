@@ -1,10 +1,10 @@
 package taskrunapi
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,13 +12,14 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 )
 
 // artifactResult is the camelCase wire view of a task-run artifact.
 type artifactResult struct {
 	WorkspaceKey    string            `json:"workspaceKey,omitempty"`
 	ArtifactID      string            `json:"artifactId"`
+	SessionID       string            `json:"sessionId,omitempty"`
 	TaskID          string            `json:"taskId,omitempty"`
 	OwnerType       string            `json:"ownerType,omitempty"`
 	OwnerID         string            `json:"ownerId,omitempty"`
@@ -38,15 +39,16 @@ type artifactResult struct {
 	UpdatedAt       time.Time         `json:"updatedAt,omitzero"`
 }
 
-func artifactResultFromDomain(artifact *domain.Artifact) artifactResult {
+func artifactResultFromModule(artifact *artifactsmodule.Artifact) artifactResult {
 	if artifact == nil {
 		return artifactResult{}
 	}
 	return artifactResult{
 		WorkspaceKey:    artifact.WorkspaceKey,
 		ArtifactID:      artifact.ArtifactID,
+		SessionID:       artifact.SessionID,
 		TaskID:          artifact.TaskID,
-		OwnerType:       artifact.OwnerType,
+		OwnerType:       string(artifact.OwnerType),
 		OwnerID:         artifact.OwnerID,
 		Type:            artifact.Type,
 		URI:             artifact.URI,
@@ -57,7 +59,7 @@ func artifactResultFromDomain(artifact *domain.Artifact) artifactResult {
 		ContentHash:     artifact.ContentHash,
 		Visibility:      artifact.Visibility,
 		RedactionStatus: artifact.RedactionStatus,
-		DurableStatus:   artifact.DurableStatus,
+		DurableStatus:   string(artifact.DurableStatus),
 		Metadata:        artifact.Metadata,
 		FinalizedAt:     artifact.FinalizedAt,
 		CreatedAt:       artifact.CreatedAt,
@@ -70,6 +72,7 @@ func artifactResultFromDomain(artifact *domain.Artifact) artifactResult {
 // verified task run.
 type artifactDeclareParams struct {
 	ArtifactID      string            `json:"artifactId"`
+	SessionID       string            `json:"sessionId"`
 	TaskID          string            `json:"taskId"`
 	Type            string            `json:"type"`
 	URI             string            `json:"uri"`
@@ -85,35 +88,26 @@ type artifactDeclareParams struct {
 }
 
 func (m *Module) artifactDeclare(ctx context.Context, ws string, id leaseIdentity, body []byte) (any, error) {
+	service, err := m.artifactAPI()
+	if err != nil {
+		return nil, err
+	}
 	params, err := decodeParams[artifactDeclareParams](body)
 	if err != nil {
 		return nil, err
-	}
-	if strings.TrimSpace(params.Type) == "" {
-		return nil, fmt.Errorf("artifact type required: %w", domain.ErrInvalid)
-	}
-	run, err := m.verifyLease(ctx, ws, id)
-	if err != nil {
-		return nil, err
-	}
-	durableStatus := strings.TrimSpace(params.DurableStatus)
-	if durableStatus == "" {
-		durableStatus = "declared"
-	}
-	taskID := strings.TrimSpace(params.TaskID)
-	if taskID == "" {
-		taskID = run.TaskID
 	}
 	artifactID := strings.TrimSpace(params.ArtifactID)
 	if artifactID == "" {
 		artifactID = generatedArtifactID(id.TaskRunID)
 	}
-	artifact, err := m.store.Artifacts().Create(ctx, store.ArtifactCreate{
-		WorkspaceKey:    ws,
+	_, auth, err := m.taskRunAuthority(ctx, ws, artifactsmodule.ActionDeclare, id)
+	if err != nil {
+		return nil, fmt.Errorf("authorize artifact declare: %w", err)
+	}
+	artifact, err := service.Create(ctx, auth, artifactExecutionOwner(ws, id), artifactsmodule.CreateCommand{
 		ArtifactID:      artifactID,
-		TaskID:          taskID,
-		OwnerType:       taskRunOwnerType,
-		OwnerID:         id.TaskRunID,
+		SessionID:       params.SessionID,
+		TaskID:          params.TaskID,
 		Type:            params.Type,
 		URI:             params.URI,
 		Summary:         params.Summary,
@@ -123,33 +117,41 @@ func (m *Module) artifactDeclare(ctx context.Context, ws string, id leaseIdentit
 		ContentHash:     params.ContentHash,
 		Visibility:      params.Visibility,
 		RedactionStatus: params.RedactionStatus,
-		DurableStatus:   durableStatus,
 		Metadata:        params.Metadata,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("declare artifact: %w", err)
+		return nil, artifactDomainError(err)
 	}
-	return artifactResultFromDomain(artifact), nil
+	return artifactResultFromModule(artifact), nil
 }
 
 func (m *Module) artifactGet(ctx context.Context, ws string, id leaseIdentity, body []byte) (any, error) {
+	service, err := m.artifactAPI()
+	if err != nil {
+		return nil, err
+	}
 	params, err := decodeParams[struct {
 		ArtifactID string `json:"artifactId"`
 	}](body)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := m.verifyLease(ctx, ws, id); err != nil {
-		return nil, err
-	}
-	artifact, err := m.ownedArtifact(ctx, ws, id, params.ArtifactID)
+	_, auth, err := m.taskRunAuthority(ctx, ws, artifactsmodule.ActionGet, id)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("authorize artifact get: %w", err)
 	}
-	return artifactResultFromDomain(artifact), nil
+	artifact, err := service.Get(ctx, auth, artifactExecutionOwner(ws, id), artifactsmodule.GetQuery{ArtifactID: strings.TrimSpace(params.ArtifactID)})
+	if err != nil {
+		return nil, artifactDomainError(err)
+	}
+	return artifactResultFromModule(artifact), nil
 }
 
 func (m *Module) artifactList(ctx context.Context, ws string, id leaseIdentity, body []byte) (any, error) {
+	service, err := m.artifactAPI()
+	if err != nil {
+		return nil, err
+	}
 	params, err := decodeParams[struct {
 		Type          string `json:"type"`
 		DurableStatus string `json:"durableStatus"`
@@ -158,29 +160,25 @@ func (m *Module) artifactList(ctx context.Context, ws string, id leaseIdentity, 
 	if err != nil {
 		return nil, err
 	}
-	if _, err := m.verifyLease(ctx, ws, id); err != nil {
-		return nil, err
+	_, auth, err := m.taskRunAuthority(ctx, ws, artifactsmodule.ActionList, id)
+	if err != nil {
+		return nil, fmt.Errorf("authorize artifact list: %w", err)
 	}
-	artifacts, err := m.store.Artifacts().List(ctx, ws, store.ArtifactFilter{
-		OwnerType: taskRunOwnerType,
-		OwnerID:   id.TaskRunID,
-		Type:      params.Type,
-		Status:    params.DurableStatus,
-		Limit:     params.Limit,
+	artifacts, err := service.List(ctx, auth, artifactExecutionOwner(ws, id), artifactsmodule.ListFilter{
+		Type: params.Type, DurableStatus: artifactsmodule.DurableStatus(params.DurableStatus), Limit: params.Limit,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("list artifacts: %w", err)
+		return nil, artifactDomainError(err)
 	}
 	results := make([]artifactResult, 0, len(artifacts))
 	for _, artifact := range artifacts {
-		results = append(results, artifactResultFromDomain(artifact))
+		results = append(results, artifactResultFromModule(artifact))
 	}
 	return map[string]any{"artifacts": results}, nil
 }
 
 // artifactFinalizeParams is the artifact-finalize request body. Pointer
-// fields distinguish "leave unchanged" from explicit values, mirroring the
-// store's ArtifactFinalize patch semantics.
+// fields distinguish "leave unchanged" from explicit values.
 type artifactFinalizeParams struct {
 	ArtifactID      string             `json:"artifactId"`
 	URI             *string            `json:"uri"`
@@ -195,17 +193,20 @@ type artifactFinalizeParams struct {
 }
 
 func (m *Module) artifactFinalize(ctx context.Context, ws string, id leaseIdentity, body []byte) (any, error) {
+	service, err := m.artifactAPI()
+	if err != nil {
+		return nil, err
+	}
 	params, err := decodeParams[artifactFinalizeParams](body)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := m.verifyLease(ctx, ws, id); err != nil {
-		return nil, err
+	_, auth, err := m.taskRunAuthority(ctx, ws, artifactsmodule.ActionFinalize, id)
+	if err != nil {
+		return nil, fmt.Errorf("authorize artifact finalize: %w", err)
 	}
-	if _, err := m.ownedArtifact(ctx, ws, id, params.ArtifactID); err != nil {
-		return nil, err
-	}
-	artifact, err := m.store.Artifacts().Finalize(ctx, ws, strings.TrimSpace(params.ArtifactID), store.ArtifactFinalize{
+	artifact, err := service.Finalize(ctx, auth, artifactExecutionOwner(ws, id), artifactsmodule.FinalizeCommand{
+		ArtifactID:      strings.TrimSpace(params.ArtifactID),
 		URI:             params.URI,
 		Summary:         params.Summary,
 		MIMEType:        params.MIMEType,
@@ -217,9 +218,9 @@ func (m *Module) artifactFinalize(ctx context.Context, ws string, id leaseIdenti
 		Metadata:        params.Metadata,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("finalize artifact: %w", err)
+		return nil, artifactDomainError(err)
 	}
-	return artifactResultFromDomain(artifact), nil
+	return artifactResultFromModule(artifact), nil
 }
 
 // handleArtifactContent is the raw-body artifact content upload route.
@@ -230,12 +231,21 @@ func (m *Module) handleArtifactContent(w http.ResponseWriter, r *http.Request) {
 	}
 	ws := r.PathValue("ws")
 	artifactID := strings.TrimSpace(r.PathValue("artifactId"))
-	if _, err := m.verifyLease(r.Context(), ws, id); err != nil {
+	service, err := m.artifactAPI()
+	if err != nil {
 		writeDomainOpError(w, err)
 		return
 	}
-	if _, err := m.ownedArtifact(r.Context(), ws, id, artifactID); err != nil {
-		writeDomainOpError(w, err)
+	owner := artifactExecutionOwner(ws, id)
+	// Authorize and hide foreign ownership before accepting a potentially
+	// large request body. Upload performs the owner command again after read.
+	_, getAuth, err := m.taskRunAuthority(r.Context(), ws, artifactsmodule.ActionGet, id)
+	if err != nil {
+		writeDomainOpError(w, artifactDomainError(err))
+		return
+	}
+	if _, err := service.Get(r.Context(), getAuth, owner, artifactsmodule.GetQuery{ArtifactID: artifactID}); err != nil {
+		writeDomainOpError(w, artifactDomainError(err))
 		return
 	}
 	content, err := readAll(w, r, maxArtifactContentBytes)
@@ -243,33 +253,61 @@ func (m *Module) handleArtifactContent(w http.ResponseWriter, r *http.Request) {
 		writeOpError(w, http.StatusBadRequest, "invalid", "read artifact content: "+err.Error(), false)
 		return
 	}
-	artifact, err := m.store.Artifacts().UploadContent(r.Context(), ws, artifactID, store.ArtifactContentUpload{
-		Body:     bytes.NewReader(content),
-		MIMEType: r.Header.Get("Content-Type"),
-	})
+	_, uploadAuth, err := m.taskRunAuthority(r.Context(), ws, artifactsmodule.ActionUpload, id)
 	if err != nil {
-		writeDomainOpError(w, fmt.Errorf("upload artifact content: %w", err))
+		writeDomainOpError(w, artifactDomainError(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, artifactResultFromDomain(artifact))
+	artifact, err := service.Upload(r.Context(), uploadAuth, owner, artifactsmodule.UploadCommand{
+		ArtifactID: artifactID,
+		Content:    content,
+		MIMEType:   r.Header.Get("Content-Type"),
+	})
+	if err != nil {
+		writeDomainOpError(w, artifactDomainError(err))
+		return
+	}
+	writeJSON(w, http.StatusOK, artifactResultFromModule(artifact))
 }
 
-// ownedArtifact loads the artifact and proves it belongs to the caller's
-// task run; foreign artifacts read as not-found so the route does not leak
-// other owners' artifact existence.
-func (m *Module) ownedArtifact(ctx context.Context, ws string, id leaseIdentity, artifactID string) (*domain.Artifact, error) {
-	artifactID = strings.TrimSpace(artifactID)
-	if artifactID == "" {
-		return nil, fmt.Errorf("artifactId required: %w", domain.ErrInvalid)
+func (m *Module) artifactAPI() (artifactsmodule.API, error) {
+	if m == nil || m.artifacts == nil {
+		return nil, artifactsmodule.ErrUnavailable
 	}
-	artifact, err := m.store.Artifacts().Get(ctx, ws, artifactID)
-	if err != nil {
-		return nil, fmt.Errorf("get artifact: %w", err)
+	return m.artifacts, nil
+}
+
+func artifactExecutionOwner(workspace string, id leaseIdentity) artifactsmodule.ExecutionOwner {
+	return artifactsmodule.ExecutionOwner{
+		WorkspaceKey: workspace,
+		TaskRunID:    id.TaskRunID,
+		NodeID:       id.NodeID,
+		LeaseID:      id.LeaseID,
+		LeaseToken:   id.LeaseToken,
+		FencingToken: id.FencingToken,
 	}
-	if artifact.OwnerType != taskRunOwnerType || artifact.OwnerID != id.TaskRunID {
-		return nil, fmt.Errorf("artifact %q does not belong to task run %q: %w", artifactID, id.TaskRunID, domain.ErrNotFound)
+}
+
+func artifactDomainError(err error) error {
+	if err == nil || errors.Is(err, errLeaseDenied) {
+		return err
 	}
-	return artifact, nil
+	var mapped error
+	switch {
+	case errors.Is(err, artifactsmodule.ErrNotFound):
+		mapped = domain.ErrNotFound
+	case errors.Is(err, artifactsmodule.ErrAlreadyExists):
+		mapped = domain.ErrAlreadyExists
+	case errors.Is(err, artifactsmodule.ErrNotOwner):
+		mapped = domain.ErrNotOwner
+	case errors.Is(err, artifactsmodule.ErrInvalidTransition):
+		mapped = domain.ErrInvalidTransition
+	case errors.Is(err, artifactsmodule.ErrInvalid):
+		mapped = domain.ErrInvalid
+	default:
+		return err
+	}
+	return errors.Join(mapped, err)
 }
 
 func readAll(w http.ResponseWriter, r *http.Request, limit int64) ([]byte, error) {

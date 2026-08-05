@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
+	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -25,8 +25,8 @@ func listDueOutboxRows(t *testing.T, st store.Store) []*domain.OutboxRecord {
 
 func TestDeliverLeadAssignmentEnqueuesOutboxOnPending(t *testing.T) {
 	h := newTestHarness(t, "")
-	h.module.deliverAssignment = func(context.Context, store.Store, string, string) (*leadcontrol.DeliveryResult, error) {
-		return &leadcontrol.DeliveryResult{State: leadcontrol.DeliveryStatePending, Reason: "lead has no orchestration session"}, nil
+	h.module.deliverAssignment = func(context.Context, store.Store, string, string) (driverpkg.AgentMessageDeliveryResult, error) {
+		return driverpkg.AgentMessageDeliveryResult{State: "pending", Reason: "lead has no orchestration session"}, nil
 	}
 
 	req := opRequest{
@@ -70,16 +70,16 @@ func TestDeliverLeadAssignmentEnqueuesOutboxOnPending(t *testing.T) {
 func TestDeliverLeadAssignmentSkipsOutboxOnDeliveredAndUnsupported(t *testing.T) {
 	cases := []struct {
 		name  string
-		state leadcontrol.DeliveryState
+		state string
 	}{
-		{"delivered", leadcontrol.DeliveryStateDelivered},
-		{"unsupported", leadcontrol.DeliveryStateUnsupported},
+		{"delivered", driverpkg.AgentMessageDeliveryStateDelivered},
+		{"unsupported", driverpkg.AgentMessageDeliveryStateUnsupported},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newTestHarness(t, "")
-			h.module.deliverAssignment = func(context.Context, store.Store, string, string) (*leadcontrol.DeliveryResult, error) {
-				return &leadcontrol.DeliveryResult{State: tc.state}, nil
+			h.module.deliverAssignment = func(context.Context, store.Store, string, string) (driverpkg.AgentMessageDeliveryResult, error) {
+				return driverpkg.AgentMessageDeliveryResult{State: tc.state}, nil
 			}
 			resp, decoded := h.do(t, opRequest{
 				op:      "deliver-lead-assignment",
@@ -89,7 +89,7 @@ func TestDeliverLeadAssignmentSkipsOutboxOnDeliveredAndUnsupported(t *testing.T)
 			if resp.StatusCode != http.StatusOK {
 				t.Fatalf("status = %d, want 200: %v", resp.StatusCode, decoded)
 			}
-			if state, _ := decoded["state"].(string); state != string(tc.state) {
+			if state, _ := decoded["state"].(string); state != tc.state {
 				t.Fatalf("state = %q, want %q", state, tc.state)
 			}
 			if rows := listDueOutboxRows(t, h.store); len(rows) != 0 {

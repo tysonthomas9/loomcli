@@ -84,7 +84,7 @@ type WorkspaceCreateFn func(ctx context.Context, req WorkspaceCreateRequest) (Wo
 // to a workspace.
 type WorkspaceAddReposFn func(ctx context.Context, req WorkspaceAddReposRequest) (WorkspaceCreateResult, error)
 
-// WorkspaceJobStatus represents the current state of a workspace creation job.
+// WorkspaceJobStatus represents the current state of a workspace mutation job.
 type WorkspaceJobStatus string
 
 const (
@@ -93,7 +93,7 @@ const (
 	JobStatusFailed  WorkspaceJobStatus = "failed"
 )
 
-// WorkspaceJob is an immutable snapshot of a workspace creation job's state.
+// WorkspaceJob is an immutable snapshot of a workspace mutation job's state.
 type WorkspaceJob struct {
 	ID          string             `json:"id"`
 	Status      WorkspaceJobStatus `json:"status"`

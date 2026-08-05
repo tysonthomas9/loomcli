@@ -41,7 +41,7 @@ func TestExecutorRunOnceClaimsVerifiesAndFinishes(t *testing.T) {
 	}
 
 	runner := &recordingRunner{result: RunResult{Status: domain.DriverRunCompleted, Summary: "driver completed"}}
-	result, err := (&Executor{
+	result, err := testExecutor(st, Executor{
 		Store:             st,
 		WorkspaceKey:      "TEST",
 		WorkDir:           root,
@@ -107,7 +107,7 @@ func TestExecutorRunOnceTargetsSpecificQueuedRunID(t *testing.T) {
 	}
 
 	runner := &recordingRunner{result: RunResult{Status: domain.DriverRunCompleted, Summary: "targeted"}}
-	result, err := (&Executor{
+	result, err := testExecutor(st, Executor{
 		Store:             st,
 		WorkspaceKey:      "TEST",
 		RunID:             "run-2",
@@ -152,7 +152,7 @@ func TestExecutorEnsureNodeRefreshesExistingNodeCapabilities(t *testing.T) {
 		t.Fatalf("Create stale node: %v", err)
 	}
 
-	if err := (&Executor{Store: st, HeartbeatInterval: -1}).ensureNode(ctx, "TEST", "node-1"); err != nil {
+	if err := testExecutor(st, Executor{Store: st, HeartbeatInterval: -1}).ensureNode(ctx, "TEST", "node-1"); err != nil {
 		t.Fatalf("ensureNode: %v", err)
 	}
 	node, err := st.Nodes().Get(ctx, "TEST", "node-1")
@@ -166,6 +166,40 @@ func TestExecutorEnsureNodeRefreshesExistingNodeCapabilities(t *testing.T) {
 		if !nodeHasCapability(node, capability) {
 			t.Fatalf("node capabilities = %v, want %q", node.Capabilities, capability)
 		}
+	}
+}
+
+func TestExecutorEnsureNodePreservesConfiguredSharedNodeCapacity(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
+		t.Fatalf("Create workspace: %v", err)
+	}
+	if _, err := st.Nodes().Create(ctx, store.NodeCreate{
+		WorkspaceKey: "TEST", NodeID: "shared-node", RuntimeProvider: domain.RuntimeProviderLocal,
+		Capacity: 4, DrainState: domain.NodeDrainActive, TTL: time.Minute,
+	}); err != nil {
+		t.Fatalf("Create shared node: %v", err)
+	}
+
+	executor := testExecutor(st, Executor{
+		Store: st, NodeCapacity: 4, HeartbeatInterval: -1,
+	})
+	if err := executor.ensureNode(ctx, "TEST", "shared-node"); err != nil {
+		t.Fatalf("ensureNode: %v", err)
+	}
+	node, err := st.Nodes().Get(ctx, "TEST", "shared-node")
+	if err != nil {
+		t.Fatalf("Get shared node: %v", err)
+	}
+	if node.Capacity != 4 {
+		t.Fatalf("shared node capacity = %d, want 4 after executor registration", node.Capacity)
+	}
+}
+
+func TestExecutorNodeCapacityDefaultsToOne(t *testing.T) {
+	if got := (&Executor{}).nodeCapacity(); got != 1 {
+		t.Fatalf("nodeCapacity() = %d, want safe default 1", got)
 	}
 }
 
@@ -189,7 +223,7 @@ func TestExecutorRunOnceFailsNonTerminalRunnerResult(t *testing.T) {
 		t.Fatalf("CreateDriverRun: %v", err)
 	}
 
-	result, err := (&Executor{
+	result, err := testExecutor(st, Executor{
 		Store:             st,
 		WorkspaceKey:      "TEST",
 		WorkDir:           root,
@@ -229,7 +263,7 @@ func TestExecutorRunOnceFailsTamperedBundleBeforeRunner(t *testing.T) {
 	}
 
 	runner := &recordingRunner{result: RunResult{Status: domain.DriverRunCompleted}}
-	result, err := (&Executor{
+	result, err := testExecutor(st, Executor{
 		Store:             st,
 		WorkspaceKey:      "TEST",
 		WorkDir:           root,
@@ -586,7 +620,7 @@ func TestExecutorScansWorkspacesAndReportsNoQueuedRun(t *testing.T) {
 	if _, err := CreateDriverRun(ctx, st, RunOptions{WorkspaceKey: "TEST", DriverID: registered.Driver.DriverID, EpicID: "TEST-1", RunID: "run-1"}); err != nil {
 		t.Fatalf("CreateDriverRun: %v", err)
 	}
-	result, err := (&Executor{
+	result, err := testExecutor(st, Executor{
 		Store:             st,
 		WorkDir:           root,
 		NodeID:            "node-1",
@@ -600,7 +634,7 @@ func TestExecutorScansWorkspacesAndReportsNoQueuedRun(t *testing.T) {
 	if result.Final == nil || result.Final.WorkspaceKey != "TEST" {
 		t.Fatalf("final = %+v, want TEST workspace run", result.Final)
 	}
-	if _, err := (&Executor{Store: st, WorkDir: root, HeartbeatInterval: -1}).RunOnce(ctx); !errors.Is(err, ErrNoQueuedRun) {
+	if _, err := testExecutor(st, Executor{Store: st, WorkDir: root, HeartbeatInterval: -1}).RunOnce(ctx); !errors.Is(err, ErrNoQueuedRun) {
 		t.Fatalf("RunOnce after drain err = %v, want ErrNoQueuedRun", err)
 	}
 }
@@ -664,7 +698,7 @@ func TestExecutorRunOnceAcknowledgesSuspendedRun(t *testing.T) {
 		t.Fatalf("CreateDriverRun: %v", err)
 	}
 
-	result, err := (&Executor{
+	result, err := testExecutor(st, Executor{
 		Store:             st,
 		WorkspaceKey:      "TEST",
 		WorkDir:           root,
@@ -714,7 +748,7 @@ func TestExecutorRunOnceFailsSuspendedReportWithoutSuspendedRun(t *testing.T) {
 		t.Fatalf("CreateDriverRun: %v", err)
 	}
 
-	result, err := (&Executor{
+	result, err := testExecutor(st, Executor{
 		Store:             st,
 		WorkspaceKey:      "TEST",
 		WorkDir:           root,

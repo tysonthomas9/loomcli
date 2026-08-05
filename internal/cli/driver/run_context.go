@@ -80,7 +80,18 @@ func resolveRunningDriverRun(ctx context.Context, h *bootstrap.StoreHandle, work
 	if err != nil {
 		return "", nil, err
 	}
-	parent, err := driverpkg.VerifyRunningDriverRun(ctx, h.Store, rc.WorkspaceKey, rc.DriverRunID, rc.NodeID, rc.LeaseID, rc.FencingToken)
+	fence, err := rc.FencingToken()
+	if err != nil {
+		return "", nil, err
+	}
+	client, err := newDriverRuntimeClient(driverRuntimeClientOptions{
+		WorkspaceKey: rc.WorkspaceKey, DriverRunID: rc.DriverRunID,
+		NodeID: rc.NodeID, LeaseID: rc.LeaseID, FencingToken: fence,
+	})
+	if err != nil {
+		return "", nil, err
+	}
+	parent, err := client.verifyRun(ctx)
 	if err != nil {
 		return "", nil, err
 	}
@@ -109,7 +120,7 @@ func newDriverIssueBackend(h *bootstrap.StoreHandle, ws, actor string) (*fleet.F
 	issueBackend, err := fleet.New(fleet.Config{
 		BaseURL:     h.URL(),
 		WorkspaceID: ws,
-		APIKey:      os.Getenv(bootstrap.EnvFleetDBAPIKey),
+		APIKey:      h.FleetDBClientAPIKey(),
 		Actor:       actor,
 	})
 	if err != nil {

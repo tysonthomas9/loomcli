@@ -4,12 +4,9 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/tysonthomas9/loomcli/internal/app/webhookingestion"
-	"github.com/tysonthomas9/loomcli/internal/app/workflowbinding"
-	"github.com/tysonthomas9/loomcli/internal/modules/automation"
-	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/trigger"
+	"github.com/tysonthomas9/loomcli/internal/webui/agentmodules/routecontracts"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/triggerbindings"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/webhooks"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -23,15 +20,14 @@ type Module interface {
 // Deps contains the Automation-owned workflows and narrow legacy ports needed
 // to compose webhook ingestion and trigger bindings.
 type Deps struct {
-	AutomationBindings automation.BindingOperations
-	WorkflowBinding    *workflowbinding.Workflow
-	AutomationAudit    automation.AuditQueries
-	AutomationWebhook  *webhookingestion.Workflow
-	AutomationOperator workflowcataloghttp.OperatorAuthorityResolver
-	Awaits             store.AwaitStore
-	DriverRuns         store.DriverRunStore
-	TriggerBindings    store.TriggerBindingStore
-	ConnectorGrants    store.ConnectorGrantStore
+	Capabilities    routecontracts.Deps
+	Awaits          store.AwaitStore
+	DriverRuns      store.DriverRunStore
+	AwaitResolver   store.AtomicAwaitStore
+	TriggerBindings store.TriggerBindingStore
+	ConnectorGrants store.ConnectorGrantStore
+	Agents          store.AgentStore
+	AgentServices   store.AgentServiceStore
 }
 
 // EventAwaitDispatcher is the shared post-admission await notification seam.
@@ -57,22 +53,26 @@ type Modules struct {
 
 // New composes the Automation and binding-facing HTTP modules.
 func New(deps Deps) Modules {
-	var eventAwaits *trigger.AwaitMatcher
-	if deps.Awaits != nil && deps.DriverRuns != nil {
-		eventAwaits = trigger.NewAwaitMatcher(deps.Awaits, deps.DriverRuns)
+	var eventAwaits EventAwaitDispatcher
+	if deps.Awaits != nil && deps.DriverRuns != nil && deps.AwaitResolver != nil {
+		eventAwaits = trigger.NewAwaitMatcherWithResolver(deps.Awaits, deps.DriverRuns, deps.AwaitResolver)
 	}
 	connectorCompatibility := newStoreConnectorCompatibility(deps.TriggerBindings, deps.ConnectorGrants)
+	agentIdentityCompatibility := newStoreAgentIdentityCompatibility(deps.Agents, deps.AgentServices)
 
 	return Modules{
 		Webhooks: webhooks.New(webhooks.Config{
-			Workflow: deps.AutomationWebhook, Automation: deps.AutomationAudit, Awaits: eventAwaits,
+			Workflow:   deps.Capabilities.AutomationWebhook,
+			Automation: deps.Capabilities.AutomationAudit,
+			Awaits:     eventAwaits,
 		}),
 		TriggerBindings: triggerbindings.New(triggerbindings.Config{
-			CreateWorkflow: deps.WorkflowBinding,
-			Commands:       deps.AutomationBindings, Queries: deps.AutomationBindings,
-			ManualDispatch: deps.AutomationBindings, OperatorAuthority: deps.AutomationOperator,
+			CreateWorkflow: deps.Capabilities.WorkflowBinding,
+			Commands:       deps.Capabilities.AutomationBindings, Queries: deps.Capabilities.AutomationBindings,
+			ManualDispatch:       deps.Capabilities.AutomationBindings,
+			OperatorAuthority:    deps.Capabilities.AutomationOperator,
 			WorkspaceFromContext: middleware.WorkspaceFromContext, Runs: deps.DriverRuns,
-			Connectors: connectorCompatibility,
+			Connectors: connectorCompatibility, AgentIdentities: agentIdentityCompatibility,
 		}),
 		EventAwaits:          eventAwaits,
 		BindingGrants:        connectorCompatibility,

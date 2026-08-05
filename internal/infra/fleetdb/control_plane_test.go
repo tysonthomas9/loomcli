@@ -3,6 +3,7 @@ package fleetdb
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -252,6 +253,64 @@ func TestControlPlaneClientAgentCommandCreateOmitsStatus(t *testing.T) {
 	}
 }
 
+func TestControlPlaneClientAgentCommandAckSendsClaimantBinding(t *testing.T) {
+	now := time.Now().UTC()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/WS/agent-commands/cmd-1/ack" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode Ack: %v", err)
+		}
+		if body["node_id"] != "node-new" || body["owner_id"] != "stable-runtime-owner" {
+			t.Fatalf("Ack body = %#v, want atomic claimant node and stable owner", body)
+		}
+		if body["ownership_lease_id"] != "lease-7" ||
+			body["ownership_token"] != "SECRET_TOKEN" ||
+			body["ownership_fencing_token"] != float64(9) {
+			t.Fatalf("Ack body ownership proof = %#v", body)
+		}
+		writeJSON(t, w, domain.AgentCommand{
+			WorkspaceKey:  "WS",
+			CommandID:     "cmd-1",
+			TargetAgentID: "agent-1",
+			TargetNodeID:  "node-new",
+			Type:          "start",
+			Status:        domain.AgentCommandAcked,
+			AckedBy:       "stable-runtime-owner",
+			CreatedAt:     now,
+			UpdatedAt:     now,
+		})
+	}))
+	defer ts.Close()
+
+	client, err := New(Config{BaseURL: ts.URL, Actor: "tester"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd, err := client.AgentCommands().Ack(
+		t.Context(),
+		"WS",
+		"cmd-1",
+		store.AgentCommandAck{
+			NodeID:  "node-new",
+			OwnerID: "stable-runtime-owner",
+			AgentCommandOwnershipProof: store.AgentCommandOwnershipProof{
+				OwnershipLeaseID:      "lease-7",
+				OwnershipToken:        "SECRET_TOKEN",
+				OwnershipFencingToken: 9,
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("Ack command: %v", err)
+	}
+	if cmd.TargetNodeID != "node-new" || cmd.AckedBy != "stable-runtime-owner" {
+		t.Fatalf("Ack response = %+v, want claimant binding", cmd)
+	}
+}
+
 func TestControlPlaneClientArtifactUploadContent(t *testing.T) {
 	body := []byte("artifact bytes")
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -330,6 +389,82 @@ func TestControlPlaneClientArtifactReadContent(t *testing.T) {
 	}
 	if !bytes.Equal(got, body) {
 		t.Fatalf("body = %q, want %q", got, body)
+	}
+}
+
+func TestControlPlaneClientArtifactReadContentAboveGenericResponseLimit(t *testing.T) {
+	const bodySize = maxResponseBody + (1 << 20)
+	chunk := bytes.Repeat([]byte("x"), 32<<10)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/WS/artifacts/large-patch/content" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+		w.Header().Set("Content-Type", "text/x-diff")
+		remaining := bodySize
+		for remaining > 0 {
+			n := min(remaining, len(chunk))
+			if _, err := w.Write(chunk[:n]); err != nil {
+				return
+			}
+			remaining -= n
+		}
+	}))
+	defer ts.Close()
+
+	client, err := New(Config{BaseURL: ts.URL, Actor: "tester"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := client.Artifacts().(store.ArtifactContentReader).
+		ReadContent(t.Context(), "WS", "large-patch")
+	if err != nil {
+		t.Fatalf("read content above generic limit: %v", err)
+	}
+	if len(got) != bodySize {
+		t.Fatalf("body length = %d, want %d", len(got), bodySize)
+	}
+	if got[0] != 'x' || got[len(got)-1] != 'x' {
+		t.Fatal("artifact content was corrupted")
+	}
+}
+
+func TestControlPlaneClientArtifactReadContentPreservesTypedFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		status     int
+		body       string
+		wantTarget error
+	}{
+		{
+			name:       "managed content missing",
+			status:     http.StatusNotFound,
+			body:       `{"error":{"code":"not_found","message":"content not found"}}`,
+			wantTarget: domain.ErrNotFound,
+		},
+		{
+			name:       "content store unavailable",
+			status:     http.StatusServiceUnavailable,
+			body:       `{"error":{"code":"internal_error","message":"content store unavailable"}}`,
+			wantTarget: store.ErrArtifactContentUnavailable,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tc.status)
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			defer ts.Close()
+			client, err := New(Config{BaseURL: ts.URL, Actor: "tester"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = client.Artifacts().(store.ArtifactContentReader).
+				ReadContent(t.Context(), "WS", "transcript-1")
+			if !errors.Is(err, tc.wantTarget) {
+				t.Fatalf("ReadContent() error = %v, want errors.Is(%v)", err, tc.wantTarget)
+			}
+		})
 	}
 }
 

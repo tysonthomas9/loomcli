@@ -76,7 +76,7 @@ func runOnceWithRunTokenKey(t *testing.T, key []byte) (*recordingRunner, *domain
 		t.Fatalf("CreateDriverRun: %v", err)
 	}
 	runner := &recordingRunner{result: RunResult{Status: domain.DriverRunCompleted, Summary: "driver completed"}}
-	result, err := (&Executor{
+	result, err := testExecutor(st, Executor{
 		Store:             st,
 		WorkspaceKey:      "TEST",
 		WorkDir:           root,

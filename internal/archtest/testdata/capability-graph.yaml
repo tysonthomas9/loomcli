@@ -1,6 +1,6 @@
 schema_version: 1
 status: approved
-completed_phase: 3
+completed_phase: 4
 decision_dependencies:
   - MM-1
   - MM-2
@@ -48,7 +48,7 @@ capabilities:
     status: active
   - name: execution
     root: execution
-    status: planned
+    status: active
   - name: interaction
     root: interaction
     status: planned
@@ -60,7 +60,7 @@ capabilities:
     status: planned
   - name: artifacts
     root: artifacts
-    status: planned
+    status: active
 aggregate_ownership:
   - record: ActionLedger
     owner: execution
@@ -156,9 +156,9 @@ legacy_paths:
         - internal/modules/execution
         - internal/modules/workflowcatalog
       remaining_call_sites:
-        - internal/app/serve/workflow_catalog.go
         - internal/cli/agent/tsruntime/tsruntime.go
         - internal/cli/epic/run.go
+        - internal/cli/serve/serveadapter/workflow_catalog.go
         - internal/cli/serve/workspacemgr/agent_identity_migration.go
         - internal/cli/serve/workspacemgr/agent_identity_migration_test.go
         - internal/cli/workflow/management_client_test.go

@@ -92,6 +92,7 @@ func CheckRepository(root, manifestsDir string) (Report, error) {
 		return report, err
 	}
 	violations = append(violations, extended...)
+	violations = append(violations, checkedInSnapshotViolations(report)...)
 	slices.Sort(violations)
 	if len(violations) > 0 {
 		return report, &ViolationsError{Violations: violations}
@@ -147,6 +148,16 @@ func loadRepositoryManifests(directory string) (repositoryManifests, error) {
 		}
 	}
 	if err := result.directWrites.ValidateCompletedPhase(result.graph.CompletedPhase); err != nil {
+		return repositoryManifests{}, err
+	}
+	// directory is the repository-owned architecture-manifest directory chosen
+	// by the analyzer entrypoint; this fixed relative suffix cannot be supplied
+	// by an HTTP request or other untrusted product input.
+	contract, err := os.ReadFile(filepath.Join(directory, "..", "..", "infra", "fleetdb", "testdata", "fleetdb-openapi.yaml")) //nolint:gosec // G304: checked-in analyzer fixture path.
+	if err != nil {
+		return repositoryManifests{}, fmt.Errorf("read vendored FleetDB OpenAPI for MM-2 compatibility: %w", err)
+	}
+	if err := validateWorkflowCatalogLifecyclePatchExtension(result.graph.CompletedPhase, result.directWrites, contract); err != nil {
 		return repositoryManifests{}, err
 	}
 	return result, nil
@@ -468,13 +479,13 @@ func usesStoreSelector(parsed *ast.File, aliases map[string]struct{}, dotImport 
 }
 
 func generated(contents []byte) bool {
-	lines := strings.SplitN(string(contents), "\n", 4)
-	for i := 0; i < len(lines) && i < 3; i++ {
-		if strings.Contains(lines[i], "// Code generated") {
-			return true
-		}
-	}
-	return false
+	parsed, err := parser.ParseFile(
+		token.NewFileSet(),
+		"",
+		contents,
+		parser.PackageClauseOnly|parser.ParseComments,
+	)
+	return err == nil && ast.IsGenerated(parsed)
 }
 
 func outsidePrefixes(files, prefixes []string) []string {

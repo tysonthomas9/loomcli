@@ -9,6 +9,7 @@ import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 
 import {
   updateIssue,
+  setIssueRepository,
   addDependency,
   removeDependency,
   getIssueEvents,
@@ -904,20 +905,18 @@ function DefaultContent({
 
   const handleRepoSave = useCallback(
     async (newRepo: string | null) => {
-      if (!issue) return;
+      if (!issue || !newRepo) return;
 
       setIsSavingRepo(true);
       try {
-        const currentLabels = issue.labels ?? [];
-        const repoLabelsToRemove = currentLabels.filter((l) =>
-          l.startsWith("repo:"),
+        // FleetDB owns both canonical repository assignment and the narrow
+        // repository-required blocked-to-open recovery. Consume the issue it
+        // returns; never synthesize a local label or separate reopen.
+        const updatedIssue = await setIssueRepository(
+          workspaceId,
+          issue.id,
+          newRepo,
         );
-        const updatedIssue = await updateIssue(workspaceId, issue.id, {
-          ...(repoLabelsToRemove.length > 0
-            ? { remove_labels: repoLabelsToRemove }
-            : {}),
-          ...(newRepo ? { add_labels: [`repo:${newRepo}`] } : {}),
-        });
         onIssueUpdate?.(updatedIssue);
       } finally {
         setIsSavingRepo(false);
@@ -1230,6 +1229,7 @@ function DefaultContent({
               repos={repos.map((r) => r.name)}
               onSave={handleRepoSave}
               isSaving={isSavingRepo}
+              allowUnassigned={false}
             />
           )}
           {issue.created_at && (
@@ -1696,7 +1696,11 @@ export function IssueDetailPanel({
   }
 
   // Build root class name
-  const rootClassName = [styles.overlay, isOpen && styles.open, className]
+  const rootClassName = [
+    styles.overlay,
+    isOpen ? styles.open : styles.closed,
+    className,
+  ]
     .filter(Boolean)
     .join(" ");
 

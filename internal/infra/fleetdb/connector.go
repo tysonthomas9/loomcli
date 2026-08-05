@@ -274,10 +274,12 @@ func (s *connectorStore) ResolveInboundSecret(ctx context.Context, ws, connector
 		return nil, err
 	}
 	out := &store.ConnectorInboundSecrets{
-		Current:  secrets.InboundSecret,
-		Previous: secrets.PreviousInboundSecret,
+		Current: secrets.InboundSecret,
 	}
-	if secrets.PreviousSecretValidUntil != nil {
+	if secrets.PreviousInboundSecret != "" &&
+		secrets.PreviousSecretValidUntil != nil &&
+		time.Now().UTC().Before(*secrets.PreviousSecretValidUntil) {
+		out.Previous = secrets.PreviousInboundSecret
 		out.PreviousValidUntil = *secrets.PreviousSecretValidUntil
 	}
 	return out, nil
@@ -299,6 +301,9 @@ func (s *connectorStore) RotateSecrets(ctx context.Context, ws, connectorID stri
 		// Zero stays absent so fleet-db applies the default overlap
 		// window (now + domain.DefaultConnectorSecretOverlap).
 		body["previous_secret_valid_until"] = in.PreviousSecretValidUntil
+	}
+	if !in.ExpectedUpdatedAt.IsZero() {
+		body["expected_updated_at"] = in.ExpectedUpdatedAt
 	}
 	if in.NewOutboundCredentialSealed != nil {
 		body["new_outbound_credential_sealed"] = in.NewOutboundCredentialSealed

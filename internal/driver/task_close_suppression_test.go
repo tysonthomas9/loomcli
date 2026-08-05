@@ -54,7 +54,7 @@ func TestEnqueueTaskRunPersistsCloseTaskOverride(t *testing.T) {
 			ParentLeaseID:      run.LeaseID,
 			ParentFence:        run.FencingToken,
 			CloseTaskOnSuccess: &closeFalse,
-		}, HostBridgeTaskExecutor{Command: []string{"unused"}})
+		}, HostBridgeTaskExecutor{APIBaseURL: testTaskRunAPIURL, Command: []string{"unused"}})
 		if err != nil {
 			t.Fatalf("EnqueueTaskRunWithResult: %v", err)
 		}
@@ -75,7 +75,7 @@ func TestEnqueueTaskRunPersistsCloseTaskOverride(t *testing.T) {
 			ParentNodeID:       run.NodeID,
 			ParentLeaseID:      run.LeaseID,
 			ParentFence:        run.FencingToken,
-		}, HostBridgeTaskExecutor{Command: []string{"unused"}})
+		}, HostBridgeTaskExecutor{APIBaseURL: testTaskRunAPIURL, Command: []string{"unused"}})
 		if err != nil {
 			t.Fatalf("EnqueueTaskRunWithResult: %v", err)
 		}
@@ -108,7 +108,7 @@ func TestWorkerHonorsPersistedCloseTaskOverride(t *testing.T) {
 			ParentLeaseID:      driverRun.LeaseID,
 			ParentFence:        driverRun.FencingToken,
 			CloseTaskOnSuccess: override,
-		}, HostBridgeTaskExecutor{Command: []string{"unused"}}); err != nil {
+		}, HostBridgeTaskExecutor{APIBaseURL: testTaskRunAPIURL, Command: []string{"unused"}}); err != nil {
 			t.Fatalf("EnqueueTaskRunWithResult: %v", err)
 		}
 

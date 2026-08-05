@@ -5,6 +5,7 @@
 // camelCase JSON and structured errors.
 
 const DEFAULT_HTTP_TIMEOUT_MS = 30_000;
+const TASK_RUN_REQUEST_MAX_ATTEMPTS = 2;
 
 // DriverApiError carries the structured v2 error envelope:
 // {code, message, retryable} plus the HTTP status.
@@ -92,9 +93,12 @@ export class LoomDriverClient {
     this.tasks = Object.freeze({
       claimReady: (input = {}) => this.claimReady(input),
       claim: (input = {}) => this.claimTask(input),
+      claimReview: (input = {}) => this.claimReview(input),
+      handoffReview: (input = {}) => this.handoffReview(input),
       diff: (input = {}) => this.taskDiff(input),
       complete: (input = {}) => this.completeTask(input),
       release: (input = {}) => this.releaseTask(input),
+      releaseReview: (input = {}) => this.releaseReview(input),
     });
     this.taskRuns = Object.freeze({
       request: (input = {}) => this.requestTaskRun(input),
@@ -122,6 +126,7 @@ export class LoomDriverClient {
       listComments: (input = {}) => this.#httpCall("issue-list-comments", { issueId: input.issueId }),
       comment: (input = {}) => this.#httpCall("issue-comment", { issueId: input.issueId, body: input.body }),
       update: (input = {}) => this.#httpCall("issue-update", { issueId: input.issueId, status: input.status, priority: input.priority, labels: input.labels, assignee: input.assignee, externalRef: input.externalRef }),
+      blockRepositoryRequired: (input = {}) => this.#httpCall("issue-block-repository-required", { issueId: input.issueId }),
       addLabel: (input = {}) => this.#httpCall("issue-add-label", { issueId: input.issueId, label: input.label }),
       removeLabel: (input = {}) => this.#httpCall("issue-remove-label", { issueId: input.issueId, label: input.label }),
     });
@@ -165,6 +170,7 @@ export class LoomDriverClient {
       // cross-agent lock takeover). Pass `type` to narrow the ready queue.
       actor: input.actor || "",
       type: input.type || "",
+      sourceRepo: input.sourceRepo || "",
       limit: input.limit || "",
     });
   }
@@ -187,6 +193,14 @@ export class LoomDriverClient {
       epicId: input.epicId || "",
       limit: input.limit || "",
     });
+  }
+
+  async claimReview(input = {}) {
+    const taskId = taskPayloadID(input);
+    if (!taskId) {
+      throw new Error("tasks.claimReview requires taskId");
+    }
+    return this.#httpCall("claim-review", { taskId: String(taskId) });
   }
 
   // taskDiff returns the bounded review diff for a card stamped with
@@ -346,7 +360,6 @@ export class LoomDriverClient {
       runnerId: input.runnerId || "",
       driverStepId: input.driverStepId || "",
       capabilities: stringList(input.capabilities),
-      leaseToken: input.leaseToken || pickEnv(this.env, "LOOM_TASK_RUN_LEASE_TOKEN") || pickEnv(this.env, "LOOM_RUNNER_LEASE_TOKEN"),
       deferCompletion: true,
     };
     const repoRef = input.repoRef || input.repo_ref || (input.sandboxPlacement && (input.sandboxPlacement.repoRef || input.sandboxPlacement.repo_ref));
@@ -368,7 +381,29 @@ export class LoomDriverClient {
     if (input.closeTask !== undefined && input.closeTask !== null) {
       params.closeTask = booleanInput(input.closeTask);
     }
-    const result = await this.#httpCall("exec-task", { ...params, enqueueOnly: true }, { rawKeys: ["input", "closeTask"] });
+    // Review hosts may need the exact DriverRun Work Item claim to survive a
+    // successful child long enough to perform connector egress and the final
+    // lifecycle handoff. The server converts this opt-in into trusted TaskRun
+    // metadata; arbitrary runtime metadata is never accepted from the SDK.
+    if (input.retainWorkItemClaim === true) {
+      params.retainWorkItemClaim = true;
+    }
+    let response;
+    for (let attempt = 1; attempt <= TASK_RUN_REQUEST_MAX_ATTEMPTS; attempt += 1) {
+      try {
+        response = await this.#httpCall("exec-task", { ...params, enqueueOnly: true }, { rawKeys: ["input", "closeTask"] });
+        break;
+      } catch (err) {
+        // A timeout, disconnect, or invalid 2xx body may happen after Fleet
+        // committed the immutable TaskRun request receipt. Replay the exact
+        // same command once before exposing the error; callers must never
+        // interpret an ambiguous transport failure as proof of no commit.
+        if (!taskRunRequestMayHaveCommitted(err) || attempt === TASK_RUN_REQUEST_MAX_ATTEMPTS) {
+          throw err;
+        }
+      }
+    }
+    const result = sanitizeTaskRunResult(response);
     rememberTaskRunResult(this, result || {});
     return result;
   }
@@ -378,7 +413,7 @@ export class LoomDriverClient {
     if (!taskRunId) {
       throw new Error("taskRuns.get requires taskRunId");
     }
-    return this.#httpCall("task-run-get", { taskRunId: String(taskRunId) });
+    return sanitizeTaskRunResult(await this.#httpCall("task-run-get", { taskRunId: String(taskRunId) }));
   }
 
   async awaitTaskRun(input = {}) {
@@ -434,7 +469,6 @@ export class LoomDriverClient {
       reason: input.reason || "",
       completionId: input.completionId || "",
       leaseToken:
-        input.leaseToken || remembered?.leaseToken ||
         pickEnv(this.env, "LOOM_TASK_RUN_LEASE_TOKEN") || pickEnv(this.env, "LOOM_RUNNER_LEASE_TOKEN"),
       logsRef: input.logsRef || remembered?.logsRef || "",
       artifactsRef: input.artifactsRef || remembered?.artifactsRef || "",
@@ -450,6 +484,77 @@ export class LoomDriverClient {
     }
     const params = { taskId: String(taskId), actor: input.actor || "" };
     return this.#httpCall("release-task", params);
+  }
+
+  async releaseReview(input = {}) {
+    const taskId = taskPayloadID(input);
+    if (!taskId) {
+      throw new Error("tasks.releaseReview requires taskId");
+    }
+    return this.#httpCall("release-review", { taskId: String(taskId) });
+  }
+
+  async handoffReview(input = {}) {
+    const taskId = taskPayloadID(input);
+    const taskRunId = input && typeof input === "object" ? String(input.taskRunId || "") : "";
+    const status = input && typeof input === "object" ? String(input.status || "") : "";
+    if (!taskId) {
+      throw new Error("tasks.handoffReview requires taskId");
+    }
+    if (!taskRunId) {
+      throw new Error("tasks.handoffReview requires taskRunId");
+    }
+    if (status !== "open" && status !== "review" && status !== "closed") {
+      throw new Error('tasks.handoffReview status must be "open", "review", or "closed"');
+    }
+    const hasPriority = Object.prototype.hasOwnProperty.call(input, "priority");
+    const hasLabels = Object.prototype.hasOwnProperty.call(input, "labels");
+    const hasCommentBody = Object.prototype.hasOwnProperty.call(input, "commentBody");
+    const hasExternalRef = Object.prototype.hasOwnProperty.call(input, "externalRef");
+    if (status !== "review" && (
+      hasPriority || hasLabels || hasCommentBody || hasExternalRef
+    )) {
+      throw new Error(
+        "tasks.handoffReview priority, labels, commentBody, and externalRef are only valid for review status",
+      );
+    }
+    if (status === "review") {
+      if (!Number.isInteger(input.priority) || input.priority < 0 || input.priority > 4) {
+        throw new Error("tasks.handoffReview review status requires priority as an integer from 0 through 4");
+      }
+      if (typeof input.commentBody !== "string" || input.commentBody.trim() === "") {
+        throw new Error("tasks.handoffReview review status requires nonblank commentBody");
+      }
+      if (hasLabels && (!Array.isArray(input.labels) || input.labels.some((label) => typeof label !== "string"))) {
+        throw new Error("tasks.handoffReview labels must be an array of strings");
+      }
+      if (
+        hasExternalRef &&
+        (
+          typeof input.externalRef !== "string" ||
+          !isCanonicalLocalBranchExternalRef(input.externalRef)
+        )
+      ) {
+        throw new Error("tasks.handoffReview externalRef must be a canonical local-branch reference");
+      }
+    }
+    const params = {
+      taskId: String(taskId),
+      taskRunId,
+      status,
+      reason: String(input.reason || ""),
+    };
+    if (status === "review") {
+      params.priority = input.priority;
+      params.commentBody = input.commentBody;
+      if (hasLabels) {
+        params.labels = input.labels;
+      }
+      if (hasExternalRef) {
+        params.externalRef = input.externalRef;
+      }
+    }
+    return this.#httpCall("handoff-review", params, { rawKeys: ["labels"] });
   }
 
   // dispatchConnector posts one connector egress call to the run-scoped
@@ -947,6 +1052,20 @@ function envelopeRetryable(envelope) {
   return Boolean(envelope?.retryable);
 }
 
+function taskRunRequestMayHaveCommitted(err) {
+  if (!(err instanceof DriverApiError)) {
+    return false;
+  }
+  switch (String(err.code || "")) {
+    case "timeout":
+    case "unavailable":
+    case "internal":
+      return true;
+    default:
+      return false;
+  }
+}
+
 // watchHttpError maps a non-OK watch response onto DriverApiError using the
 // structured {code, message, retryable} envelope when present. Without an
 // envelope, 5xx/429 default to retryable so transient proxy errors reconnect.
@@ -1060,6 +1179,7 @@ function watchDelay(ms, signal) {
 }
 
 function rememberTaskRunResult(client, result = {}) {
+	result = sanitizeTaskRunResult(result);
   const runId = result.taskRunId || result.id || "";
   const taskId = result.taskId || "";
   if (runId) {
@@ -1068,6 +1188,45 @@ function rememberTaskRunResult(client, result = {}) {
   if (taskId) {
     client.taskRunResultsByTaskId.set(String(taskId), result);
   }
+}
+
+// TaskRun lease tokens belong only to the worker that claimed the run. Strip
+// legacy server fields defensively so generic workflow results and remembered
+// polling state cannot turn a watch/request response into a bearer credential.
+function sanitizeTaskRunResult(result = {}) {
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    return result;
+  }
+  const sanitized = { ...result };
+  delete sanitized.leaseToken;
+  delete sanitized.lease_token;
+  return sanitized;
+}
+
+function isCanonicalLocalBranchExternalRef(externalRef) {
+  if (
+    externalRef !== externalRef.trim() ||
+    !externalRef.startsWith("local-branch:")
+  ) {
+    return false;
+  }
+  const body = externalRef.slice("local-branch:".length);
+  const separator = body.lastIndexOf("@");
+  if (separator <= 0 || !/^[0-9a-f]{40}$/.test(body.slice(separator + 1))) {
+    return false;
+  }
+  const branch = body.slice(0, separator);
+  return branch !== "@" &&
+    !branch.startsWith("-") &&
+    !branch.startsWith("/") &&
+    !branch.endsWith("/") &&
+    !branch.startsWith(".") &&
+    !branch.endsWith(".") &&
+    !branch.endsWith(".lock") &&
+    !branch.includes("..") &&
+    !branch.includes("//") &&
+    !branch.includes("@{") &&
+    !/[\s\u0000-\u001f\u007f~^:?*[\]\\]/u.test(branch);
 }
 
 function pickEnv(env, key) {

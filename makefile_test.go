@@ -153,7 +153,9 @@ func TestMakefileLocalModeVerifyAlwaysReadsLiveManifest(t *testing.T) {
 	)
 	for _, want := range []string{
 		"exec -T loom-local sh -c",
-		`cat "${LOCAL_MODE_RUN_MANIFEST:-/tmp/loom-local-mode-run.json}"`,
+		`manifest="${LOCAL_MODE_RUN_MANIFEST:-/tmp/loom-local-mode-run.json}"`,
+		`while [ ! -s "$manifest" ]`,
+		`cat "$manifest"`,
 	} {
 		if !strings.Contains(dryRun, want) {
 			t.Fatalf("local-mode-verify did not read the container-selected manifest path; missing %q:\n%s", want, dryRun)
@@ -169,11 +171,6 @@ func TestMakefileLocalModeVerifyAlwaysReadsLiveManifest(t *testing.T) {
 	fakeComposeScript := `#!/bin/sh
 last=""
 for arg do last="$arg"; done
-want='cat "${LOCAL_MODE_RUN_MANIFEST:-/tmp/loom-local-mode-run.json}"'
-if [ "$last" != "$want" ]; then
-  echo "unexpected container manifest command: $last" >&2
-  exit 42
-fi
 LOCAL_MODE_RUN_MANIFEST="${FAKE_CUSTOM_MANIFEST:?}" sh -c "$last"
 `
 	if err := os.WriteFile(fakeCompose, []byte(fakeComposeScript), 0o755); err != nil {

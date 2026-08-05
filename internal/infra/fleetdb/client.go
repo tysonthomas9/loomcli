@@ -24,6 +24,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/fleethttp"
@@ -32,10 +33,23 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
-// maxResponseBody caps response reads at 16 MiB to prevent OOM if
-// fleet-db ever sends a malformed/huge body. Workspace metadata is
-// kilobytes; this is generous.
-const maxResponseBody = 16 << 20
+const (
+	// maxResponseBody caps generic JSON response reads at 16 MiB to prevent OOM
+	// if fleet-db ever sends a malformed/huge metadata body. Workspace metadata
+	// is kilobytes; this is generous.
+	maxResponseBody = 16 << 20
+
+	// maxArtifactContentBody is the raw artifact-content contract shared with
+	// FleetDB and the task-run artifact upload surface. Artifact payloads include
+	// transcripts and patches that may legitimately exceed the generic JSON cap.
+	maxArtifactContentBody = 64 << 20
+)
+
+// ErrRateLimited identifies a retryable FleetDB admission failure. It must
+// never be collapsed into a domain conflict: doing so makes Execution treat a
+// transient 429 as a deterministic ownership/generation rejection and can
+// strand an otherwise valid Work Item claim.
+var ErrRateLimited = errors.New("fleetdb: rate limited")
 
 // Config holds connection parameters for the fleet-db HTTP client.
 type Config struct {
@@ -71,36 +85,38 @@ type Client struct {
 	actor     string
 	authToken string
 
-	workspaces *workspaceStore
-	repos      *repoStore
-	agents     *agentStore
-	nodes      *nodeStore
-	sessions   *agentSessionStore
-	terminals  *terminalSessionStore
-	artifacts  *artifactStore
-	leases     *agentLeaseStore
-	ownership  *agentOwnershipLeaseStore
-	commands   *agentCommandStore
-	inbox      *agentInboxMessageStore
-	drivers    *driverStore
-	versions   *driverVersionStore
-	catalog    *workflowCatalogStore
-	automation *automationStore
-	profiles   *workerProfileStore
-	services   *agentServiceStore
-	bindings   *triggerBindingStore
-	events     *triggerEventStore
-	deliveries *triggerDeliveryStore
-	routes     *triggerRouteStore
-	runs       *driverRunStore
-	steps      *driverStepStore
-	taskRuns   *taskRunStore
-	taskEvents *taskRunEventStore
-	outbox     *outboxStore
-	awaits     *awaitStore
-	workers    *workerStore
-	roles      *roleStore
-	daemon     *daemonStore
+	workspaces       *workspaceStore
+	repos            *repoStore
+	agents           *agentStore
+	nodes            *nodeStore
+	sessions         *agentSessionStore
+	terminals        *terminalSessionStore
+	artifacts        *artifactStore
+	artifactCommands *artifactCommandStore
+	leases           *agentLeaseStore
+	ownership        *agentOwnershipLeaseStore
+	commands         *agentCommandStore
+	inbox            *agentInboxMessageStore
+	drivers          *driverStore
+	versions         *driverVersionStore
+	catalog          *workflowCatalogStore
+	automation       *automationStore
+	profiles         *workerProfileStore
+	services         *agentServiceStore
+	bindings         *triggerBindingStore
+	events           *triggerEventStore
+	deliveries       *triggerDeliveryStore
+	routes           *triggerRouteStore
+	runs             *driverRunStore
+	steps            *driverStepStore
+	taskRuns         *taskRunStore
+	execution        *executionStore
+	taskEvents       *taskRunEventStore
+	outbox           *outboxStore
+	awaits           *awaitStore
+	workers          *workerStore
+	roles            *roleStore
+	daemon           *daemonStore
 
 	connectors      *connectorStore
 	connectorGrants *connectorGrantStore
@@ -125,6 +141,11 @@ func New(cfg Config) (*Client, error) {
 		actor:     cfg.Actor,
 		authToken: cfg.AuthToken,
 	}
+	c.initializeStores()
+	return c, nil
+}
+
+func (c *Client) initializeStores() {
 	c.workspaces = &workspaceStore{client: c}
 	c.repos = &repoStore{client: c}
 	c.agents = &agentStore{client: c}
@@ -132,6 +153,7 @@ func New(cfg Config) (*Client, error) {
 	c.sessions = &agentSessionStore{client: c}
 	c.terminals = &terminalSessionStore{client: c}
 	c.artifacts = &artifactStore{client: c}
+	c.artifactCommands = &artifactCommandStore{client: c}
 	c.leases = &agentLeaseStore{client: c}
 	c.ownership = &agentOwnershipLeaseStore{client: c}
 	c.commands = &agentCommandStore{client: c}
@@ -149,6 +171,7 @@ func New(cfg Config) (*Client, error) {
 	c.runs = &driverRunStore{client: c}
 	c.steps = &driverStepStore{client: c}
 	c.taskRuns = &taskRunStore{client: c}
+	c.execution = &executionStore{client: c}
 	c.taskEvents = &taskRunEventStore{client: c}
 	c.outbox = &outboxStore{client: c}
 	c.awaits = &awaitStore{client: c}
@@ -158,7 +181,6 @@ func New(cfg Config) (*Client, error) {
 	c.connectors = &connectorStore{client: c}
 	c.connectorGrants = &connectorGrantStore{client: c}
 	c.connectorCalls = &connectorAuditStore{client: c}
-	return c, nil
 }
 
 // Compile-time check.
@@ -184,6 +206,11 @@ func (c *Client) TerminalSessions() store.TerminalSessionStore { return c.termin
 
 // Artifacts returns the ArtifactStore.
 func (c *Client) Artifacts() store.ArtifactStore { return c.artifacts }
+
+// ArtifactCommands exposes the narrow owner-fenced Artifacts transport. It
+// shares this Client's credentials, tracing, retry policy, and connection pool
+// while keeping revision CAS details inside the transport.
+func (c *Client) ArtifactCommands() ArtifactTransport { return c.artifactCommands }
 
 // AgentLeases returns the AgentLeaseStore.
 func (c *Client) AgentLeases() store.AgentLeaseStore { return c.leases }
@@ -233,6 +260,12 @@ func (c *Client) DriverSteps() store.DriverStepStore { return c.steps }
 
 // TaskRuns returns the TaskRunStore.
 func (c *Client) TaskRuns() store.TaskRunStore { return c.taskRuns }
+
+// Execution exposes the production Execution foundation, including the
+// system-only terminal DriverStep convergence command. It reuses the
+// process-wide FleetDB client rather than constructing a capability-local HTTP
+// client.
+func (c *Client) Execution() ExecutionFoundationTransport { return c.execution }
 
 // TaskRunEvents returns the TaskRunEventStore.
 func (c *Client) TaskRunEvents() store.TaskRunEventStore { return c.taskEvents }
@@ -290,23 +323,47 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 	return c.doWithHeaders(ctx, method, path, body, out, nil)
 }
 
+func bodyPtr[T any](body map[string]any, key string, value *T) {
+	if value != nil {
+		body[key] = *value
+	}
+}
+
+func bodyTimeRFC3339NanoPtr(body map[string]any, key string, value *time.Time) {
+	if value != nil {
+		body[key] = value.Format(time.RFC3339Nano)
+	}
+}
+
 func (c *Client) doWithHeaders(ctx context.Context, method, path string, body, out any, headers map[string]string) error {
+	_, err := c.doWithHeadersStatus(ctx, method, path, body, out, headers)
+	return err
+}
+
+// doWithHeadersStatus is the status-observing variant used by routes where a
+// successful no-content response has domain meaning distinct from a malformed
+// empty success body. Most callers should continue to use doWithHeaders.
+func (c *Client) doWithHeadersStatus(ctx context.Context, method, path string, body, out any, headers map[string]string) (int, error) {
 	c.mu.RLock()
 	auth := fleethttp.Auth{BearerToken: c.authToken, APIKey: c.apiKey, Actor: c.actor}
 	c.mu.RUnlock()
 
 	req, err := fleethttp.BuildJSONRequest(ctx, method, c.baseURL+path, auth, body)
 	if err != nil {
-		return fmt.Errorf("fleetdb: %w", err)
+		return 0, fmt.Errorf("fleetdb: %w", err)
 	}
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
 
-	return c.doRequest(req, method, path, out)
+	return c.doRequestStatus(req, method, path, out)
 }
 
 func (c *Client) doRaw(ctx context.Context, method, path string, body io.Reader, contentType string, out any) error {
+	return c.doRawWithHeaders(ctx, method, path, body, contentType, out, nil)
+}
+
+func (c *Client) doRawWithHeaders(ctx context.Context, method, path string, body io.Reader, contentType string, out any, headers map[string]string) error {
 	c.mu.RLock()
 	auth := fleethttp.Auth{BearerToken: c.authToken, APIKey: c.apiKey, Actor: c.actor}
 	c.mu.RUnlock()
@@ -320,6 +377,9 @@ func (c *Client) doRaw(ctx context.Context, method, path string, body io.Reader,
 		req.Header.Set("Content-Type", contentType)
 	}
 	auth.Apply(req)
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
 
 	return c.doRequest(req, method, path, out)
 }
@@ -349,20 +409,25 @@ func (c *Client) doBytes(ctx context.Context, method, path string) ([]byte, erro
 		}
 		return nil, classifyHTTPError(method, path, resp.StatusCode, respBody)
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody+1))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxArtifactContentBody+1))
 	if err != nil {
 		return nil, fmt.Errorf("fleetdb: read response (%s %s): %w", method, path, err)
 	}
-	if len(body) > maxResponseBody {
-		return nil, fmt.Errorf("fleetdb: %s %s: response body exceeds %d bytes", method, path, maxResponseBody)
+	if len(body) > maxArtifactContentBody {
+		return nil, fmt.Errorf("fleetdb: %s %s: artifact content exceeds %d bytes", method, path, maxArtifactContentBody)
 	}
 	return body, nil
 }
 
 func (c *Client) doRequest(req *http.Request, method, path string, out any) error {
+	_, err := c.doRequestStatus(req, method, path, out)
+	return err
+}
+
+func (c *Client) doRequestStatus(req *http.Request, method, path string, out any) (int, error) {
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("fleetdb: %s %s: %w", method, path, err)
+		return 0, fmt.Errorf("fleetdb: %s %s: %w", method, path, err)
 	}
 	defer func() {
 		// Drain so the underlying connection can be returned to the
@@ -374,24 +439,26 @@ func (c *Client) doRequest(req *http.Request, method, path string, out any) erro
 	if resp.StatusCode >= 400 {
 		respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
 		if readErr != nil {
-			return fmt.Errorf("fleetdb: %s %s: HTTP %d (read body: %w)", method, path, resp.StatusCode, readErr)
+			return resp.StatusCode, fmt.Errorf("fleetdb: %s %s: HTTP %d (read body: %w)", method, path, resp.StatusCode, readErr)
 		}
-		return classifyHTTPError(method, path, resp.StatusCode, respBody)
+		return resp.StatusCode, classifyHTTPError(method, path, resp.StatusCode, respBody)
 	}
 	if out == nil || resp.StatusCode == http.StatusNoContent {
-		return nil
+		return resp.StatusCode, nil
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBody)).Decode(out); err != nil {
 		if errors.Is(err, io.EOF) {
-			return nil
+			return resp.StatusCode, nil
 		}
-		return fmt.Errorf("fleetdb: decode response (%s %s): %w", method, path, err)
+		return resp.StatusCode, fmt.Errorf("fleetdb: decode response (%s %s): %w", method, path, err)
 	}
-	return nil
+	return resp.StatusCode, nil
 }
 
 // classifyHTTPError maps an HTTP status + body into the appropriate
 // domain sentinel + descriptive wrap.
+//
+//nolint:cyclop // This is the central exhaustive HTTP-to-domain error classification table.
 func classifyHTTPError(method, path string, status int, body []byte) error {
 	code := extractErrorCode(body)
 	prefix := formatHTTPErrorPrefix(method, path, status, extractErrorMessage(body))
@@ -402,53 +469,76 @@ func classifyHTTPError(method, path string, status int, body []byte) error {
 	case http.StatusNotFound:
 		return fmt.Errorf("%s: %w", prefix, domain.ErrNotFound)
 	case http.StatusConflict:
-		switch code {
-		case "revision_conflict":
-			return fmt.Errorf("%s: %w", prefix, ErrWorkflowCatalogRevisionConflict)
-		case "already_claimed":
-			return fmt.Errorf("%s: %w", prefix, domain.ErrAlreadyClaimed)
-		case "invalid_transition":
-			return fmt.Errorf("%s: %w", prefix, domain.ErrInvalidTransition)
-		case "conflict":
-			return fmt.Errorf("%s: %w", prefix, domain.ErrConflict)
-		case "driver_run_already_resumed":
-			// Pending->suspend window: the await resolved before the suspend
-			// landed — the run must continue inline, never suspend.
-			return fmt.Errorf("%s: %w", prefix, domain.ErrDriverRunAlreadyResumed)
-		}
-		return fmt.Errorf("%s: %w", prefix, domain.ErrAlreadyExists)
+		return classifyConflictHTTPError(prefix, code)
 	case http.StatusForbidden:
-		if code == "await_actor_forbidden" {
-			return fmt.Errorf("%s: %w", prefix, domain.ErrAwaitActorForbidden)
-		}
-		if strings.Contains(path, "/driver-runs/") {
-			return fmt.Errorf("%s: %w", prefix, domain.ErrNotOwner)
-		}
-		return fmt.Errorf("%s: %w", prefix, domain.ErrConflict)
+		return classifyForbiddenHTTPError(prefix, path, code)
 	case http.StatusBadRequest, http.StatusUnprocessableEntity, http.StatusRequestEntityTooLarge:
-		switch code {
-		case "workflow_catalog_version_ownership":
-			return fmt.Errorf("%s: %w", prefix, ErrWorkflowCatalogVersionOwnership)
-		case "workflow_catalog_version_not_validated":
-			return fmt.Errorf("%s: %w", prefix, ErrWorkflowCatalogVersionNotValidated)
-		case "workflow_catalog_version_not_approved":
-			return fmt.Errorf("%s: %w", prefix, ErrWorkflowCatalogVersionNotApproved)
-		}
-		// Structured await validation codes map back onto their domain
-		// sentinels (each wraps domain.ErrInvalid).
-		if sentinel := awaitErrSentinel(code); sentinel != nil {
-			return fmt.Errorf("%s: %w", prefix, sentinel)
-		}
-		return fmt.Errorf("%s: %w", prefix, domain.ErrInvalid)
+		return classifyInvalidHTTPError(prefix, code)
 	case http.StatusGone:
 		// fleet-db heartbeat: lease exists, token is ours, but it is no
 		// longer live (expired or released) — re-acquire is safe.
 		return fmt.Errorf("%s: %w", prefix, domain.ErrGone)
+	case http.StatusTooManyRequests:
+		return fmt.Errorf("%s: %w", prefix, ErrRateLimited)
+	}
+	if status >= 500 && strings.Contains(path, "/artifacts/") {
+		return fmt.Errorf("%s: %w", prefix, ErrArtifactsUnavailable)
 	}
 	if status >= 400 && status < 500 {
 		return fmt.Errorf("%s: %w", prefix, domain.ErrConflict)
 	}
 	return errors.New(prefix)
+}
+
+func classifyConflictHTTPError(prefix, code string) error {
+	sentinel := domain.ErrAlreadyExists
+	switch code {
+	case "revision_conflict":
+		sentinel = ErrWorkflowCatalogRevisionConflict
+	case "already_claimed":
+		sentinel = domain.ErrAlreadyClaimed
+	case "invalid_transition":
+		sentinel = domain.ErrInvalidTransition
+	case "conflict":
+		sentinel = domain.ErrConflict
+	case "driver_run_already_resumed":
+		// Pending->suspend window: the await resolved before the suspend
+		// landed — the run must continue inline, never suspend.
+		sentinel = domain.ErrDriverRunAlreadyResumed
+	}
+	return fmt.Errorf("%s: %w", prefix, sentinel)
+}
+
+func classifyForbiddenHTTPError(prefix, path, code string) error {
+	if code == "await_actor_forbidden" {
+		return fmt.Errorf("%s: %w", prefix, domain.ErrAwaitActorForbidden)
+	}
+	if strings.Contains(path, "/driver-runs/") || strings.Contains(path, "/task-runs/") ||
+		strings.Contains(path, "/agent-commands/") ||
+		strings.Contains(path, "/artifact-commands/") || strings.Contains(path, "/artifacts/") {
+		return fmt.Errorf("%s: %w", prefix, domain.ErrNotOwner)
+	}
+	return fmt.Errorf("%s: %w", prefix, domain.ErrConflict)
+}
+
+func classifyInvalidHTTPError(prefix, code string) error {
+	var sentinel error
+	switch code {
+	case "workflow_catalog_version_ownership":
+		sentinel = ErrWorkflowCatalogVersionOwnership
+	case "workflow_catalog_version_not_validated":
+		sentinel = ErrWorkflowCatalogVersionNotValidated
+	case "workflow_catalog_version_not_approved":
+		sentinel = ErrWorkflowCatalogVersionNotApproved
+	default:
+		// Structured await validation codes map back onto their domain
+		// sentinels (each wraps domain.ErrInvalid).
+		sentinel = awaitErrSentinel(code)
+	}
+	if sentinel == nil {
+		sentinel = domain.ErrInvalid
+	}
+	return fmt.Errorf("%s: %w", prefix, sentinel)
 }
 
 var automationHTTPErrorSentinels = map[string]error{

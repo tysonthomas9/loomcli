@@ -2,6 +2,7 @@ package svcimpl
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -35,12 +36,19 @@ func TestSessionServiceListTaskSessionsUsesControlPlane(t *testing.T) {
 		Status:       domain.AgentSessionRunning,
 		Phase:        "implementation",
 		Metadata: map[string]string{
-			"backend":         "localdogfood",
-			"transcript_path": "/tmp/sess-1/transcript.jsonl",
-			"files_changed":   "1",
-			"lines_added":     "2",
-			"lines_removed":   "3",
-			"files_touched":   "file.txt",
+			"backend":           "localdogfood",
+			"transcript_path":   "/tmp/sess-1/transcript.jsonl",
+			"runtime_strategy":  "local-cli-codex",
+			"delivery":          "patch_back",
+			"patch_back_status": "applied",
+			"logs_ref":          "artifact://logs-1",
+			"local_branch":      "loom/task-1",
+			"head_sha":          "abc123",
+			"github_pr_url":     "https://github.com/acme/widgets/pull/1",
+			"files_changed":     "1",
+			"lines_added":       "2",
+			"lines_removed":     "3",
+			"files_touched":     "file.txt",
 		},
 	})
 	if err != nil {
@@ -71,6 +79,11 @@ func TestSessionServiceListTaskSessionsUsesControlPlane(t *testing.T) {
 	}
 	if item.Backend != "localdogfood" || !item.HasTranscript {
 		t.Fatalf("item backend/transcript = %q/%v", item.Backend, item.HasTranscript)
+	}
+	if item.RuntimeStrategy != "local-cli-codex" || item.DeliveryMode != "patch_back" || item.PatchBackStatus != "applied" ||
+		item.LogsRef != "artifact://logs-1" || item.LocalBranch != "loom/task-1" || item.HeadSHA != "abc123" ||
+		item.GitHubPRURL != "https://github.com/acme/widgets/pull/1" {
+		t.Fatalf("execution evidence = %+v", item)
 	}
 	if item.FilesChanged != 1 || item.LinesAdded != 2 || item.LinesRemoved != 3 || len(item.FilesTouched) != 1 || item.FilesTouched[0] != "file.txt" {
 		t.Fatalf("item diff stats = %+v", item.SessionRecord)
@@ -120,6 +133,462 @@ func TestSessionServiceCloudControlPlaneTranscriptArtifactReadContent(t *testing
 	}
 }
 
+func TestSessionServiceDaemonSessionOwnedTranscriptArtifactReadContent(t *testing.T) {
+	ctx := t.Context()
+	st := memstore.New()
+	body := []byte(`{"seq":1,"timestamp":"2026-07-28T12:00:00Z","role":"assistant","type":"text","text":"daemon transcript"}` + "\n")
+	finalized, err := store.UploadContentArtifact(ctx, st.Artifacts(), store.ArtifactCreate{
+		WorkspaceKey:  "WS",
+		ArtifactID:    "transcript-daemon-session",
+		SessionID:     "daemon-session",
+		TaskID:        "TASK-DAEMON",
+		OwnerType:     "session",
+		OwnerID:       "daemon-session",
+		Type:          "transcript",
+		MIMEType:      "application/x-ndjson",
+		DurableStatus: "declared",
+		// AgentID is deliberately empty to cover artifacts written before the
+		// daemon began stamping the already session-bound agent identity.
+	}, body)
+	if err != nil {
+		t.Fatalf("create daemon transcript artifact: %v", err)
+	}
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "daemon-session",
+		AgentID:      "daemon-agent",
+		Kind:         domain.AgentSessionKindTask,
+		TaskID:       "TASK-DAEMON",
+		Status:       domain.AgentSessionCompleted,
+		Metadata: map[string]string{
+			"transcript_ref": "artifact://" + finalized.ArtifactID,
+		},
+	}); err != nil {
+		t.Fatalf("create daemon session: %v", err)
+	}
+
+	svc := NewSessionService(st, nil)
+	events, err := svc.GetSessionTranscript(ctx, "WS", "TASK-DAEMON", "daemon-session")
+	if err != nil {
+		t.Fatalf("GetSessionTranscript: %v", err)
+	}
+	if len(events) != 1 || events[0].Text != "daemon transcript" {
+		t.Fatalf("events = %+v", events)
+	}
+	agentTranscripts := svc.(service.AgentSessionTranscriptService)
+	events, err = agentTranscripts.GetAgentSessionTranscript(ctx, "WS", "daemon-agent", "daemon-session")
+	if err != nil {
+		t.Fatalf("GetAgentSessionTranscript: %v", err)
+	}
+	if len(events) != 1 || events[0].Text != "daemon transcript" {
+		t.Fatalf("agent events = %+v", events)
+	}
+}
+
+func TestSessionServiceControlPlaneArtifactRefsRequireExactTaskRunOwnership(t *testing.T) {
+	ctx := t.Context()
+	st := memstore.New()
+	createFinalizedArtifact(
+		t, st, "transcript-other-run", "other-session", "TASK-FLUE-1",
+		"task-run-other", "transcript", "application/x-ndjson", []byte("{}\n"),
+	)
+	createFinalizedArtifact(
+		t, st, "patch-other-run", "other-session", "TASK-FLUE-1",
+		"task-run-other", "patch", "text/x-diff", []byte("diff --git a/a b/a\n"),
+	)
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "flue-task-run-1",
+		AgentID:      "flue-task-agent",
+		Kind:         domain.AgentSessionKindTask,
+		TaskID:       "TASK-FLUE-1",
+		Status:       domain.AgentSessionCompleted,
+		Metadata: map[string]string{
+			"task_run_id":    "task-run-1",
+			"transcript_ref": "file:///etc/passwd",
+			"patch_ref":      "http://127.0.0.1/private",
+		},
+	}); err != nil {
+		t.Fatalf("create task session: %v", err)
+	}
+
+	svc := NewSessionService(st, nil)
+	_, err := svc.GetSessionTranscript(ctx, "WS", "TASK-FLUE-1", "flue-task-run-1")
+	assertServiceErrorKind(t, err, service.KindNotFound)
+	_, err = svc.GetSessionDiff(ctx, "WS", "TASK-FLUE-1", "flue-task-run-1")
+	assertServiceErrorKind(t, err, service.KindNotFound)
+
+	metadata := map[string]string{
+		"task_run_id":       "task-run-1",
+		"transcript_ref":    "artifact://transcript-other-run",
+		"patch_artifact_id": "patch-other-run",
+	}
+	if _, err := st.AgentSessions().Update(ctx, "WS", "flue-task-run-1", store.AgentSessionUpdate{
+		Metadata: &metadata,
+	}); err != nil {
+		t.Fatalf("update task session: %v", err)
+	}
+	_, err = svc.GetSessionTranscript(ctx, "WS", "TASK-FLUE-1", "flue-task-run-1")
+	assertServiceErrorKind(t, err, service.KindNotFound)
+	_, err = svc.GetSessionDiff(ctx, "WS", "TASK-FLUE-1", "flue-task-run-1")
+	assertServiceErrorKind(t, err, service.KindNotFound)
+}
+
+func TestSessionServicePathlessWorkspaceTranscriptFallsBackToControlPlaneArtifact(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	ctx := t.Context()
+	st := memstore.New()
+	createPathlessWorkspace(t, st)
+
+	transcriptBody := []byte(`{"seq":1,"timestamp":"2026-06-09T12:00:00Z","role":"assistant","type":"text","text":"durable transcript"}` + "\n")
+	createFinalizedArtifact(t, st, "transcript-pathless", "flue-pathless", "TASK-PATHLESS", "task-run-pathless", "transcript", "application/x-ndjson", transcriptBody)
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "flue-pathless",
+		AgentID:      "flue-task-agent",
+		Kind:         domain.AgentSessionKindTask,
+		TaskID:       "TASK-PATHLESS",
+		Status:       domain.AgentSessionCompleted,
+		Metadata: map[string]string{
+			"transcript_ref": "artifact://transcript-pathless",
+			"task_run_id":    "task-run-pathless",
+		},
+	}); err != nil {
+		t.Fatalf("create control-plane session: %v", err)
+	}
+
+	unavailableRuntimeDir := unavailableSessionRuntimeDir(t)
+	events, err := NewSessionServiceWithRuntimeDir(st, nil, unavailableRuntimeDir).
+		GetSessionTranscript(ctx, "WS", "TASK-PATHLESS", "flue-pathless")
+	if err != nil {
+		t.Fatalf("GetSessionTranscript: %v", err)
+	}
+	if len(events) != 1 || events[0].Text != "durable transcript" {
+		t.Fatalf("events = %+v, want durable control-plane transcript", events)
+	}
+}
+
+func TestSessionServiceTranscriptUsesRuntimeStoreBeforeWorkspaceTopology(t *testing.T) {
+	ctx := t.Context()
+	rootDir := t.TempDir()
+	runtimeDir := filepath.Join(rootDir, "workspaces", "LOCALMODE")
+	targetRuntimeDir := filepath.Join(rootDir, "workspaces", "WS")
+	if err := os.MkdirAll(runtimeDir, 0o700); err != nil {
+		t.Fatalf("create active runtime directory: %v", err)
+	}
+	runtimeStore, err := sessions.NewStore(targetRuntimeDir)
+	if err != nil {
+		t.Fatalf("new target runtime session store: %v", err)
+	}
+	sess, err := runtimeStore.CreateSession(sessions.CreateOptions{
+		AgentName: "runtime-agent",
+		Backend:   "claude",
+		Phase:     "implementation",
+	})
+	if err != nil {
+		t.Fatalf("create target runtime session: %v", err)
+	}
+	sourceTranscript := filepath.Join(t.TempDir(), "codex.jsonl")
+	if err := os.WriteFile(sourceTranscript, []byte(`{"type":"assistant","uuid":"runtime-1","message":{"content":[{"type":"text","text":"from runtime"}]}}`+"\n"), 0o600); err != nil {
+		t.Fatalf("write source transcript: %v", err)
+	}
+	if err := runtimeStore.SyncNativeTranscript(sess.SessionID(), sourceTranscript, sessions.TranscriptFormatRaw); err != nil {
+		t.Fatalf("sync target runtime transcript: %v", err)
+	}
+	if err := sess.Finalize(sessions.FinalizeOptions{TaskID: "TASK-RUNTIME-1", ExitCode: 0}); err != nil {
+		t.Fatalf("finalize target runtime session: %v", err)
+	}
+
+	baseStore := memstore.New()
+	countingStore := &workspaceAccessCountingStore{Store: baseStore}
+	svc := NewSessionServiceWithRuntimeDir(countingStore, nil, runtimeDir)
+	events, err := svc.GetSessionTranscript(ctx, "WS", "TASK-RUNTIME-1", sess.SessionID())
+	if err != nil {
+		t.Fatalf("GetSessionTranscript: %v", err)
+	}
+	if len(events) != 1 || events[0].Text != "from runtime" {
+		t.Fatalf("events = %+v, want the runtime transcript", events)
+	}
+	if countingStore.workspaceCalls != 0 {
+		t.Fatalf("workspace topology lookups = %d, want 0", countingStore.workspaceCalls)
+	}
+}
+
+func TestSiblingWorkspaceRuntimeDirRequiresDirectWorkspaceSibling(t *testing.T) {
+	rootDir := t.TempDir()
+	workspaceRuntimeDir := filepath.Join(rootDir, "workspaces", "LOCALMODE")
+	want := filepath.Join(rootDir, "workspaces", "WS")
+
+	tests := []struct {
+		name       string
+		runtimeDir string
+		wsID       string
+		want       string
+		ok         bool
+	}{
+		{name: "direct workspace sibling", runtimeDir: workspaceRuntimeDir, wsID: "WS", want: want, ok: true},
+		{name: "nested workspace id", runtimeDir: workspaceRuntimeDir, wsID: "WS/other"},
+		{name: "traversal workspace id", runtimeDir: workspaceRuntimeDir, wsID: "../WS"},
+		{name: "dot workspace id", runtimeDir: workspaceRuntimeDir, wsID: "."},
+		{name: "empty runtime directory", wsID: "WS"},
+		{name: "non-workspaces parent", runtimeDir: filepath.Join(rootDir, "runtime", "LOCALMODE"), wsID: "WS"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := siblingWorkspaceRuntimeDir(tt.runtimeDir, tt.wsID)
+			if ok != tt.ok || got != tt.want {
+				t.Fatalf("siblingWorkspaceRuntimeDir(%q, %q) = (%q, %v), want (%q, %v)", tt.runtimeDir, tt.wsID, got, ok, tt.want, tt.ok)
+			}
+		})
+	}
+}
+
+type workspaceAccessCountingStore struct {
+	store.Store
+	workspaceCalls int
+}
+
+func (s *workspaceAccessCountingStore) Workspaces() store.WorkspaceStore {
+	s.workspaceCalls++
+	return s.Store.Workspaces()
+}
+
+func TestSessionServiceAgentSessionTranscriptUsesAgentOwnership(t *testing.T) {
+	ctx := t.Context()
+	st := memstore.New()
+	transcriptBody := []byte(
+		`{"seq":1,"timestamp":"2026-07-24T12:00:00Z","role":"user","type":"text","text":"Review this."}` + "\n" +
+			`{"seq":2,"timestamp":"2026-07-24T12:00:01Z","role":"assistant","type":"text","text":"Looks good."}` + "\n",
+	)
+	finalized, err := store.UploadContentArtifact(ctx, st.Artifacts(), store.ArtifactCreate{
+		WorkspaceKey:  "WS",
+		ArtifactID:    "transcript-interactive-1",
+		AgentID:       "local-review",
+		SessionID:     "interactive-1",
+		OwnerType:     "session",
+		OwnerID:       "interactive-1",
+		Type:          "transcript",
+		MIMEType:      "application/x-ndjson",
+		DurableStatus: "declared",
+	}, transcriptBody)
+	if err != nil {
+		t.Fatalf("create interactive transcript artifact: %v", err)
+	}
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "interactive-1",
+		AgentID:      "local-review",
+		Kind:         domain.AgentSessionKindOrchestration,
+		Status:       domain.AgentSessionCompleted,
+		Metadata:     map[string]string{"transcript_ref": "artifact://" + finalized.ArtifactID},
+	}); err != nil {
+		t.Fatalf("create interactive agent session: %v", err)
+	}
+
+	svc, ok := NewSessionService(st, nil).(service.AgentSessionTranscriptService)
+	if !ok {
+		t.Fatal("session service does not implement AgentSessionTranscriptService")
+	}
+	events, err := svc.GetAgentSessionTranscript(ctx, "WS", "local-review", "interactive-1")
+	if err != nil {
+		t.Fatalf("GetAgentSessionTranscript: %v", err)
+	}
+	if len(events) != 2 || events[0].Role != "user" || events[0].Text != "Review this." ||
+		events[1].Role != "assistant" || events[1].Text != "Looks good." {
+		t.Fatalf("events = %+v", events)
+	}
+
+	_, err = svc.GetAgentSessionTranscript(ctx, "WS", "another-agent", "interactive-1")
+	assertServiceError(t, err, service.KindNotFound, "session not found")
+}
+
+func TestSessionServiceAgentTranscriptPreservesManagedContentFailureKind(t *testing.T) {
+	ctx := t.Context()
+	st := memstore.New()
+	finalized, err := store.UploadContentArtifact(ctx, st.Artifacts(), store.ArtifactCreate{
+		WorkspaceKey:  "WS",
+		ArtifactID:    "transcript-interactive-errors",
+		AgentID:       "local-review",
+		SessionID:     "interactive-errors",
+		OwnerType:     "session",
+		OwnerID:       "interactive-errors",
+		Type:          "transcript",
+		MIMEType:      "application/x-ndjson",
+		DurableStatus: "declared",
+	}, []byte(`{"seq":1,"timestamp":"2026-07-24T12:00:00Z","role":"assistant","type":"text","text":"saved"}`+"\n"))
+	if err != nil {
+		t.Fatalf("create transcript artifact: %v", err)
+	}
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "interactive-errors",
+		AgentID:      "local-review",
+		Kind:         domain.AgentSessionKindOrchestration,
+		Status:       domain.AgentSessionCompleted,
+		Metadata:     map[string]string{"transcript_ref": "artifact://" + finalized.ArtifactID},
+	}); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name     string
+		readErr  error
+		wantKind service.ErrorKind
+	}{
+		{
+			name:     "content plane unavailable",
+			readErr:  store.ErrArtifactContentUnavailable,
+			wantKind: service.KindUnavailable,
+		},
+		{
+			name:     "managed content missing",
+			readErr:  domain.ErrNotFound,
+			wantKind: service.KindNotFound,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			artifacts := &transcriptContentErrorArtifactStore{
+				ArtifactStore: st.Artifacts(),
+				err:           tc.readErr,
+			}
+			wrapped := &transcriptContentErrorStore{Store: st, artifacts: artifacts}
+			svc := NewSessionService(wrapped, nil).(service.AgentSessionTranscriptService)
+			_, err := svc.GetAgentSessionTranscript(ctx, "WS", "local-review", "interactive-errors")
+			assertServiceErrorKind(t, err, tc.wantKind)
+		})
+	}
+}
+
+type transcriptContentErrorStore struct {
+	store.Store
+	artifacts store.ArtifactStore
+}
+
+func (s *transcriptContentErrorStore) Artifacts() store.ArtifactStore { return s.artifacts }
+
+type transcriptContentErrorArtifactStore struct {
+	store.ArtifactStore
+	err error
+}
+
+func (s *transcriptContentErrorArtifactStore) ReadContent(context.Context, string, string) ([]byte, error) {
+	return nil, s.err
+}
+
+func TestSessionServiceAgentTranscriptRejectsUnfinalizedArtifact(t *testing.T) {
+	for _, status := range []string{"declared", "uploading"} {
+		t.Run(status, func(t *testing.T) {
+			ctx := t.Context()
+			st := memstore.New()
+			const (
+				artifactID = "transcript-unfinalized"
+				sessionID  = "interactive-unfinalized"
+			)
+			if _, err := st.Artifacts().Create(ctx, store.ArtifactCreate{
+				WorkspaceKey:  "WS",
+				ArtifactID:    artifactID,
+				AgentID:       "local-review",
+				SessionID:     sessionID,
+				OwnerType:     "session",
+				OwnerID:       sessionID,
+				Type:          "transcript",
+				MIMEType:      "application/x-ndjson",
+				DurableStatus: status,
+			}); err != nil {
+				t.Fatalf("create %s transcript artifact: %v", status, err)
+			}
+			if status == "uploading" {
+				if _, err := st.Artifacts().UploadContent(
+					ctx,
+					"WS",
+					artifactID,
+					store.ArtifactContentUpload{
+						Body: bytes.NewBufferString(
+							`{"seq":1,"timestamp":"2026-07-24T12:00:00Z","role":"assistant","type":"text","text":"not durable"}` + "\n",
+						),
+						MIMEType: "application/x-ndjson",
+					},
+				); err != nil {
+					t.Fatalf("upload unfinalized transcript artifact: %v", err)
+				}
+			}
+			if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+				WorkspaceKey: "WS",
+				SessionID:    sessionID,
+				AgentID:      "local-review",
+				Kind:         domain.AgentSessionKindOrchestration,
+				Status:       domain.AgentSessionCompleted,
+				Metadata:     map[string]string{"transcript_ref": "artifact://" + artifactID},
+			}); err != nil {
+				t.Fatalf("create interactive session: %v", err)
+			}
+
+			svc := NewSessionService(st, nil).(service.AgentSessionTranscriptService)
+			_, err := svc.GetAgentSessionTranscript(ctx, "WS", "local-review", sessionID)
+			assertServiceError(t, err, service.KindNotFound, "transcript content is no longer available")
+		})
+	}
+}
+
+func TestSessionServiceTaskTranscriptAndDiffPreserveManagedContentFailureKind(t *testing.T) {
+	ctx := t.Context()
+	st := memstore.New()
+	createFinalizedArtifact(
+		t, st, "transcript-task-errors", "task-session-errors", "TASK-ERRORS",
+		"task-run-errors", "transcript", "application/x-ndjson", []byte("{}\n"),
+	)
+	createFinalizedArtifact(
+		t, st, "patch-task-errors", "task-session-errors", "TASK-ERRORS",
+		"task-run-errors", "patch", "text/x-diff", []byte("diff --git a/a b/a\n"),
+	)
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "task-session-errors",
+		AgentID:      "task-agent",
+		Kind:         domain.AgentSessionKindTask,
+		TaskID:       "TASK-ERRORS",
+		Status:       domain.AgentSessionCompleted,
+		Metadata: map[string]string{
+			"transcript_ref":    "artifact://transcript-task-errors",
+			"patch_artifact_id": "patch-task-errors",
+			"task_run_id":       "task-run-errors",
+		},
+	}); err != nil {
+		t.Fatalf("create task session: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name     string
+		readErr  error
+		wantKind service.ErrorKind
+	}{
+		{
+			name:     "content plane unavailable",
+			readErr:  store.ErrArtifactContentUnavailable,
+			wantKind: service.KindUnavailable,
+		},
+		{
+			name:     "managed content missing",
+			readErr:  domain.ErrNotFound,
+			wantKind: service.KindNotFound,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			artifacts := &transcriptContentErrorArtifactStore{
+				ArtifactStore: st.Artifacts(),
+				err:           tc.readErr,
+			}
+			wrapped := &transcriptContentErrorStore{Store: st, artifacts: artifacts}
+			svc := NewSessionService(wrapped, nil)
+
+			_, transcriptErr := svc.GetSessionTranscript(ctx, "WS", "TASK-ERRORS", "task-session-errors")
+			assertServiceErrorKind(t, transcriptErr, tc.wantKind)
+			_, diffErr := svc.GetSessionDiff(ctx, "WS", "TASK-ERRORS", "task-session-errors")
+			assertServiceErrorKind(t, diffErr, tc.wantKind)
+		})
+	}
+}
+
 func TestSessionServiceControlPlaneDiffArtifactReadContent(t *testing.T) {
 	ctx := t.Context()
 	st := memstore.New()
@@ -157,6 +626,88 @@ func TestSessionServiceControlPlaneDiffArtifactReadContent(t *testing.T) {
 	}
 	if diff != string(patchBody) {
 		t.Fatalf("diff = %q, want %q", diff, patchBody)
+	}
+}
+
+func TestSessionServicePathlessWorkspaceDiffFallsBackToControlPlaneArtifact(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	ctx := t.Context()
+	st := memstore.New()
+	createPathlessWorkspace(t, st)
+
+	patchBody := []byte("diff --git a/docs.md b/docs.md\n+durable patch\n")
+	createFinalizedArtifact(t, st, "patch-pathless", "flue-pathless", "TASK-PATHLESS", "task-run-pathless", "patch", "text/x-diff", patchBody)
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "flue-pathless",
+		AgentID:      "flue-task-agent",
+		Kind:         domain.AgentSessionKindTask,
+		TaskID:       "TASK-PATHLESS",
+		Status:       domain.AgentSessionCompleted,
+		Metadata: map[string]string{
+			"patch_artifact_id": "patch-pathless",
+			"task_run_id":       "task-run-pathless",
+		},
+	}); err != nil {
+		t.Fatalf("create flue control-plane session: %v", err)
+	}
+
+	unavailableRuntimeDir := unavailableSessionRuntimeDir(t)
+	diff, err := NewSessionServiceWithRuntimeDir(st, nil, unavailableRuntimeDir).
+		GetSessionDiff(ctx, "WS", "TASK-PATHLESS", "flue-pathless")
+	if err != nil {
+		t.Fatalf("GetSessionDiff: %v", err)
+	}
+	if diff != string(patchBody) {
+		t.Fatalf("diff = %q, want %q", diff, patchBody)
+	}
+}
+
+func TestSessionServicePathlessWorkspaceFallbackPreservesValidationAndOwnership(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	ctx := t.Context()
+	st := memstore.New()
+	createPathlessWorkspace(t, st)
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "flue-pathless",
+		AgentID:      "flue-task-agent",
+		Kind:         domain.AgentSessionKindTask,
+		TaskID:       "TASK-PATHLESS",
+		Status:       domain.AgentSessionCompleted,
+	}); err != nil {
+		t.Fatalf("create control-plane session: %v", err)
+	}
+
+	svc := NewSessionService(st, nil)
+	_, err := svc.GetSessionTranscript(ctx, "WS", "bad/task", "flue-pathless")
+	assertServiceErrorKind(t, err, service.KindValidation)
+	_, err = svc.GetSessionDiff(ctx, "WS", "bad/task", "flue-pathless")
+	assertServiceErrorKind(t, err, service.KindValidation)
+	_, err = svc.GetSessionTranscript(ctx, "WS", "TASK-OTHER", "flue-pathless")
+	assertServiceErrorKind(t, err, service.KindNotFound)
+	_, err = svc.GetSessionDiff(ctx, "WS", "TASK-OTHER", "flue-pathless")
+	assertServiceErrorKind(t, err, service.KindNotFound)
+}
+
+func TestSessionStoreAllowsControlPlaneFallbackOnlyForLocalAbsence(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "session not found", err: service.ErrNotFound("session not found"), want: true},
+		{name: "local stores unavailable", err: service.ErrInternal("no session stores available", errNoUsableSessionStores), want: true},
+		{name: "validation", err: service.ErrValidation("invalid session ID"), want: false},
+		{name: "forbidden", err: service.ErrForbidden("forbidden"), want: false},
+		{name: "unrelated internal", err: service.ErrInternal("failed to resolve session stores", errors.New("fleet unavailable")), want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sessionStoreAllowsControlPlaneFallback(tt.err); got != tt.want {
+				t.Fatalf("sessionStoreAllowsControlPlaneFallback() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -328,6 +879,25 @@ func createFinalizedArtifact(t *testing.T, st *memstore.Store, artifactID, sessi
 	if _, err := st.Artifacts().Finalize(t.Context(), "WS", artifactID, store.ArtifactFinalize{ContentHash: &uploaded.ContentHash}); err != nil {
 		t.Fatalf("finalize %s artifact: %v", artifactType, err)
 	}
+}
+
+func createPathlessWorkspace(t *testing.T, st *memstore.Store) {
+	t.Helper()
+	if _, err := st.Workspaces().Create(t.Context(), store.WorkspaceCreate{Key: "WS", Name: "Workspace"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := st.Repos().Create(t.Context(), store.RepoCreate{WorkspaceKey: "WS", Name: "source-repo"}); err != nil {
+		t.Fatalf("create repo: %v", err)
+	}
+}
+
+func unavailableSessionRuntimeDir(t *testing.T) string {
+	t.Helper()
+	notDirectory := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(notDirectory, []byte("occupied"), 0o600); err != nil {
+		t.Fatalf("write non-directory runtime parent: %v", err)
+	}
+	return filepath.Join(notDirectory, "runtime")
 }
 
 func assertServiceErrorKind(t *testing.T, err error, want service.ErrorKind) {

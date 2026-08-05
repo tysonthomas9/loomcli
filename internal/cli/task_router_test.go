@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
@@ -434,6 +435,32 @@ func TestMatchTask_TaskFilterAny(t *testing.T) {
 	}
 }
 
+func TestMatchTask_TaskFilterBug(t *testing.T) {
+	c := RoleConstraints{TaskFilter: "bug"}
+
+	for _, issueType := range []string{"bug", " BUG "} {
+		t.Run("accepts_"+strings.TrimSpace(issueType), func(t *testing.T) {
+			got := MatchTask(backend.IssueData{
+				ID: "BUG-1", Status: "open", IssueType: issueType, Priority: 1,
+			}, c)
+			if got.Score == 0 {
+				t.Fatalf("bug issue rejected: %+v", got)
+			}
+		})
+	}
+
+	for _, issueType := range []string{"task", "feature", ""} {
+		t.Run("rejects_"+issueType, func(t *testing.T) {
+			got := MatchTask(backend.IssueData{
+				ID: "TASK-1", Status: "open", IssueType: issueType, Priority: 0,
+			}, c)
+			if got.Score != 0 || got.Reason != "filter: issue type is not bug" {
+				t.Fatalf("non-bug match = %+v, want typed rejection", got)
+			}
+		})
+	}
+}
+
 func TestMatchTask_TaskFilterDefault(t *testing.T) {
 	// Empty TaskFilter defaults to "has_design"
 	c := RoleConstraints{}
@@ -569,6 +596,20 @@ func TestSelectBestTask_HigherPriorityWins(t *testing.T) {
 	}
 	if got.Issue.ID != "T-2" {
 		t.Errorf("ID = %q, want %q (P0 has higher priority bonus)", got.Issue.ID, "T-2")
+	}
+}
+
+func TestSelectBestTask_BugFilterSkipsHigherScoringNonBug(t *testing.T) {
+	issues := []backend.IssueData{
+		{ID: "TASK-1", Status: "open", IssueType: "task", Priority: 0, Labels: []string{"triage"}},
+		{ID: "BUG-1", Status: "open", IssueType: "bug", Priority: 4},
+	}
+	got := SelectBestTask(issues, RoleConstraints{TaskFilter: "bug"})
+	if got == nil {
+		t.Fatal("got nil, want bug match")
+	}
+	if got.Issue.ID != "BUG-1" {
+		t.Fatalf("selected %q, want BUG-1", got.Issue.ID)
 	}
 }
 

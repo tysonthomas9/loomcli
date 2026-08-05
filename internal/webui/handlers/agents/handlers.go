@@ -32,11 +32,7 @@ func HandleList(agentSvc service.AgentService) http.HandlerFunc {
 			if agent == nil {
 				continue
 			}
-			items = append(items, supervisedAgentDTO{
-				Agent: agent,
-				ID:    agent.Name,
-				Kind:  agentRecordKindSupervised,
-			})
+			items = append(items, newSupervisedAgentDTO(agent))
 		}
 		handler.WriteJSON(w, http.StatusOK, dto.NewListResponse(items, len(items)))
 	}
@@ -94,11 +90,7 @@ func HandleCreate(agentSvc service.AgentService, hub *realtime.Hub) http.Handler
 			return
 		}
 		broadcastAgentRefresh(hub, ws, created.Name, r.Header.Get("X-Actor"))
-		handler.WriteJSON(w, http.StatusCreated, supervisedAgentDTO{
-			Agent: created,
-			ID:    created.Name,
-			Kind:  agentRecordKindSupervised,
-		})
+		handler.WriteJSON(w, http.StatusCreated, newSupervisedAgentDTO(created))
 	}
 }
 
@@ -124,11 +116,7 @@ func HandleUpdate(agentSvc service.AgentService, hub *realtime.Hub) http.Handler
 			return
 		}
 		broadcastAgentRefresh(hub, ws, updated.Name, r.Header.Get("X-Actor"))
-		handler.WriteJSON(w, http.StatusOK, supervisedAgentDTO{
-			Agent: updated,
-			ID:    updated.Name,
-			Kind:  agentRecordKindSupervised,
-		})
+		handler.WriteJSON(w, http.StatusOK, newSupervisedAgentDTO(updated))
 	}
 }
 
@@ -180,8 +168,8 @@ func HandleYield(agentSvc service.AgentService, hub *realtime.Hub) http.HandlerF
 		state:       domain.AgentStateIdle,
 		desired:     domain.AgentDesiredDraining,
 		commandType: "yield",
-		status:      http.StatusAccepted,
-		message:     "yield requested",
+		status:      http.StatusOK,
+		message:     "yielded",
 	})
 }
 
@@ -217,31 +205,56 @@ func handleLifecycle(agentSvc service.AgentService, hub *realtime.Hub, patch lif
 		}
 
 		effective, input := resolveLifecycleRequest(patch, req)
-		updated, err := agentSvc.RequestAgentLifecycle(r.Context(), ws, name, input)
+		result, err := agentSvc.RequestAgentLifecycle(r.Context(), ws, name, input)
 		if err != nil {
 			handler.HandleServiceError(w, err)
 			return
 		}
-		broadcastAgentRefresh(hub, ws, updated.Name, r.Header.Get("X-Actor"))
-		handler.WriteJSON(w, effective.status, dto.NewMessageResponse(fmt.Sprintf("agent %q %s", updated.Name, effective.message)))
+		if result == nil || result.Agent == nil {
+			handler.HandleServiceError(w, service.ErrInternal("agent lifecycle returned no agent", nil))
+			return
+		}
+		if result.Pending {
+			effective.status = http.StatusAccepted
+			if patch.commandType == "stop" && req.Force {
+				effective.message = "force-stop requested"
+			} else {
+				effective.message = effective.commandType + " requested"
+			}
+		}
+		broadcastAgentRefresh(hub, ws, result.Agent.Name, r.Header.Get("X-Actor"))
+		handler.WriteJSON(w, effective.status, dto.AgentLifecycleResponse{
+			Message:   fmt.Sprintf("agent %q %s", result.Agent.Name, effective.message),
+			Pending:   result.Pending,
+			CommandID: result.CommandID,
+			Status:    string(result.Status),
+		})
+	}
+}
+
+// HandleGetLifecycleCommand exposes the durable command projection used by the
+// UI to distinguish accepted work from terminal lifecycle convergence.
+func HandleGetLifecycleCommand(agentSvc service.AgentService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		result, err := agentSvc.GetAgentLifecycleCommand(
+			r.Context(),
+			requestWorkspaceID(r),
+			r.PathValue("name"),
+			r.PathValue("command_id"),
+		)
+		if err != nil {
+			handler.HandleServiceError(w, err)
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, result)
 	}
 }
 
 func resolveLifecycleRequest(patch lifecyclePatch, req lifecycleRequest) (lifecyclePatch, service.AgentLifecycleInput) {
 	effective := patch
-	if patch.commandType == "stop" {
-		if req.Force {
-			effective.payload = map[string]string{"force": "true"}
-			effective.message = "force-stopped"
-		} else {
-			effective = lifecyclePatch{
-				state:       domain.AgentStateIdle,
-				desired:     domain.AgentDesiredDraining,
-				commandType: "yield",
-				status:      http.StatusAccepted,
-				message:     "yield requested",
-			}
-		}
+	if patch.commandType == "stop" && req.Force {
+		effective.payload = map[string]string{"force": "true"}
+		effective.message = "force-stopped"
 	}
 
 	payload := cloneLifecyclePayload(effective.payload)

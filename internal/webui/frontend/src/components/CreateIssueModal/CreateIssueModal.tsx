@@ -94,6 +94,11 @@ export function CreateIssueModal({
   const defaultSourceRepo =
     repoOptions.length === 1 ? (repoOptions[0]?.value ?? "") : "";
 
+  // Runnable issue types need an unambiguous checkout. A workspace-scoped
+  // epic may intentionally span repositories, but silently choosing the first
+  // repo for a task/bug/feature/chore is unsafe in a multi-repo workspace.
+  const requiresExplicitRepo = repoOptions.length > 1 && issueType !== "epic";
+
   // Reset form state when modal opens
   useEffect(() => {
     if (!isOpen) {
@@ -133,7 +138,10 @@ export function CreateIssueModal({
   useFocusTrap(dialogRef, isOpen, { initialFocus: titleRef });
   useFocusReturn(isOpen);
 
-  const canSubmit = title.trim() !== "" && !isSubmitting;
+  const canSubmit =
+    title.trim() !== "" &&
+    (!requiresExplicitRepo || sourceRepo !== "") &&
+    !isSubmitting;
 
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
@@ -328,7 +336,7 @@ export function CreateIssueModal({
             {(showRepoSelector || showSingleRepo) && (
               <div className={styles.fieldGroup}>
                 <label className={styles.label} htmlFor="issue-source-repo">
-                  Repo
+                  Repo{requiresExplicitRepo ? " *" : ""}
                 </label>
                 <select
                   id="issue-source-repo"
@@ -336,15 +344,30 @@ export function CreateIssueModal({
                   value={sourceRepo}
                   onChange={(e) => setSourceRepo(e.target.value)}
                   disabled={isSubmitting || showSingleRepo}
+                  required={requiresExplicitRepo}
+                  aria-describedby={
+                    requiresExplicitRepo ? "issue-source-repo-help" : undefined
+                  }
                   data-testid="create-issue-source-repo"
                 >
-                  {!showSingleRepo && <option value="">Workspace</option>}
+                  {!showSingleRepo && (
+                    <option value="" disabled={requiresExplicitRepo}>
+                      {requiresExplicitRepo
+                        ? "Select a repo"
+                        : "Workspace (no repository)"}
+                    </option>
+                  )}
                   {repoOptions.map((repo) => (
                     <option key={repo.value} value={repo.value}>
                       {repo.label}
                     </option>
                   ))}
                 </select>
+                {requiresExplicitRepo && !sourceRepo && (
+                  <p id="issue-source-repo-help" className={styles.fieldHint}>
+                    Select the repository where this issue should run.
+                  </p>
+                )}
               </div>
             )}
 

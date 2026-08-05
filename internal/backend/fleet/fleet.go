@@ -43,6 +43,7 @@ type FleetBackend struct {
 var _ backend.IssueBackend = (*FleetBackend)(nil)
 var _ backend.CursorMutationBackend = (*FleetBackend)(nil)
 var _ backend.ClaimReleaser = (*FleetBackend)(nil)
+var _ backend.RepositoryRequirementBackend = (*FleetBackend)(nil)
 
 // apiResponse is the generic JSON envelope returned by fleet server endpoints.
 type apiResponse struct {

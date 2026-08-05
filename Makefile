@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-builtin-workflows test-characterization check-supervisor-disabled test-supervisor-disabled test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down local-mode-frontend-dist local-mode-info local-mode-up local-mode-codex-up local-mode-codex-workflows-up local-mode-workflow-build-check local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-architecture check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify test-e2e-github-webhook test-e2e-github-webhook-live
+.PHONY: all build build-frontend build-all test test-builtin-workflows test-characterization check-supervisor-disabled test-supervisor-disabled test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down local-mode-frontend-dist local-mode-info local-mode-up local-mode-codex-up local-mode-codex-workflows-up local-mode-workflow-build-check local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend check-fleetdb-binary gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-architecture check-architecture-memory check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify test-e2e-github-webhook test-e2e-github-webhook-live
 
 # Default target
 all: build
@@ -35,6 +35,11 @@ LOCAL_MODE_COMPOSE_UP_FLAGS ?= --build
 # or production FleetDB deployment.
 LOCAL_MODE_FLEETDB_API_KEY ?= loom-local-mode-test-only-admin-key-v1
 LOCAL_MODE_FLEETDB_ADMIN_ACTOR ?= local-mode-harness@fixture.local
+# The supervisor-disabled proof owns an isolated host-port tuple so its clean
+# environment cannot collide with the normal 828x dogfood stack.
+SUPERVISOR_DISABLED_FLEETDB_PORT ?= 8380
+SUPERVISOR_DISABLED_API_PORT ?= 8382
+SUPERVISOR_DISABLED_UI_PORT ?= 8383
 # Override this when validating a paired FleetDB feature worktree. The default
 # preserves the long-standing sibling-repository layout.
 LOCAL_MODE_FLEETDB_SOURCE_ROOT ?= $(abspath test/local-mode/../../../fleet-db)
@@ -112,13 +117,18 @@ test-builtin-workflows:
 test-characterization:
 	@go run ./test/modular-monolith/characterization
 
-# Phase 1 supervisor-disabled contract. Declared-red rows are reported without
-# provisioning and deliberately keep this proof target failing until replaced.
+# Phase 4 supervisor-disabled execution contract. Validation is provisioning-free;
+# the full target runs the deterministic Compose row and always tears it down.
 check-supervisor-disabled:
 	@go run ./scripts/supervisordisabled --manifest test/modular-monolith/supervisor-disabled-matrix.yaml --validate
 
 test-supervisor-disabled:
-	@go run ./scripts/supervisordisabled --manifest test/modular-monolith/supervisor-disabled-matrix.yaml
+	@go run ./scripts/supervisordisabled \
+		--manifest test/modular-monolith/supervisor-disabled-matrix.yaml \
+		--fleetdb-source-root "$(LOCAL_MODE_FLEETDB_SOURCE_ROOT)" \
+		--fleetdb-port "$(SUPERVISOR_DISABLED_FLEETDB_PORT)" \
+		--api-port "$(SUPERVISOR_DISABLED_API_PORT)" \
+		--ui-port "$(SUPERVISOR_DISABLED_UI_PORT)"
 
 # Daemon-lifecycle failure-mode harness (crash/hang/slow backends + a
 # happy-path scaffold). Requires `loom serve` running on
@@ -214,8 +224,9 @@ fleetdb-empty-down:
 	fi; \
 	$$compose -f test/fleetdb/docker-compose.empty.yml down -v --remove-orphans
 
-# Start the local-mode dogfood stack: fleet-db, loom serve, workspace daemon
-# manager, a deterministic planner/coder backend, and the Web UI.
+# Start the local-mode dogfood stack: fleet-db, loom serve, a deterministic
+# planner/coder backend, and the Web UI. The default profile retains the workspace
+# daemon manager; LOOM_LOCAL_MODE_PLANE=ts uses only trigger-driven prompt agents.
 local-mode-frontend-dist:
 	@if [ ! -f "$(FRONTEND_DIR)/dist/index.html" ]; then \
 	  echo "Web UI dist is missing; building it once on the host..."; \
@@ -331,8 +342,11 @@ local-mode-logs:
 local-mode-verify:
 	@set -e; \
 	$(LOCAL_MODE_COMPOSE_SELECT); \
-	manifest="$$( $$compose $(LOCAL_MODE_COMPOSE_ARGS) exec -T loom-local sh -c 'cat "$${LOCAL_MODE_RUN_MANIFEST:-/tmp/loom-local-mode-run.json}"' )"; \
-	LOCAL_MODE_RUN_MANIFEST_JSON="$$manifest" test/local-mode/verify-local-mode.sh
+	manifest="$$( $$compose $(LOCAL_MODE_COMPOSE_ARGS) exec -T loom-local sh -c 'manifest="$${LOCAL_MODE_RUN_MANIFEST:-/tmp/loom-local-mode-run.json}"; attempt=0; while [ ! -s "$$manifest" ]; do attempt=$$((attempt + 1)); if [ "$$attempt" -ge 120 ]; then echo "timed out waiting for local-mode run manifest: $$manifest" >&2; exit 1; fi; sleep 1; done; cat "$$manifest"' )"; \
+	LOCAL_MODE_RUN_MANIFEST_JSON="$$manifest" test/local-mode/verify-local-mode.sh; \
+	if [ "$${LOOM_LOCAL_MODE_PLANE:-}" = "ts" ]; then \
+	  $$compose $(LOCAL_MODE_COMPOSE_ARGS) exec -T loom-local verify-supervisor-disabled; \
+	fi
 
 # Verify role-based task routing for UI-registered plan/task agents against a
 # running stack: seeds a no-design task (must go to the plan agent) and a
@@ -420,7 +434,16 @@ check-control-plane-paths:
 	@./scripts/check-control-plane-paths.sh
 
 check-architecture:
-	@go run ./scripts/archcheck check
+	@case "$$(go env GOOS)" in \
+		darwin|linux) go run ./scripts/rsswatch $(ARCHCHECK_RSS_LIMIT_MIB) $(ARCHCHECK_RSS_TIMEOUT_SECONDS) go run ./scripts/archcheck check ;; \
+		*) go run ./scripts/archcheck check ;; \
+	esac
+
+ARCHCHECK_RSS_LIMIT_MIB ?= 2048
+ARCHCHECK_RSS_TIMEOUT_SECONDS ?= 1200
+
+check-architecture-memory:
+	@go run ./scripts/rsswatch $(ARCHCHECK_RSS_LIMIT_MIB) $(ARCHCHECK_RSS_TIMEOUT_SECONDS) go test ./internal/archtest -count=1 -timeout=15m
 
 # Check for stale LOC allowlist entries
 check-loc-stale:
@@ -569,8 +592,8 @@ clean:
 # Frontend directory
 FRONTEND_DIR := internal/webui/frontend
 LOCAL_FLEET_DB_REPO := $(firstword $(wildcard $(CURDIR)/../fleet-db $(CURDIR)/../../fleet-db))
-LOCAL_FLEET_DB_BIN := $(firstword $(wildcard $(CURDIR)/../fleet-db/fleet-db $(CURDIR)/../../fleet-db/fleet-db))
 FLEET_DB_REPO ?= $(if $(LOCAL_FLEET_DB_REPO),$(LOCAL_FLEET_DB_REPO),../../fleet-db)
+LOCAL_FLEET_DB_BIN := $(firstword $(wildcard $(FLEET_DB_REPO)/bin/fleet-db $(FLEET_DB_REPO)/fleet-db))
 ifneq ($(LOCAL_FLEET_DB_BIN),)
 FLEET_DB_BIN ?= $(LOCAL_FLEET_DB_BIN)
 export FLEET_DB_BIN
@@ -594,9 +617,26 @@ build-all: build build-frontend
 frontend: build-frontend
 	@echo "Note: 'make frontend' is deprecated. Use 'make build-frontend'."
 
-# Go-only quality gate (no Node, no frontend dist)
+# Go-only quality gate (no Node, no frontend dist). Two package workers overlap
+# the longest independent race suites; callers can set this to 1 if needed.
+GATE_GO_TEST_PARALLELISM ?= 2
+
+check-fleetdb-binary:
+	@fleet_bin="$${FLEET_DB_BIN:-}"; \
+	if [ -z "$$fleet_bin" ]; then fleet_bin=$$(command -v fleet-db 2>/dev/null || true); fi; \
+	if [ -n "$$fleet_bin" ]; then \
+		help_output=$$("$$fleet_bin" --help 2>&1 || true); \
+		if ! printf '%s\n' "$$help_output" | grep -q -- 'Usage of fleet-db' || \
+		   ! printf '%s\n' "$$help_output" | grep -Eq '^[[:space:]]+--?auth-bootstrap-admin-actor([[:space:]]|$$)'; then \
+			echo "Error: fleet-db binary $$fleet_bin is incompatible with this Loom checkout (missing auth-bootstrap-admin-actor)." >&2; \
+			echo "Build the paired fleet-db checkout and set FLEET_DB_BIN=/path/to/fleet-db." >&2; \
+			exit 1; \
+		fi; \
+	fi
+
 check-go:
-	@echo "=== [1/16] Go: format check ==="
+	@echo "=== [1/16] Go: FleetDB compatibility + format check ==="
+	@$(MAKE) check-fleetdb-binary
 	@bad=$$(gofmt -l . 2>/dev/null | grep -v third_party | grep -v worktrees | grep -v vendor | grep -v node_modules | head -20); \
 	if [ -n "$$bad" ]; then echo "gofmt violations:"; echo "$$bad"; exit 1; fi
 	@echo "=== [2/16] Go: vet ==="
@@ -626,13 +666,31 @@ check-go:
 	@./scripts/check-no-beads-prod.sh
 	@echo "=== [14/16] Go: generated API staleness ==="
 	@./scripts/check-go-api-staleness.sh
+# The production architecture pass above already runs the full repository scan
+# and enforces the exact checked-in snapshot. Keep focused archtest coverage in
+# the race pass, but do not repeat its repository-scale integration test.
 	@echo "=== [15/16] Go: test with race detector ==="
-	@./scripts/with-clean-loom-env.sh go test -p 1 -race -covermode=atomic -coverprofile=/tmp/loom.coverage.out -timeout 15m ./...
-	@echo "=== [16/16] Go: coverage threshold ==="
-	@COVERAGE_THRESHOLD=60 ./scripts/check-coverage.sh
+	@set -e; coverage_profile=; \
+	cleanup_coverage() { \
+		rc=$$?; \
+		trap - EXIT HUP INT TERM; \
+		if [ -n "$$coverage_profile" ]; then rm -f "$$coverage_profile"; fi; \
+		exit "$$rc"; \
+	}; \
+	trap cleanup_coverage EXIT; \
+	trap 'exit 129' HUP; \
+	trap 'exit 130' INT; \
+	trap 'exit 143' TERM; \
+	coverage_profile=$$(mktemp "$${TMPDIR:-/tmp}/loom-coverage.XXXXXX"); \
+	./scripts/with-clean-loom-env.sh go test -p $(GATE_GO_TEST_PARALLELISM) -race -covermode=atomic \
+		-coverprofile="$$coverage_profile" -skip '^TestCheckedInManifestsAndRepository$$' -timeout 15m ./...; \
+	echo "=== [16/16] Go: coverage threshold ==="; \
+	COVERAGE_PROFILE="$$coverage_profile" COVERAGE_THRESHOLD=60 ./scripts/check-coverage.sh
 	@echo "=== Go quality gates PASSED ==="
 
 # Frontend-only quality gate (no Go toolchain, no dist prerequisite)
+VITEST_MAX_WORKERS ?= auto
+
 check-frontend:
 	@echo "=== [1/6] Frontend: format check ==="
 	@cd $(FRONTEND_DIR) && npm run format:check
@@ -645,18 +703,36 @@ check-frontend:
 	@echo "=== [5/6] Frontend: generated code staleness ==="
 	@cd $(FRONTEND_DIR) && npm run check:generated
 	@echo "=== [6/6] Frontend: unit tests + coverage (60% threshold) ==="
-	@cd $(FRONTEND_DIR) && npm run test:coverage
+	@cd $(FRONTEND_DIR) && workers='$(VITEST_MAX_WORKERS)'; \
+	if [ "$$workers" = auto ]; then \
+		workers=$$(node -e 'const os = require("node:os"); const n = typeof os.availableParallelism === "function" ? os.availableParallelism() : os.cpus().length; process.stdout.write(String(Math.max(1, Math.min(4, n - 1))))'); \
+	fi; \
+	VITEST_MAX_WORKERS="$$workers" npm run test:coverage
 	@echo "=== Frontend quality gates PASSED ==="
 
 # Unified quality gate — runs Go + frontend checks in parallel
 check:
 	@echo "=== Running Go and Frontend checks in parallel ==="
-	@go_log=$$(mktemp); fe_log=$$(mktemp); \
+	@set -e; go_log=; fe_log=; go_pid=; fe_pid=; \
+	cleanup() { \
+		rc=$$?; \
+		trap - EXIT HUP INT TERM; \
+		if [ -n "$$go_pid" ]; then kill "$$go_pid" 2>/dev/null || true; wait "$$go_pid" 2>/dev/null || true; fi; \
+		if [ -n "$$fe_pid" ]; then kill "$$fe_pid" 2>/dev/null || true; wait "$$fe_pid" 2>/dev/null || true; fi; \
+		if [ -n "$$go_log" ]; then rm -f "$$go_log"; fi; \
+		if [ -n "$$fe_log" ]; then rm -f "$$fe_log"; fi; \
+		exit "$$rc"; \
+	}; \
+	trap cleanup EXIT; \
+	trap 'exit 129' HUP; \
+	trap 'exit 130' INT; \
+	trap 'exit 143' TERM; \
+	go_log=$$(mktemp); fe_log=$$(mktemp); \
 	$(MAKE) check-go >"$$go_log" 2>&1 & go_pid=$$!; \
 	$(MAKE) check-frontend >"$$fe_log" 2>&1 & fe_pid=$$!; \
 	go_rc=0; fe_rc=0; \
-	wait $$go_pid || go_rc=$$?; \
-	wait $$fe_pid || fe_rc=$$?; \
+	wait "$$go_pid" || go_rc=$$?; go_pid=; \
+	wait "$$fe_pid" || fe_rc=$$?; fe_pid=; \
 	if [ $$go_rc -ne 0 ] || [ $$fe_rc -ne 0 ]; then \
 		if [ $$go_rc -ne 0 ]; then \
 			echo ""; echo "━━━ Go output (FAILED) ━━━"; cat "$$go_log"; \
@@ -664,12 +740,10 @@ check:
 		if [ $$fe_rc -ne 0 ]; then \
 			echo ""; echo "━━━ Frontend output (FAILED) ━━━"; cat "$$fe_log"; \
 		fi; \
-		rm -f "$$go_log" "$$fe_log"; \
 		exit 1; \
 	fi; \
 	echo "=== Go quality gates PASSED ==="; \
-	echo "=== Frontend quality gates PASSED ==="; \
-	rm -f "$$go_log" "$$fe_log"
+	echo "=== Frontend quality gates PASSED ==="
 	@echo "=== All quality gates PASSED ==="
 
 # Backward-compatible alias for 'make check'
@@ -738,13 +812,14 @@ help:
 	@echo "  make test-integration-race-cover - Run integration tests with race + coverage"
 	@echo "  make test-coverage     - Run Go tests with coverage threshold"
 	@echo "  make test-characterization - Run the Phase 1 modular-monolith characterization matrix"
-	@echo "  make check-supervisor-disabled - Validate the Phase 1 supervisor-disabled matrix without provisioning"
-	@echo "  make test-supervisor-disabled - Run the supervisor-disabled proof matrix (Phase 1 row is red)"
+	@echo "  make check-supervisor-disabled - Validate the Phase 4 supervisor-disabled matrix without provisioning"
+	@echo "  make test-supervisor-disabled - Run the deterministic supervisor-disabled execution proof"
 	@echo "  make test-frontend-coverage - Run frontend tests with coverage threshold"
 	@echo "  make test-forkwatch    - Run tests under a fork-bomb/process-leak watchdog (PKG=./path/...)"
 	@echo "  make check-no-raw-exec - Check for raw exec.Command in unit tests"
 	@echo "  make check-control-plane-paths - Check local/cloud fleet-db runtime path invariants"
 	@echo "  make check-architecture - Check modular-monolith manifests and coupling ratchets"
+	@echo "  make check-architecture-memory - Enforce the archtest process-tree RSS ceiling"
 	@echo "  make check-loc-stale   - Check for stale LOC allowlist entries"
 	@echo "  make lint              - Run Go linter (golangci-lint)"
 	@echo "  make lint-frontend     - Run frontend typecheck + ESLint"

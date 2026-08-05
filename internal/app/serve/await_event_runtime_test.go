@@ -8,8 +8,13 @@ import (
 
 func TestNewAwaitEventRuntimeRegistrationIsAlwaysOnExecutionComponent(t *testing.T) {
 	st := memstore.New()
-	registration, err := NewAwaitEventRuntimeRegistration(
-		st.TriggerEvents(), st.Awaits(), st.DriverRuns(), st.Workspaces(), "WS",
+	capability, err := NewExecutionCapability(executionTestDependencies(t, st))
+	if err != nil {
+		t.Fatal(err)
+	}
+	registration, err := NewAwaitEventRuntimeRegistrationWithExecution(
+		st.Awaits(), st.DriverRuns(), st.Workspaces(), "WS",
+		capability.DriverRunAPI(), capability.AwaitEventNotificationAPI(), capability.SystemAuthorityResolver(),
 	)
 	if err != nil {
 		t.Fatal(err)

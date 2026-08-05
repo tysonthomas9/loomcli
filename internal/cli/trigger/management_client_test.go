@@ -9,21 +9,17 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/spf13/cobra"
 
-	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 )
 
 const (
 	triggerManagementTestWorkspace = "TEST"
-	triggerManagementTestToken     = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 )
 
 type triggerManagementFixture struct {
@@ -47,7 +43,7 @@ type triggerManagementFixture struct {
 func setupTriggerManagementFixture(t *testing.T) *triggerManagementFixture {
 	t.Helper()
 	fixture := &triggerManagementFixture{
-		expectedBearer: "Bearer " + triggerManagementTestToken,
+		expectedBearer: "",
 		binding: &domain.TriggerBinding{
 			WorkspaceKey: triggerManagementTestWorkspace, BindingID: "binding-pr", Name: "PR",
 			SourceKind: "github", RouteKey: "github.pull_request.opened", DriverID: "reviewer",
@@ -69,30 +65,14 @@ func setupTriggerManagementFixture(t *testing.T) *triggerManagementFixture {
 	}
 	fixture.server = httptest.NewServer(http.HandlerFunc(fixture.serveHTTP))
 	t.Cleanup(fixture.server.Close)
-	configureTriggerManagementClient(t, fixture.server.URL, triggerManagementTestWorkspace, triggerManagementTestToken, true)
+	configureTriggerManagementClient(t, fixture.server.URL, triggerManagementTestWorkspace)
 	return fixture
 }
 
-func configureTriggerManagementClient(t *testing.T, serverURL, workspace, token string, writeCredential bool) {
+func configureTriggerManagementClient(t *testing.T, serverURL, workspace string) {
 	t.Helper()
-	runtimeDir := t.TempDir()
-	credentialDir := filepath.Join(runtimeDir, ".loom", "operator")
-	if err := os.MkdirAll(credentialDir, 0o700); err != nil {
-		t.Fatalf("create operator credential directory: %v", err)
-	}
-	if err := os.Chmod(credentialDir, 0o700); err != nil {
-		t.Fatalf("chmod operator credential directory: %v", err)
-	}
-	if writeCredential {
-		if err := os.WriteFile(filepath.Join(credentialDir, authority.LocalOperatorTokenFileName), []byte(token), 0o600); err != nil {
-			t.Fatalf("write operator token: %v", err)
-		}
-	}
 	t.Setenv("LOOM_SERVER_URL", serverURL)
 	t.Setenv("LOOM_WORKSPACE", workspace)
-	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", runtimeDir)
-	cli.ResetWorkspaceRuntimeDirCache()
-	t.Cleanup(cli.ResetWorkspaceRuntimeDirCache)
 }
 
 func (f *triggerManagementFixture) serveHTTP(w http.ResponseWriter, r *http.Request) {
@@ -255,21 +235,24 @@ func TestTriggerManagementDuplicateCreatePreservesConflictExitClass(t *testing.T
 	}
 }
 
-func TestTriggerManagementOpenModeRequiresLocalCredential(t *testing.T) {
+func TestTriggerManagementOpenModeRequiresNoLocalCredential(t *testing.T) {
 	fixture := setupTriggerManagementFixture(t)
-	configureTriggerManagementClient(t, fixture.server.URL, triggerManagementTestWorkspace, triggerManagementTestToken, false)
-
-	_, err := newTriggerManagementClient(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "local authentication") || !strings.Contains(err.Error(), "operator.token") {
-		t.Fatalf("newTriggerManagementClient error = %v, want missing local credential", err)
+	client, err := newTriggerManagementClient(context.Background())
+	if err != nil {
+		t.Fatalf("newTriggerManagementClient without local credential: %v", err)
 	}
-	paths, _, _, _ := fixture.snapshot()
-	if len(paths) != 0 {
-		t.Fatalf("management paths = %v, want none without a credential", paths)
+	if _, err := client.listBindings(context.Background()); err != nil {
+		t.Fatalf("listBindings without local credential: %v", err)
+	}
+	_, _, authorizations, _ := fixture.snapshot()
+	for _, got := range authorizations {
+		if got != "" {
+			t.Fatalf("Authorization = %q, want none in open mode", got)
+		}
 	}
 }
 
-func TestTriggerManagementClientUsesBearerAndPreservesAllRoutesAndFields(t *testing.T) {
+func TestTriggerManagementClientUsesNoOpenCredentialAndPreservesAllRoutesAndFields(t *testing.T) {
 	fixture := setupTriggerManagementFixture(t)
 	ctx := context.Background()
 	client, err := newTriggerManagementClient(ctx)
@@ -349,8 +332,8 @@ func TestTriggerManagementClientUsesBearerAndPreservesAllRoutesAndFields(t *test
 		t.Fatalf("management queries = %v, want event and delivery filters", queries)
 	}
 	for _, got := range authorizations {
-		if got != fixture.expectedBearer {
-			t.Fatalf("Authorization = %q, want %q", got, fixture.expectedBearer)
+		if got != "" {
+			t.Fatalf("Authorization = %q, want none in open mode", got)
 		}
 	}
 	if configRequests != 1 {
@@ -551,7 +534,8 @@ func TestTriggerManagementCommandTextCompatibility(t *testing.T) {
 func TestTriggerManagementAuthAndWorkspaceFailuresRemainDistinct(t *testing.T) {
 	t.Run("unauthorized", func(t *testing.T) {
 		fixture := setupTriggerManagementFixture(t)
-		configureTriggerManagementClient(t, fixture.server.URL, triggerManagementTestWorkspace, strings.Repeat("c", 64), true)
+		fixture.expectedBearer = "Bearer required"
+		configureTriggerManagementClient(t, fixture.server.URL, triggerManagementTestWorkspace)
 		client, err := newTriggerManagementClient(context.Background())
 		if err != nil {
 			t.Fatalf("newTriggerManagementClient: %v", err)
@@ -564,7 +548,7 @@ func TestTriggerManagementAuthAndWorkspaceFailuresRemainDistinct(t *testing.T) {
 
 	t.Run("wrong workspace", func(t *testing.T) {
 		fixture := setupTriggerManagementFixture(t)
-		configureTriggerManagementClient(t, fixture.server.URL, "OTHER", triggerManagementTestToken, true)
+		configureTriggerManagementClient(t, fixture.server.URL, "OTHER")
 		client, err := newTriggerManagementClient(context.Background())
 		if err != nil {
 			t.Fatalf("newTriggerManagementClient: %v", err)

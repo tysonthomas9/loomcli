@@ -1240,10 +1240,18 @@ describe("issueStore", () => {
       expect(toastFn).toHaveBeenCalledWith("API Error", { type: "error" });
     });
 
-    it("throws if issue not found", async () => {
-      await expect(
-        store.getState().updateIssueStatus("nonexistent", "in_progress", "ws1"),
-      ).rejects.toThrow("Issue nonexistent not found");
+    it("updates an issue outside the current list projection", async () => {
+      mockUpdateIssue.mockResolvedValue(
+        makeIssue({ id: "detail-only", status: "open" }),
+      );
+
+      await store.getState().updateIssueStatus("detail-only", "open", "ws1");
+
+      expect(mockUpdateIssue).toHaveBeenCalledWith("ws1", "detail-only", {
+        status: "open",
+      });
+      expect(store.getState().pendingIds.size).toBe(0);
+      expect(store.getState().issuesMap.size).toBe(0);
     });
 
     it("throws if issue already has pending update", async () => {

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"io"
 	"time"
 
@@ -238,6 +239,12 @@ type ArtifactContentReader interface {
 	ReadContent(ctx context.Context, workspaceKey, artifactID string) ([]byte, error)
 }
 
+// ErrArtifactContentUnavailable identifies a temporary failure of the managed
+// artifact content plane. Services should preserve it as an unavailable
+// response rather than collapsing a retryable FleetDB/content-store outage into
+// an internal error.
+var ErrArtifactContentUnavailable = errors.New("artifact content temporarily unavailable")
+
 type AgentLeaseCreate struct {
 	WorkspaceKey string
 	SessionID    string
@@ -307,17 +314,36 @@ type AgentCommandFilter struct {
 	Limit         int
 }
 
+// AgentCommandOwnershipProof is a request-only proof that the daemon
+// acknowledging or completing a lifecycle command currently owns the target
+// Agent aggregate. OwnershipToken is a bearer secret: callers must source it
+// from the in-memory AgentProcess and stores must never persist or return it.
+type AgentCommandOwnershipProof struct {
+	OwnershipLeaseID      string `json:"ownership_lease_id,omitempty"`
+	OwnershipToken        string `json:"ownership_token,omitempty"`
+	OwnershipFencingToken int64  `json:"ownership_fencing_token,omitempty"`
+}
+
+type AgentCommandAck struct {
+	NodeID  string `json:"node_id"`
+	OwnerID string `json:"owner_id"`
+	AgentCommandOwnershipProof
+}
+
 type AgentCommandComplete struct {
+	NodeID     string                    `json:"node_id"`
+	OwnerID    string                    `json:"owner_id"`
 	Status     domain.AgentCommandStatus `json:"status"`
 	Result     string                    `json:"result,omitempty"`
 	ErrorClass string                    `json:"error_class,omitempty"`
+	AgentCommandOwnershipProof
 }
 
 type AgentCommandStore interface {
 	Create(ctx context.Context, in AgentCommandCreate) (*domain.AgentCommand, error)
 	Get(ctx context.Context, workspaceKey, commandID string) (*domain.AgentCommand, error)
 	List(ctx context.Context, workspaceKey string, filter AgentCommandFilter) ([]*domain.AgentCommand, error)
-	Ack(ctx context.Context, workspaceKey, commandID string) (*domain.AgentCommand, error)
+	Ack(ctx context.Context, workspaceKey, commandID string, ack AgentCommandAck) (*domain.AgentCommand, error)
 	Complete(ctx context.Context, workspaceKey, commandID string, update AgentCommandComplete) (*domain.AgentCommand, error)
 }
 

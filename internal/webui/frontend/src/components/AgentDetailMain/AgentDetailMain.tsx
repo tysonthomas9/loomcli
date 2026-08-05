@@ -20,6 +20,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type CSSProperties,
   type ReactNode,
@@ -32,12 +33,34 @@ import type {
   TerminalSplitControls,
 } from "@/components/TerminalView";
 import { useAgentStoreInstance } from "@/hooks";
-import { restartAgent, startAgent, stopAgent, wsUrl } from "@/hooks/api";
+import {
+  getAgentLifecycleCommand,
+  restartAgent,
+  startAgent,
+  stopAgent,
+  wsUrl,
+  type AgentLifecycleCommandResult,
+  type AgentLifecycleCommandStatus,
+  type AgentLifecycleRequestResult,
+} from "@/hooks/api";
 import { useToast } from "@/hooks/ui/useToast";
-import { type LoomAgentStatus, parseLoomStatus } from "@/types";
+import { ApiError, type LoomAgentStatus, parseLoomStatus } from "@/types";
 import { isInteractiveAgent, isLeadRole } from "@/utils/agentRole";
 import { getCompactAvatarInitials } from "@/utils/compactAvatarInitials";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
+
+import {
+  acquireAgentLifecycleSubmission,
+  clearPendingAgentLifecycleCommand,
+  isAgentLifecycleSubmissionLocked,
+  loadPendingAgentLifecycleCommand,
+  markPendingAgentLifecycleWarningShown,
+  releaseAgentLifecycleSubmission,
+  savePendingAgentLifecycleCommand,
+  subscribeAgentLifecyclePending,
+  type AgentLifecycleAction,
+  type PendingAgentLifecycleCommand,
+} from "./agentLifecyclePending";
 
 const TerminalView = lazy(() =>
   import("@/components/TerminalView").then((m) => ({
@@ -93,14 +116,19 @@ export function AgentDetailMain({
     () => setPendingAgentName(undefined),
     [],
   );
+  const interactiveAgent = agent != null && isInteractiveAgent(agent);
+  const daemonSupervisedWorker = agent != null && !interactiveAgent;
   const terminalUnavailable = agent != null && isTerminalUnavailable(agent);
   const ephemeralWorker = agent != null && isEphemeralWorker(agent);
-  const shouldResolveLeadTerminal =
-    agent != null && isInteractiveAgent(agent) && terminalUnavailable;
+  const shouldResolveLeadTerminal = interactiveAgent && terminalUnavailable;
   const terminalEmptyState =
     agent != null && terminalUnavailable
       ? terminalUnavailableEmptyState(agent)
       : null;
+  const terminalAgentName =
+    !daemonSupervisedWorker && pendingAgentName === agentName
+      ? pendingAgentName
+      : undefined;
 
   if (!agentName) {
     return (
@@ -142,6 +170,11 @@ export function AgentDetailMain({
       >
         {ephemeralWorker ? (
           <EphemeralWorkerSummary agent={agent} />
+        ) : daemonSupervisedWorker ? (
+          <EmptyState
+            message="Worker terminal unavailable"
+            detail="This worker is daemon-supervised. Use worker logs or task session history instead of starting a second terminal process."
+          />
         ) : terminalUnavailable && !shouldResolveLeadTerminal ? (
           <EmptyState
             message={terminalEmptyState?.message ?? "Agent is stopped"}
@@ -154,7 +187,7 @@ export function AgentDetailMain({
           <Suspense fallback={<LoadingSkeleton.Terminal />}>
             <TerminalView
               isActive={true}
-              pendingAgentName={pendingAgentName}
+              pendingAgentName={terminalAgentName}
               onAgentNameConsumed={handleAgentNameConsumed}
               pendingTerminalInput={pendingTerminalInput}
               onTerminalInputConsumed={onTerminalInputConsumed}
@@ -609,7 +642,7 @@ function Header({
  * by the agentcontrol HTTP surface. Hidden for daemon-owned ephemeral workers
  * (rendered read-only elsewhere) and when the workspace key is unknown.
  */
-function AgentLifecycleControls({
+export function AgentLifecycleControls({
   agent,
   onChanged,
 }: {
@@ -617,30 +650,312 @@ function AgentLifecycleControls({
   onChanged: () => void;
 }): JSX.Element | null {
   const { showToast } = useToast();
-  const [busy, setBusy] = useState(false);
+  const [requestInFlight, setRequestInFlight] = useState(false);
+  const workspace = (agent?.workspace ?? "").trim();
+  const agentName = agent?.name ?? "";
+  const identity = lifecyclePendingIdentity(workspace, agentName);
+  const [submissionLocked, setSubmissionLocked] = useState(() =>
+    identity === ""
+      ? false
+      : isAgentLifecycleSubmissionLocked(workspace, agentName),
+  );
+  const [pendingState, setPendingState] = useState<{
+    identity: string;
+    pending: PendingAgentLifecycleCommand | null;
+  }>(() => ({
+    identity,
+    pending:
+      identity === ""
+        ? null
+        : loadPendingAgentLifecycleCommand(workspace, agentName),
+  }));
+  const restoredPending = useMemo(
+    () =>
+      identity === ""
+        ? null
+        : loadPendingAgentLifecycleCommand(workspace, agentName),
+    [agentName, identity, workspace],
+  );
+  const pending =
+    pendingState.identity === identity ? pendingState.pending : restoredPending;
+  const lifecycleLocked = useRef(false);
+  const onChangedRef = useRef(onChanged);
+  const showToastRef = useRef(showToast);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    onChangedRef.current = onChanged;
+    showToastRef.current = showToast;
+  }, [onChanged, showToast]);
+
+  useEffect(() => {
+    if (pendingState.identity !== identity) {
+      setPendingState({ identity, pending: restoredPending });
+      setSubmissionLocked(
+        identity === ""
+          ? false
+          : isAgentLifecycleSubmissionLocked(workspace, agentName),
+      );
+    }
+  }, [agentName, identity, pendingState.identity, restoredPending, workspace]);
+
+  useEffect(() => {
+    if (identity === "") return;
+    const synchronize = () => {
+      const stored = loadPendingAgentLifecycleCommand(workspace, agentName);
+      setPendingState((currentState) => {
+        if (currentState.identity !== identity) {
+          return { identity, pending: stored };
+        }
+        if (
+          currentState.pending?.commandId === stored?.commandId &&
+          currentState.pending?.warningShown === stored?.warningShown
+        ) {
+          return currentState;
+        }
+        return { identity, pending: stored };
+      });
+      setSubmissionLocked(
+        isAgentLifecycleSubmissionLocked(workspace, agentName),
+      );
+    };
+    synchronize();
+    return subscribeAgentLifecyclePending(workspace, agentName, synchronize);
+  }, [agentName, identity, workspace]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (pending == null || pending.warningShown) return;
+    const warningDelay = Math.max(
+      0,
+      pending.acceptedAt + lifecyclePendingWarningAfterMs - Date.now(),
+    );
+    const timeoutID = window.setTimeout(() => {
+      const warned = markPendingAgentLifecycleWarningShown(
+        pending.workspace,
+        pending.agent,
+        pending.commandId,
+      );
+      const localWarned =
+        warned ??
+        (loadPendingAgentLifecycleCommand(pending.workspace, pending.agent) ==
+        null
+          ? { ...pending, warningShown: true }
+          : null);
+      if (localWarned == null) return;
+      setPendingState((current) =>
+        current.identity === identity &&
+        current.pending?.commandId === pending.commandId
+          ? { identity, pending: localWarned }
+          : current,
+      );
+      showToastRef.current(
+        `${lifecycleActionLabel(
+          pending.action,
+        )} is still pending for ${pending.agent}; controls remain locked while Loom confirms the command`,
+        { type: "warning" },
+      );
+    }, warningDelay);
+
+    return () => {
+      window.clearTimeout(timeoutID);
+    };
+  }, [identity, pending]);
+
+  useEffect(() => {
+    if (pending == null) return;
+
+    let disposed = false;
+    let pollID: number | undefined;
+    let controller: AbortController | null = null;
+
+    const clearTrackedCommand = (): boolean => {
+      const cleared = clearPendingAgentLifecycleCommand(
+        pending.workspace,
+        pending.agent,
+        pending.commandId,
+      );
+      if (
+        !cleared &&
+        loadPendingAgentLifecycleCommand(pending.workspace, pending.agent) !=
+          null
+      ) {
+        return false;
+      }
+      if (mountedRef.current) {
+        setPendingState((current) =>
+          current.identity === identity &&
+          current.pending?.commandId === pending.commandId
+            ? { identity, pending: null }
+            : current,
+        );
+      }
+      return true;
+    };
+
+    const settle = (command: AgentLifecycleCommandResult) => {
+      if (!clearTrackedCommand()) return;
+      onChangedRef.current();
+      showLifecycleTerminalToast(showToastRef.current, pending, command);
+    };
+
+    const schedulePoll = () => {
+      if (!disposed) {
+        pollID = window.setTimeout(
+          () => void poll(),
+          lifecycleCommandPollIntervalMs,
+        );
+      }
+    };
+
+    const poll = async () => {
+      controller = new AbortController();
+      try {
+        const command = await getAgentLifecycleCommand(
+          pending.workspace,
+          pending.agent,
+          pending.commandId,
+          { signal: controller.signal },
+        );
+        if (disposed) return;
+        if (
+          command.command_id !== pending.commandId ||
+          !lifecycleCommandActionMatches(pending.action, command.action)
+        ) {
+          schedulePoll();
+          return;
+        }
+        if (isTerminalLifecycleCommandStatus(command.status)) {
+          settle(command);
+          return;
+        }
+        schedulePoll();
+      } catch (err) {
+        if (disposed || isAbortError(err)) return;
+        if (err instanceof ApiError && err.status === 404) {
+          if (!clearTrackedCommand()) return;
+          onChangedRef.current();
+          showToastRef.current(
+            `${lifecycleActionLabel(
+              pending.action,
+            )} command ${pending.commandId} is no longer available; refreshed the current agent state`,
+            { type: "warning" },
+          );
+          return;
+        }
+        // Network errors, timeouts, and server errors are not evidence that
+        // the durable command ended. Retain the lock and retry.
+        schedulePoll();
+      }
+    };
+
+    void poll();
+    return () => {
+      disposed = true;
+      if (pollID != null) window.clearTimeout(pollID);
+      controller?.abort();
+    };
+  }, [identity, pending]);
 
   if (!agent || isEphemeralWorker(agent)) return null;
-  const ws = (agent.workspace ?? "").trim();
-  if (ws === "") return null;
+  if (workspace === "") return null;
 
   const stopped = isTerminalUnavailable(agent);
+  const busy = requestInFlight || submissionLocked || pending != null;
+  lifecycleLocked.current = busy;
 
   const runControl = async (
+    actionName: AgentLifecycleAction,
     label: string,
-    action: () => Promise<void>,
+    action: () => Promise<AgentLifecycleRequestResult>,
   ): Promise<void> => {
-    setBusy(true);
+    if (lifecycleLocked.current) return;
+    const submissionToken = acquireAgentLifecycleSubmission(
+      workspace,
+      agent.name,
+    );
+    if (submissionToken == null) {
+      setSubmissionLocked(true);
+      return;
+    }
+    const requestedAt = Date.now();
+    let submissionReleased = false;
+    lifecycleLocked.current = true;
+    setRequestInFlight(true);
     try {
-      await action();
-      showToast(`${label} requested for ${agent.name}`, { type: "success" });
-      // Optimistic refresh; the status poll then reflects the settled state.
-      onChanged();
+      const response = await action();
+      if (response.pending) {
+        const command: PendingAgentLifecycleCommand = {
+          action: actionName,
+          workspace,
+          agent: agent.name,
+          commandId: response.command_id!,
+          acceptedAt: requestedAt,
+          warningShown: false,
+        };
+        const responseStatus = response.status;
+        if (
+          responseStatus != null &&
+          isTerminalLifecycleCommandStatus(responseStatus)
+        ) {
+          showLifecycleTerminalToast(showToast, command, {
+            command_id: command.commandId,
+            action: actionName,
+            status: responseStatus,
+          });
+        } else {
+          const persisted = savePendingAgentLifecycleCommand(command);
+          releaseAgentLifecycleSubmission(
+            workspace,
+            agent.name,
+            submissionToken,
+          );
+          submissionReleased = true;
+          const tracked =
+            loadPendingAgentLifecycleCommand(workspace, agent.name) ?? command;
+          if (mountedRef.current) {
+            setPendingState({
+              identity: lifecyclePendingIdentity(workspace, agent.name),
+              pending: tracked,
+            });
+          }
+          showToast(
+            persisted
+              ? `${label} requested for ${agent.name}`
+              : `${label} was accepted for ${agent.name}, but this browser could not persist the pending command; keep this view open`,
+            { type: persisted ? "success" : "warning" },
+          );
+        }
+      } else {
+        showSynchronousLifecycleToast(
+          showToast,
+          agent.name,
+          actionName,
+          response.status,
+        );
+      }
+      if (mountedRef.current) {
+        onChanged();
+      }
     } catch (err) {
-      showToast(`${label} failed: ${(err as Error).message}`, {
-        type: "error",
-      });
+      if (mountedRef.current) {
+        showToast(`${label} failed: ${(err as Error).message}`, {
+          type: "error",
+        });
+      }
     } finally {
-      setBusy(false);
+      if (!submissionReleased) {
+        releaseAgentLifecycleSubmission(workspace, agent.name, submissionToken);
+      }
+      if (mountedRef.current) {
+        setRequestInFlight(false);
+      }
     }
   };
 
@@ -669,7 +984,9 @@ function AgentLifecycleControls({
           disabled={busy}
           data-testid="agent-start-button"
           onClick={() =>
-            void runControl("Start", () => startAgent(ws, agent.name))
+            void runControl("start", "Start", () =>
+              startAgent(workspace, agent.name),
+            )
           }
         >
           Start
@@ -681,7 +998,9 @@ function AgentLifecycleControls({
           disabled={busy}
           data-testid="agent-stop-button"
           onClick={() =>
-            void runControl("Stop", () => stopAgent(ws, agent.name))
+            void runControl("stop", "Stop", () =>
+              stopAgent(workspace, agent.name),
+            )
           }
         >
           Stop
@@ -693,13 +1012,99 @@ function AgentLifecycleControls({
         disabled={busy || stopped}
         data-testid="agent-restart-button"
         onClick={() =>
-          void runControl("Restart", () => restartAgent(ws, agent.name))
+          void runControl("restart", "Restart", () =>
+            restartAgent(workspace, agent.name),
+          )
         }
       >
         Restart
       </button>
     </div>
   );
+}
+
+const lifecycleCommandPollIntervalMs = 1_000;
+const lifecyclePendingWarningAfterMs = 15_000;
+
+function lifecyclePendingIdentity(workspace: string, agent: string): string {
+  return workspace === "" || agent === ""
+    ? ""
+    : `${encodeURIComponent(workspace)}\x00${encodeURIComponent(agent)}`;
+}
+
+function lifecycleActionLabel(action: AgentLifecycleAction): string {
+  return action.charAt(0).toUpperCase() + action.slice(1);
+}
+
+function lifecycleCommandActionMatches(
+  pendingAction: AgentLifecycleAction,
+  commandAction: AgentLifecycleCommandResult["action"],
+): boolean {
+  return (
+    commandAction === pendingAction ||
+    (pendingAction === "stop" && commandAction === "yield")
+  );
+}
+
+function isTerminalLifecycleCommandStatus(
+  status: AgentLifecycleCommandStatus,
+): status is "succeeded" | "failed" | "cancelled" {
+  return (
+    status === "succeeded" || status === "failed" || status === "cancelled"
+  );
+}
+
+function isAbortError(err: unknown): boolean {
+  return (
+    (err instanceof DOMException && err.name === "AbortError") ||
+    (err instanceof Error && err.name === "AbortError")
+  );
+}
+
+function showLifecycleTerminalToast(
+  showToast: ReturnType<typeof useToast>["showToast"],
+  pending: PendingAgentLifecycleCommand,
+  command: AgentLifecycleCommandResult,
+): void {
+  const label = lifecycleActionLabel(pending.action);
+  if (command.status === "succeeded") {
+    showToast(`${label} completed for ${pending.agent}`, { type: "success" });
+    return;
+  }
+  const detail =
+    command.result?.trim() ||
+    command.error_class?.trim() ||
+    `command ${command.status}`;
+  showToast(`${label} ${command.status} for ${pending.agent}: ${detail}`, {
+    type: "error",
+  });
+}
+
+function showSynchronousLifecycleToast(
+  showToast: ReturnType<typeof useToast>["showToast"],
+  agent: string,
+  action: AgentLifecycleAction,
+  status: AgentLifecycleCommandStatus | undefined,
+): void {
+  const pending: PendingAgentLifecycleCommand = {
+    workspace: "",
+    agent,
+    action,
+    commandId: "",
+    acceptedAt: Date.now(),
+    warningShown: false,
+  };
+  if (status != null && isTerminalLifecycleCommandStatus(status)) {
+    showLifecycleTerminalToast(showToast, pending, {
+      command_id: "",
+      action,
+      status,
+    });
+    return;
+  }
+  showToast(`${lifecycleActionLabel(action)} completed for ${agent}`, {
+    type: "success",
+  });
 }
 
 export function leadDeliveryStateLabel(

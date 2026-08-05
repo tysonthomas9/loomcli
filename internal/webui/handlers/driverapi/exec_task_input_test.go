@@ -137,8 +137,8 @@ func TestDriverAPIExecTaskPreservesRequestedNodeID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get stored task run: %v", err)
 	}
-	if stored.NodeID != "task-node-target" {
-		t.Fatalf("stored node id = %q, want requested target node", stored.NodeID)
+	if stored.NodeID != "" || stored.TargetNodeID != "task-node-target" {
+		t.Fatalf("queued TaskRun owner=%q target=%q, want empty owner and requested target", stored.NodeID, stored.TargetNodeID)
 	}
 	if _, err := h.store.TaskRuns().ClaimQueued(context.Background(), "WS", store.TaskRunClaim{
 		TaskRunID:          "task-run-target-node",
@@ -157,7 +157,7 @@ func TestDriverAPIExecTaskPreservesRequestedNodeID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("target node ClaimQueued: %v", err)
 	}
-	if claimed.NodeID != "task-node-target" || claimed.Status != domain.TaskRunRunning {
+	if claimed.NodeID != "task-node-target" || claimed.TargetNodeID != "task-node-target" || claimed.Status != domain.TaskRunRunning {
 		t.Fatalf("claimed = %+v, want target node running", claimed)
 	}
 }

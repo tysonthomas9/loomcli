@@ -1,5 +1,5 @@
 /**
- * CreateWorkspaceModal — clone-only workspace creation dialog.
+ * CreateWorkspaceModal — repository-optional workspace creation dialog.
  * Renders via AetherModal portal above all other content.
  */
 
@@ -12,7 +12,7 @@ import { useRegisterEscapeLayer, LAYER_MODAL, useJobPolling } from "@/hooks";
 import { useFocusTrap, useFocusReturn } from "@/hooks/ui";
 import styles from "./CreateWorkspaceModal.module.css";
 
-export type WorkspaceType = "clone";
+export type WorkspaceType = "empty" | "clone";
 
 export interface CreateWorkspaceModalProps {
   isOpen: boolean;
@@ -122,16 +122,11 @@ export function CreateWorkspaceModal({
     setCloneUrls((prev) => prev.filter((u) => u !== url));
   };
 
-  const hasPendingUrl = urlInput.trim() !== "";
   const nameError =
     name.trim() !== "" && !WORKSPACE_NAME_RE.test(name.trim())
       ? "Use letters, numbers, hyphens, or underscores."
       : "";
-  const canSubmit =
-    name.trim() !== "" &&
-    nameError === "" &&
-    !isSubmitting &&
-    (cloneUrls.length > 0 || hasPendingUrl);
+  const canSubmit = name.trim() !== "" && nameError === "" && !isSubmitting;
 
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
@@ -149,8 +144,9 @@ export function CreateWorkspaceModal({
 
       const req: CreateWorkspaceRequest = {
         name: name.trim(),
-        type: "clone",
-        clone_urls: finalCloneUrls,
+        ...(finalCloneUrls.length > 0
+          ? { type: "clone", clone_urls: finalCloneUrls }
+          : { type: "empty" }),
       };
 
       try {
@@ -261,8 +257,11 @@ export function CreateWorkspaceModal({
 
           <div className={styles.fieldGroup}>
             <label className={styles.label} htmlFor="ws-clone-url">
-              Repository URL
+              Repository URL (optional)
             </label>
+            <p className={styles.optionalHint}>
+              You can add a repository after creating the workspace.
+            </p>
             <div className={styles.addRow}>
               <textarea
                 id="ws-clone-url"

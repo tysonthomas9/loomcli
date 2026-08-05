@@ -58,9 +58,14 @@ before running any of the above. Local mode is the default.
 ```bash
 loom serve                                              # http://localhost:8080
 loom serve --auth-url https://auth.example.com          # Enable JWT auth
-loom serve --bind 0.0.0.0                               # All interfaces
+loom serve --bind 0.0.0.0 --auth-url https://auth.example.com # Shared/network deployment
 loom serve --fleet-mode                                 # Enable fleet coordination (requires real Redis for multi-node)
 ```
+
+The default open mode is credential-free and intended for a single operator:
+any client that can reach the management endpoint can manage agents and
+workflows. Keep it on loopback. Use `--auth-url` for shared, cloud, or otherwise
+untrusted network deployments.
 
 ### Terminal state persistence
 

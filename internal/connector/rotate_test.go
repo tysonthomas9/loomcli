@@ -100,9 +100,13 @@ func TestRotateValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := baseRotateRequest()
+			req.NewCredential = []byte(rotateNewCred)
 			tt.mutate(&req)
 			if _, err := Rotate(context.Background(), ms.Connectors(), ms.ConnectorCalls(), tt.sealer, req); !errors.Is(err, tt.wantErr) {
 				t.Fatalf("Rotate = %v, want %v", err, tt.wantErr)
+			}
+			if !bytes.Equal(req.NewCredential, make([]byte, len(req.NewCredential))) {
+				t.Fatalf("plaintext credential buffer not wiped after refused rotation: %q", req.NewCredential)
 			}
 			// No refused request may have touched the store.
 			secrets, err := ms.Connectors().ResolveInboundSecret(context.Background(), rotateWS, rotateConn)
@@ -173,11 +177,15 @@ func TestRotateRedactsResult(t *testing.T) {
 }
 
 func TestRotateNotFound(t *testing.T) {
-	ms, _ := newRotateHarness(t)
+	ms, vault := newRotateHarness(t)
 	req := baseRotateRequest()
 	req.ConnectorID = "nope"
-	if _, err := Rotate(context.Background(), ms.Connectors(), ms.ConnectorCalls(), nil, req); !errors.Is(err, domain.ErrConnectorNotFound) {
+	req.NewCredential = []byte(rotateNewCred)
+	if _, err := Rotate(context.Background(), ms.Connectors(), ms.ConnectorCalls(), vault, req); !errors.Is(err, domain.ErrConnectorNotFound) {
 		t.Fatalf("Rotate = %v, want ErrConnectorNotFound", err)
+	}
+	if !bytes.Equal(req.NewCredential, make([]byte, len(req.NewCredential))) {
+		t.Fatalf("plaintext credential buffer not wiped after missing connector: %q", req.NewCredential)
 	}
 }
 
@@ -185,7 +193,7 @@ func TestRotateNotFound(t *testing.T) {
 // the same read; the first rotation lands, the second is rejected with
 // ErrRotationConflict (wrapping domain.ErrConflict) and writes nothing.
 func TestRotateConcurrentFencing(t *testing.T) {
-	ms, _ := newRotateHarness(t)
+	ms, vault := newRotateHarness(t)
 	ctx := context.Background()
 	read, err := ms.Connectors().Get(ctx, rotateWS, rotateConn)
 	if err != nil {
@@ -207,9 +215,13 @@ func TestRotateConcurrentFencing(t *testing.T) {
 	second := baseRotateRequest()
 	second.NewInboundSecret = "whsec-SECOND-writer-3"
 	second.ExpectedUpdatedAt = read.UpdatedAt
-	_, err = Rotate(ctx, ms.Connectors(), ms.ConnectorCalls(), nil, second)
+	second.NewCredential = []byte(rotateNewCred)
+	_, err = Rotate(ctx, ms.Connectors(), ms.ConnectorCalls(), vault, second)
 	if !errors.Is(err, ErrRotationConflict) || !errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("second Rotate = %v, want ErrRotationConflict wrapping domain.ErrConflict", err)
+	}
+	if !bytes.Equal(second.NewCredential, make([]byte, len(second.NewCredential))) {
+		t.Fatalf("plaintext credential buffer not wiped after preflight conflict: %q", second.NewCredential)
 	}
 
 	secrets, err := ms.Connectors().ResolveInboundSecret(ctx, rotateWS, rotateConn)
@@ -226,6 +238,43 @@ func TestRotateConcurrentFencing(t *testing.T) {
 	}
 	if len(recs) != 1 {
 		t.Fatalf("rotation audit records = %d, want 1", len(recs))
+	}
+}
+
+type conflictingConnectorStore struct {
+	store.ConnectorStore
+}
+
+func (s *conflictingConnectorStore) RotateSecrets(
+	context.Context,
+	string,
+	string,
+	store.ConnectorSecretRotation,
+) (*domain.Connector, error) {
+	return nil, fmt.Errorf("injected authoritative CAS: %w", domain.ErrConflict)
+}
+
+func TestRotateAuthoritativeStoreConflictPreservesSentinelsAndWipesCredential(t *testing.T) {
+	ms, vault := newRotateHarness(t)
+	read, err := ms.Connectors().Get(context.Background(), rotateWS, rotateConn)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	req := baseRotateRequest()
+	req.ExpectedUpdatedAt = read.UpdatedAt
+	req.NewCredential = []byte(rotateNewCred)
+	_, err = Rotate(
+		context.Background(),
+		&conflictingConnectorStore{ConnectorStore: ms.Connectors()},
+		ms.ConnectorCalls(),
+		vault,
+		req,
+	)
+	if !errors.Is(err, ErrRotationConflict) || !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("Rotate = %v, want authoritative ErrRotationConflict wrapping domain.ErrConflict", err)
+	}
+	if !bytes.Equal(req.NewCredential, make([]byte, len(req.NewCredential))) {
+		t.Fatalf("plaintext credential buffer not wiped after authoritative conflict: %q", req.NewCredential)
 	}
 }
 
@@ -364,6 +413,52 @@ func TestRotateAppendsAuditRecord(t *testing.T) {
 	}
 	if len(recs) != 2 || recs[0].CallID == recs[1].CallID {
 		t.Fatalf("rotation audit records = %d (ids %q, %q), want 2 distinct", len(recs), recs[0].CallID, recs[len(recs)-1].CallID)
+	}
+}
+
+type fixedRotatedAtConnectorStore struct {
+	store.ConnectorStore
+	rotatedAt time.Time
+}
+
+func (s *fixedRotatedAtConnectorStore) RotateSecrets(
+	ctx context.Context,
+	workspaceKey, connectorID string,
+	rotation store.ConnectorSecretRotation,
+) (*domain.Connector, error) {
+	rotated, err := s.ConnectorStore.RotateSecrets(ctx, workspaceKey, connectorID, rotation)
+	if rotated != nil {
+		rotated.RotatedAt = &s.rotatedAt
+	}
+	return rotated, err
+}
+
+func TestRotateAuditIdentityUsesMonotonicGeneration(t *testing.T) {
+	ctx := context.Background()
+	ms, _ := newRotateHarness(t)
+	connectors := &fixedRotatedAtConnectorStore{
+		ConnectorStore: ms.Connectors(),
+		rotatedAt:      time.Now().UTC().Truncate(time.Second),
+	}
+	if _, err := Rotate(ctx, connectors, ms.ConnectorCalls(), nil, baseRotateRequest()); err != nil {
+		t.Fatalf("first Rotate: %v", err)
+	}
+	second := baseRotateRequest()
+	second.NewInboundSecret = "whsec-THIRD-inbound-4"
+	if _, err := Rotate(ctx, connectors, ms.ConnectorCalls(), nil, second); err != nil {
+		t.Fatalf("second Rotate: %v", err)
+	}
+	recs, err := ms.ConnectorCalls().ListByBinding(
+		ctx,
+		rotateWS,
+		RotationAuditBindingID,
+		store.ConnectorCallFilter{},
+	)
+	if err != nil {
+		t.Fatalf("ListByBinding: %v", err)
+	}
+	if len(recs) != 2 || recs[0].CallID == recs[1].CallID {
+		t.Fatalf("same-wall-time rotations collapsed in audit: %+v", recs)
 	}
 }
 

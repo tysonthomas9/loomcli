@@ -127,7 +127,11 @@ func (m *mockAgentService) UpdateAgent(_ context.Context, _, _ string, _ service
 	return nil, nil
 }
 
-func (m *mockAgentService) RequestAgentLifecycle(_ context.Context, _, _ string, _ service.AgentLifecycleInput) (*domain.Agent, error) {
+func (m *mockAgentService) RequestAgentLifecycle(_ context.Context, _, _ string, _ service.AgentLifecycleInput) (*service.AgentLifecycleResult, error) {
+	return nil, nil
+}
+
+func (m *mockAgentService) GetAgentLifecycleCommand(_ context.Context, _, _, _ string) (*service.AgentLifecycleCommandResult, error) {
 	return nil, nil
 }
 

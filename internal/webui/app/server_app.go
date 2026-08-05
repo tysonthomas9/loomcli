@@ -14,6 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/appinfra"
 	"github.com/tysonthomas9/loomcli/internal/webui/appstores"
+	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
@@ -90,8 +91,8 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	if config.HSTSEnabled {
 		logger.Info("HSTS enabled: ensure this server is behind a TLS-terminating proxy")
 	}
-	if config.ExtAuthURL == "" && config.BindAddress != "127.0.0.1" && config.BindAddress != "::1" {
-		logger.Warn("no authentication configured and server is exposed to network", "bind_address", config.BindAddress)
+	if config.ExtAuthURL == "" && !isLoopbackBindAddress(config.BindAddress) {
+		logger.Warn("open auth mode is reachable on a non-loopback listener; restrict exposure at the host/container boundary or configure --auth-url", "bind_address", config.BindAddress)
 	}
 	if config.ExtAuthURL != "" && config.WorkspaceRoleResolver == nil {
 		logger.Warn("remote file-browser requests will be DENIED (403): file browser RBAC not configured; configure a workspace role resolver to enable remote file access")
@@ -223,11 +224,6 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 		}
 	}
 
-	// Initialize agent service layer (requires ops.GitOps; agentTmuxMgr/termAuth may be nil)
-	if config.GitOps != nil {
-		app.agentSvc = svcimpl.NewAgentService(config.GitOps, app.agentTmuxMgr, app.termAuth, config.Store)
-	}
-
 	// Initialize SSE token exchange store (external auth mode only).
 	if config.ExtAuthURL != "" {
 		var sseErr error
@@ -321,7 +317,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 
 	// Start health doctor to auto-restart daemons with stuck circuit breakers.
 	if daemonExpected && workspacePathsFn != nil {
-		doctor := webui.NewHealthDoctor(app.multiPool, workspacePathsFn, config.Logger, webui.DefaultHealthDoctorConfig())
+		doctor := daemon.NewHealthDoctor(app.multiPool, workspacePathsFn, config.Logger, daemon.DefaultHealthDoctorConfig())
 		go doctor.Run(ctx)
 	}
 
@@ -439,6 +435,21 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 		)
 	}
 
+	// Initialize agent service after terminal metadata so interactive lifecycle
+	// authority can bind process-local PTYs to server-owned agent tabs.
+	if config.GitOps != nil {
+		app.agentSvc = svcimpl.NewAgentServiceWithInteractiveRuntime(
+			config.GitOps,
+			app.agentTmuxMgr,
+			app.termAuth,
+			config.Store,
+			svcimpl.NewInteractiveRuntimeController(
+				interactiveRuntimeTabSource{terminalService: app.termSvc},
+				app.ptyMgr,
+			),
+		)
+	}
+
 	// Initialize diff service layer (requires ops.GitOps)
 	if config.GitOps != nil {
 		app.diffSvc = svcimpl.NewDiffService(config.GitOps, app.multiPool)
@@ -461,6 +472,35 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	app.registerWorkerAPIRoutes()
 
 	return app, nil
+}
+
+// interactiveRuntimeTabSource translates the terminal service's richer tab
+// metadata into the narrow ownership view consumed by svcimpl. Use the
+// terminal service rather than the persistence store so PTYAlive reflects the
+// current server process.
+type interactiveRuntimeTabSource struct {
+	terminalService service.TerminalService
+}
+
+func (s interactiveRuntimeTabSource) ListInteractiveRuntimeTabs(
+	ctx context.Context,
+	workspace string,
+) ([]svcimpl.InteractiveRuntimeTab, error) {
+	tabs, err := s.terminalService.ListTabs(ctx, workspace)
+	if err != nil {
+		return nil, err
+	}
+	runtimeTabs := make([]svcimpl.InteractiveRuntimeTab, 0, len(tabs))
+	for i := range tabs {
+		tab := &tabs[i]
+		runtimeTabs = append(runtimeTabs, svcimpl.InteractiveRuntimeTab{
+			SessionName: tab.SessionName,
+			Kind:        tab.Kind,
+			AgentID:     tab.AgentID,
+			PTYAlive:    tab.PTYAlive,
+		})
+	}
+	return runtimeTabs, nil
 }
 
 func addBundledLoopbackFrontendOrigins(config *webui.ServerConfig, actualPort int) {

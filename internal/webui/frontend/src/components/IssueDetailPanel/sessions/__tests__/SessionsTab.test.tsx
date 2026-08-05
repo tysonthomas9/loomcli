@@ -11,6 +11,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 
 import type { SessionRecord } from "@/types/agent";
+import type { TaskWorkflowRun } from "@/api/workflows";
 
 import { SessionsTab } from "../SessionsTab";
 
@@ -20,10 +21,14 @@ vi.mock("../SessionTimeline", () => ({
     sessions,
     selectedId,
     onSelect,
+    workflowRuns = [],
+    onSelectWorkflowRun,
   }: {
     sessions: SessionRecord[];
     selectedId: string | null;
     onSelect: (id: string) => void;
+    workflowRuns?: TaskWorkflowRun[];
+    onSelectWorkflowRun?: (id: string) => void;
   }) => (
     <div data-testid="session-timeline-mock">
       {sessions.map((s) => (
@@ -34,6 +39,15 @@ vi.mock("../SessionTimeline", () => ({
           onClick={() => onSelect(s.session_id)}
         >
           {s.agent_name}
+        </button>
+      ))}
+      {workflowRuns.map((run) => (
+        <button
+          key={run.run_id}
+          data-testid={`workflow-row-${run.run_id}`}
+          onClick={() => onSelectWorkflowRun?.(run.run_id)}
+        >
+          Automation
         </button>
       ))}
     </div>
@@ -54,6 +68,12 @@ vi.mock("../SessionDetailView", () => ({
   ),
 }));
 
+vi.mock("../WorkflowRunDetail", () => ({
+  WorkflowRunDetail: ({ run }: { run: TaskWorkflowRun }) => (
+    <div data-testid="workflow-run-detail-mock">{run.summary}</div>
+  ),
+}));
+
 vi.mock("@/hooks/workspace", async () => {
   const actual =
     await vi.importActual<typeof import("@/hooks/workspace")>(
@@ -71,12 +91,17 @@ vi.mock("@/hooks/terminal", async () => {
     await vi.importActual<typeof import("@/hooks/terminal")>(
       "@/hooks/terminal",
     );
-  return { ...actual, useTaskSessions: vi.fn() };
+  return {
+    ...actual,
+    useTaskSessions: vi.fn(),
+    useTaskWorkflowRuns: vi.fn(),
+  };
 });
 
-import { useTaskSessions } from "@/hooks/terminal";
+import { useTaskSessions, useTaskWorkflowRuns } from "@/hooks/terminal";
 
 const mockUseTaskSessions = vi.mocked(useTaskSessions);
+const mockUseTaskWorkflowRuns = vi.mocked(useTaskWorkflowRuns);
 
 function createSession(overrides: Partial<SessionRecord> = {}): SessionRecord {
   return {
@@ -106,9 +131,32 @@ function createSession(overrides: Partial<SessionRecord> = {}): SessionRecord {
   };
 }
 
+function createWorkflowRun(
+  overrides: Partial<TaskWorkflowRun> = {},
+): TaskWorkflowRun {
+  return {
+    workspace_key: "test-ws-id",
+    run_id: "automation-run-1",
+    driver_id: "prompt-agent",
+    driver_version_id: "v1",
+    status: "completed",
+    summary: "Repository selection is required before an agent task can start.",
+    output: { blocker: "repository_required", skipped: "true" },
+    created_at: "2026-07-18T20:00:00Z",
+    updated_at: "2026-07-18T20:00:01Z",
+    ...overrides,
+  };
+}
+
 describe("SessionsTab", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUseTaskWorkflowRuns.mockReturnValue({
+      runs: [],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
   });
 
   describe("loading state", () => {
@@ -179,6 +227,31 @@ describe("SessionsTab", () => {
   });
 
   describe("sessions loaded", () => {
+    it("shows and explains a sessionless automation instead of the empty state", async () => {
+      mockUseTaskSessions.mockReturnValue({
+        sessions: [],
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
+      mockUseTaskWorkflowRuns.mockReturnValue({
+        runs: [createWorkflowRun()],
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
+
+      render(<SessionsTab taskId="PHASE4-TERRA-FRESH-20260718-10" />);
+      expect(screen.queryByTestId("sessions-empty")).not.toBeInTheDocument();
+      expect(screen.getByText("1")).toBeInTheDocument();
+
+      const { fireEvent } = await import("@testing-library/react");
+      fireEvent.click(screen.getByTestId("workflow-row-automation-run-1"));
+      expect(screen.getByTestId("workflow-run-detail-mock")).toHaveTextContent(
+        "Repository selection is required before an agent task can start.",
+      );
+    });
+
     it("renders SessionTimeline and detail placeholder", () => {
       mockUseTaskSessions.mockReturnValue({
         sessions: [createSession()],

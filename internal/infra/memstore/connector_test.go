@@ -268,6 +268,33 @@ func TestConnectorRotateSecrets(t *testing.T) {
 		}
 	})
 
+	t.Run("expected generation is atomic", func(t *testing.T) {
+		s := New()
+		created, err := s.Connectors().Create(ctx, connectorCreate("gh-main"))
+		if err != nil {
+			t.Fatalf("create: %v", err)
+		}
+		if _, err := s.Connectors().RotateSecrets(ctx, "WS", "gh-main", store.ConnectorSecretRotation{
+			NewInboundSecret:  "winner",
+			ExpectedUpdatedAt: created.UpdatedAt,
+		}); err != nil {
+			t.Fatalf("winner rotate: %v", err)
+		}
+		if _, err := s.Connectors().RotateSecrets(ctx, "WS", "gh-main", store.ConnectorSecretRotation{
+			NewInboundSecret:  "stale",
+			ExpectedUpdatedAt: created.UpdatedAt,
+		}); !errors.Is(err, domain.ErrConflict) {
+			t.Fatalf("stale rotate = %v, want domain.ErrConflict", err)
+		}
+		secrets, err := s.Connectors().ResolveInboundSecret(ctx, "WS", "gh-main")
+		if err != nil {
+			t.Fatalf("resolve: %v", err)
+		}
+		if secrets.Current != "winner" {
+			t.Fatalf("stale rotation overwrote current secret: %q", secrets.Current)
+		}
+	})
+
 	t.Run("window capped at max overlap", func(t *testing.T) {
 		s := New()
 		if _, err := s.Connectors().Create(ctx, connectorCreate("gh-main")); err != nil {

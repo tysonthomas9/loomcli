@@ -226,7 +226,6 @@ describe("WorkspaceTree", () => {
       await waitFor(() => {
         expect(mockAddWorkspaceRepos).toHaveBeenCalledWith(TEST_WS_ID, {
           repos: ["/repos/api"],
-          branch: "main",
         });
       });
       expect(refetch).toHaveBeenCalled();
@@ -248,7 +247,6 @@ describe("WorkspaceTree", () => {
       await waitFor(() => {
         expect(mockAddWorkspaceRepos).toHaveBeenCalledWith(TEST_WS_ID, {
           clone_urls: ["https://github.com/octocat/Hello-World"],
-          branch: "main",
         });
       });
       expect(refetch).toHaveBeenCalled();
@@ -290,7 +288,6 @@ describe("WorkspaceTree", () => {
       await waitFor(() => {
         expect(mockAddWorkspaceRepos).toHaveBeenCalledWith(TEST_WS_ID, {
           clone_urls: ["https://github.com/octocat/Hello-World"],
-          branch: "main",
         });
       });
       expect(refetch).toHaveBeenCalled();

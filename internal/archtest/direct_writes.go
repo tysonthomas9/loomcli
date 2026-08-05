@@ -1,14 +1,13 @@
 package archtest
 
 import (
+	cryptosha256 "crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
-	"go/ast"
-	"go/types"
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -29,6 +28,28 @@ type DirectWriteInventory struct {
 	FunctionSurfaces          []PersistenceFunctionSurface `yaml:"function_surfaces"`
 	Writes                    []DirectWriteUse             `yaml:"writes"`
 	GenericMechanisms         []GenericMechanismUse        `yaml:"generic_mechanisms"`
+	LegacyDriver              *LegacyDirectWriteBaseline   `yaml:"legacy_driver,omitempty"`
+}
+
+// LegacyDirectWriteBaseline is a strict digest ratchet for a legacy root too
+// large to pretend was migrated. Phase 4 uses it for internal/driver: exact
+// rows, sites, capability-owner distribution, and a content digest make any
+// drift fail without falsely relabeling the package's cross-capability writes
+// as Execution-owned. expires_after_phase=6 means the baseline must be gone
+// when Phase 6 is marked complete.
+type LegacyDirectWriteBaseline struct {
+	Root              string                           `yaml:"root"`
+	ExpiresAfterPhase int                              `yaml:"expires_after_phase"`
+	Rows              int                              `yaml:"rows"`
+	Sites             int                              `yaml:"sites"`
+	Digest            string                           `yaml:"digest"`
+	Owners            []LegacyDirectWriteOwnerBaseline `yaml:"owners"`
+}
+
+type LegacyDirectWriteOwnerBaseline struct {
+	CapabilityOwner string `yaml:"capability_owner"`
+	Rows            int    `yaml:"rows"`
+	Sites           int    `yaml:"sites"`
 }
 
 type PersistencePackage struct {
@@ -101,6 +122,9 @@ func (i DirectWriteInventory) Validate() error {
 	if err := i.validateWrites(); err != nil {
 		return err
 	}
+	if err := i.validateLegacyExecution(); err != nil {
+		return err
+	}
 	return i.validateGenericMechanisms()
 }
 
@@ -115,6 +139,45 @@ func (i DirectWriteInventory) ValidateCompletedPhase(completedPhase int) error {
 		if use.ExpiresAfterPhase <= completedPhase {
 			return fmt.Errorf("direct-write row %s.%s in %s expired after Phase %d but completed_phase is %d", use.Receiver, use.Method, use.File, use.ExpiresAfterPhase, completedPhase)
 		}
+	}
+	if baseline := i.LegacyDriver; baseline != nil && baseline.ExpiresAfterPhase <= completedPhase {
+		return fmt.Errorf("legacy direct-write root %s expired after Phase %d but completed_phase is %d", baseline.Root, baseline.ExpiresAfterPhase, completedPhase)
+	}
+	return nil
+}
+
+func (i DirectWriteInventory) validateLegacyExecution() error {
+	baseline := i.LegacyDriver
+	if baseline == nil {
+		return nil
+	}
+	if baseline.Root != "internal/driver" || baseline.ExpiresAfterPhase != 6 {
+		return fmt.Errorf("legacy driver direct-write baseline must freeze internal/driver until Phase 6 completion")
+	}
+	if baseline.Rows <= 0 || baseline.Sites <= 0 || len(baseline.Digest) != cryptosha256.Size*2 {
+		return fmt.Errorf("legacy driver direct-write baseline requires positive rows/sites and a sha256 digest")
+	}
+	if _, err := hex.DecodeString(baseline.Digest); err != nil {
+		return fmt.Errorf("legacy driver direct-write digest: %w", err)
+	}
+	ownerNames := make([]string, 0, len(baseline.Owners))
+	totalRows, totalSites := 0, 0
+	for _, owner := range baseline.Owners {
+		if !validPersistenceOwner(owner.CapabilityOwner) || owner.Rows <= 0 || owner.Sites <= 0 {
+			return fmt.Errorf("legacy driver owner baseline requires a valid owner and positive rows/sites: %+v", owner)
+		}
+		ownerNames = append(ownerNames, owner.CapabilityOwner)
+		totalRows += owner.Rows
+		totalSites += owner.Sites
+	}
+	if err := validateSortedUnique("legacy driver capability owner", ownerNames); err != nil {
+		return err
+	}
+	if !slices.Contains(ownerNames, "execution") {
+		return fmt.Errorf("legacy driver owner baseline must include execution")
+	}
+	if totalRows != baseline.Rows || totalSites != baseline.Sites {
+		return fmt.Errorf("legacy driver owner totals rows=%d sites=%d do not match baseline rows=%d sites=%d", totalRows, totalSites, baseline.Rows, baseline.Sites)
 	}
 	return nil
 }
@@ -404,6 +467,17 @@ func CheckDirectWrites(root string, matrix AnalysisMatrix, inventory DirectWrite
 			violations = append(violations, fmt.Sprintf("stale direct-write baseline entry %s.%s in %s; refresh the baseline so the write cannot be reintroduced", use.Receiver, use.Method, use.File))
 		}
 	}
+	if baseline := inventory.LegacyDriver; baseline != nil {
+		legacy, err := snapshotDirectWritesAtRoots(root, matrix, inventory, []string{baseline.Root})
+		if err != nil {
+			return nil, nil, fmt.Errorf("scan legacy driver direct writes: %w", err)
+		}
+		rows, sites, digest := directWriteDigest(legacy)
+		owners := directWriteOwnerBaselines(legacy)
+		if rows != baseline.Rows || sites != baseline.Sites || digest != baseline.Digest || !slices.Equal(owners, baseline.Owners) {
+			violations = append(violations, fmt.Sprintf("legacy driver direct-write ratchet changed: rows=%d sites=%d digest=%s owners=%+v (baseline rows=%d sites=%d digest=%s owners=%+v)", rows, sites, digest, owners, baseline.Rows, baseline.Sites, baseline.Digest, baseline.Owners))
+		}
+	}
 	return observed, violations, nil
 }
 
@@ -412,17 +486,55 @@ func SnapshotDirectWrites(
 	matrix AnalysisMatrix,
 	inventory DirectWriteInventory,
 ) ([]DirectWriteUse, error) {
+	return snapshotDirectWritesAtRoots(root, matrix, inventory, inventory.AdapterRoots)
+}
+
+func snapshotDirectWritesAtRoots(
+	root string,
+	matrix AnalysisMatrix,
+	inventory DirectWriteInventory,
+	roots []string,
+) ([]DirectWriteUse, error) {
 	profiles := append(append([]AnalysisProfile{}, matrix.Release...), matrix.Tagged...)
 	if len(profiles) == 0 {
 		return nil, errors.New("direct-write analysis requires at least one declared analysis profile")
 	}
 	classifier := newPersistenceClassifier(inventory)
-	results := snapshotDirectWriteProfiles(root, profiles, inventory.AdapterRoots, classifier)
+	results := snapshotDirectWriteProfiles(root, profiles, roots, classifier)
 	calls, problems, err := mergeDirectWriteProfileResults(profiles, results)
 	if err != nil {
 		return nil, err
 	}
 	return classifyDirectWriteCalls(calls, problems, classifier)
+}
+
+func directWriteDigest(uses []DirectWriteUse) (int, int, string) {
+	hash := cryptosha256.New()
+	sites := 0
+	for _, use := range uses {
+		sites += use.Count
+		_, _ = fmt.Fprintf(hash, "%s\t%s\t%s\t%d\t%s\n", use.File, use.Receiver, use.Method, use.Count, use.AggregateOwner)
+	}
+	return len(uses), sites, hex.EncodeToString(hash.Sum(nil))
+}
+
+func directWriteOwnerBaselines(uses []DirectWriteUse) []LegacyDirectWriteOwnerBaseline {
+	byOwner := make(map[string]LegacyDirectWriteOwnerBaseline)
+	for _, use := range uses {
+		owner := byOwner[use.AggregateOwner]
+		owner.CapabilityOwner = use.AggregateOwner
+		owner.Rows++
+		owner.Sites += use.Count
+		byOwner[use.AggregateOwner] = owner
+	}
+	owners := make([]LegacyDirectWriteOwnerBaseline, 0, len(byOwner))
+	for _, owner := range byOwner {
+		owners = append(owners, owner)
+	}
+	slices.SortFunc(owners, func(left, right LegacyDirectWriteOwnerBaseline) int {
+		return strings.Compare(left.CapabilityOwner, right.CapabilityOwner)
+	})
+	return owners
 }
 
 type directWriteProfileResult struct {
@@ -438,7 +550,7 @@ func snapshotDirectWriteProfiles(
 	classifier persistenceClassifier,
 ) []directWriteProfileResult {
 	results := make([]directWriteProfileResult, len(profiles))
-	semaphore := make(chan struct{}, 3)
+	semaphore := make(chan struct{}, repositoryScaleLoadConcurrency)
 	var wg sync.WaitGroup
 	for index, profile := range profiles {
 		index, profile := index, profile
@@ -630,10 +742,6 @@ func validateDirectWriteRequiredSources(root string, profile AnalysisProfile) er
 	if len(profile.RequiredFiles) == 0 {
 		return nil
 	}
-	tags := append([]string(nil), profile.Tags...)
-	if profile.Race {
-		tags = append(tags, "race")
-	}
 	patterns := make([]string, 0, len(profile.RequiredFiles))
 	seenPatterns := map[string]struct{}{}
 	for _, required := range profile.RequiredFiles {
@@ -648,13 +756,11 @@ func validateDirectWriteRequiredSources(root string, profile AnalysisProfile) er
 		}
 	}
 	cfg := &packages.Config{
-		Mode:  packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles,
-		Dir:   root,
-		Env:   profileEnvironment(profile),
-		Tests: true,
-	}
-	if len(tags) > 0 {
-		cfg.BuildFlags = []string{"-tags=" + strings.Join(tags, ",")}
+		Mode:       packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles,
+		Dir:        root,
+		Env:        profileEnvironment(profile),
+		Tests:      true,
+		BuildFlags: profileBuildFlags(profile),
 	}
 	loaded, err := packages.Load(cfg, patterns...)
 	if err != nil {
@@ -667,26 +773,31 @@ func validateDirectWriteRequiredSources(root string, profile AnalysisProfile) er
 	return nil
 }
 
+const directWritePackageLoadMode packages.LoadMode = packages.NeedName |
+	packages.NeedFiles |
+	packages.NeedCompiledGoFiles |
+	packages.NeedSyntax |
+	packages.NeedTypes |
+	packages.NeedTypesInfo |
+	packages.NeedImports
+
 func loadDirectWritePackages(root string, profile AnalysisProfile, adapterRoots []string) ([]*packages.Package, error) {
-	tags := append([]string(nil), profile.Tags...)
-	if profile.Race {
-		tags = append(tags, "race")
-	}
 	cfg := &packages.Config{
-		Mode: packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles |
-			packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo |
-			packages.NeedImports | packages.NeedDeps | packages.NeedModule,
-		Dir: root,
-		Env: profileEnvironment(profile),
-	}
-	if len(tags) > 0 {
-		cfg.BuildFlags = []string{"-tags=" + strings.Join(tags, ",")}
+		// Direct-write collection inspects only the requested adapter roots.
+		// Dependency types are resolved from export data; loading dependency
+		// syntax and TypesInfo here creates a second repository-scale graph per
+		// profile and is not needed by collectDirectWritePackage.
+		Mode:       directWritePackageLoadMode,
+		Dir:        root,
+		Env:        profileEnvironment(profile),
+		BuildFlags: profileBuildFlags(profile),
 	}
 	patterns := []string{}
 	for _, sourceRoot := range adapterRoots {
-		if _, statErr := os.Stat(filepath.Join(root, sourceRoot)); statErr == nil {
-			patterns = append(patterns, "./"+sourceRoot+"/...")
+		if _, statErr := os.Stat(filepath.Join(root, filepath.FromSlash(sourceRoot))); statErr != nil {
+			return nil, fmt.Errorf("inspect direct-write adapter root %q: %w", sourceRoot, statErr)
 		}
+		patterns = append(patterns, "./"+sourceRoot+"/...")
 	}
 	if len(patterns) == 0 {
 		return nil, nil
@@ -696,239 +807,4 @@ func loadDirectWritePackages(root string, profile AnalysisProfile, adapterRoots 
 		return nil, err
 	}
 	return loaded, nil
-}
-
-type directWriteCountKey struct {
-	file     string
-	receiver string
-	method   string
-	owner    string
-}
-
-type persistenceAccess uint8
-
-const (
-	persistenceReadOnly persistenceAccess = iota + 1
-	persistenceMutating
-)
-
-type directWriteCallIdentity struct {
-	file   string
-	line   int
-	column int
-}
-
-type directWriteCall struct {
-	directWriteCallIdentity
-	receiver string
-	method   string
-	profiles map[string]struct{}
-}
-
-type directWriteProblemIdentity struct {
-	file    string
-	line    int
-	column  int
-	message string
-}
-
-type directWriteProblem struct {
-	directWriteProblemIdentity
-	profiles map[string]struct{}
-}
-
-func compareDirectWriteCallIdentity(left, right directWriteCallIdentity) int {
-	leftKey := fmt.Sprintf("%s\x00%09d\x00%09d", left.file, left.line, left.column)
-	rightKey := fmt.Sprintf("%s\x00%09d\x00%09d", right.file, right.line, right.column)
-	return strings.Compare(leftKey, rightKey)
-}
-
-func compareDirectWriteProblemIdentity(left, right directWriteProblemIdentity) int {
-	leftKey := fmt.Sprintf("%s\x00%09d\x00%09d\x00%s", left.file, left.line, left.column, left.message)
-	rightKey := fmt.Sprintf("%s\x00%09d\x00%09d\x00%s", right.file, right.line, right.column, right.message)
-	return strings.Compare(leftKey, rightKey)
-}
-
-func (problem directWriteProblem) withProfiles() string {
-	profiles := make([]string, 0, len(problem.profiles))
-	for profile := range problem.profiles {
-		profiles = append(profiles, profile)
-	}
-	slices.Sort(profiles)
-	return fmt.Sprintf("%s at %s:%d:%d (profiles: %s)", problem.message, problem.file, problem.line, problem.column, strings.Join(profiles, ", "))
-}
-
-func collectDirectWritePackage(
-	root string,
-	pkg *packages.Package,
-	adapterRoots []string,
-	classifier persistenceClassifier,
-	calls map[directWriteCallIdentity]directWriteCall,
-	problems map[directWriteProblemIdentity]directWriteProblem,
-) error {
-	if len(pkg.Errors) > 0 {
-		return fmt.Errorf("load direct-write package %s: %s", pkg.PkgPath, pkg.Errors[0].Msg)
-	}
-	for _, file := range pkg.Syntax {
-		if err := collectDirectWriteFile(root, pkg, file, adapterRoots, classifier, calls, problems); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func collectDirectWriteFile(
-	root string,
-	pkg *packages.Package,
-	file *ast.File,
-	adapterRoots []string,
-	classifier persistenceClassifier,
-	calls map[directWriteCallIdentity]directWriteCall,
-	problems map[directWriteProblemIdentity]directWriteProblem,
-) error {
-	position := pkg.Fset.Position(file.Pos())
-	rel, err := filepath.Rel(root, position.Filename)
-	if err != nil {
-		return err
-	}
-	rel = filepath.ToSlash(rel)
-	if !underAnyRoot(rel, adapterRoots) || strings.HasSuffix(rel, "_test.go") {
-		return nil
-	}
-	collectUndeclaredPersistenceImports(pkg, file, rel, classifier, problems)
-	collectDirectWriteSelectors(pkg, file, rel, classifier, calls)
-	return nil
-}
-
-func collectUndeclaredPersistenceImports(
-	pkg *packages.Package,
-	file *ast.File,
-	rel string,
-	classifier persistenceClassifier,
-	problems map[directWriteProblemIdentity]directWriteProblem,
-) {
-	for _, imported := range file.Imports {
-		importPath, unquoteErr := strconv.Unquote(imported.Path.Value)
-		if unquoteErr != nil {
-			continue
-		}
-		importPosition := pkg.Fset.Position(imported.Pos())
-		if imported.Name != nil && imported.Name.Name == "." && classifier.isPersistenceFunctionPackage(importPath) {
-			identity := directWriteProblemIdentity{
-				file: rel, line: importPosition.Line, column: importPosition.Column,
-				message: fmt.Sprintf("dot import of persistence package %s bypasses qualified package-function analysis", importPath),
-			}
-			problems[identity] = directWriteProblem{directWriteProblemIdentity: identity}
-			continue
-		}
-		if !classifier.undeclaredPersistenceImport(importPath) {
-			continue
-		}
-		identity := directWriteProblemIdentity{
-			file: rel, line: importPosition.Line, column: importPosition.Column,
-			message: fmt.Sprintf("undeclared persistence package import %s", importPath),
-		}
-		problems[identity] = directWriteProblem{directWriteProblemIdentity: identity}
-	}
-}
-
-func collectDirectWriteSelectors(
-	pkg *packages.Package,
-	file *ast.File,
-	rel string,
-	classifier persistenceClassifier,
-	calls map[directWriteCallIdentity]directWriteCall,
-) {
-	ast.Inspect(file, func(node ast.Node) bool {
-		selector, ok := node.(*ast.SelectorExpr)
-		if !ok {
-			return true
-		}
-		selection := pkg.TypesInfo.Selections[selector]
-		if selection == nil {
-			fn, isFunction := pkg.TypesInfo.Uses[selector.Sel].(*types.Func)
-			if !isFunction || fn.Pkg() == nil || !classifier.isPersistenceFunctionPackage(fn.Pkg().Path()) {
-				return true
-			}
-			signature, isSignature := fn.Type().(*types.Signature)
-			if !isSignature || signature.Recv() != nil {
-				return true
-			}
-			collectDirectWriteCall(pkg, selector, rel, fn.Pkg().Path(), fn.Name(), calls)
-			return true
-		}
-		fn, ok := selection.Obj().(*types.Func)
-		if !ok {
-			return true
-		}
-		packagePath, receiverName, receiver, ok := persistenceMethodReceiver(fn)
-		if !ok || !classifier.isPersistenceCandidate(packagePath, receiverName) {
-			return true
-		}
-		collectDirectWriteCall(pkg, selector, rel, receiver, fn.Name(), calls)
-		return true
-	})
-}
-
-func collectDirectWriteCall(
-	pkg *packages.Package,
-	selector *ast.SelectorExpr,
-	rel, receiver, method string,
-	calls map[directWriteCallIdentity]directWriteCall,
-) {
-	callPosition := pkg.Fset.Position(selector.Sel.Pos())
-	identity := directWriteCallIdentity{
-		file: rel, line: callPosition.Line, column: callPosition.Column,
-	}
-	calls[identity] = directWriteCall{
-		directWriteCallIdentity: identity,
-		receiver:                receiver,
-		method:                  method,
-	}
-}
-
-func persistenceMethodReceiver(fn *types.Func) (string, string, string, bool) {
-	if fn.Pkg() == nil {
-		return "", "", "", false
-	}
-	signature, ok := fn.Type().(*types.Signature)
-	if !ok || signature.Recv() == nil {
-		return "", "", "", false
-	}
-	receiverType := signature.Recv().Type()
-	named := receiverType
-	if pointer, ok := named.(*types.Pointer); ok {
-		named = pointer.Elem()
-	}
-	namedType, ok := named.(*types.Named)
-	if !ok || namedType.Obj().Pkg() == nil {
-		return "", "", "", false
-	}
-	receiver := types.TypeString(receiverType, func(p *types.Package) string { return p.Path() })
-	return namedType.Obj().Pkg().Path(), namedType.Obj().Name(), receiver, true
-}
-
-func directWriteRows(counts map[directWriteCountKey]int) []DirectWriteUse {
-	result := make([]DirectWriteUse, 0, len(counts))
-	for key, count := range counts {
-		result = append(result, DirectWriteUse{
-			File: key.file, Receiver: key.receiver, Method: key.method, Count: count,
-			AggregateOwner: key.owner, ExpiresAfterPhase: 7,
-		})
-	}
-	slices.SortFunc(result, func(a, b DirectWriteUse) int { return strings.Compare(directWriteKey(a), directWriteKey(b)) })
-	return result
-}
-
-func directWriteKey(use DirectWriteUse) string {
-	return use.File + "\x00" + use.Receiver + "\x00" + use.Method
-}
-
-func underAnyRoot(path string, roots []string) bool {
-	for _, root := range roots {
-		if path == root || strings.HasPrefix(path, root+"/") {
-			return true
-		}
-	}
-	return false
 }

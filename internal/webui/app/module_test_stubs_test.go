@@ -27,13 +27,15 @@ func (s *stubErrorPool) Stats() daemon.PoolStats     { return daemon.PoolStats{}
 func (s *stubErrorPool) Close() error                { return nil }
 
 // stubTerminalService implements TerminalService with no-op defaults for module tests.
-type stubTerminalService struct{}
+type stubTerminalService struct {
+	tabs []tabmeta.TabMetadata
+}
 
 func (s *stubTerminalService) GenerateToken(_ context.Context, _, _, _ string) (string, error) {
 	return "tok", nil
 }
 func (s *stubTerminalService) ListTabs(_ context.Context, _ string) ([]tabmeta.TabMetadata, error) {
-	return nil, nil
+	return append([]tabmeta.TabMetadata(nil), s.tabs...), nil
 }
 func (s *stubTerminalService) GetTab(_ context.Context, _, _ string) (*tabmeta.TabMetadata, error) {
 	return &tabmeta.TabMetadata{}, nil

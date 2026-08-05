@@ -56,6 +56,16 @@ func roleConfigIsInteractive(roleName string, rc cfgpkg.RoleConfig) bool {
 	return domain.ResolveRoleKind(role, roleName) == domain.RoleKindInteractive
 }
 
+// resolveRoleConfig looks up a role by name, supporting both built-in and custom roles.
+func (s *Supervisor) resolveRoleConfig(roleName string, agentIndex int) (cfgpkg.RoleConfig, error) {
+	cfg := s.ConfigSnapshot()
+	rc, err := ResolveRoleConfigStatic(roleName, cfg, s.ProjectDir)
+	if err != nil {
+		return cfgpkg.RoleConfig{}, fmt.Errorf("agent[%d]: %w", agentIndex, err)
+	}
+	return rc, nil
+}
+
 func builtInRoleConfig(roleName string) cfgpkg.RoleConfig {
 	rc := cfgpkg.RoleConfig{Description: fmt.Sprintf("Built-in %s agent", roleName)}
 	switch roleName {

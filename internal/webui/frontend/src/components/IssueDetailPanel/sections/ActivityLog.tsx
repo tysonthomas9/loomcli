@@ -10,7 +10,7 @@ import { formatDate } from "@/components/table";
 import type { Comment, Event, EventType } from "@/types";
 
 import { AuthorAvatar } from "./AuthorAvatar";
-import { MarkdownRenderer } from "./MarkdownRenderer";
+import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import styles from "./ActivityLog.module.css";
 
 type ActivityItem =

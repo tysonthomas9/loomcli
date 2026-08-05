@@ -23,6 +23,19 @@ type resolvedTarget struct {
 	bundleDigest   string
 }
 
+const (
+	taskReadyEventType                   = "task.ready"
+	taskReadyRouteKey                    = "internal.task.ready"
+	promptAgentDriverID                  = "prompt-agent"
+	taskReadyReconcileSourceEventPrefix  = "task-ready-reconcile-"
+	taskReadyExhaustedRecoverySuffix     = "-exhausted-recovery-v1"
+	taskReadyExhaustedRecoveryHashPrefix = "task-ready-reconcile-exhausted-recovery-v1-"
+	maxTaskReadyRecoverySourceEventIDLen = 128
+	maxDeliveryDispatchIdempotencyKeyLen = 128
+	deliveryDispatchHashPrefix           = "delivery-dispatch:sha256:"
+	internalAdmissionHashPrefix          = "internal:sha256:"
+)
+
 func (s *Service) AdmitEvent(ctx context.Context, eventAuth EventAuthority, command AdmitEventCommand) (*AdmissionResult, error) {
 	workspace, err := normalizeRequired("workspace", command.WorkspaceKey)
 	if err != nil {
@@ -64,22 +77,22 @@ func (s *Service) admitEventAuthorized(ctx context.Context, eventAuth EventAutho
 	}
 
 	if replayed, err := s.probeAdmissionReplay(ctx, derived); err == nil {
-		return s.dispatchAdmission(ctx, replayed)
+		return s.dispatchReplayedAdmission(ctx, eventAuth, command, replayed)
 	} else if !errors.Is(err, ErrAdmissionReplayNotFound) {
 		return nil, err
 	}
 
 	matched, err := s.matchBindings(ctx, derived.workspace, derived.routeKey)
 	if err != nil {
-		return s.recheckAdmissionReplay(ctx, derived, err)
+		return s.recheckAdmissionReplay(ctx, eventAuth, command, derived, err)
 	}
 	bindings := matched.Bindings
 	if len(bindings) == 0 {
-		return s.recheckAdmissionReplay(ctx, derived, errors.Join(ErrNoMatchingBinding, ErrNotFound))
+		return s.recheckAdmissionReplay(ctx, eventAuth, command, derived, errors.Join(ErrNoMatchingBinding, ErrNotFound))
 	}
 	reservation, err := s.buildMatchedEventReservation(ctx, derived, matched)
 	if err != nil {
-		return s.recheckAdmissionReplay(ctx, derived, err)
+		return s.recheckAdmissionReplay(ctx, eventAuth, command, derived, err)
 	}
 	reserved, err := s.reserveEvent(ctx, reservation)
 	if err != nil {
@@ -116,15 +129,95 @@ func (s *Service) probeAdmissionReplay(ctx context.Context, derived *derivedAdmi
 	return reserved, nil
 }
 
-func (s *Service) recheckAdmissionReplay(ctx context.Context, derived *derivedAdmission, preflightErr error) (*AdmissionResult, error) {
+func (s *Service) recheckAdmissionReplay(
+	ctx context.Context,
+	eventAuth EventAuthority,
+	command AdmitEventCommand,
+	derived *derivedAdmission,
+	preflightErr error,
+) (*AdmissionResult, error) {
 	replayed, err := s.probeAdmissionReplay(ctx, derived)
 	if err == nil {
-		return s.dispatchAdmission(ctx, replayed)
+		return s.dispatchReplayedAdmission(ctx, eventAuth, command, replayed)
 	}
 	if errors.Is(err, ErrAdmissionReplayNotFound) {
 		return nil, preflightErr
 	}
 	return nil, err
+}
+
+// dispatchReplayedAdmission gives a current Ready task one bounded recovery
+// generation when its synthetic startup generation has permanently exhausted
+// without creating a DriverRun. The recovery source id is deterministic, so
+// concurrent/repeated startup replays converge on the same reservation. It is
+// deliberately one-shot: the configured delivery retry budget remains the
+// authority after the recovery generation, and serve restarts cannot turn into
+// an unbounded retry mechanism.
+func (s *Service) dispatchReplayedAdmission(
+	ctx context.Context,
+	eventAuth EventAuthority,
+	command AdmitEventCommand,
+	replayed *ReservationResult,
+) (*AdmissionResult, error) {
+	result, err := s.dispatchAdmission(ctx, replayed)
+	if err != nil || !exhaustedTaskReadyReplayNeedsRecovery(result) {
+		return result, err
+	}
+	recovery := command
+	recovery.SourceEventID = taskReadyExhaustedRecoverySourceEventID(result.Event.SourceEventID)
+	return s.admitEventAuthorized(ctx, eventAuth, recovery)
+}
+
+func exhaustedTaskReadyReplayNeedsRecovery(result *AdmissionResult) bool {
+	if result == nil || !result.Replayed || result.Event == nil ||
+		result.Event.Origin != EventOriginSystem ||
+		!repositoryRequiredTaskReadyEvent(result.Event, result.Event.Payload) {
+		return false
+	}
+	sourceEventID := strings.TrimSpace(result.Event.SourceEventID)
+	if !strings.HasPrefix(sourceEventID, taskReadyReconcileSourceEventPrefix) ||
+		isTaskReadyExhaustedRecoverySourceEventID(sourceEventID) || len(result.Deliveries) == 0 {
+		return false
+	}
+
+	exhaustedPromptAgent := false
+	for _, delivery := range result.Deliveries {
+		if delivery == nil || strings.TrimSpace(delivery.DriverRunID) != "" || delivery.NextRetryAt != nil {
+			return false
+		}
+		switch delivery.Status {
+		case DeliveryFailed:
+			if delivery.ErrorClass != DeliveryErrorRetriesExhausted {
+				return false
+			}
+			if delivery.DriverID == promptAgentDriverID {
+				exhaustedPromptAgent = true
+			}
+		case DeliveryDuplicate, DeliveryRejected:
+			// Terminal no-run siblings do not own this generation. In particular,
+			// repository-required fanout deliberately marks all but one prompt role
+			// duplicate, so the sole owner can still qualify after exhausting.
+		default:
+			// Accepted/Held/retryable work or any run-bearing terminal state still
+			// has (or had) an owner; never fork a second generation around it.
+			return false
+		}
+	}
+	return exhaustedPromptAgent
+}
+
+func isTaskReadyExhaustedRecoverySourceEventID(sourceEventID string) bool {
+	return strings.HasSuffix(sourceEventID, taskReadyExhaustedRecoverySuffix) ||
+		strings.HasPrefix(sourceEventID, taskReadyExhaustedRecoveryHashPrefix)
+}
+
+func taskReadyExhaustedRecoverySourceEventID(sourceEventID string) string {
+	legacy := sourceEventID + taskReadyExhaustedRecoverySuffix
+	if len(legacy) <= maxTaskReadyRecoverySourceEventIDLen {
+		return legacy
+	}
+	sum := sha256.Sum256([]byte(legacy))
+	return taskReadyExhaustedRecoveryHashPrefix + hex.EncodeToString(sum[:])
 }
 
 func (s *Service) buildMatchedEventReservation(ctx context.Context, derived *derivedAdmission, matched *BindingMatchSnapshot) (EventReservation, error) {
@@ -209,7 +302,7 @@ func (s *Service) buildDeliveryReservations(ctx context.Context, event *Event, b
 			Status:     DeliveryAccepted,
 			SubjectKey: renderDeliverySubjectKey(binding, event),
 		}
-		if actorFiltered(binding.ActorFilter, event.Origin, event.ActorRef) {
+		if unsafeLegacyWorkflowIssueBinding(binding, event) || actorFiltered(binding.ActorFilter, event.Origin, event.ActorRef) {
 			reservation.Status = DeliveryRejected
 			reservation.RejectionReason = RejectionReasonActorFilter
 			reservations = append(reservations, reservation)
@@ -271,36 +364,6 @@ func catalogGuardFor(bindingID string, resolved resolvedTarget) CatalogGuard {
 		BindingID: bindingID, DriverID: resolved.driverID, VersionID: resolved.versionID,
 		DriverRevision: resolved.driverRevision, SourceDigest: resolved.sourceDigest, BundleDigest: resolved.bundleDigest,
 	}
-}
-
-func (s *Service) dispatchAdmission(ctx context.Context, reserved *ReservationResult) (*AdmissionResult, error) {
-	result := &AdmissionResult{
-		Event:     cloneEvent(reserved.Event),
-		Replayed:  reserved.Replayed,
-		EventType: reserved.Event.EventType,
-		RouteKey:  reserved.Event.RouteKey,
-		Origin:    reserved.Event.Origin,
-		HopDepth:  reserved.Event.HopDepth,
-	}
-	result.Deliveries = make([]*Delivery, len(reserved.Deliveries))
-	for index, item := range reserved.Deliveries {
-		result.Deliveries[index] = cloneDelivery(item.Delivery)
-	}
-
-	dispatchErrors := make([]error, 0)
-	for index, item := range reserved.Deliveries {
-		if item.Delivery.Status != DeliveryAccepted {
-			continue
-		}
-		transitioned, dispatchErr := s.dispatchReserved(ctx, reserved, item)
-		if transitioned != nil {
-			result.Deliveries[index] = cloneDelivery(transitioned)
-		}
-		if dispatchErr != nil {
-			dispatchErrors = append(dispatchErrors, dispatchErr)
-		}
-	}
-	return result, errors.Join(dispatchErrors...)
 }
 
 func (s *Service) matchBindings(ctx context.Context, workspace, routeKey string) (*BindingMatchSnapshot, error) {
@@ -375,7 +438,7 @@ func reservedDispatchRequest(reserved *ReservationResult, item ReservedDelivery)
 	delivery := item.Delivery
 	return ExecutionDispatchRequest{
 		WorkspaceKey:            event.WorkspaceKey,
-		IdempotencyKey:          event.IdempotencyKey + "#" + delivery.TriggerBindingID,
+		IdempotencyKey:          deliveryDispatchIdempotencyKey(event.IdempotencyKey, delivery.TriggerBindingID),
 		ExpectedDeliveryStatus:  delivery.Status,
 		ExpectedDeliveryAttempt: delivery.Attempt,
 		DriverID:                item.Target.DriverID,
@@ -398,6 +461,30 @@ func reservedDispatchRequest(reserved *ReservationResult, item ReservedDelivery)
 		Payload:                 cloneRawMessage(reserved.Payload),
 		SubjectAttrs:            cloneStringMap(reserved.SubjectAttrs),
 	}
+}
+
+// deliveryDispatchIdempotencyKey preserves every historically valid dispatch
+// key byte-for-byte. Only a legacy concatenation Fleet would reject is mapped
+// to a bounded, deterministic digest of the complete legacy value.
+func deliveryDispatchIdempotencyKey(eventIdempotencyKey, bindingID string) string {
+	legacy := eventIdempotencyKey + "#" + bindingID
+	if deliveryDispatchLegacyKeyAccepted(legacy) {
+		return legacy
+	}
+	sum := sha256.Sum256([]byte(legacy))
+	return deliveryDispatchHashPrefix + hex.EncodeToString(sum[:])
+}
+
+func deliveryDispatchLegacyKeyAccepted(key string) bool {
+	if key == "" || len(key) > maxDeliveryDispatchIdempotencyKeyLen {
+		return false
+	}
+	for _, char := range key {
+		if char < 0x21 || char > 0x7e {
+			return false
+		}
+	}
+	return true
 }
 
 func initialDeliveryTransition(workspace string, delivery *Delivery) DeliveryTransition {
@@ -703,6 +790,18 @@ func actorFiltered(filter *ActorFilter, origin EventOrigin, actor string) bool {
 	return true
 }
 
+// unsafeLegacyWorkflowIssueBinding fails closed for bindings persisted before
+// the create/update invariant required workflow actor exclusion. The binding
+// already matched this event, so an actual internal.issue.* route plus a
+// workflow actor is sufficient to identify the self-trigger risk. Recording a
+// rejected delivery preserves admission/audit behavior without dispatching the
+// loop-producing workflow.
+func unsafeLegacyWorkflowIssueBinding(binding *Binding, event *Event) bool {
+	return binding != nil && event != nil && isInternalIssueRoute(event.RouteKey) &&
+		eventActorKind(event.Origin, event.ActorRef) == string(EventOriginWorkflow) &&
+		!excludesWorkflowActor(binding.ActorFilter)
+}
+
 // eventActorKind classifies the trusted actor identity separately from event
 // provenance. Most events use their structurally derived origin directly, but
 // issue-journal entries are system-origin roots whose durable actor can still
@@ -727,7 +826,12 @@ func eventActorKind(origin EventOrigin, actor string) string {
 }
 
 func internalEventIdempotencyKey(workspace, sourceEventID string) string {
-	return "internal:" + workspace + ":" + sourceEventID
+	legacy := "internal:" + workspace + ":" + sourceEventID
+	if deliveryDispatchLegacyKeyAccepted(legacy) {
+		return legacy
+	}
+	sum := sha256.Sum256([]byte(legacy))
+	return internalAdmissionHashPrefix + hex.EncodeToString(sum[:])
 }
 
 func cloneRawMessage(in json.RawMessage) json.RawMessage {

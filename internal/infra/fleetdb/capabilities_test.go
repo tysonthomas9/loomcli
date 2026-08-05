@@ -37,6 +37,34 @@ func TestRequireCapabilitiesEmptyRequirementsSkipProbe(t *testing.T) {
 	}
 }
 
+func TestPhase4FoundationCapabilitiesIncludesWorkItemProfiles(t *testing.T) {
+	t.Parallel()
+
+	got := Phase4FoundationCapabilities()
+	if len(got) != 21 {
+		t.Fatalf("Phase4FoundationCapabilities length = %d, want 21", len(got))
+	}
+	found := map[string]bool{}
+	for _, capability := range got {
+		found[capability] = true
+	}
+	for _, capability := range []string{
+		AgentsLifecycleCommandFencingCapability,
+		AgentsLifecycleCommandOwnershipFencingCapability,
+		WorkItemsRepositoryRequirementCapability,
+		ExecutionDriverRunWorkItemClaimCapability,
+		ExecutionDriverRunReviewWorkItemHandoffCapability,
+		ExecutionTaskRunWorkItemDesignCapability,
+		ExecutionTaskRunTerminalConvergenceCapability,
+		ExecutionTerminalDriverRunWorkRecoveryCapability,
+		ExecutionTerminalDriverRunWorkRecoveryQueueCapability,
+	} {
+		if !found[capability] {
+			t.Fatalf("Phase4FoundationCapabilities = %q, missing %q", got, capability)
+		}
+	}
+}
+
 func TestRequireCapabilitiesAcceptsNormalizedAdvertisedKeys(t *testing.T) {
 	t.Parallel()
 

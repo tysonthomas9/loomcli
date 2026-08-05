@@ -13,13 +13,14 @@ export interface UseInteractivePromptsReturn {
 
 export function useInteractivePrompts(
   workspaceId: string,
+  enabled = true,
 ): UseInteractivePromptsReturn {
   const [prompts, setPrompts] = useState<InteractivePromptInfo[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!workspaceId) {
+    if (!workspaceId || !enabled) {
       setPrompts([]);
       setIsLoading(false);
       setError(null);
@@ -45,7 +46,7 @@ export function useInteractivePrompts(
     return () => {
       active = false;
     };
-  }, [workspaceId]);
+  }, [workspaceId, enabled]);
 
   return { prompts, isLoading, error };
 }

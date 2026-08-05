@@ -92,11 +92,11 @@ func TestLoadNativeEvents_ParsesCanonicalTSLeafTranscript(t *testing.T) {
 	}
 
 	src := filepath.Join(t.TempDir(), "canonical.jsonl")
-	payload := []byte(`{"role":"system","type":"session_meta","text":"local-cli-codex session for TASK-1"}` + "\n" +
-		`{"role":"assistant","type":"text","text":"working on it"}` + "\n" +
-		`{"role":"assistant","type":"tool_use","tool_name":"bash","tool_use_id":"t1"}` + "\n" +
-		`{"role":"tool","type":"tool_result","tool_use_id":"t1","output":"done"}` + "\n" +
-		`{"role":"system","type":"result","text":"completed | in=10 out=5"}` + "\n")
+	payload := []byte(`{"timestamp":"2026-07-28T12:00:00Z","role":"system","type":"session_meta","text":"local-cli-codex session for TASK-1"}` + "\n" +
+		`{"timestamp":"2026-07-28T12:00:01Z","role":"assistant","type":"text","text":"working on it"}` + "\n" +
+		`{"timestamp":"2026-07-28T12:00:02Z","role":"assistant","type":"tool_use","tool_name":"bash","tool_use_id":"t1"}` + "\n" +
+		`{"timestamp":"2026-07-28T12:00:03Z","role":"tool","type":"tool_result","tool_use_id":"t1","output":"done"}` + "\n" +
+		`{"timestamp":"2026-07-28T12:00:04Z","role":"system","type":"result","text":"completed | in=10 out=5"}` + "\n")
 	if err := os.WriteFile(src, payload, 0o600); err != nil {
 		t.Fatalf("write src: %v", err)
 	}

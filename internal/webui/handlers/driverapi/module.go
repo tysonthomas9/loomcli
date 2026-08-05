@@ -36,8 +36,11 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/epicrunner"
-	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
+	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/roles"
 )
@@ -51,6 +54,7 @@ const (
 	HeaderDriverRunID        = "X-Loom-Driver-Run-Id"
 	HeaderDriverNodeID       = "X-Loom-Driver-Node-Id"
 	HeaderDriverLeaseID      = "X-Loom-Driver-Lease-Id"
+	HeaderDriverLeaseToken   = "X-Loom-Driver-Lease-Token"   //nolint:gosec // header name, not a credential value
 	HeaderDriverFencingToken = "X-Loom-Driver-Fencing-Token" //nolint:gosec // header name, not a credential
 )
 
@@ -67,7 +71,7 @@ type Config struct {
 	// APIBaseURL is this serve process's own driver/task-run API base URL,
 	// handed to bridge-spawned task runners as LOOM_TASK_RUN_API_URL so they
 	// talk back to serve with their lease token instead of dialing fleet-db.
-	// Empty keeps runners on the legacy direct-fleet-db env.
+	// Task-run preflight fails closed when this is empty.
 	APIBaseURL string
 	// APIToken, when non-empty, must be presented by clients as
 	// "Authorization: Bearer <token>". Requests authenticated by a valid
@@ -84,6 +88,10 @@ type Config struct {
 	// LocalSettingsDir is the desktop-local settings directory exposed only to
 	// bundled local-task-runner executions.
 	LocalSettingsDir string
+	// LocalRepoPath resolves the trusted machine-local checkout recorded for
+	// one workspace repo. It enables local-review diff acquisition without
+	// changing the shared Repo record's canonical remote URL.
+	LocalRepoPath func(workspaceKey, repoName string) string
 	// IssueBackends overrides the default fleet-db issue backend factory.
 	IssueBackends IssueBackendFactory
 	// Dispatcher is the connector egress choke point for connector-dispatch.
@@ -96,22 +104,41 @@ type Config struct {
 	WorkflowEventing *workfloweventing.Workflow
 	// EventAwaits preserves the post-admission AW7 notification through a
 	// narrow port while await ownership remains in the legacy trigger package.
-	EventAwaits WorkflowEventAwaitDispatcher
+	EventAwaits          WorkflowEventAwaitDispatcher
+	Execution            execution.DriverRunAPI
+	ExecutionAuthorities execution.DriverRunAuthorityResolver
+	TaskRunRequests      execution.TaskRunRequestAPI
+	TaskRunRecovery      execution.TaskRunRecoveryAPI
+	TaskRuns             execution.TaskRunAPI
+	TaskRunAuthorities   execution.TaskRunAuthorityResolver
+	WorkflowCatalog      workflowcatalog.API
+	// Artifacts is injected into the host bridge used by exec-task. There is
+	// no production Store.Artifacts compatibility fallback.
+	Artifacts artifactsmodule.API
 }
 
 // Module serves the workspace-scoped driver-op routes.
 type Module struct {
-	store            store.Store
-	apiToken         string
-	runTokenKey      []byte
-	apiBaseURL       string
-	worktreePath     string
-	localSettingsDir string
-	issueBackends    IssueBackendFactory
-	dispatcher       *connector.Dispatcher
-	workflowEventing *workfloweventing.Workflow
-	eventAwaits      WorkflowEventAwaitDispatcher
-	ops              map[string]opHandler
+	store                store.Store
+	apiToken             string
+	runTokenKey          []byte
+	apiBaseURL           string
+	worktreePath         string
+	localSettingsDir     string
+	localRepoPath        func(workspaceKey, repoName string) string
+	issueBackends        IssueBackendFactory
+	dispatcher           *connector.Dispatcher
+	workflowEventing     *workfloweventing.Workflow
+	eventAwaits          WorkflowEventAwaitDispatcher
+	execution            execution.DriverRunAPI
+	executionAuthorities execution.DriverRunAuthorityResolver
+	taskRunRequests      execution.TaskRunRequestAPI
+	taskRunRecovery      execution.TaskRunRecoveryAPI
+	taskRuns             execution.TaskRunAPI
+	taskRunAuthorities   execution.TaskRunAuthorityResolver
+	workflowCatalog      workflowcatalog.API
+	artifacts            artifactsmodule.API
+	ops                  map[string]opHandler
 
 	// Watch stream cadence (see watch.go). Defaults set in NewModule;
 	// overridden in tests.
@@ -119,60 +146,73 @@ type Module struct {
 	watchHeartbeatInterval time.Duration
 	watchReconcileInterval time.Duration
 
-	// deliverAssignment is a test seam over
-	// leadcontrol.DeliverCurrentAssignment for deliver-lead-assignment.
-	deliverAssignment func(ctx context.Context, st store.Store, workspace, leadName string) (*leadcontrol.DeliveryResult, error)
+	// deliverAssignment is a test seam over the driver's lead-assignment
+	// delivery facade.
+	deliverAssignment func(ctx context.Context, st store.Store, workspace, leadName string) (driverpkg.AgentMessageDeliveryResult, error)
 }
 
 // NewModule constructs the driver API module. Returns nil-safe behavior: with
 // a nil store, Register registers nothing.
 func NewModule(cfg Config) *Module { //nolint:funlen // Operation registration is an explicit capability table.
 	m := &Module{
-		store:            cfg.Store,
-		apiToken:         strings.TrimSpace(cfg.APIToken),
-		runTokenKey:      cfg.RunTokenKey,
-		apiBaseURL:       strings.TrimSpace(cfg.APIBaseURL),
-		worktreePath:     cfg.WorktreePath,
-		localSettingsDir: strings.TrimSpace(cfg.LocalSettingsDir),
-		issueBackends:    cfg.IssueBackends,
-		dispatcher:       cfg.Dispatcher,
-		workflowEventing: cfg.WorkflowEventing,
-		eventAwaits:      cfg.EventAwaits,
+		store:                cfg.Store,
+		apiToken:             strings.TrimSpace(cfg.APIToken),
+		runTokenKey:          cfg.RunTokenKey,
+		apiBaseURL:           strings.TrimSpace(cfg.APIBaseURL),
+		worktreePath:         cfg.WorktreePath,
+		localSettingsDir:     strings.TrimSpace(cfg.LocalSettingsDir),
+		localRepoPath:        cfg.LocalRepoPath,
+		issueBackends:        cfg.IssueBackends,
+		dispatcher:           cfg.Dispatcher,
+		workflowEventing:     cfg.WorkflowEventing,
+		eventAwaits:          cfg.EventAwaits,
+		execution:            cfg.Execution,
+		executionAuthorities: cfg.ExecutionAuthorities,
+		taskRunRequests:      cfg.TaskRunRequests,
+		taskRunRecovery:      cfg.TaskRunRecovery,
+		taskRuns:             cfg.TaskRuns,
+		taskRunAuthorities:   cfg.TaskRunAuthorities,
+		workflowCatalog:      cfg.WorkflowCatalog,
+		artifacts:            cfg.Artifacts,
 
 		watchPollInterval:      defaultWatchPollInterval,
 		watchHeartbeatInterval: defaultWatchHeartbeatInterval,
 		watchReconcileInterval: defaultWatchReconcileInterval,
 
-		deliverAssignment: leadcontrol.DeliverCurrentAssignment,
+		deliverAssignment: driverpkg.DeliverLeadAssignmentForDriver,
 	}
 	m.ops = map[string]opHandler{
-		"claim-ready":                 m.claimReady,
-		"claim-task":                  m.claimTask,
-		"binding-config":              m.bindingConfig,
-		"role-get":                    m.roleGet,
-		"epic-get":                    m.epicGet,
-		"epic-snapshot":               m.epicSnapshot,
-		"list-agents":                 m.listAgents,
-		"agent-orchestration-session": m.agentOrchestrationSession,
-		"update-agent-parent":         m.updateAgentParent,
-		"deliver-lead-assignment":     m.deliverLeadAssignment,
-		"deliver-agent-message":       m.deliverAgentMessage,
-		"exec-task":                   m.execTask,
-		"task-run-get":                m.taskRunGet,
-		"active-task-runs":            m.activeTaskRuns,
-		"recover-stale-tasks":         m.recoverStaleTasks,
-		"complete-task":               m.completeTask,
-		"task-diff":                   m.taskDiff,
-		"release-task":                m.releaseTask,
-		"connector-dispatch":          m.connectorDispatch,
-		"emit-event":                  m.emitEvent,
-		"issue-get":                   m.issueGet,
-		"issue-list":                  m.issueList,
-		"issue-list-comments":         m.issueListComments,
-		"issue-comment":               m.issueComment,
-		"issue-update":                m.issueUpdate,
-		"issue-add-label":             m.issueAddLabel,
-		"issue-remove-label":          m.issueRemoveLabel,
+		"claim-ready":                     m.claimReady,
+		"claim-task":                      m.claimTask,
+		"claim-review":                    m.claimReview,
+		"handoff-review":                  m.handoffReview,
+		"binding-config":                  m.bindingConfig,
+		"role-get":                        m.roleGet,
+		"epic-get":                        m.epicGet,
+		"epic-snapshot":                   m.epicSnapshot,
+		"list-agents":                     m.listAgents,
+		"agent-orchestration-session":     m.agentOrchestrationSession,
+		"update-agent-parent":             m.updateAgentParent,
+		"deliver-lead-assignment":         m.deliverLeadAssignment,
+		"deliver-agent-message":           m.deliverAgentMessage,
+		"exec-task":                       m.execTask,
+		"task-run-get":                    m.taskRunGet,
+		"active-task-runs":                m.activeTaskRuns,
+		"recover-stale-tasks":             m.recoverStaleTasks,
+		"complete-task":                   m.completeTask,
+		"task-diff":                       m.taskDiff,
+		"release-task":                    m.releaseTask,
+		"release-review":                  m.releaseReview,
+		"connector-dispatch":              m.connectorDispatch,
+		"emit-event":                      m.emitEvent,
+		"issue-get":                       m.issueGet,
+		"issue-list":                      m.issueList,
+		"issue-list-comments":             m.issueListComments,
+		"issue-comment":                   m.issueComment,
+		"issue-update":                    m.issueUpdate,
+		"issue-block-repository-required": m.issueBlockRepositoryRequired,
+		"issue-add-label":                 m.issueAddLabel,
+		"issue-remove-label":              m.issueRemoveLabel,
 	}
 	if m.worktreePath == "" {
 		if wd, err := os.Getwd(); err == nil {
@@ -206,6 +246,10 @@ func (m *Module) Register(mux *http.ServeMux) {
 	if m.store == nil {
 		return
 	}
+	// verify-run is an internal CLI ownership handshake, not part of the
+	// frozen SDK operation table below. Keep it on an explicit route so adding
+	// the handshake does not silently expand the public driver-op surface.
+	mux.HandleFunc("POST /api/workspaces/{ws}/driver/verify-run", m.handleVerifyRun)
 	mux.HandleFunc("POST /api/workspaces/{ws}/driver/{op}", m.handleOp)
 	mux.HandleFunc("GET /api/workspaces/{ws}/driver/watch/epic", m.handleWatchEpic)
 	// Await-event ops (AW9): two-segment paths the {op} pattern cannot match.
@@ -216,13 +260,22 @@ func (m *Module) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/workspaces/{ws}/driver/workflows/await", m.handleWorkflowsAwait)
 }
 
+func (m *Module) handleVerifyRun(w http.ResponseWriter, r *http.Request) {
+	tokenID, ok := m.authenticate(w, r)
+	if !ok {
+		return
+	}
+	m.serveAuthorizedOp(w, r, m.verifyRun, tokenID)
+}
+
 // driverIdentity is the per-request parent DriverRun identity resolved from
 // the request headers.
 type driverIdentity struct {
-	RunID   string
-	NodeID  string
-	LeaseID string
-	fence   string
+	RunID      string
+	NodeID     string
+	LeaseID    string
+	LeaseToken string
+	fence      string
 }
 
 func (id driverIdentity) FencingToken() (int64, error) {
@@ -284,10 +337,11 @@ func (m *Module) serveAuthorizedOp(w http.ResponseWriter, r *http.Request, handl
 // identity from the driver headers.
 func driverIdentityFromHeaders(r *http.Request) driverIdentity {
 	return driverIdentity{
-		RunID:   strings.TrimSpace(r.Header.Get(HeaderDriverRunID)),
-		NodeID:  strings.TrimSpace(r.Header.Get(HeaderDriverNodeID)),
-		LeaseID: strings.TrimSpace(r.Header.Get(HeaderDriverLeaseID)),
-		fence:   r.Header.Get(HeaderDriverFencingToken),
+		RunID:      strings.TrimSpace(r.Header.Get(HeaderDriverRunID)),
+		NodeID:     strings.TrimSpace(r.Header.Get(HeaderDriverNodeID)),
+		LeaseID:    strings.TrimSpace(r.Header.Get(HeaderDriverLeaseID)),
+		LeaseToken: strings.TrimSpace(r.Header.Get(HeaderDriverLeaseToken)),
+		fence:      r.Header.Get(HeaderDriverFencingToken),
 	}
 }
 
@@ -295,7 +349,63 @@ type opHandler func(ctx context.Context, ws string, id driverIdentity, body []by
 
 // verifyParent proves the caller owns a running parent DriverRun.
 func (m *Module) verifyParent(ctx context.Context, ws string, id driverIdentity) (*domain.DriverRun, error) {
-	return driverpkg.VerifyRunningDriverRun(ctx, m.store, ws, id.RunID, id.NodeID, id.LeaseID, id.FencingToken)
+	if m.execution == nil || m.executionAuthorities == nil {
+		return nil, fmt.Errorf("execution DriverRun verification capability is unavailable: %w", execution.ErrUnavailable)
+	}
+	owner, err := driverRunExecutionOwner(id, id.RunID)
+	if err != nil {
+		return nil, err
+	}
+	auth, err := m.executionAuthorities.ResolveDriverRunAuthority(ctx, ws, execution.ActionHeartbeatDriverRun, owner)
+	if err != nil {
+		return nil, err
+	}
+	run, err := m.execution.HeartbeatDriverRun(ctx, auth, execution.DriverRunHeartbeatCommand{
+		WorkspaceKey: ws, Owner: owner, At: time.Now().UTC(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return driverpkg.LegacyDriverRunSnapshot(run)
+}
+
+func driverRunExecutionOwner(id driverIdentity, runID string) (execution.Owner, error) {
+	fence, err := id.FencingToken()
+	if err != nil {
+		return execution.Owner{}, err
+	}
+	return execution.Owner{
+		ResourceKind: execution.ResourceDriverRun, ResourceID: strings.TrimSpace(runID),
+		NodeID: id.NodeID, LeaseID: id.LeaseID, LeaseToken: id.LeaseToken, FencingToken: fence,
+	}, nil
+}
+
+// verifyRun is the run-scoped management handshake used by hidden CLI
+// commands before they access issue or agent read models. Authentication and
+// owner proof stay server-side and cross the typed Execution heartbeat API;
+// the CLI never opens Store to prove a lease.
+func (m *Module) verifyRun(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
+	if err := decodeNoParams(body); err != nil {
+		return nil, err
+	}
+	return m.verifyParent(ctx, ws, id)
+}
+
+func decodeNoParams(body []byte) error {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	var params struct{}
+	if err := decoder.Decode(&params); err != nil {
+		return fmt.Errorf("decode driver op params: %s: %w", err.Error(), domain.ErrInvalid)
+	}
+	var extra any
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		if err == nil {
+			err = fmt.Errorf("multiple JSON values")
+		}
+		return fmt.Errorf("decode driver op params: %s: %w", err.Error(), domain.ErrInvalid)
+	}
+	return nil
 }
 
 func decodeParams[T any](body []byte) (T, error) {
@@ -319,8 +429,9 @@ func (m *Module) claimReady(ctx context.Context, ws string, id driverIdentity, b
 		Actor string `json:"actor"`
 		// Type optionally narrows the ready queue to one issue type (e.g.
 		// "bug"), applied server-side by the ready view.
-		Type  string `json:"type"`
-		Limit int    `json:"limit"`
+		Type       string `json:"type"`
+		SourceRepo string `json:"sourceRepo"`
+		Limit      int    `json:"limit"`
 	}](body)
 	if err != nil {
 		return nil, err
@@ -335,17 +446,24 @@ func (m *Module) claimReady(ctx context.Context, ws string, id driverIdentity, b
 	if err != nil {
 		return nil, err
 	}
-	// ClaimReadyTask defaults a non-positive limit itself.
-	claimed, err := driverpkg.ClaimReadyTask(ctx, issueBackend, driverpkg.TaskClaimOptions{
-		EpicID: epicID,
-		Actor:  actor,
-		Type:   strings.TrimSpace(params.Type),
-		Limit:  params.Limit,
+	ready, err := driverpkg.ReadyTaskCandidates(ctx, issueBackend, driverpkg.TaskClaimOptions{
+		EpicID: epicID, Type: strings.TrimSpace(params.Type),
+		SourceRepo: strings.TrimSpace(params.SourceRepo), Limit: params.Limit,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("claim ready task: %w", err)
+		return nil, fmt.Errorf("list ready tasks: %w", err)
 	}
-	return claimed, nil
+	for _, issue := range ready {
+		claimed, claimErr := m.claimDriverRunWorkItem(ctx, ws, id, parent, issue, "")
+		if claimErr == nil {
+			return claimed, nil
+		}
+		if errors.Is(claimErr, execution.ErrConflict) {
+			continue
+		}
+		return nil, fmt.Errorf("claim ready task %q: %w", issue.ID, claimErr)
+	}
+	return nil, nil
 }
 
 // claimTask claims one SPECIFIC ready task by id (GAP B): the event-driven
@@ -382,16 +500,98 @@ func (m *Module) claimTask(ctx context.Context, ws string, id driverIdentity, bo
 	if err != nil {
 		return nil, err
 	}
-	claimed, err := driverpkg.ClaimTask(ctx, issueBackend, driverpkg.TaskClaimByIDOptions{
+	issue, err := driverpkg.ReadyTaskByID(ctx, issueBackend, driverpkg.TaskClaimByIDOptions{
 		TaskID: params.TaskID,
-		Actor:  actor,
 		EpicID: strings.TrimSpace(params.EpicID),
 		Limit:  params.Limit,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("claim task: %w", err)
 	}
+	claimed, err := m.claimDriverRunWorkItem(ctx, ws, id, parent, *issue, "")
+	if err != nil {
+		return nil, fmt.Errorf("claim task: %w", err)
+	}
 	return claimed, nil
+}
+
+// claimReview claims one exact Review-column card without routing it through
+// the ready queue. The detail read provides an early, comprehensible conflict;
+// RequiredStatus carries the same precondition into FleetDB's atomic claim so a
+// concurrent status change cannot turn this into a claim of ordinary ready
+// work.
+func (m *Module) claimReview(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
+	params, err := decodeParams[struct {
+		TaskID string `json:"taskId"`
+	}](body)
+	if err != nil {
+		return nil, err
+	}
+	parent, err := m.verifyParent(ctx, ws, id)
+	if err != nil {
+		return nil, err
+	}
+	taskID := strings.TrimSpace(params.TaskID)
+	if taskID == "" {
+		return nil, fmt.Errorf("taskId required: %w", domain.ErrInvalid)
+	}
+	issueBackend, err := m.issueBackends(ws, driverpkg.DriverRunActor(parent.RunID))
+	if err != nil {
+		return nil, err
+	}
+	detail, err := issueBackend.Get(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("get review task: %w", err)
+	}
+	if detail == nil || detail.Status != execution.DriverRunWorkItemRestoreReview {
+		return nil, fmt.Errorf("task %q is not in review: %w", taskID, execution.ErrConflict)
+	}
+	claimed, err := m.claimDriverRunWorkItem(
+		ctx, ws, id, parent, detail.IssueData, execution.DriverRunWorkItemRestoreReview,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("claim review task: %w", err)
+	}
+	return claimed, nil
+}
+
+func (m *Module) claimDriverRunWorkItem(
+	ctx context.Context,
+	ws string,
+	id driverIdentity,
+	parent *domain.DriverRun,
+	issue backend.IssueData,
+	requiredStatus string,
+) (*driverpkg.ClaimedTask, error) {
+	if m.execution == nil || m.executionAuthorities == nil {
+		return nil, fmt.Errorf("execution DriverRun Work Item claim capability is unavailable: %w", execution.ErrUnavailable)
+	}
+	owner, err := driverRunExecutionOwner(id, parent.RunID)
+	if err != nil {
+		return nil, err
+	}
+	auth, err := m.executionAuthorities.ResolveDriverRunAuthority(ctx, ws, execution.ActionClaimDriverRunWorkItem, owner)
+	if err != nil {
+		return nil, fmt.Errorf("resolve DriverRun Work Item claim authority: %w", err)
+	}
+	requestID := execution.ClaimDriverRunWorkItemRequestID(parent.RunID, issue.ID)
+	result, err := m.execution.ClaimDriverRunWorkItem(ctx, auth, execution.ClaimDriverRunWorkItemCommand{
+		WorkspaceKey: ws, RequestID: requestID, Owner: owner, WorkItemID: issue.ID,
+		RequiredStatus: requiredStatus, ClaimedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	if result.WorkItem == nil || result.Action == nil {
+		return nil, fmt.Errorf("typed Work Item claim returned no committed envelope: %w", execution.ErrConflict)
+	}
+	committed := backend.IssueData{
+		ID: result.WorkItem.WorkItemID, Title: result.WorkItem.Title, Status: result.WorkItem.Status,
+		Priority: result.WorkItem.Priority, IssueType: result.WorkItem.IssueType, Assignee: result.WorkItem.Assignee,
+		Labels: append([]string(nil), result.WorkItem.Labels...), SourceRepo: result.WorkItem.SourceRepo,
+		Parent: result.WorkItem.ParentID, UpdatedAt: result.WorkItem.UpdatedAt,
+	}
+	return driverpkg.ClaimedTaskFromIssue(committed, driverpkg.DriverRunActor(parent.RunID), result.Action.ActionID, result.Action.CreatedAt), nil
 }
 
 // roleGet returns a Role (behavior-config) record plus its prompt body (GAP C):
@@ -563,11 +763,7 @@ func (m *Module) deliverLeadAssignment(ctx context.Context, ws string, id driver
 	if err != nil {
 		return nil, fmt.Errorf("deliver lead assignment: %w", err)
 	}
-	state := leadcontrol.DeliveryStateNone
-	if delivery != nil {
-		state = delivery.State
-	}
-	if state != leadcontrol.DeliveryStateDelivered && state != leadcontrol.DeliveryStateUnsupported {
+	if delivery.State != driverpkg.AgentMessageDeliveryStateDelivered && delivery.State != driverpkg.AgentMessageDeliveryStateUnsupported {
 		if _, err := m.store.Outbox().Create(ctx, store.OutboxCreate{
 			WorkspaceKey: ws,
 			Kind:         domain.OutboxKindLeadAssignment,
@@ -579,7 +775,7 @@ func (m *Module) deliverLeadAssignment(ctx context.Context, ws string, id driver
 			return nil, fmt.Errorf("enqueue lead assignment outbox: %w", err)
 		}
 	}
-	return driverpkg.NewAgentMessageDeliveryResult(leadName, delivery), nil
+	return delivery, nil
 }
 
 func (m *Module) deliverAgentMessage(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
@@ -602,302 +798,6 @@ func (m *Module) deliverAgentMessage(ctx context.Context, ws string, id driverId
 	result, err := driverpkg.DeliverAgentMessageForDriver(ctx, m.store, ws, parent.RunID, agentName, message)
 	if err != nil {
 		return nil, fmt.Errorf("deliver agent message: %w", err)
-	}
-	return result, nil
-}
-
-// execTaskParams is the exec-task request body.
-type execTaskParams struct {
-	TaskID             string   `json:"taskId"`
-	TaskRunID          string   `json:"taskRunId"`
-	DriverStepID       string   `json:"driverStepId"`
-	WorkerProfileID    string   `json:"workerProfileId"`
-	Runner             string   `json:"runner"`
-	ProviderProfile    string   `json:"providerProfile"`
-	ParentSessionID    string   `json:"parentSessionId"`
-	NodeID             string   `json:"nodeId"`
-	TargetNodeID       string   `json:"targetNodeId"`
-	RunnerID           string   `json:"runnerId"`
-	LeaseToken         string   `json:"leaseToken"`
-	SupportedProviders []string `json:"supportedProviders"`
-	Capabilities       []string `json:"capabilities"`
-	RepoRef            string   `json:"repoRef"`
-	SandboxPlacement   struct {
-		Provider  string `json:"provider"`
-		SandboxID string `json:"sandboxId"`
-		CWD       string `json:"cwd"`
-		RepoRef   string `json:"repoRef"`
-	} `json:"sandboxPlacement"`
-	DeferCompletion bool `json:"deferCompletion"`
-	EnqueueOnly     bool `json:"enqueueOnly"`
-	// CloseTask optionally overrides whether the serve task worker closes the
-	// underlying task issue on success. Pointer so an absent field preserves the
-	// worker default (true) byte-for-byte; a planner run passes false to leave
-	// the card in design+review. Precedent: taskrunapi completeParams.CloseTask.
-	CloseTask *bool `json:"closeTask,omitempty"`
-	// Input is the optional task-run payload (camelCase driver wire). It is
-	// persisted on the run and delivered verbatim to the runner.
-	Input json.RawMessage `json:"input,omitempty"`
-}
-
-func (p execTaskParams) requestOptions(ws string, id driverIdentity, fencingToken int64) driverpkg.TaskRunRequestOptions {
-	opts := driverpkg.TaskRunRequestOptions{
-		WorkspaceKey:       ws,
-		DriverRunID:        id.RunID,
-		DriverStepID:       p.DriverStepID,
-		TaskRunID:          p.TaskRunID,
-		TaskID:             p.TaskID,
-		WorkerProfileID:    p.WorkerProfileID,
-		Runner:             p.Runner,
-		ProviderProfile:    p.ProviderProfile,
-		ParentSessionID:    p.ParentSessionID,
-		ParentNodeID:       id.NodeID,
-		ParentLeaseID:      id.LeaseID,
-		ParentFence:        fencingToken,
-		NodeID:             firstNonEmpty(p.NodeID, p.TargetNodeID),
-		RunnerID:           p.RunnerID,
-		LeaseToken:         p.LeaseToken,
-		SupportedProviders: p.SupportedProviders,
-		Capabilities:       p.Capabilities,
-		DeferCompletion:    p.DeferCompletion,
-		CloseTaskOnSuccess: p.CloseTask,
-		Input:              p.Input,
-		SandboxPlacement: domain.TaskRunPlacement{
-			Provider:  p.SandboxPlacement.Provider,
-			SandboxID: p.SandboxPlacement.SandboxID,
-			CWD:       p.SandboxPlacement.CWD,
-			RepoRef:   firstNonEmpty(p.SandboxPlacement.RepoRef, p.RepoRef),
-		},
-	}
-	if strings.TrimSpace(p.Runner) == "" {
-		opts.ProviderProfile = p.ProviderProfile
-		opts.SupportedProviders = p.SupportedProviders
-	}
-	return opts
-}
-
-func (m *Module) execTask(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
-	params, err := decodeParams[execTaskParams](body)
-	if err != nil {
-		return nil, err
-	}
-	if strings.TrimSpace(params.TaskID) == "" {
-		return nil, fmt.Errorf("taskId required: %w", domain.ErrInvalid)
-	}
-	fencingToken, err := id.FencingToken()
-	if err != nil {
-		return nil, err
-	}
-	opts := params.requestOptions(ws, id, fencingToken)
-	// Auto-create the run→task-run linkage step when the caller supplied none.
-	// The DriverStep is the STRUCTURED edge the unified agent detail resolves a
-	// run's transcript through (getRun embeds steps; the workflow's own JSON
-	// result is buried as a string in output.flue_stdout_tail, so without a
-	// step a bare exec-task dispatch is invisible to the UI). fleet-db requires
-	// a client-minted step_id and fences creation to the run's owner, so the
-	// id is deterministic per (run, task) — a durable-resume re-dispatch hits
-	// already-exists and REUSES the same step instead of duplicating it.
-	// Best-effort beyond that: a step-create failure must never block the
-	// dispatch — the linkage degrades, the work proceeds.
-	if strings.TrimSpace(opts.DriverStepID) == "" {
-		stepID := "step-" + id.RunID + "-" + strings.TrimSpace(params.TaskID)
-		_, stepErr := m.store.DriverSteps().CreateForRun(ctx, ws, id.RunID, store.DriverStepCreate{
-			StepID:       stepID,
-			StepKind:     "task_run",
-			Status:       domain.DriverStepQueued,
-			NodeID:       id.NodeID,
-			LeaseID:      id.LeaseID,
-			FencingToken: fencingToken,
-		})
-		if stepErr == nil || errors.Is(stepErr, domain.ErrConflict) || errors.Is(stepErr, domain.ErrAlreadyExists) {
-			opts.DriverStepID = stepID
-		}
-	}
-	executor := driverpkg.HostBridgeTaskExecutor{
-		Store:            m.store,
-		WorktreePath:     m.worktreePath,
-		APIBaseURL:       m.apiBaseURL,
-		LocalSettingsDir: m.localSettingsDir,
-		WorktreeResolver: driverpkg.LocalTaskWorktreeResolver{Store: m.store, Lineage: driverpkg.DefaultStackLineageLookup()},
-		StackStore:       driverpkg.DefaultStackStore(),
-	}
-	if params.EnqueueOnly {
-		outcome, err := driverpkg.EnqueueTaskRunWithResult(ctx, m.store, opts, executor)
-		if err != nil {
-			return nil, fmt.Errorf("enqueue task: %w", err)
-		}
-		return driverpkg.TaskRunResultFromOutcome(outcome), nil
-	}
-	outcome, err := driverpkg.RequestTaskRunWithResult(ctx, m.store, opts, executor)
-	if err != nil {
-		return nil, fmt.Errorf("exec task: %w", err)
-	}
-	return driverpkg.TaskRunResultFromOutcome(outcome), nil
-}
-
-func (m *Module) taskRunGet(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
-	params, err := decodeParams[struct {
-		TaskRunID string `json:"taskRunId"`
-	}](body)
-	if err != nil {
-		return nil, err
-	}
-	parent, err := m.verifyParent(ctx, ws, id)
-	if err != nil {
-		return nil, err
-	}
-	taskRunID := strings.TrimSpace(params.TaskRunID)
-	if taskRunID == "" {
-		return nil, fmt.Errorf("taskRunId required: %w", domain.ErrInvalid)
-	}
-	run, err := m.store.TaskRuns().Get(ctx, ws, taskRunID)
-	if err != nil {
-		return nil, fmt.Errorf("get task run: %w", err)
-	}
-	if run.DriverRunID != parent.RunID {
-		return nil, fmt.Errorf("task run %q does not belong to driver run %q: %w", taskRunID, parent.RunID, domain.ErrNotFound)
-	}
-	return driverpkg.TaskRunResultFromDomain(run), nil
-}
-
-func (m *Module) activeTaskRuns(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
-	params, err := decodeParams[struct {
-		EpicID string `json:"epicId"`
-		Limit  int    `json:"limit"`
-	}](body)
-	if err != nil {
-		return nil, err
-	}
-	parent, err := m.verifyParent(ctx, ws, id)
-	if err != nil {
-		return nil, err
-	}
-	epicID := firstNonEmpty(params.EpicID, parent.EpicID, driverpkg.DriverRunPayloadEpicID(parent.Payload))
-	limit := params.Limit
-	if limit <= 0 {
-		limit = 100
-	}
-	active, err := driverpkg.ListActiveTaskRuns(ctx, m.store, driverpkg.ActiveTaskRunsOptions{
-		WorkspaceKey: ws,
-		DriverRunID:  parent.RunID,
-		EpicID:       epicID,
-		Limit:        limit,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("list active task runs: %w", err)
-	}
-	return active, nil
-}
-
-func (m *Module) recoverStaleTasks(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
-	params, err := decodeParams[struct {
-		StaleBefore   string `json:"staleBefore"`
-		MaxAgeSeconds int64  `json:"maxAgeSeconds"`
-		ErrorClass    string `json:"errorClass"`
-		ErrorMessage  string `json:"errorMessage"`
-	}](body)
-	if err != nil {
-		return nil, err
-	}
-	// Unlike the CLI path (already inside an authenticated process), the HTTP
-	// surface must prove run ownership before failing its task runs.
-	parent, err := m.verifyParent(ctx, ws, id)
-	if err != nil {
-		return nil, err
-	}
-	staleBefore := time.Time{}
-	if raw := strings.TrimSpace(params.StaleBefore); raw != "" {
-		parsed, err := time.Parse(time.RFC3339, raw)
-		if err != nil {
-			return nil, fmt.Errorf("parse staleBefore as RFC3339: %s: %w", err.Error(), domain.ErrInvalid)
-		}
-		staleBefore = parsed.UTC()
-	}
-	maxAgeSeconds := params.MaxAgeSeconds
-	if maxAgeSeconds <= 0 {
-		maxAgeSeconds = 300
-	}
-	result, err := m.store.DriverRuns().RecoverStaleTaskRuns(ctx, ws, parent.RunID, store.StaleTaskRunRecovery{
-		StaleBefore:   staleBefore,
-		MaxAgeSeconds: maxAgeSeconds,
-		ErrorClass:    firstNonEmpty(params.ErrorClass, "stale_task_run"),
-		ErrorMessage:  firstNonEmpty(params.ErrorMessage, "task run heartbeat is stale"),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("recover stale task runs: %w", err)
-	}
-	return result, nil
-}
-
-func (m *Module) completeTask(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
-	params, err := decodeParams[struct {
-		TaskID       string   `json:"taskId"`
-		TaskRunID    string   `json:"taskRunId"`
-		CompletionID string   `json:"completionId"`
-		LeaseToken   string   `json:"leaseToken"`
-		ArtifactIDs  []string `json:"artifactIds"`
-		LogsRef      string   `json:"logsRef"`
-		ArtifactsRef string   `json:"artifactsRef"`
-		Reason       string   `json:"reason"`
-	}](body)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := m.verifyParent(ctx, ws, id); err != nil {
-		return nil, err
-	}
-	taskRunID := strings.TrimSpace(params.TaskRunID)
-	if taskRunID == "" {
-		return nil, fmt.Errorf("taskRunId is required for fenced driver completion: %w", domain.ErrInvalid)
-	}
-	result, err := driverpkg.CompleteDriverTaskRun(ctx, m.store.TaskRuns(), ws, taskRunID, driverpkg.DriverTaskRunCompletionOptions{
-		TaskID:       params.TaskID,
-		CompletionID: params.CompletionID,
-		LeaseToken:   params.LeaseToken,
-		ArtifactIDs:  params.ArtifactIDs,
-		LogsRef:      params.LogsRef,
-		ArtifactsRef: params.ArtifactsRef,
-		Reason:       params.Reason,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("complete task run: %w", err)
-	}
-	return result, nil
-}
-
-func (m *Module) releaseTask(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
-	params, err := decodeParams[struct {
-		TaskID string `json:"taskId"`
-		// Actor: accepted for wire-compat, IGNORED. SECURITY: the release
-		// ownership check is keyed by the server-derived run actor below, never
-		// by caller input — otherwise a run could present a victim's actor and
-		// release a lock it never held (cross-agent task theft). The claim path
-		// derives the SAME actor from the SAME run, so a run releases exactly
-		// the leases it took; cross-run recovery relies on lock TTL, not on a
-		// caller-supplied actor.
-		Actor string `json:"actor"`
-	}](body)
-	if err != nil {
-		return nil, err
-	}
-	parent, err := m.verifyParent(ctx, ws, id)
-	if err != nil {
-		return nil, err
-	}
-	if strings.TrimSpace(params.TaskID) == "" {
-		return nil, fmt.Errorf("taskId required: %w", domain.ErrInvalid)
-	}
-	actor := driverpkg.DriverRunActor(parent.RunID)
-	issueBackend, err := m.issueBackends(ws, actor)
-	if err != nil {
-		return nil, err
-	}
-	result, err := driverpkg.ReleaseTask(ctx, issueBackend, driverpkg.TaskReleaseOptions{
-		TaskID: params.TaskID,
-		Actor:  actor,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("release task: %w", err)
 	}
 	return result, nil
 }
@@ -942,21 +842,55 @@ func writeOpErrorDetails(w http.ResponseWriter, status int, code, message string
 	writeJSON(w, status, map[string]any{"error": opError{Code: code, Message: message, Retryable: retryable, Details: details}})
 }
 
+func writeCodedOpError(w http.ResponseWriter, err error) bool {
+	var coded *codedOpError
+	if !errors.As(err, &coded) {
+		return false
+	}
+	writeOpErrorDetails(w, coded.status, coded.code, coded.Error(), coded.retryable, coded.details)
+	return true
+}
+
+func writeSpecializedOpError(w http.ResponseWriter, err error) bool {
+	return writeConnectorOpError(w, err) || writeAwaitOpError(w, err) || writeCodedOpError(w, err)
+}
+
 // writeDomainOpError maps domain sentinel errors onto the structured error
 // envelope. Defaults to a non-retryable internal error: only transient
 // classes (timeouts, cancellation) advertise retryability.
 func writeDomainOpError(w http.ResponseWriter, err error) {
-	if writeConnectorOpError(w, err) {
+	if writeSpecializedOpError(w, err) || writeBackendDomainOpError(w, err) ||
+		writeAutomationDomainOpError(w, err) || writeExecutionDomainOpError(w, err) {
 		return
 	}
-	if writeAwaitOpError(w, err) {
-		return
+	writeBaseDomainOpError(w, err)
+}
+
+func writeBackendDomainOpError(w http.ResponseWriter, err error) bool {
+	switch {
+	case backend.IsKind(err, backend.KindValidation):
+		writeOpError(w, http.StatusBadRequest, "invalid", err.Error(), false)
+	case backend.IsKind(err, backend.KindNotFound):
+		writeOpError(w, http.StatusNotFound, "not_found", err.Error(), false)
+	case backend.IsKind(err, backend.KindConflict):
+		writeOpError(w, http.StatusConflict, "conflict", err.Error(), false)
+	case backend.IsKind(err, backend.KindNotImplemented):
+		writeOpError(w, http.StatusNotImplemented, "not_implemented", err.Error(), false)
+	case backend.IsKind(err, backend.KindUnavailable):
+		writeOpError(w, http.StatusServiceUnavailable, "unavailable", err.Error(), true)
+	case backend.IsKind(err, backend.KindTimeout):
+		writeOpError(w, http.StatusGatewayTimeout, "timeout", err.Error(), true)
+	case backend.IsKind(err, backend.KindCanceled):
+		writeOpError(w, 499, "canceled", err.Error(), true)
+	case backend.IsKind(err, backend.KindInternal):
+		writeOpError(w, http.StatusInternalServerError, "internal", err.Error(), false)
+	default:
+		return false
 	}
-	var coded *codedOpError
-	if errors.As(err, &coded) {
-		writeOpErrorDetails(w, coded.status, coded.code, coded.Error(), coded.retryable, coded.details)
-		return
-	}
+	return true
+}
+
+func writeAutomationDomainOpError(w http.ResponseWriter, err error) bool {
 	switch {
 	case errors.Is(err, workfloweventing.ErrInvalidRequest), errors.Is(err, automation.ErrInvalid), errors.Is(err, automation.ErrWrongWorkspace):
 		writeOpError(w, http.StatusBadRequest, "invalid", err.Error(), false)
@@ -966,6 +900,36 @@ func writeDomainOpError(w http.ResponseWriter, err error) {
 		writeOpError(w, http.StatusConflict, "conflict", err.Error(), false)
 	case errors.Is(err, workfloweventing.ErrUnavailable), errors.Is(err, automation.ErrUnavailable):
 		writeOpError(w, http.StatusServiceUnavailable, "unavailable", err.Error(), true)
+	default:
+		return false
+	}
+	return true
+}
+
+func writeExecutionDomainOpError(w http.ResponseWriter, err error) bool {
+	switch {
+	case errors.Is(err, execution.ErrNotFound):
+		writeOpError(w, http.StatusNotFound, "not_found", err.Error(), false)
+	case errors.Is(err, execution.ErrFenceConflict), errors.Is(err, authority.ErrInvalidScope):
+		writeOpError(w, http.StatusForbidden, "not_owner", err.Error(), false)
+	case errors.Is(err, execution.ErrUnschedulable):
+		writeOpError(w, http.StatusConflict, "unschedulable", err.Error(), true)
+	case errors.Is(err, execution.ErrInvalidTransition):
+		writeOpError(w, http.StatusConflict, "invalid_transition", err.Error(), false)
+	case errors.Is(err, execution.ErrConflict):
+		writeOpError(w, http.StatusConflict, "conflict", err.Error(), false)
+	case errors.Is(err, execution.ErrInvalid):
+		writeOpError(w, http.StatusBadRequest, "invalid", err.Error(), false)
+	case errors.Is(err, execution.ErrUnavailable):
+		writeOpError(w, http.StatusServiceUnavailable, "unavailable", err.Error(), true)
+	default:
+		return false
+	}
+	return true
+}
+
+func writeBaseDomainOpError(w http.ResponseWriter, err error) {
+	switch {
 	case errors.Is(err, domain.ErrNotFound):
 		writeOpError(w, http.StatusNotFound, "not_found", err.Error(), false)
 	case errors.Is(err, domain.ErrNotOwner):

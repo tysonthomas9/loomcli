@@ -3,8 +3,10 @@ package driver
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -21,75 +23,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver/eventpolicy"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
-
-type RunOptions struct {
-	WorkspaceKey    string
-	DriverID        string
-	DriverVersionID string
-	EpicID          string
-	RunID           string
-	IdempotencyKey  string
-	Entrypoint      string
-	SourceKind      string
-	SourceRef       string
-	// TriggerBindingID stamps the run with the binding it belongs to (the
-	// binding-scoped run-now endpoint). Config-by-reference then resolves the
-	// binding directly from the run's provenance (binding-config op). Empty for
-	// generic runs that belong to no binding.
-	TriggerBindingID string
-	Payload          json.RawMessage
-}
-
-func CreateDriverRun(ctx context.Context, s store.Store, opts RunOptions) (*domain.DriverRun, error) {
-	if s == nil {
-		return nil, fmt.Errorf("store required: %w", domain.ErrInvalid)
-	}
-	if strings.TrimSpace(opts.WorkspaceKey) == "" || strings.TrimSpace(opts.DriverID) == "" {
-		return nil, fmt.Errorf("workspace key and driver id required: %w", domain.ErrInvalid)
-	}
-	driver, version, err := resolveDriverRunVersion(ctx, s, opts.WorkspaceKey, opts.DriverID, opts.DriverVersionID)
-	if err != nil {
-		return nil, err
-	}
-	runID := opts.RunID
-	if runID == "" {
-		runID = fmt.Sprintf("run-%d", time.Now().UTC().UnixNano())
-	}
-	entrypoint := opts.Entrypoint
-	if entrypoint == "" {
-		entrypoint = EntrypointRun
-	}
-	payload := clonePayload(opts.Payload)
-	if len(payload) == 0 {
-		payload = json.RawMessage(`{}`)
-	}
-	if !json.Valid(payload) {
-		return nil, fmt.Errorf("payload must be valid JSON: %w", domain.ErrInvalid)
-	}
-	sourceKind := strings.TrimSpace(opts.SourceKind)
-	if sourceKind == "" {
-		sourceKind = "cli"
-	}
-	sourceRef := strings.TrimSpace(opts.SourceRef)
-	if sourceRef == "" {
-		sourceRef = "loom driver run"
-	}
-	return s.DriverRuns().Create(ctx, store.DriverRunCreate{
-		WorkspaceKey:     opts.WorkspaceKey,
-		RunID:            runID,
-		DriverID:         driver.DriverID,
-		DriverVersionID:  version.VersionID,
-		Entrypoint:       entrypoint,
-		SourceKind:       sourceKind,
-		SourceRef:        sourceRef,
-		EpicID:           opts.EpicID,
-		TriggerBindingID: opts.TriggerBindingID,
-		IdempotencyKey:   opts.IdempotencyKey,
-		Payload:          payload,
-	})
-}
 
 func activeDriverVersion(ctx context.Context, s store.Store, workspaceKey, driverID string) (*domain.Driver, *domain.DriverVersion, error) {
 	driver, err := s.Drivers().Get(ctx, workspaceKey, driverID)
@@ -105,24 +41,6 @@ func activeDriverVersion(ctx context.Context, s store.Store, workspaceKey, drive
 	}
 	if version.DriverID != driver.DriverID || version.ValidationStatus != domain.DriverVersionValidationPassed {
 		return nil, nil, fmt.Errorf("driver %q active version %q is not a passed version: %w", driver.DriverID, driver.ActiveVersionID, domain.ErrInvalid)
-	}
-	return driver, version, nil
-}
-
-func resolveDriverRunVersion(ctx context.Context, s store.Store, workspaceKey, driverID, versionID string) (*domain.Driver, *domain.DriverVersion, error) {
-	if strings.TrimSpace(versionID) == "" {
-		return activeDriverVersion(ctx, s, workspaceKey, driverID)
-	}
-	driver, err := s.Drivers().Get(ctx, workspaceKey, driverID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("get driver: %w", err)
-	}
-	version, err := s.DriverVersions().Get(ctx, workspaceKey, strings.TrimSpace(versionID))
-	if err != nil {
-		return nil, nil, fmt.Errorf("get driver version: %w", err)
-	}
-	if version.DriverID != driver.DriverID || version.ValidationStatus != domain.DriverVersionValidationPassed {
-		return nil, nil, fmt.Errorf("driver %q version %q is not a passed version for this driver: %w", driver.DriverID, version.VersionID, domain.ErrInvalid)
 	}
 	return driver, version, nil
 }
@@ -145,43 +63,6 @@ func cloneStringMap(in map[string]string) map[string]string {
 		out[k] = v
 	}
 	return out
-}
-
-// VerifyRunningDriverRun loads the parent DriverRun and proves the caller may
-// act on its behalf. The run must be running; when it is locked (lease or
-// fencing token set) the caller's owner credentials are verified through a
-// fenced heartbeat, so a stale executor can never act after losing the lease.
-// fencingToken is a resolver so callers with lazily-parsed credentials only
-// pay (and surface) the parse when the run is actually locked. Shared by the
-// driver CLI subcommands and the driver-op HTTP API.
-func VerifyRunningDriverRun(ctx context.Context, st store.Store, ws, runID, nodeID, leaseID string, fencingToken func() (int64, error)) (*domain.DriverRun, error) {
-	if strings.TrimSpace(runID) == "" {
-		return nil, fmt.Errorf("driver-run-id required: %w", domain.ErrInvalid)
-	}
-	parent, err := st.DriverRuns().Get(ctx, ws, runID)
-	if err != nil {
-		return nil, fmt.Errorf("get parent driver run: %w", err)
-	}
-	if parent.Status != domain.DriverRunRunning {
-		return nil, fmt.Errorf("driver run %q is %s, want running: %w", runID, parent.Status, domain.ErrInvalidTransition)
-	}
-	if parent.LeaseID != "" || parent.FencingToken != 0 {
-		ownerFence := int64(0)
-		if fencingToken != nil {
-			ownerFence, err = fencingToken()
-			if err != nil {
-				return nil, err
-			}
-		}
-		if nodeID == "" || leaseID == "" || ownerFence == 0 {
-			return nil, fmt.Errorf("driver run %q owner credentials required: %w", runID, domain.ErrNotOwner)
-		}
-		parent, err = st.DriverRuns().Heartbeat(ctx, ws, runID, nodeID, leaseID, ownerFence)
-		if err != nil {
-			return nil, fmt.Errorf("verify driver run owner: %w", err)
-		}
-	}
-	return parent, nil
 }
 
 // DriverRunActor is the store actor identity a driver run acts as.
@@ -253,6 +134,25 @@ type RunTokenClaims struct {
 	Caps []string `json:"caps,omitempty"`
 
 	jwt.RegisteredClaims
+}
+
+// DeriveDriverRunLeaseToken derives the raw FleetDB lease credential from the
+// same process-local key and immutable pre-claim identity used by the run
+// token. The raw token is never serialized into the JWT, public results, or
+// authority values; the driver API can independently re-derive it after
+// validating signed claims.
+func DeriveDriverRunLeaseToken(key []byte, workspaceKey, runID, nodeID, leaseID string) (string, error) {
+	if len(key) == 0 || strings.TrimSpace(workspaceKey) == "" || strings.TrimSpace(runID) == "" ||
+		strings.TrimSpace(nodeID) == "" || strings.TrimSpace(leaseID) == "" {
+		return "", fmt.Errorf("derive DriverRun lease token: signing key and owner identity required: %w", domain.ErrInvalid)
+	}
+	mac := hmac.New(sha256.New, key)
+	_, _ = mac.Write([]byte("loom-driver-run-lease-v1\x00"))
+	for _, value := range []string{workspaceKey, runID, nodeID, leaseID} {
+		_, _ = mac.Write([]byte(value))
+		_, _ = mac.Write([]byte{0})
+	}
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil)), nil
 }
 
 // MintRunToken signs claims as an HS256 JWT with Subject set to
@@ -439,58 +339,45 @@ type runFinishedPayload struct {
 	Truncated   bool   `json:"truncated,omitempty"`
 }
 
-// emitRunFinishedEvent notifies already-registered composition awaits, then
-// opportunistically drains the durable outcome outbox for low latency. The
-// registered runtime reconciler owns recovery after any crash or publication
-// failure. Backends without the optional durable capability retain the legacy
-// best-effort direct publication path.
-func emitRunFinishedEvent(ctx context.Context, s store.Store, publisher RunOutcomePublisher, run *domain.DriverRun) {
+// emitRunFinishedEventWithExecution performs the production low-latency
+// drain through Execution's system-authorized queue commands. The registered
+// runtime uses the same coordinator for restart recovery.
+func emitRunFinishedEventWithExecution(
+	ctx context.Context,
+	s store.Store,
+	publisher RunOutcomePublisher,
+	run *domain.DriverRun,
+	queue execution.DriverRunOutcomeAPI,
+	terminalWorkQueue execution.TerminalDriverRunWorkRecoveryQueueAPI,
+	cascades execution.DriverRunAPI,
+	authorities execution.SystemAuthorityResolver,
+	notifier RunOutcomeAwaitNotifier,
+) {
 	if s == nil || run == nil || !run.Status.IsTerminal() {
 		return
 	}
-	outcome := newRunOutcome(ctx, s, run)
-	notifier, notifierErr := NewRunOutcomeAwaitNotifier(s.Awaits())
-	unlock := lockRunOutcome(run.WorkspaceKey, run.RunID)
-	if notifierErr == nil {
-		dispatchRunFinishedAwaits(ctx, notifier, outcome)
-	}
-	unlock()
-	if outbox, ok := s.DriverRuns().(store.DriverRunOutcomeStore); ok {
-		if notifierErr != nil {
-			slog.WarnContext(ctx, "compose durable run.finished await notifier failed",
-				"runID", run.RunID, "status", string(run.Status), "eventID", outcome.EventID, "error", notifierErr)
-			return
-		}
-		journal, journalOK := s.TriggerEvents().(store.TriggerEventAppender)
-		if !journalOK {
-			slog.WarnContext(ctx, "compose durable run.finished base event journal failed",
-				"runID", run.RunID, "status", string(run.Status), "eventID", outcome.EventID)
-			return
-		}
-		reconciler, err := NewRunOutcomeReconciler(outbox, notifier, journal, publisher, run.WorkspaceKey, nil)
-		if err == nil {
-			_, err = reconciler.DrainOnce(ctx, time.Now().UTC())
-		}
-		if err != nil {
-			slog.WarnContext(ctx, "reconcile durable run.finished outcome failed",
-				"runID", run.RunID, "status", string(run.Status), "eventID", outcome.EventID, "error", err)
-		}
-		// Presence of the durable capability is authoritative even when this
-		// opportunistic drain claims nothing. Another reconciler may own the
-		// row, or a persisted retry may still be in backoff; direct publication
-		// here would bypass both the lease and retry contract.
+	if queue == nil || terminalWorkQueue == nil || cascades == nil || authorities == nil || notifier == nil {
+		slog.WarnContext(ctx, "Execution run.finished queue is unavailable",
+			"runID", run.RunID, "status", string(run.Status))
 		return
 	}
-	if notifierErr != nil {
-		slog.WarnContext(ctx, "run.finished await notifier unavailable",
-			"runID", run.RunID, "status", string(run.Status), "eventID", outcome.EventID, "error", notifierErr)
-	}
-	if publisher == nil {
+	journal, ok := s.TriggerEvents().(store.TriggerEventAppender)
+	if !ok {
+		slog.WarnContext(ctx, "Execution run.finished journal port is unavailable",
+			"runID", run.RunID, "status", string(run.Status))
 		return
 	}
-	if err := publisher.PublishRunOutcome(ctx, outcome); err != nil {
-		slog.WarnContext(ctx, "publish run.finished outcome failed",
-			"runID", run.RunID, "status", string(run.Status), "eventID", outcome.EventID, "error", err)
+	reconciler, err := NewRunOutcomeReconcilerWithExecution(
+		queue, terminalWorkQueue, notifier, journal, publisher, run.WorkspaceKey, nil,
+		cascades, authorities, string(execution.DriverRunOutcomeComponentID),
+	)
+	if err == nil {
+		_, err = reconciler.DrainOnce(ctx, time.Now().UTC())
+	}
+	if err != nil {
+		slog.WarnContext(ctx, "reconcile durable run.finished outcome failed",
+			"runID", run.RunID, "status", string(run.Status),
+			"eventID", RunFinishedEventID(run.RunID, run.Status), "error", err)
 	}
 }
 

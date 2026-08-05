@@ -41,6 +41,7 @@ import (
 // itself via init() like other sub-packages. Instead it exports Commands()
 // which we register explicitly from main.
 func init() {
+	cli.RegisterPreBackendCommandGuard(data.EnforceTaskRunCommandScope)
 	data.SetLocalIssueBackendProvider(func(_ context.Context) backend.IssueBackend {
 		return cli.DefaultIssueBackend()
 	})

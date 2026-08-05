@@ -1,6 +1,7 @@
 package workflows
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 )
 
 // Every built-in is registered and discoverable through the generalized
@@ -223,6 +225,9 @@ func TestGitHubReviewAgentWorkflowSourceContract(t *testing.T) {
 		{name: "invalid findings error class", want: `errorClass: "invalid_review_findings"`},
 		{name: "posts review", want: "loom.connectors.github.postReview({"},
 		{name: "comment-only event", want: `event: "COMMENT",`},
+		{name: "line is locator only", want: "Include line only when it is useful as a locator hint"},
+		{name: "uncertified anchors cannot lose review", want: "does not risk the whole review on an uncertified inline anchor"},
+		{name: "provider owns finding placement", want: `return summary + "\n\n" + count + " review finding(s) follow.";`},
 		{name: "completed with review url", want: "reviewUrl:"},
 	}
 	for _, tt := range tests {
@@ -353,6 +358,9 @@ func TestGitHubReviewTaskRunnerSourceContract(t *testing.T) {
 		`task_runner: "github-review-task-runner"`,
 		`runtime_strategy: "codex-review"`,
 		`review_findings: JSON.stringify(findings)`,
+		`transcript_entries: transcriptEntries`,
+		`canonicalTranscriptEntries(taskRunId`,
+		`redactTranscriptText(prompt`,
 		`"--output-schema"`,
 		`"--output-last-message"`,
 		`execFileSync(CODEX`,
@@ -360,6 +368,220 @@ func TestGitHubReviewTaskRunnerSourceContract(t *testing.T) {
 		if !strings.Contains(source, want) {
 			t.Fatalf("github-review-task-runner source missing %q", want)
 		}
+	}
+}
+
+func TestGitHubReviewTaskRunnerPersistsCanonicalTranscriptAndFindings(t *testing.T) {
+	const secret = "review-test-secret-value-12345"
+	result := runGitHubReviewTaskRunner(t, reviewTaskRunnerFixture{
+		Mode:   "success",
+		Secret: secret,
+		Diff:   "diff --git a/demo.go b/demo.go\n+" + secret + "\n",
+	})
+	if result.Status != "completed" || result.ExitCode != 0 {
+		t.Fatalf("result = status %q exit %d error %q, want completed/0", result.Status, result.ExitCode, result.ErrorMessage)
+	}
+	var findings struct {
+		Summary  string `json:"summary"`
+		Comments []any  `json:"comments"`
+	}
+	if err := json.Unmarshal([]byte(result.RuntimeMetadata["review_findings"]), &findings); err != nil {
+		t.Fatalf("review_findings is not valid JSON: %v", err)
+	}
+	if findings.Summary != "fixture review complete" || len(findings.Comments) != 0 {
+		t.Fatalf("review_findings = %+v", findings)
+	}
+	assertReviewTranscriptShape(t, result.TranscriptEntries, "completed")
+	if got := result.TranscriptEntries[1].Text; !strings.Contains(got, "diff --git") || strings.Contains(got, secret) || !strings.Contains(got, "REDACTED") {
+		t.Fatalf("user transcript was not a redacted real prompt: %q", got)
+	}
+	if got := result.TranscriptEntries[2].Text; !strings.Contains(got, "fixture review complete") {
+		t.Fatalf("assistant transcript = %q, want real output-last-message", got)
+	}
+}
+
+func TestGitHubReviewTaskRunnerFailureTranscriptsAreHonest(t *testing.T) {
+	tests := []struct {
+		name          string
+		fixture       reviewTaskRunnerFixture
+		errorClass    string
+		wantEntries   int
+		wantAssistant bool
+		wantResult    string
+	}{
+		{
+			name: "codex execution failure", fixture: reviewTaskRunnerFixture{Mode: "fail", Diff: "diff --git a/a b/a\n+x\n"},
+			errorClass: "codex_exec_failed", wantEntries: 3, wantResult: "failed",
+		},
+		{
+			name: "invalid final findings", fixture: reviewTaskRunnerFixture{
+				Mode: "invalid", Secret: "invalid-output-secret-value-12345", Diff: "diff --git a/a b/a\n+x\n",
+			},
+			errorClass: "codex_no_findings", wantEntries: 4, wantAssistant: true, wantResult: "could not",
+		},
+		{
+			name: "empty diff", fixture: reviewTaskRunnerFixture{Mode: "success", Diff: ""},
+			errorClass: "empty_diff", wantEntries: 2, wantResult: "no diff",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := runGitHubReviewTaskRunner(t, tt.fixture)
+			if result.Status != "failed" || result.ExitCode != 1 || result.ErrorClass != tt.errorClass {
+				t.Fatalf("result = status %q exit %d class %q, want failed/1/%s", result.Status, result.ExitCode, result.ErrorClass, tt.errorClass)
+			}
+			if len(result.TranscriptEntries) != tt.wantEntries {
+				t.Fatalf("transcript entries = %d, want %d: %+v", len(result.TranscriptEntries), tt.wantEntries, result.TranscriptEntries)
+			}
+			assertCanonicalTranscript(t, result.TranscriptEntries)
+			last := result.TranscriptEntries[len(result.TranscriptEntries)-1]
+			if last.Type != transcript.EventResult || !strings.Contains(last.Text, tt.wantResult) {
+				t.Fatalf("terminal transcript = %+v, want honest failure result", last)
+			}
+			hasAssistant := false
+			for _, entry := range result.TranscriptEntries {
+				hasAssistant = hasAssistant || entry.Role == transcript.RoleAssistant
+			}
+			if hasAssistant != tt.wantAssistant {
+				t.Fatalf("assistant transcript present = %v, want %v", hasAssistant, tt.wantAssistant)
+			}
+			if tt.fixture.Secret != "" {
+				if strings.Contains(result.ErrorMessage, tt.fixture.Secret) {
+					t.Fatalf("error message leaked secret: %q", result.ErrorMessage)
+				}
+				for _, entry := range result.TranscriptEntries {
+					if strings.Contains(entry.Text, tt.fixture.Secret) {
+						t.Fatalf("transcript leaked secret: %+v", entry)
+					}
+				}
+			}
+		})
+	}
+}
+
+type reviewTaskRunnerFixture struct {
+	Mode   string
+	Secret string
+	Diff   string
+}
+
+type reviewTaskRunnerResult struct {
+	Status            string             `json:"status"`
+	ExitCode          int                `json:"exitCode"`
+	ErrorClass        string             `json:"errorClass"`
+	ErrorMessage      string             `json:"errorMessage"`
+	RuntimeMetadata   map[string]string  `json:"runtimeMetadata"`
+	TranscriptEntries []transcript.Event `json:"transcript_entries"`
+}
+
+func runGitHubReviewTaskRunner(t *testing.T, fixture reviewTaskRunnerFixture) reviewTaskRunnerResult {
+	t.Helper()
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skipf("node not available: %v", err)
+	}
+	root := t.TempDir()
+	runtimeDir := filepath.Join(root, "node_modules", "@flue", "runtime")
+	if err := os.MkdirAll(runtimeDir, 0o755); err != nil {
+		t.Fatalf("mkdir runtime stub: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(runtimeDir, "package.json"), []byte(`{"type":"module","exports":"./index.js"}`), 0o644); err != nil {
+		t.Fatalf("write runtime package: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(runtimeDir, "index.js"), []byte(
+		`export const defineAgent = (value) => value; export const defineWorkflow = (value) => value;`,
+	), 0o644); err != nil {
+		t.Fatalf("write runtime stub: %v", err)
+	}
+	modulePath := filepath.Join(root, "github-review-task-runner.mjs")
+	if err := os.WriteFile(modulePath, []byte(githubReviewTaskRunnerSource(t)), 0o644); err != nil {
+		t.Fatalf("write runner source: %v", err)
+	}
+	fakeCodex := filepath.Join(root, "fake-codex.mjs")
+	fakeSource := `#!/usr/bin/env node
+import fs from "node:fs";
+const mode = process.env.FAKE_CODEX_MODE || "success";
+if (mode === "fail") process.exit(7);
+const args = process.argv.slice(2);
+const outIndex = args.indexOf("--output-last-message");
+if (outIndex < 0 || !args[outIndex + 1]) process.exit(8);
+const output = mode === "invalid"
+  ? "not-json findings from codex " + (process.env.REVIEW_TEST_SECRET || "")
+  : JSON.stringify({summary:"fixture review complete", comments:[]});
+fs.writeFileSync(args[outIndex + 1], output);
+`
+	if err := os.WriteFile(fakeCodex, []byte(fakeSource), 0o755); err != nil {
+		t.Fatalf("write fake codex: %v", err)
+	}
+	payload, err := json.Marshal(map[string]any{
+		"task_run_id": "review-fixture-1",
+		"input": map[string]any{
+			"diff": fixture.Diff, "rubric": "Report only blocking findings.",
+			"repo": "fixture/repo", "headSha": "abc1234",
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	wrapperPath := filepath.Join(root, "run.mjs")
+	wrapperSource := `import { run } from "./github-review-task-runner.mjs";
+const result = await run({payload: JSON.parse(process.env.RUNNER_TEST_PAYLOAD)});
+process.stdout.write(JSON.stringify(result));
+`
+	if err := os.WriteFile(wrapperPath, []byte(wrapperSource), 0o644); err != nil {
+		t.Fatalf("write runner wrapper: %v", err)
+	}
+	cmd := exec.Command(node, wrapperPath) //nolint:norawexec // direct behavioral test of the embedded Node task runner
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(),
+		"LOOM_CODEX_BIN="+fakeCodex,
+		"FAKE_CODEX_MODE="+fixture.Mode,
+		"RUNNER_TEST_PAYLOAD="+string(payload),
+		"REVIEW_TEST_SECRET="+fixture.Secret,
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run task runner fixture: %v\n%s", err, out)
+	}
+	var result reviewTaskRunnerResult
+	if err := json.Unmarshal(out, &result); err != nil {
+		t.Fatalf("decode task runner result: %v\n%s", err, out)
+	}
+	return result
+}
+
+func assertReviewTranscriptShape(t *testing.T, entries []transcript.Event, resultText string) {
+	t.Helper()
+	if len(entries) != 4 {
+		t.Fatalf("transcript entries = %d, want 4: %+v", len(entries), entries)
+	}
+	assertCanonicalTranscript(t, entries)
+	if entries[1].Role != transcript.RoleUser || entries[1].Type != transcript.EventText {
+		t.Fatalf("prompt transcript = %+v, want canonical user text", entries[1])
+	}
+	if entries[2].Role != transcript.RoleAssistant || entries[2].Type != transcript.EventText {
+		t.Fatalf("findings transcript = %+v, want canonical assistant text", entries[2])
+	}
+	if entries[3].Role != transcript.RoleSystem || entries[3].Type != transcript.EventResult || entries[3].Text != resultText {
+		t.Fatalf("result transcript = %+v, want system result %q", entries[3], resultText)
+	}
+}
+
+func assertCanonicalTranscript(t *testing.T, entries []transcript.Event) {
+	t.Helper()
+	for index, entry := range entries {
+		if entry.Seq != index+1 {
+			t.Fatalf("entry %d seq = %d, want %d", index, entry.Seq, index+1)
+		}
+		if entry.Timestamp.IsZero() {
+			t.Fatalf("entry %d has zero timestamp: %+v", index, entry)
+		}
+		if !transcript.KnownRoles[entry.Role] || !transcript.KnownEventTypes[entry.Type] {
+			t.Fatalf("entry %d is outside canonical vocabulary: %+v", index, entry)
+		}
+	}
+	if entries[0].Role != transcript.RoleSystem || entries[0].Type != transcript.EventSessionMeta {
+		t.Fatalf("first transcript entry = %+v, want system session_meta", entries[0])
 	}
 }
 
@@ -383,11 +605,14 @@ func TestLocalReviewAgentWorkflowSourceContract(t *testing.T) {
 	for _, want := range []string{
 		`local-branch:`,
 		`loom.tasks.diff({ taskId: issueId })`,
+		`loom.tasks.claimReview({ taskId: issueId })`,
+		`loom.tasks.releaseReview({ taskId: issueId })`,
 		`runner: "github-review-task-runner"`,
 		`closeTask: false`,
+		`retainWorkItemClaim: true`,
 		`review-cycle:`,
-		`status: "open"`,
-		`status: "closed"`,
+		`loom.tasks.handoffReview({`,
+		`status: blocking ? "open" : "closed"`,
 		`local_review_diff_`,
 	} {
 		if !strings.Contains(source, want) {

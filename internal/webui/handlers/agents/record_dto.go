@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -26,8 +27,36 @@ const (
 
 type supervisedAgentDTO struct {
 	*domain.Agent
-	ID   string `json:"id"`
-	Kind string `json:"kind"`
+	ID         string   `json:"id"`
+	Kind       string   `json:"kind"`
+	Repos      []string `json:"repos"`
+	RepoGroups []string `json:"repo_groups"`
+	CrossRepo  bool     `json:"cross_repo"`
+}
+
+// newSupervisedAgentDTO keeps the unified agent response compatible with the
+// workspace contract. Repos and repo_groups are required collection fields in
+// the frontend model; domain.Agent omits nil slices, which made a freshly
+// created cross-repo or no-group agent crash consumers that iterate them before
+// the next workspace refresh.
+func newSupervisedAgentDTO(agent *domain.Agent) supervisedAgentDTO {
+	if agent == nil {
+		return supervisedAgentDTO{
+			Kind:       agentRecordKindSupervised,
+			Repos:      []string{},
+			RepoGroups: []string{},
+			CrossRepo:  false,
+		}
+	}
+	clone := *agent
+	return supervisedAgentDTO{
+		Agent:      &clone,
+		ID:         clone.Name,
+		Kind:       agentRecordKindSupervised,
+		Repos:      append([]string{}, clone.Repos...),
+		RepoGroups: append([]string{}, clone.RepoGroups...),
+		CrossRepo:  clone.CrossRepo,
+	}
 }
 
 type agentRecordDTO struct {
@@ -67,6 +96,123 @@ type legacyBindingAgentDTO struct {
 	NextFireAt          *time.Time `json:"next_fire_at,omitempty"`
 	LastRunStatus       string     `json:"last_run_status,omitempty"`
 	ConsecutiveFailures int        `json:"consecutive_failures,omitempty"`
+}
+
+// agentRunsResponse is the unified history envelope for every agent kind.
+// Durable records and workflow bindings populate Runs; supervised/interactive
+// assignments populate Sessions. Keeping both arrays present lets the browser
+// render one Runs surface without guessing which persistence model owns the
+// selected agent.
+type agentRunsResponse struct {
+	AgentID  string                    `json:"agent_id"`
+	Runs     []*domain.DriverRun       `json:"runs"`
+	Sessions []*agentHistorySessionDTO `json:"sessions"`
+}
+
+// agentHistorySessionDTO intentionally does not expose AgentSession.Metadata
+// verbatim. Session metadata includes host-local transcript/log paths and
+// orchestration bookkeeping that are not part of the public agent-history
+// contract.
+type agentHistorySessionDTO struct {
+	WorkspaceKey    string                    `json:"workspace_key"`
+	SessionID       string                    `json:"session_id"`
+	AgentID         string                    `json:"agent_id"`
+	NodeID          string                    `json:"node_id,omitempty"`
+	Kind            domain.AgentSessionKind   `json:"kind"`
+	TaskID          string                    `json:"task_id,omitempty"`
+	TerminalID      string                    `json:"terminal_id,omitempty"`
+	ParentSessionID string                    `json:"parent_session_id,omitempty"`
+	Status          domain.AgentSessionStatus `json:"status"`
+	Phase           string                    `json:"phase,omitempty"`
+	Attempt         int                       `json:"attempt,omitempty"`
+	StartedAt       *time.Time                `json:"started_at,omitempty"`
+	LastHeartbeat   *time.Time                `json:"last_heartbeat,omitempty"`
+	FinishedAt      *time.Time                `json:"finished_at,omitempty"`
+	Summary         string                    `json:"summary,omitempty"`
+	ErrorClass      string                    `json:"error_class,omitempty"`
+	ExitCode        *int                      `json:"exit_code,omitempty"`
+	Metadata        map[string]string         `json:"metadata,omitempty"`
+	CreatedAt       time.Time                 `json:"created_at"`
+	UpdatedAt       time.Time                 `json:"updated_at"`
+}
+
+var publicAgentSessionMetadataKeys = [...]string{
+	"backend",
+	"runtime_strategy",
+	"delivery",
+	"patch_back_status",
+	"local_branch",
+	"head_sha",
+	"github_head_sha",
+	"patch_back_head_sha",
+	"github_branch",
+	"github_pr_url",
+}
+
+func newAgentHistorySessionDTO(session *domain.AgentSession) *agentHistorySessionDTO {
+	if session == nil {
+		return nil
+	}
+	return &agentHistorySessionDTO{
+		WorkspaceKey:    session.WorkspaceKey,
+		SessionID:       session.SessionID,
+		AgentID:         session.AgentID,
+		NodeID:          session.NodeID,
+		Kind:            session.Kind,
+		TaskID:          session.TaskID,
+		TerminalID:      session.TerminalID,
+		ParentSessionID: session.ParentSessionID,
+		Status:          session.Status,
+		Phase:           session.Phase,
+		Attempt:         session.Attempt,
+		StartedAt:       nonZeroAgentSessionTime(session.StartedAt),
+		LastHeartbeat:   nonZeroAgentSessionTime(session.LastHeartbeat),
+		FinishedAt:      cloneNonZeroAgentSessionTime(session.FinishedAt),
+		Summary:         session.Summary,
+		ErrorClass:      session.ErrorClass,
+		ExitCode:        session.ExitCode,
+		Metadata:        publicAgentSessionMetadata(session.Metadata),
+		CreatedAt:       session.CreatedAt,
+		UpdatedAt:       session.UpdatedAt,
+	}
+}
+
+func newAgentHistorySessionDTOs(sessions []*domain.AgentSession) []*agentHistorySessionDTO {
+	out := make([]*agentHistorySessionDTO, 0, len(sessions))
+	for _, session := range sessions {
+		if item := newAgentHistorySessionDTO(session); item != nil {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func nonZeroAgentSessionTime(value time.Time) *time.Time {
+	if value.IsZero() {
+		return nil
+	}
+	copy := value
+	return &copy
+}
+
+func cloneNonZeroAgentSessionTime(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	return nonZeroAgentSessionTime(*value)
+}
+
+func publicAgentSessionMetadata(metadata map[string]string) map[string]string {
+	public := make(map[string]string)
+	for _, key := range publicAgentSessionMetadataKeys {
+		if value := strings.TrimSpace(metadata[key]); value != "" {
+			public[key] = value
+		}
+	}
+	if len(public) == 0 {
+		return nil
+	}
+	return public
 }
 
 type createAgentKindProbe struct {
@@ -122,9 +268,19 @@ type promptAgentGrantRequest struct {
 }
 
 type patchAgentRecordRequest struct {
-	Name         *string                   `json:"name,omitempty"`
-	Behavior     *patchAgentBehaviorRecord `json:"behavior,omitempty"`
-	BudgetPolicy *string                   `json:"budget_policy,omitempty"`
+	Name             *string                   `json:"name,omitempty"`
+	Behavior         *patchAgentBehaviorRecord `json:"behavior,omitempty"`
+	BudgetPolicy     *string                   `json:"budget_policy,omitempty"`
+	BindingID        *string                   `json:"binding_id,omitempty"`
+	Schedule         *string                   `json:"schedule,omitempty"`
+	ScheduleTimezone *string                   `json:"schedule_timezone,omitempty"`
+}
+
+func (request *patchAgentRecordRequest) UnmarshalJSON(data []byte) error {
+	type patchAgentRecordRequestAlias patchAgentRecordRequest
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	return decoder.Decode((*patchAgentRecordRequestAlias)(request))
 }
 
 type patchAgentBehaviorRecord struct {
@@ -132,7 +288,18 @@ type patchAgentBehaviorRecord struct {
 }
 
 func (m *Module) agentRecordDTO(ctx context.Context, ws string, record *domain.AgentService, now time.Time) (agentRecordDTO, error) {
-	out := agentRecordDTO{
+	if m.bindings == nil {
+		return newAgentRecordDTO(record), automation.ErrUnavailable
+	}
+	bindings, err := m.bindings.ListBindings(ctx, ws, automation.BindingFilter{TargetAgentServiceID: record.ServiceID})
+	if err != nil {
+		return newAgentRecordDTO(record), err
+	}
+	return m.agentRecordDTOWithBindings(ctx, ws, record, bindings, now), nil
+}
+
+func newAgentRecordDTO(record *domain.AgentService) agentRecordDTO {
+	return agentRecordDTO{
 		ID:      record.ServiceID,
 		Name:    record.Name,
 		Kind:    deriveAgentRecordKind(record),
@@ -148,13 +315,16 @@ func (m *Module) agentRecordDTO(ctx context.Context, ws string, record *domain.A
 		CreatedAt:    record.CreatedAt,
 		UpdatedAt:    record.UpdatedAt,
 	}
-	if m.bindings == nil {
-		return out, automation.ErrUnavailable
-	}
-	bindings, err := m.bindings.ListBindings(ctx, ws, automation.BindingFilter{TargetAgentServiceID: record.ServiceID})
-	if err != nil {
-		return out, err
-	}
+}
+
+func (m *Module) agentRecordDTOWithBindings(
+	ctx context.Context,
+	ws string,
+	record *domain.AgentService,
+	bindings []*automation.Binding,
+	now time.Time,
+) agentRecordDTO {
+	out := newAgentRecordDTO(record)
 	decorators := make([]triggerbindings.BindingDecorators, 0, len(bindings))
 	out.Bindings = make([]recordBindingDTO, 0, len(bindings))
 	for _, b := range bindings {
@@ -171,7 +341,7 @@ func (m *Module) agentRecordDTO(ctx context.Context, ws string, record *domain.A
 		})
 	}
 	out.LastRunStatus, out.ConsecutiveFailures, out.NextFireAt = aggregateBindingDecorators(decorators)
-	return out, nil
+	return out
 }
 
 func legacyBindingDTO(ctx context.Context, st store.Store, ws string, b *domain.TriggerBinding, now time.Time) legacyBindingAgentDTO {
@@ -296,47 +466,6 @@ func promptAgentSourceConfigRef(roleName, backend string) (string, error) {
 	return string(data), nil
 }
 
-func (m *Module) updateAttachedBindingRole(
-	ctx context.Context,
-	auth authority.OperatorAuthority,
-	ws, agentID, roleName string,
-) error {
-	if m.bindings == nil {
-		return automation.ErrUnavailable
-	}
-	bindings, err := m.bindings.ListBindings(ctx, ws, automation.BindingFilter{TargetAgentServiceID: agentID})
-	if err != nil {
-		return err
-	}
-	for _, b := range bindings {
-		if b == nil {
-			continue
-		}
-		ref := sourceConfigRefWithRole(b.SourceConfigRef, roleName)
-		if _, err := m.bindings.UpdateManagedBinding(ctx, auth, automation.UpdateManagedBindingCommand{
-			WorkspaceKey: ws, BindingID: b.BindingID, AgentServiceID: agentID,
-			Patch: automation.BindingPatch{SourceConfigRef: &ref},
-		}); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func sourceConfigRefWithRole(ref, roleName string) string {
-	obj := map[string]json.RawMessage{}
-	if strings.TrimSpace(ref) != "" {
-		_ = json.Unmarshal([]byte(ref), &obj)
-	}
-	raw, _ := json.Marshal(roleName)
-	obj["roleName"] = raw
-	data, err := json.Marshal(obj)
-	if err != nil {
-		return `{"roleName":` + strconvQuote(roleName) + `}`
-	}
-	return string(data)
-}
-
 func (m *Module) setAttachedBindingsEnabled(
 	ctx context.Context,
 	auth authority.OperatorAuthority,
@@ -395,12 +524,4 @@ func agentRouteValue(r *http.Request, names ...string) string {
 		}
 	}
 	return ""
-}
-
-func strconvQuote(value string) string {
-	data, err := json.Marshal(value)
-	if err != nil {
-		return `""`
-	}
-	return string(data)
 }

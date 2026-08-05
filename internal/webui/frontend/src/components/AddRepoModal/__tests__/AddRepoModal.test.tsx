@@ -1,13 +1,25 @@
 /**
  * @vitest-environment jsdom
  */
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 
 const mockAddWorkspaceRepos = vi.fn();
+const mockPollWorkspaceJob = vi.fn();
+const mockFetchWorkspaceApi = vi.fn();
 vi.mock("@/hooks/api", () => ({
   addWorkspaceRepos: (...args: unknown[]) => mockAddWorkspaceRepos(...args),
+}));
+vi.mock("@/api/workspace", () => ({
+  pollWorkspaceJob: (...args: unknown[]) => mockPollWorkspaceJob(...args),
+  fetchWorkspaceApi: (...args: unknown[]) => mockFetchWorkspaceApi(...args),
 }));
 
 import { AddRepoModal } from "../AddRepoModal";
@@ -17,7 +29,7 @@ const WS = "ws-1";
 function renderModal(props: Partial<Parameters<typeof AddRepoModal>[0]> = {}) {
   const onClose = vi.fn();
   const onSuccess = vi.fn();
-  render(
+  const view = render(
     <AddRepoModal
       isOpen
       workspaceId={WS}
@@ -26,13 +38,20 @@ function renderModal(props: Partial<Parameters<typeof AddRepoModal>[0]> = {}) {
       {...props}
     />,
   );
-  return { onClose, onSuccess };
+  return { ...view, onClose, onSuccess };
 }
 
 describe("AddRepoModal", () => {
   beforeEach(() => {
     mockAddWorkspaceRepos.mockReset();
-    mockAddWorkspaceRepos.mockResolvedValue({});
+    mockPollWorkspaceJob.mockReset();
+    mockFetchWorkspaceApi.mockReset();
+    mockAddWorkspaceRepos.mockResolvedValue({ kind: "sync", data: {} });
+    mockFetchWorkspaceApi.mockResolvedValue({ id: WS });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("renders nothing when closed", () => {
@@ -54,12 +73,12 @@ describe("AddRepoModal", () => {
     expect(overlay.parentElement).toBe(document.body);
   });
 
-  it("seeds the URL field from initialUrl and defaults branch to main", () => {
+  it("seeds the URL field and leaves branch empty for remote HEAD detection", () => {
     renderModal({ initialUrl: "https://github.com/octocat/Hello-World" });
     expect(screen.getByLabelText("Repository URL")).toHaveValue(
       "https://github.com/octocat/Hello-World",
     );
-    expect(screen.getByLabelText("Default branch")).toHaveValue("main");
+    expect(screen.getByLabelText("Default branch")).toHaveValue("");
   });
 
   it("submits a clone URL with the chosen branch", async () => {
@@ -92,7 +111,6 @@ describe("AddRepoModal", () => {
     await waitFor(() =>
       expect(mockAddWorkspaceRepos).toHaveBeenCalledWith(WS, {
         repos: ["/repos/local"],
-        branch: "main",
       }),
     );
   });
@@ -112,5 +130,109 @@ describe("AddRepoModal", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Add Repository" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("clone failed");
+  });
+
+  it("polls an accepted remote clone before reporting success", async () => {
+    vi.useFakeTimers();
+    mockAddWorkspaceRepos.mockResolvedValueOnce({
+      kind: "async",
+      jobId: "add-repos-job-123",
+    });
+    mockPollWorkspaceJob.mockResolvedValueOnce({
+      status: "done",
+      workspace_id: WS,
+    });
+    const { onSuccess, onClose } = renderModal();
+
+    fireEvent.change(screen.getByLabelText("Repository URL"), {
+      target: { value: "https://github.com/org/slow-repo" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Add Repository" }));
+    });
+
+    expect(screen.getByTestId("add-repo-progress")).toBeInTheDocument();
+    expect(screen.getByText("Cloning repository...")).toBeInTheDocument();
+    expect(onSuccess).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+
+    expect(mockPollWorkspaceJob).toHaveBeenCalledWith("add-repos-job-123");
+    expect(mockFetchWorkspaceApi).toHaveBeenCalledWith(WS);
+    expect(onSuccess).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps polling when refreshed workspace data changes the initial URL", async () => {
+    vi.useFakeTimers();
+    mockAddWorkspaceRepos.mockResolvedValueOnce({
+      kind: "async",
+      jobId: "add-repos-job-rerender",
+    });
+    mockPollWorkspaceJob.mockResolvedValueOnce({
+      status: "done",
+      workspace_id: WS,
+    });
+    const { onSuccess, onClose, rerender } = renderModal({
+      initialUrl: "https://github.com/org/slow-repo",
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Add Repository" }));
+    });
+    expect(screen.getByTestId("add-repo-progress")).toBeInTheDocument();
+
+    rerender(
+      <AddRepoModal
+        isOpen
+        workspaceId={WS}
+        initialUrl=""
+        onClose={onClose}
+        onSuccess={onSuccess}
+      />,
+    );
+
+    expect(screen.getByTestId("add-repo-progress")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Add Repository" }),
+    ).not.toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+
+    expect(mockPollWorkspaceJob).toHaveBeenCalledWith("add-repos-job-rerender");
+    expect(onSuccess).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("surfaces the async job's terminal failure without closing", async () => {
+    vi.useFakeTimers();
+    mockAddWorkspaceRepos.mockResolvedValueOnce({
+      kind: "async",
+      jobId: "add-repos-job-failed",
+    });
+    mockPollWorkspaceJob.mockResolvedValueOnce({
+      status: "failed",
+      error: "repository not found",
+    });
+    const { onSuccess, onClose } = renderModal();
+
+    fireEvent.change(screen.getByLabelText("Repository URL"), {
+      target: { value: "https://github.com/org/missing" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Add Repository" }));
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent("repository not found");
+    expect(onSuccess).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

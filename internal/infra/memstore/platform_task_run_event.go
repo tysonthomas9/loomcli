@@ -65,7 +65,6 @@ func (s *taskRunEventStore) Append(_ context.Context, in store.TaskRunEventAppen
 		ErrorMessage:   in.ErrorMessage,
 		LogsRef:        in.LogsRef,
 		ArtifactsRef:   in.ArtifactsRef,
-		LeaseToken:     in.LeaseToken,
 		NextEligibleAt: nextEligibleAt,
 		OccurredAt:     in.OccurredAt,
 	}

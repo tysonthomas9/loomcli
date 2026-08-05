@@ -26,6 +26,13 @@ type AgentMessageDeliveryResult struct {
 	Controlled      bool   `json:"controlled,omitempty"`
 }
 
+const (
+	// AgentMessageDeliveryStateDelivered is a terminal successful delivery.
+	AgentMessageDeliveryStateDelivered = string(leadcontrol.DeliveryStateDelivered)
+	// AgentMessageDeliveryStateUnsupported is a terminal unsupported delivery.
+	AgentMessageDeliveryStateUnsupported = string(leadcontrol.DeliveryStateUnsupported)
+)
+
 // AgentMessageDeliveryOptions carries optional delivery metadata for
 // DeliverAgentMessageForDriverWithOptions. DedupeKey, when set, overrides the
 // inbox-side dedupe key so redelivery (e.g. the outbox dispatcher retrying)
@@ -41,6 +48,16 @@ type AgentMessageDeliveryOptions struct {
 // subcommand and the driver-op HTTP API.
 func DeliverAgentMessageForDriver(ctx context.Context, st store.Store, workspace, driverRunID, agentName, message string) (AgentMessageDeliveryResult, error) {
 	return DeliverAgentMessageForDriverWithOptions(ctx, st, workspace, driverRunID, agentName, message, AgentMessageDeliveryOptions{})
+}
+
+// DeliverLeadAssignmentForDriver delivers the lead's current assignment and
+// converts the lead-control result into the driver transport's stable shape.
+func DeliverLeadAssignmentForDriver(ctx context.Context, st store.Store, workspace, leadName string) (AgentMessageDeliveryResult, error) {
+	delivery, err := leadcontrol.DeliverCurrentAssignment(ctx, st, workspace, leadName)
+	if err != nil {
+		return AgentMessageDeliveryResult{}, err
+	}
+	return NewAgentMessageDeliveryResult(leadName, delivery), nil
 }
 
 // DeliverAgentMessageForDriverWithOptions is DeliverAgentMessageForDriver

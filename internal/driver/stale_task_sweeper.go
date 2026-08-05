@@ -2,208 +2,161 @@ package driver
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"sync"
+	"log/slog"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-// DefaultStaleTaskRunMaxAge is how old a running TaskRun's heartbeat may be
-// before the sweeper fails it, when no MaxAge is configured. Sized for the
-// longest legitimate task runs — a daytona sandbox provision + git clone +
-// agent run is routinely 10-15 minutes, and the old 5-minute default swept
-// live runs (observed: a real daytona run killed at 11.3m). Deployments that
-// only run fast local tasks can tighten this via LOOM_DRIVER_STALE_TASK_MAX_AGE.
-const DefaultStaleTaskRunMaxAge = 20 * time.Minute
+// DefaultStaleTaskRunMaxAge is retained as a compatibility alias for host
+// composition and existing callers. Execution owns the recovery policy.
+const DefaultStaleTaskRunMaxAge = execution.DefaultStaleTaskRunMaxAge
 
-var staleTaskClockOrigin = time.Now()
-
-const (
-	staleTaskRunErrorClass   = "stale_task_run"
-	staleTaskRunErrorMessage = "task run heartbeat is stale"
-)
-
-// StaleTaskSweeper is the server-side fault-recovery loop for TaskRuns. It
-// fails running TaskRuns whose heartbeat is older than MaxAge so workflows
-// never have to call recoverStale themselves (fault policy is not workflow
-// code). It reuses the same store method as the recover-stale-tasks driver
-// op, which stays available for manual/compat use.
-type StaleTaskSweeper struct {
-	Store store.Store
-	// WorkspaceKey scopes the sweep to one workspace. Empty sweeps every
-	// workspace returned by Store.Workspaces().List.
-	WorkspaceKey string
-	// MaxAge is the heartbeat staleness threshold. Zero or negative falls
-	// back to defaultStaleTaskRunMaxAge (1200s); override via the
-	// LOOM_DRIVER_STALE_TASK_MAX_AGE env knob wired in loom serve.
-	MaxAge time.Duration
-	// Now is the wall-clock seam used to keep recovery cutoffs in the same clock
-	// domain as persisted heartbeat timestamps. MonotonicNow limits forward
-	// progress, while the live wall clock limits backward-clock false positives.
-	// Nil uses time.Now.
-	Now func() time.Time
-	// MonotonicNow returns elapsed process time. Nil uses time.Since against a
-	// process-local monotonic anchor. Tests inject it together with Now to prove
-	// forward and backward wall-clock jump behavior.
-	MonotonicNow func() time.Duration
-	// ClockOrigin is the wall time corresponding to MonotonicNow()==0. Production
-	// uses the package's process-start anchor. Tests that begin after a simulated
-	// jump set this explicitly so the first sweep is protected too.
-	ClockOrigin time.Time
-
-	clockMu          sync.Mutex
-	clockInitialized bool
-	lastMonotonic    time.Duration
-	logicalNow       time.Time
-}
-
-// StaleTaskSweepResult aggregates the per-driver-run recovery results of one
-// sweep pass.
-type StaleTaskSweepResult struct {
-	Recovered           int
-	SkippedFresh        int
-	RecoveredTaskRunIDs []string
-}
-
-// RunOnce performs a single sweep: list running DriverRuns in each target
-// workspace and fail their TaskRuns whose heartbeat predates now-MaxAge.
-func (s *StaleTaskSweeper) RunOnce(ctx context.Context) (*StaleTaskSweepResult, error) {
-	if s == nil || s.Store == nil {
-		return nil, fmt.Errorf("store required: %w", domain.ErrInvalid)
+func (e *Executor) startHeartbeats(ctx context.Context, claimed *domain.DriverRun, nodeID, leaseToken string, cancelRun context.CancelFunc) (context.CancelFunc, <-chan struct{}) {
+	hbCtx, stopHeartbeat := context.WithCancel(ctx)
+	interval := e.heartbeatInterval()
+	if interval <= 0 {
+		return stopHeartbeat, nil
 	}
-	staleBefore := s.recoveryNow().Add(-s.maxAge())
-	workspaces, err := s.workspaceKeys(ctx)
+	ownerHeartbeatDone := make(chan struct{})
+	staleRecovery := e.ownedStaleTaskRunRecovery(claimed, leaseToken)
+	go heartbeatDriverRun(hbCtx, e, claimed, leaseToken, interval, cancelRun, staleRecovery, ownerHeartbeatDone)
+	go heartbeatExecutorNode(hbCtx, e, claimed.WorkspaceKey, nodeID, e.nodeTTL())
+	return stopHeartbeat, ownerHeartbeatDone
+}
+
+// staleTaskRunRecoveryInterval keeps liveness heartbeats cheap while bounding
+// stale-child convergence to one additional quarter of the selected stale
+// threshold. It never polls faster than the owner heartbeat that fences it.
+func (e *Executor) staleTaskRunRecoveryInterval() time.Duration {
+	maxAge := e.StaleTaskRunMaxAge
+	if maxAge <= 0 {
+		maxAge = DefaultStaleTaskRunMaxAge
+	}
+	interval := maxAge / 4
+	heartbeat := e.heartbeatInterval()
+	if interval < heartbeat {
+		return heartbeat
+	}
+	return interval
+}
+
+// heartbeatDriverRun renews the run lease and observes cooperative cancel
+// requests (composition cascade, AW10): a heartbeat that comes back with
+// CancelRequestedAt set cancels the runner's context so the run terminalizes
+// as cancelled through the normal finish. Losing the parent fence during
+// stale-child recovery uses the same cancellation path.
+func heartbeatDriverRun(
+	ctx context.Context,
+	executor *Executor,
+	claimed *domain.DriverRun,
+	leaseToken string,
+	interval time.Duration,
+	cancelRun context.CancelFunc,
+	staleRecovery *execution.OwnedStaleTaskRunRecovery,
+	done chan<- struct{},
+) {
+	if done != nil {
+		defer close(done)
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	recoveryInterval := executor.staleTaskRunRecoveryInterval()
+	// The claim itself proves the parent owner before this goroutine starts, so
+	// the immediate pass can recover children orphaned before the next cadence.
+	if staleRecovery != nil && !runOwnedStaleTaskRunRecovery(ctx, staleRecovery, cancelRun) {
+		return
+	}
+	nextRecoveryAt := time.Now().Add(recoveryInterval)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			run, err := executor.heartbeatDriverRun(ctx, claimed, leaseToken)
+			if err != nil {
+				if errors.Is(err, execution.ErrFenceConflict) {
+					if cancelRun != nil {
+						cancelRun()
+					}
+					slog.InfoContext(ctx, "driver runner cancelled after parent heartbeat fence conflict", "err", err)
+					return
+				}
+				continue
+			}
+			if run != nil && run.CancelRequestedAt != nil && cancelRun != nil {
+				cancelRun()
+			}
+			// Recovery has its own cadence: heartbeat frequency proves ownership but
+			// must not create a durable no-op recovery receipt every few seconds.
+			// Every recovery pass still follows a successful parent heartbeat.
+			if staleRecovery != nil && !time.Now().Before(nextRecoveryAt) {
+				if !runOwnedStaleTaskRunRecovery(ctx, staleRecovery, cancelRun) {
+					return
+				}
+				nextRecoveryAt = time.Now().Add(recoveryInterval)
+			}
+		}
+	}
+}
+
+func (e *Executor) ownedStaleTaskRunRecovery(claimed *domain.DriverRun, leaseToken string) *execution.OwnedStaleTaskRunRecovery {
+	if e == nil || e.TaskRunRecovery == nil || e.ExecutionAuthorities == nil || claimed == nil {
+		return nil
+	}
+	return &execution.OwnedStaleTaskRunRecovery{
+		API: e.TaskRunRecovery, Authorities: e.ExecutionAuthorities,
+		WorkspaceKey: claimed.WorkspaceKey,
+		ParentOwner:  executionOwnerFromLegacyDriverRun(claimed, leaseToken),
+		MaxAge:       e.StaleTaskRunMaxAge,
+	}
+}
+
+func runOwnedStaleTaskRunRecovery(ctx context.Context, recovery *execution.OwnedStaleTaskRunRecovery, cancelRun context.CancelFunc) bool {
+	result, err := recovery.RunOnce(ctx)
 	if err != nil {
-		return nil, err
-	}
-	out := &StaleTaskSweepResult{}
-	for _, ws := range workspaces {
-		if err := s.sweepWorkspace(ctx, ws, staleBefore, out); err != nil {
-			return nil, err
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return false
 		}
+		if errors.Is(err, execution.ErrFenceConflict) {
+			// A fence conflict proves this executor no longer owns the parent
+			// generation. Stop the backend as well as the heartbeat loop so a
+			// superseded runner cannot keep mutating its checkout.
+			if cancelRun != nil {
+				cancelRun()
+			}
+			slog.InfoContext(ctx, "stale child TaskRun recovery stopped after parent fence conflict", "err", err)
+			return false
+		}
+		slog.WarnContext(ctx, "stale child TaskRun recovery failed", "err", err)
+		return true
 	}
-	return out, nil
+	if result.Recovered > 0 {
+		slog.InfoContext(ctx, "recovered stale child TaskRuns", "workspace", result.WorkspaceKey,
+			"count", result.Recovered, "released", result.Released, "task_run_ids", result.RecoveredTaskRunIDs)
+	}
+	return true
 }
 
-func (s *StaleTaskSweeper) sweepWorkspace(ctx context.Context, ws string, staleBefore time.Time, out *StaleTaskSweepResult) error {
-	runs, err := s.Store.DriverRuns().List(ctx, ws, store.DriverRunFilter{Status: domain.DriverRunRunning})
-	if err != nil {
-		return fmt.Errorf("list running driver runs in workspace %q: %w", ws, err)
-	}
-	for _, run := range runs {
-		if run == nil {
-			continue
-		}
-		result, err := s.Store.DriverRuns().RecoverStaleTaskRuns(ctx, ws, run.RunID, store.StaleTaskRunRecovery{
-			StaleBefore:  staleBefore,
-			ErrorClass:   staleTaskRunErrorClass,
-			ErrorMessage: staleTaskRunErrorMessage,
-		})
-		if err != nil {
-			return fmt.Errorf("recover stale task runs for driver run %q: %w", run.RunID, err)
-		}
-		out.Recovered += result.Recovered
-		out.SkippedFresh += result.SkippedFresh
-		out.RecoveredTaskRunIDs = append(out.RecoveredTaskRunIDs, result.RecoveredTaskRunIDs...)
-	}
-	return nil
-}
-
-// workspaceKeys resolves the sweep targets: the configured workspace, or
-// every known workspace when unscoped (mirrors Executor.RecoverStaleOnce).
-func (s *StaleTaskSweeper) workspaceKeys(ctx context.Context) ([]string, error) {
-	return resolveSweepWorkspaces(ctx, s.Store, s.WorkspaceKey, "stale task sweep")
-}
-
-// resolveSweepWorkspaces returns the workspace targets for a background sweep
-// loop: the single configured workspace, or every workspace when unconfigured.
-// label names the loop in the list-error (e.g. "stale task sweep"). Shared by
-// the stale-task / await-timeout / outbox background loops, which otherwise
-// re-derived this identical configured-or-list-all logic.
-func resolveSweepWorkspaces(ctx context.Context, s store.Store, configured, label string) ([]string, error) {
+// resolveSweepWorkspaces is the shared read-only workspace projection used by
+// background reconcilers. It performs no Execution aggregate mutation.
+func resolveSweepWorkspaces(ctx context.Context, source store.Store, configured, label string) ([]string, error) {
 	if configured != "" {
 		return []string{configured}, nil
 	}
-	workspaces, err := s.Workspaces().List(ctx)
+	workspaces, err := source.Workspaces().List(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list workspaces for %s: %w", label, err)
 	}
 	keys := make([]string, 0, len(workspaces))
-	for _, ws := range workspaces {
-		if ws == nil {
-			continue
+	for _, workspace := range workspaces {
+		if workspace != nil {
+			keys = append(keys, workspace.Key)
 		}
-		keys = append(keys, ws.Key)
 	}
 	return keys, nil
-}
-
-func (s *StaleTaskSweeper) maxAge() time.Duration {
-	if s.MaxAge > 0 {
-		return s.MaxAge
-	}
-	return DefaultStaleTaskRunMaxAge
-}
-
-func (s *StaleTaskSweeper) wallNow() time.Time {
-	if s.Now != nil {
-		return s.Now().UTC()
-	}
-	return time.Now().UTC()
-}
-
-func (s *StaleTaskSweeper) monotonicNow() time.Duration {
-	if s.MonotonicNow != nil {
-		return s.MonotonicNow()
-	}
-	return time.Since(staleTaskClockOrigin)
-}
-
-// recoveryNow returns the earlier of a process-local monotonic projection and
-// the current wall clock. The projection prevents a forward wall-clock jump
-// from aging every persisted heartbeat at once. The wall-clock floor keeps a
-// fresh heartbeat written after a backward jump in the same timestamp domain
-// as the recovery cutoff. A backward jump is therefore conservative: records
-// from the old epoch may wait for wall time to catch up, but fresh records are
-// never sacrificed to preserve immediate recovery.
-func (s *StaleTaskSweeper) recoveryNow() time.Time {
-	s.clockMu.Lock()
-	defer s.clockMu.Unlock()
-
-	monotonic := s.monotonicNow()
-	wall := s.wallNow()
-	if !s.clockInitialized {
-		s.clockInitialized = true
-		s.lastMonotonic = monotonic
-		s.logicalNow = s.initialLogicalNow(wall, monotonic)
-		if wall.Before(s.logicalNow) {
-			return wall
-		}
-		return s.logicalNow
-	}
-
-	elapsed := monotonic - s.lastMonotonic
-	if elapsed < 0 {
-		elapsed = 0
-	}
-	s.lastMonotonic = monotonic
-	s.logicalNow = s.logicalNow.Add(elapsed)
-	if wall.Before(s.logicalNow) {
-		return wall
-	}
-	return s.logicalNow
-}
-
-func (s *StaleTaskSweeper) initialLogicalNow(wall time.Time, monotonic time.Duration) time.Time {
-	if !s.ClockOrigin.IsZero() {
-		return s.ClockOrigin.UTC().Add(monotonic)
-	}
-	if s.Now == nil && s.MonotonicNow == nil {
-		return staleTaskClockOrigin.Add(monotonic).UTC()
-	}
-	// A custom clock without an explicit origin retains the conventional test
-	// behavior that its first wall/monotonic pair establishes the anchor.
-	return wall
 }

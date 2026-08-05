@@ -24,7 +24,10 @@ Install these tools on the build machine:
 
 - Go toolchain for the `loom` and FleetDB sidecars.
 - Rust toolchain for Tauri.
-- Node.js and npm for the Tauri shell and bundled web UI.
+- The exact Node.js and npm version pinned in `desktop/NODE_VERSION` for the
+  Tauri shell, bundled web UI, and packaged workflow runtime.
+- macOS 13.5 or newer. The pinned Node.js 24 runtime is built with 13.5 as its
+  deployment target, so the app advertises the same minimum.
 - A sibling FleetDB checkout at `../fleet-db`, or set `FLEET_DB_REPO` to the
   FleetDB repo path before building.
 
@@ -47,7 +50,13 @@ npm run dev
 `npm run dev` runs `scripts/prepare-sidecar.sh` first. That script:
 
 - builds the web UI into `desktop/src-tauri/resources/webui`
+- builds the digest-marked built-in `prompt-agent` with the pinned Flue checkout
+  and embeds it into the Loom sidecar (the generated bundle stays gitignored)
 - builds `cmd/loom` into `desktop/src-tauri/binaries/loom-<target-triple>`
+- copies the pinned Node.js executable into
+  `desktop/src-tauri/resources/runtime/node`, signs the macOS copy with its
+  least-privilege JIT entitlement, smoke-tests executable JavaScript, and copies
+  its license into the app resources
 - builds FleetDB into
   `desktop/src-tauri/binaries/fleet-db-<target-triple>` when FleetDB is
   available
@@ -57,6 +66,9 @@ If FleetDB is not in `../fleet-db`, run:
 ```sh
 FLEET_DB_REPO=/path/to/fleet-db npm run dev
 ```
+
+If the pinned Flue checkout is not discoverable at `../flue`, `../../flue`, or
+`./flue`, also set `FLUE_REPO=/path/to/flue`.
 
 ## Local App Bundle
 
@@ -121,9 +133,11 @@ Then build, sign, notarize, staple, and verify a DMG with:
 NOTARY_PROFILE=<profile-name> npm --prefix desktop run release:macos
 ```
 
-This runs `desktop/scripts/release-macos.sh`, which signs the `.app` and the
-bundled `loom`/`fleet-db` sidecars with hardened runtime, notarizes and staples
-the app, wraps it in a DMG, then notarizes and staples the DMG. The verified
+This runs `desktop/scripts/release-macos.sh`, which signs the `.app` and bundled
+executables with hardened runtime. Node is signed separately with only the JIT
+entitlement required by V8 and is executed again after the final app seal; a
+plain `node --version` check is not accepted as runtime proof. The script then
+notarizes and staples the app, wraps it in a DMG, and notarizes and staples the DMG. The verified
 artifact lands at `desktop/dist-release/Loom-Agents-<version>-aarch64.dmg`, and
 the script prints a ready-to-run `gh release create` command. Apple's notary
 service typically takes 2–15 minutes, during which the run blocks on `--wait`.
@@ -312,9 +326,24 @@ Useful status commands:
 launchctl print gui/$(id -u)/com.loom.local
 ```
 
+Verify the self-contained workflow runtime in a built bundle (use the installed
+app path instead when validating `/Applications`):
+
+```sh
+APP="desktop/src-tauri/target/release/bundle/macos/Loom Agents.app"
+NODE="$APP/Contents/Resources/runtime/node"
+test "$("$NODE" --version)" = "v$(tr -d '[:space:]' < desktop/NODE_VERSION)"
+"$NODE" -e 'if (new Function("return 42")() !== 42) process.exit(1)'
+test -f "$APP/Contents/Resources/licenses/node-LICENSE"
+codesign --verify --strict --verbose=2 "$NODE"
+codesign -d --entitlements - "$NODE"
+codesign --verify --deep --strict --verbose=2 "$APP"
+```
+
 ## Updates
 
-The release update flow must treat the app bundle and sidecars as one unit:
+The release update flow must treat the app bundle and its Loom, FleetDB, and
+Node.js sidecars as one unit:
 
 1. Download the app update.
 2. Mark the local runtime as draining.
@@ -327,7 +356,7 @@ The release update flow must treat the app bundle and sidecars as one unit:
 9. Resume claims.
 10. Restore workspace windows.
 
-Do not hot-swap the bundled `loom` or FleetDB sidecar while agents are
+Do not hot-swap the bundled `loom`, FleetDB, or Node.js sidecar while agents are
 running. If a user also has a standalone CLI installed, the app update must not
 rewrite that CLI without explicit user consent.
 
@@ -353,6 +382,11 @@ If FleetDB is not bundled, make sure the sibling repo exists or set
 ```sh
 FLEET_DB_REPO=/path/to/fleet-db npm --prefix desktop run build
 ```
+
+If a packaged workflow reports that `node` is missing, verify that
+`Contents/Resources/runtime/node` exists and is executable. If it aborts only in
+a signed build, inspect its entitlements and rerun the JavaScript smoke above;
+the runtime must retain `com.apple.security.cs.allow-jit` after app signing.
 
 If the LaunchAgent is stale after moving the app, reinstall it:
 

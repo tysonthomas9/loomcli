@@ -72,14 +72,31 @@ const (
 // Module serves the workspace-scoped approval route.
 type Module struct {
 	store  store.Store
-	awaits *trigger.AwaitMatcher
+	awaits AwaitDispatcher
 	logger *slog.Logger
 }
 
-// NewModule constructs the approvals module backed by the given store.
-// Nil-safe: with a nil store, Register registers nothing.
-func NewModule(st store.Store) *Module {
-	return &Module{store: st, awaits: &trigger.AwaitMatcher{Store: st}, logger: slog.Default()}
+// AwaitDispatcher is the Execution-backed mutation surface used after the
+// approval event is journaled. Production composition must inject it; this
+// module never derives mutation authority from Store.
+type AwaitDispatcher interface {
+	Dispatch(context.Context, string, trigger.AwaitDispatchEvent) (*trigger.AwaitDispatchResult, error)
+}
+
+type Config struct {
+	Store  store.Store
+	Awaits AwaitDispatcher
+	Logger *slog.Logger
+}
+
+// New constructs the approvals module. Nil Store keeps route registration
+// inert; nil Awaits leaves the registered route fail-closed with 503.
+func New(config Config) *Module {
+	logger := config.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &Module{store: config.Store, awaits: config.Awaits, logger: logger}
 }
 
 func (m *Module) Register(mux *http.ServeMux) {
@@ -146,10 +163,11 @@ func (m *Module) postApproval(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "unauthenticated", "approval requires a verified session identity")
 		return
 	}
-	if eventpolicy.IsReservedSystemActorRef(actor) {
-		m.auditReservedActor(ws, actor, userID)
-		writeError(w, http.StatusForbidden, "reserved_actor_ref",
-			fmt.Sprintf("session identity cannot use reserved internal actor %q", actor))
+	if m.awaits == nil {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "Execution await resolution is unavailable")
+		return
+	}
+	if !m.approvalActorAllowed(w, ws, actor, userID) {
 		return
 	}
 	params, err := decodeApproval(w, r)
@@ -188,6 +206,16 @@ func (m *Module) postApproval(w http.ResponseWriter, r *http.Request) {
 	}
 	resp.Resolutions = m.dispatchApproval(r.Context(), ws, params, eventID, actor, payload)
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (m *Module) approvalActorAllowed(w http.ResponseWriter, workspace, actor, userID string) bool {
+	if !eventpolicy.IsReservedSystemActorRef(actor) {
+		return true
+	}
+	m.auditReservedActor(workspace, actor, userID)
+	writeError(w, http.StatusForbidden, "reserved_actor_ref",
+		fmt.Sprintf("session identity cannot use reserved internal actor %q", actor))
+	return false
 }
 
 // sessionActor resolves the verified approver identity from the session

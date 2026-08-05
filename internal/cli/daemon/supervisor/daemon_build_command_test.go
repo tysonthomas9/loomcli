@@ -2,6 +2,8 @@ package supervisor
 
 import (
 	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -109,6 +111,45 @@ func TestBuildCommand_NoConstraints_BackwardCompat(t *testing.T) {
 		if strings.HasPrefix(env, "LOOM_READ_ONLY=") {
 			t.Error("LOOM_READ_ONLY should not be set when ReadOnly is false")
 		}
+	}
+}
+
+func TestBuildCommand_CustomBugRoleRequiresReadOnly(t *testing.T) {
+	tmpDir := t.TempDir()
+	s := &Supervisor{
+		ConfigSnapshot: func() *cfgpkg.DaemonConfig {
+			return &cfgpkg.DaemonConfig{Daemon: cfgpkg.DaemonSettings{}}
+		},
+		ProjectDir:    tmpDir,
+		Shutdown:      make(chan struct{}),
+		StoppedAgents: make(map[string]struct{}),
+		EmitEvent:     func(events.Event) {},
+	}
+
+	ap := &AgentProcess{
+		Entry: cfgpkg.AgentEntry{
+			Worktree: "triage-agent",
+			Role:     "bug-triage",
+		},
+		RoleConfig: cfgpkg.RoleConfig{
+			PromptFile: filepath.Join(tmpDir, "bug-triage.md"),
+			TaskFilter: "bug",
+			ReadOnly:   false,
+		},
+		WorktreePath: tmpDir,
+	}
+
+	if _, err := s.buildCommand(ap); err == nil || !strings.Contains(err.Error(), "requires read_only=true") {
+		t.Fatalf("writable bug role build error = %v, want read-only guard", err)
+	}
+
+	ap.RoleConfig.ReadOnly = true
+	cmd, err := s.buildCommand(ap)
+	if err != nil {
+		t.Fatalf("read-only bug role buildCommand: %v", err)
+	}
+	if !slices.Contains(cmd.Env, "LOOM_READ_ONLY=1") {
+		t.Fatalf("read-only bug role env missing LOOM_READ_ONLY=1: %v", cmd.Env)
 	}
 }
 

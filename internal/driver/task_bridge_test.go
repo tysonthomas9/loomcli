@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -40,6 +41,25 @@ func TestTaskRunnerEnvAPIBaseURL(t *testing.T) {
 	if !slices.Equal(withURL[:len(legacy)], legacy) {
 		t.Fatalf("APIBaseURL changed the legacy env prefix:\n%v\n%v", withURL[:len(legacy)], legacy)
 	}
+}
+
+func TestHostBridgeTaskExecutorRequiresTaskRunAPIURL(t *testing.T) {
+	t.Run("preflight", func(t *testing.T) {
+		_, err := (HostBridgeTaskExecutor{Command: []string{"unused"}}).PreflightTaskProvider(
+			context.Background(),
+			TaskRunRequestOptions{ProviderProfile: "codex-default"},
+		)
+		if !errors.Is(err, domain.ErrInvalid) || !strings.Contains(err.Error(), "task runner requires the loom serve task-run API URL") {
+			t.Fatalf("PreflightTaskProvider error = %v, want missing task-run API URL", err)
+		}
+	})
+
+	t.Run("execute", func(t *testing.T) {
+		_, err := (HostBridgeTaskExecutor{Command: []string{"unused"}}).ExecuteTask(context.Background(), hostBridgeTaskExecRequest())
+		if !errors.Is(err, domain.ErrInvalid) || !strings.Contains(err.Error(), "task runner requires the loom serve task-run API URL") {
+			t.Fatalf("ExecuteTask error = %v, want missing task-run API URL", err)
+		}
+	})
 }
 
 func TestLocalTaskRunnerSettingsDoNotOverrideInheritedGitHubToken(t *testing.T) {
@@ -76,6 +96,53 @@ func TestLocalTaskRunnerSettingsDoNotOverrideInheritedGitHubToken(t *testing.T) 
 	if !envContains(env, "GITHUB_TOKEN=settings-token") {
 		t.Fatalf("settings GitHub token was not exported when inherited env had no GitHub token: %v", env)
 	}
+
+	req.Input = json.RawMessage(`{
+		"loomAgentPolicy": {
+			"version": 1,
+			"agentServiceId": "agent-1",
+			"roleName": "reviewer",
+			"backend": "opencode",
+			"model": "role/model"
+		}
+	}`)
+	env = executor.taskRunnerEnv(req, "{}", []string{"PATH=/bin"})
+	if !envContains(env, "LOOM_OPENCODE_MODEL=role/model") {
+		t.Fatalf("immutable role model was not exported: %v", env)
+	}
+	if envContains(env, "LOOM_OPENCODE_MODEL=opencode/model") {
+		t.Fatalf("local settings overrode immutable role model: %v", env)
+	}
+}
+
+func TestLocalTaskRunnerManagedPolicyParsingFailsClosed(t *testing.T) {
+	valid := json.RawMessage(`{
+		"loomAgentPolicy": {
+			"version": 1,
+			"agentServiceId": "agent-1",
+			"roleName": "reviewer",
+			"backend": "codex"
+		}
+	}`)
+	policy, present, err := localTaskRunnerAgentPolicyFromInput(valid)
+	if err != nil || !present {
+		t.Fatalf("valid managed policy parse = (%+v, %v, %v), want present without error", policy, present, err)
+	}
+	if policy.AgentServiceID != "agent-1" || policy.RoleName != "reviewer" || policy.Backend != "codex" {
+		t.Fatalf("valid managed policy = %+v, want stamped values", policy)
+	}
+
+	_, present, err = localTaskRunnerAgentPolicyFromInput(json.RawMessage(`{
+		"loomAgentPolicy": {"version": 1, "backend": "codex"}
+	}`))
+	if !present || err == nil || !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("incomplete managed policy parse = (present=%v, err=%v), want invalid error", present, err)
+	}
+
+	_, present, err = localTaskRunnerAgentPolicyFromInput(json.RawMessage(`{"prompt":"legacy"}`))
+	if err != nil || present {
+		t.Fatalf("legacy input parse = (present=%v, err=%v), want absent without error", present, err)
+	}
 }
 
 func TestHostBridgeTaskExecutorAppliesPatchUploadsAndFinalizesArtifact(t *testing.T) {
@@ -92,9 +159,12 @@ func TestHostBridgeTaskExecutorAppliesPatchUploadsAndFinalizesArtifact(t *testin
 	patch := "diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new\n"
 
 	executor := HostBridgeTaskExecutor{
-		Store:        st,
-		WorktreePath: repo.dir,
-		Command:      hostBridgeHelperCommand(t, "success", base, patch),
+		Store:               st,
+		Artifacts:           testArtifactsAPI(st),
+		ArtifactAuthorities: taskWorkerTestAuthorities{},
+		WorktreePath:        repo.dir,
+		APIBaseURL:          testTaskRunAPIURL,
+		Command:             hostBridgeHelperCommand(t, "success", base, patch),
 	}
 	result, err := executor.ExecuteTask(ctx, hostBridgeTaskExecRequest())
 	if err != nil {
@@ -124,6 +194,92 @@ func TestHostBridgeTaskExecutorAppliesPatchUploadsAndFinalizesArtifact(t *testin
 	}
 }
 
+func TestLocalTaskRunnerPublishedDelivery(t *testing.T) {
+	localReq := hostBridgeTaskExecRequest()
+	localReq.RunnerEntrypoint = LocalTaskRunnerEntrypoint
+	for _, tc := range []struct {
+		name     string
+		req      TaskExecRequest
+		status   domain.TaskRunStatus
+		delivery string
+		want     bool
+	}{
+		{name: "local branch", req: localReq, status: domain.TaskRunCompleted, delivery: "local_branch", want: true},
+		{name: "stack branch", req: localReq, status: domain.TaskRunCompleted, delivery: "stack_branch", want: true},
+		{name: "pull request", req: localReq, status: domain.TaskRunCompleted, delivery: "pull_request", want: true},
+		{name: "patch back", req: localReq, status: domain.TaskRunCompleted, delivery: "patch_back"},
+		{name: "empty published unit", req: localReq, status: domain.TaskRunCompleted, delivery: "pull_request_skipped_no_changes"},
+		{name: "failed result", req: localReq, status: domain.TaskRunFailed, delivery: "local_branch"},
+		{name: "foreign runner cannot self assert", req: hostBridgeTaskExecRequest(), status: domain.TaskRunCompleted, delivery: "local_branch"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := TaskExecResult{
+				Status:          tc.status,
+				RuntimeMetadata: map[string]string{"delivery": tc.delivery},
+			}
+			if got := localTaskRunnerPublishedDelivery(tc.req, result); got != tc.want {
+				t.Fatalf("localTaskRunnerPublishedDelivery() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestHostBridgeTaskExecutorPersistsPublishedPatchWithoutPatchBack(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	repo := newPatchBackRepo(t)
+	base := repo.commitFile("file.txt", "old\n", "base")
+	patch := "diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+published\n"
+	req := hostBridgeTaskExecRequest()
+	req.RunnerEntrypoint = LocalTaskRunnerEntrypoint
+	req.RunnerTrustLevel = domain.DriverTrustTrusted
+
+	executor := HostBridgeTaskExecutor{
+		Store:               st,
+		Artifacts:           testArtifactsAPI(st),
+		ArtifactAuthorities: taskWorkerTestAuthorities{},
+		WorktreePath:        repo.dir,
+		APIBaseURL:          testTaskRunAPIURL,
+		Command:             hostBridgeHelperCommand(t, "published", base, patch),
+	}
+	result, err := executor.ExecuteTask(ctx, req)
+	if err != nil {
+		t.Fatalf("ExecuteTask: %v", err)
+	}
+	if result.Status != domain.TaskRunCompleted || result.ExitCode != 0 {
+		t.Fatalf("result = %+v, want completed and zero exit", result)
+	}
+	if got := repo.read("file.txt"); got != "old\n" {
+		t.Fatalf("host file content = %q, want published delivery to leave it unchanged", got)
+	}
+	if got := result.RuntimeMetadata["patch_artifact_id"]; got != "patch-task-run-1" {
+		t.Fatalf("patch artifact metadata = %q, want patch-task-run-1", got)
+	}
+	if _, ok := result.RuntimeMetadata["patch_back_status"]; ok {
+		t.Fatalf("published delivery unexpectedly attempted patch-back: %+v", result.RuntimeMetadata)
+	}
+	artifact, err := st.Artifacts().Get(ctx, "WS", "patch-task-run-1")
+	if err != nil {
+		t.Fatalf("get patch artifact: %v", err)
+	}
+	if artifact.Type != "patch" || artifact.DurableStatus != "finalized" || artifact.ContentHash == "" {
+		t.Fatalf("patch artifact = %+v, want finalized exact diff evidence", artifact)
+	}
+	contentReader, ok := st.Artifacts().(interface {
+		ReadContent(context.Context, string, string) ([]byte, error)
+	})
+	if !ok {
+		t.Fatal("artifact store does not expose ReadContent")
+	}
+	content, err := contentReader.ReadContent(ctx, "WS", "patch-task-run-1")
+	if err != nil {
+		t.Fatalf("read patch artifact content: %v", err)
+	}
+	if string(content) != patch {
+		t.Fatalf("patch artifact content = %q, want exact runner patch %q", content, patch)
+	}
+}
+
 func TestHostBridgeTaskExecutorPreservesFinalizedPatchArtifactOnConflict(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
@@ -133,9 +289,12 @@ func TestHostBridgeTaskExecutorPreservesFinalizedPatchArtifactOnConflict(t *test
 	patch := "diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new\n"
 
 	executor := HostBridgeTaskExecutor{
-		Store:        st,
-		WorktreePath: repo.dir,
-		Command:      hostBridgeHelperCommand(t, "success", base, patch),
+		Store:               st,
+		Artifacts:           testArtifactsAPI(st),
+		ArtifactAuthorities: taskWorkerTestAuthorities{},
+		WorktreePath:        repo.dir,
+		APIBaseURL:          testTaskRunAPIURL,
+		Command:             hostBridgeHelperCommand(t, "success", base, patch),
 	}
 	result, err := executor.ExecuteTask(ctx, hostBridgeTaskExecRequest())
 	if err != nil {
@@ -168,9 +327,12 @@ func TestHostBridgeTaskExecutorThroughRequestTaskRun(t *testing.T) {
 	base := repo.commitFile("file.txt", "old\n", "base")
 	patch := "diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new\n"
 	executor := HostBridgeTaskExecutor{
-		Store:        st,
-		WorktreePath: repo.dir,
-		Command:      hostBridgeHelperCommand(t, "success", base, patch),
+		Store:               st,
+		Artifacts:           testArtifactsAPI(st),
+		ArtifactAuthorities: taskWorkerTestAuthorities{},
+		WorktreePath:        repo.dir,
+		APIBaseURL:          testTaskRunAPIURL,
+		Command:             hostBridgeHelperCommand(t, "success", base, patch),
 	}
 
 	outcome, err := RequestTaskRunWithResult(ctx, st, TaskRunRequestOptions{
@@ -212,6 +374,7 @@ func TestHostBridgeTaskExecutorThroughRequestTaskRun(t *testing.T) {
 		CompletionID:        "complete-task-run-1",
 		NodeID:              stored.NodeID,
 		LeaseID:             stored.LeaseID,
+		LeaseToken:          outcome.LeaseToken,
 		FencingToken:        stored.FencingToken,
 		Status:              domain.TaskRunCompleted,
 		ExitCode:            &exitCode,
@@ -233,9 +396,12 @@ func TestHostBridgeTaskExecutorThroughRequestTaskRun(t *testing.T) {
 func TestHostBridgeTaskExecutorRegistersFinalizedRunnerArtifacts(t *testing.T) {
 	ctx, st, run := setupRunningDriverRun(t)
 	executor := HostBridgeTaskExecutor{
-		Store:        st,
-		WorktreePath: t.TempDir(),
-		Command:      hostBridgeHelperCommand(t, "artifact", "unused-base", "unused-patch"),
+		Store:               st,
+		Artifacts:           testArtifactsAPI(st),
+		ArtifactAuthorities: taskWorkerTestAuthorities{},
+		WorktreePath:        t.TempDir(),
+		APIBaseURL:          testTaskRunAPIURL,
+		Command:             hostBridgeHelperCommand(t, "artifact", "unused-base", "unused-patch"),
 	}
 
 	outcome, err := RequestTaskRunWithResult(ctx, st, TaskRunRequestOptions{
@@ -277,6 +443,7 @@ func TestHostBridgeTaskExecutorRegistersFinalizedRunnerArtifacts(t *testing.T) {
 		CompletionID:        "complete-finalized-artifact-task-run-1",
 		NodeID:              stored.NodeID,
 		LeaseID:             stored.LeaseID,
+		LeaseToken:          outcome.LeaseToken,
 		FencingToken:        stored.FencingToken,
 		Status:              domain.TaskRunCompleted,
 		ExitCode:            &exitCode,
@@ -293,9 +460,12 @@ func TestHostBridgeTaskExecutorRegistersFinalizedRunnerArtifacts(t *testing.T) {
 func TestHostBridgeTaskExecutorMapsFlueSessionAndTranscript(t *testing.T) {
 	ctx, st, run := setupRunningDriverRun(t)
 	executor := HostBridgeTaskExecutor{
-		Store:        st,
-		WorktreePath: t.TempDir(),
-		Command:      hostBridgeHelperCommand(t, "flue-transcript", "unused-base", "unused-patch"),
+		Store:               st,
+		Artifacts:           testArtifactsAPI(st),
+		ArtifactAuthorities: taskWorkerTestAuthorities{},
+		WorktreePath:        t.TempDir(),
+		APIBaseURL:          testTaskRunAPIURL,
+		Command:             hostBridgeHelperCommand(t, "flue-transcript", "unused-base", "unused-patch"),
 	}
 
 	outcome, err := RequestTaskRunWithResult(ctx, st, TaskRunRequestOptions{
@@ -381,9 +551,12 @@ func TestHostBridgeTaskExecutorMapsFlueSessionAndTranscript(t *testing.T) {
 func TestHostBridgeTaskExecutorReusesOutputArtifactsOnRetry(t *testing.T) {
 	ctx, st, _ := setupRunningDriverRun(t)
 	executor := HostBridgeTaskExecutor{
-		Store:        st,
-		WorktreePath: t.TempDir(),
-		Command:      hostBridgeHelperCommand(t, "flue-transcript", "unused-base", "unused-patch"),
+		Store:               st,
+		Artifacts:           testArtifactsAPI(st),
+		ArtifactAuthorities: taskWorkerTestAuthorities{},
+		WorktreePath:        t.TempDir(),
+		APIBaseURL:          testTaskRunAPIURL,
+		Command:             hostBridgeHelperCommand(t, "flue-transcript", "unused-base", "unused-patch"),
 	}
 	req := hostBridgeTaskExecRequest()
 	req.RunnerKind = RunnerKindFlueWorkflow
@@ -441,6 +614,7 @@ func TestHostBridgeTaskExecutorRunsNodeModuleThroughGenericInvoker(t *testing.T)
 	req.Input = json.RawMessage(`{"message":"hello"}`)
 	executor := HostBridgeTaskExecutor{
 		WorktreePath: worktree,
+		APIBaseURL:   testTaskRunAPIURL,
 		Command:      []string{"node", genericTaskRunnerInvokerPath(t)},
 	}
 	result, err := executor.ExecuteTask(ctx, req)
@@ -489,7 +663,7 @@ func TestStackScriptsUseGenericTaskRunnerInvoker(t *testing.T) {
 }
 
 func TestHostBridgeTaskExecutorPreflightsBuiltInFlueWorkflowWithoutCommand(t *testing.T) {
-	executor := HostBridgeTaskExecutor{}
+	executor := HostBridgeTaskExecutor{APIBaseURL: testTaskRunAPIURL}
 	if _, err := executor.PreflightTaskProvider(context.Background(), TaskRunRequestOptions{
 		Runner:           "daytona-task-runner",
 		RunnerKind:       RunnerKindFlueWorkflow,
@@ -509,7 +683,8 @@ func TestHostBridgeTaskExecutorPreflightsBuiltInFlueWorkflowWithoutCommand(t *te
 func TestHostBridgeTaskExecutorRefusesUntrustedNamedRunner(t *testing.T) {
 	ranPath := filepath.Join(t.TempDir(), "ran")
 	executor := HostBridgeTaskExecutor{
-		Command: []string{"sh", "-c", "printf ran > \"$1\"; printf '%s\n' '{\"status\":\"completed\",\"exit_code\":0}'", "sh", ranPath},
+		APIBaseURL: testTaskRunAPIURL,
+		Command:    []string{"sh", "-c", "printf ran > \"$1\"; printf '%s\n' '{\"status\":\"completed\",\"exit_code\":0}'", "sh", ranPath},
 	}
 	req := hostBridgeTaskExecRequest()
 	req.Runner = "local-task-runner"
@@ -629,6 +804,7 @@ setInterval(() => {}, 1000);
 	executor := HostBridgeTaskExecutor{
 		Store:        st,
 		WorktreePath: worktree,
+		APIBaseURL:   testTaskRunAPIURL,
 		Command:      []string{"node", genericTaskRunnerInvokerPath(t)},
 	}
 	result, err := executor.ExecuteTask(ctx, req)
@@ -653,6 +829,7 @@ setInterval(() => {}, 1000);
 	directResult, err := (HostBridgeTaskExecutor{
 		Store:        st,
 		WorktreePath: worktree,
+		APIBaseURL:   testTaskRunAPIURL,
 	}).ExecuteTask(ctx, directReq)
 	if err != nil {
 		t.Fatalf("direct ExecuteTask: %v", err)
@@ -810,6 +987,21 @@ func TestHostBridgeTaskExecutorHelperProcess(t *testing.T) {
 		if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
 			t.Fatalf("encode result: %v", err)
 		}
+	case "published":
+		result := map[string]any{
+			"status":         "completed",
+			"exitCode":       0,
+			"patch":          patch,
+			"patch_base_ref": base,
+			"logsRef":        "logs://" + req.TaskRunID,
+			"runtimeMetadata": map[string]string{
+				"helper":   "host_bridge",
+				"delivery": "local_branch",
+			},
+		}
+		if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
+			t.Fatalf("encode result: %v", err)
+		}
 	case "artifact":
 		result := map[string]any{
 			"status":    "completed",
@@ -873,6 +1065,41 @@ func TestHostBridgeTaskExecutorHelperProcess(t *testing.T) {
 		}
 		if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
 			t.Fatalf("encode result: %v", err)
+		}
+	case "flue-retry-transcript":
+		attempt := req.TaskRunAttempt
+		if attempt < 1 {
+			attempt = 1
+		}
+		status := "failed"
+		exitCode := 1
+		errorClass := "retry_fixture"
+		errorMessage := "attempt 1 failed"
+		if attempt > 1 {
+			status = "completed"
+			exitCode = 0
+			errorClass = ""
+			errorMessage = ""
+		}
+		result := map[string]any{
+			"status":        status,
+			"exit_code":     exitCode,
+			"error_class":   errorClass,
+			"error_message": errorMessage,
+			"logs":          "logs for attempt " + strconv.Itoa(attempt) + "\n",
+			"transcript_entries": []map[string]any{{
+				"seq":       1,
+				"timestamp": "2026-07-23T01:00:00Z",
+				"role":      "assistant",
+				"type":      "text",
+				"text":      "transcript for attempt " + strconv.Itoa(attempt),
+			}},
+			"runtime_metadata": map[string]string{
+				"fixture_attempt": strconv.Itoa(attempt),
+			},
+		}
+		if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
+			t.Fatalf("encode retry transcript result: %v", err)
 		}
 	case "invalid-empty":
 		os.Stdout.WriteString("{}\n")
@@ -1104,6 +1331,65 @@ func TestFinishFlueTaskSessionFinalizesAfterCallerCancellation(t *testing.T) {
 	}
 	if final.Status != domain.AgentSessionFailed || final.FinishedAt == nil {
 		t.Fatalf("final session = status %q finished_at %v, want failed terminal record", final.Status, final.FinishedAt)
+	}
+}
+
+func TestFinishFlueTaskSessionPreservesHostOwnedIdentityMetadata(t *testing.T) {
+	ctx := t.Context()
+	st := memstore.New()
+	req := TaskExecRequest{
+		WorkspaceKey: "WS",
+		TaskID:       "TASK-1",
+		TaskRunID:    "task-run-1",
+		DriverRunID:  "driver-run-1",
+		Runner:       "prompt-agent",
+		RunnerKind:   RunnerKindFlueWorkflow,
+	}
+	sessionID := flueTaskSessionID(req)
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    sessionID,
+		AgentID:      "task-agent",
+		Kind:         domain.AgentSessionKindTask,
+		TaskID:       req.TaskID,
+		Status:       domain.AgentSessionRunning,
+		Metadata:     flueTaskSessionMetadata(req, sessionID),
+	}); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	err := (HostBridgeTaskExecutor{Store: st}).finishFlueTaskSession(
+		ctx,
+		req,
+		&flueTaskSession{SessionID: sessionID, Metadata: flueTaskSessionMetadata(req, sessionID)},
+		TaskExecResult{
+			Status: domain.TaskRunCompleted,
+			RuntimeMetadata: map[string]string{
+				"task_id":       "TASK-OTHER",
+				"task_run_id":   "task-run-other",
+				"driver_run_id": "driver-run-other",
+				"runner":        "forged-runner",
+				"custom":        "retained",
+			},
+		},
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("finish session: %v", err)
+	}
+	final, err := st.AgentSessions().Get(ctx, "WS", sessionID)
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if final.Metadata["task_id"] != req.TaskID ||
+		final.Metadata["task_run_id"] != req.TaskRunID ||
+		final.Metadata["driver_run_id"] != req.DriverRunID ||
+		final.Metadata["runner"] != req.Runner {
+		t.Fatalf("host-owned metadata was overwritten: %+v", final.Metadata)
+	}
+	if final.Metadata["custom"] != "retained" {
+		t.Fatalf("ordinary runtime metadata = %+v, want custom field retained", final.Metadata)
 	}
 }
 

@@ -29,6 +29,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 )
 
 // awaitActorList accepts the actor field as either a single JSON string or a
@@ -119,31 +120,67 @@ func (m *Module) awaitEvent(ctx context.Context, ws string, id driverIdentity, b
 	if err != nil {
 		return nil, err
 	}
+	outcome, err := m.awaitDriverRun(ctx, ws, id, parent, strings.TrimSpace(params.Pattern), params.Actor.normalized(), params.TimeoutMs, params.AwaitIndex)
+	if err != nil {
+		return nil, err
+	}
+	return m.executionAwaitEventResponse(ctx, ws, outcome), nil
+}
+
+func (m *Module) awaitDriverRun(
+	ctx context.Context,
+	ws string,
+	id driverIdentity,
+	parent *domain.DriverRun,
+	pattern string,
+	actorAllow []string,
+	timeoutMs int64,
+	awaitIndex int,
+) (*execution.DriverAwaitResult, error) {
+	if m.execution == nil || m.executionAuthorities == nil {
+		return nil, fmt.Errorf("execution await API is unavailable: %w", execution.ErrUnavailable)
+	}
+	if err := domain.ValidateAwaitPattern(pattern); err != nil {
+		return nil, err
+	}
+	if awaitIndex < 1 {
+		return nil, fmt.Errorf("awaitIndex %d must be >= 1: %w", awaitIndex, domain.ErrAwaitInstanceKeyMalformed)
+	}
+	limits := driverpkg.ResolveAwaitLimits()
+	timeout := time.Duration(timeoutMs) * time.Millisecond
+	if timeoutMs <= 0 || timeout/time.Millisecond != time.Duration(timeoutMs) || timeout > limits.MaxTimeout {
+		return nil, fmt.Errorf("timeoutMs %d is required, positive, and at most %s: %w", timeoutMs, limits.MaxTimeout, domain.ErrAwaitTimeoutRequired)
+	}
 	fence, err := id.FencingToken()
 	if err != nil {
 		return nil, err
 	}
-	outcome, err := driverpkg.AwaitEvent(ctx, m.store, driverpkg.AwaitEventOptions{
-		WorkspaceKey: ws,
-		RunID:        parent.RunID,
-		NodeID:       id.NodeID,
-		LeaseID:      id.LeaseID,
-		FencingToken: fence,
-		Pattern:      strings.TrimSpace(params.Pattern),
-		ActorAllow:   params.Actor.normalized(),
-		TimeoutMs:    params.TimeoutMs,
-		AwaitIndex:   params.AwaitIndex,
+	owner := execution.Owner{
+		ResourceKind: execution.ResourceDriverRun, ResourceID: parent.RunID,
+		NodeID: id.NodeID, LeaseID: id.LeaseID, LeaseToken: id.LeaseToken, FencingToken: fence,
+	}
+	auth, err := m.executionAuthorities.ResolveDriverRunAuthority(ctx, ws, execution.ActionAwaitDriverRun, owner)
+	if err != nil {
+		return nil, err
+	}
+	outcome, err := m.execution.AwaitDriverRun(ctx, auth, execution.AwaitDriverRunCommand{
+		WorkspaceKey: ws, RequestID: fmt.Sprintf("driver-await:%s:%d", parent.RunID, awaitIndex), Owner: owner,
+		Pattern: pattern, ActorAllow: actorAllow, Timeout: timeout, AwaitIndex: awaitIndex,
+		MaxTimeout: limits.MaxTimeout, MaxPerRun: limits.MaxPerRun, TotalSuspendCap: limits.TotalSuspendCap,
+		RegisteredAt: time.Now().UTC(),
 	})
 	if err != nil {
 		return nil, err
 	}
-	return m.awaitEventResponse(ctx, ws, outcome), nil
+	return outcome, nil
 }
 
-// awaitEventResponse renders the op outcome onto the camelCase wire.
-func (m *Module) awaitEventResponse(ctx context.Context, ws string, outcome *driverpkg.AwaitEventOutcome) awaitEventResponse {
+func (m *Module) executionAwaitEventResponse(ctx context.Context, ws string, outcome *execution.DriverAwaitResult) awaitEventResponse {
+	if outcome == nil {
+		return awaitEventResponse{}
+	}
 	resp := awaitEventResponse{Status: outcome.Status}
-	inst := outcome.Instance
+	inst := legacyExecutionAwaitInstance(outcome.Instance)
 	if inst == nil {
 		return resp
 	}
@@ -154,6 +191,19 @@ func (m *Module) awaitEventResponse(ctx context.Context, ws string, outcome *dri
 		resp.Event = m.awaitWireEvent(ctx, ws, inst)
 	}
 	return resp
+}
+
+func legacyExecutionAwaitInstance(instance *execution.DriverAwaitInstance) *domain.AwaitInstance {
+	if instance == nil {
+		return nil
+	}
+	return &domain.AwaitInstance{
+		WorkspaceKey: instance.WorkspaceKey, InstanceKey: instance.InstanceKey, RunID: instance.RunID,
+		Pattern: instance.Pattern, ActorAllow: append([]string(nil), instance.ActorAllow...),
+		Deadline: instance.Deadline, RegisteredAt: instance.RegisteredAt, Status: domain.AwaitStatus(instance.Status),
+		SatisfiedByEventID: instance.SatisfiedByEventID, SatisfiedActor: instance.SatisfiedActor,
+		SatisfiedPayload: append([]byte(nil), instance.SatisfiedPayload...), ResumedAt: instance.ResumedAt,
+	}
 }
 
 // awaitWireEvent builds the recorded-event payload from the terminal await
@@ -211,7 +261,7 @@ func (m *Module) handleListAwaits(w http.ResponseWriter, r *http.Request) {
 		writeDomainOpError(w, err)
 		return
 	}
-	awaits, err := driverpkg.ListRunAwaits(r.Context(), m.store, ws, parent.RunID)
+	awaits, err := driverpkg.ListRunAwaits(r.Context(), m.store.Awaits(), ws, parent.RunID)
 	if err != nil {
 		writeDomainOpError(w, err)
 		return

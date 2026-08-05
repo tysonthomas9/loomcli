@@ -17,6 +17,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver/eventpolicy"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -155,17 +156,30 @@ type RunOutcomeAwaitNotifier interface {
 	NotifyRunOutcomeAwaits(context.Context, RunOutcome) error
 }
 
-type storeRunOutcomeAwaitNotifier struct {
-	awaits   store.AwaitStore
-	resolver store.RunOutcomeAwaitStore
+// RunOutcomeAwaitResolver is the command edge used by the driver coordinator.
+// Production injects the typed Execution adapter; the legacy Store capability
+// is confined to characterization tests.
+type RunOutcomeAwaitResolver interface {
+	ResolveRunOutcomeAwaitAndResume(
+		context.Context,
+		string, string, string,
+		json.RawMessage,
+	) error
 }
 
-func NewRunOutcomeAwaitNotifier(awaits store.AwaitStore) (RunOutcomeAwaitNotifier, error) {
+type storeRunOutcomeAwaitNotifier struct {
+	awaits   store.AwaitStore
+	resolver RunOutcomeAwaitResolver
+}
+
+func NewRunOutcomeAwaitNotifierWithResolver(
+	awaits store.AwaitStore,
+	resolver RunOutcomeAwaitResolver,
+) (RunOutcomeAwaitNotifier, error) {
 	if awaits == nil {
 		return nil, fmt.Errorf("run outcome await store is required")
 	}
-	resolver, ok := awaits.(store.RunOutcomeAwaitStore)
-	if !ok {
+	if resolver == nil {
 		return nil, fmt.Errorf("await store lacks atomic run outcome resolve-and-resume capability")
 	}
 	return &storeRunOutcomeAwaitNotifier{awaits: awaits, resolver: resolver}, nil
@@ -201,11 +215,7 @@ func (notifier *storeRunOutcomeAwaitNotifier) NotifyRunOutcomeAwaits(ctx context
 }
 
 const (
-	DefaultRunOutcomeReconcileLimit = 50
-	RunOutcomeClaimLease            = time.Minute
-	runOutcomeRetryInitial          = time.Second
-	runOutcomeRetryMaximum          = 5 * time.Minute
-	runOutcomeErrorLimit            = 1024
+	DefaultRunOutcomeReconcileLimit = execution.DefaultReconciliationQueueLimit
 )
 
 type RunOutcomeWorkspaceLister interface {
@@ -217,35 +227,48 @@ type RunOutcomeWorkspaceLister interface {
 // publication is at-least-once, and RunFinishedEventID makes its admission
 // idempotent across crashes after publish but before completion.
 type RunOutcomeReconciler struct {
-	outbox       store.DriverRunOutcomeStore
-	awaits       RunOutcomeAwaitNotifier
-	journal      store.TriggerEventAppender
-	publisher    RunOutcomePublisher
-	workspace    string
-	workspaces   RunOutcomeWorkspaceLister
-	claimPrefix  string
-	claimCounter atomic.Uint64
-	limit        int
+	queue             execution.DriverRunOutcomeAPI
+	terminalWorkQueue execution.TerminalDriverRunWorkRecoveryQueueAPI
+	awaits            RunOutcomeAwaitNotifier
+	journal           store.TriggerEventAppender
+	publisher         RunOutcomePublisher
+	workspace         string
+	workspaces        RunOutcomeWorkspaceLister
+	claimPrefix       string
+	claimCounter      atomic.Uint64
+	limit             int
+	cascades          execution.DriverRunAPI
+	authorities       execution.SystemAuthorityResolver
+	componentID       string
 }
 
-func NewRunOutcomeReconciler(
-	outbox store.DriverRunOutcomeStore,
+// NewRunOutcomeReconcilerWithExecution composes the system-authorized queue
+// consumer and the recovery lane that closes a finalize-before-child-cascade
+// crash window. The queue row is not completed until every deterministic leg
+// has converged.
+func NewRunOutcomeReconcilerWithExecution(
+	queue execution.DriverRunOutcomeAPI,
+	terminalWorkQueue execution.TerminalDriverRunWorkRecoveryQueueAPI,
 	awaits RunOutcomeAwaitNotifier,
 	journal store.TriggerEventAppender,
 	publisher RunOutcomePublisher,
 	workspace string,
 	workspaces RunOutcomeWorkspaceLister,
+	cascades execution.DriverRunAPI,
+	authorities execution.SystemAuthorityResolver,
+	componentID string,
 ) (*RunOutcomeReconciler, error) {
-	if outbox == nil || awaits == nil || journal == nil {
-		return nil, fmt.Errorf("run outcome outbox, await notifier, and base event journal are required")
+	if queue == nil || terminalWorkQueue == nil || awaits == nil || journal == nil || cascades == nil || authorities == nil || strings.TrimSpace(componentID) == "" {
+		return nil, fmt.Errorf("run outcome queue, terminal-work recovery queue, await notifier, journal, cascade API, authority resolver, and component ID are required")
 	}
 	workspace = strings.TrimSpace(workspace)
 	if workspace == "" && workspaces == nil {
 		return nil, fmt.Errorf("run outcome workspace lister is required for an unscoped reconciler")
 	}
 	return &RunOutcomeReconciler{
-		outbox: outbox, awaits: awaits, journal: journal, publisher: publisher, workspace: workspace, workspaces: workspaces,
+		queue: queue, terminalWorkQueue: terminalWorkQueue, awaits: awaits, journal: journal, publisher: publisher, workspace: workspace, workspaces: workspaces,
 		claimPrefix: newRunOutcomeClaimPrefix(), limit: DefaultRunOutcomeReconcileLimit,
+		cascades: cascades, authorities: authorities, componentID: componentID,
 	}, nil
 }
 
@@ -257,7 +280,7 @@ func (reconciler *RunOutcomeReconciler) RunOnce(ctx context.Context, now time.Ti
 // DrainOnce performs one bounded pass and returns how many durable rows were
 // claimed for runtime observability and opportunistic-drain accounting.
 func (reconciler *RunOutcomeReconciler) DrainOnce(ctx context.Context, now time.Time) (int, error) {
-	if reconciler == nil || reconciler.outbox == nil || reconciler.awaits == nil || reconciler.journal == nil {
+	if reconciler == nil || reconciler.queue == nil || reconciler.terminalWorkQueue == nil || reconciler.authorities == nil || reconciler.awaits == nil || reconciler.journal == nil {
 		return 0, fmt.Errorf("run outcome reconciler is unavailable")
 	}
 	if now.IsZero() {
@@ -297,123 +320,325 @@ func (reconciler *RunOutcomeReconciler) workspaceKeys(ctx context.Context) ([]st
 }
 
 func (reconciler *RunOutcomeReconciler) runWorkspace(ctx context.Context, workspace string, now time.Time) (int, error) {
+	var errs []error
+	terminalWorkClaimed, terminalWorkErr := reconciler.runTerminalWorkRecoveryQueue(ctx, workspace, now)
+	if terminalWorkErr != nil {
+		errs = append(errs, terminalWorkErr)
+	}
+	outcomeClaimed, outcomeErr := reconciler.runOutcomeQueue(ctx, workspace, now)
+	if outcomeErr != nil {
+		errs = append(errs, outcomeErr)
+	}
+	return terminalWorkClaimed + outcomeClaimed, errors.Join(errs...)
+}
+
+func (reconciler *RunOutcomeReconciler) runOutcomeQueue(ctx context.Context, workspace string, now time.Time) (int, error) {
+	var errs []error
 	claimID := fmt.Sprintf("%s-%d", reconciler.claimPrefix, reconciler.claimCounter.Add(1))
-	claimed, err := reconciler.outbox.ClaimDriverRunOutcomes(ctx, store.DriverRunOutcomeClaim{
-		WorkspaceKey: workspace, ClaimID: claimID, Before: now,
-		ClaimUntil: now.Add(RunOutcomeClaimLease), Limit: reconciler.limit,
+	auth, err := reconciler.authorities.ResolveExecutionSystemAuthority(
+		ctx, workspace, execution.ActionClaimDriverRunOutcomes, reconciler.componentID,
+	)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("resolve run outcome claim authority in %q: %w", workspace, err))
+		return 0, errors.Join(errs...)
+	}
+	claimed, err := reconciler.queue.ClaimDriverRunOutcomes(ctx, auth, execution.ClaimDriverRunOutcomesCommand{
+		WorkspaceKey: workspace, ClaimID: claimID, Before: now, Limit: reconciler.limit,
 	})
 	if err != nil {
-		return 0, fmt.Errorf("claim run outcomes in %q: %w", workspace, err)
+		errs = append(errs, fmt.Errorf("claim run outcomes in %q: %w", workspace, err))
+		return 0, errors.Join(errs...)
 	}
-	var errs []error
 	for _, persisted := range claimed {
-		outcome, mapErr := persistedRunOutcome(persisted)
-		if mapErr != nil {
-			errs = append(errs, mapErr)
-			if retryErr := reconciler.retry(ctx, workspace, claimID, persisted, now, mapErr); retryErr != nil {
+		outcome, reportErr, retryCause := reconciler.deliverRunOutcome(ctx, persisted)
+		if reportErr != nil {
+			errs = append(errs, reportErr)
+			if retryErr := reconciler.retry(ctx, workspace, claimID, persisted, now, retryCause); retryErr != nil {
 				errs = append(errs, retryErr)
 			}
 			continue
 		}
-		if _, journalErr := reconciler.journal.AppendTriggerEvent(ctx, runOutcomeJournalEvent(outcome)); journalErr != nil {
-			errs = append(errs, fmt.Errorf("journal base run outcome %q: %w", outcome.EventID, journalErr))
-			if retryErr := reconciler.retry(ctx, workspace, claimID, persisted, now, journalErr); retryErr != nil {
-				errs = append(errs, retryErr)
-			}
-			continue
-		}
-		if notifyErr := reconciler.awaits.NotifyRunOutcomeAwaits(ctx, outcome); notifyErr != nil {
-			errs = append(errs, fmt.Errorf("notify run outcome awaits %q: %w", outcome.EventID, notifyErr))
-			if retryErr := reconciler.retry(ctx, workspace, claimID, persisted, now, notifyErr); retryErr != nil {
-				errs = append(errs, retryErr)
-			}
-			continue
-		}
-		if reconciler.publisher != nil {
-			if publishErr := reconciler.publisher.PublishRunOutcome(ctx, outcome); publishErr != nil {
-				errs = append(errs, fmt.Errorf("publish run outcome %q: %w", outcome.EventID, publishErr))
-				if retryErr := reconciler.retry(ctx, workspace, claimID, persisted, now, publishErr); retryErr != nil {
-					errs = append(errs, retryErr)
-				}
-				continue
-			}
-		}
-		if completeErr := reconciler.outbox.CompleteDriverRunOutcome(ctx, store.DriverRunOutcomeCompletion{
-			WorkspaceKey: workspace, RunID: persisted.RunID, ClaimID: claimID, CompletedAt: now,
-		}); completeErr != nil {
+		if completeErr := reconciler.complete(ctx, workspace, claimID, persisted.RunID, now); completeErr != nil {
 			errs = append(errs, fmt.Errorf("complete run outcome %q: %w", outcome.EventID, completeErr))
 		}
 	}
 	return len(claimed), errors.Join(errs...)
 }
 
+func (reconciler *RunOutcomeReconciler) runTerminalWorkRecoveryQueue(
+	ctx context.Context,
+	workspace string,
+	now time.Time,
+) (int, error) {
+	var errs []error
+	claimID := fmt.Sprintf("%s-terminal-work-%d", reconciler.claimPrefix, reconciler.claimCounter.Add(1))
+	auth, err := reconciler.authorities.ResolveExecutionSystemAuthority(
+		ctx, workspace, execution.ActionClaimTerminalDriverRunWorkRecoveries, reconciler.componentID,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("resolve terminal DriverRun work recovery claim authority in %q: %w", workspace, err)
+	}
+	claimed, err := reconciler.terminalWorkQueue.ClaimTerminalDriverRunWorkRecoveries(
+		ctx,
+		auth,
+		execution.ClaimTerminalDriverRunWorkRecoveriesCommand{
+			WorkspaceKey: workspace, ClaimID: claimID, Before: now, Limit: reconciler.limit,
+		},
+	)
+	if err != nil {
+		return 0, fmt.Errorf("claim terminal DriverRun work recoveries in %q: %w", workspace, err)
+	}
+	for _, persisted := range claimed {
+		recoveryErr := validateTerminalDriverRunWorkRecoverySnapshot(workspace, persisted)
+		if recoveryErr == nil {
+			recoveryErr = reconciler.recoverTerminalDriverRunWork(ctx, persisted)
+		}
+		if recoveryErr != nil {
+			errs = append(errs, fmt.Errorf("recover terminal DriverRun work for %q: %w", persisted.RunID, recoveryErr))
+			if retryErr := reconciler.retryTerminalDriverRunWorkRecovery(
+				ctx, workspace, claimID, persisted, now, recoveryErr,
+			); retryErr != nil {
+				errs = append(errs, retryErr)
+			}
+			continue
+		}
+		if completeErr := reconciler.completeTerminalDriverRunWorkRecovery(
+			ctx, workspace, claimID, persisted.RunID, now,
+		); completeErr != nil {
+			errs = append(errs, fmt.Errorf("complete terminal DriverRun work recovery %q: %w", persisted.RunID, completeErr))
+		}
+	}
+	return len(claimed), errors.Join(errs...)
+}
+
+func validateTerminalDriverRunWorkRecoverySnapshot(workspace string, persisted execution.DriverRunOutcome) error {
+	if persisted.WorkspaceKey != workspace || strings.TrimSpace(persisted.RunID) == "" ||
+		!persisted.Status.IsTerminal() || persisted.OccurredAt.IsZero() {
+		return fmt.Errorf("invalid terminal DriverRun work recovery snapshot")
+	}
+	return nil
+}
+
+func (reconciler *RunOutcomeReconciler) deliverRunOutcome(
+	ctx context.Context,
+	persisted execution.DriverRunOutcome,
+) (*RunOutcome, error, error) {
+	outcome, err := persistedRunOutcome(persisted)
+	if err != nil {
+		return nil, err, err
+	}
+	if reconciler.cascades != nil {
+		if err := reconciler.recoverTerminalDriverRunWork(ctx, persisted); err != nil {
+			return nil, fmt.Errorf("recover terminal DriverRun work for %q: %w", outcome.EventID, err), err
+		}
+		if err := reconciler.recoverChildDriverRunCascade(ctx, persisted); err != nil {
+			return nil, fmt.Errorf("recover child DriverRun cascade for %q: %w", outcome.EventID, err), err
+		}
+	}
+	if _, err := reconciler.journal.AppendTriggerEvent(ctx, runOutcomeJournalEvent(outcome)); err != nil {
+		return nil, fmt.Errorf("journal base run outcome %q: %w", outcome.EventID, err), err
+	}
+	if err := reconciler.awaits.NotifyRunOutcomeAwaits(ctx, outcome); err != nil {
+		return nil, fmt.Errorf("notify run outcome awaits %q: %w", outcome.EventID, err), err
+	}
+	if reconciler.publisher != nil {
+		if err := reconciler.publisher.PublishRunOutcome(ctx, outcome); err != nil {
+			return nil, fmt.Errorf("publish run outcome %q: %w", outcome.EventID, err), err
+		}
+	}
+	return &outcome, nil, nil
+}
+
+const childDriverRunCascadeErrorClass = "parent_run_terminal"
+
+func childDriverRunCascadeReason(status domain.DriverRunStatus) string {
+	return "parent driver run became " + string(status)
+}
+
+// recoverTerminalDriverRunWork closes the terminal-parent crash window for
+// TaskRuns and Work Item claims before any downstream outcome is published.
+// The Fleet command is atomic and exact-generation fenced: a stale parent may
+// terminalize its own TaskRun, but it cannot clear a successor Work Item claim.
+func (reconciler *RunOutcomeReconciler) recoverTerminalDriverRunWork(
+	ctx context.Context,
+	persisted execution.DriverRunOutcome,
+) error {
+	if reconciler == nil || reconciler.cascades == nil || reconciler.authorities == nil {
+		return execution.ErrUnavailable
+	}
+	auth, err := reconciler.authorities.ResolveExecutionSystemAuthority(
+		ctx,
+		persisted.WorkspaceKey,
+		execution.ActionRecoverTerminalDriverRunWork,
+		string(execution.DriverRunOutcomeComponentID),
+	)
+	if err != nil {
+		return fmt.Errorf("resolve terminal DriverRun work recovery authority: %w", err)
+	}
+	_, err = reconciler.cascades.RecoverTerminalDriverRunWork(ctx, auth, execution.RecoverTerminalDriverRunWorkCommand{
+		WorkspaceKey: persisted.WorkspaceKey,
+		RequestID: execution.RecoverTerminalDriverRunWorkRequestID(
+			persisted.RunID,
+			persisted.Status,
+		),
+		DriverRunID:  persisted.RunID,
+		ParentStatus: persisted.Status,
+		Reason:       childDriverRunCascadeReason(domain.DriverRunStatus(persisted.Status)),
+		ErrorClass:   childDriverRunCascadeErrorClass,
+		RecoveredAt:  persisted.OccurredAt.UTC(),
+	})
+	if err != nil {
+		return fmt.Errorf("recover terminal DriverRun work: %w", err)
+	}
+	return nil
+}
+
+func (reconciler *RunOutcomeReconciler) recoverChildDriverRunCascade(
+	ctx context.Context,
+	persisted execution.DriverRunOutcome,
+) error {
+	if reconciler == nil || reconciler.cascades == nil || reconciler.authorities == nil {
+		return execution.ErrUnavailable
+	}
+	status := persisted.Status
+	auth, err := reconciler.authorities.ResolveExecutionSystemAuthority(
+		ctx,
+		persisted.WorkspaceKey,
+		execution.ActionRecoverChildDriverRunCascade,
+		string(execution.DriverRunOutcomeComponentID),
+	)
+	if err != nil {
+		return fmt.Errorf("resolve child DriverRun cascade recovery authority: %w", err)
+	}
+	_, err = reconciler.cascades.RecoverChildDriverRunCascade(ctx, auth, execution.RecoverChildDriverRunCascadeCommand{
+		WorkspaceKey: persisted.WorkspaceKey,
+		RequestID: execution.CascadeChildDriverRunsRequestID(
+			persisted.RunID,
+			status,
+		),
+		ParentRunID:  persisted.RunID,
+		ParentStatus: status,
+		Reason:       childDriverRunCascadeReason(domain.DriverRunStatus(persisted.Status)),
+		ErrorClass:   childDriverRunCascadeErrorClass,
+		CascadedAt:   persisted.OccurredAt.UTC(),
+		MaxDepth:     DefaultCompositionMaxDepth,
+	})
+	if err != nil {
+		return fmt.Errorf("recover child DriverRun cascade: %w", err)
+	}
+	return nil
+}
+
 func (reconciler *RunOutcomeReconciler) retry(
 	ctx context.Context,
 	workspace, claimID string,
-	persisted store.DriverRunOutcome,
+	persisted execution.DriverRunOutcome,
 	now time.Time,
 	cause error,
 ) error {
-	retryAt := now.Add(runOutcomeRetryDelay(persisted.Attempt))
-	if err := reconciler.outbox.RetryDriverRunOutcome(ctx, store.DriverRunOutcomeRetry{
+	auth, err := reconciler.authorities.ResolveExecutionSystemAuthority(
+		ctx, workspace, execution.ActionRetryDriverRunOutcome, reconciler.componentID,
+	)
+	if err != nil {
+		return fmt.Errorf("resolve run outcome retry authority: %w", err)
+	}
+	if err := reconciler.queue.RetryDriverRunOutcome(ctx, auth, execution.RetryDriverRunOutcomeCommand{
 		WorkspaceKey: workspace, RunID: persisted.RunID, ClaimID: claimID,
-		AvailableAt: retryAt, Error: boundedRunOutcomeError(cause),
+		Attempt: persisted.Attempt, FailedAt: now, Cause: cause.Error(),
 	}); err != nil {
 		return fmt.Errorf("schedule run outcome %q retry: %w", persisted.RunID, err)
 	}
 	return nil
 }
 
-func persistedRunOutcome(persisted store.DriverRunOutcome) (RunOutcome, error) {
+func (reconciler *RunOutcomeReconciler) complete(
+	ctx context.Context,
+	workspace, claimID, runID string,
+	now time.Time,
+) error {
+	auth, err := reconciler.authorities.ResolveExecutionSystemAuthority(
+		ctx, workspace, execution.ActionCompleteDriverRunOutcome, reconciler.componentID,
+	)
+	if err != nil {
+		return fmt.Errorf("resolve run outcome completion authority: %w", err)
+	}
+	return reconciler.queue.CompleteDriverRunOutcome(ctx, auth, execution.CompleteDriverRunOutcomeCommand{
+		WorkspaceKey: workspace, RunID: runID, ClaimID: claimID, CompletedAt: now,
+	})
+}
+
+func (reconciler *RunOutcomeReconciler) retryTerminalDriverRunWorkRecovery(
+	ctx context.Context,
+	workspace, claimID string,
+	persisted execution.DriverRunOutcome,
+	now time.Time,
+	cause error,
+) error {
+	auth, err := reconciler.authorities.ResolveExecutionSystemAuthority(
+		ctx, workspace, execution.ActionRetryTerminalDriverRunWorkRecovery, reconciler.componentID,
+	)
+	if err != nil {
+		return fmt.Errorf("resolve terminal DriverRun work recovery retry authority: %w", err)
+	}
+	attempt := persisted.Attempt
+	if attempt < 1 {
+		attempt = 1
+	}
+	if err := reconciler.terminalWorkQueue.RetryTerminalDriverRunWorkRecovery(
+		ctx,
+		auth,
+		execution.RetryTerminalDriverRunWorkRecoveryCommand{
+			WorkspaceKey: workspace, RunID: persisted.RunID, ClaimID: claimID,
+			Attempt: attempt, FailedAt: now, Cause: cause.Error(),
+		},
+	); err != nil {
+		return fmt.Errorf("schedule terminal DriverRun work recovery %q retry: %w", persisted.RunID, err)
+	}
+	return nil
+}
+
+func (reconciler *RunOutcomeReconciler) completeTerminalDriverRunWorkRecovery(
+	ctx context.Context,
+	workspace, claimID, runID string,
+	now time.Time,
+) error {
+	auth, err := reconciler.authorities.ResolveExecutionSystemAuthority(
+		ctx, workspace, execution.ActionCompleteTerminalDriverRunWorkRecovery, reconciler.componentID,
+	)
+	if err != nil {
+		return fmt.Errorf("resolve terminal DriverRun work recovery completion authority: %w", err)
+	}
+	return reconciler.terminalWorkQueue.CompleteTerminalDriverRunWorkRecovery(
+		ctx,
+		auth,
+		execution.CompleteTerminalDriverRunWorkRecoveryCommand{
+			WorkspaceKey: workspace, RunID: runID, ClaimID: claimID, CompletedAt: now,
+		},
+	)
+}
+
+func persistedRunOutcome(persisted execution.DriverRunOutcome) (RunOutcome, error) {
 	if persisted.WorkspaceKey == "" || persisted.RunID == "" || !persisted.Status.IsTerminal() || persisted.OccurredAt.IsZero() {
 		return RunOutcome{}, fmt.Errorf("invalid persisted run outcome for %q", persisted.RunID)
 	}
 	payload, err := marshalBoundedRunFinishedPayload(
-		persisted.RunID, persisted.Status, persisted.Summary, persisted.ErrorClass, persisted.ParentRunID,
+		persisted.RunID, domain.DriverRunStatus(persisted.Status), persisted.Summary, persisted.ErrorClass, persisted.ParentRunID,
 	)
 	if err != nil {
 		return RunOutcome{}, fmt.Errorf("encode persisted run outcome %q: %w", persisted.RunID, err)
 	}
 	return RunOutcome{
 		WorkspaceKey:  persisted.WorkspaceKey,
-		EventID:       RunFinishedEventID(persisted.RunID, persisted.Status),
+		EventID:       RunFinishedEventID(persisted.RunID, domain.DriverRunStatus(persisted.Status)),
 		EventType:     RunFinishedEventType,
 		RunID:         persisted.RunID,
-		Status:        persisted.Status,
+		Status:        domain.DriverRunStatus(persisted.Status),
 		ActorRef:      RunFinishedActor,
 		ParentEventID: persisted.ParentEventID,
 		EpicID:        persisted.EpicID,
 		OccurredAt:    persisted.OccurredAt.UTC(),
 		Payload:       payload,
 	}, nil
-}
-
-func runOutcomeRetryDelay(attempt int) time.Duration {
-	if attempt < 1 {
-		attempt = 1
-	}
-	delay := runOutcomeRetryInitial
-	for current := 1; current < attempt && delay < runOutcomeRetryMaximum; current++ {
-		if delay > runOutcomeRetryMaximum/2 {
-			return runOutcomeRetryMaximum
-		}
-		delay *= 2
-	}
-	if delay > runOutcomeRetryMaximum {
-		return runOutcomeRetryMaximum
-	}
-	return delay
-}
-
-func boundedRunOutcomeError(err error) string {
-	if err == nil {
-		return ""
-	}
-	value := err.Error()
-	if len(value) > runOutcomeErrorLimit {
-		return value[:runOutcomeErrorLimit]
-	}
-	return value
 }
 
 func newRunOutcomeClaimPrefix() string {

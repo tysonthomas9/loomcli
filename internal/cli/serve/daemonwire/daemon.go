@@ -16,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon"
+	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
@@ -32,21 +33,10 @@ func BuildAgentControlFn() agentcontrol.AgentControlFn {
 		return nil
 	}
 
-	// Per-operation socket read deadlines.
-	opDeadline := map[string]time.Duration{
-		"agent_yield":   5 * time.Second,
-		"agent_list":    5 * time.Second,
-		"agent_start":   10 * time.Second,
-		"agent_stop":    35 * time.Second, // daemon write deadline is 20s; 15s buffer
-		"agent_restart": 80 * time.Second, // yieldTimeout(default 60s) + 20s buffer
-	}
-
 	return func(op, agentName string, force bool) (*agentcontrol.AgentControlResult, error) {
-		socketPath := resolveControlSocketPath(projectDir)
-		deadline := opDeadline[op]
-		if deadline == 0 {
-			deadline = 30 * time.Second
-		}
+		dc := loadDaemonControlConfig(projectDir)
+		socketPath := resolveControlSocketPathFromConfig(projectDir, dc)
+		deadline := agentControlReadDeadline(dc, op, force)
 		return sendControlRequest(socketPath, op, agentName, force, deadline)
 	}
 }
@@ -55,12 +45,20 @@ func BuildAgentControlFn() agentcontrol.AgentControlFn {
 // given project directory. Re-resolves on each call because the daemon may
 // restart with a different config.
 func resolveControlSocketPath(projectDir string) string {
+	return resolveControlSocketPathFromConfig(projectDir, loadDaemonControlConfig(projectDir))
+}
+
+func loadDaemonControlConfig(projectDir string) *config.DaemonConfig {
 	dc, err := config.LoadDaemonConfig(projectDir)
 	if err != nil {
 		dc = &config.DaemonConfig{
 			Daemon: config.DaemonSettings{PIDFile: ".loom/daemon.pid"},
 		}
 	}
+	return dc
+}
+
+func resolveControlSocketPathFromConfig(projectDir string, dc *config.DaemonConfig) string {
 	pidFilePath := dc.Daemon.PIDFile
 	if !filepath.IsAbs(pidFilePath) {
 		pidFilePath = filepath.Join(projectDir, pidFilePath)
@@ -68,30 +66,100 @@ func resolveControlSocketPath(projectDir string) string {
 	return filepath.Join(filepath.Dir(pidFilePath), "daemon.sock")
 }
 
+func agentControlReadDeadline(dc *config.DaemonConfig, op string, force bool) time.Duration {
+	const responseBuffer = 20 * time.Second
+
+	switch op {
+	case "agent_yield", "agent_list":
+		return 5 * time.Second
+	case "agent_start":
+		return 10 * time.Second
+	case "agent_stop":
+		sigtermTimeout := configuredAgentTimeout(
+			dc.Daemon.RestartPolicy.SigtermTimeout,
+			supervisor.DefaultSigtermTimeout,
+		)
+		if force {
+			return sigtermTimeout + responseBuffer
+		}
+		return configuredAgentTimeout(
+			dc.Daemon.RestartPolicy.YieldTimeout,
+			supervisor.DefaultYieldTimeout,
+		) + sigtermTimeout + responseBuffer
+	case "agent_restart":
+		return configuredAgentTimeout(
+			dc.Daemon.RestartPolicy.YieldTimeout,
+			supervisor.DefaultYieldTimeout,
+		) + configuredAgentTimeout(
+			dc.Daemon.RestartPolicy.SigtermTimeout,
+			supervisor.DefaultSigtermTimeout,
+		) + responseBuffer
+	default:
+		return 30 * time.Second
+	}
+}
+
+func configuredAgentTimeout(seconds *int, fallback int) time.Duration {
+	if seconds == nil || *seconds <= 0 {
+		return time.Duration(fallback) * time.Second
+	}
+	return time.Duration(*seconds) * time.Second
+}
+
 // sendControlRequest dials the daemon control socket, sends a JSON request,
-// and reads the JSON response. The readDeadline sets the per-operation timeout.
+// and waits for the daemon's semantic response. Lifecycle deadlines cover the
+// daemon's configured yield and SIGTERM windows, so HTTP success always means
+// the operation was accepted and completed rather than merely written.
 func sendControlRequest(socketPath, op, agentName string, force bool, readDeadline time.Duration) (*agentcontrol.AgentControlResult, error) {
+	conn, err := dialControlSocket(socketPath)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = conn.Close() }()
+	return sendControlRequestOnConn(conn, op, agentName, force, readDeadline)
+}
+
+func sendControlRequestOnConn(conn net.Conn, op, agentName string, force bool, readDeadline time.Duration) (*agentcontrol.AgentControlResult, error) {
+	if err := writeControlRequest(conn, op, agentName, force); err != nil {
+		return nil, err
+	}
+	return readControlResponse(conn, readDeadline)
+}
+
+func dialControlSocket(socketPath string) (net.Conn, error) {
 	conn, err := net.DialTimeout("unix", socketPath, 5*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("daemon is not running (no control socket at %s)", socketPath)
 	}
-	defer func() { _ = conn.Close() }()
+	return conn, nil
+}
 
+func writeControlRequest(conn net.Conn, op, agentName string, force bool) error {
 	reqData, err := json.Marshal(struct {
 		Operation string `json:"operation"`
 		AgentName string `json:"agent_name,omitempty"`
 		Force     bool   `json:"force,omitempty"`
 	}{Operation: op, AgentName: agentName, Force: force})
 	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
+		return fmt.Errorf("marshal request: %w", err)
 	}
 	reqData = append(reqData, '\n')
 
 	_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-	if _, err := conn.Write(reqData); err != nil {
-		return nil, fmt.Errorf("send request: %w", err)
+	for len(reqData) > 0 {
+		written, writeErr := conn.Write(reqData)
+		if writeErr != nil {
+			return fmt.Errorf("send request: %w", writeErr)
+		}
+		if written == 0 {
+			return fmt.Errorf("send request: wrote zero bytes")
+		}
+		reqData = reqData[written:]
 	}
+	return nil
+}
 
+func readControlResponse(conn net.Conn, readDeadline time.Duration) (*agentcontrol.AgentControlResult, error) {
 	_ = conn.SetReadDeadline(time.Now().Add(readDeadline))
 	scanner := bufio.NewScanner(conn)
 	if !scanner.Scan() {

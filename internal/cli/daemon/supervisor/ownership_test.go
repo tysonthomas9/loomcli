@@ -40,8 +40,8 @@ func TestAcquireAgentOwnershipContinuesWhenBackendDoesNotSupportOwnershipLeases(
 }
 
 // restartOwnershipLeaseStore models fleet-db's guarded acquire contract: a
-// live lease may be re-acquired by the same logical OwnerID (token preserved,
-// fence advanced), while a different owner receives ErrAlreadyClaimed.
+// live lease may be re-acquired by the same logical OwnerID (token and fence
+// rotated), while a different owner receives ErrAlreadyClaimed.
 type restartOwnershipLeaseStore struct {
 	store.AgentOwnershipLeaseStore
 	lease  *domain.AgentOwnershipLease
@@ -54,11 +54,9 @@ func (s *restartOwnershipLeaseStore) Acquire(_ context.Context, in store.AgentOw
 		return nil, fmt.Errorf("ownership held by %s: %w", s.lease.OwnerID, domain.ErrAlreadyClaimed)
 	}
 	now := time.Now().UTC()
-	token := "restart-token"
 	fence := int64(1)
 	createdAt := now
 	if s.lease != nil {
-		token = s.lease.Token
 		fence = s.lease.FencingToken + 1
 		createdAt = s.lease.CreatedAt
 	}
@@ -69,7 +67,7 @@ func (s *restartOwnershipLeaseStore) Acquire(_ context.Context, in store.AgentOw
 		OwnerID:         in.OwnerID,
 		RuntimeProvider: in.RuntimeProvider,
 		NodeID:          in.NodeID,
-		Token:           token,
+		Token:           fmt.Sprintf("restart-token-%d", fence),
 		FencingToken:    fence,
 		Status:          domain.AgentLeaseActive,
 		ExpiresAt:       now.Add(in.TTL),
@@ -125,8 +123,8 @@ func TestAcquireAgentOwnershipReacquiresAfterDaemonRestart(t *testing.T) {
 	if firstIn.TTL != defaultNodeTTL || replacementIn.TTL != defaultNodeTTL {
 		t.Fatalf("ownership TTLs = %s, %s; want node TTL %s", firstIn.TTL, replacementIn.TTL, defaultNodeTTL)
 	}
-	if replacementAgent.OwnershipFencingToken != 2 || replacementAgent.OwnershipLeaseToken != "restart-token" {
-		t.Fatalf("replacement lease = token %q fence %d, want preserved token and fence 2",
+	if replacementAgent.OwnershipFencingToken != 2 || replacementAgent.OwnershipLeaseToken != "restart-token-2" {
+		t.Fatalf("replacement lease = token %q fence %d, want rotated token and fence 2",
 			replacementAgent.OwnershipLeaseToken, replacementAgent.OwnershipFencingToken)
 	}
 
@@ -138,6 +136,184 @@ func TestAcquireAgentOwnershipReacquiresAfterDaemonRestart(t *testing.T) {
 	if len(fake.inputs) != 3 || fake.inputs[2].OwnerID == firstIn.OwnerID {
 		t.Fatalf("different runtime owner = %q, want identity distinct from %q", fake.inputs[2].OwnerID, firstIn.OwnerID)
 	}
+}
+
+func TestAgentOwnershipOperationsSerializeAcquireAndRelease(t *testing.T) {
+	base := memstore.New()
+	ownership := &blockingAcquireOwnershipLeaseStore{
+		AgentOwnershipLeaseStore: base.AgentOwnershipLeases(),
+		acquireStarted:           make(chan struct{}),
+		allowAcquire:             make(chan struct{}),
+		releaseToken:             make(chan string, 1),
+	}
+	control := &controlPlaneStoreOverrides{Store: base, ownership: ownership}
+	s := &Supervisor{
+		WorkspaceID:  "WS",
+		NodeID:       "node-1",
+		ControlStore: control,
+	}
+	ap := &AgentProcess{
+		Entry:             cfgpkg.AgentEntry{Worktree: "worker-1", Role: "task"},
+		OwnershipAcquired: make(chan struct{}),
+	}
+	acquired := make(chan ownershipAcquireOutcome, 1)
+	go func() {
+		acquired <- s.acquireAgentOwnership(ap)
+	}()
+	<-ownership.acquireStarted
+
+	releaseStarted := make(chan struct{})
+	released := make(chan struct{})
+	go func() {
+		close(releaseStarted)
+		s.releaseAgentOwnership(ap)
+		close(released)
+	}()
+	<-releaseStarted
+	select {
+	case <-released:
+		t.Fatal("Release overtook the in-flight Acquire and allowed ownership resurrection")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	close(ownership.allowAcquire)
+	if outcome := <-acquired; outcome != ownershipAcquired {
+		t.Fatalf("Acquire outcome = %v, want acquired", outcome)
+	}
+	select {
+	case <-released:
+	case <-time.After(time.Second):
+		t.Fatal("Release did not run after Acquire completed")
+	}
+	select {
+	case token := <-ownership.releaseToken:
+		if token != "rotated-token" {
+			t.Fatalf("Release token = %q, want newly acquired token", token)
+		}
+	default:
+		t.Fatal("serialized Release did not reach ownership store")
+	}
+	ap.Mu.Lock()
+	defer ap.Mu.Unlock()
+	if ap.OwnershipLeaseID != "" ||
+		ap.OwnershipLeaseToken != "" ||
+		ap.OwnershipFencingToken != 0 {
+		t.Fatalf("ownership state resurrected after Release: lease=%q token=%q fence=%d",
+			ap.OwnershipLeaseID,
+			ap.OwnershipLeaseToken,
+			ap.OwnershipFencingToken,
+		)
+	}
+}
+
+func TestAcquireAgentOwnershipRejectsNonAdvancingFence(t *testing.T) {
+	base := memstore.New()
+	ownership := &fixedAcquireOwnershipLeaseStore{
+		AgentOwnershipLeaseStore: base.AgentOwnershipLeases(),
+		fencingToken:             7,
+		token:                    "stale-token",
+	}
+	s := &Supervisor{
+		WorkspaceID: "WS",
+		NodeID:      "node-1",
+		ControlStore: &controlPlaneStoreOverrides{
+			Store:     base,
+			ownership: ownership,
+		},
+	}
+	ap := &AgentProcess{
+		Entry:                 cfgpkg.AgentEntry{Worktree: "worker-1", Role: "task"},
+		OwnershipLeaseID:      "current-lease",
+		OwnershipOwnerID:      "node-1",
+		OwnershipNodeID:       "node-1",
+		OwnershipLeaseToken:   "current-token",
+		OwnershipFencingToken: 8,
+	}
+
+	if got := s.acquireAgentOwnership(ap); got != ownershipAcquireInconclusive {
+		t.Fatalf("acquireAgentOwnership = %v, want inconclusive for a non-advancing fence", got)
+	}
+
+	ap.Mu.Lock()
+	defer ap.Mu.Unlock()
+	if ap.OwnershipLeaseID != "current-lease" ||
+		ap.OwnershipLeaseToken != "current-token" ||
+		ap.OwnershipFencingToken != 8 {
+		t.Fatalf("stale acquire response replaced current authority: lease=%q token=%q fence=%d",
+			ap.OwnershipLeaseID,
+			ap.OwnershipLeaseToken,
+			ap.OwnershipFencingToken,
+		)
+	}
+}
+
+type fixedAcquireOwnershipLeaseStore struct {
+	store.AgentOwnershipLeaseStore
+	fencingToken int64
+	token        string
+}
+
+func (s *fixedAcquireOwnershipLeaseStore) Acquire(
+	_ context.Context,
+	in store.AgentOwnershipLeaseAcquire,
+) (*domain.AgentOwnershipLease, error) {
+	now := time.Now().UTC()
+	return &domain.AgentOwnershipLease{
+		WorkspaceKey:    in.WorkspaceKey,
+		AgentID:         in.AgentID,
+		LeaseID:         "returned-lease",
+		OwnerID:         in.OwnerID,
+		RuntimeProvider: in.RuntimeProvider,
+		NodeID:          in.NodeID,
+		Token:           s.token,
+		FencingToken:    s.fencingToken,
+		Status:          domain.AgentLeaseActive,
+		ExpiresAt:       now.Add(time.Minute),
+		LastHeartbeat:   now,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}, nil
+}
+
+type blockingAcquireOwnershipLeaseStore struct {
+	store.AgentOwnershipLeaseStore
+	acquireStarted chan struct{}
+	allowAcquire   chan struct{}
+	releaseToken   chan string
+}
+
+func (s *blockingAcquireOwnershipLeaseStore) Acquire(
+	_ context.Context,
+	in store.AgentOwnershipLeaseAcquire,
+) (*domain.AgentOwnershipLease, error) {
+	close(s.acquireStarted)
+	<-s.allowAcquire
+	now := time.Now().UTC()
+	return &domain.AgentOwnershipLease{
+		WorkspaceKey:    in.WorkspaceKey,
+		AgentID:         in.AgentID,
+		LeaseID:         "rotated-lease",
+		OwnerID:         in.OwnerID,
+		RuntimeProvider: in.RuntimeProvider,
+		NodeID:          in.NodeID,
+		Token:           "rotated-token",
+		FencingToken:    2,
+		Status:          domain.AgentLeaseActive,
+		ExpiresAt:       now.Add(time.Minute),
+		LastHeartbeat:   now,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}, nil
+}
+
+func (s *blockingAcquireOwnershipLeaseStore) Release(
+	_ context.Context,
+	_,
+	_ string,
+	token string,
+) (*domain.AgentOwnershipLease, error) {
+	s.releaseToken <- token
+	return &domain.AgentOwnershipLease{Status: domain.AgentLeaseReleased}, nil
 }
 
 type unsupportedAgentOwnershipLeaseStore struct {
