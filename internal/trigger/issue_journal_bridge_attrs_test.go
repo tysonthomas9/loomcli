@@ -123,3 +123,62 @@ func TestToInternalEventShape(t *testing.T) {
 		t.Fatalf("Payload = %s, want the After snapshot", got.Payload)
 	}
 }
+
+// TestIssueSubjectAttrsDropsLabelArray pins why the label attr comes from
+// event METADATA and not from the snapshot: "labels" is not in
+// issueSubjectAttrKeys, and even if it were, scalarString rejects arrays — so
+// no {{attrs.labels}} token can ever render off a snapshot. The single-label
+// scalar lane is issueEventSubjectAttrs, which reads fleet-db's per-label event
+// metadata. Relaxing THIS projection is not the way to widen that.
+func TestIssueSubjectAttrsDropsLabelArray(t *testing.T) {
+	after := []byte(`{"status":"open","title":"T","labels":["needs-review","p1"]}`)
+	got := issueSubjectAttrs(after)
+	if _, ok := got["labels"]; ok {
+		t.Fatalf("issueSubjectAttrs kept labels = %v, want the array dropped", got)
+	}
+	if got["status"] != "open" || got["title"] != "T" {
+		t.Fatalf("issueSubjectAttrs = %v, want the scalar fields still lifted", got)
+	}
+}
+
+// TestIssueEventSubjectAttrsLiftsLabelMetadata pins the {{attrs.label}} lane:
+// the label is read from fleet-db's event METADATA, the only place it appears
+// as a scalar. The snapshot's labels array stays dropped (see
+// TestIssueSubjectAttrsDropsLabelArray), so metadata is not a convenience — it
+// is the sole route from a label to a subject-key template.
+func TestIssueEventSubjectAttrsLiftsLabelMetadata(t *testing.T) {
+	labelEvent := func(action string, meta map[string]string) store.JournalEvent {
+		return store.JournalEvent{
+			ID: "40", Action: action, Actor: "daemon", EntityID: "DOGFOOD-42",
+			After:    json.RawMessage(`{"status":"open","labels":["p1","needs-review"]}`),
+			Metadata: meta,
+		}
+	}
+
+	for _, action := range []string{IssueLabelAddAction, IssueLabelRemoveAction} {
+		got := issueEventSubjectAttrs(labelEvent(action, map[string]string{"label": "needs-review"}))
+		if got[IssueLabelSubjectAttr] != "needs-review" {
+			t.Fatalf("%s attrs = %v, want label=needs-review", action, got)
+		}
+		// The scalar snapshot fields still ride alongside.
+		if got["status"] != "open" {
+			t.Fatalf("%s attrs = %v, want status carried too", action, got)
+		}
+	}
+
+	// A non-label action never grows a label attr, even though its snapshot
+	// carries the same labels array.
+	if got := issueEventSubjectAttrs(labelEvent("issue.update", map[string]string{"label": "needs-review"})); got[IssueLabelSubjectAttr] != "" {
+		t.Fatalf("non-label action attrs = %v, want no label attr", got)
+	}
+
+	// Missing/blank metadata contributes NO attr rather than an empty one, so a
+	// template naming it falls back to the default subject key instead of
+	// collapsing unrelated deliveries onto "".
+	for _, meta := range []map[string]string{nil, {}, {"label": "   "}} {
+		got := issueEventSubjectAttrs(labelEvent(IssueLabelAddAction, meta))
+		if _, ok := got[IssueLabelSubjectAttr]; ok {
+			t.Fatalf("attrs for metadata %v = %v, want no label key", meta, got)
+		}
+	}
+}
