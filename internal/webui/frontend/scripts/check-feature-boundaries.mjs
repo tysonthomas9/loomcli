@@ -13,44 +13,17 @@ function featureOf(path) {
   return /^src\/features\/([^/]+)(?:\/|$)/.exec(slash(path))?.[1] ?? null;
 }
 
-function moduleSpecifier(node) {
-  if (
-    (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
-    node.moduleSpecifier &&
-    ts.isStringLiteral(node.moduleSpecifier)
-  ) {
-    return node.moduleSpecifier.text;
-  }
-  if (
-    ts.isCallExpression(node) &&
-    node.expression.kind === ts.SyntaxKind.ImportKeyword &&
-    node.arguments.length === 1 &&
-    ts.isStringLiteral(node.arguments[0])
-  ) {
-    return node.arguments[0].text;
-  }
-  return null;
-}
-
-function walk(node, visit) {
-  visit(node);
-  ts.forEachChild(node, (child) => walk(child, visit));
-}
-
 export function scanFile(filePath, contents) {
   const sourceFeature = featureOf(filePath);
-  const source = ts.createSourceFile(
-    filePath,
-    contents,
-    ts.ScriptTarget.Latest,
-    true,
-    filePath.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
-  );
   const violations = [];
 
-  walk(source, (node) => {
-    const specifier = moduleSpecifier(node);
-    if (!specifier) return;
+  // preProcessFile extracts static imports, re-exports, require calls, and
+  // literal dynamic imports without constructing and retaining a full AST.
+  // The boundary rule only needs module specifiers, so this keeps the
+  // all-source gate fast and memory-bounded under the parallel repository gate.
+  const imports = ts.preProcessFile(contents, true, true).importedFiles;
+  for (const imported of imports) {
+    const specifier = imported.fileName;
 
     const alias = /^@\/features\/([^/]+)(?:\/(.+))?$/.exec(specifier);
     if (alias) {
@@ -68,10 +41,10 @@ export function scanFile(filePath, contents) {
           reason: `import ${targetFeature} through @/features/${targetFeature}`,
         });
       }
-      return;
+      continue;
     }
 
-    if (!sourceFeature || !specifier.startsWith(".")) return;
+    if (!sourceFeature || !specifier.startsWith(".")) continue;
     const resolved = slash(normalize(join(dirname(filePath), specifier)));
     const targetFeature = featureOf(resolved);
     if (targetFeature && targetFeature !== sourceFeature) {
@@ -81,7 +54,7 @@ export function scanFile(filePath, contents) {
         reason: `feature ${sourceFeature} cannot import feature ${targetFeature}`,
       });
     }
-  });
+  }
 
   return violations;
 }
