@@ -12,7 +12,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
-	"github.com/tysonthomas9/loomcli/internal/cli/provenance"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/observability/tracing"
 )
@@ -100,10 +99,13 @@ EXAMPLES
   loom sync                     # Full sync: push all + pull all`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if v, _ := cmd.Flags().GetBool("version"); v {
-			// Delegates to the same assembly `loom version` uses so the two
-			// entry points cannot report different provenance.
-			fmt.Println(provenance.Current(BuildStamp()).String())
-			if warn := provenance.SkewWarning(BuildStamp()); warn != "" {
+			// Rendered through the hooks internal/cli/provenance installs, so
+			// this and `loom version` cannot report different provenance. The
+			// dependency points that way (provenance imports cli, like every
+			// other command package) because internal/cli sits at its
+			// import-fanout ceiling.
+			fmt.Println(VersionLine())
+			if warn := VersionSkewWarning(); warn != "" {
 				fmt.Fprintln(os.Stderr, warn)
 			}
 			return
@@ -114,7 +116,6 @@ EXAMPLES
 
 func init() {
 	rootCmd.Flags().BoolP("version", "v", false, "Print version information")
-	RegisterCommand(provenance.NewVersionCmd(BuildStamp))
 	rootCmd.PersistentFlags().StringVar(&backendFlag, "backend", "", "AI backend CLI to use (codex, claude, opencode). Env: LOOM_BACKEND")
 	rootCmd.PersistentFlags().StringVar(&logFormat, "log-format", "text", "Log format (text|json)")
 	rootCmd.PersistentFlags().StringVar(&logOutput, "log-output", "stderr", "Log output destination (stderr|<filepath>)")
@@ -408,14 +409,18 @@ func parseGitBranches(output string) []string {
 	return unique
 }
 
-// BuildStamp gathers this binary's ldflags-set provenance for the
-// internal/cli/provenance helpers.
-func BuildStamp() provenance.Stamp {
-	return provenance.Stamp{
-		Version:   Version,
-		Commit:    Build,
-		Ref:       Ref,
-		SourcePRs: SourcePRs,
-		BuildTime: BuildTime,
-	}
-}
+// Provenance hooks, installed by internal/cli/provenance at init. They exist
+// as function vars rather than a direct call because internal/cli is at its
+// import-fanout ceiling and, more importantly, because the dependency belongs
+// this way round: the provenance package imports cli (as every other command
+// package does), reads the ldflags-set vars above, and hands back rendered
+// strings.
+//
+// Defaults keep this package standalone — a build that never links provenance
+// still prints a truthful version line.
+var (
+	// VersionLine renders the human version line.
+	VersionLine = func() string { return fmt.Sprintf("loom version %s (%s)", Version, Build) }
+	// VersionSkewWarning renders the PATH-vs-deployed skew warning, or "".
+	VersionSkewWarning = func() string { return "" }
+)

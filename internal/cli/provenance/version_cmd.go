@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 )
 
@@ -14,6 +15,14 @@ import (
 // rather than a value so the caller keeps ownership of the ldflags-set vars
 // (they must live in internal/cli for -X compatibility) while the command
 // itself lives with the logic it drives.
+func init() {
+	cli.RegisterCommand(NewVersionCmd(stampFromCLI))
+	// One assembly for every entry point: the root --version flag and the
+	// controlled-lead banner render through these.
+	cli.VersionLine = func() string { return Current(stampFromCLI()).String() }
+	cli.VersionSkewWarning = func() string { return SkewWarning(stampFromCLI()) }
+}
+
 func NewVersionCmd(stamp func() Stamp) *cobra.Command {
 	var (
 		versionJSON   bool

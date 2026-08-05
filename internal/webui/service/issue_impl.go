@@ -348,6 +348,27 @@ func (s *issueServiceImpl) CloseIssue(ctx context.Context, params CloseIssuePara
 // behavior (and the response payload the FE expects), we follow ClaimIssue
 // with an Update(status=in_progress) and then a Get to return the canonical
 // post-claim issue body.
+// actorClaimer is the actor-scoped claim capability. Declared here rather than
+// imported so the service does not depend on a specific backend package; both
+// the fleet and API backends satisfy it.
+type actorClaimer interface {
+	ClaimIssueAsActor(ctx context.Context, id string, lockTTL time.Duration, actor string) error
+}
+
+// claimAsActor claims on behalf of the requesting worker when an actor was
+// supplied and the backend can scope a claim to one. Falling back to the
+// plain claim keeps older backends working, but it is exactly the fallback
+// that made every sibling share serve's configured actor — so the actor path
+// is preferred whenever both halves are present.
+func claimAsActor(ctx context.Context, be backend.IssueBackend, issueID, actor string) error {
+	if actor != "" {
+		if ac, ok := be.(actorClaimer); ok {
+			return ac.ClaimIssueAsActor(ctx, issueID, 0, actor)
+		}
+	}
+	return be.ClaimIssue(ctx, issueID, 0)
+}
+
 func (s *issueServiceImpl) ClaimIssue(ctx context.Context, params ClaimIssueParams) (json.RawMessage, error) {
 	if strings.TrimSpace(params.IssueID) == "" {
 		return nil, ErrValidation("issue ID is required")
@@ -365,8 +386,8 @@ func (s *issueServiceImpl) ClaimIssue(ctx context.Context, params ClaimIssuePara
 		return nil, err
 	}
 
-	if err := be.ClaimIssue(ctx, params.IssueID, 0); err != nil {
-		slog.Error("backend error in ClaimIssue", "issue_id", params.IssueID, "err", err)
+	if err := claimAsActor(ctx, be, params.IssueID, params.Actor); err != nil {
+		slog.Error("backend error in ClaimIssue", "issue_id", params.IssueID, "actor", params.Actor, "err", err)
 		return nil, translateBackendError(err)
 	}
 

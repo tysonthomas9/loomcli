@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/tysonthomas9/loomcli/internal/cli"
 )
 
 // Build provenance (D-48) and the PATH-skew tripwire (D-44).
@@ -21,6 +23,19 @@ import (
 // behaves like the current one until it doesn't, and the failure surfaces as
 // a mysterious behavior difference rather than "you are running last week's
 // binary". A deployed build records itself; every later invocation can compare.
+
+// stampFromCLI reads the ldflags-set vars out of internal/cli. They live there
+// because deployers stamp -X .../internal/cli.Build=... and moving them would
+// break every existing build command.
+func stampFromCLI() Stamp {
+	return Stamp{
+		Version:   cli.Version,
+		Commit:    cli.Build,
+		Ref:       cli.Ref,
+		SourcePRs: cli.SourcePRs,
+		BuildTime: cli.BuildTime,
+	}
+}
 
 // Stamp carries the ldflags-set build vars in from the parent package. They
 // live there because external deployers stamp

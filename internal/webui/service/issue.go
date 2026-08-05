@@ -77,6 +77,13 @@ type CloseIssueParams struct {
 // ClaimIssueParams holds the parameters for atomically claiming an issue.
 type ClaimIssueParams struct {
 	IssueID string
+	// Actor is the identity claiming the issue, forwarded from the request's
+	// X-Actor header. Empty preserves the legacy behavior (serve's own
+	// configured actor), which is what every sibling worker used to collapse
+	// onto: fleet-db arbitrates locks BY actor, so one shared actor meant
+	// concurrent claims all "won" and a sibling could release a lock out from
+	// under the worker still holding it.
+	Actor string
 }
 
 // CreateIssueParams mirrors IssueCreateRequest but is not HTTP-bound.
