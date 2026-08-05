@@ -339,6 +339,35 @@ VET (2026-08-05, codex): EXECUTE-WITH-FIXES — all folded:
   (blanket-found vs directed-found), all computable from final-issues +
   comments + integration.log; report them with the score.
 
+#### AS-RUN (2026-08-05, loom-generic-tasks-1, run 19) — THE HALVES STACKED
+**Correctness 3/5 gates (chaos 3/3, crash 3/3, IRC 11/11; API 103/129,
+frontend journey 0/1) + replica-ux 0.9375 (8 PASS, polish PARTIAL —
+B2d/B2e-identical profile) → site-formula partial 0.769 vs public board
+best 0.6.** Replica-judged (standing policy; replica calibrated within
+1/16 on both fork apps, ran conservative on B2d). First loom run to hold
+an engineering half (3 gates — prior best 1) and the ux half (0.9375)
+simultaneously; B2e's zero-sum trade broken by giving direction and
+execution to different minds. $177.58 / 3h20m full budget / 24 tasks
+integrated (8 seed + 16 correctives, every open task drained by
+deadline), 2 gate failures both recovered on attempt 2, /app untouched
+on both failures. Anti-cheat clean, health true.
+- Observables: lead filed 26 verify-tasks (≤2/pass held, backlog rail
+  never engaged — max open 2); QA closed 24/26 (2 open at deadline),
+  file→close median 1 min / max 6 min (same-pass drain); QA-RESULT
+  coverage 24/24 (~2:1 PASS:DEVIATIONS); 16 correctives filed by QA,
+  16/16 integrated — titles map directly onto suite items (status_emoji,
+  owner_id, /me literal, message.new, channel archive/join, SPA verifier
+  hooks). Crash-gate verify-task ("supervisor restarts killed HTTP
+  node") filed pass 6, gate PASSED — directed verification visibly
+  bought the gate B2e's browser-walking lead missed.
+- Launch friction (both pre-spend, both fixed in-tree): (1) podman
+  compose banner + ANSI-glued arch string — env var restored, adapter
+  strips escapes; (2) qa-verify lane rejected by fleet-db referential
+  integrity — the probe caught it at $0, bootstrap now registers the
+  lane repo (see CORRECTION above). Cosmetic: seed-pass count logged
+  before the async lead turn finished ("1 tasks" vs real 8) — fix
+  post-seed count to wait on lead idle before logging.
+
 ### B3. fractal-generic — infrastructure COMMITTED
 Mission mode `generic` (verbatim spec + finish sentence — the hardcoded
 preamble is bypassed; strip-vet #3); hidden reserve pinned to 0; concurrency
