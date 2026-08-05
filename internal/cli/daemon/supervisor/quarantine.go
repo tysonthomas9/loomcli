@@ -50,7 +50,7 @@ type killEvent struct {
 	StopReason      string // e.g. "watchdog"; empty for a bare crash / ownership kill
 	ErrClass        string // classified outcome (Unknown | Timeout | Transient | ContextOverflow)
 	ExitCode        int
-	FleetSessionID  string // ap.AgentSessionID — captured before finalize clears it
+	LocalSessionID  string // ap.AgentSessionID — captured before finalize clears it
 	ClaudeSessionID string // lock ClaudeSessionID (best-effort; empty if absent)
 	RunID           string // lock RunID (best-effort)
 }
@@ -177,7 +177,7 @@ func snapshotTaskExit(ap *AgentProcess, lockInfo *cli.LockInfo, exitCode int) ta
 	lastErr := ap.LastError
 	stopReason := ap.StopReason
 	beforeRef := ap.BeforeRef
-	fleetSessionID := ap.AgentSessionID
+	localSessionID := ap.AgentSessionID
 	ap.Mu.Unlock()
 
 	snap := taskExitSnapshot{
@@ -195,7 +195,7 @@ func snapshotTaskExit(ap *AgentProcess, lockInfo *cli.LockInfo, exitCode int) ta
 		StopReason:     string(stopReason),
 		ErrClass:       errClass,
 		ExitCode:       exitCode,
-		FleetSessionID: fleetSessionID,
+		LocalSessionID: localSessionID,
 	}
 	if lockInfo != nil {
 		snap.event.ClaudeSessionID = lockInfo.ClaudeSessionID
@@ -494,7 +494,7 @@ func formatKillTimeline(taskID string, threshold, count int, kills []killEvent) 
 		}
 		fmt.Fprintf(&b, "| %d | %s | %s | %s | %s | %d | %s | %s |\n",
 			i+1, ev.At.UTC().Format(time.RFC3339), ev.Agent, kind, class, ev.ExitCode,
-			shortSessionID(ev.FleetSessionID), shortSessionID(ev.ClaudeSessionID))
+			shortSessionID(ev.LocalSessionID), shortSessionID(ev.ClaudeSessionID))
 	}
 	fmt.Fprintf(&b, "\nTo release: investigate the stall, then `loom data update %s --status open`\n", taskID)
 	fmt.Fprintf(&b, "(the %s label stays as an audit marker; clear it via the fleet-db API\n", quarantineLabel)

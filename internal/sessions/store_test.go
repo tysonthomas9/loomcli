@@ -125,6 +125,7 @@ func TestCreateSession_MetadataFields(t *testing.T) {
 	sess, err := store.CreateSession(CreateOptions{
 		AgentName:  "ember",
 		Backend:    "claude",
+		TaskID:     "TASK-42",
 		EpicID:     "epic-xyz",
 		Prompt:     "Plan the refactoring",
 		AttemptNum: 2,
@@ -155,6 +156,9 @@ func TestCreateSession_MetadataFields(t *testing.T) {
 	}
 	if meta.EpicID != "epic-xyz" {
 		t.Errorf("EpicID = %q, want %q", meta.EpicID, "epic-xyz")
+	}
+	if meta.TaskID != "TASK-42" {
+		t.Errorf("TaskID = %q, want %q", meta.TaskID, "TASK-42")
 	}
 	if meta.AttemptNum != 2 {
 		t.Errorf("AttemptNum = %d, want %d", meta.AttemptNum, 2)

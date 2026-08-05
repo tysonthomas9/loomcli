@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -105,7 +106,7 @@ func TestHandleCreateCarriesInteractiveKindAndPromptFile(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	agentSvc := svcimpl.NewAgentService(nil, nil, nil, st)
+	agentSvc := newAuthorizedTestAgentService(t, st)
 	body := []byte(`{
 		"name":"review-nova",
 		"role_name":"pr-review",
@@ -161,7 +162,7 @@ func TestModuleListWithoutRecordStoreUsesUnifiedSupervisedShape(t *testing.T) {
 	if _, err := st.Agents().Create(ctx, store.AgentCreate{WorkspaceKey: "TEST2", Name: "falcon", RoleName: "task"}); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	agentSvc := svcimpl.NewAgentService(nil, nil, nil, st)
+	agentSvc := newAuthorizedTestAgentService(t, st)
 	mux := http.NewServeMux()
 	newTestAgentsModule(agentSvc, nil, nil, "TEST2").Register(mux)
 
@@ -196,7 +197,7 @@ func TestModuleCreateRoutesInteractiveKindToAgentService(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	agentSvc := svcimpl.NewAgentService(nil, nil, nil, st)
+	agentSvc := newAuthorizedTestAgentService(t, st)
 	mux := http.NewServeMux()
 	newTestAgentsModule(agentSvc, st, nil, "TEST2").Register(mux)
 	body := []byte(`{
@@ -318,7 +319,7 @@ func TestModuleCreateDispatchesSupportedKindNamespaces(t *testing.T) {
 					t.Fatalf("create worker role: %v", err)
 				}
 			}
-			agentSvc := svcimpl.NewAgentService(nil, nil, nil, st)
+			agentSvc := newAuthorizedTestAgentService(t, st)
 			mux := http.NewServeMux()
 			newTestAgentsModule(agentSvc, st, nil, "TEST2").Register(mux)
 			req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST2/agents", bytes.NewBufferString(tt.body))
@@ -372,7 +373,7 @@ func TestModuleLifecycleHonorsStopAndRestartContract(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	agentSvc := svcimpl.NewAgentService(nil, nil, nil, st)
+	agentSvc := newAuthorizedTestAgentService(t, st)
 	mux := http.NewServeMux()
 	newTestAgentsModule(agentSvc, st, nil, "TEST2").Register(mux)
 
@@ -520,7 +521,7 @@ func TestModuleLifecycleUsesSettledResponseWithoutCommandStore(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	agentSvc := svcimpl.NewAgentService(nil, nil, nil, noAgentCommandStore{Store: st})
+	agentSvc := newAuthorizedTestAgentService(t, noAgentCommandStore{Store: st})
 	mux := http.NewServeMux()
 	newTestAgentsModule(agentSvc, st, nil, "TEST2").Register(mux)
 
@@ -536,6 +537,75 @@ func TestModuleLifecycleUsesSettledResponseWithoutCommandStore(t *testing.T) {
 	mux.ServeHTTP(yieldRR, yieldReq)
 	if yieldRR.Code != http.StatusOK || !strings.Contains(yieldRR.Body.String(), `"agent \"falcon\" yielded"`) {
 		t.Fatalf("yield response = %d %s, want settled 200", yieldRR.Code, yieldRR.Body.String())
+	}
+}
+
+func TestSupervisedAssignmentRoutesRejectRuntimeAndParentMutation(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{
+		Key: "TEST2", Name: "Test 2", DefaultBranch: "main",
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "TEST2", Name: "falcon", RoleName: "task", Backend: "claude",
+	}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	agentSvc := newAuthorizedTestAgentService(t, st)
+	mux := http.NewServeMux()
+	newTestAgentsModule(agentSvc, st, nil, "TEST2").Register(mux)
+
+	for name, body := range map[string]string{
+		"runtime state":  `{"state":"active"}`,
+		"parent":         `{"parent":"run-7"}`,
+		"mixed mutation": `{"backend":"codex","state":"active"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			req := httptest.NewRequest(
+				http.MethodPatch,
+				"/api/workspaces/TEST2/agents/falcon",
+				strings.NewReader(body),
+			)
+			rr := httptest.NewRecorder()
+			mux.ServeHTTP(rr, req)
+			if rr.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d body=%s, want 400", rr.Code, rr.Body.String())
+			}
+			persisted, err := st.Agents().Get(ctx, "TEST2", "falcon")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if persisted.State != domain.AgentStateIdle ||
+				persisted.Parent != "" ||
+				persisted.Backend != "claude" {
+				t.Fatalf("rejected mutation changed assignment: %+v", persisted)
+			}
+		})
+	}
+
+	create := httptest.NewRequest(
+		http.MethodPost,
+		"/api/workspaces/TEST2/agents",
+		strings.NewReader(`{
+			"name":"parent-forgery",
+			"role_name":"task",
+			"parent":"run-7"
+		}`),
+	)
+	create = create.WithContext(middleware.WithWorkspace(create.Context(), "TEST2"))
+	createRecorder := httptest.NewRecorder()
+	HandleCreate(agentSvc, nil).ServeHTTP(createRecorder, create)
+	if createRecorder.Code != http.StatusBadRequest {
+		t.Fatalf(
+			"create with parent status = %d body=%s, want 400",
+			createRecorder.Code,
+			createRecorder.Body.String(),
+		)
+	}
+	if _, err := st.Agents().Get(ctx, "TEST2", "parent-forgery"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("create with parent persisted assignment: %v", err)
 	}
 }
 
@@ -573,7 +643,7 @@ func TestModuleStopTerminatesInteractiveRuntimeSynchronously(t *testing.T) {
 			"TEST2\x00ui-lead": {{Key: key, Live: true}},
 		},
 	}
-	agentSvc := svcimpl.NewAgentServiceWithInteractiveRuntime(nil, nil, nil, st, runtime)
+	agentSvc := newAuthorizedTestAgentService(t, st, runtime)
 	mux := http.NewServeMux()
 	newTestAgentsModule(agentSvc, st, nil, "TEST2").Register(mux)
 
@@ -586,15 +656,15 @@ func TestModuleStopTerminatesInteractiveRuntimeSynchronously(t *testing.T) {
 	if !strings.Contains(rr.Body.String(), `"agent \"ui-lead\" stopped"`) {
 		t.Fatalf("interactive stop body = %s, want stopped confirmation", rr.Body.String())
 	}
-	if len(runtime.killed) != 2 || runtime.killed[0] != key || runtime.killed[1] != key {
-		t.Fatalf("killed runtimes = %+v, want two fenced kills of %+v", runtime.killed, key)
+	if len(runtime.killed) != 1 || runtime.killed[0] != key {
+		t.Fatalf("killed runtimes = %+v, want one lifecycle-boundary kill of %+v", runtime.killed, key)
 	}
 	agent, err := st.Agents().Get(ctx, "TEST2", "ui-lead")
 	if err != nil {
 		t.Fatalf("get stopped agent: %v", err)
 	}
-	if agent.State != domain.AgentStateStopped || agent.DesiredState != domain.AgentDesiredStopped {
-		t.Fatalf("agent after stop = %+v, want stopped/stopped", agent)
+	if agent.State != domain.AgentStateIdle || agent.DesiredState != domain.AgentDesiredStopped {
+		t.Fatalf("agent after stop = %+v, want runtime-owned idle and operator intent stopped", agent)
 	}
 	commands, err := st.AgentCommands().List(ctx, "TEST2", store.AgentCommandFilter{
 		TargetAgentID: "ui-lead", Status: domain.AgentCommandQueued,
@@ -641,7 +711,7 @@ func TestModuleRestartReplacesInteractiveRuntimeWithoutDaemonCommand(t *testing.
 			"TEST2\x00custom-ui": {{Key: key, Live: true}},
 		},
 	}
-	agentSvc := svcimpl.NewAgentServiceWithInteractiveRuntime(nil, nil, nil, st, runtime)
+	agentSvc := newAuthorizedTestAgentService(t, st, runtime)
 	mux := http.NewServeMux()
 	newTestAgentsModule(agentSvc, st, nil, "TEST2").Register(mux)
 
@@ -658,15 +728,15 @@ func TestModuleRestartReplacesInteractiveRuntimeWithoutDaemonCommand(t *testing.
 	if err != nil {
 		t.Fatalf("get restarted agent: %v", err)
 	}
-	if agent.State != domain.AgentStateActive || agent.DesiredState != domain.AgentDesiredRunning {
-		t.Fatalf("agent after restart = %+v, want active/running for fresh terminal attach", agent)
+	if agent.State != domain.AgentStateIdle || agent.DesiredState != domain.AgentDesiredRunning {
+		t.Fatalf("agent after restart = %+v, want runtime-owned idle and operator intent running", agent)
 	}
 	session, err := st.AgentSessions().Get(ctx, "TEST2", "custom-ui-session")
 	if err != nil {
 		t.Fatalf("get replaced session: %v", err)
 	}
-	if session.Status != domain.AgentSessionCancelled || session.FinishedAt == nil {
-		t.Fatalf("replaced session = %+v, want cancelled with finished_at", session)
+	if session.Status != domain.AgentSessionRunning || session.FinishedAt != nil {
+		t.Fatalf("replaced session = %+v, want Interaction-owned lifecycle untouched", session)
 	}
 	commands, err := st.AgentCommands().List(ctx, "TEST2", store.AgentCommandFilter{
 		TargetAgentID: "custom-ui", Status: domain.AgentCommandQueued,
@@ -687,7 +757,7 @@ func TestHandleCreateCarriesInlinePrompt(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	agentSvc := svcimpl.NewAgentService(nil, nil, nil, st)
+	agentSvc := newAuthorizedTestAgentService(t, st)
 	body := []byte(`{
 		"name":"custom-nova",
 		"role_name":"custom-nova",

@@ -9,6 +9,7 @@ import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 
 import {
   updateIssue,
+  deleteIssue,
   setIssueRepository,
   addDependency,
   removeDependency,
@@ -43,6 +44,7 @@ import type {
   Event,
 } from "@/types";
 import type { Status } from "@/types/issue";
+import { ApiError, apiErrorMessage } from "@/types/common";
 import { formatStatusLabel, getReviewType, isPRUrl } from "@/utils/issue";
 import {
   epicRunnerRuntimePayload,
@@ -461,6 +463,9 @@ function DefaultContent({
   const [rejectError, setRejectError] = useState<string | null>(null);
   const [showMoveDialog, setShowMoveDialog] = useState(false);
   const [moveError, setMoveError] = useState<string | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isStartingEpicRun, setIsStartingEpicRun] = useState(false);
   const { showToast } = useToast();
 
@@ -1095,6 +1100,29 @@ function DefaultContent({
     [issue, onClose, workspaceId],
   );
 
+  const handleDeleteConfirm = useCallback(async () => {
+    if (!issue || isDeleting) return;
+    setShowDeleteConfirm(false);
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      await deleteIssue(workspaceId, issue.id);
+      showToast(`Deleted ${issue.id}`, { type: "success" });
+      onClose();
+    } catch (err) {
+      setDeleteError(
+        err instanceof ApiError && err.status === 409
+          ? apiErrorMessage(
+              err,
+              "This issue is actively claimed and cannot be deleted until the run finishes.",
+            )
+          : apiErrorMessage(err, "Failed to delete issue"),
+      );
+    } finally {
+      setIsDeleting(false);
+    }
+  }, [isDeleting, issue, onClose, showToast, workspaceId]);
+
   // Reset reject form state when issue changes
   useEffect(() => {
     setShowRejectForm(false);
@@ -1103,6 +1131,9 @@ function DefaultContent({
     setRejectError(null);
     setShowMoveDialog(false);
     setMoveError(null);
+    setShowDeleteConfirm(false);
+    setIsDeleting(false);
+    setDeleteError(null);
     setIsStartingEpicRun(false);
   }, [issue?.id]);
 
@@ -1195,6 +1226,11 @@ function DefaultContent({
               setShowMoveDialog(true);
             },
           })}
+          onDelete={() => {
+            setDeleteError(null);
+            setShowDeleteConfirm(true);
+          }}
+          isDeleting={isDeleting}
           {...prProps}
           {...(onToggleMaximize !== undefined && {
             onToggleMaximize,
@@ -1555,6 +1591,24 @@ function DefaultContent({
           testId="title-error-toast"
         />
       )}
+
+      {deleteError && (
+        <ErrorToast
+          message={deleteError}
+          onDismiss={() => setDeleteError(null)}
+          testId="delete-error-toast"
+        />
+      )}
+
+      <ConfirmDialog
+        isOpen={showDeleteConfirm}
+        title={`Delete ${issue.id}?`}
+        message="This permanently deletes the issue. An actively claimed issue will be preserved and the request will be rejected."
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={() => void handleDeleteConfirm()}
+        onCancel={() => setShowDeleteConfirm(false)}
+      />
 
       {/* Close confirmation dialog for terminal tabs with active sessions */}
       <ConfirmDialog

@@ -24,6 +24,10 @@ const (
 	// WorkflowCatalogVersionLifecycleCapability is required when Loom's
 	// catalog lifecycle slice is enabled.
 	WorkflowCatalogVersionLifecycleCapability = "workflow_catalog.version_lifecycle.v1"
+	// WorkflowCatalogVersionAuthoringCapability certifies the two
+	// service-only atomic author-version routes. New Loom never falls back to
+	// generic Driver or DriverVersion CRUD when it is absent.
+	WorkflowCatalogVersionAuthoringCapability = "workflow_catalog.version_authoring.v1"
 	// AutomationTriggerAdmissionCapability is required when Loom composes the
 	// Phase 3 Automation core, ingress workflows, and runtime components. The
 	// running FleetDB advertises it only for a backend with full contract parity.
@@ -77,6 +81,30 @@ const (
 	// lifecycle Ack/Complete is bound to the current logical-agent ownership
 	// generation, with only the documented no-live convergence exceptions.
 	AgentsLifecycleCommandOwnershipFencingCapability = "agents.lifecycle_command_ownership_fencing.v1"
+	// AgentsServiceCommandsCapability certifies the authenticated Agent/Role
+	// identity commands, desired-state CAS, and owner-fenced desired-state
+	// transition used by the Phase 5 Agents owner. Generic AgentService CRUD is
+	// not a fallback for this command surface.
+	AgentsServiceCommandsCapability = "agents.agent_service_commands.v1"
+	// AgentsLifecycleCommandsCapability certifies the atomic Agent,
+	// managed-binding, binding-grant, and archival convergence command.
+	AgentsLifecycleCommandsCapability = "agents.lifecycle_commands.v1"
+	// AgentsOwnershipLeaseCommandsCapability certifies atomic acquire, renew,
+	// and release for the complete logical-Agent ownership generation.
+	AgentsOwnershipLeaseCommandsCapability = "agents.ownership_lease_commands.v1"
+	// AgentsProvisioningProgressCapability certifies durable first-writer-wins
+	// intent recording, CAS progress, and restart recovery for the named
+	// AgentProvisioning process manager.
+	AgentsProvisioningProgressCapability = "agents.provisioning_progress.v1"
+	// RepositoriesAdmissionCapability certifies the durable, incarnation-
+	// fenced repository-admission process used by every store-backed workspace
+	// create and add-repository operation. Loom has no split Workspace/Repo
+	// mutation fallback when this capability is absent.
+	RepositoriesAdmissionCapability = "repositories.admission.v1"
+	// InteractionSessionCommandsCapability certifies the compound
+	// session/lease, terminal, inbox, recovery, and activity command family.
+	// New Loom never decomposes these owner-fenced mutations into legacy CRUD.
+	InteractionSessionCommandsCapability = "interaction.session_commands.v1"
 	// ArtifactsOwnerFencedLifecycleCapability certifies owner-fenced,
 	// idempotent Artifact create/upload/finalize/reference commands.
 	ArtifactsOwnerFencedLifecycleCapability = "artifacts.owner_fenced_lifecycle.v1"
@@ -109,6 +137,20 @@ func Phase4FoundationCapabilities() []string {
 		ExecutionDriverRunWorkItemClaimCapability,
 		ExecutionDriverRunReviewWorkItemHandoffCapability,
 		ExecutionTaskRunLogIdempotencyCapability,
+	}
+}
+
+// Phase5FoundationCapabilities is the indivisible Agents, Interaction, and
+// repository-admission runtime profile. AgentProvisioning progress is required
+// separately only when the Workflow Catalog-backed agent-authoring slice is
+// enabled.
+func Phase5FoundationCapabilities() []string {
+	return []string{
+		AgentsServiceCommandsCapability,
+		AgentsLifecycleCommandsCapability,
+		AgentsOwnershipLeaseCommandsCapability,
+		InteractionSessionCommandsCapability,
+		RepositoriesAdmissionCapability,
 	}
 }
 

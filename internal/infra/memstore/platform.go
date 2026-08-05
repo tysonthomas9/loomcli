@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -25,6 +27,15 @@ var _ store.DriverStore = (*driverStore)(nil)
 func (s *driverStore) Create(_ context.Context, in store.DriverCreate) (*domain.Driver, error) {
 	if in.WorkspaceKey == "" || in.DriverID == "" || in.Name == "" {
 		return nil, fmt.Errorf("workspace_key + driver_id + name required: %w", domain.ErrInvalid)
+	}
+	for key := range in.Metadata {
+		if strings.HasPrefix(key, workflowcatalog.ApprovedVersionMetadataPrefix) {
+			return nil, fmt.Errorf(
+				"metadata %q is lifecycle-owned; use Workflow Catalog approve: %w",
+				key,
+				domain.ErrInvalid,
+			)
+		}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -50,18 +61,17 @@ func (s *driverStore) Create(_ context.Context, in store.DriverCreate) (*domain.
 		trust = domain.DriverTrustUntrusted
 	}
 	driver := &domain.Driver{
-		WorkspaceKey:    in.WorkspaceKey,
-		DriverID:        in.DriverID,
-		Name:            in.Name,
-		OwnerType:       ownerType,
-		OwnerRef:        in.OwnerRef,
-		Description:     in.Description,
-		ActiveVersionID: in.ActiveVersionID,
-		Status:          status,
-		TrustLevel:      trust,
-		Metadata:        cloneMap(in.Metadata),
-		CreatedAt:       now,
-		UpdatedAt:       now,
+		WorkspaceKey: in.WorkspaceKey,
+		DriverID:     in.DriverID,
+		Name:         in.Name,
+		OwnerType:    ownerType,
+		OwnerRef:     in.OwnerRef,
+		Description:  in.Description,
+		Status:       status,
+		TrustLevel:   trust,
+		Metadata:     cloneMap(in.Metadata),
+		CreatedAt:    now,
+		UpdatedAt:    now,
 	}
 	s.items[in.WorkspaceKey][in.DriverID] = driver
 	return cloneDriver(driver), nil
@@ -100,6 +110,17 @@ func (s *driverStore) Update(_ context.Context, ws, driverID string, patch store
 	if !ok {
 		return nil, fmt.Errorf("driver %q in workspace %q: %w", driverID, ws, domain.ErrNotFound)
 	}
+	if patch.Status != nil && *patch.Status == domain.DriverStatusActive {
+		return nil, fmt.Errorf("active status is lifecycle-owned; use Workflow Catalog ActivateVersion: %w", domain.ErrInvalid)
+	}
+	var replacementMetadata map[string]string
+	if patch.Metadata != nil {
+		var err error
+		replacementMetadata, err = preserveApprovalMetadataForGenericUpdate(driver.Metadata, *patch.Metadata)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if patch.Name != nil {
 		driver.Name = *patch.Name
 	}
@@ -112,9 +133,6 @@ func (s *driverStore) Update(_ context.Context, ws, driverID string, patch store
 	if patch.Description != nil {
 		driver.Description = *patch.Description
 	}
-	if patch.ActiveVersionID != nil {
-		driver.ActiveVersionID = *patch.ActiveVersionID
-	}
 	if patch.Status != nil {
 		driver.Status = *patch.Status
 	}
@@ -122,10 +140,130 @@ func (s *driverStore) Update(_ context.Context, ws, driverID string, patch store
 		driver.TrustLevel = *patch.TrustLevel
 	}
 	if patch.Metadata != nil {
-		driver.Metadata = cloneMap(*patch.Metadata)
+		driver.Metadata = replacementMetadata
 	}
 	driver.UpdatedAt = time.Now().UTC()
 	return cloneDriver(driver), nil
+}
+
+// ApproveDriverVersionForTest is the memstore test double for Workflow
+// Catalog's typed ApproveVersion command. memstore is test-only; production
+// calls the durable FleetDB command through the capability adapter.
+func (s *Store) ApproveDriverVersionForTest(
+	ctx context.Context,
+	workspace, driverID, versionID string,
+) (*domain.Driver, error) {
+	version, err := s.versions.Get(ctx, workspace, versionID)
+	if err != nil {
+		return nil, err
+	}
+	if version.DriverID != driverID {
+		return nil, fmt.Errorf("version %q is not owned by driver %q: %w", versionID, driverID, domain.ErrInvalid)
+	}
+	if version.ValidationStatus != domain.DriverVersionValidationPassed {
+		return nil, fmt.Errorf("version %q has not passed validation: %w", versionID, domain.ErrInvalid)
+	}
+
+	s.drivers.mu.Lock()
+	defer s.drivers.mu.Unlock()
+	driver, ok := s.drivers.items[workspace][driverID]
+	if !ok {
+		return nil, fmt.Errorf("driver %q in workspace %q: %w", driverID, workspace, domain.ErrNotFound)
+	}
+	if driver.Metadata == nil {
+		driver.Metadata = map[string]string{}
+	}
+	driver.Metadata[workflowcatalog.ApprovedVersionMetadataKey(versionID)] = version.SourceDigest
+	driver.Revision++
+	driver.UpdatedAt = time.Now().UTC()
+	return cloneDriver(driver), nil
+}
+
+// UnapproveDriverVersionForTest is the memstore test double for Workflow
+// Catalog's typed UnapproveVersion command.
+func (s *Store) UnapproveDriverVersionForTest(
+	ctx context.Context,
+	workspace, driverID, versionID string,
+) (*domain.Driver, error) {
+	version, err := s.versions.Get(ctx, workspace, versionID)
+	if err != nil {
+		return nil, err
+	}
+	if version.DriverID != driverID {
+		return nil, fmt.Errorf("version %q is not owned by driver %q: %w", versionID, driverID, domain.ErrInvalid)
+	}
+
+	s.drivers.mu.Lock()
+	defer s.drivers.mu.Unlock()
+	driver, ok := s.drivers.items[workspace][driverID]
+	if !ok {
+		return nil, fmt.Errorf("driver %q in workspace %q: %w", driverID, workspace, domain.ErrNotFound)
+	}
+	delete(driver.Metadata, workflowcatalog.ApprovedVersionMetadataKey(versionID))
+	driver.Revision++
+	driver.UpdatedAt = time.Now().UTC()
+	return cloneDriver(driver), nil
+}
+
+// ActivateDriverVersionForTest is the memstore test double for Workflow
+// Catalog's typed ActivateVersion command. It applies the same ownership,
+// validation, and prior-approval preconditions as FleetDB.
+func (s *Store) ActivateDriverVersionForTest(
+	ctx context.Context,
+	workspace, driverID, versionID string,
+) (*domain.Driver, error) {
+	version, err := s.versions.Get(ctx, workspace, versionID)
+	if err != nil {
+		return nil, err
+	}
+	if version.DriverID != driverID {
+		return nil, fmt.Errorf("version %q is not owned by driver %q: %w", versionID, driverID, domain.ErrInvalid)
+	}
+	if version.ValidationStatus != domain.DriverVersionValidationPassed {
+		return nil, fmt.Errorf("version %q has not passed validation: %w", versionID, domain.ErrInvalid)
+	}
+
+	s.drivers.mu.Lock()
+	defer s.drivers.mu.Unlock()
+	driver, ok := s.drivers.items[workspace][driverID]
+	if !ok {
+		return nil, fmt.Errorf("driver %q in workspace %q: %w", driverID, workspace, domain.ErrNotFound)
+	}
+	if !workflowcatalog.VersionApproved(driver, version) {
+		return nil, fmt.Errorf("version %q is not approved: %w", versionID, domain.ErrInvalid)
+	}
+	driver.ActiveVersionID = versionID
+	driver.Status = domain.DriverStatusActive
+	driver.Revision++
+	driver.UpdatedAt = time.Now().UTC()
+	return cloneDriver(driver), nil
+}
+
+func preserveApprovalMetadataForGenericUpdate(
+	current, replacement map[string]string,
+) (map[string]string, error) {
+	for key, value := range replacement {
+		if !strings.HasPrefix(key, workflowcatalog.ApprovedVersionMetadataPrefix) {
+			continue
+		}
+		if currentValue, ok := current[key]; !ok || currentValue != value {
+			return nil, fmt.Errorf(
+				"metadata %q is lifecycle-owned; use Workflow Catalog approve/unapprove: %w",
+				key,
+				domain.ErrInvalid,
+			)
+		}
+	}
+	out := cloneMap(replacement)
+	if out == nil {
+		out = map[string]string{}
+	}
+	for key, value := range current {
+		if strings.HasPrefix(key, workflowcatalog.ApprovedVersionMetadataPrefix) {
+			out[key] = value
+		}
+	}
+	return out, nil
 }
 
 func (s *driverStore) exists(ws, driverID string) bool {

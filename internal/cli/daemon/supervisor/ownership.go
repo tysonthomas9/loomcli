@@ -491,7 +491,10 @@ func (s *Supervisor) releaseAgentOwnership(ap *AgentProcess) {
 	ap.Mu.Lock()
 	agentID := ap.Entry.Worktree
 	leaseID := ap.OwnershipLeaseID
+	ownerID := ap.OwnershipOwnerID
+	nodeID := ap.OwnershipNodeID
 	token := ap.OwnershipLeaseToken
+	fencingToken := ap.OwnershipFencingToken
 	if ap.ownershipCommandReserved && token != "" {
 		ap.ownershipReleasePending = true
 		ap.Mu.Unlock()
@@ -510,7 +513,18 @@ func (s *Supervisor) releaseAgentOwnership(ap *AgentProcess) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
 	defer cancel()
-	if _, err := s.ControlStore.AgentOwnershipLeases().Release(ctx, s.WorkspaceID, agentID, token); err != nil {
+	ownership := s.ControlStore.AgentOwnershipLeases()
+	var err error
+	if owned, ok := ownership.(store.AgentOwnershipLeaseOwnedStore); ok {
+		_, err = owned.ReleaseOwned(ctx, store.AgentOwnershipLeaseProof{
+			WorkspaceKey: s.WorkspaceID, AgentID: agentID, LeaseID: leaseID,
+			LeaseToken: token, OwnerID: ownerID, RuntimeProvider: domain.RuntimeProviderLocal,
+			NodeID: nodeID, FencingToken: fencingToken,
+		})
+	} else {
+		_, err = ownership.Release(ctx, s.WorkspaceID, agentID, token)
+	}
+	if err != nil {
 		slog.Warn("agent ownership release failed", "worktree", agentID, "workspace", s.WorkspaceID, "lease_id", leaseID, "err", err)
 	}
 }
@@ -613,13 +627,10 @@ func (s *Supervisor) endAgentStartTransition(ap *AgentProcess) {
 
 // clearAgentSessionState resets session state between supervision cycles.
 func (s *Supervisor) clearAgentSessionState(ap *AgentProcess) {
-	ap.SessionHeartbeatMu.Lock()
-	defer ap.SessionHeartbeatMu.Unlock()
 	ap.Mu.Lock()
 	ap.Session = nil
 	ap.AgentSessionID = ""
-	ap.AgentLeaseID = ""
-	ap.AgentLeaseToken = ""
+	ap.AgentIPCAuthToken = ""
 	ap.TranscriptPath = ""
 	ap.BeforeRef = ""
 	ap.AssignedTaskID = ""
@@ -704,7 +715,11 @@ func (s *Supervisor) doOwnershipHeartbeat(ap *AgentProcess, ttl time.Duration) e
 	defer ap.ownershipOpMu.Unlock()
 	ap.Mu.Lock()
 	agentID := ap.Entry.Worktree
+	leaseID := ap.OwnershipLeaseID
+	ownerID := ap.OwnershipOwnerID
+	nodeID := ap.OwnershipNodeID
 	token := ap.OwnershipLeaseToken
+	fencingToken := ap.OwnershipFencingToken
 	ap.Mu.Unlock()
 	if token == "" {
 		return errOwnershipLeaseCleared
@@ -712,7 +727,18 @@ func (s *Supervisor) doOwnershipHeartbeat(ap *AgentProcess, ttl time.Duration) e
 	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
 	defer cancel()
 	sentAt := time.Now()
-	lease, err := s.ControlStore.AgentOwnershipLeases().Heartbeat(ctx, s.WorkspaceID, agentID, token, ttl)
+	ownership := s.ControlStore.AgentOwnershipLeases()
+	var lease *domain.AgentOwnershipLease
+	var err error
+	if owned, ok := ownership.(store.AgentOwnershipLeaseOwnedStore); ok {
+		lease, err = owned.HeartbeatOwned(ctx, store.AgentOwnershipLeaseProof{
+			WorkspaceKey: s.WorkspaceID, AgentID: agentID, LeaseID: leaseID,
+			LeaseToken: token, OwnerID: ownerID, RuntimeProvider: domain.RuntimeProviderLocal,
+			NodeID: nodeID, FencingToken: fencingToken,
+		}, ttl)
+	} else {
+		lease, err = ownership.Heartbeat(ctx, s.WorkspaceID, agentID, token, ttl)
+	}
 	if err != nil {
 		return err
 	}

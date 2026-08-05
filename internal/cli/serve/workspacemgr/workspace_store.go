@@ -8,22 +8,28 @@ import (
 	"os"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/app/agentscompat"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr/admissionstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/gitauth"
+	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/roleprompts"
 	storepkg "github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/workspaceerrors"
 )
 
-// NewLocalSettingsGitCredentials returns the local-settings credential source
-// shared by store-backed workspace admission. The source reloads Settings for
-// every git operation; an empty directory preserves anonymous git behavior.
-func NewLocalSettingsGitCredentials(localSettingsDir string) gitauth.Source {
-	return gitauth.NewLocalSettingsSource(localSettingsDir)
+// repositoryCheckoutMaterializer is the only checkout authority Workspace
+// admission receives. It intentionally omits the Source Control owner API,
+// credential broker, and provider credential types.
+type repositoryCheckoutMaterializer interface {
+	PrepareRepositoryAdmissionCheckout(
+		context.Context,
+		sourcecontrol.RepositoryAdmissionCheckoutCommand,
+	) (*sourcecontrol.PreparedRepositoryCheckout, error)
 }
 
 // BuildStoreBackedCreateWorkspace returns a create function for fleet-db store
@@ -31,49 +37,92 @@ func NewLocalSettingsGitCredentials(localSettingsDir string) gitauth.Source {
 // store as the source of truth and records only local checkout paths in
 // ~/.loom/state.json.
 func BuildStoreBackedCreateWorkspace(s storepkg.Store) service.WorkspaceCreateFn {
-	return BuildStoreBackedCreateWorkspaceWithCredentials(s, nil)
+	return BuildStoreBackedCreateWorkspaceWithSourceControl(s, nil)
 }
 
-// BuildStoreBackedCreateWorkspaceWithCredentials is the UI/runtime variant
-// that can authenticate private HTTPS repository admission.
-func BuildStoreBackedCreateWorkspaceWithCredentials(
+// BuildStoreBackedCreateWorkspaceWithSourceControl is the UI/runtime variant.
+// Clone requests fail closed without the owner materializer; raw remotes are
+// persisted only after Source Control validation and provider credentials
+// never cross this boundary.
+func BuildStoreBackedCreateWorkspaceWithSourceControl(
 	s storepkg.Store,
-	credentials gitauth.Source,
+	materializer repositoryCheckoutMaterializer,
 ) service.WorkspaceCreateFn {
-	if s == nil {
+	return BuildStoreBackedCreateWorkspaceWithAdmission(
+		s,
+		nil,
+		nil,
+		materializer,
+	)
+}
+
+// BuildStoreBackedCreateWorkspaceWithAdmission composes the production
+// restart-safe repository-admission process. FleetDB reserves the complete
+// repository batch before any checkout is published, while the local journal
+// binds that admission to this machine's checkout root.
+func BuildStoreBackedCreateWorkspaceWithAdmission(
+	s storepkg.Store,
+	admissions infrafleetdb.RepositoryAdmissionTransport,
+	journal *RepositoryAdmissionJournal,
+	materializer repositoryCheckoutMaterializer,
+) service.WorkspaceCreateFn {
+	operations := NewStoreBackedWorkspaceAdmissionOperations(
+		s,
+		admissions,
+		journal,
+		materializer,
+	)
+	if operations == nil {
 		return nil
 	}
-	return func(ctx context.Context, req service.WorkspaceCreateRequest) (service.WorkspaceCreateResult, error) {
-		if req.Type == "clone" {
-			return createStoreBackedCloneWorkspace(ctx, s, req, credentials)
-		}
-		return createStoreBackedEmptyWorkspace(ctx, s, req)
-	}
+	return operations.CreateWorkspace
 }
 
 // BuildStoreBackedAddRepos returns a repo attachment function for fleet-db
 // store mode. It creates git worktrees, then registers those repos in the
 // store and local state cache as one rollback-aware operation.
 func BuildStoreBackedAddRepos(s storepkg.Store) service.WorkspaceAddReposFn {
-	return BuildStoreBackedAddReposWithCredentials(s, nil)
+	return BuildStoreBackedAddReposWithSourceControl(s, nil)
 }
 
-// BuildStoreBackedAddReposWithCredentials is the UI/runtime variant that can
-// authenticate private HTTPS repository admission.
-func BuildStoreBackedAddReposWithCredentials(
+// BuildStoreBackedAddReposWithSourceControl is the UI/runtime variant. Local
+// worktree attachment remains Workspace-owned; remote checkout always crosses
+// the credential-free Source Control materializer.
+func BuildStoreBackedAddReposWithSourceControl(
 	s storepkg.Store,
-	credentials gitauth.Source,
+	materializer repositoryCheckoutMaterializer,
 ) service.WorkspaceAddReposFn {
-	if s == nil {
+	return BuildStoreBackedAddReposWithAdmission(
+		s,
+		nil,
+		nil,
+		materializer,
+	)
+}
+
+// BuildStoreBackedAddReposWithAdmission composes the same durable batch for
+// an existing Workspace. Neither local worktrees nor remote checkouts become
+// FleetDB Repo records until one owner-fenced Commit publishes the full set.
+func BuildStoreBackedAddReposWithAdmission(
+	s storepkg.Store,
+	admissions infrafleetdb.RepositoryAdmissionTransport,
+	journal *RepositoryAdmissionJournal,
+	materializer repositoryCheckoutMaterializer,
+) service.WorkspaceAddReposFn {
+	operations := NewStoreBackedWorkspaceAdmissionOperations(
+		s,
+		admissions,
+		journal,
+		materializer,
+	)
+	if operations == nil {
 		return nil
 	}
-	return func(ctx context.Context, req service.WorkspaceAddReposRequest) (service.WorkspaceCreateResult, error) {
-		return addReposToStoreBackedWorkspace(ctx, s, req, credentials)
-	}
+	return operations.AddWorkspaceRepos
 }
 
 //nolint:cyclop,funlen,gocognit // Orchestrates filesystem, git, and store rollback steps for one workflow.
-func createStoreBackedEmptyWorkspace(ctx context.Context, s storepkg.Store, req service.WorkspaceCreateRequest) (service.WorkspaceCreateResult, error) {
+func createStoreBackedEmptyWorkspace(ctx context.Context, s admissionstore.Store, req service.WorkspaceCreateRequest) (service.WorkspaceCreateResult, error) {
 	if req.Type != "empty" {
 		return service.WorkspaceCreateResult{}, fmt.Errorf("unsupported workspace type: %s", req.Type)
 	}
@@ -148,10 +197,16 @@ func createStoreBackedEmptyWorkspace(ctx context.Context, s storepkg.Store, req 
 		if remoteName == "" {
 			remoteName = "origin"
 		}
+		remoteURL, err := persistentGitRemoteURL(r.Path, remoteName)
+		if err != nil {
+			rollbackStore()
+			cleanupWorktrees(wsPlan, created)
+			return service.WorkspaceCreateResult{}, err
+		}
 		if _, err := s.Repos().Create(ctx, storepkg.RepoCreate{
 			WorkspaceKey:  key,
 			Name:          r.Name,
-			RemoteURL:     gitRemoteURL(r.Path, remoteName),
+			RemoteURL:     remoteURL,
 			Remote:        remoteName,
 			DefaultBranch: branch,
 			SourceRepoID:  r.SourceRepoID,
@@ -179,9 +234,9 @@ func createStoreBackedEmptyWorkspace(ctx context.Context, s storepkg.Store, req 
 //nolint:cyclop,funlen // Coordinates local git worktrees, fleet-db repo records, and local state rollback.
 func addReposToStoreBackedWorkspace(
 	ctx context.Context,
-	s storepkg.Store,
+	s admissionstore.Store,
 	req service.WorkspaceAddReposRequest,
-	credentials gitauth.Source,
+	materializer repositoryCheckoutMaterializer,
 ) (service.WorkspaceCreateResult, error) {
 	key, ws, err := resolveWorkspaceForAddRepos(ctx, s, req.WorkspaceID)
 	if err != nil {
@@ -207,13 +262,35 @@ func addReposToStoreBackedWorkspace(
 	if err != nil {
 		return service.WorkspaceCreateResult{}, err
 	}
-	clonedRepos, err := materializeAddReposClones(ctx, req.CloneURLs, wsDir, seen, created, req.Branch, credentials)
+	clonedRepos, clonesToCleanup, err := materializeAddReposClones(
+		ctx,
+		key,
+		nil,
+		req.CloneURLs,
+		wsDir,
+		seen,
+		created,
+		req.Branch,
+		materializer,
+		nil,
+	)
 	if err != nil {
 		return service.WorkspaceCreateResult{}, err
 	}
-	repos = append(repos, clonedRepos...)
+	allRepos := append(append([]config.RepoConfig(nil), repos...), clonedRepos...)
 
-	if err := persistAddReposRecords(ctx, s, key, wsDir, branch, repos, created, clonedRepos); err != nil {
+	if err := persistAddReposRecords(
+		ctx,
+		s,
+		key,
+		wsDir,
+		branch,
+		repos,
+		allRepos,
+		created,
+		clonedRepos,
+		clonesToCleanup,
+	); err != nil {
 		return service.WorkspaceCreateResult{}, err
 	}
 	return service.WorkspaceCreateResult{WorkspaceID: key, WorkspacePath: wsDir}, nil
@@ -222,7 +299,7 @@ func addReposToStoreBackedWorkspace(
 // resolveWorkspaceForAddRepos looks up the workspace by ID, then falls back
 // to lookup-by-name so callers can pass either. Returns the canonical key
 // (which may differ from the input when matched by name).
-func resolveWorkspaceForAddRepos(ctx context.Context, s storepkg.Store, workspaceID string) (string, *domain.Workspace, error) {
+func resolveWorkspaceForAddRepos(ctx context.Context, s admissionstore.Store, workspaceID string) (string, *domain.Workspace, error) {
 	key := strings.TrimSpace(workspaceID)
 	if key == "" {
 		return "", nil, workspaceerrors.New(workspaceerrors.PathNotFound, "workspace ID is required", nil)
@@ -264,7 +341,7 @@ func resolveRequestRepos(reqRepos []string) ([]resolvedRepo, error) {
 // dedupAddReposAgainstExisting builds the set of repo names already present
 // in the workspace, then verifies the requested repos don't collide. Returns
 // the merged seen-set so downstream clone steps can extend it.
-func dedupAddReposAgainstExisting(ctx context.Context, s storepkg.Store, key string, resolved []resolvedRepo) (map[string]bool, error) {
+func dedupAddReposAgainstExisting(ctx context.Context, s admissionstore.Store, key string, resolved []resolvedRepo) (map[string]bool, error) {
 	existing, err := s.Repos().List(ctx, key)
 	if err != nil {
 		return nil, fmt.Errorf("list workspace repos: %w", err)
@@ -326,278 +403,6 @@ func materializeAddReposWorktrees(
 	return created, repos, nil
 }
 
-// materializeAddReposClones clones any --clone-url repos under the workspace
-// directory, rolling back previously-attached worktrees on failure.
-func materializeAddReposClones(
-	ctx context.Context,
-	cloneURLs []string,
-	wsDir string,
-	seen map[string]bool,
-	created []createdWorktree,
-	requestedBranch string,
-	credentials gitauth.Source,
-) ([]config.RepoConfig, error) {
-	if len(cloneURLs) == 0 {
-		return nil, nil
-	}
-	cloned, err := cloneReposWithSeenCredentials(ctx, cloneURLs, wsDir, seen, credentials)
-	if err != nil {
-		cleanupAttachedWorktrees(created)
-		return nil, err
-	}
-	if err := applyRequestedCloneBranch(cloned, requestedBranch); err != nil {
-		cleanupAttachedWorktrees(created)
-		cleanupClonedRepos(cloned)
-		return nil, workspaceerrors.New(workspaceerrors.GitFailed, "validate cloned repository default branch", err)
-	}
-	return cloned, nil
-}
-
-// persistAddReposRecords writes the fleet-db repo records for each new
-// repo and saves the local-state file. On any failure it rolls back the
-// store records, attached worktrees, and clone directories so the caller
-// is left with the pre-call state.
-func persistAddReposRecords(ctx context.Context, s storepkg.Store, key, wsDir, branch string, repos []config.RepoConfig, created []createdWorktree, clonedRepos []config.RepoConfig) error {
-	var storeRepos []string
-	rollback := func() {
-		for _, name := range storeRepos {
-			if err := s.Repos().Delete(context.Background(), key, name); err != nil && !errors.Is(err, domain.ErrNotFound) {
-				slog.Warn("failed to rollback store repo create", "workspace", key, "repo", name, "err", err)
-			}
-		}
-		cleanupAttachedWorktrees(created)
-		cleanupClonedRepos(clonedRepos)
-	}
-
-	for _, r := range repos {
-		if err := createStoreRepo(ctx, s, key, branch, r); err != nil {
-			rollback()
-			return err
-		}
-		storeRepos = append(storeRepos, r.Name)
-	}
-	if err := saveLocalWorkspaceState(key, wsDir, repos, true); err != nil {
-		rollback()
-		return err
-	}
-	return nil
-}
-
-func createStoreRepo(ctx context.Context, s storepkg.Store, key, branch string, r config.RepoConfig) error {
-	remoteName := r.Remote
-	if remoteName == "" {
-		remoteName = "origin"
-	}
-	defaultBranch := strings.TrimSpace(r.DefaultBranch)
-	if defaultBranch == "" {
-		defaultBranch = strings.TrimSpace(branch)
-	}
-	if _, err := s.Repos().Create(ctx, storepkg.RepoCreate{
-		WorkspaceKey:  key,
-		Name:          r.Name,
-		RemoteURL:     gitRemoteURL(r.Path, remoteName),
-		Remote:        remoteName,
-		DefaultBranch: defaultBranch,
-		SourceRepoID:  r.SourceRepoID,
-	}); err != nil {
-		if errors.Is(err, domain.ErrAlreadyExists) {
-			return workspaceerrors.New(
-				workspaceerrors.AlreadyExists,
-				fmt.Sprintf("repository name %q is already registered; repository names must be unique across workspaces", r.Name),
-				err,
-			)
-		}
-		return fmt.Errorf("create repo %q in store: %w", r.Name, err)
-	}
-	return nil
-}
-
-func localWorkspacePath(key string) (string, error) {
-	sc, err := bootstrap.LoadStateCache()
-	if err != nil {
-		return "", fmt.Errorf("load local workspace state: %w", err)
-	}
-	if sc != nil {
-		if local, ok := sc.Workspaces[key]; ok && strings.TrimSpace(local.Path) != "" {
-			return local.Path, nil
-		}
-	}
-	return "", workspaceerrors.New(workspaceerrors.PathNotFound, fmt.Sprintf("workspace %q has no local path; open it on this machine before adding repos", key), nil)
-}
-
-func gitRemoteURL(repoPath, remote string) string {
-	if remote == "" {
-		remote = "origin"
-	}
-	out, err := cli.RunGitCommand(repoPath, "remote", "get-url", remote)
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(out)
-}
-
-//nolint:cyclop,funlen // Orchestrates clone lifecycle state, filesystem cleanup, and store writes.
-func createStoreBackedCloneWorkspace(
-	ctx context.Context,
-	s storepkg.Store,
-	req service.WorkspaceCreateRequest,
-	credentials gitauth.Source,
-) (service.WorkspaceCreateResult, error) {
-	cloneURLs := req.CloneURLs
-	if len(cloneURLs) == 0 {
-		return service.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.PathNotFound, "no clone URLs specified", nil)
-	}
-	if err := ensureCloneWorkspaceNameAvailable(ctx, s, req.Name); err != nil {
-		return service.WorkspaceCreateResult{}, err
-	}
-
-	wsPlan, err := resolveWorkspaceDirForCreate(req.Path, req.Name)
-	if err != nil {
-		return service.WorkspaceCreateResult{}, err
-	}
-	wsDir := wsPlan.path
-	branch := req.Branch
-	if branch == "" {
-		branch = "main"
-	}
-	key := service.WorkspaceKeyFromName(req.Name)
-	if err := ensureCloneWorkspaceKeyAvailable(ctx, s, req.Name, key); err != nil {
-		return service.WorkspaceCreateResult{}, err
-	}
-
-	if _, err := s.Workspaces().Create(ctx, storepkg.WorkspaceCreate{
-		Key:           key,
-		Name:          req.Name,
-		DefaultBranch: branch,
-	}); err != nil {
-		if errors.Is(err, domain.ErrAlreadyExists) {
-			return service.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.AlreadyExists, fmt.Sprintf("workspace %q already exists", req.Name), err)
-		}
-		return service.WorkspaceCreateResult{}, fmt.Errorf("create workspace in store: %w", err)
-	}
-	rollbackStore := func() {
-		deleteLocalWorkspaceState(key)
-		if err := s.Workspaces().Delete(context.Background(), key); err != nil && !errors.Is(err, domain.ErrNotFound) {
-			slog.Warn("failed to rollback store clone workspace create", "workspace", key, "err", err)
-		}
-	}
-	if err := seedBuiltInRoles(ctx, s, key, wsDir); err != nil {
-		rollbackStore()
-		return service.WorkspaceCreateResult{}, fmt.Errorf("seed built-in roles: %w", err)
-	}
-	_ = updateStoreWorkspaceState(ctx, s, key, domain.WorkspaceStateCreating)
-
-	if err := os.MkdirAll(wsDir, 0755); err != nil {
-		rollbackStore()
-		return service.WorkspaceCreateResult{}, fmt.Errorf("cannot create workspace directory: %w", err)
-	}
-
-	if err := updateStoreWorkspaceState(ctx, s, key, domain.WorkspaceStateCloning); err != nil {
-		cleanupWorkspaceRoot(wsPlan)
-		rollbackStore()
-		return service.WorkspaceCreateResult{}, fmt.Errorf("mark workspace cloning: %w", err)
-	}
-	repos, err := cloneReposWithCredentials(ctx, cloneURLs, wsDir, credentials)
-	if err != nil {
-		cleanupWorkspaceRoot(wsPlan)
-		rollbackStore()
-		return service.WorkspaceCreateResult{}, err
-	}
-	if err := applyRequestedCloneBranch(repos, req.Branch); err != nil {
-		cleanupCloneWorkspace(wsPlan, repos)
-		rollbackStore()
-		return service.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.GitFailed, "validate cloned repository default branch", err)
-	}
-	detectedBranch := ""
-	if strings.TrimSpace(req.Branch) == "" && len(repos) > 0 {
-		branch = strings.TrimSpace(repos[0].DefaultBranch)
-		if branch == "" {
-			cleanupCloneWorkspace(wsPlan, repos)
-			rollbackStore()
-			return service.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.GitFailed, "cloned repository default branch is empty", nil)
-		}
-		detectedBranch = branch
-	}
-
-	if err := updateStoreWorkspaceStateAndDefaultBranch(ctx, s, key, domain.WorkspaceStateInitializing, detectedBranch); err != nil {
-		cleanupCloneWorkspace(wsPlan, repos)
-		rollbackStore()
-		return service.WorkspaceCreateResult{}, fmt.Errorf("mark workspace initializing: %w", err)
-	}
-	for _, r := range repos {
-		remoteURL := gitRemoteURL(r.Path, "origin")
-		defaultBranch := strings.TrimSpace(r.DefaultBranch)
-		if defaultBranch == "" {
-			defaultBranch = branch
-		}
-		if _, err := s.Repos().Create(ctx, storepkg.RepoCreate{
-			WorkspaceKey:  key,
-			Name:          r.Name,
-			RemoteURL:     remoteURL,
-			DefaultBranch: defaultBranch,
-			SourceRepoID:  r.SourceRepoID,
-		}); err != nil {
-			cleanupCloneWorkspace(wsPlan, repos)
-			rollbackStore()
-			return service.WorkspaceCreateResult{}, fmt.Errorf("create repo %q in store: %w", r.Name, err)
-		}
-	}
-	if err := saveLocalWorkspaceState(key, wsDir, repos, true); err != nil {
-		cleanupCloneWorkspace(wsPlan, repos)
-		rollbackStore()
-		return service.WorkspaceCreateResult{}, err
-	}
-	if err := updateStoreWorkspaceState(ctx, s, key, domain.WorkspaceStateReady); err != nil {
-		cleanupCloneWorkspace(wsPlan, repos)
-		rollbackStore()
-		return service.WorkspaceCreateResult{}, fmt.Errorf("mark workspace ready: %w", err)
-	}
-
-	return service.WorkspaceCreateResult{WorkspaceID: key, WorkspacePath: wsDir}, nil
-}
-
-func ensureCloneWorkspaceNameAvailable(ctx context.Context, s storepkg.Store, name string) error {
-	existing, err := s.Workspaces().GetByName(ctx, name)
-	if err == nil && existing != nil {
-		return workspaceerrors.New(workspaceerrors.AlreadyExists, fmt.Sprintf("workspace %q already exists", name), nil)
-	}
-	if err != nil && !errors.Is(err, domain.ErrNotFound) {
-		return fmt.Errorf("check workspace name: %w", err)
-	}
-	return nil
-}
-
-func ensureCloneWorkspaceKeyAvailable(ctx context.Context, s storepkg.Store, name, key string) error {
-	_, err := s.Workspaces().Get(ctx, key)
-	if err == nil {
-		return workspaceerrors.New(workspaceerrors.AlreadyExists, fmt.Sprintf("workspace %q already exists", name), nil)
-	}
-	if !errors.Is(err, domain.ErrNotFound) {
-		return fmt.Errorf("check workspace key: %w", err)
-	}
-	return nil
-}
-
-func updateStoreWorkspaceState(ctx context.Context, s storepkg.Store, key string, state domain.WorkspaceState) error {
-	return updateStoreWorkspaceStateAndDefaultBranch(ctx, s, key, state, "")
-}
-
-// updateStoreWorkspaceStateAndDefaultBranch keeps workspace lifecycle and
-// clone-derived branch persistence on the existing workspace mutation seam.
-// An empty branch leaves the stored default unchanged.
-func updateStoreWorkspaceStateAndDefaultBranch(ctx context.Context, s storepkg.Store, key string, state domain.WorkspaceState, defaultBranch string) error {
-	msg := ""
-	update := storepkg.WorkspaceUpdate{
-		State:        &state,
-		ErrorMessage: &msg,
-	}
-	if defaultBranch = strings.TrimSpace(defaultBranch); defaultBranch != "" {
-		update.DefaultBranch = &defaultBranch
-	}
-	_, err := s.Workspaces().Update(ctx, key, update)
-	return err
-}
-
 // seedBuiltInRoles creates the domain.BuiltinRoleNames set — the two lists
 // must stay in step, since delete guards consult the domain list. The
 // task-running roles (plan/task) are seeded with a TS-contract prompt body on
@@ -606,13 +411,12 @@ func updateStoreWorkspaceStateAndDefaultBranch(ctx context.Context, s storepkg.S
 // prompt_agent_missing_prompt). Writing the prompt file is best-effort: a write
 // failure logs and leaves PromptFile empty, and EnsureBuiltinRolePrompts
 // materializes it at the next serve start.
-func seedBuiltInRoles(ctx context.Context, s storepkg.Store, key, wsDir string) error {
+func seedBuiltInRoles(ctx context.Context, s admissionstore.Store, key, wsDir string) error { //nolint:funlen // Built-in role seeding preserves exact definitions and per-role prompt repair behavior.
 	roles := []storepkg.RoleCreate{
 		{
 			WorkspaceKey: key,
 			Name:         "plan",
 			Description:  "Planning agent",
-			PromptFile:   seedRolePromptFile(wsDir, "plan"),
 			TaskFilter:   "needs_plan",
 			ReadOnly:     true,
 		},
@@ -620,7 +424,6 @@ func seedBuiltInRoles(ctx context.Context, s storepkg.Store, key, wsDir string) 
 			WorkspaceKey: key,
 			Name:         "task",
 			Description:  "Task implementation agent",
-			PromptFile:   seedRolePromptFile(wsDir, "task"),
 			TaskFilter:   "has_design",
 		},
 		{
@@ -630,9 +433,39 @@ func seedBuiltInRoles(ctx context.Context, s storepkg.Store, key, wsDir string) 
 			Description:  "Lead/orchestrator terminal",
 		},
 	}
+	commands, err := newManagedAgentsCommands(
+		s.Roles(),
+		s.AgentServices(),
+		s.Agents(),
+	)
+	if err != nil {
+		return err
+	}
 	for _, role := range roles {
-		if _, err := s.Roles().Create(ctx, role); err != nil {
+		if cause := context.Cause(ctx); cause != nil {
+			return cause
+		}
+		role.PromptFile = seedRolePromptFile(wsDir, role.Name)
+		if cause := context.Cause(ctx); cause != nil {
+			return cause
+		}
+		if _, err := commands.EnsureRole(ctx, agents.EnsureRoleCommand{
+			RequestID:    "workspace-bootstrap:" + key + ":" + role.Name,
+			WorkspaceKey: key,
+			Role: agents.RoleDefinition{
+				Name: role.Name, Kind: role.Kind, Description: role.Description,
+				Prompt: role.Prompt, PromptFile: role.PromptFile, Model: role.Model,
+				TaskFilter: role.TaskFilter, Backend: role.Backend, Effort: role.Effort,
+				PathPatterns: role.PathPatterns, Skills: role.Skills,
+				MaxPriority: role.MaxPriority, MaxConcurrency: role.MaxConcurrency,
+				ReadOnly: role.ReadOnly, AllowedTools: role.AllowedTools,
+				DeniedTools: role.DeniedTools, MaxBudgetUSD: role.MaxBudgetUSD,
+			},
+		}); err != nil {
 			return fmt.Errorf("create role %q: %w", role.Name, err)
+		}
+		if cause := context.Cause(ctx); cause != nil {
+			return cause
 		}
 	}
 	return nil
@@ -666,6 +499,14 @@ func EnsureBuiltinRolePrompts(ctx context.Context, s storepkg.Store) error {
 	if s == nil {
 		return nil
 	}
+	commands, err := newManagedAgentsCommands(
+		s.Roles(),
+		s.AgentServices(),
+		s.Agents(),
+	)
+	if err != nil {
+		return err
+	}
 	workspaces, err := s.Workspaces().List(ctx)
 	if err != nil {
 		return fmt.Errorf("list workspaces for role prompt backfill: %w", err)
@@ -680,7 +521,7 @@ func EnsureBuiltinRolePrompts(ctx context.Context, s storepkg.Store) error {
 			continue
 		}
 		for _, roleName := range roleprompts.BuiltinPromptRoleNames() {
-			ensureBuiltinRolePrompt(ctx, s, ws.Key, wsDir, roleName)
+			ensureBuiltinRolePromptWithCommands(ctx, s, commands, ws.Key, wsDir, roleName)
 		}
 	}
 	return nil
@@ -689,6 +530,24 @@ func EnsureBuiltinRolePrompts(ctx context.Context, s storepkg.Store) error {
 // ensureBuiltinRolePrompt materializes one builtin role's default prompt body
 // when (and only when) its PromptFile is empty.
 func ensureBuiltinRolePrompt(ctx context.Context, s storepkg.Store, key, wsDir, roleName string) {
+	commands, err := newManagedAgentsCommands(
+		s.Roles(),
+		s.AgentServices(),
+		s.Agents(),
+	)
+	if err != nil {
+		slog.Warn("failed to compose Agents role prompt repair", "role", roleName, "workspace", key, "err", err)
+		return
+	}
+	ensureBuiltinRolePromptWithCommands(ctx, s, commands, key, wsDir, roleName)
+}
+
+func ensureBuiltinRolePromptWithCommands(
+	ctx context.Context,
+	s storepkg.Store,
+	commands agentscompat.ManagedCommands,
+	key, wsDir, roleName string,
+) {
 	role, err := s.Roles().Get(ctx, key, roleName)
 	if err != nil {
 		// Role not seeded (older workspace shape); leave it to seedBuiltInRoles.
@@ -706,7 +565,12 @@ func ensureBuiltinRolePrompt(ctx context.Context, s storepkg.Store, key, wsDir, 
 		slog.Warn("failed to backfill builtin role prompt", "role", roleName, "workspace", key, "err", err)
 		return
 	}
-	if _, err := s.Roles().Update(ctx, key, roleName, storepkg.RoleUpdate{PromptFile: &path}); err != nil {
+	if _, _, err := commands.RepairRolePromptFile(ctx, agents.RepairManagedRolePromptFileCommand{
+		RequestID:    "builtin-role-prompt-backfill:" + key + ":" + roleName,
+		WorkspaceKey: key,
+		RoleName:     roleName,
+		PromptFile:   path,
+	}); err != nil {
 		slog.Warn("failed to set builtin role PromptFile after backfill write", "role", roleName, "workspace", key, "err", err)
 	}
 }
@@ -753,5 +617,28 @@ func deleteLocalWorkspaceState(key string) {
 		return nil
 	}); err != nil {
 		slog.Warn("failed to rollback local workspace state", "workspace", key, "err", err)
+	}
+}
+
+func removeLocalRepoState(key, repositoryName string) {
+	if key == "" || repositoryName == "" {
+		return
+	}
+	if err := bootstrap.MutateWorkspaceLocalState(
+		key,
+		func(local *bootstrap.WorkspaceLocalState) error {
+			delete(local.Repos, repositoryName)
+			return nil
+		},
+	); err != nil {
+		slog.Warn(
+			"failed to rollback local repository state",
+			"workspace",
+			key,
+			"repo",
+			repositoryName,
+			"err",
+			err,
+		)
 	}
 }

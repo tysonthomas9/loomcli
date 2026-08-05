@@ -606,11 +606,18 @@ var _ store.AgentLeaseStore = (*agentLeaseStore)(nil)
 
 func (s *agentLeaseStore) Create(ctx context.Context, in store.AgentLeaseCreate) (*domain.AgentLease, error) {
 	body := map[string]any{"lease_id": in.LeaseID, "agent_id": in.AgentID, "node_id": in.NodeID, "ttl_seconds": ttlSeconds(in.TTL)}
-	var out domain.AgentLease
-	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/agent-sessions/"+pathEscape(in.SessionID)+"/leases", body, &out); err != nil {
+	var response struct {
+		Lease domain.AgentLease `json:"lease"`
+		Token string            `json:"token"`
+	}
+	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/agent-sessions/"+pathEscape(in.SessionID)+"/leases", body, &response); err != nil {
 		return nil, err
 	}
-	return &out, nil
+	if err := validateAgentLeaseEnvelope(response.Lease, response.Token, in); err != nil {
+		return nil, err
+	}
+	response.Lease.Token = response.Token
+	return &response.Lease, nil
 }
 
 func (s *agentLeaseStore) Get(ctx context.Context, ws, leaseID string) (*domain.AgentLease, error) {
@@ -671,81 +678,24 @@ func (s *agentLeaseStore) Release(ctx context.Context, ws, leaseID, token string
 	return &out, nil
 }
 
-type agentOwnershipLeaseStore struct{ client *Client }
-
-var _ store.AgentOwnershipLeaseStore = (*agentOwnershipLeaseStore)(nil)
-
-func (s *agentOwnershipLeaseStore) Acquire(ctx context.Context, in store.AgentOwnershipLeaseAcquire) (*domain.AgentOwnershipLease, error) {
-	body := map[string]any{
-		"lease_id":         in.LeaseID,
-		"owner_id":         in.OwnerID,
-		"runtime_provider": in.RuntimeProvider,
-		"node_id":          in.NodeID,
-		"ttl_seconds":      ttlSeconds(in.TTL),
+func validateAgentLeaseEnvelope(lease domain.AgentLease, token string, in store.AgentLeaseCreate) error {
+	switch {
+	case token == "":
+		return errors.New("fleetdb: agent lease create response omitted one-time token")
+	case lease.WorkspaceKey != in.WorkspaceKey:
+		return fmt.Errorf("fleetdb: agent lease create response workspace %q does not match %q", lease.WorkspaceKey, in.WorkspaceKey)
+	case lease.LeaseID != in.LeaseID:
+		return fmt.Errorf("fleetdb: agent lease create response lease %q does not match %q", lease.LeaseID, in.LeaseID)
+	case lease.SessionID != in.SessionID:
+		return fmt.Errorf("fleetdb: agent lease create response session %q does not match %q", lease.SessionID, in.SessionID)
+	case lease.AgentID != in.AgentID:
+		return fmt.Errorf("fleetdb: agent lease create response agent %q does not match %q", lease.AgentID, in.AgentID)
+	case lease.NodeID != in.NodeID:
+		return fmt.Errorf("fleetdb: agent lease create response node %q does not match %q", lease.NodeID, in.NodeID)
+	case lease.FencingToken <= 0:
+		return fmt.Errorf("fleetdb: agent lease create response has invalid fencing token %d", lease.FencingToken)
 	}
-	var out domain.AgentOwnershipLease
-	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/agent-ownership-leases/"+pathEscape(in.AgentID)+"/acquire", body, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-func (s *agentOwnershipLeaseStore) Get(ctx context.Context, ws, agentID string) (*domain.AgentOwnershipLease, error) {
-	var out domain.AgentOwnershipLease
-	if err := s.client.do(ctx, "GET", "/api/v1/"+pathEscape(ws)+"/agent-ownership-leases/"+pathEscape(agentID), nil, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-func (s *agentOwnershipLeaseStore) List(ctx context.Context, ws string, filter store.AgentOwnershipLeaseFilter) ([]*domain.AgentOwnershipLease, error) {
-	q := url.Values{}
-	if filter.OwnerID != "" {
-		q.Set("owner_id", filter.OwnerID)
-	}
-	if filter.NodeID != "" {
-		q.Set("node_id", filter.NodeID)
-	}
-	if filter.RuntimeProvider != "" {
-		q.Set("runtime_provider", string(filter.RuntimeProvider))
-	}
-	if filter.Status != "" {
-		q.Set("status", string(filter.Status))
-	}
-	if filter.Limit > 0 {
-		q.Set("limit", strconv.Itoa(filter.Limit))
-	}
-	path := withQuery("/api/v1/"+pathEscape(ws)+"/agent-ownership-leases", q)
-	var resp struct {
-		AgentOwnershipLeases []*domain.AgentOwnershipLease `json:"agent_ownership_leases"`
-	}
-	if err := s.client.do(ctx, "GET", path, nil, &resp); err != nil {
-		return nil, err
-	}
-	if resp.AgentOwnershipLeases == nil {
-		resp.AgentOwnershipLeases = []*domain.AgentOwnershipLease{}
-	}
-	return resp.AgentOwnershipLeases, nil
-}
-
-func (s *agentOwnershipLeaseStore) Heartbeat(ctx context.Context, ws, agentID, token string, ttl time.Duration) (*domain.AgentOwnershipLease, error) {
-	path := "/api/v1/" + pathEscape(ws) + "/agent-ownership-leases/" + pathEscape(agentID) + "/heartbeat"
-	if seconds := ttlSeconds(ttl); seconds > 0 {
-		path += "?ttl_seconds=" + strconv.Itoa(seconds)
-	}
-	var out domain.AgentOwnershipLease
-	if err := s.client.doWithHeaders(ctx, "POST", path, nil, &out, map[string]string{"X-Agent-Ownership-Lease-Token": token}); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-func (s *agentOwnershipLeaseStore) Release(ctx context.Context, ws, agentID, token string) (*domain.AgentOwnershipLease, error) {
-	var out domain.AgentOwnershipLease
-	if err := s.client.doWithHeaders(ctx, "POST", "/api/v1/"+pathEscape(ws)+"/agent-ownership-leases/"+pathEscape(agentID)+"/release", nil, &out, map[string]string{"X-Agent-Ownership-Lease-Token": token}); err != nil {
-		return nil, err
-	}
-	return &out, nil
+	return nil
 }
 
 type agentCommandStore struct{ client *Client }

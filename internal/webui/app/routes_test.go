@@ -20,6 +20,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
 	healthhandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/health"
 	hterminal "github.com/tysonthomas9/loomcli/internal/webui/handlers/terminal"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -1839,7 +1840,7 @@ func TestFlatAgentRoutesRemoved(t *testing.T) {
 	}
 
 	app := &Server{multiPool: multiPool, config: webui.ServerConfig{GitOps: gitOps, FileOps: fileOps}, wsExistsFn: wsExistsFn, agentSvc: svcimpl.NewAgentService(gitOps, nil, nil, nil)}
-	app.diffSvc = svcimpl.NewDiffService(gitOps, nil)
+	app.diffSvc = githandlers.NewDiffService(gitOps, nil)
 	app.fileSvc = svcimpl.NewFileService(fileOps)
 	app.sessSvc = svcimpl.NewSessionService(nil, nil)
 	setupTestRoutes(t, app)

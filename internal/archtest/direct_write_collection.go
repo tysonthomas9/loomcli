@@ -225,9 +225,13 @@ func persistenceMethodReceiver(fn *types.Func) (string, string, string, bool) {
 func directWriteRows(counts map[directWriteCountKey]int) []DirectWriteUse {
 	result := make([]DirectWriteUse, 0, len(counts))
 	for key, count := range counts {
+		expiresAfterPhase := 7
+		if key.file == "internal/driver" || strings.HasPrefix(key.file, "internal/driver/") {
+			expiresAfterPhase = legacyDriverDirectWriteExpiresAfterPhase
+		}
 		result = append(result, DirectWriteUse{
 			File: key.file, Receiver: key.receiver, Method: key.method, Count: count,
-			AggregateOwner: key.owner, ExpiresAfterPhase: 7,
+			AggregateOwner: key.owner, ExpiresAfterPhase: expiresAfterPhase,
 		})
 	}
 	slices.SortFunc(result, func(a, b DirectWriteUse) int { return strings.Compare(directWriteKey(a), directWriteKey(b)) })

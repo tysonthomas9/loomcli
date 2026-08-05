@@ -14,6 +14,7 @@ exclusions:
     - worktrees
 goroutine_disposition_policy: default-deny
 goroutine_launches:
+  - {file: "internal/archtest/agents_ownership.go", function: "snapshotPhase5AgentsMutations", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "profile workers are concurrency-limited and WaitGroup-joined before return"}
   - {file: "internal/archtest/direct_writes.go", function: "snapshotDirectWriteProfiles", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "profile workers are concurrency-limited and WaitGroup-joined before return"}
   - {file: "internal/archtest/profiles.go", function: "analyzeProfiles", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "profile workers are concurrency-limited and WaitGroup-joined before return"}
   - {file: "internal/bootstrap/embedded.go", function: "StartEmbedded", site: "go#1", callee: "emb.reapAndPublish", disposition: component, component_ids: [embedded-fleetdb-process-reaper]}
@@ -41,13 +42,11 @@ goroutine_launches:
   - {file: "internal/cli/daemon/daemon_run_helpers.go", function: "startStateUpdater", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [daemon-state-file-updater]}
   - {file: "internal/cli/daemon/supervisor/claim.go", function: "Supervisor.operationContext", site: "go#1", callee: "<anonymous>", disposition: helper, reason: "bridges supervisor shutdown into a timeout-bounded operation context"}
   - {file: "internal/cli/daemon/supervisor/concurrency.go", function: "ConcurrencyTracker.acquire", site: "go#1", callee: "<anonymous>", disposition: helper, reason: "bridges one per-agent stop channel into the role-limit condition wait and exits when acquisition returns or stop closes"}
-  - {file: "internal/cli/daemon/supervisor/critical.go", function: "Supervisor.RunCritical", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [daemon-config-reconciler, supervisor-agent-health-checker, supervisor-liveness-watchdog, supervisor-node-heartbeat, supervisor-session-lease-heartbeat]}
+  - {file: "internal/cli/daemon/supervisor/critical.go", function: "Supervisor.RunCritical", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [daemon-config-reconciler, supervisor-agent-health-checker, supervisor-liveness-watchdog, supervisor-node-heartbeat]}
   - {file: "internal/cli/daemon/supervisor/drain.go", function: "Supervisor.addAgentForTask", site: "go#1", callee: "s.supervisedAgentBody", disposition: component, component_ids: [supervisor-per-agent-loop]}
   - {file: "internal/cli/daemon/supervisor/drain.go", function: "Supervisor.drainAllWithGrace", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "agent drain fan-out is WaitGroup-joined under the caller's grace deadline"}
-  - {file: "internal/cli/daemon/supervisor/liveness.go", function: "Supervisor.runAgentSessionHeartbeatJobs", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "fixed-size heartbeat worker pool is deadline-bound and joined before the batch returns"}
   - {file: "internal/cli/daemon/supervisor/liveness.go", function: "Supervisor.startAgentWaitHeartbeatEvery", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [supervisor-agent-wait-heartbeat]}
   - {file: "internal/cli/daemon/supervisor/liveness.go", function: "Supervisor.startWorkerHeartbeatEvery", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [supervisor-worker-lease-heartbeat]}
-  - {file: "internal/cli/daemon/supervisor/liveness.go", function: "contextUntilShutdown", site: "go#1", callee: "<anonymous>", disposition: helper, reason: "bridges supervisor shutdown into one operation context and is joined by its stop function"}
   - {file: "internal/cli/daemon/supervisor/ownership.go", function: "Supervisor.startOwnershipHeartbeat", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [supervisor-agent-ownership-heartbeat]}
   - {file: "internal/cli/daemon/supervisor/supervisor.go", function: "Supervisor.startAgentSupervisor", site: "go#1", callee: "s.supervisedAgentBody", disposition: component, component_ids: [supervisor-per-agent-loop]}
   - {file: "internal/cli/epic/run.go", function: "signalContext", site: "go#1", callee: "<anonymous>", disposition: command, reason: "one-shot signal-to-context relay owned by the foreground epic command"}
@@ -65,12 +64,14 @@ goroutine_launches:
   - {file: "internal/cli/serve/logroutercmd/logrouter_cmd.go", function: "runLogRouter", site: "go#1", callee: "<anonymous>", disposition: command, reason: "one-shot signal-to-context relay owned by the foreground log-router command"}
   - {file: "internal/cli/serve/logroutercmd/logrouter_cmd.go", function: "runLogRouter", site: "go#2", callee: "watcher.Watch", disposition: component, component_ids: [logrouter-lock-watcher]}
   - {file: "internal/cli/serve/metricscmd/collector.go", function: "cachedCollector.startBackground", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [serve-metrics-cache-refresh]}
+  - {file: "internal/cli/serve/runtimecomposition/loops.go", function: "StartIssueJournalBridge", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [serve-issue-journal-bridge]}
+  - {file: "internal/cli/serve/runtimecomposition/loops.go", function: "StartOutboxDispatcher", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [serve-outbox-dispatcher]}
   - {file: "internal/cli/serve/serve.go", function: "runServe", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [web-http-server]}
   - {file: "internal/cli/serve/serve_cache.go", function: "cachedValue.startBackground", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [serve-generic-cache-refresh]}
-  - {file: "internal/cli/serve/serve_loops.go", function: "startIssueJournalBridge", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [serve-issue-journal-bridge]}
-  - {file: "internal/cli/serve/serve_loops.go", function: "startOutboxDispatcher", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [serve-outbox-dispatcher]}
   - {file: "internal/cli/serve/worker/log_forwarder.go", function: "NewLogForwarder", site: "go#1", callee: "lf.periodicFlush", disposition: component, component_ids: [serve-worker-log-forwarder]}
   - {file: "internal/cli/serve/worker/worker_cmd.go", function: "setupWorkerShutdown", site: "go#1", callee: "<anonymous>", disposition: command, reason: "one-shot operating-system signal relay owned by the foreground worker command"}
+  - {file: "internal/cli/serve/workspacemgr/repository_admission_lease.go", function: "repositoryAdmissionProcess.beginMaterialization", site: "go#1", callee: "process.watchRepositoryAdmissionLease", disposition: bounded, reason: "per-materialization lease watchdog expires at its lease deadline or is canceled and joined by materialization cleanup"}
+  - {file: "internal/cli/serve/workspacemgr/repository_admission_lease.go", function: "repositoryAdmissionProcess.renewActiveRepositoryAdmissions", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "renewal workers carry pass and per-attempt timeouts and are WaitGroup-joined before the renewal pass returns"}
   - {file: "internal/cli/workspace/status.go", function: "runStatus", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "workspace status fan-out is channel-joined before command return"}
   - {file: "internal/cli/workspace/status.go", function: "runStatus", site: "go#2", callee: "<anonymous>", disposition: bounded, reason: "workspace status fan-out is channel-joined before command return"}
   - {file: "internal/cli/worktree_resolve.go", function: "Resolver.agentWorktreeInfos", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "worktree inspection fan-out is WaitGroup-joined before resolution returns"}
@@ -80,7 +81,6 @@ goroutine_launches:
   - {file: "internal/driver/sandbox/egress.go", function: "startServeSocketRelay", site: "go#1", callee: "relay.acceptLoop", disposition: component, component_ids: [sandbox-serve-relay-accept]}
   - {file: "internal/driver/stale_task_sweeper.go", function: "Executor.startHeartbeats", site: "go#1", callee: "heartbeatDriverRun", disposition: component, component_ids: [driver-run-heartbeat]}
   - {file: "internal/driver/stale_task_sweeper.go", function: "Executor.startHeartbeats", site: "go#2", callee: "heartbeatExecutorNode", disposition: component, component_ids: [executor-node-heartbeat]}
-  - {file: "internal/driver/task_bridge_session.go", function: "startFlueTaskSessionHeartbeat", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [flue-task-session-heartbeat]}
   - {file: "internal/driver/task_worker.go", function: "TaskWorker.startExecutionTaskRunHeartbeat", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [execution-task-run-heartbeat]}
   - {file: "internal/harness/fakeharness/mock/main.go", function: "installSignalCleanup", site: "go#1", callee: "<anonymous>", disposition: helper, reason: "explicitly test-only fake-harness signal helper included by the all-source scan"}
   - {file: "internal/leadcontrol/codex_runtime.go", function: "RunCodexLeadRuntime", site: "go#1", callee: "discoverCodexLeadThread", disposition: component, component_ids: [codex-lead-thread-discovery]}
@@ -89,7 +89,7 @@ goroutine_launches:
   - {file: "internal/leadcontrol/harness_runtime.go", function: "RunHarnessLeadRuntime", site: "go#1", callee: "watchHarnessLeadRuntime", disposition: component, component_ids: [harness-lead-runtime-watch]}
   - {file: "internal/leadcontrol/harness_runtime.go", function: "RunHarnessLeadRuntime", site: "go#2", callee: "drainLeadMessageQueue", disposition: component, component_ids: [lead-message-delivery-drain]}
   - {file: "internal/leadcontrol/harness_runtime.go", function: "forwardHarnessStdin", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [harness-stdin-forwarder]}
-  - {file: "internal/platform/runtime/host.go", function: "Host.Start", site: "go#1", callee: "host.runComponent", disposition: component, component_ids: [execution-await-timeout-recovery, execution-driver-run, execution-task-run-convergence, execution-task-run-workers, serve-await-event-notifications, serve-driver-run-outcomes, serve-trigger-cron-scheduler, serve-trigger-delivery-sweeper]}
+  - {file: "internal/platform/runtime/host.go", function: "Host.Start", site: "go#1", callee: "host.runComponent", disposition: component, component_ids: [execution-await-timeout-recovery, execution-driver-run, execution-task-run-convergence, execution-task-run-workers, serve-agent-provisioning-recovery, serve-await-event-notifications, serve-driver-run-outcomes, serve-interaction-session-recovery, serve-trigger-cron-scheduler, serve-trigger-delivery-sweeper, workspace-repository-admission-lease-renewal, workspace-repository-admission-recovery]}
   - {file: "internal/webui/app/server.go", function: "Server.run", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [web-http-server]}
   - {file: "internal/webui/app/server_app.go", function: "NewServer", site: "go#1", callee: "app.hub.Run", disposition: component, component_ids: [realtime-hub-retry-drain]}
   - {file: "internal/webui/app/server_app.go", function: "NewServer", site: "go#2", callee: "config.DaemonStartupFn", disposition: component, component_ids: [web-secondary-daemon-startup]}
@@ -159,6 +159,32 @@ components:
     readiness_health: "gates startup on reusable runtime metadata and a successful healthz probe"
     retry_backoff: "fixed 100ms probe; returns the last runtime error on timeout"
     classification: startup-wait
+
+  - id: embedded-fleetdb-recovery-wait
+    kind: ticker
+    file: internal/bootstrap/openstore.go
+    function: recoverLocalStore
+    site: "time.NewTicker#1"
+    capability: platform
+    owner: embedded fleet-db bootstrap
+    cadence: "100ms while a borrowed local runtime shuts down and its replacement acquires ownership"
+    cancellation: "caller context or the bounded startup timeout"
+    readiness_health: "returns only after a reused or newly owned FleetDB satisfies required capabilities"
+    retry_backoff: "fixed 100ms ownership retry; typed capability incompatibility fails closed"
+    classification: startup-wait
+
+  - id: local-daemon-workspace-rotation
+    kind: ticker
+    file: internal/cli/local/daemon.go
+    function: runLocalDaemonOnce
+    site: "time.NewTicker#1"
+    capability: agents
+    owner: local runtime
+    cadence: "2s active-workspace check while the managed daemon child is running"
+    cancellation: "local runtime context cancellation or managed daemon exit"
+    readiness_health: "workspace drift rotates the managed daemon instead of leaving it bound to stale configuration"
+    retry_backoff: "fixed 2s poll; workspace read failures are logged and retried"
+    classification: managed
 
   - id: local-runtime-startup-wait
     kind: ticker
@@ -382,19 +408,6 @@ components:
     retry_backoff: "warns and retries on the next cadence"
     classification: managed
 
-  - id: supervisor-session-lease-heartbeat
-    kind: ticker
-    file: internal/cli/daemon/supervisor/liveness.go
-    function: Supervisor.runAgentSessionHeartbeat
-    site: "time.NewTicker#1"
-    capability: interaction
-    owner: daemon supervisor
-    cadence: "30s by default; configured intervals are capped at half the watchdog threshold"
-    cancellation: "supervisor shutdown cancels the bounded pass and in-flight calls; each pass is capped at 30s"
-    readiness_health: "renews mirrored AgentSession and AgentLease records, with ticks around each bounded pass and operation"
-    retry_backoff: "eight-worker rotating windows prevent tail starvation; failures retry on the next cadence"
-    classification: managed
-
   # Serve-hosted caches, execution workers, and automation reconcilers.
   - id: serve-metrics-cache-refresh
     kind: ticker
@@ -407,6 +420,19 @@ components:
     cancellation: "serve context cancellation"
     readiness_health: "warms the monitor snapshot cache; foreground reads retain their own fallback"
     retry_backoff: "fixed refresh cadence"
+    classification: managed
+
+  - id: serve-agent-provisioning-recovery
+    kind: component
+    file: internal/app/agentprovisioning/runtime.go
+    function: RuntimeRegistration
+    site: "component:agent-provisioning-recovery-registration"
+    capability: agents
+    owner: AgentProvisioning process manager hosted by platform runtime
+    cadence: "10s after an immediate pending-intent recovery pass"
+    cancellation: "platform runtime host cancellation and bounded Stop join"
+    readiness_health: "runtime host records per-pass success, failure, panic, timeout, and next run"
+    retry_backoff: "host exponential backoff from 1s to 1m; durable intent steps and progress CAS make every pass restart-safe"
     classification: managed
 
   - id: execution-driver-run
@@ -463,8 +489,8 @@ components:
 
   - id: serve-outbox-dispatcher
     kind: ticker
-    file: internal/cli/serve/serve_loops.go
-    function: startOutboxDispatcher
+    file: internal/cli/serve/runtimecomposition/loops.go
+    function: StartOutboxDispatcher
     site: "time.NewTicker#1"
     capability: automation
     owner: serve automation runtime
@@ -476,7 +502,7 @@ components:
 
   - id: serve-driver-run-outcomes
     kind: component
-    file: internal/app/serve/automation_run_outcome_runtime.go
+    file: internal/app/serve/automationcomposition/automation_run_outcome_runtime.go
     function: NewRunOutcomeRuntimeRegistrationWithExecution
     site: "component:driver-run-outcome-registration"
     capability: execution
@@ -485,6 +511,45 @@ components:
     cancellation: "platform runtime host cancellation and bounded Stop join"
     readiness_health: "runtime host records per-pass success, failure, panic, timeout, and next run"
     retry_backoff: "host backoff 1s to 1m plus durable record-level exponential retry capped at 5m"
+    classification: managed
+
+  - id: serve-interaction-session-recovery
+    kind: component
+    file: internal/modules/interaction/runtime.go
+    function: RuntimeRegistration
+    site: "component:interaction-session-recovery-registration"
+    capability: interaction
+    owner: Interaction runtime contribution hosted by platform runtime
+    cadence: "10s after an immediate recoverable-session reconciliation pass"
+    cancellation: "platform runtime host cancellation and bounded Stop join"
+    readiness_health: "runtime host records per-pass success, failure, panic, timeout, and next run"
+    retry_backoff: "host exponential backoff from 1s to 1m over durable session and lease state"
+    classification: managed
+
+  - id: workspace-repository-admission-recovery
+    kind: component
+    file: internal/cli/serve/workspacemgr/workspace_admission_operations.go
+    function: StoreBackedWorkspaceAdmissionOperations.RuntimeRegistrations
+    site: "component:workspace-repository-admission-recovery-registration"
+    capability: workspace
+    owner: Workspace repository-admission recovery hosted by platform runtime
+    cadence: "15s after an immediate recoverable-admission reconciliation pass"
+    cancellation: "platform runtime host cancellation and bounded Stop join"
+    readiness_health: "runtime host records per-pass success, failure, panic, timeout, and next run"
+    retry_backoff: "host exponential backoff from 5s to 1m over durable FleetDB admission and local journal state"
+    classification: managed
+
+  - id: workspace-repository-admission-lease-renewal
+    kind: component
+    file: internal/cli/serve/workspacemgr/workspace_admission_operations.go
+    function: StoreBackedWorkspaceAdmissionOperations.RuntimeRegistrations
+    site: "component:workspace-repository-admission-lease-renewal-registration"
+    capability: workspace
+    owner: Workspace repository-admission lease renewal hosted by platform runtime
+    cadence: "15s after an immediate active-admission lease-renewal pass"
+    cancellation: "platform runtime host cancellation, a 10s pass timeout, and bounded Stop join"
+    readiness_health: "runtime host records each pass; renewal scans only process-active exact durable admission coordinates and serializes local mutations"
+    retry_backoff: "host exponential backoff from 5s to 15s; each 60s Fleet lease renewal is fenced by owner ID, owner generation, spec fingerprint, and expected version"
     classification: managed
 
   - id: serve-await-event-notifications
@@ -541,8 +606,8 @@ components:
 
   - id: serve-issue-journal-bridge
     kind: ticker
-    file: internal/cli/serve/serve_loops.go
-    function: startIssueJournalBridge
+    file: internal/cli/serve/runtimecomposition/loops.go
+    function: StartIssueJournalBridge
     site: "time.NewTicker#1"
     capability: automation
     owner: serve automation runtime
@@ -1059,19 +1124,6 @@ components:
     cancellation: "per-agent stop function or supervisor shutdown"
     readiness_health: "loss of fenced ownership terminates the heartbeat and blocks unsafe spawn"
     retry_backoff: "next jittered timer only after a successful ownership renewal"
-    classification: managed
-
-  - id: flue-task-session-heartbeat
-    kind: component
-    file: internal/driver/task_bridge_session.go
-    function: heartbeatFlueTaskSession
-    site: component:resettable-timer-loop
-    capability: execution
-    owner: task bridge session lifecycle
-    cadence: "30s while a Flue-backed task execution is active"
-    cancellation: "derived task context canceled when the task session finishes"
-    readiness_health: "best-effort AgentSession heartbeat preserves task-session liveness"
-    retry_backoff: "failure is retried on the next reset timer interval"
     classification: managed
 
   - id: backend-mutation-long-poll

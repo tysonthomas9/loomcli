@@ -43,3 +43,41 @@ type VersionLifecycleStore interface {
 	UnapproveVersion(ctx context.Context, mutation LifecycleMutation) (*LifecycleResult, error)
 	ActivateVersion(ctx context.Context, mutation LifecycleMutation) (*LifecycleResult, error)
 }
+
+// AuthoringMutation is the transport-neutral, server-derived durable command.
+// Managed and Activate are never decoded from an operator request: the
+// Workflow Catalog service selects them from the typed authority lane.
+// AuditActor is the admitted authority subject, never request payload data.
+type AuthoringMutation struct {
+	AuthorVersionCommand
+	AuditActor string
+	Managed    bool
+	Activate   bool
+}
+
+// AuthoringResult is returned by one atomic aggregate command. Implementations
+// must ensure/reuse the Driver, ensure/reuse exactly one immutable version,
+// allocate a new version's positive monotonic sequence number, apply trust
+// demotion, and (for managed commands only) optionally activate in the same
+// transaction/Lua script and under ExpectedRevision. Activated reports that
+// the command's activation intent was satisfied, so an exact replay of an
+// activating command returns true even when the version is already active.
+type AuthoringResult struct {
+	Driver            *Driver
+	Version           *DriverVersion
+	CreatedDriver     bool
+	CreatedVersion    bool
+	ReusedVersion     bool
+	Activated         bool
+	Replayed          bool
+	CommittedRevision uint64
+	SemanticImpact    string
+}
+
+// AuthoringStore is the required FleetDB-backed command port for Phase 5
+// Workflow Catalog authoring. A sequence of generic CreateDriver,
+// CreateDriverVersion, trust PATCH, and activation PATCH calls is not a valid
+// implementation of this port.
+type AuthoringStore interface {
+	AuthorVersion(context.Context, AuthoringMutation) (*AuthoringResult, error)
+}

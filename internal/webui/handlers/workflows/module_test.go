@@ -15,12 +15,13 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	workflowdefs "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution/authoring"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/readprojection"
-	workflowdefs "github.com/tysonthomas9/loomcli/internal/workflows"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 type workflowRunSubmissionStub struct {
@@ -34,11 +35,15 @@ type workflowRunCatalogStub struct {
 	version               *workflowcatalog.DriverVersion
 	getDriverErr          error
 	requestedErr          error
+	getDriverWorkspace    string
+	getDriverRef          string
 	getVersionCalls       int
 	requestedVersionCalls int
 }
 
-func (stub *workflowRunCatalogStub) GetDriver(context.Context, string, string) (*workflowcatalog.Driver, error) {
+func (stub *workflowRunCatalogStub) GetDriver(_ context.Context, workspace, ref string) (*workflowcatalog.Driver, error) {
+	stub.getDriverWorkspace = workspace
+	stub.getDriverRef = ref
 	return stub.driver, stub.getDriverErr
 }
 
@@ -87,6 +92,168 @@ type workflowRunStoreTestExecution struct {
 	store store.Store
 }
 
+// workflowRunStoreTestCatalog keeps the legacy in-memory fixture behind the
+// Workflow Catalog port. Production code must never regain the direct
+// DriverStore read fallback this adapter replaces.
+type workflowRunStoreTestCatalog struct {
+	workflowcatalog.API
+	store *memstore.Store
+}
+
+func (adapter workflowRunStoreTestCatalog) GetDriver(
+	ctx context.Context,
+	workspace, driverRef string,
+) (*workflowcatalog.Driver, error) {
+	record, err := resolveWorkflowDriverForTest(ctx, adapter.store, workspace, driverRef)
+	if errors.Is(err, domain.ErrNotFound) {
+		return nil, workflowcatalog.ErrNotFound
+	}
+	if record != nil && record.Revision == 0 {
+		record.Revision = 1
+	}
+	return record, err
+}
+
+func (adapter workflowRunStoreTestCatalog) GetVersion(
+	ctx context.Context,
+	workspace, versionID string,
+) (*workflowcatalog.DriverVersion, error) {
+	record, err := adapter.store.DriverVersions().Get(ctx, workspace, versionID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return nil, workflowcatalog.ErrNotFound
+	}
+	return record, err
+}
+
+func (adapter workflowRunStoreTestCatalog) AuthorVersion(
+	context.Context,
+	authority.OperatorAuthority,
+	workflowcatalog.AuthorVersionCommand,
+) (*workflowcatalog.AuthorVersionResult, error) {
+	return nil, errors.New("unexpected operator authoring in managed-builtin test adapter")
+}
+
+func (adapter workflowRunStoreTestCatalog) AuthorManagedVersion(
+	ctx context.Context,
+	_ authority.SystemAuthority,
+	command workflowcatalog.AuthorManagedVersionCommand,
+) (*workflowcatalog.AuthorVersionResult, error) {
+	intent := command.AuthorVersionCommand
+	driverRecord, err := adapter.store.Drivers().Get(ctx, intent.WorkspaceKey, intent.DriverID)
+	createdDriver := false
+	if errors.Is(err, domain.ErrNotFound) {
+		driverRecord, err = adapter.store.Drivers().Create(ctx, store.DriverCreate{
+			WorkspaceKey: intent.WorkspaceKey,
+			DriverID:     intent.DriverID,
+			Name:         intent.DriverName,
+			OwnerType:    domain.DriverOwnerSystem,
+			Status:       domain.DriverStatusDraft,
+			TrustLevel:   domain.DriverTrustTrusted,
+			Metadata:     map[string]string{},
+		})
+		createdDriver = err == nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	versionRecord, err := adapter.store.DriverVersions().Get(ctx, intent.WorkspaceKey, intent.VersionID)
+	createdVersion := false
+	reusedVersion := false
+	if errors.Is(err, domain.ErrNotFound) {
+		versions, listErr := adapter.store.DriverVersions().List(ctx, intent.WorkspaceKey, store.DriverVersionFilter{
+			DriverID: intent.DriverID,
+		})
+		if listErr != nil {
+			return nil, listErr
+		}
+		nextVersion := 1
+		for _, existing := range versions {
+			if existing != nil && existing.Version >= nextVersion {
+				nextVersion = existing.Version + 1
+			}
+		}
+		manifest := make(map[string]string, len(intent.Manifest)+1)
+		for key, value := range intent.Manifest {
+			manifest[key] = value
+		}
+		manifest[workflowcatalog.ManifestTrustLevelKey] = string(workflowcatalog.DriverTrustTrusted)
+		versionRecord, err = adapter.store.DriverVersions().Create(ctx, store.DriverVersionCreate{
+			WorkspaceKey:     intent.WorkspaceKey,
+			VersionID:        intent.VersionID,
+			DriverID:         intent.DriverID,
+			Version:          nextVersion,
+			SourceRef:        intent.SourceRef,
+			SourceDigest:     intent.SourceDigest,
+			BundleRef:        intent.BundleRef,
+			BundleDigest:     intent.BundleDigest,
+			Runtime:          intent.Runtime,
+			Manifest:         manifest,
+			BuildDiagnostics: intent.BuildDiagnostics,
+			ValidationStatus: domain.DriverVersionValidationPassed,
+			CreatedBy:        "system",
+		})
+		createdVersion = err == nil
+	} else if err == nil {
+		if versionRecord.DriverID != intent.DriverID ||
+			versionRecord.SourceDigest != intent.SourceDigest ||
+			versionRecord.BundleDigest != intent.BundleDigest {
+			return nil, workflowcatalog.ErrAuthoringConflict
+		}
+		reusedVersion = true
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	activated := false
+	if command.Activate {
+		trusted := domain.DriverTrustTrusted
+		driverRecord, err = adapter.store.Drivers().Update(ctx, intent.WorkspaceKey, intent.DriverID, store.DriverUpdate{
+			TrustLevel: &trusted,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if _, err = adapter.store.ApproveDriverVersionForTest(ctx, intent.WorkspaceKey, intent.DriverID, versionRecord.VersionID); err != nil {
+			return nil, err
+		}
+		driverRecord, err = adapter.store.ActivateDriverVersionForTest(ctx, intent.WorkspaceKey, intent.DriverID, versionRecord.VersionID)
+		if err != nil {
+			return nil, err
+		}
+		driverRecord, err = adapter.store.UnapproveDriverVersionForTest(ctx, intent.WorkspaceKey, intent.DriverID, versionRecord.VersionID)
+		if err != nil {
+			return nil, err
+		}
+		activated = true
+	}
+	if driverRecord.Revision == 0 {
+		driverRecord.Revision = 1
+	}
+	return &workflowcatalog.AuthorVersionResult{
+		Action:            workflowcatalog.ActionAuthorManagedVersion,
+		Driver:            driverRecord,
+		Version:           versionRecord,
+		CreatedDriver:     createdDriver,
+		CreatedVersion:    createdVersion,
+		ReusedVersion:     reusedVersion,
+		Activated:         activated,
+		CommittedRevision: driverRecord.Revision,
+		SemanticImpact:    workflowcatalog.SemanticImpactVersionAuthored,
+	}, nil
+}
+
+type workflowRunManagedBuiltinAuthority struct{}
+
+func (workflowRunManagedBuiltinAuthority) AuthorityForManagedBuiltin(
+	context.Context,
+	string,
+	string,
+) (authority.SystemAuthority, error) {
+	return authority.SystemAuthority{}, nil
+}
+
 func (adapter workflowRunStoreTestExecution) SubmitDriverRun(
 	ctx context.Context,
 	_ authority.OperatorAuthority,
@@ -114,11 +281,28 @@ func (adapter workflowRunStoreTestExecution) SubmitDriverRun(
 	}, nil
 }
 
-func newWorkflowTestModule(st store.Store) *Module {
+func newWorkflowTestModule(st *memstore.Store) *Module {
+	catalog := &workflowRunStoreTestCatalog{store: st}
 	return NewModule(Config{
-		Store: st, Execution: workflowRunStoreTestExecution{store: st}, OperatorAuthority: workflowOperatorAuthorityStub{},
+		Store: st, Catalog: catalog, Authoring: catalog,
+		Execution: workflowRunStoreTestExecution{store: st}, OperatorAuthority: workflowOperatorAuthorityStub{},
+		PrepareWorkflowTarget: func(ctx context.Context, workspace, workflow string) (*workflowcatalog.Driver, error) {
+			if workflowdefs.IsBuiltinWorkflow(workflow) {
+				if err := workflowdefs.EnsureBuiltinWorkflowAuthored(
+					ctx,
+					catalog,
+					catalog,
+					workflowRunManagedBuiltinAuthority{},
+					workspace,
+					workflow,
+				); err != nil {
+					return nil, err
+				}
+			}
+			return catalog.GetDriver(ctx, workspace, workflow)
+		},
 		TaskWorkflowRuns: readprojection.NewTaskWorkflowRunReader(
-			st.AgentSessions(), st.TaskRuns(), st.TriggerEvents(), st.TriggerDeliveries(), st.DriverRuns(),
+			st.TaskRuns(), st.TriggerEvents(), st.TriggerDeliveries(), st.DriverRuns(),
 		),
 	})
 }
@@ -158,6 +342,44 @@ func (workflowOperatorAuthorityStub) ResolveOperatorAuthority(
 	authority.Action,
 ) (authority.OperatorAuthority, error) {
 	return authority.OperatorAuthority{}, nil
+}
+
+type workflowVersionAuthoringStub struct {
+	operatorCommand workflowcatalog.AuthorVersionCommand
+	operatorCalls   int
+	managedCalls    int
+}
+
+func (stub *workflowVersionAuthoringStub) AuthorVersion(
+	_ context.Context,
+	_ authority.OperatorAuthority,
+	command workflowcatalog.AuthorVersionCommand,
+) (*workflowcatalog.AuthorVersionResult, error) {
+	stub.operatorCalls++
+	stub.operatorCommand = command
+	return &workflowcatalog.AuthorVersionResult{
+		Driver: &workflowcatalog.Driver{
+			WorkspaceKey: command.WorkspaceKey, DriverID: command.DriverID,
+			Name: command.DriverName, Status: workflowcatalog.DriverStatusDraft,
+		},
+		Version: &workflowcatalog.DriverVersion{
+			WorkspaceKey: command.WorkspaceKey, DriverID: command.DriverID, VersionID: command.VersionID,
+			SourceRef: command.SourceRef, SourceDigest: command.SourceDigest,
+			BundleRef: command.BundleRef, BundleDigest: command.BundleDigest,
+			Runtime: command.Runtime, Manifest: command.Manifest, BuildDiagnostics: command.BuildDiagnostics,
+			ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
+		},
+		CreatedDriver: true, CreatedVersion: true,
+	}, nil
+}
+
+func (stub *workflowVersionAuthoringStub) AuthorManagedVersion(
+	context.Context,
+	authority.SystemAuthority,
+	workflowcatalog.AuthorManagedVersionCommand,
+) (*workflowcatalog.AuthorVersionResult, error) {
+	stub.managedCalls++
+	return nil, errors.New("unexpected managed authoring call")
 }
 
 type workflowRecordingOperatorAuthorityStub struct {
@@ -299,7 +521,7 @@ func TestCreateDriverRunServerStampsWorkflowBindingSourceRef(t *testing.T) {
 	}
 	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
 		WorkspaceKey: workspace, DriverID: driverID, Name: "demo",
-		Status: domain.DriverStatusActive, ActiveVersionID: versionID,
+		Status: domain.DriverStatusActive,
 	}); err != nil {
 		t.Fatalf("create driver: %v", err)
 	}
@@ -309,6 +531,12 @@ func TestCreateDriverRunServerStampsWorkflowBindingSourceRef(t *testing.T) {
 		ValidationStatus: domain.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("create driver version: %v", err)
+	}
+	if _, err := st.ApproveDriverVersionForTest(ctx, workspace, driverID, versionID); err != nil {
+		t.Fatalf("approve driver version: %v", err)
+	}
+	if _, err := st.ActivateDriverVersionForTest(ctx, workspace, driverID, versionID); err != nil {
+		t.Fatalf("activate driver version: %v", err)
 	}
 	if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
 		WorkspaceKey: workspace, BindingID: "binding-demo", Name: "binding-demo",
@@ -352,6 +580,9 @@ func TestCreateWorkflowRunLostResponseRetryKeepsRunIdentity(t *testing.T) {
 	mux := http.NewServeMux()
 	NewModule(Config{
 		Store: st, Execution: submissions, OperatorAuthority: workflowOperatorAuthorityStub{},
+		PrepareWorkflowTarget: func(ctx context.Context, workspace, workflow string) (*workflowcatalog.Driver, error) {
+			return resolveWorkflowDriverForTest(ctx, st, workspace, workflow)
+		},
 	}).Register(mux)
 
 	const requestID = "workflow-retry-1"
@@ -385,6 +616,28 @@ func TestCreateWorkflowRunLostResponseRetryKeepsRunIdentity(t *testing.T) {
 	if run.RunID != wantRunID {
 		t.Fatalf("retry run id = %q, want %q", run.RunID, wantRunID)
 	}
+}
+
+func resolveWorkflowDriverForTest(
+	ctx context.Context,
+	st store.Store,
+	workspace, workflow string,
+) (*workflowcatalog.Driver, error) {
+	record, err := st.Drivers().Get(ctx, workspace, workflow)
+	if err == nil {
+		return record, nil
+	}
+	if !errors.Is(err, domain.ErrNotFound) {
+		return nil, err
+	}
+	records, err := st.Drivers().List(ctx, workspace, store.DriverFilter{Name: workflow, Limit: 1})
+	if err != nil {
+		return nil, err
+	}
+	if len(records) == 0 {
+		return nil, domain.ErrNotFound
+	}
+	return records[0], nil
 }
 
 func TestCreateWorkflowRunPassesRawPayload(t *testing.T) {
@@ -496,15 +749,17 @@ func TestCreateWorkflowRunRefreshesStaleBuiltinRunnerManifest(t *testing.T) {
 	if !ok {
 		t.Fatal("epic-runner builtin missing")
 	}
-	digest := workflowdefs.SourceDigest(spec.Files)
+	digest, err := workflowdefs.SourceDigest(spec.Files)
+	if err != nil {
+		t.Fatalf("digest epic-runner source: %v", err)
+	}
 	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
-		WorkspaceKey:    "TEST",
-		DriverID:        BuiltinEpicRunnerWorkflowName,
-		Name:            BuiltinEpicRunnerWorkflowName,
-		OwnerType:       domain.DriverOwnerUser,
-		ActiveVersionID: "stale-version",
-		Status:          domain.DriverStatusActive,
-		TrustLevel:      domain.DriverTrustTrusted,
+		WorkspaceKey: "TEST",
+		DriverID:     BuiltinEpicRunnerWorkflowName,
+		Name:         BuiltinEpicRunnerWorkflowName,
+		OwnerType:    domain.DriverOwnerUser,
+		Status:       domain.DriverStatusActive,
+		TrustLevel:   domain.DriverTrustTrusted,
 	}); err != nil {
 		t.Fatalf("create stale built-in driver: %v", err)
 	}
@@ -522,6 +777,12 @@ func TestCreateWorkflowRunRefreshesStaleBuiltinRunnerManifest(t *testing.T) {
 		CreatedBy:        "system",
 	}); err != nil {
 		t.Fatalf("create stale built-in version: %v", err)
+	}
+	if _, err := st.ApproveDriverVersionForTest(ctx, "TEST", BuiltinEpicRunnerWorkflowName, "stale-version"); err != nil {
+		t.Fatalf("approve stale built-in version: %v", err)
+	}
+	if _, err := st.ActivateDriverVersionForTest(ctx, "TEST", BuiltinEpicRunnerWorkflowName, "stale-version"); err != nil {
+		t.Fatalf("activate stale built-in version: %v", err)
 	}
 
 	mux := http.NewServeMux()
@@ -937,6 +1198,7 @@ func TestCreateWorkflowVersionRejectsPackageManifest(t *testing.T) {
 
 	body := `{"files":{"package.json":"{}","workflows/demo.ts":"export async function run(){ return {}; }"}}`
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/workflows/demo/versions", stringsReader(body))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "TEST"))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
@@ -951,6 +1213,7 @@ func TestCreateWorkflowVersionRejectsInlineActivation(t *testing.T) {
 
 	body := `{"files":{"workflows/demo.ts":"export async function run(){ return {}; }"},"activate":true}`
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/workflows/demo/versions", stringsReader(body))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "TEST"))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
@@ -969,11 +1232,18 @@ func TestCreateWorkflowVersionRegistersWithoutActivation(t *testing.T) {
 	st := memstore.New()
 	installFakeFlueBuild(t)
 	t.Chdir(t.TempDir())
+	catalog := &workflowRunCatalogStub{getDriverErr: workflowcatalog.ErrNotFound}
+	authoring := &workflowVersionAuthoringStub{}
 	mux := http.NewServeMux()
-	newWorkflowTestModule(st).Register(mux)
+	NewModule(Config{
+		Store: st, Catalog: catalog, Authoring: authoring,
+		CatalogOperatorAuthority: workflowOperatorAuthorityStub{},
+	}).Register(mux)
 
 	body := `{"files":{"workflows/demo.ts":"export async function run(){ return {}; }"}}`
-	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/workflows/demo/versions", stringsReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/ALIAS/workflows/demo/versions", stringsReader(body))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "TEST"))
+	req.Header.Set("Idempotency-Key", "workflow-build-request-1")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusCreated {
@@ -990,25 +1260,31 @@ func TestCreateWorkflowVersionRegistersWithoutActivation(t *testing.T) {
 	if response.Activated || response.Driver == nil || response.Version == nil {
 		t.Fatalf("response = %+v, want registered inactive version", response)
 	}
-	driverRecord, err := st.Drivers().Get(ctx, "TEST", response.Driver.DriverID)
-	if err != nil {
-		t.Fatalf("get registered driver: %v", err)
+	if authoring.operatorCalls != 1 || authoring.managedCalls != 0 {
+		t.Fatalf("authoring calls = operator:%d managed:%d", authoring.operatorCalls, authoring.managedCalls)
 	}
-	if driverRecord.ActiveVersionID != "" || driverRecord.Status != domain.DriverStatusDraft {
-		t.Fatalf("driver = %+v, want draft with no active version", driverRecord)
+	command := authoring.operatorCommand
+	if command.WorkspaceKey != "TEST" || command.DriverID != "demo" ||
+		command.RequestID != "workflow-build-request-1" || command.ExpectedRevision != 0 {
+		t.Fatalf("author command = %+v, want canonical workspace and caller replay key", command)
+	}
+	if catalog.getDriverWorkspace != "TEST" || catalog.getDriverRef != "demo" {
+		t.Fatalf("catalog lookup = %q/%q, want TEST/demo", catalog.getDriverWorkspace, catalog.getDriverRef)
+	}
+	if _, err := st.Drivers().Get(ctx, "TEST", "demo"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("HTTP adapter wrote generic Driver store: %v", err)
 	}
 }
 
-func seededWorkflowStore(t *testing.T, ctx context.Context) store.Store {
+func seededWorkflowStore(t *testing.T, ctx context.Context) *memstore.Store {
 	t.Helper()
 	st := memstore.New()
 	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
-		WorkspaceKey:    "TEST",
-		DriverID:        "demo",
-		Name:            "demo",
-		OwnerType:       domain.DriverOwnerUser,
-		ActiveVersionID: "version-1",
-		Status:          domain.DriverStatusActive,
+		WorkspaceKey: "TEST",
+		DriverID:     "demo",
+		Name:         "demo",
+		OwnerType:    domain.DriverOwnerUser,
+		Status:       domain.DriverStatusActive,
 	}); err != nil {
 		t.Fatalf("create driver: %v", err)
 	}
@@ -1022,6 +1298,12 @@ func seededWorkflowStore(t *testing.T, ctx context.Context) store.Store {
 		ValidationStatus: domain.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("create driver version: %v", err)
+	}
+	if _, err := st.ApproveDriverVersionForTest(ctx, "TEST", "demo", "version-1"); err != nil {
+		t.Fatalf("approve driver version: %v", err)
+	}
+	if _, err := st.ActivateDriverVersionForTest(ctx, "TEST", "demo", "version-1"); err != nil {
+		t.Fatalf("activate driver version: %v", err)
 	}
 	return st
 }
@@ -1067,6 +1349,7 @@ EOF
 		runtimeRoot,
 		filepath.Join(runtimeRoot, "node_modules", "@hono", "node-server"),
 		filepath.Join(runtimeRoot, "node_modules", "hono"),
+		filepath.Join(runtimeRoot, "node_modules", "valibot"),
 	} {
 		if err := os.MkdirAll(dep, 0o755); err != nil {
 			t.Fatalf("create fake runtime dependency %s: %v", dep, err)

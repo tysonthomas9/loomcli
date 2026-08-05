@@ -63,6 +63,14 @@ fi
 # Execution and Artifacts seams follow the same rule: files listed below are
 # composition roots or narrow transport adapters over the one bootstrap-owned
 # client, never additional client constructors.
+# The Phase 5 Agents, Interaction, Source Control/Connectors, and
+# AgentProvisioning seams likewise receive only StoreHandle.FleetDBClient or a
+# capability-specific transport derived from that one client. Workspace
+# repository admission receives only the shared client's
+# RepositoryAdmissionTransport (plus its DTO/error types) at the serve
+# composition root. Every Phase 5 exception is an exact file: none constructs
+# fleetdb.New, selects a base URL, authenticates another client, or opens an
+# alternate control-plane path.
 rg -n \
   -e 'github\.com/tysonthomas9/loomcli/internal/infra/fleetdb' \
   cmd internal \
@@ -81,15 +89,31 @@ if [[ -s "$tmp" ]]; then
       internal/bootstrap/embedded.go | \
       internal/app/serve/artifacts.go | \
       internal/app/serve/artifacts_fleetdb.go | \
-      internal/app/serve/automation_execution.go | \
-      internal/app/serve/automation_fleetdb.go | \
+      internal/app/serve/automationcomposition/automation_execution.go | \
+      internal/app/serve/automationcomposition/automation_fleetdb.go | \
+      internal/app/serve/automationcomposition/workflow_catalog.go | \
       internal/app/serve/execution.go | \
       internal/app/serve/execution_driver_run_fleetdb.go | \
       internal/app/serve/execution_task_run_ports.go | \
       internal/app/serve/execution_task_run_recovery.go | \
+      internal/app/serve/sourcecontrolcomposition/source_control.go | \
+      internal/app/serve/sourcecontrolcomposition/connectors_fleetdb.go | \
+      internal/app/serve/agentcomposition/provisioningcomposition/provisioning.go | \
+      internal/app/serve/agentcomposition/agents.go | \
+      internal/app/serve/agentcomposition/agents_fleetdb.go | \
+      internal/app/serve/interactioncomposition/interaction_fleetdb.go | \
       internal/app/serve/workflow_catalog.go | \
       internal/app/serve/workflow_catalog_fleetdb.go | \
-      internal/cli/serve/serveadapter/workflow_catalog.go)
+      internal/app/agentprovisioning/fleetdb/adapter.go | \
+      internal/cli/serve/serve.go | \
+      internal/cli/serve/serveadapter/source_control.go | \
+      internal/cli/serve/workspacemgr/workspace_store.go | \
+      internal/cli/serve/workspacemgr/workspace_admission_operations.go | \
+      internal/cli/serve/workspacemgr/workspace_store_repository_materialization.go | \
+      internal/cli/serve/workspacemgr/repository_admission_lease.go | \
+      internal/cli/serve/workspacemgr/repository_admission_process.go | \
+      internal/cli/serve/workspacemgr/repository_admission_workspace_operations.go | \
+      internal/cli/serve/serveadapter/catalogcomposition/workflow_catalog.go)
         ;;
       *)
         printf '%s:%s:%s\n' "$file" "$line" "$text" >>"$disallowed"
@@ -108,10 +132,13 @@ fi
 # The fleet-db store client should be constructed by the bootstrap opener only.
 # That keeps local/cloud selection centralized and prevents alternate runtime
 # control-plane paths from growing in command or UI code.
-# Match the fleetdb identifier itself, not longer adapter aliases such as
-# catalogfleetdb.New. Construction remains restricted to bootstrap even though
-# the exact import allowlist above permits composition code to share the client.
-rg -n '\bfleetdb\.New\(' \
+# Match both identifiers used for the infra package itself, but not longer
+# adapter aliases such as catalogfleetdb.New. Construction remains restricted
+# to bootstrap even though the exact import allowlist above permits composition
+# code to share the client.
+rg -n \
+  -e '\bfleetdb\.New\(' \
+  -e '\binfrafleetdb\.New\(' \
   cmd internal \
   --glob '*.go' \
   --glob '!**/*_test.go' \

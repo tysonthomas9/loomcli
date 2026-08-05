@@ -421,6 +421,16 @@ describe("sessions API", () => {
         },
       );
     });
+
+    it("rejects blank task or session IDs before constructing a malformed route", async () => {
+      await expect(
+        getSessionTranscript("test-ws-id", " ", "session-1"),
+      ).rejects.toThrow("taskId is required");
+      await expect(
+        getSessionTranscript("test-ws-id", "task-1", " "),
+      ).rejects.toThrow("sessionId is required");
+      expect(mockApiGet).not.toHaveBeenCalled();
+    });
   });
 
   // ============= getAgentSessionTranscript =============
@@ -469,6 +479,16 @@ describe("sessions API", () => {
           preserveNotFound: true,
         }),
       ).rejects.toMatchObject({ status: 404 });
+    });
+
+    it("rejects blank agent or session IDs before constructing a malformed route", async () => {
+      await expect(
+        getAgentSessionTranscript("WS", " ", "session-1"),
+      ).rejects.toThrow("agentId is required");
+      await expect(
+        getAgentSessionTranscript("WS", "reviewer", " "),
+      ).rejects.toThrow("sessionId is required");
+      expect(mockGet).not.toHaveBeenCalled();
     });
   });
 

@@ -8,7 +8,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { startWorkflowRun } from "@/api";
 import type { AgentRecordSummary } from "@/api";
-import { loadAgentWorkPanelView } from "@/utils/agentWorkPanelStorage";
+import {
+  loadAgentWorkPanelView,
+  saveAgentWorkPanelView,
+} from "@/utils/agentWorkPanelStorage";
 
 import { AgentsPage } from "../AgentsPage";
 
@@ -363,6 +366,51 @@ describe("AgentsPage", () => {
     expect(screen.queryByTestId("agent-lifecycle-controls")).toBeNull();
   });
 
+  it("keeps configured-agent detail resolved when the route changes", async () => {
+    mocks.routeAgentName = "configured-one";
+    mocks.agents = [];
+    mocks.workspaceContext = {
+      repos: [],
+      agents: [
+        {
+          name: "configured-one",
+          repos: ["sandbox"],
+          repo_groups: [],
+          cross_repo: false,
+          role_name: "task",
+        },
+        {
+          name: "configured-two",
+          repos: ["sandbox"],
+          repo_groups: [],
+          cross_repo: false,
+          role_name: "plan",
+        },
+      ],
+      workspace: { name: "Desktop QA" },
+    };
+
+    const rendered = render(<AgentsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Info" }));
+    expect(
+      screen.getByRole("heading", { name: "configured-one" }),
+    ).toBeTruthy();
+
+    mocks.routeAgentName = "configured-two";
+    rendered.rerender(<AgentsPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Info" }));
+
+    expect(
+      screen.getByRole("heading", { name: "configured-two" }),
+    ).toBeTruthy();
+    expect(screen.queryByText("Select an agent to view info.")).toBeNull();
+    expect(mocks.useAgentHistory).toHaveBeenLastCalledWith(
+      "DESKTOP-QA",
+      "configured-two",
+      false,
+    );
+  });
+
   it("does not expose Terminal for a configured interactive agent without a live runtime row", async () => {
     mocks.routeAgentName = "configured-lead";
     mocks.agents = [];
@@ -584,6 +632,44 @@ describe("AgentsPage", () => {
     expect(
       loadAgentWorkPanelView("DESKTOP-QA", "agent-record-1").selectedTaskId,
     ).toBeNull();
+  });
+
+  it("does not fetch or render the previous agent's selected task while switching routes", async () => {
+    mocks.routeAgentName = "agent-record-1";
+    mocks.agents = [];
+    mocks.agentRecords = [
+      durableRecord(),
+      durableRecord({
+        id: "agent-record-2",
+        name: "Bug triage",
+        behavior: { role_name: "bug-triage" },
+      }),
+    ];
+    mocks.workspaceIssues = [
+      {
+        id: "TASK-1",
+        title: "Document the run",
+        status: "review",
+        issue_type: "task",
+        priority: 2,
+      },
+    ];
+    saveAgentWorkPanelView("DESKTOP-QA", "agent-record-1", {
+      selectedTaskId: "TASK-1",
+    });
+
+    const rendered = render(<AgentsPage />);
+    expect(await screen.findByTestId("issue-detail")).toHaveAttribute(
+      "data-task-id",
+      "TASK-1",
+    );
+
+    mocks.fetchIssue.mockClear();
+    mocks.routeAgentName = "agent-record-2";
+    rendered.rerender(<AgentsPage />);
+
+    expect(screen.queryByTestId("issue-detail")).toBeNull();
+    expect(mocks.fetchIssue).not.toHaveBeenCalledWith("TASK-1");
   });
 
   it("keeps binding-specific Run now on a record route with exactly one trigger", async () => {

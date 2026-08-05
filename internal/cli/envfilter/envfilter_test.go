@@ -47,6 +47,24 @@ func TestFilterEnv_BlocksSensitiveVars(t *testing.T) {
 	}
 }
 
+func TestFilterEnv_BlocksProviderCredentialsAndRuntimeConfiguration(t *testing.T) {
+	input := []string{
+		"GITHUB_TOKEN=github-secret",
+		"GITHUB_TOKEN_FILE=/tmp/github-secret",
+		"DAYTONA_API_KEY=daytona-secret",
+		"DAYTONA_CREDENTIAL_FILE=/tmp/daytona-secret",
+		"DAYTONA_SDK_IMPORT=/tmp/provider-sdk.mjs",
+		"DAYTONA_API_URL=https://provider.invalid",
+		"DAYTONA_TARGET=untrusted-target",
+		"PATH=/usr/bin",
+	}
+	got := FilterEnv(input)
+	want := []string{"PATH=/usr/bin"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("FilterEnv() = %v, want %v", got, want)
+	}
+}
+
 func TestFilterEnv_AllowsCodexE2EStubControls(t *testing.T) {
 	input := []string{
 		"STUB_CODEX_EPIC_RUNNER=1",

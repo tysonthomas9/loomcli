@@ -49,6 +49,62 @@ func TestTracedArtifactStore_ForwardsReadContent(t *testing.T) {
 	}
 }
 
+type tracingOwnershipStoreOverride struct {
+	store.Store
+	ownership store.AgentOwnershipLeaseStore
+}
+
+func (s tracingOwnershipStoreOverride) AgentOwnershipLeases() store.AgentOwnershipLeaseStore {
+	return s.ownership
+}
+
+type tracingOwnedOwnershipStore struct {
+	store.AgentOwnershipLeaseStore
+	heartbeat store.AgentOwnershipLeaseProof
+	release   store.AgentOwnershipLeaseProof
+}
+
+func (s *tracingOwnedOwnershipStore) HeartbeatOwned(
+	_ context.Context,
+	proof store.AgentOwnershipLeaseProof,
+	_ time.Duration,
+) (*domain.AgentOwnershipLease, error) {
+	s.heartbeat = proof
+	return &domain.AgentOwnershipLease{AgentID: proof.AgentID}, nil
+}
+
+func (s *tracingOwnedOwnershipStore) ReleaseOwned(
+	_ context.Context,
+	proof store.AgentOwnershipLeaseProof,
+) (*domain.AgentOwnershipLease, error) {
+	s.release = proof
+	return &domain.AgentOwnershipLease{AgentID: proof.AgentID}, nil
+}
+
+func TestTracedOwnershipStoreForwardsOwnerFencedLifecycle(t *testing.T) {
+	base := memstore.New()
+	inner := &tracingOwnedOwnershipStore{AgentOwnershipLeaseStore: base.AgentOwnershipLeases()}
+	wrapper := WrapStoreWithTracing(tracingOwnershipStoreOverride{Store: base, ownership: inner})
+	owned, ok := wrapper.AgentOwnershipLeases().(store.AgentOwnershipLeaseOwnedStore)
+	if !ok {
+		t.Fatal("traced ownership store hides owner-fenced lifecycle commands")
+	}
+	proof := store.AgentOwnershipLeaseProof{
+		WorkspaceKey: "WS", AgentID: "agent-1", LeaseID: "lease-1",
+		LeaseToken: "raw-token", OwnerID: "owner-1",
+		RuntimeProvider: domain.RuntimeProviderLocal, NodeID: "node-1", FencingToken: 7,
+	}
+	if _, err := owned.HeartbeatOwned(t.Context(), proof, time.Minute); err != nil {
+		t.Fatalf("HeartbeatOwned: %v", err)
+	}
+	if _, err := owned.ReleaseOwned(t.Context(), proof); err != nil {
+		t.Fatalf("ReleaseOwned: %v", err)
+	}
+	if inner.heartbeat != proof || inner.release != proof {
+		t.Fatalf("forwarded proofs = heartbeat %+v release %+v, want %+v", inner.heartbeat, inner.release, proof)
+	}
+}
+
 // TestWrapStoreWithTracing_Smoke exercises every traced substore method so
 // the span-decorator paths are reached. We don't assert behavior — the
 // underlying memstore already has its own coverage; this is a guard

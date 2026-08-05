@@ -33,7 +33,7 @@ Compose. Adding that overlay through `LOCAL_MODE_COMPOSE_FILES` on the
 deterministic `local-mode-up` target runs the same preflight. The default Flue
 path is `../dynamic-workflows/flue` relative to this checkout directory. It
 must be at the commit in
-`internal/workflows/FLUE_COMMIT`, with pnpm dependencies installed and the
+`internal/infra/workflowdistribution/FLUE_COMMIT`, with pnpm dependencies installed and the
 CLI/runtime built. Override it when needed:
 
 ```sh
@@ -55,15 +55,17 @@ container:
 ```sh
 export XDG_CONFIG_HOME="${TMPDIR:-/tmp}/loom-flue-pnpm-linux-arm64-gnu"
 pnpm config set --global supportedArchitectures '{"os":["current","linux"],"cpu":["current","arm64"],"libc":["current","glibc"]}'
-pnpm install --frozen-lockfile --force --filter @flue/cli... --filter @flue/runtime... --filter hello-world...
+pnpm install --frozen-lockfile --force --filter @flue/cli... --filter @flue/runtime...
 ```
 
 Use `x64` instead of `arm64` for an amd64/x86_64 container. The temporary
 `XDG_CONFIG_HOME` keeps this cross-platform pnpm setting out of the developer's
-normal global configuration. The `hello-world` workspace owns Flue's
-`@daytona/sdk` dependency; omitting that filter leaves the Bug-fix workflow's
-Daytona runner unresolvable even when the CLI, runtime, and Rolldown preflight
-otherwise look healthy.
+normal global configuration. The Daytona profile uses the same pinned Flue
+checkout and additionally preflights its installed `@daytona/sdk`. Start it
+with `make local-mode-daytona-up`, then save the Daytona credential (and GitHub
+credential when PR delivery is requested) through Settings. Credentials are
+sealed in Loom's local vault and resolved only by the host-owned provider
+broker; Compose and the workflow runner never receive them.
 
 The narrower `local-mode-codex-up` profile remains useful for supervised-agent
 and daemon testing without a Flue source checkout. If prompt-agent creation is

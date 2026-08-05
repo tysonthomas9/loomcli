@@ -8,14 +8,24 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/app/agentscompat"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	storepkg "github.com/tysonthomas9/loomcli/internal/store"
-	workflowdefs "github.com/tysonthomas9/loomcli/internal/workflows"
 )
 
 func EnsurePromptAgentIdentityRecords(ctx context.Context, s storepkg.Store) error {
 	if s == nil {
 		return fmt.Errorf("store is required: %w", domain.ErrInvalid)
+	}
+	commands, err := newManagedAgentsCommands(
+		s.Roles(),
+		s.AgentServices(),
+		s.Agents(),
+	)
+	if err != nil {
+		return err
 	}
 	workspaces, err := s.Workspaces().List(ctx)
 	if err != nil {
@@ -25,14 +35,19 @@ func EnsurePromptAgentIdentityRecords(ctx context.Context, s storepkg.Store) err
 		if ws == nil || strings.TrimSpace(ws.Key) == "" {
 			continue
 		}
-		if err := ensurePromptAgentIdentityRecordsForWorkspace(ctx, s, ws.Key); err != nil {
+		if err := ensurePromptAgentIdentityRecordsForWorkspace(ctx, s, commands, ws.Key); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func ensurePromptAgentIdentityRecordsForWorkspace(ctx context.Context, s storepkg.Store, ws string) error {
+func ensurePromptAgentIdentityRecordsForWorkspace(
+	ctx context.Context,
+	s storepkg.Store,
+	commands agentscompat.ManagedCommands,
+	ws string,
+) error {
 	agentNames, err := existingAgentNames(ctx, s, ws)
 	if err != nil {
 		return err
@@ -42,7 +57,7 @@ func ensurePromptAgentIdentityRecordsForWorkspace(ctx context.Context, s storepk
 		return err
 	}
 	bindings, err := s.TriggerBindings().List(ctx, ws, storepkg.TriggerBindingFilter{
-		DriverID: workflowdefs.BuiltinPromptAgentWorkflowName,
+		DriverID: workflowcatalog.BuiltinPromptAgentWorkflowName,
 	})
 	if err != nil {
 		return fmt.Errorf("list prompt-agent bindings in workspace %q: %w", ws, err)
@@ -69,7 +84,7 @@ func ensurePromptAgentIdentityRecordsForWorkspace(ctx context.Context, s storepk
 			continue
 		}
 		serviceID := migratedAgentServiceID(binding.BindingID, agentNames, existingRecords, roleName, binding)
-		if err := ensurePromptAgentRecordForBinding(ctx, s, ws, serviceID, roleName, binding); err != nil {
+		if err := ensurePromptAgentRecordForBinding(ctx, s, commands, ws, serviceID, roleName, binding); err != nil {
 			return err
 		}
 		record, err := s.AgentServices().Get(ctx, ws, serviceID)
@@ -152,7 +167,13 @@ func existingAgentServiceRecords(ctx context.Context, s storepkg.Store, ws strin
 	return byID, nil
 }
 
-func ensurePromptAgentRecordForBinding(ctx context.Context, s storepkg.Store, ws, serviceID, roleName string, binding *domain.TriggerBinding) error {
+func ensurePromptAgentRecordForBinding(
+	ctx context.Context,
+	s storepkg.Store,
+	commands agentscompat.ManagedCommands,
+	ws, serviceID, roleName string,
+	binding *domain.TriggerBinding,
+) error {
 	if existing, err := s.AgentServices().Get(ctx, ws, serviceID); err == nil && existing != nil {
 		if promptAgentRecordMatchesBinding(existing, roleName, binding) {
 			return nil
@@ -165,27 +186,20 @@ func ensurePromptAgentRecordForBinding(ctx context.Context, s storepkg.Store, ws
 	if binding.Enabled {
 		desired = domain.AgentServiceDesiredRunning
 	}
-	if _, err := s.AgentServices().Create(ctx, storepkg.AgentServiceCreate{
-		WorkspaceKey: ws,
-		ServiceID:    serviceID,
-		Name:         firstNonEmpty(strings.TrimSpace(binding.Name), binding.BindingID),
-		Kind:         agentServiceKindForBinding(binding),
-		DesiredState: desired,
-		RoleName:     roleName,
-	}); err != nil {
-		if errors.Is(err, domain.ErrAlreadyExists) {
-			// Another serve instance may have won the create after our initial
-			// lookup. Only adopt that winner when it is the exact record this
-			// binding would have created; otherwise attaching the binding would
-			// silently merge unrelated identities.
-			winner, getErr := s.AgentServices().Get(ctx, ws, serviceID)
-			if getErr != nil {
-				return fmt.Errorf("get concurrently created agent service %q in workspace %q: %w", serviceID, ws, getErr)
-			}
-			if !promptAgentRecordMatchesBinding(winner, roleName, binding) {
-				return fmt.Errorf("concurrently created agent service %q in workspace %q belongs to a different identity: %w", serviceID, ws, domain.ErrConflict)
-			}
-			return nil
+	_, err := commands.EnsureAgent(ctx, agents.EnsureAgentCommand{
+		RequestID: "prompt-agent-binding-migration:" + binding.BindingID,
+		CreateAgentCommand: agents.CreateAgentCommand{
+			WorkspaceKey: ws, AgentID: serviceID,
+			Name:         firstNonEmpty(strings.TrimSpace(binding.Name), binding.BindingID),
+			Kind:         agents.AgentKind(agentServiceKindForBinding(binding)),
+			DesiredState: agents.DesiredState(desired),
+			Behavior:     agents.BehaviorReference{RoleName: roleName},
+			MaxInstances: 1,
+		},
+	})
+	if err != nil {
+		if errors.Is(err, agents.ErrConflict) {
+			return fmt.Errorf("agent service %q in workspace %q belongs to a different identity: %w", serviceID, ws, domain.ErrConflict)
 		}
 		return fmt.Errorf("create agent service %q in workspace %q: %w", serviceID, ws, err)
 	}

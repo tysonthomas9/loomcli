@@ -1,17 +1,20 @@
 package prreview
 
 import (
-	"context"
 	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/app/agentscompat"
+	"github.com/tysonthomas9/loomcli/internal/app/prreviewer"
 	"github.com/tysonthomas9/loomcli/internal/connector"
-	"github.com/tysonthomas9/loomcli/internal/gitauth"
-	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
+	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
@@ -33,10 +36,16 @@ type Module struct {
 	dispatcher              *connector.Dispatcher
 	agentSvc                service.AgentService
 	terminalSvc             service.TerminalService
+	reviewerProvisioning    prreviewer.Commands
+	reviewerAgents          agents.IdentityQueries
+	sourceControl           sourcecontrol.Materializer
+	interactionChat         interaction.ChatAPI
+	interactionMessenger    interaction.ChatMessenger
+	interactionAuthority    workflowcataloghttp.OperatorAuthorityResolver
+	managedRetirements      agentscompat.ManagedRetirements
 	localSettingsDir        string
 	checkoutReviewerPRHead  reviewerCheckoutFunc
 	recordReviewerPRContext reviewerRecordContextFunc
-	dialCodex               func(ctx context.Context, endpoint string) (codexThreadReader, error)
 	streamPollInterval      time.Duration
 	streamHeartbeatInterval time.Duration
 	// seeded caches "connector+grants already ensured" by canonical resource
@@ -47,54 +56,47 @@ type Module struct {
 	beforeCredentialSeedCommit func()
 }
 
-type codexThreadReader interface {
-	ReadThreadWithTurns(ctx context.Context, threadID string) (*leadcontrol.CodexThread, error)
-	Close(reason string) error
-}
-
 // NewModule constructs the pull request review route module. localSettingsDir
 // supplies the desktop GitHub credential and connector vault fallback.
 // terminalSvc may be nil (no PTY manager); backend migration then skips
 // killing live reviewer terminals, which is safe because without a terminal
-// service none exist.
+// service none exist. Interaction chat dependencies own all provider/session
+// reads and message delivery; missing dependencies fail those routes closed.
 func NewModule(
 	st store.Store,
 	disp *connector.Dispatcher,
 	agentSvc service.AgentService,
 	terminalSvc service.TerminalService,
 	localSettingsDir string,
+	reviewerProvisioning prreviewer.Commands,
+	reviewerAgents agents.IdentityQueries,
+	sourceControl sourcecontrol.Materializer,
+	interactionChat interaction.ChatAPI,
+	interactionMessenger interaction.ChatMessenger,
+	interactionAuthority workflowcataloghttp.OperatorAuthorityResolver,
+	retirements ...agentscompat.ManagedRetirements,
 ) *Module {
-	gitCredentials := gitauth.NewLocalSettingsSource(localSettingsDir)
+	var managedRetirements agentscompat.ManagedRetirements
+	if len(retirements) > 0 {
+		managedRetirements = retirements[0]
+	}
 	return &Module{
-		store:            st,
-		dispatcher:       disp,
-		agentSvc:         agentSvc,
-		terminalSvc:      terminalSvc,
-		localSettingsDir: strings.TrimSpace(localSettingsDir),
-		checkoutReviewerPRHead: func(
-			ctx context.Context,
-			repoPath, targetPath, remoteName string,
-			prNumber int,
-			headSHA string,
-		) (string, error) {
-			return localworkspace.EnsureDetachedGitWorktreeAtPRHeadWithCredentials(
-				ctx, repoPath, targetPath, remoteName, prNumber, headSHA, gitCredentials,
-			)
-		},
-		recordReviewerPRContext: func(
-			ctx context.Context,
-			worktreePath, remoteName, baseRef string,
-			meta map[string]string,
-		) (string, error) {
-			return localworkspace.RecordPRReviewContextWithCredentials(
-				ctx, worktreePath, remoteName, baseRef, meta, gitCredentials,
-			)
-		},
+		store:                   st,
+		dispatcher:              disp,
+		agentSvc:                agentSvc,
+		terminalSvc:             terminalSvc,
+		reviewerProvisioning:    reviewerProvisioning,
+		reviewerAgents:          reviewerAgents,
+		sourceControl:           sourceControl,
+		interactionChat:         interactionChat,
+		interactionMessenger:    interactionMessenger,
+		interactionAuthority:    interactionAuthority,
+		managedRetirements:      managedRetirements,
+		localSettingsDir:        strings.TrimSpace(localSettingsDir),
+		checkoutReviewerPRHead:  localworkspace.EnsureDetachedGitWorktreeAtFetchedPRHead,
+		recordReviewerPRContext: localworkspace.RecordPRReviewContextFromFetchedBase,
 		streamPollInterval:      reviewerStreamPollInterval,
 		streamHeartbeatInterval: reviewerStreamHeartbeatInterval,
-		dialCodex: func(ctx context.Context, endpoint string) (codexThreadReader, error) {
-			return leadcontrol.DialCodexAppServer(ctx, endpoint)
-		},
 	}
 }
 

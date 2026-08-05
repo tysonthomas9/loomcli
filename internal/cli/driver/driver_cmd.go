@@ -1,7 +1,6 @@
 package driver
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,7 +8,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/managementapi"
@@ -45,8 +43,9 @@ var driverCmd = &cobra.Command{
 }
 
 var driverRegisterCmd = &cobra.Command{
-	Use:   "register",
-	Short: "Register a built native Flue driver artifact as an immutable DriverVersion",
+	Use:               "register",
+	Short:             "Register a built native Flue driver artifact as an immutable DriverVersion",
+	PersistentPreRunE: cli.PrepareStandaloneHTTPCommand,
 	Long: `Register a built native Flue driver artifact as an immutable DriverVersion.
 
 The artifact must already be built by Flue, for example:
@@ -103,8 +102,8 @@ func bindDriverRegisterFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&driverRegisterWorkflow, "workflow", "", "Flue workflow name (default: driver ID or manifest workflow_name)")
 	cmd.Flags().StringVar(&driverRegisterSourceRef, "source-ref", "", "Optional source/provenance ref recorded on the DriverVersion")
 	cmd.Flags().StringVar(&driverRegisterSourceDigest, "source-digest", "", "Optional source digest recorded on the DriverVersion")
-	cmd.Flags().BoolVar(&driverRegisterActivate, "activate", false, "Activate the registered version after validation")
-	cmd.Flags().BoolVar(&driverRegisterTrusted, "trusted", false, "Register as operator-trusted for local process execution")
+	cmd.Flags().BoolVar(&driverRegisterActivate, "activate", false, "Approve and activate the registered version after validation")
+	cmd.Flags().BoolVar(&driverRegisterTrusted, "trusted", false, "Approve the exact registered version for trusted execution")
 	cmd.Flags().BoolVar(&driverRegisterUntrusted, "untrusted", false, "Register as untrusted (default); requires an isolating launcher unless later approved")
 	cmd.Flags().BoolVar(&driverRegisterJSON, "json", false, "JSON output")
 	_ = cmd.MarkFlagRequired("flue-dist")
@@ -120,47 +119,53 @@ func bindDriverRunFlags(cmd *cobra.Command) {
 	_ = cmd.MarkFlagRequired("epic")
 }
 
-func runDriverRegister(_ *cobra.Command, _ []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		workDir, err := os.Getwd()
+func runDriverRegister(cmd *cobra.Command, _ []string) error {
+	ctx := cmd.Context()
+	trust, err := driverRegisterTrust()
+	if err != nil {
+		return err
+	}
+	if driverRegisterUntrusted && driverRegisterActivate {
+		return fmt.Errorf("--untrusted cannot be combined with --activate because activation requires prior version approval: %w", domain.ErrInvalid)
+	}
+	archive, err := archiveNativeDriverDist(driverRegisterFlueDist)
+	if err != nil {
+		return err
+	}
+	var manifest []byte
+	if strings.TrimSpace(driverRegisterManifest) != "" {
+		manifest, err = os.ReadFile(driverRegisterManifest) //nolint:gosec // explicit operator CLI input
 		if err != nil {
-			return fmt.Errorf("resolve work dir: %w", err)
+			return fmt.Errorf("read native Flue manifest: %w", err)
 		}
-		trust, err := driverRegisterTrust()
-		if err != nil {
-			return err
-		}
-		result, err := driverpkg.RegisterFlueDriver(ctx, h.Store, driverpkg.RegisterFlueOptions{
-			WorkspaceKey: ws,
-			WorkDir:      workDir,
-			DistPath:     driverRegisterFlueDist,
-			ManifestPath: driverRegisterManifest,
-			DriverName:   driverRegisterName,
-			DriverID:     driverRegisterID,
-			WorkflowName: driverRegisterWorkflow,
-			SourceRef:    driverRegisterSourceRef,
-			SourceDigest: driverRegisterSourceDigest,
-			CreatedBy:    publishActor(),
-			Activate:     driverRegisterActivate,
-			Trust:        trust,
-		})
-		if driverRegisterJSON && result != nil {
-			if writeErr := cmdstore.WriteJSON(result); writeErr != nil && err == nil {
-				err = writeErr
-			}
-		}
-		if err != nil {
-			return fmt.Errorf("register driver: %w", err)
-		}
-		if !driverRegisterJSON {
-			fmt.Printf("Registered native Flue driver %s version %s\n", result.Driver.DriverID, result.Version.VersionID)
-			fmt.Printf("Bundle: %s %s\n", result.Version.BundleRef, result.Version.BundleDigest)
-			if result.Activated {
-				fmt.Printf("Activated: %s\n", result.Version.VersionID)
-			}
-		}
-		return nil
+	}
+	client, err := managementapi.New(ctx, "loom driver register")
+	if err != nil {
+		return err
+	}
+	result, err := client.RegisterNativeDriver(ctx, managementapi.RegisterNativeDriverRequest{
+		Archive: archive, Manifest: manifest,
+		DriverName: driverRegisterName, DriverID: driverRegisterID,
+		WorkflowName: driverRegisterWorkflow,
+		SourceRef:    driverRegisterSourceRef, SourceDigest: driverRegisterSourceDigest,
+		Activate: driverRegisterActivate, Trust: trust,
 	})
+	if driverRegisterJSON && result != nil {
+		if writeErr := cmdstore.WriteJSON(result); writeErr != nil && err == nil {
+			err = writeErr
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("register driver: %w", err)
+	}
+	if !driverRegisterJSON {
+		fmt.Printf("Registered native Flue driver %s version %s\n", result.Driver.DriverID, result.Version.VersionID)
+		fmt.Printf("Bundle: %s %s\n", result.Version.BundleRef, result.Version.BundleDigest)
+		if result.Activated {
+			fmt.Printf("Activated: %s\n", result.Version.VersionID)
+		}
+	}
+	return nil
 }
 
 func driverRegisterTrust() (domain.DriverTrustLevel, error) {
@@ -222,14 +227,4 @@ func parseDriverRunPayload(values []string, epicID string) (json.RawMessage, err
 		return nil, fmt.Errorf("encode payload: %w", err)
 	}
 	return payload, nil
-}
-
-func publishActor() string {
-	if actor := os.Getenv("LOOM_FLEET_ACTOR"); actor != "" {
-		return actor
-	}
-	if actor := os.Getenv("USER"); actor != "" {
-		return actor
-	}
-	return "loom-cli"
 }

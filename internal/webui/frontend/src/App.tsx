@@ -851,6 +851,17 @@ function App() {
     }
   }, [activeView, closeAllPanels]);
 
+  // AgentsPage owns its task detail as an inline right-hand column. A board
+  // issue overlay can still be active while the route changes (the panel
+  // manager closes with an animation), which would render the same task twice
+  // and cover the agent workspace. Retire only the overlay state here; do not
+  // clear the shared issue detail because the inline panel uses it too.
+  useEffect(() => {
+    if (activeView === "agents" && activePanel?.type === "issue") {
+      closePanel();
+    }
+  }, [activeView, activePanel, closePanel]);
+
   // Workspace state preservation: save/restore ephemeral per-workspace UI state on switch
   useWorkspaceState({
     scrollContainerRef: mainContentRef,
@@ -1521,7 +1532,7 @@ function App() {
           </div>
           <ToastContainer toasts={toasts} onDismiss={dismissToast} />
           <IssueDetailPanel
-            isOpen={isPanelOpen}
+            isOpen={activeView !== "agents" && isPanelOpen}
             issue={issueDetails}
             isLoading={isLoadingDetails}
             error={detailError}

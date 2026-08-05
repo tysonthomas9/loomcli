@@ -2,13 +2,12 @@ package leadcontrol
 
 import (
 	"context"
-	"errors"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 )
 
 const (
@@ -65,23 +64,24 @@ func RuntimeMetadataFromSession(session *domain.AgentSession) CodexRuntimeMetada
 	}
 }
 
-func UpdateCodexRuntimeMetadata(ctx context.Context, st store.Store, workspace, sessionID string, runtime CodexRuntimeMetadata) error {
-	if st == nil || st.AgentSessions() == nil {
-		return nil
+func UpdateCodexRuntimeMetadata(
+	ctx context.Context,
+	sessionRuntime SessionRuntime,
+	workspace, sessionID string,
+	runtime CodexRuntimeMetadata,
+) error {
+	if err := requireSessionRuntime(sessionRuntime, workspace, sessionID); err != nil {
+		return err
+	}
+	if sessionRuntime == nil {
+		return nil // explicit standalone mode
 	}
 	workspace = strings.TrimSpace(workspace)
 	sessionID = strings.TrimSpace(sessionID)
 	if workspace == "" || sessionID == "" {
 		return nil
 	}
-	session, err := st.AgentSessions().Get(ctx, workspace, sessionID)
-	if errors.Is(err, domain.ErrNotFound) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	metadata := cloneMetadata(session.Metadata)
+	metadata := map[string]string{}
 	metadata[MetadataRuntimeProvider] = RuntimeProviderCodex
 	metadata[MetadataRuntimeControlled] = strconv.FormatBool(runtime.Controlled)
 	if runtime.Endpoint != "" {
@@ -103,82 +103,99 @@ func UpdateCodexRuntimeMetadata(ctx context.Context, st store.Store, workspace, 
 		metadata[MetadataRuntimeStatus] = runtime.Status
 		metadata[MetadataRuntimeStatusUpdated] = time.Now().UTC().Format(time.RFC3339Nano)
 	}
-	_, err = st.AgentSessions().Update(ctx, workspace, sessionID, store.AgentSessionUpdate{Metadata: &metadata})
-	return err
+	var phase *string
+	if status := strings.TrimSpace(runtime.Status); status != "" {
+		phase = &status
+	}
+	return sessionRuntime.PatchSessionRuntimeContext(ctx, interaction.PatchSessionCommand{
+		WorkspaceKey:    workspace,
+		SessionID:       sessionID,
+		Phase:           phase,
+		MetadataUpserts: metadata,
+	})
 }
 
-func MarkAssignmentDelivered(ctx context.Context, st store.Store, workspace, sessionID, epicID, version string) error {
-	if st == nil || st.AgentSessions() == nil {
-		return nil
+func MarkAssignmentDelivered(
+	ctx context.Context,
+	sessionRuntime SessionRuntime,
+	workspace, sessionID, epicID, version string,
+) error {
+	if err := requireSessionRuntime(sessionRuntime, workspace, sessionID); err != nil {
+		return err
+	}
+	if sessionRuntime == nil {
+		return nil // explicit standalone mode
 	}
 	sessionID = strings.TrimSpace(sessionID)
 	version = strings.TrimSpace(version)
 	if strings.TrimSpace(workspace) == "" || sessionID == "" || version == "" {
 		return nil
 	}
-	session, err := st.AgentSessions().Get(ctx, workspace, sessionID)
-	if errors.Is(err, domain.ErrNotFound) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	metadata := cloneMetadata(session.Metadata)
+	metadata := map[string]string{}
 	metadata[MetadataDeliveryVersion] = version
 	if strings.TrimSpace(epicID) != "" {
 		metadata[MetadataDeliveryEpic] = strings.TrimSpace(epicID)
 	}
-	delete(metadata, MetadataDeliveryError)
-	_, err = st.AgentSessions().Update(ctx, workspace, sessionID, store.AgentSessionUpdate{Metadata: &metadata})
-	return err
+	return sessionRuntime.PatchSessionRuntimeContext(ctx, interaction.PatchSessionCommand{
+		WorkspaceKey:     workspace,
+		SessionID:        sessionID,
+		MetadataUpserts:  metadata,
+		MetadataRemovals: []string{MetadataDeliveryError},
+	})
 }
 
-func MarkAssignmentDeliveryAttempt(ctx context.Context, st store.Store, workspace, sessionID, message string) error {
-	if st == nil || st.AgentSessions() == nil {
-		return nil
+func MarkAssignmentDeliveryAttempt(
+	ctx context.Context,
+	sessionRuntime SessionRuntime,
+	workspace, sessionID, message string,
+) error {
+	if err := requireSessionRuntime(sessionRuntime, workspace, sessionID); err != nil {
+		return err
+	}
+	if sessionRuntime == nil {
+		return nil // explicit standalone mode
 	}
 	sessionID = strings.TrimSpace(sessionID)
 	if strings.TrimSpace(workspace) == "" || sessionID == "" {
 		return nil
 	}
-	session, err := st.AgentSessions().Get(ctx, workspace, sessionID)
-	if errors.Is(err, domain.ErrNotFound) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	metadata := cloneMetadata(session.Metadata)
+	metadata := map[string]string{}
 	metadata[MetadataDeliveryAttemptedAt] = time.Now().UTC().Format(time.RFC3339Nano)
 	if strings.TrimSpace(message) != "" {
 		metadata[MetadataDeliveryError] = strings.TrimSpace(message)
 	}
-	_, err = st.AgentSessions().Update(ctx, workspace, sessionID, store.AgentSessionUpdate{Metadata: &metadata})
-	return err
+	return sessionRuntime.PatchSessionRuntimeContext(ctx, interaction.PatchSessionCommand{
+		WorkspaceKey:    workspace,
+		SessionID:       sessionID,
+		MetadataUpserts: metadata,
+	})
 }
 
-func MarkLeadMessageDeliveryAttempt(ctx context.Context, st store.Store, workspace, sessionID, message string) error {
-	if st == nil || st.AgentSessions() == nil {
-		return nil
+func MarkLeadMessageDeliveryAttempt(
+	ctx context.Context,
+	sessionRuntime SessionRuntime,
+	workspace, sessionID, message string,
+) error {
+	if err := requireSessionRuntime(sessionRuntime, workspace, sessionID); err != nil {
+		return err
+	}
+	if sessionRuntime == nil {
+		return nil // explicit standalone mode
 	}
 	sessionID = strings.TrimSpace(sessionID)
 	if strings.TrimSpace(workspace) == "" || sessionID == "" {
 		return nil
 	}
-	session, err := st.AgentSessions().Get(ctx, workspace, sessionID)
-	if errors.Is(err, domain.ErrNotFound) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	metadata := cloneMetadata(session.Metadata)
+	metadata := map[string]string{}
 	metadata[MetadataLeadMessageAttemptedAt] = time.Now().UTC().Format(time.RFC3339Nano)
 	if strings.TrimSpace(message) != "" {
 		metadata[MetadataLeadMessageError] = strings.TrimSpace(message)
 	}
-	_, err = st.AgentSessions().Update(ctx, workspace, sessionID, store.AgentSessionUpdate{Metadata: &metadata})
-	return err
+	return sessionRuntime.PatchSessionRuntimeContext(ctx, interaction.PatchSessionCommand{
+		WorkspaceKey:    workspace,
+		SessionID:       sessionID,
+		MetadataUpserts: metadata,
+	})
 }
 
 func cloneMetadata(in map[string]string) map[string]string {

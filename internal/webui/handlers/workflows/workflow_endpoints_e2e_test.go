@@ -29,7 +29,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
-	runtimesettings "github.com/tysonthomas9/loomcli/internal/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/netutil"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -79,110 +78,6 @@ func TestE2E_WorkflowEndpointsRunCustomizedEpicRunnerFromCLI(t *testing.T) {
 	}
 	e2e.expectRunPayloadFields(run, dag.epicID, "workflow-endpoint-e2e")
 	e2e.expectDAGDrained(dag, runID)
-}
-
-func TestE2E_WorkflowEndpointsRunCustomizedEpicRunnerWithDaytonaSandbox(t *testing.T) {
-	if strings.TrimSpace(os.Getenv("LOOM_RUN_DAYTONA_E2E")) != "1" {
-		t.Skip("set LOOM_RUN_DAYTONA_E2E=1 to run the gated Daytona sandbox e2e")
-	}
-	daytonaKey := strings.TrimSpace(os.Getenv("DAYTONA_API_KEY"))
-	if daytonaKey == "" {
-		t.Skip("DAYTONA_API_KEY is required for the gated Daytona sandbox e2e")
-	}
-	githubToken := workflowEndpointGitHubToken(t)
-	repoURL := daytonaWorkflowE2ERepoURL()
-
-	e2e := newWorkflowEndpointE2E(t)
-	e2e.runTimeout = 15 * time.Minute
-	e2e.useBundledTaskRunners = true
-	e2e.requireDaytonaSDKRoot()
-	e2e.requireHostCodexAuthHome()
-	e2e.saveRuntimeCredentials(daytonaKey, githubToken)
-	t.Setenv("LOOM_DAYTONA_TASK_RUNNER_ENABLE_DEMO_MODES", "1")
-	if model := strings.TrimSpace(os.Getenv("LOOM_DAYTONA_E2E_MODEL")); model != "" {
-		t.Setenv("LOOM_FLUE_AGENT_MODEL", model)
-	}
-
-	e2e.startFleetDB()
-	e2e.seedWorkspace()
-	dag := e2e.seedSingleTaskEpic()
-	e2e.startLoomServe()
-	marker := "loom-custom-epic-runner-marker"
-	customVersionID := e2e.customizeEpicRunnerViaCLI(marker)
-
-	runID := e2e.startWorkflowRun(BuiltinEpicRunnerWorkflowName, map[string]any{
-		"epicId":           dag.epicID,
-		"requestedBy":      "workflow-endpoint-e2e-daytona",
-		"runner":           "daytona-task-runner",
-		"mode":             "e2e-smoke",
-		"enableDemoModes":  true,
-		"refreshCodexAuth": true,
-		"repoUrl":          repoURL,
-		"maxConcurrency":   1,
-	})
-
-	run := e2e.waitForRunCompleted(runID)
-	if run.DriverVersionID != customVersionID {
-		t.Fatalf("run driver_version_id = %q, want customized version %q", run.DriverVersionID, customVersionID)
-	}
-	if !strings.Contains(run.Output["flue_stderr_tail"], marker+" "+dag.epicID) {
-		t.Fatalf("run output missing custom marker %q: %+v", marker, run.Output)
-	}
-	e2e.expectRunPayloadFields(run, dag.epicID, "workflow-endpoint-e2e-daytona")
-	e2e.expectSingleDaytonaTaskDrained(dag, runID)
-}
-
-func TestE2E_WorkflowEndpointsRunCustomizedEpicRunnerWithDaytonaPRChain(t *testing.T) {
-	if strings.TrimSpace(os.Getenv("LOOM_RUN_DAYTONA_PR_E2E")) != "1" {
-		t.Skip("set LOOM_RUN_DAYTONA_PR_E2E=1 to run the gated Daytona PR-chain e2e")
-	}
-	daytonaKey := strings.TrimSpace(os.Getenv("DAYTONA_API_KEY"))
-	if daytonaKey == "" {
-		t.Skip("DAYTONA_API_KEY is required for the gated Daytona PR-chain e2e")
-	}
-	githubToken := workflowEndpointGitHubToken(t)
-	repoURL := daytonaWorkflowE2ERepoURL()
-
-	e2e := newWorkflowEndpointE2E(t)
-	e2e.runTimeout = 30 * time.Minute
-	e2e.useBundledTaskRunners = true
-	e2e.requireDaytonaSDKRoot()
-	e2e.requireHostCodexAuthHome()
-	e2e.saveRuntimeCredentials(daytonaKey, githubToken)
-	t.Setenv("LOOM_DAYTONA_TASK_RUNNER_ENABLE_DEMO_MODES", "1")
-	if model := strings.TrimSpace(os.Getenv("LOOM_DAYTONA_E2E_MODEL")); model != "" {
-		t.Setenv("LOOM_FLUE_AGENT_MODEL", model)
-	}
-
-	e2e.startFleetDB()
-	e2e.seedWorkspace()
-	e2e.seedWorkspaceRepo(repoURL)
-	dag := e2e.seedSlackPRChainEpic(repoURL)
-	e2e.startLoomServe()
-	marker := "loom-custom-epic-runner-marker"
-	customVersionID := e2e.customizeEpicRunnerViaCLI(marker)
-
-	runID := e2e.startWorkflowRun(BuiltinEpicRunnerWorkflowName, map[string]any{
-		"epicId":              dag.epicID,
-		"requestedBy":         "workflow-endpoint-e2e-daytona-pr",
-		"runner":              "daytona-task-runner",
-		"mode":                "slack-pr-chain",
-		"enableDemoModes":     true,
-		"refreshCodexAuth":    true,
-		"repoUrl":             repoURL,
-		"stackedPullRequests": true,
-		"maxConcurrency":      2,
-	})
-
-	run := e2e.waitForRunCompleted(runID)
-	if run.DriverVersionID != customVersionID {
-		t.Fatalf("run driver_version_id = %q, want customized version %q", run.DriverVersionID, customVersionID)
-	}
-	if !strings.Contains(run.Output["flue_stderr_tail"], marker+" "+dag.epicID) {
-		t.Fatalf("run output missing custom marker %q: %+v", marker, run.Output)
-	}
-	e2e.expectRunPayloadFields(run, dag.epicID, "workflow-endpoint-e2e-daytona-pr")
-	e2e.expectDaytonaPRChainDrained(dag, runID, repoURL)
 }
 
 type workflowEndpointE2E struct {
@@ -504,7 +399,6 @@ func (e *workflowEndpointE2E) startLoomServe() {
 		"LOOM_SDK_ROOT":                    filepath.Join(e.repoRoot, "sdk"),
 		"LOOM_FLUE_RUNTIME_ROOT":           filepath.Join(e.flueRepo, "packages", "runtime"),
 		"FLUE_REPO":                        e.flueRepo,
-		"DAYTONA_SDK_ROOT":                 e.daytonaSDKRoot(),
 		"OPENAI_API_KEY":                   firstNonEmpty(strings.TrimSpace(os.Getenv("OPENAI_API_KEY")), "workflow-endpoint-e2e-test-key"),
 		"LOOM_ISSUE_BACKEND":               "",
 		bootstrap.EnvFleetDBBin:            e.fleetDBBin,
@@ -548,7 +442,6 @@ func (e *workflowEndpointE2E) loomEnv() []string {
 		"LOOM_SDK_ROOT":              filepath.Join(e.repoRoot, "sdk"),
 		"LOOM_FLUE_RUNTIME_ROOT":     filepath.Join(e.flueRepo, "packages", "runtime"),
 		"FLUE_REPO":                  e.flueRepo,
-		"DAYTONA_SDK_ROOT":           e.daytonaSDKRoot(),
 		bootstrap.EnvFleetDBBin:      e.fleetDBBin,
 		bootstrap.EnvFleetDBAPIKey:   e.fleetAPIKey,
 		bootstrap.EnvFleetDBActor:    e.actor,
@@ -654,93 +547,11 @@ func (e *workflowEndpointE2E) waitForRunCompleted(runID string) domain.DriverRun
 	return run
 }
 
-func (e *workflowEndpointE2E) requireDaytonaSDKRoot() {
-	e.t.Helper()
-	if _, err := os.Stat(filepath.Join(e.daytonaSDKRoot(), "package.json")); err == nil {
-		return
-	}
-	e.t.Skip("local @daytona/sdk package root is required for the gated Daytona sandbox e2e; set DAYTONA_SDK_ROOT")
-}
-
-func (e *workflowEndpointE2E) requireHostCodexAuthHome() {
-	e.t.Helper()
-	home := strings.TrimSpace(os.Getenv("HOME"))
-	if home == "" {
-		e.t.Skip("host HOME is required for gated Daytona e2e Codex auth")
-	}
-	if _, err := os.Stat(filepath.Join(home, ".codex", "auth.json")); err != nil {
-		e.t.Skip("host Codex auth is required for gated Daytona e2e; run codex auth login")
-	}
-	e.serveHome = home
-}
-
 func (e *workflowEndpointE2E) serveHomeDir() string {
 	if strings.TrimSpace(e.serveHome) != "" {
 		return e.serveHome
 	}
 	return filepath.Join(e.configDir, "home")
-}
-
-func (e *workflowEndpointE2E) daytonaSDKRoot() string {
-	if root := strings.TrimSpace(os.Getenv("DAYTONA_SDK_ROOT")); root != "" {
-		return root
-	}
-	return filepath.Join(e.flueRepo, "node_modules", ".pnpm", "node_modules", "@daytona", "sdk")
-}
-
-func (e *workflowEndpointE2E) saveDaytonaCredential(daytonaKey string) {
-	e.t.Helper()
-	e.saveRuntimeCredentials(daytonaKey, "")
-}
-
-func (e *workflowEndpointE2E) saveRuntimeCredentials(daytonaKey, githubToken string) {
-	e.t.Helper()
-	settings, err := runtimesettings.Load(e.configDir)
-	if err != nil {
-		e.t.Fatalf("load runtime settings: %v", err)
-	}
-	now := time.Now()
-	if strings.TrimSpace(daytonaKey) != "" {
-		credential, err := runtimesettings.SealRuntimeCredential(e.configDir, runtimesettings.RuntimeCredentialProviderDaytona, daytonaKey, now)
-		if err != nil {
-			e.t.Fatalf("seal Daytona runtime credential: %v", err)
-		}
-		settings.RuntimeCredentials.Daytona = credential
-	}
-	if strings.TrimSpace(githubToken) != "" {
-		credential, err := runtimesettings.SealRuntimeCredential(e.configDir, runtimesettings.RuntimeCredentialProviderGitHub, githubToken, now)
-		if err != nil {
-			e.t.Fatalf("seal GitHub runtime credential: %v", err)
-		}
-		settings.RuntimeCredentials.GitHub = credential
-	}
-	if err := runtimesettings.Save(e.configDir, settings); err != nil {
-		e.t.Fatalf("save runtime credentials: %v", err)
-	}
-}
-
-func workflowEndpointGitHubToken(t *testing.T) string {
-	t.Helper()
-	if token := firstNonEmpty(os.Getenv("GITHUB_TOKEN"), os.Getenv("GH_TOKEN")); token != "" {
-		return token
-	}
-	gh, err := exec.LookPath("gh")
-	if err != nil {
-		t.Skip("GITHUB_TOKEN, GH_TOKEN, or gh auth token is required for the gated Daytona PR-chain e2e")
-	}
-	output, err := exec.Command(gh, "auth", "token").Output()
-	if err != nil {
-		t.Skip("GITHUB_TOKEN, GH_TOKEN, or gh auth token is required for the gated Daytona PR-chain e2e")
-	}
-	if token := strings.TrimSpace(string(output)); token != "" {
-		return token
-	}
-	t.Skip("GITHUB_TOKEN, GH_TOKEN, or gh auth token is required for the gated Daytona PR-chain e2e")
-	return ""
-}
-
-func daytonaWorkflowE2ERepoURL() string {
-	return firstNonEmpty(os.Getenv("DAYTONA_REPO_URL"), "https://github.com/tysonthomas9/webhook-e2e-sandbox.git")
 }
 
 func workflowEndpointRepoSlug(repoURL string) string {

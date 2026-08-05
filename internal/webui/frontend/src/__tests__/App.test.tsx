@@ -2038,6 +2038,25 @@ describe("App", () => {
       expect(panel).toHaveAttribute("data-state", "closed");
     });
 
+    it("retires the global issue overlay on the agents view", async () => {
+      mockUseRouteView.mockReturnValue(createViewStateReturn("agents"));
+      mockUsePanelManager.mockReturnValue({
+        activePanel: { type: "issue", id: "agent-task-1" },
+        pendingPanel: null,
+        openPanel: mockOpenPanel,
+        closePanel: mockClosePanel,
+        isOpen: mockIsOpen,
+      });
+
+      const { container } = render(<App />);
+
+      const panel = container.querySelector(
+        '[data-testid="issue-detail-panel"]',
+      );
+      expect(panel).toHaveAttribute("data-state", "closed");
+      await waitFor(() => expect(mockClosePanel).toHaveBeenCalledTimes(1));
+    });
+
     it("opens issue panel via usePanelManager when issue is clicked in SwimLaneBoard", () => {
       const fetchIssue = vi.fn();
       const issues = [

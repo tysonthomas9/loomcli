@@ -124,6 +124,173 @@ func TestCodexAppServerLifetimeSurvivesParentCancellationUntilExplicitStop(t *te
 	}
 }
 
+func TestCodexLeadChildEnvUsesIsolatedHomeWithoutCopyingCredentials(t *testing.T) {
+	oldExecutable := codexLeadCurrentExecutable
+	codexLeadCurrentExecutable = func() (string, error) {
+		return "/Applications/Loom's App/Contents/MacOS/loom", nil
+	}
+	t.Cleanup(func() { codexLeadCurrentExecutable = oldExecutable })
+
+	sourceHome := t.TempDir()
+	authPath := filepath.Join(sourceHome, "auth.json")
+	configPath := filepath.Join(sourceHome, "config.toml")
+	if err := os.WriteFile(authPath, []byte("credential bytes stay here"), 0600); err != nil {
+		t.Fatalf("write auth fixture: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("model = \"test\"\n"), 0600); err != nil {
+		t.Fatalf("write config fixture: %v", err)
+	}
+	runtimeHome := t.TempDir()
+
+	env, err := codexLeadChildEnv(runtimeHome, []string{
+		"PATH=/usr/bin",
+		"CODEX_HOME=" + sourceHome,
+		"CODEX_HOME=/must/not/survive",
+	})
+	if err != nil {
+		t.Fatalf("codexLeadChildEnv() error = %v", err)
+	}
+	isolatedHome := filepath.Join(runtimeHome, "codex-home")
+	wantEnv := "CODEX_HOME=" + isolatedHome
+	count := 0
+	for _, entry := range env {
+		if entry == wantEnv {
+			count++
+		}
+		if strings.HasPrefix(entry, "CODEX_HOME=") && entry != wantEnv {
+			t.Fatalf("stale CODEX_HOME survived: %q", entry)
+		}
+	}
+	if count != 1 {
+		t.Fatalf("isolated CODEX_HOME count = %d, want 1: %#v", count, env)
+	}
+	shellHome := filepath.Join(runtimeHome, "shell-home")
+	startupPath := filepath.Join(shellHome, "shell-env")
+	for name, want := range map[string]string{
+		"PATH":     "/Applications/Loom's App/Contents/MacOS:/usr/bin",
+		"ZDOTDIR":  shellHome,
+		"BASH_ENV": startupPath,
+		"ENV":      startupPath,
+	} {
+		if got := environmentValue(env, name); got != want {
+			t.Errorf("%s = %q, want %q", name, got, want)
+		}
+	}
+	wantStartup := "export PATH='/Applications/Loom'\"'\"'s App/Contents/MacOS':\"${PATH:-}\"\n" +
+		"loom() { '/Applications/Loom'\"'\"'s App/Contents/MacOS/loom' \"$@\"; }\n"
+	for _, path := range []string{startupPath, filepath.Join(shellHome, ".zshenv"), filepath.Join(shellHome, ".zprofile")} {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read shell startup %s: %v", path, err)
+		}
+		if string(body) != wantStartup {
+			t.Errorf("shell startup %s = %q, want %q", path, body, wantStartup)
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat shell startup %s: %v", path, err)
+		}
+		if got := info.Mode().Perm(); got != 0600 {
+			t.Errorf("shell startup %s mode = %v, want 0600", path, got)
+		}
+	}
+	for _, name := range []string{"auth.json", "config.toml"} {
+		target := filepath.Join(isolatedHome, name)
+		info, err := os.Lstat(target)
+		if err != nil {
+			t.Fatalf("lstat %s: %v", name, err)
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			t.Fatalf("%s mode = %v, want symlink", name, info.Mode())
+		}
+		linked, err := os.Readlink(target)
+		if err != nil {
+			t.Fatalf("readlink %s: %v", name, err)
+		}
+		if linked != filepath.Join(sourceHome, name) {
+			t.Fatalf("%s link = %q", name, linked)
+		}
+	}
+}
+
+func TestCodexLeadChildEnvFailsClosedWhenExecutableCannotBeResolved(t *testing.T) {
+	oldExecutable := codexLeadCurrentExecutable
+	codexLeadCurrentExecutable = func() (string, error) {
+		return "", errors.New("boom")
+	}
+	t.Cleanup(func() { codexLeadCurrentExecutable = oldExecutable })
+
+	sourceHome := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sourceHome, "auth.json"), []byte("auth"), 0600); err != nil {
+		t.Fatalf("write auth fixture: %v", err)
+	}
+	_, err := codexLeadChildEnv(t.TempDir(), []string{"CODEX_HOME=" + sourceHome})
+	if err == nil || !strings.Contains(err.Error(), "resolve controlled Loom executable") {
+		t.Fatalf("codexLeadChildEnv() error = %v, want executable resolution failure", err)
+	}
+}
+
+func TestCodexLeadRuntimeBaseEnvUsesTrustedWorkspaceScope(t *testing.T) {
+	env := codexLeadRuntimeBaseEnv(CodexLeadRuntimeConfig{
+		Workspace: "  PROOF-WS  ",
+		ConfigDir: "  /trusted/loom-data  ",
+	}, []string{
+		"PATH=/usr/bin",
+		"LOOM_WORKSPACE=STALE",
+		"LOOM_CONFIG_DIR=/forged/loom-data",
+		"LOOM_FLEET_DB_API_KEY=secret",
+		"LOOM_ARBITRARY=forged",
+	})
+	joined := strings.Join(env, "\n")
+	if !strings.Contains(joined, "PATH=/usr/bin") ||
+		!strings.Contains(joined, "LOOM_WORKSPACE=PROOF-WS") ||
+		!strings.Contains(joined, "LOOM_CONFIG_DIR=/trusted/loom-data") {
+		t.Fatalf("runtime env missing trusted scope: %#v", env)
+	}
+	for _, forbidden := range []string{"LOOM_WORKSPACE=STALE", "/forged/loom-data", "secret", "forged"} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("runtime env retained %q: %#v", forbidden, env)
+		}
+	}
+
+	unscoped := codexLeadRuntimeBaseEnv(CodexLeadRuntimeConfig{}, []string{
+		"PATH=/usr/bin",
+		"LOOM_WORKSPACE=STALE",
+		"LOOM_CONFIG_DIR=/forged/loom-data",
+	})
+	unscopedJoined := strings.Join(unscoped, "\n")
+	if strings.Contains(unscopedJoined, "LOOM_WORKSPACE") || strings.Contains(unscopedJoined, "LOOM_CONFIG_DIR") {
+		t.Fatalf("unscoped runtime inherited ambient Loom scope: %#v", unscoped)
+	}
+}
+
+func TestCodexLeadChildEnvFailsClosedWithoutAuthentication(t *testing.T) {
+	_, err := codexLeadChildEnv(t.TempDir(), []string{"CODEX_HOME=" + t.TempDir()})
+	if err == nil || !strings.Contains(err.Error(), "auth.json") {
+		t.Fatalf("codexLeadChildEnv() error = %v, want missing auth.json", err)
+	}
+}
+
+func TestCodexLeadChildEnvRejectsCredentialLinkDrift(t *testing.T) {
+	sourceHome := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sourceHome, "auth.json"), []byte("auth"), 0600); err != nil {
+		t.Fatalf("write auth fixture: %v", err)
+	}
+	runtimeHome := t.TempDir()
+	isolatedHome := filepath.Join(runtimeHome, "codex-home")
+	if err := os.MkdirAll(isolatedHome, 0700); err != nil {
+		t.Fatalf("mkdir isolated home: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(t.TempDir(), "auth.json"), filepath.Join(isolatedHome, "auth.json")); err != nil {
+		t.Fatalf("write drifted auth link: %v", err)
+	}
+
+	_, err := codexLeadChildEnv(runtimeHome, []string{"CODEX_HOME=" + sourceHome})
+	if err == nil || !strings.Contains(err.Error(), "points outside") {
+		t.Fatalf("codexLeadChildEnv() error = %v, want link drift rejection", err)
+	}
+}
+
 func TestCodexThreadTranscriptEventsCanonicalizesMessages(t *testing.T) {
 	capturedAt := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
 	events := codexThreadTranscriptEvents(&CodexThread{
@@ -356,7 +523,7 @@ func TestCaptureCodexInteractiveTranscriptPersistsSessionArtifactAndRef(t *testi
 	}); err != nil {
 		t.Fatalf("create interactive session: %v", err)
 	}
-	if err := UpdateCodexRuntimeMetadata(ctx, st, "WS", "lead-session", CodexRuntimeMetadata{
+	if err := UpdateCodexRuntimeMetadata(ctx, testSessionRuntime(st), "WS", "lead-session", CodexRuntimeMetadata{
 		Endpoint:   "ws://codex.test",
 		ThreadID:   "thread-1",
 		Status:     RuntimeStatusIdle,
@@ -387,9 +554,9 @@ func TestCaptureCodexInteractiveTranscriptPersistsSessionArtifactAndRef(t *testi
 	t.Cleanup(func() { dialCodexAppServerClient = originalDial })
 
 	err := captureCodexInteractiveTranscript(ctx, CodexLeadRuntimeConfig{
-		Store: st, Workspace: "WS", LeadName: "local-review",
+		Runtime: testSessionRuntime(st), Workspace: "WS", LeadName: "local-review",
 		SessionID: "lead-session", WorkDir: "/repo",
-	}, CodexRuntimeMetadata{}, time.Now().Add(-time.Minute))
+	}, CodexRuntimeMetadata{Endpoint: "ws://127.0.0.1:1", ThreadID: "thread-1"}, time.Now().Add(-time.Minute))
 	if err != nil {
 		t.Fatalf("captureCodexInteractiveTranscript() error = %v", err)
 	}

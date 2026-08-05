@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -25,9 +26,13 @@ const (
 	codexThreadDiscoveryInterval = 500 * time.Millisecond
 )
 
+var codexLeadCurrentExecutable = os.Executable
+
 type CodexLeadRuntimeConfig struct {
 	Store     store.Store
+	Runtime   SessionRuntime
 	Workspace string
+	ConfigDir string
 	LeadName  string
 	SessionID string
 	WorkDir   string
@@ -41,9 +46,9 @@ type CodexLeadRuntimeConfig struct {
 
 func RunCodexLeadRuntime(ctx context.Context, cfg CodexLeadRuntimeConfig) error {
 	cfg = normalizeCodexLeadRuntimeConfig(cfg)
-	runtimeHome, sqliteHome := codexLeadRuntimeDirs(cfg)
-	if err := os.MkdirAll(sqliteHome, 0700); err != nil {
-		return fmt.Errorf("create codex lead runtime directory: %w", err)
+	runtimeHome, sqliteHome, childEnv, err := prepareCodexLeadRuntime(cfg)
+	if err != nil {
+		return err
 	}
 
 	runtimeStartedAt := time.Now().UTC()
@@ -52,7 +57,7 @@ func RunCodexLeadRuntime(ctx context.Context, cfg CodexLeadRuntimeConfig) error 
 		return err
 	}
 	appServerLogPath := codexAppServerLogPath(runtimeHome)
-	appCmd, appErr, cancelApp, logFile, err := startCodexAppServer(ctx, cfg, runtimeHome, sqliteHome, endpoint)
+	appCmd, appErr, cancelApp, logFile, err := startCodexAppServer(ctx, cfg, runtimeHome, sqliteHome, endpoint, childEnv)
 	if err != nil {
 		return err
 	}
@@ -64,7 +69,7 @@ func RunCodexLeadRuntime(ctx context.Context, cfg CodexLeadRuntimeConfig) error 
 	if err := waitForCodexAppServer(ctx, endpoint, appErr, appServerLogPath); err != nil {
 		_ = stopCodexAppServer(appCmd, appErr, cancelApp)
 		runtime.Status = RuntimeStatusFailed
-		_ = UpdateCodexRuntimeMetadata(context.Background(), cfg.Store, cfg.Workspace, cfg.SessionID, runtime)
+		_ = UpdateCodexRuntimeMetadata(context.Background(), cfg.Runtime, cfg.Workspace, cfg.SessionID, runtime)
 		return err
 	}
 
@@ -74,9 +79,9 @@ func RunCodexLeadRuntime(ctx context.Context, cfg CodexLeadRuntimeConfig) error 
 	go discoverCodexLeadThread(discoverCtx, cfg, runtime, runtimeStartedAt, discoverDone)
 	drainCtx, cancelDrain := context.WithCancel(ctx)
 	defer cancelDrain()
-	go drainLeadMessageQueue(drainCtx, cfg.Store, cfg.Workspace, cfg.LeadName, cfg.Logger)
+	go drainLeadMessageQueue(drainCtx, cfg.Store, cfg.Runtime, cfg.Workspace, cfg.LeadName, cfg.Logger)
 
-	tuiErr := runCodexRemoteTUI(ctx, cfg, endpoint)
+	tuiErr := runCodexRemoteTUI(ctx, cfg, endpoint, childEnv)
 
 	captureCodexTranscriptAfterTUI(
 		cfg, runtime, runtimeStartedAt,
@@ -86,8 +91,37 @@ func RunCodexLeadRuntime(ctx context.Context, cfg CodexLeadRuntimeConfig) error 
 		cfg.Logger.Debug("codex app-server shutdown failed", "err", err)
 	}
 	runtime.Status = RuntimeStatusDisconnected
-	_ = UpdateCodexRuntimeMetadata(context.Background(), cfg.Store, cfg.Workspace, cfg.SessionID, runtime)
+	_ = UpdateCodexRuntimeMetadata(context.Background(), cfg.Runtime, cfg.Workspace, cfg.SessionID, runtime)
 	return tuiErr
+}
+
+func prepareCodexLeadRuntime(cfg CodexLeadRuntimeConfig) (string, string, []string, error) {
+	runtimeHome, sqliteHome := codexLeadRuntimeDirs(cfg)
+	if err := os.MkdirAll(sqliteHome, 0700); err != nil {
+		return "", "", nil, fmt.Errorf("create codex lead runtime directory: %w", err)
+	}
+	childEnv, err := codexLeadChildEnv(runtimeHome, codexLeadRuntimeBaseEnv(cfg, os.Environ()))
+	if err != nil {
+		return "", "", nil, err
+	}
+	return runtimeHome, sqliteHome, childEnv, nil
+}
+
+// codexLeadRuntimeBaseEnv filters all ambient LOOM_* values, then adds back
+// only the workspace and local data directory selected by the trusted launch
+// config. This lets commands run by the interactive Lead resolve the Desktop
+// workspace without inheriting stale or forged operator scope or credentials.
+func codexLeadRuntimeBaseEnv(cfg CodexLeadRuntimeConfig, base []string) []string {
+	env := interaction.FilterChildBaseEnv(base)
+	workspace := strings.TrimSpace(cfg.Workspace)
+	if workspace != "" {
+		env = replaceEnvironmentValue(env, "LOOM_WORKSPACE", workspace)
+	}
+	configDir := strings.TrimSpace(cfg.ConfigDir)
+	if configDir != "" {
+		env = replaceEnvironmentValue(env, "LOOM_CONFIG_DIR", configDir)
+	}
+	return env
 }
 
 func captureCodexTranscriptAfterTUI(
@@ -119,7 +153,7 @@ func persistStartingCodexRuntime(ctx context.Context, cfg CodexLeadRuntimeConfig
 		Status:      RuntimeStatusStarting,
 		Controlled:  true,
 	}
-	if err := UpdateCodexRuntimeMetadata(ctx, cfg.Store, cfg.Workspace, cfg.SessionID, runtime); err != nil {
+	if err := UpdateCodexRuntimeMetadata(ctx, cfg.Runtime, cfg.Workspace, cfg.SessionID, runtime); err != nil {
 		cfg.Logger.Warn("failed to persist codex runtime metadata", "err", err)
 	}
 	return runtime
@@ -131,6 +165,7 @@ func startCodexAppServer(
 	runtimeHome string,
 	sqliteHome string,
 	endpoint string,
+	childEnv []string,
 ) (*exec.Cmd, chan error, context.CancelFunc, *os.File, error) {
 	// #nosec G304 -- runtimeHome is a lead-scoped cache path derived from Loom workspace/session ids.
 	logFile, err := os.OpenFile(codexAppServerLogPath(runtimeHome), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
@@ -145,7 +180,7 @@ func startCodexAppServer(
 	// #nosec G204 -- cfg.CodexPath is the configured Codex binary; endpoint/sqliteHome are generated by Loom.
 	appCmd := exec.CommandContext(appCtx, cfg.CodexPath, "app-server", "--listen", endpoint, "-c", "sqlite_home="+strconv.Quote(sqliteHome))
 	appCmd.Dir = cfg.WorkDir
-	appCmd.Env = os.Environ()
+	appCmd.Env = append([]string(nil), childEnv...)
 	appCmd.Stdout = logFile
 	appCmd.Stderr = logFile
 	if err := appCmd.Start(); err != nil {
@@ -169,7 +204,7 @@ func codexAppServerLogPath(runtimeHome string) string {
 	return filepath.Join(runtimeHome, "app-server.log")
 }
 
-func runCodexRemoteTUI(ctx context.Context, cfg CodexLeadRuntimeConfig, endpoint string) error {
+func runCodexRemoteTUI(ctx context.Context, cfg CodexLeadRuntimeConfig, endpoint string, childEnv []string) error {
 	_, _ = fmt.Fprintln(cfg.Stdout, "Launching controlled Codex lead session...")
 	_, _ = fmt.Fprintln(cfg.Stdout, "")
 	// #nosec G204 -- cfg.CodexPath/workDir/prompt are the same trusted inputs used by interactive agent launch.
@@ -181,15 +216,193 @@ func runCodexRemoteTUI(ctx context.Context, cfg CodexLeadRuntimeConfig, endpoint
 		cfg.Prompt,
 	)
 	tuiCmd.Dir = cfg.WorkDir
-	tuiCmd.Env = os.Environ()
+	tuiCmd.Env = append([]string(nil), childEnv...)
 	tuiCmd.Stdin = cfg.Stdin
 	tuiCmd.Stdout = cfg.Stdout
 	tuiCmd.Stderr = cfg.Stderr
 	return tuiCmd.Run()
 }
 
+// codexLeadChildEnv gives each controlled interactive session its own Codex
+// state directory. Pointing app-server at an isolated sqlite_home is not
+// sufficient: current Codex builds still reconcile the user's global state
+// database before opening the listener, which can make startup exceed Loom's
+// readiness deadline for long-lived installations. The isolated home keeps
+// that reconciliation bounded while symlinks preserve the user's existing
+// authentication and configuration without copying credential bytes.
+func codexLeadChildEnv(runtimeHome string, baseEnv []string) ([]string, error) {
+	runtimeHome = strings.TrimSpace(runtimeHome)
+	if runtimeHome == "" {
+		return nil, errors.New("codex lead runtime home required")
+	}
+	sourceHome, err := sourceCodexHome(baseEnv)
+	if err != nil {
+		return nil, err
+	}
+	isolatedHome := filepath.Join(runtimeHome, "codex-home")
+	if err := os.MkdirAll(isolatedHome, 0700); err != nil {
+		return nil, fmt.Errorf("create isolated codex lead home: %w", err)
+	}
+	// #nosec G302 -- this is a private directory, so owner-only traversal is required.
+	if err := os.Chmod(isolatedHome, 0700); err != nil {
+		return nil, fmt.Errorf("secure isolated codex lead home: %w", err)
+	}
+	if err := linkCodexHomeFile(sourceHome, isolatedHome, "auth.json", true); err != nil {
+		return nil, err
+	}
+	if err := linkCodexHomeFile(sourceHome, isolatedHome, "config.toml", false); err != nil {
+		return nil, err
+	}
+	env := replaceEnvironmentValue(baseEnv, "CODEX_HOME", isolatedHome)
+	return pinCurrentLoomForCodexShell(runtimeHome, env)
+}
+
+// pinCurrentLoomForCodexShell keeps the AI's shell on the same Loom binary
+// that launched the controlled session. Codex may use a login shell for tool
+// commands, and user startup files can otherwise restore an older global Loom
+// after the parent process pins PATH. The private startup directory is loaded
+// by zsh, bash, and POSIX shells and the function binding remains authoritative
+// even if a later startup file rewrites PATH.
+func pinCurrentLoomForCodexShell(runtimeHome string, env []string) ([]string, error) {
+	executable, err := codexLeadCurrentExecutable()
+	if err != nil {
+		return nil, fmt.Errorf("resolve controlled Loom executable: %w", err)
+	}
+	executable = strings.TrimSpace(executable)
+	if executable == "" {
+		return nil, errors.New("resolve controlled Loom executable: empty path")
+	}
+	if !filepath.IsAbs(executable) {
+		executable, err = filepath.Abs(executable)
+		if err != nil {
+			return nil, fmt.Errorf("resolve absolute controlled Loom executable: %w", err)
+		}
+	}
+	executable = filepath.Clean(executable)
+	executableDir := filepath.Dir(executable)
+
+	shellHome := filepath.Join(runtimeHome, "shell-home")
+	if err := os.MkdirAll(shellHome, 0700); err != nil {
+		return nil, fmt.Errorf("create controlled shell home: %w", err)
+	}
+	// #nosec G302 -- the startup files control executable selection and must be owner-only.
+	if err := os.Chmod(shellHome, 0700); err != nil {
+		return nil, fmt.Errorf("secure controlled shell home: %w", err)
+	}
+	startup := "export PATH=" + shellSingleQuote(executableDir) + ":\"${PATH:-}\"\n" +
+		"loom() { " + shellSingleQuote(executable) + " \"$@\"; }\n"
+	startupPath := filepath.Join(shellHome, "shell-env")
+	for _, path := range []string{
+		startupPath,
+		filepath.Join(shellHome, ".zshenv"),
+		filepath.Join(shellHome, ".zprofile"),
+	} {
+		// #nosec G306 -- these executable-selection files are intentionally owner-only.
+		if err := os.WriteFile(path, []byte(startup), 0600); err != nil {
+			return nil, fmt.Errorf("write controlled shell startup: %w", err)
+		}
+		if err := os.Chmod(path, 0600); err != nil {
+			return nil, fmt.Errorf("secure controlled shell startup: %w", err)
+		}
+	}
+
+	env = replaceEnvironmentValue(env, "PATH", prependPathEntry(environmentValue(env, "PATH"), executableDir))
+	env = replaceEnvironmentValue(env, "ZDOTDIR", shellHome)
+	env = replaceEnvironmentValue(env, "BASH_ENV", startupPath)
+	env = replaceEnvironmentValue(env, "ENV", startupPath)
+	return env, nil
+}
+
+func prependPathEntry(pathValue, entry string) string {
+	entries := []string{entry}
+	for _, candidate := range filepath.SplitList(pathValue) {
+		if filepath.Clean(candidate) != entry {
+			entries = append(entries, candidate)
+		}
+	}
+	return strings.Join(entries, string(os.PathListSeparator))
+}
+
+func environmentValue(env []string, name string) string {
+	for _, entry := range env {
+		key, value, ok := strings.Cut(entry, "=")
+		if ok && key == name {
+			return value
+		}
+	}
+	return ""
+}
+
+func shellSingleQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+}
+
+func sourceCodexHome(baseEnv []string) (string, error) {
+	for _, entry := range baseEnv {
+		name, value, ok := strings.Cut(entry, "=")
+		if ok && name == "CODEX_HOME" && strings.TrimSpace(value) != "" {
+			if !filepath.IsAbs(value) {
+				return "", errors.New("CODEX_HOME must be an absolute path")
+			}
+			return filepath.Clean(value), nil
+		}
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return "", errors.New("resolve Codex authentication home")
+	}
+	return filepath.Join(home, ".codex"), nil
+}
+
+func linkCodexHomeFile(sourceHome, isolatedHome, name string, required bool) error {
+	source := filepath.Join(sourceHome, name)
+	info, err := os.Stat(source)
+	if err != nil {
+		if !required && errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("find Codex %s in configured home: %w", name, err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("codex %s in configured home is not a regular file", name)
+	}
+	target := filepath.Join(isolatedHome, name)
+	if existing, err := os.Lstat(target); err == nil {
+		if existing.Mode()&os.ModeSymlink == 0 {
+			return fmt.Errorf("isolated Codex %s already exists and is not a symlink", name)
+		}
+		linked, err := os.Readlink(target)
+		if err != nil {
+			return fmt.Errorf("read isolated Codex %s link: %w", name, err)
+		}
+		if filepath.Clean(linked) != filepath.Clean(source) {
+			return fmt.Errorf("isolated Codex %s points outside the configured home", name)
+		}
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("inspect isolated Codex %s: %w", name, err)
+	}
+	if err := os.Symlink(source, target); err != nil {
+		return fmt.Errorf("link Codex %s into isolated lead home: %w", name, err)
+	}
+	return nil
+}
+
+func replaceEnvironmentValue(base []string, name, value string) []string {
+	out := make([]string, 0, len(base)+1)
+	for _, entry := range base {
+		key, _, ok := strings.Cut(entry, "=")
+		if ok && key == name {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return append(out, name+"="+value)
+}
+
 func normalizeCodexLeadRuntimeConfig(cfg CodexLeadRuntimeConfig) CodexLeadRuntimeConfig {
 	cfg.Workspace = strings.TrimSpace(cfg.Workspace)
+	cfg.ConfigDir = strings.TrimSpace(cfg.ConfigDir)
 	cfg.LeadName = strings.TrimSpace(cfg.LeadName)
 	cfg.SessionID = strings.TrimSpace(cfg.SessionID)
 	cfg.WorkDir = strings.TrimSpace(cfg.WorkDir)
@@ -352,7 +565,7 @@ func discoverCodexLeadThread(
 		case <-ctx.Done():
 			return
 		case <-deadline.C:
-			_ = MarkAssignmentDeliveryAttempt(ctx, cfg.Store, cfg.Workspace, cfg.SessionID, "codex thread discovery timed out")
+			_ = MarkAssignmentDeliveryAttempt(ctx, cfg.Runtime, cfg.Workspace, cfg.SessionID, "codex thread discovery timed out")
 			return
 		case <-probe.C:
 			thread, err := findNewestCodexThread(ctx, runtime.Endpoint, cfg.WorkDir, runtimeStartedAt)
@@ -366,7 +579,7 @@ func discoverCodexLeadThread(
 			}
 			runtime.ThreadID = thread.ID
 			runtime.Status = thread.Status.RuntimeStatus()
-			if err := UpdateCodexRuntimeMetadata(ctx, cfg.Store, cfg.Workspace, cfg.SessionID, runtime); err != nil {
+			if err := UpdateCodexRuntimeMetadata(ctx, cfg.Runtime, cfg.Workspace, cfg.SessionID, runtime); err != nil {
 				cfg.Logger.Debug("failed to persist codex thread metadata", "err", err)
 			}
 			return

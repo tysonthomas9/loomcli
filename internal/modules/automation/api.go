@@ -19,6 +19,7 @@ const (
 	ActionEnableManagedBinding  authority.Action = "automation.enable-managed-binding"
 	ActionDisableManagedBinding authority.Action = "automation.disable-managed-binding"
 	ActionDeleteManagedBinding  authority.Action = "automation.delete-managed-binding"
+	ActionEnsureManagedBinding  authority.Action = "automation.ensure-managed-binding"
 	ActionAdmitEvent            authority.Action = "automation.admit-event"
 	ActionDispatchBinding       authority.Action = "automation.dispatch-binding"
 	ActionSweepCron             authority.Action = "automation.sweep-cron"
@@ -29,6 +30,7 @@ const (
 type API interface {
 	BindingCommands
 	ManagedBindingCommands
+	ProvisioningBindingCommands
 	BindingQueries
 	EventQueries
 	DeliveryQueries
@@ -43,8 +45,15 @@ type API interface {
 type BindingOperations interface {
 	BindingCommands
 	ManagedBindingCommands
+	ProvisioningBindingCommands
 	BindingQueries
 	ManualDispatch
+}
+
+// ProvisioningBindingCommands is the exact system-only convergence surface
+// used by AgentProvisioning. It cannot update or adopt a divergent binding.
+type ProvisioningBindingCommands interface {
+	EnsureManagedBinding(context.Context, authority.SystemAuthority, EnsureManagedBindingCommand) (*Binding, error)
 }
 
 // AuditQueries is the read-only Event/Delivery surface used by audit HTTP
@@ -142,6 +151,13 @@ type CreateBindingCommand struct {
 }
 
 type CreateManagedBindingCommand struct {
+	WorkspaceKey   string            `json:"workspace_key"`
+	AgentServiceID string            `json:"agent_service_id"`
+	Definition     BindingDefinition `json:"binding"`
+}
+
+type EnsureManagedBindingCommand struct {
+	RequestID      string            `json:"request_id"`
 	WorkspaceKey   string            `json:"workspace_key"`
 	AgentServiceID string            `json:"agent_service_id"`
 	Definition     BindingDefinition `json:"binding"`

@@ -3,6 +3,7 @@ package backends
 import (
 	"context"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -11,6 +12,7 @@ import (
 func RunCodexLeadRuntime(
 	ctx context.Context,
 	st store.Store,
+	sessionRuntime leadcontrol.SessionRuntime,
 	workspace string,
 	leadName string,
 	sessionID string,
@@ -19,7 +21,9 @@ func RunCodexLeadRuntime(
 ) error {
 	return leadcontrol.RunCodexLeadRuntime(ctx, leadcontrol.CodexLeadRuntimeConfig{
 		Store:     st,
+		Runtime:   sessionRuntime,
 		Workspace: workspace,
+		ConfigDir: bootstrap.LoomDir(),
 		LeadName:  leadName,
 		SessionID: sessionID,
 		WorkDir:   workDir,

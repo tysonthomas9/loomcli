@@ -80,18 +80,21 @@ func (d *codexTurnDeliverer) deliveredThreadID() string { return d.runtime.Threa
 func (d *codexTurnDeliverer) deliverTurn(
 	ctx context.Context,
 	st store.Store,
+	sessionRuntime SessionRuntime,
 	workspace string,
 	sessionID string,
 	result *DeliveryResult,
 	message string,
 	closeReason string,
 ) (*DeliveryResult, error) {
-	return deliverCodexLeadTurn(ctx, st, workspace, sessionID, d.runtime, result, message, closeReason)
+	return deliverCodexLeadTurn(
+		ctx, sessionRuntime, workspace, sessionID, d.runtime, result, message, closeReason,
+	)
 }
 
 func deliverCodexLeadTurn(
 	ctx context.Context,
-	st store.Store,
+	sessionRuntime SessionRuntime,
 	workspace string,
 	sessionID string,
 	runtime CodexRuntimeMetadata,
@@ -116,7 +119,7 @@ func deliverCodexLeadTurn(
 	result.Thread = thread
 	runtime.Status = thread.Status.RuntimeStatus()
 	result.Runtime = runtime
-	_ = UpdateCodexRuntimeMetadata(ctx, st, workspace, sessionID, runtime)
+	_ = UpdateCodexRuntimeMetadata(ctx, sessionRuntime, workspace, sessionID, runtime)
 	if !thread.Status.CanStartTurn() {
 		result.Reason = fmt.Sprintf("codex thread is %s", runtime.Status)
 		return result, nil

@@ -26,9 +26,12 @@ type workflowCatalogPatchContract struct {
 // extension to both sides of the compatibility lane. The legacy-driver digest
 // freezes Loom's exact current write set; the vendored OpenAPI proves FleetDB
 // still accepts the deprecated generic activation and approval fields. Neither
-// side may survive once Phase 5 is marked complete.
+// side may survive once Phase 5 is marked complete. The generic metadata field
+// itself remains after retirement so ordinary metadata administration can
+// preserve lifecycle-owned approval markers; only descriptions advertising the
+// deprecated approval compatibility operation count as the legacy marker.
 func validateWorkflowCatalogLifecyclePatchExtension(completedPhase int, inventory DirectWriteInventory, contract []byte) error {
-	rows, sites := workflowCatalogLegacyDriverWrites(inventory.LegacyDriver)
+	rows, sites := workflowCatalogLegacyDriverWrites(inventory)
 	activation, activationDeprecated, approvalMetadata, err := workflowCatalogPatchCompatibilityFields(contract)
 	if err != nil {
 		return err
@@ -55,7 +58,24 @@ func validateWorkflowCatalogLifecyclePatchExtension(completedPhase int, inventor
 	return nil
 }
 
-func workflowCatalogLegacyDriverWrites(baseline *LegacyDirectWriteBaseline) (int, int) {
+func workflowCatalogLegacyDriverWrites(inventory DirectWriteInventory) (int, int) {
+	rows, sites := 0, 0
+	for _, use := range inventory.Writes {
+		if use.AggregateOwner != "workflowcatalog" ||
+			!strings.HasPrefix(use.File, "internal/driver/") {
+			continue
+		}
+		rows++
+		sites += use.Count
+	}
+	// The primary inventory is authoritative after the Phase 5 snapshot
+	// stopped storing a separate legacy-driver digest. Retain the fallback so
+	// the Phase 4 compatibility record and older checked snapshots remain
+	// verifiable without double-counting inventories that contain both forms.
+	if rows != 0 {
+		return rows, sites
+	}
+	baseline := inventory.LegacyDriver
 	if baseline == nil {
 		return 0, 0
 	}
@@ -78,6 +98,9 @@ func workflowCatalogPatchCompatibilityFields(contract []byte) (bool, bool, bool,
 	}
 	activeVersion, activeVersionPresent := update.Properties["active_version_id"]
 	metadata, metadataPresent := update.Properties["metadata"]
-	approvalMetadata := metadataPresent && strings.Contains(metadata.Description, "approved_version")
+	description := strings.ToLower(metadata.Description)
+	approvalMetadata := metadataPresent &&
+		strings.Contains(description, "approved_version") &&
+		(strings.Contains(description, "deprecated") || strings.Contains(description, "compatibility"))
 	return activeVersionPresent, activeVersion.Deprecated, approvalMetadata, nil
 }

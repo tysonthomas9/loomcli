@@ -1,5 +1,6 @@
 export {
   ArtifactHandle,
+  DaytonaProviderSchemaV1,
   LoomAPIError,
   RunnerEnv,
   TaskRunClient,

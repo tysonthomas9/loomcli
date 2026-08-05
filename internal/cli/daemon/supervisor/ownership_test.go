@@ -206,6 +206,74 @@ func TestAgentOwnershipOperationsSerializeAcquireAndRelease(t *testing.T) {
 	}
 }
 
+type ownedOwnershipLifecycleStore struct {
+	store.AgentOwnershipLeaseStore
+	heartbeat store.AgentOwnershipLeaseProof
+	release   store.AgentOwnershipLeaseProof
+}
+
+func (s *ownedOwnershipLifecycleStore) HeartbeatOwned(
+	_ context.Context,
+	proof store.AgentOwnershipLeaseProof,
+	ttl time.Duration,
+) (*domain.AgentOwnershipLease, error) {
+	s.heartbeat = proof
+	now := time.Now().UTC()
+	return &domain.AgentOwnershipLease{
+		WorkspaceKey: proof.WorkspaceKey, AgentID: proof.AgentID, LeaseID: proof.LeaseID,
+		OwnerID: proof.OwnerID, RuntimeProvider: proof.RuntimeProvider, NodeID: proof.NodeID,
+		FencingToken: proof.FencingToken, Status: domain.AgentLeaseActive,
+		LastHeartbeat: now, ExpiresAt: now.Add(ttl), CreatedAt: now, UpdatedAt: now,
+	}, nil
+}
+
+func (s *ownedOwnershipLifecycleStore) ReleaseOwned(
+	_ context.Context,
+	proof store.AgentOwnershipLeaseProof,
+) (*domain.AgentOwnershipLease, error) {
+	s.release = proof
+	return &domain.AgentOwnershipLease{
+		WorkspaceKey: proof.WorkspaceKey, AgentID: proof.AgentID, LeaseID: proof.LeaseID,
+		OwnerID: proof.OwnerID, RuntimeProvider: proof.RuntimeProvider, NodeID: proof.NodeID,
+		FencingToken: proof.FencingToken, Status: domain.AgentLeaseReleased,
+	}, nil
+}
+
+func TestAgentOwnershipHeartbeatAndReleasePreferOwnerFencedCommands(t *testing.T) {
+	base := memstore.New()
+	owned := &ownedOwnershipLifecycleStore{AgentOwnershipLeaseStore: base.AgentOwnershipLeases()}
+	s := &Supervisor{
+		WorkspaceID:  "WS",
+		ControlStore: &controlPlaneStoreOverrides{Store: base, ownership: owned},
+	}
+	ap := &AgentProcess{
+		Entry:                 cfgpkg.AgentEntry{Worktree: "worker-1", Role: "task"},
+		OwnershipLeaseID:      "ownership-1",
+		OwnershipOwnerID:      "runtime-1",
+		OwnershipNodeID:       "node-1",
+		OwnershipLeaseToken:   "raw-ownership-token",
+		OwnershipFencingToken: 11,
+		OwnershipRenewedAt:    time.Now(),
+	}
+
+	if err := s.doOwnershipHeartbeat(ap, 45*time.Second); err != nil {
+		t.Fatalf("doOwnershipHeartbeat: %v", err)
+	}
+	s.releaseAgentOwnership(ap)
+
+	want := store.AgentOwnershipLeaseProof{
+		WorkspaceKey: "WS", AgentID: "worker-1", LeaseID: "ownership-1",
+		LeaseToken: "raw-ownership-token", OwnerID: "runtime-1",
+		RuntimeProvider: domain.RuntimeProviderLocal, NodeID: "node-1", FencingToken: 11,
+	}
+	if owned.heartbeat != want {
+		t.Fatalf("heartbeat proof = %+v, want %+v", owned.heartbeat, want)
+	}
+	if owned.release != want {
+		t.Fatalf("release proof = %+v, want %+v", owned.release, want)
+	}
+}
+
 func TestAcquireAgentOwnershipRejectsNonAdvancingFence(t *testing.T) {
 	base := memstore.New()
 	ownership := &fixedAcquireOwnershipLeaseStore{

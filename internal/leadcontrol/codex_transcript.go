@@ -10,12 +10,12 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 const (
-	codexTranscriptCaptureTimeout = 10 * time.Second
+	codexTranscriptCaptureTimeout = 45 * time.Second
 
 	// FleetDB accepts artifact content up to 64 MiB. Keep one MiB of headroom
 	// so the canonical transcript, including a truncation marker, is always
@@ -59,8 +59,6 @@ const (
 type codexTranscriptCaptureTarget struct {
 	workspace string
 	sessionID string
-	agentID   string
-	taskID    string
 	runtime   CodexRuntimeMetadata
 }
 
@@ -84,11 +82,7 @@ func captureCodexInteractiveTranscript(
 	if err != nil {
 		return err
 	}
-	finalized, err := uploadCodexTranscriptArtifact(ctx, cfg, *target, capture)
-	if err != nil {
-		return err
-	}
-	return persistCodexTranscriptRef(ctx, cfg, *target, finalized.ArtifactID)
+	return publishCodexTranscript(ctx, cfg, *target, capture)
 }
 
 func resolveCodexTranscriptCaptureTarget(
@@ -97,28 +91,25 @@ func resolveCodexTranscriptCaptureTarget(
 	runtime CodexRuntimeMetadata,
 	runtimeStartedAt time.Time,
 ) (*codexTranscriptCaptureTarget, error) {
-	if cfg.Store == nil || cfg.Store.AgentSessions() == nil {
-		return nil, nil
-	}
 	workspace := strings.TrimSpace(cfg.Workspace)
 	sessionID := strings.TrimSpace(cfg.SessionID)
 	if workspace == "" || sessionID == "" {
 		return nil, nil
 	}
-
-	session, err := cfg.Store.AgentSessions().Get(ctx, workspace, sessionID)
-	if errors.Is(err, domain.ErrNotFound) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("load codex interactive session: %w", err)
-	}
-	persisted := RuntimeMetadataFromSession(session)
-	if runtime.Endpoint == "" {
-		runtime.Endpoint = persisted.Endpoint
-	}
-	if runtime.ThreadID == "" {
-		runtime.ThreadID = persisted.ThreadID
+	if cfg.Store != nil && cfg.Store.AgentSessions() != nil {
+		session, err := cfg.Store.AgentSessions().Get(ctx, workspace, sessionID)
+		if err != nil && !errors.Is(err, domain.ErrNotFound) {
+			return nil, fmt.Errorf("load codex interactive session: %w", err)
+		}
+		if session != nil {
+			persisted := RuntimeMetadataFromSession(session)
+			if runtime.Endpoint == "" {
+				runtime.Endpoint = persisted.Endpoint
+			}
+			if runtime.ThreadID == "" {
+				runtime.ThreadID = persisted.ThreadID
+			}
+		}
 	}
 	if runtime.Endpoint == "" {
 		return nil, errors.New("capture codex transcript: app-server endpoint unavailable")
@@ -137,8 +128,6 @@ func resolveCodexTranscriptCaptureTarget(
 	return &codexTranscriptCaptureTarget{
 		workspace: workspace,
 		sessionID: sessionID,
-		agentID:   session.AgentID,
-		taskID:    session.TaskID,
 		runtime:   runtime,
 	}, nil
 }
@@ -170,58 +159,27 @@ func readCodexTranscriptContent(ctx context.Context, runtime CodexRuntimeMetadat
 	return capture, nil
 }
 
-func uploadCodexTranscriptArtifact(
+func publishCodexTranscript(
 	ctx context.Context,
 	cfg CodexLeadRuntimeConfig,
 	target codexTranscriptCaptureTarget,
 	capture canonicalTranscriptCapture,
-) (*domain.Artifact, error) {
+) error {
+	if cfg.Runtime == nil {
+		return ErrSessionRuntimeUnavailable
+	}
 	metadata := transcriptArtifactMetadata(map[string]string{
 		"runtime": "interactive-codex",
 		"backend": RuntimeProviderCodex,
 	}, capture)
-	finalized, err := store.UploadContentArtifact(ctx, cfg.Store.Artifacts(), store.ArtifactCreate{
-		WorkspaceKey:  target.workspace,
-		ArtifactID:    "transcript-" + target.sessionID,
-		AgentID:       target.agentID,
-		SessionID:     target.sessionID,
-		TaskID:        target.taskID,
-		OwnerType:     "session",
-		OwnerID:       target.sessionID,
-		Type:          "transcript",
-		Summary:       "interactive Codex session transcript",
-		MIMEType:      "application/x-ndjson",
-		DurableStatus: "declared",
-		Metadata:      metadata,
-	}, capture.content)
-	if err != nil {
-		return nil, fmt.Errorf("upload codex transcript artifact: %w", err)
-	}
-	return finalized, nil
-}
-
-func persistCodexTranscriptRef(
-	ctx context.Context,
-	cfg CodexLeadRuntimeConfig,
-	target codexTranscriptCaptureTarget,
-	artifactID string,
-) error {
-	// Re-read before updating so transcript capture does not overwrite metadata
-	// written concurrently by assignment delivery or runtime discovery.
-	session, err := cfg.Store.AgentSessions().Get(ctx, target.workspace, target.sessionID)
-	if err != nil {
-		return fmt.Errorf("reload codex interactive session: %w", err)
-	}
-	metadata := cloneMetadata(session.Metadata)
-	metadata["transcript_ref"] = "artifact://" + artifactID
 	metadata[MetadataCodexThreadID] = target.runtime.ThreadID
-	if _, err := cfg.Store.AgentSessions().Update(
-		ctx,
-		target.workspace,
-		target.sessionID,
-		store.AgentSessionUpdate{Metadata: &metadata},
-	); err != nil {
-		return fmt.Errorf("persist codex transcript ref: %w", err)
+	if err := cfg.Runtime.PublishTranscript(ctx, interaction.PublishTranscriptCommand{
+		WorkspaceKey: target.workspace,
+		SessionID:    target.sessionID,
+		Content:      capture.content,
+		Metadata:     metadata,
+	}); err != nil {
+		return fmt.Errorf("publish codex transcript: %w", err)
 	}
 	return nil
 }

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"strings"
 	"syscall"
 	"time"
@@ -19,18 +20,31 @@ import (
 const (
 	localDaemonPollInterval = 2 * time.Second
 	localDaemonMaxBackoff   = 30 * time.Second
+	localDaemonStopTimeout  = 12 * time.Second
 )
 
 var (
 	localDaemonLoadConfig        = loadLocalDaemonConfigForWorkspace
 	localDaemonWorkspaceHasRepos = workspaceHasReposForLocalDaemon
+	localDaemonWorkspaceKeyFn    = localDaemonWorkspaceKey
 )
 
-func startLocalDaemonSupervisor(ctx context.Context, dataDir, exe string, port int, runtimeURL string) {
-	go superviseLocalDaemon(ctx, dataDir, exe, port, runtimeURL)
+func startLocalDaemonSupervisor(ctx context.Context, dataDir, exe string, port int, runtimeURL string) <-chan struct{} {
+	done := make(chan struct{})
+	go superviseLocalDaemon(ctx, dataDir, exe, port, runtimeURL, done)
+	return done
 }
 
-func superviseLocalDaemon(ctx context.Context, dataDir, exe string, port int, runtimeURL string) {
+func awaitLocalDaemonSupervisor(dataDir string, done <-chan struct{}) {
+	select {
+	case <-done:
+	case <-time.After(localDaemonStopTimeout):
+		appendLocalDaemonLog(dataDir, "managed daemon supervisor did not stop within "+localDaemonStopTimeout.String())
+	}
+}
+
+func superviseLocalDaemon(ctx context.Context, dataDir, exe string, port int, runtimeURL string, done chan<- struct{}) {
+	defer close(done)
 	backoff := time.Second
 	for {
 		workspaceKey, runnable, err := localDaemonRunnableWorkspace(ctx, dataDir, runtimeURL)
@@ -65,7 +79,7 @@ func superviseLocalDaemon(ctx context.Context, dataDir, exe string, port int, ru
 }
 
 func localDaemonRunnableWorkspace(ctx context.Context, dataDir, runtimeURL string) (string, bool, error) {
-	workspaceKey, err := localDaemonWorkspaceKey()
+	workspaceKey, err := localDaemonWorkspaceKeyFn()
 	if err != nil || workspaceKey == "" {
 		return workspaceKey, false, err
 	}
@@ -167,29 +181,89 @@ func runLocalDaemonOnce(ctx context.Context, dataDir, exe string, port int, work
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start loom daemon: %w", err)
 	}
+	if err := updateRuntimeDaemonPID(dataDir, os.Getpid(), cmd.Process.Pid); err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return fmt.Errorf("record loom daemon pid: %w", err)
+	}
+	defer clearRuntimeDaemonPID(dataDir, os.Getpid(), cmd.Process.Pid)
 
 	done := make(chan error, 1)
 	go func() {
 		done <- cmd.Wait()
 	}()
+	workspaceTicker := time.NewTicker(localDaemonPollInterval)
+	defer workspaceTicker.Stop()
+	return waitManagedLocalDaemon(ctx, dataDir, workspaceKey, cmd, done, workspaceTicker.C)
+}
 
-	select {
-	case err := <-done:
-		return err
-	case <-ctx.Done():
-		if cmd.Process != nil {
-			_ = cmd.Process.Signal(syscall.SIGTERM)
-		}
+func waitManagedLocalDaemon(
+	ctx context.Context,
+	dataDir string,
+	workspaceKey string,
+	cmd *exec.Cmd,
+	done <-chan error,
+	workspaceTicks <-chan time.Time,
+) error {
+	for {
 		select {
-		case <-done:
-		case <-time.After(10 * time.Second):
-			if cmd.Process != nil {
-				_ = cmd.Process.Kill()
+		case err := <-done:
+			return err
+		case <-ctx.Done():
+			stopManagedLocalDaemon(cmd, done)
+			return ctx.Err()
+		case <-workspaceTicks:
+			currentWorkspace, err := localDaemonWorkspaceKeyFn()
+			if err != nil {
+				appendLocalDaemonLog(dataDir, "cannot refresh active daemon workspace: "+err.Error())
+				continue
 			}
-			<-done
+			if currentWorkspace == workspaceKey {
+				continue
+			}
+			appendLocalDaemonLog(dataDir, fmt.Sprintf("active workspace changed from %s to %s; rotating managed daemon", workspaceKey, currentWorkspace))
+			stopManagedLocalDaemon(cmd, done)
+			return nil
 		}
-		return ctx.Err()
 	}
+}
+
+func stopManagedLocalDaemon(cmd *exec.Cmd, done <-chan error) {
+	if cmd.Process != nil {
+		_ = cmd.Process.Signal(syscall.SIGTERM)
+	}
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		<-done
+	}
+}
+
+// updateRuntimeDaemonPID records the managed daemon child only when the
+// runtime file still belongs to this local-service process. The ownership
+// check prevents a delayed child exit from modifying a successor runtime.
+func updateRuntimeDaemonPID(dataDir string, servicePID, daemonPID int) error {
+	info, err := readRuntime(dataDir)
+	if err != nil {
+		return err
+	}
+	if info.PID != servicePID {
+		return fmt.Errorf("runtime service changed from pid %d to %d", servicePID, info.PID)
+	}
+	info.DaemonPID = daemonPID
+	return writeRuntime(dataDir, info)
+}
+
+func clearRuntimeDaemonPID(dataDir string, servicePID, daemonPID int) {
+	info, err := readRuntime(dataDir)
+	if err != nil || info.PID != servicePID || info.DaemonPID != daemonPID {
+		return
+	}
+	info.DaemonPID = 0
+	_ = writeRuntime(dataDir, info)
 }
 
 func appendLocalDaemonLog(dataDir, message string) {

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Run the builtin workflow node unit tests (internal/workflows/builtin/*.test.mjs).
+# Run the builtin workflow node unit tests (internal/infra/workflowdistribution/builtin/*.test.mjs).
 #
-# The workflow .ts files statically import @flue/runtime (and @loom/sdk, plus
-# @daytona/sdk for the daytona runner) — those bare specifiers only resolve
+# The workflow .ts files statically import @flue/runtime and @loom/sdk. Those
+# bare specifiers only resolve
 # through a staged node_modules, exactly like the bundle build. Mirror the
 # rebuild-builtin-bundle staging so `node --test` can load the modules.
 #
@@ -17,7 +17,7 @@ FLUE_REPO="${FLUE_REPO:-$(cd "$ROOT/../flue" 2>/dev/null && pwd || true)}"
   exit 1
 }
 
-SRC="$ROOT/internal/workflows/builtin"
+SRC="$ROOT/internal/infra/workflowdistribution/builtin"
 STAGE="$(mktemp -d -t loom-builtin-tests.XXXXXX)"
 echo "==> staging builtin workflow tests at $STAGE"
 # shellcheck source=scripts/stage-builtin-modules.sh

@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
-	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/app/agentscompat"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	webuilog "github.com/tysonthomas9/loomcli/internal/webui/log"
@@ -28,6 +30,9 @@ type agentServiceImpl struct {
 	termAuth           *realtime.TerminalAuth
 	interactiveRuntime InteractiveRuntimeController
 	store              store.Store // fleet-db backed store; nil disables CRUD endpoints
+	compatibility      agents.CompatibilityAPI
+	managed            agentscompat.ManagedCommands
+	retirements        agentscompat.ManagedRetirements
 }
 
 // NewAgentService creates a new AgentService implementation.
@@ -52,12 +57,40 @@ func NewAgentServiceWithInteractiveRuntime(
 	st store.Store,
 	interactiveRuntime InteractiveRuntimeController,
 ) service.AgentService {
+	return NewAgentServiceWithCompatibility(
+		gitOps,
+		termMgr,
+		termAuth,
+		st,
+		interactiveRuntime,
+		nil,
+		nil,
+		nil,
+	)
+}
+
+// NewAgentServiceWithCompatibility is the production composition path for
+// supervised assignments. Mutations fail closed unless the owner API and
+// narrow managed-role workflow are both supplied.
+func NewAgentServiceWithCompatibility(
+	gitOps ops.GitOps,
+	termMgr *terminal.AgentTmuxManager,
+	termAuth *realtime.TerminalAuth,
+	st store.Store,
+	interactiveRuntime InteractiveRuntimeController,
+	compatibility agents.CompatibilityAPI,
+	managed agentscompat.ManagedCommands,
+	retirements agentscompat.ManagedRetirements,
+) service.AgentService {
 	return &agentServiceImpl{
 		gitOps:             gitOps,
 		termMgr:            termMgr,
 		termAuth:           termAuth,
 		interactiveRuntime: interactiveRuntime,
 		store:              st,
+		compatibility:      compatibility,
+		managed:            managed,
+		retirements:        retirements,
 	}
 }
 
@@ -366,48 +399,81 @@ func (s *agentServiceImpl) ListAgents(ctx context.Context, wsKey string) ([]*dom
 
 // CreateAgent registers a new agent assignment in the fleet-db store.
 func (s *agentServiceImpl) CreateAgent(ctx context.Context, in service.AgentCreateInput) (*domain.Agent, error) {
-	if s.store == nil {
-		return nil, service.ErrUnavailable("fleet-db store not configured")
+	if s.store == nil || s.compatibility == nil || s.managed == nil {
+		return nil, service.ErrUnavailable("Agents compatibility commands not configured")
 	}
 	in.RoleName = normalizeFirstClassAgentRole(in.RoleName)
 	in.Name = normalizeStoredAgentName(in.Name)
 	in.Kind = normalizeAgentRoleKind(in.Kind)
 	in.Prompt = strings.TrimSpace(in.Prompt)
 	in.PromptFile = strings.TrimSpace(in.PromptFile)
+	if strings.TrimSpace(in.Parent) != "" {
+		return nil, service.ErrValidation("parent is runtime-owned and cannot be set during agent creation")
+	}
 	if err := validateAgentCreateInput(in); err != nil {
 		return nil, err
+	}
+	operatorAuth, ok := service.AgentOperatorAuthorityFromContext(ctx)
+	if !ok {
+		return nil, service.ErrForbidden("verified operator authority is required")
 	}
 	roleReceipt, err := s.ensureAgentRole(ctx, in.WorkspaceKey, in.RoleName, in.Kind, in.Prompt, in.PromptFile)
 	if err != nil {
 		return nil, err
 	}
-	created, err := s.store.Agents().Create(ctx, store.AgentCreate{
-		WorkspaceKey:     in.WorkspaceKey,
-		Name:             in.Name,
-		RoleName:         in.RoleName,
-		Auto:             in.Auto,
-		Backend:          in.Backend,
-		FallbackBackends: in.FallbackBackends,
-		Repos:            in.Repos,
-		RepoGroups:       in.RepoGroups,
-		CrossRepo:        in.CrossRepo,
-		Parent:           in.Parent,
-		DesiredState:     in.DesiredState,
-	})
+	created, err := s.compatibility.CreateSupervisedAssignment(
+		ctx,
+		operatorAuth,
+		agents.CreateSupervisedAssignmentCommand{
+			WorkspaceKey:     in.WorkspaceKey,
+			AgentName:        in.Name,
+			RoleName:         in.RoleName,
+			Auto:             in.Auto,
+			Backend:          in.Backend,
+			FallbackBackends: in.FallbackBackends,
+			Repos:            in.Repos,
+			RepoGroups:       in.RepoGroups,
+			CrossRepo:        in.CrossRepo,
+			DesiredState:     agents.SupervisedAssignmentDesiredState(in.DesiredState),
+		},
+	)
 	if err != nil {
 		s.compensateAgentRole(ctx, roleReceipt)
 		return nil, classifyStoreError("create agent", err)
 	}
-	if err := s.ensureLocalAgentWorktrees(ctx, *created); err != nil {
-		if deleteErr := s.store.Agents().Delete(context.WithoutCancel(ctx), created.WorkspaceKey, created.Name); deleteErr != nil {
-			logger.Warn("agent create: assignment compensation failed",
-				"workspace", created.WorkspaceKey, "agent", created.Name, "err", deleteErr)
-		} else {
-			s.compensateAgentRole(context.WithoutCancel(ctx), roleReceipt)
-		}
+	createdDomain := supervisedAssignmentToDomain(created)
+	if err := s.ensureLocalAgentWorktrees(ctx, *createdDomain); err != nil {
+		s.compensateFailedAgentCreation(ctx, created, roleReceipt)
 		return nil, err
 	}
-	return created, nil
+	return createdDomain, nil
+}
+
+func (s *agentServiceImpl) compensateFailedAgentCreation(
+	ctx context.Context,
+	created *agents.SupervisedAssignment,
+	roleReceipt agentRoleCreateReceipt,
+) {
+	var deleteErr error
+	cleanupCtx := context.WithoutCancel(ctx)
+	if s.retirements == nil {
+		deleteErr = agents.ErrUnavailable
+	} else {
+		deleteErr = s.retirements.RetireManagedAssignment(
+			cleanupCtx,
+			agents.RetireSupervisedAssignmentCommand{
+				WorkspaceKey: created.WorkspaceKey,
+				AgentName:    created.Name,
+			},
+			"compensate failed supervised assignment creation "+created.Name,
+		)
+	}
+	if deleteErr != nil {
+		logger.Warn("agent create: assignment compensation failed",
+			"workspace", created.WorkspaceKey, "agent", created.Name, "err", deleteErr)
+		return
+	}
+	s.compensateAgentRole(cleanupCtx, roleReceipt)
 }
 
 func (s *agentServiceImpl) ensureLocalAgentWorktrees(ctx context.Context, agent domain.Agent) error {
@@ -512,16 +578,19 @@ func (s *agentServiceImpl) ensureAgentRole(
 	if isLeadAgentRole(roleName) {
 		description = "Lead/orchestrator interactive"
 	}
-	created, err := s.store.Roles().Create(ctx, store.RoleCreate{
+	if s.managed == nil {
+		return agentRoleCreateReceipt{}, service.ErrUnavailable("Agents role commands unavailable")
+	}
+	_, err := s.managed.EnsureRole(ctx, agents.EnsureRoleCommand{
+		RequestID:    "interactive-agent-role:" + workspaceKey + ":" + roleName,
 		WorkspaceKey: workspaceKey,
-		Name:         roleName,
-		Kind:         string(domain.RoleKindInteractive),
-		Description:  description,
-		Prompt:       prompt,
-		PromptFile:   promptFile,
+		Role: agents.RoleDefinition{
+			Name: roleName, Kind: string(domain.RoleKindInteractive),
+			Description: description, Prompt: prompt, PromptFile: promptFile,
+		},
 	})
 	if err != nil {
-		if !errors.Is(err, domain.ErrAlreadyExists) {
+		if !errors.Is(err, agents.ErrConflict) && !errors.Is(err, domain.ErrAlreadyExists) {
 			return agentRoleCreateReceipt{}, classifyStoreError("create agent role", err)
 		}
 		existing, getErr := s.store.Roles().Get(ctx, workspaceKey, roleName)
@@ -530,7 +599,11 @@ func (s *agentServiceImpl) ensureAgentRole(
 		}
 		return agentRoleCreateReceipt{}, reconcileExistingAgentRole(existing, roleName, kind, prompt, promptFile)
 	}
-	return agentRoleCreateReceipt{role: created, created: true}, nil
+	persisted, err := s.store.Roles().Get(ctx, workspaceKey, roleName)
+	if err != nil {
+		return agentRoleCreateReceipt{}, classifyStoreError("load created agent role", err)
+	}
+	return agentRoleCreateReceipt{role: persisted, created: true}, nil
 }
 
 func (s *agentServiceImpl) compensateAgentRole(ctx context.Context, receipt agentRoleCreateReceipt) {
@@ -586,29 +659,87 @@ func isLeadAgentRole(roleName string) bool {
 
 // UpdateAgent applies a partial update to an existing agent.
 func (s *agentServiceImpl) UpdateAgent(ctx context.Context, wsKey, name string, patch service.AgentUpdateInput) (*domain.Agent, error) {
-	if s.store == nil {
-		return nil, service.ErrUnavailable("fleet-db store not configured")
+	if s.store == nil || s.compatibility == nil {
+		return nil, service.ErrUnavailable("Agents compatibility commands not configured")
 	}
 	name = normalizeStoredAgentName(name)
 	if err := validateStoredAgentName(name); err != nil {
 		return nil, err
 	}
-	updated, err := s.store.Agents().Update(ctx, wsKey, name, store.AgentUpdate{
-		RoleName:         patch.RoleName,
-		Auto:             patch.Auto,
-		Backend:          patch.Backend,
-		FallbackBackends: patch.FallbackBackends,
-		Repos:            patch.Repos,
-		RepoGroups:       patch.RepoGroups,
-		CrossRepo:        patch.CrossRepo,
-		Parent:           patch.Parent,
-		State:            patch.State,
-		DesiredState:     patch.DesiredState,
-	})
+	if patch.State != nil {
+		return nil, service.ErrValidation("state is runtime-owned and cannot be patched")
+	}
+	if patch.Parent != nil {
+		return nil, service.ErrValidation("parent is execution-owned and cannot be patched")
+	}
+	operatorAuth, ok := service.AgentOperatorAuthorityFromContext(ctx)
+	if !ok {
+		return nil, service.ErrForbidden("verified operator authority is required")
+	}
+	updated, err := s.compatibility.UpdateSupervisedAssignmentIntent(
+		ctx,
+		operatorAuth,
+		agents.UpdateSupervisedAssignmentIntentCommand{
+			WorkspaceKey: wsKey,
+			AgentName:    name,
+			Patch: agents.SupervisedAssignmentIntentPatch{
+				RoleName:         patch.RoleName,
+				Auto:             patch.Auto,
+				Backend:          patch.Backend,
+				FallbackBackends: patch.FallbackBackends,
+				Repos:            patch.Repos,
+				RepoGroups:       patch.RepoGroups,
+				CrossRepo:        patch.CrossRepo,
+				DesiredState: supervisedAssignmentDesiredStatePointer(
+					patch.DesiredState,
+				),
+			},
+		},
+	)
 	if err != nil {
 		return nil, classifyStoreError("update agent", err)
 	}
-	return updated, nil
+	return supervisedAssignmentToDomain(updated), nil
+}
+
+func supervisedAssignmentDesiredStatePointer(
+	value *domain.AgentDesiredState,
+) *agents.SupervisedAssignmentDesiredState {
+	if value == nil {
+		return nil
+	}
+	converted := agents.SupervisedAssignmentDesiredState(*value)
+	return &converted
+}
+
+func supervisedAssignmentToDomain(value *agents.SupervisedAssignment) *domain.Agent {
+	if value == nil {
+		return nil
+	}
+	return &domain.Agent{
+		WorkspaceKey:     value.WorkspaceKey,
+		Name:             value.Name,
+		RoleName:         value.RoleName,
+		Auto:             value.Auto,
+		Backend:          value.Backend,
+		FallbackBackends: slices.Clone(value.FallbackBackends),
+		Repos:            slices.Clone(value.Repos),
+		RepoGroups:       slices.Clone(value.RepoGroups),
+		CrossRepo:        value.CrossRepo,
+		Parent:           value.Parent,
+		State:            domain.AgentState(value.State),
+		Mode:             domain.AgentMode(value.Mode),
+		TaskFilter:       value.TaskFilter,
+		MaxConcurrency:   value.MaxConcurrency,
+		BudgetPolicy:     value.BudgetPolicy,
+		DesiredState:     domain.AgentDesiredState(value.DesiredState),
+		CreatedAt:        value.CreatedAt,
+		UpdatedAt:        value.UpdatedAt,
+		LiveStatus:       domain.AgentLiveStatus(value.LiveStatus),
+		ActiveTaskID:     value.ActiveTaskID,
+		ActivePhase:      value.ActivePhase,
+		LastErrorClass:   value.LastErrorClass,
+	}
 }
 
 func (s *agentServiceImpl) requestInteractiveAgentLifecycle(
@@ -620,14 +751,11 @@ func (s *agentServiceImpl) requestInteractiveAgentLifecycle(
 	unlock := terminal.LockAgentLifecycle(wsKey, agent.Name)
 	defer unlock()
 
-	var ownedKeys []terminal.SessionKey
 	switch in.CommandType {
 	case "yield":
 		return nil, service.ErrValidation("interactive agents do not support yield; use stop")
 	case "stop", "restart":
-		var err error
-		ownedKeys, err = s.terminateInteractiveRuntime(ctx, wsKey, agent)
-		if err != nil {
+		if _, err := s.terminateInteractiveRuntime(ctx, wsKey, agent); err != nil {
 			return nil, err
 		}
 	case "start":
@@ -639,21 +767,14 @@ func (s *agentServiceImpl) requestInteractiveAgentLifecycle(
 	}
 
 	updated, err := s.UpdateAgent(ctx, wsKey, agent.Name, service.AgentUpdateInput{
-		State:        &in.State,
 		DesiredState: &in.DesiredState,
 	})
 	if err != nil {
 		return nil, err
 	}
-	if in.CommandType == "stop" {
-		// The shared lifecycle boundary prevents terminal creation or attach
-		// between the ownership snapshot and the durable stopped-state update.
-		// Preserve the second idempotent kill as defense in depth for runtime
-		// implementations outside that boundary.
-		if err := s.killInteractiveRuntimeKeys(ownedKeys); err != nil {
-			return nil, err
-		}
-	}
+	// Runtime state is placement-owned. Preserve the existing response shape
+	// without writing the transitional projection.
+	updated.State = in.State
 	return updated, nil
 }
 
@@ -665,18 +786,18 @@ func (s *agentServiceImpl) terminateInteractiveRuntime(
 	if s.interactiveRuntime == nil {
 		return nil, service.ErrUnavailable("interactive terminal runtime is not configured")
 	}
-	ownedByKey, ownedKeys, err := s.interactiveRuntimeOwnership(ctx, wsKey, agent.Name)
+	ownedByKey, owned, err := s.interactiveRuntimeOwnership(ctx, wsKey, agent.Name)
 	if err != nil {
 		return nil, err
 	}
-	active, err := s.activeOwnedInteractiveSessions(ctx, wsKey, agent.Name, ownedByKey)
-	if err != nil {
+	if err := s.validateActiveInteractiveRuntimeOwnership(ctx, wsKey, agent.Name, ownedByKey, owned); err != nil {
 		return nil, err
+	}
+	ownedKeys := make([]terminal.SessionKey, 0, len(owned))
+	for _, runtimeSession := range owned {
+		ownedKeys = append(ownedKeys, runtimeSession.Key)
 	}
 	if err := s.killInteractiveRuntimeKeys(ownedKeys); err != nil {
-		return nil, err
-	}
-	if err := s.cancelInteractiveAgentSessions(ctx, wsKey, active); err != nil {
 		return nil, err
 	}
 	return ownedKeys, nil
@@ -686,65 +807,67 @@ func (s *agentServiceImpl) interactiveRuntimeOwnership(
 	ctx context.Context,
 	wsKey string,
 	agentName string,
-) (map[terminal.SessionKey]struct{}, []terminal.SessionKey, error) {
+) (map[terminal.SessionKey]struct{}, []InteractiveRuntimeSession, error) {
 	owned, err := s.interactiveRuntime.OwnedAgentSessions(ctx, wsKey, agentName)
 	if err != nil {
 		return nil, nil, err
 	}
 	ownedByKey := make(map[terminal.SessionKey]struct{}, len(owned))
-	ownedKeys := make([]terminal.SessionKey, 0, len(owned))
 	for _, runtimeSession := range owned {
 		ownedByKey[runtimeSession.Key] = struct{}{}
-		ownedKeys = append(ownedKeys, runtimeSession.Key)
 	}
-	return ownedByKey, ownedKeys, nil
+	return ownedByKey, owned, nil
 }
 
-func (s *agentServiceImpl) activeOwnedInteractiveSessions(
+func (s *agentServiceImpl) validateActiveInteractiveRuntimeOwnership(
 	ctx context.Context,
 	wsKey string,
 	agentName string,
 	ownedByKey map[terminal.SessionKey]struct{},
-) ([]*domain.AgentSession, error) {
-	sessions, err := s.store.AgentSessions().List(ctx, wsKey, store.AgentSessionFilter{
-		AgentID: agentName,
-		Kind:    domain.AgentSessionKindOrchestration,
-		Limit:   100,
-	})
-	if err != nil {
-		return nil, service.ErrInternal("list interactive agent sessions", err)
-	}
-	active := make([]*domain.AgentSession, 0, len(sessions))
-	for _, session := range sessions {
-		if !isActiveInteractiveSession(session) {
-			continue
-		}
-		if session.TerminalID == "" {
-			return nil, service.ErrConflict("interactive runtime is not owned by a web terminal")
-		}
-		key := terminal.SessionKey{Workspace: wsKey, Name: session.TerminalID}
-		if _, processOwned := ownedByKey[key]; !processOwned {
-			return nil, service.ErrConflict("interactive runtime is not owned by this agent on this server")
-		}
-		active = append(active, session)
-	}
-	return active, nil
-}
-
-func (s *agentServiceImpl) cancelInteractiveAgentSessions(
-	ctx context.Context,
-	wsKey string,
-	active []*domain.AgentSession,
+	owned []InteractiveRuntimeSession,
 ) error {
-	status := domain.AgentSessionCancelled
-	finishedAtValue := time.Now().UTC()
-	finishedAt := &finishedAtValue
-	for _, session := range active {
-		if _, err := s.store.AgentSessions().Update(ctx, wsKey, session.SessionID, store.AgentSessionUpdate{
-			Status:     &status,
-			FinishedAt: &finishedAt,
-		}); err != nil {
-			return service.ErrInternal("terminalize interactive agent session", err)
+	canonical := make(map[string]string, len(owned))
+	for _, runtimeSession := range owned {
+		sessionID := strings.TrimSpace(runtimeSession.InteractionSessionID)
+		terminalID := strings.TrimSpace(runtimeSession.InteractionTerminalID)
+		if sessionID != "" && terminalID != "" {
+			canonical[sessionID] = terminalID
+		}
+	}
+
+	for _, kind := range []domain.AgentSessionKind{
+		domain.AgentSessionKindInteractive,
+		domain.AgentSessionKindOrchestration,
+	} {
+		sessions, err := s.store.AgentSessions().List(ctx, wsKey, store.AgentSessionFilter{
+			AgentID: agentName,
+			Kind:    kind,
+			Limit:   100,
+		})
+		if err != nil {
+			return service.ErrInternal("list interactive agent sessions", err)
+		}
+		for _, session := range sessions {
+			if !isActiveInteractiveSession(session) {
+				continue
+			}
+			if session.TerminalID == "" {
+				return service.ErrConflict("interactive runtime is not owned by a web terminal")
+			}
+			if kind == domain.AgentSessionKindInteractive {
+				if terminalID, processOwned := canonical[session.SessionID]; !processOwned ||
+					terminalID != session.TerminalID {
+					return service.ErrConflict("canonical interactive runtime is not owned by this agent on this server")
+				}
+				continue
+			}
+			// Phase-4 compatibility rows used TerminalID as the PTY tab key.
+			// Canonical Interaction rows above use a distinct random terminal
+			// identity and are matched through persisted session/terminal IDs.
+			key := terminal.SessionKey{Workspace: wsKey, Name: session.TerminalID}
+			if _, processOwned := ownedByKey[key]; !processOwned {
+				return service.ErrConflict("interactive runtime is not owned by this agent on this server")
+			}
 		}
 	}
 	return nil
@@ -774,14 +897,25 @@ func isActiveInteractiveSession(session *domain.AgentSession) bool {
 
 // DeleteAgent removes an agent assignment from the fleet-db store.
 func (s *agentServiceImpl) DeleteAgent(ctx context.Context, wsKey, name string) error {
-	if s.store == nil {
-		return service.ErrUnavailable("fleet-db store not configured")
+	if s.store == nil || s.compatibility == nil {
+		return service.ErrUnavailable("Agents compatibility commands not configured")
 	}
 	name = normalizeStoredAgentName(name)
 	if err := validateStoredAgentName(name); err != nil {
 		return err
 	}
-	if err := s.store.Agents().Delete(ctx, wsKey, name); err != nil {
+	operatorAuth, ok := service.AgentOperatorAuthorityFromContext(ctx)
+	if !ok {
+		return service.ErrForbidden("verified operator authority is required")
+	}
+	if err := s.compatibility.RetireSupervisedAssignment(
+		ctx,
+		operatorAuth,
+		agents.RetireSupervisedAssignmentCommand{
+			WorkspaceKey: wsKey,
+			AgentName:    name,
+		},
+	); err != nil {
 		return classifyStoreError("delete agent", err)
 	}
 	return nil

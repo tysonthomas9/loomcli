@@ -110,17 +110,27 @@ func (s *terminalServiceImpl) PutTab(ctx context.Context, wsID string, meta *tab
 		return service.ErrValidation(err.Error())
 	}
 
-	// Reject replace when a live PTY already has metadata for the name so
-	// label/pinning changes can't happen under a running shell; callers use
-	// PATCH for that. If the PTY is live but metadata is missing, allow the
-	// create: the frontend can legitimately race metadata PUT with the first
-	// WebSocket attach that spawns the PTY.
-	if s.ptyAlive(wsID, meta.SessionName) {
-		existing, err := s.tabStore.Get(ctx, wsID, meta.SessionName)
-		if err != nil {
-			return service.ErrInternal("failed to get existing tab metadata", err)
+	// Generic PUT must not erase server-owned canonical Interaction identity,
+	// even when a restart has lost the process-local PTY. Such tabs must pass
+	// through DeleteTab so the old exact lifecycle converges first.
+	existing, err := s.tabStore.Get(ctx, wsID, meta.SessionName)
+	if err != nil {
+		return service.ErrInternal("failed to get existing tab metadata", err)
+	}
+	if existing != nil {
+		if existing.Kind == "agent" ||
+			strings.TrimSpace(existing.InteractionSessionID) != "" ||
+			strings.TrimSpace(existing.InteractionTerminalID) != "" ||
+			strings.TrimSpace(existing.InteractionLeaseID) != "" ||
+			existing.InteractionLeaseFencingToken != 0 {
+			return service.ErrConflict(
+				"canonical agent tab must be deleted before replacement",
+			)
 		}
-		if existing != nil {
+		// Reject replacement under a running shell; callers use PATCH for
+		// label/pinning changes. If metadata is missing while the PTY is live,
+		// allow create because the first WebSocket attach can race the PUT.
+		if s.ptyAlive(wsID, meta.SessionName) {
 			return service.ErrConflict("tab metadata already exists with a live PTY; use PATCH to update")
 		}
 	}
@@ -150,19 +160,36 @@ func (s *terminalServiceImpl) DeleteTab(ctx context.Context, wsID, session strin
 		return service.ErrValidation(err.Error())
 	}
 
-	if err := s.tabStore.Delete(ctx, wsID, session); err != nil {
-		return service.ErrInternal("failed to delete tab metadata", err)
+	meta, err := s.tabStore.Get(ctx, wsID, session)
+	if err != nil {
+		return service.ErrInternal("failed to load tab metadata before delete", err)
+	}
+	if meta != nil && meta.Kind == "agent" && strings.TrimSpace(meta.AgentID) != "" {
+		unlock := LockAgentLifecycle(wsID, meta.AgentID)
+		defer unlock()
+		// The terminal launch path persists canonical IDs under the same
+		// boundary. Re-read after acquiring it so delete cannot race a launch
+		// between Start/Open and metadata persistence.
+		meta, err = s.tabStore.Get(ctx, wsID, session)
+		if err != nil {
+			return service.ErrInternal("failed to reload tab metadata before delete", err)
+		}
+		if meta == nil {
+			return nil
+		}
 	}
 
-	// Metadata is gone, but a child PTY keyed by the same name could still
-	// be running (especially with grace_period=0 on local serve). Kill it
-	// so no orphaned shell outlives its tab. Best-effort: a Kill failure
-	// is logged but doesn't undo the metadata delete.
+	// Converge and kill the child before deleting its server-owned placement
+	// metadata. The PTY lifecycle hook needs those exact canonical IDs, and a
+	// failed convergence must retain both the process and metadata for retry.
 	if s.ptyMgr != nil {
 		if err := s.ptyMgr.Kill(SessionKey{Workspace: wsID, Name: session}); err != nil {
-			slog.Warn("failed to kill PTY on tab delete",
-				"workspace", wsID, "session", session, "err", err)
+			return service.ErrInternal("failed to converge and kill PTY before tab delete", err)
 		}
+	}
+
+	if err := s.tabStore.Delete(ctx, wsID, session); err != nil {
+		return service.ErrInternal("failed to delete tab metadata", err)
 	}
 
 	if s.hub != nil {

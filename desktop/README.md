@@ -79,7 +79,7 @@ Loom sidecar build also compiles and embeds all six supported built-in
 workflows (`prompt-agent`, `epic-runner`, `github-review-agent`,
 `bug-fix-agent`, `review-loop-agent`, and `local-review-agent`) with the pinned
 Flue toolchain. Their generated, digest-marked bundles remain ignored under
-`internal/workflows/builtin-dist`; the deterministic rebuild removes source-map
+`internal/infra/workflowdistribution/builtin-dist`; the deterministic rebuild removes source-map
 and build-region annotations and rejects output containing the builder checkout
 path. Registration and execution of these embedded bundles therefore do not
 need Flue, Bun, or TypeScript tooling on the installed machine. Set `FLUE_REPO`

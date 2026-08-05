@@ -28,6 +28,10 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/fleethttp"
+	agentmanagementtransport "github.com/tysonthomas9/loomcli/internal/infra/fleetdb/agentmanagement"
+	agentprovisioningtransport "github.com/tysonthomas9/loomcli/internal/infra/fleetdb/agentprovisioning"
+	interactiontransport "github.com/tysonthomas9/loomcli/internal/infra/fleetdb/interaction"
+	repositoryadmissiontransport "github.com/tysonthomas9/loomcli/internal/infra/fleetdb/repositoryadmission"
 	"github.com/tysonthomas9/loomcli/internal/store"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -50,6 +54,129 @@ const (
 // transient 429 as a deterministic ownership/generation rejection and can
 // strand an otherwise valid Work Item claim.
 var ErrRateLimited = errors.New("fleetdb: rate limited")
+
+const (
+	FleetDelegatedActorHeader      = agentmanagementtransport.FleetDelegatedActorHeader
+	AgentOwnershipLeaseTokenHeader = agentmanagementtransport.AgentOwnershipLeaseTokenHeader
+	RepositoryAdmissionCapability  = repositoryadmissiontransport.RepositoryAdmissionCapability
+)
+
+// Phase 5 capability sentinels remain aliases of the child transport
+// sentinels so errors.Is identity is preserved for every existing caller.
+var (
+	ErrAgentServiceRevisionConflict     = agentmanagementtransport.ErrAgentServiceRevisionConflict
+	ErrAgentServiceDesiredStateConflict = agentmanagementtransport.
+						ErrAgentServiceDesiredStateConflict
+	ErrAgentServiceIdempotencyConflict = agentmanagementtransport.
+						ErrAgentServiceIdempotencyConflict
+	ErrAgentServiceUnsupportedIdentityPatch = agentmanagementtransport.
+						ErrAgentServiceUnsupportedIdentityPatch
+	ErrAgentRoleRevisionConflict            = agentmanagementtransport.ErrAgentRoleRevisionConflict
+	ErrAgentManagementInvalidDelegatedActor = agentmanagementtransport.
+						ErrAgentManagementInvalidDelegatedActor
+
+	ErrAgentProvisioningNotFound        = agentprovisioningtransport.ErrAgentProvisioningNotFound
+	ErrAgentProvisioningInvalid         = agentprovisioningtransport.ErrAgentProvisioningInvalid
+	ErrAgentProvisioningConflict        = agentprovisioningtransport.ErrAgentProvisioningConflict
+	ErrAgentProvisioningConcurrentWrite = agentprovisioningtransport.
+						ErrAgentProvisioningConcurrentWrite
+	ErrAgentProvisioningInvalidTransition = agentprovisioningtransport.
+						ErrAgentProvisioningInvalidTransition
+
+	ErrInteractionInvalid               = interactiontransport.ErrInteractionInvalid
+	ErrInteractionNotFound              = interactiontransport.ErrInteractionNotFound
+	ErrInteractionNotOwner              = interactiontransport.ErrInteractionNotOwner
+	ErrInteractionConflict              = interactiontransport.ErrInteractionConflict
+	ErrInteractionInvalidTransition     = interactiontransport.ErrInteractionInvalidTransition
+	ErrInteractionInvalidPersistedState = interactiontransport.ErrInteractionInvalidPersistedState
+	ErrInteractionUnavailable           = interactiontransport.ErrInteractionUnavailable
+
+	ErrRepositoryAdmissionUnavailable = repositoryadmissiontransport.ErrRepositoryAdmissionUnavailable
+	ErrRepositoryAdmissionNotFound    = repositoryadmissiontransport.ErrRepositoryAdmissionNotFound
+	ErrRepositoryAdmissionInvalid     = repositoryadmissiontransport.ErrRepositoryAdmissionInvalid
+	ErrRepositoryAdmissionConflict    = repositoryadmissiontransport.ErrRepositoryAdmissionConflict
+	ErrRepositoryAdmissionFenceLost   = repositoryadmissiontransport.ErrRepositoryAdmissionFenceLost
+	ErrRepositoryAdmissionState       = repositoryadmissiontransport.ErrRepositoryAdmissionState
+)
+
+// Phase 5 transport aliases preserve the public FleetDB facade while keeping
+// capability-specific wire logic out of the root package.
+type (
+	AgentManagementTransport              = agentmanagementtransport.AgentManagementTransport
+	AgentServiceQuery                     = agentmanagementtransport.AgentServiceQuery
+	AgentServiceLifecycleInput            = agentmanagementtransport.AgentServiceLifecycleInput
+	AgentServiceLifecycleResult           = agentmanagementtransport.AgentServiceLifecycleResult
+	AgentRoleInput                        = agentmanagementtransport.AgentRoleInput
+	AgentRolePatch                        = agentmanagementtransport.AgentRolePatch
+	AgentRoleUpdateInput                  = agentmanagementtransport.AgentRoleUpdateInput
+	AgentRoleDeleteInput                  = agentmanagementtransport.AgentRoleDeleteInput
+	AgentServiceCreateInput               = agentmanagementtransport.AgentServiceCreateInput
+	AgentServiceIdentityPatch             = agentmanagementtransport.AgentServiceIdentityPatch
+	AgentServiceUpdateInput               = agentmanagementtransport.AgentServiceUpdateInput
+	AgentServiceArchiveInput              = agentmanagementtransport.AgentServiceArchiveInput
+	AgentServiceDesiredStateInput         = agentmanagementtransport.AgentServiceDesiredStateInput
+	AgentOwnershipProof                   = agentmanagementtransport.AgentOwnershipProof
+	AgentServiceOwnedDesiredStateInput    = agentmanagementtransport.AgentServiceOwnedDesiredStateInput
+	AgentOwnershipAcquireInput            = agentmanagementtransport.AgentOwnershipAcquireInput
+	AgentOwnershipGrant                   = agentmanagementtransport.AgentOwnershipGrant
+	AgentOwnershipQuery                   = agentmanagementtransport.AgentOwnershipQuery
+	AgentOwnershipRenewInput              = agentmanagementtransport.AgentOwnershipRenewInput
+	AgentOwnershipReleaseInput            = agentmanagementtransport.AgentOwnershipReleaseInput
+	AgentProvisioningTransport            = agentprovisioningtransport.AgentProvisioningTransport
+	AgentProvisioningRoleSpec             = agentprovisioningtransport.AgentProvisioningRoleSpec
+	AgentProvisioningAgentSpec            = agentprovisioningtransport.AgentProvisioningAgentSpec
+	AgentProvisioningBindingSpec          = agentprovisioningtransport.AgentProvisioningBindingSpec
+	AgentProvisioningGrantSpec            = agentprovisioningtransport.AgentProvisioningGrantSpec
+	AgentProvisioningBeginInput           = agentprovisioningtransport.AgentProvisioningBeginInput
+	AgentProvisioningSpec                 = agentprovisioningtransport.AgentProvisioningSpec
+	AgentProvisioningRecord               = agentprovisioningtransport.AgentProvisioningRecord
+	AgentProvisioningProgressInput        = agentprovisioningtransport.AgentProvisioningProgressInput
+	AgentProvisioningRoleResult           = agentprovisioningtransport.AgentProvisioningRoleResult
+	AgentProvisioningAgentResult          = agentprovisioningtransport.AgentProvisioningAgentResult
+	AgentProvisioningBindingResult        = agentprovisioningtransport.AgentProvisioningBindingResult
+	AgentProvisioningGrantResult          = agentprovisioningtransport.AgentProvisioningGrantResult
+	InteractionSessionAuthorityProof      = interactiontransport.InteractionSessionAuthorityProof
+	InteractionSessionAuthorityValidation = interactiontransport.
+						InteractionSessionAuthorityValidation
+	InteractionAuthorityTransport            = interactiontransport.InteractionAuthorityTransport
+	InteractionTransport                     = interactiontransport.InteractionTransport
+	InteractionMutationTransport             = interactiontransport.InteractionMutationTransport
+	InteractionSessionStartInput             = interactiontransport.InteractionSessionStartInput
+	InteractionSessionStartResult            = interactiontransport.InteractionSessionStartResult
+	InteractionSessionStartRecoveryInput     = interactiontransport.InteractionSessionStartRecoveryInput
+	InteractionSessionHeartbeatInput         = interactiontransport.InteractionSessionHeartbeatInput
+	InteractionSessionPatchInput             = interactiontransport.InteractionSessionPatchInput
+	InteractionSessionFinishInput            = interactiontransport.InteractionSessionFinishInput
+	InteractionSessionMutationResult         = interactiontransport.InteractionSessionMutationResult
+	InteractionSessionInterruptResult        = interactiontransport.InteractionSessionInterruptResult
+	InteractionSessionForceInterruptInput    = interactiontransport.InteractionSessionForceInterruptInput
+	InteractionSessionForceInterruptResult   = interactiontransport.InteractionSessionForceInterruptResult
+	InteractionTerminalCreateInput           = interactiontransport.InteractionTerminalCreateInput
+	InteractionTerminalUpdateInput           = interactiontransport.InteractionTerminalUpdateInput
+	InteractionInboxEnqueueInput             = interactiontransport.InteractionInboxEnqueueInput
+	InteractionInboxClaimInput               = interactiontransport.InteractionInboxClaimInput
+	InteractionInboxCompleteInput            = interactiontransport.InteractionInboxCompleteInput
+	InteractionActivity                      = interactiontransport.InteractionActivity
+	RepositoryAdmissionTransport             = repositoryadmissiontransport.RepositoryAdmissionTransport
+	RepositoryAdmissionRepoSpec              = repositoryadmissiontransport.RepositoryAdmissionRepoSpec
+	RepositoryAdmissionSpec                  = repositoryadmissiontransport.RepositoryAdmissionSpec
+	RepositoryAdmissionBeginInput            = repositoryadmissiontransport.RepositoryAdmissionBeginInput
+	RepositoryAdmissionWorkspaceInput        = repositoryadmissiontransport.RepositoryAdmissionWorkspaceInput
+	WorkspaceRepositoryAdmissionBeginInput   = repositoryadmissiontransport.WorkspaceRepositoryAdmissionBeginInput
+	WorkspaceRepositoryAdmissionBeginResult  = repositoryadmissiontransport.WorkspaceRepositoryAdmissionBeginResult
+	RepositoryAdmissionRepoReceipt           = repositoryadmissiontransport.RepositoryAdmissionRepoReceipt
+	RepositoryAdmissionReceipt               = repositoryadmissiontransport.RepositoryAdmissionReceipt
+	RepositoryAdmissionWorkspaceFinalization = repositoryadmissiontransport.
+							RepositoryAdmissionWorkspaceFinalization
+	RepositoryAdmissionRecord             = repositoryadmissiontransport.RepositoryAdmissionRecord
+	RepositoryAdmissionGuard              = repositoryadmissiontransport.RepositoryAdmissionGuard
+	RepositoryAdmissionResolvedBranch     = repositoryadmissiontransport.RepositoryAdmissionResolvedBranch
+	RepositoryAdmissionRenewInput         = repositoryadmissiontransport.RepositoryAdmissionRenewInput
+	RepositoryAdmissionRecoveryClaimInput = repositoryadmissiontransport.RepositoryAdmissionRecoveryClaimInput
+	RepositoryAdmissionCommitInput        = repositoryadmissiontransport.RepositoryAdmissionCommitInput
+	RepositoryAdmissionFailInput          = repositoryadmissiontransport.RepositoryAdmissionFailInput
+	RepositoryAdmissionAbortInput         = repositoryadmissiontransport.RepositoryAdmissionAbortInput
+)
 
 // Config holds connection parameters for the fleet-db HTTP client.
 type Config struct {
@@ -85,38 +212,42 @@ type Client struct {
 	actor     string
 	authToken string
 
-	workspaces       *workspaceStore
-	repos            *repoStore
-	agents           *agentStore
-	nodes            *nodeStore
-	sessions         *agentSessionStore
-	terminals        *terminalSessionStore
-	artifacts        *artifactStore
-	artifactCommands *artifactCommandStore
-	leases           *agentLeaseStore
-	ownership        *agentOwnershipLeaseStore
-	commands         *agentCommandStore
-	inbox            *agentInboxMessageStore
-	drivers          *driverStore
-	versions         *driverVersionStore
-	catalog          *workflowCatalogStore
-	automation       *automationStore
-	profiles         *workerProfileStore
-	services         *agentServiceStore
-	bindings         *triggerBindingStore
-	events           *triggerEventStore
-	deliveries       *triggerDeliveryStore
-	routes           *triggerRouteStore
-	runs             *driverRunStore
-	steps            *driverStepStore
-	taskRuns         *taskRunStore
-	execution        *executionStore
-	taskEvents       *taskRunEventStore
-	outbox           *outboxStore
-	awaits           *awaitStore
-	workers          *workerStore
-	roles            *roleStore
-	daemon           *daemonStore
+	workspaces           *workspaceStore
+	repos                *repoStore
+	agents               *agentStore
+	nodes                *nodeStore
+	sessions             *agentSessionStore
+	terminals            *terminalSessionStore
+	artifacts            *artifactStore
+	artifactCommands     *artifactCommandStore
+	leases               *agentLeaseStore
+	ownership            *agentOwnershipLeaseStore
+	commands             *agentCommandStore
+	inbox                *agentInboxMessageStore
+	drivers              *driverStore
+	versions             *driverVersionStore
+	catalog              *workflowCatalogStore
+	provisioning         AgentProvisioningTransport
+	agentManagement      AgentManagementTransport
+	interaction          InteractionTransport
+	repositoryAdmissions RepositoryAdmissionTransport
+	automation           *automationStore
+	profiles             *workerProfileStore
+	services             *agentServiceStore
+	bindings             *triggerBindingStore
+	events               *triggerEventStore
+	deliveries           *triggerDeliveryStore
+	routes               *triggerRouteStore
+	runs                 *driverRunStore
+	steps                *driverStepStore
+	taskRuns             *taskRunStore
+	execution            *executionStore
+	taskEvents           *taskRunEventStore
+	outbox               *outboxStore
+	awaits               *awaitStore
+	workers              *workerStore
+	roles                *roleStore
+	daemon               *daemonStore
 
 	connectors      *connectorStore
 	connectorGrants *connectorGrantStore
@@ -146,6 +277,7 @@ func New(cfg Config) (*Client, error) {
 }
 
 func (c *Client) initializeStores() {
+	capabilityRequests := &capabilityRequester{client: c}
 	c.workspaces = &workspaceStore{client: c}
 	c.repos = &repoStore{client: c}
 	c.agents = &agentStore{client: c}
@@ -155,12 +287,16 @@ func (c *Client) initializeStores() {
 	c.artifacts = &artifactStore{client: c}
 	c.artifactCommands = &artifactCommandStore{client: c}
 	c.leases = &agentLeaseStore{client: c}
-	c.ownership = &agentOwnershipLeaseStore{client: c}
 	c.commands = &agentCommandStore{client: c}
 	c.inbox = &agentInboxMessageStore{client: c}
 	c.drivers = &driverStore{client: c}
 	c.versions = &driverVersionStore{client: c}
 	c.catalog = &workflowCatalogStore{client: c}
+	c.provisioning = agentprovisioningtransport.New(capabilityRequests)
+	c.agentManagement = agentmanagementtransport.New(capabilityRequests)
+	c.ownership = &agentOwnershipLeaseStore{client: c, management: c.agentManagement}
+	c.interaction = interactiontransport.New(capabilityRequests)
+	c.repositoryAdmissions = repositoryadmissiontransport.New(capabilityRequests)
 	c.automation = &automationStore{client: c}
 	c.profiles = &workerProfileStore{client: c}
 	c.services = &agentServiceStore{client: c}
@@ -181,6 +317,65 @@ func (c *Client) initializeStores() {
 	c.connectors = &connectorStore{client: c}
 	c.connectorGrants = &connectorGrantStore{client: c}
 	c.connectorCalls = &connectorAuditStore{client: c}
+}
+
+// capabilityRequester is the private bridge from capability transports to the
+// process-wide FleetDB client. It deliberately exposes only authenticated JSON
+// execution plus the Role and AgentSession dependencies required by the
+// extracted Phase 5 transports.
+type capabilityRequester struct {
+	client *Client
+}
+
+func (requester *capabilityRequester) Do(
+	ctx context.Context,
+	method,
+	path string,
+	body,
+	out any,
+) error {
+	return requester.client.do(ctx, method, path, body, out)
+}
+
+func (requester *capabilityRequester) DoWithHeaders(
+	ctx context.Context,
+	method,
+	path string,
+	body,
+	out any,
+	headers map[string]string,
+) error {
+	return requester.client.doWithHeaders(ctx, method, path, body, out, headers)
+}
+
+func (requester *capabilityRequester) GetRole(
+	ctx context.Context,
+	workspace,
+	name string,
+) (*domain.Role, error) {
+	return requester.client.roles.Get(ctx, workspace, name)
+}
+
+func (requester *capabilityRequester) ListRoles(
+	ctx context.Context,
+	workspace string,
+) ([]*domain.Role, error) {
+	return requester.client.roles.List(ctx, workspace)
+}
+
+func (requester *capabilityRequester) CreateRole(
+	ctx context.Context,
+	input store.RoleCreate,
+) (*domain.Role, error) {
+	return requester.client.roles.Create(ctx, input)
+}
+
+func (requester *capabilityRequester) GetAgentSession(
+	ctx context.Context,
+	workspace,
+	sessionID string,
+) (*domain.AgentSession, error) {
+	return requester.client.sessions.Get(ctx, workspace, sessionID)
 }
 
 // Compile-time check.
@@ -233,6 +428,31 @@ func (c *Client) DriverVersions() store.DriverVersionStore { return c.versions }
 // the capability.
 func (c *Client) WorkflowCatalog() WorkflowCatalogTransport { return c.catalog }
 
+// AgentProvisioning exposes only the durable process-manager progress
+// transport. The application workflow receives this through its own adapter,
+// never the composite Store or the low-level Client.
+func (c *Client) AgentProvisioning() AgentProvisioningTransport { return c.provisioning }
+
+// AgentManagement exposes the narrow Phase 5 Agent identity, Role, desired
+// state, and ownership-generation transport. It reuses this Client's trusted
+// service credential and keeps delegated audit identity out of request bodies.
+func (c *Client) AgentManagement() AgentManagementTransport { return c.agentManagement }
+
+// Interaction exposes the complete Phase 5 authority-validation and atomic
+// command transport. It intentionally excludes every legacy non-atomic
+// session, terminal, lease, and inbox mutation route.
+func (c *Client) Interaction() InteractionTransport { return c.interaction }
+
+// RepositoryAdmissions exposes the service-authenticated process-manager
+// transport over the shared FleetDB client. There is no capability-local
+// credential or independently configured HTTP path.
+func (c *Client) RepositoryAdmissions() RepositoryAdmissionTransport {
+	if c == nil {
+		return nil
+	}
+	return c.repositoryAdmissions
+}
+
 // Automation exposes the narrow low-level transport used by Automation's
 // capability-local FleetDB adapter. It reuses this Client's credentials,
 // tracing, retry policy, and connection pool.
@@ -241,6 +461,15 @@ func (c *Client) Automation() AutomationTransport { return c.automation }
 func (c *Client) WorkerProfiles() store.WorkerProfileStore { return c.profiles }
 
 func (c *Client) AgentServices() store.AgentServiceStore { return c.services }
+
+func (c *Client) delegatedActor() string {
+	if c == nil {
+		return ""
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.actor
+}
 
 func (c *Client) TriggerBindings() store.TriggerBindingStore { return c.bindings }
 
@@ -398,20 +627,36 @@ func (c *Client) doBytes(ctx context.Context, method, path string) ([]byte, erro
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("fleetdb: %s %s: %w", method, path, err)
+		return nil, fmt.Errorf(
+			"fleetdb: %s %s: %w",
+			method,
+			path,
+			errors.Join(domain.ErrUnavailable, err),
+		)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
 		respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
 		if readErr != nil {
-			return nil, fmt.Errorf("fleetdb: %s %s: HTTP %d (read body: %w)", method, path, resp.StatusCode, readErr)
+			return nil, fmt.Errorf(
+				"fleetdb: %s %s: HTTP %d (read body: %w)",
+				method,
+				path,
+				resp.StatusCode,
+				errors.Join(domain.ErrUnavailable, readErr),
+			)
 		}
 		return nil, classifyHTTPError(method, path, resp.StatusCode, respBody)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxArtifactContentBody+1))
 	if err != nil {
-		return nil, fmt.Errorf("fleetdb: read response (%s %s): %w", method, path, err)
+		return nil, fmt.Errorf(
+			"fleetdb: read response (%s %s): %w",
+			method,
+			path,
+			errors.Join(domain.ErrUnavailable, err),
+		)
 	}
 	if len(body) > maxArtifactContentBody {
 		return nil, fmt.Errorf("fleetdb: %s %s: artifact content exceeds %d bytes", method, path, maxArtifactContentBody)
@@ -427,7 +672,12 @@ func (c *Client) doRequest(req *http.Request, method, path string, out any) erro
 func (c *Client) doRequestStatus(req *http.Request, method, path string, out any) (int, error) {
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return 0, fmt.Errorf("fleetdb: %s %s: %w", method, path, err)
+		return 0, fmt.Errorf(
+			"fleetdb: %s %s: %w",
+			method,
+			path,
+			errors.Join(domain.ErrUnavailable, err),
+		)
 	}
 	defer func() {
 		// Drain so the underlying connection can be returned to the
@@ -439,7 +689,13 @@ func (c *Client) doRequestStatus(req *http.Request, method, path string, out any
 	if resp.StatusCode >= 400 {
 		respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
 		if readErr != nil {
-			return resp.StatusCode, fmt.Errorf("fleetdb: %s %s: HTTP %d (read body: %w)", method, path, resp.StatusCode, readErr)
+			return resp.StatusCode, fmt.Errorf(
+				"fleetdb: %s %s: HTTP %d (read body: %w)",
+				method,
+				path,
+				resp.StatusCode,
+				errors.Join(domain.ErrUnavailable, readErr),
+			)
 		}
 		return resp.StatusCode, classifyHTTPError(method, path, resp.StatusCode, respBody)
 	}
@@ -479,7 +735,11 @@ func classifyHTTPError(method, path string, status int, body []byte) error {
 		// longer live (expired or released) — re-acquire is safe.
 		return fmt.Errorf("%s: %w", prefix, domain.ErrGone)
 	case http.StatusTooManyRequests:
-		return fmt.Errorf("%s: %w", prefix, ErrRateLimited)
+		return fmt.Errorf(
+			"%s: %w",
+			prefix,
+			errors.Join(ErrRateLimited, domain.ErrRateLimited),
+		)
 	}
 	if status >= 500 && strings.Contains(path, "/artifacts/") {
 		return fmt.Errorf("%s: %w", prefix, ErrArtifactsUnavailable)
@@ -487,14 +747,30 @@ func classifyHTTPError(method, path string, status int, body []byte) error {
 	if status >= 400 && status < 500 {
 		return fmt.Errorf("%s: %w", prefix, domain.ErrConflict)
 	}
-	return errors.New(prefix)
+	return fmt.Errorf("%s: %w", prefix, domain.ErrUnavailable)
 }
 
 func classifyConflictHTTPError(prefix, code string) error {
 	sentinel := domain.ErrAlreadyExists
 	switch code {
+	case "repository_admission_conflict":
+		sentinel = ErrRepositoryAdmissionConflict
+	case "repository_admission_fence_lost":
+		sentinel = ErrRepositoryAdmissionFenceLost
+	case "repository_admission_invalid_transition":
+		sentinel = ErrRepositoryAdmissionState
 	case "revision_conflict":
 		sentinel = ErrWorkflowCatalogRevisionConflict
+	case "workflow_catalog_authoring_conflict":
+		sentinel = ErrWorkflowCatalogAuthoringConflict
+	case "agent_service_revision_conflict":
+		sentinel = ErrAgentServiceRevisionConflict
+	case "agent_role_revision_conflict":
+		sentinel = ErrAgentRoleRevisionConflict
+	case "agent_service_desired_state_conflict":
+		sentinel = ErrAgentServiceDesiredStateConflict
+	case "agent_service_desired_state_idempotency_conflict":
+		sentinel = ErrAgentServiceIdempotencyConflict
 	case "already_claimed":
 		sentinel = domain.ErrAlreadyClaimed
 	case "invalid_transition":
@@ -515,6 +791,9 @@ func classifyForbiddenHTTPError(prefix, path, code string) error {
 	}
 	if strings.Contains(path, "/driver-runs/") || strings.Contains(path, "/task-runs/") ||
 		strings.Contains(path, "/agent-commands/") ||
+		strings.Contains(path, "/agent-ownership-leases/") ||
+		strings.Contains(path, "/agent-session-authority/") ||
+		strings.Contains(path, "/desired-state/owned") ||
 		strings.Contains(path, "/artifact-commands/") || strings.Contains(path, "/artifacts/") {
 		return fmt.Errorf("%s: %w", prefix, domain.ErrNotOwner)
 	}

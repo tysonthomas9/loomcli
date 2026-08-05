@@ -15,8 +15,10 @@ import (
 	"strings"
 	"time"
 
+	appworkflowauthoring "github.com/tysonthomas9/loomcli/internal/app/workflowauthoring"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
+	workflowdefs "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution/authoring"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
@@ -25,7 +27,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/runhistory"
 	"github.com/tysonthomas9/loomcli/internal/webui/readprojection"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
-	workflowdefs "github.com/tysonthomas9/loomcli/internal/workflows"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 const maxRunPayloadBytes = 4 << 20
@@ -38,17 +40,28 @@ const (
 type Module struct {
 	store             store.Store
 	catalog           workflowcatalog.API
+	catalogRead       workflowCatalogDriverReader
+	authoring         workflowcatalog.VersionAuthoringAPI
+	catalogAuthority  workflowcataloghttp.OperatorAuthorityResolver
+	prepareTarget     func(context.Context, string, string) (*workflowcatalog.Driver, error)
 	execution         execution.DriverRunAPI
 	operatorAuthority workflowcataloghttp.OperatorAuthorityResolver
 	taskWorkflowRuns  readprojection.TaskWorkflowRunReader
 }
 
+type workflowCatalogDriverReader interface {
+	GetDriver(context.Context, string, string) (*workflowcatalog.Driver, error)
+}
+
 type Config struct {
-	Store             store.Store
-	Catalog           workflowcatalog.API
-	Execution         execution.DriverRunAPI
-	OperatorAuthority workflowcataloghttp.OperatorAuthorityResolver
-	TaskWorkflowRuns  readprojection.TaskWorkflowRunReader
+	Store                    store.Store
+	Catalog                  workflowcatalog.API
+	Authoring                workflowcatalog.VersionAuthoringAPI
+	CatalogOperatorAuthority workflowcataloghttp.OperatorAuthorityResolver
+	PrepareWorkflowTarget    func(context.Context, string, string) (*workflowcatalog.Driver, error)
+	Execution                execution.DriverRunAPI
+	OperatorAuthority        workflowcataloghttp.OperatorAuthorityResolver
+	TaskWorkflowRuns         readprojection.TaskWorkflowRunReader
 }
 
 // NewModule accepts Config in production. The store-only form remains a
@@ -58,7 +71,9 @@ func NewModule(input any) *Module {
 	switch value := input.(type) {
 	case Config:
 		return &Module{
-			store: value.Store, catalog: value.Catalog, execution: value.Execution,
+			store: value.Store, catalog: value.Catalog, catalogRead: value.Catalog, authoring: value.Authoring,
+			catalogAuthority: value.CatalogOperatorAuthority, prepareTarget: value.PrepareWorkflowTarget,
+			execution:         value.Execution,
 			operatorAuthority: value.OperatorAuthority, taskWorkflowRuns: value.TaskWorkflowRuns,
 		}
 	case store.Store:
@@ -71,6 +86,7 @@ func NewModule(input any) *Module {
 func (m *Module) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/workspaces/{ws}/workflows", m.listWorkflows)
 	mux.HandleFunc("POST /api/workspaces/{ws}/workflows/{name}/versions", m.createWorkflowVersion)
+	mux.HandleFunc("POST /api/workspaces/{ws}/workflow-catalog/native-drivers", m.registerNativeDriver)
 	// Builtin source/build/run behavior remains in this compatibility module.
 	// Registered-driver reads and version lifecycle commands are owned by the
 	// Workflow Catalog capability module and registered separately by app/serve.
@@ -399,9 +415,10 @@ func (m *Module) getWorkflowSource(w http.ResponseWriter, r *http.Request) {
 }
 
 // listWorkflowRuns returns a workflow's run history, newest first, over
-// DriverRunStore.List. It resolves the workflow with ResolveDriver (never
-// EnsureAndResolveDriver): listing runs is a read and must not self-heal or
-// register a driver as a side effect, so an unregistered workflow is a 404.
+// DriverRunStore.List. It resolves the workflow through Workflow Catalog
+// without self-healing or registering a driver, so an unregistered workflow is
+// a 404. The generic-store fallback preserves the documented read-only/test
+// compatibility constructor and performs no mutation.
 func (m *Module) listWorkflowRuns(w http.ResponseWriter, r *http.Request) {
 	ws := strings.TrimSpace(r.PathValue("ws"))
 	name := strings.TrimSpace(r.PathValue("name"))
@@ -417,7 +434,7 @@ func (m *Module) listWorkflowRuns(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	drv, err := workflowdefs.ResolveDriver(r.Context(), m.store, ws, name)
+	drv, err := m.resolveWorkflowDriverRead(r.Context(), ws, name)
 	if err != nil {
 		writeDomainError(w, err, "resolve workflow driver failed")
 		return
@@ -442,6 +459,16 @@ func (m *Module) listWorkflowRuns(w http.ResponseWriter, r *http.Request) {
 		"active_version_id": drv.ActiveVersionID,
 		"runs":              runs,
 	})
+}
+
+func (m *Module) resolveWorkflowDriverRead(
+	ctx context.Context,
+	workspace, name string,
+) (*workflowcatalog.Driver, error) {
+	if m == nil || m.catalogRead == nil {
+		return nil, workflowcatalog.ErrUnavailable
+	}
+	return m.catalogRead.GetDriver(ctx, workspace, name)
 }
 
 // parseRunStatusFilter reads the optional ?status= filter and validates it
@@ -472,14 +499,18 @@ func isKnownRunStatus(s domain.DriverRunStatus) bool {
 }
 
 type createWorkflowVersionRequest struct {
-	Files      map[string]string `json:"files"`
-	Entrypoint string            `json:"entrypoint,omitempty"`
-	Activate   *bool             `json:"activate,omitempty"`
+	Files      map[string]string         `json:"files"`
+	Entrypoint string                    `json:"entrypoint,omitempty"`
+	Activate   *bool                     `json:"activate,omitempty"`
+	Runners    []driver.DriverRunnerSpec `json:"runners,omitempty"`
+	Manifest   map[string]string         `json:"manifest,omitempty"`
 }
 
 type workflowVersionInput struct {
 	entrypoint string
 	files      map[string]string
+	runners    []driver.DriverRunnerSpec
+	manifest   map[string]string
 }
 
 // parseCreateWorkflowVersionRequest decodes and validates the request body
@@ -517,12 +548,26 @@ func parseCreateWorkflowVersionRequest(w http.ResponseWriter, r *http.Request, n
 		writeError(w, http.StatusBadRequest, "activate=true is not supported; approve and activate the version through the workflow catalog lifecycle API")
 		return in, false
 	}
+	if err := driver.ValidateDriverRunnerSpecs(req.Runners); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return in, false
+	}
+	if _, present := req.Manifest[driver.ManifestTrustLevelKey]; present {
+		writeError(w, http.StatusBadRequest, "manifest trust_level is server-owned")
+		return in, false
+	}
 	in.files = files
+	in.runners = driver.NormalizeDriverRunnerSpecs(req.Runners)
+	in.manifest = req.Manifest
 	return in, true
 }
 
 func (m *Module) createWorkflowVersion(w http.ResponseWriter, r *http.Request) {
-	ws := r.PathValue("ws")
+	ws := strings.TrimSpace(middleware.WorkspaceFromContext(r.Context()))
+	if ws == "" {
+		writeError(w, http.StatusBadRequest, "canonical workspace is required")
+		return
+	}
 	name := strings.TrimSpace(r.PathValue("name"))
 	if name == "" {
 		writeError(w, http.StatusBadRequest, "workflow name is required")
@@ -532,19 +577,49 @@ func (m *Module) createWorkflowVersion(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	result, buildOutput, err := workflowdefs.BuildAndRegister(r.Context(), m.store, workflowdefs.BuildAndRegisterOptions{
-		WorkspaceKey: ws,
-		Name:         name,
-		Entrypoint:   in.entrypoint,
-		Files:        in.files,
+	if m.catalog == nil || m.authoring == nil || m.catalogAuthority == nil {
+		writeDomainError(w, workflowcatalog.ErrUnavailable, "Workflow Catalog authoring is unavailable")
+		return
+	}
+	catalogAuth, err := m.catalogAuthority.ResolveOperatorAuthority(r, ws, workflowcatalog.ActionAuthorVersion)
+	if err != nil {
+		writeDomainError(w, err, "resolve Workflow Catalog authoring authority failed")
+		return
+	}
+	expectedRevision, ok := m.workflowVersionExpectedRevision(w, r, ws, name)
+	if !ok {
+		return
+	}
+	coordinator, err := appworkflowauthoring.New(workflowdefs.NewBundleStager())
+	if err != nil {
+		writeDomainError(w, err, "compose workflow authoring failed")
+		return
+	}
+	result, buildOutput, err := coordinator.AuthorOperator(r.Context(), m.authoring, catalogAuth, appworkflowauthoring.BuildOptions{
+		WorkspaceKey:     ws,
+		Name:             name,
+		Entrypoint:       in.entrypoint,
+		Files:            in.files,
+		Runners:          applicationRunnerSpecs(in.runners),
+		Manifest:         in.manifest,
+		RequestID:        strings.TrimSpace(r.Header.Get("Idempotency-Key")),
+		ExpectedRevision: expectedRevision,
 		// HTTP submission only builds and registers. Approval and activation
 		// cross the Workflow Catalog lifecycle command boundary explicitly.
 		Activate: false,
 	})
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeDomainError(w, err, "author workflow version failed")
 		return
 	}
+	writeWorkflowVersionAuthoringResult(w, result, buildOutput)
+}
+
+func writeWorkflowVersionAuthoringResult(
+	w http.ResponseWriter,
+	result *appworkflowauthoring.Result,
+	buildOutput string,
+) {
 	handler.WriteJSON(w, http.StatusCreated, map[string]any{
 		"driver":            result.Driver,
 		"version":           result.Version,
@@ -555,6 +630,43 @@ func (m *Module) createWorkflowVersion(w http.ResponseWriter, r *http.Request) {
 		"activated":         result.Activated,
 		"build_diagnostics": buildOutput,
 	})
+}
+
+func (m *Module) workflowVersionExpectedRevision(
+	w http.ResponseWriter,
+	r *http.Request,
+	workspace,
+	name string,
+) (uint64, bool) {
+	existing, err := m.catalog.GetDriver(r.Context(), workspace, name)
+	switch {
+	case err == nil && existing != nil:
+		if existing.Revision == 0 {
+			writeDomainError(w, workflowcatalog.ErrInvalidPersistedState, "Workflow Catalog returned a driver without a durable revision")
+			return 0, false
+		}
+		return existing.Revision, true
+	case err == nil:
+		writeDomainError(w, workflowcatalog.ErrInvalidPersistedState, "Workflow Catalog returned no driver")
+		return 0, false
+	case errors.Is(err, workflowcatalog.ErrNotFound):
+		return 0, true
+	default:
+		writeDomainError(w, err, "resolve Workflow Catalog authoring target failed")
+		return 0, false
+	}
+}
+
+func applicationRunnerSpecs(
+	input []driver.DriverRunnerSpec,
+) []appworkflowauthoring.RunnerSpec {
+	output := make([]appworkflowauthoring.RunnerSpec, 0, len(input))
+	for _, runner := range input {
+		output = append(output, appworkflowauthoring.RunnerSpec{
+			Name: runner.Name, Kind: runner.Kind, Entrypoint: runner.Entrypoint,
+		})
+	}
+	return output
 }
 
 func (m *Module) createWorkflowRun(w http.ResponseWriter, r *http.Request) {
@@ -651,7 +763,10 @@ func (m *Module) resolveWorkflowDriverID(ctx context.Context, ws, name string) (
 }
 
 func (m *Module) resolveWorkflowTarget(ctx context.Context, ws, name string) (*domain.Driver, error) {
-	return workflowdefs.EnsureAndResolveDriver(ctx, m.store, ws, name)
+	if m.prepareTarget == nil {
+		return nil, workflowcatalog.ErrUnavailable
+	}
+	return m.prepareTarget(ctx, ws, name)
 }
 
 func (m *Module) getRun(w http.ResponseWriter, r *http.Request) {
@@ -844,7 +959,8 @@ func writeDomainError(w http.ResponseWriter, err error, fallback string) {
 		errors.Is(err, execution.ErrFenceConflict),
 		errors.Is(err, execution.ErrInvalidTransition),
 		errors.Is(err, workflowcatalog.ErrVersionOwnership),
-		errors.Is(err, workflowcatalog.ErrStaleRevision):
+		errors.Is(err, workflowcatalog.ErrStaleRevision),
+		errors.Is(err, workflowcatalog.ErrAuthoringConflict):
 		writeError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, workflowcatalog.ErrVersionNotValidated),
 		errors.Is(err, workflowcatalog.ErrVersionNotApproved):

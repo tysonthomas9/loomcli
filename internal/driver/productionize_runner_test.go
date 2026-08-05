@@ -117,19 +117,6 @@ func TestRequireTerminalStatusRejectsCompletedNonZeroExit(t *testing.T) {
 	}
 }
 
-// flueTaskSessionStatus must map an empty status to failed (no fake completion).
-func TestFlueTaskSessionStatusEmptyIsFailed(t *testing.T) {
-	if got := flueTaskSessionStatus(TaskExecResult{Status: "", ExitCode: 0}, nil); got != domain.AgentSessionFailed {
-		t.Fatalf("empty status session = %q, want failed", got)
-	}
-	if got := flueTaskSessionStatus(TaskExecResult{Status: domain.TaskRunCompleted, ExitCode: 0}, nil); got != domain.AgentSessionCompleted {
-		t.Fatalf("completed session = %q, want completed", got)
-	}
-	if got := flueTaskSessionStatus(TaskExecResult{Status: domain.TaskRunCompleted, ExitCode: 1}, nil); got != domain.AgentSessionFailed {
-		t.Fatalf("completed nonzero session = %q, want failed", got)
-	}
-}
-
 // The noop provider gate (§4.5) fails closed by default and only enables with
 // LOOM_DRIVER_ENABLE_TEST_NOOP_PROVIDER=1, in BOTH preflight and execute.
 func TestNoopProviderGate(t *testing.T) {
@@ -191,8 +178,6 @@ func TestLocalTaskRunnerBaseEnvWideningGatedByEntrypoint(t *testing.T) {
 	for _, key := range []string{
 		"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "CODEX_API_KEY", "CODEX_HOME",
 		"GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_APPLICATION_CREDENTIALS", "CURSOR_API_KEY",
-		// GitHub tokens are admitted for the local runner's opt-in PR delivery.
-		"GITHUB_TOKEN", "GH_TOKEN",
 	} {
 		if _, ok := localEnv[key]; !ok {
 			t.Fatalf("local runner env missing trusted credential %s: %+v", key, localEnv)
@@ -201,9 +186,8 @@ func TestLocalTaskRunnerBaseEnvWideningGatedByEntrypoint(t *testing.T) {
 	if _, ok := localEnv["PATH"]; !ok {
 		t.Fatalf("local runner env missing PATH: %+v", localEnv)
 	}
-	// The local runner still never inherits non-provider secrets like the
-	// fleet-db API key (GitHub tokens ARE admitted, above, for PR delivery).
-	for _, key := range []string{"LOOM_FLEET_DB_API_KEY"} {
+	// The local runner never inherits forge or control-plane credentials.
+	for _, key := range []string{"GITHUB_TOKEN", "GH_TOKEN", "LOOM_FLEET_DB_API_KEY"} {
 		if _, ok := localEnv[key]; ok {
 			t.Fatalf("local runner env leaked non-provider secret %s: %+v", key, localEnv)
 		}

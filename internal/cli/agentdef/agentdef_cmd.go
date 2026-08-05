@@ -1,5 +1,5 @@
-// Package agentdef registers the `loom agentdef` noun-verb commands for
-// fleet-db-backed agent assignment CRUD within the active workspace.
+// Package agentdef registers the `loom agentdef` noun-verb commands over the
+// Phase 5 Agents capability.
 //
 // Distinct from `loom agent <worktree>`, which runs an actual agent process
 // with a custom prompt.
@@ -7,53 +7,52 @@ package agentdef
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
 
-	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/cli/backendcheck"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/localworkspace"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 )
 
 var (
 	agentAddRole         string
 	agentAddAuto         bool
-	agentAddBackend      string
-	agentAddRepos        []string
-	agentAddRepoGroups   []string
-	agentAddCrossRepo    bool
-	agentAddParent       string
 	agentAddMode         string
-	agentAddTaskFilter   string
+	agentAddProfile      string
 	agentAddMaxConc      int
 	agentAddBudget       string
-	agentAddTask         string
-	agentAddOrchestrator string
-
-	agentListJSON  bool
-	agentShowJSON  bool
-	agentStopForce bool
+	agentStartRequestID  string
+	agentStopRequestID   string
+	agentRemoveRequestID string
+	agentListJSON        bool
+	agentShowJSON        bool
 )
-
-// envOrchestratorSessionID is the env var lead injects so descendants are
-// auto-attributed to the lead session that spawned them.
-const envOrchestratorSessionID = "LOOM_ORCHESTRATOR_SESSION_ID"
 
 var agentdefCmd = &cobra.Command{
 	Use:     "agentdef",
 	Short:   "Manage agent assignments within the active workspace",
 	GroupID: "workspace",
-	Long: `Define long-lived agent assignments stored in fleet-db.
+	Long: `Define long-lived agent assignments through the Agents capability.
 
 Distinct from 'loom agent <worktree>' which runs an actual agent process.
-Phase 6 will unify these surfaces.`,
+Phase 6 will unify these surfaces.
+
+Agent definitions own identity and desired lifecycle only. Configure shared
+behavior fields such as backend and task_filter with 'loom role'. Configure
+execution placement such as repository and parent-epic scope with
+'loom worker profile', then attach that profile with 'agentdef add --profile'.
+
+The legacy --task and --orchestrator launch flags are retired; dispatch work
+through an Execution workflow such as 'loom epic run'. The legacy
+--repo-groups and --cross-repo flags have no Phase 5 replacement and are
+rejected rather than silently broadening repository access.`,
 }
 
 var agentAddCmd = &cobra.Command{
@@ -80,212 +79,192 @@ var agentShowCmd = &cobra.Command{
 var agentRemoveCmd = &cobra.Command{
 	Use:   "remove <NAME>",
 	Short: "Delete an agent assignment from the active workspace",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runAgentRemove,
+	Long: `Delete an agent assignment from the active workspace.
+
+The command prints a generation-bound request ID before issuing the mutation.
+After an ambiguous response, pass that exact value to --request-id to replay
+the same Fleet receipt. Omit the flag for a fresh operation; arbitrary
+caller-created request IDs are rejected.`,
+	Args: cobra.ExactArgs(1),
+	RunE: runAgentRemove,
 }
 
 var agentStartCmd = &cobra.Command{
 	Use:   "start <NAME>",
 	Short: "Request an agent assignment to start",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runAgentStart,
+	Long: `Request an agent assignment to start accepting work.
+
+The command prints a generation-bound request ID before issuing the mutation.
+After an ambiguous response, pass that exact value to --request-id to replay
+the same Fleet receipt. Omit the flag for a fresh operation.`,
+	Args: cobra.ExactArgs(1),
+	RunE: runAgentStart,
 }
 
 var agentStopCmd = &cobra.Command{
 	Use:   "stop <NAME>",
 	Short: "Request an agent assignment to stop",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runAgentStop,
+	Long: `Request an agent assignment to stop accepting new work.
+
+This changes durable desired state; it does not interrupt an active terminal
+session. For the transitional runtime-control operation use:
+  loom data agent stop <NAME> --force
+
+The command prints a generation-bound request ID before issuing the mutation.
+After an ambiguous response, pass that exact value to --request-id to replay
+the same Fleet receipt. Omit the flag for a fresh operation.`,
+	Args: cobra.ExactArgs(1),
+	RunE: runAgentStop,
 }
 
 func init() {
 	agentAddCmd.Flags().StringVar(&agentAddRole, "role", "", "Role name (required)")
 	_ = agentAddCmd.MarkFlagRequired("role")
-	agentAddCmd.Flags().BoolVar(&agentAddAuto, "auto", false, "Auto-start on daemon up")
-	agentAddCmd.Flags().StringVar(&agentAddBackend, "backend", "", "AI backend override")
-	agentAddCmd.Flags().StringSliceVar(&agentAddRepos, "repos", nil, "Repo names (comma-separated or repeat flag)")
-	agentAddCmd.Flags().StringSliceVar(&agentAddRepoGroups, "repo-groups", nil, "Repo groups (comma-separated or repeat flag)")
-	agentAddCmd.Flags().BoolVar(&agentAddCrossRepo, "cross-repo", false, "Allow tasks spanning repos")
-	agentAddCmd.Flags().StringVar(&agentAddParent, "parent", "", "Epic ID to scope this agent to")
+	agentAddCmd.Flags().BoolVar(&agentAddAuto, "auto", false, "Keep the agent's desired state running across controller restarts")
 	agentAddCmd.Flags().StringVar(&agentAddMode, "mode", "", "Agent mode: ephemeral or service")
-	agentAddCmd.Flags().StringVar(&agentAddTaskFilter, "task-filter", "", "Task filter for task-driven agents")
+	agentAddCmd.Flags().StringVar(&agentAddProfile, "profile", "", "Execution worker profile name")
 	agentAddCmd.Flags().IntVar(&agentAddMaxConc, "max-concurrency", 0, "Maximum concurrent runs for orchestrator/service agents")
 	agentAddCmd.Flags().StringVar(&agentAddBudget, "budget-policy", "", "Budget/retry policy name")
-	agentAddCmd.Flags().StringVar(&agentAddTask, "task", "", "Pin this agent's first cycle to a specific task ID (claims that task instead of polling Ready)")
-	agentAddCmd.Flags().StringVar(&agentAddOrchestrator, "orchestrator", "", "Parent lead/orchestrator session ID for the queued --task start command (overrides $LOOM_ORCHESTRATOR_SESSION_ID)")
 
 	agentListCmd.Flags().BoolVar(&agentListJSON, "json", false, "JSON output")
 	agentShowCmd.Flags().BoolVar(&agentShowJSON, "json", false, "JSON output")
-	agentStopCmd.Flags().BoolVar(&agentStopForce, "force", false, "Stop without graceful yield when handled by a local daemon")
+	agentStartCmd.Flags().StringVar(&agentStartRequestID, "request-id", "", "Generation-bound retry ID printed by a prior attempt")
+	agentStopCmd.Flags().StringVar(&agentStopRequestID, "request-id", "", "Generation-bound retry ID printed by a prior attempt")
+	agentRemoveCmd.Flags().StringVar(&agentRemoveRequestID, "request-id", "", "Generation-bound retry ID printed by a prior attempt")
 
 	agentdefCmd.AddCommand(agentAddCmd, agentListCmd, agentShowCmd, agentRemoveCmd, agentStartCmd, agentStopCmd)
+	_ = cli.RegisterPreBackendCommandGuard(rejectAgentdefBackendFlag)
 	cli.RegisterCommand(agentdefCmd)
 }
 
-func runAgentAdd(cmd *cobra.Command, args []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		mode := domain.AgentMode(agentAddMode)
-		// Attribution: explicit --orchestrator flag wins; otherwise inherit from
-		// the env var that `loom lead` injects. Empty = unattached.
-		orchestratorID := agentAddOrchestrator
-		if orchestratorID == "" {
-			orchestratorID = os.Getenv(envOrchestratorSessionID)
+func rejectAgentdefBackendFlag(cmd *cobra.Command) error {
+	if cmd == nil || !isAgentdefCommand(cmd) {
+		return nil
+	}
+	flag := cmd.Flags().Lookup("backend")
+	if flag == nil {
+		flag = cmd.InheritedFlags().Lookup("backend")
+	}
+	if flag == nil || !flag.Changed {
+		return nil
+	}
+	return errors.New(
+		"agentdef does not accept --backend; use " +
+			"`loom role set ROLE backend VALUE` for behavior or " +
+			"`loom worker profile add PROFILE --backend VALUE ...` for execution placement",
+	)
+}
+
+func isAgentdefCommand(cmd *cobra.Command) bool {
+	for current := cmd; current != nil; current = current.Parent() {
+		if current.Name() == agentdefCmd.Name() {
+			return true
 		}
-		a, err := h.Store.Agents().Create(ctx, agentCreateFromFlags(ws, args[0], mode))
+	}
+	return false
+}
+
+func runAgentAdd(cmd *cobra.Command, args []string) error {
+	return withAgentdefRuntime(cmd.Context(), func(ctx context.Context, runtime agentdefRuntime, ws string) error {
+		create, err := agentCreateFromFlags(ws, args[0], agentAddMode)
+		if err != nil {
+			return err
+		}
+		a, err := runtime.definitions.CreateAgentDefinition(ctx, create)
 		if err != nil {
 			return fmt.Errorf("create agent: %w", err)
 		}
-		if err := ensureAgentDefinitionLocalWorktrees(ctx, h.Store, *a); err != nil {
-			_ = h.Store.Agents().Delete(ctx, a.WorkspaceKey, a.Name)
-			return err
-		}
 		fmt.Printf("Created agent %s/%s (role=%s)\n", a.WorkspaceKey, a.Name, a.RoleName)
-
-		if err := enqueueAgentAddTaskStart(ctx, h.Store, ws, a.Name, orchestratorID); err != nil {
-			return err
-		}
-		warnIfBackendMissing(cmd, a.Name, agentAddBackend)
 		return nil
 	})
 }
 
-func agentCreateFromFlags(workspace, name string, mode domain.AgentMode) store.AgentCreate {
-	desiredState := domain.AgentDesiredState("")
-	if agentAddTask != "" {
-		desiredState = domain.AgentDesiredStopped
+func agentCreateFromFlags(
+	workspace string,
+	name string,
+	mode string,
+) (AgentDefinitionCreateCommand, error) {
+	mode = strings.TrimSpace(mode)
+	kind := agents.AgentKindMaintenance
+	switch mode {
+	case "", "ephemeral":
+	case "service":
+		kind = agents.AgentKindAlwaysOn
+	default:
+		return AgentDefinitionCreateCommand{}, fmt.Errorf(
+			"invalid agent mode %q (want ephemeral or service)",
+			mode,
+		)
 	}
-	return store.AgentCreate{
-		WorkspaceKey:   workspace,
-		Name:           name,
-		RoleName:       agentAddRole,
-		Auto:           agentAddAuto,
-		Backend:        agentAddBackend,
-		Repos:          agentAddRepos,
-		RepoGroups:     agentAddRepoGroups,
-		CrossRepo:      agentAddCrossRepo,
-		Parent:         agentAddParent,
-		Mode:           mode,
-		TaskFilter:     agentAddTaskFilter,
-		MaxConcurrency: agentAddMaxConc,
-		BudgetPolicy:   agentAddBudget,
-		DesiredState:   desiredState,
+	maxInstances := agentAddMaxConc
+	if maxInstances == 0 {
+		maxInstances = 1
 	}
+	restartPolicy := ""
+	if agentAddAuto {
+		restartPolicy = "always"
+	}
+	return AgentDefinitionCreateCommand{
+		Canonical: agents.CreateAgentCommand{
+			WorkspaceKey: workspace,
+			AgentID:      name,
+			Name:         name,
+			Kind:         kind,
+			Behavior: agents.BehaviorReference{
+				RoleName: agentAddRole,
+			},
+			DesiredState:  agents.DesiredRunning,
+			ProfileName:   strings.TrimSpace(agentAddProfile),
+			MaxInstances:  maxInstances,
+			RestartPolicy: restartPolicy,
+			BudgetPolicy:  agentAddBudget,
+		},
+	}, nil
 }
 
-func enqueueAgentAddTaskStart(ctx context.Context, st store.Store, workspace, agentName, orchestratorID string) error {
-	if agentAddTask == "" || st.AgentCommands() == nil {
-		return nil
-	}
-	payload := map[string]string{"task_id": agentAddTask}
-	if orchestratorID != "" {
-		payload["parent_session_id"] = orchestratorID
-	}
-	if _, err := st.AgentCommands().Create(ctx, store.AgentCommandCreate{
-		WorkspaceKey:  workspace,
-		TargetAgentID: agentName,
-		Type:          "start",
-		Payload:       payload,
-	}); err != nil {
-		return fmt.Errorf("enqueue start command for task %q: %w", agentAddTask, err)
-	}
-	fmt.Printf("  pinned to task: %s\n", agentAddTask)
-	return nil
-}
-
-// warnIfBackendMissing writes a stderr WARN if the resolved backend
-// for a freshly-created agent is not on PATH. The agent is still
-// created (the user may intentionally pre-create one before installing
-// the binary), but the daemon will refuse to spawn it until the binary
-// appears.
-func warnIfBackendMissing(cmd *cobra.Command, agentName, agentBackend string) {
-	effective := agentBackend
-	if effective == "" {
-		effective = cli.ResolveBackendName()
-	}
-	info, err := backendcheck.CheckBackend(effective)
-	if err != nil || info.Installed {
-		return
-	}
-	_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "WARN: %s\n", info.InstallHint)
-	_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
-		"      Agent %q was recorded, but the daemon will not spawn it until %q is installed on PATH.\n",
-		agentName, effective)
-}
-
-func ensureAgentDefinitionLocalWorktrees(ctx context.Context, st store.Store, agent domain.Agent) error {
-	sc, err := bootstrap.LoadStateCache()
-	if err != nil {
-		return fmt.Errorf("load local workspace state: %w", err)
-	}
-	local := sc.Workspaces[agent.WorkspaceKey]
-	if local.Path == "" {
-		return nil
-	}
-	repos, err := st.Repos().List(ctx, agent.WorkspaceKey)
-	if err != nil {
-		return fmt.Errorf("list workspace repos: %w", err)
-	}
-	localRepos := make([]localworkspace.Repo, 0, len(repos))
-	for _, repo := range repos {
-		if repo == nil {
-			continue
-		}
-		localRepos = append(localRepos, localworkspace.Repo{
-			Name:   repo.Name,
-			Path:   localworkspace.RepoPath(local, repo.Name),
-			Groups: append([]string(nil), repo.Groups...),
-		})
-	}
-	selected, err := localworkspace.SelectAgentRepos(localRepos, agent)
-	if err != nil {
-		return err
-	}
-	if len(selected) == 0 {
-		return fmt.Errorf("workspace %s has no repos for agent %q", agent.WorkspaceKey, agent.Name)
-	}
-
-	created := make(map[string]string, len(selected))
-	for _, repo := range selected {
-		target := localworkspace.AgentWorktreePath(local.Path, repo.Name, agent.Name)
-		if err := localworkspace.EnsureGitWorktree(repo.Path, target, agent.Name); err != nil {
-			return fmt.Errorf("create worktree for repo %q: %w", repo.Name, err)
-		}
-		created[repo.Name] = target
-	}
-	return localworkspace.RememberAgentWorktree(agent.WorkspaceKey, agent.Name, localworkspace.FirstWorktreePath(created))
-}
-
-func runAgentList(_ *cobra.Command, _ []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		agents, err := h.Store.Agents().List(ctx, ws)
+func runAgentList(cmd *cobra.Command, _ []string) error {
+	return withAgentdefRuntime(cmd.Context(), func(ctx context.Context, runtime agentdefRuntime, ws string) error {
+		definitions, err := runtime.definitions.ListAgentDefinitions(ctx, ws)
 		if err != nil {
 			return fmt.Errorf("list agents: %w", err)
 		}
 		if agentListJSON {
-			return cmdstore.WriteJSON(agents)
+			return cmdstore.WriteJSON(definitions)
 		}
-		if len(agents) == 0 {
+		if len(definitions) == 0 {
 			fmt.Printf("No agents in workspace %s\n", ws)
 			return nil
 		}
-		for _, a := range agents {
+		for _, a := range definitions {
+			state := a.State
+			if state == "" {
+				state = "unknown"
+			}
 			auto := ""
 			if a.Auto {
 				auto = " auto"
 			}
 			mode := ""
 			if a.Mode != "" {
-				mode = " mode=" + string(a.Mode)
+				mode = " mode=" + a.Mode
 			}
-			fmt.Printf("%-20s role=%-10s state=%s%s%s\n", a.Name, a.RoleName, a.State, mode, auto)
+			fmt.Printf(
+				"%-20s role=%-10s state=%s desired=%s%s%s\n",
+				a.Name,
+				a.RoleName,
+				state,
+				a.DesiredState,
+				mode,
+				auto,
+			)
 		}
 		return nil
 	})
 }
 
-func runAgentShow(_ *cobra.Command, args []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		a, err := h.Store.Agents().Get(ctx, ws, args[0])
+func runAgentShow(cmd *cobra.Command, args []string) error { //nolint:funlen // The command renders one compatibility view with explicit legacy fields and stable output ordering.
+	return withAgentdefRuntime(cmd.Context(), func(ctx context.Context, runtime agentdefRuntime, ws string) error {
+		a, err := runtime.definitions.GetAgentDefinition(ctx, ws, args[0])
 		if err != nil {
 			return fmt.Errorf("get agent: %w", err)
 		}
@@ -295,7 +274,12 @@ func runAgentShow(_ *cobra.Command, args []string) error {
 		fmt.Printf("Workspace:    %s\n", a.WorkspaceKey)
 		fmt.Printf("Name:         %s\n", a.Name)
 		fmt.Printf("Role:         %s\n", a.RoleName)
-		fmt.Printf("State:        %s\n", a.State)
+		state := a.State
+		if state == "" {
+			state = "unknown"
+		}
+		fmt.Printf("State:        %s\n", state)
+		fmt.Printf("Desired:      %s\n", a.DesiredState)
 		fmt.Printf("Auto-start:   %t\n", a.Auto)
 		if a.Backend != "" {
 			fmt.Printf("Backend:      %s\n", a.Backend)
@@ -312,11 +296,11 @@ func runAgentShow(_ *cobra.Command, args []string) error {
 		if a.Parent != "" {
 			fmt.Printf("Parent epic:  %s\n", a.Parent)
 		}
-		// AgentSession is the single source of truth for orchestrator
-		// attribution; the denormalized Agent.OrchestratorSessionID
-		// cache was dropped on FleetDB writes in 9aef2ae5.
-		if orchID, err := store.OrchestrationSessionIDFor(ctx, h.Store, ws, a.Name); err == nil && orchID != "" {
-			fmt.Printf("Orchestrator: %s\n", orchID)
+		if a.OrchestratorSessionID != "" {
+			fmt.Printf("Orchestrator: %s\n", a.OrchestratorSessionID)
+		}
+		if a.ProfileName != "" {
+			fmt.Printf("Profile:      %s\n", a.ProfileName)
 		}
 		if a.Mode != "" {
 			fmt.Printf("Mode:         %s\n", a.Mode)
@@ -334,47 +318,127 @@ func runAgentShow(_ *cobra.Command, args []string) error {
 	})
 }
 
-func runAgentRemove(_ *cobra.Command, args []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		if err := h.Store.Agents().Delete(ctx, ws, args[0]); err != nil {
-			return fmt.Errorf("remove agent: %w", err)
-		}
-		fmt.Printf("Removed agent %s/%s\n", ws, args[0])
-		return nil
-	})
-}
-
-func runAgentStart(_ *cobra.Command, args []string) error {
-	return updateAgentDesiredState(args[0], domain.AgentDesiredRunning, domain.AgentStateActive, "start", nil)
-}
-
-func runAgentStop(_ *cobra.Command, args []string) error {
-	payload := map[string]string{}
-	if agentStopForce {
-		payload["force"] = "true"
+func runAgentRemove(cmd *cobra.Command, args []string) error {
+	requestID, err := resolveLifecycleRequestID(agentRemoveRequestID)
+	if err != nil {
+		return err
 	}
-	return updateAgentDesiredState(args[0], domain.AgentDesiredStopped, domain.AgentStateStopped, "stop", payload)
+	return applyAgentLifecycle(
+		cmd.Context(),
+		args[0],
+		agents.LifecycleDelete,
+		"remove",
+		requestID,
+	)
 }
 
-func updateAgentDesiredState(name string, desired domain.AgentDesiredState, state domain.AgentState, commandType string, payload map[string]string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		if _, err := h.Store.Agents().Update(ctx, ws, name, store.AgentUpdate{
-			DesiredState: &desired,
-			State:        &state,
-		}); err != nil {
-			return fmt.Errorf("update agent desired state: %w", err)
-		}
-		if h.Store.AgentCommands() != nil {
-			if _, err := h.Store.AgentCommands().Create(ctx, store.AgentCommandCreate{
-				WorkspaceKey:  ws,
-				TargetAgentID: name,
-				Type:          commandType,
-				Payload:       payload,
-			}); err != nil {
-				return fmt.Errorf("create agent command: %w", err)
+func runAgentStart(cmd *cobra.Command, args []string) error {
+	requestID, err := resolveLifecycleRequestID(agentStartRequestID)
+	if err != nil {
+		return err
+	}
+	return applyAgentLifecycle(cmd.Context(), args[0], agents.LifecycleEnable, "start", requestID)
+}
+
+func runAgentStop(cmd *cobra.Command, args []string) error {
+	requestID, err := resolveLifecycleRequestID(agentStopRequestID)
+	if err != nil {
+		return err
+	}
+	return applyAgentLifecycle(cmd.Context(), args[0], agents.LifecycleDisable, "stop", requestID)
+}
+
+//nolint:funlen // Lifecycle token validation, request replay, and user-visible recovery instructions must remain one atomic CLI operation.
+func applyAgentLifecycle(
+	ctx context.Context,
+	name string,
+	action agents.LifecycleAction,
+	commandType string,
+	requestID string,
+) error {
+	return withAgentdefRuntime(ctx, func(ctx context.Context, runtime agentdefRuntime, ws string) error {
+		current, getErr := runtime.definitions.GetAgentDefinition(ctx, ws, name)
+		generationID := ""
+		if getErr == nil {
+			if current == nil || !agents.ValidGenerationID(current.GenerationID) {
+				return agents.ErrInvalidPersistedState
+			}
+			generationID = current.GenerationID
+		} else {
+			notFound := errors.Is(getErr, domain.ErrNotFound) ||
+				errors.Is(getErr, agents.ErrNotFound)
+			if action != agents.LifecycleDelete || !notFound {
+				return fmt.Errorf("read Agent generation before %s: %w", commandType, getErr)
+			}
+			if _, bound, parseErr := parseBoundLifecycleRequestID(requestID); parseErr != nil {
+				return fmt.Errorf("parse lifecycle retry token: %w", parseErr)
+			} else if !bound {
+				return fmt.Errorf(
+					"agent not found; a delete replay requires the generation-bound request-id printed by the prior attempt: %w",
+					getErr,
+				)
 			}
 		}
-		fmt.Printf("Requested agent %s/%s %s\n", ws, name, commandType)
+		boundRequestID, err := bindLifecycleRequestID(requestID, generationID)
+		if err != nil {
+			return fmt.Errorf("bind lifecycle request to Agent generation: %w", err)
+		}
+		fmt.Printf("Lifecycle request-id=%s\n", boundRequestID)
+		if _, err := runtime.definitions.ApplyAgentLifecycle(ctx, AgentLifecycleCommand{
+			WorkspaceKey: ws,
+			AgentID:      name,
+			Action:       action,
+			RequestID:    boundRequestID,
+		}); err != nil {
+			return fmt.Errorf(
+				"update agent desired state (request_id=%s; retry with --request-id %s): %w",
+				boundRequestID,
+				boundRequestID,
+				err,
+			)
+		}
+		if action == agents.LifecycleDelete {
+			fmt.Printf("Removed agent %s/%s (request-id=%s)\n", ws, name, boundRequestID)
+		} else {
+			fmt.Printf("Requested agent %s/%s %s (request-id=%s)\n", ws, name, commandType, boundRequestID)
+		}
 		return nil
 	})
+}
+
+var newLifecycleRequestID = func() (string, error) {
+	random := make([]byte, 16)
+	if _, err := rand.Read(random); err != nil {
+		return "", fmt.Errorf("generate lifecycle request id: %w", err)
+	}
+	return "req-" + hex.EncodeToString(random), nil
+}
+
+func resolveLifecycleRequestID(explicit string) (string, error) {
+	explicit = strings.TrimSpace(explicit)
+	if explicit != "" {
+		requestID, err := normalizeLifecycleRequestID(explicit)
+		if err != nil {
+			return "", fmt.Errorf("invalid lifecycle --request-id: %w", err)
+		}
+		if _, bound, err := parseBoundLifecycleRequestID(requestID); err != nil || !bound {
+			if err == nil {
+				err = errors.New("expected a generation-bound token printed by an earlier lifecycle attempt")
+			}
+			return "", fmt.Errorf(
+				"invalid lifecycle --request-id: %w; omit the flag to start a fresh operation",
+				err,
+			)
+		}
+		return requestID, nil
+	}
+	requestID, err := newLifecycleRequestID()
+	if err != nil {
+		return "", err
+	}
+	requestID, err = normalizeLifecycleRequestID(requestID)
+	if err != nil {
+		return "", fmt.Errorf("generated invalid lifecycle request id: %w", err)
+	}
+	return requestID, nil
 }

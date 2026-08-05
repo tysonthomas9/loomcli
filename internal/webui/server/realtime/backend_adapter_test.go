@@ -2,6 +2,7 @@ package realtime
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +14,13 @@ import (
 // in this file. Avoids time-dependent flakes and keeps the byte-equality
 // assertions reproducible.
 var sharedFixtureTimestamp = time.Date(2026, 4, 25, 10, 30, 45, 0, time.UTC)
+
+func derefMutationAssignee(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
 
 // makeSharedFixture returns a (backend.MutationData, rpc.MutationEvent) pair
 // that represent the same logical event. Used to assert byte-level
@@ -69,7 +77,7 @@ func TestBackendMutationToPayload_AllFields(t *testing.T) {
 		"Action":      {got.Action, "issue.close"},
 		"IssueID":     {got.IssueID, "loom-fleet-42"},
 		"Title":       {got.Title, "Implement SSE fleet subscriber"},
-		"Assignee":    {got.Assignee, "agent-alpha"},
+		"Assignee":    {derefMutationAssignee(got.Assignee), "agent-alpha"},
 		"Actor":       {got.Actor, "agent-beta"},
 		"OldStatus":   {got.OldStatus, "open"},
 		"NewStatus":   {got.NewStatus, "in_progress"},
@@ -179,13 +187,71 @@ func TestBackendMutationToPayload_EmptyOptionalFields(t *testing.T) {
 	}
 	got := BackendMutationToPayload(bm, "ws-min")
 
-	if got.Title != "" || got.Assignee != "" || got.Actor != "" ||
+	if got.Title != "" || got.Assignee != nil || got.Actor != "" ||
 		got.OldStatus != "" || got.NewStatus != "" || got.ParentID != "" ||
 		got.StepCount != 0 || got.SourceRepo != "" {
 		t.Errorf("optional fields should be zero-valued, got %+v", got)
 	}
 	if got.WorkspaceID != "ws-min" {
 		t.Errorf("WorkspaceID = %q, want %q", got.WorkspaceID, "ws-min")
+	}
+}
+
+func TestBackendMutationToPayload_AssigneeClearIsExplicit(t *testing.T) {
+	got := BackendMutationToPayload(backend.MutationData{
+		Type:       "update",
+		EntityType: "issue",
+		EntityID:   "loom-7",
+		IssueID:    "loom-7",
+		Action:     "issue.assign",
+		Timestamp:  sharedFixtureTimestamp,
+	}, "ws-min")
+
+	if got.Assignee == nil || *got.Assignee != "" {
+		t.Fatalf("issue.assign clear must preserve an explicit empty assignee, got %#v", got.Assignee)
+	}
+	wire, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if !strings.Contains(string(wire), `"assignee":""`) {
+		t.Fatalf("assignee clear missing from wire payload: %s", wire)
+	}
+}
+
+func TestBackendMutationToPayload_TaskRunTerminalHandoffClearsAssignee(t *testing.T) {
+	got := BackendMutationToPayload(backend.MutationData{
+		Type:       "update",
+		EntityType: "issue",
+		EntityID:   "loom-8",
+		IssueID:    "loom-8",
+		Action:     "issue.update",
+		Actor:      "task-run:run-8",
+		OldStatus:  "in_progress",
+		NewStatus:  "review",
+		Timestamp:  sharedFixtureTimestamp,
+	}, "ws-min")
+
+	if got.Assignee == nil || *got.Assignee != "" {
+		t.Fatalf("task-run terminal handoff must preserve an explicit empty assignee, got %#v", got.Assignee)
+	}
+}
+
+func TestBackendMutationToPayload_HumanStatusMoveDoesNotInventAssigneeClear(t *testing.T) {
+	got := BackendMutationToPayload(backend.MutationData{
+		Type:       "update",
+		EntityType: "issue",
+		EntityID:   "loom-9",
+		IssueID:    "loom-9",
+		Action:     "issue.update",
+		Actor:      "user:tyson",
+		OldStatus:  "in_progress",
+		NewStatus:  "review",
+		Timestamp:  sharedFixtureTimestamp,
+	}, "ws-min")
+
+	if got.Assignee != nil {
+		t.Fatalf("human status move must not invent an assignee clear, got %#v", got.Assignee)
 	}
 }
 

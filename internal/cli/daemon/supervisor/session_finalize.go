@@ -31,10 +31,9 @@ func (u leafUsage) cost() float64 {
 	return u.EstimatedCostUSD
 }
 
-// readLeafTranscript reads the session's on-disk native transcript ONCE so the
-// finalize can reuse it for both the on-disk token backfill (the supervisor's
-// collector-less finalize otherwise lands tokens=0) and the control-plane
-// transcript_ref artifact upload. ok=false when there is no transcript yet.
+// readLeafTranscript reads the local session's on-disk native transcript ONCE
+// so finalization can backfill token usage (collector-less finalization would
+// otherwise record tokens=0). ok=false when there is no transcript yet.
 func (s *Supervisor) readLeafTranscript(sessionID string) (data []byte, usage leafUsage, ok bool) {
 	if sessionID == "" {
 		return nil, leafUsage{}, false
@@ -83,7 +82,7 @@ func (s *Supervisor) completeBackendUnavailableCleanup(ap *AgentProcess) {
 	s.completePreSpawnCleanup(ap, "backend_unavailable")
 }
 
-// completePreSpawnCleanup unwinds task/session/worker state created by
+// completePreSpawnCleanup unwinds task, local-session, and worker state created by
 // preFlightSetup when the subprocess cannot safely be started.
 func (s *Supervisor) completePreSpawnCleanup(ap *AgentProcess, errClass string) {
 	state := takeAgentSessionForFinalize(ap)
@@ -91,78 +90,49 @@ func (s *Supervisor) completePreSpawnCleanup(ap *AgentProcess, errClass string) 
 	if state.session != nil {
 		_ = state.session.Finalize(sessions.FinalizeOptions{ExitCode: -1, ErrorClass: errClass})
 	}
-	if state.sessionID != "" {
-		s.completeControlPlaneAgentSession(ap, agentSessionCompletionInput{
-			sessionID:  state.sessionID,
-			leaseID:    state.leaseID,
-			leaseToken: state.leaseToken,
-			exitCode:   -1,
-			errClass:   errClass,
-			taskID:     taskID,
-		})
-		return
+	if taskID != "" {
+		s.releaseAssignedTaskClaim(ap, taskID)
 	}
-	if taskID == "" {
-		return
-	}
-	s.releaseAssignedTaskClaim(ap, taskID)
 	s.deregisterWorker(ap)
 }
 
 type agentSessionFinalizeState struct {
-	session    *sessions.Session
-	sessionID  string
-	leaseID    string
-	leaseToken string
-	beforeRef  string
+	session   *sessions.Session
+	sessionID string
+	beforeRef string
 }
 
 // finalizeAgentSession finalizes the daemon-created session after agent exit.
 func (s *Supervisor) finalizeAgentSession(ap *AgentProcess, exitCode int) {
 	state := takeAgentSessionForFinalize(ap)
-	if state.session == nil && state.sessionID == "" {
-		return
-	}
 	taskID := s.taskIDForFinalize(ap)
-	errClass := agentErrorClass(ap)
-	// Read the leaf transcript once: it feeds both the on-disk token backfill (via
-	// finalizeLocalSession) and the control-plane transcript_ref artifact upload.
-	// Read before finalizeLocalSession, whose codex/claude re-sync can rewrite the
-	// on-disk file — this captures the TS leaf's canonical transcript verbatim.
-	transcriptData, usage, _ := s.readLeafTranscript(state.sessionID)
-	diffResult := finalizeLocalSession(state.session, ap, state.beforeRef, taskID, exitCode, errClass, usage)
-	s.completeControlPlaneAgentSession(ap, agentSessionCompletionInput{
-		sessionID:      state.sessionID,
-		leaseID:        state.leaseID,
-		leaseToken:     state.leaseToken,
-		exitCode:       exitCode,
-		errClass:       errClass,
-		taskID:         taskID,
-		diffResult:     diffResult,
-		transcriptData: transcriptData,
-	})
+	if state.session != nil || state.sessionID != "" {
+		errClass := agentErrorClass(ap)
+		// Read before finalizeLocalSession, whose codex/claude re-sync can
+		// rewrite the on-disk file. Usage remains local-session evidence; batch
+		// execution no longer shadows that evidence into Interaction-owned
+		// AgentSession rows.
+		_, usage, _ := s.readLeafTranscript(state.sessionID)
+		_ = finalizeLocalSession(state.session, ap, state.beforeRef, taskID, exitCode, errClass, usage)
+	}
+	// Claim and Worker cleanup are execution lifecycle responsibilities. They
+	// must not depend on local transcript-session creation having succeeded.
+	s.releaseAssignedTaskClaim(ap, taskID)
+	s.deregisterWorker(ap)
 }
 
-// takeAgentSessionForFinalize drains any in-flight heartbeat and retires the
-// session identifiers while holding the lifecycle barrier. It releases the
-// barrier before transcript, Git, artifact, and control-plane completion work:
-// queued heartbeat jobs re-check the cleared identifiers and become no-ops, so
-// terminal work remains protected without blocking a heartbeat pass deadline.
+// takeAgentSessionForFinalize retires local session state and revokes the
+// process-local IPC credential before transcript and Git finalization.
 func takeAgentSessionForFinalize(ap *AgentProcess) agentSessionFinalizeState {
-	ap.SessionHeartbeatMu.Lock()
-	defer ap.SessionHeartbeatMu.Unlock()
 	ap.Mu.Lock()
 	state := agentSessionFinalizeState{
-		session:    ap.Session,
-		sessionID:  ap.AgentSessionID,
-		leaseID:    ap.AgentLeaseID,
-		leaseToken: ap.AgentLeaseToken,
-		beforeRef:  ap.BeforeRef,
+		session:   ap.Session,
+		sessionID: ap.AgentSessionID,
+		beforeRef: ap.BeforeRef,
 	}
 	ap.Session = nil
 	ap.AgentSessionID = ""
-	ap.AgentLeaseID = ""
-	ap.AgentLeaseToken = ""
+	ap.AgentIPCAuthToken = ""
 	ap.Mu.Unlock()
 	return state
 }

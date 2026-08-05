@@ -2,6 +2,9 @@ package driver
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,8 +14,87 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
+
+type testTaskMaterializer struct{}
+
+// testTaskSourceControl keeps the shared test helper name used by the lineage
+// tests while exposing only the narrowed task/PR Materializer contract.
+type testTaskSourceControl = testTaskMaterializer
+
+func (testTaskMaterializer) PrepareTaskCheckout(
+	ctx context.Context,
+	command sourcecontrol.TaskCheckoutCommand,
+) (*sourcecontrol.TaskCheckout, error) {
+	cache, err := bootstrap.LoadStateCache()
+	if err != nil {
+		return nil, err
+	}
+	local, ok := cache.Workspaces[command.WorkspaceKey]
+	if !ok || len(local.Repos) != 1 {
+		return nil, sourcecontrol.ErrInvalidMaterialization
+	}
+	var repoPath string
+	for _, path := range local.Repos {
+		repoPath = path
+	}
+	result := &sourcecontrol.TaskCheckout{
+		WorkspaceKey: command.WorkspaceKey, TaskRunID: command.TaskRunID,
+		RepositoryRef: command.RepositoryRef, CheckoutPath: repoPath,
+	}
+	if strings.TrimSpace(command.BaseBranch) == "" {
+		return result, nil
+	}
+	sum := sha256.Sum256([]byte(command.TaskRunID))
+	result.BaseRef = "refs/loom/task-runs/" + hex.EncodeToString(sum[:8]) + "/base"
+	baseOutput, err := testGitOutputForMaterializer(
+		ctx,
+		repoPath,
+		"rev-parse",
+		"--verify",
+		command.BaseBranch+"^{commit}",
+	)
+	if err != nil {
+		return nil, fmt.Errorf("resolve test base %q: %w", command.BaseBranch, err)
+	}
+	baseCommit := strings.TrimSpace(baseOutput)
+	if _, err := testGitOutputForMaterializer(
+		ctx,
+		repoPath,
+		"update-ref",
+		result.BaseRef,
+		baseCommit,
+	); err != nil {
+		return nil, fmt.Errorf("publish test base ref: %w", err)
+	}
+	result.BaseCommit = baseCommit
+	return result, nil
+}
+
+func (testTaskMaterializer) PreparePullRequestCheckout(
+	context.Context,
+	sourcecontrol.PullRequestCheckoutCommand,
+) (*sourcecontrol.PullRequestCheckout, error) {
+	return nil, sourcecontrol.ErrUnavailable
+}
+
+var _ sourcecontrol.Materializer = testTaskMaterializer{}
+
+func testGitOutputForMaterializer(
+	ctx context.Context,
+	dir string,
+	args ...string,
+) (string, error) {
+	command := exec.CommandContext(ctx, "git", args...) //nolint:norawexec,gosec // test helper.
+	command.Dir = dir
+	output, err := command.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(output)))
+	}
+	return string(output), nil
+}
 
 func TestLocalTaskWorktreeResolverCreatesIsolatedTaskRunWorktree(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
@@ -52,13 +134,16 @@ func TestLocalTaskWorktreeResolverCreatesIsolatedTaskRunWorktree(t *testing.T) {
 	if _, err := st.Repos().Create(ctx, store.RepoCreate{
 		WorkspaceKey:  "TEST",
 		Name:          "app",
+		RemoteURL:     repoPath,
 		DefaultBranch: "main",
 		SourceRepoID:  "frontend",
 	}); err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
 
-	resolved, err := (LocalTaskWorktreeResolver{Store: st}).ResolveTaskWorktree(ctx, TaskExecRequest{
+	resolved, err := (LocalTaskWorktreeResolver{
+		Store: st, SourceControl: testTaskMaterializer{},
+	}).ResolveTaskWorktree(ctx, TaskExecRequest{
 		WorkspaceKey:     "TEST",
 		TaskRunID:        "task/run:1",
 		TaskID:           "TEST-1",
@@ -70,8 +155,8 @@ func TestLocalTaskWorktreeResolverCreatesIsolatedTaskRunWorktree(t *testing.T) {
 	if resolved.Path == "" || resolved.Path == repoPath {
 		t.Fatalf("resolved path = %q, want isolated task worktree distinct from repo %q", resolved.Path, repoPath)
 	}
-	if resolved.RepoName != "app" || resolved.SourceRepoID != "frontend" {
-		t.Fatalf("resolved repo metadata = %+v, want app/frontend", resolved)
+	if resolved.RepoName != "app" || resolved.SourceRepoID != "frontend" || resolved.RepositoryRemote != repoPath {
+		t.Fatalf("resolved repo metadata = %+v, want app/frontend with admitted remote %q", resolved, repoPath)
 	}
 	if _, err := os.Stat(filepath.Join(resolved.Path, ".git")); err != nil {
 		t.Fatalf("resolved worktree .git missing: %v", err)

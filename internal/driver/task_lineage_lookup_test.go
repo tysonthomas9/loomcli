@@ -105,7 +105,10 @@ func setupLineageFixture(t *testing.T) lineageFixture {
 	}
 
 	return lineageFixture{
-		resolver: LocalTaskWorktreeResolver{Store: st, Lineage: StackLineageLookup{Store: stacks}},
+		resolver: LocalTaskWorktreeResolver{
+			Store: st, Lineage: StackLineageLookup{Store: stacks},
+			SourceControl: testTaskSourceControl{},
+		},
 		mainHead: mainHead,
 		taskAH:   taskAHead,
 	}
@@ -158,7 +161,9 @@ func TestResolveTaskWorktree_UnknownTaskFallsBackToDefaultBranch(t *testing.T) {
 // With no lineage lookup wired, behavior is byte-identical to the default branch.
 func TestResolveTaskWorktree_NilLineageUnchanged(t *testing.T) {
 	f := setupLineageFixture(t)
-	r := LocalTaskWorktreeResolver{Store: f.resolver.Store} // no Lineage
+	r := LocalTaskWorktreeResolver{
+		Store: f.resolver.Store, SourceControl: testTaskSourceControl{},
+	} // no Lineage
 	got := resolveHead(t, r, "task-b", "task/run:nil")
 	if got != f.mainHead {
 		t.Fatalf("nil-lineage worktree HEAD = %s, want default-branch main HEAD %s", got, f.mainHead)
@@ -308,7 +313,10 @@ func (errLineage) BaseRefForTask(context.Context, string, string, string) (strin
 // branch (pre-stacking behavior), so a corrupt stacks.json cannot break dispatch.
 func TestResolveTaskWorktree_LineageErrorFallsBackNotFatal(t *testing.T) {
 	f := setupLineageFixture(t)
-	r := LocalTaskWorktreeResolver{Store: f.resolver.Store, Lineage: errLineage{}}
+	r := LocalTaskWorktreeResolver{
+		Store: f.resolver.Store, Lineage: errLineage{},
+		SourceControl: testTaskSourceControl{},
+	}
 	got := resolveHead(t, r, "task-b", "task/run:err")
 	if got != f.mainHead {
 		t.Fatalf("lineage-error worktree HEAD = %s, want default-branch main HEAD %s (must not fail)", got, f.mainHead)

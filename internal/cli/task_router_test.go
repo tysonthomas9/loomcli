@@ -459,6 +459,13 @@ func TestMatchTask_TaskFilterBug(t *testing.T) {
 			}
 		})
 	}
+
+	triaged := MatchTask(backend.IssueData{
+		ID: "BUG-2", Status: "open", IssueType: "bug", Labels: []string{" TRIAGED "},
+	}, c)
+	if triaged.Score != 0 || triaged.Reason != "filter: bug is already triaged" {
+		t.Fatalf("triaged bug match = %+v, want terminal triage rejection", triaged)
+	}
 }
 
 func TestMatchTask_TaskFilterDefault(t *testing.T) {

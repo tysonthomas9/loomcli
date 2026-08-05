@@ -2,7 +2,6 @@
 package localworkspace
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"net/url"
@@ -16,7 +15,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/gitauth"
 	"github.com/tysonthomas9/loomcli/internal/gitbranch"
 )
 
@@ -134,24 +132,47 @@ func PathContains(root, path string) bool {
 
 // CloneRepoTo clones cloneURL into targetPath.
 func CloneRepoTo(ctx context.Context, cloneURL, targetPath string) error {
-	return CloneRepoToWithCredentials(ctx, cloneURL, targetPath, nil)
+	return CloneRepoToAnonymous(ctx, cloneURL, "origin", targetPath)
 }
 
-// CloneRepoToWithCredentials clones cloneURL into targetPath, resolving an
-// ephemeral credential only when source recognizes the remote. The remote URL
-// written by git remains the original token-free URL.
-func CloneRepoToWithCredentials(ctx context.Context, cloneURL, targetPath string, source gitauth.Source) error {
+// CloneRepoToAnonymous performs one token-free clone with ambient credential
+// helpers disabled. Credential policy and retry selection remain with
+// Connectors/localgit.
+func CloneRepoToAnonymous(ctx context.Context, cloneURL, remoteName, targetPath string) error {
+	if err := prepareBoundedClone(cloneURL, targetPath); err != nil {
+		return err
+	}
+	args, err := boundedCloneArgs(cloneURL, remoteName, targetPath)
+	if err != nil {
+		return err
+	}
+	if _, err := runGitAnonymous(
+		ctx,
+		filepath.Dir(targetPath),
+		args...,
+	); err != nil {
+		return fmt.Errorf("anonymous git clone failed for %s: %w", sanitizedRemoteURL(cloneURL), err)
+	}
+	return nil
+}
+
+func prepareBoundedClone(cloneURL, targetPath string) error {
 	if err := rejectRemoteURLSecrets(cloneURL); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
 		return fmt.Errorf("create clone parent directory: %w", err)
 	}
-	_, err := runGitForRemote(ctx, filepath.Dir(targetPath), source, cloneURL, "clone", "--", cloneURL, targetPath)
-	if err != nil {
-		return fmt.Errorf("git clone failed for %s: %w", sanitizedRemoteURL(cloneURL), err)
-	}
 	return nil
+}
+
+func boundedCloneArgs(cloneURL, remoteName, targetPath string) ([]string, error) {
+	if strings.TrimSpace(remoteName) == "" ||
+		strings.HasPrefix(remoteName, "-") ||
+		strings.ContainsAny(remoteName, " \t\r\n:/\\") {
+		return nil, fmt.Errorf("git remote name is invalid")
+	}
+	return []string{"clone", "--origin", remoteName, "--", cloneURL, targetPath}, nil
 }
 
 // EnsureGitWorktree creates a git worktree at targetPath from repoPath.
@@ -163,18 +184,7 @@ func EnsureGitWorktree(repoPath, targetPath, branchName string) error {
 // targetPath from the latest available remote/defaultBranch ref. Existing
 // worktrees are left untouched.
 func EnsureDetachedGitWorktreeFromBranch(repoPath, targetPath, remoteName, defaultBranch string) error {
-	return EnsureDetachedGitWorktreeFromBranchWithCredentials(
-		context.Background(), repoPath, targetPath, remoteName, defaultBranch, nil,
-	)
-}
-
-// EnsureDetachedGitWorktreeFromBranchWithCredentials is the credential-aware
-// form used by serve-owned task runners for private admitted repositories.
-func EnsureDetachedGitWorktreeFromBranchWithCredentials(
-	ctx context.Context,
-	repoPath, targetPath, remoteName, defaultBranch string,
-	source gitauth.Source,
-) error {
+	ctx := context.Background()
 	if _, err := os.Stat(filepath.Join(targetPath, ".git")); err == nil {
 		return nil
 	}
@@ -182,7 +192,7 @@ func EnsureDetachedGitWorktreeFromBranchWithCredentials(
 		return fmt.Errorf("creating worktree parent: %w", err)
 	}
 
-	baseRef, err := resolveFreshBaseRef(ctx, repoPath, remoteName, defaultBranch, source)
+	baseRef, err := resolveFreshBaseRef(ctx, repoPath, remoteName, defaultBranch)
 	if err != nil {
 		return err
 	}
@@ -192,6 +202,70 @@ func EnsureDetachedGitWorktreeFromBranchWithCredentials(
 	}
 	_, err = runGit(context.Background(), repoPath, args...)
 	return err
+}
+
+// EnsureDetachedGitWorktreeAtRef creates a detached worktree from an already
+// materialized local ref. It never performs a network operation.
+func EnsureDetachedGitWorktreeAtRef(
+	ctx context.Context,
+	repoPath, targetPath, baseRef, baseCommit string,
+) error {
+	baseRef = strings.TrimSpace(baseRef)
+	baseCommit = strings.TrimSpace(baseCommit)
+	if !strings.HasPrefix(baseRef, "refs/loom/") || baseCommit == "" {
+		return fmt.Errorf("Source-Control-owned task base ref and commit are required")
+	}
+	if _, err := os.Stat(filepath.Join(targetPath, ".git")); err == nil {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+		return fmt.Errorf("creating worktree parent: %w", err)
+	}
+	tipOut, err := runGit(ctx, repoPath, "rev-parse", "--verify", baseRef+"^{commit}")
+	if err != nil {
+		return fmt.Errorf("resolve fetched task base %q: %w", baseRef, err)
+	}
+	tipCommit := strings.TrimSpace(tipOut)
+	if !strings.EqualFold(tipCommit, baseCommit) {
+		return fmt.Errorf("fetched task base changed from the Source Control receipt")
+	}
+	args := []string{"worktree", "add", "--detach", targetPath, tipCommit}
+	_, err = runGit(ctx, repoPath, args...)
+	return err
+}
+
+// FetchGitRefAnonymous performs one exact read-only ref fetch with ambient Git
+// credential helpers disabled. Source Control validates the refs before this
+// infrastructure helper is reached.
+func FetchGitRefAnonymous(
+	ctx context.Context,
+	repoPath, remoteName, sourceRef, destinationRef string,
+) error {
+	args, err := exactFetchRefArgs(remoteName, sourceRef, destinationRef)
+	if err != nil {
+		return err
+	}
+	if out, err := runGitAnonymous(ctx, repoPath, args...); err != nil {
+		return fmt.Errorf("anonymous git fetch failed: %w: %s", err, strings.TrimSpace(out))
+	}
+	return nil
+}
+
+func exactFetchRefArgs(remoteName, sourceRef, destinationRef string) ([]string, error) {
+	if strings.TrimSpace(remoteName) == "" || strings.HasPrefix(remoteName, "-") ||
+		strings.ContainsAny(remoteName, " \t\r\n:/\\") {
+		return nil, fmt.Errorf("git remote name is invalid")
+	}
+	for _, value := range []string{sourceRef, destinationRef} {
+		if !strings.HasPrefix(value, "refs/") || strings.ContainsAny(value, " \t\r\n:") ||
+			strings.HasPrefix(value, "-") {
+			return nil, fmt.Errorf("git ref is invalid")
+		}
+	}
+	return []string{
+		"fetch", "--no-tags", "--force", "--",
+		remoteName, sourceRef + ":" + destinationRef,
+	}, nil
 }
 
 // prWorktreeLocks serializes EnsureDetachedGitWorktreeAtPRHead per target path
@@ -237,20 +311,6 @@ func EnsureDetachedGitWorktreeAtPRHead(
 	prNumber int,
 	headSHA string,
 ) (string, error) {
-	return EnsureDetachedGitWorktreeAtPRHeadWithCredentials(
-		ctx, repoPath, targetPath, remoteName, prNumber, headSHA, nil,
-	)
-}
-
-// EnsureDetachedGitWorktreeAtPRHeadWithCredentials is the credential-aware
-// form used by the UI PR reviewer for private admitted repositories.
-func EnsureDetachedGitWorktreeAtPRHeadWithCredentials(
-	ctx context.Context,
-	repoPath, targetPath, remoteName string,
-	prNumber int,
-	headSHA string,
-	source gitauth.Source,
-) (string, error) {
 	remoteName, err := validatePRWorktreeInputs(repoPath, targetPath, remoteName, prNumber)
 	if err != nil {
 		return "", err
@@ -263,7 +323,7 @@ func EnsureDetachedGitWorktreeAtPRHeadWithCredentials(
 
 	checkoutRef := fmt.Sprintf("refs/loom/pr/%d/head", prNumber)
 	fetchRef := fmt.Sprintf("+refs/pull/%d/head:%s", prNumber, checkoutRef)
-	if _, err = runGitRemote(ctx, repoPath, remoteName, source, "fetch", remoteName, fetchRef); err != nil {
+	if _, err = runGitAnonymous(ctx, repoPath, "fetch", remoteName, fetchRef); err != nil {
 		return "", fmt.Errorf("fetch PR #%d head from %q: %w", prNumber, remoteName, err)
 	}
 
@@ -278,6 +338,34 @@ func EnsureDetachedGitWorktreeAtPRHeadWithCredentials(
 	}
 
 	return syncPRWorktree(ctx, repoPath, targetPath, checkoutRef, tipSHA)
+}
+
+// EnsureDetachedGitWorktreeAtFetchedPRHead materializes a PR worktree from a
+// Source-Control-owned ref that has already been fetched and commit-verified.
+// It performs no network operation.
+func EnsureDetachedGitWorktreeAtFetchedPRHead(
+	ctx context.Context,
+	repoPath, targetPath, headRef, headSHA string,
+) (string, error) {
+	headRef = strings.TrimSpace(headRef)
+	headSHA = strings.TrimSpace(headSHA)
+	if !strings.HasPrefix(headRef, "refs/loom/pr-reviews/") ||
+		headSHA == "" {
+		return "", fmt.Errorf("Source-Control-owned PR head ref and commit are required")
+	}
+	lockAny, _ := prWorktreeLocks.LoadOrStore(targetPath, &sync.Mutex{})
+	lock := lockAny.(*sync.Mutex)
+	lock.Lock()
+	defer lock.Unlock()
+	tipOut, err := runGit(ctx, repoPath, "rev-parse", "--verify", headRef+"^{commit}")
+	if err != nil {
+		return "", fmt.Errorf("resolve fetched PR head %q: %w", headRef, err)
+	}
+	tipSHA := strings.TrimSpace(tipOut)
+	if !strings.EqualFold(tipSHA, headSHA) {
+		return tipSHA, &PRHeadChangedError{ExpectedSHA: headSHA, TipSHA: tipSHA}
+	}
+	return syncPRWorktree(ctx, repoPath, targetPath, tipSHA, tipSHA)
 }
 
 // syncPRWorktree materializes checkout at targetPath: create when absent,
@@ -341,18 +429,7 @@ func syncPRWorktree(ctx context.Context, repoPath, targetPath, checkout, expectH
 // remote/defaultBranch ref when available, falling back to the local branch.
 // Existing worktrees are left untouched.
 func EnsureGitWorktreeFromBranch(repoPath, targetPath, branchName, remoteName, defaultBranch string) error {
-	return EnsureGitWorktreeFromBranchWithCredentials(
-		context.Background(), repoPath, targetPath, branchName, remoteName, defaultBranch, nil,
-	)
-}
-
-// EnsureGitWorktreeFromBranchWithCredentials is the credential-aware form for
-// branch worktrees whose base must be refreshed from a private remote.
-func EnsureGitWorktreeFromBranchWithCredentials(
-	ctx context.Context,
-	repoPath, targetPath, branchName, remoteName, defaultBranch string,
-	source gitauth.Source,
-) error {
+	ctx := context.Background()
 	if _, err := os.Stat(filepath.Join(targetPath, ".git")); err == nil {
 		return nil
 	}
@@ -372,7 +449,7 @@ func EnsureGitWorktreeFromBranchWithCredentials(
 		return addBranchWorktree(repoPath, targetPath, branchName, recovery.BaseSHA)
 	}
 
-	baseRef, err := resolveFreshBaseRef(ctx, repoPath, remoteName, defaultBranch, source)
+	baseRef, err := resolveFreshBaseRef(ctx, repoPath, remoteName, defaultBranch)
 	if err != nil {
 		return err
 	}
@@ -398,7 +475,6 @@ func addBranchWorktree(repoPath, targetPath, branchName, baseRef string) error {
 func resolveFreshBaseRef(
 	ctx context.Context,
 	repoPath, remoteName, defaultBranch string,
-	source gitauth.Source,
 ) (string, error) {
 	defaultBranch = strings.TrimSpace(defaultBranch)
 	if defaultBranch == "" {
@@ -410,7 +486,7 @@ func resolveFreshBaseRef(
 	}
 
 	if _, err := runGit(ctx, repoPath, "remote", "get-url", remoteName); err == nil {
-		if _, err := runGitRemote(ctx, repoPath, remoteName, source, "fetch", remoteName, defaultBranch); err != nil {
+		if _, err := runGitAnonymous(ctx, repoPath, "fetch", remoteName, defaultBranch); err != nil {
 			if _, localErr := runGit(context.Background(), repoPath, "rev-parse", "--verify", defaultBranch); localErr == nil {
 				return defaultBranch, nil
 			}
@@ -419,7 +495,7 @@ func resolveFreshBaseRef(
 		return remoteName + "/" + defaultBranch, nil
 	}
 
-	if _, err := runGit(ctx, repoPath, "fetch", remoteName, defaultBranch); err == nil {
+	if _, err := runGitAnonymous(ctx, repoPath, "fetch", remoteName, defaultBranch); err == nil {
 		return remoteName + "/" + defaultBranch, nil
 	}
 	if _, err := runGit(context.Background(), repoPath, "rev-parse", "--verify", defaultBranch); err != nil {
@@ -440,19 +516,6 @@ func RecordPRReviewContext(
 	worktreePath, remoteName, baseRef string,
 	meta map[string]string,
 ) (string, error) {
-	return RecordPRReviewContextWithCredentials(
-		ctx, worktreePath, remoteName, baseRef, meta, nil,
-	)
-}
-
-// RecordPRReviewContextWithCredentials is the credential-aware form used by
-// the UI reviewer after checking out a private pull request.
-func RecordPRReviewContextWithCredentials(
-	ctx context.Context,
-	worktreePath, remoteName, baseRef string,
-	meta map[string]string,
-	source gitauth.Source,
-) (string, error) {
 	if strings.TrimSpace(worktreePath) == "" {
 		return "", fmt.Errorf("worktree path is empty")
 	}
@@ -471,7 +534,7 @@ func RecordPRReviewContextWithCredentials(
 	}
 	// `--` terminates option parsing so a base ref can never be read as a git
 	// flag (baseRef comes from the connector's PR metadata).
-	if out, err := runGitRemote(ctx, worktreePath, remoteName, source, "fetch", remoteName, "--", baseRef); err != nil {
+	if out, err := runGitAnonymous(ctx, worktreePath, "fetch", remoteName, "--", baseRef); err != nil {
 		return "", fmt.Errorf("fetch review base %q from %q: %w: %s", baseRef, remoteName, err, out)
 	}
 	out, err := runGit(ctx, worktreePath, "rev-parse", "FETCH_HEAD")
@@ -493,88 +556,37 @@ func RecordPRReviewContextWithCredentials(
 	return baseSHA, nil
 }
 
-// The helper command is supplied through ephemeral `git -c` arguments. The
-// credential itself is available only in the child git environment, never in
-// argv, a remote URL, or repository/global config.
-//
-//nolint:gosec // G101: env variable name and helper template, not credential material.
-const (
-	gitHTTPPasswordEnv = "LOOM_PR_GIT_PASSWORD"
-	gitHTTPHelper      = `!f() { test "$1" = get || exit 0; protocol= host=; while IFS='=' read -r key value; do case "$key" in protocol) protocol=$value ;; host) host=$value ;; esac; done; case "$protocol" in [hH][tT][tT][pP][sS]) ;; *) exit 0 ;; esac; case "$host" in [gG][iI][tT][hH][uU][bB].[cC][oO][mM]|[gG][iI][tT][hH][uU][bB].[cC][oO][mM]:443) ;; *) exit 0 ;; esac; printf '%s\n' username=x-access-token "password=$LOOM_PR_GIT_PASSWORD"; }; f`
-)
-
-func runGitRemote(
+// RecordPRReviewContextFromFetchedBase records an already fetched and verified
+// base commit in per-worktree config. It performs no network operation.
+func RecordPRReviewContextFromFetchedBase(
 	ctx context.Context,
-	repoPath, remoteName string,
-	source gitauth.Source,
-	args ...string,
+	worktreePath, baseCommit string,
+	meta map[string]string,
 ) (string, error) {
-	if source == nil {
-		return runGit(ctx, repoPath, args...)
+	if strings.TrimSpace(worktreePath) == "" {
+		return "", fmt.Errorf("worktree path is empty")
 	}
-	remoteURL, err := runGit(ctx, repoPath, "remote", "get-url", remoteName)
-	if err != nil {
-		return runGit(ctx, repoPath, args...)
+	baseCommit = strings.TrimSpace(baseCommit)
+	if baseCommit == "" {
+		return "", fmt.Errorf("base commit is empty")
 	}
-	return runGitForRemote(ctx, repoPath, source, strings.TrimSpace(remoteURL), args...)
-}
-
-func runGitForRemote(
-	ctx context.Context,
-	dir string,
-	source gitauth.Source,
-	remoteURL string,
-	args ...string,
-) (string, error) {
-	if err := rejectRemoteURLSecrets(remoteURL); err != nil {
-		return "", err
+	if out, err := runGit(ctx, worktreePath, "rev-parse", "--verify", baseCommit+"^{commit}"); err != nil {
+		return "", fmt.Errorf("verify review base commit: %w: %s", err, out)
 	}
-	if source == nil {
-		return runGit(ctx, dir, args...)
+	if out, err := runGit(ctx, worktreePath, "config", "extensions.worktreeConfig", "true"); err != nil {
+		return "", fmt.Errorf("enable worktree config: %w: %s", err, out)
 	}
-	if err := validateCredentialedGitOperation(args); err != nil {
-		return "", err
+	if _, err := runGit(ctx, worktreePath, "config", "--worktree", "loom.reviewBase", baseCommit); err != nil {
+		return "", fmt.Errorf("record review base: %w", err)
 	}
-
-	// Try the network operation without any credential helper first. Public
-	// repositories must remain usable even when Settings contains an expired
-	// or otherwise invalid GitHub token, and a public read does not needlessly
-	// disclose that token. The operations routed here are read-only
-	// clone/fetch operations; a private remote's authentication failure is
-	// therefore safe to retry with the just-in-time credential.
-	anonymousOut, anonymousErr := runGitAnonymous(ctx, dir, args...)
-	if anonymousErr == nil {
-		return anonymousOut, nil
+	for key, value := range meta {
+		value = strings.TrimSpace(value)
+		if value == "" || strings.TrimSpace(key) == "" {
+			continue
+		}
+		_, _ = runGit(ctx, worktreePath, "config", "--worktree", "loom.review"+key, value)
 	}
-	if ctx.Err() != nil {
-		return anonymousOut, anonymousErr
-	}
-
-	credential, err := source.Resolve(ctx, remoteURL)
-	if err != nil {
-		return "", err
-	}
-	if credential == nil {
-		// Preserve the Source contract for installations that intentionally
-		// rely on an existing machine-local credential helper. The first pass
-		// above was strictly anonymous; this fallback is reached only after it
-		// failed and Settings supplied no Loom-managed credential.
-		return runGit(ctx, dir, args...)
-	}
-	defer credential.Close()
-	return runGitWithCredential(ctx, dir, credential, args...)
-}
-
-func validateCredentialedGitOperation(args []string) error {
-	if len(args) == 0 {
-		return fmt.Errorf("credentialed git operation is empty")
-	}
-	switch args[0] {
-	case "clone", "fetch", "ls-remote":
-		return nil
-	default:
-		return fmt.Errorf("credentialed git operation %q is not a read-only clone/fetch", args[0])
-	}
+	return baseCommit, nil
 }
 
 func runGitAnonymous(ctx context.Context, dir string, args ...string) (string, error) {
@@ -584,45 +596,13 @@ func runGitAnonymous(ctx context.Context, dir string, args ...string) (string, e
 		"-c", "http.extraHeader=",
 	}
 	gitArgs = append(gitArgs, args...)
-	return runGitNetworkCommand(ctx, dir, nil, gitArgs...)
-}
-
-func runGitWithCredential(
-	ctx context.Context,
-	dir string,
-	credential *gitauth.Credential,
-	args ...string,
-) (string, error) {
-	gitArgs := []string{
-		"-c", "credential.helper=",
-		"-c", "credential.helper=" + gitHTTPHelper,
-		"-c", "core.askPass=",
-		"-c", "http.extraHeader=",
-	}
-	gitArgs = append(gitArgs, args...)
-	return runGitNetworkCommand(ctx, dir, credential, gitArgs...)
-}
-
-func runGitNetworkCommand(
-	ctx context.Context,
-	dir string,
-	credential *gitauth.Credential,
-	gitArgs ...string,
-) (string, error) {
-	if credential != nil {
-		if err := requireGitCredentialProcessIsolation(); err != nil {
-			return "", err
-		}
-	}
 	cmd := exec.CommandContext(ctx, "git", gitArgs...) //nolint:gosec // fixed git executable; token is never present in args.
 	cmd.Dir = dir
-	cmd.Env = gitNetworkEnv(credential)
+	cmd.Env = anonymousGitNetworkEnv()
 	cmd.WaitDelay = 2 * time.Second
 	configureGitNetworkCancellation(cmd)
 
-	rawOut, err := cmd.CombinedOutput()
-	out := redactCredential(rawOut, credential)
-	zeroBytes(rawOut)
+	out, err := cmd.CombinedOutput()
 	clearCommandEnv(cmd)
 	if err != nil {
 		return string(out), fmt.Errorf(
@@ -635,6 +615,17 @@ func runGitNetworkCommand(
 	return string(out), nil
 }
 
+// ConfigureGitProcessCancellation makes a context-owned Git command terminate
+// its complete process group on supported platforms. Callers that execute Git
+// operations capable of spawning hooks or transport children must invoke this
+// before Start or Run.
+func ConfigureGitProcessCancellation(cmd *exec.Cmd) {
+	if cmd == nil {
+		return
+	}
+	configureGitNetworkCancellation(cmd)
+}
+
 func sanitizedGitArgs(args []string) string {
 	safe := make([]string, len(args))
 	for i, arg := range args {
@@ -643,11 +634,10 @@ func sanitizedGitArgs(args []string) string {
 	return strings.Join(safe, " ")
 }
 
-// gitNetworkEnv deliberately starts from a narrow allowlist rather than the
-// agent subprocess allowlist. A git clone/fetch needs process discovery,
-// locale, temporary-directory, proxy, and certificate settings; it does not
-// need AI-provider keys, control-plane authority, or GITHUB_TOKEN.
-func gitNetworkEnv(credential *gitauth.Credential) []string {
+// anonymousGitNetworkEnv starts from a narrow allowlist. An anonymous Git read
+// needs process discovery, locale, proxy, and certificate settings, but no
+// application, control-plane, or provider authority.
+func anonymousGitNetworkEnv() []string {
 	allowed := map[string]struct{}{
 		"PATH": {}, "TMPDIR": {}, "TMP": {}, "TEMP": {},
 		"SystemRoot": {}, "WINDIR": {}, "COMSPEC": {}, "PATHEXT": {},
@@ -668,37 +658,13 @@ func gitNetworkEnv(credential *gitauth.Credential) []string {
 			env = append(env, entry)
 		}
 	}
-	env = append(env, "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never")
-	if credential != nil {
-		// exec.Cmd requires environment entries as immutable Go strings, so
-		// this conversion cannot be reliably overwritten in place. Keep the
-		// string scoped to one Cmd, clear Cmd.Env immediately after Wait, and
-		// let Credential.Close overwrite the mutable source bytes.
-		env = append(env, gitHTTPPasswordEnv+"="+string(credential.Password))
-	}
-	return env
-}
-
-func redactCredential(output []byte, credential *gitauth.Credential) []byte {
-	if credential == nil || len(credential.Password) == 0 {
-		return bytes.Clone(output)
-	}
-	return bytes.ReplaceAll(bytes.Clone(output), credential.Password, []byte("***"))
-}
-
-func zeroBytes(value []byte) {
-	for i := range value {
-		value[i] = 0
-	}
+	return append(env, "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never")
 }
 
 func clearCommandEnv(cmd *exec.Cmd) {
 	if cmd == nil {
 		return
 	}
-	// Drop every Cmd-held reference promptly. The strings themselves are
-	// immutable (documented in gitNetworkEnv), but keeping them reachable
-	// through a completed Cmd would unnecessarily extend their lifetime.
 	for i := range cmd.Env {
 		cmd.Env[i] = ""
 	}

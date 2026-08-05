@@ -1,11 +1,10 @@
 // IPC-aware IssueBackend decorator.
 //
 // When a daemon-spawned subprocess has LOOM_DAEMON_SOCKET set, defaultIssueBackend()
-// returns an ipcIssueBackend that routes the daemon-supported mutation operations
-// (Update, ClaimIssue, Close, ReleaseClaim) through the AgentIPCClient while reading
-// through the underlying direct backend. Routing every mutation through the daemon
-// keeps them behind the lease fence (see daemon.validateIPCLease) — LOOM-1 added
-// ReleaseClaim to this set via the IPCOpReleaseClaim operation.
+// returns an ipcIssueBackend that routes the task-query surface and the
+// daemon-supported mutation operations through the AgentIPCClient. This keeps
+// controlled agents behind the active-subprocess credential check without
+// exporting the embedded FleetDB service credential into child processes.
 
 package cli
 
@@ -17,21 +16,28 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 )
 
-// ipcMutator is the subset of AgentIPCClient methods used for IPC-routed mutations.
-// The decorator depends on this interface (not the concrete client) for testability.
-type ipcMutator interface {
+// ipcIssueClient is the task-scoped subset of AgentIPCClient used by the
+// decorator. It remains an interface so routing and fail-closed behavior can
+// be tested without a Unix socket.
+type ipcIssueClient interface {
+	Get(issueID string) (*backend.IssueDetailData, error)
+	List(opts backend.ListOpts) ([]backend.IssueData, error)
+	Ready(opts backend.ReadyOpts) ([]backend.IssueData, error)
+	Blocked(opts backend.BlockedOpts) ([]backend.IssueData, error)
 	Claim(issueID string, lockTTL time.Duration) error
 	Update(issueID string, params backend.UpdateParams) error
 	Complete(issueID string, params backend.CloseParams) (*backend.CloseResult, error)
 	ReleaseLock(issueID string) error
 	Release(issueID string) error
+	AddComment(params backend.CommentAddParams) (*backend.CommentData, error)
 }
 
-// ipcIssueBackend decorates an IssueBackend with IPC routing for mutations.
-// Update, ClaimIssue, and Close are routed through the IPC client. All other
-// methods read directly from the backend.
+// ipcIssueBackend decorates an IssueBackend with authenticated IPC routing for
+// the agent-facing task query and mutation surface. Administrative operations
+// remain on the direct backend and therefore fail closed in contained children
+// that do not possess the embedded FleetDB service credential.
 type ipcIssueBackend struct {
-	ipc    ipcMutator
+	ipc    ipcIssueClient
 	direct backend.IssueBackend
 }
 
@@ -40,8 +46,26 @@ var _ backend.IssueBackend = (*ipcIssueBackend)(nil)
 var _ backend.ClaimReleaser = (*ipcIssueBackend)(nil)
 
 // newIPCIssueBackend returns an IPC-aware decorator.
-func newIPCIssueBackend(ipc ipcMutator, direct backend.IssueBackend) *ipcIssueBackend {
+func newIPCIssueBackend(ipc ipcIssueClient, direct backend.IssueBackend) *ipcIssueBackend {
 	return &ipcIssueBackend{ipc: ipc, direct: direct}
+}
+
+// --- IPC-routed queries ---
+
+func (b *ipcIssueBackend) Get(_ context.Context, id string) (*backend.IssueDetailData, error) {
+	return b.ipc.Get(id)
+}
+
+func (b *ipcIssueBackend) List(_ context.Context, opts backend.ListOpts) ([]backend.IssueData, error) {
+	return b.ipc.List(opts)
+}
+
+func (b *ipcIssueBackend) Ready(_ context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
+	return b.ipc.Ready(opts)
+}
+
+func (b *ipcIssueBackend) Blocked(_ context.Context, opts backend.BlockedOpts) ([]backend.IssueData, error) {
+	return b.ipc.Blocked(opts)
 }
 
 // --- IPC-routed mutations ---
@@ -68,30 +92,14 @@ func (b *ipcIssueBackend) Close(ctx context.Context, id string, params backend.C
 }
 
 // ReleaseClaim routes through IPC (IPCOpReleaseClaim), so the daemon applies
-// the same lease fence it enforces for Claim/Update/Close before releasing the
-// claim on the agent's behalf. The daemon uses its authenticated AgentName as
-// the release actor. See LOOM-1.
+// the same active-subprocess credential check it enforces for
+// Claim/Update/Close before releasing the claim on the agent's behalf. The
+// daemon uses its authenticated AgentName as the release actor. See LOOM-1.
 func (b *ipcIssueBackend) ReleaseClaim(ctx context.Context, id, actor string) error {
 	return b.ipc.Release(id)
 }
 
 // --- Direct backend methods ---
-
-func (b *ipcIssueBackend) Get(ctx context.Context, id string) (*backend.IssueDetailData, error) {
-	return b.direct.Get(ctx, id)
-}
-
-func (b *ipcIssueBackend) List(ctx context.Context, opts backend.ListOpts) ([]backend.IssueData, error) {
-	return b.direct.List(ctx, opts)
-}
-
-func (b *ipcIssueBackend) Ready(ctx context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
-	return b.direct.Ready(ctx, opts)
-}
-
-func (b *ipcIssueBackend) Blocked(ctx context.Context, opts backend.BlockedOpts) ([]backend.IssueData, error) {
-	return b.direct.Blocked(ctx, opts)
-}
 
 func (b *ipcIssueBackend) Stats(ctx context.Context) (*backend.StatsData, error) {
 	return b.direct.Stats(ctx)
@@ -150,7 +158,7 @@ func (b *ipcIssueBackend) ListComments(ctx context.Context, id string) ([]backen
 }
 
 func (b *ipcIssueBackend) AddComment(ctx context.Context, params backend.CommentAddParams) (*backend.CommentData, error) {
-	return b.direct.AddComment(ctx, params)
+	return b.ipc.AddComment(params)
 }
 
 func (b *ipcIssueBackend) ListEvents(ctx context.Context, id string, limit int) ([]backend.EventData, error) {
@@ -189,9 +197,8 @@ type AgentIPCRequest struct {
 	Operation      string          `json:"operation"`                  // "claim", "update", "complete", "heartbeat"
 	AgentName      string          `json:"agent_name"`                 // LOOM_AGENT_NAME identity (required)
 	IssueID        string          `json:"issue_id"`                   // target issue (required except for "heartbeat")
-	SessionID      string          `json:"session_id,omitempty"`       // fleet-db AgentSession id
-	LeaseID        string          `json:"lease_id,omitempty"`         // fleet-db AgentLease id
-	LeaseToken     string          `json:"lease_token,omitempty"`      // fleet-db AgentLease token
+	SessionID      string          `json:"session_id,omitempty"`       // supervisor-local transcript session id
+	AuthToken      string          `json:"auth_token,omitempty"`       //nolint:gosec // G117: process-local credential must cross the daemon IPC wire.
 	Args           json.RawMessage `json:"args,omitempty"`             // operation-specific params
 	LastActivityAt time.Time       `json:"last_activity_at,omitempty"` // wrapper.Snapshot.LastOutputAt; carried on every op so the daemon can update per-agent liveness
 }
@@ -206,6 +213,11 @@ type AgentIPCResponse struct {
 
 // IPC operation name constants.
 const (
+	IPCOpGet          = "get"
+	IPCOpList         = "list"
+	IPCOpReady        = "ready"
+	IPCOpBlocked      = "blocked"
+	IPCOpAddComment   = "add_comment"
 	IPCOpClaim        = "claim"
 	IPCOpUpdate       = "update"
 	IPCOpComplete     = "complete"

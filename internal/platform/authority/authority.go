@@ -9,6 +9,7 @@ package authority
 
 import (
 	"errors"
+	"sync"
 	"time"
 )
 
@@ -160,7 +161,32 @@ type ExecutionOwner struct {
 // type and cannot be substituted for OperatorAuthority.
 type SessionAuthority struct {
 	grant         grant
+	owner         SessionOwner
 	sessionMarker sessionAuthorityMarker
+}
+
+// SessionOwner is the server-verified lease generation bound to a
+// SessionAuthority. SessionID and AgentID identify the Interaction aggregate;
+// TerminalID is set for PTY-backed children and left empty for non-terminal
+// chat/inbox sessions. The raw lease credential is deliberately absent.
+type SessionOwner struct {
+	SessionID    string
+	AgentID      string
+	TerminalID   string
+	NodeID       string
+	LeaseID      string
+	FencingToken int64
+	credential   *sessionLeaseCredential
+}
+
+// sessionLeaseCredential retains one raw AgentLease credential only long
+// enough to carry a server-validated SessionAuthority into the exact
+// owner-fenced FleetDB command. It is shared by value-copies of SessionOwner,
+// but ConsumeLeaseCredential succeeds at most once and clears the retained
+// bytes before returning.
+type sessionLeaseCredential struct {
+	mu    sync.Mutex
+	value []byte
 }
 
 // WebhookAuthority represents one verified webhook caller. It is a distinct
@@ -212,6 +238,58 @@ func (a SessionAuthority) Subject() string      { return a.grant.subject }
 func (a SessionAuthority) Workspace() string    { return a.grant.workspace }
 func (a SessionAuthority) Action() Action       { return a.grant.action }
 func (a SessionAuthority) ExpiresAt() time.Time { return a.grant.expiresAt }
+
+// SessionID returns the server-verified AgentSession identity.
+func (a SessionAuthority) SessionID() string { return a.owner.SessionID }
+
+// AgentID returns the durable Agent identity attached to the session.
+func (a SessionAuthority) AgentID() string { return a.owner.AgentID }
+
+// TerminalID returns the exact terminal identity for PTY-backed authorities.
+// It is empty for session-scoped chat and inbox operations.
+func (a SessionAuthority) TerminalID() string { return a.owner.TerminalID }
+
+// NodeID returns the node that owns the live session generation.
+func (a SessionAuthority) NodeID() string { return a.owner.NodeID }
+
+// LeaseID returns the verified session lease identity.
+func (a SessionAuthority) LeaseID() string { return a.owner.LeaseID }
+
+// FencingToken returns the verified session lease generation.
+func (a SessionAuthority) FencingToken() int64 { return a.owner.FencingToken }
+
+// SessionOwner returns the exact server-verified owner generation attached to
+// this authority. The returned value may carry a private one-use lease
+// credential for the capability's FleetDB transport; ordinary callers cannot
+// inspect or serialize that credential.
+func (a SessionAuthority) SessionOwner() SessionOwner { return a.owner }
+
+// ConsumeLeaseCredential transfers the private raw lease credential to the
+// owner-fenced transport exactly once. The caller must clear the returned
+// bytes after adding them to the outbound credential header.
+func (owner SessionOwner) ConsumeLeaseCredential() []byte {
+	if owner.credential == nil {
+		return nil
+	}
+	owner.credential.mu.Lock()
+	defer owner.credential.mu.Unlock()
+	value := append([]byte(nil), owner.credential.value...)
+	clear(owner.credential.value)
+	owner.credential.value = nil
+	return value
+}
+
+// CloseLeaseCredential clears an unused private credential. It is safe to call
+// after ConsumeLeaseCredential and from multiple value-copies of the owner.
+func (owner SessionOwner) CloseLeaseCredential() {
+	if owner.credential == nil {
+		return
+	}
+	owner.credential.mu.Lock()
+	defer owner.credential.mu.Unlock()
+	clear(owner.credential.value)
+	owner.credential.value = nil
+}
 
 func (a WebhookAuthority) Subject() string      { return a.grant.subject }
 func (a WebhookAuthority) Workspace() string    { return a.grant.workspace }

@@ -103,6 +103,19 @@ describe("useSessionTranscript", () => {
       expect(result.current.entries).toEqual([]);
       expect(mockGetTranscript).not.toHaveBeenCalled();
     });
+
+    it("does not issue a transcript request for blank ownership or session IDs", async () => {
+      const { result } = renderHook(() =>
+        useSessionTranscript("   ", " ", false, { agentId: "  " }),
+      );
+
+      await flushPromises();
+
+      expect(result.current.entries).toEqual([]);
+      expect(result.current.isLoading).toBe(false);
+      expect(mockGetTranscript).not.toHaveBeenCalled();
+      expect(mockGetAgentTranscript).not.toHaveBeenCalled();
+    });
   });
 
   describe("fetching", () => {
@@ -340,6 +353,44 @@ describe("useSessionTranscript", () => {
       expect(result.current.entries).toEqual(second);
       expect(result.current.error).toBeNull();
       expect(result.current.isLoading).toBe(false);
+    });
+
+    it("keeps a previous agent transcript response out after switching agents", async () => {
+      const first = deferredTranscript();
+      const second = deferredTranscript();
+      mockGetAgentTranscript
+        .mockReturnValueOnce(first.promise)
+        .mockReturnValueOnce(second.promise);
+
+      const { result, rerender } = renderHook(
+        ({ agentId }: { agentId: string }) =>
+          useSessionTranscript(null, "shared-session", false, { agentId }),
+        { initialProps: { agentId: "agent-one" } },
+      );
+
+      rerender({ agentId: "agent-two" });
+
+      await act(async () => {
+        second.resolve([createMockEntry({ text: "agent two" })]);
+        await Promise.resolve();
+      });
+      expect(mockGetAgentTranscript).toHaveBeenLastCalledWith(
+        "test-ws-id",
+        "agent-two",
+        "shared-session",
+        { preserveNotFound: true },
+      );
+      expect(result.current.entries).toEqual([
+        createMockEntry({ text: "agent two" }),
+      ]);
+
+      await act(async () => {
+        first.resolve([createMockEntry({ text: "stale agent one" })]);
+        await Promise.resolve();
+      });
+      expect(result.current.entries).toEqual([
+        createMockEntry({ text: "agent two" }),
+      ]);
     });
   });
 

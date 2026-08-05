@@ -165,6 +165,8 @@ func TestEnsureAgentTerminalSessionPutFailureDoesNotCreateRunningSession(t *test
 }
 
 func TestBuildAgentLaunchSpecIncludesPromptForInteractiveRole(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", configDir)
 	ctx := context.Background()
 	st := memstore.New()
 	if _, err := st.Roles().Create(ctx, store.RoleCreate{
@@ -186,6 +188,9 @@ func TestBuildAgentLaunchSpecIncludesPromptForInteractiveRole(t *testing.T) {
 		if !strings.Contains(cmd, want) {
 			t.Fatalf("launch command %q missing %q", cmd, want)
 		}
+	}
+	if launch.Env["LOOM_CONFIG_DIR"] != configDir {
+		t.Fatalf("launch config dir = %q, want %q", launch.Env["LOOM_CONFIG_DIR"], configDir)
 	}
 }
 
@@ -1243,7 +1248,22 @@ func TestEnsureAgentTerminalSessionCreatesFreshTabForStaleRunningInteractiveAgen
 		t.Fatalf("seed tab: %v", err)
 	}
 
-	meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "lead-live")
+	type ensureResult struct {
+		meta *tabmeta.TabMetadata
+		err  error
+	}
+	resultChannel := make(chan ensureResult, 1)
+	go func() {
+		meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "lead-live")
+		resultChannel <- ensureResult{meta: meta, err: err}
+	}()
+	var result ensureResult
+	select {
+	case result = <-resultChannel:
+	case <-time.After(2 * time.Second):
+		t.Fatal("stale-tab replacement deadlocked on the agent lifecycle boundary")
+	}
+	meta, err := result.meta, result.err
 	if err != nil {
 		t.Fatalf("ensureAgentTerminalSession: %v", err)
 	}

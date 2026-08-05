@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/tysonthomas9/loomcli/internal/infra/interactionchat"
 	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -28,6 +29,13 @@ func leadControlDisabled() bool {
 // runHarnessLead is a test seam over the harness lead runtime.
 var runHarnessLead = leadcontrol.RunHarnessLeadRuntime
 
+// LegacyInteractionChatDependencies adapts the remaining provider-specific
+// lead runtime at the CLI backend composition edge. Interaction receives only
+// operations and never receives the composite Store.
+func LegacyInteractionChatDependencies(st store.Store) interactionchat.LeadRuntimeDependencies {
+	return leadcontrol.LegacyInteractionChatDependencies(st)
+}
+
 // RunControlledLeadRuntime launches the controlled lead runtime for the given
 // backend: the Codex app-server runtime for codex, the harness-wrapper PTY
 // runtime for the other supported backends. Returns handled=false when the
@@ -36,6 +44,7 @@ var runHarnessLead = leadcontrol.RunHarnessLeadRuntime
 func RunControlledLeadRuntime(
 	ctx context.Context,
 	st store.Store,
+	sessionRuntime leadcontrol.SessionRuntime,
 	workspace string,
 	leadName string,
 	sessionID string,
@@ -48,7 +57,7 @@ func RunControlledLeadRuntime(
 	}
 	backend := strings.ToLower(strings.TrimSpace(backendName))
 	if backend == NameCodex {
-		return true, RunCodexLeadRuntime(ctx, st, workspace, leadName, sessionID, workDir, prompt)
+		return true, RunCodexLeadRuntime(ctx, st, sessionRuntime, workspace, leadName, sessionID, workDir, prompt)
 	}
 	inv, ok := harnessLeadInvocation(backend, workDir)
 	if !ok {
@@ -56,6 +65,7 @@ func RunControlledLeadRuntime(
 	}
 	return true, runHarnessLead(ctx, leadcontrol.HarnessLeadRuntimeConfig{
 		Store:            st,
+		Runtime:          sessionRuntime,
 		Workspace:        workspace,
 		LeadName:         leadName,
 		SessionID:        sessionID,

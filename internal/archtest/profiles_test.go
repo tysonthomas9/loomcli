@@ -116,6 +116,12 @@ func TestProfileBoundaryRulesMatchApprovedPackageShape(t *testing.T) {
 			want: "internal implementation package",
 		},
 		{
+			name: "capability core to retired workflows tombstone",
+			from: modulePath + "/internal/modules/workflowcatalog",
+			to:   modulePath + "/internal/workflows",
+			want: "internal implementation package",
+		},
+		{
 			name: "capability adapter to arbitrary legacy internal implementation",
 			from: modulePath + "/internal/modules/execution/httpapi",
 			to:   modulePath + "/internal/trigger",

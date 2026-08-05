@@ -16,12 +16,10 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/roleprompts"
+	workflowdefs "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/triggerbindings"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
-	"github.com/tysonthomas9/loomcli/internal/webui/svcimpl"
-	workflowdefs "github.com/tysonthomas9/loomcli/internal/workflows"
 )
 
 const agentRecordTestWS = "WS"
@@ -203,7 +201,7 @@ func TestUnifiedSupervisedCreateRejectsAgentRecordIDCollision(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create agent record: %v", err)
 	}
-	service := svcimpl.NewAgentService(nil, nil, nil, st)
+	service := newAuthorizedTestAgentService(t, st)
 	mux := http.NewServeMux()
 	newTestAgentsModule(service, st, nil, agentRecordTestWS).Register(mux)
 
@@ -227,7 +225,7 @@ func TestUnifiedSupervisedCreateRejectsLegacyBindingIDCollision(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create legacy binding: %v", err)
 	}
-	service := svcimpl.NewAgentService(nil, nil, nil, st)
+	service := newAuthorizedTestAgentService(t, st)
 	mux := http.NewServeMux()
 	newTestAgentsModule(service, st, nil, agentRecordTestWS).Register(mux)
 
@@ -390,9 +388,8 @@ func TestPromptAgentCreateTransactionCreatesRecordBindingAndRole(t *testing.T) {
 	if err != nil || role.Description != "Docs" || role.TaskFilter != "has_design" {
 		t.Fatalf("ensured role = %+v err=%v", role, err)
 	}
-	prompt, err := os.ReadFile(role.PromptFile)
-	if err != nil || string(prompt) != "Review and update the documentation." {
-		t.Fatalf("ensured role prompt = %q path=%q err=%v", string(prompt), role.PromptFile, err)
+	if role.Prompt != "Review and update the documentation." || role.PromptFile != "" {
+		t.Fatalf("ensured inline role prompt = %q path=%q", role.Prompt, role.PromptFile)
 	}
 	var runInput map[string]string
 	if err := json.Unmarshal([]byte(created.Bindings[0].SourceConfigRef), &runInput); err != nil {
@@ -696,7 +693,7 @@ func configureMissingRolldownBuild(t *testing.T) {
 	t.Setenv("LOOM_REAL_FLUE_CMD", "")
 }
 
-func TestPromptAgentCreateBindingFailureDeletesAgentRecord(t *testing.T) {
+func TestPromptAgentCreateBindingFailureRetainsCommittedAgentForRecovery(t *testing.T) {
 	st := newAgentRecordStore(t)
 	ctx := context.Background()
 	seedPromptAgentRole(t, st, "docs-assistant")
@@ -727,12 +724,12 @@ func TestPromptAgentCreateBindingFailureDeletesAgentRecord(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list agent services: %v", err)
 	}
-	if len(records) != 0 {
-		t.Fatalf("agent records after compensated failure = %+v, want none", records)
+	if len(records) != 1 || records[0].RoleName != "docs-assistant" {
+		t.Fatalf("agent records after durable partial failure = %+v, want retained Agent step", records)
 	}
 }
 
-func TestPromptAgentCreateBindingFailureRetainsRetryableRoleAndPrompt(t *testing.T) {
+func TestPromptAgentCreateBindingFailureRetainsCommittedRoleWithoutPrecommitPromptWrite(t *testing.T) {
 	for _, preexisting := range []bool{false, true} {
 		name := "new role and prompt retained"
 		if preexisting {
@@ -753,22 +750,11 @@ func TestPromptAgentCreateBindingFailureRetainsRetryableRoleAndPrompt(t *testing
 				t.Fatalf("seed taken binding: %v", err)
 			}
 
-			cache, err := bootstrap.LoadStateCache()
-			if err != nil {
-				t.Fatalf("load state cache: %v", err)
-			}
 			const prompt = "Review the documentation."
-			filename := roleprompts.ImmutablePromptFilename("transactional-reviewer", "reviewer.md", prompt)
-			promptPath := filepath.Join(cache.Workspaces[agentRecordTestWS].Path, ".loom", "prompts", filename)
 			if preexisting {
-				if _, err := roleprompts.EnsurePromptFile(
-					cache.Workspaces[agentRecordTestWS].Path, "transactional-reviewer", filename, prompt,
-				); err != nil {
-					t.Fatalf("seed prompt: %v", err)
-				}
 				if _, err := st.Roles().Create(ctx, store.RoleCreate{
 					WorkspaceKey: agentRecordTestWS, Name: "transactional-reviewer",
-					PromptFile: promptPath, TaskFilter: "has_design",
+					Prompt: prompt, TaskFilter: "has_design",
 				}); err != nil {
 					t.Fatalf("seed role: %v", err)
 				}
@@ -789,10 +775,37 @@ func TestPromptAgentCreateBindingFailureRetainsRetryableRoleAndPrompt(t *testing
 			if rec.Code != http.StatusConflict {
 				t.Fatalf("POST /agents status = %d body=%s, want 409", rec.Code, rec.Body.String())
 			}
-			_, roleErr := st.Roles().Get(ctx, agentRecordTestWS, "transactional-reviewer")
-			_, promptErr := os.Stat(promptPath)
-			if roleErr != nil || promptErr != nil {
-				t.Fatalf("retryable resources removed: role=%v prompt=%v preexisting=%v", roleErr, promptErr, preexisting)
+			role, roleErr := st.Roles().Get(ctx, agentRecordTestWS, "transactional-reviewer")
+			if roleErr != nil {
+				t.Fatalf("committed role missing after partial failure: %v", roleErr)
+			}
+			if role.Prompt != prompt || role.PromptFile != "" {
+				t.Fatalf("retained role prompt = %+v, want exact inline prompt", role)
+			}
+			records, listErr := st.AgentServices().List(
+				ctx,
+				agentRecordTestWS,
+				store.AgentServiceFilter{},
+			)
+			if listErr != nil || len(records) != 1 ||
+				records[0].RoleName != "transactional-reviewer" {
+				t.Fatalf(
+					"agent records after binding failure = %+v err=%v, want retained Agent step",
+					records,
+					listErr,
+				)
+			}
+			taken, bindingErr := st.TriggerBindings().Get(
+				ctx,
+				agentRecordTestWS,
+				"taken",
+			)
+			if bindingErr != nil || taken.TargetAgentServiceID != "" {
+				t.Fatalf(
+					"pre-existing binding changed = %+v err=%v",
+					taken,
+					bindingErr,
+				)
 			}
 		})
 	}
@@ -1032,6 +1045,105 @@ func TestAgentRunsReturnsSupervisedSessionsNewestFirst(t *testing.T) {
 	}
 }
 
+func TestAgentRunsProjectsCanonicalTaskRunsAndDeduplicatesLegacyShadows(t *testing.T) {
+	st := newAgentRecordStore(t)
+	ctx := context.Background()
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: agentRecordTestWS,
+		Name:         "falcon",
+		RoleName:     "task",
+		Backend:      "codex",
+	}); err != nil {
+		t.Fatalf("create supervised agent: %v", err)
+	}
+	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
+		WorkspaceKey:    agentRecordTestWS,
+		TaskRunID:       "task-run-batch-1",
+		TaskID:          "TASK-42",
+		WorkerProfileID: "falcon",
+		Runner:          "local-task-runner",
+		Status:          domain.TaskRunCompleted,
+		RuntimeMetadata: map[string]string{"backend": "codex"},
+	}); err != nil {
+		t.Fatalf("create canonical task run: %v", err)
+	}
+	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
+		WorkspaceKey:    agentRecordTestWS,
+		TaskRunID:       "task-run-foreign",
+		TaskID:          "TASK-FOREIGN",
+		WorkerProfileID: "hawk",
+		Status:          domain.TaskRunCompleted,
+	}); err != nil {
+		t.Fatalf("create foreign task run: %v", err)
+	}
+	time.Sleep(time.Millisecond)
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: agentRecordTestWS,
+		SessionID:    "legacy-task-run-shadow",
+		AgentID:      "falcon",
+		Kind:         domain.AgentSessionKindTask,
+		TaskID:       "TASK-42",
+		Status:       domain.AgentSessionCompleted,
+		Metadata:     map[string]string{"task_run_id": "task-run-batch-1"},
+	}); err != nil {
+		t.Fatalf("create legacy task-run shadow: %v", err)
+	}
+
+	mux := newAgentsMux(st)
+	rec := doAgentRequest(
+		t,
+		mux,
+		http.MethodGet,
+		"/api/workspaces/WS/agents/falcon/runs",
+		"",
+	)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("supervised runs status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var out agentRunsResponse
+	decodeJSON(t, rec.Body.Bytes(), &out)
+	if len(out.Sessions) != 1 {
+		t.Fatalf("supervised sessions = %+v, want one canonical TaskRun projection", out.Sessions)
+	}
+	session := out.Sessions[0]
+	if session.SessionID != "task-run-batch-1" ||
+		session.TaskID != "TASK-42" ||
+		session.AgentID != "falcon" ||
+		session.Kind != domain.AgentSessionKindTask ||
+		session.Status != domain.AgentSessionCompleted {
+		t.Fatalf(
+			"canonical history identifiers = %+v, want clickable task TASK-42 and transcript session task-run-batch-1",
+			session,
+		)
+	}
+	if session.Metadata["backend"] != "codex" {
+		t.Fatalf("canonical history metadata = %#v, want backend codex", session.Metadata)
+	}
+	if strings.Contains(rec.Body.String(), "legacy-task-run-shadow") ||
+		strings.Contains(rec.Body.String(), "TASK-FOREIGN") {
+		t.Fatalf("history leaked a legacy shadow or foreign worker run: %s", rec.Body.String())
+	}
+
+	rec = doAgentRequest(
+		t,
+		mux,
+		http.MethodGet,
+		"/api/workspaces/WS/agents/falcon/runs?limit=1",
+		"",
+	)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("limited supervised runs status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	out = agentRunsResponse{}
+	decodeJSON(t, rec.Body.Bytes(), &out)
+	if len(out.Sessions) != 1 || out.Sessions[0].SessionID != "task-run-batch-1" {
+		t.Fatalf(
+			"limited supervised sessions = %+v, want deduplication before final limit",
+			out.Sessions,
+		)
+	}
+}
+
 func TestAgentRunsReturnsLegacyBindingRuns(t *testing.T) {
 	st := newAgentRecordStore(t)
 	ctx := context.Background()
@@ -1112,23 +1224,30 @@ func seedPromptAgentRole(t *testing.T, st store.Store, name string) {
 	}
 }
 
-func seedDriverVersion(t *testing.T, st store.Store, driverID, versionID string) {
+func seedDriverVersion(t *testing.T, st *memstore.Store, driverID, versionID string) {
 	t.Helper()
 	ctx := context.Background()
 	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
-		WorkspaceKey: agentRecordTestWS, DriverID: driverID, Name: driverID, ActiveVersionID: versionID,
+		WorkspaceKey: agentRecordTestWS, DriverID: driverID, Name: driverID,
 	}); err != nil {
 		t.Fatalf("create driver: %v", err)
 	}
 	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
 		WorkspaceKey: agentRecordTestWS, VersionID: versionID, DriverID: driverID, Version: 1,
 		SourceDigest: "src-" + versionID, BundleDigest: "bundle-" + versionID,
+		ValidationStatus: domain.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("create driver version: %v", err)
 	}
+	if _, err := st.ApproveDriverVersionForTest(ctx, agentRecordTestWS, driverID, versionID); err != nil {
+		t.Fatalf("approve driver version: %v", err)
+	}
+	if _, err := st.ActivateDriverVersionForTest(ctx, agentRecordTestWS, driverID, versionID); err != nil {
+		t.Fatalf("activate driver version: %v", err)
+	}
 }
 
-func seedPromptAgentDriver(t *testing.T, st store.Store) {
+func seedPromptAgentDriver(t *testing.T, st *memstore.Store) {
 	t.Helper()
 	seedExecutablePromptAgentDriver(t, st)
 }

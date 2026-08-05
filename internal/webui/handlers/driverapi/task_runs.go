@@ -100,9 +100,9 @@ func (m *Module) taskRequestExecutor() driverpkg.HostBridgeTaskExecutor {
 		APIBaseURL:       m.apiBaseURL,
 		LocalSettingsDir: m.localSettingsDir,
 		WorktreeResolver: driverpkg.LocalTaskWorktreeResolver{
-			Store:            m.store,
-			Lineage:          driverpkg.DefaultStackLineageLookup(),
-			LocalSettingsDir: m.localSettingsDir,
+			Store:         m.store,
+			Lineage:       driverpkg.DefaultStackLineageLookup(),
+			SourceControl: m.sourceControl,
 		},
 		StackStore: driverpkg.DefaultStackStore(),
 	}

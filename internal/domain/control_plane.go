@@ -57,6 +57,7 @@ type AgentSessionKind string
 
 const (
 	AgentSessionKindTask          AgentSessionKind = "task"
+	AgentSessionKindInteractive   AgentSessionKind = "interactive"
 	AgentSessionKindOrchestration AgentSessionKind = "orchestration"
 	AgentSessionKindTerminal      AgentSessionKind = "terminal"
 	AgentSessionKindMaintenance   AgentSessionKind = "maintenance"
@@ -79,26 +80,28 @@ const (
 )
 
 type AgentSession struct {
-	WorkspaceKey    string             `json:"workspace_key"`
-	SessionID       string             `json:"session_id"`
-	AgentID         string             `json:"agent_id"`
-	NodeID          string             `json:"node_id,omitempty"`
-	Kind            AgentSessionKind   `json:"kind"`
-	TaskID          string             `json:"task_id,omitempty"`
-	TerminalID      string             `json:"terminal_id,omitempty"`
-	ParentSessionID string             `json:"parent_session_id,omitempty"`
-	Status          AgentSessionStatus `json:"status"`
-	Phase           string             `json:"phase,omitempty"`
-	Attempt         int                `json:"attempt,omitempty"`
-	StartedAt       time.Time          `json:"started_at,omitempty"`
-	LastHeartbeat   time.Time          `json:"last_heartbeat,omitempty"`
-	FinishedAt      *time.Time         `json:"finished_at,omitempty"`
-	Summary         string             `json:"summary,omitempty"`
-	ErrorClass      string             `json:"error_class,omitempty"`
-	ExitCode        *int               `json:"exit_code,omitempty"`
-	Metadata        map[string]string  `json:"metadata,omitempty"`
-	CreatedAt       time.Time          `json:"created_at"`
-	UpdatedAt       time.Time          `json:"updated_at"`
+	WorkspaceKey             string             `json:"workspace_key"`
+	SessionID                string             `json:"session_id"`
+	AgentID                  string             `json:"agent_id"`
+	NodeID                   string             `json:"node_id,omitempty"`
+	Kind                     AgentSessionKind   `json:"kind"`
+	TaskID                   string             `json:"task_id,omitempty"`
+	TerminalID               string             `json:"terminal_id,omitempty"`
+	ParentSessionID          string             `json:"parent_session_id,omitempty"`
+	Status                   AgentSessionStatus `json:"status"`
+	CurrentLeaseID           string             `json:"current_lease_id,omitempty"`
+	CurrentLeaseFencingToken int64              `json:"current_lease_fencing_token,omitempty"`
+	Phase                    string             `json:"phase,omitempty"`
+	Attempt                  int                `json:"attempt,omitempty"`
+	StartedAt                time.Time          `json:"started_at,omitempty"`
+	LastHeartbeat            time.Time          `json:"last_heartbeat,omitempty"`
+	FinishedAt               *time.Time         `json:"finished_at,omitempty"`
+	Summary                  string             `json:"summary,omitempty"`
+	ErrorClass               string             `json:"error_class,omitempty"`
+	ExitCode                 *int               `json:"exit_code,omitempty"`
+	Metadata                 map[string]string  `json:"metadata,omitempty"`
+	CreatedAt                time.Time          `json:"created_at"`
+	UpdatedAt                time.Time          `json:"updated_at"`
 }
 
 type TerminalSessionStatus string

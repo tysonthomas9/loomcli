@@ -76,8 +76,8 @@ A1_WORKFLOW_NAME="${A1_WORKFLOW_NAME:-github-review-agent}"
 A1_BINDING_ID="${A1_BINDING_ID:-a1-github-review-multi}"
 A1_WEBHOOK_ENDPOINT_PATH="${A1_WEBHOOK_ENDPOINT_PATH:-/webhooks/github}"
 WEBHOOK_URL="${SERVE_URL}/api/workspaces/${WS}${A1_WEBHOOK_ENDPOINT_PATH}"
-WORKFLOW_SOURCE="${WORKFLOW_SOURCE:-${ROOT_DIR}/internal/workflows/builtin/github-review-agent.ts}"
-REVIEW_TASK_RUNNER_SOURCE="${REVIEW_TASK_RUNNER_SOURCE:-${ROOT_DIR}/internal/workflows/builtin/github-review-task-runner.ts}"
+WORKFLOW_SOURCE="${WORKFLOW_SOURCE:-${ROOT_DIR}/internal/infra/workflowdistribution/builtin/github-review-agent.ts}"
+REVIEW_TASK_RUNNER_SOURCE="${REVIEW_TASK_RUNNER_SOURCE:-${ROOT_DIR}/internal/infra/workflowdistribution/builtin/github-review-task-runner.ts}"
 
 # Codex auth dir on the host (mounted read-only into loom-serve; the entrypoint
 # mirrors it into the writable CODEX_HOME). Never mutated.

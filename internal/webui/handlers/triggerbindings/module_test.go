@@ -772,7 +772,6 @@ func TestCreateBinding_WorkflowTargetFreshStoreReturns201Then200(t *testing.T) {
 			if _, err := st.Drivers().Create(ctx, store.DriverCreate{
 				WorkspaceKey: workspace, DriverID: "builtin-review", Name: workflow,
 				OwnerType: domain.DriverOwnerSystem, Status: domain.DriverStatusActive,
-				ActiveVersionID: "builtin-review-v1",
 			}); err != nil {
 				return err
 			}
@@ -782,7 +781,12 @@ func TestCreateBinding_WorkflowTargetFreshStoreReturns201Then200(t *testing.T) {
 				ValidationStatus: domain.DriverVersionValidationPassed,
 			})
 			if err == nil {
-				materializations++
+				if _, err = st.ApproveDriverVersionForTest(ctx, workspace, "builtin-review", "builtin-review-v1"); err == nil {
+					_, err = st.ActivateDriverVersionForTest(ctx, workspace, "builtin-review", "builtin-review-v1")
+				}
+				if err == nil {
+					materializations++
+				}
 			}
 			return err
 		},

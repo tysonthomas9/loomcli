@@ -476,8 +476,7 @@ func TestRunHarness_AutoAttachesDaemonActivityObserver(t *testing.T) {
 	t.Setenv("LOOM_DAEMON_SOCKET", socketPath)
 	t.Setenv("LOOM_AGENT_NAME", "worker-1")
 	t.Setenv("LOOM_SESSION_ID", "session-1")
-	t.Setenv("LOOM_AGENT_LEASE_ID", "lease-1")
-	t.Setenv("LOOM_AGENT_LEASE_TOKEN", "token-1")
+	t.Setenv("LOOM_AGENT_IPC_AUTH_TOKEN", "token-1")
 	t.Setenv("LOOM_SERVER_URL", "")
 	t.Setenv("LOOM_ISSUE_BACKEND", "")
 
@@ -509,8 +508,8 @@ func TestRunHarness_AutoAttachesDaemonActivityObserver(t *testing.T) {
 		if req.AgentName != "worker-1" {
 			t.Errorf("agent_name = %q, want worker-1", req.AgentName)
 		}
-		if req.SessionID != "session-1" || req.LeaseID != "lease-1" || req.LeaseToken != "token-1" {
-			t.Errorf("lease/session metadata = session:%q lease:%q token:%q", req.SessionID, req.LeaseID, req.LeaseToken)
+		if req.SessionID != "session-1" || req.AuthToken != "token-1" {
+			t.Errorf("IPC/session metadata = session:%q token:%q", req.SessionID, req.AuthToken)
 		}
 		if !req.LastActivityAt.Equal(activityAt) {
 			t.Errorf("last_activity_at = %v, want %v", req.LastActivityAt, activityAt)

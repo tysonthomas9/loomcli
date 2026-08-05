@@ -60,7 +60,7 @@ func TestAgentServiceClientRoutesBodiesAndQueries(t *testing.T) {
 			}
 			writeJSON(t, w, map[string]any{"agent_services": []*domain.AgentService{{WorkspaceKey: "WS", ServiceID: "lead", Kind: domain.AgentServiceKindLead, DesiredState: domain.AgentServiceDesiredRunning, RoleName: "lead", ProfileName: "falcon", CreatedBy: "tester", MaxInstances: 2}}, "count": 1})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/WS/agent-services/lead":
-			writeJSON(t, w, domain.AgentService{WorkspaceKey: "WS", ServiceID: "lead", Kind: domain.AgentServiceKindLead, DesiredState: domain.AgentServiceDesiredRunning, RoleName: "lead", ProfileName: "falcon", CreatedBy: "tester", MaxInstances: 2})
+			writeJSON(t, w, domain.AgentService{WorkspaceKey: "WS", ServiceID: "lead", Kind: domain.AgentServiceKindLead, DesiredState: domain.AgentServiceDesiredRunning, RoleName: "lead", ProfileName: "falcon", CreatedBy: "tester", MaxInstances: 2, UpdatedAt: deletedAt})
 		case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/WS/agent-services/lead":
 			var req struct {
 				DesiredState *domain.AgentServiceDesiredState `json:"desired_state"`
@@ -72,8 +72,22 @@ func TestAgentServiceClientRoutesBodiesAndQueries(t *testing.T) {
 				t.Fatalf("update body = %+v", req)
 			}
 			writeJSON(t, w, domain.AgentService{WorkspaceKey: "WS", ServiceID: "lead", Kind: domain.AgentServiceKindLead, DesiredState: *req.DesiredState, RoleName: "lead", ProfileName: "falcon", LeaseID: *req.LeaseID, Metadata: *req.Metadata, MaxInstances: 2})
-		case r.Method == http.MethodDelete && r.URL.Path == "/api/v1/WS/agent-services/lead":
-			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/WS/agent-services/lead/archive":
+			if got := r.Header.Get(FleetDelegatedActorHeader); got != "tester" {
+				t.Fatalf("%s = %q, want tester", FleetDelegatedActorHeader, got)
+			}
+			var req struct {
+				ExpectedUpdatedAt time.Time `json:"expected_updated_at"`
+			}
+			decodeAgentServiceJSONBody(t, r, &req)
+			if !req.ExpectedUpdatedAt.Equal(deletedAt) {
+				t.Fatalf("expected_updated_at = %s, want %s", req.ExpectedUpdatedAt, deletedAt)
+			}
+			writeJSON(t, w, domain.AgentService{
+				WorkspaceKey: "WS", ServiceID: "lead",
+				Kind: domain.AgentServiceKindLead, DesiredState: domain.AgentServiceDesiredPaused,
+				DeletedAt: &deletedAt, UpdatedAt: deletedAt,
+			})
 		default:
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
 		}

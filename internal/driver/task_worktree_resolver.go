@@ -7,11 +7,10 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver/taskworktree"
-	"github.com/tysonthomas9/loomcli/internal/stacklineage"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/stackstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -19,9 +18,10 @@ import (
 const ErrorClassLocalWorktreeUnprovisioned = "local_worktree_unprovisioned"
 
 type TaskWorktree struct {
-	Path         string
-	RepoName     string
-	SourceRepoID string
+	Path             string
+	RepoName         string
+	SourceRepoID     string
+	RepositoryRemote string
 }
 
 type TaskWorktreeResolver interface {
@@ -38,147 +38,41 @@ type TaskLineageLookup interface {
 	BaseRefForTask(ctx context.Context, workspaceKey, repoName, taskID string) (baseRef string, ok bool, err error)
 }
 
-// TaskLineage is the per-task stack-lineage carrier. It rides inside the
-// existing TaskExecRequest.Input payload under the namespaced "lineage" key so
-// it travels verbatim to a runner, including a daytona sandbox that never reads
-// the host stackstore.
-type TaskLineage struct {
-	StackID      string `json:"stackId,omitempty"`
-	BaseRef      string `json:"baseRef,omitempty"`
-	OutputBranch string `json:"outputBranch,omitempty"`
-}
-
-// Empty reports whether the carrier holds no lineage at all.
-func (l TaskLineage) Empty() bool {
-	return strings.TrimSpace(l.StackID) == "" &&
-		strings.TrimSpace(l.BaseRef) == "" &&
-		strings.TrimSpace(l.OutputBranch) == ""
-}
-
-type lineageEnvelope struct {
-	Lineage *TaskLineage `json:"lineage,omitempty"`
-}
+// TaskLineage is the per-task stack-lineage carrier.
+type TaskLineage = taskworktree.Lineage
 
 // WithLineage merges lin into the "lineage" key of an existing Input payload,
 // preserving every other key already present.
 func WithLineage(input json.RawMessage, lin TaskLineage) (json.RawMessage, error) {
-	if lin.Empty() {
-		return input, nil
-	}
-	obj := map[string]json.RawMessage{}
-	if len(strings.TrimSpace(string(input))) > 0 {
-		if err := json.Unmarshal(input, &obj); err != nil {
-			return input, nil
-		}
-	}
-	encoded, err := json.Marshal(lin)
-	if err != nil {
-		return nil, err
-	}
-	obj["lineage"] = encoded
-	merged, err := json.Marshal(obj)
-	if err != nil {
-		return nil, err
-	}
-	return merged, nil
+	return taskworktree.WithLineage(input, lin)
 }
 
 // LineageFromInput extracts the lineage carrier from an Input payload. ok=false
 // means no lineage key was present, so callers keep pre-stacking behavior.
 func LineageFromInput(input json.RawMessage) (TaskLineage, bool) {
-	if len(strings.TrimSpace(string(input))) == 0 {
-		return TaskLineage{}, false
-	}
-	var env lineageEnvelope
-	if err := json.Unmarshal(input, &env); err != nil || env.Lineage == nil {
-		return TaskLineage{}, false
-	}
-	if env.Lineage.Empty() {
-		return TaskLineage{}, false
-	}
-	return *env.Lineage, true
+	return taskworktree.LineageFromInput(input)
 }
 
 // StackLineageLookup adapts stackstore into the TaskLineageLookup consumed by
 // the worktree resolver.
-type StackLineageLookup struct {
-	Store stackstore.Store
-}
+type StackLineageLookup = taskworktree.StackLineageLookup
 
 var _ TaskLineageLookup = StackLineageLookup{}
-
-// BaseRefForTask returns the lineage base branch for taskID, scoped to repoName.
-func (l StackLineageLookup) BaseRefForTask(ctx context.Context, workspaceKey, repoName, taskID string) (string, bool, error) {
-	st, node, byTask, ok, err := findTaskStack(ctx, l.Store, workspaceKey, repoName, taskID)
-	if err != nil || !ok {
-		return "", false, err
-	}
-	base, err := stacklineage.BaseBranchSliding(st, node, byTask)
-	if err != nil {
-		return "", false, err
-	}
-	return base, true, nil
-}
 
 // DefaultStackLineageLookup returns a lineage lookup backed by the per-user loom
 // stack store, or nil when the loom directory cannot be resolved.
 func DefaultStackLineageLookup() TaskLineageLookup {
-	store, err := stackstore.Default()
-	if err != nil {
+	lookup := taskworktree.DefaultStackLineageLookup()
+	if lookup == nil {
 		return nil
 	}
-	return StackLineageLookup{Store: store}
+	return *lookup
 }
 
 // DefaultStackStore returns the per-user loom stack store, or nil when the loom
 // directory cannot be resolved.
 func DefaultStackStore() stackstore.Store {
-	store, err := stackstore.Default()
-	if err != nil {
-		return nil
-	}
-	return store
-}
-
-// findTaskStack locates the single stack scoped to repoName that contains taskID.
-func findTaskStack(ctx context.Context, store stackstore.Store, workspaceKey, repoName, taskID string) (stacklineage.Stack, stacklineage.Node, map[string]stacklineage.Node, bool, error) {
-	taskID = strings.TrimSpace(taskID)
-	repoName = strings.TrimSpace(repoName)
-	if store == nil || taskID == "" || repoName == "" {
-		return stacklineage.Stack{}, stacklineage.Node{}, nil, false, nil
-	}
-	stacks, err := store.ListStacks(ctx, workspaceKey)
-	if err != nil {
-		return stacklineage.Stack{}, stacklineage.Node{}, nil, false, err
-	}
-	var (
-		foundStack  stacklineage.Stack
-		foundNode   stacklineage.Node
-		foundByTask map[string]stacklineage.Node
-		found       bool
-	)
-	for _, st := range stacks {
-		if strings.TrimSpace(st.RepoName) == "" || st.RepoName != repoName {
-			continue
-		}
-		nodes, err := store.ListNodes(ctx, workspaceKey, st.ID)
-		if err != nil {
-			return stacklineage.Stack{}, stacklineage.Node{}, nil, false, err
-		}
-		byTask := stacklineage.ByTask(nodes)
-		node, ok := byTask[taskID]
-		if !ok {
-			continue
-		}
-		if found {
-			return stacklineage.Stack{}, stacklineage.Node{}, nil, false, nil
-		}
-		foundStack, foundNode, foundByTask, found = st, node, byTask, true
-	}
-	if !found {
-		return stacklineage.Stack{}, stacklineage.Node{}, nil, false, nil
-	}
-	return foundStack, foundNode, foundByTask, true, nil
+	return taskworktree.DefaultStackStore()
 }
 
 // resolveStackRepoName resolves the workspace repo Name a non-local task targets.
@@ -204,19 +98,7 @@ func (e HostBridgeTaskExecutor) resolveStackRepoName(ctx context.Context, req Ta
 // stackBindingForTask returns the task's stack binding when the task belongs to
 // a stack for repoName.
 func stackBindingForTask(ctx context.Context, store stackstore.Store, workspaceKey, repoName, taskID string) (TaskLineage, bool, error) {
-	st, node, byTask, ok, err := findTaskStack(ctx, store, workspaceKey, repoName, taskID)
-	if err != nil || !ok {
-		return TaskLineage{}, false, err
-	}
-	base, err := stacklineage.BaseBranchSliding(st, node, byTask)
-	if err != nil {
-		return TaskLineage{}, false, err
-	}
-	return TaskLineage{
-		StackID:      string(st.ID),
-		BaseRef:      base,
-		OutputBranch: node.OutputBranch,
-	}, true, nil
+	return taskworktree.BindingForTask(ctx, store, workspaceKey, repoName, taskID)
 }
 
 // finalizeStackNode records the completed task's stack node state/SHA before
@@ -236,64 +118,24 @@ func (e HostBridgeTaskExecutor) finalizeStackNode(ctx context.Context, req TaskE
 	if repoName == "" {
 		return
 	}
-	state, sha, ok := stackOutcome(result.RuntimeMetadata)
-	if !ok {
-		return
-	}
-	if _, err := recordStackOutput(ctx, e.StackStore, req.WorkspaceKey, repoName, taskID, state, sha); err != nil {
+	if _, err := taskworktree.RecordOutcome(
+		ctx,
+		e.StackStore,
+		req.WorkspaceKey,
+		repoName,
+		taskID,
+		result.RuntimeMetadata,
+	); err != nil {
 		slog.WarnContext(ctx, "stack finalize barrier: record node failed", "task", taskID, "repo", repoName, "err", err)
 	}
 }
 
-// stackOutcome maps runtime metadata to the stack-node state the finalize
-// barrier should record.
-func stackOutcome(meta map[string]string) (state stacklineage.NodeState, outputSHA string, ok bool) {
-	if meta == nil {
-		return "", "", false
-	}
-	sha := firstNonEmpty(meta["github_commit_sha"], meta["github_head_sha"], meta["head_sha"], meta["output_sha"])
-	switch {
-	case strings.TrimSpace(meta["github_branch"]) != "" || meta["delivery"] == "pull_request":
-		return stacklineage.NodeStatePublished, sha, true
-	case meta["delivery"] == "pull_request_skipped_no_changes" || meta["files_changed"] == "0":
-		return stacklineage.NodeStateEmpty, "", true
-	default:
-		return "", "", false
-	}
-}
-
-// recordStackOutput records the task node state in the stack store.
-func recordStackOutput(ctx context.Context, store stackstore.Store, workspaceKey, repoName, taskID string, state stacklineage.NodeState, outputSHA string) (recorded bool, err error) {
-	if store == nil || state == "" {
-		return false, nil
-	}
-	st, _, _, ok, err := findTaskStack(ctx, store, workspaceKey, repoName, taskID)
-	if err != nil || !ok {
-		return false, err
-	}
-	now := time.Now().UTC()
-	updateErr := store.UpdateNode(ctx, workspaceKey, st.ID, taskID, func(n *stacklineage.Node) error {
-		n.State = state
-		if strings.TrimSpace(outputSHA) != "" {
-			n.OutputSHA = strings.TrimSpace(outputSHA)
-		}
-		if state == stacklineage.NodeStatePublished {
-			n.LastPublishedAt = &now
-		}
-		return nil
-	})
-	if updateErr != nil {
-		return false, updateErr
-	}
-	return true, nil
-}
-
 type LocalTaskWorktreeResolver struct {
 	Store store.Store
-	// LocalSettingsDir is passed to the taskworktree boundary, which resolves
-	// private HTTPS credentials just in time for clone and fetch. Empty
-	// preserves anonymous/SSH/local git behavior.
-	LocalSettingsDir string
+	// SourceControl is the authority-free application materializer. Production
+	// task runs fail closed when it is unavailable; neither this resolver nor
+	// taskworktree receives Local Settings or a credential source.
+	SourceControl sourcecontrol.Materializer
 	// Lineage is optional. When nil (the two pre-stacking construction sites and
 	// all tests), the worktree base stays the repo default branch. When set, the
 	// per-task worktree is cut from the task's lineage base so each stacked task
@@ -314,11 +156,6 @@ func (r LocalTaskWorktreeResolver) ResolveTaskWorktree(ctx context.Context, req 
 	if taskRunID == "" {
 		return TaskWorktree{}, fmt.Errorf("task run id required: %w", domain.ErrInvalid)
 	}
-	local, err := taskworktree.OpenWithLocalSettings(workspaceKey, r.LocalSettingsDir)
-	if err != nil {
-		return TaskWorktree{}, err
-	}
-
 	repos, err := r.Store.Repos().List(ctx, workspaceKey)
 	if err != nil {
 		return TaskWorktree{}, fmt.Errorf("list workspace repos: %w", err)
@@ -332,16 +169,50 @@ func (r LocalTaskWorktreeResolver) ResolveTaskWorktree(ctx context.Context, req 
 	if err != nil {
 		return TaskWorktree{}, err
 	}
-	target, err := local.Prepare(ctx, selected, taskRunID, func() string {
-		return r.baseBranchForTask(ctx, workspaceKey, selected, req)
-	})
+	if r.SourceControl == nil {
+		return TaskWorktree{}, fmt.Errorf("source control materializer required: %w", sourcecontrol.ErrUnavailable)
+	}
+	repositoryRef := firstNonEmpty(selected.SourceRepoID, selected.Name)
+	materialized, err := r.SourceControl.PrepareTaskCheckout(
+		ctx,
+		sourcecontrol.TaskCheckoutCommand{
+			WorkspaceKey: workspaceKey, TaskRunID: taskRunID,
+			RepositoryRef: repositoryRef,
+			BaseBranch:    r.baseBranchForTask(ctx, workspaceKey, selected, req),
+		},
+	)
+	if err != nil {
+		return TaskWorktree{}, fmt.Errorf("materialize task run repository %q: %w", selected.Name, err)
+	}
+	if materialized == nil ||
+		materialized.WorkspaceKey != workspaceKey ||
+		materialized.TaskRunID != taskRunID ||
+		materialized.RepositoryRef != repositoryRef ||
+		materialized.CheckoutPath == "" ||
+		materialized.BaseRef == "" ||
+		materialized.BaseCommit == "" {
+		return TaskWorktree{}, fmt.Errorf("source control returned different task checkout coordinates: %w", sourcecontrol.ErrInvalidMaterialization)
+	}
+	local, err := taskworktree.Open(workspaceKey)
+	if err != nil {
+		return TaskWorktree{}, err
+	}
+	target, err := local.Prepare(
+		ctx,
+		selected,
+		materialized.CheckoutPath,
+		taskRunID,
+		materialized.BaseRef,
+		materialized.BaseCommit,
+	)
 	if err != nil {
 		return TaskWorktree{}, err
 	}
 	return TaskWorktree{
-		Path:         target,
-		RepoName:     selected.Name,
-		SourceRepoID: firstNonEmpty(selected.SourceRepoID, selected.Name),
+		Path:             target,
+		RepoName:         selected.Name,
+		SourceRepoID:     firstNonEmpty(selected.SourceRepoID, selected.Name),
+		RepositoryRemote: firstNonEmpty(selected.RemoteURL, selected.Remote),
 	}, nil
 }
 

@@ -9,7 +9,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/agentpolicy"
 	"github.com/tysonthomas9/loomcli/internal/cli/backendcheck"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
 // ErrBackendUnavailable is the sentinel returned by spawnAgent when the
@@ -56,7 +55,6 @@ func (s *Supervisor) gateBackendAvailable(ap *AgentProcess) error {
 		worktree := ap.Entry.Worktree
 		ap.Mu.Unlock()
 		if wasUnavailable {
-			s.markControlPlaneAgentState(ap, domain.AgentStateActive)
 			log.Printf("[daemon] Agent %s: backend %q now on PATH — resuming spawn",
 				worktree, backend)
 		}
@@ -75,7 +73,6 @@ func (s *Supervisor) gateBackendAvailable(ap *AgentProcess) error {
 	worktree := ap.Entry.Worktree
 	ap.Mu.Unlock()
 
-	s.markControlPlaneAgentState(ap, domain.AgentStateBackendUnavailable)
 	if !wasUnavailable {
 		log.Printf("[daemon] Agent %s: backend %q not on PATH — skipping spawn (%s)",
 			worktree, backend, info.InstallHint)

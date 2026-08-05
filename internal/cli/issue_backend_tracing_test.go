@@ -23,6 +23,13 @@ func (m *actorClaimMockBackend) ClaimIssueAsActor(_ context.Context, id string, 
 	return nil
 }
 
+func (m *actorClaimMockBackend) RenewIssueClaimAsActor(_ context.Context, id string, ttl time.Duration, actor string) error {
+	m.claimedID = id
+	m.actor = actor
+	m.ttl = ttl
+	return nil
+}
+
 func TestTracedIssueBackendPreservesClaimIssueAsActor(t *testing.T) {
 	inner := &actorClaimMockBackend{MockIssueBackend: NewMockIssueBackend()}
 	wrapped := wrapIssueBackendWithTracing(inner)
@@ -38,6 +45,24 @@ func TestTracedIssueBackendPreservesClaimIssueAsActor(t *testing.T) {
 	}
 	if inner.claimedID != "TASK-1" || inner.actor != "planner" || inner.ttl != time.Minute {
 		t.Fatalf("claim = id %q actor %q ttl %s", inner.claimedID, inner.actor, inner.ttl)
+	}
+}
+
+func TestTracedIssueBackendPreservesRenewIssueClaimAsActor(t *testing.T) {
+	inner := &actorClaimMockBackend{MockIssueBackend: NewMockIssueBackend()}
+	wrapped := wrapIssueBackendWithTracing(inner)
+	renewBackend, ok := wrapped.(interface {
+		RenewIssueClaimAsActor(context.Context, string, time.Duration, string) error
+	})
+	if !ok {
+		t.Fatal("traced issue backend should preserve RenewIssueClaimAsActor")
+	}
+
+	if err := renewBackend.RenewIssueClaimAsActor(context.Background(), "TASK-1", time.Minute, "planner"); err != nil {
+		t.Fatalf("RenewIssueClaimAsActor: %v", err)
+	}
+	if inner.claimedID != "TASK-1" || inner.actor != "planner" || inner.ttl != time.Minute {
+		t.Fatalf("renew = id %q actor %q ttl %s", inner.claimedID, inner.actor, inner.ttl)
 	}
 }
 

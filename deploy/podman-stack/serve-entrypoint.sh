@@ -6,7 +6,7 @@
 #
 # Why this is needed: serve builds each submitted workflow under
 # /work/.loom/workflow-builds/<name>-<n>/ and seeds only @loom/sdk into that
-# build directory's own node_modules (internal/workflows/workflows.go
+# build directory's own node_modules (internal/infra/workflowdistribution/catalog_build.go
 # writeWorkflowBuildProject). The flue node-target build, however, generates a
 # server entry that imports @hono/node-server / hono, which it resolves by
 # walking up from the build root for node_modules/@flue/runtime and then

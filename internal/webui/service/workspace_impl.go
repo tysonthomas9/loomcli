@@ -29,40 +29,43 @@ var workspaceBackendOptions = []string{"claude", defaultWorkspaceBackend, "openc
 
 // WorkspaceServiceConfig holds the dependencies for workspace service construction.
 type WorkspaceServiceConfig struct {
-	Store          store.Store         // FleetDB-backed store; authoritative workspace source
-	MultiPool      *daemon.MultiPool   // For daemon-pool stats when local daemons are running
-	CreateFn       WorkspaceCreateFn   // Already wrapped with registry hooks
-	AddReposFn     WorkspaceAddReposFn // Store-backed repo attachment
-	DeleteFn       func(string) error  // Already wrapped with cleanup hooks
-	JobStore       JobStore            // For async creation; nil = async unavailable
-	SetDefaultFn   func(string) error  // Deprecated compatibility hook; default workspace selection is disabled.
-	ClearDefaultFn func() error        // Deprecated compatibility hook; default workspace selection is disabled.
+	Store                store.Store                   // FleetDB-backed store; authoritative workspace source
+	MultiPool            *daemon.MultiPool             // For daemon-pool stats when local daemons are running
+	CreateFn             WorkspaceCreateFn             // Already wrapped with registry hooks
+	AddReposFn           WorkspaceAddReposFn           // Store-backed repo attachment
+	DeleteFn             func(string) error            // Already wrapped with cleanup hooks
+	JobStore             JobStore                      // For async creation; nil = async unavailable
+	AdmissionCoordinator WorkspaceAdmissionCoordinator // Optional durable admission seam for async mutations
+	SetDefaultFn         func(string) error            // Deprecated compatibility hook; default workspace selection is disabled.
+	ClearDefaultFn       func() error                  // Deprecated compatibility hook; default workspace selection is disabled.
 }
 
 type workspaceServiceImpl struct {
-	store          store.Store
-	multiPool      *daemon.MultiPool
-	createFn       WorkspaceCreateFn
-	addReposFn     WorkspaceAddReposFn
-	deleteFn       func(string) error
-	jobStore       JobStore
-	setDefaultFn   func(string) error
-	clearDefaultFn func() error
-	workspaceCache *workspaceDataCache
+	store                store.Store
+	multiPool            *daemon.MultiPool
+	createFn             WorkspaceCreateFn
+	addReposFn           WorkspaceAddReposFn
+	deleteFn             func(string) error
+	jobStore             JobStore
+	admissionCoordinator WorkspaceAdmissionCoordinator
+	setDefaultFn         func(string) error
+	clearDefaultFn       func() error
+	workspaceCache       *workspaceDataCache
 }
 
 // NewWorkspaceService creates a new WorkspaceService from the given config.
 func NewWorkspaceService(cfg WorkspaceServiceConfig) WorkspaceService {
 	return &workspaceServiceImpl{
-		store:          cfg.Store,
-		multiPool:      cfg.MultiPool,
-		createFn:       cfg.CreateFn,
-		addReposFn:     cfg.AddReposFn,
-		deleteFn:       cfg.DeleteFn,
-		jobStore:       cfg.JobStore,
-		setDefaultFn:   cfg.SetDefaultFn,
-		clearDefaultFn: cfg.ClearDefaultFn,
-		workspaceCache: newWorkspaceDataCache(defaultWorkspaceDataCacheTTL),
+		store:                cfg.Store,
+		multiPool:            cfg.MultiPool,
+		createFn:             cfg.CreateFn,
+		addReposFn:           cfg.AddReposFn,
+		deleteFn:             cfg.DeleteFn,
+		jobStore:             cfg.JobStore,
+		admissionCoordinator: cfg.AdmissionCoordinator,
+		setDefaultFn:         cfg.SetDefaultFn,
+		clearDefaultFn:       cfg.ClearDefaultFn,
+		workspaceCache:       newWorkspaceDataCache(defaultWorkspaceDataCacheTTL),
 	}
 }
 
@@ -102,7 +105,7 @@ func (s *workspaceServiceImpl) AddWorkspaceRepos(ctx context.Context, req Worksp
 	return s.GetWorkspace(ctx, req.WorkspaceID)
 }
 
-func (s *workspaceServiceImpl) StartAsyncAddRepos(_ context.Context, req WorkspaceAddReposRequest) (string, error) {
+func (s *workspaceServiceImpl) StartAsyncAddRepos(ctx context.Context, req WorkspaceAddReposRequest) (string, error) {
 	if s.addReposFn == nil {
 		return "", ErrUnavailable("workspace repo attachment is not available")
 	}
@@ -117,13 +120,27 @@ func (s *workspaceServiceImpl) StartAsyncAddRepos(_ context.Context, req Workspa
 		return "", ErrUnavailable("async workspace repo attachment not available")
 	}
 
-	jobID := s.jobStore.StartAddRepos(req, func(ctx context.Context, normalized WorkspaceAddReposRequest) (WorkspaceCreateResult, error) {
+	run := func(ctx context.Context, normalized WorkspaceAddReposRequest) (WorkspaceCreateResult, error) {
 		result, err := s.addReposFn(ctx, normalized)
 		if err == nil {
 			s.invalidateWorkspaceCache()
 		}
 		return result, err
-	})
+	}
+	var jobID string
+	if s.admissionCoordinator != nil {
+		var err error
+		jobID, err = s.admissionCoordinator.PrepareAddRepos(ctx, req)
+		if err != nil {
+			return "", err
+		}
+		if strings.TrimSpace(jobID) == "" {
+			return "", ErrInternal("workspace admission coordinator returned an empty job ID", nil)
+		}
+		jobID = s.jobStore.StartPreparedAddRepos(jobID, req, run)
+	} else {
+		jobID = s.jobStore.StartAddRepos(req, run)
+	}
 	return jobID, nil
 }
 
@@ -333,7 +350,7 @@ func (s *workspaceServiceImpl) CreateWorkspace(ctx context.Context, req Workspac
 	return data, warnings, nil
 }
 
-func (s *workspaceServiceImpl) StartAsyncCreate(_ context.Context, req WorkspaceCreateRequest) (string, error) {
+func (s *workspaceServiceImpl) StartAsyncCreate(ctx context.Context, req WorkspaceCreateRequest) (string, error) {
 	if err := validateWorkspaceCreateRequest(&req); err != nil {
 		return "", err
 	}
@@ -342,13 +359,38 @@ func (s *workspaceServiceImpl) StartAsyncCreate(_ context.Context, req Workspace
 		return "", ErrUnavailable("async workspace creation not available")
 	}
 
-	jobID := s.jobStore.Start(req, s.createFn)
+	var jobID string
+	if s.admissionCoordinator != nil {
+		var err error
+		jobID, err = s.admissionCoordinator.PrepareCreate(ctx, req)
+		if err != nil {
+			return "", err
+		}
+		if strings.TrimSpace(jobID) == "" {
+			return "", ErrInternal("workspace admission coordinator returned an empty job ID", nil)
+		}
+		jobID = s.jobStore.StartPrepared(jobID, req, s.createFn)
+	} else {
+		jobID = s.jobStore.Start(req, s.createFn)
+	}
 	return jobID, nil
 }
 
 func (s *workspaceServiceImpl) GetWorkspaceJob(ctx context.Context, jobID string) (*WorkspaceJob, error) {
 	if s.jobStore != nil {
 		if job := s.jobStore.Get(jobID); job != nil {
+			return job, nil
+		}
+	}
+	if s.admissionCoordinator != nil {
+		job, found, err := s.admissionCoordinator.LookupJob(ctx, jobID)
+		if err != nil {
+			return nil, err
+		}
+		if found {
+			if job == nil {
+				return nil, ErrInternal("workspace admission coordinator returned an empty job", nil)
+			}
 			return job, nil
 		}
 	}

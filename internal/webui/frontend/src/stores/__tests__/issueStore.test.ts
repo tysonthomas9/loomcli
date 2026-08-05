@@ -1157,6 +1157,36 @@ describe("issueStore", () => {
       unsubscribe();
     });
 
+    it("clears a stale claimant when an SSE assignment event carries an explicit empty assignee", () => {
+      store.setState({
+        issuesMap: new Map([
+          [
+            "task-1",
+            makeIssue({
+              id: "task-1",
+              status: "review",
+              assignee: "driver-run:run-1",
+              updated_at: "2026-05-05T22:00:00Z",
+            }),
+          ],
+        ]),
+      });
+
+      store.getState().applyMutation(
+        makeMutation({
+          type: "update",
+          entity_type: "issue",
+          entity_id: "task-1",
+          action: "issue.assign",
+          issue_id: "task-1",
+          assignee: "",
+          timestamp: "2026-05-05T22:01:00Z",
+        }),
+      );
+
+      expect(store.getState().issuesMap.get("task-1")!.assignee).toBe("");
+    });
+
     it("returns existing unsubscribe on duplicate call", () => {
       const mockSubscribe = vi.fn(() => () => {});
 

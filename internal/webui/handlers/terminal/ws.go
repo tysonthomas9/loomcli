@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -17,6 +18,8 @@ import (
 	"nhooyr.io/websocket" //nolint:staticcheck // SA1019: websocket migration tracked separately
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
+	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -81,6 +84,9 @@ type terminalWSParams struct {
 	// triggers a 4410 close; the latter proceeds to AttachSession as
 	// normal.
 	serverStartedAt time.Time
+	agentIdentity   terminalAgentIdentity
+	interaction     InteractionDependencies
+	interactionNode string
 }
 
 type workspacePTYEnsurer interface {
@@ -97,7 +103,48 @@ type workspacePTYEnsurer interface {
 // on disconnect the PTY and child process stay alive for a grace period so a
 // reconnecting client gets its shell and scrollback back. See PTYManager for
 // the lifecycle details.
-func HandleTerminalWS(manager webuterminal.PTYSource, auth *realtime.TerminalAuth, allowedOrigins []string, loomServerURL string, st store.Store, tabMetaStore *tabmeta.Store, hub *realtime.Hub, serverStartedAt time.Time) http.HandlerFunc {
+func HandleTerminalWS(
+	manager webuterminal.PTYSource,
+	auth *realtime.TerminalAuth,
+	allowedOrigins []string,
+	loomServerURL string,
+	st store.Store,
+	tabMetaStore *tabmeta.Store,
+	hub *realtime.Hub,
+	serverStartedAt time.Time,
+	identities ...terminalAgentIdentity,
+) http.HandlerFunc {
+	return HandleTerminalWSWithInteraction(
+		manager,
+		auth,
+		allowedOrigins,
+		loomServerURL,
+		st,
+		tabMetaStore,
+		hub,
+		serverStartedAt,
+		InteractionDependencies{},
+		identities...,
+	)
+}
+
+// HandleTerminalWSWithInteraction adds the owner-scoped Interaction lifecycle
+// required for agent PTYs. HandleTerminalWS remains as the compatibility
+// entrypoint for non-agent terminal composition and isolated route tests.
+//
+//nolint:funlen // Keep terminal dependency capture and request lifecycle ordering in one explicit WebSocket composition boundary.
+func HandleTerminalWSWithInteraction(
+	manager webuterminal.PTYSource,
+	auth *realtime.TerminalAuth,
+	allowedOrigins []string,
+	loomServerURL string,
+	st store.Store,
+	tabMetaStore *tabmeta.Store,
+	hub *realtime.Hub,
+	serverStartedAt time.Time,
+	interactionDeps InteractionDependencies,
+	identities ...terminalAgentIdentity,
+) http.HandlerFunc {
 	p := &terminalWSParams{
 		manager:         manager,
 		auth:            auth,
@@ -107,6 +154,9 @@ func HandleTerminalWS(manager webuterminal.PTYSource, auth *realtime.TerminalAut
 		tabMetaStore:    tabMetaStore,
 		hub:             hub,
 		serverStartedAt: serverStartedAt,
+		agentIdentity:   firstTerminalAgentIdentity(identities),
+		interaction:     interactionDeps,
+		interactionNode: "loom-terminal-" + uuid.NewString(),
 	}
 
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -115,6 +165,10 @@ func HandleTerminalWS(manager webuterminal.PTYSource, auth *realtime.TerminalAut
 			return
 		}
 		initialCols, initialRows := initialTerminalSizeFromRequest(r)
+		startAuthority, ok := resolveTerminalInteractionStartAuthority(w, r, p, session, workspace)
+		if !ok {
+			return
+		}
 
 		conn, upgradeCtx, ok := upgradeTerminalWithSpan(w, r, p.patterns, session, workspace)
 		if !ok {
@@ -136,6 +190,7 @@ func HandleTerminalWS(manager webuterminal.PTYSource, auth *realtime.TerminalAut
 			workspace,
 			initialCols,
 			initialRows,
+			startAuthority,
 		)
 	}
 }
@@ -224,6 +279,61 @@ func validateTerminalWSRequest(w http.ResponseWriter, r *http.Request, manager w
 	return session, workspace, true
 }
 
+// resolveTerminalInteractionStartAuthority derives the exact operator grant
+// only when an agent PTY must be spawned. Reattachments use the live child
+// session and never mint another durable session generation.
+func resolveTerminalInteractionStartAuthority(
+	response http.ResponseWriter,
+	request *http.Request,
+	params *terminalWSParams,
+	session,
+	workspace string,
+) (*authority.OperatorAuthority, bool) {
+	if params == nil || params.manager == nil {
+		handler.WriteJSON(response, http.StatusServiceUnavailable, map[string]any{
+			"success": false, "error": "terminal manager not initialized",
+		})
+		return nil, false
+	}
+	key := webuterminal.SessionKey{Workspace: workspace, Name: session}
+	if params.manager.HasSession(key) || params.tabMetaStore == nil {
+		return nil, true
+	}
+	meta, err := params.tabMetaStore.Get(request.Context(), workspace, session)
+	if err != nil {
+		handler.WriteJSON(response, http.StatusInternalServerError, map[string]any{
+			"success": false, "error": "load terminal metadata",
+		})
+		return nil, false
+	}
+	if meta == nil || meta.Kind != terminalKindAgent {
+		return nil, true
+	}
+	if params.interaction.API == nil || params.interaction.Operator == nil ||
+		params.interaction.SessionAuthorities == nil {
+		handler.WriteJSON(response, http.StatusServiceUnavailable, map[string]any{
+			"success": false, "error": "Interaction session lifecycle unavailable",
+		})
+		return nil, false
+	}
+	auth, err := params.interaction.Operator.ResolveOperatorAuthority(
+		request,
+		workspace,
+		interaction.ActionStartSession,
+	)
+	if err != nil {
+		status := http.StatusForbidden
+		if errors.Is(err, interaction.ErrUnavailable) {
+			status = http.StatusServiceUnavailable
+		}
+		handler.WriteJSON(response, status, map[string]any{
+			"success": false, "error": "Interaction session start is not authorized",
+		})
+		return nil, false
+	}
+	return &auth, true
+}
+
 // authenticateTerminalSession validates the one-time terminal token if auth is configured.
 func authenticateTerminalSession(w http.ResponseWriter, r *http.Request, auth *realtime.TerminalAuth, session, workspace string) bool {
 	if auth == nil {
@@ -296,11 +406,29 @@ func classifyAttachErr(err error, session, workspace string) (websocket.StatusCo
 // runTerminalRelay attaches to the (workspace, session) PTY session and runs
 // the bidirectional relay until the WebSocket closes. On WS close the session
 // is detached (grace period armed); the PTY and child process stay alive.
-func runTerminalRelay(reqCtx context.Context, conn *websocket.Conn, p *terminalWSParams, session, workspace string, initialCols, initialRows uint16) (websocket.StatusCode, string) { //nolint:staticcheck // SA1019: websocket migration tracked separately
+//
+//nolint:funlen,staticcheck // Keep the legacy websocket relay, attachment lifecycle, and exact close semantics in one boundary.
+func runTerminalRelay(
+	reqCtx context.Context,
+	conn *websocket.Conn,
+	p *terminalWSParams,
+	session,
+	workspace string,
+	initialCols,
+	initialRows uint16,
+	startAuthority *authority.OperatorAuthority,
+) (websocket.StatusCode, string) {
 	key := webuterminal.SessionKey{Workspace: workspace, Name: session}
 	ensureWorkspacePTYRegistered(reqCtx, p, workspace)
 
-	att, reattach, err := attachTerminalSession(reqCtx, p, key, initialCols, initialRows)
+	att, reattach, err := attachTerminalSession(
+		reqCtx,
+		p,
+		key,
+		initialCols,
+		initialRows,
+		startAuthority,
+	)
 	if err != nil {
 		return classifyAttachErr(err, session, workspace)
 	}
@@ -353,11 +481,14 @@ func runTerminalRelay(reqCtx context.Context, conn *websocket.Conn, p *terminalW
 // asking the PTY manager to attach or spawn. Keeping the authorization check
 // on this boundary ensures a persisted tab cannot respawn a stopped
 // interactive agent through a direct or reconnecting WebSocket.
+//
+//nolint:funlen // Keep authorization, owner-fenced Interaction launch, PTY spawn, and compensating cleanup in one attach transaction.
 func attachTerminalSession(
 	ctx context.Context,
 	p *terminalWSParams,
 	key webuterminal.SessionKey,
 	cols, rows uint16,
+	startAuthority ...*authority.OperatorAuthority,
 ) (webuterminal.Attachment, bool, error) {
 	launch, agentID, err := resolveTerminalLaunch(ctx, p, key.Workspace, key.Name)
 	if err != nil {
@@ -370,13 +501,48 @@ func attachTerminalSession(
 		// snapshots/kills it or observes the durable stopped state afterward.
 		unlock := webuterminal.LockAgentLifecycle(key.Workspace, agentID)
 		defer unlock()
-		if err := authorizeAgentTerminalLaunch(ctx, p.store, key.Workspace, agentID); err != nil {
+		if err := authorizeAgentTerminalLaunch(
+			ctx,
+			p.store,
+			key.Workspace,
+			agentID,
+			p.agentIdentity,
+		); err != nil {
 			return nil, false, err
 		}
 	}
+	var lifecycle *terminalInteractionLifecycle
+	if agentID != "" && !p.manager.HasSession(key) {
+		var operator *authority.OperatorAuthority
+		if len(startAuthority) > 0 {
+			operator = startAuthority[0]
+		}
+		launch, lifecycle, err = prepareTerminalInteractionLaunch(
+			ctx,
+			p,
+			key,
+			agentID,
+			launch,
+			operator,
+		)
+		if err != nil {
+			return nil, false, err
+		}
+		defer lifecycle.Close()
+	}
 	attachment, reattached, err := p.manager.AttachSession(key, cols, rows, launch)
 	if err != nil {
+		if lifecycle != nil {
+			lifecycle.fail(ctx, "terminal_spawn_failed")
+		}
 		return nil, false, err
+	}
+	if lifecycle != nil {
+		if err := lifecycle.running(ctx, attachment); err != nil {
+			_ = p.manager.Kill(key)
+			lifecycle.fail(ctx, "terminal_running_transition_failed")
+			return nil, false, err
+		}
 	}
 	if agentID == "" {
 		return attachment, reattached, nil
@@ -385,7 +551,13 @@ func attachTerminalSession(
 	// Keep the post-attach state check as a fail-closed defense if lifecycle
 	// state is changed by a path that does not participate in the ordering
 	// boundary.
-	if err := authorizeAgentTerminalLaunch(ctx, p.store, key.Workspace, agentID); err != nil {
+	if err := authorizeAgentTerminalLaunch(
+		ctx,
+		p.store,
+		key.Workspace,
+		agentID,
+		p.agentIdentity,
+	); err != nil {
 		if killErr := p.manager.Kill(key); killErr != nil {
 			return nil, false, fmt.Errorf("%w; additionally failed to fence spawned PTY: %v", err, killErr)
 		}
@@ -442,7 +614,13 @@ func resolveTerminalLaunch(
 		return legacyLaunchSpecForSession(session), "", nil
 	}
 	if meta.Kind == "agent" {
-		if err := authorizeAgentTerminalLaunch(ctx, p.store, workspace, meta.AgentID); err != nil {
+		if err := authorizeAgentTerminalLaunch(
+			ctx,
+			p.store,
+			workspace,
+			meta.AgentID,
+			p.agentIdentity,
+		); err != nil {
 			return nil, "", err
 		}
 		if meta.Launch == nil || (len(meta.Launch.Argv) == 0 && len(meta.Launch.Env) == 0) {
@@ -459,15 +637,21 @@ func resolveTerminalLaunch(
 	return legacyLaunchSpecForSession(session), "", nil
 }
 
-func authorizeAgentTerminalLaunch(ctx context.Context, st store.Store, workspace, agentID string) error {
-	if st == nil || st.Agents() == nil {
+func authorizeAgentTerminalLaunch(
+	ctx context.Context,
+	st store.Store,
+	workspace,
+	agentID string,
+	identities ...terminalAgentIdentity,
+) error {
+	if st == nil {
 		return errors.New("agent terminal state store unavailable")
 	}
 	agentID = strings.TrimSpace(agentID)
 	if agentID == "" {
 		return errors.New("agent terminal metadata missing agent identity")
 	}
-	agent, err := st.Agents().Get(ctx, workspace, agentID)
+	agent, err := loadTerminalAgent(ctx, st.Agents(), workspace, agentID, identities...)
 	if err != nil {
 		return fmt.Errorf("load agent terminal state: %w", err)
 	}

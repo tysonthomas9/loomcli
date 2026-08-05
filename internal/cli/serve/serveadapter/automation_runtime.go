@@ -30,7 +30,7 @@ func BuildServeRuntimeHost(
 	workspace string,
 	executionCapability webui.ExecutionCapability,
 	execution RuntimeContributor,
-	automation AutomationRuntimeContributor,
+	contributors ...RuntimeContributor,
 ) (*platformruntime.Host, error) {
 	if driverRuns == nil || awaits == nil || events == nil || workspaces == nil {
 		return nil, fmt.Errorf("compose serve runtime host: required stores are unavailable")
@@ -56,9 +56,12 @@ func BuildServeRuntimeHost(
 	if err != nil {
 		return nil, err
 	}
+	allContributors := make([]RuntimeContributor, 0, len(contributors)+1)
+	allContributors = append(allContributors, execution)
+	allContributors = append(allContributors, contributors...)
 	return BuildPlatformRuntimeHost(
 		[]platformruntime.Registration{runOutcomeRegistration, awaitEventRegistration},
-		execution, automation,
+		allContributors...,
 	)
 }
 

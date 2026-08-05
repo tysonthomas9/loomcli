@@ -13,6 +13,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -91,6 +92,9 @@ type TaskWorker struct {
 	// default worktree resolver so bundled runners and git operations can read
 	// desktop-local settings just in time.
 	LocalSettingsDir string
+	// SourceControl is the authority-free checkout materializer used by the
+	// default local task worktree resolver.
+	SourceControl sourcecontrol.Materializer
 	// WorktreeResolver resolves per-task-run local worktrees for bundled local
 	// task runners. Nil uses the machine-local workspace cache.
 	WorktreeResolver TaskWorktreeResolver
@@ -192,9 +196,9 @@ func (w *TaskWorker) runOnceInWorkspace(ctx context.Context, ws, workDir string)
 			APIBaseURL:          w.APIBaseURL,
 			LocalSettingsDir:    w.LocalSettingsDir,
 			WorktreeResolver: firstNonNilTaskWorktreeResolver(w.WorktreeResolver, LocalTaskWorktreeResolver{
-				Store:            w.Store,
-				Lineage:          DefaultStackLineageLookup(),
-				LocalSettingsDir: w.LocalSettingsDir,
+				Store:         w.Store,
+				Lineage:       DefaultStackLineageLookup(),
+				SourceControl: w.SourceControl,
 			}),
 			StackStore: DefaultStackStore(),
 		}

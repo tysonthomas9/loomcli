@@ -9,8 +9,11 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
+	"github.com/tysonthomas9/loomcli/internal/cli/managementapi"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -47,10 +50,11 @@ var workerServiceCmd = &cobra.Command{
 }
 
 var workerServiceAddCmd = &cobra.Command{
-	Use:   "add <SERVICE_ID>",
-	Short: "Create an agent service",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runWorkerServiceAdd,
+	Use:               "add <SERVICE_ID>",
+	Short:             "Create an agent service",
+	Args:              cobra.ExactArgs(1),
+	PersistentPreRunE: cli.PrepareStandaloneHTTPCommand,
+	RunE:              runWorkerServiceAdd,
 }
 
 var workerServiceListCmd = &cobra.Command{
@@ -87,8 +91,9 @@ var workerServiceSetCmd = &cobra.Command{
   trigger_refs      comma-separated list
   permissions       comma-separated list
   metadata          comma-separated key=value list`,
-	Args: cobra.ExactArgs(3),
-	RunE: runWorkerServiceSet,
+	Args:              cobra.ExactArgs(3),
+	PersistentPreRunE: cli.PrepareStandaloneHTTPCommand,
+	RunE:              runWorkerServiceSet,
 }
 
 var workerServiceUnsetCmd = &cobra.Command{
@@ -106,15 +111,17 @@ var workerServiceUnsetCmd = &cobra.Command{
   trigger_refs
   permissions
   metadata`,
-	Args: cobra.ExactArgs(2),
-	RunE: runWorkerServiceUnset,
+	Args:              cobra.ExactArgs(2),
+	PersistentPreRunE: cli.PrepareStandaloneHTTPCommand,
+	RunE:              runWorkerServiceUnset,
 }
 
 var workerServiceRemoveCmd = &cobra.Command{
-	Use:   "remove <SERVICE_ID>",
-	Short: "Delete an agent service",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runWorkerServiceRemove,
+	Use:               "remove <SERVICE_ID>",
+	Short:             "Delete an agent service",
+	Args:              cobra.ExactArgs(1),
+	PersistentPreRunE: cli.PrepareStandaloneHTTPCommand,
+	RunE:              runWorkerServiceRemove,
 }
 
 func initWorkerServiceCommands() {
@@ -149,46 +156,43 @@ func initWorkerServiceCommands() {
 	workerCmd.AddCommand(workerServiceCmd)
 }
 
-func runWorkerServiceAdd(_ *cobra.Command, args []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		metadata, err := parseWorkerProfileMetadata(workerServiceAddMetadata)
-		if err != nil {
-			return err
-		}
-		kind, err := parseAgentServiceKind(workerServiceAddKind)
-		if err != nil {
-			return err
-		}
-		desiredState, err := parseAgentServiceDesiredState(workerServiceAddDesiredState, true)
-		if err != nil {
-			return err
-		}
-		svc, err := h.Store.AgentServices().Create(ctx, store.AgentServiceCreate{
-			WorkspaceKey:    ws,
-			ServiceID:       args[0],
-			Name:            workerServiceAddName,
-			Kind:            kind,
-			DesiredState:    desiredState,
-			RoleName:        workerServiceAddRoleName,
-			ProfileName:     workerServiceAddProfileName,
-			ScheduleID:      workerServiceAddScheduleID,
-			EventSources:    workerServiceAddEventSources,
-			TriggerRefs:     workerServiceAddTriggerRefs,
-			PlacementPolicy: workerServiceAddPlacementPolicy,
-			MaxInstances:    workerServiceAddMaxInstances,
-			LeaseID:         workerServiceAddLeaseID,
-			RestartPolicy:   workerServiceAddRestartPolicy,
-			Permissions:     workerServiceAddPermissions,
-			BudgetPolicy:    workerServiceAddBudgetPolicy,
-			StateRef:        workerServiceAddStateRef,
-			Metadata:        metadata,
-		})
-		if err != nil {
-			return fmt.Errorf("create agent service: %w", err)
-		}
-		fmt.Printf("Created agent service %s/%s\n", svc.WorkspaceKey, svc.ServiceID)
-		return nil
+func runWorkerServiceAdd(cmd *cobra.Command, args []string) error {
+	metadata, err := parseWorkerProfileMetadata(workerServiceAddMetadata)
+	if err != nil {
+		return err
+	}
+	kind, err := parseAgentServiceKind(workerServiceAddKind)
+	if err != nil {
+		return err
+	}
+	desiredState, err := parseAgentServiceDesiredState(workerServiceAddDesiredState, true)
+	if err != nil {
+		return err
+	}
+	client, err := managementapi.New(cmd.Context(), "loom worker service add")
+	if err != nil {
+		return err
+	}
+	name := strings.TrimSpace(workerServiceAddName)
+	if name == "" {
+		name = args[0]
+	}
+	record, err := client.CreateAgent(cmd.Context(), agents.CreateAgentCommand{
+		WorkspaceKey: client.Workspace(), AgentID: args[0], Name: name,
+		Kind: agents.AgentKind(kind), DesiredState: agents.DesiredState(desiredState),
+		Behavior:    agents.BehaviorReference{RoleName: workerServiceAddRoleName},
+		ProfileName: workerServiceAddProfileName, ScheduleID: workerServiceAddScheduleID,
+		EventSources: workerServiceAddEventSources, TriggerRefs: workerServiceAddTriggerRefs,
+		PlacementPolicy: workerServiceAddPlacementPolicy, MaxInstances: workerServiceAddMaxInstances,
+		LeaseID: workerServiceAddLeaseID, RestartPolicy: workerServiceAddRestartPolicy,
+		Permissions: workerServiceAddPermissions, BudgetPolicy: workerServiceAddBudgetPolicy,
+		StateRef: workerServiceAddStateRef, Metadata: metadata,
 	})
+	if err != nil {
+		return fmt.Errorf("create agent service: %w", err)
+	}
+	fmt.Printf("Created agent service %s/%s\n", record.WorkspaceKey, record.AgentID)
+	return nil
 }
 
 func runWorkerServiceList(_ *cobra.Command, _ []string) error {
@@ -242,44 +246,92 @@ func runWorkerServiceShow(_ *cobra.Command, args []string) error {
 	})
 }
 
-func runWorkerServiceSet(_ *cobra.Command, args []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		serviceID, key, value := args[0], args[1], args[2]
-		patch, err := buildAgentServicePatch(key, value, false)
-		if err != nil {
-			return err
-		}
-		if _, err := h.Store.AgentServices().Update(ctx, ws, serviceID, patch); err != nil {
-			return fmt.Errorf("update agent service: %w", err)
-		}
-		fmt.Printf("Set %s/%s.%s = %s\n", ws, serviceID, key, value)
-		return nil
-	})
+func runWorkerServiceSet(cmd *cobra.Command, args []string) error {
+	return runWorkerServiceMutation(cmd, args[0], args[1], args[2], false)
 }
 
-func runWorkerServiceUnset(_ *cobra.Command, args []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		serviceID, key := args[0], args[1]
-		patch, err := buildAgentServicePatch(key, "", true)
-		if err != nil {
-			return err
-		}
-		if _, err := h.Store.AgentServices().Update(ctx, ws, serviceID, patch); err != nil {
-			return fmt.Errorf("update agent service: %w", err)
-		}
-		fmt.Printf("Cleared %s/%s.%s\n", ws, serviceID, key)
-		return nil
-	})
+func runWorkerServiceUnset(cmd *cobra.Command, args []string) error {
+	return runWorkerServiceMutation(cmd, args[0], args[1], "", true)
 }
 
-func runWorkerServiceRemove(_ *cobra.Command, args []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		if err := h.Store.AgentServices().Delete(ctx, ws, args[0]); err != nil {
-			return fmt.Errorf("remove agent service: %w", err)
+func runWorkerServiceRemove(cmd *cobra.Command, args []string) error {
+	client, err := managementapi.New(cmd.Context(), "loom worker service remove")
+	if err != nil {
+		return err
+	}
+	current, err := client.GetAgent(cmd.Context(), args[0])
+	if err != nil {
+		return fmt.Errorf("get agent service: %w", err)
+	}
+	if _, err := client.ArchiveAgent(cmd.Context(), args[0], current.UpdatedAt); err != nil {
+		return fmt.Errorf("remove agent service: %w", err)
+	}
+	fmt.Printf("Removed agent service %s/%s\n", client.Workspace(), args[0])
+	return nil
+}
+
+func runWorkerServiceMutation(
+	cmd *cobra.Command,
+	serviceID, key, value string,
+	unset bool,
+) error {
+	patch, err := buildAgentServicePatch(key, value, unset)
+	if err != nil {
+		return err
+	}
+	client, err := managementapi.New(cmd.Context(), "loom worker service update")
+	if err != nil {
+		return err
+	}
+	current, err := client.GetAgent(cmd.Context(), serviceID)
+	if err != nil {
+		return fmt.Errorf("get agent service: %w", err)
+	}
+	if patch.DesiredState != nil {
+		if _, err := client.SetAgentDesiredState(cmd.Context(), serviceID, managementapi.SetAgentDesiredStateRequest{
+			ExpectedState: current.DesiredState,
+			DesiredState:  agents.DesiredState(*patch.DesiredState), ExpectedUpdatedAt: current.UpdatedAt,
+		}); err != nil {
+			return fmt.Errorf("update agent service: %w", err)
 		}
-		fmt.Printf("Removed agent service %s/%s\n", ws, args[0])
-		return nil
-	})
+	} else if _, err := client.UpdateAgent(cmd.Context(), serviceID, current.UpdatedAt, agentPatchFromStore(patch)); err != nil {
+		return fmt.Errorf("update agent service: %w", err)
+	}
+	if unset {
+		fmt.Printf("Cleared %s/%s.%s\n", client.Workspace(), serviceID, key)
+	} else {
+		fmt.Printf("Set %s/%s.%s = %s\n", client.Workspace(), serviceID, key, value)
+	}
+	return nil
+}
+
+func agentPatchFromStore(patch store.AgentServiceUpdate) agents.AgentPatch {
+	out := agents.AgentPatch{
+		Name: patch.Name, ProfileName: patch.ProfileName, ScheduleID: patch.ScheduleID,
+		EventSources: patch.EventSources, TriggerRefs: patch.TriggerRefs,
+		PlacementPolicy: patch.PlacementPolicy, MaxInstances: patch.MaxInstances,
+		LeaseID: patch.LeaseID, RestartPolicy: patch.RestartPolicy,
+		Permissions: patch.Permissions, BudgetPolicy: patch.BudgetPolicy,
+		StateRef: patch.StateRef, Metadata: patch.Metadata,
+	}
+	if patch.Kind != nil {
+		value := agents.AgentKind(*patch.Kind)
+		out.Kind = &value
+	}
+	if patch.RoleName != nil || patch.DriverID != nil || patch.DriverVersionID != nil {
+		behavior := agents.BehaviorReference{}
+		if patch.RoleName != nil {
+			behavior.RoleName = *patch.RoleName
+		}
+		if patch.DriverID != nil {
+			behavior.DriverID = *patch.DriverID
+		}
+		if patch.DriverVersionID != nil {
+			behavior.DriverVersionID = *patch.DriverVersionID
+		}
+		out.Behavior = &behavior
+	}
+	return out
 }
 
 func printAgentService(svc *domain.AgentService) {

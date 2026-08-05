@@ -297,11 +297,41 @@ func (t *tracedAgentOwnershipLeaseStore) Heartbeat(ctx context.Context, ws, agen
 	)
 }
 
+func (t *tracedAgentOwnershipLeaseStore) HeartbeatOwned(
+	ctx context.Context,
+	proof store.AgentOwnershipLeaseProof,
+	ttl time.Duration,
+) (*domain.AgentOwnershipLease, error) {
+	return traced(ctx, "AgentOwnershipLeases", "HeartbeatOwned", func(ctx context.Context) (*domain.AgentOwnershipLease, error) {
+		if owned, ok := t.inner.(store.AgentOwnershipLeaseOwnedStore); ok {
+			return owned.HeartbeatOwned(ctx, proof, ttl)
+		}
+		return t.inner.Heartbeat(ctx, proof.WorkspaceKey, proof.AgentID, proof.LeaseToken, ttl)
+	},
+		attribute.String("loom.workspace", proof.WorkspaceKey),
+		attribute.Int64("ttl_ms", ttl.Milliseconds()),
+	)
+}
+
 func (t *tracedAgentOwnershipLeaseStore) Release(ctx context.Context, ws, agentID, token string) (*domain.AgentOwnershipLease, error) {
 	return traced(ctx, "AgentOwnershipLeases", "Release", func(ctx context.Context) (*domain.AgentOwnershipLease, error) {
 		return t.inner.Release(ctx, ws, agentID, token)
 	},
 		attribute.String("loom.workspace", ws),
+	)
+}
+
+func (t *tracedAgentOwnershipLeaseStore) ReleaseOwned(
+	ctx context.Context,
+	proof store.AgentOwnershipLeaseProof,
+) (*domain.AgentOwnershipLease, error) {
+	return traced(ctx, "AgentOwnershipLeases", "ReleaseOwned", func(ctx context.Context) (*domain.AgentOwnershipLease, error) {
+		if owned, ok := t.inner.(store.AgentOwnershipLeaseOwnedStore); ok {
+			return owned.ReleaseOwned(ctx, proof)
+		}
+		return t.inner.Release(ctx, proof.WorkspaceKey, proof.AgentID, proof.LeaseToken)
+	},
+		attribute.String("loom.workspace", proof.WorkspaceKey),
 	)
 }
 

@@ -10,7 +10,9 @@ modal
 **Related:** [Create Agent redesign](../design/create-agent-redesign.md),
 [Unified agent UX](../design/2026-07-01-unified-agent-ux-proposal.md),
 [Agent execution PRD](agent-execution-prd.md), and
-[Phase 4 evidence](../migrations/modular-monolith/09-phase-4-decisions-and-evidence.md)
+[Phase 4 evidence](../migrations/modular-monolith/09-phase-4-decisions-and-evidence.md).
+The exact Phase 5 rerun is defined by the
+[24-execution packaged Desktop proof](../migrations/modular-monolith/12-phase-5-real-codex-proof.md).
 
 ## How to read the count
 
@@ -651,8 +653,8 @@ separately running stack on port 8683.
 
 - [`CreateAgentModal.tsx`](../../internal/webui/frontend/src/components/CreateAgentModal/CreateAgentModal.tsx)
 - [`agentTemplates.ts`](../../internal/webui/frontend/src/components/CreateAgentModal/agentTemplates.ts)
-- [`prompt-agent.ts`](../../internal/workflows/builtin/prompt-agent.ts)
-- [`bug-fix-agent.ts`](../../internal/workflows/builtin/bug-fix-agent.ts)
-- [`review-loop-agent.ts`](../../internal/workflows/builtin/review-loop-agent.ts)
-- [`local-review-agent.ts`](../../internal/workflows/builtin/local-review-agent.ts)
+- [`prompt-agent.ts`](../../internal/infra/workflowdistribution/builtin/prompt-agent.ts)
+- [`bug-fix-agent.ts`](../../internal/infra/workflowdistribution/builtin/bug-fix-agent.ts)
+- [`review-loop-agent.ts`](../../internal/infra/workflowdistribution/builtin/review-loop-agent.ts)
+- [`local-review-agent.ts`](../../internal/infra/workflowdistribution/builtin/local-review-agent.ts)
 - [`interactive_prompt.go`](../../internal/domain/interactive_prompt.go)

@@ -23,7 +23,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
-func TestStandaloneLeadSessionHeartbeatAdvancesUntilStopped(t *testing.T) {
+func TestRegisteredLeadSessionHeartbeatAdvancesUntilStopped(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
@@ -46,7 +46,14 @@ func TestStandaloneLeadSessionHeartbeatAdvancesUntilStopped(t *testing.T) {
 	stop := make(chan struct{})
 	var wg sync.WaitGroup
 	wg.Add(1)
-	go heartbeatLeadSessionEvery(&bootstrap.StoreHandle{Store: st}, "WS", "lead-session", stop, &wg, time.Millisecond)
+	go heartbeatLeadSessionEvery(
+		&testLeadSessionRuntime{store: st},
+		"WS",
+		"lead-session",
+		stop,
+		&wg,
+		time.Millisecond,
+	)
 	t.Cleanup(func() {
 		select {
 		case <-stop:
@@ -69,7 +76,7 @@ func TestStandaloneLeadSessionHeartbeatAdvancesUntilStopped(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond)
 	}
-	t.Fatal("standalone lead heartbeat did not advance the session")
+	t.Fatal("registered lead heartbeat did not advance the session")
 }
 
 // mockBackend is a minimal cli.Backend for the registry path that runLead falls
@@ -358,11 +365,50 @@ func TestGenerateLeadPrompt_NotEmpty(t *testing.T) {
 	}
 }
 
-func TestResolveLeadOrchestratorSessionIDPrefersExistingEnv(t *testing.T) {
-	t.Setenv(envOrchestratorSessionID, " lead-session-1 ")
+func TestStandaloneLeadWithoutSessionEnvelopeIsUnregistered(t *testing.T) {
+	clearSessionEnvelopeForTest(t)
+	registration := registerLeadOrchestratorSession(t.Context(), t.TempDir())
+	if registration.Err() != nil || registration.Runtime() != nil || registration.SessionID != "" {
+		t.Fatalf("standalone registration = %+v, want unregistered", registration)
+	}
+}
 
-	if got := resolveLeadOrchestratorSessionID(); got != "lead-session-1" {
-		t.Fatalf("resolveLeadOrchestratorSessionID() = %q, want lead-session-1", got)
+func TestPartialSessionEnvelopeFailsClosed(t *testing.T) {
+	clearSessionEnvelopeForTest(t)
+	t.Setenv("LOOM_SESSION_ID", "session-1")
+	registration := registerLeadOrchestratorSession(t.Context(), t.TempDir())
+	if registration.Err() == nil {
+		t.Fatalf("partial session envelope registered: %+v", registration)
+	}
+	if registration.Runtime() != nil {
+		t.Fatal("partial session envelope exposed a runtime")
+	}
+}
+
+func clearSessionEnvelopeForTest(t *testing.T) {
+	t.Helper()
+	for _, name := range []string{
+		"LOOM_SESSION_WORKSPACE",
+		"LOOM_SESSION_ID",
+		"LOOM_SESSION_AGENT_ID",
+		"LOOM_SESSION_TERMINAL_ID",
+		"LOOM_SESSION_NODE_ID",
+		"LOOM_SESSION_LEASE_ID",
+		"LOOM_SESSION_FENCING_TOKEN",
+		"LOOM_SESSION_AUTH_TOKEN",
+		"LOOM_INTERACTION_API_URL",
+	} {
+		old, present := os.LookupEnv(name)
+		if err := os.Unsetenv(name); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if present {
+				_ = os.Setenv(name, old)
+			} else {
+				_ = os.Unsetenv(name)
+			}
+		})
 	}
 }
 
@@ -396,7 +442,7 @@ func TestMarkLeadAssignmentDelivered(t *testing.T) {
 		t.Fatalf("create session: %v", err)
 	}
 
-	err := markLeadAssignmentDelivered(ctx, st, "WS", &epicrunner.LeadAssignmentContext{
+	err := markLeadAssignmentDelivered(ctx, &testLeadSessionRuntime{store: st}, "WS", &epicrunner.LeadAssignmentContext{
 		EpicID:                "EPIC-1",
 		AssignmentVersion:     "2026-05-17T05:00:00Z",
 		OrchestratorSessionID: "lead-session",

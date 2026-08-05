@@ -44,13 +44,17 @@ func TestSetAndGet(t *testing.T) {
 
 	now := time.Now().UTC().Truncate(time.Second)
 	meta := &TabMetadata{
-		SessionName: "test-session",
-		Workspace:   testWorkspace,
-		Label:       "My Session",
-		Notes:       "Some notes",
-		SortOrder:   5,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		SessionName:                  "test-session",
+		Workspace:                    testWorkspace,
+		Label:                        "My Session",
+		Notes:                        "Some notes",
+		SortOrder:                    5,
+		InteractionSessionID:         "interaction-session-1",
+		InteractionTerminalID:        "interaction-terminal-1",
+		InteractionLeaseID:           "interaction-lease-1",
+		InteractionLeaseFencingToken: 17,
+		CreatedAt:                    now,
+		UpdatedAt:                    now,
 	}
 
 	if err := store.Set(ctx, meta); err != nil {
@@ -78,6 +82,12 @@ func TestSetAndGet(t *testing.T) {
 	}
 	if got.SortOrder != 5 {
 		t.Errorf("SortOrder = %d, want %d", got.SortOrder, 5)
+	}
+	if got.InteractionSessionID != "interaction-session-1" ||
+		got.InteractionTerminalID != "interaction-terminal-1" ||
+		got.InteractionLeaseID != "interaction-lease-1" ||
+		got.InteractionLeaseFencingToken != 17 {
+		t.Errorf("Interaction lifecycle identity = %+v", got)
 	}
 }
 

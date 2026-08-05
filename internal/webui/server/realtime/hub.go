@@ -39,23 +39,26 @@ func NextEventID() int64 {
 
 // MutationPayload represents mutation data sent to clients.
 type MutationPayload struct {
-	Cursor      string `json:"cursor,omitempty"`      // Durable stream cursor for SSE Last-Event-ID when available
-	Type        string `json:"type"`                  // create, update, delete, comment, status, bonded, squashed, burned, refresh, terminal_metadata, terminal_session_change
-	EntityType  string `json:"entity_type,omitempty"` // Generic changed entity type (issue, dependency, terminal, ...)
-	EntityID    string `json:"entity_id,omitempty"`   // Generic changed entity identifier
-	Action      string `json:"action,omitempty"`      // Source action, usually fleet-db action (issue.update, dep.add, ...)
-	IssueID     string `json:"issue_id,omitempty"`    // Legacy issue identifier for issue-scoped consumers
-	Title       string `json:"title,omitempty"`
-	Assignee    string `json:"assignee,omitempty"`
-	Actor       string `json:"actor,omitempty"`
-	Timestamp   string `json:"timestamp"`
-	OldStatus   string `json:"old_status,omitempty"`   // For status events
-	NewStatus   string `json:"new_status,omitempty"`   // For status events
-	ParentID    string `json:"parent_id,omitempty"`    // For bonded events
-	StepCount   int    `json:"step_count,omitempty"`   // For bonded events
-	Priority    *int   `json:"priority,omitempty"`     // Issue priority (for update events from external poll)
-	SourceRepo  string `json:"source_repo,omitempty"`  // Source repository for multi-repo filtering
-	WorkspaceID string `json:"workspace_id,omitempty"` // Workspace ID for multi-workspace filtering
+	Cursor     string `json:"cursor,omitempty"`      // Durable stream cursor for SSE Last-Event-ID when available
+	Type       string `json:"type"`                  // create, update, delete, comment, status, bonded, squashed, burned, refresh, terminal_metadata, terminal_session_change
+	EntityType string `json:"entity_type,omitempty"` // Generic changed entity type (issue, dependency, terminal, ...)
+	EntityID   string `json:"entity_id,omitempty"`   // Generic changed entity identifier
+	Action     string `json:"action,omitempty"`      // Source action, usually fleet-db action (issue.update, dep.add, ...)
+	IssueID    string `json:"issue_id,omitempty"`    // Legacy issue identifier for issue-scoped consumers
+	Title      string `json:"title,omitempty"`
+	// Assignee is a pointer so issue.assign can distinguish an omitted field
+	// from an explicit empty value. Clearing an assignee is a real projection
+	// change and must survive JSON encoding for live clients.
+	Assignee    *string `json:"assignee,omitempty"`
+	Actor       string  `json:"actor,omitempty"`
+	Timestamp   string  `json:"timestamp"`
+	OldStatus   string  `json:"old_status,omitempty"`   // For status events
+	NewStatus   string  `json:"new_status,omitempty"`   // For status events
+	ParentID    string  `json:"parent_id,omitempty"`    // For bonded events
+	StepCount   int     `json:"step_count,omitempty"`   // For bonded events
+	Priority    *int    `json:"priority,omitempty"`     // Issue priority (for update events from external poll)
+	SourceRepo  string  `json:"source_repo,omitempty"`  // Source repository for multi-repo filtering
+	WorkspaceID string  `json:"workspace_id,omitempty"` // Workspace ID for multi-workspace filtering
 }
 
 // Hub manages connected SSE clients and broadcasts mutations to them.

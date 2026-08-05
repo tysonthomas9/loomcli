@@ -15,9 +15,10 @@ import (
 // (workflows/start resolves the active passed version).
 func activateWorkflow(t *testing.T, h *testHarness) {
 	t.Helper()
-	active := "version-1"
-	if _, err := h.store.Drivers().Update(context.Background(), "WS", "driver-1",
-		store.DriverUpdate{ActiveVersionID: &active}); err != nil {
+	if _, err := h.store.ApproveDriverVersionForTest(context.Background(), "WS", "driver-1", "version-1"); err != nil {
+		t.Fatalf("approve driver version: %v", err)
+	}
+	if _, err := h.store.ActivateDriverVersionForTest(context.Background(), "WS", "driver-1", "version-1"); err != nil {
 		t.Fatalf("activate driver version: %v", err)
 	}
 }

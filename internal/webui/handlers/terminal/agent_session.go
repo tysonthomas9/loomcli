@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -33,7 +34,11 @@ var errDaemonSupervisedWorkerTerminal = errors.New("daemon-supervised worker ter
 // HandleEnsureAgentTerminalSession resolves an agent name to a persisted UUID
 // terminal session. The session's launch command lives in tab metadata; the
 // WebSocket path never infers agent behavior from the session name.
-func HandleEnsureAgentTerminalSession(svc service.TerminalService, st store.Store) http.HandlerFunc {
+func HandleEnsureAgentTerminalSession(
+	svc service.TerminalService,
+	st store.Store,
+	identities ...terminalAgentIdentity,
+) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if svc == nil {
 			handler.WriteJSON(w, http.StatusServiceUnavailable, tabMetadataResponse{
@@ -60,7 +65,14 @@ func HandleEnsureAgentTerminalSession(svc service.TerminalService, st store.Stor
 			return
 		}
 
-		meta, err := ensureAgentTerminalSession(r.Context(), svc, st, workspace, agentName)
+		meta, err := ensureAgentTerminalSession(
+			r.Context(),
+			svc,
+			st,
+			workspace,
+			agentName,
+			identities...,
+		)
 		if err != nil {
 			handler.HandleServiceError(w, err)
 			return
@@ -73,13 +85,26 @@ func HandleEnsureAgentTerminalSession(svc service.TerminalService, st store.Stor
 	}
 }
 
-func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService, st store.Store, workspace, agentName string) (*tabmeta.TabMetadata, error) {
+//nolint:funlen // Keep the non-reentrant per-agent lifecycle lock, durable tab write, unlock, and stale-tab cleanup ordering in one boundary.
+func ensureAgentTerminalSession(
+	ctx context.Context,
+	svc service.TerminalService,
+	st store.Store,
+	workspace,
+	agentName string,
+	identities ...terminalAgentIdentity,
+) (*tabmeta.TabMetadata, error) {
 	unlock := webuterminal.LockAgentLifecycle(workspace, agentName)
-	defer unlock()
+	locked := true
+	defer func() {
+		if locked {
+			unlock()
+		}
+	}()
 
-	agent, err := loadTerminalAgent(ctx, st, workspace, agentName)
+	agent, err := loadTerminalAgent(ctx, st.Agents(), workspace, agentName, identities...)
 	if err != nil {
-		return nil, err
+		return nil, terminalAgentIdentityServiceError(err)
 	}
 	role, err := loadAgentLaunchRole(ctx, st, workspace, agent.RoleName)
 	if err != nil {
@@ -124,8 +149,27 @@ func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService
 	if err := svc.PutTab(ctx, workspace, meta); err != nil {
 		return nil, err
 	}
+	stored, err := svc.GetTab(ctx, workspace, sessionName)
+	if err != nil {
+		return nil, err
+	}
+
+	// DeleteTab deliberately acquires the same per-agent lifecycle boundary
+	// before converging canonical Interaction identity. Release our creation
+	// boundary only after the new tab is durably readable, then let each stale
+	// delete reacquire it through the public service path. Calling DeleteTab
+	// while holding this non-reentrant mutex deadlocks.
+	unlock()
+	locked = false
 	pruneStaleAgentTerminalTabs(ctx, svc, workspace, agentName, sessionName, tabs)
-	return svc.GetTab(ctx, workspace, sessionName)
+	return stored, nil
+}
+
+func terminalAgentIdentityServiceError(err error) error {
+	if errors.Is(err, domain.ErrNotFound) {
+		return service.ErrNotFound("agent not found")
+	}
+	return service.ErrInternal("failed to load agent identity", err)
 }
 
 // agentTerminalLaunchSpecStale returns true when the existing tab's cached
@@ -154,20 +198,6 @@ func agentTerminalLaunchSpecStale(
 		return false
 	}
 	return !slices.Equal(candidate.Argv, existing.Launch.Argv) || candidate.Cwd != existing.Launch.Cwd
-}
-
-func loadTerminalAgent(ctx context.Context, st store.Store, workspace, agentName string) (*domain.Agent, error) {
-	agent, err := st.Agents().Get(ctx, workspace, agentName)
-	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			return nil, service.ErrNotFound("agent not found")
-		}
-		return nil, service.ErrInternal("failed to load agent", err)
-	}
-	if agent == nil {
-		return nil, service.ErrNotFound("agent not found")
-	}
-	return agent, nil
 }
 
 func inactiveAgentTerminalSession(ctx context.Context, svc service.TerminalService, workspace string, existing *tabmeta.TabMetadata) (*tabmeta.TabMetadata, error) {
@@ -410,6 +440,13 @@ func agentLaunchEnv(workspace, sessionName, backend, orchestratorID string, agen
 		"LOOM_AGENT_ROLE":        agent.RoleName,
 		"LOOM_AGENT_TERMINAL_ID": sessionName,
 		"LOOM_WORKSPACE":         workspace,
+	}
+	// The PTY base environment deliberately strips every ambient LOOM_* value.
+	// Add the server-resolved local data directory back as a trusted launch
+	// overlay so the child CLI shares the Desktop workspace registry instead of
+	// silently falling back to ~/.loom.
+	if configDir := strings.TrimSpace(bootstrap.LoomDir()); configDir != "" {
+		env["LOOM_CONFIG_DIR"] = configDir
 	}
 	if backend != "" {
 		env["LOOM_BACKEND"] = backend

@@ -32,10 +32,9 @@ type AgentProcess struct {
 	ArchiveLogFile         *os.File          // canonical agent archive (~/.loom/logs/<ws>/agents/<worktree>.log) the web UI Logs tab reads; nil if unavailable
 	TranscriptPath         string            // path to session transcript.jsonl for watchdog liveness (set by superviseAgent)
 	Session                *sessions.Session // daemon-created session handle (nil when no session active)
-	AgentSessionID         string            // fleet-db control-plane session id (empty when no session active)
+	AgentSessionID         string            // local transcript session id (empty when no session active)
 	ParentSessionID        string            // lead/orchestration session that requested this run (empty when unattached)
-	AgentLeaseID           string            // fleet-db control-plane lease id (empty when no lease active)
-	AgentLeaseToken        string            // fleet-db control-plane lease token (empty when no lease active)
+	AgentIPCAuthToken      string            // process-local daemon IPC credential; never persisted
 	OwnershipLeaseID       string            // fleet-db logical-agent ownership lease id (empty when not owner)
 	OwnershipOwnerID       string            // stable owner identity bound by the ownership lease
 	OwnershipNodeID        string            // daemon process identity bound by the ownership lease
@@ -93,19 +92,13 @@ type AgentProcess struct {
 	// while holding StartStopMu.
 	StartStopMu sync.Mutex
 
-	// SessionHeartbeatMu is a lifecycle barrier. Heartbeat RPCs hold a read
-	// lock; starting-to-running transitions and terminal retirement hold the
-	// write lock. Retirement drains earlier heartbeats and clears the session
-	// IDs before releasing, so queued jobs become no-ops without holding the
-	// barrier through slow transcript, Git, artifact, or completion work.
-	SessionHeartbeatMu sync.RWMutex
 	// ownershipOpMu serializes ownership Acquire/Heartbeat/Release from request
 	// construction through local state publication. Lock order is
 	// ownershipOpMu -> Mu. Fleet rotates the raw token on every Acquire, so a
 	// delayed operation from an older AgentProcess is fenced server-side while
 	// this mutex prevents out-of-order resurrection within one AgentProcess.
 	ownershipOpMu sync.Mutex
-	Mu            sync.Mutex // protects Cmd, Pid, LogFile, restart tracking, AssignedEpicID, AssignedTaskID, RequestedTaskID, ResumeTaskID, ResumeFailures, RecoveryMode, LastError, CurrentBackendIdx, Session, AgentSessionID, ParentSessionID, AgentLeaseID, AgentLeaseToken, ownership fields/reservation, TranscriptPath, BeforeRef, StopReason, LastActivity
+	Mu            sync.Mutex // protects Cmd, Pid, LogFile, restart tracking, AssignedEpicID, AssignedTaskID, RequestedTaskID, ResumeTaskID, ResumeFailures, RecoveryMode, LastError, CurrentBackendIdx, Session, AgentSessionID, ParentSessionID, AgentIPCAuthToken, ownership fields/reservation, TranscriptPath, BeforeRef, StopReason, LastActivity
 }
 
 // StopReason identifies why an agent was stopped.

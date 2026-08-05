@@ -4,14 +4,21 @@
 package routecontracts
 
 import (
+	"context"
+
+	"github.com/tysonthomas9/loomcli/internal/app/agentprovisioning"
+	"github.com/tysonthomas9/loomcli/internal/app/agentscompat"
 	"github.com/tysonthomas9/loomcli/internal/app/webhookingestion"
 	"github.com/tysonthomas9/loomcli/internal/app/workflowbinding"
 	"github.com/tysonthomas9/loomcli/internal/app/workfloweventing"
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/connector"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -25,6 +32,7 @@ type Deps struct {
 	Store                         store.Store
 	AgentSvc                      service.AgentService
 	AgentSessionTranscripts       service.AgentSessionTranscriptService
+	AgentLocalSessionHistory      service.AgentLocalSessionHistoryService
 	IssueSvc                      service.IssueService
 	Hub                           *realtime.Hub
 	FleetBaseURL                  string
@@ -33,6 +41,7 @@ type Deps struct {
 	DriverAPIToken                string
 	DriverRunTokenKey             []byte
 	LocalSettingsDir              string
+	SourceControl                 sourcecontrol.Materializer
 	Dispatcher                    *connector.Dispatcher
 	AutomationBindings            automation.BindingOperations
 	WorkflowBinding               *workflowbinding.Workflow
@@ -40,9 +49,22 @@ type Deps struct {
 	AutomationWebhook             *webhookingestion.Workflow
 	AutomationEventing            *workfloweventing.Workflow
 	AutomationOperator            workflowcataloghttp.OperatorAuthorityResolver
+	Agents                        agents.API
+	AgentsOperator                workflowcataloghttp.OperatorAuthorityResolver
+	AgentParentBindings           agentscompat.ParentBindingCommands
+	AgentProvisioning             agentprovisioning.Commands
+	AgentProvisioningOperator     workflowcataloghttp.OperatorAuthorityResolver
+	Interaction                   interaction.API
+	InteractionOperator           workflowcataloghttp.OperatorAuthorityResolver
+	InteractionSessionAuthorities interaction.SessionAuthorityResolver
+	InteractionChat               interaction.ChatMessenger
 	WorkflowCatalog               workflowcatalog.API
+	WorkflowCatalogAuthoring      workflowcatalog.VersionAuthoringAPI
+	WorkflowCatalogOperator       workflowcataloghttp.OperatorAuthorityResolver
+	WorkflowTargetPreparation     func(context.Context, string, string) (*workflowcatalog.Driver, error)
 	Artifacts                     artifacts.API
 	ExecutionTaskRuns             execution.TaskRunAPI
+	DaytonaProvider               execution.DaytonaProviderBroker
 	ExecutionTaskRunRequests      execution.TaskRunRequestAPI
 	ExecutionTaskRunRecovery      execution.TaskRunRecoveryAPI
 	ExecutionTaskRunAuthorities   execution.TaskRunAuthorityResolver

@@ -17,15 +17,14 @@ var _ store.DriverStore = (*driverStore)(nil)
 
 func (s *driverStore) Create(ctx context.Context, in store.DriverCreate) (*domain.Driver, error) {
 	body := map[string]any{
-		"driver_id":         in.DriverID,
-		"name":              in.Name,
-		"owner_type":        in.OwnerType,
-		"owner_ref":         in.OwnerRef,
-		"description":       in.Description,
-		"active_version_id": in.ActiveVersionID,
-		"status":            in.Status,
-		"trust_level":       in.TrustLevel,
-		"metadata":          in.Metadata,
+		"driver_id":   in.DriverID,
+		"name":        in.Name,
+		"owner_type":  in.OwnerType,
+		"owner_ref":   in.OwnerRef,
+		"description": in.Description,
+		"status":      in.Status,
+		"trust_level": in.TrustLevel,
+		"metadata":    in.Metadata,
 	}
 	var out domain.Driver
 	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/drivers", body, &out); err != nil {
@@ -839,9 +838,6 @@ func driverUpdateBody(patch store.DriverUpdate) map[string]any {
 	}
 	if patch.Description != nil {
 		body["description"] = *patch.Description
-	}
-	if patch.ActiveVersionID != nil {
-		body["active_version_id"] = *patch.ActiveVersionID
 	}
 	if patch.Status != nil {
 		body["status"] = *patch.Status

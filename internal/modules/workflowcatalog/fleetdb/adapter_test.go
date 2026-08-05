@@ -19,6 +19,20 @@ type transportFake struct {
 	revision uint64
 }
 
+type authoringTransportFake struct {
+	mutation AuthoringMutationAlias
+	result   *TransportAuthoringResult
+	err      error
+}
+
+// Alias keeps failure output compact while retaining the exact public shape.
+type AuthoringMutationAlias = workflowcatalog.AuthoringMutation
+
+func (fake *authoringTransportFake) AuthorVersion(_ context.Context, mutation workflowcatalog.AuthoringMutation) (*TransportAuthoringResult, error) {
+	fake.mutation = mutation
+	return fake.result, fake.err
+}
+
 func (f *transportFake) GetDriver(context.Context, string, string) (*workflowcatalog.Driver, error) {
 	return f.driver, f.err
 }
@@ -115,5 +129,55 @@ func TestAdapterRejectsNilDependenciesAndEmptyLifecycleResponse(t *testing.T) {
 	_, err = adapter.ActivateVersion(context.Background(), workflowcatalog.LifecycleMutation{})
 	if !errors.Is(err, workflowcatalog.ErrInvalidPersistedState) {
 		t.Fatalf("empty result error = %v", err)
+	}
+}
+
+func TestAdapterDelegatesAtomicAuthoringOnlyWhenComposed(t *testing.T) {
+	base := &transportFake{}
+	adapter, err := New(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := adapter.AuthorVersion(context.Background(), workflowcatalog.AuthoringMutation{}); !errors.Is(err, workflowcatalog.ErrUnavailable) {
+		t.Fatalf("lifecycle-only AuthorVersion err = %v, want unavailable", err)
+	}
+	if _, err := NewWithAuthoring(base, nil); !errors.Is(err, workflowcatalog.ErrUnavailable) {
+		t.Fatalf("NewWithAuthoring(nil) err = %v", err)
+	}
+
+	driver := &workflowcatalog.Driver{WorkspaceKey: "TEST", DriverID: "demo", Revision: 1}
+	version := &workflowcatalog.DriverVersion{WorkspaceKey: "TEST", DriverID: "demo", VersionID: "demo-v1"}
+	authoring := &authoringTransportFake{result: &TransportAuthoringResult{
+		Driver: driver, Version: version, CreatedDriver: true, CreatedVersion: true,
+		CommittedRevision: 1, SemanticImpact: workflowcatalog.SemanticImpactVersionAuthored,
+	}}
+	adapter, err = NewWithAuthoring(base, authoring)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutation := workflowcatalog.AuthoringMutation{
+		AuthorVersionCommand: workflowcatalog.AuthorVersionCommand{
+			WorkspaceKey: "TEST", RequestID: "request-1", DriverID: "demo", VersionID: "demo-v1",
+		},
+		Managed: true, Activate: true,
+	}
+	result, err := adapter.AuthorVersion(context.Background(), mutation)
+	if err != nil {
+		t.Fatalf("AuthorVersion: %v", err)
+	}
+	if authoring.mutation.RequestID != "request-1" || !authoring.mutation.Managed || !authoring.mutation.Activate ||
+		result.Driver != driver || result.Version != version || !result.CreatedDriver || !result.CreatedVersion {
+		t.Fatalf("authoring delegation mutation=%+v result=%+v", authoring.mutation, result)
+	}
+}
+
+func TestAdapterMapsAuthoringConflict(t *testing.T) {
+	adapter, err := NewWithAuthoring(&transportFake{}, &authoringTransportFake{err: ErrTransportAuthoringConflict})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = adapter.AuthorVersion(context.Background(), workflowcatalog.AuthoringMutation{})
+	if !errors.Is(err, workflowcatalog.ErrAuthoringConflict) {
+		t.Fatalf("AuthorVersion err = %v, want authoring conflict", err)
 	}
 }

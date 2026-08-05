@@ -24,11 +24,12 @@ func TestOrchestrationSessionFor_NoSession(t *testing.T) {
 	}
 }
 
-func TestOrchestrationSessionFor_HappyPath(t *testing.T) {
+func TestOrchestrationSessionFor_FallsBackToLegacyOrchestrationKind(t *testing.T) {
 	st := memstore.New()
 	ctx := context.Background()
 
-	// Create the lead's orchestration session
+	// Phase 4 and older sessions used the orchestration kind. Keep them
+	// readable while Phase 5 writes the canonical interactive kind.
 	want, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
 		WorkspaceKey: "WS",
 		SessionID:    "lead-nova-abc",
@@ -62,6 +63,73 @@ func TestOrchestrationSessionFor_HappyPath(t *testing.T) {
 	}
 }
 
+func TestOrchestrationSessionFor_PrefersCanonicalInteractiveKind(t *testing.T) {
+	st := memstore.New()
+	ctx := context.Background()
+
+	canonical, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "lead-nova-interactive",
+		AgentID:      "nova",
+		Kind:         domain.AgentSessionKindInteractive,
+		Status:       domain.AgentSessionRunning,
+	})
+	if err != nil {
+		t.Fatalf("create canonical interactive session: %v", err)
+	}
+	time.Sleep(2 * time.Millisecond)
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "lead-nova-legacy-newer",
+		AgentID:      "nova",
+		Kind:         domain.AgentSessionKindOrchestration,
+		Status:       domain.AgentSessionRunning,
+	}); err != nil {
+		t.Fatalf("create newer legacy orchestration session: %v", err)
+	}
+
+	got, err := store.OrchestrationSessionFor(ctx, st, "WS", "nova")
+	if err != nil {
+		t.Fatalf("OrchestrationSessionFor: %v", err)
+	}
+	if got == nil || got.SessionID != canonical.SessionID {
+		t.Fatalf("got = %+v, want canonical interactive session %q", got, canonical.SessionID)
+	}
+}
+
+func TestOrchestrationSessionFor_FallsBackWhenCanonicalSessionIsInactive(t *testing.T) {
+	st := memstore.New()
+	ctx := context.Background()
+
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "lead-nova-interactive-completed",
+		AgentID:      "nova",
+		Kind:         domain.AgentSessionKindInteractive,
+		Status:       domain.AgentSessionCompleted,
+	}); err != nil {
+		t.Fatalf("create inactive canonical session: %v", err)
+	}
+	legacy, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "lead-nova-legacy-running",
+		AgentID:      "nova",
+		Kind:         domain.AgentSessionKindOrchestration,
+		Status:       domain.AgentSessionRunning,
+	})
+	if err != nil {
+		t.Fatalf("create active legacy session: %v", err)
+	}
+
+	got, err := store.OrchestrationSessionFor(ctx, st, "WS", "nova")
+	if err != nil {
+		t.Fatalf("OrchestrationSessionFor: %v", err)
+	}
+	if got == nil || got.SessionID != legacy.SessionID {
+		t.Fatalf("got = %+v, want active legacy session %q", got, legacy.SessionID)
+	}
+}
+
 func TestOrchestrationSessionFor_PicksMostRecentlyUpdated(t *testing.T) {
 	st := memstore.New()
 	ctx := context.Background()
@@ -73,7 +141,7 @@ func TestOrchestrationSessionFor_PicksMostRecentlyUpdated(t *testing.T) {
 		WorkspaceKey: "WS",
 		SessionID:    "lead-nova-old",
 		AgentID:      "nova",
-		Kind:         domain.AgentSessionKindOrchestration,
+		Kind:         domain.AgentSessionKindInteractive,
 		Status:       domain.AgentSessionRunning,
 	}); err != nil {
 		t.Fatalf("create old: %v", err)
@@ -84,7 +152,7 @@ func TestOrchestrationSessionFor_PicksMostRecentlyUpdated(t *testing.T) {
 		WorkspaceKey: "WS",
 		SessionID:    "lead-nova-new",
 		AgentID:      "nova",
-		Kind:         domain.AgentSessionKindOrchestration,
+		Kind:         domain.AgentSessionKindInteractive,
 		Status:       domain.AgentSessionRunning,
 	}); err != nil {
 		t.Fatalf("create new: %v", err)
@@ -107,7 +175,7 @@ func TestOrchestrationSessionFor_IgnoresCompletedSessions(t *testing.T) {
 		WorkspaceKey: "WS",
 		SessionID:    "lead-nova-running",
 		AgentID:      "nova",
-		Kind:         domain.AgentSessionKindOrchestration,
+		Kind:         domain.AgentSessionKindInteractive,
 		Status:       domain.AgentSessionRunning,
 	}); err != nil {
 		t.Fatalf("create running: %v", err)
@@ -117,7 +185,7 @@ func TestOrchestrationSessionFor_IgnoresCompletedSessions(t *testing.T) {
 		WorkspaceKey: "WS",
 		SessionID:    "lead-nova-completed",
 		AgentID:      "nova",
-		Kind:         domain.AgentSessionKindOrchestration,
+		Kind:         domain.AgentSessionKindInteractive,
 		Status:       domain.AgentSessionCompleted,
 	})
 	if err != nil {

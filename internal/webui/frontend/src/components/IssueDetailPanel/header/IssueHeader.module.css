@@ -220,6 +220,37 @@
   outline-offset: 2px;
 }
 
+.deleteButton {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.deleteButton:hover:not(:disabled) {
+  background-color: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+
+.deleteButton:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.deleteButton:focus-visible {
+  outline: 2px solid var(--color-danger);
+  outline-offset: 2px;
+}
+
 .maximizeButton {
   width: 28px;
   height: 28px;

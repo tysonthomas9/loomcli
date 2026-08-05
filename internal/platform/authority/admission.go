@@ -147,6 +147,13 @@ func (a *Admission) RequireExecution(action Action, workspace string, authority 
 	return a.Admit(action, workspace, authority)
 }
 
+// RequireSession applies admission to a concrete SessionAuthority. The
+// capability must additionally compare the SessionID/AgentID/TerminalID and
+// lease generation with its command or freshly loaded durable record.
+func (a *Admission) RequireSession(action Action, workspace string, authority SessionAuthority) error {
+	return a.Admit(action, workspace, authority)
+}
+
 // RequireSystem applies admission to a concrete SystemAuthority. Keeping this
 // method typed prevents internal capability APIs from treating system callers
 // as a generic superuser or accepting another authority class accidentally.

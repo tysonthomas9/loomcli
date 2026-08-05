@@ -460,13 +460,13 @@ func TestSuperviseAgent_RechecksOwnershipAfterPreflightBeforeSpawn(t *testing.T)
 	}
 	ap.Mu.Lock()
 	cmd, pid := ap.Cmd, ap.Pid
-	sessionID, leaseID, leaseToken := ap.AgentSessionID, ap.AgentLeaseID, ap.AgentLeaseToken
+	sessionID, ipcAuthToken := ap.AgentSessionID, ap.AgentIPCAuthToken
 	ap.Mu.Unlock()
 	if cmd != nil || pid != 0 {
 		t.Errorf("agent process after failed pre-spawn ownership check = cmd %v pid %d, want no process", cmd, pid)
 	}
-	if sessionID != "" || leaseID != "" || leaseToken != "" {
-		t.Errorf("pre-spawn session state not cleared: session=%q lease=%q token=%q", sessionID, leaseID, leaseToken)
+	if sessionID != "" || ipcAuthToken != "" {
+		t.Errorf("pre-spawn session state not cleared: session=%q ipc_token_present=%t", sessionID, ipcAuthToken != "")
 	}
 	if got := tracker.ActiveCount("task"); got != 0 {
 		t.Errorf("active concurrency count = %d, want 0", got)

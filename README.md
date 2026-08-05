@@ -36,7 +36,8 @@ loomcli -> HTTP client -> fleet-db service -> Redis/Postgres
 loom workspace add ACME             # Creates workspace ACME, sets it active
 loom repo add my-app --url git@github.com:org/my-app.git
 loom role set reviewer --prompt-file ./prompts/reviewer.txt
-loom agentdef add falcon --role reviewer --repo my-app
+loom worker profile add falcon --role reviewer --repo my-app
+loom agentdef add falcon --role reviewer --profile falcon
 
 # 2. Start the UI and create tasks
 loom serve
@@ -134,7 +135,7 @@ reset      Hard reset worktree to a specific branch
 workspace  Create/list/show workspaces (workspace add|use|show|status)
 repo       Manage repos within a workspace (repo add|remove|list|show)
 role       Manage agent roles (role set|unset|show|list)
-agentdef   Manage agent definitions (agentdef add|remove|update|list|show)
+agentdef   Manage agent definitions (agentdef add|remove|start|stop|list|show)
 daemon     Daemon profile + lifecycle (daemon profile show|set|unset)
 init       Guided setup wizard (workspace and worktree creation)
 ```
@@ -302,8 +303,8 @@ loom agentdef add pr-review --role pr-review             # Interactive agent def
 loom lead --prompt builtin:pr-review                     # Run an interactive prompt directly
 
 # Agent definitions (workspace-scoped)
-loom agentdef add falcon --role reviewer --repo frontend
-loom agentdef update falcon --auto
+loom worker profile add falcon --role reviewer --repo frontend
+loom agentdef add falcon --role reviewer --profile falcon --auto
 loom agentdef list
 
 # Daemon profile (one per workspace)
@@ -311,6 +312,21 @@ loom daemon profile set --max-agents=20 --log-level=debug
 loom daemon profile show
 loom daemon profile unset --max-agents                   # Clear an int field
 ```
+
+`agentdef` owns durable identity and desired lifecycle only. Put backend and
+task-filter policy on the Role, and put repository or parent-epic scheduling
+scope on a WorkerProfile. The retired `agentdef add --task`, `--orchestrator`,
+`--backend`, `--repos`, `--parent`, and `--task-filter` flags are rejected.
+`--repo-groups` and `--cross-repo` have no Phase 5 replacement and also fail
+closed rather than silently broadening repository access. `agentdef stop`
+changes desired state; use `loom data agent stop <name> --force` only for the
+transitional runtime-interruption operation. `agentdef start`, ordinary
+`stop`, and `remove` print a generation-bound lifecycle request ID before
+issuing the mutation. After an ambiguous response, repeat the command with
+that exact printed `--request-id`; an arbitrary unbound value is rejected.
+Omit the flag to start a fresh operation against the currently observed Agent
+generation. A token from an Agent deleted with its workspace cannot be
+silently rebound to a same-name replacement.
 
 ### Storage modes
 

@@ -1,6 +1,8 @@
 # Migration Plan
 
-- **Status:** Phase 4 complete; Phase 5 has not started
+- **Status:** Phase 5 source ownership and exact-head paired gates complete;
+  twenty local packaged-Desktop rows are accepted, four GitHub rows remain
+  authorization-fenced, and repaired-package UI regression awaits macOS unlock
 - **Strategy:** Incremental vertical extraction aligned with active product work; no standalone big-bang reorganization
 - **Migration:** [Modular Monolith Migration](README.md)
 
@@ -191,8 +193,15 @@ Do not move the supervisor into `internal/modules`. Characterize it, implement r
 
 ## Phase 5 — Agents and Interaction
 
-**Not started.** Phase 4 completion does not activate or partially claim this
-phase.
+**Source implementation complete; final acceptance pending.** Agents,
+Interaction, AgentProvisioning, and the minimal Source Control and Connectors
+seams are active. The dedicated all-`internal` sole-writer scan finds zero
+direct AgentSession, TerminalSession, AgentLease, or inbox mutations outside
+Interaction and persistence adapters, and the graph is ratcheted to
+`completed_phase: 5`. See the
+[Phase 5 evidence](11-phase-5-decisions-and-evidence.md) for the exact
+authority/retry contracts, green paired gates, and remaining packaged-product
+proof.
 
 Begin only after the post-`v5` identity/Role model is stable. First establish the minimal Source Control materialization API and Connectors credential-broker API needed by this phase; leave their remaining UI/query/provider scope for Phase 7.
 

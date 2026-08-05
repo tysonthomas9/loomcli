@@ -11,6 +11,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/agentinbox"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/epicrunner"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -47,6 +48,77 @@ type LeadMessageDeliveryOptions struct {
 	DedupeKey string
 }
 
+// InteractionChatDependencies is the provider-specific lead runtime surface
+// consumed by Interaction's infrastructure adapter. It contains operations,
+// not the process-wide persistence aggregate.
+type InteractionChatDependencies struct {
+	DeliverMessage func(
+		context.Context,
+		string,
+		string,
+		string,
+		LeadMessageDeliveryOptions,
+		interaction.InboxEnqueuer,
+	) (*DeliveryResult, error)
+	DeliverAssignment func(
+		context.Context,
+		string,
+		string,
+		interaction.InboxEnqueuer,
+	) (*DeliveryResult, error)
+	FindSession func(
+		context.Context,
+		string,
+		string,
+	) (*domain.AgentSession, error)
+}
+
+// LegacyInteractionChatDependencies confines the remaining composite Store
+// dependency to leadcontrol while exposing only provider operations to
+// Interaction.
+func LegacyInteractionChatDependencies(st store.Store) InteractionChatDependencies {
+	if st == nil {
+		return InteractionChatDependencies{}
+	}
+	return InteractionChatDependencies{
+		DeliverMessage: func(
+			ctx context.Context,
+			workspace, agentID, body string,
+			options LeadMessageDeliveryOptions,
+			inbox interaction.InboxEnqueuer,
+		) (*DeliveryResult, error) {
+			return DeliverLeadMessageWithOptions(
+				ctx,
+				st,
+				workspace,
+				agentID,
+				body,
+				options,
+				inbox,
+			)
+		},
+		DeliverAssignment: func(
+			ctx context.Context,
+			workspace, agentID string,
+			inbox interaction.InboxEnqueuer,
+		) (*DeliveryResult, error) {
+			return DeliverCurrentAssignment(
+				ctx,
+				st,
+				workspace,
+				agentID,
+				inbox,
+			)
+		},
+		FindSession: func(
+			ctx context.Context,
+			workspace, agentID string,
+		) (*domain.AgentSession, error) {
+			return store.OrchestrationSessionFor(ctx, st, workspace, agentID)
+		},
+	}
+}
+
 const (
 	assignmentInboxSourceKind      = "lead_assignment"
 	assignmentInboxSourceRefPrefix = "lead-assignment://"
@@ -68,12 +140,11 @@ type leadTurnDeliverer interface {
 	// pendingReason returns a non-empty reason when runtime metadata exists
 	// but the runtime is not yet ready to accept a turn.
 	pendingReason() string
-	claimedBy(sessionID string) string
 	// populate refreshes the deliverer's cached runtime view from the session
 	// and mirrors it onto the result.
 	populate(result *DeliveryResult, session *domain.AgentSession)
 	deliveredThreadID() string
-	deliverTurn(ctx context.Context, st store.Store, workspace, sessionID string,
+	deliverTurn(ctx context.Context, st store.Store, runtime SessionRuntime, workspace, sessionID string,
 		result *DeliveryResult, message, closeReason string) (*DeliveryResult, error)
 }
 
@@ -103,7 +174,25 @@ func IsControlledLeadBackend(backend string) bool {
 	}
 }
 
-func DeliverCurrentAssignment(ctx context.Context, st store.Store, workspace, leadName string) (*DeliveryResult, error) {
+func DeliverCurrentAssignment(
+	ctx context.Context,
+	st store.Store,
+	workspace,
+	leadName string,
+	inbox ...interaction.InboxEnqueuer,
+) (*DeliveryResult, error) {
+	return deliverCurrentAssignmentOwned(ctx, st, nil, workspace, leadName, inbox...)
+}
+
+//nolint:funlen // Assignment lookup, durable inbox publication, and runtime delivery are one ordered orchestration transition.
+func deliverCurrentAssignmentOwned(
+	ctx context.Context,
+	st store.Store,
+	runtime SessionRuntime,
+	workspace, leadName string,
+	inbox ...interaction.InboxEnqueuer,
+) (*DeliveryResult, error) {
+	enqueuer := firstInboxEnqueuer(runtime, inbox)
 	assignment, err := epicrunner.LoadLeadAssignmentContext(ctx, st, workspace, leadName)
 	if err != nil || assignment == nil {
 		return &DeliveryResult{State: DeliveryStateNone}, err
@@ -114,7 +203,7 @@ func DeliverCurrentAssignment(ctx context.Context, st store.Store, workspace, le
 		return nil, err
 	}
 	if session == nil {
-		inbox, err := createLeadAssignmentInboxMessage(ctx, st, workspace, assignment, "")
+		inbox, err := createLeadAssignmentInboxMessage(ctx, enqueuer, workspace, assignment, "")
 		if err != nil {
 			return nil, err
 		}
@@ -139,27 +228,81 @@ func DeliverCurrentAssignment(ctx context.Context, st store.Store, workspace, le
 			return result, nil
 		}
 	}
-	inbox, err := createLeadAssignmentInboxMessage(ctx, st, workspace, assignment, session.SessionID)
+	inboxMessage, err := createLeadAssignmentInboxMessage(
+		ctx, enqueuer, workspace, assignment, session.SessionID,
+	)
 	if err != nil {
-		return nil, err
+		if runtime == nil {
+			return nil, err
+		}
+	} else if inboxMessage != nil {
+		result.InboxMessageID = inboxMessage.InboxMessageID
 	}
-	if inbox != nil {
-		result.InboxMessageID = inbox.InboxMessageID
+	if runtime == nil {
+		result.Reason = "awaiting session-owned inbox claim"
+		return result, nil
 	}
 	if !d.hasRuntimeMetadata(session.Metadata) {
-		return recordPendingDelivery(ctx, st, workspace, session.SessionID, result, d.notReadyReason()), nil
+		return recordPendingDelivery(ctx, runtime, workspace, session.SessionID, result, d.notReadyReason()), nil
 	}
 	if pendingReason := d.pendingReason(); pendingReason != "" {
-		return recordPendingDelivery(ctx, st, workspace, session.SessionID, result, pendingReason), nil
+		return recordPendingDelivery(ctx, runtime, workspace, session.SessionID, result, pendingReason), nil
 	}
-	return deliverNextLeadInboxMessage(ctx, st, workspace, assignment.LeadName, session.SessionID, d, result)
+	return deliverNextLeadInboxMessage(
+		ctx, st, runtime, workspace, assignment.LeadName, session.SessionID, d, result,
+	)
 }
 
-func DeliverLeadMessage(ctx context.Context, st store.Store, workspace, leadName, message string) (*DeliveryResult, error) {
-	return DeliverLeadMessageWithOptions(ctx, st, workspace, leadName, message, LeadMessageDeliveryOptions{})
+func DeliverLeadMessage(
+	ctx context.Context,
+	st store.Store,
+	workspace,
+	leadName,
+	message string,
+	inbox ...interaction.InboxEnqueuer,
+) (*DeliveryResult, error) {
+	return DeliverLeadMessageWithOptions(
+		ctx, st, workspace, leadName, message, LeadMessageDeliveryOptions{}, inbox...,
+	)
 }
 
-func DeliverLeadMessageWithOptions(ctx context.Context, st store.Store, workspace, leadName, message string, opts LeadMessageDeliveryOptions) (*DeliveryResult, error) {
+func DeliverLeadMessageWithOptions(
+	ctx context.Context,
+	st store.Store,
+	workspace,
+	leadName,
+	message string,
+	opts LeadMessageDeliveryOptions,
+	inbox ...interaction.InboxEnqueuer,
+) (*DeliveryResult, error) {
+	return deliverLeadMessageWithOptionsOwned(
+		ctx, st, nil, workspace, leadName, message, opts, inbox...,
+	)
+}
+
+//nolint:unparam // Tests inject fixed workspace/inbox coordinates through this owner-runtime seam.
+func deliverLeadMessageOwned(
+	ctx context.Context,
+	st store.Store,
+	runtime SessionRuntime,
+	workspace, leadName, message string,
+	inbox ...interaction.InboxEnqueuer,
+) (*DeliveryResult, error) {
+	return deliverLeadMessageWithOptionsOwned(
+		ctx, st, runtime, workspace, leadName, message, LeadMessageDeliveryOptions{}, inbox...,
+	)
+}
+
+//nolint:funlen // Message validation, durable enqueue, and controlled-runtime delivery share one ordered ownership boundary.
+func deliverLeadMessageWithOptionsOwned(
+	ctx context.Context,
+	st store.Store,
+	runtime SessionRuntime,
+	workspace, leadName, message string,
+	opts LeadMessageDeliveryOptions,
+	inbox ...interaction.InboxEnqueuer,
+) (*DeliveryResult, error) {
+	enqueuer := firstInboxEnqueuer(runtime, inbox)
 	leadName = strings.TrimSpace(leadName)
 	message = strings.TrimSpace(message)
 	if leadName == "" {
@@ -174,7 +317,9 @@ func DeliverLeadMessageWithOptions(ctx context.Context, st store.Store, workspac
 		return nil, err
 	}
 	if session == nil {
-		return enqueueLeadMessageWithoutSession(ctx, st, workspace, leadName, message, opts)
+		return enqueueLeadMessageWithoutSession(
+			ctx, enqueuer, workspace, leadName, message, opts,
+		)
 	}
 	d := delivererForSession(session)
 	result := &DeliveryResult{State: DeliveryStatePending, SessionID: session.SessionID}
@@ -186,12 +331,19 @@ func DeliverLeadMessageWithOptions(ctx context.Context, st store.Store, workspac
 			return result, nil
 		}
 	}
-	inbox, err := createLeadInboxMessage(ctx, st, workspace, leadName, session.SessionID, message, opts)
+	inboxMessage, err := createLeadInboxMessage(
+		ctx, enqueuer, workspace, leadName, session.SessionID, message, opts,
+	)
 	if err != nil {
-		return nil, err
+		if runtime == nil {
+			return nil, err
+		}
+	} else if inboxMessage != nil {
+		result.InboxMessageID = inboxMessage.InboxMessageID
 	}
-	if inbox != nil {
-		result.InboxMessageID = inbox.InboxMessageID
+	if runtime == nil {
+		result.Reason = "awaiting session-owned inbox claim"
+		return result, nil
 	}
 	session, err = st.AgentSessions().Get(ctx, workspace, session.SessionID)
 	if err != nil {
@@ -199,16 +351,27 @@ func DeliverLeadMessageWithOptions(ctx context.Context, st store.Store, workspac
 	}
 	d = delivererForSession(session)
 	d.populate(result, session)
-	if blocked := leadMessageDeliveryBlock(ctx, st, workspace, session, d, result); blocked != nil {
+	if blocked := leadMessageDeliveryBlock(ctx, runtime, workspace, session, d, result); blocked != nil {
 		return blocked, nil
 	}
-	return deliverNextLeadInboxMessage(ctx, st, workspace, leadName, session.SessionID, d, result)
+	return deliverNextLeadInboxMessage(
+		ctx, st, runtime, workspace, leadName, session.SessionID, d, result,
+	)
 }
 
 // enqueueLeadMessageWithoutSession queues a lead message when the lead has no
 // orchestration session yet, reporting the enqueue as a pending delivery.
-func enqueueLeadMessageWithoutSession(ctx context.Context, st store.Store, workspace, leadName, message string, opts LeadMessageDeliveryOptions) (*DeliveryResult, error) {
-	inbox, err := createLeadInboxMessage(ctx, st, workspace, leadName, "", message, opts)
+func enqueueLeadMessageWithoutSession(
+	ctx context.Context,
+	enqueuer interaction.InboxEnqueuer,
+	workspace,
+	leadName,
+	message string,
+	opts LeadMessageDeliveryOptions,
+) (*DeliveryResult, error) {
+	inbox, err := createLeadInboxMessage(
+		ctx, enqueuer, workspace, leadName, "", message, opts,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -222,10 +385,17 @@ func enqueueLeadMessageWithoutSession(ctx context.Context, st store.Store, works
 // leadMessageDeliveryBlock applies the runtime readiness gates for direct lead
 // message delivery, returning the (mutated) result when delivery cannot
 // proceed and nil when the runtime is ready for a turn.
-func leadMessageDeliveryBlock(ctx context.Context, st store.Store, workspace string, session *domain.AgentSession, d leadTurnDeliverer, result *DeliveryResult) *DeliveryResult {
+func leadMessageDeliveryBlock(
+	ctx context.Context,
+	runtime SessionRuntime,
+	workspace string,
+	session *domain.AgentSession,
+	d leadTurnDeliverer,
+	result *DeliveryResult,
+) *DeliveryResult {
 	if !d.hasRuntimeMetadata(session.Metadata) {
 		result.Reason = d.notReadyReason()
-		_ = MarkLeadMessageDeliveryAttempt(ctx, st, workspace, session.SessionID, result.Reason)
+		_ = MarkLeadMessageDeliveryAttempt(ctx, runtime, workspace, session.SessionID, result.Reason)
 		return result
 	}
 	if reason := d.unsupportedReason(session.Metadata); reason != "" {
@@ -235,13 +405,22 @@ func leadMessageDeliveryBlock(ctx context.Context, st store.Store, workspace str
 	}
 	if pendingReason := d.pendingReason(); pendingReason != "" {
 		result.Reason = pendingReason
-		_ = MarkLeadMessageDeliveryAttempt(ctx, st, workspace, session.SessionID, result.Reason)
+		_ = MarkLeadMessageDeliveryAttempt(ctx, runtime, workspace, session.SessionID, result.Reason)
 		return result
 	}
 	return nil
 }
 
 func DeliverPendingLeadMessages(ctx context.Context, st store.Store, workspace, leadName string) (*DeliveryResult, error) {
+	return deliverPendingLeadMessagesOwned(ctx, st, nil, workspace, leadName)
+}
+
+func deliverPendingLeadMessagesOwned(
+	ctx context.Context,
+	st store.Store,
+	runtime SessionRuntime,
+	workspace, leadName string,
+) (*DeliveryResult, error) {
 	leadName = strings.TrimSpace(leadName)
 	if leadName == "" {
 		return nil, fmt.Errorf("lead agent required")
@@ -261,6 +440,10 @@ func DeliverPendingLeadMessages(ctx context.Context, st store.Store, workspace, 
 	}
 	result := &DeliveryResult{State: DeliveryStatePending, SessionID: session.SessionID}
 	d.populate(result, session)
+	if runtime == nil {
+		result.Reason = "session authority is required to claim inbox messages"
+		return result, nil
+	}
 	if !d.hasRuntimeMetadata(session.Metadata) {
 		result.Reason = d.notReadyReason()
 		return result, nil
@@ -274,28 +457,28 @@ func DeliverPendingLeadMessages(ctx context.Context, st store.Store, workspace, 
 		result.Reason = pendingReason
 		return result, nil
 	}
-	return deliverNextLeadInboxMessage(ctx, st, workspace, leadName, session.SessionID, d, result)
+	return deliverNextLeadInboxMessage(ctx, st, runtime, workspace, leadName, session.SessionID, d, result)
 }
 
 func deliverNextLeadInboxMessage(
 	ctx context.Context,
 	st store.Store,
+	runtime SessionRuntime,
 	workspace string,
 	leadName string,
 	sessionID string,
 	d leadTurnDeliverer,
 	result *DeliveryResult,
 ) (*DeliveryResult, error) {
-	if st == nil || st.AgentInboxMessages() == nil {
-		result.Reason = "agent inbox store is not configured"
+	if runtime == nil {
+		result.Reason = "session authority is required to claim inbox messages"
 		return result, nil
 	}
-	msg, err := st.AgentInboxMessages().ClaimNext(ctx, store.AgentInboxMessageClaim{
-		WorkspaceKey:  workspace,
-		TargetAgentID: leadName,
-		SessionID:     sessionID,
-		ClaimedBy:     d.claimedBy(sessionID),
-		LeaseTTL:      2 * time.Minute,
+	msg, err := runtime.ClaimNextInbox(ctx, interaction.ClaimInboxCommand{
+		WorkspaceKey: workspace,
+		AgentID:      leadName,
+		SessionID:    sessionID,
+		LeaseTTL:     2 * time.Minute,
 	})
 	if errors.Is(err, domain.ErrNotFound) {
 		result.State = DeliveryStateNone
@@ -305,43 +488,46 @@ func deliverNextLeadInboxMessage(
 	if err != nil {
 		return nil, err
 	}
-	result.InboxMessageID = msg.InboxMessageID
+	result.InboxMessageID = msg.MessageID
 	closeReason := "lead message delivery complete"
 	if isAssignmentInboxMessage(msg) {
 		closeReason = "assignment delivery complete"
 	}
-	delivered, err := d.deliverTurn(ctx, st, workspace, sessionID, result, msg.Body, closeReason)
+	delivered, err := d.deliverTurn(ctx, st, runtime, workspace, sessionID, result, msg.Body, closeReason)
 	if err != nil {
 		return nil, err
 	}
 	if delivered.State != DeliveryStateDelivered {
-		return completeLeadInboxRetry(ctx, st, workspace, sessionID, d, msg, delivered)
+		return completeLeadInboxRetry(ctx, runtime, workspace, sessionID, d, msg, delivered)
 	}
-	return completeLeadInboxDelivered(ctx, st, workspace, sessionID, d, msg, delivered)
+	return completeLeadInboxDelivered(ctx, runtime, workspace, sessionID, d, msg, delivered)
 }
 
 // completeLeadInboxRetry records the delivery attempt and returns the claimed
 // inbox message to the queue for retry after a non-delivered turn.
 func completeLeadInboxRetry(
 	ctx context.Context,
-	st store.Store,
+	runtime SessionRuntime,
 	workspace string,
 	sessionID string,
 	d leadTurnDeliverer,
-	msg *domain.AgentInboxMessage,
+	msg *interaction.InboxMessage,
 	delivered *DeliveryResult,
 ) (*DeliveryResult, error) {
 	if delivered.Reason != "" {
 		if isAssignmentInboxMessage(msg) {
-			_ = MarkAssignmentDeliveryAttempt(ctx, st, workspace, sessionID, delivered.Reason)
+			_ = MarkAssignmentDeliveryAttempt(ctx, runtime, workspace, sessionID, delivered.Reason)
 		} else {
-			_ = MarkLeadMessageDeliveryAttempt(ctx, st, workspace, sessionID, delivered.Reason)
+			_ = MarkLeadMessageDeliveryAttempt(ctx, runtime, workspace, sessionID, delivered.Reason)
 		}
 	}
-	if _, err := st.AgentInboxMessages().Complete(ctx, workspace, msg.InboxMessageID, store.AgentInboxMessageComplete{
-		Outcome:    "retry",
-		ErrorClass: d.provider() + "_delivery_pending",
-		Error:      delivered.Reason,
+	if err := runtime.CompleteInbox(ctx, interaction.CompleteInboxCommand{
+		WorkspaceKey: workspace,
+		SessionID:    sessionID,
+		MessageID:    msg.MessageID,
+		Attempt:      msg.Attempt,
+		Status:       interaction.InboxQueued,
+		ErrorClass:   d.provider() + "_delivery_pending",
 	}); err != nil {
 		return nil, err
 	}
@@ -352,21 +538,25 @@ func completeLeadInboxRetry(
 // assignment messages, marks the assignment delivered on the session.
 func completeLeadInboxDelivered(
 	ctx context.Context,
-	st store.Store,
+	runtime SessionRuntime,
 	workspace string,
 	sessionID string,
 	d leadTurnDeliverer,
-	msg *domain.AgentInboxMessage,
+	msg *interaction.InboxMessage,
 	delivered *DeliveryResult,
 ) (*DeliveryResult, error) {
-	if _, err := st.AgentInboxMessages().Complete(ctx, workspace, msg.InboxMessageID, store.AgentInboxMessageComplete{
-		Outcome:           "delivered",
+	if err := runtime.CompleteInbox(ctx, interaction.CompleteInboxCommand{
+		WorkspaceKey:      workspace,
+		SessionID:         sessionID,
+		MessageID:         msg.MessageID,
+		Attempt:           msg.Attempt,
+		Status:            interaction.InboxDelivered,
 		DeliveredThreadID: d.deliveredThreadID(),
 	}); err != nil {
 		return nil, err
 	}
 	if epicID, version, ok := assignmentFromInboxMessage(msg); ok {
-		if err := MarkAssignmentDelivered(ctx, st, workspace, sessionID, epicID, version); err != nil {
+		if err := MarkAssignmentDelivered(ctx, runtime, workspace, sessionID, epicID, version); err != nil {
 			return nil, err
 		}
 	}
@@ -377,8 +567,15 @@ func completeLeadInboxDelivered(
 // messages to the lead's controlled runtime. Run by the lead runtime process
 // (codex and harness alike) so messages enqueued by other processes land in
 // the visible session.
-func drainLeadMessageQueue(ctx context.Context, st store.Store, workspace, leadName string, logger *slog.Logger) {
-	if st == nil || strings.TrimSpace(workspace) == "" || strings.TrimSpace(leadName) == "" {
+func drainLeadMessageQueue(
+	ctx context.Context,
+	st store.Store,
+	runtime SessionRuntime,
+	workspace, leadName string,
+	logger *slog.Logger,
+) {
+	if st == nil || runtime == nil ||
+		strings.TrimSpace(workspace) == "" || strings.TrimSpace(leadName) == "" {
 		return
 	}
 	if logger == nil {
@@ -391,7 +588,7 @@ func drainLeadMessageQueue(ctx context.Context, st store.Store, workspace, leadN
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			result, err := DeliverPendingLeadMessages(ctx, st, workspace, leadName)
+			result, err := deliverPendingLeadMessagesOwned(ctx, st, runtime, workspace, leadName)
 			if err != nil {
 				logger.Debug("lead message queue drain failed", "err", err)
 				continue
@@ -403,7 +600,15 @@ func drainLeadMessageQueue(ctx context.Context, st store.Store, workspace, leadN
 	}
 }
 
-func createLeadInboxMessage(ctx context.Context, st store.Store, workspace, leadName, sessionID, message string, opts LeadMessageDeliveryOptions) (*domain.AgentInboxMessage, error) {
+func createLeadInboxMessage(
+	ctx context.Context,
+	enqueuer interaction.InboxEnqueuer,
+	workspace,
+	leadName,
+	sessionID,
+	message string,
+	opts LeadMessageDeliveryOptions,
+) (*domain.AgentInboxMessage, error) {
 	if opts.SourceKind == "" {
 		opts.SourceKind = "workflow"
 	}
@@ -414,7 +619,7 @@ func createLeadInboxMessage(ctx context.Context, st store.Store, workspace, lead
 	if dedupeKey == "" {
 		dedupeKey = leadInboxDedupeKey(workspace, leadName, message, opts)
 	}
-	return agentinbox.Enqueue(ctx, st, workspace, leadName, message, agentinbox.MessageOptions{
+	return agentinbox.Enqueue(ctx, enqueuer, workspace, leadName, message, agentinbox.MessageOptions{
 		SessionID:         sessionID,
 		SourceKind:        opts.SourceKind,
 		SourceRef:         opts.SourceRef,
@@ -426,17 +631,36 @@ func createLeadInboxMessage(ctx context.Context, st store.Store, workspace, lead
 	})
 }
 
-func createLeadAssignmentInboxMessage(ctx context.Context, st store.Store, workspace string, assignment *epicrunner.LeadAssignmentContext, sessionID string) (*domain.AgentInboxMessage, error) {
+func createLeadAssignmentInboxMessage(
+	ctx context.Context,
+	enqueuer interaction.InboxEnqueuer,
+	workspace string,
+	assignment *epicrunner.LeadAssignmentContext,
+	sessionID string,
+) (*domain.AgentInboxMessage, error) {
 	if assignment == nil {
 		return nil, nil
 	}
 	message := formatLeadAssignmentTurn(assignment)
-	return agentinbox.Enqueue(ctx, st, workspace, assignment.LeadName, message, agentinbox.MessageOptions{
+	return agentinbox.Enqueue(ctx, enqueuer, workspace, assignment.LeadName, message, agentinbox.MessageOptions{
 		SessionID:  sessionID,
 		SourceKind: assignmentInboxSourceKind,
 		SourceRef:  assignmentInboxSourceRef(assignment),
 		DedupeKey:  leadAssignmentInboxDedupeKey(workspace, assignment),
 	})
+}
+
+func firstInboxEnqueuer(
+	runtime SessionRuntime,
+	values []interaction.InboxEnqueuer,
+) interaction.InboxEnqueuer {
+	for _, value := range values {
+		if value != nil {
+			return value
+		}
+	}
+	value, _ := runtime.(interaction.InboxEnqueuer)
+	return value
 }
 
 func hasQueuedLeadInboxMessages(ctx context.Context, st store.Store, workspace, leadName, sessionID string) bool {
@@ -488,11 +712,11 @@ func assignmentInboxSourceRef(assignment *epicrunner.LeadAssignmentContext) stri
 	return assignmentInboxSourceRefPrefix + strings.TrimSpace(assignment.EpicID) + "/" + strings.TrimSpace(assignment.AssignmentVersion)
 }
 
-func isAssignmentInboxMessage(msg *domain.AgentInboxMessage) bool {
+func isAssignmentInboxMessage(msg *interaction.InboxMessage) bool {
 	return msg != nil && strings.TrimSpace(msg.SourceKind) == assignmentInboxSourceKind
 }
 
-func assignmentFromInboxMessage(msg *domain.AgentInboxMessage) (string, string, bool) {
+func assignmentFromInboxMessage(msg *interaction.InboxMessage) (string, string, bool) {
 	if !isAssignmentInboxMessage(msg) {
 		return "", "", false
 	}
@@ -508,9 +732,15 @@ func assignmentFromInboxMessage(msg *domain.AgentInboxMessage) (string, string, 
 	return payload[:slash], payload[slash+1:], true
 }
 
-func recordPendingDelivery(ctx context.Context, st store.Store, workspace, sessionID string, result *DeliveryResult, reason string) *DeliveryResult {
+func recordPendingDelivery(
+	ctx context.Context,
+	runtime SessionRuntime,
+	workspace, sessionID string,
+	result *DeliveryResult,
+	reason string,
+) *DeliveryResult {
 	result.Reason = reason
-	_ = MarkAssignmentDeliveryAttempt(ctx, st, workspace, sessionID, reason)
+	_ = MarkAssignmentDeliveryAttempt(ctx, runtime, workspace, sessionID, reason)
 	return result
 }
 

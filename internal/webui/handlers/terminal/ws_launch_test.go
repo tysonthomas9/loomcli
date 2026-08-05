@@ -13,6 +13,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 	webuterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
@@ -137,9 +138,15 @@ func TestAgentTerminalAttachRequiresStartAfterStop(t *testing.T) {
 	manager := webuterminal.NewPTYManager("/bin/sh", 1, t.TempDir())
 	t.Cleanup(func() { _ = manager.Shutdown() })
 	p := &terminalWSParams{
-		manager:      manager,
-		store:        st,
-		tabMetaStore: tabStore,
+		manager:         manager,
+		store:           st,
+		tabMetaStore:    tabStore,
+		interactionNode: "test-node",
+		loomServerURL:   "http://127.0.0.1:8683",
+		interaction: InteractionDependencies{
+			API:                &terminalInteractionAPIStub{},
+			SessionAuthorities: newTerminalSessionResolverStub(),
+		},
 	}
 	key := webuterminal.SessionKey{Workspace: "E2E", Name: "term_reviewer"}
 
@@ -163,7 +170,14 @@ func TestAgentTerminalAttachRequiresStartAfterStop(t *testing.T) {
 		t.Fatalf("start interactive agent: %v", err)
 	}
 
-	attachment, reattached, err = attachTerminalSession(ctx, p, key, 80, 24)
+	attachment, reattached, err = attachTerminalSession(
+		ctx,
+		p,
+		key,
+		80,
+		24,
+		&authority.OperatorAuthority{},
+	)
 	if err != nil {
 		t.Fatalf("attach after Start: %v", err)
 	}

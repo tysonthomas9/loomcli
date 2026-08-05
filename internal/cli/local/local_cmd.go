@@ -30,6 +30,14 @@ var (
 
 	readRuntimeStatusFn = ReadRuntimeStatus
 	restartRuntimeFn    = RestartRuntime
+
+	localServiceStartServe      = startServeProcess
+	localServiceAwaitServe      = awaitServeHealthy
+	localServiceWaitServe       = waitServeExit
+	localServiceStartDaemon     = startLocalDaemonSupervisor
+	localServiceAwaitDaemon     = awaitLocalDaemonSupervisor
+	localServiceRestartDelay    = time.Second
+	localServiceMaxRestartDelay = 30 * time.Second
 )
 
 var localCmd = &cobra.Command{
@@ -144,17 +152,87 @@ func runService(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	serveCmd, err := startServeProcess(serviceCtx, cfg, logFile, info)
-	if err != nil {
-		return err
-	}
-	if err := awaitServeHealthy(serviceCtx, cfg, info, serveCmd); err != nil {
-		return err
-	}
+	return superviseLocalServe(serviceCtx, cfg, logFile, info, cmd.OutOrStdout())
+}
 
-	startLocalDaemonSupervisor(serviceCtx, cfg.dataDir, cfg.exe, cfg.port, cfg.url)
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Loom local runtime: %s\n", info.URL)
-	return waitServeExit(serviceCtx, serveCmd, cfg.dataDir, info)
+// superviseLocalServe keeps the packaged runtime alive after an unexpected
+// `loom serve` exit. A successful generation owns one daemon supervisor; the
+// daemon is stopped before the next generation starts so it never retains a
+// dead FleetDB URL. Initial startup errors remain synchronous so Desktop can
+// surface packaging or compatibility failures instead of hiding them in an
+// endless retry loop.
+func superviseLocalServe(ctx context.Context, cfg *localServiceConfig, logFile *os.File, info *runtimeInfo, out io.Writer) error {
+	restartDelay := localServiceRestartDelay
+	everHealthy := false
+	for {
+		serveCmd, err := startLocalServeGeneration(ctx, cfg, logFile, info)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			if !everHealthy {
+				return err
+			}
+			if !waitForLocalServeRestart(ctx, out, err, restartDelay) {
+				return nil
+			}
+			restartDelay = nextLocalServeRestartDelay(restartDelay)
+			continue
+		}
+
+		everHealthy = true
+		generationCtx, stopGeneration := context.WithCancel(ctx)
+		daemonDone := localServiceStartDaemon(generationCtx, cfg.dataDir, cfg.exe, cfg.port, cfg.url)
+		_, _ = fmt.Fprintf(out, "Loom local runtime: %s\n", info.URL)
+		waitErr := localServiceWaitServe(ctx, serveCmd, cfg.dataDir, info)
+		stopGeneration()
+		localServiceAwaitDaemon(cfg.dataDir, daemonDone)
+		if ctx.Err() != nil {
+			return nil
+		}
+		if !waitForLocalServeRestart(ctx, out, waitErr, restartDelay) {
+			return nil
+		}
+		restartDelay = nextLocalServeRestartDelay(restartDelay)
+	}
+}
+
+func startLocalServeGeneration(ctx context.Context, cfg *localServiceConfig, logFile *os.File, info *runtimeInfo) (*exec.Cmd, error) {
+	info.Status = "starting"
+	info.Error = ""
+	info.ServePID = 0
+	info.DaemonPID = 0
+	if err := writeRuntime(cfg.dataDir, info); err != nil {
+		return nil, err
+	}
+	serveCmd, err := localServiceStartServe(ctx, cfg, logFile, info)
+	if err != nil {
+		return nil, err
+	}
+	if err := localServiceAwaitServe(ctx, cfg, info, serveCmd); err != nil {
+		// awaitServeHealthy kills a child that fails its health budget. Reap
+		// it here because this long-lived service will continue running.
+		_ = serveCmd.Wait()
+		return nil, err
+	}
+	return serveCmd, nil
+}
+
+func waitForLocalServeRestart(ctx context.Context, out io.Writer, cause error, delay time.Duration) bool {
+	message := fmt.Sprintf("loom serve exited; restarting local runtime in %s", delay)
+	if cause != nil {
+		message += ": " + cause.Error()
+	}
+	_, _ = fmt.Fprintln(out, message)
+	return sleepOrDone(ctx, delay)
+}
+
+func nextLocalServeRestartDelay(current time.Duration) time.Duration {
+	next := current * 2
+	if next > localServiceMaxRestartDelay {
+		return localServiceMaxRestartDelay
+	}
+	return next
 }
 
 // localServiceConfig is the resolved environment for a single runService
@@ -476,7 +554,7 @@ func reuseRunningRuntime(dataDir string, force bool) (*RuntimeStartResult, error
 		return nil, nil
 	}
 	if !runtimePIDRunning(info, info.PID) {
-		if runtimePIDRunning(info, info.ServePID) {
+		if runtimeProcessRunning(info) {
 			if err := stopRuntimeProcesses(info, 15*time.Second); err != nil {
 				return nil, fmt.Errorf("stop orphaned local runtime: %w", err)
 			}
@@ -663,9 +741,9 @@ func runtimePIDs(info *runtimeInfo) []int {
 	if info == nil {
 		return nil
 	}
-	pids := make([]int, 0, 2)
+	pids := make([]int, 0, 3)
 	seen := map[int]struct{}{}
-	for _, pid := range []int{info.PID, info.ServePID} {
+	for _, pid := range []int{info.PID, info.ServePID, info.DaemonPID} {
 		if pid <= 0 {
 			continue
 		}

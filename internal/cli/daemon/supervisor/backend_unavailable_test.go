@@ -297,8 +297,8 @@ func TestSpawnAndWait_BackendUnavailableAfterClaimCleansWorkerState(t *testing.T
 	if got := workers.deregisters.Load(); got != 1 {
 		t.Fatalf("worker deregisters = %d, want 1", got)
 	}
-	if ap.AgentSessionID != "" || ap.AgentLeaseID != "" || ap.AgentLeaseToken != "" {
-		t.Fatalf("session state not cleared: session=%q lease=%q token=%q", ap.AgentSessionID, ap.AgentLeaseID, ap.AgentLeaseToken)
+	if ap.AgentSessionID != "" || ap.AgentIPCAuthToken != "" {
+		t.Fatalf("session state not cleared: session=%q ipc_token_present=%t", ap.AgentSessionID, ap.AgentIPCAuthToken != "")
 	}
 }
 

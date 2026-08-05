@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -128,7 +127,7 @@ func (s *Supervisor) thresholdFor(name string) time.Duration {
 	}
 
 	switch name {
-	case GoroutineHealthChecker, GoroutineConfigReconciler, GoroutineNodeHeartbeat, GoroutineSessionHeartbeat:
+	case GoroutineHealthChecker, GoroutineConfigReconciler, GoroutineNodeHeartbeat:
 		return 2 * time.Minute
 	case GoroutineStateUpdater:
 		return minLivenessThreshold
@@ -242,7 +241,11 @@ func (s *Supervisor) startWorkerHeartbeat(ap *AgentProcess) func() {
 // allowing tests to drive the heartbeat without real-time waits. It is a no-op
 // (returns a no-op stop) when the control plane is not wired.
 func (s *Supervisor) startWorkerHeartbeatEvery(ap *AgentProcess, interval time.Duration) func() {
-	if s.ControlStore == nil || s.WorkspaceID == "" || ap.Entry.Worktree == "" {
+	_, canRenewClaim := s.IssueBackend.(actorClaimBackend)
+	if _, ok := s.IssueBackend.(actorClaimRenewBackend); ok {
+		canRenewClaim = true
+	}
+	if s.WorkspaceID == "" || ap.Entry.Worktree == "" || (s.ControlStore == nil && !canRenewClaim) {
 		return func() {}
 	}
 	workerID := ap.Entry.Worktree
@@ -259,11 +262,17 @@ func (s *Supervisor) startWorkerHeartbeatEvery(ap *AgentProcess, interval time.D
 			case <-s.Shutdown:
 				return
 			case <-ticker.C:
-				ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
-				err := s.ControlStore.Workers().Heartbeat(ctx, s.WorkspaceID, workerID)
-				cancel()
-				if err != nil {
-					slog.Debug("supervisor worker heartbeat failed",
+				if s.ControlStore != nil {
+					ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
+					err := s.ControlStore.Workers().Heartbeat(ctx, s.WorkspaceID, workerID)
+					cancel()
+					if err != nil {
+						slog.Warn("supervisor worker heartbeat failed",
+							"workspace", s.WorkspaceID, "worker_id", workerID, "err", err)
+					}
+				}
+				if err := s.renewAssignedTaskClaim(ap); err != nil {
+					slog.Warn("supervisor issue claim renewal failed",
 						"workspace", s.WorkspaceID, "worker_id", workerID, "err", err)
 				}
 			}
@@ -275,357 +284,44 @@ func (s *Supervisor) startWorkerHeartbeatEvery(ap *AgentProcess, interval time.D
 	}
 }
 
-type agentSessionHeartbeatResult struct {
-	Sessions int
-	Leases   int
-	Failures int
-}
-
-const (
-	// agentSessionHeartbeatConcurrency bounds FleetDB pressure independently of
-	// the number of configured agents. Session and lease renewals are separate
-	// jobs so one degraded record family cannot serialize the other.
-	agentSessionHeartbeatConcurrency = 8
-	// maxAgentSessionHeartbeatPassTimeout stays at half the minimum configurable
-	// liveness threshold. A pass therefore returns and refreshes its loop tick
-	// before the watchdog can mistake a large or unreachable backend for a
-	// wedged critical goroutine.
-	maxAgentSessionHeartbeatPassTimeout     = 30 * time.Second
-	defaultAgentSessionHeartbeatPassTimeout = maxAgentSessionHeartbeatPassTimeout
-)
-
-type agentSessionHeartbeatJobKind uint8
-
-const (
-	agentSessionHeartbeatSession agentSessionHeartbeatJobKind = iota
-	agentSessionHeartbeatLease
-)
-
-type agentSessionHeartbeatJob struct {
-	kind       agentSessionHeartbeatJobKind
-	agent      *AgentProcess
-	agentName  string
-	sessionID  string
-	leaseID    string
-	leaseToken string
-}
-
-type agentSessionHeartbeatOutcome struct {
-	attempted bool
-	err       error
-}
-
-// startAgentSessionHeartbeat registers one supervisor-owned loop that keeps
-// every active control-plane AgentSession and AgentLease alive independently of
-// daemon IPC traffic. Long-running or temporarily idle agents therefore retain
-// their fencing lease even when they have no mutation to send.
-func (s *Supervisor) startAgentSessionHeartbeat() {
-	if s.ControlStore == nil || s.WorkspaceID == "" {
-		return
+// renewAssignedTaskClaim refreshes the distributed issue lock through the
+// actor-scoped renewal-only backend. Fleet worker heartbeats remain the normal
+// registration lease, but the claim refresh is a second, direct fence: a live
+// model process must never lose its issue to a competing role merely because
+// worker-heartbeat transport or projection is delayed. The FleetDB renewal
+// contract is authoritative and cannot change workflow state, so a handoff to
+// Review racing this heartbeat remains Review.
+func (s *Supervisor) renewAssignedTaskClaim(ap *AgentProcess) error {
+	if ap.Entry.Worktree == "" {
+		return nil
 	}
-	s.RegisterTick(GoroutineSessionHeartbeat)
-	s.RunCritical(GoroutineSessionHeartbeat, func() {
-		s.runAgentSessionHeartbeat(s.agentSessionHeartbeatInterval())
-	})
-}
-
-func (s *Supervisor) runAgentSessionHeartbeat(interval time.Duration) {
-	shutdownCtx, releaseShutdownCtx := contextUntilShutdown(s.Shutdown)
-	defer releaseShutdownCtx()
-
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-s.Shutdown:
-			return
-		case <-ticker.C:
-			if shutdownCtx.Err() != nil {
-				return
-			}
-			result := s.heartbeatAgentSessionsOnceContext(shutdownCtx)
-			if shutdownCtx.Err() != nil {
-				return
-			}
-			if result.Failures > 0 {
-				slog.Warn("agent control-plane heartbeat pass had failures",
-					"sessions", result.Sessions, "leases", result.Leases, "failures", result.Failures)
-			}
-		}
+	ap.Mu.Lock()
+	taskID := ap.AssignedTaskID
+	ap.Mu.Unlock()
+	if taskID == "" {
+		return nil
 	}
-}
-
-func (s *Supervisor) heartbeatAgentSessionsOnce() agentSessionHeartbeatResult {
-	shutdownCtx, releaseShutdownCtx := contextUntilShutdown(s.Shutdown)
-	defer releaseShutdownCtx()
-	return s.heartbeatAgentSessionsOnceContext(shutdownCtx)
-}
-
-func (s *Supervisor) heartbeatAgentSessionsOnceContext(parent context.Context) agentSessionHeartbeatResult {
-	s.RecordTick(GoroutineSessionHeartbeat)
-	defer s.RecordTick(GoroutineSessionHeartbeat)
-
-	if s.ControlStore == nil || s.WorkspaceID == "" {
-		return agentSessionHeartbeatResult{}
+	ctx, cancel := s.operationContext()
+	defer cancel()
+	if renewBackend, ok := s.IssueBackend.(actorClaimRenewBackend); ok {
+		return renewBackend.RenewIssueClaimAsActor(ctx, taskID, 0, ap.Entry.Worktree)
 	}
-	if parent == nil {
-		parent = context.Background()
+	actorBackend, ok := s.IssueBackend.(actorClaimBackend)
+	if !ok {
+		return nil
 	}
-	passCtx, cancelPass := context.WithTimeout(parent, s.agentSessionHeartbeatPassTimeout())
-	defer cancelPass()
-
-	ttl := s.AgentLeaseTTL
-	if ttl <= 0 {
-		ttl = defaultLeaseTTL
+	// Compatibility fallback for non-Fleet backends that predate the
+	// renewal-only contract. FleetDB-backed runtime paths use the authoritative
+	// server-side renewal above.
+	issue, err := s.IssueBackend.Get(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("read assigned issue before claim renewal: %w", err)
 	}
-	jobs := s.snapshotAgentSessionHeartbeatJobs()
-	if len(jobs) == 0 {
-		return agentSessionHeartbeatResult{}
+	if issue == nil {
+		return fmt.Errorf("read assigned issue before claim renewal: task %s not found", taskID)
 	}
-	outcomes := s.runAgentSessionHeartbeatJobs(passCtx, jobs, ttl)
-	return summarizeAgentSessionHeartbeat(jobs, outcomes)
-}
-
-func (s *Supervisor) runAgentSessionHeartbeatJobs(
-	ctx context.Context,
-	jobs []agentSessionHeartbeatJob,
-	ttl time.Duration,
-) []agentSessionHeartbeatOutcome {
-	outcomes := make([]agentSessionHeartbeatOutcome, len(jobs))
-	work := make(chan int, len(jobs))
-	firstJob := s.reserveAgentSessionHeartbeatWindow(len(jobs))
-	for offset := range jobs {
-		work <- (firstJob + offset) % len(jobs)
+	if !strings.EqualFold(strings.TrimSpace(issue.Status), "in_progress") {
+		return nil
 	}
-	close(work)
-
-	workerCount := agentSessionHeartbeatConcurrency
-	if workerCount > len(jobs) {
-		workerCount = len(jobs)
-	}
-	var workers sync.WaitGroup
-	workers.Add(workerCount)
-	for range workerCount {
-		go func() {
-			defer workers.Done()
-			for {
-				if ctx.Err() != nil {
-					return
-				}
-				select {
-				case <-ctx.Done():
-					return
-				case index, ok := <-work:
-					if !ok {
-						return
-					}
-					outcomes[index] = s.runAgentSessionHeartbeatJob(ctx, jobs[index], ttl)
-				}
-			}
-		}()
-	}
-	workers.Wait()
-	return outcomes
-}
-
-func summarizeAgentSessionHeartbeat(
-	jobs []agentSessionHeartbeatJob,
-	outcomes []agentSessionHeartbeatOutcome,
-) agentSessionHeartbeatResult {
-	result := agentSessionHeartbeatResult{}
-	// Aggregate only after every worker exits. Each outcome has one writer, so
-	// the counts are deterministic and race-free. Eligible but unattempted jobs
-	// (because the pass or shutdown deadline fired) count as failures, preserving
-	// successes+failures == jobs regardless of scheduling.
-	for index, job := range jobs {
-		outcome := outcomes[index]
-		if !outcome.attempted || outcome.err != nil {
-			result.Failures++
-			continue
-		}
-		switch job.kind {
-		case agentSessionHeartbeatSession:
-			result.Sessions++
-		case agentSessionHeartbeatLease:
-			result.Leases++
-		}
-	}
-	return result
-}
-
-func (s *Supervisor) snapshotAgentSessionHeartbeatJobs() []agentSessionHeartbeatJob {
-	s.AgentsMu.RLock()
-	agents := append([]*AgentProcess(nil), s.Agents...)
-	s.AgentsMu.RUnlock()
-
-	jobs := make([]agentSessionHeartbeatJob, 0, len(agents)*2)
-	for _, ap := range agents {
-		if ap == nil {
-			continue
-		}
-		ap.Mu.Lock()
-		sessionID := ap.AgentSessionID
-		leaseID := ap.AgentLeaseID
-		leaseToken := ap.AgentLeaseToken
-		agentName := ap.Entry.Worktree
-		ap.Mu.Unlock()
-
-		if sessionID != "" {
-			jobs = append(jobs, agentSessionHeartbeatJob{
-				kind:      agentSessionHeartbeatSession,
-				agent:     ap,
-				agentName: agentName,
-				sessionID: sessionID,
-			})
-		}
-		if leaseID != "" && leaseToken != "" {
-			jobs = append(jobs, agentSessionHeartbeatJob{
-				kind:       agentSessionHeartbeatLease,
-				agent:      ap,
-				agentName:  agentName,
-				leaseID:    leaseID,
-				leaseToken: leaseToken,
-			})
-		}
-	}
-	return jobs
-}
-
-func (s *Supervisor) runAgentSessionHeartbeatJob(ctx context.Context, job agentSessionHeartbeatJob, ttl time.Duration) agentSessionHeartbeatOutcome {
-	if ctx.Err() != nil {
-		return agentSessionHeartbeatOutcome{}
-	}
-	if job.agent != nil {
-		if !lockAgentSessionHeartbeat(ctx, &job.agent.SessionHeartbeatMu) {
-			return agentSessionHeartbeatOutcome{}
-		}
-		defer job.agent.SessionHeartbeatMu.RUnlock()
-		if !agentSessionHeartbeatJobIsCurrent(job) {
-			// The session was finalized after this pass took its snapshot. Treat
-			// retirement as a successful no-op: it no longer needs renewal.
-			return agentSessionHeartbeatOutcome{attempted: true}
-		}
-	}
-	s.RecordTick(GoroutineSessionHeartbeat)
-	operationCtx, cancelOperation := context.WithTimeout(ctx, controlPlaneOperationTimeout)
-	defer cancelOperation()
-
-	var err error
-	switch job.kind {
-	case agentSessionHeartbeatSession:
-		_, err = s.ControlStore.AgentSessions().Heartbeat(operationCtx, s.WorkspaceID, job.sessionID)
-		if err != nil {
-			slog.Debug("agent session heartbeat failed", "agent", job.agentName, "session_id", job.sessionID, "err", err)
-		}
-	case agentSessionHeartbeatLease:
-		_, err = s.ControlStore.AgentLeases().Heartbeat(operationCtx, s.WorkspaceID, job.leaseID, job.leaseToken, ttl)
-		if err != nil {
-			slog.Debug("agent lease heartbeat failed", "agent", job.agentName, "lease_id", job.leaseID, "err", err)
-		}
-	default:
-		return agentSessionHeartbeatOutcome{}
-	}
-	s.RecordTick(GoroutineSessionHeartbeat)
-	return agentSessionHeartbeatOutcome{attempted: true, err: err}
-}
-
-// lockAgentSessionHeartbeat acquires the lifecycle barrier without allowing a
-// heartbeat worker to outlive its pass or shutdown context. A plain RLock is
-// not cancelable and can otherwise wait indefinitely behind finalization or a
-// starting-to-running transition.
-func lockAgentSessionHeartbeat(ctx context.Context, barrier *sync.RWMutex) bool {
-	for {
-		if ctx.Err() != nil {
-			return false
-		}
-		if barrier.TryRLock() {
-			if ctx.Err() == nil {
-				return true
-			}
-			barrier.RUnlock()
-			return false
-		}
-		time.Sleep(time.Millisecond)
-	}
-}
-
-func agentSessionHeartbeatJobIsCurrent(job agentSessionHeartbeatJob) bool {
-	job.agent.Mu.Lock()
-	defer job.agent.Mu.Unlock()
-	switch job.kind {
-	case agentSessionHeartbeatSession:
-		return job.agent.AgentSessionID == job.sessionID
-	case agentSessionHeartbeatLease:
-		return job.agent.AgentLeaseID == job.leaseID && job.agent.AgentLeaseToken == job.leaseToken
-	default:
-		return false
-	}
-}
-
-func (s *Supervisor) agentSessionHeartbeatPassTimeout() time.Duration {
-	timeout := s.SessionHeartbeatPassTimeout
-	if timeout <= 0 {
-		return defaultAgentSessionHeartbeatPassTimeout
-	}
-	if timeout > maxAgentSessionHeartbeatPassTimeout {
-		return maxAgentSessionHeartbeatPassTimeout
-	}
-	return timeout
-}
-
-func (s *Supervisor) agentSessionHeartbeatInterval() time.Duration {
-	interval := s.SessionHeartbeatInterval
-	if interval <= 0 {
-		interval = defaultSessionHeartbeatInterval
-	}
-	// RegisterTick happens before the ticker starts. Keep the first and every
-	// later cadence at most halfway to the effective watchdog threshold so an
-	// explicit oversized interval cannot make the loop stale while it waits.
-	maximum := s.thresholdFor(GoroutineSessionHeartbeat) / 2
-	if interval > maximum {
-		return maximum
-	}
-	return interval
-}
-
-// reserveAgentSessionHeartbeatWindow returns the first job for this pass and
-// advances the shared cursor by one fixed worker window. Even when every pass
-// expires after its initial calls, consecutive passes therefore cover the
-// entire stable job list instead of repeatedly favoring index zero.
-func (s *Supervisor) reserveAgentSessionHeartbeatWindow(jobCount int) int {
-	if jobCount <= 0 {
-		return 0
-	}
-	window := agentSessionHeartbeatConcurrency
-	if window > jobCount {
-		window = jobCount
-	}
-	s.sessionHeartbeatCursorMu.Lock()
-	defer s.sessionHeartbeatCursorMu.Unlock()
-	first := s.sessionHeartbeatCursor % jobCount
-	s.sessionHeartbeatCursor = (first + window) % jobCount
-	return first
-}
-
-// contextUntilShutdown converts the supervisor's close-only shutdown signal
-// into a context parent for FleetDB calls. The release function cancels and
-// joins the bridge goroutine, so a completed pass cannot leak it.
-func contextUntilShutdown(shutdown <-chan struct{}) (context.Context, func()) {
-	ctx, cancel := context.WithCancel(context.Background())
-	if shutdown == nil {
-		return ctx, cancel
-	}
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		select {
-		case <-shutdown:
-			cancel()
-		case <-ctx.Done():
-		}
-	}()
-	return ctx, func() {
-		cancel()
-		<-done
-	}
+	return actorBackend.ClaimIssueAsActor(ctx, taskID, 0, ap.Entry.Worktree)
 }

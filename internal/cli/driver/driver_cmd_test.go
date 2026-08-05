@@ -8,8 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/agentinbox"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -122,20 +124,23 @@ func TestDriverRegisterTrustDefaultsUntrusted(t *testing.T) {
 func TestDeliverAgentMessageForDriverQueuesGenericMessage(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{
-		WorkspaceKey: "WS",
-		Name:         "worker-1",
-		RoleName:     "task",
-		Backend:      "codex",
-	}); err != nil {
-		t.Fatalf("create agent: %v", err)
+	messenger := driverCommandChatMessenger{
+		inbox: driverCommandInbox{store: st},
 	}
-
-	result, err := deliverAgentMessageForDriver(ctx, st, "WS", "run-1", "worker-1", " task finished ")
+	result, err := deliverAgentMessageForDriver(
+		ctx,
+		messenger,
+		"WS",
+		"run-1",
+		"worker-1",
+		" task finished ",
+	)
 	if err != nil {
 		t.Fatalf("deliver generic agent message: %v", err)
 	}
-	if result.State != "queued" || result.AgentName != "worker-1" || result.InboxMessageID == "" {
+	if result.State != string(interaction.ChatDeliveryPending) ||
+		result.AgentName != "worker-1" ||
+		result.InboxMessageID == "" {
 		t.Fatalf("result = %#v, want queued inbox message", result)
 	}
 	msgs, err := st.AgentInboxMessages().List(ctx, "WS", store.AgentInboxMessageFilter{
@@ -151,6 +156,90 @@ func TestDeliverAgentMessageForDriverQueuesGenericMessage(t *testing.T) {
 	if msgs[0].Body != "task finished" || msgs[0].SourceKind != "workflow" || msgs[0].SourceRef != "driver-run://run-1" || msgs[0].DriverRunID != "run-1" {
 		t.Fatalf("queued inbox message = %#v", msgs[0])
 	}
+}
+
+type driverCommandChatMessenger struct {
+	inbox interaction.InboxEnqueuer
+}
+
+func (messenger driverCommandChatMessenger) DeliverChatMessage(
+	ctx context.Context,
+	command interaction.DeliverChatMessageCommand,
+) (*interaction.ChatDelivery, error) {
+	message, err := agentinbox.Enqueue(
+		ctx,
+		messenger.inbox,
+		command.WorkspaceKey,
+		command.AgentID,
+		command.Body,
+		agentinbox.MessageOptions{
+			SourceKind:  command.SourceKind,
+			SourceRef:   command.SourceRef,
+			DriverRunID: command.DriverRunID,
+			TaskRunID:   command.TaskRunID,
+			DedupeKey:   command.DedupeKey,
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &interaction.ChatDelivery{
+		State:          interaction.ChatDeliveryPending,
+		SessionID:      message.SessionID,
+		InboxMessageID: message.InboxMessageID,
+	}, nil
+}
+
+func (driverCommandChatMessenger) DeliverAssignment(
+	context.Context,
+	interaction.DeliverAssignmentCommand,
+) (*interaction.ChatDelivery, error) {
+	return &interaction.ChatDelivery{
+		State: interaction.ChatDeliveryUnsupported,
+	}, nil
+}
+
+type driverCommandInbox struct {
+	store store.Store
+}
+
+func (inbox driverCommandInbox) Enqueue(
+	ctx context.Context,
+	command interaction.EnqueueInboxCommand,
+) (*interaction.InboxMessage, error) {
+	message, err := inbox.store.AgentInboxMessages().Create(
+		ctx,
+		store.AgentInboxMessageCreate{
+			WorkspaceKey:  command.WorkspaceKey,
+			TargetAgentID: command.TargetAgentID,
+			SessionID:     command.SessionID,
+			Body:          command.Body,
+			SourceKind:    command.SourceKind,
+			SourceRef:     command.SourceRef,
+			DriverRunID:   command.DriverRunID,
+			TaskRunID:     command.TaskRunID,
+			DedupeKey:     command.DedupeKey,
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &interaction.InboxMessage{
+		WorkspaceKey:  message.WorkspaceKey,
+		MessageID:     message.InboxMessageID,
+		Cursor:        message.Cursor,
+		TargetAgentID: message.TargetAgentID,
+		SessionID:     message.SessionID,
+		Body:          message.Body,
+		Status:        interaction.InboxStatus(message.Status),
+		SourceKind:    message.SourceKind,
+		SourceRef:     message.SourceRef,
+		DriverRunID:   message.DriverRunID,
+		TaskRunID:     message.TaskRunID,
+		DedupeKey:     message.DedupeKey,
+		CreatedAt:     message.CreatedAt,
+		UpdatedAt:     message.UpdatedAt,
+	}, nil
 }
 
 func TestResolveDriverCompleteTaskLeaseToken(t *testing.T) {

@@ -161,7 +161,8 @@ if loom role show lead >/dev/null 2>&1; then
 else
     loom role add lead --description "Lead orchestration agent" --backend codex
 fi
-loom agentdef add nova --role lead --auto --repos app
+loom worker profile add nova --role lead --backend codex --repo app
+loom agentdef add nova --role lead --profile nova --auto
 
 LOOM_ORCHESTRATOR_SESSION_ID="$LEAD_SESSION_ID" timeout "$EPIC_RUNNER_TIMEOUT" loom epic run \
     --parent "$EPIC_ID" \

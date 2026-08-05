@@ -2,30 +2,549 @@ package workspacemgr
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/gitauth"
 	"github.com/tysonthomas9/loomcli/internal/gitbranch"
+	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/workspaceerrors"
 )
 
-type recordingGitCredentialSource struct {
-	remotes []string
+type testRepositoryMaterializer struct {
+	infrafleetdb.RepositoryAdmissionTransport
+	store                    store.Store
+	mu                       sync.Mutex
+	commands                 []sourcecontrol.RepositoryAdmissionCheckoutCommand
+	prepared                 []testPreparedRepositoryCheckout
+	records                  map[string]*infrafleetdb.RepositoryAdmissionRecord
+	byOp                     map[string]string
+	creates                  map[string]bool
+	nextID                   int
+	beginLeases              []time.Duration
+	renewals                 int
+	recoveryClaims           int
+	now                      func() time.Time
+	failNextRepositoryRef    string
+	failNextMaterializeError error
+	blockNextRepositoryRef   string
+	blockMaterializeStarted  chan struct{}
+	blockMaterializeCanceled chan struct{}
+	blockMaterializeRelease  chan struct{}
 }
 
-func (s *recordingGitCredentialSource) Resolve(_ context.Context, remoteURL string) (*gitauth.Credential, error) {
-	s.remotes = append(s.remotes, remoteURL)
-	return nil, nil
+type testPreparedRepositoryCheckout struct {
+	command sourcecontrol.RepositoryAdmissionCheckoutCommand
+	receipt sourcecontrol.PreparedRepositoryCheckout
+}
+
+func (materializer *testRepositoryMaterializer) PrepareRepositoryAdmissionCheckout(
+	ctx context.Context,
+	command sourcecontrol.RepositoryAdmissionCheckoutCommand,
+) (*sourcecontrol.PreparedRepositoryCheckout, error) {
+	if materializer == nil || materializer.store == nil {
+		return nil, sourcecontrol.ErrUnavailable
+	}
+	materializer.mu.Lock()
+	materializer.commands = append(materializer.commands, command)
+	record := materializer.records[command.AdmissionID]
+	if command.RepositoryRef == materializer.blockNextRepositoryRef {
+		materializer.blockNextRepositoryRef = ""
+		started := materializer.blockMaterializeStarted
+		canceled := materializer.blockMaterializeCanceled
+		release := materializer.blockMaterializeRelease
+		materializer.mu.Unlock()
+		if started != nil {
+			close(started)
+		}
+		<-ctx.Done()
+		if canceled != nil {
+			close(canceled)
+		}
+		if release != nil {
+			<-release
+		}
+		return nil, context.Cause(ctx)
+	}
+	if command.RepositoryRef == materializer.failNextRepositoryRef {
+		err := materializer.failNextMaterializeError
+		materializer.failNextRepositoryRef = ""
+		materializer.failNextMaterializeError = nil
+		materializer.mu.Unlock()
+		if err == nil {
+			err = sourcecontrol.ErrUnavailable
+		}
+		return nil, err
+	}
+	if record == nil ||
+		record.State != "pending" ||
+		record.WorkspaceKey != command.WorkspaceKey ||
+		record.OwnerID != command.OwnerID ||
+		record.OwnerGenerationID != command.OwnerGenerationID ||
+		record.SpecFingerprint != command.SpecFingerprint ||
+		!record.OwnerLeaseExpiresAt.After(materializer.currentTime()) {
+		materializer.mu.Unlock()
+		return nil, sourcecontrol.ErrRepositoryAdmissionNotFound
+	}
+	materializer.mu.Unlock()
+	var spec *infrafleetdb.RepositoryAdmissionRepoSpec
+	for index := range record.Spec.Repositories {
+		candidate := &record.Spec.Repositories[index]
+		if candidate.Name == command.RepositoryRef ||
+			candidate.SourceRepoID == command.RepositoryRef {
+			spec = candidate
+			break
+		}
+	}
+	if spec == nil {
+		return nil, sourcecontrol.ErrRepositoryAdmissionNotFound
+	}
+	stateCache, err := bootstrap.LoadStateCache()
+	if err != nil {
+		return nil, err
+	}
+	workspacePath := stateCache.Workspaces[command.WorkspaceKey].Path
+	targetPath := filepath.Join(workspacePath, spec.Name)
+	reused := false
+	if _, err := os.Stat(filepath.Join(targetPath, ".git")); err == nil {
+		reused = true
+	} else {
+		clone := exec.CommandContext(ctx, "git", "clone", "--", spec.RemoteURL, targetPath) //nolint:norawexec // test fixture.
+		if output, err := clone.CombinedOutput(); err != nil {
+			return nil, errors.New(strings.TrimSpace(string(output)) + ": " + err.Error())
+		}
+	}
+	receipt := sourcecontrol.PreparedRepositoryCheckout{
+		WorkspaceKey:  command.WorkspaceKey,
+		AdmissionID:   command.AdmissionID,
+		RepositoryRef: command.RepositoryRef,
+		CheckoutPath:  targetPath,
+		Reused:        reused,
+	}
+	materializer.mu.Lock()
+	materializer.prepared = append(
+		materializer.prepared,
+		testPreparedRepositoryCheckout{command: command, receipt: receipt},
+	)
+	materializer.mu.Unlock()
+	return &receipt, nil
+}
+
+func sourceControlFor(store store.Store) *testRepositoryMaterializer {
+	return &testRepositoryMaterializer{
+		store: store, records: make(map[string]*infrafleetdb.RepositoryAdmissionRecord),
+		byOp: make(map[string]string), creates: make(map[string]bool),
+	}
+}
+
+func (materializer *testRepositoryMaterializer) currentTime() time.Time {
+	if materializer.now != nil {
+		return materializer.now().UTC()
+	}
+	return time.Now().UTC()
+}
+
+func (materializer *testRepositoryMaterializer) CreateWorkspaceWithRepositoryAdmission(
+	ctx context.Context,
+	input infrafleetdb.WorkspaceRepositoryAdmissionBeginInput,
+) (*infrafleetdb.WorkspaceRepositoryAdmissionBeginResult, error) {
+	workspace, err := materializer.store.Workspaces().Create(ctx, store.WorkspaceCreate{
+		Key: input.Workspace.Key, Name: input.Workspace.Name,
+		Description:   input.Workspace.Description,
+		DefaultBranch: input.Workspace.DefaultBranch,
+		DesignFormat:  input.Workspace.DesignFormat,
+	})
+	if err != nil {
+		if errors.Is(err, domain.ErrAlreadyExists) {
+			return nil, infrafleetdb.ErrRepositoryAdmissionConflict
+		}
+		return nil, err
+	}
+	state := domain.WorkspaceState(input.Workspace.State)
+	if state != "" {
+		workspace, err = materializer.store.Workspaces().Update(
+			ctx,
+			input.Workspace.Key,
+			store.WorkspaceUpdate{State: &state},
+		)
+		if err != nil {
+			return nil, err
+		}
+	}
+	record, err := materializer.begin(
+		input.Workspace.Key,
+		input.OperationID,
+		input.OwnerID,
+		input.OwnerLease,
+		input.Repositories,
+		true,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &infrafleetdb.WorkspaceRepositoryAdmissionBeginResult{
+		Workspace: workspace, Admission: record, WorkspaceEventID: "workspace-event",
+	}, nil
+}
+
+func (materializer *testRepositoryMaterializer) BeginRepositoryAdmission(
+	_ context.Context,
+	workspace string,
+	input infrafleetdb.RepositoryAdmissionBeginInput,
+) (*infrafleetdb.RepositoryAdmissionRecord, error) {
+	return materializer.begin(
+		workspace,
+		input.OperationID,
+		input.OwnerID,
+		input.OwnerLease,
+		input.Repositories,
+		false,
+	)
+}
+
+func (materializer *testRepositoryMaterializer) begin(
+	workspace,
+	operationID,
+	ownerID string,
+	ownerLease time.Duration,
+	repositories []infrafleetdb.RepositoryAdmissionRepoSpec,
+	createsWorkspace bool,
+) (*infrafleetdb.RepositoryAdmissionRecord, error) {
+	materializer.mu.Lock()
+	defer materializer.mu.Unlock()
+	if existingID := materializer.byOp[operationID]; existingID != "" {
+		return cloneTestAdmission(materializer.records[existingID]), nil
+	}
+	materializer.nextID++
+	admissionID := fmt.Sprintf("%032x", materializer.nextID)
+	ownerGenerationID := fmt.Sprintf("%032x", materializer.nextID+1000)
+	canonical := append([]infrafleetdb.RepositoryAdmissionRepoSpec(nil), repositories...)
+	sort.Slice(canonical, func(i, j int) bool { return canonical[i].Name < canonical[j].Name })
+	encoded, _ := json.Marshal(canonical)
+	sum := sha256.Sum256(encoded)
+	now := materializer.currentTime()
+	if ownerLease == 0 {
+		ownerLease = repositoryAdmissionLease
+	}
+	record := &infrafleetdb.RepositoryAdmissionRecord{
+		AdmissionID: admissionID, WorkspaceKey: workspace,
+		OperationID: operationID, OwnerID: ownerID,
+		OwnerGenerationID:   ownerGenerationID,
+		OwnerLeaseExpiresAt: now.Add(ownerLease),
+		SpecFingerprint:     "sha256:" + hex.EncodeToString(sum[:]),
+		Spec: infrafleetdb.RepositoryAdmissionSpec{
+			WorkspaceKey: workspace, OperationID: operationID,
+			Repositories: canonical,
+		},
+		State: "pending", Version: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	materializer.records[admissionID] = record
+	materializer.byOp[operationID] = admissionID
+	materializer.creates[admissionID] = createsWorkspace
+	materializer.beginLeases = append(materializer.beginLeases, ownerLease)
+	return cloneTestAdmission(record), nil
+}
+
+func (materializer *testRepositoryMaterializer) GetRepositoryAdmission(
+	_ context.Context,
+	_ string,
+	admissionID string,
+) (*infrafleetdb.RepositoryAdmissionRecord, error) {
+	materializer.mu.Lock()
+	defer materializer.mu.Unlock()
+	record := materializer.records[admissionID]
+	if record == nil {
+		return nil, infrafleetdb.ErrRepositoryAdmissionNotFound
+	}
+	return cloneTestAdmission(record), nil
+}
+
+func (materializer *testRepositoryMaterializer) GetRepositoryAdmissionByOperation(
+	_ context.Context,
+	_ string,
+	operationID string,
+) (*infrafleetdb.RepositoryAdmissionRecord, error) {
+	materializer.mu.Lock()
+	defer materializer.mu.Unlock()
+	record := materializer.records[materializer.byOp[operationID]]
+	if record == nil {
+		return nil, infrafleetdb.ErrRepositoryAdmissionNotFound
+	}
+	result := cloneTestAdmission(record)
+	result.OwnerID = ""
+	result.OwnerGenerationID = ""
+	return result, nil
+}
+
+func (materializer *testRepositoryMaterializer) ListRecoverableRepositoryAdmissions(
+	_ context.Context,
+	workspace string,
+	limit int,
+) ([]*infrafleetdb.RepositoryAdmissionRecord, error) {
+	materializer.mu.Lock()
+	defer materializer.mu.Unlock()
+	result := make([]*infrafleetdb.RepositoryAdmissionRecord, 0)
+	for _, record := range materializer.records {
+		if record.WorkspaceKey != workspace ||
+			(record.State != "retryable_failed" &&
+				record.State != "pending") {
+			continue
+		}
+		result = append(result, cloneTestAdmission(record))
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].AdmissionID < result[j].AdmissionID
+	})
+	if limit > 0 && len(result) > limit {
+		result = result[:limit]
+	}
+	return result, nil
+}
+
+func (materializer *testRepositoryMaterializer) RenewRepositoryAdmission(
+	_ context.Context,
+	input infrafleetdb.RepositoryAdmissionRenewInput,
+) (*infrafleetdb.RepositoryAdmissionRecord, error) {
+	materializer.mu.Lock()
+	defer materializer.mu.Unlock()
+	record := materializer.records[input.AdmissionID]
+	if record == nil {
+		return nil, infrafleetdb.ErrRepositoryAdmissionNotFound
+	}
+	now := materializer.currentTime()
+	if record.State != "pending" ||
+		record.WorkspaceKey != input.WorkspaceKey ||
+		record.OwnerID != input.OwnerID ||
+		record.OwnerGenerationID != input.OwnerGenerationID ||
+		record.SpecFingerprint != input.SpecFingerprint ||
+		record.Version != input.ExpectedVersion ||
+		now.After(record.OwnerLeaseExpiresAt) {
+		return nil, infrafleetdb.ErrRepositoryAdmissionFenceLost
+	}
+	record.Version++
+	record.UpdatedAt = now
+	record.OwnerLeaseExpiresAt = now.Add(input.Lease)
+	materializer.renewals++
+	return cloneTestAdmission(record), nil
+}
+
+func (materializer *testRepositoryMaterializer) ClaimRepositoryAdmissionRecovery(
+	_ context.Context,
+	input infrafleetdb.RepositoryAdmissionRecoveryClaimInput,
+) (*infrafleetdb.RepositoryAdmissionRecord, error) {
+	materializer.mu.Lock()
+	defer materializer.mu.Unlock()
+	record := materializer.records[input.AdmissionID]
+	if record == nil {
+		return nil, infrafleetdb.ErrRepositoryAdmissionNotFound
+	}
+	now := materializer.currentTime()
+	if record.WorkspaceKey != input.WorkspaceKey ||
+		record.SpecFingerprint != input.ExpectedSpecFingerprint ||
+		record.Version != input.ExpectedVersion ||
+		(record.State != "retryable_failed" &&
+			(record.State != "pending" ||
+				now.Before(record.OwnerLeaseExpiresAt))) {
+		return nil, infrafleetdb.ErrRepositoryAdmissionFenceLost
+	}
+	materializer.recoveryClaims++
+	record.OwnerID = input.NewOwnerID
+	record.OwnerGenerationID = fmt.Sprintf(
+		"%032x",
+		materializer.nextID+2000+materializer.recoveryClaims,
+	)
+	record.OwnerLeaseExpiresAt = now.Add(input.Lease)
+	record.State = "pending"
+	record.LastErrorClass = ""
+	record.Version++
+	record.UpdatedAt = now
+	return cloneTestAdmission(record), nil
+}
+
+func (materializer *testRepositoryMaterializer) CommitRepositoryAdmission(
+	ctx context.Context,
+	input infrafleetdb.RepositoryAdmissionCommitInput,
+) (*infrafleetdb.RepositoryAdmissionRecord, error) {
+	materializer.mu.Lock()
+	record := materializer.records[input.AdmissionID]
+	if record == nil {
+		materializer.mu.Unlock()
+		return nil, infrafleetdb.ErrRepositoryAdmissionNotFound
+	}
+	if record.Version != input.ExpectedVersion ||
+		record.OwnerID != input.OwnerID ||
+		record.OwnerGenerationID != input.OwnerGenerationID ||
+		record.SpecFingerprint != input.SpecFingerprint ||
+		materializer.currentTime().After(record.OwnerLeaseExpiresAt) {
+		materializer.mu.Unlock()
+		return nil, infrafleetdb.ErrRepositoryAdmissionFenceLost
+	}
+	resolved := make(map[string]string, len(input.ResolvedDefaultBranches))
+	for _, branch := range input.ResolvedDefaultBranches {
+		resolved[branch.Name] = branch.DefaultBranch
+	}
+	specs := append([]infrafleetdb.RepositoryAdmissionRepoSpec(nil), record.Spec.Repositories...)
+	materializer.mu.Unlock()
+
+	receipts := make([]infrafleetdb.RepositoryAdmissionRepoReceipt, 0, len(specs))
+	for _, spec := range specs {
+		repository, err := materializer.store.Repos().Create(ctx, store.RepoCreate{
+			WorkspaceKey: record.WorkspaceKey, Name: spec.Name,
+			RemoteURL: spec.RemoteURL, Remote: spec.Remote,
+			DefaultBranch: resolved[spec.Name], Groups: spec.Groups,
+			SourceRepoID: spec.SourceRepoID,
+		})
+		if errors.Is(err, domain.ErrAlreadyExists) {
+			return nil, infrafleetdb.ErrRepositoryAdmissionConflict
+		}
+		if err != nil {
+			return nil, err
+		}
+		receipts = append(receipts, infrafleetdb.RepositoryAdmissionRepoReceipt{
+			Repository: *repository, EventID: "repo-event-" + spec.Name,
+		})
+	}
+	if input.WorkspaceFinalization != nil {
+		state := domain.WorkspaceStateReady
+		branch := input.WorkspaceFinalization.DefaultBranch
+		empty := ""
+		if _, err := materializer.store.Workspaces().Update(
+			ctx,
+			record.WorkspaceKey,
+			store.WorkspaceUpdate{
+				State: &state, DefaultBranch: &branch, ErrorMessage: &empty,
+			},
+		); err != nil {
+			return nil, err
+		}
+	}
+	materializer.mu.Lock()
+	defer materializer.mu.Unlock()
+	record = materializer.records[input.AdmissionID]
+	now := materializer.currentTime()
+	record.State = "committed"
+	record.Version++
+	record.UpdatedAt = now
+	record.TerminalAt = &now
+	record.Receipt = &infrafleetdb.RepositoryAdmissionReceipt{
+		AdmissionID: record.AdmissionID, SpecFingerprint: record.SpecFingerprint,
+		Repositories: receipts, WorkspaceFinalization: input.WorkspaceFinalization,
+		CommittedAt: now,
+	}
+	return cloneTestAdmission(record), nil
+}
+
+func (materializer *testRepositoryMaterializer) FailRepositoryAdmission(
+	ctx context.Context,
+	input infrafleetdb.RepositoryAdmissionFailInput,
+) (*infrafleetdb.RepositoryAdmissionRecord, error) {
+	materializer.mu.Lock()
+	record := materializer.records[input.AdmissionID]
+	if record == nil {
+		materializer.mu.Unlock()
+		return nil, infrafleetdb.ErrRepositoryAdmissionNotFound
+	}
+	now := materializer.currentTime()
+	if record.Version != input.ExpectedVersion ||
+		record.OwnerID != input.OwnerID ||
+		record.OwnerGenerationID != input.OwnerGenerationID ||
+		record.SpecFingerprint != input.SpecFingerprint ||
+		now.After(record.OwnerLeaseExpiresAt) {
+		materializer.mu.Unlock()
+		return nil, infrafleetdb.ErrRepositoryAdmissionFenceLost
+	}
+	record.Version++
+	record.UpdatedAt = now
+	record.LastErrorClass = input.ErrorClass
+	if input.Retryable {
+		record.State = "retryable_failed"
+	} else {
+		record.State = "permanent_failed"
+		record.TerminalAt = &now
+	}
+	createsWorkspace := materializer.creates[input.AdmissionID]
+	result := cloneTestAdmission(record)
+	materializer.mu.Unlock()
+	if createsWorkspace && !input.Retryable {
+		state := domain.WorkspaceStateError
+		message := input.ErrorClass
+		_, _ = materializer.store.Workspaces().Update(
+			ctx,
+			record.WorkspaceKey,
+			store.WorkspaceUpdate{State: &state, ErrorMessage: &message},
+		)
+	}
+	return result, nil
+}
+
+func cloneTestAdmission(
+	record *infrafleetdb.RepositoryAdmissionRecord,
+) *infrafleetdb.RepositoryAdmissionRecord {
+	if record == nil {
+		return nil
+	}
+	encoded, _ := json.Marshal(record)
+	var result infrafleetdb.RepositoryAdmissionRecord
+	_ = json.Unmarshal(encoded, &result)
+	return &result
+}
+
+func buildTestAddReposWithAdmission(
+	t *testing.T,
+	st store.Store,
+	materializer *testRepositoryMaterializer,
+) service.WorkspaceAddReposFn {
+	t.Helper()
+	journal, err := newLocalRepositoryAdmissionJournalAt(
+		filepath.Join(t.TempDir(), "admissions"),
+		time.Now,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return BuildStoreBackedAddReposWithAdmission(
+		st,
+		materializer,
+		journal,
+		materializer,
+	)
+}
+
+func buildTestCreateWithAdmission(
+	t *testing.T,
+	st store.Store,
+	materializer *testRepositoryMaterializer,
+) service.WorkspaceCreateFn {
+	t.Helper()
+	journal, err := newLocalRepositoryAdmissionJournalAt(
+		filepath.Join(t.TempDir(), "admissions"),
+		time.Now,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return BuildStoreBackedCreateWorkspaceWithAdmission(
+		st,
+		materializer,
+		journal,
+		materializer,
+	)
 }
 
 func TestStoreBackedCreateEmptyWorkspaceCreatesStoreAndLocalState(t *testing.T) {
@@ -102,6 +621,47 @@ func TestStoreBackedCreateEmptyWorkspaceCreatesStoreAndLocalState(t *testing.T) 
 	}
 	if local.Repos["app"] != filepath.Join(wsPath, "app") {
 		t.Fatalf("local repo path = %q", local.Repos["app"])
+	}
+}
+
+func TestStoreBackedCreateEmptyWorkspaceRejectsCredentialBearingLocalRemote(t *testing.T) {
+	loomDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", loomDir)
+
+	src := initTestGitRepo(t, t.TempDir(), "private-local")
+	runGit(
+		t,
+		src,
+		"remote",
+		"add",
+		"origin",
+		"https://operator:plaintext-secret@example.test/private.git",
+	)
+	st := memstore.New()
+	wsPath := filepath.Join(loomDir, "workspaces", "private-ws")
+	_, err := BuildStoreBackedCreateWorkspace(st)(
+		t.Context(),
+		service.WorkspaceCreateRequest{
+			Name:  "private-ws",
+			Type:  "empty",
+			Repos: []string{src},
+			Path:  wsPath,
+		},
+	)
+	var createErr *workspaceerrors.CreateError
+	if !errors.As(err, &createErr) ||
+		createErr.Code != workspaceerrors.SecurityViolation ||
+		!errors.Is(err, sourcecontrol.ErrInvalid) {
+		t.Fatalf("credential-bearing local remote error = %v, want security violation", err)
+	}
+	if strings.Contains(err.Error(), "plaintext-secret") {
+		t.Fatalf("credential-bearing local remote leaked secret in error: %v", err)
+	}
+	if _, getErr := st.Workspaces().Get(t.Context(), "PRIVATE-WS"); !errors.Is(getErr, domain.ErrNotFound) {
+		t.Fatalf("invalid local remote persisted workspace: %v", getErr)
+	}
+	if _, statErr := os.Stat(wsPath); !os.IsNotExist(statErr) {
+		t.Fatalf("invalid local remote left workspace checkout: %v", statErr)
 	}
 }
 
@@ -610,7 +1170,7 @@ func TestStoreBackedAddReposClassifiesLocalRepoNameCollisionAndRollsBack(t *test
 	assertWorkspaceHasNoRepo(t, base, "MY-WS", "shared-repo")
 }
 
-func TestStoreBackedAddReposClassifiesCloneRepoNameCollisionAndRollsBack(t *testing.T) {
+func TestStoreBackedAddReposClassifiesCloneRepoNameCollisionAndRetainsCheckoutForReview(t *testing.T) {
 	loomDir := t.TempDir()
 	t.Setenv("LOOM_CONFIG_DIR", loomDir)
 
@@ -627,7 +1187,7 @@ func TestStoreBackedAddReposClassifiesCloneRepoNameCollisionAndRollsBack(t *test
 
 	remote := initTestGitRepo(t, t.TempDir(), "shared-clone")
 	st := &repoFailStore{Store: base, err: domain.ErrAlreadyExists}
-	addFn := BuildStoreBackedAddRepos(st)
+	addFn := buildTestAddReposWithAdmission(t, st, sourceControlFor(st))
 	_, err := addFn(context.Background(), service.WorkspaceAddReposRequest{
 		WorkspaceID: "MY-WS",
 		CloneURLs:   []string{remote},
@@ -640,10 +1200,18 @@ func TestStoreBackedAddReposClassifiesCloneRepoNameCollisionAndRollsBack(t *test
 		t.Fatalf("error message = %q, want cross-workspace uniqueness guidance", createErr.Message)
 	}
 
-	if _, statErr := os.Stat(filepath.Join(wsPath, "shared-clone")); !os.IsNotExist(statErr) {
-		t.Fatalf("failed clone attach left checkout behind: %v", statErr)
+	if _, statErr := os.Stat(filepath.Join(wsPath, "shared-clone", ".git")); statErr != nil {
+		t.Fatalf("verified checkout was not retained for admission review: %v", statErr)
 	}
-	assertWorkspaceHasNoRepo(t, base, "MY-WS", "shared-clone")
+	repos, listErr := base.Repos().List(context.Background(), "MY-WS")
+	if listErr != nil || len(repos) != 0 {
+		t.Fatalf("uncommitted FleetDB repos = %#v, err=%v", repos, listErr)
+	}
+	state, stateErr := bootstrap.LoadStateCache()
+	if stateErr != nil ||
+		state.Workspaces["MY-WS"].Repos["shared-clone"] != filepath.Join(wsPath, "shared-clone") {
+		t.Fatalf("durable local retry projection = %#v, err=%v", state, stateErr)
+	}
 }
 
 func assertWorkspaceHasNoRepo(t *testing.T, st store.Store, workspace, repo string) {
@@ -684,8 +1252,8 @@ func TestStoreBackedAddReposClonesRemoteRepoToEmptyWorkspace(t *testing.T) {
 
 	src := initTestGitRepo(t, t.TempDir(), "Hello-World")
 	sourceBranch := strings.TrimSpace(gitOutput(t, src, "branch", "--show-current"))
-	credentials := &recordingGitCredentialSource{}
-	addFn := BuildStoreBackedAddReposWithCredentials(st, credentials)
+	materializer := sourceControlFor(st)
+	addFn := buildTestAddReposWithAdmission(t, st, materializer)
 	result, err := addFn(context.Background(), service.WorkspaceAddReposRequest{
 		WorkspaceID: "MY-WS",
 		CloneURLs:   []string{src},
@@ -693,8 +1261,9 @@ func TestStoreBackedAddReposClonesRemoteRepoToEmptyWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add clone repo: %v", err)
 	}
-	if len(credentials.remotes) != 0 {
-		t.Fatalf("credential source remotes = %v, want none for anonymous clone success", credentials.remotes)
+	if len(materializer.commands) != 1 ||
+		materializer.commands[0].RepositoryRef != "hello-world" {
+		t.Fatalf("Source Control commands = %#v, want hello-world admission", materializer.commands)
 	}
 	if result.WorkspaceID != "MY-WS" || result.WorkspacePath != wsPath {
 		t.Fatalf("result = %#v, want MY-WS at %s", result, wsPath)
@@ -721,8 +1290,8 @@ func TestStoreBackedAddReposClonesRemoteRepoToEmptyWorkspace(t *testing.T) {
 		t.Fatalf("local repo path = %q", local.Repos["hello-world"])
 	}
 
-	// The source is still wired through the store-backed path: once the
-	// anonymous clone fails, credential resolution receives the exact remote.
+	// A failed clone still crosses only the opaque repository-reference port;
+	// the remote remains behind the test resolver.
 	missingRemote := filepath.Join(t.TempDir(), "missing-private.git")
 	if _, err := addFn(context.Background(), service.WorkspaceAddReposRequest{
 		WorkspaceID: "MY-WS",
@@ -730,8 +1299,153 @@ func TestStoreBackedAddReposClonesRemoteRepoToEmptyWorkspace(t *testing.T) {
 	}); err == nil {
 		t.Fatal("add missing clone repo succeeded")
 	}
-	if len(credentials.remotes) != 1 || credentials.remotes[0] != missingRemote {
-		t.Fatalf("credential source remotes = %v, want fallback [%s]", credentials.remotes, missingRemote)
+	if len(materializer.commands) != 2 ||
+		materializer.commands[1].RepositoryRef != "missing-private" {
+		t.Fatalf("Source Control commands = %#v, want opaque missing-private admission", materializer.commands)
+	}
+}
+
+func TestStoreBackedRemoteCloneFailsClosedWithoutSourceControl(t *testing.T) {
+	loomDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", loomDir)
+
+	st := memstore.New()
+	createFn := BuildStoreBackedCreateWorkspace(st)
+	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
+	if _, err := createFn(t.Context(), service.WorkspaceCreateRequest{
+		Name: "my-ws",
+		Type: "empty",
+		Path: wsPath,
+	}); err != nil {
+		t.Fatalf("create empty workspace: %v", err)
+	}
+	remote := initTestGitRepo(t, t.TempDir(), "private-repo")
+	_, err := BuildStoreBackedAddRepos(st)(t.Context(), service.WorkspaceAddReposRequest{
+		WorkspaceID: "MY-WS",
+		CloneURLs:   []string{remote},
+	})
+	var createErr *workspaceerrors.CreateError
+	if !errors.As(err, &createErr) ||
+		createErr.Code != workspaceerrors.SecurityViolation ||
+		!errors.Is(err, sourcecontrol.ErrUnavailable) {
+		t.Fatalf("add clone error = %v, want fail-closed Source Control error", err)
+	}
+	assertWorkspaceHasNoRepo(t, st, "MY-WS", "private-repo")
+	if _, statErr := os.Stat(filepath.Join(wsPath, "private-repo")); !os.IsNotExist(statErr) {
+		t.Fatalf("fail-closed clone created a checkout: %v", statErr)
+	}
+
+	_, err = BuildStoreBackedCreateWorkspace(st)(t.Context(), service.WorkspaceCreateRequest{
+		Name:      "clone-without-owner",
+		Type:      "clone",
+		CloneURLs: []string{remote},
+		Path:      filepath.Join(loomDir, "workspaces", "clone-without-owner"),
+	})
+	if !errors.As(err, &createErr) ||
+		createErr.Code != workspaceerrors.SecurityViolation ||
+		!errors.Is(err, sourcecontrol.ErrUnavailable) {
+		t.Fatalf("create clone error = %v, want fail-closed Source Control error", err)
+	}
+	if _, getErr := st.Workspaces().Get(t.Context(), "CLONE-WITHOUT-OWNER"); !errors.Is(getErr, domain.ErrNotFound) {
+		t.Fatalf("fail-closed clone persisted workspace: %v", getErr)
+	}
+}
+
+func TestStoreBackedRemoteCloneRejectsCredentialBearingRemoteBeforePersistence(t *testing.T) {
+	loomDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", loomDir)
+
+	st := memstore.New()
+	createFn := BuildStoreBackedCreateWorkspace(st)
+	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
+	if _, err := createFn(t.Context(), service.WorkspaceCreateRequest{
+		Name: "my-ws",
+		Type: "empty",
+		Path: wsPath,
+	}); err != nil {
+		t.Fatalf("create empty workspace: %v", err)
+	}
+	materializer := sourceControlFor(st)
+	_, err := buildTestAddReposWithAdmission(t, st, materializer)(
+		t.Context(),
+		service.WorkspaceAddReposRequest{
+			WorkspaceID: "MY-WS",
+			CloneURLs: []string{
+				"https://operator:plaintext-secret@example.test/private.git",
+			},
+		},
+	)
+	var createErr *workspaceerrors.CreateError
+	if !errors.As(err, &createErr) ||
+		createErr.Code != workspaceerrors.SecurityViolation ||
+		!errors.Is(err, sourcecontrol.ErrInvalid) {
+		t.Fatalf("credential-bearing remote error = %v, want security violation", err)
+	}
+	if len(materializer.commands) != 0 {
+		t.Fatalf("Source Control commands = %#v, want none for invalid remote", materializer.commands)
+	}
+	repositories, listErr := st.Repos().List(t.Context(), "MY-WS")
+	if listErr != nil || len(repositories) != 0 {
+		t.Fatalf("repositories after invalid remote = %#v, err=%v", repositories, listErr)
+	}
+}
+
+func TestStoreBackedAddReposRejectsCredentialBearingLocalRemote(t *testing.T) {
+	loomDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", loomDir)
+
+	st := memstore.New()
+	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
+	if _, err := BuildStoreBackedCreateWorkspace(st)(
+		t.Context(),
+		service.WorkspaceCreateRequest{Name: "my-ws", Type: "empty", Path: wsPath},
+	); err != nil {
+		t.Fatalf("create empty workspace: %v", err)
+	}
+	src := initTestGitRepo(t, t.TempDir(), "private-local")
+	runGit(
+		t,
+		src,
+		"remote",
+		"add",
+		"origin",
+		"https://operator:plaintext-secret@example.test/private.git",
+	)
+	_, err := BuildStoreBackedAddRepos(st)(
+		t.Context(),
+		service.WorkspaceAddReposRequest{
+			WorkspaceID: "MY-WS",
+			Repos:       []string{src},
+			Branch:      strings.TrimSpace(gitOutput(t, src, "branch", "--show-current")),
+		},
+	)
+	var createErr *workspaceerrors.CreateError
+	if !errors.As(err, &createErr) ||
+		createErr.Code != workspaceerrors.SecurityViolation ||
+		!errors.Is(err, sourcecontrol.ErrInvalid) {
+		t.Fatalf("credential-bearing local attach error = %v, want security violation", err)
+	}
+	if strings.Contains(err.Error(), "plaintext-secret") {
+		t.Fatalf("credential-bearing local attach leaked secret in error: %v", err)
+	}
+	assertWorkspaceHasNoRepo(t, st, "MY-WS", "private-local")
+	if _, statErr := os.Stat(filepath.Join(wsPath, "private-local")); !os.IsNotExist(statErr) {
+		t.Fatalf("credential-bearing local attach left worktree: %v", statErr)
+	}
+}
+
+func TestWorkspaceRepositoryOperationIDIsStableAndRemoteBound(t *testing.T) {
+	first := workspaceRepositoryOperationID("WS-1", "repo", "https://example.test/repo.git")
+	retry := workspaceRepositoryOperationID("WS-1", "repo", "https://example.test/repo.git")
+	otherRemote := workspaceRepositoryOperationID("WS-1", "repo", "https://example.test/other.git")
+	if first != retry {
+		t.Fatalf("retry operation ID changed: %q != %q", first, retry)
+	}
+	if first == otherRemote {
+		t.Fatalf("different remote reused operation ID %q", first)
+	}
+	if strings.Contains(first, "example.test") {
+		t.Fatalf("operation ID exposes remote: %q", first)
 	}
 }
 
@@ -755,7 +1469,7 @@ func TestStoreBackedAddReposPersistsEachClonesDetectedDefaultBranch(t *testing.T
 	runGit(t, alpha, "branch", "-m", "main")
 	runGit(t, beta, "branch", "-m", "master")
 
-	addFn := BuildStoreBackedAddRepos(st)
+	addFn := buildTestAddReposWithAdmission(t, st, sourceControlFor(st))
 	if _, err := addFn(context.Background(), service.WorkspaceAddReposRequest{
 		WorkspaceID: "MY-WS",
 		CloneURLs:   []string{alpha, beta},
@@ -793,7 +1507,7 @@ func TestStoreBackedAddReposRejectsExplicitMissingCloneBranch(t *testing.T) {
 
 	src := initTestGitRepo(t, t.TempDir(), "hello-world")
 	runGit(t, src, "branch", "-m", "master")
-	addFn := BuildStoreBackedAddRepos(st)
+	addFn := buildTestAddReposWithAdmission(t, st, sourceControlFor(st))
 	_, err := addFn(context.Background(), service.WorkspaceAddReposRequest{
 		WorkspaceID: "MY-WS",
 		CloneURLs:   []string{src},
@@ -802,8 +1516,8 @@ func TestStoreBackedAddReposRejectsExplicitMissingCloneBranch(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), `default branch "main" does not exist`) {
 		t.Fatalf("add clone error = %v, want missing explicit default branch", err)
 	}
-	if _, statErr := os.Stat(filepath.Join(wsPath, "hello-world")); !os.IsNotExist(statErr) {
-		t.Fatalf("failed clone checkout was not rolled back: %v", statErr)
+	if _, statErr := os.Stat(filepath.Join(wsPath, "hello-world", ".git")); statErr != nil {
+		t.Fatalf("verified clone checkout was not retained for retry: %v", statErr)
 	}
 	repos, listErr := st.Repos().List(context.Background(), "MY-WS")
 	if listErr != nil || len(repos) != 0 {
@@ -832,7 +1546,7 @@ func TestStoreBackedAddReposRejectsEmptyRemoteWithoutCommittedDefaultBranch(t *t
 	}
 	runGit(t, emptyRemote, "init")
 
-	addFn := BuildStoreBackedAddRepos(st)
+	addFn := buildTestAddReposWithAdmission(t, st, sourceControlFor(st))
 	_, err := addFn(context.Background(), service.WorkspaceAddReposRequest{
 		WorkspaceID: "MY-WS",
 		CloneURLs:   []string{emptyRemote},
@@ -841,8 +1555,8 @@ func TestStoreBackedAddReposRejectsEmptyRemoteWithoutCommittedDefaultBranch(t *t
 		!strings.Contains(err.Error(), "specify one explicitly") {
 		t.Fatalf("add empty remote error = %v, want committed-branch validation", err)
 	}
-	if _, statErr := os.Stat(filepath.Join(wsPath, "empty-remote")); !os.IsNotExist(statErr) {
-		t.Fatalf("empty remote clone was not rolled back: %v", statErr)
+	if _, statErr := os.Stat(filepath.Join(wsPath, "empty-remote", ".git")); statErr != nil {
+		t.Fatalf("empty remote checkout was not retained for retry: %v", statErr)
 	}
 	repos, listErr := st.Repos().List(context.Background(), "MY-WS")
 	if listErr != nil || len(repos) != 0 {
@@ -946,8 +1660,8 @@ func TestStoreBackedCreateCloneWorkspacePersistsLifecycleAndRepos(t *testing.T) 
 	src := initTestGitRepo(t, t.TempDir(), "app")
 	sourceBranch := strings.TrimSpace(gitOutput(t, src, "branch", "--show-current"))
 	st := memstore.New()
-	credentials := &recordingGitCredentialSource{}
-	createFn := BuildStoreBackedCreateWorkspaceWithCredentials(st, credentials)
+	materializer := sourceControlFor(st)
+	createFn := buildTestCreateWithAdmission(t, st, materializer)
 	wsPath := filepath.Join(loomDir, "workspaces", "clone-ws")
 
 	result, err := createFn(context.Background(), service.WorkspaceCreateRequest{
@@ -959,8 +1673,9 @@ func TestStoreBackedCreateCloneWorkspacePersistsLifecycleAndRepos(t *testing.T) 
 	if err != nil {
 		t.Fatalf("clone workspace: %v", err)
 	}
-	if len(credentials.remotes) != 0 {
-		t.Fatalf("credential source remotes = %v, want none for anonymous clone success", credentials.remotes)
+	if len(materializer.commands) != 1 ||
+		materializer.commands[0].RepositoryRef != "app" {
+		t.Fatalf("Source Control commands = %#v, want app admission", materializer.commands)
 	}
 	if result.WorkspaceID != "CLONE-WS" {
 		t.Fatalf("WorkspaceID = %q, want CLONE-WS", result.WorkspaceID)
@@ -1004,8 +1719,8 @@ func TestStoreBackedCreateCloneWorkspacePersistsLifecycleAndRepos(t *testing.T) 
 		t.Fatalf("state repo path = %q", sc.Workspaces["CLONE-WS"].Repos["app"])
 	}
 
-	// A failed anonymous clone still proves the credential source is wired
-	// through the create path and receives the exact remote for fallback.
+	// A failed clone still carries only the opaque repository reference over
+	// the Workspace-to-Source-Control port.
 	missingRemote := filepath.Join(t.TempDir(), "missing-private.git")
 	if _, err := createFn(context.Background(), service.WorkspaceCreateRequest{
 		Name:      "clone-ws-auth-fallback",
@@ -1015,8 +1730,203 @@ func TestStoreBackedCreateCloneWorkspacePersistsLifecycleAndRepos(t *testing.T) 
 	}); err == nil {
 		t.Fatal("create workspace from missing clone repo succeeded")
 	}
-	if len(credentials.remotes) != 1 || credentials.remotes[0] != missingRemote {
-		t.Fatalf("credential source remotes = %v, want fallback [%s]", credentials.remotes, missingRemote)
+	if len(materializer.commands) != 2 ||
+		materializer.commands[1].RepositoryRef != "missing-private" {
+		t.Fatalf("Source Control commands = %#v, want opaque missing-private admission", materializer.commands)
+	}
+}
+
+func TestStoreBackedCreateCloneWorkspaceRecoversBeginLostBeforeLocalBind(t *testing.T) {
+	loomDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", loomDir)
+
+	src := initTestGitRepo(t, t.TempDir(), "app")
+	st := memstore.New()
+	materializer := sourceControlFor(st)
+	journal, err := newLocalRepositoryAdmissionJournalAt(
+		filepath.Join(t.TempDir(), "admissions"),
+		time.Now,
+	)
+	if err != nil {
+		t.Fatalf("new admission journal: %v", err)
+	}
+	wsPath := filepath.Join(loomDir, "workspaces", "crash-recovery")
+	planned, err := planCloneRepos([]string{src}, make(map[string]bool))
+	if err != nil {
+		t.Fatalf("plan clone: %v", err)
+	}
+	specs := cloneAdmissionSpecs(planned, "")
+	operationID, err := repositoryAdmissionOperationID(
+		"create_workspace",
+		"CRASH-RECOVERY",
+		wsPath,
+		specs,
+	)
+	if err != nil {
+		t.Fatalf("operation ID: %v", err)
+	}
+	if _, err := journal.Prepare(t.Context(), localRepositoryAdmissionIntent{
+		OperationID: operationID, WorkspaceKey: "CRASH-RECOVERY",
+		WorkspaceName: "crash-recovery", WorkspacePath: wsPath,
+		Kind:      localRepositoryAdmissionCreateWorkspace,
+		CloneURLs: []string{src},
+	}); err != nil {
+		t.Fatalf("prepare local intent: %v", err)
+	}
+	begin, err := materializer.CreateWorkspaceWithRepositoryAdmission(
+		t.Context(),
+		infrafleetdb.WorkspaceRepositoryAdmissionBeginInput{
+			Workspace: infrafleetdb.RepositoryAdmissionWorkspaceInput{
+				Key: "CRASH-RECOVERY", Name: "crash-recovery",
+				State: "creating", DefaultBranch: "main",
+			},
+			OperationID: operationID, OwnerID: "dead-loom-process",
+			OwnerLease: repositoryAdmissionLease, Repositories: specs,
+		},
+	)
+	if err != nil {
+		t.Fatalf("seed FleetDB begin: %v", err)
+	}
+	materializer.mu.Lock()
+	materializer.records[begin.Admission.AdmissionID].OwnerLeaseExpiresAt =
+		time.Now().Add(-time.Second)
+	materializer.mu.Unlock()
+
+	createFn := BuildStoreBackedCreateWorkspaceWithAdmission(
+		st,
+		materializer,
+		journal,
+		materializer,
+	)
+	result, err := createFn(t.Context(), service.WorkspaceCreateRequest{
+		Name: "crash-recovery", Type: "clone",
+		CloneURLs: []string{src}, Path: wsPath,
+	})
+	if err != nil {
+		t.Fatalf("recover lost begin response: %v", err)
+	}
+	if result.WorkspaceID != "CRASH-RECOVERY" {
+		t.Fatalf("workspace ID = %q, want CRASH-RECOVERY", result.WorkspaceID)
+	}
+	bound, err := journal.GetByOperation(t.Context(), operationID)
+	if err != nil {
+		t.Fatalf("load rebound intent: %v", err)
+	}
+	if bound.AdmissionID != begin.Admission.AdmissionID ||
+		bound.SpecFingerprint != begin.Admission.SpecFingerprint {
+		t.Fatalf("bound coordinates = %#v, want seeded admission", bound)
+	}
+	record, err := materializer.GetRepositoryAdmission(
+		t.Context(),
+		"CRASH-RECOVERY",
+		begin.Admission.AdmissionID,
+	)
+	if err != nil || record.State != "committed" {
+		t.Fatalf("recovered admission = %#v, err=%v", record, err)
+	}
+}
+
+func TestStoreBackedCreateCloneWorkspaceRecoversPartialCheckoutAndReplaysCommit(t *testing.T) {
+	loomDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", loomDir)
+
+	alpha := initTestGitRepo(t, t.TempDir(), "alpha")
+	beta := initTestGitRepo(t, t.TempDir(), "beta")
+	st := memstore.New()
+	materializer := sourceControlFor(st)
+	journal, err := newLocalRepositoryAdmissionJournalAt(
+		filepath.Join(t.TempDir(), "admissions"),
+		time.Now,
+	)
+	if err != nil {
+		t.Fatalf("new admission journal: %v", err)
+	}
+	wsPath := filepath.Join(loomDir, "workspaces", "partial-recovery")
+	request := service.WorkspaceCreateRequest{
+		Name: "partial-recovery", Type: "clone",
+		CloneURLs: []string{alpha, beta}, Path: wsPath,
+	}
+	materializer.failNextRepositoryRef = "beta"
+	materializer.failNextMaterializeError = sourcecontrol.ErrUnavailable
+
+	firstCreate := BuildStoreBackedCreateWorkspaceWithAdmission(
+		st,
+		materializer,
+		journal,
+		materializer,
+	)
+	if _, err := firstCreate(t.Context(), request); !errors.Is(err, sourcecontrol.ErrUnavailable) {
+		t.Fatalf("first create error = %v, want retryable Source Control outage", err)
+	}
+	if _, err := os.Stat(filepath.Join(wsPath, "alpha", ".git")); err != nil {
+		t.Fatalf("first verified checkout was not retained: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wsPath, "beta", ".git")); !os.IsNotExist(err) {
+		t.Fatalf("failed checkout unexpectedly exists: %v", err)
+	}
+	materializer.mu.Lock()
+	var admissionID string
+	for id, record := range materializer.records {
+		admissionID = id
+		if record.State != "retryable_failed" {
+			t.Fatalf("first admission state = %q, want retryable_failed", record.State)
+		}
+	}
+	materializer.mu.Unlock()
+	if admissionID == "" {
+		t.Fatal("first attempt did not persist an admission")
+	}
+
+	restartedCreate := BuildStoreBackedCreateWorkspaceWithAdmission(
+		st,
+		materializer,
+		journal,
+		materializer,
+	)
+	result, err := restartedCreate(t.Context(), request)
+	if err != nil {
+		t.Fatalf("restart recovery: %v", err)
+	}
+	if result.WorkspaceID != "PARTIAL-RECOVERY" {
+		t.Fatalf("workspace ID = %q, want PARTIAL-RECOVERY", result.WorkspaceID)
+	}
+	for _, name := range []string{"alpha", "beta"} {
+		if _, err := os.Stat(filepath.Join(wsPath, name, ".git")); err != nil {
+			t.Fatalf("recovered checkout %s missing: %v", name, err)
+		}
+	}
+	record, err := materializer.GetRepositoryAdmission(
+		t.Context(),
+		"PARTIAL-RECOVERY",
+		admissionID,
+	)
+	if err != nil || record.State != "committed" {
+		t.Fatalf("recovered admission = %#v, err=%v", record, err)
+	}
+	materializer.mu.Lock()
+	commandCount := len(materializer.commands)
+	materializer.mu.Unlock()
+
+	replayCreate := BuildStoreBackedCreateWorkspaceWithAdmission(
+		st,
+		materializer,
+		journal,
+		materializer,
+	)
+	replayed, err := replayCreate(t.Context(), request)
+	if err != nil {
+		t.Fatalf("committed replay: %v", err)
+	}
+	if replayed != result {
+		t.Fatalf("replayed result = %#v, want %#v", replayed, result)
+	}
+	materializer.mu.Lock()
+	defer materializer.mu.Unlock()
+	if len(materializer.commands) != commandCount {
+		t.Fatalf(
+			"committed replay issued %d new materialization commands",
+			len(materializer.commands)-commandCount,
+		)
 	}
 }
 
@@ -1027,7 +1937,7 @@ func TestStoreBackedCreateCloneWorkspaceNormalizesRepoNameForFleetStore(t *testi
 	src := initTestGitRepo(t, t.TempDir(), "Hello-World")
 	sourceBranch := strings.TrimSpace(gitOutput(t, src, "branch", "--show-current"))
 	st := memstore.New()
-	createFn := BuildStoreBackedCreateWorkspace(st)
+	createFn := buildTestCreateWithAdmission(t, st, sourceControlFor(st))
 	wsPath := filepath.Join(loomDir, "workspaces", "clone-ws")
 
 	_, err := createFn(context.Background(), service.WorkspaceCreateRequest{
@@ -1058,7 +1968,7 @@ func TestStoreBackedCreateCloneWorkspaceClassifiesCreateRace(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", loomDir)
 
 	st := &workspaceCreateRaceStore{Store: memstore.New()}
-	createFn := BuildStoreBackedCreateWorkspace(st)
+	createFn := buildTestCreateWithAdmission(t, st, sourceControlFor(st))
 	src := initTestGitRepo(t, t.TempDir(), "app")
 
 	_, err := createFn(context.Background(), service.WorkspaceCreateRequest{
@@ -1076,12 +1986,12 @@ func TestStoreBackedCreateCloneWorkspaceClassifiesCreateRace(t *testing.T) {
 	}
 }
 
-func TestStoreBackedCreateCloneWorkspaceRollsBackStoreOnCloneFailure(t *testing.T) {
+func TestStoreBackedCreateCloneWorkspaceRetainsDurableCreatingStateOnRetryableFailure(t *testing.T) {
 	loomDir := t.TempDir()
 	t.Setenv("LOOM_CONFIG_DIR", loomDir)
 
 	st := memstore.New()
-	createFn := BuildStoreBackedCreateWorkspace(st)
+	createFn := buildTestCreateWithAdmission(t, st, sourceControlFor(st))
 	wsPath := filepath.Join(loomDir, "workspaces", "clone-ws")
 
 	_, err := createFn(context.Background(), service.WorkspaceCreateRequest{
@@ -1094,18 +2004,23 @@ func TestStoreBackedCreateCloneWorkspaceRollsBackStoreOnCloneFailure(t *testing.
 		t.Fatal("clone workspace succeeded, want git clone error")
 	}
 
-	if _, getErr := st.Workspaces().Get(context.Background(), "CLONE-WS"); !errors.Is(getErr, domain.ErrNotFound) {
-		t.Fatalf("workspace was not rolled back, err=%v", getErr)
+	workspace, getErr := st.Workspaces().Get(context.Background(), "CLONE-WS")
+	if getErr != nil {
+		t.Fatalf("durable creating workspace was lost: %v", getErr)
 	}
-	if _, statErr := os.Stat(wsPath); !os.IsNotExist(statErr) {
-		t.Fatalf("workspace path still exists after clone failure, stat err=%v", statErr)
+	if workspace.State != domain.WorkspaceStateCreating {
+		t.Fatalf("workspace state = %q, want creating for recovery", workspace.State)
+	}
+	if _, statErr := os.Stat(wsPath); statErr != nil {
+		t.Fatalf("workspace recovery root was lost: %v", statErr)
 	}
 	sc, err := bootstrap.LoadStateCache()
 	if err != nil {
 		t.Fatalf("load state cache: %v", err)
 	}
-	if sc.LastWorkspace != "" || len(sc.Workspaces) != 0 {
-		t.Fatalf("state cache was written on clone rollback: %#v", sc)
+	if sc.LastWorkspace != "CLONE-WS" ||
+		sc.Workspaces["CLONE-WS"].Path != wsPath {
+		t.Fatalf("state cache does not retain recovery coordinates: %#v", sc)
 	}
 }
 
@@ -1119,7 +2034,7 @@ func TestStoreBackedCreateCloneWorkspaceKeepsPreexistingExternalRootOnFailure(t 
 	}
 
 	st := memstore.New()
-	createFn := BuildStoreBackedCreateWorkspace(st)
+	createFn := buildTestCreateWithAdmission(t, st, sourceControlFor(st))
 
 	_, err := createFn(context.Background(), service.WorkspaceCreateRequest{
 		Name:      "clone-ws",

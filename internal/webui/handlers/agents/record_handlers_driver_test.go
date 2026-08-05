@@ -12,8 +12,9 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	workflowdefs "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	workflowdefs "github.com/tysonthomas9/loomcli/internal/workflows"
 )
 
 const promptAgentDriverTestVersion = "prompt-agent-version-1"
@@ -22,7 +23,7 @@ const promptAgentDriverTestVersion = "prompt-agent-version-1"
 // that satisfies the same on-disk availability checks as production. Prompt
 // agent creation must not mistake a FleetDB-only driver row for an executable
 // workflow, so success fixtures need a real staged manifest and server module.
-func seedExecutablePromptAgentDriver(t *testing.T, st store.Store) {
+func seedExecutablePromptAgentDriver(t *testing.T, st *memstore.Store) {
 	t.Helper()
 	ctx := context.Background()
 	runtimeDir := t.TempDir()
@@ -54,32 +55,41 @@ func seedExecutablePromptAgentDriver(t *testing.T, st store.Store) {
 	if !ok {
 		t.Fatal("prompt-agent builtin is not registered")
 	}
-	digest := workflowdefs.SourceDigest(spec.Files)
+	digest, err := workflowdefs.SourceDigest(spec.Files)
+	if err != nil {
+		t.Fatalf("digest prompt-agent source: %v", err)
+	}
 	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
-		WorkspaceKey:    agentRecordTestWS,
-		DriverID:        workflowdefs.BuiltinPromptAgentWorkflowName,
-		Name:            workflowdefs.BuiltinPromptAgentWorkflowName,
-		OwnerType:       domain.DriverOwnerSystem,
-		ActiveVersionID: promptAgentDriverTestVersion,
-		Status:          domain.DriverStatusActive,
-		TrustLevel:      domain.DriverTrustTrusted,
+		WorkspaceKey: agentRecordTestWS,
+		DriverID:     workflowdefs.BuiltinPromptAgentWorkflowName,
+		Name:         workflowdefs.BuiltinPromptAgentWorkflowName,
+		OwnerType:    domain.DriverOwnerSystem,
+		Status:       domain.DriverStatusActive,
+		TrustLevel:   domain.DriverTrustTrusted,
 	}); err != nil {
 		t.Fatalf("create prompt-agent driver fixture: %v", err)
 	}
 	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
-		WorkspaceKey: agentRecordTestWS,
-		VersionID:    promptAgentDriverTestVersion,
-		DriverID:     workflowdefs.BuiltinPromptAgentWorkflowName,
-		Version:      1,
-		SourceRef:    "builtin://workflows/prompt-agent/versions/" + digest,
-		SourceDigest: digest,
-		BundleRef:    bundleRef,
-		BundleDigest: "sha256:prompt-agent-test-bundle",
-		Runtime:      "node",
-		Manifest:     map[string]string{"runners": string(runners)},
-		CreatedBy:    "system",
+		WorkspaceKey:     agentRecordTestWS,
+		VersionID:        promptAgentDriverTestVersion,
+		DriverID:         workflowdefs.BuiltinPromptAgentWorkflowName,
+		Version:          1,
+		SourceRef:        "builtin://workflows/prompt-agent/versions/" + digest,
+		SourceDigest:     digest,
+		BundleRef:        bundleRef,
+		BundleDigest:     "sha256:prompt-agent-test-bundle",
+		Runtime:          "node",
+		Manifest:         map[string]string{"runners": string(runners)},
+		ValidationStatus: domain.DriverVersionValidationPassed,
+		CreatedBy:        "system",
 	}); err != nil {
 		t.Fatalf("create prompt-agent driver version fixture: %v", err)
+	}
+	if _, err := st.ApproveDriverVersionForTest(ctx, agentRecordTestWS, workflowdefs.BuiltinPromptAgentWorkflowName, promptAgentDriverTestVersion); err != nil {
+		t.Fatalf("approve prompt-agent driver version fixture: %v", err)
+	}
+	if _, err := st.ActivateDriverVersionForTest(ctx, agentRecordTestWS, workflowdefs.BuiltinPromptAgentWorkflowName, promptAgentDriverTestVersion); err != nil {
+		t.Fatalf("activate prompt-agent driver version fixture: %v", err)
 	}
 }
 

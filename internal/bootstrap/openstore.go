@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend/fleet"
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
@@ -44,6 +45,10 @@ type StoreHandle struct {
 
 	// embedded is the embedded fleet-db handle, set only in ModeLocal.
 	embedded *EmbeddedFleetDB
+	// reusedLocal is true when this handle borrowed a FleetDB process owned by
+	// another Loom service. It allows startup to recover an operational race
+	// without replacing a cloud deployment or a newly started owned process.
+	reusedLocal bool
 }
 
 // OpenStoreOptions carries startup requirements derived by the caller from the
@@ -148,12 +153,24 @@ func OpenStoreWithOptions(ctx context.Context, dataDir string, logger *slog.Logg
 		return nil, err
 	}
 	if err := requireFleetDBCapabilities(ctx, handle, opts.RequiredFleetDBCapabilities); err != nil {
+		if mode == ModeLocal && handle.reusedLocal && !isFleetDBCapabilityIncompatibility(err) {
+			if closeErr := handle.Close(); closeErr != nil {
+				return nil, fmt.Errorf("openstore: fleet-db compatibility: %w (cleanup before local recovery: %v)", err, closeErr)
+			}
+			logger.Warn("reused embedded fleet-db became unavailable during compatibility negotiation; recovering local runtime", "err", err)
+			return recoverLocalStore(ctx, dataDir, cfg, logger, opts.RequiredFleetDBCapabilities, err)
+		}
 		if closeErr := handle.Close(); closeErr != nil {
 			return nil, fmt.Errorf("openstore: fleet-db compatibility: %w (cleanup: %v)", err, closeErr)
 		}
 		return nil, fmt.Errorf("openstore: fleet-db compatibility: %w", err)
 	}
 	return handle, nil
+}
+
+func isFleetDBCapabilityIncompatibility(err error) bool {
+	var incompatibility *fleetdb.CapabilityIncompatibilityError
+	return errors.As(err, &incompatibility)
 }
 
 func openStoreForMode(ctx context.Context, dataDir string, cfg fleetdb.Config, logger *slog.Logger, mode Mode) (*StoreHandle, error) {
@@ -214,6 +231,10 @@ func openLocalStore(ctx context.Context, dataDir string, cfg fleetdb.Config, log
 		}
 		return nil, fmt.Errorf("openstore: local: %w", err)
 	}
+	return openStartedLocalStore(emb, cfg, logger)
+}
+
+func openStartedLocalStore(emb *EmbeddedFleetDB, cfg fleetdb.Config, logger *slog.Logger) (*StoreHandle, error) {
 	cfg.BaseURL = emb.URL()
 	client, err := emb.NewClient(cfg)
 	if err != nil {
@@ -256,6 +277,7 @@ func tryReuseLocalStore(ctx context.Context, fleetDir string, cfg fleetdb.Config
 		url:                 cfg.BaseURL,
 		fleetDBClientAPIKey: serviceCredential,
 		fleetDBClient:       client,
+		reusedLocal:         true,
 	}, true, nil
 }
 
@@ -281,7 +303,69 @@ func waitAndOpenLocalStore(ctx context.Context, fleetDir string, cfg fleetdb.Con
 		url:                 cfg.BaseURL,
 		fleetDBClientAPIKey: serviceCredential,
 		fleetDBClient:       client,
+		reusedLocal:         true,
 	}, nil
+}
+
+// recoverLocalStore closes the health-to-capability race when a previous Loom
+// service is shutting down its embedded FleetDB while a replacement service is
+// starting. Only operational failures from a borrowed local runtime enter this
+// path. A typed deployment incompatibility still fails closed, and an owned
+// replacement that cannot negotiate capabilities is not repeatedly respawned.
+func recoverLocalStore(
+	ctx context.Context,
+	dataDir string,
+	cfg fleetdb.Config,
+	logger *slog.Logger,
+	required []string,
+	initialErr error,
+) (*StoreHandle, error) {
+	recoveryCtx, cancel := context.WithTimeout(ctx, startupTimeout)
+	defer cancel()
+
+	fleetDir := filepath.Join(dataDir, "fleet-db")
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		if handle, ok, _ := tryReuseLocalStore(recoveryCtx, fleetDir, cfg, logger); ok {
+			capabilityErr := requireFleetDBCapabilities(recoveryCtx, handle, required)
+			if capabilityErr == nil {
+				return handle, nil
+			}
+			_ = handle.Close()
+			if isFleetDBCapabilityIncompatibility(capabilityErr) {
+				return nil, fmt.Errorf("openstore: fleet-db compatibility: %w", capabilityErr)
+			}
+		}
+
+		// The recovery timeout bounds lock/reuse negotiation, but it is not the
+		// lifetime of a replacement process that this StoreHandle will own. Use
+		// the caller's service context for the child; canceling recoveryCtx on a
+		// successful return would otherwise kill the freshly started FleetDB.
+		emb, err := StartEmbedded(ctx, dataDir, logger)
+		if err == nil {
+			handle, openErr := openStartedLocalStore(emb, cfg, logger)
+			if openErr != nil {
+				return nil, openErr
+			}
+			if capabilityErr := requireFleetDBCapabilities(recoveryCtx, handle, required); capabilityErr != nil {
+				if closeErr := handle.Close(); closeErr != nil {
+					return nil, fmt.Errorf("openstore: fleet-db compatibility after local recovery: %w (cleanup: %v)", capabilityErr, closeErr)
+				}
+				return nil, fmt.Errorf("openstore: fleet-db compatibility after local recovery: %w", capabilityErr)
+			}
+			return handle, nil
+		}
+		if !errors.Is(err, ErrEmbeddedAlreadyRunning) {
+			return nil, fmt.Errorf("openstore: recover local runtime after compatibility failure %v: %w", initialErr, err)
+		}
+		select {
+		case <-recoveryCtx.Done():
+			return nil, fmt.Errorf("openstore: recover local runtime after compatibility failure %v: %w (last error: %v)", initialErr, recoveryCtx.Err(), err)
+		case <-ticker.C:
+		}
+	}
 }
 
 // resolveActor returns the X-Actor identity.

@@ -1,8 +1,13 @@
 package archtest
 
 import (
+	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 
 	"golang.org/x/tools/go/packages"
@@ -11,6 +16,105 @@ import (
 func TestRepositoryScalePackageLoadsStaySerialized(t *testing.T) {
 	if repositoryScaleLoadConcurrency != 1 {
 		t.Fatalf("repository-scale package load concurrency = %d, want 1 to bound peak memory", repositoryScaleLoadConcurrency)
+	}
+}
+
+func TestRepositoryProfileCacheIsIsolatedAndRemoved(t *testing.T) {
+	inherited := filepath.Join(t.TempDir(), "inherited-cache")
+	t.Setenv("GOCACHE", inherited)
+
+	var scoped string
+	err := withRepositoryProfileCache(
+		AnalysisProfile{Name: "cache-test", GOOS: "plan9", GOARCH: "amd64"},
+		func(environment []string) error {
+			for _, entry := range environment {
+				if strings.HasPrefix(entry, "GOCACHE=") {
+					scoped = strings.TrimPrefix(entry, "GOCACHE=")
+					break
+				}
+			}
+			if scoped == "" {
+				t.Fatal("scoped profile environment has no GOCACHE")
+			}
+			if scoped == inherited {
+				t.Fatalf("scoped GOCACHE = inherited cache %q", inherited)
+			}
+			return os.WriteFile(filepath.Join(scoped, "proof"), []byte("scoped"), 0o600)
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(scoped); !os.IsNotExist(err) {
+		t.Fatalf("scoped GOCACHE still exists after profile analysis: %v", err)
+	}
+	if _, err := os.Stat(inherited); !os.IsNotExist(err) {
+		t.Fatalf("inherited GOCACHE was mutated: %v", err)
+	}
+}
+
+func TestRepositoryNativeTaggedRaceProfileReusesExplicitCallerCache(t *testing.T) {
+	inherited := t.TempDir()
+	t.Setenv("GOCACHE", inherited)
+
+	var scoped string
+	err := withRepositoryProfileCache(
+		AnalysisProfile{
+			Name: "native-cache-test", GOOS: runtime.GOOS, GOARCH: runtime.GOARCH,
+			Tags: []string{"integration"}, Race: true,
+		},
+		func(environment []string) error {
+			for _, entry := range environment {
+				if strings.HasPrefix(entry, "GOCACHE=") {
+					scoped = strings.TrimPrefix(entry, "GOCACHE=")
+					break
+				}
+			}
+			return os.WriteFile(filepath.Join(scoped, "proof"), []byte("reused"), 0o600)
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if scoped != inherited {
+		t.Fatalf("native profile GOCACHE = %q, want inherited %q", scoped, inherited)
+	}
+	if _, err := os.Stat(filepath.Join(inherited, "proof")); err != nil {
+		t.Fatalf("native profile did not reuse caller cache: %v", err)
+	}
+}
+
+func TestRepositoryProfileCacheIsRemovedAfterAnalysisFailure(t *testing.T) {
+	// Force the native-profile reuse check to fail on every host. Otherwise the
+	// linux/amd64 CI runner correctly reuses its caller cache and this test
+	// incorrectly expects that shared cache to be deleted.
+	t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "missing-cache"))
+
+	sentinel := errors.New("analysis failed")
+	var scoped string
+	err := withRepositoryProfileCache(
+		AnalysisProfile{Name: "failure-test", GOOS: "linux", GOARCH: "amd64"},
+		func(environment []string) error {
+			for _, entry := range environment {
+				if strings.HasPrefix(entry, "GOCACHE=") {
+					scoped = strings.TrimPrefix(entry, "GOCACHE=")
+					break
+				}
+			}
+			if scoped == "" || !filepath.IsAbs(scoped) {
+				t.Fatalf("scoped GOCACHE = %q, want an absolute path", scoped)
+			}
+			if err := os.WriteFile(filepath.Join(scoped, "proof"), []byte("scoped"), 0o600); err != nil {
+				return err
+			}
+			return sentinel
+		},
+	)
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("profile analysis error = %v, want %v", err, sentinel)
+	}
+	if _, err := os.Stat(scoped); !os.IsNotExist(err) {
+		t.Fatalf("failed profile GOCACHE still exists: %v", err)
 	}
 }
 

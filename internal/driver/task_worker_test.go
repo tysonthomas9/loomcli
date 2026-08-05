@@ -532,7 +532,7 @@ func TestTaskWorkerRunOnceSerializesClaimReceiptReplay(t *testing.T) {
 	}
 }
 
-func TestTaskWorkerRunOnceMapsFlueSessionUnderParent(t *testing.T) {
+func TestTaskWorkerRunOnceKeepsFlueTaskRunDistinctFromInteractionSession(t *testing.T) {
 	ctx, st, run := setupRunningDriverRun(t)
 	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
 		WorkspaceKey:     "TEST",
@@ -574,15 +574,11 @@ func TestTaskWorkerRunOnceMapsFlueSessionUnderParent(t *testing.T) {
 	if outcome.Run.Status != domain.TaskRunCompleted {
 		t.Fatalf("outcome status = %s error=%s, want completed", outcome.Run.Status, outcome.Run.ErrorMessage)
 	}
-	session, err := st.AgentSessions().Get(ctx, "TEST", "flue-task-run-worker-flue")
-	if err != nil {
-		t.Fatalf("get flue agent session: %v", err)
+	if _, err := st.AgentSessions().Get(ctx, "TEST", "flue-task-run-worker-flue"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("batch worker created Interaction AgentSession shadow: %v", err)
 	}
-	if session.Kind != domain.AgentSessionKindTask || session.TaskID != "TEST-12" || session.ParentSessionID != "lead-session-1" {
-		t.Fatalf("session = %+v, want task session under lead-session-1", session)
-	}
-	if session.Metadata["runtime"] != "flue" || session.Metadata["task_run_id"] != "task-run-worker-flue" || session.Metadata["transcript_ref"] == "" {
-		t.Fatalf("session metadata = %+v, want flue transcript metadata", session.Metadata)
+	if outcome.Run.RuntimeMetadata["transcript_ref"] != "artifact://transcript-task-run-worker-flue" {
+		t.Fatalf("TaskRun transcript ref = %q, want TaskRun-owned evidence", outcome.Run.RuntimeMetadata["transcript_ref"])
 	}
 }
 
@@ -819,13 +815,8 @@ func TestTaskWorkerRetryPersistsDistinctAttemptTranscriptsAndCompletes(t *testin
 		!strings.Contains(string(secondContent), "transcript for attempt 2") {
 		t.Fatalf("transcript contents first=%q second=%q, want distinct attempt evidence", firstContent, secondContent)
 	}
-	session, err := st.AgentSessions().Get(ctx, "TEST", "flue-"+taskRunID)
-	if err != nil {
-		t.Fatalf("get retry session: %v", err)
-	}
-	if session.Status != domain.AgentSessionCompleted ||
-		session.Metadata["transcript_ref"] != "artifact://"+secondTranscriptID {
-		t.Fatalf("session after successful retry = %+v, want completed with current transcript link", session)
+	if _, err := st.AgentSessions().Get(ctx, "TEST", "flue-"+taskRunID); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("retry created Interaction AgentSession shadow: %v", err)
 	}
 }
 

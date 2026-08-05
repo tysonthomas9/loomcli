@@ -245,6 +245,25 @@ type ArtifactContentReader interface {
 // an internal error.
 var ErrArtifactContentUnavailable = errors.New("artifact content temporarily unavailable")
 
+// ErrControlPlaneUnavailable identifies a retryable failure to reach or serve
+// the durable control plane. Infrastructure adapters wrap this sentinel while
+// preserving their concrete transport error so service layers can return 503
+// without importing a FleetDB implementation or exposing transport details.
+//
+// Deprecated: use domain.ErrUnavailable at capability and transport
+// boundaries. This alias preserves errors.Is compatibility for legacy Store
+// consumers without making upper layers import persistence contracts.
+var ErrControlPlaneUnavailable = domain.ErrUnavailable
+
+// ErrControlPlaneRateLimited is the narrower retryable admission failure.
+// Services preserve it as 429 so clients can apply bounded backoff rather than
+// presenting a durable transcript or session failure.
+//
+// Deprecated: use domain.ErrRateLimited at capability and transport
+// boundaries. This alias preserves errors.Is compatibility for legacy Store
+// consumers without making upper layers import persistence contracts.
+var ErrControlPlaneRateLimited = domain.ErrRateLimited
+
 type AgentLeaseCreate struct {
 	WorkspaceKey string
 	SessionID    string
@@ -286,6 +305,29 @@ type AgentOwnershipLeaseFilter struct {
 	RuntimeProvider domain.RuntimeProvider
 	Status          domain.AgentLeaseStatus
 	Limit           int
+}
+
+// AgentOwnershipLeaseProof identifies one exact ownership generation. It is
+// request-only: LeaseToken is a bearer secret and must never be persisted or
+// returned in a public projection.
+type AgentOwnershipLeaseProof struct {
+	WorkspaceKey    string
+	AgentID         string
+	LeaseID         string
+	LeaseToken      string
+	OwnerID         string
+	RuntimeProvider domain.RuntimeProvider
+	NodeID          string
+	FencingToken    int64
+}
+
+// AgentOwnershipLeaseOwnedStore is the narrow compatibility seam used by the
+// transitional daemon supervisor when FleetDB publishes owner-fenced Phase 5
+// ownership commands. Implementations validate the complete proof atomically;
+// callers may fall back to AgentOwnershipLeaseStore only for legacy backends.
+type AgentOwnershipLeaseOwnedStore interface {
+	HeartbeatOwned(ctx context.Context, proof AgentOwnershipLeaseProof, ttl time.Duration) (*domain.AgentOwnershipLease, error)
+	ReleaseOwned(ctx context.Context, proof AgentOwnershipLeaseProof) (*domain.AgentOwnershipLease, error)
 }
 
 type AgentOwnershipLeaseStore interface {

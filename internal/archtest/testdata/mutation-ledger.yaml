@@ -1,6 +1,300 @@
 schema_version: 1
 status: reviewed
 commands:
+  - id: agentprovisioning.begin
+    phase: 5
+    aggregate_owner: agents
+    coordinating_owner: agentprovisioning
+    mechanism_discriminator: agent_provisioning_intent
+    instance_owner: agentprovisioning
+    accepted_authority: [operator]
+    durable_commands: [fleetdb.begin_agent_provisioning.v1, fleetdb.save_agent_provisioning_progress.v1]
+    transaction_or_saga_boundary: FleetDB first-writer-wins persistence records the complete secret-free intent before the process manager converges Role, Agent, Binding, and Grant steps with deterministic command IDs and version-CAS progress.
+    idempotency_key: workspace_id:provisioning_id:intent_fingerprint
+    semantic_events_or_read_models: [agents.provisioning_progress.v1]
+    retry_restart_behavior: Exact intent replay returns the durable record; a changed intent under the same provisioning ID conflicts, and startup recovery resumes only pending, running, or retryable-failed steps.
+    negative_tests: [divergent_intent, expired_operator, secret_in_intent, unauthenticated, wrong_action, wrong_workspace]
+    fault_injection_tests: [crash_after_external_commit, duplicate_request, lost_response_after_commit, progress_cas_conflict]
+  - id: agents.acquire-ownership
+    phase: 5
+    aggregate_owner: agents
+    coordinating_owner: agents
+    mechanism_discriminator: agent_ownership_generation
+    instance_owner: agents
+    accepted_authority: [system]
+    durable_commands: [fleetdb.acquire_agent_ownership.v1]
+    transaction_or_saga_boundary: FleetDB atomically claims the Agent ownership generation and returns one opaque lease credential plus its public fenced ownership record.
+    idempotency_key: workspace_id:agent_id:owner_id:request_id
+    semantic_events_or_read_models: [agents.ownership.v1]
+    retry_restart_behavior: Exact acquisition replay returns the same generation; a live competing owner is rejected and expiry permits a later generation without reviving an old proof.
+    negative_tests: [expired_system_authority, live_competing_owner, unauthenticated, wrong_action, wrong_component, wrong_workspace]
+    fault_injection_tests: [concurrent_request, duplicate_request, lost_response_after_commit]
+  - id: agents.apply-lifecycle
+    phase: 5
+    aggregate_owner: agents
+    coordinating_owner: agents
+    mechanism_discriminator: agent_lifecycle:agent_service:trigger_bindings:connector_grants
+    instance_owner: agents
+    accepted_authority: [operator]
+    durable_commands: [fleetdb.apply_agent_lifecycle.v1]
+    transaction_or_saga_boundary: One FleetDB Redis script or PostgreSQL transaction CAS-fences the Agent revision and changes every owned managed binding together with desired state; deletion additionally revokes every binding-scoped active grant, retires and removes the bindings, and archives the Agent in the same visibility point.
+    idempotency_key: workspace_id:agent_id:expected_revision:action:caller_idempotency_key
+    semantic_events_or_read_models: [agents.identity.v1, agents.lifecycle_receipt.v1, automation.binding.v1, connectors.grant.v1]
+    retry_restart_behavior: FleetDB persists the exact secret-free result in the same commit and returns it before live-revision checks on replay, so a lost response or Loom restart cannot expose or strand a half-enabled, half-disabled, or partially deleted Agent.
+    negative_tests: [archived_agent, divergent_idempotency_key, expired_operator, retired_binding_grant_create, stale_revision, unauthenticated, wrong_action, wrong_workspace]
+    fault_injection_tests: [concurrent_binding_create, concurrent_grant_create, lost_response_after_commit, restart_exact_replay]
+  - id: agents.archive-agent
+    phase: 5
+    aggregate_owner: agents
+    coordinating_owner: agents
+    mechanism_discriminator: agent_identity
+    instance_owner: agents
+    accepted_authority: [operator]
+    durable_commands: [fleetdb.archive_agent_service.v1]
+    transaction_or_saga_boundary: FleetDB applies one expected-revision transition that archives the Agent identity without deleting its audit history or transferring ownership to Interaction or Execution.
+    idempotency_key: workspace_id:agent_id:expected_revision:archive
+    semantic_events_or_read_models: [agents.identity.v1]
+    retry_restart_behavior: An exact receipt replays the archived snapshot; a stale revision or changed identity conflicts without a generic delete fallback.
+    negative_tests: [expired_operator, stale_revision, unauthenticated, wrong_action, wrong_workspace]
+    fault_injection_tests: [concurrent_request, duplicate_request, lost_response_after_commit]
+  - id: agents.bind-supervised-assignment-parent
+    phase: 5
+    aggregate_owner: agents
+    coordinating_owner: execution
+    mechanism_discriminator: supervised_assignment_parent:driver_run_generation
+    instance_owner: agents
+    accepted_authority: [system]
+    durable_commands: [agents.compat.bind_supervised_assignment_parent.v1]
+    transaction_or_saga_boundary: The Driver API first verifies the exact running DriverRun node, lease, and fence through Execution; the application process manager then derives a single-action Agents system authority and compatstore compare-and-sets the expected parent.
+    idempotency_key: workspace_id:agent_name:expected_parent:driver_run_id:lease_id:fencing_token
+    semantic_events_or_read_models: [agents.supervised_assignment.v1]
+    retry_restart_behavior: Exact same-generation replay converges on the bound parent; a stale DriverRun generation or changed expected parent conflicts and cannot fall back to a filesystem lock.
+    negative_tests: [expired_system_authority, forged_proof, stale_fence, unauthenticated, wrong_action, wrong_driver_run, wrong_workspace]
+    fault_injection_tests: [concurrent_parent_change, duplicate_request, lost_response_after_commit]
+  - id: agents.create-agent
+    phase: 5
+    aggregate_owner: agents
+    coordinating_owner: agents
+    mechanism_discriminator: agent_identity
+    instance_owner: agents
+    accepted_authority: [operator]
+    durable_commands: [fleetdb.create_agent_service.v1]
+    transaction_or_saga_boundary: FleetDB reserves the workspace Agent identity and persists only Role or Driver behavior references plus desired intent; terminal, Git, trigger, and execution state are excluded.
+    idempotency_key: workspace_id:agent_id:create
+    semantic_events_or_read_models: [agents.identity.v1]
+    retry_restart_behavior: Exact definition replay converges on the same Agent identity; a divergent definition under the same Agent ID conflicts.
+    negative_tests: [divergent_identity, expired_operator, invalid_behavior_reference, unauthenticated, wrong_action, wrong_workspace]
+    fault_injection_tests: [concurrent_request, duplicate_request, lost_response_after_commit]
+  - id: agents.create-role
+    phase: 5
+    aggregate_owner: agents
+    coordinating_owner: agents
+    mechanism_discriminator: role_definition
+    instance_owner: agents
+    accepted_authority: [operator]
+    durable_commands: [fleetdb.create_role.v1]
+    transaction_or_saga_boundary: Agents validates the complete Role policy and FleetDB atomically reserves the workspace and Role-name natural key without embedding session, terminal, trigger, Git, or execution state.
+    idempotency_key: workspace_id:role_name:definition_fingerprint
+    semantic_events_or_read_models: [agents.role.v1]
+    retry_restart_behavior: The stable natural key makes a committed Role discoverable after a lost response; duplicate create reports already exists, and concurrent or divergent reuse never overwrites the existing policy.
+    negative_tests: [divergent_role, expired_operator, invalid_role, unauthenticated, wrong_action, wrong_workspace]
+    fault_injection_tests: [concurrent_request, duplicate_request, lost_response_after_commit]
+  - id: agents.create-supervised-assignment
+    phase: 5
+    aggregate_owner: agents
+    coordinating_owner: agents
+    mechanism_discriminator: supervised_assignment_intent
+    instance_owner: agents
+    accepted_authority: [operator]
+    durable_commands: [agents.compat.create_supervised_assignment.v1]
+    transaction_or_saga_boundary: Agents admits one operator-owned assignment definition and compatstore creates only configuration plus desired intent; observed runtime state and parent linkage are structurally absent.
+    idempotency_key: workspace_id:agent_name:create
+    semantic_events_or_read_models: [agents.supervised_assignment.v1]
+    retry_restart_behavior: The workspace and agent-name natural key makes a committed create discoverable; duplicate or divergent create never overwrites the existing assignment.
+    negative_tests: [invalid_definition, parent_in_create, runtime_state_in_create, unauthenticated, wrong_action, wrong_workspace]
+    fault_injection_tests: [concurrent_request, duplicate_request, lost_response_after_commit]
+  - id: agents.delete-role
+    phase: 5
+    aggregate_owner: agents
+    coordinating_owner: agents
+    mechanism_discriminator: role_definition
+    instance_owner: agents
+    accepted_authority: [operator]
+    durable_commands: [fleetdb.delete_role_cas.v1]
+    transaction_or_saga_boundary: FleetDB validates the expected Role revision and rejects deletion while an Agent still references the Role, then removes only that exact policy record in one atomic transition.
+    idempotency_key: workspace_id:role_name:expected_revision:delete
+    semantic_events_or_read_models: [agents.role.v1]
+    retry_restart_behavior: A committed delete is observable as not found and cannot remove a recreated successor revision; stale revision or active reference conflicts require a fresh operator decision.
+    negative_tests: [active_agent_reference, expired_operator, stale_revision, unauthenticated, wrong_action, wrong_workspace]
+    fault_injection_tests: [concurrent_agent_create, concurrent_role_update, lost_response_after_commit]
+  - id: agents.ensure-managed-agent
+    phase: 5
+    aggregate_owner: agents
+    coordinating_owner: agentprovisioning
+    mechanism_discriminator: agent_identity:managed
+    instance_owner: agents
+    accepted_authority: [system]
+    durable_commands: [fleetdb.ensure_managed_agent_service.v1]
+    transaction_or_saga_boundary: Agents validates the complete immutable managed definition and FleetDB creates it or returns the exact existing identity without adopting a divergent record.
+    idempotency_key: workspace_id:agent_id:provisioning_id:agent_step
+    semantic_events_or_read_models: [agents.identity.v1]
+    retry_restart_behavior: The deterministic provisioning command ID makes crash replay converge; same-key divergent state is a permanent conflict.
+    negative_tests: [divergent_identity, expired_system_authority, unauthenticated, wrong_action, wrong_component, wrong_workspace]
+    fault_injection_tests: [concurrent_request, duplicate_request, lost_response_after_commit]
+  - id: agents.ensure-managed-role
+    phase: 5
+    aggregate_owner: agents
+    coordinating_owner: agentprovisioning
+    mechanism_discriminator: role_definition:managed
+    instance_owner: agents
+    accepted_authority: [system]
+    durable_commands: [fleetdb.ensure_managed_role.v1]
+    transaction_or_saga_boundary: Agents validates the complete Role definition and FleetDB creates it or returns the exact existing natural-key record; unused managed Roles remain retained and auditable.
+    idempotency_key: workspace_id:role_name:provisioning_id:role_step
+    semantic_events_or_read_models: [agents.role.v1]
+    retry_restart_behavior: Exact replay converges on the same Role; a conflicting definition never overwrites or deletes the retained Role.
+    negative_tests: [divergent_role, expired_system_authority, unauthenticated, wrong_action, wrong_component, wrong_workspace]
+    fault_injection_tests: [concurrent_request, duplicate_request, lost_response_after_commit]
+  - id: agents.release-ownership
+    phase: 5
+    aggregate_owner: agents
+    coordinating_owner: agents
+    mechanism_discriminator: agent_ownership_generation
+    instance_owner: agents
+    accepted_authority: [system]
+    durable_commands: [fleetdb.release_agent_ownership.v1]
+    transaction_or_saga_boundary: FleetDB validates the complete opaque ownership proof and closes only that exact Agent ownership generation.
+    idempotency_key: workspace_id:agent_id:lease_id:fencing_token:release
+    semantic_events_or_read_models: [agents.ownership.v1]
+    retry_restart_behavior: Releasing the same closed generation is replay-safe; stale or cross-owner proofs cannot affect the current generation.
+    negative_tests: [expired_ownership, expired_system_authority, owner_mismatch, stale_fence, unauthenticated, wrong_action, wrong_workspace]
+    fault_injection_tests: [duplicate_request, lost_response_after_commit, release_renew_race]
+  - id: agents.renew-ownership
+    phase: 5
+    aggregate_owner: agents
+    coordinating_owner: agents
+    mechanism_discriminator: agent_ownership_generation
+    instance_owner: agents
+    accepted_authority: [system]
+    durable_commands: [fleetdb.renew_agent_ownership.v1]
+    transaction_or_saga_boundary: FleetDB validates lease ID, opaque credential, owner, runtime provider, node, and fence before extending only the exact live Agent ownership generation.
+    idempotency_key: workspace_id:agent_id:lease_id:fencing_token:renewal_deadline
+    semantic_events_or_read_models: [agents.ownership.v1]
+    retry_restart_behavior: Repeated renewal of the same generation converges on a nondecreasing expiry; stale generations remain fenced out.
+    negative_tests: [expired_ownership, expired_system_authority, owner_mismatch, stale_fence, unauthenticated, wrong_action, wrong_workspace]
+    fault_injection_tests: [duplicate_request, lost_response_after_commit, renew_release_race]
+  - id: agents.repair-managed-role-prompt-file
+    phase: 5
+    aggregate_owner: agents
+    coordinating_owner: agents
+    mechanism_discriminator: role_prompt_file:fill_if_empty
+    instance_owner: agents
+    accepted_authority: [system]
+    durable_commands: [agents.compat.repair_managed_role_prompt_file.v1]
+    transaction_or_saga_boundary: Agents admits one exact startup repair request and compatstore invokes the Role store fill-if-empty primitive, so an existing nonempty prompt is never overwritten by read-then-write repair.
+    idempotency_key: workspace_id:role_name:request_id:prompt_file
+    semantic_events_or_read_models: [agents.role.v1]
+    retry_restart_behavior: Repeating the same fill-if-empty repair returns the exact Role; a divergent nonempty value conflicts and remains unchanged.
+    negative_tests: [divergent_prompt, expired_system_authority, nonempty_prompt_file, unauthenticated, wrong_action, wrong_workspace]
+    fault_injection_tests: [concurrent_prompt_update, duplicate_request, lost_response_after_commit]
+  - id: agents.retire-managed-supervised-assignment
+    phase: 5
+    aggregate_owner: agents
+    coordinating_owner: agents
+    mechanism_discriminator: supervised_assignment_retirement:managed
+    instance_owner: agents
+    accepted_authority: [system]
+    durable_commands: [agents.compat.retire_supervised_assignment.v1]
+    transaction_or_saga_boundary: A narrow application workflow derives one audited system authority and Agents deletes only the named compatibility assignment after its owning migration has converged.
+    idempotency_key: workspace_id:agent_name:managed_retirement
+    semantic_events_or_read_models: [agents.supervised_assignment.v1]
+    retry_restart_behavior: Missing is success, so restart replay converges; a wrong component, action, or workspace never reaches compatstore.
+    negative_tests: [expired_system_authority, unauthenticated, wrong_action, wrong_component, wrong_workspace]
+    fault_injection_tests: [concurrent_request, duplicate_request, lost_response_after_commit]
+  - id: agents.retire-supervised-assignment
+    phase: 5
+    aggregate_owner: agents
+    coordinating_owner: agents
+    mechanism_discriminator: supervised_assignment_retirement:operator
+    instance_owner: agents
+    accepted_authority: [operator]
+    durable_commands: [agents.compat.retire_supervised_assignment.v1]
+    transaction_or_saga_boundary: Agents admits the exact operator retirement and compatstore removes only the named transitional assignment without exposing the process-wide Store.
+    idempotency_key: workspace_id:agent_name:operator_retirement
+    semantic_events_or_read_models: [agents.supervised_assignment.v1]
+    retry_restart_behavior: Missing is success, so a lost response or restart replay converges without deleting a differently named assignment.
+    negative_tests: [expired_operator, unauthenticated, wrong_action, wrong_workspace]
+    fault_injection_tests: [concurrent_request, duplicate_request, lost_response_after_commit]
+  - id: agents.set-desired-state
+    phase: 5
+    aggregate_owner: agents
+    coordinating_owner: agents
+    mechanism_discriminator: agent_desired_state
+    instance_owner: agents
+    accepted_authority: [operator]
+    durable_commands: [fleetdb.set_agent_desired_state.v1]
+    transaction_or_saga_boundary: FleetDB applies one expected-revision desired-state transition while leaving observed session and execution activity in their owning capabilities.
+    idempotency_key: workspace_id:agent_id:expected_revision:desired_state
+    semantic_events_or_read_models: [agents.desired_state.v1]
+    retry_restart_behavior: Exact receipt replay returns the committed desired state; a stale revision conflicts without inferring state from activity.
+    negative_tests: [expired_operator, invalid_transition, stale_revision, unauthenticated, wrong_action, wrong_workspace]
+    fault_injection_tests: [concurrent_request, duplicate_request, lost_response_after_commit]
+  - id: agents.set-desired-state-owned
+    phase: 5
+    aggregate_owner: agents
+    coordinating_owner: agents
+    mechanism_discriminator: agent_desired_state:ownership
+    instance_owner: agents
+    accepted_authority: [system]
+    durable_commands: [fleetdb.set_agent_desired_state_owned.v1]
+    transaction_or_saga_boundary: FleetDB validates the exact Agent ownership generation and expected identity revision before changing desired state for the owned Agent.
+    idempotency_key: workspace_id:agent_id:lease_id:fencing_token:expected_revision:desired_state
+    semantic_events_or_read_models: [agents.desired_state.v1]
+    retry_restart_behavior: Exact owner-fenced replay returns the committed transition; an expired or superseded ownership generation cannot mutate desired state.
+    negative_tests: [expired_ownership, expired_system_authority, owner_mismatch, stale_fence, stale_revision, unauthenticated, wrong_action, wrong_workspace]
+    fault_injection_tests: [duplicate_request, lost_response_after_commit, ownership_generation_change]
+  - id: agents.update-agent
+    phase: 5
+    aggregate_owner: agents
+    coordinating_owner: agents
+    mechanism_discriminator: agent_identity
+    instance_owner: agents
+    accepted_authority: [operator]
+    durable_commands: [fleetdb.update_agent_service.v1]
+    transaction_or_saga_boundary: FleetDB applies one expected-revision patch limited to identity and behavior references; desired state and ownership use dedicated commands.
+    idempotency_key: workspace_id:agent_id:expected_revision:patch_fingerprint
+    semantic_events_or_read_models: [agents.identity.v1]
+    retry_restart_behavior: Exact receipt replay returns the updated identity; stale revision or an attempt to smuggle desired state through the identity patch fails closed.
+    negative_tests: [desired_state_in_patch, expired_operator, stale_revision, unauthenticated, wrong_action, wrong_workspace]
+    fault_injection_tests: [concurrent_request, duplicate_request, lost_response_after_commit]
+  - id: agents.update-role
+    phase: 5
+    aggregate_owner: agents
+    coordinating_owner: agents
+    mechanism_discriminator: role_definition
+    instance_owner: agents
+    accepted_authority: [operator]
+    durable_commands: [fleetdb.update_role_cas.v1]
+    transaction_or_saga_boundary: FleetDB validates the expected Role revision and applies one bounded policy patch atomically while preserving the workspace and Role-name identity.
+    idempotency_key: workspace_id:role_name:expected_revision:patch_fingerprint
+    semantic_events_or_read_models: [agents.role.v1]
+    retry_restart_behavior: After a lost response the caller reads the current Role and may accept the exact requested patch result; replay with the consumed revision conflicts, and a divergent concurrent patch never falls back to read-then-replace.
+    negative_tests: [expired_operator, invalid_patch, stale_revision, unauthenticated, wrong_action, wrong_workspace]
+    fault_injection_tests: [concurrent_request, duplicate_request, lost_response_after_commit]
+  - id: agents.update-supervised-assignment-intent
+    phase: 5
+    aggregate_owner: agents
+    coordinating_owner: agents
+    mechanism_discriminator: supervised_assignment_intent_patch
+    instance_owner: agents
+    accepted_authority: [operator]
+    durable_commands: [agents.compat.update_supervised_assignment_intent.v1]
+    transaction_or_saga_boundary: Agents admits one bounded operator-intent patch and compatstore updates only configuration or desired state; observed runtime state and parent linkage are structurally absent.
+    idempotency_key: workspace_id:agent_name:intent_patch_fingerprint
+    semantic_events_or_read_models: [agents.supervised_assignment.v1]
+    retry_restart_behavior: Exact patch replay converges on the same intent, while an empty patch or attempt to smuggle runtime or parent state is rejected before persistence.
+    negative_tests: [empty_patch, expired_operator, parent_in_patch, runtime_state_in_patch, unauthenticated, wrong_action, wrong_workspace]
+    fault_injection_tests: [concurrent_request, duplicate_request, lost_response_after_commit]
   - id: artifacts.declare
     phase: 4
     aggregate_owner: artifacts
@@ -197,6 +491,20 @@ commands:
     retry_restart_behavior: An already-enabled owner-matched binding returns its durable snapshot; mismatched owners remain rejected.
     negative_tests: [expired_operator, mismatched_agent_service_owner, ordinary_binding_authority, unauthenticated, wrong_action, wrong_workspace]
     fault_injection_tests: [duplicate_request, persistence_failure]
+  - id: automation.ensure-managed-binding
+    phase: 5
+    aggregate_owner: automation
+    coordinating_owner: agentprovisioning
+    mechanism_discriminator: trigger_binding:agent
+    instance_owner: automation
+    accepted_authority: [system]
+    durable_commands: [fleetdb.ensure_managed_trigger_binding.v1]
+    transaction_or_saga_boundary: Automation validates the exact Agent owner and complete managed binding definition, then creates it or returns the exact existing record without adopting or updating divergence.
+    idempotency_key: workspace_id:agent_id:binding_id:provisioning_id:binding_step
+    semantic_events_or_read_models: [automation.binding.v1]
+    retry_restart_behavior: Deterministic provisioning replay converges on one binding; same-ID divergent state is a permanent conflict and ordinary operator commands cannot take ownership.
+    negative_tests: [divergent_binding, expired_system_authority, owner_mismatch, unauthenticated, wrong_action, wrong_component, wrong_workspace]
+    fault_injection_tests: [concurrent_request, duplicate_request, lost_response_after_commit]
   - id: automation.retry-deliveries
     phase: 3
     aggregate_owner: automation
@@ -253,6 +561,20 @@ commands:
     retry_restart_behavior: Repeating an identical owner-matched patch converges; an owner change or ordinary binding command fails closed.
     negative_tests: [expired_operator, immutable_binding_id, mismatched_agent_service_owner, ordinary_binding_authority, unauthenticated, wrong_action, wrong_workspace]
     fault_injection_tests: [duplicate_request, persistence_failure, response_validation]
+  - id: connectors.ensure-grant
+    phase: 5
+    aggregate_owner: connectors
+    coordinating_owner: agentprovisioning
+    mechanism_discriminator: connector_grant:binding
+    instance_owner: connectors
+    accepted_authority: [system]
+    durable_commands: [fleetdb.ensure_connector_grant.v1]
+    transaction_or_saga_boundary: Connectors validates the immutable binding-scoped grant tuple and FleetDB creates it or returns the exact existing grant without exposing or persisting a resolved credential.
+    idempotency_key: workspace_id:binding_id:grant_id:provisioning_id:grant_step
+    semantic_events_or_read_models: [connectors.grant.v1]
+    retry_restart_behavior: Exact replay converges on the same grant; reusing the grant ID for another connector, binding, action, or resource fails closed.
+    negative_tests: [credential_in_result, divergent_grant, expired_system_authority, unauthenticated, wrong_action, wrong_component, wrong_workspace]
+    fault_injection_tests: [concurrent_request, duplicate_request, lost_response_after_commit]
   - id: execution.append-log
     phase: 4
     aggregate_owner: execution
@@ -813,6 +1135,230 @@ commands:
     retry_restart_behavior: Repeating the desired patch converges on the current profile projection; conflicting concurrent changes remain visible through the resulting persisted state rather than replaying a stale snapshot.
     negative_tests: [expired_operator, invalid_patch, unauthenticated, wrong_action, wrong_workspace]
     fault_injection_tests: [concurrent_update, duplicate_request, lost_response_after_commit]
+  - id: interaction.claim-inbox
+    phase: 5
+    aggregate_owner: interaction
+    coordinating_owner: interaction
+    mechanism_discriminator: inbox_delivery:session
+    instance_owner: interaction
+    accepted_authority: [session]
+    durable_commands: [fleetdb.claim_interaction_inbox.v1]
+    transaction_or_saga_boundary: FleetDB validates the one-use SessionAuthority against the exact live AgentLease generation and atomically claims the next eligible Inbox message for that session.
+    idempotency_key: workspace_id:session_id:lease_id:fencing_token:claim_request_id
+    semantic_events_or_read_models: [interaction.inbox.v1]
+    retry_restart_behavior: Exact claim replay returns the same message while a stale session fence or competing live claim is rejected.
+    negative_tests: [expired_session, owner_mismatch, stale_fence, unauthenticated, wrong_action, wrong_resource, wrong_workspace]
+    fault_injection_tests: [concurrent_claimants, duplicate_request, lost_response_after_commit]
+  - id: interaction.complete-inbox
+    phase: 5
+    aggregate_owner: interaction
+    coordinating_owner: interaction
+    mechanism_discriminator: inbox_delivery:session
+    instance_owner: interaction
+    accepted_authority: [session]
+    durable_commands: [fleetdb.complete_interaction_inbox.v1]
+    transaction_or_saga_boundary: FleetDB validates the exact session and claimed attempt before atomically recording delivered or failed, or returning the message to queued while clearing only that claim generation.
+    idempotency_key: workspace_id:session_id:inbox_message_id:attempt:completion
+    semantic_events_or_read_models: [interaction.inbox.v1]
+    retry_restart_behavior: Exact same-attempt outcome replay returns the committed message; queued preserves the attempt for a later incrementing reclaim, while an older attempt, superseded lease generation, or foreign session cannot clear or complete the successor claim.
+    negative_tests: [expired_session, owner_mismatch, stale_claim, stale_fence, unauthenticated, wrong_action, wrong_resource, wrong_workspace]
+    fault_injection_tests: [duplicate_request, lost_response_after_commit, reclaim_completion_race]
+  - id: interaction.deliver-assignment
+    phase: 5
+    aggregate_owner: interaction
+    coordinating_owner: interaction
+    mechanism_discriminator: provider_neutral_assignment_delivery
+    instance_owner: interaction
+    accepted_authority: [operator, system]
+    durable_commands: [fleetdb.enqueue_interaction_inbox.v1]
+    transaction_or_saga_boundary: Interaction resolves the current durable lead assignment behind its runtime port and enqueues one immutable inbox message through the owner command; callers cannot forge the assignment body, version, provider endpoint, or session identity.
+    idempotency_key: workspace_id:agent_id:epic_id:assignment_version
+    semantic_events_or_read_models: [interaction.chat_delivery.v1, interaction.inbox.v1]
+    retry_restart_behavior: The assignment version derives the inbox dedupe identity, so duplicate delivery and lost-response replay return the same queued message; a later assignment version creates a distinct message and an unavailable runtime leaves no fabricated delivery receipt.
+    negative_tests: [expired_operator, expired_system_authority, invalid_target_agent, missing_assignment, unauthenticated, wrong_action, wrong_component, wrong_workspace]
+    fault_injection_tests: [duplicate_request, lost_response_after_commit, session_start_race]
+  - id: interaction.deliver-chat-message
+    phase: 5
+    aggregate_owner: interaction
+    coordinating_owner: interaction
+    mechanism_discriminator: provider_neutral_chat_delivery
+    instance_owner: interaction
+    accepted_authority: [operator, system]
+    durable_commands: [fleetdb.enqueue_interaction_inbox.v1]
+    transaction_or_saga_boundary: Interaction validates bounded message and provenance coordinates, verifies the target Agent through its owned query seam, and enqueues one immutable inbox message without exposing provider endpoints, credentials, transcripts, or the authority issuer.
+    idempotency_key: workspace_id:agent_id:producer_dedupe_key
+    semantic_events_or_read_models: [interaction.chat_delivery.v1, interaction.inbox.v1]
+    retry_restart_behavior: Exact producer dedupe replay returns the same queued inbox message; changed content or provenance under that identity conflicts, and delivery remains queued until a fenced Interaction session claims it.
+    negative_tests: [divergent_message, expired_operator, expired_system_authority, invalid_target_agent, oversized_message, unauthenticated, wrong_action, wrong_component, wrong_workspace]
+    fault_injection_tests: [duplicate_request, lost_response_after_commit, session_start_race]
+  - id: interaction.enqueue-inbox
+    phase: 5
+    aggregate_owner: interaction
+    coordinating_owner: interaction
+    mechanism_discriminator: inbox_message
+    instance_owner: interaction
+    accepted_authority: [operator, system]
+    durable_commands: [fleetdb.enqueue_interaction_inbox.v1]
+    transaction_or_saga_boundary: FleetDB validates the target Agent identity and reserves one immutable Inbox message and delivery identity.
+    idempotency_key: workspace_id:inbox_message_id:enqueue
+    semantic_events_or_read_models: [interaction.inbox.v1]
+    retry_restart_behavior: Exact definition replay returns the queued message; divergent content under the same message ID conflicts. Registered delivery adapters derive a fresh system authority for this one enqueue and never receive the issuer.
+    negative_tests: [divergent_message, expired_operator, expired_system_authority, invalid_target_agent, unauthenticated, wrong_action, wrong_component, wrong_workspace]
+    fault_injection_tests: [concurrent_request, duplicate_request, lost_response_after_commit]
+  - id: interaction.finish-session
+    phase: 5
+    aggregate_owner: interaction
+    coordinating_owner: interaction
+    mechanism_discriminator: agent_session:terminal_session:lease
+    instance_owner: interaction
+    accepted_authority: [session]
+    durable_commands: [fleetdb.finish_interaction_session.v1]
+    transaction_or_saga_boundary: FleetDB validates the one-use SessionAuthority against the exact AgentLease generation and atomically records the AgentSession result, terminalizes the exact bound TerminalSession for interactive sessions, and closes that lease generation.
+    idempotency_key: workspace_id:session_id:lease_id:fencing_token:terminal_status
+    semantic_events_or_read_models: [interaction.session.v1]
+    retry_restart_behavior: A retry after the retired terminal-first sequence atomically finishes the remaining AgentSession and lease while preserving the exact terminal evidence; a successor lease or divergent terminal result is rejected.
+    negative_tests: [divergent_terminal_result, expired_session, owner_mismatch, stale_fence, unauthenticated, wrong_action, wrong_workspace]
+    fault_injection_tests: [duplicate_request, finish_heartbeat_race, lost_response_after_commit]
+  - id: interaction.force-interrupt
+    phase: 5
+    aggregate_owner: interaction
+    coordinating_owner: interaction
+    mechanism_discriminator: agent_session:terminal_session:lease
+    instance_owner: interaction
+    accepted_authority: [system]
+    durable_commands: [fleetdb.force_interrupt_interaction_session.v1]
+    transaction_or_saga_boundary: FleetDB validates the exact canonical interactive AgentSession, TerminalSession stream and server-owned terminal-tab placement, and caller-expected AgentLease ID and fencing generation before atomically interrupting the session, exiting the terminal with zero attachments, and releasing that exact lease.
+    idempotency_key: workspace_id:session_id:terminal_id:stream_ref:terminal_tab:expected_lease_id:expected_lease_fencing_token:force_interrupt
+    semantic_events_or_read_models: [interaction.session.v1, interaction.terminal.v1]
+    retry_restart_behavior: Exact replay returns a fully converged session, terminal, and lease unchanged. A partially committed exact triple is repaired without overwriting completed, failed, cancelled, interrupted, exited, or terminal-failed outcomes; missing terminal timestamps and stale attachment counts are converged. A foreign agent, terminal, stream, tab, expected lease ID or fencing generation, successor lease, or divergent lifecycle is rejected. A delayed teardown captured before recovery cannot adopt or mutate the successor generation. The UI lifecycle adapter derives one fresh registered system authority and never accepts or receives a raw session lease token.
+    negative_tests: [delayed_prior_lease_generation, divergent_lifecycle, expired_system_authority, non_interactive_session, owner_mismatch, stale_fence, terminal_mismatch, unauthenticated, wrong_action, wrong_component, wrong_stream, wrong_terminal_tab, wrong_workspace]
+    fault_injection_tests: [duplicate_request, lost_response_after_commit, stop_finish_race]
+  - id: interaction.heartbeat-session
+    phase: 5
+    aggregate_owner: interaction
+    coordinating_owner: interaction
+    mechanism_discriminator: agent_session:lease
+    instance_owner: interaction
+    accepted_authority: [session]
+    durable_commands: [fleetdb.heartbeat_interaction_session.v1]
+    transaction_or_saga_boundary: FleetDB validates the complete opaque session lease proof before extending the exact live AgentLease generation and updating session phase.
+    idempotency_key: workspace_id:session_id:lease_id:fencing_token:heartbeat_deadline
+    semantic_events_or_read_models: [interaction.session.v1]
+    retry_restart_behavior: Repeated heartbeat converges on nondecreasing expiry; a finished session or successor fence remains immutable.
+    negative_tests: [expired_session, owner_mismatch, stale_fence, terminal_session, unauthenticated, wrong_action, wrong_workspace]
+    fault_injection_tests: [duplicate_request, finish_heartbeat_race, lost_response_after_commit]
+  - id: interaction.open-terminal
+    phase: 5
+    aggregate_owner: interaction
+    coordinating_owner: interaction
+    mechanism_discriminator: terminal_session:agent_session
+    instance_owner: interaction
+    accepted_authority: [session]
+    durable_commands: [fleetdb.create_interaction_terminal.v1]
+    transaction_or_saga_boundary: FleetDB validates the exact SessionAuthority and creates a Terminal record bound to that session without granting PTY or filesystem authority to the Agent identity.
+    idempotency_key: workspace_id:session_id:terminal_id:create
+    semantic_events_or_read_models: [interaction.terminal.v1]
+    retry_restart_behavior: Exact terminal definition replay returns the existing record; cross-session reuse or divergent definition conflicts.
+    negative_tests: [divergent_terminal, expired_session, owner_mismatch, stale_fence, unauthenticated, wrong_action, wrong_workspace]
+    fault_injection_tests: [concurrent_request, duplicate_request, lost_response_after_commit]
+  - id: interaction.patch-session
+    phase: 5
+    aggregate_owner: interaction
+    coordinating_owner: interaction
+    mechanism_discriminator: agent_session:lease
+    instance_owner: interaction
+    accepted_authority: [session]
+    durable_commands: [fleetdb.patch_interaction_session.v1]
+    transaction_or_saga_boundary: FleetDB validates the exact live AgentLease generation and atomically applies only bounded phase, metadata, and transcript-reference changes without exposing identity, ownership, task placement, lifecycle outcome, or timestamps.
+    idempotency_key: "state-based: workspace_id:session_id:lease_id:fencing_token:desired_patch"
+    semantic_events_or_read_models: [interaction.session.v1]
+    retry_restart_behavior: Repeating the same desired patch converges without advancing the persisted update timestamp; a stale lease generation is rejected, while a different concurrent patch remains visible as current state rather than replaying a stale snapshot.
+    negative_tests: [empty_patch, expired_session, forbidden_identity_field, owner_mismatch, stale_fence, terminal_session, unauthenticated, wrong_action, wrong_workspace]
+    fault_injection_tests: [concurrent_patch, duplicate_request, lost_response_after_commit]
+  - id: interaction.publish-transcript
+    phase: 5
+    aggregate_owner: interaction
+    coordinating_owner: interaction
+    mechanism_discriminator: session_transcript:agent_session:lease
+    instance_owner: interaction
+    accepted_authority: [session]
+    durable_commands: [fleetdb.create_artifact.v1, fleetdb.finalize_artifact.v1, fleetdb.patch_interaction_session.v1, fleetdb.upload_artifact_content.v1]
+    transaction_or_saga_boundary: Serve resolves the one-use SessionAuthority before accepting bounded canonical NDJSON, Interaction derives the immutable session-owned Artifact identity, and the final owned AgentSession patch revalidates the exact live lease generation before linking the finalized transcript.
+    idempotency_key: workspace_id:session_id:transcript
+    semantic_events_or_read_models: [artifacts.lifecycle.v1, interaction.session.v1]
+    retry_restart_behavior: The deterministic transcript Artifact is reusable only for the same session owner and finalized content; exact replay converges, while a stale or successor lease cannot attach the reference. A lost response may leave only the same owner-bound finalized Artifact for a bounded retry to link.
+    negative_tests: [empty_transcript, expired_session, invalid_content_type, invalid_metadata, oversized_transcript, owner_mismatch, stale_fence, unauthenticated, wrong_action, wrong_workspace]
+    fault_injection_tests: [duplicate_request, lost_response_after_artifact_finalize, publish_finish_race]
+  - id: interaction.reconcile-sessions
+    phase: 5
+    aggregate_owner: interaction
+    coordinating_owner: interaction
+    mechanism_discriminator: session_lease_recovery
+    instance_owner: interaction
+    accepted_authority: [system]
+    durable_commands: [fleetdb.interrupt_session_if_lease_missing.v1]
+    transaction_or_saga_boundary: The registered Interaction runtime lists only recoverable sessions and FleetDB conditionally interrupts one session only when its exact persisted AgentLease is absent or expired.
+    idempotency_key: workspace_id:session_id:observed_lease_id:reconcile
+    semantic_events_or_read_models: [interaction.session.v1]
+    retry_restart_behavior: A live lease is a no-op; a committed interrupt is replay-safe, and restart repeats the durable query without guessing from process memory.
+    negative_tests: [expired_system_authority, live_lease, unauthenticated, wrong_action, wrong_component, wrong_workspace]
+    fault_injection_tests: [lease_renewal_race, process_stop_after_scan, restart_replay]
+  - id: interaction.recover-session-start
+    phase: 5
+    aggregate_owner: interaction
+    coordinating_owner: interaction
+    mechanism_discriminator: agent_session:lease_generation_recovery
+    instance_owner: interaction
+    accepted_authority: [operator, system]
+    durable_commands: [fleetdb.recover_interaction_session_start.v1]
+    transaction_or_saga_boundary: FleetDB locks one exact starting AgentSession and its expected current AgentLease generation, requires that no TerminalSession or replacement lease exists, then atomically releases the old lease, creates a higher-fence replacement, and updates the session generation. Only the SHA-256 replacement-token hash reaches storage; the raw token is returned once by the service response.
+    idempotency_key: workspace_id:session_id:expected_lease_id:expected_fence:replacement_lease_id
+    semantic_events_or_read_models: [interaction.session.v1]
+    retry_restart_behavior: The command is intentionally not raw-token replayable. After an ambiguous start Loom reads the stable session ID, retries the original definition only when absent, and recovers only an exact starting definition. If a recovery response is lost, Loom reads the exact generation and performs a bounded rotation with a fresh replacement ID; a delivered, stale, divergent, terminalized, or concurrently replaced generation is never silently overwritten.
+    negative_tests: [definitive_start_error, divergent_session, existing_terminal, expired_operator, expired_system_authority, malformed_start_response, replacement_exists, stale_fence, terminal_session, unauthenticated, wrong_action, wrong_component, wrong_workspace]
+    fault_injection_tests: [concurrent_recovery, force_interrupt_race, lost_response_after_commit, replay_after_commit]
+  - id: interaction.start-session
+    phase: 5
+    aggregate_owner: interaction
+    coordinating_owner: interaction
+    mechanism_discriminator: agent_session_and_lease
+    instance_owner: interaction
+    accepted_authority: [operator]
+    durable_commands: [fleetdb.start_interaction_session.v1]
+    transaction_or_saga_boundary: One FleetDB transaction creates the session and its AgentLease generation together; the raw lease credential is returned only through a private one-use authority handle and is not persisted in the public result.
+    idempotency_key: workspace_id:session_id:start
+    semantic_events_or_read_models: [interaction.session.v1]
+    retry_restart_behavior: Exact session definition replay returns the same durable session and lease generation; divergent identity, task, or node binding conflicts.
+    negative_tests: [credential_in_public_result, divergent_session, expired_operator, unauthenticated, wrong_action, wrong_workspace]
+    fault_injection_tests: [concurrent_request, duplicate_request, lost_response_after_commit]
+  - id: interaction.update-terminal
+    phase: 5
+    aggregate_owner: interaction
+    coordinating_owner: interaction
+    mechanism_discriminator: terminal_session:agent_session
+    instance_owner: interaction
+    accepted_authority: [session]
+    durable_commands: [fleetdb.update_interaction_terminal.v1]
+    transaction_or_saga_boundary: FleetDB validates the exact SessionAuthority and expected terminal revision before applying one bounded terminal metadata or lifecycle patch.
+    idempotency_key: workspace_id:session_id:terminal_id:expected_revision:patch_fingerprint
+    semantic_events_or_read_models: [interaction.terminal.v1]
+    retry_restart_behavior: Exact receipt replay returns the updated terminal; a stale session fence or terminal revision conflicts.
+    negative_tests: [expired_session, owner_mismatch, stale_fence, stale_revision, unauthenticated, wrong_action, wrong_workspace]
+    fault_injection_tests: [concurrent_update, duplicate_request, lost_response_after_commit]
+  - id: sourcecontrol.materialize-workspace
+    phase: 5
+    aggregate_owner: sourcecontrol
+    coordinating_owner: sourcecontrol
+    mechanism_discriminator: contained_repository_materialization
+    instance_owner: sourcecontrol
+    accepted_authority: [system]
+    durable_commands: [connectors.execute_git_read.v1, sourcecontrol.materialize_contained_checkout.v1]
+    transaction_or_saga_boundary: Source Control resolves an opaque repository reference, validates a contained non-symlink target, and asks Connectors to perform one credential-brokered Git read without returning credentials or helper environment.
+    idempotency_key: workspace_id:repository_ref:target_path:expected_remote
+    semantic_events_or_read_models: [sourcecontrol.materialization.v1]
+    retry_restart_behavior: An exact existing checkout with the expected remote is reused; wrong remote, symlink escape, partial clone, or target divergence fails closed before replacement.
+    negative_tests: [credential_in_result, expired_system_authority, remote_mismatch, symlink_escape, unauthenticated, wrong_action, wrong_component, wrong_workspace]
+    fault_injection_tests: [clone_failure, concurrent_materialization, process_stop_after_clone, target_rename_race]
   - id: workflowcatalog.activate-version
     phase: 2B
     aggregate_owner: workflowcatalog
@@ -841,6 +1387,34 @@ commands:
     retry_restart_behavior: Duplicate and lost-response retries return the committed revision; CAS conflict is terminal and never falls back to UpdateDriver.
     negative_tests: [execution_authority, expired_operator, invalid_validation_state, session_authority, stale_revision, unauthenticated, webhook_authority, wrong_workspace]
     fault_injection_tests: [concurrent_metadata_update, duplicate_request, lost_response_after_commit]
+  - id: workflowcatalog.author-managed-version
+    phase: 5
+    aggregate_owner: workflowcatalog
+    coordinating_owner: workflowdistribution
+    mechanism_discriminator: driver_version:managed_builtin
+    instance_owner: workflowcatalog
+    accepted_authority: [system]
+    durable_commands: [fleetdb.author_driver_version.v1]
+    transaction_or_saga_boundary: One FleetDB command atomically creates or validates the Driver and immutable managed version, binds source and bundle digests, stamps trusted system provenance, and optionally activates only that exact version.
+    idempotency_key: workspace_id:driver_id:version_id:source_digest:bundle_digest:managed
+    semantic_events_or_read_models: [workflow_catalog.effective_version_changed.v1, workflow_catalog.version_authored.v1]
+    retry_restart_behavior: Exact managed definition replay returns the authored version; digest drift or reuse by operator-owned state conflicts and never falls back to generic Driver or DriverVersion writes.
+    negative_tests: [digest_drift, expired_system_authority, operator_authority, unauthenticated, unmanaged_source, wrong_action, wrong_component, wrong_workspace]
+    fault_injection_tests: [concurrent_authoring, duplicate_request, lost_response_after_commit]
+  - id: workflowcatalog.author-version
+    phase: 5
+    aggregate_owner: workflowcatalog
+    coordinating_owner: workflowcatalog
+    mechanism_discriminator: driver_version:operator
+    instance_owner: workflowcatalog
+    accepted_authority: [operator]
+    durable_commands: [fleetdb.author_driver_version.v1]
+    transaction_or_saga_boundary: One FleetDB command atomically creates or validates the Driver and immutable operator-authored version while forcing untrusted inactive provenance regardless of caller fields.
+    idempotency_key: workspace_id:driver_id:version_id:source_digest:bundle_digest:operator
+    semantic_events_or_read_models: [workflow_catalog.version_authored.v1]
+    retry_restart_behavior: Exact source and bundle digest replay returns the same inactive untrusted version; changed bytes or attempts at trust or activation conflict without generic persistence fallback.
+    negative_tests: [activate_on_author, digest_drift, expired_operator, managed_provenance, trust_on_author, unauthenticated, wrong_action, wrong_workspace]
+    fault_injection_tests: [concurrent_authoring, duplicate_request, lost_response_after_commit]
   - id: workflowcatalog.unapprove-version
     phase: 2B
     aggregate_owner: workflowcatalog

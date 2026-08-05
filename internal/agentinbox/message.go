@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 )
 
 type MessageOptions struct {
@@ -22,7 +24,14 @@ type MessageOptions struct {
 	DedupeKey         string
 }
 
-func Enqueue(ctx context.Context, st store.Store, workspace, targetAgentID, body string, opts MessageOptions) (*domain.AgentInboxMessage, error) {
+func Enqueue(
+	ctx context.Context,
+	enqueuer interaction.InboxEnqueuer,
+	workspace,
+	targetAgentID,
+	body string,
+	opts MessageOptions,
+) (*domain.AgentInboxMessage, error) {
 	workspace = strings.TrimSpace(workspace)
 	targetAgentID = strings.TrimSpace(targetAgentID)
 	body = strings.TrimSpace(body)
@@ -35,11 +44,12 @@ func Enqueue(ctx context.Context, st store.Store, workspace, targetAgentID, body
 	if body == "" {
 		return nil, fmt.Errorf("message body required: %w", domain.ErrInvalid)
 	}
-	if st == nil || st.AgentInboxMessages() == nil {
-		return nil, fmt.Errorf("agent inbox store is not configured: %w", domain.ErrInvalid)
+	if enqueuer == nil {
+		return nil, fmt.Errorf("interaction inbox commands are not configured: %w", domain.ErrInvalid)
 	}
-	return st.AgentInboxMessages().Create(ctx, store.AgentInboxMessageCreate{
+	value, err := enqueuer.Enqueue(ctx, interaction.EnqueueInboxCommand{
 		WorkspaceKey:      workspace,
+		MessageID:         uuid.NewString(),
 		TargetAgentID:     targetAgentID,
 		SessionID:         strings.TrimSpace(opts.SessionID),
 		Body:              body,
@@ -51,6 +61,30 @@ func Enqueue(ctx context.Context, st store.Store, workspace, targetAgentID, body
 		TriggerDeliveryID: strings.TrimSpace(opts.TriggerDeliveryID),
 		DedupeKey:         strings.TrimSpace(opts.DedupeKey),
 	})
+	if err != nil {
+		return nil, err
+	}
+	return domainInboxMessage(value), nil
+}
+
+func domainInboxMessage(value *interaction.InboxMessage) *domain.AgentInboxMessage {
+	if value == nil {
+		return nil
+	}
+	result := &domain.AgentInboxMessage{
+		WorkspaceKey: value.WorkspaceKey, InboxMessageID: value.MessageID,
+		Cursor: value.Cursor, TargetAgentID: value.TargetAgentID,
+		SessionID: value.SessionID, Body: value.Body,
+		Status:     domain.AgentInboxMessageStatus(value.Status),
+		SourceKind: value.SourceKind, SourceRef: value.SourceRef,
+		DriverRunID: value.DriverRunID, TaskRunID: value.TaskRunID,
+		TriggerEventID: value.TriggerEventID, TriggerDeliveryID: value.TriggerDeliveryID,
+		DedupeKey: value.DedupeKey, Attempt: value.Attempt,
+		ClaimedBy: value.ClaimedBy, ClaimExpiresAt: value.ClaimExpiresAt,
+		ErrorClass: value.ErrorClass, DeliveredThreadID: value.DeliveredThreadID,
+		DeliveredAt: value.DeliveredAt, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
+	}
+	return result
 }
 
 func ContentDedupeKey(prefix string, parts ...string) string {

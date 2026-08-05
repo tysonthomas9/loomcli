@@ -7,12 +7,15 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
+	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 func TestEnqueueCreatesGenericAgentInboxMessage(t *testing.T) {
 	st := memstore.New()
+	inbox := testInboxEnqueuer{store: st}
 
-	msg, err := Enqueue(context.Background(), st, " WS ", " agent-1 ", " hello ", MessageOptions{
+	msg, err := Enqueue(context.Background(), inbox, " WS ", " agent-1 ", " hello ", MessageOptions{
 		SessionID:         "session-1",
 		SourceKind:        "workflow",
 		SourceRef:         "workflow://run",
@@ -38,12 +41,13 @@ func TestEnqueueCreatesGenericAgentInboxMessage(t *testing.T) {
 
 func TestEnqueueDoesNotDedupeWithoutProducerKey(t *testing.T) {
 	st := memstore.New()
+	inbox := testInboxEnqueuer{store: st}
 
-	first, err := Enqueue(context.Background(), st, "WS", "agent-1", "same body", MessageOptions{})
+	first, err := Enqueue(context.Background(), inbox, "WS", "agent-1", "same body", MessageOptions{})
 	if err != nil {
 		t.Fatalf("first enqueue: %v", err)
 	}
-	second, err := Enqueue(context.Background(), st, "WS", "agent-1", "same body", MessageOptions{})
+	second, err := Enqueue(context.Background(), inbox, "WS", "agent-1", "same body", MessageOptions{})
 	if err != nil {
 		t.Fatalf("second enqueue: %v", err)
 	}
@@ -54,6 +58,7 @@ func TestEnqueueDoesNotDedupeWithoutProducerKey(t *testing.T) {
 
 func TestEnqueueValidatesRequiredFields(t *testing.T) {
 	st := memstore.New()
+	inbox := testInboxEnqueuer{store: st}
 
 	for _, tc := range []struct {
 		name      string
@@ -66,12 +71,47 @@ func TestEnqueueValidatesRequiredFields(t *testing.T) {
 		{name: "body", workspace: "WS", agent: "agent-1", body: ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := Enqueue(context.Background(), st, tc.workspace, tc.agent, tc.body, MessageOptions{})
+			_, err := Enqueue(context.Background(), inbox, tc.workspace, tc.agent, tc.body, MessageOptions{})
 			if !errors.Is(err, domain.ErrInvalid) {
 				t.Fatalf("err = %v, want ErrInvalid", err)
 			}
 		})
 	}
+}
+
+type testInboxEnqueuer struct {
+	store store.Store
+}
+
+func (enqueuer testInboxEnqueuer) Enqueue(
+	ctx context.Context,
+	command interaction.EnqueueInboxCommand,
+) (*interaction.InboxMessage, error) {
+	message, err := enqueuer.store.AgentInboxMessages().Create(ctx, store.AgentInboxMessageCreate{
+		WorkspaceKey: command.WorkspaceKey, TargetAgentID: command.TargetAgentID,
+		SessionID: command.SessionID, Body: command.Body,
+		SourceKind: command.SourceKind, SourceRef: command.SourceRef,
+		DriverRunID: command.DriverRunID, TaskRunID: command.TaskRunID,
+		TriggerEventID: command.TriggerEventID, TriggerDeliveryID: command.TriggerDeliveryID,
+		DedupeKey: command.DedupeKey,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &interaction.InboxMessage{
+		WorkspaceKey: message.WorkspaceKey, MessageID: message.InboxMessageID,
+		Cursor: message.Cursor, TargetAgentID: message.TargetAgentID,
+		SessionID: message.SessionID, Body: message.Body,
+		Status:     interaction.InboxStatus(message.Status),
+		SourceKind: message.SourceKind, SourceRef: message.SourceRef,
+		DriverRunID: message.DriverRunID, TaskRunID: message.TaskRunID,
+		TriggerEventID: message.TriggerEventID, TriggerDeliveryID: message.TriggerDeliveryID,
+		DedupeKey: message.DedupeKey, Attempt: message.Attempt,
+		ClaimedBy: message.ClaimedBy, ClaimExpiresAt: message.ClaimExpiresAt,
+		ErrorClass: message.ErrorClass, DeliveredThreadID: message.DeliveredThreadID,
+		DeliveredAt: message.DeliveredAt, CreatedAt: message.CreatedAt,
+		UpdatedAt: message.UpdatedAt,
+	}, nil
 }
 
 func TestContentDedupeKeyIsStableAndNamespaced(t *testing.T) {

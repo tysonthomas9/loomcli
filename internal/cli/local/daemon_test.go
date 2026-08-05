@@ -4,8 +4,10 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -101,5 +103,33 @@ func TestWorkspaceHasReposForLocalDaemonUsesRuntimeAPI(t *testing.T) {
 	}
 	if got, _ := observedPath.Load().(string); got != "/api/workspaces/WS/repos" {
 		t.Fatalf("server saw path = %q, want /api/workspaces/WS/repos", got)
+	}
+}
+
+func TestWaitManagedLocalDaemonRotatesWhenActiveWorkspaceChanges(t *testing.T) {
+	previousWorkspaceKey := localDaemonWorkspaceKeyFn
+	localDaemonWorkspaceKeyFn = func() (string, error) { return "NEW", nil }
+	t.Cleanup(func() { localDaemonWorkspaceKeyFn = previousWorkspaceKey })
+
+	cmd := exec.Command("/bin/sleep", "30") //nolint:norawexec // intentional child process for lifecycle assertion.
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start sleep process: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	t.Cleanup(func() {
+		if processRunning(cmd.Process.Pid) {
+			_ = cmd.Process.Kill()
+			<-done
+		}
+	})
+
+	ticks := make(chan time.Time, 1)
+	ticks <- time.Now()
+	if err := waitManagedLocalDaemon(context.Background(), t.TempDir(), "OLD", cmd, done, ticks); err != nil {
+		t.Fatalf("waitManagedLocalDaemon() error = %v", err)
+	}
+	if processRunning(cmd.Process.Pid) {
+		t.Fatalf("managed daemon pid %d still running after workspace rotation", cmd.Process.Pid)
 	}
 }

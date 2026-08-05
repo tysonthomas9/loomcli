@@ -14,11 +14,16 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
+	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
+	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/roleprompts"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 )
 
@@ -28,15 +33,28 @@ const maxRoleBodyBytes = 1 << 20
 // machine-local workspace directory, so it holds the store directly (the same
 // shape as the workflows/webhooks modules).
 type Module struct {
-	store store.Store
+	store     store.Store
+	roles     RoleAPI
+	authority workflowcataloghttp.OperatorAuthorityResolver
 }
 
-func NewModule(st store.Store) *Module {
-	return &Module{store: st}
+type RoleAPI interface {
+	agents.RoleQueries
+	agents.RoleCommands
+}
+
+type Config struct {
+	Store     store.Store
+	Roles     RoleAPI
+	Authority workflowcataloghttp.OperatorAuthorityResolver
+}
+
+func NewModule(config Config) *Module {
+	return &Module{store: config.Store, roles: config.Roles, authority: config.Authority}
 }
 
 func (m *Module) Register(mux *http.ServeMux) {
-	if m.store == nil {
+	if m.store == nil || m.roles == nil {
 		return
 	}
 	mux.HandleFunc("GET /api/workspaces/{ws}/roles", m.listRoles)
@@ -50,33 +68,47 @@ func (m *Module) Register(mux *http.ServeMux) {
 }
 
 type createRoleRequest struct {
-	Name           string   `json:"name"`
-	Description    string   `json:"description,omitempty"`
-	Prompt         string   `json:"prompt,omitempty"`          // prompt body written to disk
-	PromptFilename string   `json:"prompt_filename,omitempty"` // defaults to <name>.md
-	Model          string   `json:"model,omitempty"`
-	TaskFilter     string   `json:"task_filter,omitempty"`
-	Backend        string   `json:"backend,omitempty"`
-	Effort         string   `json:"effort,omitempty"`
-	ReadOnly       bool     `json:"read_only,omitempty"`
-	AllowedTools   []string `json:"allowed_tools,omitempty"`
-	DeniedTools    []string `json:"denied_tools,omitempty"`
-	Skills         []string `json:"skills,omitempty"`
+	Name                string   `json:"name"`
+	Kind                string   `json:"kind,omitempty"`
+	Description         string   `json:"description,omitempty"`
+	Prompt              string   `json:"prompt,omitempty"`          // prompt body written to disk
+	PromptFile          string   `json:"prompt_file,omitempty"`     // existing workspace-relative prompt reference
+	PromptFilename      string   `json:"prompt_filename,omitempty"` // defaults to <name>.md
+	Model               string   `json:"model,omitempty"`
+	TaskFilter          string   `json:"task_filter,omitempty"`
+	Backend             string   `json:"backend,omitempty"`
+	Effort              string   `json:"effort,omitempty"`
+	PathPatterns        []string `json:"path_patterns,omitempty"`
+	Skills              []string `json:"skills,omitempty"`
+	MaxPriority         *int     `json:"max_priority,omitempty"`
+	MaxConcurrency      *int     `json:"max_concurrency,omitempty"`
+	ReadOnly            bool     `json:"read_only,omitempty"`
+	AllowedTools        []string `json:"allowed_tools,omitempty"`
+	DeniedTools         []string `json:"denied_tools,omitempty"`
+	MaxBudgetUSD        *float64 `json:"max_budget_usd,omitempty"`
+	PersistInlinePrompt bool     `json:"persist_inline_prompt,omitempty"`
 }
 
 type EnsureRoleRequest struct {
-	Name           string
-	Description    string
-	Prompt         string
-	PromptFilename string
-	Model          string
-	TaskFilter     string
-	Backend        string
-	Effort         string
-	ReadOnly       bool
-	AllowedTools   []string
-	DeniedTools    []string
-	Skills         []string
+	Name                string
+	Kind                string
+	Description         string
+	Prompt              string
+	PromptFile          string
+	PromptFilename      string
+	Model               string
+	TaskFilter          string
+	Backend             string
+	Effort              string
+	PathPatterns        []string
+	MaxPriority         *int
+	MaxConcurrency      *int
+	ReadOnly            bool
+	AllowedTools        []string
+	DeniedTools         []string
+	Skills              []string
+	MaxBudgetUSD        *float64
+	PersistInlinePrompt bool
 }
 
 // EnsureRoleResult reports whether an ensure call created the durable role.
@@ -96,17 +128,27 @@ type roleWithPrompt struct {
 // updateRoleRequest is a partial update: only non-nil fields are applied, so the
 // UI can PATCH just the prompt without resending the whole role.
 type updateRoleRequest struct {
-	Description    *string   `json:"description,omitempty"`
-	Prompt         *string   `json:"prompt,omitempty"`          // new prompt body (publishes a new immutable file)
-	PromptFilename *string   `json:"prompt_filename,omitempty"` // optional new filename
-	Model          *string   `json:"model,omitempty"`
-	TaskFilter     *string   `json:"task_filter,omitempty"`
-	Backend        *string   `json:"backend,omitempty"`
-	Effort         *string   `json:"effort,omitempty"`
-	ReadOnly       *bool     `json:"read_only,omitempty"`
-	AllowedTools   *[]string `json:"allowed_tools,omitempty"`
-	DeniedTools    *[]string `json:"denied_tools,omitempty"`
-	Skills         *[]string `json:"skills,omitempty"`
+	Description         *string   `json:"description,omitempty"`
+	Kind                *string   `json:"kind,omitempty"`
+	Prompt              *string   `json:"prompt,omitempty"` // new prompt body (publishes a new immutable file)
+	PromptFile          *string   `json:"prompt_file,omitempty"`
+	PromptFilename      *string   `json:"prompt_filename,omitempty"` // optional new filename
+	Model               *string   `json:"model,omitempty"`
+	TaskFilter          *string   `json:"task_filter,omitempty"`
+	Backend             *string   `json:"backend,omitempty"`
+	Effort              *string   `json:"effort,omitempty"`
+	PathPatterns        *[]string `json:"path_patterns,omitempty"`
+	MaxPriority         *int      `json:"max_priority,omitempty"`
+	ClearPriority       bool      `json:"clear_max_priority,omitempty"`
+	MaxConcurrency      *int      `json:"max_concurrency,omitempty"`
+	ClearConcurrent     bool      `json:"clear_max_concurrency,omitempty"`
+	ReadOnly            *bool     `json:"read_only,omitempty"`
+	AllowedTools        *[]string `json:"allowed_tools,omitempty"`
+	DeniedTools         *[]string `json:"denied_tools,omitempty"`
+	Skills              *[]string `json:"skills,omitempty"`
+	MaxBudgetUSD        *float64  `json:"max_budget_usd,omitempty"`
+	ClearBudget         bool      `json:"clear_max_budget_usd,omitempty"`
+	PersistInlinePrompt bool      `json:"persist_inline_prompt,omitempty"`
 }
 
 // cloneRoleRequest duplicates an existing role (and its prompt) under a new name.
@@ -116,17 +158,31 @@ type cloneRoleRequest struct {
 }
 
 func (m *Module) listRoles(w http.ResponseWriter, r *http.Request) {
-	ws := strings.TrimSpace(r.PathValue("ws"))
-	roles, err := m.store.Roles().List(r.Context(), ws)
-	if err != nil {
-		handler.WriteDomainError(w, err, "list roles failed")
+	ws, ok := canonicalWorkspace(w, r)
+	if !ok {
 		return
+	}
+	values, err := m.roles.ListRoles(r.Context(), ws)
+	if err != nil {
+		writeRoleError(w, err, "list roles failed")
+		return
+	}
+	roles := make([]*domain.Role, 0, len(values))
+	for _, role := range values {
+		roles = append(roles, domainRole(role))
 	}
 	handler.WriteJSON(w, http.StatusOK, roles)
 }
 
-func EnsureRole(ctx context.Context, st store.Store, ws string, req EnsureRoleRequest) (*domain.Role, bool, error) {
-	result, err := EnsureRoleWithReceipt(ctx, st, ws, req)
+func EnsureRole(
+	ctx context.Context,
+	st store.Store,
+	api RoleAPI,
+	auth authority.OperatorAuthority,
+	ws string,
+	req EnsureRoleRequest,
+) (*domain.Role, bool, error) {
+	result, err := EnsureRoleWithReceipt(ctx, st, api, auth, ws, req)
 	if err != nil {
 		return nil, false, err
 	}
@@ -134,9 +190,16 @@ func EnsureRole(ctx context.Context, st store.Store, ws string, req EnsureRoleRe
 }
 
 // EnsureRoleWithReceipt is EnsureRole with a compensating ownership receipt.
-func EnsureRoleWithReceipt(ctx context.Context, st store.Store, ws string, req EnsureRoleRequest) (*EnsureRoleResult, error) {
-	if st == nil {
-		return nil, fmt.Errorf("store is required: %w", domain.ErrInvalid)
+func EnsureRoleWithReceipt(
+	ctx context.Context,
+	st store.Store,
+	api RoleAPI,
+	auth authority.OperatorAuthority,
+	ws string,
+	req EnsureRoleRequest,
+) (*EnsureRoleResult, error) {
+	if st == nil || api == nil {
+		return nil, fmt.Errorf("store and Agents role API are required: %w", domain.ErrInvalid)
 	}
 	ws = strings.TrimSpace(ws)
 	name := strings.TrimSpace(req.Name)
@@ -144,7 +207,7 @@ func EnsureRoleWithReceipt(ctx context.Context, st store.Store, ws string, req E
 		return nil, fmt.Errorf("workspace and role name are required: %w", domain.ErrInvalid)
 	}
 
-	existing, found, err := findEnsuredRole(ctx, st, ws, name, req)
+	existing, found, err := findEnsuredRole(ctx, api, ws, name, req)
 	if err != nil {
 		return nil, err
 	}
@@ -156,18 +219,22 @@ func EnsureRoleWithReceipt(ctx context.Context, st store.Store, ws string, req E
 	if err != nil {
 		return nil, err
 	}
-	role, err := st.Roles().Create(ctx, in)
+	created, err := api.CreateRole(ctx, auth, agents.CreateRoleCommand{
+		WorkspaceKey: ws,
+		Role:         roleDefinitionFromCreate(in),
+	})
 	if err == nil {
-		return &EnsureRoleResult{Role: role, Created: true}, nil
+		return &EnsureRoleResult{Role: domainRole(created), Created: true}, nil
 	}
-	if !errors.Is(err, domain.ErrAlreadyExists) {
+	if !errors.Is(err, agents.ErrAlreadyExists) && !errors.Is(err, domain.ErrAlreadyExists) {
 		// The immutable prompt is deliberately retained. Another concurrent
 		// ensure may already have adopted it, and there is no transaction that
 		// spans the role store and filesystem. Retention is retry-safe.
 		return nil, err
 	}
 
-	existing, getErr := st.Roles().Get(ctx, ws, name)
+	existingRole, getErr := api.GetRole(ctx, ws, name)
+	existing = domainRole(existingRole)
 	if getErr == nil && existing != nil {
 		if matchErr := validateEnsureRoleMatch(existing, req); matchErr != nil {
 			return nil, matchErr
@@ -187,20 +254,29 @@ func buildEnsuredRoleCreate(
 	req EnsureRoleRequest,
 ) (store.RoleCreate, roleprompts.PromptFileReceipt, error) {
 	in := store.RoleCreate{
-		WorkspaceKey: ws,
-		Name:         name,
-		Description:  strings.TrimSpace(req.Description),
-		Model:        strings.TrimSpace(req.Model),
-		TaskFilter:   strings.TrimSpace(req.TaskFilter),
-		Backend:      strings.TrimSpace(req.Backend),
-		Effort:       strings.TrimSpace(req.Effort),
-		ReadOnly:     req.ReadOnly,
-		AllowedTools: slices.Clone(req.AllowedTools),
-		DeniedTools:  slices.Clone(req.DeniedTools),
-		Skills:       slices.Clone(req.Skills),
+		WorkspaceKey:   ws,
+		Name:           name,
+		Kind:           strings.TrimSpace(req.Kind),
+		Description:    strings.TrimSpace(req.Description),
+		PromptFile:     strings.TrimSpace(req.PromptFile),
+		Model:          strings.TrimSpace(req.Model),
+		TaskFilter:     strings.TrimSpace(req.TaskFilter),
+		Backend:        strings.TrimSpace(req.Backend),
+		Effort:         strings.TrimSpace(req.Effort),
+		PathPatterns:   slices.Clone(req.PathPatterns),
+		MaxPriority:    cloneInt(req.MaxPriority),
+		MaxConcurrency: cloneInt(req.MaxConcurrency),
+		ReadOnly:       req.ReadOnly,
+		AllowedTools:   slices.Clone(req.AllowedTools),
+		DeniedTools:    slices.Clone(req.DeniedTools),
+		Skills:         slices.Clone(req.Skills),
+		MaxBudgetUSD:   cloneFloat64(req.MaxBudgetUSD),
+	}
+	if req.PersistInlinePrompt {
+		in.Prompt = req.Prompt
 	}
 	var receipt roleprompts.PromptFileReceipt
-	if strings.TrimSpace(req.Prompt) != "" {
+	if !req.PersistInlinePrompt && strings.TrimSpace(req.Prompt) != "" {
 		var err error
 		receipt, err = ensureRolePromptWithReceipt(ctx, st, ws, name, req.PromptFilename, req.Prompt)
 		if err != nil {
@@ -219,24 +295,33 @@ func (*EnsureRoleResult) Compensate(context.Context, store.Store, string) error 
 	return nil
 }
 
-func deleteRoleRecord(ctx context.Context, st store.Store, ws, name string) error {
-	return st.Roles().Delete(ctx, ws, name)
+func deleteRoleRecord(
+	ctx context.Context,
+	api RoleAPI,
+	auth authority.OperatorAuthority,
+	ws, name string,
+	expectedUpdatedAt time.Time,
+) error {
+	return api.DeleteRole(ctx, auth, agents.DeleteRoleCommand{
+		WorkspaceKey: ws, RoleName: name, ExpectedUpdatedAt: expectedUpdatedAt,
+	})
 }
 
 func findEnsuredRole(
 	ctx context.Context,
-	st store.Store,
+	api RoleAPI,
 	ws string,
 	name string,
 	req EnsureRoleRequest,
 ) (*domain.Role, bool, error) {
-	existing, err := st.Roles().Get(ctx, ws, name)
+	value, err := api.GetRole(ctx, ws, name)
 	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
+		if errors.Is(err, agents.ErrNotFound) || errors.Is(err, domain.ErrNotFound) {
 			return nil, false, nil
 		}
 		return nil, false, err
 	}
+	existing := domainRole(value)
 	if existing == nil {
 		return nil, false, nil
 	}
@@ -263,14 +348,24 @@ func validateEnsureRoleMatch(existing *domain.Role, req EnsureRoleRequest) error
 		}
 	}
 	addMismatch("description", existing.Description == strings.TrimSpace(req.Description))
+	addMismatch("kind", string(existing.Kind) == strings.TrimSpace(req.Kind))
+	addMismatch(
+		"prompt_file",
+		existing.PromptFile == strings.TrimSpace(req.PromptFile) ||
+			(!req.PersistInlinePrompt && strings.TrimSpace(req.Prompt) != ""),
+	)
 	addMismatch("model", existing.Model == strings.TrimSpace(req.Model))
 	addMismatch("task_filter", existing.TaskFilter == strings.TrimSpace(req.TaskFilter))
 	addMismatch("backend", existing.Backend == strings.TrimSpace(req.Backend))
 	addMismatch("effort", existing.Effort == strings.TrimSpace(req.Effort))
+	addMismatch("path_patterns", slices.Equal(existing.PathPatterns, req.PathPatterns))
+	addMismatch("max_priority", equalInt(existing.MaxPriority, req.MaxPriority))
+	addMismatch("max_concurrency", equalInt(existing.MaxConcurrency, req.MaxConcurrency))
 	addMismatch("read_only", existing.ReadOnly == req.ReadOnly)
 	addMismatch("allowed_tools", slices.Equal(existing.AllowedTools, req.AllowedTools))
 	addMismatch("denied_tools", slices.Equal(existing.DeniedTools, req.DeniedTools))
 	addMismatch("skills", slices.Equal(existing.Skills, req.Skills))
+	addMismatch("max_budget_usd", equalFloat64(existing.MaxBudgetUSD, req.MaxBudgetUSD))
 
 	requestedPrompt := normalizePromptBody(req.Prompt)
 	existingPrompt := normalizePromptBody(ReadPromptBody(existing))
@@ -336,9 +431,8 @@ func ValidatePromptAgentRole(role *domain.Role) error {
 // returned (200), a new role is created (201), and an incompatible collision
 // is rejected (409).
 func (m *Module) createRole(w http.ResponseWriter, r *http.Request) {
-	ws := strings.TrimSpace(r.PathValue("ws"))
-	if ws == "" {
-		handler.RespondError(w, http.StatusBadRequest, "workspace is required")
+	ws, ok := canonicalWorkspace(w, r)
+	if !ok {
 		return
 	}
 
@@ -352,22 +446,33 @@ func (m *Module) createRole(w http.ResponseWriter, r *http.Request) {
 		handler.RespondError(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	role, created, err := EnsureRole(r.Context(), m.store, ws, EnsureRoleRequest{
-		Name:           name,
-		Description:    req.Description,
-		Prompt:         req.Prompt,
-		PromptFilename: req.PromptFilename,
-		Model:          req.Model,
-		TaskFilter:     req.TaskFilter,
-		Backend:        req.Backend,
-		Effort:         req.Effort,
-		ReadOnly:       req.ReadOnly,
-		AllowedTools:   req.AllowedTools,
-		DeniedTools:    req.DeniedTools,
-		Skills:         req.Skills,
+	auth, ok := m.resolveOperator(w, r, ws, agents.ActionCreateRole)
+	if !ok {
+		return
+	}
+	role, created, err := EnsureRole(r.Context(), m.store, m.roles, auth, ws, EnsureRoleRequest{
+		Name:                name,
+		Kind:                req.Kind,
+		Description:         req.Description,
+		Prompt:              req.Prompt,
+		PromptFile:          req.PromptFile,
+		PromptFilename:      req.PromptFilename,
+		Model:               req.Model,
+		TaskFilter:          req.TaskFilter,
+		Backend:             req.Backend,
+		Effort:              req.Effort,
+		PathPatterns:        req.PathPatterns,
+		MaxPriority:         req.MaxPriority,
+		MaxConcurrency:      req.MaxConcurrency,
+		ReadOnly:            req.ReadOnly,
+		AllowedTools:        req.AllowedTools,
+		DeniedTools:         req.DeniedTools,
+		Skills:              req.Skills,
+		MaxBudgetUSD:        req.MaxBudgetUSD,
+		PersistInlinePrompt: req.PersistInlinePrompt,
 	})
 	if err != nil {
-		handler.WriteDomainError(w, err, "create role failed")
+		writeRoleError(w, err, "create role failed")
 		return
 	}
 	status := http.StatusOK
@@ -380,17 +485,21 @@ func (m *Module) createRole(w http.ResponseWriter, r *http.Request) {
 // getRole returns a single role plus its current prompt body so the UI can
 // populate an editor. A missing role is a 404.
 func (m *Module) getRole(w http.ResponseWriter, r *http.Request) {
-	ws := strings.TrimSpace(r.PathValue("ws"))
+	ws, ok := canonicalWorkspace(w, r)
+	if !ok {
+		return
+	}
 	name := strings.TrimSpace(r.PathValue("name"))
-	if ws == "" || name == "" {
-		handler.RespondError(w, http.StatusBadRequest, "workspace and role name are required")
+	if name == "" {
+		handler.RespondError(w, http.StatusBadRequest, "role name is required")
 		return
 	}
-	role, err := m.store.Roles().Get(r.Context(), ws, name)
+	value, err := m.roles.GetRole(r.Context(), ws, name)
 	if err != nil {
-		handler.WriteDomainError(w, err, "get role failed")
+		writeRoleError(w, err, "get role failed")
 		return
 	}
+	role := domainRole(value)
 	handler.WriteJSON(w, http.StatusOK, roleWithPrompt{Role: role, Prompt: m.readRolePrompt(role)})
 }
 
@@ -400,10 +509,13 @@ func (m *Module) getRole(w http.ResponseWriter, r *http.Request) {
 // change takes effect on the agent's next spawn — a running agent keeps the
 // prompt it read at launch.
 func (m *Module) updateRole(w http.ResponseWriter, r *http.Request) { //nolint:funlen // Partial role updates are intentionally explicit.
-	ws := strings.TrimSpace(r.PathValue("ws"))
+	ws, ok := canonicalWorkspace(w, r)
+	if !ok {
+		return
+	}
 	name := strings.TrimSpace(r.PathValue("name"))
-	if ws == "" || name == "" {
-		handler.RespondError(w, http.StatusBadRequest, "workspace and role name are required")
+	if name == "" {
+		handler.RespondError(w, http.StatusBadRequest, "role name is required")
 		return
 	}
 	var req updateRoleRequest
@@ -411,44 +523,63 @@ func (m *Module) updateRole(w http.ResponseWriter, r *http.Request) { //nolint:f
 		handler.RespondError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	// The role must exist to edit it.
-	if _, err := m.store.Roles().Get(r.Context(), ws, name); err != nil {
-		handler.WriteDomainError(w, err, "get role failed")
+	currentValue, err := m.roles.GetRole(r.Context(), ws, name)
+	if err != nil {
+		writeRoleError(w, err, "get role failed")
+		return
+	}
+	current := domainRole(currentValue)
+	auth, ok := m.resolveOperator(w, r, ws, agents.ActionUpdateRole)
+	if !ok {
 		return
 	}
 
 	// A nil field means "leave unchanged"; RoleUpdate's fields are all pointers,
 	// so trimPtr threads that through for the string fields.
 	patch := store.RoleUpdate{
-		Description:  trimPtr(req.Description),
-		Model:        trimPtr(req.Model),
-		TaskFilter:   trimPtr(req.TaskFilter),
-		Backend:      trimPtr(req.Backend),
-		Effort:       trimPtr(req.Effort),
-		ReadOnly:     req.ReadOnly,
-		AllowedTools: req.AllowedTools,
-		DeniedTools:  req.DeniedTools,
-		Skills:       req.Skills,
+		Kind:           trimPtr(req.Kind),
+		Description:    trimPtr(req.Description),
+		PromptFile:     trimPtr(req.PromptFile),
+		Model:          trimPtr(req.Model),
+		TaskFilter:     trimPtr(req.TaskFilter),
+		Backend:        trimPtr(req.Backend),
+		Effort:         trimPtr(req.Effort),
+		PathPatterns:   req.PathPatterns,
+		MaxPriority:    optionalIntPatch(req.MaxPriority, req.ClearPriority),
+		MaxConcurrency: optionalIntPatch(req.MaxConcurrency, req.ClearConcurrent),
+		ReadOnly:       req.ReadOnly,
+		AllowedTools:   req.AllowedTools,
+		DeniedTools:    req.DeniedTools,
+		Skills:         req.Skills,
+		MaxBudgetUSD:   optionalFloatPatch(req.MaxBudgetUSD, req.ClearBudget),
 	}
 
 	if req.Prompt != nil {
-		filename := ""
-		if req.PromptFilename != nil {
-			filename = strings.TrimSpace(*req.PromptFilename)
+		if req.PersistInlinePrompt {
+			patch.Prompt = req.Prompt
+		} else {
+			filename := ""
+			if req.PromptFilename != nil {
+				filename = strings.TrimSpace(*req.PromptFilename)
+			}
+			promptPath, werr := ensureRolePrompt(r.Context(), m.store, ws, name, filename, *req.Prompt)
+			if werr != nil {
+				handler.WriteDomainError(w, werr, "update role prompt failed")
+				return
+			}
+			patch.PromptFile = &promptPath
 		}
-		promptPath, werr := ensureRolePrompt(r.Context(), m.store, ws, name, filename, *req.Prompt)
-		if werr != nil {
-			handler.WriteDomainError(w, werr, "update role prompt failed")
-			return
-		}
-		patch.PromptFile = &promptPath
 	}
 
-	role, err := m.store.Roles().Update(r.Context(), ws, name, patch)
+	updated, err := m.roles.UpdateRole(r.Context(), auth, agents.UpdateRoleCommand{
+		WorkspaceKey: ws, RoleName: name, ExpectedUpdatedAt: current.UpdatedAt,
+		Patch: rolePatchFromStore(patch),
+	})
 	if err != nil {
-		handler.WriteDomainError(w, err, "update role failed")
+		writeRoleError(w, err, "update role failed")
 		return
 	}
+	role := domainRole(updated)
 	handler.WriteJSON(w, http.StatusOK, roleWithPrompt{Role: role, Prompt: m.readRolePrompt(role)})
 }
 
@@ -458,10 +589,13 @@ func (m *Module) updateRole(w http.ResponseWriter, r *http.Request) { //nolint:f
 // collision is a 409 (the caller picked a taken name) — unlike createRole, clone
 // is not a silent ensure.
 func (m *Module) cloneRole(w http.ResponseWriter, r *http.Request) { //nolint:funlen // Clone validation and persistence stay in one handler.
-	ws := strings.TrimSpace(r.PathValue("ws"))
+	ws, ok := canonicalWorkspace(w, r)
+	if !ok {
+		return
+	}
 	name := strings.TrimSpace(r.PathValue("name"))
-	if ws == "" || name == "" {
-		handler.RespondError(w, http.StatusBadRequest, "workspace and source role name are required")
+	if name == "" {
+		handler.RespondError(w, http.StatusBadRequest, "source role name is required")
 		return
 	}
 	var req cloneRoleRequest
@@ -479,9 +613,14 @@ func (m *Module) cloneRole(w http.ResponseWriter, r *http.Request) { //nolint:fu
 		return
 	}
 
-	src, err := m.store.Roles().Get(r.Context(), ws, name)
+	value, err := m.roles.GetRole(r.Context(), ws, name)
 	if err != nil {
-		handler.WriteDomainError(w, err, "get source role failed")
+		writeRoleError(w, err, "get source role failed")
+		return
+	}
+	src := domainRole(value)
+	auth, ok := m.resolveOperator(w, r, ws, agents.ActionCreateRole)
+	if !ok {
 		return
 	}
 
@@ -515,11 +654,15 @@ func (m *Module) cloneRole(w http.ResponseWriter, r *http.Request) { //nolint:fu
 		in.PromptFile = promptPath
 	}
 
-	role, err := m.store.Roles().Create(r.Context(), in)
+	created, err := m.roles.CreateRole(r.Context(), auth, agents.CreateRoleCommand{
+		WorkspaceKey: ws,
+		Role:         roleDefinitionFromCreate(in),
+	})
 	if err != nil {
-		handler.WriteDomainError(w, err, "clone role failed")
+		writeRoleError(w, err, "clone role failed")
 		return
 	}
+	role := domainRole(created)
 	handler.WriteJSON(w, http.StatusCreated, role)
 }
 
@@ -528,21 +671,46 @@ func (m *Module) cloneRole(w http.ResponseWriter, r *http.Request) { //nolint:fu
 // role still in use by an agent service. The role's prompt file is left on disk
 // (harmless).
 func (m *Module) deleteRole(w http.ResponseWriter, r *http.Request) {
-	ws := strings.TrimSpace(r.PathValue("ws"))
+	ws, ok := canonicalWorkspace(w, r)
+	if !ok {
+		return
+	}
 	name := strings.TrimSpace(r.PathValue("name"))
-	if ws == "" || name == "" {
-		handler.RespondError(w, http.StatusBadRequest, "workspace and role name are required")
+	if name == "" {
+		handler.RespondError(w, http.StatusBadRequest, "role name is required")
 		return
 	}
 	if domain.IsBuiltinRole(name) {
 		handler.RespondError(w, http.StatusBadRequest, "cannot delete the built-in "+name+" role")
 		return
 	}
-	if err := deleteRoleRecord(r.Context(), m.store, ws, name); err != nil {
-		handler.WriteDomainError(w, err, "delete role failed")
+	current, err := m.roles.GetRole(r.Context(), ws, name)
+	if err != nil {
+		writeRoleError(w, err, "get role failed")
+		return
+	}
+	auth, ok := m.resolveOperator(w, r, ws, agents.ActionDeleteRole)
+	if !ok {
+		return
+	}
+	if err := deleteRoleRecord(r.Context(), m.roles, auth, ws, name, current.UpdatedAt); err != nil {
+		writeRoleError(w, err, "delete role failed")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func canonicalWorkspace(w http.ResponseWriter, r *http.Request) (string, bool) {
+	if r == nil {
+		handler.RespondError(w, http.StatusBadRequest, "canonical workspace is required")
+		return "", false
+	}
+	workspace := strings.TrimSpace(middleware.WorkspaceFromContext(r.Context()))
+	if workspace == "" {
+		handler.RespondError(w, http.StatusBadRequest, "canonical workspace is required")
+		return "", false
+	}
+	return workspace, true
 }
 
 // readRolePrompt reads a role's prompt body from its PromptFile. It returns ""
@@ -582,6 +750,135 @@ func trimPtr(p *string) *string {
 	}
 	v := strings.TrimSpace(*p)
 	return &v
+}
+
+func optionalIntPatch(value *int, clear bool) **int {
+	if clear {
+		var cleared *int
+		return &cleared
+	}
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	pointer := &cloned
+	return &pointer
+}
+
+func optionalFloatPatch(value *float64, clear bool) **float64 {
+	if clear {
+		var cleared *float64
+		return &cleared
+	}
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	pointer := &cloned
+	return &pointer
+}
+
+func (m *Module) resolveOperator(
+	w http.ResponseWriter,
+	r *http.Request,
+	workspace string,
+	action authority.Action,
+) (authority.OperatorAuthority, bool) {
+	if m == nil || m.authority == nil {
+		writeRoleError(w, agents.ErrUnavailable, "role management unavailable")
+		return authority.OperatorAuthority{}, false
+	}
+	auth, err := m.authority.ResolveOperatorAuthority(r, workspace, action)
+	if err != nil {
+		writeRoleError(w, err, "role authorization failed")
+		return authority.OperatorAuthority{}, false
+	}
+	return auth, true
+}
+
+func writeRoleError(w http.ResponseWriter, err error, fallback string) {
+	switch {
+	case errors.Is(err, workflowcataloghttp.ErrUnauthenticated):
+		handler.RespondError(w, http.StatusUnauthorized, "operator authentication required")
+	case errors.Is(err, authority.ErrWorkspaceMismatch),
+		errors.Is(err, authority.ErrAdmissionDenied),
+		errors.Is(err, authority.ErrActionNotAllowed):
+		handler.RespondError(w, http.StatusForbidden, "operator is not allowed to manage this workspace")
+	case errors.Is(err, agents.ErrInvalid), errors.Is(err, domain.ErrInvalid):
+		handler.RespondError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, agents.ErrNotFound), errors.Is(err, domain.ErrNotFound):
+		handler.RespondError(w, http.StatusNotFound, fallback)
+	case errors.Is(err, agents.ErrAlreadyExists), errors.Is(err, agents.ErrConflict),
+		errors.Is(err, domain.ErrAlreadyExists), errors.Is(err, domain.ErrConflict):
+		handler.RespondError(w, http.StatusConflict, err.Error())
+	case errors.Is(err, agents.ErrUnavailable):
+		handler.RespondError(w, http.StatusServiceUnavailable, fallback)
+	default:
+		handler.RespondError(w, http.StatusInternalServerError, fallback)
+	}
+}
+
+func roleDefinitionFromCreate(input store.RoleCreate) agents.RoleDefinition {
+	return agents.RoleDefinition{
+		Name: input.Name, Kind: input.Kind, Description: input.Description,
+		Prompt: input.Prompt, PromptFile: input.PromptFile, Model: input.Model,
+		TaskFilter: input.TaskFilter, Backend: input.Backend, Effort: input.Effort,
+		PathPatterns: slices.Clone(input.PathPatterns), Skills: slices.Clone(input.Skills),
+		MaxPriority: cloneInt(input.MaxPriority), MaxConcurrency: cloneInt(input.MaxConcurrency),
+		ReadOnly: input.ReadOnly, AllowedTools: slices.Clone(input.AllowedTools),
+		DeniedTools: slices.Clone(input.DeniedTools), MaxBudgetUSD: cloneFloat64(input.MaxBudgetUSD),
+	}
+}
+
+func rolePatchFromStore(patch store.RoleUpdate) agents.RolePatch {
+	return agents.RolePatch{
+		Kind: patch.Kind, Description: patch.Description, Prompt: patch.Prompt,
+		PromptFile: patch.PromptFile, Model: patch.Model, TaskFilter: patch.TaskFilter,
+		Backend: patch.Backend, Effort: patch.Effort, PathPatterns: patch.PathPatterns,
+		Skills: patch.Skills, MaxPriority: patch.MaxPriority, MaxConcurrency: patch.MaxConcurrency,
+		ReadOnly: patch.ReadOnly, AllowedTools: patch.AllowedTools, DeniedTools: patch.DeniedTools,
+		MaxBudgetUSD: patch.MaxBudgetUSD,
+	}
+}
+
+func domainRole(role *agents.Role) *domain.Role {
+	if role == nil {
+		return nil
+	}
+	return &domain.Role{
+		WorkspaceKey: role.WorkspaceKey, Name: role.Name, Kind: domain.RoleKind(role.Kind),
+		Description: role.Description, Prompt: role.Prompt, PromptFile: role.PromptFile,
+		Model: role.Model, TaskFilter: role.TaskFilter, Backend: role.Backend, Effort: role.Effort,
+		PathPatterns: slices.Clone(role.PathPatterns), Skills: slices.Clone(role.Skills),
+		MaxPriority: cloneInt(role.MaxPriority), MaxConcurrency: cloneInt(role.MaxConcurrency),
+		ReadOnly: role.ReadOnly, AllowedTools: slices.Clone(role.AllowedTools),
+		DeniedTools: slices.Clone(role.DeniedTools), MaxBudgetUSD: cloneFloat64(role.MaxBudgetUSD),
+		CreatedAt: role.CreatedAt, UpdatedAt: role.UpdatedAt,
+	}
+}
+
+func cloneInt(value *int) *int {
+	if value == nil {
+		return nil
+	}
+	out := *value
+	return &out
+}
+
+func cloneFloat64(value *float64) *float64 {
+	if value == nil {
+		return nil
+	}
+	out := *value
+	return &out
+}
+
+func equalInt(left, right *int) bool {
+	return left == nil && right == nil || left != nil && right != nil && *left == *right
+}
+
+func equalFloat64(left, right *float64) bool {
+	return left == nil && right == nil || left != nil && right != nil && *left == *right
 }
 
 // writeRolePrompt writes the prompt body to <workspace>/.loom/prompts/<file>

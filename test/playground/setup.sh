@@ -91,9 +91,25 @@ rm -f "$RUNTIME/create.err"
 export LOOM_WORKSPACE="$WORKSPACE_KEY"
 loom workspace use "$WORKSPACE_KEY"
 
+register_worker_agent() {
+  name="$1"
+  role="$2"
+  backend="$3"
+  task_filter="$4"
+  repo_name="$(basename "$REPO")"
+
+  # Behavior policy belongs to Role; per-run repository/backend placement
+  # belongs to Execution's WorkerProfile. Agent identity retains only the
+  # stable profile reference.
+  loom role set "$role" backend "$backend" >/dev/null
+  loom role set "$role" task_filter "$task_filter" >/dev/null
+  loom worker profile add "$name" --role "$role" --backend "$backend" --repo "$repo_name"
+  loom agentdef add "$name" --role "$role" --profile "$name" --auto
+}
+
 if [ -z "$SCENARIO" ]; then
-  loom agentdef add playground-planner --role plan --backend playground --repos "$(basename "$REPO")" --auto --task-filter needs_plan
-  loom agentdef add playground-coder   --role task --backend playground --repos "$(basename "$REPO")" --auto --task-filter has_design
+  register_worker_agent playground-planner plan playground needs_plan
+  register_worker_agent playground-coder task playground has_design
   loom data create --title "Seed task 1 (playground)" --type task --priority 2
   loom data create --title "Seed task 2 (playground)" --type task --priority 2
   loom data create --title "Seed task 3 (playground)" --type task --priority 3
@@ -105,16 +121,14 @@ elif [ "$SCENARIO" = "leakclaim" ]; then
   # tasks, so the leaked lock persists forever — matching the TREE
   # workspace behavior where the planner had already finished and stopped
   # by the time the user noticed the worker was stuck.
-  loom agentdef add leakclaim-coder --role task --backend playground \
-    --repos "$(basename "$REPO")" --auto --task-filter has_design
+  register_worker_agent leakclaim-coder task playground has_design
   loom data create --title "Leakclaim scenario seed" --type task --priority 2
 else
   # Agent name must differ from the workspace name. loom seeds the primary
   # repo checkout on a branch named after the workspace, and each agent
   # gets a worktree on a branch named after the agent. Using the same name
   # for both collides with "already checked out".
-  loom agentdef add "${SCENARIO}-worker" --role task --backend "playground-$SCENARIO" \
-    --repos "$(basename "$REPO")" --auto --task-filter has_design
+  register_worker_agent "${SCENARIO}-worker" task "playground-$SCENARIO" has_design
 fi
 
 if [ -z "$SCENARIO" ]; then

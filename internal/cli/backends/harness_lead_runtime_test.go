@@ -25,7 +25,7 @@ func installFakeHarnessLead(t *testing.T) *leadcontrol.HarnessLeadRuntimeConfig 
 func TestRunControlledLeadRuntimeDispatchesClaude(t *testing.T) {
 	captured := installFakeHarnessLead(t)
 
-	handled, err := RunControlledLeadRuntime(context.Background(), nil, "WS", "nova", "lead-session", "/repo", "prompt", "claude")
+	handled, err := RunControlledLeadRuntime(context.Background(), nil, nil, "WS", "nova", "lead-session", "/repo", "prompt", "claude")
 	if err != nil {
 		t.Fatalf("RunControlledLeadRuntime() error = %v", err)
 	}
@@ -69,7 +69,7 @@ func TestRunControlledLeadRuntimeDispatchesGenericBackends(t *testing.T) {
 	}
 	for backend, want := range cases {
 		captured := installFakeHarnessLead(t)
-		handled, err := RunControlledLeadRuntime(context.Background(), nil, "WS", "nova", "lead-session", "/repo", "prompt", backend)
+		handled, err := RunControlledLeadRuntime(context.Background(), nil, nil, "WS", "nova", "lead-session", "/repo", "prompt", backend)
 		if err != nil {
 			t.Fatalf("%s: RunControlledLeadRuntime() error = %v", backend, err)
 		}
@@ -88,7 +88,7 @@ func TestRunControlledLeadRuntimeDispatchesGenericBackends(t *testing.T) {
 
 func TestRunControlledLeadRuntimeUnknownBackendNotHandled(t *testing.T) {
 	installFakeHarnessLead(t)
-	handled, err := RunControlledLeadRuntime(context.Background(), nil, "WS", "nova", "lead-session", "/repo", "prompt", "my-external-plugin")
+	handled, err := RunControlledLeadRuntime(context.Background(), nil, nil, "WS", "nova", "lead-session", "/repo", "prompt", "my-external-plugin")
 	if err != nil {
 		t.Fatalf("RunControlledLeadRuntime() error = %v", err)
 	}
@@ -100,7 +100,7 @@ func TestRunControlledLeadRuntimeUnknownBackendNotHandled(t *testing.T) {
 func TestRunControlledLeadRuntimeEnvEscapeHatch(t *testing.T) {
 	t.Setenv(envLeadControlled, "0")
 	installFakeHarnessLead(t)
-	handled, err := RunControlledLeadRuntime(context.Background(), nil, "WS", "nova", "lead-session", "/repo", "prompt", "claude")
+	handled, err := RunControlledLeadRuntime(context.Background(), nil, nil, "WS", "nova", "lead-session", "/repo", "prompt", "claude")
 	if err != nil {
 		t.Fatalf("RunControlledLeadRuntime() error = %v", err)
 	}

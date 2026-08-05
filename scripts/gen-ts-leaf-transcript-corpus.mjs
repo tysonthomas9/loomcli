@@ -4,7 +4,7 @@
 // pin the TypeScript local-task-runner leaf's output to the canonical Go
 // transcript.Event schema.
 //
-// It runs the REAL parser (internal/workflows/builtin/local-task-runner.ts
+// It runs the REAL parser (internal/infra/workflowdistribution/builtin/local-task-runner.ts
 // parseStreamJSONTranscript) over representative claude/codex/cursor stream-json so
 // the fixture is actual leaf output, not a hand-authored guess. Re-run whenever the
 // parser's emitted shape changes:
@@ -13,7 +13,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseStreamJSONTranscript } from "../internal/workflows/builtin/local-task-runner.ts";
+import { parseStreamJSONTranscript } from "../internal/infra/workflowdistribution/builtin/local-task-runner.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const out = path.join(here, "../internal/sessions/transcript/testdata/ts_leaf_corpus.json");

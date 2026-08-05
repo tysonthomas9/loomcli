@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-builtin-workflows test-characterization check-supervisor-disabled test-supervisor-disabled test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down local-mode-frontend-dist local-mode-info local-mode-up local-mode-codex-up local-mode-codex-workflows-up local-mode-workflow-build-check local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend check-fleetdb-binary gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-architecture check-architecture-memory check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify test-e2e-github-webhook test-e2e-github-webhook-live
+.PHONY: all build build-frontend build-all test test-builtin-workflows test-characterization check-supervisor-disabled test-supervisor-disabled test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down local-mode-frontend-dist local-mode-info local-mode-up local-mode-codex-up local-mode-codex-workflows-up local-mode-workflow-build-check local-mode-daytona-build-check local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full test-e2e-daytona-broker clean install help frontend check check-go check-frontend check-fleetdb-binary gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-architecture check-architecture-memory check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify test-e2e-github-webhook test-e2e-github-webhook-live
 
 # Default target
 all: build
@@ -56,7 +56,7 @@ LOCAL_MODE_COMPOSE_ARGS = -p $(LOCAL_MODE_COMPOSE_PROJECT) -f test/local-mode/do
 LOCAL_MODE_CODEX_COMPOSE_ARGS = -p $(LOCAL_MODE_COMPOSE_PROJECT) -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.codex.yml $(LOCAL_MODE_COMPOSE_EXTRA)
 LOCAL_MODE_CODEX_WORKFLOW_COMPOSE_ARGS = -p $(LOCAL_MODE_COMPOSE_PROJECT) -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.codex.yml -f test/local-mode/docker-compose.workflow-build.yml $(LOCAL_MODE_COMPOSE_EXTRA)
 LOCAL_MODE_CLAUDE_COMPOSE_ARGS = -p $(LOCAL_MODE_COMPOSE_PROJECT) -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.claude.yml $(LOCAL_MODE_COMPOSE_EXTRA)
-LOCAL_MODE_DAYTONA_COMPOSE_ARGS = -p $(LOCAL_MODE_COMPOSE_PROJECT) -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.daytona.yml $(LOCAL_MODE_COMPOSE_EXTRA)
+LOCAL_MODE_DAYTONA_COMPOSE_ARGS = -p $(LOCAL_MODE_COMPOSE_PROJECT) -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.workflow-build.yml -f test/local-mode/docker-compose.daytona.yml $(LOCAL_MODE_COMPOSE_EXTRA)
 LOCAL_MODE_WORKFLOW_BUILD_CHECK = $(if $(filter %docker-compose.workflow-build.yml,$(LOCAL_MODE_COMPOSE_FILES)),local-mode-workflow-build-check)
 export LOCAL_MODE_FLEETDB_IMAGE
 export LOCAL_MODE_LOOM_IMAGE
@@ -105,7 +105,7 @@ test-all:
 	@echo "Running all tests..."
 	@TEST_TAGS=integration,e2e TEST_COVER=1 ./scripts/test.sh
 
-# Run the builtin workflow node unit tests (internal/workflows/builtin/*.test.mjs).
+# Run the builtin workflow node unit tests (internal/infra/workflowdistribution/builtin/*.test.mjs).
 # Deliberately NOT folded into check-go (that gate is Go-only + decoupling-smoke
 # tested); run it standalone here and in the builtin-bundle-pin CI job. Needs ../flue.
 test-builtin-workflows:
@@ -255,15 +255,15 @@ local-mode-codex-up: local-mode-frontend-dist
 local-mode-workflow-build-check:
 	@set -e; \
 	missing=""; \
-	for rel in packages/cli/bin/flue.mjs packages/cli/dist/flue.js packages/runtime/package.json packages/runtime/dist/node/index.mjs packages/runtime/node_modules/@hono/node-server packages/runtime/node_modules/hono node_modules/.pnpm/node_modules/@daytona/sdk/package.json; do \
+	for rel in packages/cli/bin/flue.mjs packages/cli/dist/flue.js packages/runtime/package.json packages/runtime/dist/node/index.mjs packages/runtime/node_modules/@hono/node-server packages/runtime/node_modules/hono; do \
 	  if [ ! -e "$(FLUE_SRC)/$$rel" ]; then missing="$$missing $$rel"; fi; \
 	done; \
 	if [ "$$missing" != "" ]; then \
 	  echo "Flue workflow build toolchain is incomplete at $(FLUE_SRC)." >&2; \
 	  echo "Missing:$$missing" >&2; \
-	  echo "Built-in workflow sources require the Flue CLI/runtime plus @daytona/sdk from Flue's hello-world workspace." >&2; \
+	  echo "Built-in workflow sources require the Flue CLI/runtime." >&2; \
 	  echo "From the pinned Flue checkout, run:" >&2; \
-	  echo "  pnpm install --frozen-lockfile --force --filter @flue/cli... --filter @flue/runtime... --filter hello-world..." >&2; \
+	  echo "  pnpm install --frozen-lockfile --force --filter @flue/cli... --filter @flue/runtime..." >&2; \
 	  echo "  pnpm build" >&2; \
 	  echo "Or set FLUE_SRC=/path/to/flue with an already prepared checkout." >&2; \
 	  exit 1; \
@@ -298,7 +298,7 @@ local-mode-workflow-build-check:
 	  echo "Then rerun the selected local-mode target." >&2; \
 	  exit 1; \
 	fi; \
-	expected="$$(tr -d '[:space:]' < internal/workflows/FLUE_COMMIT)"; \
+	expected="$$(tr -d '[:space:]' < internal/infra/workflowdistribution/FLUE_COMMIT)"; \
 	actual="$$(git -C "$(FLUE_SRC)" rev-parse HEAD 2>/dev/null || true)"; \
 	if [ "$$actual" != "$$expected" ]; then \
 	  echo "Flue checkout $$actual does not match Loom's pinned commit $$expected." >&2; \
@@ -318,12 +318,19 @@ local-mode-claude-up: local-mode-frontend-dist
 	$(LOCAL_MODE_COMPOSE_SELECT); \
 	$$compose $(LOCAL_MODE_CLAUDE_COMPOSE_ARGS) up $(LOCAL_MODE_COMPOSE_UP_FLAGS)
 
-# Daemon TS leaf routed to Daytona: a claimed task runs inside a real Daytona
-# sandbox. Requires DAYTONA_API_KEY on the host; DAYTONA_REPO_URL must be a
-# network-reachable git URL. e.g.:
-#   DAYTONA_API_KEY=... LOOM_DAEMON_LEAF=ts make local-mode-daytona-up
-local-mode-daytona-up: local-mode-frontend-dist
-	@echo "Starting local-mode Daytona dogfood stack ($(LOCAL_MODE_COMPOSE_PROJECT)) on http://localhost:$${LOCAL_MODE_UI_PORT:-8283}/ws/LOCALMODE/kanban..."
+local-mode-daytona-build-check: local-mode-workflow-build-check
+	@if [ ! -f "$(FLUE_SRC)/node_modules/.pnpm/node_modules/@daytona/sdk/package.json" ]; then \
+	  echo "Daytona SDK is missing from the pinned Flue checkout at $(FLUE_SRC)." >&2; \
+	  echo "Run pnpm install in that checkout before starting the Daytona profile." >&2; \
+	  exit 1; \
+	fi
+
+# Starts the real host-broker Daytona profile. Provider credentials are never
+# accepted through Compose env; save Daytona (and GitHub for PR delivery) in
+# Settings after startup so loom serve seals them in its local credential vault.
+local-mode-daytona-up: local-mode-frontend-dist local-mode-daytona-build-check
+	@echo "Starting local-mode Daytona host-broker stack ($(LOCAL_MODE_COMPOSE_PROJECT)) on http://localhost:$${LOCAL_MODE_UI_PORT:-8283}/ws/LOCALMODE/kanban..."
+	@echo "After startup, save provider credentials in Settings; they are resolved only by loom serve."
 	@set -e; \
 	$(LOCAL_MODE_COMPOSE_SELECT); \
 	$$compose $(LOCAL_MODE_DAYTONA_COMPOSE_ARGS) up $(LOCAL_MODE_COMPOSE_UP_FLAGS)
@@ -443,7 +450,7 @@ ARCHCHECK_RSS_LIMIT_MIB ?= 2048
 ARCHCHECK_RSS_TIMEOUT_SECONDS ?= 1200
 
 check-architecture-memory:
-	@go run ./scripts/rsswatch $(ARCHCHECK_RSS_LIMIT_MIB) $(ARCHCHECK_RSS_TIMEOUT_SECONDS) go test ./internal/archtest -count=1 -timeout=15m
+	@$(MAKE) check-architecture
 
 # Check for stale LOC allowlist entries
 check-loc-stale:
@@ -523,6 +530,20 @@ test-e2e-github-webhook-live:
 	@: "$${LOOM_E2E_GITHUB_REPO:?set LOOM_E2E_GITHUB_REPO=owner/repo}"
 	@echo "Running live GitHub webhook e2e against $$LOOM_E2E_GITHUB_REPO..."
 	@GOCACHE=$${GOCACHE:-/tmp/go-build-cache} go test -count=1 -tags e2e -run TestE2E_GitHubWebhookRunsDriverAgainstLiveGitHubPR ./internal/webui/handlers/webhooks -timeout 5m
+
+# Provisions a real Daytona sandbox and may use a paid Codex backend. The test
+# harness seals DAYTONA_API_KEY into a temporary Loom vault before exercising
+# the host broker; the raw credential is not forwarded to the workflow process.
+test-e2e-daytona-broker: local-mode-daytona-build-check
+	@: "$${DAYTONA_API_KEY:?set DAYTONA_API_KEY for the opt-in live test}"
+	@echo "Running paid external-service Daytona host-broker e2e..."
+	@LOOM_DAYTONA_BROKER_E2E=1 \
+	  LOOM_FLUE_RUNTIME_ROOT="$(FLUE_SRC)/packages/runtime" \
+	  LOOM_SDK_ROOT="$(CURDIR)/sdk" \
+	  DAYTONA_SDK_ROOT="$(FLUE_SRC)/node_modules/.pnpm/node_modules/@daytona/sdk" \
+	  LOOM_REAL_FLUE_CMD_JSON='["node","$(FLUE_SRC)/packages/cli/bin/flue.mjs"]' \
+	  GOCACHE=$${GOCACHE:-/tmp/go-build-cache} \
+	  go test -count=1 -tags e2e -run TestE2EDaytonaProviderBroker ./internal/cli/serve/serveadapter/daytonabroker -timeout 15m
 
 # Compile + run the real GitHub stacked-PR publisher e2e (initial publish / re-run /
 # drop-a-unit / reorder). The test is //go:build e2e tagged, so this target is also the
@@ -634,6 +655,8 @@ check-fleetdb-binary:
 		fi; \
 	fi
 
+CHECK_GO_SKIP_ARCHITECTURE ?= 0
+
 check-go:
 	@echo "=== [1/16] Go: FleetDB compatibility + format check ==="
 	@$(MAKE) check-fleetdb-binary
@@ -653,7 +676,11 @@ check-go:
 	@echo "=== [7/16] Go: import fanout check ==="
 	@./scripts/check-import-fanout.sh 18
 	@echo "=== [8/16] Go: modular-monolith architecture guard ==="
-	@$(MAKE) check-architecture
+	@if [ "$(CHECK_GO_SKIP_ARCHITECTURE)" = "1" ]; then \
+		echo "Architecture guard is owned by the separate measured CI job."; \
+	else \
+		$(MAKE) check-architecture; \
+	fi
 	@echo "=== [9/16] Go: modular-monolith characterization gate ==="
 	@$(MAKE) test-characterization
 	@echo "=== [10/16] Go: supervisor-disabled contract validation ==="
@@ -666,9 +693,10 @@ check-go:
 	@./scripts/check-no-beads-prod.sh
 	@echo "=== [14/16] Go: generated API staleness ==="
 	@./scripts/check-go-api-staleness.sh
-# The production architecture pass above already runs the full repository scan
-# and enforces the exact checked-in snapshot. Keep focused archtest coverage in
-# the race pass, but do not repeat its repository-scale integration test.
+# The production architecture pass above, or CI's separate measured job, runs
+# the full repository scan and enforces the exact checked-in snapshot. Keep
+# focused archtest coverage in the race pass, but do not repeat its
+# repository-scale integration test.
 	@echo "=== [15/16] Go: test with race detector ==="
 	@set -e; coverage_profile=; \
 	cleanup_coverage() { \

@@ -175,18 +175,20 @@ production_background_loops:
   record:
     status: measured
     rationale: >-
-      The Phase 1 AST inventory names every in-scope non-test source ticker and
+      The Phase 5 AST inventory names every in-scope non-test source ticker and
       goroutine launch definition plus every additional boot or long-lived
-      component; managed classifications are the production background-loop
-      population, while bounded command, request, and startup waits remain
-      visible but do not inflate that count. The all-source definition ledger
-      intentionally includes architecture tooling, mutually exclusive build-tag
-      variants such as testbackend, and the fake-harness helper; it is not a
-      simultaneous product-runtime instance count.
+      component. It adds the AgentProvisioning and Interaction recovery plus
+      separately scheduled Workspace repository-admission recovery and lease
+      renewal registrations to the managed population; bounded command,
+      request, and startup waits remain visible but do not inflate that count.
+      The all-source definition ledger intentionally includes architecture
+      tooling, mutually exclusive build-tag variants such as testbackend, and
+      the fake-harness helper; it is not a simultaneous product-runtime
+      instance count.
     evidence:
-      source_sha: 1353e2faf14ae121c93fe5eb92f779b56a2ad7ae
-      measured_at: 2026-07-17T05:58:05Z
-      evidence_source: internal/archtest/testdata/runtime-components.yaml with exact AST parity enforced by internal/archtest/runtime_inventory_test.go
+      source_sha: accb1fa60a8a546b8952368d52d5cee85bdf00ee
+      measured_at: 2026-07-30
+      evidence_source: Phase 5 base accb1fa60 plus the reviewed working diff, recorded in internal/archtest/testdata/runtime-components.yaml with exact AST parity enforced by internal/archtest/runtime_inventory_test.go
       command:
         - go
         - test
@@ -217,14 +219,14 @@ production_background_loops:
           - internal/archtest/testdata/runtime-components.yaml
   result:
     inventory_path: internal/archtest/testdata/runtime-components.yaml
-    total_components: 86
-    ticker_sites: 53
+    total_components: 90
+    ticker_sites: 54
     goroutine_launch_sites: 105
-    managed: 58
+    managed: 61
     command_poll: 4
     request_scoped: 15
-    startup_wait: 9
-    background_loop_count: 58
+    startup_wait: 10
+    background_loop_count: 61
     count_rule: classification equals managed
 
 full_build_gate_duration:

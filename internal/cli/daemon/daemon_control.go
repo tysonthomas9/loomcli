@@ -15,7 +15,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // DaemonControlRequest is sent by the CLI client to the daemon control socket.
@@ -177,14 +176,10 @@ func (d *Daemon) handleAgentControlStop(name string, force bool) DaemonControlRe
 		d.drainAddMu.Unlock()
 		return DaemonControlResponse{Error: fmt.Sprintf("failed to stop agent %q: %v", name, err)}
 	}
-	if err := d.markAgentStopAccepted(name); err != nil {
-		// Runtime stop is already authoritative. The durable command worker
-		// retries terminal projection after completion, so do not misreport a
-		// completed stop as a control failure or replay its side effect.
-		slog.Warn("agent stopped but lifecycle projection is pending retry",
-			"worktree", name,
-			"err", err)
-	}
+	// Runtime state remains owned by Execution. This local desired intent keeps
+	// the reconciler from immediately respawning the worker; the durable
+	// AgentCommand records the accepted operator transition.
+	d.markAgentStopAccepted(name)
 	d.drainAddMu.Unlock()
 
 	slog.Info("agent stopped via control socket", "worktree", name, "force", force)
@@ -298,41 +293,20 @@ func agentControlStartIDs(taskIDs []string) (string, string) {
 }
 
 func (d *Daemon) markAgentStartAccepted(name string) {
-	desired := domain.AgentDesiredRunning
-	state := domain.AgentStateActive
-	if err := d.markAgentLifecycleAccepted(name, state, desired); err != nil {
-		slog.Warn("failed to mark agent start accepted", "worktree", name, "err", err)
-	}
+	d.markDaemonAgentIntentAccepted(name, domain.AgentDesiredRunning)
 }
 
-func (d *Daemon) markAgentStopAccepted(name string) error {
-	return d.markAgentLifecycleAccepted(
-		name,
-		domain.AgentStateStopped,
-		domain.AgentDesiredStopped,
-	)
+func (d *Daemon) markAgentStopAccepted(name string) {
+	d.markDaemonAgentIntentAccepted(name, domain.AgentDesiredStopped)
 }
 
-func (d *Daemon) markAgentLifecycleAccepted(
+func (d *Daemon) markDaemonAgentIntentAccepted(
 	name string,
-	state domain.AgentState,
 	desired domain.AgentDesiredState,
-) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
+) {
 	d.reconcileMu.Lock()
 	defer d.reconcileMu.Unlock()
-	if d.store != nil && d.sup != nil && d.sup.WorkspaceID != "" {
-		if _, err := d.store.Agents().Update(ctx, d.sup.WorkspaceID, name, store.AgentUpdate{
-			DesiredState: &desired,
-			State:        &state,
-		}); err != nil {
-			return err
-		}
-	}
 	d.setConfigAgentDesiredStateLocked(name, desired)
-	return nil
 }
 
 func (d *Daemon) validateEphemeralStart(entry config.AgentEntry, taskID string) error {
@@ -342,36 +316,30 @@ func (d *Daemon) validateEphemeralStart(entry config.AgentEntry, taskID string) 
 	if taskID == "" {
 		return fmt.Errorf("ephemeral agent %q requires a task_id; rerun the task to create a new worker attempt", entry.Worktree)
 	}
-	if d.hasTerminalEphemeralTaskSession(entry.Worktree) {
+	if d.hasTerminalEphemeralTaskRun(entry.Worktree) {
 		return fmt.Errorf("ephemeral agent %q already has a terminal task attempt; rerun the task to create a new worker attempt", entry.Worktree)
 	}
 	return nil
 }
 
-func (d *Daemon) hasTerminalEphemeralTaskSession(agentName string) bool {
-	if d.store == nil || d.sup == nil || d.sup.WorkspaceID == "" || d.store.AgentSessions() == nil {
+func (d *Daemon) hasTerminalEphemeralTaskRun(workerProfileID string) bool {
+	if d.store == nil || d.sup == nil || d.sup.WorkspaceID == "" || d.store.TaskRuns() == nil {
 		return false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	sessions, err := d.store.AgentSessions().List(ctx, d.sup.WorkspaceID, store.AgentSessionFilter{
-		AgentID: agentName,
-		Limit:   100,
-	})
+	terminal, err := d.hasEphemeralTaskRunWithStatus(
+		ctx,
+		workerProfileID,
+		domain.TaskRunCompleted,
+		domain.TaskRunFailed,
+		domain.TaskRunCancelled,
+	)
 	if err != nil {
-		slog.Warn("failed to inspect ephemeral task sessions", "agent", agentName, "err", err)
+		slog.Warn("failed to inspect ephemeral task runs", "worker_profile_id", workerProfileID, "err", err)
 		return true
 	}
-	for _, session := range sessions {
-		if session == nil || session.Kind != domain.AgentSessionKindTask || session.TaskID == "" {
-			continue
-		}
-		switch session.Status {
-		case domain.AgentSessionCompleted, domain.AgentSessionFailed, domain.AgentSessionCancelled, domain.AgentSessionExpired:
-			return true
-		}
-	}
-	return false
+	return terminal
 }
 
 func (d *Daemon) setConfigAgentDesiredState(name string, desired domain.AgentDesiredState) {

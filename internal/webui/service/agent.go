@@ -7,7 +7,30 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 )
+
+type agentOperatorAuthorityContextKey struct{}
+
+// WithAgentOperatorAuthority carries one request-verified, opaque operator
+// authority from the HTTP adapter to the supervised assignment service.
+func WithAgentOperatorAuthority(
+	ctx context.Context,
+	auth authority.OperatorAuthority,
+) context.Context {
+	return context.WithValue(ctx, agentOperatorAuthorityContextKey{}, auth)
+}
+
+// AgentOperatorAuthorityFromContext returns the authority previously resolved
+// at the transport boundary. The Agents admission service remains responsible
+// for checking its exact action and workspace.
+func AgentOperatorAuthorityFromContext(ctx context.Context) (authority.OperatorAuthority, bool) {
+	if ctx == nil {
+		return authority.OperatorAuthority{}, false
+	}
+	auth, ok := ctx.Value(agentOperatorAuthorityContextKey{}).(authority.OperatorAuthority)
+	return auth, ok
+}
 
 // AgentService defines the business logic operations for agents.
 // Handlers call this interface to perform agent-scoped operations and map

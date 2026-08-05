@@ -239,7 +239,11 @@ For the supervisor-assigned bug ticket:
    smallest failing case you can find.
 3. Locate the most likely root cause in the code (file:line) and explain why.
 4. Assess severity and blast radius.
-5. Post a triage summary comment and set the ticket's labels/priority.
+5. Post a triage summary comment, set the ticket's priority, and add the fixed
+   triage handoff marker:
+   loom data update <assigned-task-id> --priority <0-4> --add-label triaged
+   You may add other evidence labels with repeated --add-label flags, but the
+   triaged marker is mandatory so this role does not claim the ticket again.
 6. Move the ticket to the Review column as the terminal triage handoff:
    loom data update <assigned-task-id> --status review
    Do not leave it Open: the daemon would otherwise select it for triage again.

@@ -301,7 +301,7 @@ func RPCMutationToPayload(m rpc.MutationEvent) *MutationPayload {
 		Action:     m.Action,
 		IssueID:    m.IssueID,
 		Title:      m.Title,
-		Assignee:   m.Assignee,
+		Assignee:   mutationAssignee(m.Action, m.Assignee, m.Actor, m.OldStatus, m.NewStatus),
 		Actor:      m.Actor,
 		Timestamp:  m.Timestamp.UTC().Format(time.RFC3339Nano),
 		OldStatus:  m.OldStatus,

@@ -135,9 +135,9 @@ func TestE2E_PR82_WrapperTickerFiresOnActivity(t *testing.T) {
 // supervisor and daemon-state projections preserve the task/activity fields
 // the kanban surface eventually consumes.
 //
-// The daemon is constructed without a fleet-db store, so validateIPCLease
-// short-circuits (no lease validation) — the heartbeat path runs purely
-// for its per-agent activity side effect.
+// The daemon is constructed without a workspace identity, so process-local
+// IPC credential fencing is disabled — the heartbeat path runs purely for its
+// per-agent activity side effect.
 func TestE2E_PR82_FullChainWrapperToSupervisor(t *testing.T) {
 	if testing.Short() {
 		t.Skip("e2e test skipped under -short")
@@ -182,8 +182,7 @@ func TestE2E_PR82_FullChainWrapperToSupervisor(t *testing.T) {
 	t.Setenv("LOOM_DAEMON_SOCKET", socketPath)
 	t.Setenv("LOOM_AGENT_NAME", agentName)
 	t.Setenv("LOOM_SESSION_ID", "session-1")
-	t.Setenv("LOOM_AGENT_LEASE_ID", "lease-1")
-	t.Setenv("LOOM_AGENT_LEASE_TOKEN", "token-1")
+	t.Setenv("LOOM_AGENT_IPC_AUTH_TOKEN", "token-1")
 
 	// DefaultIssueBackend is a singleton; tests that ran before us may
 	// have initialized it under different env. Force a fresh init.
@@ -320,8 +319,7 @@ func TestE2E_PR82_DepartureClearsLiveness(t *testing.T) {
 	t.Setenv("LOOM_DAEMON_SOCKET", socketPath)
 	t.Setenv("LOOM_AGENT_NAME", agentName)
 	t.Setenv("LOOM_SESSION_ID", "session-1")
-	t.Setenv("LOOM_AGENT_LEASE_ID", "lease-1")
-	t.Setenv("LOOM_AGENT_LEASE_TOKEN", "token-1")
+	t.Setenv("LOOM_AGENT_IPC_AUTH_TOKEN", "token-1")
 
 	cli.ResetDefaultIssueBackend()
 	defer cli.ResetDefaultIssueBackend()

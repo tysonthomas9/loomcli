@@ -298,7 +298,7 @@ func TestCreateAgentAllowsDistributedWorkspaceWithoutLocalPath(t *testing.T) {
 		t.Fatalf("create repo: %v", err)
 	}
 
-	svc := NewAgentService(nil, nil, nil, st)
+	svc := newAuthorizedTestAgentService(t, nil, nil, nil, st)
 	created, err := svc.CreateAgent(ctx, service.AgentCreateInput{
 		WorkspaceKey: "TEST2",
 		Name:         "smoke-rebuild",
@@ -330,7 +330,7 @@ func TestCreateAgentLeadEnsuresRoleAndDoesNotRequireRepo(t *testing.T) {
 		t.Fatalf("create workspace: %v", err)
 	}
 
-	svc := NewAgentService(nil, nil, nil, st)
+	svc := newAuthorizedTestAgentService(t, nil, nil, nil, st)
 	created, err := svc.CreateAgent(ctx, service.AgentCreateInput{
 		WorkspaceKey: "TEST2",
 		Name:         "lead-nova",
@@ -378,7 +378,7 @@ func TestCreateAgentLeadReusesSeededDefaultRole(t *testing.T) {
 		t.Fatalf("seed lead role: %v", err)
 	}
 
-	svc := NewAgentService(nil, nil, nil, st)
+	svc := newAuthorizedTestAgentService(t, nil, nil, nil, st)
 	if _, err := svc.CreateAgent(ctx, service.AgentCreateInput{
 		WorkspaceKey: "TEST2",
 		Name:         "lead-two",
@@ -422,7 +422,7 @@ func TestCreateAgentFailureRetainsRetryableInteractiveRole(t *testing.T) {
 					err:        fmt.Errorf("injected create failure: %w", domain.ErrConflict),
 				},
 			}
-			svc := NewAgentService(nil, nil, nil, st)
+			svc := newAuthorizedTestAgentService(t, nil, nil, nil, st)
 			if _, err := svc.CreateAgent(ctx, service.AgentCreateInput{
 				WorkspaceKey: "TEST2", Name: "reviewer-a", RoleName: "reviewer",
 				Kind: "interactive", PromptFile: "builtin:pr-review", Backend: "codex",
@@ -498,7 +498,7 @@ func TestCreateAgentMultiRepoFailureRetainsRetryableWorktrees(t *testing.T) {
 				}
 			}
 
-			svc := NewAgentService(nil, nil, nil, st)
+			svc := newAuthorizedTestAgentService(t, nil, nil, nil, st)
 			if _, err := svc.CreateAgent(ctx, service.AgentCreateInput{
 				WorkspaceKey: "MULTI", Name: "worker", RoleName: "task",
 				Backend: "codex", CrossRepo: true,
@@ -532,7 +532,7 @@ func TestCreateAgentInteractiveKindEnsuresRoleWithPromptFile(t *testing.T) {
 		t.Fatalf("create workspace: %v", err)
 	}
 
-	svc := NewAgentService(nil, nil, nil, st)
+	svc := newAuthorizedTestAgentService(t, nil, nil, nil, st)
 	created, err := svc.CreateAgent(ctx, service.AgentCreateInput{
 		WorkspaceKey: "TEST2",
 		Name:         "review-nova",
@@ -570,7 +570,7 @@ func TestCreateAgentInteractiveKindEnsuresRoleWithInlinePrompt(t *testing.T) {
 		t.Fatalf("create workspace: %v", err)
 	}
 
-	svc := NewAgentService(nil, nil, nil, st)
+	svc := newAuthorizedTestAgentService(t, nil, nil, nil, st)
 	if _, err := svc.CreateAgent(ctx, service.AgentCreateInput{
 		WorkspaceKey: "TEST2",
 		Name:         "custom-nova",
@@ -614,7 +614,7 @@ func TestCreateAgentInteractiveRoleCreationIsIdempotent(t *testing.T) {
 		t.Fatalf("create role: %v", err)
 	}
 
-	svc := NewAgentService(nil, nil, nil, st)
+	svc := newAuthorizedTestAgentService(t, nil, nil, nil, st)
 	// Creating another agent on the same interactive role with the SAME prompt
 	// is a no-op on the role (idempotent), never a mutation.
 	if _, err := svc.CreateAgent(ctx, service.AgentCreateInput{
@@ -671,7 +671,7 @@ func TestCreateAgentInteractiveRoleConflict(t *testing.T) {
 		t.Fatalf("create empty-prompt interactive role: %v", err)
 	}
 
-	svc := NewAgentService(nil, nil, nil, st)
+	svc := newAuthorizedTestAgentService(t, nil, nil, nil, st)
 
 	// Interactive agent colliding with the worker role "task" → error.
 	if _, err := svc.CreateAgent(ctx, service.AgentCreateInput{
@@ -719,7 +719,7 @@ func TestCreateAgentRoleCreateRaceRefetchesAndReconciles(t *testing.T) {
 		},
 	}
 	st := roleCreateRaceStore{Store: base, roles: racingRoles}
-	svc := NewAgentService(nil, nil, nil, st)
+	svc := newAuthorizedTestAgentService(t, nil, nil, nil, st)
 
 	if _, err := svc.CreateAgent(ctx, service.AgentCreateInput{
 		WorkspaceKey: "TEST4",
@@ -753,7 +753,7 @@ func TestCreateAgentRejectsInvalidKind(t *testing.T) {
 		t.Fatalf("create workspace: %v", err)
 	}
 
-	svc := NewAgentService(nil, nil, nil, st)
+	svc := newAuthorizedTestAgentService(t, nil, nil, nil, st)
 	if _, err := svc.CreateAgent(ctx, service.AgentCreateInput{
 		WorkspaceKey: "TEST2",
 		Name:         "bad-kind",
@@ -777,7 +777,7 @@ func TestCreateAgentNormalizesMixedCaseName(t *testing.T) {
 		t.Fatalf("create workspace: %v", err)
 	}
 
-	svc := NewAgentService(nil, nil, nil, st)
+	svc := newAuthorizedTestAgentService(t, nil, nil, nil, st)
 	created, err := svc.CreateAgent(ctx, service.AgentCreateInput{
 		WorkspaceKey: "TEST2",
 		Name:         "Test-lead",
@@ -809,7 +809,7 @@ func TestUpdateAndDeleteAgentAcceptDottedStoredName(t *testing.T) {
 		t.Fatalf("create workspace: %v", err)
 	}
 
-	svc := NewAgentService(nil, nil, nil, st)
+	svc := newAuthorizedTestAgentService(t, nil, nil, nil, st)
 	if _, err := svc.CreateAgent(ctx, service.AgentCreateInput{
 		WorkspaceKey: "TEST2",
 		Name:         "foo.bar",
@@ -853,7 +853,7 @@ func TestRequestAgentLifecycleQueuesStartWithPendingProjection(t *testing.T) {
 		t.Fatalf("create agent: %v", err)
 	}
 
-	svc := NewAgentService(nil, nil, nil, st)
+	svc := newAuthorizedTestAgentService(t, nil, nil, nil, st)
 	result, err := svc.RequestAgentLifecycle(ctx, "TEST2", "desktopqa", service.AgentLifecycleInput{
 		State:        domain.AgentStateActive,
 		DesiredState: domain.AgentDesiredRunning,
@@ -907,7 +907,7 @@ func TestRequestAgentLifecycleQueuesWorkerStopWithoutClaimingItSettled(t *testin
 		t.Fatalf("create agent: %v", err)
 	}
 
-	svc := NewAgentService(nil, nil, nil, st)
+	svc := newAuthorizedTestAgentService(t, nil, nil, nil, st)
 	result, err := svc.RequestAgentLifecycle(ctx, "TEST2", "desktopqa", service.AgentLifecycleInput{
 		State:        domain.AgentStateStopped,
 		DesiredState: domain.AgentDesiredStopped,
@@ -987,7 +987,7 @@ func TestRequestAgentLifecycleLeavesWorkerStateUnchangedWhenCommandCreateFails(t
 			err:               createErr,
 		},
 	}
-	svc := NewAgentService(nil, nil, nil, wrapped)
+	svc := newAuthorizedTestAgentService(t, nil, nil, nil, wrapped)
 	if _, err := svc.RequestAgentLifecycle(ctx, "TEST2", "desktopqa", service.AgentLifecycleInput{
 		State:        domain.AgentStateStopped,
 		DesiredState: domain.AgentDesiredStopped,
@@ -1037,7 +1037,7 @@ func TestRequestAgentLifecycleRecoversCommitThenErrorWithClientCommandID(t *test
 		Store:    st,
 		commands: commands,
 	}
-	svc := NewAgentService(nil, nil, nil, wrapped)
+	svc := newAuthorizedTestAgentService(t, nil, nil, nil, wrapped)
 	result, err := svc.RequestAgentLifecycle(ctx, "TEST2", "desktopqa", service.AgentLifecycleInput{
 		State:        domain.AgentStateStopped,
 		DesiredState: domain.AgentDesiredStopped,
@@ -1097,7 +1097,7 @@ func TestRequestAgentLifecycleAnchorsListProofAtRecoveredCursor(t *testing.T) {
 		createErr:         errors.New("synthetic response lost after commit"),
 		defaultListCap:    50,
 	}
-	svc := NewAgentService(nil, nil, nil, agentCommandOverrideStore{
+	svc := newAuthorizedTestAgentService(t, nil, nil, nil, agentCommandOverrideStore{
 		Store: st, commands: commands,
 	})
 	result, err := svc.RequestAgentLifecycle(ctx, "TEST2", "desktopqa", service.AgentLifecycleInput{
@@ -1142,7 +1142,7 @@ func TestRequestAgentLifecycleRejectsHashOnlyGetRecovery(t *testing.T) {
 		createErr:         errors.New("synthetic index write failure"),
 		cursor:            1,
 	}
-	svc := NewAgentService(nil, nil, nil, agentCommandOverrideStore{
+	svc := newAuthorizedTestAgentService(t, nil, nil, nil, agentCommandOverrideStore{
 		Store: st, commands: commands,
 	})
 	result, err := svc.RequestAgentLifecycle(ctx, "TEST2", "desktopqa", service.AgentLifecycleInput{
@@ -1218,7 +1218,7 @@ func TestRequestAgentLifecycleRecoversCreateAfterCommandWasAcknowledged(t *testi
 		createErr:         errors.New("synthetic response lost after commit"),
 		ackAfterCreate:    true,
 	}
-	svc := NewAgentService(nil, nil, nil, agentCommandOverrideStore{
+	svc := newAuthorizedTestAgentService(t, nil, nil, nil, agentCommandOverrideStore{
 		Store: st, commands: commands,
 	})
 	result, err := svc.RequestAgentLifecycle(ctx, "TEST2", "desktopqa", service.AgentLifecycleInput{
@@ -1270,7 +1270,7 @@ func TestOverlappingStopStartRequestsCannotRepairOlderProjectionOverNewerTermina
 	}
 
 	forbidUpdates := &forbidAgentUpdateStore{AgentStore: st.Agents()}
-	svc := NewAgentService(nil, nil, nil, agentCreateOverrideStore{
+	svc := newAuthorizedTestAgentService(t, nil, nil, nil, agentCreateOverrideStore{
 		Store:  st,
 		agents: forbidUpdates,
 	})
@@ -1367,7 +1367,7 @@ func TestRequestAgentLifecycleStopsInteractiveRuntimeWithoutDaemonCommand(t *tes
 			"TEST2\x00reviewer": {{Key: key, Live: true}},
 		},
 	}
-	svc := NewAgentServiceWithInteractiveRuntime(nil, nil, nil, st, runtime)
+	svc := newAuthorizedTestAgentService(t, nil, nil, nil, st, runtime)
 	result, err := svc.RequestAgentLifecycle(ctx, "TEST2", "reviewer", service.AgentLifecycleInput{
 		State:        domain.AgentStateStopped,
 		DesiredState: domain.AgentDesiredStopped,
@@ -1382,15 +1382,15 @@ func TestRequestAgentLifecycleStopsInteractiveRuntimeWithoutDaemonCommand(t *tes
 	if result.Agent.State != domain.AgentStateStopped || result.Agent.DesiredState != domain.AgentDesiredStopped {
 		t.Fatalf("updated agent state = %s/%s, want stopped/stopped", result.Agent.State, result.Agent.DesiredState)
 	}
-	if len(runtime.killed) != 2 || runtime.killed[0] != key || runtime.killed[1] != key {
-		t.Fatalf("killed runtimes = %+v, want two fenced kills of %+v", runtime.killed, key)
+	if len(runtime.killed) != 1 || runtime.killed[0] != key {
+		t.Fatalf("killed runtimes = %+v, want one lifecycle-boundary kill of %+v", runtime.killed, key)
 	}
 	session, err := st.AgentSessions().Get(ctx, "TEST2", "lead-session")
 	if err != nil {
 		t.Fatalf("get orchestration session: %v", err)
 	}
-	if session.Status != domain.AgentSessionCancelled || session.FinishedAt == nil {
-		t.Fatalf("orchestration session = %+v, want cancelled with finished_at", session)
+	if session.Status != domain.AgentSessionRunning || session.FinishedAt != nil {
+		t.Fatalf("orchestration session = %+v, want Interaction-owned lifecycle untouched", session)
 	}
 	commands, err := st.AgentCommands().List(ctx, "TEST2", store.AgentCommandFilter{
 		TargetAgentID: "reviewer",
@@ -1431,7 +1431,7 @@ func TestRequestAgentLifecycleStopsOwnedPTYBeforeFleetSessionRegistration(t *tes
 			"TEST2\x00startup-lead": {{Key: key, Live: true}},
 		},
 	}
-	svc := NewAgentServiceWithInteractiveRuntime(nil, nil, nil, st, runtime)
+	svc := newAuthorizedTestAgentService(t, nil, nil, nil, st, runtime)
 	result, err := svc.RequestAgentLifecycle(ctx, "TEST2", "startup-lead", service.AgentLifecycleInput{
 		State: domain.AgentStateStopped, DesiredState: domain.AgentDesiredStopped, CommandType: "stop",
 	})
@@ -1441,8 +1441,63 @@ func TestRequestAgentLifecycleStopsOwnedPTYBeforeFleetSessionRegistration(t *tes
 	if result.Pending || result.Agent.State != domain.AgentStateStopped || result.Agent.DesiredState != domain.AgentDesiredStopped {
 		t.Fatalf("lifecycle result = %+v, want synchronous stopped/stopped", result)
 	}
-	if len(runtime.killed) != 2 || runtime.killed[0] != key || runtime.killed[1] != key {
-		t.Fatalf("startup PTY kills = %+v, want two fenced kills of %+v", runtime.killed, key)
+	if len(runtime.killed) != 1 || runtime.killed[0] != key {
+		t.Fatalf("startup PTY kills = %+v, want one lifecycle-boundary kill of %+v", runtime.killed, key)
+	}
+}
+
+func TestRequestAgentLifecycleRestartDelegatesOnceToCanonicalPTYBoundary(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{
+		Key: "TEST2", Name: "Test 2", DefaultBranch: "main",
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{
+		WorkspaceKey: "TEST2", Name: "lead", Kind: string(domain.RoleKindInteractive),
+	}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "TEST2", Name: "restart-lead", RoleName: "lead",
+		DesiredState: domain.AgentDesiredRunning,
+	}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "TEST2", SessionID: "session-canonical",
+		AgentID: "restart-lead", Kind: domain.AgentSessionKindInteractive,
+		TerminalID: "terminal-canonical", Status: domain.AgentSessionRunning,
+	}); err != nil {
+		t.Fatalf("create canonical interactive session: %v", err)
+	}
+	key := terminal.SessionKey{Workspace: "TEST2", Name: "term_restart"}
+	runtime := &fakeInteractiveRuntime{
+		live: map[terminal.SessionKey]bool{key: true},
+		owned: map[string][]InteractiveRuntimeSession{
+			"TEST2\x00restart-lead": {{
+				Key: key, Live: true,
+				InteractionSessionID:  "session-canonical",
+				InteractionTerminalID: "terminal-canonical",
+				StreamRef:             "terminal:TEST2/term_restart",
+			}},
+		},
+	}
+	svc := newAuthorizedTestAgentService(t, nil, nil, nil, st, runtime)
+	result, err := svc.RequestAgentLifecycle(ctx, "TEST2", "restart-lead", service.AgentLifecycleInput{
+		State: domain.AgentStateActive, DesiredState: domain.AgentDesiredRunning,
+		CommandType: "restart",
+	})
+	if err != nil {
+		t.Fatalf("RequestAgentLifecycle restart: %v", err)
+	}
+	if result.Pending || result.Agent.State != domain.AgentStateActive ||
+		result.Agent.DesiredState != domain.AgentDesiredRunning {
+		t.Fatalf("restart result = %+v", result)
+	}
+	if len(runtime.killed) != 1 || runtime.killed[0] != key {
+		t.Fatalf("runtime kills = %+v, want one kill of %+v", runtime.killed, key)
 	}
 }
 
@@ -1476,7 +1531,7 @@ func TestRequestAgentLifecycleHoldsTerminalBoundaryThroughStoppedStateUpdate(t *
 		firstKillStarted: make(chan struct{}),
 		releaseFirstKill: make(chan struct{}),
 	}
-	svc := NewAgentServiceWithInteractiveRuntime(nil, nil, nil, st, runtime)
+	svc := newAuthorizedTestAgentService(t, nil, nil, nil, st, runtime)
 	type lifecycleResult struct {
 		result *service.AgentLifecycleResult
 		err    error
@@ -1545,12 +1600,12 @@ func TestRequestAgentLifecycleHoldsTerminalBoundaryThroughStoppedStateUpdate(t *
 	if err != nil {
 		t.Fatalf("get agent after stopped update: %v", err)
 	}
-	if afterUpdate.State != domain.AgentStateStopped || afterUpdate.DesiredState != domain.AgentDesiredStopped {
-		t.Fatalf("agent visible at terminal boundary = %+v, want stopped/stopped", afterUpdate)
+	if afterUpdate.State != domain.AgentStateActive || afterUpdate.DesiredState != domain.AgentDesiredStopped {
+		t.Fatalf("agent visible at terminal boundary = %+v, want runtime state untouched and desired stopped", afterUpdate)
 	}
 	close(releaseContender)
-	if len(runtime.killed) != 2 || runtime.killed[0] != key || runtime.killed[1] != key {
-		t.Fatalf("runtime kills = %+v, want two fenced kills of %+v", runtime.killed, key)
+	if len(runtime.killed) != 1 || runtime.killed[0] != key {
+		t.Fatalf("runtime kills = %+v, want one lifecycle-boundary kill of %+v", runtime.killed, key)
 	}
 }
 
@@ -1574,7 +1629,7 @@ func TestRequestAgentLifecycleStartsInteractiveWithoutDaemonCommandAndRejectsYie
 		t.Fatalf("create agent: %v", err)
 	}
 
-	svc := NewAgentServiceWithInteractiveRuntime(nil, nil, nil, st, nil)
+	svc := newAuthorizedTestAgentService(t, nil, nil, nil, st, nil)
 	result, err := svc.RequestAgentLifecycle(ctx, "TEST2", "ui-lead", service.AgentLifecycleInput{
 		State:        domain.AgentStateActive,
 		DesiredState: domain.AgentDesiredRunning,
@@ -1598,7 +1653,7 @@ func TestRequestAgentLifecycleStartsInteractiveWithoutDaemonCommandAndRejectsYie
 	if err != nil {
 		t.Fatalf("get agent after Yield: %v", err)
 	}
-	if unchanged.State != domain.AgentStateActive || unchanged.DesiredState != domain.AgentDesiredRunning {
+	if unchanged.State != domain.AgentStateIdle || unchanged.DesiredState != domain.AgentDesiredRunning {
 		t.Fatalf("agent changed after rejected Yield: %+v", unchanged)
 	}
 	commands, err := st.AgentCommands().List(ctx, "TEST2", store.AgentCommandFilter{
@@ -1648,7 +1703,7 @@ func TestRequestAgentLifecycleRefusesUnownedInteractiveRuntime(t *testing.T) {
 		live:  map[terminal.SessionKey]bool{},
 		owned: map[string][]InteractiveRuntimeSession{},
 	}
-	svc := NewAgentServiceWithInteractiveRuntime(nil, nil, nil, st, runtime)
+	svc := newAuthorizedTestAgentService(t, nil, nil, nil, st, runtime)
 	if _, err := svc.RequestAgentLifecycle(ctx, "TEST2", "custom-agent", service.AgentLifecycleInput{
 		State: domain.AgentStateStopped, DesiredState: domain.AgentDesiredStopped, CommandType: "stop",
 	}); err == nil {
@@ -1711,7 +1766,7 @@ func TestRequestAgentLifecycleRejectsForgedCrossAgentTerminalID(t *testing.T) {
 			"TEST2\x00agent-b": {{Key: victimKey, Live: true}},
 		},
 	}
-	svc := NewAgentServiceWithInteractiveRuntime(nil, nil, nil, st, runtime)
+	svc := newAuthorizedTestAgentService(t, nil, nil, nil, st, runtime)
 	if _, err := svc.RequestAgentLifecycle(ctx, "TEST2", "agent-a", service.AgentLifecycleInput{
 		State: domain.AgentStateStopped, DesiredState: domain.AgentDesiredStopped, CommandType: "stop",
 	}); err == nil {

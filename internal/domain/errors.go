@@ -43,6 +43,17 @@ var (
 	// placed on any live node with the required provider/capabilities.
 	ErrUnschedulable = errors.New("domain: unschedulable")
 
+	// ErrUnavailable indicates a retryable failure to reach or serve a
+	// required durable capability. Infrastructure may wrap this sentinel with
+	// transport detail, but shared application and HTTP boundaries must not
+	// depend on the persistence package to preserve a 503 classification.
+	ErrUnavailable = errors.New("domain: temporarily unavailable")
+
+	// ErrRateLimited indicates a retryable admission failure for which the
+	// caller should apply bounded backoff. It is distinct from ErrUnavailable
+	// so HTTP and SDK boundaries can preserve a 429 classification.
+	ErrRateLimited = errors.New("domain: rate limited")
+
 	// ErrGone indicates the entity exists but is no longer available —
 	// e.g. a lease that has expired or been released (fleet-db 410
 	// lease_expired). Distinct from ErrNotFound (never existed here) and

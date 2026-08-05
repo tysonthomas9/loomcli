@@ -53,7 +53,7 @@ jobs:
         id: flue-pin
         run: |
           set -euo pipefail
-          sha="$(tr -d '[:space:]' < internal/workflows/FLUE_COMMIT)"
+          sha="$(tr -d '[:space:]' < internal/infra/workflowdistribution/FLUE_COMMIT)"
           if ! printf '%s' "$sha" | grep -Eq '^[0-9a-f]{40}$'; then
             echo "ERROR: FLUE_COMMIT is not a 40-char hex SHA: '$sha'" >&2
             exit 1

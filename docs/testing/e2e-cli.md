@@ -20,8 +20,9 @@ Tests CLI writes are visible at the API layer (cross-checked via curl). State is
 | A6.set | `loom role set task max_concurrency 10` | `^Set ACME/task.max_concurrency = 10$` | **curl** `:18095/api/v1/ACME/roles/task` → `max_concurrency:10` (do NOT trust `loom role show` for this — use curl) |
 | A6.verify | (curl above) | response has `"max_concurrency":10` | — |
 | A7.unset | `loom role unset task max_concurrency` | `^Cleared ACME/task.max_concurrency$` | **curl** response has NO `max_concurrency` field |
-| A8 | `loom agentdef add agent-1 --role task --auto --repos backend` | `^Created agent ACME/agent-1` | `curl :18095/api/v1/ACME/agents/agent-1` → `role_name:"task", state:"idle"` |
-| A8.state | (response from A8 curl) | `state:"idle"` is the initial value | — |
+| A7.profile | `loom worker profile add agent-1 --role task --repo backend` | stdout identifies profile `agent-1` | management response has `role:"task", repos:["backend"]` |
+| A8 | `loom agentdef add agent-1 --role task --profile agent-1 --auto` | `^Created agent ACME/agent-1` | `curl :8080/api/workspaces/ACME/agent-identities/agent-1` → `behavior.role_name:"task", profile_name:"agent-1"` |
+| A8.state | (response from A8 curl) | `desired_state:"running"` is the initial value | — |
 | A9 | `loom daemon profile set max_agents 8` | `^Set ACME.max_agents = 8$` | `curl :18095/api/v1/ACME/daemon` → `max_agents:8` |
 | A10 | `loom daemon profile show --json` | JSON contains `"max_agents": 8` | matches A9 curl |
 | A11 | `loom workspace show --json` | nested `workspace+repos+agents+roles` | counts: 2 repos, 1 agent, 1 role |
@@ -38,6 +39,7 @@ Tests every error path produces an actionable, parseable message.
 | B4 | `loom repo show nope` | `HTTP 404` AND `not found` | — |
 | B5 | (env without `LOOM_WORKSPACE`) `loom repo list` | `^Error: no active workspace: set LOOM_WORKSPACE` | runtime commands ignore state-cache defaults |
 | B6 | `loom role set task no_such_key value` | `^Error: unknown key "no_such_key"` | — |
+| B6.agentdef | `loom agentdef add scoped --role task --repo-groups core` | unknown flag; no Agent identity is created | Repo-group/cross-repo parity has no Phase 5 WorkerProfile contract and fails closed |
 | **B7** | **`loom workspace remove ACME` with `LOOM_WORKSPACE=ACME`** | success | **then** `loom repo list` → `^Error: active workspace "ACME" not found in fleet-db` (explicit env becomes stale) |
 | **B8** | (corrupt state.json) `echo '{bad json' > $LOOM_CONFIG_DIR/state.json && loom repo list` | error mentions `parse` and the file path | malformed-cache recovery |
 | **B9** | (B8 fix-up: write valid state.json with `last_workspace: "DELETED-WS"` and unset `LOOM_WORKSPACE`) `loom repo list` | `^Error: no active workspace` — NOT a panic | stale state cache is ignored by runtime selection |

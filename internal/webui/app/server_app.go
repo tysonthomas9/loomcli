@@ -12,10 +12,11 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/tysonthomas9/loomcli/internal/webui"
+	"github.com/tysonthomas9/loomcli/internal/webui/app/capabilitycomposition"
 	"github.com/tysonthomas9/loomcli/internal/webui/appinfra"
 	"github.com/tysonthomas9/loomcli/internal/webui/appstores"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
-
+	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
@@ -409,14 +410,15 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	// Initialize workspace service layer. FleetDB Store is the authoritative
 	// workspace source in both local and distributed modes.
 	app.workspaceSvc = service.NewWorkspaceService(service.WorkspaceServiceConfig{
-		Store:          config.Store,
-		MultiPool:      app.multiPool,
-		CreateFn:       app.wrappedCreateFn,
-		AddReposFn:     config.WorkspaceAddReposFn,
-		DeleteFn:       app.wrappedDeleteFn,
-		JobStore:       app.jobStore,
-		SetDefaultFn:   config.SetDefaultWorkspaceFn,
-		ClearDefaultFn: config.ClearDefaultWorkspaceFn,
+		Store:                config.Store,
+		MultiPool:            app.multiPool,
+		CreateFn:             app.wrappedCreateFn,
+		AddReposFn:           config.WorkspaceAddReposFn,
+		DeleteFn:             app.wrappedDeleteFn,
+		JobStore:             app.jobStore,
+		AdmissionCoordinator: config.WorkspaceAdmissions,
+		SetDefaultFn:         config.SetDefaultWorkspaceFn,
+		ClearDefaultFn:       config.ClearDefaultWorkspaceFn,
 	})
 
 	// Generate and persist notify token for session change endpoint auth.
@@ -437,8 +439,13 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 
 	// Initialize agent service after terminal metadata so interactive lifecycle
 	// authority can bind process-local PTYs to server-owned agent tabs.
+	app.ptyMgr.SetBeforeKill(capabilitycomposition.NewInteractionPTYBeforeKill(
+		app.tabMetaStore,
+		capabilitycomposition.InteractionForceInterrupter(config.InteractionCapability),
+	))
 	if config.GitOps != nil {
-		app.agentSvc = svcimpl.NewAgentServiceWithInteractiveRuntime(
+		compatibility := capabilitycomposition.ResolveAgentServiceCompatibility(config.AgentsCapability)
+		app.agentSvc = svcimpl.NewAgentServiceWithCompatibility(
 			config.GitOps,
 			app.agentTmuxMgr,
 			app.termAuth,
@@ -447,12 +454,15 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 				interactiveRuntimeTabSource{terminalService: app.termSvc},
 				app.ptyMgr,
 			),
+			compatibility.API,
+			compatibility.Managed,
+			compatibility.Retirements,
 		)
 	}
 
 	// Initialize diff service layer (requires ops.GitOps)
 	if config.GitOps != nil {
-		app.diffSvc = svcimpl.NewDiffService(config.GitOps, app.multiPool)
+		app.diffSvc = githandlers.NewDiffService(config.GitOps, app.multiPool)
 	}
 
 	// Initialize file service layer (requires ops.FileOps)
@@ -494,10 +504,12 @@ func (s interactiveRuntimeTabSource) ListInteractiveRuntimeTabs(
 	for i := range tabs {
 		tab := &tabs[i]
 		runtimeTabs = append(runtimeTabs, svcimpl.InteractiveRuntimeTab{
-			SessionName: tab.SessionName,
-			Kind:        tab.Kind,
-			AgentID:     tab.AgentID,
-			PTYAlive:    tab.PTYAlive,
+			SessionName:           tab.SessionName,
+			Kind:                  tab.Kind,
+			AgentID:               tab.AgentID,
+			InteractionSessionID:  tab.InteractionSessionID,
+			InteractionTerminalID: tab.InteractionTerminalID,
+			PTYAlive:              tab.PTYAlive,
 		})
 	}
 	return runtimeTabs, nil

@@ -57,24 +57,29 @@ func TestWaitForAgent_RenewsWorkerLease(t *testing.T) {
 	}
 }
 
-// TestCompleteControlPlaneAgentSession_DeregistersWorker guards the deregister
-// half of the fix at the lifecycle level: the completion chokepoint must
+// TestCompletePreSpawnCleanupDeregistersWorker guards the deregister half of
+// the fix at the lifecycle level: the cleanup chokepoint must
 // deregister the agent's worker so a stopped/drained agent clears the board
 // immediately. A unit test of deregisterWorker alone would not catch the
 // chokepoint dropping the s.deregisterWorker(ap) call.
-func TestCompleteControlPlaneAgentSession_DeregistersWorker(t *testing.T) {
+func TestCompletePreSpawnCleanupDeregistersWorker(t *testing.T) {
 	s, cw := newWorkerWiringSupervisor()
 	ap := &AgentProcess{Entry: cfgpkg.AgentEntry{Worktree: "agent-wt"}}
 
-	// sessionID must be non-empty (the method early-returns otherwise); taskID
-	// and lease fields stay empty so claim/lease release are skipped — we are
-	// only asserting the worker deregister is reached.
-	s.completeControlPlaneAgentSession(ap, agentSessionCompletionInput{
-		sessionID: "sess-1",
-		exitCode:  0,
-	})
+	s.completePreSpawnCleanup(ap, "test")
 
 	if got := cw.deregisters.Load(); got != 1 {
-		t.Fatalf("completeControlPlaneAgentSession did not deregister the worker — deregister is not wired into the completion chokepoint (got %d, want 1)", got)
+		t.Fatalf("completePreSpawnCleanup did not deregister the worker — deregister is not wired into the cleanup chokepoint (got %d, want 1)", got)
+	}
+}
+
+func TestFinalizeWithoutLocalSessionDeregistersWorker(t *testing.T) {
+	s, cw := newWorkerWiringSupervisor()
+	ap := &AgentProcess{Entry: cfgpkg.AgentEntry{Worktree: "agent-wt"}}
+
+	s.finalizeAgentSession(ap, 0)
+
+	if got := cw.deregisters.Load(); got != 1 {
+		t.Fatalf("finalizeAgentSession coupled Worker cleanup to local session creation (got %d deregisters, want 1)", got)
 	}
 }

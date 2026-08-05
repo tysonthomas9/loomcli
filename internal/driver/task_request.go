@@ -205,7 +205,7 @@ func resolveTaskRunRequestRunner(ctx context.Context, s store.Store, opts TaskRu
 	if !errors.Is(err, ErrRunnerNotDeclared) {
 		return opts, err
 	}
-	if globalResolved, gErr := resolveGlobalRunnerRequest(ctx, s, opts, parent); gErr == nil {
+	if globalResolved, gErr := resolveGlobalRunnerRequest(ctx, opts, parent); gErr == nil {
 		return globalResolved, nil
 	}
 	// Global resolution also failed: return the ORIGINAL not-declared error so an
@@ -219,8 +219,8 @@ func resolveTaskRunRequestRunner(ctx context.Context, s store.Store, opts TaskRu
 // — and its trust level — so the runner executes under its own trust, never the
 // (possibly untrusted) caller's. See global_runner.go for the security
 // reasoning.
-func resolveGlobalRunnerRequest(ctx context.Context, s store.Store, opts TaskRunRequestOptions, parent *domain.DriverRun) (TaskRunRequestOptions, error) {
-	res, err := resolveGlobalRunner(ctx, s, opts.WorkspaceKey, opts.Runner)
+func resolveGlobalRunnerRequest(ctx context.Context, opts TaskRunRequestOptions, parent *domain.DriverRun) (TaskRunRequestOptions, error) {
+	res, err := resolveGlobalRunner(ctx, opts.WorkspaceKey, opts.Runner)
 	if err != nil {
 		return opts, err
 	}

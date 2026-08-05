@@ -2,16 +2,11 @@ package driver
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
-
-const flueTaskSessionFinalizeTimeout = 10 * time.Second
 
 // validateBridgeTaskRunnerResult mirrors §4.1/§4.2: a decoded runner result is
 // valid only when it carries a terminal status and — for completed — a zero
@@ -115,6 +110,7 @@ func (e *HostBridgeTaskExecutor) resolveLocalTaskWorktree(ctx context.Context, r
 		}
 		e.WorktreePath = resolved.Path
 	}
+	e.repositoryRemote = strings.TrimSpace(resolved.RepositoryRemote)
 	return resolved, TaskExecResult{}, false
 }
 
@@ -156,239 +152,6 @@ func taskRunnerTrustLevel(trust domain.DriverTrustLevel) domain.DriverTrustLevel
 	return domain.DriverTrustUntrusted
 }
 
-func (e HostBridgeTaskExecutor) startFlueTaskSession(ctx context.Context, req TaskExecRequest) (*flueTaskSession, error) {
-	if e.Store == nil || !taskExecUsesFlueRuntime(req) {
-		return nil, nil
-	}
-	sessionID := flueTaskSessionID(req)
-	metadata := flueTaskSessionMetadata(req, sessionID)
-	status := domain.AgentSessionRunning
-	if _, err := e.Store.AgentSessions().Create(ctx, store.AgentSessionCreate{
-		WorkspaceKey:    req.WorkspaceKey,
-		SessionID:       sessionID,
-		AgentID:         flueTaskAgentID(req),
-		NodeID:          req.NodeID,
-		Kind:            domain.AgentSessionKindTask,
-		TaskID:          req.TaskID,
-		ParentSessionID: req.ParentSessionID,
-		Status:          status,
-		Phase:           "implementation",
-		Metadata:        metadata,
-	}); err != nil {
-		if !errors.Is(err, domain.ErrAlreadyExists) {
-			return nil, fmt.Errorf("create flue task agent session: %w", err)
-		}
-		existing, getErr := e.Store.AgentSessions().Get(ctx, req.WorkspaceKey, sessionID)
-		if getErr != nil {
-			return nil, fmt.Errorf("get existing flue task agent session: %w", getErr)
-		}
-		metadata = mergeStringMaps(existing.Metadata, metadata)
-		if _, updateErr := e.Store.AgentSessions().Update(ctx, req.WorkspaceKey, sessionID, store.AgentSessionUpdate{
-			NodeID:   optionalString(req.NodeID),
-			TaskID:   optionalString(req.TaskID),
-			Status:   &status,
-			Phase:    optionalString("implementation"),
-			Metadata: &metadata,
-		}); updateErr != nil {
-			return nil, fmt.Errorf("update existing flue task agent session: %w", updateErr)
-		}
-	}
-	hbCtx, cancel := context.WithCancel(ctx)
-	heartbeatDone := startFlueTaskSessionHeartbeat(hbCtx, e.Store, req.WorkspaceKey, sessionID, 30*time.Second)
-	return &flueTaskSession{
-		SessionID:     sessionID,
-		Metadata:      metadata,
-		cancel:        cancel,
-		heartbeatDone: heartbeatDone,
-	}, nil
-}
-
-func startFlueTaskSessionHeartbeat(
-	ctx context.Context,
-	st store.Store,
-	workspaceKey string,
-	sessionID string,
-	interval time.Duration,
-) <-chan struct{} {
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		heartbeatFlueTaskSession(ctx, st, workspaceKey, sessionID, interval)
-	}()
-	return done
-}
-
-func heartbeatFlueTaskSession(ctx context.Context, st store.Store, workspaceKey, sessionID string, interval time.Duration) {
-	if st == nil || workspaceKey == "" || sessionID == "" || interval <= 0 {
-		return
-	}
-	timer := time.NewTimer(interval)
-	defer timer.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-timer.C:
-			_, _ = st.AgentSessions().Heartbeat(ctx, workspaceKey, sessionID)
-			timer.Reset(interval)
-		}
-	}
-}
-
-func (e HostBridgeTaskExecutor) finishFlueTaskSession(ctx context.Context, req TaskExecRequest, session *flueTaskSession, result TaskExecResult, runner *bridgeTaskRunnerResult, execErr error) error {
-	if e.Store == nil || session == nil {
-		return nil
-	}
-	stopFlueTaskSessionHeartbeat(session)
-	// Execution cancellation is itself a normal terminal outcome. Once the
-	// heartbeat is drained, use an independent bounded context so a canceled
-	// task cannot leave its AgentSession running without further heartbeats.
-	finalizeCtx, cancelFinalize := context.WithTimeout(context.WithoutCancel(ctx), flueTaskSessionFinalizeTimeout)
-	defer cancelFinalize()
-	patch := finalFlueTaskSessionPatch(req, session, result, runner, execErr)
-	return updateFlueAgentSession(finalizeCtx, e.Store, req.WorkspaceKey, session.SessionID, patch)
-}
-
-func finalFlueTaskSessionPatch(
-	req TaskExecRequest,
-	session *flueTaskSession,
-	result TaskExecResult,
-	runner *bridgeTaskRunnerResult,
-	execErr error,
-) store.AgentSessionUpdate {
-	status := flueTaskSessionStatus(result, execErr)
-	metadata := finalFlueTaskSessionMetadata(req, session, result, runner, execErr)
-	exitCode := result.ExitCode
-	if status != domain.AgentSessionCompleted && exitCode == 0 {
-		exitCode = 1
-	}
-	exitCodePtr := &exitCode
-	finishedAt := time.Now().UTC()
-	finishedAtPtr := &finishedAt
-	errorClass := result.ErrorClass
-	if execErr != nil && errorClass == "" {
-		errorClass = "task_runner_error"
-	}
-	summary := "task run completed"
-	if status != domain.AgentSessionCompleted {
-		summary = firstNonEmpty(result.ErrorMessage, "task run failed")
-	}
-	return store.AgentSessionUpdate{
-		Status:     &status,
-		FinishedAt: &finishedAtPtr,
-		Summary:    &summary,
-		ErrorClass: optionalString(errorClass),
-		ExitCode:   &exitCodePtr,
-		Metadata:   &metadata,
-	}
-}
-
-func finalFlueTaskSessionMetadata(
-	req TaskExecRequest,
-	session *flueTaskSession,
-	result TaskExecResult,
-	runner *bridgeTaskRunnerResult,
-	execErr error,
-) map[string]string {
-	// Runtime metadata is runner-controlled. Reapply the immutable host-owned
-	// identity after merging so a fenced child cannot retarget the durable
-	// AgentSession at another task, TaskRun, DriverRun, or runner.
-	metadata := mergeStringMaps(
-		session.Metadata,
-		result.RuntimeMetadata,
-		flueTaskSessionMetadata(req, session.SessionID),
-	)
-	if metadata == nil {
-		metadata = make(map[string]string)
-	}
-	if runner != nil {
-		if sessionID := firstNonEmpty(runner.SessionID, runner.SessionIDCamel); sessionID != "" {
-			metadata["driver_runner_session_id"] = sessionID
-		}
-	}
-	if result.LogsRef != "" {
-		metadata["logs_ref"] = result.LogsRef
-	}
-	if result.ArtifactsRef != "" {
-		metadata["artifacts_ref"] = result.ArtifactsRef
-	}
-	if execErr != nil {
-		metadata["task_runner_error"] = execErr.Error()
-	}
-	return metadata
-}
-
-func stopFlueTaskSessionHeartbeat(session *flueTaskSession) {
-	if session.cancel != nil {
-		session.cancel()
-	}
-	if session.heartbeatDone != nil {
-		// Heartbeat is a non-CAS read/modify/write in the Redis store. Drain an
-		// in-flight call before writing terminal state so a stale running record
-		// cannot be committed after completion.
-		<-session.heartbeatDone
-	}
-}
-
-func updateFlueAgentSession(ctx context.Context, st store.Store, workspaceKey, sessionID string, patch store.AgentSessionUpdate) error {
-	if _, err := st.AgentSessions().Update(ctx, workspaceKey, sessionID, patch); err != nil {
-		return fmt.Errorf("update flue task agent session: %w", err)
-	}
-	return nil
-}
-
-func flueTaskSessionStatus(result TaskExecResult, execErr error) domain.AgentSessionStatus {
-	if execErr != nil {
-		return domain.AgentSessionFailed
-	}
-	switch result.Status {
-	case domain.TaskRunCompleted:
-		if result.ExitCode == 0 {
-			return domain.AgentSessionCompleted
-		}
-		return domain.AgentSessionFailed
-	case domain.TaskRunCancelled:
-		return domain.AgentSessionCancelled
-	default:
-		// Empty/non-terminal status is never success: an empty result maps to
-		// failed (no fake completion).
-		return domain.AgentSessionFailed
-	}
-}
-
 func taskExecUsesFlueRuntime(req TaskExecRequest) bool {
 	return strings.TrimSpace(req.RunnerKind) == RunnerKindFlueWorkflow
-}
-
-func flueTaskSessionID(req TaskExecRequest) string {
-	return "flue-" + req.TaskRunID
-}
-
-func flueTaskAgentID(req TaskExecRequest) string {
-	return firstNonEmpty(req.WorkerProfileID, req.RunnerPlacement.RunnerID, req.RunnerPlacement.Provider, "flue-task-agent")
-}
-
-func flueTaskSessionMetadata(req TaskExecRequest, sessionID string) map[string]string {
-	metadata := map[string]string{
-		"backend":                  "flue",
-		"runtime":                  "flue",
-		"task_id":                  req.TaskID,
-		"task_run_id":              req.TaskRunID,
-		"driver_run_id":            req.DriverRunID,
-		"runner":                   req.Runner,
-		"runner_ref":               req.RunnerRef,
-		"runner_kind":              req.RunnerKind,
-		"runner_entrypoint":        req.RunnerEntrypoint,
-		"runner_driver_version_id": req.RunnerVersionID,
-		"provider_profile":         req.ProviderProfile,
-		"flue_session":             sessionID,
-		"flue_harness":             "task-agent",
-	}
-	if req.DriverStepID != "" {
-		metadata["driver_step_id"] = req.DriverStepID
-	}
-	if req.ParentSessionID != "" {
-		metadata["parent_session_id"] = req.ParentSessionID
-	}
-	return metadata
 }

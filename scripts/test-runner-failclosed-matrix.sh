@@ -111,7 +111,7 @@ wait_http() {
 check_prerequisites() {
   require_cmd go; require_cmd git; require_cmd jq; require_cmd curl; require_cmd node; require_cmd redis-server
   [[ -n "$FLEET_DB_REPO" && -d "$FLEET_DB_REPO/cmd/fleet-db" ]] || die "fleet-db repo not found; set FLEET_DB_REPO=/path/to/fleet-db"
-  [[ -d "$ROOT/internal/workflows/builtin-dist/epic-runner/dist" ]] || die "builtin epic-runner dist missing; run 'flue build' first"
+  [[ -d "$ROOT/internal/infra/workflowdistribution/builtin-dist/epic-runner/dist" ]] || die "builtin epic-runner dist missing; run 'flue build' first"
 }
 
 build_binaries() {
@@ -183,7 +183,7 @@ seed_repo() {
 }
 
 stage_dist() {
-  cp -R "$ROOT/internal/workflows/builtin-dist/epic-runner/dist" "$STAGE"
+  cp -R "$ROOT/internal/infra/workflowdistribution/builtin-dist/epic-runner/dist" "$STAGE"
   printf '%s\n' '{"runners":"[{\"name\":\"local-task-runner\",\"kind\":\"flue-workflow\",\"entrypoint\":\"local-task-runner\"}]"}' > "$STAGE/loom-driver.json"
 }
 

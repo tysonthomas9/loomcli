@@ -14,7 +14,7 @@ import (
 // plane (Go) cannot silently drift apart on transcript shape.
 //
 // testdata/ts_leaf_corpus.json is produced by running the REAL TS parser
-// (internal/workflows/builtin/local-task-runner.ts parseStreamJSONTranscript) over
+// (internal/infra/workflowdistribution/builtin/local-task-runner.ts parseStreamJSONTranscript) over
 // representative claude/codex/cursor stream-json — regenerate with
 // scripts/gen-ts-leaf-transcript-corpus.mjs whenever the parser changes.
 func TestTSLeafCorpusConformsToCanonicalSchema(t *testing.T) {

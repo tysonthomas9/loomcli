@@ -74,14 +74,16 @@ What would you like to do?
 **6. Manage Repos or Agents**
 - Before changing repos or agents, inspect current state with `loom workspace ops diagnose --json`, `loom repo list --json`, `loom role list`, and `loom agentdef list`.
 - Register repos with `loom repo add <name> <remote-url>`. In local desktop workspaces this creates or records the local checkout when the URL is cloneable.
-- Create runnable local background agents with `loom agentdef add <name> --role <plan|task> --auto --repos <repo-name>`.
-- Scope an agent to an epic/task subtree with `--parent <issue-id>` when the user asks for scoped work.
-- Use `--task-filter needs_design` for planner agents and `--task-filter has_design` for implementation agents when the user wants the normal plan-then-build flow.
+- Put shared behavior policy on the Role: use `loom role set <role> backend <backend>` and `loom role set <role> task_filter <filter>`.
+- Put execution placement on a WorkerProfile: `loom worker profile add <profile> --role <role> --backend <backend> --repo <repo-name> [--parent-epic <issue-id>]`.
+- Create the durable identity with `loom agentdef add <name> --role <role> --profile <profile> --auto`.
+- `agentdef add` does not accept task-launch or repository-policy flags. Dispatch an epic with `loom epic run --parent <issue-id>`; do not emulate retired `--task` behavior by creating a partially configured identity.
+- Repo-group and cross-repo AgentDefinition parity is not available in Phase 5. Report that limitation instead of omitting the requested scope.
 - Create interactive terminal teammates with `loom role add <name> --kind interactive --prompt-file <path-or-builtin:pr-review>`, then `loom agentdef add <name> --role <name>`. Opening that agent's terminal runs `loom lead --prompt <file>`.
 - Interactive agents are for human-in-the-loop terminal conversations, like PR review. They are NOT daemon-supervised plan/task workers; they run when their terminal is opened.
 - Use `builtin:pr-review` for a ready-made interactive PR-review agent prompt.
 - After adding or starting agents, run `loom workspace ops ensure-runtime --json` and then `loom workspace ops status --json`.
-- Use `loom agentdef start <name>` and `loom agentdef stop <name>` only to change desired state. These commands do not start the daemon process by themselves.
+- Use `loom agentdef start <name>` and `loom agentdef stop <name>` only to change desired state. These commands do not start the daemon process by themselves. Start, stop, and remove print a generation-bound request ID before issuing the mutation. If one returns an ambiguous response, retry with that exact printed `--request-id`; omit the flag for a fresh operation and never invent an unbound ID.
 
 ### Runtime and Daemon Rules
 
@@ -128,10 +130,12 @@ project/
 - `loom role list`: list available agent roles.
 - `loom role add <name> --kind interactive --prompt-file <path>`: define an interactive terminal-agent role.
 - `loom role set <name> kind interactive`: mark an existing role interactive.
+- `loom worker profile add <name> --role <role> --backend <backend> --repo <repo>`: define Execution scheduling and repository scope.
 - `loom agentdef list`: list stored long-lived agent assignments.
-- `loom agentdef add <name> --role <role> --auto --repos <repo>`: create a runnable background agent assignment.
+- `loom agentdef add <name> --role <role> --profile <profile> --auto`: create an identity that references an Execution profile.
 - `loom lead --prompt <file>`: run an interactive terminal agent with a custom prompt.
-- `loom agentdef start <name>` / `loom agentdef stop <name>`: change desired state for an assignment.
+- `loom agentdef start <name> [--request-id <printed-id>]` / `loom agentdef stop <name> [--request-id <printed-id>]` / `loom agentdef remove <name> [--request-id <printed-id>]`: change or remove durable assignment intent; reuse only the generation-bound ID printed by the same ambiguous operation.
+- `loom data agent stop <name> --force`: transitional runtime interruption; `agentdef stop` never force-kills a terminal.
 - `loom plan <name>`: planning agent creates designs and moves tasks to review.
 - `loom task <name>`: implementation agent works approved tasks.
 - `loom plan <name> --auto`: continuous planning.

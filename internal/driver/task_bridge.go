@@ -84,6 +84,11 @@ type HostBridgeTaskExecutor struct {
 	// which the per-run git worktree does NOT contain — so taskRunnerBundleEnv must
 	// resolve the bundle against this base, not the reassigned worktree.
 	driverBundleBaseDir string
+	// repositoryRemote is the token-free remote resolved from the admitted
+	// Workspace repository. It is exported only to the trusted bundled local
+	// runner, allowing filesystem-backed local-branch delivery without adding a
+	// mutable git remote to the isolated task worktree.
+	repositoryRemote string
 }
 
 type bridgeTaskRunnerResult struct {
@@ -166,13 +171,6 @@ type bridgeArtifact struct {
 	RedactionStatus    string            `json:"redaction_status"`
 	RedactionStatusAlt string            `json:"redactionStatus"`
 	Metadata           map[string]string `json:"metadata"`
-}
-
-type flueTaskSession struct {
-	SessionID     string
-	Metadata      map[string]string
-	cancel        context.CancelFunc
-	heartbeatDone <-chan struct{}
 }
 
 func (e HostBridgeTaskExecutor) PreflightTaskProvider(ctx context.Context, opts TaskRunRequestOptions) (TaskRunRequestOptions, error) {
@@ -269,23 +267,10 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 		return LocalTaskExecutor{}.ExecuteTask(ctx, req)
 	}
 
-	session, err := e.startFlueTaskSession(ctx, req)
-	if err != nil {
-		return TaskExecResult{}, err
-	}
-	var runner *bridgeTaskRunnerResult
-	defer func() {
-		if session != nil {
-			if finishErr := e.finishFlueTaskSession(ctx, req, session, result, runner, err); finishErr != nil && err == nil {
-				err = finishErr
-			}
-		}
-	}()
 	runnerResult, err := runBridge()
 	if err != nil {
 		return TaskExecResult{}, err
 	}
-	runner = &runnerResult
 	// Pre-persist validation gate (§4.2): the decoded runner result must be a
 	// non-empty terminal result with a zero exit when completed. An invalid
 	// result fails closed (invalid_task_result, exit 1) and NEVER reaches the
@@ -304,13 +289,13 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 			"worktree_source": "local_workspace_state",
 		})
 	}
-	if artifacts := runner.finalizedArtifacts(); len(artifacts) > 0 {
+	if artifacts := runnerResult.finalizedArtifacts(); len(artifacts) > 0 {
 		result, err = e.registerRunnerArtifacts(ctx, req, artifacts, result)
 		if err != nil {
 			return TaskExecResult{}, err
 		}
 	}
-	result, err = e.persistRunnerOutputArtifacts(ctx, req, session, runnerResult, result)
+	result, err = e.persistRunnerOutputArtifacts(ctx, req, runnerResult, result)
 	if err != nil {
 		return TaskExecResult{}, err
 	}
@@ -742,6 +727,9 @@ func (e HostBridgeTaskExecutor) taskRunnerEnv(req TaskExecRequest, requestJSON s
 		backend := e.resolveTaskRunnerBackend(req, agentPolicy)
 		env = append(env, TaskRunnerBackendEnv+"="+backend)
 		env = append(env, localTaskRunnerRoleEnv(agentPolicy, backend)...)
+		if remote := strings.TrimSpace(e.repositoryRemote); remote != "" && taskRunnerTrustLevel(req.RunnerTrustLevel).Trusted() {
+			env = append(env, "LOOM_TASK_RUN_REPOSITORY_REMOTE_URL="+remote)
+		}
 		existing := env
 		if len(inherited) > 0 && len(inherited[0]) > 0 {
 			existing = append(append([]string{}, inherited[0]...), env...)
@@ -760,16 +748,10 @@ func (e HostBridgeTaskExecutor) localTaskRunnerSettingsEnv(existing []string) []
 	if err != nil {
 		return nil
 	}
-	out := make([]string, 0, 2)
+	out := make([]string, 0, 1)
 	if model := strings.TrimSpace(settings.LocalTaskRunner.OpenCodeModel); model != "" &&
 		!envHasAny(existing, "LOOM_OPENCODE_MODEL") {
 		out = append(out, "LOOM_OPENCODE_MODEL="+model)
-	}
-	if !envHasAny(existing, "GITHUB_TOKEN", "GH_TOKEN") {
-		token, err := runtimesettings.UnsealRuntimeCredential(dir, settings, runtimesettings.RuntimeCredentialProviderGitHub)
-		if err == nil && strings.TrimSpace(token) != "" {
-			out = append(out, "GITHUB_TOKEN="+strings.TrimSpace(token))
-		}
 	}
 	return out
 }

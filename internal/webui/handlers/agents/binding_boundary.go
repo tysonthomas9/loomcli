@@ -10,9 +10,14 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/webui/handlers/triggerbindings"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
+
+type bindingDeletionResult struct {
+	BindingID     string `json:"binding_id"`
+	Deleted       bool   `json:"deleted"`
+	GrantsRevoked int    `json:"grants_revoked"`
+}
 
 func (m *Module) canonicalWorkspace(r *http.Request) (string, bool) {
 	if m == nil || r == nil || strings.TrimSpace(r.PathValue("ws")) == "" || m.workspaceFromContext == nil {
@@ -63,6 +68,10 @@ func writeBindingError(w http.ResponseWriter, err error, fallback string) {
 	case errors.Is(err, automation.ErrConflict), errors.Is(err, automation.ErrManagedBinding),
 		errors.Is(err, automation.ErrBindingEnabled), errors.Is(err, domain.ErrConflict):
 		handler.RespondError(w, http.StatusConflict, err.Error())
+	case handler.IsControlPlaneRateLimited(err):
+		handler.RespondError(w, http.StatusTooManyRequests, fallback)
+	case handler.IsControlPlaneUnavailable(err):
+		handler.RespondError(w, http.StatusServiceUnavailable, fallback)
 	case errors.Is(err, automation.ErrUnavailable):
 		handler.RespondError(w, http.StatusServiceUnavailable, fallback)
 	default:
@@ -78,8 +87,8 @@ func (m *Module) deleteUnmanagedBinding(
 	ctx context.Context,
 	workspace, bindingID string,
 	disableAuth, deleteAuth authority.OperatorAuthority,
-) (triggerbindings.DeleteBindingResult, error) {
-	result := triggerbindings.DeleteBindingResult{BindingID: bindingID}
+) (bindingDeletionResult, error) {
+	result := bindingDeletionResult{BindingID: bindingID}
 	if m == nil || m.bindings == nil || m.bindingGrants == nil {
 		return result, automation.ErrUnavailable
 	}
@@ -103,8 +112,8 @@ func (m *Module) deleteManagedBinding(
 	ctx context.Context,
 	workspace, bindingID, agentServiceID string,
 	disableAuth, deleteAuth authority.OperatorAuthority,
-) (triggerbindings.DeleteBindingResult, error) {
-	result := triggerbindings.DeleteBindingResult{BindingID: bindingID}
+) (bindingDeletionResult, error) {
+	result := bindingDeletionResult{BindingID: bindingID}
 	if m == nil || m.bindings == nil || m.bindingGrants == nil {
 		return result, automation.ErrUnavailable
 	}

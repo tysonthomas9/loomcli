@@ -128,6 +128,66 @@ func (i *Issuer) IssueSession(principal VerifiedPrincipal, workspace string, act
 	return SessionAuthority{grant: value}, nil
 }
 
+// IssueSessionForOwner derives a session authority and binds the exact
+// server-verified AgentSession/lease generation that owns the interactive
+// child. Callers must validate the raw lease credential against durable state
+// before constructing owner; the credential itself never enters the authority.
+func (i *Issuer) IssueSessionForOwner(
+	principal VerifiedPrincipal,
+	workspace string,
+	action Action,
+	owner SessionOwner,
+) (SessionAuthority, error) {
+	return i.issueSessionForOwner(principal, workspace, action, owner)
+}
+
+// IssueSessionForOwnerWithCredential derives a one-command SessionAuthority
+// after the caller validates the raw lease credential against durable state.
+// The credential is copied into a private, non-serializable one-shot handle;
+// callers should clear their source bytes immediately after this method
+// returns.
+func (i *Issuer) IssueSessionForOwnerWithCredential(
+	principal VerifiedPrincipal,
+	workspace string,
+	action Action,
+	owner SessionOwner,
+	credential []byte,
+) (SessionAuthority, error) {
+	if len(credential) == 0 {
+		return SessionAuthority{}, fmt.Errorf("%w: session lease credential is required", ErrInvalidScope)
+	}
+	owner.credential = &sessionLeaseCredential{value: append([]byte(nil), credential...)}
+	result, err := i.issueSessionForOwner(principal, workspace, action, owner)
+	if err != nil {
+		owner.CloseLeaseCredential()
+	}
+	return result, err
+}
+
+func (i *Issuer) issueSessionForOwner(
+	principal VerifiedPrincipal,
+	workspace string,
+	action Action,
+	owner SessionOwner,
+) (SessionAuthority, error) {
+	if strings.TrimSpace(owner.SessionID) == "" || owner.SessionID != strings.TrimSpace(owner.SessionID) ||
+		strings.TrimSpace(owner.AgentID) == "" || owner.AgentID != strings.TrimSpace(owner.AgentID) ||
+		owner.TerminalID != strings.TrimSpace(owner.TerminalID) ||
+		strings.TrimSpace(owner.NodeID) == "" || owner.NodeID != strings.TrimSpace(owner.NodeID) ||
+		strings.TrimSpace(owner.LeaseID) == "" || owner.LeaseID != strings.TrimSpace(owner.LeaseID) ||
+		owner.FencingToken <= 0 {
+		return SessionAuthority{}, fmt.Errorf(
+			"%w: session, agent, node, lease, and positive fence are required",
+			ErrInvalidScope,
+		)
+	}
+	value, err := i.issue(principal, ClassSession, workspace, action, "")
+	if err != nil {
+		return SessionAuthority{}, err
+	}
+	return SessionAuthority{grant: value, owner: owner}, nil
+}
+
 // IssueWebhook derives a webhook authority for one exact workspace/action.
 func (i *Issuer) IssueWebhook(principal VerifiedPrincipal, workspace string, action Action) (WebhookAuthority, error) {
 	value, err := i.issue(principal, ClassWebhook, workspace, action, "")

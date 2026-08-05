@@ -46,6 +46,8 @@ type LegacyDirectWriteBaseline struct {
 	Owners            []LegacyDirectWriteOwnerBaseline `yaml:"owners"`
 }
 
+const legacyDriverDirectWriteExpiresAfterPhase = 6
+
 type LegacyDirectWriteOwnerBaseline struct {
 	CapabilityOwner string `yaml:"capability_owner"`
 	Rows            int    `yaml:"rows"`
@@ -151,7 +153,7 @@ func (i DirectWriteInventory) validateLegacyExecution() error {
 	if baseline == nil {
 		return nil
 	}
-	if baseline.Root != "internal/driver" || baseline.ExpiresAfterPhase != 6 {
+	if baseline.Root != "internal/driver" || baseline.ExpiresAfterPhase != legacyDriverDirectWriteExpiresAfterPhase {
 		return fmt.Errorf("legacy driver direct-write baseline must freeze internal/driver until Phase 6 completion")
 	}
 	if baseline.Rows <= 0 || baseline.Sites <= 0 || len(baseline.Digest) != cryptosha256.Size*2 {
@@ -195,7 +197,14 @@ func (i DirectWriteInventory) validateMetadata() error {
 	if err := validateSortedUnique("direct-write adapter root", i.AdapterRoots); err != nil {
 		return err
 	}
-	wantRoots := []string{"internal/app", "internal/cli", "internal/modules", "internal/webui/handlers"}
+	wantRoots := []string{
+		"internal/app",
+		"internal/cli",
+		"internal/driver",
+		"internal/infra/agentscompatstore",
+		"internal/modules",
+		"internal/webui/handlers",
+	}
 	if !slices.Equal(i.AdapterRoots, wantRoots) {
 		return fmt.Errorf("direct-write adapter roots: got %v, want %v", i.AdapterRoots, wantRoots)
 	}
@@ -468,10 +477,10 @@ func CheckDirectWrites(root string, matrix AnalysisMatrix, inventory DirectWrite
 		}
 	}
 	if baseline := inventory.LegacyDriver; baseline != nil {
-		legacy, err := snapshotDirectWritesAtRoots(root, matrix, inventory, []string{baseline.Root})
-		if err != nil {
-			return nil, nil, fmt.Errorf("scan legacy driver direct writes: %w", err)
+		if !rootCoveredByAdapterRoots(baseline.Root, inventory.AdapterRoots) {
+			return nil, nil, fmt.Errorf("legacy driver root %s must be covered by adapter_roots", baseline.Root)
 		}
+		legacy := directWritesWithinRoot(observed, baseline.Root)
 		rows, sites, digest := directWriteDigest(legacy)
 		owners := directWriteOwnerBaselines(legacy)
 		if rows != baseline.Rows || sites != baseline.Sites || digest != baseline.Digest || !slices.Equal(owners, baseline.Owners) {
@@ -479,6 +488,33 @@ func CheckDirectWrites(root string, matrix AnalysisMatrix, inventory DirectWrite
 		}
 	}
 	return observed, violations, nil
+}
+
+func rootCoveredByAdapterRoots(root string, adapterRoots []string) bool {
+	root = cleanInventoryPath(root)
+	for _, adapterRoot := range adapterRoots {
+		adapterRoot = cleanInventoryPath(adapterRoot)
+		if root == adapterRoot || strings.HasPrefix(root, adapterRoot+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+func directWritesWithinRoot(uses []DirectWriteUse, root string) []DirectWriteUse {
+	root = cleanInventoryPath(root)
+	within := make([]DirectWriteUse, 0, len(uses))
+	for _, use := range uses {
+		file := cleanInventoryPath(use.File)
+		if file == root || strings.HasPrefix(file, root+"/") {
+			within = append(within, use)
+		}
+	}
+	return within
+}
+
+func cleanInventoryPath(path string) string {
+	return strings.Trim(filepath.ToSlash(filepath.Clean(strings.TrimSpace(path))), "/")
 }
 
 func SnapshotDirectWrites(
@@ -559,9 +595,13 @@ func snapshotDirectWriteProfiles(
 			defer wg.Done()
 			semaphore <- struct{}{}
 			defer func() { <-semaphore }()
-			results[index].calls, results[index].problems, results[index].err = snapshotDirectWriteProfile(
-				root, profile, adapterRoots, classifier,
-			)
+			results[index].err = withRepositoryProfileCache(profile, func(environment []string) error {
+				var err error
+				results[index].calls, results[index].problems, err = snapshotDirectWriteProfileWithEnvironment(
+					root, profile, adapterRoots, classifier, environment,
+				)
+				return err
+			})
 		}()
 	}
 	wg.Wait()
@@ -721,10 +761,22 @@ func snapshotDirectWriteProfile(
 	adapterRoots []string,
 	classifier persistenceClassifier,
 ) (map[directWriteCallIdentity]directWriteCall, map[directWriteProblemIdentity]directWriteProblem, error) {
-	if err := validateDirectWriteRequiredSources(root, profile); err != nil {
+	return snapshotDirectWriteProfileWithEnvironment(
+		root, profile, adapterRoots, classifier, profileEnvironment(profile),
+	)
+}
+
+func snapshotDirectWriteProfileWithEnvironment(
+	root string,
+	profile AnalysisProfile,
+	adapterRoots []string,
+	classifier persistenceClassifier,
+	environment []string,
+) (map[directWriteCallIdentity]directWriteCall, map[directWriteProblemIdentity]directWriteProblem, error) {
+	if err := validateDirectWriteRequiredSourcesWithEnvironment(root, profile, environment); err != nil {
 		return nil, nil, err
 	}
-	loaded, err := loadDirectWritePackages(root, profile, adapterRoots)
+	loaded, err := loadDirectWritePackagesWithEnvironment(root, profile, adapterRoots, environment)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -739,6 +791,14 @@ func snapshotDirectWriteProfile(
 }
 
 func validateDirectWriteRequiredSources(root string, profile AnalysisProfile) error {
+	return validateDirectWriteRequiredSourcesWithEnvironment(root, profile, profileEnvironment(profile))
+}
+
+func validateDirectWriteRequiredSourcesWithEnvironment(
+	root string,
+	profile AnalysisProfile,
+	environment []string,
+) error {
 	if len(profile.RequiredFiles) == 0 {
 		return nil
 	}
@@ -758,7 +818,7 @@ func validateDirectWriteRequiredSources(root string, profile AnalysisProfile) er
 	cfg := &packages.Config{
 		Mode:       packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles,
 		Dir:        root,
-		Env:        profileEnvironment(profile),
+		Env:        environment,
 		Tests:      true,
 		BuildFlags: profileBuildFlags(profile),
 	}
@@ -782,6 +842,15 @@ const directWritePackageLoadMode packages.LoadMode = packages.NeedName |
 	packages.NeedImports
 
 func loadDirectWritePackages(root string, profile AnalysisProfile, adapterRoots []string) ([]*packages.Package, error) {
+	return loadDirectWritePackagesWithEnvironment(root, profile, adapterRoots, profileEnvironment(profile))
+}
+
+func loadDirectWritePackagesWithEnvironment(
+	root string,
+	profile AnalysisProfile,
+	adapterRoots []string,
+	environment []string,
+) ([]*packages.Package, error) {
 	cfg := &packages.Config{
 		// Direct-write collection inspects only the requested adapter roots.
 		// Dependency types are resolved from export data; loading dependency
@@ -789,7 +858,7 @@ func loadDirectWritePackages(root string, profile AnalysisProfile, adapterRoots 
 		// profile and is not needed by collectDirectWritePackage.
 		Mode:       directWritePackageLoadMode,
 		Dir:        root,
-		Env:        profileEnvironment(profile),
+		Env:        environment,
 		BuildFlags: profileBuildFlags(profile),
 	}
 	patterns := []string{}

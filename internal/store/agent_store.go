@@ -49,7 +49,9 @@ type AgentUpdate struct {
 	DesiredState   *domain.AgentDesiredState
 }
 
-// AgentStore is the persistence interface for Agent assignments.
+// AgentStore persists the transitional domain.Agent assignment projection.
+// Production mutation intent belongs to the Agents compatibility API; concrete
+// persistence and tracing adapters implement or forward this interface.
 type AgentStore interface {
 	Create(ctx context.Context, in AgentCreate) (*domain.Agent, error)
 	Get(ctx context.Context, workspaceKey, name string) (*domain.Agent, error)

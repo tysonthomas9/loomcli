@@ -14,15 +14,15 @@ func TestCheckedInDirectWriteInventoryStrictCounts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(inventory.Writes) != 251 {
-		t.Fatalf("direct-write rows = %d, want strict baseline of 251", len(inventory.Writes))
+	if len(inventory.Writes) != 260 {
+		t.Fatalf("direct-write rows = %d, want strict Phase 5 baseline of 260", len(inventory.Writes))
 	}
 	totalSites := 0
 	for _, use := range inventory.Writes {
 		totalSites += use.Count
 	}
-	if totalSites != 272 {
-		t.Fatalf("direct-write sites = %d, want strict baseline of 272", totalSites)
+	if totalSites != 269 {
+		t.Fatalf("direct-write sites = %d, want strict Phase 5 baseline of 269", totalSites)
 	}
 }
 
@@ -387,6 +387,26 @@ func TestDirectWriteInventoryRejectsExpiredRowsForCompletedPhase(t *testing.T) {
 	}
 }
 
+func TestDirectWriteRowsPreserveLegacyDriverPhase6Expiry(t *testing.T) {
+	rows := directWriteRows(map[directWriteCountKey]int{
+		{file: "internal/driver/register.go", receiver: "driver.Store", method: "Create", owner: "workflowcatalog"}: 1,
+		{file: "internal/app/serve/agents.go", receiver: "agents.Store", method: "Create", owner: "agents"}:         1,
+	})
+	if len(rows) != 2 {
+		t.Fatalf("direct-write rows = %+v, want 2", rows)
+	}
+	expiryByFile := make(map[string]int, len(rows))
+	for _, row := range rows {
+		expiryByFile[row.File] = row.ExpiresAfterPhase
+	}
+	if got := expiryByFile["internal/driver/register.go"]; got != legacyDriverDirectWriteExpiresAfterPhase {
+		t.Fatalf("driver expiry = %d, want %d", got, legacyDriverDirectWriteExpiresAfterPhase)
+	}
+	if got := expiryByFile["internal/app/serve/agents.go"]; got != 7 {
+		t.Fatalf("non-driver expiry = %d, want 7", got)
+	}
+}
+
 func TestLegacyDriverDirectWriteRatchetRejectsDrift(t *testing.T) {
 	root := t.TempDir()
 	writeDirectWriteModule(t, root)
@@ -401,11 +421,13 @@ func write(s store.WorkspaceStore) error { return s.Create("one") }
 
 	matrix := oneDirectWriteProfile()
 	inventory := directWriteTestInventory(matrix)
+	inventory.AdapterRoots = append(inventory.AdapterRoots, "internal/driver")
 	inventory.ReceiverSurfaces[0].CapabilityOwner = "execution"
 	uses, err := snapshotDirectWritesAtRoots(root, matrix, inventory, []string{"internal/driver"})
 	if err != nil {
 		t.Fatal(err)
 	}
+	inventory.Writes = uses
 	rows, sites, digest := directWriteDigest(uses)
 	inventory.LegacyDriver = &LegacyDirectWriteBaseline{
 		Root: "internal/driver", ExpiresAfterPhase: 6,
@@ -431,6 +453,20 @@ func write(s store.WorkspaceStore) error {
 	}
 	if !containsViolation(violations, "legacy driver direct-write ratchet changed") {
 		t.Fatalf("legacy driver drift violations = %v", violations)
+	}
+}
+
+func TestDirectWritesWithinRootUsesPathBoundary(t *testing.T) {
+	uses := []DirectWriteUse{
+		{File: "internal/driver"},
+		{File: "internal/driver/nested/write.go"},
+		{File: "internal/driverx/write.go"},
+		{File: "internal/app/write.go"},
+	}
+
+	got := directWritesWithinRoot(uses, "./internal/driver/")
+	if len(got) != 2 || got[0].File != "internal/driver" || got[1].File != "internal/driver/nested/write.go" {
+		t.Fatalf("direct writes within root = %+v", got)
 	}
 }
 

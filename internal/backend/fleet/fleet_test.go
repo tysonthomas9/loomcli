@@ -990,6 +990,55 @@ func TestClaimIssueAsActor_OverridesActorHeader(t *testing.T) {
 	}
 }
 
+func TestClaimIssueAsActor_UsesDelegationForServiceCredential(t *testing.T) {
+	var gotActor, gotDelegated string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotActor = r.Header.Get("X-Actor")
+		gotDelegated = r.Header.Get("X-Fleet-Delegated-Actor")
+		respondOK(w, json.RawMessage(`{}`))
+	}))
+	defer ts.Close()
+
+	fb, err := New(Config{
+		BaseURL: ts.URL, WorkspaceID: "ws", APIKey: "service-key", Actor: "loom-local-service",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fb.ClaimIssueAsActor(context.Background(), "test-1", 0, "planner"); err != nil {
+		t.Fatalf("ClaimIssueAsActor: %v", err)
+	}
+	if gotActor != "loom-local-service" || gotDelegated != "planner" {
+		t.Fatalf("headers actor=%q delegated=%q, want loom-local-service/planner", gotActor, gotDelegated)
+	}
+}
+
+func TestRenewIssueClaimAsActor_SendsRenewOnly(t *testing.T) {
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" || !strings.HasSuffix(r.URL.Path, "/issues/test-1/claim") {
+			t.Errorf("unexpected: %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("X-Actor"); got != "desktopqa" {
+			t.Fatalf("X-Actor = %q, want desktopqa", got)
+		}
+		var body struct {
+			RenewOnly bool `json:"renew_only"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		if !body.RenewOnly {
+			t.Error("renew_only = false, want true")
+		}
+		respondOK(w, json.RawMessage(`{}`))
+	})
+	defer ts.Close()
+
+	if err := fb.RenewIssueClaimAsActor(context.Background(), "test-1", 0, "desktopqa"); err != nil {
+		t.Fatalf("RenewIssueClaimAsActor: %v", err)
+	}
+}
+
 func TestClaimIssue_ForwardsLockTTL(t *testing.T) {
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" || !strings.HasSuffix(r.URL.Path, "/issues/test-1/claim") {

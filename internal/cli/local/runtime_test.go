@@ -262,16 +262,18 @@ func TestEnsureRuntimeStartedRestartsUnhealthyRecordedRuntime(t *testing.T) {
 	}
 }
 
-func TestStopRuntimeProcessesStopsServiceAndServePIDs(t *testing.T) {
+func TestStopRuntimeProcessesStopsServiceServeAndDaemonPIDs(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("uses POSIX sleep process")
 	}
 
 	service := startSleepProcess(t)
 	serve := startSleepProcess(t)
+	daemon := startSleepProcess(t)
 	info := &runtimeInfo{
-		PID:      service.Process.Pid,
-		ServePID: serve.Process.Pid,
+		PID:       service.Process.Pid,
+		ServePID:  serve.Process.Pid,
+		DaemonPID: daemon.Process.Pid,
 	}
 
 	if err := stopRuntimeProcesses(info, 3*time.Second); err != nil {
@@ -282,6 +284,56 @@ func TestStopRuntimeProcessesStopsServiceAndServePIDs(t *testing.T) {
 	}
 	if processRunning(serve.Process.Pid) {
 		t.Fatalf("serve pid %d still running", serve.Process.Pid)
+	}
+	if processRunning(daemon.Process.Pid) {
+		t.Fatalf("daemon pid %d still running", daemon.Process.Pid)
+	}
+}
+
+func TestUpdateRuntimeDaemonPIDRejectsSuccessorRuntime(t *testing.T) {
+	dataDir := t.TempDir()
+	if err := writeRuntime(dataDir, &runtimeInfo{PID: 202}); err != nil {
+		t.Fatalf("writeRuntime() error = %v", err)
+	}
+
+	err := updateRuntimeDaemonPID(dataDir, 101, 303)
+	if err == nil || !strings.Contains(err.Error(), "runtime service changed") {
+		t.Fatalf("updateRuntimeDaemonPID() error = %v, want service changed", err)
+	}
+	info, readErr := readRuntime(dataDir)
+	if readErr != nil {
+		t.Fatalf("readRuntime() error = %v", readErr)
+	}
+	if info.DaemonPID != 0 {
+		t.Fatalf("DaemonPID = %d, want 0", info.DaemonPID)
+	}
+}
+
+func TestReuseRunningRuntimeStopsOrphanedManagedDaemon(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses POSIX sleep process")
+	}
+
+	daemon := startSleepProcess(t)
+	dataDir := t.TempDir()
+	info := &runtimeInfo{
+		PID:       999999,
+		DaemonPID: daemon.Process.Pid,
+		Status:    "running",
+	}
+	if err := writeRuntime(dataDir, info); err != nil {
+		t.Fatalf("writeRuntime() error = %v", err)
+	}
+
+	result, err := reuseRunningRuntime(dataDir, false)
+	if err != nil {
+		t.Fatalf("reuseRunningRuntime() error = %v", err)
+	}
+	if result != nil {
+		t.Fatalf("reuseRunningRuntime() result = %#v, want fresh start", result)
+	}
+	if processRunning(daemon.Process.Pid) {
+		t.Fatalf("orphaned daemon pid %d still running", daemon.Process.Pid)
 	}
 }
 

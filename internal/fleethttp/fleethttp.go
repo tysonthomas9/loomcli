@@ -26,9 +26,10 @@ import (
 // Auth holds the optional auth headers fleet-db accepts. Fields default
 // to empty (omitted from the request when zero).
 type Auth struct {
-	BearerToken string //nolint:gosec // G117: auth header value intentionally carried by request config.
-	APIKey      string //nolint:gosec // G117: fleet-db API key intentionally carried by request config.
-	Actor       string // → X-Actor (used by --auth-dev-mode)
+	BearerToken    string //nolint:gosec // G117: auth header value intentionally carried by request config.
+	APIKey         string //nolint:gosec // G117: fleet-db API key intentionally carried by request config.
+	Actor          string // → X-Actor (used by --auth-dev-mode)
+	DelegatedActor string // → X-Fleet-Delegated-Actor (trusted API-key service hops only)
 }
 
 // Apply writes the auth headers onto req. Empty fields are skipped.
@@ -42,6 +43,9 @@ func (a Auth) Apply(req *http.Request) {
 	}
 	if a.Actor != "" {
 		req.Header.Set("X-Actor", a.Actor)
+	}
+	if a.DelegatedActor != "" {
+		req.Header.Set("X-Fleet-Delegated-Actor", a.DelegatedActor)
 	}
 }
 

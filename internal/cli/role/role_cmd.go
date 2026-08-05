@@ -13,7 +13,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
+	"github.com/tysonthomas9/loomcli/internal/cli/managementapi"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -40,10 +42,11 @@ var roleCmd = &cobra.Command{
 }
 
 var roleAddCmd = &cobra.Command{
-	Use:   "add <NAME>",
-	Short: "Create a role definition in the active workspace",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runRoleAdd,
+	Use:               "add <NAME>",
+	Short:             "Create a role definition in the active workspace",
+	Args:              cobra.ExactArgs(1),
+	PersistentPreRunE: cli.PrepareStandaloneHTTPCommand,
+	RunE:              runRoleAdd,
 }
 
 var roleListCmd = &cobra.Command{
@@ -61,10 +64,11 @@ var roleShowCmd = &cobra.Command{
 }
 
 var roleRemoveCmd = &cobra.Command{
-	Use:   "remove <NAME>",
-	Short: "Delete a role from the active workspace",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runRoleRemove,
+	Use:               "remove <NAME>",
+	Short:             "Delete a role from the active workspace",
+	Args:              cobra.ExactArgs(1),
+	PersistentPreRunE: cli.PrepareStandaloneHTTPCommand,
+	RunE:              runRoleRemove,
 }
 
 var roleSetCmd = &cobra.Command{
@@ -87,8 +91,9 @@ var roleSetCmd = &cobra.Command{
   path_patterns   comma-separated list
   allowed_tools   comma-separated list
   denied_tools    comma-separated list`,
-	Args: cobra.ExactArgs(3),
-	RunE: runRoleSet,
+	Args:              cobra.ExactArgs(3),
+	PersistentPreRunE: cli.PrepareStandaloneHTTPCommand,
+	RunE:              runRoleSet,
 }
 
 var roleUnsetCmd = &cobra.Command{
@@ -101,8 +106,9 @@ var roleUnsetCmd = &cobra.Command{
   description / kind / prompt / prompt_file / model / task_filter / backend / effort  (set to "")
   skills / path_patterns / allowed_tools / denied_tools      (set to empty list)
   read_only                                                 (set to false)`,
-	Args: cobra.ExactArgs(2),
-	RunE: runRoleUnset,
+	Args:              cobra.ExactArgs(2),
+	PersistentPreRunE: cli.PrepareStandaloneHTTPCommand,
+	RunE:              runRoleUnset,
 }
 
 func init() {
@@ -124,35 +130,30 @@ func init() {
 	cli.RegisterCommand(roleCmd)
 }
 
-func runRoleAdd(_ *cobra.Command, args []string) error {
+func runRoleAdd(cmd *cobra.Command, args []string) error {
 	if err := validateRoleKindValue(roleAddKind); err != nil {
 		return err
 	}
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		in := store.RoleCreate{
-			WorkspaceKey: ws,
-			Name:         args[0],
-			Kind:         normalizeRoleKindValue(roleAddKind),
-			Description:  roleAddDescription,
-			Prompt:       roleAddPrompt,
-			PromptFile:   roleAddPromptFile,
-			Model:        roleAddModel,
-			Backend:      roleAddBackend,
-			Effort:       roleAddEffort,
-			Skills:       roleAddSkills,
-			ReadOnly:     roleAddReadOnly,
-		}
-		if roleAddMaxConc > 0 {
-			v := roleAddMaxConc
-			in.MaxConcurrency = &v
-		}
-		r, err := h.Store.Roles().Create(ctx, in)
-		if err != nil {
-			return fmt.Errorf("create role: %w", err)
-		}
-		fmt.Printf("Created role %s/%s\n", r.WorkspaceKey, r.Name)
-		return nil
-	})
+	client, err := managementapi.New(cmd.Context(), "loom role add")
+	if err != nil {
+		return err
+	}
+	definition := agents.RoleDefinition{
+		Name: args[0], Kind: normalizeRoleKindValue(roleAddKind),
+		Description: roleAddDescription, Prompt: roleAddPrompt, PromptFile: roleAddPromptFile,
+		Model: roleAddModel, Backend: roleAddBackend, Effort: roleAddEffort,
+		Skills: roleAddSkills, ReadOnly: roleAddReadOnly,
+	}
+	if roleAddMaxConc > 0 {
+		value := roleAddMaxConc
+		definition.MaxConcurrency = &value
+	}
+	role, err := client.CreateRole(cmd.Context(), definition)
+	if err != nil {
+		return fmt.Errorf("create role: %w", err)
+	}
+	fmt.Printf("Created role %s/%s\n", role.WorkspaceKey, role.Name)
+	return nil
 }
 
 func runRoleList(_ *cobra.Command, _ []string) error {
@@ -224,44 +225,61 @@ func runRoleShow(_ *cobra.Command, args []string) error {
 	})
 }
 
-func runRoleRemove(_ *cobra.Command, args []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		if err := h.Store.Roles().Delete(ctx, ws, args[0]); err != nil {
-			return fmt.Errorf("remove role: %w", err)
-		}
-		fmt.Printf("Removed role %s/%s\n", ws, args[0])
-		return nil
-	})
+func runRoleRemove(cmd *cobra.Command, args []string) error {
+	client, err := managementapi.New(cmd.Context(), "loom role remove")
+	if err != nil {
+		return err
+	}
+	if err := client.DeleteRole(cmd.Context(), args[0]); err != nil {
+		return fmt.Errorf("remove role: %w", err)
+	}
+	fmt.Printf("Removed role %s/%s\n", client.Workspace(), args[0])
+	return nil
 }
 
-func runRoleSet(_ *cobra.Command, args []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		name, key, value := args[0], args[1], args[2]
-		patch, err := buildRolePatch(key, value, false /* unset */)
-		if err != nil {
-			return err
-		}
-		if _, err := h.Store.Roles().Update(ctx, ws, name, patch); err != nil {
-			return fmt.Errorf("update role: %w", err)
-		}
-		fmt.Printf("Set %s/%s.%s = %s\n", ws, name, key, value)
-		return nil
-	})
+func runRoleSet(cmd *cobra.Command, args []string) error {
+	name, key, value := args[0], args[1], args[2]
+	patch, err := buildRolePatch(key, value, false /* unset */)
+	if err != nil {
+		return err
+	}
+	client, err := managementapi.New(cmd.Context(), "loom role set")
+	if err != nil {
+		return err
+	}
+	if _, err := client.UpdateRole(cmd.Context(), name, agentsRolePatch(patch)); err != nil {
+		return fmt.Errorf("update role: %w", err)
+	}
+	fmt.Printf("Set %s/%s.%s = %s\n", client.Workspace(), name, key, value)
+	return nil
 }
 
-func runRoleUnset(_ *cobra.Command, args []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		name, key := args[0], args[1]
-		patch, err := buildRolePatch(key, "" /* value */, true /* unset */)
-		if err != nil {
-			return err
-		}
-		if _, err := h.Store.Roles().Update(ctx, ws, name, patch); err != nil {
-			return fmt.Errorf("update role: %w", err)
-		}
-		fmt.Printf("Cleared %s/%s.%s\n", ws, name, key)
-		return nil
-	})
+func runRoleUnset(cmd *cobra.Command, args []string) error {
+	name, key := args[0], args[1]
+	patch, err := buildRolePatch(key, "" /* value */, true /* unset */)
+	if err != nil {
+		return err
+	}
+	client, err := managementapi.New(cmd.Context(), "loom role unset")
+	if err != nil {
+		return err
+	}
+	if _, err := client.UpdateRole(cmd.Context(), name, agentsRolePatch(patch)); err != nil {
+		return fmt.Errorf("update role: %w", err)
+	}
+	fmt.Printf("Cleared %s/%s.%s\n", client.Workspace(), name, key)
+	return nil
+}
+
+func agentsRolePatch(patch store.RoleUpdate) agents.RolePatch {
+	return agents.RolePatch{
+		Kind: patch.Kind, Description: patch.Description, Prompt: patch.Prompt,
+		PromptFile: patch.PromptFile, Model: patch.Model, TaskFilter: patch.TaskFilter,
+		Backend: patch.Backend, Effort: patch.Effort, PathPatterns: patch.PathPatterns,
+		Skills: patch.Skills, MaxPriority: patch.MaxPriority, MaxConcurrency: patch.MaxConcurrency,
+		ReadOnly: patch.ReadOnly, AllowedTools: patch.AllowedTools, DeniedTools: patch.DeniedTools,
+		MaxBudgetUSD: patch.MaxBudgetUSD,
+	}
 }
 
 // buildRolePatch produces a store.RoleUpdate for a single key. When unset

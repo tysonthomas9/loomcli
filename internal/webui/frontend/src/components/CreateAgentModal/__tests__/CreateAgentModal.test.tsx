@@ -962,8 +962,10 @@ describe("CreateAgentModal: submission", () => {
     });
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(onSuccess).not.toHaveBeenCalled();
-    expect(screen.getByTestId("route-probe")).toHaveTextContent(
-      "/ws/ws-1/agents/agt-coder",
+    await waitFor(() =>
+      expect(screen.getByTestId("route-probe")).toHaveTextContent(
+        "/ws/ws-1/agents/agt-coder",
+      ),
     );
   });
 

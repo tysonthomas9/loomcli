@@ -1,10 +1,10 @@
 package workflow
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,12 +12,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
-	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/workflows"
+	workflows "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution/authoring"
 )
 
 func TestWorkflowCloneJSONWritesSourceLayout(t *testing.T) {
@@ -253,13 +250,6 @@ func TestWorkflowRunUsesManagementAPIWithoutOpeningStore(t *testing.T) {
 	resetWorkflowCommandGlobals()
 	t.Cleanup(resetWorkflowCommandGlobals)
 	fixture := setupWorkflowManagementFixture(t)
-	openedStore := false
-	original := workflowWithActiveWorkspace
-	workflowWithActiveWorkspace = func(func(context.Context, *bootstrap.StoreHandle, string) error) error {
-		openedStore = true
-		return nil
-	}
-	t.Cleanup(func() { workflowWithActiveWorkspace = original })
 	workflowRunEpic = "EPIC-1"
 	workflowRunJSON = true
 
@@ -267,9 +257,6 @@ func TestWorkflowRunUsesManagementAPIWithoutOpeningStore(t *testing.T) {
 		return runWorkflowRun(&cobra.Command{}, []string{workflows.BuiltinEpicRunnerWorkflowName})
 	}); err != nil {
 		t.Fatalf("runWorkflowRun: %v", err)
-	}
-	if openedStore {
-		t.Fatal("workflow run opened a Store")
 	}
 	if paths := strings.Join(fixture.paths(), "\n"); !strings.Contains(paths, "POST /api/workspaces/TEST/execution/driver-runs") {
 		t.Fatalf("management paths =\n%s", paths)
@@ -290,21 +277,11 @@ func TestWorkflowVersionsUnknownWorkflowReturnsError(t *testing.T) {
 }
 
 func TestWorkflowBuildTextHandoffNamesManagementServerAndWorkspace(t *testing.T) {
-	_, st := setupWorkflowCommandStore(t)
-	withWorkflowCommandStore(t, st)
+	resetWorkflowCommandGlobals()
+	t.Cleanup(resetWorkflowCommandGlobals)
+	fixture := setupWorkflowManagementFixture(t)
 	workflowBuildSource = writeWorkflowSourceLayout(t, "custom-flow")
-	const versionID = "custom-version-1"
-	const digest = "sha256:custom-source"
-	var gotOptions workflows.BuildAndRegisterOptions
-	originalBuild := workflowBuildAndRegister
-	workflowBuildAndRegister = func(_ context.Context, _ workflows.DriverCatalog, opts workflows.BuildAndRegisterOptions) (*driverpkg.RegisterFlueResult, string, error) {
-		gotOptions = opts
-		return &driverpkg.RegisterFlueResult{
-			Driver:  &domain.Driver{WorkspaceKey: opts.WorkspaceKey, DriverID: opts.Name},
-			Version: &domain.DriverVersion{WorkspaceKey: opts.WorkspaceKey, DriverID: opts.Name, VersionID: versionID, SourceDigest: digest},
-		}, "", nil
-	}
-	t.Cleanup(func() { workflowBuildAndRegister = originalBuild })
+	const versionID = "custom-flow-v-test"
 
 	stdout, err := captureWorkflowStdout(t, func() error {
 		return runWorkflowBuild(&cobra.Command{}, []string{"custom-flow"})
@@ -312,11 +289,18 @@ func TestWorkflowBuildTextHandoffNamesManagementServerAndWorkspace(t *testing.T)
 	if err != nil {
 		t.Fatalf("runWorkflowBuild: %v", err)
 	}
-	if gotOptions.WorkspaceKey != "TEST" || gotOptions.Activate {
-		t.Fatalf("build options = %+v, want workspace TEST and inactive registration", gotOptions)
+	if fixture.authoringRequest == nil ||
+		fixture.authoringRequest.Entrypoint != "workflows/custom-flow.ts" ||
+		fixture.authoringRequest.Files["workflows/custom-flow.ts"] == "" {
+		t.Fatalf("authoring request = %+v", fixture.authoringRequest)
+	}
+	if fixture.authoringRequestID == "" {
+		t.Fatal("authoring request omitted Idempotency-Key")
+	}
+	if paths := strings.Join(fixture.paths(), "\n"); !strings.Contains(paths, "POST /api/workspaces/TEST/workflows/custom-flow/versions") {
+		t.Fatalf("management paths =\n%s", paths)
 	}
 	for _, want := range []string{
-		"Management server required: set LOOM_SERVER_URL to its URL, or replace $LOOM_SERVER_URL below with the URL.",
 		"Target workspace: TEST",
 		"loom --server \"$LOOM_SERVER_URL\" --workspace TEST workflow approve custom-flow --version " + versionID,
 		"loom --server \"$LOOM_SERVER_URL\" --workspace TEST workflow activate custom-flow --version " + versionID,
@@ -330,17 +314,14 @@ func TestWorkflowBuildTextHandoffNamesManagementServerAndWorkspace(t *testing.T)
 	}
 }
 
-func TestWorkflowBuildJSONFailureDoesNotCreateVersion(t *testing.T) {
-	ctx, st := setupWorkflowCommandStore(t)
-	withWorkflowCommandStore(t, st)
+func TestWorkflowBuildJSONFailureReturnsServerErrorWithoutFallback(t *testing.T) {
+	resetWorkflowCommandGlobals()
+	t.Cleanup(resetWorkflowCommandGlobals)
+	fixture := setupWorkflowManagementFixture(t)
+	fixture.authoringFailureStatus = http.StatusBadRequest
 	sourceDir := writeWorkflowSourceLayout(t, "custom-flow")
 	workflowBuildSource = sourceDir
 	workflowBuildJSON = true
-	origBuild := workflowBuildAndRegister
-	workflowBuildAndRegister = func(context.Context, workflows.DriverCatalog, workflows.BuildAndRegisterOptions) (*driverpkg.RegisterFlueResult, string, error) {
-		return nil, "redacted diagnostics", errors.New("flue build failed")
-	}
-	t.Cleanup(func() { workflowBuildAndRegister = origBuild })
 
 	stdout, err := captureWorkflowStdout(t, func() error {
 		return runWorkflowBuild(&cobra.Command{}, []string{"custom-flow"})
@@ -352,16 +333,12 @@ func TestWorkflowBuildJSONFailureDoesNotCreateVersion(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
 		t.Fatalf("decode build failure JSON %q: %v", stdout, err)
 	}
-	if payload.OK || payload.Status != "failed" || payload.Version != nil || payload.Diagnostics != "redacted diagnostics" ||
-		payload.ErrorClass != "flue_build_failed" || payload.SourceDigest == "" || !strings.Contains(payload.Error, "flue build failed") {
+	if payload.OK || payload.Status != "failed" || payload.Version != nil || payload.Diagnostics != "" ||
+		payload.ErrorClass != "workflow_authoring_failed" || payload.SourceDigest == "" || !strings.Contains(payload.Error, "flue build failed") {
 		t.Fatalf("build failure payload = %+v, want failed JSON diagnostics without version", payload)
 	}
-	versions, err := st.DriverVersions().List(ctx, "TEST", store.DriverVersionFilter{DriverID: "custom-flow"})
-	if err != nil {
-		t.Fatalf("list versions: %v", err)
-	}
-	if len(versions) != 0 {
-		t.Fatalf("versions = %+v, want no custom-flow version after failed build", versions)
+	if paths := fixture.paths(); len(paths) != 1 || paths[0] != "POST /api/workspaces/TEST/workflows/custom-flow/versions" {
+		t.Fatalf("management paths = %v, want one authoring request and no fallback", paths)
 	}
 }
 
@@ -372,67 +349,6 @@ func packageRoot(t *testing.T) string {
 		t.Fatalf("write package.json: %v", err)
 	}
 	return root
-}
-
-func setupWorkflowCommandStore(t *testing.T) (context.Context, store.Store) {
-	t.Helper()
-	ctx := context.Background()
-	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
-		t.Fatalf("Create workspace: %v", err)
-	}
-	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
-		WorkspaceKey:    "TEST",
-		DriverID:        workflows.BuiltinEpicRunnerWorkflowName,
-		Name:            workflows.BuiltinEpicRunnerWorkflowName,
-		Status:          domain.DriverStatusActive,
-		ActiveVersionID: "version-1",
-		TrustLevel:      domain.DriverTrustTrusted,
-	}); err != nil {
-		t.Fatalf("Create driver: %v", err)
-	}
-	for _, in := range []store.DriverVersionCreate{
-		{
-			WorkspaceKey:     "TEST",
-			VersionID:        "version-1",
-			DriverID:         workflows.BuiltinEpicRunnerWorkflowName,
-			Version:          1,
-			SourceDigest:     "sha256:source-1",
-			BundleDigest:     "sha256:bundle-1",
-			Manifest:         map[string]string{driverpkg.ManifestTrustLevelKey: string(domain.DriverTrustUntrusted)},
-			ValidationStatus: domain.DriverVersionValidationPassed,
-			CreatedBy:        "tester",
-		},
-		{
-			WorkspaceKey:     "TEST",
-			VersionID:        "version-2",
-			DriverID:         workflows.BuiltinEpicRunnerWorkflowName,
-			Version:          2,
-			SourceDigest:     "sha256:source-2",
-			BundleDigest:     "sha256:bundle-2",
-			Manifest:         map[string]string{driverpkg.ManifestTrustLevelKey: string(domain.DriverTrustUntrusted)},
-			ValidationStatus: domain.DriverVersionValidationPassed,
-			CreatedBy:        "tester",
-		},
-	} {
-		if _, err := st.DriverVersions().Create(ctx, in); err != nil {
-			t.Fatalf("Create version %s: %v", in.VersionID, err)
-		}
-	}
-	return ctx, st
-}
-
-func withWorkflowCommandStore(t *testing.T, st store.Store) {
-	t.Helper()
-	resetWorkflowCommandGlobals()
-	origWith := workflowWithActiveWorkspace
-	workflowWithActiveWorkspace = func(fn func(context.Context, *bootstrap.StoreHandle, string) error) error {
-		return fn(context.Background(), &bootstrap.StoreHandle{Store: st}, "TEST")
-	}
-	t.Cleanup(func() {
-		workflowWithActiveWorkspace = origWith
-		resetWorkflowCommandGlobals()
-	})
 }
 
 func resetWorkflowCommandGlobals() {

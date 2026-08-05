@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -14,9 +13,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/driver"
+	workflowdistribution "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/usage"
-	"github.com/tysonthomas9/loomcli/internal/workflows"
 )
 
 // Phase U — execution-leaf unification. When LOOM_DAEMON_LEAF=ts, the daemon's
@@ -45,33 +44,14 @@ func Invoker(fallback cli.AgentInvoker) cli.AgentInvoker {
 }
 
 // taskRunnerEntrypoint selects which bundled task-runner the TS runtime delegates
-// to. Default is the local-task-runner (local execution). Set
-// LOOM_DAEMON_LEAF_RUNNER=daytona-task-runner to run the task inside a Daytona
-// sandbox (requires DAYTONA_API_KEY + a reachable repo URL); the same bundle ships
-// both runners, so this is just an entrypoint switch.
+// to. Default is the local-task-runner. Other registered entrypoints may be
+// selected, but provider-backed runners remain fail-closed until the host can
+// furnish an opaque provider capability.
 func taskRunnerEntrypoint() string {
 	if v := strings.TrimSpace(os.Getenv("LOOM_DAEMON_LEAF_RUNNER")); v != "" {
 		return v
 	}
 	return driver.LocalTaskRunnerEntrypoint
-}
-
-// daytonaRepoURL returns an explicit DAYTONA_REPO_URL, or the worktree's origin
-// remote URL, for the Daytona runner to clone. Local filesystem paths are skipped:
-// a cloud sandbox can only clone a network-reachable URL.
-func daytonaRepoURL(workDir string) string {
-	if v := strings.TrimSpace(os.Getenv("DAYTONA_REPO_URL")); v != "" {
-		return v
-	}
-	out, err := exec.Command("git", "-C", workDir, "remote", "get-url", "origin").Output() //nolint:gosec // G204: fixed git argv; workDir is the active worktree path, not shell input.
-	if err != nil {
-		return ""
-	}
-	url := strings.TrimSpace(string(out))
-	if url == "" || strings.HasPrefix(url, "/") || strings.HasPrefix(url, "file:") {
-		return ""
-	}
-	return url
 }
 
 // agentInvoker is the cli.AgentInvoker that runs a non-interactive
@@ -102,15 +82,6 @@ func (i agentInvoker) InvokeNonInteractive(workDir, prompt, agentName string, sh
 	if taskRunID == "" {
 		taskRunID = "tr-" + agentName
 	}
-	input := map[string]any{}
-	if entrypoint == driver.DaytonaTaskRunnerEntrypoint {
-		// The Daytona runner clones a network-reachable git URL into the sandbox.
-		// Prefer an explicit DAYTONA_REPO_URL; otherwise fall back to the worktree's
-		// origin remote so a workspace with a reachable remote works out of the box.
-		if repoURL := daytonaRepoURL(workDir); repoURL != "" {
-			input["repoUrl"] = repoURL
-		}
-	}
 	req := map[string]any{
 		"task_run_id":       taskRunID,
 		"task_id":           os.Getenv("LOOM_ASSIGNED_TASK_ID"),
@@ -118,7 +89,7 @@ func (i agentInvoker) InvokeNonInteractive(workDir, prompt, agentName string, sh
 		"workspace_key":     os.Getenv("LOOM_WORKSPACE"),
 		"lease_token":       leaseToken,
 		"runner_entrypoint": entrypoint,
-		"input":             input,
+		"input":             map[string]any{},
 	}
 	reqJSON, _ := json.Marshal(req)
 
@@ -147,8 +118,8 @@ func (i agentInvoker) InvokeNonInteractive(workDir, prompt, agentName string, sh
 	// change as a patch+base_ref, leaving the daemon's HOST worktree clean. The Go leaf commits in
 	// place, so the worker's session finalize (`git diff beforeRef..HEAD`) captures its change; the TS
 	// leaf must apply that patch back onto the host worktree and commit, or finalize records
-	// files_changed=0 and serve surfaces no diff. (Daytona delivers via its own PR/sandbox path —
-	// it returns no top-level patch, so this is a no-op for the Daytona entrypoint.)
+	// files_changed=0 and serve surfaces no diff. Non-local entrypoints do not
+	// participate in this local patch-back path.
 	if entrypoint == driver.LocalTaskRunnerEntrypoint {
 		applyLeafPatchBack(ctx, workDir, baseRef, patch, taskRunID)
 	}
@@ -259,7 +230,7 @@ var (
 func taskRunnerBundleServerPath() (string, error) {
 	taskRunnerBundleOnce.Do(func() {
 		dest := filepath.Join(cli.GetWorkspaceRuntimeDir(), "ts-runtime-bundle", "dist")
-		taskRunnerServerPath, _, taskRunnerBundleErr = workflows.BuildBuiltinBundle(context.Background(), "epic-runner", dest)
+		taskRunnerServerPath, _, taskRunnerBundleErr = workflowdistribution.BuildBuiltinBundle(context.Background(), "epic-runner", dest)
 	})
 	return taskRunnerServerPath, taskRunnerBundleErr
 }

@@ -33,6 +33,7 @@ type runtimeInfo struct {
 	Status           string    `json:"status"`
 	PID              int       `json:"pid"`
 	ServePID         int       `json:"serve_pid,omitempty"`
+	DaemonPID        int       `json:"daemon_pid,omitempty"`
 	DataDir          string    `json:"data_dir"`
 	URL              string    `json:"url,omitempty"`
 	Port             int       `json:"port,omitempty"`
@@ -59,6 +60,7 @@ type RuntimeSnapshot struct {
 	Status           string    `json:"status"`
 	PID              int       `json:"pid"`
 	ServePID         int       `json:"serve_pid,omitempty"`
+	DaemonPID        int       `json:"daemon_pid,omitempty"`
 	DataDir          string    `json:"data_dir"`
 	URL              string    `json:"url,omitempty"`
 	Port             int       `json:"port,omitempty"`
@@ -89,6 +91,7 @@ func runtimeSnapshot(info *runtimeInfo) *RuntimeSnapshot {
 		Status:           info.Status,
 		PID:              info.PID,
 		ServePID:         info.ServePID,
+		DaemonPID:        info.DaemonPID,
 		DataDir:          info.DataDir,
 		URL:              info.URL,
 		Port:             info.Port,

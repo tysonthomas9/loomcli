@@ -14,18 +14,165 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
+	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
+
+type testRoleAPI struct {
+	store store.Store
+}
+
+func (api *testRoleAPI) GetRole(ctx context.Context, workspace, roleName string) (*agents.Role, error) {
+	role, err := api.store.Roles().Get(ctx, workspace, roleName)
+	return agentsRoleFromDomain(role), err
+}
+
+func (api *testRoleAPI) ListRoles(ctx context.Context, workspace string) ([]*agents.Role, error) {
+	roles, err := api.store.Roles().List(ctx, workspace)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*agents.Role, 0, len(roles))
+	for _, role := range roles {
+		out = append(out, agentsRoleFromDomain(role))
+	}
+	return out, nil
+}
+
+func (api *testRoleAPI) CreateRole(
+	ctx context.Context,
+	_ authority.OperatorAuthority,
+	command agents.CreateRoleCommand,
+) (*agents.Role, error) {
+	definition := command.Role
+	role, err := api.store.Roles().Create(ctx, store.RoleCreate{
+		WorkspaceKey: command.WorkspaceKey, Name: definition.Name, Kind: definition.Kind,
+		Description: definition.Description, Prompt: definition.Prompt, PromptFile: definition.PromptFile,
+		Model: definition.Model, TaskFilter: definition.TaskFilter, Backend: definition.Backend,
+		Effort: definition.Effort, PathPatterns: definition.PathPatterns, Skills: definition.Skills,
+		MaxPriority: definition.MaxPriority, MaxConcurrency: definition.MaxConcurrency,
+		ReadOnly: definition.ReadOnly, AllowedTools: definition.AllowedTools,
+		DeniedTools: definition.DeniedTools, MaxBudgetUSD: definition.MaxBudgetUSD,
+	})
+	return agentsRoleFromDomain(role), err
+}
+
+func (api *testRoleAPI) UpdateRole(
+	ctx context.Context,
+	_ authority.OperatorAuthority,
+	command agents.UpdateRoleCommand,
+) (*agents.Role, error) {
+	current, err := api.store.Roles().Get(ctx, command.WorkspaceKey, command.RoleName)
+	if err != nil {
+		return nil, err
+	}
+	if current == nil || !current.UpdatedAt.Equal(command.ExpectedUpdatedAt) {
+		return nil, agents.ErrConflict
+	}
+	patch := command.Patch
+	role, err := api.store.Roles().Update(ctx, command.WorkspaceKey, command.RoleName, store.RoleUpdate{
+		Kind: patch.Kind, Description: patch.Description, Prompt: patch.Prompt,
+		PromptFile: patch.PromptFile, Model: patch.Model, TaskFilter: patch.TaskFilter,
+		Backend: patch.Backend, Effort: patch.Effort, PathPatterns: patch.PathPatterns,
+		Skills: patch.Skills, MaxPriority: patch.MaxPriority, MaxConcurrency: patch.MaxConcurrency,
+		ReadOnly: patch.ReadOnly, AllowedTools: patch.AllowedTools, DeniedTools: patch.DeniedTools,
+		MaxBudgetUSD: patch.MaxBudgetUSD,
+	})
+	return agentsRoleFromDomain(role), err
+}
+
+func (api *testRoleAPI) DeleteRole(
+	ctx context.Context,
+	_ authority.OperatorAuthority,
+	command agents.DeleteRoleCommand,
+) error {
+	current, err := api.store.Roles().Get(ctx, command.WorkspaceKey, command.RoleName)
+	if err != nil {
+		return err
+	}
+	if current == nil || !current.UpdatedAt.Equal(command.ExpectedUpdatedAt) {
+		return agents.ErrConflict
+	}
+	return api.store.Roles().Delete(ctx, command.WorkspaceKey, command.RoleName)
+}
+
+type testRoleAuthorityResolver struct{}
+
+func (testRoleAuthorityResolver) ResolveOperatorAuthority(
+	*http.Request,
+	string,
+	authority.Action,
+) (authority.OperatorAuthority, error) {
+	return authority.OperatorAuthority{}, nil
+}
+
+type capturingRoleAuthorityResolver struct {
+	workspace string
+	action    authority.Action
+}
+
+func (resolver *capturingRoleAuthorityResolver) ResolveOperatorAuthority(
+	_ *http.Request,
+	workspace string,
+	action authority.Action,
+) (authority.OperatorAuthority, error) {
+	resolver.workspace = workspace
+	resolver.action = action
+	return authority.OperatorAuthority{}, nil
+}
+
+func newTestRoleModule(st store.Store) *Module {
+	return NewModule(Config{
+		Store: st, Roles: &testRoleAPI{store: st}, Authority: testRoleAuthorityResolver{},
+	})
+}
+
+func ensureRoleForTest(
+	ctx context.Context,
+	st store.Store,
+	ws string,
+	req EnsureRoleRequest,
+) (*domain.Role, bool, error) {
+	return EnsureRole(ctx, st, &testRoleAPI{store: st}, authority.OperatorAuthority{}, ws, req)
+}
+
+func ensureRoleWithReceiptForTest(
+	ctx context.Context,
+	st store.Store,
+	ws string,
+	req EnsureRoleRequest,
+) (*EnsureRoleResult, error) {
+	return EnsureRoleWithReceipt(ctx, st, &testRoleAPI{store: st}, authority.OperatorAuthority{}, ws, req)
+}
+
+func agentsRoleFromDomain(role *domain.Role) *agents.Role {
+	if role == nil {
+		return nil
+	}
+	return &agents.Role{
+		WorkspaceKey: role.WorkspaceKey, Name: role.Name, Kind: string(role.Kind),
+		Description: role.Description, Prompt: role.Prompt, PromptFile: role.PromptFile,
+		Model: role.Model, TaskFilter: role.TaskFilter, Backend: role.Backend, Effort: role.Effort,
+		PathPatterns: append([]string(nil), role.PathPatterns...), Skills: append([]string(nil), role.Skills...),
+		MaxPriority: cloneInt(role.MaxPriority), MaxConcurrency: cloneInt(role.MaxConcurrency),
+		ReadOnly: role.ReadOnly, AllowedTools: append([]string(nil), role.AllowedTools...),
+		DeniedTools: append([]string(nil), role.DeniedTools...), MaxBudgetUSD: cloneFloat64(role.MaxBudgetUSD),
+		CreatedAt: role.CreatedAt, UpdatedAt: role.UpdatedAt,
+	}
+}
 
 func newRolesMux() *http.ServeMux {
 	mux := http.NewServeMux()
-	NewModule(memstore.New()).Register(mux)
+	newTestRoleModule(memstore.New()).Register(mux)
 	return mux
 }
 
 func postRole(t *testing.T, mux *http.ServeMux, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/WS/roles", strings.NewReader(body))
+	req = withCanonicalWorkspace(req, "WS", "WS")
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -55,6 +202,65 @@ func TestCreateRole_CreatesThenIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestRoleRoutesUseCanonicalWorkspaceAndFailClosedWithoutResolution(t *testing.T) {
+	body := `{"name":"docs","task_filter":"any"}`
+
+	t.Run("alias resolves to canonical workspace", func(t *testing.T) {
+		st := memstore.New()
+		resolver := &capturingRoleAuthorityResolver{}
+		mux := http.NewServeMux()
+		NewModule(Config{
+			Store: st, Roles: &testRoleAPI{store: st}, Authority: resolver,
+		}).Register(mux)
+		req := httptest.NewRequest(
+			http.MethodPost,
+			"/api/workspaces/ALIAS/roles",
+			strings.NewReader(body),
+		)
+		req = withCanonicalWorkspace(req, "ALIAS", "CANONICAL")
+		rec := httptest.NewRecorder()
+
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("status/body = %d/%s", rec.Code, rec.Body.String())
+		}
+		if resolver.workspace != "CANONICAL" || resolver.action != agents.ActionCreateRole {
+			t.Fatalf("authority scope = %q/%q", resolver.workspace, resolver.action)
+		}
+		if _, err := st.Roles().Get(t.Context(), "CANONICAL", "docs"); err != nil {
+			t.Fatalf("canonical role lookup: %v", err)
+		}
+		if _, err := st.Roles().Get(t.Context(), "ALIAS", "docs"); !errors.Is(err, domain.ErrNotFound) {
+			t.Fatalf("alias role lookup err = %v, want not found", err)
+		}
+	})
+
+	t.Run("missing canonical workspace fails closed", func(t *testing.T) {
+		st := memstore.New()
+		resolver := &capturingRoleAuthorityResolver{}
+		mux := http.NewServeMux()
+		NewModule(Config{
+			Store: st, Roles: &testRoleAPI{store: st}, Authority: resolver,
+		}).Register(mux)
+		req := httptest.NewRequest(
+			http.MethodPost,
+			"/api/workspaces/WS/roles",
+			strings.NewReader(body),
+		)
+		rec := httptest.NewRecorder()
+
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("status/body = %d/%s", rec.Code, rec.Body.String())
+		}
+		if resolver.workspace != "" {
+			t.Fatalf("authority invoked with workspace %q", resolver.workspace)
+		}
+	})
+}
+
 func TestCreateRole_ExistingPromptAndPolicyMustMatch(t *testing.T) {
 	st := memstore.New()
 	if _, err := st.Roles().Create(context.Background(), store.RoleCreate{
@@ -68,7 +274,7 @@ func TestCreateRole_ExistingPromptAndPolicyMustMatch(t *testing.T) {
 		t.Fatalf("seed role: %v", err)
 	}
 	mux := http.NewServeMux()
-	NewModule(st).Register(mux)
+	newTestRoleModule(st).Register(mux)
 
 	rec := postRole(t, mux, `{
 		"name":"bug-triage",
@@ -105,7 +311,7 @@ func TestCreateRole_ExactInlinePromptIsIdempotent(t *testing.T) {
 		t.Fatalf("seed role: %v", err)
 	}
 	mux := http.NewServeMux()
-	NewModule(st).Register(mux)
+	newTestRoleModule(st).Register(mux)
 
 	rec := postRole(t, mux, `{
 		"name":"bug-triage",
@@ -123,7 +329,7 @@ func TestCreateRole_ExactInlinePromptIsIdempotent(t *testing.T) {
 func TestEnsureRole_RecreateAfterDeleteUsesNewImmutablePrompt(t *testing.T) {
 	st := newPromptRoleStore(t)
 	ctx := context.Background()
-	first, created, err := EnsureRole(ctx, st, "WS", EnsureRoleRequest{
+	first, created, err := ensureRoleForTest(ctx, st, "WS", EnsureRoleRequest{
 		Name: "docs", Prompt: "first prompt", PromptFilename: "docs.md", TaskFilter: "has_design",
 	})
 	if err != nil || !created {
@@ -132,7 +338,7 @@ func TestEnsureRole_RecreateAfterDeleteUsesNewImmutablePrompt(t *testing.T) {
 	if err := st.Roles().Delete(ctx, "WS", "docs"); err != nil {
 		t.Fatalf("delete first role: %v", err)
 	}
-	second, recreated, err := EnsureRole(ctx, st, "WS", EnsureRoleRequest{
+	second, recreated, err := ensureRoleForTest(ctx, st, "WS", EnsureRoleRequest{
 		Name: "docs", Prompt: "second prompt", PromptFilename: "docs.md", TaskFilter: "has_design",
 	})
 	if err != nil || !recreated {
@@ -149,13 +355,13 @@ func TestEnsureRole_RecreateAfterDeleteUsesNewImmutablePrompt(t *testing.T) {
 func TestEnsureRole_ExplicitPromptFilenameIsRoleNamespaced(t *testing.T) {
 	st := newPromptRoleStore(t)
 	ctx := context.Background()
-	first, firstCreated, err := EnsureRole(ctx, st, "WS", EnsureRoleRequest{
+	first, firstCreated, err := ensureRoleForTest(ctx, st, "WS", EnsureRoleRequest{
 		Name: "reviewer", Prompt: "shared prompt", PromptFilename: "shared.md", TaskFilter: "has_design",
 	})
 	if err != nil || !firstCreated {
 		t.Fatalf("first EnsureRole = %+v created=%v err=%v", first, firstCreated, err)
 	}
-	second, secondCreated, err := EnsureRole(ctx, st, "WS", EnsureRoleRequest{
+	second, secondCreated, err := ensureRoleForTest(ctx, st, "WS", EnsureRoleRequest{
 		Name: "auditor", Prompt: "shared prompt", PromptFilename: "shared.md", TaskFilter: "has_design",
 	})
 	if err != nil || !secondCreated {
@@ -175,7 +381,7 @@ func TestEnsureRole_ExplicitPromptFilenameIsRoleNamespaced(t *testing.T) {
 func TestEnsureRoleCompensationRetainsRetryableRoleAndPrompt(t *testing.T) {
 	st := newPromptRoleStore(t)
 	ctx := context.Background()
-	created, err := EnsureRoleWithReceipt(ctx, st, "WS", EnsureRoleRequest{
+	created, err := ensureRoleWithReceiptForTest(ctx, st, "WS", EnsureRoleRequest{
 		Name: "reviewer", Prompt: "owned prompt", PromptFilename: "reviewer.md", TaskFilter: "has_design",
 	})
 	if err != nil || created == nil || !created.Created {
@@ -192,7 +398,7 @@ func TestEnsureRoleCompensationRetainsRetryableRoleAndPrompt(t *testing.T) {
 		t.Fatalf("retryable prompt was removed: %v", err)
 	}
 
-	reused, err := EnsureRoleWithReceipt(ctx, st, "WS", EnsureRoleRequest{
+	reused, err := ensureRoleWithReceiptForTest(ctx, st, "WS", EnsureRoleRequest{
 		Name: "reviewer", Prompt: "pre-existing prompt", PromptFilename: "reviewer.md", TaskFilter: "has_design",
 	})
 	if err == nil || reused != nil {
@@ -210,7 +416,7 @@ func TestEnsureRoleCompensationRetainsRetryableRoleAndPrompt(t *testing.T) {
 func TestEnsureRoleCompensationNeverDeletesEditedGeneration(t *testing.T) {
 	st := newPromptRoleStore(t)
 	ctx := context.Background()
-	receipt, err := EnsureRoleWithReceipt(ctx, st, "WS", EnsureRoleRequest{
+	receipt, err := ensureRoleWithReceiptForTest(ctx, st, "WS", EnsureRoleRequest{
 		Name: "reviewer", Prompt: "owned prompt", TaskFilter: "has_design",
 	})
 	if err != nil {
@@ -243,7 +449,7 @@ func TestEnsureRole_ConcurrentDifferentPromptsCannotOverwriteWinner(t *testing.T
 		go func() {
 			defer wg.Done()
 			<-start
-			_, _, err := EnsureRole(ctx, st, "WS", EnsureRoleRequest{
+			_, _, err := ensureRoleForTest(ctx, st, "WS", EnsureRoleRequest{
 				Name: "reviewer", Prompt: prompt, PromptFilename: "reviewer.md",
 				TaskFilter: "has_design", ReadOnly: prompt == "read-only prompt",
 			})
@@ -339,10 +545,16 @@ func TestValidatePromptAgentRole(t *testing.T) {
 func doRole(t *testing.T, mux *http.ServeMux, method, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req = withCanonicalWorkspace(req, "WS", "WS")
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	return rec
+}
+
+func withCanonicalWorkspace(request *http.Request, requested, canonical string) *http.Request {
+	ref := middleware.WorkspaceRef{RequestedID: requested, CanonicalID: canonical}
+	return request.WithContext(middleware.WithWorkspaceRef(request.Context(), ref))
 }
 
 // The Phase-B single-role endpoints below deliberately avoid a prompt body, so
@@ -399,7 +611,7 @@ func TestUpdateRole_PatchesFields(t *testing.T) {
 func TestUpdateRole_PublishesImmutablePromptAndLeavesSharedFileUntouched(t *testing.T) {
 	st := newPromptRoleStore(t)
 	ctx := context.Background()
-	first, created, err := EnsureRole(ctx, st, "WS", EnsureRoleRequest{
+	first, created, err := ensureRoleForTest(ctx, st, "WS", EnsureRoleRequest{
 		Name: "reviewer", Prompt: "shared prompt", PromptFilename: "shared.md", TaskFilter: "has_design",
 	})
 	if err != nil || !created {
@@ -414,7 +626,7 @@ func TestUpdateRole_PublishesImmutablePromptAndLeavesSharedFileUntouched(t *test
 		t.Fatalf("seed second role sharing legacy prompt path: %v", err)
 	}
 	mux := http.NewServeMux()
-	NewModule(st).Register(mux)
+	newTestRoleModule(st).Register(mux)
 
 	rec := doRole(t, mux, http.MethodPatch, "/api/workspaces/WS/roles/reviewer", `{"prompt":"updated prompt"}`)
 	if rec.Code != http.StatusOK {

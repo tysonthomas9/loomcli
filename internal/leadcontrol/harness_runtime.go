@@ -44,6 +44,7 @@ var harnessRuntimeNow = func() time.Time { return time.Now().UTC() }
 // runtime drains the lead's inbox and injects queued messages as turns.
 type HarnessLeadRuntimeConfig struct {
 	Store     store.Store
+	Runtime   SessionRuntime
 	Workspace string
 	LeadName  string
 	SessionID string
@@ -105,7 +106,7 @@ func RunHarnessLeadRuntime(ctx context.Context, cfg HarnessLeadRuntimeConfig) er
 	}
 
 	runtime := newHarnessRuntimeMetadata(cfg, conv, runtimeStartedAt)
-	if err := UpdateHarnessRuntimeMetadata(ctx, cfg.Store, cfg.Workspace, cfg.SessionID, runtime); err != nil {
+	if err := UpdateHarnessRuntimeMetadata(ctx, cfg.Runtime, cfg.Workspace, cfg.SessionID, runtime); err != nil {
 		cfg.Logger.Warn("failed to persist harness runtime metadata", "err", err)
 	}
 
@@ -130,7 +131,7 @@ func RunHarnessLeadRuntime(ctx context.Context, cfg HarnessLeadRuntimeConfig) er
 	go watchHarnessLeadRuntime(watchCtx, cfg, conv, handle, runtime, watchDone)
 	drainCtx, cancelDrain := context.WithCancel(ctx)
 	defer cancelDrain()
-	go drainLeadMessageQueue(drainCtx, cfg.Store, cfg.Workspace, cfg.LeadName, cfg.Logger)
+	go drainLeadMessageQueue(drainCtx, cfg.Store, cfg.Runtime, cfg.Workspace, cfg.LeadName, cfg.Logger)
 
 	result, waitErr := conv.Wait()
 
@@ -224,7 +225,7 @@ func finalizeHarnessLeadRuntime(
 	}
 	captureFinalHarnessTranscript(cfg, conv, transcriptOutput, unavailableSourceCause)
 	runtime.Status = RuntimeStatusDisconnected
-	_ = UpdateHarnessRuntimeMetadata(context.Background(), cfg.Store, cfg.Workspace, cfg.SessionID, runtime)
+	_ = UpdateHarnessRuntimeMetadata(context.Background(), cfg.Runtime, cfg.Workspace, cfg.SessionID, runtime)
 	if waitErr != nil {
 		return waitErr
 	}
@@ -500,7 +501,7 @@ func (w *harnessLeadRuntimeWatcher) persist(ctx context.Context, status string) 
 	}
 	w.lastStatus = status
 	w.runtime.Status = status
-	if err := UpdateHarnessRuntimeMetadata(ctx, w.cfg.Store, w.cfg.Workspace, w.cfg.SessionID, w.runtime); err != nil {
+	if err := UpdateHarnessRuntimeMetadata(ctx, w.cfg.Runtime, w.cfg.Workspace, w.cfg.SessionID, w.runtime); err != nil {
 		w.cfg.Logger.Debug("failed to persist harness runtime status", "status", status, "err", err)
 	}
 }
@@ -543,7 +544,7 @@ func (w *harnessLeadRuntimeWatcher) backfillHarnessSessionID(ctx context.Context
 		return
 	}
 	w.runtime.HarnessSessionID = hsid
-	if err := UpdateHarnessRuntimeMetadata(ctx, w.cfg.Store, w.cfg.Workspace, w.cfg.SessionID, w.runtime); err != nil {
+	if err := UpdateHarnessRuntimeMetadata(ctx, w.cfg.Runtime, w.cfg.Workspace, w.cfg.SessionID, w.runtime); err != nil {
 		w.cfg.Logger.Debug("failed to persist harness session id", "err", err)
 	}
 }

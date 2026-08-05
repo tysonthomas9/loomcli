@@ -137,7 +137,7 @@ echo "==> creating isolated workflow repo with the builtin epic-runner"
   ln -s "$FLUE_REPO/packages/runtime" node_modules/@flue/runtime
   printf '%s\n' '{"type":"module","dependencies":{"@loom/sdk":"file:./node_modules/@loom/sdk","@flue/runtime":"file:./node_modules/@flue/runtime"}}' > package.json
 )
-cp "$ROOT/internal/workflows/builtin/epic-runner.ts" "$WORKDIR/workflows/epic-runner.ts"
+cp "$ROOT/internal/infra/workflowdistribution/builtin/epic-runner.ts" "$WORKDIR/workflows/epic-runner.ts"
 
 # When this file exists and contains a task id, the task runner fails that
 # task on every attempt so the server retry-then-block policy exhausts

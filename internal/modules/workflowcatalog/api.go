@@ -13,9 +13,12 @@ const (
 	ActionApproveVersion          authority.Action = "workflowcatalog.approve-version"
 	ActionUnapproveVersion        authority.Action = "workflowcatalog.unapprove-version"
 	ActionActivateVersion         authority.Action = "workflowcatalog.activate-version"
+	ActionAuthorVersion           authority.Action = "workflowcatalog.author-version"
+	ActionAuthorManagedVersion    authority.Action = "workflowcatalog.author-managed-version"
 
 	SemanticImpactVersionTrustChanged     = "workflow_catalog.version_trust_changed.v1"
 	SemanticImpactEffectiveVersionChanged = "workflow_catalog.effective_version_changed.v1"
+	SemanticImpactVersionAuthored         = "workflow_catalog.version_authored.v1"
 
 	// MaxExpectedRevision leaves room for FleetDB to advance a successful
 	// lifecycle command by one within Redis HINCRBY and PostgreSQL BIGINT.
@@ -48,6 +51,22 @@ type API interface {
 	ApproveVersion(ctx context.Context, auth authority.OperatorAuthority, command VersionCommand) (*VersionResult, error)
 	UnapproveVersion(ctx context.Context, auth authority.OperatorAuthority, command VersionCommand) (*VersionResult, error)
 	ActivateVersion(ctx context.Context, auth authority.OperatorAuthority, command VersionCommand) (*VersionResult, error)
+}
+
+// VersionAuthoringAPI is deliberately separate from API while the paired
+// FleetDB atomic authoring command is rolled out. Production composition must
+// not advertise this surface until its AuthoringStore is available; callers
+// may not fall back to generic Driver/DriverVersion creates or whole-record
+// updates.
+type VersionAuthoringAPI interface {
+	// AuthorVersion admits an operator-authored immutable version. The core
+	// always stamps it untrusted and never activates it; approval and
+	// activation remain explicit lifecycle commands.
+	AuthorVersion(context.Context, authority.OperatorAuthority, AuthorVersionCommand) (*AuthorVersionResult, error)
+	// AuthorManagedVersion is the system-only lane for embedded, Loom-managed
+	// builtins. Managed trust and optional activation are selected by this
+	// method, not by caller-controlled fields in AuthorVersionCommand.
+	AuthorManagedVersion(context.Context, authority.SystemAuthority, AuthorManagedVersionCommand) (*AuthorVersionResult, error)
 }
 
 // VersionSet is a driver and its versions, in the persistence-defined stable
@@ -96,6 +115,54 @@ type VersionResult struct {
 	Active            bool             `json:"active"`
 	Approved          bool             `json:"approved"`
 	EffectiveTrust    DriverTrustLevel `json:"effective_trust"`
+	Replayed          bool             `json:"replayed,omitempty"`
+	CommittedRevision uint64           `json:"committed_revision"`
+	SemanticImpact    string           `json:"semantic_impact"`
+}
+
+// AuthorVersionCommand is the complete immutable catalog intent produced
+// after a bundle has been built and staged locally. RequestID is the durable
+// lost-response replay key. ExpectedRevision is zero only when the driver is
+// expected not to exist; otherwise it is the exact aggregate CAS revision.
+//
+// Trust and activation are intentionally absent. The selected public method
+// determines both, and the service derives CreatedBy from the admitted
+// authority subject, preventing an HTTP/CLI submission from self-elevating or
+// forging its audit actor.
+type AuthorVersionCommand struct {
+	WorkspaceKey     string            `json:"workspace_key"`
+	RequestID        string            `json:"request_id"`
+	ExpectedRevision uint64            `json:"expected_revision"`
+	DriverID         string            `json:"driver_id"`
+	DriverName       string            `json:"driver_name"`
+	VersionID        string            `json:"version_id"`
+	SourceRef        string            `json:"source_ref"`
+	SourceDigest     string            `json:"source_digest"`
+	BundleRef        string            `json:"bundle_ref"`
+	BundleDigest     string            `json:"bundle_digest"`
+	Runtime          string            `json:"runtime"`
+	Manifest         map[string]string `json:"manifest,omitempty"`
+	BuildDiagnostics string            `json:"build_diagnostics,omitempty"`
+}
+
+// AuthorManagedVersionCommand adds only the system-owned activation choice.
+// Its embedded authoring command still cannot choose trust.
+type AuthorManagedVersionCommand struct {
+	AuthorVersionCommand
+	Activate bool `json:"activate"`
+}
+
+// AuthorVersionResult is the authoritative atomic FleetDB outcome. Driver and
+// Version are post-command snapshots; CommittedRevision identifies the
+// original durable commit even when a later read has advanced Driver.Revision.
+type AuthorVersionResult struct {
+	Action            authority.Action `json:"action"`
+	Driver            *Driver          `json:"driver"`
+	Version           *DriverVersion   `json:"version"`
+	CreatedDriver     bool             `json:"created_driver"`
+	CreatedVersion    bool             `json:"created_version"`
+	ReusedVersion     bool             `json:"reused_version"`
+	Activated         bool             `json:"activated"`
 	Replayed          bool             `json:"replayed,omitempty"`
 	CommittedRevision uint64           `json:"committed_revision"`
 	SemanticImpact    string           `json:"semantic_impact"`

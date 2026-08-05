@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
 var ownerRepoSegmentRE = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
@@ -75,11 +75,11 @@ func splitGitHubPath(path string) (owner, repo string, ok bool) {
 // request can never seed a grant whose (case-sensitive) pattern fails to match
 // the later canonical dispatch.
 func (m *Module) workspaceHasRepo(ctx context.Context, ws, owner, repo string) (canonOwner, canonRepo string, ok bool, err error) {
-	data, buildErr := storeadapter.BuildWorkspaceDataForKey(ctx, m.store, ws)
-	if buildErr != nil {
-		return "", "", false, buildErr
+	repos, listErr := m.workspaceRepos(ctx, ws)
+	if listErr != nil {
+		return "", "", false, listErr
 	}
-	for _, workspaceRepo := range data.Repos {
+	for _, workspaceRepo := range repos {
 		gotOwner, gotRepo, parsed := parseGitHubOwnerRepo(workspaceRepo.RemoteURL)
 		if !parsed {
 			continue
@@ -89,4 +89,18 @@ func (m *Module) workspaceHasRepo(ctx context.Context, ws, owner, repo string) (
 		}
 	}
 	return "", "", false, nil
+}
+
+// workspaceRepos reads only the workspace aggregate required by PR
+// authorization and listing. The former full WorkspaceData projection also
+// loaded agents, daemon profiles, and every workspace summary, coupling a
+// repository membership check to unrelated read models.
+func (m *Module) workspaceRepos(ctx context.Context, workspace string) ([]*domain.Repo, error) {
+	if m == nil || m.store == nil {
+		return nil, errEgressUnavailable
+	}
+	if _, err := m.store.Workspaces().Get(ctx, workspace); err != nil {
+		return nil, err
+	}
+	return m.store.Repos().List(ctx, workspace)
 }

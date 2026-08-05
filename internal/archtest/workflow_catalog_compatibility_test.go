@@ -41,6 +41,34 @@ func TestWorkflowCatalogLifecyclePatchExtensionRejectsPhase4Drift(t *testing.T) 
 	}
 }
 
+func TestWorkflowCatalogLegacyDriverWritesUsesPrimaryInventory(t *testing.T) {
+	inventory := DirectWriteInventory{
+		Writes: []DirectWriteUse{
+			{
+				File: "internal/driver/approval.go", AggregateOwner: "workflowcatalog", Count: 1,
+			},
+			{
+				File: "internal/driver/register.go", AggregateOwner: "workflowcatalog", Count: 2,
+			},
+			{
+				File: "internal/driver/unrelated.go", AggregateOwner: "execution", Count: 8,
+			},
+			{
+				File: "internal/modules/workflowcatalog/service.go", AggregateOwner: "workflowcatalog", Count: 8,
+			},
+		},
+		LegacyDriver: &LegacyDirectWriteBaseline{
+			Owners: []LegacyDirectWriteOwnerBaseline{{
+				CapabilityOwner: "workflowcatalog", Rows: 9, Sites: 9,
+			}},
+		},
+	}
+	rows, sites := workflowCatalogLegacyDriverWrites(inventory)
+	if rows != 2 || sites != 3 {
+		t.Fatalf("workflowcatalog internal/driver writes = %d/%d, want 2/3", rows, sites)
+	}
+}
+
 func TestWorkflowCatalogLifecyclePatchExtensionExpiresAtPhase5Completion(t *testing.T) {
 	inventory := directWriteInventoryWithWorkflowCatalogLegacyDriver(4, 4)
 	err := validateWorkflowCatalogLifecyclePatchExtension(5, inventory, []byte(workflowCatalogLifecyclePatchFixture))
@@ -51,6 +79,20 @@ func TestWorkflowCatalogLifecyclePatchExtensionExpiresAtPhase5Completion(t *test
 	inventory.LegacyDriver.Owners = nil
 	if err := validateWorkflowCatalogLifecyclePatchExtension(5, inventory, []byte("components: {schemas: {UpdateDriverRequest: {properties: {}}}}")); err != nil {
 		t.Fatalf("retired Phase 5 lane must pass: %v", err)
+	}
+
+	retiredMetadataContract := `
+components:
+  schemas:
+    UpdateDriverRequest:
+      type: object
+      properties:
+        metadata:
+          type: object
+          description: Ordinary replacement preserves approved_version lifecycle markers; adding or changing them is rejected.
+`
+	if err := validateWorkflowCatalogLifecyclePatchExtension(5, inventory, []byte(retiredMetadataContract)); err != nil {
+		t.Fatalf("ordinary metadata with retired approval semantics must pass: %v", err)
 	}
 
 	contract := strings.Replace(workflowCatalogLifecyclePatchFixture, "deprecated: true", "deprecated: false", 1)

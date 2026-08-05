@@ -11,7 +11,7 @@ import (
 func TestAuth_Apply(t *testing.T) {
 	t.Run("all set", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		Auth{BearerToken: "tk", APIKey: "ak", Actor: "alice"}.Apply(req)
+		Auth{BearerToken: "tk", APIKey: "ak", Actor: "alice", DelegatedActor: "planner"}.Apply(req)
 		if got := req.Header.Get("Authorization"); got != "Bearer tk" {
 			t.Errorf("Authorization = %q, want Bearer tk", got)
 		}
@@ -23,6 +23,9 @@ func TestAuth_Apply(t *testing.T) {
 		}
 		if got := req.Header.Get("X-Actor"); got != "alice" {
 			t.Errorf("X-Actor = %q, want alice", got)
+		}
+		if got := req.Header.Get("X-Fleet-Delegated-Actor"); got != "planner" {
+			t.Errorf("X-Fleet-Delegated-Actor = %q, want planner", got)
 		}
 	})
 	t.Run("empty fields skipped", func(t *testing.T) {
@@ -39,6 +42,9 @@ func TestAuth_Apply(t *testing.T) {
 		}
 		if req.Header.Get("X-Actor") != "bob" {
 			t.Errorf("X-Actor = %q, want bob", req.Header.Get("X-Actor"))
+		}
+		if req.Header.Get("X-Fleet-Delegated-Actor") != "" {
+			t.Errorf("expected no X-Fleet-Delegated-Actor header")
 		}
 	})
 }

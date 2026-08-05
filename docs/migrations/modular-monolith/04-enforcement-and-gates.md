@@ -1,6 +1,9 @@
 # Enforcement, Validation, and Stop Conditions
 
-- **Status:** The Phase 4 architecture slice is complete, with paired full gates and exact packaged-Desktop positive, fail-closed, and restart-persistence proof at Loom `f0011b248` with FleetDB `de89f0544`; Phase 5 has not started
+- **Status:** Phase 5 source architecture is complete: the Interaction
+  sole-writer ratchet is zero, the graph is at `completed_phase: 5`, and both
+  exact-head gates pass. Twenty local packaged-Desktop rows are accepted; four
+  GitHub rows and repaired-package UI regression remain
 - **Purpose:** Define the fitness functions that distinguish a real modular monolith from a folder reorganization
 - **Migration:** [Modular Monolith Migration](README.md)
 
@@ -17,7 +20,7 @@ across restart.
 
 ## Architecture source of truth
 
-Phase 1 established the checks in `internal/archtest/testdata/capability-graph.yaml`, with `analysis-matrix.yaml`, `migration-baseline.json`, `direct-writes.yaml`, `mutation-ledger.yaml`, `runtime-components.yaml`, and `performance-baseline.yaml` beside it. Workflow Catalog, Automation, Execution, and Artifacts are now `active`, `completed_phase` is `4`, and the ledger records the complete current 61-namespace inventory selected through Phase 4 and its hardening delta. The baseline retains the immutable Phase 2 snapshot, the self-reference-free Phase 3 base-plus-diff measurement, and the Phase 3 post-commit audit. Its retained Phase 4 pre-commit snapshot remains explicitly provisional and is not rewritten. The appended `phase4-execution-validation-53cbe2577` snapshot remains the source, contract, gate, performance, source-bound, and packaged-product record for the exact source it names. The newer `phase4-reliability-validation-67c45972f` record remains immutable evidence for its named paired contract, FleetDB gate, packaged Desktop repository recovery/Terra coder, Podman/raw-browser journeys, exact-head architecture checks, and aggregate Loom gate. The final current-head closure is recorded in [Phase 4 evidence](09-phase-4-decisions-and-evidence.md#final-exact-packaged-builtin-closure) without rewriting either historical snapshot. The graph declares:
+Phase 1 established the checks in `internal/archtest/testdata/capability-graph.yaml`, with `analysis-matrix.yaml`, `migration-baseline.json`, `direct-writes.yaml`, `mutation-ledger.yaml`, `runtime-components.yaml`, and `performance-baseline.yaml` beside it. At Phase 4, Workflow Catalog, Automation, Execution, and Artifacts were active at `completed_phase: 4` with 61 selected command namespaces. Phase 5 activates Agents, Connectors, Interaction, and Source Control as well, moves the graph to `completed_phase: 5`, and expands the complete mutation ledger to 102 commands. The baseline retains the immutable Phase 2 snapshot, the self-reference-free Phase 3 base-plus-diff measurement, and the Phase 3 post-commit audit. Its retained Phase 4 pre-commit snapshot remains explicitly provisional and is not rewritten. The appended `phase4-execution-validation-53cbe2577` snapshot remains the source, contract, gate, performance, source-bound, and packaged-product record for the exact source it names. The newer `phase4-reliability-validation-67c45972f` record remains immutable evidence for its named paired contract, FleetDB gate, packaged Desktop repository recovery/Terra coder, Podman/raw-browser journeys, exact-head architecture checks, and aggregate Loom gate. The final Phase 4 current-head closure is recorded in [Phase 4 evidence](09-phase-4-decisions-and-evidence.md#final-exact-packaged-builtin-closure) without rewriting either historical snapshot. The graph declares:
 
 - every capability root;
 - allowed capability-to-capability import, synchronous command/query, and durable event edges;
@@ -29,14 +32,44 @@ Phase 1 established the checks in `internal/archtest/testdata/capability-graph.y
 
 The human ownership tables in [02-target-architecture.md](02-target-architecture.md) and the machine graph change together. An import exception without an ownership decision is not accepted.
 
+Phase 5 activates Agents, Interaction, Source Control, and Connectors package
+roots and expands the ledger and runtime inventories.
+`TestPhase5InteractionOwnershipBlockerRatchet` walks every non-test Go source
+under `internal` and now requires zero semantic AgentSession, TerminalSession,
+AgentLease, and inbox mutations outside Interaction and persistence adapters.
+It deliberately covers driver, leadcontrol, agentinbox, and svcimpl paths
+outside the primary direct-write analyzer roots. The graph may remain at
+`completed_phase: 5` only while that count is zero.
+
+Interaction inbox enqueue is available to operators and to one registered
+system-delivery path. Production callers receive only an authority-free
+`InboxEnqueuer`; on each call the `serve-interaction-inbox-delivery` component
+derives a fresh workspace/action-scoped system authority and never receives the
+issuer. Queue completion is bound to the positive claimed `attempt`. Returning
+a message to `queued` clears only that claim generation, preserves the attempt
+for the next incrementing reclaim, and rejects a delayed completion from the
+older attempt. The mutation ledger records both invariants and a dedicated
+Interaction action-to-ledger test prevents a newly registered mutation from
+escaping the inventory. See the
+[Phase 5 evidence](11-phase-5-decisions-and-evidence.md).
+
+Interactive stop and restart use the separate system-only
+`interaction.force-interrupt` command. The registered terminal-lifecycle
+adapter supplies exact non-secret session, terminal, stream, and terminal-tab
+identity; FleetDB atomically interrupts the session, exits the terminal, and
+releases the current lease before the process-local PTY is killed. The adapter
+is request-scoped and does not add a background runtime component.
+
 The `internal/workflows` legacy-path expiry is explicitly extended from Phase 3 to Phase 5 under `workflow-distribution-lane`. It cannot truthfully expire in Phase 3: the package still mixes embedded source authoring/catalog duties with trusted global-runner resolution, and 16 checked-in Go callers remain. The graph records the rationale, Workflow Catalog and Execution replacement roots, and the exact sorted caller list; `TestLegacyWorkflowsExtensionMatchesCurrentCallers` fails if that evidence drifts. Phase 5 is the last permitted milestone under this review, not a silent waiver.
 
-Phase 4 also freezes the remaining mixed `internal/driver` mutation sites as a
-content-addressed legacy ratchet until Phase 6 completion. The baseline records exact
-10 rows, 11 call sites, capability-owner distribution, and a SHA-256 digest. This is
-containment evidence, not a claim that cross-capability driver code became
-Execution-owned merely because Execution is now active; any drift fails until
-the remaining lanes move to their actual owners or the Phase 6 path expires.
+Phase 4 froze the mixed `internal/driver` mutation sites as a separate
+content-addressed legacy ratchet: 10 rows across 11 sites. Phase 5 removes all
+three Interaction-owned driver rows and folds the remaining seven rows into the
+primary typed inventory. Their individual Phase 6 expiry remains enforced.
+This is containment evidence, not a claim that the remaining Automation,
+Execution, Source Control, and Workflow Catalog policy became Execution-owned;
+exact file, receiver, method, count, and owner drift now fails in the primary
+scan.
 
 ## Go dependency gates
 

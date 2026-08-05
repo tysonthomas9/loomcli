@@ -155,9 +155,9 @@ func (d *Daemon) hasDurableActiveEphemeralWork(entry config.AgentEntry) bool {
 	if active {
 		return true
 	}
-	active, err = d.hasLiveEphemeralTaskSession(ctx, entry.Worktree)
+	active, err = d.hasLiveEphemeralTaskRun(ctx, entry.Worktree)
 	if err != nil {
-		slog.Warn("ephemeral session state check failed; deferring reconcile", "worktree", entry.Worktree, "err", err)
+		slog.Warn("ephemeral task-run state check failed; deferring reconcile", "worktree", entry.Worktree, "err", err)
 		return true
 	}
 	if active {
@@ -203,22 +203,33 @@ func (d *Daemon) hasLiveEphemeralStartCommand(ctx context.Context, agentName str
 	return false, nil
 }
 
-func (d *Daemon) hasLiveEphemeralTaskSession(ctx context.Context, agentName string) (bool, error) {
-	if d.store.AgentSessions() == nil {
+func (d *Daemon) hasLiveEphemeralTaskRun(ctx context.Context, workerProfileID string) (bool, error) {
+	return d.hasEphemeralTaskRunWithStatus(
+		ctx,
+		workerProfileID,
+		domain.TaskRunQueued,
+		domain.TaskRunRunning,
+	)
+}
+
+func (d *Daemon) hasEphemeralTaskRunWithStatus(
+	ctx context.Context,
+	workerProfileID string,
+	statuses ...domain.TaskRunStatus,
+) (bool, error) {
+	if d.store == nil || d.sup == nil || d.sup.WorkspaceID == "" || d.store.TaskRuns() == nil {
 		return false, nil
 	}
-	sessions, err := d.store.AgentSessions().List(ctx, d.sup.WorkspaceID, store.AgentSessionFilter{
-		AgentID: agentName,
-		Limit:   100,
-	})
-	if err != nil {
-		return false, err
-	}
-	for _, session := range sessions {
-		if session == nil || session.Kind != domain.AgentSessionKindTask || session.TaskID == "" {
-			continue
+	for _, status := range statuses {
+		runs, err := d.store.TaskRuns().List(ctx, d.sup.WorkspaceID, store.TaskRunFilter{
+			WorkerProfileID: workerProfileID,
+			Status:          status,
+			Limit:           1,
+		})
+		if err != nil {
+			return false, err
 		}
-		if liveAgentSessionStatus(session.Status) {
+		if len(runs) != 0 {
 			return true, nil
 		}
 	}
@@ -228,15 +239,6 @@ func (d *Daemon) hasLiveEphemeralTaskSession(ctx context.Context, agentName stri
 func liveAgentCommandStatus(status domain.AgentCommandStatus) bool {
 	switch status {
 	case domain.AgentCommandQueued, domain.AgentCommandAcked, domain.AgentCommandRunning:
-		return true
-	default:
-		return false
-	}
-}
-
-func liveAgentSessionStatus(status domain.AgentSessionStatus) bool {
-	switch status {
-	case domain.AgentSessionQueued, domain.AgentSessionLeased, domain.AgentSessionStarting, domain.AgentSessionRunning:
 		return true
 	default:
 		return false

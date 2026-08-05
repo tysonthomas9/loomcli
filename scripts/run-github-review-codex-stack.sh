@@ -15,7 +15,7 @@
 #     runs deploy/agents/a1-github-review/setup.sh to create the connector,
 #     grant, and trigger binding;
 #   * it registers the github-review-agent BUILTIN workflow (built from
-#     internal/workflows/builtin/github-review-agent.ts) — setup.sh's binding
+#     internal/infra/workflowdistribution/builtin/github-review-agent.ts) — setup.sh's binding
 #     references it by name, so it must exist first.
 #
 # This script provisions and prints how to drive the live flow; it does NOT
@@ -30,8 +30,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # ── Reused mount sources (verbatim shapes from the slack stack) ────────────
 TASK_RUNNER="${TASK_RUNNER:-${ROOT_DIR}/scripts/loom-task-runner-invoker.mjs}"
 SETUP_SCRIPT="${SETUP_SCRIPT:-${ROOT_DIR}/deploy/agents/a1-github-review/setup.sh}"
-REVIEW_WORKFLOW_SOURCE="${REVIEW_WORKFLOW_SOURCE:-${ROOT_DIR}/internal/workflows/builtin/github-review-agent.ts}"
-REVIEW_TASK_RUNNER_SOURCE="${REVIEW_TASK_RUNNER_SOURCE:-${ROOT_DIR}/internal/workflows/builtin/github-review-task-runner.ts}"
+REVIEW_WORKFLOW_SOURCE="${REVIEW_WORKFLOW_SOURCE:-${ROOT_DIR}/internal/infra/workflowdistribution/builtin/github-review-agent.ts}"
+REVIEW_TASK_RUNNER_SOURCE="${REVIEW_TASK_RUNNER_SOURCE:-${ROOT_DIR}/internal/infra/workflowdistribution/builtin/github-review-task-runner.ts}"
 LOOM_SDK_DIR="${LOOM_SDK_DIR:-${ROOT_DIR}/sdk}"
 
 CONTAINER="${CONTAINER:-loom-github-review}"

@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/httpclient"
 )
 
@@ -62,6 +63,23 @@ type workflowVersionActionAPIResponse struct {
 	Action  string                `json:"action"`
 	Driver  *domain.Driver        `json:"driver"`
 	Version *domain.DriverVersion `json:"version"`
+}
+
+type workflowAuthorVersionRequest struct {
+	Files      map[string]string         `json:"files"`
+	Entrypoint string                    `json:"entrypoint,omitempty"`
+	Runners    []driver.DriverRunnerSpec `json:"runners,omitempty"`
+	Manifest   map[string]string         `json:"manifest,omitempty"`
+}
+
+type workflowAuthorVersionAPIResponse struct {
+	Driver           *domain.Driver        `json:"driver"`
+	Version          *domain.DriverVersion `json:"version"`
+	CreatedDriver    bool                  `json:"created_driver"`
+	CreatedVersion   bool                  `json:"created_version"`
+	ReusedVersion    bool                  `json:"reused_version"`
+	Activated        bool                  `json:"activated"`
+	BuildDiagnostics string                `json:"build_diagnostics,omitempty"`
 }
 
 type workflowManagementAPIError struct {
@@ -134,6 +152,26 @@ func (c *workflowManagementClient) listVersions(ctx context.Context, workflow st
 	return &out, nil
 }
 
+func (c *workflowManagementClient) authorVersion(
+	ctx context.Context,
+	workflow, requestID string,
+	input workflowAuthorVersionRequest,
+) (*workflowAuthorVersionAPIResponse, error) {
+	path := c.workspacePath("/workflows/" + url.PathEscape(strings.TrimSpace(workflow)) + "/versions")
+	var out workflowAuthorVersionAPIResponse
+	headers := map[string]string{}
+	if requestID = strings.TrimSpace(requestID); requestID != "" {
+		headers["Idempotency-Key"] = requestID
+	}
+	if err := c.doJSONWithHeaders(ctx, http.MethodPost, path, input, &out, headers); err != nil {
+		return nil, err
+	}
+	if out.Driver == nil || out.Version == nil {
+		return nil, fmt.Errorf("workflow management API returned an incomplete authoring result")
+	}
+	return &out, nil
+}
+
 func (c *workflowManagementClient) applyVersionAction(ctx context.Context, workflow, versionID, action string) (*workflowVersionActionAPIResponse, error) {
 	versions, err := c.listVersions(ctx, workflow)
 	if err != nil {
@@ -175,6 +213,15 @@ func (c *workflowManagementClient) workspacePath(suffix string) string {
 }
 
 func (c *workflowManagementClient) doJSON(ctx context.Context, method, path string, input, output any) error {
+	return c.doJSONWithHeaders(ctx, method, path, input, output, nil)
+}
+
+func (c *workflowManagementClient) doJSONWithHeaders(
+	ctx context.Context,
+	method, path string,
+	input, output any,
+	headers map[string]string,
+) error {
 	var body io.Reader
 	if input != nil {
 		encoded, err := json.Marshal(input)
@@ -190,6 +237,9 @@ func (c *workflowManagementClient) doJSON(ctx context.Context, method, path stri
 	req.Header.Set("Accept", "application/json")
 	if input != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	for key, value := range headers {
+		req.Header.Set(key, value)
 	}
 
 	resp, err := c.doer.Do(req)

@@ -28,8 +28,20 @@ func ValidWorkspaceDesignFormat(format string) bool {
 // JobStore is implemented by WorkspaceJobStore for async workspace mutations.
 type JobStore interface {
 	Start(req WorkspaceCreateRequest, createFn WorkspaceCreateFn) string
+	StartPrepared(id string, req WorkspaceCreateRequest, createFn WorkspaceCreateFn) string
 	StartAddRepos(req WorkspaceAddReposRequest, addReposFn WorkspaceAddReposFn) string
+	StartPreparedAddRepos(id string, req WorkspaceAddReposRequest, addReposFn WorkspaceAddReposFn) string
 	Get(id string) *WorkspaceJob
+}
+
+// WorkspaceAdmissionCoordinator durably records an asynchronous workspace
+// mutation before request handling schedules its process-local runner. Job IDs
+// are opaque durable admission handles; callers must pass them through without
+// deriving a replacement.
+type WorkspaceAdmissionCoordinator interface {
+	PrepareCreate(ctx context.Context, req WorkspaceCreateRequest) (jobID string, err error)
+	PrepareAddRepos(ctx context.Context, req WorkspaceAddReposRequest) (jobID string, err error)
+	LookupJob(ctx context.Context, jobID string) (job *WorkspaceJob, found bool, err error)
 }
 
 // WorkspaceService encapsulates all workspace CRUD, config management,

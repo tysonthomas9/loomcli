@@ -3,42 +3,28 @@ package prreview
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
-	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
-	"github.com/tysonthomas9/loomcli/internal/sessions/redact"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
+	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
+	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
 const (
 	reviewerStreamPollInterval      = time.Second
 	reviewerStreamHeartbeatInterval = 15 * time.Second
-	// reviewerPollTimeout bounds a single dial+read so a hung codex can't wedge
-	// the SSE loop (blocking the heartbeat) or stall the first byte.
+	// reviewerPollTimeout bounds one provider-neutral Interaction read so a
+	// stalled provider cannot wedge the SSE heartbeat or initial response.
 	reviewerPollTimeout = 10 * time.Second
 )
-
-// readReviewerThread dials the codex app-server, reads the thread WITH turns,
-// and always closes the connection — under a per-call timeout. Shared by the
-// SSE stream and the snapshot handler so both bound their codex calls.
-func (m *Module) readReviewerThread(ctx context.Context, rt leadcontrol.CodexRuntimeMetadata) (*leadcontrol.CodexThread, error) {
-	pollCtx, cancel := context.WithTimeout(ctx, reviewerPollTimeout)
-	defer cancel()
-	client, err := m.dialCodex(pollCtx, rt.Endpoint)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = client.Close("poll") }()
-	return client.ReadThreadWithTurns(pollCtx, rt.ThreadID)
-}
 
 type reviewerStreamSession struct {
 	ws        string
 	agentName string
+	request   *http.Request
 }
 
 type reviewerStreamStatus struct {
@@ -46,12 +32,14 @@ type reviewerStreamStatus struct {
 	Detail string `json:"detail,omitempty"`
 }
 
-type reviewerStreamMessage struct {
-	TurnID string `json:"turn_id"`
-	ItemID string `json:"item_id"`
-	Role   string `json:"role"`
-	Text   string `json:"text"`
-	Phase  string `json:"phase,omitempty"`
+type reviewerStreamMessage = interaction.ConversationMessage
+
+// reviewerSnapshot is the provider-neutral conversation snapshot both the SSE
+// stream and the poll endpoint serve.
+type reviewerSnapshot struct {
+	state    string
+	detail   string
+	messages []reviewerStreamMessage
 }
 
 func (m *Module) streamReviewer(w http.ResponseWriter, r *http.Request) {
@@ -74,7 +62,11 @@ func (m *Module) streamReviewer(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) prepareReviewerStream(w http.ResponseWriter, r *http.Request) (reviewerStreamSession, bool) {
-	ws := r.PathValue("ws")
+	ws := canonicalWorkspaceFromRequest(r)
+	if ws == "" {
+		writePRReviewErrorCode(w, http.StatusBadRequest, "invalid", "canonical workspace is required", false)
+		return reviewerStreamSession{}, false
+	}
 	params, ok := parsePullRequestPath(r.PathValue("owner"), r.PathValue("repo"), r.PathValue("number"))
 	if !ok {
 		writePRReviewErrorCode(w, http.StatusBadRequest, "invalid", "invalid pull request path", false)
@@ -85,11 +77,22 @@ func (m *Module) prepareReviewerStream(w http.ResponseWriter, r *http.Request) (
 		return reviewerStreamSession{}, false
 	}
 	agentName := reviewerAgentName(canonOwner, canonRepo, params.number)
-	if _, err := m.store.Agents().Get(r.Context(), ws, agentName); err != nil {
-		writePRReviewErrorCode(w, http.StatusNotFound, "reviewer_not_started", "reviewer has not been started for this pull request", false)
+	if !m.requireReviewerIdentity(w, r.Context(), ws, agentName) {
 		return reviewerStreamSession{}, false
 	}
-	return reviewerStreamSession{ws: ws, agentName: agentName}, true
+	if m == nil || m.interactionChat == nil || m.interactionAuthority == nil {
+		writeReviewerConversationError(w, interaction.ErrUnavailable)
+		return reviewerStreamSession{}, false
+	}
+	if _, err := m.resolveReviewerConversationAuthority(r, ws); err != nil {
+		writeReviewerConversationError(w, err)
+		return reviewerStreamSession{}, false
+	}
+	return reviewerStreamSession{
+		ws:        ws,
+		agentName: agentName,
+		request:   r,
+	}, true
 }
 
 func (m *Module) runReviewerStream(ctx context.Context, sw *realtime.Writer, session reviewerStreamSession) {
@@ -126,49 +129,58 @@ func (m *Module) runReviewerStream(ctx context.Context, sw *realtime.Writer, ses
 	}
 }
 
-// readReviewerSnapshot resolves the reviewer's orchestration session and
-// dispatches on its runtime provider: codex conversations are read live over
-// the app-server socket; harness backends (claude, gemini) are read from the
-// harness's own transcript on disk; backends with no readable conversation
-// report "unsupported". Message text is redacted before it leaves this
-// function — every serving path (snapshot and SSE) goes through here.
-func (m *Module) readReviewerSnapshot(ctx context.Context, session reviewerStreamSession) (reviewerSnapshot, error) {
-	sess, err := store.OrchestrationSessionFor(ctx, m.store, session.ws, session.agentName)
+// readReviewerSnapshot refreshes request-bound operator authority for every
+// poll, then delegates provider/session metadata, transcript reads, prompt
+// trimming, and redaction to Interaction. The refresh matters for SSE streams:
+// operator authorities are deliberately short-lived.
+func (m *Module) readReviewerSnapshot(
+	ctx context.Context,
+	session reviewerStreamSession,
+) (reviewerSnapshot, error) {
+	if m == nil || m.interactionChat == nil ||
+		m.interactionAuthority == nil || session.request == nil {
+		return reviewerSnapshot{}, interaction.ErrUnavailable
+	}
+	pollCtx, cancel := context.WithTimeout(ctx, reviewerPollTimeout)
+	defer cancel()
+	request := session.request.Clone(pollCtx)
+	auth, err := m.resolveReviewerConversationAuthority(request, session.ws)
 	if err != nil {
 		return reviewerSnapshot{}, err
 	}
-	provider := ""
-	if sess != nil {
-		provider = strings.ToLower(strings.TrimSpace(sess.Metadata[leadcontrol.MetadataRuntimeProvider]))
-	}
-	var snap reviewerSnapshot
-	switch provider {
-	case "", leadcontrol.RuntimeProviderCodex:
-		snap = m.readCodexReviewerSnapshot(ctx, sess)
-	default:
-		snap = m.readHarnessReviewerSnapshot(session, sess, provider)
-	}
-	for i := range snap.messages {
-		snap.messages[i].Text = redact.String(snap.messages[i].Text)
-	}
-	return snap, nil
-}
-
-func (m *Module) readCodexReviewerSnapshot(ctx context.Context, sess *domain.AgentSession) reviewerSnapshot {
-	rt := leadcontrol.RuntimeMetadataFromSession(sess)
-	if sess == nil || rt.Endpoint == "" || rt.ThreadID == "" {
-		// Reviewer's codex hasn't booted yet (terminal not attached / thread
-		// not discovered) — an empty conversation in the "starting" state.
-		return reviewerSnapshot{state: "starting"}
-	}
-	thread, err := m.readReviewerThread(ctx, rt)
+	conversation, err := m.interactionChat.ReadConversation(
+		pollCtx,
+		auth,
+		interaction.ConversationQuery{
+			WorkspaceKey: session.ws,
+			AgentID:      session.agentName,
+		},
+	)
 	if err != nil {
-		return reviewerSnapshot{state: "reconnecting"}
+		return reviewerSnapshot{}, err
+	}
+	if conversation == nil {
+		return reviewerSnapshot{}, interaction.ErrInvalidPersistedState
 	}
 	return reviewerSnapshot{
-		state:    reviewerThreadState(thread),
-		messages: flattenReviewerMessages(thread),
+		state:    string(conversation.State),
+		detail:   conversation.Detail,
+		messages: append([]reviewerStreamMessage(nil), conversation.Messages...),
+	}, nil
+}
+
+func (m *Module) resolveReviewerConversationAuthority(
+	request *http.Request,
+	workspace string,
+) (authority.OperatorAuthority, error) {
+	if m == nil || m.interactionAuthority == nil {
+		return authority.OperatorAuthority{}, interaction.ErrUnavailable
 	}
+	return m.interactionAuthority.ResolveOperatorAuthority(
+		request,
+		workspace,
+		interaction.ActionReadConversation,
+	)
 }
 
 func (m *Module) pollReviewerStream(ctx context.Context, sw *realtime.Writer, session reviewerStreamSession, seen map[string]struct{}, lastStatus *string) bool {
@@ -213,7 +225,7 @@ func (m *Module) getReviewerConversation(w http.ResponseWriter, r *http.Request)
 	}
 	snap, err := m.readReviewerSnapshot(r.Context(), session)
 	if err != nil {
-		writePRReviewErrorCode(w, http.StatusBadGateway, "upstream_error", "failed to resolve reviewer session", true)
+		writeReviewerConversationError(w, err)
 		return
 	}
 	msgs := snap.messages
@@ -240,72 +252,91 @@ func writeReviewerStatus(sw *realtime.Writer, lastStatus *string, snap reviewerS
 	return true
 }
 
-func reviewerThreadState(thread *leadcontrol.CodexThread) string {
-	if thread != nil && thread.Status.CanStartTurn() {
-		return "idle"
+//nolint:funlen // Keep the exhaustive authority and Interaction error-to-HTTP classification in one auditable response matrix.
+func writeReviewerConversationError(w http.ResponseWriter, err error) {
+	var admissionErr *authority.AdmissionError
+	if errors.As(err, &admissionErr) {
+		writeReviewerAdmissionError(w, admissionErr)
+		return
 	}
-	return "running"
-}
-
-func flattenReviewerMessages(thread *leadcontrol.CodexThread) []reviewerStreamMessage {
-	if thread == nil {
-		return nil
-	}
-	var out []reviewerStreamMessage
-	for _, turn := range thread.Turns {
-		for _, item := range turn.Items {
-			msg := reviewerMessageFromItem(turn.ID, item)
-			if msg == nil {
-				continue
-			}
-			out = append(out, *msg)
-		}
-	}
-	return trimReviewerPreamble(out)
-}
-
-// reviewerPromptMarker is the first line of the reviewer prompt
-// (prompts/pr-review.md). Codex is launched with that prompt as its positional
-// argument, i.e. its FIRST turn, so it comes back as the leading `user` message.
-// It's a heading no human types, so trimming it can't hide a real user message.
-// Kept in sync with pr-review.md's first line.
-const reviewerPromptMarker = "## READ-ONLY PR REVIEWER"
-
-// trimReviewerPreamble drops the leading prompt bubble so the chat opens on the
-// actual review. It only skips leading `user` messages matching the prompt
-// marker and stops at the first non-match (in particular the first assistant
-// reply), so a real user message is never hidden.
-func trimReviewerPreamble(msgs []reviewerStreamMessage) []reviewerStreamMessage {
-	i := 0
-	for i < len(msgs) {
-		m := msgs[i]
-		if m.Role == "user" && strings.HasPrefix(strings.TrimSpace(m.Text), reviewerPromptMarker) {
-			i++
-			continue
-		}
-		break
-	}
-	return msgs[i:]
-}
-
-func reviewerMessageFromItem(turnID string, item leadcontrol.CodexTurnItem) *reviewerStreamMessage {
-	msg := reviewerStreamMessage{
-		TurnID: turnID,
-		ItemID: item.ID,
-		Text:   item.PlainText(),
-		Phase:  item.Phase,
-	}
-	switch item.Type {
-	case "userMessage":
-		msg.Role = "user"
-	case "agentMessage":
-		msg.Role = "assistant"
+	switch {
+	case errors.Is(err, workflowcataloghttp.ErrUnauthenticated),
+		errors.Is(err, authority.ErrInvalidPrincipal),
+		errors.Is(err, authority.ErrPrincipalExpired),
+		errors.Is(err, authority.ErrOpaqueAuthority):
+		writePRReviewErrorCode(
+			w,
+			http.StatusUnauthorized,
+			"unauthenticated",
+			"operator authentication required",
+			false,
+		)
+	case errors.Is(err, authority.ErrAdmissionDenied),
+		errors.Is(err, authority.ErrWorkspaceMismatch),
+		errors.Is(err, authority.ErrPrincipalClass),
+		errors.Is(err, authority.ErrActionNotAllowed):
+		writePRReviewErrorCode(
+			w,
+			http.StatusForbidden,
+			"forbidden",
+			"operator is not allowed to read this workspace",
+			false,
+		)
+	case errors.Is(err, interaction.ErrUnavailable):
+		writePRReviewErrorCode(
+			w,
+			http.StatusServiceUnavailable,
+			"interaction_unavailable",
+			"reviewer conversation is unavailable",
+			true,
+		)
+	case errors.Is(err, context.DeadlineExceeded):
+		writePRReviewErrorCode(
+			w,
+			http.StatusGatewayTimeout,
+			"timeout",
+			"reviewer conversation timed out",
+			true,
+		)
+	case errors.Is(err, context.Canceled):
+		writePRReviewErrorCode(
+			w,
+			499,
+			"canceled",
+			"reviewer conversation was canceled",
+			true,
+		)
 	default:
-		return nil
+		writePRReviewErrorCode(
+			w,
+			http.StatusBadGateway,
+			"upstream_error",
+			"failed to resolve reviewer conversation",
+			true,
+		)
 	}
-	// Skip empty bubbles (e.g. a non-final-phase agent item with no text yet).
-	if strings.TrimSpace(msg.Text) == "" {
-		return nil
+}
+
+func writeReviewerAdmissionError(
+	w http.ResponseWriter,
+	admissionErr *authority.AdmissionError,
+) {
+	switch admissionErr.Reason {
+	case authority.DenialInvalidAuthority, authority.DenialExpired:
+		writePRReviewErrorCode(
+			w,
+			http.StatusUnauthorized,
+			"unauthenticated",
+			"operator authentication required",
+			false,
+		)
+	default:
+		writePRReviewErrorCode(
+			w,
+			http.StatusForbidden,
+			"forbidden",
+			"operator is not allowed to read this workspace",
+			false,
+		)
 	}
-	return &msg
 }

@@ -12,6 +12,66 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
+func TestGenericDriverRequestsOmitLifecycleActivation(t *testing.T) {
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		var body map[string]any
+		decodeJSONBody(t, r, &body)
+		if _, present := body["active_version_id"]; present {
+			t.Fatalf("%s %s carried lifecycle-owned active_version_id: %#v", r.Method, r.URL.Path, body)
+		}
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/WS/drivers":
+			if body["status"] != string(domain.DriverStatusDraft) ||
+				body["trust_level"] != string(domain.DriverTrustTrusted) {
+				t.Fatalf("generic create lost draft/trust administration: %#v", body)
+			}
+			writeJSON(t, w, domain.Driver{
+				WorkspaceKey: "WS", DriverID: "driver-1", Name: "driver",
+				Status: domain.DriverStatusDraft, TrustLevel: domain.DriverTrustTrusted,
+			})
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/WS/drivers/driver-1":
+			metadata, _ := body["metadata"].(map[string]any)
+			if body["status"] != string(domain.DriverStatusDisabled) ||
+				body["trust_level"] != string(domain.DriverTrustUntrusted) ||
+				metadata["team"] != "runtime" {
+				t.Fatalf("generic patch lost non-activation administration: %#v", body)
+			}
+			writeJSON(t, w, domain.Driver{
+				WorkspaceKey: "WS", DriverID: "driver-1", Name: "driver",
+				Status: domain.DriverStatusDisabled, TrustLevel: domain.DriverTrustUntrusted,
+				Metadata: map[string]string{"team": "runtime"},
+			})
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client, err := New(Config{BaseURL: server.URL, Actor: "operator"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Drivers().Create(t.Context(), store.DriverCreate{
+		WorkspaceKey: "WS", DriverID: "driver-1", Name: "driver",
+		Status: domain.DriverStatusDraft, TrustLevel: domain.DriverTrustTrusted,
+	}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	disabled := domain.DriverStatusDisabled
+	untrusted := domain.DriverTrustUntrusted
+	metadata := map[string]string{"team": "runtime"}
+	if _, err := client.Drivers().Update(t.Context(), "WS", "driver-1", store.DriverUpdate{
+		Status: &disabled, TrustLevel: &untrusted, Metadata: &metadata,
+	}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("requests = %d, want create + update", calls)
+	}
+}
+
 func TestPlatformClientDriverRunLifecycleRoutesAndErrors(t *testing.T) {
 	var claimCount int
 	recoveryBefore := time.Date(2026, 6, 6, 12, 34, 56, 0, time.UTC)
@@ -362,7 +422,7 @@ func TestPlatformClientDriverRunLifecycleRoutesAndErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := client.Drivers().Create(t.Context(), store.DriverCreate{WorkspaceKey: "WS", DriverID: "driver-1", Name: "epic-runner", Status: domain.DriverStatusActive}); err != nil {
+	if _, err := client.Drivers().Create(t.Context(), store.DriverCreate{WorkspaceKey: "WS", DriverID: "driver-1", Name: "epic-runner", Status: domain.DriverStatusDraft}); err != nil {
 		t.Fatalf("Create driver: %v", err)
 	}
 	if _, err := client.DriverVersions().Create(t.Context(), store.DriverVersionCreate{WorkspaceKey: "WS", DriverID: "driver-1", VersionID: "version-1", Version: 1, SourceDigest: "sha256:source", BundleDigest: "sha256:bundle"}); err != nil {

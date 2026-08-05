@@ -88,6 +88,55 @@ func TestAgentIPCClient_Claim_Success(t *testing.T) {
 	}
 }
 
+func TestAgentIPCClient_TaskQueriesAndCommentsCarrySessionCredential(t *testing.T) {
+	tmpDir := shortSocketDir(t)
+	socketPath := filepath.Join(tmpDir, "ipc.sock")
+
+	seen := make(chan AgentIPCRequest, 5)
+	startTestIPCServer(t, socketPath, func(req AgentIPCRequest) AgentIPCResponse {
+		seen <- req
+		var value any
+		switch req.Operation {
+		case IPCOpGet:
+			value = backend.IssueDetailData{IssueData: backend.IssueData{ID: req.IssueID}}
+		case IPCOpList, IPCOpReady, IPCOpBlocked:
+			value = []backend.IssueData{{ID: req.Operation + "-1"}}
+		case IPCOpAddComment:
+			value = backend.CommentData{IssueID: req.IssueID, Text: "review"}
+		default:
+			return AgentIPCResponse{Error: "unexpected operation"}
+		}
+		data, _ := json.Marshal(value)
+		return AgentIPCResponse{Success: true, Data: data}
+	})
+
+	client := NewAgentIPCClient(socketPath, "planner")
+	client.SessionID = "sess-1"
+	client.AuthToken = "token-1"
+	if got, err := client.Get("task-1"); err != nil || got.ID != "task-1" {
+		t.Fatalf("Get() = %+v, %v", got, err)
+	}
+	if got, err := client.List(backend.ListOpts{Limit: 5}); err != nil || len(got) != 1 {
+		t.Fatalf("List() = %+v, %v", got, err)
+	}
+	if got, err := client.Ready(backend.ReadyOpts{Limit: 6}); err != nil || len(got) != 1 {
+		t.Fatalf("Ready() = %+v, %v", got, err)
+	}
+	if got, err := client.Blocked(backend.BlockedOpts{Limit: 7}); err != nil || len(got) != 1 {
+		t.Fatalf("Blocked() = %+v, %v", got, err)
+	}
+	if got, err := client.AddComment(backend.CommentAddParams{IssueID: "task-1", Text: "review"}); err != nil || got.Text != "review" {
+		t.Fatalf("AddComment() = %+v, %v", got, err)
+	}
+
+	for range 5 {
+		req := <-seen
+		if req.AgentName != "planner" || req.SessionID != "sess-1" || req.AuthToken != "token-1" {
+			t.Fatalf("request identity = agent %q session %q token %q", req.AgentName, req.SessionID, req.AuthToken)
+		}
+	}
+}
+
 func TestAgentIPCClient_Claim_Conflict(t *testing.T) {
 	tmpDir := shortSocketDir(t)
 	socketPath := filepath.Join(tmpDir, "ipc.sock")
@@ -410,8 +459,7 @@ func TestAgentIPCClient_Release_Success(t *testing.T) {
 
 	client := NewAgentIPCClient(socketPath, "falcon")
 	client.SessionID = "sess-1"
-	client.LeaseID = "lease-1"
-	client.LeaseToken = "token-1"
+	client.AuthToken = "token-1"
 	if err := client.Release("abc-123"); err != nil {
 		t.Fatalf("Release() error = %v", err)
 	}
@@ -422,10 +470,10 @@ func TestAgentIPCClient_Release_Success(t *testing.T) {
 	if capturedReq.IssueID != "abc-123" {
 		t.Errorf("IssueID = %q, want %q", capturedReq.IssueID, "abc-123")
 	}
-	// Release must carry the lease-fence fields so the daemon can validate it.
-	if capturedReq.SessionID != "sess-1" || capturedReq.LeaseID != "lease-1" || capturedReq.LeaseToken != "token-1" {
-		t.Errorf("lease fields = session %q lease %q token %q, want sess-1/lease-1/token-1",
-			capturedReq.SessionID, capturedReq.LeaseID, capturedReq.LeaseToken)
+	// Release must carry the process-local session credential so the daemon can validate it.
+	if capturedReq.SessionID != "sess-1" || capturedReq.AuthToken != "token-1" {
+		t.Errorf("IPC fields = session %q token %q, want sess-1/token-1",
+			capturedReq.SessionID, capturedReq.AuthToken)
 	}
 }
 

@@ -10,11 +10,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/app/agentprovisioning"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/webui/handlers/triggerbindings"
 )
 
 type boundaryOperatorResolverFunc func(*http.Request, string, authority.Action) (authority.OperatorAuthority, error)
@@ -56,7 +57,8 @@ func TestLegacyBindingPatchRejectsWrongWorkspaceAuthority(t *testing.T) {
 	}
 	bindings := &testBindingOperations{store: st}
 	module := New(Config{
-		Store: st, Bindings: bindings,
+		Store: st, Bindings: bindings, AgentRecords: &testAgentRecordAPI{store: st},
+		AgentRecordAuthority: testOperatorAuthorityResolver{},
 		OperatorAuthority: boundaryOperatorResolverFunc(func(_ *http.Request, workspace string, action authority.Action) (authority.OperatorAuthority, error) {
 			if workspace != agentRecordTestWS || action != automation.ActionUpdateBinding {
 				t.Fatalf("authority scope = %q/%q", workspace, action)
@@ -86,17 +88,33 @@ func TestManagedBindingLifecycleUsesExactActions(t *testing.T) {
 	seedPromptAgentRole(t, st, "docs")
 	bindings := &testBindingOperations{store: st}
 	var actions []authority.Action
+	provisioning := newTestAgentProvisioning(st, bindings)
+	provisioning.onResolve = func(workspace string, action authority.Action) {
+		if workspace != agentRecordTestWS {
+			t.Fatalf(
+				"provisioning authority workspace = %q, want %q",
+				workspace,
+				agentRecordTestWS,
+			)
+		}
+		actions = append(actions, action)
+	}
+	resolver := boundaryOperatorResolverFunc(func(_ *http.Request, workspace string, action authority.Action) (authority.OperatorAuthority, error) {
+		if workspace != agentRecordTestWS {
+			t.Fatalf("authority workspace = %q, want %q", workspace, agentRecordTestWS)
+		}
+		actions = append(actions, action)
+		return authority.OperatorAuthority{}, nil
+	})
 	module := New(Config{
 		Store: st, Bindings: bindings,
-		OperatorAuthority: boundaryOperatorResolverFunc(func(_ *http.Request, workspace string, action authority.Action) (authority.OperatorAuthority, error) {
-			if workspace != agentRecordTestWS {
-				t.Fatalf("authority workspace = %q, want %q", workspace, agentRecordTestWS)
-			}
-			actions = append(actions, action)
-			return authority.OperatorAuthority{}, nil
-		}),
-		WorkspaceFromContext: func(context.Context) string { return agentRecordTestWS },
-		BindingGrants:        testBindingGrantCompatibility{grants: st.ConnectorGrants()},
+		OperatorAuthority: resolver,
+		AgentRecords:      &testAgentRecordAPI{store: st}, AgentRecordAuthority: resolver,
+		Provisioning:          provisioning,
+		ProvisioningAuthority: provisioning,
+		PrepareWorkflowTarget: testWorkflowTargetPreparation(st),
+		WorkspaceFromContext:  func(context.Context) string { return agentRecordTestWS },
+		BindingGrants:         testBindingGrantCompatibility{grants: st.ConnectorGrants()},
 	})
 	mux := http.NewServeMux()
 	module.Register(mux)
@@ -127,10 +145,9 @@ func TestManagedBindingLifecycleUsesExactActions(t *testing.T) {
 		t.Fatalf("delete status = %d; body=%s", deleted.Code, deleted.Body.String())
 	}
 	want := []authority.Action{
-		automation.ActionCreateManagedBinding,
-		automation.ActionDisableManagedBinding,
-		automation.ActionDisableManagedBinding,
-		automation.ActionDeleteManagedBinding,
+		agentprovisioning.ActionBeginProvisioning,
+		agentsmodule.ActionApplyLifecycle,
+		agentsmodule.ActionApplyLifecycle,
 	}
 	if len(actions) != len(want) {
 		t.Fatalf("actions = %v, want %v", actions, want)
@@ -150,7 +167,7 @@ func TestManagedBindingDeleteResumesAfterEveryDurableStepFailure(t *testing.T) {
 				bindings:      &managedDeleteFaultBindings{state: state},
 				bindingGrants: &managedDeleteFaultGrants{state: state},
 			}
-			command := func() (triggerbindings.DeleteBindingResult, error) {
+			command := func() (bindingDeletionResult, error) {
 				return module.deleteManagedBinding(
 					context.Background(), agentRecordTestWS, "binding-1", "agent-1",
 					authority.OperatorAuthority{}, authority.OperatorAuthority{},
@@ -205,6 +222,8 @@ func TestManagedAgentDeleteResumesAfterParkOrArchiveFailure(t *testing.T) {
 			module := New(Config{
 				Store: faultStore, Bindings: &testBindingOperations{store: faultStore},
 				OperatorAuthority:    testOperatorAuthorityResolver{},
+				AgentRecords:         &testAgentRecordAPI{store: faultStore},
+				AgentRecordAuthority: testOperatorAuthorityResolver{},
 				WorkspaceFromContext: func(context.Context) string { return agentRecordTestWS },
 				BindingGrants:        testBindingGrantCompatibility{grants: faultStore.ConnectorGrants()},
 			})

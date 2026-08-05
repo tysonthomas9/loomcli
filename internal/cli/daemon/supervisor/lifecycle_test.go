@@ -1904,14 +1904,13 @@ func TestBuildCommand_SessionEnvVars(t *testing.T) {
 			EmitEvent:      func(events.Event) {},
 		}
 		ap := &AgentProcess{
-			Entry:           cfgpkg.AgentEntry{Worktree: "falcon", Role: "plan"},
-			RoleConfig:      cfgpkg.RoleConfig{Description: "Built-in plan agent"},
-			WorktreePath:    tmpDir,
-			Session:         sess,
-			AgentLeaseID:    "lease-1",
-			AgentLeaseToken: "token-1",
-			ParentSessionID: "lead-session-1",
-			AssignedTaskID:  "task-1",
+			Entry:             cfgpkg.AgentEntry{Worktree: "falcon", Role: "plan"},
+			RoleConfig:        cfgpkg.RoleConfig{Description: "Built-in plan agent"},
+			WorktreePath:      tmpDir,
+			Session:           sess,
+			AgentIPCAuthToken: "token-1",
+			ParentSessionID:   "lead-session-1",
+			AssignedTaskID:    "task-1",
 		}
 
 		cmd, err := s.buildCommand(ap)
@@ -1941,7 +1940,7 @@ func TestBuildCommand_SessionEnvVars(t *testing.T) {
 		if !foundRuntimeDir {
 			t.Error("LOOM_WORKSPACE_RUNTIME_DIR not found in cmd.Env")
 		}
-		for _, want := range []string{"LOOM_AGENT_LEASE_ID=lease-1", "LOOM_AGENT_LEASE_TOKEN=token-1", "LOOM_ORCHESTRATOR_SESSION_ID=lead-session-1", "LOOM_ASSIGNED_TASK_ID=task-1"} {
+		for _, want := range []string{"LOOM_AGENT_IPC_AUTH_TOKEN=token-1", "LOOM_ORCHESTRATOR_SESSION_ID=lead-session-1", "LOOM_ASSIGNED_TASK_ID=task-1"} {
 			found := false
 			for _, env := range cmd.Env {
 				if env == want {
@@ -1960,7 +1959,7 @@ func TestBuildCommand_SessionEnvVars(t *testing.T) {
 		// environment so cli.FilteredEnv() does not leak them into the test.
 		// t.Setenv handles restore-on-cleanup; Unsetenv removes them for the
 		// duration of this subtest.
-		for _, key := range []string{"LOOM_SESSION_ID", "LOOM_WORKSPACE_RUNTIME_DIR", "LOOM_AGENT_LEASE_ID", "LOOM_AGENT_LEASE_TOKEN"} {
+		for _, key := range []string{"LOOM_SESSION_ID", "LOOM_WORKSPACE_RUNTIME_DIR", "LOOM_AGENT_IPC_AUTH_TOKEN"} {
 			t.Setenv(key, "") // registers cleanup to restore original value
 			os.Unsetenv(key)  // actually remove from os.Environ()
 		}
@@ -1993,11 +1992,8 @@ func TestBuildCommand_SessionEnvVars(t *testing.T) {
 			if len(env) >= len("LOOM_WORKSPACE_RUNTIME_DIR=") && env[:len("LOOM_WORKSPACE_RUNTIME_DIR=")] == "LOOM_WORKSPACE_RUNTIME_DIR=" {
 				t.Errorf("LOOM_WORKSPACE_RUNTIME_DIR should not be in cmd.Env when session is nil, got %q", env)
 			}
-			if len(env) >= len("LOOM_AGENT_LEASE_ID=") && env[:len("LOOM_AGENT_LEASE_ID=")] == "LOOM_AGENT_LEASE_ID=" {
-				t.Errorf("LOOM_AGENT_LEASE_ID should not be in cmd.Env when session is nil, got %q", env)
-			}
-			if len(env) >= len("LOOM_AGENT_LEASE_TOKEN=") && env[:len("LOOM_AGENT_LEASE_TOKEN=")] == "LOOM_AGENT_LEASE_TOKEN=" {
-				t.Errorf("LOOM_AGENT_LEASE_TOKEN should not be in cmd.Env when session is nil, got %q", env)
+			if len(env) >= len("LOOM_AGENT_IPC_AUTH_TOKEN=") && env[:len("LOOM_AGENT_IPC_AUTH_TOKEN=")] == "LOOM_AGENT_IPC_AUTH_TOKEN=" {
+				t.Errorf("LOOM_AGENT_IPC_AUTH_TOKEN should not be in cmd.Env when session is nil, got %q", env)
 			}
 		}
 	})

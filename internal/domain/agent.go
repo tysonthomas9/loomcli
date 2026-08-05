@@ -32,9 +32,11 @@ const (
 	AgentLiveIdle AgentLiveStatus = "idle"
 )
 
-// Agent is a long-lived assignment of a Role to one or more Repos within
-// a Workspace. Distinct from a Worker (fleet-db's per-claim record); an
-// Agent persists across many task claims.
+// Agent is the transitional supervised-assignment compatibility projection: a
+// long-lived assignment of a Role to one or more Repos within a Workspace.
+// Distinct from a Worker (fleet-db's per-claim record), it persists across many
+// task claims. During Phase 5 its mutation owner is the Agents module; the
+// legacy store shape remains only until Phase 6 consumers are retired.
 //
 // Name is the workspace-scoped agent identifier (unique within
 // WorkspaceKey, typically used as the tmux session + worktree dir name).

@@ -35,11 +35,44 @@ func (r *releaserMock) ReleaseClaim(_ context.Context, id, actor string) error {
 
 // mockIPCMutator implements ipcMutator for testing the decorator logic.
 type mockIPCMutator struct {
+	getFn         func(issueID string) (*backend.IssueDetailData, error)
+	listFn        func(opts backend.ListOpts) ([]backend.IssueData, error)
+	readyFn       func(opts backend.ReadyOpts) ([]backend.IssueData, error)
+	blockedFn     func(opts backend.BlockedOpts) ([]backend.IssueData, error)
 	claimFn       func(issueID string, lockTTL time.Duration) error
 	updateFn      func(issueID string, params backend.UpdateParams) error
 	completeFn    func(issueID string, params backend.CloseParams) (*backend.CloseResult, error)
 	releaseLockFn func(issueID string) error
 	releaseFn     func(issueID string) error
+	addCommentFn  func(params backend.CommentAddParams) (*backend.CommentData, error)
+}
+
+func (m *mockIPCMutator) Get(issueID string) (*backend.IssueDetailData, error) {
+	if m.getFn != nil {
+		return m.getFn(issueID)
+	}
+	return &backend.IssueDetailData{}, nil
+}
+
+func (m *mockIPCMutator) List(opts backend.ListOpts) ([]backend.IssueData, error) {
+	if m.listFn != nil {
+		return m.listFn(opts)
+	}
+	return nil, nil
+}
+
+func (m *mockIPCMutator) Ready(opts backend.ReadyOpts) ([]backend.IssueData, error) {
+	if m.readyFn != nil {
+		return m.readyFn(opts)
+	}
+	return nil, nil
+}
+
+func (m *mockIPCMutator) Blocked(opts backend.BlockedOpts) ([]backend.IssueData, error) {
+	if m.blockedFn != nil {
+		return m.blockedFn(opts)
+	}
+	return nil, nil
 }
 
 func (m *mockIPCMutator) Claim(issueID string, lockTTL time.Duration) error {
@@ -75,6 +108,13 @@ func (m *mockIPCMutator) Release(issueID string) error {
 		return m.releaseFn(issueID)
 	}
 	return nil
+}
+
+func (m *mockIPCMutator) AddComment(params backend.CommentAddParams) (*backend.CommentData, error) {
+	if m.addCommentFn != nil {
+		return m.addCommentFn(params)
+	}
+	return &backend.CommentData{}, nil
 }
 
 // --- IPC routing tests ---
@@ -278,12 +318,16 @@ func TestIPCIssueBackend_Close_PropagatesNotFound(t *testing.T) {
 	}
 }
 
-// --- Direct backend delegation tests ---
+// --- Authenticated IPC query routing tests ---
 
-func TestIPCIssueBackend_Ready_DelegatesToDirectBackend(t *testing.T) {
-	ipc := &mockIPCMutator{}
+func TestIPCIssueBackend_Ready_RoutesToIPC(t *testing.T) {
+	ipc := &mockIPCMutator{readyFn: func(opts backend.ReadyOpts) ([]backend.IssueData, error) {
+		if opts.Limit != 5 {
+			t.Errorf("ready limit = %d, want 5", opts.Limit)
+		}
+		return []backend.IssueData{{ID: "ready-1"}}, nil
+	}}
 	direct := NewMockIssueBackend()
-	direct.ReadyResult = []backend.IssueData{{ID: "ready-1"}}
 	b := newIPCIssueBackend(ipc, direct)
 
 	got, err := b.Ready(context.Background(), backend.ReadyOpts{Limit: 5})
@@ -293,15 +337,16 @@ func TestIPCIssueBackend_Ready_DelegatesToDirectBackend(t *testing.T) {
 	if len(got) != 1 || got[0].ID != "ready-1" {
 		t.Errorf("got %v, want [{ID:ready-1}]", got)
 	}
-	if !direct.Called("Ready") {
-		t.Error("direct Ready should have been called")
+	if direct.Called("Ready") {
+		t.Error("direct Ready must not bypass authenticated IPC")
 	}
 }
 
-func TestIPCIssueBackend_Get_DelegatesToDirectBackend(t *testing.T) {
-	ipc := &mockIPCMutator{}
+func TestIPCIssueBackend_Get_RoutesToIPC(t *testing.T) {
+	ipc := &mockIPCMutator{getFn: func(id string) (*backend.IssueDetailData, error) {
+		return &backend.IssueDetailData{IssueData: backend.IssueData{ID: id}}, nil
+	}}
 	fb := NewMockIssueBackend()
-	fb.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{ID: "get-1"}}
 	b := newIPCIssueBackend(ipc, fb)
 
 	got, err := b.Get(context.Background(), "get-1")
@@ -311,12 +356,16 @@ func TestIPCIssueBackend_Get_DelegatesToDirectBackend(t *testing.T) {
 	if got.ID != "get-1" {
 		t.Errorf("got ID %q, want get-1", got.ID)
 	}
+	if fb.Called("Get") {
+		t.Error("direct Get must not bypass authenticated IPC")
+	}
 }
 
-func TestIPCIssueBackend_List_DelegatesToDirectBackend(t *testing.T) {
-	ipc := &mockIPCMutator{}
+func TestIPCIssueBackend_List_RoutesToIPC(t *testing.T) {
+	ipc := &mockIPCMutator{listFn: func(backend.ListOpts) ([]backend.IssueData, error) {
+		return []backend.IssueData{{ID: "list-1"}}, nil
+	}}
 	fb := NewMockIssueBackend()
-	fb.ListResult = []backend.IssueData{{ID: "list-1"}}
 	b := newIPCIssueBackend(ipc, fb)
 
 	got, err := b.List(context.Background(), backend.ListOpts{})
@@ -325,6 +374,47 @@ func TestIPCIssueBackend_List_DelegatesToDirectBackend(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].ID != "list-1" {
 		t.Errorf("got %v, want [{ID:list-1}]", got)
+	}
+	if fb.Called("List") {
+		t.Error("direct List must not bypass authenticated IPC")
+	}
+}
+
+func TestIPCIssueBackend_Blocked_RoutesToIPC(t *testing.T) {
+	ipc := &mockIPCMutator{blockedFn: func(backend.BlockedOpts) ([]backend.IssueData, error) {
+		return []backend.IssueData{{ID: "blocked-1"}}, nil
+	}}
+	direct := NewMockIssueBackend()
+	b := newIPCIssueBackend(ipc, direct)
+
+	got, err := b.Blocked(context.Background(), backend.BlockedOpts{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "blocked-1" {
+		t.Errorf("got %v, want [{ID:blocked-1}]", got)
+	}
+	if direct.Called("Blocked") {
+		t.Error("direct Blocked must not bypass authenticated IPC")
+	}
+}
+
+func TestIPCIssueBackend_AddComment_RoutesToIPC(t *testing.T) {
+	ipc := &mockIPCMutator{addCommentFn: func(params backend.CommentAddParams) (*backend.CommentData, error) {
+		return &backend.CommentData{IssueID: params.IssueID, Text: params.Text}, nil
+	}}
+	direct := NewMockIssueBackend()
+	b := newIPCIssueBackend(ipc, direct)
+
+	got, err := b.AddComment(context.Background(), backend.CommentAddParams{IssueID: "task-1", Text: "review"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.IssueID != "task-1" || got.Text != "review" {
+		t.Fatalf("comment = %+v", got)
+	}
+	if direct.Called("AddComment") {
+		t.Error("direct AddComment must not bypass authenticated IPC")
 	}
 }
 
@@ -366,7 +456,7 @@ func TestIPCIssueBackend_SearchIssues_DelegatesToDirectBackend(t *testing.T) {
 
 // TestIPCIssueBackend_ReleaseClaim_RoutesThroughIPC asserts that ReleaseClaim
 // goes through the IPC mutator (IPCOpReleaseClaim) — so the daemon applies the
-// lease fence — and does NOT touch the direct backend, even when the direct
+// process-local credential fence — and does NOT touch the direct backend, even when the direct
 // backend implements ClaimReleaser. This is the inverse of the pre-LOOM-1
 // bypass: release is now daemon-mediated like Claim/Update/Close.
 func TestIPCIssueBackend_ReleaseClaim_RoutesThroughIPC(t *testing.T) {

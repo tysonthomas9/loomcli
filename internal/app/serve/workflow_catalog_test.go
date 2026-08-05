@@ -15,6 +15,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/tysonthomas9/loomcli/internal/app/serve/automationcomposition"
+
 	"github.com/tysonthomas9/loomcli/internal/app/workflowbinding"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
@@ -77,12 +79,12 @@ func TestWorkflowCatalogComposesProductionAutomationCapability(t *testing.T) {
 }
 
 func TestConfiguredWorkflowTargetPreparerProjectsTarget(t *testing.T) {
-	preparer := &configuredWorkflowTargetPreparer{prepare: func(_ context.Context, workspace, workflow string) (WorkflowTarget, error) {
+	preparer := automationcomposition.NewWorkflowTargetPreparer(func(_ context.Context, workspace, workflow string) (WorkflowTarget, error) {
 		if workspace == "TEST" && workflow == "custom-workflow" {
 			return WorkflowTarget{DriverID: "driver-1", DriverVersionID: "version-2"}, nil
 		}
 		return WorkflowTarget{}, domain.ErrNotFound
-	}}
+	})
 	target, err := preparer.PrepareWorkflowTarget(t.Context(), "TEST", "custom-workflow")
 	if err != nil {
 		t.Fatalf("PrepareWorkflowTarget: %v", err)
@@ -90,7 +92,7 @@ func TestConfiguredWorkflowTargetPreparerProjectsTarget(t *testing.T) {
 	if target.DriverID != "driver-1" || target.DriverVersionID != "version-2" {
 		t.Fatalf("target = %+v", target)
 	}
-	if _, err := (&configuredWorkflowTargetPreparer{}).PrepareWorkflowTarget(t.Context(), "TEST", "custom-workflow"); !errors.Is(err, workflowbinding.ErrUnavailable) {
+	if _, err := automationcomposition.NewWorkflowTargetPreparer(nil).PrepareWorkflowTarget(t.Context(), "TEST", "custom-workflow"); !errors.Is(err, workflowbinding.ErrUnavailable) {
 		t.Fatalf("nil preparation error = %v, want %v", err, workflowbinding.ErrUnavailable)
 	}
 	if _, err := preparer.PrepareWorkflowTarget(t.Context(), "TEST", "missing"); !errors.Is(err, domain.ErrNotFound) {
@@ -154,6 +156,27 @@ func TestWorkflowCatalogCompositionRejectsUnregisteredSystemAuthorityComponent(t
 	}
 }
 
+func TestWorkflowCatalogManagedBuiltinAuthorityIsExactPurpose(t *testing.T) {
+	client, _ := newCatalogFleetClient(t)
+	module, err := NewWorkflowCatalogModule(testWorkflowCatalogConfig(WorkflowCatalogConfig{
+		Enabled: true, FleetDBClient: client,
+	}))
+	if err != nil {
+		t.Fatalf("NewWorkflowCatalogModule: %v", err)
+	}
+	granted, err := module.ManagedBuiltinAuthoringAuthority("TEST", "refresh embedded prompt-agent")
+	if err != nil {
+		t.Fatalf("ManagedBuiltinAuthoringAuthority: %v", err)
+	}
+	if granted.Subject() != string(workflowCatalogBuiltinDistributionComponent) ||
+		granted.Workspace() != "TEST" ||
+		granted.Action() != workflowcatalog.ActionAuthorManagedVersion ||
+		granted.Reason() != "refresh embedded prompt-agent" {
+		t.Fatalf("managed builtin authority = subject:%q workspace:%q action:%q reason:%q",
+			granted.Subject(), granted.Workspace(), granted.Action(), granted.Reason())
+	}
+}
+
 func TestWorkflowCatalogSystemAuthorityComponentsExistInRuntimeInventory(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "..", "archtest", "testdata", "runtime-components.yaml"))
 	if err != nil {
@@ -194,6 +217,7 @@ func TestWorkflowCatalogFleetDBBridgeOwnsItsDTOAndErrorVocabulary(t *testing.T) 
 		{name: "ownership", in: infrafleetdb.ErrWorkflowCatalogVersionOwnership, want: catalogfleetdb.ErrTransportVersionOwnership},
 		{name: "validation", in: infrafleetdb.ErrWorkflowCatalogVersionNotValidated, want: catalogfleetdb.ErrTransportVersionNotValidated},
 		{name: "approval", in: infrafleetdb.ErrWorkflowCatalogVersionNotApproved, want: catalogfleetdb.ErrTransportVersionNotApproved},
+		{name: "authoring conflict", in: infrafleetdb.ErrWorkflowCatalogAuthoringConflict, want: catalogfleetdb.ErrTransportAuthoringConflict},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			got := translateWorkflowCatalogFleetDBError(test.in)
@@ -214,6 +238,22 @@ func TestWorkflowCatalogFleetDBBridgeOwnsItsDTOAndErrorVocabulary(t *testing.T) 
 	}
 	if got.Driver != driver || got.Version != version || !got.Replayed || got.CommittedRevision != 3 || got.SemanticImpact != workflowcatalog.SemanticImpactVersionTrustChanged {
 		t.Fatalf("translated result = %#v", got)
+	}
+
+	authored, err := translateWorkflowCatalogFleetDBAuthoringResult(&infrafleetdb.WorkflowCatalogAuthorVersionResult{
+		Driver: driver, Version: version,
+		CreatedDriver: true, CreatedVersion: true, ReusedVersion: false,
+		Activated: true, Replayed: true, CommittedRevision: 4,
+		SemanticImpact: workflowcatalog.SemanticImpactVersionAuthored,
+	}, nil)
+	if err != nil {
+		t.Fatalf("translate authoring result: %v", err)
+	}
+	if authored.Driver != driver || authored.Version != version ||
+		!authored.CreatedDriver || !authored.CreatedVersion || authored.ReusedVersion ||
+		!authored.Activated || !authored.Replayed || authored.CommittedRevision != 4 ||
+		authored.SemanticImpact != workflowcatalog.SemanticImpactVersionAuthored {
+		t.Fatalf("translated authoring result = %#v", authored)
 	}
 }
 
@@ -248,6 +288,104 @@ func TestLocalOpenWorkflowCatalogDerivesExactAuthorityWithoutCredential(t *testi
 	}
 	if calls := fleet.Calls(); len(calls) != 4 {
 		t.Fatalf("authorized request FleetDB calls = %v, want four capability calls", calls)
+	}
+}
+
+func TestWorkflowCatalogCompositionUsesAtomicAuthoringAndAuthorityDerivedAuditActor(t *testing.T) {
+	client, fleet := newCatalogFleetClient(t)
+	module, err := NewWorkflowCatalogModule(testWorkflowCatalogConfig(WorkflowCatalogConfig{
+		Enabled: true, FleetDBClient: client, Workspace: "TEST",
+	}))
+	if err != nil {
+		t.Fatalf("NewWorkflowCatalogModule: %v", err)
+	}
+	authoring := module.VersionAuthoringAPI()
+	if authoring == nil {
+		t.Fatal("composed VersionAuthoringAPI is nil")
+	}
+
+	operatorRequest := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/workflows/demo/versions", nil)
+	operatorAuth, err := module.operatorResolver.ResolveOperatorAuthority(
+		operatorRequest,
+		"TEST",
+		workflowcatalog.ActionAuthorVersion,
+	)
+	if err != nil {
+		t.Fatalf("resolve operator authoring authority: %v", err)
+	}
+	operatorCommand := workflowcatalog.AuthorVersionCommand{
+		WorkspaceKey: "TEST", RequestID: "operator-request-1", ExpectedRevision: 0,
+		DriverID: "demo", DriverName: "demo", VersionID: "demo-v-bbbbbbbbbbbb",
+		SourceRef:    "api://workflows/demo/versions/source",
+		SourceDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		BundleRef:    ".loom/drivers/demo/demo-v-bbbbbbbbbbbb",
+		BundleDigest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		Runtime:      "flue-node", Manifest: map[string]string{"entrypoint": "run"},
+		BuildDiagnostics: "built",
+	}
+	operatorResult, err := authoring.AuthorVersion(t.Context(), operatorAuth, operatorCommand)
+	if err != nil {
+		t.Fatalf("AuthorVersion: %v", err)
+	}
+	if operatorResult.Version.CreatedBy != localOpenOperatorSubject ||
+		operatorResult.Version.Manifest[workflowcatalog.ManifestTrustLevelKey] != string(workflowcatalog.DriverTrustUntrusted) ||
+		operatorResult.Activated {
+		t.Fatalf("operator result = %+v", operatorResult)
+	}
+
+	managedCommand := operatorCommand
+	managedCommand.RequestID = "managed-request-1"
+	managedCommand.ExpectedRevision = 1
+	managedCommand.DriverID = workflowcatalog.BuiltinEpicRunnerWorkflowName
+	managedCommand.DriverName = managedCommand.DriverID
+	managedCommand.SourceRef = workflowcatalog.BuiltinSourceRef(managedCommand.DriverID, managedCommand.SourceDigest)
+	managedCommand.VersionID = workflowcatalog.BuiltinVersionID(managedCommand.DriverID, managedCommand.BundleDigest)
+	managedCommand.BundleRef = workflowcatalog.BuiltinBundleRef(managedCommand.DriverID, managedCommand.VersionID)
+	managedCommand.Manifest = map[string]string{
+		"driver_id": managedCommand.DriverID, "driver_name": managedCommand.DriverName,
+		"workflow_name": managedCommand.DriverID, "source_ref": managedCommand.SourceRef,
+		"source_digest": managedCommand.SourceDigest, "runtime": managedCommand.Runtime,
+		"provenance": workflowcatalog.ManagedBuiltinProvenance, "entrypoint": "run",
+	}
+	principal, err := module.issuer.DeriveVerifiedPrincipal(authority.PrincipalClaims{
+		Subject: "builtin-distribution", Class: authority.ClassSystem, Workspace: "TEST",
+		Actions:   []authority.Action{workflowcatalog.ActionAuthorManagedVersion},
+		ExpiresAt: time.Now().Add(time.Minute),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	systemAuth, err := module.issuer.IssueSystem(
+		principal,
+		"TEST",
+		workflowcatalog.ActionAuthorManagedVersion,
+		"refresh embedded builtin",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	managedResult, err := authoring.AuthorManagedVersion(
+		t.Context(),
+		systemAuth,
+		workflowcatalog.AuthorManagedVersionCommand{
+			AuthorVersionCommand: managedCommand,
+			Activate:             true,
+		},
+	)
+	if err != nil {
+		t.Fatalf("AuthorManagedVersion: %v", err)
+	}
+	if managedResult.Version.CreatedBy != "builtin-distribution" ||
+		managedResult.Version.Manifest[workflowcatalog.ManifestTrustLevelKey] != string(workflowcatalog.DriverTrustTrusted) ||
+		!managedResult.Activated {
+		t.Fatalf("managed result = %+v", managedResult)
+	}
+
+	calls := fleet.Calls()
+	if len(calls) != 2 ||
+		!strings.Contains(calls[0], "/drivers/demo/versions/author") ||
+		!strings.Contains(calls[1], "/drivers/epic-runner/versions/author-managed") {
+		t.Fatalf("FleetDB authoring calls = %v", calls)
 	}
 }
 
@@ -488,6 +626,10 @@ func (s *catalogFleetStub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch {
+	case r.Method == http.MethodPost &&
+		(r.URL.Path == "/api/v1/TEST/drivers/demo/versions/author" ||
+			r.URL.Path == "/api/v1/TEST/drivers/epic-runner/versions/author-managed"):
+		s.serveAuthorVersion(w, r)
 	case r.Method == http.MethodGet && r.URL.Path == "/api/v1/TEST/drivers/demo":
 		writeCatalogFleetJSON(w, driver)
 	case r.Method == http.MethodGet && r.URL.Path == "/api/v1/TEST/driver-versions/v1":
@@ -517,6 +659,72 @@ func (s *catalogFleetStub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.t.Errorf("unexpected FleetDB request: %s %s", r.Method, r.URL.RequestURI())
 		http.NotFound(w, r)
 	}
+}
+
+func (s *catalogFleetStub) serveAuthorVersion(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		RequestID        string            `json:"request_id"`
+		ExpectedRevision uint64            `json:"expected_revision"`
+		DriverName       string            `json:"driver_name"`
+		VersionID        string            `json:"version_id"`
+		SourceRef        string            `json:"source_ref"`
+		SourceDigest     string            `json:"source_digest"`
+		BundleRef        string            `json:"bundle_ref"`
+		BundleDigest     string            `json:"bundle_digest"`
+		Runtime          string            `json:"runtime"`
+		Manifest         map[string]string `json:"manifest"`
+		BuildDiagnostics string            `json:"build_diagnostics"`
+		Activate         bool              `json:"activate"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		s.t.Errorf("decode author-version request: %v", err)
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	managed := strings.HasSuffix(r.URL.Path, "/author-managed")
+	if body.RequestID == "" || body.VersionID == "" || body.DriverName == "" ||
+		body.Activate != managed {
+		s.t.Errorf("author-version body = %+v, managed=%v", body, managed)
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	actor := r.Header.Get(infrafleetdb.FleetDelegatedActorHeader)
+	if actor == "" {
+		s.t.Error("author-version request missing delegated actor")
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	driverID := "demo"
+	trust := workflowcatalog.DriverTrustUntrusted
+	ownerType := workflowcatalog.DriverOwnerUser
+	status := workflowcatalog.DriverStatusDraft
+	activeVersionID := ""
+	if managed {
+		driverID = workflowcatalog.BuiltinEpicRunnerWorkflowName
+		trust = workflowcatalog.DriverTrustTrusted
+		ownerType = workflowcatalog.DriverOwnerSystem
+		status = workflowcatalog.DriverStatusActive
+		activeVersionID = body.VersionID
+	}
+	manifest := cloneWorkflowCatalogBridgeMap(body.Manifest)
+	manifest[workflowcatalog.ManifestTrustLevelKey] = string(trust)
+	writeCatalogFleetJSON(w, infrafleetdb.WorkflowCatalogAuthorVersionResult{
+		Driver: &workflowcatalog.Driver{
+			WorkspaceKey: "TEST", DriverID: driverID, Name: body.DriverName,
+			OwnerType: ownerType, Status: status, ActiveVersionID: activeVersionID,
+			TrustLevel: trust, Revision: body.ExpectedRevision + 1,
+		},
+		Version: &workflowcatalog.DriverVersion{
+			WorkspaceKey: "TEST", DriverID: driverID, VersionID: body.VersionID,
+			Version: 1, SourceRef: body.SourceRef, SourceDigest: body.SourceDigest,
+			BundleRef: body.BundleRef, BundleDigest: body.BundleDigest,
+			Runtime: body.Runtime, Manifest: manifest, BuildDiagnostics: body.BuildDiagnostics,
+			ValidationStatus: workflowcatalog.DriverVersionValidationPassed, CreatedBy: actor,
+		},
+		CreatedDriver: true, CreatedVersion: true, Activated: body.Activate,
+		CommittedRevision: body.ExpectedRevision + 1,
+		SemanticImpact:    workflowcatalog.SemanticImpactVersionAuthored,
+	})
 }
 
 func (s *catalogFleetStub) Calls() []string {

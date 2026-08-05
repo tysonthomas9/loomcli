@@ -139,7 +139,7 @@ func TestAppendRoleEnv_ReadOnlyRoleConfigIsAuthoritative(t *testing.T) {
 	})
 }
 
-func TestAppendSessionEnvConcurrentLeaseAccess(t *testing.T) {
+func TestAppendSessionEnvConcurrentIPCAuthAccess(t *testing.T) {
 	ap := &AgentProcess{}
 
 	var wg sync.WaitGroup
@@ -149,8 +149,7 @@ func TestAppendSessionEnvConcurrentLeaseAccess(t *testing.T) {
 		defer wg.Done()
 		for i := 0; i < 10000; i++ {
 			ap.Mu.Lock()
-			ap.AgentLeaseID = fmt.Sprintf("lease-%d", i)
-			ap.AgentLeaseToken = fmt.Sprintf("token-%d", i)
+			ap.AgentIPCAuthToken = fmt.Sprintf("token-%d", i)
 			ap.Mu.Unlock()
 			runtime.Gosched()
 		}

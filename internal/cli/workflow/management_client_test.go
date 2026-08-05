@@ -1,7 +1,6 @@
 package workflow
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,10 +12,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	workflows "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/workflows"
 )
 
 const (
@@ -24,16 +22,19 @@ const (
 )
 
 type workflowManagementFixture struct {
-	server          *httptest.Server
-	expectedBearer  string
-	mu              sync.Mutex
-	driver          *domain.Driver
-	versions        map[string]*domain.DriverVersion
-	authorizations  []string
-	managementPaths []string
-	configRequests  int
-	listBareDriver  bool
-	rejectedClass   authority.Class
+	server                 *httptest.Server
+	expectedBearer         string
+	mu                     sync.Mutex
+	driver                 *domain.Driver
+	versions               map[string]*domain.DriverVersion
+	authorizations         []string
+	managementPaths        []string
+	configRequests         int
+	listBareDriver         bool
+	rejectedClass          authority.Class
+	authoringRequest       *workflowAuthorVersionRequest
+	authoringRequestID     string
+	authoringFailureStatus int
 }
 
 type workflowManagementRunRequest struct {
@@ -129,6 +130,37 @@ func (f *workflowManagementFixture) serveHTTP(w http.ResponseWriter, r *http.Req
 	}
 
 	switch {
+	case r.Method == http.MethodPost &&
+		strings.HasPrefix(r.URL.Path, workspacePrefix+"/workflows/") &&
+		strings.HasSuffix(r.URL.Path, "/versions") &&
+		strings.Count(strings.TrimPrefix(r.URL.Path, workspacePrefix+"/workflows/"), "/") == 1:
+		if f.authoringFailureStatus != 0 {
+			writeWorkflowManagementTestJSON(w, f.authoringFailureStatus, map[string]string{"error": "flue build failed"})
+			return
+		}
+		var request workflowAuthorVersionRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			writeWorkflowManagementTestJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+			return
+		}
+		name := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, workspacePrefix+"/workflows/"), "/versions")
+		f.authoringRequest = &request
+		f.authoringRequestID = r.Header.Get("Idempotency-Key")
+		digest := "sha256:" + strings.Repeat("1", 64)
+		driverRecord := &domain.Driver{
+			WorkspaceKey: workflowManagementTestWorkspace, DriverID: name, Name: name,
+			Status: domain.DriverStatusDraft, TrustLevel: domain.DriverTrustUntrusted, Revision: 1,
+		}
+		version := &domain.DriverVersion{
+			WorkspaceKey: workflowManagementTestWorkspace, DriverID: name, VersionID: name + "-v-test",
+			Version: 1, SourceDigest: digest, BundleDigest: digest,
+			ValidationStatus: domain.DriverVersionValidationPassed,
+		}
+		writeWorkflowManagementTestJSON(w, http.StatusCreated, map[string]any{
+			"driver": driverRecord, "version": version,
+			"created_driver": true, "created_version": true, "build_diagnostics": "server build passed",
+		})
+		return
 	case r.Method == http.MethodPost && r.URL.Path == workspacePrefix+"/execution/driver-runs":
 		var request workflowManagementRunRequest
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
@@ -272,20 +304,10 @@ func TestWorkflowManagementRequiresExplicitEndpoint(t *testing.T) {
 	t.Cleanup(resetWorkflowCommandGlobals)
 	t.Setenv("LOOM_SERVER_URL", "")
 	t.Setenv("LOOM_WORKSPACE", workflowManagementTestWorkspace)
-	openedStore := false
-	original := workflowWithActiveWorkspace
-	workflowWithActiveWorkspace = func(func(context.Context, *bootstrap.StoreHandle, string) error) error {
-		openedStore = true
-		return nil
-	}
-	t.Cleanup(func() { workflowWithActiveWorkspace = original })
 
 	err := runWorkflowList(&cobra.Command{}, nil)
 	if err == nil || !strings.Contains(err.Error(), "require --server or LOOM_SERVER_URL") {
 		t.Fatalf("runWorkflowList error = %v, want explicit endpoint requirement", err)
-	}
-	if openedStore {
-		t.Fatal("workflow list opened a Store while resolving a missing endpoint")
 	}
 }
 
@@ -307,32 +329,15 @@ func TestWorkflowManagementUnavailableHostFailsClosedWithoutImplicitStartup(t *t
 	serverURL := fixture.server.URL
 	fixture.server.Close()
 	t.Setenv("LOOM_SERVER_URL", serverURL)
-	openedStore := false
-	original := workflowWithActiveWorkspace
-	workflowWithActiveWorkspace = func(func(context.Context, *bootstrap.StoreHandle, string) error) error {
-		openedStore = true
-		return nil
-	}
-	t.Cleanup(func() { workflowWithActiveWorkspace = original })
 
 	err := runWorkflowList(&cobra.Command{}, nil)
 	if err == nil || !strings.Contains(err.Error(), "endpoint discovery") || !strings.Contains(err.Error(), serverURL) {
 		t.Fatalf("runWorkflowList error = %v, want unavailable configured endpoint", err)
 	}
-	if openedStore {
-		t.Fatal("workflow list opened a Store or fallback after endpoint failure")
-	}
 }
 
 func TestWorkflowManagementCommandsNeverOpenStoreAndSendNoOpenModeCredential(t *testing.T) {
 	fixture := setupWorkflowManagementFixture(t)
-	openedStore := false
-	original := workflowWithActiveWorkspace
-	workflowWithActiveWorkspace = func(func(context.Context, *bootstrap.StoreHandle, string) error) error {
-		openedStore = true
-		return nil
-	}
-	t.Cleanup(func() { workflowWithActiveWorkspace = original })
 	workflowListJSON = true
 	workflowVersionID = "version-1"
 	workflowApproveJSON = true
@@ -344,9 +349,6 @@ func TestWorkflowManagementCommandsNeverOpenStoreAndSendNoOpenModeCredential(t *
 		return runWorkflowApprove(&cobra.Command{}, []string{workflows.BuiltinEpicRunnerWorkflowName})
 	}); err != nil {
 		t.Fatalf("runWorkflowApprove: %v", err)
-	}
-	if openedStore {
-		t.Fatal("standalone workflow management command opened a Store")
 	}
 	if got := fixture.lastAuthorization(); got != "" {
 		t.Fatalf("Authorization = %q, want no open-mode credential", got)

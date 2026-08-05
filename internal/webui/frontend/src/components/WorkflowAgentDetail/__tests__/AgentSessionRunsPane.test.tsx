@@ -207,6 +207,33 @@ describe("AgentSessionRunsPane", () => {
     expect(onOpenTask).not.toHaveBeenCalled();
   });
 
+  it("uses a normalized task identity for history links and their callback", () => {
+    const onOpenTask = vi.fn();
+    mocks.useAgentHistory.mockReturnValue({
+      runs: [],
+      sessions: [historySession("session-1", " TASK-1 ")],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    render(
+      <AgentSessionRunsPane
+        workspaceId="WS"
+        agentName="coder"
+        onOpenTask={onOpenTask}
+      />,
+    );
+
+    const taskLinks = screen.getAllByRole("link", { name: "TASK-1" });
+    expect(taskLinks).toHaveLength(2);
+    for (const taskLink of taskLinks) {
+      expect(taskLink).toHaveAttribute("href", "/ws/WS/issues/TASK-1");
+    }
+    fireEvent.click(taskLinks[0]!);
+    expect(onOpenTask).toHaveBeenCalledWith("TASK-1");
+  });
+
   it("retries projected transcript evidence when only the durable session exists", () => {
     const only = historySession("session-1", "TASK-1");
     mocks.useAgentHistory.mockReturnValue({
@@ -233,6 +260,70 @@ describe("AgentSessionRunsPane", () => {
     );
   });
 
+  it("keeps transcript detail mounted when task-session metadata fails", () => {
+    const only = historySession("session-1", "TASK-1");
+    mocks.useAgentHistory.mockReturnValue({
+      runs: [],
+      sessions: [only],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    mocks.useTaskSessions.mockReturnValue({
+      sessions: [],
+      isLoading: false,
+      error: new Error("FleetDB unavailable"),
+      refetch: vi.fn(),
+    });
+
+    render(<AgentSessionRunsPane workspaceId="WS" agentName="coder" />);
+
+    expect(
+      screen.getByTestId("supervised-agent-session-metadata-warning"),
+    ).toHaveTextContent(
+      "Task-session metadata is temporarily unavailable. Showing transcript evidence from run history. FleetDB unavailable",
+    );
+    expect(screen.getByTestId("session-run-detail")).toHaveTextContent(
+      "TASK-1:session-1",
+    );
+    expect(screen.getByTestId("session-run-detail")).toHaveAttribute(
+      "data-retry",
+      "true",
+    );
+  });
+
+  it("starts fallback transcript detail while task-session metadata loads", () => {
+    const only = historySession("session-1", "TASK-1");
+    mocks.useAgentHistory.mockReturnValue({
+      runs: [],
+      sessions: [only],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    mocks.useTaskSessions.mockReturnValue({
+      sessions: [],
+      isLoading: true,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    render(<AgentSessionRunsPane workspaceId="WS" agentName="coder" />);
+
+    expect(
+      screen.getByTestId("supervised-agent-session-metadata-loading"),
+    ).toHaveTextContent(
+      "Loading task-session metadata. Showing transcript evidence from run history.",
+    );
+    expect(screen.getByTestId("session-run-detail")).toHaveTextContent(
+      "TASK-1:session-1",
+    );
+    expect(screen.getByTestId("session-run-detail")).toHaveAttribute(
+      "data-retry",
+      "true",
+    );
+  });
+
   it("loads durable transcript evidence for a non-task interactive session", () => {
     mocks.useAgentHistory.mockReturnValue({
       runs: [],
@@ -256,6 +347,61 @@ describe("AgentSessionRunsPane", () => {
       "true",
     );
     expect(mocks.useTaskSessions).toHaveBeenCalledWith(null);
+  });
+
+  it("waits for a task reference instead of using the agent transcript route for a task session", () => {
+    mocks.useAgentHistory.mockReturnValue({
+      runs: [],
+      sessions: [
+        historySession("task-session-without-task", undefined, {
+          kind: "task",
+        }),
+      ],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    render(<AgentSessionRunsPane workspaceId="WS" agentName="coder" />);
+
+    expect(
+      screen.getByTestId("supervised-agent-task-reference-pending"),
+    ).toHaveTextContent("Task reference is still loading");
+    expect(screen.queryByTestId("session-run-detail")).not.toBeInTheDocument();
+    expect(mocks.useTaskSessions).toHaveBeenCalledWith(null);
+  });
+
+  it("drops the prior selected session when switching to another agent", () => {
+    mocks.useAgentHistory.mockImplementation(
+      (_workspaceId: string, agentName: string) => ({
+        runs: [],
+        sessions:
+          agentName === "agent-one"
+            ? [historySession("one-session", "TASK-ONE")]
+            : [
+                {
+                  ...historySession("two-session", "TASK-TWO"),
+                  agent_id: "agent-two",
+                },
+              ],
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      }),
+    );
+
+    const { rerender } = render(
+      <AgentSessionRunsPane workspaceId="WS" agentName="agent-one" />,
+    );
+    expect(screen.getByTestId("session-run-detail")).toHaveTextContent(
+      "TASK-ONE:one-session",
+    );
+
+    rerender(<AgentSessionRunsPane workspaceId="WS" agentName="agent-two" />);
+
+    expect(screen.getByTestId("session-run-detail")).toHaveTextContent(
+      "TASK-TWO:two-session",
+    );
   });
 
   it("keeps yielded sessions active and does not treat progress summaries as errors", () => {

@@ -45,9 +45,10 @@ func TestCreateDriverRunUsesActivePassedVersion(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Create version 2: %v", err)
 	}
-	activeVersion := "version-1"
-	activeStatus := domain.DriverStatusActive
-	if _, err := st.Drivers().Update(ctx, "TEST", "epic-runner", store.DriverUpdate{ActiveVersionID: &activeVersion, Status: &activeStatus}); err != nil {
+	if _, err := st.ApproveDriverVersionForTest(ctx, "TEST", "epic-runner", "version-1"); err != nil {
+		t.Fatalf("Approve driver: %v", err)
+	}
+	if _, err := st.ActivateDriverVersionForTest(ctx, "TEST", "epic-runner", "version-1"); err != nil {
 		t.Fatalf("Activate driver: %v", err)
 	}
 
@@ -114,8 +115,10 @@ func TestCreateDriverRunCanPinNonActivePreviewVersion(t *testing.T) {
 			t.Fatalf("Create version %s: %v", in.VersionID, err)
 		}
 	}
-	activeVersion := "version-active"
-	if _, err := st.Drivers().Update(ctx, "TEST", "epic-runner", store.DriverUpdate{ActiveVersionID: &activeVersion}); err != nil {
+	if _, err := st.ApproveDriverVersionForTest(ctx, "TEST", "epic-runner", "version-active"); err != nil {
+		t.Fatalf("Approve driver: %v", err)
+	}
+	if _, err := st.ActivateDriverVersionForTest(ctx, "TEST", "epic-runner", "version-active"); err != nil {
 		t.Fatalf("Activate driver: %v", err)
 	}
 
@@ -173,9 +176,7 @@ func TestVersionScopedApprovalDoesNotTrustSiblingVersions(t *testing.T) {
 	if got := DriverVersionEffectiveTrust(driver, custom1); got != domain.DriverTrustUntrusted {
 		t.Fatalf("custom1 trust before approval = %q, want untrusted", got)
 	}
-	approvedMetadata := cloneStringMap(driver.Metadata)
-	approvedMetadata[ApprovedVersionMetadataKey(custom1.VersionID)] = custom1.SourceDigest
-	driver, err = st.Drivers().Update(ctx, "TEST", "epic-runner", store.DriverUpdate{Metadata: &approvedMetadata})
+	driver, err = st.ApproveDriverVersionForTest(ctx, "TEST", "epic-runner", custom1.VersionID)
 	if err != nil {
 		t.Fatalf("approve test fixture version: %v", err)
 	}
@@ -185,7 +186,7 @@ func TestVersionScopedApprovalDoesNotTrustSiblingVersions(t *testing.T) {
 	if got := DriverVersionEffectiveTrust(driver, custom2); got != domain.DriverTrustUntrusted {
 		t.Fatalf("custom2 trust inherited from custom1 approval = %q, want untrusted", got)
 	}
-	driver, _, err = ActivateDriverVersion(ctx, st.Drivers(), st.DriverVersions(), "TEST", "epic-runner", "version-custom-2")
+	driver, _, err = ActivateDriverVersion(ctx, st, "TEST", "epic-runner", "version-custom-2")
 	if err != nil {
 		t.Fatalf("ActivateDriverVersion: %v", err)
 	}
@@ -195,9 +196,7 @@ func TestVersionScopedApprovalDoesNotTrustSiblingVersions(t *testing.T) {
 	if DriverVersionApproved(driver, custom2) {
 		t.Fatalf("activation implicitly approved version-custom-2")
 	}
-	unapprovedMetadata := cloneStringMap(driver.Metadata)
-	delete(unapprovedMetadata, ApprovedVersionMetadataKey(custom1.VersionID))
-	driver, err = st.Drivers().Update(ctx, "TEST", "epic-runner", store.DriverUpdate{Metadata: &unapprovedMetadata})
+	driver, err = st.UnapproveDriverVersionForTest(ctx, "TEST", "epic-runner", custom1.VersionID)
 	if err != nil {
 		t.Fatalf("unapprove test fixture version: %v", err)
 	}

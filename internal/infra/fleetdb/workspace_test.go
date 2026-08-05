@@ -25,7 +25,7 @@ func newWorkspaceHTTPClient(handler http.HandlerFunc) *http.Client {
 	})}
 }
 
-func TestWorkspaceStoreCreateOmitsUnsupportedFleetDBFields(t *testing.T) {
+func TestWorkspaceStoreCreatePersistsLifecycleFields(t *testing.T) {
 	now := time.Now().UTC()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/admin/workspaces" {
@@ -35,19 +35,20 @@ func TestWorkspaceStoreCreateOmitsUnsupportedFleetDBFields(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("decode body: %v", err)
 		}
-		if _, ok := body["default_branch"]; ok {
-			t.Fatalf("create body must not include default_branch: %+v", body)
-		}
-		if body["key"] != "LOCALMODE" || body["name"] != "Local Mode" || body["description"] != "dogfood" {
+		if body["key"] != "LOCALMODE" ||
+			body["name"] != "Local Mode" ||
+			body["description"] != "dogfood" ||
+			body["default_branch"] != "localmode" {
 			t.Fatalf("create body = %+v", body)
 		}
 		w.WriteHeader(http.StatusCreated)
 		writeJSON(t, w, domain.Workspace{
-			Key:         "LOCALMODE",
-			Name:        "Local Mode",
-			Description: "dogfood",
-			CreatedAt:   now,
-			UpdatedAt:   now,
+			Key:           "LOCALMODE",
+			Name:          "Local Mode",
+			Description:   "dogfood",
+			DefaultBranch: "localmode",
+			CreatedAt:     now,
+			UpdatedAt:     now,
 		})
 	}))
 	defer ts.Close()
@@ -85,8 +86,13 @@ func TestWorkspaceStoreUpdateSendsSupportedFleetDBFields(t *testing.T) {
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				t.Fatalf("decode patch: %v", err)
 			}
-			if len(body) != 1 || body["name"] != "Renamed" {
-				t.Fatalf("patch body = %+v, want name only", body)
+			if len(body) != 5 ||
+				body["name"] != "Renamed" ||
+				body["description"] != description ||
+				body["default_branch"] != defaultBranch ||
+				body["state"] != string(state) ||
+				body["error_message"] != errorMessage {
+				t.Fatalf("patch body = %+v, want all lifecycle fields", body)
 			}
 			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/admin/workspaces/LOCALMODE":
@@ -322,7 +328,7 @@ func TestWorkspaceStoreUpdateSendsNameAndDesignFormat(t *testing.T) {
 	}
 }
 
-func TestWorkspaceStoreUpdateUnsupportedFieldsOnlySkipsFleetDBPatch(t *testing.T) {
+func TestWorkspaceStoreUpdatePersistsLifecycleFields(t *testing.T) {
 	now := time.Now().UTC()
 	state := domain.WorkspaceStateReady
 	description := "desc"
@@ -330,9 +336,27 @@ func TestWorkspaceStoreUpdateUnsupportedFieldsOnlySkipsFleetDBPatch(t *testing.T
 	httpClient := newWorkspaceHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/admin/workspaces/LOCALMODE":
-			t.Fatalf("update with only unsupported fields must not PATCH")
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode patch: %v", err)
+			}
+			if len(body) != 3 ||
+				body["state"] != string(state) ||
+				body["description"] != description ||
+				body["default_branch"] != defaultBranch {
+				t.Fatalf("patch body = %+v, want lifecycle fields", body)
+			}
+			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/admin/workspaces/LOCALMODE":
-			writeJSON(t, w, domain.Workspace{Key: "LOCALMODE", Name: "Local Mode", CreatedAt: now, UpdatedAt: now})
+			writeJSON(t, w, domain.Workspace{
+				Key:           "LOCALMODE",
+				Name:          "Local Mode",
+				State:         state,
+				Description:   description,
+				DefaultBranch: defaultBranch,
+				CreatedAt:     now,
+				UpdatedAt:     now,
+			})
 		default:
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
 		}
@@ -350,8 +374,8 @@ func TestWorkspaceStoreUpdateUnsupportedFieldsOnlySkipsFleetDBPatch(t *testing.T
 	if err != nil {
 		t.Fatalf("update workspace: %v", err)
 	}
-	if ws.Key != "LOCALMODE" {
-		t.Fatalf("Key = %q, want LOCALMODE", ws.Key)
+	if ws.State != state || ws.Description != description || ws.DefaultBranch != defaultBranch {
+		t.Fatalf("workspace fields = %+v, want persisted lifecycle fields", ws)
 	}
 }
 
@@ -383,13 +407,20 @@ func TestWorkspaceStoreGetDecodesDesignFormat(t *testing.T) {
 	}
 }
 
-func TestWorkspaceStoreUpdateStateOnlySkipsUnsupportedFleetDBPatch(t *testing.T) {
+func TestWorkspaceStoreUpdateStateOnlyPersistsState(t *testing.T) {
 	now := time.Now().UTC()
 	state := domain.WorkspaceStateReady
 	httpClient := newWorkspaceHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/admin/workspaces/LOCALMODE":
-			t.Fatalf("state-only update must not PATCH unsupported fleet-db fields")
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode patch: %v", err)
+			}
+			if len(body) != 1 || body["state"] != string(state) {
+				t.Fatalf("patch body = %+v, want state only", body)
+			}
+			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/admin/workspaces/LOCALMODE":
 			writeJSON(t, w, domain.Workspace{Key: "LOCALMODE", Name: "Local Mode", State: state, CreatedAt: now, UpdatedAt: now})
 		default:

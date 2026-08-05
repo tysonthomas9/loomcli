@@ -3,6 +3,7 @@ package daemon
 import (
 	"bufio"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,17 +15,15 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
 // AgentIPCRequest is sent by an agent subprocess to the daemon IPC socket.
 type AgentIPCRequest struct {
-	Operation      string          `json:"operation"`                  // "claim", "update", "complete", "heartbeat", "release_claim"
+	Operation      string          `json:"operation"`                  // authenticated task query or mutation operation
 	AgentName      string          `json:"agent_name"`                 // LOOM_AGENT_NAME identity (required)
 	IssueID        string          `json:"issue_id"`                   // target issue (required except for "heartbeat")
-	SessionID      string          `json:"session_id,omitempty"`       // fleet-db AgentSession id
-	LeaseID        string          `json:"lease_id,omitempty"`         // fleet-db AgentLease id
-	LeaseToken     string          `json:"lease_token,omitempty"`      // fleet-db AgentLease token
+	SessionID      string          `json:"session_id,omitempty"`       // supervisor-local transcript session id
+	AuthToken      string          `json:"auth_token,omitempty"`       //nolint:gosec // G117: process-local credential must cross the daemon IPC wire.
 	Args           json.RawMessage `json:"args,omitempty"`             // operation-specific params
 	LastActivityAt time.Time       `json:"last_activity_at,omitempty"` // most recent wrapper PTY-output observation; piggybacked on every op
 }
@@ -40,6 +39,11 @@ type AgentIPCResponse struct {
 // Operation name constants for agent IPC.
 // These string values must stay in sync with the cli package's IPCOp* constants.
 const (
+	ipcOpGet          = "get"
+	ipcOpList         = "list"
+	ipcOpReady        = "ready"
+	ipcOpBlocked      = "blocked"
+	ipcOpAddComment   = "add_comment"
 	ipcOpClaim        = "claim"
 	ipcOpUpdate       = "update"
 	ipcOpComplete     = "complete"
@@ -134,8 +138,8 @@ func (d *Daemon) handleIPCConnection(conn net.Conn) {
 }
 
 // validateIPCRequest checks required fields. Returns (response, false) on failure.
-// Heartbeat requests are exempt from the IssueID requirement: the daemon
-// updates per-agent liveness by name, not by issue.
+// Workspace-scoped list views and heartbeat requests are exempt from the
+// IssueID requirement.
 func validateIPCRequest(req AgentIPCRequest) (AgentIPCResponse, bool) {
 	if req.AgentName == "" {
 		return AgentIPCResponse{
@@ -143,13 +147,22 @@ func validateIPCRequest(req AgentIPCRequest) (AgentIPCResponse, bool) {
 			Kind:  string(backend.KindValidation),
 		}, false
 	}
-	if req.Operation != ipcOpHeartbeat && req.IssueID == "" {
+	if ipcOperationRequiresIssueID(req.Operation) && req.IssueID == "" {
 		return AgentIPCResponse{
 			Error: "issue_id is required",
 			Kind:  string(backend.KindValidation),
 		}, false
 	}
 	return AgentIPCResponse{}, true
+}
+
+func ipcOperationRequiresIssueID(operation string) bool {
+	switch operation {
+	case ipcOpHeartbeat, ipcOpList, ipcOpReady, ipcOpBlocked:
+		return false
+	default:
+		return true
+	}
 }
 
 // dispatchIPCOperation routes to the appropriate handler based on operation.
@@ -163,7 +176,8 @@ func validateIPCRequest(req AgentIPCRequest) (AgentIPCResponse, bool) {
 // can thread it through to inherit the span as parent.
 func (d *Daemon) dispatchIPCOperation(req AgentIPCRequest) AgentIPCResponse {
 	switch req.Operation {
-	case ipcOpClaim, ipcOpUpdate, ipcOpComplete, ipcOpHeartbeat, ipcOpReleaseLock, ipcOpReleaseClaim:
+	case ipcOpGet, ipcOpList, ipcOpReady, ipcOpBlocked, ipcOpAddComment,
+		ipcOpClaim, ipcOpUpdate, ipcOpComplete, ipcOpHeartbeat, ipcOpReleaseLock, ipcOpReleaseClaim:
 		// known method — fall through to traced dispatch below
 	default:
 		return AgentIPCResponse{Error: fmt.Sprintf("unknown operation: %q", req.Operation)}
@@ -175,6 +189,16 @@ func (d *Daemon) dispatchIPCOperation(req AgentIPCRequest) AgentIPCResponse {
 
 	var resp AgentIPCResponse
 	switch req.Operation {
+	case ipcOpGet:
+		resp = d.handleIPCGet(req)
+	case ipcOpList:
+		resp = d.handleIPCList(req)
+	case ipcOpReady:
+		resp = d.handleIPCReady(req)
+	case ipcOpBlocked:
+		resp = d.handleIPCBlocked(req)
+	case ipcOpAddComment:
+		resp = d.handleIPCAddComment(req)
 	case ipcOpClaim:
 		resp = d.handleIPCClaim(req)
 	case ipcOpUpdate:
@@ -199,6 +223,120 @@ func (d *Daemon) dispatchIPCOperation(req AgentIPCRequest) AgentIPCResponse {
 	return resp
 }
 
+func (d *Daemon) handleIPCGet(req AgentIPCRequest) AgentIPCResponse {
+	if resp, ok := d.validateIPCSession(req); !ok {
+		return resp
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	result, err := d.issueBackend.Get(ctx, req.IssueID)
+	if err != nil {
+		return ipcErrorResponse(err)
+	}
+	return marshalIPCResult(result)
+}
+
+func (d *Daemon) handleIPCList(req AgentIPCRequest) AgentIPCResponse {
+	var opts backend.ListOpts
+	if resp, ok := decodeIPCArgs(req.Args, &opts); !ok {
+		return resp
+	}
+	if resp, ok := d.validateIPCSession(req); !ok {
+		return resp
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	result, err := d.issueBackend.List(ctx, opts)
+	if err != nil {
+		return ipcErrorResponse(err)
+	}
+	return marshalIPCResult(result)
+}
+
+func (d *Daemon) handleIPCReady(req AgentIPCRequest) AgentIPCResponse {
+	var opts backend.ReadyOpts
+	if resp, ok := decodeIPCArgs(req.Args, &opts); !ok {
+		return resp
+	}
+	if resp, ok := d.validateIPCSession(req); !ok {
+		return resp
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	result, err := d.issueBackend.Ready(ctx, opts)
+	if err != nil {
+		return ipcErrorResponse(err)
+	}
+	return marshalIPCResult(result)
+}
+
+func (d *Daemon) handleIPCBlocked(req AgentIPCRequest) AgentIPCResponse {
+	var opts backend.BlockedOpts
+	if resp, ok := decodeIPCArgs(req.Args, &opts); !ok {
+		return resp
+	}
+	if resp, ok := d.validateIPCSession(req); !ok {
+		return resp
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	result, err := d.issueBackend.Blocked(ctx, opts)
+	if err != nil {
+		return ipcErrorResponse(err)
+	}
+	return marshalIPCResult(result)
+}
+
+func (d *Daemon) handleIPCAddComment(req AgentIPCRequest) AgentIPCResponse {
+	var params backend.CommentAddParams
+	if resp, ok := decodeIPCArgs(req.Args, &params); !ok {
+		return resp
+	}
+	if params.IssueID != req.IssueID {
+		return AgentIPCResponse{
+			Error: "comment issue_id must match request issue_id",
+			Kind:  string(backend.KindValidation),
+		}
+	}
+	if resp, ok := d.validateIPCSession(req); !ok {
+		return resp
+	}
+	// The actor is the authenticated daemon session, never caller-controlled
+	// comment JSON.
+	params.Author = req.AgentName
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	result, err := d.issueBackend.AddComment(ctx, params)
+	if err != nil {
+		return ipcErrorResponse(err)
+	}
+	return marshalIPCResult(result)
+}
+
+func decodeIPCArgs(raw json.RawMessage, target any) (AgentIPCResponse, bool) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return AgentIPCResponse{}, true
+	}
+	if err := json.Unmarshal(raw, target); err != nil {
+		return AgentIPCResponse{
+			Error: "invalid operation args: " + err.Error(),
+			Kind:  string(backend.KindValidation),
+		}, false
+	}
+	return AgentIPCResponse{}, true
+}
+
+func marshalIPCResult(result any) AgentIPCResponse {
+	data, err := json.Marshal(result)
+	if err != nil {
+		return AgentIPCResponse{
+			Error: "failed to marshal operation result: " + err.Error(),
+			Kind:  string(backend.KindInternal),
+		}
+	}
+	return AgentIPCResponse{Success: true, Data: data}
+}
+
 // recordIPCActivity forwards req.LastActivityAt to the supervisor's per-agent
 // liveness sink. No-op when the timestamp is zero or the supervisor is unset.
 func (d *Daemon) recordIPCActivity(req AgentIPCRequest) {
@@ -210,12 +348,11 @@ func (d *Daemon) recordIPCActivity(req AgentIPCRequest) {
 
 // handleIPCHeartbeat handles the "heartbeat" operation. Its only side
 // effect is updating per-agent liveness via recordIPCActivity (called
-// from dispatchIPCOperation on Success). It does still validate the
-// lease so unauthenticated callers can't poke at agent state.
+// from dispatchIPCOperation on Success). It still validates the active
+// subprocess's process-local credential so unauthenticated callers cannot
+// poke at agent state.
 func (d *Daemon) handleIPCHeartbeat(req AgentIPCRequest) AgentIPCResponse {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if resp, ok := d.validateIPCLease(ctx, req); !ok {
+	if resp, ok := d.validateIPCSession(req); !ok {
 		return resp
 	}
 	return AgentIPCResponse{Success: true}
@@ -240,10 +377,18 @@ func (d *Daemon) handleIPCClaim(req AgentIPCRequest) AgentIPCResponse {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if resp, ok := d.validateIPCLease(ctx, req); !ok {
+	if resp, ok := d.validateIPCSession(req); !ok {
 		return resp
 	}
-	if err := d.issueBackend.ClaimIssue(ctx, req.IssueID, lockTTL); err != nil {
+	var err error
+	if actorBackend, ok := d.issueBackend.(interface {
+		ClaimIssueAsActor(context.Context, string, time.Duration, string) error
+	}); ok {
+		err = actorBackend.ClaimIssueAsActor(ctx, req.IssueID, lockTTL, req.AgentName)
+	} else {
+		err = d.issueBackend.ClaimIssue(ctx, req.IssueID, lockTTL)
+	}
+	if err != nil {
 		return ipcErrorResponse(err)
 	}
 
@@ -272,7 +417,7 @@ func (d *Daemon) handleIPCUpdate(req AgentIPCRequest) AgentIPCResponse {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if resp, ok := d.validateIPCLease(ctx, req); !ok {
+	if resp, ok := d.validateIPCSession(req); !ok {
 		return resp
 	}
 	if err := d.issueBackend.Update(ctx, req.IssueID, params); err != nil {
@@ -303,7 +448,7 @@ func (d *Daemon) handleIPCComplete(req AgentIPCRequest) AgentIPCResponse {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if resp, ok := d.validateIPCLease(ctx, req); !ok {
+	if resp, ok := d.validateIPCSession(req); !ok {
 		return resp
 	}
 	result, err := d.issueBackend.Close(ctx, req.IssueID, params)
@@ -342,7 +487,7 @@ func (d *Daemon) handleIPCReleaseLock(req AgentIPCRequest) AgentIPCResponse {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if resp, ok := d.validateIPCLease(ctx, req); !ok {
+	if resp, ok := d.validateIPCSession(req); !ok {
 		return resp
 	}
 	if err := d.issueBackend.ReleaseIssueLock(ctx, req.IssueID, req.AgentName); err != nil {
@@ -352,15 +497,16 @@ func (d *Daemon) handleIPCReleaseLock(req AgentIPCRequest) AgentIPCResponse {
 }
 
 // handleIPCReleaseClaim handles the "release_claim" operation behind the same
-// lease fence as the other mutations. The daemon supplies the authenticated
-// agent name as the release actor; the backend must not derive the actor from
-// mutable issue state. Backends without an explicit claim lock (non-fleet)
-// report success without acting — release is a no-op there.
+// active-subprocess credential check as the other mutations. The daemon
+// supplies the authenticated agent name as the release actor; the backend
+// must not derive the actor from mutable issue state. Backends without an
+// explicit claim lock (non-fleet) report success without acting — release is a
+// no-op there.
 func (d *Daemon) handleIPCReleaseClaim(req AgentIPCRequest) AgentIPCResponse {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if resp, ok := d.validateIPCLease(ctx, req); !ok {
+	if resp, ok := d.validateIPCSession(req); !ok {
 		return resp
 	}
 	releaser, ok := d.issueBackend.(backend.ClaimReleaser)
@@ -377,69 +523,41 @@ func (d *Daemon) handleIPCReleaseClaim(req AgentIPCRequest) AgentIPCResponse {
 	return AgentIPCResponse{Success: true}
 }
 
-func (d *Daemon) validateIPCLease(ctx context.Context, req AgentIPCRequest) (AgentIPCResponse, bool) {
-	if d.store == nil || d.sup == nil || d.sup.WorkspaceID == "" {
+func (d *Daemon) validateIPCSession(req AgentIPCRequest) (AgentIPCResponse, bool) {
+	if d.sup == nil || d.sup.WorkspaceID == "" {
 		return AgentIPCResponse{}, true
 	}
-	if req.SessionID == "" || req.LeaseID == "" || req.LeaseToken == "" {
+	if req.SessionID == "" || req.AuthToken == "" {
 		return AgentIPCResponse{
-			Error: "session_id, lease_id, and lease_token are required for fenced daemon IPC mutations",
+			Error: "session_id and auth_token are required for fenced daemon IPC operations",
 			Kind:  string(backend.KindValidation),
 		}, false
 	}
-	// 30-minute TTL matches the supervisor's defaultLeaseTTL so a single
-	// IPC mutation extends the lease past a typical real-codex turn.
-	lease, err := d.store.AgentLeases().Heartbeat(ctx, d.sup.WorkspaceID, req.LeaseID, req.LeaseToken, 30*time.Minute)
-	if err != nil {
-		if errors.Is(err, domain.ErrAlreadyExists) || errors.Is(err, domain.ErrGone) {
-			slog.Warn("agent lease heartbeat returned already-exists/gone; verifying via get",
-				"workspace", d.sup.WorkspaceID,
-				"lease_id", req.LeaseID,
-				"err", err,
-			)
-			verified, getErr := d.store.AgentLeases().Get(ctx, d.sup.WorkspaceID, req.LeaseID)
-			if getErr != nil {
-				return ipcErrorResponse(getErr), false
-			}
-			return validateLeaseRecord(verified, req)
-		}
-		return ipcErrorResponse(err), false
-	}
-	return validateLeaseRecord(lease, req)
-}
 
-func validateLeaseRecord(lease *domain.AgentLease, req AgentIPCRequest) (AgentIPCResponse, bool) {
-	if lease == nil {
-		return AgentIPCResponse{
-			Error: "lease not found",
-			Kind:  string(backend.KindConflict),
-		}, false
+	d.sup.AgentsMu.RLock()
+	agents := append([]*supervisor.AgentProcess(nil), d.sup.Agents...)
+	d.sup.AgentsMu.RUnlock()
+	for _, agent := range agents {
+		if agent == nil || agent.Entry.Worktree != req.AgentName {
+			continue
+		}
+		agent.Mu.Lock()
+		sessionID := agent.AgentSessionID
+		authToken := agent.AgentIPCAuthToken
+		agent.Mu.Unlock()
+		if sessionID != req.SessionID ||
+			subtle.ConstantTimeCompare([]byte(authToken), []byte(req.AuthToken)) != 1 {
+			return AgentIPCResponse{
+				Error: "IPC credential does not match the active agent session",
+				Kind:  string(backend.KindConflict),
+			}, false
+		}
+		return AgentIPCResponse{}, true
 	}
-	if lease.SessionID != req.SessionID || lease.AgentID != req.AgentName {
-		return AgentIPCResponse{
-			Error: "lease does not match IPC session or agent",
-			Kind:  string(backend.KindConflict),
-		}, false
-	}
-	if lease.Token != req.LeaseToken {
-		return AgentIPCResponse{
-			Error: "lease token does not match IPC credentials",
-			Kind:  string(backend.KindConflict),
-		}, false
-	}
-	if lease.Status != domain.AgentLeaseActive {
-		return AgentIPCResponse{
-			Error: "lease is not active",
-			Kind:  string(backend.KindConflict),
-		}, false
-	}
-	if time.Now().After(lease.ExpiresAt) {
-		return AgentIPCResponse{
-			Error: "lease expired",
-			Kind:  string(backend.KindConflict),
-		}, false
-	}
-	return AgentIPCResponse{}, true
+	return AgentIPCResponse{
+		Error: "active agent session not found",
+		Kind:  string(backend.KindConflict),
+	}, false
 }
 
 // ipcErrorResponse converts a backend error into an AgentIPCResponse.
