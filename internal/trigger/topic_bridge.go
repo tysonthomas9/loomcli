@@ -23,7 +23,7 @@ package trigger
 //
 // ORDERING IS HEAD-OF-LINE. Messages are handled in cursor order and the bridge
 // acks only the contiguous successful prefix: a message whose dispatch fails
-// pauses the subscription rather than being skipped, so a topic modelling a
+// pauses the subscription rather than being skipped, so a topic modeling a
 // sequential handoff cannot process step 3 after step 2 failed. A message that
 // keeps failing is retired to the dead-letter log after MaxAttempts (broker-
 // tracked, so the count survives a consumer swap) and the subscription resumes.
@@ -36,7 +36,6 @@ package trigger
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -142,22 +141,10 @@ func (b *TopicBridge) RunOnce(ctx context.Context) (*TopicSweepResult, error) {
 	}
 	out := &TopicSweepResult{}
 
-	if err := b.Consumer.EnsureSubscription(ctx, b.WorkspaceKey, b.Topic, b.Subscriber, b.StartCursor); err != nil {
-		return out, fmt.Errorf("ensure subscription %q on %q: %w", b.Subscriber, b.Topic, err)
+	acquired, err := b.acquireDrain(ctx, out)
+	if err != nil || !acquired {
+		return out, err
 	}
-	token, acquired, err := b.Consumer.AcquireLease(ctx, b.WorkspaceKey, b.Topic, b.Subscriber, b.owner(), b.leaseToken, b.leaseTTL())
-	if err != nil {
-		return out, fmt.Errorf("acquire lease on %q: %w", b.Topic, err)
-	}
-	if !acquired {
-		// Routine contention, not a failure: another consumer owns the drain.
-		b.leaseToken = ""
-		out.LeaseHeldElsewhere = true
-		b.logger().Debug("topic bridge: lease held elsewhere, skipping pass",
-			"workspace", b.WorkspaceKey, "topic", b.Topic, "subscriber", b.Subscriber)
-		return out, nil
-	}
-	b.leaseToken = token
 
 	// The ack CAS guard is the subscription's CURRENT cursor, which the pull
 	// response does not carry (its Cursor is the ack-through target). Read it
@@ -185,33 +172,10 @@ func (b *TopicBridge) RunOnce(ctx context.Context) (*TopicSweepResult, error) {
 	// first means a message that panics the dispatch path still gets retired
 	// rather than being retried forever.
 	if b.MaxAttemptsReached(pull) {
-		reason := fmt.Sprintf("dispatch failed %d times", pull.Attempts)
-		if err := b.Consumer.DeadLetter(ctx, b.WorkspaceKey, b.Topic, b.Subscriber, b.leaseToken, pull.Head, b.maxAttempts(), reason); err != nil {
-			return out, fmt.Errorf("dead-letter head of %q: %w", b.Topic, err)
-		}
-		out.DeadLettered++
-		b.logger().Warn("topic bridge: message retired to dead-letter log",
-			"workspace", b.WorkspaceKey, "topic", b.Topic, "subscriber", b.Subscriber,
-			"cursor", pull.Head, "attempts", pull.Attempts)
-		return out, nil
+		return out, b.retirePoisonHead(ctx, pull, out)
 	}
 
-	// Dispatch in order, remembering the last message whose dispatch succeeded.
-	// A failure stops the batch: acking past it would skip it permanently.
-	ackTo := ""
-	var dispatchErr error
-	for _, msg := range pull.Messages {
-		if ctx.Err() != nil {
-			dispatchErr = ctx.Err()
-			break
-		}
-		if err := b.emit(ctx, msg); err != nil {
-			dispatchErr = err
-			break
-		}
-		out.Emitted++
-		ackTo = msg.Cursor
-	}
+	ackTo, dispatchErr := b.dispatchBatch(ctx, pull.Messages, out)
 
 	if ackTo != "" {
 		if err := b.Consumer.Ack(ctx, b.WorkspaceKey, b.Topic, b.Subscriber, b.leaseToken, from, ackTo); err != nil {
@@ -222,6 +186,62 @@ func (b *TopicBridge) RunOnce(ctx context.Context) (*TopicSweepResult, error) {
 		out.Acked = out.Emitted
 	}
 	return out, dispatchErr
+}
+
+// acquireDrain ensures the subscription exists and takes (or renews) the drain
+// lease. acquired=false with a nil error is the routine "someone else owns the
+// drain" answer, which the caller turns into a quiet no-op pass rather than a
+// failure.
+func (b *TopicBridge) acquireDrain(ctx context.Context, out *TopicSweepResult) (bool, error) {
+	if err := b.Consumer.EnsureSubscription(ctx, b.WorkspaceKey, b.Topic, b.Subscriber, b.StartCursor); err != nil {
+		return false, fmt.Errorf("ensure subscription %q on %q: %w", b.Subscriber, b.Topic, err)
+	}
+	token, acquired, err := b.Consumer.AcquireLease(ctx, b.WorkspaceKey, b.Topic, b.Subscriber, b.owner(), b.leaseToken, b.leaseTTL())
+	if err != nil {
+		return false, fmt.Errorf("acquire lease on %q: %w", b.Topic, err)
+	}
+	if !acquired {
+		b.leaseToken = ""
+		out.LeaseHeldElsewhere = true
+		b.logger().Debug("topic bridge: lease held elsewhere, skipping pass",
+			"workspace", b.WorkspaceKey, "topic", b.Topic, "subscriber", b.Subscriber)
+		return false, nil
+	}
+	b.leaseToken = token
+	return true, nil
+}
+
+// dispatchBatch emits messages in cursor order and reports the cursor of the
+// last one that landed. It stops at the first failure rather than continuing:
+// acking past a failed message would skip it permanently, and a topic modeling
+// a sequential handoff must not process step 3 after step 2 failed.
+func (b *TopicBridge) dispatchBatch(ctx context.Context, msgs []store.TopicMessage, out *TopicSweepResult) (string, error) {
+	ackTo := ""
+	for _, msg := range msgs {
+		if ctx.Err() != nil {
+			return ackTo, ctx.Err()
+		}
+		if err := b.emit(ctx, msg); err != nil {
+			return ackTo, err
+		}
+		out.Emitted++
+		ackTo = msg.Cursor
+	}
+	return ackTo, nil
+}
+
+// retirePoisonHead dead-letters the un-acked head that has exhausted its
+// delivery budget, so the subscription resumes at the message behind it.
+func (b *TopicBridge) retirePoisonHead(ctx context.Context, pull *store.TopicPull, out *TopicSweepResult) error {
+	reason := fmt.Sprintf("dispatch failed %d times", pull.Attempts)
+	if err := b.Consumer.DeadLetter(ctx, b.WorkspaceKey, b.Topic, b.Subscriber, b.leaseToken, pull.Head, b.maxAttempts(), reason); err != nil {
+		return fmt.Errorf("dead-letter head of %q: %w", b.Topic, err)
+	}
+	out.DeadLettered++
+	b.logger().Warn("topic bridge: message retired to dead-letter log",
+		"workspace", b.WorkspaceKey, "topic", b.Topic, "subscriber", b.Subscriber,
+		"cursor", pull.Head, "attempts", pull.Attempts)
+	return nil
 }
 
 // MaxAttemptsReached reports whether the pull's head has exhausted its delivery
@@ -284,7 +304,7 @@ func (b *TopicBridge) toInternalEvent(msg store.TopicMessage) InternalEvent {
 		Origin:       domain.TriggerEventOriginSystem,
 		ActorRef:     strings.TrimSpace(msg.Trace["actor"]),
 		SubjectRef:   subject,
-		Payload:      json.RawMessage(msg.Payload),
+		Payload:      msg.Payload,
 		SubjectAttrs: topicSubjectAttrs(msg),
 	}
 }

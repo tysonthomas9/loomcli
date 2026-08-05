@@ -34,7 +34,7 @@ var (
 )
 
 // leaseTokenHeader carries the drain-lease capability on cursor-mutating ops.
-const leaseTokenHeader = "X-Lease-Token"
+const leaseTokenHeader = "X-Lease-Token" //nolint:gosec // G101: an HTTP header NAME, not a credential (mirrors fleet-db's waiver on the same constant)
 
 // topicMessageWire mirrors fleet-db's MessageResponse (api/pubsub.go).
 type topicMessageWire struct {
@@ -82,7 +82,7 @@ func subscriptionPath(ws, topic, subscriber string, suffix ...string) string {
 // broker collapses a re-publish onto the stored message rather than appending
 // a duplicate, which is what lets a crashed publisher retry safely.
 func (s *triggerEventStore) Publish(ctx context.Context, ws, topic string, msg store.TopicPublish) (*store.TopicMessage, error) {
-	body := map[string]any{"payload": json.RawMessage(msg.Payload)}
+	body := map[string]any{"payload": msg.Payload}
 	if msg.ID != "" {
 		body["id"] = msg.ID
 	}
