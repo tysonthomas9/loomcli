@@ -63,7 +63,13 @@ func TestComputeBackoff(t *testing.T) {
 	s := &Supervisor{ConfigSnapshot: func() *cfgpkg.DaemonConfig { return cfg }, Shutdown: make(chan struct{}), StoppedAgents: make(map[string]struct{}), Agents: make([]*AgentProcess, 0), EmitEvent: func(events.Event) {}}
 
 	t.Run("restartCount=0 returns initial backoff", func(t *testing.T) {
-		ap := &AgentProcess{RestartCount: 0}
+		ap := &AgentProcess{
+			RestartCount: 0,
+			// A crash always classifies (exit != 0 -> ClassifyFromLog), so the
+			// exponential arm is reached with an error attached; a bare nil
+			// error now means clean success and takes the cadence floor.
+			LastError: &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrUnknown)},
+		}
 		backoff := s.computeBackoff(ap)
 
 		// initial * 2^0 = 2 * 1 = 2s
@@ -74,7 +80,13 @@ func TestComputeBackoff(t *testing.T) {
 	})
 
 	t.Run("restartCount=1 returns 4s", func(t *testing.T) {
-		ap := &AgentProcess{RestartCount: 1}
+		ap := &AgentProcess{
+			RestartCount: 1,
+			// A crash always classifies (exit != 0 -> ClassifyFromLog), so the
+			// exponential arm is reached with an error attached; a bare nil
+			// error now means clean success and takes the cadence floor.
+			LastError: &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrUnknown)},
+		}
 		backoff := s.computeBackoff(ap)
 
 		// initial * 2^1 = 2 * 2 = 4s
@@ -85,7 +97,13 @@ func TestComputeBackoff(t *testing.T) {
 	})
 
 	t.Run("restartCount=5 returns 64s", func(t *testing.T) {
-		ap := &AgentProcess{RestartCount: 5}
+		ap := &AgentProcess{
+			RestartCount: 5,
+			// A crash always classifies (exit != 0 -> ClassifyFromLog), so the
+			// exponential arm is reached with an error attached; a bare nil
+			// error now means clean success and takes the cadence floor.
+			LastError: &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrUnknown)},
+		}
 		backoff := s.computeBackoff(ap)
 
 		// initial * 2^5 = 2 * 32 = 64s
@@ -96,7 +114,13 @@ func TestComputeBackoff(t *testing.T) {
 	})
 
 	t.Run("large restartCount is capped at BackoffMax", func(t *testing.T) {
-		ap := &AgentProcess{RestartCount: 20}
+		ap := &AgentProcess{
+			RestartCount: 20,
+			// A crash always classifies (exit != 0 -> ClassifyFromLog), so the
+			// exponential arm is reached with an error attached; a bare nil
+			// error now means clean success and takes the cadence floor.
+			LastError: &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrUnknown)},
+		}
 		backoff := s.computeBackoff(ap)
 
 		// 2 * 2^20 = 2097152s, should be capped at 300s
@@ -107,7 +131,13 @@ func TestComputeBackoff(t *testing.T) {
 	})
 
 	t.Run("restartCount=7 exceeds max and is capped", func(t *testing.T) {
-		ap := &AgentProcess{RestartCount: 7}
+		ap := &AgentProcess{
+			RestartCount: 7,
+			// A crash always classifies (exit != 0 -> ClassifyFromLog), so the
+			// exponential arm is reached with an error attached; a bare nil
+			// error now means clean success and takes the cadence floor.
+			LastError: &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrUnknown)},
+		}
 		backoff := s.computeBackoff(ap)
 
 		// 2 * 2^7 = 256s, which is < 300s, so not capped
@@ -118,7 +148,13 @@ func TestComputeBackoff(t *testing.T) {
 	})
 
 	t.Run("restartCount=8 exceeds max and is capped", func(t *testing.T) {
-		ap := &AgentProcess{RestartCount: 8}
+		ap := &AgentProcess{
+			RestartCount: 8,
+			// A crash always classifies (exit != 0 -> ClassifyFromLog), so the
+			// exponential arm is reached with an error attached; a bare nil
+			// error now means clean success and takes the cadence floor.
+			LastError: &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrUnknown)},
+		}
 		backoff := s.computeBackoff(ap)
 
 		// 2 * 2^8 = 512s > 300s, should be capped
@@ -218,17 +254,17 @@ func TestComputeBackoff(t *testing.T) {
 		}
 	})
 
-	t.Run("nil lastError uses standard backoff", func(t *testing.T) {
+	t.Run("nil lastError is a clean success and takes the cadence floor", func(t *testing.T) {
+		// The pre-floor contract routed nil errors into the exponential arm;
+		// E3 replaced it: a clean success has no failure to back off from,
+		// and its only bound is the success cadence floor.
 		ap := &AgentProcess{
 			RestartCount: 1,
 			LastError:    nil,
+			LastStart:    time.Now().Add(-time.Minute),
 		}
-		backoff := s.computeBackoff(ap)
-
-		// standard: 2 * 2^1 = 4s
-		want := 4 * time.Second
-		if backoff != want {
-			t.Errorf("computeBackoff() = %v, want %v", backoff, want)
+		if backoff := s.computeBackoff(ap); backoff != 0 {
+			t.Errorf("computeBackoff() = %v, want 0 (floor already elapsed)", backoff)
 		}
 	})
 
