@@ -40,6 +40,8 @@ if [[ ! -d "${APP_BUNDLE}" ]]; then
   exit 1
 fi
 
+"${SCRIPT_DIR}/reseal-local-app.sh" "${APP_BUNDLE}"
+
 if [[ "${RESTART}" == "1" ]]; then
   echo "[desktop] starting Loom Agents.app"
   open "${APP_BUNDLE}"

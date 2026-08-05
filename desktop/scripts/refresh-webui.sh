@@ -35,6 +35,7 @@ if [[ -d "${APP_BUNDLE}" ]]; then
   echo "[desktop] syncing packaged app web UI"
   mkdir -p "${APP_WEBUI_DIR}"
   rsync -a --delete "${WEBUI_DIST_DIR}/" "${APP_WEBUI_DIR}/"
+  "${SCRIPT_DIR}/reseal-local-app.sh" "${APP_BUNDLE}"
 else
   echo "[desktop] packaged app not found at ${APP_BUNDLE}; skipping app bundle sync"
   RESTART=0
