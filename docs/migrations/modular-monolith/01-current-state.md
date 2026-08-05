@@ -1,6 +1,6 @@
 # Current-State Evidence
 
-- **Status:** Reviewed baseline — Phase 1 inventories complete
+- **Status:** Reviewed historical Phase 1 baseline with current Phase 3 ratchets appended
 - **Snapshot:** 2026-07-15, pre-guardrail Loom code head `122d4d79` after refreshing `origin/v5`
 - **Migration:** [Modular Monolith Migration](README.md)
 
@@ -75,7 +75,7 @@ Two fleet-db mechanisms also defeat a simplistic “one table equals one module�
 
 ## Runtime ownership is also distributed
 
-The Phase 1 runtime inventory replaces the old scalar loop estimates. It names 83 lifecycle component definitions across `cmd`, `internal`, and `sdk`: 58 exact `time.NewTicker` AST sites plus 25 additional boot or long-lived components. A separate default-deny AST ledger ratchets all 108 in-scope non-test source goroutine launch definitions, including each callee and either resolving lifecycle-component links or an explicit bounded, request, command, or helper disposition with a reason. The all-source ledger intentionally includes architecture tooling, mutually exclusive build-tag variants such as `testbackend`, and the fake harness, so 108 is a source-definition ratchet rather than a reachable or simultaneous product-runtime count. The lifecycle classification is 56 managed components, 3 bounded command polls, 15 request-scoped components, and 9 startup waits. The performance baseline therefore uses 56 as the production background-component count; this counts definitions, not simultaneous instances, which remain configuration-dependent.
+The Phase 1 runtime inventory replaced the old scalar loop estimates. That historical snapshot named 83 lifecycle component definitions across `cmd`, `internal`, and `sdk`: 58 exact `time.NewTicker` AST sites plus 25 additional boot or long-lived components. A separate default-deny AST ledger ratcheted all 108 in-scope non-test source goroutine launch definitions. Phase 3's current inventory names 85 components, 56 ticker sites, 58 managed components, and 107 goroutine launch definitions. Each launch still records its callee and either resolves to lifecycle-component IDs or carries an explicit bounded, request, command, or helper disposition with a reason. These are source-definition ratchets, not counts of simultaneously running product loops.
 
 Phase 1 also removed the stale-task policy mismatch: `serve` now sources the same twenty-minute default as `StaleTaskSweeper`. The sweeper uses the earlier of a monotonic projection and the current wall clock: forward jumps cannot mass-age persisted heartbeats, while a backward jump conservatively protects fresh post-jump heartbeats and recovery resumes as the new clock advances. Standalone lead sessions, serve-hosted task sessions, and supervisor-owned AgentSession/AgentLease records have explicit heartbeat coverage; terminal finalization drains in-flight session heartbeats before writing completion.
 
@@ -120,8 +120,8 @@ git merge-base --is-ancestor origin/main HEAD
 shasum -a 256 api/openapi.yaml
 ```
 
-The Phase 1 architecture tooling now generates or validates capability edges, Store consumers, direct adapter writes, runtime components, performance records, and authority/transaction specifications. The current figures remain pre-extraction ratchets: zero capability module roots, 93 composite-Store files, 82 outside composition, and 233 direct persistence-write rows.
+The Phase 1 architecture tooling generated and continues to validate capability edges, Store consumers, direct adapter writes, runtime components, performance records, and authority/transaction specifications. The frozen pre-extraction values remain zero capability module roots, 93 composite-Store files, 82 outside composition, and 233 direct-write rows. The Phase 3 pre-commit base-plus-diff snapshot has two active module roots, 88 composite-Store files, 77 outside composition, and 226 direct-write rows across 249 call sites. The historical table above is therefore not presented as the Phase 3 source state; a separate post-commit audit snapshot binds the measured result to Loom `7f95b9bf1` and FleetDB `f1c4e1119` without changing the original measurement.
 
 ---
 
-[All migrations](../README.md) · [Migration overview](README.md) · Next: [Target architecture](02-target-architecture.md) · [Phase 1 evidence](06-phase-1-decisions-and-evidence.md)
+[All migrations](../README.md) · [Migration overview](README.md) · Next: [Target architecture](02-target-architecture.md) · [Phase 3 evidence](08-phase-3-decisions-and-evidence.md)

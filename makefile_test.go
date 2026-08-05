@@ -249,6 +249,26 @@ func TestMakefileLocalModeCodexWorkflowsUsesToolchainOverlay(t *testing.T) {
 	}
 }
 
+func TestMakefileLocalModeWorkflowOverlayRunsToolchainPreflight(t *testing.T) {
+	t.Parallel()
+
+	out := runMake(t,
+		"-n",
+		"LOCAL_MODE_COMPOSE=fake-compose",
+		"LOCAL_MODE_COMPOSE_FILES=test/local-mode/docker-compose.workflow-build.yml",
+		"FLUE_SRC=/tmp/fake-flue",
+		"local-mode-up",
+	)
+	preflight := strings.Index(out, "node_modules/.pnpm/node_modules/@daytona/sdk/package.json")
+	compose := strings.Index(out, "fake-compose")
+	if preflight < 0 {
+		t.Fatalf("workflow-build overlay did not add the toolchain preflight:\n%s", out)
+	}
+	if compose < 0 || preflight > compose {
+		t.Fatalf("workflow-build preflight did not run before Compose:\n%s", out)
+	}
+}
+
 func TestMakefileLocalModeWorkflowBuildCheckFailsBeforeCompose(t *testing.T) {
 	t.Parallel()
 
@@ -265,6 +285,48 @@ func TestMakefileLocalModeWorkflowBuildCheckFailsBeforeCompose(t *testing.T) {
 	}
 }
 
+func TestMakefileLocalModeWorkflowBuildCheckRequiresDaytonaSDK(t *testing.T) {
+	t.Parallel()
+
+	flueRoot := t.TempDir()
+	for _, rel := range []string{
+		"packages/cli/bin/flue.mjs",
+		"packages/cli/dist/flue.js",
+		"packages/runtime/package.json",
+		"packages/runtime/dist/node/index.mjs",
+		"packages/runtime/node_modules/@hono/node-server/package.json",
+		"packages/runtime/node_modules/hono/package.json",
+	} {
+		path := filepath.Join(flueRoot, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("{}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cmd := exec.Command( //nolint:norawexec -- exercises the Make preflight boundary
+		"make", "-s",
+		"FLUE_SRC="+flueRoot,
+		"local-mode-workflow-build-check",
+	)
+	cmd.Dir = repoRoot(t)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("Flue checkout without @daytona/sdk unexpectedly passed preflight:\n%s", out)
+	}
+	for _, want := range []string{
+		"node_modules/.pnpm/node_modules/@daytona/sdk/package.json",
+		"Built-in workflow sources require the Flue CLI/runtime plus @daytona/sdk",
+		"--filter hello-world...",
+	} {
+		if !strings.Contains(string(out), want) {
+			t.Fatalf("workflow build preflight output missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestMakefileLocalModeWorkflowBuildCheckRequiresContainerRolldownBinding(t *testing.T) {
 	t.Parallel()
 
@@ -276,6 +338,7 @@ func TestMakefileLocalModeWorkflowBuildCheckRequiresContainerRolldownBinding(t *
 		"packages/runtime/dist/node/index.mjs",
 		"packages/runtime/node_modules/@hono/node-server/package.json",
 		"packages/runtime/node_modules/hono/package.json",
+		"node_modules/.pnpm/node_modules/@daytona/sdk/package.json",
 		"node_modules/.pnpm/rolldown@1.0.3/node_modules/rolldown/package.json",
 	} {
 		path := filepath.Join(flueRoot, filepath.FromSlash(rel))
@@ -303,8 +366,8 @@ func TestMakefileLocalModeWorkflowBuildCheckRequiresContainerRolldownBinding(t *
 		"@rolldown/binding-linux-arm64-gnu",
 		`"os":["current","linux"]`,
 		`"cpu":["current","arm64"]`,
-		"pnpm install --frozen-lockfile --force --filter @flue/cli... --filter @flue/runtime...",
-		"Then rerun make local-mode-codex-workflows-up",
+		"pnpm install --frozen-lockfile --force --filter @flue/cli... --filter @flue/runtime... --filter hello-world...",
+		"Then rerun the selected local-mode target",
 	} {
 		if !strings.Contains(string(out), want) {
 			t.Fatalf("workflow build preflight output missing %q:\n%s", want, out)

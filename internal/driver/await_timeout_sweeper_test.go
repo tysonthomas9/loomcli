@@ -248,38 +248,40 @@ func TestAwaitTimeoutSweeperDrainsBacklog(t *testing.T) {
 }
 
 // TestAwaitMatcherTimeoutCarveOutSweeperLaneOnly pins the locked RULE 4
-// carve-out boundary: a timeout-shaped event (reserved ID prefix +
-// system:timeout actor) arriving on a NON-sweeper matcher lane — e.g. forged
-// through an ingress or loopback hook — still faces the allow-list, and a
-// timeout event naming one instance never touches a co-waiter on any lane.
+// carve-out boundary: a timeout-shaped event arriving on a NON-sweeper
+// matcher lane is rejected even when its actor would otherwise be eligible.
+// A timeout event naming one instance never touches a co-waiter on any lane.
 func TestAwaitMatcherTimeoutCarveOutSweeperLaneOnly(t *testing.T) {
-	ctx := context.Background()
-	st := newAwaitSweepStore(t, "WS")
-	key := suspendAwaitingRun(t, st, "WS", "run-1", "pr.merged:pr#7", []string{"alice"}, time.Hour)
-	otherKey := suspendAwaitingRun(t, st, "WS", "run-2", "pr.merged:pr#7", nil, time.Hour)
-
-	forged := trigger.AwaitDispatchEvent{
-		EventID:    domain.AwaitTimeoutEventID(key),
-		EventType:  "pr.merged",
-		SubjectRef: "pr#7",
-		ActorRef:   domain.AwaitTimeoutActor,
-		Payload:    []byte(`{"timeout":true}`),
-	}
-	res, err := (&trigger.AwaitMatcher{Store: st}).Dispatch(ctx, "WS", forged) // default lane: no carve-out
-	if err != nil {
-		t.Fatalf("Dispatch: %v", err)
-	}
-	if len(res.Records) != 1 || res.Records[0].InstanceKey != key ||
-		res.Records[0].Outcome != trigger.AwaitMatchActorRejected {
-		t.Fatalf("records = %+v, want one actor_rejected for %s and the co-waiter skipped (RULE 3)", res.Records, key)
-	}
-	for runID, wantKey := range map[string]string{"run-1": key, "run-2": otherKey} {
-		run, err := st.DriverRuns().Get(ctx, "WS", runID)
-		if err != nil || run.Status != domain.DriverRunSuspendedAwaitingEvent {
-			t.Fatalf("run %s = %+v, %v; want still suspended", runID, run, err)
-		}
-		if _, err := st.Awaits().GetSatisfiedAwait(ctx, "WS", wantKey); !errors.Is(err, domain.ErrNotFound) {
-			t.Fatalf("await %s = %v, want still pending", wantKey, err)
-		}
+	for _, tc := range []struct {
+		name       string
+		actorAllow []string
+		actor      string
+	}{
+		{name: "eligible actor", actorAllow: []string{"alice"}, actor: "alice"},
+		{name: "empty allow list", actor: "mallory"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			st := newAwaitSweepStore(t, "WS")
+			key := suspendAwaitingRun(t, st, "WS", "run-1", "pr.merged:pr#7", tc.actorAllow, time.Hour)
+			otherKey := suspendAwaitingRun(t, st, "WS", "run-2", "pr.merged:pr#7", nil, time.Hour)
+			forged := trigger.AwaitDispatchEvent{
+				EventID: domain.AwaitTimeoutEventID(key), EventType: "pr.merged", SubjectRef: "pr#7",
+				ActorRef: tc.actor, Payload: []byte(`{"timeout":true}`),
+			}
+			res, err := (&trigger.AwaitMatcher{Store: st}).Dispatch(ctx, "WS", forged)
+			if !errors.Is(err, domain.ErrInvalid) || len(res.Records) != 0 {
+				t.Fatalf("Dispatch = records %+v, err %v; want reserved-prefix rejection", res.Records, err)
+			}
+			for runID, wantKey := range map[string]string{"run-1": key, "run-2": otherKey} {
+				run, err := st.DriverRuns().Get(ctx, "WS", runID)
+				if err != nil || run.Status != domain.DriverRunSuspendedAwaitingEvent {
+					t.Fatalf("run %s = %+v, %v; want still suspended", runID, run, err)
+				}
+				if _, err := st.Awaits().GetSatisfiedAwait(ctx, "WS", wantKey); !errors.Is(err, domain.ErrNotFound) {
+					t.Fatalf("await %s = %v, want still pending", wantKey, err)
+				}
+			}
+		})
 	}
 }

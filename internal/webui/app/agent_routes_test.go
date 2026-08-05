@@ -49,8 +49,10 @@ func TestFleetDBAgentRoutesUseStoreInsteadOfDaemonControl(t *testing.T) {
 	gitOps := &mockGitOps{}
 	app := &Server{
 		multiPool: daemon.NewMultiPool(middleware.WorkspaceFromContext, 1),
-		config:    webui.ServerConfig{Store: st, GitOps: gitOps},
-		agentSvc:  svcimpl.NewAgentService(gitOps, nil, nil, st),
+		config: webui.ServerConfig{
+			Store: st, GitOps: gitOps, AutomationCapability: newAgentRouteAutomationCapability(st),
+		},
+		agentSvc: svcimpl.NewAgentService(gitOps, nil, nil, st),
 		wsExistsFn: func(id string) bool {
 			return id == "PARITY"
 		},
@@ -163,9 +165,11 @@ func TestFleetDBAgentRoutesBroadcastMonitorRefresh(t *testing.T) {
 	gitOps := &mockGitOps{}
 	app := &Server{
 		multiPool: daemon.NewMultiPool(middleware.WorkspaceFromContext, 1),
-		config:    webui.ServerConfig{Store: st, GitOps: gitOps},
-		agentSvc:  svcimpl.NewAgentService(gitOps, nil, nil, st),
-		hub:       hub,
+		config: webui.ServerConfig{
+			Store: st, GitOps: gitOps, AutomationCapability: newAgentRouteAutomationCapability(st),
+		},
+		agentSvc: svcimpl.NewAgentService(gitOps, nil, nil, st),
+		hub:      hub,
 		wsExistsFn: func(id string) bool {
 			return id == "PARITY"
 		},

@@ -129,6 +129,84 @@ The committed source includes focused tests for the following contracts, and the
 | Loom HTTP | Read compatibility, approve/activate journey, unapprove-active semantics, legacy create-version activation rejection, stale revision, malformed requests, unauthenticated, non-operator, and wrong-workspace denial. |
 | Loom CLI | Explicit endpoint/workspace, no implicit host/Store, unavailable-host and missing-token failure, local bearer, output compatibility, domain exit classes, unauthenticated, and wrong workspace. |
 
+## Slice locality and structural delta
+
+This locality record is measured from the exact committed implementation ranges
+Loom `7e8a6dd2d76bf9cddd0d8a6610a3d91046fe1433..84cccb76123d7531a881988ca0b1e9db49e17677`
+and FleetDB `8120c788ccc78477a61cfba591fe0445c580ab77..430dce8d9fcc9c48bc9d52613b78403b8aae19d4`.
+The count includes shipping, non-generated source and configuration. It excludes
+tests and fixtures, docs, architecture tooling/evidence, generated schemas and
+the vendored OpenAPI fixture, lockfiles, and test-only scripts/Compose files.
+
+| Slice | Owner and categorized changed production files | Allowed inbound adapters/contracts | Business-rule files outside the owner | Composite Store and direct-write delta |
+|---|---|---|---|---|
+| Workflow Catalog pilot (Loom) | **Workflow Catalog; 47 files.** Eight owner-root files (five public/core files and three owner-private FleetDB/HTTP adapters); seven typed-authority platform files; nine composition, shared-transport, bootstrap/readiness, and credential-retention files; ten CLI/HTTP/WebUI inbound-adapter files; four legacy alias/compatibility files; and nine frontend/Desktop source or capability/dependency files. | `app/serve` composition; the shared FleetDB client and catalog adapter; bootstrap capability negotiation; Workflow Catalog HTTP; standalone workflow-management CLI; local browser-session exchange; Tauri launcher and Vite workflow UI; bounded legacy domain, driver execution/registration, and old create-version compatibility shims. | **0 files owned by another capability.** Catalog policy is in the five owner core files. One rule-bearing file remains outside the physical module root: `internal/driver/approval.go`, a Workflow Catalog-owned legacy compatibility shim whose Phase 2 diff removes direct approve/unapprove mutations and narrows the remaining activation/trust dependencies. `internal/domain/platform.go` is aliases; `internal/driver/executor.go` and `register.go` are call-site adaptations. All other changed files are declared adapters, composition, platform authority/security, contracts, or UI/native privilege integration. | Store `93 -> 92`; outside-composition Store `82 -> 81`. Type-resolved direct-write inventory stays `233` rows across `258` call sites. The required coupling improvement is the removal of one composite-Store consumer, not a claimed direct-write reduction. |
+| Workflow Catalog durable mechanism (FleetDB) | **FleetDB companion; 21 files.** Two command-composition/profile files; five HTTP/auth/OpenAPI files; six model/service/storage-contract files; five Redis lifecycle/compatibility files; and three Postgres lifecycle/migration files. | Three authenticated lifecycle routes; deployment-derived capability manifest; `workflow_catalog.version_lifecycle` permission; source OpenAPI; Redis Lua command; Postgres transaction and migration; bounded old-Loom generic Driver compatibility. | **0 cross-owner product-policy files.** Workflow Catalog remains the product aggregate owner; FleetDB owns durable validation, CAS, replay, transaction, and backend-parity enforcement required by that owner command. Generic Driver changes are the documented Fleet-first compatibility boundary, not a second Loom mutation API. | Loom coupling ratchets are not applicable inside FleetDB. Redis and Postgres implement the same three intent commands and replay tuple; no additional service or module boundary is introduced. |
+
+The 47-file Loom categorization is mutually exclusive:
+
+- owner root (`8`): `internal/modules/workflowcatalog/{api,errors,model,ports,service}.go`, `fleetdb/adapter.go`, and `httpapi/{errors,module}.go`;
+- typed authority (`7`): `internal/platform/authority/{admission,authority,browser_session,issuer,opaque,operator_credential}.go` and `httpapi/module.go`;
+- composition/transport/readiness (`9`): the three `internal/app/serve/workflow_catalog*.go` files, `internal/bootstrap/{embedded,openstore}.go`, `internal/infra/fleetdb/{capabilities,client,workflow_catalog}.go`, and `internal/cli/issue_backend_workspace.go`;
+- inbound adapters (`10`): `internal/cli/root.go`, `internal/cli/local/browser_session.go`, `internal/cli/serve/{serve,serveadapter/workflow_catalog}.go`, `internal/cli/workflow/{management_client,workflow_cmd}.go`, `internal/httpclient/client.go`, and `internal/webui/{app/server_modules.go,handlers/workflows/module.go,server_config.go}`;
+- legacy aliases/compatibility (`4`): `internal/domain/platform.go` and `internal/driver/{approval,executor,register}.go`; and
+- frontend/Desktop (`9`): `desktop/src-tauri/{Cargo.toml,capabilities/workspace-launcher.json,src/lib.rs}`, `desktop/src/main.ts`, and the five production files changed under `internal/webui/frontend/src` (`api/workflows/{localOperatorSession,workflows}.ts`, `components/WorkflowSourceModal/WorkflowSourceModal.tsx`, `hooks/workflows/useWorkflowSource.ts`, and `main.tsx`).
+
+The 21-file FleetDB categorization is likewise mutually exclusive:
+
+- composition/profile (`2`): `cmd/fleet-db/{main,workflow_catalog}.go`;
+- HTTP/auth/OpenAPI (`5`): `internal/api/{errors,platform,workflow_catalog}.go`, `internal/auth/permissions.go`, and `api/openapi.yaml`;
+- model/service/storage contracts (`6`): `internal/models/platform.go`, `internal/service/control_plane.go`, and `internal/storage/{errors,keys,platform_types,storage}.go`;
+- Redis lifecycle/compatibility (`5`): `internal/storage/{driver_version_lifecycle,platform,redis}.go` and `internal/storage/lua/{driver_version_lifecycle,update_driver}.lua`; and
+- Postgres lifecycle/migration (`3`): `internal/storage/postgres/{driver_version_lifecycle,platform}.go` and migration `044_workflow_catalog_version_lifecycle.up.sql`.
+
+The production-file and structural counts are reproducible with:
+
+```sh
+git diff --name-only --diff-filter=ACMR 7e8a6dd2..84cccb761 \
+  | sort -u | rg '\.go$' \
+  | rg -v '(_test\.go$|^internal/archtest/|^internal/infra/fleetdb/testdata/|generated)' \
+  | wc -l # 38
+git diff --name-only --diff-filter=ACMR 7e8a6dd2..84cccb761 \
+  | sort -u | rg '\.(ts|tsx|rs|json|toml)$' \
+  | rg -v '(__tests__/|/tests/|\.spec\.ts$|^internal/archtest/|/gen/|Cargo\.lock$)' \
+  | wc -l # 9
+
+git -C ../fleet-db-modular-monolith-phase3 diff --name-only --diff-filter=ACMR 8120c788..430dce8d \
+  | sort -u | rg '\.go$' | rg -v '(_test\.go$|generated)' | wc -l # 17
+git -C ../fleet-db-modular-monolith-phase3 diff --name-only --diff-filter=ACMR 8120c788..430dce8d \
+  | sort -u \
+  | rg '^(api/openapi\.yaml|internal/storage/lua/.*\.lua|internal/storage/postgres/migrate/migrations/postgres/044_workflow_catalog_version_lifecycle\.up\.sql)$' \
+  | wc -l # 4
+
+for revision in 7e8a6dd2 84cccb761; do
+  git show "$revision":internal/archtest/testdata/migration-baseline.json \
+    | jq '.ratchets.composite_store | [.max_production_files, .max_outside_composition]'
+  git show "$revision":internal/archtest/testdata/direct-writes.yaml \
+    | awk '/^  - file:/{rows++} /^    count:/{sites += $2} END{print rows, sites}'
+done
+```
+
+The target-path performance procedure is source-bound to Loom `e96925ae6`
+(an ancestor of `84cccb761`) and FleetDB `430dce8d9`. With
+`FLEET_DB_REPO` pinned to that companion checkout, the test builds both
+binaries, starts a fresh embedded Redis-backed FleetDB and real `loom serve`,
+and executes 30 independently seeded authenticated approval commands:
+
+```sh
+GOCACHE=/tmp/go-build-cache GOMODCACHE=/tmp/go-mod-cache \
+FLEET_DB_REPO=<fleet-db@430dce8d9> \
+go test -tags=e2e ./internal/webui/handlers/workflows \
+  -run '^TestE2E_WorkflowCatalogPhase2ApprovePerformance$' -count=1 -v
+```
+
+The test measures command start through successful management response, uses
+nearest-rank percentiles, and places a counter on Loom's FleetDB transport.
+Each sample observed exactly six requests: two workspace GETs, two driver GETs,
+one version GET, and one lifecycle POST. The 30 raw latency samples and full
+environment are retained in `performance-baseline.yaml`; they produce p50
+`8.886 ms` and p95 `35.834 ms`.
+
 ### Final architecture validation
 
 The following checks passed after the final boundary remediations at Loom implementation head `84cccb761`:
@@ -159,7 +237,7 @@ The results below are measured or executable proof; no row is inferred only from
 
 The completion update appends a source-bound Phase 2 validation snapshot to `migration-baseline.json`, retains the tightened structural ratchets, and sets `capability-graph.yaml` to `completed_phase: 2`.
 
-The two Phase 1 target-path nulls are already replaced by the measured records in `performance-baseline.yaml`; they must not be reverted while the external proof is pending.
+The two Phase 1 target-path nulls are already replaced by the measured records in `performance-baseline.yaml`; later phases must not revert them or substitute measurements from a legacy direct-Store path.
 
 ## Next phase
 

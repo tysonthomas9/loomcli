@@ -41,6 +41,13 @@ fail() { echo "[webhook-e2e] FAIL: $*" >&2; exit 1; }
 jfield() { python3 -c 'import sys,json;print(json.load(sys.stdin).get(sys.argv[1],""))' "$2" <<<"$1"; }
 # jlen <json> <array-key>        -> length of the named top-level array
 jlen() { python3 -c 'import sys,json;print(len(json.load(sys.stdin).get(sys.argv[1],[])))' "$2" <<<"$1"; }
+# delivery_run_id <json>         -> first router-v2 deliveries[] run id
+delivery_run_id() {
+  python3 -c 'import sys,json
+o=json.load(sys.stdin)
+d=o.get("deliveries",[])
+print(d[0].get("driver_run_id","") if d else "")' <<<"$1"
+}
 # github_sigstatus <events-json> -> signature_status of the first github event
 github_sigstatus() {
   python3 -c 'import sys,json
@@ -66,16 +73,26 @@ count() { # GET a fleet-db list endpoint, print len of the named array
 say "loom=$LOOM_API fleet-db=$FLEETDB_API ws=$WS route=$ROUTE"
 
 # --- Arrange: register a driver + pinned version + signed binding -------------
-DRIVER="github-pr-review"
-VERSION="${DRIVER}-v1-$$"
+DRIVER="github-pr-review-$$"
+VERSION="${DRIVER}-v1"
 
-say "creating driver $DRIVER"
+say "creating draft driver $DRIVER"
 fdb POST "/api/v1/$WS/drivers" \
-  "{\"driver_id\":\"$DRIVER\",\"name\":\"$DRIVER\",\"status\":\"active\"}" >/dev/null || true
+  "{\"driver_id\":\"$DRIVER\",\"name\":\"$DRIVER\",\"status\":\"draft\"}" >/dev/null
 
 say "creating pinned driver version $VERSION"
 fdb POST "/api/v1/$WS/drivers/$DRIVER/versions" \
   "{\"version_id\":\"$VERSION\",\"version\":1,\"source_ref\":\"e2e://github-pr-review\",\"source_digest\":\"sha256:e2e-src\",\"bundle_ref\":\".loom/drivers/$DRIVER/$VERSION\",\"bundle_digest\":\"sha256:e2e-bundle\",\"runtime\":\"flue-node\",\"validation_status\":\"passed\"}" >/dev/null
+
+say "approving and activating pinned driver version $VERSION"
+fdb POST "/api/v1/$WS/drivers/$DRIVER/versions/$VERSION/approve" \
+  '{"expected_revision":1}' >/dev/null
+fdb POST "/api/v1/$WS/drivers/$DRIVER/versions/$VERSION/activate" \
+  '{"expected_revision":2}' >/dev/null
+DRIVER_JSON="$(fdb GET "/api/v1/$WS/drivers/$DRIVER")"
+[ "$(jfield "$DRIVER_JSON" active_version_id)" = "$VERSION" ] \
+  || fail "workflow catalog lifecycle did not activate $VERSION"
+say "ok: driver version approved and active"
 
 say "creating trigger binding for $ROUTE with webhook_secret"
 BINDING_ID="binding-$ROUTE-$$"
@@ -109,8 +126,8 @@ say "POST signed webhook (delivery=$DELIVERY)"
 BODY1=/tmp/webhook-e2e-1.json
 CODE1="$(post_webhook "$BODY1")"
 [ "$CODE1" = "202" ] || fail "expected 202, got $CODE1 ($(cat "$BODY1"))"
-RUN_ID="$(jfield "$(cat "$BODY1")" driver_run_id)"
-[ -n "$RUN_ID" ] || fail "no driver_run_id in response"
+RUN_ID="$(delivery_run_id "$(cat "$BODY1")")"
+[ -n "$RUN_ID" ] || fail "no deliveries[0].driver_run_id in response"
 say "ok: 202 Accepted, driver_run_id=$RUN_ID"
 
 # --- Assert: durable records were created and linked -------------------------
@@ -136,7 +153,7 @@ say "re-POST same delivery id (expect dedup)"
 BODY2=/tmp/webhook-e2e-2.json
 CODE2="$(post_webhook "$BODY2")"
 [ "$CODE2" = "202" ] || fail "redelivery expected 202, got $CODE2 ($(cat "$BODY2"))"
-RUN_ID2="$(jfield "$(cat "$BODY2")" driver_run_id)"
+RUN_ID2="$(delivery_run_id "$(cat "$BODY2")")"
 [ "$RUN_ID2" = "$RUN_ID" ] || fail "redelivery created a new run ($RUN_ID2 != $RUN_ID)"
 
 EVENTS_AFTER2="$(count "/api/v1/$WS/trigger-events" trigger_events)"

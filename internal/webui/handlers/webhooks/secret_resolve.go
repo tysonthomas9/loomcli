@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"net/http"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/app/webhookingestion"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -32,21 +32,63 @@ func errInboundUnverified() error {
 	return unverified("webhook signature verification failed")
 }
 
-// verifyInboundSignature resolves the inbound signing secret(s) for the
-// binding and verifies the request signature against each candidate (the
-// adapter compares in constant time). Secret-resolution failures are logged
-// server-side and fail closed with the same uniform 401 as a bad signature.
-// A match against a rotation-window previous secret emits the stale-secret
-// audit signal before returning success.
-func (m *Module) verifyInboundSignature(r *http.Request, adapter Adapter, ws string, binding *domain.TriggerBinding, body []byte) error {
-	candidates, err := m.resolveInboundSecretCandidates(r.Context(), ws, binding, time.Now().UTC())
+// CompatibilityVerifierConfig supplies the privileged persistence seams used
+// only inside inbound signature verification. Neither resolved secrets nor a
+// binding DTO cross into webhookingestion or Automation.
+type CompatibilityVerifierConfig struct {
+	Bindings   store.TriggerBindingStore
+	Connectors store.ConnectorStore
+	Now        func() time.Time
+}
+
+// CompatibilityVerifier adapts the legacy binding/connector secret stores to
+// webhookingestion.Verifier. Verify returns only success or a uniform denial;
+// plaintext secret material never leaves this adapter.
+type CompatibilityVerifier struct {
+	bindings   store.TriggerBindingStore
+	connectors store.ConnectorStore
+	adapters   registry
+	now        func() time.Time
+}
+
+var _ webhookingestion.Verifier = (*CompatibilityVerifier)(nil)
+
+func NewCompatibilityVerifier(config CompatibilityVerifierConfig) *CompatibilityVerifier {
+	now := config.Now
+	if now == nil {
+		now = time.Now
+	}
+	return &CompatibilityVerifier{
+		bindings: config.Bindings, connectors: config.Connectors,
+		adapters: defaultRegistry(), now: now,
+	}
+}
+
+// Verify resolves the exact enabled route binding, finds the eligible secret
+// candidates, and compares the presented signature in constant time through
+// the selected source adapter. Missing/disabled routes, bad signatures, and
+// secret-resolution failures deliberately share one 401 response.
+func (v *CompatibilityVerifier) Verify(ctx context.Context, request webhookingestion.VerificationRequest) error {
+	if v == nil || v.bindings == nil {
+		return errInboundUnverified()
+	}
+	adapter, ok := v.adapters[request.SourceKind]
+	if !ok {
+		return errInboundUnverified()
+	}
+	binding, err := v.bindings.GetByRouteKey(ctx, request.WorkspaceKey, request.RouteKey)
+	if err != nil || binding == nil || !binding.Enabled || binding.SourceKind != request.SourceKind {
+		return errInboundUnverified()
+	}
+
+	candidates, err := v.resolveInboundSecretCandidates(ctx, request.WorkspaceKey, binding, v.now().UTC())
 	if err != nil {
 		slog.Error("webhook inbound secret resolution failed",
-			"workspace", ws, "binding_id", binding.BindingID, "source_kind", binding.SourceKind, "err", err)
+			"workspace", request.WorkspaceKey, "binding_id", binding.BindingID, "source_kind", binding.SourceKind, "err", err)
 		return errInboundUnverified()
 	}
 	for _, cand := range candidates {
-		if adapter.Verify(r, body, cand.secret) != nil {
+		if adapter.VerifySignature(request.Payload, request.PresentedSignature, cand.secret) != nil {
 			continue
 		}
 		if cand.stale {
@@ -55,7 +97,7 @@ func (m *Module) verifyInboundSignature(r *http.Request, adapter Adapter, ws str
 			// verifying when the rotation window closes.
 			slog.Warn("webhook verified with previous (stale) connector inbound secret",
 				"audit", "connector_stale_inbound_secret",
-				"workspace", ws, "binding_id", binding.BindingID, "connector_id", cand.connectorID)
+				"workspace", request.WorkspaceKey, "binding_id", binding.BindingID, "connector_id", cand.connectorID)
 		}
 		return nil
 	}
@@ -71,15 +113,15 @@ func (m *Module) verifyInboundSignature(r *http.Request, adapter Adapter, ws str
 // exact-RouteKey binding's webhook secret (back-compat — no flag day). A
 // connector that exists but yields no usable secret does NOT fall back:
 // verification fails closed.
-func (m *Module) resolveInboundSecretCandidates(ctx context.Context, ws string, binding *domain.TriggerBinding, now time.Time) ([]inboundSecretCandidate, error) {
-	candidates, connectorFound, err := m.connectorSecretCandidates(ctx, ws, binding.SourceKind, now)
+func (v *CompatibilityVerifier) resolveInboundSecretCandidates(ctx context.Context, ws string, binding *domain.TriggerBinding, now time.Time) ([]inboundSecretCandidate, error) {
+	candidates, connectorFound, err := v.connectorSecretCandidates(ctx, ws, binding.SourceKind, now)
 	if err != nil {
 		return nil, err
 	}
 	if connectorFound {
 		return candidates, nil
 	}
-	secret, err := m.store.TriggerBindings().ResolveWebhookSecret(ctx, ws, binding.BindingID)
+	secret, err := v.bindings.ResolveWebhookSecret(ctx, ws, binding.BindingID)
 	if err != nil {
 		return nil, err
 	}
@@ -91,14 +133,14 @@ func (m *Module) resolveInboundSecretCandidates(ctx context.Context, ws string, 
 // actually resolved — false means the workspace has no connector for this
 // source (or the store has no connector wiring at all) and the caller may
 // use the back-compat binding-secret path.
-func (m *Module) connectorSecretCandidates(ctx context.Context, ws, sourceKind string, now time.Time) (candidates []inboundSecretCandidate, found bool, err error) {
+func (v *CompatibilityVerifier) connectorSecretCandidates(ctx context.Context, ws, sourceKind string, now time.Time) (candidates []inboundSecretCandidate, found bool, err error) {
 	kind := domain.ConnectorSourceKind(sourceKind)
 	if !kind.Valid() {
 		// Source kinds outside the connector enum (e.g. cron) never have
 		// connectors.
 		return nil, false, nil
 	}
-	cs := m.store.Connectors()
+	cs := v.connectors
 	if cs == nil {
 		return nil, false, nil
 	}
@@ -119,6 +161,9 @@ func (m *Module) connectorSecretCandidates(ctx context.Context, ws, sourceKind s
 				continue
 			}
 			return nil, true, err
+		}
+		if secrets == nil {
+			return nil, true, errors.New("connector inbound secret resolution returned no result")
 		}
 		found = true
 		if secrets.Current != "" {

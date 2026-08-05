@@ -3,6 +3,7 @@ package triggerbindings
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -22,7 +23,11 @@ func TestRunBinding_StampsBindingAndOmitsRunInput(t *testing.T) {
 		t.Fatalf("create status = %d, want 201; body=%s", create.Code, create.Body.String())
 	}
 
-	rec := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings/prompt-agent-cron/run", "")
+	request := httptest.NewRequest(http.MethodPost, "/api/workspaces/WS/trigger-bindings/prompt-agent-cron/run", nil)
+	request.Header.Set("Authorization", "Bearer test-operator")
+	request.Header.Set("Idempotency-Key", "manual-request-1")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, request)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("run status = %d, want 202; body=%s", rec.Code, rec.Body.String())
 	}
@@ -40,6 +45,9 @@ func TestRunBinding_StampsBindingAndOmitsRunInput(t *testing.T) {
 	}
 	if run.DriverID != "driver-1" || run.Status != domain.DriverRunQueued {
 		t.Fatalf("unexpected run: driver=%q status=%q", run.DriverID, run.Status)
+	}
+	if run.IdempotencyKey != "manual-request-1" {
+		t.Fatalf("run idempotency_key = %q, want caller header", run.IdempotencyKey)
 	}
 	// The whole point: run-input is NOT merged into the payload client-side.
 	if strings.Contains(string(run.Payload), "roleName") {

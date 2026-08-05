@@ -26,10 +26,13 @@ make local-mode-codex-workflows-up
 ```
 
 Embedded workflow source is built into a registered driver on first use. That
-requires Loom's local SDK plus the pinned Flue CLI/runtime checkout, so this
-target adds `docker-compose.workflow-build.yml` and checks the toolchain before
-starting Compose. The default Flue path is `../dynamic-workflows/flue`
-relative to this checkout directory. It must be at the commit in
+requires Loom's local SDK plus the pinned Flue CLI/runtime checkout and the
+Daytona SDK imported by the built-in runner, so this target adds
+`docker-compose.workflow-build.yml` and checks the toolchain before starting
+Compose. Adding that overlay through `LOCAL_MODE_COMPOSE_FILES` on the
+deterministic `local-mode-up` target runs the same preflight. The default Flue
+path is `../dynamic-workflows/flue` relative to this checkout directory. It
+must be at the commit in
 `internal/workflows/FLUE_COMMIT`, with pnpm dependencies installed and the
 CLI/runtime built. Override it when needed:
 
@@ -52,12 +55,15 @@ container:
 ```sh
 export XDG_CONFIG_HOME="${TMPDIR:-/tmp}/loom-flue-pnpm-linux-arm64-gnu"
 pnpm config set --global supportedArchitectures '{"os":["current","linux"],"cpu":["current","arm64"],"libc":["current","glibc"]}'
-pnpm install --frozen-lockfile --force --filter @flue/cli... --filter @flue/runtime...
+pnpm install --frozen-lockfile --force --filter @flue/cli... --filter @flue/runtime... --filter hello-world...
 ```
 
 Use `x64` instead of `arm64` for an amd64/x86_64 container. The temporary
 `XDG_CONFIG_HOME` keeps this cross-platform pnpm setting out of the developer's
-normal global configuration.
+normal global configuration. The `hello-world` workspace owns Flue's
+`@daytona/sdk` dependency; omitting that filter leaves the Bug-fix workflow's
+Daytona runner unresolvable even when the CLI, runtime, and Rolldown preflight
+otherwise look healthy.
 
 The narrower `local-mode-codex-up` profile remains useful for supervised-agent
 and daemon testing without a Flue source checkout. If prompt-agent creation is

@@ -56,6 +56,8 @@ tags:
     description: Durable trigger ingress events
   - name: Trigger Deliveries
     description: Durable trigger delivery attempts and dispatch records
+  - name: Automation
+    description: Atomic Automation event/delivery reservations, durable cron occurrences, and delivery progress; Execution remains the owner of DriverRun creation
   - name: Action Ledger
     description: Idempotent side-effect ledger records
   - name: Driver Runs
@@ -2788,6 +2790,9 @@ paths:
     post:
       tags: [Trigger Bindings]
       summary: Register a trigger binding
+      description: >-
+        Ordinary lifecycle only. target_agent_service_id is not accepted;
+        AgentService-owned bindings use the dedicated Automation managed lane.
       operationId: createTriggerBinding
       requestBody:
         required: true
@@ -2861,6 +2866,9 @@ paths:
     patch:
       tags: [Trigger Bindings]
       summary: Update a trigger binding
+      description: >-
+        Ordinary lifecycle only. Ownership fields are rejected, and a current
+        AgentService-owned row cannot be mutated through this route.
       operationId: updateTriggerBinding
       requestBody:
         required: true
@@ -2887,7 +2895,8 @@ paths:
       description: |
         Removes the binding and frees its route-key reservation. Historical
         trigger events and driver runs stamped with the binding id are left
-        intact as an audit trail.
+        intact as an audit trail. A current AgentService-owned row is rejected;
+        managed deletion uses the exact-snapshot Automation lane.
       operationId: deleteTriggerBinding
       responses:
         "204":
@@ -3216,6 +3225,10 @@ paths:
                 $ref: "#/components/schemas/TriggerEvent"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
@@ -3302,10 +3315,644 @@ paths:
                 $ref: "#/components/schemas/DriverRun"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+
+  /api/v1/{workspace}/automation/binding-matches/{route_key}:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - name: route_key
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [Automation]
+      summary: Match the current Automation binding fan-out set
+      operationId: matchAutomationBindings
+      responses:
+        "200":
+          description: Deterministic binding match snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutomationBindingMatchSnapshot"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/{workspace}/automation/admissions/external/{route_key}:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - name: route_key
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [Automation]
+      summary: Reserve an external Automation admission
+      description: >-
+        Atomically persists one external-origin Event and its Delivery progress
+        records. It does not create DriverRuns; Loom dispatches each reserved
+        delivery through Execution and records the result with the transition
+        operation. External admission cannot assert event_type=run.finished or
+        an actor_ref in the reserved system or system:* actor namespace.
+      operationId: reserveExternalAutomationAdmission
+      parameters:
+        - $ref: "#/components/parameters/AutomationIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AutomationNonWorkflowAdmissionReservationRequest"
+      responses:
+        "200":
+          description: Original reservation returned for an idempotent replay
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutomationAdmissionReservationResult"
+        "201":
+          description: Event and Delivery records reserved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutomationAdmissionReservationResult"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/BadRequest" }
+        "422":
+          description: Hop, Catalog, or fan-out precondition failed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutomationErrorResponse" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "503":
+          description: Complete Automation admission backend is unavailable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutomationErrorResponse" }
+
+  /api/v1/{workspace}/automation/admissions/system/{route_key}:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - name: route_key
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [Automation]
+      summary: Reserve a system Automation admission
+      description: >-
+        Server stamps origin=system and hop_depth=0; neither field is accepted
+        in the request body. A run.finished reservation requires
+        actor_ref=system and a canonical source_event_id beginning with
+        run-finished:.
+      operationId: reserveSystemAutomationAdmission
+      parameters:
+        - $ref: "#/components/parameters/AutomationIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AutomationNonWorkflowAdmissionReservationRequest" }
+      responses:
+        "200":
+          description: Original reservation returned for an idempotent replay
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutomationAdmissionReservationResult" }
+        "201":
+          description: Event and Delivery records reserved
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutomationAdmissionReservationResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/BadRequest" }
+        "422":
+          description: Catalog or fan-out precondition failed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutomationErrorResponse" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "503":
+          description: Complete Automation admission backend is unavailable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutomationErrorResponse" }
+
+  /api/v1/{workspace}/driver-runs/{run_id}/automation/admissions/{route_key}:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/DriverRunID"
+      - name: route_key
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [Automation]
+      summary: Reserve a workflow-originated Automation admission
+      description: >-
+        Fleet derives emitting run identity, parent Event, origin=workflow, and
+        hop_depth from the path and durable records. The body carries the
+        server-verified node, lease, and fencing token for that emitting run;
+        Fleet revalidates the exact running owner atomically on a fresh
+        reservation. Exact committed replay is checked first, so it remains
+        available after terminal completion or ownership handoff. Workflow
+        admission cannot assert event_type=run.finished or an actor_ref in the
+        reserved system or system:* actor namespace.
+      operationId: reserveWorkflowAutomationAdmission
+      parameters:
+        - $ref: "#/components/parameters/AutomationIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AutomationWorkflowAdmissionReservationRequest" }
+      responses:
+        "200":
+          description: Original reservation returned for an idempotent replay
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutomationAdmissionReservationResult" }
+        "201":
+          description: Event and Delivery records reserved
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutomationAdmissionReservationResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Idempotency conflict or stale execution owner tuple
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutomationErrorResponse" }
+        "413": { $ref: "#/components/responses/BadRequest" }
+        "422":
+          description: Hop, Catalog, or fan-out precondition failed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutomationErrorResponse" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "503":
+          description: Complete Automation admission backend is unavailable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutomationErrorResponse" }
+
+  /api/v1/{workspace}/automation/cron/claim-due:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+    post:
+      tags: [Automation]
+      summary: Atomically claim due durable cron occurrences
+      description: >-
+        Claims stable binding/scheduled-instant occurrence identities through a
+        bounded lease. Exact Idempotency-Key replay returns the original set;
+        unfinished occurrences become reclaimable after claim_until, including
+        after a FleetDB or Loom process restart.
+      operationId: claimDueAutomationCron
+      parameters:
+        - $ref: "#/components/parameters/AutomationIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AutomationCronClaimRequest" }
+      responses:
+        "200":
+          description: Stable claimed occurrence set, including an exact replay
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutomationCronClaimResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          description: Idempotency-Key was reused with different claim content
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutomationErrorResponse" }
+        "413": { $ref: "#/components/responses/BadRequest" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "503":
+          description: Complete Automation backend is unavailable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutomationErrorResponse" }
+
+  /api/v1/{workspace}/automation/cron/{occurrence_id}/complete:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - name: occurrence_id
+        in: path
+        required: true
+        schema: { type: string, pattern: '^cron:' }
+    post:
+      tags: [Automation]
+      summary: Complete or release one durable cron occurrence
+      description: >-
+        Admitted and dropped outcomes advance the schedule cursor exactly once.
+        Failed releases the lease and retains the same occurrence without
+        advancing. Completion is idempotent by workspace and occurrence ID.
+      operationId: completeAutomationCron
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AutomationCronCompletionRequest" }
+      responses:
+        "204": { description: Completion recorded }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: Occurrence was not found in this workspace
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutomationErrorResponse" }
+        "409":
+          description: A terminal completion already exists with different content
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutomationErrorResponse" }
+        "413": { $ref: "#/components/responses/BadRequest" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "503":
+          description: Complete Automation backend is unavailable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutomationErrorResponse" }
+
+  /api/v1/{workspace}/automation/bindings/{binding_id}/dispatch:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - name: binding_id
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    post:
+      tags: [Automation]
+      summary: Atomically dispatch one manual TriggerBinding run
+      description: >-
+        Reloads the binding target and concurrency policy, revalidates the
+        supplied active Catalog guard, and creates, reuses, rejects, or
+        supersedes DriverRuns in one transaction. Exact Idempotency-Key replay
+        returns the original full DriverRun envelope even after binding changes.
+      operationId: dispatchAutomationBinding
+      parameters:
+        - $ref: "#/components/parameters/AutomationIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AutomationBindingDispatchRequest" }
+      responses:
+        "200":
+          description: Atomic manual dispatch result or exact replay
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutomationBindingDispatchResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: TriggerBinding was not found in this workspace
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutomationErrorResponse" }
+        "409":
+          description: Idempotency or binding/Catalog snapshot conflict
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutomationErrorResponse" }
+        "413": { $ref: "#/components/responses/BadRequest" }
+        "422":
+          description: Effective Catalog version is unavailable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutomationErrorResponse" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "503":
+          description: Complete Automation backend is unavailable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutomationErrorResponse" }
+
+  /api/v1/{workspace}/automation/managed-bindings:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+    post:
+      tags: [Automation]
+      summary: Create an AgentService-owned TriggerBinding
+      description: >-
+        Dedicated service-identity lane for managed bindings. The body
+        workspace must match the route, target_agent_service_id must be
+        non-empty, and webhook_secret is rejected. Generic TriggerBinding
+        creation cannot establish managed ownership.
+      operationId: createManagedAutomationBinding
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TriggerBinding" }
+      responses:
+        "201":
+          description: Exact committed managed binding snapshot, with secrets redacted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TriggerBinding" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/{workspace}/automation/managed-bindings/{binding_id}/replace:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - name: binding_id
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    post:
+      tags: [Automation]
+      summary: Conditionally replace an AgentService-owned TriggerBinding
+      description: >-
+        Compares the exact owner, route, creation timestamp, and update
+        timestamp before committing the replacement. This prevents stale
+        writers and delete/recreate ABA from mutating a different generation.
+      operationId: replaceManagedAutomationBinding
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AutomationManagedBindingReplaceRequest" }
+      responses:
+        "200":
+          description: Exact committed managed binding snapshot, with secrets redacted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TriggerBinding" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Managed binding owner or generation changed concurrently
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutomationErrorResponse" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/{workspace}/automation/managed-bindings/{binding_id}/delete:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - name: binding_id
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    post:
+      tags: [Automation]
+      summary: Conditionally delete a disabled AgentService-owned TriggerBinding
+      description: >-
+        Deletes only the exact disabled owner/generation snapshot. Ambiguous
+        response recovery probes that snapshot before deciding whether retry
+        is safe, so an intervening recreation is never deleted.
+      operationId: deleteManagedAutomationBinding
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AutomationManagedBindingSnapshotRequest" }
+      responses:
+        "204": { description: Exact managed binding generation deleted }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Managed binding owner or generation changed concurrently
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutomationErrorResponse" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/{workspace}/automation/unmanaged-bindings/{binding_id}/replace:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - name: binding_id
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    post:
+      tags: [Automation]
+      summary: Conditionally replace an ordinary TriggerBinding
+      description: >-
+        Compares the exact route and generation timestamps and atomically
+        rejects both current managed rows and attempts to introduce managed
+        ownership through the ordinary lifecycle.
+      operationId: replaceUnmanagedAutomationBinding
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AutomationUnmanagedBindingReplaceRequest" }
+      responses:
+        "200":
+          description: Exact committed unmanaged binding snapshot, with secrets redacted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TriggerBinding" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Binding is managed or its route/generation changed concurrently
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutomationErrorResponse" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/{workspace}/automation/unmanaged-bindings/{binding_id}/delete:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - name: binding_id
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    post:
+      tags: [Automation]
+      summary: Conditionally delete a disabled ordinary TriggerBinding
+      description: >-
+        Deletes only the exact disabled unmanaged generation and atomically
+        rejects a current AgentService-owned row.
+      operationId: deleteUnmanagedAutomationBinding
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AutomationUnmanagedBindingSnapshotRequest" }
+      responses:
+        "204": { description: Exact unmanaged binding generation deleted }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Binding is managed or its route/generation changed concurrently
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutomationErrorResponse" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/{workspace}/automation/deliveries/claim-due:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+    post:
+      tags: [Automation]
+      summary: Atomically claim due Automation delivery progress records
+      description: >-
+        Advances each claimed failed/held Delivery attempt exactly once and
+        leases it through next_retry_at. Idempotent replay returns the original
+        Event and Delivery snapshots without advancing attempts again.
+      operationId: claimDueAutomationDeliveries
+      parameters:
+        - $ref: "#/components/parameters/AutomationIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AutomationDeliveryClaimRequest" }
+      responses:
+        "200":
+          description: Claimed deliveries with their durable Event and admission-time target snapshots
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClaimDueAutomationDeliveriesResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/BadRequest" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "503":
+          description: Complete Automation admission backend is unavailable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutomationErrorResponse" }
+
+  /api/v1/{workspace}/automation/deliveries/{delivery_id}/dispatch:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - name: delivery_id
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [Automation]
+      summary: Atomically dispatch one reserved Automation delivery
+      description: >-
+        Loads the immutable Event and Delivery snapshots, enforces the
+        admission-time concurrency policy, and creates or reuses a DriverRun
+        without rematching a binding or accepting caller-supplied target,
+        payload, version, agent, subject, or Epic fields.
+      operationId: dispatchAutomationDelivery
+      parameters:
+        - $ref: "#/components/parameters/AutomationIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AutomationDeliveryDispatchRequest" }
+      responses:
+        "200":
+          description: Durable dispatch, busy-policy, or idempotent replay result
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutomationDeliveryDispatchResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Delivery CAS, idempotency, or dispatchability conflict
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutomationErrorResponse" }
+        "413": { $ref: "#/components/responses/BadRequest" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "503":
+          description: Complete Automation admission backend is unavailable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutomationErrorResponse" }
+
+  /api/v1/{workspace}/automation/deliveries/{delivery_id}/transition:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - name: delivery_id
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [Automation]
+      summary: Record a durable Automation delivery transition
+      description: >-
+        Records non-dispatch lifecycle progress for retry and failure recovery.
+        Initial reserved-delivery dispatch must use the atomic dispatch route;
+        clients must not follow a successful dispatch result with this route.
+        A legacy dispatched transition only links an already-created DriverRun
+        and never creates it.
+      operationId: transitionAutomationDelivery
+      parameters:
+        - $ref: "#/components/parameters/AutomationIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AutomationDeliveryTransitionRequest" }
+      responses:
+        "200":
+          description: Delivery progress updated or replayed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutomationDeliveryResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/BadRequest" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "503":
+          description: Complete Automation admission backend is unavailable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutomationErrorResponse" }
 
   /api/v1/{workspace}/trigger-deliveries:
     parameters:
@@ -3669,6 +4316,190 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "409":
           $ref: "#/components/responses/Conflict"
+
+  /api/v1/{workspace}/driver-run-outcomes/claim:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+    post:
+      tags: [Driver Runs]
+      summary: Claim due terminal driver-run outcomes
+      description: >-
+        Privileged runtime-host reconciliation lease over immutable terminal
+        DriverRun snapshots. Expired claims are reclaimable after a process
+        crash; deterministic run.finished event IDs make replay idempotent.
+      operationId: claimDriverRunOutcomes
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DriverRunOutcomeClaimRequest"
+      responses:
+        "200":
+          description: Claimed terminal outcomes
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverRunOutcomeClaimResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/{workspace}/driver-run-outcomes/complete:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+    post:
+      tags: [Driver Runs]
+      summary: Complete a claimed terminal driver-run outcome
+      operationId: completeDriverRunOutcome
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DriverRunOutcomeCompleteRequest"
+      responses:
+        "200":
+          description: Outcome marked delivered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverRunOutcomeCompleteResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/{workspace}/driver-run-outcomes/retry:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+    post:
+      tags: [Driver Runs]
+      summary: Retry a claimed terminal driver-run outcome
+      operationId: retryDriverRunOutcome
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DriverRunOutcomeRetryRequest"
+      responses:
+        "200":
+          description: Outcome returned to the due queue
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverRunOutcomeRetryResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/{workspace}/await-event-notifications/claim:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+    post:
+      tags: [Awaits]
+      summary: Claim due TriggerEvent notifications for await reconciliation
+      description: >-
+        Service-authenticated leased claim over immutable TriggerEvent
+        envelopes. Event.event_id is the durable queue identity; source_event_id
+        when nonempty is the canonical await resolution identity. Payloads over
+        the await cap are classified and omitted so they can be quarantined
+        without materializing an unbounded response.
+      operationId: claimAwaitEventNotifications
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AwaitEventNotificationClaimRequest"
+      responses:
+        "200":
+          description: Claimed TriggerEvent notifications
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AwaitEventNotificationClaimResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/{workspace}/await-event-notifications/complete:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+    post:
+      tags: [Awaits]
+      summary: Complete a claimed await-event notification
+      operationId: completeAwaitEventNotification
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AwaitEventNotificationCompleteRequest"
+      responses:
+        "200":
+          description: Notification marked delivered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AwaitEventNotificationCompleteResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/{workspace}/await-event-notifications/retry:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+    post:
+      tags: [Awaits]
+      summary: Retry a claimed await-event notification
+      operationId: retryAwaitEventNotification
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AwaitEventNotificationRetryRequest"
+      responses:
+        "200":
+          description: Notification returned to the due queue
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AwaitEventNotificationRetryResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "500": { $ref: "#/components/responses/InternalError" }
 
   /api/v1/{workspace}/driver-runs/{run_id}:
     parameters:
@@ -4566,6 +5397,69 @@ paths:
         "400":
           $ref: "#/components/responses/BadRequest"
 
+  /api/v1/{workspace}/awaits/resolve-and-resume:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+    post:
+      tags: [Awaits]
+      summary: Atomically resolve an event await and resume its parent
+      description: >-
+        Trusted Execution event-dispatch lane. It accepts only an API-key or
+        Unix-socket service identity with await.resolve_system permission. The
+        pending await transition and suspended-parent wakeup, or the
+        pending-resume marker when resolution wins before suspension, commit
+        atomically. Exact event replay converges the parent again; a different
+        event cannot replace the recorded winner.
+      operationId: resolveAwaitAndResume
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ResolveAwaitAndResumeRequest" }
+      responses:
+        "200":
+          description: Await resolution and parent-run state have converged
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ResolveAwaitAndResumeResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/{workspace}/awaits/resolve-run-outcome:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+    post:
+      tags: [Awaits]
+      summary: Atomically resolve a run.finished await and resume its parent
+      description: >-
+        Trusted runtime-host lane. It accepts only an API-key or Unix-socket
+        service identity with await.resolve_system permission. The pending
+        await transition and suspended-parent wakeup (or pending-resume marker)
+        commit atomically. Exact event replay converges the parent again; an
+        actor-rejected co-waiter is a successful no-op and remains pending.
+      operationId: resolveRunOutcomeAwaitAndResume
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ResolveRunOutcomeAwaitRequest" }
+      responses:
+        "200":
+          description: Await resolution converged or was an intentional no-op
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ResolveRunOutcomeAwaitResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
   /api/v1/{workspace}/awaits/{instance_key}:
     parameters:
       - $ref: "#/components/parameters/Workspace"
@@ -4611,13 +5505,15 @@ paths:
       - $ref: "#/components/parameters/AwaitInstanceKey"
     post:
       tags: [Awaits]
-      summary: Resolve one pending await as satisfied (actor-predicated lane)
+      summary: Legacy service-only split resolution as satisfied
       description: >-
-        Transitions pending -> satisfied, persisting the verified actor and
-        the size-capped resume payload. Only status=satisfied is accepted
-        here — the actor predicate runs on this lane. timed_out/cancelled
-        require the privileged resolve-system route. Idempotent: resolving an
-        already-terminal await returns resume=false.
+        Compatibility lane for an authenticated API-key or Unix-socket
+        service identity. Transitions pending -> satisfied, persisting the
+        service-verified semantic event actor and size-capped resume payload.
+        Only status=satisfied is accepted here; timed_out/cancelled require
+        resolve-system. New dispatchers use the atomic resolve-and-resume
+        command instead. Idempotent: an already-terminal await returns
+        resume=false.
       operationId: resolveAwait
       requestBody:
         required: true
@@ -4645,13 +5541,13 @@ paths:
       - $ref: "#/components/parameters/AwaitInstanceKey"
     post:
       tags: [Awaits]
-      summary: System-only await resolution (timed_out or cancelled)
+      summary: Legacy service-only system resolution (timed_out or cancelled)
       description: >-
-        Privileged lane for the timeout sweeper and the cancel cascade,
-        gated by the await.resolve_system permission (admin/maintainer
-        keys only). Accepts status timed_out or cancelled exclusively;
-        satisfied stays on the public resolve route where the actor
-        predicate runs.
+        Compatibility lane for an authenticated API-key or Unix-socket
+        service identity with await.resolve_system. Accepts status timed_out
+        or cancelled exclusively; satisfied stays on the actor-predicated
+        resolve route. New timeout dispatchers use the atomic
+        resolve-and-resume command.
       operationId: resolveAwaitSystem
       requestBody:
         required: true
@@ -4716,11 +5612,13 @@ paths:
       tags: [Awaits]
       summary: Resume a suspended driver run after its await resolved
       description: >-
-        suspended_awaiting_event -> queued, recording the resolving event.
-        Tolerant of still-running runs (pending->suspend window): the run then
-        stays running with a pending-resume marker and the response status
-        reflects that. Of two racing resumes exactly one wins; the loser
-        gets 409 invalid_transition.
+        Service-only compatibility command. The await must belong to this run,
+        be satisfied or timed_out, and name the exact winning event.
+        suspended_awaiting_event -> queued records that event. A still-running
+        run may advance its pending-resume marker only to a higher await
+        ordinal, preserving old-Loom pending->suspend behavior without letting
+        delayed retries move execution backward. New dispatchers use the
+        atomic resolve-and-resume command.
       operationId: resumeDriverRun
       requestBody:
         required: true
@@ -4737,6 +5635,8 @@ paths:
                 $ref: "#/components/schemas/DriverRun"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
@@ -6276,6 +7176,24 @@ components:
         type: string
         maxLength: 128
 
+    AutomationIdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: >-
+        Durable Automation reservation, cron-claim, or delivery-transition identity. Reuse
+        with the same immutable event content returns the original result;
+        reuse with different immutable content returns automation_idempotency_conflict.
+        Binding revisions, Catalog guards, and the workflow execution-owner
+        node/lease/fence tuple are first-commit preconditions and are excluded
+        from the replay fingerprint. The emitting run remains immutable event
+        identity across an owner handoff.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+        pattern: '^[!-~]+$'
+
     EntityName:
       name: name
       in: path
@@ -7453,7 +8371,7 @@ components:
 
     TriggerDeliveryStatus:
       type: string
-      enum: [accepted, rejected, duplicate, queued, dispatched, failed, replayed]
+      enum: [accepted, rejected, duplicate, queued, dispatched, failed, replayed, superseded, held]
 
     ActionLedgerStatus:
       type: string
@@ -7660,7 +8578,47 @@ components:
         capabilities:
           type: array
           items: { type: string }
-          example: [workflow_catalog.version_lifecycle.v1]
+          example: [automation.trigger_admission.v1, execution.await_atomic_resume.v1, workflow_catalog.version_lifecycle.v1]
+
+    AutomationErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum:
+                - automation_idempotency_required
+                - automation_invalid_admission
+                - automation_route_not_found
+                - automation_parent_run_not_found
+                - automation_execution_owner_conflict
+                - automation_idempotency_conflict
+                - automation_binding_snapshot_conflict
+                - automation_catalog_snapshot_conflict
+                - automation_hop_depth_exceeded
+                - automation_catalog_version_unavailable
+                - automation_fanout_limit_exceeded
+                - automation_admission_unavailable
+                - automation_admission_replay_not_found
+                - automation_delivery_not_found
+                - automation_delivery_not_dispatchable
+                - automation_delivery_transition_conflict
+                - automation_payload_digest_mismatch
+                - automation_binding_not_found
+                - automation_managed_binding_conflict
+                - automation_binding_dispatch_replay_not_found
+                - automation_cron_occurrence_not_found
+                - automation_cron_completion_conflict
+            message: { type: string }
+            meta:
+              type: object
+              additionalProperties: { type: string }
 
     DriverVersionLifecycleRequest:
       type: object
@@ -8237,6 +9195,7 @@ components:
 
     CreateTriggerBindingRequest:
       type: object
+      additionalProperties: false
       required: [binding_id, name, source_kind, driver_id, driver_version_id]
       properties:
         binding_id: { type: string }
@@ -8255,7 +9214,6 @@ components:
         driver_id: { type: string }
         driver_version_id: { type: string }
         target_entrypoint: { type: string }
-        target_agent_service_id: { type: string }
         concurrency_policy:
           $ref: "#/components/schemas/TriggerBindingConcurrencyPolicy"
         idempotency_policy: { type: string }
@@ -8267,6 +9225,7 @@ components:
 
     UpdateTriggerBindingRequest:
       type: object
+      additionalProperties: false
       properties:
         name: { type: string }
         source_kind: { type: string }
@@ -8283,7 +9242,6 @@ components:
         driver_id: { type: string }
         driver_version_id: { type: string }
         target_entrypoint: { type: string }
-        target_agent_service_id: { type: string }
         concurrency_policy:
           $ref: "#/components/schemas/TriggerBindingConcurrencyPolicy"
         idempotency_policy: { type: string }
@@ -8308,9 +9266,10 @@ components:
       type: string
       enum: [external, workflow, system]
       description: >-
-        Server-stamped event provenance: webhook ingest stamps external
-        (hop_depth 0), the workflow events API stamps workflow
-        (hop_depth parent+1, capped), system schedulers stamp system.
+        Server-stamped event provenance: webhook ingest and the trusted Loom
+        session-attestation lane stamp external (hop_depth 0), the workflow
+        events API stamps workflow (hop_depth parent+1, capped), and system
+        schedulers stamp system.
 
     TriggerEvent:
       type: object
@@ -8319,11 +9278,19 @@ components:
         workspace_key: { type: string }
         event_id: { type: string }
         trigger_binding_id: { type: string }
+        route_key: { type: string }
         source_kind: { type: string }
         source_event_id: { type: string }
         event_type: { type: string }
         subject_ref: { type: string }
         actor_ref: { type: string }
+        emitting_run_id:
+          type: string
+          description: Server-derived emitting DriverRun for workflow-originated events.
+        parent_event_id:
+          type: string
+          description: Server-derived parent TriggerEvent used to calculate durable hop depth.
+        epic_id: { type: string }
         origin:
           $ref: "#/components/schemas/TriggerEventOrigin"
         hop_depth:
@@ -8337,9 +9304,18 @@ components:
         raw_payload_digest: { type: string }
         signature_status: { type: string }
         replay_of_event_id: { type: string }
+        payload_base64:
+          type: string
+          format: byte
+          description: Standard-base64 encoding of the exact immutable payload bytes.
+        subject_attrs:
+          type: object
+          maxProperties: 64
+          additionalProperties: { type: string }
 
     CreateTriggerEventRequest:
       type: object
+      additionalProperties: false
       required: [source_kind, event_type]
       properties:
         event_id: { type: string }
@@ -8351,14 +9327,22 @@ components:
         actor_ref: { type: string }
         origin:
           type: string
-          enum: [workflow, system]
+          enum: [workflow, system, external]
           description: >-
             Provenance lane. Defaults to workflow (hop_depth derived
-            server-side from parent_event_id, capped). "external" is reserved
-            for the webhook ingest path and rejected here.
+            server-side from parent_event_id, capped). External is a narrow
+            operator-only service attestation: signature_status must be
+            "session" and actor_ref must name the Loom-authenticated user.
+            Fleet trusts the authenticated Loom service as the attester and
+            never accepts this lane from human bearer/header authentication.
+            Reserved system actor refs and the run.finished event type are
+            rejected on the external lane.
         parent_event_id:
           type: string
           description: Trigger event whose handling produced this workflow-originated event.
+        epic_id:
+          type: string
+          description: Optional durable epic correlation identifier.
         occurred_at: { type: string, format: date-time }
         received_at: { type: string, format: date-time }
         idempotency_key: { type: string }
@@ -8366,6 +9350,10 @@ components:
         raw_payload_digest: { type: string }
         signature_status: { type: string }
         replay_of_event_id: { type: string }
+        payload_base64:
+          type: string
+          format: byte
+          description: Standard-base64 encoding of the exact immutable payload bytes.
 
     ListTriggerEventsResponse:
       type: object
@@ -8386,6 +9374,36 @@ components:
         delivery_id: { type: string }
         trigger_event_id: { type: string }
         trigger_binding_id: { type: string }
+        driver_id:
+          type: string
+          description: Admission-time Catalog Driver snapshot; retries do not retarget it.
+        driver_version_id:
+          type: string
+          description: Admission-time active Driver version snapshot; retries do not retarget it.
+        target_entrypoint:
+          type: string
+          description: Admission-time binding target; retries do not reload the binding.
+        target_agent_service_id:
+          type: string
+          description: Admission-time agent-service target; retries do not reload the binding.
+        source_kind:
+          type: string
+          description: Admission-time binding source kind.
+        concurrency_policy:
+          allOf:
+            - $ref: "#/components/schemas/TriggerBindingConcurrencyPolicy"
+          description: Admission-time concurrency policy snapshot.
+        retry_max_attempts:
+          type: integer
+          minimum: 0
+          description: Admission-time retry budget snapshot.
+        retry_backoff_seconds:
+          type: integer
+          minimum: 0
+          description: Admission-time retry backoff snapshot.
+        subject_key:
+          type: string
+          description: Admission-time rendered concurrency subject snapshot.
         status:
           $ref: "#/components/schemas/TriggerDeliveryStatus"
         rejection_reason: { type: string }
@@ -8440,6 +9458,500 @@ components:
         next_retry_at: { type: string, format: date-time }
         error_class: { type: string }
         driver_run_id: { type: string }
+
+    TriggerActorFilter:
+      type: object
+      additionalProperties: false
+      properties:
+        exclude_actor_kinds:
+          type: array
+          items: { type: string, enum: [external, workflow, system] }
+        allow_actors:
+          type: array
+          items: { type: string }
+
+    AutomationBindingTarget:
+      type: object
+      additionalProperties: false
+      required:
+        [workspace_key, binding_id, source_kind, driver_id, concurrency_policy,
+         retry_max_attempts, retry_backoff_seconds, enabled]
+      properties:
+        workspace_key: { type: string }
+        binding_id: { type: string, minLength: 1 }
+        route_key: { type: string }
+        event_type_patterns:
+          type: array
+          items: { type: string }
+        source_kind: { type: string }
+        source_ref: { type: string }
+        driver_id: { type: string, minLength: 1 }
+        target_entrypoint: { type: string }
+        target_agent_service_id: { type: string }
+        concurrency_policy: { $ref: "#/components/schemas/TriggerBindingConcurrencyPolicy" }
+        subject_key_template: { type: string }
+        actor_filter:
+          allOf:
+            - $ref: "#/components/schemas/TriggerActorFilter"
+          description: Loom applies this before Catalog resolution; Fleet revalidates it during reservation.
+        retry_max_attempts: { type: integer, minimum: 0 }
+        retry_backoff_seconds: { type: integer, minimum: 0 }
+        enabled: { type: boolean, enum: [true] }
+
+    AutomationManagedBindingSnapshotRequest:
+      type: object
+      additionalProperties: false
+      required:
+        [expected_target_agent_service_id, expected_route_key, expected_created_at, expected_updated_at]
+      properties:
+        expected_target_agent_service_id:
+          type: string
+          minLength: 1
+          description: Exact AgentService owner from the previously committed snapshot.
+        expected_route_key:
+          type: string
+          description: Exact route identity from the previously committed snapshot.
+        expected_created_at:
+          type: string
+          format: date-time
+          description: Exact creation timestamp identifying the binding generation.
+        expected_updated_at:
+          type: string
+          format: date-time
+          description: Exact update timestamp used for optimistic concurrency.
+
+    AutomationManagedBindingReplaceRequest:
+      type: object
+      additionalProperties: false
+      required:
+        [expected_target_agent_service_id, expected_route_key, expected_created_at, expected_updated_at, binding]
+      properties:
+        expected_target_agent_service_id:
+          type: string
+          minLength: 1
+        expected_route_key: { type: string }
+        expected_created_at: { type: string, format: date-time }
+        expected_updated_at: { type: string, format: date-time }
+        binding: { $ref: "#/components/schemas/TriggerBinding" }
+
+    AutomationUnmanagedBindingSnapshotRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_route_key, expected_created_at, expected_updated_at]
+      properties:
+        expected_route_key:
+          type: string
+          description: Exact route identity from the previously committed snapshot.
+        expected_created_at:
+          type: string
+          format: date-time
+          description: Exact creation timestamp identifying the binding generation.
+        expected_updated_at:
+          type: string
+          format: date-time
+          description: Exact update timestamp used for optimistic concurrency.
+
+    AutomationUnmanagedBindingReplaceRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_route_key, expected_created_at, expected_updated_at, binding]
+      properties:
+        expected_route_key: { type: string }
+        expected_created_at: { type: string, format: date-time }
+        expected_updated_at: { type: string, format: date-time }
+        binding: { $ref: "#/components/schemas/TriggerBinding" }
+
+    AutomationBindingMatchSnapshot:
+      type: object
+      additionalProperties: false
+      required: [workspace_key, route_key, binding_set_revision, bindings]
+      properties:
+        workspace_key: { type: string }
+        route_key: { type: string }
+        binding_set_revision:
+          type: integer
+          format: int64
+          minimum: 1
+        bindings:
+          type: array
+          maxItems: 64
+          items: { $ref: "#/components/schemas/AutomationBindingTarget" }
+
+    AutomationEffectiveVersionGuard:
+      type: object
+      additionalProperties: false
+      required: [binding_id, driver_id, driver_revision, version_id, source_digest, bundle_digest]
+      properties:
+        binding_id: { type: string, minLength: 1 }
+        driver_id: { type: string, minLength: 1 }
+        driver_revision:
+          type: integer
+          format: int64
+          minimum: 1
+        version_id: { type: string, minLength: 1 }
+        source_digest: { type: string, minLength: 1 }
+        bundle_digest: { type: string, minLength: 1 }
+
+    AutomationAdmissionReservationRequest:
+      type: object
+      additionalProperties: false
+      description: >-
+        Immutable event content plus optimistic binding and Catalog preconditions.
+        workspace, route, origin, hop depth, emitting run, trust, and approval
+        are server-derived and intentionally absent. Workflow admission also
+        carries the server-verified execution owner tuple; external and system
+        routes reject those three fields. A replay probe supplies replay_only=true
+        and the same immutable event content while omitting mutable binding and
+        Catalog preconditions. External and workflow routes reject
+        event_type=run.finished and actor_ref values in the reserved system or
+        system:* actor namespace. The system route admits run.finished only
+        with actor_ref=system and a canonical source_event_id beginning with
+        run-finished:.
+      required: [event_type]
+      oneOf:
+        - required: [binding_set_revision, matched_binding_ids, effective_versions]
+        - required: [replay_only]
+      properties:
+        replay_only:
+          type: boolean
+          enum: [true]
+          description: Return only an exact committed replay; never reserve an Event or Delivery.
+        binding_set_revision:
+          type: integer
+          format: int64
+          minimum: 1
+        effective_versions:
+          type: array
+          maxItems: 64
+          description: >-
+            Effective Catalog guards exactly for legs that survive actor
+            filtering. Empty is valid when every matched leg is durably rejected.
+          items: { $ref: "#/components/schemas/AutomationEffectiveVersionGuard" }
+        matched_binding_ids:
+          type: array
+          minItems: 1
+          maxItems: 64
+          description: Exact-route binding first, followed by pattern matches sorted by binding ID.
+          items: { type: string, minLength: 1 }
+        node_id:
+          type: string
+          minLength: 1
+          description: Required only for workflow admission; verified owner node for the emitting run.
+        lease_id:
+          type: string
+          minLength: 1
+          description: Required only for workflow admission; verified owner lease for the emitting run.
+        fencing_token:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Required only for workflow admission; verified owner fence for the emitting run.
+        source_event_id:
+          type: string
+          maxLength: 512
+          description: >-
+            Immutable provider identity. System run.finished admission requires
+            this value to begin with run-finished:.
+        event_type:
+          type: string
+          minLength: 1
+          maxLength: 256
+          description: External and workflow admission cannot assert the reserved run.finished value.
+        subject_ref: { type: string, maxLength: 1024 }
+        actor_ref:
+          type: string
+          maxLength: 512
+          description: >-
+            External and workflow admission cannot assert system or system:*;
+            system run.finished admission requires exactly system.
+        occurred_at: { type: string, format: date-time }
+        raw_payload_ref: { type: string, maxLength: 2048 }
+        raw_payload_digest: { type: string }
+        payload_base64:
+          type: string
+          format: byte
+          description: Standard-base64 exact payload bytes; decoded bytes must be valid JSON.
+        subject_attrs:
+          type: object
+          maxProperties: 64
+          additionalProperties: { type: string }
+
+    AutomationNonWorkflowAdmissionReservationRequest:
+      allOf:
+        - $ref: "#/components/schemas/AutomationAdmissionReservationRequest"
+        - not:
+            anyOf:
+              - required: [node_id]
+              - required: [lease_id]
+              - required: [fencing_token]
+      description: >-
+        External and system admission reject all execution-owner fields. The
+        shared immutable event schema also documents each lane's reserved
+        run.finished and system actor identity rules.
+
+    AutomationWorkflowAdmissionReservationRequest:
+      allOf:
+        - $ref: "#/components/schemas/AutomationAdmissionReservationRequest"
+        - required: [node_id, lease_id, fencing_token]
+      description: >-
+        Workflow admission requires the server-verified execution owner tuple;
+        the run identity itself remains server-derived from the route. It cannot
+        assert run.finished or the reserved system or system:* actor namespace.
+
+    AutomationDeliveryResult:
+      type: object
+      additionalProperties: false
+      required:
+        [workspace_key, delivery_id, trigger_event_id, trigger_binding_id, status, driver_id, target_entrypoint,
+         source_kind, concurrency_policy, retry_max_attempts, retry_backoff_seconds,
+         attempt, created_at, updated_at]
+      properties:
+        workspace_key: { type: string }
+        delivery_id: { type: string }
+        trigger_event_id: { type: string }
+        trigger_binding_id: { type: string }
+        status: { $ref: "#/components/schemas/TriggerDeliveryStatus" }
+        rejection_reason: { type: string }
+        driver_id: { type: string }
+        driver_version_id:
+          type: string
+          description: Admission-time Catalog version snapshot.
+        target_entrypoint: { type: string }
+        target_agent_service_id: { type: string }
+        source_kind: { type: string }
+        concurrency_policy: { $ref: "#/components/schemas/TriggerBindingConcurrencyPolicy" }
+        retry_max_attempts: { type: integer, minimum: 0 }
+        retry_backoff_seconds: { type: integer, minimum: 0 }
+        subject_key: { type: string }
+        driver_run_id:
+          type: string
+          description: Execution-owned run linked by a later delivery transition; absent on reservation.
+        attempt: { type: integer, minimum: 1 }
+        next_retry_at: { type: string, format: date-time, nullable: true }
+        error_class: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    AutomationAdmissionReservationResult:
+      type: object
+      additionalProperties: false
+      required: [event, deliveries, effective_versions, replayed]
+      properties:
+        event: { $ref: "#/components/schemas/TriggerEvent" }
+        deliveries:
+          type: array
+          items: { $ref: "#/components/schemas/AutomationDeliveryResult" }
+        effective_versions:
+          type: array
+          maxItems: 64
+          description: >-
+            Immutable Catalog guards committed for accepted deliveries. Replays
+            return this snapshot so dispatch does not consult live activation.
+          items: { $ref: "#/components/schemas/AutomationEffectiveVersionGuard" }
+        replayed: { type: boolean }
+
+    AutomationCronClaimRequest:
+      type: object
+      additionalProperties: false
+      required: [before, claim_until]
+      properties:
+        before:
+          type: string
+          format: date-time
+          description: Stable due cutoff included in the idempotent claim fingerprint.
+        claim_until:
+          type: string
+          format: date-time
+          description: Reclaim boundary, after before and no more than five minutes later.
+        limit: { type: integer, minimum: 1, maximum: 1000, default: 100 }
+
+    AutomationCronOccurrence:
+      type: object
+      additionalProperties: false
+      required: [workspace_key, binding_id, occurrence_id, occurred_at]
+      properties:
+        workspace_key: { type: string }
+        binding_id: { type: string, minLength: 1 }
+        route_key: { type: string }
+        occurrence_id:
+          type: string
+          pattern: '^cron:'
+          description: Stable binding and scheduled-UTC-instant identity.
+        occurred_at: { type: string, format: date-time }
+
+    AutomationCronClaimResponse:
+      type: object
+      additionalProperties: false
+      required: [occurrences, count]
+      properties:
+        occurrences:
+          type: array
+          items: { $ref: "#/components/schemas/AutomationCronOccurrence" }
+        count: { type: integer, minimum: 0 }
+
+    AutomationCronCompletionStatus:
+      type: string
+      enum: [admitted, dropped, failed]
+
+    AutomationCronCompletionRequest:
+      type: object
+      additionalProperties: false
+      required: [binding_id, status]
+      properties:
+        binding_id: { type: string, minLength: 1 }
+        status: { $ref: "#/components/schemas/AutomationCronCompletionStatus" }
+        error_class:
+          type: string
+          maxLength: 256
+          description: Empty for admitted; reason or failure class for dropped/failed.
+
+    AutomationDeliveryClaimRequest:
+      type: object
+      additionalProperties: false
+      required: [before, claim_until]
+      properties:
+        before:
+          type: string
+          format: date-time
+          description: Stable due cutoff supplied by the caller and included in the replay fingerprint.
+        claim_until:
+          type: string
+          format: date-time
+          description: Bounded claim lease, after before and no more than five minutes later.
+        limit: { type: integer, minimum: 1, maximum: 1000, default: 100 }
+
+    AutomationClaimedDelivery:
+      type: object
+      additionalProperties: false
+      required: [event, delivery]
+      properties:
+        event:
+          allOf:
+            - $ref: "#/components/schemas/TriggerEvent"
+          description: Durable admission envelope used for retry without caller reconstruction.
+        delivery:
+          allOf:
+            - $ref: "#/components/schemas/TriggerDelivery"
+          description: Includes every admission-time Driver, target, concurrency, and retry snapshot.
+
+    ClaimDueAutomationDeliveriesResponse:
+      type: object
+      additionalProperties: false
+      required: [deliveries, count]
+      properties:
+        deliveries:
+          type: array
+          items: { $ref: "#/components/schemas/AutomationClaimedDelivery" }
+        count: { type: integer, minimum: 0 }
+
+    AutomationDeliveryDispatchRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_status, expected_attempt]
+      properties:
+        expected_status:
+          type: string
+          enum: [accepted, failed, held]
+        expected_attempt: { type: integer, minimum: 1 }
+
+    AutomationDeliveryDispatchOutcome:
+      type: string
+      enum: [run, busy, reused, superseded]
+
+    AutomationBindingDispatchRequest:
+      type: object
+      additionalProperties: false
+      description: >-
+        A fresh dispatch supplies effective_version. An authenticated replay
+        probe supplies replay_only=true with the same immutable caller intent
+        but no effective_version; it can only return a prior committed result.
+      oneOf:
+        - required: [effective_version]
+        - required: [replay_only]
+      properties:
+        replay_only:
+          type: boolean
+          enum: [true]
+          description: Return only an intent-matching committed replay; never create a run.
+        effective_version: { $ref: "#/components/schemas/AutomationEffectiveVersionGuard" }
+        subject_ref: { type: string, maxLength: 1024 }
+        epic_id: { type: string }
+        actor_ref: { type: string, maxLength: 512 }
+        raw_payload_ref: { type: string, maxLength: 2048 }
+        payload_base64:
+          type: string
+          format: byte
+          description: Standard-base64 exact payload bytes; decoded bytes must be valid JSON.
+        subject_attrs:
+          type: object
+          maxProperties: 64
+          additionalProperties: { type: string }
+
+    AutomationBindingDispatchResult:
+      type: object
+      additionalProperties: false
+      required: [outcome, run_reused, replayed]
+      properties:
+        driver_run:
+          allOf:
+            - $ref: "#/components/schemas/DriverRun"
+          description: Full newly-created, reused, or superseded DriverRun; absent for busy outcomes.
+        outcome: { $ref: "#/components/schemas/AutomationDeliveryDispatchOutcome" }
+        busy_run_id:
+          type: string
+          description: Subject holder for forbid/queue busy outcomes.
+        superseded_run_ids:
+          type: array
+          items: { type: string }
+          description: Queued replace-policy siblings atomically canceled by this dispatch.
+        run_reused: { type: boolean }
+        replayed:
+          type: boolean
+          description: True only for the same workspace, binding, and Idempotency-Key replay.
+
+    AutomationDeliveryDispatchResult:
+      type: object
+      additionalProperties: false
+      required: [event, delivery, outcome, run_reused, replayed]
+      properties:
+        event:
+          allOf:
+            - $ref: "#/components/schemas/TriggerEvent"
+          description: Immutable admitted Event; payload_base64 preserves exact bytes.
+        delivery: { $ref: "#/components/schemas/AutomationDeliveryResult" }
+        driver_run:
+          allOf:
+            - $ref: "#/components/schemas/DriverRun"
+          description: Newly created or one-active-per-epic reused run; absent for busy outcomes.
+        outcome: { $ref: "#/components/schemas/AutomationDeliveryDispatchOutcome" }
+        busy_run_id:
+          type: string
+          description: Subject holder for forbid/queue busy outcomes.
+        superseded_run_ids:
+          type: array
+          items: { type: string }
+          description: Queued replace-policy siblings atomically canceled by this dispatch.
+        run_reused:
+          type: boolean
+          description: True when one_active_per_epic or the stable delivery run identity reused a run.
+        replayed:
+          type: boolean
+          description: True only for the same workspace, delivery, and Idempotency-Key replay.
+
+    AutomationDeliveryTransitionRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_status, expected_attempt, status]
+      properties:
+        expected_status: { $ref: "#/components/schemas/TriggerDeliveryStatus" }
+        expected_attempt: { type: integer, minimum: 1 }
+        status: { $ref: "#/components/schemas/TriggerDeliveryStatus" }
+        driver_run_id:
+          type: string
+          description: Required only for a legacy dispatched transition; identifies an already-created run.
+        rejection_reason: { type: string }
+        next_retry_at: { type: string, format: date-time }
+        error_class: { type: string }
 
     ActionLedger:
       type: object
@@ -8554,6 +10066,9 @@ components:
             Agent service targeted by the trigger binding at dispatch time
             (empty for runs without an attached agent service). The runs-list
             agent_service_id filter matches on this field.
+        subject_key:
+          type: string
+          description: Rendered trigger-concurrency subject stamped at dispatch time.
         parent_run_id:
           type: string
           description: >-
@@ -8577,6 +10092,8 @@ components:
         idempotency_key: { type: string }
         input:
           $ref: "#/components/schemas/StringMap"
+        payload:
+          description: Exact JSON run payload used by current DriverRun responses.
         output:
           $ref: "#/components/schemas/StringMap"
         summary: { type: string }
@@ -8623,6 +10140,198 @@ components:
             $ref: "#/components/schemas/DriverRun"
         count:
           type: integer
+
+    DriverRunOutcome:
+      type: object
+      additionalProperties: false
+      required: [workspace_key, run_id, status, occurred_at, attempt]
+      properties:
+        workspace_key: { type: string }
+        run_id:
+          type: string
+          minLength: 1
+          description: Opaque DriverRun identifier preserved exactly.
+        status:
+          type: string
+          enum: [completed, failed, needs_review, cancelled]
+        summary: { type: string }
+        error_class: { type: string }
+        parent_run_id: { type: string }
+        parent_event_id: { type: string }
+        epic_id: { type: string }
+        occurred_at: { type: string, format: date-time }
+        attempt: { type: integer, minimum: 1 }
+
+    DriverRunOutcomeClaimRequest:
+      type: object
+      additionalProperties: false
+      required: [claim_id, before, claim_until]
+      properties:
+        claim_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^[A-Za-z0-9][A-Za-z0-9_.:-]*$'
+        before:
+          type: string
+          format: date-time
+          description: Due cutoff supplied by the runtime host.
+        claim_until:
+          type: string
+          format: date-time
+          description: Lease expiry after before and no more than five minutes later.
+        limit: { type: integer, minimum: 1, maximum: 500, default: 50 }
+
+    DriverRunOutcomeClaimResponse:
+      type: object
+      additionalProperties: false
+      required: [outcomes, count]
+      properties:
+        outcomes:
+          type: array
+          items: { $ref: "#/components/schemas/DriverRunOutcome" }
+        count: { type: integer, minimum: 0 }
+
+    DriverRunOutcomeCompleteRequest:
+      type: object
+      additionalProperties: false
+      required: [run_id, claim_id]
+      properties:
+        run_id:
+          type: string
+          minLength: 1
+          description: Opaque DriverRun identifier; preserved exactly without URL-segment constraints.
+        claim_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^[A-Za-z0-9][A-Za-z0-9_.:-]*$'
+        completed_at: { type: string, format: date-time }
+
+    DriverRunOutcomeCompleteResponse:
+      type: object
+      additionalProperties: false
+      required: [completed]
+      properties:
+        completed: { type: boolean, enum: [true] }
+
+    DriverRunOutcomeRetryRequest:
+      type: object
+      additionalProperties: false
+      required: [run_id, claim_id, available_at]
+      properties:
+        run_id:
+          type: string
+          minLength: 1
+          description: Opaque DriverRun identifier; preserved exactly without URL-segment constraints.
+        claim_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^[A-Za-z0-9][A-Za-z0-9_.:-]*$'
+        available_at: { type: string, format: date-time }
+        error: { type: string, maxLength: 1024 }
+
+    DriverRunOutcomeRetryResponse:
+      type: object
+      additionalProperties: false
+      required: [retried]
+      properties:
+        retried: { type: boolean, enum: [true] }
+
+    AwaitEventNotification:
+      type: object
+      additionalProperties: false
+      required: [durable_event_id, canonical_event_id, event, attempt, payload_oversized, payload_size]
+      properties:
+        durable_event_id:
+          type: string
+          minLength: 1
+          description: Fleet TriggerEvent.event_id used for queue completion and retry.
+        canonical_event_id:
+          type: string
+          minLength: 1
+          description: TriggerEvent.source_event_id when nonempty, otherwise event_id.
+        event:
+          $ref: "#/components/schemas/TriggerEvent"
+        attempt: { type: integer, minimum: 1 }
+        payload_oversized:
+          type: boolean
+          description: True when payload_size exceeds the await cap and event.payload_base64 is omitted.
+        payload_size: { type: integer, minimum: 0 }
+
+    AwaitEventNotificationClaimRequest:
+      type: object
+      additionalProperties: false
+      required: [claim_id, before, claim_until]
+      properties:
+        claim_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^[A-Za-z0-9][A-Za-z0-9_.:-]*$'
+        before: { type: string, format: date-time }
+        claim_until:
+          type: string
+          format: date-time
+          description: Lease expiry after before and no more than five minutes later.
+        limit: { type: integer, minimum: 1, maximum: 500, default: 50 }
+
+    AwaitEventNotificationClaimResponse:
+      type: object
+      additionalProperties: false
+      required: [notifications, count]
+      properties:
+        notifications:
+          type: array
+          items: { $ref: "#/components/schemas/AwaitEventNotification" }
+        count: { type: integer, minimum: 0 }
+
+    AwaitEventNotificationCompleteRequest:
+      type: object
+      additionalProperties: false
+      required: [event_id, claim_id]
+      properties:
+        event_id:
+          type: string
+          minLength: 1
+          description: Opaque durable Fleet TriggerEvent.event_id.
+        claim_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^[A-Za-z0-9][A-Za-z0-9_.:-]*$'
+        completed_at: { type: string, format: date-time }
+
+    AwaitEventNotificationCompleteResponse:
+      type: object
+      additionalProperties: false
+      required: [completed]
+      properties:
+        completed: { type: boolean, enum: [true] }
+
+    AwaitEventNotificationRetryRequest:
+      type: object
+      additionalProperties: false
+      required: [event_id, claim_id, available_at]
+      properties:
+        event_id:
+          type: string
+          minLength: 1
+        claim_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^[A-Za-z0-9][A-Za-z0-9_.:-]*$'
+        available_at: { type: string, format: date-time }
+        error: { type: string, maxLength: 1024 }
+
+    AwaitEventNotificationRetryResponse:
+      type: object
+      additionalProperties: false
+      required: [retried]
+      properties:
+        retried: { type: boolean, enum: [true] }
 
     DriverRunOwnerRequest:
       type: object
@@ -9368,8 +11077,8 @@ components:
             by exact string equality only — no glob; '*' is a literal.
         actor_allow:
           type: array
-          items: { type: string }
-          description: Eligible-actor predicate; empty admits any actor.
+          items: { type: string, minLength: 1, pattern: '.*\S.*' }
+          description: Eligible-actor predicate; empty admits any actor; blank entries are rejected.
         deadline:
           type: string
           format: date-time
@@ -9397,7 +11106,7 @@ components:
         pattern: { type: string, minLength: 1 }
         actor_allow:
           type: array
-          items: { type: string }
+          items: { type: string, minLength: 1, pattern: '.*\S.*' }
         deadline: { type: string, format: date-time }
         registered_at: { type: string, format: date-time }
 
@@ -9414,6 +11123,66 @@ components:
             the row's status distinguishes satisfied from a timed-out or
             cancelled replay.
 
+    ResolveRunOutcomeAwaitRequest:
+      type: object
+      additionalProperties: false
+      required: [instance_key, event_id]
+      properties:
+        instance_key:
+          type: string
+          minLength: 1
+          description: Canonical parent run await-instance key.
+        event_id:
+          type: string
+          minLength: 1
+          pattern: '^run-finished:'
+          description: Stable run.finished event identity for idempotent replay.
+        payload:
+          description: >-
+            Arbitrary JSON resume payload. The encoded JSON bytes are rejected,
+            never truncated, above the 64 KiB await-resume cap.
+
+    ResolveAwaitAndResumeRequest:
+      type: object
+      additionalProperties: false
+      required: [instance_key, event_id, status]
+      properties:
+        instance_key:
+          type: string
+          minLength: 1
+          description: Canonical parent run await-instance key.
+        event_id:
+          type: string
+          minLength: 1
+          description: Stable admitted-event identity for idempotent replay.
+        status:
+          type: string
+          enum: [satisfied, timed_out]
+          description: >-
+            satisfied applies the verified event actor predicate; timed_out is
+            the trusted deadline-sweeper outcome.
+        actor:
+          type: string
+          description: Verified actor identity from the admitted event.
+        payload:
+          description: >-
+            Arbitrary JSON resume payload. The encoded JSON bytes are rejected,
+            never truncated, above the 64 KiB await-resume cap.
+
+    ResolveAwaitAndResumeResponse:
+      type: object
+      additionalProperties: false
+      required: [resolved]
+      properties:
+        resolved: { type: boolean, enum: [true] }
+
+    ResolveRunOutcomeAwaitResponse:
+      type: object
+      additionalProperties: false
+      required: [resolved]
+      properties:
+        resolved: { type: boolean, enum: [true] }
+
     ResolveAwaitRequest:
       type: object
       required: [event_id]
@@ -9421,7 +11190,9 @@ components:
         event_id: { type: string }
         status:
           $ref: "#/components/schemas/AwaitStatus"
-        actor: { type: string }
+        actor:
+          type: string
+          description: Semantic event actor asserted by the authenticated service caller.
         payload:
           description: Resume payload, rejected (never truncated) above the cap.
 

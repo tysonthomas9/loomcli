@@ -11,10 +11,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/app/workfloweventing"
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/trigger"
 )
 
 // fakeIssueBackend embeds the interface so only the methods the driver ops
@@ -34,6 +39,63 @@ type fakeIssueBackend struct {
 type fakeRelease struct {
 	id    string
 	actor string
+}
+
+// testWorkflowEventAuthorityProvider and testLegacyEventAdmission are
+// deliberately test-only compatibility wiring for the pre-Phase-3 memstore
+// route suites. Production driverapi has no InternalSource or TriggerRoutes
+// fallback.
+type testWorkflowEventAuthorityProvider struct{}
+
+func (testWorkflowEventAuthorityProvider) AuthorityForVerifiedRun(context.Context, workfloweventing.VerifiedRun) (authority.ExecutionAuthority, error) {
+	return authority.ExecutionAuthority{}, nil
+}
+
+type testLegacyEventAdmission struct{ st store.Store }
+
+func (adapter testLegacyEventAdmission) AdmitEvent(ctx context.Context, _ automation.EventAuthority, command automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
+	parent, err := adapter.st.DriverRuns().Get(ctx, command.WorkspaceKey, "run-1")
+	if err != nil {
+		return nil, err
+	}
+	sourceResult, err := (&trigger.InternalSource{Store: adapter.st}).Emit(ctx, command.WorkspaceKey, trigger.InternalEvent{
+		EventID: command.SourceEventID, EventType: command.EventType,
+		Origin: domain.TriggerEventOriginWorkflow, ParentEventID: parent.SourceRef,
+		EmittedByRunID: parent.RunID, SubjectRef: command.SubjectRef,
+		ActorRef: driverpkg.DriverRunActor(parent.RunID),
+		EpicID:   firstNonEmpty(parent.EpicID, driverpkg.DriverRunPayloadEpicID(parent.Payload)),
+		Payload:  command.Payload, SubjectAttrs: command.SubjectAttrs,
+	})
+	if err != nil {
+		return nil, err
+	}
+	result := &automation.AdmissionResult{
+		Dropped: sourceResult.Dropped, DropReason: sourceResult.DropReason,
+		EventType: sourceResult.EventType, RouteKey: sourceResult.RouteKey,
+		Origin: sourceResult.Origin, HopDepth: sourceResult.HopDepth,
+	}
+	if sourceResult.Dropped {
+		return result, nil
+	}
+	result.Event = &automation.Event{
+		WorkspaceKey: command.WorkspaceKey, SourceKind: automation.SourceKindInternal,
+		SourceEventID: command.SourceEventID, EventType: sourceResult.EventType,
+		RouteKey: sourceResult.RouteKey, SubjectRef: command.SubjectRef,
+		ActorRef: driverpkg.DriverRunActor(parent.RunID), EmittingRunID: parent.RunID,
+		ParentEventID: parent.SourceRef, EpicID: firstNonEmpty(parent.EpicID, driverpkg.DriverRunPayloadEpicID(parent.Payload)),
+		Origin: sourceResult.Origin, HopDepth: sourceResult.HopDepth,
+	}
+	if sourceResult.Dispatch != nil {
+		result.Deliveries = make([]*automation.Delivery, 0, len(sourceResult.Dispatch.Deliveries))
+		for _, delivery := range sourceResult.Dispatch.Deliveries {
+			result.Deliveries = append(result.Deliveries, &automation.Delivery{
+				DeliveryID: delivery.DeliveryID, TriggerBindingID: delivery.BindingID,
+				DriverRunID: delivery.RunID, Status: delivery.Status,
+				RejectionReason: delivery.RejectionReason,
+			})
+		}
+	}
+	return result, nil
 }
 
 func (f *fakeIssueBackend) Ready(_ context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
@@ -123,10 +185,15 @@ func newTestHarness(t *testing.T, apiToken string) *testHarness {
 	// header-quad/static-bearer tests double as proof the legacy path is
 	// unchanged when the token auth path is enabled.
 	runTokenKey := bytes.Repeat([]byte{0x42}, 32)
+	eventWorkflow, err := workfloweventing.New(testWorkflowEventAuthorityProvider{}, testLegacyEventAdmission{st: st})
+	if err != nil {
+		t.Fatalf("new test workflow eventing: %v", err)
+	}
 	module := NewModule(Config{
-		Store:       st,
-		APIToken:    apiToken,
-		RunTokenKey: runTokenKey,
+		Store:            st,
+		APIToken:         apiToken,
+		RunTokenKey:      runTokenKey,
+		WorkflowEventing: eventWorkflow,
 		IssueBackends: func(_, actor string) (backend.IssueBackend, error) {
 			fake.actor = actor
 			return fake, nil

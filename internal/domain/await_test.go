@@ -120,6 +120,9 @@ func TestAwaitInstanceValidateAt(t *testing.T) {
 		{"unscoped pattern", func(a *AwaitInstance) { a.Pattern = "github.pr.merged" }, ErrAwaitPatternUnscoped},
 		{"empty pattern", func(a *AwaitInstance) { a.Pattern = "" }, ErrAwaitPatternUnscoped},
 		{"unknown status", func(a *AwaitInstance) { a.Status = "unknown" }, ErrInvalid},
+		{"blank actor", func(a *AwaitInstance) { a.ActorAllow = []string{"  "} }, ErrInvalid},
+		{"noncanonical actor", func(a *AwaitInstance) { a.ActorAllow = []string{" alice"} }, ErrInvalid},
+		{"control actor", func(a *AwaitInstance) { a.ActorAllow = []string{"alice\nadmin"} }, ErrInvalid},
 		{"zero deadline", func(a *AwaitInstance) { a.Deadline = time.Time{} }, ErrAwaitTimeoutRequired},
 		{"past deadline", func(a *AwaitInstance) { a.Deadline = now.Add(-time.Minute) }, ErrAwaitTimeoutRequired},
 		{"deadline exactly now", func(a *AwaitInstance) { a.Deadline = now }, ErrAwaitTimeoutRequired},
@@ -214,6 +217,7 @@ func TestAwaitInstanceJSONRoundTrip(t *testing.T) {
 		RegisteredAt:       now,
 		Status:             AwaitSatisfied,
 		SatisfiedByEventID: "evt-9",
+		SatisfiedActor:     "user:tyson",
 		SatisfiedPayload:   json.RawMessage(`{"approved":true}`),
 		ResumedAt:          &resumed,
 	}
@@ -227,7 +231,7 @@ func TestAwaitInstanceJSONRoundTrip(t *testing.T) {
 	}
 	for _, want := range []string{
 		"workspaceKey", "instanceKey", "runID", "pattern", "actorAllow",
-		"deadline", "registeredAt", "status", "satisfiedByEventID",
+		"deadline", "registeredAt", "status", "satisfiedByEventID", "satisfiedActor",
 		"satisfiedPayload", "resumedAt",
 	} {
 		if _, ok := keys[want]; !ok {
@@ -240,6 +244,7 @@ func TestAwaitInstanceJSONRoundTrip(t *testing.T) {
 	}
 	if out.InstanceKey != in.InstanceKey || out.Status != in.Status ||
 		out.SatisfiedByEventID != in.SatisfiedByEventID ||
+		out.SatisfiedActor != in.SatisfiedActor ||
 		string(out.SatisfiedPayload) != string(in.SatisfiedPayload) ||
 		!out.Deadline.Equal(in.Deadline) || out.ResumedAt == nil || !out.ResumedAt.Equal(resumed) {
 		t.Errorf("round-trip mismatch: got %+v, want %+v", out, in)

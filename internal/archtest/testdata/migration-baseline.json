@@ -189,6 +189,211 @@
             "artifact_paths": ["docs/migrations/modular-monolith/07-phase-2-decisions-and-evidence.md"]
           }
         ]
+      },
+      {
+        "id": "phase3-automation-precommit-e8b73a2a6",
+        "loom_head": "e8b73a2a65f4a1c9fb6cd56653335d8e4a1c7bb7",
+        "fleetdb_head": "430dce8d9fcc9c48bc9d52613b78403b8aae19d4",
+        "openapi_sha256": "7b9abcdce6b47b553687f592253c3ed437b9ec03fe823e758738fb0bb4c8ebeb",
+        "recorded_at": "2026-07-16",
+        "runs": [
+          {
+            "id": "architecture-check",
+            "repository": "loom",
+            "command": ["go", "run", "./scripts/archcheck", "check"],
+            "environment": {
+              "set": ["GOCACHE=/tmp/go-build-cache", "GOMODCACHE=/tmp/go-mod-cache"],
+              "unset": [],
+              "notes": "Measured from Loom base e8b73a2a65f4 plus the Phase 3 pre-commit diff; no self-referential final commit identity is implied, and the final local commit ID is reported in the handoff."
+            },
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "All 11 profiles and the all-files AST pass accepted two active roots, 17 mutations, Store 88/77, 91 handler exceptions, 226 direct-write rows across 249 sites, 85 runtime components, 107 goroutine definitions, six measured performance records, and zero pending decisions."},
+            "artifact_paths": ["docs/migrations/modular-monolith/08-phase-3-decisions-and-evidence.md"]
+          },
+          {
+            "id": "browser-local-ui",
+            "repository": "loom",
+            "command": ["agent-browser", "--session", "loom-mm-phase3", "snapshot", "-i"],
+            "environment": {
+              "set": [],
+              "unset": [],
+              "notes": "One-time operator exchange POST 200; retained screenshots /tmp/loom-mm-phase3-ui/06-agent-history-after-trust-fix.png and /tmp/loom-mm-phase3-ui/07-final-run-now-completed.png."
+            },
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "UI Run now for s1-bug-fix returned 202 and run-history GET returned 200. Run automation-run-107e83e1e7a899fe76a407177cc8a33e completed on bug-fix-agent-v-b14ca933dc57 with summary bug-fix: no ready bug to claim; final browser console and error inspection was empty."},
+            "artifact_paths": ["docs/migrations/modular-monolith/08-phase-3-decisions-and-evidence.md"]
+          },
+          {
+            "id": "contract-snapshot-match",
+            "repository": "cross-repo",
+            "command": ["shasum", "-a", "256", "fleet-db-modular-monolith-phase3/api/openapi.yaml", "loomcli-modular-monolith-phase3/internal/infra/fleetdb/testdata/fleetdb-openapi.yaml"],
+            "environment": {"set": [], "unset": [], "notes": "Run from the rc-2 multi-repository workspace against the paired Phase 3 base-plus-pre-commit-diff sources."},
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "FleetDB source and Loom vendored OpenAPI were byte-identical at SHA-256 7b9abcdce6b47b553687f592253c3ed437b9ec03fe823e758738fb0bb4c8ebeb."},
+            "artifact_paths": ["docs/migrations/modular-monolith/08-phase-3-decisions-and-evidence.md"]
+          },
+          {
+            "id": "deterministic-local-mode-verify",
+            "repository": "cross-repo",
+            "command": ["make", "local-mode-verify"],
+            "environment": {
+              "set": ["LOCAL_MODE_API_PORT=8582", "LOCAL_MODE_COMPOSE_PROJECT=loomcli-mm-phase3", "LOCAL_MODE_FLEETDB_PORT=8580", "LOCAL_MODE_FLEETDB_SOURCE_ROOT=<paired-fleetdb-worktree>", "LOCAL_MODE_UI_PORT=8583"],
+              "unset": [],
+              "notes": "Checkout-scoped Podman Compose stack with the exact Loom, FleetDB, and pinned Flue worktrees."
+            },
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "The planner/coder task, session, transcript, completion, and diff assertions passed against the live run manifest."},
+            "artifact_paths": ["docs/migrations/modular-monolith/08-phase-3-decisions-and-evidence.md"]
+          },
+          {
+            "id": "fleetdb-gate",
+            "repository": "fleetdb",
+            "command": ["make", "gate"],
+            "environment": {
+              "set": ["ARTIFACTS_DIR=/tmp/fleet-phase3-gate-artifacts", "GOCACHE=/tmp/go-build-cache", "GOMODCACHE=/tmp/go-mod-cache"],
+              "unset": [],
+              "notes": "Final post-correction gate measured from FleetDB base 430dce8d9fcc plus the Phase 3 pre-commit diff; the final local commit ID is reported in the handoff."
+            },
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "The final post-correction gate passed static/lint, unit/race, Redis/Postgres integration/API/contracts, real-container E2E, harness, and 78.0 percent coverage, ending with Quality Gate PASSED."},
+            "artifact_paths": ["docs/migrations/modular-monolith/08-phase-3-decisions-and-evidence.md"]
+          },
+          {
+            "id": "local-mode-webhook-verify",
+            "repository": "cross-repo",
+            "command": ["make", "local-mode-webhook-verify"],
+            "environment": {
+              "set": ["LOCAL_MODE_API_PORT=8582", "LOCAL_MODE_COMPOSE_PROJECT=loomcli-mm-phase3", "LOCAL_MODE_FLEETDB_PORT=8580", "LOCAL_MODE_UI_PORT=8583"],
+              "unset": [],
+              "notes": "Same checkout-scoped stack as deterministic-local-mode-verify."
+            },
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "The signed webhook returned 202, created a durable pinned run, redacted the secret, and replayed an identical delivery idempotently."},
+            "artifact_paths": ["docs/migrations/modular-monolith/08-phase-3-decisions-and-evidence.md"]
+          },
+          {
+            "id": "loom-gate",
+            "repository": "loom",
+            "command": ["make", "gate"],
+            "environment": {
+              "set": ["FLEET_DB_BIN=/tmp/fleet-db-modular-monolith-phase3", "FLEET_DB_REPO=<paired-fleetdb-worktree>", "GOCACHE=/tmp/go-build-cache", "GOMODCACHE=/tmp/go-mod-cache", "HOME=<isolated-temporary-home>"],
+              "unset": ["LOOM_AGENT_NAME", "LOOM_AGENT_ROLE", "LOOM_AGENT_TERMINAL_ID", "LOOM_CONFIG_DIR", "LOOM_DESKTOP_DATA_DIR", "LOOM_FRONTEND_DIR", "LOOM_LOCAL_RUNTIME", "LOOM_NOTIFY_TOKEN", "LOOM_SESSION_ID", "LOOM_WEBUI_URL", "LOOM_WORKSPACE", "LOOM_WORKSPACE_RUNTIME_DIR"],
+              "notes": "The final aggregate gate used the rebuilt post-correction FleetDB binary at SHA-256 f5e91ea7a35665240ba9edbe2ec95d8d601b11704e6d5265367c9099e2a9ae58, the matching companion source, and an isolated HOME with inherited Loom desktop/runtime state removed."
+            },
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "The final post-correction Loom aggregate gate passed every Go and frontend gate against the exact paired FleetDB binary and matching companion source under the clean HOME/runtime environment."},
+            "artifact_paths": ["docs/migrations/modular-monolith/08-phase-3-decisions-and-evidence.md"]
+          },
+          {
+            "id": "paired-fleetdb-binary",
+            "repository": "cross-repo",
+            "command": ["shasum", "-a", "256", "/tmp/fleet-db-modular-monolith-phase3"],
+            "environment": {
+              "set": [],
+              "unset": [],
+              "notes": "Rebuilt from FleetDB base 430dce8d9fcc plus the post-correction Phase 3 pre-commit diff used by the successful local-browser manual dispatch."
+            },
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "The final paired FleetDB binary SHA-256 is f5e91ea7a35665240ba9edbe2ec95d8d601b11704e6d5265367c9099e2a9ae58."},
+            "artifact_paths": ["docs/migrations/modular-monolith/08-phase-3-decisions-and-evidence.md"]
+          },
+          {
+            "id": "public-route-cli-e2e",
+            "repository": "cross-repo",
+            "command": ["go", "test", "-tags=e2e", "./internal/webui/handlers/webhooks", "-run", "^TestE2E_AutomationPhase3RealFleetDBLoomHTTPAndCLI$", "-count=1", "-v"],
+            "environment": {
+              "set": ["FLEET_DB_REPO=<paired-fleetdb-worktree>", "GOCACHE=/tmp/go-build-cache", "GOMODCACHE=/tmp/go-mod-cache"],
+              "unset": [],
+              "notes": "Fresh real FleetDB and loom serve processes from the paired Phase 3 base-plus-pre-commit-diff sources."
+            },
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "In one post-hardening escalated run, the public binding-management, manual-run, signed-webhook, audit-read, idempotent-redelivery, CLI, and anonymous-denial journey passed in 42.47 seconds including its paired FleetDB build; the deterministic GitHub webhook E2E passed in 8.41 seconds."},
+            "artifact_paths": ["docs/migrations/modular-monolith/08-phase-3-decisions-and-evidence.md"]
+          },
+          {
+            "id": "terra-ui-review",
+            "repository": "loom",
+            "command": ["codex", "exec", "-m", "gpt-5.6-terra", "-i", "<approved-local-phase3-ui-screenshot>", "<UI review prompt>"],
+            "environment": {
+              "set": [],
+              "unset": [],
+              "notes": "This command would export a local screenshot to an external model and must not run until the user gives explicit informed approval."
+            },
+            "expected_skips": [],
+            "result": {"status": "not-recorded", "summary": "GPT-5.6 Terra review is not claimed because external screenshot export awaits explicit informed approval; this is an evidence-policy boundary, not a product failure."},
+            "artifact_paths": ["docs/migrations/modular-monolith/08-phase-3-decisions-and-evidence.md"]
+          },
+          {
+            "id": "webhook-performance",
+            "repository": "cross-repo",
+            "command": ["go", "test", "-tags=e2e", "./internal/webui/handlers/webhooks", "-run", "^TestE2E_AutomationPhase3WebhookPerformance$", "-count=1", "-v"],
+            "environment": {
+              "set": ["FLEET_DB_REPO=<paired-fleetdb-worktree>", "GOCACHE=/tmp/go-build-cache", "GOMODCACHE=/tmp/go-mod-cache"],
+              "unset": [],
+              "notes": "Thirty fresh unique signed webhook samples through real Loom and embedded Redis-backed FleetDB."
+            },
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "In the post-hardening escalated run, the test passed in 20.62 seconds at p50 6.314 ms and p95 19.023 ms with exactly 12 observed Loom-to-FleetDB requests for every sample."},
+            "artifact_paths": ["docs/migrations/modular-monolith/08-phase-3-decisions-and-evidence.md"]
+          }
+        ]
+      },
+      {
+        "id": "phase3-postcommit-audit-7f95b9bf1",
+        "loom_head": "7f95b9bf1c0cd4d6ab45fb10617189ec4ef5f048",
+        "fleetdb_head": "f1c4e11199c2c7cdab52cce55899af4df328fbcb",
+        "openapi_sha256": "7b9abcdce6b47b553687f592253c3ed437b9ec03fe823e758738fb0bb4c8ebeb",
+        "recorded_at": "2026-07-16",
+        "runs": [
+          {
+            "id": "audit-01-frontend-playwright-local-operator",
+            "repository": "loom",
+            "command": ["./node_modules/.bin/playwright", "test", "tests/e2e/workflow-catalog-local-operator.spec.ts", "--project=chromium", "--reporter=line"],
+            "environment": {
+              "set": ["PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/Applications/Chromium.app/Contents/MacOS/Chromium"],
+              "unset": [],
+              "notes": "Post-commit audit of the localOperatorSession path shared by the Workflow Catalog and Phase 3 agent/binding mutation clients."
+            },
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "All 3 scenarios passed in 3.8 seconds: one-time exchange and fragment erasure, raw-browser lifecycle denial, and workspace-switch authority clearing."},
+            "artifact_paths": ["docs/migrations/modular-monolith/08-phase-3-decisions-and-evidence.md"]
+          },
+          {
+            "id": "audit-02-loom-committed-capability-smoke",
+            "repository": "loom",
+            "command": ["go", "test", "./internal/modules/workflowcatalog", "./internal/modules/automation", "./internal/app/webhookingestion", "./internal/app/systemeventing", "./internal/app/workflowbinding", "./internal/app/workfloweventing", "./internal/platform/runtime", "./internal/cli/trigger"],
+            "environment": {
+              "set": ["GOCACHE=/tmp/go-build-cache", "GOMODCACHE=/tmp/go-mod-cache"],
+              "unset": [],
+              "notes": "Run from committed Loom implementation head 7f95b9bf1 with ephemeral loopback permission for the management-client fixture."
+            },
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "Workflow Catalog, Automation, all four named application workflows, runtime host, and HTTP-only trigger CLI packages passed from the committed source."},
+            "artifact_paths": ["docs/migrations/modular-monolith/08-phase-3-decisions-and-evidence.md"]
+          },
+          {
+            "id": "audit-03-fleetdb-committed-security-smoke",
+            "repository": "fleetdb",
+            "command": ["go", "test", "./cmd/fleet-db", "./internal/api", "./internal/storage", "-run", "Test(RedisAutomationCatalogEffectiveTrustParity|RedisAutomationCatalogMalformedApprovalCannotAuthorizeAtomicScripts|ResolveAwaitAndResumeAtomicGenericReplay|AutomationAdmissionReservationReservesRunOutcomeIdentity)", "-count=1"],
+            "environment": {
+              "set": ["GOCACHE=/tmp/go-build-cache", "GOMODCACHE=/tmp/go-mod-cache"],
+              "unset": [],
+              "notes": "Run from committed FleetDB implementation head f1c4e1119 with ephemeral miniredis loopback permission."
+            },
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "The effective-trust precedence, malformed-approval rejection, atomic generic await replay, and reserved run-outcome identity smoke tests passed from the committed source."},
+            "artifact_paths": ["docs/migrations/modular-monolith/08-phase-3-decisions-and-evidence.md"]
+          },
+          {
+            "id": "audit-04-contract-snapshot-match",
+            "repository": "cross-repo",
+            "command": ["shasum", "-a", "256", "fleet-db-modular-monolith-phase3/api/openapi.yaml", "loomcli-modular-monolith-phase3/internal/infra/fleetdb/testdata/fleetdb-openapi.yaml"],
+            "environment": {"set": [], "unset": [], "notes": "Run against the two committed Phase 3 implementation heads."},
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "The committed FleetDB source and Loom vendored OpenAPI remain byte-identical at SHA-256 7b9abcdce6b47b553687f592253c3ed437b9ec03fe823e758738fb0bb4c8ebeb."},
+            "artifact_paths": ["docs/migrations/modular-monolith/08-phase-3-decisions-and-evidence.md"]
+          }
+        ]
       }
     ]
   },
@@ -203,8 +408,8 @@
   },
   "ratchets": {
     "composite_store": {
-      "max_production_files": 92,
-      "max_outside_composition": 81,
+      "max_production_files": 88,
+      "max_outside_composition": 77,
       "composition_prefixes": [
         "internal/cli/serve/",
         "internal/infra/",
@@ -238,18 +443,16 @@
         "internal/cli/serve/serveadapter/serveadapter.go",
         "internal/cli/serve/workspacemgr/agent_identity_migration.go",
         "internal/cli/serve/workspacemgr/workspace_store.go",
-        "internal/cli/trigger/trigger_cmd.go",
         "internal/cli/workflow/workflow_cmd.go",
         "internal/cli/workspace/ops_cmd.go",
         "internal/cli/workspace/workspacev2_cmd.go",
         "internal/driver/await_op.go",
-        "internal/driver/await_timeout_sweeper.go",
+        "internal/driver/await_reconcilers.go",
         "internal/driver/composition.go",
         "internal/driver/epic_snapshot.go",
         "internal/driver/executor.go",
         "internal/driver/global_runner.go",
         "internal/driver/outbox_dispatcher.go",
-        "internal/driver/register.go",
         "internal/driver/run.go",
         "internal/driver/stale_task_sweeper.go",
         "internal/driver/task_bridge.go",
@@ -270,7 +473,6 @@
         "internal/leadcontrol/harness_delivery.go",
         "internal/leadcontrol/harness_metadata.go",
         "internal/leadcontrol/harness_runtime.go",
-        "internal/trigger/await_matcher.go",
         "internal/trigger/cron.go",
         "internal/trigger/delivery_sweeper.go",
         "internal/trigger/internal_source.go",
@@ -301,8 +503,7 @@
         "internal/webui/storeadapter/storeadapter.go",
         "internal/webui/svcimpl/agent_service.go",
         "internal/webui/svcimpl/session_service.go",
-        "internal/workflows/global_runner.go",
-        "internal/workflows/workflows.go"
+        "internal/workflows/global_runner.go"
       ]
     },
     "legacy_handler_imports": {

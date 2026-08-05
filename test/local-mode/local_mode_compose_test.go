@@ -46,11 +46,12 @@ func TestLocalModeComposeUsesAuthenticatedAuthorizedFleetDB(t *testing.T) {
 		t.Fatal("fleet-db service is missing")
 	}
 	for key, want := range map[string]string{
-		"FLEET_AUTH_ENABLED":               "true",
-		"FLEET_AUTH_DEV_MODE":              "false",
-		"FLEET_AUTHZ_ENABLED":              "true",
-		"FLEET_AUTH_BOOTSTRAP_ADMIN_ACTOR": localModeEnv("LOCAL_MODE_FLEETDB_ADMIN_ACTOR", localModeAdminActor),
-		"FLEET_AUTH_BOOTSTRAP_ADMIN_KEY":   localModeEnv("LOCAL_MODE_FLEETDB_API_KEY", localModeAdminKey),
+		"FLEET_AUTH_ENABLED":                         "true",
+		"FLEET_AUTH_DEV_MODE":                        "false",
+		"FLEET_AUTHZ_ENABLED":                        "true",
+		"FLEET_AUTOMATION_TRIGGER_ADMISSION_ENABLED": "true",
+		"FLEET_AUTH_BOOTSTRAP_ADMIN_ACTOR":           localModeEnv("LOCAL_MODE_FLEETDB_ADMIN_ACTOR", localModeAdminActor),
+		"FLEET_AUTH_BOOTSTRAP_ADMIN_KEY":             localModeEnv("LOCAL_MODE_FLEETDB_API_KEY", localModeAdminKey),
 	} {
 		if got := fleet.Environment[key]; got != want {
 			t.Errorf("fleet-db environment %s = %q, want %q", key, got, want)
@@ -80,6 +81,9 @@ func TestLocalModeComposeUsesAuthenticatedAuthorizedFleetDB(t *testing.T) {
 	}
 	if got := loom.Environment["LOOM_WORKFLOW_CATALOG_ENABLED"]; got != "true" {
 		t.Errorf("LOOM_WORKFLOW_CATALOG_ENABLED = %q, want true", got)
+	}
+	if got := loom.Environment["LOOM_AUTOMATION_ENABLED"]; got != "true" {
+		t.Errorf("LOOM_AUTOMATION_ENABLED = %q, want true", got)
 	}
 }
 

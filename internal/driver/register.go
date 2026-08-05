@@ -72,6 +72,14 @@ type RegisterFlueResult struct {
 	Activated      bool                  `json:"activated"`
 }
 
+// RegistrationCatalog is the complete persistence surface needed to register,
+// reuse, and activate a Driver version. Keeping this narrow prevents workflow
+// materialization from inheriting the process-wide composite store.Store.
+type RegistrationCatalog interface {
+	Drivers() store.DriverStore
+	DriverVersions() store.DriverVersionStore
+}
+
 type DriverRunnerSpec struct {
 	Name       string `json:"name"`
 	Kind       string `json:"kind"`
@@ -268,7 +276,7 @@ func inferNodeModuleRunnerName(path string) string {
 	return strings.TrimSpace(name)
 }
 
-func RegisterFlueDriver(ctx context.Context, s store.Store, opts RegisterFlueOptions) (*RegisterFlueResult, error) {
+func RegisterFlueDriver(ctx context.Context, s RegistrationCatalog, opts RegisterFlueOptions) (*RegisterFlueResult, error) {
 	if s == nil {
 		return nil, fmt.Errorf("store required: %w", domain.ErrInvalid)
 	}
@@ -466,7 +474,7 @@ func writeFlueBundleManifest(tmpRoot string, manifest map[string]string) ([]byte
 	return manifestBytes, nil
 }
 
-func reuseRegisteredFlueVersion(ctx context.Context, s store.Store, opts RegisterFlueOptions, result *RegisterFlueResult, existing *domain.DriverVersion, driverID string, staged *stagedFlueBundle) error {
+func reuseRegisteredFlueVersion(ctx context.Context, s RegistrationCatalog, opts RegisterFlueOptions, result *RegisterFlueResult, existing *domain.DriverVersion, driverID string, staged *stagedFlueBundle) error {
 	result.Version = existing
 	result.ReusedVersion = true
 	if existing.DriverID != driverID || existing.BundleDigest != staged.bundleDigest {
@@ -513,7 +521,7 @@ func promoteFlueBundle(tmpRoot, finalRoot string) error {
 	return nil
 }
 
-func persistRegisteredFlueVersion(ctx context.Context, s store.Store, opts RegisterFlueOptions, reg *flueRegistrationInput, staged *stagedFlueBundle, result *RegisterFlueResult, nextVersion int) error {
+func persistRegisteredFlueVersion(ctx context.Context, s RegistrationCatalog, opts RegisterFlueOptions, reg *flueRegistrationInput, staged *stagedFlueBundle, result *RegisterFlueResult, nextVersion int) error {
 	version, err := s.DriverVersions().Create(ctx, store.DriverVersionCreate{
 		WorkspaceKey:     opts.WorkspaceKey,
 		VersionID:        staged.versionID,
@@ -551,7 +559,7 @@ func registrationTrust(trust domain.DriverTrustLevel) domain.DriverTrustLevel {
 	return trust
 }
 
-func ensureRegisteredDriver(ctx context.Context, s store.Store, ws, driverID, driverName, sourceRef string, trust domain.DriverTrustLevel) (*domain.Driver, bool, error) {
+func ensureRegisteredDriver(ctx context.Context, s RegistrationCatalog, ws, driverID, driverName, sourceRef string, trust domain.DriverTrustLevel) (*domain.Driver, bool, error) {
 	driver, err := s.Drivers().Get(ctx, ws, driverID)
 	if err == nil {
 		return demoteReregisteredDriver(ctx, s, driver, trust)
@@ -585,7 +593,7 @@ func ensureRegisteredDriver(ctx context.Context, s store.Store, ws, driverID, dr
 // the row (its newest content is untrusted), while a trusted registration
 // never elevates an untrusted driver — elevation is an explicit ops action
 // (driver update), not a registration side effect.
-func demoteReregisteredDriver(ctx context.Context, s store.Store, driver *domain.Driver, trust domain.DriverTrustLevel) (*domain.Driver, bool, error) {
+func demoteReregisteredDriver(ctx context.Context, s RegistrationCatalog, driver *domain.Driver, trust domain.DriverTrustLevel) (*domain.Driver, bool, error) {
 	if trust.Trusted() || !driver.TrustLevel.Trusted() {
 		return driver, false, nil
 	}
@@ -597,7 +605,7 @@ func demoteReregisteredDriver(ctx context.Context, s store.Store, driver *domain
 	return updated, false, nil
 }
 
-func activateRegisteredDriver(ctx context.Context, s store.Store, result *RegisterFlueResult, ws, driverID, versionID string, _ map[string]string) error {
+func activateRegisteredDriver(ctx context.Context, s RegistrationCatalog, result *RegisterFlueResult, ws, driverID, versionID string, _ map[string]string) error {
 	driver, version, err := ActivateDriverVersion(ctx, s.Drivers(), s.DriverVersions(), ws, driverID, versionID)
 	if err != nil {
 		return fmt.Errorf("activate native Flue driver version: %w", err)
@@ -610,7 +618,7 @@ func activateRegisteredDriver(ctx context.Context, s store.Store, result *Regist
 	return nil
 }
 
-func nextDriverVersion(ctx context.Context, s store.Store, ws, driverID string) (int, error) {
+func nextDriverVersion(ctx context.Context, s RegistrationCatalog, ws, driverID string) (int, error) {
 	versions, err := s.DriverVersions().List(ctx, ws, store.DriverVersionFilter{DriverID: driverID})
 	if err != nil {
 		return 0, fmt.Errorf("list driver versions: %w", err)

@@ -28,6 +28,9 @@ persistence_packages:
     receiver_names: [Client]
     receiver_suffixes: []
     guard_subpackages: true
+  - path: github.com/tysonthomas9/loomcli/internal/modules/automation
+    receiver_names: [AdmissionStore, BindingStore, ManagedBindingStore, UnmanagedBindingStore]
+    receiver_suffixes: []
   - path: github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog
     receiver_names: [VersionLifecycleStore]
     receiver_suffixes: []
@@ -54,6 +57,9 @@ persistence_packages:
     receiver_names: [Store]
     receiver_suffixes: []
 method_sets:
+  - name: automation_persistence
+    read_only: [GetBinding, ListBindings]
+    mutating: [CreateBinding, CreateManagedBinding, DeleteBinding, DeleteManagedBindingIfUnchanged, DeleteUnmanagedBindingIfUnchanged, ReplaceManagedBinding, ReplaceUnmanagedBinding, ReserveEvent, TransitionDelivery, UpdateBinding]
   - name: composite_store
     read_only:
       - AgentCommands
@@ -98,6 +104,7 @@ method_sets:
       - AgentSessions
       - Agents
       - Artifacts
+      - Automation
       - Awaits
       - Close
       - ConnectorCalls
@@ -202,9 +209,13 @@ method_sets:
       - ApproveVersion
       - CancelQueuedRun
       - Claim
+      - ClaimAwaitEventNotifications
+      - ClaimDriverRunOutcomes
       - ClaimNext
       - ClaimQueued
       - Complete
+      - CompleteAwaitEventNotification
+      - CompleteDriverRunOutcome
       - Create
       - CreateEpic
       - CreateForRun
@@ -223,7 +234,11 @@ method_sets:
       - RequestCancel
       - Requeue
       - ResolveAwait
+      - ResolveAwaitAndResume
+      - ResolveRunOutcomeAwaitAndResume
       - ResumeAwaiting
+      - RetryAwaitEventNotification
+      - RetryDriverRunOutcome
       - Revoke
       - RotateSecrets
       - Suspend
@@ -275,6 +290,22 @@ receiver_surfaces:
     package: github.com/tysonthomas9/loomcli/internal/webui/tabmeta
     method_set: tab_metadata
     capability_owner: interaction
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/automation.AdmissionStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/automation
+    method_set: automation_persistence
+    capability_owner: automation
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/automation.BindingStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/automation
+    method_set: automation_persistence
+    capability_owner: automation
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/automation.ManagedBindingStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/automation
+    method_set: automation_persistence
+    capability_owner: automation
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/automation.UnmanagedBindingStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/automation
+    method_set: automation_persistence
+    capability_owner: automation
   - receiver: github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog.VersionLifecycleStore
     package: github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog
     method_set: store_repository
@@ -319,6 +350,14 @@ receiver_surfaces:
     package: github.com/tysonthomas9/loomcli/internal/store
     method_set: store_repository
     capability_owner: artifacts
+  - receiver: github.com/tysonthomas9/loomcli/internal/store.AtomicAwaitStore
+    package: github.com/tysonthomas9/loomcli/internal/store
+    method_set: store_repository
+    capability_owner: execution
+  - receiver: github.com/tysonthomas9/loomcli/internal/store.AwaitEventNotificationStore
+    package: github.com/tysonthomas9/loomcli/internal/store
+    method_set: store_repository
+    capability_owner: execution
   - receiver: github.com/tysonthomas9/loomcli/internal/store.AwaitStore
     package: github.com/tysonthomas9/loomcli/internal/store
     method_set: store_repository
@@ -344,6 +383,10 @@ receiver_surfaces:
     method_set: store_repository
     capability_owner: execution
   - receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunEventsReader
+    package: github.com/tysonthomas9/loomcli/internal/store
+    method_set: store_repository
+    capability_owner: execution
+  - receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunOutcomeStore
     package: github.com/tysonthomas9/loomcli/internal/store
     method_set: store_repository
     capability_owner: execution
@@ -383,6 +426,10 @@ receiver_surfaces:
     package: github.com/tysonthomas9/loomcli/internal/store
     method_set: store_repository
     capability_owner: agents
+  - receiver: github.com/tysonthomas9/loomcli/internal/store.RunOutcomeAwaitStore
+    package: github.com/tysonthomas9/loomcli/internal/store
+    method_set: store_repository
+    capability_owner: execution
   - receiver: github.com/tysonthomas9/loomcli/internal/store.Store
     package: github.com/tysonthomas9/loomcli/internal/store
     method_set: composite_store
@@ -448,6 +495,38 @@ function_surfaces:
     function: SetContextProvider
     access: read-only
     capability_owner: read_projection
+  - package: github.com/tysonthomas9/loomcli/internal/modules/automation
+    function: New
+    access: read-only
+    capability_owner: automation
+  - package: github.com/tysonthomas9/loomcli/internal/modules/automation
+    function: NewExecutionEventAuthority
+    access: read-only
+    capability_owner: automation
+  - package: github.com/tysonthomas9/loomcli/internal/modules/automation
+    function: NewSystemEventAuthority
+    access: read-only
+    capability_owner: automation
+  - package: github.com/tysonthomas9/loomcli/internal/modules/automation
+    function: NewWebhookEventAuthority
+    access: read-only
+    capability_owner: automation
+  - package: github.com/tysonthomas9/loomcli/internal/modules/automation
+    function: RuntimeRegistrations
+    access: read-only
+    capability_owner: automation
+  - package: github.com/tysonthomas9/loomcli/internal/modules/automation
+    function: WithAwaitEventNotifier
+    access: read-only
+    capability_owner: automation
+  - package: github.com/tysonthomas9/loomcli/internal/modules/automation
+    function: WithEventTrustPolicy
+    access: read-only
+    capability_owner: automation
+  - package: github.com/tysonthomas9/loomcli/internal/modules/automation
+    function: WithRuntimePorts
+    access: read-only
+    capability_owner: automation
   - package: github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog
     function: New
     access: read-only
@@ -968,6 +1047,12 @@ writes:
     aggregate_owner: agents
     expires_after_phase: 7
   - file: internal/cli/cmdstore/store_tracing_platform.go
+    receiver: github.com/tysonthomas9/loomcli/internal/store.AtomicAwaitStore
+    method: ResolveAwaitAndResume
+    count: 1
+    aggregate_owner: execution
+    expires_after_phase: 7
+  - file: internal/cli/cmdstore/store_tracing_platform.go
     receiver: github.com/tysonthomas9/loomcli/internal/store.AwaitStore
     method: RegisterAwaitAndCheck
     count: 1
@@ -976,6 +1061,24 @@ writes:
   - file: internal/cli/cmdstore/store_tracing_platform.go
     receiver: github.com/tysonthomas9/loomcli/internal/store.AwaitStore
     method: ResolveAwait
+    count: 1
+    aggregate_owner: execution
+    expires_after_phase: 7
+  - file: internal/cli/cmdstore/store_tracing_platform.go
+    receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunOutcomeStore
+    method: ClaimDriverRunOutcomes
+    count: 1
+    aggregate_owner: execution
+    expires_after_phase: 7
+  - file: internal/cli/cmdstore/store_tracing_platform.go
+    receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunOutcomeStore
+    method: CompleteDriverRunOutcome
+    count: 1
+    aggregate_owner: execution
+    expires_after_phase: 7
+  - file: internal/cli/cmdstore/store_tracing_platform.go
+    receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunOutcomeStore
+    method: RetryDriverRunOutcome
     count: 1
     aggregate_owner: execution
     expires_after_phase: 7
@@ -1078,6 +1181,12 @@ writes:
   - file: internal/cli/cmdstore/store_tracing_platform.go
     receiver: github.com/tysonthomas9/loomcli/internal/store.OutboxStore
     method: MarkResult
+    count: 1
+    aggregate_owner: execution
+    expires_after_phase: 7
+  - file: internal/cli/cmdstore/store_tracing_platform.go
+    receiver: github.com/tysonthomas9/loomcli/internal/store.RunOutcomeAwaitStore
+    method: ResolveRunOutcomeAwaitAndResume
     count: 1
     aggregate_owner: execution
     expires_after_phase: 7
@@ -1639,30 +1748,6 @@ writes:
     count: 1
     aggregate_owner: sourcecontrol
     expires_after_phase: 7
-  - file: internal/cli/trigger/trigger_cmd.go
-    receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorGrantStore
-    method: Revoke
-    count: 1
-    aggregate_owner: connectors
-    expires_after_phase: 7
-  - file: internal/cli/trigger/trigger_cmd.go
-    receiver: github.com/tysonthomas9/loomcli/internal/store.TriggerBindingStore
-    method: Create
-    count: 1
-    aggregate_owner: automation
-    expires_after_phase: 7
-  - file: internal/cli/trigger/trigger_cmd.go
-    receiver: github.com/tysonthomas9/loomcli/internal/store.TriggerBindingStore
-    method: Delete
-    count: 1
-    aggregate_owner: automation
-    expires_after_phase: 7
-  - file: internal/cli/trigger/trigger_cmd.go
-    receiver: github.com/tysonthomas9/loomcli/internal/store.TriggerBindingStore
-    method: Update
-    count: 1
-    aggregate_owner: automation
-    expires_after_phase: 7
   - file: internal/cli/workspace/workspace_cmd.go
     receiver: github.com/tysonthomas9/loomcli/internal/store.WorkspaceStore
     method: Delete
@@ -1687,12 +1772,6 @@ writes:
     count: 1
     aggregate_owner: workspace
     expires_after_phase: 7
-  - file: internal/webui/handlers/agents/record_dto.go
-    receiver: github.com/tysonthomas9/loomcli/internal/store.TriggerBindingStore
-    method: Update
-    count: 2
-    aggregate_owner: automation
-    expires_after_phase: 7
   - file: internal/webui/handlers/agents/record_handlers.go
     receiver: github.com/tysonthomas9/loomcli/internal/store.AgentServiceStore
     method: Create
@@ -1716,18 +1795,6 @@ writes:
     method: Create
     count: 1
     aggregate_owner: connectors
-    expires_after_phase: 7
-  - file: internal/webui/handlers/agents/record_handlers.go
-    receiver: github.com/tysonthomas9/loomcli/internal/store.TriggerBindingStore
-    method: Create
-    count: 1
-    aggregate_owner: automation
-    expires_after_phase: 7
-  - file: internal/webui/handlers/agents/record_handlers.go
-    receiver: github.com/tysonthomas9/loomcli/internal/store.TriggerBindingStore
-    method: Update
-    count: 1
-    aggregate_owner: automation
     expires_after_phase: 7
   - file: internal/webui/handlers/approvals/module.go
     receiver: github.com/tysonthomas9/loomcli/internal/store.TriggerEventAppender
@@ -1884,36 +1951,6 @@ writes:
     method: Heartbeat
     count: 2
     aggregate_owner: execution
-    expires_after_phase: 7
-  - file: internal/webui/handlers/triggerbindings/module.go
-    receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorGrantStore
-    method: Revoke
-    count: 1
-    aggregate_owner: connectors
-    expires_after_phase: 7
-  - file: internal/webui/handlers/triggerbindings/module.go
-    receiver: github.com/tysonthomas9/loomcli/internal/store.TriggerBindingStore
-    method: Create
-    count: 1
-    aggregate_owner: automation
-    expires_after_phase: 7
-  - file: internal/webui/handlers/triggerbindings/module.go
-    receiver: github.com/tysonthomas9/loomcli/internal/store.TriggerBindingStore
-    method: Delete
-    count: 1
-    aggregate_owner: automation
-    expires_after_phase: 7
-  - file: internal/webui/handlers/triggerbindings/module.go
-    receiver: github.com/tysonthomas9/loomcli/internal/store.TriggerBindingStore
-    method: Update
-    count: 2
-    aggregate_owner: automation
-    expires_after_phase: 7
-  - file: internal/webui/handlers/webhooks/module.go
-    receiver: github.com/tysonthomas9/loomcli/internal/store.TriggerRouteDispatcher
-    method: DispatchTriggerRouteV2
-    count: 1
-    aggregate_owner: automation
     expires_after_phase: 7
 generic_mechanisms:
   - mechanism: action_ledger

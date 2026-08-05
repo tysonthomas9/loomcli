@@ -13,11 +13,9 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
-	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/trigger"
 )
 
@@ -57,42 +55,58 @@ var (
 )
 
 var bindingsCreateCmd = &cobra.Command{
-	Use:   "create",
-	Short: "Create a trigger binding that maps a route key to a pinned driver version",
-	Args:  cobra.NoArgs,
-	RunE:  runBindingsCreate,
+	Use:               "create",
+	Short:             "Create a trigger binding that maps a route key to a pinned driver version",
+	Args:              cobra.NoArgs,
+	PersistentPreRunE: cli.PrepareStandaloneHTTPCommand,
+	RunE:              runBindingsCreate,
 }
 
 var bindingsUpdateCmd = &cobra.Command{
-	Use:   "update <binding-id>",
-	Short: "Update Router v2 fields on an existing trigger binding",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runBindingsUpdate,
+	Use:               "update <binding-id>",
+	Short:             "Update Router v2 fields on an existing trigger binding",
+	Args:              cobra.ExactArgs(1),
+	PersistentPreRunE: cli.PrepareStandaloneHTTPCommand,
+	RunE:              runBindingsUpdate,
 }
 
 var bindingsListCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List trigger bindings",
-	Args:  cobra.NoArgs,
-	RunE:  runBindingsList,
+	Use:               "list",
+	Short:             "List trigger bindings",
+	Args:              cobra.NoArgs,
+	PersistentPreRunE: cli.PrepareStandaloneHTTPCommand,
+	RunE:              runBindingsList,
 }
 
 var bindingsShowCmd = &cobra.Command{
-	Use:     "show <binding-id>",
-	Aliases: []string{"get"},
-	Short:   "Show a single trigger binding",
-	Args:    cobra.ExactArgs(1),
-	RunE:    runBindingsShow,
+	Use:               "show <binding-id>",
+	Aliases:           []string{"get"},
+	Short:             "Show a single trigger binding",
+	Args:              cobra.ExactArgs(1),
+	PersistentPreRunE: cli.PrepareStandaloneHTTPCommand,
+	RunE:              runBindingsShow,
 }
 
-var bindDeleteJSON bool
+var (
+	bindDeleteJSON bool
+	bindRunJSON    bool
+)
 
 var bindingsDeleteCmd = &cobra.Command{
-	Use:     "delete <binding-id>",
-	Aliases: []string{"rm"},
-	Short:   "Delete a trigger binding and revoke its connector grants",
-	Args:    cobra.ExactArgs(1),
-	RunE:    runBindingsDelete,
+	Use:               "delete <binding-id>",
+	Aliases:           []string{"rm"},
+	Short:             "Delete a trigger binding and revoke its connector grants",
+	Args:              cobra.ExactArgs(1),
+	PersistentPreRunE: cli.PrepareStandaloneHTTPCommand,
+	RunE:              runBindingsDelete,
+}
+
+var bindingsRunCmd = &cobra.Command{
+	Use:               "run <binding-id>",
+	Short:             "Dispatch a trigger binding manually",
+	Args:              cobra.ExactArgs(1),
+	PersistentPreRunE: cli.PrepareStandaloneHTTPCommand,
+	RunE:              runBindingsRun,
 }
 
 // routerBindingFlags groups the Router v2 binding flags shared by the create
@@ -198,14 +212,14 @@ func (f *routerBindingFlags) actorFilter() *domain.TriggerActorFilter {
 	return &domain.TriggerActorFilter{ExcludeActorKinds: kinds}
 }
 
-// patch builds a TriggerBindingUpdate from the flags the operator actually
+// patch builds the management API patch from the flags the operator actually
 // set. A changed --actor-filter-exclude with only blank values becomes the
-// zero filter, which clears the stored filter (C4 replace-whole semantics).
-func (f *routerBindingFlags) patch(flags *pflag.FlagSet) (store.TriggerBindingUpdate, error) {
+// explicit clear operation (C4 replace-whole semantics).
+func (f *routerBindingFlags) patch(flags *pflag.FlagSet) (triggerBindingPatchRequest, error) {
 	if err := f.validate(); err != nil {
-		return store.TriggerBindingUpdate{}, err
+		return triggerBindingPatchRequest{}, err
 	}
-	patch := store.TriggerBindingUpdate{
+	patch := triggerBindingPatchRequest{
 		SubjectKeyTemplate:  strPtrIfChanged(flags, "subject-key-template", f.subjectKeyTemplate),
 		RetryMaxAttempts:    intPtrIfChanged(flags, "retry-max-attempts", f.retryMaxAttempts),
 		RetryBackoffSeconds: intPtrIfChanged(flags, "retry-backoff", f.retryBackoffSecs),
@@ -219,16 +233,17 @@ func (f *routerBindingFlags) patch(flags *pflag.FlagSet) (store.TriggerBindingUp
 	if flags.Changed("actor-filter-exclude") {
 		filter := f.actorFilter()
 		if filter == nil {
-			filter = &domain.TriggerActorFilter{}
+			patch.ClearActorFilter = true
+		} else {
+			patch.ActorFilter = filter
 		}
-		patch.ActorFilter = filter
 	}
 	if flags.Changed("event-pattern") {
 		v := append([]string(nil), f.patterns...)
 		patch.EventTypePatterns = &v
 	}
-	if patch == (store.TriggerBindingUpdate{}) {
-		return store.TriggerBindingUpdate{}, fmt.Errorf("no fields to update: pass at least one flag")
+	if patch == (triggerBindingPatchRequest{}) {
+		return triggerBindingPatchRequest{}, fmt.Errorf("no fields to update: pass at least one flag")
 	}
 	return patch, nil
 }
@@ -295,10 +310,9 @@ func intPtrIfChanged(flags *pflag.FlagSet, name string, val int) *int {
 func runBindingsCreate(cmd *cobra.Command, _ []string) error {
 	source := firstNonEmpty(strings.TrimSpace(bindCreateSource), "github")
 	routeKey := strings.TrimSpace(bindCreateRouteKey)
-	// A cron binding fires by schedule and has no external route — the store
-	// derives its route_key from the (unique) binding_id — so it needs a
+	// A cron binding fires by schedule and has no external route, so it needs a
 	// --binding-id but not a --route-key. Event sources need an explicit route.
-	if source == store.CronSourceKind {
+	if source == "cron" {
 		if routeKey == "" && strings.TrimSpace(bindCreateBindingID) == "" {
 			return fmt.Errorf("--binding-id is required for a cron trigger binding")
 		}
@@ -317,25 +331,12 @@ func runBindingsCreate(cmd *cobra.Command, _ []string) error {
 	if err := bindCreateRouter.validateForCreate(source); err != nil {
 		return err
 	}
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		return createBindingInWorkspace(ctx, cmd, h, ws, routeKey, source)
-	})
-}
-
-func createBindingInWorkspace(ctx context.Context, cmd *cobra.Command, h *bootstrap.StoreHandle, ws, routeKey, source string) error {
-	driverRef := strings.TrimSpace(firstNonEmpty(bindCreateDriver, bindCreateWorkflow))
-	driver, err := resolveDriver(ctx, h.Store, ws, driverRef)
+	ctx := triggerCommandContext(cmd)
+	client, err := newTriggerManagementClient(ctx)
 	if err != nil {
 		return err
 	}
-	versionID := strings.TrimSpace(bindCreateVersion)
-	if versionID == "" {
-		versionID = driver.ActiveVersionID
-	}
-	if versionID == "" {
-		return fmt.Errorf("driver %q has no active version; pass --driver-version or activate one first", driver.DriverID)
-	}
-	binding, err := h.Store.TriggerBindings().Create(ctx, newBindingCreateInput(ws, routeKey, source, driver.DriverID, versionID))
+	binding, err := client.createBinding(ctx, newBindingCreateRequest(routeKey, source))
 	if err != nil {
 		return fmt.Errorf("create trigger binding: %w", err)
 	}
@@ -347,30 +348,35 @@ func createBindingInWorkspace(ctx context.Context, cmd *cobra.Command, h *bootst
 	return nil
 }
 
-func newBindingCreateInput(ws, routeKey, source, driverID, versionID string) store.TriggerBindingCreate {
-	bindingID := firstNonEmpty(strings.TrimSpace(bindCreateBindingID), store.DefaultBindingID(routeKey))
-	return store.TriggerBindingCreate{
-		WorkspaceKey: ws,
-		BindingID:    bindingID,
-		// Name falls back to binding_id (cron leaves route_key empty for the store
-		// to derive, so it can't seed the name).
+func newBindingCreateRequest(routeKey, source string) triggerBindingCreateRequest {
+	bindingID := firstNonEmpty(strings.TrimSpace(bindCreateBindingID), defaultBindingID(routeKey))
+	enabled := !bindCreateDisabled
+	request := triggerBindingCreateRequest{
+		BindingID: bindingID,
+		// Name falls back to binding_id because cron leaves route_key empty and
+		// cannot use it to seed a display name.
 		Name:                firstNonEmpty(strings.TrimSpace(bindCreateName), routeKey, bindingID),
 		SourceKind:          source,
 		RouteKey:            routeKey,
-		EventTypePatterns:   bindCreateRouter.patterns,
-		DriverID:            driverID,
-		DriverVersionID:     versionID,
-		TargetEntrypoint:    strings.TrimSpace(bindCreateEntry),
+		EventTypePatterns:   append([]string(nil), bindCreateRouter.patterns...),
+		DriverVersionID:     strings.TrimSpace(bindCreateVersion),
+		Entrypoint:          strings.TrimSpace(bindCreateEntry),
 		ConcurrencyPolicy:   domain.TriggerBindingConcurrencyPolicy(strings.TrimSpace(bindCreateRouter.concurrencyPolicy)),
-		WebhookSecret:       bindCreateSecret,
+		Secret:              bindCreateSecret,
 		SubjectKeyTemplate:  strings.TrimSpace(bindCreateRouter.subjectKeyTemplate),
 		ActorFilter:         bindCreateRouter.actorFilter(),
 		RetryMaxAttempts:    bindCreateRouter.retryMaxAttempts,
 		RetryBackoffSeconds: bindCreateRouter.retryBackoffSecs,
 		Schedule:            strings.TrimSpace(bindCreateRouter.schedule),
 		ScheduleTimezone:    strings.TrimSpace(bindCreateRouter.scheduleTimezone),
-		Enabled:             !bindCreateDisabled,
+		Enabled:             &enabled,
 	}
+	if driver := strings.TrimSpace(bindCreateDriver); driver != "" {
+		request.DriverID = driver
+	} else {
+		request.Workflow = strings.TrimSpace(bindCreateWorkflow)
+	}
+	return request
 }
 
 func runBindingsUpdate(cmd *cobra.Command, args []string) error {
@@ -378,78 +384,105 @@ func runBindingsUpdate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		binding, err := h.Store.TriggerBindings().Update(ctx, ws, strings.TrimSpace(args[0]), patch)
-		if err != nil {
-			return fmt.Errorf("update trigger binding: %w", err)
-		}
-		if bindUpdateJSON {
-			return cmdstore.WriteJSON(binding)
-		}
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Updated trigger binding %s (policy=%s, enabled=%t)\n",
-			binding.BindingID, binding.ConcurrencyPolicy, binding.Enabled)
-		return nil
-	})
+	ctx := triggerCommandContext(cmd)
+	client, err := newTriggerManagementClient(ctx)
+	if err != nil {
+		return err
+	}
+	binding, err := client.updateBinding(ctx, strings.TrimSpace(args[0]), patch)
+	if err != nil {
+		return fmt.Errorf("update trigger binding: %w", err)
+	}
+	if bindUpdateJSON {
+		return cmdstore.WriteJSON(binding)
+	}
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Updated trigger binding %s (policy=%s, enabled=%t)\n",
+		binding.BindingID, binding.ConcurrencyPolicy, binding.Enabled)
+	return nil
 }
 
-// runBindingsDelete deletes a binding and revokes its connector grants
-// (Decision 6: no orphaned credentials), mirroring the HTTP DELETE semantics.
-// Delete is the gating action — a store that cannot delete fails with no side
-// effects; grants are revoked only once the binding is gone.
+// runBindingsDelete delegates the restartable disable/revoke/delete workflow
+// to serve, which owns both Automation authority and connector credentials.
 func runBindingsDelete(cmd *cobra.Command, args []string) error {
 	bindingID := strings.TrimSpace(args[0])
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		if err := h.Store.TriggerBindings().Delete(ctx, ws, bindingID); err != nil {
-			return fmt.Errorf("delete trigger binding: %w", err)
-		}
-		revoked := 0
-		grants, err := h.Store.ConnectorGrants().ListByBinding(ctx, ws, bindingID)
-		if err != nil {
-			return fmt.Errorf("binding deleted but listing connector grants failed: %w", err)
-		}
-		for _, g := range grants {
-			if g == nil {
-				continue
-			}
-			if err := h.Store.ConnectorGrants().Revoke(ctx, ws, g.GrantID); err != nil {
-				return fmt.Errorf("binding deleted but revoking grant %q failed: %w", g.GrantID, err)
-			}
-			revoked++
-		}
-		if bindDeleteJSON {
-			return cmdstore.WriteJSON(map[string]any{"binding_id": bindingID, "deleted": true, "grants_revoked": revoked})
-		}
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Deleted trigger binding %s (grants revoked=%d)\n", bindingID, revoked)
-		return nil
-	})
+	ctx := triggerCommandContext(cmd)
+	client, err := newTriggerManagementClient(ctx)
+	if err != nil {
+		return err
+	}
+	result, err := client.deleteBinding(ctx, bindingID)
+	if err != nil {
+		return fmt.Errorf("delete trigger binding: %w", err)
+	}
+	if bindDeleteJSON {
+		return cmdstore.WriteJSON(result)
+	}
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Deleted trigger binding %s (grants revoked=%d)\n", result.BindingID, result.GrantsRevoked)
+	return nil
 }
 
 func runBindingsList(cmd *cobra.Command, _ []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		filter := store.TriggerBindingFilter{SourceKind: strings.TrimSpace(bindListSource)}
-		if cmd.Flags().Changed("enabled") {
-			filter.Enabled = &bindListEnabled
-		}
-		bindings, err := h.Store.TriggerBindings().List(ctx, ws, filter)
-		if err != nil {
-			return fmt.Errorf("list trigger bindings: %w", err)
-		}
-		if bindListJSON {
-			return cmdstore.WriteJSON(bindings)
-		}
-		renderBindingsList(cmd.OutOrStdout(), bindings)
-		return nil
-	})
+	ctx := triggerCommandContext(cmd)
+	client, err := newTriggerManagementClient(ctx)
+	if err != nil {
+		return err
+	}
+	bindings, err := client.listBindings(ctx)
+	if err != nil {
+		return fmt.Errorf("list trigger bindings: %w", err)
+	}
+	bindings = filterBindingList(bindings, strings.TrimSpace(bindListSource), cmd.Flags().Changed("enabled"), bindListEnabled)
+	if bindListJSON {
+		return cmdstore.WriteJSON(bindings)
+	}
+	renderBindingsList(cmd.OutOrStdout(), bindings)
+	return nil
 }
 
-func runBindingsShow(_ *cobra.Command, args []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		binding, err := h.Store.TriggerBindings().Get(ctx, ws, strings.TrimSpace(args[0]))
-		if err != nil {
-			return fmt.Errorf("get trigger binding: %w", err)
+func runBindingsShow(cmd *cobra.Command, args []string) error {
+	ctx := triggerCommandContext(cmd)
+	client, err := newTriggerManagementClient(ctx)
+	if err != nil {
+		return err
+	}
+	binding, err := client.getBinding(ctx, strings.TrimSpace(args[0]))
+	if err != nil {
+		return fmt.Errorf("get trigger binding: %w", err)
+	}
+	return cmdstore.WriteJSON(binding)
+}
+
+func runBindingsRun(cmd *cobra.Command, args []string) error {
+	ctx := triggerCommandContext(cmd)
+	client, err := newTriggerManagementClient(ctx)
+	if err != nil {
+		return err
+	}
+	bindingID := strings.TrimSpace(args[0])
+	run, err := client.runBinding(ctx, bindingID)
+	if err != nil {
+		return fmt.Errorf("run trigger binding: %w", err)
+	}
+	if bindRunJSON {
+		return cmdstore.WriteJSON(run)
+	}
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Recorded trigger binding run %s (%s)\n", run.RunID, run.Status)
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Binding: %s driver %s version %s\n", bindingID, run.DriverID, run.DriverVersionID)
+	return nil
+}
+
+func filterBindingList(bindings []*domain.TriggerBinding, sourceKind string, filterEnabled, enabled bool) []*domain.TriggerBinding {
+	if sourceKind == "" && !filterEnabled {
+		return bindings
+	}
+	filtered := make([]*domain.TriggerBinding, 0, len(bindings))
+	for _, binding := range bindings {
+		if binding == nil || (sourceKind != "" && binding.SourceKind != sourceKind) || (filterEnabled && binding.Enabled != enabled) {
+			continue
 		}
-		return cmdstore.WriteJSON(binding)
-	})
+		filtered = append(filtered, binding)
+	}
+	return filtered
 }
 
 // renderBindingsList writes the human-readable bindings listing. Kept as a
@@ -497,50 +530,58 @@ var (
 )
 
 var eventsListCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List trigger events",
-	Args:  cobra.NoArgs,
-	RunE:  runEventsList,
+	Use:               "list",
+	Short:             "List trigger events",
+	Args:              cobra.NoArgs,
+	PersistentPreRunE: cli.PrepareStandaloneHTTPCommand,
+	RunE:              runEventsList,
 }
 
 var eventsShowCmd = &cobra.Command{
-	Use:   "show <event-id>",
-	Short: "Show a single trigger event",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runEventsShow,
+	Use:               "show <event-id>",
+	Short:             "Show a single trigger event",
+	Args:              cobra.ExactArgs(1),
+	PersistentPreRunE: cli.PrepareStandaloneHTTPCommand,
+	RunE:              runEventsShow,
 }
 
 func runEventsList(cmd *cobra.Command, _ []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		events, err := h.Store.TriggerEvents().List(ctx, ws, store.TriggerEventFilter{
-			SourceKind: strings.TrimSpace(eventsListSource),
-			Limit:      eventsListLimit,
-		})
-		if err != nil {
-			return fmt.Errorf("list trigger events: %w", err)
-		}
-		if eventsListJSON {
-			return cmdstore.WriteJSON(events)
-		}
-		if len(events) == 0 {
-			_, _ = fmt.Fprintln(cmd.OutOrStdout(), "No trigger events.")
-			return nil
-		}
-		for _, e := range events {
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%-22s %-22s subject=%-24s sig=%s\n", e.EventID, e.EventType, e.SubjectRef, e.SignatureStatus)
-		}
+	ctx := triggerCommandContext(cmd)
+	client, err := newTriggerManagementClient(ctx)
+	if err != nil {
+		return err
+	}
+	events, err := client.listEvents(ctx, eventsListSource, eventsListLimit)
+	if err != nil {
+		return fmt.Errorf("list trigger events: %w", err)
+	}
+	if eventsListJSON {
+		return cmdstore.WriteJSON(events)
+	}
+	if len(events) == 0 {
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "No trigger events.")
 		return nil
-	})
+	}
+	for _, event := range events {
+		if event == nil {
+			return fmt.Errorf("list trigger events: management API returned a null event")
+		}
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%-22s %-22s subject=%-24s sig=%s\n", event.EventID, event.EventType, event.SubjectRef, event.SignatureStatus)
+	}
+	return nil
 }
 
 func runEventsShow(cmd *cobra.Command, args []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		event, err := h.Store.TriggerEvents().Get(ctx, ws, strings.TrimSpace(args[0]))
-		if err != nil {
-			return fmt.Errorf("get trigger event: %w", err)
-		}
-		return cmdstore.WriteJSON(event)
-	})
+	ctx := triggerCommandContext(cmd)
+	client, err := newTriggerManagementClient(ctx)
+	if err != nil {
+		return err
+	}
+	event, err := client.getEvent(ctx, strings.TrimSpace(args[0]))
+	if err != nil {
+		return fmt.Errorf("get trigger event: %w", err)
+	}
+	return cmdstore.WriteJSON(event)
 }
 
 // --- deliveries ---
@@ -558,71 +599,69 @@ var (
 )
 
 var deliveriesListCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List trigger deliveries",
-	Args:  cobra.NoArgs,
-	RunE:  runDeliveriesList,
+	Use:               "list",
+	Short:             "List trigger deliveries",
+	Args:              cobra.NoArgs,
+	PersistentPreRunE: cli.PrepareStandaloneHTTPCommand,
+	RunE:              runDeliveriesList,
 }
 
 var deliveriesShowCmd = &cobra.Command{
-	Use:   "show <delivery-id>",
-	Short: "Show a single trigger delivery",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runDeliveriesShow,
+	Use:               "show <delivery-id>",
+	Short:             "Show a single trigger delivery",
+	Args:              cobra.ExactArgs(1),
+	PersistentPreRunE: cli.PrepareStandaloneHTTPCommand,
+	RunE:              runDeliveriesShow,
 }
 
 func runDeliveriesList(cmd *cobra.Command, _ []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		deliveries, err := h.Store.TriggerDeliveries().List(ctx, ws, store.TriggerDeliveryFilter{
-			TriggerEventID: strings.TrimSpace(delivListEvent),
-			Status:         domain.TriggerDeliveryStatus(strings.TrimSpace(delivListStatus)),
-			Limit:          delivListLimit,
-		})
-		if err != nil {
-			return fmt.Errorf("list trigger deliveries: %w", err)
-		}
-		if delivListJSON {
-			return cmdstore.WriteJSON(deliveries)
-		}
-		if len(deliveries) == 0 {
-			_, _ = fmt.Fprintln(cmd.OutOrStdout(), "No trigger deliveries.")
-			return nil
-		}
-		for _, d := range deliveries {
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%-26s event=%-22s status=%-12s run=%s\n", d.DeliveryID, d.TriggerEventID, d.Status, d.DriverRunID)
-		}
+	ctx := triggerCommandContext(cmd)
+	client, err := newTriggerManagementClient(ctx)
+	if err != nil {
+		return err
+	}
+	deliveries, err := client.listDeliveries(ctx, delivListEvent, delivListStatus, delivListLimit)
+	if err != nil {
+		return fmt.Errorf("list trigger deliveries: %w", err)
+	}
+	if delivListJSON {
+		return cmdstore.WriteJSON(deliveries)
+	}
+	if len(deliveries) == 0 {
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "No trigger deliveries.")
 		return nil
-	})
+	}
+	for _, delivery := range deliveries {
+		if delivery == nil {
+			return fmt.Errorf("list trigger deliveries: management API returned a null delivery")
+		}
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%-26s event=%-22s status=%-12s run=%s\n", delivery.DeliveryID, delivery.TriggerEventID, delivery.Status, delivery.DriverRunID)
+	}
+	return nil
 }
 
 func runDeliveriesShow(cmd *cobra.Command, args []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		delivery, err := h.Store.TriggerDeliveries().Get(ctx, ws, strings.TrimSpace(args[0]))
-		if err != nil {
-			return fmt.Errorf("get trigger delivery: %w", err)
-		}
-		return cmdstore.WriteJSON(delivery)
-	})
+	ctx := triggerCommandContext(cmd)
+	client, err := newTriggerManagementClient(ctx)
+	if err != nil {
+		return err
+	}
+	delivery, err := client.getDelivery(ctx, strings.TrimSpace(args[0]))
+	if err != nil {
+		return fmt.Errorf("get trigger delivery: %w", err)
+	}
+	return cmdstore.WriteJSON(delivery)
 }
 
-// resolveDriver looks up a driver by ID, then by name — mirroring how the
-// workflows module resolves a workflow's backing driver.
-func resolveDriver(ctx context.Context, st store.Store, ws, ref string) (*domain.Driver, error) {
-	driver, err := st.Drivers().Get(ctx, ws, ref)
-	if err == nil {
-		return driver, nil
+func triggerCommandContext(cmd *cobra.Command) context.Context {
+	if cmd != nil && cmd.Context() != nil {
+		return cmd.Context()
 	}
-	if !cmdstore.IsNotFound(err) {
-		return nil, fmt.Errorf("get driver %q: %w", ref, err)
-	}
-	drivers, err := st.Drivers().List(ctx, ws, store.DriverFilter{Name: ref, Limit: 1})
-	if err != nil {
-		return nil, fmt.Errorf("list drivers: %w", err)
-	}
-	if len(drivers) == 0 {
-		return nil, fmt.Errorf("driver or workflow %q not found in workspace %q", ref, ws)
-	}
-	return drivers[0], nil
+	return context.Background()
+}
+
+func defaultBindingID(routeKey string) string {
+	return "binding-" + strings.ReplaceAll(routeKey, ".", "-")
 }
 
 func firstNonEmpty(values ...string) string {
@@ -656,8 +695,9 @@ func init() {
 	bindingsListCmd.Flags().BoolVar(&bindListJSON, "json", false, "JSON output")
 
 	bindingsDeleteCmd.Flags().BoolVar(&bindDeleteJSON, "json", false, "JSON output")
+	bindingsRunCmd.Flags().BoolVar(&bindRunJSON, "json", false, "JSON output")
 
-	bindingsCmd.AddCommand(bindingsCreateCmd, bindingsUpdateCmd, bindingsListCmd, bindingsShowCmd, bindingsDeleteCmd)
+	bindingsCmd.AddCommand(bindingsCreateCmd, bindingsUpdateCmd, bindingsListCmd, bindingsShowCmd, bindingsDeleteCmd, bindingsRunCmd)
 
 	eventsListCmd.Flags().StringVar(&eventsListSource, "source-kind", "", "filter by source kind")
 	eventsListCmd.Flags().IntVar(&eventsListLimit, "limit", 0, "max results")

@@ -57,6 +57,9 @@ fi
 # local/cloud selection and construction. The Phase 2 Workflow Catalog seams
 # below only share that already-constructed client, expose its capability key,
 # or translate its narrow transport into the module-owned adapter contract.
+# The Phase 3 Automation seams likewise share the same client to expose the
+# consumer-owned durability and atomic dispatch ports; neither constructs a
+# second client or creates an alternate control-plane path.
 rg -n \
   -e 'github\.com/tysonthomas9/loomcli/internal/infra/fleetdb' \
   cmd internal \
@@ -73,6 +76,8 @@ if [[ -s "$tmp" ]]; then
     case "$file" in
       internal/bootstrap/openstore.go | \
       internal/bootstrap/embedded.go | \
+      internal/app/serve/automation_execution.go | \
+      internal/app/serve/automation_fleetdb.go | \
       internal/app/serve/workflow_catalog.go | \
       internal/app/serve/workflow_catalog_fleetdb.go | \
       internal/cli/serve/serveadapter/workflow_catalog.go)

@@ -220,10 +220,54 @@ func TestAwaitChildWorkflowRejectsNonChild(t *testing.T) {
 	}
 }
 
+func TestAwaitChildWorkflowRejectsForgedSatisfiedReplay(t *testing.T) {
+	seedForgedWinner := func(t *testing.T, st *memstore.Store, parent, child *domain.DriverRun, eventID string) {
+		t.Helper()
+		instanceKey := domain.AwaitInstanceKey(parent.RunID, 1)
+		result, err := st.Awaits().RegisterAwaitAndCheck(t.Context(), "WS", store.AwaitRegistration{
+			InstanceKey: instanceKey, RunID: parent.RunID, Pattern: RunFinishedSubjectKey(child.RunID),
+			ActorAllow: []string{RunFinishedActor}, Deadline: time.Now().Add(time.Hour),
+		})
+		if err != nil || result.Satisfied {
+			t.Fatalf("register forged-winner await = %+v, %v; want pending", result, err)
+		}
+		if _, err := st.Awaits().ResolveAwait(t.Context(), "WS", instanceKey, eventID,
+			json.RawMessage(`{"runId":"forged","status":"completed"}`), RunFinishedActor); err != nil {
+			t.Fatalf("seed forged satisfied await: %v", err)
+		}
+	}
+
+	t.Run("nonterminal child", func(t *testing.T) {
+		st, parent := newCompositionRun(t)
+		child, err := StartChildWorkflow(t.Context(), st, startOpts(parent.RunID, "nonterminal", 0))
+		if err != nil {
+			t.Fatal(err)
+		}
+		seedForgedWinner(t, st, parent, child, RunFinishedEventID(child.RunID, domain.DriverRunCompleted))
+		if _, _, err := AwaitChildWorkflow(t.Context(), st, awaitChildOpts(parent, child.RunID, 1)); !errors.Is(err, domain.ErrConflict) {
+			t.Fatalf("AwaitChildWorkflow err = %v, want conflict for satisfied nonterminal child", err)
+		}
+	})
+
+	t.Run("terminal child event identity mismatch", func(t *testing.T) {
+		st, parent := newCompositionRun(t)
+		child, err := StartChildWorkflow(t.Context(), st, startOpts(parent.RunID, "terminal-mismatch", 0))
+		if err != nil {
+			t.Fatal(err)
+		}
+		forgedID := RunFinishedEventID(child.RunID, domain.DriverRunFailed)
+		seedForgedWinner(t, st, parent, child, forgedID)
+		finishRunAs(t, st, child.RunID, domain.DriverRunCompleted)
+		if _, _, err := AwaitChildWorkflow(t.Context(), st, awaitChildOpts(parent, child.RunID, 1)); !errors.Is(err, domain.ErrConflict) {
+			t.Fatalf("AwaitChildWorkflow err = %v, want conflict for winner %s", err, forgedID)
+		}
+	})
+}
+
 // TestAwaitChildWorkflowAlreadyTerminalChild is the RULE 2 composition proof:
-// the journaled run.finished of a child that terminated BEFORE the parent
-// awaited resolves the registration inline — no lost wakeup, parent stays
-// running.
+// a child that terminated BEFORE the parent awaited resolves inline from its
+// durable terminal state — no listener, event-journal appender, or lost
+// wakeup; the parent stays running.
 func TestAwaitChildWorkflowAlreadyTerminalChild(t *testing.T) {
 	ctx := context.Background()
 	st, parent := newCompositionRun(t)
@@ -251,6 +295,64 @@ func TestAwaitChildWorkflowAlreadyTerminalChild(t *testing.T) {
 	}
 }
 
+// TestAwaitChildWorkflowConcurrentFinishNoLostWakeup exercises the boundary
+// ordering the striped Execution outcome lock protects: registration and the
+// child terminal transition begin together. Regardless of which wins, the
+// deterministic outcome lands on the await and the parent cannot remain
+// stranded suspended.
+func TestAwaitChildWorkflowConcurrentFinishNoLostWakeup(t *testing.T) {
+	for iteration := 0; iteration < 20; iteration++ {
+		st, parent := newCompositionRun(t)
+		child, err := StartChildWorkflow(t.Context(), st, startOpts(parent.RunID, "racing-child", 0))
+		if err != nil {
+			t.Fatal(err)
+		}
+		claimed, err := st.DriverRuns().Claim(t.Context(), "WS", child.RunID, "node-child", "lease-child")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		start := make(chan struct{})
+		finishErr := make(chan error, 1)
+		awaitResult := make(chan struct {
+			outcome *AwaitEventOutcome
+			err     error
+		}, 1)
+		go func() {
+			<-start
+			_, finishError := (&Executor{Store: st, WorkspaceKey: "WS"}).finish(t.Context(), claimed,
+				RunResult{Status: domain.DriverRunCompleted, Summary: "done"})
+			finishErr <- finishError
+		}()
+		go func() {
+			<-start
+			outcome, _, awaitErr := AwaitChildWorkflow(t.Context(), st, awaitChildOpts(parent, child.RunID, 1))
+			awaitResult <- struct {
+				outcome *AwaitEventOutcome
+				err     error
+			}{outcome: outcome, err: awaitErr}
+		}()
+		close(start)
+		if err := <-finishErr; err != nil {
+			t.Fatalf("iteration %d finish: %v", iteration, err)
+		}
+		awaited := <-awaitResult
+		if awaited.err != nil || awaited.outcome == nil {
+			t.Fatalf("iteration %d await = %+v, %v", iteration, awaited.outcome, awaited.err)
+		}
+
+		eventID := RunFinishedEventID(child.RunID, domain.DriverRunCompleted)
+		instance, err := st.Awaits().GetSatisfiedAwait(t.Context(), "WS", domain.AwaitInstanceKey(parent.RunID, 1))
+		if err != nil || instance.SatisfiedByEventID != eventID {
+			t.Fatalf("iteration %d satisfied = %+v, %v; want %s", iteration, instance, err, eventID)
+		}
+		storedParent, err := st.DriverRuns().Get(t.Context(), "WS", parent.RunID)
+		if err != nil || storedParent.Status == domain.DriverRunSuspendedAwaitingEvent {
+			t.Fatalf("iteration %d parent = %+v, %v; lost wakeup", iteration, storedParent, err)
+		}
+	}
+}
+
 // TestAwaitChildWorkflowSuspendResumeReplay drives the full composition
 // cycle: parent suspends on the child, the child's terminal transition resumes
 // it with the lifecycle payload, and re-entry replays the satisfied await
@@ -266,6 +368,10 @@ func TestAwaitChildWorkflowSuspendResumeReplay(t *testing.T) {
 	outcome, _, err := AwaitChildWorkflow(ctx, st, awaitChildOpts(parent, child.RunID, 1))
 	if err != nil || outcome.Status != AwaitOutcomeSuspended {
 		t.Fatalf("first await = %+v, %v; want suspended", outcome, err)
+	}
+	if outcome.Instance == nil || len(outcome.Instance.ActorAllow) != 1 ||
+		outcome.Instance.ActorAllow[0] != RunFinishedActor {
+		t.Fatalf("composition actor allow = %+v, want only %q", outcome.Instance, RunFinishedActor)
 	}
 	suspended, err := st.DriverRuns().Get(ctx, "WS", parent.RunID)
 	if err != nil || suspended.Status != domain.DriverRunSuspendedAwaitingEvent {
@@ -340,7 +446,8 @@ func TestCascadeCancelChildren(t *testing.T) {
 	}
 
 	// Parent terminalizes through the executor finish path.
-	final, err := (&Executor{Store: st, WorkspaceKey: "WS"}).finish(ctx, parent,
+	publisher := &recordingRunOutcomePublisher{}
+	final, err := (&Executor{Store: st, WorkspaceKey: "WS", RunOutcomes: publisher}).finish(ctx, parent,
 		RunResult{Status: domain.DriverRunFailed, Summary: "parent failed"})
 	if err != nil || final.Status != domain.DriverRunFailed {
 		t.Fatalf("finish parent = %+v, %v", final, err)
@@ -348,9 +455,19 @@ func TestCascadeCancelChildren(t *testing.T) {
 
 	assertRunState(t, st, queuedChild.RunID, domain.DriverRunCancelled, CancelErrorClassParentTerminal)
 	assertRunState(t, st, grandchild.RunID, domain.DriverRunCancelled, CancelErrorClassParentTerminal)
-	for _, runID := range []string{queuedChild.RunID, grandchild.RunID} {
-		if _, err := st.TriggerEvents().Get(ctx, "WS", RunFinishedEventID(runID, domain.DriverRunCancelled)); err != nil {
-			t.Fatalf("run.finished for cascaded child %s: %v", runID, err)
+	wantOutcomes := map[string]bool{
+		RunFinishedEventID(parent.RunID, domain.DriverRunFailed):         false,
+		RunFinishedEventID(queuedChild.RunID, domain.DriverRunCancelled): false,
+		RunFinishedEventID(grandchild.RunID, domain.DriverRunCancelled):  false,
+	}
+	for _, outcome := range publisher.snapshot() {
+		if _, wanted := wantOutcomes[outcome.EventID]; wanted {
+			wantOutcomes[outcome.EventID] = true
+		}
+	}
+	for eventID, published := range wantOutcomes {
+		if !published {
+			t.Fatalf("missing cascaded outcome %s; got %+v", eventID, publisher.snapshot())
 		}
 	}
 	running, err := st.DriverRuns().Get(ctx, "WS", runningChild.RunID)

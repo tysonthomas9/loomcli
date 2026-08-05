@@ -26,6 +26,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/netutil"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -219,6 +220,8 @@ func newGitHubWebhookE2E(t *testing.T) *githubWebhookE2E {
 func (e *githubWebhookE2E) startFleetDB() {
 	e.t.Helper()
 	e.t.Setenv(bootstrap.EnvFleetDBBin, e.fleetDBBin)
+	e.t.Setenv("FLEET_RATE_LIMIT_ENABLED", "false")
+	e.t.Setenv("FLEETDB_ISSUE_DESIGN_STORAGE", "inline")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	e.t.Cleanup(cancel)
@@ -271,7 +274,7 @@ func (e *githubWebhookE2E) startLoomServe() {
 		e.t.Fatalf("pick loom port: %v", err)
 	}
 	e.loomURL = "http://127.0.0.1:" + strconv.Itoa(port)
-	home := filepath.Join(e.configDir, "home")
+	home := e.phase3HomeDir()
 	if e.useHostHomeForDriver {
 		if hostHome := strings.TrimSpace(os.Getenv("HOME")); hostHome != "" {
 			home = hostHome
@@ -293,6 +296,7 @@ func (e *githubWebhookE2E) startLoomServe() {
 		"HOME":                         home,
 		"LOOM_CONFIG_DIR":              e.configDir,
 		"LOOM_WORKSPACE":               e.workspace,
+		"LOOM_WORKSPACE_RUNTIME_DIR":   e.phase3RuntimeDir(),
 		"LOOM_FLEET_DB_URL":            e.fleetURL,
 		"LOOM_FLEET_URL":               "",
 		"LOOM_SERVER_URL":              "",
@@ -334,15 +338,20 @@ func (e *githubWebhookE2E) registerGitHubDriver() *domain.TriggerBinding {
 		route    = "github.pull_request.opened"
 		secret   = "e2e-webhook-secret"
 	)
-	_, err := e.fleetClient.Drivers().Create(ctx, store.DriverCreate{
+	driver, err := e.fleetClient.Drivers().Create(ctx, store.DriverCreate{
 		WorkspaceKey: e.workspace,
 		DriverID:     driverID,
 		Name:         driverID,
-		OwnerType:    domain.DriverOwnerSystem,
-		Status:       domain.DriverStatusActive,
+		OwnerType:    domain.DriverOwnerUser,
+		OwnerRef:     e.actor,
+		Status:       domain.DriverStatusDraft,
+		TrustLevel:   domain.DriverTrustUntrusted,
 	})
-	if err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
+	if err != nil {
 		e.t.Fatalf("create driver: %v", err)
+	}
+	if driver.Revision != 1 {
+		e.t.Fatalf("created driver revision = %d, want 1", driver.Revision)
 	}
 	_, err = e.fleetClient.DriverVersions().Create(ctx, store.DriverVersionCreate{
 		WorkspaceKey:     e.workspace,
@@ -354,11 +363,20 @@ func (e *githubWebhookE2E) registerGitHubDriver() *domain.TriggerBinding {
 		BundleRef:        ".loom/drivers/github-pr-review/github-pr-review-v1",
 		BundleDigest:     "sha256:e2e-bundle",
 		Runtime:          "flue-node",
+		Manifest:         map[string]string{workflowcatalog.ManifestTrustLevelKey: string(domain.DriverTrustUntrusted)},
 		ValidationStatus: domain.DriverVersionValidationPassed,
 		CreatedBy:        e.actor,
 	})
-	if err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
+	if err != nil {
 		e.t.Fatalf("create driver version: %v", err)
+	}
+	approved, err := e.fleetClient.WorkflowCatalog().ApproveVersion(ctx, e.workspace, driverID, version, 1)
+	if err != nil || approved == nil || approved.CommittedRevision != 2 {
+		e.t.Fatalf("approve driver version = %+v, %v", approved, err)
+	}
+	activated, err := e.fleetClient.WorkflowCatalog().ActivateVersion(ctx, e.workspace, driverID, version, 2)
+	if err != nil || activated == nil || activated.CommittedRevision != 3 {
+		e.t.Fatalf("activate driver version = %+v, %v", activated, err)
 	}
 
 	binding, err := e.fleetClient.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
@@ -632,10 +650,12 @@ func (e *githubWebhookE2E) expectQueuedDriverRun(runID string) *domain.DriverRun
 	if run.Status != domain.DriverRunQueued {
 		e.t.Fatalf("driver run status = %s, want queued: %+v", run.Status, run)
 	}
-	if run.DriverID != "github-pr-review" || run.DriverVersionID != "github-pr-review-v1" || run.Entrypoint != "run" {
+	if run.DriverID != "github-pr-review" || run.DriverVersionID != "github-pr-review-v1" || run.Entrypoint != "run" ||
+		run.TriggerBindingID != "binding-github-pr-opened" {
 		e.t.Fatalf("driver run pinned target = %+v", run)
 	}
-	if run.SourceKind != "github" || run.SourceRef == "" || run.IdempotencyKey != "github:e2e-delivery-1" {
+	if run.SourceKind != "github" || !strings.HasPrefix(run.SourceRef, "automation-event-") ||
+		!strings.HasPrefix(run.IdempotencyKey, "automation-run-idempotency-") || run.IdempotencyKey == "github:e2e-delivery-1" {
 		e.t.Fatalf("driver run source/idempotency = %+v", run)
 	}
 	var payload struct {

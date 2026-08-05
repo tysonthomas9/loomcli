@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -18,8 +19,9 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/driver/eventpolicy"
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/trigger"
 )
 
 type RunOptions struct {
@@ -367,53 +369,55 @@ func RunTokenTTL() (time.Duration, error) {
 }
 
 // run.finished lifecycle emission (ARCHITECTURE-PROPOSAL §7 step 8, chunk
-// AW6). loom serve is the publisher: every server-side DriverRun terminal
-// transition — finish (completed/failed/needs_review/cancelled) and
-// stale-sweep recovery — emits one run.finished event so composition awaits
-// (pattern "run.finished:{childRunId}", AW10) have a matchable,
-// journal-backed record.
-//
-// The emission is best-effort-but-journaled-first:
-//
-//  1. JOURNAL: the event is appended directly to the trigger-event journal
-//     (store.TriggerEventAppender) that the await registration scan reads
-//     (RULE 2). A child that finishes before its parent registers the await
-//     is found by that scan — the "already-terminal child resolves
-//     immediately" guarantee — and the append is UNCONDITIONAL: neither
-//     binding configuration nor the loop guard can suppress composition.
-//     The dispatch-time await matcher (AW7) hooks in right after this append.
-//  2. LOOPBACK: the event then feeds the C14 internal loopback (route key
-//     "internal.run.finished") for binding fan-out. Bindings opt in
-//     explicitly via the internal.* namespace, and the structural guard
-//     applies: origin=system (server-originated lifecycle, never
-//     workflow-forged) with C19 hop-depth stamping — a run admitted by a
-//     trigger event emits run.finished at the admitting event's depth + 1,
-//     capped, so internal.run.finished bindings cannot recursively amplify.
-//
-// Both steps are best-effort: failures are logged and never fail the
-// transition (the watch reconciliation + stale sweeps converge state; a
-// re-finish replays the deterministic event ID idempotently).
+// AW6). Every server-side terminal transition notifies Execution-owned awaits
+// and publishes a narrow RunOutcome. Production composition maps that outcome
+// into Automation admission; internal/driver never imports Automation or its
+// application workflow. Both legs are best-effort so a publication failure
+// can never roll back an already committed terminal DriverRun transition.
 
 // RunFinishedEventType is the lifecycle event type terminal DriverRun
 // transitions emit. Already normalized (NormalizeInternalEventType is a
 // no-op on it), so the journaled type and the loopback route suffix match.
-const RunFinishedEventType = "run.finished"
+const RunFinishedEventType = eventpolicy.RunFinishedEventType
 
-// runFinishedActor is the ActorRef stamped on run.finished events: the
-// server itself. Composition awaits use no actor predicate (AW10's
-// actor=system carve-out).
-const runFinishedActor = "system"
+// RunFinishedActor is the ActorRef stamped on run.finished events: the
+// server itself. Composition awaits require this exact actor in addition to
+// using the reserved run.finished event type.
+const RunFinishedActor = eventpolicy.RunFinishedActorRef
 
-// runFinishedSourceKind marks journal records produced by the lifecycle
-// lane rather than an ingress connector.
-const runFinishedSourceKind = "internal"
+// AutomationEventTrustPolicy exposes Execution's concrete lifecycle-event
+// policy through Automation's consumer-owned port. Composition depends on the
+// driver package, never on the policy implementation subpackage directly.
+func AutomationEventTrustPolicy() automation.EventTrustPolicy {
+	return eventpolicy.Policy{}
+}
 
-// RunFinishedEventID is the deterministic event ID for a terminal
-// transition: "run-finished:{runID}:{status}". Deterministic so a re-run of
-// the finish path (double-finish, sweep retry) re-emits idempotently — the
-// journal append and the loopback idempotency key both dedup on it.
+// maxRunFinishedEventIDLength leaves room for the longest valid FleetDB
+// workspace in Automation's 128-character "internal:{workspace}:{eventID}"
+// idempotency key.
+const maxRunFinishedEventIDLength = 86
+
+// RunFinishedEventID is the deterministic event ID for a terminal transition.
+// Existing short IDs retain "run-finished:{runID}:{status}". Opaque long run
+// IDs use a collision-resistant bounded hash so publication cannot be poisoned
+// by Automation's idempotency-key limit; the payload and SubjectRef still carry
+// the exact run ID.
 func RunFinishedEventID(runID string, status domain.DriverRunStatus) string {
-	return "run-finished:" + runID + ":" + string(status)
+	candidate := eventpolicy.RunFinishedSourceEventIDPrefix + runID + ":" + string(status)
+	if len(candidate) <= maxRunFinishedEventIDLength && isSafeRunFinishedEventID(candidate) {
+		return candidate
+	}
+	digest := sha256.Sum256([]byte(runID))
+	return eventpolicy.RunFinishedSourceEventIDPrefix + "h:" + hex.EncodeToString(digest[:20]) + ":" + string(status)
+}
+
+func isSafeRunFinishedEventID(value string) bool {
+	for index := 0; index < len(value); index++ {
+		if value[index] < 0x21 || value[index] > 0x7e {
+			return false
+		}
+	}
+	return true
 }
 
 // RunFinishedSubjectKey renders the await-matchable subject key for a run's
@@ -432,46 +436,96 @@ type runFinishedPayload struct {
 	Summary     string `json:"summary,omitempty"`
 	ErrorClass  string `json:"errorClass,omitempty"`
 	ParentRunID string `json:"parentRunId,omitempty"`
+	Truncated   bool   `json:"truncated,omitempty"`
 }
 
-// emitRunFinishedEvent publishes one terminal transition: journal-first
-// append, then internal-loopback dispatch. Nil-safe and best-effort; a
-// non-terminal (or suspended) run is ignored. src may be nil — a zero-config
-// loopback over the same store is used; passing the serve-shared
-// InternalSource keeps the hop-depth ledger warm across emissions.
-func emitRunFinishedEvent(ctx context.Context, s store.Store, src *trigger.InternalSource, run *domain.DriverRun) {
+// emitRunFinishedEvent notifies already-registered composition awaits, then
+// opportunistically drains the durable outcome outbox for low latency. The
+// registered runtime reconciler owns recovery after any crash or publication
+// failure. Backends without the optional durable capability retain the legacy
+// best-effort direct publication path.
+func emitRunFinishedEvent(ctx context.Context, s store.Store, publisher RunOutcomePublisher, run *domain.DriverRun) {
 	if s == nil || run == nil || !run.Status.IsTerminal() {
 		return
 	}
-	if src == nil {
-		src = &trigger.InternalSource{Store: s}
+	outcome := newRunOutcome(ctx, s, run)
+	notifier, notifierErr := NewRunOutcomeAwaitNotifier(s.Awaits())
+	unlock := lockRunOutcome(run.WorkspaceKey, run.RunID)
+	if notifierErr == nil {
+		dispatchRunFinishedAwaits(ctx, notifier, outcome)
 	}
-	eventID := RunFinishedEventID(run.RunID, run.Status)
-	parentEventID, hopDepth := runFinishedProvenance(ctx, s, src, run)
-	payload := marshalRunFinishedPayload(ctx, run)
-	appendRunFinishedJournal(ctx, s, run, eventID, hopDepth)
-	dispatchRunFinishedAwaits(ctx, s, run, eventID, payload)
-	emitRunFinishedLoopback(ctx, src, run, eventID, parentEventID, payload)
+	unlock()
+	if outbox, ok := s.DriverRuns().(store.DriverRunOutcomeStore); ok {
+		if notifierErr != nil {
+			slog.WarnContext(ctx, "compose durable run.finished await notifier failed",
+				"runID", run.RunID, "status", string(run.Status), "eventID", outcome.EventID, "error", notifierErr)
+			return
+		}
+		journal, journalOK := s.TriggerEvents().(store.TriggerEventAppender)
+		if !journalOK {
+			slog.WarnContext(ctx, "compose durable run.finished base event journal failed",
+				"runID", run.RunID, "status", string(run.Status), "eventID", outcome.EventID)
+			return
+		}
+		reconciler, err := NewRunOutcomeReconciler(outbox, notifier, journal, publisher, run.WorkspaceKey, nil)
+		if err == nil {
+			_, err = reconciler.DrainOnce(ctx, time.Now().UTC())
+		}
+		if err != nil {
+			slog.WarnContext(ctx, "reconcile durable run.finished outcome failed",
+				"runID", run.RunID, "status", string(run.Status), "eventID", outcome.EventID, "error", err)
+		}
+		// Presence of the durable capability is authoritative even when this
+		// opportunistic drain claims nothing. Another reconciler may own the
+		// row, or a persisted retry may still be in backoff; direct publication
+		// here would bypass both the lease and retry contract.
+		return
+	}
+	if notifierErr != nil {
+		slog.WarnContext(ctx, "run.finished await notifier unavailable",
+			"runID", run.RunID, "status", string(run.Status), "eventID", outcome.EventID, "error", notifierErr)
+	}
+	if publisher == nil {
+		return
+	}
+	if err := publisher.PublishRunOutcome(ctx, outcome); err != nil {
+		slog.WarnContext(ctx, "publish run.finished outcome failed",
+			"runID", run.RunID, "status", string(run.Status), "eventID", outcome.EventID, "error", err)
+	}
 }
 
-// dispatchRunFinishedAwaits runs the dispatch-time await matcher (AW7)
-// directly off the journaled lifecycle event, BEFORE the loopback:
-// composition awaits (pattern "run.finished:{runID}") resolve even when no
-// internal.* binding listens or the hop-depth guard suppresses binding
-// fan-out — matching the unconditional journal append above. When the
-// loopback does dispatch, its own matcher pass replays as an idempotent
-// no-op (the await is already terminal). Best-effort like every leg here.
-func dispatchRunFinishedAwaits(ctx context.Context, s store.Store, run *domain.DriverRun, eventID string, payload json.RawMessage) {
-	matcher := &trigger.AwaitMatcher{Store: s}
-	if _, err := matcher.Dispatch(ctx, run.WorkspaceKey, trigger.AwaitDispatchEvent{
-		EventID:    eventID,
-		EventType:  RunFinishedEventType,
-		SubjectRef: run.RunID,
-		ActorRef:   runFinishedActor,
-		Payload:    payload,
-	}); err != nil {
+// newRunOutcome maps trusted DriverRun state onto the narrow outbound port.
+// This stays in the already-baselined legacy Execution file while the Phase 4
+// extraction still supplies a composite Store; the new port definition itself
+// has no persistence dependency.
+func newRunOutcome(ctx context.Context, st store.Store, run *domain.DriverRun) RunOutcome {
+	occurredAt := time.Now().UTC()
+	if run.FinishedAt != nil && !run.FinishedAt.IsZero() {
+		occurredAt = run.FinishedAt.UTC()
+	}
+	return RunOutcome{
+		WorkspaceKey:  run.WorkspaceKey,
+		EventID:       RunFinishedEventID(run.RunID, run.Status),
+		EventType:     RunFinishedEventType,
+		RunID:         run.RunID,
+		Status:        run.Status,
+		ActorRef:      RunFinishedActor,
+		ParentEventID: runFinishedParentEvent(ctx, st, run),
+		EpicID:        run.EpicID,
+		OccurredAt:    occurredAt,
+		Payload:       marshalRunFinishedPayload(ctx, run),
+	}
+}
+
+// dispatchRunFinishedAwaits is Execution's independent await notification
+// lane. It resolves already-registered composition awaits without depending
+// on Automation bindings. AwaitChildWorkflow also re-checks terminal child
+// state after registration, closing the child-finished-before-await window on
+// backends that do not expose a client-side event journal appender.
+func dispatchRunFinishedAwaits(ctx context.Context, notifier RunOutcomeAwaitNotifier, outcome RunOutcome) {
+	if err := notifier.NotifyRunOutcomeAwaits(ctx, outcome); err != nil {
 		slog.WarnContext(ctx, "run.finished await dispatch failed",
-			"runID", run.RunID, "status", string(run.Status), "error", err)
+			"runID", outcome.RunID, "status", string(outcome.Status), "eventID", outcome.EventID, "error", err)
 	}
 }
 
@@ -479,13 +533,9 @@ func dispatchRunFinishedAwaits(ctx context.Context, s store.Store, run *domain.D
 // log record) on the never-expected marshal failure so the lifecycle event
 // still propagates without it.
 func marshalRunFinishedPayload(ctx context.Context, run *domain.DriverRun) json.RawMessage {
-	payload, err := json.Marshal(runFinishedPayload{
-		RunID:       run.RunID,
-		Status:      string(run.Status),
-		Summary:     run.Summary,
-		ErrorClass:  run.ErrorClass,
-		ParentRunID: run.ParentRunID,
-	})
+	payload, err := marshalBoundedRunFinishedPayload(
+		run.RunID, run.Status, run.Summary, run.ErrorClass, run.ParentRunID,
+	)
 	if err != nil {
 		slog.WarnContext(ctx, "encode run.finished payload failed", "runID", run.RunID, "error", err)
 		return nil
@@ -493,85 +543,18 @@ func marshalRunFinishedPayload(ctx context.Context, run *domain.DriverRun) json.
 	return payload
 }
 
-// runFinishedProvenance derives the C19 chain provenance for a run's
-// terminal event. A run admitted by the trigger dispatch path carries the
-// admitting event's ID in SourceRef; when that resolves to a persisted
-// trigger event the run.finished continues its chain at depth parent+1.
-// Anything else (CLI runs, epic runs, free-form source refs) is a depth-0
-// system root.
-func runFinishedProvenance(ctx context.Context, s store.Store, src *trigger.InternalSource, run *domain.DriverRun) (string, int) {
+// runFinishedParentEvent returns the durable admitting event when SourceRef
+// names one. Automation derives hop depth from that persisted parent. Free-
+// form source refs remain parentless system roots.
+func runFinishedParentEvent(ctx context.Context, s store.Store, run *domain.DriverRun) string {
 	parentEventID := strings.TrimSpace(run.SourceRef)
 	if parentEventID == "" {
-		return "", 0
+		return ""
 	}
 	if _, err := s.TriggerEvents().Get(ctx, run.WorkspaceKey, parentEventID); err != nil {
-		return "", 0
+		return ""
 	}
-	return parentEventID, src.ChainHopDepth(ctx, run.WorkspaceKey, parentEventID) + 1
-}
-
-// appendRunFinishedJournal writes the journal record the await registration
-// scan matches (subject key RunFinishedSubjectKey). Unconditional with
-// respect to the loop guard: the stamped HopDepth may exceed the cap — the
-// cap suppresses binding fan-out, never await visibility. Backends without
-// the appender capability (fleet-db client) journal server-side in their
-// dispatch wiring instead (IndexAwaitEvent, AW2/AW7).
-func appendRunFinishedJournal(ctx context.Context, s store.Store, run *domain.DriverRun, eventID string, hopDepth int) {
-	appender, ok := s.TriggerEvents().(store.TriggerEventAppender)
-	if !ok {
-		slog.DebugContext(ctx, "run.finished journal append skipped: backend journals server-side",
-			"runID", run.RunID)
-		return
-	}
-	now := time.Now().UTC()
-	occurredAt := now
-	if run.FinishedAt != nil && !run.FinishedAt.IsZero() {
-		occurredAt = run.FinishedAt.UTC()
-	}
-	_, err := appender.AppendTriggerEvent(ctx, &domain.TriggerEvent{
-		WorkspaceKey:    run.WorkspaceKey,
-		EventID:         eventID,
-		SourceKind:      runFinishedSourceKind,
-		SourceEventID:   eventID,
-		EventType:       RunFinishedEventType,
-		SubjectRef:      run.RunID,
-		ActorRef:        runFinishedActor,
-		Origin:          domain.TriggerEventOriginSystem,
-		HopDepth:        hopDepth,
-		OccurredAt:      occurredAt,
-		ReceivedAt:      now,
-		IdempotencyKey:  trigger.InternalEventIdempotencyKey(run.WorkspaceKey, eventID),
-		SignatureStatus: "internal",
-	})
-	if err != nil {
-		slog.WarnContext(ctx, "append run.finished journal event failed",
-			"runID", run.RunID, "status", string(run.Status), "error", err)
-	}
-}
-
-// emitRunFinishedLoopback feeds the terminal event into the C14 loopback for
-// binding fan-out. "Nobody listening" (domain.ErrNotFound) is the normal
-// case and logged at debug; a guard drop was already audited by the source.
-func emitRunFinishedLoopback(ctx context.Context, src *trigger.InternalSource, run *domain.DriverRun, eventID, parentEventID string, payload json.RawMessage) {
-	_, err := src.Emit(ctx, run.WorkspaceKey, trigger.InternalEvent{
-		EventID:       eventID,
-		EventType:     RunFinishedEventType,
-		Origin:        domain.TriggerEventOriginSystem,
-		ParentEventID: parentEventID,
-		SubjectRef:    run.RunID,
-		ActorRef:      runFinishedActor,
-		EpicID:        run.EpicID,
-		Payload:       payload,
-	})
-	switch {
-	case err == nil:
-	case errors.Is(err, domain.ErrNotFound):
-		slog.DebugContext(ctx, "run.finished loopback: no internal binding listening",
-			"runID", run.RunID, "status", string(run.Status))
-	default:
-		slog.WarnContext(ctx, "run.finished loopback dispatch failed",
-			"runID", run.RunID, "status", string(run.Status), "error", err)
-	}
+	return parentEventID
 }
 
 const (

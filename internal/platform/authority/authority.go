@@ -132,7 +132,16 @@ type OperatorAuthority struct {
 // type and cannot be substituted for OperatorAuthority.
 type ExecutionAuthority struct {
 	grant           grant
+	owner           ExecutionOwner
 	executionMarker executionAuthorityMarker
+}
+
+// ExecutionOwner is the verified lease/fence tuple bound to an execution
+// authority. It is server-derived and never accepted from a request wire.
+type ExecutionOwner struct {
+	NodeID       string
+	LeaseID      string
+	FencingToken int64
 }
 
 // SessionAuthority represents one session-scoped caller. It is a distinct
@@ -171,6 +180,15 @@ func (a ExecutionAuthority) Subject() string      { return a.grant.subject }
 func (a ExecutionAuthority) Workspace() string    { return a.grant.workspace }
 func (a ExecutionAuthority) Action() Action       { return a.grant.action }
 func (a ExecutionAuthority) ExpiresAt() time.Time { return a.grant.expiresAt }
+
+// NodeID returns the server-verified execution owner node.
+func (a ExecutionAuthority) NodeID() string { return a.owner.NodeID }
+
+// LeaseID returns the server-verified execution owner lease.
+func (a ExecutionAuthority) LeaseID() string { return a.owner.LeaseID }
+
+// FencingToken returns the server-verified execution owner fence.
+func (a ExecutionAuthority) FencingToken() int64 { return a.owner.FencingToken }
 
 func (a SessionAuthority) Subject() string      { return a.grant.subject }
 func (a SessionAuthority) Workspace() string    { return a.grant.workspace }

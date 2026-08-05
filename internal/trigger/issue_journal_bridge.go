@@ -114,7 +114,10 @@ type IssueJournalBridge struct {
 	// Store resolves the sweep's workspace set (mirrors DeliverySweeper).
 	Store store.Store
 	// Source is the loopback ingress every journal entry re-enters through.
-	Source *InternalSource
+	// Source is the single system-event admission seam. Production serve
+	// supplies an Automation-backed emitter; InternalSource is retained only as
+	// the legacy conformance implementation used by isolated trigger tests.
+	Source InternalEventEmitter
 	// Reader is the issue-journal read capability (store.IssueJournalReader,
 	// the fleet-db-only capability from A4-1). Required.
 	Reader store.IssueJournalReader

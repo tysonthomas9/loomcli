@@ -24,6 +24,15 @@ const (
 	// WorkflowCatalogVersionLifecycleCapability is required when Loom's
 	// catalog lifecycle slice is enabled.
 	WorkflowCatalogVersionLifecycleCapability = "workflow_catalog.version_lifecycle.v1"
+	// AutomationTriggerAdmissionCapability is required when Loom composes the
+	// Phase 3 Automation core, ingress workflows, and runtime components. The
+	// running FleetDB advertises it only for a backend with full contract parity.
+	AutomationTriggerAdmissionCapability = "automation.trigger_admission.v1"
+	// ExecutionAwaitAtomicResumeCapability is required by every Loom serve
+	// profile. Await dispatch and run-outcome reconciliation must never fall
+	// back to separate resolve/resume writes, even when the Catalog and
+	// Automation slices are disabled.
+	ExecutionAwaitAtomicResumeCapability = "execution.await_atomic_resume.v1"
 )
 
 // CapabilityIncompatibilityKind identifies why the running FleetDB deployment

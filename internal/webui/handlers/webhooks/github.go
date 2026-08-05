@@ -168,11 +168,18 @@ func githubActorRef(p githubPayload) string {
 	return ""
 }
 
-func (githubAdapter) Verify(r *http.Request, body []byte, secret string) error {
+func (githubAdapter) PresentedSignature(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	return strings.TrimSpace(r.Header.Get(githubSignatureHeader))
+}
+
+func (githubAdapter) VerifySignature(body []byte, header, secret string) error {
 	if strings.TrimSpace(secret) == "" {
 		return unverified("webhook secret is not configured for this binding")
 	}
-	header := strings.TrimSpace(r.Header.Get(githubSignatureHeader))
+	header = strings.TrimSpace(header)
 	if header == "" {
 		return unverified("missing " + githubSignatureHeader + " header")
 	}

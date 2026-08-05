@@ -155,6 +155,9 @@ type AwaitInstance struct {
 	// SatisfiedByEventID is the trigger event that resolved the await
 	// (or the synthetic timeout event for timed_out rows).
 	SatisfiedByEventID string `json:"satisfiedByEventID,omitempty"`
+	// SatisfiedActor is the verified actor that won the resolution. Keeping it
+	// on the replay row makes the in-memory and FleetDB audit contracts equal.
+	SatisfiedActor string `json:"satisfiedActor,omitempty"`
 	// SatisfiedPayload is the size-capped resume payload persisted on the
 	// satisfied row and returned inline when the await is replayed.
 	SatisfiedPayload json.RawMessage `json:"satisfiedPayload,omitempty"`
@@ -271,11 +274,30 @@ func (a *AwaitInstance) ValidateAt(now time.Time) error {
 	if !a.Status.IsValid() {
 		return fmt.Errorf("await status %q unknown: %w", a.Status, ErrInvalid)
 	}
+	if err := validateAwaitActorAllow(a.ActorAllow); err != nil {
+		return err
+	}
 	return validateAwaitDeadline(a.Deadline, now)
 }
 
 // Validate is ValidateAt against the wall clock.
 func (a *AwaitInstance) Validate() error { return a.ValidateAt(time.Now()) }
+
+// validateAwaitActorAllow keeps every AwaitStore implementation on the same
+// exact-match actor contract. Whitespace normalization is deliberately not
+// performed: accepting a value here that can never equal a resolver identity
+// would create an await that no actor can safely satisfy.
+func validateAwaitActorAllow(actors []string) error {
+	for _, actor := range actors {
+		if strings.TrimSpace(actor) == "" || actor != strings.TrimSpace(actor) {
+			return fmt.Errorf("await actorAllow entries must be non-blank canonical actor ids: %w", ErrInvalid)
+		}
+		if strings.ContainsFunc(actor, func(r rune) bool { return r < 0x20 }) {
+			return fmt.Errorf("await actorAllow entry contains control characters: %w", ErrInvalid)
+		}
+	}
+	return nil
+}
 
 // validateAwaitDeadline enforces RULE 5: mandatory, strictly future.
 func validateAwaitDeadline(deadline, now time.Time) error {

@@ -34,11 +34,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/app/webhookingestion"
 	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/connector/providers"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/driverapi"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/webhooks"
@@ -190,6 +193,63 @@ type e2eHarness struct {
 	fence   int64
 }
 
+// connectorE2EAdmission is test-only compatibility wiring for this legacy
+// memstore journey. Production webhook transport has no TriggerRoutes
+// fallback; it receives the real Automation API from serve composition.
+type connectorE2EAdmission struct{ st store.Store }
+
+func (adapter connectorE2EAdmission) AdmitEvent(ctx context.Context, _ automation.EventAuthority, command automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
+	result, err := adapter.st.TriggerRoutes().DispatchTriggerRouteV2(ctx, command.WorkspaceKey, command.RouteKey, store.TriggerRouteDispatch{
+		IdempotencyKey: command.SourceKind + ":" + command.SourceEventID,
+		SourceEventID:  command.SourceEventID, EventType: command.EventType,
+		SubjectRef: command.SubjectRef, ActorRef: command.ActorRef,
+		SignatureStatus: "verified", RawPayloadRef: command.RawPayloadRef,
+		RawPayloadDigest: command.RawPayloadDigest, Payload: command.Payload,
+		SubjectAttrs: command.SubjectAttrs,
+	})
+	if err != nil {
+		return nil, err
+	}
+	deliveries := make([]*automation.Delivery, 0, len(result.Deliveries))
+	for _, delivery := range result.Deliveries {
+		deliveries = append(deliveries, &automation.Delivery{
+			DeliveryID: delivery.DeliveryID, TriggerBindingID: delivery.BindingID,
+			DriverRunID: delivery.RunID, Status: delivery.Status,
+			RejectionReason: delivery.RejectionReason,
+		})
+	}
+	return &automation.AdmissionResult{Deliveries: deliveries}, nil
+}
+
+type connectorE2EQueries struct{ st store.Store }
+
+func (adapter connectorE2EQueries) GetEvent(ctx context.Context, workspace, eventID string) (*automation.Event, error) {
+	return adapter.st.TriggerEvents().Get(ctx, workspace, eventID)
+}
+
+func (adapter connectorE2EQueries) ListEvents(ctx context.Context, workspace string, filter automation.EventFilter) ([]*automation.Event, error) {
+	return adapter.st.TriggerEvents().List(ctx, workspace, store.TriggerEventFilter{
+		SourceKind: filter.SourceKind, TriggerBindingID: filter.BindingID, Limit: filter.Limit,
+	})
+}
+
+func (adapter connectorE2EQueries) GetDelivery(ctx context.Context, workspace, deliveryID string) (*automation.Delivery, error) {
+	return adapter.st.TriggerDeliveries().Get(ctx, workspace, deliveryID)
+}
+
+func (adapter connectorE2EQueries) ListDeliveries(ctx context.Context, workspace string, filter automation.DeliveryFilter) ([]*automation.Delivery, error) {
+	return adapter.st.TriggerDeliveries().List(ctx, workspace, store.TriggerDeliveryFilter{
+		TriggerEventID: filter.EventID, TriggerBindingID: filter.BindingID,
+		Status: filter.Status, Limit: filter.Limit,
+	})
+}
+
+type connectorE2EAuthorityProvider struct{}
+
+func (connectorE2EAuthorityProvider) AuthorityForVerifiedWebhook(context.Context, webhookingestion.AuthorityRequest) (authority.WebhookAuthority, error) {
+	return authority.WebhookAuthority{}, nil
+}
+
 func newE2EHarness(t *testing.T) *e2eHarness {
 	t.Helper()
 	h := &e2eHarness{store: memstore.New(), github: newFakeGitHub(t)}
@@ -217,7 +277,18 @@ func newE2EHarness(t *testing.T) *e2eHarness {
 
 	mux := http.NewServeMux()
 	driverapi.NewModule(driverapi.Config{Store: h.store, Dispatcher: dispatcher}).Register(mux)
-	webhooks.NewModule(h.store).Register(mux)
+	workflow, err := webhookingestion.New(
+		webhooks.NewCompatibilityVerifier(webhooks.CompatibilityVerifierConfig{
+			Bindings: h.store.TriggerBindings(), Connectors: h.store.Connectors(),
+		}),
+		connectorE2EAuthorityProvider{}, connectorE2EAdmission{st: h.store},
+	)
+	if err != nil {
+		t.Fatalf("new webhook ingestion workflow: %v", err)
+	}
+	webhooks.New(webhooks.Config{
+		Workflow: workflow, Automation: connectorE2EQueries{st: h.store},
+	}).Register(mux)
 	h.server = httptest.NewServer(mux)
 	t.Cleanup(h.server.Close)
 	return h

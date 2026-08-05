@@ -23,6 +23,7 @@ import {
   post,
   wsUrl,
 } from "@/api/common";
+import { localOperatorRequestOptions } from "@/api/workflows/localOperatorSession";
 
 function monitorPath(path: string, workspaceId?: string): string {
   if (!workspaceId) return path;
@@ -308,6 +309,7 @@ export async function setAgentRecordEnabled(
       `/agents/${encodeURIComponent(agentId)}/${enabled ? "enable" : "disable"}`,
     ),
     undefined,
+    localOperatorRequestOptions(workspaceId),
   );
 }
 
@@ -341,6 +343,7 @@ export async function updateAgentRecord(
   return patch<AgentRecord>(
     wsUrl(workspaceId, `/agents/${encodeURIComponent(agentId)}`),
     req,
+    localOperatorRequestOptions(workspaceId),
   );
 }
 
@@ -355,6 +358,7 @@ export async function deleteAgentRecord(
 ): Promise<DeleteAgentRecordResult> {
   return del<DeleteAgentRecordResult>(
     wsUrl(workspaceId, `/agents/${encodeURIComponent(agentId)}`),
+    localOperatorRequestOptions(workspaceId),
   );
 }
 
@@ -366,7 +370,9 @@ export async function createPromptAgentRecord(
   workspaceId: string,
   req: CreatePromptAgentRecordRequest,
 ): Promise<AgentRecord> {
-  return post<AgentRecord>(wsUrl(workspaceId, "/agents"), req, {
-    timeout: 120_000,
-  });
+  return post<AgentRecord>(
+    wsUrl(workspaceId, "/agents"),
+    req,
+    localOperatorRequestOptions(workspaceId, { timeout: 120_000 }),
+  );
 }

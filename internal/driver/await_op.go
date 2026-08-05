@@ -108,18 +108,32 @@ type AwaitEventOutcome struct {
 // accepted pending->suspend window (domain.ErrDriverRunAlreadyResumed, or a
 // terminal row observed by the post-suspend recheck) is never lost.
 func AwaitEvent(ctx context.Context, st store.Store, opts AwaitEventOptions) (*AwaitEventOutcome, error) {
-	if opts.AwaitIndex < 1 {
-		return nil, fmt.Errorf("awaitIndex %d must be >= 1: %w", opts.AwaitIndex, domain.ErrAwaitInstanceKeyMalformed)
-	}
-	if err := domain.ValidateAwaitPattern(opts.Pattern); err != nil {
-		return nil, err
-	}
-	timeout, err := awaitTimeout(opts.TimeoutMs, opts.maxTimeout())
+	res, instanceKey, err := registerAwait(ctx, st, opts)
 	if err != nil {
 		return nil, err
 	}
+	if res.Satisfied {
+		return &AwaitEventOutcome{Status: string(res.Instance.Status), Instance: res.Instance}, nil
+	}
+	return suspendForAwait(ctx, st, opts, instanceKey, res.Instance)
+}
+
+// registerAwait owns the validation, budget, instance identity, and one
+// atomic registration call shared by the generic event-await and the
+// composition-specific terminal-child recheck.
+func registerAwait(ctx context.Context, st store.Store, opts AwaitEventOptions) (*store.AwaitResult, string, error) {
+	if opts.AwaitIndex < 1 {
+		return nil, "", fmt.Errorf("awaitIndex %d must be >= 1: %w", opts.AwaitIndex, domain.ErrAwaitInstanceKeyMalformed)
+	}
+	if err := domain.ValidateAwaitPattern(opts.Pattern); err != nil {
+		return nil, "", err
+	}
+	timeout, err := awaitTimeout(opts.TimeoutMs, opts.maxTimeout())
+	if err != nil {
+		return nil, "", err
+	}
 	if err := enforceAwaitBudget(ctx, st, opts, timeout); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	instanceKey := domain.AwaitInstanceKey(opts.RunID, opts.AwaitIndex)
 	// RULE 2: one atomic registration scan + pending row. Idempotent on the
@@ -132,12 +146,9 @@ func AwaitEvent(ctx context.Context, st store.Store, opts AwaitEventOptions) (*A
 		Deadline:    time.Now().UTC().Add(timeout),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("register await %s: %w", instanceKey, err)
+		return nil, "", fmt.Errorf("register await %s: %w", instanceKey, err)
 	}
-	if res.Satisfied {
-		return &AwaitEventOutcome{Status: string(res.Instance.Status), Instance: res.Instance}, nil
-	}
-	return suspendForAwait(ctx, st, opts, instanceKey, res.Instance)
+	return res, instanceKey, nil
 }
 
 // suspendForAwait is the pending leg: fenced suspend, tolerating a resolution

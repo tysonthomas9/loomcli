@@ -1,12 +1,10 @@
 // Package webhooks implements the inbound external-event ingestion surface for
-// Loom's trigger-driven driver workflows.
+// Loom's Automation capability.
 //
 // A single generic route, POST /api/workspaces/{ws}/webhooks/{name}, selects a
 // source-specific Adapter by {name} (e.g. "github"). The adapter normalizes the
-// request into a route key and dedup key, the handler verifies the request
-// signature against the matched TriggerBinding's secret, and then hands off to
-// the durable dispatch path (store.TriggerRouteDispatcher), which persists a
-// TriggerEvent, records a TriggerDelivery, and enqueues a queued DriverRun.
+// request into a route key and source event id, then the named
+// webhookingestion workflow verifies it and enters Automation admission.
 //
 // The webhook handler never executes workflow TypeScript; the existing Loom
 // driver executor claims and runs the enqueued DriverRun asynchronously.
@@ -62,13 +60,17 @@ type Adapter interface {
 	// Name is the {name} path segment that selects this adapter.
 	Name() string
 	// Normalize parses the request headers and raw body into routing metadata.
-	// It must not require the payload to be authentic — Verify does that. It
-	// returns a *adapterError (via badRequest) for malformed requests.
+	// It must not require the payload to be authentic — the named workflow's
+	// verifier does that. It returns a *adapterError (via badRequest) for
+	// malformed requests.
 	Normalize(r *http.Request, body []byte) (NormalizedEvent, error)
-	// Verify checks the request signature against the binding's shared secret.
-	// It returns a *adapterError (via unverified) when the signature is
-	// missing, malformed, or does not match.
-	Verify(r *http.Request, body []byte, secret string) error
+	// PresentedSignature extracts only the caller-provided proof. Server-side
+	// secret material stays inside CompatibilityVerifier and never enters the
+	// webhookingestion workflow or Automation.
+	PresentedSignature(r *http.Request) string
+	// VerifySignature checks caller-provided proof against one secret resolved
+	// inside CompatibilityVerifier. Implementations compare in constant time.
+	VerifySignature(body []byte, presentedSignature, secret string) error
 }
 
 // registry maps an adapter name to its implementation.

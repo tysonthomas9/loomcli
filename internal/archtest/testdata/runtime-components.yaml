@@ -71,8 +71,6 @@ goroutine_launches:
   - {file: "internal/cli/serve/serve_loops.go", function: "startIssueJournalBridge", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [serve-issue-journal-bridge]}
   - {file: "internal/cli/serve/serve_loops.go", function: "startOutboxDispatcher", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [serve-outbox-dispatcher]}
   - {file: "internal/cli/serve/serve_loops.go", function: "startStaleTaskSweeper", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [serve-stale-task-sweeper]}
-  - {file: "internal/cli/serve/serve_loops.go", function: "startTriggerCronScheduler", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [serve-trigger-cron-scheduler]}
-  - {file: "internal/cli/serve/serve_loops.go", function: "startTriggerDeliverySweeper", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [serve-trigger-delivery-sweeper]}
   - {file: "internal/cli/serve/worker/log_forwarder.go", function: "NewLogForwarder", site: "go#1", callee: "lf.periodicFlush", disposition: component, component_ids: [serve-worker-log-forwarder]}
   - {file: "internal/cli/serve/worker/worker_cmd.go", function: "setupWorkerShutdown", site: "go#1", callee: "<anonymous>", disposition: command, reason: "one-shot operating-system signal relay owned by the foreground worker command"}
   - {file: "internal/cli/workspace/status.go", function: "runStatus", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "workspace status fan-out is channel-joined before command return"}
@@ -93,6 +91,7 @@ goroutine_launches:
   - {file: "internal/leadcontrol/harness_runtime.go", function: "RunHarnessLeadRuntime", site: "go#1", callee: "watchHarnessLeadRuntime", disposition: component, component_ids: [harness-lead-runtime-watch]}
   - {file: "internal/leadcontrol/harness_runtime.go", function: "RunHarnessLeadRuntime", site: "go#2", callee: "drainLeadMessageQueue", disposition: component, component_ids: [lead-message-delivery-drain]}
   - {file: "internal/leadcontrol/harness_runtime.go", function: "forwardHarnessStdin", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [harness-stdin-forwarder]}
+  - {file: "internal/platform/runtime/host.go", function: "Host.Start", site: "go#1", callee: "host.runComponent", disposition: component, component_ids: [serve-await-event-notifications, serve-driver-run-outcomes, serve-trigger-cron-scheduler, serve-trigger-delivery-sweeper]}
   - {file: "internal/webui/app/server.go", function: "Server.run", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [web-http-server]}
   - {file: "internal/webui/app/server_app.go", function: "NewServer", site: "go#1", callee: "app.hub.Run", disposition: component, component_ids: [realtime-hub-retry-drain]}
   - {file: "internal/webui/app/server_app.go", function: "NewServer", site: "go#2", callee: "config.DaemonStartupFn", disposition: component, component_ids: [web-secondary-daemon-startup]}
@@ -464,30 +463,56 @@ components:
     retry_backoff: "fixed 2s cadence over durable outbox state"
     classification: managed
 
+  - id: serve-driver-run-outcomes
+    kind: component
+    file: internal/app/serve/automation_run_outcome_runtime.go
+    function: NewRunOutcomeRuntimeRegistration
+    site: "component:driver-run-outcome-registration"
+    capability: execution
+    owner: Execution outcome publication hosted by platform runtime
+    cadence: "fixed 5s after an immediate pass"
+    cancellation: "platform runtime host cancellation and bounded Stop join"
+    readiness_health: "runtime host records per-pass success, failure, panic, timeout, and next run"
+    retry_backoff: "host backoff 1s to 1m plus durable record-level exponential retry capped at 5m"
+    classification: managed
+
+  - id: serve-await-event-notifications
+    kind: component
+    file: internal/app/serve/await_event_runtime.go
+    function: NewAwaitEventRuntimeRegistration
+    site: "component:await-event-notification-registration"
+    capability: execution
+    owner: Execution await-event notification recovery hosted by platform runtime
+    cadence: "fixed 5s after an immediate pass"
+    cancellation: "platform runtime host cancellation and bounded Stop join"
+    readiness_health: "runtime host records per-pass success, failure, panic, timeout, and next run"
+    retry_backoff: "host backoff 1s to 1m plus durable record-level exponential retry capped at 5m"
+    classification: managed
+
   - id: serve-trigger-cron-scheduler
-    kind: ticker
-    file: internal/cli/serve/serve_loops.go
-    function: startTriggerCronScheduler
-    site: "time.NewTicker#1"
+    kind: component
+    file: internal/modules/automation/runtime.go
+    function: RuntimeRegistrations
+    site: "component:cron-scheduler-registration"
     capability: automation
-    owner: serve automation runtime
-    cadence: "30s default, environment bounded to 1..3600s"
-    cancellation: "serve context cancellation"
-    readiness_health: "logs scheduler enablement, fired counts, and pass failures"
-    retry_backoff: "fixed configured cadence; durable tick identity deduplicates repeats"
+    owner: Automation runtime contribution hosted by platform runtime
+    cadence: "fixed 30s after an immediate pass"
+    cancellation: "platform runtime host cancellation and bounded Stop join"
+    readiness_health: "runtime host records per-pass success, failure, panic, timeout, and next run"
+    retry_backoff: "no host backoff; durable occurrence claims and completion make passes restart-safe"
     classification: managed
 
   - id: serve-trigger-delivery-sweeper
-    kind: ticker
-    file: internal/cli/serve/serve_loops.go
-    function: startTriggerDeliverySweeper
-    site: "time.NewTicker#1"
+    kind: component
+    file: internal/modules/automation/runtime.go
+    function: RuntimeRegistrations
+    site: "component:delivery-sweeper-registration"
     capability: automation
-    owner: serve automation runtime
-    cadence: "15s default, environment bounded to 1..3600s"
-    cancellation: "serve context cancellation"
-    readiness_health: "logs dispatched, rescheduled, exhausted, and failure counts"
-    retry_backoff: "configured scan cadence over each delivery's durable retry schedule"
+    owner: Automation runtime contribution hosted by platform runtime
+    cadence: "fixed 15s after an immediate pass"
+    cancellation: "platform runtime host cancellation and bounded Stop join"
+    readiness_health: "runtime host records per-pass success, failure, panic, timeout, and next run"
+    retry_backoff: "no host backoff; each delivery retains its durable record-level retry schedule"
     classification: managed
 
   - id: serve-await-timeout-sweeper

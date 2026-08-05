@@ -336,9 +336,10 @@ type TriggerEventStore interface {
 }
 
 // TriggerEventAppender is an OPTIONAL TriggerEventStore capability (detected
-// by type assertion, like DriverRunEventsReader): append one server-stamped
-// event directly to the trigger-event journal without route dispatch. This is
-// the run.finished lifecycle lane (AW6): journal-first so the await
+// by type assertion, like DriverRunEventsReader): append one trusted,
+// server-attested event directly to the trigger-event journal without route
+// dispatch. The base Execution runtime requires this for run.finished (AW6):
+// journal-first so the await
 // registration scan (AwaitStore.RegisterAwaitAndCheck) sees terminal runs
 // even when no binding listens on the internal route — composition awaits can
 // never be suppressed by binding configuration or the loop guard.
@@ -346,9 +347,8 @@ type TriggerEventStore interface {
 // Implementations preserve the caller's EventID (lifecycle event IDs are
 // deterministic for idempotent re-emission) and dedup on both EventID and
 // IdempotencyKey, returning the existing record unchanged on a replay. The
-// fleet-db backend does not implement this client-side capability: there the
-// journal append happens server-side in fleet-db's dispatch wiring
-// (IndexAwaitEvent, AW2/AW7).
+// Production FleetDB exposes this capability only through its service-auth
+// producer route; human bearer requests cannot forge event provenance.
 type TriggerEventAppender interface {
 	AppendTriggerEvent(ctx context.Context, event *domain.TriggerEvent) (*domain.TriggerEvent, error)
 }
@@ -601,6 +601,58 @@ type DriverRunStore interface {
 	// loser gets domain.ErrInvalidTransition, which resume callers (AW7)
 	// tolerate.
 	ResumeAwaiting(ctx context.Context, workspaceKey, runID, awaitInstanceKey, resumeSourceEventID string) (*domain.DriverRun, error)
+}
+
+// DriverRunOutcome is the immutable terminal snapshot persisted atomically
+// with a DriverRun transition. Publication workers derive the deterministic
+// run.finished envelope from this record; they never re-read mutable run or
+// trigger state after claiming it.
+type DriverRunOutcome struct {
+	WorkspaceKey  string                 `json:"workspace_key"`
+	RunID         string                 `json:"run_id"`
+	Status        domain.DriverRunStatus `json:"status"`
+	Summary       string                 `json:"summary,omitempty"`
+	ErrorClass    string                 `json:"error_class,omitempty"`
+	ParentRunID   string                 `json:"parent_run_id,omitempty"`
+	ParentEventID string                 `json:"parent_event_id,omitempty"`
+	EpicID        string                 `json:"epic_id,omitempty"`
+	OccurredAt    time.Time              `json:"occurred_at"`
+	Attempt       int                    `json:"attempt"`
+}
+
+// DriverRunOutcomeClaim leases due terminal outcomes to one reconciler pass.
+// Expired claims are reclaimable, so a process crash after publication but
+// before completion converges through the deterministic event id.
+type DriverRunOutcomeClaim struct {
+	WorkspaceKey string
+	ClaimID      string
+	Before       time.Time
+	ClaimUntil   time.Time
+	Limit        int
+}
+
+type DriverRunOutcomeCompletion struct {
+	WorkspaceKey string
+	RunID        string
+	ClaimID      string
+	CompletedAt  time.Time
+}
+
+type DriverRunOutcomeRetry struct {
+	WorkspaceKey string
+	RunID        string
+	ClaimID      string
+	AvailableAt  time.Time
+	Error        string
+}
+
+// DriverRunOutcomeStore is an optional DriverRunStore capability. Production
+// FleetDB and the in-memory backend implement it; wrappers must forward it so
+// the registered Execution reconciler cannot silently lose durability.
+type DriverRunOutcomeStore interface {
+	ClaimDriverRunOutcomes(context.Context, DriverRunOutcomeClaim) ([]DriverRunOutcome, error)
+	CompleteDriverRunOutcome(context.Context, DriverRunOutcomeCompletion) error
+	RetryDriverRunOutcome(context.Context, DriverRunOutcomeRetry) error
 }
 
 // DriverRunCancelSupport is an OPTIONAL DriverRunStore capability (detected

@@ -60,7 +60,7 @@ type Store struct {
 // Production code uses internal/infra/fleetdb.New instead. Calling New outside
 // a Go test process panics so memstore cannot become a real runtime control
 // plane by accident.
-func New() *Store {
+func New() *Store { //nolint:funlen // Constructor wiring is deliberately explicit so test-store dependencies remain auditable.
 	requireTestProcess()
 
 	drivers, versions, profiles, roles, services, bindings := newCatalogGraph()
@@ -73,9 +73,11 @@ func New() *Store {
 	runs.taskRuns = taskRuns
 	steps.taskRuns = taskRuns
 	events := newTriggerEventStore()
+	runs.events = events
 	deliveries := newTriggerDeliveryStore(bindings)
 	routes := &triggerRouteStore{bindings: bindings, events: events, deliveries: deliveries, runs: runs}
 	awaits := newAwaitStore(events)
+	awaits.runs = runs
 	// ResumeAwaiting's security gate: only a resolved (satisfied/timed_out)
 	// await releases its suspended run.
 	runs.setAwaitResumeEligible(awaits.resumeEligible)
