@@ -198,37 +198,6 @@ type AgentOwnershipLease struct {
 	UpdatedAt       time.Time        `json:"updated_at"`
 }
 
-type AgentCommandStatus string
-
-const (
-	AgentCommandQueued    AgentCommandStatus = "queued"
-	AgentCommandAcked     AgentCommandStatus = "acked"
-	AgentCommandRunning   AgentCommandStatus = "running"
-	AgentCommandSucceeded AgentCommandStatus = "succeeded"
-	AgentCommandFailed    AgentCommandStatus = "failed"
-	AgentCommandCancelled AgentCommandStatus = "cancelled"
-)
-
-type AgentCommand struct {
-	WorkspaceKey          string             `json:"workspace_key"`
-	CommandID             string             `json:"command_id"`
-	Cursor                int64              `json:"cursor"`
-	TargetAgentID         string             `json:"target_agent_id,omitempty"`
-	TargetNodeID          string             `json:"target_node_id,omitempty"`
-	SessionID             string             `json:"session_id,omitempty"`
-	Type                  string             `json:"type"`
-	Payload               map[string]string  `json:"payload,omitempty"`
-	Status                AgentCommandStatus `json:"status"`
-	AckedBy               string             `json:"acked_by,omitempty"`
-	AckedAt               *time.Time         `json:"acked_at,omitempty"`
-	OwnershipLeaseID      string             `json:"ownership_lease_id,omitempty"`
-	OwnershipFencingToken int64              `json:"ownership_fencing_token,omitempty"`
-	Result                string             `json:"result,omitempty"`
-	ErrorClass            string             `json:"error_class,omitempty"`
-	CreatedAt             time.Time          `json:"created_at"`
-	UpdatedAt             time.Time          `json:"updated_at"`
-}
-
 type AgentInboxMessageStatus string
 
 const (

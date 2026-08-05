@@ -11,7 +11,7 @@ import (
 
 // UploadContentArtifact creates (or reuses), uploads, and finalizes a content
 // artifact in one call — the create→UploadContent→Finalize sequence shared by the
-// driver host-bridge and the daemon supervisor's transcript upload. On an
+// driver host bridge and Interaction transcript upload. On an
 // already-existing, finalized, owner-matching artifact it returns that artifact
 // instead of re-uploading, so a retried finalize is idempotent.
 //

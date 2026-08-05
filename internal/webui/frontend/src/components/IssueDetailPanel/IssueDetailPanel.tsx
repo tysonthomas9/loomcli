@@ -481,6 +481,17 @@ function DefaultContent({
   const taskRunId = issue?.issue_type === "task" ? issue.id : null;
   const { sessions: taskRuns } = useTaskSessions(taskRunId);
   const failedRun = useMemo(() => latestFailedRun(taskRuns), [taskRuns]);
+  const activeTaskAgent = useMemo(() => {
+    if (!issue?.assignee?.startsWith("driver-run:")) return undefined;
+    const active = taskRuns.find(
+      (run) =>
+        run.is_active ||
+        run.status === "running" ||
+        run.status === "queued" ||
+        run.status === "planning",
+    );
+    return active?.agent_name?.trim() || undefined;
+  }, [issue?.assignee, taskRuns]);
 
   const currentRepo = useMemo(() => issueRepoName(issue), [issue]);
 
@@ -601,6 +612,7 @@ function DefaultContent({
   // the epic (lead.parent === epic id) for the claim badge.
   const issueStore = useIssueStoreInstance();
   const issuesMap = useStore(issueStore, (s) => s.issuesMap);
+  const reconcileIssue = useStore(issueStore, (s) => s.reconcileIssue);
   const epicChildren = useMemo<Issue[]>(() => {
     if (!issue || issue.issue_type !== "epic") return [];
     const children: Issue[] = [];
@@ -819,6 +831,7 @@ function DefaultContent({
         const updatedIssue = await updateIssue(workspaceId, issue.id, {
           title: newTitle,
         });
+        reconcileIssue(updatedIssue);
         onIssueUpdate?.(updatedIssue);
       } catch (err) {
         const message =
@@ -829,7 +842,7 @@ function DefaultContent({
         setIsSavingTitle(false);
       }
     },
-    [issue, onIssueUpdate],
+    [issue, onIssueUpdate, reconcileIssue, workspaceId],
   );
 
   const handleStatusChange = useCallback(
@@ -842,6 +855,7 @@ function DefaultContent({
         const updatedIssue = await updateIssue(workspaceId, issue.id, {
           status: newStatus,
         });
+        reconcileIssue(updatedIssue);
         onIssueUpdate?.(updatedIssue);
       } catch (err) {
         const message =
@@ -851,7 +865,7 @@ function DefaultContent({
         setIsSavingStatus(false);
       }
     },
-    [issue, onIssueUpdate],
+    [issue, onIssueUpdate, reconcileIssue, workspaceId],
   );
 
   const handleAssigneeSave = useCallback(
@@ -862,7 +876,7 @@ function DefaultContent({
       try {
         // Assigning an agent to an open or review issue starts work, like
         // the old Start Work flow: an open issue moves to in_progress and
-        // the agent daemon claims the task; a review issue keeps its status
+        // Execution claims the ready task; a review issue keeps its status
         // (the PR stays in the review queue while the agent works it).
         const isAgentAssignment =
           newAssignee !== "" &&
@@ -876,6 +890,7 @@ function DefaultContent({
           const updatedIssue = await updateIssue(workspaceId, issue.id, {
             assignee: newAssignee,
           });
+          reconcileIssue(updatedIssue);
           onIssueUpdate?.(updatedIssue);
           return;
         }
@@ -886,8 +901,9 @@ function DefaultContent({
           assignee: newAssignee,
           ...(issue.status === "review" ? {} : { status: "in_progress" }),
         });
+        reconcileIssue(updatedIssue);
         try {
-          await startAgent(workspaceId, newAssignee, { taskId: issue.id });
+          await startAgent(workspaceId, newAssignee);
           onIssueUpdate?.(updatedIssue);
         } catch (err) {
           try {
@@ -895,6 +911,7 @@ function DefaultContent({
               assignee: previousAssignee,
               status: previousStatus,
             });
+            reconcileIssue(rolledBackIssue);
             onIssueUpdate?.(rolledBackIssue);
           } catch {
             // Keep the original start failure visible to the dropdown.
@@ -905,7 +922,7 @@ function DefaultContent({
         setIsSavingAssignee(false);
       }
     },
-    [agents, issue, onIssueUpdate, workspaceId],
+    [agents, issue, onIssueUpdate, reconcileIssue, workspaceId],
   );
 
   const handleRepoSave = useCallback(
@@ -922,12 +939,13 @@ function DefaultContent({
           issue.id,
           newRepo,
         );
+        reconcileIssue(updatedIssue);
         onIssueUpdate?.(updatedIssue);
       } finally {
         setIsSavingRepo(false);
       }
     },
-    [issue, onIssueUpdate, workspaceId],
+    [issue, onIssueUpdate, reconcileIssue, workspaceId],
   );
 
   const handleRunEpicWorkflow = useCallback(async () => {
@@ -957,7 +975,6 @@ function DefaultContent({
           const leadAgent = await createWorkspaceAgent(workspaceId, {
             name: candidate,
             role_name: "lead",
-            auto: false,
             cross_repo: repoNames.length === 0,
             repos: repoNames,
           });
@@ -1254,6 +1271,9 @@ function DefaultContent({
           </span>
           <AssigneeDropdown
             assignee={issue.assignee}
+            {...(activeTaskAgent !== undefined && {
+              assigneeDisplayName: activeTaskAgent,
+            })}
             onSave={handleAssigneeSave}
             isSaving={isSavingAssignee}
             agents={agents}

@@ -318,7 +318,7 @@ func (e *workflowCatalogPhase2E2E) startLoomServe() {
 		e.t.Fatalf("pick loom serve port: %v", err)
 	}
 	e.loomURL = "http://127.0.0.1:" + strconv.Itoa(port)
-	cmd := exec.Command(e.loomBin, "serve", "--no-daemon", "--bind", "127.0.0.1", "--port", strconv.Itoa(port), "--frontend-url", "http://127.0.0.1:9")
+	cmd := exec.Command(e.loomBin, "serve", "--bind", "127.0.0.1", "--port", strconv.Itoa(port), "--frontend-url", "http://127.0.0.1:9")
 	cmd.Dir = e.workDir
 	cmd.Env = workflowEndpointEnv(map[string]string{
 		"HOME":                          e.homeDir,

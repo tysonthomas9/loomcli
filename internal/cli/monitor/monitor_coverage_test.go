@@ -137,25 +137,6 @@ func TestRenderAgentLine_Basic(t *testing.T) {
 	}
 }
 
-func TestRenderAgentLine_DaemonManaged(t *testing.T) {
-	var sb strings.Builder
-	agent := AgentStatus{
-		Name:          "worker",
-		Branch:        "main",
-		Status:        "working:task-1",
-		DaemonManaged: true,
-	}
-	RenderAgentLine(&sb, agent, "  ")
-	result := sb.String()
-
-	if !strings.Contains(result, "[D]") {
-		t.Error("renderAgentLine should show [D] prefix for daemon-managed agents")
-	}
-	if !strings.Contains(result, "●") {
-		t.Error("renderAgentLine should show ● for working status")
-	}
-}
-
 func TestRenderAgentLine_WithSyncIndicator(t *testing.T) {
 	var sb strings.Builder
 	agent := AgentStatus{

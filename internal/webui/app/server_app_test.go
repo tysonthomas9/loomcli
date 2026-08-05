@@ -78,7 +78,7 @@ func TestServer_RegisterRoutes_HealthRegistered(t *testing.T) {
 	}
 }
 
-func TestNewServer_FleetClientSkipsDaemonPoolAndHealthProbe(t *testing.T) {
+func TestNewServerFleetClientHealthProbe(t *testing.T) {
 	app, err := NewServer(context.Background(), webui.ServerConfig{
 		Port:            freeTCPPort(t),
 		BindAddress:     "127.0.0.1",
@@ -90,10 +90,6 @@ func TestNewServer_FleetClientSkipsDaemonPoolAndHealthProbe(t *testing.T) {
 		t.Fatalf("NewServer: %v", err)
 	}
 	t.Cleanup(func() { app.Close() })
-
-	if app.pool != nil {
-		t.Fatal("daemon pool should be nil in FleetDB-backed mode")
-	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
 	rec := httptest.NewRecorder()
@@ -194,19 +190,6 @@ func freeTCPPort(t *testing.T) int {
 	return l.Addr().(*net.TCPAddr).Port
 }
 
-// TestServer_ConfigDefaults_PoolSize verifies that the default pool size is
-// applied when the config has PoolSize=0.
-func TestServer_ConfigDefaults_PoolSize(t *testing.T) {
-	config := webui.ServerConfig{}
-
-	if config.PoolSize == 0 {
-		config.PoolSize = webui.DefaultPoolSize
-	}
-	if config.PoolSize != 100 {
-		t.Errorf("default PoolSize = %d, want 100", config.PoolSize)
-	}
-}
-
 // TestServer_ConfigDefaults_ShutdownTimeout verifies that the default
 // shutdown timeout is applied when the config has ShutdownTimeout=0.
 func TestServer_ConfigDefaults_ShutdownTimeout(t *testing.T) {
@@ -255,9 +238,6 @@ func TestServer_ConfigDefaults_AllAtOnce(t *testing.T) {
 	if config.Port == 0 {
 		config.Port = webui.DefaultPort
 	}
-	if config.PoolSize == 0 {
-		config.PoolSize = webui.DefaultPoolSize
-	}
 	if config.ShutdownTimeout == 0 {
 		config.ShutdownTimeout = webui.DefaultShutdownTimeout
 	}
@@ -270,9 +250,6 @@ func TestServer_ConfigDefaults_AllAtOnce(t *testing.T) {
 
 	if config.Port != 8080 {
 		t.Errorf("Port = %d, want 8080", config.Port)
-	}
-	if config.PoolSize != 100 {
-		t.Errorf("PoolSize = %d, want 100", config.PoolSize)
 	}
 	if config.ShutdownTimeout != 5*time.Second {
 		t.Errorf("ShutdownTimeout = %v, want %v", config.ShutdownTimeout, 5*time.Second)
@@ -405,7 +382,6 @@ func TestServer_ClosePTYMgr_IdempotentWithShutdownPath(t *testing.T) {
 func TestServer_ConfigDefaults_ExplicitValuesPreserved(t *testing.T) {
 	config := webui.ServerConfig{
 		Port:            9090,
-		PoolSize:        50,
 		ShutdownTimeout: 10 * time.Second,
 		MaxPortAttempts: 3,
 		BindAddress:     "0.0.0.0",
@@ -414,9 +390,6 @@ func TestServer_ConfigDefaults_ExplicitValuesPreserved(t *testing.T) {
 	// Apply defaults — none should trigger because every field is non-zero.
 	if config.Port == 0 {
 		config.Port = webui.DefaultPort
-	}
-	if config.PoolSize == 0 {
-		config.PoolSize = webui.DefaultPoolSize
 	}
 	if config.ShutdownTimeout == 0 {
 		config.ShutdownTimeout = webui.DefaultShutdownTimeout
@@ -430,9 +403,6 @@ func TestServer_ConfigDefaults_ExplicitValuesPreserved(t *testing.T) {
 
 	if config.Port != 9090 {
 		t.Errorf("Port = %d, want 9090 (explicit)", config.Port)
-	}
-	if config.PoolSize != 50 {
-		t.Errorf("PoolSize = %d, want 50 (explicit)", config.PoolSize)
 	}
 	if config.ShutdownTimeout != 10*time.Second {
 		t.Errorf("ShutdownTimeout = %v, want %v (explicit)", config.ShutdownTimeout, 10*time.Second)

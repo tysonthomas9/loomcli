@@ -18,6 +18,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	workflowdefs "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution/authoring"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
@@ -26,6 +27,10 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/webhooks"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
+
+// AgentIdentityQueries keeps the root serve adapter dependent on this
+// composition boundary rather than importing the Agents capability directly.
+type AgentIdentityQueries = agents.IdentityQueries
 
 // WorkflowCatalogEnabledEnv controls whether serve exposes the Workflow
 // Catalog slice.
@@ -431,9 +436,16 @@ func (module *WorkflowCatalogModule) NewInteractionCapabilityWithFleetDB(
 // operator resolver so Desktop's action-limited browser bearer can submit a
 // run. Catalog-disabled profiles still get runtime/TaskRun execution but no
 // operator submit resolver.
-func BuildExecutionCapability(module *WorkflowCatalogModule, handle *bootstrap.StoreHandle) (*appserve.ExecutionCapability, error) {
+func BuildExecutionCapability(
+	module *WorkflowCatalogModule,
+	handle *bootstrap.StoreHandle,
+	agentQueries agents.IdentityQueries,
+) (*appserve.ExecutionCapability, error) {
 	if handle == nil || handle.Store == nil || handle.FleetDBClient() == nil {
 		return nil, fmt.Errorf("compose Execution: FleetDB Store handle is required")
+	}
+	if agentQueries == nil {
+		return nil, fmt.Errorf("compose Execution: canonical Agents queries are required")
 	}
 	st := handle.Store
 	executionTransport := handle.FleetDBClient().Execution()
@@ -444,7 +456,7 @@ func BuildExecutionCapability(module *WorkflowCatalogModule, handle *bootstrap.S
 	dependencies := appserve.ExecutionDependencies{
 		TaskRuns: st.TaskRuns(), DriverRuns: st.DriverRuns(), DriverSteps: st.DriverSteps(),
 		TerminalStepRepairs: executionTransport, TaskRunEvents: st.TaskRunEvents(), Nodes: st.Nodes(),
-		WorkerProfiles: st.WorkerProfiles(), Agents: st.Agents(), Outbox: st.Outbox(), Awaits: st.Awaits(),
+		WorkerProfiles: st.WorkerProfiles(), AgentQueries: agentQueries, Outbox: st.Outbox(), Awaits: st.Awaits(),
 		TriggerEvents:         st.TriggerEvents(),
 		Workspaces:            st.Workspaces(),
 		AtomicTaskRunRequests: requestPort, AtomicTaskRunClaims: claimPort,

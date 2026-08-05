@@ -45,6 +45,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/testutil"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/driverapi"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/webhooks"
 )
@@ -320,7 +321,7 @@ func newE2EHarness(t *testing.T) *e2eHarness {
 	executionCapability, err := appserve.NewExecutionCapability(appserve.ExecutionDependencies{
 		TaskRuns: h.store.TaskRuns(), DriverRuns: h.store.DriverRuns(), DriverSteps: h.store.DriverSteps(),
 		TerminalStepRepairs: repairs, TaskRunEvents: h.store.TaskRunEvents(), Nodes: h.store.Nodes(),
-		WorkerProfiles: h.store.WorkerProfiles(), Agents: h.store.Agents(), Outbox: h.store.Outbox(),
+		WorkerProfiles: h.store.WorkerProfiles(), AgentQueries: testutil.StaticAgentQueries{}, Outbox: h.store.Outbox(),
 		Awaits: h.store.Awaits(), TriggerEvents: h.store.TriggerEvents(), Workspaces: h.store.Workspaces(),
 		AtomicTaskRunRequests: taskRunCommands, AtomicTaskRunClaims: taskRunCommands,
 		AtomicTaskRunWorkItemDesign: taskRunCommands,

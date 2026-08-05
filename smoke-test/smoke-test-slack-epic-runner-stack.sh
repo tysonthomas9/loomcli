@@ -594,11 +594,8 @@ main() {
   [[ -n "${LOOM_OPENCODE_MODEL:-}" ]] && podman_args+=(-e "LOOM_OPENCODE_MODEL=${LOOM_OPENCODE_MODEL}")
   [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]] && podman_args+=(-e "CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}")
 
-  # Flag-gated serve behaviors (unified-agents): LOOM_TASK_READY_EVENTS opts the
-  # issue-journal bridge into task.ready internal events (serve_loops.go, default off);
-  # LOOM_DRIVER_EXECUTOR_WORKSPACE scopes/unscopes the driver automation loops
-  # (serve.go). Forwarded only when set so the default stack env is unchanged.
-  [[ -n "${LOOM_TASK_READY_EVENTS:-}" ]] && podman_args+=(-e "LOOM_TASK_READY_EVENTS=${LOOM_TASK_READY_EVENTS}")
+  # LOOM_DRIVER_EXECUTOR_WORKSPACE scopes the driver automation loops. Task
+  # ready/review events are unconditional runtime behavior and have no selector.
   [[ -n "${LOOM_DRIVER_EXECUTOR_WORKSPACE:-}" ]] && podman_args+=(-e "LOOM_DRIVER_EXECUTOR_WORKSPACE=${LOOM_DRIVER_EXECUTOR_WORKSPACE}")
 
   # Server-side workflow-build toolchain (register builtin/custom workflow versions over HTTP):

@@ -210,72 +210,19 @@ func TestDriverStaleTaskMaxAgeMatchesSweeperDefault(t *testing.T) {
 	}
 }
 
-func TestTaskReadyEventsEnabledDefaultsOnWithExplicitOptOut(t *testing.T) {
-	for _, value := range []string{"", "1", "true", "TRUE", "yes", "on", "unexpected"} {
-		t.Run("enabled_"+value, func(t *testing.T) {
-			t.Setenv(envLoomTaskReadyEvents, value)
-			if !taskReadyEventsEnabled() {
-				t.Fatalf("taskReadyEventsEnabled() = false for %q", value)
-			}
-		})
-	}
-	for _, value := range []string{"0", "false", "FALSE", "off", "no"} {
-		t.Run("disabled_"+value, func(t *testing.T) {
-			t.Setenv(envLoomTaskReadyEvents, value)
-			if taskReadyEventsEnabled() {
-				t.Fatalf("taskReadyEventsEnabled() = true for %q", value)
-			}
-		})
-	}
-}
-
-func TestTaskReviewEventsEnabledDefaultsOnWithExplicitOptOut(t *testing.T) {
-	for _, value := range []string{"", "1", "true", "TRUE", "yes", "on", "unexpected"} {
-		t.Run("enabled_"+value, func(t *testing.T) {
-			t.Setenv(envLoomTaskReviewEvents, value)
-			if !taskReviewEventsEnabled() {
-				t.Fatalf("taskReviewEventsEnabled() = false for %q", value)
-			}
-		})
-	}
-	for _, value := range []string{"0", "false", "FALSE", "off", "no"} {
-		t.Run("disabled_"+value, func(t *testing.T) {
-			t.Setenv(envLoomTaskReviewEvents, value)
-			if taskReviewEventsEnabled() {
-				t.Fatalf("taskReviewEventsEnabled() = true for %q", value)
-			}
-		})
-	}
-}
-
-func TestBuildIssueJournalBridgeWiresTaskReviewToggle(t *testing.T) {
+func TestBuildIssueJournalBridgeAlwaysEnablesTaskReviewEvents(t *testing.T) {
 	mem := memstore.New()
 	source := &trigger.InternalSource{Store: mem}
 
-	t.Run("default on", func(t *testing.T) {
-		t.Setenv(envLoomIssueBridgeDisabled, "")
-		t.Setenv(envLoomIssueBridgeStatePath, filepath.Join(t.TempDir(), "cursor.json"))
-		t.Setenv(envLoomTaskReviewEvents, "")
-		bridge := runtimecomposition.BuildIssueJournalBridge(
-			readerCapableStore{Store: mem}, nil, nil, nil, source,
-			buildServeRuntimeConfig().IssueJournal,
-		)
-		if bridge == nil || !bridge.EmitTaskReview {
-			t.Fatalf("bridge = %+v, want task-review lane enabled", bridge)
-		}
-	})
-	t.Run("explicit opt out", func(t *testing.T) {
-		t.Setenv(envLoomIssueBridgeDisabled, "")
-		t.Setenv(envLoomIssueBridgeStatePath, filepath.Join(t.TempDir(), "cursor.json"))
-		t.Setenv(envLoomTaskReviewEvents, "off")
-		bridge := runtimecomposition.BuildIssueJournalBridge(
-			readerCapableStore{Store: mem}, nil, nil, nil, source,
-			buildServeRuntimeConfig().IssueJournal,
-		)
-		if bridge == nil || bridge.EmitTaskReview {
-			t.Fatalf("bridge = %+v, want task-review lane disabled", bridge)
-		}
-	})
+	t.Setenv(envLoomIssueBridgeDisabled, "")
+	t.Setenv(envLoomIssueBridgeStatePath, filepath.Join(t.TempDir(), "cursor.json"))
+	bridge := runtimecomposition.BuildIssueJournalBridge(
+		readerCapableStore{Store: mem}, nil, nil, nil, source,
+		buildServeRuntimeConfig().IssueJournal,
+	)
+	if bridge == nil || !bridge.EmitTaskReview {
+		t.Fatalf("bridge = %+v, want generic task-review lane enabled", bridge)
+	}
 }
 
 func TestTaskReadyRepositoryRequired(t *testing.T) {

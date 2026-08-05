@@ -32,11 +32,6 @@ const reviewerIdentityHashLen = 8
 const reviewerRoleName = prreviewer.RoleName
 const reviewerGitTimeout = 60 * time.Second
 
-// terminalKindAgent mirrors the agent-terminal tab kind used by the terminal
-// handlers (internal/webui/handlers/terminal); tabs of this kind for the
-// reviewer's agent name are the reviewer's live PTYs.
-const terminalKindAgent = "agent"
-
 // reviewerAgentName expects the canonical owner/repo pair returned by the
 // repository membership check.
 func reviewerAgentName(owner, repo string, number int) string {
@@ -280,9 +275,7 @@ func (m *Module) ensureReviewer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := m.ensureReviewerAgentAndRetireLegacy(
-		r.Context(), ws, agentName, params.owner, params.repo, params.number,
-	); err != nil {
+	if err := m.ensureReviewerAgent(r.Context(), ws, agentName); err != nil {
 		slog.Error("pr-review: ensure reviewer agent failed", "ws", ws, "agent", agentName, "err", err)
 		writeReviewerProvisioningError(w, err)
 		return
@@ -439,86 +432,6 @@ func (m *Module) ensureReviewerAgent(ctx context.Context, ws, agentName string) 
 	if result == nil || result.Agent == nil ||
 		result.Agent.WorkspaceKey != ws || result.Agent.AgentID != agentName {
 		return fmt.Errorf("pr reviewer provisioning returned an invalid identity: %w", agents.ErrInvalidPersistedState)
-	}
-	return nil
-}
-
-func (m *Module) ensureReviewerAgentAndRetireLegacy(
-	ctx context.Context,
-	ws, agentName, owner, repo string,
-	number int,
-) error {
-	if err := m.ensureReviewerAgent(ctx, ws, agentName); err != nil {
-		return err
-	}
-	return m.retireLegacyReviewer(ctx, ws,
-		agentName,
-		legacyReviewerAgentName(repo, number),
-		intermediateReviewerAgentName(owner, repo, number),
-	)
-}
-
-// retireLegacyReviewer removes all historical store.Agent projections after
-// the same stable identity has been committed through canonical Agents. The
-// current hashed name is included because the two aggregates use independent
-// storage: deleting its legacy projection cannot delete the AgentService.
-func (m *Module) retireLegacyReviewer(ctx context.Context, ws string, legacyAgentNames ...string) error {
-	seen := make(map[string]struct{}, len(legacyAgentNames))
-	for _, legacyAgentName := range legacyAgentNames {
-		if _, duplicate := seen[legacyAgentName]; duplicate {
-			continue
-		}
-		seen[legacyAgentName] = struct{}{}
-		if err := m.retireReviewerAgent(ctx, ws, legacyAgentName); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (m *Module) retireReviewerAgent(ctx context.Context, ws, agentName string) error {
-	if _, err := m.store.Agents().Get(ctx, ws, agentName); err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			return nil
-		}
-		return fmt.Errorf("load legacy reviewer agent: %w", err)
-	}
-	if err := m.stopAndClearReviewerRuntime(ctx, ws, agentName); err != nil {
-		return err
-	}
-	if m.managedRetirements == nil {
-		return fmt.Errorf("compose legacy reviewer retirement: %w", agents.ErrUnavailable)
-	}
-	if err := m.managedRetirements.RetireManagedAssignment(
-		ctx,
-		agents.RetireSupervisedAssignmentCommand{
-			WorkspaceKey: ws,
-			AgentName:    agentName,
-		},
-		"retire PR reviewer compatibility projection "+agentName,
-	); err != nil {
-		return fmt.Errorf("delete legacy reviewer agent: %w", err)
-	}
-	return nil
-}
-
-func (m *Module) stopAndClearReviewerRuntime(ctx context.Context, ws, agentName string) error {
-	if m.terminalSvc != nil {
-		tabs, err := m.terminalSvc.ListTabs(ctx, ws)
-		if err != nil {
-			// Without the tab list the old PTY may survive and fight the new
-			// runtime over session metadata — refuse rather than migrate dirty.
-			return fmt.Errorf("list reviewer terminals: %w", err)
-		}
-		for _, tab := range tabs {
-			if tab.Kind != terminalKindAgent || tab.AgentID != agentName {
-				continue
-			}
-			// DeleteTab kills the live PTY along with the tab metadata.
-			if err := m.terminalSvc.DeleteTab(ctx, ws, tab.SessionName); err != nil {
-				return fmt.Errorf("stop reviewer terminal %s: %w", tab.SessionName, err)
-			}
-		}
 	}
 	return nil
 }

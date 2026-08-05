@@ -9,26 +9,20 @@ import (
 	"strings"
 	"sync"
 	"testing"
-
-	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
 )
 
 // agentMockServer records observed request paths and bodies so tests can
 // assert on them. Each handler writes back a MessageResponse envelope.
 type agentMockServer struct {
-	mu       sync.Mutex
-	paths    []string
-	bodies   map[string]string
-	forceOK  bool // force-stop returns 200
-	yieldAcc bool // yield/non-force-stop returns 202
+	mu     sync.Mutex
+	paths  []string
+	bodies map[string]string
 }
 
 func newAgentMockServer(t *testing.T) (*httptest.Server, *agentMockServer) {
 	t.Helper()
 	state := &agentMockServer{
-		bodies:   map[string]string{},
-		forceOK:  true,
-		yieldAcc: true,
+		bodies: map[string]string{},
 	}
 	mux := http.NewServeMux()
 	registerAuthConfig(mux)
@@ -39,15 +33,15 @@ func newAgentMockServer(t *testing.T) (*httptest.Server, *agentMockServer) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(agentsListEnvelope{
 			Success: true,
-			Data: []gen.AgentControlEntry{
-				{Name: "falcon", Role: "task", Status: "idle"},
-				{Name: "nova", Role: "plan", Status: "running"},
+			Data: []agentListEntry{
+				{ID: "falcon", Name: "falcon", Kind: "prompt", Enabled: false, Behavior: agentListBehavior{RoleName: "task"}, WorkspaceKey: "default"},
+				{ID: "nova", Name: "nova", Kind: "interactive", Enabled: true, Behavior: agentListBehavior{RoleName: "plan"}, WorkspaceKey: "default"},
 			},
 			Total: 2,
 		})
 	})
 
-	// Stop endpoint: 200 when {"force":true}, 202 otherwise.
+	// Canonical lifecycle endpoints return a settled 200 response.
 	mux.HandleFunc("/api/workspaces/default/agents/falcon/stop", func(w http.ResponseWriter, r *http.Request) {
 		state.record(r)
 		body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<12))
@@ -55,28 +49,19 @@ func newAgentMockServer(t *testing.T) (*httptest.Server, *agentMockServer) {
 		state.bodies["/agents/falcon/stop"] = string(body)
 		state.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
-		if strings.Contains(string(body), `"force":true`) {
-			w.WriteHeader(http.StatusOK)
-			_ = json.NewEncoder(w).Encode(agentMessageEnvelope{Success: true, Message: `agent "falcon" force-stopped`})
-			return
-		}
-		w.WriteHeader(http.StatusAccepted)
-		_ = json.NewEncoder(w).Encode(agentMessageEnvelope{Success: true, Message: `yield requested for agent "falcon"`})
+		_ = json.NewEncoder(w).Encode(agentMessageEnvelope{Success: true, Message: `agent "falcon" stopped`})
 	})
 
-	for _, verb := range []string{"start", "restart", "yield"} {
+	for _, verb := range []string{"start", "restart"} {
 		v := verb
 		mux.HandleFunc("/api/workspaces/default/agents/falcon/"+v, func(w http.ResponseWriter, r *http.Request) {
 			state.record(r)
 			w.Header().Set("Content-Type", "application/json")
-			if v == "yield" {
-				w.WriteHeader(http.StatusAccepted)
-			}
 			_ = json.NewEncoder(w).Encode(agentMessageEnvelope{Success: true, Message: `agent "falcon" ` + v})
 		})
 	}
 
-	// 503 endpoint for daemon-unavailable test.
+	// 503 endpoint for runtime-unavailable test.
 	mux.HandleFunc("/api/workspaces/default/agents/ghost/stop", func(w http.ResponseWriter, r *http.Request) {
 		state.record(r)
 		w.WriteHeader(http.StatusServiceUnavailable)
@@ -142,13 +127,12 @@ func TestAgentStopDefault(t *testing.T) {
 	defer srv.Close()
 	withDataClientState(t, func() {
 		setupAgentTest(t, srv.URL)
-		agentStopForce = false
-		if err := runAgentControl(context.Background(), "falcon", "stop", false, true); err != nil {
+		if err := runAgentControl(context.Background(), "falcon", "stop"); err != nil {
 			t.Fatalf("runAgentControl: %v", err)
 		}
 		body := state.bodies["/agents/falcon/stop"]
 		if body != "" {
-			t.Errorf("expected empty body on non-force stop; got %q", body)
+			t.Errorf("expected empty body on canonical stop; got %q", body)
 		}
 		if !state.seenPath("/api/workspaces/default/agents/falcon/stop") {
 			t.Errorf("did not POST to stop path; saw %v", state.paths)
@@ -156,28 +140,13 @@ func TestAgentStopDefault(t *testing.T) {
 	})
 }
 
-func TestAgentStopForce(t *testing.T) {
+func TestAgentStartRestart(t *testing.T) {
 	srv, state := newAgentMockServer(t)
 	defer srv.Close()
 	withDataClientState(t, func() {
 		setupAgentTest(t, srv.URL)
-		if err := runAgentControl(context.Background(), "falcon", "stop", true, false); err != nil {
-			t.Fatalf("runAgentControl: %v", err)
-		}
-		body := state.bodies["/agents/falcon/stop"]
-		if !strings.Contains(body, `"force":true`) {
-			t.Errorf("expected body to contain force=true; got %q", body)
-		}
-	})
-}
-
-func TestAgentStartRestartYield(t *testing.T) {
-	srv, state := newAgentMockServer(t)
-	defer srv.Close()
-	withDataClientState(t, func() {
-		setupAgentTest(t, srv.URL)
-		for _, verb := range []string{"start", "restart", "yield"} {
-			if err := runAgentControl(context.Background(), "falcon", verb, false, verb == "yield"); err != nil {
+		for _, verb := range []string{"start", "restart"} {
+			if err := runAgentControl(context.Background(), "falcon", verb); err != nil {
 				t.Errorf("%s: %v", verb, err)
 			}
 			if !state.seenPath("/api/workspaces/default/agents/falcon/" + verb) {
@@ -192,7 +161,7 @@ func TestAgent503(t *testing.T) {
 	defer srv.Close()
 	withDataClientState(t, func() {
 		setupAgentTest(t, srv.URL)
-		err := runAgentControl(context.Background(), "ghost", "stop", false, true)
+		err := runAgentControl(context.Background(), "ghost", "stop")
 		if err == nil {
 			t.Fatal("expected 503 to surface as error")
 		}
@@ -209,7 +178,7 @@ func TestFetchAgentsErrors(t *testing.T) {
 		body       string
 		wantErrSub string
 	}{
-		{name: "unavailable", status: http.StatusServiceUnavailable, wantErrSub: "daemon unavailable"},
+		{name: "unavailable", status: http.StatusServiceUnavailable, wantErrSub: "agent runtime unavailable"},
 		{name: "no content", status: http.StatusNoContent, wantErrSub: "no body"},
 		{name: "server error", status: http.StatusInternalServerError, body: "boom", wantErrSub: "HTTP 500"},
 		{name: "bad json", status: http.StatusOK, body: "{", wantErrSub: "decode agents response"},
@@ -238,7 +207,7 @@ func TestFetchAgentsErrors(t *testing.T) {
 }
 
 func TestDecodeAgentMessageFallbackAndError(t *testing.T) {
-	msg, err := decodeAgentMessage([]byte(`{"success":true}`), "yield")
+	msg, err := decodeAgentMessage([]byte(`{"success":true}`), "start")
 	if err != nil {
 		t.Fatalf("decode empty success message: %v", err)
 	}
@@ -270,7 +239,7 @@ func TestPostAgentActionHTTPErrorIncludesBody(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := postAgentAction(context.Background(), srv.Client(), srv.URL, "start", false)
+	_, err := postAgentAction(context.Background(), srv.Client(), srv.URL, "start")
 	if err == nil {
 		t.Fatal("expected HTTP error")
 	}
@@ -282,9 +251,8 @@ func TestPostAgentActionHTTPErrorIncludesBody(t *testing.T) {
 func TestRunAgentControlUsesFallbackMessage(t *testing.T) {
 	mux := http.NewServeMux()
 	registerAuthConfig(mux)
-	mux.HandleFunc("/api/workspaces/default/agents/falcon/yield", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/workspaces/default/agents/falcon/start", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusAccepted)
 		_, _ = w.Write([]byte(`{"success":true}`))
 	})
 	srv := httptest.NewServer(mux)
@@ -293,12 +261,12 @@ func TestRunAgentControlUsesFallbackMessage(t *testing.T) {
 	withDataClientState(t, func() {
 		setupAgentTest(t, srv.URL)
 		out, err := captureDataStdout(t, func() error {
-			return runAgentControl(context.Background(), "falcon", "yield", false, true)
+			return runAgentControl(context.Background(), "falcon", "start")
 		})
 		if err != nil {
 			t.Fatalf("runAgentControl: %v", err)
 		}
-		if !strings.Contains(out, `agent "falcon" yield requested`) {
+		if !strings.Contains(out, `agent "falcon" start`) {
 			t.Fatalf("output = %q, want fallback message", out)
 		}
 	})

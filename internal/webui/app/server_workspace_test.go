@@ -4,49 +4,85 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
+	"sync"
 	"sync/atomic"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/coordinator"
-	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
-	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // newTestRegistry creates a coordinator.WorkspaceRegistry with real hooks and
 // supporting infrastructure for testing. Returns the registry, the underlying
-// MultiPool (for pool assertions). Cleanup is registered automatically.
-func newTestRegistry(t *testing.T) (*coordinator.WorkspaceRegistry, *daemon.MultiPool) {
+// observable hook state. Cleanup is registered automatically.
+func newTestRegistry(t *testing.T) (*coordinator.WorkspaceRegistry, *testRegistryState) {
 	t.Helper()
-	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 10)
+	state := &testRegistryState{registered: map[string]int64{}}
 
 	reg := coordinator.NewWorkspaceRegistry(slog.Default())
-	_ = reg.AddHook(&testPoolHook{multiPool: multiPool})
+	_ = reg.AddHook(&testPoolHook{state: state})
 	t.Cleanup(func() { _ = reg.Close() })
 
-	return reg, multiPool
+	return reg, state
 }
 
 type testPoolHook struct {
-	multiPool *daemon.MultiPool
-	nextID    atomic.Int64
+	state *testRegistryState
 }
 
 func (h *testPoolHook) Name() string   { return "test-pool" }
 func (h *testPoolHook) Critical() bool { return true }
 func (h *testPoolHook) OnRegister(ctx *coordinator.RegistrationContext) error {
-	return h.multiPool.Register(ctx.WorkspaceID, &testRegisteredPool{id: h.nextID.Add(1)})
+	h.state.register(ctx.WorkspaceID)
+	return nil
 }
 func (h *testPoolHook) OnDeregister(ctx coordinator.DeregistrationContext) {
-	h.multiPool.Deregister(ctx.WorkspaceID)
+	h.state.deregister(ctx.WorkspaceID)
 }
 func (h *testPoolHook) OnRollback(ctx coordinator.DeregistrationContext) {
 	h.OnDeregister(ctx)
 }
 
-type testRegisteredPool struct {
-	stubPool
-	id int64
+type testRegistryState struct {
+	mu         sync.Mutex
+	registered map[string]int64
+	next       int64
+}
+
+func (s *testRegistryState) register(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.next++
+	s.registered[id] = s.next
+}
+func (s *testRegistryState) deregister(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.registered, id)
+}
+func (s *testRegistryState) WorkspaceIDs() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ids := make([]string, 0, len(s.registered))
+	for id := range s.registered {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+func (s *testRegistryState) PoolForWorkspace(id string) any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if generation, ok := s.registered[id]; ok {
+		return generation
+	}
+	return nil
+}
+func (s *testRegistryState) Close() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.registered = map[string]int64{}
 }
 
 func TestCreateWarnings_ContextHelpers(t *testing.T) {
@@ -123,10 +159,10 @@ func TestWrapWorkspaceCreateFn_CollectsWarnings(t *testing.T) {
 		t.Fatal("expected at least one warning from empty WorkspaceID path")
 	}
 
-	// Verify the warning mentions daemon/registration
+	// Verify the warning identifies runtime registration.
 	found := false
 	for _, w := range warnings {
-		if w == "Could not register workspace with daemon — workspace may not auto-connect until restart" {
+		if w == "Could not register workspace runtime — workspace may not auto-connect until restart" {
 			found = true
 			break
 		}
@@ -269,7 +305,7 @@ func TestWrapWorkspaceCreateFn_InnerCreateFails_NoRegistration(t *testing.T) {
 }
 
 func TestWrapWorkspaceCreateFn_RegisterFails_SurfacesWarning(t *testing.T) {
-	registry, multiPool := newTestRegistry(t)
+	registry, _ := newTestRegistry(t)
 
 	wsUUID := "aaaaaaaa-2222-3333-4444-555555555555"
 	wsPath := t.TempDir()
@@ -278,8 +314,10 @@ func TestWrapWorkspaceCreateFn_RegisterFails_SurfacesWarning(t *testing.T) {
 		return service.WorkspaceCreateResult{WorkspaceID: wsUUID, WorkspacePath: wsPath}, nil
 	}
 
-	// Close MultiPool so the critical test pool hook fails during Register.
-	multiPool.Close()
+	// A closed registry rejects new runtime registrations.
+	if err := registry.Close(); err != nil {
+		t.Fatalf("close registry: %v", err)
+	}
 
 	wrapped := wrapWorkspaceCreateFn(innerCreate, registry)
 
@@ -307,7 +345,7 @@ func TestWrapWorkspaceCreateFn_RegisterFails_SurfacesWarning(t *testing.T) {
 }
 
 func TestWrapWorkspaceCreateFn_RegisterFails_PlainContext_NoPanic(t *testing.T) {
-	registry, multiPool := newTestRegistry(t)
+	registry, _ := newTestRegistry(t)
 
 	wsUUID := "bbbbbbbb-2222-3333-4444-555555555555"
 	wsPath := t.TempDir()
@@ -316,8 +354,10 @@ func TestWrapWorkspaceCreateFn_RegisterFails_PlainContext_NoPanic(t *testing.T) 
 		return service.WorkspaceCreateResult{WorkspaceID: wsUUID, WorkspacePath: wsPath}, nil
 	}
 
-	// Close MultiPool so the critical test pool hook fails during Register.
-	multiPool.Close()
+	// A closed registry rejects new runtime registrations.
+	if err := registry.Close(); err != nil {
+		t.Fatalf("close registry: %v", err)
+	}
 
 	wrapped := wrapWorkspaceCreateFn(innerCreate, registry)
 

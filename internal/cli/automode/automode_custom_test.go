@@ -1085,9 +1085,8 @@ func TestStartTmuxSession_CodexBackend_NoTermDumb(t *testing.T) {
 	if !strings.Contains(paneCmd, "--backend") || !strings.Contains(paneCmd, "codex") {
 		t.Errorf("Codex backend should have --backend codex flag, got: %s", paneCmd)
 	}
-	// Command should contain --daemon-mode
-	if !strings.Contains(paneCmd, "--daemon-mode") {
-		t.Errorf("Command should contain --daemon-mode, got: %s", paneCmd)
+	if strings.Contains(paneCmd, "--daemon-mode") {
+		t.Errorf("command must not contain retired --daemon-mode, got: %s", paneCmd)
 	}
 }
 
@@ -1135,9 +1134,8 @@ func TestStartTmuxSession_ClaudeBackend_HasTermDumb(t *testing.T) {
 	if !strings.Contains(paneCmd, "--backend") {
 		t.Errorf("Command should contain --backend flag, got: %s", paneCmd)
 	}
-	// Command should contain --daemon-mode
-	if !strings.Contains(paneCmd, "--daemon-mode") {
-		t.Errorf("Command should contain --daemon-mode, got: %s", paneCmd)
+	if strings.Contains(paneCmd, "--daemon-mode") {
+		t.Errorf("command must not contain retired --daemon-mode, got: %s", paneCmd)
 	}
 }
 

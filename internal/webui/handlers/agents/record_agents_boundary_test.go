@@ -31,6 +31,107 @@ type recordingAgentRecordAPI struct {
 	lifecycle agentsmodule.ApplyLifecycleCommand
 }
 
+type recordingInteractiveAgentRuntime struct {
+	stopped []string
+	err     error
+}
+
+func (runtime *recordingInteractiveAgentRuntime) StopAgent(
+	_ context.Context,
+	workspace,
+	agentID string,
+) error {
+	runtime.stopped = append(runtime.stopped, workspace+"/"+agentID)
+	return runtime.err
+}
+
+func canonicalRuntimeMetadataForTest(t *testing.T, kind string) map[string]string {
+	t.Helper()
+	metadata, err := agentsmodule.WithRuntimeMetadata(nil, agentsmodule.RuntimeMetadata{RoleKind: kind})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return metadata
+}
+
+func TestCanonicalInteractiveLifecycleUsesAgentsAndLocalRuntime(t *testing.T) {
+	for _, test := range []struct {
+		operation string
+		action    agentsmodule.LifecycleAction
+		stops     bool
+	}{
+		{operation: "start", action: agentsmodule.LifecycleEnable},
+		{operation: "stop", action: agentsmodule.LifecycleDisable, stops: true},
+		{operation: "restart", action: agentsmodule.LifecycleEnable, stops: true},
+	} {
+		t.Run(test.operation, func(t *testing.T) {
+			now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
+			api := &recordingAgentRecordAPI{record: &agentsmodule.Agent{
+				WorkspaceKey: agentRecordTestWS, AgentID: "reviewer", Name: "reviewer",
+				GenerationID: "0123456789abcdef0123456789abcdef",
+				Kind:         agentsmodule.AgentKindLead, Behavior: agentsmodule.BehaviorReference{RoleName: "review"},
+				DesiredState: agentsmodule.DesiredRunning, MaxInstances: 1,
+				Metadata: canonicalRuntimeMetadataForTest(t, "interactive"), CreatedAt: now, UpdatedAt: now,
+			}}
+			runtime := &recordingInteractiveAgentRuntime{}
+			module := newTestAgentsModule(nil, newAgentRecordStore(t), nil, agentRecordTestWS)
+			module.agentRecords = api
+			module.agentLifecycle = api
+			module.interactiveRuntime = runtime
+			mux := http.NewServeMux()
+			module.Register(mux)
+
+			response := doAgentRequest(t, mux, http.MethodPost,
+				"/api/workspaces/WS/agents/reviewer/"+test.operation, `{}`)
+			if response.Code != http.StatusOK {
+				t.Fatalf("%s status=%d body=%s", test.operation, response.Code, response.Body.String())
+			}
+			if api.lifecycle.Action != test.action || api.lifecycle.AgentID != "reviewer" ||
+				api.lifecycle.ExpectedGenerationID != api.record.GenerationID {
+				t.Fatalf("lifecycle command = %#v", api.lifecycle)
+			}
+			if got := len(runtime.stopped); got != map[bool]int{false: 0, true: 1}[test.stops] {
+				t.Fatalf("runtime stops = %v", runtime.stopped)
+			}
+		})
+	}
+}
+
+func TestCanonicalAgentYieldRouteIsAbsent(t *testing.T) {
+	api := &recordingAgentRecordAPI{}
+	module := newTestAgentsModule(nil, newAgentRecordStore(t), nil, agentRecordTestWS)
+	module.agentRecords = api
+	module.agentLifecycle = api
+	mux := http.NewServeMux()
+	module.Register(mux)
+	response := doAgentRequest(t, mux, http.MethodPost, "/api/workspaces/WS/agents/reviewer/yield", "")
+	if response.Code != http.StatusNotFound || api.lifecycle.AgentID != "" {
+		t.Fatalf("yield status=%d body=%s lifecycle=%#v", response.Code, response.Body.String(), api.lifecycle)
+	}
+}
+
+func TestCanonicalAgentLifecycleRejectsRetiredDaemonCommandFields(t *testing.T) {
+	api := &recordingAgentRecordAPI{}
+	module := newTestAgentsModule(nil, newAgentRecordStore(t), nil, agentRecordTestWS)
+	module.agentRecords = api
+	module.agentLifecycle = api
+	mux := http.NewServeMux()
+	module.Register(mux)
+
+	for _, body := range []string{
+		`{"force":true}`,
+		`{"task_id":"WS-1"}`,
+		`{"payload":{"task_id":"WS-1"}}`,
+	} {
+		response := doAgentRequest(
+			t, mux, http.MethodPost, "/api/workspaces/WS/agents/reviewer/stop", body,
+		)
+		if response.Code != http.StatusBadRequest || api.lifecycle.AgentID != "" {
+			t.Fatalf("body=%s status=%d response=%s lifecycle=%#v", body, response.Code, response.Body.String(), api.lifecycle)
+		}
+	}
+}
+
 func (api *recordingAgentRecordAPI) ApplyLifecycle(
 	_ context.Context,
 	_ authority.OperatorAuthority,
@@ -71,7 +172,9 @@ func TestUnifiedAgentDisableUsesOneAtomicLifecycleCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	api := &recordingAgentRecordAPI{record: canonicalAgentRecordForTest(persisted)}
+	canonical := canonicalAgentRecordForTest(persisted)
+	canonical.Metadata = canonicalRuntimeMetadataForTest(t, "worker")
+	api := &recordingAgentRecordAPI{record: canonical}
 	module := newTestAgentsModule(nil, st, nil, agentRecordTestWS)
 	module.agentRecords = api
 	module.agentLifecycle = api
@@ -205,6 +308,7 @@ func TestUnifiedAgentRecordReadsPreferCanonicalAgentsAndFailClosed(t *testing.T)
 			Behavior:     agentsmodule.BehaviorReference{RoleName: "canonical-role"},
 			DesiredState: agentsmodule.DesiredRunning,
 			MaxInstances: 1,
+			Metadata:     canonicalRuntimeMetadataForTest(t, "worker"),
 			CreatedAt:    now,
 			UpdatedAt:    now,
 		}}
@@ -277,6 +381,8 @@ func TestUnifiedAgentDeleteUsesExactCanonicalCASCommands(t *testing.T) {
 		Behavior:     agentsmodule.BehaviorReference{RoleName: "docs"},
 		DesiredState: agentsmodule.DesiredRunning,
 		MaxInstances: 1,
+		GenerationID: "0123456789abcdef0123456789abcdef",
+		Metadata:     canonicalRuntimeMetadataForTest(t, "worker"),
 		CreatedAt:    updatedAt,
 		UpdatedAt:    updatedAt,
 	}}

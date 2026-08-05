@@ -71,10 +71,12 @@ const { mockStartAgent } = vi.hoisted(() => ({
 const {
   mockFetchWorkspaceApi,
   mockCreateWorkspaceAgent,
+  mockCreatePromptAgentRecord,
   mockRunOnboardingFirstTask,
 } = vi.hoisted(() => ({
   mockFetchWorkspaceApi: vi.fn(),
   mockCreateWorkspaceAgent: vi.fn(),
+  mockCreatePromptAgentRecord: vi.fn(),
   mockRunOnboardingFirstTask: vi.fn(),
 }));
 
@@ -149,6 +151,14 @@ vi.mock("@/api/workspace", async (importOriginal) => {
     fetchWorkspaceApi: mockFetchWorkspaceApi,
     createWorkspaceAgent: mockCreateWorkspaceAgent,
     runOnboardingFirstTask: mockRunOnboardingFirstTask,
+  };
+});
+
+vi.mock("@/api/agents", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/api/agents")>();
+  return {
+    ...actual,
+    createPromptAgentRecord: mockCreatePromptAgentRecord,
   };
 });
 
@@ -965,6 +975,15 @@ describe("App", () => {
       repos: ["Hello-World"],
       repo_groups: [],
       cross_repo: false,
+    });
+    mockCreatePromptAgentRecord.mockResolvedValue({
+      id: "agt-planner",
+      name: "planner",
+      kind: "prompt",
+      enabled: true,
+      behavior: { role_name: "plan" },
+      workspace_key: "test-ws-id",
+      bindings: [{ binding_id: "agt-planner-1" }],
     });
     // Set up default store state for issue store selectors
     mockStoreState = createMockUseIssuesReturn({});
@@ -2793,7 +2812,7 @@ describe("App", () => {
       });
     });
 
-    it("does not navigate to a terminal after creating a background worker", async () => {
+    it("opens the canonical agent page after creating a background worker", async () => {
       localStorage.clear();
       // Default mock resolves a plan worker (role_name: "plan").
       mockStoreState = createMockUseIssuesReturn({
@@ -2803,27 +2822,42 @@ describe("App", () => {
       mockHelloWorldWorkspaceContext({
         agents: [{ name: "existing-planner", role_name: "plan" }],
       });
+      mockCreatePromptAgentRecord.mockResolvedValueOnce({
+        id: "agt-planner-two",
+        name: "planner-two",
+        kind: "prompt",
+        enabled: true,
+        behavior: { role_name: "plan" },
+        workspace_key: "test-ws-id",
+        bindings: [{ binding_id: "agt-planner-two-1" }],
+      });
 
       render(<App />);
 
       fireEvent.click(screen.getByRole("button", { name: "+ Add agent" }));
       const dialog = await screen.findByRole("dialog", { name: "New Agent" });
       fireEvent.click(
-        within(dialog).getByTestId("create-agent-template-legacy-planner"),
+        within(dialog).getByTestId("create-agent-template-planner"),
       );
       fireEvent.change(within(dialog).getByLabelText("Name"), {
         target: { value: "planner-two" },
       });
       mockNavigate.mockClear();
-      fireEvent.click(
-        within(dialog).getByRole("button", { name: "Create Agent" }),
-      );
+      fireEvent.click(within(dialog).getByRole("button", { name: "Activate" }));
 
       await waitFor(() => {
-        expect(mockCreateWorkspaceAgent).toHaveBeenCalled();
+        expect(mockCreatePromptAgentRecord).toHaveBeenCalledWith(
+          "test-ws-id",
+          expect.objectContaining({
+            name: "planner-two",
+            behavior: { role_name: "plan" },
+          }),
+        );
       });
-      expect(mockNavigate).not.toHaveBeenCalledWith(
-        expect.stringContaining("/agents/"),
+      await waitFor(() =>
+        expect(mockNavigate).toHaveBeenCalledWith(
+          "/ws/test-ws-id/agents/agt-planner-two",
+        ),
       );
     });
   });
@@ -2842,7 +2876,7 @@ describe("App", () => {
       });
 
       expect(
-        within(dialog).queryByTestId("create-agent-supervised-mode"),
+        within(dialog).queryByTestId("create-agent-required-role-mode"),
       ).not.toBeInTheDocument();
       expect(
         within(dialog).getByTestId("create-agent-template-planner"),
@@ -2867,7 +2901,7 @@ describe("App", () => {
         name: "New Agent",
       });
       expect(
-        within(onboardingDialog).getByTestId("create-agent-supervised-mode"),
+        within(onboardingDialog).getByTestId("create-agent-required-role-mode"),
       ).toBeInTheDocument();
       fireEvent.click(
         within(onboardingDialog).getByRole("button", { name: "Cancel" }),
@@ -2878,7 +2912,7 @@ describe("App", () => {
         name: "New Agent",
       });
       expect(
-        within(galleryDialog).queryByTestId("create-agent-supervised-mode"),
+        within(galleryDialog).queryByTestId("create-agent-required-role-mode"),
       ).not.toBeInTheDocument();
       expect(
         within(galleryDialog).getByTestId("create-agent-template-lead"),
@@ -2903,25 +2937,22 @@ describe("App", () => {
         name: "New Agent",
       });
       expect(
-        within(agentDialog).getByTestId("create-agent-supervised-mode"),
+        within(agentDialog).getByTestId("create-agent-required-role-mode"),
       ).toBeInTheDocument();
       expect(
-        within(agentDialog).getByTestId("create-agent-template-legacy-planner"),
+        within(agentDialog).getByTestId("create-agent-template-planner"),
       ).toHaveAttribute("aria-pressed", "true");
-      expect(
-        within(agentDialog).queryByTestId("create-agent-template-planner"),
-      ).not.toBeInTheDocument();
       fireEvent.click(
-        within(agentDialog).getByRole("button", { name: "Create Agent" }),
+        within(agentDialog).getByRole("button", { name: "Activate" }),
       );
 
       await waitFor(() => {
-        expect(mockCreateWorkspaceAgent).toHaveBeenCalledWith(
+        expect(mockCreatePromptAgentRecord).toHaveBeenCalledWith(
           "test-ws-id",
           expect.objectContaining({
             name: "planner",
-            role_name: "plan",
             backend: "opencode",
+            behavior: { role_name: "plan" },
           }),
         );
       });
@@ -3080,7 +3111,7 @@ describe("App", () => {
         default_workspace: "Hello-World",
       });
       mockRunOnboardingFirstTask.mockRejectedValueOnce(
-        new Error("daemon unavailable"),
+        new Error("execution runtime unavailable"),
       );
       mockStoreState = createMockUseIssuesReturn({
         issues: [],
@@ -3095,7 +3126,7 @@ describe("App", () => {
 
       await waitFor(() => {
         expect(showToast).toHaveBeenCalledWith(
-          "First task did not start: daemon unavailable",
+          "First task did not start: execution runtime unavailable",
           { type: "error" },
         );
       });

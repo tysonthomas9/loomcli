@@ -3,7 +3,6 @@ package issues
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -11,8 +10,6 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/rpc"
-	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 )
 
 // stubReadyBackend implements backend.IssueBackend with only Ready
@@ -109,16 +106,6 @@ func (s *stubReadyBackend) WaitForMutations(_ context.Context, _ int64, _ int64)
 	return nil, fmt.Errorf("WaitForMutations not implemented in stubReadyBackend")
 }
 
-// errorDaemonPool implements daemon.Pool and always errors from Get.
-type errorDaemonPool struct{ err error }
-
-func (p *errorDaemonPool) Get(_ context.Context) (*rpc.Client, error) { return nil, p.err }
-func (p *errorDaemonPool) Put(_ *rpc.Client)                          {}
-func (p *errorDaemonPool) PutAfterError(_ *rpc.Client)                {}
-func (p *errorDaemonPool) Discard(_ *rpc.Client)                      {}
-func (p *errorDaemonPool) Stats() daemon.PoolStats                    { return daemon.PoolStats{} }
-func (p *errorDaemonPool) Close() error                               { return nil }
-
 func TestHandleReady_BackendWhenNoPool(t *testing.T) {
 	be := &stubReadyBackend{
 		ready: []backend.IssueData{
@@ -126,7 +113,7 @@ func TestHandleReady_BackendWhenNoPool(t *testing.T) {
 			{ID: "RDY-2", Title: "Ready Two", Status: "open", Priority: 2, IssueType: "bug"},
 		},
 	}
-	handler := HandleReadyWithBackend(nil, func(_ context.Context) backend.IssueBackend { return be })
+	handler := HandleReadyWithBackend(func(_ context.Context) backend.IssueBackend { return be })
 
 	req := httptest.NewRequest(http.MethodGet, "/api/ready", nil)
 	rr := httptest.NewRecorder()
@@ -168,44 +155,8 @@ func TestHandleReady_BackendWhenNoPool(t *testing.T) {
 	}
 }
 
-func TestHandleReady_PoolErrorDoesNotUseBackend(t *testing.T) {
-	dp := &errorDaemonPool{err: errors.New("pool unavailable")}
-	be := &stubReadyBackend{
-		ready: []backend.IssueData{
-			{ID: "BE-1", Title: "Via backend", Status: "open", Priority: 1},
-		},
-	}
-	handler := HandleReadyWithBackend(dp, func(_ context.Context) backend.IssueBackend { return be })
-
-	req := httptest.NewRequest(http.MethodGet, "/api/ready", nil)
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503; body=%s", rr.Code, rr.Body.String())
-	}
-}
-
-func TestHandleReady_PoolPathClientErrorPreserved(t *testing.T) {
-	// When backendFn is non-nil but a daemon pool is configured, the pool path
-	// remains authoritative and client errors are surfaced directly.
-	dp := &errorDaemonPool{err: errors.New("should not be invoked")}
-	be := &stubReadyBackend{
-		ready: []backend.IssueData{{ID: "SHOULD-NOT-APPEAR"}},
-	}
-	handler := HandleReadyWithBackend(dp, func(_ context.Context) backend.IssueBackend { return be })
-
-	req := httptest.NewRequest(http.MethodGet, "/api/ready?priority=abc", nil)
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 (client-error preserved); body=%s", rr.Code, rr.Body.String())
-	}
-}
-
 func TestHandleReady_NoPoolNoBackendReturns503(t *testing.T) {
-	handler := HandleReadyWithBackend(nil, nil)
+	handler := HandleReadyWithBackend(nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/ready", nil)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)

@@ -303,9 +303,9 @@ export function createIssueStore(
         }
         // Prefer the server's original error text (from ApiError.body.error)
         // over the generic HTTP status text baked into ApiError.message. This
-        // lets IssueViewGuard distinguish "workspace is loading" (daemon
-        // starting, 503+kind=starting) from other 503s like "daemon
-        // unavailable" and route to the loading-variant UX accordingly.
+        // lets IssueViewGuard distinguish "workspace is loading" (runtime
+        // starting, 503+kind=starting) from other 503s such as service
+        // unavailability and route to the loading-variant UX accordingly.
         const message = extractErrorMessage(err);
 
         // Schedule exponential-backoff auto-retry if we haven't exhausted
@@ -417,6 +417,30 @@ export function createIssueStore(
       }
 
       applyMutationToStore(mutation, set, get);
+    },
+
+    reconcileIssue(issue: Issue): void {
+      const currentMap = get().issuesMap;
+      const existingIssue = currentMap.get(issue.id);
+
+      // Detail-only records may sit outside the active list projection. Do not
+      // insert them blindly, because that can violate active repo/status
+      // filters; the scheduled projection refresh will decide membership.
+      if (!existingIssue) {
+        scheduleProjectionRefresh(get);
+        return;
+      }
+
+      // Update endpoints return the canonical issue, while list projections
+      // may carry extra Kanban-only fields. Preserve those enrichment fields
+      // until the scheduled projection refresh replaces them authoritatively.
+      const reconciledIssue = { ...existingIssue, ...issue };
+      if (!issuesAreEqual(existingIssue, reconciledIssue)) {
+        const newMap = new Map(currentMap);
+        newMap.set(issue.id, reconciledIssue);
+        set({ issuesMap: newMap });
+      }
+      scheduleProjectionRefresh(get);
     },
 
     async updateIssueStatus(

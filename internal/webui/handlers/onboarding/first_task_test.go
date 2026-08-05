@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/ops"
+	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
+	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/types"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
@@ -34,15 +34,15 @@ func TestHandleRunFirstTaskCreatesClaimableTaskAndQueuesAgentStart(t *testing.T)
 		},
 	}
 	agentSvc := &stubAgentService{
-		agents: []*domain.Agent{{Name: "planner", RoleName: "plan"}},
-		lifecycleFunc: func(_ context.Context, wsKey, name string, in service.AgentLifecycleInput) (*service.AgentLifecycleResult, error) {
-			if wsKey != "HELLO-WORLD" || name != "planner" {
-				t.Fatalf("lifecycle target = %s/%s", wsKey, name)
+		agent: &agentsmodule.Agent{WorkspaceKey: "HELLO-WORLD", AgentID: "planner"},
+		lifecycleFunc: func(_ context.Context, _ authority.OperatorAuthority, command agentsmodule.ApplyLifecycleCommand) (*agentsmodule.LifecycleResult, error) {
+			if command.WorkspaceKey != "HELLO-WORLD" || command.AgentID != "planner" {
+				t.Fatalf("lifecycle target = %s/%s", command.WorkspaceKey, command.AgentID)
 			}
-			if in.CommandType != "start" || in.Payload["task_id"] != "task-1" {
-				t.Fatalf("lifecycle input = %#v", in)
+			if command.Action != agentsmodule.LifecycleEnable || command.IdempotencyKey != "onboarding-first-task:task-1" {
+				t.Fatalf("lifecycle input = %#v", command)
 			}
-			return &service.AgentLifecycleResult{Agent: &domain.Agent{Name: name}, Pending: true}, nil
+			return &agentsmodule.LifecycleResult{Agent: &agentsmodule.Agent{AgentID: command.AgentID}}, nil
 		},
 	}
 
@@ -57,7 +57,7 @@ func TestHandleRunFirstTaskCreatesClaimableTaskAndQueuesAgentStart(t *testing.T)
 	}`))
 	req.SetPathValue("ws", "HELLO-WORLD")
 
-	HandleRunFirstTask(issueSvc, agentSvc).ServeHTTP(rec, req)
+	HandleRunFirstTask(issueSvc, agentSvc, testOnboardingAuthorityResolver{}).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
@@ -71,7 +71,7 @@ func TestHandleRunFirstTaskCreatesClaimableTaskAndQueuesAgentStart(t *testing.T)
 	}
 }
 
-func TestHandleRunFirstTaskKeepsTaskClaimableForDaemon(t *testing.T) {
+func TestHandleRunFirstTaskKeepsTaskClaimableForExecution(t *testing.T) {
 	issueSvc := &stubIssueService{
 		createFunc: func(_ context.Context, params service.CreateIssueParams) (json.RawMessage, error) {
 			if params.Status != "open" || params.Assignee != "" {
@@ -85,9 +85,9 @@ func TestHandleRunFirstTaskKeepsTaskClaimableForDaemon(t *testing.T) {
 		},
 	}
 	agentSvc := &stubAgentService{
-		agents: []*domain.Agent{{Name: "planner", RoleName: "plan"}},
-		lifecycleFunc: func(context.Context, string, string, service.AgentLifecycleInput) (*service.AgentLifecycleResult, error) {
-			return &service.AgentLifecycleResult{Agent: &domain.Agent{Name: "planner"}, Pending: true}, nil
+		agent: &agentsmodule.Agent{WorkspaceKey: "HELLO-WORLD", AgentID: "planner"},
+		lifecycleFunc: func(context.Context, authority.OperatorAuthority, agentsmodule.ApplyLifecycleCommand) (*agentsmodule.LifecycleResult, error) {
+			return &agentsmodule.LifecycleResult{Agent: &agentsmodule.Agent{AgentID: "planner"}}, nil
 		},
 	}
 
@@ -98,7 +98,7 @@ func TestHandleRunFirstTaskKeepsTaskClaimableForDaemon(t *testing.T) {
 	}`))
 	req.SetPathValue("ws", "HELLO-WORLD")
 
-	HandleRunFirstTask(issueSvc, agentSvc).ServeHTTP(rec, req)
+	HandleRunFirstTask(issueSvc, agentSvc, testOnboardingAuthorityResolver{}).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
@@ -121,9 +121,9 @@ func TestHandleRunFirstTaskDeletesCreatedIssueWhenStartFails(t *testing.T) {
 		},
 	}
 	agentSvc := &stubAgentService{
-		agents: []*domain.Agent{{Name: "planner", RoleName: "plan"}},
-		lifecycleFunc: func(context.Context, string, string, service.AgentLifecycleInput) (*service.AgentLifecycleResult, error) {
-			return nil, service.ErrUnavailable("daemon unavailable")
+		agent: &agentsmodule.Agent{WorkspaceKey: "HELLO-WORLD", AgentID: "planner"},
+		lifecycleFunc: func(context.Context, authority.OperatorAuthority, agentsmodule.ApplyLifecycleCommand) (*agentsmodule.LifecycleResult, error) {
+			return nil, agentsmodule.ErrUnavailable
 		},
 	}
 
@@ -134,7 +134,7 @@ func TestHandleRunFirstTaskDeletesCreatedIssueWhenStartFails(t *testing.T) {
 	}`))
 	req.SetPathValue("ws", "HELLO-WORLD")
 
-	HandleRunFirstTask(issueSvc, agentSvc).ServeHTTP(rec, req)
+	HandleRunFirstTask(issueSvc, agentSvc, testOnboardingAuthorityResolver{}).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
@@ -164,9 +164,9 @@ func TestHandleRunFirstTaskCleanupRunsWithLiveContextWhenClientDisconnects(t *te
 		},
 	}
 	agentSvc := &stubAgentService{
-		agents: []*domain.Agent{{Name: "planner", RoleName: "plan"}},
-		lifecycleFunc: func(context.Context, string, string, service.AgentLifecycleInput) (*service.AgentLifecycleResult, error) {
-			return nil, service.ErrUnavailable("daemon unavailable")
+		agent: &agentsmodule.Agent{WorkspaceKey: "HELLO-WORLD", AgentID: "planner"},
+		lifecycleFunc: func(context.Context, authority.OperatorAuthority, agentsmodule.ApplyLifecycleCommand) (*agentsmodule.LifecycleResult, error) {
+			return nil, agentsmodule.ErrUnavailable
 		},
 	}
 
@@ -181,7 +181,7 @@ func TestHandleRunFirstTaskCleanupRunsWithLiveContextWhenClientDisconnects(t *te
 	cancel()
 	req = req.WithContext(ctx)
 
-	HandleRunFirstTask(issueSvc, agentSvc).ServeHTTP(rec, req)
+	HandleRunFirstTask(issueSvc, agentSvc, testOnboardingAuthorityResolver{}).ServeHTTP(rec, req)
 
 	if !deleteCalled {
 		t.Fatal("cleanup delete was not called")
@@ -202,7 +202,7 @@ func TestHandleRunFirstTaskRejectsUnknownAgent(t *testing.T) {
 		},
 	}
 	agentSvc := &stubAgentService{
-		agents: []*domain.Agent{{Name: "builder", RoleName: "task"}},
+		agent: &agentsmodule.Agent{WorkspaceKey: "HELLO-WORLD", AgentID: "builder"},
 	}
 
 	rec := httptest.NewRecorder()
@@ -212,7 +212,7 @@ func TestHandleRunFirstTaskRejectsUnknownAgent(t *testing.T) {
 	}`))
 	req.SetPathValue("ws", "HELLO-WORLD")
 
-	HandleRunFirstTask(issueSvc, agentSvc).ServeHTTP(rec, req)
+	HandleRunFirstTask(issueSvc, agentSvc, testOnboardingAuthorityResolver{}).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
@@ -284,69 +284,26 @@ func (s *stubIssueService) SearchIssues(context.Context, service.SearchIssuesPar
 }
 
 type stubAgentService struct {
-	agents        []*domain.Agent
-	lifecycleFunc func(context.Context, string, string, service.AgentLifecycleInput) (*service.AgentLifecycleResult, error)
+	agent         *agentsmodule.Agent
+	lifecycleFunc func(context.Context, authority.OperatorAuthority, agentsmodule.ApplyLifecycleCommand) (*agentsmodule.LifecycleResult, error)
 }
 
-func (s *stubAgentService) GetTerminalInfo(context.Context, string, string) (*service.AgentTerminalInfoResult, error) {
-	return nil, service.ErrNotImplemented("not implemented")
-}
-func (s *stubAgentService) GenerateTerminalToken(context.Context, string, string, string) (string, error) {
-	return "", service.ErrNotImplemented("not implemented")
-}
-func (s *stubAgentService) GetLog(context.Context, string, string, int, int64) (*service.AgentLogResult, error) {
-	return nil, service.ErrNotImplemented("not implemented")
-}
-func (s *stubAgentService) GetDiffStat(context.Context, string, string) (*service.AgentDiffStatResult, error) {
-	return nil, service.ErrNotImplemented("not implemented")
-}
-func (s *stubAgentService) GitPush(context.Context, string, string, string) (*ops.GitPushResult, error) {
-	return nil, service.ErrNotImplemented("not implemented")
-}
-func (s *stubAgentService) GitPushAll(context.Context, string) (*service.GitPushAllResult, error) {
-	return nil, service.ErrNotImplemented("not implemented")
-}
-func (s *stubAgentService) GitPull(context.Context, string, string, string) (*ops.GitPullResult, error) {
-	return nil, service.ErrNotImplemented("not implemented")
-}
-func (s *stubAgentService) GitSync(context.Context, string, string) (*service.GitSyncResult, error) {
-	return nil, service.ErrNotImplemented("not implemented")
-}
-func (s *stubAgentService) CreatePR(context.Context, string, string, string) (*ops.GitPRResult, error) {
-	return nil, service.ErrNotImplemented("not implemented")
-}
-
-func (s *stubAgentService) ListPullRequests(context.Context, string, string) (*ops.GitPullRequestList, error) {
-	return &ops.GitPullRequestList{PullRequests: []ops.GitPullRequest{}}, nil
-}
-
-func (s *stubAgentService) GitReset(context.Context, string, string, string, bool, bool) (*ops.GitResetResult, error) {
-	return nil, service.ErrNotImplemented("not implemented")
-}
-func (s *stubAgentService) GitStatus(context.Context, string, string) (*ops.GitStatusResult, error) {
-	return nil, service.ErrNotImplemented("not implemented")
-}
-func (s *stubAgentService) SetTargetBranch(context.Context, string, string, string) error {
-	return service.ErrNotImplemented("not implemented")
-}
-func (s *stubAgentService) ListAgents(context.Context, string) ([]*domain.Agent, error) {
-	return s.agents, nil
-}
-func (s *stubAgentService) CreateAgent(context.Context, service.AgentCreateInput) (*domain.Agent, error) {
-	return nil, service.ErrNotImplemented("not implemented")
-}
-func (s *stubAgentService) UpdateAgent(context.Context, string, string, service.AgentUpdateInput) (*domain.Agent, error) {
-	return nil, service.ErrNotImplemented("not implemented")
-}
-func (s *stubAgentService) RequestAgentLifecycle(ctx context.Context, wsKey, name string, in service.AgentLifecycleInput) (*service.AgentLifecycleResult, error) {
-	if s.lifecycleFunc != nil {
-		return s.lifecycleFunc(ctx, wsKey, name, in)
+func (s *stubAgentService) GetAgent(_ context.Context, workspace, agentID string) (*agentsmodule.Agent, error) {
+	if s.agent == nil || s.agent.WorkspaceKey != workspace || s.agent.AgentID != agentID {
+		return nil, agentsmodule.ErrNotFound
 	}
-	return &service.AgentLifecycleResult{Agent: &domain.Agent{Name: name}}, nil
+	return s.agent, nil
 }
-func (s *stubAgentService) GetAgentLifecycleCommand(context.Context, string, string, string) (*service.AgentLifecycleCommandResult, error) {
-	return nil, service.ErrNotImplemented("not implemented")
+
+func (s *stubAgentService) ApplyLifecycle(ctx context.Context, auth authority.OperatorAuthority, command agentsmodule.ApplyLifecycleCommand) (*agentsmodule.LifecycleResult, error) {
+	if s.lifecycleFunc != nil {
+		return s.lifecycleFunc(ctx, auth, command)
+	}
+	return &agentsmodule.LifecycleResult{Agent: s.agent}, nil
 }
-func (s *stubAgentService) DeleteAgent(context.Context, string, string) error {
-	return service.ErrNotImplemented("not implemented")
+
+type testOnboardingAuthorityResolver struct{}
+
+func (testOnboardingAuthorityResolver) ResolveOperatorAuthority(_ *http.Request, _ string, _ authority.Action) (authority.OperatorAuthority, error) {
+	return authority.OperatorAuthority{}, nil
 }

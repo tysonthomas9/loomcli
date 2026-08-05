@@ -189,7 +189,7 @@ describe("issueStore", () => {
     });
 
     it("surfaces ApiError.body.error instead of the generic status text", async () => {
-      // Reproduces the fix for the daemon-loading UX: IssueViewGuard decides
+      // Reproduces the fix for the runtime-loading UX: IssueViewGuard decides
       // between the "loading" and "fetch-error" variants by checking the
       // error string for the server's phrase. Prior to the fix the store
       // surfaced ApiError.message ("API Error: 503 Service Unavailable"),
@@ -1209,6 +1209,33 @@ describe("issueStore", () => {
       // Can subscribe again after unsubscribing
       store.getState().connectToEvents(mockSubscribe);
       expect(mockSubscribe).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // reconcileIssue (confirmed API snapshots)
+  // -----------------------------------------------------------------------
+
+  describe("reconcileIssue", () => {
+    it("moves an existing kanban issue from open to in progress immediately", () => {
+      const issue = makeIssue({
+        id: "task-1",
+        status: "open",
+        assignee: "",
+        is_ready: true,
+      });
+      const confirmed = makeIssue({
+        id: "task-1",
+        status: "in_progress",
+        assignee: "[H] Tyson",
+        updated_at: "2026-01-02T00:00:00Z",
+      });
+      store.setState({ issuesMap: new Map([[issue.id, issue]]) });
+
+      store.getState().reconcileIssue(confirmed);
+
+      expect(store.getState().issuesMap.get("task-1")).toMatchObject(confirmed);
+      expect(store.getState().issuesMap.get("task-1")?.is_ready).toBe(true);
     });
   });
 

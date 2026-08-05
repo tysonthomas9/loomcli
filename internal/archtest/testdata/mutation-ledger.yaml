@@ -155,6 +155,20 @@ commands:
     retry_restart_behavior: Exact replay converges on the same Role; a conflicting definition never overwrites or deletes the retained Role.
     negative_tests: [divergent_role, expired_system_authority, unauthenticated, wrong_action, wrong_component, wrong_workspace]
     fault_injection_tests: [concurrent_request, duplicate_request, lost_response_after_commit]
+  - id: agents.reconcile-desired-state
+    phase: 6
+    aggregate_owner: agents
+    coordinating_owner: agents
+    mechanism_discriminator: agent_desired_state:managed_bindings
+    instance_owner: agents
+    accepted_authority: [system]
+    durable_commands: ["POST /api/v1/{workspace}/agent-services/{service_id}/lifecycle"]
+    transaction_or_saga_boundary: The registered Agents reconciler reads the canonical desired intent and binding projections, then uses FleetDB's one atomic lifecycle CAS to repair every managed binding without changing desired state.
+    idempotency_key: workspace_id:agent_id:generation_id:expected_updated_at:reconcile
+    semantic_events_or_read_models: [agents.identity.v1, agents.lifecycle_receipt.v1, automation.binding.v1]
+    retry_restart_behavior: Converged projections are a no-op; drift uses a deterministic generation-and-revision key, exact replay returns the committed receipt, and any concurrent Agent revision fails closed for a fresh reconciliation pass.
+    negative_tests: [expired_system_authority, invalid_generation, stale_revision, unauthenticated, wrong_action, wrong_component, wrong_workspace]
+    fault_injection_tests: [concurrent_binding_change, duplicate_request, lost_response_after_commit, restart_exact_replay]
   - id: agents.release-ownership
     phase: 5
     aggregate_owner: agents
@@ -603,6 +617,20 @@ commands:
     retry_restart_behavior: Registration replay returns the same Await; an already-satisfied registration or post-suspend satisfied probe resumes the same DriverRun without consuming another await index.
     negative_tests: [expired_execution, owner_mismatch, stale_fence, unauthenticated, wrong_action, wrong_resource, wrong_workspace]
     fault_injection_tests: [duplicate_event, duplicate_request, process_stop_after_registration, process_stop_after_suspend]
+  - id: execution.bind-worker-profile-parent
+    phase: 6
+    aggregate_owner: execution
+    coordinating_owner: execution
+    mechanism_discriminator: worker_profile_parent:driver_run_owner
+    instance_owner: execution
+    accepted_authority: [execution]
+    durable_commands: ["PATCH /api/v1/{workspace}/worker-profiles/{profile_id}"]
+    transaction_or_saga_boundary: Execution verifies the exact DriverRun owner resource and fence, then invokes FleetDB's WorkerProfile expected-parent CAS so only the active run generation can bind the profile to its epic.
+    idempotency_key: workspace_id:profile_id:request_id:expected_parent:parent
+    semantic_events_or_read_models: [execution.worker_profile.v1]
+    retry_restart_behavior: Exact replay converges on the same parent; a changed current parent, expired lease, or superseded fence conflicts without a read-then-write fallback.
+    negative_tests: [expired_execution, owner_mismatch, stale_fence, stale_parent, unauthenticated, wrong_action, wrong_resource, wrong_workspace]
+    fault_injection_tests: [concurrent_parent_change, duplicate_request, lost_response_after_commit]
   - id: execution.cascade-child-driver-runs
     phase: 4
     aggregate_owner: execution
@@ -883,6 +911,20 @@ commands:
     retry_restart_behavior: Repeated heartbeat calls move liveness forward without creating another Node; an unknown runtime component cannot obtain authority.
     negative_tests: [expired_system_authority, unauthenticated, wrong_action, wrong_component, wrong_workspace]
     fault_injection_tests: [duplicate_request, lost_response_after_commit]
+  - id: execution.record-outbox-delivery-result
+    phase: 6
+    aggregate_owner: execution
+    coordinating_owner: execution
+    mechanism_discriminator: lead_delivery_outbox_attempt
+    instance_owner: execution
+    accepted_authority: [system]
+    durable_commands: ["POST /api/v1/{workspace}/outbox/{outbox_id}/result"]
+    transaction_or_saga_boundary: The registered outbox dispatcher records one attempt against the exact workspace and outbox identity through the Execution-owned delivery port; the store atomically applies the terminal result or next retry deadline.
+    idempotency_key: "state-based: workspace_id:outbox_id:attempt"
+    semantic_events_or_read_models: [execution.lead_delivery_outbox.v1]
+    retry_restart_behavior: A restart lists only still-pending due rows; terminal delivery and unsupported results are not retried, while pending attempts preserve capped backoff and monotonic attempt count.
+    negative_tests: [expired_system_authority, invalid_attempt, invalid_status, unauthenticated, wrong_action, wrong_component, wrong_workspace]
+    fault_injection_tests: [delivery_error, duplicate_pass, lost_response_after_commit]
   - id: execution.recover-child-driver-run-cascade
     phase: 4
     aggregate_owner: execution

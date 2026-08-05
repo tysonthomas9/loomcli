@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/app/agentscompat"
+	"github.com/tysonthomas9/loomcli/internal/app/agentsbootstrap"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr/admissionstore"
@@ -436,7 +436,6 @@ func seedBuiltInRoles(ctx context.Context, s admissionstore.Store, key, wsDir st
 	commands, err := newManagedAgentsCommands(
 		s.Roles(),
 		s.AgentServices(),
-		s.Agents(),
 	)
 	if err != nil {
 		return err
@@ -502,7 +501,6 @@ func EnsureBuiltinRolePrompts(ctx context.Context, s storepkg.Store) error {
 	commands, err := newManagedAgentsCommands(
 		s.Roles(),
 		s.AgentServices(),
-		s.Agents(),
 	)
 	if err != nil {
 		return err
@@ -533,7 +531,6 @@ func ensureBuiltinRolePrompt(ctx context.Context, s storepkg.Store, key, wsDir, 
 	commands, err := newManagedAgentsCommands(
 		s.Roles(),
 		s.AgentServices(),
-		s.Agents(),
 	)
 	if err != nil {
 		slog.Warn("failed to compose Agents role prompt repair", "role", roleName, "workspace", key, "err", err)
@@ -545,7 +542,7 @@ func ensureBuiltinRolePrompt(ctx context.Context, s storepkg.Store, key, wsDir, 
 func ensureBuiltinRolePromptWithCommands(
 	ctx context.Context,
 	s storepkg.Store,
-	commands agentscompat.ManagedCommands,
+	commands agentsbootstrap.ManagedCommands,
 	key, wsDir, roleName string,
 ) {
 	role, err := s.Roles().Get(ctx, key, roleName)

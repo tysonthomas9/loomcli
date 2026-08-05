@@ -96,6 +96,17 @@ echo "==> flue build --target node --root $STAGE --output $STAGE/dist"
 ( cd "$STAGE"; node "$FLUE_REPO/packages/cli/bin/flue.mjs" build --target node --root "$STAGE" --output "$STAGE/dist" )
 [ -f "$STAGE/dist/server.mjs" ] || { echo "ERROR: flue build produced no dist/server.mjs" >&2; exit 1; }
 
+# Flue's Node target deliberately keeps valibot as a bare runtime import.
+# Materialize the resolved package beneath dist so the bundle remains runnable
+# after the temporary source tree and host pnpm symlinks are removed.
+VALIBOT_SRC="$(cd "$FLUE_REPO/packages/runtime/node_modules/valibot" && pwd -P)"
+mkdir -p "$STAGE/dist/node_modules"
+cp -R "$VALIBOT_SRC" "$STAGE/dist/node_modules/valibot"
+if find "$STAGE/dist/node_modules/valibot" -type l -print -quit | grep -q .; then
+  echo "ERROR: packaged valibot dependency retained a symlink" >&2
+  exit 1
+fi
+
 # Rolldown emits source-region and source-map comments into executable output.
 # Those comments retain the absolute Flue checkout/build paths even after the
 # .map files are removed for Desktop. Strip only those non-runtime annotations,

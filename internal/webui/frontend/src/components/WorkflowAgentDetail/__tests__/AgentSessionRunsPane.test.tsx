@@ -109,7 +109,7 @@ describe("AgentSessionRunsPane", () => {
     });
   });
 
-  it("explains when a supervised agent has not run yet", () => {
+  it("explains when a background agent has not run yet", () => {
     mocks.useAgentHistory.mockReturnValue({
       runs: [],
       sessions: [],
@@ -120,7 +120,7 @@ describe("AgentSessionRunsPane", () => {
 
     render(<AgentSessionRunsPane workspaceId="WS" agentName="coder" />);
 
-    expect(screen.getByTestId("supervised-agent-no-runs")).toHaveTextContent(
+    expect(screen.getByTestId("agent-history-no-runs")).toHaveTextContent(
       "No sessions yet",
     );
   });
@@ -169,7 +169,7 @@ describe("AgentSessionRunsPane", () => {
       "href",
       "/ws/WS/issues/TASK-2",
     );
-    fireEvent.click(screen.getByTestId("supervised-agent-session-session-2"));
+    fireEvent.click(screen.getByTestId("agent-history-session-session-2"));
     expect(screen.getByTestId("session-run-detail")).toHaveTextContent(
       "TASK-2:session-2",
     );
@@ -279,7 +279,7 @@ describe("AgentSessionRunsPane", () => {
     render(<AgentSessionRunsPane workspaceId="WS" agentName="coder" />);
 
     expect(
-      screen.getByTestId("supervised-agent-session-metadata-warning"),
+      screen.getByTestId("agent-history-session-metadata-warning"),
     ).toHaveTextContent(
       "Task-session metadata is temporarily unavailable. Showing transcript evidence from run history. FleetDB unavailable",
     );
@@ -311,7 +311,7 @@ describe("AgentSessionRunsPane", () => {
     render(<AgentSessionRunsPane workspaceId="WS" agentName="coder" />);
 
     expect(
-      screen.getByTestId("supervised-agent-session-metadata-loading"),
+      screen.getByTestId("agent-history-session-metadata-loading"),
     ).toHaveTextContent(
       "Loading task-session metadata. Showing transcript evidence from run history.",
     );
@@ -365,7 +365,7 @@ describe("AgentSessionRunsPane", () => {
     render(<AgentSessionRunsPane workspaceId="WS" agentName="coder" />);
 
     expect(
-      screen.getByTestId("supervised-agent-task-reference-pending"),
+      screen.getByTestId("agent-history-task-reference-pending"),
     ).toHaveTextContent("Task reference is still loading");
     expect(screen.queryByTestId("session-run-detail")).not.toBeInTheDocument();
     expect(mocks.useTaskSessions).toHaveBeenCalledWith(null);
@@ -489,9 +489,7 @@ describe("AgentSessionRunsPane", () => {
       "patch-head-sha",
     );
 
-    fireEvent.click(
-      screen.getByTestId("supervised-agent-session-session-github"),
-    );
+    fireEvent.click(screen.getByTestId("agent-history-session-session-github"));
     expect(screen.getByTestId("session-run-detail")).toHaveAttribute(
       "data-patch-back-status",
       "pull_request_opened",

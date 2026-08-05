@@ -7,16 +7,15 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/app/agentscompat"
 	"github.com/tysonthomas9/loomcli/internal/app/prreviewer"
 	"github.com/tysonthomas9/loomcli/internal/app/serve/agentcomposition/provisioningcomposition"
 	"github.com/tysonthomas9/loomcli/internal/app/serve/operatorauth"
-	"github.com/tysonthomas9/loomcli/internal/infra/agentscompatstore"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	agentsfleetdb "github.com/tysonthomas9/loomcli/internal/modules/agents/fleetdb"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
+	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -25,13 +24,17 @@ import (
 // Fleet transport, and persistence adapter remain private.
 type AgentsCapability struct {
 	api              agents.API
-	compatibility    agents.CompatibilityAPI
-	managed          agentscompat.ManagedCommands
-	parentBindings   agentscompat.ParentBindingCommands
-	retirements      agentscompat.ManagedRetirements
 	issuer           *authority.Issuer
 	operatorResolver workflowcataloghttp.OperatorAuthorityResolver
 	prReviewers      prreviewer.Commands
+	runtime          []platformruntime.Registration
+}
+
+func (capability *AgentsCapability) RuntimeRegistrations() []platformruntime.Registration {
+	if capability == nil {
+		return nil
+	}
+	return append([]platformruntime.Registration(nil), capability.runtime...)
 }
 
 func (capability *AgentsCapability) AgentsAPI() agents.API {
@@ -39,34 +42,6 @@ func (capability *AgentsCapability) AgentsAPI() agents.API {
 		return nil
 	}
 	return capability.api
-}
-
-func (capability *AgentsCapability) CompatibilityAPI() agents.CompatibilityAPI {
-	if capability == nil {
-		return nil
-	}
-	return capability.compatibility
-}
-
-func (capability *AgentsCapability) ManagedCompatibility() agentscompat.ManagedCommands {
-	if capability == nil {
-		return nil
-	}
-	return capability.managed
-}
-
-func (capability *AgentsCapability) ParentBindingCommands() agentscompat.ParentBindingCommands {
-	if capability == nil {
-		return nil
-	}
-	return capability.parentBindings
-}
-
-func (capability *AgentsCapability) ManagedRetirements() agentscompat.ManagedRetirements {
-	if capability == nil {
-		return nil
-	}
-	return capability.retirements
 }
 
 func (capability *AgentsCapability) OperatorAuthorityResolver() workflowcataloghttp.OperatorAuthorityResolver {
@@ -85,24 +60,17 @@ func (capability *AgentsCapability) PRReviewerProvisioning() prreviewer.Commands
 
 type AgentsConfig struct {
 	FleetDBClient                   *infrafleetdb.Client
-	CompatibilityRoles              store.RoleStore
-	CompatibilityAgentServices      store.AgentServiceStore
-	CompatibilityAssignments        store.AgentStore
+	TriggerBindings                 store.TriggerBindingStore
+	WorkspaceKey                    string
+	WorkspaceLister                 agents.RuntimeWorkspaceLister
 	ExternalAuth                    bool
 	ExternalOperatorResolverFactory operatorauth.ExternalOperatorResolverFactory
 }
 
 type API = agents.API
-type CompatibilityAPI = agents.CompatibilityAPI
-type ManagedCommands = agentscompat.ManagedCommands
-type ParentBindingCommands = agentscompat.ParentBindingCommands
-type ManagedRetirements = agentscompat.ManagedRetirements
 type PRReviewerCommands = prreviewer.Commands
 type OperatorAuthorityResolver = workflowcataloghttp.OperatorAuthorityResolver
 type FleetDBClient = infrafleetdb.Client
-type RoleStore = store.RoleStore
-type AgentServiceStore = store.AgentServiceStore
-type AgentStore = store.AgentStore
 
 type AgentProvisioningCapability = provisioningcomposition.Capability
 type AgentProvisioningConfig = provisioningcomposition.Config
@@ -138,43 +106,11 @@ func NewAgentsCapability(config AgentsConfig) (*AgentsCapability, error) {
 		return nil, fmt.Errorf("compose Agents FleetDB adapter: %w", err)
 	}
 	service, err := agents.NewWithLifecycle(
-		adapter, adapter, adapter, adapter, adapter, adapter, adapter, admission,
+		adapter, adapter, adapter, adapter, adapter, adapter, adapter,
+		newAgentBindingStateSource(config.TriggerBindings), admission,
 	)
 	if err != nil {
 		return nil, err
-	}
-	var compatibility agents.CompatibilityAPI
-	var managed agentscompat.ManagedCommands
-	var parentBindings agentscompat.ParentBindingCommands
-	var retirements agentscompat.ManagedRetirements
-	compatibilityConfigured := config.CompatibilityRoles != nil ||
-		config.CompatibilityAgentServices != nil ||
-		config.CompatibilityAssignments != nil
-	if compatibilityConfigured {
-		compatibilityPersistence, persistenceErr := agentscompatstore.New(
-			config.CompatibilityRoles,
-			config.CompatibilityAgentServices,
-			config.CompatibilityAssignments,
-		)
-		if persistenceErr != nil {
-			return nil, fmt.Errorf("compose Agents compatibility persistence: %w", persistenceErr)
-		}
-		compatibility, err = agentscompat.NewAPI(compatibilityPersistence, admission)
-		if err != nil {
-			return nil, fmt.Errorf("compose Agents compatibility API: %w", err)
-		}
-		managed, err = agentscompat.NewManagedCommandsWithIssuer(compatibility, issuer)
-		if err != nil {
-			return nil, err
-		}
-		parentBindings, err = agentscompat.NewParentBindingCommands(compatibility, issuer)
-		if err != nil {
-			return nil, err
-		}
-		retirements, err = agentscompat.NewManagedRetirements(compatibility, issuer)
-		if err != nil {
-			return nil, err
-		}
 	}
 	resolver, err := composeAgentsOperatorResolver(config, issuer)
 	if err != nil {
@@ -187,10 +123,19 @@ func NewAgentsCapability(config AgentsConfig) (*AgentsCapability, error) {
 	if err != nil {
 		return nil, err
 	}
+	runtimeRegistration, err := agents.RuntimeRegistration(
+		service,
+		service,
+		newAgentsRuntimeAuthorityProvider(issuer, time.Now),
+		agents.RuntimeConfig{WorkspaceKey: config.WorkspaceKey, WorkspaceLister: config.WorkspaceLister},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("compose Agents desired-state reconciliation: %w", err)
+	}
 	return &AgentsCapability{
-		api: service, compatibility: compatibility, managed: managed, parentBindings: parentBindings,
-		retirements: retirements, issuer: issuer, operatorResolver: resolver,
+		api: service, issuer: issuer, operatorResolver: resolver,
 		prReviewers: reviewers,
+		runtime:     []platformruntime.Registration{runtimeRegistration},
 	}, nil
 }
 
@@ -225,9 +170,6 @@ func agentsOperatorActions() []authority.Action {
 		agents.ActionCreateRole,
 		agents.ActionUpdateRole,
 		agents.ActionDeleteRole,
-		agents.ActionCreateSupervisedAssignment,
-		agents.ActionUpdateSupervisedAssignmentIntent,
-		agents.ActionRetireSupervisedAssignment,
 		provisioningcomposition.ActionBeginProvisioning,
 	}
 }

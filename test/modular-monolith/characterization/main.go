@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -19,16 +21,27 @@ import (
 
 const (
 	manifestSchemaVersion = 1
-	manifestSuite         = "modular-monolith-phase1-characterization"
 	defaultManifestPath   = "test/modular-monolith/characterization-matrix.yaml"
 )
 
-var requiredRowIDs = []string{
-	"workflow-approval",
-	"trigger-admission",
-	"agent-provisioning",
-	"execution-recovery",
-	"supervisor-policy",
+var requiredRowsBySuite = map[string][]string{
+	"modular-monolith-phase1-characterization": {
+		"workflow-approval",
+		"trigger-admission",
+		"agent-provisioning",
+		"execution-recovery",
+		"agent-retry-policy",
+		"runtime-host-recovery",
+	},
+	"modular-monolith-phase6-parity": {
+		"architecture-retirement",
+		"canonical-agent-reconciliation",
+		"canonical-agentdef-boundary",
+		"runtime-defaults",
+		"heartbeats-and-recovery",
+		"retry-concurrency-and-epics",
+		"prompt-agent-arbitration",
+	},
 }
 
 type manifest struct {
@@ -87,7 +100,7 @@ func main() {
 		fmt.Printf("  result: PASS\n")
 	}
 
-	fmt.Printf("\nPhase 1 characterization gate PASS (%d/%d rows)\n", len(m.Rows), len(requiredRowIDs))
+	fmt.Printf("\n%s gate PASS (%d/%d rows)\n", m.Suite, len(m.Rows), len(m.Rows))
 }
 
 func fatal(err error) {
@@ -147,8 +160,9 @@ func validateManifest(m manifest) error {
 	if m.SchemaVersion != manifestSchemaVersion {
 		return fmt.Errorf("schema_version = %d, want %d", m.SchemaVersion, manifestSchemaVersion)
 	}
-	if m.Suite != manifestSuite {
-		return fmt.Errorf("suite = %q, want %q", m.Suite, manifestSuite)
+	requiredRowIDs, ok := requiredRowsBySuite[m.Suite]
+	if !ok {
+		return fmt.Errorf("suite = %q is not supported", m.Suite)
 	}
 	if strings.TrimSpace(m.Description) == "" {
 		return errors.New("description must not be empty")
@@ -240,7 +254,7 @@ func compareDiscoveredTests(expected, discovered []string) error {
 func executeRow(root string, r row) error {
 	cleaner := filepath.Join(root, "scripts", "with-clean-loom-env.sh")
 	args := []string{
-		"go", "test", r.Package,
+		"go", "test", "-json", r.Package,
 		"-run", r.TestRegex,
 		"-count=1",
 		"-shuffle=off",
@@ -249,10 +263,78 @@ func executeRow(root string, r row) error {
 	}
 	cmd := exec.Command(cleaner, args...) //nolint:gosec // Executable is the repo-owned cleaner; schema validation constrains package, regex, and timeout arguments.
 	cmd.Dir = root
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("execute %s: %w", strings.Join(args, " "), err)
+	output, runErr := cmd.CombinedOutput()
+	proofErr := renderAndValidateTestOutput(os.Stdout, output, r.ExpectedTests)
+	if runErr != nil {
+		return fmt.Errorf("execute %s: %w", strings.Join(args, " "), errors.Join(runErr, proofErr))
+	}
+	if proofErr != nil {
+		return fmt.Errorf("execute %s: %w", strings.Join(args, " "), proofErr)
+	}
+	return nil
+}
+
+type testEvent struct {
+	Action string `json:"Action"`
+	Test   string `json:"Test"`
+	Output string `json:"Output"`
+}
+
+type testEvidence struct {
+	ran     bool
+	passed  bool
+	skipped bool
+}
+
+func renderAndValidateTestOutput(writer io.Writer, output []byte, expected []string) error {
+	evidence := make(map[string]testEvidence, len(expected))
+	for _, name := range expected {
+		evidence[name] = testEvidence{}
+	}
+
+	scanner := bufio.NewScanner(bytes.NewReader(output))
+	scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		var event testEvent
+		if err := json.Unmarshal(line, &event); err != nil {
+			if _, writeErr := fmt.Fprintln(writer, string(line)); writeErr != nil {
+				return fmt.Errorf("render non-JSON test output: %w", writeErr)
+			}
+			continue
+		}
+		if event.Output != "" {
+			if _, err := fmt.Fprint(writer, event.Output); err != nil {
+				return fmt.Errorf("render test output: %w", err)
+			}
+		}
+		observed, tracked := evidence[event.Test]
+		if !tracked {
+			continue
+		}
+		switch event.Action {
+		case "run":
+			observed.ran = true
+		case "pass":
+			observed.passed = true
+		case "skip":
+			observed.skipped = true
+		}
+		evidence[event.Test] = observed
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("decode go test JSON: %w", err)
+	}
+	for _, name := range expected {
+		observed := evidence[name]
+		switch {
+		case observed.skipped:
+			return fmt.Errorf("required test %s was skipped", name)
+		case !observed.ran:
+			return fmt.Errorf("required test %s did not run", name)
+		case !observed.passed:
+			return fmt.Errorf("required test %s did not pass", name)
+		}
 	}
 	return nil
 }

@@ -31,9 +31,41 @@ func TestBuildBuiltinBundle(t *testing.T) {
 	if info.IsDir() || info.Size() == 0 {
 		t.Fatalf("server.mjs is empty or a directory (size=%d)", info.Size())
 	}
+	assertPortableValibot(t, dest)
 
 	if _, _, err := BuildBuiltinBundle(context.Background(), "does-not-exist", filepath.Join(t.TempDir(), "x")); err == nil {
 		t.Error("expected an error building an unknown bundle")
+	}
+}
+
+func TestBuildStagesPortableRuntimeDependencies(t *testing.T) {
+	configureFakeBuiltinBundleBuild(t)
+
+	bundle, output, err := Build(context.Background(), BuildOptions{
+		Name:    "portable-runtime",
+		Files:   map[string]string{"workflows/portable-runtime.ts": "export default {};\n"},
+		WorkDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("Build: %v\n%s", err, output)
+	}
+	defer bundle.Cleanup()
+	assertPortableValibot(t, bundle.OutputDir)
+}
+
+func assertPortableValibot(t *testing.T, dist string) {
+	t.Helper()
+	packageJSON := filepath.Join(dist, "node_modules", "valibot", "package.json")
+	info, err := os.Lstat(packageJSON)
+	if err != nil {
+		t.Fatalf("portable valibot package missing: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		t.Fatalf("portable valibot package.json mode = %v, want regular file", info.Mode())
+	}
+	index := filepath.Join(dist, "node_modules", "valibot", "index.js")
+	if info, err := os.Lstat(index); err != nil || !info.Mode().IsRegular() {
+		t.Fatalf("portable valibot entrypoint missing or not regular: info=%v err=%v", info, err)
 	}
 }
 
@@ -79,7 +111,6 @@ func configureFakeBuiltinBundleBuild(t *testing.T) {
 		runtimeRoot,
 		filepath.Join(runtimeRoot, "node_modules", "@hono", "node-server"),
 		filepath.Join(runtimeRoot, "node_modules", "hono"),
-		filepath.Join(runtimeRoot, "node_modules", "valibot"),
 	} {
 		if err := os.MkdirAll(path, 0o755); err != nil {
 			t.Fatalf("mkdir %s: %v", path, err)
@@ -87,6 +118,19 @@ func configureFakeBuiltinBundleBuild(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(path, "package.json"), []byte(`{"name":"test"}`), 0o644); err != nil {
 			t.Fatalf("write package.json for %s: %v", path, err)
 		}
+	}
+	valibotRoot := filepath.Join(root, "pnpm-store", "valibot")
+	if err := os.MkdirAll(valibotRoot, 0o755); err != nil {
+		t.Fatalf("mkdir valibot package: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(valibotRoot, "package.json"), []byte(`{"name":"valibot","type":"module","exports":"./index.js"}`), 0o644); err != nil {
+		t.Fatalf("write valibot package.json: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(valibotRoot, "index.js"), []byte("export const parse = () => ({});\n"), 0o644); err != nil {
+		t.Fatalf("write valibot entrypoint: %v", err)
+	}
+	if err := os.Symlink(valibotRoot, filepath.Join(runtimeRoot, "node_modules", "valibot")); err != nil {
+		t.Fatalf("link valibot package: %v", err)
 	}
 
 	flue := filepath.Join(root, "fake-flue.sh")
@@ -109,7 +153,7 @@ if [[ -z "$out" ]]; then
   exit 1
 fi
 mkdir -p "$out"
-printf 'export {};\n' > "$out/server.mjs"
+printf 'import "valibot"; export {};\n' > "$out/server.mjs"
 echo "fake flue build"
 `
 	if err := os.WriteFile(flue, []byte(script), 0o755); err != nil {

@@ -12,7 +12,7 @@ func TestStoreFacetSetIsExact(t *testing.T) {
 	for index := 0; index < storeType.NumMethod(); index++ {
 		got = append(got, storeType.Method(index).Name)
 	}
-	want := []string{"AgentServices", "Agents", "Repos", "Roles", "Workspaces"}
+	want := []string{"AgentServices", "Repos", "Roles", "Workspaces"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("Workspace admission Store facets = %v, want %v", got, want)
 	}

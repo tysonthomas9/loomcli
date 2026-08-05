@@ -3,9 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
-	"net/http"
 
-	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/app/capabilitycomposition"
 	"github.com/tysonthomas9/loomcli/internal/webui/appinfra"
 	"github.com/tysonthomas9/loomcli/internal/webui/appstores"
@@ -22,22 +20,9 @@ import (
 // and assigns them to app.wsModules.
 func (app *Server) buildModules() {
 	storeBacked := app.config.Store != nil
-	poollessIssueBackend := app.config.FleetClient || storeBacked
 
-	var agentQueueH http.HandlerFunc
-	if app.config.AgentQueueFn != nil && !storeBacked && !app.config.FleetClient {
-		agentQueueH = webui.HandleAgentQueue(app.config.AgentQueueFn)
-	}
-
-	// Core modules. FleetDB-backed serve opens the unified store instead of
-	// per-workspace daemons, so issue ops must use IssueBackendFn even when
-	// a daemon pool object was constructed during startup.
-	opsPool := app.multiPool
-	if poollessIssueBackend {
-		opsPool = nil
-	}
-	opsModule := handlermux.NewWorkspaceOpsModule(app.workspaceSvc, opsPool, agentQueueH).
-		WithDaemonExpected(!poollessIssueBackend)
+	// Core workspace operations use the workflow-catalog IssueBackend port.
+	opsModule := handlermux.NewWorkspaceOpsModule(app.workspaceSvc, nil)
 	if app.config.IssueBackendFn != nil {
 		opsModule = opsModule.WithIssueBackendFn(app.config.IssueBackendFn)
 	}
@@ -110,7 +95,7 @@ func (app *Server) buildInfraModules() {
 	if app.fleetRegistry != nil {
 		app.wsModules = append(app.wsModules,
 			appinfra.NewFleetModule(app.fleetRegistry, app.tokenCfg,
-				app.multiPool, app.claimMetrics, app.fleetRegCfg))
+				app.config.IssueBackendFn, app.claimMetrics, app.fleetRegCfg))
 	}
 
 	if app.diffSvc != nil {
@@ -142,7 +127,8 @@ func (app *Server) buildStoreBackedInfraModules() {
 
 func (app *Server) unifiedAgentModuleDeps() modbuilder.UnifiedAgentModuleDeps {
 	deps := modbuilder.UnifiedAgentModuleDeps{
-		Store: app.config.Store, AgentSvc: app.agentSvc, IssueSvc: app.issueSvc, Hub: app.hub,
+		Store: app.config.Store, InteractiveAgentRuntime: app.agentRuntime,
+		IssueSvc: app.issueSvc, Hub: app.hub,
 		FleetBaseURL: app.config.FleetDBBaseURL, DriverAPIBaseURL: app.config.DriverAPIBaseURL,
 		ExecutionIssueBackends: app.config.ExecutionIssueBackends,
 		DriverAPIToken:         app.config.DriverAPIToken, DriverRunTokenKey: app.config.DriverRunTokenKey,
@@ -156,9 +142,6 @@ func (app *Server) unifiedAgentModuleDeps() modbuilder.UnifiedAgentModuleDeps {
 	}
 	if transcripts, ok := app.sessSvc.(service.AgentSessionTranscriptService); ok {
 		deps.AgentSessionTranscripts = transcripts
-	}
-	if history, ok := app.sessSvc.(service.AgentLocalSessionHistoryService); ok {
-		deps.AgentLocalSessionHistory = history
 	}
 	if capability := app.config.ArtifactsCapability; capability != nil {
 		deps.Artifacts = capability.ArtifactsAPI()
@@ -182,7 +165,4 @@ func (app *Server) buildStorelessInfraModules() {
 	// Without a store there is no connector-backed prreview module, so
 	// keep the gh-backed pull-request list route available.
 	app.wsModules = append(app.wsModules, githandlers.NewPullRequestListModule(app.agentSvc))
-	if app.config.AgentControlFn != nil {
-		app.wsModules = append(app.wsModules, webui.NewAgentControlModule(app.config.AgentControlFn))
-	}
 }

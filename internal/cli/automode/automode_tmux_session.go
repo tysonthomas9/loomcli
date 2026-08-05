@@ -10,7 +10,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 )
 
-// startTmuxSession creates a detached tmux session running loom --daemon-mode
+// startTmuxSession creates a detached tmux session running one ordinary
+// single-task compatibility command. The child selects and claims its own task;
+// there is no supervisor-assigned leaf mode.
 func startTmuxSession(sessionName string, opts AutoModeOptions, logFile string) error {
 	// Kill any existing session with this name (error expected if session doesn't exist)
 	_ = exec.Command("tmux", "kill-session", "-t", sessionName).Run() //nolint:gosec // args are constant tmux subcommands + validated session name
@@ -22,7 +24,7 @@ func startTmuxSession(sessionName string, opts AutoModeOptions, logFile string) 
 	if resolved := cli.GetBackendName(); resolved != "claude" {
 		termPrefix = ""
 	}
-	loomCmd := fmt.Sprintf("%sloom %s %s --daemon-mode", termPrefix, shellQuote(opts.AgentType), shellQuote(opts.WorktreePath))
+	loomCmd := fmt.Sprintf("%sloom %s %s", termPrefix, shellQuote(opts.AgentType), shellQuote(opts.WorktreePath))
 
 	// Always propagate backend to subprocess so the tmux-spawned process
 	// (which runs the installed binary) uses the same backend as the parent.

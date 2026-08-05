@@ -86,7 +86,7 @@ func TestRepoConfigResolveAbsPath(t *testing.T) {
 	}
 }
 
-func TestAgentEntryShouldSuperviseSkipsLeadRoles(t *testing.T) {
+func TestAgentEntryShouldRunSkipsInteractiveRoles(t *testing.T) {
 	tests := []struct {
 		name  string
 		entry AgentEntry
@@ -94,10 +94,10 @@ func TestAgentEntryShouldSuperviseSkipsLeadRoles(t *testing.T) {
 		want  bool
 	}{
 		{name: "task default runs", entry: AgentEntry{Worktree: "worker", Role: "task"}, want: true},
-		{name: "lead interactive is not daemon supervised", entry: AgentEntry{Worktree: "lead", Role: "lead"}, want: false},
-		{name: "orchestrator interactive is not daemon supervised", entry: AgentEntry{Worktree: "lead", Role: "orchestrator"}, want: false},
+		{name: "lead interactive does not run as a worker", entry: AgentEntry{Worktree: "lead", Role: "lead"}, want: false},
+		{name: "orchestrator interactive does not run as a worker", entry: AgentEntry{Worktree: "lead", Role: "orchestrator"}, want: false},
 		{
-			name:  "custom interactive kind is not daemon supervised",
+			name:  "custom interactive kind does not run as a worker",
 			entry: AgentEntry{Worktree: "operator", Role: "operator"},
 			roles: map[string]RoleConfig{
 				"operator": {Kind: string(domain.RoleKindInteractive)},
@@ -124,72 +124,10 @@ func TestAgentEntryShouldSuperviseSkipsLeadRoles(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.entry.ShouldSuperviseWithRoles(tt.roles); got != tt.want {
-				t.Fatalf("ShouldSuperviseWithRoles() = %v, want %v", got, tt.want)
+			if got := tt.entry.ShouldRunWithRoles(tt.roles); got != tt.want {
+				t.Fatalf("ShouldRunWithRoles() = %v, want %v", got, tt.want)
 			}
 		})
-	}
-}
-
-func TestLoadDaemonConfigFromStoreOmitsBuiltinWorkerPromptFiles(t *testing.T) {
-	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
-	ctx := context.Background()
-	st := memstore.New()
-	t.Cleanup(func() { _ = st.Close() })
-
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "Workspace One"}); err != nil {
-		t.Fatalf("create workspace: %v", err)
-	}
-	for _, role := range []store.RoleCreate{
-		{
-			WorkspaceKey: "WS1",
-			Name:         "plan",
-			Description:  "Planning agent",
-			PromptFile:   "/workspace/.loom/prompts/plan.md",
-			TaskFilter:   "needs_plan",
-		},
-		{
-			WorkspaceKey: "WS1",
-			Name:         "task",
-			Description:  "Task implementation agent",
-			PromptFile:   "/workspace/.loom/prompts/task.md",
-			TaskFilter:   "has_design",
-		},
-		{
-			WorkspaceKey: "WS1",
-			Name:         "reviewer",
-			Description:  "Custom reviewer",
-			PromptFile:   "/workspace/.loom/prompts/reviewer.md",
-			TaskFilter:   "review",
-		},
-	} {
-		if _, err := st.Roles().Create(ctx, role); err != nil {
-			t.Fatalf("create role %q: %v", role.Name, err)
-		}
-	}
-
-	cfg, err := loadDaemonConfigFromStore(ctx, st, "WS1", newDefaultDaemonConfig(), t.TempDir())
-	if err != nil {
-		t.Fatalf("loadDaemonConfigFromStore() error = %v", err)
-	}
-	for _, name := range []string{"plan", "task"} {
-		if got := cfg.Roles[name].PromptFile; got != "" {
-			t.Errorf("daemon role %q PromptFile = %q, want empty", name, got)
-		}
-	}
-	if got := cfg.Roles["plan"].TaskFilter; got != "needs_plan" {
-		t.Errorf("daemon plan TaskFilter = %q, want needs_plan", got)
-	}
-	if got := cfg.Roles["reviewer"].PromptFile; got != "/workspace/.loom/prompts/reviewer.md" {
-		t.Errorf("daemon custom role PromptFile = %q, want preserved", got)
-	}
-
-	stored, err := st.Roles().Get(ctx, "WS1", "plan")
-	if err != nil {
-		t.Fatalf("get stored plan role: %v", err)
-	}
-	if got := stored.PromptFile; got != "/workspace/.loom/prompts/plan.md" {
-		t.Errorf("stored plan PromptFile = %q, want shared role prompt preserved", got)
 	}
 }
 

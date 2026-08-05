@@ -22,7 +22,7 @@ const mocks = vi.hoisted(() => ({
   startAgent: vi.fn(),
   getPullRequestDetail: vi.fn(),
   diffRefreshKeys: [] as Array<number | undefined>,
-  createAgentModalProps: null as null | { supervisedRole?: string },
+  createAgentModalProps: null as null | { requiredRole?: string },
   data: {
     agents: [] as unknown[],
     issues: [] as unknown[],
@@ -72,11 +72,11 @@ vi.mock("@/contexts/WorkspaceViewContext", () => ({
 vi.mock("@/components/CreateAgentModal/CreateAgentModal", () => ({
   CreateAgentModal: (props: {
     isOpen: boolean;
-    supervisedRole?: string;
+    requiredRole?: string;
     onSuccess: (agent: WorkspaceAgentInfo) => void;
   }) => {
     mocks.createAgentModalProps = {
-      ...(props.supervisedRole ? { supervisedRole: props.supervisedRole } : {}),
+      ...(props.requiredRole ? { requiredRole: props.requiredRole } : {}),
     };
     return props.isOpen ? (
       <button
@@ -234,7 +234,7 @@ describe("PRReviewWorkspace", () => {
     mocks.actions.updateIssueStatus.mockResolvedValue(undefined);
   });
 
-  it("creates a constrained supervised reviewer, then assigns and starts it", async () => {
+  it("creates a constrained task-behavior reviewer, then assigns and starts it", async () => {
     renderWorkspace();
 
     fireEvent.click(screen.getByTestId("review-agent-button"));
@@ -243,7 +243,7 @@ describe("PRReviewWorkspace", () => {
     expect(
       await screen.findByTestId("create-agent-modal-success"),
     ).toBeInTheDocument();
-    expect(mocks.createAgentModalProps).toEqual({ supervisedRole: "task" });
+    expect(mocks.createAgentModalProps).toEqual({ requiredRole: "task" });
 
     fireEvent.click(screen.getByTestId("create-agent-modal-success"));
 
@@ -251,36 +251,30 @@ describe("PRReviewWorkspace", () => {
       expect(mocks.updateIssue).toHaveBeenCalledWith("WS", "TASK-1", {
         assignee: "review-worker",
       });
-      expect(mocks.startAgent).toHaveBeenCalledWith("WS", "review-worker", {
-        taskId: "TASK-1",
-      });
+      expect(mocks.startAgent).toHaveBeenCalledWith("WS", "review-worker");
     });
   });
 
-  it("offers only daemon-startable workers in the reviewer chooser", () => {
+  it("offers only background workers in the reviewer chooser", () => {
     mocks.data.agents = [
       makeAgent({
         name: "task-worker",
         role: "task",
         role_kind: "worker",
-        daemon_managed: true,
       }),
       makeAgent({
         name: "interactive-reviewer",
         role: "pr-review",
         role_kind: "interactive",
-        daemon_managed: false,
       }),
       makeAgent({
         name: "custom-worker",
         role: "bug-triage",
         role_kind: "worker",
-        daemon_managed: false,
       }),
       makeAgent({
         name: "untyped-custom-agent",
         role: "legacy-custom",
-        daemon_managed: false,
       }),
     ];
 

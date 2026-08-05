@@ -1448,7 +1448,9 @@ function App() {
       <SearchTermProvider value={activeSearchTerm}>
         <AppLayout
           title={headerTitle}
-          onTitleClick={() => navigateToView("kanban")}
+          {...(!showBoardToolbar && {
+            onTitleClick: () => navigateToView("kanban"),
+          })}
           actions={headerActions}
           navRail={
             <NavRail
@@ -1597,7 +1599,7 @@ function App() {
         {...(prefillOnboardingAgent && shouldPrefillOnboardingAgent
           ? {
               defaultName: ONBOARDING_AGENT_NAME,
-              supervisedRole: ONBOARDING_AGENT_ROLE,
+              requiredRole: ONBOARDING_AGENT_ROLE,
             }
           : {})}
         onClose={() => {

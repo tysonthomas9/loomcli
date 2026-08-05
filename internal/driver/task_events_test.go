@@ -277,31 +277,34 @@ func TestBuildLeadTaskMessage(t *testing.T) {
 }
 
 func TestResolveEpicLead(t *testing.T) {
+	type agentFixture struct {
+		name, role, parent string
+	}
 	cases := []struct {
 		name   string
-		agents []store.AgentCreate
+		agents []agentFixture
 		want   string
 	}{
 		{name: "no agents", want: ""},
 		{
 			name: "lead bound to epic",
-			agents: []store.AgentCreate{
-				{WorkspaceKey: "TEST", Name: "dev-1", RoleName: "developer", Parent: "TEST-EPIC"},
-				{WorkspaceKey: "TEST", Name: "lead-z", RoleName: "Lead", Parent: "TEST-EPIC"},
+			agents: []agentFixture{
+				{name: "dev-1", role: "developer", parent: "TEST-EPIC"},
+				{name: "lead-z", role: "Lead", parent: "TEST-EPIC"},
 			},
 			want: "lead-z",
 		},
 		{
 			name: "orchestrator counts as lead",
-			agents: []store.AgentCreate{
-				{WorkspaceKey: "TEST", Name: "orc-1", RoleName: "orchestrator", Parent: "TEST-EPIC"},
+			agents: []agentFixture{
+				{name: "orc-1", role: "orchestrator", parent: "TEST-EPIC"},
 			},
 			want: "orc-1",
 		},
 		{
 			name: "lead bound to another epic ignored",
-			agents: []store.AgentCreate{
-				{WorkspaceKey: "TEST", Name: "lead-other", RoleName: "lead", Parent: "OTHER-EPIC"},
+			agents: []agentFixture{
+				{name: "lead-other", role: "lead", parent: "OTHER-EPIC"},
 			},
 			want: "",
 		},
@@ -310,8 +313,19 @@ func TestResolveEpicLead(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, st, _ := setupRunningDriverRun(t)
 			for _, in := range tc.agents {
-				if _, err := st.Agents().Create(ctx, in); err != nil {
-					t.Fatalf("Create agent %q: %v", in.Name, err)
+				createEventRole(t, ctx, st, in.role)
+				profileID := in.name + "-profile"
+				if _, err := st.WorkerProfiles().Create(ctx, store.WorkerProfileCreate{
+					WorkspaceKey: "TEST", ProfileID: profileID, Name: profileID, Role: in.role, ParentEpic: in.parent,
+				}); err != nil {
+					t.Fatalf("Create profile %q: %v", profileID, err)
+				}
+				if _, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
+					WorkspaceKey: "TEST", ServiceID: in.name, Name: in.name, RoleName: in.role,
+					ProfileName: profileID, Kind: domain.AgentServiceKindLead,
+					DesiredState: domain.AgentServiceDesiredRunning, MaxInstances: 1,
+				}); err != nil {
+					t.Fatalf("Create agent service %q: %v", in.name, err)
 				}
 			}
 			got, err := resolveEpicLead(ctx, st, "TEST", "TEST-EPIC")
@@ -341,13 +355,25 @@ func createQueuedEventTaskRun(t *testing.T, ctx context.Context, st store.Store,
 
 func bindEpicLead(t *testing.T, ctx context.Context, st store.Store, name string) {
 	t.Helper()
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{
-		WorkspaceKey: "TEST",
-		Name:         name,
-		RoleName:     "lead",
-		Parent:       "TEST-EPIC",
+	createEventRole(t, ctx, st, "lead")
+	profileID := name + "-profile"
+	if _, err := st.WorkerProfiles().Create(ctx, store.WorkerProfileCreate{
+		WorkspaceKey: "TEST", ProfileID: profileID, Name: profileID, Role: "lead", ParentEpic: "TEST-EPIC",
 	}); err != nil {
-		t.Fatalf("Create lead agent: %v", err)
+		t.Fatalf("Create lead profile: %v", err)
+	}
+	if _, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
+		WorkspaceKey: "TEST", ServiceID: name, Name: name, RoleName: "lead", ProfileName: profileID,
+		Kind: domain.AgentServiceKindLead, DesiredState: domain.AgentServiceDesiredRunning, MaxInstances: 1,
+	}); err != nil {
+		t.Fatalf("Create lead agent service: %v", err)
+	}
+}
+
+func createEventRole(t *testing.T, ctx context.Context, st store.Store, name string) {
+	t.Helper()
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: "TEST", Name: name}); err != nil {
+		t.Fatalf("Create role %q: %v", name, err)
 	}
 }
 

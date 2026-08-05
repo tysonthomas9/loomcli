@@ -264,9 +264,15 @@ func newLocalModeVerifyServer(t *testing.T, manifest localModeManifest, evidence
 				"design": "Approved design", "assignee": evidence.planAssignee, "created_at": evidence.taskCreatedAt,
 			}})
 		case "/api/workspaces/LOCALMODE/issues/" + manifest.CodeTaskID:
+			status := "closed"
+			externalRef := ""
+			if manifest.Plane == "ts" {
+				status = "review"
+				externalRef = "local-branch:loom/" + manifest.CodeTaskID + "@0123456789abcdef0123456789abcdef01234567"
+			}
 			writeTestJSON(t, w, map[string]any{"data": map[string]any{
-				"id": manifest.CodeTaskID, "title": manifest.CodeTaskName, "status": "closed",
-				"created_at": evidence.taskCreatedAt,
+				"id": manifest.CodeTaskID, "title": manifest.CodeTaskName, "status": status,
+				"external_ref": externalRef, "assignee": "", "created_at": evidence.taskCreatedAt,
 			}})
 		case "/api/workspaces/LOCALMODE/tasks/" + manifest.PlanTaskID + "/sessions":
 			writeTestJSON(t, w, map[string]any{"data": map[string]any{"sessions": []map[string]any{{

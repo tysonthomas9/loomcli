@@ -3,38 +3,13 @@ package service
 import (
 	"context"
 	"regexp"
-	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/ops"
-	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 )
 
-type agentOperatorAuthorityContextKey struct{}
-
-// WithAgentOperatorAuthority carries one request-verified, opaque operator
-// authority from the HTTP adapter to the supervised assignment service.
-func WithAgentOperatorAuthority(
-	ctx context.Context,
-	auth authority.OperatorAuthority,
-) context.Context {
-	return context.WithValue(ctx, agentOperatorAuthorityContextKey{}, auth)
-}
-
-// AgentOperatorAuthorityFromContext returns the authority previously resolved
-// at the transport boundary. The Agents admission service remains responsible
-// for checking its exact action and workspace.
-func AgentOperatorAuthorityFromContext(ctx context.Context) (authority.OperatorAuthority, bool) {
-	if ctx == nil {
-		return authority.OperatorAuthority{}, false
-	}
-	auth, ok := ctx.Value(agentOperatorAuthorityContextKey{}).(authority.OperatorAuthority)
-	return auth, ok
-}
-
-// AgentService defines the business logic operations for agents.
-// Handlers call this interface to perform agent-scoped operations and map
-// the returned errors/results to HTTP responses.
+// AgentService is the remaining transport-oriented terminal and Source
+// Control surface historically named for agents. Durable Agent identity and
+// lifecycle are owned exclusively by internal/modules/agents.
 type AgentService interface {
 	// GetTerminalInfo reports whether an agent has a live tmux session.
 	GetTerminalInfo(ctx context.Context, wsID, agentName string) (*AgentTerminalInfoResult, error)
@@ -75,94 +50,14 @@ type AgentService interface {
 
 	// SetTargetBranch changes the target/integration branch for a worktree.
 	SetTargetBranch(ctx context.Context, wsID, agentName, branch string) error
-
-	// ListAgents returns all agent assignments registered to a workspace
-	// in the fleet-db store. Empty slice when none. Returns ErrUnavailable
-	// when the service was constructed without a store handle.
-	ListAgents(ctx context.Context, wsKey string) ([]*domain.Agent, error)
-
-	// CreateAgent registers a new agent assignment in the store.
-	CreateAgent(ctx context.Context, in AgentCreateInput) (*domain.Agent, error)
-
-	// UpdateAgent applies a partial-update to an existing agent.
-	UpdateAgent(ctx context.Context, wsKey, name string, patch AgentUpdateInput) (*domain.Agent, error)
-
-	// RequestAgentLifecycle requests a placement-owned lifecycle transition.
-	// Pending is authoritative: handlers must not infer asynchronous completion
-	// from the best-effort Agent projection.
-	RequestAgentLifecycle(ctx context.Context, wsKey, name string, in AgentLifecycleInput) (*AgentLifecycleResult, error)
-
-	// GetAgentLifecycleCommand returns the durable status of a lifecycle
-	// command scoped to the named agent.
-	GetAgentLifecycleCommand(ctx context.Context, wsKey, name, commandID string) (*AgentLifecycleCommandResult, error)
-
-	// DeleteAgent removes an agent assignment from the store.
-	DeleteAgent(ctx context.Context, wsKey, name string) error
 }
 
-// AgentCreateInput is the JSON payload for POST /api/agents.
-// Mirrors store.AgentCreate but kept distinct so the service contract
-// doesn't leak the persistence type.
-type AgentCreateInput struct {
-	WorkspaceKey     string                   `json:"workspace_key"`
-	Name             string                   `json:"name"`
-	RoleName         string                   `json:"role_name"`
-	Kind             string                   `json:"kind,omitempty"`
-	Prompt           string                   `json:"prompt,omitempty"`
-	PromptFile       string                   `json:"prompt_file,omitempty"`
-	Auto             bool                     `json:"auto"`
-	Backend          string                   `json:"backend,omitempty"`
-	FallbackBackends []string                 `json:"fallback_backends,omitempty"`
-	Repos            []string                 `json:"repos,omitempty"`
-	RepoGroups       []string                 `json:"repo_groups,omitempty"`
-	CrossRepo        bool                     `json:"cross_repo,omitempty"`
-	Parent           string                   `json:"parent,omitempty"`
-	DesiredState     domain.AgentDesiredState `json:"desired_state,omitempty"`
-}
-
-// AgentUpdateInput is the partial-update payload for PATCH /api/agents.
-type AgentUpdateInput struct {
-	RoleName         *string                   `json:"role_name,omitempty"`
-	Auto             *bool                     `json:"auto,omitempty"`
-	Backend          *string                   `json:"backend,omitempty"`
-	FallbackBackends *[]string                 `json:"fallback_backends,omitempty"`
-	Repos            *[]string                 `json:"repos,omitempty"`
-	RepoGroups       *[]string                 `json:"repo_groups,omitempty"`
-	CrossRepo        *bool                     `json:"cross_repo,omitempty"`
-	Parent           *string                   `json:"parent,omitempty"`
-	State            *domain.AgentState        `json:"state,omitempty"`
-	DesiredState     *domain.AgentDesiredState `json:"desired_state,omitempty"`
-}
-
-// AgentLifecycleInput describes an agent lifecycle request that should be
-// persisted as agent state plus a queued daemon command.
-type AgentLifecycleInput struct {
-	State        domain.AgentState
-	DesiredState domain.AgentDesiredState
-	CommandType  string
-	Payload      map[string]string
-}
-
-// AgentLifecycleResult describes whether a lifecycle transition completed in
-// the request owner or was durably accepted for asynchronous execution.
-type AgentLifecycleResult struct {
-	Agent     *domain.Agent
-	Pending   bool
-	CommandID string
-	Status    domain.AgentCommandStatus
-}
-
-// AgentLifecycleCommandResult is the UI-safe projection of a durable lifecycle
-// command. It intentionally omits claimant and placement metadata.
-type AgentLifecycleCommandResult struct {
-	CommandID  string                    `json:"command_id"`
-	Action     string                    `json:"action"`
-	Status     domain.AgentCommandStatus `json:"status"`
-	Result     string                    `json:"result"`
-	ErrorClass string                    `json:"error_class"`
-	CreatedAt  time.Time                 `json:"created_at"`
-	UpdatedAt  time.Time                 `json:"updated_at"`
-	AckedAt    *time.Time                `json:"acked_at"`
+// InteractiveAgentRuntime is the process-local side of canonical Agent
+// lifecycle convergence. Durable desired state is changed through Agents;
+// this port only tears down PTYs owned by the current web process. The PTY
+// manager's before-kill hook fences the matching Interaction generation.
+type InteractiveAgentRuntime interface {
+	StopAgent(context.Context, string, string) error
 }
 
 // AgentTerminalInfoResult contains the terminal mode for an agent.

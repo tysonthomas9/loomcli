@@ -200,7 +200,8 @@ func (w *TaskWorker) runOnceInWorkspace(ctx context.Context, ws, workDir string)
 				Lineage:       DefaultStackLineageLookup(),
 				SourceControl: w.SourceControl,
 			}),
-			StackStore: DefaultStackStore(),
+			StackStore:   DefaultStackStore(),
+			TaskOutcomes: taskOutcomeRecorder(w.SourceControl),
 		}
 	} else {
 		executor = withTaskWorkerArtifacts(executor, w.Artifacts, w.TaskRunAuthorities)

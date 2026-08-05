@@ -713,14 +713,12 @@ func approvedAggregateOwnership() map[string]aggregateOwnershipIdentity {
 	return map[string]aggregateOwnershipIdentity{
 		"ActionLedger":             {owner: "execution"},
 		"Activity, history, usage": {owner: "read_projection"},
-		"Agent, Role, desired state, AgentOwnershipLease": {owner: "agents"},
-		"AgentCommand": {owner: "interaction"},
-		"AgentSession, TerminalSession, AgentLease, inbox, lead-delivery Outbox": {owner: "interaction"},
+		"Agent, Role, desired state, AgentOwnershipLease":  {owner: "agents"},
+		"AgentSession, TerminalSession, AgentLease, inbox": {owner: "interaction"},
 		"Artifact": {owner: "artifacts"},
 		"Connector, Grant, secret and audit state": {owner: "connectors"},
-		"DaemonProfile":                      {owner: "legacy_tombstone"},
-		"Driver, DriverVersion, trust state": {owner: "workflowcatalog"},
-		"DriverRun, DriverStep, TaskRun, TaskRunEvent, Node, Worker, WorkerProfile, Await": {owner: "execution"},
+		"Driver, DriverVersion, trust state":       {owner: "workflowcatalog"},
+		"DriverRun, DriverStep, TaskRun, TaskRunEvent, Node, Worker, WorkerProfile, Await, lead-delivery Outbox": {owner: "execution"},
 		"Generic fleet-db Lease": {
 			owner: "fleet-db", mechanism: true,
 			discriminator: "agent_service=agents;driver_run|task_run=execution;terminal=interaction;artifact_upload=artifacts",

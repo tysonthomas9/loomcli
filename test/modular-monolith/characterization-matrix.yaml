@@ -52,16 +52,24 @@ rows:
       - Fresh task runs and task runs whose driver is not running remain untouched.
       - The default recovery threshold is twenty minutes and workspace scoping is preserved.
 
-  - id: supervisor-policy
-    package: ./internal/cli/daemon/supervisor
-    test_regex: '^TestShouldRestart_(Exhaustion_BlocksThenFreshBurst|BlockBudgetEscalatesToFastFail|FastFailClasses|Fatal_StillStops_NotBlocked)$'
+  - id: agent-retry-policy
+    package: ./internal/agentpolicy
+    test_regex: '^TestDecide_(Golden|DeterministicNeverBlocks)$'
     expected_tests:
-      - TestShouldRestart_Exhaustion_BlocksThenFreshBurst
-      - TestShouldRestart_BlockBudgetEscalatesToFastFail
-      - TestShouldRestart_FastFailClasses
-      - TestShouldRestart_Fatal_StillStops_NotBlocked
+      - TestDecide_Golden
+      - TestDecide_DeterministicNeverBlocks
     timeout: 2m
     expected_behavior:
-      - Transient restart exhaustion enters a bounded block cycle and then receives a fresh retry budget.
-      - Repeated unknown failures escalate after the finite block budget instead of blocking forever.
-      - Deterministic and fatal error classes stop immediately and are never converted into a block.
+      - Auth and billing failures stop fatally, deterministic failures fast-fail or exhaust failover, and transient failures remain retryable.
+      - Deterministic failures and unknown failures can never select an unbounded block.
+
+  - id: runtime-host-recovery
+    package: ./internal/platform/runtime
+    test_regex: '^TestHost(OwnsTimeoutAndCappedFailureBackoff|IsolatesPanickingAndHealthyComponents)$'
+    expected_tests:
+      - TestHostOwnsTimeoutAndCappedFailureBackoff
+      - TestHostIsolatesPanickingAndHealthyComponents
+    timeout: 2m
+    expected_behavior:
+      - Component timeouts use capped failure backoff and a successful pass resets consecutive failure state.
+      - A panicking component is degraded without preventing healthy runtime components from continuing.

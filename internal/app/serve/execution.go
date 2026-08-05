@@ -9,6 +9,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
@@ -39,6 +40,7 @@ type ExecutionCapability struct {
 	awaitEvents            execution.AwaitEventNotificationAPI
 	runOutcomes            execution.DriverRunOutcomeAPI
 	terminalWorkRecoveries execution.TerminalDriverRunWorkRecoveryQueueAPI
+	outboxDeliveries       execution.OutboxDeliveryAPI
 }
 
 func (capability *ExecutionCapability) AwaitEventNotificationAPI() execution.AwaitEventNotificationAPI {
@@ -60,6 +62,13 @@ func (capability *ExecutionCapability) TerminalDriverRunWorkRecoveryQueueAPI() e
 		return nil
 	}
 	return capability.terminalWorkRecoveries
+}
+
+func (capability *ExecutionCapability) OutboxDeliveryAPI() execution.OutboxDeliveryAPI {
+	if capability == nil {
+		return nil
+	}
+	return capability.outboxDeliveries
 }
 
 func (capability *ExecutionCapability) TaskRunRequestAPI() execution.TaskRunRequestAPI {
@@ -175,7 +184,7 @@ type ExecutionDependencies struct {
 	TaskRunEvents                store.TaskRunEventStore
 	Nodes                        store.NodeStore
 	WorkerProfiles               store.WorkerProfileStore
-	Agents                       store.AgentStore
+	AgentQueries                 agents.IdentityQueries
 	Outbox                       store.OutboxStore
 	Awaits                       store.AwaitStore
 	TriggerEvents                store.TriggerEventStore
@@ -285,7 +294,8 @@ func newExecutionConvergenceDependencies(dependencies ExecutionDependencies) (ex
 	return NewExecutionTaskRunConvergenceDependencies(ExecutionTaskRunConvergenceDependencies{
 		TaskRuns: dependencies.TaskRuns, Checkpoints: checkpoints,
 		DriverRuns: dependencies.DriverRuns, DriverSteps: dependencies.TerminalStepRepairs,
-		Events: dependencies.TaskRunEvents, Agents: dependencies.Agents, Outbox: dependencies.Outbox,
+		Events: dependencies.TaskRunEvents, AgentQueries: dependencies.AgentQueries,
+		WorkerProfiles: dependencies.WorkerProfiles, Outbox: dependencies.Outbox,
 	})
 }
 
@@ -325,6 +335,7 @@ func newExecutionServiceDependencies(
 		DriverRuns: driverRuns, TaskRuns: taskRuns, Workers: workers, Convergence: convergence,
 		TaskRunRecovery: recovery, AwaitEvents: queueAdapter, RunOutcomes: queueAdapter,
 		TerminalWorkRecoveries: queueAdapter,
+		OutboxDeliveries:       &executionOutboxDeliveryAdapter{store: dependencies.Outbox},
 	}, convergence.Source, convergence.Checkpoints, recovery.Scopes, nil
 }
 
@@ -356,6 +367,7 @@ func newExecutionCapabilityHandle(
 		awaitEvents:            service,
 		runOutcomes:            service,
 		terminalWorkRecoveries: service,
+		outboxDeliveries:       service,
 	}
 }
 
@@ -368,7 +380,7 @@ func validateExecutionDependencies(dependencies ExecutionDependencies, issuer *a
 		dependencies.TaskRunEvents == nil,
 		dependencies.Nodes == nil,
 		dependencies.WorkerProfiles == nil,
-		dependencies.Agents == nil,
+		dependencies.AgentQueries == nil,
 		dependencies.Outbox == nil,
 		dependencies.Awaits == nil,
 		dependencies.Workspaces == nil,

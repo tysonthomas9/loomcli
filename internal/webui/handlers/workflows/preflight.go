@@ -27,7 +27,7 @@ func (m *Module) preflightRunnerForRun(ctx context.Context, ws, workflowName str
 	if !runnerIsLocal(payload) {
 		return nil
 	}
-	return runtimepreflight.PreflightLocalTaskRunner(ctx, m.store, ws)
+	return runtimepreflight.PreflightLocalTaskRunner(ctx, ws)
 }
 
 // runnerIsLocal reports whether the run payload resolves to the local task

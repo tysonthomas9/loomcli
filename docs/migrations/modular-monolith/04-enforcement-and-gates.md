@@ -1,9 +1,8 @@
 # Enforcement, Validation, and Stop Conditions
 
-- **Status:** Phase 5 source architecture is complete: the Interaction
-  sole-writer ratchet is zero, the graph is at `completed_phase: 5`, and both
-  exact-head gates pass. Twenty local packaged-Desktop rows are accepted; four
-  GitHub rows and repaired-package UI regression remain
+- **Status:** Phase 6 complete at `completed_phase: 6`, including source
+  architecture, daemon-free runtime, signed packaged-Desktop UI, and fresh
+  real-Codex acceptance
 - **Purpose:** Define the fitness functions that distinguish a real modular monolith from a folder reorganization
 - **Migration:** [Modular Monolith Migration](README.md)
 
@@ -17,6 +16,19 @@ built-in workflows, passes deep strict signing verification after ad-hoc
 resealing, completes a real-Codex Local Review run with transcript evidence,
 fails closed to Blocked when Codex is unavailable, and preserves that state
 across restart.
+
+**Phase 6 status:** Loom `02daec339` with FleetDB `51b8a493` passes both full
+gates, the byte-identical paired contract, and the fresh supervisor-disabled
+Podman proof. Current structural ratchets are Store `67/57`, 82 legacy handler
+imports, 225 direct writes, eight roots, 105 mutation commands, 71 runtime
+components, and 80 goroutine-launch definitions across all 11 profiles plus
+the all-files AST pass. The seven authoritative Phase 6 rows reject discovery
+drift, disabled rows, and `t.Skip`; all seven pass. Physical supervisor, daemon
+IPC/control, RPC, agent IPC, and WebUI daemon paths have zero allowances and
+cannot return. The exact signed package also passes a UI-created real-Codex
+planner/coder canary with both transcripts, exit-0 local-branch delivery, an
+exact one-file diff, and Review convergence. See the
+[Phase 6 evidence](13-phase-6-decisions-and-evidence.md).
 
 ## Architecture source of truth
 

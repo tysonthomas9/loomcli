@@ -186,10 +186,10 @@ func runWorkspaceShow(_ *cobra.Command, args []string) error {
 		}
 		if wsShowJSON {
 			return cmdstore.WriteJSON(struct {
-				Workspace *domain.Workspace `json:"workspace"`
-				Repos     []*domain.Repo    `json:"repos"`
-				Agents    []*domain.Agent   `json:"agents"`
-				Roles     []*domain.Role    `json:"roles"`
+				Workspace *domain.Workspace      `json:"workspace"`
+				Repos     []*domain.Repo         `json:"repos"`
+				Agents    []*domain.AgentService `json:"agents"`
+				Roles     []*domain.Role         `json:"roles"`
 			}{ws, repos, agents, roles})
 		}
 		fmt.Printf("Workspace:    %s\n", ws.Key)
@@ -214,17 +214,20 @@ func runWorkspaceShow(_ *cobra.Command, args []string) error {
 // in parallel. Each List is independent and goes over HTTP, so serial
 // fan-out adds 2-3× round-trip latency for no benefit. Returns the first
 // error any of the four sub-fetches produces.
-func gatherWorkspaceDetails(ctx context.Context, s store.Store, key string) (*domain.Workspace, []*domain.Repo, []*domain.Agent, []*domain.Role, error) {
+func gatherWorkspaceDetails(ctx context.Context, s store.Store, key string) (*domain.Workspace, []*domain.Repo, []*domain.AgentService, []*domain.Role, error) {
 	var (
 		ws     *domain.Workspace
 		repos  []*domain.Repo
-		agents []*domain.Agent
+		agents []*domain.AgentService
 		roles  []*domain.Role
 	)
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() (err error) { ws, err = s.Workspaces().Get(gctx, key); return })
 	g.Go(func() (err error) { repos, err = s.Repos().List(gctx, key); return })
-	g.Go(func() (err error) { agents, err = s.Agents().List(gctx, key); return })
+	g.Go(func() (err error) {
+		agents, err = s.AgentServices().List(gctx, key, store.AgentServiceFilter{})
+		return
+	})
 	g.Go(func() (err error) { roles, err = s.Roles().List(gctx, key); return })
 	if err := g.Wait(); err != nil {
 		return nil, nil, nil, nil, err

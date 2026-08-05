@@ -24,6 +24,11 @@ type IssueModule struct {
 	store         store.Store
 }
 
+// issueListFilter keeps transport parsing independent of another new direct
+// service-package import while the existing module composition remains the
+// temporary owner of the legacy service contract.
+type issueListFilter = service.ListFilter
+
 type issueRepositoryServiceAdapter struct {
 	svc service.IssueRepositoryService
 }

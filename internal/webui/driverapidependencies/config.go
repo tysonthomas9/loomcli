@@ -7,12 +7,12 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/tysonthomas9/loomcli/internal/app/agentscompat"
 	"github.com/tysonthomas9/loomcli/internal/app/workfloweventing"
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/fleet"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/connector"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
@@ -25,7 +25,6 @@ import (
 type IssueBackendFactory func(workspace, actor string) (backend.IssueBackend, error)
 
 type SourceControl = sourcecontrol.Materializer
-type AgentParentBindings = agentscompat.ParentBindingCommands
 type Artifacts = artifactsmodule.API
 
 // WorkflowEventAwaitDispatcher is the narrow post-admission AW7 seam.
@@ -52,7 +51,7 @@ type Config struct {
 
 	Execution            execution.DriverRunAPI
 	ExecutionAuthorities execution.DriverRunAuthorityResolver
-	AgentParentBindings  AgentParentBindings
+	AgentIdentities      agents.IdentityQueries
 	TaskRunRequests      execution.TaskRunRequestAPI
 	TaskRunRecovery      execution.TaskRunRecoveryAPI
 	TaskRuns             execution.TaskRunAPI

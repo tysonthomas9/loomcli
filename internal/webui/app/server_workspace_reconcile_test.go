@@ -14,21 +14,12 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/webui/appinfra"
 	"github.com/tysonthomas9/loomcli/internal/webui/coordinator"
-	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
-	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 // newTestCoordinatorRegistry creates a coordinator.WorkspaceRegistry with real
-// hooks for reconciliation tests. Returns the registry and MultiPool.
-func newTestCoordinatorRegistry(t *testing.T) (*coordinator.WorkspaceRegistry, *daemon.MultiPool) {
-	t.Helper()
-	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 10)
-
-	reg := coordinator.NewWorkspaceRegistry(slog.Default())
-	_ = reg.AddHook(&testPoolHook{multiPool: multiPool})
-	t.Cleanup(func() { _ = reg.Close() })
-
-	return reg, multiPool
+// hooks for reconciliation tests. Returns the registry and observable hook state.
+func newTestCoordinatorRegistry(t *testing.T) (*coordinator.WorkspaceRegistry, *testRegistryState) {
+	return newTestRegistry(t)
 }
 
 // --- Registry.Register unit tests ---
@@ -116,7 +107,6 @@ func TestStartupReconciliation_SkipsInitialWorkspace(t *testing.T) {
 	config := webui.ServerConfig{
 		Port:            port,
 		BindAddress:     "127.0.0.1",
-		PoolSize:        1,
 		ShutdownTimeout: 1 * time.Second,
 		MaxPortAttempts: 5,
 	}
@@ -168,7 +158,6 @@ func TestStartupReconciliation_NoStore(t *testing.T) {
 	config := webui.ServerConfig{
 		Port:            port,
 		BindAddress:     "127.0.0.1",
-		PoolSize:        1,
 		ShutdownTimeout: 1 * time.Second,
 		MaxPortAttempts: 5,
 	}
@@ -218,7 +207,6 @@ func TestStartupReconciliation_NoStoreSecondCase(t *testing.T) {
 	config := webui.ServerConfig{
 		Port:            port,
 		BindAddress:     "127.0.0.1",
-		PoolSize:        1,
 		ShutdownTimeout: 1 * time.Second,
 		MaxPortAttempts: 5,
 	}
@@ -268,7 +256,6 @@ func TestStartupReconciliation_NoStoreEmptyCase(t *testing.T) {
 	config := webui.ServerConfig{
 		Port:            port,
 		BindAddress:     "127.0.0.1",
-		PoolSize:        1,
 		ShutdownTimeout: 1 * time.Second,
 		MaxPortAttempts: 5,
 	}

@@ -8,10 +8,8 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/ops"
-	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	storepkg "github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
@@ -73,18 +71,6 @@ func (tc *testSSEClient) Close() {
 	tc.hub.UnregisterClient(tc.client)
 	close(tc.client.Done())
 }
-
-// stubPool is a minimal daemon.Pool for handler tests.
-type stubPool struct{}
-
-func (s *stubPool) Get(_ context.Context) (*rpc.Client, error) { return &rpc.Client{}, nil }
-func (s *stubPool) Put(_ *rpc.Client)                          {}
-func (s *stubPool) PutAfterError(_ *rpc.Client)                {}
-func (s *stubPool) Discard(_ *rpc.Client)                      {}
-func (s *stubPool) Stats() daemon.PoolStats {
-	return daemon.PoolStats{Size: 10, Created: 2, Active: 1, Available: 1}
-}
-func (s *stubPool) Close() error { return nil }
 
 // newTestSessionStore creates a sessions.Store rooted in a temporary directory.
 func newTestSessionStore(t *testing.T) *sessions.Store {

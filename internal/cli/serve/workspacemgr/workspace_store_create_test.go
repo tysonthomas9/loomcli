@@ -1157,8 +1157,8 @@ func TestStoreBackedAddReposClassifiesLocalRepoNameCollisionAndRollsBack(t *test
 	if !errors.As(err, &createErr) || createErr.Code != workspaceerrors.AlreadyExists {
 		t.Fatalf("error = %v, want AlreadyExists workspace error", err)
 	}
-	if !strings.Contains(createErr.Message, "repository names must be unique across workspaces") {
-		t.Fatalf("error message = %q, want cross-workspace uniqueness guidance", createErr.Message)
+	if !strings.Contains(createErr.Message, "already registered in this workspace") {
+		t.Fatalf("error message = %q, want same-workspace collision guidance", createErr.Message)
 	}
 
 	if _, statErr := os.Stat(filepath.Join(wsPath, "shared-repo")); !os.IsNotExist(statErr) {
@@ -1196,8 +1196,8 @@ func TestStoreBackedAddReposClassifiesCloneRepoNameCollisionAndRetainsCheckoutFo
 	if !errors.As(err, &createErr) || createErr.Code != workspaceerrors.AlreadyExists {
 		t.Fatalf("error = %v, want AlreadyExists workspace error", err)
 	}
-	if !strings.Contains(createErr.Message, "repository names must be unique across workspaces") {
-		t.Fatalf("error message = %q, want cross-workspace uniqueness guidance", createErr.Message)
+	if !strings.Contains(createErr.Message, "already registered in this workspace") {
+		t.Fatalf("error message = %q, want same-workspace collision guidance", createErr.Message)
 	}
 
 	if _, statErr := os.Stat(filepath.Join(wsPath, "shared-clone", ".git")); statErr != nil {
@@ -1968,7 +1968,20 @@ func TestStoreBackedCreateCloneWorkspaceClassifiesCreateRace(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", loomDir)
 
 	st := &workspaceCreateRaceStore{Store: memstore.New()}
-	createFn := buildTestCreateWithAdmission(t, st, sourceControlFor(st))
+	materializer := sourceControlFor(st)
+	journal, journalErr := newLocalRepositoryAdmissionJournalAt(
+		filepath.Join(t.TempDir(), "admissions"),
+		time.Now,
+	)
+	if journalErr != nil {
+		t.Fatal(journalErr)
+	}
+	createFn := BuildStoreBackedCreateWorkspaceWithAdmission(
+		st,
+		materializer,
+		journal,
+		materializer,
+	)
 	src := initTestGitRepo(t, t.TempDir(), "app")
 
 	_, err := createFn(context.Background(), service.WorkspaceCreateRequest{
@@ -1983,6 +1996,13 @@ func TestStoreBackedCreateCloneWorkspaceClassifiesCreateRace(t *testing.T) {
 	}
 	if createErr.Code != workspaceerrors.AlreadyExists {
 		t.Fatalf("error code = %s, want AlreadyExists", createErr.Code)
+	}
+	records, listErr := journal.List(context.Background())
+	if listErr != nil {
+		t.Fatalf("list admission journal: %v", listErr)
+	}
+	if len(records) != 0 {
+		t.Fatalf("definitive conflict retained unbound admission journal records: %#v", records)
 	}
 }
 

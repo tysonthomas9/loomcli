@@ -13,14 +13,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
 
-// SupervisedAuthorityContext is the transitional, request-local bridge into
-// the legacy supervised-assignment service. Composition supplies the carrier;
-// this canonical Agents boundary never imports the legacy service package.
-type SupervisedAuthorityContext func(
-	context.Context,
-	authority.OperatorAuthority,
-) context.Context
-
 func (m *Module) getAgentRecord(
 	ctx context.Context,
 	workspace,
@@ -35,6 +27,9 @@ func (m *Module) getAgentRecord(
 	}
 	if record == nil {
 		return nil, agentsmodule.ErrInvalidPersistedState
+	}
+	if _, err := agentsmodule.ParseRuntimeMetadata(record.Metadata); err != nil {
+		return nil, err
 	}
 	return canonicalAgentServiceProjection(record), nil
 }
@@ -57,6 +52,9 @@ func (m *Module) listAgentRecords(
 	for _, record := range records {
 		if record == nil {
 			return nil, agentsmodule.ErrInvalidPersistedState
+		}
+		if _, err := agentsmodule.ParseRuntimeMetadata(record.Metadata); err != nil {
+			return nil, err
 		}
 		out = append(out, canonicalAgentServiceProjection(record))
 	}
@@ -115,37 +113,6 @@ func (m *Module) resolveAgentRecordAuthority(
 	return auth, true
 }
 
-func (m *Module) withSupervisedOperatorAuthority(
-	w http.ResponseWriter,
-	r *http.Request,
-	action authority.Action,
-) (*http.Request, bool) {
-	workspace := requestWorkspaceID(r)
-	auth, ok := m.resolveAgentRecordAuthority(w, r, workspace, action)
-	if !ok {
-		return nil, false
-	}
-	if m.supervisedAuthority == nil {
-		writeAgentRecordError(w, agentsmodule.ErrUnavailable, "supervised agent authority bridge is unavailable")
-		return nil, false
-	}
-	return r.WithContext(m.supervisedAuthority(r.Context(), auth)), true
-}
-
-func (m *Module) authorizeSupervisedIntent(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		authorized, ok := m.withSupervisedOperatorAuthority(
-			w,
-			r,
-			agentsmodule.ActionUpdateSupervisedAssignmentIntent,
-		)
-		if !ok {
-			return
-		}
-		next(w, authorized)
-	}
-}
-
 func writeAgentRecordError(w http.ResponseWriter, err error, fallback string) {
 	switch {
 	case errors.Is(err, workflowcataloghttp.ErrUnauthenticated),
@@ -178,7 +145,7 @@ func writeAgentRecordError(w http.ResponseWriter, err error, fallback string) {
 }
 
 func writeUnifiedAgentLookupError(w http.ResponseWriter, err error) {
-	const fallback = "get supervised agent failed"
+	const fallback = "get agent failed"
 	switch {
 	case errors.Is(err, agentsmodule.ErrInvalid),
 		errors.Is(err, agentsmodule.ErrNotFound),

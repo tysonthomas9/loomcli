@@ -10,7 +10,6 @@ import (
 	"context"
 
 	"github.com/tysonthomas9/loomcli/internal/app/agentprovisioning"
-	"github.com/tysonthomas9/loomcli/internal/app/agentscompat"
 	"github.com/tysonthomas9/loomcli/internal/app/prreviewer"
 	"github.com/tysonthomas9/loomcli/internal/app/webhookingestion"
 	"github.com/tysonthomas9/loomcli/internal/app/workflowbinding"
@@ -41,10 +40,6 @@ type Automation interface {
 // Agents is the narrow identity handle published by serve composition.
 type Agents interface {
 	AgentsAPI() agents.API
-	CompatibilityAPI() agents.CompatibilityAPI
-	ManagedCompatibility() agentscompat.ManagedCommands
-	ParentBindingCommands() agentscompat.ParentBindingCommands
-	ManagedRetirements() agentscompat.ManagedRetirements
 	OperatorAuthorityResolver() workflowcataloghttp.OperatorAuthorityResolver
 	PRReviewerProvisioning() prreviewer.Commands
 }
@@ -94,6 +89,7 @@ type Execution interface {
 	AwaitEventNotificationAPI() execution.AwaitEventNotificationAPI
 	DriverRunOutcomeAPI() execution.DriverRunOutcomeAPI
 	TerminalDriverRunWorkRecoveryQueueAPI() execution.TerminalDriverRunWorkRecoveryQueueAPI
+	OutboxDeliveryAPI() execution.OutboxDeliveryAPI
 	DriverRunAuthorityResolver() execution.DriverRunAuthorityResolver
 	SystemAuthorityResolver() execution.SystemAuthorityResolver
 	OperatorAuthorityResolver() workflowcataloghttp.OperatorAuthorityResolver

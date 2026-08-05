@@ -28,18 +28,18 @@ func checkedInSnapshotViolations(report Report) []string {
 		}
 	}
 
-	checkCount("composite Store files", len(report.CompositeStoreFiles), 78)
-	checkCount("outside-composition Store files", len(report.CompositeStoreOutside), 66)
-	checkCount("legacy handler imports", len(report.LegacyHandlerImports), 87)
+	checkCount("composite Store files", len(report.CompositeStoreFiles), 67)
+	checkCount("outside-composition Store files", len(report.CompositeStoreOutside), 57)
+	checkCount("legacy handler imports", len(report.LegacyHandlerImports), 82)
 	if !slices.Equal(report.ModuleRoots, checkedInModuleRoots) {
 		violations = append(violations, fmt.Sprintf("checked-in architecture snapshot module roots = %v, want %v", report.ModuleRoots, checkedInModuleRoots))
 	}
 	checkCount("pending decisions", len(report.PendingDecisions), 0)
 	checkCount("enforced analysis profiles", report.AnalysisProfilesEnforced, 11)
-	checkCount("mutation commands", report.MutationCommands, 102)
-	checkCount("direct persistence-write rows", report.DirectPersistenceWrites, 260)
-	checkCount("runtime components", report.RuntimeComponents, 90)
-	checkCount("runtime goroutine launches", report.RuntimeGoroutineLaunches, 105)
+	checkCount("mutation commands", report.MutationCommands, 105)
+	checkCount("direct persistence-write rows", report.DirectPersistenceWrites, 225)
+	checkCount("runtime components", report.RuntimeComponents, 71)
+	checkCount("runtime goroutine launches", report.RuntimeGoroutineLaunches, 80)
 	checkCount("performance metrics", report.PerformanceMetrics, 6)
 	checkCount("measured performance metrics", report.PerformanceMetricsMeasured, 6)
 	checkCount("deferred performance metrics", report.PerformanceMetricsDeferred, 0)

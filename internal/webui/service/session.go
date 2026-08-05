@@ -53,15 +53,6 @@ type AgentSessionTranscriptService interface {
 	GetAgentSessionTranscript(ctx context.Context, wsID, agentID, sessionID string) (TranscriptEvents, error)
 }
 
-// AgentLocalSessionHistoryService exposes daemon-local supervised execution
-// records to the unified agent activity projection. It is read-only: batch
-// execution and Interaction keep their distinct durable aggregates, while the
-// browser can still render the local compatibility record that owns a real
-// transcript on this host.
-type AgentLocalSessionHistoryService interface {
-	ListAgentLocalSessions(ctx context.Context, wsID, agentID string) ([]SessionListItem, error)
-}
-
 // SessionListItem extends a session record with computed UI fields.
 type SessionListItem struct {
 	sessions.SessionRecord

@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/gitbranch"
 )
 
@@ -780,48 +779,6 @@ func safePathSegment(value string) string {
 		return "unnamed"
 	}
 	return out
-}
-
-// SelectAgentRepos applies an agent's repo affinity to local repos.
-func SelectAgentRepos(repos []Repo, agent domain.Agent) ([]Repo, error) {
-	if len(repos) == 0 {
-		return nil, nil
-	}
-	if agent.CrossRepo {
-		return repos, nil
-	}
-	allowed := make(map[string]struct{})
-	for _, name := range agent.Repos {
-		allowed[name] = struct{}{}
-	}
-	for _, group := range agent.RepoGroups {
-		for _, repo := range repos {
-			for _, repoGroup := range repo.Groups {
-				if repoGroup == group {
-					allowed[repo.Name] = struct{}{}
-					break
-				}
-			}
-		}
-	}
-	if len(allowed) == 0 {
-		return []Repo{repos[0]}, nil
-	}
-	selected := make([]Repo, 0, len(allowed))
-	for _, repo := range repos {
-		if _, ok := allowed[repo.Name]; ok {
-			selected = append(selected, repo)
-		}
-	}
-	if len(selected) == 0 {
-		names := make([]string, 0, len(repos))
-		for _, repo := range repos {
-			names = append(names, repo.Name)
-		}
-		sort.Strings(names)
-		return nil, fmt.Errorf("agent repo affinity does not match any workspace repo; available repos: %s", strings.Join(names, ", "))
-	}
-	return selected, nil
 }
 
 // FirstWorktreePath returns a deterministic path from a repo-name keyed map.

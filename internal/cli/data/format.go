@@ -117,10 +117,10 @@ func printCreatedIssue(w, errW io.Writer, issue *backend.IssueData, format strin
 	return nil
 }
 
-// printAgentList renders a []gen.AgentControlEntry in the requested format.
-func printAgentList(w io.Writer, entries []gen.AgentControlEntry, format string) error {
+// printAgentList renders canonical Agent identities in the requested format.
+func printAgentList(w io.Writer, entries []agentListEntry, format string) error {
 	if entries == nil {
-		entries = []gen.AgentControlEntry{}
+		entries = []agentListEntry{}
 	}
 	if format == formatJSON {
 		return writeJSON(w, entries)
@@ -129,9 +129,17 @@ func printAgentList(w io.Writer, entries []gen.AgentControlEntry, format string)
 		fmt.Fprintln(w, "(no agents)")
 		return nil
 	}
-	fmt.Fprintf(w, "%-20s  %-15s  %s\n", "NAME", "ROLE", "STATUS")
+	fmt.Fprintf(w, "%-20s  %-15s  %-20s  %s\n", "NAME", "KIND", "BEHAVIOR", "STATE")
 	for _, a := range entries {
-		fmt.Fprintf(w, "%-20s  %-15s  %s\n", a.Name, a.Role, a.Status)
+		behavior := a.Behavior.RoleName
+		if behavior == "" {
+			behavior = a.Behavior.DriverID
+		}
+		state := "paused"
+		if a.Enabled {
+			state = "running"
+		}
+		fmt.Fprintf(w, "%-20s  %-15s  %-20s  %s\n", a.Name, a.Kind, behavior, state)
 	}
 	return nil
 }

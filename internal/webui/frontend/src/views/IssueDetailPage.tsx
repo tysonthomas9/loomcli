@@ -140,7 +140,6 @@ export function IssueDetailPage() {
             const leadAgent = await createWorkspaceAgent(workspaceId, {
               name: candidate,
               role_name: "lead",
-              auto: false,
               cross_repo: repoNames.length === 0,
               repos: repoNames,
             });

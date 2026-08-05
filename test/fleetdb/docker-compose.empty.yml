@@ -3,7 +3,7 @@
 # This is the clean "new user" stack:
 #   - redis       empty backing store for fleet-db
 #   - fleet-db    issue/workspace store API
-#   - loom        Loom API server plus a workspace daemon manager
+#   - loom        Loom API server and platform runtime
 #   - ui          static web UI + reverse proxy to loom
 #
 # Usage from the loomcli repo root:
@@ -95,7 +95,6 @@ services:
       LOOM_WORKFLOW_CATALOG_ENABLED: "false"
       LOOM_FLEET_REQUIRED: "1"
       LOOM_FRONTEND_URL: "http://localhost:${LOOM_UI_PORT:-8091}"
-      LOOM_DAEMON_SCAN_INTERVAL: "2"
     command:
       - /bin/sh
       - -c
@@ -111,12 +110,7 @@ services:
           sleep 1
         done
         wget -qO- "$$LOOM_FLEET_URL/healthz" >/dev/null || { echo "[loom-empty] FATAL: fleet-db unreachable"; exit 1; }
-        loom-empty-daemon-manager >/tmp/loom-empty-daemon-manager.log 2>&1 &
-        manager_pid="$$!"
-        trap 'kill "$$manager_pid" "$$serve_pid" 2>/dev/null || true' INT TERM EXIT
-        loom serve --bind 0.0.0.0 --port 8080 --frontend-url "http://localhost:${LOOM_UI_PORT:-8091}" &
-        serve_pid="$$!"
-        wait "$$serve_pid"
+        exec loom serve --bind 0.0.0.0 --port 8080 --frontend-url "http://localhost:${LOOM_UI_PORT:-8091}"
     networks: [fleetdb-empty]
     ports:
       - "${LOOM_API_PORT:-8092}:8080"

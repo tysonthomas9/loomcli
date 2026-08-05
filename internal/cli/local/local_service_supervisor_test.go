@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"os"
 	"os/exec"
 	"testing"
 )
@@ -14,25 +13,19 @@ func TestSuperviseLocalServeRestartsAfterHealthyChildExit(t *testing.T) {
 	originalStart := localServiceStartServe
 	originalAwait := localServiceAwaitServe
 	originalWait := localServiceWaitServe
-	originalStartDaemon := localServiceStartDaemon
-	originalAwaitDaemon := localServiceAwaitDaemon
 	originalDelay := localServiceRestartDelay
 	t.Cleanup(func() {
 		localServiceStartServe = originalStart
 		localServiceAwaitServe = originalAwait
 		localServiceWaitServe = originalWait
-		localServiceStartDaemon = originalStartDaemon
-		localServiceAwaitDaemon = originalAwaitDaemon
 		localServiceRestartDelay = originalDelay
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	starts := 0
-	daemonStarts := 0
-	daemonAwaits := 0
 	localServiceRestartDelay = 0
-	localServiceStartServe = func(context.Context, *localServiceConfig, *os.File, *runtimeInfo) (*exec.Cmd, error) {
+	localServiceStartServe = func(context.Context, *localServiceConfig, io.Writer, *runtimeInfo) (*exec.Cmd, error) {
 		starts++
 		return &exec.Cmd{}, nil
 	}
@@ -46,15 +39,6 @@ func TestSuperviseLocalServeRestartsAfterHealthyChildExit(t *testing.T) {
 		cancel()
 		return nil
 	}
-	localServiceStartDaemon = func(context.Context, string, string, int, string) <-chan struct{} {
-		daemonStarts++
-		done := make(chan struct{})
-		close(done)
-		return done
-	}
-	localServiceAwaitDaemon = func(string, <-chan struct{}) {
-		daemonAwaits++
-	}
 
 	dataDir := t.TempDir()
 	cfg := &localServiceConfig{dataDir: dataDir, url: "http://127.0.0.1:12345"}
@@ -65,9 +49,6 @@ func TestSuperviseLocalServeRestartsAfterHealthyChildExit(t *testing.T) {
 	}
 	if starts != 2 {
 		t.Fatalf("serve starts = %d, want 2", starts)
-	}
-	if daemonStarts != 2 || daemonAwaits != 2 {
-		t.Fatalf("daemon generations = %d starts, %d awaits; want 2 and 2", daemonStarts, daemonAwaits)
 	}
 	if got := output.String(); !bytes.Contains([]byte(got), []byte("signal: killed")) {
 		t.Fatalf("service output = %q, want crash cause", got)
@@ -84,7 +65,7 @@ func TestSuperviseLocalServeReturnsInitialHealthFailure(t *testing.T) {
 
 	starts := 0
 	wantErr := errors.New("fleet compatibility failure")
-	localServiceStartServe = func(context.Context, *localServiceConfig, *os.File, *runtimeInfo) (*exec.Cmd, error) {
+	localServiceStartServe = func(context.Context, *localServiceConfig, io.Writer, *runtimeInfo) (*exec.Cmd, error) {
 		starts++
 		return &exec.Cmd{}, nil
 	}

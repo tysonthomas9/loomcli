@@ -67,7 +67,7 @@ fi
 loom workspace add CLEAN --description "clean checkout smoke" >/tmp/loom-clean-workspace.out
 
 port="$((18080 + RANDOM % 1000))"
-loom serve --port "$port" --bind 127.0.0.1 --no-daemon >"$tmp/serve.log" 2>&1 &
+loom serve --port "$port" --bind 127.0.0.1 >"$tmp/serve.log" 2>&1 &
 serve_pid=$!
 base="http://127.0.0.1:$port"
 

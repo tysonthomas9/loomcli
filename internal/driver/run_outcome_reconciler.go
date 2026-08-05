@@ -44,6 +44,13 @@ type RunOutcome struct {
 	Payload       json.RawMessage
 }
 
+// RunOutcomeJournal is Automation's narrow durable event-journal port used by
+// Execution outcome reconciliation. It exposes no binding, delivery, or
+// generic store capability to the driver coordinator.
+type RunOutcomeJournal interface {
+	AppendTriggerEvent(context.Context, *domain.TriggerEvent) (*domain.TriggerEvent, error)
+}
+
 // RunOutcomeJournalEventID is the deterministic durable identity of
 // Execution's base event-journal record. It is intentionally distinct from
 // Automation's admission identity while SourceEventID remains the shared
@@ -230,7 +237,7 @@ type RunOutcomeReconciler struct {
 	queue             execution.DriverRunOutcomeAPI
 	terminalWorkQueue execution.TerminalDriverRunWorkRecoveryQueueAPI
 	awaits            RunOutcomeAwaitNotifier
-	journal           store.TriggerEventAppender
+	journal           RunOutcomeJournal
 	publisher         RunOutcomePublisher
 	workspace         string
 	workspaces        RunOutcomeWorkspaceLister
@@ -250,7 +257,7 @@ func NewRunOutcomeReconcilerWithExecution(
 	queue execution.DriverRunOutcomeAPI,
 	terminalWorkQueue execution.TerminalDriverRunWorkRecoveryQueueAPI,
 	awaits RunOutcomeAwaitNotifier,
-	journal store.TriggerEventAppender,
+	journal RunOutcomeJournal,
 	publisher RunOutcomePublisher,
 	workspace string,
 	workspaces RunOutcomeWorkspaceLister,

@@ -4,14 +4,13 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
 
-// parseListParams extracts ListArgs from HTTP query parameters.
-func parseListParams(r *http.Request) (*rpc.ListArgs, error) { //nolint:funlen
+// parseListParams extracts a service-owned issue filter from HTTP query parameters.
+func parseListParams(r *http.Request) (*issueListFilter, error) { //nolint:funlen
 	q := r.URL.Query()
-	args := &rpc.ListArgs{}
+	args := &issueListFilter{}
 
 	// Basic string filters
 	args.Status = handler.ParseStringParam(q, "status")

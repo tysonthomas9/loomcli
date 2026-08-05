@@ -14,8 +14,6 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/cli/config"
-	"github.com/tysonthomas9/loomcli/internal/cli/daemon"
 	"github.com/tysonthomas9/loomcli/internal/events"
 )
 
@@ -333,20 +331,13 @@ func ParseIntParam(s string, defaultVal int) (int, error) {
 	return strconv.Atoi(s)
 }
 
-// ResolveEventsDir resolves the events directory from daemon config.
+// ResolveEventsDir resolves the serve-owned local observability journal.
 func ResolveEventsDir() string {
 	loomDir := cli.GetWorkspaceRuntimeDir()
 	if loomDir == "" {
-		loomDir = "."
-	}
-	dc, err := config.LoadDaemonConfig(loomDir)
-	if err != nil {
 		return ""
 	}
-	if dc.Daemon.EventsDir == "" {
-		return ""
-	}
-	return daemon.ResolveDaemonPath(loomDir, dc.Daemon.EventsDir)
+	return filepath.Join(loomDir, "events")
 }
 
 // writeJSON writes a JSON response.

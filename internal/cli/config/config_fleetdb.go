@@ -9,19 +9,14 @@ import (
 
 // FleetDBServerConfig holds configuration for FleetDBServer.
 type FleetDBServerConfig struct {
-	RedisURL   string // Redis connection URL. Empty = use miniredis if AutoStart.
-	Workspace  string // Workspace/project identifier.
-	AutoStart  bool   // If true and RedisURL empty, auto-start miniredis.
-	DBPath     string // SQLite database path. Empty = in-memory storage.
-	SocketPath string // Unix socket path for RPC server.
+	RedisURL  string // Redis connection URL. Empty = use miniredis if AutoStart.
+	Workspace string // Workspace/project identifier.
+	AutoStart bool   // If true and RedisURL empty, auto-start miniredis.
 }
 
 // ResolveFleetDBConfig produces FleetDB server bootstrap config from env vars.
-// DBPath and SocketPath are set by daemon startup code because they are runtime
-// paths, not persisted workspace config.
-func ResolveFleetDBConfig(daemon *DaemonSettings) (FleetDBServerConfig, bool) {
-	_ = daemon
-	var enabled, autoStart bool
+func ResolveFleetDBConfig() FleetDBServerConfig {
+	var autoStart bool
 	var redisURL, workspace string
 
 	if v, ok := os.LookupEnv("LOOM_FLEETDB_REDIS_URL"); ok {
@@ -45,7 +40,7 @@ func ResolveFleetDBConfig(daemon *DaemonSettings) (FleetDBServerConfig, bool) {
 		RedisURL:  redisURL,
 		Workspace: workspace,
 		AutoStart: autoStart,
-	}, enabled
+	}
 }
 
 func normalizeExplicitFleetWorkspace(workspace string) string {

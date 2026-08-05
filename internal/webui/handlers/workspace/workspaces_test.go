@@ -17,7 +17,7 @@ func TestHandleListWorkspaces(t *testing.T) {
 	svc := &mockWorkspaceService{
 		listWorkspacesFn: func(_ context.Context) ([]service.WorkspaceListItem, error) {
 			return []service.WorkspaceListItem{
-				{ID: "ws-alpha", Name: "ws-alpha", Path: "/path/alpha", Active: true, Pool: &service.PoolStats{Size: 10, Active: 1}},
+				{ID: "ws-alpha", Name: "ws-alpha", Path: "/path/alpha", Active: true},
 				{ID: "ws-beta", Name: "ws-beta", Path: "/path/beta", Active: false},
 			}, nil
 		},
@@ -219,7 +219,7 @@ func TestHandleAddWorkspaceRepos_LocalPathRemainsSynchronous(t *testing.T) {
 }
 
 func TestHandleAddWorkspaceRepos_NameCollisionReturnsConflict(t *testing.T) {
-	const message = `repository name "source-repo" is already registered; repository names must be unique across workspaces`
+	const message = `repository name "source-repo" is already registered in this workspace`
 	svc := service.NewWorkspaceService(service.WorkspaceServiceConfig{
 		AddReposFn: func(_ context.Context, _ service.WorkspaceAddReposRequest) (service.WorkspaceCreateResult, error) {
 			return service.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.AlreadyExists, message, nil)

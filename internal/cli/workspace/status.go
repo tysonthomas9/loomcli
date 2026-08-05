@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -13,7 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	localruntime "github.com/tysonthomas9/loomcli/internal/cli/local"
 	"github.com/tysonthomas9/loomcli/internal/cli/monitor"
 	"github.com/tysonthomas9/loomcli/internal/kv"
 )
@@ -29,7 +28,7 @@ var statusCmd = &cobra.Command{
 	GroupID: "workspace",
 	Long: `Display a one-shot snapshot of the entire loom system.
 
-Shows daemon health, backend config, worktree/agent state, task counts,
+Shows local runtime health, backend config, worktree/agent state, task counts,
 git sync status, Redis connectivity, and any detected issues.
 
 Unlike 'loom monitor' (auto-refreshing dashboard), 'loom status' is a
@@ -50,7 +49,7 @@ func init() {
 
 // StatusData is the top-level JSON output for loom status.
 type StatusData struct {
-	Daemon       DaemonInfo       `json:"daemon"`
+	Runtime      RuntimeInfo      `json:"runtime"`
 	Backend      BackendInfo      `json:"backend"`
 	IssueBackend string           `json:"issue_backend"`
 	Worktrees    WorktreesSummary `json:"worktrees"`
@@ -60,17 +59,14 @@ type StatusData struct {
 	Issues       []StatusIssue    `json:"issues,omitempty"`
 }
 
-// DaemonInfo holds daemon health information.
-type DaemonInfo struct {
-	Running  bool   `json:"running"`
-	PID      int    `json:"pid,omitempty"`
-	Uptime   string `json:"uptime,omitempty"`
-	StalePID bool   `json:"stale_pid,omitempty"`
-	// Cwd is the daemon's project directory — the workspace working
-	// tree it is supervising. Only populated when the daemon source can
-	// report it (currently the Registered source — see
-	// WorkspaceOpsDaemon.Registered).
-	Cwd string `json:"cwd,omitempty"`
+// RuntimeInfo reports the local HTTP runtime used by Desktop deployments.
+type RuntimeInfo struct {
+	Applicable bool   `json:"applicable"`
+	Healthy    bool   `json:"healthy"`
+	PID        int    `json:"pid,omitempty"`
+	URL        string `json:"url,omitempty"`
+	Reason     string `json:"reason,omitempty"`
+	Error      string `json:"error,omitempty"`
 }
 
 // BackendInfo holds the resolved backend information.
@@ -123,17 +119,17 @@ type StatusIssue struct {
 
 func runStatus(cmd *cobra.Command, args []string) error {
 	var (
-		daemonInfo DaemonInfo
-		monData    *monitor.MonitorData
-		wg         sync.WaitGroup
+		runtimeInfo RuntimeInfo
+		monData     *monitor.MonitorData
+		wg          sync.WaitGroup
 	)
 
-	// Collect daemon status and monitor data concurrently.
+	// Collect runtime status and monitor data concurrently.
 	wg.Add(2)
 
 	go func() {
 		defer wg.Done()
-		daemonInfo = collectDaemonStatus()
+		runtimeInfo = collectRuntimeStatus()
 	}()
 
 	go func() {
@@ -144,7 +140,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	wg.Wait()
 
 	// Build status data from collected information.
-	data := buildStatusData(daemonInfo, monData)
+	data := buildStatusData(runtimeInfo, monData)
 
 	if statusJSON {
 		enc := json.NewEncoder(os.Stdout)
@@ -156,17 +152,29 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func collectDaemonStatus() DaemonInfo {
-	projectDir, err := os.Getwd()
+func collectRuntimeStatus() RuntimeInfo {
+	dataDir, err := localruntime.DefaultDataDir()
 	if err != nil {
-		return DaemonInfo{}
+		return RuntimeInfo{Applicable: true, Error: err.Error()}
 	}
-	return collectDaemonStatusForDir(projectDir)
+	snapshot, readErr := localruntime.ReadRuntimeStatus(context.Background(), dataDir)
+	local := buildLocalRuntime(snapshot, readErr)
+	info := RuntimeInfo{
+		Applicable: local.Applicable,
+		Healthy:    local.Healthy,
+		Reason:     local.Reason,
+		Error:      local.Error,
+	}
+	if local.Runtime != nil {
+		info.PID = local.Runtime.PID
+		info.URL = local.Runtime.URL
+	}
+	return info
 }
 
-func buildStatusData(daemon DaemonInfo, mon *monitor.MonitorData) StatusData {
+func buildStatusData(runtime RuntimeInfo, mon *monitor.MonitorData) StatusData {
 	data := StatusData{
-		Daemon:       daemon,
+		Runtime:      runtime,
 		Backend:      collectBackendInfo(),
 		IssueBackend: cli.ResolveIssueBackendType(),
 		Redis:        collectRedisStatus(),
@@ -307,7 +315,7 @@ func isActiveStatus(status string) bool {
 }
 
 func renderStatusHuman(data StatusData) {
-	renderStatusDaemon(data.Daemon)
+	renderStatusRuntime(data.Runtime)
 	fmt.Printf("Backend:    %s (via %s)\n", data.Backend.Name, data.Backend.Source)
 	fmt.Printf("Issues:     %s\n", data.IssueBackend)
 	renderStatusWorktrees(data.Worktrees)
@@ -318,18 +326,16 @@ func renderStatusHuman(data StatusData) {
 	renderStatusIssues(data.Issues)
 }
 
-func renderStatusDaemon(d DaemonInfo) {
+func renderStatusRuntime(runtime RuntimeInfo) {
 	switch {
-	case d.Running:
-		uptime := d.Uptime
-		if uptime == "" {
-			uptime = "unknown"
-		}
-		fmt.Printf("Daemon:     running (pid %d, uptime %s)\n", d.PID, uptime)
-	case d.StalePID:
-		fmt.Println("Daemon:     not running (stale pid file)")
+	case !runtime.Applicable:
+		fmt.Printf("Runtime:    not applicable (%s)\n", runtime.Reason)
+	case runtime.Healthy:
+		fmt.Printf("Runtime:    healthy (pid %d, url %s)\n", runtime.PID, runtime.URL)
+	case runtime.Error != "":
+		fmt.Printf("Runtime:    unavailable (%s)\n", runtime.Error)
 	default:
-		fmt.Println("Daemon:     not running")
+		fmt.Println("Runtime:    unavailable")
 	}
 }
 
@@ -403,43 +409,4 @@ func formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%dh", hours)
 	}
 	return fmt.Sprintf("%dh%dm", hours, minutes)
-}
-
-// collectDaemonStatusForDir is an internal helper for testing with a custom project dir.
-func collectDaemonStatusForDir(projectDir string) DaemonInfo {
-	rt := cli.DetectDaemonRuntime(projectDir)
-
-	if rt.Running {
-		info := DaemonInfo{Running: true, PID: rt.PID}
-		stateFilePath := config.ResolveDaemonStatePath(projectDir)
-		// Read state file for uptime info (inline to avoid daemon/ import cycle)
-		if data, err := os.ReadFile(stateFilePath); err == nil { //nolint:gosec // controlled path
-			var state struct {
-				StartedAt time.Time `json:"started_at"`
-			}
-			if json.Unmarshal(data, &state) == nil {
-				info.Uptime = formatDuration(time.Since(state.StartedAt))
-			}
-		}
-		return info
-	}
-
-	// Check for stale PID file (file exists but process not running)
-	dcfg, err := config.LoadDaemonConfig(projectDir)
-	if err != nil {
-		dcfg = &config.DaemonConfig{
-			Daemon: config.DaemonSettings{
-				PIDFile: ".loom/daemon.pid",
-			},
-		}
-	}
-	pidFile := dcfg.Daemon.PIDFile
-	if !filepath.IsAbs(pidFile) {
-		pidFile = filepath.Join(projectDir, pidFile)
-	}
-	if _, err := os.Stat(pidFile); err == nil {
-		return DaemonInfo{StalePID: true}
-	}
-
-	return DaemonInfo{}
 }

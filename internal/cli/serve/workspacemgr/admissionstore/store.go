@@ -14,5 +14,4 @@ type Store interface {
 	Repos() store.RepoStore
 	Roles() store.RoleStore
 	AgentServices() store.AgentServiceStore
-	Agents() store.AgentStore
 }

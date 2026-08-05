@@ -18,7 +18,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backendnames"
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/localnodeconfig"
 )
 
 // LocalTaskRunnerEntrypoint is the runner name that routes to the bundled
@@ -26,8 +26,8 @@ import (
 // this runner; daytona/openshell/other explicit runners are not gated here.
 const LocalTaskRunnerEntrypoint = "local-task-runner"
 
-// DefaultBackend mirrors the workspace default backend (Settings "Project
-// Default Backend") used when no DaemonProfile.AgentBackend is set.
+// DefaultBackend is used when the local node has no workspace provider
+// override in machine-local state.
 const DefaultBackend = backendnames.Codex
 
 // HealthStatus describes backend readiness for local-runner preflight tests
@@ -40,27 +40,11 @@ type HealthStatus = backends.HealthStatus
 // backend registry populated by internal/cli/backends init().
 var healthChecker = backends.CheckBackendHealth
 
-// daemonGetter is the minimal store surface preflight needs: the per-workspace
-// daemon profile carrying AgentBackend. Implemented by store.Store via
-// store.DaemonProfileStore.
-type daemonGetter interface {
-	Daemon() store.DaemonProfileStore
-}
-
 // ResolveLocalBackend returns the effective backend for the local task runner
-// in workspace ws, mirroring service.GetWorkspaceBackend precedence: the
-// DaemonProfile.AgentBackend when set, else the default (codex). A per-agent
-// override is not known at epic-run/queue time (no specific agent is bound
-// yet), so the workspace default is authoritative here.
-func ResolveLocalBackend(ctx context.Context, st daemonGetter, ws string) string {
-	if st == nil {
-		return DefaultBackend
-	}
-	profile, err := st.Daemon().Get(ctx, ws)
-	if err != nil || profile == nil {
-		return DefaultBackend
-	}
-	if backend := strings.TrimSpace(profile.AgentBackend); backend != "" {
+// in workspace ws. A per-agent override is not known at queue time, so the
+// machine-local workspace provider is authoritative here.
+func ResolveLocalBackend(ws string) string {
+	if backend, err := localnodeconfig.RuntimeProvider(ws); err == nil && backend != "" {
 		return backend
 	}
 	return DefaultBackend
@@ -74,8 +58,8 @@ func ResolveLocalBackend(ctx context.Context, st daemonGetter, ws string) string
 // This is fail-closed by design: a missing binary or missing auth must stop the
 // run from being queued rather than letting it surface as a fake completion or
 // an opaque deep failure.
-func PreflightLocalTaskRunner(ctx context.Context, st daemonGetter, ws string) error {
-	backend := ResolveLocalBackend(ctx, st, ws)
+func PreflightLocalTaskRunner(_ context.Context, ws string) error {
+	backend := ResolveLocalBackend(ws)
 
 	status, ok := healthChecker(backend)
 	if !ok {

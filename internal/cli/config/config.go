@@ -217,9 +217,7 @@ func workspaceConfigFromStore(
 		ErrorMessage: ws.ErrorMessage,
 		DesignFormat: ws.DesignFormat,
 	}
-	if profile, err := st.Daemon().Get(ctx, ws.Key); err == nil && profile != nil {
-		wsc.Backend = profile.AgentBackend
-	}
+	wsc.Backend = local.DefaultRuntimeProvider
 	return wsc, nil
 }
 

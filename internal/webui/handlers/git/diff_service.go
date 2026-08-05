@@ -2,15 +2,13 @@ package git
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
-	"github.com/tysonthomas9/loomcli/internal/rpc"
-	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/service/pathsec"
 )
@@ -20,13 +18,13 @@ var _ service.DiffService = (*diffServiceImpl)(nil)
 
 // diffServiceImpl is the concrete implementation of DiffService.
 type diffServiceImpl struct {
-	gitOps ops.GitOps
-	pool   daemon.Pool
+	gitOps    ops.GitOps
+	backendFn service.IssueBackendProvider
 }
 
 // NewDiffService creates a new DiffService implementation.
-func NewDiffService(gitOps ops.GitOps, pool daemon.Pool) service.DiffService {
-	return &diffServiceImpl{gitOps: gitOps, pool: pool}
+func NewDiffService(gitOps ops.GitOps, backendFn service.IssueBackendProvider) service.DiffService {
+	return &diffServiceImpl{gitOps: gitOps, backendFn: backendFn}
 }
 
 func (s *diffServiceImpl) resolveAgent(wsID, agentName string) (*ops.AgentWorktree, error) {
@@ -163,32 +161,22 @@ func (s *diffServiceImpl) GetIssueDiffStat(ctx context.Context, wsID, issueID st
 	if issueID == "" {
 		return nil, service.ErrValidation("missing issue ID")
 	}
-	if s.pool == nil {
+	if s.backendFn == nil {
 		return nil, service.ErrUnavailable("issue backend unavailable")
 	}
-
-	rpcCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	ctx = middleware.WithWorkspace(ctx, wsID)
+	be := s.backendFn(ctx)
+	if be == nil {
+		return nil, service.ErrUnavailable("issue backend unavailable")
+	}
+	backendCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-
-	client, err := s.pool.Get(rpcCtx)
+	issue, err := be.Get(backendCtx, issueID)
 	if err != nil {
-		return nil, service.ErrUnavailable("issue backend unavailable")
-	}
-	defer s.pool.Put(client)
-
-	resp, err := client.Show(&rpc.ShowArgs{ID: issueID})
-	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			return nil, service.ErrNotFound(fmt.Sprintf("issue not found: %s", issueID))
-		}
 		return nil, service.ErrInternal("failed to get issue", err)
 	}
-
-	var issue struct {
-		Assignee string `json:"assignee"`
-	}
-	if err := json.Unmarshal(resp.Data, &issue); err != nil {
-		return nil, service.ErrInternal("failed to parse issue data", err)
+	if issue == nil {
+		return nil, service.ErrNotFound(fmt.Sprintf("issue not found: %s", issueID))
 	}
 	if issue.Assignee == "" {
 		return nil, service.ErrNotFound("issue has no assignee (no agent worktree)")

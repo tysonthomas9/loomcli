@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
@@ -248,12 +247,12 @@ func TestHandleListIssues_ParseListParams_Filters(t *testing.T) {
 	tests := []struct {
 		name     string
 		url      string
-		validate func(t *testing.T, args *rpc.ListArgs)
+		validate func(t *testing.T, args *service.ListFilter)
 	}{
 		{
 			name: "no params returns empty args",
 			url:  "/api/issues",
-			validate: func(t *testing.T, args *rpc.ListArgs) {
+			validate: func(t *testing.T, args *service.ListFilter) {
 				if args.Status != "" {
 					t.Errorf("expected empty status, got %q", args.Status)
 				}
@@ -268,7 +267,7 @@ func TestHandleListIssues_ParseListParams_Filters(t *testing.T) {
 		{
 			name: "status filter",
 			url:  "/api/issues?status=open",
-			validate: func(t *testing.T, args *rpc.ListArgs) {
+			validate: func(t *testing.T, args *service.ListFilter) {
 				if args.Status != "open" {
 					t.Errorf("expected status %q, got %q", "open", args.Status)
 				}
@@ -277,7 +276,7 @@ func TestHandleListIssues_ParseListParams_Filters(t *testing.T) {
 		{
 			name: "type filter",
 			url:  "/api/issues?type=bug",
-			validate: func(t *testing.T, args *rpc.ListArgs) {
+			validate: func(t *testing.T, args *service.ListFilter) {
 				if args.IssueType != "bug" {
 					t.Errorf("expected type %q, got %q", "bug", args.IssueType)
 				}
@@ -286,7 +285,7 @@ func TestHandleListIssues_ParseListParams_Filters(t *testing.T) {
 		{
 			name: "priority filter",
 			url:  "/api/issues?priority=1",
-			validate: func(t *testing.T, args *rpc.ListArgs) {
+			validate: func(t *testing.T, args *service.ListFilter) {
 				if args.Priority == nil || *args.Priority != 1 {
 					t.Errorf("expected priority 1, got %v", args.Priority)
 				}
@@ -295,7 +294,7 @@ func TestHandleListIssues_ParseListParams_Filters(t *testing.T) {
 		{
 			name: "assignee filter",
 			url:  "/api/issues?assignee=alice",
-			validate: func(t *testing.T, args *rpc.ListArgs) {
+			validate: func(t *testing.T, args *service.ListFilter) {
 				if args.Assignee != "alice" {
 					t.Errorf("expected assignee %q, got %q", "alice", args.Assignee)
 				}
@@ -304,7 +303,7 @@ func TestHandleListIssues_ParseListParams_Filters(t *testing.T) {
 		{
 			name: "query filter",
 			url:  "/api/issues?q=login",
-			validate: func(t *testing.T, args *rpc.ListArgs) {
+			validate: func(t *testing.T, args *service.ListFilter) {
 				if args.Query != "login" {
 					t.Errorf("expected query %q, got %q", "login", args.Query)
 				}
@@ -313,7 +312,7 @@ func TestHandleListIssues_ParseListParams_Filters(t *testing.T) {
 		{
 			name: "limit filter",
 			url:  "/api/issues?limit=50",
-			validate: func(t *testing.T, args *rpc.ListArgs) {
+			validate: func(t *testing.T, args *service.ListFilter) {
 				if args.Limit != 50 {
 					t.Errorf("expected limit 50, got %d", args.Limit)
 				}
@@ -322,7 +321,7 @@ func TestHandleListIssues_ParseListParams_Filters(t *testing.T) {
 		{
 			name: "limit capped at MaxListLimit",
 			url:  "/api/issues?limit=99999",
-			validate: func(t *testing.T, args *rpc.ListArgs) {
+			validate: func(t *testing.T, args *service.ListFilter) {
 				if args.Limit != MaxListLimit {
 					t.Errorf("expected limit %d (MaxListLimit), got %d", MaxListLimit, args.Limit)
 				}
@@ -331,7 +330,7 @@ func TestHandleListIssues_ParseListParams_Filters(t *testing.T) {
 		{
 			name: "labels comma-separated",
 			url:  "/api/issues?labels=urgent,backend",
-			validate: func(t *testing.T, args *rpc.ListArgs) {
+			validate: func(t *testing.T, args *service.ListFilter) {
 				if len(args.Labels) != 2 || args.Labels[0] != "urgent" || args.Labels[1] != "backend" {
 					t.Errorf("expected labels [urgent, backend], got %v", args.Labels)
 				}
@@ -340,7 +339,7 @@ func TestHandleListIssues_ParseListParams_Filters(t *testing.T) {
 		{
 			name: "title_contains filter",
 			url:  "/api/issues?title_contains=login",
-			validate: func(t *testing.T, args *rpc.ListArgs) {
+			validate: func(t *testing.T, args *service.ListFilter) {
 				if args.TitleContains != "login" {
 					t.Errorf("expected title_contains %q, got %q", "login", args.TitleContains)
 				}
@@ -349,7 +348,7 @@ func TestHandleListIssues_ParseListParams_Filters(t *testing.T) {
 		{
 			name: "pinned=true filter",
 			url:  "/api/issues?pinned=true",
-			validate: func(t *testing.T, args *rpc.ListArgs) {
+			validate: func(t *testing.T, args *service.ListFilter) {
 				if args.Pinned == nil || *args.Pinned != true {
 					t.Errorf("expected pinned=true, got %v", args.Pinned)
 				}
@@ -358,7 +357,7 @@ func TestHandleListIssues_ParseListParams_Filters(t *testing.T) {
 		{
 			name: "pinned=false filter",
 			url:  "/api/issues?pinned=false",
-			validate: func(t *testing.T, args *rpc.ListArgs) {
+			validate: func(t *testing.T, args *service.ListFilter) {
 				if args.Pinned == nil || *args.Pinned != false {
 					t.Errorf("expected pinned=false, got %v", args.Pinned)
 				}
@@ -367,7 +366,7 @@ func TestHandleListIssues_ParseListParams_Filters(t *testing.T) {
 		{
 			name: "multiple filters combined",
 			url:  "/api/issues?status=open&type=feature&priority=2&assignee=bob&limit=25",
-			validate: func(t *testing.T, args *rpc.ListArgs) {
+			validate: func(t *testing.T, args *service.ListFilter) {
 				if args.Status != "open" {
 					t.Errorf("expected status %q, got %q", "open", args.Status)
 				}
@@ -388,7 +387,7 @@ func TestHandleListIssues_ParseListParams_Filters(t *testing.T) {
 		{
 			name: "empty_description flag",
 			url:  "/api/issues?empty_description=true",
-			validate: func(t *testing.T, args *rpc.ListArgs) {
+			validate: func(t *testing.T, args *service.ListFilter) {
 				if !args.EmptyDescription {
 					t.Error("expected empty_description=true")
 				}
@@ -397,7 +396,7 @@ func TestHandleListIssues_ParseListParams_Filters(t *testing.T) {
 		{
 			name: "no_assignee flag",
 			url:  "/api/issues?no_assignee=true",
-			validate: func(t *testing.T, args *rpc.ListArgs) {
+			validate: func(t *testing.T, args *service.ListFilter) {
 				if !args.NoAssignee {
 					t.Error("expected no_assignee=true")
 				}
@@ -406,7 +405,7 @@ func TestHandleListIssues_ParseListParams_Filters(t *testing.T) {
 		{
 			name: "source_repos filter",
 			url:  "/api/issues?source_repos=repo-a,repo-b",
-			validate: func(t *testing.T, args *rpc.ListArgs) {
+			validate: func(t *testing.T, args *service.ListFilter) {
 				if len(args.SourceRepos) != 2 || args.SourceRepos[0] != "repo-a" || args.SourceRepos[1] != "repo-b" {
 					t.Errorf("expected source_repos [repo-a, repo-b], got %v", args.SourceRepos)
 				}

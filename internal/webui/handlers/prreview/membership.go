@@ -93,8 +93,8 @@ func (m *Module) workspaceHasRepo(ctx context.Context, ws, owner, repo string) (
 
 // workspaceRepos reads only the workspace aggregate required by PR
 // authorization and listing. The former full WorkspaceData projection also
-// loaded agents, daemon profiles, and every workspace summary, coupling a
-// repository membership check to unrelated read models.
+// loaded agent configuration and every workspace summary, coupling a repository
+// membership check to unrelated read models.
 func (m *Module) workspaceRepos(ctx context.Context, workspace string) ([]*domain.Repo, error) {
 	if m == nil || m.store == nil {
 		return nil, errEgressUnavailable

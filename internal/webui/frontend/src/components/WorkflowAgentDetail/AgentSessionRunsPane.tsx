@@ -157,7 +157,7 @@ function AgentSessionDetail({
     return (
       <div
         className={styles.transcriptEmpty}
-        data-testid="supervised-agent-task-reference-pending"
+        data-testid="agent-history-task-reference-pending"
       >
         Task reference is still loading for this session. Transcript evidence
         will appear when the session projection catches up.
@@ -191,7 +191,7 @@ function AgentSessionDetail({
         <div
           className={styles.sessionMetadataNotice}
           role="status"
-          data-testid="supervised-agent-session-metadata-warning"
+          data-testid="agent-history-session-metadata-warning"
         >
           Task-session metadata is temporarily unavailable. Showing transcript
           evidence from run history. {error.message}
@@ -206,7 +206,7 @@ function AgentSessionDetail({
         <div
           className={styles.sessionMetadataNotice}
           role="status"
-          data-testid="supervised-agent-session-metadata-loading"
+          data-testid="agent-history-session-metadata-loading"
         >
           Loading task-session metadata. Showing transcript evidence from run
           history.
@@ -218,7 +218,7 @@ function AgentSessionDetail({
   return detail;
 }
 
-/** Run-history tab for daemon-supervised and interactive agent assignments. */
+/** Run-history tab for background and interactive agent assignments. */
 export function AgentSessionRunsPane({
   workspaceId,
   agentName,
@@ -250,7 +250,7 @@ export function AgentSessionRunsPane({
       {selected ? (
         <section
           className={styles.card}
-          data-testid="supervised-agent-session-detail"
+          data-testid="agent-history-session-detail"
         >
           <div className={styles.runDetailHead}>
             <span
@@ -311,16 +311,13 @@ export function AgentSessionRunsPane({
         ) : isLoading && sessions.length === 0 ? (
           <div className={styles.emptyText}>Loading runs…</div>
         ) : sessions.length === 0 ? (
-          <div
-            className={styles.emptyText}
-            data-testid="supervised-agent-no-runs"
-          >
+          <div className={styles.emptyText} data-testid="agent-history-no-runs">
             No sessions yet. This agent will appear here after it starts work.
           </div>
         ) : (
           <ul
             className={styles.runList}
-            data-testid="supervised-agent-session-list"
+            data-testid="agent-history-session-list"
           >
             {sessions.map((session) => {
               const taskId = session.task_id?.trim() || null;
@@ -335,7 +332,7 @@ export function AgentSessionRunsPane({
                   <button
                     type="button"
                     className={styles.runRowSelect}
-                    data-testid={`supervised-agent-session-${session.session_id}`}
+                    data-testid={`agent-history-session-${session.session_id}`}
                     onClick={() => setSelectedSessionId(session.session_id)}
                   >
                     <span

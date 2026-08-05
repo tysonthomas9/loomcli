@@ -34,7 +34,7 @@ func wrapWorkspaceCreateFn(
 		if wsID == "" {
 			logger.Error("workspace creation returned empty WorkspaceID — skipping runtime registration",
 				"workspace", req.Name)
-			service.AddCreateWarning(ctx, "Could not register workspace with daemon — workspace may not auto-connect until restart")
+			service.AddCreateWarning(ctx, "Could not register workspace runtime — workspace may not auto-connect until restart")
 			return result, nil
 		}
 
@@ -42,7 +42,7 @@ func wrapWorkspaceCreateFn(
 		if wsDir == "" {
 			logger.Warn("workspace creation returned empty WorkspacePath — skipping runtime registration",
 				"workspace", req.Name)
-			service.AddCreateWarning(ctx, "Could not determine workspace directory for daemon registration")
+			service.AddCreateWarning(ctx, "Could not determine workspace directory for runtime registration")
 			return result, nil
 		}
 

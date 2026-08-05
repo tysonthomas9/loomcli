@@ -3,7 +3,6 @@ package agent
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,7 +19,7 @@ func testCmdWithDeps(deps *Deps) *cobra.Command {
 }
 
 func TestRunTask_SingleTask_NoTasksAvailable(t *testing.T) {
-	// not parallel: uses os.Chdir, global taskAutoMode/taskDaemonMode, mock.Install(), os.Stdout capture
+	// not parallel: uses os.Chdir, global taskAutoMode, mock.Install(), os.Stdout capture
 	deps, _, _, _, _ := NewTestDeps(t)
 
 	// Setup temp worktree directory
@@ -35,7 +34,6 @@ func TestRunTask_SingleTask_NoTasksAvailable(t *testing.T) {
 
 	// Reset flags
 	taskAutoMode = false
-	taskDaemonMode = false
 
 	// Mock issue-store ready returning empty array (no tasks).
 	mock := NewCommandMock(t, []CommandStub{
@@ -63,7 +61,7 @@ func TestRunTask_SingleTask_NoTasksAvailable(t *testing.T) {
 }
 
 func TestRunTask_SingleTask_Success(t *testing.T) {
-	// not parallel: uses os.Chdir, global taskAutoMode/taskDaemonMode, mock.Install(), os.Stdout capture
+	// not parallel: uses os.Chdir, global taskAutoMode, mock.Install(), os.Stdout capture
 	deps, _, _, _, _ := NewTestDeps(t)
 
 	// Setup temp worktree directory
@@ -78,7 +76,6 @@ func TestRunTask_SingleTask_Success(t *testing.T) {
 
 	// Reset flags
 	taskAutoMode = false
-	taskDaemonMode = false
 
 	// Mock issue-store ready with available task (status=open, has design, no needs-revision label).
 	taskJSON := `[{"id":"loom-123","status":"open","issue_type":"task","title":"Test task","design":"Implementation plan here"}]`
@@ -122,67 +119,8 @@ func TestRunTask_SingleTask_Success(t *testing.T) {
 	}
 }
 
-func TestRunTask_DaemonMode_AcquiresLock(t *testing.T) {
-	// not parallel: uses os.Chdir, global taskDaemonMode, os.Stdout capture
-	deps, _, _, _, _ := NewTestDeps(t)
-
-	// Setup temp worktree directory
-	tmpDir := t.TempDir()
-	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
-	origDir, _ := os.Getwd()
-	os.Chdir(tmpDir)
-	t.Cleanup(func() { os.Chdir(origDir) })
-
-	// Create .git directory
-	os.MkdirAll(filepath.Join(tmpDir, ".git"), 0755)
-
-	// Set daemon mode
-	taskAutoMode = false
-	taskDaemonMode = true
-	defer func() { taskDaemonMode = false }()
-
-	// Mock Claude invoker on deps
-	recorder := SetupMockAgentInvokerOn(t, deps, nil)
-
-	// Capture stdout
-	oldStdout := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
-	runTask(testCmdWithDeps(deps), nil)
-
-	w.Close()
-	os.Stdout = oldStdout
-	var buf bytes.Buffer
-	buf.ReadFrom(r)
-
-	// Daemon mode routes through the wrapper-backed non-interactive path so
-	// the supervisor watchdog sees per-turn stream output (see runTaskDaemon).
-	if len(recorder.NonInteractiveCalls) != 1 {
-		t.Fatalf("expected 1 Claude non-interactive invocation in daemon mode, got %d", len(recorder.NonInteractiveCalls))
-	}
-	if len(recorder.InteractiveCalls) != 0 {
-		t.Fatalf("daemon mode must not invoke the interactive path, got %d calls", len(recorder.InteractiveCalls))
-	}
-
-	// In daemon mode, lock is intentionally NOT released (for parent to read)
-	lockPath := filepath.Join(tmpDir, LockFileName)
-	data, err := os.ReadFile(lockPath)
-	if err != nil {
-		t.Fatalf("expected lock file to exist in daemon mode, got error: %v", err)
-	}
-
-	var info LockInfo
-	if err := json.Unmarshal(data, &info); err != nil {
-		t.Fatalf("failed to parse lock file: %v", err)
-	}
-	if info.Command != "task" {
-		t.Errorf("expected lock command 'task', got %q", info.Command)
-	}
-}
-
 func TestRunTask_SkipsEpics(t *testing.T) {
-	// not parallel: uses os.Chdir, global taskAutoMode/taskDaemonMode, mock.Install(), os.Stdout capture
+	// not parallel: uses os.Chdir, global taskAutoMode, mock.Install(), os.Stdout capture
 	deps, _, _, _, _ := NewTestDeps(t)
 
 	// Setup temp worktree directory
@@ -197,7 +135,6 @@ func TestRunTask_SkipsEpics(t *testing.T) {
 
 	// Reset flags
 	taskAutoMode = false
-	taskDaemonMode = false
 
 	// Mock issue-store ready with only an epic (should be skipped).
 	taskJSON := `[{"id":"loom-123","status":"open","issue_type":"epic","title":"Test epic","design":"Some design"}]`
@@ -226,7 +163,7 @@ func TestRunTask_SkipsEpics(t *testing.T) {
 }
 
 func TestRunTask_SkipsTasksWithoutDesign(t *testing.T) {
-	// not parallel: uses os.Chdir, global taskAutoMode/taskDaemonMode, mock.Install(), os.Stdout capture
+	// not parallel: uses os.Chdir, global taskAutoMode, mock.Install(), os.Stdout capture
 	deps, _, _, _, _ := NewTestDeps(t)
 
 	// Setup temp worktree directory
@@ -241,7 +178,6 @@ func TestRunTask_SkipsTasksWithoutDesign(t *testing.T) {
 
 	// Reset flags
 	taskAutoMode = false
-	taskDaemonMode = false
 
 	// Mock issue-store ready with task that has no design.
 	taskJSON := `[{"id":"loom-123","status":"open","issue_type":"task","title":"Test task","design":""}]`
@@ -270,7 +206,7 @@ func TestRunTask_SkipsTasksWithoutDesign(t *testing.T) {
 }
 
 func TestRunTask_SkipsTasksWithNeedsRevision(t *testing.T) {
-	// not parallel: uses os.Chdir, global taskAutoMode/taskDaemonMode, mock.Install(), os.Stdout capture
+	// not parallel: uses os.Chdir, global taskAutoMode, mock.Install(), os.Stdout capture
 	deps, _, _, _, _ := NewTestDeps(t)
 
 	// Setup temp worktree directory
@@ -285,7 +221,6 @@ func TestRunTask_SkipsTasksWithNeedsRevision(t *testing.T) {
 
 	// Reset flags
 	taskAutoMode = false
-	taskDaemonMode = false
 
 	// Mock issue-store ready with task that has needs-revision label.
 	taskJSON := `[{"id":"loom-123","status":"open","issue_type":"task","title":"Test task","design":"Some plan","labels":["needs-revision"]}]`

@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-builtin-workflows test-characterization check-supervisor-disabled test-supervisor-disabled test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down local-mode-frontend-dist local-mode-info local-mode-up local-mode-codex-up local-mode-codex-workflows-up local-mode-workflow-build-check local-mode-daytona-build-check local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full test-e2e-daytona-broker clean install help frontend check check-go check-frontend check-fleetdb-binary gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-architecture check-architecture-memory check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify test-e2e-github-webhook test-e2e-github-webhook-live
+.PHONY: all build build-frontend build-all test test-builtin-workflows test-characterization test-phase6-parity check-supervisor-disabled test-supervisor-disabled test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down local-mode-frontend-dist local-mode-info local-mode-up local-mode-codex-up local-mode-codex-workflows-up local-mode-workflow-build-check local-mode-daytona-build-check local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full test-e2e-daytona-broker clean install help frontend check check-go check-frontend check-fleetdb-binary gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-architecture check-architecture-memory check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify test-e2e-github-webhook test-e2e-github-webhook-live
 
 # Default target
 all: build
@@ -117,8 +117,14 @@ test-builtin-workflows:
 test-characterization:
 	@go run ./test/modular-monolith/characterization
 
-# Phase 4 supervisor-disabled execution contract. Validation is provisioning-free;
-# the full target runs the deterministic Compose row and always tears it down.
+# Phase 6 exact named-test matrix. The shared runner rejects missing, renamed,
+# extra, or disabled rows before executing any test.
+test-phase6-parity:
+	@go run ./test/modular-monolith/characterization --manifest test/modular-monolith/phase6-parity-matrix.yaml
+
+# Phase 6 supervisor-disabled execution contract. Validation is provisioning-free;
+# the full target runs the deterministic Compose row plus exact parity matrix and
+# always tears the stack down.
 check-supervisor-disabled:
 	@go run ./scripts/supervisordisabled --manifest test/modular-monolith/supervisor-disabled-matrix.yaml --validate
 
@@ -157,11 +163,6 @@ test-playground:
 test-fleetdb-embedded: build
 	@echo "Running fleet-db-only clean checkout embedded smoke..."
 	LOOM_BIN="$(PWD)/loom" scripts/test-fleetdb-clean-checkout.sh
-
-test-fleetdb-supervisor:
-	@echo "Running fleet-db supervisor control-plane gate..."
-	go test -count=1 ./internal/cli ./internal/cli/data ./internal/cli/agentdef ./internal/cli/daemon ./internal/cli/daemon/supervisor \
-	  -run 'Test(AgentIPCClient|IPCServer_|Data(Ready|ShowClaimClose)_NoServer|ClaimTask_|TaskIDForLifecycle_|Supervisor(Register|Heartbeats|Mirrors)ControlPlane|BuildCommand_SessionEnvVars)'
 
 # Run the UI browser suite in fleet-db-only regression mode.
 # Assumes docker-compose.regression.yml is already up AND seeded — the suite's
@@ -225,8 +226,8 @@ fleetdb-empty-down:
 	$$compose -f test/fleetdb/docker-compose.empty.yml down -v --remove-orphans
 
 # Start the local-mode dogfood stack: fleet-db, loom serve, a deterministic
-# planner/coder backend, and the Web UI. The default profile retains the workspace
-# daemon manager; LOOM_LOCAL_MODE_PLANE=ts uses only trigger-driven prompt agents.
+# planner/coder backend, and the Web UI. Trigger-driven prompt agents are the
+# only execution plane.
 local-mode-frontend-dist:
 	@if [ ! -f "$(FRONTEND_DIR)/dist/index.html" ]; then \
 	  echo "Web UI dist is missing; building it once on the host..."; \
@@ -351,15 +352,12 @@ local-mode-verify:
 	$(LOCAL_MODE_COMPOSE_SELECT); \
 	manifest="$$( $$compose $(LOCAL_MODE_COMPOSE_ARGS) exec -T loom-local sh -c 'manifest="$${LOCAL_MODE_RUN_MANIFEST:-/tmp/loom-local-mode-run.json}"; attempt=0; while [ ! -s "$$manifest" ]; do attempt=$$((attempt + 1)); if [ "$$attempt" -ge 120 ]; then echo "timed out waiting for local-mode run manifest: $$manifest" >&2; exit 1; fi; sleep 1; done; cat "$$manifest"' )"; \
 	LOCAL_MODE_RUN_MANIFEST_JSON="$$manifest" test/local-mode/verify-local-mode.sh; \
-	if [ "$${LOOM_LOCAL_MODE_PLANE:-}" = "ts" ]; then \
-	  $$compose $(LOCAL_MODE_COMPOSE_ARGS) exec -T loom-local verify-supervisor-disabled; \
-	fi
+	$$compose $(LOCAL_MODE_COMPOSE_ARGS) exec -T loom-local verify-supervisor-disabled
 
 # Verify role-based task routing for UI-registered plan/task agents against a
 # running stack: seeds a no-design task (must go to the plan agent) and a
 # designed task (must go to the task agent), exercises the UI POST /agents
-# endpoint, and asserts the claims. Pairs with `LOOM_DAEMON_LEAF=ts make
-# local-mode-codex-up` to prove UI agent creation maps to the TS execution path.
+# endpoint, and asserts the claims through the default Execution-owned worker.
 local-mode-routing-verify:
 	@python3 test/local-mode/verify-agent-routing.py
 
@@ -376,7 +374,7 @@ local-mode-codex-verify:
 test-local-mode-harness: local-mode-verify
 
 # Run the fleet-db distributed smoke stack: shared fleet-db/Redis, two loom
-# serve processes, two local supervisor heartbeat loops, and a one-shot smoke
+# serve processes, two runtime worker-heartbeat loops, and a one-shot smoke
 # runner that reports auth, claim contention, SSE reconnect catch-up, and WebUI
 # health. Builds local static loom/fleet-db binaries, then mounts them into
 # small runtime containers. Override FLEET_DB_REPO if the sibling repo is not at

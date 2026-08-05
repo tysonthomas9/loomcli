@@ -13,7 +13,7 @@ func TestIsFleetMode_NilConfig(t *testing.T) {
 
 func TestIsFleetMode_EmptyBackend(t *testing.T) {
 	t.Setenv(fleetModeEnvVar, "")
-	cfg := &DaemonConfig{Backend: ""}
+	cfg := &RuntimeConfig{Backend: ""}
 	if isFleetMode(cfg) {
 		t.Error("isFleetMode with empty backend = true, want false")
 	}
@@ -21,7 +21,7 @@ func TestIsFleetMode_EmptyBackend(t *testing.T) {
 
 func TestIsFleetMode_UnsupportedBackend(t *testing.T) {
 	t.Setenv(fleetModeEnvVar, "")
-	cfg := &DaemonConfig{Backend: "unknown"}
+	cfg := &RuntimeConfig{Backend: "unknown"}
 	if isFleetMode(cfg) {
 		t.Error("isFleetMode with backend=unknown = true, want false")
 	}
@@ -29,7 +29,7 @@ func TestIsFleetMode_UnsupportedBackend(t *testing.T) {
 
 func TestIsFleetMode_FleetBackend(t *testing.T) {
 	t.Setenv(fleetModeEnvVar, "")
-	cfg := &DaemonConfig{Backend: BackendFleet}
+	cfg := &RuntimeConfig{Backend: BackendFleet}
 	if !isFleetMode(cfg) {
 		t.Error("isFleetMode with backend=fleet = false, want true")
 	}
@@ -39,7 +39,7 @@ func TestIsFleetMode_AIBackendNotFleet(t *testing.T) {
 	// AI backends (claude, codex) should NOT trigger fleet mode
 	t.Setenv(fleetModeEnvVar, "")
 	for _, b := range []string{"claude", "codex", "opencode"} {
-		cfg := &DaemonConfig{Backend: b}
+		cfg := &RuntimeConfig{Backend: b}
 		if isFleetMode(cfg) {
 			t.Errorf("isFleetMode with backend=%s = true, want false", b)
 		}
@@ -52,7 +52,7 @@ func TestIsFleetMode_EnvVarOverride(t *testing.T) {
 	if !isFleetMode(nil) {
 		t.Error("isFleetMode with LOOM_ISSUE_BACKEND=fleet and nil config = false, want true")
 	}
-	cfg := &DaemonConfig{Backend: "unknown"}
+	cfg := &RuntimeConfig{Backend: "unknown"}
 	if !isFleetMode(cfg) {
 		t.Error("isFleetMode with LOOM_ISSUE_BACKEND=fleet and backend=unknown = false, want true")
 	}
@@ -60,7 +60,7 @@ func TestIsFleetMode_EnvVarOverride(t *testing.T) {
 
 func TestIsFleetMode_EnvVarOtherValue(t *testing.T) {
 	t.Setenv(fleetModeEnvVar, "unknown")
-	cfg := &DaemonConfig{Backend: ""}
+	cfg := &RuntimeConfig{Backend: ""}
 	if isFleetMode(cfg) {
 		t.Error("isFleetMode with LOOM_ISSUE_BACKEND=unknown = true, want false")
 	}
@@ -69,7 +69,7 @@ func TestIsFleetMode_EnvVarOtherValue(t *testing.T) {
 func TestIsFleetMode_FleetDBIsNotFleetMode(t *testing.T) {
 	// "fleetdb" (embedded SQLite fleet store) is NOT the same as "fleet" (external fleet server)
 	t.Setenv(fleetModeEnvVar, "")
-	cfg := &DaemonConfig{Backend: "fleetdb"}
+	cfg := &RuntimeConfig{Backend: "fleetdb"}
 	if isFleetMode(cfg) {
 		t.Error("isFleetMode with backend=fleetdb = true, want false (fleetdb != fleet)")
 	}

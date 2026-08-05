@@ -150,14 +150,14 @@ func TestPhase5AgentsCompatibilityStoreHasSingleCompositionImporter(t *testing.T
 
 func TestPhase5AgentsCompatibilityStoreImportRatchetRejectsProductionBypass(t *testing.T) {
 	root := t.TempDir()
-	writePhase5AgentsOwnershipFixture(t, root, "internal/app/serve/agentcomposition/agents.go", `package agentcomposition
-import _ "github.com/tysonthomas9/loomcli/internal/infra/agentscompatstore"
+	writePhase5AgentsOwnershipFixture(t, root, "internal/cli/serve/workspacemgr/agents_bootstrap.go", `package workspacemgr
+import _ "github.com/tysonthomas9/loomcli/internal/infra/agentsbootstrapstore"
 `)
 	writePhase5AgentsOwnershipFixture(t, root, "internal/webui/bypass.go", `package webui
-import _ "github.com/tysonthomas9/loomcli/internal/infra/agentscompatstore"
+import _ "github.com/tysonthomas9/loomcli/internal/infra/agentsbootstrapstore"
 `)
 	writePhase5AgentsOwnershipFixture(t, root, "internal/webui/bypass_test.go", `package webui
-import _ "github.com/tysonthomas9/loomcli/internal/infra/agentscompatstore"
+import _ "github.com/tysonthomas9/loomcli/internal/infra/agentsbootstrapstore"
 `)
 	blockers, err := snapshotPhase5AgentsCompatibilityImportBlockers(root)
 	if err != nil {
@@ -173,10 +173,6 @@ func TestCollectPhase5AgentsMutationPackageUsesDeclaringInterfaceType(t *testing
 	writePhase5AgentsOwnershipFixture(t, root, "go.mod", "module github.com/tysonthomas9/loomcli\n\ngo 1.24\n")
 	writePhase5AgentsOwnershipFixture(t, root, "internal/store/store.go", `package store
 type RoleStore interface {
-	Create()
-	Get()
-}
-type AgentStore interface {
 	Create()
 	Get()
 }
@@ -214,7 +210,6 @@ import (
 )
 func mutate(
 	legacyRole store.RoleStore,
-	legacyAssignment store.AgentStore,
 	legacyAgent store.AgentServiceStore,
 	role agents.RoleStore,
 	prompt agents.RolePromptRepairStore,
@@ -225,8 +220,6 @@ func mutate(
 ) {
 	_ = legacyRole.Create
 	legacyRole.Get()
-	_ = legacyAssignment.Create
-	legacyAssignment.Get()
 	legacyAgent.Update()
 	legacyAgent.List()
 	role.DeleteRole()
@@ -254,7 +247,7 @@ func mutate(
 		t.Fatalf("load fixture = %#v", loaded)
 	}
 	mutations := collectPhase5AgentsMutationPackage(root, loaded[0])
-	if len(mutations) != 9 {
+	if len(mutations) != 8 {
 		t.Fatalf("mutations = %#v, want one mutation per receiver family", mutations)
 	}
 	got := make(map[string]string, len(mutations))
@@ -263,7 +256,6 @@ func mutate(
 	}
 	want := map[string]string{
 		legacyRoleStoreReceiver:          "Create",
-		legacyAgentStoreReceiver:         "Create",
 		legacyAgentServiceStoreReceiver:  "Update",
 		agentsRoleStoreReceiver:          "DeleteRole",
 		agentsRolePromptStoreReceiver:    "SetPromptFileIfEmpty",
@@ -294,7 +286,7 @@ func TestPhase5AgentsMutationAllowlistIsReceiverAndPathSpecific(t *testing.T) {
 			name:     "owned role prompt repair",
 			receiver: agentsRolePromptStoreReceiver,
 			method:   "SetPromptFileIfEmpty",
-			file:     "internal/infra/agentscompatstore/adapter.go",
+			file:     "internal/infra/agentsbootstrapstore/adapter.go",
 		},
 		{
 			name:     "owned identity",
@@ -321,16 +313,10 @@ func TestPhase5AgentsMutationAllowlistIsReceiverAndPathSpecific(t *testing.T) {
 			file:     "internal/modules/agents/service.go",
 		},
 		{
-			name:     "legacy durable agent compatibility adapter",
-			receiver: legacyAgentStoreReceiver,
-			method:   "Create",
-			file:     "internal/infra/agentscompatstore/legacy_assignments.go",
-		},
-		{
-			name:     "legacy agent compatibility adapter",
+			name:     "bootstrap agent service adapter",
 			receiver: legacyAgentServiceStoreReceiver,
 			method:   "Create",
-			file:     "internal/infra/agentscompatstore/adapter.go",
+			file:     "internal/infra/agentsbootstrapstore/adapter.go",
 		},
 		{
 			name:     "legacy role tracing adapter",
@@ -356,38 +342,6 @@ func TestPhase5AgentsMutationAllowlistIsReceiverAndPathSpecific(t *testing.T) {
 				t.Fatalf("outside-owner placement allowed: %#v", outsideOwner)
 			}
 		})
-	}
-}
-
-func TestPhase5LegacyAssignmentMutationAllowlistIsExact(t *testing.T) {
-	for _, file := range []string{
-		"internal/infra/agentscompatstore/legacy_assignments.go",
-		"internal/infra/fleetdb/agent.go",
-		"internal/infra/memstore/agent.go",
-		"internal/cli/cmdstore/store_tracing_core_entities.go",
-	} {
-		mutation := phase5AgentsMutation{phase5AgentsMutationIdentity: phase5AgentsMutationIdentity{
-			file: file, receiver: legacyAgentStoreReceiver, method: "Update",
-		}}
-		if !isPhase5AgentsMutationAllowed(mutation) {
-			t.Fatalf("legacy assignment owner/adaptor placement rejected: %#v", mutation)
-		}
-	}
-	for _, file := range []string{
-		"internal/infra/agentscompatstore/adapter.go",
-		"internal/infra/agentscompatstore/unreviewed.go",
-		"internal/modules/agents/fleetdb/adapter.go",
-		"internal/infra/fleetdb/control_plane.go",
-		"internal/infra/memstore/control_plane.go",
-		"internal/cli/cmdstore/store_tracing_platform.go",
-		"internal/webui/svcimpl/agent_service.go",
-	} {
-		mutation := phase5AgentsMutation{phase5AgentsMutationIdentity: phase5AgentsMutationIdentity{
-			file: file, receiver: legacyAgentStoreReceiver, method: "Update",
-		}}
-		if isPhase5AgentsMutationAllowed(mutation) {
-			t.Fatalf("legacy assignment mutation allowed outside exact owner seam: %#v", mutation)
-		}
 	}
 }
 

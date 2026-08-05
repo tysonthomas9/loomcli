@@ -390,16 +390,18 @@ func TestRuntimeRejectsMissingTargetBeforeInboxMutation(t *testing.T) {
 
 func TestRuntimeValidatesLeadBeforeAssignmentInboxMutation(t *testing.T) {
 	st := memstore.New()
-	if _, err := st.Agents().Create(
-		t.Context(),
-		store.AgentCreate{
-			WorkspaceKey: "WS",
-			Name:         "lead-1",
-			RoleName:     "lead",
-			Backend:      "codex",
-			Parent:       "EPIC-1",
-		},
-	); err != nil {
+	if _, err := st.Roles().Create(t.Context(), store.RoleCreate{WorkspaceKey: "WS", Name: "lead"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.WorkerProfiles().Create(t.Context(), store.WorkerProfileCreate{
+		WorkspaceKey: "WS", ProfileID: "lead-profile", Role: "lead", ParentEpic: "EPIC-1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AgentServices().Create(t.Context(), store.AgentServiceCreate{
+		WorkspaceKey: "WS", ServiceID: "lead-1", Kind: domain.AgentServiceKindLead,
+		RoleName: "lead", ProfileName: "lead-profile",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	steps := []string{}

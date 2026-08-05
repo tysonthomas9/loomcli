@@ -12,9 +12,28 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/testutil"
 )
+
+func runtimeAgent(t *testing.T, workspace, name, role string, repos, groups []string) *agents.Agent {
+	t.Helper()
+	metadata, err := agents.WithRuntimeMetadata(nil, agents.RuntimeMetadata{Repos: repos, RepoGroups: groups})
+	if err != nil {
+		t.Fatalf("runtime metadata: %v", err)
+	}
+	return &agents.Agent{
+		WorkspaceKey: workspace,
+		AgentID:      name,
+		Name:         name,
+		Behavior:     agents.BehaviorReference{RoleName: role},
+		DesiredState: agents.DesiredRunning,
+		MaxInstances: 1,
+		Metadata:     metadata,
+	}
+}
 
 // --- resolveWorkspaceConfigName tests ---
 
@@ -262,14 +281,7 @@ func TestResolveAgentWorktree_StoreBackedFleetDB(t *testing.T) {
 	if _, err := st.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: "WS1", Name: "task"}); err != nil {
 		t.Fatalf("create role: %v", err)
 	}
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{
-		WorkspaceKey: "WS1",
-		Name:         "nova",
-		RoleName:     "task",
-		RepoGroups:   []string{"backend"},
-	}); err != nil {
-		t.Fatalf("create agent: %v", err)
-	}
+	nova := runtimeAgent(t, "WS1", "nova", "task", nil, []string{"backend"})
 
 	wtPath := filepath.Join(wsRoot, "worktrees", "api", "nova")
 	if err := runGit(t, wtPath, "init", "-b", "feature/nova"); err != nil {
@@ -286,7 +298,7 @@ func TestResolveAgentWorktree_StoreBackedFleetDB(t *testing.T) {
 		t.Fatalf("save state cache: %v", err)
 	}
 
-	got, err := NewGitOps().WithStore(st).ResolveAgentWorktree("WS1", "nova")
+	got, err := NewGitOps().WithStore(st).WithAgentQueries(testutil.StaticAgentQueries{Agents: []*agents.Agent{nova}}).ResolveAgentWorktree("WS1", "nova")
 	if err != nil {
 		t.Fatalf("ResolveAgentWorktree: %v", err)
 	}
@@ -319,21 +331,8 @@ func TestResolveAgentWorktreeForRepo_StoreBackedFleetDB(t *testing.T) {
 	if _, err := st.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: "WS1", Name: "task"}); err != nil {
 		t.Fatalf("create role: %v", err)
 	}
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{
-		WorkspaceKey: "WS1",
-		Name:         "nova",
-		RoleName:     "task",
-		RepoGroups:   []string{"backend"},
-	}); err != nil {
-		t.Fatalf("create nova: %v", err)
-	}
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{
-		WorkspaceKey: "WS1",
-		Name:         "any",
-		RoleName:     "task",
-	}); err != nil {
-		t.Fatalf("create any: %v", err)
-	}
+	nova := runtimeAgent(t, "WS1", "nova", "task", nil, []string{"backend"})
+	any := runtimeAgent(t, "WS1", "any", "task", nil, nil)
 
 	novaAPIPath := filepath.Join(wsRoot, "worktrees", "api", "nova")
 	if err := runGit(t, novaAPIPath, "init", "-b", "feature/nova"); err != nil {
@@ -357,7 +356,7 @@ func TestResolveAgentWorktreeForRepo_StoreBackedFleetDB(t *testing.T) {
 		t.Fatalf("save state cache: %v", err)
 	}
 
-	g := NewGitOps().WithStore(st)
+	g := NewGitOps().WithStore(st).WithAgentQueries(testutil.StaticAgentQueries{Agents: []*agents.Agent{nova, any}})
 	got, err := g.ResolveAgentWorktreeForRepo("WS1", "nova", "api")
 	if err != nil {
 		t.Fatalf("ResolveAgentWorktreeForRepo nova/api: %v", err)
@@ -407,14 +406,7 @@ func TestResolveAgentWorktree_BrokenGitMetadataReturnsUnknownBranch(t *testing.T
 	if _, err := st.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: "WS1", Name: "task"}); err != nil {
 		t.Fatalf("create role: %v", err)
 	}
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{
-		WorkspaceKey: "WS1",
-		Name:         "broken",
-		RoleName:     "task",
-		RepoGroups:   []string{"backend"},
-	}); err != nil {
-		t.Fatalf("create agent: %v", err)
-	}
+	broken := runtimeAgent(t, "WS1", "broken", "task", nil, []string{"backend"})
 
 	wtPath := filepath.Join(wsRoot, "worktrees", "api", "broken")
 	if err := os.MkdirAll(wtPath, 0755); err != nil {
@@ -435,7 +427,7 @@ func TestResolveAgentWorktree_BrokenGitMetadataReturnsUnknownBranch(t *testing.T
 		t.Fatalf("save state cache: %v", err)
 	}
 
-	g := NewGitOps().WithStore(st)
+	g := NewGitOps().WithStore(st).WithAgentQueries(testutil.StaticAgentQueries{Agents: []*agents.Agent{broken}})
 	for name, resolve := range map[string]func() (*ops.AgentWorktree, error){
 		"ResolveAgentWorktree": func() (*ops.AgentWorktree, error) {
 			return g.ResolveAgentWorktree("WS1", "broken")

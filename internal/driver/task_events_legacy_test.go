@@ -142,24 +142,26 @@ func createLeadTaskOutbox(ctx context.Context, s store.Store, run *domain.TaskRu
 	}
 }
 
-// resolveEpicLead finds the lead/orchestrator agent bound to an epic —
-// the server-side port of epic-runner's findConflictingLeadOwner +
-// isLeadRole scan. Agents().List returns name-sorted agents, so ties
-// resolve deterministically. Returns "" when no lead is bound.
+// resolveEpicLead finds the canonical lead/orchestrator AgentService whose
+// WorkerProfile is bound to an epic. Returns "" when no lead is bound.
 func resolveEpicLead(ctx context.Context, s store.Store, workspaceKey, epicID string) (string, error) {
 	if epicID == "" {
 		return "", nil
 	}
-	agents, err := s.Agents().List(ctx, workspaceKey)
+	services, err := s.AgentServices().List(ctx, workspaceKey, store.AgentServiceFilter{})
 	if err != nil {
-		return "", fmt.Errorf("list agents for epic lead: %w", err)
+		return "", fmt.Errorf("list agent services for epic lead: %w", err)
 	}
-	for _, agent := range agents {
-		if agent == nil {
+	for _, service := range services {
+		if service == nil || !isLeadRole(service.RoleName) || strings.TrimSpace(service.ProfileName) == "" {
 			continue
 		}
-		if isLeadRole(agent.RoleName) && strings.TrimSpace(agent.Parent) == epicID {
-			return agent.Name, nil
+		profile, profileErr := s.WorkerProfiles().Get(ctx, workspaceKey, service.ProfileName)
+		if profileErr != nil {
+			return "", fmt.Errorf("get worker profile %q for epic lead: %w", service.ProfileName, profileErr)
+		}
+		if strings.TrimSpace(profile.ParentEpic) == epicID {
+			return service.ServiceID, nil
 		}
 	}
 	return "", nil

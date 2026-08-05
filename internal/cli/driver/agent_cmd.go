@@ -166,7 +166,7 @@ func runDriverListAgents(_ *cobra.Command, _ []string) error {
 		if err != nil {
 			return err
 		}
-		agents, err := h.Store.Agents().List(ctx, ws)
+		agents, err := h.Store.AgentServices().List(ctx, ws, store.AgentServiceFilter{})
 		if err != nil {
 			return fmt.Errorf("list agents: %w", err)
 		}
@@ -177,7 +177,7 @@ func runDriverListAgents(_ *cobra.Command, _ []string) error {
 			if agent == nil {
 				continue
 			}
-			fmt.Printf("%s\t%s\t%s\n", agent.Name, agent.RoleName, agent.Parent)
+			fmt.Printf("%s\t%s\t%s\n", agent.ServiceID, agent.RoleName, agent.ProfileName)
 		}
 		return nil
 	})
@@ -222,7 +222,7 @@ func runDriverUpdateAgentParent(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	var updated domain.Agent
+	var updated domain.WorkerProfile
 	if err := client.call(cmd.Context(), "update-agent-parent", map[string]string{
 		"agent": agentName, "parent": parentID,
 		"expectParent": strings.TrimSpace(driverUpdateAgentParentExpectParent),

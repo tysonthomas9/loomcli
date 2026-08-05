@@ -6,10 +6,8 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
-	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
@@ -111,9 +109,6 @@ func TestServer_BuildModules_StoreBacked(t *testing.T) {
 func TestRegisterWorkspaceRoutes_IteratesModules(t *testing.T) {
 	var app Server
 	app.mux = http.NewServeMux()
-	app.multiPool = daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
-	t.Cleanup(func() { _ = app.multiPool.Close() })
-
 	// buildHandlers sets up shared infrastructure (frontend handler, etc.)
 	// required by registerRoutes.
 	app.buildHandlers()

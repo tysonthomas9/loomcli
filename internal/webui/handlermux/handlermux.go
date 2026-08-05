@@ -7,10 +7,8 @@ package handlermux
 import (
 	"context"
 	"net/http"
-	"reflect"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
 	healthhandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/health"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/issues"
@@ -27,49 +25,22 @@ type Module interface {
 // WorkspaceOpsModule registers workspace-scoped operations routes.
 type WorkspaceOpsModule struct {
 	workspaceSvc   service.WorkspaceService
-	multiPool      daemon.Pool
 	agentQueueH    http.HandlerFunc
 	issueBackendFn func(ctx context.Context) backend.IssueBackend
-	daemonExpected bool
 	localPathFn    healthhandlers.WorkspaceLocalPathFn
 }
 
-// NewWorkspaceOpsModule creates a WorkspaceOpsModule. Callers that support
-// pool-less backends (e.g. fleet mode) should also call WithIssueBackendFn
-// so issue query handlers can use the IssueBackend when no daemon pool exists.
-//
-// daemonExpected defaults to true; chain WithDaemonExpected(false) for
-// fleet client mode.
-func NewWorkspaceOpsModule(workspaceSvc service.WorkspaceService, multiPool daemon.Pool, agentQueueH http.HandlerFunc) *WorkspaceOpsModule {
-	return &WorkspaceOpsModule{workspaceSvc: workspaceSvc, multiPool: normalizePool(multiPool), agentQueueH: agentQueueH, daemonExpected: true}
+// NewWorkspaceOpsModule creates a WorkspaceOpsModule. Callers supply an
+// IssueBackend factory so issue query handlers use the configured durable
+// backend directly.
+func NewWorkspaceOpsModule(workspaceSvc service.WorkspaceService, agentQueueH http.HandlerFunc) *WorkspaceOpsModule {
+	return &WorkspaceOpsModule{workspaceSvc: workspaceSvc, agentQueueH: agentQueueH}
 }
 
-func normalizePool(pool daemon.Pool) daemon.Pool {
-	if pool == nil {
-		return nil
-	}
-	v := reflect.ValueOf(pool)
-	switch v.Kind() {
-	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
-		if v.IsNil() {
-			return nil
-		}
-	}
-	return pool
-}
-
-// WithIssueBackendFn injects the IssueBackend factory used by pool-less
-// handlers. Returns the module for chaining.
+// WithIssueBackendFn injects the IssueBackend factory used by handlers.
+// Returns the module for chaining.
 func (m *WorkspaceOpsModule) WithIssueBackendFn(fn func(ctx context.Context) backend.IssueBackend) *WorkspaceOpsModule {
 	m.issueBackendFn = fn
-	return m
-}
-
-// WithDaemonExpected sets whether a local issue daemon is expected to be reachable
-// for this deployment. False in fleet client mode. Returns the module for
-// chaining.
-func (m *WorkspaceOpsModule) WithDaemonExpected(b bool) *WorkspaceOpsModule {
-	m.daemonExpected = b
 	return m
 }
 
@@ -86,15 +57,15 @@ func (m *WorkspaceOpsModule) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/workspaces/{ws}/repos", workspace.HandleListWorkspaceRepos(m.workspaceSvc))
 	mux.HandleFunc("POST /api/workspaces/{ws}/repos", workspace.HandleAddWorkspaceRepos(m.workspaceSvc))
 	mux.HandleFunc("GET /api/workspaces/{ws}/stats",
-		healthhandlers.HandleStatsWithBackend(m.multiPool, healthhandlers.IssueBackendFn(m.issueBackendFn)))
+		healthhandlers.HandleStatsWithBackend(healthhandlers.IssueBackendFn(m.issueBackendFn)))
 	mux.HandleFunc("GET /api/workspaces/{ws}/ready",
-		issues.HandleReadyWithBackend(m.multiPool, issues.IssueBackendFn(m.issueBackendFn)))
+		issues.HandleReadyWithBackend(issues.IssueBackendFn(m.issueBackendFn)))
 	mux.HandleFunc("GET /api/workspaces/{ws}/blocked",
-		githandlers.HandleBlockedWithBackend(m.multiPool, githandlers.IssueBackendFn(m.issueBackendFn)))
+		githandlers.HandleBlockedWithBackend(githandlers.IssueBackendFn(m.issueBackendFn)))
 	mux.HandleFunc("GET /api/workspaces/{ws}/issues/graph",
-		githandlers.HandleGraphWithBackend(m.multiPool, githandlers.IssueBackendFn(m.issueBackendFn)))
+		githandlers.HandleGraphWithBackend(githandlers.IssueBackendFn(m.issueBackendFn)))
 	mux.HandleFunc("GET /api/workspaces/{ws}/readyz",
-		healthhandlers.HandleWorkspaceRuntimeReadyWithLocalPath(m.multiPool, m.daemonExpected, healthhandlers.IssueBackendFn(m.issueBackendFn), m.localPathFn))
+		healthhandlers.HandleWorkspaceRuntimeReadyWithLocalPath(healthhandlers.IssueBackendFn(m.issueBackendFn), m.localPathFn))
 	mux.HandleFunc("GET /api/workspaces/{ws}/config/backend", workspace.HandleWorkspaceBackendGet(m.workspaceSvc))
 	if m.agentQueueH != nil {
 		mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/queue", m.agentQueueH)

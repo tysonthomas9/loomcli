@@ -58,7 +58,16 @@ fn additional_workspace_launcher_init_script() -> String {
 }
 
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    let builder = builder.on_web_content_process_terminate(|webview| {
+        // WebKit may terminate its renderer under memory pressure while the
+        // native shell and Loom runtime remain healthy. Without an explicit
+        // reload the workspace window stays permanently blank.
+        let _ = webview.reload();
+    });
+
+    builder
         .manage(WorkspaceRecoveryState::default())
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![

@@ -15,9 +15,7 @@ import (
 	storepkg "github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 
-	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
-	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/svcimpl"
 )
 
@@ -50,11 +48,9 @@ func TestSessionRouteMigration_OldFlatRoutesReturn404(t *testing.T) {
 	// "handler returns error").
 	sessDir := t.TempDir()
 
-	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
-	_ = multiPool.Register("test-ws", &stubPool{})
-	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
+	wsExistsFn := func(id string) bool { return id == "test-ws" }
 
-	app := &Server{multiPool: multiPool, config: webui.ServerConfig{}, wsExistsFn: wsExistsFn}
+	app := &Server{config: webui.ServerConfig{}, wsExistsFn: wsExistsFn}
 	app.sessSvc = svcimpl.NewSessionService(testSessionWorkspaceStore(t, sessDir), nil)
 	setupTestRoutes(t, app)
 
@@ -95,11 +91,9 @@ func TestSessionRouteMigration_OldFlatRoutesReturn404(t *testing.T) {
 func TestSessionRouteMigration_WorkspaceScopedRoutesRegistered(t *testing.T) {
 	sessDir := t.TempDir()
 
-	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
-	_ = multiPool.Register("test-ws", &stubPool{})
-	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
+	wsExistsFn := func(id string) bool { return id == "test-ws" }
 
-	app := &Server{multiPool: multiPool, config: webui.ServerConfig{}, wsExistsFn: wsExistsFn}
+	app := &Server{config: webui.ServerConfig{}, wsExistsFn: wsExistsFn}
 	app.sessSvc = svcimpl.NewSessionService(testSessionWorkspaceStore(t, sessDir), nil)
 	setupTestRoutes(t, app)
 
@@ -146,11 +140,9 @@ func TestSessionRouteMigration_WorkspaceScopedRoutesRegistered(t *testing.T) {
 func TestSessionRouteMigration_UnknownWorkspaceReturns404(t *testing.T) {
 	sessDir := t.TempDir()
 
-	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
-	_ = multiPool.Register("test-ws", &stubPool{})
-	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
+	wsExistsFn := func(id string) bool { return id == "test-ws" }
 
-	app := &Server{multiPool: multiPool, config: webui.ServerConfig{}, wsExistsFn: wsExistsFn}
+	app := &Server{config: webui.ServerConfig{}, wsExistsFn: wsExistsFn}
 	app.sessSvc = svcimpl.NewSessionService(testSessionWorkspaceStore(t, sessDir), nil)
 	setupTestRoutes(t, app)
 
@@ -185,11 +177,9 @@ func TestSessionRouteMigration_UnknownWorkspaceReturns404(t *testing.T) {
 func TestSessionRouteMigration_WorkspaceScopedListReturnsJSON(t *testing.T) {
 	sessDir := t.TempDir()
 
-	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
-	_ = multiPool.Register("test-ws", &stubPool{})
-	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
+	wsExistsFn := func(id string) bool { return id == "test-ws" }
 
-	app := &Server{multiPool: multiPool, config: webui.ServerConfig{}, wsExistsFn: wsExistsFn}
+	app := &Server{config: webui.ServerConfig{}, wsExistsFn: wsExistsFn}
 	app.sessSvc = svcimpl.NewSessionService(testSessionWorkspaceStore(t, sessDir), nil)
 	setupTestRoutes(t, app)
 
@@ -234,11 +224,9 @@ func TestSessionRouteMigration_WorkspaceScopedSessionWithData(t *testing.T) {
 	sessStore, sessDir := newTestSessionStoreWithDir(t)
 	sess := createTestSession(t, sessStore, "loom-routed")
 
-	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
-	_ = multiPool.Register("test-ws", &stubPool{})
-	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
+	wsExistsFn := func(id string) bool { return id == "test-ws" }
 
-	app := &Server{multiPool: multiPool, config: webui.ServerConfig{}, wsExistsFn: wsExistsFn}
+	app := &Server{config: webui.ServerConfig{}, wsExistsFn: wsExistsFn}
 	app.sessSvc = svcimpl.NewSessionService(testSessionWorkspaceStore(t, sessDir), nil)
 	setupTestRoutes(t, app)
 
@@ -272,11 +260,9 @@ func TestSessionRouteMigration_WorkspaceScopedDiffEndpoint(t *testing.T) {
 	sessStore, sessDir := newTestSessionStoreWithDir(t)
 	sess := createTestSession(t, sessStore, "loom-diffrouted")
 
-	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
-	_ = multiPool.Register("test-ws", &stubPool{})
-	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
+	wsExistsFn := func(id string) bool { return id == "test-ws" }
 
-	app := &Server{multiPool: multiPool, config: webui.ServerConfig{}, wsExistsFn: wsExistsFn}
+	app := &Server{config: webui.ServerConfig{}, wsExistsFn: wsExistsFn}
 	app.sessSvc = svcimpl.NewSessionService(testSessionWorkspaceStore(t, sessDir), nil)
 	setupTestRoutes(t, app)
 
@@ -318,11 +304,9 @@ func TestSessionRouteMigration_WorkspaceScopedTranscriptEndpoint(t *testing.T) {
 		t.Fatalf("SyncNativeTranscript: %v", err)
 	}
 
-	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
-	_ = multiPool.Register("test-ws", &stubPool{})
-	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
+	wsExistsFn := func(id string) bool { return id == "test-ws" }
 
-	app := &Server{multiPool: multiPool, config: webui.ServerConfig{}, wsExistsFn: wsExistsFn}
+	app := &Server{config: webui.ServerConfig{}, wsExistsFn: wsExistsFn}
 	app.sessSvc = svcimpl.NewSessionService(testSessionWorkspaceStore(t, sessDir), nil)
 	setupTestRoutes(t, app)
 

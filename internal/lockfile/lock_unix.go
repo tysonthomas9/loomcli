@@ -9,10 +9,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-var errDaemonLocked = errors.New("daemon lock already held by another process")
-
 // ErrLocked is returned by TryLockExclusive when the lock is already held.
-var ErrLocked = errDaemonLocked
+var ErrLocked = errors.New("file lock already held by another process")
 
 // flockFd calls unix.Flock via RawConn to avoid uintptr-to-int conversion.
 func flockFd(f *os.File, how int) error {
@@ -34,7 +32,7 @@ func flockFd(f *os.File, how int) error {
 func flockExclusive(f *os.File) error {
 	err := flockFd(f, unix.LOCK_EX|unix.LOCK_NB)
 	if err == unix.EWOULDBLOCK {
-		return errDaemonLocked
+		return ErrLocked
 	}
 	return err
 }

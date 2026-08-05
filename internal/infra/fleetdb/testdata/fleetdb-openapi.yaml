@@ -6948,88 +6948,6 @@ paths:
           $ref: "#/components/responses/Conflict"
 
   # ---------------------------------------------------------------------------
-  # Agents (first-class entity, workspace-scoped)
-  # ---------------------------------------------------------------------------
-  /api/v1/{workspace}/agents:
-    parameters:
-      - $ref: "#/components/parameters/Workspace"
-    post:
-      tags: [Agents]
-      summary: Create an Agent
-      operationId: createAgent
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CreateAgentRequest"
-      responses:
-        "201":
-          description: Agent created
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Agent"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "409":
-          $ref: "#/components/responses/Conflict"
-    get:
-      tags: [Agents]
-      summary: List Agents
-      operationId: listAgents
-      x-pagination: none
-      responses:
-        "200":
-          description: Agent list
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ListAgentsResponse"
-
-  /api/v1/{workspace}/agents/{name}:
-    parameters:
-      - $ref: "#/components/parameters/Workspace"
-      - $ref: "#/components/parameters/EntityName"
-    get:
-      tags: [Agents]
-      summary: Get an Agent
-      operationId: getAgent
-      responses:
-        "200":
-          description: Agent
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Agent"
-        "404":
-          $ref: "#/components/responses/NotFound"
-    patch:
-      tags: [Agents]
-      summary: Update an Agent
-      operationId: updateAgent
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/UpdateAgentRequest"
-      responses:
-        "204":
-          description: Agent updated
-        "404":
-          $ref: "#/components/responses/NotFound"
-    delete:
-      tags: [Agents]
-      summary: Delete an Agent
-      operationId: deleteAgent
-      responses:
-        "204":
-          description: Agent deleted
-        "404":
-          $ref: "#/components/responses/NotFound"
-
-  # ---------------------------------------------------------------------------
   # Agent control plane (runtime nodes and execution sessions)
   # ---------------------------------------------------------------------------
   /api/v1/{workspace}/nodes:
@@ -9563,148 +9481,6 @@ paths:
         "409": { $ref: "#/components/responses/Conflict" }
         "500": { $ref: "#/components/responses/InternalError" }
 
-  /api/v1/{workspace}/agent-commands:
-    parameters:
-      - $ref: "#/components/parameters/Workspace"
-    post:
-      tags: [ControlPlane]
-      summary: Enqueue an agent command
-      operationId: createAgentCommand
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CreateAgentCommandRequest"
-      responses:
-        "201":
-          description: Command enqueued
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AgentCommand"
-    get:
-      tags: [ControlPlane]
-      summary: Poll agent commands by cursor
-      operationId: listAgentCommands
-      parameters:
-        - name: target_agent_id
-          in: query
-          schema: { type: string }
-        - name: target_node_id
-          in: query
-          schema: { type: string }
-        - name: status
-          in: query
-          schema:
-            type: string
-            enum: [queued, acked, running, succeeded, failed, cancelled]
-        - name: after_cursor
-          in: query
-          schema:
-            type: integer
-            format: int64
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            minimum: 1
-      responses:
-        "200":
-          description: Agent command list
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ListAgentCommandsResponse"
-
-  /api/v1/{workspace}/agent-commands/{command_id}:
-    parameters:
-      - $ref: "#/components/parameters/Workspace"
-      - $ref: "#/components/parameters/AgentCommandID"
-    get:
-      tags: [ControlPlane]
-      summary: Get an agent command
-      operationId: getAgentCommand
-      responses:
-        "200":
-          description: Agent command
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AgentCommand"
-
-  /api/v1/{workspace}/agent-commands/{command_id}/ack:
-    parameters:
-      - $ref: "#/components/parameters/Workspace"
-      - $ref: "#/components/parameters/AgentCommandID"
-    post:
-      tags: [ControlPlane]
-      summary: Atomically claim and acknowledge an agent command
-      operationId: ackAgentCommand
-      requestBody:
-        required: false
-        description: |
-          Modern clients must send node_id and the durable owner_id.
-          Known lifecycle commands start/stop/restart/yield may omit ownership
-          proof only when no live ownership lease exists; unknown targeted
-          command types always require proof. When a live lease exists, clients
-          must send its exact lease ID, request-only token, and fencing token.
-          During the Fleet-first rolling upgrade only, an omitted body is
-          accepted as a deprecated authenticated legacy request only when no
-          lease is live. FleetDB persists an unmintable temporary claimant
-          marker that the first real ownership Acquire atomically upgrades to
-          its stable owner, node, lease ID, and fence. A live lease is rejected
-          because hash-only storage cannot recover its raw holder proof.
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/AckAgentCommandRequest"
-      responses:
-        "200":
-          description: Command bound to the claimant node and acknowledged
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AgentCommand"
-
-  /api/v1/{workspace}/agent-commands/{command_id}/complete:
-    parameters:
-      - $ref: "#/components/parameters/Workspace"
-      - $ref: "#/components/parameters/AgentCommandID"
-    post:
-      tags: [ControlPlane]
-      summary: Complete an agent command
-      operationId: completeAgentCommand
-      requestBody:
-        required: true
-        description: |
-          Modern clients must send the current node_id, durable owner_id, and
-          the ownership generation proof persisted by Ack (or a newer current
-          same-owner generation). The raw ownership token is request-only.
-          A proofless command acknowledged while no lease was live may converge
-          to failed or canceled for any known lifecycle type, or to succeeded
-          only for Stop; successful Start/Restart/Yield and Running always
-          require proof, and unknown targeted types always require proof.
-          Legacy requests without claimant fields are deprecated and accepted
-          only for a command carrying FleetDB's server-reserved proofless
-          marker. A command already bound to a durable ownership generation
-          must use the modern request and present the raw token; hash-only
-          storage cannot recover that proof. The proofless exception never
-          permits Running or Succeeded Start/Restart/Yield.
-        content:
-          application/json:
-            schema:
-              oneOf:
-                - $ref: "#/components/schemas/CompleteAgentCommandRequest"
-                - $ref: "#/components/schemas/LegacyCompleteAgentCommandRequest"
-      responses:
-        "200":
-          description: Command completed
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AgentCommand"
-
   /api/v1/{workspace}/agent-inbox-messages:
     parameters:
       - $ref: "#/components/parameters/Workspace"
@@ -9979,54 +9755,6 @@ paths:
           $ref: "#/components/responses/Conflict"
 
   # ---------------------------------------------------------------------------
-  # DaemonProfile (workspace-scoped singleton)
-  # ---------------------------------------------------------------------------
-  /api/v1/{workspace}/daemon:
-    parameters:
-      - $ref: "#/components/parameters/Workspace"
-    get:
-      tags: [Daemon]
-      summary: Get the daemon profile
-      operationId: getDaemonProfile
-      responses:
-        "200":
-          description: Daemon profile
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DaemonProfile"
-    put:
-      tags: [Daemon]
-      summary: Replace the daemon profile (PUT semantics)
-      operationId: upsertDaemonProfile
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/UpsertDaemonProfileRequest"
-      responses:
-        "200":
-          description: Updated daemon profile
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DaemonProfile"
-    patch:
-      tags: [Daemon]
-      summary: Patch the daemon profile (partial update)
-      operationId: patchDaemonProfile
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/PatchDaemonProfileRequest"
-      responses:
-        "204":
-          description: Daemon profile patched
-
-  # ---------------------------------------------------------------------------
   # Workspace-root aliases
   # ---------------------------------------------------------------------------
   /api/v1/{workspace}/ready:
@@ -10238,7 +9966,7 @@ components:
       in: path
       required: true
       description: |
-        Workspace-scoped entity name (Repo, Agent, or Role).
+        Workspace-scoped entity name (Repo or Role).
         Lowercase alphanumeric + dot/underscore/hyphen, 1-100 characters.
       schema:
         type: string
@@ -10296,15 +10024,6 @@ components:
       in: path
       required: true
       description: Generic lease identifier.
-      schema:
-        type: string
-        minLength: 1
-
-    AgentCommandID:
-      name: command_id
-      in: path
-      required: true
-      description: Agent command identifier.
       schema:
         type: string
         minLength: 1
@@ -11757,7 +11476,7 @@ components:
         capabilities:
           type: array
           items: { type: string }
-          example: [agents.agent_service_commands.v1, agents.lifecycle_command_fencing.v1, agents.lifecycle_command_ownership_fencing.v1, agents.ownership_lease_commands.v1, agents.provisioning_progress.v1, artifacts.owner_fenced_lifecycle.v1, automation.trigger_admission.v1, execution.await_atomic_resume.v1, execution.driver_run_child_cascade.v1, execution.driver_run_child_start.v1, execution.driver_run_lease_fencing.v1, execution.driver_run_review_work_item_handoff.v1, execution.driver_run_review_work_item_handoff.v2, execution.driver_run_work_item_claim.v1, execution.driver_step_terminal_repair.v1, execution.issue_claim_next_task_run_start.v1, execution.issue_claim_task_run_start.v1, execution.task_run_lease_fencing.v1, execution.task_run_log_idempotency.v1, execution.task_run_request.v1, execution.task_run_requeue.v1, execution.task_run_retry_exhaustion.v1, execution.task_run_terminal_convergence.v1, execution.task_run_work_item_design.v1, execution.terminal_driver_run_work_recovery.v1, execution.terminal_driver_run_work_recovery_queue.v1, interaction.session_commands.v1, work_items.repository_requirement.v1, workflow_catalog.version_authoring.v1, workflow_catalog.version_lifecycle.v1]
+          example: [agents.agent_service_commands.v1, agents.ownership_lease_commands.v1, agents.provisioning_progress.v1, artifacts.owner_fenced_lifecycle.v1, automation.trigger_admission.v1, execution.await_atomic_resume.v1, execution.driver_run_child_cascade.v1, execution.driver_run_child_start.v1, execution.driver_run_lease_fencing.v1, execution.driver_run_review_work_item_handoff.v1, execution.driver_run_review_work_item_handoff.v2, execution.driver_run_work_item_claim.v1, execution.driver_step_terminal_repair.v1, execution.issue_claim_next_task_run_start.v1, execution.issue_claim_task_run_start.v1, execution.task_run_lease_fencing.v1, execution.task_run_log_idempotency.v1, execution.task_run_request.v1, execution.task_run_requeue.v1, execution.task_run_retry_exhaustion.v1, execution.task_run_terminal_convergence.v1, execution.task_run_work_item_design.v1, execution.terminal_driver_run_work_recovery.v1, execution.terminal_driver_run_work_recovery_queue.v1, interaction.session_commands.v1, work_items.repository_requirement.v1, workflow_catalog.version_authoring.v1, workflow_catalog.version_lifecycle.v1]
 
     AutomationErrorResponse:
       type: object
@@ -12085,6 +11804,9 @@ components:
           type: integer
           minimum: 0
         parent_epic: { type: string }
+        expected_parent_epic:
+          type: string
+          description: Atomic compare-and-set guard for the current parent epic.
         labels:
           type: array
           items: { type: string }
@@ -12298,7 +12020,7 @@ components:
 
     AgentServiceLifecycleAction:
       type: string
-      enum: [enable, disable, delete]
+      enum: [enable, disable, delete, reconcile]
 
     ApplyAgentServiceLifecycleRequest:
       type: object
@@ -12330,7 +12052,8 @@ components:
           description: >-
             Stable identity for one lifecycle generation. Reuse only to recover
             that exact workspace, Agent, action, and audit-actor operation; use
-            a new key for a later enable, disable, or delete intent.
+            a new key for a later enable, disable, delete, or reconciliation
+            generation.
 
     AgentServiceLifecycleResult:
       type: object
@@ -15292,7 +15015,7 @@ components:
         await_instance_key: { type: string }
         resume_event_id: { type: string }
 
-    # --- First-class entity schemas (Repo / Agent / Role / DaemonProfile) ---
+    # --- First-class entity schemas (Repo / Role) ---
 
     Repo:
       type: object
@@ -15341,135 +15064,6 @@ components:
         repos:
           type: array
           items: { $ref: "#/components/schemas/Repo" }
-        count: { type: integer }
-
-    Agent:
-      type: object
-      required: [workspace_key, name, role_name, state, created_at, updated_at]
-      properties:
-        workspace_key: { type: string }
-        name:          { type: string }
-        role_name:     { type: string }
-        auto:          { type: boolean }
-        backend:       { type: string }
-        fallback_backends:
-          type: array
-          items: { type: string }
-        repos:
-          type: array
-          items: { type: string }
-        repo_groups:
-          type: array
-          items: { type: string }
-        cross_repo: { type: boolean }
-        parent:
-          type: string
-          description: Parent agent name (lowercase) or an existing epic/task issue ID in this workspace (e.g. PROJ-123) scoping this agent to an issue subtree.
-        state:
-          type: string
-          enum: [idle, active, stopped]
-        mode:
-          type: string
-          enum: [ephemeral, service]
-        task_filter: { type: string }
-        max_concurrency:
-          type: integer
-          minimum: 0
-        budget_policy: { type: string }
-        desired_state:
-          type: string
-          enum: [stopped, idle, running, draining]
-        created_at: { type: string, format: date-time }
-        updated_at: { type: string, format: date-time }
-        # Derived, read-only liveness — set by the read paths from the
-        # session+lease join, never persisted. Absent unless computed.
-        live_status:
-          type: string
-          enum: [working, idle]
-        active_task_id: { type: string }
-        active_phase:   { type: string }
-        # error_class of the agent's most recent terminal session, surfaced only
-        # when that latest run failed (a newer success clears it) and the agent
-        # is not currently working. Lets a client explain a stalled idle agent.
-        last_error_class: { type: string }
-
-    CreateAgentRequest:
-      type: object
-      required: [name, role_name]
-      properties:
-        name:        { type: string }
-        role_name:   { type: string }
-        auto:        { type: boolean }
-        backend:     { type: string }
-        fallback_backends:
-          type: array
-          items: { type: string }
-        repos:
-          type: array
-          items: { type: string }
-        repo_groups:
-          type: array
-          items: { type: string }
-        cross_repo: { type: boolean }
-        parent:
-          type: string
-          description: Parent agent name (lowercase) or an existing epic/task issue ID in this workspace (e.g. PROJ-123) scoping this agent to an issue subtree.
-        state:
-          type: string
-          enum: [idle, active, stopped]
-        mode:
-          type: string
-          enum: [ephemeral, service]
-        task_filter: { type: string }
-        max_concurrency:
-          type: integer
-          minimum: 0
-        budget_policy: { type: string }
-        desired_state:
-          type: string
-          enum: [stopped, idle, running, draining]
-
-    UpdateAgentRequest:
-      type: object
-      properties:
-        role_name:   { type: string }
-        auto:        { type: boolean }
-        backend:     { type: string }
-        fallback_backends:
-          type: array
-          items: { type: string }
-        repos:
-          type: array
-          items: { type: string }
-        repo_groups:
-          type: array
-          items: { type: string }
-        cross_repo: { type: boolean }
-        parent:
-          type: string
-          description: Parent agent name (lowercase) or an existing epic/task issue ID in this workspace (e.g. PROJ-123) scoping this agent to an issue subtree.
-        state:
-          type: string
-          enum: [idle, active, stopped]
-        mode:
-          type: string
-          enum: [ephemeral, service]
-        task_filter: { type: string }
-        max_concurrency:
-          type: integer
-          minimum: 0
-        budget_policy: { type: string }
-        desired_state:
-          type: string
-          enum: [stopped, idle, running, draining]
-
-    ListAgentsResponse:
-      type: object
-      required: [agents, count]
-      properties:
-        agents:
-          type: array
-          items: { $ref: "#/components/schemas/Agent" }
         count: { type: integer }
 
     Node:
@@ -17348,167 +16942,6 @@ components:
           items: { $ref: "#/components/schemas/AgentOwnershipLease" }
         count: { type: integer }
 
-    AgentCommand:
-      type: object
-      required: [workspace_key, command_id, cursor, type, status, created_at, updated_at]
-      properties:
-        workspace_key:    { type: string }
-        command_id:       { type: string }
-        cursor:
-          type: integer
-          format: int64
-        target_agent_id:  { type: string }
-        target_node_id:   { type: string }
-        session_id:       { type: string }
-        type:             { type: string }
-        payload:
-          type: object
-          additionalProperties: { type: string }
-        status:
-          type: string
-          enum: [queued, acked, running, succeeded, failed, cancelled]
-        acked_by:
-          type: string
-          description: |
-            Stable claimant supervisor owner identity used for daemon-restart
-            recovery; not the authenticated request actor. During a deprecated
-            Fleet-first rolling upgrade, a proofless legacy Ack briefly stores
-            a server-reserved marker here until the first real Acquire
-            atomically replaces it with the stable owner.
-        acked_at:
-          type: string
-          format: date-time
-          nullable: true
-        ownership_lease_id:
-          type: string
-          description: Non-secret ownership generation identifier that authorized the command.
-        ownership_fencing_token:
-          type: integer
-          format: int64
-          minimum: 1
-          description: Monotonic non-secret ownership generation fence. The raw ownership token is never persisted on a command.
-        result:           { type: string }
-        error_class:      { type: string }
-        created_at:       { type: string, format: date-time }
-        updated_at:       { type: string, format: date-time }
-
-    CreateAgentCommandRequest:
-      type: object
-      required: [type]
-      properties:
-        command_id:       { type: string }
-        target_agent_id:  { type: string }
-        target_node_id:   { type: string }
-        session_id:       { type: string }
-        type:             { type: string }
-        payload:
-          type: object
-          additionalProperties: { type: string }
-        status:
-          type: string
-          enum: [queued]
-          description: 'Optional; only "queued" is accepted on create. Server-assigned regardless.'
-
-    AckAgentCommandRequest:
-      type: object
-      additionalProperties: false
-      description: |
-        Known lifecycle commands start/stop/restart/yield may omit all ownership
-        proof fields only when no live ownership lease exists. Unknown targeted
-        command types always require complete proof.
-      required: [node_id, owner_id]
-      properties:
-        node_id:
-          type: string
-          minLength: 1
-          description: Claimant daemon node. Ack atomically binds an untargeted command to this node.
-        owner_id:
-          type: string
-          minLength: 1
-          description: Stable supervisor owner identity used to recover an acknowledged command after process-node replacement.
-        ownership_lease_id:
-          type: string
-          minLength: 1
-          description: Required with ownership_token and ownership_fencing_token when proving a live owner.
-        ownership_token:
-          type: string
-          minLength: 1
-          writeOnly: true
-          description: Request-only raw token for the current agent ownership lease. Never persisted on AgentCommand.
-        ownership_fencing_token:
-          type: integer
-          format: int64
-          minimum: 1
-          description: Current ownership generation fence.
-
-    CompleteAgentCommandRequest:
-      type: object
-      additionalProperties: false
-      description: |
-        Complete ownership proof is normally required. A proofless command
-        acknowledged while no lease was live may report failed or canceled for
-        any known lifecycle type, or succeeded only for Stop. Successful
-        Start/Restart/Yield and Running require proof; unknown targeted types
-        always require proof.
-      required: [node_id, owner_id]
-      properties:
-        node_id:
-          type: string
-          minLength: 1
-          description: Current claimant daemon node. Claim metadata remains bound to the original atomic Ack.
-        owner_id:
-          type: string
-          minLength: 1
-          description: Stable supervisor owner identity that must match acked_by.
-        ownership_lease_id:
-          type: string
-          minLength: 1
-          description: Ownership generation identifier persisted by Ack, or a newer same-owner generation.
-        ownership_token:
-          type: string
-          minLength: 1
-          writeOnly: true
-          description: Request-only raw token proving the ownership generation. Never persisted on AgentCommand.
-        ownership_fencing_token:
-          type: integer
-          format: int64
-          minimum: 1
-          description: Ownership generation fence, never lower than the command's persisted fence.
-        status:
-          type: string
-          enum: [running, succeeded, failed, cancelled]
-        result:      { type: string }
-        error_class: { type: string }
-
-    LegacyCompleteAgentCommandRequest:
-      type: object
-      additionalProperties: false
-      deprecated: true
-      description: |
-        Fleet-first rolling-upgrade bridge for the previous Loom client.
-        It is accepted only for a still-proofless command when X-Actor matches
-        FleetDB's server-reserved marker. A command bound to any durable
-        ownership generation is rejected because FleetDB stores only its token
-        hash and cannot reconstruct the raw holder proof. Failed/Canceled may
-        converge through the proofless bridge, but Running and Succeeded
-        Start/Restart/Yield remain forbidden. New clients must use
-        CompleteAgentCommandRequest.
-      properties:
-        status:
-          type: string
-          enum: [running, succeeded, failed, cancelled]
-        result:      { type: string }
-        error_class: { type: string }
-
-    ListAgentCommandsResponse:
-      type: object
-      required: [agent_commands, count]
-      properties:
-        agent_commands:
-          type: array
-          items: { $ref: "#/components/schemas/AgentCommand" }
-        count: { type: integer }
-
     AgentInboxMessage:
       type: object
       required: [workspace_key, inbox_message_id, cursor, target_agent_id, body, status, created_at, updated_at]
@@ -17727,73 +17160,6 @@ components:
           items: { $ref: "#/components/schemas/Role" }
         count: { type: integer }
 
-    RestartPolicy:
-      type: object
-      properties:
-        max_retries:         { type: integer }
-        backoff_initial:     { type: integer }
-        backoff_max:         { type: integer }
-        backoff_multiplier:  { type: integer }
-        reset_after_success: { type: integer }
-
-    OTelSettings:
-      type: object
-      properties:
-        enabled:      { type: boolean }
-        endpoint:     { type: string }
-        service_name: { type: string }
-        sample_rate:  { type: number }
-        headers:
-          type: object
-          additionalProperties: { type: string }
-
-    DaemonProfile:
-      type: object
-      required: [workspace_key, updated_at]
-      properties:
-        workspace_key:   { type: string }
-        pid_file:        { type: string }
-        log_dir:         { type: string }
-        events_dir:      { type: string }
-        issue_backend:   { type: string }
-        agent_backend:   { type: string }
-        max_agents:      { type: integer }
-        startup_timeout: { type: integer }
-        restart_policy:  { $ref: "#/components/schemas/RestartPolicy" }
-        otel:            { $ref: "#/components/schemas/OTelSettings" }
-        updated_at:      { type: string, format: date-time }
-
-    UpsertDaemonProfileRequest:
-      type: object
-      properties:
-        pid_file:        { type: string }
-        log_dir:         { type: string }
-        events_dir:      { type: string }
-        issue_backend:   { type: string }
-        agent_backend:   { type: string }
-        max_agents:      { type: integer }
-        startup_timeout: { type: integer }
-        restart_policy:  { $ref: "#/components/schemas/RestartPolicy" }
-        otel:            { $ref: "#/components/schemas/OTelSettings" }
-
-    PatchDaemonProfileRequest:
-      type: object
-      properties:
-        pid_file:              { type: string }
-        log_dir:               { type: string }
-        events_dir:            { type: string }
-        issue_backend:         { type: string }
-        agent_backend:         { type: string }
-        max_agents:            { type: integer }
-        clear_max_agents:      { type: boolean }
-        startup_timeout:       { type: integer }
-        clear_startup_timeout: { type: boolean }
-        restart_policy:        { $ref: "#/components/schemas/RestartPolicy" }
-        clear_restart_policy:  { type: boolean }
-        otel:                  { $ref: "#/components/schemas/OTelSettings" }
-        clear_otel:            { type: boolean }
-
-  # ---------------------------------------------------------------------------
   # Responses
   # ---------------------------------------------------------------------------
   responses:

@@ -18,8 +18,8 @@ import (
 )
 
 // checkOrphanedFleetLocks scans all in_progress issues and warns when the
-// recorded assignee is not currently a running daemon-managed agent. This
-// surfaces "lock survived agent exit" situations so the operator can either
+// recorded assignee is not currently visible in durable/live agent status. This
+// surfaces "claim survived agent exit" situations so the operator can either
 // `loom recover <worktree>` (which releases the fleet-db lock) or wait for
 // the TTL to expire.
 //
@@ -41,20 +41,7 @@ func checkOrphanedFleetLocks(deps *cli.Deps) CheckResult {
 		return CheckResult{}
 	}
 
-	stateFilePath := cfgpkg.ResolveDaemonStatePath(cli.GetWorkspaceRuntimeDir())
-	managed := monitor.LoadDaemonManagedAgents(stateFilePath)
-
-	var orphans []string
-	for _, issue := range issues {
-		holder := issue.Assignee
-		if holder == "" {
-			continue
-		}
-		if _, ok := managed[holder]; ok {
-			continue
-		}
-		orphans = append(orphans, fmt.Sprintf("issue=%s holder=%s status=stopped-or-dead", issue.ID, holder))
-	}
+	orphans := orphanedFleetLocks(issues, activeFleetAgentNames())
 
 	if len(orphans) == 0 {
 		return CheckResult{
@@ -68,9 +55,35 @@ func checkOrphanedFleetLocks(deps *cli.Deps) CheckResult {
 	return CheckResult{
 		Name:    "orphaned_fleet_locks",
 		Status:  StatusWarn,
-		Summary: fmt.Sprintf("%d in_progress issue(s) claimed by agents that are not running", len(orphans)),
+		Summary: fmt.Sprintf("%d in_progress issue(s) claimed by agents without live runtime status", len(orphans)),
 		Detail:  strings.Join(orphans, "\n") + "\nremediation: run `loom recover <worktree>` to release the fleet-db lock, or wait for TTL expiry.",
 	}
+}
+
+func activeFleetAgentNames() map[string]struct{} {
+	active := make(map[string]struct{})
+	for _, agent := range monitor.CollectAgentStatusOnly("") {
+		if agent.LiveStatus == "working" || agent.ActiveTaskID != "" || agent.CurrentTaskID != "" ||
+			strings.HasPrefix(agent.Status, "working:") || strings.HasPrefix(agent.Status, "planning:") ||
+			strings.HasPrefix(agent.Status, "review:") {
+			active[agent.Name] = struct{}{}
+		}
+	}
+	return active
+}
+
+func orphanedFleetLocks(issues []backend.IssueData, active map[string]struct{}) []string {
+	orphans := make([]string, 0)
+	for _, issue := range issues {
+		if issue.Assignee == "" {
+			continue
+		}
+		if _, ok := active[issue.Assignee]; ok {
+			continue
+		}
+		orphans = append(orphans, fmt.Sprintf("issue=%s holder=%s status=stopped-or-dead", issue.ID, issue.Assignee))
+	}
+	return orphans
 }
 
 // fleetHealthProbe is overridden in tests to avoid real network calls.
@@ -120,13 +133,7 @@ func checkFleetDB() CheckResult {
 	if bootstrap.DetectMode() == bootstrap.ModeLocal {
 		return checkEmbeddedFleetDB()
 	}
-	dc, err := cfgpkg.LoadDaemonConfig(cli.GetWorkspaceRuntimeDir())
-	if err != nil {
-		cfg, _ := cfgpkg.ResolveFleetDBConfig(&cfgpkg.DaemonSettings{})
-		return reportFleetDBConfig(cfg)
-	}
-	cfg, _ := cfgpkg.ResolveFleetDBConfig(&dc.Daemon)
-	return reportFleetDBConfig(cfg)
+	return reportFleetDBConfig(cfgpkg.ResolveFleetDBConfig())
 }
 
 func checkEmbeddedFleetDB() CheckResult {
@@ -188,20 +195,14 @@ func reportFleetDBConfig(cfg cfgpkg.FleetDBServerConfig) CheckResult {
 }
 
 func checkFleet() CheckResult {
-	dc, err := cfgpkg.LoadDaemonConfig(cli.GetWorkspaceRuntimeDir())
-	var fleetCfg cfgpkg.FleetClientConfig
-	if err != nil {
-		fleetCfg = cfgpkg.ResolveFleetConfig(&cfgpkg.DaemonSettings{})
-	} else {
-		fleetCfg = cfgpkg.ResolveFleetConfig(&dc.Daemon)
-	}
+	fleetCfg := cfgpkg.ResolveFleetConfig()
 
 	if fleetCfg.URL == "" {
 		return CheckResult{
 			Name:    "fleet",
 			Status:  StatusFail,
 			Summary: "fleet mode active but no fleet URL configured",
-			Detail:  "Set LOOM_FLEET_URL or the daemon fleet URL in FleetDB",
+			Detail:  "Set LOOM_FLEET_URL",
 		}
 	}
 

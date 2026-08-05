@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
 
 // eventFileRe matches event filenames like "events-2025-01-15.jsonl" and
@@ -82,15 +81,7 @@ func shouldPurgeEventFile(entry os.DirEntry, cutoff time.Time, today string) boo
 func resolveEventsDir() string {
 	loomDir := cli.GetWorkspaceRuntimeDir()
 	if loomDir == "" {
-		loomDir = "."
-	}
-	dc, err := config.LoadDaemonConfig(loomDir)
-	if err != nil || dc.Daemon.EventsDir == "" {
 		return ""
 	}
-	eventsDir := dc.Daemon.EventsDir
-	if !filepath.IsAbs(eventsDir) {
-		eventsDir = filepath.Join(loomDir, eventsDir)
-	}
-	return eventsDir
+	return filepath.Join(loomDir, "events")
 }

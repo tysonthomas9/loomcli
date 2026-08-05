@@ -49,7 +49,7 @@ type WorkspaceStore interface {
 	Update(ctx context.Context, key string, patch WorkspaceUpdate) (*domain.Workspace, error)
 
 	// Delete removes a workspace. Implementations should cascade-delete
-	// child entities (Repos, Agents, Roles, DaemonProfile, Issues).
+	// child entities (Repos, Agents, Roles, Issues).
 	// Returns ErrNotFound if absent.
 	Delete(ctx context.Context, key string) error
 }

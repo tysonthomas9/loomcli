@@ -2,8 +2,6 @@ package git
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -12,9 +10,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
-	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
 
@@ -30,40 +26,6 @@ type BlockedResponse struct {
 	Success bool                  `json:"success"`
 	Data    []*types.BlockedIssue `json:"data,omitempty"`
 	Error   string                `json:"error,omitempty"`
-}
-
-// BlockedClient is an interface for testing blocked operations.
-// The production code uses *rpc.Client which implements this interface.
-type BlockedClient interface {
-	Blocked(args *rpc.BlockedArgs) (*rpc.Response, error)
-}
-
-// BlockedConnectionGetter is an interface for testing blocked handler pool operations.
-type BlockedConnectionGetter interface {
-	Get(ctx context.Context) (BlockedClient, error)
-	Put(client BlockedClient)
-	Discard(client BlockedClient)
-}
-
-// blockedPoolAdapter wraps daemon.Pool to implement BlockedConnectionGetter.
-type blockedPoolAdapter struct {
-	pool daemon.Pool
-}
-
-func (p *blockedPoolAdapter) Get(ctx context.Context) (BlockedClient, error) {
-	return p.pool.Get(ctx)
-}
-
-func (p *blockedPoolAdapter) Put(client BlockedClient) {
-	if c, ok := client.(*rpc.Client); ok {
-		p.pool.Put(c)
-	}
-}
-
-func (p *blockedPoolAdapter) Discard(client BlockedClient) {
-	if c, ok := client.(*rpc.Client); ok {
-		p.pool.Discard(c)
-	}
 }
 
 // GraphDependency represents a dependency relationship for graph visualization.
@@ -92,65 +54,19 @@ type GraphResponse struct {
 	Error   string        `json:"error,omitempty"`
 }
 
-// GraphClient is an interface for testing graph operations.
-// The production code uses *rpc.Client which implements this interface.
-type GraphClient interface {
-	GetGraphData(args *rpc.GetGraphDataArgs) (*rpc.GetGraphDataResponse, error)
-}
-
-// GraphConnectionGetter is an interface for testing graph handler pool operations.
-type GraphConnectionGetter interface {
-	Get(ctx context.Context) (GraphClient, error)
-	Put(client GraphClient)
-	Discard(client GraphClient)
-}
-
-// graphPoolAdapter wraps daemon.Pool to implement GraphConnectionGetter.
-type graphPoolAdapter struct {
-	pool daemon.Pool
-}
-
-func (p *graphPoolAdapter) Get(ctx context.Context) (GraphClient, error) {
-	return p.pool.Get(ctx)
-}
-
-func (p *graphPoolAdapter) Put(client GraphClient) {
-	if c, ok := client.(*rpc.Client); ok {
-		p.pool.Put(c)
-	}
-}
-
-func (p *graphPoolAdapter) Discard(client GraphClient) {
-	if c, ok := client.(*rpc.Client); ok {
-		p.pool.Discard(c)
-	}
-}
-
-// HandleBlocked returns issues that have blocking dependencies (waiting on other issues).
-func HandleBlocked(pool daemon.Pool) http.HandlerFunc {
-	return HandleBlockedWithBackend(pool, nil)
-}
-
-// HandleBlockedWithBackend returns a handler that serves the blocked endpoint
-// from exactly one configured source: the daemon pool when present, otherwise
-// the supplied backend.IssueBackend for pool-less fleet mode.
-//
-// backendFn may be nil — in that case the behavior is identical to the
-// pool-only path, returning a 503 when the pool is unusable.
-func HandleBlockedWithBackend(pool daemon.Pool, backendFn IssueBackendFn) http.HandlerFunc {
-	var poolAdapter BlockedConnectionGetter
-	if pool != nil {
-		poolAdapter = &blockedPoolAdapter{pool: pool}
-	}
-	poolHandler := HandleBlockedWithPool(poolAdapter)
-	if pool != nil || backendFn == nil {
-		return poolHandler
-	}
+func HandleBlockedWithBackend(backendFn IssueBackendFn) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if serveBlockedViaBackend(w, r, backendFn) {
-			return
+		if !serveBlockedViaBackend(w, r, backendFn) {
+			handler.WriteJSON(w, http.StatusServiceUnavailable, BlockedResponse{Success: false, Error: "issue backend not configured"})
 		}
-		poolHandler(w, r)
+	}
+}
+
+func HandleGraphWithBackend(backendFn IssueBackendFn) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !serveGraphViaBackend(w, r, backendFn) {
+			handler.WriteJSON(w, http.StatusServiceUnavailable, GraphResponse{Success: false, Error: "issue backend not configured"})
+		}
 	}
 }
 
@@ -201,156 +117,6 @@ func serveBlockedViaBackend(w http.ResponseWriter, r *http.Request, backendFn Is
 		"data":    issues,
 	})
 	return true
-}
-
-// HandleBlockedWithPool is the internal implementation that accepts an interface for testing.
-func HandleBlockedWithPool(pool BlockedConnectionGetter) http.HandlerFunc { //nolint:funlen
-	return func(w http.ResponseWriter, r *http.Request) {
-		if pool == nil {
-			handler.WriteJSON(w, http.StatusServiceUnavailable, BlockedResponse{
-				Success: false,
-				Error:   "connection pool not initialized",
-			})
-			return
-		}
-
-		// Parse query parameters into BlockedArgs
-		args, err := parseBlockedParams(r)
-		if err != nil {
-			handler.WriteJSON(w, http.StatusBadRequest, BlockedResponse{
-				Success: false,
-				Error:   err.Error(),
-			})
-			return
-		}
-
-		// Acquire connection with 5-second timeout
-		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-		defer cancel()
-
-		client, err := pool.Get(ctx)
-		if err != nil {
-			status := http.StatusServiceUnavailable
-			if errors.Is(err, context.DeadlineExceeded) {
-				status = http.StatusGatewayTimeout
-			}
-			slog.Error("pool error in HandleBlocked", "err", err)
-			handler.WriteJSON(w, status, BlockedResponse{
-				Success: false,
-				Error:   "issue backend unavailable",
-			})
-			return
-		}
-		rpcOK := false
-		defer func() {
-			if rpcOK {
-				pool.Put(client)
-			} else {
-				pool.Discard(client)
-			}
-		}()
-
-		// Execute Blocked RPC call
-		resp, err := client.Blocked(args)
-		if err != nil {
-			slog.Error("RPC error in HandleBlocked", "err", err)
-			handler.WriteJSON(w, http.StatusInternalServerError, BlockedResponse{
-				Success: false,
-				Error:   "internal server error",
-			})
-			return
-		}
-		rpcOK = true
-
-		if !resp.Success {
-			handler.WriteJSON(w, http.StatusInternalServerError, BlockedResponse{
-				Success: false,
-				Error:   resp.Error,
-			})
-			return
-		}
-
-		// Parse the blocked issues from RPC response
-		var issues []*types.BlockedIssue
-		if err := json.Unmarshal(resp.Data, &issues); err != nil {
-			handler.WriteJSON(w, http.StatusInternalServerError, BlockedResponse{
-				Success: false,
-				Error:   fmt.Sprintf("failed to parse blocked issues: %v", err),
-			})
-			return
-		}
-
-		handler.WriteJSON(w, http.StatusOK, BlockedResponse{
-			Success: true,
-			Data:    issues,
-		})
-	}
-}
-
-// HandleGraph returns issues with full dependency data for graph visualization.
-func HandleGraph(pool daemon.Pool) http.HandlerFunc {
-	return HandleGraphWithBackend(pool, nil)
-}
-
-// HandleGraphWithBackend returns a handler that serves the graph endpoint
-// from exactly one configured source: the daemon pool when present, otherwise
-// the supplied backend.IssueBackend for pool-less fleet mode.
-//
-// backendFn may be nil — in that case the behavior is identical to the
-// pool-only path, returning a 503 when the pool is unusable.
-func HandleGraphWithBackend(pool daemon.Pool, backendFn IssueBackendFn) http.HandlerFunc {
-	var poolAdapter GraphConnectionGetter
-	if pool != nil {
-		poolAdapter = &graphPoolAdapter{pool: pool}
-	}
-	poolHandler := HandleGraphWithPool(poolAdapter)
-	if pool != nil || backendFn == nil {
-		return poolHandler
-	}
-	return func(w http.ResponseWriter, r *http.Request) {
-		if serveGraphViaBackend(w, r, backendFn) {
-			return
-		}
-		poolHandler(w, r)
-	}
-}
-
-// graphInterceptor captures the pool-handler's response so the wrapper can
-// decide whether to forward or fall through to the backend path without
-// double-writing to the real ResponseWriter.
-type graphInterceptor struct {
-	header     http.Header
-	body       []byte
-	statusCode int
-}
-
-func (g *graphInterceptor) Header() http.Header { return g.header }
-
-func (g *graphInterceptor) WriteHeader(code int) {
-	if g.statusCode == 0 {
-		g.statusCode = code
-	}
-}
-
-func (g *graphInterceptor) Write(b []byte) (int, error) {
-	if g.statusCode == 0 {
-		g.statusCode = http.StatusOK
-	}
-	g.body = append(g.body, b...)
-	return len(b), nil
-}
-
-func (g *graphInterceptor) flushTo(w http.ResponseWriter) {
-	for k, vs := range g.header {
-		for _, v := range vs {
-			w.Header().Add(k, v)
-		}
-	}
-	if g.statusCode == 0 {
-		g.statusCode = http.StatusOK
-	}
-	w.WriteHeader(g.statusCode)
-	_, _ = w.Write(g.body)
 }
 
 // serveGraphViaBackend materializes a GraphResponse from the supplied
@@ -469,117 +235,17 @@ func includeGraphIssue(issueStatus, filter string, includeClosed bool) bool {
 	}
 }
 
-// HandleGraphWithPool is the internal implementation that accepts an interface for testing.
-func HandleGraphWithPool(pool GraphConnectionGetter) http.HandlerFunc { //nolint:funlen
-	return func(w http.ResponseWriter, r *http.Request) {
-		if pool == nil {
-			handler.WriteJSON(w, http.StatusServiceUnavailable, GraphResponse{
-				Success: false,
-				Error:   "connection pool not initialized",
-			})
-			return
-		}
-
-		// Parse query parameters
-		status, includeClosed, sourceRepos := parseGraphParams(r)
-
-		// Validate status parameter
-		validStatuses := map[string]bool{"all": true, "open": true, "closed": true}
-		if !validStatuses[status] {
-			handler.WriteJSON(w, http.StatusBadRequest, GraphResponse{
-				Success: false,
-				Error:   fmt.Sprintf("invalid status: %s (must be all, open, or closed)", status),
-			})
-			return
-		}
-
-		// Acquire connection with timeout
-		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-		defer cancel()
-
-		client, err := pool.Get(ctx)
-		if err != nil {
-			httpStatus := http.StatusServiceUnavailable
-			if errors.Is(err, context.DeadlineExceeded) {
-				httpStatus = http.StatusGatewayTimeout
-			}
-			slog.Error("pool error in HandleGraph", "err", err)
-			handler.WriteJSON(w, httpStatus, GraphResponse{
-				Success: false,
-				Error:   "issue backend unavailable",
-			})
-			return
-		}
-		rpcOK := false
-		defer func() {
-			if rpcOK {
-				pool.Put(client)
-			} else {
-				pool.Discard(client)
-			}
-		}()
-
-		// Build GetGraphData args based on status filter
-		graphArgs := &rpc.GetGraphDataArgs{
-			SourceRepos: sourceRepos,
-		}
-		if status == "open" {
-			graphArgs.ExcludeStatus = []string{"closed", "tombstone"}
-		} else if status == "closed" {
-			graphArgs.Status = "closed"
-		} else {
-			// "all" - exclude only tombstones
-			graphArgs.ExcludeStatus = []string{"tombstone"}
-		}
-		// Don't include closed if explicitly disabled
-		if !includeClosed && status == "all" {
-			graphArgs.ExcludeStatus = append(graphArgs.ExcludeStatus, "closed")
-		}
-		// Single RPC call replaces List + N×Show
-		result, err := client.GetGraphData(graphArgs)
-		if err != nil {
-			slog.Error("RPC error in HandleGraph", "err", err)
-			handler.WriteJSON(w, http.StatusInternalServerError, GraphResponse{
-				Success: false,
-				Error:   "internal server error",
-			})
-			return
-		}
-		rpcOK = true
-
-		// Convert RPC response to HTTP response format
-		graphIssues := make([]*GraphIssue, 0, len(result.Issues))
-		for _, summary := range result.Issues {
-			var graphDeps []*GraphDependency
-			for _, dep := range summary.Dependencies {
-				graphDeps = append(graphDeps, &GraphDependency{
-					DependsOnID: dep.DependsOnID,
-					Type:        dep.Type,
-				})
-			}
-			graphIssues = append(graphIssues, &GraphIssue{
-				ID:           summary.ID,
-				Title:        summary.Title,
-				Status:       summary.Status,
-				Priority:     summary.Priority,
-				IssueType:    summary.IssueType,
-				Labels:       summary.Labels,
-				Dependencies: graphDeps,
-				DeferUntil:   summary.DeferUntil,
-				DueAt:        summary.DueAt,
-			})
-		}
-
-		handler.WriteJSON(w, http.StatusOK, GraphResponse{
-			Success: true,
-			Data:    graphIssues,
-		})
-	}
+type blockedFilter struct {
+	ParentID string
+	Assignee string
+	Priority *int
+	Type     string
+	Limit    int
 }
 
-// parseBlockedParams parses query parameters into rpc.BlockedArgs.
-func parseBlockedParams(r *http.Request) (*rpc.BlockedArgs, error) {
-	args := &rpc.BlockedArgs{}
+// parseBlockedParams parses and validates blocked-list query parameters.
+func parseBlockedParams(r *http.Request) (*blockedFilter, error) {
+	args := &blockedFilter{}
 	q := r.URL.Query()
 
 	// String parameters

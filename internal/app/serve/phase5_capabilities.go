@@ -7,6 +7,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/app/serve/interactioncomposition"
 	"github.com/tysonthomas9/loomcli/internal/app/serve/sourcecontrolcomposition"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
+	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
 )
 
 // AgentsCapability is the composition-owned Phase 5 Agents handle. The
@@ -24,34 +25,6 @@ func (capability *AgentsCapability) AgentsAPI() agentcomposition.API {
 	return capability.capability.AgentsAPI()
 }
 
-func (capability *AgentsCapability) CompatibilityAPI() agentcomposition.CompatibilityAPI {
-	if capability == nil {
-		return nil
-	}
-	return capability.capability.CompatibilityAPI()
-}
-
-func (capability *AgentsCapability) ManagedCompatibility() agentcomposition.ManagedCommands {
-	if capability == nil {
-		return nil
-	}
-	return capability.capability.ManagedCompatibility()
-}
-
-func (capability *AgentsCapability) ParentBindingCommands() agentcomposition.ParentBindingCommands {
-	if capability == nil {
-		return nil
-	}
-	return capability.capability.ParentBindingCommands()
-}
-
-func (capability *AgentsCapability) ManagedRetirements() agentcomposition.ManagedRetirements {
-	if capability == nil {
-		return nil
-	}
-	return capability.capability.ManagedRetirements()
-}
-
 func (capability *AgentsCapability) OperatorAuthorityResolver() agentcomposition.OperatorAuthorityResolver {
 	if capability == nil {
 		return nil
@@ -64,6 +37,13 @@ func (capability *AgentsCapability) PRReviewerProvisioning() agentcomposition.PR
 		return nil
 	}
 	return capability.capability.PRReviewerProvisioning()
+}
+
+func (capability *AgentsCapability) RuntimeRegistrations() []platformruntime.Registration {
+	if capability == nil {
+		return nil
+	}
+	return capability.capability.RuntimeRegistrations()
 }
 
 type AgentsConfig = agentcomposition.AgentsConfig

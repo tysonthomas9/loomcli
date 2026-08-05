@@ -217,7 +217,7 @@ func TestFindAvailablePort_ListenerIsUsable(t *testing.T) {
 // WriteTimeout = 30s. Since the http.Server is created internally, we test this
 // behaviorally: start the server, make an HTTP request to the health endpoint, and
 // confirm the server is functioning correctly with the timeout configuration.
-// The health endpoint is used because it does not require a daemon connection pool.
+// The health endpoint is used because it does not require workspace runtime state.
 func TestStartServer_WriteTimeout(t *testing.T) {
 	port := grabEphemeralPort(t)
 
@@ -227,7 +227,6 @@ func TestStartServer_WriteTimeout(t *testing.T) {
 	config := webui.ServerConfig{
 		Port:            port,
 		BindAddress:     "127.0.0.1",
-		PoolSize:        1,
 		ShutdownTimeout: 1 * time.Second,
 		MaxPortAttempts: 5,
 	}
@@ -280,9 +279,10 @@ func TestStartServer_WriteTimeout(t *testing.T) {
 		t.Fatalf("failed to parse health response: %v", err)
 	}
 
-	// With nil pool, status should be "degraded" but the response itself must succeed
-	if health.Status != "degraded" {
-		t.Errorf("expected health status 'degraded' (no daemon pool), got %q", health.Status)
+	// The canonical runtime has no daemon pool dependency, so an otherwise empty
+	// server is healthy.
+	if health.Status != "ok" {
+		t.Errorf("expected health status 'ok', got %q", health.Status)
 	}
 
 	// Verify Content-Type is JSON
@@ -338,18 +338,11 @@ func TestDefaultConfig(t *testing.T) {
 	if config.BindAddress != "127.0.0.1" {
 		t.Errorf("BindAddress = %q, want %q", config.BindAddress, "127.0.0.1")
 	}
-	if config.PoolSize != 100 {
-		t.Errorf("PoolSize = %d, want 100", config.PoolSize)
-	}
 	if config.ShutdownTimeout != 5*time.Second {
 		t.Errorf("ShutdownTimeout = %v, want %v", config.ShutdownTimeout, 5*time.Second)
 	}
 	if config.MaxPortAttempts != 10 {
 		t.Errorf("MaxPortAttempts = %d, want 10", config.MaxPortAttempts)
-	}
-	// Socket path should be empty by default
-	if config.SocketPath != "" {
-		t.Errorf("SocketPath = %q, want empty", config.SocketPath)
 	}
 }
 
@@ -365,7 +358,6 @@ func TestStartServer_WriteTimeout_NonStreamingEndpoint(t *testing.T) {
 	config := webui.ServerConfig{
 		Port:            port,
 		BindAddress:     "127.0.0.1",
-		PoolSize:        1,
 		ShutdownTimeout: 1 * time.Second,
 		MaxPortAttempts: 5,
 	}
@@ -401,11 +393,8 @@ func TestStartServer_WriteTimeout_NonStreamingEndpoint(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	// /api/health may return 200 (pool-less / fleet steady state) or 503
-	// (pool present but daemon unreachable, as in this test where PoolSize=1
-	// but no real daemon is started). The point of the test is that the
-	// response completes well-formed within the WriteTimeout, not the exact
-	// status code.
+	// The point of the test is that the response completes well-formed within
+	// the WriteTimeout.
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		cancel()

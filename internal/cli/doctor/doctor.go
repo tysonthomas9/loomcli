@@ -67,7 +67,7 @@ var doctorCmd = &cobra.Command{
 	GroupID: "workspace",
 	Long: `Diagnose the health of your loom installation, configuration, and runtime.
 
-Runs a series of checks covering prerequisite tools, daemon status,
+Runs a series of checks covering prerequisite tools, runtime status,
 configuration validity, worktree state, and connectivity. Reports
 actionable pass/warn/fail results.
 
@@ -140,9 +140,9 @@ func collectDoctorChecks(cmd *cobra.Command) []checkFunc {
 	} else {
 		checks = append(checks, checkFleetDB)
 	}
-	checks = append(checks, checkBackendCLI, checkProjectConfig, checkGlobalConfig,
+	checks = append(checks, checkBackendCLI, checkGlobalConfig,
 		checkWorktrees, checkStaleLocks, checkStaleSignalFiles, checkStaleSessionRecords,
-		checkOrphanedTranscripts, checkOrphanedTmuxSessions, checkLoomDaemon, checkDaemonStuck, checkRedis,
+		checkOrphanedTranscripts, checkOrphanedTmuxSessions, checkRedis,
 		func() CheckResult { return checkOrphanedFleetLocks(deps) })
 	return checks
 }

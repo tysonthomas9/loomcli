@@ -274,7 +274,9 @@ describe("local-task-runner pure helpers", () => {
     process.env.LOOM_ALLOWED_TOOLS = "read, grep,read";
     process.env.LOOM_DENIED_TOOLS = "write";
     const prompt = applyRolePolicy("Do the work");
-    assert.match(prompt, /READ-ONLY run/);
+    assert.match(prompt, /REPOSITORY READ-ONLY run/);
+    assert.match(prompt, /MUST save a requested design/);
+    assert.match(prompt, /task-data handoff/);
     assert.match(prompt, /read, grep/);
     assert.match(prompt, /Do not use these tool categories: write/);
     assert.ok(prompt.endsWith("Do the work"));

@@ -107,7 +107,14 @@ func TestEnsureReviewerUsesOnlyExactManagedAgentsCommands(t *testing.T) {
 		got.Behavior != (agents.BehaviorReference{RoleName: RoleName}) ||
 		got.DesiredState != agents.DesiredRunning ||
 		got.MaxInstances != 1 ||
-		len(got.Metadata) != 0 {
+		got.Metadata[agents.MetadataRoleKind] != "interactive" ||
+		got.Metadata[agents.MetadataBackend] != "" ||
+		got.Metadata[agents.MetadataFallbackBackends] != "[]" ||
+		got.Metadata[agents.MetadataRepos] != "[]" ||
+		got.Metadata[agents.MetadataRepoGroups] != "[]" ||
+		got.Metadata[agents.MetadataCrossRepo] != "false" ||
+		got.Metadata[agents.MetadataAuto] != "false" ||
+		len(got.Metadata) != 7 {
 		t.Fatalf("Agent command = %#v", got)
 	}
 }

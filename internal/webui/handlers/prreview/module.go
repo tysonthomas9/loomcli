@@ -7,7 +7,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/app/agentscompat"
 	"github.com/tysonthomas9/loomcli/internal/app/prreviewer"
 	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
@@ -42,7 +41,6 @@ type Module struct {
 	interactionChat         interaction.ChatAPI
 	interactionMessenger    interaction.ChatMessenger
 	interactionAuthority    workflowcataloghttp.OperatorAuthorityResolver
-	managedRetirements      agentscompat.ManagedRetirements
 	localSettingsDir        string
 	checkoutReviewerPRHead  reviewerCheckoutFunc
 	recordReviewerPRContext reviewerRecordContextFunc
@@ -74,12 +72,7 @@ func NewModule(
 	interactionChat interaction.ChatAPI,
 	interactionMessenger interaction.ChatMessenger,
 	interactionAuthority workflowcataloghttp.OperatorAuthorityResolver,
-	retirements ...agentscompat.ManagedRetirements,
 ) *Module {
-	var managedRetirements agentscompat.ManagedRetirements
-	if len(retirements) > 0 {
-		managedRetirements = retirements[0]
-	}
 	return &Module{
 		store:                   st,
 		dispatcher:              disp,
@@ -91,7 +84,6 @@ func NewModule(
 		interactionChat:         interactionChat,
 		interactionMessenger:    interactionMessenger,
 		interactionAuthority:    interactionAuthority,
-		managedRetirements:      managedRetirements,
 		localSettingsDir:        strings.TrimSpace(localSettingsDir),
 		checkoutReviewerPRHead:  localworkspace.EnsureDetachedGitWorktreeAtFetchedPRHead,
 		recordReviewerPRContext: localworkspace.RecordPRReviewContextFromFetchedBase,

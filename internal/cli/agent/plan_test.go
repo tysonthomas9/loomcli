@@ -3,7 +3,6 @@ package agent
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -104,60 +103,6 @@ func TestRunPlan_SingleTask_Success(t *testing.T) {
 	_, err := os.Stat(filepath.Join(tmpDir, LockFileName))
 	if err == nil {
 		t.Error("lock file should be released after runPlan completes")
-	}
-}
-
-func TestRunPlan_DaemonMode_AcquiresLock(t *testing.T) {
-	// not parallel: mutates global planDaemonMode, os.Chdir, os.Stdout capture
-
-	tmpDir := t.TempDir()
-	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
-	origDir, _ := os.Getwd()
-	os.Chdir(tmpDir)
-	t.Cleanup(func() { os.Chdir(origDir) })
-
-	os.MkdirAll(filepath.Join(tmpDir, ".git"), 0755)
-
-	deps, _, _, _, _ := NewTestDeps(t)
-	recorder := SetupMockAgentInvokerOn(t, deps, nil)
-
-	oldStdout := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
-	origDaemon := planDaemonMode
-	planDaemonMode = true
-	t.Cleanup(func() { planDaemonMode = origDaemon })
-
-	cmd := newPlanCmd(deps)
-	cmd.Run(cmd, nil)
-
-	w.Close()
-	os.Stdout = oldStdout
-	var buf bytes.Buffer
-	buf.ReadFrom(r)
-
-	// Daemon mode routes through the wrapper-backed non-interactive path so
-	// the supervisor watchdog sees per-turn stream output (see runPlanDaemon).
-	if len(recorder.NonInteractiveCalls) != 1 {
-		t.Fatalf("expected 1 agent non-interactive invocation in daemon mode, got %d", len(recorder.NonInteractiveCalls))
-	}
-	if len(recorder.InteractiveCalls) != 0 {
-		t.Fatalf("daemon mode must not invoke the interactive path, got %d calls", len(recorder.InteractiveCalls))
-	}
-
-	lockPath := filepath.Join(tmpDir, LockFileName)
-	data, err := os.ReadFile(lockPath)
-	if err != nil {
-		t.Fatalf("expected lock file to exist in daemon mode, got error: %v", err)
-	}
-
-	var info LockInfo
-	if err := json.Unmarshal(data, &info); err != nil {
-		t.Fatalf("failed to parse lock file: %v", err)
-	}
-	if info.Command != "plan" {
-		t.Errorf("expected lock command 'plan', got %q", info.Command)
 	}
 }
 

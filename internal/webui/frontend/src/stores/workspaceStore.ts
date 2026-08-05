@@ -200,9 +200,8 @@ export function createWorkspaceStore(): StoreApi<WorkspaceStore> {
     };
 
     const upsertAgent = (agent: WorkspaceData["agents"][number]): void => {
-      // Unified create responses include supervised, prompt, scripted, and
-      // binding-backed records. Older and non-supervised shapes may omit the
-      // workspace model's collection fields, so normalize at this runtime
+      // Canonical create responses include interactive and background Agent
+      // shapes. Normalize optional workspace collection fields at this runtime
       // boundary before File Explorer and repo-scope consumers iterate them.
       const normalizedAgent: WorkspaceData["agents"][number] = {
         ...agent,

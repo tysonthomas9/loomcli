@@ -335,57 +335,6 @@ func (t *tracedAgentOwnershipLeaseStore) ReleaseOwned(
 	)
 }
 
-// --- AgentCommandStore ---
-
-type tracedAgentCommandStore struct{ inner store.AgentCommandStore }
-
-func (t *tracedAgentCommandStore) Create(ctx context.Context, in store.AgentCommandCreate) (*domain.AgentCommand, error) {
-	return traced(ctx, "AgentCommands", "Create", func(ctx context.Context) (*domain.AgentCommand, error) {
-		return t.inner.Create(ctx, in)
-	},
-		attribute.String("loom.workspace", in.WorkspaceKey),
-	)
-}
-
-func (t *tracedAgentCommandStore) Get(ctx context.Context, ws, commandID string) (*domain.AgentCommand, error) {
-	return traced(ctx, "AgentCommands", "Get", func(ctx context.Context) (*domain.AgentCommand, error) {
-		return t.inner.Get(ctx, ws, commandID)
-	},
-		attribute.String("loom.workspace", ws),
-	)
-}
-
-func (t *tracedAgentCommandStore) List(ctx context.Context, ws string, filter store.AgentCommandFilter) ([]*domain.AgentCommand, error) {
-	return tracedList(ctx, "AgentCommands", "List", func(ctx context.Context) ([]*domain.AgentCommand, error) {
-		return t.inner.List(ctx, ws, filter)
-	},
-		attribute.String("loom.workspace", ws),
-	)
-}
-
-func (t *tracedAgentCommandStore) Ack(
-	ctx context.Context,
-	ws,
-	commandID string,
-	ack store.AgentCommandAck,
-) (*domain.AgentCommand, error) {
-	return traced(ctx, "AgentCommands", "Ack", func(ctx context.Context) (*domain.AgentCommand, error) {
-		return t.inner.Ack(ctx, ws, commandID, ack)
-	},
-		attribute.String("loom.workspace", ws),
-	)
-}
-
-func (t *tracedAgentCommandStore) Complete(ctx context.Context, ws, commandID string, update store.AgentCommandComplete) (*domain.AgentCommand, error) {
-	return traced(ctx, "AgentCommands", "Complete", func(ctx context.Context) (*domain.AgentCommand, error) {
-		return t.inner.Complete(ctx, ws, commandID, update)
-	},
-		attribute.String("loom.workspace", ws),
-	)
-}
-
-// --- AgentInboxMessageStore ---
-
 type tracedAgentInboxMessageStore struct{ inner store.AgentInboxMessageStore }
 
 func (t *tracedAgentInboxMessageStore) Create(ctx context.Context, in store.AgentInboxMessageCreate) (*domain.AgentInboxMessage, error) {

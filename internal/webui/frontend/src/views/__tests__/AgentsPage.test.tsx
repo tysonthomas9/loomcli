@@ -81,7 +81,6 @@ const mocks = vi.hoisted(() => {
       name: string;
       role?: string;
       role_kind?: string;
-      daemon_managed?: boolean;
       repo?: string;
       status?: string;
       branch?: string;
@@ -556,6 +555,39 @@ describe("AgentsPage", () => {
     );
   });
 
+  it("prefers a durable record over its same-id legacy roster projection", async () => {
+    mocks.routeAgentName = "agent-record-1";
+    mocks.agents = [
+      {
+        name: "agent-record-1",
+        role: "plan",
+        status: "ready",
+        branch: "main",
+        repo: "sandbox",
+        worktree_path: "/tmp/legacy-projection",
+      },
+    ];
+    mocks.agentRecords = [durableRecord()];
+    mocks.useAgentHistory.mockReturnValue({
+      runs: [],
+      sessions: [],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    render(<AgentsPage />);
+
+    expect(await screen.findByTestId("agent-record-header")).toBeTruthy();
+    expect(mocks.useAgentHistory).toHaveBeenCalledWith(
+      "DESKTOP-QA",
+      "agent-record-1",
+      true,
+    );
+    expect(screen.queryByTestId("agent-lifecycle-controls")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Git" })).toBeNull();
+  });
+
   it("opens a durable-agent run task in the inline right pane without leaving the agent route", async () => {
     mocks.routeAgentName = "agent-record-1";
     mocks.agents = [];
@@ -828,14 +860,13 @@ describe("AgentsPage", () => {
     });
   });
 
-  it("does not expose or seed Terminal for a daemon-supervised advanced worker", async () => {
+  it("does not expose or seed Terminal for a background advanced worker", async () => {
     mocks.routeAgentName = "triage-1";
     mocks.agents = [
       {
         name: "triage-1",
         role: "bug-triage",
         role_kind: "worker",
-        daemon_managed: true,
         status: "ready",
         branch: "agent/triage-1",
         repo: "loomcli",

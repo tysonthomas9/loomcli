@@ -24,14 +24,11 @@ import (
 
 const agentRecordTestWS = "WS"
 
-func TestUnifiedAgentsListMergesSupervisedRecordsAndLegacyBindings(t *testing.T) {
+func TestUnifiedAgentsListUsesCanonicalRecordsOnly(t *testing.T) {
 	st := newAgentRecordStore(t)
 	ctx := context.Background()
 	seedRole(t, st, "docs-assistant")
 	seedDriverVersion(t, st, "driver-1", "version-1")
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{WorkspaceKey: agentRecordTestWS, Name: "falcon", RoleName: "task"}); err != nil {
-		t.Fatalf("create supervised agent: %v", err)
-	}
 	if _, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
 		WorkspaceKey: agentRecordTestWS, ServiceID: "agt-docs-x7", Name: "Docs assistant",
 		Kind: domain.AgentServiceKindEvent, DesiredState: domain.AgentServiceDesiredRunning, RoleName: "docs-assistant",
@@ -69,8 +66,8 @@ func TestUnifiedAgentsListMergesSupervisedRecordsAndLegacyBindings(t *testing.T)
 	for _, item := range items {
 		kinds[item["kind"].(string)] = item
 	}
-	if kinds[agentRecordKindSupervised]["id"] != "falcon" {
-		t.Fatalf("supervised item = %+v", kinds[agentRecordKindSupervised])
+	if len(items) != 2 {
+		t.Fatalf("items = %+v, want only two canonical records", items)
 	}
 	if kinds[agentRecordKindPrompt]["id"] != "agt-docs-x7" {
 		t.Fatalf("prompt item = %+v", kinds[agentRecordKindPrompt])
@@ -85,12 +82,9 @@ func TestUnifiedAgentsListMergesSupervisedRecordsAndLegacyBindings(t *testing.T)
 	if bindings, ok := kinds[agentRecordKindPrompt]["bindings"].([]any); !ok || len(bindings) != 1 {
 		t.Fatalf("prompt bindings = %#v, want one attached binding", kinds[agentRecordKindPrompt]["bindings"])
 	}
-	if kinds[agentRecordKindBinding]["id"] != "legacy-review" {
-		t.Fatalf("legacy binding item = %+v", kinds[agentRecordKindBinding])
-	}
 }
 
-func TestUnifiedLegacyBindingFallbackSupportsDetailRenameAndDelete(t *testing.T) {
+func TestUnifiedLegacyBindingFallbackIsRetired(t *testing.T) {
 	st := newAgentRecordStore(t)
 	ctx := context.Background()
 	seedDriverVersion(t, st, "legacy-driver", "legacy-version")
@@ -110,49 +104,24 @@ func TestUnifiedLegacyBindingFallbackSupportsDetailRenameAndDelete(t *testing.T)
 	mux := newAgentsMux(st)
 
 	rec := doAgentRequest(t, mux, http.MethodGet, "/api/workspaces/WS/agents/legacy-review", "")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("legacy GET status = %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("legacy GET status = %d body=%s, want 404", rec.Code, rec.Body.String())
 	}
-	var got legacyBindingAgentDTO
-	decodeJSON(t, rec.Body.Bytes(), &got)
-	if got.ID != "legacy-review" || got.Kind != agentRecordKindBinding || got.Name != "Legacy review" {
-		t.Fatalf("legacy GET = %+v", got)
+	rec = doAgentRequest(t, mux, http.MethodPatch, "/api/workspaces/WS/agents/legacy-review", `{"name":"Renamed review"}`)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("legacy PATCH status = %d body=%s, want 404", rec.Code, rec.Body.String())
 	}
-
-	rec = doAgentRequest(
-		t,
-		mux,
-		http.MethodPatch,
-		"/api/workspaces/WS/agents/legacy-review",
-		`{"name":"Must not persist","backend":"claude"}`,
-	)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("legacy foreign-kind PATCH status = %d body=%s, want 400", rec.Code, rec.Body.String())
+	rec = doAgentRequest(t, mux, http.MethodDelete, "/api/workspaces/WS/agents/legacy-review", "")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("legacy DELETE status = %d body=%s, want 404", rec.Code, rec.Body.String())
 	}
 	unchanged, err := st.TriggerBindings().Get(ctx, agentRecordTestWS, "legacy-review")
 	if err != nil || unchanged.Name != "Legacy review" {
-		t.Fatalf("legacy foreign-kind PATCH mutated binding = %+v err=%v", unchanged, err)
-	}
-
-	rec = doAgentRequest(t, mux, http.MethodPatch, "/api/workspaces/WS/agents/legacy-review", `{"name":"Renamed review"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("legacy PATCH status = %d body=%s", rec.Code, rec.Body.String())
-	}
-	binding, err := st.TriggerBindings().Get(ctx, agentRecordTestWS, "legacy-review")
-	if err != nil || binding.Name != "Renamed review" {
-		t.Fatalf("binding after PATCH = %+v err=%v", binding, err)
-	}
-
-	rec = doAgentRequest(t, mux, http.MethodDelete, "/api/workspaces/WS/agents/legacy-review", "")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("legacy DELETE status = %d body=%s", rec.Code, rec.Body.String())
-	}
-	if _, err := st.TriggerBindings().Get(ctx, agentRecordTestWS, "legacy-review"); !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("binding after DELETE err = %v, want ErrNotFound", err)
+		t.Fatalf("retired route mutated binding = %+v err=%v", unchanged, err)
 	}
 	grants, err := st.ConnectorGrants().ListByBinding(ctx, agentRecordTestWS, "legacy-review")
-	if err != nil || len(grants) != 0 {
-		t.Fatalf("legacy grants after DELETE = %+v err=%v", grants, err)
+	if err != nil || len(grants) != 1 {
+		t.Fatalf("retired route mutated grants = %+v err=%v", grants, err)
 	}
 }
 
@@ -201,16 +170,12 @@ func TestUnifiedSupervisedCreateRejectsAgentRecordIDCollision(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create agent record: %v", err)
 	}
-	service := newAuthorizedTestAgentService(t, st)
 	mux := http.NewServeMux()
-	newTestAgentsModule(service, st, nil, agentRecordTestWS).Register(mux)
+	newTestAgentsModule(nil, st, nil, agentRecordTestWS).Register(mux)
 
 	rec := doAgentRequest(t, mux, http.MethodPost, "/api/workspaces/WS/agents", `{"name":"agt-reserved","role_name":"task","kind":"worker","backend":"codex"}`)
-	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "already used by an agent record") {
-		t.Fatalf("collision status = %d body=%s, want 409", rec.Code, rec.Body.String())
-	}
-	if _, err := st.Agents().Get(ctx, agentRecordTestWS, "agt-reserved"); !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("colliding supervised agent persisted, err=%v", err)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "AgentProvisioning") {
+		t.Fatalf("background create status = %d body=%s, want AgentProvisioning guidance", rec.Code, rec.Body.String())
 	}
 }
 
@@ -225,23 +190,19 @@ func TestUnifiedSupervisedCreateRejectsLegacyBindingIDCollision(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create legacy binding: %v", err)
 	}
-	service := newAuthorizedTestAgentService(t, st)
 	mux := http.NewServeMux()
-	newTestAgentsModule(service, st, nil, agentRecordTestWS).Register(mux)
+	newTestAgentsModule(nil, st, nil, agentRecordTestWS).Register(mux)
 
 	rec := doAgentRequest(t, mux, http.MethodPost, "/api/workspaces/WS/agents", `{"name":"legacy-reserved","role_name":"task","kind":"worker","backend":"codex"}`)
-	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "already used by a legacy binding agent") {
-		t.Fatalf("collision status = %d body=%s, want 409", rec.Code, rec.Body.String())
-	}
-	if _, err := st.Agents().Get(ctx, agentRecordTestWS, "legacy-reserved"); !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("colliding supervised agent persisted, err=%v", err)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "AgentProvisioning") {
+		t.Fatalf("background create status = %d body=%s, want AgentProvisioning guidance", rec.Code, rec.Body.String())
 	}
 	if _, err := st.TriggerBindings().Get(ctx, agentRecordTestWS, "legacy-reserved"); err != nil {
 		t.Fatalf("legacy binding mutated: %v", err)
 	}
 }
 
-func TestUnifiedItemRoutesFailClosedOnExistingCrossKindCollision(t *testing.T) {
+func TestUnifiedItemRoutesUseCanonicalRecord(t *testing.T) {
 	st := newAgentRecordStore(t)
 	ctx := context.Background()
 	seedRole(t, st, "docs-assistant")
@@ -251,34 +212,23 @@ func TestUnifiedItemRoutesFailClosedOnExistingCrossKindCollision(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create record: %v", err)
 	}
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{
-		WorkspaceKey: agentRecordTestWS, Name: "collision", RoleName: "task",
-	}); err != nil {
-		t.Fatalf("create supervised agent: %v", err)
-	}
 	mux := newAgentsMux(st)
 
 	listRec := doAgentRequest(t, mux, http.MethodGet, "/api/workspaces/WS/agents", "")
-	if listRec.Code != http.StatusConflict {
-		t.Fatalf("list collision status = %d body=%s, want 409", listRec.Code, listRec.Body.String())
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("canonical list status = %d body=%s, want 200", listRec.Code, listRec.Body.String())
 	}
-	assertAgentErrorWireResponse(t, listRec, false)
-	for _, method := range []string{http.MethodGet, http.MethodPatch, http.MethodDelete} {
-		body := ""
-		if method == http.MethodPatch {
-			body = `{"name":"Must not apply"}`
-		}
-		rec := doAgentRequest(t, mux, method, "/api/workspaces/WS/agents/collision", body)
-		if rec.Code != http.StatusConflict {
-			t.Fatalf("%s collision status = %d body=%s, want 409", method, rec.Code, rec.Body.String())
-		}
+	items := decodeListItems(t, listRec.Body.Bytes())
+	if len(items) != 1 || items[0]["id"] != "collision" {
+		t.Fatalf("canonical list = %+v, want only canonical record", items)
+	}
+	getRec := doAgentRequest(t, mux, http.MethodGet, "/api/workspaces/WS/agents/collision", "")
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("canonical get status = %d body=%s, want 200", getRec.Code, getRec.Body.String())
 	}
 	record, err := st.AgentServices().Get(ctx, agentRecordTestWS, "collision")
 	if err != nil || record.Name != "Record" || record.DeletedAt != nil {
 		t.Fatalf("colliding record mutated: %+v err=%v", record, err)
-	}
-	if _, err := st.Agents().Get(ctx, agentRecordTestWS, "collision"); err != nil {
-		t.Fatalf("colliding supervised agent mutated: %v", err)
 	}
 }
 
@@ -290,8 +240,8 @@ func TestUnifiedAgentCreateRejectsOversizedBodyWithServiceErrorEnvelope(t *testi
 	assertAgentErrorWireResponse(t, rec, true)
 }
 
-func TestUnifiedRoutesFailClosedOnLegacyBindingIdentityCollision(t *testing.T) {
-	for _, ownerKind := range []string{"supervised", "record"} {
+func TestUnifiedRoutesIgnoreUnrelatedBindingIdentityCollision(t *testing.T) {
+	for _, ownerKind := range []string{"record"} {
 		t.Run(ownerKind, func(t *testing.T) {
 			st := newAgentRecordStore(t)
 			ctx := context.Background()
@@ -305,12 +255,6 @@ func TestUnifiedRoutesFailClosedOnLegacyBindingIdentityCollision(t *testing.T) {
 				t.Fatalf("create legacy binding: %v", err)
 			}
 			switch ownerKind {
-			case "supervised":
-				if _, err := st.Agents().Create(ctx, store.AgentCreate{
-					WorkspaceKey: agentRecordTestWS, Name: "collision", RoleName: "task",
-				}); err != nil {
-					t.Fatalf("create supervised agent: %v", err)
-				}
 			case "record":
 				if _, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
 					WorkspaceKey: agentRecordTestWS, ServiceID: "collision", Name: "Record",
@@ -322,29 +266,23 @@ func TestUnifiedRoutesFailClosedOnLegacyBindingIdentityCollision(t *testing.T) {
 
 			mux := newAgentsMux(st)
 			listRec := doAgentRequest(t, mux, http.MethodGet, "/api/workspaces/WS/agents", "")
-			if listRec.Code != http.StatusConflict {
-				t.Fatalf("list collision status = %d body=%s, want 409", listRec.Code, listRec.Body.String())
+			if listRec.Code != http.StatusOK {
+				t.Fatalf("canonical list status = %d body=%s, want 200", listRec.Code, listRec.Body.String())
 			}
-			for _, method := range []string{http.MethodGet, http.MethodPatch, http.MethodDelete} {
-				body := ""
-				if method == http.MethodPatch {
-					body = `{"name":"Must not apply"}`
-				}
-				rec := doAgentRequest(t, mux, method, "/api/workspaces/WS/agents/collision", body)
-				if rec.Code != http.StatusConflict {
-					t.Fatalf("%s collision status = %d body=%s, want 409", method, rec.Code, rec.Body.String())
-				}
+			items := decodeListItems(t, listRec.Body.Bytes())
+			if ownerKind == "record" && (len(items) != 1 || items[0]["id"] != "collision") {
+				t.Fatalf("canonical record list = %+v", items)
+			}
+			getRec := doAgentRequest(t, mux, http.MethodGet, "/api/workspaces/WS/agents/collision", "")
+			if getRec.Code != http.StatusOK {
+				t.Fatalf("canonical get status = %d body=%s, want 200", getRec.Code, getRec.Body.String())
 			}
 
 			binding, err := st.TriggerBindings().Get(ctx, agentRecordTestWS, "collision")
 			if err != nil || binding.Name != "Legacy binding" {
 				t.Fatalf("colliding legacy binding mutated: %+v err=%v", binding, err)
 			}
-			if ownerKind == "supervised" {
-				if _, err := st.Agents().Get(ctx, agentRecordTestWS, "collision"); err != nil {
-					t.Fatalf("colliding supervised agent mutated: %v", err)
-				}
-			} else {
+			if ownerKind == "record" {
 				record, err := st.AgentServices().Get(ctx, agentRecordTestWS, "collision")
 				if err != nil || record.Name != "Record" || record.DeletedAt != nil {
 					t.Fatalf("colliding record mutated: %+v err=%v", record, err)
@@ -953,8 +891,8 @@ func TestAgentRunsNewestFirstAndExcludesUnattributedRuns(t *testing.T) {
 	if out.AgentID != created.ID {
 		t.Fatalf("agent_id = %q, want %q", out.AgentID, created.ID)
 	}
-	if len(out.Runs) != 3 || out.Runs[0].RunID != "run-legacy" || out.Runs[1].RunID != "run-new" || out.Runs[2].RunID != "run-old" {
-		t.Fatalf("runs = %+v, want legacy compatibility plus deduplicated direct runs", out.Runs)
+	if len(out.Runs) != 2 || out.Runs[0].RunID != "run-new" || out.Runs[1].RunID != "run-old" {
+		t.Fatalf("runs = %+v, want canonical managed-binding runs only", out.Runs)
 	}
 
 	rec = doAgentRequest(t, mux, http.MethodDelete, "/api/workspaces/WS/agents/"+created.ID, "")
@@ -975,16 +913,15 @@ func TestAgentRunsNewestFirstAndExcludesUnattributedRuns(t *testing.T) {
 	}
 }
 
-func TestAgentRunsReturnsSupervisedSessionsNewestFirst(t *testing.T) {
+func TestAgentRunsDoesNotProjectInteractionSessions(t *testing.T) {
 	st := newAgentRecordStore(t)
 	ctx := context.Background()
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{
-		WorkspaceKey: agentRecordTestWS,
-		Name:         "falcon",
-		RoleName:     "task",
-		Backend:      "codex",
+	seedRole(t, st, "task")
+	if _, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
+		WorkspaceKey: agentRecordTestWS, ServiceID: "falcon", Name: "falcon", RoleName: "task",
+		Kind: domain.AgentServiceKindSupport, DesiredState: domain.AgentServiceDesiredRunning, MaxInstances: 1,
 	}); err != nil {
-		t.Fatalf("create supervised agent: %v", err)
+		t.Fatalf("create canonical agent: %v", err)
 	}
 	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
 		WorkspaceKey: agentRecordTestWS,
@@ -1021,17 +958,8 @@ func TestAgentRunsReturnsSupervisedSessionsNewestFirst(t *testing.T) {
 	if out.AgentID != "falcon" || len(out.Runs) != 0 {
 		t.Fatalf("supervised history envelope = %+v", out)
 	}
-	if len(out.Sessions) != 2 || out.Sessions[0].SessionID != "session-new" || out.Sessions[1].SessionID != "session-old" {
-		t.Fatalf("supervised sessions = %+v, want newest then oldest", out.Sessions)
-	}
-	if out.Sessions[0].StartedAt != nil {
-		t.Fatalf("zero started_at must be omitted, got %v", out.Sessions[0].StartedAt)
-	}
-	if len(out.Sessions[0].Metadata) != 1 || out.Sessions[0].Metadata["backend"] != "codex" {
-		t.Fatalf("public session metadata = %#v, want backend only", out.Sessions[0].Metadata)
-	}
-	if strings.Contains(rec.Body.String(), "private-session") || strings.Contains(rec.Body.String(), "transcript_path") {
-		t.Fatalf("agent history leaked internal metadata: %s", rec.Body.String())
+	if len(out.Sessions) != 0 {
+		t.Fatalf("retired Interaction session projection leaked into Agent history: %+v", out.Sessions)
 	}
 
 	rec = doAgentRequest(t, newAgentsMux(st), http.MethodGet, "/api/workspaces/WS/agents/falcon/runs?limit=1", "")
@@ -1040,21 +968,20 @@ func TestAgentRunsReturnsSupervisedSessionsNewestFirst(t *testing.T) {
 	}
 	out = agentRunsResponse{}
 	decodeJSON(t, rec.Body.Bytes(), &out)
-	if len(out.Sessions) != 1 || out.Sessions[0].SessionID != "session-new" {
-		t.Fatalf("limited supervised sessions = %+v", out.Sessions)
+	if len(out.Sessions) != 0 {
+		t.Fatalf("limited Agent history leaked Interaction sessions: %+v", out.Sessions)
 	}
 }
 
-func TestAgentRunsProjectsCanonicalTaskRunsAndDeduplicatesLegacyShadows(t *testing.T) {
+func TestAgentRunsDoesNotProjectTaskRunsOrLegacySessionShadows(t *testing.T) {
 	st := newAgentRecordStore(t)
 	ctx := context.Background()
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{
-		WorkspaceKey: agentRecordTestWS,
-		Name:         "falcon",
-		RoleName:     "task",
-		Backend:      "codex",
+	seedRole(t, st, "task")
+	if _, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
+		WorkspaceKey: agentRecordTestWS, ServiceID: "falcon", Name: "falcon", RoleName: "task",
+		Kind: domain.AgentServiceKindSupport, DesiredState: domain.AgentServiceDesiredRunning, MaxInstances: 1,
 	}); err != nil {
-		t.Fatalf("create supervised agent: %v", err)
+		t.Fatalf("create canonical agent: %v", err)
 	}
 	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
 		WorkspaceKey:    agentRecordTestWS,
@@ -1102,26 +1029,8 @@ func TestAgentRunsProjectsCanonicalTaskRunsAndDeduplicatesLegacyShadows(t *testi
 	}
 	var out agentRunsResponse
 	decodeJSON(t, rec.Body.Bytes(), &out)
-	if len(out.Sessions) != 1 {
-		t.Fatalf("supervised sessions = %+v, want one canonical TaskRun projection", out.Sessions)
-	}
-	session := out.Sessions[0]
-	if session.SessionID != "task-run-batch-1" ||
-		session.TaskID != "TASK-42" ||
-		session.AgentID != "falcon" ||
-		session.Kind != domain.AgentSessionKindTask ||
-		session.Status != domain.AgentSessionCompleted {
-		t.Fatalf(
-			"canonical history identifiers = %+v, want clickable task TASK-42 and transcript session task-run-batch-1",
-			session,
-		)
-	}
-	if session.Metadata["backend"] != "codex" {
-		t.Fatalf("canonical history metadata = %#v, want backend codex", session.Metadata)
-	}
-	if strings.Contains(rec.Body.String(), "legacy-task-run-shadow") ||
-		strings.Contains(rec.Body.String(), "TASK-FOREIGN") {
-		t.Fatalf("history leaked a legacy shadow or foreign worker run: %s", rec.Body.String())
+	if len(out.Sessions) != 0 {
+		t.Fatalf("Agent history leaked TaskRun or session compatibility projections: %+v", out.Sessions)
 	}
 
 	rec = doAgentRequest(
@@ -1136,15 +1045,12 @@ func TestAgentRunsProjectsCanonicalTaskRunsAndDeduplicatesLegacyShadows(t *testi
 	}
 	out = agentRunsResponse{}
 	decodeJSON(t, rec.Body.Bytes(), &out)
-	if len(out.Sessions) != 1 || out.Sessions[0].SessionID != "task-run-batch-1" {
-		t.Fatalf(
-			"limited supervised sessions = %+v, want deduplication before final limit",
-			out.Sessions,
-		)
+	if len(out.Sessions) != 0 {
+		t.Fatalf("limited Agent history leaked compatibility sessions: %+v", out.Sessions)
 	}
 }
 
-func TestAgentRunsReturnsLegacyBindingRuns(t *testing.T) {
+func TestAgentRunsRejectsUnattachedLegacyBindingIdentity(t *testing.T) {
 	st := newAgentRecordStore(t)
 	ctx := context.Background()
 	seedDriverVersion(t, st, "legacy-driver", "legacy-version")
@@ -1171,13 +1077,8 @@ func TestAgentRunsReturnsLegacyBindingRuns(t *testing.T) {
 	}
 
 	rec := doAgentRequest(t, newAgentsMux(st), http.MethodGet, "/api/workspaces/WS/agents/legacy-review/runs", "")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("legacy binding runs status = %d body=%s", rec.Code, rec.Body.String())
-	}
-	var out agentRunsResponse
-	decodeJSON(t, rec.Body.Bytes(), &out)
-	if out.AgentID != "legacy-review" || len(out.Sessions) != 0 || len(out.Runs) != 1 || out.Runs[0].RunID != "legacy-run" {
-		t.Fatalf("legacy binding history = %+v", out)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("legacy binding identity status = %d body=%s, want 404", rec.Code, rec.Body.String())
 	}
 }
 

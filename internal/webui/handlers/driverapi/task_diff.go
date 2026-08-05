@@ -92,7 +92,7 @@ type taskDiffResponse struct {
 // patch is returned. The robust local input is therefore the review card's
 // external_ref stamp plus either the workspace repo's filesystem origin or its
 // verified machine-local checkout. The checkout fallback lets a legacy
-// daemon-supervised Task Runner hand work to Local Review when GitHub PR
+// Execution-owned Task Runner hand work to Local Review when GitHub PR
 // delivery is unavailable without pretending the commit was published.
 //
 // Auth is the same run-scoped verifyParent model as role-get: a trusted

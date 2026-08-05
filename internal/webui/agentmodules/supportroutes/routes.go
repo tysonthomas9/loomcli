@@ -3,6 +3,8 @@ package supportroutes
 import (
 	"net/http"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
+	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/onboarding"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
@@ -13,6 +15,6 @@ type Module interface {
 }
 
 // New composes service-only support routes without importing persistence.
-func New(issueSvc service.IssueService, agentSvc service.AgentService) Module {
-	return onboarding.NewModule(issueSvc, agentSvc)
+func New(issueSvc service.IssueService, agentAPI agents.API, authority workflowcataloghttp.OperatorAuthorityResolver) Module {
+	return onboarding.NewModule(issueSvc, agentAPI, authority)
 }

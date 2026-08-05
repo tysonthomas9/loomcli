@@ -73,14 +73,6 @@ const (
 	// from sending those strict fields to a V1 Fleet that cannot decode them.
 	ExecutionDriverRunReviewWorkItemHandoffCapability = "execution.driver_run_review_work_item_handoff.v2"
 	ExecutionTaskRunLogIdempotencyCapability          = "execution.task_run_log_idempotency.v1"
-	// AgentsLifecycleCommandFencingCapability certifies client-ID Create
-	// recovery, atomic node/stable-owner Ack binding, and owner-fenced,
-	// idempotent command completion. Loom has no unfenced fallback.
-	AgentsLifecycleCommandFencingCapability = "agents.lifecycle_command_fencing.v1"
-	// AgentsLifecycleCommandOwnershipFencingCapability certifies that every
-	// lifecycle Ack/Complete is bound to the current logical-agent ownership
-	// generation, with only the documented no-live convergence exceptions.
-	AgentsLifecycleCommandOwnershipFencingCapability = "agents.lifecycle_command_ownership_fencing.v1"
 	// AgentsServiceCommandsCapability certifies the authenticated Agent/Role
 	// identity commands, desired-state CAS, and owner-fenced desired-state
 	// transition used by the Phase 5 Agents owner. Generic AgentService CRUD is
@@ -116,8 +108,6 @@ const (
 // serve.
 func Phase4FoundationCapabilities() []string {
 	return []string{
-		AgentsLifecycleCommandFencingCapability,
-		AgentsLifecycleCommandOwnershipFencingCapability,
 		ArtifactsOwnerFencedLifecycleCapability,
 		WorkItemsRepositoryRequirementCapability,
 		ExecutionIssueClaimTaskRunStartCapability,

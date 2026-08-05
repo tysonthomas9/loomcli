@@ -79,9 +79,9 @@ func TestPrintIssueDetailTextIncludesOptionalFields(t *testing.T) {
 }
 
 func TestPrintAgentListTextJSONAndEmpty(t *testing.T) {
-	entries := []gen.AgentControlEntry{
-		{Name: "falcon", Role: "task", Status: "idle"},
-		{Name: "nova", Role: "plan", Status: "running"},
+	entries := []agentListEntry{
+		{Name: "falcon", Kind: "prompt", Enabled: false, Behavior: agentListBehavior{RoleName: "task"}},
+		{Name: "nova", Kind: "interactive", Enabled: true, Behavior: agentListBehavior{RoleName: "plan"}},
 	}
 
 	t.Run("text", func(t *testing.T) {
@@ -90,7 +90,7 @@ func TestPrintAgentListTextJSONAndEmpty(t *testing.T) {
 			t.Fatalf("printAgentList text: %v", err)
 		}
 		got := out.String()
-		for _, need := range []string{"NAME", "ROLE", "STATUS", "falcon", "nova"} {
+		for _, need := range []string{"NAME", "KIND", "BEHAVIOR", "STATE", "falcon", "nova", "prompt", "running"} {
 			if !strings.Contains(got, need) {
 				t.Fatalf("text output missing %q:\n%s", need, got)
 			}
@@ -102,7 +102,7 @@ func TestPrintAgentListTextJSONAndEmpty(t *testing.T) {
 		if err := printAgentList(&out, entries, formatJSON); err != nil {
 			t.Fatalf("printAgentList json: %v", err)
 		}
-		var decoded []gen.AgentControlEntry
+		var decoded []agentListEntry
 		if err := json.Unmarshal(out.Bytes(), &decoded); err != nil {
 			t.Fatalf("decode agent list JSON: %v", err)
 		}

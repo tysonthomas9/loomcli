@@ -6,7 +6,6 @@ import (
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/app/agentprovisioning"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
@@ -26,29 +25,18 @@ type BindingGrantCompatibility interface {
 }
 
 type agentSessionTranscriptEvents = service.TranscriptEvents
-type agentLocalSessionHistoryItem = service.SessionListItem
-
-// AgentLocalSessionHistoryReader is the read-only compatibility projection
-// consumed by supervised agent history. Keeping this transport-owned port here
-// prevents the history implementation from importing the legacy WebUI service
-// package while composition can still supply the session service structurally.
-type AgentLocalSessionHistoryReader interface {
-	ListAgentLocalSessions(context.Context, string, string) ([]agentLocalSessionHistoryItem, error)
-}
 
 // Config composes the unified transport with the canonical Agents identity
-// surface and Automation bindings. The composite Store remains for supervised
-// legacy assignments, prompt-agent build/provisioning projections, connector
+// surface and Automation bindings. The composite Store remains for
+// prompt-agent build/provisioning projections, connector
 // compatibility, and run history; public durable Agent identity reads and
 // mutations never use store.AgentServices directly.
 type Config struct {
-	AgentService          service.AgentService
 	AgentRecords          AgentRecordAPI
+	AgentIdentityCreator  CanonicalInteractiveAgentAPI
+	InteractiveRuntime    service.InteractiveAgentRuntime
 	AgentRecordAuthority  workflowcataloghttp.OperatorAuthorityResolver
-	SupervisedAuthority   SupervisedAuthorityContext
-	TaskRunHistory        AgentTaskRunHistoryReader
 	SessionTranscripts    service.AgentSessionTranscriptService
-	LocalSessionHistory   AgentLocalSessionHistoryReader
 	Store                 store.Store
 	Hub                   *realtime.Hub
 	Bindings              automation.BindingOperations
@@ -62,13 +50,12 @@ type Config struct {
 
 // Module registers fleet-db-backed agent assignment routes.
 type Module struct {
-	agentSvc              service.AgentService
 	agentRecords          AgentRecordAPI
+	agentIdentityCreator  CanonicalInteractiveAgentAPI
+	agentRoleQueries      agentsmodule.RoleQueries
+	interactiveRuntime    service.InteractiveAgentRuntime
 	agentRecordAuthority  workflowcataloghttp.OperatorAuthorityResolver
-	supervisedAuthority   SupervisedAuthorityContext
-	taskRunHistory        AgentTaskRunHistoryReader
 	sessionTranscripts    service.AgentSessionTranscriptService
-	localSessionHistory   AgentLocalSessionHistoryReader
 	store                 store.Store
 	hub                   *realtime.Hub
 	bindings              automation.BindingOperations
@@ -84,30 +71,18 @@ type Module struct {
 // New constructs the Automation-aware agent HTTP module.
 func New(config Config) *Module {
 	lifecycle, _ := config.AgentRecords.(AgentLifecycleAPI)
-	supervisedAuthority := config.SupervisedAuthority
-	if supervisedAuthority == nil {
-		supervisedAuthority = service.WithAgentOperatorAuthority
-	}
-	taskRunHistory := config.TaskRunHistory
-	if taskRunHistory == nil && config.Store != nil && config.Store.TaskRuns() != nil {
-		taskRuns := config.Store.TaskRuns()
-		taskRunHistory = func(
-			ctx context.Context,
-			workspace,
-			agentID string,
-		) ([]*domain.TaskRun, error) {
-			return taskRuns.List(ctx, workspace, store.TaskRunFilter{
-				WorkerProfileID: agentID,
-			})
-		}
+	roleQueries, _ := config.AgentRecords.(agentsmodule.RoleQueries)
+	identityCreator := config.AgentIdentityCreator
+	if identityCreator == nil {
+		identityCreator, _ = config.AgentRecords.(CanonicalInteractiveAgentAPI)
 	}
 	return &Module{
-		agentSvc: config.AgentService, agentRecords: config.AgentRecords,
+		agentRecords:         config.AgentRecords,
+		agentIdentityCreator: identityCreator,
+		agentRoleQueries:     roleQueries,
+		interactiveRuntime:   config.InteractiveRuntime,
 		agentRecordAuthority: config.AgentRecordAuthority,
-		supervisedAuthority:  supervisedAuthority,
-		taskRunHistory:       taskRunHistory,
 		sessionTranscripts:   config.SessionTranscripts,
-		localSessionHistory:  config.LocalSessionHistory,
 		store:                config.Store, hub: config.Hub,
 		bindings: config.Bindings, operatorAuthority: config.OperatorAuthority,
 		provisioning: config.Provisioning, provisioningAuthority: config.ProvisioningAuthority,
@@ -128,18 +103,18 @@ type AgentRecordAPI interface {
 	SetDesiredState(context.Context, authority.OperatorAuthority, agentsmodule.SetDesiredStateCommand) (*agentsmodule.Agent, error)
 }
 
+type CanonicalInteractiveAgentAPI interface {
+	CreateAgent(context.Context, authority.OperatorAuthority, agentsmodule.CreateAgentCommand) (*agentsmodule.Agent, error)
+	GetRole(context.Context, string, string) (*agentsmodule.Role, error)
+	CreateRole(context.Context, authority.OperatorAuthority, agentsmodule.CreateRoleCommand) (*agentsmodule.Role, error)
+}
+
 type AgentLifecycleAPI interface {
 	ApplyLifecycle(context.Context, authority.OperatorAuthority, agentsmodule.ApplyLifecycleCommand) (*agentsmodule.LifecycleResult, error)
 }
 
-// NewModule is retained for non-binding legacy/test composition. Binding reads
-// and writes fail closed until callers migrate to New(Config).
-func NewModule(agentSvc service.AgentService, st store.Store, hub *realtime.Hub) *Module {
-	return New(Config{AgentService: agentSvc, Store: st, Hub: hub})
-}
-
 func (m *Module) Register(mux *http.ServeMux) {
-	if m.agentSvc == nil && m.store == nil && m.sessionTranscripts == nil {
+	if m.agentRecords == nil && m.store == nil && m.sessionTranscripts == nil {
 		return
 	}
 	mux.HandleFunc("GET /api/workspaces/{ws}/interactive-prompts", HandleInteractivePrompts())
@@ -148,16 +123,10 @@ func (m *Module) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}", m.getAgent)
 	mux.HandleFunc("PATCH /api/workspaces/{ws}/agents/{name}", m.patchAgent)
 	mux.HandleFunc("DELETE /api/workspaces/{ws}/agents/{name}", m.deleteAgent)
-	mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/queue", HandleQueueUnsupported)
 
-	mux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/stop", m.authorizeSupervisedIntent(HandleStop(m.agentSvc, m.hub)))
-	mux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/start", m.authorizeSupervisedIntent(HandleStart(m.agentSvc, m.hub)))
-	mux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/restart", m.authorizeSupervisedIntent(HandleRestart(m.agentSvc, m.hub)))
-	mux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/yield", m.authorizeSupervisedIntent(HandleYield(m.agentSvc, m.hub)))
-	mux.HandleFunc(
-		"GET /api/workspaces/{ws}/agents/{name}/lifecycle-commands/{command_id}",
-		HandleGetLifecycleCommand(m.agentSvc),
-	)
+	mux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/stop", m.handleCanonicalLifecycle("stop"))
+	mux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/start", m.handleCanonicalLifecycle("start"))
+	mux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/restart", m.handleCanonicalLifecycle("restart"))
 	mux.HandleFunc("POST /api/workspaces/{ws}/agents/{id}/enable", m.setRecordEnabled(true))
 	mux.HandleFunc("POST /api/workspaces/{ws}/agents/{id}/disable", m.setRecordEnabled(false))
 	mux.HandleFunc("GET /api/workspaces/{ws}/agents/{id}/runs", m.listAgentRuns)

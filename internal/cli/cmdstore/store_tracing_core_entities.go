@@ -105,54 +105,6 @@ func (t *tracedRepoStore) Delete(ctx context.Context, ws, name string) error {
 	)
 }
 
-// --- AgentStore ---
-
-type tracedAgentStore struct{ inner store.AgentStore }
-
-func (t *tracedAgentStore) Create(ctx context.Context, in store.AgentCreate) (*domain.Agent, error) {
-	return traced(ctx, "Agents", "Create", func(ctx context.Context) (*domain.Agent, error) {
-		return t.inner.Create(ctx, in)
-	},
-		attribute.String("loom.workspace", in.WorkspaceKey),
-		attribute.String("loom.agent", in.Name),
-	)
-}
-
-func (t *tracedAgentStore) Get(ctx context.Context, ws, name string) (*domain.Agent, error) {
-	return traced(ctx, "Agents", "Get", func(ctx context.Context) (*domain.Agent, error) {
-		return t.inner.Get(ctx, ws, name)
-	},
-		attribute.String("loom.workspace", ws),
-		attribute.String("loom.agent", name),
-	)
-}
-
-func (t *tracedAgentStore) List(ctx context.Context, ws string) ([]*domain.Agent, error) {
-	return tracedList(ctx, "Agents", "List", func(ctx context.Context) ([]*domain.Agent, error) {
-		return t.inner.List(ctx, ws)
-	},
-		attribute.String("loom.workspace", ws),
-	)
-}
-
-func (t *tracedAgentStore) Update(ctx context.Context, ws, name string, patch store.AgentUpdate) (*domain.Agent, error) {
-	return traced(ctx, "Agents", "Update", func(ctx context.Context) (*domain.Agent, error) {
-		return t.inner.Update(ctx, ws, name, patch)
-	},
-		attribute.String("loom.workspace", ws),
-		attribute.String("loom.agent", name),
-	)
-}
-
-func (t *tracedAgentStore) Delete(ctx context.Context, ws, name string) error {
-	return tracedErr(ctx, "Agents", func(ctx context.Context) error {
-		return t.inner.Delete(ctx, ws, name)
-	},
-		attribute.String("loom.workspace", ws),
-		attribute.String("loom.agent", name),
-	)
-}
-
 // --- RoleStore ---
 
 type tracedRoleStore struct{ inner store.RoleStore }

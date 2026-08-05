@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
@@ -191,7 +190,7 @@ func parseMutationPayload(data string) (*realtime.MutationPayload, error) {
 // newLiveSSEServer creates an httptest.NewServer wired to realtime.NewHandler with the
 // given hub and getMutationsSince callback. The caller must call server.Close()
 // and hub.Stop() when done (use t.Cleanup).
-func newLiveSSEServer(t *testing.T, hub *realtime.Hub, getMutationsSince func(wsID string, since string) []rpc.MutationEvent) *httptest.Server {
+func newLiveSSEServer(t *testing.T, hub *realtime.Hub, getMutationsSince func(wsID string, since string) []realtime.MutationEvent) *httptest.Server {
 	t.Helper()
 
 	handler := realtime.NewHandler(realtime.HandlerConfig{Hub: hub, GetMutationsSince: getMutationsSince, WorkspaceFromCtx: middleware.WorkspaceFromContext})
@@ -443,7 +442,7 @@ func TestSSELive_CatchUpOnReconnect(t *testing.T) {
 	go hub.Run()
 	t.Cleanup(hub.Stop)
 
-	catchUpEvents := []rpc.MutationEvent{
+	catchUpEvents := []realtime.MutationEvent{
 		{
 			Type:      "create",
 			IssueID:   "loom-catchup-1",
@@ -458,7 +457,7 @@ func TestSSELive_CatchUpOnReconnect(t *testing.T) {
 		},
 	}
 
-	getMutationsSince := func(wsID string, since string) []rpc.MutationEvent {
+	getMutationsSince := func(wsID string, since string) []realtime.MutationEvent {
 		return catchUpEvents
 	}
 
@@ -512,7 +511,7 @@ func TestSSELive_LastEventIDHeader(t *testing.T) {
 	t.Cleanup(hub.Stop)
 
 	var capturedSince string
-	getMutationsSince := func(wsID string, since string) []rpc.MutationEvent {
+	getMutationsSince := func(wsID string, since string) []realtime.MutationEvent {
 		capturedSince = since
 		return nil
 	}

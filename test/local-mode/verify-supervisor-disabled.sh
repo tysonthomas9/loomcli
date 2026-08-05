@@ -18,10 +18,8 @@ require_manifest_field() {
   jq -er --arg field "$field" '.[$field] | select(type == "string" and length > 0)' "$RUN_MANIFEST"
 }
 
-[ "${LOOM_LOCAL_MODE_PLANE:-}" = "ts" ] || fail "LOOM_LOCAL_MODE_PLANE must be ts"
-[ "${LOOM_TASK_READY_EVENTS:-}" = "1" ] || fail "LOOM_TASK_READY_EVENTS must be 1"
 [ -s "$RUN_MANIFEST" ] || fail "run manifest is missing"
-[ "$(require_manifest_field plane)" = "ts" ] || fail "run manifest does not identify the TS plane"
+[ "$(require_manifest_field plane)" = "ts" ] || fail "run manifest does not identify the prompt-agent execution plane"
 
 PLAN_AGENT_ID="$(require_manifest_field plan_agent_record_id)"
 CODE_AGENT_ID="$(require_manifest_field code_agent_record_id)"
@@ -32,7 +30,7 @@ CODE_BINDING="$(require_manifest_field code_binding_id)"
 
 agentdefs="$(loom agentdef list --json)" || fail "could not list agent definitions"
 if ! printf '%s' "$agentdefs" | jq -e '((.data? // .) | map(select(.auto == true)) | length) == 0' >/dev/null; then
-  fail "auto agent definitions remain in the TS execution plane"
+  fail "auto agent definitions remain in the prompt-agent execution plane"
 fi
 echo "[supervisor-disabled-verify] ok: zero auto agentdefs"
 
@@ -78,4 +76,4 @@ if [ "$control_artifacts" != "" ]; then
 fi
 echo "[supervisor-disabled-verify] ok: zero daemon control sockets"
 
-echo "[supervisor-disabled-verify] supervisor-disabled TS execution controls verified"
+echo "[supervisor-disabled-verify] supervisor-disabled prompt-agent execution verified"

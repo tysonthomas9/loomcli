@@ -9,14 +9,13 @@ import (
 )
 
 // The local runtime re-launches this same loom binary as child processes:
-// `loom serve`, `loom daemon` (the agent supervisor), and `loom local service`.
+// `loom serve` and `loom local service`.
 // Each resolves the binary via os.Executable(). Under `go test`, os.Executable()
 // is the package test binary (local.test), so spawning it as e.g.
-// `local.test daemon` re-runs the ENTIRE local test suite, which re-enters the
+// `local.test serve` re-runs the ENTIRE local test suite, which re-enters the
 // spawn path and forks exponentially until the host dies — a fork bomb. The
-// supervisor package hit the same trap (see its loomExecutablePath seam +
-// TestMain stub in internal/cli/daemon/supervisor); the local package never had
-// the equivalent guard.
+// retired supervisor package once hit the same trap; keep the shared local
+// self-reexec boundary guarded.
 //
 // loomReexecCommand / loomReexecCommandContext are the single choke point for
 // every loom self-re-exec in this package. They refuse to spawn a *.test

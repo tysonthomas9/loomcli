@@ -108,19 +108,20 @@ type WorkerProfileFilter struct {
 }
 
 type WorkerProfileUpdate struct {
-	Name             *string
-	Role             *string
-	Backend          *string
-	RuntimePolicy    *map[string]string
-	Repos            *[]string
-	MaxPriority      *int
-	MaxParallel      *int
-	ClearMaxPriority bool
-	ParentEpic       *string
-	Labels           *[]string
-	Capabilities     *[]string
-	Enabled          *bool
-	Metadata         *map[string]string
+	Name               *string
+	Role               *string
+	Backend            *string
+	RuntimePolicy      *map[string]string
+	Repos              *[]string
+	MaxPriority        *int
+	MaxParallel        *int
+	ClearMaxPriority   bool
+	ParentEpic         *string
+	ExpectedParentEpic *string
+	Labels             *[]string
+	Capabilities       *[]string
+	Enabled            *bool
+	Metadata           *map[string]string
 }
 
 type WorkerProfileStore interface {

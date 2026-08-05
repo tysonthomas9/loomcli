@@ -53,7 +53,17 @@ type WorkerDependencies struct {
 	Registration WorkerNodeRegistrationPort
 	Heartbeats   WorkerNodeHeartbeatPort
 	Drain        WorkerNodeDrainPort
-	Profiles     WorkerProfileMutationPort
+	Profiles     WorkerProfilePort
+}
+
+type WorkerProfilePort interface {
+	WorkerProfileQueryPort
+	WorkerProfileMutationPort
+}
+
+type WorkerProfileQueryPort interface {
+	GetWorkerProfile(context.Context, string, string) (*WorkerProfile, error)
+	ListWorkerProfiles(context.Context, string, WorkerProfileFilter) ([]*WorkerProfile, error)
 }
 
 type WorkerNodeRegistrationPort interface {

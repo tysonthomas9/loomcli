@@ -1,29 +1,21 @@
 package agent
 
 import (
-	"context"
 	"fmt"
 	"os"
-	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/cli/agent/tsruntime"
 	"github.com/tysonthomas9/loomcli/internal/cli/automode"
-	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/workspace"
-	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
 var (
 	agentPromptFile  string
 	agentTaskFilter  string
 	agentAutoMode    bool
-	agentDaemonMode  bool // Hidden: for internal tmux session use
 	agentInterval    int
 	agentMaxTasks    int
 	agentIdleTimeout int
@@ -48,7 +40,7 @@ Required Flags:
   -p, --prompt    Path to prompt template file
 
 Optional Flags:
-  -f, --task-filter   Task filter: needs_design, has_design, or any (bug is supervisor-daemon only)
+  -f, --task-filter   Task filter: needs_design, has_design, bug, or any
   -a, --auto          Enable continuous mode (process multiple tasks)
   -i, --interval      Polling interval in seconds when no tasks (default: 30)
   -m, --max-tasks     Maximum tasks to process before exiting (0 = unlimited)
@@ -70,10 +62,8 @@ Examples:
 func init() {
 	agentCmd.Flags().StringVarP(&agentPromptFile, "prompt", "p", "", "Path to prompt template file")
 	_ = agentCmd.MarkFlagRequired("prompt")
-	agentCmd.Flags().StringVarP(&agentTaskFilter, "task-filter", "f", "any", "Task filter: needs_design, has_design, or any (bug requires supervisor daemon)")
+	agentCmd.Flags().StringVarP(&agentTaskFilter, "task-filter", "f", "any", "Task filter: needs_design, has_design, bug, or any")
 	agentCmd.Flags().BoolVarP(&agentAutoMode, "auto", "a", false, "Enable continuous mode (process multiple tasks)")
-	agentCmd.Flags().BoolVar(&agentDaemonMode, "daemon-mode", false, "Internal: single task mode for daemon")
-	_ = agentCmd.Flags().MarkHidden("daemon-mode")
 	agentCmd.Flags().IntVarP(&agentInterval, "interval", "i", 30, "Polling interval in seconds when no tasks available")
 	agentCmd.Flags().IntVarP(&agentMaxTasks, "max-tasks", "m", 0, "Maximum tasks to process (0 = unlimited)")
 	agentCmd.Flags().IntVarP(&agentIdleTimeout, "idle-timeout", "t", 0, "Exit after N minutes with no tasks (0 = none)")
@@ -82,21 +72,17 @@ func init() {
 }
 
 func runAgent(cmd *cobra.Command, args []string) {
-	deps := cli.GetDeps(cmd)
 	argName := args[0]
 	validatePromptFile(agentPromptFile)
 
-	if err := validateTaskFilterExecutionMode(agentTaskFilter, agentDaemonMode); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		cli.ExitWithFlush(1)
-	}
 	taskCheckFn, err := mapTaskFilter(agentTaskFilter, agentParentID)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		cli.ExitWithFlush(1)
 	}
 
-	// Override with router-based check if daemon env vars provide routing constraints
+	// Override with a server-provided router when this compatibility command is
+	// launched with explicit role routing constraints.
 	if routerCheck := cli.BuildRouterTaskCheck(cli.RoleConfigFromEnv(), cli.AgentEntryFromEnv(), agentParentID); routerCheck != nil {
 		taskCheckFn = routerCheck
 	}
@@ -110,14 +96,6 @@ func runAgent(cmd *cobra.Command, args []string) {
 	worktreePath := target.WorkDir
 	agentName := target.AgentName
 	promptGen := makeCustomPromptGen(agentPromptFile)
-
-	if agentDaemonMode {
-		if err := runAgentDaemon(deps, worktreePath, agentName, promptGen); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			cli.ExitWithFlush(1)
-		}
-		return
-	}
 
 	if agentAutoMode {
 		runAgentAutoMode(worktreePath, agentName, promptGen, taskCheckFn)
@@ -140,187 +118,6 @@ func validatePromptFile(path string) {
 	}
 }
 
-// runAgentDaemon handles daemon mode for a custom-role agent. It mirrors the
-// built-in plan/task leaf contract: bind the supervisor-assigned task to the
-// lock and prompt, invoke headlessly, emit task lifecycle events, and finalize
-// the task-bound session.
-func runAgentDaemon(deps *cli.Deps, worktreePath, agentName string, promptGen func(string, *config.WorkspaceConfig) string) error {
-	if err := cli.AcquireLock(worktreePath, "agent", agentName); err != nil {
-		return err
-	}
-	// Lock intentionally NOT released here. Parent (RunAutoModeTmux)
-	// reads the lock after daemon exit to detect task claims, then
-	// removes it before the next cycle.
-
-	if err := cli.UpdateLockState(worktreePath, cli.StateActive); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not update lock state: %v\n", err)
-	}
-
-	assignedTaskID := strings.TrimSpace(os.Getenv("LOOM_ASSIGNED_TASK_ID"))
-	if err := prepareCustomDaemonAssignment(
-		cmdstore.RootContext(),
-		deps.IssueBackend,
-		worktreePath,
-		assignedTaskID,
-		agentTaskFilter,
-		os.Getenv("LOOM_READ_ONLY") == "1",
-	); err != nil {
-		return err
-	}
-
-	ws, _ := config.ResolveActiveWorkspace()
-	prompt := bindCustomDaemonTask(promptGen(agentName, ws), assignedTaskID, agentTaskFilter)
-	sess := adoptOrCreateSession(agentName, agentParentID, prompt, "implementation")
-
-	emitTaskClaimedFromEnv(agentName, assignedTaskID)
-
-	beforeRef := automode.CaptureHEADRef(worktreePath)
-	startedAt := time.Now()
-	shutdown := automode.SetupSignalHandler()
-	collector := usage.NewCollector(cli.GetBackendName(), agentName)
-	invokeErr := tsruntime.Invoker(deps.Agent).InvokeNonInteractive(worktreePath, prompt, agentName, shutdown, collector)
-	if invokeErr == nil {
-		invokeErr = validateBugDaemonReviewHandoff(
-			cmdstore.RootContext(),
-			deps.IssueBackend,
-			assignedTaskID,
-			agentTaskFilter,
-		)
-	}
-	if invokeErr == nil {
-		clearDaemonResumeOnSuccess(worktreePath)
-	}
-
-	emitTaskLifecycleResult(agentName, worktreePath, startedAt, invokeErr)
-	finalizeAgentSession(sess, worktreePath, beforeRef, invokeErr, collector, startedAt, agentParentID)
-
-	return invokeErr
-}
-
-// prepareCustomDaemonAssignment establishes the leaf's task identity. The
-// resume decision MUST observe the carried lock before this run overwrites its
-// task ID; otherwise a session from task A could be resumed while processing
-// task B. Persisting before the remaining preflight checks keeps a rejected
-// assignment attributable to the supervisor for recovery.
-func prepareCustomDaemonAssignment(
-	ctx context.Context,
-	issueBackend backend.IssueBackend,
-	worktreePath, taskID, taskFilter string,
-	readOnly bool,
-) error {
-	maybeResumeDaemonSession(worktreePath, taskID)
-	persistAssignedTaskToLock(worktreePath, taskID)
-	return validateAssignedTaskFilter(ctx, issueBackend, taskID, taskFilter, readOnly)
-}
-
-// validateAssignedTaskFilter is the daemon leaf's final fail-closed guard.
-// Supervisor routing is authoritative for selection, but the leaf re-reads a
-// bug-filtered assignment before emitting task-claimed or invoking an AI
-// backend so stale/malformed assignment data cannot spend on non-bug work.
-func validateAssignedTaskFilter(
-	ctx context.Context,
-	issueBackend backend.IssueBackend,
-	taskID, taskFilter string,
-	readOnly bool,
-) error {
-	if strings.TrimSpace(taskFilter) != "bug" {
-		return nil
-	}
-	if !readOnly {
-		return fmt.Errorf("bug task filter requires read-only execution")
-	}
-	taskID = strings.TrimSpace(taskID)
-	if taskID == "" {
-		return fmt.Errorf("bug task filter requires a supervisor-assigned task")
-	}
-	if issueBackend == nil {
-		return fmt.Errorf("bug task filter cannot verify assigned task %s: issue backend is unavailable", taskID)
-	}
-	issue, err := issueBackend.Get(ctx, taskID)
-	if err != nil {
-		return fmt.Errorf("bug task filter cannot verify assigned task %s: %w", taskID, err)
-	}
-	if issue == nil {
-		return fmt.Errorf("bug task filter cannot verify assigned task %s: issue was not returned", taskID)
-	}
-	if !strings.EqualFold(strings.TrimSpace(issue.IssueType), "bug") {
-		return fmt.Errorf(
-			"bug task filter rejected assigned task %s with issue type %q",
-			taskID, strings.TrimSpace(issue.IssueType),
-		)
-	}
-	return nil
-}
-
-// validateBugDaemonReviewHandoff makes the bug-triage terminal state a
-// host-verified contract rather than trusting a clean model exit. A bug worker
-// that exits without moving its assigned card to Review is failed so the
-// supervisor can recover/retry it, and its carried resume state is retained.
-func validateBugDaemonReviewHandoff(
-	ctx context.Context,
-	issueBackend backend.IssueBackend,
-	taskID, taskFilter string,
-) error {
-	if strings.TrimSpace(taskFilter) != "bug" {
-		return nil
-	}
-	taskID = strings.TrimSpace(taskID)
-	if taskID == "" {
-		return fmt.Errorf("bug task filter cannot verify Review handoff without an assigned task")
-	}
-	if issueBackend == nil {
-		return fmt.Errorf("bug task filter cannot verify Review handoff for %s: issue backend is unavailable", taskID)
-	}
-	issue, err := issueBackend.Get(ctx, taskID)
-	if err != nil {
-		return fmt.Errorf("bug task filter cannot verify Review handoff for %s: %w", taskID, err)
-	}
-	if issue == nil {
-		return fmt.Errorf("bug task filter cannot verify Review handoff for %s: issue was not returned", taskID)
-	}
-	if status := issue.Status; status != "review" {
-		return fmt.Errorf(
-			"bug task filter run for %s exited successfully with task status %q; expected %q",
-			taskID, status, "review",
-		)
-	}
-	return nil
-}
-
-// validateTaskFilterExecutionMode keeps the strict issue-type filter out of
-// legacy unbound execution. Only the daemon leaf receives a supervisor-selected
-// task ID that it can verify before model invocation.
-func validateTaskFilterExecutionMode(taskFilter string, daemonMode bool) error {
-	if strings.TrimSpace(taskFilter) == "bug" && !daemonMode {
-		return fmt.Errorf("bug task filter requires a supervisor-assigned daemon run")
-	}
-	return nil
-}
-
-// bindCustomDaemonTask makes the supervisor's claim authoritative for custom
-// prompts. Custom role bodies can describe how to process work, but they must
-// not run their own ready/claim loop after the supervisor has fenced one task.
-func bindCustomDaemonTask(prompt, taskID, taskFilter string) string {
-	taskID = strings.TrimSpace(taskID)
-	if taskID == "" {
-		return prompt
-	}
-	handoff := `When the role's handoff is complete, run 'loom complete' and exit.`
-	if strings.TrimSpace(taskFilter) == "bug" {
-		handoff = `Follow the custom role's status handoff exactly. Leave the bug in
-Review and do NOT run 'loom complete' because that would close it. Exit after
-the Review handoff.`
-	}
-	return fmt.Sprintf(`## Supervisor-assigned task
-
-Your one task for this run is %s. The supervisor has already claimed it for
-this agent. Load it with 'loom data show %s --output json' and perform the
-custom role below only for that task. Do NOT claim or select another task, and
-do NOT run 'loom data ready'. %s
-
-%s`, taskID, taskID, handoff, prompt)
-}
-
 // agentAutoOpts builds the common AutoModeOptions for auto mode invocations.
 func agentAutoOpts(worktreePath, agentName string, promptGen func(string, *config.WorkspaceConfig) string, taskCheckFn func() (bool, error)) automode.AutoModeOptions {
 	return automode.AutoModeOptions{
@@ -336,29 +133,23 @@ func agentAutoOpts(worktreePath, agentName string, promptGen func(string, *confi
 	}
 }
 
-// runAgentAutoMode handles continuous mode with tmux (preferred) or JSON streaming fallback.
+// runAgentAutoMode handles continuous custom-agent execution in the current
+// process. Custom agents require their prompt generator and filter in memory,
+// so they cannot be reconstructed by a detached compatibility child.
 func runAgentAutoMode(worktreePath, agentName string, promptGen func(string, *config.WorkspaceConfig) string, taskCheckFn func() (bool, error)) {
 	opts := agentAutoOpts(worktreePath, agentName, promptGen, taskCheckFn)
-
-	if automode.IsTmuxAvailable() {
-		shutdown := automode.SetupSignalHandler()
-		automode.RunAutoModeTmux(opts, shutdown)
-		return
-	}
-
-	// Fallback to JSON streaming mode (no tmux)
 	if err := cli.AcquireLock(worktreePath, "agent", agentName); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		cli.ExitWithFlush(1)
 	}
 	defer func() { _ = cli.ReleaseLock(worktreePath) }()
 
-	fmt.Println("[auto] tmux not found, using JSON streaming mode")
+	fmt.Println("[auto] using managed JSON streaming mode")
 	shutdown := automode.SetupSignalHandler()
 	automode.RunAutoModeLoop(opts, shutdown)
 }
 
-// runAgentSingleTask handles the single-task (non-auto, non-daemon) execution path.
+// runAgentSingleTask handles the single-task execution path.
 func runAgentSingleTask(worktreePath, agentName string, promptGen func(string, *config.WorkspaceConfig) string, taskCheckFn func() (bool, error)) {
 	if err := cli.AcquireLock(worktreePath, "agent", agentName); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

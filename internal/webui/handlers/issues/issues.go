@@ -86,7 +86,7 @@ type IssueCreateRequest struct {
 	IssueType string `json:"issue_type"`
 	Priority  int    `json:"priority"`
 
-	// Optional fields - match rpc.CreateArgs
+	// Optional create fields preserved by the HTTP contract.
 	ID                 string   `json:"id,omitempty"`
 	Parent             string   `json:"parent,omitempty"`
 	Description        string   `json:"description,omitempty"`

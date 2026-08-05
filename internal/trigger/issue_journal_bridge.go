@@ -127,20 +127,19 @@ type IssueJournalBridge struct {
 	// BatchLimit bounds ListIssueEvents per workspace per pass; zero or
 	// negative falls back to DefaultIssueJournalBatchLimit.
 	BatchLimit int
-	// EmitTaskReady turns on the flag-gated task-ready lane: in addition to the
+	// EmitTaskReady turns on the task-ready lane: in addition to the
 	// normal allowlisted re-emission, an entry that marks a task becoming ready
 	// (issue.create / issue.update to an open status) also emits a task.ready
 	// internal event carrying the task id, so a prompt-agent binding on
 	// internal.task.ready can claim THAT task. The field itself defaults false
 	// for explicit construction in tests and alternate hosts; loom serve enables
-	// it by default and keeps LOOM_TASK_READY_EVENTS as an opt-out rollback knob.
+	// it unconditionally as a generic platform event lane.
 	// See issue_journal_bridge_task_ready.go.
 	EmitTaskReady bool
 	// EmitTaskReview turns on the task-review transition lane: a proven
 	// issue.update transition from a non-review status into review emits a
 	// task.review internal event. The field itself defaults false for explicit
-	// construction; loom serve enables it by default and keeps
-	// LOOM_TASK_REVIEW_EVENTS as an opt-out rollback knob. See
+	// construction; loom serve enables it unconditionally. See
 	// issue_journal_bridge_task_review.go.
 	EmitTaskReview bool
 	// IssueLookup resolves the CURRENT design/labels/type of an issue for

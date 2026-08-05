@@ -19,7 +19,6 @@ goroutine_launches:
   - {file: "internal/archtest/profiles.go", function: "analyzeProfiles", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "profile workers are concurrency-limited and WaitGroup-joined before return"}
   - {file: "internal/bootstrap/embedded.go", function: "StartEmbedded", site: "go#1", callee: "emb.reapAndPublish", disposition: component, component_ids: [embedded-fleetdb-process-reaper]}
   - {file: "internal/cli/agent/lead/lead.go", function: "startLeadSessionHeartbeat", site: "go#1", callee: "heartbeatLeadSession", disposition: component, component_ids: [lead-session-heartbeat]}
-  - {file: "internal/cli/agent/tsruntime/tsruntime.go", function: "contextFromShutdown", site: "go#1", callee: "<anonymous>", disposition: helper, reason: "bridges the daemon-leaf shutdown channel to one invocation context and exits with either side"}
   - {file: "internal/cli/automode/automode.go", function: "SetupSignalHandler", site: "go#1", callee: "<anonymous>", disposition: command, reason: "one-shot operating-system signal relay owned by the foreground automode command"}
   - {file: "internal/cli/automode/automode_task.go", function: "createAutoSession", site: "go#1", callee: "sessions.NotifyWebUI", disposition: bounded, reason: "best-effort Web UI notification carries its own two-second timeout"}
   - {file: "internal/cli/automode/automode_task.go", function: "finalizeAutoSession", site: "go#1", callee: "sessions.NotifyWebUI", disposition: bounded, reason: "best-effort Web UI notification carries its own two-second timeout"}
@@ -29,29 +28,7 @@ goroutine_launches:
   - {file: "internal/cli/backend_echo_testbackend.go", function: "EchoBackend.InvokeStreaming", site: "go#1", callee: "<anonymous>", disposition: helper, reason: "testbackend-only pipe writer is owned by the returned reader and excluded from product runtime counts"}
   - {file: "internal/cli/backends/backend_wrapper.go", function: "contextFromShutdown", site: "go#1", callee: "<anonymous>", disposition: helper, reason: "bridges one legacy shutdown channel to one invocation context and exits with either side"}
   - {file: "internal/cli/backends/backend_wrapper.go", function: "runHarness", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "the harness output scanner is explicitly awaited through scanDone"}
-  - {file: "internal/cli/daemon/daemon_cmd.go", function: "runDaemonMainLoop", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "shutdown worker is awaited with a thirty-second process-exit bound"}
-  - {file: "internal/cli/daemon/daemon_cmd.go", function: "setupSignalHandler", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [daemon-signal-runtime]}
-  - {file: "internal/cli/daemon/daemon_cmd.go", function: "setupSignalHandler", site: "go#2", callee: "<anonymous>", disposition: component, component_ids: [daemon-signal-runtime]}
-  - {file: "internal/cli/daemon/daemon_command_poller.go", function: "Daemon.dispatchAgentCommand", site: "go#1", callee: "d.runAgentCommandQueue", disposition: component, component_ids: [daemon-agent-command-poller]}
-  - {file: "internal/cli/daemon/daemon_command_poller.go", function: "Daemon.startAgentCommandPoller", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [daemon-agent-command-poller]}
-  - {file: "internal/cli/daemon/daemon_control.go", function: "Daemon.startControlServer", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [daemon-control-socket-listener]}
-  - {file: "internal/cli/daemon/daemon_control.go", function: "Daemon.startControlServer", site: "go#2", callee: "d.handleControlConnection", disposition: request, reason: "one control request per accepted connection with socket read deadlines"}
-  - {file: "internal/cli/daemon/daemon_ipc.go", function: "Daemon.startIPCServer", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [daemon-agent-ipc-listener]}
-  - {file: "internal/cli/daemon/daemon_ipc.go", function: "Daemon.startIPCServer", site: "go#2", callee: "d.handleIPCConnection", disposition: request, reason: "one agent IPC request per accepted connection with socket read deadlines"}
-  - {file: "internal/cli/daemon/daemon_mutations.go", function: "MutationBuffer.Start", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [daemon-mutation-subscription-drain]}
-  - {file: "internal/cli/daemon/daemon_run_helpers.go", function: "startStateUpdater", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [daemon-state-file-updater]}
-  - {file: "internal/cli/daemon/supervisor/claim.go", function: "Supervisor.operationContext", site: "go#1", callee: "<anonymous>", disposition: helper, reason: "bridges supervisor shutdown into a timeout-bounded operation context"}
-  - {file: "internal/cli/daemon/supervisor/concurrency.go", function: "ConcurrencyTracker.acquire", site: "go#1", callee: "<anonymous>", disposition: helper, reason: "bridges one per-agent stop channel into the role-limit condition wait and exits when acquisition returns or stop closes"}
-  - {file: "internal/cli/daemon/supervisor/critical.go", function: "Supervisor.RunCritical", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [daemon-config-reconciler, supervisor-agent-health-checker, supervisor-liveness-watchdog, supervisor-node-heartbeat]}
-  - {file: "internal/cli/daemon/supervisor/drain.go", function: "Supervisor.addAgentForTask", site: "go#1", callee: "s.supervisedAgentBody", disposition: component, component_ids: [supervisor-per-agent-loop]}
-  - {file: "internal/cli/daemon/supervisor/drain.go", function: "Supervisor.drainAllWithGrace", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "agent drain fan-out is WaitGroup-joined under the caller's grace deadline"}
-  - {file: "internal/cli/daemon/supervisor/liveness.go", function: "Supervisor.startAgentWaitHeartbeatEvery", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [supervisor-agent-wait-heartbeat]}
-  - {file: "internal/cli/daemon/supervisor/liveness.go", function: "Supervisor.startWorkerHeartbeatEvery", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [supervisor-worker-lease-heartbeat]}
-  - {file: "internal/cli/daemon/supervisor/ownership.go", function: "Supervisor.startOwnershipHeartbeat", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [supervisor-agent-ownership-heartbeat]}
-  - {file: "internal/cli/daemon/supervisor/supervisor.go", function: "Supervisor.startAgentSupervisor", site: "go#1", callee: "s.supervisedAgentBody", disposition: component, component_ids: [supervisor-per-agent-loop]}
   - {file: "internal/cli/epic/run.go", function: "signalContext", site: "go#1", callee: "<anonymous>", disposition: command, reason: "one-shot signal-to-context relay owned by the foreground epic command"}
-  - {file: "internal/cli/local/daemon.go", function: "runLocalDaemonOnce", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [local-daemon-supervisor]}
-  - {file: "internal/cli/local/daemon.go", function: "startLocalDaemonSupervisor", site: "go#1", callee: "superviseLocalDaemon", disposition: component, component_ids: [local-daemon-supervisor]}
   - {file: "internal/cli/monitor/monitor_collect.go", function: "collectMonitorDataDeps", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "monitor dependency fan-out is channel-joined before collection returns"}
   - {file: "internal/cli/monitor/monitor_collect.go", function: "collectMonitorDataDeps", site: "go#2", callee: "<anonymous>", disposition: bounded, reason: "monitor dependency fan-out is channel-joined before collection returns"}
   - {file: "internal/cli/monitor/monitor_collect.go", function: "runParallelTaskQueries", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "task-query fan-out is channel-joined before monitor collection returns"}
@@ -60,12 +37,12 @@ goroutine_launches:
   - {file: "internal/cli/monitor/monitor_collect.go", function: "runParallelTaskQueries", site: "go#4", callee: "<anonymous>", disposition: bounded, reason: "task-query fan-out is channel-joined before monitor collection returns"}
   - {file: "internal/cli/monitor/monitor_collect.go", function: "runParallelTaskQueries", site: "go#5", callee: "<anonymous>", disposition: bounded, reason: "task-query fan-out is channel-joined before monitor collection returns"}
   - {file: "internal/cli/root.go", function: "Execute", site: "go#1", callee: "<anonymous>", disposition: command, reason: "one-shot trace-flush signal relay owned by the foreground CLI invocation"}
-  - {file: "internal/cli/serve/daemonwire/stale.go", function: "InitStaleDetectorHandler", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [redis-stale-worker-detector]}
   - {file: "internal/cli/serve/logroutercmd/logrouter_cmd.go", function: "runLogRouter", site: "go#1", callee: "<anonymous>", disposition: command, reason: "one-shot signal-to-context relay owned by the foreground log-router command"}
   - {file: "internal/cli/serve/logroutercmd/logrouter_cmd.go", function: "runLogRouter", site: "go#2", callee: "watcher.Watch", disposition: component, component_ids: [logrouter-lock-watcher]}
   - {file: "internal/cli/serve/metricscmd/collector.go", function: "cachedCollector.startBackground", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [serve-metrics-cache-refresh]}
   - {file: "internal/cli/serve/runtimecomposition/loops.go", function: "StartIssueJournalBridge", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [serve-issue-journal-bridge]}
-  - {file: "internal/cli/serve/runtimecomposition/loops.go", function: "StartOutboxDispatcher", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [serve-outbox-dispatcher]}
+  - {file: "internal/cli/serve/runtimecomposition/loops.go", function: "StartOutboxDispatcher", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [execution-outbox-delivery]}
+  - {file: "internal/cli/serve/runtimewire/stale.go", function: "InitStaleDetectorHandler", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [redis-stale-worker-detector]}
   - {file: "internal/cli/serve/serve.go", function: "runServe", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [web-http-server]}
   - {file: "internal/cli/serve/serve_cache.go", function: "cachedValue.startBackground", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [serve-generic-cache-refresh]}
   - {file: "internal/cli/serve/worker/log_forwarder.go", function: "NewLogForwarder", site: "go#1", callee: "lf.periodicFlush", disposition: component, component_ids: [serve-worker-log-forwarder]}
@@ -89,11 +66,9 @@ goroutine_launches:
   - {file: "internal/leadcontrol/harness_runtime.go", function: "RunHarnessLeadRuntime", site: "go#1", callee: "watchHarnessLeadRuntime", disposition: component, component_ids: [harness-lead-runtime-watch]}
   - {file: "internal/leadcontrol/harness_runtime.go", function: "RunHarnessLeadRuntime", site: "go#2", callee: "drainLeadMessageQueue", disposition: component, component_ids: [lead-message-delivery-drain]}
   - {file: "internal/leadcontrol/harness_runtime.go", function: "forwardHarnessStdin", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [harness-stdin-forwarder]}
-  - {file: "internal/platform/runtime/host.go", function: "Host.Start", site: "go#1", callee: "host.runComponent", disposition: component, component_ids: [execution-await-timeout-recovery, execution-driver-run, execution-task-run-convergence, execution-task-run-workers, serve-agent-provisioning-recovery, serve-await-event-notifications, serve-driver-run-outcomes, serve-interaction-session-recovery, serve-trigger-cron-scheduler, serve-trigger-delivery-sweeper, workspace-repository-admission-lease-renewal, workspace-repository-admission-recovery]}
+  - {file: "internal/platform/runtime/host.go", function: "Host.Start", site: "go#1", callee: "host.runComponent", disposition: component, component_ids: [execution-await-timeout-recovery, execution-driver-run, execution-task-run-convergence, execution-task-run-workers, serve-agent-provisioning-recovery, serve-agents-desired-state-reconciliation, serve-await-event-notifications, serve-driver-run-outcomes, serve-interaction-session-recovery, serve-trigger-cron-scheduler, serve-trigger-delivery-sweeper, workspace-repository-admission-lease-renewal, workspace-repository-admission-recovery]}
   - {file: "internal/webui/app/server.go", function: "Server.run", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [web-http-server]}
   - {file: "internal/webui/app/server_app.go", function: "NewServer", site: "go#1", callee: "app.hub.Run", disposition: component, component_ids: [realtime-hub-retry-drain]}
-  - {file: "internal/webui/app/server_app.go", function: "NewServer", site: "go#2", callee: "config.DaemonStartupFn", disposition: component, component_ids: [web-secondary-daemon-startup]}
-  - {file: "internal/webui/app/server_app.go", function: "NewServer", site: "go#3", callee: "doctor.Run", disposition: component, component_ids: [daemon-health-doctor]}
   - {file: "internal/webui/appinfra/appinfra.go", function: "StartPeriodicWorkspaceReconcile", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [workspace-registry-reconcile]}
   - {file: "internal/webui/editor/launch_darwin.go", function: "LaunchEditor", site: "go#1", callee: "cmd.Wait", disposition: component, component_ids: [editor-process-reaper-darwin]}
   - {file: "internal/webui/editor/launch_linux.go", function: "LaunchEditor", site: "go#1", callee: "cmd.Wait", disposition: component, component_ids: [editor-process-reaper-linux]}
@@ -173,19 +148,6 @@ components:
     retry_backoff: "fixed 100ms ownership retry; typed capability incompatibility fails closed"
     classification: startup-wait
 
-  - id: local-daemon-workspace-rotation
-    kind: ticker
-    file: internal/cli/local/daemon.go
-    function: runLocalDaemonOnce
-    site: "time.NewTicker#1"
-    capability: agents
-    owner: local runtime
-    cadence: "2s active-workspace check while the managed daemon child is running"
-    cancellation: "local runtime context cancellation or managed daemon exit"
-    readiness_health: "workspace drift rotates the managed daemon instead of leaving it bound to stale configuration"
-    retry_backoff: "fixed 2s poll; workspace read failures are logged and retried"
-    classification: managed
-
   - id: local-runtime-startup-wait
     kind: ticker
     file: internal/cli/local/local_cmd.go
@@ -223,19 +185,6 @@ components:
     cancellation: "caller context cancellation"
     readiness_health: "gates the command on the workspace readiness endpoint"
     retry_backoff: "fixed 200ms retry"
-    classification: startup-wait
-
-  - id: workspace-ops-daemon-wait
-    kind: ticker
-    file: internal/cli/workspace/ops_cmd.go
-    function: waitForWorkspaceOpsDaemon
-    site: "time.NewTicker#1"
-    capability: workspace
-    owner: workspace operations CLI
-    cadence: "500ms daemon status probe"
-    cancellation: "caller context or command timeout"
-    readiness_health: "gates workspace operations on a reachable daemon"
-    retry_backoff: "fixed 500ms retry"
     classification: startup-wait
 
   - id: codex-app-server-startup-wait
@@ -290,7 +239,7 @@ components:
     retry_backoff: "fixed 1s read polling; read failures fail the command closed"
     classification: command-poll
 
-  # Daemon and supervisor managed loops.
+  # Standalone and serve-hosted managed loops.
   - id: lead-session-heartbeat
     kind: ticker
     file: internal/cli/agent/lead/lead.go
@@ -302,110 +251,6 @@ components:
     cancellation: "lead stop channel with WaitGroup join"
     readiness_health: "advances AgentSession last_heartbeat; failures are debug logged"
     retry_backoff: "best effort; retry on the next cadence"
-    classification: managed
-
-  - id: daemon-agent-command-poller
-    kind: ticker
-    file: internal/cli/daemon/daemon_command_poller.go
-    function: Daemon.startAgentCommandPoller
-    site: "time.NewTicker#1"
-    capability: agents
-    owner: daemon runtime
-    cadence: "1s"
-    cancellation: "supervisor shutdown channel with WaitGroup join"
-    readiness_health: "each poll records duration and command outcomes through daemon telemetry"
-    retry_backoff: "next fixed cadence after poll or command failure"
-    classification: managed
-
-  - id: daemon-config-reconciler
-    kind: ticker
-    file: internal/cli/daemon/daemon_reconciler.go
-    function: Daemon.configPollingLoop
-    site: "time.NewTicker#1"
-    capability: agents
-    owner: daemon runtime
-    cadence: "30s"
-    cancellation: "supervisor shutdown through the critical-goroutine wrapper"
-    readiness_health: "records the config_reconciler liveness tick after each pass"
-    retry_backoff: "next fixed cadence after load or reconcile failure"
-    classification: managed
-
-  - id: daemon-state-file-updater
-    kind: ticker
-    file: internal/cli/daemon/daemon_run_helpers.go
-    function: startStateUpdater
-    site: "time.NewTicker#1"
-    capability: agents
-    owner: daemon runtime
-    cadence: "5s"
-    cancellation: "daemon shutdown channel; closes the returned done channel"
-    readiness_health: "writes the daemon state snapshot and records a critical liveness tick"
-    retry_backoff: "logs write failures and retries on the next fixed cadence"
-    classification: managed
-
-  - id: supervisor-node-heartbeat
-    kind: ticker
-    file: internal/cli/daemon/supervisor/control_plane.go
-    function: Supervisor.runNodeHeartbeat
-    site: "time.NewTicker#1"
-    capability: agents
-    owner: daemon supervisor
-    cadence: "30s by default for a 2m node TTL"
-    cancellation: "supervisor shutdown through the critical-goroutine wrapper"
-    readiness_health: "renews the control-plane node and records node-heartbeat liveness"
-    retry_backoff: "warns and retries on the next cadence"
-    classification: managed
-
-  - id: supervisor-agent-health-checker
-    kind: ticker
-    file: internal/cli/daemon/supervisor/health.go
-    function: Supervisor.healthChecker
-    site: "time.NewTicker#1"
-    capability: agents
-    owner: daemon supervisor
-    cadence: "30s"
-    cancellation: "supervisor shutdown through the critical-goroutine wrapper"
-    readiness_health: "checks supervised process health and records health-checker liveness"
-    retry_backoff: "each agent is isolated; the next scan retries failed observations"
-    classification: managed
-
-  - id: supervisor-liveness-watchdog
-    kind: ticker
-    file: internal/cli/daemon/supervisor/liveness.go
-    function: Supervisor.livenessWatchdog
-    site: "time.NewTicker#1"
-    capability: agents
-    owner: daemon supervisor
-    cadence: "10s"
-    cancellation: "supervisor shutdown through the critical-goroutine wrapper"
-    readiness_health: "turns repeated stale critical ticks into a fatal supervisor signal"
-    retry_backoff: "requires consecutive stale scans and tolerates process suspension"
-    classification: managed
-
-  - id: supervisor-agent-wait-heartbeat
-    kind: ticker
-    file: internal/cli/daemon/supervisor/liveness.go
-    function: Supervisor.startAgentWaitHeartbeatEvery
-    site: "time.NewTicker#1"
-    capability: agents
-    owner: daemon supervisor
-    cadence: "15s by default"
-    cancellation: "per-agent stop function or supervisor shutdown"
-    readiness_health: "keeps per-agent wait liveness fresh while a child process is running or backing off"
-    retry_backoff: "fixed cadence until stopped"
-    classification: managed
-
-  - id: supervisor-worker-lease-heartbeat
-    kind: ticker
-    file: internal/cli/daemon/supervisor/liveness.go
-    function: Supervisor.startWorkerHeartbeatEvery
-    site: "time.NewTicker#1"
-    capability: execution
-    owner: daemon supervisor
-    cadence: "30s by default"
-    cancellation: "per-agent stop function or supervisor shutdown"
-    readiness_health: "renews worker registration and records the last successful heartbeat"
-    retry_backoff: "warns and retries on the next cadence"
     classification: managed
 
   # Serve-hosted caches, execution workers, and automation reconcilers.
@@ -433,6 +278,19 @@ components:
     cancellation: "platform runtime host cancellation and bounded Stop join"
     readiness_health: "runtime host records per-pass success, failure, panic, timeout, and next run"
     retry_backoff: "host exponential backoff from 1s to 1m; durable intent steps and progress CAS make every pass restart-safe"
+    classification: managed
+
+  - id: serve-agents-desired-state-reconciliation
+    kind: component
+    file: internal/modules/agents/runtime.go
+    function: RuntimeRegistration
+    site: "component:desired-state-reconciliation-registration"
+    capability: agents
+    owner: Agents runtime contribution hosted by platform runtime
+    cadence: "30s after an immediate desired-state reconciliation pass"
+    cancellation: "platform runtime host cancellation and a 30s per-pass timeout"
+    readiness_health: "runtime host records per-pass success, failure, panic, timeout, and next run"
+    retry_backoff: "host exponential backoff from 1s to 1m; exact-generation lifecycle CAS makes every pass restart-safe"
     classification: managed
 
   - id: execution-driver-run
@@ -487,13 +345,13 @@ components:
     retry_backoff: "host exponential backoff from 1s to 1m; every projection leg has a deterministic dedupe identity"
     classification: managed
 
-  - id: serve-outbox-dispatcher
+  - id: execution-outbox-delivery
     kind: ticker
     file: internal/cli/serve/runtimecomposition/loops.go
     function: StartOutboxDispatcher
     site: "time.NewTicker#1"
-    capability: automation
-    owner: serve automation runtime
+    capability: execution
+    owner: Execution outbox delivery runtime
     cadence: "2s after an immediate dispatch pass"
     cancellation: "serve context cancellation"
     readiness_health: "logs delivered counts and dispatch failures"
@@ -839,19 +697,6 @@ components:
     retry_backoff: "fixed request-local poll cadence"
     classification: request-scoped
 
-  - id: daemon-health-doctor
-    kind: ticker
-    file: internal/webui/daemon/health_doctor.go
-    function: HealthDoctor.Run
-    site: "time.NewTicker#1"
-    capability: agents
-    owner: web application runtime
-    cadence: "15s default"
-    cancellation: "server context cancellation"
-    readiness_health: "tracks unhealthy circuit-breaker duration and logs restart decisions"
-    retry_backoff: "90s stuck threshold and per-workspace recovery tracking"
-    classification: managed
-
   - id: local-redis-health-monitor
     kind: ticker
     file: internal/webui/localredis/manager.go
@@ -1009,19 +854,6 @@ components:
     retry_backoff: "none in-process; the idempotent repair reruns on the next serve start"
     classification: startup-wait
 
-  - id: prompt-agent-identity-boot-repair
-    kind: component
-    file: internal/cli/serve/workspacemgr/agent_identity_migration.go
-    function: EnsurePromptAgentIdentityRecords
-    site: component:boot-repair
-    capability: agents
-    owner: serve workspace bootstrap
-    cadence: "once during serve startup"
-    cancellation: "serve startup context"
-    readiness_health: "serve startup fails if prompt-agent identity reconciliation fails"
-    retry_backoff: "none in-process; the idempotent repair reruns on the next serve start"
-    classification: startup-wait
-
   - id: embedded-fleetdb-process-reaper
     kind: component
     file: internal/bootstrap/embedded.go
@@ -1059,71 +891,6 @@ components:
     cancellation: "server context cancellation followed by bounded graceful shutdown"
     readiness_health: "listener acquisition and server errors are surfaced to the serve caller"
     retry_backoff: "no in-process listener restart"
-    classification: managed
-
-  - id: local-daemon-supervisor
-    kind: component
-    file: internal/cli/local/daemon.go
-    function: superviseLocalDaemon
-    site: component:daemon-supervision
-    capability: agents
-    owner: local runtime
-    cadence: "configuration poll while idle; child lifetime while runnable"
-    cancellation: "local runtime context cancellation"
-    readiness_health: "daemon exit and missing configuration are appended to the local daemon log"
-    retry_backoff: "1s exponential restart backoff capped by localDaemonMaxBackoff"
-    classification: managed
-
-  - id: daemon-control-socket-listener
-    kind: component
-    file: internal/cli/daemon/daemon_control.go
-    function: Daemon.startControlServer
-    site: component:unix-accept-loop
-    capability: agents
-    owner: daemon runtime
-    cadence: "event driven on the control Unix socket"
-    cancellation: "listener close during supervisor shutdown"
-    readiness_health: "socket bind failure blocks startup; later accept failure is warning logged"
-    retry_backoff: "no listener rebind after an unexpected accept failure"
-    classification: managed
-
-  - id: daemon-agent-ipc-listener
-    kind: component
-    file: internal/cli/daemon/daemon_ipc.go
-    function: Daemon.startIPCServer
-    site: component:unix-accept-loop
-    capability: interaction
-    owner: daemon runtime
-    cadence: "event driven on the owner-only agent IPC Unix socket"
-    cancellation: "listener close during supervisor shutdown"
-    readiness_health: "socket bind and chmod failures block startup; later accept failure is warning logged"
-    retry_backoff: "no listener rebind after an unexpected accept failure"
-    classification: managed
-
-  - id: supervisor-per-agent-loop
-    kind: component
-    file: internal/cli/daemon/supervisor/critical.go
-    function: Supervisor.supervisedAgentBody
-    site: component:agent-supervision
-    capability: agents
-    owner: daemon supervisor
-    cadence: "event driven across spawn, wait, classification, and backoff states"
-    cancellation: "per-agent cancel or supervisor shutdown; completion closes AgentProcess done"
-    readiness_health: "panic recovery signals fatal and agent status exposes stop reason, retries, and block count"
-    retry_backoff: "class-based retry, failover, block, and fast-fail policy"
-    classification: managed
-
-  - id: supervisor-agent-ownership-heartbeat
-    kind: component
-    file: internal/cli/daemon/supervisor/ownership.go
-    function: Supervisor.startOwnershipHeartbeat
-    site: component:jittered-timer-loop
-    capability: agents
-    owner: daemon supervisor
-    cadence: "jittered timer derived from ownership TTL, capped at 30s base"
-    cancellation: "per-agent stop function or supervisor shutdown"
-    readiness_health: "loss of fenced ownership terminates the heartbeat and blocks unsafe spawn"
-    retry_backoff: "next jittered timer only after a successful ownership renewal"
     classification: managed
 
   - id: backend-mutation-long-poll
@@ -1178,19 +945,6 @@ components:
     retry_backoff: "no accept-loop restart; per-connection forwarding failures remain isolated"
     classification: request-scoped
 
-  - id: daemon-mutation-subscription-drain
-    kind: component
-    file: internal/cli/daemon/daemon_mutations.go
-    function: MutationBuffer.run
-    site: component:subscription-drain
-    capability: work-items
-    owner: daemon mutation projection
-    cadence: "event driven by the workspace issue-mutation subscription"
-    cancellation: "MutationBuffer.Stop closes done and the subscription, then joins the goroutine"
-    readiness_health: "not readiness-bearing; feeds the bounded control-socket mutation replay buffer"
-    retry_backoff: "no resubscribe loop; subscription closure terminates the component"
-    classification: managed
-
   - id: legacy-file-history-boot-cleanup
     kind: component
     file: internal/webui/svcimpl/file_history.go
@@ -1243,19 +997,6 @@ components:
     retry_backoff: "no retry; the caller may issue another launch request"
     classification: request-scoped
 
-  - id: daemon-signal-runtime
-    kind: component
-    file: internal/cli/daemon/daemon_cmd.go
-    function: setupSignalHandler
-    site: component:signal-handlers
-    capability: platform
-    owner: daemon runtime
-    cadence: "event driven by termination signals and process-lifetime SIGUSR1 diagnostics"
-    cancellation: "termination waiter stops after the first signal; SIGUSR1 diagnostics end with the process"
-    readiness_health: "not readiness-bearing; termination initiates graceful shutdown and SIGUSR1 emits goroutine diagnostics"
-    retry_backoff: "none; signal delivery is provided by the operating system"
-    classification: managed
-
   - id: automode-attach-input
     kind: component
     file: internal/cli/automode/automode_tmux_util.go
@@ -1281,16 +1022,3 @@ components:
     readiness_health: "not readiness-bearing; write failure or stdin closure terminates forwarding"
     retry_backoff: "continues after successful writes; no retry after read or PTY write failure"
     classification: request-scoped
-
-  - id: web-secondary-daemon-startup
-    kind: component
-    file: internal/webui/app/server_app.go
-    function: NewServer
-    site: component:secondary-daemon-startup
-    capability: agents
-    owner: web application runtime
-    cadence: "once during server construction when the compatibility hook is configured"
-    cancellation: "server context cancellation"
-    readiness_health: "the hook reports each reachable secondary workspace through onReady; currently dormant in production composition"
-    retry_backoff: "owned by the injected compatibility hook"
-    classification: managed

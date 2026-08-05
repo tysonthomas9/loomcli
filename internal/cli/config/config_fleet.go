@@ -16,8 +16,7 @@ type FleetClientConfig struct {
 // resolveFleetConfig produces the final resolved FleetClientConfig from
 // environment. Fleet server connection config is deployment bootstrap state,
 // not workspace configuration.
-func ResolveFleetConfig(daemon *DaemonSettings) FleetClientConfig {
-	_ = daemon
+func ResolveFleetConfig() FleetClientConfig {
 	var url, workspace, apiKey, actor string
 
 	if v, ok := os.LookupEnv("LOOM_FLEET_URL"); ok {

@@ -11,6 +11,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/testutil"
 )
 
 const outboxTestWorkspace = "WS"
@@ -127,7 +128,8 @@ func TestOutboxDispatcherRunOnce(t *testing.T) {
 			st := memstore.New()
 			row := createOutboxRow(t, ctx, st, tc.create)
 			d := &OutboxDispatcher{
-				Store:        st,
+				Delivery:     testutil.StoreOutboxDeliveryAPI{Store: st.Outbox()},
+				Authorities:  testutil.StaticExecutionSystemAuthorityResolver{},
 				WorkspaceKey: outboxTestWorkspace,
 				Now:          func() time.Time { return now },
 				deliverAssignment: func(
@@ -187,7 +189,8 @@ func TestOutboxDispatcherBackoffGrowsAndSkipsNotDueRows(t *testing.T) {
 	now := time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC)
 	attempts := 0
 	d := &OutboxDispatcher{
-		Store:        st,
+		Delivery:     testutil.StoreOutboxDeliveryAPI{Store: st.Outbox()},
+		Authorities:  testutil.StaticExecutionSystemAuthorityResolver{},
 		WorkspaceKey: outboxTestWorkspace,
 		Now:          func() time.Time { return now },
 		deliverAssignment: func(
@@ -270,7 +273,8 @@ func TestOutboxDispatcherForwardsDedupeKeyToInbox(t *testing.T) {
 	inbox := testInteractionInbox{store: st}
 	messenger := &testInteractionChatMessenger{inbox: inbox}
 	d := &OutboxDispatcher{
-		Store:        st,
+		Delivery:     testutil.StoreOutboxDeliveryAPI{Store: st.Outbox()},
+		Authorities:  testutil.StaticExecutionSystemAuthorityResolver{},
 		WorkspaceKey: outboxTestWorkspace,
 		Chat:         messenger,
 	}
@@ -428,7 +432,8 @@ func TestOutboxDispatcherTerminalRowsAreNotRetried(t *testing.T) {
 	})
 	attempts := 0
 	d := &OutboxDispatcher{
-		Store:        st,
+		Delivery:     testutil.StoreOutboxDeliveryAPI{Store: st.Outbox()},
+		Authorities:  testutil.StaticExecutionSystemAuthorityResolver{},
 		WorkspaceKey: outboxTestWorkspace,
 		deliverAssignment: func(
 			context.Context,
@@ -463,7 +468,7 @@ func TestOutboxDispatcherUnscopedResolvesEveryWorkspace(t *testing.T) {
 			t.Fatalf("create workspace %q: %v", workspace, err)
 		}
 	}
-	dispatcher := &OutboxDispatcher{Store: st}
+	dispatcher := &OutboxDispatcher{Workspaces: testutil.StoreWorkspaceLister{Store: st.Workspaces()}}
 	got, err := dispatcher.workspaceKeys(ctx)
 	if err != nil {
 		t.Fatalf("workspaceKeys: %v", err)

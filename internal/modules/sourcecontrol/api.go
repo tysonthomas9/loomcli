@@ -53,3 +53,18 @@ type RepositoryAdmissionMaterializer interface {
 		RepositoryAdmissionCheckoutCommand,
 	) (*PreparedRepositoryCheckout, error)
 }
+
+// TaskOutcomeRecorder is the narrow Source Control application port used by
+// task execution's finalize barrier. The capability owns stack-lineage
+// persistence; the executor supplies only trusted task/repository coordinates
+// and runner evidence.
+type TaskOutcomeRecorder interface {
+	RecordTaskOutcome(context.Context, TaskOutcomeCommand) (bool, error)
+}
+
+type TaskOutcomeCommand struct {
+	WorkspaceKey string
+	Repository   string
+	TaskID       string
+	Metadata     map[string]string
+}

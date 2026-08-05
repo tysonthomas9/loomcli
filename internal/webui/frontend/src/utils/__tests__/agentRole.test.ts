@@ -71,23 +71,19 @@ describe("isInteractiveAgent", () => {
 });
 
 describe("isBackgroundAgent", () => {
-  it("treats lead agents as regular even when daemon-managed", () => {
-    expect(
-      isBackgroundAgent(
-        makeAgent({ name: "lead-a", role: "lead", daemon_managed: true }),
-      ),
-    ).toBe(false);
+  it("treats lead agents as regular", () => {
+    expect(isBackgroundAgent(makeAgent({ name: "lead-a", role: "lead" }))).toBe(
+      false,
+    );
   });
 
-  it("treats daemon-managed workers as background", () => {
-    expect(
-      isBackgroundAgent(
-        makeAgent({ name: "task-a", role: "task", daemon_managed: true }),
-      ),
-    ).toBe(true);
+  it("treats worker roles as background", () => {
+    expect(isBackgroundAgent(makeAgent({ name: "task-a", role: "task" }))).toBe(
+      true,
+    );
   });
 
-  it("treats plan/task roles as background without daemon flag", () => {
+  it("treats plan/task roles as background", () => {
     expect(
       isBackgroundAgent(makeAgent({ name: "planner-a", role: "plan" })),
     ).toBe(true);
@@ -103,15 +99,26 @@ describe("isBackgroundAgent", () => {
           name: "operator-a",
           role: "operator",
           role_kind: "interactive",
-          daemon_managed: true,
         }),
       ),
     ).toBe(false);
   });
+
+  it("treats worker-kind custom agents as background", () => {
+    expect(
+      isBackgroundAgent(
+        makeAgent({
+          name: "bug-triage-a",
+          role: "bug-triage",
+          role_kind: "worker",
+        }),
+      ),
+    ).toBe(true);
+  });
 });
 
 describe("splitAgentsByRuntime", () => {
-  it("separates lead from supervised workers", () => {
+  it("separates lead from background workers", () => {
     const lead = makeAgent({ name: "lead-a", role: "lead" });
     const planner = makeAgent({ name: "planner-a", role: "plan" });
     const task = makeAgent({ name: "task-a", role: "task" });

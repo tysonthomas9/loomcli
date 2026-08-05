@@ -219,14 +219,14 @@ production_background_loops:
           - internal/archtest/testdata/runtime-components.yaml
   result:
     inventory_path: internal/archtest/testdata/runtime-components.yaml
-    total_components: 90
-    ticker_sites: 54
-    goroutine_launch_sites: 105
-    managed: 61
+    total_components: 71
+    ticker_sites: 43
+    goroutine_launch_sites: 80
+    managed: 44
     command_poll: 4
     request_scoped: 15
-    startup_wait: 10
-    background_loop_count: 61
+    startup_wait: 8
+    background_loop_count: 44
     count_rule: classification equals managed
 
 full_build_gate_duration:

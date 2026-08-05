@@ -40,6 +40,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/testutil"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/driverapi"
 )
 
@@ -140,7 +141,7 @@ func newStep9Fixture(t *testing.T, trust domain.DriverTrustLevel) *step9Fixture 
 	executionCapability, err := appserve.NewExecutionCapability(appserve.ExecutionDependencies{
 		TaskRuns: st.TaskRuns(), DriverRuns: st.DriverRuns(), DriverSteps: st.DriverSteps(),
 		TerminalStepRepairs: repairs, TaskRunEvents: st.TaskRunEvents(), Nodes: st.Nodes(),
-		WorkerProfiles: st.WorkerProfiles(), Agents: st.Agents(), Outbox: st.Outbox(), Awaits: st.Awaits(), TriggerEvents: st.TriggerEvents(),
+		WorkerProfiles: st.WorkerProfiles(), AgentQueries: testutil.StaticAgentQueries{}, Outbox: st.Outbox(), Awaits: st.Awaits(), TriggerEvents: st.TriggerEvents(),
 		Workspaces: st.Workspaces(), AtomicTaskRunRequests: step9TaskRunClaimPort{}, AtomicTaskRunClaims: step9TaskRunClaimPort{},
 		AtomicTaskRunWorkItemDesign: step9TaskRunClaimPort{},
 		AtomicTaskRunRequeues:       step9TaskRunClaimPort{}, AtomicTaskRunRetryExhaustion: step9TaskRunClaimPort{},
@@ -424,6 +425,7 @@ func newStep9TwoRuns(t *testing.T) *step9TwoRuns {
 	module := driverapi.NewModule(driverapi.Config{
 		Store: f.st, APIToken: "ops-static-token", RunTokenKey: step9TokenKey,
 		Execution: f.exec.DriverRunAPI(), ExecutionAuthorities: f.exec.DriverRunAuthorityResolver(),
+		AgentIdentities: testutil.StaticAgentQueries{},
 		TaskRunRequests: f.exec.TaskRunRequestAPI(), TaskRunRecovery: f.exec.TaskRunRecoveryAPI(),
 		TaskRuns: f.exec.TaskRunAPI(), TaskRunAuthorities: f.exec.TaskRunAuthorityResolver(),
 	})

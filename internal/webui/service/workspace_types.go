@@ -71,9 +71,8 @@ func WorkspaceKeyFromName(name string) string {
 // WorkspaceCreateResult carries data produced during workspace creation,
 // eliminating the need for a post-creation config re-read.
 type WorkspaceCreateResult struct {
-	WorkspaceID      string // stable UUID assigned during creation
-	WorkspacePath    string // absolute path to the workspace directory
-	DeferDaemonStart bool   // if true, caller should start daemon after releasing locks
+	WorkspaceID   string // stable UUID assigned during creation
+	WorkspacePath string // absolute path to the workspace directory
 }
 
 // WorkspaceCreateFn is the function signature for creating a workspace.
@@ -117,16 +116,6 @@ func AddCreateWarning(ctx context.Context, msg string) {
 	if w, ok := ctx.Value(createWarningsKey{}).(*[]string); ok {
 		*w = append(*w, msg)
 	}
-}
-
-// PoolStats contains connection pool statistics.
-// Mirrors daemon.PoolStats so the service API does not leak daemon types.
-type PoolStats struct {
-	Size      int  `json:"size"`
-	Created   int  `json:"created"`
-	Active    int  `json:"active"`
-	Available int  `json:"available"`
-	Closed    bool `json:"closed"`
 }
 
 // GetCreateWarnings returns collected warnings, or nil.

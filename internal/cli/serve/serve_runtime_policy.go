@@ -31,8 +31,8 @@ func buildServeRuntimeConfig() runtimecomposition.Config {
 			Interval:       issueBridgeInterval(),
 			StatePath:      issueBridgeStatePath(),
 			Disabled:       issueBridgeDisabled(),
-			EmitTaskReady:  taskReadyEventsEnabled(),
-			EmitTaskReview: taskReviewEventsEnabled(),
+			EmitTaskReady:  true,
+			EmitTaskReview: true,
 		},
 	}
 }
@@ -56,24 +56,6 @@ func issueBridgeDisabled() bool {
 		return true
 	default:
 		return false
-	}
-}
-
-func taskReadyEventsEnabled() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(envLoomTaskReadyEvents))) {
-	case "0", "false", "off", "no":
-		return false
-	default:
-		return true
-	}
-}
-
-func taskReviewEventsEnabled() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(envLoomTaskReviewEvents))) {
-	case "0", "false", "off", "no":
-		return false
-	default:
-		return true
 	}
 }
 

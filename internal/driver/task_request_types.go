@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/driver/runnersettings"
 )
 
 const NoopTaskProviderEnvVar = "LOOM_DRIVER_ENABLE_TEST_NOOP_PROVIDER"
@@ -41,28 +42,23 @@ func testNoopProviderEnabled() bool {
 
 // resolveTaskRunnerBackend resolves the backend CLI for the local task runner.
 // A server-stamped managed-agent policy wins so a caller-supplied legacy worker
-// identifier cannot change a UI agent's credentialed backend. Unmanaged legacy
-// runs retain their Agent override, DaemonProfile, and codex fallback behavior.
+// identifier cannot change a UI agent's credentialed backend. Unmanaged runs
+// use the local-node setting and codex fallback; the retired supervised-agent
+// projection is never consulted by the execution leaf.
 func (e HostBridgeTaskExecutor) resolveTaskRunnerBackend(req TaskExecRequest, agentPolicy localTaskRunnerAgentPolicy) string {
 	if backend := strings.TrimSpace(agentPolicy.Backend); backend != "" {
 		return backend
 	}
-	ctx := context.Background()
-	if e.Store != nil {
-		if worker := strings.TrimSpace(req.WorkerProfileID); worker != "" {
-			if agent, err := e.Store.Agents().Get(ctx, req.WorkspaceKey, worker); err == nil && agent != nil {
-				if backend := strings.TrimSpace(agent.Backend); backend != "" {
-					return backend
-				}
-			}
-		}
-		if profile, err := e.Store.Daemon().Get(ctx, req.WorkspaceKey); err == nil && profile != nil {
-			if backend := strings.TrimSpace(profile.AgentBackend); backend != "" {
-				return backend
-			}
-		}
+	if backend := runnersettings.RuntimeProvider(req.WorkspaceKey); backend != "" {
+		return backend
 	}
 	return defaultTaskRunnerBackend
+}
+
+// RuntimeProviderForWorkspace exposes the driver's canonical local execution
+// provider resolution to inbound adapters without leaking its settings store.
+func RuntimeProviderForWorkspace(workspace string) string {
+	return runnersettings.RuntimeProvider(workspace)
 }
 
 type localTaskRunnerAgentPolicy = ManagedAgentPolicy

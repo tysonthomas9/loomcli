@@ -56,7 +56,7 @@ const (
 // package tree's non-test sources.
 // When you add/remove/move a client call, update clientRoutes below FIRST, then
 // bump this constant.
-const expectedClientCallSites = 249
+const expectedClientCallSites = 237
 
 // clientRoute is one method+path template the client issues. Path params are
 // written as {} (already normalized).
@@ -106,17 +106,6 @@ var clientRoutes = []clientRoute{
 	{"DELETE", "/api/v1/{}/roles/{}"},
 	{"PATCH", "/api/v1/{}/roles/{}/definition"},
 	{"POST", "/api/v1/{}/roles/{}/delete"},
-
-	// agent.go
-	{"POST", "/api/v1/{}/agents"},
-	{"GET", "/api/v1/{}/agents/{}"},
-	{"GET", "/api/v1/{}/agents"},
-	{"PATCH", "/api/v1/{}/agents/{}"},
-	{"DELETE", "/api/v1/{}/agents/{}"},
-
-	// daemon.go
-	{"GET", "/api/v1/{}/daemon"},
-	{"PUT", "/api/v1/{}/daemon"},
 
 	// worker_profile.go
 	{"POST", "/api/v1/{}/worker-profiles"},
@@ -217,11 +206,6 @@ var clientRoutes = []clientRoute{
 	{"GET", "/api/v1/{}/agent-ownership-leases"},
 	{"POST", "/api/v1/{}/agent-ownership-leases/{}/heartbeat"},
 	{"POST", "/api/v1/{}/agent-ownership-leases/{}/release"},
-	{"POST", "/api/v1/{}/agent-commands"},
-	{"GET", "/api/v1/{}/agent-commands/{}"},
-	{"GET", "/api/v1/{}/agent-commands"},
-	{"POST", "/api/v1/{}/agent-commands/{}/ack"},
-	{"POST", "/api/v1/{}/agent-commands/{}/complete"},
 	{"POST", "/api/v1/{}/agent-inbox-messages"},
 	{"GET", "/api/v1/{}/agent-inbox-messages/{}"},
 	{"GET", "/api/v1/{}/agent-inbox-messages"},

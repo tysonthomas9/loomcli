@@ -39,8 +39,9 @@ func RefreshBoundPromptAgentWorkflows(
 func BuildExecutionCapability(
 	module *WorkflowCatalogModule,
 	handle *bootstrap.StoreHandle,
+	agentQueries catalogcomposition.AgentIdentityQueries,
 ) (*appserve.ExecutionCapability, error) {
-	return catalogcomposition.BuildExecutionCapability(module, handle)
+	return catalogcomposition.BuildExecutionCapability(module, handle, agentQueries)
 }
 
 func BuildWorkflowCatalogModule(config WorkflowCatalogConfig) (*WorkflowCatalogModule, error) {

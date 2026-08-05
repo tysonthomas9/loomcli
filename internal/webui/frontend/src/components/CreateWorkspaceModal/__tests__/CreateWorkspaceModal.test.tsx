@@ -88,7 +88,7 @@ const MOCK_CREATE_RESULT: WorkspaceCreateResult =
 const MOCK_CREATE_RESULT_WITH_WARNINGS: WorkspaceCreateResult = {
   kind: "sync",
   data: MOCK_WORKSPACE_DATA,
-  warnings: ["Daemon startup failed: timeout after 30s"],
+  warnings: ["Runtime startup failed: timeout after 30s"],
 };
 
 describe("CreateWorkspaceModal", () => {

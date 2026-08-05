@@ -23,7 +23,7 @@ function makeAgent(overrides: Partial<LoomAgentStatus> = {}): LoomAgentStatus {
 }
 
 describe("effectiveAgentStatus", () => {
-  it("keeps a daemon-mode working status verbatim (preserving duration)", () => {
+  it("keeps a runtime-reported working status verbatim (preserving duration)", () => {
     expect(
       effectiveAgentStatus(
         makeAgent({ status: "working: loom-1 (5m)", live_status: "idle" }),
@@ -31,7 +31,7 @@ describe("effectiveAgentStatus", () => {
     ).toBe("working: loom-1 (5m)");
   });
 
-  it("keeps a daemon-mode planning status verbatim", () => {
+  it("keeps a runtime-reported planning status verbatim", () => {
     expect(
       effectiveAgentStatus(makeAgent({ status: "planning: loom-2 (2m)" })),
     ).toBe("planning: loom-2 (2m)");
@@ -130,13 +130,13 @@ describe("effectiveAgentStatus", () => {
 });
 
 describe("isAgentActive", () => {
-  it("counts a daemon-mode working agent", () => {
+  it("counts a runtime-reported working agent", () => {
     expect(isAgentActive(makeAgent({ status: "working: loom-1 (5m)" }))).toBe(
       true,
     );
   });
 
-  it("counts a daemon-mode planning agent", () => {
+  it("counts a runtime-reported planning agent", () => {
     expect(isAgentActive(makeAgent({ status: "planning: loom-2 (2m)" }))).toBe(
       true,
     );

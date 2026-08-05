@@ -1,211 +1,18 @@
 package issues
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
-	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
-
-func newHandlersMockPool(t *testing.T, socketPath string) daemon.Pool {
-	t.Helper()
-	pool, err := daemon.NewConnectionPool(socketPath, 2)
-	if err != nil {
-		t.Fatalf("failed to create pool: %v", err)
-	}
-	pool.SetDialTimeout(2 * time.Second)
-	pool.SetPoolTimeout(2 * time.Second)
-	t.Cleanup(func() { pool.Close() })
-	return pool
-}
-
-// startHandlersMockServer creates a Unix socket mock server for handler tests.
-func startHandlersMockServer(t *testing.T, handler func(req rpc.Request) rpc.Response) string {
-	t.Helper()
-	dir, err := os.MkdirTemp("/tmp", "handler-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(dir) })
-	socketPath := filepath.Join(dir, "loom.sock")
-
-	listener, err := net.Listen("unix", socketPath)
-	if err != nil {
-		t.Fatalf("failed to create mock server: %v", err)
-	}
-
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				return
-			}
-			go func(c net.Conn) {
-				defer c.Close()
-				reader := bufio.NewReader(c)
-				for {
-					line, err := reader.ReadBytes('\n')
-					if err != nil {
-						return
-					}
-					var req rpc.Request
-					if err := json.Unmarshal(line, &req); err != nil {
-						return
-					}
-					resp := handler(req)
-					respJSON, _ := json.Marshal(resp)
-					respJSON = append(respJSON, '\n')
-					c.Write(respJSON)
-				}
-			}(conn)
-		}
-	}()
-
-	t.Cleanup(func() { listener.Close() })
-	return socketPath
-}
-
-func defaultHealthPingHandler(req rpc.Request) (rpc.Response, bool) {
-	switch req.Operation {
-	case "health":
-		hd, _ := json.Marshal(rpc.HealthResponse{Status: "healthy", Version: "0.0.0", Compatible: true})
-		return rpc.Response{Success: true, Data: hd}, true
-	case "ping":
-		return rpc.Response{Success: true}, true
-	}
-	return rpc.Response{}, false
-}
-
-// mockBlockedClient implements blockedClient for testing.
-type mockBlockedClient struct {
-	blockedFunc func(args *rpc.BlockedArgs) (*rpc.Response, error)
-}
-
-func (m *mockBlockedClient) Blocked(args *rpc.BlockedArgs) (*rpc.Response, error) {
-	if m.blockedFunc != nil {
-		return m.blockedFunc(args)
-	}
-	return nil, errors.New("blockedFunc not implemented")
-}
-
-// mockBlockedPool implements blockedConnectionGetter for testing.
-type mockBlockedPool struct {
-	getFunc func(ctx context.Context) (blockedClient, error)
-	putFunc func(client blockedClient)
-}
-
-func (m *mockBlockedPool) Get(ctx context.Context) (blockedClient, error) {
-	if m.getFunc != nil {
-		return m.getFunc(ctx)
-	}
-	return nil, errors.New("getFunc not implemented")
-}
-
-func (m *mockBlockedPool) Put(client blockedClient) {
-	if m.putFunc != nil {
-		m.putFunc(client)
-	}
-}
-
-// mockGraphClient implements graphClient for testing.
-type mockGraphClient struct {
-	getGraphDataFunc func(args *rpc.GetGraphDataArgs) (*rpc.GetGraphDataResponse, error)
-}
-
-func (m *mockGraphClient) GetGraphData(args *rpc.GetGraphDataArgs) (*rpc.GetGraphDataResponse, error) {
-	if m.getGraphDataFunc != nil {
-		return m.getGraphDataFunc(args)
-	}
-	return nil, errors.New("getGraphDataFunc not implemented")
-}
-
-// mockGraphPool implements graphConnectionGetter for testing.
-type mockGraphPool struct {
-	getFunc func(ctx context.Context) (graphClient, error)
-	putFunc func(client graphClient)
-}
-
-func (m *mockGraphPool) Get(ctx context.Context) (graphClient, error) {
-	if m.getFunc != nil {
-		return m.getFunc(ctx)
-	}
-	return nil, errors.New("getFunc not implemented")
-}
-
-func (m *mockGraphPool) Put(client graphClient) {
-	if m.putFunc != nil {
-		m.putFunc(client)
-	}
-}
-
-// mockReadyClient implements readyClient for testing.
-type mockReadyClient struct {
-	readyFunc    func(args *rpc.ReadyArgs) (*rpc.Response, error)
-	listFunc     func(args *rpc.ListArgs) (*rpc.Response, error)
-	getParentIDs func(args *rpc.GetParentIDsArgs) (*rpc.Response, error)
-}
-
-func (m *mockReadyClient) Ready(args *rpc.ReadyArgs) (*rpc.Response, error) {
-	if m.readyFunc != nil {
-		return m.readyFunc(args)
-	}
-	return nil, errors.New("readyFunc not implemented")
-}
-
-func (m *mockReadyClient) List(args *rpc.ListArgs) (*rpc.Response, error) {
-	if m.listFunc != nil {
-		return m.listFunc(args)
-	}
-	return nil, errors.New("listFunc not implemented")
-}
-
-func (m *mockReadyClient) GetParentIDs(args *rpc.GetParentIDsArgs) (*rpc.Response, error) {
-	if m.getParentIDs != nil {
-		return m.getParentIDs(args)
-	}
-	return nil, errors.New("getParentIDs not implemented")
-}
-
-// mockReadyPool implements readyConnectionGetter for testing.
-type mockReadyPool struct {
-	getFunc     func(ctx context.Context) (readyClient, error)
-	putFunc     func(client readyClient)
-	discardFunc func(client readyClient)
-}
-
-func (m *mockReadyPool) Get(ctx context.Context) (readyClient, error) {
-	if m.getFunc != nil {
-		return m.getFunc(ctx)
-	}
-	return nil, errors.New("getFunc not implemented")
-}
-
-func (m *mockReadyPool) Put(client readyClient) {
-	if m.putFunc != nil {
-		m.putFunc(client)
-	}
-}
-
-func (m *mockReadyPool) Discard(client readyClient) {
-	if m.discardFunc != nil {
-		m.discardFunc(client)
-	}
-}
 
 // Tests for parseListParams and handleListIssues from feature/web-ui branch
 
@@ -440,7 +247,7 @@ func TestParseListParams(t *testing.T) {
 	}
 }
 
-// testListArgs is a simplified version of rpc.ListArgs for testing.
+// testListArgs is a simplified list filter for testing.
 type testListArgs struct {
 	Status           string
 	Priority         *int
@@ -1133,46 +940,6 @@ func TestParseReadyParams_MultipleParams(t *testing.T) {
 // handleReady tests (from webui/nova branch)
 // ===========================================================================
 
-func TestHandleReady_NilPool(t *testing.T) {
-	handler := HandleReady(nil)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/ready", nil)
-	rr := httptest.NewRecorder()
-
-	handler.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusServiceUnavailable {
-		t.Errorf("status code = %d, want %d", rr.Code, http.StatusServiceUnavailable)
-	}
-
-	var resp ReadyResponse
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Errorf("failed to decode response: %v", err)
-		return
-	}
-
-	if resp.Success {
-		t.Error("Success = true, want false")
-	}
-	if resp.Error != "connection pool not initialized" {
-		t.Errorf("Error = %q, want %q", resp.Error, "connection pool not initialized")
-	}
-}
-
-func TestHandleReady_ContentType(t *testing.T) {
-	handler := HandleReady(nil)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/ready", nil)
-	rr := httptest.NewRecorder()
-
-	handler.ServeHTTP(rr, req)
-
-	contentType := rr.Header().Get("Content-Type")
-	if contentType != "application/json" {
-		t.Errorf("Content-Type = %q, want %q", contentType, "application/json")
-	}
-}
-
 // ===========================================================================
 // Helper functions
 // ===========================================================================
@@ -1180,24 +947,6 @@ func TestHandleReady_ContentType(t *testing.T) {
 func intPtr(i int) *int {
 	return &i
 }
-
-// Verify that rpc.ReadyArgs fields match what we expect (compile-time check)
-var _ = func() bool {
-	args := &rpc.ReadyArgs{
-		Assignee:   "",
-		Unassigned: false,
-		Priority:   nil,
-		Type:       "",
-		Limit:      0,
-		SortPolicy: "",
-		Labels:     nil,
-		LabelsAny:  nil,
-		ParentID:   "",
-		MolType:    "",
-	}
-	_ = args
-	return true
-}()
 
 // ===========================================================================
 // parseBlockedParams tests
@@ -1233,55 +982,6 @@ func TestParseBlockedParams_ParentID(t *testing.T) {
 // ===========================================================================
 // handleBlocked tests
 // ===========================================================================
-
-func TestHandleBlocked_NilPool(t *testing.T) {
-	handler := handleBlocked(nil)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/blocked", nil)
-	rr := httptest.NewRecorder()
-
-	handler.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusServiceUnavailable {
-		t.Errorf("status code = %d, want %d", rr.Code, http.StatusServiceUnavailable)
-	}
-
-	var resp BlockedResponse
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Errorf("failed to decode response: %v", err)
-		return
-	}
-
-	if resp.Success {
-		t.Error("Success = true, want false")
-	}
-	if resp.Error != "connection pool not initialized" {
-		t.Errorf("Error = %q, want %q", resp.Error, "connection pool not initialized")
-	}
-}
-
-func TestHandleBlocked_ContentType(t *testing.T) {
-	handler := handleBlocked(nil)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/blocked", nil)
-	rr := httptest.NewRecorder()
-
-	handler.ServeHTTP(rr, req)
-
-	contentType := rr.Header().Get("Content-Type")
-	if contentType != "application/json" {
-		t.Errorf("Content-Type = %q, want %q", contentType, "application/json")
-	}
-}
-
-// Verify that rpc.BlockedArgs fields match what we expect (compile-time check)
-var _ = func() bool {
-	args := &rpc.BlockedArgs{
-		ParentID: "",
-	}
-	_ = args
-	return true
-}()
 
 // ===========================================================================
 // handleGetIssue tests

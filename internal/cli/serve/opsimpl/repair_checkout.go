@@ -1,6 +1,7 @@
 package opsimpl
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/gitbranch"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 )
 
@@ -50,7 +52,14 @@ func (g *GitOpsImpl) RepairCheckout(workspaceID, scope, target, repoName string,
 	}
 	ws.Path = wsRoot
 
-	spec, err := repairCheckoutTarget(ws, wsRoot, scope, target, repoName)
+	var agent *agents.RuntimeIdentity
+	if strings.TrimSpace(scope) == "agent" {
+		agent, err = g.loadRuntimeIdentity(context.Background(), workspaceID, strings.TrimSpace(target))
+		if err != nil {
+			return ops.RepairResult{}, fmt.Errorf("%w: agent %q is not known in workspace", ops.ErrCheckoutTargetNotAllowed, target)
+		}
+	}
+	spec, err := repairCheckoutTarget(ws, wsRoot, agent, scope, target, repoName)
 	if err != nil {
 		return ops.RepairResult{}, err
 	}
@@ -136,13 +145,13 @@ func repairNone(message string) ops.RepairResult {
 	return ops.RepairResult{Repaired: false, Method: repairMethodNone, Message: message}
 }
 
-func repairCheckoutTarget(ws *ops.WorkspaceData, wsRoot, scope, target, repoName string) (repairCheckoutSpec, error) {
+func repairCheckoutTarget(ws *ops.WorkspaceData, wsRoot string, agent *agents.RuntimeIdentity, scope, target, repoName string) (repairCheckoutSpec, error) {
 	scope = strings.TrimSpace(scope)
 	target = strings.TrimSpace(target)
 	repoName = strings.TrimSpace(repoName)
 	switch scope {
 	case "agent":
-		return repairAgentCheckoutTarget(ws, wsRoot, target, repoName)
+		return repairAgentCheckoutTarget(ws, wsRoot, agent, target, repoName)
 	case "repo":
 		return repairRepoCheckoutTarget(ws, wsRoot, target, repoName)
 	default:
@@ -150,16 +159,16 @@ func repairCheckoutTarget(ws *ops.WorkspaceData, wsRoot, scope, target, repoName
 	}
 }
 
-func repairAgentCheckoutTarget(ws *ops.WorkspaceData, wsRoot, target, repoName string) (repairCheckoutSpec, error) {
-	agent, err := findWorkspaceAgent(ws, ws.ID, target)
-	if err != nil {
+func repairAgentCheckoutTarget(ws *ops.WorkspaceData, wsRoot string, agent *agents.RuntimeIdentity, target, repoName string) (repairCheckoutSpec, error) {
+	if agent == nil || agent.AgentID != target || agent.WorkspaceKey != ws.ID {
 		return repairCheckoutSpec{}, fmt.Errorf("%w: agent %q is not known in workspace", ops.ErrCheckoutTargetNotAllowed, target)
 	}
+	var err error
 	var repo ops.WorkspaceRepo
 	if repoName != "" {
-		repo, err = selectAgentRepoByName(ws.Repos, *agent, repoName)
+		repo, err = selectAgentRepoByName(ws.Repos, agent.AgentID, agent.Repos, agent.RepoGroups, repoName)
 	} else {
-		repo, err = selectAgentRepo(ws.Repos, *agent)
+		repo, err = selectAgentRepo(ws.Repos, agent.AgentID, agent.Repos, agent.RepoGroups)
 	}
 	if err != nil {
 		return repairCheckoutSpec{}, err

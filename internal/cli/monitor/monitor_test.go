@@ -2653,42 +2653,6 @@ func TestRenderAgentLine(t *testing.T) {
 	}
 }
 
-func TestRenderDashboardWithDaemonManagedAgents(t *testing.T) {
-	t.Parallel()
-	data := &MonitorData{
-		Timestamp: fixedTime(),
-		Agents: []AgentStatus{
-			{Name: "falcon", Branch: "falcon", Status: "working: T-1 (2m)", DaemonManaged: true},
-			{Name: "nova", Branch: "nova", Status: "ready", DaemonManaged: false},
-			{Name: "spark", Branch: "spark", Status: "3 changes", DaemonManaged: true},
-		},
-		Tasks:         TaskSummary{},
-		AgentTasks:    make(map[string]TaskInfo),
-		TaskConflicts: make(map[string][]string),
-		SyncStatus:    SyncInfo{DBSynced: true},
-		Stats:         MonitorStats{},
-	}
-
-	output := renderDashboard(data)
-
-	// Verify [D] markers appear for daemon-managed agents
-	// falcon and spark should have [D], nova should not
-	if !strings.Contains(output, "[D] falcon") {
-		t.Error("expected '[D] falcon' in output for daemon-managed agent")
-	}
-	if !strings.Contains(output, "[D] spark") {
-		t.Error("expected '[D] spark' in output for daemon-managed agent")
-	}
-	// nova should NOT have [D] prefix
-	if strings.Contains(output, "[D] nova") {
-		t.Error("nova should NOT have [D] prefix (not daemon-managed)")
-	}
-	// But nova should still appear
-	if !strings.Contains(output, "nova") {
-		t.Error("expected 'nova' in output")
-	}
-}
-
 // TestCollectTaskStatusReadyLimitParam verifies that collectTaskStatus passes
 // the readyLimit parameter through to Ready(). The existing
 // TestCollectTaskStatusReadyCommandArgs tests limit=100 (monitor default);

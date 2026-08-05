@@ -2,29 +2,13 @@ package app
 
 import (
 	"context"
-	"errors"
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
-	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
-	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
-
-// stubErrorPool implements daemon.Pool, returning errors from Get.
-// Used in module tests where handlers must not attempt RPC calls.
-type stubErrorPool struct{}
-
-func (s *stubErrorPool) Get(_ context.Context) (*rpc.Client, error) {
-	return nil, errors.New("stub: pool unavailable")
-}
-func (s *stubErrorPool) Put(_ *rpc.Client)           {}
-func (s *stubErrorPool) PutAfterError(_ *rpc.Client) {}
-func (s *stubErrorPool) Discard(_ *rpc.Client)       {}
-func (s *stubErrorPool) Stats() daemon.PoolStats     { return daemon.PoolStats{} }
-func (s *stubErrorPool) Close() error                { return nil }
 
 // stubTerminalService implements TerminalService with no-op defaults for module tests.
 type stubTerminalService struct {

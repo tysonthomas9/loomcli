@@ -59,9 +59,6 @@ func prepareStoreBackedCloneWorkspaceAdmission(
 		return cloneWorkspaceAdmissionPlan{}, err
 	}
 	initialBranch := strings.TrimSpace(req.Branch)
-	if initialBranch == "" {
-		initialBranch = "main"
-	}
 	record, err := process.prepareCreate(
 		ctx,
 		infrafleetdb.RepositoryAdmissionWorkspaceInput{
@@ -77,7 +74,7 @@ func prepareStoreBackedCloneWorkspaceAdmission(
 		if errors.Is(err, infrafleetdb.ErrRepositoryAdmissionConflict) {
 			return cloneWorkspaceAdmissionPlan{}, workspaceerrors.New(
 				workspaceerrors.AlreadyExists,
-				fmt.Sprintf("workspace %q already exists or has different repository admission intent", req.Name),
+				fmt.Sprintf("workspace %q or one of its repositories conflicts with an existing repository admission", req.Name),
 				err,
 			)
 		}
@@ -260,6 +257,13 @@ func prepareAddReposToStoreBackedWorkspaceAdmission(
 		req.Branch,
 	)
 	if err != nil {
+		if errors.Is(err, infrafleetdb.ErrRepositoryAdmissionConflict) {
+			return addRepositoriesAdmissionPlan{}, workspaceerrors.New(
+				workspaceerrors.AlreadyExists,
+				fmt.Sprintf("one or more repositories conflict with an existing repository admission in workspace %q", key),
+				err,
+			)
+		}
 		return addRepositoriesAdmissionPlan{}, err
 	}
 	specs := append(
@@ -409,7 +413,7 @@ func addReposToStoreBackedWorkspaceAdmission(
 		if errors.Is(err, infrafleetdb.ErrRepositoryAdmissionConflict) {
 			return service.WorkspaceCreateResult{}, workspaceerrors.New(
 				workspaceerrors.AlreadyExists,
-				"one or more repository names are already registered; repository names must be unique across workspaces",
+				"one or more repository names are already registered in this workspace",
 				err,
 			)
 		}

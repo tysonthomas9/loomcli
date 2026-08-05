@@ -2,9 +2,9 @@
  * Agent template catalog for the CreateAgentModal behavior gallery.
  *
  * Main cards are organized by what the user wants the agent to do:
- * role-backed behavior cards (Planner, Coder, custom roles, + New role) and
- * scripted workflow behaviors. The old daemon-supervised cards remain available
- * in an advanced section because they still hit the legacy agentdef endpoint.
+ * role-backed behavior cards (Planner, Coder, custom roles, + New role),
+ * scripted workflows, and browser-owned interactive agents. Background work
+ * always enters through Automation and Execution.
  */
 
 export type AgentTemplateKind =
@@ -12,10 +12,9 @@ export type AgentTemplateKind =
   | "role-create"
   | "workflow"
   | "lead"
-  | "builtin-role"
   | "custom-role";
 
-export type TemplateSection = "behavior" | "advanced";
+export type TemplateSection = "behavior";
 
 export type RoleTrigger = "ready" | "review";
 
@@ -57,7 +56,7 @@ export function roleTriggerForTaskFilter(
   return taskFilter?.trim() === "review" ? "review" : "ready";
 }
 
-/** Provisioning data for a legacy `custom-role` daemon template. */
+/** Provisioning data for a fixed role-backed behavior template. */
 export interface CustomRoleSpec {
   /** Canonical role name to ensure (e.g. "bug-triage"). */
   roleName: string;
@@ -151,7 +150,7 @@ export interface AgentTemplate {
   /** Placeholder shown in the name field when this template is selected. */
   defaultName: string;
   testId: string;
-  /** Canonical role name for role and legacy daemon templates. */
+  /** Canonical role name for role-backed and interactive templates. */
   roleName: string;
   /** Typed prompt-agent trigger; role-backed templates default to ready. */
   roleTrigger?: RoleTrigger;
@@ -178,12 +177,6 @@ export const TEMPLATE_SECTIONS: TemplateSectionMeta[] = [
     hint: "Pick what this agent should do.",
     labelId: "create-agent-behavior-label",
   },
-  {
-    id: "advanced",
-    label: "Advanced: daemon-supervised (legacy)",
-    hint: "Older Go-daemon agents kept for compatibility.",
-    labelId: "create-agent-advanced-label",
-  },
 ];
 
 const ACCENTS = {
@@ -198,42 +191,12 @@ const ACCENTS = {
   newRole: "#475569",
 } as const;
 
-/**
- * Prompt seeded for the legacy bug-triage daemon role on first use. The main
- * behavior grid only shows bug triage when a workspace role exists for it.
- */
-export const LEGACY_BUG_TRIAGE_PROMPT = `# Bug triage agent
-
-You are a focused bug-triage agent. You claim incoming bug tickets, reproduce
-them, and write a crisp triage summary. You do NOT implement fixes.
-
-For each bug ticket you claim:
-1. Restate the report in one line and identify the affected area of the code.
-2. Attempt to reproduce. Record exact steps, expected vs actual, and the
-   smallest failing case you can find.
-3. Locate the most likely root cause in the code (file:line) and explain why.
-4. Assess severity and blast radius.
-5. Post a triage summary comment and set the ticket's labels/priority. Leave the
-   ticket ready for an implementer — do not change product code yourself.
-
-Be concise and evidence-based. Prefer reading code and logs over speculation.
-`;
-
-/**
- * Immutable prompt filename produced for the legacy role by the backend's
- * roleprompts.ImmutablePromptFilename contract. This is intentionally pinned:
- * the one-time migration must not overwrite a user role that merely retained
- * the old prompt body while being repointed to an operator-owned prompt file.
- */
-export const LEGACY_BUG_TRIAGE_PROMPT_FILE_BASENAME =
-  "bug-triage.c72a7d7efcff.3c7b7bb16b2d.md";
-
 export const BUG_TRIAGE_PROMPT = `# Bug triage agent
 
-You are a focused bug-triage agent. You investigate the ticket assigned by the
-supervisor and write a crisp triage summary. You do NOT implement fixes.
+You are a focused bug-triage agent. You investigate the task delivered by Loom
+and write a crisp triage summary. You do NOT implement fixes.
 
-For the supervisor-assigned bug ticket:
+For the delivered bug ticket:
 1. Restate the report in one line and identify the affected area of the code.
 2. Attempt to reproduce. Record exact steps, expected vs actual, and the
    smallest failing case you can find.
@@ -246,7 +209,8 @@ For the supervisor-assigned bug ticket:
    triaged marker is mandatory so this role does not claim the ticket again.
 6. Move the ticket to the Review column as the terminal triage handoff:
    loom data update <assigned-task-id> --status review
-   Do not leave it Open: the daemon would otherwise select it for triage again.
+   Do not leave it Open: the ready-task trigger would otherwise select it for
+   triage again.
 
 The ticket must be ready for a human to approve into the Planner → Coder path.
 Do not change product code yourself.
@@ -278,6 +242,29 @@ const CODER_ROLE_TEMPLATE: AgentTemplate = {
   accentColor: ACCENTS.task,
   defaultName: "coder",
   testId: "create-agent-template-task",
+};
+
+const BUG_TRIAGE_ROLE_TEMPLATE: AgentTemplate = {
+  id: "role-bug-triage",
+  kind: "custom-role",
+  section: "behavior",
+  roleName: "bug-triage",
+  roleTrigger: "ready",
+  title: "Bug triage",
+  description:
+    "Reproduces and triages ready bug tickets without writing fixes.",
+  glyph: "B",
+  accentColor: ACCENTS.triage,
+  defaultName: "bug-triage",
+  testId: "create-agent-template-bug-triage",
+  customRole: {
+    roleName: "bug-triage",
+    promptFilename: "bug-triage.md",
+    promptContent: BUG_TRIAGE_PROMPT,
+    description: "Reproduces and triages ready tickets; does not write fixes.",
+    taskFilter: "bug",
+    readOnly: true,
+  },
 };
 
 export const NEW_ROLE_TEMPLATE: AgentTemplate = {
@@ -361,60 +348,13 @@ const LOCAL_REVIEW_WORKFLOW_TEMPLATE: AgentTemplate = {
   },
 };
 
-const LEGACY_PLANNER_TEMPLATE: AgentTemplate = {
-  id: "legacy-planner",
-  kind: "builtin-role",
-  section: "advanced",
-  roleName: "plan",
-  title: "Planner",
-  description: "Legacy Go-daemon planner.",
-  glyph: "P",
-  accentColor: ACCENTS.plan,
-  defaultName: "planner",
-  testId: "create-agent-template-legacy-planner",
-};
-
-const LEGACY_TASK_TEMPLATE: AgentTemplate = {
-  id: "legacy-task",
-  kind: "builtin-role",
-  section: "advanced",
-  roleName: "task",
-  title: "Task Runner",
-  description: "Legacy Go-daemon task runner.",
-  glyph: "T",
-  accentColor: ACCENTS.task,
-  defaultName: "worker",
-  testId: "create-agent-template-legacy-task",
-};
-
-const LEGACY_BUG_TRIAGE_TEMPLATE: AgentTemplate = {
-  id: "legacy-bug-triage",
-  kind: "custom-role",
-  section: "advanced",
-  roleName: "bug-triage",
-  title: "Bug triage",
-  description: "Legacy Go-daemon triage worker (read-only).",
-  glyph: "B",
-  accentColor: ACCENTS.triage,
-  defaultName: "triage",
-  testId: "create-agent-template-bug-triage",
-  customRole: {
-    roleName: "bug-triage",
-    promptFilename: "bug-triage.md",
-    promptContent: BUG_TRIAGE_PROMPT,
-    description: "Reproduces and triages ready tickets; does not write fixes.",
-    taskFilter: "bug",
-    readOnly: true,
-  },
-};
-
-const LEGACY_LEAD_TEMPLATE: AgentTemplate = {
+const INTERACTIVE_LEAD_TEMPLATE: AgentTemplate = {
   id: "lead",
   kind: "lead",
-  section: "advanced",
+  section: "behavior",
   roleName: "lead",
   title: "Lead",
-  description: "Legacy interactive lead terminal.",
+  description: "Interactive lead terminal.",
   glyph: "L",
   accentColor: ACCENTS.lead,
   defaultName: "lead",
@@ -424,6 +364,7 @@ const LEGACY_LEAD_TEMPLATE: AgentTemplate = {
 export const BUILTIN_ROLE_TEMPLATES: AgentTemplate[] = [
   PLANNER_ROLE_TEMPLATE,
   CODER_ROLE_TEMPLATE,
+  BUG_TRIAGE_ROLE_TEMPLATE,
 ];
 
 export const SCRIPTED_WORKFLOW_TEMPLATES: AgentTemplate[] = [
@@ -432,46 +373,38 @@ export const SCRIPTED_WORKFLOW_TEMPLATES: AgentTemplate[] = [
   LOCAL_REVIEW_WORKFLOW_TEMPLATE,
 ];
 
-export const LEGACY_DAEMON_TEMPLATES: AgentTemplate[] = [
-  LEGACY_PLANNER_TEMPLATE,
-  LEGACY_TASK_TEMPLATE,
-  LEGACY_BUG_TRIAGE_TEMPLATE,
-  LEGACY_LEAD_TEMPLATE,
-];
-
 /** The static catalog, excluding dynamic custom-role cards from the roles API. */
 export const AGENT_TEMPLATES: AgentTemplate[] = [
   ...BUILTIN_ROLE_TEMPLATES,
   NEW_ROLE_TEMPLATE,
   ...SCRIPTED_WORKFLOW_TEMPLATES,
-  ...LEGACY_DAEMON_TEMPLATES,
+  INTERACTIVE_LEAD_TEMPLATE,
 ];
 
 export type DefaultRole = "lead" | "plan" | "task";
-export type SupervisedRole = "plan" | "task";
+export type RequiredRole = "plan" | "task";
 
 /**
  * Resolve the template a `defaultRole` prop should pre-select. plan/task select
- * the TS role-backed behavior cards; lead remains legacy/advanced for Phase 5.
+ * the role-backed behavior cards; lead selects its interactive prompt card.
  */
 export function templateForRole(role: DefaultRole | undefined): AgentTemplate {
   if (role === "plan") return PLANNER_ROLE_TEMPLATE;
-  if (role === "lead") return LEGACY_LEAD_TEMPLATE;
+  if (role === "lead") return INTERACTIVE_LEAD_TEMPLATE;
   return CODER_ROLE_TEMPLATE;
 }
 
 /**
- * Resolve a daemon-supervised template for flows that must receive an agent
- * row through CreateAgentModal.onSuccess (for example onboarding and PR
- * reviewer assignment). These callers cannot accept role-backed prompt-agent
- * bindings, so the modal constrains selection to this one template.
+ * Resolve the one role-backed behavior required by constrained flows such as
+ * onboarding and PR reviewer assignment.
  */
-export function supervisedTemplateForRole(role: SupervisedRole): AgentTemplate {
-  return role === "plan" ? LEGACY_PLANNER_TEMPLATE : LEGACY_TASK_TEMPLATE;
+export function requiredTemplateForRole(role: RequiredRole): AgentTemplate {
+  return role === "plan" ? PLANNER_ROLE_TEMPLATE : CODER_ROLE_TEMPLATE;
 }
 
-export function templatesForSection(section: TemplateSection): AgentTemplate[] {
-  if (section === "advanced") return LEGACY_DAEMON_TEMPLATES;
+export function templatesForSection(
+  _section: TemplateSection,
+): AgentTemplate[] {
   return [
     ...BUILTIN_ROLE_TEMPLATES,
     NEW_ROLE_TEMPLATE,

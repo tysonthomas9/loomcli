@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // LeadAssignmentContext is the provider-neutral context a lead runtime should
@@ -21,39 +20,80 @@ type LeadAssignmentContext struct {
 	OrchestratorSessionID string
 }
 
+// LeadAssignmentIdentity is the canonical Agents-owned identity projection
+// needed by lead assignment. It deliberately excludes the retired
+// supervised-assignment record.
+type LeadAssignmentIdentity struct {
+	WorkspaceKey string
+	AgentID      string
+	RoleName     string
+	ProfileName  string
+}
+
+// LeadAssignmentProfile is the Execution-owned scheduling projection that
+// carries the currently assigned epic and its revision.
+type LeadAssignmentProfile struct {
+	WorkspaceKey string
+	ProfileID    string
+	RoleName     string
+	ParentEpic   string
+	UpdatedAt    time.Time
+}
+
+// LeadAssignmentSource is the combined read model consumed by interactive
+// providers. Its three operations remain owned by Agents, Execution, and
+// Interaction respectively; this query never exposes a mutation surface.
+type LeadAssignmentSource interface {
+	GetLeadAssignmentIdentity(context.Context, string, string) (*LeadAssignmentIdentity, error)
+	GetLeadAssignmentProfile(context.Context, string, string) (*LeadAssignmentProfile, error)
+	GetLeadOrchestrationSessionID(context.Context, string, string) (string, error)
+}
+
 // LoadLeadAssignmentContext returns the current backend assignment for a lead,
 // or nil when the agent is not a lead or has no assigned epic.
-func LoadLeadAssignmentContext(ctx context.Context, st store.Store, workspace, leadName string) (*LeadAssignmentContext, error) {
+func LoadLeadAssignmentContext(ctx context.Context, source LeadAssignmentSource, workspace, leadName string) (*LeadAssignmentContext, error) {
 	workspace = strings.TrimSpace(workspace)
 	leadName = strings.TrimSpace(leadName)
-	if st == nil || st.Agents() == nil || workspace == "" || leadName == "" {
+	if source == nil || workspace == "" || leadName == "" {
 		return nil, nil
 	}
 
-	lead, err := st.Agents().Get(ctx, workspace, leadName)
+	lead, err := source.GetLeadAssignmentIdentity(ctx, workspace, leadName)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("load lead assignment context: %w", err)
 	}
-	if lead == nil || !IsLeadRole(lead.RoleName) || strings.TrimSpace(lead.Parent) == "" {
+	if lead == nil || lead.WorkspaceKey != workspace || lead.AgentID != leadName ||
+		!IsLeadRole(lead.RoleName) || strings.TrimSpace(lead.ProfileName) == "" {
+		return nil, nil
+	}
+	profile, err := source.GetLeadAssignmentProfile(ctx, workspace, lead.ProfileName)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("load lead assignment profile: %w", err)
+	}
+	if profile == nil || profile.WorkspaceKey != workspace || profile.ProfileID != lead.ProfileName ||
+		profile.RoleName != lead.RoleName || strings.TrimSpace(profile.ParentEpic) == "" {
 		return nil, nil
 	}
 
-	orchestratorID, err := store.OrchestrationSessionIDFor(ctx, st, workspace, lead.Name)
+	orchestratorID, err := source.GetLeadOrchestrationSessionID(ctx, workspace, lead.AgentID)
 	if err != nil {
 		orchestratorID = ""
 	}
 
-	version := lead.UpdatedAt.UTC().Format(time.RFC3339Nano)
-	if lead.UpdatedAt.IsZero() {
-		version = lead.Parent
+	version := profile.UpdatedAt.UTC().Format(time.RFC3339Nano)
+	if profile.UpdatedAt.IsZero() {
+		version = profile.ParentEpic
 	}
 	return &LeadAssignmentContext{
 		WorkspaceKey:          workspace,
-		LeadName:              lead.Name,
-		EpicID:                lead.Parent,
+		LeadName:              lead.AgentID,
+		EpicID:                profile.ParentEpic,
 		AssignmentVersion:     version,
 		OrchestratorSessionID: orchestratorID,
 	}, nil

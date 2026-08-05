@@ -26,7 +26,7 @@ type orphanSession struct {
 }
 
 // checkOrphanedTranscripts finds completed Claude sessions whose native
-// transcript was never captured — e.g. fleet/daemon-mode runs, which have no
+// transcript was never captured — e.g. non-interactive fleet runs, which have no
 // Claude Code hooks installed — and, with --fix, backfills agent_transcript.jsonl
 // plus token usage from Claude Code's own ~/.claude/projects transcript.
 func checkOrphanedTranscripts() CheckResult {

@@ -341,15 +341,7 @@ func createHarnessLeadSession(t *testing.T, st store.Store) {
 func createAssignedLeadSessionWithBackend(t *testing.T, st store.Store, backend string) {
 	t.Helper()
 	ctx := context.Background()
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{
-		WorkspaceKey: "WS",
-		Name:         "nova",
-		RoleName:     "lead",
-		Backend:      backend,
-		Parent:       "EPIC-1",
-	}); err != nil {
-		t.Fatalf("create lead: %v", err)
-	}
+	seedAssignedLeadIdentity(t, st)
 	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
 		WorkspaceKey: "WS",
 		SessionID:    "lead-session",

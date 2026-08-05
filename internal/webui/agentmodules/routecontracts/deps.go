@@ -7,7 +7,6 @@ import (
 	"context"
 
 	"github.com/tysonthomas9/loomcli/internal/app/agentprovisioning"
-	"github.com/tysonthomas9/loomcli/internal/app/agentscompat"
 	"github.com/tysonthomas9/loomcli/internal/app/webhookingestion"
 	"github.com/tysonthomas9/loomcli/internal/app/workflowbinding"
 	"github.com/tysonthomas9/loomcli/internal/app/workfloweventing"
@@ -30,9 +29,8 @@ import (
 // needed to assemble workspace-scoped agent and execution routes.
 type Deps struct {
 	Store                         store.Store
-	AgentSvc                      service.AgentService
+	InteractiveAgentRuntime       service.InteractiveAgentRuntime
 	AgentSessionTranscripts       service.AgentSessionTranscriptService
-	AgentLocalSessionHistory      service.AgentLocalSessionHistoryService
 	IssueSvc                      service.IssueService
 	Hub                           *realtime.Hub
 	FleetBaseURL                  string
@@ -51,7 +49,6 @@ type Deps struct {
 	AutomationOperator            workflowcataloghttp.OperatorAuthorityResolver
 	Agents                        agents.API
 	AgentsOperator                workflowcataloghttp.OperatorAuthorityResolver
-	AgentParentBindings           agentscompat.ParentBindingCommands
 	AgentProvisioning             agentprovisioning.Commands
 	AgentProvisioningOperator     workflowcataloghttp.OperatorAuthorityResolver
 	Interaction                   interaction.API

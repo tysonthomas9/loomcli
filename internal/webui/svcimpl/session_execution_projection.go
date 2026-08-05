@@ -2,6 +2,7 @@ package svcimpl
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strconv"
 	"strings"
@@ -67,7 +68,7 @@ func sessionRecordFromTaskRun(run *domain.TaskRun) sessions.SessionRecord {
 		SchemaVersion:    sessions.CurrentSchemaVersion,
 		SessionID:        domain.PublicTaskRunSessionID(run),
 		TaskID:           run.TaskID,
-		AgentName:        taskRunWorkerName(run),
+		AgentName:        taskRunAgentName(run),
 		Backend:          taskRunBackend(run),
 		Model:            strings.TrimSpace(metadata["model"]),
 		Phase:            firstNonEmptySessionValue(metadata["phase"], "implementation"),
@@ -93,6 +94,28 @@ func sessionRecordFromTaskRun(run *domain.TaskRun) sessions.SessionRecord {
 		}
 	}
 	return record
+}
+
+// taskRunAgentName reports the product agent that requested a managed TaskRun.
+// WorkerProfileID identifies the infrastructure process which claimed the run;
+// showing it as the assignee makes every managed task look owned by the shared
+// task worker. The immutable policy snapshot is stamped by Loom when the agent
+// requests execution, so it is the durable, retry-safe source of attribution.
+func taskRunAgentName(run *domain.TaskRun) string {
+	if run != nil && len(run.Input) > 0 {
+		var input map[string]json.RawMessage
+		if err := json.Unmarshal(run.Input, &input); err == nil {
+			var policy struct {
+				AgentServiceID string `json:"agentServiceId"`
+			}
+			if err := json.Unmarshal(input["loomAgentPolicy"], &policy); err == nil {
+				if agentID := strings.TrimSpace(policy.AgentServiceID); agentID != "" {
+					return agentID
+				}
+			}
+		}
+	}
+	return taskRunWorkerName(run)
 }
 
 func taskRunWorkerName(run *domain.TaskRun) string {

@@ -7,14 +7,13 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 )
 
 // Compile-time assertion: *WorkspaceOpsModule implements Module.
 var _ Module = (*WorkspaceOpsModule)(nil)
 
 func TestWorkspaceOpsModule_RegisterRoutes(t *testing.T) {
-	mod := NewWorkspaceOpsModule(&mockWorkspaceService{}, &stubErrorPool{}, nil)
+	mod := NewWorkspaceOpsModule(&mockWorkspaceService{}, nil)
 
 	mux := http.NewServeMux()
 	mod.Register(mux)
@@ -50,7 +49,7 @@ func TestWorkspaceOpsModule_RegisterRoutes(t *testing.T) {
 }
 
 func TestWorkspaceOpsModule_WrongMethod_Returns405(t *testing.T) {
-	mod := NewWorkspaceOpsModule(&mockWorkspaceService{}, &stubErrorPool{}, nil)
+	mod := NewWorkspaceOpsModule(&mockWorkspaceService{}, nil)
 
 	mux := http.NewServeMux()
 	mod.Register(mux)
@@ -65,19 +64,17 @@ func TestWorkspaceOpsModule_WrongMethod_Returns405(t *testing.T) {
 }
 
 func TestWorkspaceOpsModule_NilDeps(t *testing.T) {
-	mod := NewWorkspaceOpsModule(nil, nil, nil)
+	mod := NewWorkspaceOpsModule(nil, nil)
 
 	mux := http.NewServeMux()
 	mod.Register(mux) // must not panic during registration
 }
 
-func TestWorkspaceOpsModule_TypedNilPoolUsesBackend(t *testing.T) {
-	var typedNilPool *daemon.MultiPool
-	mod := NewWorkspaceOpsModule(&mockWorkspaceService{}, typedNilPool, nil).
+func TestWorkspaceOpsModuleUsesBackend(t *testing.T) {
+	mod := NewWorkspaceOpsModule(&mockWorkspaceService{}, nil).
 		WithIssueBackendFn(func(context.Context) backend.IssueBackend {
 			return &stubIssueBackend{}
-		}).
-		WithDaemonExpected(false)
+		})
 
 	mux := http.NewServeMux()
 	mod.Register(mux)

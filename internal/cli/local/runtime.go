@@ -33,7 +33,6 @@ type runtimeInfo struct {
 	Status           string    `json:"status"`
 	PID              int       `json:"pid"`
 	ServePID         int       `json:"serve_pid,omitempty"`
-	DaemonPID        int       `json:"daemon_pid,omitempty"`
 	DataDir          string    `json:"data_dir"`
 	URL              string    `json:"url,omitempty"`
 	Port             int       `json:"port,omitempty"`
@@ -60,7 +59,6 @@ type RuntimeSnapshot struct {
 	Status           string    `json:"status"`
 	PID              int       `json:"pid"`
 	ServePID         int       `json:"serve_pid,omitempty"`
-	DaemonPID        int       `json:"daemon_pid,omitempty"`
 	DataDir          string    `json:"data_dir"`
 	URL              string    `json:"url,omitempty"`
 	Port             int       `json:"port,omitempty"`
@@ -91,7 +89,6 @@ func runtimeSnapshot(info *runtimeInfo) *RuntimeSnapshot {
 		Status:           info.Status,
 		PID:              info.PID,
 		ServePID:         info.ServePID,
-		DaemonPID:        info.DaemonPID,
 		DataDir:          info.DataDir,
 		URL:              info.URL,
 		Port:             info.Port,
@@ -208,10 +205,6 @@ func serveStartupLogTail(dataDir string, maxBytes int) string {
 
 func serviceLogPath(dataDir string) string {
 	return filepath.Join(dataDir, logsDirName, "loom-local-service.log")
-}
-
-func daemonLogPath(dataDir string) string {
-	return filepath.Join(dataDir, logsDirName, "loom-daemon.log")
 }
 
 func readRuntime(dataDir string) (*runtimeInfo, error) {

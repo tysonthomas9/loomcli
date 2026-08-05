@@ -89,5 +89,10 @@ func loadClaudeHookAssignmentContextFromStore(ctx context.Context) (*epicrunner.
 			return nil, nil
 		}
 	}
-	return epicrunner.LoadLeadAssignmentContext(ctx, handle.Store, workspace, leadName)
+	return epicrunner.LoadLeadAssignmentContext(
+		ctx,
+		epicrunner.NewStoreLeadAssignmentSource(handle.Store),
+		workspace,
+		leadName,
+	)
 }

@@ -14,13 +14,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/app/agentscompat"
 	appserve "github.com/tysonthomas9/loomcli/internal/app/serve"
 	"github.com/tysonthomas9/loomcli/internal/app/workfloweventing"
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
-	"github.com/tysonthomas9/loomcli/internal/infra/agentscompatstore"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
@@ -28,6 +26,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/testutil"
 	"github.com/tysonthomas9/loomcli/internal/trigger"
 )
 
@@ -174,6 +173,50 @@ type testHarness struct {
 	fence       int64
 	runTokenKey []byte
 	execution   *appserve.ExecutionCapability
+}
+
+type testStoreAgentIdentities struct {
+	store store.AgentServiceStore
+}
+
+func (queries testStoreAgentIdentities) GetAgent(ctx context.Context, workspace, agentID string) (*agents.Agent, error) {
+	value, err := queries.store.Get(ctx, workspace, agentID)
+	if err != nil {
+		return nil, err
+	}
+	return testCanonicalAgent(value), nil
+}
+
+func (queries testStoreAgentIdentities) ListAgents(ctx context.Context, workspace string, filter agents.AgentFilter) ([]*agents.Agent, error) {
+	values, err := queries.store.List(ctx, workspace, store.AgentServiceFilter{
+		RoleName:       filter.RoleName,
+		IncludeDeleted: filter.IncludeDeleted,
+		Limit:          filter.Limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*agents.Agent, 0, len(values))
+	for _, value := range values {
+		out = append(out, testCanonicalAgent(value))
+	}
+	return out, nil
+}
+
+func testCanonicalAgent(value *domain.AgentService) *agents.Agent {
+	if value == nil {
+		return nil
+	}
+	return &agents.Agent{
+		WorkspaceKey: value.WorkspaceKey,
+		AgentID:      value.ServiceID,
+		GenerationID: value.GenerationID,
+		Name:         value.Name,
+		Behavior:     agents.BehaviorReference{RoleName: value.RoleName},
+		ProfileName:  value.ProfileName,
+		CreatedAt:    value.CreatedAt,
+		UpdatedAt:    value.UpdatedAt,
+	}
 }
 
 type testDriverRunExecution struct {
@@ -645,7 +688,7 @@ func newTestHarness(t *testing.T, apiToken string) *testHarness {
 	executionCapability, err := appserve.NewExecutionCapability(appserve.ExecutionDependencies{
 		TaskRuns: st.TaskRuns(), DriverRuns: st.DriverRuns(), DriverSteps: st.DriverSteps(),
 		TerminalStepRepairs: repairs, TaskRunEvents: st.TaskRunEvents(), Nodes: st.Nodes(),
-		WorkerProfiles: st.WorkerProfiles(), Agents: st.Agents(), Outbox: st.Outbox(), Awaits: st.Awaits(), TriggerEvents: st.TriggerEvents(),
+		WorkerProfiles: st.WorkerProfiles(), AgentQueries: testutil.StaticAgentQueries{}, Outbox: st.Outbox(), Awaits: st.Awaits(), TriggerEvents: st.TriggerEvents(),
 		Workspaces: st.Workspaces(), AtomicTaskRunRequests: taskRunCommands, AtomicTaskRunClaims: taskRunCommands,
 		AtomicTaskRunWorkItemDesign: taskRunCommands,
 		AtomicTaskRunRequeues:       taskRunCommands, AtomicTaskRunRetryExhaustion: taskRunCommands,
@@ -654,27 +697,6 @@ func newTestHarness(t *testing.T, apiToken string) *testHarness {
 	if err != nil {
 		t.Fatalf("new test Execution capability: %v", err)
 	}
-	agentsIssuer := authority.NewIssuer()
-	agentsAdmission, err := agentsIssuer.NewAdmission(agents.OperationRules()...)
-	if err != nil {
-		t.Fatalf("new test Agents admission: %v", err)
-	}
-	compatibilityPersistence, err := agentscompatstore.New(
-		st.Roles(),
-		st.AgentServices(),
-		st.Agents(),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	compatibility, err := agentscompat.NewAPI(compatibilityPersistence, agentsAdmission)
-	if err != nil {
-		t.Fatalf("new test Agents compatibility API: %v", err)
-	}
-	parentBindings, err := agentscompat.NewParentBindingCommands(compatibility, agentsIssuer)
-	if err != nil {
-		t.Fatalf("new test Agents parent binding workflow: %v", err)
-	}
 	module := NewModule(Config{
 		Store:                st,
 		APIToken:             apiToken,
@@ -682,7 +704,7 @@ func newTestHarness(t *testing.T, apiToken string) *testHarness {
 		WorkflowEventing:     eventWorkflow,
 		Execution:            testDriverRunExecution{DriverRunAPI: executionCapability.DriverRunAPI(), store: st, issues: fake},
 		ExecutionAuthorities: executionCapability.DriverRunAuthorityResolver(),
-		AgentParentBindings:  parentBindings,
+		AgentIdentities:      testStoreAgentIdentities{store: st.AgentServices()},
 		TaskRunRequests:      executionCapability.TaskRunRequestAPI(),
 		TaskRunRecovery:      executionCapability.TaskRunRecoveryAPI(),
 		TaskRuns:             executionCapability.TaskRunAPI(),
@@ -784,13 +806,26 @@ func TestVerifyRunOpProvesOwnerThroughExecution(t *testing.T) {
 
 func TestUpdateAgentParentUsesVerifiedDriverRunGeneration(t *testing.T) {
 	h := newTestHarness(t, "")
+	if _, err := h.store.Roles().Create(t.Context(), store.RoleCreate{WorkspaceKey: "WS", Name: "task"}); err != nil {
+		t.Fatalf("create task role: %v", err)
+	}
 	for _, name := range []string{"child", "wrong-generation-child"} {
-		if _, err := h.store.Agents().Create(t.Context(), store.AgentCreate{
+		profileID := name + "-profile"
+		if _, err := h.store.WorkerProfiles().Create(t.Context(), store.WorkerProfileCreate{
 			WorkspaceKey: "WS",
-			Name:         name,
-			RoleName:     "task",
+			ProfileID:    profileID,
+			Role:         "task",
 		}); err != nil {
-			t.Fatalf("create %s: %v", name, err)
+			t.Fatalf("create %s profile: %v", name, err)
+		}
+		if _, err := h.store.AgentServices().Create(t.Context(), store.AgentServiceCreate{
+			WorkspaceKey: "WS",
+			ServiceID:    name,
+			Kind:         domain.AgentServiceKindSupport,
+			RoleName:     "task",
+			ProfileName:  profileID,
+		}); err != nil {
+			t.Fatalf("create %s identity: %v", name, err)
 		}
 	}
 
@@ -804,12 +839,12 @@ func TestUpdateAgentParentUsesVerifiedDriverRunGeneration(t *testing.T) {
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("update parent status/body = %d/%v, want 200", response.StatusCode, decoded)
 	}
-	child, err := h.store.Agents().Get(t.Context(), "WS", "child")
+	child, err := h.store.WorkerProfiles().Get(t.Context(), "WS", "child-profile")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if child.Parent != h.runID {
-		t.Fatalf("child parent = %q, want %q", child.Parent, h.runID)
+	if child.ParentEpic != h.runID {
+		t.Fatalf("child parent = %q, want %q", child.ParentEpic, h.runID)
 	}
 
 	staleHeaders := h.ownerHeaders()
@@ -824,12 +859,12 @@ func TestUpdateAgentParentUsesVerifiedDriverRunGeneration(t *testing.T) {
 	if response.StatusCode != http.StatusForbidden || errorCode(t, decoded) != "not_owner" {
 		t.Fatalf("stale generation status/body = %d/%v, want 403 not_owner", response.StatusCode, decoded)
 	}
-	unchanged, err := h.store.Agents().Get(t.Context(), "WS", "wrong-generation-child")
+	unchanged, err := h.store.WorkerProfiles().Get(t.Context(), "WS", "wrong-generation-child-profile")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if unchanged.Parent != "" {
-		t.Fatalf("stale generation changed parent to %q", unchanged.Parent)
+	if unchanged.ParentEpic != "" {
+		t.Fatalf("stale generation changed parent to %q", unchanged.ParentEpic)
 	}
 }
 

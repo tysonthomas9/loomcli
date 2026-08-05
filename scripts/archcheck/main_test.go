@@ -150,3 +150,51 @@ func TestEncodeDirectWriteSnapshotIncludesProvenance(t *testing.T) {
 		t.Fatalf("decoded snapshot = %+v, want %+v", got, want)
 	}
 }
+
+func TestRefreshDirectWriteInventoryReplacesObservationsAndRetiresEmptyLegacyRoot(t *testing.T) {
+	source := []byte(`schema_version: 1
+status: complete
+source_head: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+writes:
+  - file: internal/driver/legacy.go
+    receiver: old.Store
+    method: Save
+    count: 1
+    aggregate_owner: execution
+    expires_after_phase: 6
+generic_mechanisms:
+  - mechanism: action_ledger
+legacy_driver:
+  root: internal/driver
+  expires_after_phase: 6
+  rows: 1
+  sites: 1
+  digest: deadbeef
+`)
+	snapshot := directWriteSnapshot{
+		SourceHead:  testSourceHead,
+		SourceDirty: true,
+		Writes: []archtest.DirectWriteUse{{
+			File: "internal/app/new.go", Receiver: "new.Store", Method: "Save", Count: 2,
+			AggregateOwner: "execution", ExpiresAfterPhase: 7,
+		}},
+	}
+	refreshed, removed, err := refreshDirectWriteInventory(source, snapshot, &archtest.LegacyDirectWriteBaseline{Root: "internal/driver"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !removed {
+		t.Fatal("expected empty legacy root to be retired")
+	}
+	text := string(refreshed)
+	for _, want := range []string{"source_head: " + testSourceHead, "internal/app/new.go", "count: 2", "generic_mechanisms:"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("refreshed inventory missing %q:\n%s", want, text)
+		}
+	}
+	for _, unwanted := range []string{"internal/driver/legacy.go", "legacy_driver:"} {
+		if strings.Contains(text, unwanted) {
+			t.Fatalf("refreshed inventory retained %q:\n%s", unwanted, text)
+		}
+	}
+}

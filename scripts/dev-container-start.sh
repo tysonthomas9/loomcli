@@ -20,9 +20,9 @@ EXTRA_WORKSPACES=${EXTRA_WORKSPACES:-bravo:/root/.loom/workspaces/bravo}
 export LOOM_CONFIG_DIR=${LOOM_CONFIG_DIR:-/root/.loom-config}
 mkdir -p "$LOOM_CONFIG_DIR"
 
-# The dev container already runs a headless HTTP server plus a workspace daemon
-# watcher. Lead agents may run `loom workspace ops ensure-runtime`; keep that
-# from starting the Loom.app desktop local runtime and creating a second daemon.
+# The dev container already runs the headless platform runtime. Lead agents may
+# run `loom workspace ops ensure-runtime`; keep that from starting the packaged
+# Desktop runtime alongside it.
 export LOOM_LOCAL_RUNTIME="${LOOM_LOCAL_RUNTIME:-disabled}"
 
 # fleet-db --auth-dev-mode reads the X-Actor header; the loom CLI sends it
@@ -130,9 +130,8 @@ for spec in $EXTRA_WORKSPACES; do
         2>/dev/null || log "  (already registered or create failed — continuing)"
 done
 
-# Pre-seeded workspaces are registered but inactive. The loom daemon resolves
-# its agent list from the *active* workspace, so set one now; the daemon
-# watcher below promotes any newly-created workspace as it appears.
+# Pre-seeded workspaces are registered but inactive. Select the primary one for
+# CLI defaults; the serve runtime itself spans every workspace below.
 loom workspace use "$PRIMARY_NAME" >/dev/null 2>&1 \
     || log "  (primary workspace '$PRIMARY_NAME' not yet registered)"
 
@@ -146,12 +145,12 @@ trap cleanup EXIT INT TERM
 log "starting loom serve on :${API_PORT}"
 export LOOM_ISSUE_BACKEND="${LOOM_ISSUE_BACKEND:-fleetdb}"
 export LOOM_FLEET_DB_ACTOR="${LOOM_FLEET_DB_ACTOR:-loom-dev}"
+export LOOM_DRIVER_EXECUTOR_WORKSPACE="${LOOM_DRIVER_EXECUTOR_WORKSPACE:-*}"
 cd "$PRIMARY_PATH"
 loom serve \
     --bind 127.0.0.1 --port "$API_PORT" \
     --frontend-url "${LOOM_FRONTEND_URL:-http://localhost:${UI_PORT}}" \
-    --frontend-url "http://localhost:${UI_PORT}" \
-    --no-daemon &
+    --frontend-url "http://localhost:${UI_PORT}" &
 
 # ── 6. Wait for /api/health and /api/workspaces to both work before UI boots ──
 for _ in $(seq 1 30); do
@@ -177,45 +176,7 @@ log "loom serve ready"
     log "default backend '$DEFAULT_BACKEND' applied where possible"
 ) &
 
-# ── 8. Agent daemon watcher ──
-# loom serve only handles HTTP + terminal. The agent supervisor that actually
-# runs codex/claude/opencode lives in a separate `loom daemon` process and
-# expects to be pointed at one workspace via LOOM_WORKSPACE. The dev container
-# can't know the user's workspace upfront (the onboarding flow creates it via
-# the UI), so this watcher polls /api/workspaces and brings up one daemon per
-# workspace that has at least one configured agent. It respawns if a daemon
-# exits.
-(
-    declare -A DAEMON_PIDS=()
-    start_daemon_for() {
-        local ws=$1 ws_path=$2
-        log "starting loom daemon for workspace $ws (cwd $ws_path)"
-        loom workspace use "$ws" >/dev/null 2>&1 || true
-        (
-            cd "$ws_path"
-            LOOM_WORKSPACE="$ws" loom daemon >> "/tmp/loom-daemon-$ws.log" 2>&1
-        ) &
-        DAEMON_PIDS[$ws]=$!
-    }
-    while sleep 5; do
-        ws_listing=$(curl -fs --max-time 3 \
-            "http://127.0.0.1:${API_PORT}/api/workspaces" 2>/dev/null) || continue
-        while IFS=$'\t' read -r ws ws_path; do
-            [ -z "$ws" ] && continue
-            agent_count=$(curl -fs --max-time 3 \
-                "http://127.0.0.1:${API_PORT}/api/workspaces/$ws/agents" 2>/dev/null \
-                | jq '.data | length // 0' 2>/dev/null || echo 0)
-            [ "$agent_count" -eq 0 ] && continue
-            pid=${DAEMON_PIDS[$ws]:-}
-            if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-                continue
-            fi
-            start_daemon_for "$ws" "$ws_path"
-        done < <(printf '%s' "$ws_listing" | jq -r '.workspaces[]? | "\(.id)\t\(.path)"')
-    done
-) &
-
-# ── 9. Vite preview (foreground, keeps container alive) ──
+# ── 8. Vite preview (foreground, keeps container alive) ──
 log "starting vite preview on :${UI_PORT}"
 cd /src/internal/webui/frontend
 exec npx vite preview --host 0.0.0.0 --port "$UI_PORT" --strictPort

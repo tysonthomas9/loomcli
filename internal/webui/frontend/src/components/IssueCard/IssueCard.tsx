@@ -311,7 +311,7 @@ export const IssueCard = memo(function IssueCard({
             issue.labels?.includes("loom:quarantined") && (
               <span
                 className={styles.quarantinedBadge}
-                title="Task quarantined by daemon after repeated no-progress kills — see comment for the kill timeline"
+                title="Task quarantined by the execution runtime after repeated no-progress kills — see comment for the kill timeline"
                 aria-label="Task quarantined"
               >
                 Quarantined

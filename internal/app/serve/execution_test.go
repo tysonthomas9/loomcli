@@ -13,6 +13,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/testutil"
 )
 
 type executionTestClaimPort struct{}
@@ -50,7 +51,7 @@ func executionTestDependencies(t *testing.T, st store.Store) ExecutionDependenci
 	return ExecutionDependencies{
 		TaskRuns: st.TaskRuns(), DriverRuns: st.DriverRuns(), DriverSteps: st.DriverSteps(),
 		TerminalStepRepairs: repairs, TaskRunEvents: st.TaskRunEvents(), Nodes: st.Nodes(),
-		WorkerProfiles: st.WorkerProfiles(), Agents: st.Agents(), Outbox: st.Outbox(), Awaits: st.Awaits(),
+		WorkerProfiles: st.WorkerProfiles(), AgentQueries: testutil.StaticAgentQueries{}, Outbox: st.Outbox(), Awaits: st.Awaits(),
 		TriggerEvents: st.TriggerEvents(), Workspaces: st.Workspaces(),
 		AtomicTaskRunRequests: executionTestClaimPort{}, AtomicTaskRunClaims: executionTestClaimPort{},
 		AtomicTaskRunWorkItemDesign: executionTestClaimPort{},

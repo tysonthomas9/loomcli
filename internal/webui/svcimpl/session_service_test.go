@@ -3,6 +3,7 @@ package svcimpl
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -227,6 +228,30 @@ func TestSessionRecordFromTaskRunMapsExecutionLifecycle(t *testing.T) {
 	}
 }
 
+func TestSessionRecordFromTaskRunAttributesManagedAgent(t *testing.T) {
+	run := &domain.TaskRun{
+		TaskRunID:       "task-run-managed",
+		TaskID:          "TASK-MANAGED",
+		WorkerProfileID: "loom-serve-task-worker-1",
+		RunnerKind:      "flue-workflow",
+		Status:          domain.TaskRunRunning,
+		CreatedAt:       time.Now().UTC(),
+		Input: json.RawMessage(`{
+			"loomAgentPolicy": {
+				"version": 1,
+				"agentServiceId": "agt-planner-1",
+				"roleName": "plan",
+				"backend": "codex"
+			}
+		}`),
+	}
+
+	record := sessionRecordFromTaskRun(run)
+	if record.AgentName != "agt-planner-1" {
+		t.Fatalf("agent name = %q, want managed product agent", record.AgentName)
+	}
+}
+
 func TestSessionServiceExecutionTaskHistoryDoesNotDependOnInteractionSessionList(t *testing.T) {
 	st := memstore.New()
 	if _, err := st.TaskRuns().Create(t.Context(), store.TaskRunCreate{
@@ -443,7 +468,7 @@ func TestSessionServiceTranscriptUsesRuntimeStoreBeforeWorkspaceTopology(t *test
 	}
 }
 
-func TestSessionServiceAgentLocalHistoryAndTranscriptEnforceOwnership(t *testing.T) {
+func TestSessionServiceAgentTranscriptEnforcesOwnership(t *testing.T) {
 	ctx := t.Context()
 	rootDir := t.TempDir()
 	runtimeDir := filepath.Join(rootDir, "workspaces", "LOCALMODE")
@@ -492,16 +517,6 @@ func TestSessionServiceAgentLocalHistoryAndTranscriptEnforceOwnership(t *testing
 	}
 
 	svc := NewSessionServiceWithRuntimeDir(memstore.New(), nil, runtimeDir)
-	history := svc.(service.AgentLocalSessionHistoryService)
-	items, err := history.ListAgentLocalSessions(ctx, "WS", "advanced-planner")
-	if err != nil {
-		t.Fatalf("ListAgentLocalSessions: %v", err)
-	}
-	if len(items) != 1 || items[0].SessionID != sess.SessionID() ||
-		items[0].TaskID != "TASK-LOCAL-1" || !items[0].HasTranscript {
-		t.Fatalf("local history = %+v, want one transcript-bearing task session", items)
-	}
-
 	transcripts := svc.(service.AgentSessionTranscriptService)
 	events, err := transcripts.GetAgentSessionTranscript(ctx, "WS", "advanced-planner", sess.SessionID())
 	if err != nil {

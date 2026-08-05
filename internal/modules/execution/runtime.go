@@ -13,6 +13,7 @@ const (
 	DriverRunOutcomeComponentID   platformruntime.ComponentID = "serve-driver-run-outcomes"
 	AwaitTimeoutComponentID       platformruntime.ComponentID = "execution-await-timeout-recovery"
 	TaskRunConvergenceComponentID platformruntime.ComponentID = "execution-task-run-convergence"
+	OutboxDeliveryComponentID     platformruntime.ComponentID = "execution-outbox-delivery"
 )
 
 // RuntimePass is the compatibility seam used while the legacy driver package

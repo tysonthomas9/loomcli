@@ -31,50 +31,20 @@ function monitorPath(path: string, workspaceId?: string): string {
   return `${path}?workspace=${encodeURIComponent(workspaceId)}`;
 }
 
-export type AgentLifecycleAction = "start" | "stop" | "restart" | "yield";
+export type AgentLifecycleAction = "start" | "stop" | "restart";
 
-export type AgentLifecycleCommandStatus =
-  | "queued"
-  | "acked"
-  | "running"
-  | "succeeded"
-  | "failed"
-  | "cancelled";
+export type AgentLifecycleStatus = "succeeded" | "failed" | "cancelled";
 
 export interface AgentLifecycleRequestResult {
   message: string;
-  pending: boolean;
-  command_id?: string;
-  status?: AgentLifecycleCommandStatus;
+  status: AgentLifecycleStatus;
 }
 
-export interface AgentLifecycleCommandResult {
-  command_id: string;
-  action: AgentLifecycleAction;
-  status: AgentLifecycleCommandStatus;
-  result?: string;
-  error_class?: string;
-  created_at?: string;
-  updated_at?: string;
-}
-
-const agentLifecycleCommandStatuses = new Set<AgentLifecycleCommandStatus>([
-  "queued",
-  "acked",
-  "running",
+const agentLifecycleStatuses = new Set<AgentLifecycleStatus>([
   "succeeded",
   "failed",
   "cancelled",
 ]);
-
-function parseAgentLifecycleCommandStatus(
-  value: unknown,
-): AgentLifecycleCommandStatus | undefined {
-  return typeof value === "string" &&
-    agentLifecycleCommandStatuses.has(value as AgentLifecycleCommandStatus)
-    ? (value as AgentLifecycleCommandStatus)
-    : undefined;
-}
 
 function parseAgentLifecycleRequestResult(
   value: unknown,
@@ -83,69 +53,15 @@ function parseAgentLifecycleRequestResult(
     throw new Error("Invalid agent lifecycle response");
   }
   const response = value as Record<string, unknown>;
+  const status = response.status;
   if (
     typeof response.message !== "string" ||
-    typeof response.pending !== "boolean"
+    typeof status !== "string" ||
+    !agentLifecycleStatuses.has(status as AgentLifecycleStatus)
   ) {
     throw new Error("Invalid agent lifecycle response");
   }
-  const commandID =
-    typeof response.command_id === "string" && response.command_id.trim() !== ""
-      ? response.command_id
-      : undefined;
-  if (response.pending && commandID == null) {
-    throw new Error(
-      "Invalid agent lifecycle response: pending command_id is missing",
-    );
-  }
-  const status = parseAgentLifecycleCommandStatus(response.status);
-  if (response.status != null && status == null) {
-    throw new Error("Invalid agent lifecycle response: unknown status");
-  }
-  return {
-    message: response.message,
-    pending: response.pending,
-    ...(commandID != null && { command_id: commandID }),
-    ...(status != null && { status }),
-  };
-}
-
-function parseAgentLifecycleCommandResult(
-  value: unknown,
-): AgentLifecycleCommandResult {
-  if (value == null || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("Invalid agent lifecycle command response");
-  }
-  const response = value as Record<string, unknown>;
-  const commandID =
-    typeof response.command_id === "string" ? response.command_id.trim() : "";
-  const action = response.action;
-  const status = parseAgentLifecycleCommandStatus(response.status);
-  if (
-    commandID === "" ||
-    (action !== "start" &&
-      action !== "stop" &&
-      action !== "restart" &&
-      action !== "yield") ||
-    status == null
-  ) {
-    throw new Error("Invalid agent lifecycle command response");
-  }
-  const optionalString = (key: string): string | undefined =>
-    typeof response[key] === "string" ? response[key] : undefined;
-  const result = optionalString("result");
-  const errorClass = optionalString("error_class");
-  const createdAt = optionalString("created_at");
-  const updatedAt = optionalString("updated_at");
-  return {
-    command_id: commandID,
-    action,
-    status,
-    ...(result != null && { result }),
-    ...(errorClass != null && { error_class: errorClass }),
-    ...(createdAt != null && { created_at: createdAt }),
-    ...(updatedAt != null && { updated_at: updatedAt }),
-  };
+  return { message: response.message, status: status as AgentLifecycleStatus };
 }
 
 /**
@@ -188,15 +104,11 @@ export async function checkLoomHealth(): Promise<boolean> {
 export async function startAgent(
   workspaceId: string,
   agentName: string,
-  options?: { taskId?: string },
 ): Promise<AgentLifecycleRequestResult> {
   const { data, error, response } = await api.POST(
     "/api/workspaces/{ws}/agents/{name}/start",
     {
       params: { path: { ws: workspaceId, name: agentName } },
-      ...(options?.taskId
-        ? { body: { payload: { task_id: options.taskId } } }
-        : {}),
     },
   );
   if (error) throw apiErrorFromResponse(error, response);
@@ -204,20 +116,17 @@ export async function startAgent(
 }
 
 /**
- * Request that a running workspace agent stops. Without `force` the backend
- * drains active work cooperatively before keeping the agent stopped; with
- * `force: true` it skips the cooperative yield and terminates directly.
+ * Request that a running workspace agent stops through canonical desired
+ * state. Interactive runtime interruption is coordinated by the server.
  */
 export async function stopAgent(
   workspaceId: string,
   agentName: string,
-  options?: { force?: boolean },
 ): Promise<AgentLifecycleRequestResult> {
   const { data, error, response } = await api.POST(
     "/api/workspaces/{ws}/agents/{name}/stop",
     {
       params: { path: { ws: workspaceId, name: agentName } },
-      ...(options?.force ? { body: { force: true } } : {}),
     },
   );
   if (error) throw apiErrorFromResponse(error, response);
@@ -225,8 +134,7 @@ export async function stopAgent(
 }
 
 /**
- * Request that a workspace agent restarts. Supervised runtimes complete the
- * stop + start asynchronously after accepting the request.
+ * Request that a workspace agent restarts through canonical desired state.
  */
 export async function restartAgent(
   workspaceId: string,
@@ -240,29 +148,6 @@ export async function restartAgent(
   );
   if (error) throw apiErrorFromResponse(error, response);
   return parseAgentLifecycleRequestResult(data);
-}
-
-/**
- * Read the authoritative lifecycle command state for one supervised agent.
- * This route is intentionally called through the handwritten helper until the
- * next generated OpenAPI refresh lands.
- */
-export async function getAgentLifecycleCommand(
-  workspaceId: string,
-  agentName: string,
-  commandID: string,
-  options?: { signal?: AbortSignal },
-): Promise<AgentLifecycleCommandResult> {
-  const result = await get<unknown>(
-    wsUrl(
-      workspaceId,
-      `/agents/${encodeURIComponent(
-        agentName,
-      )}/lifecycle-commands/${encodeURIComponent(commandID)}`,
-    ),
-    options?.signal == null ? undefined : { signal: options.signal },
-  );
-  return parseAgentLifecycleCommandResult(result);
 }
 
 /**
@@ -483,9 +368,8 @@ export async function setAgentRecordEnabled(
 
 /**
  * List durable prompt/scripted identities from the unified agent collection.
- * The collection also contains supervised and legacy binding entries, which
- * are deliberately excluded: only AgentService records can own the display
- * name of an attached binding.
+ * Interactive identities are deliberately excluded because this query feeds
+ * Automation binding ownership and workflow-run history.
  */
 export async function listAgentRecords(
   workspaceId: string,
@@ -498,7 +382,7 @@ export async function listAgentRecords(
   );
 }
 
-/** List one agent's durable workflow runs or supervised session history. */
+/** List one agent's durable workflow runs or interactive session history. */
 export async function listAgentRuns(
   workspaceId: string,
   agentId: string,

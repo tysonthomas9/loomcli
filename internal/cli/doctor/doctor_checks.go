@@ -2,7 +2,6 @@ package doctor
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -10,7 +9,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
-	"github.com/tysonthomas9/loomcli/internal/cli/daemon"
 )
 
 // --- individual checks ---
@@ -98,7 +96,7 @@ func checkTmux(deps *cli.Deps) CheckResult {
 			Name:    "tmux",
 			Status:  StatusWarn,
 			Summary: "tmux not installed",
-			Detail:  "Required for loom daemon and auto mode",
+			Detail:  "Required for auto mode and terminal-backed workflows",
 		}
 	}
 
@@ -136,28 +134,6 @@ func checkBackendCLI() CheckResult {
 		Name:    "backend_cli",
 		Status:  StatusPass,
 		Summary: fmt.Sprintf("%s CLI found (active backend)", name),
-	}
-}
-
-func checkProjectConfig() CheckResult {
-	runtimeDir := cli.GetWorkspaceRuntimeDir()
-	dc, err := cfgpkg.LoadDaemonConfig(runtimeDir)
-	if err != nil {
-		return CheckResult{
-			Name:    "project_config",
-			Status:  StatusFail,
-			Summary: "FleetDB daemon profile unavailable",
-			Detail:  err.Error(),
-		}
-	}
-	agentCount := 0
-	if dc != nil {
-		agentCount = len(dc.Agents)
-	}
-	return CheckResult{
-		Name:    "project_config",
-		Status:  StatusPass,
-		Summary: fmt.Sprintf("FleetDB daemon profile loaded (%d agents configured)", agentCount),
 	}
 }
 
@@ -250,53 +226,5 @@ func checkStaleLocks() CheckResult {
 		Name:    "stale_locks",
 		Status:  StatusPass,
 		Summary: "no stale locks",
-	}
-}
-
-func checkLoomDaemon() CheckResult {
-	projectDir, err := os.Getwd()
-	if err != nil {
-		return CheckResult{
-			Name:    "loom_daemon",
-			Status:  StatusWarn,
-			Summary: "could not determine working directory",
-		}
-	}
-
-	dcfg, err := cfgpkg.LoadDaemonConfig(projectDir)
-	if err != nil {
-		dcfg = &cfgpkg.DaemonConfig{
-			Daemon: cfgpkg.DaemonSettings{
-				PIDFile: ".loom/daemon.pid",
-			},
-		}
-	}
-
-	pidFilePath := daemon.ResolveDaemonPath(projectDir, dcfg.Daemon.PIDFile)
-	pid, running := daemon.IsLoomDaemonRunning(pidFilePath)
-
-	if running {
-		return CheckResult{
-			Name:    "loom_daemon",
-			Status:  StatusPass,
-			Summary: fmt.Sprintf("loom daemon running (PID %d)", pid),
-		}
-	}
-
-	// Check for stale PID file
-	if _, statErr := os.Stat(pidFilePath); statErr == nil {
-		return CheckResult{
-			Name:    "loom_daemon",
-			Status:  StatusWarn,
-			Summary: "loom daemon not running (stale PID file)",
-			Detail:  "Start with: loom daemon",
-		}
-	}
-
-	return CheckResult{
-		Name:    "loom_daemon",
-		Status:  StatusWarn,
-		Summary: "loom daemon not running",
-		Detail:  "Start with: loom daemon (optional)",
 	}
 }

@@ -41,11 +41,11 @@ func TestCommandsShape(t *testing.T) {
 	}
 }
 
-// TestAgentSubTreeShape asserts the four agent control verbs are wired
+// TestAgentSubTreeShape asserts the canonical agent control verbs are wired
 // under `loom data agent`.
 func TestAgentSubTreeShape(t *testing.T) {
 	t.Parallel()
-	want := map[string]bool{"stop": false, "start": false, "restart": false, "yield": false}
+	want := map[string]bool{"stop": false, "start": false, "restart": false}
 	for _, c := range agentCmd.Commands() {
 		if _, ok := want[c.Name()]; ok {
 			want[c.Name()] = true

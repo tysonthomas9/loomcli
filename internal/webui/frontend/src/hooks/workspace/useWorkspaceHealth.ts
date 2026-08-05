@@ -131,7 +131,7 @@ export function useWorkspaceHealth(): UseWorkspaceHealthReturn {
 
       if (!mountedRef.current) return;
 
-      if (response.status === "ok" || response.daemon.connected) {
+      if (response.status === "ok") {
         // Workspace service is available
         setIsWorkspaceAvailable(true);
         wasEverConnectedRef.current = true;
@@ -144,16 +144,12 @@ export function useWorkspaceHealth(): UseWorkspaceHealthReturn {
         // Workspace service is starting up (hydrating) — show loading state, not error
         setIsWorkspaceAvailable(false);
         setConnectionMode("starting");
-        setLastError(
-          response.daemon.error ?? "Workspace service is starting up",
-        );
+        setLastError(response.error ?? "Workspace service is starting up");
         initialCheckDoneRef.current = true;
         reportFailureRef.current({ forceRetry: true });
       } else {
         // Workspace service responded but degraded/unhealthy
-        handleUnavailable(
-          response.daemon.error ?? "Workspace service is degraded",
-        );
+        handleUnavailable(response.error ?? "Workspace service is degraded");
       }
     } catch (err) {
       if (!mountedRef.current) return;

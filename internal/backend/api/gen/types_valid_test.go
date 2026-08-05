@@ -42,7 +42,7 @@ func TestGeneratedEnumValidMethods(t *testing.T) {
 		{"ListIssuesParamsStatus", ListIssuesParamsStatusOpen, ListIssuesParamsStatus("invalid")},
 		{"ListIssuesParamsType", ListIssuesParamsTypeBug, ListIssuesParamsType("invalid")},
 		{"GetGraphParamsStatus", GetGraphParamsStatusAll, GetGraphParamsStatus("invalid")},
-		{"ListReadyParamsType", ListReadyParamsTypeFeature, ListReadyParamsType("invalid")},
+		{"ListReadyParamsType", Feature, ListReadyParamsType("invalid")},
 		{"ListReadyParamsMolType", Work, ListReadyParamsMolType("invalid")},
 		{"ListReadyParamsSort", Priority, ListReadyParamsSort("invalid")},
 	}

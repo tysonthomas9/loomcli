@@ -17,6 +17,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/git"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
@@ -24,7 +25,8 @@ import (
 
 // GitOpsImpl implements ops.GitOps using the cli package git functions.
 type GitOpsImpl struct {
-	store store.Store
+	store        store.Store
+	agentQueries agents.IdentityQueries
 }
 
 // NewGitOps creates a new GitOps implementation.
@@ -35,6 +37,14 @@ func NewGitOps() *GitOpsImpl {
 // WithStore enables FleetDB-backed workspace/agent worktree resolution.
 func (g *GitOpsImpl) WithStore(s store.Store) *GitOpsImpl {
 	g.store = s
+	return g
+}
+
+// WithAgentQueries provides the canonical Agent identity projection used for
+// store-backed worktree placement. The retired supervised-assignment store is
+// deliberately not a fallback: a partially composed server must fail closed.
+func (g *GitOpsImpl) WithAgentQueries(queries agents.IdentityQueries) *GitOpsImpl {
+	g.agentQueries = queries
 	return g
 }
 
@@ -110,11 +120,11 @@ func (g *GitOpsImpl) ResolveAgentWorktreeForRepo(workspaceID, name, repoName str
 		if err != nil {
 			return nil, err
 		}
-		agent, err := findWorkspaceAgent(ws, workspaceID, name)
+		agent, err := g.loadRuntimeIdentity(context.Background(), workspaceID, name)
 		if err != nil {
 			return nil, err
 		}
-		repo, err := selectAgentRepoByName(ws.Repos, *agent, repoName)
+		repo, err := selectAgentRepoByName(ws.Repos, agent.AgentID, agent.Repos, agent.RepoGroups, repoName)
 		if err != nil {
 			return nil, err
 		}
@@ -160,14 +170,19 @@ func (g *GitOpsImpl) loadStoreWorkspace(ctx context.Context, workspaceID, name s
 	return ws, nil
 }
 
-// findWorkspaceAgent returns the named agent from an already-loaded workspace.
-func findWorkspaceAgent(ws *ops.WorkspaceData, workspaceID, name string) (*ops.WorkspaceAgentInfo, error) {
-	for i := range ws.Agents {
-		if ws.Agents[i].Name == name {
-			return &ws.Agents[i], nil
-		}
+func (g *GitOpsImpl) loadRuntimeIdentity(ctx context.Context, workspaceID, name string) (*agents.RuntimeIdentity, error) {
+	if g == nil || g.agentQueries == nil {
+		return nil, fmt.Errorf("canonical agent identity queries are not composed: %w", domain.ErrNotFound)
 	}
-	return nil, fmt.Errorf("agent %q in workspace %q: %w", name, workspaceID, domain.ErrNotFound)
+	record, err := g.agentQueries.GetAgent(ctx, workspaceID, name)
+	if err != nil {
+		return nil, fmt.Errorf("agent %q in workspace %q: %w", name, workspaceID, err)
+	}
+	identity, err := agents.ResolveRuntimeIdentity(record)
+	if err != nil {
+		return nil, fmt.Errorf("project runtime identity for agent %q in workspace %q: %w", name, workspaceID, err)
+	}
+	return identity, nil
 }
 
 // newWorkspaceWorktree builds an AgentWorktree pointing at a workspace-local
@@ -194,21 +209,21 @@ func (g *GitOpsImpl) resolveAgentWorktreeFromStore(ctx context.Context, workspac
 	if err != nil {
 		return nil, err
 	}
-	return resolveAgentWorktreeFromWS(ws, workspaceID, name)
+	agent, err := g.loadRuntimeIdentity(ctx, workspaceID, name)
+	if err != nil {
+		return nil, err
+	}
+	return resolveAgentWorktreeFromWS(ws, agent)
 }
 
 // resolveAgentWorktreeFromWS builds the agent's own worktree (under
 // <ws>/worktrees) from an already-loaded workspace.
-func resolveAgentWorktreeFromWS(ws *ops.WorkspaceData, workspaceID, name string) (*ops.AgentWorktree, error) {
-	agent, err := findWorkspaceAgent(ws, workspaceID, name)
+func resolveAgentWorktreeFromWS(ws *ops.WorkspaceData, agent *agents.RuntimeIdentity) (*ops.AgentWorktree, error) {
+	repo, err := selectAgentRepo(ws.Repos, agent.AgentID, agent.Repos, agent.RepoGroups)
 	if err != nil {
 		return nil, err
 	}
-	repo, err := selectAgentRepo(ws.Repos, *agent)
-	if err != nil {
-		return nil, err
-	}
-	return resolveAgentWorktreeFromWSForRepo(ws, name, repo)
+	return resolveAgentWorktreeFromWSForRepo(ws, agent.AgentID, repo)
 }
 
 func resolveAgentWorktreeFromWSForRepo(ws *ops.WorkspaceData, name string, repo ops.WorkspaceRepo) (*ops.AgentWorktree, error) {
@@ -349,15 +364,15 @@ func validateWorkspaceRoot(workspaceID, path string) (string, error) {
 	return path, nil
 }
 
-func selectAgentRepo(repos []ops.WorkspaceRepo, agent ops.WorkspaceAgentInfo) (ops.WorkspaceRepo, error) {
+func selectAgentRepo(repos []ops.WorkspaceRepo, agentName string, agentRepos, agentRepoGroups []string) (ops.WorkspaceRepo, error) {
 	if len(repos) == 0 {
-		return ops.WorkspaceRepo{}, fmt.Errorf("workspace has no repos for agent %q", agent.Name)
+		return ops.WorkspaceRepo{}, fmt.Errorf("workspace has no repos for agent %q", agentName)
 	}
 	allowed := make(map[string]bool)
-	for _, name := range agent.Repos {
+	for _, name := range agentRepos {
 		allowed[name] = true
 	}
-	for _, group := range agent.RepoGroups {
+	for _, group := range agentRepoGroups {
 		for _, repo := range repos {
 			for _, repoGroup := range repo.Groups {
 				if repoGroup == group {
@@ -375,16 +390,16 @@ func selectAgentRepo(repos []ops.WorkspaceRepo, agent ops.WorkspaceAgentInfo) (o
 			return repo, nil
 		}
 	}
-	return ops.WorkspaceRepo{}, fmt.Errorf("agent %q repo affinity does not match any workspace repo", agent.Name)
+	return ops.WorkspaceRepo{}, fmt.Errorf("agent %q repo affinity does not match any workspace repo", agentName)
 }
 
-func selectAgentRepoByName(repos []ops.WorkspaceRepo, agent ops.WorkspaceAgentInfo, repoName string) (ops.WorkspaceRepo, error) {
+func selectAgentRepoByName(repos []ops.WorkspaceRepo, agentName string, agentRepos, agentRepoGroups []string, repoName string) (ops.WorkspaceRepo, error) {
 	repo, ok := findWorkspaceRepo(repos, repoName)
 	if !ok {
 		return ops.WorkspaceRepo{}, fmt.Errorf("%w: repo %q is not known in workspace", ops.ErrAgentRepoNotAllowed, repoName)
 	}
-	if !agentRepoAllowed(repos, agent, repo.Name) {
-		return ops.WorkspaceRepo{}, fmt.Errorf("%w: repo %q is not allowed for agent %q", ops.ErrAgentRepoNotAllowed, repo.Name, agent.Name)
+	if !agentRepoAllowed(repos, agentRepos, agentRepoGroups, repo.Name) {
+		return ops.WorkspaceRepo{}, fmt.Errorf("%w: repo %q is not allowed for agent %q", ops.ErrAgentRepoNotAllowed, repo.Name, agentName)
 	}
 	return repo, nil
 }
@@ -398,17 +413,17 @@ func findWorkspaceRepo(repos []ops.WorkspaceRepo, repoName string) (ops.Workspac
 	return ops.WorkspaceRepo{}, false
 }
 
-func agentRepoAllowed(repos []ops.WorkspaceRepo, agent ops.WorkspaceAgentInfo, repoName string) bool {
-	if len(agent.Repos) == 0 && len(agent.RepoGroups) == 0 {
+func agentRepoAllowed(repos []ops.WorkspaceRepo, agentRepos, agentRepoGroups []string, repoName string) bool {
+	if len(agentRepos) == 0 && len(agentRepoGroups) == 0 {
 		_, ok := findWorkspaceRepo(repos, repoName)
 		return ok
 	}
-	for _, name := range agent.Repos {
+	for _, name := range agentRepos {
 		if name == repoName {
 			return true
 		}
 	}
-	for _, group := range agent.RepoGroups {
+	for _, group := range agentRepoGroups {
 		for _, repo := range repos {
 			if repo.Name != repoName {
 				continue

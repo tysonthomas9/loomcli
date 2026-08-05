@@ -1,9 +1,8 @@
 //go:build ignore
 // +build ignore
 
-// TODO: These tests require rpc.Server and memory storage (server-side packages
-// not vendored into loomcli). Re-enable when loomcli vendors the full rpc server
-// or provides its own test infrastructure.
+// TODO: These historical daemon tests require server-side fixtures that are
+// no longer part of Loom. Replace them with direct-backend SSE integration.
 
 package app
 
@@ -11,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
@@ -60,10 +58,10 @@ func TestSSE_MutationDelivery_Create(t *testing.T) {
 	}
 }
 
-// broadcastMutations converts RPC mutations to payloads and broadcasts them.
-func broadcastMutations(hub *realtime.Hub, mutations []rpc.MutationEvent) {
+// broadcastMutations converts durable mutations to payloads and broadcasts them.
+func broadcastMutations(hub *realtime.Hub, mutations []realtime.MutationEvent) {
 	for _, m := range mutations {
-		payload := realtime.RPCMutationToPayload(m)
+		payload := realtime.MutationEventToPayload(m)
 		hub.Broadcast(payload)
 	}
 }

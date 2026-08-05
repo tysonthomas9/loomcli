@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/rpc"
 )
 
 // sharedFixtureTimestamp is a deterministic instant used by every fixture
@@ -22,10 +21,10 @@ func derefMutationAssignee(value *string) string {
 	return *value
 }
 
-// makeSharedFixture returns a (backend.MutationData, rpc.MutationEvent) pair
+// makeSharedFixture returns equivalent backend and realtime mutation values
 // that represent the same logical event. Used to assert byte-level
-// equivalence between BackendMutationToPayload and RPCMutationToPayload.
-func makeSharedFixture() (backend.MutationData, rpc.MutationEvent) {
+// equivalence between BackendMutationToPayload and MutationEventToPayload.
+func makeSharedFixture() (backend.MutationData, MutationEvent) {
 	bm := backend.MutationData{
 		Type:       "status",
 		EntityType: "issue",
@@ -42,7 +41,7 @@ func makeSharedFixture() (backend.MutationData, rpc.MutationEvent) {
 		StepCount:  3,
 		SourceRepo: "loomcli",
 	}
-	rm := rpc.MutationEvent{
+	rm := MutationEvent{
 		Type:       "status",
 		EntityType: "issue",
 		EntityID:   "loom-fleet-42",
@@ -166,19 +165,19 @@ func TestMutationPayloadPreservesSubsecondTimestamp(t *testing.T) {
 		t.Errorf("backend timestamp = %q, want %q", backendPayload.Timestamp, want)
 	}
 
-	rpcPayload := RPCMutationToPayload(rpc.MutationEvent{
+	eventPayload := MutationEventToPayload(MutationEvent{
 		Type:      "status",
 		IssueID:   "loom-1",
 		Timestamp: ts,
 	})
-	if rpcPayload.Timestamp != want {
-		t.Errorf("rpc timestamp = %q, want %q", rpcPayload.Timestamp, want)
+	if eventPayload.Timestamp != want {
+		t.Errorf("event timestamp = %q, want %q", eventPayload.Timestamp, want)
 	}
 }
 
 // TestBackendMutationToPayload_EmptyOptionalFields verifies that empty
 // optional fields stay empty so omitempty produces minimal JSON, matching
-// what RPCMutationToPayload produces for a minimal event.
+// what MutationEventToPayload produces for a minimal event.
 func TestBackendMutationToPayload_EmptyOptionalFields(t *testing.T) {
 	bm := backend.MutationData{
 		Type:      "create",
@@ -257,7 +256,7 @@ func TestBackendMutationToPayload_HumanStatusMoveDoesNotInventAssigneeClear(t *t
 
 // TestBackendMutationToPayload_WireFormatStability is the load-bearing
 // assertion of this file: the JSON bytes produced by BackendMutationToPayload
-// MUST equal the JSON bytes produced by RPCMutationToPayload for the same
+// MUST equal the JSON bytes produced by MutationEventToPayload for the same
 // logical event (after WorkspaceID is set on the rpc-derived payload by
 // the SSE handler — we apply the same workspaceID by hand here).
 //
@@ -269,31 +268,31 @@ func TestBackendMutationToPayload_WireFormatStability(t *testing.T) {
 	const wsID = "ws-shared"
 
 	backendPayload := BackendMutationToPayload(bm, wsID)
-	rpcPayload := RPCMutationToPayload(rm)
-	rpcPayload.WorkspaceID = wsID // SSE handler injects this; mirror that here
+	eventPayload := MutationEventToPayload(rm)
+	eventPayload.WorkspaceID = wsID // SSE handler injects this; mirror that here
 
 	bBytes, err := json.Marshal(backendPayload)
 	if err != nil {
 		t.Fatalf("marshal backend payload: %v", err)
 	}
-	rBytes, err := json.Marshal(rpcPayload)
+	rBytes, err := json.Marshal(eventPayload)
 	if err != nil {
-		t.Fatalf("marshal rpc payload: %v", err)
+		t.Fatalf("marshal event payload: %v", err)
 	}
 	if string(bBytes) != string(rBytes) {
-		t.Errorf("wire-format drift between backend and rpc payloads:\n  backend: %s\n  rpc:     %s", bBytes, rBytes)
+		t.Errorf("wire-format drift between backend and event payloads:\n  backend: %s\n  event:   %s", bBytes, rBytes)
 	}
 }
 
-// TestBackendMutationToRPCEvent_RoundTripFields verifies that every field
-// of backend.MutationData is preserved when projected to rpc.MutationEvent
-// and back. The catch-up path projects backend → rpc; this test guards
+// TestBackendMutationToEvent_RoundTripFields verifies that every field
+// of backend.MutationData is preserved when projected to MutationEvent and
+// back. The catch-up path projects backend to realtime; this test guards
 // against losing fields silently when the two structs evolve.
-func TestBackendMutationToRPCEvent_RoundTripFields(t *testing.T) {
+func TestBackendMutationToEvent_RoundTripFields(t *testing.T) {
 	original, _ := makeSharedFixture()
 
-	rpcEvt := BackendMutationToRPCEvent(original)
-	roundTripped := RPCEventToMutationData(rpcEvt)
+	event := BackendMutationToEvent(original)
+	roundTripped := EventToMutationData(event)
 
 	if !roundTripped.Timestamp.Equal(original.Timestamp) {
 		t.Errorf("Timestamp lost equality: orig=%v rt=%v", original.Timestamp, roundTripped.Timestamp)
@@ -306,11 +305,11 @@ func TestBackendMutationToRPCEvent_RoundTripFields(t *testing.T) {
 	}
 }
 
-// TestRPCEventToMutationData_AllFields verifies the inverse projection.
-func TestRPCEventToMutationData_AllFields(t *testing.T) {
+// TestEventToMutationData_AllFields verifies the inverse projection.
+func TestEventToMutationData_AllFields(t *testing.T) {
 	_, rm := makeSharedFixture()
 
-	got := RPCEventToMutationData(rm)
+	got := EventToMutationData(rm)
 	if got.Type != rm.Type || got.EntityType != rm.EntityType ||
 		got.EntityID != rm.EntityID || got.Action != rm.Action ||
 		got.IssueID != rm.IssueID ||
@@ -318,9 +317,9 @@ func TestRPCEventToMutationData_AllFields(t *testing.T) {
 		got.Actor != rm.Actor || got.OldStatus != rm.OldStatus ||
 		got.NewStatus != rm.NewStatus || got.ParentID != rm.ParentID ||
 		got.StepCount != rm.StepCount || got.SourceRepo != rm.SourceRepo {
-		t.Errorf("RPCEventToMutationData field drift: got=%+v rpc=%+v", got, rm)
+		t.Errorf("EventToMutationData field drift: got=%+v event=%+v", got, rm)
 	}
 	if !got.Timestamp.Equal(rm.Timestamp) {
-		t.Errorf("Timestamp drift: got=%v rpc=%v", got.Timestamp, rm.Timestamp)
+		t.Errorf("Timestamp drift: got=%v event=%v", got.Timestamp, rm.Timestamp)
 	}
 }

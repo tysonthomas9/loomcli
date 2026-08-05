@@ -26,7 +26,7 @@ const BACKGROUND_ROLE_NAMES = new Set([
   "worker",
 ]);
 
-/** True when the role string denotes a supervised plan/task worker. */
+/** True when the role string denotes a built-in background worker. */
 export function isWorkerRole(role: string | undefined): boolean {
   return BACKGROUND_ROLE_NAMES.has((role ?? "").trim().toLowerCase());
 }
@@ -44,12 +44,12 @@ export function isCustomRole(role: string | undefined): boolean {
 }
 
 /**
- * Background agents are daemon-supervised auto workers (plan/task). Lead agents
- * stay in the regular section because they run interactively in a terminal.
+ * Background agents are non-interactive worker roles. Lead agents stay in the
+ * regular section because they run interactively in a terminal.
  */
 export function isBackgroundAgent(agent: LoomAgentStatus): boolean {
-  if (isInteractiveAgent(agent)) return false;
-  if (agent.daemon_managed === true) return true;
+  const kind = (agent.role_kind ?? "").trim().toLowerCase();
+  if (kind !== "") return kind === "worker";
   return isWorkerRole(agent.role);
 }
 

@@ -16,7 +16,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
 
 var (
@@ -229,16 +228,7 @@ func resolveServiceBinaryPath() string {
 }
 
 func resolveServiceLogDir(cwd string) string {
-	logDir := filepath.Join(cwd, ".loom", "logs")
-	if dc, err := config.LoadDaemonConfig(cwd); err == nil && dc.Daemon.LogDir != "" {
-		ld := dc.Daemon.LogDir
-		if filepath.IsAbs(ld) {
-			logDir = ld
-		} else {
-			logDir = filepath.Join(cwd, ld)
-		}
-	}
-	return logDir
+	return filepath.Join(cwd, ".loom", "logs")
 }
 
 func buildServiceName(goos string) string {

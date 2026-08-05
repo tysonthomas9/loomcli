@@ -11,9 +11,7 @@ import (
 )
 
 type AgentEntry = config.AgentEntry
-type DaemonConfig = config.DaemonConfig
-type DaemonSettings = config.DaemonSettings
-type RestartPolicy = config.RestartPolicy
+type RuntimeConfig = config.RuntimeConfig
 type RoleConfig = config.RoleConfig
 type RepoConfig = config.RepoConfig
 type WorkspaceConfig = config.WorkspaceConfig
@@ -22,9 +20,8 @@ type Checkpoint = config.Checkpoint
 type FleetClientConfig = config.FleetClientConfig
 
 var LoadConfig = config.LoadConfig
-var LoadDaemonConfig = config.LoadDaemonConfig
+var LoadRuntimeConfig = config.LoadRuntimeConfig
 var ResolveActiveWorkspace = config.ResolveActiveWorkspace
-var ResolveDaemonStatePath = config.ResolveDaemonStatePath
 var ValidateRemoteName = config.ValidateRemoteName
 var GetWorkspaceDir = config.GetWorkspaceDir
 var LoadCheckpoint = config.LoadCheckpoint
@@ -35,7 +32,6 @@ func intPtr(v int) *int    { return config.IntPtr(v) }
 func boolPtr(v bool) *bool { return config.BoolPtr(v) }
 
 var validateAgentRepos = config.ValidateAgentRepos
-var overlayDaemonSettings = config.OverlayDaemonSettings
 var resolveAgentRepos = config.ResolveAgentRepos
 var fetchReadyIssues = FetchReadyIssues
 var setDefaultIssueBackend = SetDefaultIssueBackend

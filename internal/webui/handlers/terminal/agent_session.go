@@ -3,7 +3,6 @@ package terminal
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"slices"
@@ -14,7 +13,9 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/localnodeconfig"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -29,7 +30,7 @@ const (
 	roleTask          = "task"
 )
 
-var errDaemonSupervisedWorkerTerminal = errors.New("daemon-supervised worker terminals cannot be launched directly; use worker logs or task session history")
+var errBackgroundWorkerTerminal = errors.New("background worker terminals cannot be launched directly; use worker logs or task session history")
 
 // HandleEnsureAgentTerminalSession resolves an agent name to a persisted UUID
 // terminal session. The session's launch command lives in tab metadata; the
@@ -102,7 +103,7 @@ func ensureAgentTerminalSession(
 		}
 	}()
 
-	agent, err := loadTerminalAgent(ctx, st.Agents(), workspace, agentName, identities...)
+	agent, err := loadTerminalAgent(ctx, workspace, agentName, identities...)
 	if err != nil {
 		return nil, terminalAgentIdentityServiceError(err)
 	}
@@ -112,8 +113,8 @@ func ensureAgentTerminalSession(
 	}
 	roleKind := domain.ResolveRoleKind(role, agent.RoleName)
 
-	if isDaemonSupervisedWorker(agent, roleKind) {
-		return nil, service.ErrValidation(errDaemonSupervisedWorkerTerminal.Error())
+	if isBackgroundWorker(agent, roleKind) {
+		return nil, service.ErrValidation(errBackgroundWorkerTerminal.Error())
 	}
 
 	tabs, err := svc.ListTabs(ctx, workspace)
@@ -166,7 +167,7 @@ func ensureAgentTerminalSession(
 }
 
 func terminalAgentIdentityServiceError(err error) error {
-	if errors.Is(err, domain.ErrNotFound) {
+	if errors.Is(err, agents.ErrNotFound) {
 		return service.ErrNotFound("agent not found")
 	}
 	return service.ErrInternal("failed to load agent identity", err)
@@ -183,7 +184,7 @@ func agentTerminalLaunchSpecStale(
 	st store.Store,
 	workspace string,
 	existing *tabmeta.TabMetadata,
-	agent *domain.Agent,
+	agent *agents.RuntimeIdentity,
 ) bool {
 	if existing == nil || existing.Launch == nil {
 		return true
@@ -222,20 +223,20 @@ func newAgentTerminalTabPlacement(tabs []tabmeta.TabMetadata, existing *tabmeta.
 // reserves an ID for the launch environment. It deliberately does not persist
 // a running record: loom lead creates and heartbeats that record only after the
 // PTY child actually starts, so an unlaunched tab cannot become a stale session.
-func ensureTerminalOrchestratorLink(ctx context.Context, st store.Store, workspace string, agent *domain.Agent, kind domain.RoleKind) (domain.Agent, string) {
+func ensureTerminalOrchestratorLink(ctx context.Context, st store.Store, workspace string, agent *agents.RuntimeIdentity, kind domain.RoleKind) (agents.RuntimeIdentity, string) {
 	agentForLaunch := *agent
 	if kind != domain.RoleKindInteractive {
 		return agentForLaunch, ""
 	}
 	// Skip when this terminal agent already has an active orchestration session.
-	if existingID, err := store.OrchestrationSessionIDFor(ctx, st, workspace, agentForLaunch.Name); err == nil && existingID != "" {
+	if existingID, err := store.OrchestrationSessionIDFor(ctx, st, workspace, agentForLaunch.AgentID); err == nil && existingID != "" {
 		return agentForLaunch, existingID
 	}
 
 	return agentForLaunch, "lead-" + uuid.NewString()
 }
 
-func newAgentTerminalTabMetadata(workspace, sessionName, label string, sortOrder int, agent *domain.Agent, backend string, launch *tabmeta.LaunchSpec, existing *tabmeta.TabMetadata) *tabmeta.TabMetadata {
+func newAgentTerminalTabMetadata(workspace, sessionName, label string, sortOrder int, agent *agents.RuntimeIdentity, backend string, launch *tabmeta.LaunchSpec, existing *tabmeta.TabMetadata) *tabmeta.TabMetadata {
 	now := time.Now().UTC()
 	meta := &tabmeta.TabMetadata{
 		SessionName: sessionName,
@@ -244,7 +245,7 @@ func newAgentTerminalTabMetadata(workspace, sessionName, label string, sortOrder
 		SortOrder:   sortOrder,
 		Pinned:      existing != nil && existing.Pinned,
 		Kind:        terminalKindAgent,
-		AgentID:     agent.Name,
+		AgentID:     agent.AgentID,
 		Role:        agent.RoleName,
 		Backend:     backend,
 		Writable:    true,
@@ -259,11 +260,13 @@ func newAgentTerminalTabMetadata(workspace, sessionName, label string, sortOrder
 	return meta
 }
 
-func agentTerminalLaunchAllowed(agent *domain.Agent, kind domain.RoleKind) bool {
-	return agent != nil && kind == domain.RoleKindInteractive
+func agentTerminalLaunchAllowed(agent *agents.RuntimeIdentity, kind domain.RoleKind) bool {
+	return agent != nil &&
+		agent.DesiredState == agents.DesiredRunning &&
+		kind == domain.RoleKindInteractive
 }
 
-func isDaemonSupervisedWorker(agent *domain.Agent, kind domain.RoleKind) bool {
+func isBackgroundWorker(agent *agents.RuntimeIdentity, kind domain.RoleKind) bool {
 	return agent != nil && kind != domain.RoleKindInteractive
 }
 
@@ -320,17 +323,17 @@ func pruneStaleAgentTerminalTabs(ctx context.Context, svc service.TerminalServic
 // orchestratorID is the lead → orchestration session id resolved by
 // ensureTerminalOrchestratorLink. It is passed in rather than read off the
 // agent struct because AgentSession is the single source of truth.
-func buildAgentLaunchSpec(ctx context.Context, st store.Store, workspace, sessionName string, agent *domain.Agent, orchestratorID string) (*tabmeta.LaunchSpec, string, error) {
+func buildAgentLaunchSpec(ctx context.Context, st store.Store, workspace, sessionName string, agent *agents.RuntimeIdentity, orchestratorID string) (*tabmeta.LaunchSpec, string, error) {
 	role, err := loadAgentLaunchRole(ctx, st, workspace, agent.RoleName)
 	if err != nil {
 		return nil, "", err
 	}
 	roleKind := domain.ResolveRoleKind(role, agent.RoleName)
-	if isDaemonSupervisedWorker(agent, roleKind) {
-		return nil, "", service.ErrValidation(errDaemonSupervisedWorkerTerminal.Error())
+	if isBackgroundWorker(agent, roleKind) {
+		return nil, "", service.ErrValidation(errBackgroundWorkerTerminal.Error())
 	}
-	backend := agentLaunchBackend(ctx, st, workspace, agent, role)
-	commandArgs, err := agentLaunchCommandArgs(roleKind, agent, role)
+	backend := agentLaunchBackend(workspace, agent, role)
+	commandArgs, err := agentLaunchCommandArgs(roleKind, role)
 	if err != nil {
 		return nil, "", err
 	}
@@ -343,11 +346,11 @@ func buildAgentLaunchSpec(ctx context.Context, st store.Store, workspace, sessio
 	}, backend, nil
 }
 
-func agentLaunchCwd(workspace string, agent *domain.Agent) string {
+func agentLaunchCwd(workspace string, agent *agents.RuntimeIdentity) string {
 	if agent == nil {
 		return ""
 	}
-	worktree, ok := localworkspace.RememberedAgentWorktree(workspace, agent.Name)
+	worktree, ok := localworkspace.RememberedAgentWorktree(workspace, agent.AgentID)
 	if !ok {
 		return ""
 	}
@@ -365,20 +368,18 @@ func loadAgentLaunchRole(ctx context.Context, st store.Store, workspace, roleNam
 	return role, nil
 }
 
-func agentLaunchBackend(ctx context.Context, st store.Store, workspace string, agent *domain.Agent, role *domain.Role) string {
+func agentLaunchBackend(workspace string, agent *agents.RuntimeIdentity, role *domain.Role) string {
 	backend := strings.TrimSpace(agent.Backend)
 	if backend == "" && role != nil {
 		backend = strings.TrimSpace(role.Backend)
 	}
-	// Workspace-level default backend (set via PATCH /config/backend or the
-	// daemon profile) is the last fallback before the launch spec ships with
+	// The local-node workspace default (set via PATCH /config/backend) is the
+	// last fallback before the launch spec ships with
 	// no --backend flag at all. Without this, an agent created via
 	// `loom agentdef add … --role lead` (no --backend) produced a terminal
 	// command of `loom lead` with no backend wired, so codex never started.
-	if backend == "" && st != nil {
-		if profile, err := st.Daemon().Get(ctx, workspace); err == nil && profile != nil {
-			backend = strings.TrimSpace(profile.AgentBackend)
-		}
+	if backend == "" {
+		backend, _ = localnodeconfig.RuntimeProvider(workspace)
 	}
 	return backend
 }
@@ -394,8 +395,7 @@ func agentLaunchBaseArgs(workspace, backend string) []string {
 	return args
 }
 
-func agentLaunchCommandArgs(kind domain.RoleKind, agent *domain.Agent, role *domain.Role) ([]string, error) {
-	roleName := strings.ToLower(strings.TrimSpace(agent.RoleName))
+func agentLaunchCommandArgs(kind domain.RoleKind, role *domain.Role) ([]string, error) {
 	if kind == domain.RoleKindInteractive {
 		args := []string{"lead"}
 		if role != nil && strings.TrimSpace(role.Prompt) == "" && strings.TrimSpace(role.PromptFile) != "" {
@@ -403,40 +403,12 @@ func agentLaunchCommandArgs(kind domain.RoleKind, agent *domain.Agent, role *dom
 		}
 		return args, nil
 	}
-	switch roleName {
-	case rolePlan, roleTask:
-		return builtInAgentLaunchArgs(roleName, agent), nil
-	default:
-		return customAgentLaunchArgs(agent, role)
-	}
+	return nil, service.ErrValidation(errBackgroundWorkerTerminal.Error())
 }
 
-func builtInAgentLaunchArgs(roleName string, agent *domain.Agent) []string {
-	args := []string{roleName, agent.Name, "--auto", "--daemon-mode"}
-	return appendParentArg(args, agent.Parent)
-}
-
-func customAgentLaunchArgs(agent *domain.Agent, role *domain.Role) ([]string, error) {
-	if role == nil || strings.TrimSpace(role.PromptFile) == "" {
-		return nil, service.ErrValidation(fmt.Sprintf("agent role %q has no launch spec", agent.RoleName))
-	}
-	args := []string{"agent", agent.Name, "--prompt", role.PromptFile, "--auto", "--daemon-mode"}
-	if strings.TrimSpace(role.TaskFilter) != "" {
-		args = append(args, "--task-filter", role.TaskFilter)
-	}
-	return appendParentArg(args, agent.Parent), nil
-}
-
-func appendParentArg(args []string, parent string) []string {
-	if strings.TrimSpace(parent) != "" {
-		args = append(args, "--parent", parent)
-	}
-	return args
-}
-
-func agentLaunchEnv(workspace, sessionName, backend, orchestratorID string, agent *domain.Agent) map[string]string {
+func agentLaunchEnv(workspace, sessionName, backend, orchestratorID string, agent *agents.RuntimeIdentity) map[string]string {
 	env := map[string]string{
-		"LOOM_AGENT_NAME":        agent.Name,
+		"LOOM_AGENT_NAME":        agent.AgentID,
 		"LOOM_AGENT_ROLE":        agent.RoleName,
 		"LOOM_AGENT_TERMINAL_ID": sessionName,
 		"LOOM_WORKSPACE":         workspace,

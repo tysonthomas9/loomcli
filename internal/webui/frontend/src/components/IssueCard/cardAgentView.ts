@@ -98,7 +98,7 @@ export type CardAgentView =
        * "claimed", NOT "live": a current_task_id match is lock-derived and may be
        * a stale lock, so this kind asserts a claim, not lease-verified liveness.
        * The two claim sources are intentionally rendered identically — on the
-       * daemon path a current-only claim is the normal working case.
+       * execution path a current-only claim is the normal working case.
        */
       kind: "claimed";
       displayName: string;

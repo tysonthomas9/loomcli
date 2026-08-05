@@ -215,7 +215,8 @@ func TestRuntimeRegistrationsOwnStableExecutionComponents(t *testing.T) {
 func newTestService(t *testing.T, dependencies Dependencies) (*Service, *authority.Issuer) {
 	t.Helper()
 	issuer := authority.NewIssuer()
-	admission, err := issuer.NewAdmission(OperationRules()...)
+	rules := append(OperationRules(), DriverRunOperationRules()...)
+	admission, err := issuer.NewAdmission(rules...)
 	if err != nil {
 		t.Fatal(err)
 	}

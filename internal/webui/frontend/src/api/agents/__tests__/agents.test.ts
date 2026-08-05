@@ -22,7 +22,6 @@ import {
   checkLoomHealth,
   createPromptAgentRecord,
   deleteAgentRecord,
-  getAgentLifecycleCommand,
   restartAgent,
   startAgent,
   stopAgent,
@@ -89,10 +88,16 @@ describe("durable agent record lifecycle", () => {
           behavior: { driver_id: "review-loop-agent" },
           workspace_key: "TEAM A",
         },
-        { id: "lead", name: "lead", kind: "supervised" },
-        { id: "legacy", name: "Legacy binding", kind: "binding" },
+        {
+          id: "lead",
+          name: "lead",
+          kind: "interactive",
+          enabled: true,
+          behavior: { role_name: "lead" },
+          workspace_key: "TEAM A",
+        },
       ],
-      total: 4,
+      total: 3,
     });
 
     await expect(listAgentRecords("TEAM A")).resolves.toEqual([
@@ -413,56 +418,24 @@ describe("startAgent", () => {
     vi.clearAllMocks();
   });
 
-  it("returns pending when the workspace-scoped start endpoint accepts the command", async () => {
-    mockApiPost.mockResolvedValueOnce({
-      data: {
-        message: "agent start requested",
-        pending: true,
-        command_id: "agent-lifecycle-start-1",
-        status: "queued",
-      },
-      error: undefined,
-      response: new Response(null, { status: 202 }),
-    } as never);
-
-    await expect(startAgent("TEST 2", "nova")).resolves.toEqual({
-      message: "agent start requested",
-      pending: true,
-      command_id: "agent-lifecycle-start-1",
-      status: "queued",
-    });
-
-    expect(mockApiPost).toHaveBeenCalledWith(
-      "/api/workspaces/{ws}/agents/{name}/start",
-      { params: { path: { ws: "TEST 2", name: "nova" } } },
-    );
-  });
-
-  it("returns settled and can include a requested task id", async () => {
+  it("returns the settled workspace-scoped lifecycle result", async () => {
     mockApiPost.mockResolvedValueOnce({
       data: {
         message: "agent started",
-        pending: false,
         status: "succeeded",
       },
       error: undefined,
       response: new Response(null, { status: 200 }),
     } as never);
 
-    await expect(
-      startAgent("TEST 2", "nova", { taskId: "TEST-1" }),
-    ).resolves.toEqual({
+    await expect(startAgent("TEST 2", "nova")).resolves.toEqual({
       message: "agent started",
-      pending: false,
       status: "succeeded",
     });
 
     expect(mockApiPost).toHaveBeenCalledWith(
       "/api/workspaces/{ws}/agents/{name}/start",
-      {
-        params: { path: { ws: "TEST 2", name: "nova" } },
-        body: { payload: { task_id: "TEST-1" } },
-      },
+      { params: { path: { ws: "TEST 2", name: "nova" } } },
     );
   });
 
@@ -476,15 +449,19 @@ describe("startAgent", () => {
     await expect(startAgent("TEST", "missing")).rejects.toThrow(ApiError);
   });
 
-  it("rejects a pending response without an authoritative command id", async () => {
+  it("rejects a retired asynchronous command response", async () => {
     mockApiPost.mockResolvedValueOnce({
-      data: { message: "agent start requested", pending: true },
+      data: {
+        message: "agent start requested",
+        pending: true,
+        status: "queued",
+      },
       error: undefined,
       response: new Response(null, { status: 202 }),
     } as never);
 
     await expect(startAgent("TEST", "nova")).rejects.toThrow(
-      "pending command_id is missing",
+      "Invalid agent lifecycle response",
     );
   });
 });
@@ -494,49 +471,24 @@ describe("stopAgent", () => {
     vi.clearAllMocks();
   });
 
-  it("reports asynchronous acceptance instead of waiting for lifecycle completion", async () => {
+  it("reports synchronous lifecycle completion", async () => {
     mockApiPost.mockResolvedValueOnce({
       data: {
-        message: "agent stop requested",
-        pending: true,
-        command_id: "agent-lifecycle-stop-1",
+        message: "agent stopped",
+        status: "succeeded",
       },
       error: undefined,
-      response: new Response(null, { status: 202 }),
+      response: new Response(null, { status: 200 }),
     } as never);
 
     await expect(stopAgent("TEST 2", "nova")).resolves.toEqual({
-      message: "agent stop requested",
-      pending: true,
-      command_id: "agent-lifecycle-stop-1",
+      message: "agent stopped",
+      status: "succeeded",
     });
 
     expect(mockApiPost).toHaveBeenCalledWith(
       "/api/workspaces/{ws}/agents/{name}/stop",
       { params: { path: { ws: "TEST 2", name: "nova" } } },
-    );
-  });
-
-  it("reports synchronous force completion and forwards the force flag", async () => {
-    mockApiPost.mockResolvedValueOnce({
-      data: { message: "agent force-stopped", pending: false },
-      error: undefined,
-      response: new Response(null, { status: 200 }),
-    } as never);
-
-    await expect(stopAgent("TEST 2", "nova", { force: true })).resolves.toEqual(
-      {
-        message: "agent force-stopped",
-        pending: false,
-      },
-    );
-
-    expect(mockApiPost).toHaveBeenCalledWith(
-      "/api/workspaces/{ws}/agents/{name}/stop",
-      {
-        params: { path: { ws: "TEST 2", name: "nova" } },
-        body: { force: true },
-      },
     );
   });
 });
@@ -546,88 +498,25 @@ describe("restartAgent", () => {
     vi.clearAllMocks();
   });
 
-  it("reports asynchronous acceptance instead of waiting for lifecycle completion", async () => {
+  it("reports synchronous lifecycle completion", async () => {
     mockApiPost.mockResolvedValueOnce({
       data: {
-        message: "agent restart requested",
-        pending: true,
-        command_id: "agent-lifecycle-restart-1",
-        status: "acked",
+        message: "agent restarted",
+        status: "succeeded",
       },
       error: undefined,
-      response: new Response(null, { status: 202 }),
+      response: new Response(null, { status: 200 }),
     } as never);
 
     await expect(restartAgent("TEST 2", "nova")).resolves.toEqual({
-      message: "agent restart requested",
-      pending: true,
-      command_id: "agent-lifecycle-restart-1",
-      status: "acked",
+      message: "agent restarted",
+      status: "succeeded",
     });
 
     expect(mockApiPost).toHaveBeenCalledWith(
       "/api/workspaces/{ws}/agents/{name}/restart",
       { params: { path: { ws: "TEST 2", name: "nova" } } },
     );
-  });
-});
-
-describe("getAgentLifecycleCommand", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it("fetches and validates the authoritative command by encoded identity", async () => {
-    const controller = new AbortController();
-    mockGet.mockResolvedValueOnce({
-      command_id: "command/1",
-      action: "restart",
-      status: "running",
-      created_at: "2026-07-24T12:00:00Z",
-    });
-
-    await expect(
-      getAgentLifecycleCommand("TEAM A", "review/one", "command/1", {
-        signal: controller.signal,
-      }),
-    ).resolves.toEqual({
-      command_id: "command/1",
-      action: "restart",
-      status: "running",
-      created_at: "2026-07-24T12:00:00Z",
-    });
-    expect(mockGet).toHaveBeenCalledWith(
-      "/api/workspaces/TEAM%20A/agents/review%2Fone/lifecycle-commands/command%2F1",
-      { signal: controller.signal },
-    );
-  });
-
-  it("rejects unknown command statuses instead of guessing convergence", async () => {
-    mockGet.mockResolvedValueOnce({
-      command_id: "command-1",
-      action: "restart",
-      status: "lost",
-    });
-
-    await expect(
-      getAgentLifecycleCommand("TEAM", "review", "command-1"),
-    ).rejects.toThrow("Invalid agent lifecycle command response");
-  });
-
-  it("accepts the yield action exposed by the lifecycle command contract", async () => {
-    mockGet.mockResolvedValueOnce({
-      command_id: "command-yield-1",
-      action: "yield",
-      status: "succeeded",
-    });
-
-    await expect(
-      getAgentLifecycleCommand("TEAM", "review", "command-yield-1"),
-    ).resolves.toEqual({
-      command_id: "command-yield-1",
-      action: "yield",
-      status: "succeeded",
-    });
   });
 });
 

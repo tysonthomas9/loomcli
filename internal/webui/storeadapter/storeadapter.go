@@ -11,6 +11,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/localnodeconfig"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -58,10 +59,6 @@ func BuildWorkspaceDataForKey(ctx context.Context, s store.Store, key string) (*
 	if err != nil {
 		return nil, err
 	}
-	agents, err := loadAgents(ctx, s, ws.Key)
-	if err != nil {
-		return nil, err
-	}
 	summaries, err := loadSummaries(ctx, s, ws.Key)
 	if err != nil {
 		return nil, err
@@ -75,9 +72,9 @@ func BuildWorkspaceDataForKey(ctx context.Context, s store.Store, key string) (*
 		Path:             wsPath,
 		Repos:            repos,
 		Groups:           groups,
-		Agents:           agents,
+		Agents:           []ops.WorkspaceAgentInfo{},
 		Workspaces:       summaries,
-		WorkspaceOrder:   nil, // TODO(.16): persist order in DaemonProfile or similar
+		WorkspaceOrder:   nil,
 		DefaultWorkspace: "",
 		DesignFormat:     ws.DesignFormat,
 	}, nil
@@ -167,24 +164,6 @@ func loadRepos(ctx context.Context, s store.Store, wsKey string) ([]ops.Workspac
 	return out, groups, nil
 }
 
-func loadAgents(ctx context.Context, s store.Store, wsKey string) ([]ops.WorkspaceAgentInfo, error) {
-	agents, err := s.Agents().List(ctx, wsKey)
-	if err != nil {
-		return nil, fmt.Errorf("storeadapter: list agents: %w", err)
-	}
-	out := make([]ops.WorkspaceAgentInfo, 0, len(agents))
-	for _, a := range agents {
-		out = append(out, ops.WorkspaceAgentInfo{
-			Name:       a.Name,
-			RoleName:   a.RoleName,
-			Repos:      a.Repos,
-			RepoGroups: a.RepoGroups,
-			CrossRepo:  a.CrossRepo,
-		})
-	}
-	return out, nil
-}
-
 func loadSummaries(ctx context.Context, s store.Store, activeKey string) ([]ops.WorkspaceSummary, error) {
 	all, err := s.Workspaces().List(ctx)
 	if err != nil {
@@ -196,10 +175,7 @@ func loadSummaries(ctx context.Context, s store.Store, activeKey string) ([]ops.
 		if repos, repoErr := s.Repos().List(ctx, ws.Key); repoErr == nil {
 			repoCount = len(repos)
 		}
-		backend := ""
-		if profile, profileErr := s.Daemon().Get(ctx, ws.Key); profileErr == nil && profile != nil {
-			backend = profile.AgentBackend
-		}
+		backend, _ := localnodeconfig.RuntimeProvider(ws.Key)
 		out = append(out, ops.WorkspaceSummary{
 			ID:           ws.Key,
 			Name:         ws.Name,

@@ -10,24 +10,39 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-
-	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
 )
 
-// agentsListEnvelope matches dto.ListResponse[gen.AgentControlEntry]
-// returned by GET /api/workspaces/{ws}/agents. We inline the shape here
-// rather than adding a shared decoder because it is used in exactly one
-// place and inlining keeps cli/data flat.
+type agentListBehavior struct {
+	RoleName        string `json:"role_name,omitempty"`
+	DriverID        string `json:"driver_id,omitempty"`
+	DriverVersionID string `json:"driver_version_id,omitempty"`
+}
+
+// agentListEntry is the canonical Agents collection projection consumed by
+// the data CLI. It deliberately does not reuse the generated oneOf wrapper,
+// which is awkward for a flat human-readable list and previously hid the
+// canonical nested behavior behind a retired daemon-control DTO.
+type agentListEntry struct {
+	ID           string            `json:"id"`
+	Name         string            `json:"name"`
+	Kind         string            `json:"kind"`
+	Enabled      bool              `json:"enabled"`
+	Behavior     agentListBehavior `json:"behavior"`
+	WorkspaceKey string            `json:"workspace_key"`
+}
+
+// agentsListEnvelope matches the canonical collection response returned by
+// GET /api/workspaces/{ws}/agents.
 type agentsListEnvelope struct {
-	Success bool                    `json:"success"`
-	Data    []gen.AgentControlEntry `json:"data"`
-	Total   int                     `json:"total"`
-	Error   string                  `json:"error,omitempty"`
+	Success bool             `json:"success"`
+	Data    []agentListEntry `json:"data"`
+	Total   int              `json:"total"`
+	Error   string           `json:"error,omitempty"`
 }
 
 var agentsCmd = &cobra.Command{
 	Use:   "agents",
-	Short: "List agents managed by the loom server daemon (HTTP)",
+	Short: "List agents managed by the Loom platform runtime (HTTP)",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
@@ -48,8 +63,8 @@ var agentsCmd = &cobra.Command{
 }
 
 // fetchAgents issues GET /api/workspaces/{ws}/agents and unwraps the
-// dto.ListResponse envelope into a slice of AgentControlEntry.
-func fetchAgents(ctx context.Context, cli *http.Client, baseURL, wsID string) ([]gen.AgentControlEntry, error) {
+// canonical list envelope into its compact CLI projection.
+func fetchAgents(ctx context.Context, cli *http.Client, baseURL, wsID string) ([]agentListEntry, error) {
 	path := baseURL + "/api/workspaces/" + url.PathEscape(wsID) + "/agents"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, path, nil)
 	if err != nil {
@@ -63,7 +78,7 @@ func fetchAgents(ctx context.Context, cli *http.Client, baseURL, wsID string) ([
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusServiceUnavailable {
-		return nil, fmt.Errorf("daemon unavailable on server")
+		return nil, fmt.Errorf("agent runtime unavailable on server")
 	}
 	if resp.StatusCode == http.StatusNoContent {
 		return nil, fmt.Errorf("server returned no body (HTTP 204)")

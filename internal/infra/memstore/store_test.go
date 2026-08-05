@@ -214,22 +214,3 @@ func TestRoleStoreKindCreatePatchClear(t *testing.T) {
 		t.Fatalf("cleared kind = %q, want empty", role.Kind)
 	}
 }
-
-// TestDaemonProfileGetReturnsDefaults verifies that Get on a workspace
-// with no explicit Upsert returns sensible defaults rather than
-// ErrNotFound — the API contract is "every workspace has a profile".
-func TestDaemonProfileGetReturnsDefaults(t *testing.T) {
-	ctx := context.Background()
-	s := New()
-
-	p, err := s.Daemon().Get(ctx, "MYWS")
-	if err != nil {
-		t.Fatalf("Get default: %v", err)
-	}
-	if p.WorkspaceKey != "MYWS" {
-		t.Errorf("WorkspaceKey: want MYWS, got %q", p.WorkspaceKey)
-	}
-	if p.IssueBackend != "fleetdb" {
-		t.Errorf("IssueBackend default: want fleetdb, got %q", p.IssueBackend)
-	}
-}

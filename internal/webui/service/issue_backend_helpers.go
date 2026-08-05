@@ -83,7 +83,7 @@ func patchParamsToBackendUpdate(p *PatchIssueParams) backend.UpdateParams {
 // --- Wire-shape converters (backend → JSON shape FE expects) ---
 
 // issueDataToWire converts a backend.IssueData to a wire-format value whose
-// JSON matches what *rpc.Client previously returned for create/claim
+// JSON matches the legacy create/claim handler response
 // responses (a bare types.Issue body).
 //
 // The function returns map[string]any rather than *types.Issue because
@@ -277,7 +277,7 @@ func commentsToWire(in []backend.CommentData) []map[string]any {
 
 // closeResultToWire converts a backend.CloseResult into a wire-format value.
 //
-// The previous direct-RPC payload was rpc.CloseResult with
+// The legacy close payload contained
 // {closed: <Issue>, unblocked: [<Issue>...]} when SuggestNext=true and a
 // bare <Issue> when SuggestNext=false. The migrated path always returns the
 // wrapped shape because CloseResult is the typed return; FE consumers

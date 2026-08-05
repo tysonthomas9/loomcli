@@ -43,7 +43,6 @@ type AgentStatus struct {
 	RoleKind              string         `json:"role_kind,omitempty"`               // resolved role kind ("interactive" or "worker")
 	Repo                  string         `json:"repo,omitempty"`                    // repository this agent is assigned to (multi-repo)
 	Workspace             string         `json:"workspace"`                         // workspace name
-	DaemonManaged         bool           `json:"daemon_managed,omitempty"`          // true if under daemon supervision
 	Parent                string         `json:"parent,omitempty"`                  // active epic for leads/workers
 	DeliveryState         string         `json:"delivery_state,omitempty"`          // lead assignment delivery state
 	InboxQueuedCount      int            `json:"inbox_queued_count,omitempty"`      // queued agent inbox messages
@@ -53,10 +52,10 @@ type AgentStatus struct {
 	TaskID                string         `json:"task_id,omitempty"`                 // latest task session associated with this agent
 	SessionID             string         `json:"session_id,omitempty"`              // latest control-plane session for this agent
 	Mode                  string         `json:"mode,omitempty"`                    // persistent/ephemeral assignment mode
-	DesiredState          string         `json:"desired_state,omitempty"`           // requested daemon state
+	DesiredState          string         `json:"desired_state,omitempty"`           // requested durable agent state
 	Commits               []CommitDetail `json:"commits,omitempty"`                 // recent commits ahead of integration branch
 	Changes               []FileChange   `json:"changes,omitempty"`                 // uncommitted file changes
-	CurrentTaskID         string         `json:"current_task_id,omitempty"`         // task this daemon-managed agent has claimed; empty between tasks
+	CurrentTaskID         string         `json:"current_task_id,omitempty"`         // task this agent has claimed; empty between tasks
 	LastActivityAt        *time.Time     `json:"last_activity_at,omitempty"`        // most recent PTY-output observation from the agent's supervised backend; nil when not reported (a zero time.Time would serialize as "0001-01-01T00:00:00Z" and the UI would render it as a bogus "last seen" age)
 	// LiveStatus/ActiveTaskID/ActivePhase are fleet-db's DERIVED liveness signal
 	// (computed there from the running-session+fresh-lease join), carried through
@@ -120,30 +119,4 @@ type MonitorStats struct {
 	InProgress int     `json:"in_progress"`
 	Review     int     `json:"review"`
 	Blocked    int     `json:"blocked"`
-}
-
-// DaemonAgentState represents the daemon-agents.json file format.
-// This matches the DaemonState written by daemon_cmd.go.
-type DaemonAgentState struct {
-	PID    int                     `json:"pid"`
-	Agents []DaemonAgentStateEntry `json:"agents"`
-}
-
-// DaemonAgentStateEntry represents a single agent in daemon-agents.json
-type DaemonAgentStateEntry struct {
-	Worktree     string    `json:"worktree"`
-	Status       string    `json:"status"`
-	Role         string    `json:"role"`
-	Repo         string    `json:"repo,omitempty"`
-	TaskID       string    `json:"task_id,omitempty"`
-	LastActivity time.Time `json:"last_activity,omitempty"`
-}
-
-// DaemonAgentInfo carries daemon supervision metadata for a worktree.
-type DaemonAgentInfo struct {
-	Managed       bool
-	Role          string
-	Repo          string
-	CurrentTaskID string
-	LastActivity  time.Time
 }

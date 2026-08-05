@@ -1054,13 +1054,20 @@ func (ports *workflowTaskRunConvergencePorts) EnsureTaskRunTerminalEvent(ctx con
 }
 
 func (ports *workflowTaskRunConvergencePorts) ResolveEpicLead(ctx context.Context, workspace, epicID string) (string, error) {
-	agents, err := ports.store.Agents().List(ctx, workspace)
+	agents, err := ports.store.AgentServices().List(ctx, workspace, store.AgentServiceFilter{})
 	if err != nil {
 		return "", err
 	}
 	for _, agent := range agents {
-		if agent != nil && agent.Parent == epicID && (agent.RoleName == "lead" || agent.RoleName == "orchestrator") {
-			return agent.Name, nil
+		if agent == nil || (agent.RoleName != "lead" && agent.RoleName != "orchestrator") || agent.ProfileName == "" {
+			continue
+		}
+		profile, profileErr := ports.store.WorkerProfiles().Get(ctx, workspace, agent.ProfileName)
+		if profileErr != nil {
+			return "", profileErr
+		}
+		if profile.ParentEpic == epicID {
+			return agent.ServiceID, nil
 		}
 	}
 	return "", nil
@@ -1077,13 +1084,22 @@ func (ports *workflowTaskRunConvergencePorts) EnsureLeadTaskNotification(ctx con
 
 func bindWorkflowEpicLead(t *testing.T, ctx context.Context, st store.Store, name, epicID string) {
 	t.Helper()
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{
-		WorkspaceKey: "TEST",
-		Name:         name,
-		RoleName:     "lead",
-		Parent:       epicID,
+	profileID := name + "-profile"
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{
+		WorkspaceKey: "TEST", Name: "lead",
+	}); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
+		t.Fatalf("create lead role: %v", err)
+	}
+	if _, err := st.WorkerProfiles().Create(ctx, store.WorkerProfileCreate{
+		WorkspaceKey: "TEST", ProfileID: profileID, Name: profileID, Role: "lead", ParentEpic: epicID,
 	}); err != nil {
-		t.Fatalf("create lead agent: %v", err)
+		t.Fatalf("create lead profile: %v", err)
+	}
+	if _, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
+		WorkspaceKey: "TEST", ServiceID: name, Name: name, RoleName: "lead", ProfileName: profileID,
+		Kind: domain.AgentServiceKindLead, DesiredState: domain.AgentServiceDesiredRunning, MaxInstances: 1,
+	}); err != nil {
+		t.Fatalf("create lead agent service: %v", err)
 	}
 }
 
