@@ -1240,6 +1240,25 @@ function DefaultContent({
               Created: {formatDate(issue.created_at)}
             </span>
           )}
+          {issue.closed_at && (
+            <span className={styles.metadataItem} data-testid="metadata-closed">
+              Closed: {formatDate(issue.closed_at)}
+            </span>
+          )}
+          {/* D-57: close_reason has been on the wire (and written by the
+              bulk-close flow) with nothing rendering it, so "why was this
+              closed?" could only be answered from the API. Shown only when
+              non-empty — an unexplained close renders nothing rather than an
+              empty label. */}
+          {issue.close_reason && (
+            <span
+              className={styles.metadataItem}
+              data-testid="metadata-close-reason"
+              title={issue.close_reason}
+            >
+              Reason: {issue.close_reason}
+            </span>
+          )}
         </div>
       </div>
 

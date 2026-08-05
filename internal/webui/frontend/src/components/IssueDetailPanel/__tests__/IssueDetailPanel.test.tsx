@@ -395,6 +395,50 @@ describe("IssueDetailPanel", () => {
       expect(screen.getByTestId("issue-detail-panel")).toBeInTheDocument();
     });
 
+    // D-57: close_reason has been on the wire (and written by the bulk-close
+    // flow) with nothing rendering it, so "why was this closed?" was only
+    // answerable from the API.
+    it("shows the close reason and closed timestamp on a closed issue", () => {
+      const mockIssue = createTestIssue({
+        status: "closed",
+        closed_at: "2026-02-01T10:30:00Z",
+        close_reason: "superseded by DOGFOOD-42",
+      });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+      expect(screen.getByTestId("metadata-close-reason")).toHaveTextContent(
+        "superseded by DOGFOOD-42",
+      );
+      expect(screen.getByTestId("metadata-closed")).toBeInTheDocument();
+    });
+
+    it("renders nothing for an unexplained close", () => {
+      const mockIssue = createTestIssue({
+        status: "closed",
+        closed_at: "2026-02-01T10:30:00Z",
+      });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+      // An empty reason must not leave a dangling "Reason:" label.
+      expect(
+        screen.queryByTestId("metadata-close-reason"),
+      ).not.toBeInTheDocument();
+      expect(screen.getByTestId("metadata-closed")).toBeInTheDocument();
+    });
+
+    it("shows neither closing field on an open issue", () => {
+      const mockIssue = createTestIssue({ status: "open" });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+      expect(screen.queryByTestId("metadata-closed")).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("metadata-close-reason"),
+      ).not.toBeInTheDocument();
+    });
+
     it("renders children in content area", () => {
       const mockIssue = createTestIssue();
       render(
