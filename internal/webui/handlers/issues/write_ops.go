@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
@@ -129,13 +128,7 @@ func HandleClaimIssue(svc service.IssueService) http.HandlerFunc {
 			return
 		}
 
-		// X-Actor is the existing convention for carrying a worker identity
-		// to fleet-db (--auth-dev-mode); the serve-mediated claim path was
-		// the one place that dropped it.
-		data, err := svc.ClaimIssue(r.Context(), service.ClaimIssueParams{
-			IssueID: issueID,
-			Actor:   strings.TrimSpace(r.Header.Get("X-Actor")),
-		})
+		data, err := svc.ClaimIssue(r.Context(), service.ClaimIssueParams{IssueID: issueID})
 		if err != nil {
 			handler.HandleServiceError(w, err)
 			return
