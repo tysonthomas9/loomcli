@@ -251,7 +251,11 @@ func runServe(cmd *cobra.Command, args []string) {
 	startTriggerCronScheduler(ctx, storeHandle.Store)
 	startTriggerDeliverySweeper(ctx, storeHandle.Store)
 	startAwaitTimeoutSweeper(ctx, storeHandle.Store)
-	issueBackendFn := cli.WorkspaceAwareIssueBackendForURL(storeHandle.URL(), fleetState.clientCfg.Actor)
+	issueBackendFn := cli.WorkspaceAwareIssueBackendForConfig(
+		storeHandle.URL(),
+		storeHandle.FleetDBClientAPIKey(),
+		fleetState.clientCfg.Actor,
+	)
 	// task.ready payload enrichment: an issue.update journal delta can't say
 	// whether the card has a design, so the bridge looks the live card up
 	// through the same per-workspace issue backend the monitor uses.
@@ -271,7 +275,11 @@ func runServe(cmd *cobra.Command, args []string) {
 
 	webuiErr := make(chan error, 1)
 	go func() {
-		cfg := buildServerConfig(monitorHandlers, fleetState, storeHandle)
+		cfg, err := buildServerConfig(monitorHandlers, fleetState, storeHandle)
+		if err != nil {
+			webuiErr <- err
+			return
+		}
 		webuiErr <- webuiapp.StartServer(ctx, cfg)
 	}()
 
@@ -324,7 +332,11 @@ func openServeStore(ctx context.Context, fs fleetState) (*bootstrap.StoreHandle,
 	if cli.IsFleetActive() {
 		ensureFleetStoreEnv(fs.clientCfg)
 	}
-	return cmdstore.OpenStore(ctx)
+	required, err := serveadapter.RequiredFleetDBCapabilities(serveAuthURL != "", false)
+	if err != nil {
+		return nil, fmt.Errorf("derive required FleetDB capabilities: %w", err)
+	}
+	return cmdstore.OpenStoreWithCapabilities(ctx, required)
 }
 
 func startDriverExecutorIfEnabled(ctx context.Context, st store.Store) {
@@ -674,7 +686,7 @@ func buildMonitorHandlers(collectDataFn metricscmd.CollectDataFn, staleDetectorH
 	}
 }
 
-func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState, storeHandle *bootstrap.StoreHandle) webui.ServerConfig {
+func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState, storeHandle *bootstrap.StoreHandle) (webui.ServerConfig, error) {
 	gitOps := opsimpl.NewGitOps()
 	resolvedBackend := cli.ResolveBackendName()
 	log.Printf("Terminal backend: %s", resolvedBackend)
@@ -684,9 +696,13 @@ func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState, sto
 		cfg.Store = storeHandle.Store
 		gitOps.WithStore(storeHandle.Store)
 		if url := storeHandle.URL(); url != "" {
-			cfg.IssueBackendFn = cli.WorkspaceAwareIssueBackendForURL(url, fs.clientCfg.Actor)
+			cfg.IssueBackendFn = cli.WorkspaceAwareIssueBackendForConfig(
+				url,
+				storeHandle.FleetDBClientAPIKey(),
+				fs.clientCfg.Actor,
+			)
 			cfg.FleetDBBaseURL = url
-			fs = withStoreFleetURL(fs, url)
+			fs = withStoreFleetConfig(fs, url, storeHandle.FleetDBClientAPIKey())
 		}
 		cfg.DriverAPIToken = driverAPIToken()
 		cfg.DriverAPIBaseURL = driverAPIBaseURL()
@@ -694,8 +710,26 @@ func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState, sto
 	}
 	applyFleetConfig(&cfg, fs)
 	applyWorkspaceConfig(&cfg)
+	enabled, err := serveadapter.WorkflowCatalogEnabled(cfg.ExtAuthURL != "", cfg.WorkspaceRoleResolver != nil)
+	if err != nil {
+		return webui.ServerConfig{}, fmt.Errorf("configure Workflow Catalog: %w", err)
+	}
+	module, err := serveadapter.BuildWorkflowCatalogModule(serveadapter.WorkflowCatalogConfig{
+		Enabled:               enabled,
+		StoreHandle:           storeHandle,
+		RuntimeDir:            cli.GetWorkspaceRuntimeDir(),
+		Workspace:             cfg.InitialWorkspaceID,
+		ExternalAuth:          cfg.ExtAuthURL != "",
+		WorkspaceRoleResolver: cfg.WorkspaceRoleResolver,
+	})
+	if err != nil {
+		return webui.ServerConfig{}, err
+	}
+	if module != nil {
+		cfg.WorkflowCatalogModule = module
+	}
 	applyCORSConfig(&cfg)
-	return cfg
+	return cfg, nil
 }
 
 func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimpl.GitOpsImpl, backend string) webui.ServerConfig {
@@ -738,9 +772,15 @@ func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimp
 	}
 }
 
-func withStoreFleetURL(fs fleetState, storeURL string) fleetState {
+func withStoreFleetConfig(fs fleetState, storeURL, storeAPIKey string) fleetState {
 	if fs.clientCfg.URL == "" {
 		fs.clientCfg.URL = storeURL
+		fs.clientCfg.APIKey = storeAPIKey
+	} else if strings.TrimRight(fs.clientCfg.URL, "/") == strings.TrimRight(storeURL, "/") && fs.clientCfg.APIKey == "" {
+		// The explicit Fleet URL targets the same Store opened by bootstrap.
+		// Reuse that Store's in-memory credential, but never attach a local
+		// credential to a different explicitly configured external URL.
+		fs.clientCfg.APIKey = storeAPIKey
 	}
 	return fs
 }

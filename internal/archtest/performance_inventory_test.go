@@ -69,11 +69,18 @@ func TestPerformanceInventoryStrictlyRejectsUnknownField(t *testing.T) {
 }
 
 func TestPerformanceInventoryRequiresExplicitNullForUnavailableValue(t *testing.T) {
-	contents := readPerformanceBaseline(t)
-	contents = strings.Replace(contents, "      value: null\n      unit: milliseconds", "      unit: milliseconds", 1)
-	_, err := LoadPerformanceInventory(writePerformanceBaseline(t, contents))
+	inventory, err := LoadPerformanceInventory(checkedPerformanceBaseline)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inventory.WorkflowApprovalLatency.Record.Status = performanceNotYetMigrated
+	inventory.WorkflowApprovalLatency.Record.Evidence.Command = []string{}
+	inventory.WorkflowApprovalLatency.Result.SampleCount = 0
+	inventory.WorkflowApprovalLatency.Result.P50.Value = RecordedNumber{}
+	inventory.WorkflowApprovalLatency.Result.P95.Value = RecordedNumber{Present: true}
+	err = inventory.Validate()
 	if err == nil || !strings.Contains(err.Error(), "p50 must explicitly include value") {
-		t.Fatalf("LoadPerformanceInventory error = %v, want missing-value rejection", err)
+		t.Fatalf("Validate error = %v, want missing-value rejection", err)
 	}
 }
 
@@ -121,14 +128,20 @@ func TestPerformanceInventoryRejectsIncompleteOrIncoherentRecords(t *testing.T) 
 		{
 			name: "invented unavailable latency",
 			mutate: func(inventory *PerformanceInventory) {
+				inventory.WorkflowApprovalLatency.Record.Status = performanceNotYetMigrated
+				inventory.WorkflowApprovalLatency.Record.Evidence.Command = []string{}
+				inventory.WorkflowApprovalLatency.Result.SampleCount = 0
 				inventory.WorkflowApprovalLatency.Result.P50.Value = RecordedNumber{Present: true, Valid: true, Value: 1}
+				inventory.WorkflowApprovalLatency.Result.P95.Value = RecordedNumber{Present: true}
 			},
 			want: "p50 must be null while status is not-yet-migrated",
 		},
 		{
 			name: "unavailable command",
 			mutate: func(inventory *PerformanceInventory) {
+				inventory.FleetDBRoundTrips.Record.Status = performanceNotYetMigrated
 				inventory.FleetDBRoundTrips.Record.Evidence.Command = []string{"legacy-probe"}
+				inventory.FleetDBRoundTrips.Result.RoundTrips.Value = RecordedNumber{Present: true}
 			},
 			want: "unavailable status requires command: []",
 		},

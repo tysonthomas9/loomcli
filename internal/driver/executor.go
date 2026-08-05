@@ -584,7 +584,7 @@ func loadRunRequest(ctx context.Context, workDir string, run *domain.DriverRun, 
 	if err != nil {
 		return RunRequest{}, err
 	}
-	trust, err := driverTrustLevel(ctx, s, run, version)
+	trust, err := driverTrustLevel(ctx, s.Drivers(), run, version)
 	if err != nil {
 		return RunRequest{}, err
 	}

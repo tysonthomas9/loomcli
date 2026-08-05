@@ -19,7 +19,8 @@ import (
 
 // Config holds the parameters needed to create an authenticated client.
 type Config struct {
-	ServerURL string // Base URL of the loom server (e.g., "https://loom.example.com:8080")
+	ServerURL     string // Base URL of the loom server (e.g., "https://loom.example.com:8080")
+	CheckRedirect func(req *http.Request, via []*http.Request) error
 }
 
 // AuthMode represents the server's authentication configuration.
@@ -47,8 +48,9 @@ func New(cfg Config) (*Client, error) {
 	c := &Client{
 		serverURL: serverURL,
 		httpClient: &http.Client{
-			Transport: otelhttp.NewTransport(http.DefaultTransport),
-			Timeout:   30 * time.Second,
+			Transport:     otelhttp.NewTransport(http.DefaultTransport),
+			Timeout:       30 * time.Second,
+			CheckRedirect: cfg.CheckRedirect,
 		},
 	}
 
@@ -65,6 +67,16 @@ func New(cfg Config) (*Client, error) {
 	}
 
 	return c, nil
+}
+
+// AuthMode returns the server authentication configuration already discovered
+// by New. The returned value is a copy so callers cannot mutate client state or
+// trigger a redundant /api/config request just to branch on open versus OIDC.
+func (c *Client) AuthMode() AuthMode {
+	if c == nil || c.authMode == nil {
+		return AuthMode{}
+	}
+	return *c.authMode
 }
 
 // Do executes an HTTP request with the appropriate Authorization header.

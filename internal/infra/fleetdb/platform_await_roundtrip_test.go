@@ -23,12 +23,14 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
+	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/store/storetest"
 )
@@ -43,15 +45,20 @@ func TestFleetDBAwaitConformanceRoundTrip(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
-	emb, err := bootstrap.StartEmbedded(ctx, t.TempDir(), slog.Default())
+	dataDir := t.TempDir()
+	emb, err := bootstrap.StartEmbedded(ctx, dataDir, slog.Default())
 	if err != nil {
 		t.Fatalf("StartEmbedded: %v", err)
 	}
 	t.Cleanup(func() { _ = emb.Stop() })
 
-	client, err := fleetdb.New(fleetdb.Config{BaseURL: emb.URL(), Actor: "await-roundtrip"})
+	client, err := emb.NewClient(fleetdb.Config{Actor: "await-roundtrip"})
 	if err != nil {
 		t.Fatalf("fleetdb client: %v", err)
+	}
+	apiKey, err := authority.ReadLocalFleetDBServiceCredential(filepath.Join(dataDir, "fleet-db", "auth"))
+	if err != nil {
+		t.Fatalf("read embedded FleetDB service credential: %v", err)
 	}
 
 	var wsSeq atomic.Int64
@@ -63,7 +70,7 @@ func TestFleetDBAwaitConformanceRoundTrip(t *testing.T) {
 		return &storetest.AwaitHarness{
 			Workspace:   ws,
 			Awaits:      client.Awaits(),
-			AppendEvent: fleetDBAppendEvent(emb.URL(), ws),
+			AppendEvent: fleetDBAppendEvent(emb.URL(), apiKey, ws),
 			// Runs is nil: see the package comment.
 		}
 	})
@@ -74,7 +81,7 @@ func TestFleetDBAwaitConformanceRoundTrip(t *testing.T) {
 // journal in the same transaction) and returns the assigned event ID. Raw
 // HTTP because the loomcli store contract has no client-side trigger-event
 // create — production events arrive via webhook/loopback dispatch.
-func fleetDBAppendEvent(baseURL, ws string) func(t testing.TB, eventType, subjectRef, actorRef string) string {
+func fleetDBAppendEvent(baseURL, apiKey, ws string) func(t testing.TB, eventType, subjectRef, actorRef string) string {
 	return func(t testing.TB, eventType, subjectRef, actorRef string) string {
 		t.Helper()
 		body, err := json.Marshal(map[string]any{
@@ -92,6 +99,7 @@ func fleetDBAppendEvent(baseURL, ws string) func(t testing.TB, eventType, subjec
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("X-Actor", "await-roundtrip")
+		req.Header.Set("X-API-Key", apiKey)
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("create trigger event: %v", err)

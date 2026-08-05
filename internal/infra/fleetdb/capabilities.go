@@ -20,6 +20,10 @@ const (
 	// SupportedCapabilitiesAPIRevision is the manifest schema this client can
 	// interpret. Capability keys carry their own versions independently.
 	SupportedCapabilitiesAPIRevision = "v1"
+
+	// WorkflowCatalogVersionLifecycleCapability is required when Loom's
+	// catalog lifecycle slice is enabled.
+	WorkflowCatalogVersionLifecycleCapability = "workflow_catalog.version_lifecycle.v1"
 )
 
 // CapabilityIncompatibilityKind identifies why the running FleetDB deployment

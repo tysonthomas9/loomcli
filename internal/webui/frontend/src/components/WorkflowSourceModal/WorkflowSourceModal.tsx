@@ -4,13 +4,14 @@
  * Opened for a builtin workflow (e.g. bug-fix-agent / review-loop-agent), it
  * loads the TS source via GET /workflows/{name}/source into an editor and lets
  * the user rebuild it into a new driver version via POST .../versions. It can
- * also list versions and approve/activate them.
+ * also list versions and preserve the approval/activation journey. In local
+ * mode the durable operator credential never enters browser code: Loom Desktop
+ * delegates only a short-lived, action-limited in-memory lifecycle bearer.
  *
  * HONESTY: a rebuild runs the flue toolchain on the serve host and can fail. We
- * surface `build_diagnostics` verbatim and only claim success when the response
- * says the version built AND activated. Because HTTP-built versions are stamped
- * UNTRUSTED, we also tell the user the version must be approved before it runs —
- * we never imply a freshly built version is already live.
+ * surface `build_diagnostics` verbatim. HTTP-built versions are inactive and
+ * UNTRUSTED until they pass the explicit approve and activate command path; we
+ * never imply a freshly built version is already live.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -45,6 +46,7 @@ export function WorkflowSourceModal({
     saveSource,
     approveVersion,
     activateVersion,
+    canManageVersions,
   } = useWorkflowSource(workspaceId);
   const { showToast } = useToast();
 
@@ -61,6 +63,9 @@ export function WorkflowSourceModal({
 
   const [versions, setVersions] = useState<DriverVersion[]>([]);
   const [activeVersionId, setActiveVersionId] = useState("");
+  const [approvedVersionIds, setApprovedVersionIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [versionsError, setVersionsError] = useState<string | null>(null);
   const [actioningId, setActioningId] = useState<string | null>(null);
 
@@ -72,12 +77,25 @@ export function WorkflowSourceModal({
       const res = await listVersions(workflowName);
       setVersions(res.versions ?? []);
       setActiveVersionId(res.active_version_id ?? "");
+      const metadata = res.driver?.metadata ?? {};
+      setApprovedVersionIds(
+        new Set(
+          (res.versions ?? [])
+            .filter((version) => {
+              const marker =
+                metadata[`approved_version:${version.version_id}`]?.trim();
+              return marker === "trusted" || marker === version.source_digest;
+            })
+            .map((version) => version.version_id),
+        ),
+      );
     } catch (err) {
       // A workflow with no driver built yet is a 404 — that is "no versions",
       // not an error to alarm the user with.
       if (err instanceof ApiError && err.status === 404) {
         setVersions([]);
         setActiveVersionId("");
+        setApprovedVersionIds(new Set());
         return;
       }
       setVersionsError(apiErrorMessage(err, "Failed to load versions"));
@@ -138,18 +156,12 @@ export function WorkflowSourceModal({
       const result = await saveSource(workflowName, {
         files,
         entrypoint,
-        activate: true,
+        activate: false,
       });
       setSaveResult(result);
-      // HONESTY: only claim success when the build activated. A non-activated
-      // build is a warning, never a success toast.
-      if (result.activated) {
-        showToast(`${workflowName} built and activated`, { type: "success" });
-      } else {
-        showToast(`${workflowName} built but was not activated`, {
-          type: "warning",
-        });
-      }
+      showToast(`${workflowName} built as an inactive draft`, {
+        type: "success",
+      });
       await refreshVersions();
     } catch (err) {
       // A build failure surfaces here (ApiError 400) with the redacted flue
@@ -182,6 +194,7 @@ export function WorkflowSourceModal({
     [approveVersion, activateVersion, workflowName, showToast, refreshVersions],
   );
 
+  const lifecycleAuthorized = canManageVersions;
   const busy = saving || actioningId !== null;
 
   return (
@@ -267,27 +280,21 @@ export function WorkflowSourceModal({
                 disabled={busy || !selectedFile}
                 data-testid="workflow-source-save"
               >
-                {saving ? "Building…" : "Build & activate"}
+                {saving ? "Building…" : "Build draft"}
               </button>
             </div>
 
             {saveResult && (
               <>
                 <div
-                  className={`${styles.outcome} ${
-                    saveResult.activated
-                      ? styles.outcomeSuccess
-                      : styles.outcomeWarning
-                  }`}
+                  className={`${styles.outcome} ${styles.outcomeWarning}`}
                   role="status"
                   data-testid="workflow-source-outcome"
                 >
-                  {saveResult.activated
-                    ? `Built version ${saveResult.version.version} and pointed the workflow at it.`
-                    : `Built version ${saveResult.version.version}, but it was NOT activated — the workflow still runs its previous version.`}
+                  {`Built version ${saveResult.version.version} as an inactive draft — the workflow still runs its previous version.`}
                   <p className={styles.caveat}>
-                    Versions built here are untrusted until approved. Approve it
-                    below before this workflow will actually run the new build.
+                    Versions built here are untrusted until approved, then must
+                    be activated explicitly.
                   </p>
                 </div>
                 <p className={styles.diagnosticsLabel}>Build diagnostics</p>
@@ -333,67 +340,100 @@ export function WorkflowSourceModal({
                 No driver versions built yet.
               </p>
             ) : (
-              <div
-                className={styles.versionList}
-                data-testid="workflow-source-versions"
-              >
-                {versions.map((v) => {
-                  const isActive = v.version_id === activeVersionId;
-                  return (
-                    <div key={v.version_id} className={styles.versionItem}>
-                      <div className={styles.versionMeta}>
-                        <span className={styles.versionName}>
-                          Version {v.version}
-                        </span>
-                        <span className={styles.versionSub}>
-                          {v.version_id}
-                        </span>
+              <>
+                {!lifecycleAuthorized && (
+                  <p
+                    className={styles.emptyHint}
+                    data-testid="workflow-lifecycle-desktop-required"
+                  >
+                    Open this workspace through Loom Desktop to approve or
+                    activate versions. Those lifecycle controls are unavailable
+                    in a raw loopback browser.
+                  </p>
+                )}
+                <div
+                  className={styles.versionList}
+                  data-testid="workflow-source-versions"
+                >
+                  {versions.map((v) => {
+                    const isActive = v.version_id === activeVersionId;
+                    const isApproved = approvedVersionIds.has(v.version_id);
+                    return (
+                      <div key={v.version_id} className={styles.versionItem}>
+                        <div className={styles.versionMeta}>
+                          <span className={styles.versionName}>
+                            Version {v.version}
+                          </span>
+                          <span className={styles.versionSub}>
+                            {v.version_id}
+                          </span>
+                        </div>
+                        {isActive ? (
+                          <span
+                            className={`${styles.badge} ${styles.badgeActive}`}
+                          >
+                            Active
+                          </span>
+                        ) : isApproved ? (
+                          <span
+                            className={`${styles.badge} ${styles.badgePassed}`}
+                          >
+                            Approved
+                          </span>
+                        ) : v.validation_status === "failed" ? (
+                          <span
+                            className={`${styles.badge} ${styles.badgeFailed}`}
+                          >
+                            Failed
+                          </span>
+                        ) : (
+                          <span
+                            className={`${styles.badge} ${styles.badgePassed}`}
+                          >
+                            {v.validation_status}
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          className={styles.secondaryButton}
+                          onClick={() =>
+                            runVersionAction(v.version_id, "approve")
+                          }
+                          disabled={
+                            busy ||
+                            !lifecycleAuthorized ||
+                            isApproved ||
+                            v.validation_status !== "passed"
+                          }
+                          data-testid={`workflow-version-approve-${v.version_id}`}
+                        >
+                          {isApproved
+                            ? "Approved"
+                            : actioningId === v.version_id
+                              ? "…"
+                              : "Approve"}
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.secondaryButton}
+                          onClick={() =>
+                            runVersionAction(v.version_id, "activate")
+                          }
+                          disabled={
+                            busy ||
+                            !lifecycleAuthorized ||
+                            isActive ||
+                            !isApproved
+                          }
+                          data-testid={`workflow-version-activate-${v.version_id}`}
+                        >
+                          {isActive ? "Active" : "Activate"}
+                        </button>
                       </div>
-                      {isActive ? (
-                        <span
-                          className={`${styles.badge} ${styles.badgeActive}`}
-                        >
-                          Active
-                        </span>
-                      ) : v.validation_status === "failed" ? (
-                        <span
-                          className={`${styles.badge} ${styles.badgeFailed}`}
-                        >
-                          Failed
-                        </span>
-                      ) : (
-                        <span
-                          className={`${styles.badge} ${styles.badgePassed}`}
-                        >
-                          {v.validation_status}
-                        </span>
-                      )}
-                      <button
-                        type="button"
-                        className={styles.secondaryButton}
-                        onClick={() =>
-                          runVersionAction(v.version_id, "approve")
-                        }
-                        disabled={busy}
-                        data-testid={`workflow-version-approve-${v.version_id}`}
-                      >
-                        {actioningId === v.version_id ? "…" : "Approve"}
-                      </button>
-                      <button
-                        type="button"
-                        className={styles.secondaryButton}
-                        onClick={() =>
-                          runVersionAction(v.version_id, "activate")
-                        }
-                        disabled={busy || isActive}
-                        data-testid={`workflow-version-activate-${v.version_id}`}
-                      >
-                        {isActive ? "Active" : "Activate"}
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              </>
             )}
             {versionsError && (
               <div

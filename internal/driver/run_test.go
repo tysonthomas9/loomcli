@@ -173,9 +173,11 @@ func TestVersionScopedApprovalDoesNotTrustSiblingVersions(t *testing.T) {
 	if got := DriverVersionEffectiveTrust(driver, custom1); got != domain.DriverTrustUntrusted {
 		t.Fatalf("custom1 trust before approval = %q, want untrusted", got)
 	}
-	driver, _, err = ApproveDriverVersion(ctx, st, "TEST", "epic-runner", "version-custom-1")
+	approvedMetadata := cloneStringMap(driver.Metadata)
+	approvedMetadata[ApprovedVersionMetadataKey(custom1.VersionID)] = custom1.SourceDigest
+	driver, err = st.Drivers().Update(ctx, "TEST", "epic-runner", store.DriverUpdate{Metadata: &approvedMetadata})
 	if err != nil {
-		t.Fatalf("ApproveDriverVersion: %v", err)
+		t.Fatalf("approve test fixture version: %v", err)
 	}
 	if got := DriverVersionEffectiveTrust(driver, custom1); got != domain.DriverTrustTrusted {
 		t.Fatalf("custom1 trust after approval = %q, want trusted", got)
@@ -183,7 +185,7 @@ func TestVersionScopedApprovalDoesNotTrustSiblingVersions(t *testing.T) {
 	if got := DriverVersionEffectiveTrust(driver, custom2); got != domain.DriverTrustUntrusted {
 		t.Fatalf("custom2 trust inherited from custom1 approval = %q, want untrusted", got)
 	}
-	driver, _, err = ActivateDriverVersion(ctx, st, "TEST", "epic-runner", "version-custom-2")
+	driver, _, err = ActivateDriverVersion(ctx, st.Drivers(), st.DriverVersions(), "TEST", "epic-runner", "version-custom-2")
 	if err != nil {
 		t.Fatalf("ActivateDriverVersion: %v", err)
 	}
@@ -193,9 +195,11 @@ func TestVersionScopedApprovalDoesNotTrustSiblingVersions(t *testing.T) {
 	if DriverVersionApproved(driver, custom2) {
 		t.Fatalf("activation implicitly approved version-custom-2")
 	}
-	driver, _, err = UnapproveDriverVersion(ctx, st, "TEST", "epic-runner", "version-custom-1")
+	unapprovedMetadata := cloneStringMap(driver.Metadata)
+	delete(unapprovedMetadata, ApprovedVersionMetadataKey(custom1.VersionID))
+	driver, err = st.Drivers().Update(ctx, "TEST", "epic-runner", store.DriverUpdate{Metadata: &unapprovedMetadata})
 	if err != nil {
-		t.Fatalf("UnapproveDriverVersion: %v", err)
+		t.Fatalf("unapprove test fixture version: %v", err)
 	}
 	if DriverVersionApproved(driver, custom1) {
 		t.Fatalf("custom1 still approved after unapprove")

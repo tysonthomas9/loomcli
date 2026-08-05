@@ -22,6 +22,9 @@ FLEET_PORT="${FLEET_PORT:-$(node -e 'const s=require("node:net").createServer();
 LOOM_PORT="${LOOM_PORT:-$(node -e 'const s=require("node:net").createServer();s.listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close();});')}"
 FLEET_URL="http://127.0.0.1:${FLEET_PORT}"
 LOOM_URL="http://127.0.0.1:${LOOM_PORT}"
+# This runtime matrix intentionally runs FleetDB without authorization and
+# does not prove the Workflow Catalog lifecycle capability.
+export LOOM_WORKFLOW_CATALOG_ENABLED=false
 
 RUN_DAYTONA="${RUN_DAYTONA:-auto}"
 DAYTONA_REPO_URL="${DAYTONA_REPO_URL:-https://github.com/tysonthomas9/loom-review-sandbox.git}"

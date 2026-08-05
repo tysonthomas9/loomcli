@@ -18,17 +18,17 @@ func TestCheckedInManifestsAndRepository(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := len(report.CompositeStoreFiles), 93; got != want {
+	if got, want := len(report.CompositeStoreFiles), 92; got != want {
 		t.Fatalf("composite Store file count = %d, want %d; files = %v", got, want, report.CompositeStoreFiles)
 	}
-	if got, want := len(report.CompositeStoreOutside), 82; got != want {
+	if got, want := len(report.CompositeStoreOutside), 81; got != want {
 		t.Fatalf("outside-composition Store file count = %d, want %d", got, want)
 	}
 	if got, want := len(report.LegacyHandlerImports), 91; got != want {
 		t.Fatalf("legacy handler imports = %d, want %d", got, want)
 	}
-	if got := len(report.ModuleRoots); got != 0 {
-		t.Fatalf("module roots = %d, want 0 before the first extraction", got)
+	if got, want := report.ModuleRoots, []string{"workflowcatalog"}; !slices.Equal(got, want) {
+		t.Fatalf("module roots = %v, want active Phase 2 extraction %v", got, want)
 	}
 	if got, want := len(report.PendingDecisions), 0; got != want {
 		t.Fatalf("pending decisions = %d, want %d", got, want)
@@ -48,10 +48,10 @@ func TestCheckedInManifestsAndRepository(t *testing.T) {
 	if got, want := report.PerformanceMetrics, 6; got != want {
 		t.Fatalf("performance metrics = %d, want %d", got, want)
 	}
-	if got, want := report.PerformanceMetricsMeasured, 4; got != want {
+	if got, want := report.PerformanceMetricsMeasured, 6; got != want {
 		t.Fatalf("measured performance metrics = %d, want %d", got, want)
 	}
-	if got, want := report.PerformanceMetricsDeferred, 2; got != want {
+	if got, want := report.PerformanceMetricsDeferred, 0; got != want {
 		t.Fatalf("deferred performance metrics = %d, want %d", got, want)
 	}
 }
@@ -278,7 +278,7 @@ import _ "github.com/tysonthomas9/loomcli/internal/modules/unknown"
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !containsViolation(violations, "imports undeclared module root unknown") {
+	if !containsViolation(violations, "capability imports must target a declared capability public root") {
 		t.Fatalf("expected unknown-root violation, got %v", violations)
 	}
 }
@@ -295,7 +295,7 @@ import _ "github.com/tysonthomas9/loomcli/internal/store"
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !containsViolation(violations, "imports forbidden internal package") {
+	if !containsViolation(violations, "capability core may not import internal implementation package") {
 		t.Fatalf("expected forbidden-internal-import violation, got %v", violations)
 	}
 }

@@ -38,6 +38,9 @@ CLONE_URL="https://x-access-token:${TOKEN}@github.com/${REPO_SLUG}.git"
 freeport() { node -e 's=require("net").createServer();s.listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close()})'; }
 REDIS_PORT="$(freeport)"; FLEET_PORT="$(freeport)"; LOOM_PORT="$(freeport)"
 FLEET_URL="http://127.0.0.1:$FLEET_PORT"; LOOM_URL="http://127.0.0.1:$LOOM_PORT"
+# This runner regression intentionally runs FleetDB without authorization and
+# does not prove the Workflow Catalog lifecycle capability.
+export LOOM_WORKFLOW_CATALOG_ENABLED=false
 
 TMP_ROOT="$(mktemp -d -t loom-pr-e2e.XXXXXX)"
 BIN_DIR="$TMP_ROOT/bin"; REPO="$TMP_ROOT/repo"; STAGE="$TMP_ROOT/dist"; CONFIG="$TMP_ROOT/loom-config"

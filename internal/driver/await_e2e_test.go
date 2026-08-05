@@ -421,7 +421,7 @@ func TestAwaitFlowsE2EFleetDB(t *testing.T) {
 		t.Fatalf("StartEmbedded: %v", err)
 	}
 	t.Cleanup(func() { _ = emb.Stop() })
-	client, err := fleetdb.New(fleetdb.Config{BaseURL: emb.URL(), Actor: "await-e2e"})
+	client, err := emb.NewClient(fleetdb.Config{Actor: "await-e2e"})
 	if err != nil {
 		t.Fatalf("fleetdb client: %v", err)
 	}

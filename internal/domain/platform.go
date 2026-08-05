@@ -3,6 +3,8 @@ package domain
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 )
 
 type PlatformEvent struct {
@@ -23,22 +25,24 @@ type PlatformEventsPage struct {
 	Cursor string          `json:"cursor"`
 }
 
-type DriverOwnerType string
+// DriverOwnerType is owned by Workflow Catalog. This alias preserves the
+// legacy domain import path while callers migrate to the capability API.
+type DriverOwnerType = workflowcatalog.DriverOwnerType
 
 const (
-	DriverOwnerUser      DriverOwnerType = "user"
-	DriverOwnerTeam      DriverOwnerType = "team"
-	DriverOwnerLeadAgent DriverOwnerType = "lead_agent"
-	DriverOwnerSystem    DriverOwnerType = "system"
+	DriverOwnerUser      = workflowcatalog.DriverOwnerUser
+	DriverOwnerTeam      = workflowcatalog.DriverOwnerTeam
+	DriverOwnerLeadAgent = workflowcatalog.DriverOwnerLeadAgent
+	DriverOwnerSystem    = workflowcatalog.DriverOwnerSystem
 )
 
-type DriverStatus string
+type DriverStatus = workflowcatalog.DriverStatus
 
 const (
-	DriverStatusDraft    DriverStatus = "draft"
-	DriverStatusActive   DriverStatus = "active"
-	DriverStatusDisabled DriverStatus = "disabled"
-	DriverStatusArchived DriverStatus = "archived"
+	DriverStatusDraft    = workflowcatalog.DriverStatusDraft
+	DriverStatusActive   = workflowcatalog.DriverStatusActive
+	DriverStatusDisabled = workflowcatalog.DriverStatusDisabled
+	DriverStatusArchived = workflowcatalog.DriverStatusArchived
 )
 
 // DriverTrustLevel classifies who vouches for a driver's bundle content and
@@ -46,60 +50,24 @@ const (
 // policy): trusted drivers (builtin/operator-registered) may run in a host
 // process; untrusted drivers (externally submitted bundles) require an
 // isolating sandbox launcher and the executor refuses anything else.
-type DriverTrustLevel string
+type DriverTrustLevel = workflowcatalog.DriverTrustLevel
 
 const (
-	DriverTrustTrusted   DriverTrustLevel = "trusted"
-	DriverTrustUntrusted DriverTrustLevel = "untrusted"
+	DriverTrustTrusted   = workflowcatalog.DriverTrustTrusted
+	DriverTrustUntrusted = workflowcatalog.DriverTrustUntrusted
 )
 
-// Trusted reports whether the level grants host-process execution. Unknown or
-// missing levels are untrusted — fail closed (step-9 locked decision: the
-// one-time fleet-db backfill stamps pre-existing rows trusted; thereafter
-// unknown/missing means sandbox).
-func (t DriverTrustLevel) Trusted() bool {
-	return t == DriverTrustTrusted
-}
+type Driver = workflowcatalog.Driver
 
-type Driver struct {
-	WorkspaceKey    string            `json:"workspace_key"`
-	DriverID        string            `json:"driver_id"`
-	Name            string            `json:"name"`
-	OwnerType       DriverOwnerType   `json:"owner_type"`
-	OwnerRef        string            `json:"owner_ref,omitempty"`
-	Description     string            `json:"description,omitempty"`
-	ActiveVersionID string            `json:"active_version_id,omitempty"`
-	Status          DriverStatus      `json:"status"`
-	TrustLevel      DriverTrustLevel  `json:"trust_level,omitempty"`
-	Metadata        map[string]string `json:"metadata,omitempty"`
-	CreatedAt       time.Time         `json:"created_at"`
-	UpdatedAt       time.Time         `json:"updated_at"`
-}
-
-type DriverVersionValidationStatus string
+type DriverVersionValidationStatus = workflowcatalog.DriverVersionValidationStatus
 
 const (
-	DriverVersionValidationPending DriverVersionValidationStatus = "pending"
-	DriverVersionValidationPassed  DriverVersionValidationStatus = "passed"
-	DriverVersionValidationFailed  DriverVersionValidationStatus = "failed"
+	DriverVersionValidationPending = workflowcatalog.DriverVersionValidationPending
+	DriverVersionValidationPassed  = workflowcatalog.DriverVersionValidationPassed
+	DriverVersionValidationFailed  = workflowcatalog.DriverVersionValidationFailed
 )
 
-type DriverVersion struct {
-	WorkspaceKey     string                        `json:"workspace_key"`
-	VersionID        string                        `json:"version_id"`
-	DriverID         string                        `json:"driver_id"`
-	Version          int                           `json:"version"`
-	SourceRef        string                        `json:"source_ref"`
-	SourceDigest     string                        `json:"source_digest"`
-	BundleRef        string                        `json:"bundle_ref"`
-	BundleDigest     string                        `json:"bundle_digest"`
-	Runtime          string                        `json:"runtime,omitempty"`
-	Manifest         map[string]string             `json:"manifest,omitempty"`
-	BuildDiagnostics string                        `json:"build_diagnostics,omitempty"`
-	ValidationStatus DriverVersionValidationStatus `json:"validation_status"`
-	CreatedBy        string                        `json:"created_by,omitempty"`
-	CreatedAt        time.Time                     `json:"created_at"`
-}
+type DriverVersion = workflowcatalog.DriverVersion
 
 type WorkerProfile struct {
 	WorkspaceKey  string            `json:"workspace_key"`

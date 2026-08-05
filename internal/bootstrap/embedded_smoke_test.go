@@ -30,9 +30,12 @@ func TestEmbeddedFleetDBPersistenceSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartEmbedded first: %v", err)
 	}
-	client, err := fleetdb.New(fleetdb.Config{BaseURL: emb.URL(), Actor: "embedded-smoke"})
+	client, err := emb.NewClient(fleetdb.Config{Actor: "embedded-smoke"})
 	if err != nil {
 		t.Fatalf("fleetdb client: %v", err)
+	}
+	if err := client.RequireCapabilities(ctx, []string{fleetdb.WorkflowCatalogVersionLifecycleCapability}); err != nil {
+		t.Fatalf("embedded FleetDB capability readiness: %v", err)
 	}
 	if _, err := client.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "SMOKE", Name: "Smoke"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
@@ -55,7 +58,7 @@ func TestEmbeddedFleetDBPersistenceSmoke(t *testing.T) {
 		t.Fatalf("StartEmbedded second: %v", err)
 	}
 	defer emb2.Stop()
-	client2, err := fleetdb.New(fleetdb.Config{BaseURL: emb2.URL(), Actor: "embedded-smoke"})
+	client2, err := emb2.NewClient(fleetdb.Config{Actor: "embedded-smoke"})
 	if err != nil {
 		t.Fatalf("fleetdb client 2: %v", err)
 	}

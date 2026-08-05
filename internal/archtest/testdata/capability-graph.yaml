@@ -1,6 +1,6 @@
 schema_version: 1
 status: approved
-completed_phase: 1
+completed_phase: 2
 decision_dependencies:
   - MM-1
   - MM-2
@@ -41,7 +41,7 @@ capabilities:
     status: planned
   - name: workflowcatalog
     root: workflowcatalog
-    status: planned
+    status: active
   - name: automation
     root: automation
     status: planned

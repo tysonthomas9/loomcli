@@ -26,6 +26,15 @@ func WorkspaceAwareIssueBackend() func(ctx context.Context) backend.IssueBackend
 // concrete fleet-db base URL. Serve uses this for embedded local mode, where
 // fleet-db is running but LOOM_FLEET_DB_URL intentionally remains unset.
 func WorkspaceAwareIssueBackendForURL(fleetURL, actor string) func(ctx context.Context) backend.IssueBackend {
+	return WorkspaceAwareIssueBackendForConfig(fleetURL, os.Getenv(bootstrap.EnvFleetDBAPIKey), actor)
+}
+
+// WorkspaceAwareIssueBackendForConfig returns an IssueBackend factory scoped
+// to a concrete FleetDB connection. The API key is captured in process memory;
+// it is never copied into environment state or emitted to logs. Serve uses this
+// path for embedded local mode because its service credential is intentionally
+// absent from the parent process environment.
+func WorkspaceAwareIssueBackendForConfig(fleetURL, apiKey, actor string) func(ctx context.Context) backend.IssueBackend {
 	if fleetURL == "" {
 		// Local mode: ctx-aware factory degenerates to the global backend.
 		return func(_ context.Context) backend.IssueBackend {
@@ -57,6 +66,7 @@ func WorkspaceAwareIssueBackendForURL(fleetURL, actor string) func(ctx context.C
 		fb, err := fleet.New(fleet.Config{
 			BaseURL:     fleetURL,
 			WorkspaceID: wsID,
+			APIKey:      apiKey,
 			Actor:       actor,
 		})
 		if err != nil {

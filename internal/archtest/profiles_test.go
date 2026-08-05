@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"golang.org/x/tools/go/packages"
 )
 
 func TestProfileBoundaryRulesMatchApprovedPackageShape(t *testing.T) {
@@ -274,6 +276,52 @@ func TestProfileBoundaryRulesMatchApprovedPackageShape(t *testing.T) {
 	}
 }
 
+func TestInspectModulesAllowsApprovedPlatformAndFleetDBAdapterImportsOnly(t *testing.T) {
+	root := t.TempDir()
+	writeGoFile(t, root, "internal/modules/workspace/api.go", `package workspace
+import _ "github.com/tysonthomas9/loomcli/internal/platform/authority"
+`)
+	writeGoFile(t, root, "internal/modules/workspace/fleetdb/adapter.go", `package fleetdb
+import _ "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
+`)
+	writeGoFile(t, root, "internal/modules/workspace/httpapi/adapter.go", `package httpapi
+import _ "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
+`)
+
+	graph := validGraph()
+	_, _, violations, err := inspectModules(root, graph)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(violations) != 1 || !containsViolation(violations, "internal/modules/workspace/httpapi/adapter.go imports "+modulePath+"/internal/infra/fleetdb") {
+		t.Fatalf("violations = %v, want only the non-fleetdb adapter transport import denied", violations)
+	}
+}
+
+func TestProfileBoundarySkipsOnlySyntheticTestMainPackage(t *testing.T) {
+	graph := validGraph()
+	synthetic := &packages.Package{
+		PkgPath: modulePath + "/internal/modules/workspace.test",
+		Imports: map[string]*packages.Package{
+			modulePath + "/internal/domain": {PkgPath: modulePath + "/internal/domain"},
+		},
+	}
+	if violations := profilePackageViolations("", "fixture", synthetic, graph, nil); len(violations) != 0 {
+		t.Fatalf("synthetic test-main violations = %v, want ignored", violations)
+	}
+
+	realTestVariant := &packages.Package{
+		PkgPath: modulePath + "/internal/modules/workspace/fleetdb",
+		Imports: map[string]*packages.Package{
+			modulePath + "/internal/domain": {PkgPath: modulePath + "/internal/domain"},
+		},
+	}
+	violations := profilePackageViolations("", "fixture", realTestVariant, graph, nil)
+	if !containsViolation(violations, "capability adapter may import only") {
+		t.Fatalf("real package-under-test violations = %v, want boundary enforcement", violations)
+	}
+}
+
 func TestAnalyzeProfileTypeChecksTagSelectedTestSource(t *testing.T) {
 	t.Setenv("GOFLAGS", "-tags=profilefixture")
 	root := t.TempDir()
@@ -434,6 +482,43 @@ func Leaked() legacy { return legacy{} }
 	}
 	if !containsViolation(violations, "exports local alias legacy of forbidden type from "+modulePath+"/internal/domain") {
 		t.Fatalf("violations = %v, want all-files alias leakage", violations)
+	}
+}
+
+func TestAllFilesChecksOnlyExportedAdapterSignatures(t *testing.T) {
+	root := t.TempDir()
+	path := "internal/modules/workspace/fleetdb/adapter.go"
+	writeGoFile(t, root, path, `package fleetdb
+import infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
+type Adapter struct { transport infrafleetdb.Transport }
+type transportFake struct { result infrafleetdb.Result }
+func (transportFake) ExportedMethod() infrafleetdb.Result { panic("not called") }
+`)
+	matrix := AnalysisMatrix{AST: ASTProfile{IncludeTests: true, ExcludeGenerated: true}}
+	violations, err := analyzeAllGoFiles(root, matrix, validGraph(), genericMechanismTestPolicies())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(violations) != 0 {
+		t.Fatalf("private adapter implementation produced violations: %v", violations)
+	}
+
+	writeGoFile(t, root, path, `package fleetdb
+import infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
+type Adapter struct { Transport infrafleetdb.Transport }
+func (Adapter) Leak() infrafleetdb.Result { panic("not called") }
+`)
+	violations, err = analyzeAllGoFiles(root, matrix, validGraph(), genericMechanismTestPolicies())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"exports legacy or implementation type infrafleetdb.Transport",
+		"exports legacy or implementation type infrafleetdb.Result",
+	} {
+		if !containsViolation(violations, want) {
+			t.Fatalf("public adapter violations = %v, want %q", violations, want)
+		}
 	}
 }
 

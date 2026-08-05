@@ -18,6 +18,21 @@ import {
 import { initExternalAuth } from "@/api/common/authClient";
 import { ExternalAuthProvider, NoAuthProvider } from "@/contexts/AuthContext";
 import { AuthGate } from "@/components/AuthGate";
+import {
+  captureLocalOperatorLaunchFromFragment,
+  exchangeLocalOperatorLaunch,
+  type LocalOperatorLaunch,
+} from "@/api/workflows/localOperatorSession";
+
+// Capture and erase Desktop's one-time launch fragment before error reporting,
+// config discovery, storage migration, or React rendering can observe it.
+let pendingLocalOperatorLaunch: LocalOperatorLaunch | null = null;
+let localOperatorLaunchError: unknown = null;
+try {
+  pendingLocalOperatorLaunch = captureLocalOperatorLaunchFromFragment();
+} catch (error) {
+  localOperatorLaunchError = error;
+}
 
 // Run localStorage migration before anything reads storage.
 migrateLocalStorage();
@@ -76,6 +91,13 @@ function renderApp(config: AppConfig): void {
 const BOOT_TIMEOUT_MS = 10_000;
 
 async function doBootAndRender(): Promise<void> {
+  if (localOperatorLaunchError) {
+    throw localOperatorLaunchError;
+  }
+  if (pendingLocalOperatorLaunch) {
+    await exchangeLocalOperatorLaunch(pendingLocalOperatorLaunch);
+    pendingLocalOperatorLaunch = null;
+  }
   const config = await fetchAppConfig();
 
   if (config.mode === AUTH_MODE_OIDC) {

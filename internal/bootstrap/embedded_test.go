@@ -11,6 +11,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
+	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 )
 
 func TestDiagnoseFleetDBBinaryEnvMissingReportsRemediation(t *testing.T) {
@@ -104,6 +107,58 @@ func TestAppendEmbeddedFleetDBEnvDefaultsReplacesEmptyValues(t *testing.T) {
 	}
 }
 
+func TestEmbeddedFleetDBSecurityProfileAndChildEnvSanitization(t *testing.T) {
+	args := strings.Join(embeddedFleetDBArgs(), " ")
+	for _, want := range []string{
+		"--backend=redis",
+		"--auth-enabled=true",
+		"--auth-dev-mode=false",
+		"--authz-enabled=true",
+		"--auth-bootstrap-admin-actor=" + embeddedFleetDBServiceActor,
+		"--rpc-enabled=false",
+	} {
+		if !strings.Contains(args, want) {
+			t.Fatalf("embedded args %q missing %q", args, want)
+		}
+	}
+	if strings.Contains(args, "bootstrap-admin-key") {
+		t.Fatalf("embedded args expose bootstrap credential: %q", args)
+	}
+
+	env := []string{
+		"FLEET_CONFIG=/tmp/insecure.json",
+		"FLEET_AUTH_BOOTSTRAP_ADMIN_KEY=old",
+		"FLEET_AUTH_BOOTSTRAP_ADMIN_KEY=older",
+		"FLEET_WORKFLOW_CATALOG_LIFECYCLE_ENABLED=false",
+		embeddedFleetDBArtifactBackendEnv + "=http",
+		embeddedFleetDBArtifactDirEnv + "=/tmp/wrong",
+		"UNCHANGED=value",
+	}
+	env = withoutEnvKey(env, "FLEET_CONFIG")
+	env = withEnvValue(env, "FLEET_AUTH_BOOTSTRAP_ADMIN_KEY", "new-secret")
+	env = withEnvValue(env, "FLEET_WORKFLOW_CATALOG_LIFECYCLE_ENABLED", "true")
+	env = withEnvValue(env, embeddedFleetDBArtifactBackendEnv, "local")
+	env = withEnvValue(env, embeddedFleetDBArtifactDirEnv, "/private/runtime/artifacts")
+	if envKeyCount(env, "FLEET_CONFIG") != 0 {
+		t.Fatalf("FLEET_CONFIG survived child env sanitization: %v", env)
+	}
+	if envKeyCount(env, "FLEET_AUTH_BOOTSTRAP_ADMIN_KEY") != 1 || !envHas(env, "FLEET_AUTH_BOOTSTRAP_ADMIN_KEY=new-secret") {
+		t.Fatalf("bootstrap key was not replaced exactly once: %v", env)
+	}
+	if envKeyCount(env, "FLEET_WORKFLOW_CATALOG_LIFECYCLE_ENABLED") != 1 || !envHas(env, "FLEET_WORKFLOW_CATALOG_LIFECYCLE_ENABLED=true") {
+		t.Fatalf("lifecycle capability was not forced on: %v", env)
+	}
+	if envKeyCount(env, embeddedFleetDBArtifactBackendEnv) != 1 || !envHas(env, embeddedFleetDBArtifactBackendEnv+"=local") {
+		t.Fatalf("embedded artifact backend was not forced local: %v", env)
+	}
+	if envKeyCount(env, embeddedFleetDBArtifactDirEnv) != 1 || !envHas(env, embeddedFleetDBArtifactDirEnv+"=/private/runtime/artifacts") {
+		t.Fatalf("embedded artifact directory was not replaced exactly once: %v", env)
+	}
+	if !envHas(env, "UNCHANGED=value") {
+		t.Fatalf("unrelated child env was not preserved: %v", env)
+	}
+}
+
 func envHas(env []string, want string) bool {
 	for _, got := range env {
 		if got == want {
@@ -111,6 +166,17 @@ func envHas(env []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func envKeyCount(env []string, key string) int {
+	prefix := key + "="
+	count := 0
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			count++
+		}
+	}
+	return count
 }
 
 func TestEmbeddedRuntimeLockFailsFastWhenHeld(t *testing.T) {
@@ -211,16 +277,30 @@ func TestReuseEmbeddedRuntimeRejectsUnhealthyProcess(t *testing.T) {
 func TestOpenStoreLocalReusesHealthyEmbeddedRuntime(t *testing.T) {
 	t.Setenv(EnvFleetDBURL, "")
 	t.Setenv(EnvFleetDBBin, filepath.Join(t.TempDir(), "missing-fleet-db"))
+	t.Setenv(EnvFleetDBAPIKey, "ambient-key-must-not-win")
+	dataDir := t.TempDir()
+	serviceCredential, err := authority.LoadOrCreateLocalFleetDBServiceCredential(embeddedFleetDBAuthDir(dataDir))
+	if err != nil {
+		t.Fatalf("create service credential: %v", err)
+	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/healthz" {
+		switch r.URL.Path {
+		case "/healthz":
+			w.WriteHeader(http.StatusOK)
+		case fleetdb.CapabilitiesAPIPath:
+			if got := r.Header.Get("X-API-Key"); got != serviceCredential {
+				t.Errorf("capability API key = %q, want persisted local service credential", got)
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"api_revision":"v1","capabilities":["workflow_catalog.version_lifecycle.v1"]}`))
+		default:
 			http.NotFound(w, r)
-			return
 		}
-		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
 
-	dataDir := t.TempDir()
 	fleetDir := filepath.Join(dataDir, "fleet-db")
 	if err := writeEmbeddedRuntime(fleetDir, embeddedRuntimeInfo{
 		PID: os.Getpid(),
@@ -229,7 +309,9 @@ func TestOpenStoreLocalReusesHealthyEmbeddedRuntime(t *testing.T) {
 		t.Fatalf("write runtime: %v", err)
 	}
 
-	h, err := OpenStore(context.Background(), dataDir, nil)
+	h, err := OpenStoreWithOptions(context.Background(), dataDir, nil, OpenStoreOptions{
+		RequiredFleetDBCapabilities: []string{fleetdb.WorkflowCatalogVersionLifecycleCapability},
+	})
 	if err != nil {
 		t.Fatalf("OpenStore: %v", err)
 	}
@@ -239,5 +321,41 @@ func TestOpenStoreLocalReusesHealthyEmbeddedRuntime(t *testing.T) {
 	}
 	if h.embedded != nil {
 		t.Fatal("OpenStore started a new embedded process instead of reusing runtime")
+	}
+	if h.FleetDBClientAPIKey() != serviceCredential {
+		t.Fatal("StoreHandle did not retain the persisted local service credential for in-process client composition")
+	}
+	if got := os.Getenv(EnvFleetDBAPIKey); got != "ambient-key-must-not-win" {
+		t.Fatalf("%s was mutated while opening local Store", EnvFleetDBAPIKey)
+	}
+}
+
+func TestOpenStoreLocalReuseFailsClosedWhenServiceCredentialIsMissing(t *testing.T) {
+	t.Setenv(EnvFleetDBURL, "")
+	t.Setenv(EnvFleetDBBin, filepath.Join(t.TempDir(), "missing-fleet-db"))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	dataDir := t.TempDir()
+	fleetDir := filepath.Join(dataDir, "fleet-db")
+	if err := writeEmbeddedRuntime(fleetDir, embeddedRuntimeInfo{PID: os.Getpid(), URL: srv.URL}); err != nil {
+		t.Fatalf("write runtime: %v", err)
+	}
+	handle, err := OpenStore(context.Background(), dataDir, nil)
+	if handle != nil {
+		_ = handle.Close()
+		t.Fatal("OpenStore returned a handle without a persisted service credential")
+	}
+	if err == nil || !strings.Contains(err.Error(), "reused service credential") {
+		t.Fatalf("OpenStore error = %v, want reused service credential failure", err)
+	}
+	if _, statErr := os.Lstat(embeddedFleetDBAuthDir(dataDir)); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("reuse path created credential state: %v", statErr)
 	}
 }

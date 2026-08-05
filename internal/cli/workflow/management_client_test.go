@@ -1,0 +1,619 @@
+package workflow
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/spf13/cobra"
+
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/platform/authority"
+	"github.com/tysonthomas9/loomcli/internal/workflows"
+)
+
+const (
+	workflowManagementTestWorkspace = "TEST"
+	workflowManagementTestToken     = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+)
+
+type workflowManagementFixture struct {
+	server          *httptest.Server
+	expectedBearer  string
+	mu              sync.Mutex
+	driver          *domain.Driver
+	versions        map[string]*domain.DriverVersion
+	authorizations  []string
+	managementPaths []string
+	configRequests  int
+	listBareDriver  bool
+	rejectedClass   authority.Class
+}
+
+func setupWorkflowManagementFixture(t *testing.T) *workflowManagementFixture {
+	t.Helper()
+	fixture := &workflowManagementFixture{
+		expectedBearer: "Bearer " + workflowManagementTestToken,
+		driver: &domain.Driver{
+			WorkspaceKey:    workflowManagementTestWorkspace,
+			DriverID:        workflows.BuiltinEpicRunnerWorkflowName,
+			Name:            workflows.BuiltinEpicRunnerWorkflowName,
+			Status:          domain.DriverStatusActive,
+			ActiveVersionID: "version-1",
+			TrustLevel:      domain.DriverTrustTrusted,
+			Revision:        1,
+			Metadata: map[string]string{
+				"approved_version:version-2": "sha256:source-2",
+			},
+		},
+		versions: map[string]*domain.DriverVersion{
+			"version-1": {
+				WorkspaceKey:     workflowManagementTestWorkspace,
+				DriverID:         workflows.BuiltinEpicRunnerWorkflowName,
+				VersionID:        "version-1",
+				Version:          1,
+				SourceDigest:     "sha256:source-1",
+				BundleDigest:     "sha256:bundle-1",
+				ValidationStatus: domain.DriverVersionValidationPassed,
+				Manifest:         map[string]string{"trust_level": string(domain.DriverTrustUntrusted)},
+			},
+			"version-2": {
+				WorkspaceKey:     workflowManagementTestWorkspace,
+				DriverID:         workflows.BuiltinEpicRunnerWorkflowName,
+				VersionID:        "version-2",
+				Version:          2,
+				SourceDigest:     "sha256:source-2",
+				BundleDigest:     "sha256:bundle-2",
+				ValidationStatus: domain.DriverVersionValidationPassed,
+				Manifest:         map[string]string{"trust_level": string(domain.DriverTrustUntrusted)},
+			},
+		},
+	}
+	fixture.server = httptest.NewServer(http.HandlerFunc(fixture.serveHTTP))
+	t.Cleanup(fixture.server.Close)
+	configureWorkflowManagementClient(t, fixture.server.URL, workflowManagementTestWorkspace, workflowManagementTestToken)
+	return fixture
+}
+
+func configureWorkflowManagementClient(t *testing.T, serverURL, workspace, token string) {
+	t.Helper()
+	runtimeDir := t.TempDir()
+	credentialDir := filepath.Join(runtimeDir, ".loom", "operator")
+	if err := os.MkdirAll(credentialDir, 0o700); err != nil {
+		t.Fatalf("create operator credential directory: %v", err)
+	}
+	if err := os.Chmod(credentialDir, 0o700); err != nil {
+		t.Fatalf("chmod operator credential directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(credentialDir, authority.LocalOperatorTokenFileName), []byte(token), 0o600); err != nil {
+		t.Fatalf("write operator token: %v", err)
+	}
+	t.Setenv("LOOM_SERVER_URL", serverURL)
+	t.Setenv("LOOM_WORKSPACE", workspace)
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", runtimeDir)
+	cli.ResetWorkspaceRuntimeDirCache()
+	t.Cleanup(cli.ResetWorkspaceRuntimeDirCache)
+}
+
+func (f *workflowManagementFixture) serveHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/api/config" {
+		f.mu.Lock()
+		f.configRequests++
+		f.mu.Unlock()
+		writeWorkflowManagementTestJSON(w, http.StatusOK, map[string]string{"mode": "open"})
+		return
+	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.authorizations = append(f.authorizations, r.Header.Get("Authorization"))
+	f.managementPaths = append(f.managementPaths, r.Method+" "+r.URL.Path)
+	if r.Header.Get("Authorization") != f.expectedBearer {
+		writeWorkflowManagementTestJSON(w, http.StatusUnauthorized, map[string]string{"error": "operator credential required", "code": "unauthenticated"})
+		return
+	}
+	workspacePrefix := "/api/workspaces/" + workflowManagementTestWorkspace
+	if !strings.HasPrefix(r.URL.Path, workspacePrefix+"/") {
+		writeWorkflowManagementTestJSON(w, http.StatusForbidden, map[string]string{"error": "workspace authority mismatch", "code": "wrong_workspace"})
+		return
+	}
+	if f.rejectedClass != "" {
+		writeWorkflowManagementTestJSON(w, http.StatusForbidden, map[string]string{
+			"error": string(f.rejectedClass) + " authority cannot perform Workflow Catalog operator actions",
+			"code":  "wrong_authority_class",
+		})
+		return
+	}
+
+	switch {
+	case r.Method == http.MethodGet && r.URL.Path == workspacePrefix+"/workflow-catalog/drivers":
+		if f.listBareDriver {
+			writeWorkflowManagementTestJSON(w, http.StatusOK, map[string]any{"drivers": []*domain.Driver{f.driver}})
+			return
+		}
+		activeVersion := f.versions[f.driver.ActiveVersionID]
+		approved := activeVersion != nil && f.driver.Metadata["approved_version:"+activeVersion.VersionID] == activeVersion.SourceDigest
+		writeWorkflowManagementTestJSON(w, http.StatusOK, map[string]any{"drivers": []any{map[string]any{
+			"driver": f.driver, "version": activeVersion, "built_in": true,
+			"approved": approved, "effective_trust": effectiveWorkflowManagementTestTrust(f.driver, activeVersion),
+		}}})
+		return
+	case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/versions"):
+		name := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, workspacePrefix+"/workflows/"), "/versions")
+		if name != workflows.BuiltinEpicRunnerWorkflowName {
+			writeWorkflowManagementTestJSON(w, http.StatusNotFound, map[string]string{"error": "workflow not found", "code": "not_found"})
+			return
+		}
+		writeWorkflowManagementTestJSON(w, http.StatusOK, map[string]any{
+			"driver": f.driver, "driver_id": f.driver.DriverID, "active_version_id": f.driver.ActiveVersionID,
+			"versions": []*domain.DriverVersion{f.versions["version-1"], f.versions["version-2"]},
+		})
+		return
+	case r.Method == http.MethodPost:
+		f.applyVersionAction(w, r, workspacePrefix)
+		return
+	default:
+		writeWorkflowManagementTestJSON(w, http.StatusNotFound, map[string]string{"error": "route not found", "code": "not_found"})
+	}
+}
+
+func (f *workflowManagementFixture) applyVersionAction(w http.ResponseWriter, r *http.Request, workspacePrefix string) {
+	path := strings.TrimPrefix(r.URL.Path, workspacePrefix+"/workflows/"+workflows.BuiltinEpicRunnerWorkflowName+"/versions/")
+	parts := strings.Split(path, "/")
+	if len(parts) != 2 {
+		writeWorkflowManagementTestJSON(w, http.StatusNotFound, map[string]string{"error": "route not found", "code": "not_found"})
+		return
+	}
+	version := f.versions[parts[0]]
+	if version == nil {
+		writeWorkflowManagementTestJSON(w, http.StatusNotFound, map[string]string{"error": "version not found", "code": "not_found"})
+		return
+	}
+	var request struct {
+		ExpectedRevision uint64 `json:"expected_revision"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeWorkflowManagementTestJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request", "code": "invalid"})
+		return
+	}
+	if request.ExpectedRevision != f.driver.Revision {
+		writeWorkflowManagementTestJSON(w, http.StatusConflict, map[string]string{"error": "stale driver revision", "code": "revision_conflict"})
+		return
+	}
+	action := parts[1]
+	switch action {
+	case "approve":
+		f.driver.Metadata["approved_version:"+version.VersionID] = version.SourceDigest
+	case "unapprove":
+		delete(f.driver.Metadata, "approved_version:"+version.VersionID)
+	case "activate":
+		if f.driver.Metadata["approved_version:"+version.VersionID] != version.SourceDigest {
+			writeWorkflowManagementTestJSON(w, http.StatusConflict, map[string]string{"error": "version is not approved", "code": "not_approved"})
+			return
+		}
+		f.driver.ActiveVersionID = version.VersionID
+	default:
+		writeWorkflowManagementTestJSON(w, http.StatusNotFound, map[string]string{"error": "route not found", "code": "not_found"})
+		return
+	}
+	f.driver.Revision++
+	writeWorkflowManagementTestJSON(w, http.StatusOK, map[string]any{"action": action, "driver": f.driver, "version": version})
+}
+
+func (f *workflowManagementFixture) lastAuthorization() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.authorizations) == 0 {
+		return ""
+	}
+	return f.authorizations[len(f.authorizations)-1]
+}
+
+func (f *workflowManagementFixture) paths() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.managementPaths...)
+}
+
+func (f *workflowManagementFixture) authDiscoveryCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.configRequests
+}
+
+func effectiveWorkflowManagementTestTrust(driver *domain.Driver, version *domain.DriverVersion) domain.DriverTrustLevel {
+	if version != nil && driver.Metadata["approved_version:"+version.VersionID] == version.SourceDigest {
+		return domain.DriverTrustTrusted
+	}
+	return domain.DriverTrustUntrusted
+}
+
+func writeWorkflowManagementTestJSON(w http.ResponseWriter, status int, payload any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(payload)
+}
+
+func TestWorkflowManagementRequiresExplicitEndpoint(t *testing.T) {
+	resetWorkflowCommandGlobals()
+	t.Cleanup(resetWorkflowCommandGlobals)
+	t.Setenv("LOOM_SERVER_URL", "")
+	t.Setenv("LOOM_WORKSPACE", workflowManagementTestWorkspace)
+	openedStore := false
+	original := workflowWithActiveWorkspace
+	workflowWithActiveWorkspace = func(func(context.Context, *bootstrap.StoreHandle, string) error) error {
+		openedStore = true
+		return nil
+	}
+	t.Cleanup(func() { workflowWithActiveWorkspace = original })
+
+	err := runWorkflowList(&cobra.Command{}, nil)
+	if err == nil || !strings.Contains(err.Error(), "require --server or LOOM_SERVER_URL") {
+		t.Fatalf("runWorkflowList error = %v, want explicit endpoint requirement", err)
+	}
+	if openedStore {
+		t.Fatal("workflow list opened a Store while resolving a missing endpoint")
+	}
+}
+
+func TestWorkflowManagementRequiresExplicitWorkspace(t *testing.T) {
+	fixture := setupWorkflowManagementFixture(t)
+	t.Setenv("LOOM_WORKSPACE", "")
+
+	err := runWorkflowList(&cobra.Command{}, nil)
+	if err == nil || !strings.Contains(err.Error(), "require --workspace or LOOM_WORKSPACE") {
+		t.Fatalf("runWorkflowList error = %v, want explicit workspace requirement", err)
+	}
+	if got := fixture.paths(); len(got) != 0 {
+		t.Fatalf("management requests = %v, want none without a workspace", got)
+	}
+}
+
+func TestWorkflowManagementUnavailableHostFailsClosedWithoutImplicitStartup(t *testing.T) {
+	fixture := setupWorkflowManagementFixture(t)
+	serverURL := fixture.server.URL
+	fixture.server.Close()
+	t.Setenv("LOOM_SERVER_URL", serverURL)
+	openedStore := false
+	original := workflowWithActiveWorkspace
+	workflowWithActiveWorkspace = func(func(context.Context, *bootstrap.StoreHandle, string) error) error {
+		openedStore = true
+		return nil
+	}
+	t.Cleanup(func() { workflowWithActiveWorkspace = original })
+
+	err := runWorkflowList(&cobra.Command{}, nil)
+	if err == nil || !strings.Contains(err.Error(), "endpoint discovery") || !strings.Contains(err.Error(), serverURL) {
+		t.Fatalf("runWorkflowList error = %v, want unavailable configured endpoint", err)
+	}
+	if openedStore {
+		t.Fatal("workflow list opened a Store or fallback after endpoint failure")
+	}
+}
+
+func TestWorkflowManagementCommandsNeverOpenStoreAndUseLocalBearer(t *testing.T) {
+	fixture := setupWorkflowManagementFixture(t)
+	openedStore := false
+	original := workflowWithActiveWorkspace
+	workflowWithActiveWorkspace = func(func(context.Context, *bootstrap.StoreHandle, string) error) error {
+		openedStore = true
+		return nil
+	}
+	t.Cleanup(func() { workflowWithActiveWorkspace = original })
+	workflowListJSON = true
+	workflowVersionID = "version-1"
+	workflowApproveJSON = true
+
+	if _, err := captureWorkflowStdout(t, func() error { return runWorkflowList(&cobra.Command{}, nil) }); err != nil {
+		t.Fatalf("runWorkflowList: %v", err)
+	}
+	if _, err := captureWorkflowStdout(t, func() error {
+		return runWorkflowApprove(&cobra.Command{}, []string{workflows.BuiltinEpicRunnerWorkflowName})
+	}); err != nil {
+		t.Fatalf("runWorkflowApprove: %v", err)
+	}
+	if openedStore {
+		t.Fatal("standalone workflow management command opened a Store")
+	}
+	if got := fixture.lastAuthorization(); got != fixture.expectedBearer {
+		t.Fatalf("Authorization = %q, want local operator bearer", got)
+	}
+	paths := strings.Join(fixture.paths(), "\n")
+	for _, want := range []string{
+		"GET /api/workspaces/TEST/workflow-catalog/drivers",
+		"GET /api/workspaces/TEST/workflows/epic-runner/versions",
+		"POST /api/workspaces/TEST/workflows/epic-runner/versions/version-1/approve",
+	} {
+		if !strings.Contains(paths, want) {
+			t.Fatalf("management paths =\n%s\nwant %s", paths, want)
+		}
+	}
+}
+
+func TestWorkflowManagementClientReusesAuthenticatedClientDiscovery(t *testing.T) {
+	fixture := setupWorkflowManagementFixture(t)
+	workflowListJSON = true
+	t.Cleanup(func() { workflowListJSON = false })
+
+	if _, err := captureWorkflowStdout(t, func() error { return runWorkflowList(&cobra.Command{}, nil) }); err != nil {
+		t.Fatalf("runWorkflowList: %v", err)
+	}
+	if got := fixture.authDiscoveryCount(); got != 1 {
+		t.Fatalf("GET /api/config count = %d, want exactly one authenticated-client discovery", got)
+	}
+}
+
+func TestWorkflowManagementOpenModeFailsClosedWithoutOperatorCredential(t *testing.T) {
+	fixture := setupWorkflowManagementFixture(t)
+	credentialPath := filepath.Join(cli.GetWorkspaceRuntimeDir(), ".loom", "operator", authority.LocalOperatorTokenFileName)
+	if err := os.Remove(credentialPath); err != nil {
+		t.Fatalf("remove operator credential: %v", err)
+	}
+
+	err := runWorkflowList(&cobra.Command{}, nil)
+	if err == nil || !strings.Contains(err.Error(), "local authentication") || !strings.Contains(err.Error(), "operator.token") {
+		t.Fatalf("runWorkflowList error = %v, want missing local operator credential", err)
+	}
+	if got := fixture.paths(); len(got) != 0 {
+		t.Fatalf("management requests = %v, want no unauthenticated catalog request", got)
+	}
+}
+
+func TestWorkflowManagementOpenModeRejectsNonLoopbackEndpointBeforeCredentialUse(t *testing.T) {
+	tests := []struct {
+		name      string
+		serverURL string
+	}{
+		{name: "remote IP", serverURL: "http://192.0.2.10:8080"},
+		{name: "remote DNS", serverURL: "http://loom.example.com:8080"},
+		{name: "localhost alias", serverURL: "http://localhost:8080"},
+		{name: "implicit port", serverURL: "http://127.0.0.1"},
+		{name: "embedded credentials", serverURL: "http://user@127.0.0.1:8080"},
+		{name: "path prefix", serverURL: "http://127.0.0.1:8080/loom"},
+		{name: "query", serverURL: "http://127.0.0.1:8080?mode=open"},
+		{name: "fragment", serverURL: "http://127.0.0.1:8080#open"},
+		{name: "TLS", serverURL: "https://127.0.0.1:8443"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parsed, err := url.Parse(tt.serverURL)
+			if err != nil {
+				t.Fatalf("url.Parse: %v", err)
+			}
+			if err := validateOpenWorkflowManagementEndpoint(parsed); err == nil {
+				t.Fatalf("validateOpenWorkflowManagementEndpoint(%q) succeeded, want fail-closed rejection", tt.serverURL)
+			}
+		})
+	}
+
+	for _, serverURL := range []string{"http://127.0.0.1:8080", "http://[::1]:8080"} {
+		parsed, err := url.Parse(serverURL)
+		if err != nil {
+			t.Fatalf("url.Parse: %v", err)
+		}
+		if err := validateOpenWorkflowManagementEndpoint(parsed); err != nil {
+			t.Fatalf("validateOpenWorkflowManagementEndpoint(%q): %v", serverURL, err)
+		}
+	}
+}
+
+func TestWorkflowManagementBearerNeverFollowsRedirect(t *testing.T) {
+	var (
+		leakMu   sync.Mutex
+		leakAuth []string
+	)
+	leak := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		leakMu.Lock()
+		leakAuth = append(leakAuth, r.Header.Get("Authorization"))
+		leakMu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(leak.Close)
+
+	front := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/config" {
+			writeWorkflowManagementTestJSON(w, http.StatusOK, map[string]string{"mode": "open"})
+			return
+		}
+		http.Redirect(w, r, leak.URL+"/capture", http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(front.Close)
+	configureWorkflowManagementClient(t, front.URL, workflowManagementTestWorkspace, workflowManagementTestToken)
+	workflowListJSON = true
+	t.Cleanup(func() { workflowListJSON = false })
+
+	_, err := captureWorkflowStdout(t, func() error { return runWorkflowList(&cobra.Command{}, nil) })
+	if err == nil || !strings.Contains(err.Error(), "HTTP 307") {
+		t.Fatalf("runWorkflowList error = %v, want redirect rejection", err)
+	}
+	leakMu.Lock()
+	defer leakMu.Unlock()
+	if len(leakAuth) != 0 {
+		t.Fatalf("redirect target requests = %v, want none so bearer cannot leave configured origin", leakAuth)
+	}
+}
+
+func TestWorkflowListEnrichesBareCatalogDriversThroughManagementVersions(t *testing.T) {
+	fixture := setupWorkflowManagementFixture(t)
+	fixture.mu.Lock()
+	fixture.listBareDriver = true
+	fixture.mu.Unlock()
+	workflowListJSON = true
+	t.Cleanup(func() { workflowListJSON = false })
+
+	raw, err := captureWorkflowStdout(t, func() error { return runWorkflowList(&cobra.Command{}, nil) })
+	if err != nil {
+		t.Fatalf("runWorkflowList: %v", err)
+	}
+	var payload struct {
+		Workflows []struct {
+			Approved       bool                    `json:"approved"`
+			EffectiveTrust domain.DriverTrustLevel `json:"effective_trust"`
+		} `json:"workflows"`
+	}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		t.Fatalf("decode workflow list: %v", err)
+	}
+	if len(payload.Workflows) != 1 || payload.Workflows[0].Approved || payload.Workflows[0].EffectiveTrust != domain.DriverTrustUntrusted {
+		t.Fatalf("workflow list = %+v, want active version trust derived through versions endpoint", payload.Workflows)
+	}
+	paths := strings.Join(fixture.paths(), "\n")
+	if !strings.Contains(paths, "GET /api/workspaces/TEST/workflows/epic-runner/versions") {
+		t.Fatalf("management paths =\n%s\nwant versions enrichment", paths)
+	}
+}
+
+func TestWorkflowManagementTextOutputCompatibility(t *testing.T) {
+	setupWorkflowManagementFixture(t)
+	resetWorkflowCommandGlobals()
+	t.Cleanup(resetWorkflowCommandGlobals)
+
+	list, err := captureWorkflowStdout(t, func() error { return runWorkflowList(&cobra.Command{}, nil) })
+	if err != nil {
+		t.Fatalf("runWorkflowList: %v", err)
+	}
+	if want := "epic-runner\tactive\tversion-1\n"; list != want {
+		t.Fatalf("workflow list output = %q, want %q", list, want)
+	}
+
+	versions, err := captureWorkflowStdout(t, func() error {
+		return runWorkflowVersions(&cobra.Command{}, []string{workflows.BuiltinEpicRunnerWorkflowName})
+	})
+	if err != nil {
+		t.Fatalf("runWorkflowVersions: %v", err)
+	}
+	wantVersions := "version-1\tactive\tapproved=false\ttrust=untrusted\n" +
+		"version-2\t\tapproved=true\ttrust=trusted\n"
+	if versions != wantVersions {
+		t.Fatalf("workflow versions output = %q, want %q", versions, wantVersions)
+	}
+
+	workflowVersionID = "version-1"
+	approved, err := captureWorkflowStdout(t, func() error {
+		return runWorkflowApprove(&cobra.Command{}, []string{workflows.BuiltinEpicRunnerWorkflowName})
+	})
+	if err != nil {
+		t.Fatalf("runWorkflowApprove: %v", err)
+	}
+	if want := "Approved workflow epic-runner version version-1\n"; approved != want {
+		t.Fatalf("workflow approve output = %q, want %q", approved, want)
+	}
+
+	unapproved, err := captureWorkflowStdout(t, func() error {
+		return runWorkflowUnapprove(&cobra.Command{}, []string{workflows.BuiltinEpicRunnerWorkflowName})
+	})
+	if err != nil {
+		t.Fatalf("runWorkflowUnapprove: %v", err)
+	}
+	if want := "Unapproved workflow epic-runner version version-1\n"; unapproved != want {
+		t.Fatalf("workflow unapprove output = %q, want %q", unapproved, want)
+	}
+
+	workflowVersionID = "version-2"
+	activated, err := captureWorkflowStdout(t, func() error {
+		return runWorkflowActivate(&cobra.Command{}, []string{workflows.BuiltinEpicRunnerWorkflowName})
+	})
+	if err != nil {
+		t.Fatalf("runWorkflowActivate: %v", err)
+	}
+	if want := "Activated workflow epic-runner version version-2\n"; activated != want {
+		t.Fatalf("workflow activate output = %q, want %q", activated, want)
+	}
+}
+
+func TestWorkflowManagementRejectsUnauthenticatedAndWrongWorkspace(t *testing.T) {
+	t.Run("unauthenticated", func(t *testing.T) {
+		fixture := setupWorkflowManagementFixture(t)
+		fixture.mu.Lock()
+		fixture.expectedBearer = "Bearer bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+		fixture.mu.Unlock()
+		workflowListJSON = true
+		t.Cleanup(func() { workflowListJSON = false })
+
+		_, err := captureWorkflowStdout(t, func() error { return runWorkflowList(&cobra.Command{}, nil) })
+		if err == nil || !strings.Contains(err.Error(), "unauthorized") || !strings.Contains(err.Error(), "code=unauthenticated") {
+			t.Fatalf("runWorkflowList error = %v, want machine-readable unauthenticated failure", err)
+		}
+	})
+
+	t.Run("wrong workspace", func(t *testing.T) {
+		setupWorkflowManagementFixture(t)
+		t.Setenv("LOOM_WORKSPACE", "OTHER")
+		workflowVersionID = "version-1"
+		workflowApproveJSON = true
+		t.Cleanup(func() {
+			workflowVersionID = ""
+			workflowApproveJSON = false
+		})
+
+		_, err := captureWorkflowStdout(t, func() error {
+			return runWorkflowApprove(&cobra.Command{}, []string{workflows.BuiltinEpicRunnerWorkflowName})
+		})
+		if err == nil || !strings.Contains(err.Error(), "forbidden") || !strings.Contains(err.Error(), "code=wrong_workspace") {
+			t.Fatalf("runWorkflowApprove error = %v, want machine-readable wrong-workspace failure", err)
+		}
+	})
+}
+
+func TestWorkflowManagementRejectsNonOperatorAuthorityClasses(t *testing.T) {
+	for _, class := range []authority.Class{
+		authority.ClassExecution,
+		authority.ClassSession,
+		authority.ClassWebhook,
+	} {
+		t.Run(string(class), func(t *testing.T) {
+			resetWorkflowCommandGlobals()
+			t.Cleanup(resetWorkflowCommandGlobals)
+			fixture := setupWorkflowManagementFixture(t)
+			fixture.mu.Lock()
+			fixture.rejectedClass = class
+			fixture.mu.Unlock()
+			workflowVersionID = "version-1"
+			workflowApproveJSON = true
+
+			_, err := captureWorkflowStdout(t, func() error {
+				return runWorkflowApprove(&cobra.Command{}, []string{workflows.BuiltinEpicRunnerWorkflowName})
+			})
+			if err == nil || !strings.Contains(err.Error(), "forbidden") || !strings.Contains(err.Error(), "code=wrong_authority_class") {
+				t.Fatalf("runWorkflowApprove error = %v, want %s-class denial", err, class)
+			}
+			paths := fixture.paths()
+			if len(paths) != 1 || paths[0] != "GET /api/workspaces/TEST/workflows/epic-runner/versions" {
+				t.Fatalf("management requests = %v, want denial before any lifecycle mutation", paths)
+			}
+		})
+	}
+}
+
+func TestWorkflowManagementStatusErrorsPreserveDomainExitClasses(t *testing.T) {
+	tests := []struct {
+		status int
+		want   error
+	}{
+		{status: http.StatusBadRequest, want: domain.ErrInvalid},
+		{status: http.StatusNotFound, want: domain.ErrNotFound},
+		{status: http.StatusConflict, want: domain.ErrConflict},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprint(tt.status), func(t *testing.T) {
+			err := workflowManagementStatusError(tt.status, []byte(`{"error":"test failure","code":"test"}`))
+			if !strings.Contains(err.Error(), fmt.Sprint(tt.status)) || !strings.Contains(err.Error(), "code=test") {
+				t.Fatalf("error = %v, want status and code", err)
+			}
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("error = %v, want errors.Is(%v)", err, tt.want)
+			}
+		})
+	}
+}

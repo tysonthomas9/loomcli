@@ -28,6 +28,9 @@ persistence_packages:
     receiver_names: [Client]
     receiver_suffixes: []
     guard_subpackages: true
+  - path: github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog
+    receiver_names: [VersionLifecycleStore]
+    receiver_suffixes: []
   - path: github.com/tysonthomas9/loomcli/internal/sessions
     receiver_names: [Session, Store]
     receiver_suffixes: []
@@ -121,6 +124,7 @@ method_sets:
       - TriggerRoutes
       - WorkerProfiles
       - Workers
+      - WorkflowCatalog
       - Workspaces
     mutating: []
   - name: issue_tabs
@@ -191,9 +195,11 @@ method_sets:
     mutating:
       - Ack
       - Acquire
+      - ActivateVersion
       - Append
       - AppendLog
       - AppendTriggerEvent
+      - ApproveVersion
       - CancelQueuedRun
       - Claim
       - ClaimNext
@@ -221,6 +227,7 @@ method_sets:
       - Revoke
       - RotateSecrets
       - Suspend
+      - UnapproveVersion
       - Update
       - UpdateResult
       - UploadContent
@@ -268,6 +275,10 @@ receiver_surfaces:
     package: github.com/tysonthomas9/loomcli/internal/webui/tabmeta
     method_set: tab_metadata
     capability_owner: interaction
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog.VersionLifecycleStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog
+    method_set: store_repository
+    capability_owner: workflowcatalog
   - receiver: github.com/tysonthomas9/loomcli/internal/stackstore.Store
     package: github.com/tysonthomas9/loomcli/internal/stackstore
     method_set: stack_store
@@ -437,6 +448,10 @@ function_surfaces:
     function: SetContextProvider
     access: read-only
     capability_owner: read_projection
+  - package: github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog
+    function: New
+    access: read-only
+    capability_owner: workflowcatalog
   - package: github.com/tysonthomas9/loomcli/internal/sessions
     function: EncodeDiffStatsMetadata
     access: read-only

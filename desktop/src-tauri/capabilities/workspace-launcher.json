@@ -1,0 +1,22 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "workspace-launcher",
+  "description": "Bundled launcher permissions for a new workspace window before it navigates to the local runtime.",
+  "windows": ["workspace-*"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-hide",
+    "core:window:allow-set-focus",
+    "core:window:allow-show",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "name": "binaries/loom",
+          "sidecar": true,
+          "args": true
+        }
+      ]
+    }
+  ]
+}

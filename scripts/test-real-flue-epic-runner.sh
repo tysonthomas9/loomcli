@@ -23,6 +23,9 @@ FLEET_PORT="${FLEET_PORT:-18095}"
 LOOM_PORT="${LOOM_PORT:-18096}"
 FLEET_URL="http://127.0.0.1:${FLEET_PORT}"
 LOOM_URL="http://127.0.0.1:${LOOM_PORT}"
+# This runtime regression intentionally runs FleetDB without authorization and
+# does not prove the Workflow Catalog lifecycle capability.
+export LOOM_WORKFLOW_CATALOG_ENABLED=false
 # The watch-driven loop reacts to journal events instead of sleeping between
 # polls, so the whole DAG must drain well inside this budget (the old
 # cadence-based loop burned ~5s per scheduling round).
