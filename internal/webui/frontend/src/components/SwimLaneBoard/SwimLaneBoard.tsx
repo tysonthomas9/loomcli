@@ -19,7 +19,7 @@ import {
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { useStore } from "zustand";
 
-import { useAgentStoreInstance } from "@/hooks/common";
+import { useAgentStoreInstance } from "@/hooks/common/useStoreContext";
 import { useWorkspaceContext } from "@/hooks/workspace";
 import { buildEpicLeadClaims } from "@/utils/agentRole";
 import { wsGet, wsSet } from "@/utils/scopedStorage";

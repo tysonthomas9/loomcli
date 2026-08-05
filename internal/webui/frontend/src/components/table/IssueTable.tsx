@@ -9,7 +9,7 @@ import { useStore } from "zustand";
 import type { BlockedInfo } from "@/types/issue";
 import type { SortDirection } from "@/hooks";
 import { useSort } from "@/hooks";
-import { useAgentStoreInstance } from "@/hooks/common";
+import { useAgentStoreInstance } from "@/hooks/common/useStoreContext";
 import { useWorkspaceContext } from "@/hooks/workspace";
 import { buildEpicLeadClaims } from "@/utils/agentRole";
 import type { Issue } from "@/types";

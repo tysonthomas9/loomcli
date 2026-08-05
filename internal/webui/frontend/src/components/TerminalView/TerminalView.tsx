@@ -29,7 +29,6 @@ import {
 } from "./instances";
 import type { TerminalInstanceHandle } from "./instances";
 import {
-  TerminalTabBar,
   MAX_TABS,
   BACKEND_BRAND_COLORS,
   type TabState,
@@ -42,6 +41,7 @@ import {
   useUnreadTracking,
   useWorkspaceTabState,
 } from "./tabs";
+import { TerminalTabBar } from "./tabs/TerminalTabBar";
 import styles from "./TerminalView.module.css";
 
 export interface TerminalInputRequest {

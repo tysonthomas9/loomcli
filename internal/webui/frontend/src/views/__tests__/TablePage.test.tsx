@@ -39,7 +39,7 @@ vi.mock("@/components", () => ({
   BulkActionToolbar: () => <div data-testid="bulk-action-toolbar" />,
 }));
 
-vi.mock("@/components/IssueViewGuard", () => ({
+vi.mock("@/components/IssueViewGuard/IssueViewGuard", () => ({
   IssueViewGuard: ({ children }: { children: React.ReactNode }) => (
     <div data-testid="issue-view-guard">{children}</div>
   ),

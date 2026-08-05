@@ -29,7 +29,6 @@ import {
 import {
   useToast,
   useWorkspaceContext,
-  useEventContext,
   agentFileBrowserTabsStorageKey,
   FileDocumentRegistryProvider,
   FileCapabilitiesProvider,
@@ -41,6 +40,7 @@ import {
   useFileBrowserStoreInstance,
   type FileBrowserTab,
 } from "@/hooks";
+import { useEventContext } from "@/hooks/common/useEventProvider";
 import {
   checkoutLabel,
   checkoutRefKey,

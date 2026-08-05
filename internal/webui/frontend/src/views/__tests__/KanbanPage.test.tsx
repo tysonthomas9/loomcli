@@ -66,7 +66,7 @@ vi.mock("@/components", () => ({
   },
 }));
 
-vi.mock("@/components/IssueViewGuard", () => ({
+vi.mock("@/components/IssueViewGuard/IssueViewGuard", () => ({
   IssueViewGuard: ({ children }: { children: React.ReactNode }) => (
     <div data-testid="issue-view-guard">{children}</div>
   ),

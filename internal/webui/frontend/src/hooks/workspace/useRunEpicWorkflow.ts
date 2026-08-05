@@ -2,7 +2,7 @@ import { useCallback, useRef, useState } from "react";
 import { useStore } from "zustand";
 
 import type { Issue } from "@/types";
-import { useAgentStoreInstance } from "@/hooks/common";
+import { useAgentStoreInstance } from "@/hooks/common/useStoreContext";
 import { useLocalSettings, useWorkspaceContext } from "@/hooks/workspace";
 import { startEpicRunnerForIssue } from "@/hooks/workspace/startEpicRunnerForIssue";
 
