@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -72,6 +73,10 @@ func RunControlledLeadRuntime(
 		PromptFlag:       inv.promptFlag,
 		Env:              inv.env,
 		HarnessSessionID: inv.harnessSessionID,
+		// D-44: a stale `loom` on PATH behaves like the current one until it
+		// does not, and the difference then reads as a mystery. Surface it
+		// where the operator is looking anyway.
+		StartupWarning: cli.VersionSkewWarning(),
 	})
 }
 

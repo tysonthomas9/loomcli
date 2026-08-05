@@ -92,7 +92,13 @@ EXAMPLES
   loom sync                     # Full sync: push all + pull all`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if v, _ := cmd.Flags().GetBool("version"); v {
-			fmt.Printf("loom version %s (%s)\n", Version, Build)
+			// Delegates to the same assembly `loom version` uses so the two
+			// entry points cannot report different provenance.
+			info := CurrentVersionInfo()
+			fmt.Println(info.String())
+			if warn := VersionSkewWarning(); warn != "" {
+				fmt.Fprintln(os.Stderr, warn)
+			}
 			return
 		}
 		_ = cmd.Help()

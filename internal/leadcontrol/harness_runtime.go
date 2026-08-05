@@ -52,6 +52,12 @@ type HarnessLeadRuntimeConfig struct {
 	// HarnessName selects the harness-wrapper adapter. Defaults from Backend
 	// via HarnessNameForBackend.
 	HarnessName string
+	// StartupWarning, when non-empty, is printed above the launch banner. The
+	// caller supplies it (cli.VersionSkewWarning) rather than this package
+	// computing it: leadcontrol must not import internal/cli, and a stale-PATH
+	// warning is exactly the kind of thing an operator needs at the top of the
+	// session rather than buried in a log.
+	StartupWarning string
 	// BinaryPath and Args launch the harness. Prompt is appended as the final
 	// positional argument unless PromptFlag is set, in which case the runtime
 	// appends PromptFlag followed by Prompt. This supports CLIs such as OpenCode
@@ -118,6 +124,9 @@ func RunHarnessLeadRuntime(ctx context.Context, cfg HarnessLeadRuntimeConfig) er
 	handle, unregister := registerLeadConversation(cfg.SessionID, conv)
 	defer unregister()
 
+	if cfg.StartupWarning != "" {
+		_, _ = fmt.Fprintf(cfg.Stdout, "%s\n\n", cfg.StartupWarning)
+	}
 	_, _ = fmt.Fprintf(cfg.Stdout, "Launching controlled %s lead session...\n\n", cfg.Backend)
 	detach := conv.AttachOutput(cfg.Stdout)
 	defer detach()
