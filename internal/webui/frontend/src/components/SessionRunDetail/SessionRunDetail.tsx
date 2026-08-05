@@ -105,6 +105,10 @@ function runErrorSummary(session: SessionRecord): string | null {
   return null;
 }
 
+function runErrorTitle(status: SessionRecord["status"]): string {
+  return status === "aborted" ? "Run aborted" : "Run failed";
+}
+
 // ─── Event grouping ────────────────────────────────────────────────────
 
 type ToolItem = {
@@ -462,7 +466,9 @@ function SessionRunDetailContent({
             role="alert"
             data-testid="run-error-banner"
           >
-            <div className={styles.runErrorTitle}>Run failed</div>
+            <div className={styles.runErrorTitle}>
+              {runErrorTitle(session.status)}
+            </div>
             <div className={styles.runErrorBody}>{runError}</div>
           </div>
         )}
