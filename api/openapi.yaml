@@ -2752,6 +2752,55 @@ paths:
               schema:
                 $ref: "#/components/schemas/AgentErrorResponse"
 
+  /api/workspaces/{ws}/agents/{id}/activity:
+    get:
+      operationId: listAgentActivity
+      tags: [agent-control, sessions]
+      summary: List Interaction session and Execution batch activity for an agent
+      description: >-
+        Returns the Interaction-owned read projection for one canonical agent,
+        newest first. Agent sessions remain distinct from Automation DriverRun
+        history and preserve task references for task-side-panel navigation.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentId"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Agent activity, newest first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentActivityResponse"
+        "400":
+          description: Invalid agent identifier or limit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "401":
+          description: Operator authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "500":
+          description: Agent activity projection failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "503":
+          description: Interaction activity is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+
   /api/workspaces/{ws}/agents/{id}/sessions/{session_id}/transcript:
     get:
       operationId: getAgentSessionTranscript
@@ -6667,6 +6716,47 @@ components:
           items:
             $ref: "#/components/schemas/AgentHistorySession"
 
+    AgentActivityResponse:
+      type: object
+      required: [agent_id, activity, count]
+      properties:
+        agent_id:
+          type: string
+        activity:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentActivity"
+        count:
+          type: integer
+          minimum: 0
+
+    AgentActivity:
+      type: object
+      required:
+        [workspace_key, agent_id, kind, source_id, status, started_at]
+      properties:
+        workspace_key:
+          type: string
+        agent_id:
+          type: string
+        kind:
+          type: string
+          enum: [agent_session, batch_run]
+        source_id:
+          type: string
+        task_id:
+          type: string
+        status:
+          type: string
+        summary:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+
     AgentHistorySession:
       type: object
       required:
@@ -6682,7 +6772,7 @@ components:
           type: string
         kind:
           type: string
-          enum: [task, orchestration, terminal, maintenance, ad_hoc]
+          enum: [interactive, review, task, orchestration, terminal, maintenance, ad_hoc]
         task_id:
           type: string
         terminal_id:
@@ -6692,7 +6782,7 @@ components:
         status:
           type: string
           enum:
-            [queued, leased, starting, running, idle, yielded, completed, failed, cancelled, expired]
+            [queued, leased, starting, running, idle, yielded, completed, failed, cancelled, expired, interrupted]
         phase:
           type: string
         attempt:

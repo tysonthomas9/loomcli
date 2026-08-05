@@ -254,6 +254,9 @@ export type AgentRunsResponse = Omit<
 > & {
   runs: WorkflowRun[];
 };
+export type AgentActivity = components["schemas"]["AgentActivity"];
+export type AgentActivityResponse =
+  components["schemas"]["AgentActivityResponse"];
 
 interface UnifiedAgentListResponse {
   success: boolean;
@@ -395,6 +398,23 @@ export async function listAgentRuns(
     wsUrl(
       workspaceId,
       `/agents/${encodeURIComponent(agentId)}/runs${query ? `?${query}` : ""}`,
+    ),
+  );
+}
+
+/** List Interaction-owned session and Execution batch activity for one agent. */
+export async function listAgentActivity(
+  workspaceId: string,
+  agentId: string,
+  opts?: { limit?: number },
+): Promise<AgentActivityResponse> {
+  const params = new URLSearchParams();
+  if (opts?.limit !== undefined) params.set("limit", String(opts.limit));
+  const query = params.toString();
+  return get<AgentActivityResponse>(
+    wsUrl(
+      workspaceId,
+      `/agents/${encodeURIComponent(agentId)}/activity${query ? `?${query}` : ""}`,
     ),
   );
 }

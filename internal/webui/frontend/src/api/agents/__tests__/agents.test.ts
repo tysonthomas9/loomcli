@@ -25,6 +25,7 @@ import {
   restartAgent,
   startAgent,
   stopAgent,
+  listAgentActivity,
   listAgentRuns,
   listAgentRecords,
   setAgentRecordEnabled,
@@ -149,6 +150,31 @@ describe("durable agent record lifecycle", () => {
     ).resolves.toEqual(response);
     expect(mockGet).toHaveBeenCalledWith(
       "/api/workspaces/TEAM%20A/agents/agent%2Fone/runs?limit=7",
+    );
+  });
+
+  it("lists encoded Interaction activity with an optional limit", async () => {
+    const response = {
+      agent_id: "agent/one",
+      activity: [
+        {
+          workspace_key: "TEAM A",
+          agent_id: "agent/one",
+          kind: "agent_session" as const,
+          source_id: "session-1",
+          status: "interrupted",
+          started_at: "2026-07-25T00:00:00Z",
+        },
+      ],
+      count: 1,
+    };
+    mockGet.mockResolvedValueOnce(response);
+
+    await expect(
+      listAgentActivity("TEAM A", "agent/one", { limit: 7 }),
+    ).resolves.toEqual(response);
+    expect(mockGet).toHaveBeenCalledWith(
+      "/api/workspaces/TEAM%20A/agents/agent%2Fone/activity?limit=7",
     );
   });
 

@@ -18,11 +18,31 @@ const (
 	WorkerTokenScopes = "WorkerToken.Scopes"
 )
 
+// Defines values for AgentActivityKind.
+const (
+	AgentSession AgentActivityKind = "agent_session"
+	BatchRun     AgentActivityKind = "batch_run"
+)
+
+// Valid indicates whether the value is a known member of the AgentActivityKind enum.
+func (e AgentActivityKind) Valid() bool {
+	switch e {
+	case AgentSession:
+		return true
+	case BatchRun:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AgentHistorySessionKind.
 const (
 	AgentHistorySessionKindAdHoc         AgentHistorySessionKind = "ad_hoc"
+	AgentHistorySessionKindInteractive   AgentHistorySessionKind = "interactive"
 	AgentHistorySessionKindMaintenance   AgentHistorySessionKind = "maintenance"
 	AgentHistorySessionKindOrchestration AgentHistorySessionKind = "orchestration"
+	AgentHistorySessionKindReview        AgentHistorySessionKind = "review"
 	AgentHistorySessionKindTask          AgentHistorySessionKind = "task"
 	AgentHistorySessionKindTerminal      AgentHistorySessionKind = "terminal"
 )
@@ -32,9 +52,13 @@ func (e AgentHistorySessionKind) Valid() bool {
 	switch e {
 	case AgentHistorySessionKindAdHoc:
 		return true
+	case AgentHistorySessionKindInteractive:
+		return true
 	case AgentHistorySessionKindMaintenance:
 		return true
 	case AgentHistorySessionKindOrchestration:
+		return true
+	case AgentHistorySessionKindReview:
 		return true
 	case AgentHistorySessionKindTask:
 		return true
@@ -47,16 +71,17 @@ func (e AgentHistorySessionKind) Valid() bool {
 
 // Defines values for AgentHistorySessionStatus.
 const (
-	AgentHistorySessionStatusCancelled AgentHistorySessionStatus = "cancelled"
-	AgentHistorySessionStatusCompleted AgentHistorySessionStatus = "completed"
-	AgentHistorySessionStatusExpired   AgentHistorySessionStatus = "expired"
-	AgentHistorySessionStatusFailed    AgentHistorySessionStatus = "failed"
-	AgentHistorySessionStatusIdle      AgentHistorySessionStatus = "idle"
-	AgentHistorySessionStatusLeased    AgentHistorySessionStatus = "leased"
-	AgentHistorySessionStatusQueued    AgentHistorySessionStatus = "queued"
-	AgentHistorySessionStatusRunning   AgentHistorySessionStatus = "running"
-	AgentHistorySessionStatusStarting  AgentHistorySessionStatus = "starting"
-	AgentHistorySessionStatusYielded   AgentHistorySessionStatus = "yielded"
+	AgentHistorySessionStatusCancelled   AgentHistorySessionStatus = "cancelled"
+	AgentHistorySessionStatusCompleted   AgentHistorySessionStatus = "completed"
+	AgentHistorySessionStatusExpired     AgentHistorySessionStatus = "expired"
+	AgentHistorySessionStatusFailed      AgentHistorySessionStatus = "failed"
+	AgentHistorySessionStatusIdle        AgentHistorySessionStatus = "idle"
+	AgentHistorySessionStatusInterrupted AgentHistorySessionStatus = "interrupted"
+	AgentHistorySessionStatusLeased      AgentHistorySessionStatus = "leased"
+	AgentHistorySessionStatusQueued      AgentHistorySessionStatus = "queued"
+	AgentHistorySessionStatusRunning     AgentHistorySessionStatus = "running"
+	AgentHistorySessionStatusStarting    AgentHistorySessionStatus = "starting"
+	AgentHistorySessionStatusYielded     AgentHistorySessionStatus = "yielded"
 )
 
 // Valid indicates whether the value is a known member of the AgentHistorySessionStatus enum.
@@ -71,6 +96,8 @@ func (e AgentHistorySessionStatus) Valid() bool {
 	case AgentHistorySessionStatusFailed:
 		return true
 	case AgentHistorySessionStatusIdle:
+		return true
+	case AgentHistorySessionStatusInterrupted:
 		return true
 	case AgentHistorySessionStatusLeased:
 		return true
@@ -1768,6 +1795,29 @@ func (e StartTerminalSetupJSONBodyAction) Valid() bool {
 type AddDependencyRequest struct {
 	DepType     *string `json:"dep_type,omitempty"`
 	DependsOnId string  `json:"depends_on_id"`
+}
+
+// AgentActivity defines model for AgentActivity.
+type AgentActivity struct {
+	AgentId      string            `json:"agent_id"`
+	FinishedAt   *time.Time        `json:"finished_at,omitempty"`
+	Kind         AgentActivityKind `json:"kind"`
+	SourceId     string            `json:"source_id"`
+	StartedAt    time.Time         `json:"started_at"`
+	Status       string            `json:"status"`
+	Summary      *string           `json:"summary,omitempty"`
+	TaskId       *string           `json:"task_id,omitempty"`
+	WorkspaceKey string            `json:"workspace_key"`
+}
+
+// AgentActivityKind defines model for AgentActivity.Kind.
+type AgentActivityKind string
+
+// AgentActivityResponse defines model for AgentActivityResponse.
+type AgentActivityResponse struct {
+	Activity []AgentActivity `json:"activity"`
+	AgentId  string          `json:"agent_id"`
+	Count    int             `json:"count"`
 }
 
 // AgentBackendOverride defines model for AgentBackendOverride.
@@ -3755,6 +3805,11 @@ type ListAgentsParams struct {
 
 // ListAgentsParamsInclude defines parameters for ListAgents.
 type ListAgentsParamsInclude string
+
+// ListAgentActivityParams defines parameters for ListAgentActivity.
+type ListAgentActivityParams struct {
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
 
 // ListAgentRunsParams defines parameters for ListAgentRuns.
 type ListAgentRunsParams struct {

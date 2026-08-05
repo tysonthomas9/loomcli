@@ -191,15 +191,15 @@ const (
 // of either an Execution batch run or an Interaction AgentSession; persistence
 // for the two aggregates is never merged.
 type Activity struct {
-	WorkspaceKey string
-	AgentID      string
-	Kind         ActivityKind
-	SourceID     string
-	TaskID       string
-	Status       string
-	Summary      string
-	StartedAt    time.Time
-	FinishedAt   *time.Time
+	WorkspaceKey string       `json:"workspace_key"`
+	AgentID      string       `json:"agent_id"`
+	Kind         ActivityKind `json:"kind"`
+	SourceID     string       `json:"source_id"`
+	TaskID       string       `json:"task_id,omitempty"`
+	Status       string       `json:"status"`
+	Summary      string       `json:"summary,omitempty"`
+	StartedAt    time.Time    `json:"started_at"`
+	FinishedAt   *time.Time   `json:"finished_at,omitempty"`
 }
 
 func cloneMetadata(in map[string]string) map[string]string {

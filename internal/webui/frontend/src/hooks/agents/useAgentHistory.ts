@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
+  listAgentActivity,
   listAgentRuns,
+  type AgentActivity,
   type AgentHistorySession,
   type AgentRunsResponse,
 } from "@/api/agents";
@@ -30,6 +32,43 @@ interface AgentHistoryState {
   response: AgentRunsResponse;
   isLoading: boolean;
   error: Error | null;
+}
+
+function sessionFromActivity(activity: AgentActivity): AgentHistorySession {
+  const updatedAt = activity.finished_at ?? activity.started_at;
+  return {
+    workspace_key: activity.workspace_key,
+    session_id: activity.source_id,
+    agent_id: activity.agent_id,
+    kind: "interactive",
+    ...(activity.task_id ? { task_id: activity.task_id } : {}),
+    status: activity.status as AgentHistorySession["status"],
+    started_at: activity.started_at,
+    ...(activity.finished_at ? { finished_at: activity.finished_at } : {}),
+    ...(activity.summary ? { summary: activity.summary } : {}),
+    created_at: activity.started_at,
+    updated_at: updatedAt,
+  };
+}
+
+function mergeSessions(
+  canonical: AgentHistorySession[],
+  activity: AgentHistorySession[],
+): AgentHistorySession[] {
+  const byID = new Map<string, AgentHistorySession>();
+  for (const session of canonical) byID.set(session.session_id, session);
+  for (const session of activity) byID.set(session.session_id, session);
+  return [...byID.values()].sort((left, right) => {
+    const leftTime = left.updated_at || left.started_at || left.created_at;
+    const rightTime = right.updated_at || right.started_at || right.created_at;
+    return rightTime.localeCompare(leftTime);
+  });
+}
+
+function rejectionError(result: PromiseRejectedResult): Error {
+  return result.reason instanceof Error
+    ? result.reason
+    : new Error(String(result.reason));
 }
 
 /** Fetch unified workflow-run or interactive-session history for one agent. */
@@ -64,7 +103,37 @@ export function useAgentHistory(
       error: current.key === requestKey ? current.error : null,
     }));
     try {
-      const next = await listAgentRuns(workspaceId, agentId, { limit: 25 });
+      const [runsResult, activityResult] = await Promise.allSettled([
+        listAgentRuns(workspaceId, agentId, { limit: 25 }),
+        listAgentActivity(workspaceId, agentId, { limit: 25 }),
+      ]);
+      const runs =
+        runsResult.status === "fulfilled"
+          ? runsResult.value
+          : emptyHistory(agentId);
+      const activityItems =
+        activityResult.status === "fulfilled" &&
+        Array.isArray(activityResult.value.activity)
+          ? activityResult.value.activity
+          : [];
+      const activitySessions = activityItems
+        .filter((item) => item.kind === "agent_session")
+        .map(sessionFromActivity);
+      const sessions = mergeSessions(runs.sessions ?? [], activitySessions);
+
+      // `/runs` is the established history surface and `/activity` is an
+      // additive Interaction projection. Keep existing DriverRun history
+      // usable against an older or temporarily degraded activity route. If
+      // `/runs` is the failed source, only suppress its error when Interaction
+      // still supplied real session history rather than a misleading empty
+      // state.
+      if (runsResult.status === "rejected" && sessions.length === 0) {
+        throw rejectionError(runsResult);
+      }
+      const next: AgentRunsResponse = {
+        ...runs,
+        sessions,
+      };
       if (generation !== generationRef.current) {
         return;
       }
