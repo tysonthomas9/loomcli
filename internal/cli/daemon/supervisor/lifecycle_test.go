@@ -2,8 +2,6 @@ package supervisor
 
 import (
 	"encoding/json"
-	"github.com/olesho/harness-wrapper/pkg/wrapper"
-	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
+
+	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/events"
