@@ -13,6 +13,8 @@ export interface UseObservabilityMetricsOptions {
   pollInterval?: number;
   /** Whether to fetch (default: true) */
   enabled?: boolean;
+  /** Workspace whose durable runs should be projected. */
+  workspaceId?: string;
 }
 
 export interface UseObservabilityMetricsResult {
@@ -27,7 +29,7 @@ export interface UseObservabilityMetricsResult {
 export function useObservabilityMetrics(
   options?: UseObservabilityMetricsOptions,
 ): UseObservabilityMetricsResult {
-  const { pollInterval = 30000, enabled = true } = options ?? {};
+  const { pollInterval = 30000, enabled = true, workspaceId } = options ?? {};
 
   const [metrics, setMetrics] = useState<MetricsSnapshot | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -36,39 +38,57 @@ export function useObservabilityMetrics(
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   const fetchInProgressRef = useRef(false);
+  const requestSequenceRef = useRef(0);
   const mountedRef = useRef(true);
 
   const fetchData = useCallback(async () => {
     if (fetchInProgressRef.current) return;
 
     fetchInProgressRef.current = true;
+    const requestSequence = ++requestSequenceRef.current;
     setIsLoading(true);
 
     try {
-      const result = await fetchObservabilityMetrics();
+      const result = await fetchObservabilityMetrics(workspaceId);
 
-      if (mountedRef.current) {
+      if (
+        mountedRef.current &&
+        requestSequence === requestSequenceRef.current
+      ) {
         setMetrics(result);
         setIsConnected(true);
         setError(null);
         setLastUpdated(new Date());
       }
     } catch (err) {
-      if (mountedRef.current) {
+      if (
+        mountedRef.current &&
+        requestSequence === requestSequenceRef.current
+      ) {
         setError(err instanceof Error ? err : new Error(String(err)));
         setIsConnected(false);
       }
     } finally {
-      if (mountedRef.current) {
+      if (
+        mountedRef.current &&
+        requestSequence === requestSequenceRef.current
+      ) {
         setIsLoading(false);
+        fetchInProgressRef.current = false;
       }
-      fetchInProgressRef.current = false;
     }
-  }, []);
+  }, [workspaceId]);
 
   const refetch = useCallback(async () => {
     await fetchData();
   }, [fetchData]);
+
+  useEffect(() => {
+    requestSequenceRef.current += 1;
+    fetchInProgressRef.current = false;
+    setMetrics(null);
+    setError(null);
+  }, [workspaceId]);
 
   useEffect(() => {
     mountedRef.current = true;

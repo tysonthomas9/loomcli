@@ -4747,6 +4747,12 @@ paths:
       operationId: getObservabilityMetrics
       tags: [observability]
       summary: Event metrics snapshot
+      parameters:
+        - name: workspace
+          in: query
+          description: Workspace ID or name whose durable driver runs should be projected
+          schema:
+            type: string
       responses:
         "200":
           description: Metrics snapshot

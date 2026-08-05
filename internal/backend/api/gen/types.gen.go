@@ -3773,6 +3773,12 @@ type GetObservabilityEventsParams struct {
 	Since *time.Time `form:"since,omitempty" json:"since,omitempty"`
 }
 
+// GetObservabilityMetricsParams defines parameters for GetObservabilityMetrics.
+type GetObservabilityMetricsParams struct {
+	// Workspace Workspace ID or name whose durable driver runs should be projected
+	Workspace *string `form:"workspace,omitempty" json:"workspace,omitempty"`
+}
+
 // NotifySessionChangeJSONBody defines parameters for NotifySessionChange.
 type NotifySessionChangeJSONBody struct {
 	SessionId   string `json:"session_id"`

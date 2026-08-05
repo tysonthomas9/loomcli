@@ -9436,7 +9436,10 @@ export interface operations {
   };
   getObservabilityMetrics: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Workspace ID or name whose durable driver runs should be projected */
+        workspace?: string;
+      };
       header?: never;
       path?: never;
       cookie?: never;

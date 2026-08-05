@@ -103,6 +103,54 @@ describe("useObservabilityMetrics", () => {
       expect(mockFetch).not.toHaveBeenCalled();
       expect(result.current.metrics).toBeNull();
     });
+
+    it("refetches with the selected workspace when it changes", async () => {
+      mockFetch.mockResolvedValue(createMockMetrics());
+      const { rerender } = renderHook(
+        ({ workspaceId }) =>
+          useObservabilityMetrics({ pollInterval: 0, workspaceId }),
+        { initialProps: { workspaceId: "WS-A" } },
+      );
+
+      await flushPromises();
+      expect(mockFetch).toHaveBeenLastCalledWith("WS-A");
+
+      rerender({ workspaceId: "WS-B" });
+      await flushPromises();
+      expect(mockFetch).toHaveBeenLastCalledWith("WS-B");
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it("ignores a stale response when the workspace changes in flight", async () => {
+      let resolveA!: (value: MetricsSnapshot) => void;
+      let resolveB!: (value: MetricsSnapshot) => void;
+      mockFetch
+        .mockImplementationOnce(
+          () => new Promise<MetricsSnapshot>((resolve) => (resolveA = resolve)),
+        )
+        .mockImplementationOnce(
+          () => new Promise<MetricsSnapshot>((resolve) => (resolveB = resolve)),
+        );
+      const { result, rerender } = renderHook(
+        ({ workspaceId }) =>
+          useObservabilityMetrics({ pollInterval: 0, workspaceId }),
+        { initialProps: { workspaceId: "WS-A" } },
+      );
+
+      await flushPromises();
+      rerender({ workspaceId: "WS-B" });
+      await flushPromises();
+      await act(async () =>
+        resolveB(createMockMetrics({ tasks_completed_24h: 2 })),
+      );
+      await act(async () =>
+        resolveA(createMockMetrics({ tasks_completed_24h: 1 })),
+      );
+
+      expect(mockFetch).toHaveBeenNthCalledWith(1, "WS-A");
+      expect(mockFetch).toHaveBeenNthCalledWith(2, "WS-B");
+      expect(result.current.metrics?.tasks_completed_24h).toBe(2);
+    });
   });
 
   describe("polling", () => {

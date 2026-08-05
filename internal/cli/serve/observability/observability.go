@@ -18,6 +18,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/events"
 )
 
+const maxWorkspaceMetricsCaches = 128
+
 // MetricsResponse wraps the metrics snapshot for the API.
 type MetricsResponse struct {
 	Success bool                    `json:"success"`
@@ -134,6 +136,19 @@ type DriverRunMetric struct {
 // workspace. Composition supplies the FleetDB-backed adapter.
 type DriverRunMetricsReader func(context.Context, string, int) ([]DriverRunMetric, error)
 
+// WorkspaceMetricsCache keeps an independent TTL cache for each requested
+// workspace. The observability endpoint is shared across workspace routes, so
+// a single cache would otherwise return one workspace's durable runs while the
+// user is viewing another.
+type WorkspaceMetricsCache struct {
+	eventsDir        string
+	defaultWorkspace string
+	reader           DriverRunMetricsReader
+
+	mu     sync.Mutex
+	values map[string]*CachedValue[*events.MetricsSnapshot]
+}
+
 // NewMetricsCacheWithDriverRuns creates the production observability cache.
 // Durable runs supplement the legacy JSONL journal so modular agent activity
 // remains visible after loom serve restarts.
@@ -142,6 +157,37 @@ func NewMetricsCacheWithDriverRuns(
 	reader DriverRunMetricsReader,
 ) *CachedValue[*events.MetricsSnapshot] {
 	return newMetricsCache(eventsDir, workspace, reader)
+}
+
+// NewWorkspaceMetricsCacheWithDriverRuns creates the production cache used by
+// the HTTP handler. Empty workspace requests retain the configured default.
+func NewWorkspaceMetricsCacheWithDriverRuns(
+	eventsDir, defaultWorkspace string,
+	reader DriverRunMetricsReader,
+) *WorkspaceMetricsCache {
+	return &WorkspaceMetricsCache{
+		eventsDir: eventsDir, defaultWorkspace: defaultWorkspace, reader: reader,
+		values: make(map[string]*CachedValue[*events.MetricsSnapshot]),
+	}
+}
+
+// Get returns the cached metrics projection for exactly one workspace.
+func (c *WorkspaceMetricsCache) Get(workspace string) *events.MetricsSnapshot {
+	if workspace == "" {
+		workspace = c.defaultWorkspace
+	}
+	c.mu.Lock()
+	value := c.values[workspace]
+	if value == nil && len(c.values) >= maxWorkspaceMetricsCaches {
+		c.mu.Unlock()
+		return newMetricsCache(c.eventsDir, workspace, c.reader).Get()
+	}
+	if value == nil {
+		value = newMetricsCache(c.eventsDir, workspace, c.reader)
+		c.values[workspace] = value
+	}
+	c.mu.Unlock()
+	return value.Get()
 }
 
 func newMetricsCache(
@@ -215,6 +261,27 @@ func HandleMetrics(eventsDir string, cache *CachedValue[*events.MetricsSnapshot]
 		}
 
 		snap := cache.Get()
+		writeJSON(w, MetricsResponse{
+			Success: true,
+			Data:    snap,
+		})
+	}
+}
+
+// HandleWorkspaceMetrics returns the metrics projection for the workspace
+// selected by the UI. The query contract matches the existing monitor APIs.
+func HandleWorkspaceMetrics(eventsDir string, cache *WorkspaceMetricsCache) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if eventsDir == "" {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			writeJSON(w, MetricsResponse{
+				Success: false,
+				Error:   "observability not configured",
+			})
+			return
+		}
+
+		snap := cache.Get(r.URL.Query().Get("workspace"))
 		writeJSON(w, MetricsResponse{
 			Success: true,
 			Data:    snap,

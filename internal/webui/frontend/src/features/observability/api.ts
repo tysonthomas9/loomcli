@@ -3,7 +3,7 @@
  * Uses openapi-fetch generated client (monitor endpoints are in the spec).
  */
 
-import { api, apiErrorFromResponse } from "@/api/common";
+import { api, apiErrorFromResponse, cleanQuery } from "@/api/common";
 
 import type { MetricsSnapshot } from "./types";
 
@@ -11,10 +11,15 @@ import type { MetricsSnapshot } from "./types";
  * Fetch observability metrics from the loom server.
  * Throws on network errors or non-OK responses.
  */
-export async function fetchObservabilityMetrics(): Promise<MetricsSnapshot> {
+export async function fetchObservabilityMetrics(
+  workspaceId?: string,
+): Promise<MetricsSnapshot> {
   const { data, error, response } = await api.GET(
     "/api/observability/metrics",
     {
+      params: {
+        query: cleanQuery<{ workspace?: string }>({ workspace: workspaceId }),
+      },
       signal: AbortSignal.timeout(15000),
     },
   );

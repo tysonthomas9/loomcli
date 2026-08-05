@@ -5,6 +5,7 @@
 
 import { ErrorDisplay } from "@/components/ErrorDisplay";
 import { LoadingSkeleton } from "@/components/LoadingSkeleton";
+import { useParams } from "react-router-dom";
 
 import { useObservabilityMetrics } from "../useObservabilityMetrics";
 import { AgentUtilizationBars } from "./AgentUtilizationBars";
@@ -21,8 +22,12 @@ export interface ObservabilityDashboardProps {
 export function ObservabilityDashboard({
   className,
 }: ObservabilityDashboardProps): JSX.Element {
+  const { workspaceId } = useParams<{ workspaceId: string }>();
   const { metrics, isLoading, error, isConnected, lastUpdated, refetch } =
-    useObservabilityMetrics({ pollInterval: 30000 });
+    useObservabilityMetrics({
+      pollInterval: 30000,
+      ...(workspaceId ? { workspaceId } : {}),
+    });
 
   const rootClassName = [styles.dashboard, className].filter(Boolean).join(" ");
 

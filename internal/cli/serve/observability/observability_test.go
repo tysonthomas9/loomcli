@@ -161,6 +161,64 @@ func TestHandleObservabilityMetrics_MergesDurableDriverRuns(t *testing.T) {
 	}
 }
 
+func TestHandleWorkspaceObservabilityMetrics_IsolatesWorkspaceCaches(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now().UTC()
+	var reads atomic.Int32
+	reader := DriverRunMetricsReader(func(_ context.Context, workspace string, _ int) ([]DriverRunMetric, error) {
+		reads.Add(1)
+		return []DriverRunMetric{{
+			RunID: "run-" + workspace, TaskID: "task-" + workspace, Agent: "agent-" + workspace,
+			Status: "completed", StartedAt: now.Add(-time.Minute), FinishedAt: now,
+		}}, nil
+	})
+	cache := NewWorkspaceMetricsCacheWithDriverRuns(dir, "DEFAULT", reader)
+	handler := HandleWorkspaceMetrics(dir, cache)
+
+	get := func(path string) *events.MetricsSnapshot {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		handler(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s = %d: %s", path, rec.Code, rec.Body.String())
+		}
+		var resp MetricsResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatal(err)
+		}
+		return resp.Data
+	}
+
+	first := get("/api/observability/metrics?workspace=FIRST")
+	second := get("/api/observability/metrics?workspace=SECOND")
+	firstAgain := get("/api/observability/metrics?workspace=FIRST")
+	fallback := get("/api/observability/metrics")
+	if first.TasksByAgent["agent-FIRST"] != 1 || first.TasksByAgent["agent-SECOND"] != 0 {
+		t.Fatalf("FIRST metrics leaked: %#v", first.TasksByAgent)
+	}
+	if second.TasksByAgent["agent-SECOND"] != 1 || second.TasksByAgent["agent-FIRST"] != 0 {
+		t.Fatalf("SECOND metrics leaked: %#v", second.TasksByAgent)
+	}
+	if firstAgain.TasksByAgent["agent-FIRST"] != 1 || fallback.TasksByAgent["agent-DEFAULT"] != 1 {
+		t.Fatalf("cached/default metrics = first %#v default %#v", firstAgain.TasksByAgent, fallback.TasksByAgent)
+	}
+	if reads.Load() != 3 {
+		t.Fatalf("durable reads = %d, want one per workspace", reads.Load())
+	}
+}
+
+func TestWorkspaceMetricsCache_BoundsStoredWorkspaces(t *testing.T) {
+	cache := NewWorkspaceMetricsCacheWithDriverRuns(t.TempDir(), "DEFAULT", func(context.Context, string, int) ([]DriverRunMetric, error) {
+		return nil, nil
+	})
+	for i := 0; i < maxWorkspaceMetricsCaches+2; i++ {
+		cache.Get(fmt.Sprintf("WS-%d", i))
+	}
+	if len(cache.values) != maxWorkspaceMetricsCaches {
+		t.Fatalf("cached workspaces = %d, want %d", len(cache.values), maxWorkspaceMetricsCaches)
+	}
+}
+
 func TestHandleObservabilityMetrics_NotConfigured(t *testing.T) {
 	handler := HandleMetrics("", newTestMetricsCache(""))
 	req := httptest.NewRequest("GET", "/api/observability/metrics", nil)

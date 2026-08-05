@@ -70,7 +70,7 @@ func BuildHandlers(
 		StaleDetector:        staleDetectorHandler,
 		Usage:                usageHandler,
 		Metrics:              metricscmd.HandleMetrics(collectDataFn),
-		ObservabilityMetrics: observability.HandleMetrics(eventsDir, observability.NewMetricsCacheWithDriverRuns(eventsDir, defaultWorkspace, driverRunMetrics)),
+		ObservabilityMetrics: observability.HandleWorkspaceMetrics(eventsDir, observability.NewWorkspaceMetricsCacheWithDriverRuns(eventsDir, defaultWorkspace, driverRunMetrics)),
 		ObservabilityEvents:  observability.HandleEvents(eventsDir),
 	}
 }
