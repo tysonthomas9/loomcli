@@ -230,7 +230,9 @@ func startAwaitTimeoutSweeper(ctx context.Context, st store.Store) {
 // LOOM_ISSUE_BRIDGE_INTERVAL sets the poll cadence in seconds (default 2,
 // matching the sweepers, capped at one hour); LOOM_ISSUE_BRIDGE_STATE_PATH
 // overrides the cursor file; LOOM_ISSUE_BRIDGE_REPLAY=1 opts into
-// replay-from-zero on first observation (handled inside the bridge).
+// replay-from-zero on first observation (handled inside the bridge);
+// LOOM_ISSUE_BRIDGE_ACTIONS widens the action allowlist (see
+// issueBridgeActions — the default stays issue.create only).
 func startIssueJournalBridge(ctx context.Context, st store.Store) {
 	if st == nil {
 		return
@@ -250,14 +252,15 @@ func startIssueJournalBridge(ctx context.Context, st store.Store) {
 		return
 	}
 	bridge := &trigger.IssueJournalBridge{
-		Store:        st,
-		Source:       &trigger.InternalSource{Store: st},
-		Reader:       reader,
-		WorkspaceKey: os.Getenv(bootstrap.EnvWorkspace),
-		Cursors:      cursors,
+		Store:           st,
+		Source:          &trigger.InternalSource{Store: st},
+		Reader:          reader,
+		WorkspaceKey:    os.Getenv(bootstrap.EnvWorkspace),
+		Cursors:         cursors,
+		ActionAllowlist: issueBridgeActions(),
 	}
 	interval := issueBridgeInterval()
-	slog.Info("Issue journal bridge enabled", "workspace", bridge.WorkspaceKey, "interval", interval, "state_path", issueBridgeStatePath())
+	slog.Info("Issue journal bridge enabled", "workspace", bridge.WorkspaceKey, "interval", interval, "state_path", issueBridgeStatePath(), "actions", trigger.IssueJournalActions(bridge.ActionAllowlist))
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
@@ -305,6 +308,51 @@ func issueBridgeDisabled() bool {
 	default:
 		return false
 	}
+}
+
+// issueBridgeActions reads the bridge's journal-action allowlist from
+// LOOM_ISSUE_BRIDGE_ACTIONS (comma-separated, e.g. "issue.create,issue.update").
+// Empty/unset returns nil, which leaves the bridge on its conservative default
+// (issue.create only).
+//
+// WHY THIS IS OPT-IN. Widening the roster is not a cadence knob, it is a
+// blast-radius change: every binding whose event_type_patterns glob matches the
+// newly-admitted route key starts receiving traffic it never saw before. The
+// sharp edge is issue.update — agents that edit tickets (labels, status,
+// assignment) generate one per write, so an unfiltered binding whose driver
+// itself edits tickets self-triggers at hop_depth=0, which the structural
+// hop-depth cap does NOT stop (see the self-trigger story on IssueJournalBridge).
+// A binding admitted here MUST carry a domain.TriggerActorFilter excluding the
+// actor kinds its own runs write under. Defaulting this on would arm that loop
+// for every existing deployment on upgrade, so the default stays put and the
+// operator opts in per environment.
+func issueBridgeActions() []string {
+	raw := strings.TrimSpace(os.Getenv(envLoomIssueBridgeActions))
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	actions := make([]string, 0, len(parts))
+	seen := make(map[string]struct{}, len(parts))
+	for _, part := range parts {
+		action := strings.ToLower(strings.TrimSpace(part))
+		if action == "" {
+			continue
+		}
+		if _, dup := seen[action]; dup {
+			continue
+		}
+		seen[action] = struct{}{}
+		actions = append(actions, action)
+	}
+	if len(actions) == 0 {
+		// A non-empty value that parsed to nothing (e.g. ",,") is operator
+		// error, not a request to emit nothing: fall back to the default
+		// rather than silently muting the bridge.
+		slog.Warn("LOOM_ISSUE_BRIDGE_ACTIONS set but empty after parsing, using bridge default", "value", raw)
+		return nil
+	}
+	return actions
 }
 
 // issueBridgeStatePath resolves the cursor state file: LOOM_ISSUE_BRIDGE_STATE_PATH
