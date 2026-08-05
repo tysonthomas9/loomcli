@@ -320,9 +320,16 @@ VET (2026-08-05, codex): EXECUTE-WITH-FIXES — all folded:
   the lead files ≤2 verify-tasks per pass and none when the harness
   reports backlog >8 (rail records QAV-BACKLOG). [H] bounds, ledgered.
 - Rails: bootstrap pre-spend probe proves qa-verify create/close in-
-  container (the POC already proved no repo registration is needed —
-  vet finding 2 overstated that — but the assert is free); codex nudge
-  suppression in container config; prompt hashes logged at bootstrap.
+  container. CORRECTION (2026-08-05, launch 1): vet finding 2 was RIGHT
+  and the POC-based rebuttal was wrong — fleet-db enforces referential
+  integrity on source_repo (fa31508, 2026-02), and the POC only passed
+  after `loom repo add qa-verify ""` registered the lane (entity in the
+  POC snapshot, 06:41Z). The unregistered create died in-container at
+  the probe, pre-spend, exactly as the probe was designed to catch;
+  bootstrap now registers the virtual lane repo (empty remote) before
+  probing, verified green in a tasks-mode stub trial (MARATHON-1).
+  Codex nudge suppression in container config; prompt hashes logged at
+  bootstrap (sha256sum with shasum fallback).
 - Purity: prompt files carry no experiment labels/comments; the [S]-
   flagged phrases (duty ordering, target-enumeration) removed; remaining
   bounds are disclosed [H] rails.

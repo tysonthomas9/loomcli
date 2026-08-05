@@ -281,19 +281,24 @@ log "flock contention verified on $LOOM_CONFIG_DIR"
 loom data list >/dev/null 2>&1 || die "loom data list failed (fleet-db not reachable)"
 
 # ---- verification-as-tasks preflight (EXPERIMENTS B2f-revised) ---------------
-# Pre-spend proof that the qa-verify lane is creatable and closable (codex
-# B2f-vet rail; the POC proved no repo registration is needed, this asserts it
-# in THIS container). Leaves one closed probe task; split metrics exclude it.
+# fleet-db enforces referential integrity on source_repo (codex B2f-vet
+# finding 2 — CONFIRMED: the POC only passed after registering the lane), so
+# qa-verify must be a registered workspace repo. Virtual lane: empty remote
+# URL, never checked out. The probe then proves create+close works in THIS
+# container; it leaves one closed probe task which split metrics exclude.
 if [ "${LOOM_MARATHON_VERIFY_ROLE:-off}" = "tasks" ]; then
-  PROBE_ID=$(loom data create --type task --source-repo qa-verify \
-    --title "qa-verify preflight probe (harness)" -o json 2>/dev/null \
+  loom repo add qa-verify "" >/dev/null 2>&1 || true  # idempotent; probe is the assertion
+  PROBE_JSON=$(loom data create --type task --source-repo qa-verify \
+    --title "qa-verify preflight probe (harness)" -o json) \
+    || die "qa-verify preflight: create failed"
+  PROBE_ID=$(printf '%s' "$PROBE_JSON" \
     | python3 -c 'import sys,json;print(json.load(sys.stdin).get("id",""))' 2>/dev/null)
-  [ -n "$PROBE_ID" ] || die "qa-verify preflight: create failed"
+  [ -n "$PROBE_ID" ] || die "qa-verify preflight: create output unparsable: $PROBE_JSON"
   loom data update "$PROBE_ID" --status closed >/dev/null 2>&1 \
     || die "qa-verify preflight: close failed"
   log "qa-verify preflight probe ok ($PROBE_ID)"
   for pf in lead-persistent-verifier-tasks.md qa-persistent-tasks.md; do
-    log "prompt-hash $pf $(shasum -a 256 "${LOOM_MARATHON_PROMPTS_DIR:-$MH/prompts}/$pf" 2>/dev/null | cut -c1-16)"
+    log "prompt-hash $pf $( (sha256sum "${LOOM_MARATHON_PROMPTS_DIR:-$MH/prompts}/$pf" 2>/dev/null || shasum -a 256 "${LOOM_MARATHON_PROMPTS_DIR:-$MH/prompts}/$pf" 2>/dev/null) | cut -c1-16)"
   done
 fi
 
