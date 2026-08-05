@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
+	"github.com/tysonthomas9/loomcli/internal/cli/provenance"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/observability/tracing"
 )
@@ -20,6 +21,13 @@ import (
 var (
 	Version = "dev"
 	Build   = "unknown"
+	// Ref, SourcePRs and BuildTime complete the build provenance (D-48). They
+	// stay in this package because deployers stamp
+	// -X .../internal/cli.<Name>=...; the logic that reads them lives in
+	// internal/cli/provenance.
+	Ref       = ""
+	SourcePRs = ""
+	BuildTime = ""
 )
 
 // serverFlag stores the --server flag value (remote loom server base URL).
@@ -94,9 +102,8 @@ EXAMPLES
 		if v, _ := cmd.Flags().GetBool("version"); v {
 			// Delegates to the same assembly `loom version` uses so the two
 			// entry points cannot report different provenance.
-			info := CurrentVersionInfo()
-			fmt.Println(info.String())
-			if warn := VersionSkewWarning(); warn != "" {
+			fmt.Println(provenance.Current(BuildStamp()).String())
+			if warn := provenance.SkewWarning(BuildStamp()); warn != "" {
 				fmt.Fprintln(os.Stderr, warn)
 			}
 			return
@@ -107,6 +114,7 @@ EXAMPLES
 
 func init() {
 	rootCmd.Flags().BoolP("version", "v", false, "Print version information")
+	RegisterCommand(provenance.NewVersionCmd(BuildStamp))
 	rootCmd.PersistentFlags().StringVar(&backendFlag, "backend", "", "AI backend CLI to use (codex, claude, opencode). Env: LOOM_BACKEND")
 	rootCmd.PersistentFlags().StringVar(&logFormat, "log-format", "text", "Log format (text|json)")
 	rootCmd.PersistentFlags().StringVar(&logOutput, "log-output", "stderr", "Log output destination (stderr|<filepath>)")
@@ -398,4 +406,16 @@ func parseGitBranches(output string) []string {
 	}
 
 	return unique
+}
+
+// BuildStamp gathers this binary's ldflags-set provenance for the
+// internal/cli/provenance helpers.
+func BuildStamp() provenance.Stamp {
+	return provenance.Stamp{
+		Version:   Version,
+		Commit:    Build,
+		Ref:       Ref,
+		SourcePRs: SourcePRs,
+		BuildTime: BuildTime,
+	}
 }

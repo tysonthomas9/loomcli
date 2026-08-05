@@ -1,4 +1,4 @@
-package cli
+package provenance
 
 import (
 	"encoding/json"
@@ -8,19 +8,19 @@ import (
 	"testing"
 )
 
-// stampBuild sets the ldflags-backed vars for one test and restores them.
-func stampBuild(t *testing.T, version, commit, ref, prs, built string) {
-	t.Helper()
-	ov, oc, or, op, ob := Version, Build, Ref, SourcePRs, BuildTime
-	Version, Build, Ref, SourcePRs, BuildTime = version, commit, ref, prs, built
-	t.Cleanup(func() { Version, Build, Ref, SourcePRs, BuildTime = ov, oc, or, op, ob })
+// stamp builds the ldflags-equivalent input for one case. The real vars live
+// in internal/cli (deployers stamp them by that import path); the logic under
+// test takes them as a value, which is why these tests need no globals.
+func stamp(version, commit, ref, prs, built string) Stamp {
+	return Stamp{Version: version, Commit: commit, Ref: ref, SourcePRs: prs, BuildTime: built}
 }
 
-func TestCurrentVersionInfo_ReportsWhatWasStamped(t *testing.T) {
+func TestCurrent_ReportsWhatWasStamped(t *testing.T) {
 	t.Setenv("LOOM_DIR", t.TempDir())
-	stampBuild(t, "1.2.3", "abc1234", "v5", "https://github.com/o/r/pull/1, https://github.com/o/r/pull/2", "2026-08-05T12:00:00Z")
 
-	info := CurrentVersionInfo()
+	info := Current(stamp("1.2.3", "abc1234", "v5",
+		"https://github.com/o/r/pull/1, https://github.com/o/r/pull/2", "2026-08-05T12:00:00Z"))
+
 	if info.Version != "1.2.3" || info.Commit != "abc1234" || info.Ref != "v5" {
 		t.Fatalf("info = %+v", info)
 	}
@@ -37,11 +37,10 @@ func TestCurrentVersionInfo_ReportsWhatWasStamped(t *testing.T) {
 
 // An unstamped build must say nothing rather than invent a ref: the whole
 // point of the field is that a deployed binary can be trusted about it.
-func TestCurrentVersionInfo_UnstampedFieldsStayAbsent(t *testing.T) {
+func TestCurrent_UnstampedFieldsStayAbsent(t *testing.T) {
 	t.Setenv("LOOM_DIR", t.TempDir())
-	stampBuild(t, "dev", "unknown", "", "", "")
 
-	info := CurrentVersionInfo()
+	info := Current(stamp("dev", "unknown", "", "", ""))
 	if info.Ref != "" || info.SourcePRs != nil || info.BuildTime != "" {
 		t.Fatalf("unstamped info should be empty, got %+v", info)
 	}
@@ -59,18 +58,18 @@ func TestCurrentVersionInfo_UnstampedFieldsStayAbsent(t *testing.T) {
 func TestDeployRecord_RoundTripAndSkew(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("LOOM_DIR", dir)
+	deployed := stamp("1.0.0", "cafe123", "v5", "", "")
 
 	// Nothing recorded yet: absence is not an error and not skew.
 	rec, err := ReadDeployRecord()
 	if err != nil || rec != nil {
 		t.Fatalf("ReadDeployRecord on a fresh host = (%v, %v), want (nil, nil)", rec, err)
 	}
-	stampBuild(t, "1.0.0", "cafe123", "v5", "", "")
-	if got := CurrentVersionInfo().Skew; got != "" {
+	if got := Current(deployed).Skew; got != "" {
 		t.Fatalf("skew with no record = %q, want empty", got)
 	}
 
-	path, err := WriteDeployRecord("2026-08-05T12:00:00Z")
+	path, err := WriteDeployRecord(deployed, "2026-08-05T12:00:00Z")
 	if err != nil {
 		t.Fatalf("WriteDeployRecord: %v", err)
 	}
@@ -78,8 +77,8 @@ func TestDeployRecord_RoundTripAndSkew(t *testing.T) {
 		t.Fatalf("record path = %q", path)
 	}
 
-	// Same binary as recorded: no skew, and the record is reported.
-	info := CurrentVersionInfo()
+	// The recorded build compared against itself: no skew, record reported.
+	info := Current(deployed)
 	if info.Skew != "" {
 		t.Fatalf("skew against its own record = %q", info.Skew)
 	}
@@ -88,8 +87,8 @@ func TestDeployRecord_RoundTripAndSkew(t *testing.T) {
 	}
 
 	// A different commit is skew, and the message names both sides.
-	stampBuild(t, "1.0.0", "deadbee", "feature/x", "", "")
-	info = CurrentVersionInfo()
+	other := stamp("1.0.0", "deadbee", "feature/x", "", "")
+	info = Current(other)
 	if info.Skew == "" {
 		t.Fatal("a different commit must report skew")
 	}
@@ -98,27 +97,25 @@ func TestDeployRecord_RoundTripAndSkew(t *testing.T) {
 			t.Errorf("skew %q should name %q", info.Skew, want)
 		}
 	}
-	if w := VersionSkewWarning(); !strings.Contains(w, "WARNING") || !strings.Contains(w, "deadbee") {
-		t.Errorf("VersionSkewWarning() = %q", w)
+	if w := SkewWarning(other); !strings.Contains(w, "WARNING") || !strings.Contains(w, "deadbee") {
+		t.Errorf("SkewWarning() = %q", w)
 	}
 }
 
 // Missing commit data on either side means "cannot tell", not "skew" — a
 // warning that fires on a plain `go build` teaches operators to ignore it.
 func TestSkew_UnknownCommitsDoNotWarn(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("LOOM_DIR", dir)
+	t.Setenv("LOOM_DIR", t.TempDir())
 
-	stampBuild(t, "dev", "", "", "", "")
-	if _, err := WriteDeployRecord("2026-08-05T12:00:00Z"); err != nil {
+	if _, err := WriteDeployRecord(stamp("dev", "", "", "", ""), "2026-08-05T12:00:00Z"); err != nil {
 		t.Fatal(err)
 	}
-	stampBuild(t, "dev", "abc1234", "", "", "")
-	if got := CurrentVersionInfo().Skew; got != "" {
+	running := stamp("dev", "abc1234", "", "", "")
+	if got := Current(running).Skew; got != "" {
 		t.Fatalf("skew against an unstamped record = %q, want empty", got)
 	}
-	if got := VersionSkewWarning(); got != "" {
-		t.Fatalf("VersionSkewWarning = %q, want empty", got)
+	if got := SkewWarning(running); got != "" {
+		t.Fatalf("SkewWarning = %q, want empty", got)
 	}
 }
 
@@ -131,8 +128,8 @@ func TestReadDeployRecord_MalformedIsAnError(t *testing.T) {
 	if _, err := ReadDeployRecord(); err == nil {
 		t.Fatal("a malformed record must error rather than read as absent")
 	}
-	// And it must not crash the version path.
-	if got := CurrentVersionInfo(); got.Deployed != nil {
+	// And it must not break the version path.
+	if got := Current(stamp("dev", "abc1234", "", "", "")); got.Deployed != nil {
 		t.Fatalf("Deployed = %+v, want nil on a malformed record", got.Deployed)
 	}
 }

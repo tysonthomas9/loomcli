@@ -1,4 +1,4 @@
-package cli
+package provenance
 
 import (
 	"encoding/json"
@@ -22,18 +22,18 @@ import (
 // a mysterious behavior difference rather than "you are running last week's
 // binary". A deployed build records itself; every later invocation can compare.
 
-// Provenance vars, all settable with -ldflags -X. Empty/unknown is a legal
-// state and is reported as such rather than guessed at: a binary built by
-// `go build` with no stamping must not claim a ref it does not have.
-var (
-	// Ref is the git ref the build came from (branch or tag).
-	Ref = ""
-	// SourcePRs is a comma-separated list of PR URLs or numbers the deploy
-	// was assembled from. The deploy tool knows this; nothing else does.
-	SourcePRs = ""
-	// BuildTime is an RFC3339 timestamp.
-	BuildTime = ""
-)
+// Stamp carries the ldflags-set build vars in from the parent package. They
+// live there because external deployers stamp
+// -X .../internal/cli.Build=... and moving them would break every existing
+// build command; the logic lives here because internal/cli is at its
+// package-size ceiling and this is a self-contained concern.
+type Stamp struct {
+	Version   string
+	Commit    string
+	Ref       string
+	SourcePRs string
+	BuildTime string
+}
 
 // VersionInfo is the structured form of `loom version --json`.
 type VersionInfo struct {
@@ -70,13 +70,13 @@ const deployRecordName = "deployed-version.json"
 
 // CurrentVersionInfo assembles this binary's provenance and compares it with
 // the host's deploy record.
-func CurrentVersionInfo() VersionInfo {
+func Current(s Stamp) VersionInfo {
 	info := VersionInfo{
-		Version:   Version,
-		Commit:    Build,
-		Ref:       Ref,
-		SourcePRs: splitSourcePRs(SourcePRs),
-		BuildTime: BuildTime,
+		Version:   s.Version,
+		Commit:    s.Commit,
+		Ref:       s.Ref,
+		SourcePRs: splitSourcePRs(s.SourcePRs),
+		BuildTime: s.BuildTime,
 	}
 	if exe, err := os.Executable(); err == nil {
 		info.Path = exe
@@ -189,7 +189,7 @@ func ReadDeployRecord() (*DeployedBuild, error) {
 // WriteDeployRecord records THIS binary as the deployed build. The deployer
 // calls `loom version --record` after installing, so the record describes the
 // binary that was actually put in place rather than whatever ran last.
-func WriteDeployRecord(now string) (string, error) {
+func WriteDeployRecord(s Stamp, now string) (string, error) {
 	dir, err := loomDirForProvenance()
 	if err != nil {
 		return "", err
@@ -198,11 +198,11 @@ func WriteDeployRecord(now string) (string, error) {
 		return "", err
 	}
 	rec := DeployedBuild{
-		Version:    Version,
-		Commit:     Build,
-		Ref:        Ref,
-		SourcePRs:  splitSourcePRs(SourcePRs),
-		BuildTime:  BuildTime,
+		Version:    s.Version,
+		Commit:     s.Commit,
+		Ref:        s.Ref,
+		SourcePRs:  splitSourcePRs(s.SourcePRs),
+		BuildTime:  s.BuildTime,
 		RecordedAt: now,
 	}
 	if exe, exeErr := os.Executable(); exeErr == nil {
@@ -222,8 +222,8 @@ func WriteDeployRecord(now string) (string, error) {
 // VersionSkewWarning returns the operator-facing warning for a stale PATH
 // binary, or "" when there is nothing to say. Cheap enough to call from a
 // session preamble: one small file read, no exec.
-func VersionSkewWarning() string {
-	info := CurrentVersionInfo()
+func SkewWarning(s Stamp) string {
+	info := Current(s)
 	if info.Skew == "" {
 		return ""
 	}
