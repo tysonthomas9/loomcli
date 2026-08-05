@@ -126,6 +126,7 @@ func (binding *ExecutionAwaitResolverBinding) ResolveAwaitAndResume(
 	return resolver.ResolveAwaitAndResume(ctx, workspace, instanceKey, eventID, payload, actor)
 }
 
+//nolint:funlen // Composition intentionally wires the complete capability graph in one visible sequence.
 func ComposeWorkflowCatalogAutomation(
 	config WorkflowCatalogConfig,
 ) (*AutomationCapability, *ExecutionAwaitResolverBinding, error) {

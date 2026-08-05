@@ -164,7 +164,7 @@ func (s *Service) SetLifecycle(ctx context.Context, command SetLifecycleCommand)
 }
 
 func (s *Service) Delete(ctx context.Context, command DeleteCommand) (*Reference, error) {
-	current, err := s.Resolve(ctx, ResolveQuery{Reference: command.Reference})
+	current, err := s.Resolve(ctx, ResolveQuery(command))
 	if err != nil {
 		return nil, err
 	}
@@ -274,10 +274,7 @@ func (s *Service) UnregisterRepository(ctx context.Context, command UnregisterRe
 	if s.repositories == nil {
 		return nil, fmt.Errorf("Workspace repository catalog unavailable: %w", ErrUnavailable)
 	}
-	current, err := s.GetRepository(ctx, GetRepositoryQuery{
-		WorkspaceReference: command.WorkspaceReference,
-		Name:               command.Name,
-	})
+	current, err := s.GetRepository(ctx, GetRepositoryQuery(command))
 	if err != nil {
 		return nil, err
 	}

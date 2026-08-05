@@ -46,6 +46,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
@@ -98,6 +99,36 @@ func (h *awaitFlows) awaitResolver() store.AtomicAwaitStore {
 }
 
 type awaitE2EClaimPort struct{}
+
+// awaitE2EApprovalAuthorityProvider is the approval endpoint's test-session
+// authority bridge. The suite already translates its private identity headers
+// into verified middleware identity; this bridge mints only the matching
+// short-lived Automation approval authority from that verified actor.
+type awaitE2EApprovalAuthorityProvider struct {
+	issuer *authority.Issuer
+}
+
+func (provider awaitE2EApprovalAuthorityProvider) AuthorityForVerifiedSession(
+	ctx context.Context,
+	workspace,
+	actor string,
+) (authority.OperatorAuthority, error) {
+	if provider.issuer == nil || ctx == nil || strings.TrimSpace(workspace) == "" ||
+		workspace != strings.TrimSpace(workspace) || strings.TrimSpace(actor) == "" || actor != strings.TrimSpace(actor) {
+		return authority.OperatorAuthority{}, authority.ErrInvalidScope
+	}
+	if err := ctx.Err(); err != nil {
+		return authority.OperatorAuthority{}, err
+	}
+	principal, err := provider.issuer.DeriveVerifiedPrincipal(authority.PrincipalClaims{
+		Subject: actor, Class: authority.ClassOperator, Workspace: workspace,
+		Actions: []authority.Action{automation.ActionJournalApproval}, ExpiresAt: time.Now().Add(time.Minute),
+	})
+	if err != nil {
+		return authority.OperatorAuthority{}, err
+	}
+	return provider.issuer.IssueOperator(principal, workspace, automation.ActionJournalApproval)
+}
 
 func (awaitE2EClaimPort) ReplayTaskRunRequest(context.Context, execution.RequestTaskRunCommand) (execution.RequestTaskRunResult, error) {
 	return execution.RequestTaskRunResult{}, execution.ErrUnavailable
@@ -257,6 +288,21 @@ func newAwaitFlowsServer(t *testing.T, st store.Store, runTokenKey []byte) (*htt
 		ComponentID: string(appserve.AwaitEventNotificationComponentID),
 	}
 	awaitMatcher := trigger.NewAwaitMatcherWithResolver(st.Awaits(), st.DriverRuns(), awaitResolver)
+	approvalEvents, ok := st.TriggerEvents().(automation.ApprovalEventStore)
+	if !ok {
+		t.Fatal("await E2E store lacks Automation approval journal support")
+	}
+	approvalIssuer := authority.NewIssuer()
+	approvalAdmission, err := approvalIssuer.NewAdmission(
+		authority.OperatorOnly(automation.ActionJournalApproval),
+	)
+	if err != nil {
+		t.Fatalf("compose await E2E approval admission: %v", err)
+	}
+	approvalJournal := automation.New(
+		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, approvalAdmission,
+		automation.WithApprovalEventStore(approvalEvents),
+	)
 	mux := http.NewServeMux()
 	driverapi.NewModule(driverapi.Config{
 		Store: st, RunTokenKey: runTokenKey,
@@ -266,7 +312,10 @@ func newAwaitFlowsServer(t *testing.T, st store.Store, runTokenKey []byte) (*htt
 		TaskRuns: executionCapability.TaskRunAPI(), TaskRunAuthorities: executionCapability.TaskRunAuthorityResolver(),
 		WorkflowCatalog: awaitE2EWorkflowCatalog{store: st},
 	}).Register(mux)
-	approvals.New(approvals.Config{Store: st, Awaits: awaitMatcher}).Register(mux)
+	approvals.New(approvals.Config{
+		Store: st, Awaits: awaitMatcher, Journal: approvalJournal,
+		Authority: awaitE2EApprovalAuthorityProvider{issuer: approvalIssuer},
+	}).Register(mux)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if user := r.Header.Get(awaitE2EUserHeader); user != "" {
 			identity := middleware.UserIdentity{UserID: user, Email: r.Header.Get(awaitE2EEmailHeader)}

@@ -29,6 +29,7 @@ func NewSession(store SessionStore, admission *authority.Admission) (*SessionSer
 	return &SessionService{store: store, admission: admission}, nil
 }
 
+//nolint:funlen // Creation keeps authority, owner, digest, and persisted projection checks together.
 func (service *SessionService) CreateContent(
 	ctx context.Context,
 	auth SessionContentAuthorities,

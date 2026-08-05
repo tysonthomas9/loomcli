@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 )
 
@@ -21,9 +22,12 @@ const (
 	ttl       = 24 * time.Hour
 )
 
-// Compatibility aliases keep existing WebUI callers source-compatible while
-// Interaction owns the canonical tab vocabulary.
+// IssueTab keeps existing WebUI callers source-compatible while Interaction
+// owns the canonical tab vocabulary.
 type IssueTab = interaction.IssueTab
+
+// IssueTabState keeps existing WebUI callers source-compatible while
+// Interaction owns the canonical tab-state vocabulary.
 type IssueTabState = interaction.IssueTabState
 
 // Store provides Redis-backed persistence for issue tab state.

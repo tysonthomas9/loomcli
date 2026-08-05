@@ -100,7 +100,6 @@ func (operations *StoreBackedWorkspaceAdmissionOperations) AddWorkspaceRepos(
 		}
 		return addReposToStoreBackedWorkspace(
 			ctx,
-			operations.store,
 			operations.workspace,
 			req,
 			nil,
@@ -157,7 +156,6 @@ func (operations *StoreBackedWorkspaceAdmissionOperations) PrepareAddRepos(
 	}
 	plan, err := prepareAddReposToStoreBackedWorkspaceAdmission(
 		ctx,
-		operations.store,
 		operations.workspace,
 		req,
 		operations.process,

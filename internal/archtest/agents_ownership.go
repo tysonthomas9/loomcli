@@ -416,7 +416,7 @@ const (
 )
 
 var phase5AgentsCompatibilityCompositions = map[string]struct{}{
-	"internal/cli/serve/workspacemgr/agents_bootstrap.go": {},
+	"internal/cli/serve/workspacemgr/agentsbootstrapcomposition/managed.go": {},
 }
 
 // snapshotPhase5AgentsCompatibilityImportBlockers enforces agentscompatstore

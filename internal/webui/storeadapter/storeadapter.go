@@ -16,6 +16,13 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
+// ActiveWorkspaceKey projects the explicit runtime workspace selection for UI
+// composition. An unavailable selection is represented as the empty key.
+func ActiveWorkspaceKey(ctx context.Context, workspaces store.WorkspaceStore) string {
+	key, _ := bootstrap.ResolveActiveWorkspaceKey(ctx, workspaces)
+	return key
+}
+
 // BuildActiveWorkspaceData materializes the active workspace topology as
 // an *ops.WorkspaceData using the supplied Store. The "active" workspace
 // key comes from the explicit runtime workspace. If no runtime workspace is

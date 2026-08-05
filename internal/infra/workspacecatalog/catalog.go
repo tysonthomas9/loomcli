@@ -95,7 +95,7 @@ func (s catalogStore) SetDesignFormat(ctx context.Context, key, format string) (
 }
 
 func (s catalogStore) SetLifecycle(ctx context.Context, key string, update workspace.LifecycleUpdate) (*workspace.Reference, error) {
-	state := domain.WorkspaceState(update.State)
+	state := update.State
 	message := update.ErrorMessage
 	patch := store.WorkspaceUpdate{State: &state, ErrorMessage: &message}
 	if update.DefaultBranch != nil {

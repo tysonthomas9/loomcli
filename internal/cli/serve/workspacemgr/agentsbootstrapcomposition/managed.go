@@ -1,4 +1,6 @@
-package workspacemgr
+// Package agentsbootstrapcomposition assembles the canonical Agents bootstrap
+// workflow from the two persistence facets owned by workspace materialization.
+package agentsbootstrapcomposition
 
 import (
 	"fmt"
@@ -7,14 +9,14 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/infra/agentsbootstrapstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	storepkg "github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-// newManagedAgentsCommands composes the canonical Agents bootstrap workflow
-// from only the Role and Agent identity persistence facets it owns.
-func newManagedAgentsCommands(
-	roles storepkg.RoleStore,
-	agentServices storepkg.AgentServiceStore,
+// NewManagedCommands composes the canonical Agents bootstrap workflow from
+// only the Role and Agent identity persistence facets it owns.
+func NewManagedCommands(
+	roles store.RoleStore,
+	agentServices store.AgentServiceStore,
 ) (agentsbootstrap.ManagedCommands, error) {
 	issuer := authority.NewIssuer()
 	admission, err := issuer.NewAdmission(agents.OperationRules()...)

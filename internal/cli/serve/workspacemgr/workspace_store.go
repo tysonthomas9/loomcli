@@ -12,6 +12,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr/admissionstore"
+	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr/agentsbootstrapcomposition"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/infra/workspacecatalog"
@@ -258,7 +259,6 @@ func createStoreBackedEmptyWorkspace(
 //nolint:cyclop,funlen // Coordinates local git worktrees, fleet-db repo records, and local state rollback.
 func addReposToStoreBackedWorkspace(
 	ctx context.Context,
-	s admissionstore.Store,
 	catalog workspacemodule.API,
 	req service.WorkspaceAddReposRequest,
 	materializer repositoryCheckoutMaterializer,
@@ -460,7 +460,7 @@ func seedBuiltInRoles(ctx context.Context, s admissionstore.Store, key, wsDir st
 			Description:  "Lead/orchestrator terminal",
 		},
 	}
-	commands, err := newManagedAgentsCommands(
+	commands, err := agentsbootstrapcomposition.NewManagedCommands(
 		s.Roles(),
 		s.AgentServices(),
 	)
@@ -525,7 +525,7 @@ func EnsureBuiltinRolePrompts(ctx context.Context, s storepkg.Store) error {
 	if s == nil {
 		return nil
 	}
-	commands, err := newManagedAgentsCommands(
+	commands, err := agentsbootstrapcomposition.NewManagedCommands(
 		s.Roles(),
 		s.AgentServices(),
 	)
@@ -555,7 +555,7 @@ func EnsureBuiltinRolePrompts(ctx context.Context, s storepkg.Store) error {
 // ensureBuiltinRolePrompt materializes one builtin role's default prompt body
 // when (and only when) its PromptFile is empty.
 func ensureBuiltinRolePrompt(ctx context.Context, s storepkg.Store, key, wsDir, roleName string) {
-	commands, err := newManagedAgentsCommands(
+	commands, err := agentsbootstrapcomposition.NewManagedCommands(
 		s.Roles(),
 		s.AgentServices(),
 	)

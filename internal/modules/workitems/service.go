@@ -72,6 +72,7 @@ func (s *Service) Create(ctx context.Context, command CreateCommand) (*CreatedIs
 	return &CreatedIssue{Summary: &canonical}, nil
 }
 
+//nolint:funlen // Kanban projection joins ready, blocked, deferred, and canonical issue state in one read workflow.
 func (s *Service) List(ctx context.Context, query ListQuery) (*ListResult, error) {
 	if query.Filter.Limit < 0 {
 		return nil, fmt.Errorf("limit must be non-negative: %w", ErrInvalid)

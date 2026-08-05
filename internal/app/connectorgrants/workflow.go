@@ -88,6 +88,8 @@ func New(bindings BindingReader, grants ConnectorManagement) (*Workflow, error) 
 //
 // Replace deliberately does not enable the binding. Its caller may do so only
 // after success, which makes every partial/retry state inert.
+//
+//nolint:funlen // Keeping the fenced revoke/create/recheck ceremony contiguous makes its ordering auditable.
 func (r *Workflow) Replace(ctx context.Context, request ReplaceGrantSetRequest) (ReplaceGrantSetResult, error) {
 	if ctx == nil {
 		return ReplaceGrantSetResult{}, fmt.Errorf("context is required: %w", connectors.ErrInvalid)

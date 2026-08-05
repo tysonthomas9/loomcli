@@ -1,14 +1,12 @@
 package app
 
 import (
-	"net/http"
 	"os"
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/infra/connectorscatalog"
-	"github.com/tysonthomas9/loomcli/internal/infra/connectorsproviders"
-	"github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
+	"github.com/tysonthomas9/loomcli/internal/webui/app/connectorcomposition"
+
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 )
 
@@ -35,32 +33,11 @@ const (
 // without the key sealed credentials can never be opened, so refusing every
 // dispatch up front is strictly safer than failing per-call mid-flow.
 func (app *Server) buildConnectorDispatcher() connectorsmodule.Dispatcher {
-	if app.config.Store == nil {
-		return nil
-	}
-	vault, err := connectorsvault.NewVaultFromEnvOrKeyFile(app.config.LocalSettingsDir)
-	if err != nil {
-		return nil
-	}
-	catalog, err := connectorscatalog.New(
-		app.config.Store.Connectors(),
-		app.config.Store.ConnectorGrants(),
-		app.config.Store.ConnectorCalls(),
+	return connectorcomposition.BuildDispatcher(
+		app.config.Store,
+		app.config.LocalSettingsDir,
+		connectorUpstreamTimeout(),
 	)
-	if err != nil {
-		return nil
-	}
-	client := &http.Client{Timeout: connectorUpstreamTimeout()}
-	dispatcher, err := connectorsmodule.NewDispatch(
-		catalog,
-		vault,
-		connectorsproviders.Default(client),
-		nil,
-	)
-	if err != nil {
-		return nil
-	}
-	return dispatcher
 }
 
 // connectorUpstreamTimeout resolves the provider HTTP client timeout from

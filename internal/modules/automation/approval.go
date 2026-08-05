@@ -22,6 +22,8 @@ const (
 // dispatches it to Execution's await matcher. It intentionally does not match
 // Automation bindings: an approval must be durable even when no binding is
 // configured, and the approval route owns its existing await-only fanout.
+//
+//nolint:funlen // Approval journaling is an ordered authority and generation-fencing transaction.
 func (s *Service) JournalApproval(
 	ctx context.Context,
 	auth authority.OperatorAuthority,

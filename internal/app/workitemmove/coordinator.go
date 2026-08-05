@@ -59,6 +59,7 @@ func New(workItems WorkItems, workspaces WorkspaceCatalog, scope WorkspaceScope)
 	return &Coordinator{workItems: workItems, workspaces: workspaces, scope: scope}, nil
 }
 
+//nolint:funlen // The coordinator keeps the copy-before-delete compensation sequence explicit.
 func (c *Coordinator) Move(ctx context.Context, command Command) (*Result, error) {
 	issueID := strings.TrimSpace(command.IssueID)
 	sourceRef := strings.TrimSpace(command.SourceWorkspace)

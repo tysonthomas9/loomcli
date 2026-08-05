@@ -23,6 +23,7 @@ func NewTaskOutcomes(store TaskOutcomeStore, now func() time.Time) (*TaskOutcome
 	return &TaskOutcomeService{store: store, now: now}, nil
 }
 
+//nolint:cyclop,funlen // The recorder validates every persisted stack boundary before its single mutation.
 func (service *TaskOutcomeService) RecordTaskOutcome(
 	ctx context.Context,
 	command TaskOutcomeCommand,

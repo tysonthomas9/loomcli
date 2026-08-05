@@ -165,6 +165,8 @@ type approvalResponse struct {
 
 // postApproval is the endpoint flow: verified identity -> eligible-approver
 // check -> journal-first append -> matcher dispatch.
+//
+//nolint:funlen // The handler preserves identity, eligibility, authority, journal, and dispatch ordering.
 func (m *Module) postApproval(w http.ResponseWriter, r *http.Request) {
 	ws := r.PathValue("ws")
 	actor, userID, ok := sessionActor(r)

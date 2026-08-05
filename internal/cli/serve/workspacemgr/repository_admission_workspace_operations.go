@@ -222,7 +222,6 @@ type addRepositoriesAdmissionPlan struct {
 //nolint:funlen,cyclop // Preparation resolves the exact complete batch before one durable Begin.
 func prepareAddReposToStoreBackedWorkspaceAdmission(
 	ctx context.Context,
-	s admissionstore.Store,
 	catalog workspacemodule.API,
 	req service.WorkspaceAddReposRequest,
 	process *repositoryAdmissionProcess,
@@ -310,7 +309,6 @@ func addReposToStoreBackedWorkspaceAdmission(
 ) (service.WorkspaceCreateResult, error) {
 	plan, err := prepareAddReposToStoreBackedWorkspaceAdmission(
 		ctx,
-		s,
 		catalog,
 		req,
 		process,

@@ -29,6 +29,8 @@ import (
 // a reconcile failure is a warning, not an epic failure — it is fully
 // re-runnable via `loom stack publish <stack>`. It never uses os.Getwd(); the
 // checkout is provisioned by PublishFromOrigin in a temp dir.
+//
+//nolint:funlen // Reconciliation is an ordered transaction across the stack projection and Git refs.
 func reconcileEpicStack(ctx context.Context, ws string, proj *EpicStackProjection) error {
 	if proj == nil {
 		return nil

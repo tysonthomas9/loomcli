@@ -178,6 +178,7 @@ func (service *StackLifecycleService) RecordStackNodePublication(
 	)
 }
 
+//nolint:funlen // Binding resolution validates the complete stack projection before selecting one node.
 func (service *StackLifecycleService) ResolveTaskStackBinding(
 	ctx context.Context,
 	workspace,
@@ -256,7 +257,7 @@ func slidingStackBase(stack Stack, node StackNode, byTask map[string]StackNode) 
 	return "", fmt.Errorf("stack lineage contains a cycle: %w", ErrInvalidMaterialization)
 }
 
-//nolint:funlen // The reconciliation loop keeps idempotency and result projection in one auditable owner operation.
+//nolint:funlen,gocognit,cyclop // Reconciliation explicitly validates every lineage and conflict branch before mutation.
 func (service *StackLifecycleService) ReconcileStack(ctx context.Context, command ReconcileStackCommand) (*ReconcileStackResult, error) {
 	if service == nil || service.store == nil {
 		return nil, ErrUnavailable

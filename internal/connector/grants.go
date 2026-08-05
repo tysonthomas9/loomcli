@@ -7,6 +7,8 @@ import (
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 )
 
+// DenyReason identifies why legacy connector authorization denied a request.
+//
 // Deprecated: connector authorization policy is owned by modules/connectors.
 type DenyReason = connectorsmodule.GrantDenyReason
 
@@ -19,6 +21,7 @@ const (
 
 // GrantDenied preserves legacy domain sentinel matching while the dispatcher
 // and new callers consume the Connectors-owned structured denial directly.
+//
 // Deprecated: use connectors.GrantDenied.
 type GrantDenied struct {
 	BindingID string
@@ -44,6 +47,8 @@ func (denied *GrantDenied) Unwrap() []error {
 	return []error{domain.ErrGrantDenied}
 }
 
+// Decision is the legacy connector authorization result.
+//
 // Deprecated: use connectors.GrantAuthorization.
 type Decision struct {
 	Allowed bool
@@ -59,6 +64,7 @@ func (decision Decision) Err() error {
 }
 
 // Evaluate is a compatibility adapter over the Connectors-owned policy.
+//
 // Deprecated: use connectors.EvaluateGrantAuthorization.
 func Evaluate(
 	bindingID string,
@@ -103,6 +109,8 @@ func ownerGrant(grant *domain.ConnectorGrant) *connectorsmodule.ConnectorGrant {
 	return owned
 }
 
+// MatchResource evaluates a legacy connector grant resource pattern.
+//
 // Deprecated: use connectors.MatchGrantResource.
 func MatchResource(pattern string, resource string) bool {
 	return connectorsmodule.MatchGrantResource(pattern, resource)

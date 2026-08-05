@@ -76,6 +76,8 @@ func NewManagementWithCredentialVault(
 // SynchronizeConnectorCredential owns credential comparison, inbound-secret
 // preservation, conflict retries, and atomic resealing. Plaintext is wiped and
 // neither the stored ciphertext nor unsealed current value leaves Connectors.
+//
+//nolint:gocognit,funlen // Credential convergence enumerates each fail-closed vault and rollback branch explicitly.
 func (service *ManagementService) SynchronizeConnectorCredential(
 	ctx context.Context,
 	command SynchronizeConnectorCredentialCommand,
@@ -148,6 +150,8 @@ func (service *ManagementService) SynchronizeConnectorCredential(
 // RotateConnector performs one atomic dual-secret rotation and appends its
 // redaction-safe audit record. On an audit failure the rotated Connector is
 // returned together with the error because the atomic secret write has landed.
+//
+//nolint:funlen // Rotation keeps secret generation, durable update, and audit compensation in one ceremony.
 func (service *ManagementService) RotateConnector(
 	ctx context.Context,
 	command RotateConnectorCommand,

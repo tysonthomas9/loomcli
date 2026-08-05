@@ -169,6 +169,7 @@ func (w *TaskWorker) validateRunOnceDependencies() error {
 	return nil
 }
 
+//nolint:funlen // The worker's claim, placement, and execution setup must remain visibly ordered.
 func (w *TaskWorker) runOnceInWorkspace(ctx context.Context, ws, workDir string) (*TaskRunRequestOutcome, error) {
 	nodeID := w.nodeID()
 	if pending := w.taskWorkerRuntimeClaimState().pending; pending != nil && pending.WorkspaceKey == ws {

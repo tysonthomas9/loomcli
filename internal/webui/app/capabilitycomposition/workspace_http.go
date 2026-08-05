@@ -3,7 +3,6 @@ package capabilitycomposition
 import (
 	"context"
 
-	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	workspacehandler "github.com/tysonthomas9/loomcli/internal/webui/handlers/workspace"
@@ -31,8 +30,7 @@ func (p *WorkspaceHTTPProjection) ActiveWorkspaceKey(ctx context.Context) string
 	if p == nil || p.store == nil {
 		return ""
 	}
-	key, _ := bootstrap.ResolveActiveWorkspaceKey(ctx, p.store)
-	return key
+	return storeadapter.ActiveWorkspaceKey(ctx, p.store)
 }
 
 func (p *WorkspaceHTTPProjection) WorkspacePath(key string) string {

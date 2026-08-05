@@ -188,6 +188,7 @@ func TestNewAndNilWorkflowFailClosed(t *testing.T) {
 	if _, err := New(bindings, nil); !errors.Is(err, ErrGrantSetUnavailable) {
 		t.Fatalf("New(bindings, nil) = %v", err)
 	}
+	//nolint:staticcheck // Deliberately exercises fail-closed nil-context validation.
 	if _, err := workflow.Replace(nil, request); !errors.Is(err, connectors.ErrInvalid) {
 		t.Fatalf("nil context Replace = %v", err)
 	}

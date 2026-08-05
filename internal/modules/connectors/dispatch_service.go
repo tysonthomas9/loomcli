@@ -38,6 +38,7 @@ func NewDispatch(
 	return &DispatchService{store: store, vault: vault, providers: providers, now: now}, nil
 }
 
+//nolint:funlen // Dispatch keeps authorization, credential lifetime, provider call, and audit ordering explicit.
 func (service *DispatchService) Dispatch(
 	ctx context.Context,
 	command DispatchCommand,

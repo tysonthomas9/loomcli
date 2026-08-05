@@ -129,6 +129,8 @@ func (app *Server) registerMonitorHandlers() {
 }
 
 // registerWorkspaceRoutes sets up workspace listing, CRUD, and workspace-scoped API routes.
+//
+//nolint:funlen // Route registration keeps the workspace transport surface auditable in one table-like block.
 func (app *Server) registerWorkspaceRoutes() {
 	workspaceMW := app.workspaceMiddleware()
 	workspaceProjection := capabilitycomposition.NewWorkspaceHTTPProjection(app.workspaceStore, app.workspaceSvc)
