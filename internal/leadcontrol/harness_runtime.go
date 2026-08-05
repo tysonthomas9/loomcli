@@ -124,10 +124,7 @@ func RunHarnessLeadRuntime(ctx context.Context, cfg HarnessLeadRuntimeConfig) er
 	handle, unregister := registerLeadConversation(cfg.SessionID, conv)
 	defer unregister()
 
-	if cfg.StartupWarning != "" {
-		_, _ = fmt.Fprintf(cfg.Stdout, "%s\n\n", cfg.StartupWarning)
-	}
-	_, _ = fmt.Fprintf(cfg.Stdout, "Launching controlled %s lead session...\n\n", cfg.Backend)
+	printLeadStartupBanner(cfg)
 	detach := conv.AttachOutput(cfg.Stdout)
 	defer detach()
 	restoreTerminal := forwardHarnessStdin(ctx, cfg, conv)
@@ -153,6 +150,15 @@ func RunHarnessLeadRuntime(ctx context.Context, cfg HarnessLeadRuntimeConfig) er
 	unregister()
 	restoreTerminal()
 	return finalizeHarnessLeadRuntime(cfg, conv, runtime, result, waitErr)
+}
+
+// printLeadStartupBanner writes the operator-facing banner, preceded by any
+// startup warning the caller supplied (the D-44 version-skew tripwire).
+func printLeadStartupBanner(cfg HarnessLeadRuntimeConfig) {
+	if cfg.StartupWarning != "" {
+		_, _ = fmt.Fprintf(cfg.Stdout, "%s\n\n", cfg.StartupWarning)
+	}
+	_, _ = fmt.Fprintf(cfg.Stdout, "Launching controlled %s lead session...\n\n", cfg.Backend)
 }
 
 // openHarnessLeadConversation starts the harness under harness-wrapper PTY

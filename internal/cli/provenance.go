@@ -170,6 +170,8 @@ func ReadDeployRecord() (*DeployedBuild, error) {
 	if err != nil {
 		return nil, err
 	}
+	// #nosec G304 -- path is deployRecordPath(): the loom directory plus a
+	// fixed filename, never caller-supplied.
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return nil, nil
