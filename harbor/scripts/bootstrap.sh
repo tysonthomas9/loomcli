@@ -131,6 +131,13 @@ fi
 
 # ---- codex config ------------------------------------------------------------
 toml_escape() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+# Suppress codex's interactive rate-limit model nudge (blocks controlled
+# sessions on a modal — B2f POC lesson). Must be a TOP-LEVEL key, so it goes
+# in before any [projects] table is appended.
+if ! grep -q '^hide_rate_limit_model_nudge' "$CODEX_HOME/config.toml" 2>/dev/null; then
+  { printf 'hide_rate_limit_model_nudge = true\n'; cat "$CODEX_HOME/config.toml" 2>/dev/null; } \
+    > "$CODEX_HOME/config.toml.tmp" && mv "$CODEX_HOME/config.toml.tmp" "$CODEX_HOME/config.toml"
+fi
 trust_codex_project_path() {
   local path escaped config="$CODEX_HOME/config.toml"
   path="$1"; escaped="$(toml_escape "$path")"
@@ -272,6 +279,23 @@ wait "$FLOCK_BG" 2>/dev/null || true
 log "flock contention verified on $LOOM_CONFIG_DIR"
 
 loom data list >/dev/null 2>&1 || die "loom data list failed (fleet-db not reachable)"
+
+# ---- verification-as-tasks preflight (EXPERIMENTS B2f-revised) ---------------
+# Pre-spend proof that the qa-verify lane is creatable and closable (codex
+# B2f-vet rail; the POC proved no repo registration is needed, this asserts it
+# in THIS container). Leaves one closed probe task; split metrics exclude it.
+if [ "${LOOM_MARATHON_VERIFY_ROLE:-off}" = "tasks" ]; then
+  PROBE_ID=$(loom data create --type task --source-repo qa-verify \
+    --title "qa-verify preflight probe (harness)" -o json 2>/dev/null \
+    | python3 -c 'import sys,json;print(json.load(sys.stdin).get("id",""))' 2>/dev/null)
+  [ -n "$PROBE_ID" ] || die "qa-verify preflight: create failed"
+  loom data update "$PROBE_ID" --status closed >/dev/null 2>&1 \
+    || die "qa-verify preflight: close failed"
+  log "qa-verify preflight probe ok ($PROBE_ID)"
+  for pf in lead-persistent-verifier-tasks.md qa-persistent-tasks.md; do
+    log "prompt-hash $pf $(shasum -a 256 "${LOOM_MARATHON_PROMPTS_DIR:-$MH/prompts}/$pf" 2>/dev/null | cut -c1-16)"
+  done
+fi
 
 # ---- env.sh ------------------------------------------------------------------
 cat > "$MH/env.sh" <<EOF

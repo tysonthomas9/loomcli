@@ -309,6 +309,29 @@ keeps the product walk (the B2d vantage) → gates ≥1/5 AND replica-ux ≥0.8
 level — which would localize the constraint to single-executor
 verification bandwidth (QA can't drain both duties at integration pace).
 
+VET (2026-08-05, codex): EXECUTE-WITH-FIXES — all folded:
+- Wiring: `tasks` threaded through prompt selection, QA bring-up, pass
+  delivery (lead gets VERIFY_INFO; QA gets its pass), the current-head
+  line (tasks mode only, prior arms byte-stable), drain-continue, and an
+  app-source guard in the integration sweep.
+- Duty cycle rebalanced against queue starvation of the ux-winning
+  blanket vantage: QA verifies the current head against the WHOLE spec on
+  every pass that lists new integrations, THEN drains ≤2 directed tasks;
+  the lead files ≤2 verify-tasks per pass and none when the harness
+  reports backlog >8 (rail records QAV-BACKLOG). [H] bounds, ledgered.
+- Rails: bootstrap pre-spend probe proves qa-verify create/close in-
+  container (the POC already proved no repo registration is needed —
+  vet finding 2 overstated that — but the assert is free); codex nudge
+  suppression in container config; prompt hashes logged at bootstrap.
+- Purity: prompt files carry no experiment labels/comments; the [S]-
+  flagged phrases (duty ordering, target-enumeration) removed; remaining
+  bounds are disclosed [H] rails.
+- OBSERVABLES (disambiguate "composition worked" from "B2d again with
+  stale verify-tasks"): count of lead-filed qa-verify tasks, claimed/
+  closed counts and ages, QA-RESULT coverage, corrective attribution
+  (blanket-found vs directed-found), all computable from final-issues +
+  comments + integration.log; report them with the score.
+
 ### B3. fractal-generic — infrastructure COMMITTED
 Mission mode `generic` (verbatim spec + finish sentence — the hardcoded
 preamble is bypassed; strip-vet #3); hidden reserve pinned to 0; concurrency

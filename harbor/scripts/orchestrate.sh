@@ -80,6 +80,7 @@ persistent_lead_start() {
   local lead_prompt="$PROMPTS/lead-persistent.md"
   [ "$VERIFY_ROLE" = "lead" ] && lead_prompt="$PROMPTS/lead-persistent-verifier.md"
   [ "$VERIFY_ROLE" = "lead-ui" ] && lead_prompt="$PROMPTS/lead-persistent-verifier-ui.md"
+  [ "$VERIFY_ROLE" = "tasks" ] && lead_prompt="$PROMPTS/lead-persistent-verifier-tasks.md"
   cat > "$LOGD/lead-launch.sh" <<LEOF
 #!/usr/bin/env bash
 . "$MH/env.sh"
@@ -96,12 +97,14 @@ LEOF
 # uses — a second `loom lead` process registered under agent name `qa` via
 # LOOM_AGENT_NAME, with its own app-server thread, addressable via leadmsg.
 persistent_qa_start() {
+  local qa_prompt="$PROMPTS/qa-persistent.md"
+  [ "$VERIFY_ROLE" = "tasks" ] && qa_prompt="$PROMPTS/qa-persistent-tasks.md"
   cat > "$LOGD/qa-launch.sh" <<QEOF
 #!/usr/bin/env bash
 . "$MH/env.sh"
 export LOOM_AGENT_NAME=qa
 cd "\$MARATHON_WS_ROOT/app" || exit 1
-exec loom lead --backend codex --prompt "$PROMPTS/qa-persistent.md"
+exec loom lead --backend codex --prompt "$qa_prompt"
 QEOF
   chmod +x "$LOGD/qa-launch.sh"
   tmux kill-session -t "$QA_TMUX" 2>/dev/null
@@ -195,8 +198,11 @@ impl_reviews() {
     | python3 -c '
 import sys, json
 for i in json.load(sys.stdin):
-    if "needs-revision" not in (i.get("labels") or []):
-        print(i["id"])
+    if "needs-revision" in (i.get("labels") or []):
+        continue
+    if i.get("source_repo") and i.get("source_repo") != "app":
+        continue  # verification-lane tasks never enter the integration gate
+    print(i["id"])
 ' 2>/dev/null) || return 0
   for id in $ids; do
     # NB: must be python3 -c, NOT `python3 - <<heredoc` — a heredoc would
@@ -599,7 +605,7 @@ epics = [i for i in issues if i.get("issue_type") == "epic"]
 print(epics[0]["id"] if epics else "")' 2>/dev/null)
   log "verify role=$VERIFY_ROLE epic=$EPIC_ID checkout=${MARATHON_VERIFY_CHECKOUT:-unset}"
 fi
-if [ "$VERIFY_ROLE" = "qa" ]; then
+if [ "$VERIFY_ROLE" = "qa" ] || [ "$VERIFY_ROLE" = "tasks" ]; then
   persistent_qa_start || { FINALIZE_REASON=qa-tmux-failed; echo "[orchestrate] FATAL: tmux qa launch failed" >&2; exit 1; }
   record "PERSISTENT-QA started tmux=$QA_TMUX"
   QA_READY=0
@@ -654,14 +660,28 @@ while :; do
   VERIFY_INFO=""
   if [ "$VERIFY_ROLE" != "off" ]; then
     integ_delta
-    VERIFY_INFO=" Integrated since last pass: ${INTEG_DELTA:-none}. Verification checkout: ${MARATHON_VERIFY_CHECKOUT}. Epic: ${EPIC_ID}."
+    VERIFY_HEAD=""
+    if [ "$VERIFY_ROLE" = "tasks" ]; then
+      VERIFY_HEAD=" Current integrated head: $(git -C "${MARATHON_APP_BASE:-/app}" rev-parse --short HEAD 2>/dev/null)."
+    fi
+    VERIFY_INFO=" Integrated since last pass: ${INTEG_DELTA:-none}.${VERIFY_HEAD} Verification checkout: ${MARATHON_VERIFY_CHECKOUT}. Epic: ${EPIC_ID}."
   fi
   if [ "$LEAD_MODE" = "persistent" ]; then
+    BACKLOG_NOTE=""
+    if [ "$VERIFY_ROLE" = "tasks" ]; then
+      QAV_OPEN=$(loom data list --limit 300 -o json 2>/dev/null | python3 -c '
+import sys, json
+print(len([i for i in json.load(sys.stdin) if i.get("source_repo") == "qa-verify" and i.get("status") == "open"]))' 2>/dev/null) || QAV_OPEN=0
+      if [ "${QAV_OPEN:-0}" -gt 8 ]; then
+        BACKLOG_NOTE=" Verification backlog: ${QAV_OPEN} tasks open; do not file new verification tasks this pass."
+        record "QAV-BACKLOG open=${QAV_OPEN} (rail engaged)"
+      fi
+    fi
     case "$VERIFY_ROLE" in
-      lead|lead-ui) persistent_pass lead "${PASS_MSG}${VERIFY_INFO}" >/dev/null ;;
+      lead|lead-ui|tasks) persistent_pass lead "${PASS_MSG}${VERIFY_INFO}${BACKLOG_NOTE}" >/dev/null ;;
       *) persistent_pass lead "$PASS_MSG" >/dev/null ;;
     esac
-    if [ "$VERIFY_ROLE" = "qa" ]; then
+    if [ "$VERIFY_ROLE" = "qa" ] || [ "$VERIFY_ROLE" = "tasks" ]; then
       persistent_pass qa "QA pass $PASS. About $REMAIN_MIN minutes of work time remain.${VERIFY_INFO}" >/dev/null
     fi
   else
@@ -679,8 +699,11 @@ while :; do
   loom data list --status review --limit 500 -o json 2>/dev/null | python3 -c '
 import sys, json
 for i in json.load(sys.stdin):
-    if "needs-revision" not in (i.get("labels") or []):
-        print(i["id"])
+    if "needs-revision" in (i.get("labels") or []):
+        continue
+    if i.get("source_repo") and i.get("source_repo") != "app":
+        continue  # verification-lane tasks never enter the integration gate
+    print(i["id"])
 ' 2>/dev/null | while read -r mid; do
     [ -n "$mid" ] || continue
     loom data show "$mid" -o json 2>/dev/null | python3 -c '
@@ -749,8 +772,8 @@ if has_sub and not has_valid:
   OPEN=$(open_task_count)
   TOTAL=$(nonepic_task_count)
   if [ "$TOTAL" -gt 0 ] && [ "$OPEN" = "0" ]; then
-    if [ "$VERIFY_ROLE" = "lead-ui" ]; then
-      # B2e: draining is not the end — the lead keeps verifying (including
+    if [ "$VERIFY_ROLE" = "lead-ui" ] || [ "$VERIFY_ROLE" = "tasks" ]; then
+      # B2e/B2f: draining is not the end — the lead keeps verifying (including
       # the UI walk) and refiling until the deadline reserve. B2c finalized
       # here and threw away 43 minutes that the ux half needed.
       if [ "${DRAIN_LOGGED:-0}" = "0" ]; then
