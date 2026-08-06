@@ -76,6 +76,21 @@ export function WorkflowRunDetail({
             {run.error_class}
           </div>
         )}
+        <div
+          className={styles.workflowTranscriptState}
+          data-state={active ? "pending" : "absent"}
+          data-testid="workflow-transcript-state"
+        >
+          <div className={styles.workflowTranscriptLabel}>Transcript</div>
+          <div className={styles.workflowTranscriptTitle}>
+            {active ? "Waiting for an agent session" : "No transcript created"}
+          </div>
+          <div className={styles.workflowTranscriptDescription}>
+            {active
+              ? "This workflow has not started an agent session yet. This view will update if it does."
+              : "This workflow finished without starting an agent session, so no agent transcript or diff exists."}
+          </div>
+        </div>
       </header>
 
       <div className={styles.workflowDetailBody}>
@@ -116,12 +131,6 @@ export function WorkflowRunDetail({
             </dl>
           </section>
         )}
-
-        <div className={styles.workflowNoSessionNote}>
-          {active
-            ? "An agent session is not available yet. This view will update if the automation starts one."
-            : "No agent session was recorded for this automation, so no agent transcript or diff is available."}
-        </div>
       </div>
     </div>
   );
