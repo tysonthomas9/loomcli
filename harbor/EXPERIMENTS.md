@@ -368,6 +368,29 @@ on both failures. Anti-cheat clean, health true.
   before the async lead turn finished ("1 tasks" vs real 8) — fix
   post-seed count to wait on lead idle before logging.
 
+#### AS-RUN repeat (2026-08-06, loom-generic-tasks-2, run 20) — UX HALF
+#### STABLE, CORRECTNESS HALF HIGH-VARIANCE
+Identical arm (prompt hashes byte-match run 19). **0/5 gates + replica-ux
+0.9375 → site partial 0.469.** API breadth IMPROVED (107/129, loom best),
+mechanics improved (30 integrated incl 20 correctives, ZERO integration
+failures, epic fully drained, $187.30), ux identical (8 PASS + polish
+PARTIAL — 4th consecutive run of this family at 0.9375-1.0). But every
+lost gate shares one signature: cross-node fan-out / dense seq / replay
+(IRC 7/11 all-bridge-fails, crash 1/3, chaos 1/3) — the clustered
+event-log semantics run 19 built as a dedicated seed task.
+- The verification loop TARGETED it: 36 verify-tasks filed/closed (median
+  1 min), five aimed exactly at cluster faults (cross-node fan-out +
+  Redis outage fallback, dense seq under outage, supervisor respawn);
+  QA found MORE deviations than run 19 (~53% PASS vs ~67%). Direction
+  was right; a 1-2 min manual directed check cannot reproduce the
+  multi-node kill/outage choreography the gate pytest orchestrates.
+- n=2 verdict: mean site partial 0.619 (still > board 0.6) but gate
+  variance is the binding risk — the correctness half rides on whether
+  one seed task nails clustered event-log semantics. The systematic fix
+  is codex-L2's deterministic evidence gate (run the fault suite, or a
+  faithful miniature, inside the loop as an integration-gate check or a
+  QA tool) rather than more directed manual checks. Next arm candidate.
+
 ### B3. fractal-generic — infrastructure COMMITTED
 Mission mode `generic` (verbatim spec + finish sentence — the hardcoded
 preamble is bypassed; strip-vet #3); hidden reserve pinned to 0; concurrency
