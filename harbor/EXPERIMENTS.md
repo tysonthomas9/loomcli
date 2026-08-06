@@ -471,6 +471,46 @@ verification mind holding the backend vantage.
    active turn, both cursors advance); violation = abort early, ~$10
    exposure instead of $200. No separate pre-spend run.
 
+#### AS-RUN (2026-08-06, loom-generic-tasks-dual-1, run 21) — PREDICTION
+#### FALSIFIED: 0/5 gates + replica-ux 0.9375 → site 0.469
+Mechanics flawless: smoke assertions all green, 34 passes, ZERO
+ALTERNATION-SKIP / QA-DELIVERY-ERROR, 19 integrated (8 seed + 11
+correctives) all first-attempt, $171.54, deadline finalize. UX held at
+0.9375 — FIFTH consecutive run of the persistent-QA family at exactly
+that profile, now proven robust even at HALF product-QA cadence. But
+the gates: the SAME six tests failed as run 20 (cross-node WS fan-out
+to a subscriber on another node, replay across a dead node, seq density
+across Redis outage, IRC bridge-seq 2) — three runs, one signature, and
+only run 19's dedicated event-log seed task ever passed it. API 93/129
+(family worst; decomposition variance).
+- The backend QA DID its designed job, deeply: built backend_probe.py
+  on pass 1 and re-ran/extended it per head (46→58 of the app's own
+  tests + launcher smoke each time), live cross-node REST checks over
+  real 3-node clusters, HTTP-node respawn and Redis-SIGKILL checks,
+  found real contract deviations (MessageObj.mentions shape,
+  include_archived) → lanes: backend 11 filed/10 closed (median 2 min),
+  product 4/4 (median 10 min); QA-RESULT 50:50 PASS:DEVIATIONS (most
+  deviation-heavy run).
+- WHY THE GATES STILL FAILED (two mechanisms, both now evidence-backed):
+  (1) VOCABULARY: its fault checks verified RECOVERY (respawn, health,
+  REST-after-fault) — the gates verify CONTINUITY (a WS subscriber on
+  node B receives messages posted via node A DURING the fault, missed
+  events replay on resume, seq stays dense THROUGH the outage). No
+  agent probe across 3 runs has spontaneously reproduced that
+  choreography. (2) TIMING: the fault-hardening correctives landed in
+  the final 2 passes — no verify→corrective→fix cycle remained.
+- NEW FAILURE MODE: corrective drain LOST the race for the first time —
+  23 filed, 12 still open at deadline. Two verification minds generate
+  findings faster than one coder drains them (the flagged risk axis).
+- CONCLUSION (n=3 of the tasks family: gates {3,0,0}, ux 0.9375×3,
+  site mean 0.569): agent-owned verification has hit its ceiling on
+  these gates. The evidence now MANDATES the deferred arm — a
+  deterministic continuity fault-suite (spec-derived: boot 3 nodes,
+  subscribe WS on B, post via A, kill C / kill Redis, assert delivery
+  during fault + replay on resume + dense seq) run per-integration as a
+  harness gate or a frozen tool the QA invokes. Plus either a second
+  coder or verified-priority correctives to fix the drain race.
+
 ### B3. fractal-generic — infrastructure COMMITTED
 Mission mode `generic` (verbatim spec + finish sentence — the hardcoded
 preamble is bypassed; strip-vet #3); hidden reserve pinned to 0; concurrency
