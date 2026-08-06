@@ -40,16 +40,17 @@ const (
 // WorkspaceKey, typically used as the tmux session + worktree dir name).
 // Empty Repos means "all repos in the workspace".
 type Agent struct {
-	WorkspaceKey     string   `json:"workspace_key"`
-	Name             string   `json:"name"`
-	RoleName         string   `json:"role_name"`
-	Auto             bool     `json:"auto,omitempty"`
-	Backend          string   `json:"backend,omitempty"`
-	FallbackBackends []string `json:"fallback_backends,omitempty"`
-	Repos            []string `json:"repos,omitempty"`
-	RepoGroups       []string `json:"repo_groups,omitempty"`
-	CrossRepo        bool     `json:"cross_repo,omitempty"`
-	Parent           string   `json:"parent,omitempty"`
+	WorkspaceKey     string          `json:"workspace_key"`
+	Name             string          `json:"name"`
+	RoleName         string          `json:"role_name"`
+	Auto             bool            `json:"auto,omitempty"`
+	Backend          string          `json:"backend,omitempty"`
+	FallbackBackends []string        `json:"fallback_backends,omitempty"`
+	RuntimeProvider  RuntimeProvider `json:"runtime_provider,omitempty"`
+	Repos            []string        `json:"repos,omitempty"`
+	RepoGroups       []string        `json:"repo_groups,omitempty"`
+	CrossRepo        bool            `json:"cross_repo,omitempty"`
+	Parent           string          `json:"parent,omitempty"`
 	// OrchestratorSessionID was here historically as a cache of the
 	// lead-to-orchestration AgentSession join. AgentSession is the
 	// single source of truth; use store.OrchestrationSessionIDFor.

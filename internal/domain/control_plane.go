@@ -24,6 +24,7 @@ const (
 	RuntimeProviderLocal      RuntimeProvider = "local"
 	RuntimeProviderE2B        RuntimeProvider = "e2b"
 	RuntimeProviderKubernetes RuntimeProvider = "kubernetes"
+	RuntimeProviderDaytona    RuntimeProvider = "daytona"
 	RuntimeProviderCI         RuntimeProvider = "ci"
 	RuntimeProviderOther      RuntimeProvider = "other"
 )
@@ -36,11 +37,22 @@ const (
 	NodeDrainDrained  NodeDrainState = "drained"
 )
 
+type PlacementState string
+
+const (
+	PlacementStateProvisioning PlacementState = "provisioning"
+	PlacementStateActive       PlacementState = "active"
+	PlacementStateReleasing    PlacementState = "releasing"
+	PlacementStateReleased     PlacementState = "released"
+	PlacementStateLost         PlacementState = "lost"
+)
+
 type Node struct {
 	WorkspaceKey    string          `json:"workspace_key"`
 	NodeID          string          `json:"node_id"`
 	OwnerActor      string          `json:"owner_actor,omitempty"`
 	RuntimeProvider RuntimeProvider `json:"runtime_provider"`
+	Placement       *NodePlacement  `json:"placement,omitempty"`
 	Labels          []string        `json:"labels,omitempty"`
 	Capabilities    []string        `json:"capabilities,omitempty"`
 	ToolInventory   []string        `json:"tool_inventory,omitempty"`
@@ -51,6 +63,26 @@ type Node struct {
 	ExpiresAt       time.Time       `json:"expires_at"`
 	CreatedAt       time.Time       `json:"created_at"`
 	UpdatedAt       time.Time       `json:"updated_at"`
+}
+
+type NodePlacement struct {
+	SandboxID       string         `json:"sandbox_id,omitempty"`
+	Generation      int64          `json:"generation"`
+	ReservedVCPU    int            `json:"reserved_vcpu,omitempty"`
+	ReservedMemGiB  int            `json:"reserved_mem_gib,omitempty"`
+	State           PlacementState `json:"state"`
+	FirstAttachedAt *time.Time     `json:"first_attached_at,omitempty"`
+	SnapshotRef     string         `json:"snapshot_ref,omitempty"`
+}
+
+func ResolveRuntimeProvider(agent *Agent, profile *DaemonProfile) RuntimeProvider {
+	if agent != nil && agent.RuntimeProvider != "" {
+		return agent.RuntimeProvider
+	}
+	if profile != nil && profile.RuntimeProvider != "" {
+		return profile.RuntimeProvider
+	}
+	return RuntimeProviderLocal
 }
 
 type AgentSessionKind string

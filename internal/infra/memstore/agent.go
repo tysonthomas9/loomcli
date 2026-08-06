@@ -42,6 +42,7 @@ func (s *agentStore) Create(_ context.Context, in store.AgentCreate) (*domain.Ag
 		Auto:             in.Auto,
 		Backend:          in.Backend,
 		FallbackBackends: append([]string(nil), in.FallbackBackends...),
+		RuntimeProvider:  in.RuntimeProvider,
 		Repos:            append([]string(nil), in.Repos...),
 		RepoGroups:       append([]string(nil), in.RepoGroups...),
 		CrossRepo:        in.CrossRepo,
@@ -110,6 +111,9 @@ func applyAgentPatch(a *domain.Agent, patch store.AgentUpdate) {
 func applyAgentRoutingPatch(a *domain.Agent, patch store.AgentUpdate) {
 	if patch.FallbackBackends != nil {
 		a.FallbackBackends = append([]string(nil), (*patch.FallbackBackends)...)
+	}
+	if patch.RuntimeProvider != nil {
+		a.RuntimeProvider = *patch.RuntimeProvider
 	}
 	if patch.Repos != nil {
 		a.Repos = append([]string(nil), (*patch.Repos)...)

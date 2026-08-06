@@ -24,6 +24,7 @@ type agentWire struct {
 	Auto             bool      `json:"auto,omitempty"`
 	Backend          string    `json:"backend,omitempty"`
 	FallbackBackends []string  `json:"fallback_backends,omitempty"`
+	RuntimeProvider  string    `json:"runtime_provider,omitempty"`
 	Repos            []string  `json:"repos,omitempty"`
 	RepoGroups       []string  `json:"repo_groups,omitempty"`
 	CrossRepo        bool      `json:"cross_repo,omitempty"`
@@ -55,6 +56,7 @@ func (a agentWire) toDomain() *domain.Agent {
 		Auto:             a.Auto,
 		Backend:          a.Backend,
 		FallbackBackends: a.FallbackBackends,
+		RuntimeProvider:  domain.RuntimeProvider(a.RuntimeProvider),
 		Repos:            a.Repos,
 		RepoGroups:       a.RepoGroups,
 		CrossRepo:        a.CrossRepo,
@@ -81,6 +83,7 @@ func (s *agentStore) Create(ctx context.Context, in store.AgentCreate) (*domain.
 		Auto             bool     `json:"auto,omitempty"`
 		Backend          string   `json:"backend,omitempty"`
 		FallbackBackends []string `json:"fallback_backends,omitempty"`
+		RuntimeProvider  string   `json:"runtime_provider,omitempty"`
 		Repos            []string `json:"repos,omitempty"`
 		RepoGroups       []string `json:"repo_groups,omitempty"`
 		CrossRepo        bool     `json:"cross_repo,omitempty"`
@@ -96,6 +99,7 @@ func (s *agentStore) Create(ctx context.Context, in store.AgentCreate) (*domain.
 		Auto:             in.Auto,
 		Backend:          in.Backend,
 		FallbackBackends: in.FallbackBackends,
+		RuntimeProvider:  string(in.RuntimeProvider),
 		Repos:            in.Repos,
 		RepoGroups:       in.RepoGroups,
 		CrossRepo:        in.CrossRepo,
@@ -139,51 +143,63 @@ func (s *agentStore) Update(ctx context.Context, ws, name string, patch store.Ag
 	if !agentUpdateHasFleetDBFields(patch) {
 		return s.Get(ctx, ws, name)
 	}
-	body := struct {
-		RoleName         *string   `json:"role_name,omitempty"`
-		Auto             *bool     `json:"auto,omitempty"`
-		Backend          *string   `json:"backend,omitempty"`
-		FallbackBackends *[]string `json:"fallback_backends,omitempty"`
-		Repos            *[]string `json:"repos,omitempty"`
-		RepoGroups       *[]string `json:"repo_groups,omitempty"`
-		CrossRepo        *bool     `json:"cross_repo,omitempty"`
-		Parent           *string   `json:"parent,omitempty"`
-		State            *string   `json:"state,omitempty"`
-		Mode             *string   `json:"mode,omitempty"`
-		TaskFilter       *string   `json:"task_filter,omitempty"`
-		MaxConcurrency   *int      `json:"max_concurrency,omitempty"`
-		BudgetPolicy     *string   `json:"budget_policy,omitempty"`
-		DesiredState     *string   `json:"desired_state,omitempty"`
-	}{
-		RoleName:         patch.RoleName,
-		Auto:             patch.Auto,
-		Backend:          patch.Backend,
-		FallbackBackends: patch.FallbackBackends,
-		Repos:            patch.Repos,
-		RepoGroups:       patch.RepoGroups,
-		CrossRepo:        patch.CrossRepo,
-		Parent:           patch.Parent,
-		TaskFilter:       patch.TaskFilter,
-		MaxConcurrency:   patch.MaxConcurrency,
-		BudgetPolicy:     patch.BudgetPolicy,
-	}
-	if patch.State != nil {
-		s := string(*patch.State)
-		body.State = &s
-	}
-	if patch.Mode != nil {
-		s := string(*patch.Mode)
-		body.Mode = &s
-	}
-	if patch.DesiredState != nil {
-		s := string(*patch.DesiredState)
-		body.DesiredState = &s
-	}
+	body := agentUpdateBody(patch)
 	var resp agentWire
 	if err := s.client.do(ctx, "PATCH", "/api/v1/"+pathEscape(ws)+"/agents/"+pathEscape(name), body, &resp); err != nil {
 		return nil, err
 	}
 	return resp.toDomain(), nil
+}
+
+//nolint:funlen // Patch serialization mirrors the store.AgentUpdate surface area.
+func agentUpdateBody(patch store.AgentUpdate) map[string]any {
+	body := map[string]any{}
+	if patch.RoleName != nil {
+		body["role_name"] = *patch.RoleName
+	}
+	if patch.Auto != nil {
+		body["auto"] = *patch.Auto
+	}
+	if patch.Backend != nil {
+		body["backend"] = *patch.Backend
+	}
+	if patch.FallbackBackends != nil {
+		body["fallback_backends"] = *patch.FallbackBackends
+	}
+	if patch.RuntimeProvider != nil {
+		body["runtime_provider"] = string(*patch.RuntimeProvider)
+	}
+	if patch.Repos != nil {
+		body["repos"] = *patch.Repos
+	}
+	if patch.RepoGroups != nil {
+		body["repo_groups"] = *patch.RepoGroups
+	}
+	if patch.CrossRepo != nil {
+		body["cross_repo"] = *patch.CrossRepo
+	}
+	if patch.Parent != nil {
+		body["parent"] = *patch.Parent
+	}
+	if patch.State != nil {
+		body["state"] = string(*patch.State)
+	}
+	if patch.Mode != nil {
+		body["mode"] = string(*patch.Mode)
+	}
+	if patch.TaskFilter != nil {
+		body["task_filter"] = *patch.TaskFilter
+	}
+	if patch.MaxConcurrency != nil {
+		body["max_concurrency"] = *patch.MaxConcurrency
+	}
+	if patch.BudgetPolicy != nil {
+		body["budget_policy"] = *patch.BudgetPolicy
+	}
+	if patch.DesiredState != nil {
+		body["desired_state"] = string(*patch.DesiredState)
+	}
+	return body
 }
 
 // agentUpdateHasFleetDBFields filters store.AgentUpdate down to the fields
@@ -196,6 +212,7 @@ func agentUpdateHasFleetDBFields(patch store.AgentUpdate) bool {
 		patch.Auto != nil ||
 		patch.Backend != nil ||
 		patch.FallbackBackends != nil ||
+		patch.RuntimeProvider != nil ||
 		patch.Repos != nil ||
 		patch.RepoGroups != nil ||
 		patch.CrossRepo != nil ||

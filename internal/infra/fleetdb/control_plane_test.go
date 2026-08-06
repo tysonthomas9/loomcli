@@ -58,6 +58,65 @@ func TestControlPlaneClientNodeLifecycle(t *testing.T) {
 	}
 }
 
+func TestNodeUpdateBodyPlacement(t *testing.T) {
+	t.Run("untouched", func(t *testing.T) {
+		body := nodeUpdateBody(store.NodeUpdate{})
+		if _, ok := body["placement"]; ok {
+			t.Fatalf("body contains placement: %#v", body)
+		}
+
+		raw, err := json.Marshal(body)
+		if err != nil {
+			t.Fatalf("marshal body: %v", err)
+		}
+		var keys map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &keys); err != nil {
+			t.Fatalf("unmarshal body keys: %v", err)
+		}
+		if _, ok := keys["placement"]; ok {
+			t.Fatalf("JSON contains placement: %s", raw)
+		}
+	})
+
+	t.Run("set", func(t *testing.T) {
+		placement := &domain.NodePlacement{
+			SandboxID:  "sandbox-1",
+			Generation: 2,
+			State:      domain.PlacementStateActive,
+		}
+		body := nodeUpdateBody(store.NodeUpdate{Placement: &placement})
+		got, ok := body["placement"]
+		if !ok {
+			t.Fatalf("body omits placement: %#v", body)
+		}
+		gotPlacement, ok := got.(*domain.NodePlacement)
+		if !ok || gotPlacement != placement {
+			t.Fatalf("placement = %#v, want %#v", got, placement)
+		}
+	})
+
+	t.Run("clear", func(t *testing.T) {
+		var placement *domain.NodePlacement
+		body := nodeUpdateBody(store.NodeUpdate{Placement: &placement})
+		got, ok := body["placement"]
+		if !ok {
+			t.Fatalf("body omits placement: %#v", body)
+		}
+		gotPlacement, ok := got.(*domain.NodePlacement)
+		if !ok || gotPlacement != nil {
+			t.Fatalf("placement = %#v, want typed nil", got)
+		}
+
+		raw, err := json.Marshal(body)
+		if err != nil {
+			t.Fatalf("marshal body: %v", err)
+		}
+		if string(raw) != `{"placement":null}` {
+			t.Fatalf("body JSON = %s, want explicit placement null", raw)
+		}
+	})
+}
+
 func TestControlPlaneClientAgentSessionListQuery(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/WS/agent-sessions" {

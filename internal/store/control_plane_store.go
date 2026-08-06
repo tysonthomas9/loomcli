@@ -13,6 +13,7 @@ type NodeCreate struct {
 	NodeID          string
 	OwnerActor      string
 	RuntimeProvider domain.RuntimeProvider
+	Placement       *domain.NodePlacement
 	Labels          []string
 	Capabilities    []string
 	ToolInventory   []string
@@ -25,6 +26,7 @@ type NodeCreate struct {
 type NodeUpdate struct {
 	OwnerActor      *string
 	RuntimeProvider *domain.RuntimeProvider
+	Placement       **domain.NodePlacement
 	Labels          *[]string
 	Capabilities    *[]string
 	ToolInventory   *[]string

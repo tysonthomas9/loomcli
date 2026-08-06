@@ -41,6 +41,7 @@ func (s *nodeStore) Create(_ context.Context, in store.NodeCreate) (*domain.Node
 		NodeID:          in.NodeID,
 		OwnerActor:      in.OwnerActor,
 		RuntimeProvider: in.RuntimeProvider,
+		Placement:       cloneNodePlacement(in.Placement),
 		Labels:          append([]string(nil), in.Labels...),
 		Capabilities:    append([]string(nil), in.Capabilities...),
 		ToolInventory:   append([]string(nil), in.ToolInventory...),
@@ -107,6 +108,9 @@ func (s *nodeStore) Update(_ context.Context, ws, nodeID string, patch store.Nod
 	}
 	if patch.RuntimeProvider != nil {
 		n.RuntimeProvider = *patch.RuntimeProvider
+	}
+	if patch.Placement != nil {
+		n.Placement = cloneNodePlacement(*patch.Placement)
 	}
 	if patch.Labels != nil {
 		n.Labels = append([]string(nil), (*patch.Labels)...)
@@ -256,6 +260,16 @@ func cloneNode(n *domain.Node) *domain.Node {
 	out.Labels = append([]string(nil), n.Labels...)
 	out.Capabilities = append([]string(nil), n.Capabilities...)
 	out.ToolInventory = append([]string(nil), n.ToolInventory...)
+	out.Placement = cloneNodePlacement(n.Placement)
+	return &out
+}
+
+func cloneNodePlacement(p *domain.NodePlacement) *domain.NodePlacement {
+	if p == nil {
+		return nil
+	}
+	out := *p
+	out.FirstAttachedAt = clonePtr(p.FirstAttachedAt)
 	return &out
 }
 

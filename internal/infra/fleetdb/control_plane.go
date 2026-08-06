@@ -14,11 +14,51 @@ type nodeStore struct{ client *Client }
 
 var _ store.NodeStore = (*nodeStore)(nil)
 
+// nodeWire mirrors fleet-db's models.Node JSON shape.
+type nodeWire struct {
+	WorkspaceKey    string                 `json:"workspace_key"`
+	NodeID          string                 `json:"node_id"`
+	OwnerActor      string                 `json:"owner_actor,omitempty"`
+	RuntimeProvider domain.RuntimeProvider `json:"runtime_provider"`
+	Placement       *domain.NodePlacement  `json:"placement,omitempty"`
+	Labels          []string               `json:"labels,omitempty"`
+	Capabilities    []string               `json:"capabilities,omitempty"`
+	ToolInventory   []string               `json:"tool_inventory,omitempty"`
+	Version         string                 `json:"version,omitempty"`
+	Capacity        int                    `json:"capacity,omitempty"`
+	DrainState      domain.NodeDrainState  `json:"drain_state"`
+	LastHeartbeat   time.Time              `json:"last_heartbeat"`
+	ExpiresAt       time.Time              `json:"expires_at"`
+	CreatedAt       time.Time              `json:"created_at"`
+	UpdatedAt       time.Time              `json:"updated_at"`
+}
+
+func (n nodeWire) toDomain() *domain.Node {
+	return &domain.Node{
+		WorkspaceKey:    n.WorkspaceKey,
+		NodeID:          n.NodeID,
+		OwnerActor:      n.OwnerActor,
+		RuntimeProvider: n.RuntimeProvider,
+		Placement:       n.Placement,
+		Labels:          n.Labels,
+		Capabilities:    n.Capabilities,
+		ToolInventory:   n.ToolInventory,
+		Version:         n.Version,
+		Capacity:        n.Capacity,
+		DrainState:      n.DrainState,
+		LastHeartbeat:   n.LastHeartbeat,
+		ExpiresAt:       n.ExpiresAt,
+		CreatedAt:       n.CreatedAt,
+		UpdatedAt:       n.UpdatedAt,
+	}
+}
+
 func (s *nodeStore) Create(ctx context.Context, in store.NodeCreate) (*domain.Node, error) {
 	body := struct {
 		NodeID          string                 `json:"node_id"`
 		OwnerActor      string                 `json:"owner_actor,omitempty"`
 		RuntimeProvider domain.RuntimeProvider `json:"runtime_provider,omitempty"`
+		Placement       *domain.NodePlacement  `json:"placement,omitempty"`
 		Labels          []string               `json:"labels,omitempty"`
 		Capabilities    []string               `json:"capabilities,omitempty"`
 		ToolInventory   []string               `json:"tool_inventory,omitempty"`
@@ -30,6 +70,7 @@ func (s *nodeStore) Create(ctx context.Context, in store.NodeCreate) (*domain.No
 		NodeID:          in.NodeID,
 		OwnerActor:      in.OwnerActor,
 		RuntimeProvider: in.RuntimeProvider,
+		Placement:       in.Placement,
 		Labels:          in.Labels,
 		Capabilities:    in.Capabilities,
 		ToolInventory:   in.ToolInventory,
@@ -38,32 +79,36 @@ func (s *nodeStore) Create(ctx context.Context, in store.NodeCreate) (*domain.No
 		DrainState:      in.DrainState,
 		TTLSeconds:      ttlSeconds(in.TTL),
 	}
-	var out domain.Node
+	var out nodeWire
 	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/nodes", body, &out); err != nil {
 		return nil, err
 	}
-	return &out, nil
+	return out.toDomain(), nil
 }
 
 func (s *nodeStore) Get(ctx context.Context, ws, nodeID string) (*domain.Node, error) {
-	var out domain.Node
+	var out nodeWire
 	if err := s.client.do(ctx, "GET", "/api/v1/"+pathEscape(ws)+"/nodes/"+pathEscape(nodeID), nil, &out); err != nil {
 		return nil, err
 	}
-	return &out, nil
+	return out.toDomain(), nil
 }
 
 func (s *nodeStore) List(ctx context.Context, ws string) ([]*domain.Node, error) {
 	var resp struct {
-		Nodes []*domain.Node `json:"nodes"`
+		Nodes []nodeWire `json:"nodes"`
 	}
 	if err := s.client.do(ctx, "GET", "/api/v1/"+pathEscape(ws)+"/nodes", nil, &resp); err != nil {
 		return nil, err
 	}
 	if resp.Nodes == nil {
-		resp.Nodes = []*domain.Node{}
+		return []*domain.Node{}, nil
 	}
-	return resp.Nodes, nil
+	out := make([]*domain.Node, 0, len(resp.Nodes))
+	for _, node := range resp.Nodes {
+		out = append(out, node.toDomain())
+	}
+	return out, nil
 }
 
 func (s *nodeStore) Heartbeat(ctx context.Context, ws, nodeID string, ttl time.Duration) (*domain.Node, error) {
@@ -71,19 +116,19 @@ func (s *nodeStore) Heartbeat(ctx context.Context, ws, nodeID string, ttl time.D
 	if seconds := ttlSeconds(ttl); seconds > 0 {
 		path += "?ttl_seconds=" + strconv.Itoa(seconds)
 	}
-	var out domain.Node
+	var out nodeWire
 	if err := s.client.do(ctx, "POST", path, nil, &out); err != nil {
 		return nil, err
 	}
-	return &out, nil
+	return out.toDomain(), nil
 }
 
 func (s *nodeStore) Update(ctx context.Context, ws, nodeID string, patch store.NodeUpdate) (*domain.Node, error) {
-	var out domain.Node
+	var out nodeWire
 	if err := s.client.do(ctx, "PATCH", "/api/v1/"+pathEscape(ws)+"/nodes/"+pathEscape(nodeID), nodeUpdateBody(patch), &out); err != nil {
 		return nil, err
 	}
-	return &out, nil
+	return out.toDomain(), nil
 }
 
 type agentSessionStore struct{ client *Client }
@@ -429,6 +474,12 @@ func nodeUpdateBody(patch store.NodeUpdate) map[string]any {
 	}
 	if patch.RuntimeProvider != nil {
 		body["runtime_provider"] = *patch.RuntimeProvider
+	}
+	// Node PATCHes use a generic map merge, so a typed nil serializes as JSON
+	// null and clears placement. Role clear flags exist because the role's
+	// typed omitempty PATCH body cannot emit null.
+	if patch.Placement != nil {
+		body["placement"] = *patch.Placement
 	}
 	if patch.Labels != nil {
 		body["labels"] = *patch.Labels

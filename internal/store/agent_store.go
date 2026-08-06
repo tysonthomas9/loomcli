@@ -16,6 +16,7 @@ type AgentCreate struct {
 	Auto             bool
 	Backend          string
 	FallbackBackends []string
+	RuntimeProvider  domain.RuntimeProvider
 	Repos            []string
 	RepoGroups       []string
 	CrossRepo        bool
@@ -36,6 +37,7 @@ type AgentUpdate struct {
 	Auto             *bool
 	Backend          *string
 	FallbackBackends *[]string
+	RuntimeProvider  *domain.RuntimeProvider
 	Repos            *[]string
 	RepoGroups       *[]string
 	CrossRepo        *bool
