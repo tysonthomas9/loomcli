@@ -45,7 +45,7 @@ workspace keys, or any unbounded value.
 |---|---|---|
 | HTTP server | `<METHOD> <route-template>` | `GET /api/v1/{workspace}/issues/{id}` |
 | HTTP client | `<METHOD>` only; route on attribute | `POST` |
-| Service method | `<package>.<Type>.<Method>` | `service.IssueService.Claim` |
+| Service/coordinator method | `<package>.<Type>.<Method>` with a fixed package name | `workspacecoord.WorkspaceService.List` |
 | Storage method | `<backend>.<Method>` | `redis.CreateIssue`, `postgres.GetIssue` |
 | Redis command | `redis.<CMD>` | `redis.HGETALL`, `redis.PIPELINE` |
 | Postgres query | `pgx.<op>` | `pgx.query`, `pgx.exec` |

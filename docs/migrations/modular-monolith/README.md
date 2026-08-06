@@ -168,11 +168,14 @@ Phase 7 completes the modular-monolith migration. All ten capability roots are
 active; Work Items, Workspace, Source Control, Connectors, and Artifacts own
 their remaining product surfaces; and Observability plus Source Control are
 full frontend feature slices. The final architecture inventory records Store
-`64/54`, 77 handler exceptions, 107 mutation commands, 102 primary direct
-writes, 71 runtime components, 80 goroutine launches, and all six performance
-rows measured. The signed packaged Desktop selected 16 passing real-Codex
-executions across the eight local creation templates, with four GitHub
-execution rows explicitly waived and three legacy Advanced templates retired.
+`61/51`, 29 broad handler exceptions, zero legacy service-handler imports, 107
+mutation commands, 102 primary direct writes, 71 runtime components, 80
+goroutine launches, and all six performance rows measured. The legacy
+`webui/service` and `svcimpl` business-logic centers are physically empty; the
+remaining delivery coordination lives in focused packages. The signed packaged
+Desktop selected 16 passing real-Codex executions across the eight local
+creation templates, with four GitHub execution rows explicitly waived and
+three legacy Advanced templates retired.
 Product proof also corrected the Observability cache so modular DriverRun
 metrics survive restart. See the
 [Phase 7 record](14-phase-7-decisions-and-evidence.md).

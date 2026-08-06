@@ -1,8 +1,8 @@
 # Enforcement, Validation, and Stop Conditions
 
-- **Status:** Phase 6 complete at `completed_phase: 6`, including source
-  architecture, daemon-free runtime, signed packaged-Desktop UI, and fresh
-  real-Codex acceptance
+- **Status:** Phase 7 complete at `completed_phase: 7`, including source
+  architecture, legacy service-center retirement, daemon-free runtime, signed
+  packaged-Desktop UI, and real-Codex acceptance
 - **Purpose:** Define the fitness functions that distinguish a real modular monolith from a folder reorganization
 - **Migration:** [Modular Monolith Migration](README.md)
 
@@ -16,6 +16,15 @@ built-in workflows, passes deep strict signing verification after ad-hoc
 resealing, completes a real-Codex Local Review run with transcript evidence,
 fails closed to Blocked when Codex is unavailable, and preserves that state
 across restart.
+
+**Phase 7 status:** All ten capability roots are active. The closing cleanup
+reduces composite Store references to `61/51`, reduces the broad legacy-handler
+inventory to 29, and removes every handler import of `internal/webui/service`
+and `internal/webui/svcimpl`. The two retired service directories contain no Go
+source. The exact inventories record 107 mutation commands, 102 primary
+direct-write rows, 71 runtime components, 80 goroutine-launch definitions, and
+all six performance rows across the 11 build profiles plus the all-files AST
+pass. See the [Phase 7 evidence](14-phase-7-decisions-and-evidence.md).
 
 **Phase 6 status:** Loom `02daec339` with FleetDB `51b8a493` passes both full
 gates, the byte-identical paired contract, and the fresh supervisor-disabled
