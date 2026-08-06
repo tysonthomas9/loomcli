@@ -155,6 +155,7 @@ done
 # the app's fixed ports EXCEPT harness infrastructure (the MARATHON-9 fix).
 VERIFY_ROLE="${LOOM_MARATHON_VERIFY_ROLE:-off}"
 VERIFY_CHECKOUT=""
+VERIFY_CHECKOUT_BACKEND=""
 if [ "$VERIFY_ROLE" != "off" ]; then
   VERIFY_CHECKOUT="$WS_ROOT/verify-checkout"
   if [ ! -d "$VERIFY_CHECKOUT" ]; then
@@ -162,6 +163,17 @@ if [ "$VERIFY_ROLE" != "off" ]; then
       || die "verify-checkout worktree creation failed"
   fi
   trust_codex_project_path "$VERIFY_CHECKOUT"
+  if [ "$VERIFY_ROLE" = "tasks-dual" ]; then
+    # Second verifier gets its own checkout; the two QA sessions never run
+    # the app simultaneously (orchestrate alternates passes — spec-pinned
+    # ports), but each keeps its own working tree and probe scripts.
+    VERIFY_CHECKOUT_BACKEND="$WS_ROOT/verify-checkout-backend"
+    if [ ! -d "$VERIFY_CHECKOUT_BACKEND" ]; then
+      git -C /app worktree add --detach "$VERIFY_CHECKOUT_BACKEND" >/dev/null 2>&1 \
+        || die "verify-checkout-backend worktree creation failed"
+    fi
+    trust_codex_project_path "$VERIFY_CHECKOUT_BACKEND"
+  fi
   cat > /usr/local/bin/marathon-freeports <<'FPEOF'
 #!/usr/bin/env python3
 """Free the app's fixed ports by killing their listeners, sparing harness
@@ -286,21 +298,32 @@ loom data list >/dev/null 2>&1 || die "loom data list failed (fleet-db not reach
 # qa-verify must be a registered workspace repo. Virtual lane: empty remote
 # URL, never checked out. The probe then proves create+close works in THIS
 # container; it leaves one closed probe task which split metrics exclude.
-if [ "${LOOM_MARATHON_VERIFY_ROLE:-off}" = "tasks" ]; then
-  loom repo add qa-verify "" >/dev/null 2>&1 || true  # idempotent; probe is the assertion
-  PROBE_JSON=$(loom data create --type task --source-repo qa-verify \
-    --title "qa-verify preflight probe (harness)" -o json) \
-    || die "qa-verify preflight: create failed"
-  PROBE_ID=$(printf '%s' "$PROBE_JSON" \
+probe_lane() { # $1 lane -> registers the virtual lane repo and proves create+close
+  loom repo add "$1" "" >/dev/null 2>&1 || true  # idempotent; probe is the assertion
+  local pj pid
+  pj=$(loom data create --type task --source-repo "$1" \
+    --title "$1 preflight probe (harness)" -o json) \
+    || die "$1 preflight: create failed"
+  pid=$(printf '%s' "$pj" \
     | python3 -c 'import sys,json;print(json.load(sys.stdin).get("id",""))' 2>/dev/null)
-  [ -n "$PROBE_ID" ] || die "qa-verify preflight: create output unparsable: $PROBE_JSON"
-  loom data update "$PROBE_ID" --status closed >/dev/null 2>&1 \
-    || die "qa-verify preflight: close failed"
-  log "qa-verify preflight probe ok ($PROBE_ID)"
-  for pf in lead-persistent-verifier-tasks.md qa-persistent-tasks.md; do
+  [ -n "$pid" ] || die "$1 preflight: create output unparsable: $pj"
+  loom data update "$pid" --status closed >/dev/null 2>&1 \
+    || die "$1 preflight: close failed"
+  log "$1 preflight probe ok ($pid)"
+}
+case "${LOOM_MARATHON_VERIFY_ROLE:-off}" in
+tasks|tasks-dual)
+  probe_lane qa-verify
+  PHASH_FILES="lead-persistent-verifier-tasks.md qa-persistent-tasks.md"
+  if [ "${LOOM_MARATHON_VERIFY_ROLE:-off}" = "tasks-dual" ]; then
+    probe_lane qa-verify-backend
+    PHASH_FILES="lead-persistent-verifier-tasks-dual.md qa-persistent-tasks.md qa-backend-persistent-tasks.md"
+  fi
+  for pf in $PHASH_FILES; do
     log "prompt-hash $pf $( (sha256sum "${LOOM_MARATHON_PROMPTS_DIR:-$MH/prompts}/$pf" 2>/dev/null || shasum -a 256 "${LOOM_MARATHON_PROMPTS_DIR:-$MH/prompts}/$pf" 2>/dev/null) | cut -c1-16)"
   done
-fi
+  ;;
+esac
 
 # ---- env.sh ------------------------------------------------------------------
 cat > "$MH/env.sh" <<EOF
@@ -317,5 +340,6 @@ export MARATHON_WS_ROOT="$WS_ROOT"
 export MARATHON_CODER_WT="$CODER_WT"
 export MARATHON_PLANNER_WT="$PLANNER_WT"
 export MARATHON_VERIFY_CHECKOUT="$VERIFY_CHECKOUT"
+export MARATHON_VERIFY_CHECKOUT_BACKEND="$VERIFY_CHECKOUT_BACKEND"
 EOF
 log "bootstrap complete (stub=$STUB, max_agents=$MAX_AGENTS)"

@@ -76,11 +76,13 @@ lead_pass() {
 # runtime pump auto-drains in order) when a turn is active.
 LEAD_TMUX=marathon-lead
 QA_TMUX=marathon-qa
+QAB_TMUX=marathon-qab
 persistent_lead_start() {
   local lead_prompt="$PROMPTS/lead-persistent.md"
   [ "$VERIFY_ROLE" = "lead" ] && lead_prompt="$PROMPTS/lead-persistent-verifier.md"
   [ "$VERIFY_ROLE" = "lead-ui" ] && lead_prompt="$PROMPTS/lead-persistent-verifier-ui.md"
   [ "$VERIFY_ROLE" = "tasks" ] && lead_prompt="$PROMPTS/lead-persistent-verifier-tasks.md"
+  [ "$VERIFY_ROLE" = "tasks-dual" ] && lead_prompt="$PROMPTS/lead-persistent-verifier-tasks-dual.md"
   cat > "$LOGD/lead-launch.sh" <<LEOF
 #!/usr/bin/env bash
 . "$MH/env.sh"
@@ -98,7 +100,7 @@ LEOF
 # LOOM_AGENT_NAME, with its own app-server thread, addressable via leadmsg.
 persistent_qa_start() {
   local qa_prompt="$PROMPTS/qa-persistent.md"
-  [ "$VERIFY_ROLE" = "tasks" ] && qa_prompt="$PROMPTS/qa-persistent-tasks.md"
+  case "$VERIFY_ROLE" in tasks|tasks-dual) qa_prompt="$PROMPTS/qa-persistent-tasks.md";; esac
   cat > "$LOGD/qa-launch.sh" <<QEOF
 #!/usr/bin/env bash
 . "$MH/env.sh"
@@ -110,6 +112,23 @@ QEOF
   tmux kill-session -t "$QA_TMUX" 2>/dev/null
   tmux new-session -d -s "$QA_TMUX" -x 220 -y 50 "$LOGD/qa-launch.sh" || return 1
   tmux pipe-pane -t "$QA_TMUX" -o "cat >> $LOGD/qa-pane.log" 2>/dev/null || true
+}
+
+# Backend QA (verify_role=tasks-dual): a third controlled session under agent
+# name `qab`, holding the backend/fault-tolerance verification vantage. Same
+# runtime as lead and qa; addressable via leadmsg.
+persistent_qab_start() {
+  cat > "$LOGD/qab-launch.sh" <<QBEOF
+#!/usr/bin/env bash
+. "$MH/env.sh"
+export LOOM_AGENT_NAME=qab
+cd "\$MARATHON_WS_ROOT/app" || exit 1
+exec loom lead --backend codex --prompt "$PROMPTS/qa-backend-persistent-tasks.md"
+QBEOF
+  chmod +x "$LOGD/qab-launch.sh"
+  tmux kill-session -t "$QAB_TMUX" 2>/dev/null
+  tmux new-session -d -s "$QAB_TMUX" -x 220 -y 50 "$LOGD/qab-launch.sh" || return 1
+  tmux pipe-pane -t "$QAB_TMUX" -o "cat >> $LOGD/qab-pane.log" 2>/dev/null || true
 }
 
 # runtime_status AGENT -> controlled-runtime status for that agent name
@@ -165,6 +184,24 @@ integ_delta() {
       | tr '\n' ' ')
     INTEG_SEEN=$total
   fi
+}
+
+# integ_delta_for CURSOR_FILE: like integ_delta but with a per-recipient
+# file cursor, so alternating QA sessions each see everything integrated
+# since THEIR last delivered pass. Sets INTEG_DELTA_FOR.
+integ_delta_for() {
+  local seen total
+  seen=$(cat "$1" 2>/dev/null) || seen=0
+  case "$seen" in ''|*[!0-9]*) seen=0;; esac
+  total=$(grep -c "INTEGRATED task=" "$INTEG_LOG" 2>/dev/null) || total=0
+  INTEG_DELTA_FOR=""
+  if [ "$total" -gt "$seen" ]; then
+    INTEG_DELTA_FOR=$(grep "INTEGRATED task=" "$INTEG_LOG" \
+      | sed -n "$((seen + 1)),${total}p" \
+      | sed -E 's/.*INTEGRATED task=([A-Za-z0-9_-]+).*app_after=([0-9a-f]+).*/\1@\2/' \
+      | tr '\n' ' ')
+  fi
+  printf '%s' "$total" > "$1"
 }
 
 spend_usd() {
@@ -382,6 +419,7 @@ finalize() {
   if [ "$LEAD_MODE" = "persistent" ]; then
     tmux kill-session -t "$LEAD_TMUX" 2>/dev/null
     tmux kill-session -t "$QA_TMUX" 2>/dev/null
+    tmux kill-session -t "$QAB_TMUX" 2>/dev/null
     pkill -9 -f 'codex app-server' 2>/dev/null
     pkill -9 -f 'codex --remote' 2>/dev/null
     CACHE_LEADS="${XDG_CACHE_HOME:-$HOME/.cache}/loom/codex-leads"
@@ -605,31 +643,37 @@ epics = [i for i in issues if i.get("issue_type") == "epic"]
 print(epics[0]["id"] if epics else "")' 2>/dev/null)
   log "verify role=$VERIFY_ROLE epic=$EPIC_ID checkout=${MARATHON_VERIFY_CHECKOUT:-unset}"
 fi
-if [ "$VERIFY_ROLE" = "qa" ] || [ "$VERIFY_ROLE" = "tasks" ]; then
-  persistent_qa_start || { FINALIZE_REASON=qa-tmux-failed; echo "[orchestrate] FATAL: tmux qa launch failed" >&2; exit 1; }
-  record "PERSISTENT-QA started tmux=$QA_TMUX"
-  QA_READY=0
+qa_session_up() { # $1 agent-name, $2 start-fn, $3 pane-log
+  "$2" || { FINALIZE_REASON=$1-tmux-failed; echo "[orchestrate] FATAL: tmux $1 launch failed" >&2; exit 1; }
+  record "PERSISTENT-${1} started"
+  local ready=0 state
   for _ in $(seq 1 60); do
-    QSTATE="$(runtime_status qa)"
-    case "$QSTATE" in idle|active) QA_READY=1; break;; esac
+    state="$(runtime_status "$1")"
+    case "$state" in idle|active) ready=1; break;; esac
     sleep 10
   done
-  if [ "$QA_READY" != 1 ]; then
-    FINALIZE_REASON=qa-runtime-failed
-    echo "[orchestrate] FATAL: qa runtime never became ready (last=$QSTATE)" >&2
-    tail -30 "$LOGD/qa-pane.log" >&2 2>/dev/null
+  if [ "$ready" != 1 ]; then
+    FINALIZE_REASON=$1-runtime-failed
+    echo "[orchestrate] FATAL: $1 runtime never became ready (last=$state)" >&2
+    tail -30 "$LOGD/$3" >&2 2>/dev/null
     exit 1
   fi
-  record "PERSISTENT-QA ready"
-  QA_ACK="$(persistent_pass qa 'Reply ACK.')"
-  case "$QA_ACK" in delivered|pending) ;; *)
-    FINALIZE_REASON=qa-delivery-failed
-    echo "[orchestrate] FATAL: qa delivery probe state=$QA_ACK" >&2
+  record "PERSISTENT-${1} ready"
+  local ack
+  ack="$(persistent_pass "$1" 'Reply ACK.')"
+  case "$ack" in delivered|pending) ;; *)
+    FINALIZE_REASON=$1-delivery-failed
+    echo "[orchestrate] FATAL: $1 delivery probe state=$ack" >&2
     exit 1;;
   esac
-  # QA retains the spec verbatim as its reference (its prompt replies READY).
-  persistent_pass qa "$INSTRUCTION" >/dev/null
-fi
+  # The verifier retains the spec verbatim as its reference (prompt replies READY).
+  persistent_pass "$1" "$INSTRUCTION" >/dev/null
+}
+case "$VERIFY_ROLE" in qa|tasks|tasks-dual)
+  qa_session_up qa persistent_qa_start qa-pane.log
+  [ "$VERIFY_ROLE" = "tasks-dual" ] && qa_session_up qab persistent_qab_start qab-pane.log
+  ;;
+esac
 
 # ---------------------------------------------------------------- daemon -----
 # (persistent lead mode starts the daemon BEFORE the lead — see seed section —
@@ -661,9 +705,10 @@ while :; do
   if [ "$VERIFY_ROLE" != "off" ]; then
     integ_delta
     VERIFY_HEAD=""
-    if [ "$VERIFY_ROLE" = "tasks" ]; then
+    case "$VERIFY_ROLE" in tasks|tasks-dual)
       VERIFY_HEAD=" Current integrated head: $(git -C "${MARATHON_APP_BASE:-/app}" rev-parse --short HEAD 2>/dev/null)."
-    fi
+      ;;
+    esac
     VERIFY_INFO=" Integrated since last pass: ${INTEG_DELTA:-none}.${VERIFY_HEAD} Verification checkout: ${MARATHON_VERIFY_CHECKOUT}. Epic: ${EPIC_ID}."
   fi
   if [ "$LEAD_MODE" = "persistent" ]; then
@@ -676,13 +721,45 @@ print(len([i for i in json.load(sys.stdin) if i.get("source_repo") == "qa-verify
         BACKLOG_NOTE=" Verification backlog: ${QAV_OPEN} tasks open; do not file new verification tasks this pass."
         record "QAV-BACKLOG open=${QAV_OPEN} (rail engaged)"
       fi
+    elif [ "$VERIFY_ROLE" = "tasks-dual" ]; then
+      # Per-lane rails: the alternating QAs drain half as often per lane, so
+      # the same >8 threshold engages per lane independently.
+      LANE_OPENS=$(loom data list --limit 300 -o json 2>/dev/null | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+for lane in ("qa-verify", "qa-verify-backend"):
+    print(len([i for i in d if i.get("source_repo") == lane and i.get("status") == "open"]))' 2>/dev/null) || LANE_OPENS="0
+0"
+      QAV_OPEN=$(printf '%s\n' "$LANE_OPENS" | sed -n 1p); QAV_OPEN=${QAV_OPEN:-0}
+      QABV_OPEN=$(printf '%s\n' "$LANE_OPENS" | sed -n 2p); QABV_OPEN=${QABV_OPEN:-0}
+      if [ "$QAV_OPEN" -gt 8 ]; then
+        BACKLOG_NOTE=" The qa-verify lane is full (${QAV_OPEN} tasks open); do not file new qa-verify tasks this pass."
+        record "QAV-BACKLOG open=${QAV_OPEN} (rail engaged)"
+      fi
+      if [ "$QABV_OPEN" -gt 8 ]; then
+        BACKLOG_NOTE="${BACKLOG_NOTE} The qa-verify-backend lane is full (${QABV_OPEN} tasks open); do not file new qa-verify-backend tasks this pass."
+        record "QABV-BACKLOG open=${QABV_OPEN} (rail engaged)"
+      fi
     fi
     case "$VERIFY_ROLE" in
-      lead|lead-ui|tasks) persistent_pass lead "${PASS_MSG}${VERIFY_INFO}${BACKLOG_NOTE}" >/dev/null ;;
+      lead|lead-ui|tasks|tasks-dual) persistent_pass lead "${PASS_MSG}${VERIFY_INFO}${BACKLOG_NOTE}" >/dev/null ;;
       *) persistent_pass lead "$PASS_MSG" >/dev/null ;;
     esac
     if [ "$VERIFY_ROLE" = "qa" ] || [ "$VERIFY_ROLE" = "tasks" ]; then
       persistent_pass qa "QA pass $PASS. About $REMAIN_MIN minutes of work time remain.${VERIFY_INFO}" >/dev/null
+    elif [ "$VERIFY_ROLE" = "tasks-dual" ]; then
+      # The spec pins the app's ports, so two verification app instances can
+      # never run at once: alternate the QA duty per pass (odd = product QA,
+      # even = backend QA). Each session keeps its own integration cursor so
+      # its message lists everything integrated since ITS last active pass.
+      QA_HEAD="$(git -C "${MARATHON_APP_BASE:-/app}" rev-parse --short HEAD 2>/dev/null)"
+      if [ $((PASS % 2)) -eq 1 ]; then
+        integ_delta_for "$LOGD/.integ-cursor-qa"
+        persistent_pass qa "QA pass $PASS. About $REMAIN_MIN minutes of work time remain. Integrated since last pass: ${INTEG_DELTA_FOR:-none}. Current integrated head: ${QA_HEAD}. Verification checkout: ${MARATHON_VERIFY_CHECKOUT}. Epic: ${EPIC_ID}." >/dev/null
+      else
+        integ_delta_for "$LOGD/.integ-cursor-qab"
+        persistent_pass qab "QA pass $PASS. About $REMAIN_MIN minutes of work time remain. Integrated since last pass: ${INTEG_DELTA_FOR:-none}. Current integrated head: ${QA_HEAD}. Verification checkout: ${MARATHON_VERIFY_CHECKOUT_BACKEND}. Epic: ${EPIC_ID}." >/dev/null
+      fi
     fi
   else
     lead_pass "$PROMPTS/lead-orchestrate.md" "$PASS_MSG" 900 "lead-orchestrate.log"
@@ -772,7 +849,7 @@ if has_sub and not has_valid:
   OPEN=$(open_task_count)
   TOTAL=$(nonepic_task_count)
   if [ "$TOTAL" -gt 0 ] && [ "$OPEN" = "0" ]; then
-    if [ "$VERIFY_ROLE" = "lead-ui" ] || [ "$VERIFY_ROLE" = "tasks" ]; then
+    if [ "$VERIFY_ROLE" = "lead-ui" ] || [ "$VERIFY_ROLE" = "tasks" ] || [ "$VERIFY_ROLE" = "tasks-dual" ]; then
       # B2e/B2f: draining is not the end — the lead keeps verifying (including
       # the UI walk) and refiling until the deadline reserve. B2c finalized
       # here and threw away 43 minutes that the ux half needed.

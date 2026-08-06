@@ -391,6 +391,51 @@ event-log semantics run 19 built as a dedicated seed task.
   faithful miniature, inside the loop as an integration-gate check or a
   QA tool) rather than more directed manual checks. Next arm candidate.
 
+### B2g. loom-generic-tasks-dual — dual-QA verification lanes (WIRED, unrun)
+User's design (2026-08-06), directly answering the run-19/20 variance
+split: the ux half is architecture-stable (persistent product QA, 4
+straight runs ≥0.9375) while the gates half swings on clustered
+event-log/fault semantics that a product walk cannot exercise and a 1-2
+minute directed manual probe cannot reproduce. Add a SECOND persistent
+verification mind holding the backend vantage.
+
+- `verify_role=tasks-dual` (additive; `tasks` path byte-stable, proven by
+  stub regression). Three persistent sessions: lead (directs), qa
+  (product walk, prompt unchanged from B2f), qab (backend: HTTP/WS/IRC
+  contracts + fault injection — kill/restart processes, interrupt
+  storage, verify delivery/replay/ordering/seq density via documented
+  interfaces; encouraged to build REPEATABLE probe scripts in its own
+  checkout and re-run per head — the durable-tooling upgrade over B2f's
+  ad-hoc checks).
+- Two lanes: `qa-verify` (product) + `qa-verify-backend`; bootstrap
+  registers + probes both pre-spend; lead files ≤2/pass TOTAL, lane
+  chosen by where the risk lives, per-lane >8 backlog rails
+  (QAV-BACKLOG / QABV-BACKLOG records).
+- Port-collision law: the spec pins app ports, so two verification app
+  instances can never run at once → orchestrate ALTERNATES the QA duty
+  per pass (odd = qa, even = qab), each with its own integration cursor
+  (integ_delta_for) so its pass message lists everything since ITS last
+  active pass. Halves each QA's cadence (12 min); B2f closes were
+  median-1-min, so headroom is ample. Also halves per-QA spend.
+- Fork lineage: B2c proved the contracts vantage wins gates; B2d the
+  product vantage wins ux; B2e that one mind can't hold both; B2f that
+  direction/execution split works but execution depth on faults is the
+  binding constraint. B2g = fork union with three minds.
+- PREDICTION (pre-registered): ux ≥0.9 (product QA unchanged); gates
+  ≥2/5 with the cross-node fan-out/seq signature specifically caught
+  pre-verifier by qab correctives; risk axis = coder bandwidth now
+  split across two corrective streams (B2f runs drained fully, so slack
+  exists).
+- OBSERVABLES: per-lane filed/claimed/closed + ages; probe-script reuse
+  evidence in verify-checkout-backend (files + re-run traces); corrective
+  attribution per lane; gate outcomes vs qab-lane activity; alternation
+  health (no port-collision freeports kills during the other QA's pass).
+- Validated free: bash -n; stub tasks-dual (both lane probes green
+  in-container, MARATHON-1/-2); stub tasks regression (ALL INVARIANTS
+  PROVEN — proven arm untouched). Persistent-session alternation is not
+  stub-coverable (same limit as B2f); components are reused proven
+  mechanics.
+
 ### B3. fractal-generic — infrastructure COMMITTED
 Mission mode `generic` (verbatim spec + finish sentence — the hardcoded
 preamble is bypassed; strip-vet #3); hidden reserve pinned to 0; concurrency
