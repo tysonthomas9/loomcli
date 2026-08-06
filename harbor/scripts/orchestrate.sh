@@ -186,22 +186,26 @@ integ_delta() {
   fi
 }
 
-# integ_delta_for CURSOR_FILE: like integ_delta but with a per-recipient
-# file cursor, so alternating QA sessions each see everything integrated
-# since THEIR last delivered pass. Sets INTEG_DELTA_FOR.
-integ_delta_for() {
+# Per-recipient integration cursors for the alternating QA sessions, split
+# peek/commit (codex B2g-vet finding 3): the cursor advances only after the
+# delivery is known good, so a failed or skipped delivery re-presents the
+# same integrations on the recipient's next active pass.
+integ_delta_peek() { # $1 cursor-file -> INTEG_DELTA_FOR, INTEG_DELTA_TOTAL
   local seen total
   seen=$(cat "$1" 2>/dev/null) || seen=0
   case "$seen" in ''|*[!0-9]*) seen=0;; esac
   total=$(grep -c "INTEGRATED task=" "$INTEG_LOG" 2>/dev/null) || total=0
   INTEG_DELTA_FOR=""
+  INTEG_DELTA_TOTAL=$total
   if [ "$total" -gt "$seen" ]; then
     INTEG_DELTA_FOR=$(grep "INTEGRATED task=" "$INTEG_LOG" \
       | sed -n "$((seen + 1)),${total}p" \
       | sed -E 's/.*INTEGRATED task=([A-Za-z0-9_-]+).*app_after=([0-9a-f]+).*/\1@\2/' \
       | tr '\n' ' ')
   fi
-  printf '%s' "$total" > "$1"
+}
+integ_delta_commit() { # $1 cursor-file
+  printf '%s' "$INTEG_DELTA_TOTAL" > "$1"
 }
 
 spend_usd() {
@@ -706,7 +710,7 @@ while :; do
     integ_delta
     VERIFY_HEAD=""
     case "$VERIFY_ROLE" in tasks|tasks-dual)
-      VERIFY_HEAD=" Current integrated head: $(git -C "${MARATHON_APP_BASE:-/app}" rev-parse --short HEAD 2>/dev/null)."
+      VERIFY_HEAD=" Current integrated head: $(git -C "${MARATHON_APP_DIR:-/app}" rev-parse --short HEAD 2>/dev/null)."
       ;;
     esac
     VERIFY_INFO=" Integrated since last pass: ${INTEG_DELTA:-none}.${VERIFY_HEAD} Verification checkout: ${MARATHON_VERIFY_CHECKOUT}. Epic: ${EPIC_ID}."
@@ -728,16 +732,16 @@ print(len([i for i in json.load(sys.stdin) if i.get("source_repo") == "qa-verify
 import sys, json
 d = json.load(sys.stdin)
 for lane in ("qa-verify", "qa-verify-backend"):
-    print(len([i for i in d if i.get("source_repo") == lane and i.get("status") == "open"]))' 2>/dev/null) || LANE_OPENS="0
+    print(len([i for i in d if i.get("source_repo") == lane and i.get("status") in ("open", "in_progress")]))' 2>/dev/null) || LANE_OPENS="0
 0"
       QAV_OPEN=$(printf '%s\n' "$LANE_OPENS" | sed -n 1p); QAV_OPEN=${QAV_OPEN:-0}
       QABV_OPEN=$(printf '%s\n' "$LANE_OPENS" | sed -n 2p); QABV_OPEN=${QABV_OPEN:-0}
       if [ "$QAV_OPEN" -gt 8 ]; then
-        BACKLOG_NOTE=" The qa-verify lane is full (${QAV_OPEN} tasks open); do not file new qa-verify tasks this pass."
+        BACKLOG_NOTE=" The qa-verify lane is full (${QAV_OPEN} tasks outstanding); do not file new qa-verify tasks this pass."
         record "QAV-BACKLOG open=${QAV_OPEN} (rail engaged)"
       fi
       if [ "$QABV_OPEN" -gt 8 ]; then
-        BACKLOG_NOTE="${BACKLOG_NOTE} The qa-verify-backend lane is full (${QABV_OPEN} tasks open); do not file new qa-verify-backend tasks this pass."
+        BACKLOG_NOTE="${BACKLOG_NOTE} The qa-verify-backend lane is full (${QABV_OPEN} tasks outstanding); do not file new qa-verify-backend tasks this pass."
         record "QABV-BACKLOG open=${QABV_OPEN} (rail engaged)"
       fi
     fi
@@ -750,15 +754,25 @@ for lane in ("qa-verify", "qa-verify-backend"):
     elif [ "$VERIFY_ROLE" = "tasks-dual" ]; then
       # The spec pins the app's ports, so two verification app instances can
       # never run at once: alternate the QA duty per pass (odd = product QA,
-      # even = backend QA). Each session keeps its own integration cursor so
-      # its message lists everything integrated since ITS last active pass.
-      QA_HEAD="$(git -C "${MARATHON_APP_BASE:-/app}" rev-parse --short HEAD 2>/dev/null)"
+      # even = backend QA), and — because alternation alone is only
+      # time-based (codex B2g-vet finding 1) — never deliver to one QA while
+      # the other's turn is still active. A skipped or failed delivery keeps
+      # the recipient's cursor, so nothing integrated is ever lost to it.
+      QA_HEAD="$(git -C "${MARATHON_APP_DIR:-/app}" rev-parse --short HEAD 2>/dev/null)"
       if [ $((PASS % 2)) -eq 1 ]; then
-        integ_delta_for "$LOGD/.integ-cursor-qa"
-        persistent_pass qa "QA pass $PASS. About $REMAIN_MIN minutes of work time remain. Integrated since last pass: ${INTEG_DELTA_FOR:-none}. Current integrated head: ${QA_HEAD}. Verification checkout: ${MARATHON_VERIFY_CHECKOUT}. Epic: ${EPIC_ID}." >/dev/null
+        QA_TGT=qa; QA_OTHER=qab; QA_CKT="$MARATHON_VERIFY_CHECKOUT"; QA_CUR="$LOGD/.integ-cursor-qa"
       else
-        integ_delta_for "$LOGD/.integ-cursor-qab"
-        persistent_pass qab "QA pass $PASS. About $REMAIN_MIN minutes of work time remain. Integrated since last pass: ${INTEG_DELTA_FOR:-none}. Current integrated head: ${QA_HEAD}. Verification checkout: ${MARATHON_VERIFY_CHECKOUT_BACKEND}. Epic: ${EPIC_ID}." >/dev/null
+        QA_TGT=qab; QA_OTHER=qa; QA_CKT="$MARATHON_VERIFY_CHECKOUT_BACKEND"; QA_CUR="$LOGD/.integ-cursor-qab"
+      fi
+      if [ "$(runtime_status "$QA_OTHER")" = "active" ]; then
+        record "ALTERNATION-SKIP pass=$PASS target=$QA_TGT ($QA_OTHER still active)"
+      else
+        integ_delta_peek "$QA_CUR"
+        QA_DELIVERY="$(persistent_pass "$QA_TGT" "QA pass $PASS. About $REMAIN_MIN minutes of work time remain. Integrated since last pass: ${INTEG_DELTA_FOR:-none}. Current integrated head: ${QA_HEAD}. Verification checkout: ${QA_CKT}. Epic: ${EPIC_ID}.")"
+        case "$QA_DELIVERY" in
+          delivered|pending) integ_delta_commit "$QA_CUR" ;;
+          *) record "QA-DELIVERY-ERROR pass=$PASS target=$QA_TGT state=$QA_DELIVERY (cursor kept)" ;;
+        esac
       fi
     fi
   else

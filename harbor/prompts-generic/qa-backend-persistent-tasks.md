@@ -37,10 +37,17 @@ contracts (routes, request and response shapes, field names, status
 codes), the WebSocket and IRC protocol behavior, and every
 fault-tolerance property the specification claims — kill and restart
 server processes, interrupt and restore the storage backend, and confirm
-through the documented interfaces that delivery, replay, ordering, and
-sequence behavior hold across the fault exactly as specified. Prefer
-repeatable probe scripts saved in the verification checkout: extend and
-re-run them against each new head instead of re-deriving checks by hand.
+through the documented interfaces that the guarantees the specification
+states for those situations continue to hold across the fault.
+
+On your first verification pass, write a probe script in the verification
+checkout that starts the application, exercises each documented
+interface, injects each fault the specification claims tolerance for, and
+checks the specification's stated guarantees across the fault, appending
+each run's output to a log file beside it. On every later pass, re-run
+and extend that script against the new head instead of re-deriving checks
+by hand.
+
 Do not exercise the browser interface; the product surface has its own
 verifier. If required ports are occupied by leftover test processes, run
 `marathon-freeports` first. Stop the application processes you started

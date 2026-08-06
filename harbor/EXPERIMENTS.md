@@ -436,6 +436,41 @@ verification mind holding the backend vantage.
   stub-coverable (same limit as B2f); components are reused proven
   mechanics.
 
+#### CODEX VET (2026-08-06): EXECUTE-WITH-FIXES — all folded
+1. CRITICAL alternation only time-based → FOLDED: deliver to a QA only
+   when the other's runtime_status is not `active` (ALTERNATION-SKIP
+   record); skip keeps the cursor.
+2. HIGH MARATHON_APP_BASE is a SHA used as a path → CONFIRMED, also
+   silently degraded runs 19/20 (every "Current integrated head:" line
+   was EMPTY; QAs worked off delta task@sha entries — noted for those
+   as-run records). FOLDED: new MARATHON_APP_DIR=/app; both head sites
+   use it.
+3. HIGH cursors advanced before delivery known → FOLDED for dual:
+   integ_delta_peek/commit split; commit only on delivered|pending,
+   QA-DELIVERY-ERROR record otherwise. Lead-cursor variant of the same
+   flaw exists in the proven single-QA path (integ_delta) — ACCEPTED
+   RISK there (0 delivery errors in 2 full runs; byte-stability of the
+   proven arm preferred).
+4. HIGH rails ignore in_progress → FOLDED for dual lanes (open +
+   in_progress, wording "outstanding"); single-lane tasks rail left
+   byte-stable (never engaged in 2 runs).
+5. MEDIUM durable-probe instruction too weak → FOLDED as prompt
+   strengthening: first-pass REQUIRED probe script (start app, exercise
+   interfaces, inject spec-claimed faults, check stated guarantees, log
+   output), re-run+extend each later pass. Codex's harness-provided
+   deterministic probe wrapper DEFERRED as the next arm if B2g misses
+   the gates — B2g stays a clean test of agent-owned verification.
+6. MEDIUM purity leak risk → PARTIALLY REBUTTED: dense/replay/sequence/
+   fan-out are literal instruction.md text (4/2/2/3 occurrences);
+   "ordering" was not — term lists dropped from both new prompts,
+   replaced with "the guarantees the specification states".
+7. MEDIUM risky path not covered free → FOLDED as bounded in-run smoke:
+   the run's first ~5 passes are monitored against explicit assertions
+   (qab READY+ACK, alternating deliveries both reach delivered/pending,
+   no ALTERNATION-SKIP storm, no freeports kill during the other QA's
+   active turn, both cursors advance); violation = abort early, ~$10
+   exposure instead of $200. No separate pre-spend run.
+
 ### B3. fractal-generic — infrastructure COMMITTED
 Mission mode `generic` (verbatim spec + finish sentence — the hardcoded
 preamble is bypassed; strip-vet #3); hidden reserve pinned to 0; concurrency

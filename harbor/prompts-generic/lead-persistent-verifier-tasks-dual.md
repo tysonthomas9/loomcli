@@ -48,9 +48,9 @@ exist, each drawing from its own task lane:
   exercises the application through its user-facing interface as a user
   would.
 - `--source-repo qa-verify-backend` routes to the backend verifier, which
-  exercises the HTTP, WebSocket, and IRC contracts directly and injects
-  the faults the specification claims tolerance for (process kills,
-  storage outages, replay, ordering, sequence density).
+  exercises the HTTP, WebSocket, and IRC contracts directly, injects the
+  faults the specification claims tolerance for, and checks the
+  guarantees it states.
 
 On every pass whose message lists integrations since the last pass, file
 verification tasks — at most two per pass in total, and none into a lane
