@@ -12,6 +12,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/approvals"
 	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/issues"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/leadapi"
 	locsettings "github.com/tysonthomas9/loomcli/internal/webui/handlers/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/prreview"
@@ -134,4 +135,11 @@ func NewLocalSettingsHandlers(dataDir string, invalidator CredentialSeedInvalida
 // processes talk to serve instead of holding fleet-db credentials.
 func NewTaskRunAPIModule(st store.Store, fleetBaseURL string, localSettingsDir string) interface{ Register(*http.ServeMux) } {
 	return taskrunapi.NewModule(taskrunapi.Config{Store: st, FleetBaseURL: fleetBaseURL, LocalSettingsDir: localSettingsDir})
+}
+
+// NewLeadAPIModule creates the sandboxed-lead HTTP API module
+// (POST /api/workspaces/{ws}/lead/{op}, occupant-token auth) so lead
+// runtimes talk to serve instead of holding fleet-db credentials.
+func NewLeadAPIModule(st store.Store, tokenKey []byte) interface{ Register(*http.ServeMux) } {
+	return leadapi.NewModule(leadapi.Config{Store: st, TokenKey: tokenKey})
 }
