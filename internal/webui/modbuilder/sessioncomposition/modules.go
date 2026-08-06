@@ -14,17 +14,18 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/issues"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
 	hterminal "github.com/tysonthomas9/loomcli/internal/webui/handlers/terminal"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
 // NewIssueModules creates the issue and session modules.
-func NewIssueModules(workItems workitems.API, mover workitemmove.Commands, sessSvc service.SessionService) []interface{ Register(*http.ServeMux) } {
+func NewIssueModules(workItems workitems.API, mover workitemmove.Commands, sessSvc sessioncoord.SessionService) []interface{ Register(*http.ServeMux) } {
 	return []interface{ Register(*http.ServeMux) }{
 		issues.NewIssueModule(workItems, mover),
 		issues.NewSessionModule(sessSvc, issues.SessionModuleOpts{
@@ -40,8 +41,8 @@ func NewIssueModules(workItems workitems.API, mover workitemmove.Commands, sessS
 // modules. PTYMgr drives the main terminal WS; AgentTmuxMgr is kept only for
 // the live agent-view WS, which still reads auto-mode tmux sessions.
 type TerminalModuleDeps struct {
-	TermSvc            service.TerminalService
-	AgentSvc           service.AgentService
+	TermSvc            terminal.TerminalService
+	AgentSvc           agentcoord.AgentService
 	PTYMgr             terminal.PTYSource
 	AgentTmuxMgr       *terminal.AgentTmuxManager // may be nil when tmux is missing
 	TermAuth           *realtime.TerminalAuth

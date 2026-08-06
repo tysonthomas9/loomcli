@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/coordinator"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 )
 
 // newTestRegistry creates a coordinator.WorkspaceRegistry with real hooks and
@@ -87,16 +87,16 @@ func (s *testRegistryState) Close() {
 func TestCreateWarnings_ContextHelpers(t *testing.T) {
 	t.Run("full lifecycle", func(t *testing.T) {
 		ctx := context.Background()
-		ctx = service.WithCreateWarnings(ctx)
+		ctx = workspacecoord.WithCreateWarnings(ctx)
 
 		// Initially no warnings
-		if w := service.GetCreateWarnings(ctx); w != nil {
+		if w := workspacecoord.GetCreateWarnings(ctx); w != nil {
 			t.Fatalf("expected nil warnings initially, got %v", w)
 		}
 
 		// Add a warning
-		service.AddCreateWarning(ctx, "warning one")
-		warnings := service.GetCreateWarnings(ctx)
+		workspacecoord.AddCreateWarning(ctx, "warning one")
+		warnings := workspacecoord.GetCreateWarnings(ctx)
 		if len(warnings) != 1 {
 			t.Fatalf("expected 1 warning, got %d: %v", len(warnings), warnings)
 		}
@@ -105,8 +105,8 @@ func TestCreateWarnings_ContextHelpers(t *testing.T) {
 		}
 
 		// Add another warning
-		service.AddCreateWarning(ctx, "warning two")
-		warnings = service.GetCreateWarnings(ctx)
+		workspacecoord.AddCreateWarning(ctx, "warning two")
+		warnings = workspacecoord.GetCreateWarnings(ctx)
 		if len(warnings) != 2 {
 			t.Fatalf("expected 2 warnings, got %d: %v", len(warnings), warnings)
 		}
@@ -118,17 +118,17 @@ func TestCreateWarnings_ContextHelpers(t *testing.T) {
 	t.Run("AddCreateWarning is no-op on plain context", func(t *testing.T) {
 		ctx := context.Background()
 		// Should not panic
-		service.AddCreateWarning(ctx, "should be ignored")
+		workspacecoord.AddCreateWarning(ctx, "should be ignored")
 
 		// GetCreateWarnings returns nil on plain context
-		if w := service.GetCreateWarnings(ctx); w != nil {
+		if w := workspacecoord.GetCreateWarnings(ctx); w != nil {
 			t.Errorf("expected nil from plain context, got %v", w)
 		}
 	})
 
 	t.Run("GetCreateWarnings returns nil on plain context", func(t *testing.T) {
 		ctx := context.Background()
-		if w := service.GetCreateWarnings(ctx); w != nil {
+		if w := workspacecoord.GetCreateWarnings(ctx); w != nil {
 			t.Errorf("expected nil from plain context, got %v", w)
 		}
 	})
@@ -137,8 +137,8 @@ func TestCreateWarnings_ContextHelpers(t *testing.T) {
 func TestWrapWorkspaceCreateFn_CollectsWarnings(t *testing.T) {
 	registry, _ := newTestRegistry(t)
 
-	innerCreate := func(ctx context.Context, req service.WorkspaceCreateRequest) (service.WorkspaceCreateResult, error) {
-		return service.WorkspaceCreateResult{}, nil
+	innerCreate := func(ctx context.Context, req workspacecoord.WorkspaceCreateRequest) (workspacecoord.WorkspaceCreateResult, error) {
+		return workspacecoord.WorkspaceCreateResult{}, nil
 	}
 
 	// Empty WorkspaceID triggers a warning in the wrapped function
@@ -147,13 +147,13 @@ func TestWrapWorkspaceCreateFn_CollectsWarnings(t *testing.T) {
 		t.Fatal("expected non-nil wrapper")
 	}
 
-	ctx := service.WithCreateWarnings(context.Background())
-	_, err := wrapped(ctx, service.WorkspaceCreateRequest{Name: "my-ws"})
+	ctx := workspacecoord.WithCreateWarnings(context.Background())
+	_, err := wrapped(ctx, workspacecoord.WorkspaceCreateRequest{Name: "my-ws"})
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
 
-	warnings := service.GetCreateWarnings(ctx)
+	warnings := workspacecoord.GetCreateWarnings(ctx)
 	if len(warnings) == 0 {
 		t.Fatal("expected at least one warning from empty WorkspaceID path")
 	}
@@ -184,9 +184,9 @@ func TestWrapWorkspaceCreateFn_EmptyWorkspaceID_AbortsRegistration(t *testing.T)
 	registry, multiPool := newTestRegistry(t)
 
 	var innerCalled bool
-	innerCreate := func(ctx context.Context, req service.WorkspaceCreateRequest) (service.WorkspaceCreateResult, error) {
+	innerCreate := func(ctx context.Context, req workspacecoord.WorkspaceCreateRequest) (workspacecoord.WorkspaceCreateResult, error) {
 		innerCalled = true
-		return service.WorkspaceCreateResult{}, nil // empty WorkspaceID
+		return workspacecoord.WorkspaceCreateResult{}, nil // empty WorkspaceID
 	}
 
 	wrapped := wrapWorkspaceCreateFn(innerCreate, registry)
@@ -194,7 +194,7 @@ func TestWrapWorkspaceCreateFn_EmptyWorkspaceID_AbortsRegistration(t *testing.T)
 		t.Fatal("expected non-nil wrapper")
 	}
 
-	_, err := wrapped(context.Background(), service.WorkspaceCreateRequest{Name: "my-ws"})
+	_, err := wrapped(context.Background(), workspacecoord.WorkspaceCreateRequest{Name: "my-ws"})
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
@@ -212,13 +212,13 @@ func TestWrapWorkspaceCreateFn_EmptyWorkspaceID_NoError_AbortsRegistration(t *te
 	registry, multiPool := newTestRegistry(t)
 
 	var innerCalled bool
-	innerCreate := func(ctx context.Context, req service.WorkspaceCreateRequest) (service.WorkspaceCreateResult, error) {
+	innerCreate := func(ctx context.Context, req workspacecoord.WorkspaceCreateRequest) (workspacecoord.WorkspaceCreateResult, error) {
 		innerCalled = true
-		return service.WorkspaceCreateResult{WorkspaceID: ""}, nil // empty ID, no error
+		return workspacecoord.WorkspaceCreateResult{WorkspaceID: ""}, nil // empty ID, no error
 	}
 
 	wrapped := wrapWorkspaceCreateFn(innerCreate, registry)
-	_, err := wrapped(context.Background(), service.WorkspaceCreateRequest{Name: "my-ws"})
+	_, err := wrapped(context.Background(), workspacecoord.WorkspaceCreateRequest{Name: "my-ws"})
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
@@ -235,12 +235,12 @@ func TestWrapWorkspaceCreateFn_EmptyWorkspaceID_NoError_AbortsRegistration(t *te
 func TestWrapWorkspaceCreateFn_ZeroResult_AbortsRegistration(t *testing.T) {
 	registry, multiPool := newTestRegistry(t)
 
-	innerCreate := func(ctx context.Context, req service.WorkspaceCreateRequest) (service.WorkspaceCreateResult, error) {
-		return service.WorkspaceCreateResult{}, nil // zero-value result
+	innerCreate := func(ctx context.Context, req workspacecoord.WorkspaceCreateRequest) (workspacecoord.WorkspaceCreateResult, error) {
+		return workspacecoord.WorkspaceCreateResult{}, nil // zero-value result
 	}
 
 	wrapped := wrapWorkspaceCreateFn(innerCreate, registry)
-	_, err := wrapped(context.Background(), service.WorkspaceCreateRequest{Name: "my-ws"})
+	_, err := wrapped(context.Background(), workspacecoord.WorkspaceCreateRequest{Name: "my-ws"})
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
@@ -258,12 +258,12 @@ func TestWrapWorkspaceCreateFn_ResultWithID_RegistersByUUID(t *testing.T) {
 	wsName := "new-workspace"
 	wsPath := t.TempDir()
 
-	innerCreate := func(ctx context.Context, req service.WorkspaceCreateRequest) (service.WorkspaceCreateResult, error) {
-		return service.WorkspaceCreateResult{WorkspaceID: wsUUID, WorkspacePath: wsPath}, nil
+	innerCreate := func(ctx context.Context, req workspacecoord.WorkspaceCreateRequest) (workspacecoord.WorkspaceCreateResult, error) {
+		return workspacecoord.WorkspaceCreateResult{WorkspaceID: wsUUID, WorkspacePath: wsPath}, nil
 	}
 
 	wrapped := wrapWorkspaceCreateFn(innerCreate, registry)
-	_, err := wrapped(context.Background(), service.WorkspaceCreateRequest{Name: wsName, Path: wsPath})
+	_, err := wrapped(context.Background(), workspacecoord.WorkspaceCreateRequest{Name: wsName, Path: wsPath})
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
@@ -288,12 +288,12 @@ func TestWrapWorkspaceCreateFn_InnerCreateFails_NoRegistration(t *testing.T) {
 	registry, multiPool := newTestRegistry(t)
 
 	createErr := fmt.Errorf("disk full")
-	innerCreate := func(ctx context.Context, req service.WorkspaceCreateRequest) (service.WorkspaceCreateResult, error) {
-		return service.WorkspaceCreateResult{}, createErr
+	innerCreate := func(ctx context.Context, req workspacecoord.WorkspaceCreateRequest) (workspacecoord.WorkspaceCreateResult, error) {
+		return workspacecoord.WorkspaceCreateResult{}, createErr
 	}
 
 	wrapped := wrapWorkspaceCreateFn(innerCreate, registry)
-	_, err := wrapped(context.Background(), service.WorkspaceCreateRequest{Name: "my-ws"})
+	_, err := wrapped(context.Background(), workspacecoord.WorkspaceCreateRequest{Name: "my-ws"})
 	if err != createErr {
 		t.Fatalf("expected createErr, got %v", err)
 	}
@@ -309,8 +309,8 @@ func TestWrapWorkspaceCreateFn_RegisterFails_SurfacesWarning(t *testing.T) {
 	wsUUID := "aaaaaaaa-2222-3333-4444-555555555555"
 	wsPath := t.TempDir()
 
-	innerCreate := func(ctx context.Context, req service.WorkspaceCreateRequest) (service.WorkspaceCreateResult, error) {
-		return service.WorkspaceCreateResult{WorkspaceID: wsUUID, WorkspacePath: wsPath}, nil
+	innerCreate := func(ctx context.Context, req workspacecoord.WorkspaceCreateRequest) (workspacecoord.WorkspaceCreateResult, error) {
+		return workspacecoord.WorkspaceCreateResult{WorkspaceID: wsUUID, WorkspacePath: wsPath}, nil
 	}
 
 	// A closed registry rejects new runtime registrations.
@@ -320,13 +320,13 @@ func TestWrapWorkspaceCreateFn_RegisterFails_SurfacesWarning(t *testing.T) {
 
 	wrapped := wrapWorkspaceCreateFn(innerCreate, registry)
 
-	ctx := service.WithCreateWarnings(context.Background())
-	_, err := wrapped(ctx, service.WorkspaceCreateRequest{Name: "my-ws"})
+	ctx := workspacecoord.WithCreateWarnings(context.Background())
+	_, err := wrapped(ctx, workspacecoord.WorkspaceCreateRequest{Name: "my-ws"})
 	if err != nil {
 		t.Fatalf("expected nil error (workspace creation succeeded), got %v", err)
 	}
 
-	warnings := service.GetCreateWarnings(ctx)
+	warnings := workspacecoord.GetCreateWarnings(ctx)
 	if len(warnings) == 0 {
 		t.Fatal("expected at least one warning from Register failure")
 	}
@@ -349,8 +349,8 @@ func TestWrapWorkspaceCreateFn_RegisterFails_PlainContext_NoPanic(t *testing.T) 
 	wsUUID := "bbbbbbbb-2222-3333-4444-555555555555"
 	wsPath := t.TempDir()
 
-	innerCreate := func(ctx context.Context, req service.WorkspaceCreateRequest) (service.WorkspaceCreateResult, error) {
-		return service.WorkspaceCreateResult{WorkspaceID: wsUUID, WorkspacePath: wsPath}, nil
+	innerCreate := func(ctx context.Context, req workspacecoord.WorkspaceCreateRequest) (workspacecoord.WorkspaceCreateResult, error) {
+		return workspacecoord.WorkspaceCreateResult{WorkspaceID: wsUUID, WorkspacePath: wsPath}, nil
 	}
 
 	// A closed registry rejects new runtime registrations.
@@ -362,13 +362,13 @@ func TestWrapWorkspaceCreateFn_RegisterFails_PlainContext_NoPanic(t *testing.T) 
 
 	// Use plain context without WithCreateWarnings — should not panic.
 	ctx := context.Background()
-	_, err := wrapped(ctx, service.WorkspaceCreateRequest{Name: "my-ws"})
+	_, err := wrapped(ctx, workspacecoord.WorkspaceCreateRequest{Name: "my-ws"})
 	if err != nil {
 		t.Fatalf("expected nil error (workspace creation succeeded), got %v", err)
 	}
 
 	// No warnings context — GetCreateWarnings should return nil.
-	if w := service.GetCreateWarnings(ctx); w != nil {
+	if w := workspacecoord.GetCreateWarnings(ctx); w != nil {
 		t.Errorf("expected nil warnings from plain context, got %v", w)
 	}
 }

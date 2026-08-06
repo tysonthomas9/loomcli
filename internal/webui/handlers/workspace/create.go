@@ -8,11 +8,11 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 )
 
 // HandleWorkspaceCreate returns a handler that creates a new workspace.
-func HandleWorkspaceCreate(svc service.WorkspaceService) http.HandlerFunc {
+func HandleWorkspaceCreate(svc workspacecoord.WorkspaceService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx, span := startSpan(r.Context(), "service.Workspace.Create")
 		defer span.End()
@@ -55,8 +55,8 @@ func HandleWorkspaceCreate(svc service.WorkspaceService) http.HandlerFunc {
 
 // decodeCreateRequest decodes the request body, writing an error response
 // and returning ok=false on failure.
-func decodeCreateRequest(w http.ResponseWriter, r *http.Request) (service.WorkspaceCreateRequest, bool) {
-	var req service.WorkspaceCreateRequest
+func decodeCreateRequest(w http.ResponseWriter, r *http.Request) (workspacecoord.WorkspaceCreateRequest, bool) {
+	var req workspacecoord.WorkspaceCreateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		var maxBytesErr *http.MaxBytesError
 		status := http.StatusBadRequest

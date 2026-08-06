@@ -148,6 +148,20 @@ func (s *Service) List(ctx context.Context, query ListQuery) (*ListResult, error
 	return &ListResult{KanbanIssues: out}, nil
 }
 
+func (s *Service) Ready(ctx context.Context, query AvailabilityQuery) ([]IssueSummary, error) {
+	if query.Limit < 0 {
+		return nil, fmt.Errorf("limit must be non-negative: %w", ErrInvalid)
+	}
+	query.Labels = append([]string(nil), query.Labels...)
+	query.LabelsAny = append([]string(nil), query.LabelsAny...)
+	query.SourceRepos = append([]string(nil), query.SourceRepos...)
+	values, err := s.store.Ready(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	return validIssueSummaries(values)
+}
+
 func validIssueSummaries(values []IssueSummary) ([]IssueSummary, error) {
 	out := make([]IssueSummary, len(values))
 	for index := range values {
@@ -179,7 +193,7 @@ func excludeIssuesByStatus(values []IssueSummary, excluded []string) []IssueSumm
 func availabilityFromFilter(filter ListFilter) AvailabilityQuery {
 	return AvailabilityQuery{
 		ParentID: filter.ParentID, Assignee: filter.Assignee, Priority: filter.Priority,
-		IssueType: filter.IssueType, Labels: append([]string(nil), filter.Labels...),
+		IssueType: filter.IssueType, Labels: append([]string(nil), filter.Labels...), LabelsAny: append([]string(nil), filter.LabelsAny...),
 		SourceRepos: append([]string(nil), filter.SourceRepos...), Limit: filter.Limit,
 	}
 }

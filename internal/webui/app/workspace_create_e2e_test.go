@@ -9,8 +9,9 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/workspace"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 )
 
 // TestWorkspaceCreateE2E_ErrorCodes exercises the full handler chain for
@@ -26,28 +27,28 @@ func TestWorkspaceCreateE2E_ErrorCodes(t *testing.T) {
 		{
 			name:         "conflict returns 409",
 			body:         `{"name":"my-dup","type":"empty","repos":["/home/user/repo"]}`,
-			svcErr:       service.ErrConflict("workspace 'my-dup' already exists"),
+			svcErr:       apperrors.ErrConflict("workspace 'my-dup' already exists"),
 			wantStatus:   http.StatusConflict,
 			wantContains: "my-dup",
 		},
 		{
 			name:         "validation error returns 400",
 			body:         `{"name":"bad-path","type":"empty","repos":["/nonexistent/fake/dir"]}`,
-			svcErr:       service.ErrValidation("repo path does not exist: /nonexistent/fake/dir"),
+			svcErr:       apperrors.ErrValidation("repo path does not exist: /nonexistent/fake/dir"),
 			wantStatus:   http.StatusBadRequest,
 			wantContains: "/nonexistent/fake/dir",
 		},
 		{
 			name:         "forbidden returns 403",
 			body:         `{"name":"escape","type":"empty","repos":["/a"]}`,
-			svcErr:       service.ErrForbidden("path traversal detected"),
+			svcErr:       apperrors.ErrForbidden("path traversal detected"),
 			wantStatus:   http.StatusForbidden,
 			wantContains: "path traversal",
 		},
 		{
 			name:         "internal error returns 500",
 			body:         `{"name":"boom","type":"empty","repos":["/a"]}`,
-			svcErr:       service.ErrInternal("failed to create workspace", nil),
+			svcErr:       apperrors.ErrInternal("failed to create workspace", nil),
 			wantStatus:   http.StatusInternalServerError,
 			wantContains: "failed to create workspace",
 		},
@@ -56,10 +57,10 @@ func TestWorkspaceCreateE2E_ErrorCodes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			svc := &mockWorkspaceService{
-				startAsyncCreateFn: func(_ context.Context, _ service.WorkspaceCreateRequest) (string, error) {
-					return "", service.ErrUnavailable("not available")
+				startAsyncCreateFn: func(_ context.Context, _ workspacecoord.WorkspaceCreateRequest) (string, error) {
+					return "", apperrors.ErrUnavailable("not available")
 				},
-				createWorkspaceFn: func(_ context.Context, _ service.WorkspaceCreateRequest) (*ops.WorkspaceData, []string, error) {
+				createWorkspaceFn: func(_ context.Context, _ workspacecoord.WorkspaceCreateRequest) (*ops.WorkspaceData, []string, error) {
 					return nil, nil, tt.svcErr
 				},
 			}
@@ -90,7 +91,7 @@ func TestWorkspaceCreateE2E_ErrorCodes(t *testing.T) {
 // TestWorkspaceCreateE2E_CloneAsync verifies async creation path with mock service.
 func TestWorkspaceCreateE2E_CloneAsync(t *testing.T) {
 	svc := &mockWorkspaceService{
-		startAsyncCreateFn: func(_ context.Context, req service.WorkspaceCreateRequest) (string, error) {
+		startAsyncCreateFn: func(_ context.Context, req workspacecoord.WorkspaceCreateRequest) (string, error) {
 			return "job-e2e-123", nil
 		},
 	}
@@ -124,10 +125,10 @@ func TestWorkspaceCreateE2E_CloneAsync(t *testing.T) {
 func TestWorkspaceCreateE2E_CloneAsyncUnavailable(t *testing.T) {
 	createCalled := false
 	svc := &mockWorkspaceService{
-		startAsyncCreateFn: func(_ context.Context, _ service.WorkspaceCreateRequest) (string, error) {
-			return "", service.ErrUnavailable("async not available")
+		startAsyncCreateFn: func(_ context.Context, _ workspacecoord.WorkspaceCreateRequest) (string, error) {
+			return "", apperrors.ErrUnavailable("async not available")
 		},
-		createWorkspaceFn: func(_ context.Context, _ service.WorkspaceCreateRequest) (*ops.WorkspaceData, []string, error) {
+		createWorkspaceFn: func(_ context.Context, _ workspacecoord.WorkspaceCreateRequest) (*ops.WorkspaceData, []string, error) {
 			createCalled = true
 			return &ops.WorkspaceData{Name: "sync-e2e"}, nil, nil
 		},
@@ -151,10 +152,10 @@ func TestWorkspaceCreateE2E_CloneAsyncUnavailable(t *testing.T) {
 // TestWorkspaceCreateE2E_EmptySuccess verifies empty workspace creation.
 func TestWorkspaceCreateE2E_EmptySuccess(t *testing.T) {
 	svc := &mockWorkspaceService{
-		startAsyncCreateFn: func(_ context.Context, _ service.WorkspaceCreateRequest) (string, error) {
-			return "", service.ErrUnavailable("not available")
+		startAsyncCreateFn: func(_ context.Context, _ workspacecoord.WorkspaceCreateRequest) (string, error) {
+			return "", apperrors.ErrUnavailable("not available")
 		},
-		createWorkspaceFn: func(_ context.Context, req service.WorkspaceCreateRequest) (*ops.WorkspaceData, []string, error) {
+		createWorkspaceFn: func(_ context.Context, req workspacecoord.WorkspaceCreateRequest) (*ops.WorkspaceData, []string, error) {
 			if req.Type != "empty" {
 				t.Errorf("expected type %q, got %q", "empty", req.Type)
 			}
@@ -188,8 +189,8 @@ func TestWorkspaceCreateE2E_EmptySuccess(t *testing.T) {
 // TestWorkspaceCreateE2E_JobPollingUnknownID verifies 404 for unknown job.
 func TestWorkspaceCreateE2E_JobPollingUnknownID(t *testing.T) {
 	svc := &mockWorkspaceService{
-		getWorkspaceJobFn: func(_ context.Context, _ string) (*service.WorkspaceJob, error) {
-			return nil, service.ErrNotFound("job not found")
+		getWorkspaceJobFn: func(_ context.Context, _ string) (*workspacecoord.WorkspaceJob, error) {
+			return nil, apperrors.ErrNotFound("job not found")
 		},
 	}
 	handler := workspace.HandleGetWorkspaceJob(svc)
@@ -207,10 +208,10 @@ func TestWorkspaceCreateE2E_JobPollingUnknownID(t *testing.T) {
 // TestWorkspaceCreateE2E_JobPollingCompleted verifies completed job polling.
 func TestWorkspaceCreateE2E_JobPollingCompleted(t *testing.T) {
 	svc := &mockWorkspaceService{
-		getWorkspaceJobFn: func(_ context.Context, jobID string) (*service.WorkspaceJob, error) {
-			return &service.WorkspaceJob{
+		getWorkspaceJobFn: func(_ context.Context, jobID string) (*workspacecoord.WorkspaceJob, error) {
+			return &workspacecoord.WorkspaceJob{
 				ID:          jobID,
-				Status:      service.JobStatusDone,
+				Status:      workspacecoord.JobStatusDone,
 				WorkspaceID: "ws-poll-done",
 			}, nil
 		},
@@ -229,8 +230,8 @@ func TestWorkspaceCreateE2E_JobPollingCompleted(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if resp["status"] != string(service.JobStatusDone) {
-		t.Errorf("expected status %q, got %v", service.JobStatusDone, resp["status"])
+	if resp["status"] != string(workspacecoord.JobStatusDone) {
+		t.Errorf("expected status %q, got %v", workspacecoord.JobStatusDone, resp["status"])
 	}
 	if resp["workspace_id"] != "ws-poll-done" {
 		t.Errorf("expected workspace_id %q, got %v", "ws-poll-done", resp["workspace_id"])

@@ -6,7 +6,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
 type terminalSetupRequest struct {
@@ -18,7 +18,7 @@ type terminalSetupRequest struct {
 // workspace-scoped PTY session and returns the tab the frontend should attach
 // to. The handler never accepts arbitrary shell input; service.StartSetup maps
 // backend/action pairs to known commands.
-func HandleStartTerminalSetup(svc service.TerminalService) http.HandlerFunc {
+func HandleStartTerminalSetup(svc terminal.TerminalService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		workspace := middleware.WorkspaceFromContext(r.Context())
 
@@ -32,7 +32,7 @@ func HandleStartTerminalSetup(svc service.TerminalService) http.HandlerFunc {
 			return
 		}
 
-		result, err := svc.StartSetup(r.Context(), workspace, service.TerminalSetupRequest{
+		result, err := svc.StartSetup(r.Context(), workspace, terminal.TerminalSetupRequest{
 			Backend: req.Backend,
 			Action:  req.Action,
 		})

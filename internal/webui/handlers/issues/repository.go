@@ -11,10 +11,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
 
-type issueRepositoryCommand interface {
-	SetIssueRepository(ctx context.Context, issueID, repo string) (json.RawMessage, error)
-}
-
 // HandleAssignWorkItemRepository delegates the atomic repository assignment
 // and conditional reopen to the Work Items owner.
 func HandleAssignWorkItemRepository(api workitems.API) http.HandlerFunc {
@@ -34,17 +30,6 @@ func HandleAssignWorkItemRepository(api workitems.API) http.HandlerFunc {
 // canonical source repository to an issue.
 type SetIssueRepositoryRequest struct {
 	Repo string `json:"repo"`
-}
-
-// HandleSetIssueRepository assigns a canonical workspace repository and
-// returns the authoritative issue projection from FleetDB. FleetDB also owns
-// the conditional blocked-to-open recovery; this handler never reopens an
-// issue with a second mutation.
-func HandleSetIssueRepository(svc issueRepositoryCommand) http.HandlerFunc {
-	if svc == nil {
-		return handleSetIssueRepository(nil, false)
-	}
-	return handleSetIssueRepository(svc.SetIssueRepository, false)
 }
 
 func handleSetIssueRepository(command func(context.Context, string, string) (json.RawMessage, error), capabilityErrors bool) http.HandlerFunc {

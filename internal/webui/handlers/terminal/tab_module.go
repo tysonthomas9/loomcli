@@ -3,7 +3,7 @@ package terminal
 import (
 	"net/http"
 
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
 // TabModule registers workspace-scoped terminal tab metadata, UI state, and
@@ -12,12 +12,12 @@ import (
 // The module is only constructed when termSvc is non-nil. All routes are
 // unconditional within this module.
 type TabModule struct {
-	termSvc service.TerminalService
+	termSvc terminal.TerminalService
 }
 
 // NewTabModule returns a TabModule that will register routes
 // using the given terminal service.
-func NewTabModule(termSvc service.TerminalService) *TabModule {
+func NewTabModule(termSvc terminal.TerminalService) *TabModule {
 	return &TabModule{termSvc: termSvc}
 }
 

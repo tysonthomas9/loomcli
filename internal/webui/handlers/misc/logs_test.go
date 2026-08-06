@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // TestValidAgentNameRegex tests the agent name validation regex.
@@ -126,7 +126,7 @@ func TestValidPhaseRegex(t *testing.T) {
 func TestHandleGetAgentLog_MissingName(t *testing.T) {
 	svc := &mockAgentService{
 		getLogFunc: func(_ context.Context, _, agentName string, _ int, _ int64) (*AgentLogResult, error) {
-			return nil, service.ErrValidation("missing agent name")
+			return nil, apperrors.ErrValidation("missing agent name")
 		},
 	}
 	handler := handleGetAgentLog(svc)
@@ -156,7 +156,7 @@ func TestHandleGetAgentLog_MissingName(t *testing.T) {
 func TestHandleGetAgentLog_InvalidName(t *testing.T) {
 	svc := &mockAgentService{
 		getLogFunc: func(_ context.Context, _, agentName string, _ int, _ int64) (*AgentLogResult, error) {
-			return nil, service.ErrValidation("invalid agent name: must match [a-zA-Z0-9_-]+")
+			return nil, apperrors.ErrValidation("invalid agent name: must match [a-zA-Z0-9_-]+")
 		},
 	}
 	handler := handleGetAgentLog(svc)
@@ -201,7 +201,7 @@ func TestHandleGetAgentLog_InvalidName(t *testing.T) {
 func TestHandleGetAgentLog_FileNotFound(t *testing.T) {
 	svc := &mockAgentService{
 		getLogFunc: func(_ context.Context, _, _ string, _ int, _ int64) (*AgentLogResult, error) {
-			return nil, service.ErrNotFound("log file not found - agent may not be active")
+			return nil, apperrors.ErrNotFound("log file not found - agent may not be active")
 		},
 	}
 	handler := handleGetAgentLog(svc)
@@ -1079,7 +1079,7 @@ func TestFileExists(t *testing.T) {
 func TestHandleGetAgentLog_ContentType(t *testing.T) {
 	svc := &mockAgentService{
 		getLogFunc: func(_ context.Context, _, _ string, _ int, _ int64) (*AgentLogResult, error) {
-			return nil, service.ErrValidation("missing agent name")
+			return nil, apperrors.ErrValidation("missing agent name")
 		},
 	}
 	handler := handleGetAgentLog(svc)
@@ -1815,7 +1815,7 @@ func TestHandleGetAgentLog_DifferentWorkspaces(t *testing.T) {
 					StartLine: 1,
 				}, nil
 			default:
-				return nil, service.ErrNotFound("unknown workspace")
+				return nil, apperrors.ErrNotFound("unknown workspace")
 			}
 		},
 	}

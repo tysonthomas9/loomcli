@@ -20,7 +20,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 	webuiterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
@@ -34,17 +34,17 @@ func newAgentSessionTestDeps(t *testing.T) (*memstore.Store, *tabmeta.Store, *re
 }
 
 type slowListTerminalService struct {
-	service.TerminalService
+	webuiterminal.TerminalService
 	delay time.Duration
 }
 
 type failingPutTerminalService struct {
-	service.TerminalService
+	webuiterminal.TerminalService
 	err error
 }
 
 type signalingPutTerminalService struct {
-	service.TerminalService
+	webuiterminal.TerminalService
 	once      sync.Once
 	putCalled chan struct{}
 }
@@ -318,8 +318,8 @@ func TestBuildAgentLaunchSpecRejectsDaemonSupervisedWorker(t *testing.T) {
 	agent := &agents.RuntimeIdentity{WorkspaceKey: "E2E", AgentID: "review-a", RoleName: "reviewer"}
 
 	launch, _, err := buildAgentLaunchSpec(ctx, st, "E2E", "term_review", agent, "")
-	var svcErr *service.ServiceError
-	if launch != nil || !errors.As(err, &svcErr) || svcErr.Kind != service.KindValidation {
+	var svcErr *apperrors.ServiceError
+	if launch != nil || !errors.As(err, &svcErr) || svcErr.Kind != apperrors.KindValidation {
 		t.Fatalf("buildAgentLaunchSpec = (%#v, %v), want worker-terminal validation", launch, err)
 	}
 	if !strings.Contains(svcErr.Message, "background worker") {
@@ -705,8 +705,8 @@ func TestEnsureAgentTerminalSessionRejectsStoppedAgentWithoutSession(t *testing.
 	}
 
 	_, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "worker-done", terminalStoreIdentity{services: st.AgentServices()})
-	var svcErr *service.ServiceError
-	if !errors.As(err, &svcErr) || svcErr.Kind != service.KindValidation {
+	var svcErr *apperrors.ServiceError
+	if !errors.As(err, &svcErr) || svcErr.Kind != apperrors.KindValidation {
 		t.Fatalf("ensureAgentTerminalSession error = %v, want validation", err)
 	}
 	if !strings.Contains(svcErr.Message, "background worker") {
@@ -744,8 +744,8 @@ func TestEnsureAgentTerminalSessionRejectsActiveEphemeralWorkerWithoutRelaunch(t
 	}
 
 	_, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "worker-live", terminalStoreIdentity{services: st.AgentServices()})
-	var svcErr *service.ServiceError
-	if !errors.As(err, &svcErr) || svcErr.Kind != service.KindValidation {
+	var svcErr *apperrors.ServiceError
+	if !errors.As(err, &svcErr) || svcErr.Kind != apperrors.KindValidation {
 		t.Fatalf("ensureAgentTerminalSession error = %v, want validation", err)
 	}
 	if !strings.Contains(svcErr.Message, "background worker") {
@@ -813,8 +813,8 @@ func TestEnsureAgentTerminalSessionRejectsAdvancedServiceWorkersWithoutCreatingT
 			}
 
 			meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "advanced-worker", terminalStoreIdentity{services: st.AgentServices()})
-			var svcErr *service.ServiceError
-			if meta != nil || !errors.As(err, &svcErr) || svcErr.Kind != service.KindValidation {
+			var svcErr *apperrors.ServiceError
+			if meta != nil || !errors.As(err, &svcErr) || svcErr.Kind != apperrors.KindValidation {
 				t.Fatalf("ensureAgentTerminalSession = (%#v, %v), want validation", meta, err)
 			}
 			if !strings.Contains(svcErr.Message, "background worker") {
@@ -1243,8 +1243,8 @@ func TestEnsureAgentTerminalSessionRejectsWorkerWithExistingTerminalTab(t *testi
 	}
 
 	meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "worker-done", terminalStoreIdentity{services: st.AgentServices()})
-	var svcErr *service.ServiceError
-	if meta != nil || !errors.As(err, &svcErr) || svcErr.Kind != service.KindValidation {
+	var svcErr *apperrors.ServiceError
+	if meta != nil || !errors.As(err, &svcErr) || svcErr.Kind != apperrors.KindValidation {
 		t.Fatalf("ensureAgentTerminalSession = (%#v, %v), want validation", meta, err)
 	}
 	if !strings.Contains(svcErr.Message, "background worker") {

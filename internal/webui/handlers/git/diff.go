@@ -5,7 +5,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/sourcecontrolcoord"
 )
 
 // diffResponse is the standard response envelope for diff endpoints.
@@ -24,7 +24,7 @@ func respondDiffError(w http.ResponseWriter, status int, msg string) {
 }
 
 // HandleDiffCommits handles GET /api/agents/{name}/diff/commits?limit=N
-func HandleDiffCommits(svc service.DiffService) http.HandlerFunc {
+func HandleDiffCommits(svc sourcecontrolcoord.DiffService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		agentName := r.PathValue("name")
 		wsID := middleware.WorkspaceFromContext(r.Context())
@@ -52,7 +52,7 @@ func HandleDiffCommits(svc service.DiffService) http.HandlerFunc {
 }
 
 // HandleDiffFiles handles GET /api/agents/{name}/diff/files?to=HEAD&from=X
-func HandleDiffFiles(svc service.DiffService) http.HandlerFunc {
+func HandleDiffFiles(svc sourcecontrolcoord.DiffService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		agentName := r.PathValue("name")
 		wsID := middleware.WorkspaceFromContext(r.Context())
@@ -71,7 +71,7 @@ func HandleDiffFiles(svc service.DiffService) http.HandlerFunc {
 }
 
 // HandleDiffFile handles GET /api/agents/{name}/diff/file?path=X&to=HEAD&from=Y
-func HandleDiffFile(svc service.DiffService) http.HandlerFunc {
+func HandleDiffFile(svc sourcecontrolcoord.DiffService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		agentName := r.PathValue("name")
 		wsID := middleware.WorkspaceFromContext(r.Context())

@@ -27,6 +27,7 @@ type fakeStore struct {
 	issues          []IssueSummary
 	blockedIssues   []IssueSummary
 	readyIssues     []IssueSummary
+	readyQuery      AvailabilityQuery
 	deferredIssues  []IssueSummary
 	listFilter      ListFilter
 	claimed         *IssueDetail
@@ -59,7 +60,8 @@ func (f *fakeStore) List(_ context.Context, filter ListFilter) ([]IssueSummary, 
 func (f *fakeStore) Blocked(context.Context, AvailabilityQuery) ([]IssueSummary, error) {
 	return f.blockedIssues, f.err
 }
-func (f *fakeStore) Ready(context.Context, AvailabilityQuery) ([]IssueSummary, error) {
+func (f *fakeStore) Ready(_ context.Context, query AvailabilityQuery) ([]IssueSummary, error) {
+	f.readyQuery = query
 	return f.readyIssues, f.err
 }
 func (f *fakeStore) Deferred(context.Context, AvailabilityQuery) ([]IssueSummary, error) {
@@ -215,6 +217,46 @@ func TestServiceListRejectsNegativeLimitBeforePersistence(t *testing.T) {
 	}
 	if store.listFilter.Limit != 0 {
 		t.Fatalf("invalid list reached persistence: %#v", store.listFilter)
+	}
+}
+
+func TestServiceReadyOwnsQueryAndProjection(t *testing.T) {
+	labels := []string{"ready"}
+	labelsAny := []string{"backend"}
+	sourceRepos := []string{"loomcli"}
+	store := &fakeStore{readyIssues: []IssueSummary{{ID: "TASK-1", Status: "open", Labels: []string{"persisted"}}}}
+	service, _ := New(store)
+	issues, err := service.Ready(context.Background(), AvailabilityQuery{
+		Assignee: "agent-1", Labels: labels, LabelsAny: labelsAny, SourceRepos: sourceRepos,
+		Limit: 10, SortPolicy: "priority", MolType: "work",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	labels[0] = "mutated"
+	labelsAny[0] = "mutated"
+	sourceRepos[0] = "mutated"
+	issues[0].Labels[0] = "mutated"
+	if store.readyQuery.Labels[0] != "ready" || store.readyQuery.LabelsAny[0] != "backend" || store.readyQuery.SourceRepos[0] != "loomcli" {
+		t.Fatalf("ready query leaked caller slices: %#v", store.readyQuery)
+	}
+	if store.readyIssues[0].Labels[0] != "persisted" {
+		t.Fatalf("ready projection leaked durable slices: %#v", store.readyIssues[0])
+	}
+}
+
+func TestServiceReadyRejectsInvalidInputAndPersistedState(t *testing.T) {
+	store := &fakeStore{}
+	service, _ := New(store)
+	if _, err := service.Ready(context.Background(), AvailabilityQuery{Limit: -1}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("expected invalid query, got %v", err)
+	}
+	if store.readyQuery.Limit != 0 {
+		t.Fatalf("invalid ready query reached persistence: %#v", store.readyQuery)
+	}
+	store.readyIssues = []IssueSummary{{Status: "open"}}
+	if _, err := service.Ready(context.Background(), AvailabilityQuery{}); !errors.Is(err, ErrInvalidPersistedState) {
+		t.Fatalf("expected invalid persisted state, got %v", err)
 	}
 }
 

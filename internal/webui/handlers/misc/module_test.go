@@ -7,8 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/filecoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // Compile-time assertion: *FileModule implements the module interface.
@@ -71,11 +71,11 @@ func TestFileModule_ViewerCapabilities(t *testing.T) {
 	if capRR.Code != http.StatusOK {
 		t.Fatalf("capabilities status=%d body=%s", capRR.Code, capRR.Body.String())
 	}
-	var capabilities service.FileCapabilities
+	var capabilities filecoord.FileCapabilities
 	if err := json.NewDecoder(capRR.Body).Decode(&capabilities); err != nil {
 		t.Fatal(err)
 	}
-	if capabilities != (service.FileCapabilities{Read: true}) {
+	if capabilities != (filecoord.FileCapabilities{Read: true}) {
 		t.Fatalf("capabilities=%+v", capabilities)
 	}
 }

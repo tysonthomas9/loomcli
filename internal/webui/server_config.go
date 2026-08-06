@@ -14,7 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/servercapabilities"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 )
 
 // AutomationCapability is the narrow composition handle consumed by the web
@@ -120,15 +120,13 @@ type ServerConfig struct {
 	WorkspaceSourceControl    servercapabilities.RepositoryAdmissionMaterializer
 	WorkspaceCatalog          servercapabilities.WorkspaceAPI
 	InteractionCapability     InteractionCapability
-	MonitorHandlers           MonitorHandlers             // Pre-built handlers for monitor/metrics endpoints (injected by cli)
-	GitOps                    ops.GitOps                  // Git operations interface (optional; nil disables git endpoints)
-	FileOps                   ops.FileOps                 // File operations interface (optional; nil disables file endpoints)
-	WorkspaceDeleteCleanupFn  func(key string) error      // Machine-local cleanup after an owner-command deletion.
-	SetDefaultWorkspaceFn     func(name string) error     // Deprecated compatibility hook; default workspace selection is disabled.
-	ClearDefaultWorkspaceFn   func() error                // Deprecated compatibility hook; default workspace selection is disabled.
-	WorkspaceCreateFn         service.WorkspaceCreateFn   // Workspace creation function; nil = creation unavailable
-	WorkspaceAddReposFn       service.WorkspaceAddReposFn // Attach local repos to an existing workspace; nil = unavailable
-	WorkspaceAdmissions       service.WorkspaceAdmissionCoordinator
+	MonitorHandlers           MonitorHandlers                    // Pre-built handlers for monitor/metrics endpoints (injected by cli)
+	GitOps                    ops.GitOps                         // Git operations interface (optional; nil disables git endpoints)
+	FileOps                   ops.FileOps                        // File operations interface (optional; nil disables file endpoints)
+	WorkspaceDeleteCleanupFn  func(key string) error             // Machine-local cleanup after an owner-command deletion.
+	WorkspaceCreateFn         workspacecoord.WorkspaceCreateFn   // Workspace creation function; nil = creation unavailable
+	WorkspaceAddReposFn       workspacecoord.WorkspaceAddReposFn // Attach local repos to an existing workspace; nil = unavailable
+	WorkspaceAdmissions       workspacecoord.WorkspaceAdmissionCoordinator
 	InitialWorkspaceID        string                // Stable key of the initial workspace
 	WorkspaceIDResolverFn     WorkspaceIDResolverFn // Resolves workspace name → UUID; nil = no resolution available
 	// Store is the transitional unified state store for workspace configuration

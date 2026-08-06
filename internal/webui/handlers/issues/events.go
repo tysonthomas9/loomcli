@@ -7,7 +7,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/types"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // HandleGetWorkItemEvents routes the audit query through the Work Items API.
@@ -56,32 +55,4 @@ func parseEventLimit(r *http.Request) int {
 		return maxLimit
 	}
 	return parsed
-}
-
-// handleGetIssueEvents returns a handler that lists events for an issue.
-func HandleGetIssueEvents(svc service.IssueService) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		issueID := r.PathValue("id")
-		if issueID == "" {
-			handler.WriteJSON(w, http.StatusBadRequest, EventListResponse{
-				Success: false,
-				Error:   "missing issue ID",
-			})
-			return
-		}
-
-		events, err := svc.ListEvents(r.Context(), service.EventListParams{
-			IssueID: issueID,
-			Limit:   parseEventLimit(r),
-		})
-		if err != nil {
-			handler.HandleServiceError(w, err)
-			return
-		}
-
-		handler.WriteJSON(w, http.StatusOK, EventListResponse{
-			Success: true,
-			Data:    events,
-		})
-	}
 }

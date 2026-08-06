@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
@@ -97,11 +97,11 @@ func setupCommandFor(backend, action string) (setupCommandSpec, string, error) {
 	action = strings.ToLower(strings.TrimSpace(action))
 	spec, ok := setupCommandSpecs[backend]
 	if !ok {
-		return setupCommandSpec{}, "", service.ErrValidation("unsupported setup backend")
+		return setupCommandSpec{}, "", apperrors.ErrValidation("unsupported setup backend")
 	}
 	command := spec.commands[action]
 	if command == "" {
-		return setupCommandSpec{}, "", service.ErrValidation("unsupported setup action")
+		return setupCommandSpec{}, "", apperrors.ErrValidation("unsupported setup action")
 	}
 	return spec, command, nil
 }
@@ -174,13 +174,13 @@ func setupIsManual(action string, spec setupCommandSpec) bool {
 	return spec.manual != nil && spec.manual[action]
 }
 
-func (s *terminalServiceImpl) StartSetup(ctx context.Context, wsID string, req service.TerminalSetupRequest) (*service.TerminalSetupResult, error) {
+func (s *terminalServiceImpl) StartSetup(ctx context.Context, wsID string, req TerminalSetupRequest) (*TerminalSetupResult, error) {
 	if s.ptyMgr == nil {
-		return nil, service.ErrUnavailable("terminal manager not initialized")
+		return nil, apperrors.ErrUnavailable("terminal manager not initialized")
 	}
 	runner, ok := s.ptyMgr.(PTYCommandRunner)
 	if !ok {
-		return nil, service.ErrUnavailable("terminal setup runner not available")
+		return nil, apperrors.ErrUnavailable("terminal setup runner not available")
 	}
 
 	backend := strings.ToLower(strings.TrimSpace(req.Backend))
@@ -195,11 +195,11 @@ func (s *terminalServiceImpl) StartSetup(ctx context.Context, wsID string, req s
 	key := SessionKey{Workspace: wsID, Name: session}
 	created, err := runner.EnsureSession(key, setupTerminalCols, setupTerminalRows, setupShellArgv(command))
 	if err != nil {
-		return nil, service.ErrInternal("failed to start setup terminal", err)
+		return nil, apperrors.ErrInternal("failed to start setup terminal", err)
 	}
 	if !created {
 		if err := runner.WriteToSession(key, []byte(command+"\n")); err != nil {
-			return nil, service.ErrInternal("failed to run setup command", err)
+			return nil, apperrors.ErrInternal("failed to run setup command", err)
 		}
 	}
 
@@ -211,7 +211,7 @@ func (s *terminalServiceImpl) StartSetup(ctx context.Context, wsID string, req s
 		_ = s.PatchTerminalState(ctx, wsID, session)
 	}
 
-	return &service.TerminalSetupResult{
+	return &TerminalSetupResult{
 		SessionName: session,
 		Label:       label,
 		Backend:     backend,
@@ -231,7 +231,7 @@ func (s *terminalServiceImpl) upsertSetupTab(ctx context.Context, wsID, session,
 
 	existing, err := s.tabStore.Get(ctx, wsID, session)
 	if err != nil {
-		return service.ErrInternal("failed to get setup tab metadata", err)
+		return apperrors.ErrInternal("failed to get setup tab metadata", err)
 	}
 	if existing == nil {
 		now := time.Now().UTC()
@@ -248,11 +248,11 @@ func (s *terminalServiceImpl) upsertSetupTab(ctx context.Context, wsID, session,
 			UpdatedAt:   now,
 		}
 		if err := s.tabStore.Set(ctx, meta); err != nil {
-			return service.ErrInternal("failed to create setup tab metadata", err)
+			return apperrors.ErrInternal("failed to create setup tab metadata", err)
 		}
 	} else if existing.Label != label {
 		if _, err := s.tabStore.Patch(ctx, wsID, session, map[string]string{"label": label}); err != nil {
-			return service.ErrInternal("failed to update setup tab metadata", err)
+			return apperrors.ErrInternal("failed to update setup tab metadata", err)
 		}
 	}
 

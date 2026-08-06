@@ -10,8 +10,8 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // mockGitOps implements ops.GitOps for testing.
@@ -361,7 +361,7 @@ func TestGitPull_Conflict(t *testing.T) {
 func TestGitPull_GetCurrentBranchError(t *testing.T) {
 	svc := &mockAgentService{
 		gitPullFunc: func(ctx context.Context, wsID, agentName, source string) (*ops.GitPullResult, error) {
-			return nil, &service.ServiceError{Kind: service.KindInternal, Message: "detached HEAD"}
+			return nil, &apperrors.ServiceError{Kind: apperrors.KindInternal, Message: "detached HEAD"}
 		},
 	}
 	handler := handleGitPull(svc)
@@ -558,7 +558,7 @@ func TestGitSync_PullError(t *testing.T) {
 func TestGitSync_GetCurrentBranchError(t *testing.T) {
 	svc := &mockAgentService{
 		gitSyncFunc: func(ctx context.Context, wsID, agentName string) (*GitSyncResult, error) {
-			return nil, &service.ServiceError{Kind: service.KindInternal, Message: "detached HEAD"}
+			return nil, &apperrors.ServiceError{Kind: apperrors.KindInternal, Message: "detached HEAD"}
 		},
 	}
 	handler := handleGitSync(svc)
@@ -642,7 +642,7 @@ func TestGitPR_AlreadyExists(t *testing.T) {
 func TestGitPR_GhNotInstalled(t *testing.T) {
 	svc := &mockAgentService{
 		createPRFunc: func(ctx context.Context, wsID, agentName, target string) (*ops.GitPRResult, error) {
-			return nil, &service.ServiceError{Kind: service.KindUnavailable, Message: "gh CLI not installed"}
+			return nil, &apperrors.ServiceError{Kind: apperrors.KindUnavailable, Message: "gh CLI not installed"}
 		},
 	}
 	handler := handleGitPR(svc)
@@ -992,7 +992,7 @@ func TestGitTargetUpdate_MissingBranch(t *testing.T) {
 func TestGitTargetUpdate_NotWorkspaceMode(t *testing.T) {
 	svc := &mockAgentService{
 		setTargetBranchFunc: func(ctx context.Context, wsID, agentName, branch string) error {
-			return &service.ServiceError{Kind: service.KindValidation, Message: "target branch can only be changed in workspace mode"}
+			return &apperrors.ServiceError{Kind: apperrors.KindValidation, Message: "target branch can only be changed in workspace mode"}
 		},
 	}
 	handler := handleGitTargetUpdate(svc)

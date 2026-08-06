@@ -738,8 +738,8 @@
   },
   "ratchets": {
     "composite_store": {
-      "max_production_files": 64,
-      "max_outside_composition": 54,
+      "max_production_files": 61,
+      "max_outside_composition": 51,
       "composition_prefixes": [
         "internal/cli/serve/",
         "internal/infra/",
@@ -791,7 +791,6 @@
         "internal/webui/handlers/approvals/module.go",
         "internal/webui/handlers/connectors/module.go",
         "internal/webui/handlers/driverapi/module.go",
-        "internal/webui/handlers/issues/move.go",
         "internal/webui/handlers/prreview/module.go",
         "internal/webui/handlers/roles/module.go",
         "internal/webui/handlers/taskrunapi/module.go",
@@ -806,10 +805,8 @@
         "internal/webui/modbuilder/reviewcomposition/modules.go",
         "internal/webui/modbuilder/sessioncomposition/modules.go",
         "internal/webui/server_config.go",
-        "internal/webui/service/workspace_impl.go",
         "internal/webui/storeadapter/selfheal.go",
-        "internal/webui/storeadapter/storeadapter.go",
-        "internal/webui/svcimpl/session_service.go"
+        "internal/webui/storeadapter/storeadapter.go"
       ]
     },
     "legacy_handler_imports": {
@@ -835,8 +832,6 @@
         {"file": "internal/webui/handlers/driverapi/watch.go", "import": "github.com/tysonthomas9/loomcli/internal/store"},
         {"file": "internal/webui/handlers/git/graph.go", "import": "github.com/tysonthomas9/loomcli/internal/backend"},
         {"file": "internal/webui/handlers/health/health.go", "import": "github.com/tysonthomas9/loomcli/internal/backend"},
-        {"file": "internal/webui/handlers/issues/move.go", "import": "github.com/tysonthomas9/loomcli/internal/store"},
-        {"file": "internal/webui/handlers/issues/ready.go", "import": "github.com/tysonthomas9/loomcli/internal/backend"},
         {"file": "internal/webui/handlers/misc/auth_config.go", "import": "github.com/tysonthomas9/loomcli/internal/backend"},
         {"file": "internal/webui/handlers/prreview/handlers.go", "import": "github.com/tysonthomas9/loomcli/internal/backend/api/gen"},
         {"file": "internal/webui/handlers/prreview/module.go", "import": "github.com/tysonthomas9/loomcli/internal/store"},
@@ -860,54 +855,7 @@
       "denied_prefixes": [
         "github.com/tysonthomas9/loomcli/internal/webui/service"
       ],
-      "allowed": [
-        {"file": "internal/webui/handlers/agents/handlers.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/agents/module.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/agents/record_handlers.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/git/agent_diff_stat.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/git/diff.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/git/diff_service.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/git/diff_service.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service/pathsec"},
-        {"file": "internal/webui/handlers/git/git.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/git/module.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/git/pull_requests.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/git/pull_requests_module.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/issues/comments.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/issues/deps.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/issues/diff_stat.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/issues/events.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/issues/issues.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/issues/move.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/issues/search.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/issues/session_history.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/issues/session_module.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/issues/write.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/issues/write_ops.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/misc/files.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/misc/logs.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/misc/module.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/misc/sessions.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/prreview/module.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/terminal/agent.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/terminal/agent_session.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/terminal/module.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/terminal/sessions_by_issue.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/terminal/setup.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/terminal/state.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/terminal/tab_module.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/terminal/tabs.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/terminal/terminal.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/workspace/backend.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/workspace/create.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/workspace/default.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/workspace/delete.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/workspace/design_format.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/workspace/jobs.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/workspace/rename.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/workspace/reorder.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/workspace/workspace.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/workspace/workspaces.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"}
-      ]
+      "allowed": []
     }
   },
   "inventories": [

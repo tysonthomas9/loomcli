@@ -40,6 +40,14 @@ type SessionHistory struct {
 	Sessions []SessionRecord `json:"sessions"`
 }
 
+// ScrollbackResult is the read projection for one completed session's
+// captured terminal output. It belongs with session-history persistence rather
+// than the retired global Web UI service bucket.
+type ScrollbackResult struct {
+	Content string
+	Lines   int
+}
+
 // Store provides Redis-backed persistence for session history.
 // Workspace identity is passed per-operation (matching the tabmeta pattern),
 // not embedded in the struct. One Store instance serves all workspaces.

@@ -356,6 +356,11 @@ func CheckDirectWrites(root string, matrix AnalysisMatrix, inventory DirectWrite
 	if err != nil {
 		return nil, nil, err
 	}
+	violations, err := checkDirectWriteObservations(inventory, observed)
+	return observed, violations, err
+}
+
+func checkDirectWriteObservations(inventory DirectWriteInventory, observed []DirectWriteUse) ([]string, error) {
 	expected := inventory.Writes
 	violations := []string{}
 	expectedByKey := make(map[string]DirectWriteUse, len(expected))
@@ -387,7 +392,7 @@ func CheckDirectWrites(root string, matrix AnalysisMatrix, inventory DirectWrite
 	}
 	if baseline := inventory.LegacyDriver; baseline != nil {
 		if !rootCoveredByAdapterRoots(baseline.Root, inventory.AdapterRoots) {
-			return nil, nil, fmt.Errorf("legacy driver root %s must be covered by adapter_roots", baseline.Root)
+			return nil, fmt.Errorf("legacy driver root %s must be covered by adapter_roots", baseline.Root)
 		}
 		legacy := directWritesWithinRoot(observed, baseline.Root)
 		rows, sites, digest := directWriteDigest(legacy)
@@ -396,7 +401,7 @@ func CheckDirectWrites(root string, matrix AnalysisMatrix, inventory DirectWrite
 			violations = append(violations, fmt.Sprintf("legacy driver direct-write ratchet changed: rows=%d sites=%d digest=%s owners=%+v (baseline rows=%d sites=%d digest=%s owners=%+v)", rows, sites, digest, owners, baseline.Rows, baseline.Sites, baseline.Digest, baseline.Owners))
 		}
 	}
-	return observed, violations, nil
+	return violations, nil
 }
 
 func rootCoveredByAdapterRoots(root string, adapterRoots []string) bool {

@@ -13,15 +13,17 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/app/workitemmove"
 	"github.com/tysonthomas9/loomcli/internal/webui"
+	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/app/capabilitycomposition"
 	"github.com/tysonthomas9/loomcli/internal/webui/appinfra"
 	"github.com/tysonthomas9/loomcli/internal/webui/appstores"
-	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
+	"github.com/tysonthomas9/loomcli/internal/webui/filecoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
+	"github.com/tysonthomas9/loomcli/internal/webui/sourcecontrolcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
-	"github.com/tysonthomas9/loomcli/internal/webui/svcimpl"
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
+	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 )
 
 // NewServer initializes all server dependencies. On failure, it cleans up
@@ -288,7 +290,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	app.wrappedDeleteCleanupFn = wrapWorkspaceDeleteCleanupFn(config.WorkspaceDeleteCleanupFn, app.registry)
 
 	// Async job store for clone workspace creation (202 + polling).
-	app.jobStore = svcimpl.NewWorkspaceJobStore()
+	app.jobStore = workspacecoord.NewWorkspaceJobRegistry()
 	cleanups = append(cleanups, func() { app.jobStore.Stop() })
 
 	// Workspace-existence checker. Subscriber activation is deliberately not
@@ -335,20 +337,18 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 
 	// Initialize workspace service layer. FleetDB Store is the authoritative
 	// workspace source in both local and distributed modes.
-	var workspaceAgents service.WorkspaceAgentDirectory
+	var workspaceAgents workspacecoord.WorkspaceAgentDirectory
 	if config.AgentsCapability != nil {
 		workspaceAgents = config.AgentsCapability.AgentsAPI()
 	}
-	app.workspaceSvc = service.NewWorkspaceService(service.WorkspaceServiceConfig{
-		Store:                config.Store,
+	app.workspaceSvc = workspacecoord.NewWorkspaceService(workspacecoord.WorkspaceServiceConfig{
+		Topology:             config.Store,
 		Workspace:            app.workspaceCatalog,
 		CreateFn:             app.wrappedCreateFn,
 		AddReposFn:           config.WorkspaceAddReposFn,
 		DeleteCleanupFn:      app.wrappedDeleteCleanupFn,
 		JobStore:             app.jobStore,
 		AdmissionCoordinator: config.WorkspaceAdmissions,
-		SetDefaultFn:         config.SetDefaultWorkspaceFn,
-		ClearDefaultFn:       config.ClearDefaultWorkspaceFn,
 		AgentDirectory:       workspaceAgents,
 	})
 
@@ -374,27 +374,27 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 		app.tabMetaStore,
 		capabilitycomposition.InteractionForceInterrupter(config.InteractionCapability),
 	))
-	interactiveController := svcimpl.NewInteractiveRuntimeController(
+	interactiveController := agentcoord.NewInteractiveRuntimeController(
 		interactiveRuntimeTabSource{terminalService: app.termSvc},
 		app.ptyMgr,
 	)
-	app.agentRuntime = svcimpl.NewCanonicalInteractiveAgentRuntime(interactiveController)
+	app.agentRuntime = agentcoord.NewCanonicalInteractiveAgentRuntime(interactiveController)
 	if config.GitOps != nil {
-		app.agentSvc = svcimpl.NewAgentService(config.GitOps, app.agentTmuxMgr, app.termAuth)
+		app.agentSvc = agentcoord.NewAgentService(config.GitOps, app.agentTmuxMgr, app.termAuth)
 	}
 
 	// Initialize diff service layer (requires ops.GitOps)
 	if config.GitOps != nil {
-		app.diffSvc = githandlers.NewDiffService(config.GitOps, service.IssueBackendProvider(config.IssueBackendFn))
+		app.diffSvc = sourcecontrolcoord.NewDiffService(config.GitOps, config.IssueBackendFn, middleware.WithWorkspace)
 	}
 
 	// Initialize file service layer (requires ops.FileOps)
 	if config.FileOps != nil {
-		app.fileSvc = svcimpl.NewFileService(config.FileOps)
+		app.fileSvc = filecoord.NewFileService(config.FileOps)
 	}
 
 	// Initialize session service layer (always constructed; stores may be nil internally)
-	app.sessSvc = svcimpl.NewSessionServiceWithRuntimeDir(config.Store, app.sessionHistoryStore, config.SessionRuntimeDir)
+	app.sessSvc = sessioncoord.NewSessionServiceWithRuntimeDir(config.Store, app.sessionHistoryStore, config.SessionRuntimeDir)
 
 	app.buildHandlers()
 	app.buildModules()
@@ -408,25 +408,25 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 }
 
 // interactiveRuntimeTabSource translates the terminal service's richer tab
-// metadata into the narrow ownership view consumed by svcimpl. Use the
+// metadata into the narrow ownership view consumed by agentcoord. Use the
 // terminal service rather than the persistence store so PTYAlive reflects the
 // current server process.
 type interactiveRuntimeTabSource struct {
-	terminalService service.TerminalService
+	terminalService terminal.TerminalService
 }
 
 func (s interactiveRuntimeTabSource) ListInteractiveRuntimeTabs(
 	ctx context.Context,
 	workspace string,
-) ([]svcimpl.InteractiveRuntimeTab, error) {
+) ([]agentcoord.InteractiveRuntimeTab, error) {
 	tabs, err := s.terminalService.ListTabs(ctx, workspace)
 	if err != nil {
 		return nil, err
 	}
-	runtimeTabs := make([]svcimpl.InteractiveRuntimeTab, 0, len(tabs))
+	runtimeTabs := make([]agentcoord.InteractiveRuntimeTab, 0, len(tabs))
 	for i := range tabs {
 		tab := &tabs[i]
-		runtimeTabs = append(runtimeTabs, svcimpl.InteractiveRuntimeTab{
+		runtimeTabs = append(runtimeTabs, agentcoord.InteractiveRuntimeTab{
 			SessionName:           tab.SessionName,
 			Kind:                  tab.Kind,
 			AgentID:               tab.AgentID,

@@ -135,37 +135,21 @@ func (app *Server) registerWorkspaceRoutes() {
 	workspaceMW := app.workspaceMiddleware()
 	workspaceProjection := capabilitycomposition.NewWorkspaceHTTPProjection(app.workspaceStore, app.workspaceSvc)
 	app.mux.HandleFunc("GET /api/workspaces/active", handlermux.HandleActiveWorkspace(app.workspaceSvc))
-	if app.workspaceCatalog != nil {
-		app.mux.HandleFunc("GET /api/workspaces", handlermux.HandleWorkspaceCatalogList(app.workspaceCatalog, workspaceProjection))
-	} else {
-		app.mux.HandleFunc("GET /api/workspaces", handlermux.HandleListWorkspaces(app.workspaceSvc))
-	}
-	app.mux.HandleFunc("PUT /api/workspaces/default", handlermux.HandleSetDefaultWorkspace(app.workspaceSvc))
-	app.mux.HandleFunc("DELETE /api/workspaces/default", handlermux.HandleClearDefaultWorkspace(app.workspaceSvc))
-	if app.workspaceCatalog != nil {
-		app.mux.Handle("GET /api/workspaces/{ws}", workspaceMW(handlermux.HandleWorkspaceCatalogGet(app.workspaceCatalog, workspaceProjection)))
-	} else {
-		app.mux.Handle("GET /api/workspaces/{ws}", workspaceMW(handlermux.HandleGetWorkspace(app.workspaceSvc)))
-	}
+	app.mux.HandleFunc("GET /api/workspaces", handlermux.HandleWorkspaceCatalogList(app.workspaceCatalog, workspaceProjection))
+	app.mux.HandleFunc("PUT /api/workspaces/default", handlermux.HandleSetDefaultWorkspace())
+	app.mux.HandleFunc("DELETE /api/workspaces/default", handlermux.HandleClearDefaultWorkspace())
+	app.mux.Handle("GET /api/workspaces/{ws}", workspaceMW(handlermux.HandleWorkspaceCatalogGet(app.workspaceCatalog, workspaceProjection)))
 	app.mux.HandleFunc("POST /api/workspaces", handlermux.HandleWorkspaceCreate(app.workspaceSvc))
 	app.mux.HandleFunc("GET /api/workspaces/jobs/{id}", handlermux.HandleGetWorkspaceJob(app.workspaceSvc))
-	app.mux.HandleFunc("PUT /api/workspaces/order", handlermux.HandleWorkspaceReorder(app.workspaceSvc))
+	app.mux.HandleFunc("PUT /api/workspaces/order", handlermux.HandleWorkspaceReorder())
 	app.mux.Handle("DELETE /api/workspaces/{ws}", workspaceMW(handlermux.HandleWorkspaceDelete(app.workspaceSvc)))
 	// PATCH handlers are registered on the outer mux (not the nested wsMux)
 	// because Go 1.22+ http.ServeMux has a bug where r.Body.Read() hangs for
 	// PATCH requests routed through a nested mux via wildcard subtree pattern.
-	if app.workspaceCatalog != nil {
-		app.mux.Handle("PATCH /api/workspaces/{ws}/name", workspaceMW(handlermux.HandleWorkspaceCatalogRename(app.workspaceCatalog, workspaceProjection)))
-	} else {
-		app.mux.Handle("PATCH /api/workspaces/{ws}/name", workspaceMW(handlermux.HandleWorkspaceRename(app.workspaceSvc)))
-	}
+	app.mux.Handle("PATCH /api/workspaces/{ws}/name", workspaceMW(handlermux.HandleWorkspaceCatalogRename(app.workspaceCatalog, workspaceProjection)))
 	app.mux.Handle("GET /api/workspaces/{ws}/config/backend", workspaceMW(handlermux.HandleWorkspaceBackendGet(app.workspaceSvc)))
 	app.mux.Handle("PATCH /api/workspaces/{ws}/config/backend", workspaceMW(handlermux.HandleWorkspaceBackendPatch(app.workspaceSvc)))
-	if app.workspaceCatalog != nil {
-		app.mux.Handle("PATCH /api/workspaces/{ws}/config/design-format", workspaceMW(handlermux.HandleWorkspaceCatalogDesignFormatPatch(app.workspaceCatalog, workspaceProjection)))
-	} else {
-		app.mux.Handle("PATCH /api/workspaces/{ws}/config/design-format", workspaceMW(handlermux.HandleWorkspaceDesignFormatPatch(app.workspaceSvc)))
-	}
+	app.mux.Handle("PATCH /api/workspaces/{ws}/config/design-format", workspaceMW(handlermux.HandleWorkspaceCatalogDesignFormatPatch(app.workspaceCatalog, workspaceProjection)))
 	if statusHandler := app.config.MonitorHandlers.Status; statusHandler != nil {
 		app.mux.Handle("GET /api/workspaces/{ws}/monitor/status", workspaceMW(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			q := r.URL.Query()

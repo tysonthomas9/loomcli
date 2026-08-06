@@ -96,9 +96,11 @@ var allowlistRegexes = []*regexp.Regexp{
 	regexp.MustCompile(`^pgx\.(query|exec|connect|prepare)$`),
 
 	// Service layer methods: `service.IssueService.Claim`,
-	// `service.WorkspaceService.List`, `service.IssueBackend.Get`.
-	// Two CamelCase identifiers joined by dots.
+	// `workspacecoord.WorkspaceService.List`, `service.IssueBackend.Get`.
+	// Two CamelCase identifiers joined by dots. Loom's extracted Workspace
+	// coordinator uses its fixed package name; fleet-db retains `service`.
 	regexp.MustCompile(`^service\.[A-Z][a-zA-Z]+\.[A-Z][a-zA-Z]+$`),
+	regexp.MustCompile(`^workspacecoord\.[A-Z][a-zA-Z]+\.[A-Z][a-zA-Z]+$`),
 
 	// Projector handler spans (fleet-db). Lowercase event-name segments
 	// like `service.Projector.workspace.upsert`,
@@ -218,7 +220,7 @@ func TestSpanNames_KnownNamesMatchAllowlist(t *testing.T) {
 
 		// Service layer (Tier L2).
 		"service.IssueService.Claim",
-		"service.WorkspaceService.List",
+		"workspacecoord.WorkspaceService.List",
 		"service.IssueBackend.Get",
 		"service.IssueBackend.SearchIssues",
 		"service.IssueBackend.WaitForMutations",

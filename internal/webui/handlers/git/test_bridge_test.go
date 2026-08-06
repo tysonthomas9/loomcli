@@ -11,8 +11,11 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
+	"github.com/tysonthomas9/loomcli/internal/webui/servercapabilities"
+	"github.com/tysonthomas9/loomcli/internal/webui/sourcecontrolcoord"
 )
 
 // stubGraphBackend implements backend.IssueBackend with just enough surface
@@ -170,23 +173,23 @@ var handleGitStatus = HandleGitStatus
 // handleGitTargetUpdate → HandleGitTargetUpdate
 var handleGitTargetUpdate = HandleGitTargetUpdate
 
-// AgentDiffStatResult → service.AgentDiffStatResult
-type AgentDiffStatResult = service.AgentDiffStatResult
+// AgentDiffStatResult → agentcoord.AgentDiffStatResult
+type AgentDiffStatResult = agentcoord.AgentDiffStatResult
 
 // MaxListLimit from handler package
 const MaxListLimit = handler.MaxListLimit
 
-// GitSyncResult → service.GitSyncResult
-type GitSyncResult = service.GitSyncResult
+// GitSyncResult → agentcoord.GitSyncResult
+type GitSyncResult = agentcoord.GitSyncResult
 
-// GitPushAllResult → service.GitPushAllResult
-type GitPushAllResult = service.GitPushAllResult
+// GitPushAllResult → agentcoord.GitPushAllResult
+type GitPushAllResult = agentcoord.GitPushAllResult
 
-// GitPushAllWorktreeResult → service.GitPushAllWorktreeResult
-type GitPushAllWorktreeResult = service.GitPushAllWorktreeResult
+// GitPushAllWorktreeResult → agentcoord.GitPushAllWorktreeResult
+type GitPushAllWorktreeResult = agentcoord.GitPushAllWorktreeResult
 
 // ---------------------------------------------------------------------------
-// stubDiffService implements service.DiffService with no-op defaults for module tests.
+// stubDiffService implements sourcecontrolcoord.DiffService with no-op defaults for module tests.
 // ---------------------------------------------------------------------------
 
 type stubDiffService struct{}
@@ -200,8 +203,12 @@ func (s *stubDiffService) DiffFiles(_ context.Context, _, _, _, _ string) ([]ops
 func (s *stubDiffService) DiffFilePatch(_ context.Context, _, _, _, _, _ string) (*ops.DiffFilePatchResult, error) {
 	return &ops.DiffFilePatchResult{}, nil
 }
-func (s *stubDiffService) GetIssueDiffStat(_ context.Context, _, _ string) (*service.IssueDiffStatResult, error) {
-	return &service.IssueDiffStatResult{}, nil
+func (s *stubDiffService) GetIssueDiffStat(_ context.Context, _, _ string) (*sourcecontrolcoord.IssueDiffStatResult, error) {
+	return &sourcecontrolcoord.IssueDiffStatResult{}, nil
+}
+
+func newTestDiffService(gitOps ops.GitOps, backendFn func(context.Context) servercapabilities.IssueBackend) sourcecontrolcoord.DiffService {
+	return sourcecontrolcoord.NewDiffService(gitOps, backendFn, middleware.WithWorkspace)
 }
 
 // ---------------------------------------------------------------------------
@@ -210,25 +217,25 @@ func (s *stubDiffService) GetIssueDiffStat(_ context.Context, _, _ string) (*ser
 // ---------------------------------------------------------------------------
 
 type mockAgentService struct {
-	getTerminalInfoFunc       func(ctx context.Context, wsID, agentName string) (*service.AgentTerminalInfoResult, error)
+	getTerminalInfoFunc       func(ctx context.Context, wsID, agentName string) (*agentcoord.AgentTerminalInfoResult, error)
 	generateTerminalTokenFunc func(ctx context.Context, wsID, agentName, userID string) (string, error)
-	getLogFunc                func(ctx context.Context, wsID, agentName string, lines int, beforeLine int64) (*service.AgentLogResult, error)
-	getDiffStatFunc           func(ctx context.Context, wsID, agentName string) (*service.AgentDiffStatResult, error)
+	getLogFunc                func(ctx context.Context, wsID, agentName string, lines int, beforeLine int64) (*agentcoord.AgentLogResult, error)
+	getDiffStatFunc           func(ctx context.Context, wsID, agentName string) (*agentcoord.AgentDiffStatResult, error)
 	gitPushFunc               func(ctx context.Context, wsID, agentName, target string) (*ops.GitPushResult, error)
-	gitPushAllFunc            func(ctx context.Context, wsID string) (*service.GitPushAllResult, error)
+	gitPushAllFunc            func(ctx context.Context, wsID string) (*agentcoord.GitPushAllResult, error)
 	gitPullFunc               func(ctx context.Context, wsID, agentName, source string) (*ops.GitPullResult, error)
-	gitSyncFunc               func(ctx context.Context, wsID, agentName string) (*service.GitSyncResult, error)
+	gitSyncFunc               func(ctx context.Context, wsID, agentName string) (*agentcoord.GitSyncResult, error)
 	createPRFunc              func(ctx context.Context, wsID, agentName, target string) (*ops.GitPRResult, error)
 	gitResetFunc              func(ctx context.Context, wsID, agentName, branch string, force, push bool) (*ops.GitResetResult, error)
 	gitStatusFunc             func(ctx context.Context, wsID, agentName string) (*ops.GitStatusResult, error)
 	setTargetBranchFunc       func(ctx context.Context, wsID, agentName, branch string) error
 }
 
-func (m *mockAgentService) GetTerminalInfo(ctx context.Context, wsID, agentName string) (*service.AgentTerminalInfoResult, error) {
+func (m *mockAgentService) GetTerminalInfo(ctx context.Context, wsID, agentName string) (*agentcoord.AgentTerminalInfoResult, error) {
 	if m.getTerminalInfoFunc != nil {
 		return m.getTerminalInfoFunc(ctx, wsID, agentName)
 	}
-	return &service.AgentTerminalInfoResult{Agent: agentName, Mode: "archive"}, nil
+	return &agentcoord.AgentTerminalInfoResult{Agent: agentName, Mode: "archive"}, nil
 }
 
 func (m *mockAgentService) GenerateTerminalToken(ctx context.Context, wsID, agentName, userID string) (string, error) {
@@ -238,18 +245,18 @@ func (m *mockAgentService) GenerateTerminalToken(ctx context.Context, wsID, agen
 	return "test-token", nil
 }
 
-func (m *mockAgentService) GetLog(ctx context.Context, wsID, agentName string, lines int, beforeLine int64) (*service.AgentLogResult, error) {
+func (m *mockAgentService) GetLog(ctx context.Context, wsID, agentName string, lines int, beforeLine int64) (*agentcoord.AgentLogResult, error) {
 	if m.getLogFunc != nil {
 		return m.getLogFunc(ctx, wsID, agentName, lines, beforeLine)
 	}
-	return &service.AgentLogResult{Lines: []string{}, LineCount: 0, StartLine: 1}, nil
+	return &agentcoord.AgentLogResult{Lines: []string{}, LineCount: 0, StartLine: 1}, nil
 }
 
-func (m *mockAgentService) GetDiffStat(ctx context.Context, wsID, agentName string) (*service.AgentDiffStatResult, error) {
+func (m *mockAgentService) GetDiffStat(ctx context.Context, wsID, agentName string) (*agentcoord.AgentDiffStatResult, error) {
 	if m.getDiffStatFunc != nil {
 		return m.getDiffStatFunc(ctx, wsID, agentName)
 	}
-	return &service.AgentDiffStatResult{}, nil
+	return &agentcoord.AgentDiffStatResult{}, nil
 }
 
 func (m *mockAgentService) GitPush(ctx context.Context, wsID, agentName, target string) (*ops.GitPushResult, error) {
@@ -259,11 +266,11 @@ func (m *mockAgentService) GitPush(ctx context.Context, wsID, agentName, target 
 	return &ops.GitPushResult{Success: true, Message: "pushed"}, nil
 }
 
-func (m *mockAgentService) GitPushAll(ctx context.Context, wsID string) (*service.GitPushAllResult, error) {
+func (m *mockAgentService) GitPushAll(ctx context.Context, wsID string) (*agentcoord.GitPushAllResult, error) {
 	if m.gitPushAllFunc != nil {
 		return m.gitPushAllFunc(ctx, wsID)
 	}
-	return &service.GitPushAllResult{}, nil
+	return &agentcoord.GitPushAllResult{}, nil
 }
 
 func (m *mockAgentService) GitPull(ctx context.Context, wsID, agentName, source string) (*ops.GitPullResult, error) {
@@ -273,11 +280,11 @@ func (m *mockAgentService) GitPull(ctx context.Context, wsID, agentName, source 
 	return &ops.GitPullResult{Success: true, Message: "pulled"}, nil
 }
 
-func (m *mockAgentService) GitSync(ctx context.Context, wsID, agentName string) (*service.GitSyncResult, error) {
+func (m *mockAgentService) GitSync(ctx context.Context, wsID, agentName string) (*agentcoord.GitSyncResult, error) {
 	if m.gitSyncFunc != nil {
 		return m.gitSyncFunc(ctx, wsID, agentName)
 	}
-	return &service.GitSyncResult{
+	return &agentcoord.GitSyncResult{
 		PushResult: &ops.GitPushResult{Success: true},
 		PullResult: &ops.GitPullResult{Success: true},
 	}, nil

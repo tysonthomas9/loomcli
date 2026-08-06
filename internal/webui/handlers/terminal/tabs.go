@@ -9,8 +9,8 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
+	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
 // tabMetadataResponse wraps tab metadata API responses.
@@ -21,7 +21,7 @@ type tabMetadataResponse struct {
 }
 
 // HandleListTerminalTabs returns all tab metadata, auto-creating defaults for new sessions.
-func HandleListTerminalTabs(svc service.TerminalService) http.HandlerFunc {
+func HandleListTerminalTabs(svc terminal.TerminalService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		workspace := middleware.WorkspaceFromContext(r.Context())
 
@@ -39,7 +39,7 @@ func HandleListTerminalTabs(svc service.TerminalService) http.HandlerFunc {
 }
 
 // HandleGetTerminalTab returns metadata for a single tab.
-func HandleGetTerminalTab(svc service.TerminalService) http.HandlerFunc {
+func HandleGetTerminalTab(svc terminal.TerminalService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		workspace := middleware.WorkspaceFromContext(r.Context())
 		session := r.PathValue("session")
@@ -88,7 +88,7 @@ func buildPatchFields(req tabPatchRequest) map[string]string {
 }
 
 // HandlePatchTerminalTab partially updates tab metadata and broadcasts an SSE event.
-func HandlePatchTerminalTab(svc service.TerminalService) http.HandlerFunc {
+func HandlePatchTerminalTab(svc terminal.TerminalService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		workspace := middleware.WorkspaceFromContext(r.Context())
 		session := r.PathValue("session")
@@ -134,7 +134,7 @@ type tabPutRequest struct {
 }
 
 // HandlePutTerminalTab creates or replaces tab metadata and broadcasts an SSE event.
-func HandlePutTerminalTab(svc service.TerminalService) http.HandlerFunc {
+func HandlePutTerminalTab(svc terminal.TerminalService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		workspace := middleware.WorkspaceFromContext(r.Context())
 		session := r.PathValue("session")
@@ -182,7 +182,7 @@ func HandlePutTerminalTab(svc service.TerminalService) http.HandlerFunc {
 }
 
 // HandleDeleteTerminalTab removes tab metadata and broadcasts an SSE event.
-func HandleDeleteTerminalTab(svc service.TerminalService) http.HandlerFunc {
+func HandleDeleteTerminalTab(svc terminal.TerminalService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		workspace := middleware.WorkspaceFromContext(r.Context())
 		session := r.PathValue("session")

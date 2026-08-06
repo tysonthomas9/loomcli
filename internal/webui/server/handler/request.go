@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 )
 
 // MaxRequestBody is the maximum request body size (1MB) to prevent DoS attacks.
@@ -22,7 +22,7 @@ const MaxListLimit = 1000
 
 // ReadJSON reads and decodes a JSON request body into dst.
 // It enforces MaxRequestBody size limit. On failure it returns a
-// *service.ServiceError (KindPayloadTooLarge or KindValidation)
+// *apperrors.ServiceError (KindPayloadTooLarge or KindValidation)
 // that the caller can pass directly to HandleServiceError.
 // ReadJSON applies its own MaxBytesReader; callers should NOT pre-wrap r.Body.
 func ReadJSON(w http.ResponseWriter, r *http.Request, dst any) error {
@@ -32,12 +32,12 @@ func ReadJSON(w http.ResponseWriter, r *http.Request, dst any) error {
 	if err := dec.Decode(dst); err != nil {
 		var maxBytesErr *http.MaxBytesError
 		if errors.As(err, &maxBytesErr) {
-			return service.ErrPayloadTooLarge("request body too large (max 1MB)")
+			return apperrors.ErrPayloadTooLarge("request body too large (max 1MB)")
 		}
-		return service.ErrValidation("invalid request body")
+		return apperrors.ErrValidation("invalid request body")
 	}
 	if dec.More() {
-		return service.ErrValidation("request body contains trailing content")
+		return apperrors.ErrValidation("request body contains trailing content")
 	}
 	return nil
 }
@@ -75,7 +75,7 @@ func ParseListOpts(r *http.Request) (*ListOpts, error) {
 	if v := q.Get("limit"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 0 {
-			return nil, service.ErrValidation("invalid limit: must be a non-negative integer")
+			return nil, apperrors.ErrValidation("invalid limit: must be a non-negative integer")
 		}
 		if n == 0 {
 			n = DefaultListLimit
@@ -89,7 +89,7 @@ func ParseListOpts(r *http.Request) (*ListOpts, error) {
 	if v := q.Get("offset"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 0 {
-			return nil, service.ErrValidation("invalid offset: must be a non-negative integer")
+			return nil, apperrors.ErrValidation("invalid offset: must be a non-negative integer")
 		}
 		opts.Offset = n
 	}
@@ -100,7 +100,7 @@ func ParseListOpts(r *http.Request) (*ListOpts, error) {
 
 	if v := q.Get("sort_order"); v != "" {
 		if v != "asc" && v != "desc" {
-			return nil, service.ErrValidation(`invalid sort_order: must be "asc" or "desc"`)
+			return nil, apperrors.ErrValidation(`invalid sort_order: must be "asc" or "desc"`)
 		}
 		opts.SortOrder = v
 	}

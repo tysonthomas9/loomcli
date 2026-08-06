@@ -17,9 +17,10 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
+	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 	webuterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
@@ -36,7 +37,7 @@ var errBackgroundWorkerTerminal = errors.New("background worker terminals cannot
 // terminal session. The session's launch command lives in tab metadata; the
 // WebSocket path never infers agent behavior from the session name.
 func HandleEnsureAgentTerminalSession(
-	svc service.TerminalService,
+	svc webuterminal.TerminalService,
 	st store.Store,
 	identities ...terminalAgentIdentity,
 ) http.HandlerFunc {
@@ -58,7 +59,7 @@ func HandleEnsureAgentTerminalSession(
 
 		workspace := middleware.WorkspaceFromContext(r.Context())
 		agentName := r.PathValue("name")
-		if !service.IsValidAgentName(agentName) {
+		if !agentcoord.IsValidAgentName(agentName) {
 			handler.WriteJSON(w, http.StatusBadRequest, tabMetadataResponse{
 				Success: false,
 				Error:   "invalid agent name",
@@ -89,7 +90,7 @@ func HandleEnsureAgentTerminalSession(
 //nolint:funlen // Keep the non-reentrant per-agent lifecycle lock, durable tab write, unlock, and stale-tab cleanup ordering in one boundary.
 func ensureAgentTerminalSession(
 	ctx context.Context,
-	svc service.TerminalService,
+	svc webuterminal.TerminalService,
 	st store.Store,
 	workspace,
 	agentName string,
@@ -114,7 +115,7 @@ func ensureAgentTerminalSession(
 	roleKind := domain.ResolveRoleKind(role, agent.RoleName)
 
 	if isBackgroundWorker(agent, roleKind) {
-		return nil, service.ErrValidation(errBackgroundWorkerTerminal.Error())
+		return nil, apperrors.ErrValidation(errBackgroundWorkerTerminal.Error())
 	}
 
 	tabs, err := svc.ListTabs(ctx, workspace)
@@ -168,9 +169,9 @@ func ensureAgentTerminalSession(
 
 func terminalAgentIdentityServiceError(err error) error {
 	if errors.Is(err, agents.ErrNotFound) {
-		return service.ErrNotFound("agent not found")
+		return apperrors.ErrNotFound("agent not found")
 	}
-	return service.ErrInternal("failed to load agent identity", err)
+	return apperrors.ErrInternal("failed to load agent identity", err)
 }
 
 // agentTerminalLaunchSpecStale returns true when the existing tab's cached
@@ -203,7 +204,7 @@ func agentTerminalLaunchSpecStale(
 
 func inactiveAgentTerminalSession(existing *tabmeta.TabMetadata) (*tabmeta.TabMetadata, error) {
 	if existing == nil {
-		return nil, service.ErrValidation("agent is not running and has no terminal session")
+		return nil, apperrors.ErrValidation("agent is not running and has no terminal session")
 	}
 
 	// Canonical agent tabs are Interaction-owned lifecycle records. Generic
@@ -297,7 +298,7 @@ func selectAgentTerminalTab(tabs []tabmeta.TabMetadata, agentName string) *tabme
 	return newest
 }
 
-func pruneStaleAgentTerminalTabs(ctx context.Context, svc service.TerminalService, workspace, agentName, keepSession string, tabs []tabmeta.TabMetadata) {
+func pruneStaleAgentTerminalTabs(ctx context.Context, svc webuterminal.TerminalService, workspace, agentName, keepSession string, tabs []tabmeta.TabMetadata) {
 	for i := range tabs {
 		tab := tabs[i]
 		if tab.SessionName == keepSession || tab.Kind != terminalKindAgent || tab.AgentID != agentName || tab.PTYAlive {
@@ -324,7 +325,7 @@ func buildAgentLaunchSpec(ctx context.Context, st store.Store, workspace, sessio
 	}
 	roleKind := domain.ResolveRoleKind(role, agent.RoleName)
 	if isBackgroundWorker(agent, roleKind) {
-		return nil, "", service.ErrValidation(errBackgroundWorkerTerminal.Error())
+		return nil, "", apperrors.ErrValidation(errBackgroundWorkerTerminal.Error())
 	}
 	backend := agentLaunchBackend(workspace, agent, role)
 	commandArgs, err := agentLaunchCommandArgs(roleKind, role)
@@ -357,7 +358,7 @@ func loadAgentLaunchRole(ctx context.Context, st store.Store, workspace, roleNam
 		return nil, nil
 	}
 	if err != nil {
-		return nil, service.ErrInternal("failed to load agent role", err)
+		return nil, apperrors.ErrInternal("failed to load agent role", err)
 	}
 	return role, nil
 }
@@ -397,7 +398,7 @@ func agentLaunchCommandArgs(kind domain.RoleKind, role *domain.Role) ([]string, 
 		}
 		return args, nil
 	}
-	return nil, service.ErrValidation(errBackgroundWorkerTerminal.Error())
+	return nil, apperrors.ErrValidation(errBackgroundWorkerTerminal.Error())
 }
 
 func agentLaunchEnv(workspace, sessionName, backend, orchestratorID string, agent *agents.RuntimeIdentity) map[string]string {

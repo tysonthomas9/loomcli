@@ -28,8 +28,27 @@ type CatalogListItem struct {
 	IsDefault bool   `json:"is_default"`
 }
 
+type WorkspaceRenameRequest struct {
+	NewName string `json:"new_name"`
+}
+
+type WorkspaceDesignFormatPatchRequest struct {
+	DesignFormat string `json:"design_format"`
+}
+
+func catalogUnavailable(w http.ResponseWriter, api workspacemodule.API, projection CatalogProjection) bool {
+	if api != nil && projection != nil {
+		return false
+	}
+	handler.RespondError(w, http.StatusServiceUnavailable, "Workspace capability unavailable")
+	return true
+}
+
 func HandleCatalogList(api workspacemodule.API, projection CatalogProjection) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if catalogUnavailable(w, api, projection) {
+			return
+		}
 		values, err := api.List(r.Context(), workspacemodule.ListQuery{})
 		if err != nil {
 			handler.HandleWorkspaceError(w, err)
@@ -49,6 +68,9 @@ func HandleCatalogList(api workspacemodule.API, projection CatalogProjection) ht
 
 func HandleCatalogGet(api workspacemodule.API, projection CatalogProjection) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if catalogUnavailable(w, api, projection) {
+			return
+		}
 		reference := workspaceIDFromRequest(r)
 		if reference == "" {
 			handler.RespondError(w, http.StatusBadRequest, "workspace ID is required")
@@ -70,6 +92,9 @@ func HandleCatalogGet(api workspacemodule.API, projection CatalogProjection) htt
 
 func HandleCatalogRepositories(api workspacemodule.API, projection CatalogProjection) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if catalogUnavailable(w, api, projection) {
+			return
+		}
 		reference := workspaceIDFromRequest(r)
 		if reference == "" {
 			handler.RespondError(w, http.StatusBadRequest, "workspace ID is required")
@@ -118,6 +143,9 @@ func HandleCatalogRepositories(api workspacemodule.API, projection CatalogProjec
 
 func HandleCatalogRename(api workspacemodule.API, projection CatalogProjection) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if catalogUnavailable(w, api, projection) {
+			return
+		}
 		reference := middleware.WorkspaceFromContext(r.Context())
 		if reference == "" {
 			handler.WriteJSON(w, http.StatusBadRequest, WorkspaceResponse{Success: false, Error: "workspace ID is required"})
@@ -150,6 +178,9 @@ func HandleCatalogRename(api workspacemodule.API, projection CatalogProjection) 
 
 func HandleCatalogDesignFormatPatch(api workspacemodule.API, projection CatalogProjection) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if catalogUnavailable(w, api, projection) {
+			return
+		}
 		reference := middleware.WorkspaceFromContext(r.Context())
 		if reference == "" {
 			handler.WriteJSON(w, http.StatusBadRequest, WorkspaceResponse{Success: false, Error: "workspace ID is required"})

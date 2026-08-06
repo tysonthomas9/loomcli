@@ -9,11 +9,11 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/webui"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 )
 
 func TestWriteServiceError_ServiceError(t *testing.T) {
-	svcErr := service.ErrNotFound("issue abc-123")
+	svcErr := apperrors.ErrNotFound("issue abc-123")
 	w := httptest.NewRecorder()
 	webui.WriteServiceError(w, svcErr)
 
@@ -30,7 +30,7 @@ func TestWriteServiceError_ServiceError(t *testing.T) {
 }
 
 func TestWriteServiceError_WrappedServiceError(t *testing.T) {
-	svcErr := service.ErrConflict("duplicate key")
+	svcErr := apperrors.ErrConflict("duplicate key")
 	wrapped := fmt.Errorf("operation failed: %w", svcErr)
 	w := httptest.NewRecorder()
 	webui.WriteServiceError(w, wrapped)
@@ -58,7 +58,7 @@ func TestWriteServiceError_NonServiceError(t *testing.T) {
 
 func TestWriteServiceError_UsesMessageNotErrorString(t *testing.T) {
 	cause := fmt.Errorf("connection refused")
-	svcErr := service.ErrInternal("database query failed", cause)
+	svcErr := apperrors.ErrInternal("database query failed", cause)
 	w := httptest.NewRecorder()
 	webui.WriteServiceError(w, svcErr)
 

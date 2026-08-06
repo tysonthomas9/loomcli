@@ -1114,6 +1114,10 @@ function_surfaces:
     access: read-only
     capability_owner: workspace
   - package: github.com/tysonthomas9/loomcli/internal/sessions
+    function: DecodeDiffStatsMetadata
+    access: read-only
+    capability_owner: interaction
+  - package: github.com/tysonthomas9/loomcli/internal/sessions
     function: EncodeDiffStatsMetadata
     access: read-only
     capability_owner: interaction

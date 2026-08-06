@@ -9,11 +9,11 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/appstores"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlermux"
 	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
+	webuilog "github.com/tysonthomas9/loomcli/internal/webui/log"
 	"github.com/tysonthomas9/loomcli/internal/webui/modbuilder"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
-	"github.com/tysonthomas9/loomcli/internal/webui/svcimpl"
 )
 
 // buildModules conditionally constructs workspace-scoped route modules
@@ -22,7 +22,7 @@ func (app *Server) buildModules() {
 	storeBacked := app.config.Store != nil
 
 	// Core workspace operations use the workflow-catalog IssueBackend port.
-	opsModule := handlermux.NewWorkspaceOpsModule(app.workspaceSvc, nil)
+	opsModule := handlermux.NewWorkspaceOpsModule(app.workspaceSvc, nil).WithWorkItems(app.workItems)
 	if app.workspaceCatalog != nil && app.workspaceStore != nil && app.workspaceSvc != nil {
 		workspaceProjection := capabilitycomposition.NewWorkspaceHTTPProjection(app.workspaceStore, app.workspaceSvc)
 		opsModule = opsModule.WithWorkspaceCatalog(app.workspaceCatalog, workspaceProjection)
@@ -48,7 +48,7 @@ func (app *Server) buildModules() {
 		modbuilder.NewIssueModules(app.workItems, app.workItemMover, app.sessSvc)...)
 
 	// Log module (always added — handles nil agentSvc gracefully)
-	app.wsModules = append(app.wsModules, svcimpl.NewLogModule(app.agentSvc))
+	app.wsModules = append(app.wsModules, webuilog.NewModule(app.agentSvc))
 
 	// SSE subscription
 	if app.hub != nil {
@@ -144,7 +144,7 @@ func (app *Server) unifiedAgentModuleDeps() modbuilder.UnifiedAgentModuleDeps {
 		WorkflowTargetPreparation: app.config.WorkflowTargetPreparation,
 		SourceControl:             app.config.SourceControl,
 	}
-	if transcripts, ok := app.sessSvc.(service.AgentSessionTranscriptService); ok {
+	if transcripts, ok := app.sessSvc.(sessioncoord.AgentSessionTranscriptService); ok {
 		deps.AgentSessionTranscripts = transcripts
 	}
 	if capability := app.config.ArtifactsCapability; capability != nil {

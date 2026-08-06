@@ -31,9 +31,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	localsettingshandler "github.com/tysonthomas9/loomcli/internal/webui/handlers/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 const (
@@ -434,7 +434,7 @@ const (
 )
 
 type fallbackAgentService struct {
-	service.AgentService
+	agentcoord.AgentService
 
 	called bool
 	ws     string
@@ -546,14 +546,14 @@ func newPRReviewHarness(t *testing.T, withDispatcher bool) *prReviewHarness {
 	return newPRReviewHarnessWithAgent(t, withDispatcher, nil)
 }
 
-func newPRReviewHarnessWithAgent(t *testing.T, withDispatcher bool, agentSvc service.AgentService) *prReviewHarness {
+func newPRReviewHarnessWithAgent(t *testing.T, withDispatcher bool, agentSvc agentcoord.AgentService) *prReviewHarness {
 	return newPRReviewHarnessWithCredential(t, withDispatcher, agentSvc, testCredentialEnv, prReviewTestToken)
 }
 
 func newPRReviewHarnessWithCredential(
 	t *testing.T,
 	withDispatcher bool,
-	agentSvc service.AgentService,
+	agentSvc agentcoord.AgentService,
 	source testCredentialSource,
 	token string,
 ) *prReviewHarness {

@@ -11,8 +11,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/webui"
+	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/modbuilder"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
 // NewTerminalModules adds the identity and Interaction capability projections
@@ -83,8 +84,8 @@ func PopulateUnifiedAgentCapabilityDeps(
 func NewPRReviewModule(
 	config webui.ServerConfig,
 	dispatcher connectorsmodule.Dispatcher,
-	agentService service.AgentService,
-	terminalService service.TerminalService,
+	agentService agentcoord.AgentService,
+	terminalService terminal.TerminalService,
 ) modbuilder.PRReviewModule {
 	var reviewerProvisioning prreviewer.Commands
 	var reviewerAgents agents.IdentityQueries

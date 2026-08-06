@@ -18,8 +18,8 @@ import (
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 type testBindingOperations struct{ store store.Store }
@@ -658,7 +658,7 @@ func (c testBindingGrantCompatibility) RevokeBindingGrants(ctx context.Context, 
 	return revoked, nil
 }
 
-func newTestAgentsModule(agentSvc service.AgentService, st store.Store, hub *realtime.Hub, workspace string) *Module {
+func newTestAgentsModule(agentSvc agentcoord.AgentService, st store.Store, hub *realtime.Hub, workspace string) *Module {
 	config := Config{
 		Store: st, Hub: hub,
 		OperatorAuthority: testOperatorAuthorityResolver{}, WorkspaceFromContext: func(context.Context) string { return workspace },

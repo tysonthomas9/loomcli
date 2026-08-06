@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 )
 
 // --- ReadJSON tests ---
@@ -49,11 +49,11 @@ func TestReadJSON_BodyTooLarge(t *testing.T) {
 		t.Fatal("expected error for oversized body, got nil")
 	}
 
-	var svcErr *service.ServiceError
+	var svcErr *apperrors.ServiceError
 	if !errors.As(err, &svcErr) {
-		t.Fatalf("expected *service.ServiceError, got %T: %v", err, err)
+		t.Fatalf("expected *apperrors.ServiceError, got %T: %v", err, err)
 	}
-	if svcErr.Kind != service.KindPayloadTooLarge {
+	if svcErr.Kind != apperrors.KindPayloadTooLarge {
 		t.Fatalf("expected KindPayloadTooLarge, got %s", svcErr.Kind)
 	}
 }
@@ -68,11 +68,11 @@ func TestReadJSON_InvalidJSON(t *testing.T) {
 		t.Fatal("expected error for invalid JSON, got nil")
 	}
 
-	var svcErr *service.ServiceError
+	var svcErr *apperrors.ServiceError
 	if !errors.As(err, &svcErr) {
-		t.Fatalf("expected *service.ServiceError, got %T: %v", err, err)
+		t.Fatalf("expected *apperrors.ServiceError, got %T: %v", err, err)
 	}
-	if svcErr.Kind != service.KindValidation {
+	if svcErr.Kind != apperrors.KindValidation {
 		t.Fatalf("expected KindValidation, got %s", svcErr.Kind)
 	}
 }
@@ -87,11 +87,11 @@ func TestReadJSON_TrailingContent(t *testing.T) {
 		t.Fatal("expected error for trailing content, got nil")
 	}
 
-	var svcErr *service.ServiceError
+	var svcErr *apperrors.ServiceError
 	if !errors.As(err, &svcErr) {
-		t.Fatalf("expected *service.ServiceError, got %T: %v", err, err)
+		t.Fatalf("expected *apperrors.ServiceError, got %T: %v", err, err)
 	}
-	if svcErr.Kind != service.KindValidation {
+	if svcErr.Kind != apperrors.KindValidation {
 		t.Fatalf("expected KindValidation, got %s", svcErr.Kind)
 	}
 }
@@ -106,11 +106,11 @@ func TestReadJSON_EmptyBody(t *testing.T) {
 		t.Fatal("expected error for empty body, got nil")
 	}
 
-	var svcErr *service.ServiceError
+	var svcErr *apperrors.ServiceError
 	if !errors.As(err, &svcErr) {
-		t.Fatalf("expected *service.ServiceError, got %T: %v", err, err)
+		t.Fatalf("expected *apperrors.ServiceError, got %T: %v", err, err)
 	}
-	if svcErr.Kind != service.KindValidation {
+	if svcErr.Kind != apperrors.KindValidation {
 		t.Fatalf("expected KindValidation, got %s", svcErr.Kind)
 	}
 }
@@ -240,11 +240,11 @@ func TestParseListOpts_InvalidLimit(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for non-integer limit")
 	}
-	var svcErr *service.ServiceError
+	var svcErr *apperrors.ServiceError
 	if !errors.As(err, &svcErr) {
-		t.Fatalf("expected *service.ServiceError, got %T", err)
+		t.Fatalf("expected *apperrors.ServiceError, got %T", err)
 	}
-	if svcErr.Kind != service.KindValidation {
+	if svcErr.Kind != apperrors.KindValidation {
 		t.Fatalf("expected KindValidation, got %s", svcErr.Kind)
 	}
 }
@@ -256,11 +256,11 @@ func TestParseListOpts_NegativeLimit(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for negative limit")
 	}
-	var svcErr *service.ServiceError
+	var svcErr *apperrors.ServiceError
 	if !errors.As(err, &svcErr) {
-		t.Fatalf("expected *service.ServiceError, got %T", err)
+		t.Fatalf("expected *apperrors.ServiceError, got %T", err)
 	}
-	if svcErr.Kind != service.KindValidation {
+	if svcErr.Kind != apperrors.KindValidation {
 		t.Fatalf("expected KindValidation, got %s", svcErr.Kind)
 	}
 }
@@ -272,11 +272,11 @@ func TestParseListOpts_InvalidOffset(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for non-integer offset")
 	}
-	var svcErr *service.ServiceError
+	var svcErr *apperrors.ServiceError
 	if !errors.As(err, &svcErr) {
-		t.Fatalf("expected *service.ServiceError, got %T", err)
+		t.Fatalf("expected *apperrors.ServiceError, got %T", err)
 	}
-	if svcErr.Kind != service.KindValidation {
+	if svcErr.Kind != apperrors.KindValidation {
 		t.Fatalf("expected KindValidation, got %s", svcErr.Kind)
 	}
 }
@@ -288,11 +288,11 @@ func TestParseListOpts_NegativeOffset(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for negative offset")
 	}
-	var svcErr *service.ServiceError
+	var svcErr *apperrors.ServiceError
 	if !errors.As(err, &svcErr) {
-		t.Fatalf("expected *service.ServiceError, got %T", err)
+		t.Fatalf("expected *apperrors.ServiceError, got %T", err)
 	}
-	if svcErr.Kind != service.KindValidation {
+	if svcErr.Kind != apperrors.KindValidation {
 		t.Fatalf("expected KindValidation, got %s", svcErr.Kind)
 	}
 }
@@ -304,11 +304,11 @@ func TestParseListOpts_InvalidSortOrder(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for invalid sort_order")
 	}
-	var svcErr *service.ServiceError
+	var svcErr *apperrors.ServiceError
 	if !errors.As(err, &svcErr) {
-		t.Fatalf("expected *service.ServiceError, got %T", err)
+		t.Fatalf("expected *apperrors.ServiceError, got %T", err)
 	}
-	if svcErr.Kind != service.KindValidation {
+	if svcErr.Kind != apperrors.KindValidation {
 		t.Fatalf("expected KindValidation, got %s", svcErr.Kind)
 	}
 }

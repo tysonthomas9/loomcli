@@ -73,6 +73,8 @@ goroutine_launches:
   - {file: "internal/webui/editor/launch_darwin.go", function: "LaunchEditor", site: "go#1", callee: "cmd.Wait", disposition: component, component_ids: [editor-process-reaper-darwin]}
   - {file: "internal/webui/editor/launch_linux.go", function: "LaunchEditor", site: "go#1", callee: "cmd.Wait", disposition: component, component_ids: [editor-process-reaper-linux]}
   - {file: "internal/webui/editor/launch_windows.go", function: "LaunchEditor", site: "go#1", callee: "cmd.Wait", disposition: component, component_ids: [editor-process-reaper-windows]}
+  - {file: "internal/webui/filecoord/git_status.go", function: "fileServiceImpl.inspectWorkspaceCheckouts", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "checkout inspection uses a ten-second context and joins its fan-out before return"}
+  - {file: "internal/webui/filecoord/history.go", function: "fileServiceImpl.startLegacyHistoryCleanup", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [legacy-file-history-boot-cleanup]}
   - {file: "internal/webui/fleet/timeout.go", function: "TimeoutEnforcer.Start", site: "go#1", callee: "t.run", disposition: component, component_ids: [fleet-task-timeout-enforcer]}
   - {file: "internal/webui/handlers/misc/auth_config.go", function: "NewAuthConfigLimiter", site: "go#1", callee: "l.CleanupLoop", disposition: component, component_ids: [auth-config-rate-limit-cleanup]}
   - {file: "internal/webui/handlers/misc/client_errors.go", function: "NewClientErrorLimiter", site: "go#1", callee: "l.CleanupLoop", disposition: component, component_ids: [client-error-rate-limit-cleanup]}
@@ -86,14 +88,12 @@ goroutine_launches:
   - {file: "internal/webui/server/realtime/terminal_auth.go", function: "NewTerminalAuth", site: "go#1", callee: "ta.cleanupLoop", disposition: component, component_ids: [terminal-token-nonce-cleanup]}
   - {file: "internal/webui/subscription/backend_subscriber.go", function: "BackendMutationSubscriber.Start", site: "go#1", callee: "s.loop", disposition: component, component_ids: [backend-mutation-long-poll]}
   - {file: "internal/webui/subscription/multi.go", function: "MultiWorkspaceSubscriber.Start", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [workspace-subscriber-idle-deactivation]}
-  - {file: "internal/webui/svcimpl/file_git_status.go", function: "fileServiceImpl.inspectWorkspaceCheckouts", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "checkout inspection uses a ten-second context and joins its fan-out before return"}
-  - {file: "internal/webui/svcimpl/file_history.go", function: "fileServiceImpl.startLegacyHistoryCleanup", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [legacy-file-history-boot-cleanup]}
-  - {file: "internal/webui/svcimpl/workspace_job_store.go", function: "NewWorkspaceJobStore", site: "go#1", callee: "s.cleanupLoop", disposition: component, component_ids: [workspace-job-cleanup]}
-  - {file: "internal/webui/svcimpl/workspace_job_store.go", function: "WorkspaceJobStore.start", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "workspace mutation job carries a five-minute context and persists terminal completion"}
   - {file: "internal/webui/terminal/agent_tmux.go", function: "AgentTmuxManager.KillWorkspaceSessions", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "tmux cleanup fan-out is WaitGroup-joined before return"}
   - {file: "internal/webui/terminal/agent_tmux.go", function: "AgentTmuxManager.KillWorkspaceSessions", site: "go#2", callee: "<anonymous>", disposition: bounded, reason: "tmux cleanup fan-out is WaitGroup-joined before return"}
   - {file: "internal/webui/terminal/pty_manager.go", function: "NewPTYManager", site: "go#1", callee: "m.reapLoop", disposition: component, component_ids: [terminal-idle-reaper]}
   - {file: "internal/webui/terminal/pty_manager.go", function: "PTYManager.spawnSession", site: "go#1", callee: "sess.drain", disposition: component, component_ids: [terminal-pty-drain]}
+  - {file: "internal/webui/workspacecoord/job_store.go", function: "NewWorkspaceJobRegistry", site: "go#1", callee: "s.cleanupLoop", disposition: component, component_ids: [workspace-job-cleanup]}
+  - {file: "internal/webui/workspacecoord/job_store.go", function: "WorkspaceJobRegistry.start", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "workspace mutation job carries a five-minute context and persists terminal completion"}
 components:
   # Bounded command and startup polling.
   - id: fleet-dependency-state-wait
@@ -712,7 +712,7 @@ components:
 
   - id: log-stream-heartbeat
     kind: ticker
-    file: internal/webui/log/streamer.go
+    file: internal/logstore/streamer.go
     function: LogStreamer.streamEventLoop
     site: "time.NewTicker#1"
     capability: interaction
@@ -816,13 +816,13 @@ components:
 
   - id: workspace-job-cleanup
     kind: ticker
-    file: internal/webui/svcimpl/workspace_job_store.go
-    function: WorkspaceJobStore.cleanupLoop
+    file: internal/webui/workspacecoord/job_store.go
+    function: WorkspaceJobRegistry.cleanupLoop
     site: "time.NewTicker#1"
     capability: workspace
     owner: workspace service adapter
     cadence: "1m"
-    cancellation: "WorkspaceJobStore done channel"
+    cancellation: "WorkspaceJobRegistry done channel"
     readiness_health: "not readiness-bearing; evicts terminal jobs after the 5m retention window"
     retry_backoff: "fixed cleanup cadence"
     classification: managed
@@ -947,7 +947,7 @@ components:
 
   - id: legacy-file-history-boot-cleanup
     kind: component
-    file: internal/webui/svcimpl/file_history.go
+    file: internal/webui/filecoord/history.go
     function: fileServiceImpl.startLegacyHistoryCleanup
     site: component:boot-cleanup
     capability: artifacts

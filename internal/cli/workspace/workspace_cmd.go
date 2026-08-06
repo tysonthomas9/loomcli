@@ -17,7 +17,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr"
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 )
 
 var (
@@ -125,7 +125,7 @@ func runWorkspaceCreate(cmd *cobra.Command, args []string) {
 
 	if err := cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
 		create := workspacemgr.BuildStoreBackedCreateWorkspace(h.Store)
-		result, err := create(ctx, service.WorkspaceCreateRequest{
+		result, err := create(ctx, workspacecoord.WorkspaceCreateRequest{
 			Name:   wsName,
 			Type:   "empty",
 			Repos:  repoPaths,

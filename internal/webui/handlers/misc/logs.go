@@ -6,9 +6,9 @@ import (
 	"regexp"
 	"strconv"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // parseBeforeLine extracts and validates the before_line query parameter.
@@ -35,7 +35,7 @@ var validPhase = regexp.MustCompile(`^(planning|implementation)$`)
 // GET /api/workspaces/{ws}/agents/{name}/logs
 // Query params: ?lines=N (default 200, max 10000)
 // Response: {success: true, data: {lines: [...], lineCount: N}}
-func HandleGetAgentLog(svc service.AgentService) http.HandlerFunc {
+func HandleGetAgentLog(svc agentcoord.AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
 		agentName := r.PathValue("name")

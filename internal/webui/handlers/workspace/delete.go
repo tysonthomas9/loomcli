@@ -7,11 +7,11 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 )
 
 // HandleWorkspaceDelete returns a handler for DELETE /api/workspaces/{ws}.
-func HandleWorkspaceDelete(svc service.WorkspaceService) http.HandlerFunc {
+func HandleWorkspaceDelete(svc workspacecoord.WorkspaceService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
 		ctx, span := startSpan(r.Context(), "service.Workspace.Delete",

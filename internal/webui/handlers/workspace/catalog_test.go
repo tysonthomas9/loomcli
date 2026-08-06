@@ -178,3 +178,45 @@ func TestCatalogDesignFormatRejectsInvalidThroughWorkspacePolicy(t *testing.T) {
 		t.Fatalf("status=%d command=%#v topology_key=%q body=%s", recorder.Code, api.formatCommand, projection.topologyKey, recorder.Body.String())
 	}
 }
+
+func TestCatalogHandlersFailClosedWithoutCapability(t *testing.T) {
+	tests := map[string]http.HandlerFunc{
+		"list":          HandleCatalogList(nil, &fakeCatalogProjection{}),
+		"get":           HandleCatalogGet(&fakeCatalogAPI{}, nil),
+		"repositories":  HandleCatalogRepositories(nil, nil),
+		"rename":        HandleCatalogRename(nil, &fakeCatalogProjection{}),
+		"design format": HandleCatalogDesignFormatPatch(&fakeCatalogAPI{}, nil),
+	}
+	for name, handler := range tests {
+		t.Run(name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/workspaces", nil))
+			if recorder.Code != http.StatusServiceUnavailable {
+				t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+			}
+		})
+	}
+}
+
+func TestRetiredWorkspaceMutationEndpointsAreExplicit(t *testing.T) {
+	tests := []struct {
+		name    string
+		handler http.HandlerFunc
+		body    string
+		status  int
+	}{
+		{name: "set default", handler: HandleSetDefaultWorkspace(), status: http.StatusGone},
+		{name: "clear default", handler: HandleClearDefaultWorkspace(), status: http.StatusGone},
+		{name: "reorder", handler: HandleWorkspaceReorder(), body: `{"order":["ALPHA"]}`, status: http.StatusNotImplemented},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			handler := test.handler
+			handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/api/workspaces", strings.NewReader(test.body)))
+			if recorder.Code != test.status {
+				t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+			}
+		})
+	}
+}

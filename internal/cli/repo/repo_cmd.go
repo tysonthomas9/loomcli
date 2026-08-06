@@ -16,7 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 )
 
 var (
@@ -122,10 +122,10 @@ func runRepoAdd(_ *cobra.Command, args []string) error {
 }
 
 func ensureRepoLocalCheckout(ctx context.Context, ws, name, remoteURL string) (path string, cloned bool, err error) {
-	if !service.IsCloneURL(remoteURL) {
+	if !workspacecoord.IsCloneURL(remoteURL) {
 		return "", false, nil
 	}
-	if err := service.ValidateCloneURL(remoteURL); err != nil {
+	if err := workspacecoord.ValidateCloneURL(remoteURL); err != nil {
 		return "", false, err
 	}
 	sc, err := bootstrap.LoadStateCache()

@@ -22,16 +22,17 @@ import (
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
 )
 
 // Deps contains the capability ports and remaining compatibility dependencies
 // needed to assemble workspace-scoped agent and execution routes.
 type Deps struct {
 	Store                         store.Store
-	InteractiveAgentRuntime       service.InteractiveAgentRuntime
-	AgentSessionTranscripts       service.AgentSessionTranscriptService
+	InteractiveAgentRuntime       agentcoord.InteractiveAgentRuntime
+	AgentSessionTranscripts       sessioncoord.AgentSessionTranscriptService
 	WorkItems                     workitems.API
 	Hub                           *realtime.Hub
 	FleetBaseURL                  string

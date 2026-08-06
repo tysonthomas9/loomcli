@@ -8,7 +8,6 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
@@ -78,7 +77,7 @@ func TestStartSetupCreatesTabAndStartsSetupSession(t *testing.T) {
 	fake := newFakeSetupPTYSource(true)
 	svc, mr := newSetupTestSvc(t, fake)
 
-	result, err := svc.StartSetup(context.Background(), "HELLO-WORLD", service.TerminalSetupRequest{
+	result, err := svc.StartSetup(context.Background(), "HELLO-WORLD", TerminalSetupRequest{
 		Backend: "codex",
 		Action:  "install",
 	})
@@ -122,7 +121,7 @@ func TestStartSetupWritesCommandIntoExistingSetupSession(t *testing.T) {
 	fake := newFakeSetupPTYSource(false)
 	svc, _ := newSetupTestSvc(t, fake)
 
-	result, err := svc.StartSetup(context.Background(), "HELLO-WORLD", service.TerminalSetupRequest{
+	result, err := svc.StartSetup(context.Background(), "HELLO-WORLD", TerminalSetupRequest{
 		Backend: "codex",
 		Action:  "login",
 	})
@@ -148,7 +147,7 @@ func TestStartSetupSupportsCursorInstaller(t *testing.T) {
 	fake := newFakeSetupPTYSource(true)
 	svc, _ := newSetupTestSvc(t, fake)
 
-	result, err := svc.StartSetup(context.Background(), "HELLO-WORLD", service.TerminalSetupRequest{
+	result, err := svc.StartSetup(context.Background(), "HELLO-WORLD", TerminalSetupRequest{
 		Backend: "cursor",
 		Action:  "install",
 	})
@@ -177,7 +176,7 @@ func TestStartSetupSupportsCursorCredentialGuidance(t *testing.T) {
 	fake := newFakeSetupPTYSource(true)
 	svc, _ := newSetupTestSvc(t, fake)
 
-	result, err := svc.StartSetup(context.Background(), "HELLO-WORLD", service.TerminalSetupRequest{
+	result, err := svc.StartSetup(context.Background(), "HELLO-WORLD", TerminalSetupRequest{
 		Backend: "cursor",
 		Action:  "login",
 	})
@@ -257,7 +256,7 @@ func TestStartSetupWritesRawCommandToExistingSessionWithoutQuoting(t *testing.T)
 	fake := newFakeSetupPTYSource(false) // not created => triggers WriteToSession
 	svc, _ := newSetupTestSvc(t, fake)
 
-	_, err := svc.StartSetup(context.Background(), "HELLO-WORLD", service.TerminalSetupRequest{
+	_, err := svc.StartSetup(context.Background(), "HELLO-WORLD", TerminalSetupRequest{
 		Backend: "unsafe",
 		Action:  "login",
 	})
@@ -281,7 +280,7 @@ func TestStartSetupRejectsUnsupportedBackend(t *testing.T) {
 	fake := newFakeSetupPTYSource(true)
 	svc, _ := newSetupTestSvc(t, fake)
 
-	_, err := svc.StartSetup(context.Background(), "HELLO-WORLD", service.TerminalSetupRequest{
+	_, err := svc.StartSetup(context.Background(), "HELLO-WORLD", TerminalSetupRequest{
 		Backend: "unknown",
 		Action:  "install",
 	})

@@ -880,8 +880,6 @@ func applyWorkspaceConfigWithAdmission(
 	cfg.InitialWorkspaceID = serveadapter.ResolveInitialWorkspaceID(cfg.Store)
 	applyFleetInitialWorkspaceFallback(cfg, false)
 	cfg.WorkspaceDeleteCleanupFn = serveadapter.BuildWorkspaceDeleteCleanupFn()
-	cfg.SetDefaultWorkspaceFn = nil
-	cfg.ClearDefaultWorkspaceFn = nil
 	var admissions infrafleetdb.RepositoryAdmissionTransport
 	if storeHandle != nil && storeHandle.FleetDBClient() != nil {
 		admissions = storeHandle.FleetDBClient().RepositoryAdmissions()

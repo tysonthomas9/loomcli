@@ -15,7 +15,7 @@ import (
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 )
 
 type concurrentRenewalTransport struct {
@@ -467,7 +467,7 @@ func TestRepositoryAdmissionBlockedCloneCancelsBeforeTakeoverAndCannotPublish(
 	// into a second, unrelated successor-expiry test.
 	second.process.ownerLease = 5 * time.Second
 	second.process.leaseSafetyMargin = 500 * time.Millisecond
-	request := service.WorkspaceCreateRequest{
+	request := workspacecoord.WorkspaceCreateRequest{
 		Name: "fenced-clone", Type: "clone",
 		Path:      filepath.Join(loomDir, "workspaces", "fenced-clone"),
 		CloneURLs: []string{alpha, beta, gamma},
@@ -644,7 +644,7 @@ func TestRepositoryAdmissionLocalBatchFenceRetainsWorktreeWithoutPartialState(
 	workspacePath := filepath.Join(loomDir, "workspaces", "local-batch")
 	if _, err := BuildStoreBackedCreateWorkspace(st)(
 		t.Context(),
-		service.WorkspaceCreateRequest{
+		workspacecoord.WorkspaceCreateRequest{
 			Name: "local-batch", Type: "empty", Path: workspacePath,
 		},
 	); err != nil {
@@ -690,7 +690,7 @@ func TestRepositoryAdmissionLocalBatchFenceRetainsWorktreeWithoutPartialState(
 	go func() {
 		_, addErr := operations.AddWorkspaceRepos(
 			context.Background(),
-			service.WorkspaceAddReposRequest{
+			workspacecoord.WorkspaceAddReposRequest{
 				WorkspaceID: "LOCAL-BATCH",
 				Repos:       []string{firstRepository, secondRepository},
 				Branch:      "local-batch-work",
@@ -762,7 +762,7 @@ func TestRepositoryAdmissionStopCancelsAndWaitsForBlockedClone(t *testing.T) {
 		journal,
 		transport,
 	)
-	request := service.WorkspaceCreateRequest{
+	request := workspacecoord.WorkspaceCreateRequest{
 		Name: "stop-clone", Type: "clone",
 		Path:      filepath.Join(loomDir, "workspaces", "stop-clone"),
 		CloneURLs: []string{repository},

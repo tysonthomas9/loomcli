@@ -8,7 +8,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/types"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // CommentRequest represents the JSON body for creating a comment.
@@ -21,9 +20,7 @@ type CommentRequest struct {
 	Body string `json:"body,omitempty"`
 }
 
-// HandleListWorkItemComments is the Work Items-owned route adapter. The
-// legacy HandleListComments remains temporarily for non-route compatibility
-// tests and callers while the rest of IssueService migrates.
+// HandleListWorkItemComments is the Work Items-owned route adapter.
 func HandleListWorkItemComments(api workitems.API) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		issueID := r.PathValue("id")
@@ -96,74 +93,4 @@ type CommentListResponse struct {
 	Success bool             `json:"success"`
 	Data    []*types.Comment `json:"data"`
 	Error   string           `json:"error,omitempty"`
-}
-
-// HandleListComments returns a handler that lists comments for an issue.
-// Always returns {success:true, data:[]} for issues with no comments rather
-// than nil, matching the parity test's expectation of a list shape.
-func HandleListComments(svc service.IssueService) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		issueID := r.PathValue("id")
-		if issueID == "" {
-			handler.WriteJSON(w, http.StatusBadRequest, CommentListResponse{
-				Success: false,
-				Data:    []*types.Comment{},
-				Error:   "missing issue ID",
-			})
-			return
-		}
-
-		comments, err := svc.ListComments(r.Context(), issueID)
-		if err != nil {
-			handler.HandleServiceError(w, err)
-			return
-		}
-		if comments == nil {
-			comments = []*types.Comment{}
-		}
-
-		handler.WriteJSON(w, http.StatusOK, CommentListResponse{
-			Success: true,
-			Data:    comments,
-		})
-	}
-}
-
-// handleAddComment returns a handler that adds a comment to an issue.
-func HandleAddComment(svc service.IssueService) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		issueID := r.PathValue("id")
-		if issueID == "" {
-			handler.WriteJSON(w, http.StatusBadRequest, CommentResponse{
-				Success: false,
-				Error:   "missing issue ID",
-			})
-			return
-		}
-
-		var req CommentRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			slog.Warn("invalid request body in handleAddComment", "err", err)
-			handler.WriteJSON(w, http.StatusBadRequest, CommentResponse{
-				Success: false,
-				Error:   "invalid request body",
-			})
-			return
-		}
-
-		comment, err := svc.AddComment(r.Context(), service.AddCommentParams{
-			IssueID: issueID,
-			Author:  "web-ui",
-			Text:    req.Content(),
-		})
-		if err != nil {
-			handler.HandleServiceError(w, err)
-			return
-		}
-
-		handler.WriteJSON(w, http.StatusCreated, CommentResponse{
-			Success: true,
-			Data:    comment,
-		})
-	}
 }

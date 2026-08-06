@@ -21,13 +21,16 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
+	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/appinfra"
 	"github.com/tysonthomas9/loomcli/internal/webui/appstores"
+	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
+	"github.com/tysonthomas9/loomcli/internal/webui/sourcecontrolcoord"
+	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/filecoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlermux"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
-	"github.com/tysonthomas9/loomcli/internal/webui/svcimpl"
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
@@ -60,13 +63,13 @@ type Server struct {
 	workspaceCatalog workspace.API
 	workspaceStore   store.WorkspaceStore
 	workItemMover    workitemmove.Commands
-	agentSvc         service.AgentService
-	agentRuntime     service.InteractiveAgentRuntime
-	workspaceSvc     service.WorkspaceService
-	termSvc          service.TerminalService // nil if termMgr is nil
-	diffSvc          service.DiffService     // nil if ops.GitOps is nil
-	fileSvc          service.FileService     // nil if ops.FileOps is nil
-	sessSvc          service.SessionService  // always constructed (stores may be nil internally)
+	agentSvc         agentcoord.AgentService
+	agentRuntime     agentcoord.InteractiveAgentRuntime
+	workspaceSvc     workspacecoord.WorkspaceService
+	termSvc          terminal.TerminalService       // nil if termMgr is nil
+	diffSvc          sourcecontrolcoord.DiffService // nil if ops.GitOps is nil
+	fileSvc          filecoord.FileService          // nil if ops.FileOps is nil
+	sessSvc          sessioncoord.SessionService    // always constructed (stores may be nil internally)
 
 	// Real-time
 	hub               *appstores.Hub
@@ -101,11 +104,11 @@ type Server struct {
 	jwksCleanup       func()                // nil if no JWKS cache
 
 	// Wrapped workspace lifecycle functions
-	wrappedCreateFn        service.WorkspaceCreateFn
+	wrappedCreateFn        workspacecoord.WorkspaceCreateFn
 	wrappedDeleteCleanupFn func(string) error
 
 	// Async workspace creation jobs
-	jobStore *svcimpl.WorkspaceJobStore
+	jobStore *workspacecoord.WorkspaceJobRegistry
 
 	// Workspace resolver
 	wsExistsFn  func(string) bool // legacy identity resolver used by tests

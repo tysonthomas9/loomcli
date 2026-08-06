@@ -9,8 +9,8 @@ import (
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 	webuterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
@@ -27,7 +27,7 @@ type InteractionDependencies struct {
 	API                interaction.API
 	Operator           workflowcataloghttp.OperatorAuthorityResolver
 	SessionAuthorities InteractionSessionAuthorityResolver
-	TerminalIdentities service.InteractionTerminalIdentityWriter
+	TerminalIdentities webuterminal.InteractionTerminalIdentityWriter
 }
 
 // Module registers the surviving workspace-scoped terminal routes: the
@@ -40,8 +40,8 @@ type InteractionDependencies struct {
 // session-status) are gone — each WebSocket now owns a fresh PTY with
 // wterm-style wire, so there are no persistent sessions to manage.
 type Module struct {
-	termSvc         service.TerminalService
-	agentSvc        service.AgentService // may be nil — agent routes skipped
+	termSvc         webuterminal.TerminalService
+	agentSvc        agentcoord.AgentService // may be nil — agent routes skipped
 	ptyMgr          webuterminal.PTYSource
 	agentTmuxMgr    *webuterminal.AgentTmuxManager // may be nil — tmux missing
 	termAuth        *realtime.TerminalAuth         // may be nil — token routes skipped
@@ -60,8 +60,8 @@ type Module struct {
 // ptyMgr must be non-nil when terminal routes should be served; pass nil
 // (the interface, not a typed-nil pointer) to skip registration.
 func NewModule(
-	termSvc service.TerminalService,
-	agentSvc service.AgentService,
+	termSvc webuterminal.TerminalService,
+	agentSvc agentcoord.AgentService,
 	ptyMgr webuterminal.PTYSource,
 	agentTmuxMgr *webuterminal.AgentTmuxManager,
 	termAuth *realtime.TerminalAuth,

@@ -1,20 +1,15 @@
 package issues
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/app/workitemmove"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // HandleMoveWorkItem routes cross-workspace movement through the named
@@ -75,92 +70,6 @@ type MoveResult struct {
 	Warnings []string `json:"warnings,omitempty"`
 }
 
-// workspaceValidatorImpl implements service.WorkspaceValidator using FleetDB.
-type workspaceValidatorImpl struct {
-	store            store.Store
-	currentWorkspace string
-}
-
-func (v *workspaceValidatorImpl) ValidateTarget(targetWorkspace string) (string, error) {
-	if v.store == nil {
-		return "", service.ErrValidation("workspace store not available")
-	}
-
-	targetKey, targetName, err := resolveWorkspaceRef(context.Background(), v.store, targetWorkspace)
-	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			return "", service.ErrValidation(fmt.Sprintf("workspace %q not found", targetWorkspace))
-		}
-		return "", service.ErrInternal("failed to load workspace", err)
-	}
-
-	if v.currentWorkspace != "" {
-		currentKey, currentName, currentErr := resolveWorkspaceRef(context.Background(), v.store, v.currentWorkspace)
-		if currentErr == nil {
-			if targetKey == currentKey || (targetName != "" && targetName == currentName) {
-				return "", service.ErrValidation("cannot move issue to the same workspace")
-			}
-		}
-	}
-
-	return targetKey, nil
-}
-
-func (v *workspaceValidatorImpl) CurrentWorkspace() string {
-	return v.currentWorkspace
-}
-
-// handleMoveIssue returns a handler that moves an issue to a different workspace.
-func HandleMoveIssue(svc service.IssueService, st store.Store) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		issueID := r.PathValue("id")
-		if issueID == "" {
-			handler.WriteJSON(w, http.StatusBadRequest, MoveIssueResponse{Success: false, Error: "missing issue ID in path"})
-			return
-		}
-
-		req, ok := decodeMoveIssueRequest(w, r)
-		if !ok {
-			return
-		}
-
-		targetWorkspace := strings.TrimSpace(req.TargetWorkspace)
-		if targetWorkspace == "" {
-			handler.WriteJSON(w, http.StatusBadRequest, MoveIssueResponse{Success: false, Error: "target_workspace is required"})
-			return
-		}
-
-		currentWorkspace := middleware.WorkspaceFromContext(r.Context())
-		if currentWorkspace == "" {
-			currentWorkspace = r.PathValue("ws")
-		}
-		validator := &workspaceValidatorImpl{store: st, currentWorkspace: currentWorkspace}
-
-		result, err := svc.MoveIssue(r.Context(), service.MoveIssueParams{
-			IssueID:         issueID,
-			TargetWorkspace: targetWorkspace,
-			Validator:       validator,
-		})
-		if err != nil {
-			handler.HandleServiceError(w, err)
-			return
-		}
-		if result == nil {
-			handler.HandleServiceError(w, service.ErrInternal("move issue returned no result", nil))
-			return
-		}
-
-		handler.WriteJSON(w, http.StatusOK, MoveIssueResponse{
-			Success: true,
-			Data: &MoveResult{
-				SourceID: result.SourceID,
-				TargetID: result.TargetID,
-				Warnings: result.Warnings,
-			},
-		})
-	}
-}
-
 func decodeMoveIssueRequest(w http.ResponseWriter, r *http.Request) (MoveIssueRequest, bool) {
 	r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
 	var req MoveIssueRequest
@@ -174,20 +83,4 @@ func decodeMoveIssueRequest(w http.ResponseWriter, r *http.Request) (MoveIssueRe
 		return MoveIssueRequest{}, false
 	}
 	return req, true
-}
-
-func resolveWorkspaceRef(ctx context.Context, st store.Store, ref string) (string, string, error) {
-	ref = strings.TrimSpace(ref)
-	if ref == "" {
-		return "", "", domain.ErrNotFound
-	}
-	ws, getErr := st.Workspaces().Get(ctx, ref)
-	if getErr == nil && ws != nil {
-		return ws.Key, ws.Name, nil
-	}
-	ws, err := st.Workspaces().GetByName(ctx, ref)
-	if err != nil {
-		return "", "", err
-	}
-	return ws.Key, ws.Name, nil
 }

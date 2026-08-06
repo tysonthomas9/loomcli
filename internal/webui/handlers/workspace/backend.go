@@ -8,15 +8,15 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	webuiterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
+	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 )
 
 // BackendConfigResponse wraps the backend config data for JSON response.
 type BackendConfigResponse struct {
-	Success bool                       `json:"success"`
-	Data    *service.BackendConfigData `json:"data,omitempty"`
-	Error   string                     `json:"error,omitempty"`
+	Success bool                              `json:"success"`
+	Data    *workspacecoord.BackendConfigData `json:"data,omitempty"`
+	Error   string                            `json:"error,omitempty"`
 }
 
 // isValidBackend checks if the backend name is in the allowed list.
@@ -35,7 +35,7 @@ type WorkspaceBackendPatchRequest struct {
 }
 
 // HandleWorkspaceBackendGet returns the store-backed workspace backend config.
-func HandleWorkspaceBackendGet(svc service.WorkspaceService) http.HandlerFunc {
+func HandleWorkspaceBackendGet(svc workspacecoord.WorkspaceService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
 		if wsID == "" {
@@ -53,7 +53,7 @@ func HandleWorkspaceBackendGet(svc service.WorkspaceService) http.HandlerFunc {
 
 // HandleWorkspaceBackendPatch returns a handler that updates a workspace's backend
 // in the FleetDB-backed workspace config.
-func HandleWorkspaceBackendPatch(svc service.WorkspaceService) http.HandlerFunc {
+func HandleWorkspaceBackendPatch(svc workspacecoord.WorkspaceService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
 		if wsID == "" {

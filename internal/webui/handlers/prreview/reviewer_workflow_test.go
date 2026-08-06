@@ -26,8 +26,8 @@ import (
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // A non-canonical-cased request must canonicalize owner/repo from the
@@ -102,7 +102,7 @@ func TestReviewerAgentNameTruncatesToStoredNameLimit(t *testing.T) {
 	if len(name) > reviewerAgentNameMaxLen {
 		t.Fatalf("reviewerAgentName length = %d, want <= %d: %q", len(name), reviewerAgentNameMaxLen, name)
 	}
-	if !service.ValidStoredAgentName.MatchString(name) {
+	if !agentcoord.ValidStoredAgentName.MatchString(name) {
 		t.Fatalf("reviewerAgentName() = %q, want valid stored agent name", name)
 	}
 	if !strings.HasPrefix(name, "review-") || !strings.HasSuffix(name, "-pr-123") {

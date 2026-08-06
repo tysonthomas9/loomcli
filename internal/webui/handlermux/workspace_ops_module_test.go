@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 )
@@ -73,11 +73,9 @@ func TestWorkspaceOpsModule_NilDeps(t *testing.T) {
 	mod.Register(mux) // must not panic during registration
 }
 
-func TestWorkspaceOpsModuleUsesBackend(t *testing.T) {
+func TestWorkspaceOpsModuleUsesWorkItemsForReady(t *testing.T) {
 	mod := NewWorkspaceOpsModule(&mockWorkspaceService{}, nil).
-		WithIssueBackendFn(func(context.Context) backend.IssueBackend {
-			return &stubIssueBackend{}
-		})
+		WithWorkItems(stubReadyQueries{})
 
 	mux := http.NewServeMux()
 	mod.Register(mux)
@@ -115,12 +113,10 @@ func TestWorkspaceOpsModuleUsesWorkspaceCatalogForRepositoryReads(t *testing.T) 
 	}
 }
 
-type stubIssueBackend struct {
-	backend.IssueBackend
-}
+type stubReadyQueries struct{}
 
-func (s *stubIssueBackend) Ready(_ context.Context, _ backend.ReadyOpts) ([]backend.IssueData, error) {
-	return []backend.IssueData{}, nil
+func (stubReadyQueries) Ready(context.Context, workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
+	return []workitems.IssueSummary{}, nil
 }
 
 type stubWorkspaceCatalog struct {

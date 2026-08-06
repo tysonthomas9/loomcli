@@ -12,9 +12,11 @@ import (
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
+	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
 )
 
 // BindingGrantCompatibility is the narrow Phase-3 connector seam needed by
@@ -24,7 +26,7 @@ type BindingGrantCompatibility interface {
 	RevokeBindingGrants(ctx context.Context, workspaceKey, bindingID string) (int, error)
 }
 
-type agentSessionTranscriptEvents = service.TranscriptEvents
+type agentSessionTranscriptEvents = sessioncoord.TranscriptEvents
 
 // Config composes the unified transport with the canonical Agents identity
 // surface and Automation bindings. The composite Store remains for
@@ -34,9 +36,9 @@ type agentSessionTranscriptEvents = service.TranscriptEvents
 type Config struct {
 	AgentRecords          AgentRecordAPI
 	AgentIdentityCreator  CanonicalInteractiveAgentAPI
-	InteractiveRuntime    service.InteractiveAgentRuntime
+	InteractiveRuntime    agentcoord.InteractiveAgentRuntime
 	AgentRecordAuthority  workflowcataloghttp.OperatorAuthorityResolver
-	SessionTranscripts    service.AgentSessionTranscriptService
+	SessionTranscripts    sessioncoord.AgentSessionTranscriptService
 	Store                 store.Store
 	Hub                   *realtime.Hub
 	Bindings              automation.BindingOperations
@@ -53,9 +55,9 @@ type Module struct {
 	agentRecords          AgentRecordAPI
 	agentIdentityCreator  CanonicalInteractiveAgentAPI
 	agentRoleQueries      agentsmodule.RoleQueries
-	interactiveRuntime    service.InteractiveAgentRuntime
+	interactiveRuntime    agentcoord.InteractiveAgentRuntime
 	agentRecordAuthority  workflowcataloghttp.OperatorAuthorityResolver
-	sessionTranscripts    service.AgentSessionTranscriptService
+	sessionTranscripts    sessioncoord.AgentSessionTranscriptService
 	store                 store.Store
 	hub                   *realtime.Hub
 	bindings              automation.BindingOperations
@@ -137,7 +139,7 @@ func (m *Module) Register(mux *http.ServeMux) {
 }
 
 func writeAgentSessionTranscriptServiceError(w http.ResponseWriter, err error) {
-	var svcErr *service.ServiceError
+	var svcErr *apperrors.ServiceError
 	status := http.StatusInternalServerError
 	message := "internal server error"
 	if errors.As(err, &svcErr) {

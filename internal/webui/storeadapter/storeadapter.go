@@ -1,5 +1,5 @@
-// Package storeadapter exposes ops.WorkspaceData-shaped views over a
-// store.Store handle.
+// Package storeadapter exposes ops.WorkspaceData-shaped views over narrow
+// persisted workspace topology collections.
 package storeadapter
 
 import (
@@ -16,6 +16,13 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
+// WorkspaceTopologyReader is the read surface required to compose Workspace
+// and Repository projections for the legacy WorkspaceData transport shape.
+type WorkspaceTopologyReader interface {
+	Workspaces() store.WorkspaceStore
+	Repos() store.RepoStore
+}
+
 // ActiveWorkspaceKey projects the explicit runtime workspace selection for UI
 // composition. An unavailable selection is represented as the empty key.
 func ActiveWorkspaceKey(ctx context.Context, workspaces store.WorkspaceStore) string {
@@ -30,7 +37,7 @@ func ActiveWorkspaceKey(ctx context.Context, workspaces store.WorkspaceStore) st
 //
 // Returns nil, nil when no workspace exists — single-repo /
 // un-initialized mode.
-func BuildActiveWorkspaceData(ctx context.Context, s store.Store) (*ops.WorkspaceData, error) {
+func BuildActiveWorkspaceData(ctx context.Context, s WorkspaceTopologyReader) (*ops.WorkspaceData, error) {
 	if s == nil {
 		return nil, nil
 	}
@@ -54,7 +61,7 @@ func BuildActiveWorkspaceData(ctx context.Context, s store.Store) (*ops.Workspac
 // in the frontend).
 //
 // Returns ErrNotFound (wrapped) if the workspace key does not exist.
-func BuildWorkspaceDataForKey(ctx context.Context, s store.Store, key string) (*ops.WorkspaceData, error) {
+func BuildWorkspaceDataForKey(ctx context.Context, s WorkspaceTopologyReader, key string) (*ops.WorkspaceData, error) {
 	if s == nil {
 		return nil, errors.New("storeadapter: nil store")
 	}
@@ -128,7 +135,7 @@ func ResolveWorkspaceKeyByName(ctx context.Context, s store.Store, name string) 
 	return ws.Key, nil
 }
 
-func loadRepos(ctx context.Context, s store.Store, wsKey string) ([]ops.WorkspaceRepo, []string, error) {
+func loadRepos(ctx context.Context, s WorkspaceTopologyReader, wsKey string) ([]ops.WorkspaceRepo, []string, error) {
 	repos, err := s.Repos().List(ctx, wsKey)
 	if err != nil {
 		return nil, nil, fmt.Errorf("storeadapter: list repos: %w", err)
@@ -171,7 +178,7 @@ func loadRepos(ctx context.Context, s store.Store, wsKey string) ([]ops.Workspac
 	return out, groups, nil
 }
 
-func loadSummaries(ctx context.Context, s store.Store, activeKey string) ([]ops.WorkspaceSummary, error) {
+func loadSummaries(ctx context.Context, s WorkspaceTopologyReader, activeKey string) ([]ops.WorkspaceSummary, error) {
 	all, err := s.Workspaces().List(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("storeadapter: list workspaces: %w", err)
@@ -199,7 +206,7 @@ func loadSummaries(ctx context.Context, s store.Store, activeKey string) ([]ops.
 	return out, nil
 }
 
-func firstWorkspaceKey(ctx context.Context, s store.Store) (string, error) {
+func firstWorkspaceKey(ctx context.Context, s WorkspaceTopologyReader) (string, error) {
 	all, err := s.Workspaces().List(ctx)
 	if err != nil {
 		return "", fmt.Errorf("storeadapter: list workspaces: %w", err)

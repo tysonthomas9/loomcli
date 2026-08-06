@@ -8,6 +8,7 @@ import "context"
 type API interface {
 	Create(context.Context, CreateCommand) (*CreatedIssue, error)
 	List(context.Context, ListQuery) (*ListResult, error)
+	Ready(context.Context, AvailabilityQuery) ([]IssueSummary, error)
 	Search(context.Context, SearchQuery) ([]IssueSummary, error)
 	Get(context.Context, GetQuery) (*IssueDetail, error)
 	Patch(context.Context, PatchCommand) (*IssueDetail, error)
@@ -22,6 +23,12 @@ type API interface {
 	AddDependency(context.Context, AddDependencyCommand) error
 	RemoveDependency(context.Context, RemoveDependencyCommand) error
 	ListDependencies(context.Context, ListDependenciesQuery) ([]Dependency, error)
+}
+
+// ReadyQueries is the narrow queue projection used by schedulers and the
+// ready-list HTTP adapter. It does not expose mutation authority.
+type ReadyQueries interface {
+	Ready(context.Context, AvailabilityQuery) ([]IssueSummary, error)
 }
 
 type ListQuery struct {
@@ -58,11 +65,15 @@ type ListFilter struct {
 type AvailabilityQuery struct {
 	ParentID    string
 	Assignee    string
+	Unassigned  bool
 	Priority    *int
 	IssueType   string
 	Labels      []string
+	LabelsAny   []string
 	SourceRepos []string
 	Limit       int
+	SortPolicy  string
+	MolType     string
 }
 
 type CreateCommand struct {

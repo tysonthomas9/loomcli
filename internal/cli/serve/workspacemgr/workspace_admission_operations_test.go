@@ -11,7 +11,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 )
 
 func TestWorkspaceAdmissionCoordinatorPreparesDurablyBeforeMaterialization(t *testing.T) {
@@ -34,7 +34,7 @@ func TestWorkspaceAdmissionCoordinatorPreparesDurablyBeforeMaterialization(t *te
 		journal,
 		transport,
 	)
-	request := service.WorkspaceCreateRequest{
+	request := workspacecoord.WorkspaceCreateRequest{
 		Name: "durable-prepare", Type: "clone",
 		CloneURLs: []string{src},
 		Path:      filepath.Join(loomDir, "workspaces", "durable-prepare"),
@@ -64,7 +64,7 @@ func TestWorkspaceAdmissionCoordinatorPreparesDurablyBeforeMaterialization(t *te
 		t.Fatalf("prepare materialized a checkout before scheduling: %v", err)
 	}
 	job, found, err := operations.LookupJob(t.Context(), jobID)
-	if err != nil || !found || job.Status != service.JobStatusRunning {
+	if err != nil || !found || job.Status != workspacecoord.JobStatusRunning {
 		t.Fatalf("prepared durable job = %#v, found=%t, err=%v", job, found, err)
 	}
 
@@ -82,7 +82,7 @@ func TestWorkspaceAdmissionCoordinatorPreparesDurablyBeforeMaterialization(t *te
 		transport,
 	)
 	job, found, err = restarted.LookupJob(t.Context(), jobID)
-	if err != nil || !found || job.Status != service.JobStatusDone ||
+	if err != nil || !found || job.Status != workspacecoord.JobStatusDone ||
 		job.WorkspaceID != "DURABLE-PREPARE" {
 		t.Fatalf("restarted durable job = %#v, found=%t, err=%v", job, found, err)
 	}
@@ -127,7 +127,7 @@ func TestWorkspaceAdmissionRuntimeRecoversRetryablePartialCheckout(t *testing.T)
 	if err != nil {
 		t.Fatalf("new journal: %v", err)
 	}
-	request := service.WorkspaceCreateRequest{
+	request := workspacecoord.WorkspaceCreateRequest{
 		Name: "runtime-recovery", Type: "clone",
 		CloneURLs: []string{alpha, beta},
 		Path:      filepath.Join(loomDir, "workspaces", "runtime-recovery"),
@@ -175,7 +175,7 @@ func TestWorkspaceAdmissionRuntimeRecoversRetryablePartialCheckout(t *testing.T)
 		t.Context(),
 		locals[0].AdmissionID,
 	)
-	if err != nil || !found || job.Status != service.JobStatusDone {
+	if err != nil || !found || job.Status != workspacecoord.JobStatusDone {
 		t.Fatalf("recovered job = %#v, found=%t, err=%v", job, found, err)
 	}
 }
@@ -200,7 +200,7 @@ func TestWorkspaceAdmissionLeaseRenewalTracksOnlyActiveMaterialization(t *testin
 		journal,
 		transport,
 	)
-	request := service.WorkspaceCreateRequest{
+	request := workspacecoord.WorkspaceCreateRequest{
 		Name: "lease-renewal", Type: "clone",
 		CloneURLs: []string{src},
 		Path:      filepath.Join(loomDir, "workspaces", "lease-renewal"),
@@ -318,7 +318,7 @@ func TestWorkspaceAdmissionRuntimeRecoversUnstartedPreparedJobWithoutRenewingIt(
 	now := time.Now()
 	operations.process.now = func() time.Time { return now }
 	transport.now = func() time.Time { return now }
-	request := service.WorkspaceCreateRequest{
+	request := workspacecoord.WorkspaceCreateRequest{
 		Name: "unstarted-recovery", Type: "clone",
 		CloneURLs: []string{src},
 		Path:      filepath.Join(loomDir, "workspaces", "unstarted-recovery"),
@@ -394,7 +394,7 @@ func TestWorkspaceAdmissionRuntimeClaimsExpiredOwnerAfterHardCrash(t *testing.T)
 	if err != nil {
 		t.Fatalf("new journal: %v", err)
 	}
-	request := service.WorkspaceCreateRequest{
+	request := workspacecoord.WorkspaceCreateRequest{
 		Name: "hard-crash", Type: "clone",
 		CloneURLs: []string{src},
 		Path:      filepath.Join(loomDir, "workspaces", "hard-crash"),

@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // backendPatchRequest creates a PATCH request with workspace UUID in context.
@@ -104,7 +104,7 @@ func TestHandleWorkspaceBackendPatch_MissingWorkspaceID(t *testing.T) {
 func TestHandleWorkspaceBackendPatch_UnknownUUID(t *testing.T) {
 	svc := &mockWorkspaceService{
 		patchWorkspaceBackendFn: func(_ context.Context, _ string, _ string) (*ops.WorkspaceData, error) {
-			return nil, service.ErrNotFound("workspace not found")
+			return nil, apperrors.ErrNotFound("workspace not found")
 		},
 	}
 	handler := handleWorkspaceBackendPatch(svc)

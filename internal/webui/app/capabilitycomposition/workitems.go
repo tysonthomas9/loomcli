@@ -143,9 +143,10 @@ func (s *workItemsBackendStore) Ready(ctx context.Context, query workitems.Avail
 	ctx, cancel := context.WithTimeout(ctx, workItemOperationTimeout)
 	defer cancel()
 	values, err := be.Ready(ctx, backend.ReadyOpts{
-		ParentID: query.ParentID, Assignee: query.Assignee, Priority: query.Priority,
-		Type: query.IssueType, Labels: query.Labels, SourceRepos: query.SourceRepos,
-		Limit: query.Limit,
+		ParentID: query.ParentID, Assignee: query.Assignee, Unassigned: query.Unassigned,
+		Priority: query.Priority, Type: query.IssueType, Labels: query.Labels,
+		LabelsAny: query.LabelsAny, SourceRepos: query.SourceRepos, Limit: query.Limit,
+		SortPolicy: query.SortPolicy, MolType: query.MolType,
 	})
 	if err != nil {
 		return nil, translateWorkItemsBackendError(err)

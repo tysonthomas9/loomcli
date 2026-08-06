@@ -16,7 +16,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
+	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
 const (
@@ -36,8 +37,8 @@ type Module struct {
 	connectorManagement      connectorsmodule.Management
 	connectorManagementStore connectorsmodule.ManagementStore
 	dispatcher               connectorsmodule.Dispatcher
-	agentSvc                 service.AgentService
-	terminalSvc              service.TerminalService
+	agentSvc                 agentcoord.AgentService
+	terminalSvc              terminal.TerminalService
 	reviewerProvisioning     prreviewer.Commands
 	reviewerAgents           agents.IdentityQueries
 	sourceControl            sourcecontrol.Materializer
@@ -66,8 +67,8 @@ type Module struct {
 func NewModule(
 	st store.Store,
 	disp connectorsmodule.Dispatcher,
-	agentSvc service.AgentService,
-	terminalSvc service.TerminalService,
+	agentSvc agentcoord.AgentService,
+	terminalSvc terminal.TerminalService,
 	localSettingsDir string,
 	reviewerProvisioning prreviewer.Commands,
 	reviewerAgents agents.IdentityQueries,

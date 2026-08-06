@@ -11,10 +11,11 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
+	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
 )
 
 // validSessionID matches session IDs produced by GenerateSessionID:
@@ -33,15 +34,15 @@ type SessionListResponse struct {
 
 // SessionListData contains the task ID and its sessions.
 type SessionListData struct {
-	TaskID   string                    `json:"task_id"`
-	Sessions []service.SessionListItem `json:"sessions"`
+	TaskID   string                         `json:"task_id"`
+	Sessions []sessioncoord.SessionListItem `json:"sessions"`
 }
 
 // SessionDetailResponse is the JSON envelope for a single session's metadata.
 type SessionDetailResponse struct {
-	Success bool                       `json:"success"`
-	Data    *service.SessionDetailData `json:"data,omitempty"`
-	Error   string                     `json:"error,omitempty"`
+	Success bool                            `json:"success"`
+	Data    *sessioncoord.SessionDetailData `json:"data,omitempty"`
+	Error   string                          `json:"error,omitempty"`
 }
 
 // TranscriptResponse is the JSON envelope for a session transcript.
@@ -73,14 +74,14 @@ type SubagentListData struct {
 // --- Handlers ---
 
 // HandleListTaskSessions returns all sessions for a given task.
-func HandleListTaskSessions(svc service.SessionService) http.HandlerFunc {
+func HandleListTaskSessions(svc sessioncoord.SessionService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
 		taskID := r.PathValue("taskId")
 
 		items, err := svc.ListTaskSessions(r.Context(), wsID, taskID)
 		if err != nil {
-			var svcErr *service.ServiceError
+			var svcErr *apperrors.ServiceError
 			status := http.StatusInternalServerError
 			msg := "internal server error"
 			if errors.As(err, &svcErr) {
@@ -105,7 +106,7 @@ func HandleListTaskSessions(svc service.SessionService) http.HandlerFunc {
 }
 
 // HandleGetSession returns metadata for a single session.
-func HandleGetSession(svc service.SessionService) http.HandlerFunc {
+func HandleGetSession(svc sessioncoord.SessionService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
 		taskID := r.PathValue("taskId")
@@ -113,7 +114,7 @@ func HandleGetSession(svc service.SessionService) http.HandlerFunc {
 
 		result, err := svc.GetSession(r.Context(), wsID, taskID, sessionID)
 		if err != nil {
-			var svcErr *service.ServiceError
+			var svcErr *apperrors.ServiceError
 			status := http.StatusInternalServerError
 			msg := "internal server error"
 			if errors.As(err, &svcErr) {
@@ -135,7 +136,7 @@ func HandleGetSession(svc service.SessionService) http.HandlerFunc {
 }
 
 // HandleGetSessionTranscript returns the transcript entries for a session.
-func HandleGetSessionTranscript(svc service.SessionService) http.HandlerFunc {
+func HandleGetSessionTranscript(svc sessioncoord.SessionService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
 		taskID := r.PathValue("taskId")
@@ -143,7 +144,7 @@ func HandleGetSessionTranscript(svc service.SessionService) http.HandlerFunc {
 
 		entries, err := svc.GetSessionTranscript(r.Context(), wsID, taskID, sessionID)
 		if err != nil {
-			var svcErr *service.ServiceError
+			var svcErr *apperrors.ServiceError
 			status := http.StatusInternalServerError
 			msg := "internal server error"
 			if errors.As(err, &svcErr) {
@@ -228,7 +229,7 @@ func HandleNotifySessionChange(hub *realtime.Hub, notifyToken string) http.Handl
 }
 
 // HandleListSessionSubagents returns the list of captured subagent IDs for a session.
-func HandleListSessionSubagents(svc service.SessionService) http.HandlerFunc {
+func HandleListSessionSubagents(svc sessioncoord.SessionService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
 		taskID := r.PathValue("taskId")
@@ -236,7 +237,7 @@ func HandleListSessionSubagents(svc service.SessionService) http.HandlerFunc {
 
 		ids, err := svc.ListSessionSubagents(r.Context(), wsID, taskID, sessionID)
 		if err != nil {
-			var svcErr *service.ServiceError
+			var svcErr *apperrors.ServiceError
 			status := http.StatusInternalServerError
 			msg := "internal server error"
 			if errors.As(err, &svcErr) {
@@ -258,7 +259,7 @@ func HandleListSessionSubagents(svc service.SessionService) http.HandlerFunc {
 
 // HandleGetSessionSubagentTranscript returns the canonical event stream for a
 // captured subagent transcript.
-func HandleGetSessionSubagentTranscript(svc service.SessionService) http.HandlerFunc {
+func HandleGetSessionSubagentTranscript(svc sessioncoord.SessionService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
 		taskID := r.PathValue("taskId")
@@ -267,7 +268,7 @@ func HandleGetSessionSubagentTranscript(svc service.SessionService) http.Handler
 
 		events, err := svc.GetSessionSubagentTranscript(r.Context(), wsID, taskID, sessionID, subagentID)
 		if err != nil {
-			var svcErr *service.ServiceError
+			var svcErr *apperrors.ServiceError
 			status := http.StatusInternalServerError
 			msg := "internal server error"
 			if errors.As(err, &svcErr) {
@@ -285,7 +286,7 @@ func HandleGetSessionSubagentTranscript(svc service.SessionService) http.Handler
 }
 
 // HandleGetSessionDiff returns the diff.patch file for a session as plain text.
-func HandleGetSessionDiff(svc service.SessionService) http.HandlerFunc {
+func HandleGetSessionDiff(svc sessioncoord.SessionService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
 		taskID := r.PathValue("taskId")
@@ -293,7 +294,7 @@ func HandleGetSessionDiff(svc service.SessionService) http.HandlerFunc {
 
 		diff, err := svc.GetSessionDiff(r.Context(), wsID, taskID, sessionID)
 		if err != nil {
-			var svcErr *service.ServiceError
+			var svcErr *apperrors.ServiceError
 			status := http.StatusInternalServerError
 			msg := "internal server error"
 			if errors.As(err, &svcErr) {

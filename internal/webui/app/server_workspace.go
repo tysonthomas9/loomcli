@@ -10,18 +10,18 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/appinfra"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlermux"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
+	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 )
 
 func wrapWorkspaceCreateFn(
-	innerCreate service.WorkspaceCreateFn,
+	innerCreate workspacecoord.WorkspaceCreateFn,
 	registry *appinfra.WorkspaceRegistry,
-) service.WorkspaceCreateFn {
+) workspacecoord.WorkspaceCreateFn {
 	if innerCreate == nil {
 		return nil
 	}
-	return func(ctx context.Context, req service.WorkspaceCreateRequest) (service.WorkspaceCreateResult, error) {
+	return func(ctx context.Context, req workspacecoord.WorkspaceCreateRequest) (workspacecoord.WorkspaceCreateResult, error) {
 		result, err := innerCreate(ctx, req)
 		if err != nil {
 			return result, err
@@ -33,7 +33,7 @@ func wrapWorkspaceCreateFn(
 		if wsID == "" {
 			logger.Error("workspace creation returned empty WorkspaceID — skipping runtime registration",
 				"workspace", req.Name)
-			service.AddCreateWarning(ctx, "Could not register workspace runtime — workspace may not auto-connect until restart")
+			workspacecoord.AddCreateWarning(ctx, "Could not register workspace runtime — workspace may not auto-connect until restart")
 			return result, nil
 		}
 
@@ -41,14 +41,14 @@ func wrapWorkspaceCreateFn(
 		if wsDir == "" {
 			logger.Warn("workspace creation returned empty WorkspacePath — skipping runtime registration",
 				"workspace", req.Name)
-			service.AddCreateWarning(ctx, "Could not determine workspace directory for runtime registration")
+			workspacecoord.AddCreateWarning(ctx, "Could not determine workspace directory for runtime registration")
 			return result, nil
 		}
 
 		if err := registry.Register(wsID, wsDir); err != nil {
 			logger.Warn("workspace created but runtime registration failed",
 				"workspace", req.Name, "workspace_id", wsID, "err", err)
-			service.AddCreateWarning(ctx, "Workspace created but runtime registration failed — some features may be unavailable until restart")
+			workspacecoord.AddCreateWarning(ctx, "Workspace created but runtime registration failed — some features may be unavailable until restart")
 		}
 		// Subscriber activation is deferred to the workspace SSE token/stream
 		// routes so ordinary REST traffic does not start FleetDB long-polls.

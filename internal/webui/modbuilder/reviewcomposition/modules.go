@@ -12,12 +12,15 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
+	"github.com/tysonthomas9/loomcli/internal/webui/filecoord"
 	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
 	locsettings "github.com/tysonthomas9/loomcli/internal/webui/handlers/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/prreview"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/sourcecontrolcoord"
+	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
 // PRReviewModule is the route module plus its credential-cache invalidation
@@ -41,12 +44,12 @@ type LocalSettingsHandlers struct {
 }
 
 // NewDiffModule creates the git diff module.
-func NewDiffModule(agentSvc service.AgentService, diffSvc service.DiffService) interface{ Register(*http.ServeMux) } {
+func NewDiffModule(agentSvc agentcoord.AgentService, diffSvc sourcecontrolcoord.DiffService) interface{ Register(*http.ServeMux) } {
 	return githandlers.NewModule(agentSvc, diffSvc)
 }
 
 // NewFileModule creates the file operations module.
-func NewFileModule(fileSvc service.FileService, accessCfg ...middleware.FileAccessConfig) interface{ Register(*http.ServeMux) } {
+func NewFileModule(fileSvc filecoord.FileService, accessCfg ...middleware.FileAccessConfig) interface{ Register(*http.ServeMux) } {
 	return misc.NewModule(fileSvc, accessCfg...)
 }
 
@@ -58,8 +61,8 @@ func NewFileModule(fileSvc service.FileService, accessCfg ...middleware.FileAcce
 func NewPRReviewModule(
 	st store.Store,
 	dispatcher connectorsmodule.Dispatcher,
-	agentSvc service.AgentService,
-	terminalSvc service.TerminalService,
+	agentSvc agentcoord.AgentService,
+	terminalSvc terminal.TerminalService,
 	localSettingsDir string,
 	reviewerProvisioning prreviewer.Commands,
 	reviewerAgents agents.IdentityQueries,

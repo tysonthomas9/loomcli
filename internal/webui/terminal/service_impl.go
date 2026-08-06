@@ -7,8 +7,8 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
@@ -40,7 +40,7 @@ func NewTerminalService(
 	redisClient *redis.Client,
 	ptyMgr PTYSource,
 	startedAt time.Time,
-) service.TerminalService {
+) TerminalService {
 	return &terminalServiceImpl{
 		termAuth:    termAuth,
 		tabStore:    tabStore,
@@ -97,14 +97,14 @@ func (s *terminalServiceImpl) attachedClients(wsID, session string) int {
 
 func (s *terminalServiceImpl) GenerateToken(_ context.Context, wsID, session, userID string) (string, error) {
 	if s.termAuth == nil {
-		return "", service.ErrUnavailable("terminal auth not initialized")
+		return "", apperrors.ErrUnavailable("terminal auth not initialized")
 	}
 	if session == "" || !validTerminalSession.MatchString(session) {
-		return "", service.ErrValidation("invalid session name")
+		return "", apperrors.ErrValidation("invalid session name")
 	}
 	token, err := s.termAuth.GenerateToken(session, wsID, userID)
 	if err != nil {
-		return "", service.ErrInternal("failed to generate token", err)
+		return "", apperrors.ErrInternal("failed to generate token", err)
 	}
 	return token, nil
 }

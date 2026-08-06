@@ -3,8 +3,8 @@ package log
 import (
 	"net/http"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // Module registers the workspace-scoped log streaming routes on a
@@ -13,12 +13,12 @@ import (
 // The agent log route is conditional on agentSvc being non-nil. Task log
 // routes are always registered (their handler constructors take no parameters).
 type Module struct {
-	agentSvc service.AgentService // may be nil — agent log route skipped
+	agentSvc agentcoord.AgentService // may be nil — agent log route skipped
 }
 
 // NewModule returns a Module. agentSvc may be nil — the agent log
 // route will simply not be registered.
-func NewModule(agentSvc service.AgentService) *Module {
+func NewModule(agentSvc agentcoord.AgentService) *Module {
 	return &Module{agentSvc: agentSvc}
 }
 

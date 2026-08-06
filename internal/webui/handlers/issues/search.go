@@ -7,7 +7,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // HandleSearchWorkItems routes full-text search through the Work Items public
@@ -62,35 +61,4 @@ func parseSearchLimit(r *http.Request) int {
 		return searchMaxLimit
 	}
 	return parsed
-}
-
-// HandleSearchIssues returns a handler that performs full-text search across
-// the backend.IssueBackend and emits the list of matching issues in the same
-// JSON envelope as the issues list endpoint (`{success, data: [...]}`).
-//
-// Query parameters:
-//   - q: required search query (forwarded to IssueBackend.SearchIssues)
-//   - limit: optional, defaults to searchDefaultLimit, clamped to searchMaxLimit
-func HandleSearchIssues(svc service.IssueService) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		query := r.URL.Query().Get("q")
-		if query == "" {
-			writeIssuesError(w, http.StatusBadRequest, "missing search query 'q'", "MISSING_QUERY")
-			return
-		}
-
-		data, err := svc.SearchIssues(r.Context(), service.SearchIssuesParams{
-			Query: query,
-			Limit: parseSearchLimit(r),
-		})
-		if err != nil {
-			handler.HandleServiceError(w, err)
-			return
-		}
-
-		handler.WriteJSON(w, http.StatusOK, IssuesResponse{
-			Success: true,
-			Data:    data,
-		})
-	}
 }

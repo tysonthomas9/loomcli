@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	webuilog "github.com/tysonthomas9/loomcli/internal/webui/log"
+	webuilog "github.com/tysonthomas9/loomcli/internal/logstore"
 )
 
 // OpenAgentArchiveLog opens (creating parent directories) the per-workspace

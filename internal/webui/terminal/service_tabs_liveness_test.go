@@ -9,7 +9,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
@@ -221,8 +221,8 @@ func TestPutTab_RejectsOverwriteWhenPTYIsLive(t *testing.T) {
 	fake.alive[SessionKey{Workspace: ws, Name: "sess"}] = true
 	meta := &tabmeta.TabMetadata{SessionName: "sess", Workspace: ws, Label: "replacement"}
 	err := svc.PutTab(ctx, ws, meta)
-	var svcErr *service.ServiceError
-	if !errors.As(err, &svcErr) || svcErr.Kind != service.KindConflict {
+	var svcErr *apperrors.ServiceError
+	if !errors.As(err, &svcErr) || svcErr.Kind != apperrors.KindConflict {
 		t.Fatalf("expected ServiceError.Kind=Conflict, got %v", err)
 	}
 }
@@ -285,8 +285,8 @@ func TestPutTabRejectsDeadCanonicalAgentTabReplacement(t *testing.T) {
 	err := svc.PutTab(ctx, ws, &tabmeta.TabMetadata{
 		SessionName: "agent-tab", Workspace: ws, Label: "ordinary replacement",
 	})
-	var typed *service.ServiceError
-	if !errors.As(err, &typed) || typed.Kind != service.KindConflict {
+	var typed *apperrors.ServiceError
+	if !errors.As(err, &typed) || typed.Kind != apperrors.KindConflict {
 		t.Fatalf("PutTab error = %v, want canonical replacement conflict", err)
 	}
 	got, getErr := svc.tabStore.Get(ctx, ws, key.Name)
@@ -317,8 +317,8 @@ func TestPersistInteractionTabIdentityRequiresCompleteCanonicalOwner(t *testing.
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := svc.PersistInteractionTabIdentity(t.Context(), "w", meta)
-			var typed *service.ServiceError
-			if !errors.As(err, &typed) || typed.Kind != service.KindValidation {
+			var typed *apperrors.ServiceError
+			if !errors.As(err, &typed) || typed.Kind != apperrors.KindValidation {
 				t.Fatalf("error = %v, want validation", err)
 			}
 		})

@@ -12,7 +12,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/infra/workspacecatalog"
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 )
 
 const (
@@ -68,14 +68,14 @@ func NewStoreBackedWorkspaceAdmissionOperationsWithWorkspace(
 
 func (operations *StoreBackedWorkspaceAdmissionOperations) CreateWorkspace(
 	ctx context.Context,
-	req service.WorkspaceCreateRequest,
-) (service.WorkspaceCreateResult, error) {
+	req workspacecoord.WorkspaceCreateRequest,
+) (workspacecoord.WorkspaceCreateResult, error) {
 	if operations == nil || operations.store == nil {
-		return service.WorkspaceCreateResult{}, repositoryAdmissionUnavailable()
+		return workspacecoord.WorkspaceCreateResult{}, repositoryAdmissionUnavailable()
 	}
 	if req.Type == "clone" {
 		if operations.process == nil {
-			return service.WorkspaceCreateResult{}, repositoryAdmissionUnavailable()
+			return workspacecoord.WorkspaceCreateResult{}, repositoryAdmissionUnavailable()
 		}
 		return createStoreBackedCloneWorkspaceAdmission(
 			ctx,
@@ -89,14 +89,14 @@ func (operations *StoreBackedWorkspaceAdmissionOperations) CreateWorkspace(
 
 func (operations *StoreBackedWorkspaceAdmissionOperations) AddWorkspaceRepos(
 	ctx context.Context,
-	req service.WorkspaceAddReposRequest,
-) (service.WorkspaceCreateResult, error) {
+	req workspacecoord.WorkspaceAddReposRequest,
+) (workspacecoord.WorkspaceCreateResult, error) {
 	if operations == nil || operations.store == nil {
-		return service.WorkspaceCreateResult{}, repositoryAdmissionUnavailable()
+		return workspacecoord.WorkspaceCreateResult{}, repositoryAdmissionUnavailable()
 	}
 	if operations.process == nil {
 		if len(req.CloneURLs) > 0 {
-			return service.WorkspaceCreateResult{}, repositoryAdmissionUnavailable()
+			return workspacecoord.WorkspaceCreateResult{}, repositoryAdmissionUnavailable()
 		}
 		return addReposToStoreBackedWorkspace(
 			ctx,
@@ -119,7 +119,7 @@ func (operations *StoreBackedWorkspaceAdmissionOperations) AddWorkspaceRepos(
 // after the request has ended or be recovered by a later serve incarnation.
 func (operations *StoreBackedWorkspaceAdmissionOperations) PrepareCreate(
 	ctx context.Context,
-	req service.WorkspaceCreateRequest,
+	req workspacecoord.WorkspaceCreateRequest,
 ) (string, error) {
 	if operations == nil || operations.process == nil {
 		return "", repositoryAdmissionUnavailable()
@@ -149,7 +149,7 @@ func (operations *StoreBackedWorkspaceAdmissionOperations) PrepareCreate(
 // runner is scheduled. Local paths remain only in the protected local journal.
 func (operations *StoreBackedWorkspaceAdmissionOperations) PrepareAddRepos(
 	ctx context.Context,
-	req service.WorkspaceAddReposRequest,
+	req workspacecoord.WorkspaceAddReposRequest,
 ) (string, error) {
 	if operations == nil || operations.process == nil {
 		return "", repositoryAdmissionUnavailable()
@@ -174,7 +174,7 @@ func (operations *StoreBackedWorkspaceAdmissionOperations) PrepareAddRepos(
 func (operations *StoreBackedWorkspaceAdmissionOperations) LookupJob(
 	ctx context.Context,
 	jobID string,
-) (*service.WorkspaceJob, bool, error) {
+) (*workspacecoord.WorkspaceJob, bool, error) {
 	if operations == nil || operations.process == nil {
 		return nil, false, nil
 	}
@@ -203,27 +203,27 @@ func (operations *StoreBackedWorkspaceAdmissionOperations) LookupJob(
 	if err := verifyPreparedRepositoryAdmission(local, record); err != nil {
 		return nil, false, err
 	}
-	job := &service.WorkspaceJob{
+	job := &workspacecoord.WorkspaceJob{
 		ID: jobID, WorkspaceID: local.Intent.WorkspaceKey,
 	}
 	switch record.State {
 	case "pending":
-		job.Status = service.JobStatusRunning
+		job.Status = workspacecoord.JobStatusRunning
 		if local.Intent.Kind == localRepositoryAdmissionCreateWorkspace {
 			job.Progress = "cloning workspace repositories..."
 		} else {
 			job.Progress = "attaching workspace repositories..."
 		}
 	case "retryable_failed":
-		job.Status = service.JobStatusFailed
+		job.Status = workspacecoord.JobStatusFailed
 		job.Error = "repository materialization was interrupted; retry the request"
 		job.CompletedAt = record.UpdatedAt
 	case "permanent_failed", "aborted":
-		job.Status = service.JobStatusFailed
+		job.Status = workspacecoord.JobStatusFailed
 		job.Error = "repository materialization failed"
 		job.CompletedAt = record.UpdatedAt
 	case "committed":
-		job.Status = service.JobStatusDone
+		job.Status = workspacecoord.JobStatusDone
 		job.CompletedAt = record.UpdatedAt
 	default:
 		return nil, false, infrafleetdb.ErrRepositoryAdmissionInvalid
@@ -417,7 +417,7 @@ func (operations *StoreBackedWorkspaceAdmissionOperations) recoverLocalRepositor
 	case localRepositoryAdmissionCreateWorkspace:
 		_, err := operations.CreateWorkspace(
 			ctx,
-			service.WorkspaceCreateRequest{
+			workspacecoord.WorkspaceCreateRequest{
 				Name: local.Intent.WorkspaceName, Type: "clone",
 				Path: local.Intent.WorkspacePath, Branch: local.Intent.Branch,
 				CloneURLs: append([]string(nil), local.Intent.CloneURLs...),
@@ -427,7 +427,7 @@ func (operations *StoreBackedWorkspaceAdmissionOperations) recoverLocalRepositor
 	case localRepositoryAdmissionAddRepositories:
 		_, err := operations.AddWorkspaceRepos(
 			ctx,
-			service.WorkspaceAddReposRequest{
+			workspacecoord.WorkspaceAddReposRequest{
 				WorkspaceID: local.Intent.WorkspaceKey,
 				Branch:      local.Intent.Branch,
 				Repos:       append([]string(nil), local.Intent.LocalRepoPaths...),
@@ -461,7 +461,7 @@ func (operations *StoreBackedWorkspaceAdmissionOperations) verifyRecoveryIntent(
 		if err != nil {
 			return err
 		}
-		key := service.WorkspaceKeyFromName(intent.WorkspaceName)
+		key := workspacecoord.WorkspaceKeyFromName(intent.WorkspaceName)
 		if key != intent.WorkspaceKey {
 			return infrafleetdb.ErrRepositoryAdmissionInvalid
 		}
@@ -548,7 +548,7 @@ func (operations *StoreBackedWorkspaceAdmissionOperations) verifyRecoveryIntent(
 }
 
 var (
-	_ service.WorkspaceAdmissionCoordinator = (*StoreBackedWorkspaceAdmissionOperations)(nil)
+	_ workspacecoord.WorkspaceAdmissionCoordinator = (*StoreBackedWorkspaceAdmissionOperations)(nil)
 	_ interface {
 		RuntimeRegistrations() []platformruntime.Registration
 	} = (*StoreBackedWorkspaceAdmissionOperations)(nil)

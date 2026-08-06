@@ -7,7 +7,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // HandleGetWorkItem reads one aggregate through the Work Items public API.
@@ -138,27 +137,6 @@ func writeIssuesError(w http.ResponseWriter, status int, message, code string) {
 	handler.WriteJSON(w, status, IssuesResponse{Success: false, Error: message, Code: code})
 }
 
-// handleGetIssue returns a handler that retrieves a single issue by ID.
-func HandleGetIssue(svc service.IssueService) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		issueID := r.PathValue("id")
-		if issueID == "" {
-			handler.RespondError(w, http.StatusBadRequest, "missing issue ID")
-			return
-		}
-		data, err := svc.GetIssue(r.Context(), issueID)
-		if err != nil {
-			handler.HandleServiceError(w, err)
-			return
-		}
-		handler.WriteJSON(w, http.StatusOK, IssuesResponse{
-			Success: true,
-			Data:    data,
-		})
-	}
-}
-
-// handleListIssues returns a handler that lists issues from the daemon.
 func HandleListWorkItems(api workitems.API) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		args, err := parseListParams(r)
@@ -213,68 +191,5 @@ func listFilterToWorkItems(value *workitems.ListFilter) workitems.ListFilter {
 		UpdatedBefore: value.UpdatedBefore, EmptyDescription: value.EmptyDescription,
 		NoAssignee: value.NoAssignee, NoLabels: value.NoLabels, Pinned: value.Pinned,
 		ParentID: value.ParentID, Lightweight: value.Lightweight,
-	}
-}
-
-func listFilterToLegacy(value *workitems.ListFilter) *service.ListFilter {
-	if value == nil {
-		return &service.ListFilter{}
-	}
-	return &service.ListFilter{
-		Query: value.Query, Status: value.Status, Priority: value.Priority,
-		IssueType: value.IssueType, Assignee: value.Assignee,
-		Labels: append([]string(nil), value.Labels...), LabelsAny: append([]string(nil), value.LabelsAny...),
-		SourceRepos: append([]string(nil), value.SourceRepos...), Limit: value.Limit,
-		TitleContains: value.TitleContains, DescriptionContains: value.DescriptionContains,
-		NotesContains: value.NotesContains, CreatedAfter: value.CreatedAfter,
-		CreatedBefore: value.CreatedBefore, UpdatedAfter: value.UpdatedAfter,
-		UpdatedBefore: value.UpdatedBefore, EmptyDescription: value.EmptyDescription,
-		NoAssignee: value.NoAssignee, NoLabels: value.NoLabels, Pinned: value.Pinned,
-		ParentID: value.ParentID, Lightweight: value.Lightweight,
-	}
-}
-
-func HandleListIssues(svc service.IssueService) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		args, err := parseListParams(r)
-		if err != nil {
-			writeIssuesError(w, http.StatusBadRequest, err.Error(), "INVALID_PARAMS")
-			return
-		}
-		// List views don't need full issue bodies — use lightweight mode
-		// to avoid allocating multi-KB description/design/notes per issue.
-		args.Lightweight = true
-
-		kp, err := parseKanbanParams(r)
-		if err != nil {
-			writeIssuesError(w, http.StatusBadRequest, err.Error(), "INVALID_PARAMS")
-			return
-		}
-
-		result, svcErr := svc.ListIssues(r.Context(), service.ListIssuesParams{
-			Args:           listFilterToLegacy(args),
-			ExcludeStatus:  kp.ExcludeStatus,
-			IncludeBlocked: kp.IncludeBlocked,
-		})
-		if svcErr != nil {
-			handler.HandleServiceError(w, svcErr)
-			return
-		}
-
-		var data []byte
-		if result.KanbanIssues != nil {
-			data, err = json.Marshal(result.KanbanIssues)
-		} else {
-			data, err = json.Marshal(result.Issues)
-		}
-		if err != nil {
-			slog.Error("failed to marshal issues", "err", err)
-			writeIssuesError(w, http.StatusInternalServerError, "failed to encode response", "ENCODE_ERROR")
-			return
-		}
-		handler.WriteJSON(w, http.StatusOK, IssuesResponse{
-			Success: true,
-			Data:    data,
-		})
 	}
 }

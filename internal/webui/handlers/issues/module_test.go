@@ -124,6 +124,7 @@ type routeWorkItems struct {
 	patchIDs            []string
 	closeIDs            []string
 	repositoryIDs       []string
+	assignRepositoryErr error
 }
 
 type routeMover struct {
@@ -144,6 +145,10 @@ func (f *routeWorkItems) List(context.Context, workitems.ListQuery) (*workitems.
 	return &workitems.ListResult{Issues: []workitems.ListItem{}}, nil
 }
 
+func (f *routeWorkItems) Ready(context.Context, workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
+	return []workitems.IssueSummary{}, nil
+}
+
 func (f *routeWorkItems) Search(context.Context, workitems.SearchQuery) ([]workitems.IssueSummary, error) {
 	f.searchCalls++
 	return []workitems.IssueSummary{}, nil
@@ -162,6 +167,9 @@ func (f *routeWorkItems) Close(_ context.Context, command workitems.CloseCommand
 }
 func (f *routeWorkItems) AssignRepository(_ context.Context, command workitems.AssignRepositoryCommand) (*workitems.IssueSummary, error) {
 	f.repositoryIDs = append(f.repositoryIDs, command.IssueID)
+	if f.assignRepositoryErr != nil {
+		return nil, f.assignRepositoryErr
+	}
 	return &workitems.IssueSummary{ID: command.IssueID, SourceRepo: command.Repository, Repo: command.Repository}, nil
 }
 func (f *routeWorkItems) Claim(_ context.Context, command workitems.ClaimCommand) (*workitems.IssueDetail, error) {

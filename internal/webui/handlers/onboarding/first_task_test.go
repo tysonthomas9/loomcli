@@ -224,6 +224,9 @@ func (s *stubIssueService) Create(ctx context.Context, command workitems.CreateC
 func (s *stubIssueService) List(context.Context, workitems.ListQuery) (*workitems.ListResult, error) {
 	return nil, workitems.ErrNotImplemented
 }
+func (s *stubIssueService) Ready(context.Context, workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
+	return nil, workitems.ErrNotImplemented
+}
 func (s *stubIssueService) Search(context.Context, workitems.SearchQuery) ([]workitems.IssueSummary, error) {
 	return nil, workitems.ErrNotImplemented
 }

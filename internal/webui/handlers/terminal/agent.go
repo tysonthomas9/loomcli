@@ -14,10 +14,11 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"nhooyr.io/websocket" //nolint:staticcheck // SA1019: websocket migration tracked separately
 
+	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
+	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	webuterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
@@ -69,14 +70,14 @@ func (m *agentTmuxMonitor) CapturePaneRaw(name string, lines int) string {
 
 // HandleGetAgentTerminalInfo reports whether an agent has a live tmux session
 // suitable for terminal streaming, or should fall back to archive logs.
-func HandleGetAgentTerminalInfo(svc service.AgentService) http.HandlerFunc {
+func HandleGetAgentTerminalInfo(svc agentcoord.AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		agentName := r.PathValue("name")
 		wsID := middleware.WorkspaceFromContext(r.Context())
 
 		result, err := svc.GetTerminalInfo(r.Context(), wsID, agentName)
 		if err != nil {
-			var svcErr *service.ServiceError
+			var svcErr *apperrors.ServiceError
 			status := http.StatusInternalServerError
 			msg := "internal server error"
 			if errors.As(err, &svcErr) {
@@ -101,7 +102,7 @@ func HandleGetAgentTerminalInfo(svc service.AgentService) http.HandlerFunc {
 }
 
 // HandleGetAgentTerminalToken generates a one-time token scoped to an agent logs stream.
-func HandleGetAgentTerminalToken(svc service.AgentService) http.HandlerFunc {
+func HandleGetAgentTerminalToken(svc agentcoord.AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		agentName := r.PathValue("name")
 
@@ -113,7 +114,7 @@ func HandleGetAgentTerminalToken(svc service.AgentService) http.HandlerFunc {
 		wsID := middleware.WorkspaceFromContext(r.Context())
 		token, err := svc.GenerateTerminalToken(r.Context(), wsID, agentName, userID)
 		if err != nil {
-			var svcErr *service.ServiceError
+			var svcErr *apperrors.ServiceError
 			status := http.StatusInternalServerError
 			msg := "internal server error"
 			if errors.As(err, &svcErr) {

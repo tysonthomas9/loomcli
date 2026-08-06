@@ -10,17 +10,22 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/webui"
+	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
+	"github.com/tysonthomas9/loomcli/internal/webui/filecoord"
+	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
+	"github.com/tysonthomas9/loomcli/internal/webui/sourcecontrolcoord"
+	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/types"
-	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
+	"github.com/tysonthomas9/loomcli/internal/webui/app/capabilitycomposition"
 	healthhandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/health"
 	hterminal "github.com/tysonthomas9/loomcli/internal/webui/handlers/terminal"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
-	"github.com/tysonthomas9/loomcli/internal/webui/svcimpl"
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
@@ -354,7 +359,7 @@ func TestSetupRoutes_SSEEndpointRegisteredOnWorkspaceScope(t *testing.T) {
 
 	wsExistsFn := func(id string) bool { return id == "test-ws" }
 	app := &Server{hub: hub, wsExistsFn: wsExistsFn}
-	app.sessSvc = svcimpl.NewSessionService(nil, nil)
+	app.sessSvc = sessioncoord.NewSessionService(nil, nil)
 	setupTestRoutes(t, app)
 
 	// Use a context with short timeout because the SSE handler streams forever
@@ -387,7 +392,7 @@ func TestSetupRoutes_SSEEndpointUsesCanonicalWorkspace(t *testing.T) {
 			return middleware.WorkspaceRef{RequestedID: requestedID, CanonicalID: "canonical-ws"}, true
 		},
 	}
-	app.sessSvc = svcimpl.NewSessionService(nil, nil)
+	app.sessSvc = sessioncoord.NewSessionService(nil, nil)
 	setupTestRoutes(t, app)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -433,7 +438,7 @@ func TestSetupRoutes_WorkspaceMonitorStatusInjectsWorkspace(t *testing.T) {
 			},
 		},
 	}
-	app.sessSvc = svcimpl.NewSessionService(nil, nil)
+	app.sessSvc = sessioncoord.NewSessionService(nil, nil)
 	setupTestRoutes(t, app)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/monitor/status", nil)
@@ -449,19 +454,20 @@ func TestSetupRoutes_WorkspaceMonitorStatusInjectsWorkspace(t *testing.T) {
 }
 
 func TestSetupRoutes_WorkspaceGetUsesCanonicalWorkspace(t *testing.T) {
-	wsSvc := &mockWorkspaceService{
-		getWorkspaceFn: func(ctx context.Context, wsID string) (*ops.WorkspaceData, error) {
-			if wsID != "canonical-ws" {
-				t.Errorf("workspace id = %q, want canonical-ws", wsID)
-			}
-			if got := middleware.WorkspaceFromContext(ctx); got != "canonical-ws" {
-				t.Errorf("workspace context = %q, want canonical-ws", got)
-			}
-			return &ops.WorkspaceData{ID: "canonical-ws"}, nil
-		},
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(context.Background(), store.WorkspaceCreate{Key: "canonical-ws", Name: "Canonical"}); err != nil {
+		t.Fatal(err)
 	}
+	catalog, err := capabilitycomposition.NewWorkspaceCapability(st.Workspaces(), st.Repos())
+	if err != nil {
+		t.Fatal(err)
+	}
+	wsSvc := workspacecoord.NewWorkspaceService(workspacecoord.WorkspaceServiceConfig{Topology: st, Workspace: catalog})
 	app := &Server{
-		workspaceSvc: wsSvc,
+		config:           webui.ServerConfig{Store: st},
+		workspaceSvc:     wsSvc,
+		workspaceCatalog: catalog,
+		workspaceStore:   st.Workspaces(),
 		wsResolveFn: func(_ context.Context, requestedID string) (middleware.WorkspaceRef, bool) {
 			if requestedID != "alias-ws" {
 				t.Fatalf("requested workspace = %q, want alias-ws", requestedID)
@@ -469,7 +475,7 @@ func TestSetupRoutes_WorkspaceGetUsesCanonicalWorkspace(t *testing.T) {
 			return middleware.WorkspaceRef{RequestedID: requestedID, CanonicalID: "canonical-ws"}, true
 		},
 	}
-	app.sessSvc = svcimpl.NewSessionService(nil, nil)
+	app.sessSvc = sessioncoord.NewSessionService(nil, nil)
 	setupTestRoutes(t, app)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/alias-ws", nil)
@@ -496,11 +502,11 @@ func waitForWorkspaceClientCount(t *testing.T, hub *realtime.Hub, wsID string, e
 func TestSetupRoutes_WorkspaceBackendGetEndpoint(t *testing.T) {
 	wsExistsFn := func(id string) bool { return id == "test-ws" }
 	wsSvc := &mockWorkspaceService{
-		getWorkspaceBackendFn: func(_ context.Context, wsID string) (*service.BackendConfigData, error) {
+		getWorkspaceBackendFn: func(_ context.Context, wsID string) (*workspacecoord.BackendConfigData, error) {
 			if wsID != "test-ws" {
 				t.Errorf("workspace id = %q, want test-ws", wsID)
 			}
-			return &service.BackendConfigData{
+			return &workspacecoord.BackendConfigData{
 				Backend:   "codex",
 				Source:    "workspace",
 				Available: []string{"claude", "codex"},
@@ -508,7 +514,7 @@ func TestSetupRoutes_WorkspaceBackendGetEndpoint(t *testing.T) {
 		},
 	}
 	app := &Server{config: webui.ServerConfig{}, wsExistsFn: wsExistsFn, workspaceSvc: wsSvc}
-	app.sessSvc = svcimpl.NewSessionService(nil, nil)
+	app.sessSvc = sessioncoord.NewSessionService(nil, nil)
 	setupTestRoutes(t, app)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/config/backend", nil)
@@ -549,7 +555,7 @@ func TestSetupRoutes_WorkspaceBackendPatchEndpoint(t *testing.T) {
 		},
 	}
 	app := &Server{config: webui.ServerConfig{}, wsExistsFn: wsExistsFn, workspaceSvc: wsSvc}
-	app.sessSvc = svcimpl.NewSessionService(nil, nil)
+	app.sessSvc = sessioncoord.NewSessionService(nil, nil)
 	setupTestRoutes(t, app)
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/workspaces/test-ws/config/backend",
@@ -596,16 +602,23 @@ func TestSetupRoutes_WorkspaceBackendPatchEndpoint(t *testing.T) {
 // body decoding would break and this test would catch it.
 func TestSetupRoutes_WorkspaceRenamePatchEndpoint(t *testing.T) {
 	wsExistsFn := func(id string) bool { return id == "test-ws" }
-
-	var capturedNewName string
-	wsSvc := &mockWorkspaceService{
-		renameWorkspaceFn: func(_ context.Context, _ string, newName string) (*ops.WorkspaceData, error) {
-			capturedNewName = newName
-			return &ops.WorkspaceData{Name: newName, Path: "/tmp/test"}, nil
-		},
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(context.Background(), store.WorkspaceCreate{Key: "test-ws", Name: "test-ws"}); err != nil {
+		t.Fatal(err)
 	}
-	app := &Server{config: webui.ServerConfig{}, wsExistsFn: wsExistsFn, workspaceSvc: wsSvc}
-	app.sessSvc = svcimpl.NewSessionService(nil, nil)
+	catalog, err := capabilitycomposition.NewWorkspaceCapability(st.Workspaces(), st.Repos())
+	if err != nil {
+		t.Fatal(err)
+	}
+	wsSvc := workspacecoord.NewWorkspaceService(workspacecoord.WorkspaceServiceConfig{Topology: st, Workspace: catalog})
+	app := &Server{
+		config:           webui.ServerConfig{Store: st},
+		wsExistsFn:       wsExistsFn,
+		workspaceSvc:     wsSvc,
+		workspaceCatalog: catalog,
+		workspaceStore:   st.Workspaces(),
+	}
+	app.sessSvc = sessioncoord.NewSessionService(nil, nil)
 	setupTestRoutes(t, app)
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/workspaces/test-ws/name",
@@ -624,10 +637,12 @@ func TestSetupRoutes_WorkspaceRenamePatchEndpoint(t *testing.T) {
 		t.Fatalf("expected status 200, got %d, body=%s", rr.Code, rr.Body.String())
 	}
 
-	// The body must have been decoded and passed to the service — if it was
-	// lost (e.g., nested mux body-read bug), capturedNewName would be empty.
-	if capturedNewName != "renamed-ws" {
-		t.Errorf("handler did not receive new_name from body; got %q, want %q", capturedNewName, "renamed-ws")
+	updated, err := st.Workspaces().Get(context.Background(), "test-ws")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Name != "renamed-ws" {
+		t.Errorf("handler did not persist new_name; got %q, want %q", updated.Name, "renamed-ws")
 	}
 
 	var body map[string]interface{}
@@ -659,7 +674,7 @@ func TestSetupRoutes_WorkspaceBackendPatchReadsBody(t *testing.T) {
 		},
 	}
 	app := &Server{config: webui.ServerConfig{}, wsExistsFn: wsExistsFn, workspaceSvc: wsSvc}
-	app.sessSvc = svcimpl.NewSessionService(nil, nil)
+	app.sessSvc = sessioncoord.NewSessionService(nil, nil)
 	setupTestRoutes(t, app)
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/workspaces/test-ws/config/backend",
@@ -957,10 +972,10 @@ func TestFlatAgentRoutesRemoved(t *testing.T) {
 		},
 	}
 
-	app := &Server{config: webui.ServerConfig{GitOps: gitOps, FileOps: fileOps}, wsExistsFn: wsExistsFn, agentSvc: svcimpl.NewAgentService(gitOps, nil, nil)}
-	app.diffSvc = githandlers.NewDiffService(gitOps, nil)
-	app.fileSvc = svcimpl.NewFileService(fileOps)
-	app.sessSvc = svcimpl.NewSessionService(nil, nil)
+	app := &Server{config: webui.ServerConfig{GitOps: gitOps, FileOps: fileOps}, wsExistsFn: wsExistsFn, agentSvc: agentcoord.NewAgentService(gitOps, nil, nil)}
+	app.diffSvc = sourcecontrolcoord.NewDiffService(gitOps, nil, middleware.WithWorkspace)
+	app.fileSvc = filecoord.NewFileService(fileOps)
+	app.sessSvc = sessioncoord.NewSessionService(nil, nil)
 	setupTestRoutes(t, app)
 
 	// Removed flat routes; each must return 404.

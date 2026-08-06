@@ -1,10 +1,18 @@
 package issues
 
 import (
+	"context"
 	"net/http"
 
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
 )
+
+// SessionHistoryQueries is the issue-history read projection consumed by this
+// route module. Task session evidence is composed separately by Artifacts.
+type SessionHistoryQueries interface {
+	ListSessionHistory(context.Context, string, string) ([]sessionhistory.SessionRecord, error)
+	GetSessionScrollback(context.Context, string, string, string) (*sessionhistory.ScrollbackResult, error)
+}
 
 // SessionModule registers the 6 workspace-scoped session history and audit
 // trail routes on a [*http.ServeMux].
@@ -15,7 +23,7 @@ import (
 // The 4 task-scoped session handlers (list, get, transcript, diff) are
 // provided as pre-built HandlerFuncs because they live in a sibling package.
 type SessionModule struct {
-	sessSvc service.SessionService
+	sessSvc SessionHistoryQueries
 
 	// Task-scoped session handlers injected from the sibling package.
 	listTaskSessionsHandler     http.HandlerFunc
@@ -34,7 +42,7 @@ type SessionModuleOpts struct {
 
 // NewSessionModule returns a SessionModule that will register routes using
 // the given session service. Task-scoped session handlers are injected via opts.
-func NewSessionModule(sessSvc service.SessionService, opts SessionModuleOpts) *SessionModule {
+func NewSessionModule(sessSvc SessionHistoryQueries, opts SessionModuleOpts) *SessionModule {
 	return &SessionModule{
 		sessSvc:                     sessSvc,
 		listTaskSessionsHandler:     opts.ListTaskSessions,
