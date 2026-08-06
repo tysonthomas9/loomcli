@@ -49,6 +49,11 @@ describe("sessionless workflow run UI", () => {
     expect(transcriptState).toHaveTextContent(
       /finished without starting an agent session.*no agent transcript or diff exists/i,
     );
+    const outcome = screen.getByText("Outcome").parentElement;
+    expect(
+      transcriptState.compareDocumentPosition(outcome as Node) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it("describes an active workflow as pending rather than completed", () => {

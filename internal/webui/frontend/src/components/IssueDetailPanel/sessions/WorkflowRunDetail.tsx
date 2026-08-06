@@ -67,15 +67,6 @@ export function WorkflowRunDetail({
             {label(run.status)}
           </span>
         </div>
-        <div className={styles.workflowExplanation}>
-          <div className={styles.workflowExplanationLabel}>Outcome</div>
-          <div>{explanation}</div>
-        </div>
-        {run.error_class && (
-          <div className={styles.workflowError} role="alert">
-            {run.error_class}
-          </div>
-        )}
         <div
           className={styles.workflowTranscriptState}
           data-state={active ? "pending" : "absent"}
@@ -91,6 +82,15 @@ export function WorkflowRunDetail({
               : "This workflow finished without starting an agent session, so no agent transcript or diff exists."}
           </div>
         </div>
+        <div className={styles.workflowExplanation}>
+          <div className={styles.workflowExplanationLabel}>Outcome</div>
+          <div>{explanation}</div>
+        </div>
+        {run.error_class && (
+          <div className={styles.workflowError} role="alert">
+            {run.error_class}
+          </div>
+        )}
       </header>
 
       <div className={styles.workflowDetailBody}>
