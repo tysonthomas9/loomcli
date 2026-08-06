@@ -22,6 +22,7 @@
 package terminal
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -275,7 +276,7 @@ func (m *PTYManager) AttachSession(key SessionKey, cols, rows uint16, launch *ta
 		m.mu.Unlock()
 
 		if existed {
-			_ = pty.Setsize(sess.pty, &pty.Winsize{Cols: cols, Rows: rows})
+			_ = sess.resize(context.Background(), cols, rows)
 		}
 
 		sess.cancelKillTimer()
@@ -326,7 +327,7 @@ func (m *PTYManager) EnsureSession(key SessionKey, cols, rows uint16, argv []str
 	}
 	m.mu.Unlock()
 
-	_ = pty.Setsize(sess.pty, &pty.Winsize{Cols: cols, Rows: rows})
+	_ = sess.resize(context.Background(), cols, rows)
 	sess.cancelKillTimer()
 	return false, nil
 }
@@ -341,7 +342,7 @@ func (m *PTYManager) WriteToSession(key SessionKey, p []byte) error {
 	if sess == nil {
 		return ErrPTYSessionNotFound
 	}
-	_, err := sess.pty.Write(p)
+	_, err := sess.writeInput(p)
 	return err
 }
 
@@ -370,8 +371,8 @@ func (m *PTYManager) spawnSession(key SessionKey, cols, rows uint16, launch *tab
 		return nil, fmt.Errorf("pty.StartWithSize: %w", err)
 	}
 
-	sess := newPtySession(key, ptmx, cmd)
-	go sess.drain(m)
+	sess := newPtySession(key, newHostUpstream(ptmx, cmd), m.onSessionExited)
+	go sess.drain()
 	return sess, nil
 }
 

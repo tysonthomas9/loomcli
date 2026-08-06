@@ -1,15 +1,10 @@
 package terminal
 
 import (
-	"os"
-	"os/exec"
+	"context"
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/creack/pty"
-
-	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
 // screenResetSeq clears the terminal and homes the cursor. Emitted at the
@@ -34,12 +29,10 @@ const (
 // the ground truth.
 const attachBufferSize = 64
 
-// localAttachment is the in-process Attachment implementation. It wraps the
-// session's PTY fd directly. An Attachment interface exists in source.go so
-// a future gRPC-backed implementation can plug into the WS handler unchanged.
+// localAttachment is the in-process Attachment implementation. It forwards
+// input and resize requests through the owning session's upstream.
 type localAttachment struct {
 	connID     string
-	pty        *os.File
 	output     chan []byte
 	scrollback []byte
 	// session is held so ExitReason can report *why* the output channel
@@ -53,14 +46,10 @@ type localAttachment struct {
 func (a *localAttachment) ConnID() string        { return a.connID }
 func (a *localAttachment) Output() <-chan []byte { return a.output }
 
-// WriteInput writes keystrokes to the shared PTY fd. Multiple attachments
-// share the same *os.File; POSIX guarantees concurrent write(2) calls up
-// to PIPE_BUF (4096 bytes) are atomic, and terminal keystrokes are far
-// below that, so no mutex is needed on this path.
-func (a *localAttachment) WriteInput(p []byte) (int, error) { return a.pty.Write(p) }
+func (a *localAttachment) WriteInput(p []byte) (int, error) { return a.session.writeInput(p) }
 func (a *localAttachment) Scrollback() []byte               { return a.scrollback }
 func (a *localAttachment) Resize(_ string, cols, rows uint16) error {
-	return pty.Setsize(a.pty, &pty.Winsize{Cols: cols, Rows: rows})
+	return a.session.resize(context.Background(), cols, rows)
 }
 
 // ExitReason returns the reason the owning session closed, or "" if the
@@ -78,16 +67,19 @@ func (a *localAttachment) ExitReason() string {
 	return ""
 }
 
-// ptySession owns the PTY fd, child process, scrollback ring, and the set
-// of concurrent attachments (multi-client) for one (workspace, session)
-// pair. Each attachment is a separate WebSocket / viewer that sees the
-// same output and can write input into the shared PTY.
+// ptySession owns the scrollback ring and the set of concurrent attachments
+// (multi-client) for one (workspace, session) pair. Each attachment is a
+// separate WebSocket / viewer that sees the same output and can write input
+// into the shared upstream.
 type ptySession struct {
 	key        SessionKey
-	pty        *os.File
-	cmd        *exec.Cmd
+	upstream   PTYUpstream
 	scrollback *ringBuffer
-	createdAt  int64 // unix nanos
+	// frameSink is read unsynchronized by drain, so it must be set before
+	// drain starts. It must not mutate p: the same backing array is fanned
+	// out to every attachment after the sink returns.
+	frameSink func([]byte)
+	createdAt int64 // unix nanos
 
 	lastOutput atomic.Int64 // unix nanos, updated by drain
 
@@ -100,6 +92,8 @@ type ptySession struct {
 	closeOnce   sync.Once
 	closeReason atomic.Value // string; stored before the output channels close
 	done        chan struct{}
+
+	onUpstreamEnd func(SessionKey)
 }
 
 // attachmentState is the internal mutable half of an Attachment.
@@ -118,57 +112,53 @@ type attachmentState struct {
 	closed  bool // guarded by closeMu
 }
 
-func newPtySession(key SessionKey, f *os.File, cmd *exec.Cmd) *ptySession {
+func newPtySession(key SessionKey, upstream PTYUpstream, onUpstreamEnd func(SessionKey)) *ptySession {
 	return &ptySession{
-		key:        key,
-		pty:        f,
-		cmd:        cmd,
-		scrollback: newRingBuffer(defaultRingCapacity),
-		createdAt:  time.Now().UnixNano(),
-		attaches:   make(map[string]*attachmentState),
-		done:       make(chan struct{}),
+		key:           key,
+		upstream:      upstream,
+		scrollback:    newRingBuffer(defaultRingCapacity),
+		createdAt:     time.Now().UnixNano(),
+		attaches:      make(map[string]*attachmentState),
+		done:          make(chan struct{}),
+		onUpstreamEnd: onUpstreamEnd,
 	}
 }
 
-// drain reads from the PTY forever: bytes go into the ring buffer and a
-// best-effort copy is fanned out to every current attachment. Exits when
-// the PTY returns an error (child exit, fd close). On exit it asks the
-// manager to clean up the session unless close() has already marked it
-// done.
-func (s *ptySession) drain(m *PTYManager) {
-	buf := make([]byte, realtime.TerminalReadBufSize)
+// drain pumps upstream output forever: bytes go into the ring buffer and a
+// best-effort copy is fanned out to every current attachment. Exits when the
+// upstream output channel closes. On exit it asks the owner to handle the end
+// unless close() has already marked it done.
+func (s *ptySession) drain() {
 	// Reused across iterations to avoid per-chunk allocation. Sized once
 	// to a typical attachment count; grows naturally if needed.
 	snapshot := make([]*attachmentState, 0, 4)
-	for {
-		n, err := s.pty.Read(buf)
-		if n > 0 {
-			chunk := make([]byte, n)
-			copy(chunk, buf[:n])
-			s.scrollback.Append(chunk)
-			s.lastOutput.Store(time.Now().UnixNano())
-
-			// Hold attachMu only for the map copy — sending outside the
-			// lock means a slow client's backed-up channel can never block
-			// the drain goroutine or any other attachment's delivery.
-			s.attachMu.Lock()
-			snapshot = snapshot[:0]
-			for _, st := range s.attaches {
-				snapshot = append(snapshot, st)
-			}
-			s.attachMu.Unlock()
-			for _, st := range snapshot {
-				st.send(chunk)
-			}
+	for chunk := range s.upstream.Output() {
+		s.scrollback.Append(chunk)
+		if s.frameSink != nil {
+			s.frameSink(chunk)
 		}
-		if err != nil {
-			select {
-			case <-s.done:
-				// close() already tore the session down.
-			default:
-				m.onSessionExited(s.key)
-			}
-			return
+		s.lastOutput.Store(time.Now().UnixNano())
+
+		// Hold attachMu only for the map copy — sending outside the
+		// lock means a slow client's backed-up channel can never block
+		// the drain goroutine or any other attachment's delivery.
+		s.attachMu.Lock()
+		snapshot = snapshot[:0]
+		for _, st := range s.attaches {
+			snapshot = append(snapshot, st)
+		}
+		s.attachMu.Unlock()
+		for _, st := range snapshot {
+			st.send(chunk)
+		}
+	}
+
+	select {
+	case <-s.done:
+		// close() already tore the session down.
+	default:
+		if s.onUpstreamEnd != nil {
+			s.onUpstreamEnd(s.key)
 		}
 	}
 }
@@ -212,7 +202,7 @@ func (s *ptySession) attachNew(connID string) *localAttachment {
 		replay = append(replay, body...)
 	}
 
-	return &localAttachment{connID: connID, pty: s.pty, output: ch, scrollback: replay, session: s}
+	return &localAttachment{connID: connID, output: ch, scrollback: replay, session: s}
 }
 
 // detach releases the attachment identified by connID and reports whether
@@ -247,6 +237,12 @@ func (s *ptySession) attachmentCount() int {
 func (s *ptySession) lastOutputUnixNano() int64 { return s.lastOutput.Load() }
 func (s *ptySession) createdUnixNano() int64    { return s.createdAt }
 
+func (s *ptySession) writeInput(p []byte) (int, error) { return s.upstream.Write(p) }
+
+func (s *ptySession) resize(ctx context.Context, cols, rows uint16) error {
+	return s.upstream.Resize(ctx, cols, rows)
+}
+
 func (s *ptySession) armKillTimer(after time.Duration, fire func()) {
 	s.killMu.Lock()
 	defer s.killMu.Unlock()
@@ -265,7 +261,7 @@ func (s *ptySession) cancelKillTimer() {
 	}
 }
 
-// close tears down the PTY and child process. Idempotent. reason is
+// close tears down the upstream. Idempotent. reason is
 // recorded (first-writer-wins via closeOnce) so attached clients can
 // distinguish an explicit kill from a child exit or shutdown via
 // Attachment.ExitReason().
@@ -285,14 +281,10 @@ func (s *ptySession) close(reason string) error {
 		s.attaches = nil
 		s.attachMu.Unlock()
 
-		if s.pty != nil {
-			if err := s.pty.Close(); err != nil {
+		if s.upstream != nil {
+			if err := s.upstream.Close(); err != nil {
 				firstErr = err
 			}
-		}
-		if s.cmd != nil && s.cmd.Process != nil {
-			_ = s.cmd.Process.Kill()
-			_ = s.cmd.Wait()
 		}
 	})
 	return firstErr
