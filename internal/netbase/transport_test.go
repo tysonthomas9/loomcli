@@ -69,7 +69,7 @@ func TestForceIPv4NetworkPreservesIPv6Literal(t *testing.T) {
 }
 
 func TestForceIPv4KillSwitch(t *testing.T) {
-	cmd := exec.Command(os.Args[0], "-test.run=TestNetbaseIPv4Helper")
+	cmd := exec.Command(os.Args[0], "-test.run=TestNetbaseIPv4Helper") //nolint:norawexec
 	cmd.Env = ipv4HelperEnv()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -226,7 +226,7 @@ func TestTransportProxyFromEnvironment(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cmd := exec.Command(os.Args[0], "-test.run=TestNetbaseProxyHelper")
+			cmd := exec.Command(os.Args[0], "-test.run=TestNetbaseProxyHelper") //nolint:norawexec
 			cmd.Env = proxyHelperEnv(tc.proxy, tc.target)
 			out, err := cmd.CombinedOutput()
 			if err != nil {
