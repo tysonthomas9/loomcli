@@ -59,9 +59,11 @@ export function WorkflowRunDetail({
     <div className={styles.workflowDetail} data-testid="workflow-run-detail">
       <header className={styles.workflowDetailHeader}>
         <div className={styles.workflowDetailTitleRow}>
-          <div>
+          <div className={styles.workflowDetailIdentity}>
             <div className={styles.workflowDetailTitle}>Automation run</div>
-            <div className={styles.workflowDetailSubtitle}>{run.run_id}</div>
+            <div className={styles.workflowDetailSubtitle} title={run.run_id}>
+              {run.run_id}
+            </div>
           </div>
           <span className={styles.workflowStatusBadge} data-status={run.status}>
             {label(run.status)}

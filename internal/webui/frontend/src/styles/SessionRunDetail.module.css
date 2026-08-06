@@ -371,6 +371,10 @@
   gap: 16px;
 }
 
+.workflowDetailIdentity {
+  min-width: 0;
+}
+
 .workflowDetailTitle {
   font-size: 15px;
   font-weight: 700;
@@ -381,7 +385,9 @@
   color: var(--color-text-tertiary);
   font-family: var(--font-mono);
   font-size: 11px;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .workflowStatusBadge {

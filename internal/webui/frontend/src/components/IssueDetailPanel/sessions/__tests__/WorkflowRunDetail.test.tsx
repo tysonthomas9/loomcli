@@ -37,6 +37,9 @@ describe("sessionless workflow run UI", () => {
     render(<WorkflowRunDetail run={repositoryGuardRun()} />);
     expect(screen.getByText("Automation run")).toBeInTheDocument();
     expect(
+      screen.getByTitle("automation-run-repository-guard"),
+    ).toHaveTextContent("automation-run-repository-guard");
+    expect(
       screen.getByText(
         "Repository selection is required before an agent task can start.",
       ),
