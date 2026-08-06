@@ -5,6 +5,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/netbase"
+
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
@@ -18,13 +20,13 @@ import (
 //
 // See docs/design/fleet-http-connection-reuse.md for the symptom analysis
 // and the rationale behind each tuning value.
-var sharedTransport = &http.Transport{
+var sharedTransport = netbase.Clone(&http.Transport{
 	MaxIdleConnsPerHost:   128,
 	MaxIdleConns:          256,
 	IdleConnTimeout:       90 * time.Second,
 	TLSHandshakeTimeout:   10 * time.Second,
 	ExpectContinueTimeout: 1 * time.Second,
-}
+})
 
 var (
 	sharedClientOnce sync.Once

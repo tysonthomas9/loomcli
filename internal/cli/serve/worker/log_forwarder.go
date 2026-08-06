@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/netbase"
 )
 
 // LogForwarder wraps an io.Writer and forwards chunks to the control plane via HTTP.
@@ -34,7 +36,7 @@ func NewLogForwarder(controlPlaneURL, workerID, token string) *LogForwarder {
 		controlPlaneURL: controlPlaneURL,
 		workerID:        workerID,
 		token:           token,
-		httpClient:      &http.Client{Timeout: 10 * time.Second},
+		httpClient:      &http.Client{Transport: netbase.Transport(), Timeout: 10 * time.Second},
 		buffer:          make([]byte, 0, logForwarderBufferSize),
 		flushStop:       make(chan struct{}),
 		done:            make(chan struct{}),

@@ -27,6 +27,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/fleethttp"
+	"github.com/tysonthomas9/loomcli/internal/netbase"
 	"github.com/tysonthomas9/loomcli/internal/store"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -113,7 +114,7 @@ func New(cfg Config) (*Client, error) {
 	httpClient := cfg.HTTPClient
 	if httpClient == nil {
 		httpClient = &http.Client{
-			Transport: otelhttp.NewTransport(http.DefaultTransport),
+			Transport: otelhttp.NewTransport(netbase.Transport()),
 		}
 	}
 	c := &Client{

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/authmode"
+	"github.com/tysonthomas9/loomcli/internal/netbase"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
@@ -47,7 +48,7 @@ func New(cfg Config) (*Client, error) {
 	c := &Client{
 		serverURL: serverURL,
 		httpClient: &http.Client{
-			Transport: otelhttp.NewTransport(http.DefaultTransport),
+			Transport: otelhttp.NewTransport(netbase.Transport()),
 			Timeout:   30 * time.Second,
 		},
 	}

@@ -8,9 +8,13 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/tysonthomas9/loomcli/internal/netbase"
 )
 
 const contextFetchTimeout = 3 * time.Second
+
+var contextHTTPClient = &http.Client{Transport: netbase.Transport()}
 
 // TerminalContext holds project status data fetched from the loom server.
 type TerminalContext struct {
@@ -56,7 +60,7 @@ func FetchTerminalContext(loomServerURL string) (*TerminalContext, error) {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := contextHTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetch status: %w", err)
 	}

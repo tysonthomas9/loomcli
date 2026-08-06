@@ -19,6 +19,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/automode"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/netbase"
 )
 
 var (
@@ -257,7 +258,7 @@ func registerWorker(controlPlaneURL, token string, req workerRegistration) (*wor
 		httpReq.Header.Set("Authorization", "Bearer "+token)
 	}
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{Transport: netbase.Transport(), Timeout: 30 * time.Second}
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("POST %s: %w", url, err)
@@ -287,7 +288,7 @@ func deregisterWorker(controlPlaneURL, token, workerID string) {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{Transport: netbase.Transport(), Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Printf("[worker] Warning: failed to deregister: %v", err)
