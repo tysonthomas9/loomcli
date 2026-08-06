@@ -43,7 +43,7 @@ for id in $IDS; do
       -Dsonar.exclusions='**/node_modules/**,**/data/**,**/*.min.js' \
       -Dsonar.tests='' \
       -Dsonar.scm.disabled=true > "$MX/sonar-scan-$id.log" 2>&1 \
-    || { echo "  WARN: scanner nonzero for $id (see $MX/sonar-scan-$id.log)"; tail -5 "$MX/sonar-scan-$id.log"; continue; }
+    || { echo "FATAL: scanner nonzero for $id (see $MX/sonar-scan-$id.log)" >&2; tail -5 "$MX/sonar-scan-$id.log" >&2; exit 1; }
   # vet fix: poll the submitted CE task to a terminal state, not just queue length
   TASK=$(grep -oE 'task\?id=[A-Za-z0-9_-]+' "$MX/sonar-scan-$id.log" | tail -1 | cut -d= -f2 || true)
   for j in $(seq 1 60); do
@@ -55,11 +55,13 @@ for id in $IDS; do
     fi
     case "$ST" in
       SUCCESS) break ;;
-      FAILED|CANCELED) echo "  WARN: CE task $ST for $id"; break ;;
+      FAILED|CANCELED) echo "FATAL: CE task $ST for $id" >&2; exit 1 ;;
     esac
     sleep 5
   done
-  echo "  analysis $id -> ${ST:-unknown}"
+  [ "$ST" = SUCCESS ] || { echo "FATAL: CE task never reached SUCCESS for $id (last=${ST:-unknown})" >&2; exit 1; }
+  curl -sf -u "admin:$PW" "http://localhost:9000/api/ce/component?component=mx-$id" > "$MX/sonar-ce-$id.json" 2>/dev/null || true
+  echo "  analysis $id -> $ST"
 done
 
 METRICS='sqale_index,sqale_debt_ratio,sqale_rating,code_smells,cognitive_complexity,complexity,duplicated_lines_density,comment_lines_density,ncloc,files,functions,reliability_rating,security_rating,bugs,vulnerabilities'
@@ -94,6 +96,13 @@ for i in ids:
     try: dens.append(str(round(1000*float(out[i]['code_smells'])/float(out[i]['ncloc']), 1)))
     except Exception: dens.append('-')
 rows.append(('code_smells_per_kloc', *dens))
+cog = []
+for i in ids:
+    try: cog.append(str(round(1000*float(out[i]['cognitive_complexity'])/float(out[i]['ncloc']), 1)))
+    except Exception: cog.append('-')
+rows.append(('cognitive_per_kloc', *cog))
+print('scope: WHOLE staged analyzable tree (prod+tests+assets) — NOT the panel prod-only scope;')
+print('compare Sonar rows only against other Sonar rows, and only within language.\n')
 w = [max(len(str(r[c])) for r in rows) for c in range(len(ids)+1)]
 for r in rows: print('  '.join(str(x).ljust(w[i]) for i,x in enumerate(r)))
 print(f"\nsonar -> {MX}/sonar.json")
