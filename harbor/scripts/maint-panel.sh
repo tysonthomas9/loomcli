@@ -46,38 +46,47 @@ TEST_RE = re.compile(r'(^|/)(tests?)/|(^|/)test_[^/]*\.py$|\.(test|spec)\.[cm]?[
 def is_test(rel): return bool(TEST_RE.search(rel))
 
 def sloc_comments(path):
-    """SLOC + comment lines, language-aware (JS block/line, Python # and docstrings)."""
-    try: lines = open(path, encoding='utf-8', errors='replace').read().splitlines()
+    """SLOC + comment lines. Python: tokenize (#) + ast (docstrings) so that
+    triple-quoted SQL/data literals count as CODE (codex numbers-vet finding 1).
+    JS: line/block comment scan (independently verified against ripgrep)."""
+    try: src = open(path, encoding='utf-8', errors='replace').read()
     except OSError: return 0, 0
-    sloc = com = 0
-    inblk = False; dq = None
-    py = path.endswith('.py')
+    lines = src.splitlines()
+    nonblank = {i for i, ln in enumerate(lines, 1) if ln.strip()}
+    if path.endswith('.py'):
+        import ast as _ast, io as _io, tokenize as _tok
+        cmt = set()
+        try:
+            for t in _tok.generate_tokens(_io.StringIO(src).readline):
+                if t.type == _tok.COMMENT: cmt.add(t.start[0])
+        except Exception: pass
+        try:
+            tree = _ast.parse(src)
+            for node in _ast.walk(tree):
+                if isinstance(node, (_ast.Module, _ast.FunctionDef, _ast.AsyncFunctionDef, _ast.ClassDef)):
+                    body = getattr(node, 'body', None)
+                    if body and isinstance(body[0], _ast.Expr) and isinstance(getattr(body[0], 'value', None), _ast.Constant) \
+                       and isinstance(body[0].value.value, str):
+                        d = body[0].value
+                        for i in range(d.lineno, (getattr(d, 'end_lineno', d.lineno) or d.lineno) + 1): cmt.add(i)
+        except SyntaxError: pass
+        cmt &= nonblank
+        return len(nonblank - cmt), len(cmt)
+    # JS/MJS/CJS
+    sloc = com = 0; inblk = False
     for ln in lines:
-        s = ln.strip()
-        if not s: continue
-        if py:
-            if dq:
-                com += 1
-                if dq in s: dq = None
-                continue
-            if s.startswith(('"""', "'''")):
-                q = s[:3]
-                com += 1
-                if not (s.count(q) >= 2 and len(s) > 3): dq = q
-                continue
-            if s.startswith('#'): com += 1; continue
-            sloc += 1
-        else:
-            if inblk:
-                com += 1
-                if '*/' in s: inblk = False
-                continue
-            if s.startswith('/*'):
-                com += 1
-                if '*/' not in s: inblk = True
-                continue
-            if s.startswith('//'): com += 1; continue
-            sloc += 1
+        t = ln.strip()
+        if not t: continue
+        if inblk:
+            com += 1
+            if '*/' in t: inblk = False
+            continue
+        if t.startswith('/*'):
+            com += 1
+            if '*/' not in t: inblk = True
+            continue
+        if t.startswith('//'): com += 1; continue
+        sloc += 1
     return sloc, com
 
 def pct(xs, p):
@@ -90,16 +99,23 @@ results = {}
 for aid in ids:
     root = os.path.join(MX, aid)
     prod, test, other = [], [], {}
+    manifest = globals().setdefault('MANIFEST', [])
     for dp, dns, fns in os.walk(root):
         dns[:] = [d for d in dns if d not in ('.git', 'node_modules', '__pycache__', '.venv')]
         for fn in fns:
             fp = os.path.join(dp, fn); rel = os.path.relpath(fp, root)
             ext = os.path.splitext(fn)[1].lower()
-            if ext in CODE: (test if is_test(rel) else prod).append((fp, rel))
-            elif ext in ('.html', '.css', '.json', '.sql', '.sh', '.md'):
+            if ext in CODE:
+                (test if is_test(rel) else prod).append((fp, rel))
+                manifest.append((aid, 'test' if is_test(rel) else 'prod', rel, 0))
+            elif ext in ('.html', '.css', '.json', '.sql', '.sh', '.md') or fn in ('Makefile',) or fn.startswith('.'):
+                if fn in ('Makefile',) or fn.startswith('.'): ext = ext or fn
                 # vet MEDIUM: excluded surface must be REPORTED, not silently dropped
-                s, _ = sloc_comments(fp) if ext in ('.html','.css','.sh') else (sum(1 for _ in open(fp,errors='replace')), 0)
-                other[ext] = other.get(ext, 0) + s
+                try: n = sum(1 for ln in open(fp, errors='replace') if ln.strip())
+                except OSError: n = 0
+                key = ext + ('|test' if is_test(rel) else '')
+                other[key] = other.get(key, 0) + n
+                manifest.append((aid, 'excluded', rel, n))
 
     def agg(files):
         sl = cm = 0; per_file = []
@@ -114,8 +130,8 @@ for aid in ids:
     if prod:
         cmd = ['python3', '-m', 'lizard', '--csv'] + [fp for fp, _ in prod]
         r = subprocess.run(cmd, capture_output=True, text=True)
-        for line in r.stdout.splitlines():
-            parts = line.split(',')
+        import csv as _csv, io as _io
+        for parts in _csv.reader(_io.StringIO(r.stdout)):
             if len(parts) < 3: continue
             try: fnloc.append(int(parts[0])); ccn.append(int(parts[1]))
             except ValueError: continue
@@ -136,6 +152,8 @@ for aid in ids:
         'fn_nloc_gt60_pct': round(100 * sum(1 for n in fnloc if n > 60) / max(len(fnloc), 1), 1),
         'excluded_surface_lines': other,
     }
+with open(os.path.join(MX, 'scope-manifest.tsv'), 'w') as mh:
+    for row in globals().get('MANIFEST', []): mh.write('\t'.join(str(x) for x in row) + '\n')
 json.dump(results, open(os.path.join(MX, 'metrics.json'), 'w'), indent=1)
 print('[panel] metrics done')
 PY
@@ -149,7 +167,9 @@ for id in $IDS; do
       ! -path '*/node_modules/*' -print0 2>/dev/null \
     | while IFS= read -r -d '' f; do mkdir -p "$M/$(dirname "$f")"; cp "$f" "$M/$f"; done )
   npx --yes "$JSCPD_PIN" --min-tokens 50 --reporters json --silent \
-      --output "$MX/jscpd-$id" "$M" >/dev/null 2>&1 || true
+      --output "$MX/jscpd-$id" "$M" >/dev/null 2>&1 \
+    || { echo "FATAL: jscpd failed for $id" >&2; exit 1; }
+  [ -s "$MX/jscpd-$id/jscpd-report.json" ] || { echo "FATAL: no jscpd report for $id" >&2; exit 1; }
 done
 echo "[panel] duplication done"
 
@@ -193,7 +213,7 @@ for aid in ids:
     flush()
     rework = sum(1 for v in touched.values() if v > 1)
     out[aid] = {'has_git': True, 'code_commits': commits,
-                'median_commit_lines': sorted(sizes)[len(sizes)//2] if sizes else 0,
+                'median_commit_lines': __import__('statistics').median(sizes) if sizes else 0,
                 'total_churn_lines': churn,
                 'files_touched': len(touched),
                 'files_rewritten_pct': round(100*rework/max(len(touched),1), 1),
@@ -210,10 +230,8 @@ m = json.load(open(os.path.join(MX,'metrics.json')))
 g = json.load(open(os.path.join(MX,'git.json')))
 for aid in ids:
     p = os.path.join(MX, f'jscpd-{aid}', 'jscpd-report.json')
-    dup = 0.0
-    if os.path.exists(p):
-        try: dup = json.load(open(p))['statistics']['total']['percentage']
-        except Exception: dup = 0.0
+    if not os.path.exists(p): raise SystemExit(f'FATAL: missing jscpd report for {aid}')
+    dup = json.load(open(p))['statistics']['total']['percentage']  # no silent 0.0 fallback
     m[aid]['dup_pct'] = round(float(dup), 2)
     m[aid]['git'] = g.get(aid, {})
 json.dump(m, open(OUT,'w'), indent=1)
