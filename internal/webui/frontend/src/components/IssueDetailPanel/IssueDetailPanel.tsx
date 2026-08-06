@@ -46,6 +46,7 @@ import type {
 import type { Status } from "@/types/issue";
 import { ApiError, apiErrorMessage } from "@/types/common";
 import { formatStatusLabel, getReviewType, isPRUrl } from "@/utils/issue";
+import { humanizeRunError } from "@/utils/runError";
 import {
   epicRunnerRuntimePayload,
   issueRepoName,
@@ -291,7 +292,19 @@ function latestFailedRun(sessions: SessionRecord[]): SessionRecord | null {
 }
 
 function runFailureMessage(run: SessionRecord): string {
-  return run.last_error || run.error_class || "Agent run failed.";
+  const error = run.last_error || run.error_class;
+  return error ? humanizeRunError(error) : "Agent run failed.";
+}
+
+function backendLabel(backend: string): string {
+  const labels: Record<string, string> = {
+    claude: "Claude",
+    codex: "Codex",
+    cursor: "Cursor",
+    gemini: "Gemini",
+    opencode: "OpenCode",
+  };
+  return labels[backend.toLowerCase()] ?? backend;
 }
 
 function formatUnknownError(error: unknown, fallback: string): string {
@@ -346,6 +359,9 @@ function LatestRunFailureBanner({
 }): JSX.Element | null {
   if (!run) return null;
 
+  const rawError = run.last_error || run.error_class || "Agent run failed.";
+  const failureMessage = runFailureMessage(run);
+
   return (
     <div
       className={styles.runFailureBanner}
@@ -354,12 +370,17 @@ function LatestRunFailureBanner({
     >
       <div className={styles.runFailureMain}>
         <span className={styles.runFailureTitle}>Latest run failed</span>
-        <span className={styles.runFailureMeta}>
-          {run.agent_name} - {run.backend}
-        </span>
-        <span className={styles.runFailureMessage}>
-          {runFailureMessage(run)}
-        </span>
+        <div
+          className={styles.runFailureSummary}
+          title={`Agent: ${run.agent_name}; error: ${rawError}`}
+          aria-label={`${backendLabel(run.backend)}: ${failureMessage}`}
+        >
+          <span className={styles.runFailureMeta}>
+            {backendLabel(run.backend)}
+          </span>
+          <span aria-hidden="true">·</span>
+          <span className={styles.runFailureMessage}>{failureMessage}</span>
+        </div>
       </div>
       <button
         type="button"

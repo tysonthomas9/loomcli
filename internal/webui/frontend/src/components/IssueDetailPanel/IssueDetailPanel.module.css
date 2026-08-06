@@ -299,8 +299,9 @@
 /* ============= Latest Run Failure Banner ============= */
 
 .runFailureBanner {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
   gap: 12px;
   padding: 10px var(--panel-padding-md);
   border-bottom: 1px solid var(--color-border-light);
@@ -314,11 +315,9 @@
 
 .runFailureMain {
   min-width: 0;
-  flex: 1;
-  display: grid;
-  grid-template-columns: auto auto 1fr;
-  align-items: center;
-  gap: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .runFailureTitle {
@@ -331,8 +330,15 @@
 .runFailureMeta {
   color: var(--color-text-secondary);
   font-size: 12px;
-  font-family: var(--font-mono);
   white-space: nowrap;
+}
+
+.runFailureSummary {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  color: var(--color-text-secondary);
 }
 
 .runFailureMessage {
@@ -340,12 +346,14 @@
   color: var(--color-text-primary);
   font-size: 12px;
   font-weight: 600;
+  line-height: 1.35;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .runFailureAction {
+  align-self: center;
   flex-shrink: 0;
   border: 1px solid rgba(220, 38, 38, 0.35);
   background: transparent;

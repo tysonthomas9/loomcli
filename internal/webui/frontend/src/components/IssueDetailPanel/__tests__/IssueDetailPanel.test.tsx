@@ -517,7 +517,11 @@ describe("IssueDetailPanel", () => {
 
     it("shows latest failed task run and links to Runs tab", async () => {
       mockGetTaskSessions.mockResolvedValue([
-        createTestSession({ error_class: "AuthFailure" }),
+        createTestSession({
+          agent_name: "agt-generated-planner-d8836e85",
+          backend: "codex",
+          error_class: "local_backend_unavailable",
+        }),
       ]);
       const mockIssue = createTestIssue({
         issue_type: "task",
@@ -530,8 +534,17 @@ describe("IssueDetailPanel", () => {
       await waitFor(() => {
         expect(
           screen.getByTestId("latest-run-failure-banner"),
-        ).toHaveTextContent("AuthFailure");
+        ).toHaveTextContent("Latest run failedCodex·Local backend unavailable");
       });
+      expect(
+        screen.getByTestId("latest-run-failure-banner"),
+      ).not.toHaveTextContent("agt-generated-planner-d8836e85");
+      expect(
+        screen.getByTitle(/agt-generated-planner-d8836e85/),
+      ).toHaveAttribute(
+        "title",
+        expect.stringContaining("local_backend_unavailable"),
+      );
 
       fireEvent.click(screen.getByRole("button", { name: "View run" }));
       expect(screen.getByRole("tab", { name: "Runs" })).toHaveAttribute(
