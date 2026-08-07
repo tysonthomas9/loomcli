@@ -19,8 +19,12 @@ import (
 )
 
 const (
-	defaultNodeTTL                   = 10 * time.Minute
-	defaultProvisioningTimeout       = 10 * time.Minute
+	defaultNodeTTL             = 10 * time.Minute
+	defaultProvisioningTimeout = 10 * time.Minute
+	// deleteConfirmAttempts bounds the poll proving a delete completed.
+	// Provider deletion is asynchronous, so one read never confirms.
+	deleteConfirmAttempts            = 5
+	deleteConfirmBackoff             = 400 * time.Millisecond
 	defaultLeadHeartbeatStaleAfter   = 5 * time.Minute
 	defaultParkingAutostopInterval   = 2 * time.Minute
 	deploymentIDEnv                  = "LOOM_DEPLOYMENT_ID"
@@ -42,7 +46,11 @@ type Config struct {
 	LeadHeartbeatStaleAfter time.Duration
 	ParkingAutostopInterval time.Duration
 	DeploymentID            string
-	Now                     func() time.Time
+	// DeleteConfirmBackoff is the first delay in the poll that proves a
+	// delete completed; it doubles per attempt. Exposed so tests do not sleep
+	// for seconds. Zero uses the default.
+	DeleteConfirmBackoff time.Duration
+	Now                  func() time.Time
 }
 
 // Broker creates, reads, lists, and releases lead placements.
@@ -57,6 +65,7 @@ type Broker struct {
 	leadHeartbeatStaleAfter time.Duration
 	parkingAutostopInterval time.Duration
 	deploymentID            string
+	deleteConfirmBackoff    time.Duration
 	now                     func() time.Time
 
 	// Deployed loom serve is a single process today. These per-key locks are
@@ -119,26 +128,12 @@ func NewBroker(cfg Config) (*Broker, error) {
 	if err != nil {
 		return nil, err
 	}
-	ttl := cfg.TokenTTL
-	if ttl <= 0 {
-		ttl = leadtoken.DefaultOccupantTokenTTL
-	}
-	nodeTTL := cfg.NodeTTL
-	if nodeTTL <= 0 {
-		nodeTTL = defaultNodeTTL
-	}
-	provisioningTimeout := cfg.ProvisioningTimeout
-	if provisioningTimeout <= 0 {
-		provisioningTimeout = defaultProvisioningTimeout
-	}
-	staleAfter := cfg.LeadHeartbeatStaleAfter
-	if staleAfter <= 0 {
-		staleAfter = defaultLeadHeartbeatStaleAfter
-	}
-	parkingAutostopInterval := cfg.ParkingAutostopInterval
-	if parkingAutostopInterval <= 0 {
-		parkingAutostopInterval = defaultParkingAutostopInterval
-	}
+	ttl := orDefaultDuration(cfg.TokenTTL, leadtoken.DefaultOccupantTokenTTL)
+	nodeTTL := orDefaultDuration(cfg.NodeTTL, defaultNodeTTL)
+	provisioningTimeout := orDefaultDuration(cfg.ProvisioningTimeout, defaultProvisioningTimeout)
+	staleAfter := orDefaultDuration(cfg.LeadHeartbeatStaleAfter, defaultLeadHeartbeatStaleAfter)
+	parkingAutostopInterval := orDefaultDuration(cfg.ParkingAutostopInterval, defaultParkingAutostopInterval)
+	confirmBackoff := orDefaultDuration(cfg.DeleteConfirmBackoff, deleteConfirmBackoff)
 	deploymentID, err := resolveDeploymentID(cfg.DeploymentID)
 	if err != nil {
 		return nil, err
@@ -158,9 +153,18 @@ func NewBroker(cfg Config) (*Broker, error) {
 		leadHeartbeatStaleAfter: staleAfter,
 		parkingAutostopInterval: parkingAutostopInterval,
 		deploymentID:            deploymentID,
+		deleteConfirmBackoff:    confirmBackoff,
 		now:                     now,
 		locks:                   make(map[placementLockKey]*sync.Mutex),
 	}, nil
+}
+
+// orDefaultDuration treats a non-positive configured value as unset.
+func orDefaultDuration(configured, fallback time.Duration) time.Duration {
+	if configured <= 0 {
+		return fallback
+	}
+	return configured
 }
 
 func resolveDeploymentID(configured string) (string, error) {
@@ -898,22 +902,46 @@ func (b *Broker) deleteAndConfirmSandbox(ctx context.Context, sandboxID string) 
 	return b.confirmSandboxDeleted(ctx, sandboxID)
 }
 
+// confirmSandboxDeleted polls until the provider proves the sandbox is gone.
+//
+// A single read is not enough: provider deletion is asynchronous -- Daytona's
+// Delete returns success while an immediate Get still reports the sandbox --
+// so one read would never confirm, and every release would leave its record
+// stuck in `releasing`.
+//
+// Only a not-found or a terminal absent state confirms. A transitional state
+// deliberately does NOT, because stamping `released` on a sandbox that is
+// still alive severs the only link anything has to a resource that is still
+// billing. Failing to confirm is safe: the record stays `releasing` and the
+// delete is re-driven.
 func (b *Broker) confirmSandboxDeleted(ctx context.Context, sandboxID string) error {
 	sandboxID = strings.TrimSpace(sandboxID)
 	if sandboxID == "" {
 		return fmt.Errorf("sandbox id required: %w", domain.ErrInvalid)
 	}
-	sandbox, err := b.provider.Get(ctx, sandboxID)
-	if errors.Is(err, ErrSandboxNotFound) {
-		return nil
+	var lastState ProviderSandboxState
+	for attempt := range deleteConfirmAttempts {
+		sandbox, err := b.provider.Get(ctx, sandboxID)
+		if errors.Is(err, ErrSandboxNotFound) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("get sandbox %q after delete: %w", sandboxID, err)
+		}
+		if sandbox.State == ProviderSandboxAbsent {
+			return nil
+		}
+		lastState = sandbox.State
+		if attempt == deleteConfirmAttempts-1 {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("confirm sandbox %q deleted: %w", sandboxID, ctx.Err())
+		case <-time.After(b.deleteConfirmBackoff << attempt):
+		}
 	}
-	if err != nil {
-		return fmt.Errorf("get sandbox %q after delete: %w", sandboxID, err)
-	}
-	if sandbox.State == ProviderSandboxAbsent {
-		return nil
-	}
-	return fmt.Errorf("provider still reports sandbox %q after delete: %w", sandboxID, domain.ErrConflict)
+	return fmt.Errorf("provider still reports sandbox %q as %q after delete: %w", sandboxID, lastState, domain.ErrConflict)
 }
 
 func (b *Broker) providerSandboxIDForPlacement(ctx context.Context, placementID string) (string, error) {

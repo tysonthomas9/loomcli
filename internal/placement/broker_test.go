@@ -310,8 +310,11 @@ func TestReleaseRequiresGetConfirmedDeletion(t *testing.T) {
 	if !errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("Release with still-visible sandbox = %v, want ErrConflict", err)
 	}
-	if got := provider.getCallCount(); got != 1 {
-		t.Fatalf("Get calls = %d, want confirmation read", got)
+	// Confirmation polls because provider deletion is asynchronous, so the
+	// exact read count is an implementation detail. What matters is that a
+	// sandbox the provider still reports never confirms as deleted.
+	if got := provider.getCallCount(); got == 0 {
+		t.Fatal("no confirmation read was issued after delete")
 	}
 	node := getNode(t, st, "WS", result.Node.NodeID)
 	assertPlacement(t, node, domain.PlacementStateReleasing, result.Node.Placement.SandboxID)
@@ -1248,6 +1251,8 @@ func mustBrokerWithMax(t *testing.T, st store.Store, provider *fakeProvider, max
 		TokenKey:     testTokenKey,
 		MaxLive:      max,
 		DeploymentID: testDeploymentID,
+		// The delete-confirm poll is real; keep its sleeps out of unit tests.
+		DeleteConfirmBackoff: time.Millisecond,
 	})
 	if err != nil {
 		t.Fatalf("NewBroker: %v", err)
@@ -1258,11 +1263,12 @@ func mustBrokerWithMax(t *testing.T, st store.Store, provider *fakeProvider, max
 func mustBrokerWithNow(t *testing.T, st store.Store, provider *fakeProvider, now time.Time) *Broker {
 	t.Helper()
 	broker, err := NewBroker(Config{
-		Store:        st,
-		Provider:     provider,
-		TokenKey:     testTokenKey,
-		DeploymentID: testDeploymentID,
-		Now:          func() time.Time { return now },
+		Store:                st,
+		Provider:             provider,
+		TokenKey:             testTokenKey,
+		DeploymentID:         testDeploymentID,
+		DeleteConfirmBackoff: time.Millisecond,
+		Now:                  func() time.Time { return now },
 	})
 	if err != nil {
 		t.Fatalf("NewBroker: %v", err)

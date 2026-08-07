@@ -7,6 +7,8 @@ require (
 	github.com/alicebob/miniredis/v2 v2.36.1
 	github.com/bmatcuk/doublestar/v4 v4.7.1
 	github.com/creack/pty v1.1.24
+	github.com/daytonaio/daytona/libs/api-client-go v0.190.0
+	github.com/daytonaio/daytona/libs/sdk-go v0.190.0
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/getsentry/sentry-go v0.44.1
 	github.com/getsentry/sentry-go/slog v0.44.1
@@ -23,14 +25,14 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/zricethezav/gitleaks/v8 v8.30.1
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.66.0
-	go.opentelemetry.io/otel v1.41.0
-	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp v1.41.0
-	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.41.0
-	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.41.0
-	go.opentelemetry.io/otel/metric v1.41.0
-	go.opentelemetry.io/otel/sdk v1.41.0
-	go.opentelemetry.io/otel/sdk/metric v1.41.0
-	go.opentelemetry.io/otel/trace v1.41.0
+	go.opentelemetry.io/otel v1.43.0
+	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp v1.43.0
+	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.43.0
+	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.43.0
+	go.opentelemetry.io/otel/metric v1.43.0
+	go.opentelemetry.io/otel/sdk v1.43.0
+	go.opentelemetry.io/otel/sdk/metric v1.43.0
+	go.opentelemetry.io/otel/trace v1.43.0
 	golang.org/x/net v0.53.0
 	golang.org/x/sync v0.20.0
 	golang.org/x/sys v0.43.0
@@ -66,6 +68,7 @@ require (
 	github.com/cloudflare/circl v1.6.3 // indirect
 	github.com/cyphar/filepath-securejoin v0.6.1 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
+	github.com/daytonaio/daytona/libs/toolbox-api-client-go v0.190.0 // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/dsnet/compress v0.0.2-0.20230904184137-39efe44ab707 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
@@ -127,15 +130,15 @@ require (
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/yuin/gopher-lua v1.1.1 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
-	go.opentelemetry.io/proto/otlp v1.9.0 // indirect
+	go.opentelemetry.io/proto/otlp v1.10.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	go4.org v0.0.0-20230225012048-214862532bf5 // indirect
 	golang.org/x/crypto v0.50.0 // indirect
 	golang.org/x/exp v0.0.0-20250218142911-aa4b98e5adaa // indirect
 	golang.org/x/text v0.36.0 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20260209200024-4cfbd4190f57 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260209200024-4cfbd4190f57 // indirect
-	google.golang.org/grpc v1.79.1 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20260401024825-9d38bb4040a9 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260401024825-9d38bb4040a9 // indirect
+	google.golang.org/grpc v1.80.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )
