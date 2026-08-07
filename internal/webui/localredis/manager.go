@@ -449,23 +449,26 @@ func (s sweepStats) abortError() error {
 		s.unread, s.persisted, s.firstErr, s.elapsed.Round(100*time.Millisecond))
 }
 
-// isVanishedKeyErr reports whether a per-key read error only means the
-// key vanished between SCAN and the read. TTL'd keys (fleet-db locks,
-// worker leases) expire constantly, so this is normal churn — treating
-// it as a failure would abort, and under steady churn starve, the
-// snapshot. Only the string-type GET errors this way (redis.Nil): the
-// aggregate reads return empty results and TYPE returns "none" for a
-// vanished key, both of which readEntry already skips.
-func isVanishedKeyErr(err error) bool { return errors.Is(err, redis.Nil) }
-
-// listKeys SCANs the entire keyspace under its own deadline (a handful
-// of SCAN pages — independent of the per-batch read budgets) and
-// returns the keys sorted for deterministic snapshots.
+// listKeys enumerates the entire keyspace under its own deadline and returns
+// keys sorted for deterministic snapshots. The embedded FleetDB manager uses
+// miniredis' direct Keys API: its production keyspace is large enough that
+// thousands of SCAN round trips can exhaust scanTimeout under live traffic.
+// The terminal-only manager retains SCAN and its transport fault-test seam.
 //
-// Uses SCAN rather than KEYS to avoid the canonical "blocks the entire
-// server" issue — even though miniredis is in-process, the dump runs on
-// a 30s timer alongside live traffic.
+// The terminal-only path uses SCAN rather than Redis KEYS to avoid blocking
+// its server while a dump runs alongside live traffic.
 func (m *Manager) listKeys(ctx context.Context) ([]string, error) {
+	if m.fleetKeys {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		keys := m.mr.Keys()
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return keys, nil
+	}
+
 	scanCtx, cancel := context.WithTimeout(ctx, m.scanTimeout)
 	defer cancel()
 	var keys []string
@@ -487,9 +490,9 @@ func (m *Manager) listKeys(ctx context.Context) ([]string, error) {
 
 // snapshotBatchProbe contains the type and TTL commands for one key. Snapshot
 // reads deliberately use two pipelines: the first discovers each key's type,
-// then the second issues exactly one matching value command. This reduces a
-// 600k-key embedded FleetDB sweep from millions of localhost round trips to a
-// few thousand bounded pipeline executions without sending WRONGTYPE commands.
+// then the second issues exactly one matching value command. The embedded
+// FleetDB manager uses the faster direct path below; this path remains for the
+// terminal-state manager and its transport-level fault tests.
 type snapshotBatchProbe struct {
 	key     string
 	typ     *redis.StatusCmd
@@ -504,6 +507,11 @@ type snapshotBatchProbe struct {
 // never returns an error: the abort signal lives in st.unread so the
 // caller can account for the keys it then abandons.
 func (m *Manager) readBatch(parent context.Context, keys []string, out *[]snapshotEntry, st *sweepStats) {
+	if m.fleetKeys {
+		m.readDirectBatch(parent, keys, out, st)
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(parent, m.batchTimeout)
 	defer cancel()
 
