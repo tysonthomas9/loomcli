@@ -13,6 +13,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver/runnersettings"
+	driversandbox "github.com/tysonthomas9/loomcli/internal/driver/sandbox"
 	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
@@ -393,6 +394,7 @@ func (e HostBridgeTaskExecutor) runBuiltInFlueWorkflow(ctx context.Context, req 
 	defer cleanup()
 
 	cmd := exec.CommandContext(ctx, processNodePath(""), launcherPath) //nolint:gosec // resolved packaged/operator Node runtime; launcherPath is a temp file.
+	driversandbox.ConfigureProcessTreeCancellation(cmd)
 	if worktree := strings.TrimSpace(e.WorktreePath); worktree != "" {
 		cmd.Dir = worktree
 	}
@@ -404,12 +406,6 @@ func (e HostBridgeTaskExecutor) runBuiltInFlueWorkflow(ctx context.Context, req 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	cmd.Cancel = func() error {
-		if cmd.Process == nil {
-			return nil
-		}
-		return cmd.Process.Signal(os.Interrupt)
-	}
 	cmd.WaitDelay = 5 * time.Second
 	if err := cmd.Run(); err != nil {
 		msg := strings.TrimSpace(stderr.String())
@@ -453,6 +449,7 @@ func (e HostBridgeTaskExecutor) runCommand(ctx context.Context, req TaskExecRequ
 		return bridgeTaskRunnerResult{}, fmt.Errorf("encode task runner request: %w", err)
 	}
 	cmd := exec.CommandContext(ctx, command[0], command[1:]...) //nolint:gosec // configured argv vector; no shell expansion.
+	driversandbox.ConfigureProcessTreeCancellation(cmd)
 	if worktree := strings.TrimSpace(e.WorktreePath); worktree != "" {
 		cmd.Dir = worktree
 	}

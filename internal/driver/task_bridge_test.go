@@ -8,10 +8,12 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -22,6 +24,90 @@ import (
 	runtimesettings "github.com/tysonthomas9/loomcli/internal/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
+
+func TestHostBridgeTaskExecutorCancellationStopsDescendants(t *testing.T) {
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skipf("sh unavailable: %v", err)
+	}
+
+	childPIDFile := filepath.Join(t.TempDir(), "child.pid")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := (HostBridgeTaskExecutor{WorktreePath: t.TempDir()}).runCommand(
+			ctx,
+			hostBridgeTaskExecRequest(),
+			[]string{sh, "-c", `sleep 60 & printf '%s:%s' "$$" "$!" > "$1"; wait`, "task-runner-test", childPIDFile},
+		)
+		done <- err
+	}()
+
+	launcherPID, childPID := waitForTaskRunnerPIDs(t, childPIDFile)
+	childPGID, err := syscall.Getpgid(childPID)
+	if err != nil {
+		t.Fatalf("get child process group: %v", err)
+	}
+	if childPGID != launcherPID {
+		t.Fatalf("child process group = %d, want launcher pid %d", childPGID, launcherPID)
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("cancelled runner unexpectedly exited successfully")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancelled runner did not exit")
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		err := syscall.Kill(-launcherPID, 0)
+		if errors.Is(err, syscall.ESRCH) {
+			break
+		}
+		if err != nil && !errors.Is(err, syscall.EPERM) {
+			t.Fatalf("probe runner process group: %v", err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("runner process group %d still exists after cancellation", launcherPID)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+func waitForTaskRunnerPIDs(t *testing.T, path string) (int, int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		raw, err := os.ReadFile(path)
+		if err == nil && strings.TrimSpace(string(raw)) != "" {
+			parts := strings.Split(strings.TrimSpace(string(raw)), ":")
+			if len(parts) != 2 {
+				t.Fatalf("parse runner pids %q: want launcher:child", raw)
+			}
+			launcherPID, parseErr := strconv.Atoi(parts[0])
+			if parseErr != nil {
+				t.Fatalf("parse launcher pid %q: %v", raw, parseErr)
+			}
+			childPID, parseErr := strconv.Atoi(parts[1])
+			if parseErr != nil {
+				t.Fatalf("parse child pid %q: %v", raw, parseErr)
+			}
+			return launcherPID, childPID
+		}
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("read child pid: %v", err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("runner child pid was not written")
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
 
 // TestTaskRunnerEnvAPIBaseURL pins the serve-transport seam: when the
 // executor carries an API base URL, runners get LOOM_TASK_RUN_API_URL (and
