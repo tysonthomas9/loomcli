@@ -485,6 +485,20 @@ func (m *Manager) listKeys(ctx context.Context) ([]string, error) {
 	return keys, nil
 }
 
+// snapshotBatchProbe contains the type and TTL commands for one key. Snapshot
+// reads deliberately use two pipelines: the first discovers each key's type,
+// then the second issues exactly one matching value command. This reduces a
+// 600k-key embedded FleetDB sweep from millions of localhost round trips to a
+// few thousand bounded pipeline executions without sending WRONGTYPE commands.
+type snapshotBatchProbe struct {
+	key     string
+	typ     *redis.StatusCmd
+	ttl     *redis.DurationCmd
+	value   redis.Cmder
+	typeStr string
+	ttlMs   int64
+}
+
 // readBatch reads one slice of keys under a fresh per-batch deadline,
 // appending successful entries and folding failures/skips into st. It
 // never returns an error: the abort signal lives in st.unread so the
@@ -492,31 +506,229 @@ func (m *Manager) listKeys(ctx context.Context) ([]string, error) {
 func (m *Manager) readBatch(parent context.Context, keys []string, out *[]snapshotEntry, st *sweepStats) {
 	ctx, cancel := context.WithTimeout(parent, m.batchTimeout)
 	defer cancel()
-	for i, key := range keys {
-		entry, err := m.readEntry(ctx, key)
+
+	probes, ok := m.probeSnapshotBatch(ctx, keys, st)
+	if !ok {
+		return
+	}
+	valuePipe := m.client.Pipeline()
+	pending := m.queueSnapshotValues(valuePipe, ctx, probes, st)
+	if len(pending) == 0 {
+		valuePipe.Discard()
+		return
+	}
+	if !m.execSnapshotValues(valuePipe, ctx, probes, pending, st) {
+		return
+	}
+	for _, i := range pending {
+		probe := &probes[i]
+		entry, err := snapshotEntryFromProbe(*probe)
 		switch {
 		case err != nil && isVanishedKeyErr(err):
 			st.skipped++
 		case err != nil:
-			st.unread++
-			if st.firstErr == nil {
-				st.firstErr = err
-			}
-			m.logger.Debug("failed to read key for snapshot", "key", key, "err", err)
-			if ctx.Err() != nil {
-				// The batch deadline (or the sweep cap / shutdown cancel
-				// above it) expired: every later read would fail the same
-				// way. Account for the keys after this one without issuing
-				// doomed round trips or logging once per key.
-				st.unread += len(keys) - i - 1
-				return
-			}
+			m.recordSnapshotReadError(probe.key, err, st)
 		case entry == nil:
 			st.skipped++
 		default:
 			st.read++
 			*out = append(*out, *entry)
 		}
+	}
+}
+
+func (m *Manager) probeSnapshotBatch(ctx context.Context, keys []string, st *sweepStats) ([]snapshotBatchProbe, bool) {
+	probes := make([]snapshotBatchProbe, len(keys))
+	typePipe := m.client.Pipeline()
+	for i, key := range keys {
+		probes[i] = snapshotBatchProbe{
+			key: key,
+			typ: typePipe.Type(ctx, key),
+			ttl: typePipe.PTTL(ctx, key),
+		}
+	}
+	_, typeErr := typePipe.Exec(ctx)
+	typePipe.Discard()
+	if ctx.Err() != nil || errors.Is(typeErr, context.Canceled) || errors.Is(typeErr, context.DeadlineExceeded) {
+		m.abortBatch(keys, ctx.Err(), typeErr, st)
+		return nil, false
+	}
+	return probes, true
+}
+
+func (m *Manager) queueSnapshotValues(
+	valuePipe redis.Pipeliner,
+	ctx context.Context,
+	probes []snapshotBatchProbe,
+	st *sweepStats,
+) []int {
+	pending := make([]int, 0, len(probes))
+	for i := range probes {
+		probe := &probes[i]
+		typ, err := probe.typ.Result()
+		if err != nil {
+			m.recordSnapshotReadError(probe.key, err, st)
+			continue
+		}
+		ttl, err := probe.ttl.Result()
+		if err != nil {
+			m.recordSnapshotReadError(probe.key, err, st)
+			continue
+		}
+		if typ == "none" || ttl == -2*time.Millisecond {
+			st.skipped++
+			continue
+		}
+		probe.typeStr = typ
+		probe.ttlMs = -1
+		if ttl > 0 {
+			probe.ttlMs = ttl.Milliseconds()
+		}
+		probe.value = queueSnapshotValueRead(valuePipe, ctx, probe.key, typ)
+		if probe.value == nil {
+			// Truly unsupported (geo, hyperloglog, etc.) — fleet-db does not
+			// use these today. Preserve the existing silent-skip behavior.
+			st.skipped++
+			continue
+		}
+		pending = append(pending, i)
+	}
+	return pending
+}
+
+func (m *Manager) execSnapshotValues(
+	valuePipe redis.Pipeliner,
+	ctx context.Context,
+	probes []snapshotBatchProbe,
+	pending []int,
+	st *sweepStats,
+) bool {
+	_, valueErr := valuePipe.Exec(ctx)
+	valuePipe.Discard()
+	if ctx.Err() != nil || errors.Is(valueErr, context.Canceled) || errors.Is(valueErr, context.DeadlineExceeded) {
+		pendingKeys := make([]string, 0, len(pending))
+		for _, i := range pending {
+			pendingKeys = append(pendingKeys, probes[i].key)
+		}
+		m.abortBatch(pendingKeys, ctx.Err(), valueErr, st)
+		return false
+	}
+	return true
+}
+
+func (m *Manager) abortBatch(keys []string, contextErr, pipelineErr error, st *sweepStats) {
+	err := contextErr
+	if err == nil {
+		err = pipelineErr
+	}
+	if err == nil {
+		err = context.DeadlineExceeded
+	}
+	if len(keys) > 0 {
+		m.logger.Debug("failed to read key for snapshot", "key", keys[0], "err", err)
+	}
+	st.unread += len(keys)
+	if st.firstErr == nil {
+		st.firstErr = err
+	}
+}
+
+func (m *Manager) recordSnapshotReadError(key string, err error, st *sweepStats) {
+	st.unread++
+	if st.firstErr == nil {
+		st.firstErr = err
+	}
+	m.logger.Debug("failed to read key for snapshot", "key", key, "err", err)
+}
+
+func queueSnapshotValueRead(pipe redis.Pipeliner, ctx context.Context, key, typ string) redis.Cmder {
+	switch typ {
+	case "hash":
+		return pipe.HGetAll(ctx, key)
+	case "string":
+		return pipe.Get(ctx, key)
+	case "set":
+		return pipe.SMembers(ctx, key)
+	case "list":
+		return pipe.LRange(ctx, key, 0, -1)
+	case "zset":
+		return pipe.ZRangeWithScores(ctx, key, 0, -1)
+	case "stream":
+		return pipe.XRevRangeN(ctx, key, "+", "-", maxStreamEntriesPerKey)
+	default:
+		return nil
+	}
+}
+
+//nolint:gocognit,cyclop,funlen // Redis type-specific snapshot reads stay together for symmetry with replay.
+func snapshotEntryFromProbe(probe snapshotBatchProbe) (*snapshotEntry, error) {
+	switch probe.typeStr {
+	case "hash":
+		fields, err := probe.value.(*redis.MapStringStringCmd).Result()
+		if err != nil {
+			return nil, err
+		}
+		if len(fields) == 0 {
+			return nil, nil
+		}
+		return &snapshotEntry{Key: probe.key, Type: "hash", TTLMs: probe.ttlMs, Hash: fields}, nil
+	case "string":
+		value, err := probe.value.(*redis.StringCmd).Result()
+		if err != nil {
+			return nil, err
+		}
+		return &snapshotEntry{Key: probe.key, Type: "string", TTLMs: probe.ttlMs, String: value}, nil
+	case "set", "list":
+		values, err := probe.value.(*redis.StringSliceCmd).Result()
+		if err != nil {
+			return nil, err
+		}
+		if len(values) == 0 {
+			return nil, nil
+		}
+		if probe.typeStr == "set" {
+			sort.Strings(values)
+			return &snapshotEntry{Key: probe.key, Type: "set", TTLMs: probe.ttlMs, Set: values}, nil
+		}
+		return &snapshotEntry{Key: probe.key, Type: "list", TTLMs: probe.ttlMs, List: values}, nil
+	case "zset":
+		zs, err := probe.value.(*redis.ZSliceCmd).Result()
+		if err != nil {
+			return nil, err
+		}
+		if len(zs) == 0 {
+			return nil, nil
+		}
+		entries := make([]zEntry, 0, len(zs))
+		for _, z := range zs {
+			member, _ := z.Member.(string)
+			entries = append(entries, zEntry{Member: member, Score: z.Score})
+		}
+		return &snapshotEntry{Key: probe.key, Type: "zset", TTLMs: probe.ttlMs, ZSet: entries}, nil
+	case "stream":
+		msgs, err := probe.value.(*redis.XMessageSliceCmd).Result()
+		if err != nil {
+			return nil, err
+		}
+		if len(msgs) == 0 {
+			return nil, nil
+		}
+		entries := make([]streamEntry, 0, len(msgs))
+		for i := len(msgs) - 1; i >= 0; i-- {
+			msg := msgs[i]
+			vals := make(map[string]string, len(msg.Values))
+			for k, v := range msg.Values {
+				if s, ok := v.(string); ok {
+					vals[k] = s
+				} else {
+					vals[k] = fmt.Sprint(v)
+				}
+			}
+			entries = append(entries, streamEntry{ID: msg.ID, Values: vals})
+		}
+		return &snapshotEntry{Key: probe.key, Type: "stream", TTLMs: probe.ttlMs, Stream: entries}, nil
+	default:
+		return nil, nil
 	}
 }
 
@@ -560,106 +772,6 @@ func (m *Manager) collectEntries(ctx context.Context) ([]snapshotEntry, sweepSta
 	}
 	st.elapsed = time.Since(start)
 	return entries, st, nil
-}
-
-//nolint:gocognit,cyclop,funlen // Redis type-specific snapshot reads stay together for symmetry with replay.
-func (m *Manager) readEntry(ctx context.Context, key string) (*snapshotEntry, error) {
-	typ, err := m.client.Type(ctx, key).Result()
-	if err != nil {
-		return nil, err
-	}
-	ttl, err := m.client.PTTL(ctx, key).Result()
-	if err != nil {
-		return nil, err
-	}
-	ttlMs := int64(-1)
-	switch {
-	case ttl == -2*time.Millisecond:
-		// Key expired between Keys() and here — skip.
-		return nil, nil
-	case ttl > 0:
-		ttlMs = ttl.Milliseconds()
-	}
-	switch typ {
-	case "hash":
-		fields, err := m.client.HGetAll(ctx, key).Result()
-		if err != nil {
-			return nil, err
-		}
-		if len(fields) == 0 {
-			return nil, nil
-		}
-		return &snapshotEntry{Key: key, Type: "hash", TTLMs: ttlMs, Hash: fields}, nil
-	case "string":
-		value, err := m.client.Get(ctx, key).Result()
-		if err != nil {
-			return nil, err
-		}
-		return &snapshotEntry{Key: key, Type: "string", TTLMs: ttlMs, String: value}, nil
-	case "set":
-		members, err := m.client.SMembers(ctx, key).Result()
-		if err != nil {
-			return nil, err
-		}
-		if len(members) == 0 {
-			return nil, nil
-		}
-		sort.Strings(members) // determinism for tests + diffs
-		return &snapshotEntry{Key: key, Type: "set", TTLMs: ttlMs, Set: members}, nil
-	case "list":
-		values, err := m.client.LRange(ctx, key, 0, -1).Result()
-		if err != nil {
-			return nil, err
-		}
-		if len(values) == 0 {
-			return nil, nil
-		}
-		return &snapshotEntry{Key: key, Type: "list", TTLMs: ttlMs, List: values}, nil
-	case "zset":
-		zs, err := m.client.ZRangeWithScores(ctx, key, 0, -1).Result()
-		if err != nil {
-			return nil, err
-		}
-		if len(zs) == 0 {
-			return nil, nil
-		}
-		entries := make([]zEntry, 0, len(zs))
-		for _, z := range zs {
-			member, _ := z.Member.(string)
-			entries = append(entries, zEntry{Member: member, Score: z.Score})
-		}
-		return &snapshotEntry{Key: key, Type: "zset", TTLMs: ttlMs, ZSet: entries}, nil
-	case "stream":
-		// Read the newest maxStreamEntriesPerKey via XREVRANGE; reverse
-		// to oldest-first so replay preserves ordering. Older entries
-		// beyond the cap are NOT in the snapshot — they remain in the
-		// running miniredis but won't survive a restart.
-		msgs, err := m.client.XRevRangeN(ctx, key, "+", "-", maxStreamEntriesPerKey).Result()
-		if err != nil {
-			return nil, err
-		}
-		if len(msgs) == 0 {
-			return nil, nil
-		}
-		entries := make([]streamEntry, 0, len(msgs))
-		for i := len(msgs) - 1; i >= 0; i-- {
-			msg := msgs[i]
-			vals := make(map[string]string, len(msg.Values))
-			for k, v := range msg.Values {
-				if s, ok := v.(string); ok {
-					vals[k] = s
-				} else {
-					vals[k] = fmt.Sprint(v)
-				}
-			}
-			entries = append(entries, streamEntry{ID: msg.ID, Values: vals})
-		}
-		return &snapshotEntry{Key: key, Type: "stream", TTLMs: ttlMs, Stream: entries}, nil
-	default:
-		// Truly unsupported (geo, hyperloglog, etc.) — fleet-db does not
-		// use these today. Skip silently rather than fail the whole dump.
-		return nil, nil
-	}
 }
 
 // load reads the snapshot file (or its .bak fallback) and replays it
