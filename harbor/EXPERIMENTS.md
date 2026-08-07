@@ -511,6 +511,67 @@ only run 19's dedicated event-log seed task ever passed it. API 93/129
   harness gate or a frozen tool the QA invokes. Plus either a second
   coder or verified-priority correctives to fix the drain race.
 
+### B2h. quality-in-the-loop — maintainability as a measured outcome (PLANNED)
+Motivation: the benchmark scores behavior only. The stage-1/2 quality evaluation
+(harbor/QUALITY.md, 4 artifacts, 3 codex vets) established that process changes
+move code quality in ways the score cannot see — the dual-QA arm scored
+identically to single-QA on the benchmark (0/5, ux 0.9375) yet differed 8x in
+smell density, and carried a 7-module dependency cycle over 25% of its modules.
+Right now that is measured POST HOC and no agent ever sees it. B2h makes
+maintainability a first-class, in-loop, and comparable outcome.
+
+**L1 — SCORECARD (free, no behavior change, do first).** After every trial the
+harness runs `maint-all.sh` over the preserved `/app` artifact and archives
+`scorecard.json` beside `metrics.json`. Every past and future arm becomes
+comparable on quality, not just score. Zero risk to arm comparability because
+nothing during the run changes. The 4 reference artifacts are already scored and
+act as the baseline distribution.
+
+**L2 — OBSERVE (agents can see quality, nothing blocks).** New harness knob
+`quality_mode=off|observe|gate` (default `off` so prior arms stay byte-stable).
+In `observe`, the integration gate additionally computes a FAST metric set on the
+candidate — vendored `lizard`, the pure-python coupling/import-graph script, and
+duplication — and appends a one-line QUALITY delta to the lead's pass message
+(e.g. "since last pass: +2 modules, cycles 0->1, largest file 612 SLOC,
+CCN>10 4.1%"). The lead decides what, if anything, to do about it. Rationale:
+the ladder's repeated lesson is that agents act on what their vantage makes
+visible; quality has never been visible to them.
+- Container constraint (hard): the trial container has no egress except
+  api.openai.com, so every in-run tool must be VENDORED in the bundle. lizard is
+  pure python (vendorable), the coupling script is ours (pure python), jscpd is
+  a node package (vendorable). SonarQube needs a server — post-hoc only.
+  Semgrep is heavy and rule-dependent — post-hoc only, or a small vendored
+  local ruleset. Per-integration budget: <15s, else it eats the agent budget.
+
+**L3 — GATE (quality can block an integration).** In `gate`, the integration
+check fails a candidate that breaches a threshold, exactly like the existing
+correctness check — `/app` stays untouched and the task reopens with the reason.
+Thresholds are set from OBSERVED-ACHIEVABLE values in QUALITY.md, not
+aspiration: no NEW circular dependency (run19 held 0 across 49 modules), no file
+> 600 SLOC (run19 max 481; run20's 1269 is the outlier), no function CCN > 15,
+duplication < 3% (all four artifacts are under 1.2%).
+- Optional companion: a `qa-verify-quality` lane (reuses the vetted task-lane
+  routing from B2f/B2g) where breaches become refactor tasks instead of hard
+  blocks — a softer variant if `gate` proves too disruptive.
+
+**PRE-REGISTERED RISK, and the actual experiment.** Refactoring time competes
+with implementation time inside a fixed 4h budget, and the score rewards only
+behavior. `gate` may LOWER the benchmark score. That is the hypothesis worth
+testing, not a reason to avoid it: does quality discipline cost correctness, or
+buy it (cleaner code -> fewer defects -> more gates)? Measure BOTH outcomes for
+every mode. n>=2 per mode before any causal reading, given the gate variance
+already documented (tasks-family gates {3,0,0}).
+
+**Sequencing.** L1 immediately (free, retroactive). L2 next, one arm, compared
+against B2f run19/run20 as the quality baseline. L3 only if L2 shows agents
+actually respond to the signal — if they ignore a visible metric, a hard gate is
+the answer; if they overreact and burn budget, the lane variant is.
+
+**Observables**: scorecard deltas vs the reference distribution; whether the
+lead acts on QUALITY lines (refactor tasks filed / files split); gate-block
+count and recovery rate; benchmark score vs quality score correlation across
+arms; time and spend attributable to quality work.
+
 ### B3. fractal-generic — infrastructure COMMITTED
 Mission mode `generic` (verbatim spec + finish sentence — the hardcoded
 preamble is bypassed; strip-vet #3); hidden reserve pinned to 0; concurrency
