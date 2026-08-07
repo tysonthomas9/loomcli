@@ -29,7 +29,11 @@ type WorkspaceRecovery = {
 type StageMode = "starting" | "ready" | "error";
 
 const SIDECAR = "binaries/loom";
-const RUNTIME_TIMEOUT_MS = 45_000;
+// The sidecar allows two minutes for a durable embedded-FleetDB replay. Keep
+// the launcher window open beyond that service budget so it can surface the
+// final runtime status instead of declaring a healthy large-state restart
+// failed while initialization is still in progress.
+const RUNTIME_TIMEOUT_MS = 150_000;
 const RUNTIME_POLL_MS = 500;
 const OPEN_ADDITIONAL_WORKSPACE_WINDOW = Boolean(
   (window as unknown as Record<string, unknown>)
