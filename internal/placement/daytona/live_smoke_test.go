@@ -85,8 +85,7 @@ func TestLiveDaytonaSmoke(t *testing.T) {
 	t.Logf("PASS ListManaged -> %d match(es)", len(listed))
 
 	spec := placement.ProcessSpec{
-		SessionID: "lead",
-		Env:       map[string]string{"LOOM_LEAD_BOOT": "1"},
+		SessionID: placement.LeadPTYSessionID,
 		TTY:       true,
 	}
 	if err := p.CreatePty(ctx, sandboxID, spec); err != nil {

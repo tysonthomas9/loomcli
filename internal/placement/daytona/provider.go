@@ -3,10 +3,15 @@
 // Daytona's toolbox PTY API cannot run placement.ProcessSpec.Command literally:
 // the create payload only has cols, rows, cwd, envs, id, and lazyStart. Lead
 // boot therefore depends on the loom-lead-poc-v2 snapshot's profile hook. This
-// adapter maps ProcessSpec onto that hook by setting LOOM_LEAD_BOOT in the
-// per-PTY environment, plus LOOM_LEAD_WORKDIR and LOOM_LEAD_PROMPT_FILE when
-// available. Arbitrary ProcessSpec.Command values are intentionally not sent to
-// Daytona because there is no command field to send.
+// adapter maps ProcessSpec onto that hook only for the lead PTY session
+// (placement.LeadPTYSessionID) by setting LOOM_LEAD_BOOT in the per-PTY
+// environment, plus LOOM_LEAD_WORKDIR and LOOM_LEAD_PROMPT_FILE when available.
+// Caller-supplied hook keys are stripped at both the sandbox level and the PTY
+// level, so this adapter is the sole authority on hook activation. That makes a
+// duplicate lead impossible per sandbox through this adapter; the
+// workspace-level single-orchestrator invariant remains the broker's admission
+// mutex responsibility. Arbitrary ProcessSpec.Command values are intentionally
+// not sent to Daytona because there is no command field to send.
 package daytona
 
 import (
@@ -344,6 +349,10 @@ func (p *Provider) CreatePty(ctx context.Context, sandboxID string, spec placeme
 	ctx, cancel := p.withDefaultTimeout(ctx)
 	defer cancel()
 
+	if strings.TrimSpace(spec.SessionID) == "" {
+		return fmt.Errorf("daytona pty session id required")
+	}
+
 	sandbox, err := p.getSandbox(ctx, sandboxID)
 	if err != nil {
 		return err
@@ -586,12 +595,15 @@ type ptySessionInfo struct {
 
 func ptyCreatePayload(spec placement.ProcessSpec) ptyCreateRequest {
 	env := sandboxEnv(spec.Env)
-	env[leadBootEnv] = "1"
-	if workdir := strings.TrimSpace(spec.WorkingDir); workdir != "" {
-		env[leadWorkdirEnv] = workdir
-	}
-	if prompt := promptFileFromCommand(spec.Command); prompt != "" {
-		env[leadPromptFileEnv] = prompt
+	isLead := strings.TrimSpace(spec.SessionID) == placement.LeadPTYSessionID
+	if isLead {
+		env[leadBootEnv] = "1"
+		if workdir := strings.TrimSpace(spec.WorkingDir); workdir != "" {
+			env[leadWorkdirEnv] = workdir
+		}
+		if prompt := promptFileFromCommand(spec.Command); prompt != "" {
+			env[leadPromptFileEnv] = prompt
+		}
 	}
 	return ptyCreateRequest{
 		Cols:      defaultPtyCols,
@@ -619,6 +631,9 @@ func promptFileFromCommand(command []string) string {
 func sandboxEnv(in map[string]string) map[string]string {
 	out := cleanMap(in)
 	delete(out, APIKeyEnv)
+	delete(out, leadBootEnv)
+	delete(out, leadWorkdirEnv)
+	delete(out, leadPromptFileEnv)
 	return out
 }
 

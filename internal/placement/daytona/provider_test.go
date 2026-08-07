@@ -71,6 +71,27 @@ func TestCreatePayloadPassesLabelsEnvResourceAndAllowlist(t *testing.T) {
 	}
 }
 
+func TestCreatePayloadStripsLeadHookEnv(t *testing.T) {
+	provider := &Provider{snapshotName: DefaultSnapshotName, snapshotID: DefaultSnapshotID, createAutoStopInterval: -1}
+	payload, err := provider.createPayload(placement.CreateRequest{
+		SnapshotRef: DefaultSnapshotName,
+		Env: map[string]string{
+			"KEEP":            "yes",
+			leadBootEnv:       "1",
+			leadWorkdirEnv:    "/wrong",
+			leadPromptFileEnv: "/wrong.md",
+		},
+	})
+	if err != nil {
+		t.Fatalf("createPayload: %v", err)
+	}
+	env := payload.GetEnv()
+	if env["KEEP"] != "yes" {
+		t.Fatalf("env KEEP = %q, want yes", env["KEEP"])
+	}
+	assertNoLeadHookEnv(t, env)
+}
+
 func TestCreatePayloadHonorsExplicitResource(t *testing.T) {
 	provider := &Provider{snapshotName: DefaultSnapshotName, snapshotID: DefaultSnapshotID, createAutoStopInterval: -1}
 	payload, err := provider.createPayload(placement.CreateRequest{
@@ -298,7 +319,7 @@ func TestCreatePtyUsesLeadHookEnvAndIgnoresCommand(t *testing.T) {
 	})
 
 	err := provider.CreatePty(context.Background(), "sandbox-1", placement.ProcessSpec{
-		SessionID:  "lead",
+		SessionID:  placement.LeadPTYSessionID,
 		Command:    []string{"some", "unsupported", "command", "--prompt", "prompts/lead.md"},
 		WorkingDir: "/workspace",
 		Env: map[string]string{
@@ -330,6 +351,123 @@ func TestCreatePtyUsesLeadHookEnvAndIgnoresCommand(t *testing.T) {
 	}
 }
 
+func TestPtyCreatePayloadStripsLeadHookEnvForNonLeadSession(t *testing.T) {
+	payload := ptyCreatePayload(placement.ProcessSpec{
+		SessionID:  "probe",
+		WorkingDir: "/workspace",
+		Command:    []string{"loom", "lead", "--prompt", "/x.md"},
+		Env: map[string]string{
+			"KEEP":            "yes",
+			leadBootEnv:       "1",
+			leadWorkdirEnv:    "/wrong",
+			leadPromptFileEnv: "/wrong.md",
+		},
+	})
+
+	if payload.Cwd != "/workspace" {
+		t.Fatalf("cwd = %q, want /workspace", payload.Cwd)
+	}
+	if payload.ID != "probe" {
+		t.Fatalf("id = %q, want probe", payload.ID)
+	}
+	if payload.Envs["KEEP"] != "yes" {
+		t.Fatalf("env KEEP = %q, want yes", payload.Envs["KEEP"])
+	}
+	assertNoLeadHookEnv(t, payload.Envs)
+}
+
+func TestPtyCreatePayloadDoesNotTreatUppercaseLeadAsLeadSession(t *testing.T) {
+	payload := ptyCreatePayload(placement.ProcessSpec{
+		SessionID:  "LEAD",
+		WorkingDir: "/workspace",
+		Command:    []string{"loom", "lead", "--prompt", "/x.md"},
+	})
+
+	if payload.ID != "LEAD" {
+		t.Fatalf("id = %q, want LEAD", payload.ID)
+	}
+	if payload.Cwd != "/workspace" {
+		t.Fatalf("cwd = %q, want /workspace", payload.Cwd)
+	}
+	assertNoLeadHookEnv(t, payload.Envs)
+}
+
+func TestPtyCreatePayloadLeadSessionOverridesSmuggledHookEnv(t *testing.T) {
+	payload := ptyCreatePayload(placement.ProcessSpec{
+		SessionID:  placement.LeadPTYSessionID,
+		WorkingDir: " /workspace ",
+		Command:    []string{"loom", "lead", "--prompt=/right.md"},
+		Env: map[string]string{
+			"KEEP":            "yes",
+			APIKeyEnv:         "must-not-enter-pty",
+			leadBootEnv:       "smuggled",
+			leadWorkdirEnv:    "/wrong",
+			leadPromptFileEnv: "/wrong.md",
+		},
+	})
+
+	if payload.Cwd != "/workspace" {
+		t.Fatalf("cwd = %q, want /workspace", payload.Cwd)
+	}
+	if payload.Envs["KEEP"] != "yes" {
+		t.Fatalf("env KEEP = %q, want yes", payload.Envs["KEEP"])
+	}
+	if payload.Envs[leadBootEnv] != "1" {
+		t.Fatalf("%s = %q, want 1", leadBootEnv, payload.Envs[leadBootEnv])
+	}
+	if payload.Envs[leadWorkdirEnv] != "/workspace" {
+		t.Fatalf("%s = %q, want /workspace", leadWorkdirEnv, payload.Envs[leadWorkdirEnv])
+	}
+	if payload.Envs[leadPromptFileEnv] != "/right.md" {
+		t.Fatalf("%s = %q, want /right.md", leadPromptFileEnv, payload.Envs[leadPromptFileEnv])
+	}
+	if _, ok := payload.Envs[APIKeyEnv]; ok {
+		t.Fatalf("%s was sent in PTY env", APIKeyEnv)
+	}
+}
+
+// The broker's default lead command carries no --prompt and may carry no
+// working dir, so injection then sets only LOOM_LEAD_BOOT and the other two
+// hook keys are protected by the strip alone. This pins the strip for that
+// shape; without it, a smuggled LOOM_LEAD_WORKDIR would boot the lead in the
+// wrong checkout.
+func TestPtyCreatePayloadLeadSessionStripsHookEnvWithoutOverrides(t *testing.T) {
+	payload := ptyCreatePayload(placement.ProcessSpec{
+		SessionID: placement.LeadPTYSessionID,
+		Command:   []string{"loom", "lead"},
+		Env: map[string]string{
+			leadWorkdirEnv:    "/etc",
+			leadPromptFileEnv: "/wrong.md",
+		},
+	})
+
+	if payload.Envs[leadBootEnv] != "1" {
+		t.Fatalf("%s = %q, want 1", leadBootEnv, payload.Envs[leadBootEnv])
+	}
+	for _, key := range []string{leadWorkdirEnv, leadPromptFileEnv} {
+		if value, ok := payload.Envs[key]; ok {
+			t.Fatalf("smuggled %s survived = %q", key, value)
+		}
+	}
+}
+
+func TestCreatePtyRejectsEmptySessionIDBeforeHTTP(t *testing.T) {
+	var calls int
+	provider := newTestProvider(t, func(req *http.Request) (*http.Response, error) {
+		calls++
+		t.Fatalf("unexpected HTTP request %s %s", req.Method, req.URL.Path)
+		return nil, nil
+	})
+
+	err := provider.CreatePty(context.Background(), "sandbox-1", placement.ProcessSpec{SessionID: " \t\n "})
+	if err == nil || !strings.Contains(err.Error(), "pty session id required") {
+		t.Fatalf("CreatePty empty session = %v, want validation error", err)
+	}
+	if calls != 0 {
+		t.Fatalf("HTTP requests = %d, want 0", calls)
+	}
+}
+
 func TestCreatePtyMapsDuplicateSession(t *testing.T) {
 	provider := newTestProvider(t, func(req *http.Request) (*http.Response, error) {
 		switch {
@@ -343,7 +481,7 @@ func TestCreatePtyMapsDuplicateSession(t *testing.T) {
 		}
 	})
 
-	err := provider.CreatePty(context.Background(), "sandbox-1", placement.ProcessSpec{SessionID: "lead"})
+	err := provider.CreatePty(context.Background(), "sandbox-1", placement.ProcessSpec{SessionID: placement.LeadPTYSessionID})
 	if !errors.Is(err, placement.ErrPtySessionAlreadyExists) {
 		t.Fatalf("CreatePty duplicate = %v, want ErrPtySessionAlreadyExists", err)
 	}
@@ -478,5 +616,14 @@ func assertRequestNumber(t *testing.T, values map[string]any, key string, want f
 	t.Helper()
 	if got, _ := values[key].(float64); got != want {
 		t.Fatalf("%s = %v, want %v in %#v", key, got, want, values)
+	}
+}
+
+func assertNoLeadHookEnv[V any](t *testing.T, env map[string]V) {
+	t.Helper()
+	for _, key := range []string{leadBootEnv, leadWorkdirEnv, leadPromptFileEnv} {
+		if _, ok := env[key]; ok {
+			t.Fatalf("%s was copied into env: %#v", key, env)
+		}
 	}
 }
