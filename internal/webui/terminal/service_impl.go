@@ -76,6 +76,9 @@ func (s *terminalServiceImpl) ptyAttachable(wsID string, meta *tabmeta.TabMetada
 	if s.ptyMgr != nil && s.ptyMgr.SessionClosed(key) {
 		return false
 	}
+	if launchSpecRemoteAttachable(meta.Launch) {
+		return true
+	}
 	if meta.Kind == "agent" && (meta.Launch == nil || len(meta.Launch.Argv) == 0) {
 		return false
 	}
@@ -83,6 +86,13 @@ func (s *terminalServiceImpl) ptyAttachable(wsID string, meta *tabmeta.TabMetada
 		return false
 	}
 	return !meta.CreatedAt.Before(s.startedAt)
+}
+
+func launchSpecRemoteAttachable(launch *tabmeta.LaunchSpec) bool {
+	if launch == nil || launch.Remote == nil {
+		return false
+	}
+	return launch.Remote.Provider != "" && launch.Remote.SandboxID != "" && launch.Remote.PTYSessionID != ""
 }
 
 // attachedClients reports the number of WebSocket clients currently

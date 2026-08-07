@@ -313,7 +313,7 @@ func runTerminalRelay(reqCtx context.Context, conn *websocket.Conn, p *terminalW
 
 	realtime.BroadcastSessionIssueEvent(p.tabMetaStore, p.hub, workspace, session)
 
-	if !reattach {
+	if !reattach && !remoteLaunchSpec(launch) {
 		maybeEmitStaleRestartBanner(reqCtx, conn, p, workspace, session)
 	}
 
@@ -385,18 +385,27 @@ func launchSpecForTerminalSession(ctx context.Context, p *terminalWSParams, work
 		return legacyLaunchSpecForSession(session), nil
 	}
 	if meta.Kind == "agent" {
-		if meta.Launch == nil || (len(meta.Launch.Argv) == 0 && len(meta.Launch.Env) == 0) {
-			return nil, errAgentLaunchSpecMissing
-		}
-		if len(meta.Launch.Argv) == 0 {
+		if meta.Launch == nil || !launchSpecAttachable(meta.Launch) {
 			return nil, errAgentLaunchSpecMissing
 		}
 		return meta.Launch, nil
 	}
-	if meta.Launch != nil && (len(meta.Launch.Argv) > 0 || len(meta.Launch.Env) > 0) {
+	if meta.Launch != nil && (launchSpecAttachable(meta.Launch) || len(meta.Launch.Env) > 0) {
 		return meta.Launch, nil
 	}
 	return legacyLaunchSpecForSession(session), nil
+}
+
+func launchSpecAttachable(launch *tabmeta.LaunchSpec) bool {
+	return len(launch.Argv) > 0 || remoteLaunchSpec(launch)
+}
+
+func remoteLaunchSpec(launch *tabmeta.LaunchSpec) bool {
+	return launch != nil &&
+		launch.Remote != nil &&
+		strings.TrimSpace(launch.Remote.Provider) != "" &&
+		strings.TrimSpace(launch.Remote.SandboxID) != "" &&
+		strings.TrimSpace(launch.Remote.PTYSessionID) != ""
 }
 
 func isUUIDTerminalSession(session string) bool {

@@ -31,6 +31,35 @@ func newAgentSessionTestDeps(t *testing.T) (*memstore.Store, *tabmeta.Store, *re
 	return memstore.New(), tabmeta.NewStore(rdb, nil), rdb
 }
 
+func createActiveDaytonaLeadPlacement(t *testing.T, st store.Store, workspace, agentName, nodeID, sandboxID string, generation int64) {
+	t.Helper()
+	now := time.Now().UTC()
+	placement := &domain.NodePlacement{
+		SandboxID:            sandboxID,
+		Generation:           generation,
+		State:                domain.PlacementStateActive,
+		LeadProcessStartedAt: &now,
+	}
+	if _, err := st.Nodes().Create(context.Background(), store.NodeCreate{
+		WorkspaceKey:    workspace,
+		NodeID:          nodeID,
+		OwnerActor:      "agent:" + agentName,
+		RuntimeProvider: domain.RuntimeProviderDaytona,
+		Placement:       placement,
+		Labels: []string{
+			"loom-lead-placement",
+			"loom-workspace=" + workspace,
+			"loom-agent=" + agentName,
+		},
+		Capabilities:  []string{"lead:session"},
+		ToolInventory: []string{"loom-lead"},
+		DrainState:    domain.NodeDrainActive,
+		TTL:           time.Hour,
+	}); err != nil {
+		t.Fatalf("create placement node: %v", err)
+	}
+}
+
 type slowListTerminalService struct {
 	service.TerminalService
 	delay time.Duration
@@ -116,6 +145,88 @@ func TestEnsureAgentTerminalSessionCreatesLeadLaunchSpec(t *testing.T) {
 	}
 	if session.Kind != domain.AgentSessionKindOrchestration || session.TerminalID != meta.SessionName {
 		t.Fatalf("agent session = kind:%q terminal:%q", session.Kind, session.TerminalID)
+	}
+}
+
+func TestEnsureAgentTerminalSessionCreatesDaytonaLeadRemoteLaunchSpec(t *testing.T) {
+	ctx := context.Background()
+	st, tabStore, rdb := newAgentSessionTestDeps(t)
+	svc := webuiterminal.NewTerminalService(
+		nil,
+		tabStore,
+		nil,
+		rdb,
+		nil,
+		time.Now().Add(-time.Second),
+	)
+
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{
+		WorkspaceKey: "E2E",
+		Name:         "lead",
+		Backend:      "codex",
+	}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey:    "E2E",
+		Name:            "nova",
+		RoleName:        "lead",
+		RuntimeProvider: domain.RuntimeProviderDaytona,
+	}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	createActiveDaytonaLeadPlacement(t, st, "E2E", "nova", "placement-1", "sandbox-1", 1)
+
+	meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "nova")
+	if err != nil {
+		t.Fatalf("ensureAgentTerminalSession: %v", err)
+	}
+	if meta.Launch == nil || meta.Launch.Remote == nil {
+		t.Fatalf("launch = %#v, want remote Daytona launch", meta.Launch)
+	}
+	if len(meta.Launch.Argv) != 0 {
+		t.Fatalf("remote launch argv = %v, want empty to avoid local spawn", meta.Launch.Argv)
+	}
+	remote := meta.Launch.Remote
+	if remote.Provider != string(domain.RuntimeProviderDaytona) ||
+		remote.SandboxID != "sandbox-1" ||
+		remote.PTYSessionID != webuiterminal.DefaultDaytonaLeadPTYSessionID {
+		t.Fatalf("remote launch = %#v, want daytona sandbox-1 lead", remote)
+	}
+	if !meta.PTYAlive {
+		t.Fatal("PTYAlive = false, want remote metadata attachable")
+	}
+}
+
+func TestAgentTerminalLaunchSpecStaleDetectsDaytonaPlacementChange(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{
+		WorkspaceKey: "E2E",
+		Name:         "lead",
+	}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	agent := &domain.Agent{
+		WorkspaceKey:    "E2E",
+		Name:            "nova",
+		RoleName:        "lead",
+		RuntimeProvider: domain.RuntimeProviderDaytona,
+	}
+	createActiveDaytonaLeadPlacement(t, st, "E2E", "nova", "placement-2", "sandbox-2", 2)
+	existing := &tabmeta.TabMetadata{
+		SessionName: "term_old",
+		Launch: &tabmeta.LaunchSpec{
+			Remote: &tabmeta.RemoteLaunchSpec{
+				Provider:     string(domain.RuntimeProviderDaytona),
+				SandboxID:    "sandbox-1",
+				PTYSessionID: webuiterminal.DefaultDaytonaLeadPTYSessionID,
+			},
+		},
+	}
+
+	if !agentTerminalLaunchSpecStale(ctx, st, "E2E", existing, agent) {
+		t.Fatal("expected remote launch spec to be stale after Daytona sandbox changed")
 	}
 }
 

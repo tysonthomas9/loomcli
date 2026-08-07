@@ -2,11 +2,14 @@ package terminal
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
 // TestNewPTYManager_EmptyCwdPanics verifies the constructor refuses an empty
@@ -177,6 +180,65 @@ func TestAttach_SpawnsFreshSession(t *testing.T) {
 	}
 	if got := m.SessionCount(); got != 1 {
 		t.Errorf("SessionCount=%d want 1", got)
+	}
+	m.Detach(key, att.ConnID())
+}
+
+func TestAttach_RemoteDaytonaLaunchUsesRemoteUpstream(t *testing.T) {
+	m := NewPTYManager("cat", 0, t.TempDir())
+	t.Cleanup(func() { _ = m.Shutdown() })
+
+	fake := newFakeUpstream()
+	var calls int
+	oldFactory := newDaytonaPTYUpstreamForManager
+	newDaytonaPTYUpstreamForManager = func(_ context.Context, sandboxID, ptySessionID string, _ DaytonaPTYConfig) (PTYUpstream, error) {
+		calls++
+		if sandboxID != "sandbox-1" {
+			t.Fatalf("sandboxID = %q, want sandbox-1", sandboxID)
+		}
+		if ptySessionID != DefaultDaytonaLeadPTYSessionID {
+			t.Fatalf("ptySessionID = %q, want %q", ptySessionID, DefaultDaytonaLeadPTYSessionID)
+		}
+		return fake, nil
+	}
+	t.Cleanup(func() { newDaytonaPTYUpstreamForManager = oldFactory })
+
+	key := SessionKey{Workspace: "ws1", Name: "remote-lead"}
+	att, reattach, err := m.AttachSession(key, 120, 33, &LaunchSpec{
+		Remote: &tabmeta.RemoteLaunchSpec{
+			Provider:     "daytona",
+			SandboxID:    "sandbox-1",
+			PTYSessionID: DefaultDaytonaLeadPTYSessionID,
+		},
+	})
+	if err != nil {
+		t.Fatalf("AttachSession: %v", err)
+	}
+	if reattach {
+		t.Fatal("reattach=true on fresh remote session")
+	}
+	if calls != 1 {
+		t.Fatalf("Daytona upstream factory calls = %d, want 1", calls)
+	}
+	_, resizes := fake.snapshot()
+	if len(resizes) != 1 || resizes[0] != (fakeResize{cols: 120, rows: 33}) {
+		t.Fatalf("initial remote resize = %+v, want 120x33", resizes)
+	}
+
+	select {
+	case fake.output <- []byte("remote-output"):
+	case <-time.After(time.Second):
+		t.Fatal("timeout sending remote output")
+	}
+	if got := readOutputFrame(t, att.Output(), time.Second); !bytes.Equal(got, []byte("remote-output")) {
+		t.Fatalf("attachment output = %q, want remote-output", got)
+	}
+	if n, err := att.WriteInput([]byte("typed")); err != nil || n != len("typed") {
+		t.Fatalf("WriteInput n=%d err=%v, want %d nil", n, err, len("typed"))
+	}
+	writes, _ := fake.snapshot()
+	if len(writes) != 1 || !bytes.Equal(writes[0], []byte("typed")) {
+		t.Fatalf("remote writes = %q, want typed", writes)
 	}
 	m.Detach(key, att.ConnID())
 }

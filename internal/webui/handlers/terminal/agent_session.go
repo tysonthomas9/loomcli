@@ -157,7 +157,9 @@ func agentTerminalLaunchSpecStale(
 	if err != nil || candidate == nil {
 		return false
 	}
-	return !slices.Equal(candidate.Argv, existing.Launch.Argv) || candidate.Cwd != existing.Launch.Cwd
+	return !slices.Equal(candidate.Argv, existing.Launch.Argv) ||
+		candidate.Cwd != existing.Launch.Cwd ||
+		!remoteLaunchSpecsEqual(candidate.Remote, existing.Launch.Remote)
 }
 
 func loadTerminalAgent(ctx context.Context, st store.Store, workspace, agentName string) (*domain.Agent, error) {
@@ -323,6 +325,14 @@ func buildAgentLaunchSpec(ctx context.Context, st store.Store, workspace, sessio
 	}
 	roleKind := domain.ResolveRoleKind(role, agent.RoleName)
 	backend := agentLaunchBackend(ctx, st, workspace, agent, role)
+	if roleKind == domain.RoleKindInteractive && agentRuntimeProvider(ctx, st, workspace, agent) == domain.RuntimeProviderDaytona {
+		remote, err := daytonaLeadRemoteLaunchSpec(ctx, st, workspace, agent.Name)
+		if err != nil {
+			return nil, "", err
+		}
+		return &tabmeta.LaunchSpec{Remote: remote}, backend, nil
+	}
+
 	commandArgs, err := agentLaunchCommandArgs(roleKind, agent, role)
 	if err != nil {
 		return nil, "", err
@@ -334,6 +344,77 @@ func buildAgentLaunchSpec(ctx context.Context, st store.Store, workspace, sessio
 		Env:  agentLaunchEnv(workspace, sessionName, backend, orchestratorID, agent),
 		Cwd:  agentLaunchCwd(workspace, agent),
 	}, backend, nil
+}
+
+func remoteLaunchSpecsEqual(a, b *tabmeta.RemoteLaunchSpec) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return strings.TrimSpace(a.Provider) == strings.TrimSpace(b.Provider) &&
+		strings.TrimSpace(a.SandboxID) == strings.TrimSpace(b.SandboxID) &&
+		strings.TrimSpace(a.PTYSessionID) == strings.TrimSpace(b.PTYSessionID)
+}
+
+func agentRuntimeProvider(ctx context.Context, st store.Store, workspace string, agent *domain.Agent) domain.RuntimeProvider {
+	var profile *domain.DaemonProfile
+	if st != nil {
+		if got, err := st.Daemon().Get(ctx, workspace); err == nil {
+			profile = got
+		}
+	}
+	return domain.ResolveRuntimeProvider(agent, profile)
+}
+
+func daytonaLeadRemoteLaunchSpec(ctx context.Context, st store.Store, workspace, agentName string) (*tabmeta.RemoteLaunchSpec, error) {
+	node, err := latestActiveDaytonaLeadPlacement(ctx, st, workspace, agentName)
+	if err != nil {
+		return nil, err
+	}
+	return &tabmeta.RemoteLaunchSpec{
+		Provider:     string(domain.RuntimeProviderDaytona),
+		SandboxID:    strings.TrimSpace(node.Placement.SandboxID),
+		PTYSessionID: webuterminal.DefaultDaytonaLeadPTYSessionID,
+	}, nil
+}
+
+func latestActiveDaytonaLeadPlacement(ctx context.Context, st store.Store, workspace, agentName string) (*domain.Node, error) {
+	if st == nil {
+		return nil, service.ErrUnavailable("agent store not initialized")
+	}
+	nodes, err := st.Nodes().List(ctx, strings.TrimSpace(workspace))
+	if err != nil {
+		return nil, service.ErrInternal("failed to list lead placements", err)
+	}
+	var best *domain.Node
+	for _, node := range nodes {
+		if !terminalNodeMatchesDaytonaLead(node, agentName) {
+			continue
+		}
+		if best == nil ||
+			node.Placement.Generation > best.Placement.Generation ||
+			(node.Placement.Generation == best.Placement.Generation && node.UpdatedAt.After(best.UpdatedAt)) {
+			best = node
+		}
+	}
+	if best == nil {
+		return nil, service.ErrValidation("Daytona lead has no active placement to attach")
+	}
+	return best, nil
+}
+
+func terminalNodeMatchesDaytonaLead(node *domain.Node, agentName string) bool {
+	if node == nil || node.Placement == nil {
+		return false
+	}
+	if node.RuntimeProvider != domain.RuntimeProviderDaytona ||
+		node.Placement.State != domain.PlacementStateActive ||
+		strings.TrimSpace(node.Placement.SandboxID) == "" {
+		return false
+	}
+	if node.OwnerActor == "agent:"+agentName {
+		return true
+	}
+	return slices.Contains(node.Labels, "loom-agent="+agentName)
 }
 
 func agentLaunchCwd(workspace string, agent *domain.Agent) string {

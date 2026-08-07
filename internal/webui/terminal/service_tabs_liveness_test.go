@@ -141,6 +141,43 @@ func TestListTabs_TreatsCurrentProcessMetadataAsAttachable(t *testing.T) {
 	}
 }
 
+func TestListTabs_TreatsRemoteAgentMetadataAsAttachableAcrossRestart(t *testing.T) {
+	svc, _, _ := newLivenessTestSvc(t)
+	ctx := context.Background()
+	const ws = "w"
+	startedAt := time.Date(2026, 5, 5, 1, 0, 0, 0, time.UTC)
+	svc.startedAt = startedAt
+
+	if err := svc.tabStore.Set(ctx, &tabmeta.TabMetadata{
+		SessionName: "term_remote_agent",
+		Workspace:   ws,
+		Label:       "agent-nova",
+		Kind:        "agent",
+		AgentID:     "nova",
+		Launch: &tabmeta.LaunchSpec{
+			Remote: &tabmeta.RemoteLaunchSpec{
+				Provider:     "daytona",
+				SandboxID:    "sandbox-1",
+				PTYSessionID: DefaultDaytonaLeadPTYSessionID,
+			},
+		},
+		CreatedAt: startedAt.Add(-time.Hour),
+		UpdatedAt: startedAt.Add(-time.Hour),
+	}); err != nil {
+		t.Fatalf("seed remote agent tab: %v", err)
+	}
+
+	tabs, err := svc.ListTabs(ctx, ws)
+	if err != nil {
+		t.Fatalf("ListTabs: %v", err)
+	}
+	for _, tb := range tabs {
+		if tb.SessionName == "term_remote_agent" && !tb.PTYAlive {
+			t.Fatal("remote agent metadata should stay attachable across serve restart")
+		}
+	}
+}
+
 func TestListTabs_DoesNotTreatAgentMetadataWithoutLaunchAsAttachable(t *testing.T) {
 	svc, _, _ := newLivenessTestSvc(t)
 	ctx := context.Background()
