@@ -46,6 +46,7 @@ on macOS.
 | median file SLOC | 286 | **83** | 206 | 103 |
 | max file SLOC | 924 | 481 | **1269** | 463 |
 | CCN>10 % | 1.9 | 2.5 | 5.0 | 4.1 |
+| **max function CCN** | 35 | **29** | **130** (`dispatch`) | 97 (`dispatch_api`) |
 | duplication % | 0.0 | 1.1 | 1.11 | 0.65 |
 | comment density % | 0.0 | 0.0 | 0.5 | 0.0 |
 | test:code SLOC | 0.0 | 0.449 | 0.493 | 0.445 |
@@ -83,6 +84,12 @@ on macOS.
    measurement bug — see below.)
 5. **A mutation in run19's `realtime-hub.js` made its WebSocket test hang
    forever rather than fail.** In CI that is a stuck pipeline, not a red build.
+6. **Both Python artifacts hide a god-function behind healthy aggregates.**
+   run20's `dispatch` (http_api.py) has cyclomatic complexity **130** and
+   run21's `dispatch_api` has **97**, while their CCN>10 rates look benign at
+   5.0% and 4.1%. Aggregates conceal exactly the function a maintainer would
+   dread; per-function evidence is what matters. Added as `ccn_max` /
+   `ccn_max_where` only because a vet demanded thresholds be measurable.
 
 ## Interpretation rules (binding)
 

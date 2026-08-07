@@ -511,66 +511,81 @@ only run 19's dedicated event-log seed task ever passed it. API 93/129
   harness gate or a frozen tool the QA invokes. Plus either a second
   coder or verified-priority correctives to fix the drain race.
 
-### B2h. quality-in-the-loop — maintainability as a measured outcome (PLANNED)
-Motivation: the benchmark scores behavior only. The stage-1/2 quality evaluation
-(harbor/QUALITY.md, 4 artifacts, 3 codex vets) established that process changes
-move code quality in ways the score cannot see — the dual-QA arm scored
-identically to single-QA on the benchmark (0/5, ux 0.9375) yet differed 8x in
-smell density, and carried a 7-module dependency cycle over 25% of its modules.
-Right now that is measured POST HOC and no agent ever sees it. B2h makes
-maintainability a first-class, in-loop, and comparable outcome.
+### B2h. quality-in-the-loop — maintainability as a measured outcome
+### (REVISED after codex vet — verdict was REVISE, not execute-with-fixes)
+Motivation: the benchmark scores behavior only. harbor/QUALITY.md (4 artifacts,
+5 instruments, 3 codex vets) showed process changes move code quality in ways
+the score cannot see — dual-QA scored identically to single-QA on the benchmark
+(0/5, ux 0.9375) yet differed 8x in smell density and carried a 7-module cycle
+over 25% of its modules. Today that is measured post hoc and no agent ever sees
+it. B2h makes maintainability first-class, comparable, and eventually in-loop.
 
-**L1 — SCORECARD (free, no behavior change, do first).** After every trial the
-harness runs `maint-all.sh` over the preserved `/app` artifact and archives
-`scorecard.json` beside `metrics.json`. Every past and future arm becomes
-comparable on quality, not just score. Zero risk to arm comparability because
-nothing during the run changes. The 4 reference artifacts are already scored and
-act as the baseline distribution.
+**L1 — SCORECARD. RUN (generalized).** `maint-all.sh` scores any trial artifact
+(`id=path` via MAINT_ARTIFACTS — vet finding 1: the orchestrator exported this
+but the instruments ignored it and hard-coded the 4 references; fixed and
+regression-checked). Runs POST-VERIFIER off the archived /app snapshot, never
+inside the live trial path (vet 9), and archives the scorer commit hash beside
+scorecard.json so numbers stay attributable. Retroactive over every past arm.
 
-**L2 — OBSERVE (agents can see quality, nothing blocks).** New harness knob
-`quality_mode=off|observe|gate` (default `off` so prior arms stay byte-stable).
-In `observe`, the integration gate additionally computes a FAST metric set on the
-candidate — vendored `lizard`, the pure-python coupling/import-graph script, and
-duplication — and appends a one-line QUALITY delta to the lead's pass message
-(e.g. "since last pass: +2 modules, cycles 0->1, largest file 612 SLOC,
-CCN>10 4.1%"). The lead decides what, if anything, to do about it. Rationale:
-the ladder's repeated lesson is that agents act on what their vantage makes
-visible; quality has never been visible to them.
-- Container constraint (hard): the trial container has no egress except
-  api.openai.com, so every in-run tool must be VENDORED in the bundle. lizard is
-  pure python (vendorable), the coupling script is ours (pure python), jscpd is
-  a node package (vendorable). SonarQube needs a server — post-hoc only.
-  Semgrep is heavy and rule-dependent — post-hoc only, or a small vendored
-  local ruleset. Per-integration budget: <15s, else it eats the agent budget.
+**L2 — OBSERVE. MODIFY before running.** Four binding changes from the vet:
+- *Offline is not solved, it is a build task* (vet 2, CRITICAL). The bundle ships
+  only loom/fleet-db/leadmsg and the payload only scripts/prompts/stub; the
+  instruments call `python3 -m lizard` and `npx --yes jscpd/madge`, and the
+  container has no egress but api.openai.com. Vendoring full python+node
+  dependency trees at bundle-build time, calling local binaries only, plus a
+  bootstrap preflight probe per tool, is a PREREQUISITE — not an assumption.
+  JS coupling is madge-backed, not pure python (vet 3); until a vendored JS
+  resolver is proven in-container, L2 makes no JS-cycle claims.
+- *Timing is unproven* (vet 4). The <15s/integration budget is asserted against
+  evidence of ~3 min panel + ~2 min coupling over four artifacts. Build a
+  separate `maint-fast-candidate` (one artifact, no semgrep/sonar/mutation, no
+  npx, unique temp dir) and MEASURE p95 <15s in the real container on a
+  ~50-module artifact before any paid arm.
+- *Expose breach EVIDENCE, never aggregates* (vet 7, the gaming problem).
+  Agents see only concrete, locatable facts: "new cycle path A -> B -> A",
+  "function X CCN 18 (was 9)", "duplicate block in files A and B". Aggregate
+  median SLOC, duplication %, comment density, test ratio, mutation score,
+  semgrep/KLOC, Sonar debt and process metrics stay HIDDEN as evaluation-only —
+  the moment an aggregate is a target it stops measuring what it measured.
+- *The comparison needs a control* (vet 8). Comparing one L2 arm against
+  B2f/B2g is confounded: those differ in prompt bytes and pass-message content,
+  and gate variance is already {3,0,0}. Add `quality_shadow` FIRST — compute and
+  log identical metrics with identical overhead but show the agents nothing —
+  then compare shadow vs visible, randomized. Historical arms are descriptive
+  baselines only.
 
-**L3 — GATE (quality can block an integration).** In `gate`, the integration
-check fails a candidate that breaches a threshold, exactly like the existing
-correctness check — `/app` stays untouched and the task reopens with the reason.
-Thresholds are set from OBSERVED-ACHIEVABLE values in QUALITY.md, not
-aspiration: no NEW circular dependency (run19 held 0 across 49 modules), no file
-> 600 SLOC (run19 max 481; run20's 1269 is the outlier), no function CCN > 15,
-duplication < 3% (all four artifacts are under 1.2%).
-- Optional companion: a `qa-verify-quality` lane (reuses the vetted task-lane
-  routing from B2f/B2g) where breaches become refactor tasks instead of hard
-  blocks — a softer variant if `gate` proves too disruptive.
+**L3 — GATE. DROPPED in its current form** (vet 5, 6). Absolute caps were
+overfit to n=1 observations, one threshold (max function CCN) was not even
+emitted until the vet forced it, and "no NEW circular dependency" is trivially
+satisfiable while the architecture degrades — an agent can hold cycle count
+constant while absorbing half the graph into one existing SCC. Any future gate
+must be REGRESSION-AWARE against the current /app (no increase in cyclic SCC
+size, % modules in cycles, cyclic edges, max fan-in/out, dynamic imports),
+language-aware, fail-closed on tool error, and revisited only after L2 shows a
+constructive response.
 
-**PRE-REGISTERED RISK, and the actual experiment.** Refactoring time competes
-with implementation time inside a fixed 4h budget, and the score rewards only
-behavior. `gate` may LOWER the benchmark score. That is the hypothesis worth
-testing, not a reason to avoid it: does quality discipline cost correctness, or
-buy it (cleaner code -> fewer defects -> more gates)? Measure BOTH outcomes for
-every mode. n>=2 per mode before any causal reading, given the gate variance
-already documented (tasks-family gates {3,0,0}).
+**PREREQUISITE — the anti-gaming evaluator** (vet 10, its highest-value
+finding). Run the blinded LLM-judge rubric (designed, codex-vetted, still unrun)
+over the B2f/B2g artifacts BEFORE any automated metric is exposed to an agent.
+It is the only instrument that sees naming, abstraction quality and
+error-handling discipline, so it is the only way to detect metric-gaming once
+metrics become targets. Without it, L2 has no way to tell "improved" from
+"gamed".
 
-**Sequencing.** L1 immediately (free, retroactive). L2 next, one arm, compared
-against B2f run19/run20 as the quality baseline. L3 only if L2 shows agents
-actually respond to the signal — if they ignore a visible metric, a hard gate is
-the answer; if they overreact and burn budget, the lane variant is.
+**PRE-REGISTERED RISK.** Refactoring competes with implementation in a fixed 4h
+budget and the score rewards only behavior, so quality work may LOWER the score.
+That is the hypothesis, not a reason to avoid it. Measure BOTH outcomes per
+mode; n>=2 per mode given documented gate variance.
 
-**Observables**: scorecard deltas vs the reference distribution; whether the
-lead acts on QUALITY lines (refactor tasks filed / files split); gate-block
-count and recovery rate; benchmark score vs quality score correlation across
-arms; time and spend attributable to quality work.
+**SEQUENCING (revised).** (1) L1 now, retroactively. (2) Blinded judge over
+existing artifacts — establishes the hidden yardstick. (3) Vendoring + timing
+proof. (4) `quality_shadow` arm. (5) `observe` arm vs shadow. (6) Reconsider a
+regression-aware gate only if 5 shows agents respond constructively.
+
+**OBSERVABLES**: scorecard deltas vs the reference distribution; whether the
+lead acts on breach evidence (refactor tasks filed, files split, cycle removed);
+shadow-vs-visible difference in both quality and benchmark score; blinded-judge
+score movement (the gaming detector); time and spend attributable to quality work.
 
 ### B3. fractal-generic — infrastructure COMMITTED
 Mission mode `generic` (verbatim spec + finish sentence — the hardcoded

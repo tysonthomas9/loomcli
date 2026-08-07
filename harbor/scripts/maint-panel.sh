@@ -9,6 +9,14 @@ rm -rf "$MX"; mkdir -p "$MX"
 
 # --- artifact map ------------------------------------------------------------
 # bash 3.2 on macOS has no associative arrays — case map instead.
+# MAINT_ARTIFACTS ("id=path id=path ...") overrides the reference set so the panel
+# can score ANY trial artifact (codex B2h-vet finding 1: the orchestrator exported
+# this but the scripts ignored it).
+if [ -n "${MAINT_ARTIFACTS:-}" ]; then
+  IDS=""; for kv in $MAINT_ARTIFACTS; do IDS="$IDS ${kv%%=*}"; done
+  IDS="${IDS# }"
+  src_of() { for kv in $MAINT_ARTIFACTS; do [ "${kv%%=*}" = "$1" ] && { echo "${kv#*=}"; return; }; done; }
+else
 IDS="baseline run19 run20 run21"
 src_of() {
   case "$1" in
@@ -18,6 +26,7 @@ src_of() {
     run21)    echo /Users/tyson/codebase/code-agents/loomcli/harbor/trials/loom-generic-tasks-dual-1/slack-clone__jxozk75/artifacts/app ;;
   esac
 }
+fi
 
 # --- fold: pinned versions (vet HIGH x2) -------------------------------------
 LIZARD_V=$(python3 -c 'import lizard;print(lizard.version)')
@@ -127,14 +136,18 @@ for aid in ids:
 
     # lizard: identical machinery for JS+Python (vet: cross-language = descriptive)
     ccn, fnloc = [], []
+    worst = (0, '')   # (max function CCN, where) — L3 thresholds need per-function evidence
     if prod:
         cmd = ['python3', '-m', 'lizard', '--csv'] + [fp for fp, _ in prod]
         r = subprocess.run(cmd, capture_output=True, text=True)
         import csv as _csv, io as _io
+        worst = (0, '')
         for parts in _csv.reader(_io.StringIO(r.stdout)):
             if len(parts) < 3: continue
-            try: fnloc.append(int(parts[0])); ccn.append(int(parts[1]))
+            try: n0, c0 = int(parts[0]), int(parts[1])
             except ValueError: continue
+            fnloc.append(n0); ccn.append(c0)
+            if c0 > worst[0]: worst = (c0, parts[5] if len(parts) > 5 else '')
 
     kloc = max(p_sloc, 1) / 1000
     results[aid] = {
@@ -150,6 +163,7 @@ for aid in ids:
         'ccn_gt10_pct': round(100 * sum(1 for c in ccn if c > 10) / max(len(ccn), 1), 1),
         'fn_nloc_p90': pct(fnloc, 90),
         'fn_nloc_gt60_pct': round(100 * sum(1 for n in fnloc if n > 60) / max(len(fnloc), 1), 1),
+        'ccn_max': worst[0], 'ccn_max_where': worst[1],
         'excluded_surface_lines': other,
     }
 with open(os.path.join(MX, 'scope-manifest.tsv'), 'w') as mh:
@@ -177,7 +191,9 @@ echo "[panel] duplication done"
 python3 - "$MX" $IDS <<'PY' > "$MX/git.json"
 import json, os, re, subprocess, sys
 MX, ids = sys.argv[1], sys.argv[2:]
-SRCS = {
+import os as _os
+_override = _os.environ.get('MAINT_ARTIFACTS','').split()
+SRCS = {kv.split('=',1)[0]: kv.split('=',1)[1] for kv in _override} if _override else {
  'baseline':'/Users/tyson/codebase/code-agents/loomcli/harbor/trials/codex-baseline-1/slack-clone__BV7wtZv/artifacts/app',
  'run19':'/Users/tyson/codebase/code-agents/loomcli/harbor/trials/loom-generic-tasks-1/slack-clone__tUAmrE8/artifacts/app',
  'run20':'/Users/tyson/codebase/code-agents/loomcli/harbor/trials/loom-generic-tasks-2/slack-clone__RbVFjFP/artifacts/app',

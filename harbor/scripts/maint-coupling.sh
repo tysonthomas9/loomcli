@@ -7,12 +7,15 @@
 set -euo pipefail
 MX="${MX:-$HOME/.mx-stage}"
 [ -d "$MX/baseline" ] || { echo "FATAL: run maint-panel.sh first" >&2; exit 1; }
-IDS="baseline run19 run20 run21"
+if [ -n "${MAINT_ARTIFACTS:-}" ]; then IDS=""; for kv in $MAINT_ARTIFACTS; do IDS="$IDS ${kv%%=*}"; done; IDS="${IDS# }"; else IDS="baseline run19 run20 run21"; fi
 
 # JS graphs from pinned madge (real parser + resolver)
-for id in baseline run19 run21; do
+JS_IDS="${MAINT_JS_IDS:-baseline run19 run21}"
+for id in $JS_IDS; do
   npx --yes madge@8.0.0 --json --extensions js,mjs,cjs \
-      --exclude '(^|/)(test|tests)/' "$MX/$id" > "$MX/madge-$id.json" 2>"$MX/madge-$id.err" || echo '{}' > "$MX/madge-$id.json"
+      --exclude '(^|/)(test|tests)/' "$MX/$id" > "$MX/madge-$id.json" 2>"$MX/madge-$id.err" \
+    || { echo "FATAL: madge failed for $id (see $MX/madge-$id.err)" >&2; exit 1; }
+  [ -s "$MX/madge-$id.json" ] || { echo "FATAL: empty madge graph for $id" >&2; exit 1; }
 done
 
 python3 - "$MX" $IDS <<'PY'
@@ -21,7 +24,9 @@ from collections import defaultdict
 
 MX, ids = sys.argv[1], sys.argv[2:]
 TEST_RE = re.compile(r'(^|/)(tests?)/|(^|/)test_[^/]*\.py$|\.(test|spec)\.[cm]?[jt]s$|(^|/)conftest\.py$')
-PRIMARY = {'baseline':'js','run19':'js','run20':'py','run21':'py'}
+import os as _os
+_ov = _os.environ.get('MAINT_PRIMARY','')
+PRIMARY = dict(kv.split('=',1) for kv in _ov.split()) if _ov else {'baseline':'js','run19':'js','run20':'py','run21':'py'}
 
 def tarjan(nodes, edges):
     """SCCs — cycles are SCCs of size>1 (or self-loops)."""
@@ -107,8 +112,8 @@ def py_graph(root):
     return list(mods), {k: sorted(set(v)) for k, v in edges.items()}, dynamic
 
 def js_graph(mpath, root):
-    try: raw = json.load(open(mpath))
-    except Exception: return [], {}, 0
+    # fail closed: an unreadable graph must not silently become "0 cycles"
+    raw = json.load(open(mpath))
     raw = {k: v for k, v in raw.items() if not TEST_RE.search(k)}
     edges = {k: [x for x in v if x in raw] for k, v in raw.items()}
     src = ''
