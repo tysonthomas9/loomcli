@@ -3,7 +3,7 @@ package store
 import (
 	"context"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 )
 
 // RepoCreate is the input for RepoStore.Create. WorkspaceKey + Name are
@@ -30,9 +30,9 @@ type RepoUpdate struct {
 // RepoStore is the persistence interface for Repo entities. All methods
 // are workspace-scoped — Repo names are unique within a workspace.
 type RepoStore interface {
-	Create(ctx context.Context, in RepoCreate) (*domain.Repo, error)
-	Get(ctx context.Context, workspaceKey, name string) (*domain.Repo, error)
-	List(ctx context.Context, workspaceKey string) ([]*domain.Repo, error)
-	Update(ctx context.Context, workspaceKey, name string, patch RepoUpdate) (*domain.Repo, error)
+	Create(ctx context.Context, in RepoCreate) (*workspacemodule.Repository, error)
+	Get(ctx context.Context, workspaceKey, name string) (*workspacemodule.Repository, error)
+	List(ctx context.Context, workspaceKey string) ([]*workspacemodule.Repository, error)
+	Update(ctx context.Context, workspaceKey, name string, patch RepoUpdate) (*workspacemodule.Repository, error)
 	Delete(ctx context.Context, workspaceKey, name string) error
 }

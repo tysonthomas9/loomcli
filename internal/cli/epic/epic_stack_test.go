@@ -7,10 +7,10 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
+	stackstore "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore"
 	infrastackstore "github.com/tysonthomas9/loomcli/internal/infra/stackstoreadapter"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
-	sl "github.com/tysonthomas9/loomcli/internal/stacklineage"
-	"github.com/tysonthomas9/loomcli/internal/stackstore"
+	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol/stacklineage"
 )
 
 // baseOf returns the planned BaseTaskID for a task, or "<absent>" if the task

@@ -33,7 +33,7 @@ const (
 // grants provide defense in depth. Read grants are seeded on read paths; write
 // grants only on explicit review posts.
 type Module struct {
-	store                    store.Store
+	store                    prReviewStore
 	connectorManagement      connectorsmodule.Management
 	connectorManagementStore connectorsmodule.ManagementStore
 	dispatcher               connectorsmodule.Dispatcher
@@ -58,6 +58,14 @@ type Module struct {
 	beforeCredentialSeedCommit func()
 }
 
+type prReviewStore interface {
+	Workspaces() store.WorkspaceStore
+	Repos() store.RepoStore
+	Connectors() store.ConnectorStore
+	ConnectorGrants() store.ConnectorGrantStore
+	ConnectorCalls() store.ConnectorAuditStore
+}
+
 // NewModule constructs the pull request review route module. localSettingsDir
 // supplies the desktop GitHub credential and connector vault fallback.
 // terminalSvc may be nil (no PTY manager); backend migration then skips
@@ -65,7 +73,7 @@ type Module struct {
 // service none exist. Interaction chat dependencies own all provider/session
 // reads and message delivery; missing dependencies fail those routes closed.
 func NewModule(
-	st store.Store,
+	st prReviewStore,
 	disp connectorsmodule.Dispatcher,
 	agentSvc agentcoord.AgentService,
 	terminalSvc terminal.TerminalService,

@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // ResolveOrHealWorkspacePath returns the machine-local root path for a
@@ -24,7 +24,7 @@ import (
 // match writes the path(s) back via bootstrap.MutateWorkspaceLocalState and
 // returns the workspace dir. It never clones; an absent or unverifiable checkout
 // returns "" (degrade as before) after an actionable log.
-func ResolveOrHealWorkspacePath(ctx context.Context, s store.Store, key string) string {
+func ResolveOrHealWorkspacePath(ctx context.Context, s workspaceRepositoryStore, key string) string {
 	if p := resolveWorkspacePath(key); p != "" {
 		return p
 	}
@@ -42,7 +42,7 @@ func ResolveOrHealWorkspacePath(ctx context.Context, s store.Store, key string) 
 // the reconcile loops: the same key->path map, but empty entries trigger a
 // one-shot re-bind attempt against the on-disk checkout before being reported
 // empty. It reuses the already-loaded workspace records (no extra Get).
-func ListWorkspacePathsOrHeal(ctx context.Context, s store.Store) (map[string]string, error) {
+func ListWorkspacePathsOrHeal(ctx context.Context, s workspaceRepositoryStore) (map[string]string, error) {
 	if s == nil {
 		return nil, nil
 	}
@@ -79,7 +79,7 @@ func ListWorkspacePathsOrHeal(ctx context.Context, s store.Store) (map[string]st
 //
 // It NEVER clones — re-cloning a genuinely missing checkout stays an explicit
 // user action. The only side effect on success is the state.json write.
-func healWorkspacePath(ctx context.Context, s store.Store, ws *domain.Workspace) string {
+func healWorkspacePath(ctx context.Context, s workspaceRepositoryStore, ws *workspacemodule.Workspace) string {
 	if ws == nil || ws.Key == "" || ws.Name == "" {
 		return ""
 	}
@@ -135,7 +135,7 @@ func healWorkspacePath(ctx context.Context, s store.Store, ws *domain.Workspace)
 // origin remote must match it; when fleet-db has no canonical URL (e.g. a
 // locally-created repo with no shared remote), any real git checkout at the
 // authoritative fleet-db-derived location is accepted.
-func verifyCheckout(repoPath string, r *domain.Repo) bool {
+func verifyCheckout(repoPath string, r *workspacemodule.Repository) bool {
 	if strings.TrimSpace(r.RemoteURL) == "" {
 		// fleet-db has no canonical URL (locally-created repo / no shared remote
 		// yet). The location came from authoritative fleet-db data, so any real

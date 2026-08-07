@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -16,7 +18,7 @@ func ApprovedVersionMetadataKey(versionID string) string {
 	return ApprovedVersionMetadataPrefix + strings.TrimSpace(versionID)
 }
 
-func DriverVersionApproved(driver *domain.Driver, version *domain.DriverVersion) bool {
+func DriverVersionApproved(driver *workflowcatalog.Driver, version *workflowcatalog.DriverVersion) bool {
 	if driver == nil || version == nil {
 		return false
 	}
@@ -25,24 +27,24 @@ func DriverVersionApproved(driver *domain.Driver, version *domain.DriverVersion)
 		return false
 	}
 	value = strings.TrimSpace(value)
-	return value == "" || value == version.SourceDigest || value == string(domain.DriverTrustTrusted)
+	return value == "" || value == version.SourceDigest || value == string(workflowcatalog.DriverTrustTrusted)
 }
 
-func DriverVersionEffectiveTrust(driver *domain.Driver, version *domain.DriverVersion) domain.DriverTrustLevel {
+func DriverVersionEffectiveTrust(driver *workflowcatalog.Driver, version *workflowcatalog.DriverVersion) workflowcatalog.DriverTrustLevel {
 	if DriverVersionApproved(driver, version) {
-		return domain.DriverTrustTrusted
+		return workflowcatalog.DriverTrustTrusted
 	}
-	level := domain.DriverTrustLevel(strings.TrimSpace(version.Manifest[ManifestTrustLevelKey]))
+	level := workflowcatalog.DriverTrustLevel(strings.TrimSpace(version.Manifest[ManifestTrustLevelKey]))
 	switch level {
-	case domain.DriverTrustTrusted:
-		return domain.DriverTrustTrusted
-	case domain.DriverTrustUntrusted:
-		return domain.DriverTrustUntrusted
+	case workflowcatalog.DriverTrustTrusted:
+		return workflowcatalog.DriverTrustTrusted
+	case workflowcatalog.DriverTrustUntrusted:
+		return workflowcatalog.DriverTrustUntrusted
 	}
 	if driver != nil && driver.TrustLevel.Trusted() {
-		return domain.DriverTrustTrusted
+		return workflowcatalog.DriverTrustTrusted
 	}
-	return domain.DriverTrustUntrusted
+	return workflowcatalog.DriverTrustUntrusted
 }
 
 // driverTrustLevel resolves trust for the exact driver version pinned on the
@@ -52,10 +54,10 @@ func DriverVersionEffectiveTrust(driver *domain.Driver, version *domain.DriverVe
 // here (not in internal/driver/sandbox) because it depends on
 // DriverVersionEffectiveTrust; the sandbox package owns only the admission
 // decision once a trust level is known.
-func driverTrustLevel(ctx context.Context, drivers store.DriverStore, run *domain.DriverRun, version *domain.DriverVersion) (domain.DriverTrustLevel, error) {
+func driverTrustLevel(ctx context.Context, drivers store.DriverStore, run *domain.DriverRun, version *workflowcatalog.DriverVersion) (workflowcatalog.DriverTrustLevel, error) {
 	driver, err := drivers.Get(ctx, run.WorkspaceKey, run.DriverID)
 	if errors.Is(err, domain.ErrNotFound) {
-		return domain.DriverTrustUntrusted, nil
+		return workflowcatalog.DriverTrustUntrusted, nil
 	}
 	if err != nil {
 		return "", fmt.Errorf("load driver for trust placement policy: %w", err)
@@ -63,7 +65,7 @@ func driverTrustLevel(ctx context.Context, drivers store.DriverStore, run *domai
 	return DriverVersionEffectiveTrust(driver, version), nil
 }
 
-func loadDriverVersionForOperatorAction(ctx context.Context, drivers store.DriverStore, versions store.DriverVersionStore, ws, driverID, versionID string) (*domain.Driver, *domain.DriverVersion, error) {
+func loadDriverVersionForOperatorAction(ctx context.Context, drivers store.DriverStore, versions store.DriverVersionStore, ws, driverID, versionID string) (*workflowcatalog.Driver, *workflowcatalog.DriverVersion, error) {
 	if drivers == nil || versions == nil {
 		return nil, nil, fmt.Errorf("driver and driver version stores required: %w", domain.ErrInvalid)
 	}
@@ -83,7 +85,7 @@ func loadDriverVersionForOperatorAction(ctx context.Context, drivers store.Drive
 	if version.DriverID != driver.DriverID {
 		return nil, nil, fmt.Errorf("driver version %q belongs to %q, not %q: %w", version.VersionID, version.DriverID, driver.DriverID, domain.ErrInvalid)
 	}
-	if version.ValidationStatus != domain.DriverVersionValidationPassed {
+	if version.ValidationStatus != workflowcatalog.DriverVersionValidationPassed {
 		return nil, nil, fmt.Errorf("driver version %q is not passed: %w", version.VersionID, domain.ErrInvalid)
 	}
 	return driver, version, nil

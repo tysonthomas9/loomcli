@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
 	"github.com/tysonthomas9/loomcli/internal/app/serve/operatorauth"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
@@ -28,7 +30,7 @@ func (*agentsTriggerBindingStoreStub) List(
 	context.Context,
 	string,
 	store.TriggerBindingFilter,
-) ([]*domain.TriggerBinding, error) {
+) ([]*automation.Binding, error) {
 	return nil, nil
 }
 

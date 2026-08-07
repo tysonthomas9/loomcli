@@ -11,8 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/agentinbox"
-	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
+	leadcontrol "github.com/tysonthomas9/loomcli/internal/infra/interactionlead"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/sessions/redact"
@@ -265,13 +264,13 @@ func (runtime *Runtime) enqueueGenericMessage(
 	ctx context.Context,
 	command interaction.DeliverChatMessageCommand,
 ) (*interaction.ChatDelivery, error) {
-	message, err := agentinbox.Enqueue(
+	message, err := interaction.EnqueueGenerated(
 		ctx,
 		runtime.inbox,
-		command.WorkspaceKey,
-		command.AgentID,
-		command.Body,
-		agentinbox.MessageOptions{
+		interaction.EnqueueInboxCommand{
+			WorkspaceKey:      command.WorkspaceKey,
+			TargetAgentID:     command.AgentID,
+			Body:              command.Body,
 			SourceKind:        command.SourceKind,
 			SourceRef:         command.SourceRef,
 			DriverRunID:       command.DriverRunID,
@@ -287,7 +286,7 @@ func (runtime *Runtime) enqueueGenericMessage(
 	if message == nil ||
 		message.WorkspaceKey != command.WorkspaceKey ||
 		message.TargetAgentID != command.AgentID ||
-		message.InboxMessageID == "" {
+		message.MessageID == "" {
 		return nil, fmt.Errorf(
 			"interaction inbox returned a mismatched delivery: %w",
 			interaction.ErrInvalidPersistedState,
@@ -298,7 +297,7 @@ func (runtime *Runtime) enqueueGenericMessage(
 		Reason: "agent message queued; no runtime delivery adapter is " +
 			"configured",
 		SessionID:      message.SessionID,
-		InboxMessageID: message.InboxMessageID,
+		InboxMessageID: message.MessageID,
 	}, nil
 }
 

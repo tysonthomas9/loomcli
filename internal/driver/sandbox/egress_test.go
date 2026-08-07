@@ -39,6 +39,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
@@ -46,20 +48,20 @@ func TestResolveSandboxEgress(t *testing.T) {
 	cases := []struct {
 		name       string
 		configured string
-		trust      domain.DriverTrustLevel
+		trust      workflowcatalog.DriverTrustLevel
 		want       SandboxEgressMode
 		wantErr    bool
 	}{
-		{name: "trusted default is all", trust: domain.DriverTrustTrusted, want: SandboxEgressAll},
-		{name: "untrusted default is serve-only", trust: domain.DriverTrustUntrusted, want: SandboxEgressServeOnly},
+		{name: "trusted default is all", trust: workflowcatalog.DriverTrustTrusted, want: SandboxEgressAll},
+		{name: "untrusted default is serve-only", trust: workflowcatalog.DriverTrustUntrusted, want: SandboxEgressServeOnly},
 		{name: "empty trust fails closed to serve-only", trust: "", want: SandboxEgressServeOnly},
 		{name: "unknown trust fails closed to serve-only", trust: "verified", want: SandboxEgressServeOnly},
-		{name: "explicit all wins over untrusted", configured: "all", trust: domain.DriverTrustUntrusted, want: SandboxEgressAll},
-		{name: "explicit serve-only wins over trusted", configured: "serve-only", trust: domain.DriverTrustTrusted, want: SandboxEgressServeOnly},
-		{name: "explicit none", configured: "none", trust: domain.DriverTrustTrusted, want: SandboxEgressNone},
-		{name: "explicit delegated", configured: "delegated", trust: domain.DriverTrustUntrusted, want: SandboxEgressDelegated},
-		{name: "case and space insensitive", configured: " Serve-Only ", trust: domain.DriverTrustTrusted, want: SandboxEgressServeOnly},
-		{name: "unknown mode rejected", configured: "firewall", trust: domain.DriverTrustTrusted, wantErr: true},
+		{name: "explicit all wins over untrusted", configured: "all", trust: workflowcatalog.DriverTrustUntrusted, want: SandboxEgressAll},
+		{name: "explicit serve-only wins over trusted", configured: "serve-only", trust: workflowcatalog.DriverTrustTrusted, want: SandboxEgressServeOnly},
+		{name: "explicit none", configured: "none", trust: workflowcatalog.DriverTrustTrusted, want: SandboxEgressNone},
+		{name: "explicit delegated", configured: "delegated", trust: workflowcatalog.DriverTrustUntrusted, want: SandboxEgressDelegated},
+		{name: "case and space insensitive", configured: " Serve-Only ", trust: workflowcatalog.DriverTrustTrusted, want: SandboxEgressServeOnly},
+		{name: "unknown mode rejected", configured: "firewall", trust: workflowcatalog.DriverTrustTrusted, wantErr: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

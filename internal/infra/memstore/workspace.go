@@ -7,23 +7,25 @@ import (
 	"sync"
 	"time"
 
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 type workspaceStore struct {
 	mu    sync.RWMutex
-	items map[string]*domain.Workspace // keyed by Workspace.Key
+	items map[string]*workspacemodule.Workspace // keyed by Workspace.Key
 }
 
 func newWorkspaceStore() *workspaceStore {
-	return &workspaceStore{items: make(map[string]*domain.Workspace)}
+	return &workspaceStore{items: make(map[string]*workspacemodule.Workspace)}
 }
 
 // Compile-time check.
 var _ store.WorkspaceStore = (*workspaceStore)(nil)
 
-func (s *workspaceStore) Create(_ context.Context, in store.WorkspaceCreate) (*domain.Workspace, error) {
+func (s *workspaceStore) Create(_ context.Context, in store.WorkspaceCreate) (*workspacemodule.Workspace, error) {
 	if in.Key == "" {
 		return nil, fmt.Errorf("workspace key required: %w", domain.ErrInvalid)
 	}
@@ -36,13 +38,13 @@ func (s *workspaceStore) Create(_ context.Context, in store.WorkspaceCreate) (*d
 		return nil, fmt.Errorf("workspace %q: %w", in.Key, domain.ErrAlreadyExists)
 	}
 	now := time.Now().UTC()
-	ws := &domain.Workspace{
+	ws := &workspacemodule.Workspace{
 		Key:           in.Key,
 		Name:          in.Name,
 		Description:   in.Description,
 		DefaultBranch: in.DefaultBranch,
 		DesignFormat:  in.DesignFormat,
-		State:         domain.WorkspaceStateReady,
+		State:         workspacemodule.StateReady,
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	}
@@ -50,7 +52,7 @@ func (s *workspaceStore) Create(_ context.Context, in store.WorkspaceCreate) (*d
 	return cloneWorkspace(ws), nil
 }
 
-func (s *workspaceStore) Get(_ context.Context, key string) (*domain.Workspace, error) {
+func (s *workspaceStore) Get(_ context.Context, key string) (*workspacemodule.Workspace, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	ws, ok := s.items[key]
@@ -60,7 +62,7 @@ func (s *workspaceStore) Get(_ context.Context, key string) (*domain.Workspace, 
 	return cloneWorkspace(ws), nil
 }
 
-func (s *workspaceStore) GetByName(_ context.Context, name string) (*domain.Workspace, error) {
+func (s *workspaceStore) GetByName(_ context.Context, name string) (*workspacemodule.Workspace, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for _, ws := range s.items {
@@ -71,10 +73,10 @@ func (s *workspaceStore) GetByName(_ context.Context, name string) (*domain.Work
 	return nil, fmt.Errorf("workspace name %q: %w", name, domain.ErrNotFound)
 }
 
-func (s *workspaceStore) List(_ context.Context) ([]*domain.Workspace, error) {
+func (s *workspaceStore) List(_ context.Context) ([]*workspacemodule.Workspace, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	out := make([]*domain.Workspace, 0, len(s.items))
+	out := make([]*workspacemodule.Workspace, 0, len(s.items))
 	for _, ws := range s.items {
 		out = append(out, cloneWorkspace(ws))
 	}
@@ -82,7 +84,7 @@ func (s *workspaceStore) List(_ context.Context) ([]*domain.Workspace, error) {
 	return out, nil
 }
 
-func (s *workspaceStore) Update(_ context.Context, key string, patch store.WorkspaceUpdate) (*domain.Workspace, error) {
+func (s *workspaceStore) Update(_ context.Context, key string, patch store.WorkspaceUpdate) (*workspacemodule.Workspace, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ws, ok := s.items[key]
@@ -128,7 +130,7 @@ func (s *workspaceStore) Delete(_ context.Context, key string) error {
 // internal state. Workspace currently has no slice/map fields so a
 // shallow struct copy suffices; if fields are added (e.g., Tags []string),
 // extend this helper.
-func cloneWorkspace(ws *domain.Workspace) *domain.Workspace {
+func cloneWorkspace(ws *workspacemodule.Workspace) *workspacemodule.Workspace {
 	out := *ws
 	return &out
 }

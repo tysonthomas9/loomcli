@@ -19,7 +19,9 @@ const (
 )
 
 type awaitEventRuntimeComponent struct {
-	reconciler *driver.AwaitEventReconciler
+	reconciler interface {
+		RunOnce(context.Context, time.Time) error
+	}
 }
 
 var _ platformruntime.Component = (*awaitEventRuntimeComponent)(nil)
@@ -53,12 +55,10 @@ func NewAwaitEventRuntimeRegistrationWithExecution(
 	if awaits == nil || driverRuns == nil || workspacesStore == nil {
 		return platformruntime.Registration{}, fmt.Errorf("compose await event runtime: required dependency is unavailable")
 	}
-	reconciler, err := driver.NewAwaitEventReconcilerWithExecutionStores(
+	reconciler, err := automationcomposition.NewAwaitEventReconcilerWithExecutionStores(
 		queue, authorities, awaits, driverRuns, resolver,
 		workspace,
-		driver.RunOutcomeWorkspaceLister(
-			automationcomposition.NewAutomationWorkspaceLister(workspacesStore),
-		),
+		automationcomposition.NewAutomationWorkspaceLister(workspacesStore),
 		string(AwaitEventNotificationComponentID),
 	)
 	if err != nil {

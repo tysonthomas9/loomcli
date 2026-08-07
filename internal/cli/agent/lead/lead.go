@@ -21,9 +21,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/epicrunner"
 	"github.com/tysonthomas9/loomcli/internal/infra/interactionclient"
-	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
+	leadcontrol "github.com/tysonthomas9/loomcli/internal/infra/interactionlead"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // envOrchestratorSessionID is the env var lead injects so descendants
@@ -297,7 +296,7 @@ func (r leadSessionRegistration) Finalize() {
 	}
 }
 
-func (r leadSessionRegistration) Store() store.Store {
+func (r leadSessionRegistration) Store() leadcontrol.RuntimeStore {
 	if r.handle == nil {
 		return nil
 	}

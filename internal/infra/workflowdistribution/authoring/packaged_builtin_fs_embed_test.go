@@ -11,7 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 )
@@ -102,8 +103,8 @@ func TestEmbeddedPackagedBuiltinsRegisterWithoutBuildToolchain(t *testing.T) {
 			if got, want := version.SourceDigest, mustSourceDigest(t, spec.Files); got != want {
 				t.Fatalf("%s source digest = %q, want %q", name, got, want)
 			}
-			if got := driverpkg.DriverVersionEffectiveTrust(driverRecord, version); got != domain.DriverTrustTrusted {
-				t.Fatalf("%s effective trust = %q, want %q", name, got, domain.DriverTrustTrusted)
+			if got := driverpkg.DriverVersionEffectiveTrust(driverRecord, version); got != workflowcatalog.DriverTrustTrusted {
+				t.Fatalf("%s effective trust = %q, want %q", name, got, workflowcatalog.DriverTrustTrusted)
 			}
 			var runnerSpecs []driverpkg.DriverRunnerSpec
 			if err := json.Unmarshal([]byte(version.Manifest["runners"]), &runnerSpecs); err != nil {

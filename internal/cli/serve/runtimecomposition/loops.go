@@ -19,10 +19,10 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/serveadapter"
 	driverexecutor "github.com/tysonthomas9/loomcli/internal/driver"
+	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/trigger"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 )
 
@@ -60,13 +60,15 @@ func buildExecutionRuntimePasses(
 	if err := validateExecutionRuntimePassCapabilities(st, executionCapability, artifactsCapability); err != nil {
 		return serveadapter.ExecutionRuntimePasses{}, err
 	}
-	awaitTimeoutSweeper := &driverexecutor.AwaitTimeoutSweeper{
+	awaitTimeoutSweeper := &trigger.AwaitTimeoutSweeper{
 		Store: st, WorkspaceKey: config.WorkspaceScope,
 		Resolver:   serveadapter.NewAwaitTimeoutExecutionResolver(executionCapability),
 		BatchLimit: config.AwaitSweepBatch,
 	}
 	passes := serveadapter.ExecutionRuntimePasses{
-		AwaitTimeouts: serveadapter.BuildAwaitTimeoutRuntimePass(awaitTimeoutSweeper.RunOnce),
+		AwaitTimeouts: serveadapter.BuildAwaitTimeoutRuntimePass(func(ctx context.Context) (serveadapter.AwaitTimeoutRuntimeResult, error) {
+			return awaitTimeoutSweeper.RunOnce(ctx)
+		}),
 	}
 	if !config.DriverExecutorEnabled {
 		return passes, nil

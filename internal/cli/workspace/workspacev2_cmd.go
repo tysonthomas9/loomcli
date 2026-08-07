@@ -189,10 +189,10 @@ func runWorkspaceShow(_ *cobra.Command, args []string) error {
 		}
 		if wsShowJSON {
 			return cmdstore.WriteJSON(struct {
-				Workspace *domain.Workspace      `json:"workspace"`
-				Repos     []*domain.Repo         `json:"repos"`
-				Agents    []*domain.AgentService `json:"agents"`
-				Roles     []*domain.Role         `json:"roles"`
+				Workspace *workspacemodule.Workspace    `json:"workspace"`
+				Repos     []*workspacemodule.Repository `json:"repos"`
+				Agents    []*domain.AgentService        `json:"agents"`
+				Roles     []*domain.Role                `json:"roles"`
 			}{ws, repos, agents, roles})
 		}
 		fmt.Printf("Workspace:    %s\n", ws.Key)
@@ -217,10 +217,15 @@ func runWorkspaceShow(_ *cobra.Command, args []string) error {
 // in parallel. Each List is independent and goes over HTTP, so serial
 // fan-out adds 2-3× round-trip latency for no benefit. Returns the first
 // error any of the four sub-fetches produces.
-func gatherWorkspaceDetails(ctx context.Context, s store.Store, workspace workspacemodule.API, key string) (*domain.Workspace, []*domain.Repo, []*domain.AgentService, []*domain.Role, error) {
+type workspaceDetailStore interface {
+	AgentServices() store.AgentServiceStore
+	Roles() store.RoleStore
+}
+
+func gatherWorkspaceDetails(ctx context.Context, s workspaceDetailStore, workspace workspacemodule.API, key string) (*workspacemodule.Workspace, []*workspacemodule.Repository, []*domain.AgentService, []*domain.Role, error) {
 	var (
-		ws     *domain.Workspace
-		repos  []*domain.Repo
+		ws     *workspacemodule.Workspace
+		repos  []*workspacemodule.Repository
 		agents []*domain.AgentService
 		roles  []*domain.Role
 	)
@@ -234,7 +239,7 @@ func gatherWorkspaceDetails(ctx context.Context, s store.Store, workspace worksp
 		if listErr != nil {
 			return listErr
 		}
-		repos = make([]*domain.Repo, len(values))
+		repos = make([]*workspacemodule.Repository, len(values))
 		for index := range values {
 			value := values[index]
 			repos[index] = &value

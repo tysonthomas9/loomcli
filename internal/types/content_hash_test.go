@@ -3,6 +3,8 @@ package types
 import (
 	"testing"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 func TestComputeContentHash_Determinism(t *testing.T) {
@@ -76,7 +78,7 @@ func TestComputeContentHash_FieldDifferences(t *testing.T) {
 		{
 			name: "Comments difference",
 			modify: func(i *Issue) {
-				i.Comments = []*Comment{
+				i.Comments = []*workitems.Comment{
 					{
 						ID:      1,
 						IssueID: "issue-1",
@@ -203,13 +205,13 @@ func TestComputeContentHash_DependencyOrder(t *testing.T) {
 }
 
 func TestComputeContentHash_CommentOrder(t *testing.T) {
-	comment1 := &Comment{
+	comment1 := &workitems.Comment{
 		ID:      1,
 		IssueID: "issue-1",
 		Author:  "user1",
 		Text:    "First comment",
 	}
-	comment2 := &Comment{
+	comment2 := &workitems.Comment{
 		ID:      2,
 		IssueID: "issue-1",
 		Author:  "user2",
@@ -217,10 +219,10 @@ func TestComputeContentHash_CommentOrder(t *testing.T) {
 	}
 
 	issue1 := createBaseIssue()
-	issue1.Comments = []*Comment{comment1, comment2}
+	issue1.Comments = []*workitems.Comment{comment1, comment2}
 
 	issue2 := createBaseIssue()
-	issue2.Comments = []*Comment{
+	issue2.Comments = []*workitems.Comment{
 		{
 			ID:      2,
 			IssueID: "issue-1",

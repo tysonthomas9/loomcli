@@ -14,14 +14,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
+	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/trigger"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
@@ -105,14 +107,14 @@ func newApprovalsHarnessWithExecution(t *testing.T, executionAvailable bool) *ap
 	}
 	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
 		WorkspaceKey: approvalsTestWS, DriverID: "approval-gate", Name: "approval-gate",
-		OwnerType: domain.DriverOwnerSystem, Status: domain.DriverStatusActive,
+		OwnerType: workflowcatalog.DriverOwnerSystem, Status: workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatalf("Create driver: %v", err)
 	}
 	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
 		WorkspaceKey: approvalsTestWS, VersionID: "v1", DriverID: "approval-gate", Version: 1,
 		SourceDigest: "sha256:source", BundleDigest: "sha256:bundle",
-		ValidationStatus: domain.DriverVersionValidationPassed,
+		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
 	}
@@ -262,7 +264,7 @@ func (h *approvalsHarness) post(t *testing.T, call approvalCall) (*http.Response
 	return resp, decoded
 }
 
-func (h *approvalsHarness) journalEvents(t *testing.T) []*domain.TriggerEvent {
+func (h *approvalsHarness) journalEvents(t *testing.T) []*automation.Event {
 	t.Helper()
 	events, err := h.store.TriggerEvents().List(context.Background(), approvalsTestWS, store.TriggerEventFilter{})
 	if err != nil {

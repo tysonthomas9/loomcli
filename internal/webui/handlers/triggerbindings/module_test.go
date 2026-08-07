@@ -16,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -34,8 +35,8 @@ func seededMux(t *testing.T) (*http.ServeMux, store.Store) {
 		WorkspaceKey: "WS",
 		DriverID:     "driver-1",
 		Name:         "epic-runner",
-		OwnerType:    domain.DriverOwnerSystem,
-		Status:       domain.DriverStatusActive,
+		OwnerType:    workflowcatalog.DriverOwnerSystem,
+		Status:       workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatalf("create driver: %v", err)
 	}
@@ -46,7 +47,7 @@ func seededMux(t *testing.T) (*http.ServeMux, store.Store) {
 		Version:          1,
 		SourceDigest:     "sha256:source",
 		BundleDigest:     "sha256:bundle",
-		ValidationStatus: domain.DriverVersionValidationPassed,
+		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("create driver version: %v", err)
 	}
@@ -231,7 +232,7 @@ func (a *testAutomationAPI) UpdateBinding(ctx context.Context, _ authority.Opera
 		RetryBackoffSeconds: command.Patch.RetryBackoffSeconds,
 	}
 	if command.Patch.ClearActorFilter {
-		patch.ActorFilter = &domain.TriggerActorFilter{}
+		patch.ActorFilter = &automation.ActorFilter{}
 	} else {
 		patch.ActorFilter = command.Patch.ActorFilter
 	}
@@ -327,7 +328,7 @@ func (a *testAutomationAPI) DispatchBinding(ctx context.Context, _ authority.Ope
 	return &automation.DispatchBindingResult{BindingID: binding.BindingID, RunID: run.RunID, RunSnapshot: snapshot}, nil
 }
 
-func automationBinding(binding *domain.TriggerBinding) *automation.Binding {
+func automationBinding(binding *automation.Binding) *automation.Binding {
 	if binding == nil {
 		return nil
 	}
@@ -406,7 +407,7 @@ func TestCreateBinding_CreatesThenDisables(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create status = %d, want 201; body=%s", rec.Code, rec.Body.String())
 	}
-	var binding domain.TriggerBinding
+	var binding automation.Binding
 	if err := json.Unmarshal(rec.Body.Bytes(), &binding); err != nil {
 		t.Fatalf("decode binding: %v", err)
 	}
@@ -420,7 +421,7 @@ func TestCreateBinding_CreatesThenDisables(t *testing.T) {
 	if rec2.Code != http.StatusOK {
 		t.Fatalf("disable status = %d, want 200; body=%s", rec2.Code, rec2.Body.String())
 	}
-	var disabled domain.TriggerBinding
+	var disabled automation.Binding
 	if err := json.Unmarshal(rec2.Body.Bytes(), &disabled); err != nil {
 		t.Fatalf("decode disabled: %v", err)
 	}
@@ -584,7 +585,7 @@ func TestCreateBinding_IsIdempotent(t *testing.T) {
 	if rec2.Code != http.StatusOK {
 		t.Fatalf("re-create status = %d, want 200 ensure; body=%s", rec2.Code, rec2.Body.String())
 	}
-	var binding domain.TriggerBinding
+	var binding automation.Binding
 	if err := json.Unmarshal(rec2.Body.Bytes(), &binding); err != nil {
 		t.Fatalf("decode ensure binding: %v", err)
 	}
@@ -763,14 +764,14 @@ func TestCreateBinding_WorkflowTargetFreshStoreReturns201Then200(t *testing.T) {
 			}
 			if _, err := st.Drivers().Create(ctx, store.DriverCreate{
 				WorkspaceKey: workspace, DriverID: "builtin-review", Name: workflow,
-				OwnerType: domain.DriverOwnerSystem, Status: domain.DriverStatusActive,
+				OwnerType: workflowcatalog.DriverOwnerSystem, Status: workflowcatalog.DriverStatusActive,
 			}); err != nil {
 				return err
 			}
 			_, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
 				WorkspaceKey: workspace, VersionID: "builtin-review-v1", DriverID: "builtin-review",
 				Version: 1, SourceDigest: "sha256:builtin", BundleDigest: "sha256:bundle",
-				ValidationStatus: domain.DriverVersionValidationPassed,
+				ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 			})
 			if err == nil {
 				if _, err = st.ApproveDriverVersionForTest(ctx, workspace, "builtin-review", "builtin-review-v1"); err == nil {
@@ -846,7 +847,7 @@ func TestCreateBinding_CronDerivesRouteKey(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("cron create status = %d, want 201; body=%s", rec.Code, rec.Body.String())
 	}
-	var b domain.TriggerBinding
+	var b automation.Binding
 	if err := json.Unmarshal(rec.Body.Bytes(), &b); err != nil {
 		t.Fatalf("decode binding: %v", err)
 	}
@@ -883,7 +884,7 @@ func TestCreateBinding_InternalDerivesRouteKey(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("internal create status = %d, want 201; body=%s", rec.Code, rec.Body.String())
 	}
-	var b domain.TriggerBinding
+	var b automation.Binding
 	if err := json.Unmarshal(rec.Body.Bytes(), &b); err != nil {
 		t.Fatalf("decode binding: %v", err)
 	}
@@ -915,7 +916,7 @@ func TestCreateBinding_InternalDerivesRouteKey(t *testing.T) {
 	if rec4.Code != http.StatusCreated {
 		t.Fatalf("internal explicit-route create status = %d, want 201; body=%s", rec4.Code, rec4.Body.String())
 	}
-	var b4 domain.TriggerBinding
+	var b4 automation.Binding
 	if err := json.Unmarshal(rec4.Body.Bytes(), &b4); err != nil {
 		t.Fatalf("decode binding: %v", err)
 	}
@@ -935,7 +936,7 @@ func TestCreateBinding_RunInputStoredOnSourceConfigRef(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create status = %d, want 201; body=%s", rec.Code, rec.Body.String())
 	}
-	var b domain.TriggerBinding
+	var b automation.Binding
 	if err := json.Unmarshal(rec.Body.Bytes(), &b); err != nil {
 		t.Fatalf("decode binding: %v", err)
 	}

@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	legacyproviders "github.com/tysonthomas9/loomcli/internal/connector/providers"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	legacyproviders "github.com/tysonthomas9/loomcli/internal/infra/connectorsproviders/providerimpl"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 )
 

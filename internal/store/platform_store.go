@@ -7,6 +7,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
@@ -14,45 +18,45 @@ type DriverCreate struct {
 	WorkspaceKey string
 	DriverID     string
 	Name         string
-	OwnerType    domain.DriverOwnerType
+	OwnerType    workflowcatalog.DriverOwnerType
 	OwnerRef     string
 	Description  string
 	// Status exists for generic draft creation compatibility. FleetDB rejects
 	// active here; version activation belongs to Workflow Catalog's typed
 	// ActivateVersion command.
-	Status domain.DriverStatus
+	Status workflowcatalog.DriverStatus
 	// TrustLevel gates sandbox placement (§7 step 9). Stamped by the
 	// registration path server-side, never from client input; empty means
 	// untrusted (fail closed).
-	TrustLevel domain.DriverTrustLevel
+	TrustLevel workflowcatalog.DriverTrustLevel
 	Metadata   map[string]string
 }
 
 type DriverFilter struct {
 	Name   string
-	Status domain.DriverStatus
+	Status workflowcatalog.DriverStatus
 	Limit  int
 }
 
 type DriverUpdate struct {
 	Name        *string
-	OwnerType   *domain.DriverOwnerType
+	OwnerType   *workflowcatalog.DriverOwnerType
 	OwnerRef    *string
 	Description *string
 	// Status retains non-activation administration such as disable/archive.
 	// FleetDB rejects DriverStatusActive on this generic surface.
-	Status *domain.DriverStatus
+	Status *workflowcatalog.DriverStatus
 	// TrustLevel is the explicit ops elevation/demotion path; workflow
 	// runtimes never reach a surface that sets it.
-	TrustLevel *domain.DriverTrustLevel
+	TrustLevel *workflowcatalog.DriverTrustLevel
 	Metadata   *map[string]string
 }
 
 type DriverStore interface {
-	Create(ctx context.Context, in DriverCreate) (*domain.Driver, error)
-	Get(ctx context.Context, workspaceKey, driverID string) (*domain.Driver, error)
-	List(ctx context.Context, workspaceKey string, filter DriverFilter) ([]*domain.Driver, error)
-	Update(ctx context.Context, workspaceKey, driverID string, patch DriverUpdate) (*domain.Driver, error)
+	Create(ctx context.Context, in DriverCreate) (*workflowcatalog.Driver, error)
+	Get(ctx context.Context, workspaceKey, driverID string) (*workflowcatalog.Driver, error)
+	List(ctx context.Context, workspaceKey string, filter DriverFilter) ([]*workflowcatalog.Driver, error)
+	Update(ctx context.Context, workspaceKey, driverID string, patch DriverUpdate) (*workflowcatalog.Driver, error)
 }
 
 type DriverVersionCreate struct {
@@ -67,20 +71,20 @@ type DriverVersionCreate struct {
 	Runtime          string
 	Manifest         map[string]string
 	BuildDiagnostics string
-	ValidationStatus domain.DriverVersionValidationStatus
+	ValidationStatus workflowcatalog.DriverVersionValidationStatus
 	CreatedBy        string
 }
 
 type DriverVersionFilter struct {
 	DriverID         string
-	ValidationStatus domain.DriverVersionValidationStatus
+	ValidationStatus workflowcatalog.DriverVersionValidationStatus
 	Limit            int
 }
 
 type DriverVersionStore interface {
-	Create(ctx context.Context, in DriverVersionCreate) (*domain.DriverVersion, error)
-	Get(ctx context.Context, workspaceKey, versionID string) (*domain.DriverVersion, error)
-	List(ctx context.Context, workspaceKey string, filter DriverVersionFilter) ([]*domain.DriverVersion, error)
+	Create(ctx context.Context, in DriverVersionCreate) (*workflowcatalog.DriverVersion, error)
+	Get(ctx context.Context, workspaceKey, versionID string) (*workflowcatalog.DriverVersion, error)
+	List(ctx context.Context, workspaceKey string, filter DriverVersionFilter) ([]*workflowcatalog.DriverVersion, error)
 }
 
 type WorkerProfileCreate struct {
@@ -210,12 +214,12 @@ type TriggerBindingCreate struct {
 	DriverVersionID      string
 	TargetEntrypoint     string
 	TargetAgentServiceID string
-	ConcurrencyPolicy    domain.TriggerBindingConcurrencyPolicy
+	ConcurrencyPolicy    automation.BindingConcurrencyPolicy
 	IdempotencyPolicy    string
 	AuthPolicy           string
 	WebhookSecret        string
 	SubjectKeyTemplate   string
-	ActorFilter          *domain.TriggerActorFilter
+	ActorFilter          *automation.ActorFilter
 	RetryMaxAttempts     int
 	RetryBackoffSeconds  int
 	Schedule             string
@@ -294,14 +298,14 @@ type TriggerBindingUpdate struct {
 	DriverVersionID      *string
 	TargetEntrypoint     *string
 	TargetAgentServiceID *string
-	ConcurrencyPolicy    *domain.TriggerBindingConcurrencyPolicy
+	ConcurrencyPolicy    *automation.BindingConcurrencyPolicy
 	IdempotencyPolicy    *string
 	AuthPolicy           *string
 	WebhookSecret        *string
 	SubjectKeyTemplate   *string
 	// ActorFilter replaces the whole filter when set; a zero-valued filter
 	// (no constraints) clears it, mirroring fleet-db's patch semantics.
-	ActorFilter         *domain.TriggerActorFilter
+	ActorFilter         *automation.ActorFilter
 	RetryMaxAttempts    *int
 	RetryBackoffSeconds *int
 	Schedule            *string
@@ -311,11 +315,11 @@ type TriggerBindingUpdate struct {
 }
 
 type TriggerBindingStore interface {
-	Create(ctx context.Context, in TriggerBindingCreate) (*domain.TriggerBinding, error)
-	Get(ctx context.Context, workspaceKey, bindingID string) (*domain.TriggerBinding, error)
-	GetByRouteKey(ctx context.Context, workspaceKey, routeKey string) (*domain.TriggerBinding, error)
-	List(ctx context.Context, workspaceKey string, filter TriggerBindingFilter) ([]*domain.TriggerBinding, error)
-	Update(ctx context.Context, workspaceKey, bindingID string, patch TriggerBindingUpdate) (*domain.TriggerBinding, error)
+	Create(ctx context.Context, in TriggerBindingCreate) (*automation.Binding, error)
+	Get(ctx context.Context, workspaceKey, bindingID string) (*automation.Binding, error)
+	GetByRouteKey(ctx context.Context, workspaceKey, routeKey string) (*automation.Binding, error)
+	List(ctx context.Context, workspaceKey string, filter TriggerBindingFilter) ([]*automation.Binding, error)
+	Update(ctx context.Context, workspaceKey, bindingID string, patch TriggerBindingUpdate) (*automation.Binding, error)
 	// Delete removes a binding. Deleting is deliberately separate from grant
 	// revocation (Decision 6): the caller revokes the binding's connector grants
 	// so no credentials outlive it. A missing binding wraps domain.ErrNotFound.
@@ -340,8 +344,8 @@ type TriggerEventFilter struct {
 
 // TriggerEventStore is a read-only view of persisted trigger events.
 type TriggerEventStore interface {
-	Get(ctx context.Context, workspaceKey, eventID string) (*domain.TriggerEvent, error)
-	List(ctx context.Context, workspaceKey string, filter TriggerEventFilter) ([]*domain.TriggerEvent, error)
+	Get(ctx context.Context, workspaceKey, eventID string) (*automation.Event, error)
+	List(ctx context.Context, workspaceKey string, filter TriggerEventFilter) ([]*automation.Event, error)
 }
 
 // TriggerEventAppender is an OPTIONAL TriggerEventStore capability (detected
@@ -359,14 +363,14 @@ type TriggerEventStore interface {
 // Production FleetDB exposes this capability only through its service-auth
 // producer route; human bearer requests cannot forge event provenance.
 type TriggerEventAppender interface {
-	AppendTriggerEvent(ctx context.Context, event *domain.TriggerEvent) (*domain.TriggerEvent, error)
+	AppendTriggerEvent(ctx context.Context, event *automation.Event) (*automation.Event, error)
 }
 
 // TriggerDeliveryFilter narrows TriggerDelivery listings.
 type TriggerDeliveryFilter struct {
 	TriggerEventID   string
 	TriggerBindingID string
-	Status           domain.TriggerDeliveryStatus
+	Status           automation.DeliveryStatus
 	Limit            int
 }
 
@@ -387,7 +391,7 @@ type TriggerDeliveryDueFilter struct {
 // failed once the binding's RetryMaxAttempts is reached) make it final.
 // A zero Attempt keeps the stored attempt count.
 type TriggerDeliveryResultUpdate struct {
-	Status      domain.TriggerDeliveryStatus
+	Status      automation.DeliveryStatus
 	Attempt     int
 	NextRetryAt *time.Time
 	ErrorClass  string
@@ -399,20 +403,20 @@ type TriggerDeliveryResultUpdate struct {
 // retry-sweeper attempt outcomes. Deliveries themselves are created by the
 // dispatch path (TriggerRouteDispatcher), never directly through this store.
 type TriggerDeliveryStore interface {
-	Get(ctx context.Context, workspaceKey, deliveryID string) (*domain.TriggerDelivery, error)
-	List(ctx context.Context, workspaceKey string, filter TriggerDeliveryFilter) ([]*domain.TriggerDelivery, error)
+	Get(ctx context.Context, workspaceKey, deliveryID string) (*automation.Delivery, error)
+	List(ctx context.Context, workspaceKey string, filter TriggerDeliveryFilter) ([]*automation.Delivery, error)
 	// ListDue returns deliveries awaiting the retry sweeper whose due time
 	// is <= filter.Now, in due order (earliest first).
-	ListDue(ctx context.Context, workspaceKey string, filter TriggerDeliveryDueFilter) ([]*domain.TriggerDelivery, error)
+	ListDue(ctx context.Context, workspaceKey string, filter TriggerDeliveryDueFilter) ([]*automation.Delivery, error)
 	// UpdateResult records one attempt outcome. A failed result whose
 	// Attempt reaches the binding's RetryMaxAttempts is forced terminal:
 	// status stays failed, ErrorClass becomes
-	// domain.TriggerDeliveryErrorRetriesExhausted and NextRetryAt clears.
+	// automation.TriggerDeliveryErrorRetriesExhausted and NextRetryAt clears.
 	// Final deliveries (dispatched, rejected, duplicate, superseded,
 	// replayed, terminal failed) reject transitions to a different status
 	// with domain.ErrInvalidTransition; re-applying the same status is
 	// idempotent.
-	UpdateResult(ctx context.Context, workspaceKey, deliveryID string, update TriggerDeliveryResultUpdate) (*domain.TriggerDelivery, error)
+	UpdateResult(ctx context.Context, workspaceKey, deliveryID string, update TriggerDeliveryResultUpdate) (*automation.Delivery, error)
 }
 
 // TriggerRouteDispatch carries the normalized fields an adapter resolves from
@@ -441,11 +445,11 @@ type TriggerRouteDispatch struct {
 // JSON tags pin fleet-db's BREAKING router-v2 webhook wire: the response
 // carries deliveries[] only, with no top-level driver_run_id.
 type TriggerRouteDelivery struct {
-	DeliveryID      string                       `json:"delivery_id"`
-	BindingID       string                       `json:"trigger_binding_id"`
-	RunID           string                       `json:"driver_run_id"`
-	Status          domain.TriggerDeliveryStatus `json:"status"`
-	RejectionReason string                       `json:"rejection_reason,omitempty"`
+	DeliveryID      string                    `json:"delivery_id"`
+	BindingID       string                    `json:"trigger_binding_id"`
+	RunID           string                    `json:"driver_run_id"`
+	Status          automation.DeliveryStatus `json:"status"`
+	RejectionReason string                    `json:"rejection_reason,omitempty"`
 }
 
 // TriggerRouteDispatchResult collects the fan-out legs of one dispatch in

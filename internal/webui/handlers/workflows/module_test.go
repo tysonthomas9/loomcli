@@ -146,9 +146,9 @@ func (adapter workflowRunStoreTestCatalog) AuthorManagedVersion(
 			WorkspaceKey: intent.WorkspaceKey,
 			DriverID:     intent.DriverID,
 			Name:         intent.DriverName,
-			OwnerType:    domain.DriverOwnerSystem,
-			Status:       domain.DriverStatusDraft,
-			TrustLevel:   domain.DriverTrustTrusted,
+			OwnerType:    workflowcatalog.DriverOwnerSystem,
+			Status:       workflowcatalog.DriverStatusDraft,
+			TrustLevel:   workflowcatalog.DriverTrustTrusted,
 			Metadata:     map[string]string{},
 		})
 		createdDriver = err == nil
@@ -190,7 +190,7 @@ func (adapter workflowRunStoreTestCatalog) AuthorManagedVersion(
 			Runtime:          intent.Runtime,
 			Manifest:         manifest,
 			BuildDiagnostics: intent.BuildDiagnostics,
-			ValidationStatus: domain.DriverVersionValidationPassed,
+			ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 			CreatedBy:        "system",
 		})
 		createdVersion = err == nil
@@ -208,7 +208,7 @@ func (adapter workflowRunStoreTestCatalog) AuthorManagedVersion(
 
 	activated := false
 	if command.Activate {
-		trusted := domain.DriverTrustTrusted
+		trusted := workflowcatalog.DriverTrustTrusted
 		driverRecord, err = adapter.store.Drivers().Update(ctx, intent.WorkspaceKey, intent.DriverID, store.DriverUpdate{
 			TrustLevel: &trusted,
 		})
@@ -521,14 +521,14 @@ func TestCreateDriverRunServerStampsWorkflowBindingSourceRef(t *testing.T) {
 	}
 	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
 		WorkspaceKey: workspace, DriverID: driverID, Name: "demo",
-		Status: domain.DriverStatusActive,
+		Status: workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatalf("create driver: %v", err)
 	}
 	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
 		WorkspaceKey: workspace, DriverID: driverID, VersionID: versionID, Version: 1,
 		SourceDigest: "sha256:source", BundleDigest: "sha256:bundle",
-		ValidationStatus: domain.DriverVersionValidationPassed,
+		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("create driver version: %v", err)
 	}
@@ -727,7 +727,7 @@ func TestCreateWorkflowRunRegistersBuiltinEpicRunner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get built-in driver: %v", err)
 	}
-	if driverRecord.Status != domain.DriverStatusActive || driverRecord.ActiveVersionID == "" {
+	if driverRecord.Status != workflowcatalog.DriverStatusActive || driverRecord.ActiveVersionID == "" {
 		t.Fatalf("driver = %+v, want active built-in driver", driverRecord)
 	}
 	version, err := st.DriverVersions().Get(ctx, "TEST", driverRecord.ActiveVersionID)
@@ -757,9 +757,9 @@ func TestCreateWorkflowRunRefreshesStaleBuiltinRunnerManifest(t *testing.T) {
 		WorkspaceKey: "TEST",
 		DriverID:     BuiltinEpicRunnerWorkflowName,
 		Name:         BuiltinEpicRunnerWorkflowName,
-		OwnerType:    domain.DriverOwnerUser,
-		Status:       domain.DriverStatusActive,
-		TrustLevel:   domain.DriverTrustTrusted,
+		OwnerType:    workflowcatalog.DriverOwnerUser,
+		Status:       workflowcatalog.DriverStatusActive,
+		TrustLevel:   workflowcatalog.DriverTrustTrusted,
 	}); err != nil {
 		t.Fatalf("create stale built-in driver: %v", err)
 	}
@@ -773,7 +773,7 @@ func TestCreateWorkflowRunRefreshesStaleBuiltinRunnerManifest(t *testing.T) {
 		BundleDigest:     "sha256:stale",
 		Runtime:          driver.RuntimeFlueNode,
 		Manifest:         map[string]string{"workflow_name": BuiltinEpicRunnerWorkflowName},
-		ValidationStatus: domain.DriverVersionValidationPassed,
+		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 		CreatedBy:        "system",
 	}); err != nil {
 		t.Fatalf("create stale built-in version: %v", err)
@@ -1266,9 +1266,9 @@ func TestCreateWorkflowVersionRegistersWithoutActivation(t *testing.T) {
 		t.Fatalf("status = %d body=%s, want 201", rec.Code, rec.Body.String())
 	}
 	var response struct {
-		Activated bool                  `json:"activated"`
-		Driver    *domain.Driver        `json:"driver"`
-		Version   *domain.DriverVersion `json:"version"`
+		Activated bool                           `json:"activated"`
+		Driver    *workflowcatalog.Driver        `json:"driver"`
+		Version   *workflowcatalog.DriverVersion `json:"version"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode response: %v", err)
@@ -1299,8 +1299,8 @@ func seededWorkflowStore(t *testing.T, ctx context.Context) *memstore.Store {
 		WorkspaceKey: "TEST",
 		DriverID:     "demo",
 		Name:         "demo",
-		OwnerType:    domain.DriverOwnerUser,
-		Status:       domain.DriverStatusActive,
+		OwnerType:    workflowcatalog.DriverOwnerUser,
+		Status:       workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatalf("create driver: %v", err)
 	}
@@ -1311,7 +1311,7 @@ func seededWorkflowStore(t *testing.T, ctx context.Context) *memstore.Store {
 		Version:          1,
 		SourceDigest:     "sha256:source",
 		BundleDigest:     "sha256:bundle",
-		ValidationStatus: domain.DriverVersionValidationPassed,
+		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("create driver version: %v", err)
 	}

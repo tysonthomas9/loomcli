@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
+
 	"github.com/tysonthomas9/loomcli/internal/types"
 )
 
@@ -268,7 +270,7 @@ func TestDetailsToDetailData(t *testing.T) {
 				DependencyType: types.DepBlocks,
 			},
 		},
-		Comments: []*types.Comment{
+		Comments: []*workitems.Comment{
 			{ID: 1, IssueID: "test-1", Author: "user", Text: "hello", CreatedAt: now},
 		},
 	}
@@ -332,7 +334,7 @@ func TestCountIssuesResponse_ZeroValueGroups(t *testing.T) {
 
 func TestCommentToData(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
-	c := &types.Comment{
+	c := &workitems.Comment{
 		ID:        42,
 		IssueID:   "test-1",
 		Author:    "user",
@@ -351,10 +353,10 @@ func TestCommentToData(t *testing.T) {
 
 func TestEventToData(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
-	e := &types.Event{
+	e := &workitems.Event{
 		ID:        99,
 		IssueID:   "test-1",
-		EventType: types.EventCreated,
+		EventType: workitems.EventCreated,
 		Actor:     "user",
 		CreatedAt: now,
 	}

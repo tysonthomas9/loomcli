@@ -15,7 +15,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/tysonthomas9/loomcli/internal/trigger"
+	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 )
 
 // bindingConfig is the "binding-config" op handler. Flow: verify the caller

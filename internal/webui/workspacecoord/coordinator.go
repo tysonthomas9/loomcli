@@ -426,16 +426,16 @@ func (s *workspaceServiceImpl) workspaceJobFromStore(ctx context.Context, key st
 	}
 	job := &WorkspaceJob{ID: key, WorkspaceID: key}
 	switch ws.State {
-	case domain.WorkspaceStateCreating:
+	case workspacemodule.StateCreating:
 		job.Status = JobStatusRunning
 		job.Progress = "creating workspace..."
-	case domain.WorkspaceStateCloning:
+	case workspacemodule.StateCloning:
 		job.Status = JobStatusRunning
 		job.Progress = "cloning repository..."
-	case domain.WorkspaceStateInitializing:
+	case workspacemodule.StateInitializing:
 		job.Status = JobStatusRunning
 		job.Progress = "initializing workspace..."
-	case domain.WorkspaceStateError:
+	case workspacemodule.StateError:
 		job.Status = JobStatusFailed
 		job.Error = ws.ErrorMessage
 		if job.Error == "" {
@@ -490,7 +490,7 @@ func (s *workspaceServiceImpl) deleteDurableWorkspace(ctx context.Context, refer
 	return deleted.Key, nil
 }
 
-func (s *workspaceServiceImpl) resolveStoreWorkspaceForDefault(ctx context.Context, name string) (*domain.Workspace, *ServiceError) {
+func (s *workspaceServiceImpl) resolveStoreWorkspaceForDefault(ctx context.Context, name string) (*workspacemodule.Workspace, *ServiceError) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, ErrValidation("workspace name is required")

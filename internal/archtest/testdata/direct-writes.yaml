@@ -1,6 +1,6 @@
 schema_version: 1
 status: complete
-source_head: 4d43a51770a8b6c67b022446a3b9c706a854f428
+source_head: 2242517f5206cd8e38de75f5765d70ca32269587
 adapter_roots:
   - internal/app
   - internal/cli
@@ -88,6 +88,9 @@ persistence_packages:
   - path: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/repositoryadmission
     receiver_names: [RepositoryAdmissionTransport]
     receiver_suffixes: []
+  - path: github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore
+    receiver_names: [LocalStore, Store]
+    receiver_suffixes: []
   - path: github.com/tysonthomas9/loomcli/internal/modules/agents
     receiver_names: [AgentIdentityStore, BootstrapStore, DesiredStateStore, LifecycleStore, OwnershipStore, RolePromptRepairStore, RoleStore]
     receiver_suffixes: []
@@ -120,9 +123,6 @@ persistence_packages:
     receiver_suffixes: []
   - path: github.com/tysonthomas9/loomcli/internal/sessions/eventstore
     receiver_names: [Store]
-    receiver_suffixes: []
-  - path: github.com/tysonthomas9/loomcli/internal/stackstore
-    receiver_names: [LocalStore, Store]
     receiver_suffixes: []
   - path: github.com/tysonthomas9/loomcli/internal/store
     receiver_names: []
@@ -440,6 +440,10 @@ receiver_surfaces:
     package: github.com/tysonthomas9/loomcli/internal/infra/fleetdb
     method_set: fleetdb_client
     capability_owner: fleet-db
+  - receiver: "*github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore.LocalStore"
+    package: github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore
+    method_set: stack_store
+    capability_owner: sourcecontrol
   - receiver: "*github.com/tysonthomas9/loomcli/internal/sessions.Session"
     package: github.com/tysonthomas9/loomcli/internal/sessions
     method_set: session
@@ -452,10 +456,6 @@ receiver_surfaces:
     package: github.com/tysonthomas9/loomcli/internal/sessions/eventstore
     method_set: session_event_store
     capability_owner: interaction
-  - receiver: "*github.com/tysonthomas9/loomcli/internal/stackstore.LocalStore"
-    package: github.com/tysonthomas9/loomcli/internal/stackstore
-    method_set: stack_store
-    capability_owner: sourcecontrol
   - receiver: "*github.com/tysonthomas9/loomcli/internal/usage.Store"
     package: github.com/tysonthomas9/loomcli/internal/usage
     method_set: usage
@@ -472,10 +472,50 @@ receiver_surfaces:
     package: github.com/tysonthomas9/loomcli/internal/app/agentprovisioning
     method_set: agentprovisioning_progress
     capability_owner: named_application_workflow
+  - receiver: github.com/tysonthomas9/loomcli/internal/cli/config.configStore
+    package: github.com/tysonthomas9/loomcli/internal/cli/config
+    method_set: composite_store
+    capability_owner: read_projection
   - receiver: github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr/admissionstore.Store
     package: github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr/admissionstore
     method_set: workspace_admission_store
     capability_owner: workspace
+  - receiver: github.com/tysonthomas9/loomcli/internal/cli/workspace.workspaceDetailStore
+    package: github.com/tysonthomas9/loomcli/internal/cli/workspace
+    method_set: composite_store
+    capability_owner: read_projection
+  - receiver: github.com/tysonthomas9/loomcli/internal/driver.awaitTimeoutStore
+    package: github.com/tysonthomas9/loomcli/internal/driver
+    method_set: composite_store
+    capability_owner: read_projection
+  - receiver: github.com/tysonthomas9/loomcli/internal/driver.driverRunReadStore
+    package: github.com/tysonthomas9/loomcli/internal/driver
+    method_set: composite_store
+    capability_owner: read_projection
+  - receiver: github.com/tysonthomas9/loomcli/internal/driver.executorStore
+    package: github.com/tysonthomas9/loomcli/internal/driver
+    method_set: composite_store
+    capability_owner: read_projection
+  - receiver: github.com/tysonthomas9/loomcli/internal/driver.hostBridgeStore
+    package: github.com/tysonthomas9/loomcli/internal/driver
+    method_set: composite_store
+    capability_owner: read_projection
+  - receiver: github.com/tysonthomas9/loomcli/internal/driver.taskRunListStore
+    package: github.com/tysonthomas9/loomcli/internal/driver
+    method_set: composite_store
+    capability_owner: read_projection
+  - receiver: github.com/tysonthomas9/loomcli/internal/driver.taskRunRequestStore
+    package: github.com/tysonthomas9/loomcli/internal/driver
+    method_set: composite_store
+    capability_owner: read_projection
+  - receiver: github.com/tysonthomas9/loomcli/internal/driver.taskWorktreeStore
+    package: github.com/tysonthomas9/loomcli/internal/driver
+    method_set: composite_store
+    capability_owner: read_projection
+  - receiver: github.com/tysonthomas9/loomcli/internal/driver.workspaceReadStore
+    package: github.com/tysonthomas9/loomcli/internal/driver
+    method_set: composite_store
+    capability_owner: read_projection
   - receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/agentmanagement.AgentManagementTransport
     package: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/agentmanagement
     method_set: fleetdb_agent_management_transport
@@ -492,6 +532,14 @@ receiver_surfaces:
     package: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/repositoryadmission
     method_set: fleetdb_repository_admission_transport
     capability_owner: workspace
+  - receiver: github.com/tysonthomas9/loomcli/internal/infra/interactionlead.RuntimeStore
+    package: github.com/tysonthomas9/loomcli/internal/infra/interactionlead
+    method_set: composite_store
+    capability_owner: read_projection
+  - receiver: github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore.Store
+    package: github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore
+    method_set: stack_store
+    capability_owner: sourcecontrol
   - receiver: github.com/tysonthomas9/loomcli/internal/modules/agents.AgentIdentityStore
     package: github.com/tysonthomas9/loomcli/internal/modules/agents
     method_set: agents_identity
@@ -612,10 +660,6 @@ receiver_surfaces:
     package: github.com/tysonthomas9/loomcli/internal/modules/workspace
     method_set: workspace_repository_catalog
     capability_owner: workspace
-  - receiver: github.com/tysonthomas9/loomcli/internal/stackstore.Store
-    package: github.com/tysonthomas9/loomcli/internal/stackstore
-    method_set: stack_store
-    capability_owner: sourcecontrol
   - receiver: github.com/tysonthomas9/loomcli/internal/store.AgentInboxMessageStore
     package: github.com/tysonthomas9/loomcli/internal/store
     method_set: store_repository
@@ -784,6 +828,42 @@ receiver_surfaces:
     package: github.com/tysonthomas9/loomcli/internal/store
     method_set: store_repository
     capability_owner: workspace
+  - receiver: github.com/tysonthomas9/loomcli/internal/webui/driverapidependencies.Store
+    package: github.com/tysonthomas9/loomcli/internal/webui/driverapidependencies
+    method_set: composite_store
+    capability_owner: read_projection
+  - receiver: github.com/tysonthomas9/loomcli/internal/webui/handlers/agents.agentProjectionStore
+    package: github.com/tysonthomas9/loomcli/internal/webui/handlers/agents
+    method_set: composite_store
+    capability_owner: read_projection
+  - receiver: github.com/tysonthomas9/loomcli/internal/webui/handlers/approvals.approvalStore
+    package: github.com/tysonthomas9/loomcli/internal/webui/handlers/approvals
+    method_set: composite_store
+    capability_owner: read_projection
+  - receiver: github.com/tysonthomas9/loomcli/internal/webui/handlers/connectors.connectorStore
+    package: github.com/tysonthomas9/loomcli/internal/webui/handlers/connectors
+    method_set: composite_store
+    capability_owner: read_projection
+  - receiver: github.com/tysonthomas9/loomcli/internal/webui/handlers/prreview.prReviewStore
+    package: github.com/tysonthomas9/loomcli/internal/webui/handlers/prreview
+    method_set: composite_store
+    capability_owner: read_projection
+  - receiver: github.com/tysonthomas9/loomcli/internal/webui/handlers/taskrunapi.taskRunProjectionStore
+    package: github.com/tysonthomas9/loomcli/internal/webui/handlers/taskrunapi
+    method_set: composite_store
+    capability_owner: read_projection
+  - receiver: github.com/tysonthomas9/loomcli/internal/webui/handlers/terminal.terminalStore
+    package: github.com/tysonthomas9/loomcli/internal/webui/handlers/terminal
+    method_set: composite_store
+    capability_owner: read_projection
+  - receiver: github.com/tysonthomas9/loomcli/internal/webui/handlers/triggerbindings.bindingRunStore
+    package: github.com/tysonthomas9/loomcli/internal/webui/handlers/triggerbindings
+    method_set: composite_store
+    capability_owner: read_projection
+  - receiver: github.com/tysonthomas9/loomcli/internal/webui/handlers/workflows.workflowProjectionStore
+    package: github.com/tysonthomas9/loomcli/internal/webui/handlers/workflows
+    method_set: composite_store
+    capability_owner: read_projection
 function_surfaces:
   - package: github.com/tysonthomas9/loomcli/internal/app/agentprovisioning
     function: New
@@ -833,6 +913,10 @@ function_surfaces:
     function: Phase5FoundationCapabilities
     access: read-only
     capability_owner: read_projection
+  - package: github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore
+    function: Default
+    access: read-only
+    capability_owner: sourcecontrol
   - package: github.com/tysonthomas9/loomcli/internal/modules/agents
     function: New
     access: read-only
@@ -1006,6 +1090,10 @@ function_surfaces:
     access: read-only
     capability_owner: interaction
   - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
+    function: ContentDedupeKey
+    access: read-only
+    capability_owner: interaction
+  - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
     function: New
     access: read-only
     capability_owner: interaction
@@ -1137,14 +1225,14 @@ function_surfaces:
     function: Open
     access: read-only
     capability_owner: interaction
-  - package: github.com/tysonthomas9/loomcli/internal/stackstore
-    function: Default
-    access: read-only
-    capability_owner: sourcecontrol
   - package: github.com/tysonthomas9/loomcli/internal/store
     function: DefaultBindingID
     access: read-only
     capability_owner: automation
+  - package: github.com/tysonthomas9/loomcli/internal/store
+    function: IsNotFound
+    access: read-only
+    capability_owner: workspace
   - package: github.com/tysonthomas9/loomcli/internal/store
     function: OrchestrationSessionFor
     access: read-only
@@ -1705,37 +1793,37 @@ writes:
       aggregate_owner: interaction
       disposition: owner_adapter
     - file: internal/infra/stackstoreadapter/adapter.go
-      receiver: github.com/tysonthomas9/loomcli/internal/stackstore.Store
+      receiver: github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore.Store
       method: AddNode
       count: 1
       aggregate_owner: sourcecontrol
       disposition: owner_adapter
     - file: internal/infra/stackstoreadapter/adapter.go
-      receiver: github.com/tysonthomas9/loomcli/internal/stackstore.Store
+      receiver: github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore.Store
       method: EnsureStack
       count: 1
       aggregate_owner: sourcecontrol
       disposition: owner_adapter
     - file: internal/infra/stackstoreadapter/adapter.go
-      receiver: github.com/tysonthomas9/loomcli/internal/stackstore.Store
+      receiver: github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore.Store
       method: MoveNode
       count: 1
       aggregate_owner: sourcecontrol
       disposition: owner_adapter
     - file: internal/infra/stackstoreadapter/adapter.go
-      receiver: github.com/tysonthomas9/loomcli/internal/stackstore.Store
+      receiver: github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore.Store
       method: RemoveNode
       count: 1
       aggregate_owner: sourcecontrol
       disposition: owner_adapter
     - file: internal/infra/stackstoreadapter/adapter.go
-      receiver: github.com/tysonthomas9/loomcli/internal/stackstore.Store
+      receiver: github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore.Store
       method: SetBase
       count: 1
       aggregate_owner: sourcecontrol
       disposition: owner_adapter
     - file: internal/infra/stackstoreadapter/adapter.go
-      receiver: github.com/tysonthomas9/loomcli/internal/stackstore.Store
+      receiver: github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore.Store
       method: UpdateNode
       count: 2
       aggregate_owner: sourcecontrol

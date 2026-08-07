@@ -108,9 +108,9 @@ func (b *FleetBackend) ListComments(ctx context.Context, id string) ([]backend.C
 
 func (b *FleetBackend) AddComment(ctx context.Context, params backend.CommentAddParams) (*backend.CommentData, error) {
 	// Response body: fleet-db returns a "body" field + string ID; loom's
-	// canonical types.Comment has "text" + int64 ID. Unmarshal into a
+	// canonical workitems.Comment has "text" + int64 ID. Unmarshal into a
 	// local struct that mirrors fleet-db's wire shape, then project to
-	// types.Comment.
+	// workitems.Comment.
 	type commentReq struct {
 		Body string `json:"body"`
 	}

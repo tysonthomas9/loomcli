@@ -7,15 +7,16 @@ import (
 	"strings"
 	"time"
 
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/fleet"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
+	stackstore "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore"
 	infrastackstore "github.com/tysonthomas9/loomcli/internal/infra/stackstoreadapter"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
-	sl "github.com/tysonthomas9/loomcli/internal/stacklineage"
-	"github.com/tysonthomas9/loomcli/internal/stackstore"
+	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol/stacklineage"
 )
 
 // epicStackID is the deterministic stack id for an epic. The publisher
@@ -277,7 +278,7 @@ func projectEpicStackForRun(ctx context.Context, handle *bootstrap.StoreHandle, 
 // repo Name, so this must return the same Name. It is deliberately strict: with
 // more than one workspace repo and no --repo-url to disambiguate, it errors
 // rather than guessing and scoping lineage to the wrong repo.
-func resolveEpicStackRepo(ctx context.Context, handle *bootstrap.StoreHandle, ws, repoURL, baseBranch string) (selected *domain.Repo, rootBase string, err error) {
+func resolveEpicStackRepo(ctx context.Context, handle *bootstrap.StoreHandle, ws, repoURL, baseBranch string) (selected *workspacemodule.Repository, rootBase string, err error) {
 	repos, err := handle.Store.Repos().List(ctx, ws)
 	if err != nil {
 		return nil, "", fmt.Errorf("list workspace repos: %w", err)

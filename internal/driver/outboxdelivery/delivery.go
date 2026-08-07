@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/agentinbox"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
@@ -114,7 +113,7 @@ func DeliverAgentMessageForDriverWithOptions(
 	message = strings.TrimSpace(message)
 	dedupeKey := strings.TrimSpace(opts.DedupeKey)
 	if dedupeKey == "" {
-		dedupeKey = agentinbox.ContentDedupeKey(
+		dedupeKey = interaction.ContentDedupeKey(
 			"driver-message",
 			workspace,
 			driverRunID,

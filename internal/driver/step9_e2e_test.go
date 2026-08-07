@@ -33,6 +33,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	appserve "github.com/tysonthomas9/loomcli/internal/app/serve"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
@@ -110,7 +112,7 @@ func (step9DriverRunAPI) RecoverChildDriverRunCascade(
 	return execution.CascadeChildDriverRunsResult{ActionID: command.RequestID}, nil
 }
 
-func newStep9Fixture(t *testing.T, trust domain.DriverTrustLevel) *step9Fixture {
+func newStep9Fixture(t *testing.T, trust workflowcatalog.DriverTrustLevel) *step9Fixture {
 	t.Helper()
 	ctx := context.Background()
 	root := t.TempDir()
@@ -234,7 +236,7 @@ func (step9CaptureProcess) Placement() domain.TaskRunPlacement {
 // driver resolved onto the default process launcher terminalizes failed with
 // the structured sandbox_required result, persisted on the run row.
 func TestStep9UntrustedDriverRefusedOutsideSandbox(t *testing.T) {
-	f := newStep9Fixture(t, domain.DriverTrustUntrusted)
+	f := newStep9Fixture(t, workflowcatalog.DriverTrustUntrusted)
 	f.queueRun(t, "run-refused", "TEST-1")
 
 	result, err := f.executor("run-refused", nil).RunOnce(f.ctx)
@@ -254,7 +256,7 @@ func TestStep9UntrustedDriverRefusedOutsideSandbox(t *testing.T) {
 	wantOutput := map[string]string{
 		driver.ErrorCodeOutputKey:       driver.ErrorClassSandboxRequired,
 		driver.RetryableOutputKey:       "false",
-		driver.TrustLevelOutputKey:      string(domain.DriverTrustUntrusted),
+		driver.TrustLevelOutputKey:      string(workflowcatalog.DriverTrustUntrusted),
 		driver.SandboxLauncherOutputKey: driver.SandboxProviderProcess,
 	}
 	for key, want := range wantOutput {
@@ -317,7 +319,7 @@ func TestStep9WorkflowEnvHoldsOnlyRunToken(t *testing.T) {
 	}
 	t.Setenv("LOOM_RUN_TOKEN", "stale-parent-token")
 
-	f := newStep9Fixture(t, domain.DriverTrustUntrusted)
+	f := newStep9Fixture(t, workflowcatalog.DriverTrustUntrusted)
 	f.queueRun(t, "run-env-audit", "TEST-2")
 	capture := &step9CaptureLauncher{}
 	result, err := f.executor("run-env-audit", capture).RunOnce(f.ctx)
@@ -391,7 +393,7 @@ func assertStep9RunTokenBound(t *testing.T, env map[string]string, claimed *doma
 
 func assertStep9PlacementAudit(t *testing.T, output map[string]string) {
 	t.Helper()
-	if got := output[driver.TrustLevelOutputKey]; got != string(domain.DriverTrustUntrusted) {
+	if got := output[driver.TrustLevelOutputKey]; got != string(workflowcatalog.DriverTrustUntrusted) {
 		t.Fatalf("output[%s] = %q, want untrusted", driver.TrustLevelOutputKey, got)
 	}
 	if got := output[driver.SandboxLauncherOutputKey]; got != "custom-isolating" {
@@ -418,7 +420,7 @@ type step9TwoRuns struct {
 
 func newStep9TwoRuns(t *testing.T) *step9TwoRuns {
 	t.Helper()
-	f := newStep9Fixture(t, domain.DriverTrustUntrusted)
+	f := newStep9Fixture(t, workflowcatalog.DriverTrustUntrusted)
 	rig := &step9TwoRuns{f: f}
 	rig.runA = rig.claimRunWithTaskRun(t, "run-a", "TEST-A", "node-a", "lease-a")
 	rig.runB = rig.claimRunWithTaskRun(t, "run-b", "TEST-B", "node-b", "lease-b")

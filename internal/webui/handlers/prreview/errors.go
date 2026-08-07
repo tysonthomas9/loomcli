@@ -6,8 +6,8 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 )
 
 var errEgressUnavailable = errors.New("pull request review connector egress is unavailable")
@@ -49,9 +49,9 @@ func writePRReviewError(w http.ResponseWriter, err error) {
 		return
 	}
 	switch {
-	case errors.Is(err, domain.ErrNotFound):
+	case errors.Is(err, connectorsmodule.ErrNotFound), errors.Is(err, workspacemodule.ErrNotFound):
 		writePRReviewErrorCode(w, http.StatusNotFound, "not_found", err.Error(), false)
-	case errors.Is(err, domain.ErrInvalid):
+	case errors.Is(err, connectorsmodule.ErrInvalid), errors.Is(err, workspacemodule.ErrInvalid):
 		writePRReviewErrorCode(w, http.StatusBadRequest, "invalid", err.Error(), false)
 	case errors.Is(err, context.DeadlineExceeded):
 		writePRReviewErrorCode(w, http.StatusGatewayTimeout, "timeout", err.Error(), true)

@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -23,20 +25,20 @@ func TestDriverGenericLifecycleFieldsRetired(t *testing.T) {
 		t.Fatalf("generic create approval metadata err = %v, want ErrInvalid", err)
 	}
 	if _, err := s.Drivers().Create(ctx, store.DriverCreate{
-		WorkspaceKey: "WS", DriverID: "driver-1", Name: "driver", Status: domain.DriverStatusDraft,
-		TrustLevel: domain.DriverTrustUntrusted, Metadata: map[string]string{"team": "runtime"},
+		WorkspaceKey: "WS", DriverID: "driver-1", Name: "driver", Status: workflowcatalog.DriverStatusDraft,
+		TrustLevel: workflowcatalog.DriverTrustUntrusted, Metadata: map[string]string{"team": "runtime"},
 	}); err != nil {
 		t.Fatalf("Create driver: %v", err)
 	}
 	if _, err := s.DriverVersions().Create(ctx, store.DriverVersionCreate{
 		WorkspaceKey: "WS", DriverID: "driver-1", VersionID: "version-1", Version: 1,
 		SourceDigest: "sha256:source", BundleDigest: "sha256:bundle",
-		ValidationStatus: domain.DriverVersionValidationPassed,
+		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("Create version: %v", err)
 	}
 
-	active := domain.DriverStatusActive
+	active := workflowcatalog.DriverStatusActive
 	renamed := "must-not-partially-apply"
 	if _, err := s.Drivers().Update(ctx, "WS", "driver-1", store.DriverUpdate{
 		Name: &renamed, Status: &active,
@@ -47,7 +49,7 @@ func TestDriverGenericLifecycleFieldsRetired(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if driver.Name != "driver" || driver.Status != domain.DriverStatusDraft || driver.ActiveVersionID != "" {
+	if driver.Name != "driver" || driver.Status != workflowcatalog.DriverStatusDraft || driver.ActiveVersionID != "" {
 		t.Fatalf("rejected activation partially mutated driver: %+v", driver)
 	}
 
@@ -65,8 +67,8 @@ func TestDriverGenericLifecycleFieldsRetired(t *testing.T) {
 	}
 
 	replacement := map[string]string{"team": "catalog"}
-	disabled := domain.DriverStatusDisabled
-	trusted := domain.DriverTrustTrusted
+	disabled := workflowcatalog.DriverStatusDisabled
+	trusted := workflowcatalog.DriverTrustTrusted
 	driver, err = s.Drivers().Update(ctx, "WS", "driver-1", store.DriverUpdate{
 		Status: &disabled, TrustLevel: &trusted, Metadata: &replacement,
 	})
@@ -99,8 +101,8 @@ func TestPlatformRegisteredEpicRunViaTriggerBinding(t *testing.T) {
 		WorkspaceKey: "WS",
 		DriverID:     "driver-1",
 		Name:         "epic-runner",
-		OwnerType:    domain.DriverOwnerSystem,
-		Status:       domain.DriverStatusActive,
+		OwnerType:    workflowcatalog.DriverOwnerSystem,
+		Status:       workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatalf("Create driver: %v", err)
 	}
@@ -111,7 +113,7 @@ func TestPlatformRegisteredEpicRunViaTriggerBinding(t *testing.T) {
 		Version:          1,
 		SourceDigest:     "sha256:source-v1",
 		BundleDigest:     "sha256:bundle-v1",
-		ValidationStatus: domain.DriverVersionValidationPassed,
+		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
 	}
@@ -126,7 +128,7 @@ func TestPlatformRegisteredEpicRunViaTriggerBinding(t *testing.T) {
 		DriverID:          "driver-1",
 		DriverVersionID:   "version-1",
 		TargetEntrypoint:  "run",
-		ConcurrencyPolicy: domain.TriggerBindingConcurrencyOneActivePerEpic,
+		ConcurrencyPolicy: automation.ConcurrencyOneActivePerEpic,
 		IdempotencyPolicy: "header:Idempotency-Key",
 		AuthPolicy:        "workspace_user",
 		Permissions:       []string{"driver_run.create"},
@@ -141,7 +143,7 @@ func TestPlatformRegisteredEpicRunViaTriggerBinding(t *testing.T) {
 		Version:          2,
 		SourceDigest:     "sha256:source-v2",
 		BundleDigest:     "sha256:bundle-v2",
-		ValidationStatus: domain.DriverVersionValidationPassed,
+		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("Create driver version 2: %v", err)
 	}
@@ -236,20 +238,20 @@ func TestDispatchTriggerRouteSupersedesQueuedRunsForSubject(t *testing.T) {
 
 	if _, err := s.Drivers().Create(ctx, store.DriverCreate{
 		WorkspaceKey: "WS", DriverID: "pr-review", Name: "pr-review",
-		OwnerType: domain.DriverOwnerSystem, Status: domain.DriverStatusActive,
+		OwnerType: workflowcatalog.DriverOwnerSystem, Status: workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatalf("Create driver: %v", err)
 	}
 	if _, err := s.DriverVersions().Create(ctx, store.DriverVersionCreate{
 		WorkspaceKey: "WS", VersionID: "v1", DriverID: "pr-review", Version: 1,
-		SourceDigest: "sha256:s", BundleDigest: "sha256:b", ValidationStatus: domain.DriverVersionValidationPassed,
+		SourceDigest: "sha256:s", BundleDigest: "sha256:b", ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
 	}
 	if _, err := s.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
 		WorkspaceKey: "WS", BindingID: "binding-pr", Name: "pr", SourceKind: "github",
 		RouteKey: "github.pull_request.synchronize", DriverID: "pr-review", DriverVersionID: "v1",
-		TargetEntrypoint: "run", ConcurrencyPolicy: domain.TriggerBindingConcurrencyReplace, Enabled: true,
+		TargetEntrypoint: "run", ConcurrencyPolicy: automation.ConcurrencyReplace, Enabled: true,
 	}); err != nil {
 		t.Fatalf("Create trigger binding: %v", err)
 	}
@@ -292,7 +294,7 @@ func TestDispatchTriggerRouteSupersedesQueuedRunsForSubject(t *testing.T) {
 	// Loser deliveries transition to superseded via their rendered subject
 	// key (binding_id|subject_ref), keeping the audit trail consistent with
 	// the cancelled runs; the winner's delivery stays dispatched.
-	superseded, err := s.TriggerDeliveries().List(ctx, "WS", store.TriggerDeliveryFilter{Status: domain.TriggerDeliverySuperseded})
+	superseded, err := s.TriggerDeliveries().List(ctx, "WS", store.TriggerDeliveryFilter{Status: automation.DeliverySuperseded})
 	if err != nil || len(superseded) != 2 {
 		t.Fatalf("superseded deliveries = %d err=%v, want 2", len(superseded), err)
 	}
@@ -304,7 +306,7 @@ func TestDispatchTriggerRouteSupersedesQueuedRunsForSubject(t *testing.T) {
 			t.Fatalf("superseded delivery run %s = %s, want cancelled", delivery.DriverRunID, got)
 		}
 	}
-	dispatched, err := s.TriggerDeliveries().List(ctx, "WS", store.TriggerDeliveryFilter{Status: domain.TriggerDeliveryDispatched})
+	dispatched, err := s.TriggerDeliveries().List(ctx, "WS", store.TriggerDeliveryFilter{Status: automation.DeliveryDispatched})
 	if err != nil || len(dispatched) != 2 {
 		t.Fatalf("dispatched deliveries = %d err=%v, want run-3 + run-other", len(dispatched), err)
 	}
@@ -316,20 +318,20 @@ func TestDispatchTriggerRouteRedeliveryDoesNotSupersedeNewerRun(t *testing.T) {
 
 	if _, err := s.Drivers().Create(ctx, store.DriverCreate{
 		WorkspaceKey: "WS", DriverID: "pr-review", Name: "pr-review",
-		OwnerType: domain.DriverOwnerSystem, Status: domain.DriverStatusActive,
+		OwnerType: workflowcatalog.DriverOwnerSystem, Status: workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatalf("Create driver: %v", err)
 	}
 	if _, err := s.DriverVersions().Create(ctx, store.DriverVersionCreate{
 		WorkspaceKey: "WS", VersionID: "v1", DriverID: "pr-review", Version: 1,
-		SourceDigest: "sha256:s", BundleDigest: "sha256:b", ValidationStatus: domain.DriverVersionValidationPassed,
+		SourceDigest: "sha256:s", BundleDigest: "sha256:b", ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
 	}
 	if _, err := s.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
 		WorkspaceKey: "WS", BindingID: "binding-pr", Name: "pr", SourceKind: "github",
 		RouteKey: "github.pull_request.synchronize", DriverID: "pr-review", DriverVersionID: "v1",
-		TargetEntrypoint: "run", ConcurrencyPolicy: domain.TriggerBindingConcurrencyReplace, Enabled: true,
+		TargetEntrypoint: "run", ConcurrencyPolicy: automation.ConcurrencyReplace, Enabled: true,
 	}); err != nil {
 		t.Fatalf("Create trigger binding: %v", err)
 	}
@@ -367,20 +369,20 @@ func TestDispatchTriggerRouteSupersedeCancelsOlderRunThatArrivesLate(t *testing.
 
 	if _, err := s.Drivers().Create(ctx, store.DriverCreate{
 		WorkspaceKey: "WS", DriverID: "pr-review", Name: "pr-review",
-		OwnerType: domain.DriverOwnerSystem, Status: domain.DriverStatusActive,
+		OwnerType: workflowcatalog.DriverOwnerSystem, Status: workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatalf("Create driver: %v", err)
 	}
 	if _, err := s.DriverVersions().Create(ctx, store.DriverVersionCreate{
 		WorkspaceKey: "WS", VersionID: "v1", DriverID: "pr-review", Version: 1,
-		SourceDigest: "sha256:s", BundleDigest: "sha256:b", ValidationStatus: domain.DriverVersionValidationPassed,
+		SourceDigest: "sha256:s", BundleDigest: "sha256:b", ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
 	}
 	binding, err := s.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
 		WorkspaceKey: "WS", BindingID: "binding-pr", Name: "pr", SourceKind: "github",
 		RouteKey: "github.pull_request.synchronize", DriverID: "pr-review", DriverVersionID: "v1",
-		TargetEntrypoint: "run", ConcurrencyPolicy: domain.TriggerBindingConcurrencyReplace, Enabled: true,
+		TargetEntrypoint: "run", ConcurrencyPolicy: automation.ConcurrencyReplace, Enabled: true,
 	})
 	if err != nil {
 		t.Fatalf("Create trigger binding: %v", err)
@@ -406,13 +408,13 @@ func TestDispatchTriggerRouteSupersedeCancelsOlderRunThatArrivesLate(t *testing.
 		t.Fatalf("Create late older driver run: %v", err)
 	}
 	subjectKey := renderTriggerSubjectKey(binding, olderEvent, nil)
-	if err := s.deliveries.create(&domain.TriggerDelivery{
+	if err := s.deliveries.create(&automation.Delivery{
 		WorkspaceKey:     "WS",
 		DeliveryID:       "delivery-" + olderEvent.EventID,
 		TriggerEventID:   olderEvent.EventID,
 		TriggerBindingID: binding.BindingID,
 		SubjectKey:       subjectKey,
-		Status:           domain.TriggerDeliveryDispatched,
+		Status:           automation.DeliveryDispatched,
 		DriverRunID:      oldRun.RunID,
 		Attempt:          1,
 		CreatedAt:        time.Now(),
@@ -420,7 +422,7 @@ func TestDispatchTriggerRouteSupersedeCancelsOlderRunThatArrivesLate(t *testing.
 	}); err != nil {
 		t.Fatalf("Create old delivery: %v", err)
 	}
-	if status := s.routes.applyTriggerReplacePolicy(ctx, "WS", binding, oldRun, subjectKey); status != domain.TriggerDeliverySuperseded {
+	if status := s.routes.applyTriggerReplacePolicy(ctx, "WS", binding, oldRun, subjectKey); status != automation.DeliverySuperseded {
 		t.Fatalf("late older delivery status = %s, want superseded", status)
 	}
 
@@ -596,8 +598,8 @@ func TestPlatformRecoverStaleDriverRunsFailsStaleRunsAndReleasesAdmission(t *tes
 		WorkspaceKey: "WS",
 		DriverID:     "driver-1",
 		Name:         "epic-runner",
-		OwnerType:    domain.DriverOwnerSystem,
-		Status:       domain.DriverStatusActive,
+		OwnerType:    workflowcatalog.DriverOwnerSystem,
+		Status:       workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatalf("Create driver: %v", err)
 	}
@@ -608,7 +610,7 @@ func TestPlatformRecoverStaleDriverRunsFailsStaleRunsAndReleasesAdmission(t *tes
 		Version:          1,
 		SourceDigest:     "sha256:source",
 		BundleDigest:     "sha256:bundle",
-		ValidationStatus: domain.DriverVersionValidationPassed,
+		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
 	}
@@ -687,8 +689,8 @@ func TestPlatformDriverRunAndTaskRunLifecycle(t *testing.T) {
 		WorkspaceKey: "WS",
 		DriverID:     "driver-1",
 		Name:         "epic-runner",
-		OwnerType:    domain.DriverOwnerSystem,
-		Status:       domain.DriverStatusActive,
+		OwnerType:    workflowcatalog.DriverOwnerSystem,
+		Status:       workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatalf("Create driver: %v", err)
 	}
@@ -700,7 +702,7 @@ func TestPlatformDriverRunAndTaskRunLifecycle(t *testing.T) {
 		Version:          1,
 		SourceDigest:     "sha256:source",
 		BundleDigest:     "sha256:bundle",
-		ValidationStatus: domain.DriverVersionValidationPassed,
+		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
 	}
@@ -1436,8 +1438,8 @@ func TestPlatformDriverStepLifecycle(t *testing.T) {
 		WorkspaceKey: "WS",
 		DriverID:     "driver-1",
 		Name:         "epic-runner",
-		OwnerType:    domain.DriverOwnerSystem,
-		Status:       domain.DriverStatusActive,
+		OwnerType:    workflowcatalog.DriverOwnerSystem,
+		Status:       workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatalf("Create driver: %v", err)
 	}
@@ -1448,7 +1450,7 @@ func TestPlatformDriverStepLifecycle(t *testing.T) {
 		Version:          1,
 		SourceDigest:     "sha256:source",
 		BundleDigest:     "sha256:bundle",
-		ValidationStatus: domain.DriverVersionValidationPassed,
+		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
 	}
@@ -1659,8 +1661,8 @@ func TestPlatformRecoverStaleTaskRunsFailsStaleRunsAndSteps(t *testing.T) {
 		WorkspaceKey: "WS",
 		DriverID:     "driver-1",
 		Name:         "epic-runner",
-		OwnerType:    domain.DriverOwnerSystem,
-		Status:       domain.DriverStatusActive,
+		OwnerType:    workflowcatalog.DriverOwnerSystem,
+		Status:       workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatalf("Create driver: %v", err)
 	}
@@ -1671,7 +1673,7 @@ func TestPlatformRecoverStaleTaskRunsFailsStaleRunsAndSteps(t *testing.T) {
 		Version:          1,
 		SourceDigest:     "sha256:source",
 		BundleDigest:     "sha256:bundle",
-		ValidationStatus: domain.DriverVersionValidationPassed,
+		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
 	}

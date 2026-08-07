@@ -16,7 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	workflowdefs "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/triggerbindings"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
@@ -185,7 +185,7 @@ func TestUnifiedSupervisedCreateRejectsLegacyBindingIDCollision(t *testing.T) {
 	seedRole(t, st, "task")
 	if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
 		WorkspaceKey: agentRecordTestWS, BindingID: "legacy-reserved", Name: "Legacy reserved",
-		SourceKind: store.InternalSourceKind, DriverID: workflowdefs.BuiltinPromptAgentWorkflowName,
+		SourceKind: store.InternalSourceKind, DriverID: workflowcatalog.BuiltinPromptAgentWorkflowName,
 		DriverVersionID: "prompt-agent-version-1", Enabled: true,
 	}); err != nil {
 		t.Fatalf("create legacy binding: %v", err)
@@ -249,7 +249,7 @@ func TestUnifiedRoutesIgnoreUnrelatedBindingIdentityCollision(t *testing.T) {
 			seedRole(t, st, "docs-assistant")
 			if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
 				WorkspaceKey: agentRecordTestWS, BindingID: "collision", Name: "Legacy binding",
-				SourceKind: store.InternalSourceKind, DriverID: workflowdefs.BuiltinPromptAgentWorkflowName,
+				SourceKind: store.InternalSourceKind, DriverID: workflowcatalog.BuiltinPromptAgentWorkflowName,
 				DriverVersionID: "prompt-agent-version-1", Enabled: true,
 			}); err != nil {
 				t.Fatalf("create legacy binding: %v", err)
@@ -635,7 +635,7 @@ func TestPromptAgentCreateBindingFailureRetainsCommittedAgentForRecovery(t *test
 	st := newAgentRecordStore(t)
 	ctx := context.Background()
 	seedPromptAgentRole(t, st, "docs-assistant")
-	driver, err := st.Drivers().Get(ctx, agentRecordTestWS, workflowdefs.BuiltinPromptAgentWorkflowName)
+	driver, err := st.Drivers().Get(ctx, agentRecordTestWS, workflowcatalog.BuiltinPromptAgentWorkflowName)
 	if err != nil {
 		t.Fatalf("get prompt-agent driver: %v", err)
 	}
@@ -676,7 +676,7 @@ func TestPromptAgentCreateBindingFailureRetainsCommittedRoleWithoutPrecommitProm
 		t.Run(name, func(t *testing.T) {
 			st := newAgentRecordStore(t)
 			ctx := context.Background()
-			driver, err := st.Drivers().Get(ctx, agentRecordTestWS, workflowdefs.BuiltinPromptAgentWorkflowName)
+			driver, err := st.Drivers().Get(ctx, agentRecordTestWS, workflowcatalog.BuiltinPromptAgentWorkflowName)
 			if err != nil {
 				t.Fatalf("get prompt-agent driver: %v", err)
 			}
@@ -839,7 +839,7 @@ func TestAgentRunsNewestFirstAndExcludesUnattributedRuns(t *testing.T) {
 	st := newAgentRecordStore(t)
 	mux := newAgentsMux(st)
 	created := createPromptAgentForTest(t, mux)
-	binding := created.Bindings[0].TriggerBinding
+	binding := created.Bindings[0].Binding
 	ctx := context.Background()
 	if _, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
 		WorkspaceKey: agentRecordTestWS, RunID: "run-old", DriverID: binding.DriverID,
@@ -1136,7 +1136,7 @@ func seedDriverVersion(t *testing.T, st *memstore.Store, driverID, versionID str
 	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
 		WorkspaceKey: agentRecordTestWS, VersionID: versionID, DriverID: driverID, Version: 1,
 		SourceDigest: "src-" + versionID, BundleDigest: "bundle-" + versionID,
-		ValidationStatus: domain.DriverVersionValidationPassed,
+		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("create driver version: %v", err)
 	}

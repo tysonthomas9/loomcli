@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
@@ -170,7 +172,7 @@ func TestLocalTaskWorktreeResolverCreatesIsolatedTaskRunWorktree(t *testing.T) {
 }
 
 func TestLocalTaskWorktreeResolverRequiresSelectorForMultipleRepos(t *testing.T) {
-	repos := []*domain.Repo{
+	repos := []*workspacemodule.Repository{
 		{Name: "alpha", SourceRepoID: "source-alpha"},
 		{Name: "beta", SourceRepoID: "source-beta"},
 	}
@@ -193,9 +195,9 @@ func TestLocalTaskWorktreeResolverRequiresSelectorForMultipleRepos(t *testing.T)
 }
 
 func TestLocalTaskWorktreeResolverKeepsSingleRepoFallback(t *testing.T) {
-	repo := &domain.Repo{Name: "only", SourceRepoID: "source-only"}
+	repo := &workspacemodule.Repository{Name: "only", SourceRepoID: "source-only"}
 	selected, err := (LocalTaskWorktreeResolver{}).selectRepo(
-		context.Background(), "TEST", []*domain.Repo{repo}, TaskExecRequest{},
+		context.Background(), "TEST", []*workspacemodule.Repository{repo}, TaskExecRequest{},
 	)
 	if err != nil {
 		t.Fatalf("selectRepo() single repo: %v", err)
@@ -207,7 +209,7 @@ func TestLocalTaskWorktreeResolverKeepsSingleRepoFallback(t *testing.T) {
 
 func TestLocalTaskWorktreeResolverTreatsWorkerProfileReposAsScope(t *testing.T) {
 	ctx := context.Background()
-	repos := []*domain.Repo{
+	repos := []*workspacemodule.Repository{
 		{Name: "alpha", SourceRepoID: "source-alpha"},
 		{Name: "beta", SourceRepoID: "source-beta"},
 	}
@@ -247,9 +249,9 @@ func TestLocalTaskWorktreeResolverTreatsWorkerProfileReposAsScope(t *testing.T) 
 }
 
 func TestLocalTaskWorktreeResolverDoesNotIgnoreInvalidExplicitSelectorInSingleRepoWorkspace(t *testing.T) {
-	repo := &domain.Repo{Name: "only", SourceRepoID: "source-only"}
+	repo := &workspacemodule.Repository{Name: "only", SourceRepoID: "source-only"}
 	if _, err := (LocalTaskWorktreeResolver{}).selectRepo(
-		context.Background(), "TEST", []*domain.Repo{repo}, TaskExecRequest{
+		context.Background(), "TEST", []*workspacemodule.Repository{repo}, TaskExecRequest{
 			RunnerPlacement: domain.TaskRunPlacement{RepoRef: "missing"},
 		},
 	); err == nil || !strings.Contains(err.Error(), "no workspace repo matches") {
@@ -259,7 +261,7 @@ func TestLocalTaskWorktreeResolverDoesNotIgnoreInvalidExplicitSelectorInSingleRe
 
 func TestLocalTaskWorktreeResolverProfileScopeDoesNotAliasRemoteBasenames(t *testing.T) {
 	ctx := context.Background()
-	repos := []*domain.Repo{
+	repos := []*workspacemodule.Repository{
 		{Name: "alpha-app", SourceRepoID: "source-alpha-app", RemoteURL: "https://github.com/org-a/app.git"},
 		{Name: "beta-app", SourceRepoID: "source-beta-app", RemoteURL: "git@github.com:org-b/app.git"},
 	}

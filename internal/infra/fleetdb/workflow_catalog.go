@@ -7,6 +7,8 @@ import (
 	"math"
 	"net/http"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	fleettransport "github.com/tysonthomas9/loomcli/internal/infra/fleetdb/transport"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -30,11 +32,11 @@ var (
 // WorkflowCatalogLifecycleResult is FleetDB's authoritative response to one
 // atomic version lifecycle command.
 type WorkflowCatalogLifecycleResult struct {
-	CommittedRevision uint64                `json:"committed_revision"`
-	SemanticImpact    string                `json:"semantic_impact"`
-	Replayed          bool                  `json:"replayed,omitempty"`
-	Driver            *domain.Driver        `json:"driver"`
-	Version           *domain.DriverVersion `json:"version"`
+	CommittedRevision uint64                         `json:"committed_revision"`
+	SemanticImpact    string                         `json:"semantic_impact"`
+	Replayed          bool                           `json:"replayed,omitempty"`
+	Driver            *workflowcatalog.Driver        `json:"driver"`
+	Version           *workflowcatalog.DriverVersion `json:"version"`
 }
 
 // WorkflowCatalogAuthorVersionInput is the server-derived metadata for one
@@ -68,15 +70,15 @@ type WorkflowCatalogAuthorManagedVersionInput struct {
 // WorkflowCatalogAuthorVersionResult is FleetDB's authoritative response from
 // either atomic authoring route.
 type WorkflowCatalogAuthorVersionResult struct {
-	Driver            *domain.Driver        `json:"driver"`
-	Version           *domain.DriverVersion `json:"version"`
-	CreatedDriver     bool                  `json:"created_driver"`
-	CreatedVersion    bool                  `json:"created_version"`
-	ReusedVersion     bool                  `json:"reused_version"`
-	Activated         bool                  `json:"activated"`
-	Replayed          bool                  `json:"replayed"`
-	CommittedRevision uint64                `json:"committed_revision"`
-	SemanticImpact    string                `json:"semantic_impact"`
+	Driver            *workflowcatalog.Driver        `json:"driver"`
+	Version           *workflowcatalog.DriverVersion `json:"version"`
+	CreatedDriver     bool                           `json:"created_driver"`
+	CreatedVersion    bool                           `json:"created_version"`
+	ReusedVersion     bool                           `json:"reused_version"`
+	Activated         bool                           `json:"activated"`
+	Replayed          bool                           `json:"replayed"`
+	CommittedRevision uint64                         `json:"committed_revision"`
+	SemanticImpact    string                         `json:"semantic_impact"`
 }
 
 // WorkflowCatalogTransport is the narrow low-level surface exposed to the
@@ -84,11 +86,11 @@ type WorkflowCatalogAuthorVersionResult struct {
 // and sentinels into the capability adapter's owned transport vocabulary. The
 // implementation shares its parent Client's transport and credentials.
 type WorkflowCatalogTransport interface {
-	GetDriver(ctx context.Context, workspace, driverID string) (*domain.Driver, error)
-	FindDriverByName(ctx context.Context, workspace, name string) (*domain.Driver, error)
-	ListDrivers(ctx context.Context, workspace string) ([]*domain.Driver, error)
-	GetVersion(ctx context.Context, workspace, versionID string) (*domain.DriverVersion, error)
-	ListVersions(ctx context.Context, workspace, driverID string) ([]*domain.DriverVersion, error)
+	GetDriver(ctx context.Context, workspace, driverID string) (*workflowcatalog.Driver, error)
+	FindDriverByName(ctx context.Context, workspace, name string) (*workflowcatalog.Driver, error)
+	ListDrivers(ctx context.Context, workspace string) ([]*workflowcatalog.Driver, error)
+	GetVersion(ctx context.Context, workspace, versionID string) (*workflowcatalog.DriverVersion, error)
+	ListVersions(ctx context.Context, workspace, driverID string) ([]*workflowcatalog.DriverVersion, error)
 	ApproveVersion(ctx context.Context, workspace, driverID, versionID string, expectedRevision uint64) (*WorkflowCatalogLifecycleResult, error)
 	UnapproveVersion(ctx context.Context, workspace, driverID, versionID string, expectedRevision uint64) (*WorkflowCatalogLifecycleResult, error)
 	ActivateVersion(ctx context.Context, workspace, driverID, versionID string, expectedRevision uint64) (*WorkflowCatalogLifecycleResult, error)
@@ -100,11 +102,11 @@ type workflowCatalogStore struct{ client *Client }
 
 var _ WorkflowCatalogTransport = (*workflowCatalogStore)(nil)
 
-func (s *workflowCatalogStore) GetDriver(ctx context.Context, workspace, driverID string) (*domain.Driver, error) {
+func (s *workflowCatalogStore) GetDriver(ctx context.Context, workspace, driverID string) (*workflowcatalog.Driver, error) {
 	return s.client.drivers.Get(ctx, workspace, driverID)
 }
 
-func (s *workflowCatalogStore) FindDriverByName(ctx context.Context, workspace, name string) (*domain.Driver, error) {
+func (s *workflowCatalogStore) FindDriverByName(ctx context.Context, workspace, name string) (*workflowcatalog.Driver, error) {
 	drivers, err := s.client.drivers.List(ctx, workspace, store.DriverFilter{Name: name, Limit: 2})
 	if err != nil {
 		return nil, err
@@ -117,15 +119,15 @@ func (s *workflowCatalogStore) FindDriverByName(ctx context.Context, workspace, 
 	return nil, domain.ErrNotFound
 }
 
-func (s *workflowCatalogStore) ListDrivers(ctx context.Context, workspace string) ([]*domain.Driver, error) {
+func (s *workflowCatalogStore) ListDrivers(ctx context.Context, workspace string) ([]*workflowcatalog.Driver, error) {
 	return s.client.drivers.List(ctx, workspace, store.DriverFilter{})
 }
 
-func (s *workflowCatalogStore) GetVersion(ctx context.Context, workspace, versionID string) (*domain.DriverVersion, error) {
+func (s *workflowCatalogStore) GetVersion(ctx context.Context, workspace, versionID string) (*workflowcatalog.DriverVersion, error) {
 	return s.client.versions.Get(ctx, workspace, versionID)
 }
 
-func (s *workflowCatalogStore) ListVersions(ctx context.Context, workspace, driverID string) ([]*domain.DriverVersion, error) {
+func (s *workflowCatalogStore) ListVersions(ctx context.Context, workspace, driverID string) ([]*workflowcatalog.DriverVersion, error) {
 	return s.client.versions.List(ctx, workspace, store.DriverVersionFilter{DriverID: driverID})
 }
 

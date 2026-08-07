@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
@@ -690,17 +692,17 @@ type countingWorkspaceStore struct {
 	listCalls      int
 }
 
-func (s *countingWorkspaceStore) Get(ctx context.Context, key string) (*domain.Workspace, error) {
+func (s *countingWorkspaceStore) Get(ctx context.Context, key string) (*workspacemodule.Workspace, error) {
 	s.getCalls++
 	return s.WorkspaceStore.Get(ctx, key)
 }
 
-func (s *countingWorkspaceStore) GetByName(ctx context.Context, name string) (*domain.Workspace, error) {
+func (s *countingWorkspaceStore) GetByName(ctx context.Context, name string) (*workspacemodule.Workspace, error) {
 	s.getByNameCalls++
 	return s.WorkspaceStore.GetByName(ctx, name)
 }
 
-func (s *countingWorkspaceStore) List(ctx context.Context) ([]*domain.Workspace, error) {
+func (s *countingWorkspaceStore) List(ctx context.Context) ([]*workspacemodule.Workspace, error) {
 	s.listCalls++
 	return s.WorkspaceStore.List(ctx)
 }
@@ -711,7 +713,7 @@ type countingRepoStore struct {
 	listByWorkspace map[string]int
 }
 
-func (s *countingRepoStore) List(ctx context.Context, workspaceKey string) ([]*domain.Repo, error) {
+func (s *countingRepoStore) List(ctx context.Context, workspaceKey string) ([]*workspacemodule.Repository, error) {
 	s.listCalls++
 	s.listByWorkspace[workspaceKey]++
 	return s.RepoStore.List(ctx, workspaceKey)

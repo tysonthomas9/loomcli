@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -52,13 +54,13 @@ func TestTriggerRouteDispatchAndAudit(t *testing.T) {
 			if got := r.URL.Query().Get("subject_ref"); got != "issue:TASK-1" {
 				t.Fatalf("subject_ref filter = %q", got)
 			}
-			writeJSON(t, w, map[string]any{"trigger_events": []domain.TriggerEvent{{WorkspaceKey: "WS", EventID: "event-1", SourceKind: "github", EventType: "pull_request", SignatureStatus: "verified"}}})
+			writeJSON(t, w, map[string]any{"trigger_events": []automation.Event{{WorkspaceKey: "WS", EventID: "event-1", SourceKind: "github", EventType: "pull_request", SignatureStatus: "verified"}}})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/WS/trigger-events/event-1":
-			writeJSON(t, w, domain.TriggerEvent{WorkspaceKey: "WS", EventID: "event-1", SourceKind: "github"})
+			writeJSON(t, w, automation.Event{WorkspaceKey: "WS", EventID: "event-1", SourceKind: "github"})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/WS/trigger-deliveries":
-			writeJSON(t, w, map[string]any{"trigger_deliveries": []domain.TriggerDelivery{{WorkspaceKey: "WS", DeliveryID: "delivery-event-1", TriggerEventID: "event-1", DriverRunID: "run-1", Status: domain.TriggerDeliveryDispatched}}})
+			writeJSON(t, w, map[string]any{"trigger_deliveries": []automation.Delivery{{WorkspaceKey: "WS", DeliveryID: "delivery-event-1", TriggerEventID: "event-1", DriverRunID: "run-1", Status: automation.DeliveryDispatched}}})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/WS/trigger-deliveries/delivery-event-1":
-			writeJSON(t, w, domain.TriggerDelivery{WorkspaceKey: "WS", DeliveryID: "delivery-event-1", DriverRunID: "run-1"})
+			writeJSON(t, w, automation.Delivery{WorkspaceKey: "WS", DeliveryID: "delivery-event-1", DriverRunID: "run-1"})
 		default:
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
 		}
@@ -113,7 +115,7 @@ func TestTriggerBindingWebhookSecret(t *testing.T) {
 				t.Fatalf("webhook_secret not sent on create: %v", req["webhook_secret"])
 			}
 			// Server redacts the secret on the create response.
-			writeJSON(t, w, domain.TriggerBinding{WorkspaceKey: "WS", BindingID: "b1", RouteKey: "github.push", Enabled: true})
+			writeJSON(t, w, automation.Binding{WorkspaceKey: "WS", BindingID: "b1", RouteKey: "github.push", Enabled: true})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/WS/trigger-bindings/b1/webhook-secret":
 			writeJSON(t, w, map[string]any{"binding_id": "b1", "webhook_secret": "topsecret"})
 		default:

@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -22,14 +24,14 @@ func appendAwaitJournalEvent(t *testing.T, st store.Store, eventID, eventType, s
 		t.Fatalf("store %T does not implement TriggerEventAppender", st.TriggerEvents())
 	}
 	now := time.Now().UTC()
-	event, err := appender.AppendTriggerEvent(context.Background(), &domain.TriggerEvent{
+	event, err := appender.AppendTriggerEvent(context.Background(), &automation.Event{
 		WorkspaceKey: "WS",
 		EventID:      eventID,
 		SourceKind:   "test",
 		EventType:    eventType,
 		SubjectRef:   subjectRef,
 		ActorRef:     actorRef,
-		Origin:       domain.TriggerEventOriginExternal,
+		Origin:       automation.EventOriginExternal,
 		OccurredAt:   now,
 		ReceivedAt:   now,
 	})

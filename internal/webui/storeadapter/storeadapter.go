@@ -16,6 +16,11 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
+type workspaceRepositoryStore interface {
+	Workspaces() store.WorkspaceStore
+	Repos() store.RepoStore
+}
+
 // WorkspaceTopologyReader is the read surface required to compose Workspace
 // and Repository projections for the legacy WorkspaceData transport shape.
 type WorkspaceTopologyReader interface {
@@ -100,7 +105,7 @@ func BuildWorkspaceDataForKey(ctx context.Context, s WorkspaceTopologyReader, ke
 //
 // Paths come from the per-machine state cache; workspaces missing from
 // the cache map to "" so callers can fall back to defaults.
-func ListWorkspacePaths(ctx context.Context, s store.Store) (map[string]string, error) {
+func ListWorkspacePaths(ctx context.Context, s workspaceRepositoryStore) (map[string]string, error) {
 	if s == nil {
 		return nil, nil
 	}
@@ -120,7 +125,7 @@ func ListWorkspacePaths(ctx context.Context, s store.Store) (map[string]string, 
 
 // ResolveWorkspaceKeyByName looks up a workspace by display name and
 // returns its stable Key (UUID-like uppercase identifier).
-func ResolveWorkspaceKeyByName(ctx context.Context, s store.Store, name string) (string, error) {
+func ResolveWorkspaceKeyByName(ctx context.Context, s workspaceRepositoryStore, name string) (string, error) {
 	if s == nil {
 		return "", errors.New("storeadapter: nil store")
 	}

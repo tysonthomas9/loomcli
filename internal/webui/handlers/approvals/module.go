@@ -45,10 +45,10 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver/eventpolicy"
+	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/trigger"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
@@ -73,11 +73,15 @@ const (
 
 // Module serves the workspace-scoped approval route.
 type Module struct {
-	store     store.Store
+	store     approvalStore
 	awaits    AwaitDispatcher
 	journal   automation.ApprovalJournal
 	authority automation.ApprovalAuthorityProvider
 	logger    *slog.Logger
+}
+
+type approvalStore interface {
+	Awaits() store.AwaitStore
 }
 
 // AwaitDispatcher is the Execution-backed mutation surface used after the
@@ -88,7 +92,7 @@ type AwaitDispatcher interface {
 }
 
 type Config struct {
-	Store     store.Store
+	Store     approvalStore
 	Awaits    AwaitDispatcher
 	Journal   automation.ApprovalJournal
 	Authority automation.ApprovalAuthorityProvider
@@ -358,7 +362,7 @@ func (m *Module) dispatchApproval(ctx context.Context, ws string, params approva
 		EventID:    eventID,
 		EventType:  params.EventType,
 		SourceKind: approvalSourceKind,
-		Origin:     domain.TriggerEventOriginExternal,
+		Origin:     automation.EventOriginExternal,
 		SubjectRef: params.SubjectRef,
 		ActorRef:   actor,
 		Payload:    payload,

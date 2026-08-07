@@ -44,6 +44,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
+	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
@@ -52,7 +53,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/testutil"
-	"github.com/tysonthomas9/loomcli/internal/trigger"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/approvals"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/driverapi"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -1072,7 +1072,7 @@ func testTimeoutArmFlow(t *testing.T, h *awaitFlows) {
 	// The sweeper resumes the run with the synthetic timeout event — the
 	// restrictive allow-list does not block the carve-out — and NEVER
 	// terminalizes the run itself.
-	sweeper := &driver.AwaitTimeoutSweeper{Store: h.st, Resolver: h.awaitResolver(), WorkspaceKey: h.ws}
+	sweeper := &trigger.AwaitTimeoutSweeper{Store: h.st, Resolver: h.awaitResolver(), WorkspaceKey: h.ws}
 	swept, err := sweeper.RunOnce(h.ctx)
 	if err != nil || swept.TimedOut != 1 {
 		t.Fatalf("sweep = %+v, %v; want one timed-out instance", swept, err)
@@ -1097,7 +1097,7 @@ func testTimeoutArmFlow(t *testing.T, h *awaitFlows) {
 // await exactly once, in both interleavings (RULE 5 proof).
 func testTimeoutRaceExactlyOnce(t *testing.T, h *awaitFlows) {
 	pattern := domain.AwaitEventKey("race.event", "subject-1")
-	sweeper := &driver.AwaitTimeoutSweeper{Store: h.st, Resolver: h.awaitResolver(), WorkspaceKey: h.ws}
+	sweeper := &trigger.AwaitTimeoutSweeper{Store: h.st, Resolver: h.awaitResolver(), WorkspaceKey: h.ws}
 	runner := opRunner{fn: func(req driver.RunRequest) driver.RunResult {
 		resp := h.awaitOp(t, req.Run, req.RunToken, pattern, nil, awaitE2EShortAwait, 1)
 		if resp.Status == driver.AwaitOutcomeSuspended {

@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 )
 
 var ownerRepoSegmentRE = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
@@ -95,7 +95,7 @@ func (m *Module) workspaceHasRepo(ctx context.Context, ws, owner, repo string) (
 // authorization and listing. The former full WorkspaceData projection also
 // loaded agent configuration and every workspace summary, coupling a repository
 // membership check to unrelated read models.
-func (m *Module) workspaceRepos(ctx context.Context, workspace string) ([]*domain.Repo, error) {
+func (m *Module) workspaceRepos(ctx context.Context, workspace string) ([]*workspacemodule.Repository, error) {
 	if m == nil || m.store == nil {
 		return nil, errEgressUnavailable
 	}

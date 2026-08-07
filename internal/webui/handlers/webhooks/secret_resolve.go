@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
 	"github.com/tysonthomas9/loomcli/internal/app/webhookingestion"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -113,7 +115,7 @@ func (v *CompatibilityVerifier) Verify(ctx context.Context, request webhookinges
 // exact-RouteKey binding's webhook secret (back-compat — no flag day). A
 // connector that exists but yields no usable secret does NOT fall back:
 // verification fails closed.
-func (v *CompatibilityVerifier) resolveInboundSecretCandidates(ctx context.Context, ws string, binding *domain.TriggerBinding, now time.Time) ([]inboundSecretCandidate, error) {
+func (v *CompatibilityVerifier) resolveInboundSecretCandidates(ctx context.Context, ws string, binding *automation.Binding, now time.Time) ([]inboundSecretCandidate, error) {
 	candidates, connectorFound, err := v.connectorSecretCandidates(ctx, ws, binding.SourceKind, now)
 	if err != nil {
 		return nil, err

@@ -418,6 +418,30 @@ func TestDirectWritePersistencePolicyRejectsUnassignedOwner(t *testing.T) {
 	}
 }
 
+func TestDirectWritePersistencePolicyAllowsExplicitCandidateSurfaceWithoutClassifyingWholePackage(t *testing.T) {
+	inventory := directWriteTestInventory(oneDirectWriteProfile())
+	const packagePath = modulePath + "/internal/example"
+	const receiver = packagePath + ".projectionStore"
+	inventory.MethodSets = append([]PersistenceMethodSet{{
+		Name: "projection", ReadOnly: []string{"Workspaces"}, Mutating: []string{},
+	}}, inventory.MethodSets...)
+	inventory.ReceiverSurfaces = append([]PersistenceReceiverSurface{{
+		Receiver: receiver, Package: packagePath,
+		MethodSet: "projection", CapabilityOwner: "read_projection",
+	}}, inventory.ReceiverSurfaces...)
+	if err := inventory.validatePersistencePolicy(); err != nil {
+		t.Fatalf("validate narrow candidate surface: %v", err)
+	}
+	classifier := newPersistenceClassifier(inventory)
+	if classifier.isPersistenceFunctionPackage(packagePath) {
+		t.Fatal("declaring one narrow candidate receiver classified every package helper as persistence")
+	}
+	access, owner, ok := classifier.classify(receiver, "Workspaces")
+	if !ok || access != persistenceReadOnly || owner != "read_projection" {
+		t.Fatalf("candidate receiver classification = (%v, %q, %t), want read-only read_projection", access, owner, ok)
+	}
+}
+
 func TestDirectWriteInventoryRejectsExpiredRowsForCompletedPhase(t *testing.T) {
 	inventory := directWriteTestInventory(oneDirectWriteProfile())
 	inventory.Writes = []DirectWriteUse{{

@@ -13,6 +13,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
@@ -56,18 +58,18 @@ type RegisterFlueOptions struct {
 	// trusted: calling RegisterFlueDriver directly is the operator/source-tree
 	// path (CLI `loom driver register`). External submission paths (the
 	// workflows HTTP API via workflows.BuildAndRegister) must stamp
-	// domain.DriverTrustUntrusted explicitly.
-	Trust domain.DriverTrustLevel
+	// workflowcatalog.DriverTrustUntrusted explicitly.
+	Trust workflowcatalog.DriverTrustLevel
 }
 
 type RegisterFlueResult struct {
-	Driver         *domain.Driver        `json:"driver"`
-	Version        *domain.DriverVersion `json:"version"`
-	Bundle         *Bundle               `json:"bundle,omitempty"`
-	CreatedDriver  bool                  `json:"created_driver"`
-	CreatedVersion bool                  `json:"created_version"`
-	ReusedVersion  bool                  `json:"reused_version"`
-	Activated      bool                  `json:"activated"`
+	Driver         *workflowcatalog.Driver        `json:"driver"`
+	Version        *workflowcatalog.DriverVersion `json:"version"`
+	Bundle         *Bundle                        `json:"bundle,omitempty"`
+	CreatedDriver  bool                           `json:"created_driver"`
+	CreatedVersion bool                           `json:"created_version"`
+	ReusedVersion  bool                           `json:"reused_version"`
+	Activated      bool                           `json:"activated"`
 }
 
 // StagedFlueRegistration is the persistence-free output of preparing one
@@ -289,7 +291,7 @@ var ErrOpenShellRunnerUnimplemented = errors.New("openshell_runner_unimplemented
 // other failure fails closed with no fallback.
 var ErrRunnerNotDeclared = errors.New("driver runner not declared by version")
 
-func resolveDriverRunner(version *domain.DriverVersion, runnerName string) (DriverRunnerSpec, error) {
+func resolveDriverRunner(version *workflowcatalog.DriverVersion, runnerName string) (DriverRunnerSpec, error) {
 	runnerName = strings.TrimSpace(runnerName)
 	if runnerName == "" {
 		return DriverRunnerSpec{}, nil
@@ -314,7 +316,7 @@ func resolveDriverRunner(version *domain.DriverVersion, runnerName string) (Driv
 	return DriverRunnerSpec{}, fmt.Errorf("runner %q is not declared by driver version %q: %w: %w", runnerName, version.VersionID, ErrRunnerNotDeclared, domain.ErrInvalid)
 }
 
-func applyResolvedRunner(opts TaskRunRequestOptions, parent *domain.DriverRun, version *domain.DriverVersion) (TaskRunRequestOptions, error) {
+func applyResolvedRunner(opts TaskRunRequestOptions, parent *domain.DriverRun, version *workflowcatalog.DriverVersion) (TaskRunRequestOptions, error) {
 	opts.Runner = strings.TrimSpace(opts.Runner)
 	if opts.Runner == "" {
 		return opts, nil
@@ -330,7 +332,7 @@ func applyResolvedRunner(opts TaskRunRequestOptions, parent *domain.DriverRun, v
 	return opts, nil
 }
 
-func resolvedRunnerRef(parent *domain.DriverRun, version *domain.DriverVersion, spec DriverRunnerSpec) string {
+func resolvedRunnerRef(parent *domain.DriverRun, version *workflowcatalog.DriverVersion, spec DriverRunnerSpec) string {
 	driverID := ""
 	if version != nil {
 		driverID = version.DriverID
@@ -360,7 +362,7 @@ type flueRegistrationInput struct {
 	sourceRef    string
 	sourceDigest string
 	runnerSpecs  []DriverRunnerSpec
-	trust        domain.DriverTrustLevel
+	trust        workflowcatalog.DriverTrustLevel
 }
 
 func resolveFlueRegistrationInput(opts RegisterFlueOptions) (*flueRegistrationInput, error) {
@@ -543,9 +545,9 @@ func promoteFlueBundle(tmpRoot, finalRoot string) error {
 // registrationTrust resolves the trust level a registration stamps: empty
 // means the operator/source-tree default (trusted). See
 // RegisterFlueOptions.Trust for the contract.
-func registrationTrust(trust domain.DriverTrustLevel) domain.DriverTrustLevel {
+func registrationTrust(trust workflowcatalog.DriverTrustLevel) workflowcatalog.DriverTrustLevel {
 	if trust == "" {
-		return domain.DriverTrustTrusted
+		return workflowcatalog.DriverTrustTrusted
 	}
 	return trust
 }

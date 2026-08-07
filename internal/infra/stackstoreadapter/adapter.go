@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"time"
 
+	stackstore "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
-	"github.com/tysonthomas9/loomcli/internal/stacklineage"
-	"github.com/tysonthomas9/loomcli/internal/stackstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol/stacklineage"
 )
 
 type Adapter struct{ store stackstore.Store }

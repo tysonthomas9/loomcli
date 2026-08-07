@@ -7,6 +7,8 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -43,11 +45,11 @@ type taskRunListPort interface {
 }
 
 type triggerEventListPort interface {
-	List(context.Context, string, store.TriggerEventFilter) ([]*domain.TriggerEvent, error)
+	List(context.Context, string, store.TriggerEventFilter) ([]*automation.Event, error)
 }
 
 type triggerDeliveryListPort interface {
-	List(context.Context, string, store.TriggerDeliveryFilter) ([]*domain.TriggerDelivery, error)
+	List(context.Context, string, store.TriggerDeliveryFilter) ([]*automation.Delivery, error)
 }
 
 type driverRunGetPort interface {
@@ -143,7 +145,7 @@ func (reader *taskWorkflowRunReader) ListTaskWorkflowRuns(
 func (reader *taskWorkflowRunReader) collectTaskWorkflowEventRuns(
 	ctx context.Context,
 	workspace, subjectRef string,
-	event *domain.TriggerEvent,
+	event *automation.Event,
 	representedDriverRuns map[string]struct{},
 	runsByID map[string]*domain.DriverRun,
 ) error {

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -20,9 +22,9 @@ type RegistrationCatalog interface {
 }
 
 type registrationLifecycleTestCatalog interface {
-	ApproveDriverVersionForTest(context.Context, string, string, string) (*domain.Driver, error)
-	UnapproveDriverVersionForTest(context.Context, string, string, string) (*domain.Driver, error)
-	ActivateDriverVersionForTest(context.Context, string, string, string) (*domain.Driver, error)
+	ApproveDriverVersionForTest(context.Context, string, string, string) (*workflowcatalog.Driver, error)
+	UnapproveDriverVersionForTest(context.Context, string, string, string) (*workflowcatalog.Driver, error)
+	ActivateDriverVersionForTest(context.Context, string, string, string) (*workflowcatalog.Driver, error)
 }
 
 func RegisterFlueDriver(
@@ -105,7 +107,7 @@ func reuseRegisteredFlueVersion(
 	s RegistrationCatalog,
 	opts RegisterFlueOptions,
 	result *RegisterFlueResult,
-	existing *domain.DriverVersion,
+	existing *workflowcatalog.DriverVersion,
 	driverID string,
 	staged *stagedFlueBundle,
 ) error {
@@ -165,7 +167,7 @@ func persistRegisteredFlueVersion(
 		Runtime:          RuntimeFlueNode,
 		Manifest:         staged.manifest,
 		BuildDiagnostics: opts.BuildDiagnostics,
-		ValidationStatus: domain.DriverVersionValidationPassed,
+		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 		CreatedBy:        opts.CreatedBy,
 	})
 	if err != nil {
@@ -195,8 +197,8 @@ func ensureRegisteredDriver(
 	ctx context.Context,
 	s RegistrationCatalog,
 	workspace, driverID, driverName, sourceRef string,
-	trust domain.DriverTrustLevel,
-) (*domain.Driver, bool, error) {
+	trust workflowcatalog.DriverTrustLevel,
+) (*workflowcatalog.Driver, bool, error) {
 	driverRecord, err := s.Drivers().Get(ctx, workspace, driverID)
 	if err == nil {
 		return demoteReregisteredDriver(ctx, s, driverRecord, trust)
@@ -208,9 +210,9 @@ func ensureRegisteredDriver(
 		WorkspaceKey: workspace,
 		DriverID:     driverID,
 		Name:         driverName,
-		OwnerType:    domain.DriverOwnerUser,
+		OwnerType:    workflowcatalog.DriverOwnerUser,
 		Description:  "Native Flue driver registered from " + sourceRef,
-		Status:       domain.DriverStatusDraft,
+		Status:       workflowcatalog.DriverStatusDraft,
 		TrustLevel:   trust,
 		Metadata: map[string]string{
 			"source_ref":    sourceRef,
@@ -228,13 +230,13 @@ func ensureRegisteredDriver(
 func demoteReregisteredDriver(
 	ctx context.Context,
 	s RegistrationCatalog,
-	driverRecord *domain.Driver,
-	trust domain.DriverTrustLevel,
-) (*domain.Driver, bool, error) {
+	driverRecord *workflowcatalog.Driver,
+	trust workflowcatalog.DriverTrustLevel,
+) (*workflowcatalog.Driver, bool, error) {
 	if trust.Trusted() || !driverRecord.TrustLevel.Trusted() {
 		return driverRecord, false, nil
 	}
-	demoted := domain.DriverTrustUntrusted
+	demoted := workflowcatalog.DriverTrustUntrusted
 	updated, err := s.Drivers().Update(
 		ctx,
 		driverRecord.WorkspaceKey,
@@ -297,7 +299,7 @@ func ActivateDriverVersion(
 	ctx context.Context,
 	catalog RegistrationCatalog,
 	workspace, driverID, versionID string,
-) (*domain.Driver, *domain.DriverVersion, error) {
+) (*workflowcatalog.Driver, *workflowcatalog.DriverVersion, error) {
 	driverRecord, version, err := loadDriverVersionForOperatorAction(ctx, catalog.Drivers(), catalog.DriverVersions(), workspace, driverID, versionID)
 	if err != nil {
 		return nil, nil, err
@@ -313,7 +315,7 @@ func ActivateDriverVersion(
 	if err != nil {
 		return nil, nil, fmt.Errorf("activate driver version: %w", err)
 	}
-	if DriverVersionEffectiveTrust(driverRecord, version) == domain.DriverTrustUntrusted {
+	if DriverVersionEffectiveTrust(driverRecord, version) == workflowcatalog.DriverTrustUntrusted {
 		updated, err = lifecycle.UnapproveDriverVersionForTest(ctx, workspace, driverRecord.DriverID, version.VersionID)
 		if err != nil {
 			return nil, nil, fmt.Errorf("restore active untrusted version: %w", err)

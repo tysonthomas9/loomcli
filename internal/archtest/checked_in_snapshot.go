@@ -30,9 +30,9 @@ func checkedInSnapshotViolations(report Report) []string {
 		}
 	}
 
-	checkCount("composite Store files", len(report.CompositeStoreFiles), 61)
-	checkCount("outside-composition Store files", len(report.CompositeStoreOutside), 51)
-	checkCount("legacy handler imports", len(report.LegacyHandlerImports), 29)
+	checkCount("composite Store files", len(report.CompositeStoreFiles), 18)
+	checkCount("outside-composition Store files", len(report.CompositeStoreOutside), 0)
+	checkCount("legacy handler imports", len(report.LegacyHandlerImports), 27)
 	if !slices.Equal(report.ModuleRoots, checkedInModuleRoots) {
 		violations = append(violations, fmt.Sprintf("checked-in architecture snapshot module roots = %v, want %v", report.ModuleRoots, checkedInModuleRoots))
 	}

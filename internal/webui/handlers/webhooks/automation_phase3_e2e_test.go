@@ -24,6 +24,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
@@ -54,7 +56,7 @@ func TestE2E_AutomationPhase3RealFleetDBLoomHTTPAndCLI(t *testing.T) {
 	e2e.startLoomServe()
 
 	createBody := e2e.automationPhase3CreateBindingBody()
-	var created domain.TriggerBinding
+	var created automation.Binding
 	e2e.doAutomationPhase3LoomJSON(
 		http.MethodPost,
 		"/api/workspaces/"+e2e.workspace+"/trigger-bindings?create_only=true",
@@ -63,20 +65,20 @@ func TestE2E_AutomationPhase3RealFleetDBLoomHTTPAndCLI(t *testing.T) {
 		http.StatusCreated,
 		&created,
 	)
-	assertAutomationPhase3Binding(t, &created, automationPhase3BindingID, domain.TriggerBindingConcurrencyAllow)
+	assertAutomationPhase3Binding(t, &created, automationPhase3BindingID, automation.ConcurrencyAllow)
 	if created.WebhookSecret != "" {
 		t.Fatalf("public create leaked webhook secret: %+v", created)
 	}
 
-	var listed []*domain.TriggerBinding
+	var listed []*automation.Binding
 	e2e.runAutomationPhase3CLIJSON(&listed, "trigger", "bindings", "list", "--source-kind", "github", "--json")
 	assertAutomationPhase3BindingListed(t, listed, automationPhase3BindingID)
 
-	var shown domain.TriggerBinding
+	var shown automation.Binding
 	e2e.runAutomationPhase3CLIJSON(&shown, "trigger", "bindings", "show", automationPhase3BindingID)
-	assertAutomationPhase3Binding(t, &shown, automationPhase3BindingID, domain.TriggerBindingConcurrencyAllow)
+	assertAutomationPhase3Binding(t, &shown, automationPhase3BindingID, automation.ConcurrencyAllow)
 
-	var updated domain.TriggerBinding
+	var updated automation.Binding
 	e2e.runAutomationPhase3CLIJSON(&updated,
 		"trigger", "bindings", "update", automationPhase3BindingID,
 		"--concurrency-policy", "allow",
@@ -84,7 +86,7 @@ func TestE2E_AutomationPhase3RealFleetDBLoomHTTPAndCLI(t *testing.T) {
 		"--retry-backoff", "2",
 		"--json",
 	)
-	assertAutomationPhase3Binding(t, &updated, automationPhase3BindingID, domain.TriggerBindingConcurrencyAllow)
+	assertAutomationPhase3Binding(t, &updated, automationPhase3BindingID, automation.ConcurrencyAllow)
 	if updated.RetryMaxAttempts != 3 || updated.RetryBackoffSeconds != 2 {
 		t.Fatalf("updated retry policy = attempts %d backoff %ds, want 3/2s", updated.RetryMaxAttempts, updated.RetryBackoffSeconds)
 	}
@@ -96,19 +98,19 @@ func TestE2E_AutomationPhase3RealFleetDBLoomHTTPAndCLI(t *testing.T) {
 	e2e.expectTriggerDelivery(event, &created, webhookRun)
 	e2e.expectRunEvents(webhookRun.RunID, "driver_run.create")
 
-	var events []*domain.TriggerEvent
+	var events []*automation.Event
 	e2e.runAutomationPhase3CLIJSON(&events, "trigger", "events", "list", "--source-kind", "github", "--json")
 	assertAutomationPhase3EventListed(t, events, event.EventID)
-	var shownEvent domain.TriggerEvent
+	var shownEvent automation.Event
 	e2e.runAutomationPhase3CLIJSON(&shownEvent, "trigger", "events", "show", event.EventID)
 	if shownEvent.EventID != event.EventID || shownEvent.SourceEventID != "e2e-delivery-1" || shownEvent.SignatureStatus != "verified" {
 		t.Fatalf("CLI event show = %+v, want verified %s", shownEvent, event.EventID)
 	}
 
-	var deliveries []*domain.TriggerDelivery
+	var deliveries []*automation.Delivery
 	e2e.runAutomationPhase3CLIJSON(&deliveries, "trigger", "deliveries", "list", "--event", event.EventID, "--json")
 	delivery := assertAutomationPhase3DeliveryListed(t, deliveries, event.EventID, firstRunID)
-	var shownDelivery domain.TriggerDelivery
+	var shownDelivery automation.Delivery
 	e2e.runAutomationPhase3CLIJSON(&shownDelivery, "trigger", "deliveries", "show", delivery.DeliveryID)
 	if shownDelivery.DeliveryID != delivery.DeliveryID || shownDelivery.DriverRunID != firstRunID {
 		t.Fatalf("CLI delivery show = %+v, want delivery %s run %s", shownDelivery, delivery.DeliveryID, firstRunID)
@@ -149,7 +151,7 @@ func TestE2E_AutomationPhase3WebhookPerformance(t *testing.T) {
 	e2e.fleetURL = proxyURL
 	e2e.startLoomServe()
 
-	var binding domain.TriggerBinding
+	var binding automation.Binding
 	e2e.runAutomationPhase3CLIJSON(&binding,
 		"trigger", "bindings", "create",
 		"--binding-id", automationPhase3BindingID,
@@ -162,7 +164,7 @@ func TestE2E_AutomationPhase3WebhookPerformance(t *testing.T) {
 		"--concurrency-policy", "allow",
 		"--json",
 	)
-	assertAutomationPhase3Binding(t, &binding, automationPhase3BindingID, domain.TriggerBindingConcurrencyAllow)
+	assertAutomationPhase3Binding(t, &binding, automationPhase3BindingID, automation.ConcurrencyAllow)
 
 	durationsMS := make([]float64, 0, automationPhase3PerformanceSample)
 	for sample := 0; sample < automationPhase3PerformanceSample; sample++ {
@@ -218,10 +220,10 @@ func (e *githubWebhookE2E) seedAutomationPhase3Target() {
 		WorkspaceKey: e.workspace,
 		DriverID:     automationPhase3DriverID,
 		Name:         automationPhase3DriverID,
-		OwnerType:    domain.DriverOwnerUser,
+		OwnerType:    workflowcatalog.DriverOwnerUser,
 		OwnerRef:     e.actor,
-		Status:       domain.DriverStatusDraft,
-		TrustLevel:   domain.DriverTrustUntrusted,
+		Status:       workflowcatalog.DriverStatusDraft,
+		TrustLevel:   workflowcatalog.DriverTrustUntrusted,
 	})
 	if err != nil {
 		e.t.Fatalf("seed Phase 3 driver: %v", err)
@@ -239,14 +241,14 @@ func (e *githubWebhookE2E) seedAutomationPhase3Target() {
 		BundleRef:        "e2e://automation-phase3-bundle",
 		BundleDigest:     "sha256:automation-phase3-bundle",
 		Runtime:          "flue-node",
-		Manifest:         map[string]string{workflowcatalog.ManifestTrustLevelKey: string(domain.DriverTrustUntrusted)},
-		ValidationStatus: domain.DriverVersionValidationPassed,
+		Manifest:         map[string]string{workflowcatalog.ManifestTrustLevelKey: string(workflowcatalog.DriverTrustUntrusted)},
+		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 		CreatedBy:        e.actor,
 	})
 	if err != nil {
 		e.t.Fatalf("seed Phase 3 driver version: %v", err)
 	}
-	if version.DriverID != automationPhase3DriverID || version.ValidationStatus != domain.DriverVersionValidationPassed {
+	if version.DriverID != automationPhase3DriverID || version.ValidationStatus != workflowcatalog.DriverVersionValidationPassed {
 		e.t.Fatalf("seed Phase 3 version = %+v", version)
 	}
 	approved, err := e.fleetClient.WorkflowCatalog().ApproveVersion(
@@ -343,7 +345,7 @@ func (e *githubWebhookE2E) assertAutomationPhase3BindingDeleted(bindingID string
 	}
 }
 
-func assertAutomationPhase3Binding(t *testing.T, binding *domain.TriggerBinding, bindingID string, policy domain.TriggerBindingConcurrencyPolicy) {
+func assertAutomationPhase3Binding(t *testing.T, binding *automation.Binding, bindingID string, policy automation.BindingConcurrencyPolicy) {
 	t.Helper()
 	if binding == nil || binding.BindingID != bindingID || binding.DriverID != automationPhase3DriverID ||
 		binding.DriverVersionID != automationPhase3VersionID || binding.RouteKey != "github.pull_request.opened" ||
@@ -352,7 +354,7 @@ func assertAutomationPhase3Binding(t *testing.T, binding *domain.TriggerBinding,
 	}
 }
 
-func assertAutomationPhase3BindingListed(t *testing.T, bindings []*domain.TriggerBinding, bindingID string) {
+func assertAutomationPhase3BindingListed(t *testing.T, bindings []*automation.Binding, bindingID string) {
 	t.Helper()
 	for _, binding := range bindings {
 		if binding != nil && binding.BindingID == bindingID {
@@ -371,7 +373,7 @@ func assertAutomationPhase3Run(t *testing.T, run *domain.DriverRun, bindingID st
 	}
 }
 
-func assertAutomationPhase3EventListed(t *testing.T, events []*domain.TriggerEvent, eventID string) {
+func assertAutomationPhase3EventListed(t *testing.T, events []*automation.Event, eventID string) {
 	t.Helper()
 	for _, event := range events {
 		if event != nil && event.EventID == eventID {
@@ -381,7 +383,7 @@ func assertAutomationPhase3EventListed(t *testing.T, events []*domain.TriggerEve
 	t.Fatalf("event %s not found in %+v", eventID, events)
 }
 
-func assertAutomationPhase3DeliveryListed(t *testing.T, deliveries []*domain.TriggerDelivery, eventID, runID string) *domain.TriggerDelivery {
+func assertAutomationPhase3DeliveryListed(t *testing.T, deliveries []*automation.Delivery, eventID, runID string) *automation.Delivery {
 	t.Helper()
 	for _, delivery := range deliveries {
 		if delivery != nil && delivery.TriggerEventID == eventID && delivery.DriverRunID == runID {

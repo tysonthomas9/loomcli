@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // Schedulability preflight for taskRuns.request: fail fast as unschedulable
@@ -21,7 +20,7 @@ type taskRunSchedulingRequirements struct {
 	Capabilities []string
 }
 
-func verifyTaskRunRequestSchedulable(ctx context.Context, s store.Store, opts TaskRunRequestOptions) error {
+func verifyTaskRunRequestSchedulable(ctx context.Context, s taskRunRequestStore, opts TaskRunRequestOptions) error {
 	profile, err := taskRunRequestSchedulingProfile(ctx, s, opts)
 	if err != nil {
 		return err
@@ -51,7 +50,7 @@ func verifyTaskRunRequestSchedulable(ctx context.Context, s store.Store, opts Ta
 	)
 }
 
-func taskRunRequestSchedulingProfile(ctx context.Context, s store.Store, opts TaskRunRequestOptions) (*domain.WorkerProfile, error) {
+func taskRunRequestSchedulingProfile(ctx context.Context, s taskRunRequestStore, opts TaskRunRequestOptions) (*domain.WorkerProfile, error) {
 	profileID := strings.TrimSpace(opts.WorkerProfileID)
 	if profileID == "" {
 		return nil, nil

@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	appworkflowauthoring "github.com/tysonthomas9/loomcli/internal/app/workflowauthoring"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	workflowdistribution "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
@@ -52,7 +51,7 @@ type BuildAndRegisterOptions struct {
 	// DeriveRunners is reserved for trusted built-in template registration.
 	DeriveRunners bool
 	// Trust is server-selected. External submissions default untrusted.
-	Trust domain.DriverTrustLevel
+	Trust workflowcatalog.DriverTrustLevel
 	// RequestID is the durable lost-response replay key submitted to Workflow
 	// Catalog's atomic authoring command. When omitted, BuildAndAuthor derives
 	// one from the content-addressed driver/version identity.

@@ -13,10 +13,16 @@ import (
 // WorkerProfile, and orchestration-session projections and never reads or
 // mutates the retired supervised-assignment aggregate.
 type StoreLeadAssignmentSource struct {
-	store store.Store
+	store leadAssignmentStore
 }
 
-func NewStoreLeadAssignmentSource(st store.Store) LeadAssignmentSource {
+type leadAssignmentStore interface {
+	store.OrchestrationSessionStore
+	AgentServices() store.AgentServiceStore
+	WorkerProfiles() store.WorkerProfileStore
+}
+
+func NewStoreLeadAssignmentSource(st leadAssignmentStore) LeadAssignmentSource {
 	if st == nil || st.AgentServices() == nil || st.WorkerProfiles() == nil || st.AgentSessions() == nil {
 		return nil
 	}

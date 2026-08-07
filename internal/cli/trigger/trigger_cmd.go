@@ -10,13 +10,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/trigger"
+	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 )
 
 var triggerCmd = &cobra.Command{
@@ -152,7 +153,7 @@ func registerRouterBindingFlags(cmd *cobra.Command, f *routerBindingFlags) {
 // Note: non-allow policies deliberately do NOT require a subject template —
 // deliveries fall back to the default key "<binding_id>|<subject_ref>".
 func (f *routerBindingFlags) validate() error {
-	if p := strings.TrimSpace(f.concurrencyPolicy); p != "" && !isValidConcurrencyPolicy(domain.TriggerBindingConcurrencyPolicy(p)) {
+	if p := strings.TrimSpace(f.concurrencyPolicy); p != "" && !isValidConcurrencyPolicy(automation.BindingConcurrencyPolicy(p)) {
 		return fmt.Errorf("--concurrency-policy %q is invalid: must be one of allow, forbid, replace, queue, one_active_per_epic", p)
 	}
 	for _, pattern := range f.patterns {
@@ -199,7 +200,7 @@ func (f *routerBindingFlags) validateForCreate(source string) error {
 // domain filter, dropping blank entries. Returns nil when no constraint
 // remains (create sends no filter; update callers map nil to the zero filter,
 // which clears it server-side).
-func (f *routerBindingFlags) actorFilter() *domain.TriggerActorFilter {
+func (f *routerBindingFlags) actorFilter() *automation.ActorFilter {
 	kinds := make([]string, 0, len(f.actorExclude))
 	for _, k := range f.actorExclude {
 		if t := strings.TrimSpace(k); t != "" {
@@ -209,7 +210,7 @@ func (f *routerBindingFlags) actorFilter() *domain.TriggerActorFilter {
 	if len(kinds) == 0 {
 		return nil
 	}
-	return &domain.TriggerActorFilter{ExcludeActorKinds: kinds}
+	return &automation.ActorFilter{ExcludeActorKinds: kinds}
 }
 
 // patch builds the management API patch from the flags the operator actually
@@ -227,7 +228,7 @@ func (f *routerBindingFlags) patch(flags *pflag.FlagSet) (triggerBindingPatchReq
 		ScheduleTimezone:    strPtrIfChanged(flags, "schedule-timezone", f.scheduleTimezone),
 	}
 	if flags.Changed("concurrency-policy") {
-		p := domain.TriggerBindingConcurrencyPolicy(strings.TrimSpace(f.concurrencyPolicy))
+		p := automation.BindingConcurrencyPolicy(strings.TrimSpace(f.concurrencyPolicy))
 		patch.ConcurrencyPolicy = &p
 	}
 	if flags.Changed("actor-filter-exclude") {
@@ -248,13 +249,13 @@ func (f *routerBindingFlags) patch(flags *pflag.FlagSet) (triggerBindingPatchReq
 	return patch, nil
 }
 
-func isValidConcurrencyPolicy(p domain.TriggerBindingConcurrencyPolicy) bool {
+func isValidConcurrencyPolicy(p automation.BindingConcurrencyPolicy) bool {
 	switch p {
-	case domain.TriggerBindingConcurrencyAllow,
-		domain.TriggerBindingConcurrencyForbid,
-		domain.TriggerBindingConcurrencyReplace,
-		domain.TriggerBindingConcurrencyQueue,
-		domain.TriggerBindingConcurrencyOneActivePerEpic:
+	case automation.ConcurrencyAllow,
+		automation.ConcurrencyForbid,
+		automation.ConcurrencyReplace,
+		automation.ConcurrencyQueue,
+		automation.ConcurrencyOneActivePerEpic:
 		return true
 	}
 	return false
@@ -361,7 +362,7 @@ func newBindingCreateRequest(routeKey, source string) triggerBindingCreateReques
 		EventTypePatterns:   append([]string(nil), bindCreateRouter.patterns...),
 		DriverVersionID:     strings.TrimSpace(bindCreateVersion),
 		Entrypoint:          strings.TrimSpace(bindCreateEntry),
-		ConcurrencyPolicy:   domain.TriggerBindingConcurrencyPolicy(strings.TrimSpace(bindCreateRouter.concurrencyPolicy)),
+		ConcurrencyPolicy:   automation.BindingConcurrencyPolicy(strings.TrimSpace(bindCreateRouter.concurrencyPolicy)),
 		Secret:              bindCreateSecret,
 		SubjectKeyTemplate:  strings.TrimSpace(bindCreateRouter.subjectKeyTemplate),
 		ActorFilter:         bindCreateRouter.actorFilter(),
@@ -471,11 +472,11 @@ func runBindingsRun(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func filterBindingList(bindings []*domain.TriggerBinding, sourceKind string, filterEnabled, enabled bool) []*domain.TriggerBinding {
+func filterBindingList(bindings []*automation.Binding, sourceKind string, filterEnabled, enabled bool) []*automation.Binding {
 	if sourceKind == "" && !filterEnabled {
 		return bindings
 	}
-	filtered := make([]*domain.TriggerBinding, 0, len(bindings))
+	filtered := make([]*automation.Binding, 0, len(bindings))
 	for _, binding := range bindings {
 		if binding == nil || (sourceKind != "" && binding.SourceKind != sourceKind) || (filterEnabled && binding.Enabled != enabled) {
 			continue
@@ -487,7 +488,7 @@ func filterBindingList(bindings []*domain.TriggerBinding, sourceKind string, fil
 
 // renderBindingsList writes the human-readable bindings listing. Kept as a
 // pure helper so the golden-output test can exercise it directly.
-func renderBindingsList(w io.Writer, bindings []*domain.TriggerBinding) {
+func renderBindingsList(w io.Writer, bindings []*automation.Binding) {
 	if len(bindings) == 0 {
 		_, _ = fmt.Fprintln(w, "No trigger bindings.")
 		return
@@ -497,7 +498,7 @@ func renderBindingsList(w io.Writer, bindings []*domain.TriggerBinding) {
 	}
 }
 
-func formatBindingRow(b *domain.TriggerBinding) string {
+func formatBindingRow(b *automation.Binding) string {
 	policy := string(b.ConcurrencyPolicy)
 	if policy == "" {
 		policy = "-"

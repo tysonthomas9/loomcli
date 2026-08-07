@@ -64,7 +64,7 @@ type Config = dependencies.Config
 
 // Module serves the workspace-scoped driver-op routes.
 type Module struct {
-	store                store.Store
+	store                dependencies.Store
 	apiToken             string
 	runTokenKey          []byte
 	apiBaseURL           string
@@ -96,7 +96,7 @@ type Module struct {
 
 	// deliverAssignment is a test seam over the driver's lead-assignment
 	// delivery facade.
-	deliverAssignment func(ctx context.Context, st store.Store, workspace, leadName string) (driverpkg.AgentMessageDeliveryResult, error)
+	deliverAssignment func(ctx context.Context, st dependencies.Store, workspace, leadName string) (driverpkg.AgentMessageDeliveryResult, error)
 }
 
 // NewModule constructs the driver API module. Returns nil-safe behavior: with
@@ -135,7 +135,7 @@ func NewModule(cfg Config) *Module { //nolint:funlen // Operation registration i
 
 		deliverAssignment: func(
 			ctx context.Context,
-			st store.Store,
+			st dependencies.Store,
 			workspace,
 			leadName string,
 		) (driverpkg.AgentMessageDeliveryResult, error) {

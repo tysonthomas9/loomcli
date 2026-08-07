@@ -5,6 +5,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -19,8 +23,8 @@ func newRouterTestStore(t *testing.T) *Store {
 		WorkspaceKey: "WS",
 		DriverID:     "driver-1",
 		Name:         "epic-runner",
-		OwnerType:    domain.DriverOwnerSystem,
-		Status:       domain.DriverStatusActive,
+		OwnerType:    workflowcatalog.DriverOwnerSystem,
+		Status:       workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatalf("Create driver: %v", err)
 	}
@@ -31,7 +35,7 @@ func newRouterTestStore(t *testing.T) *Store {
 		Version:          1,
 		SourceDigest:     "sha256:source-v1",
 		BundleDigest:     "sha256:bundle-v1",
-		ValidationStatus: domain.DriverVersionValidationPassed,
+		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
 	}
@@ -55,14 +59,14 @@ func TestTriggerBindingRouterFieldsCreateRoundTrip(t *testing.T) {
 		name    string
 		mutate  func(*store.TriggerBindingCreate)
 		wantErr error
-		check   func(t *testing.T, b *domain.TriggerBinding)
+		check   func(t *testing.T, b *automation.Binding)
 	}{
 		{
 			name: "all router fields round-trip",
 			mutate: func(in *store.TriggerBindingCreate) {
 				in.SourceKind = "cron"
 				in.SubjectKeyTemplate = "{{subject_ref}}|{{attrs.repo}}"
-				in.ActorFilter = &domain.TriggerActorFilter{
+				in.ActorFilter = &automation.ActorFilter{
 					ExcludeActorKinds: []string{"workflow"},
 					AllowActors:       []string{"agent:lead"},
 				}
@@ -71,7 +75,7 @@ func TestTriggerBindingRouterFieldsCreateRoundTrip(t *testing.T) {
 				in.Schedule = "*/5 * * * *"
 				in.ScheduleTimezone = "Europe/Berlin"
 			},
-			check: func(t *testing.T, b *domain.TriggerBinding) {
+			check: func(t *testing.T, b *automation.Binding) {
 				if b.SubjectKeyTemplate != "{{subject_ref}}|{{attrs.repo}}" {
 					t.Fatalf("subject_key_template = %q", b.SubjectKeyTemplate)
 				}
@@ -89,11 +93,11 @@ func TestTriggerBindingRouterFieldsCreateRoundTrip(t *testing.T) {
 		{
 			name: "retry defaults and empty actor filter normalized",
 			mutate: func(in *store.TriggerBindingCreate) {
-				in.ActorFilter = &domain.TriggerActorFilter{}
+				in.ActorFilter = &automation.ActorFilter{}
 			},
-			check: func(t *testing.T, b *domain.TriggerBinding) {
-				if b.RetryMaxAttempts != domain.DefaultTriggerRetryMaxAttempts || b.RetryBackoffSeconds != domain.DefaultTriggerRetryBackoffSeconds {
-					t.Fatalf("retry defaults = %d/%d, want %d/%d", b.RetryMaxAttempts, b.RetryBackoffSeconds, domain.DefaultTriggerRetryMaxAttempts, domain.DefaultTriggerRetryBackoffSeconds)
+			check: func(t *testing.T, b *automation.Binding) {
+				if b.RetryMaxAttempts != automation.DefaultTriggerRetryMaxAttempts || b.RetryBackoffSeconds != automation.DefaultTriggerRetryBackoffSeconds {
+					t.Fatalf("retry defaults = %d/%d, want %d/%d", b.RetryMaxAttempts, b.RetryBackoffSeconds, automation.DefaultTriggerRetryMaxAttempts, automation.DefaultTriggerRetryBackoffSeconds)
 				}
 				if b.ActorFilter != nil {
 					t.Fatalf("empty actor_filter = %+v, want nil", b.ActorFilter)
@@ -151,18 +155,18 @@ func TestTriggerBindingRouterFieldsUpdate(t *testing.T) {
 	backoff := 120
 	schedule := "0 9 * * 1"
 	tz := "America/Los_Angeles"
-	filter := domain.TriggerActorFilter{ExcludeActorKinds: []string{"workflow"}}
-	emptyFilter := domain.TriggerActorFilter{}
+	filter := automation.ActorFilter{ExcludeActorKinds: []string{"workflow"}}
+	emptyFilter := automation.ActorFilter{}
 	tests := []struct {
 		name  string
 		seed  func(*store.TriggerBindingCreate)
 		patch store.TriggerBindingUpdate
-		check func(t *testing.T, b *domain.TriggerBinding)
+		check func(t *testing.T, b *automation.Binding)
 	}{
 		{
 			name:  "set subject key template",
 			patch: store.TriggerBindingUpdate{SubjectKeyTemplate: &template},
-			check: func(t *testing.T, b *domain.TriggerBinding) {
+			check: func(t *testing.T, b *automation.Binding) {
 				if b.SubjectKeyTemplate != template {
 					t.Fatalf("subject_key_template = %q, want %q", b.SubjectKeyTemplate, template)
 				}
@@ -171,7 +175,7 @@ func TestTriggerBindingRouterFieldsUpdate(t *testing.T) {
 		{
 			name:  "set actor filter",
 			patch: store.TriggerBindingUpdate{ActorFilter: &filter},
-			check: func(t *testing.T, b *domain.TriggerBinding) {
+			check: func(t *testing.T, b *automation.Binding) {
 				if b.ActorFilter == nil || len(b.ActorFilter.ExcludeActorKinds) != 1 || b.ActorFilter.ExcludeActorKinds[0] != "workflow" {
 					t.Fatalf("actor_filter = %+v", b.ActorFilter)
 				}
@@ -180,10 +184,10 @@ func TestTriggerBindingRouterFieldsUpdate(t *testing.T) {
 		{
 			name: "empty actor filter clears existing",
 			seed: func(in *store.TriggerBindingCreate) {
-				in.ActorFilter = &domain.TriggerActorFilter{AllowActors: []string{"agent:lead"}}
+				in.ActorFilter = &automation.ActorFilter{AllowActors: []string{"agent:lead"}}
 			},
 			patch: store.TriggerBindingUpdate{ActorFilter: &emptyFilter},
-			check: func(t *testing.T, b *domain.TriggerBinding) {
+			check: func(t *testing.T, b *automation.Binding) {
 				if b.ActorFilter != nil {
 					t.Fatalf("actor_filter = %+v, want cleared", b.ActorFilter)
 				}
@@ -192,7 +196,7 @@ func TestTriggerBindingRouterFieldsUpdate(t *testing.T) {
 		{
 			name:  "retry and schedule fields",
 			patch: store.TriggerBindingUpdate{RetryMaxAttempts: &attempts, RetryBackoffSeconds: &backoff, Schedule: &schedule, ScheduleTimezone: &tz},
-			check: func(t *testing.T, b *domain.TriggerBinding) {
+			check: func(t *testing.T, b *automation.Binding) {
 				if b.RetryMaxAttempts != attempts || b.RetryBackoffSeconds != backoff {
 					t.Fatalf("retry = %d/%d, want %d/%d", b.RetryMaxAttempts, b.RetryBackoffSeconds, attempts, backoff)
 				}
@@ -208,7 +212,7 @@ func TestTriggerBindingRouterFieldsUpdate(t *testing.T) {
 				in.RetryMaxAttempts = 2
 			},
 			patch: store.TriggerBindingUpdate{},
-			check: func(t *testing.T, b *domain.TriggerBinding) {
+			check: func(t *testing.T, b *automation.Binding) {
 				if b.SubjectKeyTemplate != template || b.RetryMaxAttempts != 2 {
 					t.Fatalf("router fields drifted: template=%q retry=%d", b.SubjectKeyTemplate, b.RetryMaxAttempts)
 				}
@@ -244,9 +248,9 @@ func TestTriggerDeliverySubjectKeyAndRouterStatuses(t *testing.T) {
 	ctx := t.Context()
 	s := newRouterTestStore(t)
 	now := time.Now().UTC()
-	deliveries := []*domain.TriggerDelivery{
-		{WorkspaceKey: "WS", DeliveryID: "delivery-1", TriggerEventID: "event-1", TriggerBindingID: "binding-1", Status: domain.TriggerDeliverySuperseded, SubjectKey: "binding-1|repo-a", CreatedAt: now, UpdatedAt: now},
-		{WorkspaceKey: "WS", DeliveryID: "delivery-2", TriggerEventID: "event-2", TriggerBindingID: "binding-1", Status: domain.TriggerDeliveryHeld, SubjectKey: "binding-1|repo-b", CreatedAt: now.Add(time.Second), UpdatedAt: now.Add(time.Second)},
+	deliveries := []*automation.Delivery{
+		{WorkspaceKey: "WS", DeliveryID: "delivery-1", TriggerEventID: "event-1", TriggerBindingID: "binding-1", Status: automation.DeliverySuperseded, SubjectKey: "binding-1|repo-a", CreatedAt: now, UpdatedAt: now},
+		{WorkspaceKey: "WS", DeliveryID: "delivery-2", TriggerEventID: "event-2", TriggerBindingID: "binding-1", Status: automation.DeliveryHeld, SubjectKey: "binding-1|repo-b", CreatedAt: now.Add(time.Second), UpdatedAt: now.Add(time.Second)},
 	}
 	for _, delivery := range deliveries {
 		if err := s.deliveries.create(delivery); err != nil {
@@ -258,11 +262,11 @@ func TestTriggerDeliverySubjectKeyAndRouterStatuses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get delivery: %v", err)
 	}
-	if got.SubjectKey != "binding-1|repo-a" || got.Status != domain.TriggerDeliverySuperseded {
+	if got.SubjectKey != "binding-1|repo-a" || got.Status != automation.DeliverySuperseded {
 		t.Fatalf("delivery = status %q subject_key %q, want superseded binding-1|repo-a", got.Status, got.SubjectKey)
 	}
 
-	held, err := s.TriggerDeliveries().List(ctx, "WS", store.TriggerDeliveryFilter{Status: domain.TriggerDeliveryHeld})
+	held, err := s.TriggerDeliveries().List(ctx, "WS", store.TriggerDeliveryFilter{Status: automation.DeliveryHeld})
 	if err != nil || len(held) != 1 || held[0].DeliveryID != "delivery-2" || held[0].SubjectKey != "binding-1|repo-b" {
 		t.Fatalf("List held = %+v err=%v, want delivery-2 with subject key", held, err)
 	}

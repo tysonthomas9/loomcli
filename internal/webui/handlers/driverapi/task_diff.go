@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
@@ -175,7 +177,7 @@ func (m *Module) taskDiff(ctx context.Context, ws string, id driverIdentity, bod
 	}, nil
 }
 
-func (m *Module) taskDiffRepositoryPath(ctx context.Context, ws string, repo *domain.Repo) (string, string, error) {
+func (m *Module) taskDiffRepositoryPath(ctx context.Context, ws string, repo *workspacemodule.Repository) (string, string, error) {
 	if repo == nil {
 		return "", "", taskDiffError(http.StatusNotFound, "task_diff_repo_missing", "workspace repo is missing", false, nil, domain.ErrNotFound)
 	}
@@ -210,7 +212,7 @@ func (m *Module) taskDiffRepositoryPath(ctx context.Context, ws string, repo *do
 	return checkoutPath, "workspace-checkout", nil
 }
 
-func validateTaskDiffCheckout(ctx context.Context, checkoutPath string, repo *domain.Repo) error {
+func validateTaskDiffCheckout(ctx context.Context, checkoutPath string, repo *workspacemodule.Repository) error {
 	info, err := os.Stat(checkoutPath)
 	if err != nil || !info.IsDir() {
 		return taskDiffError(http.StatusNotFound, "task_diff_checkout_missing",
@@ -288,8 +290,8 @@ func parseLocalBranchExternalRef(externalRef string) (string, string, error) {
 	return branch, strings.ToLower(sha), nil
 }
 
-func selectTaskDiffRepo(repos []*domain.Repo, sourceRepo string) (*domain.Repo, error) {
-	available := make([]*domain.Repo, 0, len(repos))
+func selectTaskDiffRepo(repos []*workspacemodule.Repository, sourceRepo string) (*workspacemodule.Repository, error) {
+	available := make([]*workspacemodule.Repository, 0, len(repos))
 	for _, repo := range repos {
 		if repo != nil {
 			available = append(available, repo)

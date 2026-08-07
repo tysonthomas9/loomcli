@@ -13,7 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	workflows "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 )
 
@@ -25,8 +25,8 @@ type workflowManagementFixture struct {
 	server                 *httptest.Server
 	expectedBearer         string
 	mu                     sync.Mutex
-	driver                 *domain.Driver
-	versions               map[string]*domain.DriverVersion
+	driver                 *workflowcatalog.Driver
+	versions               map[string]*workflowcatalog.DriverVersion
 	authorizations         []string
 	managementPaths        []string
 	configRequests         int
@@ -52,38 +52,38 @@ func setupWorkflowManagementFixture(t *testing.T) *workflowManagementFixture {
 	t.Helper()
 	fixture := &workflowManagementFixture{
 		expectedBearer: "",
-		driver: &domain.Driver{
+		driver: &workflowcatalog.Driver{
 			WorkspaceKey:    workflowManagementTestWorkspace,
-			DriverID:        workflows.BuiltinEpicRunnerWorkflowName,
-			Name:            workflows.BuiltinEpicRunnerWorkflowName,
-			Status:          domain.DriverStatusActive,
+			DriverID:        workflowcatalog.BuiltinEpicRunnerWorkflowName,
+			Name:            workflowcatalog.BuiltinEpicRunnerWorkflowName,
+			Status:          workflowcatalog.DriverStatusActive,
 			ActiveVersionID: "version-1",
-			TrustLevel:      domain.DriverTrustTrusted,
+			TrustLevel:      workflowcatalog.DriverTrustTrusted,
 			Revision:        1,
 			Metadata: map[string]string{
 				"approved_version:version-2": "sha256:source-2",
 			},
 		},
-		versions: map[string]*domain.DriverVersion{
+		versions: map[string]*workflowcatalog.DriverVersion{
 			"version-1": {
 				WorkspaceKey:     workflowManagementTestWorkspace,
-				DriverID:         workflows.BuiltinEpicRunnerWorkflowName,
+				DriverID:         workflowcatalog.BuiltinEpicRunnerWorkflowName,
 				VersionID:        "version-1",
 				Version:          1,
 				SourceDigest:     "sha256:source-1",
 				BundleDigest:     "sha256:bundle-1",
-				ValidationStatus: domain.DriverVersionValidationPassed,
-				Manifest:         map[string]string{"trust_level": string(domain.DriverTrustUntrusted)},
+				ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
+				Manifest:         map[string]string{"trust_level": string(workflowcatalog.DriverTrustUntrusted)},
 			},
 			"version-2": {
 				WorkspaceKey:     workflowManagementTestWorkspace,
-				DriverID:         workflows.BuiltinEpicRunnerWorkflowName,
+				DriverID:         workflowcatalog.BuiltinEpicRunnerWorkflowName,
 				VersionID:        "version-2",
 				Version:          2,
 				SourceDigest:     "sha256:source-2",
 				BundleDigest:     "sha256:bundle-2",
-				ValidationStatus: domain.DriverVersionValidationPassed,
-				Manifest:         map[string]string{"trust_level": string(domain.DriverTrustUntrusted)},
+				ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
+				Manifest:         map[string]string{"trust_level": string(workflowcatalog.DriverTrustUntrusted)},
 			},
 		},
 	}
@@ -147,14 +147,14 @@ func (f *workflowManagementFixture) serveHTTP(w http.ResponseWriter, r *http.Req
 		f.authoringRequest = &request
 		f.authoringRequestID = r.Header.Get("Idempotency-Key")
 		digest := "sha256:" + strings.Repeat("1", 64)
-		driverRecord := &domain.Driver{
+		driverRecord := &workflowcatalog.Driver{
 			WorkspaceKey: workflowManagementTestWorkspace, DriverID: name, Name: name,
-			Status: domain.DriverStatusDraft, TrustLevel: domain.DriverTrustUntrusted, Revision: 1,
+			Status: workflowcatalog.DriverStatusDraft, TrustLevel: workflowcatalog.DriverTrustUntrusted, Revision: 1,
 		}
-		version := &domain.DriverVersion{
+		version := &workflowcatalog.DriverVersion{
 			WorkspaceKey: workflowManagementTestWorkspace, DriverID: name, VersionID: name + "-v-test",
 			Version: 1, SourceDigest: digest, BundleDigest: digest,
-			ValidationStatus: domain.DriverVersionValidationPassed,
+			ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 		}
 		writeWorkflowManagementTestJSON(w, http.StatusCreated, map[string]any{
 			"driver": driverRecord, "version": version,
@@ -193,7 +193,7 @@ func (f *workflowManagementFixture) serveHTTP(w http.ResponseWriter, r *http.Req
 		return
 	case r.Method == http.MethodGet && r.URL.Path == workspacePrefix+"/workflow-catalog/drivers":
 		if f.listBareDriver {
-			writeWorkflowManagementTestJSON(w, http.StatusOK, map[string]any{"drivers": []*domain.Driver{f.driver}})
+			writeWorkflowManagementTestJSON(w, http.StatusOK, map[string]any{"drivers": []*workflowcatalog.Driver{f.driver}})
 			return
 		}
 		activeVersion := f.versions[f.driver.ActiveVersionID]
@@ -205,13 +205,13 @@ func (f *workflowManagementFixture) serveHTTP(w http.ResponseWriter, r *http.Req
 		return
 	case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/versions"):
 		name := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, workspacePrefix+"/workflows/"), "/versions")
-		if name != workflows.BuiltinEpicRunnerWorkflowName {
+		if name != workflowcatalog.BuiltinEpicRunnerWorkflowName {
 			writeWorkflowManagementTestJSON(w, http.StatusNotFound, map[string]string{"error": "workflow not found", "code": "not_found"})
 			return
 		}
 		writeWorkflowManagementTestJSON(w, http.StatusOK, map[string]any{
 			"driver": f.driver, "driver_id": f.driver.DriverID, "active_version_id": f.driver.ActiveVersionID,
-			"versions": []*domain.DriverVersion{f.versions["version-1"], f.versions["version-2"]},
+			"versions": []*workflowcatalog.DriverVersion{f.versions["version-1"], f.versions["version-2"]},
 		})
 		return
 	case r.Method == http.MethodPost:
@@ -223,7 +223,7 @@ func (f *workflowManagementFixture) serveHTTP(w http.ResponseWriter, r *http.Req
 }
 
 func (f *workflowManagementFixture) applyVersionAction(w http.ResponseWriter, r *http.Request, workspacePrefix string) {
-	path := strings.TrimPrefix(r.URL.Path, workspacePrefix+"/workflows/"+workflows.BuiltinEpicRunnerWorkflowName+"/versions/")
+	path := strings.TrimPrefix(r.URL.Path, workspacePrefix+"/workflows/"+workflowcatalog.BuiltinEpicRunnerWorkflowName+"/versions/")
 	parts := strings.Split(path, "/")
 	if len(parts) != 2 {
 		writeWorkflowManagementTestJSON(w, http.StatusNotFound, map[string]string{"error": "route not found", "code": "not_found"})
@@ -286,11 +286,11 @@ func (f *workflowManagementFixture) authDiscoveryCount() int {
 	return f.configRequests
 }
 
-func effectiveWorkflowManagementTestTrust(driver *domain.Driver, version *domain.DriverVersion) domain.DriverTrustLevel {
+func effectiveWorkflowManagementTestTrust(driver *workflowcatalog.Driver, version *workflowcatalog.DriverVersion) workflowcatalog.DriverTrustLevel {
 	if version != nil && driver.Metadata["approved_version:"+version.VersionID] == version.SourceDigest {
-		return domain.DriverTrustTrusted
+		return workflowcatalog.DriverTrustTrusted
 	}
-	return domain.DriverTrustUntrusted
+	return workflowcatalog.DriverTrustUntrusted
 }
 
 func writeWorkflowManagementTestJSON(w http.ResponseWriter, status int, payload any) {
@@ -346,7 +346,7 @@ func TestWorkflowManagementCommandsNeverOpenStoreAndSendNoOpenModeCredential(t *
 		t.Fatalf("runWorkflowList: %v", err)
 	}
 	if _, err := captureWorkflowStdout(t, func() error {
-		return runWorkflowApprove(&cobra.Command{}, []string{workflows.BuiltinEpicRunnerWorkflowName})
+		return runWorkflowApprove(&cobra.Command{}, []string{workflowcatalog.BuiltinEpicRunnerWorkflowName})
 	}); err != nil {
 		t.Fatalf("runWorkflowApprove: %v", err)
 	}
@@ -438,14 +438,14 @@ func TestWorkflowListEnrichesBareCatalogDriversThroughManagementVersions(t *test
 	}
 	var payload struct {
 		Workflows []struct {
-			Approved       bool                    `json:"approved"`
-			EffectiveTrust domain.DriverTrustLevel `json:"effective_trust"`
+			Approved       bool                             `json:"approved"`
+			EffectiveTrust workflowcatalog.DriverTrustLevel `json:"effective_trust"`
 		} `json:"workflows"`
 	}
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
 		t.Fatalf("decode workflow list: %v", err)
 	}
-	if len(payload.Workflows) != 1 || payload.Workflows[0].Approved || payload.Workflows[0].EffectiveTrust != domain.DriverTrustUntrusted {
+	if len(payload.Workflows) != 1 || payload.Workflows[0].Approved || payload.Workflows[0].EffectiveTrust != workflowcatalog.DriverTrustUntrusted {
 		t.Fatalf("workflow list = %+v, want active version trust derived through versions endpoint", payload.Workflows)
 	}
 	paths := strings.Join(fixture.paths(), "\n")
@@ -468,7 +468,7 @@ func TestWorkflowManagementTextOutputCompatibility(t *testing.T) {
 	}
 
 	versions, err := captureWorkflowStdout(t, func() error {
-		return runWorkflowVersions(&cobra.Command{}, []string{workflows.BuiltinEpicRunnerWorkflowName})
+		return runWorkflowVersions(&cobra.Command{}, []string{workflowcatalog.BuiltinEpicRunnerWorkflowName})
 	})
 	if err != nil {
 		t.Fatalf("runWorkflowVersions: %v", err)
@@ -481,7 +481,7 @@ func TestWorkflowManagementTextOutputCompatibility(t *testing.T) {
 
 	workflowVersionID = "version-1"
 	approved, err := captureWorkflowStdout(t, func() error {
-		return runWorkflowApprove(&cobra.Command{}, []string{workflows.BuiltinEpicRunnerWorkflowName})
+		return runWorkflowApprove(&cobra.Command{}, []string{workflowcatalog.BuiltinEpicRunnerWorkflowName})
 	})
 	if err != nil {
 		t.Fatalf("runWorkflowApprove: %v", err)
@@ -491,7 +491,7 @@ func TestWorkflowManagementTextOutputCompatibility(t *testing.T) {
 	}
 
 	unapproved, err := captureWorkflowStdout(t, func() error {
-		return runWorkflowUnapprove(&cobra.Command{}, []string{workflows.BuiltinEpicRunnerWorkflowName})
+		return runWorkflowUnapprove(&cobra.Command{}, []string{workflowcatalog.BuiltinEpicRunnerWorkflowName})
 	})
 	if err != nil {
 		t.Fatalf("runWorkflowUnapprove: %v", err)
@@ -502,7 +502,7 @@ func TestWorkflowManagementTextOutputCompatibility(t *testing.T) {
 
 	workflowVersionID = "version-2"
 	activated, err := captureWorkflowStdout(t, func() error {
-		return runWorkflowActivate(&cobra.Command{}, []string{workflows.BuiltinEpicRunnerWorkflowName})
+		return runWorkflowActivate(&cobra.Command{}, []string{workflowcatalog.BuiltinEpicRunnerWorkflowName})
 	})
 	if err != nil {
 		t.Fatalf("runWorkflowActivate: %v", err)
@@ -538,7 +538,7 @@ func TestWorkflowManagementRejectsUnauthenticatedAndWrongWorkspace(t *testing.T)
 		})
 
 		_, err := captureWorkflowStdout(t, func() error {
-			return runWorkflowApprove(&cobra.Command{}, []string{workflows.BuiltinEpicRunnerWorkflowName})
+			return runWorkflowApprove(&cobra.Command{}, []string{workflowcatalog.BuiltinEpicRunnerWorkflowName})
 		})
 		if err == nil || !strings.Contains(err.Error(), "forbidden") || !strings.Contains(err.Error(), "code=wrong_workspace") {
 			t.Fatalf("runWorkflowApprove error = %v, want machine-readable wrong-workspace failure", err)
@@ -563,7 +563,7 @@ func TestWorkflowManagementRejectsNonOperatorAuthorityClasses(t *testing.T) {
 			workflowApproveJSON = true
 
 			_, err := captureWorkflowStdout(t, func() error {
-				return runWorkflowApprove(&cobra.Command{}, []string{workflows.BuiltinEpicRunnerWorkflowName})
+				return runWorkflowApprove(&cobra.Command{}, []string{workflowcatalog.BuiltinEpicRunnerWorkflowName})
 			})
 			if err == nil || !strings.Contains(err.Error(), "forbidden") || !strings.Contains(err.Error(), "code=wrong_authority_class") {
 				t.Fatalf("runWorkflowApprove error = %v, want %s-class denial", err, class)

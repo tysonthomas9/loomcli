@@ -38,7 +38,7 @@ var errBackgroundWorkerTerminal = errors.New("background worker terminals cannot
 // WebSocket path never infers agent behavior from the session name.
 func HandleEnsureAgentTerminalSession(
 	svc webuterminal.TerminalService,
-	st store.Store,
+	st terminalStore,
 	identities ...terminalAgentIdentity,
 ) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -91,7 +91,7 @@ func HandleEnsureAgentTerminalSession(
 func ensureAgentTerminalSession(
 	ctx context.Context,
 	svc webuterminal.TerminalService,
-	st store.Store,
+	st terminalStore,
 	workspace,
 	agentName string,
 	identities ...terminalAgentIdentity,
@@ -182,7 +182,7 @@ func terminalAgentIdentityServiceError(err error) error {
 // returned indefinitely and the running PTY never picks up the change.
 func agentTerminalLaunchSpecStale(
 	ctx context.Context,
-	st store.Store,
+	st terminalStore,
 	workspace string,
 	existing *tabmeta.TabMetadata,
 	agent *agents.RuntimeIdentity,
@@ -234,7 +234,7 @@ func newAgentTerminalTabPlacement(tabs []tabmeta.TabMetadata, existing *tabmeta.
 // reserves an ID for the launch environment. It deliberately does not persist
 // a running record: loom lead creates and heartbeats that record only after the
 // PTY child actually starts, so an unlaunched tab cannot become a stale session.
-func ensureTerminalOrchestratorLink(ctx context.Context, st store.Store, workspace string, agent *agents.RuntimeIdentity, kind domain.RoleKind) (agents.RuntimeIdentity, string) {
+func ensureTerminalOrchestratorLink(ctx context.Context, st terminalStore, workspace string, agent *agents.RuntimeIdentity, kind domain.RoleKind) (agents.RuntimeIdentity, string) {
 	agentForLaunch := *agent
 	if kind != domain.RoleKindInteractive {
 		return agentForLaunch, ""
@@ -318,7 +318,7 @@ func pruneStaleAgentTerminalTabs(ctx context.Context, svc webuterminal.TerminalS
 // orchestratorID is the lead → orchestration session id resolved by
 // ensureTerminalOrchestratorLink. It is passed in rather than read off the
 // agent struct because AgentSession is the single source of truth.
-func buildAgentLaunchSpec(ctx context.Context, st store.Store, workspace, sessionName string, agent *agents.RuntimeIdentity, orchestratorID string) (*tabmeta.LaunchSpec, string, error) {
+func buildAgentLaunchSpec(ctx context.Context, st terminalStore, workspace, sessionName string, agent *agents.RuntimeIdentity, orchestratorID string) (*tabmeta.LaunchSpec, string, error) {
 	role, err := loadAgentLaunchRole(ctx, st, workspace, agent.RoleName)
 	if err != nil {
 		return nil, "", err
@@ -352,7 +352,7 @@ func agentLaunchCwd(workspace string, agent *agents.RuntimeIdentity) string {
 	return worktree
 }
 
-func loadAgentLaunchRole(ctx context.Context, st store.Store, workspace, roleName string) (*domain.Role, error) {
+func loadAgentLaunchRole(ctx context.Context, st terminalStore, workspace, roleName string) (*domain.Role, error) {
 	role, err := st.Roles().Get(ctx, workspace, roleName)
 	if errors.Is(err, domain.ErrNotFound) {
 		return nil, nil

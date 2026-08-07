@@ -164,7 +164,7 @@ func (s repositoryCatalogStore) Delete(ctx context.Context, workspaceKey, name s
 	return translateError(s.store.Delete(ctx, workspaceKey, name))
 }
 
-func reference(value *domain.Workspace) *workspace.Reference {
+func reference(value *workspace.Workspace) *workspace.Reference {
 	if value == nil {
 		return nil
 	}
@@ -176,7 +176,7 @@ func reference(value *domain.Workspace) *workspace.Reference {
 	}
 }
 
-func repository(value *domain.Repo) *workspace.Repository {
+func repository(value *workspace.Repository) *workspace.Repository {
 	if value == nil {
 		return nil
 	}

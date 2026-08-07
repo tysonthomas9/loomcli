@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver/eventpolicy"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -121,8 +123,8 @@ func (s *awaitStore) RegisterAwaitAndCheck(_ context.Context, workspaceKey strin
 // whose rendered key exactly equals the await pattern and whose actor passes
 // the allow-list. Earliest = ReceivedAt, then EventID, so re-registration
 // replays deterministically. Caller holds the journal lock.
-func (s *awaitStore) matchJournalLocked(ws string, inst *domain.AwaitInstance) *domain.TriggerEvent {
-	var best *domain.TriggerEvent
+func (s *awaitStore) matchJournalLocked(ws string, inst *domain.AwaitInstance) *automation.Event {
+	var best *automation.Event
 	for _, event := range s.events.items[ws] {
 		eventID := event.SourceEventID
 		if eventID == "" {

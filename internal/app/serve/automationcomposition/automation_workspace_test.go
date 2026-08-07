@@ -6,23 +6,24 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 type automationWorkspaceStoreStub struct {
 	store.WorkspaceStore
-	values []*domain.Workspace
+	values []*workspacemodule.Workspace
 	err    error
 }
 
-func (stub *automationWorkspaceStoreStub) List(context.Context) ([]*domain.Workspace, error) {
+func (stub *automationWorkspaceStoreStub) List(context.Context) ([]*workspacemodule.Workspace, error) {
 	return stub.values, stub.err
 }
 
 func TestAutomationWorkspaceListerReturnsSortedCurrentKeys(t *testing.T) {
-	stub := &automationWorkspaceStoreStub{values: []*domain.Workspace{{Key: "ZED"}, {Key: "ALPHA"}}}
+	stub := &automationWorkspaceStoreStub{values: []*workspacemodule.Workspace{{Key: "ZED"}, {Key: "ALPHA"}}}
 	keys, err := newAutomationWorkspaceLister(stub).ListWorkspaceKeys(t.Context())
 	if err != nil || !reflect.DeepEqual(keys, []string{"ALPHA", "ZED"}) {
 		t.Fatalf("ListWorkspaceKeys = %v, %v", keys, err)
@@ -30,7 +31,7 @@ func TestAutomationWorkspaceListerReturnsSortedCurrentKeys(t *testing.T) {
 }
 
 func TestAutomationWorkspaceListerFailsClosedOnInvalidState(t *testing.T) {
-	for _, values := range [][]*domain.Workspace{
+	for _, values := range [][]*workspacemodule.Workspace{
 		{nil},
 		{{Key: ""}},
 		{{Key: " DUP "}},

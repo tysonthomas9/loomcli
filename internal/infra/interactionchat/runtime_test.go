@@ -8,8 +8,8 @@ import (
 	hwtranscript "github.com/olesho/harness-wrapper/pkg/transcript"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	leadcontrol "github.com/tysonthomas9/loomcli/internal/infra/interactionlead"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/store"

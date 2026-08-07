@@ -6,6 +6,8 @@ import (
 	"hash"
 	"sort"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 // ComputeContentHash creates a deterministic hash of the issue's content.
@@ -193,7 +195,7 @@ func (w hashFieldWriter) dependencies(deps []*Dependency) {
 	w.h.Write([]byte{0})
 }
 
-func (w hashFieldWriter) comments(comments []*Comment) {
+func (w hashFieldWriter) comments(comments []*workitems.Comment) {
 	type commentKey struct {
 		id  int64
 		key string

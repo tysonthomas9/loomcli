@@ -44,7 +44,7 @@ const maxConnectorBodyBytes = 1 << 20
 // directly (the same shape as the roles/webhooks/triggerbindings modules) plus
 // the localsettings data dir needed to bridge the Settings runtime credential.
 type Module struct {
-	store             store.Store
+	store             connectorStore
 	managementStore   connectorsmodule.ManagementStore
 	management        connectorsmodule.Management
 	localSettingsDir  string
@@ -54,8 +54,14 @@ type Module struct {
 	operatorAuthority workflowcataloghttp.OperatorAuthorityResolver
 }
 
+type connectorStore interface {
+	Connectors() store.ConnectorStore
+	ConnectorGrants() store.ConnectorGrantStore
+	ConnectorCalls() store.ConnectorAuditStore
+}
+
 func NewModule(
-	st store.Store,
+	st connectorStore,
 	localSettingsDir string,
 	automationBindings connectorgrants.BindingReader,
 	operatorAuthorities ...workflowcataloghttp.OperatorAuthorityResolver,

@@ -6,7 +6,7 @@
 //	POST /api/v1/{ws}/trigger-deliveries/{delivery_id}/result
 //
 // fleet-db's models.TriggerDelivery JSON shape is snake_case and matches
-// domain.TriggerDelivery's tags field-for-field, so responses decode
+// automation.Delivery's tags field-for-field, so responses decode
 // directly into the domain struct — same as the Get/List methods in
 // platform.go. The terminal-failure rule (failed at the binding's retry
 // budget forces error_class retries_exhausted) is enforced server-side; the
@@ -19,14 +19,15 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // ListDue returns deliveries awaiting the retry sweeper whose due score is
 // <= filter.Now, in due order. A zero Now is omitted from the query; the
 // server then cuts off at its own current time.
-func (s *triggerDeliveryStore) ListDue(ctx context.Context, ws string, filter store.TriggerDeliveryDueFilter) ([]*domain.TriggerDelivery, error) {
+func (s *triggerDeliveryStore) ListDue(ctx context.Context, ws string, filter store.TriggerDeliveryDueFilter) ([]*automation.Delivery, error) {
 	q := url.Values{}
 	if !filter.Now.IsZero() {
 		q.Set("now", filter.Now.UTC().Format(time.RFC3339Nano))
@@ -36,13 +37,13 @@ func (s *triggerDeliveryStore) ListDue(ctx context.Context, ws string, filter st
 	}
 	path := withQuery("/api/v1/"+pathEscape(ws)+"/trigger-deliveries/due", q)
 	var resp struct {
-		TriggerDeliveries []*domain.TriggerDelivery `json:"trigger_deliveries"`
+		TriggerDeliveries []*automation.Delivery `json:"trigger_deliveries"`
 	}
 	if err := s.client.do(ctx, "GET", path, nil, &resp); err != nil {
 		return nil, err
 	}
 	if resp.TriggerDeliveries == nil {
-		resp.TriggerDeliveries = []*domain.TriggerDelivery{}
+		resp.TriggerDeliveries = []*automation.Delivery{}
 	}
 	return resp.TriggerDeliveries, nil
 }
@@ -51,7 +52,7 @@ func (s *triggerDeliveryStore) ListDue(ctx context.Context, ws string, filter st
 // set (mirrors the outbox MarkResult wire); a final delivery transitioning
 // to a different status surfaces as domain.ErrInvalidTransition via the 409
 // invalid_transition mapping in classifyHTTPError.
-func (s *triggerDeliveryStore) UpdateResult(ctx context.Context, ws, deliveryID string, update store.TriggerDeliveryResultUpdate) (*domain.TriggerDelivery, error) {
+func (s *triggerDeliveryStore) UpdateResult(ctx context.Context, ws, deliveryID string, update store.TriggerDeliveryResultUpdate) (*automation.Delivery, error) {
 	body := map[string]any{
 		"status":        update.Status,
 		"attempt":       update.Attempt,
@@ -62,7 +63,7 @@ func (s *triggerDeliveryStore) UpdateResult(ctx context.Context, ws, deliveryID 
 		body["next_retry_at"] = update.NextRetryAt
 	}
 	path := "/api/v1/" + pathEscape(ws) + "/trigger-deliveries/" + pathEscape(deliveryID) + "/result"
-	var out domain.TriggerDelivery
+	var out automation.Delivery
 	if err := s.client.do(ctx, "POST", path, body, &out); err != nil {
 		return nil, err
 	}

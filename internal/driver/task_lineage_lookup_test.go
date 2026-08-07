@@ -13,10 +13,10 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	stackstore "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore"
 	stackstoreadapter "github.com/tysonthomas9/loomcli/internal/infra/stackstoreadapter"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
-	sl "github.com/tysonthomas9/loomcli/internal/stacklineage"
-	"github.com/tysonthomas9/loomcli/internal/stackstore"
+	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol/stacklineage"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 

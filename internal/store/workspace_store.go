@@ -3,7 +3,7 @@ package store
 import (
 	"context"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 )
 
 // WorkspaceCreate is the input for WorkspaceStore.Create. Required: Key
@@ -24,7 +24,7 @@ type WorkspaceUpdate struct {
 	Description   *string
 	DefaultBranch *string
 	DesignFormat  *string
-	State         *domain.WorkspaceState
+	State         *workspacemodule.State
 	ErrorMessage  *string
 }
 
@@ -32,21 +32,21 @@ type WorkspaceUpdate struct {
 type WorkspaceStore interface {
 	// Create inserts a new workspace. Returns ErrAlreadyExists if Key
 	// already exists, ErrInvalid for malformed input.
-	Create(ctx context.Context, in WorkspaceCreate) (*domain.Workspace, error)
+	Create(ctx context.Context, in WorkspaceCreate) (*workspacemodule.Workspace, error)
 
 	// Get returns the workspace by Key. Returns ErrNotFound if absent.
-	Get(ctx context.Context, key string) (*domain.Workspace, error)
+	Get(ctx context.Context, key string) (*workspacemodule.Workspace, error)
 
 	// GetByName returns the workspace whose Name matches. Returns
 	// ErrNotFound if no such workspace; behavior is undefined if names
 	// are non-unique (callers should treat this as best-effort).
-	GetByName(ctx context.Context, name string) (*domain.Workspace, error)
+	GetByName(ctx context.Context, name string) (*workspacemodule.Workspace, error)
 
 	// List returns all workspaces. Order is implementation-defined.
-	List(ctx context.Context) ([]*domain.Workspace, error)
+	List(ctx context.Context) ([]*workspacemodule.Workspace, error)
 
 	// Update applies a partial update. Returns ErrNotFound if absent.
-	Update(ctx context.Context, key string, patch WorkspaceUpdate) (*domain.Workspace, error)
+	Update(ctx context.Context, key string, patch WorkspaceUpdate) (*workspacemodule.Workspace, error)
 
 	// Delete removes a workspace. Implementations should cascade-delete
 	// child entities (Repos, Agents, Roles, Issues).

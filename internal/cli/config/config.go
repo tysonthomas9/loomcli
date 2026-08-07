@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"path/filepath"
 
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -161,7 +162,12 @@ func ResolveActiveWorkspace() (*WorkspaceConfig, error) {
 	return &ws, nil
 }
 
-func loadConfigFromStore(ctx context.Context, st store.Store) (*LoomConfig, error) {
+type configStore interface {
+	Workspaces() store.WorkspaceStore
+	Repos() store.RepoStore
+}
+
+func loadConfigFromStore(ctx context.Context, st configStore) (*LoomConfig, error) {
 	workspaces, err := st.Workspaces().List(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list fleet-db workspaces: %w", err)
@@ -197,8 +203,8 @@ func loadConfigFromStore(ctx context.Context, st store.Store) (*LoomConfig, erro
 
 func workspaceConfigFromStore(
 	ctx context.Context,
-	st store.Store,
-	ws *domain.Workspace,
+	st configStore,
+	ws *workspacemodule.Workspace,
 	local bootstrap.WorkspaceLocalState,
 ) (WorkspaceConfig, error) {
 	repos, err := repoConfigsFromStore(ctx, st, ws.Key, local)
@@ -219,7 +225,7 @@ func workspaceConfigFromStore(
 
 func repoConfigsFromStore(
 	ctx context.Context,
-	st store.Store,
+	st configStore,
 	wsKey string,
 	local bootstrap.WorkspaceLocalState,
 ) ([]RepoConfig, error) {
@@ -237,7 +243,7 @@ func repoConfigsFromStore(
 	return repos, nil
 }
 
-func repoConfigFromStore(r *domain.Repo, local bootstrap.WorkspaceLocalState) RepoConfig {
+func repoConfigFromStore(r *workspacemodule.Repository, local bootstrap.WorkspaceLocalState) RepoConfig {
 	path := local.Repos[r.Name]
 	if path == "" {
 		path = r.Name

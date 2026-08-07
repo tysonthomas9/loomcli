@@ -7,7 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -134,7 +135,7 @@ func TestEnsureBuiltinWorkflowRefreshesDeprecatedRunnerManifest(t *testing.T) {
 			{Name: "github-review-task-runner", Kind: driverpkg.RunnerKindFlueWorkflow, Entrypoint: "github-review-task-runner"},
 			{Name: "openshell-task-runner", Kind: driverpkg.RunnerKindFlueWorkflow, Entrypoint: "openshell-task-runner"},
 		},
-		Trust: domain.DriverTrustTrusted,
+		Trust: workflowcatalog.DriverTrustTrusted,
 	})
 	if err != nil {
 		t.Fatalf("register deprecated driver: %v", err)

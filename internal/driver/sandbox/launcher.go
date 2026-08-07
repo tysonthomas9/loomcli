@@ -36,6 +36,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver/runtypes"
 )
@@ -92,7 +94,7 @@ type LaunchSpec struct {
 	// TrustLevel is the run's driver trust level (SB3). The container
 	// launcher resolves its default egress mode from it (SB4): trusted →
 	// all, anything else — including empty — → serve-only, fail closed.
-	TrustLevel domain.DriverTrustLevel
+	TrustLevel workflowcatalog.DriverTrustLevel
 }
 
 // SandboxProcess is one launched runtime. Cooperative cancellation stays

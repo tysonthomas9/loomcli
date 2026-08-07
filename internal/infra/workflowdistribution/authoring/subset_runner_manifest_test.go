@@ -10,7 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -56,7 +57,7 @@ func registerEpicRunnerWithRunners(t *testing.T, st store.Store, workDir string,
 		CreatedBy:    "system",
 		Activate:     true,
 		RunnerSpecs:  runners,
-		Trust:        domain.DriverTrustTrusted,
+		Trust:        workflowcatalog.DriverTrustTrusted,
 	})
 	if err != nil {
 		t.Fatalf("register epic-runner: %v", err)

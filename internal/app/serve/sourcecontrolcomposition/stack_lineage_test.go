@@ -4,10 +4,10 @@ import (
 	"testing"
 	"time"
 
+	stackstore "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore"
 	infrastackstore "github.com/tysonthomas9/loomcli/internal/infra/stackstoreadapter"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
-	"github.com/tysonthomas9/loomcli/internal/stacklineage"
-	"github.com/tysonthomas9/loomcli/internal/stackstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol/stacklineage"
 )
 
 func TestRecordTaskOutcomeOwnsFinalizeBarrier(t *testing.T) {

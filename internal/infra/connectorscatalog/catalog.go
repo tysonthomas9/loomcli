@@ -245,7 +245,7 @@ func translateError(err error) error {
 		owner = connectorsmodule.ErrNotFound
 	case errors.Is(err, domain.ErrGrantRevoked):
 		owner = connectorsmodule.ErrGrantRevoked
-	case errors.Is(err, domain.ErrAlreadyExists):
+	case errors.Is(err, domain.ErrConnectorExists), errors.Is(err, domain.ErrAlreadyExists):
 		owner = connectorsmodule.ErrAlreadyExists
 	case errors.Is(err, domain.ErrConflict):
 		owner = connectorsmodule.ErrConflict

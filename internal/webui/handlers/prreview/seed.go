@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
 	"github.com/tysonthomas9/loomcli/internal/localsettings"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
@@ -100,7 +99,7 @@ func (m *Module) seedConnectorAndGrants(
 		Status:                   connectorsmodule.ConnectorStatusActive,
 		CreatedBy:                bindingID,
 	}); err != nil {
-		if !errors.Is(err, domain.ErrConnectorExists) && !errors.Is(err, domain.ErrAlreadyExists) {
+		if !errors.Is(err, connectorsmodule.ErrAlreadyExists) {
 			return fmt.Errorf("seed webui github connector: %w", err)
 		}
 		if err := m.rotateConnectorCredentialIfChanged(ctx, ws, token, sealer); err != nil {
@@ -116,7 +115,7 @@ func (m *Module) seedConnectorAndGrants(
 			BindingID:       bindingID,
 			Action:          action,
 			ResourcePattern: resourcePattern,
-		}); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
+		}); err != nil && !errors.Is(err, connectorsmodule.ErrAlreadyExists) {
 			return fmt.Errorf("seed webui github grant %q: %w", action, err)
 		}
 	}

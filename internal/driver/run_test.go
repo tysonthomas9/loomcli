@@ -7,6 +7,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -19,7 +21,7 @@ func TestCreateDriverRunUsesActivePassedVersion(t *testing.T) {
 		WorkspaceKey: "TEST",
 		DriverID:     "epic-runner",
 		Name:         "epic-runner",
-		Status:       domain.DriverStatusDraft,
+		Status:       workflowcatalog.DriverStatusDraft,
 	}); err != nil {
 		t.Fatalf("Create driver: %v", err)
 	}
@@ -30,7 +32,7 @@ func TestCreateDriverRunUsesActivePassedVersion(t *testing.T) {
 		Version:          1,
 		SourceDigest:     "sha256:source1",
 		BundleDigest:     "sha256:bundle1",
-		ValidationStatus: domain.DriverVersionValidationPassed,
+		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("Create version 1: %v", err)
 	}
@@ -41,7 +43,7 @@ func TestCreateDriverRunUsesActivePassedVersion(t *testing.T) {
 		Version:          2,
 		SourceDigest:     "sha256:source2",
 		BundleDigest:     "sha256:bundle2",
-		ValidationStatus: domain.DriverVersionValidationPassed,
+		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("Create version 2: %v", err)
 	}
@@ -103,13 +105,13 @@ func TestCreateDriverRunCanPinNonActivePreviewVersion(t *testing.T) {
 		WorkspaceKey: "TEST",
 		DriverID:     "epic-runner",
 		Name:         "epic-runner",
-		Status:       domain.DriverStatusActive,
+		Status:       workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatalf("Create driver: %v", err)
 	}
 	for _, in := range []store.DriverVersionCreate{
-		{WorkspaceKey: "TEST", VersionID: "version-active", DriverID: "epic-runner", Version: 1, SourceDigest: "sha256:active", BundleDigest: "sha256:bundle-active", ValidationStatus: domain.DriverVersionValidationPassed},
-		{WorkspaceKey: "TEST", VersionID: "version-preview", DriverID: "epic-runner", Version: 2, SourceDigest: "sha256:preview", BundleDigest: "sha256:bundle-preview", ValidationStatus: domain.DriverVersionValidationPassed},
+		{WorkspaceKey: "TEST", VersionID: "version-active", DriverID: "epic-runner", Version: 1, SourceDigest: "sha256:active", BundleDigest: "sha256:bundle-active", ValidationStatus: workflowcatalog.DriverVersionValidationPassed},
+		{WorkspaceKey: "TEST", VersionID: "version-preview", DriverID: "epic-runner", Version: 2, SourceDigest: "sha256:preview", BundleDigest: "sha256:bundle-preview", ValidationStatus: workflowcatalog.DriverVersionValidationPassed},
 	} {
 		if _, err := st.DriverVersions().Create(ctx, in); err != nil {
 			t.Fatalf("Create version %s: %v", in.VersionID, err)
@@ -144,18 +146,18 @@ func TestVersionScopedApprovalDoesNotTrustSiblingVersions(t *testing.T) {
 		WorkspaceKey: "TEST",
 		DriverID:     "epic-runner",
 		Name:         "epic-runner",
-		Status:       domain.DriverStatusActive,
-		TrustLevel:   domain.DriverTrustTrusted,
+		Status:       workflowcatalog.DriverStatusActive,
+		TrustLevel:   workflowcatalog.DriverTrustTrusted,
 		Metadata:     map[string]string{"active": "metadata"},
 	}); err != nil {
 		t.Fatalf("Create driver: %v", err)
 	}
-	trustedManifest := map[string]string{ManifestTrustLevelKey: string(domain.DriverTrustTrusted)}
-	untrustedManifest := map[string]string{ManifestTrustLevelKey: string(domain.DriverTrustUntrusted)}
+	trustedManifest := map[string]string{ManifestTrustLevelKey: string(workflowcatalog.DriverTrustTrusted)}
+	untrustedManifest := map[string]string{ManifestTrustLevelKey: string(workflowcatalog.DriverTrustUntrusted)}
 	for _, in := range []store.DriverVersionCreate{
-		{WorkspaceKey: "TEST", VersionID: "version-trusted", DriverID: "epic-runner", Version: 1, SourceDigest: "sha256:trusted", BundleDigest: "sha256:bundle-trusted", Manifest: trustedManifest, ValidationStatus: domain.DriverVersionValidationPassed},
-		{WorkspaceKey: "TEST", VersionID: "version-custom-1", DriverID: "epic-runner", Version: 2, SourceDigest: "sha256:custom-1", BundleDigest: "sha256:bundle-custom-1", Manifest: untrustedManifest, ValidationStatus: domain.DriverVersionValidationPassed},
-		{WorkspaceKey: "TEST", VersionID: "version-custom-2", DriverID: "epic-runner", Version: 3, SourceDigest: "sha256:custom-2", BundleDigest: "sha256:bundle-custom-2", Manifest: untrustedManifest, ValidationStatus: domain.DriverVersionValidationPassed},
+		{WorkspaceKey: "TEST", VersionID: "version-trusted", DriverID: "epic-runner", Version: 1, SourceDigest: "sha256:trusted", BundleDigest: "sha256:bundle-trusted", Manifest: trustedManifest, ValidationStatus: workflowcatalog.DriverVersionValidationPassed},
+		{WorkspaceKey: "TEST", VersionID: "version-custom-1", DriverID: "epic-runner", Version: 2, SourceDigest: "sha256:custom-1", BundleDigest: "sha256:bundle-custom-1", Manifest: untrustedManifest, ValidationStatus: workflowcatalog.DriverVersionValidationPassed},
+		{WorkspaceKey: "TEST", VersionID: "version-custom-2", DriverID: "epic-runner", Version: 3, SourceDigest: "sha256:custom-2", BundleDigest: "sha256:bundle-custom-2", Manifest: untrustedManifest, ValidationStatus: workflowcatalog.DriverVersionValidationPassed},
 	} {
 		if _, err := st.DriverVersions().Create(ctx, in); err != nil {
 			t.Fatalf("Create version %s: %v", in.VersionID, err)
@@ -173,17 +175,17 @@ func TestVersionScopedApprovalDoesNotTrustSiblingVersions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get custom2: %v", err)
 	}
-	if got := DriverVersionEffectiveTrust(driver, custom1); got != domain.DriverTrustUntrusted {
+	if got := DriverVersionEffectiveTrust(driver, custom1); got != workflowcatalog.DriverTrustUntrusted {
 		t.Fatalf("custom1 trust before approval = %q, want untrusted", got)
 	}
 	driver, err = st.ApproveDriverVersionForTest(ctx, "TEST", "epic-runner", custom1.VersionID)
 	if err != nil {
 		t.Fatalf("approve test fixture version: %v", err)
 	}
-	if got := DriverVersionEffectiveTrust(driver, custom1); got != domain.DriverTrustTrusted {
+	if got := DriverVersionEffectiveTrust(driver, custom1); got != workflowcatalog.DriverTrustTrusted {
 		t.Fatalf("custom1 trust after approval = %q, want trusted", got)
 	}
-	if got := DriverVersionEffectiveTrust(driver, custom2); got != domain.DriverTrustUntrusted {
+	if got := DriverVersionEffectiveTrust(driver, custom2); got != workflowcatalog.DriverTrustUntrusted {
 		t.Fatalf("custom2 trust inherited from custom1 approval = %q, want untrusted", got)
 	}
 	driver, _, err = ActivateDriverVersion(ctx, st, "TEST", "epic-runner", "version-custom-2")
@@ -212,7 +214,7 @@ func TestCreateDriverRunRejectsDriverWithoutActiveVersion(t *testing.T) {
 		WorkspaceKey: "TEST",
 		DriverID:     "draft-driver",
 		Name:         "draft-driver",
-		Status:       domain.DriverStatusDraft,
+		Status:       workflowcatalog.DriverStatusDraft,
 	}); err != nil {
 		t.Fatalf("Create driver: %v", err)
 	}

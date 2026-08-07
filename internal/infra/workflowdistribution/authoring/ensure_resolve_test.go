@@ -1,13 +1,15 @@
 // EnsureAndResolveDriver tests live in the external workflowauthoring_test
 // package so the test can seed a memstore without joining the application
 // workflow package build
-// (mirrors internal/trigger's cron tests, which avoid the memstore import
+// (mirrors internal/infra/automationruntime's cron tests, which avoid the memstore import
 // lattice the same way).
 package authoring_test
 
 import (
 	"errors"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
@@ -38,7 +40,7 @@ func TestEnsureAndResolveDriverNonBuiltins(t *testing.T) {
 
 	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
 		WorkspaceKey: "WS", DriverID: "custom-flow", Name: "custom-flow",
-		OwnerType: domain.DriverOwnerSystem, Status: domain.DriverStatusActive,
+		OwnerType: workflowcatalog.DriverOwnerSystem, Status: workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatalf("Create driver: %v", err)
 	}

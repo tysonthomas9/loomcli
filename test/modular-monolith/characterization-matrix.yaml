@@ -16,7 +16,7 @@ rows:
       - Unapproval removes the selected version's approval.
 
   - id: trigger-admission
-    package: ./internal/trigger
+    package: ./internal/infra/automationruntime
     test_regex: '^TestInternalSource(EmitValidation|HopDepthChainAndCap|IdempotentReEmit)$'
     expected_tests:
       - TestInternalSourceHopDepthChainAndCap

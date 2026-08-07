@@ -12,11 +12,11 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/stack"
 	"github.com/tysonthomas9/loomcli/internal/configlock"
+	stackpublish "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolpublisher"
+	stackstore "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore"
 	stackstoreadapter "github.com/tysonthomas9/loomcli/internal/infra/stackstoreadapter"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
-	sl "github.com/tysonthomas9/loomcli/internal/stacklineage"
-	"github.com/tysonthomas9/loomcli/internal/stackpublish"
-	"github.com/tysonthomas9/loomcli/internal/stackstore"
+	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol/stacklineage"
 )
 
 // reconcileEpicStack runs the Stage-4 post-drain reconcile: once the epic has

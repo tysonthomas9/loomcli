@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/gitbranch"
@@ -176,7 +178,7 @@ func (materializer *testRepositoryMaterializer) CreateWorkspaceWithRepositoryAdm
 		}
 		return nil, err
 	}
-	state := domain.WorkspaceState(input.Workspace.State)
+	state := workspacemodule.State(input.Workspace.State)
 	if state != "" {
 		workspace, err = materializer.store.Workspaces().Update(
 			ctx,
@@ -421,7 +423,7 @@ func (materializer *testRepositoryMaterializer) CommitRepositoryAdmission(
 		})
 	}
 	if input.WorkspaceFinalization != nil {
-		state := domain.WorkspaceStateReady
+		state := workspacemodule.StateReady
 		branch := input.WorkspaceFinalization.DefaultBranch
 		empty := ""
 		if _, err := materializer.store.Workspaces().Update(
@@ -482,7 +484,7 @@ func (materializer *testRepositoryMaterializer) FailRepositoryAdmission(
 	result := cloneTestAdmission(record)
 	materializer.mu.Unlock()
 	if createsWorkspace && !input.Retryable {
-		state := domain.WorkspaceStateError
+		state := workspacemodule.StateError
 		message := input.ErrorClass
 		_, _ = materializer.store.Workspaces().Update(
 			ctx,
@@ -1684,7 +1686,7 @@ func TestStoreBackedCreateCloneWorkspacePersistsLifecycleAndRepos(t *testing.T) 
 	if err != nil {
 		t.Fatalf("workspace not stored: %v", err)
 	}
-	if ws.State != domain.WorkspaceStateReady {
+	if ws.State != workspacemodule.StateReady {
 		t.Fatalf("workspace state = %q, want ready", ws.State)
 	}
 	repos, err := st.Repos().List(context.Background(), "CLONE-WS")
@@ -2028,7 +2030,7 @@ func TestStoreBackedCreateCloneWorkspaceRetainsDurableCreatingStateOnRetryableFa
 	if getErr != nil {
 		t.Fatalf("durable creating workspace was lost: %v", getErr)
 	}
-	if workspace.State != domain.WorkspaceStateCreating {
+	if workspace.State != workspacemodule.StateCreating {
 		t.Fatalf("workspace state = %q, want creating for recovery", workspace.State)
 	}
 	if _, statErr := os.Stat(wsPath); statErr != nil {
@@ -2091,7 +2093,7 @@ type workspaceCreateRaceWorkspaceStore struct {
 	store.WorkspaceStore
 }
 
-func (s workspaceCreateRaceWorkspaceStore) Create(context.Context, store.WorkspaceCreate) (*domain.Workspace, error) {
+func (s workspaceCreateRaceWorkspaceStore) Create(context.Context, store.WorkspaceCreate) (*workspacemodule.Workspace, error) {
 	return nil, domain.ErrAlreadyExists
 }
 
@@ -2107,8 +2109,8 @@ type workspaceReadyUpdateFailWorkspaceStore struct {
 	store.WorkspaceStore
 }
 
-func (s workspaceReadyUpdateFailWorkspaceStore) Update(ctx context.Context, key string, patch store.WorkspaceUpdate) (*domain.Workspace, error) {
-	if patch.State != nil && *patch.State == domain.WorkspaceStateReady {
+func (s workspaceReadyUpdateFailWorkspaceStore) Update(ctx context.Context, key string, patch store.WorkspaceUpdate) (*workspacemodule.Workspace, error) {
+	if patch.State != nil && *patch.State == workspacemodule.StateReady {
 		return nil, errors.New("ready update failed")
 	}
 	return s.WorkspaceStore.Update(ctx, key, patch)
@@ -2135,19 +2137,19 @@ func rolesByName(roles []*domain.Role) map[string]*domain.Role {
 	return out
 }
 
-func (r repoFailer) Create(context.Context, store.RepoCreate) (*domain.Repo, error) {
+func (r repoFailer) Create(context.Context, store.RepoCreate) (*workspacemodule.Repository, error) {
 	return nil, r.err
 }
 
-func (r repoFailer) Get(context.Context, string, string) (*domain.Repo, error) {
+func (r repoFailer) Get(context.Context, string, string) (*workspacemodule.Repository, error) {
 	return nil, domain.ErrNotFound
 }
 
-func (r repoFailer) List(context.Context, string) ([]*domain.Repo, error) {
+func (r repoFailer) List(context.Context, string) ([]*workspacemodule.Repository, error) {
 	return nil, nil
 }
 
-func (r repoFailer) Update(context.Context, string, string, store.RepoUpdate) (*domain.Repo, error) {
+func (r repoFailer) Update(context.Context, string, string, store.RepoUpdate) (*workspacemodule.Repository, error) {
 	return nil, r.err
 }
 

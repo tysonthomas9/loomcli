@@ -6,23 +6,27 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-func cloneDriver(d *domain.Driver) *domain.Driver {
+func cloneDriver(d *workflowcatalog.Driver) *workflowcatalog.Driver {
 	out := *d
 	out.Metadata = cloneMap(d.Metadata)
 	return &out
 }
 
-func cloneDriverVersion(v *domain.DriverVersion) *domain.DriverVersion {
+func cloneDriverVersion(v *workflowcatalog.DriverVersion) *workflowcatalog.DriverVersion {
 	out := *v
 	out.Manifest = cloneMap(v.Manifest)
 	return &out
 }
 
-func cloneTriggerBinding(b *domain.TriggerBinding) *domain.TriggerBinding {
+func cloneTriggerBinding(b *automation.Binding) *automation.Binding {
 	out := *b
 	out.EventTypePatterns = append([]string(nil), b.EventTypePatterns...)
 	out.ActorFilter = b.ActorFilter.Clone()
@@ -32,7 +36,7 @@ func cloneTriggerBinding(b *domain.TriggerBinding) *domain.TriggerBinding {
 
 // normalizedActorFilterMem deep-copies an actor filter, normalizing a filter
 // with no constraints to nil the way fleet-db's write path does.
-func normalizedActorFilterMem(f *domain.TriggerActorFilter) *domain.TriggerActorFilter {
+func normalizedActorFilterMem(f *automation.ActorFilter) *automation.ActorFilter {
 	if f.IsZero() {
 		return nil
 	}
@@ -51,7 +55,7 @@ func defaultRetryFieldMem(value, fallback int) int {
 // redactedTriggerBinding clones b with the webhook signing secret cleared,
 // mirroring the fleet-db API which never returns the secret on read/list/create
 // responses. The secret is reachable only via ResolveWebhookSecret.
-func redactedTriggerBinding(b *domain.TriggerBinding) *domain.TriggerBinding {
+func redactedTriggerBinding(b *automation.Binding) *automation.Binding {
 	out := cloneTriggerBinding(b)
 	out.WebhookSecret = ""
 	return out
@@ -136,15 +140,15 @@ func mergeStringMapMem(base, patch map[string]string) map[string]string {
 	return out
 }
 
-func driverMatchesMem(d *domain.Driver, f store.DriverFilter) bool {
+func driverMatchesMem(d *workflowcatalog.Driver, f store.DriverFilter) bool {
 	return (f.Name == "" || d.Name == f.Name) && (f.Status == "" || d.Status == f.Status)
 }
 
-func driverVersionMatchesMem(v *domain.DriverVersion, f store.DriverVersionFilter) bool {
+func driverVersionMatchesMem(v *workflowcatalog.DriverVersion, f store.DriverVersionFilter) bool {
 	return (f.DriverID == "" || v.DriverID == f.DriverID) && (f.ValidationStatus == "" || v.ValidationStatus == f.ValidationStatus)
 }
 
-func triggerBindingMatchesMem(b *domain.TriggerBinding, f store.TriggerBindingFilter) bool {
+func triggerBindingMatchesMem(b *automation.Binding, f store.TriggerBindingFilter) bool {
 	return (f.SourceKind == "" || b.SourceKind == f.SourceKind) &&
 		(f.RouteKey == "" || b.RouteKey == f.RouteKey) &&
 		(f.DriverID == "" || b.DriverID == f.DriverID) &&
@@ -317,14 +321,14 @@ func stringListContainsAllStrictMem(have, required []string) bool {
 	return true
 }
 
-func applyTriggerBindingUpdateMem(b *domain.TriggerBinding, patch store.TriggerBindingUpdate) {
+func applyTriggerBindingUpdateMem(b *automation.Binding, patch store.TriggerBindingUpdate) {
 	applyTriggerBindingSourceUpdateMem(b, patch)
 	applyTriggerBindingTargetUpdateMem(b, patch)
 	applyTriggerBindingPolicyUpdateMem(b, patch)
 	applyTriggerBindingRouterUpdateMem(b, patch)
 }
 
-func applyTriggerBindingSourceUpdateMem(b *domain.TriggerBinding, patch store.TriggerBindingUpdate) {
+func applyTriggerBindingSourceUpdateMem(b *automation.Binding, patch store.TriggerBindingUpdate) {
 	if patch.Name != nil {
 		b.Name = *patch.Name
 	}
@@ -357,7 +361,7 @@ func applyTriggerBindingSourceUpdateMem(b *domain.TriggerBinding, patch store.Tr
 	}
 }
 
-func applyTriggerBindingTargetUpdateMem(b *domain.TriggerBinding, patch store.TriggerBindingUpdate) {
+func applyTriggerBindingTargetUpdateMem(b *automation.Binding, patch store.TriggerBindingUpdate) {
 	if patch.DriverID != nil {
 		b.DriverID = *patch.DriverID
 	}
@@ -372,7 +376,7 @@ func applyTriggerBindingTargetUpdateMem(b *domain.TriggerBinding, patch store.Tr
 	}
 }
 
-func applyTriggerBindingPolicyUpdateMem(b *domain.TriggerBinding, patch store.TriggerBindingUpdate) {
+func applyTriggerBindingPolicyUpdateMem(b *automation.Binding, patch store.TriggerBindingUpdate) {
 	if patch.ConcurrencyPolicy != nil {
 		b.ConcurrencyPolicy = *patch.ConcurrencyPolicy
 	}
@@ -396,7 +400,7 @@ func applyTriggerBindingPolicyUpdateMem(b *domain.TriggerBinding, patch store.Tr
 // applyTriggerBindingRouterUpdateMem applies the Router v2 binding fields.
 // ActorFilter is replace-whole: a zero-valued filter clears it (normalized to
 // nil), mirroring fleet-db's patch semantics.
-func applyTriggerBindingRouterUpdateMem(b *domain.TriggerBinding, patch store.TriggerBindingUpdate) {
+func applyTriggerBindingRouterUpdateMem(b *automation.Binding, patch store.TriggerBindingUpdate) {
 	if patch.SubjectKeyTemplate != nil {
 		b.SubjectKeyTemplate = *patch.SubjectKeyTemplate
 	}

@@ -34,14 +34,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	appserve "github.com/tysonthomas9/loomcli/internal/app/serve"
 	"github.com/tysonthomas9/loomcli/internal/app/webhookingestion"
-	"github.com/tysonthomas9/loomcli/internal/connector"
-	"github.com/tysonthomas9/loomcli/internal/connector/providers"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
+	"github.com/tysonthomas9/loomcli/internal/infra/connectorscatalog"
+	"github.com/tysonthomas9/loomcli/internal/infra/connectorsproviders"
+	providers "github.com/tysonthomas9/loomcli/internal/infra/connectorsproviders/providerimpl"
+	"github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -181,7 +186,7 @@ func (g *fakeGitHub) snapshot() (calls []upstreamCall, merged bool) {
 // real AES-256-GCM vault, and the real GitHub provider pointed at fakeGitHub.
 type e2eHarness struct {
 	store  store.Store
-	vault  *connector.Vault
+	vault  *connectorsvault.Vault
 	github *fakeGitHub
 	server *httptest.Server
 
@@ -293,7 +298,7 @@ func newE2EHarness(t *testing.T) *e2eHarness {
 		runTokenKey: bytes.Repeat([]byte{0x51}, 32),
 	}
 
-	vault, err := connector.NewVault(bytes.Repeat([]byte{0x42}, 32))
+	vault, err := connectorsvault.NewVault(bytes.Repeat([]byte{0x42}, 32))
 	if err != nil {
 		t.Fatalf("NewVault: %v", err)
 	}
@@ -306,12 +311,17 @@ func newE2EHarness(t *testing.T) *e2eHarness {
 		providers.NewGitHub(h.github.server.Client(), h.github.server.URL)); err != nil {
 		t.Fatalf("Register github provider: %v", err)
 	}
-	dispatcher := &connector.Dispatcher{
-		Connectors: h.store.Connectors(),
-		Grants:     h.store.ConnectorGrants(),
-		Audit:      h.store.ConnectorCalls(),
-		Vault:      h.vault,
-		Providers:  registry,
+	catalog, err := connectorscatalog.New(h.store.Connectors(), h.store.ConnectorGrants(), h.store.ConnectorCalls())
+	if err != nil {
+		t.Fatalf("New connector catalog: %v", err)
+	}
+	providerRegistry, err := connectorsproviders.New(registry)
+	if err != nil {
+		t.Fatalf("New provider registry: %v", err)
+	}
+	dispatcher, err := connectorsmodule.NewDispatch(catalog, h.vault, providerRegistry, nil)
+	if err != nil {
+		t.Fatalf("New connector dispatcher: %v", err)
 	}
 	repairs, ok := h.store.DriverSteps().(store.TerminalDriverStepRepairStore)
 	if !ok {
@@ -364,14 +374,14 @@ func (h *e2eHarness) provisionWorkspace(t *testing.T) {
 	ctx := context.Background()
 	if _, err := h.store.Drivers().Create(ctx, store.DriverCreate{
 		WorkspaceKey: e2eWorkspace, DriverID: "driver-1", Name: "pr-agent",
-		OwnerType: domain.DriverOwnerSystem, Status: domain.DriverStatusActive,
+		OwnerType: workflowcatalog.DriverOwnerSystem, Status: workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatalf("Create driver: %v", err)
 	}
 	if _, err := h.store.DriverVersions().Create(ctx, store.DriverVersionCreate{
 		WorkspaceKey: e2eWorkspace, VersionID: "version-1", DriverID: "driver-1", Version: 1,
 		SourceDigest: "sha256:source", BundleDigest: "sha256:bundle",
-		ValidationStatus: domain.DriverVersionValidationPassed,
+		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
 	}
@@ -386,7 +396,7 @@ func (h *e2eHarness) provisionWorkspace(t *testing.T) {
 		t.Fatalf("Create trigger binding: %v", err)
 	}
 
-	sealed, err := h.vault.Seal([]byte(outboundCredentialV1), connector.CredentialAAD(e2eWorkspace, "gh-main"))
+	sealed, err := h.vault.Seal([]byte(outboundCredentialV1), connectorsmodule.CredentialAAD(e2eWorkspace, "gh-main"))
 	if err != nil {
 		t.Fatalf("Seal credential: %v", err)
 	}
@@ -737,8 +747,16 @@ func TestConnectorEndToEnd(t *testing.T) {
 	})
 
 	// (8) Mid-flight rotation: both secrets rotate while the run is live.
-	rotated, err := connector.Rotate(ctx, h.store.Connectors(), h.store.ConnectorCalls(), h.vault,
-		connector.RotateRequest{
+	catalog, err := connectorscatalog.New(h.store.Connectors(), h.store.ConnectorGrants(), h.store.ConnectorCalls())
+	if err != nil {
+		t.Fatalf("New connector catalog for rotation: %v", err)
+	}
+	management, err := connectorsmodule.NewManagementWithSecrets(catalog, h.vault, time.Now)
+	if err != nil {
+		t.Fatalf("New connector management for rotation: %v", err)
+	}
+	rotated, err := management.RotateConnector(ctx,
+		connectorsmodule.RotateConnectorCommand{
 			WorkspaceKey:     e2eWorkspace,
 			ConnectorID:      "gh-main",
 			NewInboundSecret: inboundSecretV2,
@@ -834,7 +852,7 @@ func assertNoSecretMaterial(t *testing.T, h *e2eHarness) {
 	if err != nil {
 		t.Fatalf("ListByRun: %v", err)
 	}
-	rotationRows, err := h.store.ConnectorCalls().ListByBinding(ctx, e2eWorkspace, connector.RotationAuditBindingID, store.ConnectorCallFilter{})
+	rotationRows, err := h.store.ConnectorCalls().ListByBinding(ctx, e2eWorkspace, connectorsmodule.RotationAuditBindingID, store.ConnectorCallFilter{})
 	if err != nil {
 		t.Fatalf("ListByBinding rotation rows: %v", err)
 	}
@@ -877,7 +895,7 @@ func assertNoSecretMaterial(t *testing.T, h *e2eHarness) {
 // identity — the only credential a workflow may hold — came through.
 func TestConnectorE2EWorkflowEnvNeverSeesSecrets(t *testing.T) {
 	vaultKey := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x42}, 32))
-	t.Setenv(connector.VaultKeyEnvVar, vaultKey)
+	t.Setenv(connectorsvault.VaultKeyEnvVar, vaultKey)
 	// An operator host env holding the raw upstream credential must never
 	// reach the workflow either (sensitive-name filtering).
 	t.Setenv("GITHUB_TOKEN", outboundCredentialV1)
@@ -905,7 +923,7 @@ func TestConnectorE2EWorkflowEnvNeverSeesSecrets(t *testing.T) {
 		ServerPath: filepath.Join(bundleRoot, "flue-server.mjs"),
 		// The env seam is under test, not the SB3 trust gate: a trusted
 		// request passes the process launcher.
-		TrustLevel: domain.DriverTrustTrusted,
+		TrustLevel: workflowcatalog.DriverTrustTrusted,
 	})
 	if err != nil {
 		t.Fatalf("NodeRunner.Run: %v", err)
@@ -936,7 +954,7 @@ func TestConnectorE2EWorkflowEnvNeverSeesSecrets(t *testing.T) {
 	// neither the values nor the secret-bearing variables themselves.
 	for _, forbidden := range []string{
 		vaultKey,
-		connector.VaultKeyEnvVar,
+		connectorsvault.VaultKeyEnvVar,
 		outboundCredentialV1,
 		inboundSecretV1,
 		"GITHUB_TOKEN",

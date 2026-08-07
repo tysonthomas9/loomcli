@@ -12,10 +12,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/connector"
-	"github.com/tysonthomas9/loomcli/internal/connector/providers"
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/infra/connectorscatalog"
+	"github.com/tysonthomas9/loomcli/internal/infra/connectorsproviders"
+	providers "github.com/tysonthomas9/loomcli/internal/infra/connectorsproviders/providerimpl"
+	"github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -29,6 +34,15 @@ type stubProvider struct {
 	calls  []providers.CallSpec
 	result providers.CallResult
 	err    error
+}
+
+type unreachableConnectorDispatcher struct{}
+
+func (unreachableConnectorDispatcher) Dispatch(
+	context.Context,
+	connectorsmodule.DispatchCommand,
+) (connectorsmodule.DispatchResult, error) {
+	panic("connector dispatch unexpectedly reached")
 }
 
 func (p *stubProvider) Call(_ context.Context, spec providers.CallSpec) (providers.CallResult, error) {
@@ -51,14 +65,14 @@ func newConnectorHarness(t *testing.T) *connectorHarness {
 	st := memstore.New()
 	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
 		WorkspaceKey: "WS", DriverID: "driver-1", Name: "epic-runner",
-		OwnerType: domain.DriverOwnerSystem, Status: domain.DriverStatusActive,
+		OwnerType: workflowcatalog.DriverOwnerSystem, Status: workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatalf("Create driver: %v", err)
 	}
 	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
 		WorkspaceKey: "WS", VersionID: "version-1", DriverID: "driver-1", Version: 1,
 		SourceDigest: "sha256:source", BundleDigest: "sha256:bundle",
-		ValidationStatus: domain.DriverVersionValidationPassed,
+		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
 	}
@@ -82,11 +96,11 @@ func newConnectorHarness(t *testing.T) *connectorHarness {
 		t.Fatalf("Claim driver run: %v", err)
 	}
 
-	vault, err := connector.NewVault(bytes.Repeat([]byte{7}, 32))
+	vault, err := connectorsvault.NewVault(bytes.Repeat([]byte{7}, 32))
 	if err != nil {
 		t.Fatalf("NewVault: %v", err)
 	}
-	sealed, err := vault.Seal([]byte(connectorTestCredential), connector.CredentialAAD("WS", "gh-main"))
+	sealed, err := vault.Seal([]byte(connectorTestCredential), connectorsmodule.CredentialAAD("WS", "gh-main"))
 	if err != nil {
 		t.Fatalf("Seal credential: %v", err)
 	}
@@ -116,17 +130,23 @@ func newConnectorHarness(t *testing.T) *connectorHarness {
 	if err := registry.Register(domain.ConnectorSourceGitHub, provider); err != nil {
 		t.Fatalf("Register provider: %v", err)
 	}
+	catalog, err := connectorscatalog.New(st.Connectors(), st.ConnectorGrants(), st.ConnectorCalls())
+	if err != nil {
+		t.Fatalf("New connector catalog: %v", err)
+	}
+	providerRegistry, err := connectorsproviders.New(registry)
+	if err != nil {
+		t.Fatalf("New provider registry: %v", err)
+	}
+	dispatcher, err := connectorsmodule.NewDispatch(catalog, vault, providerRegistry, nil)
+	if err != nil {
+		t.Fatalf("New connector dispatcher: %v", err)
+	}
 	module := NewModule(Config{
 		Store:                st,
 		Execution:            testDriverRunExecution{store: st},
 		ExecutionAuthorities: testDriverRunAuthorityResolver{},
-		Dispatcher: &connector.Dispatcher{
-			Connectors: st.Connectors(),
-			Grants:     st.ConnectorGrants(),
-			Audit:      st.ConnectorCalls(),
-			Vault:      vault,
-			Providers:  registry,
-		},
+		Dispatcher:           dispatcher,
 	})
 	mux := http.NewServeMux()
 	module.Register(mux)
@@ -307,7 +327,7 @@ func TestConnectorDispatchNoBindingDeniedWithoutAudit(t *testing.T) {
 	// A run with no trigger lineage has no binding, hence no grants:
 	// deny-by-default refuses before any dispatch or audit work.
 	h := newTestHarness(t, "")
-	dispatcher := &connector.Dispatcher{} // never reached
+	dispatcher := unreachableConnectorDispatcher{} // never reached
 	h.module.dispatcher = dispatcher
 	resp, decoded := h.do(t, opRequest{
 		op:      "connector-dispatch",

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -38,17 +40,17 @@ func completedStubProcess(summary string) *stubSandboxProcess {
 func TestTrustPlacementPolicyGatesLaunch(t *testing.T) {
 	cases := []struct {
 		name         string
-		trust        domain.DriverTrustLevel
+		trust        workflowcatalog.DriverTrustLevel
 		isolates     bool
 		wantRefused  bool
 		wantLaunches int
 	}{
-		{name: "untrusted + non-isolating launcher refused", trust: domain.DriverTrustUntrusted, isolates: false, wantRefused: true},
+		{name: "untrusted + non-isolating launcher refused", trust: workflowcatalog.DriverTrustUntrusted, isolates: false, wantRefused: true},
 		{name: "unknown trust fails closed", trust: "", isolates: false, wantRefused: true},
 		{name: "bogus trust fails closed", trust: "sorta-trusted", isolates: false, wantRefused: true},
-		{name: "untrusted + isolating launcher launches", trust: domain.DriverTrustUntrusted, isolates: true, wantLaunches: 1},
-		{name: "trusted + non-isolating launcher unchanged", trust: domain.DriverTrustTrusted, isolates: false, wantLaunches: 1},
-		{name: "trusted + isolating launcher launches", trust: domain.DriverTrustTrusted, isolates: true, wantLaunches: 1},
+		{name: "untrusted + isolating launcher launches", trust: workflowcatalog.DriverTrustUntrusted, isolates: true, wantLaunches: 1},
+		{name: "trusted + non-isolating launcher unchanged", trust: workflowcatalog.DriverTrustTrusted, isolates: false, wantLaunches: 1},
+		{name: "trusted + isolating launcher launches", trust: workflowcatalog.DriverTrustTrusted, isolates: true, wantLaunches: 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -72,7 +74,7 @@ func TestTrustPlacementPolicyGatesLaunch(t *testing.T) {
 				if result.Output[ErrorCodeOutputKey] != ErrorClassSandboxRequired || result.Output[RetryableOutputKey] != "false" {
 					t.Fatalf("output = %+v, want structured {code:sandbox_required, retryable:false}", result.Output)
 				}
-				if result.Output[TrustLevelOutputKey] != string(domain.DriverTrustUntrusted) {
+				if result.Output[TrustLevelOutputKey] != string(workflowcatalog.DriverTrustUntrusted) {
 					t.Fatalf("output trust = %q, want untrusted audit", result.Output[TrustLevelOutputKey])
 				}
 				return
@@ -80,9 +82,9 @@ func TestTrustPlacementPolicyGatesLaunch(t *testing.T) {
 			if result.Status != domain.DriverRunCompleted || result.Summary != "sandbox ok" {
 				t.Fatalf("result = %+v, want completed sandbox ok", result)
 			}
-			wantTrust := domain.DriverTrustUntrusted
+			wantTrust := workflowcatalog.DriverTrustUntrusted
 			if tc.trust.Trusted() {
-				wantTrust = domain.DriverTrustTrusted
+				wantTrust = workflowcatalog.DriverTrustTrusted
 			}
 			if result.Output[TrustLevelOutputKey] != string(wantTrust) {
 				t.Fatalf("output trust = %q, want %q audit", result.Output[TrustLevelOutputKey], wantTrust)
@@ -99,7 +101,7 @@ func TestTrustPlacementPolicyRefusesDefaultProcessLauncher(t *testing.T) {
 	// default process launcher run, the result would be a driver_runtime
 	// start failure instead of sandbox_required.
 	req := sandboxSeamRunRequest(t.TempDir())
-	req.TrustLevel = domain.DriverTrustUntrusted
+	req.TrustLevel = workflowcatalog.DriverTrustUntrusted
 	result, err := (NodeRunner{NodePath: "/nonexistent/loom-test-node"}).Run(context.Background(), req)
 	if err != nil {
 		t.Fatalf("NodeRunner.Run: %v", err)
@@ -115,7 +117,7 @@ func TestTrustPlacementPolicyRefusesDefaultProcessLauncher(t *testing.T) {
 	}
 }
 
-func setupTrustPolicyExecutorRun(t *testing.T, trust domain.DriverTrustLevel) (context.Context, store.Store, string) {
+func setupTrustPolicyExecutorRun(t *testing.T, trust workflowcatalog.DriverTrustLevel) (context.Context, store.Store, string) {
 	t.Helper()
 	ctx := context.Background()
 	root := t.TempDir()
@@ -141,7 +143,7 @@ func setupTrustPolicyExecutorRun(t *testing.T, trust domain.DriverTrustLevel) (c
 }
 
 func TestExecutorRefusesUntrustedRunOnDefaultProcessLauncher(t *testing.T) {
-	ctx, st, root := setupTrustPolicyExecutorRun(t, domain.DriverTrustUntrusted)
+	ctx, st, root := setupTrustPolicyExecutorRun(t, workflowcatalog.DriverTrustUntrusted)
 	result, err := testExecutor(st, Executor{
 		Store:             st,
 		WorkspaceKey:      "TEST",
@@ -160,7 +162,7 @@ func TestExecutorRefusesUntrustedRunOnDefaultProcessLauncher(t *testing.T) {
 	if final.Output[ErrorCodeOutputKey] != ErrorClassSandboxRequired || final.Output[RetryableOutputKey] != "false" {
 		t.Fatalf("final output = %+v, want persisted structured refusal", final.Output)
 	}
-	if final.Output[TrustLevelOutputKey] != string(domain.DriverTrustUntrusted) {
+	if final.Output[TrustLevelOutputKey] != string(workflowcatalog.DriverTrustUntrusted) {
 		t.Fatalf("final output trust = %q, want untrusted audit", final.Output[TrustLevelOutputKey])
 	}
 	if final.Output[SandboxPlacementOutputKey] != "" {
@@ -169,7 +171,7 @@ func TestExecutorRefusesUntrustedRunOnDefaultProcessLauncher(t *testing.T) {
 }
 
 func TestExecutorLaunchesUntrustedRunThroughIsolatingLauncher(t *testing.T) {
-	ctx, st, root := setupTrustPolicyExecutorRun(t, domain.DriverTrustUntrusted)
+	ctx, st, root := setupTrustPolicyExecutorRun(t, workflowcatalog.DriverTrustUntrusted)
 	launcher := &countingSandboxLauncher{
 		stubSandboxLauncher: stubSandboxLauncher{process: completedStubProcess("isolated ok")},
 		isolates:            true,
@@ -193,7 +195,7 @@ func TestExecutorLaunchesUntrustedRunThroughIsolatingLauncher(t *testing.T) {
 	if final == nil || final.Status != domain.DriverRunCompleted || final.Summary != "isolated ok" {
 		t.Fatalf("final = %+v, want completed via isolating launcher", final)
 	}
-	if final.Output[TrustLevelOutputKey] != string(domain.DriverTrustUntrusted) {
+	if final.Output[TrustLevelOutputKey] != string(workflowcatalog.DriverTrustUntrusted) {
 		t.Fatalf("final output trust = %q, want untrusted audit", final.Output[TrustLevelOutputKey])
 	}
 }
@@ -212,10 +214,10 @@ func TestRegistrationStampsTrustServerSide(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RegisterFlueDriver (operator): %v", err)
 	}
-	if registered.Driver.TrustLevel != domain.DriverTrustTrusted {
+	if registered.Driver.TrustLevel != workflowcatalog.DriverTrustTrusted {
 		t.Fatalf("operator-registered trust = %q, want trusted", registered.Driver.TrustLevel)
 	}
-	if registered.Version.Manifest[ManifestTrustLevelKey] != string(domain.DriverTrustTrusted) {
+	if registered.Version.Manifest[ManifestTrustLevelKey] != string(workflowcatalog.DriverTrustTrusted) {
 		t.Fatalf("operator version trust = %q, want trusted", registered.Version.Manifest[ManifestTrustLevelKey])
 	}
 
@@ -229,15 +231,15 @@ func TestRegistrationStampsTrustServerSide(t *testing.T) {
 	submitted, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{
 		WorkspaceKey: "TEST", WorkDir: rootUser, DistPath: "dist",
 		DriverName: "user-flow", CreatedBy: "api", Activate: true,
-		Trust: domain.DriverTrustUntrusted,
+		Trust: workflowcatalog.DriverTrustUntrusted,
 	})
 	if err != nil {
 		t.Fatalf("RegisterFlueDriver (submission): %v", err)
 	}
-	if submitted.Driver.TrustLevel != domain.DriverTrustUntrusted {
+	if submitted.Driver.TrustLevel != workflowcatalog.DriverTrustUntrusted {
 		t.Fatalf("submitted trust = %q, want untrusted (client manifest ignored)", submitted.Driver.TrustLevel)
 	}
-	if submitted.Version.Manifest[ManifestTrustLevelKey] != string(domain.DriverTrustUntrusted) {
+	if submitted.Version.Manifest[ManifestTrustLevelKey] != string(workflowcatalog.DriverTrustUntrusted) {
 		t.Fatalf("version manifest trust = %q, want server-stamped untrusted", submitted.Version.Manifest[ManifestTrustLevelKey])
 	}
 }
@@ -257,11 +259,11 @@ func TestReRegistrationNeverElevatesAndUntrustedSubmissionDemotes(t *testing.T) 
 	// Untrusted submission onto the existing trusted driver demotes it: the
 	// driver's newest content came through the untrusted path.
 	writeFlueDist(t, root, "epic-runner", "v2")
-	demoted, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "epic-runner", CreatedBy: "api", Activate: true, Trust: domain.DriverTrustUntrusted})
+	demoted, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "epic-runner", CreatedBy: "api", Activate: true, Trust: workflowcatalog.DriverTrustUntrusted})
 	if err != nil {
 		t.Fatalf("RegisterFlueDriver (untrusted v2): %v", err)
 	}
-	if demoted.Driver.TrustLevel != domain.DriverTrustUntrusted {
+	if demoted.Driver.TrustLevel != workflowcatalog.DriverTrustUntrusted {
 		t.Fatalf("driver trust after untrusted re-registration = %q, want demoted untrusted", demoted.Driver.TrustLevel)
 	}
 
@@ -273,7 +275,7 @@ func TestReRegistrationNeverElevatesAndUntrustedSubmissionDemotes(t *testing.T) 
 	if err != nil {
 		t.Fatalf("RegisterFlueDriver (trusted v3): %v", err)
 	}
-	if stillUntrusted.Driver.TrustLevel != domain.DriverTrustUntrusted {
+	if stillUntrusted.Driver.TrustLevel != workflowcatalog.DriverTrustUntrusted {
 		t.Fatalf("driver trust after trusted re-registration = %q, want still untrusted", stillUntrusted.Driver.TrustLevel)
 	}
 }

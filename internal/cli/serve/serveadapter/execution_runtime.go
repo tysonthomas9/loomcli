@@ -49,10 +49,15 @@ func NewAwaitTimeoutExecutionResolver(capability webui.ExecutionCapability) *dri
 	}
 }
 
+// AwaitTimeoutRuntimeResult is the narrow summary exposed by an await sweep.
+type AwaitTimeoutRuntimeResult interface {
+	RuntimeSummary() (timedOut, resumeDeferred int, instanceKeys []string)
+}
+
 // BuildAwaitTimeoutRuntimePass adapts an already-composed legacy await sweep
 // to an inert Execution runtime pass.
 func BuildAwaitTimeoutRuntimePass(
-	runOnce func(context.Context) (*driverexecutor.AwaitTimeoutSweepResult, error),
+	runOnce func(context.Context) (AwaitTimeoutRuntimeResult, error),
 ) execution.RuntimePass {
 	return execution.RuntimePassFunc(func(ctx context.Context) error {
 		if runOnce == nil {
@@ -62,9 +67,12 @@ func BuildAwaitTimeoutRuntimePass(
 		if err != nil {
 			return err
 		}
-		if result != nil && result.TimedOut+result.ResumeDeferred > 0 {
-			slog.Info("Execution resolved due awaits", "timed_out", result.TimedOut,
-				"resume_deferred", result.ResumeDeferred, "instance_keys", result.TimedOutInstanceKeys)
+		if result != nil {
+			timedOut, resumeDeferred, instanceKeys := result.RuntimeSummary()
+			if timedOut+resumeDeferred > 0 {
+				slog.Info("Execution resolved due awaits", "timed_out", timedOut,
+					"resume_deferred", resumeDeferred, "instance_keys", instanceKeys)
+			}
 		}
 		return nil
 	})

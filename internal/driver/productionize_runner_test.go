@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/localnodeconfig"
@@ -282,14 +284,14 @@ func TestLocalTaskRunnerBackendEnvResolution(t *testing.T) {
 		}
 		if _, err := st.Drivers().Create(ctx, store.DriverCreate{
 			WorkspaceKey: "WS", DriverID: "prompt-agent", Name: "prompt-agent",
-			OwnerType: domain.DriverOwnerSystem, Status: domain.DriverStatusActive,
+			OwnerType: workflowcatalog.DriverOwnerSystem, Status: workflowcatalog.DriverStatusActive,
 		}); err != nil {
 			t.Fatalf("create driver: %v", err)
 		}
 		if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
 			WorkspaceKey: "WS", VersionID: "prompt-agent-v1", DriverID: "prompt-agent", Version: 1,
 			SourceDigest: "sha256:source", BundleDigest: "sha256:bundle",
-			ValidationStatus: domain.DriverVersionValidationPassed,
+			ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 		}); err != nil {
 			t.Fatalf("create driver version: %v", err)
 		}
@@ -406,7 +408,7 @@ func TestValidateDriverRunnerSpecs(t *testing.T) {
 // The OpenShell guard (§4.6/§4.5) fails resolution closed with the
 // openshell_runner_unimplemented error class regardless of the manifest.
 func TestResolveDriverRunnerGuardsOpenShell(t *testing.T) {
-	version := &domain.DriverVersion{
+	version := &workflowcatalog.DriverVersion{
 		VersionID: "v-1",
 		DriverID:  "epic-runner",
 		Manifest: map[string]string{
@@ -449,9 +451,9 @@ func TestRunBuiltInFlueWorkflowRejectsEmptyResult(t *testing.T) {
 		WorkspaceKey: "WS",
 		DriverID:     "epic-runner",
 		Name:         "epic-runner",
-		OwnerType:    domain.DriverOwnerUser,
-		Status:       domain.DriverStatusActive,
-		TrustLevel:   domain.DriverTrustTrusted,
+		OwnerType:    workflowcatalog.DriverOwnerUser,
+		Status:       workflowcatalog.DriverStatusActive,
+		TrustLevel:   workflowcatalog.DriverTrustTrusted,
 	}); err != nil {
 		t.Fatalf("Create driver: %v", err)
 	}
@@ -494,7 +496,7 @@ setInterval(() => {}, 1000);
 		BundleDigest:     bundleDigest,
 		Runtime:          RuntimeFlueNode,
 		Manifest:         manifest,
-		ValidationStatus: domain.DriverVersionValidationPassed,
+		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 		CreatedBy:        "tester",
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
@@ -506,7 +508,7 @@ setInterval(() => {}, 1000);
 	req.RunnerKind = RunnerKindFlueWorkflow
 	req.RunnerEntrypoint = "local-task-runner"
 	req.RunnerVersionID = "driver-version-1"
-	req.RunnerTrustLevel = domain.DriverTrustTrusted
+	req.RunnerTrustLevel = workflowcatalog.DriverTrustTrusted
 	result, err := (HostBridgeTaskExecutor{Store: st, WorktreePath: worktree, APIBaseURL: testTaskRunAPIURL}).ExecuteTask(ctx, req)
 	if err != nil {
 		t.Fatalf("ExecuteTask: %v", err)
@@ -538,9 +540,9 @@ func TestRunBuiltInFlueWorkflowRejectsCompletedStringizedNonzeroExit(t *testing.
 		WorkspaceKey: "WS",
 		DriverID:     "epic-runner",
 		Name:         "epic-runner",
-		OwnerType:    domain.DriverOwnerUser,
-		Status:       domain.DriverStatusActive,
-		TrustLevel:   domain.DriverTrustTrusted,
+		OwnerType:    workflowcatalog.DriverOwnerUser,
+		Status:       workflowcatalog.DriverStatusActive,
+		TrustLevel:   workflowcatalog.DriverTrustTrusted,
 	}); err != nil {
 		t.Fatalf("Create driver: %v", err)
 	}
@@ -584,7 +586,7 @@ setInterval(() => {}, 1000);
 		BundleDigest:     bundleDigest,
 		Runtime:          RuntimeFlueNode,
 		Manifest:         manifest,
-		ValidationStatus: domain.DriverVersionValidationPassed,
+		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 		CreatedBy:        "tester",
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
@@ -596,7 +598,7 @@ setInterval(() => {}, 1000);
 	req.RunnerKind = RunnerKindFlueWorkflow
 	req.RunnerEntrypoint = "local-task-runner"
 	req.RunnerVersionID = "driver-version-1"
-	req.RunnerTrustLevel = domain.DriverTrustTrusted
+	req.RunnerTrustLevel = workflowcatalog.DriverTrustTrusted
 	result, err := (HostBridgeTaskExecutor{Store: st, WorktreePath: worktree, APIBaseURL: testTaskRunAPIURL}).ExecuteTask(ctx, req)
 	if err != nil {
 		t.Fatalf("ExecuteTask: %v", err)

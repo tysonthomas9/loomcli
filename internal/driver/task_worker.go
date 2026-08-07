@@ -10,11 +10,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 var ErrNoQueuedTaskRun = errors.New("task worker: no queued task run")
@@ -52,7 +53,7 @@ type taskWorkerNodeLifecycleState struct {
 var taskWorkerNodeLifecycleStateInitMu sync.Mutex
 
 type TaskWorker struct {
-	Store        store.Store
+	Store        taskWorkerStore
 	WorkspaceKey string
 	TaskRunID    string
 	WorkDir      string
@@ -277,7 +278,7 @@ func (w *TaskWorker) claimAndExecuteTaskRun(ctx context.Context, workspace, node
 	opts := executeClaimedTaskRunOptions{
 		WorkspaceKey: claimed.WorkspaceKey, DriverRunID: claimed.DriverRunID, DriverStepID: claimed.DriverStepID,
 		TaskID: claimed.TaskID, ProviderProfile: claimed.ProviderProfile,
-		RunnerTrustLevel: domain.DriverTrustLevel(claimed.RuntimeMetadata["runner_trust_level"]),
+		RunnerTrustLevel: workflowcatalog.DriverTrustLevel(claimed.RuntimeMetadata["runner_trust_level"]),
 		ParentSessionID:  claimed.RuntimeMetadata["parent_session_id"], LeaseToken: leaseToken,
 		HeartbeatInterval: w.HeartbeatInterval, CloseTaskOnSuccess: true, MaxAttempts: w.maxAttempts(),
 		HeartbeatSource: "task_run_worker", Now: w.Now,

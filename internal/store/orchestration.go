@@ -7,6 +7,12 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
+// OrchestrationSessionStore is the narrow read boundary required by the
+// orchestration-session join helpers.
+type OrchestrationSessionStore interface {
+	AgentSessions() AgentSessionStore
+}
+
 // OrchestrationSessionFor returns the most recent active interactive session
 // for a lead agent, or (nil, nil) if none exists. Phase 4 and older records
 // used kind=orchestration, so the lookup falls back to that legacy kind only
@@ -21,7 +27,7 @@ import (
 // Returns the most-recently-updated session when multiple match - which
 // shouldn't happen in normal operation but is a defensive choice over
 // returning a random one.
-func OrchestrationSessionFor(ctx context.Context, s Store, workspaceKey, agentID string) (*domain.AgentSession, error) {
+func OrchestrationSessionFor(ctx context.Context, s OrchestrationSessionStore, workspaceKey, agentID string) (*domain.AgentSession, error) {
 	agentID = strings.TrimSpace(agentID)
 	if agentID == "" {
 		return nil, nil
@@ -50,7 +56,7 @@ func OrchestrationSessionFor(ctx context.Context, s Store, workspaceKey, agentID
 // OrchestrationSessionFor that returns just the session id ("" when
 // there is no orchestration session). Designed as a drop-in for
 // `agent.OrchestratorSessionID` reads.
-func OrchestrationSessionIDFor(ctx context.Context, s Store, workspaceKey, agentID string) (string, error) {
+func OrchestrationSessionIDFor(ctx context.Context, s OrchestrationSessionStore, workspaceKey, agentID string) (string, error) {
 	sess, err := OrchestrationSessionFor(ctx, s, workspaceKey, agentID)
 	if err != nil || sess == nil {
 		return "", err

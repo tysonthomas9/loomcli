@@ -26,9 +26,9 @@ func TestCheckedInRuntimeInventoryMatchesRepository(t *testing.T) {
 		t.Fatalf("runtime goroutine launches = %d, want baseline %d", got, want)
 	}
 	codexLaunches := map[string]struct{}{
-		"internal/leadcontrol/codex_runtime.go::RunCodexLeadRuntime::go#1": {},
-		"internal/leadcontrol/codex_runtime.go::RunCodexLeadRuntime::go#2": {},
-		"internal/leadcontrol/codex_runtime.go::startCodexAppServer::go#1": {},
+		"internal/infra/interactionlead/codex_runtime.go::RunCodexLeadRuntime::go#1": {},
+		"internal/infra/interactionlead/codex_runtime.go::RunCodexLeadRuntime::go#2": {},
+		"internal/infra/interactionlead/codex_runtime.go::startCodexAppServer::go#1": {},
 	}
 	for _, launch := range inventory.GoroutineLaunches {
 		delete(codexLaunches, runtimeIdentity(launch.File, launch.Function, launch.Site))

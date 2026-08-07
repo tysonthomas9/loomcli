@@ -73,7 +73,7 @@ type IssueBackendFactory func(ws, actor string) (backend.IssueBackend, error)
 
 // Config wires the module's dependencies.
 type Config struct {
-	Store store.Store
+	Store taskRunProjectionStore
 	// Execution owns every running TaskRun mutation. Store remains only for
 	// the legacy read projection and unrelated compatibility surfaces.
 	Execution   execution.TaskRunAPI
@@ -91,9 +91,14 @@ type Config struct {
 	IssueBackends IssueBackendFactory
 }
 
+type taskRunProjectionStore interface {
+	TaskRuns() store.TaskRunStore
+	Artifacts() store.ArtifactStore
+}
+
 // Module serves the workspace-scoped task-run routes.
 type Module struct {
-	store           store.Store
+	store           taskRunProjectionStore
 	execution       execution.TaskRunAPI
 	authorities     execution.TaskRunAuthorityResolver
 	artifacts       artifactsmodule.API

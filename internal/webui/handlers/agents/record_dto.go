@@ -49,7 +49,7 @@ type agentBehaviorDTO struct {
 }
 
 type recordBindingDTO struct {
-	*domain.TriggerBinding
+	*automation.Binding
 	NextFireAt          *time.Time `json:"next_fire_at,omitempty"`
 	LastRunStatus       string     `json:"last_run_status,omitempty"`
 	ConsecutiveFailures int        `json:"consecutive_failures,omitempty"`
@@ -242,7 +242,7 @@ func (m *Module) agentRecordDTOWithBindings(
 		dec := triggerbindings.DecorateBinding(ctx, m.store, ws, b, now)
 		decorators = append(decorators, dec)
 		out.Bindings = append(out.Bindings, recordBindingDTO{
-			TriggerBinding:      b,
+			Binding:             b,
 			NextFireAt:          dec.NextFireAt,
 			LastRunStatus:       dec.LastRunStatus,
 			ConsecutiveFailures: dec.ConsecutiveFailures,

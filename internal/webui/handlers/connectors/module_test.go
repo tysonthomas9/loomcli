@@ -12,8 +12,10 @@ import (
 	"testing"
 	"time"
 
-	connectorvault "github.com/tysonthomas9/loomcli/internal/connector"
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	connectorvault "github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
@@ -331,20 +333,20 @@ func TestCreateGrantRejectsDifferentResourceForSameID(t *testing.T) {
 	}
 }
 
-func seedGrantReplacementFixture(t *testing.T) (store.Store, *domain.TriggerBinding) {
+func seedGrantReplacementFixture(t *testing.T) (store.Store, *automation.Binding) {
 	t.Helper()
 	st := memstore.New()
 	ctx := context.Background()
 	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
 		WorkspaceKey: "WS", DriverID: "review-loop", Name: "review-loop",
-		OwnerType: domain.DriverOwnerSystem, Status: domain.DriverStatusActive,
+		OwnerType: workflowcatalog.DriverOwnerSystem, Status: workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatalf("create driver: %v", err)
 	}
 	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
 		WorkspaceKey: "WS", VersionID: "review-loop-v1", DriverID: "review-loop", Version: 1,
 		SourceDigest: "sha256:source", BundleDigest: "sha256:bundle",
-		ValidationStatus: domain.DriverVersionValidationPassed,
+		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("create driver version: %v", err)
 	}
@@ -364,7 +366,7 @@ func seedGrantReplacementFixture(t *testing.T) (store.Store, *domain.TriggerBind
 	return st, binding
 }
 
-func replaceGrantSetBody(binding *domain.TriggerBinding, repo string) map[string]any {
+func replaceGrantSetBody(binding *automation.Binding, repo string) map[string]any {
 	return map[string]any{
 		"expected_binding_created_at": binding.CreatedAt.Format(time.RFC3339Nano),
 		"expected_binding_updated_at": binding.UpdatedAt.Format(time.RFC3339Nano),

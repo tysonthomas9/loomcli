@@ -4,7 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -25,8 +26,8 @@ type repoWire struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 
-func (r repoWire) toDomain() *domain.Repo {
-	return &domain.Repo{
+func (r repoWire) toDomain() *workspacemodule.Repository {
+	return &workspacemodule.Repository{
 		WorkspaceKey:  r.WorkspaceKey,
 		Name:          r.Name,
 		RemoteURL:     r.RemoteURL,
@@ -39,7 +40,7 @@ func (r repoWire) toDomain() *domain.Repo {
 	}
 }
 
-func (s *repoStore) Create(ctx context.Context, in store.RepoCreate) (*domain.Repo, error) {
+func (s *repoStore) Create(ctx context.Context, in store.RepoCreate) (*workspacemodule.Repository, error) {
 	body := struct {
 		Name          string   `json:"name"`
 		RemoteURL     string   `json:"remote_url"`
@@ -65,7 +66,7 @@ func (s *repoStore) Create(ctx context.Context, in store.RepoCreate) (*domain.Re
 	return resp.toDomain(), nil
 }
 
-func (s *repoStore) Get(ctx context.Context, ws, name string) (*domain.Repo, error) {
+func (s *repoStore) Get(ctx context.Context, ws, name string) (*workspacemodule.Repository, error) {
 	var resp repoWire
 	if err := s.client.do(ctx, "GET", "/api/v1/"+pathEscape(ws)+"/repos/"+pathEscape(name), nil, &resp); err != nil {
 		return nil, err
@@ -73,21 +74,21 @@ func (s *repoStore) Get(ctx context.Context, ws, name string) (*domain.Repo, err
 	return resp.toDomain(), nil
 }
 
-func (s *repoStore) List(ctx context.Context, ws string) ([]*domain.Repo, error) {
+func (s *repoStore) List(ctx context.Context, ws string) ([]*workspacemodule.Repository, error) {
 	var resp struct {
 		Repos []repoWire `json:"repos"`
 	}
 	if err := s.client.do(ctx, "GET", "/api/v1/"+pathEscape(ws)+"/repos", nil, &resp); err != nil {
 		return nil, err
 	}
-	out := make([]*domain.Repo, 0, len(resp.Repos))
+	out := make([]*workspacemodule.Repository, 0, len(resp.Repos))
 	for _, r := range resp.Repos {
 		out = append(out, r.toDomain())
 	}
 	return out, nil
 }
 
-func (s *repoStore) Update(ctx context.Context, ws, name string, patch store.RepoUpdate) (*domain.Repo, error) {
+func (s *repoStore) Update(ctx context.Context, ws, name string, patch store.RepoUpdate) (*workspacemodule.Repository, error) {
 	body := struct {
 		RemoteURL     *string   `json:"remote_url,omitempty"`
 		Remote        *string   `json:"remote,omitempty"`

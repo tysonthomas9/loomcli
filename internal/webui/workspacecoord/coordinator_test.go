@@ -700,7 +700,7 @@ func TestGetWorkspaceJob_StoreFallbackSurvivesJobStoreLoss(t *testing.T) {
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "CLONE-WS", Name: "clone-ws"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	cloning := domain.WorkspaceStateCloning
+	cloning := workspacemodule.StateCloning
 	if _, err := st.Workspaces().Update(ctx, "CLONE-WS", store.WorkspaceUpdate{State: &cloning}); err != nil {
 		t.Fatalf("mark cloning: %v", err)
 	}
@@ -727,7 +727,7 @@ func TestGetWorkspaceJob_StoreFallbackReturnsFailedForErrorWorkspace(t *testing.
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "CLONE-WS", Name: "clone-ws"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	failed := domain.WorkspaceStateError
+	failed := workspacemodule.StateError
 	msg := "git clone failed"
 	if _, err := st.Workspaces().Update(ctx, "CLONE-WS", store.WorkspaceUpdate{
 		State:        &failed,
@@ -878,12 +878,12 @@ type workspaceCountingWorkspaceStore struct {
 	listCalls int
 }
 
-func (s *workspaceCountingWorkspaceStore) Get(ctx context.Context, key string) (*domain.Workspace, error) {
+func (s *workspaceCountingWorkspaceStore) Get(ctx context.Context, key string) (*workspacemodule.Workspace, error) {
 	s.getCalls++
 	return s.WorkspaceStore.Get(ctx, key)
 }
 
-func (s *workspaceCountingWorkspaceStore) List(ctx context.Context) ([]*domain.Workspace, error) {
+func (s *workspaceCountingWorkspaceStore) List(ctx context.Context) ([]*workspacemodule.Workspace, error) {
 	s.listCalls++
 	return s.WorkspaceStore.List(ctx)
 }
@@ -893,7 +893,7 @@ type workspaceCountingRepoStore struct {
 	listByWorkspace map[string]int
 }
 
-func (s *workspaceCountingRepoStore) List(ctx context.Context, workspaceKey string) ([]*domain.Repo, error) {
+func (s *workspaceCountingRepoStore) List(ctx context.Context, workspaceKey string) ([]*workspacemodule.Repository, error) {
 	s.listByWorkspace[workspaceKey]++
 	return s.RepoStore.List(ctx, workspaceKey)
 }

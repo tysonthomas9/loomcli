@@ -4,6 +4,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
+
 	"github.com/tysonthomas9/loomcli/internal/entity"
 	"github.com/tysonthomas9/loomcli/internal/types"
 )
@@ -47,7 +49,7 @@ func fullIssue() *types.Issue {
 		Dependencies: []*types.Dependency{
 			{IssueID: "test-123", DependsOnID: "dep-1", Type: types.DepBlocks, CreatedAt: now, CreatedBy: "user", Metadata: `{"key":"val"}`, ThreadID: "thread-1"},
 		},
-		Comments: []*types.Comment{
+		Comments: []*workitems.Comment{
 			{ID: 1, IssueID: "test-123", Author: "user", Text: "comment", CreatedAt: now},
 		},
 		DeletedAt:      nil,
@@ -372,7 +374,7 @@ func TestDetailsToEntity(t *testing.T) {
 			{Issue: types.Issue{ID: "child-1", Title: "Child1", CreatedAt: now, CreatedBy: "user4"}, DependencyType: types.DepBlocks},
 			{Issue: types.Issue{ID: "child-2", Title: "Child2", CreatedAt: now, CreatedBy: "user5"}, DependencyType: types.DepParentChild},
 		},
-		Comments: []*types.Comment{
+		Comments: []*workitems.Comment{
 			{ID: 1, IssueID: "parent-1", Author: "a", Text: "c1", CreatedAt: now},
 			{ID: 2, IssueID: "parent-1", Author: "b", Text: "c2", CreatedAt: now},
 			{ID: 3, IssueID: "parent-1", Author: "c", Text: "c3", CreatedAt: now},
@@ -511,7 +513,7 @@ func TestDependenciesToEntities_Nil(t *testing.T) {
 
 func TestCommentToEntity(t *testing.T) {
 	now := testTime()
-	c := &types.Comment{
+	c := &workitems.Comment{
 		ID:        42,
 		IssueID:   "test-1",
 		Author:    "user",
@@ -539,7 +541,7 @@ func TestCommentToEntity_Nil(t *testing.T) {
 }
 
 func TestCommentToEntity_ZeroID(t *testing.T) {
-	c := &types.Comment{ID: 0, IssueID: "test-1", Author: "u", Text: "t", CreatedAt: testTime()}
+	c := &workitems.Comment{ID: 0, IssueID: "test-1", Author: "u", Text: "t", CreatedAt: testTime()}
 	e := CommentToEntity(c)
 	if e == nil {
 		t.Fatal("result should not be nil")

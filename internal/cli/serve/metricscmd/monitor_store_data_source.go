@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/monitor"
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -325,7 +327,7 @@ func agentInboxSummariesForMonitor(ctx context.Context, st store.Store, wsKey st
 	return out
 }
 
-func workspaceNames(workspaces []*domain.Workspace) []string {
+func workspaceNames(workspaces []*workspacemodule.Workspace) []string {
 	names := make([]string, 0, len(workspaces))
 	for _, ws := range workspaces {
 		if ws != nil {
@@ -335,7 +337,7 @@ func workspaceNames(workspaces []*domain.Workspace) []string {
 	return names
 }
 
-func resolveMonitorWorkspaceFromList(ctx context.Context, st store.Store, workspaceHint string, workspaces []*domain.Workspace) (key string, name string, ok bool) {
+func resolveMonitorWorkspaceFromList(ctx context.Context, st store.Store, workspaceHint string, workspaces []*workspacemodule.Workspace) (key string, name string, ok bool) {
 	if workspaceHint != "" {
 		if key, name, ok := findMonitorWorkspace(workspaces, workspaceHint, true); ok {
 			return key, name, true
@@ -353,7 +355,7 @@ func resolveMonitorWorkspaceFromList(ctx context.Context, st store.Store, worksp
 	return resolveMonitorWorkspace(ctx, st, workspaceHint)
 }
 
-func findMonitorWorkspace(workspaces []*domain.Workspace, hint string, allowName bool) (key string, name string, ok bool) {
+func findMonitorWorkspace(workspaces []*workspacemodule.Workspace, hint string, allowName bool) (key string, name string, ok bool) {
 	for _, ws := range workspaces {
 		if ws == nil {
 			continue

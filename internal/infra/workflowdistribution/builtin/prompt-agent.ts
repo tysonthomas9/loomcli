@@ -292,7 +292,7 @@ export async function run(ctx) {
   //    The id may arrive flat (input.taskId — cron/manual dispatch) or nested in
   //    the InternalSource provenance envelope for a task-ready event
   //    (input.event.taskId — the loopback wraps the emitter payload under
-  //    "event"; see internal/trigger issue_journal_bridge_task_ready.go).
+  //    "event"; see internal/infra/automationruntime issue_journal_bridge_task_ready.go).
   const claimed = isReview
     ? await claimTargetReviewTask(loom, targetId)
     : await claimTargetTask(loom, actor, targetId);

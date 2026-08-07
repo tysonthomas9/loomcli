@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/driver/nativearchive"
@@ -52,15 +54,15 @@ type SubmitDriverRunRequest struct {
 // authenticated Loom management boundary. Workspace and actor are absent:
 // serve derives both from the configured route and verified HTTP identity.
 type RegisterNativeDriverRequest struct {
-	Archive      []byte                  `json:"archive"`
-	Manifest     []byte                  `json:"manifest,omitempty"`
-	DriverName   string                  `json:"driver_name,omitempty"`
-	DriverID     string                  `json:"driver_id,omitempty"`
-	WorkflowName string                  `json:"workflow_name,omitempty"`
-	SourceRef    string                  `json:"source_ref,omitempty"`
-	SourceDigest string                  `json:"source_digest,omitempty"`
-	Activate     bool                    `json:"activate,omitempty"`
-	Trust        domain.DriverTrustLevel `json:"trust"`
+	Archive      []byte                           `json:"archive"`
+	Manifest     []byte                           `json:"manifest,omitempty"`
+	DriverName   string                           `json:"driver_name,omitempty"`
+	DriverID     string                           `json:"driver_id,omitempty"`
+	WorkflowName string                           `json:"workflow_name,omitempty"`
+	SourceRef    string                           `json:"source_ref,omitempty"`
+	SourceDigest string                           `json:"source_digest,omitempty"`
+	Activate     bool                             `json:"activate,omitempty"`
+	Trust        workflowcatalog.DriverTrustLevel `json:"trust"`
 }
 
 // CreateAgentRequest is the standalone-CLI intent sent to loom serve. The

@@ -47,7 +47,7 @@ func isLocalTaskRunner(req TaskExecRequest) bool {
 }
 
 type HostBridgeTaskExecutor struct {
-	Store store.Store
+	Store hostBridgeStore
 	// Artifacts is the sole production mutation surface for task-run artifacts.
 	// Store remains for session, worktree, and other documented read paths; a
 	// missing Artifacts API fails artifact-producing execution closed.
@@ -89,6 +89,11 @@ type HostBridgeTaskExecutor struct {
 	// runner, allowing filesystem-backed local-branch delivery without adding a
 	// mutable git remote to the isolated task worktree.
 	repositoryRemote string
+}
+
+type hostBridgeStore interface {
+	DriverVersions() store.DriverVersionStore
+	Repos() store.RepoStore
 }
 
 type bridgeTaskRunnerResult struct {

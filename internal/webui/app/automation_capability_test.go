@@ -91,7 +91,7 @@ func (queries *agentRouteBindingQueries) ListBindings(ctx context.Context, works
 	return projected, nil
 }
 
-func projectAgentRouteBinding(binding *domain.TriggerBinding) (*automation.Binding, error) {
+func projectAgentRouteBinding(binding *automation.Binding) (*automation.Binding, error) {
 	if binding == nil {
 		return nil, nil
 	}

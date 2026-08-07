@@ -10,10 +10,10 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/app/agentprovisioning"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -267,7 +267,7 @@ func TestSourceControlRepositoryAdmissionProjectionIsDurableAndExactAdmissionBou
 		"PROOF",
 		"task-run:unrelated:checkout",
 		"pending-repo",
-	); !errors.Is(err, domain.ErrNotFound) {
+	); !errors.Is(err, workspacemodule.ErrNotFound) {
 		t.Fatalf("unrelated operation resolved pending repository: %v", err)
 	}
 	if _, err := memory.Repos().Create(t.Context(), store.RepoCreate{

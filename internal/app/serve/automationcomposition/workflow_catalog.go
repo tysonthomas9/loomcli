@@ -9,7 +9,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/app/webhookingestion"
 	"github.com/tysonthomas9/loomcli/internal/app/workflowbinding"
-	"github.com/tysonthomas9/loomcli/internal/driver"
+	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	automationfleetdb "github.com/tysonthomas9/loomcli/internal/modules/automation/fleetdb"
@@ -25,6 +25,27 @@ type DriverRunStore = store.DriverRunStore
 type AwaitStore = store.AwaitStore
 type WorkspaceStore = store.WorkspaceStore
 type WebhookVerifier = webhookingestion.Verifier
+
+// NewAwaitEventReconcilerWithExecutionStores composes Automation's durable
+// await-notification loop without exposing its infrastructure type to the
+// outer serve package.
+func NewAwaitEventReconcilerWithExecutionStores(
+	queue execution.AwaitEventNotificationAPI,
+	authorities execution.SystemAuthorityResolver,
+	awaits store.AwaitStore,
+	driverRuns store.DriverRunStore,
+	resolver store.AtomicAwaitStore,
+	workspace string,
+	workspaces interface {
+		ListWorkspaceKeys(context.Context) ([]string, error)
+	},
+	componentID string,
+) (*trigger.AwaitEventReconciler, error) {
+	return trigger.NewAwaitEventReconcilerWithExecutionStores(
+		queue, authorities, awaits, driverRuns, resolver,
+		workspace, workspaces, componentID,
+	)
+}
 
 // WorkflowTarget is the composition projection of one prepared legacy
 // workflow.
@@ -146,7 +167,7 @@ func ComposeWorkflowCatalogAutomation(
 	}
 	workspaceLister := newAutomationWorkspaceLister(config.Workspaces)
 	awaitResolver := &ExecutionAwaitResolverBinding{}
-	awaitNotifier, err := driver.NewAutomationAwaitEventNotifierWithResolver(
+	awaitNotifier, err := trigger.NewAutomationAwaitEventNotifierWithResolver(
 		config.Awaits,
 		config.DriverRuns,
 		awaitResolver,

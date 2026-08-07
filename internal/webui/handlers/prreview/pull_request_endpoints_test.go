@@ -12,8 +12,9 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
-	"github.com/tysonthomas9/loomcli/internal/connector"
-	"github.com/tysonthomas9/loomcli/internal/connector/providers"
+	providers "github.com/tysonthomas9/loomcli/internal/infra/connectorsproviders/providerimpl"
+	"github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
+	"github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -173,12 +174,12 @@ func TestSettingsCredentialResealsAfterVaultKeyChanges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveOutboundCredentialSealed: %v", err)
 	}
-	dispatcher, ok := h.module.dispatcher.(*connector.Dispatcher)
-	if !ok || dispatcher.Vault == nil {
-		t.Fatalf("dispatcher = %T, want composed legacy connector adapter", h.module.dispatcher)
+	vault, err := connectorsvault.NewVaultFromEnvOrKeyFile(h.dataDir)
+	if err != nil {
+		t.Fatalf("NewVaultFromEnvOrKeyFile: %v", err)
 	}
-	if _, err := dispatcher.Vault.Unseal(
-		sealed, connector.CredentialAAD(prReviewTestWorkspace, connectorID),
+	if _, err := vault.Unseal(
+		sealed, connectors.CredentialAAD(prReviewTestWorkspace, connectorID),
 	); err != nil {
 		t.Fatalf("credential was not re-sealed under the replacement vault key: %v", err)
 	}
@@ -219,12 +220,12 @@ func TestCredentialInvalidationDuringEnsureUsesNewToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveOutboundCredentialSealed: %v", err)
 	}
-	dispatcher, ok := h.module.dispatcher.(*connector.Dispatcher)
-	if !ok || dispatcher.Vault == nil {
-		t.Fatalf("dispatcher = %T, want composed legacy connector adapter", h.module.dispatcher)
+	vault, err := connectorsvault.NewVaultFromEnvOrKeyFile(h.dataDir)
+	if err != nil {
+		t.Fatalf("NewVaultFromEnvOrKeyFile: %v", err)
 	}
-	plain, err := dispatcher.Vault.Unseal(
-		sealed, connector.CredentialAAD(prReviewTestWorkspace, connectorID),
+	plain, err := vault.Unseal(
+		sealed, connectors.CredentialAAD(prReviewTestWorkspace, connectorID),
 	)
 	if err != nil {
 		t.Fatalf("Unseal raced credential: %v", err)
@@ -259,7 +260,7 @@ func TestDaytonaCredentialPatchDoesNotInvalidatePRReviewSeeds(t *testing.T) {
 		t.Fatal("Daytona-only PATCH cleared PR-review seed cache")
 	}
 	rotations, err := h.store.ConnectorCalls().ListByBinding(
-		context.Background(), prReviewTestWorkspace, connector.RotationAuditBindingID, store.ConnectorCallFilter{},
+		context.Background(), prReviewTestWorkspace, connectors.RotationAuditBindingID, store.ConnectorCallFilter{},
 	)
 	if err != nil {
 		t.Fatalf("list connector rotations: %v", err)

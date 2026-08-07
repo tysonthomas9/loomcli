@@ -3,11 +3,9 @@ package serveadapter
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -24,7 +22,7 @@ func BuildWorkspaceIDResolverFn(s store.Store) func(string) (string, error) {
 		// Try direct key lookup first — the dominant case.
 		if ws, err := s.Workspaces().Get(ctx, name); err == nil && ws != nil {
 			return ws.Key, nil
-		} else if !errors.Is(err, domain.ErrNotFound) {
+		} else if !store.IsNotFound(err) {
 			return "", err
 		}
 		// Fallback: name lookup for workspaces with distinct Name vs Key.

@@ -8,7 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/agentinbox"
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
@@ -98,7 +99,7 @@ func TestDriverRegisterTrustDefaultsUntrusted(t *testing.T) {
 
 	driverRegisterTrusted = false
 	driverRegisterUntrusted = false
-	if trust, err := driverRegisterTrust(); err != nil || trust != domain.DriverTrustUntrusted {
+	if trust, err := driverRegisterTrust(); err != nil || trust != workflowcatalog.DriverTrustUntrusted {
 		t.Fatalf("driverRegisterTrust without flag = %q err=%v, want untrusted", trust, err)
 	}
 
@@ -110,13 +111,13 @@ func TestDriverRegisterTrustDefaultsUntrusted(t *testing.T) {
 
 	driverRegisterTrusted = true
 	driverRegisterUntrusted = false
-	if trust, err := driverRegisterTrust(); err != nil || trust != domain.DriverTrustTrusted {
+	if trust, err := driverRegisterTrust(); err != nil || trust != workflowcatalog.DriverTrustTrusted {
 		t.Fatalf("driverRegisterTrust trusted = %q err=%v", trust, err)
 	}
 
 	driverRegisterTrusted = false
 	driverRegisterUntrusted = true
-	if trust, err := driverRegisterTrust(); err != nil || trust != domain.DriverTrustUntrusted {
+	if trust, err := driverRegisterTrust(); err != nil || trust != workflowcatalog.DriverTrustUntrusted {
 		t.Fatalf("driverRegisterTrust untrusted = %q err=%v", trust, err)
 	}
 }
@@ -166,18 +167,18 @@ func (messenger driverCommandChatMessenger) DeliverChatMessage(
 	ctx context.Context,
 	command interaction.DeliverChatMessageCommand,
 ) (*interaction.ChatDelivery, error) {
-	message, err := agentinbox.Enqueue(
+	message, err := interaction.EnqueueGenerated(
 		ctx,
 		messenger.inbox,
-		command.WorkspaceKey,
-		command.AgentID,
-		command.Body,
-		agentinbox.MessageOptions{
-			SourceKind:  command.SourceKind,
-			SourceRef:   command.SourceRef,
-			DriverRunID: command.DriverRunID,
-			TaskRunID:   command.TaskRunID,
-			DedupeKey:   command.DedupeKey,
+		interaction.EnqueueInboxCommand{
+			WorkspaceKey:  command.WorkspaceKey,
+			TargetAgentID: command.AgentID,
+			Body:          command.Body,
+			SourceKind:    command.SourceKind,
+			SourceRef:     command.SourceRef,
+			DriverRunID:   command.DriverRunID,
+			TaskRunID:     command.TaskRunID,
+			DedupeKey:     command.DedupeKey,
 		},
 	)
 	if err != nil {
@@ -186,7 +187,7 @@ func (messenger driverCommandChatMessenger) DeliverChatMessage(
 	return &interaction.ChatDelivery{
 		State:          interaction.ChatDeliveryPending,
 		SessionID:      message.SessionID,
-		InboxMessageID: message.InboxMessageID,
+		InboxMessageID: message.MessageID,
 	}, nil
 }
 

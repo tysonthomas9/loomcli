@@ -6,7 +6,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -79,7 +80,7 @@ func (m *Module) listPullRequests(w http.ResponseWriter, r *http.Request) {
 // repo, accumulating per-repo warnings instead of failing the whole list.
 // attempted/failed let the caller distinguish "no repo was eligible" from
 // "the connector tried and failed everywhere".
-func (m *Module) connectorListPullRequests(r *http.Request, ws, state string, repos []*domain.Repo) (prs []ops.GitPullRequest, warnings []string, attempted, failed int) {
+func (m *Module) connectorListPullRequests(r *http.Request, ws, state string, repos []*workspacemodule.Repository) (prs []ops.GitPullRequest, warnings []string, attempted, failed int) {
 	prs = []ops.GitPullRequest{}
 	for _, workspaceRepo := range repos {
 		owner, repo, ok := parseGitHubOwnerRepo(workspaceRepo.RemoteURL)

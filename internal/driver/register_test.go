@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -38,10 +40,10 @@ func TestRegisterFlueDriverStagesNativeArtifactAndActivates(t *testing.T) {
 	if !result.CreatedDriver || !result.CreatedVersion || result.ReusedVersion || !result.Activated {
 		t.Fatalf("result flags = %+v, want created driver/version and activated", result)
 	}
-	if result.Driver.Status != domain.DriverStatusActive || result.Driver.ActiveVersionID != result.Version.VersionID {
+	if result.Driver.Status != workflowcatalog.DriverStatusActive || result.Driver.ActiveVersionID != result.Version.VersionID {
 		t.Fatalf("driver = %+v, want active pinned version", result.Driver)
 	}
-	if result.Version.Runtime != RuntimeFlueNode || result.Version.ValidationStatus != domain.DriverVersionValidationPassed {
+	if result.Version.Runtime != RuntimeFlueNode || result.Version.ValidationStatus != workflowcatalog.DriverVersionValidationPassed {
 		t.Fatalf("version = %+v, want passed flue-node version", result.Version)
 	}
 	if result.Version.Manifest["schema_version"] != NativeFlueSchemaVersion ||
@@ -97,7 +99,7 @@ func TestStageFlueDriverBundleIsPersistenceFreeAndPromotesIdempotently(t *testin
 		DriverName:   "custom-flow",
 		SourceRef:    "file:///tmp/custom-flow#sha256:source",
 		SourceDigest: "sha256:07ba20a2ad84dcc940d3a7adeb55288a8b76f5a5c97aeb12fe783d44567380b5",
-		Trust:        domain.DriverTrustUntrusted,
+		Trust:        workflowcatalog.DriverTrustUntrusted,
 	})
 	if err != nil {
 		t.Fatalf("StageFlueDriverBundle: %v", err)
@@ -111,7 +113,7 @@ func TestStageFlueDriverBundleIsPersistenceFreeAndPromotesIdempotently(t *testin
 	if _, ok := staged.CatalogManifest[ManifestTrustLevelKey]; ok {
 		t.Fatalf("catalog manifest = %+v, must not expose trust selection", staged.CatalogManifest)
 	}
-	if got := staged.Bundle.Manifest[ManifestTrustLevelKey]; got != string(domain.DriverTrustUntrusted) {
+	if got := staged.Bundle.Manifest[ManifestTrustLevelKey]; got != string(workflowcatalog.DriverTrustUntrusted) {
 		t.Fatalf("bundle trust = %q, want untrusted", got)
 	}
 	if _, err := os.Stat(staged.Bundle.Root); !errors.Is(err, os.ErrNotExist) {

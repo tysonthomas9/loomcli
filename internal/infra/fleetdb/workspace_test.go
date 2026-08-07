@@ -7,7 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -42,7 +43,7 @@ func TestWorkspaceStoreCreatePersistsLifecycleFields(t *testing.T) {
 			t.Fatalf("create body = %+v", body)
 		}
 		w.WriteHeader(http.StatusCreated)
-		writeJSON(t, w, domain.Workspace{
+		writeJSON(t, w, workspacemodule.Workspace{
 			Key:           "LOCALMODE",
 			Name:          "Local Mode",
 			Description:   "dogfood",
@@ -73,7 +74,7 @@ func TestWorkspaceStoreCreatePersistsLifecycleFields(t *testing.T) {
 
 func TestWorkspaceStoreUpdateSendsSupportedFleetDBFields(t *testing.T) {
 	now := time.Now().UTC()
-	state := domain.WorkspaceStateReady
+	state := workspacemodule.StateReady
 	description := "dogfood workspace"
 	defaultBranch := "localmode"
 	errorMessage := "clear"
@@ -96,7 +97,7 @@ func TestWorkspaceStoreUpdateSendsSupportedFleetDBFields(t *testing.T) {
 			}
 			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/admin/workspaces/LOCALMODE":
-			writeJSON(t, w, domain.Workspace{
+			writeJSON(t, w, workspacemodule.Workspace{
 				Key:           "LOCALMODE",
 				Name:          "Renamed",
 				Description:   "dogfood workspace",
@@ -151,7 +152,7 @@ func TestWorkspaceStoreCreateSendsDesignFormat(t *testing.T) {
 			t.Fatalf("create body design_format = %v, want html (body=%+v)", body["design_format"], body)
 		}
 		w.WriteHeader(http.StatusCreated)
-		writeJSON(t, w, domain.Workspace{
+		writeJSON(t, w, workspacemodule.Workspace{
 			Key:          "LOCALMODE",
 			Name:         "Local Mode",
 			DesignFormat: "html",
@@ -191,7 +192,7 @@ func TestWorkspaceStoreCreateOmitsEmptyDesignFormat(t *testing.T) {
 			t.Fatalf("create body must omit design_format when empty: %+v", body)
 		}
 		w.WriteHeader(http.StatusCreated)
-		writeJSON(t, w, domain.Workspace{Key: "LOCALMODE", Name: "Local Mode", CreatedAt: now, UpdatedAt: now})
+		writeJSON(t, w, workspacemodule.Workspace{Key: "LOCALMODE", Name: "Local Mode", CreatedAt: now, UpdatedAt: now})
 	}))
 
 	client, err := New(Config{BaseURL: "http://fleet.test", Actor: "tester", HTTPClient: httpClient})
@@ -225,7 +226,7 @@ func TestWorkspaceStoreUpdateClearsDesignFormat(t *testing.T) {
 			}
 			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/admin/workspaces/LOCALMODE":
-			writeJSON(t, w, domain.Workspace{Key: "LOCALMODE", Name: "Local Mode", CreatedAt: now, UpdatedAt: now})
+			writeJSON(t, w, workspacemodule.Workspace{Key: "LOCALMODE", Name: "Local Mode", CreatedAt: now, UpdatedAt: now})
 		default:
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
 		}
@@ -264,7 +265,7 @@ func TestWorkspaceStoreUpdateSendsDesignFormat(t *testing.T) {
 			}
 			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/admin/workspaces/LOCALMODE":
-			writeJSON(t, w, domain.Workspace{
+			writeJSON(t, w, workspacemodule.Workspace{
 				Key:          "LOCALMODE",
 				Name:         "Local Mode",
 				DesignFormat: "html",
@@ -307,7 +308,7 @@ func TestWorkspaceStoreUpdateSendsNameAndDesignFormat(t *testing.T) {
 			}
 			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/admin/workspaces/LOCALMODE":
-			writeJSON(t, w, domain.Workspace{Key: "LOCALMODE", Name: "Renamed", DesignFormat: "markdown", CreatedAt: now, UpdatedAt: now})
+			writeJSON(t, w, workspacemodule.Workspace{Key: "LOCALMODE", Name: "Renamed", DesignFormat: "markdown", CreatedAt: now, UpdatedAt: now})
 		default:
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
 		}
@@ -330,7 +331,7 @@ func TestWorkspaceStoreUpdateSendsNameAndDesignFormat(t *testing.T) {
 
 func TestWorkspaceStoreUpdatePersistsLifecycleFields(t *testing.T) {
 	now := time.Now().UTC()
-	state := domain.WorkspaceStateReady
+	state := workspacemodule.StateReady
 	description := "desc"
 	defaultBranch := "main"
 	httpClient := newWorkspaceHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -348,7 +349,7 @@ func TestWorkspaceStoreUpdatePersistsLifecycleFields(t *testing.T) {
 			}
 			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/admin/workspaces/LOCALMODE":
-			writeJSON(t, w, domain.Workspace{
+			writeJSON(t, w, workspacemodule.Workspace{
 				Key:           "LOCALMODE",
 				Name:          "Local Mode",
 				State:         state,
@@ -409,7 +410,7 @@ func TestWorkspaceStoreGetDecodesDesignFormat(t *testing.T) {
 
 func TestWorkspaceStoreUpdateStateOnlyPersistsState(t *testing.T) {
 	now := time.Now().UTC()
-	state := domain.WorkspaceStateReady
+	state := workspacemodule.StateReady
 	httpClient := newWorkspaceHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/admin/workspaces/LOCALMODE":
@@ -422,7 +423,7 @@ func TestWorkspaceStoreUpdateStateOnlyPersistsState(t *testing.T) {
 			}
 			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/admin/workspaces/LOCALMODE":
-			writeJSON(t, w, domain.Workspace{Key: "LOCALMODE", Name: "Local Mode", State: state, CreatedAt: now, UpdatedAt: now})
+			writeJSON(t, w, workspacemodule.Workspace{Key: "LOCALMODE", Name: "Local Mode", State: state, CreatedAt: now, UpdatedAt: now})
 		default:
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
 		}

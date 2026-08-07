@@ -9,7 +9,18 @@
 // match via errors.Is regardless of the underlying implementation.
 package store
 
-import "io"
+import (
+	"errors"
+	"io"
+
+	"github.com/tysonthomas9/loomcli/internal/domain"
+)
+
+// IsNotFound classifies the legacy persistence sentinel without forcing
+// composition adapters to depend on the horizontal domain bucket.
+func IsNotFound(err error) bool {
+	return errors.Is(err, domain.ErrNotFound)
+}
 
 // Store is the composite repository interface — the dependency callers
 // actually take. It groups the entity-specific sub-stores so a single

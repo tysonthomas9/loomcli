@@ -15,9 +15,10 @@ import (
 	"strings"
 	"time"
 
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/app/prreviewer"
 	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
@@ -128,7 +129,7 @@ func (m *Module) resolveRepositoryRef(
 	if err != nil {
 		return "", "", false, err
 	}
-	var matched *domain.Repo
+	var matched *workspacemodule.Repository
 	for _, workspaceRepo := range repositories {
 		if workspaceRepo == nil {
 			return "", "", false, sourcecontrol.ErrInvalidMaterialization

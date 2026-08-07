@@ -1,17 +1,20 @@
-//nolint:revive // Tests use the established driver package name to exercise unexported helpers.
+//nolint:revive // Tests use the established driver package name for shared execution fixtures.
 package driver
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/trigger"
 )
 
 func testAtomicAwaitResolver(t testing.TB, st store.Store) store.AtomicAwaitStore {
@@ -40,14 +43,14 @@ func newAwaitSweepStore(t *testing.T, workspaces ...string) *memstore.Store {
 		}
 		if _, err := st.Drivers().Create(ctx, store.DriverCreate{
 			WorkspaceKey: ws, DriverID: "awaiter", Name: "awaiter",
-			OwnerType: domain.DriverOwnerSystem, Status: domain.DriverStatusActive,
+			OwnerType: workflowcatalog.DriverOwnerSystem, Status: workflowcatalog.DriverStatusActive,
 		}); err != nil {
 			t.Fatalf("Create driver in %s: %v", ws, err)
 		}
 		if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
 			WorkspaceKey: ws, VersionID: "v1", DriverID: "awaiter", Version: 1,
 			SourceDigest: "sha256:s", BundleDigest: "sha256:b",
-			ValidationStatus: domain.DriverVersionValidationPassed,
+			ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 		}); err != nil {
 			t.Fatalf("Create driver version in %s: %v", ws, err)
 		}
@@ -93,7 +96,7 @@ func futureClock(ahead time.Duration) func() time.Time {
 
 func TestAwaitTimeoutSweeperRequiresExplicitResolver(t *testing.T) {
 	st := newAwaitSweepStore(t, "WS")
-	result, err := (&AwaitTimeoutSweeper{Store: st}).RunOnce(t.Context())
+	result, err := (&trigger.AwaitTimeoutSweeper{Store: st}).RunOnce(t.Context())
 	if err == nil || result != nil {
 		t.Fatalf("RunOnce = %+v, %v; want fail-closed resolver error", result, err)
 	}
@@ -107,7 +110,7 @@ func TestAwaitTimeoutSweeperResumesDueAwait(t *testing.T) {
 	ctx := context.Background()
 	st := newAwaitSweepStore(t, "WS")
 	key := suspendAwaitingRun(t, st, "WS", "run-1", "pr.merged:pr#7", []string{"alice"}, time.Hour)
-	sweeper := &AwaitTimeoutSweeper{Store: st, Resolver: testAtomicAwaitResolver(t, st), Now: futureClock(2 * time.Hour)}
+	sweeper := &trigger.AwaitTimeoutSweeper{Store: st, Resolver: testAtomicAwaitResolver(t, st), Now: futureClock(2 * time.Hour)}
 
 	result, err := sweeper.RunOnce(ctx)
 	if err != nil {
@@ -129,7 +132,12 @@ func TestAwaitTimeoutSweeperResumesDueAwait(t *testing.T) {
 	if inst.Status != domain.AwaitTimedOut || inst.SatisfiedByEventID != wantEventID {
 		t.Fatalf("row = %s by %q, want timed_out by %q", inst.Status, inst.SatisfiedByEventID, wantEventID)
 	}
-	var payload awaitTimeoutPayload
+	var payload struct {
+		Timeout     bool      `json:"timeout"`
+		EventType   string    `json:"eventType"`
+		InstanceKey string    `json:"instanceKey"`
+		Deadline    time.Time `json:"deadline"`
+	}
 	if err := json.Unmarshal(inst.SatisfiedPayload, &payload); err != nil {
 		t.Fatalf("decode timeout payload %s: %v", inst.SatisfiedPayload, err)
 	}
@@ -159,7 +167,7 @@ func TestAwaitTimeoutSweeperTargetsOnlyDueInstance(t *testing.T) {
 	st := newAwaitSweepStore(t, "WS")
 	dueKey := suspendAwaitingRun(t, st, "WS", "run-due", "pr.merged:pr#7", nil, time.Hour)
 	lateKey := suspendAwaitingRun(t, st, "WS", "run-late", "pr.merged:pr#7", nil, 10*time.Hour)
-	sweeper := &AwaitTimeoutSweeper{Store: st, Resolver: testAtomicAwaitResolver(t, st), Now: futureClock(2 * time.Hour)}
+	sweeper := &trigger.AwaitTimeoutSweeper{Store: st, Resolver: testAtomicAwaitResolver(t, st), Now: futureClock(2 * time.Hour)}
 
 	result, err := sweeper.RunOnce(ctx)
 	if err != nil {
@@ -185,25 +193,34 @@ func TestAwaitTimeoutSweeperRaceAlreadySatisfied(t *testing.T) {
 	ctx := context.Background()
 	st := newAwaitSweepStore(t, "WS")
 	key := suspendAwaitingRun(t, st, "WS", "run-1", "pr.merged:pr#7", nil, time.Hour)
-	sweeper := &AwaitTimeoutSweeper{Store: st, Resolver: testAtomicAwaitResolver(t, st), Now: futureClock(2 * time.Hour)}
-
-	// Snapshot the due instance the way RunOnce's scan would.
-	due, err := st.Awaits().ListDueAwaitDeadlines(ctx, "WS", time.Now().UTC().Add(2*time.Hour), 10)
-	if err != nil || len(due) != 1 {
-		t.Fatalf("ListDueAwaitDeadlines = %d, %v; want the pending instance", len(due), err)
-	}
-	// The real event lands between scan and timeout dispatch.
+	// The wrapper lands a real event immediately after the sweeper reads its
+	// due snapshot and before it dispatches the synthetic timeout.
 	realEvent := trigger.AwaitDispatchEvent{
 		EventID: "evt-real", EventType: "pr.merged", SubjectRef: "pr#7",
 		ActorRef: "alice", Payload: []byte(`{"won":"race"}`),
 	}
-	if res, err := testAwaitMatcher(t, st).Dispatch(ctx, "WS", realEvent); err != nil || res.Resolved() != 1 {
-		t.Fatalf("real event dispatch = %+v, %v; want resolved", res, err)
+	var dispatchErr error
+	raceAwaits := &awaitRaceStore{
+		AwaitStore: st.Awaits(),
+		afterList: func() {
+			res, err := testAwaitMatcher(t, st).Dispatch(ctx, "WS", realEvent)
+			if err != nil {
+				dispatchErr = err
+				return
+			}
+			if res.Resolved() != 1 {
+				dispatchErr = fmt.Errorf("real event resolved %d awaits, want 1", res.Resolved())
+			}
+		},
 	}
-
-	out := &AwaitTimeoutSweepResult{}
-	if err := sweeper.sweepInstance(ctx, sweeper.matcher(), "WS", due[0], out); err != nil {
-		t.Fatalf("sweepInstance: %v", err)
+	sweepStore := &awaitRaceSweepStore{Store: st, awaits: raceAwaits}
+	sweeper := &trigger.AwaitTimeoutSweeper{Store: sweepStore, Resolver: testAtomicAwaitResolver(t, st), Now: futureClock(2 * time.Hour)}
+	out, err := sweeper.RunOnce(ctx)
+	if err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if dispatchErr != nil {
+		t.Fatalf("real event dispatch: %v", dispatchErr)
 	}
 	if out.AlreadySatisfied != 1 || out.TimedOut != 0 || out.Failed != 0 {
 		t.Fatalf("out = %+v, want exactly one already_satisfied no-op", out)
@@ -218,6 +235,33 @@ func TestAwaitTimeoutSweeperRaceAlreadySatisfied(t *testing.T) {
 	}
 }
 
+type awaitRaceSweepStore struct {
+	store.Store
+	awaits store.AwaitStore
+}
+
+func (s *awaitRaceSweepStore) Awaits() store.AwaitStore { return s.awaits }
+
+type awaitRaceStore struct {
+	store.AwaitStore
+	afterList func()
+	fired     bool
+}
+
+func (s *awaitRaceStore) ListDueAwaitDeadlines(
+	ctx context.Context,
+	workspace string,
+	before time.Time,
+	limit int,
+) ([]*domain.AwaitInstance, error) {
+	values, err := s.AwaitStore.ListDueAwaitDeadlines(ctx, workspace, before, limit)
+	if err == nil && len(values) > 0 && !s.fired {
+		s.fired = true
+		s.afterList()
+	}
+	return values, err
+}
+
 // TestAwaitTimeoutSweeperWorkspaceScope covers the multi-workspace scan: a
 // scoped sweeper touches only its workspace; an unscoped one drains the rest.
 func TestAwaitTimeoutSweeperWorkspaceScope(t *testing.T) {
@@ -226,7 +270,7 @@ func TestAwaitTimeoutSweeperWorkspaceScope(t *testing.T) {
 	suspendAwaitingRun(t, st, "WS1", "run-a", "pr.merged:pr#1", nil, time.Hour)
 	suspendAwaitingRun(t, st, "WS2", "run-b", "pr.merged:pr#2", nil, time.Hour)
 
-	scoped := &AwaitTimeoutSweeper{Store: st, Resolver: testAtomicAwaitResolver(t, st), WorkspaceKey: "WS1", Now: futureClock(2 * time.Hour)}
+	scoped := &trigger.AwaitTimeoutSweeper{Store: st, Resolver: testAtomicAwaitResolver(t, st), WorkspaceKey: "WS1", Now: futureClock(2 * time.Hour)}
 	result, err := scoped.RunOnce(ctx)
 	if err != nil || result.TimedOut != 1 {
 		t.Fatalf("scoped RunOnce = %+v, %v; want one timed out in WS1 only", result, err)
@@ -236,7 +280,7 @@ func TestAwaitTimeoutSweeperWorkspaceScope(t *testing.T) {
 		t.Fatalf("WS2 run = %+v, %v; want untouched by the scoped sweep", other, err)
 	}
 
-	unscoped := &AwaitTimeoutSweeper{Store: st, Resolver: testAtomicAwaitResolver(t, st), Now: futureClock(2 * time.Hour)}
+	unscoped := &trigger.AwaitTimeoutSweeper{Store: st, Resolver: testAtomicAwaitResolver(t, st), Now: futureClock(2 * time.Hour)}
 	result, err = unscoped.RunOnce(ctx)
 	if err != nil || result.TimedOut != 1 {
 		t.Fatalf("unscoped RunOnce = %+v, %v; want the WS2 backlog drained", result, err)
@@ -252,7 +296,7 @@ func TestAwaitTimeoutSweeperDrainsBacklog(t *testing.T) {
 	for i, runID := range []string{"run-1", "run-2", "run-3"} {
 		suspendAwaitingRun(t, st, "WS", runID, "pr.merged:pr#7", nil, time.Duration(i+1)*time.Hour)
 	}
-	sweeper := &AwaitTimeoutSweeper{Store: st, Resolver: testAtomicAwaitResolver(t, st), BatchLimit: 1, Now: futureClock(5 * time.Hour)}
+	sweeper := &trigger.AwaitTimeoutSweeper{Store: st, Resolver: testAtomicAwaitResolver(t, st), BatchLimit: 1, Now: futureClock(5 * time.Hour)}
 
 	result, err := sweeper.RunOnce(ctx)
 	if err != nil {

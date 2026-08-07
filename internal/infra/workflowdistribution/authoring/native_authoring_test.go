@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
@@ -239,7 +238,7 @@ func TestAuthorNativeFlueDriverConvergesAfterEachCommittedLostResponseSplit(t *t
 				fake.loseApproveOnce = true
 			},
 			options: func(opts driver.RegisterFlueOptions) driver.RegisterFlueOptions {
-				opts.Trust, opts.Activate = domain.DriverTrustTrusted, true
+				opts.Trust, opts.Activate = workflowcatalog.DriverTrustTrusted, true
 				return opts
 			},
 			wantApprove: 1, wantActivate: 1, wantActivated: true,
@@ -250,7 +249,7 @@ func TestAuthorNativeFlueDriverConvergesAfterEachCommittedLostResponseSplit(t *t
 				fake.loseActivateOnce = true
 			},
 			options: func(opts driver.RegisterFlueOptions) driver.RegisterFlueOptions {
-				opts.Trust, opts.Activate = domain.DriverTrustTrusted, true
+				opts.Trust, opts.Activate = workflowcatalog.DriverTrustTrusted, true
 				return opts
 			},
 			wantApprove: 1, wantActivate: 1, wantActivated: true,
@@ -292,7 +291,7 @@ func TestAuthorNativeFlueDriverConvergesAfterEachCommittedLostResponseSplit(t *t
 func TestAuthorNativeFlueDriverReReadsDurableRevisionAfterOlderAuthorReceipt(t *testing.T) {
 	fake := &nativeAuthoringStateFake{advanceAfterAuthorOnce: true}
 	options := nativeAuthoringOptions(t)
-	options.Trust = domain.DriverTrustTrusted
+	options.Trust = workflowcatalog.DriverTrustTrusted
 	result, err := AuthorNativeFlueDriver(
 		context.Background(),
 		fake,
@@ -314,7 +313,7 @@ func TestAuthorNativeFlueDriverReReadsDurableRevisionAfterOlderAuthorReceipt(t *
 func TestAuthorNativeFlueDriverConcurrentWriterConflictFailsClosed(t *testing.T) {
 	fake := &nativeAuthoringStateFake{conflictBeforeApprove: true}
 	options := nativeAuthoringOptions(t)
-	options.Trust = domain.DriverTrustTrusted
+	options.Trust = workflowcatalog.DriverTrustTrusted
 	_, err := AuthorNativeFlueDriver(
 		context.Background(),
 		fake,
@@ -332,7 +331,7 @@ func TestAuthorNativeFlueDriverConcurrentWriterConflictFailsClosed(t *testing.T)
 
 func TestAuthorNativeFlueDriverRejectsIncompleteAuthoritySetBeforeStaging(t *testing.T) {
 	options := nativeAuthoringOptions(t)
-	options.Trust = domain.DriverTrustTrusted
+	options.Trust = workflowcatalog.DriverTrustTrusted
 	authorities := nativeTestAuthorities(t, "TEST", "operator-1")
 	authorities.Approve = nil
 	fake := &nativeAuthoringStateFake{}
@@ -371,7 +370,7 @@ func nativeAuthoringOptions(t *testing.T) driver.RegisterFlueOptions {
 		DriverName:   "demo",
 		DriverID:     "demo",
 		WorkflowName: "demo",
-		Trust:        domain.DriverTrustUntrusted,
+		Trust:        workflowcatalog.DriverTrustUntrusted,
 	}
 }
 

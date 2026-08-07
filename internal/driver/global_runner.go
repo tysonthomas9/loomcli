@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 )
 
 // Workspace-global builtin task-runner resolution (GAP A).
@@ -20,7 +20,7 @@ import (
 // not declare a runner (ErrRunnerNotDeclared), the runner name is resolved
 // against the workspace's BUILTIN task-runner registry instead — a runner is
 // globally resolvable iff it is declared by the ACTIVE version of a TRUSTED
-// (domain.DriverTrustTrusted) driver whose spec ships through the managed
+// (workflowcatalog.DriverTrustTrusted) driver whose spec ships through the managed
 // workflow distribution catalog (the builtins).
 //
 // SECURITY REASONING. Allowing an untrusted custom driver to dispatch the
@@ -53,8 +53,8 @@ import (
 // GlobalRunnerResolution is a resolved workspace-global runner: the trusted
 // builtin driver + active version that OWNS the runner, and the declared spec.
 type GlobalRunnerResolution struct {
-	Driver  *domain.Driver
-	Version *domain.DriverVersion
+	Driver  *workflowcatalog.Driver
+	Version *workflowcatalog.DriverVersion
 	Spec    DriverRunnerSpec
 }
 
@@ -80,7 +80,7 @@ func SetGlobalRunnerResolver(resolver GlobalRunnerResolver) {
 // adapter so it can implement the application port without duplicating the
 // decode/guard logic. It returns ErrRunnerNotDeclared (wrapped) when the
 // version does not declare the runner.
-func DeclaredRunnerSpec(version *domain.DriverVersion, runnerName string) (DriverRunnerSpec, error) {
+func DeclaredRunnerSpec(version *workflowcatalog.DriverVersion, runnerName string) (DriverRunnerSpec, error) {
 	return resolveDriverRunner(version, runnerName)
 }
 

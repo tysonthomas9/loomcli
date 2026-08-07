@@ -39,7 +39,7 @@ type Config struct {
 	InteractiveRuntime    agentcoord.InteractiveAgentRuntime
 	AgentRecordAuthority  workflowcataloghttp.OperatorAuthorityResolver
 	SessionTranscripts    sessioncoord.AgentSessionTranscriptService
-	Store                 store.Store
+	Store                 agentProjectionStore
 	Hub                   *realtime.Hub
 	Bindings              automation.BindingOperations
 	OperatorAuthority     workflowcataloghttp.OperatorAuthorityResolver
@@ -50,6 +50,12 @@ type Config struct {
 	BindingGrants         BindingGrantCompatibility
 }
 
+type agentProjectionStore interface {
+	AgentServices() store.AgentServiceStore
+	Roles() store.RoleStore
+	DriverRuns() store.DriverRunStore
+}
+
 // Module registers fleet-db-backed agent assignment routes.
 type Module struct {
 	agentRecords          AgentRecordAPI
@@ -58,7 +64,7 @@ type Module struct {
 	interactiveRuntime    agentcoord.InteractiveAgentRuntime
 	agentRecordAuthority  workflowcataloghttp.OperatorAuthorityResolver
 	sessionTranscripts    sessioncoord.AgentSessionTranscriptService
-	store                 store.Store
+	store                 agentProjectionStore
 	hub                   *realtime.Hub
 	bindings              automation.BindingOperations
 	operatorAuthority     workflowcataloghttp.OperatorAuthorityResolver

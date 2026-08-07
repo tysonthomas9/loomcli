@@ -24,6 +24,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/fleet"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
@@ -484,13 +486,13 @@ func (e *workflowEndpointE2E) customizeEpicRunnerViaCLI(marker string) string {
 	}
 
 	var built struct {
-		Version *domain.DriverVersion `json:"version"`
+		Version *workflowcatalog.DriverVersion `json:"version"`
 	}
 	e.runLoomJSON(&built, "workflow", "build", BuiltinEpicRunnerWorkflowName, "--source", sourceDir, "--json")
 	if built.Version == nil || built.Version.VersionID == "" {
 		e.t.Fatalf("workflow build response missing version: %+v", built)
 	}
-	if built.Version.Manifest["trust_level"] != string(domain.DriverTrustUntrusted) {
+	if built.Version.Manifest["trust_level"] != string(workflowcatalog.DriverTrustUntrusted) {
 		e.t.Fatalf("custom version trust = %q, want untrusted", built.Version.Manifest["trust_level"])
 	}
 	e.runLoom("workflow", "approve", BuiltinEpicRunnerWorkflowName, "--version", built.Version.VersionID, "--json")

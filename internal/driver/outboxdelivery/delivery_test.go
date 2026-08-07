@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/agentinbox"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
@@ -357,13 +356,13 @@ func (messenger *testInteractionChatMessenger) DeliverChatMessage(
 	command interaction.DeliverChatMessageCommand,
 ) (*interaction.ChatDelivery, error) {
 	messenger.messages = append(messenger.messages, command)
-	message, err := agentinbox.Enqueue(
+	message, err := interaction.EnqueueGenerated(
 		ctx,
 		messenger.inbox,
-		command.WorkspaceKey,
-		command.AgentID,
-		command.Body,
-		agentinbox.MessageOptions{
+		interaction.EnqueueInboxCommand{
+			WorkspaceKey:      command.WorkspaceKey,
+			TargetAgentID:     command.AgentID,
+			Body:              command.Body,
 			SourceKind:        command.SourceKind,
 			SourceRef:         command.SourceRef,
 			DriverRunID:       command.DriverRunID,
@@ -379,7 +378,7 @@ func (messenger *testInteractionChatMessenger) DeliverChatMessage(
 	return &interaction.ChatDelivery{
 		State:          interaction.ChatDeliveryPending,
 		SessionID:      message.SessionID,
-		InboxMessageID: message.InboxMessageID,
+		InboxMessageID: message.MessageID,
 	}, nil
 }
 

@@ -43,6 +43,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
@@ -95,7 +97,7 @@ const (
 // resolveSandboxEgress resolves the declared egress mode for one run:
 // explicit operator config wins; empty defaults per trust level (trusted →
 // all, anything else → serve-only, fail closed).
-func resolveSandboxEgress(configured string, trust domain.DriverTrustLevel) (SandboxEgressMode, error) {
+func resolveSandboxEgress(configured string, trust workflowcatalog.DriverTrustLevel) (SandboxEgressMode, error) {
 	mode := SandboxEgressMode(strings.ToLower(strings.TrimSpace(configured)))
 	switch mode {
 	case "":

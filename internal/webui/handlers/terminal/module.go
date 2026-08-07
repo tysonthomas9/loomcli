@@ -47,12 +47,19 @@ type Module struct {
 	termAuth        *realtime.TerminalAuth         // may be nil — token routes skipped
 	allowedOrigins  []string
 	loomServerURL   string
-	store           store.Store
+	store           terminalStore
 	tabMetaStore    *tabmeta.Store
 	hub             *realtime.Hub
 	serverStartedAt time.Time
 	agentIdentity   terminalAgentIdentity
 	interaction     InteractionDependencies
+}
+
+type terminalStore interface {
+	store.OrchestrationSessionStore
+	Roles() store.RoleStore
+	Workspaces() store.WorkspaceStore
+	Repos() store.RepoStore
 }
 
 // NewModule returns a Module. Any of agentSvc, agentTmuxMgr, and termAuth
@@ -67,7 +74,7 @@ func NewModule(
 	termAuth *realtime.TerminalAuth,
 	allowedOrigins []string,
 	loomServerURL string,
-	st store.Store,
+	st terminalStore,
 	tabMetaStore *tabmeta.Store,
 	hub *realtime.Hub,
 	serverStartedAt time.Time,

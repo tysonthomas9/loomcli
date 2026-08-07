@@ -16,7 +16,7 @@ import (
 // TestPhase5InteractionChatOwnershipRatchet keeps provider-specific
 // conversation reads and controlled-runtime delivery behind Interaction's
 // chat runtime adapter. Production callers may receive ChatAPI or
-// ChatMessenger; they may not call leadcontrol's provider/runtime helpers
+// ChatMessenger; they may not call Interaction's provider/runtime helpers
 // directly.
 func TestPhase5InteractionChatOwnershipRatchet(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", ".."))
@@ -35,7 +35,7 @@ func TestPhase5InteractionChatOwnershipRatchet(t *testing.T) {
 				if err != nil {
 					return err
 				}
-				if relative == "internal/leadcontrol" ||
+				if relative == "internal/infra/interactionlead" ||
 					relative == "internal/infra/interactionchat" {
 					return filepath.SkipDir
 				}
@@ -86,7 +86,7 @@ func collectDirectInteractionChatCalls(
 	}
 	for _, imported := range source.Imports {
 		if strings.Trim(imported.Path.Value, `"`) !=
-			"github.com/tysonthomas9/loomcli/internal/leadcontrol" {
+			"github.com/tysonthomas9/loomcli/internal/infra/interactionlead" {
 			continue
 		}
 		name := "leadcontrol"
@@ -170,7 +170,7 @@ func TestCollectDirectInteractionChatCallsRejectsAliasesReferencesAndDotImports(
 		{
 			name: "aliased function reference",
 			body: `package sample
-import lc "github.com/tysonthomas9/loomcli/internal/leadcontrol"
+import lc "github.com/tysonthomas9/loomcli/internal/infra/interactionlead"
 var deliver = lc.DeliverLeadMessageToCodexWithOptions
 `,
 			want: []string{
@@ -180,7 +180,7 @@ var deliver = lc.DeliverLeadMessageToCodexWithOptions
 		{
 			name: "dot import",
 			body: `package sample
-import . "github.com/tysonthomas9/loomcli/internal/leadcontrol"
+import . "github.com/tysonthomas9/loomcli/internal/infra/interactionlead"
 func use() { _, _ = DeliverLeadMessage, DeliverCurrentAssignment }
 `,
 			want: []string{"sample.go:2:dot-import"},
@@ -188,7 +188,7 @@ func use() { _, _ = DeliverLeadMessage, DeliverCurrentAssignment }
 		{
 			name: "blank import",
 			body: `package sample
-import _ "github.com/tysonthomas9/loomcli/internal/leadcontrol"
+import _ "github.com/tysonthomas9/loomcli/internal/infra/interactionlead"
 `,
 		},
 	}

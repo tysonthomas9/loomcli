@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	workflowdistribution "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution"
@@ -24,14 +26,14 @@ type DriverCatalog interface {
 }
 
 type driverLifecycleTestCatalog interface {
-	ApproveDriverVersionForTest(context.Context, string, string, string) (*domain.Driver, error)
-	UnapproveDriverVersionForTest(context.Context, string, string, string) (*domain.Driver, error)
-	ActivateDriverVersionForTest(context.Context, string, string, string) (*domain.Driver, error)
+	ApproveDriverVersionForTest(context.Context, string, string, string) (*workflowcatalog.Driver, error)
+	UnapproveDriverVersionForTest(context.Context, string, string, string) (*workflowcatalog.Driver, error)
+	ActivateDriverVersionForTest(context.Context, string, string, string) (*workflowcatalog.Driver, error)
 }
 
-func submissionTrust(trust domain.DriverTrustLevel) domain.DriverTrustLevel {
+func submissionTrust(trust workflowcatalog.DriverTrustLevel) workflowcatalog.DriverTrustLevel {
 	if trust == "" {
-		return domain.DriverTrustUntrusted
+		return workflowcatalog.DriverTrustUntrusted
 	}
 	return trust
 }
@@ -88,7 +90,7 @@ func registerFlueDriverForLegacyTest(
 
 	trust := opts.Trust
 	if trust == "" {
-		trust = domain.DriverTrustTrusted
+		trust = workflowcatalog.DriverTrustTrusted
 	}
 	driverRecord, err := catalog.Drivers().Get(ctx, opts.WorkspaceKey, staged.DriverID)
 	createdDriver := false
@@ -98,9 +100,9 @@ func registerFlueDriverForLegacyTest(
 			WorkspaceKey: opts.WorkspaceKey,
 			DriverID:     staged.DriverID,
 			Name:         staged.DriverName,
-			OwnerType:    domain.DriverOwnerUser,
+			OwnerType:    workflowcatalog.DriverOwnerUser,
 			Description:  "Native Flue driver registered from " + staged.SourceRef,
-			Status:       domain.DriverStatusDraft,
+			Status:       workflowcatalog.DriverStatusDraft,
 			TrustLevel:   trust,
 			Metadata: map[string]string{
 				"source_ref": staged.SourceRef, "runtime": driver.RuntimeFlueNode,
@@ -160,7 +162,7 @@ func registerFlueDriverForLegacyTest(
 			Runtime:          staged.Runtime,
 			Manifest:         cloneLegacyMap(staged.Bundle.Manifest),
 			BuildDiagnostics: staged.BuildDiagnostics,
-			ValidationStatus: domain.DriverVersionValidationPassed,
+			ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 			CreatedBy:        opts.CreatedBy,
 		})
 		if err != nil {
@@ -180,7 +182,7 @@ func registerFlueDriverForLegacyTest(
 		if !ok {
 			return nil, fmt.Errorf("legacy test catalog lacks typed Workflow Catalog lifecycle fixtures: %w", domain.ErrInvalid)
 		}
-		wasUntrusted := driver.DriverVersionEffectiveTrust(result.Driver, result.Version) == domain.DriverTrustUntrusted
+		wasUntrusted := driver.DriverVersionEffectiveTrust(result.Driver, result.Version) == workflowcatalog.DriverTrustUntrusted
 		if _, err = lifecycle.ApproveDriverVersionForTest(ctx, opts.WorkspaceKey, staged.DriverID, result.Version.VersionID); err != nil {
 			return nil, fmt.Errorf("approve driver version: %w", err)
 		}
@@ -199,7 +201,7 @@ func registerFlueDriverForLegacyTest(
 	return result, nil
 }
 
-func EnsureAndResolveDriver(ctx context.Context, catalog DriverCatalog, workspace, name string) (*domain.Driver, error) {
+func EnsureAndResolveDriver(ctx context.Context, catalog DriverCatalog, workspace, name string) (*workflowcatalog.Driver, error) {
 	if IsBuiltinWorkflow(name) {
 		if err := EnsureBuiltinWorkflow(ctx, catalog, workspace, name); err != nil {
 			return nil, err
@@ -208,7 +210,7 @@ func EnsureAndResolveDriver(ctx context.Context, catalog DriverCatalog, workspac
 	return ResolveDriver(ctx, catalog, workspace, name)
 }
 
-func ResolveDriver(ctx context.Context, catalog DriverCatalog, workspace, name string) (*domain.Driver, error) {
+func ResolveDriver(ctx context.Context, catalog DriverCatalog, workspace, name string) (*workflowcatalog.Driver, error) {
 	if strings.TrimSpace(name) == "" {
 		return nil, fmt.Errorf("workflow name is required: %w", domain.ErrInvalid)
 	}
@@ -293,7 +295,7 @@ func registerBuiltinWorkflow(
 		WorkspaceKey: workspace, Name: name, Entrypoint: spec.Entrypoint, Files: spec.Files,
 		Activate: true, SourceRef: "builtin://workflows/" + name + "/versions/" + digest,
 		SourceDigest: digest, CreatedBy: "system", WorkDir: builtinWorkflowWorkDir(),
-		DeriveRunners: true, Trust: domain.DriverTrustTrusted,
+		DeriveRunners: true, Trust: workflowcatalog.DriverTrustTrusted,
 	})
 	return err
 }
@@ -449,7 +451,7 @@ func registerPackagedBuiltinWorkflowFromFS(
 		SourceRef:    "builtin://workflows/" + name + "/versions/" + digest,
 		SourceDigest: digest, CreatedBy: "system", Activate: true,
 		RunnerSpecs: deriveWorkflowRunnerSpecs(spec.Entrypoint, spec.Files),
-		Trust:       domain.DriverTrustTrusted,
+		Trust:       workflowcatalog.DriverTrustTrusted,
 	})
 	return true, err
 }

@@ -38,7 +38,7 @@ const (
 )
 
 type Module struct {
-	store             store.Store
+	store             workflowProjectionStore
 	catalog           workflowcatalog.API
 	catalogRead       workflowCatalogDriverReader
 	authoring         workflowcatalog.VersionAuthoringAPI
@@ -49,12 +49,19 @@ type Module struct {
 	taskWorkflowRuns  readprojection.TaskWorkflowRunReader
 }
 
+type workflowProjectionStore interface {
+	DriverRuns() store.DriverRunStore
+	DriverSteps() store.DriverStepStore
+	TaskRuns() store.TaskRunStore
+	TriggerBindings() store.TriggerBindingStore
+}
+
 type workflowCatalogDriverReader interface {
 	GetDriver(context.Context, string, string) (*workflowcatalog.Driver, error)
 }
 
 type Config struct {
-	Store                    store.Store
+	Store                    workflowProjectionStore
 	Catalog                  workflowcatalog.API
 	Authoring                workflowcatalog.VersionAuthoringAPI
 	CatalogOperatorAuthority workflowcataloghttp.OperatorAuthorityResolver
@@ -76,7 +83,7 @@ func NewModule(input any) *Module {
 			execution:         value.Execution,
 			operatorAuthority: value.OperatorAuthority, taskWorkflowRuns: value.TaskWorkflowRuns,
 		}
-	case store.Store:
+	case workflowProjectionStore:
 		return &Module{store: value}
 	default:
 		return &Module{}
@@ -707,7 +714,7 @@ func (m *Module) createWorkflowRun(w http.ResponseWriter, r *http.Request) {
 	handler.WriteJSON(w, http.StatusAccepted, run)
 }
 
-func (m *Module) submitWorkflowRun(r *http.Request, workspace string, target *domain.Driver, payload json.RawMessage) (*domain.DriverRun, error) {
+func (m *Module) submitWorkflowRun(r *http.Request, workspace string, target *workflowcatalog.Driver, payload json.RawMessage) (*domain.DriverRun, error) {
 	if target == nil {
 		return nil, domain.ErrNotFound
 	}
@@ -762,7 +769,7 @@ func (m *Module) resolveWorkflowDriverID(ctx context.Context, ws, name string) (
 	return drv.DriverID, nil
 }
 
-func (m *Module) resolveWorkflowTarget(ctx context.Context, ws, name string) (*domain.Driver, error) {
+func (m *Module) resolveWorkflowTarget(ctx context.Context, ws, name string) (*workflowcatalog.Driver, error) {
 	if m.prepareTarget == nil {
 		return nil, workflowcatalog.ErrUnavailable
 	}

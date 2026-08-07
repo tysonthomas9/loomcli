@@ -6,17 +6,17 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 )
 
 func TestGitHubReviewAgentRegistersThroughTrustedBuiltinPath(t *testing.T) {
 	if _, ok := BuiltinWorkflow(BuiltinGitHubReviewAgentWorkflowName); !ok {
 		t.Fatal("EnsureBuiltinWorkflow would return ErrNotFound: github-review-agent not in the builtin registry")
 	}
-	if got := submissionTrust(domain.DriverTrustTrusted); got != domain.DriverTrustTrusted {
+	if got := submissionTrust(workflowcatalog.DriverTrustTrusted); got != workflowcatalog.DriverTrustTrusted {
 		t.Fatalf("submissionTrust(trusted) = %q, want trusted (builtin path)", got)
 	}
-	if got := submissionTrust(""); got != domain.DriverTrustUntrusted {
+	if got := submissionTrust(""); got != workflowcatalog.DriverTrustUntrusted {
 		t.Fatalf("submissionTrust(\"\") = %q, want untrusted (external submissions fail closed)", got)
 	}
 }

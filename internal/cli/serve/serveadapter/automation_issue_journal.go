@@ -3,7 +3,7 @@ package serveadapter
 import (
 	"github.com/tysonthomas9/loomcli/internal/app/systemeventing"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/serveadapter/automationjournal"
-	"github.com/tysonthomas9/loomcli/internal/trigger"
+	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 )
 
 func NewAutomationIssueJournalEmitter(

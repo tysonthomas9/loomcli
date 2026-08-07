@@ -15,6 +15,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver/eventpolicy"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
@@ -48,7 +50,7 @@ type RunOutcome struct {
 // Execution outcome reconciliation. It exposes no binding, delivery, or
 // generic store capability to the driver coordinator.
 type RunOutcomeJournal interface {
-	AppendTriggerEvent(context.Context, *domain.TriggerEvent) (*domain.TriggerEvent, error)
+	AppendTriggerEvent(context.Context, *automation.Event) (*automation.Event, error)
 }
 
 // RunOutcomeJournalEventID is the deterministic durable identity of
@@ -65,14 +67,14 @@ func runOutcomeJournalIdempotencyKey(workspace, sourceEventID string) string {
 	return "execution-await:" + hex.EncodeToString(sum[:])
 }
 
-func runOutcomeJournalEvent(outcome RunOutcome) *domain.TriggerEvent {
-	return &domain.TriggerEvent{
+func runOutcomeJournalEvent(outcome RunOutcome) *automation.Event {
+	return &automation.Event{
 		WorkspaceKey: outcome.WorkspaceKey,
 		EventID:      RunOutcomeJournalEventID(outcome.WorkspaceKey, outcome.EventID),
 		SourceKind:   eventpolicy.SourceKindExecution, SourceEventID: outcome.EventID,
 		EventType: outcome.EventType, SubjectRef: outcome.RunID, ActorRef: outcome.ActorRef,
 		EpicID:     outcome.EpicID,
-		Origin:     domain.TriggerEventOriginSystem,
+		Origin:     automation.EventOriginSystem,
 		OccurredAt: outcome.OccurredAt.UTC(), ReceivedAt: outcome.OccurredAt.UTC(),
 		IdempotencyKey:  runOutcomeJournalIdempotencyKey(outcome.WorkspaceKey, outcome.EventID),
 		SignatureStatus: "internal",

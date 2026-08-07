@@ -10,7 +10,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr/admissionstore"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
@@ -63,7 +62,7 @@ func prepareStoreBackedCloneWorkspaceAdmission(
 	record, err := process.prepareCreate(
 		ctx,
 		infrafleetdb.RepositoryAdmissionWorkspaceInput{
-			Key: key, Name: req.Name, State: string(domain.WorkspaceStateCreating),
+			Key: key, Name: req.Name, State: string(workspacemodule.StateCreating),
 			DefaultBranch: initialBranch,
 		},
 		wsPlan.path,

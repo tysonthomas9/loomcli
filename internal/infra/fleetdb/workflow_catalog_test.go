@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 )
 
 func TestWorkflowCatalogTransportUsesAtomicLifecycleRoutes(t *testing.T) {
@@ -44,8 +44,8 @@ func TestWorkflowCatalogTransportUsesAtomicLifecycleRoutes(t *testing.T) {
 					CommittedRevision: 8,
 					SemanticImpact:    "workflow_catalog.version_trust_changed.v1",
 					Replayed:          true,
-					Driver:            &domain.Driver{WorkspaceKey: "TEST", DriverID: "driver/one", Revision: 9},
-					Version:           &domain.DriverVersion{WorkspaceKey: "TEST", DriverID: "driver/one", VersionID: "version one"},
+					Driver:            &workflowcatalog.Driver{WorkspaceKey: "TEST", DriverID: "driver/one", Revision: 9},
+					Version:           &workflowcatalog.DriverVersion{WorkspaceKey: "TEST", DriverID: "driver/one", VersionID: "version one"},
 				})
 			}))
 			defer server.Close()
@@ -166,10 +166,10 @@ func TestWorkflowCatalogTransportUsesExactAtomicAuthoringRoutesAndDelegatedActor
 					t.Errorf("activate = %v, want %v", activate, test.activate)
 				}
 				_ = json.NewEncoder(w).Encode(WorkflowCatalogAuthorVersionResult{
-					Driver: &domain.Driver{
+					Driver: &workflowcatalog.Driver{
 						WorkspaceKey: baseInput.WorkspaceKey, DriverID: baseInput.DriverID, Revision: 8,
 					},
-					Version: &domain.DriverVersion{
+					Version: &workflowcatalog.DriverVersion{
 						WorkspaceKey: baseInput.WorkspaceKey, DriverID: baseInput.DriverID,
 						VersionID: baseInput.VersionID,
 					},

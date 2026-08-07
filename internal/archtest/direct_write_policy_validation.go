@@ -52,7 +52,12 @@ func (i DirectWriteInventory) validatePersistencePolicy() error {
 	if err != nil {
 		return err
 	}
-	if err := validatePersistenceReceiverSurfaces(i.ReceiverSurfaces, packagesByPath, methodSetsByName); err != nil {
+	if err := validatePersistenceReceiverSurfaces(
+		i.ReceiverSurfaces,
+		packagesByPath,
+		methodSetsByName,
+		i.CandidateReceiverSuffixes,
+	); err != nil {
 		return err
 	}
 	return validatePersistenceFunctionSurfaces(i.FunctionSurfaces, packagesByPath)
@@ -118,19 +123,24 @@ func validatePersistenceReceiverSurfaces(
 	surfaces []PersistenceReceiverSurface,
 	packagesByPath map[string]PersistencePackage,
 	methodSetsByName map[string]PersistenceMethodSet,
+	candidateReceiverSuffixes []string,
 ) error {
 	receivers := make([]string, 0, len(surfaces))
 	for _, surface := range surfaces {
-		pkg, ok := packagesByPath[surface.Package]
-		if !ok {
-			return fmt.Errorf("direct-write receiver %s uses undeclared persistence package %s", surface.Receiver, surface.Package)
-		}
 		methodSet, ok := methodSetsByName[surface.MethodSet]
 		if !ok {
 			return fmt.Errorf("direct-write receiver %s uses unknown method set %s", surface.Receiver, surface.MethodSet)
 		}
 		receiverPackage, receiverName, ok := splitReceiver(surface.Receiver)
-		if !ok || receiverPackage != surface.Package || !pkg.matchesReceiver(receiverName) {
+		if !ok || receiverPackage != surface.Package {
+			return fmt.Errorf("direct-write receiver surface %s does not match package %s receiver policy", surface.Receiver, surface.Package)
+		}
+		pkg, declaredPackage := packagesByPath[surface.Package]
+		matchesCandidate := strings.HasPrefix(surface.Package, modulePath+"/internal/") && slices.ContainsFunc(
+			candidateReceiverSuffixes,
+			func(suffix string) bool { return strings.HasSuffix(receiverName, suffix) },
+		)
+		if (!declaredPackage || !pkg.matchesReceiver(receiverName)) && !matchesCandidate {
 			return fmt.Errorf("direct-write receiver surface %s does not match package %s receiver policy", surface.Receiver, surface.Package)
 		}
 		if surface.CapabilityOwner == "" || surface.CapabilityOwner == "unassigned_legacy" {

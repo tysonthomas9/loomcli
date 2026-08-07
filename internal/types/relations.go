@@ -59,7 +59,7 @@ type IssueDetails struct {
 	Labels       []string                       `json:"labels"`
 	Dependencies []*IssueWithDependencyMetadata `json:"dependencies"`
 	Dependents   []*IssueWithDependencyMetadata `json:"dependents"`
-	Comments     []*Comment                     `json:"comments"`
+	Comments     []*workitems.Comment           `json:"comments"`
 	Parent       *string                        `json:"parent,omitempty"`
 }
 
@@ -205,30 +205,6 @@ type Label struct {
 	IssueID string `json:"issue_id"`
 	Label   string `json:"label"`
 }
-
-// Comment is a compatibility alias for the Work Items-owned comment model.
-// New capability callers import internal/modules/workitems directly.
-type Comment = workitems.Comment
-
-// Event and EventType are compatibility aliases for the Work Items-owned
-// audit projection and vocabulary.
-type Event = workitems.Event
-type EventType = workitems.EventType
-
-// Event type constants for audit trail
-const (
-	EventCreated           = workitems.EventCreated
-	EventUpdated           = workitems.EventUpdated
-	EventStatusChanged     = workitems.EventStatusChanged
-	EventCommented         = workitems.EventCommented
-	EventClosed            = workitems.EventClosed
-	EventReopened          = workitems.EventReopened
-	EventDependencyAdded   = workitems.EventDependencyAdded
-	EventDependencyRemoved = workitems.EventDependencyRemoved
-	EventLabelAdded        = workitems.EventLabelAdded
-	EventLabelRemoved      = workitems.EventLabelRemoved
-	EventCompacted         = workitems.EventCompacted
-)
 
 // BondRef tracks compound molecule lineage.
 // When protos or molecules are bonded together, BondRefs record

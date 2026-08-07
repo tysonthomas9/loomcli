@@ -14,12 +14,11 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/app/workfloweventing"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
+	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/trigger"
 )
 
 type driverEventAuthorityProviderFunc func(context.Context, workfloweventing.VerifiedRun) (authority.ExecutionAuthority, error)
@@ -92,7 +91,7 @@ func seedInternalBinding(t *testing.T, st store.Store, routeKey string) {
 		WorkspaceKey: "WS", BindingID: "b-" + routeKey, Name: "b-" + routeKey,
 		SourceKind: "internal", RouteKey: routeKey,
 		DriverID: "driver-1", DriverVersionID: "version-1", TargetEntrypoint: "run",
-		ConcurrencyPolicy: domain.TriggerBindingConcurrencyAllow, Enabled: true,
+		ConcurrencyPolicy: automation.ConcurrencyAllow, Enabled: true,
 	}); err != nil {
 		t.Fatalf("Create trigger binding: %v", err)
 	}
@@ -129,7 +128,7 @@ func TestDriverAPIEmitEventDispatchesLoopback(t *testing.T) {
 		t.Fatalf("deliveries = %v, want one leg", decoded["deliveries"])
 	}
 	leg, _ := deliveries[0].(map[string]any)
-	if leg["status"] != string(domain.TriggerDeliveryDispatched) || leg["driverRunId"] == "" {
+	if leg["status"] != string(automation.DeliveryDispatched) || leg["driverRunId"] == "" {
 		t.Fatalf("delivery leg = %v, want dispatched with run", leg)
 	}
 

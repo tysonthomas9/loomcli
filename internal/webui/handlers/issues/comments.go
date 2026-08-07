@@ -6,7 +6,6 @@ import (
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
-	"github.com/tysonthomas9/loomcli/internal/types"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
 
@@ -25,7 +24,7 @@ func HandleListWorkItemComments(api workitems.API) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		issueID := r.PathValue("id")
 		if issueID == "" {
-			handler.WriteJSON(w, http.StatusBadRequest, CommentListResponse{Success: false, Data: []*types.Comment{}, Error: "missing issue ID"})
+			handler.WriteJSON(w, http.StatusBadRequest, CommentListResponse{Success: false, Data: []*workitems.Comment{}, Error: "missing issue ID"})
 			return
 		}
 		if api == nil {
@@ -82,15 +81,15 @@ func (r CommentRequest) Content() string {
 
 // CommentResponse wraps the comment data for JSON response.
 type CommentResponse struct {
-	Success bool           `json:"success"`
-	Data    *types.Comment `json:"data,omitempty"`
-	Error   string         `json:"error,omitempty"`
+	Success bool               `json:"success"`
+	Data    *workitems.Comment `json:"data,omitempty"`
+	Error   string             `json:"error,omitempty"`
 }
 
 // CommentListResponse wraps the comment list data for JSON response.
 // Data is always a (possibly empty) slice so the FE sees a stable shape.
 type CommentListResponse struct {
-	Success bool             `json:"success"`
-	Data    []*types.Comment `json:"data"`
-	Error   string           `json:"error,omitempty"`
+	Success bool                 `json:"success"`
+	Data    []*workitems.Comment `json:"data"`
+	Error   string               `json:"error,omitempty"`
 }

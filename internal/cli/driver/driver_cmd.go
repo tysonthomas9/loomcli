@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
@@ -168,14 +170,14 @@ func runDriverRegister(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-func driverRegisterTrust() (domain.DriverTrustLevel, error) {
+func driverRegisterTrust() (workflowcatalog.DriverTrustLevel, error) {
 	if driverRegisterTrusted && driverRegisterUntrusted {
 		return "", fmt.Errorf("only one of --trusted or --untrusted may be set: %w", domain.ErrInvalid)
 	}
 	if driverRegisterTrusted {
-		return domain.DriverTrustTrusted, nil
+		return workflowcatalog.DriverTrustTrusted, nil
 	}
-	return domain.DriverTrustUntrusted, nil
+	return workflowcatalog.DriverTrustUntrusted, nil
 }
 
 func runDriverRun(cmd *cobra.Command, args []string) error {

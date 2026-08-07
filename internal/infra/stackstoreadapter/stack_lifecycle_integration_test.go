@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
+	stackstore "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore"
 	stackstoreadapter "github.com/tysonthomas9/loomcli/internal/infra/stackstoreadapter"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
-	"github.com/tysonthomas9/loomcli/internal/stackstore"
 )
 
 func TestStackLifecycleOwnsAppendAndTopologyReconciliation(t *testing.T) {

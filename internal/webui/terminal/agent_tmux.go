@@ -29,7 +29,7 @@ import (
 	"github.com/creack/pty"
 
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
-	"github.com/tysonthomas9/loomcli/internal/workspace"
+	"github.com/tysonthomas9/loomcli/internal/platform/workspaceid"
 )
 
 // ErrTmuxNotFound is returned by NewAgentTmuxManager when the tmux binary is
@@ -235,7 +235,7 @@ func (m *AgentTmuxManager) FindLatestAgentSession(wsID, agentName string) (strin
 	if err != nil {
 		return "", false, err
 	}
-	wsPrefix := workspace.ShortWorkspaceID(wsID)
+	wsPrefix := workspaceid.Short(wsID)
 	pattern := regexp.MustCompile(fmt.Sprintf(
 		`^loom-%s-[a-zA-Z0-9_-]+-%s-[0-9]+$`,
 		regexp.QuoteMeta(wsPrefix),
@@ -370,7 +370,7 @@ func (m *AgentTmuxManager) KillWorkspaceSessions(wsID string) error {
 	if wsID == "" {
 		return fmt.Errorf("wsID must not be empty")
 	}
-	wsPrefix := "loom-" + workspace.ShortWorkspaceID(wsID) + "-"
+	wsPrefix := "loom-" + workspaceid.Short(wsID) + "-"
 
 	sessions, err := m.listTmuxSessions()
 	if err != nil {

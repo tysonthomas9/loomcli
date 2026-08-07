@@ -27,10 +27,34 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
 )
 
-// Deps contains the capability ports and remaining compatibility dependencies
-// needed to assemble workspace-scoped agent and execution routes.
+// ProjectionStore contains the read models needed to assemble
+// workspace-scoped agent and execution routes.
+type ProjectionStore interface {
+	store.OrchestrationSessionStore
+	Workspaces() store.WorkspaceStore
+	Repos() store.RepoStore
+	Roles() store.RoleStore
+	AgentServices() store.AgentServiceStore
+	Awaits() store.AwaitStore
+	DriverRuns() store.DriverRunStore
+	DriverSteps() store.DriverStepStore
+	Drivers() store.DriverStore
+	DriverVersions() store.DriverVersionStore
+	Nodes() store.NodeStore
+	WorkerProfiles() store.WorkerProfileStore
+	TaskRuns() store.TaskRunStore
+	TaskRunEvents() store.TaskRunEventStore
+	Artifacts() store.ArtifactStore
+	TriggerBindings() store.TriggerBindingStore
+	TriggerEvents() store.TriggerEventStore
+	TriggerDeliveries() store.TriggerDeliveryStore
+	Connectors() store.ConnectorStore
+	ConnectorGrants() store.ConnectorGrantStore
+	ConnectorCalls() store.ConnectorAuditStore
+}
+
 type Deps struct {
-	Store                         store.Store
+	Store                         ProjectionStore
 	InteractiveAgentRuntime       agentcoord.InteractiveAgentRuntime
 	AgentSessionTranscripts       sessioncoord.AgentSessionTranscriptService
 	WorkItems                     workitems.API

@@ -18,16 +18,17 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver/eventpolicy"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-func activeDriverVersion(ctx context.Context, s store.Store, workspaceKey, driverID string) (*domain.Driver, *domain.DriverVersion, error) {
+func activeDriverVersion(ctx context.Context, s driverRunReadStore, workspaceKey, driverID string) (*workflowcatalog.Driver, *workflowcatalog.DriverVersion, error) {
 	driver, err := s.Drivers().Get(ctx, workspaceKey, driverID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("get driver: %w", err)
@@ -39,7 +40,7 @@ func activeDriverVersion(ctx context.Context, s store.Store, workspaceKey, drive
 	if err != nil {
 		return nil, nil, fmt.Errorf("get active driver version: %w", err)
 	}
-	if version.DriverID != driver.DriverID || version.ValidationStatus != domain.DriverVersionValidationPassed {
+	if version.DriverID != driver.DriverID || version.ValidationStatus != workflowcatalog.DriverVersionValidationPassed {
 		return nil, nil, fmt.Errorf("driver %q active version %q is not a passed version: %w", driver.DriverID, driver.ActiveVersionID, domain.ErrInvalid)
 	}
 	return driver, version, nil
@@ -344,7 +345,7 @@ type runFinishedPayload struct {
 // runtime uses the same coordinator for restart recovery.
 func emitRunFinishedEventWithExecution(
 	ctx context.Context,
-	s store.Store,
+	s driverRunReadStore,
 	publisher RunOutcomePublisher,
 	run *domain.DriverRun,
 	queue execution.DriverRunOutcomeAPI,
@@ -385,7 +386,7 @@ func emitRunFinishedEventWithExecution(
 // This stays in the already-baselined legacy Execution file while the Phase 4
 // extraction still supplies a composite Store; the new port definition itself
 // has no persistence dependency.
-func newRunOutcome(ctx context.Context, st store.Store, run *domain.DriverRun) RunOutcome {
+func newRunOutcome(ctx context.Context, st driverRunReadStore, run *domain.DriverRun) RunOutcome {
 	occurredAt := time.Now().UTC()
 	if run.FinishedAt != nil && !run.FinishedAt.IsZero() {
 		occurredAt = run.FinishedAt.UTC()
@@ -433,7 +434,7 @@ func marshalRunFinishedPayload(ctx context.Context, run *domain.DriverRun) json.
 // runFinishedParentEvent returns the durable admitting event when SourceRef
 // names one. Automation derives hop depth from that persisted parent. Free-
 // form source refs remain parentless system roots.
-func runFinishedParentEvent(ctx context.Context, s store.Store, run *domain.DriverRun) string {
+func runFinishedParentEvent(ctx context.Context, s driverRunReadStore, run *domain.DriverRun) string {
 	parentEventID := strings.TrimSpace(run.SourceRef)
 	if parentEventID == "" {
 		return ""

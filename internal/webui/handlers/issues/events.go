@@ -5,7 +5,6 @@ import (
 	"strconv"
 
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
-	"github.com/tysonthomas9/loomcli/internal/types"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
 
@@ -32,9 +31,9 @@ func HandleGetWorkItemEvents(api workitems.API) http.HandlerFunc {
 
 // EventListResponse wraps the event list data for JSON response.
 type EventListResponse struct {
-	Success bool           `json:"success"`
-	Data    []*types.Event `json:"data,omitempty"`
-	Error   string         `json:"error,omitempty"`
+	Success bool               `json:"success"`
+	Data    []*workitems.Event `json:"data,omitempty"`
+	Error   string             `json:"error,omitempty"`
 }
 
 // parseEventLimit parses and clamps the limit query parameter.

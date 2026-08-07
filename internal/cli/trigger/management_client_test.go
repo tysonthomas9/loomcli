@@ -13,6 +13,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -34,9 +36,9 @@ type triggerManagementFixture struct {
 	createConflict bool
 	createRequest  triggerBindingCreateRequest
 	patchRequest   triggerBindingPatchRequest
-	binding        *domain.TriggerBinding
-	event          *domain.TriggerEvent
-	delivery       *domain.TriggerDelivery
+	binding        *automation.Binding
+	event          *automation.Event
+	delivery       *automation.Delivery
 	run            *domain.DriverRun
 }
 
@@ -44,19 +46,19 @@ func setupTriggerManagementFixture(t *testing.T) *triggerManagementFixture {
 	t.Helper()
 	fixture := &triggerManagementFixture{
 		expectedBearer: "",
-		binding: &domain.TriggerBinding{
+		binding: &automation.Binding{
 			WorkspaceKey: triggerManagementTestWorkspace, BindingID: "binding-pr", Name: "PR",
 			SourceKind: "github", RouteKey: "github.pull_request.opened", DriverID: "reviewer",
-			DriverVersionID: "version-1", ConcurrencyPolicy: domain.TriggerBindingConcurrencyQueue,
+			DriverVersionID: "version-1", ConcurrencyPolicy: automation.ConcurrencyQueue,
 			RetryMaxAttempts: 7, RetryBackoffSeconds: 45, Enabled: true,
 		},
-		event: &domain.TriggerEvent{
+		event: &automation.Event{
 			WorkspaceKey: triggerManagementTestWorkspace, EventID: "event-1", SourceKind: "github",
 			EventType: "github.pull_request.opened", SubjectRef: "repo#1", SignatureStatus: "verified",
 		},
-		delivery: &domain.TriggerDelivery{
+		delivery: &automation.Delivery{
 			WorkspaceKey: triggerManagementTestWorkspace, DeliveryID: "delivery-1", TriggerEventID: "event-1",
-			TriggerBindingID: "binding-pr", Status: domain.TriggerDeliveryDispatched, DriverRunID: "run-1",
+			TriggerBindingID: "binding-pr", Status: automation.DeliveryDispatched, DriverRunID: "run-1",
 		},
 		run: &domain.DriverRun{
 			WorkspaceKey: triggerManagementTestWorkspace, RunID: "run-1", DriverID: "reviewer",
@@ -101,7 +103,7 @@ func (f *triggerManagementFixture) serveHTTP(w http.ResponseWriter, r *http.Requ
 
 	switch {
 	case r.Method == http.MethodGet && r.URL.Path == prefix+"/trigger-bindings":
-		writeTriggerManagementJSON(w, http.StatusOK, triggerBindingsAPIResponse{Bindings: []*domain.TriggerBinding{f.binding}})
+		writeTriggerManagementJSON(w, http.StatusOK, triggerBindingsAPIResponse{Bindings: []*automation.Binding{f.binding}})
 	case r.Method == http.MethodPost && r.URL.Path == prefix+"/trigger-bindings":
 		f.mu.Lock()
 		createConflict := f.createConflict
@@ -146,11 +148,11 @@ func (f *triggerManagementFixture) serveHTTP(w http.ResponseWriter, r *http.Requ
 	case r.Method == http.MethodPost && r.URL.Path == prefix+"/trigger-bindings/binding-pr/run":
 		writeTriggerManagementJSON(w, http.StatusAccepted, f.run)
 	case r.Method == http.MethodGet && r.URL.Path == prefix+"/trigger-events":
-		writeTriggerManagementJSON(w, http.StatusOK, triggerEventsAPIResponse{Events: []*domain.TriggerEvent{f.event}, Count: 1})
+		writeTriggerManagementJSON(w, http.StatusOK, triggerEventsAPIResponse{Events: []*automation.Event{f.event}, Count: 1})
 	case r.Method == http.MethodGet && r.URL.Path == prefix+"/trigger-events/event-1":
 		writeTriggerManagementJSON(w, http.StatusOK, f.event)
 	case r.Method == http.MethodGet && r.URL.Path == prefix+"/trigger-deliveries":
-		writeTriggerManagementJSON(w, http.StatusOK, triggerDeliveriesAPIResponse{Deliveries: []*domain.TriggerDelivery{f.delivery}, Count: 1})
+		writeTriggerManagementJSON(w, http.StatusOK, triggerDeliveriesAPIResponse{Deliveries: []*automation.Delivery{f.delivery}, Count: 1})
 	case r.Method == http.MethodGet && r.URL.Path == prefix+"/trigger-deliveries/delivery-1":
 		writeTriggerManagementJSON(w, http.StatusOK, f.delivery)
 	default:
@@ -264,15 +266,15 @@ func TestTriggerManagementClientUsesNoOpenCredentialAndPreservesAllRoutesAndFiel
 		DriverID: "reviewer", DriverVersionID: "version-1", BindingID: "binding-created", Name: "Created",
 		SourceKind: "github", RouteKey: "github.pull_request.opened", Secret: "secret", Enabled: &enabled,
 		EventTypePatterns: []string{"github.pull_request.*"}, SubjectKeyTemplate: "{{subject_ref}}",
-		ConcurrencyPolicy: domain.TriggerBindingConcurrencyQueue,
-		ActorFilter:       &domain.TriggerActorFilter{ExcludeActorKinds: []string{"workflow"}},
+		ConcurrencyPolicy: automation.ConcurrencyQueue,
+		ActorFilter:       &automation.ActorFilter{ExcludeActorKinds: []string{"workflow"}},
 		RetryMaxAttempts:  9, RetryBackoffSeconds: 60, Schedule: "@hourly", ScheduleTimezone: "UTC",
 	})
 	if err != nil || created.BindingID != "binding-created" {
 		t.Fatalf("createBinding = %+v err=%v", created, err)
 	}
 	patterns := []string{"github.{push,release}.*"}
-	policy := domain.TriggerBindingConcurrencyReplace
+	policy := automation.ConcurrencyReplace
 	retryMax, retryBackoff := 3, 90
 	subjectTemplate := "{{event_type}}/{{subject_ref}}"
 	if _, err := client.updateBinding(ctx, "binding-pr", triggerBindingPatchRequest{
@@ -304,7 +306,7 @@ func TestTriggerManagementClientUsesNoOpenCredentialAndPreservesAllRoutesAndFiel
 	}
 
 	createRequest, patchRequest := fixture.requestSnapshot()
-	if got := createRequest; got.SubjectKeyTemplate != "{{subject_ref}}" || got.ConcurrencyPolicy != domain.TriggerBindingConcurrencyQueue ||
+	if got := createRequest; got.SubjectKeyTemplate != "{{subject_ref}}" || got.ConcurrencyPolicy != automation.ConcurrencyQueue ||
 		got.ActorFilter == nil || got.RetryMaxAttempts != 9 || got.RetryBackoffSeconds != 60 || len(got.EventTypePatterns) != 1 {
 		t.Fatalf("create request dropped Router-v2 fields: %+v", got)
 	}
@@ -357,7 +359,7 @@ func TestTriggerManagementCommandJSONCompatibility(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runBindingsCreate: %v", err)
 	}
-	var created domain.TriggerBinding
+	var created automation.Binding
 	if err := json.Unmarshal([]byte(createdJSON), &created); err != nil || created.BindingID != "binding-created" {
 		t.Fatalf("create JSON = %q decoded=%+v err=%v", createdJSON, created, err)
 	}
@@ -372,7 +374,7 @@ func TestTriggerManagementCommandJSONCompatibility(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runBindingsUpdate: %v", err)
 	}
-	var updated domain.TriggerBinding
+	var updated automation.Binding
 	if err := json.Unmarshal([]byte(updatedJSON), &updated); err != nil || updated.BindingID != "binding-pr" {
 		t.Fatalf("update JSON = %q decoded=%+v err=%v", updatedJSON, updated, err)
 	}
@@ -382,7 +384,7 @@ func TestTriggerManagementCommandJSONCompatibility(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runBindingsList: %v", err)
 	}
-	var listed []*domain.TriggerBinding
+	var listed []*automation.Binding
 	if err := json.Unmarshal([]byte(listedJSON), &listed); err != nil || len(listed) != 1 || listed[0].BindingID != "binding-pr" {
 		t.Fatalf("list JSON = %q decoded=%+v err=%v", listedJSON, listed, err)
 	}
@@ -391,7 +393,7 @@ func TestTriggerManagementCommandJSONCompatibility(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runBindingsShow: %v", err)
 	}
-	var shown domain.TriggerBinding
+	var shown automation.Binding
 	if err := json.Unmarshal([]byte(shownJSON), &shown); err != nil || shown.BindingID != "binding-pr" {
 		t.Fatalf("show JSON = %q decoded=%+v err=%v", shownJSON, shown, err)
 	}
@@ -421,7 +423,7 @@ func TestTriggerManagementCommandJSONCompatibility(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runEventsList: %v", err)
 	}
-	var events []*domain.TriggerEvent
+	var events []*automation.Event
 	if err := json.Unmarshal([]byte(eventsJSON), &events); err != nil || len(events) != 1 || events[0].EventID != "event-1" {
 		t.Fatalf("events JSON = %q decoded=%+v err=%v", eventsJSON, events, err)
 	}
@@ -430,7 +432,7 @@ func TestTriggerManagementCommandJSONCompatibility(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runEventsShow: %v", err)
 	}
-	var event domain.TriggerEvent
+	var event automation.Event
 	if err := json.Unmarshal([]byte(eventJSON), &event); err != nil || event.EventID != "event-1" {
 		t.Fatalf("event JSON = %q decoded=%+v err=%v", eventJSON, event, err)
 	}
@@ -440,7 +442,7 @@ func TestTriggerManagementCommandJSONCompatibility(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runDeliveriesList: %v", err)
 	}
-	var deliveries []*domain.TriggerDelivery
+	var deliveries []*automation.Delivery
 	if err := json.Unmarshal([]byte(deliveriesJSON), &deliveries); err != nil || len(deliveries) != 1 || deliveries[0].DeliveryID != "delivery-1" {
 		t.Fatalf("deliveries JSON = %q decoded=%+v err=%v", deliveriesJSON, deliveries, err)
 	}
@@ -449,7 +451,7 @@ func TestTriggerManagementCommandJSONCompatibility(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runDeliveriesShow: %v", err)
 	}
-	var delivery domain.TriggerDelivery
+	var delivery automation.Delivery
 	if err := json.Unmarshal([]byte(deliveryJSON), &delivery); err != nil || delivery.DeliveryID != "delivery-1" {
 		t.Fatalf("delivery JSON = %q decoded=%+v err=%v", deliveryJSON, delivery, err)
 	}

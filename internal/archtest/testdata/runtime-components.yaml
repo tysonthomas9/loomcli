@@ -60,12 +60,12 @@ goroutine_launches:
   - {file: "internal/driver/stale_task_sweeper.go", function: "Executor.startHeartbeats", site: "go#2", callee: "heartbeatExecutorNode", disposition: component, component_ids: [executor-node-heartbeat]}
   - {file: "internal/driver/task_worker.go", function: "TaskWorker.startExecutionTaskRunHeartbeat", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [execution-task-run-heartbeat]}
   - {file: "internal/harness/fakeharness/mock/main.go", function: "installSignalCleanup", site: "go#1", callee: "<anonymous>", disposition: helper, reason: "explicitly test-only fake-harness signal helper included by the all-source scan"}
-  - {file: "internal/leadcontrol/codex_runtime.go", function: "RunCodexLeadRuntime", site: "go#1", callee: "discoverCodexLeadThread", disposition: component, component_ids: [codex-lead-thread-discovery]}
-  - {file: "internal/leadcontrol/codex_runtime.go", function: "RunCodexLeadRuntime", site: "go#2", callee: "drainLeadMessageQueue", disposition: component, component_ids: [lead-message-delivery-drain]}
-  - {file: "internal/leadcontrol/codex_runtime.go", function: "startCodexAppServer", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [codex-app-server-process-reaper]}
-  - {file: "internal/leadcontrol/harness_runtime.go", function: "RunHarnessLeadRuntime", site: "go#1", callee: "watchHarnessLeadRuntime", disposition: component, component_ids: [harness-lead-runtime-watch]}
-  - {file: "internal/leadcontrol/harness_runtime.go", function: "RunHarnessLeadRuntime", site: "go#2", callee: "drainLeadMessageQueue", disposition: component, component_ids: [lead-message-delivery-drain]}
-  - {file: "internal/leadcontrol/harness_runtime.go", function: "forwardHarnessStdin", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [harness-stdin-forwarder]}
+  - {file: "internal/infra/interactionlead/codex_runtime.go", function: "RunCodexLeadRuntime", site: "go#1", callee: "discoverCodexLeadThread", disposition: component, component_ids: [codex-lead-thread-discovery]}
+  - {file: "internal/infra/interactionlead/codex_runtime.go", function: "RunCodexLeadRuntime", site: "go#2", callee: "drainLeadMessageQueue", disposition: component, component_ids: [lead-message-delivery-drain]}
+  - {file: "internal/infra/interactionlead/codex_runtime.go", function: "startCodexAppServer", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [codex-app-server-process-reaper]}
+  - {file: "internal/infra/interactionlead/harness_runtime.go", function: "RunHarnessLeadRuntime", site: "go#1", callee: "watchHarnessLeadRuntime", disposition: component, component_ids: [harness-lead-runtime-watch]}
+  - {file: "internal/infra/interactionlead/harness_runtime.go", function: "RunHarnessLeadRuntime", site: "go#2", callee: "drainLeadMessageQueue", disposition: component, component_ids: [lead-message-delivery-drain]}
+  - {file: "internal/infra/interactionlead/harness_runtime.go", function: "forwardHarnessStdin", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [harness-stdin-forwarder]}
   - {file: "internal/platform/runtime/host.go", function: "Host.Start", site: "go#1", callee: "host.runComponent", disposition: component, component_ids: [execution-await-timeout-recovery, execution-driver-run, execution-task-run-convergence, execution-task-run-workers, serve-agent-provisioning-recovery, serve-agents-desired-state-reconciliation, serve-await-event-notifications, serve-driver-run-outcomes, serve-interaction-session-recovery, serve-trigger-cron-scheduler, serve-trigger-delivery-sweeper, workspace-repository-admission-lease-renewal, workspace-repository-admission-recovery]}
   - {file: "internal/webui/app/server.go", function: "Server.run", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [web-http-server]}
   - {file: "internal/webui/app/server_app.go", function: "NewServer", site: "go#1", callee: "app.hub.Run", disposition: component, component_ids: [realtime-hub-retry-drain]}
@@ -189,7 +189,7 @@ components:
 
   - id: codex-app-server-startup-wait
     kind: ticker
-    file: internal/leadcontrol/codex_runtime.go
+    file: internal/infra/interactionlead/codex_runtime.go
     function: waitForCodexAppServer
     site: "time.NewTicker#1"
     capability: interaction
@@ -202,7 +202,7 @@ components:
 
   - id: codex-lead-thread-discovery
     kind: component
-    file: internal/leadcontrol/codex_runtime.go
+    file: internal/infra/interactionlead/codex_runtime.go
     function: discoverCodexLeadThread
     site: component:bounded-thread-discovery
     capability: interaction
@@ -542,7 +542,7 @@ components:
 
   - id: lead-message-delivery-drain
     kind: ticker
-    file: internal/leadcontrol/delivery.go
+    file: internal/infra/interactionlead/delivery.go
     function: drainLeadMessageQueue
     site: "time.NewTicker#1"
     capability: interaction
@@ -555,7 +555,7 @@ components:
 
   - id: harness-lead-runtime-watch
     kind: ticker
-    file: internal/leadcontrol/harness_runtime.go
+    file: internal/infra/interactionlead/harness_runtime.go
     function: watchHarnessLeadRuntime
     site: "time.NewTicker#1"
     capability: interaction
@@ -869,7 +869,7 @@ components:
 
   - id: codex-app-server-process-reaper
     kind: component
-    file: internal/leadcontrol/codex_runtime.go
+    file: internal/infra/interactionlead/codex_runtime.go
     function: startCodexAppServer
     site: component:process-wait
     capability: interaction
@@ -1012,7 +1012,7 @@ components:
 
   - id: harness-stdin-forwarder
     kind: component
-    file: internal/leadcontrol/harness_runtime.go
+    file: internal/infra/interactionlead/harness_runtime.go
     function: forwardHarnessStdin
     site: component:stdin-forwarder
     capability: interaction

@@ -1,6 +1,9 @@
 package runtypes
 
-import "github.com/tysonthomas9/loomcli/internal/domain"
+import (
+	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+)
 
 // Package runtypes holds the driver's core execution-run contract (RunRequest /
 // RunResult). It lives in this neutral leaf package — imported by both the parent
@@ -10,7 +13,7 @@ import "github.com/tysonthomas9/loomcli/internal/domain"
 
 type RunRequest struct {
 	Run          *domain.DriverRun
-	Version      *domain.DriverVersion
+	Version      *workflowcatalog.DriverVersion
 	BundleRoot   string
 	WorkflowPath string
 	ServerPath   string
@@ -24,7 +27,7 @@ type RunRequest struct {
 	// TrustLevel is the run's driver trust level, loaded server-side by
 	// loadRunRequest (SB3 placement policy). Anything but trusted — including
 	// empty/unknown — refuses non-isolating launchers (sandbox_required).
-	TrustLevel domain.DriverTrustLevel
+	TrustLevel workflowcatalog.DriverTrustLevel
 }
 
 type RunResult struct {

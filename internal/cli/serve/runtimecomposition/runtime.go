@@ -6,14 +6,16 @@ import (
 	"strings"
 	"time"
 
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/metricscmd"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/serveadapter"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverexecutor "github.com/tysonthomas9/loomcli/internal/driver"
+	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/trigger"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
@@ -64,7 +66,7 @@ type TaskReadyBridgeCallbacks struct {
 type taskReadyRepositoryResolver func(context.Context, string, string, string) (bool, error)
 
 type taskReadyRepositoryLister interface {
-	List(context.Context, string) ([]*domain.Repo, error)
+	List(context.Context, string) ([]*workspacemodule.Repository, error)
 }
 
 func BuildTaskReadyBridgeCallbacks(repositories taskReadyRepositoryLister, issueBackendFn metricscmd.IssueBackendFn) TaskReadyBridgeCallbacks {
