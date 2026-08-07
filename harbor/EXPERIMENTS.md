@@ -511,90 +511,36 @@ only run 19's dedicated event-log seed task ever passed it. API 93/129
   harness gate or a frozen tool the QA invokes. Plus either a second
   coder or verified-priority correctives to fix the drain race.
 
-### B2h. quality-in-the-loop — maintainability as a measured outcome
-### (REVISED after codex vet — verdict was REVISE, not execute-with-fixes)
-Motivation: the benchmark scores behavior only. harbor/QUALITY.md (4 artifacts,
-5 instruments, 3 codex vets) showed process changes move code quality in ways
-the score cannot see — dual-QA scored identically to single-QA on the benchmark
-(0/5, ux 0.9375) yet differed 8x in smell density and carried a 7-module cycle
-over 25% of its modules. Today that is measured post hoc and no agent ever sees
-it. B2h makes maintainability first-class, comparable, and eventually in-loop.
+### MAINTAINABILITY AUDIT (2026-08-06/07) — full report: docs/maintainability-audit.md
+Four same-spec artifacts (baseline, runs 19/20/21) measured with a
+codex-vetted two-stage instrument set (panel + Sonar + coupling + Semgrep +
+sampled fault injection + the benchmark's own conformance suite as the
+independent black-box check). Headlines: (F1) on the like-for-like JS pair
+the ensemble beats the single session on EVERY quality instrument while also
+winning gates — 13× lower Semgrep density, acyclic 49-module graph, real
+tests (mutation 62%) vs none; (F2) test volume and independently-verified
+correctness are INVERTED across the set (zero-test baseline: API 109/129;
+most-tested run21: 93/129); (F4) the second QA agent bought no quality —
+cleaner shape but a 7-module import cycle, red own suite (3/74 failing),
+lowest mutation score; (F7) the benchmark is blind to all of it (identical
+scores, 8× smell-density gap). Instruments and every number were themselves
+codex-vetted; four real measurement bugs were caught and fixed before
+reporting (SQL-literals-as-comments HIGH, .mjs scope, JS mutation classifier,
+edit-while-running contamination). Scripts: scripts/maint-*.sh; data in the
+trials repo docs/.
 
-**L1 — SCORECARD. BUILT AND PROVEN (2026-08-07).** `score-trial.sh <job-dir>`
-attaches `scorecard.json` to a finished trial beside its `metrics.json`,
-stamped with the scorer commit. Proven end-to-end on loom-generic-tasks-dual-1
-(reproduces its published numbers); the 4-artifact reference set still runs
-unchanged. Four further hard-coded-reference bugs surfaced only by running it
-on a real trial: the display block's LANG/GATES lookup KeyError'd on any new
-id, coupling and semgrep asserted a literal `baseline` staging dir, and
-`${MAINT_JS_IDS:-...}` fell back on an intentionally EMPTY value (`:-` vs `-`),
-so a Python-primary artifact still tried to madge the JS references.
-Prior description: `maint-all.sh` scores any trial artifact
-(`id=path` via MAINT_ARTIFACTS — vet finding 1: the orchestrator exported this
-but the instruments ignored it and hard-coded the 4 references; fixed and
-regression-checked). Runs POST-VERIFIER off the archived /app snapshot, never
-inside the live trial path (vet 9), and archives the scorer commit hash beside
-scorecard.json so numbers stay attributable. Retroactive over every past arm.
-
-**L2 — OBSERVE. MODIFY before running.** Four binding changes from the vet:
-- *Offline is not solved, it is a build task* (vet 2, CRITICAL). The bundle ships
-  only loom/fleet-db/leadmsg and the payload only scripts/prompts/stub; the
-  instruments call `python3 -m lizard` and `npx --yes jscpd/madge`, and the
-  container has no egress but api.openai.com. Vendoring full python+node
-  dependency trees at bundle-build time, calling local binaries only, plus a
-  bootstrap preflight probe per tool, is a PREREQUISITE — not an assumption.
-  JS coupling is madge-backed, not pure python (vet 3); until a vendored JS
-  resolver is proven in-container, L2 makes no JS-cycle claims.
-- *Timing is unproven* (vet 4). The <15s/integration budget is asserted against
-  evidence of ~3 min panel + ~2 min coupling over four artifacts. Build a
-  separate `maint-fast-candidate` (one artifact, no semgrep/sonar/mutation, no
-  npx, unique temp dir) and MEASURE p95 <15s in the real container on a
-  ~50-module artifact before any paid arm.
-- *Expose breach EVIDENCE, never aggregates* (vet 7, the gaming problem).
-  Agents see only concrete, locatable facts: "new cycle path A -> B -> A",
-  "function X CCN 18 (was 9)", "duplicate block in files A and B". Aggregate
-  median SLOC, duplication %, comment density, test ratio, mutation score,
-  semgrep/KLOC, Sonar debt and process metrics stay HIDDEN as evaluation-only —
-  the moment an aggregate is a target it stops measuring what it measured.
-- *The comparison needs a control* (vet 8). Comparing one L2 arm against
-  B2f/B2g is confounded: those differ in prompt bytes and pass-message content,
-  and gate variance is already {3,0,0}. Add `quality_shadow` FIRST — compute and
-  log identical metrics with identical overhead but show the agents nothing —
-  then compare shadow vs visible, randomized. Historical arms are descriptive
-  baselines only.
-
-**L3 — GATE. DROPPED in its current form** (vet 5, 6). Absolute caps were
-overfit to n=1 observations, one threshold (max function CCN) was not even
-emitted until the vet forced it, and "no NEW circular dependency" is trivially
-satisfiable while the architecture degrades — an agent can hold cycle count
-constant while absorbing half the graph into one existing SCC. Any future gate
-must be REGRESSION-AWARE against the current /app (no increase in cyclic SCC
-size, % modules in cycles, cyclic edges, max fan-in/out, dynamic imports),
-language-aware, fail-closed on tool error, and revisited only after L2 shows a
-constructive response.
-
-**PREREQUISITE — the anti-gaming evaluator** (vet 10, its highest-value
-finding). Run the blinded LLM-judge rubric (designed, codex-vetted, still unrun)
-over the B2f/B2g artifacts BEFORE any automated metric is exposed to an agent.
-It is the only instrument that sees naming, abstraction quality and
-error-handling discipline, so it is the only way to detect metric-gaming once
-metrics become targets. Without it, L2 has no way to tell "improved" from
-"gamed".
-
-**PRE-REGISTERED RISK.** Refactoring competes with implementation in a fixed 4h
-budget and the score rewards only behavior, so quality work may LOWER the score.
-That is the hypothesis, not a reason to avoid it. Measure BOTH outcomes per
-mode; n>=2 per mode given documented gate variance.
-
-**SEQUENCING (revised).** (1) L1 now, retroactively. (2) Blinded judge over
-existing artifacts — establishes the hidden yardstick. (3) Vendoring + timing
-proof. (4) `quality_shadow` arm. (5) `observe` arm vs shadow. (6) Reconsider a
-regression-aware gate only if 5 shows agents respond constructively.
-
-**OBSERVABLES**: scorecard deltas vs the reference distribution; whether the
-lead acts on breach evidence (refactor tasks filed, files split, cycle removed);
-shadow-vs-visible difference in both quality and benchmark score; blinded-judge
-score movement (the gaming detector); time and spend attributable to quality work.
+### B2i. loom-generic-tasks-quality — quality-instrumented arm (PLANNED)
+Full plan: docs/quality-eval-plan.md. Stage A: per-trial quality scorecard
+(in-container fast panel + own-suite verdict at finalize → quality.json;
+host-side Sonar/Semgrep/mutation post-run). Stage B (the arm, base =
+verify_role=tasks per run 19): advisory QUALITY line per integration
+(complexity/dup/file-size/cycle deltas in the disposable worktree), one-line
+lead quality digest per pass (existing corrective machinery, no new agents —
+audit F4 argues against more verification minds), modest coder-template
+maintainability duty incl. test deadlines (F6), one seed-guidance sentence.
+Pre-registered targets: 0 cycles, median file ≤120, dup ≤1%, smells/KLOC ≤10,
+own suite GREEN, mutation ≥75%, with gates/ux non-regression as the actual
+experimental question. Ladder: stub → codex vet → one $200 run.
 
 ### B3. fractal-generic — infrastructure COMMITTED
 Mission mode `generic` (verbatim spec + finish sentence — the hardcoded
