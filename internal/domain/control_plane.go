@@ -66,13 +66,19 @@ type Node struct {
 }
 
 type NodePlacement struct {
-	SandboxID       string         `json:"sandbox_id,omitempty"`
-	Generation      int64          `json:"generation"`
-	ReservedVCPU    int            `json:"reserved_vcpu,omitempty"`
-	ReservedMemGiB  int            `json:"reserved_mem_gib,omitempty"`
-	State           PlacementState `json:"state"`
-	FirstAttachedAt *time.Time     `json:"first_attached_at,omitempty"`
-	SnapshotRef     string         `json:"snapshot_ref,omitempty"`
+	SandboxID              string         `json:"sandbox_id,omitempty"`
+	Generation             int64          `json:"generation"`
+	ReservedVCPU           int            `json:"reserved_vcpu,omitempty"`
+	ReservedMemGiB         int            `json:"reserved_mem_gib,omitempty"`
+	State                  PlacementState `json:"state"`
+	FirstAttachedAt        *time.Time     `json:"first_attached_at,omitempty"`
+	LeadProcessStartedAt   *time.Time     `json:"lead_process_started_at,omitempty"`
+	ProvisioningDeadlineAt *time.Time     `json:"provisioning_deadline_at,omitempty"`
+	SnapshotRef            string         `json:"snapshot_ref,omitempty"`
+	AbandonedSandboxIDs    []string       `json:"abandoned_sandbox_ids,omitempty"`
+	DeleteAttempts         int            `json:"delete_attempts,omitempty"`
+	LastDeleteError        string         `json:"last_delete_error,omitempty"`
+	NextDeleteAt           time.Time      `json:"next_delete_at,omitempty"`
 }
 
 func ResolveRuntimeProvider(agent *Agent, profile *DaemonProfile) RuntimeProvider {

@@ -64,15 +64,24 @@ func TestDaemonProfileWireRuntimeProviderRoundTrip(t *testing.T) {
 
 func TestNodeWirePlacementRoundTripAndOmit(t *testing.T) {
 	firstAttached := time.Date(2026, 8, 6, 13, 0, 0, 0, time.UTC)
+	leadStarted := time.Date(2026, 8, 6, 13, 1, 0, 0, time.UTC)
+	provisioningDeadline := time.Date(2026, 8, 6, 13, 5, 0, 0, time.UTC)
+	nextDelete := time.Date(2026, 8, 6, 13, 10, 0, 0, time.UTC)
 	withPlacement := nodeWire{
 		WorkspaceKey:    "WS",
 		NodeID:          "node-1",
 		RuntimeProvider: domain.RuntimeProviderDaytona,
 		Placement: &domain.NodePlacement{
-			Generation:      7,
-			State:           domain.PlacementStateProvisioning,
-			FirstAttachedAt: &firstAttached,
-			SnapshotRef:     "snapshot-1",
+			Generation:             7,
+			State:                  domain.PlacementStateProvisioning,
+			FirstAttachedAt:        &firstAttached,
+			LeadProcessStartedAt:   &leadStarted,
+			ProvisioningDeadlineAt: &provisioningDeadline,
+			SnapshotRef:            "snapshot-1",
+			AbandonedSandboxIDs:    []string{"abandoned-1"},
+			DeleteAttempts:         3,
+			LastDeleteError:        "still running",
+			NextDeleteAt:           nextDelete,
 		},
 	}
 	raw, err := json.Marshal(withPlacement)
@@ -92,6 +101,19 @@ func TestNodeWirePlacementRoundTripAndOmit(t *testing.T) {
 	}
 	if node.Placement.FirstAttachedAt == nil || !node.Placement.FirstAttachedAt.Equal(firstAttached) {
 		t.Fatalf("FirstAttachedAt = %v, want %v", node.Placement.FirstAttachedAt, firstAttached)
+	}
+	if node.Placement.LeadProcessStartedAt == nil || !node.Placement.LeadProcessStartedAt.Equal(leadStarted) {
+		t.Fatalf("LeadProcessStartedAt = %v, want %v", node.Placement.LeadProcessStartedAt, leadStarted)
+	}
+	if node.Placement.ProvisioningDeadlineAt == nil || !node.Placement.ProvisioningDeadlineAt.Equal(provisioningDeadline) {
+		t.Fatalf("ProvisioningDeadlineAt = %v, want %v", node.Placement.ProvisioningDeadlineAt, provisioningDeadline)
+	}
+	if !reflect.DeepEqual(node.Placement.AbandonedSandboxIDs, []string{"abandoned-1"}) {
+		t.Fatalf("AbandonedSandboxIDs = %v, want [abandoned-1]", node.Placement.AbandonedSandboxIDs)
+	}
+	if node.Placement.DeleteAttempts != 3 || node.Placement.LastDeleteError != "still running" || !node.Placement.NextDeleteAt.Equal(nextDelete) {
+		t.Fatalf("delete retry fields = %d/%q/%v, want 3/still running/%v",
+			node.Placement.DeleteAttempts, node.Placement.LastDeleteError, node.Placement.NextDeleteAt, nextDelete)
 	}
 
 	withoutPlacement := nodeWire{
@@ -121,19 +143,28 @@ func TestNodeWirePlacementRoundTripAndOmit(t *testing.T) {
 
 func TestNodeWirePreservesEveryDomainField(t *testing.T) {
 	firstAttached := time.Date(2026, 8, 6, 13, 0, 0, 0, time.UTC)
+	leadStarted := time.Date(2026, 8, 6, 13, 1, 0, 0, time.UTC)
+	provisioningDeadline := time.Date(2026, 8, 6, 13, 5, 0, 0, time.UTC)
+	nextDelete := time.Date(2026, 8, 6, 13, 10, 0, 0, time.UTC)
 	want := &domain.Node{
 		WorkspaceKey:    "WS",
 		NodeID:          "node-1",
 		OwnerActor:      "serve",
 		RuntimeProvider: domain.RuntimeProviderDaytona,
 		Placement: &domain.NodePlacement{
-			SandboxID:       "sandbox-1",
-			Generation:      7,
-			ReservedVCPU:    4,
-			ReservedMemGiB:  8,
-			State:           domain.PlacementStateActive,
-			FirstAttachedAt: &firstAttached,
-			SnapshotRef:     "snapshot-1",
+			SandboxID:              "sandbox-1",
+			Generation:             7,
+			ReservedVCPU:           4,
+			ReservedMemGiB:         8,
+			State:                  domain.PlacementStateActive,
+			FirstAttachedAt:        &firstAttached,
+			LeadProcessStartedAt:   &leadStarted,
+			ProvisioningDeadlineAt: &provisioningDeadline,
+			SnapshotRef:            "snapshot-1",
+			AbandonedSandboxIDs:    []string{"abandoned-1", "abandoned-2"},
+			DeleteAttempts:         4,
+			LastDeleteError:        "delete failed",
+			NextDeleteAt:           nextDelete,
 		},
 		Labels:        []string{"role:lead"},
 		Capabilities:  []string{"terminal"},

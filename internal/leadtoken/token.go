@@ -22,6 +22,9 @@ import (
 )
 
 const (
+	// CapLeadSession authorizes the sandboxed lead to call lead session APIs.
+	CapLeadSession = "lead:session"
+
 	// DefaultOccupantTokenTTL is the default lifetime for a lead occupant
 	// token. Tokens share driver.ResolveRunTokenSigningKey's signing key; an
 	// ephemeral per-process key means every occupant token dies with serve.

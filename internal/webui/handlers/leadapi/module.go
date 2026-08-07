@@ -29,7 +29,6 @@ import (
 
 const (
 	maxLeadOpBodyBytes       = 8 << 20
-	capLeadSession           = "lead:session"
 	occupantTokenRenewWindow = 30 * time.Minute
 )
 
@@ -58,7 +57,7 @@ func NewModule(cfg Config) *Module {
 		now:      func() time.Time { return time.Now().UTC() },
 	}
 	m.ops = map[string]leadOp{
-		"heartbeat": {handler: m.heartbeat, cap: capLeadSession},
+		"heartbeat": {handler: m.heartbeat, cap: leadtoken.CapLeadSession},
 	}
 	return m
 }

@@ -60,6 +60,7 @@ func TestNodePlacementCopyIndependence(t *testing.T) {
 	st := New()
 	ctx := t.Context()
 	attached := time.Date(2026, 8, 6, 12, 0, 0, 0, time.UTC)
+	nextDelete := time.Date(2026, 8, 6, 12, 5, 0, 0, time.UTC)
 
 	created, err := st.Nodes().Create(ctx, store.NodeCreate{
 		WorkspaceKey:    "WS",
@@ -73,6 +74,9 @@ func TestNodePlacementCopyIndependence(t *testing.T) {
 			State:           domain.PlacementStateActive,
 			FirstAttachedAt: &attached,
 			SnapshotRef:     "snapshot-1",
+			DeleteAttempts:  2,
+			LastDeleteError: "delete failed",
+			NextDeleteAt:    nextDelete,
 		},
 		TTL: time.Minute,
 	})
@@ -89,7 +93,11 @@ func TestNodePlacementCopyIndependence(t *testing.T) {
 	if got.Placement == nil {
 		t.Fatal("get placement = nil, want placement")
 	}
-	if got.Placement.SandboxID != "sandbox-1" || !got.Placement.FirstAttachedAt.Equal(attached) {
+	if got.Placement.SandboxID != "sandbox-1" ||
+		!got.Placement.FirstAttachedAt.Equal(attached) ||
+		got.Placement.DeleteAttempts != 2 ||
+		got.Placement.LastDeleteError != "delete failed" ||
+		!got.Placement.NextDeleteAt.Equal(nextDelete) {
 		t.Fatalf("stored placement mutated through create result: %+v", got.Placement)
 	}
 
@@ -103,24 +111,28 @@ func TestNodePlacementCopyIndependence(t *testing.T) {
 	}
 
 	replacement := &domain.NodePlacement{
-		SandboxID:  "sandbox-2",
-		Generation: 2,
-		State:      domain.PlacementStateProvisioning,
+		SandboxID:       "sandbox-2",
+		Generation:      2,
+		State:           domain.PlacementStateProvisioning,
+		DeleteAttempts:  3,
+		LastDeleteError: "retry later",
+		NextDeleteAt:    nextDelete.Add(time.Minute),
 	}
 	updated, err := st.Nodes().Update(ctx, "WS", "node-placed", store.NodeUpdate{Placement: &replacement})
 	if err != nil {
 		t.Fatalf("update placement: %v", err)
 	}
-	if updated.Placement == nil || updated.Placement.SandboxID != "sandbox-2" {
+	if updated.Placement == nil || updated.Placement.SandboxID != "sandbox-2" || updated.Placement.DeleteAttempts != 3 {
 		t.Fatalf("updated placement = %+v, want sandbox-2", updated.Placement)
 	}
 	replacement.SandboxID = "mutated-patch"
+	replacement.LastDeleteError = "mutated-error"
 
 	got, err = st.Nodes().Get(ctx, "WS", "node-placed")
 	if err != nil {
 		t.Fatalf("get after update: %v", err)
 	}
-	if got.Placement == nil || got.Placement.SandboxID != "sandbox-2" {
+	if got.Placement == nil || got.Placement.SandboxID != "sandbox-2" || got.Placement.LastDeleteError != "retry later" {
 		t.Fatalf("stored placement mutated through patch input: %+v", got.Placement)
 	}
 

@@ -270,6 +270,9 @@ func cloneNodePlacement(p *domain.NodePlacement) *domain.NodePlacement {
 	}
 	out := *p
 	out.FirstAttachedAt = clonePtr(p.FirstAttachedAt)
+	out.LeadProcessStartedAt = clonePtr(p.LeadProcessStartedAt)
+	out.ProvisioningDeadlineAt = clonePtr(p.ProvisioningDeadlineAt)
+	out.AbandonedSandboxIDs = append([]string(nil), p.AbandonedSandboxIDs...)
 	return &out
 }
 

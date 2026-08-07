@@ -124,7 +124,7 @@ func (h *testHarness) mintToken(t *testing.T, ttl time.Duration, mutate func(*le
 		WorkspaceKey: h.workspace,
 		PlacementID:  h.nodeID,
 		Generation:   h.generation,
-		Caps:         []string{capLeadSession},
+		Caps:         []string{leadtoken.CapLeadSession},
 	}
 	if mutate != nil {
 		mutate(&claims)
@@ -299,7 +299,7 @@ func wrongKeyToken(t *testing.T, h *testHarness) string {
 		WorkspaceKey: h.workspace,
 		PlacementID:  h.nodeID,
 		Generation:   h.generation,
-		Caps:         []string{capLeadSession},
+		Caps:         []string{leadtoken.CapLeadSession},
 	}
 	token, err := leadtoken.MintOccupantToken(claims, bytes.Repeat([]byte{0x44}, 32), time.Hour)
 	if err != nil {
@@ -315,7 +315,7 @@ func expiredToken(t *testing.T, h *testHarness) string {
 		WorkspaceKey: h.workspace,
 		PlacementID:  h.nodeID,
 		Generation:   h.generation,
-		Caps:         []string{capLeadSession},
+		Caps:         []string{leadtoken.CapLeadSession},
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   leadtoken.OccupantActor(h.nodeID),
 			IssuedAt:  jwt.NewNumericDate(now.Add(-2 * time.Hour)),
@@ -441,7 +441,7 @@ func TestLeadAPISessionLookupDoesNotTruncateBeforeActiveFilter(t *testing.T) {
 
 func TestLeadAPIHeartbeatRenewsNearExpiry(t *testing.T) {
 	h := newHarness(t, harnessOptions{createNode: true, createSession: true})
-	wantCaps := []string{capLeadSession, "lead:custom"}
+	wantCaps := []string{leadtoken.CapLeadSession, "lead:custom"}
 	token := h.mintToken(t, 29*time.Minute, func(c *leadtoken.OccupantClaims) {
 		c.Caps = append([]string(nil), wantCaps...)
 	})
