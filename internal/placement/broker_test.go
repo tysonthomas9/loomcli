@@ -131,8 +131,8 @@ func TestProvisionCreateLabelAndToken(t *testing.T) {
 	if claims.WorkspaceKey != "WS" || len(claims.Caps) == 0 {
 		t.Fatalf("claims workspace/caps = %q/%v, want WS and non-empty caps", claims.WorkspaceKey, claims.Caps)
 	}
-	if spec := provider.startProcessCall(t, 0); spec.SessionID != leadPTYSessionID {
-		t.Fatalf("lead PTY session id = %q, want %q", spec.SessionID, leadPTYSessionID)
+	if spec := provider.startProcessCall(t, 0); spec.SessionID != LeadPTYSessionID {
+		t.Fatalf("lead PTY session id = %q, want %q", spec.SessionID, LeadPTYSessionID)
 	}
 }
 
@@ -638,7 +638,7 @@ func TestStaleHeartbeatUsesPtyObservationBeforeRedrive(t *testing.T) {
 		},
 		State: ProviderSandboxRunning,
 	})
-	provider.addPtySession("sandbox-1", leadPTYSessionID)
+	provider.addPtySession("sandbox-1", LeadPTYSessionID)
 	broker := mustBrokerWithNow(t, st, provider, time.Now().UTC().Add(10*time.Minute))
 
 	result := mustProvision(t, ctx, broker, "nova", 2, 4)
@@ -747,7 +747,7 @@ func TestLeadProcessNilStartedAtUsesPtyObservationBeforeCreate(t *testing.T) {
 		},
 		State: ProviderSandboxRunning,
 	})
-	provider.addPtySession("sandbox-1", leadPTYSessionID)
+	provider.addPtySession("sandbox-1", LeadPTYSessionID)
 	broker := mustBroker(t, st, provider)
 
 	result := mustProvision(t, ctx, broker, "nova", 2, 4)
@@ -1615,7 +1615,7 @@ func (f *fakeProvider) CreatePty(_ context.Context, sandboxID string, spec Proce
 	}
 	sessionID := strings.TrimSpace(spec.SessionID)
 	if sessionID == "" {
-		sessionID = leadPTYSessionID
+		sessionID = LeadPTYSessionID
 	}
 	if _, ok := f.ptySessions[sandboxID][sessionID]; ok {
 		return ErrPtySessionAlreadyExists

@@ -19,8 +19,12 @@ const (
 	// deployment sharing a provider account.
 	EnvironmentLabelKey = "loom-env"
 
-	// leadPTYSessionID is the provider PTY session id used for every lead.
-	leadPTYSessionID = "lead"
+	// LeadPTYSessionID is the provider PTY session id used for every lead.
+	// Serve names every lead PTY by this convention and stores nothing, so
+	// the terminal layer must attach using the same id the broker created --
+	// two literals that silently drift would make every attach fail as
+	// "session not found".
+	LeadPTYSessionID = "lead"
 
 	// OccupantTokenEnv is the sandbox environment variable carrying the lead
 	// API occupant bearer token.

@@ -627,7 +627,7 @@ func (b *Broker) providerHasLeadPTY(ctx context.Context, sandboxID string) (bool
 		return false, err
 	}
 	for _, session := range sessions {
-		if strings.TrimSpace(session.SessionID) == leadPTYSessionID {
+		if strings.TrimSpace(session.SessionID) == LeadPTYSessionID {
 			return true, nil
 		}
 	}
@@ -1194,7 +1194,7 @@ func providerCreateRequest(req ProvisionRequest, nodeID, token, deploymentID str
 
 func processSpec(req ProvisionRequest, node *domain.Node, token string) ProcessSpec {
 	spec := req.Process
-	spec.SessionID = leadPTYSessionID
+	spec.SessionID = LeadPTYSessionID
 	spec.Command = append([]string(nil), spec.Command...)
 	if len(spec.Command) == 0 {
 		spec.Command = []string{"loom", "--workspace", req.WorkspaceKey, "lead"}

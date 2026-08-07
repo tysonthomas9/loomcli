@@ -3,6 +3,7 @@ package terminal
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"runtime"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+	sdktypes "github.com/daytonaio/daytona/libs/sdk-go/pkg/types"
 )
 
 type fakeUpstream struct {
@@ -60,6 +62,112 @@ func (u *fakeUpstream) snapshot() ([][]byte, []fakeResize) {
 	writes := append([][]byte(nil), u.writes...)
 	resizes := append([]fakeResize(nil), u.resizes...)
 	return writes, resizes
+}
+
+type fakeDaytonaPTYHandle struct {
+	data chan []byte
+
+	mu                sync.Mutex
+	dataChanCalls     int
+	writes            [][]byte
+	resizes           []fakeResize
+	disconnectCalls   int
+	killCalls         int
+	waitCalls         int
+	sendErr           error
+	resizeErr         error
+	disconnectErr     error
+	waitErr           error
+	connectionWaitHit chan struct{}
+}
+
+func newFakeDaytonaPTYHandle() *fakeDaytonaPTYHandle {
+	return &fakeDaytonaPTYHandle{data: make(chan []byte)}
+}
+
+func (h *fakeDaytonaPTYHandle) DataChan() <-chan []byte {
+	h.mu.Lock()
+	h.dataChanCalls++
+	h.mu.Unlock()
+	return h.data
+}
+
+func (h *fakeDaytonaPTYHandle) SendInput(p []byte) error {
+	if h.sendErr != nil {
+		return h.sendErr
+	}
+	cp := append([]byte(nil), p...)
+	h.mu.Lock()
+	h.writes = append(h.writes, cp)
+	h.mu.Unlock()
+	return nil
+}
+
+func (h *fakeDaytonaPTYHandle) Resize(_ context.Context, cols, rows int) (*sdktypes.PtySessionInfo, error) {
+	if h.resizeErr != nil {
+		return nil, h.resizeErr
+	}
+	h.mu.Lock()
+	h.resizes = append(h.resizes, fakeResize{cols: uint16(cols), rows: uint16(rows)})
+	h.mu.Unlock()
+	return &sdktypes.PtySessionInfo{ID: DefaultDaytonaLeadPTYSessionID, Cols: cols, Rows: rows}, nil
+}
+
+func (h *fakeDaytonaPTYHandle) Disconnect() error {
+	h.mu.Lock()
+	h.disconnectCalls++
+	h.mu.Unlock()
+	return h.disconnectErr
+}
+
+func (h *fakeDaytonaPTYHandle) WaitForConnection(context.Context) error {
+	h.mu.Lock()
+	h.waitCalls++
+	h.mu.Unlock()
+	if h.connectionWaitHit != nil {
+		close(h.connectionWaitHit)
+	}
+	return h.waitErr
+}
+
+func (h *fakeDaytonaPTYHandle) Kill(context.Context) error {
+	h.mu.Lock()
+	h.killCalls++
+	h.mu.Unlock()
+	return nil
+}
+
+func (h *fakeDaytonaPTYHandle) snapshot() (dataChanCalls int, writes [][]byte, resizes []fakeResize, disconnects, kills, waits int) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	writes = append([][]byte(nil), h.writes...)
+	resizes = append([]fakeResize(nil), h.resizes...)
+	return h.dataChanCalls, writes, resizes, h.disconnectCalls, h.killCalls, h.waitCalls
+}
+
+type fakeDaytonaPTYConnector struct {
+	sessions    []daytonaPTYSession
+	handle      *fakeDaytonaPTYHandle
+	listErr     error
+	connectErr  error
+	connectID   string
+	connectCall int
+}
+
+func (c *fakeDaytonaPTYConnector) ListPtySessions(context.Context) ([]daytonaPTYSession, error) {
+	if c.listErr != nil {
+		return nil, c.listErr
+	}
+	return append([]daytonaPTYSession(nil), c.sessions...), nil
+}
+
+func (c *fakeDaytonaPTYConnector) ConnectPty(_ context.Context, sessionID string) (daytonaPTYHandle, error) {
+	c.connectID = sessionID
+	c.connectCall++
+	if c.connectErr != nil {
+		return nil, c.connectErr
+	}
+	return c.handle, nil
 }
 
 func TestPtySessionPumpsUpstreamFanoutAndDelegatesInput(t *testing.T) {
@@ -319,6 +427,155 @@ func TestHostUpstreamOutputResizeAndClose(t *testing.T) {
 	}, 2*time.Second, "host upstream output channel to close")
 }
 
+func TestDaytonaPTYUpstreamConnectsExistingSessionOnly(t *testing.T) {
+	handle := newFakeDaytonaPTYHandle()
+	connector := &fakeDaytonaPTYConnector{
+		sessions: []daytonaPTYSession{{ID: "other"}, {ID: DefaultDaytonaLeadPTYSessionID}},
+		handle:   handle,
+	}
+
+	upstream, err := newDaytonaPTYUpstreamFromConnector(context.Background(), connector, "sandbox-1", DefaultDaytonaLeadPTYSessionID)
+	if err != nil {
+		t.Fatalf("newDaytonaPTYUpstreamFromConnector: %v", err)
+	}
+	t.Cleanup(func() { _ = upstream.Close() })
+	if connector.connectID != DefaultDaytonaLeadPTYSessionID || connector.connectCall != 1 {
+		t.Fatalf("connect pty id/calls = %q/%d, want %q/1", connector.connectID, connector.connectCall, DefaultDaytonaLeadPTYSessionID)
+	}
+	_, _, _, _, _, waits := handle.snapshot()
+	if waits != 1 {
+		t.Fatalf("WaitForConnection calls = %d, want 1", waits)
+	}
+}
+
+func TestDaytonaPTYUpstreamMissingSessionDoesNotConnect(t *testing.T) {
+	connector := &fakeDaytonaPTYConnector{
+		sessions: []daytonaPTYSession{{ID: "other"}},
+		handle:   newFakeDaytonaPTYHandle(),
+	}
+
+	_, err := newDaytonaPTYUpstreamFromConnector(context.Background(), connector, "sandbox-1", DefaultDaytonaLeadPTYSessionID)
+	if !errors.Is(err, ErrDaytonaPTYSessionNotFound) {
+		t.Fatalf("error = %v, want ErrDaytonaPTYSessionNotFound", err)
+	}
+	if connector.connectCall != 0 {
+		t.Fatalf("ConnectPty calls = %d, want 0 for absent session", connector.connectCall)
+	}
+}
+
+func TestDaytonaPTYUpstreamOutputStartsSingleReaderAndPreservesOrder(t *testing.T) {
+	handle := newFakeDaytonaPTYHandle()
+	upstream := newDaytonaPTYUpstream(handle)
+	out1 := upstream.Output()
+	out2 := upstream.Output()
+	if out1 != out2 {
+		t.Fatal("Output returned different channels across calls")
+	}
+	waitUntil(t, func() bool {
+		calls, _, _, _, _, _ := handle.snapshot()
+		return calls == 1
+	}, time.Second, "daytona DataChan to be consumed once")
+
+	chunks := [][]byte{[]byte("first"), []byte("second"), []byte("third")}
+	for _, chunk := range chunks {
+		select {
+		case handle.data <- chunk:
+		case <-time.After(time.Second):
+			t.Fatal("timeout sending daytona output")
+		}
+		if got := readOutputFrame(t, out1, time.Second); !bytes.Equal(got, chunk) {
+			t.Fatalf("output chunk = %q, want %q", got, chunk)
+		}
+	}
+	if err := upstream.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}
+
+func TestDaytonaPTYUpstreamWriteResizeAndCloseDisconnectOnly(t *testing.T) {
+	handle := newFakeDaytonaPTYHandle()
+	upstream := newDaytonaPTYUpstream(handle)
+
+	if n, err := upstream.Write([]byte("typed")); err != nil || n != len("typed") {
+		t.Fatalf("Write n=%d err=%v, want %d nil", n, err, len("typed"))
+	}
+	if err := upstream.Resize(context.Background(), 100, 40); err != nil {
+		t.Fatalf("Resize: %v", err)
+	}
+	if err := upstream.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if err := upstream.Close(); err != nil {
+		t.Fatalf("second Close: %v", err)
+	}
+
+	_, writes, resizes, disconnects, kills, _ := handle.snapshot()
+	if len(writes) != 1 || !bytes.Equal(writes[0], []byte("typed")) {
+		t.Fatalf("writes = %q, want typed", writes)
+	}
+	if len(resizes) != 1 || resizes[0] != (fakeResize{cols: 100, rows: 40}) {
+		t.Fatalf("resizes = %+v, want 100x40", resizes)
+	}
+	if disconnects != 1 {
+		t.Fatalf("Disconnect calls = %d, want 1", disconnects)
+	}
+	if kills != 0 {
+		t.Fatalf("Kill calls = %d, want 0; Close must not kill remote PTY", kills)
+	}
+}
+
+func TestDaytonaPTYUpstreamCloseReturnsFirstDisconnectError(t *testing.T) {
+	want := errors.New("disconnect failed")
+	handle := newFakeDaytonaPTYHandle()
+	handle.disconnectErr = want
+	upstream := newDaytonaPTYUpstream(handle)
+
+	if err := upstream.Close(); !errors.Is(err, want) {
+		t.Fatalf("Close error = %v, want %v", err, want)
+	}
+	if err := upstream.Close(); !errors.Is(err, want) {
+		t.Fatalf("second Close error = %v, want %v", err, want)
+	}
+	_, _, _, disconnects, _, _ := handle.snapshot()
+	if disconnects != 1 {
+		t.Fatalf("Disconnect calls = %d, want 1", disconnects)
+	}
+}
+
+func TestDaytonaPTYUpstreamCloseUnblocksReaderBlockedOnSend(t *testing.T) {
+	handle := newFakeDaytonaPTYHandle()
+	upstream := newDaytonaPTYUpstream(handle)
+	out := upstream.Output()
+
+	select {
+	case handle.data <- []byte("blocked frame"):
+	case <-time.After(time.Second):
+		t.Fatal("timeout sending daytona output")
+	}
+	waitUntil(t, daytonaPTYUpstreamReaderBlockedOnSend, time.Second, "daytona upstream reader blocked on output send")
+
+	closed := make(chan error, 1)
+	go func() {
+		closed <- upstream.Close()
+	}()
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for Close to unblock reader")
+	}
+	select {
+	case _, ok := <-out:
+		if ok {
+			t.Fatal("output channel still open after Close")
+		}
+	default:
+		t.Fatal("output channel not closed after Close")
+	}
+}
+
 func hostUpstreamReaderBlockedOnSend() bool {
 	buf := make([]byte, 1<<20)
 	n := runtime.Stack(buf, true)
@@ -326,6 +583,19 @@ func hostUpstreamReaderBlockedOnSend() bool {
 		header, _, _ := strings.Cut(stack, "\n")
 		if strings.Contains(header, "[select]") &&
 			strings.Contains(stack, "terminal.(*hostUpstream).readOutput") {
+			return true
+		}
+	}
+	return false
+}
+
+func daytonaPTYUpstreamReaderBlockedOnSend() bool {
+	buf := make([]byte, 1<<20)
+	n := runtime.Stack(buf, true)
+	for _, stack := range strings.Split(string(buf[:n]), "\n\n") {
+		header, _, _ := strings.Cut(stack, "\n")
+		if strings.Contains(header, "[select]") &&
+			strings.Contains(stack, "terminal.(*daytonaPTYUpstream).readOutput") {
 			return true
 		}
 	}
