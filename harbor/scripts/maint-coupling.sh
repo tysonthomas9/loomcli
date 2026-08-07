@@ -6,11 +6,11 @@
 # Within-language comparison ONLY — JS and Python module semantics differ.
 set -euo pipefail
 MX="${MX:-$HOME/.mx-stage}"
-[ -d "$MX/baseline" ] || { echo "FATAL: run maint-panel.sh first" >&2; exit 1; }
 if [ -n "${MAINT_ARTIFACTS:-}" ]; then IDS=""; for kv in $MAINT_ARTIFACTS; do IDS="$IDS ${kv%%=*}"; done; IDS="${IDS# }"; else IDS="baseline run19 run20 run21"; fi
+for _id in $IDS; do [ -d "$MX/$_id" ] || { echo "FATAL: run maint-panel.sh first (missing $MX/$_id)" >&2; exit 1; }; done
 
 # JS graphs from pinned madge (real parser + resolver)
-JS_IDS="${MAINT_JS_IDS:-baseline run19 run21}"
+JS_IDS="${MAINT_JS_IDS-baseline run19 run21}"
 for id in $JS_IDS; do
   npx --yes madge@8.0.0 --json --extensions js,mjs,cjs \
       --exclude '(^|/)(test|tests)/' "$MX/$id" > "$MX/madge-$id.json" 2>"$MX/madge-$id.err" \

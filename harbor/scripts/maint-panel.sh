@@ -252,9 +252,11 @@ for aid in ids:
     m[aid]['git'] = g.get(aid, {})
 json.dump(m, open(OUT,'w'), indent=1)
 
+# reference-set annotations only; any other artifact id renders '-' (the display
+# block must never KeyError on a new trial — codex B2h-vet finding 1 class)
 LANG = {'baseline':'JS','run19':'JS','run20':'PY','run21':'PY'}
 GATES = {'baseline':'2/5','run19':'3/5','run20':'0/5','run21':'0/5'}
-rows = [('metric', *ids), ('language', *[LANG[i] for i in ids]), ('gates', *[GATES[i] for i in ids])]
+rows = [('metric', *ids), ('language', *[LANG.get(i,'-') for i in ids]), ('gates', *[GATES.get(i,'-') for i in ids])]
 keys = ['prod_files','prod_sloc','files_per_kloc','file_sloc_median','file_sloc_p90','file_sloc_max',
         'functions','ccn_median','ccn_p90','ccn_gt10_pct','fn_nloc_p90','fn_nloc_gt60_pct',
         'dup_pct','comment_density_pct','test_files','test_sloc','test_to_prod_sloc']

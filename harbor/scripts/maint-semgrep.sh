@@ -5,7 +5,7 @@ set -euo pipefail
 MX="${MX:-$HOME/.mx-stage}"
 IMG=docker.io/semgrep/semgrep:1.171.0
 if [ -n "${MAINT_ARTIFACTS:-}" ]; then IDS=""; for kv in $MAINT_ARTIFACTS; do IDS="$IDS ${kv%%=*}"; done; IDS="${IDS# }"; else IDS="baseline run19 run20 run21"; fi
-[ -d "$MX/dupmirror-baseline" ] || { echo "FATAL: run maint-panel.sh first" >&2; exit 1; }
+for _id in $IDS; do [ -d "$MX/dupmirror-$_id" ] || { echo "FATAL: run maint-panel.sh first (missing dupmirror-$_id)" >&2; exit 1; }; done
 for id in $IDS; do
   echo "[semgrep] $id"
   podman run --rm -v "$MX/dupmirror-$id:/src:ro,z" "$IMG" \

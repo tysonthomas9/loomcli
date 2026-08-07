@@ -520,7 +520,16 @@ the score cannot see — dual-QA scored identically to single-QA on the benchmar
 over 25% of its modules. Today that is measured post hoc and no agent ever sees
 it. B2h makes maintainability first-class, comparable, and eventually in-loop.
 
-**L1 — SCORECARD. RUN (generalized).** `maint-all.sh` scores any trial artifact
+**L1 — SCORECARD. BUILT AND PROVEN (2026-08-07).** `score-trial.sh <job-dir>`
+attaches `scorecard.json` to a finished trial beside its `metrics.json`,
+stamped with the scorer commit. Proven end-to-end on loom-generic-tasks-dual-1
+(reproduces its published numbers); the 4-artifact reference set still runs
+unchanged. Four further hard-coded-reference bugs surfaced only by running it
+on a real trial: the display block's LANG/GATES lookup KeyError'd on any new
+id, coupling and semgrep asserted a literal `baseline` staging dir, and
+`${MAINT_JS_IDS:-...}` fell back on an intentionally EMPTY value (`:-` vs `-`),
+so a Python-primary artifact still tried to madge the JS references.
+Prior description: `maint-all.sh` scores any trial artifact
 (`id=path` via MAINT_ARTIFACTS — vet finding 1: the orchestrator exported this
 but the instruments ignored it and hard-coded the 4 references; fixed and
 regression-checked). Runs POST-VERIFIER off the archived /app snapshot, never
