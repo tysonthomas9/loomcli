@@ -336,6 +336,8 @@ func TestCreatePtyUsesLeadHookEnvAndIgnoresCommand(t *testing.T) {
 	}
 	assertRequestString(t, captured, "id", "lead")
 	assertRequestString(t, captured, "cwd", "/workspace")
+	assertRequestNumber(t, captured, "cols", 120)
+	assertRequestNumber(t, captured, "rows", 40)
 	env := captured["envs"].(map[string]any)
 	if env[leadBootEnv] != "1" {
 		t.Fatalf("%s = %v, want 1", leadBootEnv, env[leadBootEnv])

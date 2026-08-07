@@ -47,8 +47,8 @@ const (
 	defaultCreateAutoStop           = 15 * time.Minute
 	defaultVCPU                     = 1
 	defaultMemGiB                   = 2
-	defaultPtyCols                  = 80
-	defaultPtyRows                  = 24
+	defaultPtyCols                  = 120
+	defaultPtyRows                  = 40
 	leadBootEnv                     = "LOOM_LEAD_BOOT"
 	leadWorkdirEnv                  = "LOOM_LEAD_WORKDIR"
 	leadPromptFileEnv               = "LOOM_LEAD_PROMPT_FILE"
