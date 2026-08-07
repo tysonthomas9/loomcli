@@ -5,8 +5,12 @@ package placement
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/url"
+	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/leadtoken"
 )
 
@@ -51,6 +55,9 @@ type Provider interface {
 	Delete(context.Context, string) error
 	UpdateLastActivity(context.Context, string) error
 	SetAutostopInterval(context.Context, string, time.Duration) error
+	// PrepareLeadBoot materializes the lead's working state in the sandbox
+	// before the lead PTY is created: the repo checkout and role prompt file.
+	PrepareLeadBoot(ctx context.Context, sandboxID string, prep LeadBootPrep) error
 	// CreatePty creates the requested PTY session if absent. Providers should
 	// return ErrPtySessionAlreadyExists when the session already exists.
 	CreatePty(context.Context, string, ProcessSpec) error
@@ -78,6 +85,28 @@ type CreateRequest struct {
 // CreateResult returns the provider's sandbox identity.
 type CreateResult struct {
 	SandboxID string
+}
+
+// LeadBootPrep is the purpose-scoped pre-PTY materialization request for an
+// interactive lead placement.
+type LeadBootPrep struct {
+	Repo *RepoClone
+	// GitToken resolves the clone token at prep time. The token must never be
+	// stored on this struct or surfaced in logs/errors.
+	GitToken   func() (string, error)
+	PromptPath string
+	PromptText string
+	// Timeout bounds each prep exec command. Zero uses the provider default.
+	Timeout time.Duration
+}
+
+// RepoClone describes the one-shot checkout a provider should create before
+// the lead PTY starts.
+type RepoClone struct {
+	Name      string
+	RemoteURL string
+	Ref       string
+	Checkout  string
 }
 
 // ProcessSpec describes the PTY process the provider starts in a sandbox.
@@ -109,4 +138,49 @@ type ProviderSandbox struct {
 	ID     string
 	Labels map[string]string
 	State  ProviderSandboxState
+}
+
+// NormalizeRepoCloneRemote implements the fail-closed remote URL policy for
+// provisioned lead checkouts.
+func NormalizeRepoCloneRemote(raw string) (normalized string, host string, err error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", "", fmt.Errorf("repo clone remote URL required: %w", domain.ErrInvalid)
+	}
+	if rest, ok := strings.CutPrefix(raw, "git@github.com:"); ok {
+		rest = strings.TrimSuffix(rest, ".git")
+		if !validGitHubOwnerRepo(rest) {
+			return "", "", unsupportedRepoCloneRemoteError()
+		}
+		return "https://github.com/" + rest, "github.com", nil
+	}
+	parsed, parseErr := url.Parse(raw)
+	if parseErr != nil || parsed.Scheme != "https" || parsed.Host == "" {
+		return "", "", unsupportedRepoCloneRemoteError()
+	}
+	if parsed.User != nil || parsed.Port() != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", "", unsupportedRepoCloneRemoteError()
+	}
+	host = strings.ToLower(parsed.Hostname())
+	if host == "" {
+		return "", "", unsupportedRepoCloneRemoteError()
+	}
+	return raw, host, nil
+}
+
+func validGitHubOwnerRepo(rest string) bool {
+	parts := strings.Split(rest, "/")
+	if len(parts) != 2 {
+		return false
+	}
+	return strings.TrimSpace(parts[0]) != "" &&
+		strings.TrimSpace(parts[1]) != "" &&
+		!strings.ContainsAny(rest, " \t\r\n")
+}
+
+func unsupportedRepoCloneRemoteError() error {
+	return fmt.Errorf(
+		"unsupported repo clone remote URL: only https:// and git@github.com:owner/repo(.git) are supported: %w",
+		domain.ErrInvalid,
+	)
 }

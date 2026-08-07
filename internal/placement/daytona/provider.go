@@ -17,6 +17,7 @@ package daytona
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,12 +26,15 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
+	"regexp"
 	"strings"
 	"time"
 
 	apiclient "github.com/daytonaio/daytona/libs/api-client-go"
 	sdkerrors "github.com/daytonaio/daytona/libs/sdk-go/pkg/errors"
 
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/netbase"
 	"github.com/tysonthomas9/loomcli/internal/placement"
 )
@@ -40,24 +44,29 @@ const (
 	// sandbox or PTY environments.
 	APIKeyEnv = "DAYTONA_API_KEY" //nolint:gosec // env var name, not a credential
 
-	defaultAPIURL                   = "https://app.daytona.io/api"
-	DefaultSnapshotName             = "loom-lead-poc-v2"
-	DefaultSnapshotID               = "ae429d20-520a-401f-9a6d-b87b89d75939"
-	defaultHTTPTimeout              = 60 * time.Second
-	defaultCreateAutoStop           = 15 * time.Minute
-	defaultVCPU                     = 1
-	defaultMemGiB                   = 2
-	defaultPtyCols                  = 120
-	defaultPtyRows                  = 40
-	leadBootEnv                     = "LOOM_LEAD_BOOT"
-	leadWorkdirEnv                  = "LOOM_LEAD_WORKDIR"
-	leadPromptFileEnv               = "LOOM_LEAD_PROMPT_FILE"
-	daytonaOrganizationIDEnv        = "DAYTONA_ORGANIZATION_ID"
-	daytonaAPIURLEnv                = "DAYTONA_API_URL"
-	daytonaTargetEnv                = "DAYTONA_TARGET"
-	maxDomainAllowlistEntries       = 20
-	maxErrorBodyBytes         int64 = 1 << 20
-	maxInt32Value             int64 = 1<<31 - 1
+	defaultAPIURL                     = "https://app.daytona.io/api"
+	DefaultSnapshotName               = "loom-lead-poc-v2"
+	DefaultSnapshotID                 = "ae429d20-520a-401f-9a6d-b87b89d75939"
+	defaultHTTPTimeout                = 60 * time.Second
+	defaultLeadBootPrepTimeout        = 5 * time.Minute
+	defaultCreateAutoStop             = 15 * time.Minute
+	defaultVCPU                       = 1
+	defaultMemGiB                     = 2
+	defaultPtyCols                    = 120
+	defaultPtyRows                    = 40
+	leadBootEnv                       = "LOOM_LEAD_BOOT"
+	leadWorkdirEnv                    = "LOOM_LEAD_WORKDIR"
+	leadPromptFileEnv                 = "LOOM_LEAD_PROMPT_FILE"
+	daytonaOrganizationIDEnv          = "DAYTONA_ORGANIZATION_ID"
+	daytonaAPIURLEnv                  = "DAYTONA_API_URL"
+	daytonaTargetEnv                  = "DAYTONA_TARGET"
+	maxDomainAllowlistEntries         = 20
+	maxErrorBodyBytes           int64 = 1 << 20
+	maxInt32Value               int64 = 1<<31 - 1
+	maxPrepDiagnosticBytes            = 4096
+	leadCheckoutPresentMarker         = "git"
+	leadCheckoutAbsentMarker          = "absent"
+	leadCheckoutInvalidExitCode       = 42
 
 	// deleteConflictAttempts bounds retries of the transient
 	// "state change in progress" 409. Bounded rather than unbounded because a
@@ -65,6 +74,11 @@ const (
 	// later; blocking here would hold the per-agent lock instead.
 	deleteConflictAttempts = 4
 	deleteConflictBackoff  = 500 * time.Millisecond
+)
+
+var (
+	basicAuthHeaderRe = regexp.MustCompile(`AUTHORIZATION: basic [A-Za-z0-9+/=]+`)
+	xAccessTokenURLRe = regexp.MustCompile(`x-access-token:[^@\s]+@`)
 )
 
 // Config contains Daytona provider configuration.
@@ -96,6 +110,7 @@ type Config struct {
 type Provider struct {
 	apiClient                *apiclient.APIClient
 	httpClient               *http.Client
+	prepHTTPClient           *http.Client
 	apiKey                   string
 	organizationID           string
 	target                   string
@@ -153,6 +168,7 @@ func New(cfg Config) (*Provider, error) {
 	return &Provider{
 		apiClient:                apiclient.NewAPIClient(apiCfg),
 		httpClient:               httpClient,
+		prepHTTPClient:           prepHTTPClient(httpClient),
 		apiKey:                   apiKey,
 		organizationID:           firstNonEmpty(cfg.OrganizationID, os.Getenv(daytonaOrganizationIDEnv)),
 		target:                   firstNonEmpty(cfg.Target, os.Getenv(daytonaTargetEnv)),
@@ -162,6 +178,18 @@ func New(cfg Config) (*Provider, error) {
 		createAutoStopInterval:   autoStop,
 		createAutoDeleteInterval: cfg.CreateAutoDeleteInterval,
 	}, nil
+}
+
+// prepHTTPClient carries no client-level timeout: prep calls are bounded by
+// the caller's context deadline (the broker's prep budget), and a fixed client
+// timeout would silently cap any budget raised above it.
+func prepHTTPClient(base *http.Client) *http.Client {
+	if base == nil {
+		return &http.Client{Transport: netbase.Transport()}
+	}
+	prep := *base
+	prep.Timeout = 0
+	return &prep
 }
 
 // Create creates a Daytona sandbox from a snapshot. Labels, resource sizing,
@@ -342,6 +370,39 @@ func (p *Provider) SetAutostopInterval(ctx context.Context, sandboxID string, in
 	return nil
 }
 
+// PrepareLeadBoot prepares the checkout and prompt file before the lead PTY is
+// created. It intentionally exposes no generic exec or upload primitive.
+func (p *Provider) PrepareLeadBoot(ctx context.Context, sandboxID string, prep placement.LeadBootPrep) error {
+	timeout := prep.Timeout
+	if timeout <= 0 {
+		timeout = defaultLeadBootPrepTimeout
+	}
+	ctx, cancel := withTimeoutIfNone(ctx, timeout)
+	defer cancel()
+
+	if prep.Repo != nil {
+		if _, _, err := placement.NormalizeRepoCloneRemote(prep.Repo.RemoteURL); err != nil {
+			return err
+		}
+	}
+	sandbox, err := p.getSandbox(ctx, sandboxID)
+	if err != nil {
+		return err
+	}
+
+	if prep.Repo != nil {
+		if err := p.prepareLeadCheckout(ctx, sandbox, prep); err != nil {
+			return err
+		}
+	}
+	if prep.PromptText != "" {
+		if err := p.writeLeadPrompt(ctx, sandbox, prep.PromptPath, prep.PromptText); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // CreatePty creates the requested PTY session if absent. ProcessSpec.Command is
 // mapped to the snapshot hook's environment contract; Daytona has no PTY command
 // field and therefore cannot honor arbitrary commands literally.
@@ -413,6 +474,258 @@ func (p *Provider) KillPtySession(ctx context.Context, sandboxID string, session
 		return fmt.Errorf("daytona kill pty %q in sandbox %q: %w", sessionID, sandboxID, err)
 	}
 	return nil
+}
+
+func (p *Provider) prepareLeadCheckout(ctx context.Context, sandbox *apiclient.Sandbox, prep placement.LeadBootPrep) error {
+	repo := prep.Repo
+	checkout := strings.TrimSpace(repo.Checkout)
+	if checkout == "" || !strings.HasPrefix(checkout, "/") {
+		return fmt.Errorf("lead checkout path must be absolute: %w", domain.ErrInvalid)
+	}
+	remoteURL, host, err := placement.NormalizeRepoCloneRemote(repo.RemoteURL)
+	if err != nil {
+		return err
+	}
+
+	state, err := p.leadCheckoutState(ctx, sandbox, checkout)
+	if err != nil {
+		return err
+	}
+	if state == leadCheckoutPresentMarker {
+		return nil
+	}
+	token, encoded, err := resolveLeadGitToken(prep.GitToken)
+	if err != nil {
+		return err
+	}
+	// POC: a shallow single-branch clone is enough for lead boot. The lead
+	// holds no git credential (ticket 12), so it cannot deepen or fetch later;
+	// full clone is the post-POC upgrade and needs async exec. Do not use
+	// --filter=blob:none because lazy blob fetches would need mid-session auth.
+	cloneCmd := leadCloneCommand(remoteURL, host, strings.TrimSpace(repo.Ref), checkout, encoded)
+	if _, err := p.execLeadPrep(ctx, sandbox, cloneCmd, token, encoded); err != nil {
+		return err
+	}
+	return p.assertLeadRemoteURL(ctx, sandbox, checkout, remoteURL, token, encoded)
+}
+
+func (p *Provider) leadCheckoutState(ctx context.Context, sandbox *apiclient.Sandbox, checkout string) (string, error) {
+	// An existing but EMPTY directory counts as absent: git clone into an
+	// empty directory succeeds, and the revive path may find one left by an
+	// interrupted earlier prep.
+	quoted := shellQuote(checkout)
+	cmd := "if [ -e " + quoted + " ]; then " +
+		"if git -C " + quoted + " rev-parse --is-inside-work-tree >/dev/null 2>&1; then " +
+		"printf %s " + shellQuote(leadCheckoutPresentMarker) + "; " +
+		"elif [ -z \"$(ls -A " + quoted + " 2>/dev/null)\" ]; then " +
+		"printf %s " + shellQuote(leadCheckoutAbsentMarker) + "; " +
+		"else exit 42; fi; " +
+		"else printf %s " + shellQuote(leadCheckoutAbsentMarker) + "; fi"
+	result, err := p.execLeadPrep(ctx, sandbox, cmd)
+	if err != nil {
+		var execErr *leadPrepExecError
+		if errors.As(err, &execErr) && execErr.exitCode == leadCheckoutInvalidExitCode {
+			return "", fmt.Errorf("lead checkout path %q exists but is not a git work tree: %w", checkout, domain.ErrInvalid)
+		}
+		return "", err
+	}
+	state := strings.TrimSpace(result.outputText())
+	switch state {
+	case leadCheckoutPresentMarker, leadCheckoutAbsentMarker:
+		return state, nil
+	default:
+		return "", fmt.Errorf("lead checkout state probe returned %q: %w", state, domain.ErrInvalid)
+	}
+}
+
+func resolveLeadGitToken(callback func() (string, error)) (token string, encoded string, err error) {
+	if callback == nil {
+		return "", "", nil
+	}
+	token, err = callback()
+	if err != nil {
+		return "", "", fmt.Errorf("resolve git token for lead boot: credential callback failed")
+	}
+	if token == "" {
+		return "", "", nil
+	}
+	encoded = base64.StdEncoding.EncodeToString([]byte("x-access-token:" + token))
+	return token, encoded, nil
+}
+
+func leadCloneCommand(remoteURL, host, ref, checkout, encodedToken string) string {
+	parts := []string{"git"}
+	if encodedToken != "" {
+		key := "http.https://" + host + "/.extraheader=AUTHORIZATION: basic " + encodedToken
+		parts = append(parts, "-c", shellQuote(key))
+	}
+	parts = append(parts, "clone", "--depth", "1", "--single-branch")
+	if ref != "" {
+		parts = append(parts, "--branch", shellQuote(ref))
+	}
+	// The clone stages into a sibling .partial path and renames into place on
+	// success, so a clone killed mid-transfer (context budget, network drop)
+	// leaves NOTHING at the checkout path -- a partial directory there would
+	// wedge every future resume as "exists but is not a git work tree". The
+	// rm -rf targets only the staging path, never the checkout (which may
+	// hold the lead's work).
+	partial := checkout + ".partial"
+	parts = append(parts, shellQuote(remoteURL), shellQuote(partial))
+	return "rm -rf " + shellQuote(partial) +
+		" && " + strings.Join(parts, " ") +
+		" && mv " + shellQuote(partial) + " " + shellQuote(checkout)
+}
+
+func (p *Provider) assertLeadRemoteURL(
+	ctx context.Context,
+	sandbox *apiclient.Sandbox,
+	checkout string,
+	want string,
+	redactions ...string,
+) error {
+	cmd := "git -C " + shellQuote(checkout) + " config --get remote.origin.url"
+	result, err := p.execLeadPrep(ctx, sandbox, cmd, redactions...)
+	if err != nil {
+		return err
+	}
+	got := strings.TrimSpace(result.outputText())
+	if strings.Contains(got, "@") || strings.Contains(strings.ToLower(got), "x-access-token") {
+		return fmt.Errorf("lead clone persisted a credential-bearing remote URL")
+	}
+	if got != want {
+		return fmt.Errorf("lead clone remote URL = %q, want %q", got, want)
+	}
+	return nil
+}
+
+func (p *Provider) writeLeadPrompt(ctx context.Context, sandbox *apiclient.Sandbox, promptPath, promptText string) error {
+	promptPath = strings.TrimSpace(promptPath)
+	if promptPath == "" || !strings.HasPrefix(promptPath, "/") {
+		return fmt.Errorf("lead prompt path must be absolute when prompt text is provided: %w", domain.ErrInvalid)
+	}
+	encoded := base64.StdEncoding.EncodeToString([]byte(promptText))
+	// Write-then-rename: `>` truncates before base64 writes, and a lead booted
+	// by a previous Provision may be inside its one startup read of this file.
+	// mv within one filesystem is atomic, so a reader sees the old prompt or
+	// the new one, never a partial.
+	cmd := "mkdir -p " + shellQuote(path.Dir(promptPath)) +
+		" && printf %s " + shellQuote(encoded) + " | base64 -d > " + shellQuote(promptPath+".tmp") +
+		" && mv -f " + shellQuote(promptPath+".tmp") + " " + shellQuote(promptPath)
+	_, err := p.execLeadPrep(ctx, sandbox, cmd)
+	return err
+}
+
+func (p *Provider) execLeadPrep(
+	ctx context.Context,
+	sandbox *apiclient.Sandbox,
+	command string,
+	redactions ...string,
+) (toolboxExecuteResponse, error) {
+	var out toolboxExecuteResponse
+	req := toolboxExecuteRequest{
+		Command: command,
+		// The toolbox default is 10 seconds -- far too short for a clone --
+		// so the timeout is always sent explicitly, derived from the caller's
+		// context deadline (the broker's prep budget).
+		Timeout: leadPrepExecTimeoutSeconds(ctx),
+	}
+	err := p.doToolboxWithClient(ctx, p.prepClient(), sandbox, http.MethodPost, "/process/execute", req, &out)
+	if err != nil {
+		return out, classifyLeadPrepTransportError(err)
+	}
+	if out.ExitCode == nil {
+		return out, fmt.Errorf("daytona lead prep exec returned no exitCode")
+	}
+	if *out.ExitCode != 0 {
+		return out, &leadPrepExecError{
+			exitCode: *out.ExitCode,
+			message:  prepDiagnostic(out, command, redactions...),
+		}
+	}
+	return out, nil
+}
+
+// leadPrepExecTimeoutSeconds converts the context's remaining budget into the
+// toolbox exec timeout field, so the sandbox-side command never outlives the
+// caller. Floor of 1 second; the provider default when the context is
+// unbounded.
+func leadPrepExecTimeoutSeconds(ctx context.Context) int {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return int(defaultLeadBootPrepTimeout / time.Second)
+	}
+	remaining := int(time.Until(deadline) / time.Second)
+	if remaining < 1 {
+		return 1
+	}
+	return remaining
+}
+
+// classifyLeadPrepTransportError preserves error classification (the
+// not-found sentinel and the HTTP status) while discarding response bodies,
+// which can echo the credential-bearing exec command.
+func classifyLeadPrepTransportError(err error) error {
+	if isDaytonaNotFound(err) {
+		return fmt.Errorf("daytona lead prep exec: %w", placement.ErrSandboxNotFound)
+	}
+	if status, _, ok := daytonaStatusAndMessage(err); ok && status != 0 {
+		return fmt.Errorf("daytona lead prep exec request failed: http status %d", status)
+	}
+	return fmt.Errorf("daytona lead prep exec request failed")
+}
+
+type toolboxExecuteRequest struct {
+	Command string `json:"command"`
+	Timeout int    `json:"timeout"`
+}
+
+type toolboxExecuteResponse struct {
+	ExitCode *int   `json:"exitCode"`
+	Result   string `json:"result"`
+	Stdout   string `json:"stdout"`
+	Stderr   string `json:"stderr"`
+	Error    string `json:"error"`
+}
+
+func (r toolboxExecuteResponse) outputText() string {
+	for _, value := range []string{r.Result, r.Stdout} {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+type leadPrepExecError struct {
+	exitCode int
+	message  string
+}
+
+func (e *leadPrepExecError) Error() string {
+	if strings.TrimSpace(e.message) == "" {
+		return fmt.Sprintf("daytona lead prep exec exit code %d", e.exitCode)
+	}
+	return fmt.Sprintf("daytona lead prep exec exit code %d: %s", e.exitCode, e.message)
+}
+
+func prepDiagnostic(out toolboxExecuteResponse, command string, redactions ...string) string {
+	text := strings.Join([]string{out.Stderr, out.Error, out.Result, out.Stdout}, "\n")
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	text = strings.ReplaceAll(text, command, "[redacted command]")
+	for _, secret := range redactions {
+		if secret != "" {
+			text = strings.ReplaceAll(text, secret, "[redacted]")
+		}
+	}
+	text = basicAuthHeaderRe.ReplaceAllString(text, "AUTHORIZATION: basic [redacted]")
+	text = xAccessTokenURLRe.ReplaceAllString(text, "x-access-token:***@")
+	if len(text) > maxPrepDiagnosticBytes {
+		text = text[:maxPrepDiagnosticBytes] + "..."
+	}
+	return text
 }
 
 func (p *Provider) createPayload(req placement.CreateRequest) (*apiclient.CreateSandbox, error) {
@@ -510,31 +823,32 @@ func (p *Provider) waitForStarted(ctx context.Context, sandbox *apiclient.Sandbo
 }
 
 func (p *Provider) doToolbox(ctx context.Context, sandbox *apiclient.Sandbox, method, path string, in any, out any) error {
+	return p.doToolboxWithClient(ctx, p.httpClient, sandbox, method, path, in, out)
+}
+
+func (p *Provider) doToolboxWithClient(
+	ctx context.Context,
+	client *http.Client,
+	sandbox *apiclient.Sandbox,
+	method string,
+	path string,
+	in any,
+	out any,
+) error {
 	baseURL := strings.TrimRight(strings.TrimSpace(sandbox.GetToolboxProxyUrl()), "/")
 	sandboxID := strings.TrimSpace(sandbox.GetId())
 	if baseURL == "" || sandboxID == "" {
 		return fmt.Errorf("daytona sandbox %q has no toolbox proxy url", sandboxID)
 	}
-
-	var body io.Reader
-	if in != nil {
-		buf, err := json.Marshal(in)
-		if err != nil {
-			return fmt.Errorf("encode daytona toolbox request: %w", err)
-		}
-		body = bytes.NewReader(buf)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, baseURL+"/"+sandboxID+path, body)
+	req, err := p.newToolboxRequest(ctx, method, baseURL+"/"+sandboxID+path, in)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Authorization", "Bearer "+p.apiKey)
-	req.Header.Set("Accept", "application/json")
-	if in != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
 
-	resp, err := p.httpClient.Do(req)
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return sdkerrors.NewDaytonaError(err.Error(), 0, nil)
 	}
@@ -555,18 +869,53 @@ func (p *Provider) doToolbox(ctx context.Context, sandbox *apiclient.Sandbox, me
 	return nil
 }
 
+func (p *Provider) newToolboxRequest(ctx context.Context, method string, url string, in any) (*http.Request, error) {
+	var body io.Reader
+	if in != nil {
+		buf, err := json.Marshal(in)
+		if err != nil {
+			return nil, fmt.Errorf("encode daytona toolbox request: %w", err)
+		}
+		body = bytes.NewReader(buf)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, url, body)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	req.Header.Set("Accept", "application/json")
+	if in != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	return req, nil
+}
+
+func (p *Provider) prepClient() *http.Client {
+	if p.prepHTTPClient != nil {
+		return p.prepHTTPClient
+	}
+	return prepHTTPClient(p.httpClient)
+}
+
 func (p *Provider) authContext(ctx context.Context) context.Context {
 	return context.WithValue(ctx, apiclient.ContextAccessToken, p.apiKey)
 }
 
 func (p *Provider) withDefaultTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	return withTimeoutIfNone(ctx, p.callTimeout)
+}
+
+func withTimeoutIfNone(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if _, ok := ctx.Deadline(); ok {
 		return ctx, func() {}
 	}
-	return context.WithTimeout(ctx, p.callTimeout)
+	if timeout <= 0 {
+		timeout = defaultHTTPTimeout
+	}
+	return context.WithTimeout(ctx, timeout)
 }
 
 func (p *Provider) mapSandboxOperationError(operation, sandboxID string, err error) error {
@@ -831,6 +1180,10 @@ func normalizeAPIURL(raw string) (string, error) {
 		return "", fmt.Errorf("daytona API URL %q must include scheme and host", raw)
 	}
 	return strings.TrimRight(parsed.String(), "/"), nil
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
 
 func firstNonEmpty(values ...string) string {

@@ -136,6 +136,336 @@ func TestProvisionCreateLabelAndToken(t *testing.T) {
 	}
 }
 
+func TestProvisionPreparesLeadBootBeforeCreatePty(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	createRepo(t, st, "WS", "app", "https://github.com/acme/app", "main")
+	provider := &fakeProvider{}
+	broker := mustBroker(t, st, provider)
+
+	req := testProvisionRequest("nova", 2, 4)
+	req.NetworkDomainAllowlist = []string{"api.loom.invalid", "github.com"}
+	req.PromptText = "lead prompt"
+	result, err := broker.Provision(ctx, req)
+	if err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+
+	assertStringSlicesEqual(t, provider.eventsSnapshot(), []string{
+		"create:sandbox-1",
+		"prep:sandbox-1",
+		"startProcess:sandbox-1",
+	})
+	prep := provider.prepCall(t, 0)
+	if prep.Repo == nil || prep.Repo.Checkout != "/root/workspace/app" || prep.Repo.Ref != "main" {
+		t.Fatalf("prep repo = %#v, want app checkout on main", prep.Repo)
+	}
+	spec := provider.startProcessCall(t, 0)
+	if spec.WorkingDir != prep.Repo.Checkout {
+		t.Fatalf("WorkingDir = %q, want checkout %q", spec.WorkingDir, prep.Repo.Checkout)
+	}
+	if got := promptPathFromCommand(spec.Command); got != prep.PromptPath {
+		t.Fatalf("command prompt = %q, want prep prompt path %q", got, prep.PromptPath)
+	}
+	if !result.LeadStarted || result.LeadStartError != "" {
+		t.Fatalf("lead boot = started %v err %q, want success", result.LeadStarted, result.LeadStartError)
+	}
+}
+
+func TestProvisionPrepFailureCompensatesAndLeavesNoActivePlacement(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	createRepo(t, st, "WS", "app", "https://github.com/acme/app", "main")
+	provider := &fakeProvider{prepErr: errors.New("clone failed")}
+	broker := mustBroker(t, st, provider)
+
+	req := testProvisionRequest("nova", 2, 4)
+	req.NetworkDomainAllowlist = []string{"github.com"}
+	_, err := broker.Provision(ctx, req)
+	if err == nil || !strings.Contains(err.Error(), "clone failed") {
+		t.Fatalf("Provision = %v, want prep error", err)
+	}
+
+	node := onlyNode(t, st, "WS")
+	assertPlacement(t, node, domain.PlacementStateReleased, "sandbox-1")
+	assertStringSlicesEqual(t, node.Placement.AbandonedSandboxIDs, []string{"sandbox-1"})
+	assertStringSlicesEqual(t, provider.deleteCallsSnapshot(), []string{"sandbox-1"})
+	if got := provider.startProcessCallCount(); got != 0 {
+		t.Fatalf("CreatePty calls = %d, want none after prep failure", got)
+	}
+}
+
+// A prep-failure compensation whose delete the provider has not yet confirmed
+// must leave the placement `releasing` (re-driven by the next Provision), never
+// stamp `released` over a possibly-live sandbox. Regression: the first
+// implementation issued an unconfirmed delete and stamped released anyway.
+func TestProvisionPrepFailureUnconfirmedDeleteLeavesReleasing(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	createRepo(t, st, "WS", "app", "https://github.com/acme/app", "main")
+	provider := &fakeProvider{
+		prepErr:             errors.New("clone failed"),
+		deleteLeavesSandbox: true,
+	}
+	broker := mustBroker(t, st, provider)
+
+	req := testProvisionRequest("nova", 2, 4)
+	req.NetworkDomainAllowlist = []string{"github.com"}
+	_, err := broker.Provision(ctx, req)
+	if err == nil || !strings.Contains(err.Error(), "compensating release failed") {
+		t.Fatalf("Provision = %v, want compensating release failure", err)
+	}
+
+	node := onlyNode(t, st, "WS")
+	assertPlacement(t, node, domain.PlacementStateReleasing, "sandbox-1")
+	assertStringSlicesEqual(t, node.Placement.AbandonedSandboxIDs, []string{"sandbox-1"})
+}
+
+// Prep must run on the resume path too: a placement whose checkout or prompt
+// file is missing would otherwise boot a PTY that dies on the hook and wedge
+// permanently, since only the create path materialized them. Regression for
+// exactly that wedge.
+func TestProvisionResumeRunsPrepAgain(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	createRepo(t, st, "WS", "app", "https://github.com/acme/app", "main")
+	provider := &fakeProvider{}
+	broker := mustBroker(t, st, provider)
+
+	req := testProvisionRequest("nova", 2, 4)
+	req.NetworkDomainAllowlist = []string{"github.com"}
+	first, err := broker.Provision(ctx, req)
+	if err != nil {
+		t.Fatalf("first Provision: %v", err)
+	}
+	if got := provider.prepCallCount(); got != 1 {
+		t.Fatalf("prep calls after create = %d, want 1", got)
+	}
+
+	// Simulate the wedge scenario: the lead never started (e.g. its PTY died
+	// on a missing checkout). The resume path must re-run the idempotent prep
+	// before retrying the boot, or the retry dies identically forever.
+	node := getNode(t, st, "WS", first.Node.NodeID)
+	cleared := clonePlacement(node.Placement)
+	cleared.LeadProcessStartedAt = nil
+	clearedPtr := &cleared
+	if _, err := st.Nodes().Update(ctx, "WS", first.Node.NodeID, store.NodeUpdate{Placement: &clearedPtr}); err != nil {
+		t.Fatalf("clear lead process started: %v", err)
+	}
+
+	second, err := broker.Provision(ctx, req)
+	if err != nil {
+		t.Fatalf("second Provision: %v", err)
+	}
+	if second.Node.NodeID != first.Node.NodeID {
+		t.Fatalf("resume created a new placement %q, want %q", second.Node.NodeID, first.Node.NodeID)
+	}
+	if got := provider.prepCallCount(); got != 2 {
+		t.Fatalf("prep calls after resume = %d, want 2", got)
+	}
+	firstPrep := provider.prepCall(t, 0)
+	resumePrep := provider.prepCall(t, 1)
+	if firstPrep.Repo == nil || resumePrep.Repo == nil || resumePrep.Repo.Checkout != firstPrep.Repo.Checkout {
+		t.Fatalf("resume prep checkout = %+v, want same checkout as create prep %+v", resumePrep.Repo, firstPrep.Repo)
+	}
+}
+
+func TestProvisionZeroReposBootsWithoutCloneOrWorkingDir(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	provider := &fakeProvider{}
+	broker := mustBroker(t, st, provider)
+
+	result := mustProvision(t, ctx, broker, "nova", 2, 4)
+	if provider.prepCallCount() != 0 {
+		t.Fatalf("prep calls = %d, want none for repo-less prompt-less workspace", provider.prepCallCount())
+	}
+	spec := provider.startProcessCall(t, 0)
+	if spec.WorkingDir != "" {
+		t.Fatalf("WorkingDir = %q, want empty without repo", spec.WorkingDir)
+	}
+	if !result.LeadStarted {
+		t.Fatalf("LeadStarted = false, error %q", result.LeadStartError)
+	}
+}
+
+func TestProvisionRepoSelectionFailsClosed(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name     string
+		repoName string
+		wantRepo string
+		wantErr  error
+	}{
+		{name: "missing selector", wantErr: domain.ErrInvalid},
+		{name: "matching selector", repoName: "api", wantRepo: "api"},
+		{name: "nonmatching selector", repoName: "web", wantErr: domain.ErrNotFound},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := memstore.New()
+			createRepo(t, st, "WS", "api", "https://github.com/acme/api", "main")
+			createRepo(t, st, "WS", "cli", "https://github.com/acme/cli", "trunk")
+			provider := &fakeProvider{}
+			broker := mustBroker(t, st, provider)
+
+			req := testProvisionRequest("nova", 2, 4)
+			req.NetworkDomainAllowlist = []string{"github.com"}
+			req.RepoName = tc.repoName
+			_, err := broker.Provision(ctx, req)
+			if tc.wantErr != nil {
+				if !errors.Is(err, tc.wantErr) {
+					t.Fatalf("Provision = %v, want %v", err, tc.wantErr)
+				}
+				if got := provider.createCallCount(); got != 0 {
+					t.Fatalf("Create calls = %d, want fail before provider create", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Provision: %v", err)
+			}
+			prep := provider.prepCall(t, 0)
+			if prep.Repo == nil || prep.Repo.Name != tc.wantRepo {
+				t.Fatalf("prep repo = %#v, want %q", prep.Repo, tc.wantRepo)
+			}
+		})
+	}
+}
+
+func TestProvisionAllowlistRequiresCloneHostBeforeCreate(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	createRepo(t, st, "WS", "app", "https://github.com/acme/app", "main")
+	provider := &fakeProvider{}
+	broker := mustBroker(t, st, provider)
+
+	req := testProvisionRequest("nova", 2, 4)
+	req.NetworkDomainAllowlist = []string{"api.loom.invalid"}
+	_, err := broker.Provision(ctx, req)
+	if !errors.Is(err, domain.ErrInvalid) || !strings.Contains(err.Error(), "github.com") {
+		t.Fatalf("Provision = %v, want allowlist error mentioning github.com", err)
+	}
+	if got := provider.createCallCount(); got != 0 {
+		t.Fatalf("Create calls = %d, want fail before provider create", got)
+	}
+}
+
+func TestProvisionDeadPtyAfterCreateIsNotMarkedStarted(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	provider := &fakeProvider{dropPtyAfterCreate: true}
+	broker := mustBroker(t, st, provider)
+
+	result := mustProvision(t, ctx, broker, "nova", 2, 4)
+	if result.LeadStarted || !strings.Contains(result.LeadStartError, "exited immediately") {
+		t.Fatalf("lead boot = started %v err %q, want immediate-exit error", result.LeadStarted, result.LeadStartError)
+	}
+	if result.Node.Placement.LeadProcessStartedAt != nil {
+		t.Fatalf("LeadProcessStartedAt = %v, want nil", result.Node.Placement.LeadProcessStartedAt)
+	}
+}
+
+func TestProvisionPromptJoinUsesOnePath(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name    string
+		command []string
+		want    string
+	}{
+		{name: "default prompt path", want: defaultLeadPromptPath},
+		{name: "existing prompt arg", command: []string{"loom", "lead", "--prompt", "/tmp/custom.md"}, want: "/tmp/custom.md"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := memstore.New()
+			provider := &fakeProvider{}
+			broker := mustBroker(t, st, provider)
+
+			req := testProvisionRequest("nova", 2, 4)
+			req.PromptText = "role prompt"
+			req.Process.Command = tc.command
+			_, err := broker.Provision(ctx, req)
+			if err != nil {
+				t.Fatalf("Provision: %v", err)
+			}
+			prep := provider.prepCall(t, 0)
+			spec := provider.startProcessCall(t, 0)
+			if prep.PromptPath != tc.want {
+				t.Fatalf("prep prompt path = %q, want %q", prep.PromptPath, tc.want)
+			}
+			if got := promptPathFromCommand(spec.Command); got != tc.want {
+				t.Fatalf("command prompt = %q, want %q", got, tc.want)
+			}
+			if countPromptArgs(spec.Command) != 1 {
+				t.Fatalf("command = %v, want exactly one prompt arg", spec.Command)
+			}
+		})
+	}
+}
+
+func TestProvisionLeadEnvIncludesTermBackendAndRole(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name         string
+		reqBackend   string
+		reqRole      string
+		agentBackend string
+		agentRole    string
+		wantBackend  string
+		wantRole     string
+	}{
+		{
+			name:         "request wins",
+			reqBackend:   "codex",
+			reqRole:      "operator",
+			agentBackend: "claude",
+			agentRole:    "lead",
+			wantBackend:  "codex",
+			wantRole:     "operator",
+		},
+		{
+			name:         "agent row fallback",
+			agentBackend: "claude",
+			agentRole:    "lead",
+			wantBackend:  "claude",
+			wantRole:     "lead",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := memstore.New()
+			if _, err := st.Agents().Create(ctx, store.AgentCreate{
+				WorkspaceKey: "WS",
+				Name:         "nova",
+				RoleName:     tc.agentRole,
+				Backend:      tc.agentBackend,
+			}); err != nil {
+				t.Fatalf("create agent: %v", err)
+			}
+			provider := &fakeProvider{}
+			broker := mustBroker(t, st, provider)
+
+			req := testProvisionRequest("nova", 2, 4)
+			req.Backend = tc.reqBackend
+			req.AgentRole = tc.reqRole
+			if _, err := broker.Provision(ctx, req); err != nil {
+				t.Fatalf("Provision: %v", err)
+			}
+			createEnv := provider.createCall(t, 0).Env
+			ptyEnv := provider.startProcessCall(t, 0).Env
+			for _, env := range []map[string]string{createEnv, ptyEnv} {
+				if env["TERM"] != "xterm-256color" {
+					t.Fatalf("TERM = %q, want xterm-256color in %#v", env["TERM"], env)
+				}
+				if env["LOOM_BACKEND"] != tc.wantBackend {
+					t.Fatalf("LOOM_BACKEND = %q, want %q", env["LOOM_BACKEND"], tc.wantBackend)
+				}
+				if env["LOOM_AGENT_ROLE"] != tc.wantRole {
+					t.Fatalf("LOOM_AGENT_ROLE = %q, want %q", env["LOOM_AGENT_ROLE"], tc.wantRole)
+				}
+			}
+		})
+	}
+}
+
 func TestBrokerSettledDefaults(t *testing.T) {
 	broker := mustBroker(t, memstore.New(), &fakeProvider{})
 
@@ -150,6 +480,9 @@ func TestBrokerSettledDefaults(t *testing.T) {
 	}
 	if broker.parkingAutostopInterval != 2*time.Minute {
 		t.Fatalf("parking autostop interval = %v, want 2m", broker.parkingAutostopInterval)
+	}
+	if broker.leadBootPrepTimeout != 5*time.Minute {
+		t.Fatalf("lead boot prep timeout = %v, want 5m", broker.leadBootPrepTimeout)
 	}
 	if broker.deploymentID != testDeploymentID {
 		t.Fatalf("deployment id = %q, want %q", broker.deploymentID, testDeploymentID)
@@ -1406,6 +1739,18 @@ func createWorkspace(t *testing.T, st store.Store, key string) {
 	}
 }
 
+func createRepo(t *testing.T, st store.Store, workspace, name, remoteURL, defaultBranch string) {
+	t.Helper()
+	if _, err := st.Repos().Create(context.Background(), store.RepoCreate{
+		WorkspaceKey:  workspace,
+		Name:          name,
+		RemoteURL:     remoteURL,
+		DefaultBranch: defaultBranch,
+	}); err != nil {
+		t.Fatalf("create repo %s/%s: %v", workspace, name, err)
+	}
+}
+
 func createPlacementNode(t *testing.T, st store.Store, workspaceKey, nodeID, agentName string, placement domain.NodePlacement) *domain.Node {
 	t.Helper()
 	placementPtr := &placement
@@ -1475,6 +1820,8 @@ func (s failingUpdateNodeStore) Update(ctx context.Context, workspaceKey, nodeID
 type fakeProvider struct {
 	mu                     sync.Mutex
 	createCalls            []CreateRequest
+	prepCalls              []LeadBootPrep
+	prepSandboxIDs         []string
 	startProcessCalls      []ProcessSpec
 	startProcessSandboxIDs []string
 	deleteCalls            []string
@@ -1490,6 +1837,7 @@ type fakeProvider struct {
 	createErr              error
 	createCtxErr           error
 	deleteErr              error
+	prepErr                error
 	getErr                 error
 	listErr                error
 	listPtySessionsErr     error
@@ -1498,6 +1846,7 @@ type fakeProvider struct {
 	startProcessErrs       []error
 	createDelay            time.Duration
 	deleteLeavesSandbox    bool
+	dropPtyAfterCreate     bool
 	createHook             func(string)
 	deleteHook             func(string)
 }
@@ -1584,6 +1933,21 @@ func (f *fakeProvider) SetAutostopInterval(_ context.Context, sandboxID string, 
 	return nil
 }
 
+func (f *fakeProvider) PrepareLeadBoot(_ context.Context, sandboxID string, prep LeadBootPrep) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.prepSandboxIDs = append(f.prepSandboxIDs, sandboxID)
+	f.prepCalls = append(f.prepCalls, cloneLeadBootPrep(prep))
+	f.events = append(f.events, "prep:"+sandboxID)
+	if f.prepErr != nil {
+		return f.prepErr
+	}
+	if _, ok := f.sandboxes[sandboxID]; !ok {
+		return ErrSandboxNotFound
+	}
+	return nil
+}
+
 func (f *fakeProvider) CreatePty(_ context.Context, sandboxID string, spec ProcessSpec) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -1593,34 +1957,40 @@ func (f *fakeProvider) CreatePty(_ context.Context, sandboxID string, spec Proce
 	if len(f.startProcessErrs) > 0 {
 		err := f.startProcessErrs[0]
 		f.startProcessErrs = f.startProcessErrs[1:]
-		if errors.Is(err, ErrSandboxNotFound) {
-			delete(f.sandboxes, sandboxID)
-			delete(f.ptySessions, sandboxID)
+		if err != nil {
+			if errors.Is(err, ErrSandboxNotFound) {
+				delete(f.sandboxes, sandboxID)
+				delete(f.ptySessions, sandboxID)
+			}
+			if errors.Is(err, ErrPtySessionAlreadyExists) {
+				f.addPtySessionLocked(sandboxID, LeadPTYSessionID)
+			}
+			return err
 		}
-		return err
 	}
 	if f.startProcessErr != nil {
 		if errors.Is(f.startProcessErr, ErrSandboxNotFound) {
 			delete(f.sandboxes, sandboxID)
 			delete(f.ptySessions, sandboxID)
 		}
+		if errors.Is(f.startProcessErr, ErrPtySessionAlreadyExists) {
+			f.addPtySessionLocked(sandboxID, LeadPTYSessionID)
+		}
 		return f.startProcessErr
 	}
 	if _, ok := f.sandboxes[sandboxID]; !ok {
 		return ErrSandboxNotFound
 	}
-	f.ensurePtySessionsLocked()
-	if f.ptySessions[sandboxID] == nil {
-		f.ptySessions[sandboxID] = make(map[string]PtySession)
+	if f.dropPtyAfterCreate {
+		return nil
 	}
 	sessionID := strings.TrimSpace(spec.SessionID)
 	if sessionID == "" {
 		sessionID = LeadPTYSessionID
 	}
-	if _, ok := f.ptySessions[sandboxID][sessionID]; ok {
+	if f.addPtySessionLocked(sandboxID, sessionID) {
 		return ErrPtySessionAlreadyExists
 	}
-	f.ptySessions[sandboxID][sessionID] = PtySession{SessionID: sessionID}
 	return nil
 }
 
@@ -1689,11 +2059,19 @@ func (f *fakeProvider) addListOnlySandbox(sandbox ProviderSandbox) {
 func (f *fakeProvider) addPtySession(sandboxID, sessionID string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.addPtySessionLocked(sandboxID, sessionID)
+}
+
+func (f *fakeProvider) addPtySessionLocked(sandboxID, sessionID string) bool {
 	f.ensurePtySessionsLocked()
 	if f.ptySessions[sandboxID] == nil {
 		f.ptySessions[sandboxID] = make(map[string]PtySession)
 	}
+	if _, ok := f.ptySessions[sandboxID][sessionID]; ok {
+		return true
+	}
 	f.ptySessions[sandboxID][sessionID] = PtySession{SessionID: sessionID}
+	return false
 }
 
 func (f *fakeProvider) resetEvents() {
@@ -1706,6 +2084,12 @@ func (f *fakeProvider) createCallCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.createCalls)
+}
+
+func (f *fakeProvider) prepCallCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.prepCalls)
 }
 
 func (f *fakeProvider) deleteCallCount() int {
@@ -1764,6 +2148,16 @@ func (f *fakeProvider) startProcessCall(t *testing.T, idx int) ProcessSpec {
 	return cloneProcessSpec(f.startProcessCalls[idx])
 }
 
+func (f *fakeProvider) prepCall(t *testing.T, idx int) LeadBootPrep {
+	t.Helper()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.prepCalls) <= idx {
+		t.Fatalf("prep calls = %d, want index %d", len(f.prepCalls), idx)
+	}
+	return cloneLeadBootPrep(f.prepCalls[idx])
+}
+
 func (f *fakeProvider) deleteCallsSnapshot() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -1805,6 +2199,25 @@ func cloneProcessSpec(in ProcessSpec) ProcessSpec {
 	in.Command = append([]string(nil), in.Command...)
 	in.Env = copyMap(in.Env)
 	return in
+}
+
+func countPromptArgs(command []string) int {
+	count := 0
+	for _, arg := range command {
+		if strings.TrimSpace(arg) == "--prompt" || strings.HasPrefix(strings.TrimSpace(arg), "--prompt=") {
+			count++
+		}
+	}
+	return count
+}
+
+func cloneLeadBootPrep(in LeadBootPrep) LeadBootPrep {
+	out := in
+	if in.Repo != nil {
+		repo := *in.Repo
+		out.Repo = &repo
+	}
+	return out
 }
 
 func cloneProviderSandbox(in ProviderSandbox) ProviderSandbox {

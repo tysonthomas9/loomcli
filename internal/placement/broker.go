@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -27,6 +28,9 @@ const (
 	deleteConfirmBackoff             = 400 * time.Millisecond
 	defaultLeadHeartbeatStaleAfter   = 5 * time.Minute
 	defaultParkingAutostopInterval   = 2 * time.Minute
+	defaultLeadBootPrepTimeout       = 5 * time.Minute
+	defaultLeadPromptPath            = "/tmp/loom-lead-prompt.md"
+	leadCheckoutRoot                 = "/root/workspace"
 	deploymentIDEnv                  = "LOOM_DEPLOYMENT_ID"
 	unknownSandboxIDMarker           = "<unknown>"
 	detachedCreateTimeout            = 5 * time.Minute
@@ -45,6 +49,7 @@ type Config struct {
 	ProvisioningTimeout     time.Duration
 	LeadHeartbeatStaleAfter time.Duration
 	ParkingAutostopInterval time.Duration
+	LeadBootPrepTimeout     time.Duration
 	DeploymentID            string
 	// DeleteConfirmBackoff is the first delay in the poll that proves a
 	// delete completed; it doubles per attempt. Exposed so tests do not sleep
@@ -64,6 +69,7 @@ type Broker struct {
 	provisioningTimeout     time.Duration
 	leadHeartbeatStaleAfter time.Duration
 	parkingAutostopInterval time.Duration
+	leadBootPrepTimeout     time.Duration
 	deploymentID            string
 	deleteConfirmBackoff    time.Duration
 	now                     func() time.Time
@@ -93,6 +99,11 @@ type ProvisionRequest struct {
 	Resource               ResourceSize
 	NetworkDomainAllowlist []string
 	Process                ProcessSpec
+	RepoName               string
+	GitToken               func() (string, error)
+	PromptText             string
+	Backend                string
+	AgentRole              string
 }
 
 // ProvisionResult is returned by Provision for both created and existing rows.
@@ -133,6 +144,7 @@ func NewBroker(cfg Config) (*Broker, error) {
 	provisioningTimeout := orDefaultDuration(cfg.ProvisioningTimeout, defaultProvisioningTimeout)
 	staleAfter := orDefaultDuration(cfg.LeadHeartbeatStaleAfter, defaultLeadHeartbeatStaleAfter)
 	parkingAutostopInterval := orDefaultDuration(cfg.ParkingAutostopInterval, defaultParkingAutostopInterval)
+	leadBootPrepTimeout := orDefaultDuration(cfg.LeadBootPrepTimeout, defaultLeadBootPrepTimeout)
 	confirmBackoff := orDefaultDuration(cfg.DeleteConfirmBackoff, deleteConfirmBackoff)
 	deploymentID, err := resolveDeploymentID(cfg.DeploymentID)
 	if err != nil {
@@ -152,6 +164,7 @@ func NewBroker(cfg Config) (*Broker, error) {
 		provisioningTimeout:     provisioningTimeout,
 		leadHeartbeatStaleAfter: staleAfter,
 		parkingAutostopInterval: parkingAutostopInterval,
+		leadBootPrepTimeout:     leadBootPrepTimeout,
 		deploymentID:            deploymentID,
 		deleteConfirmBackoff:    confirmBackoff,
 		now:                     now,
@@ -243,11 +256,15 @@ func (b *Broker) Provision(ctx context.Context, req ProvisionRequest) (*Provisio
 		if err != nil {
 			return nil, err
 		}
+		bootPlan, err := b.resolveLeadBootPlan(ctx, req, true)
+		if err != nil {
+			return nil, err
+		}
 		node, err := b.admitProvisioningNode(ctx, req, predecessor)
 		if err != nil {
 			return nil, err
 		}
-		return b.createSandbox(ctx, req, node)
+		return b.createSandbox(ctx, req, node, bootPlan)
 	}
 }
 
@@ -313,7 +330,7 @@ func (b *Broker) existingProvisionResult(node *domain.Node, caps []string) (*Pro
 	return &ProvisionResult{Node: node, Token: token, Caps: outCaps, LeadStarted: leadProcessRecorded(node)}, nil
 }
 
-func (b *Broker) createSandbox(ctx context.Context, req ProvisionRequest, node *domain.Node) (*ProvisionResult, error) {
+func (b *Broker) createSandbox(ctx context.Context, req ProvisionRequest, node *domain.Node, bootPlan leadBootPlan) (*ProvisionResult, error) {
 	token, caps, err := b.mintToken(node, req.Caps)
 	if err != nil {
 		return nil, err
@@ -325,7 +342,7 @@ func (b *Broker) createSandbox(ctx context.Context, req ProvisionRequest, node *
 	// a reaper; this does not make an in-process crash atomic.
 	createCtx, cancel := detachedTimeout(ctx, detachedCreateTimeout)
 	defer cancel()
-	created, err := b.provider.Create(createCtx, providerCreateRequest(req, node.NodeID, token, b.deploymentID))
+	created, err := b.provider.Create(createCtx, providerCreateRequest(req, node.NodeID, token, b.deploymentID, bootPlan))
 	sandboxID := strings.TrimSpace(created.SandboxID)
 	if err != nil {
 		if sandboxID != "" {
@@ -346,9 +363,54 @@ func (b *Broker) createSandbox(ctx context.Context, req ProvisionRequest, node *
 		}
 		return nil, err
 	}
+	if bootPlan.needsPrep() {
+		prepCtx, prepCancel := detachedTimeout(ctx, b.effectiveLeadBootPrepTimeout())
+		prepErr := b.provider.PrepareLeadBoot(prepCtx, sandboxID, bootPlan.prep)
+		prepCancel()
+		if prepErr != nil {
+			if err := b.compensateLeadBootPrepFailure(createCtx, recorded, sandboxID, prepErr); err != nil {
+				return nil, err
+			}
+			return nil, prepErr
+		}
+	}
 	result := &ProvisionResult{Node: recorded, Token: token, Caps: caps, Created: true}
-	b.populateLeadBootResult(ctx, req, result, token)
+	b.populateLeadBootResult(ctx, req, result, token, bootPlan)
 	return result, nil
+}
+
+func (b *Broker) effectiveLeadBootPrepTimeout() time.Duration {
+	timeout := b.leadBootPrepTimeout
+	if timeout <= 0 {
+		timeout = defaultLeadBootPrepTimeout
+	}
+	if b.provisioningTimeout > 0 && b.provisioningTimeout < timeout {
+		return b.provisioningTimeout
+	}
+	return timeout
+}
+
+// compensateLeadBootPrepFailure unwinds a create whose prep failed by driving
+// the full release path: releasing-intent first, then a provider-confirmed
+// delete, and `released` only after confirmation. Delegating to releaseLocked
+// (the caller already holds the per-agent lock) rather than issuing a bare
+// delete keeps the broker's invariant that `released` is never stamped over an
+// unconfirmed delete; on confirmation failure the node stays `releasing`, which
+// Provision's own re-drive branch recovers on the next call.
+func (b *Broker) compensateLeadBootPrepFailure(ctx context.Context, node *domain.Node, sandboxID string, cause error) error {
+	if _, releaseErr := b.releaseLocked(ctx, node.WorkspaceKey, node.NodeID, ReleaseFence{
+		Generation: node.Placement.Generation,
+		SandboxID:  sandboxID,
+	}); releaseErr != nil {
+		return fmt.Errorf(
+			"prepare lead boot for placement %q in sandbox %q: %v; compensating release failed: %w",
+			node.NodeID,
+			sandboxID,
+			cause,
+			releaseErr,
+		)
+	}
+	return fmt.Errorf("prepare lead boot for placement %q in sandbox %q: %w", node.NodeID, sandboxID, cause)
 }
 
 func (b *Broker) preparePredecessorForSuccessor(existing *domain.Node) (*domain.Node, error) {
@@ -483,7 +545,34 @@ func (b *Broker) startOrReplaceRecordedSandbox(ctx context.Context, req Provisio
 	if !b.shouldProbeLeadProcess(node) {
 		return result, nil
 	}
-	outcome, err := b.tryStartLeadProcess(ctx, req, node, token)
+	bootPlan, err := b.resolveLeadBootPlan(ctx, req, false)
+	if err != nil {
+		b.recordLeadBootOutcome(ctx, result, leadBootOutcome{node: node}, err)
+		return result, nil
+	}
+	// Prep must run on this path too, or a resume whose checkout or prompt
+	// file is missing boots a PTY that dies on the hook's cd/--prompt and every
+	// retry repeats it identically -- a permanent wedge. The checkout probe is
+	// idempotent (present -> one exec, no clone), and failure is recorded
+	// rather than compensated: a revive must never delete a sandbox that may
+	// hold the lead's work. The extra probe execs on healthy resumes disappear
+	// once lead heartbeats land and shouldProbeLeadProcess stops firing.
+	if bootPlan.needsPrep() {
+		prepCtx, prepCancel := detachedTimeout(ctx, b.effectiveLeadBootPrepTimeout())
+		prepErr := b.provider.PrepareLeadBoot(prepCtx, sandboxID, bootPlan.prep)
+		prepCancel()
+		if errors.Is(prepErr, ErrSandboxNotFound) {
+			if lostErr := b.markLostAfterBootNotFound(ctx, node, sandboxID); lostErr != nil {
+				return nil, lostErr
+			}
+			return nil, fmt.Errorf("placement %q active sandbox %q is Get-confirmed absent and marked lost: %w", node.NodeID, sandboxID, domain.ErrConflict)
+		}
+		if prepErr != nil {
+			b.recordLeadBootOutcome(ctx, result, leadBootOutcome{node: node}, prepErr)
+			return result, nil
+		}
+	}
+	outcome, err := b.tryStartLeadProcess(ctx, req, node, token, bootPlan)
 	if errors.Is(err, ErrSandboxNotFound) {
 		if lostErr := b.markLostAfterBootNotFound(ctx, node, sandboxID); lostErr != nil {
 			return nil, lostErr
@@ -555,11 +644,11 @@ type leadBootOutcome struct {
 	errText string
 }
 
-func (b *Broker) populateLeadBootResult(ctx context.Context, req ProvisionRequest, result *ProvisionResult, token string) {
+func (b *Broker) populateLeadBootResult(ctx context.Context, req ProvisionRequest, result *ProvisionResult, token string, bootPlan leadBootPlan) {
 	if result == nil || result.Node == nil || result.Node.Placement == nil {
 		return
 	}
-	outcome, err := b.tryStartLeadProcess(ctx, req, result.Node, token)
+	outcome, err := b.tryStartLeadProcess(ctx, req, result.Node, token, bootPlan)
 	b.recordLeadBootOutcome(ctx, result, outcome, err)
 }
 
@@ -580,7 +669,7 @@ func (b *Broker) recordLeadBootOutcome(ctx context.Context, result *ProvisionRes
 	result.LeadStartError = outcome.errText
 }
 
-func (b *Broker) tryStartLeadProcess(ctx context.Context, req ProvisionRequest, node *domain.Node, token string) (leadBootOutcome, error) {
+func (b *Broker) tryStartLeadProcess(ctx context.Context, req ProvisionRequest, node *domain.Node, token string, bootPlan leadBootPlan) (leadBootOutcome, error) {
 	sandboxID := strings.TrimSpace(node.Placement.SandboxID)
 	if sandboxID == "" {
 		return leadBootOutcome{node: node}, fmt.Errorf("placement %q has no recorded sandbox id: %w", node.NodeID, domain.ErrInvalid)
@@ -601,8 +690,20 @@ func (b *Broker) tryStartLeadProcess(ctx context.Context, req ProvisionRequest, 
 	}
 	startCtx, cancel := detachedTimeout(ctx, detachedProviderOperationTimeout)
 	defer cancel()
-	if err := b.provider.CreatePty(startCtx, sandboxID, processSpec(req, node, token)); err != nil && !errors.Is(err, ErrPtySessionAlreadyExists) {
+	if err := b.provider.CreatePty(startCtx, sandboxID, processSpec(req, node, token, bootPlan)); err != nil && !errors.Is(err, ErrPtySessionAlreadyExists) {
 		return leadBootOutcome{node: node}, err
+	}
+	// Confirms the PTY was not already gone at first observation. This catches
+	// the fast failure class (hook cd failure, missing prompt file) but not a
+	// lead that dies seconds later; durable liveness is the heartbeat's job,
+	// not this probe's. A fixed delay would not close that gap either -- the
+	// slow failures (e.g. an in-sandbox store bootstrap) take seconds.
+	hasLead, err = b.providerHasLeadPTY(ctx, sandboxID)
+	if err != nil {
+		return leadBootOutcome{node: node}, err
+	}
+	if !hasLead {
+		return leadBootOutcome{node: node}, fmt.Errorf("lead PTY exited immediately after create")
 	}
 	started, err := b.markLeadProcessStarted(ctx, node, sandboxID)
 	if err != nil {
@@ -1158,9 +1259,13 @@ func normalizeProvisionRequest(req ProvisionRequest) ProvisionRequest {
 	req.WorkspaceKey = strings.TrimSpace(req.WorkspaceKey)
 	req.AgentName = strings.TrimSpace(req.AgentName)
 	req.SnapshotRef = strings.TrimSpace(req.SnapshotRef)
+	req.RepoName = strings.TrimSpace(req.RepoName)
+	req.Backend = strings.TrimSpace(req.Backend)
+	req.AgentRole = strings.TrimSpace(req.AgentRole)
 	req.Caps = normalizeCaps(req.Caps)
 	req.Labels = copyMap(req.Labels)
 	req.Env = copyMap(req.Env)
+	req.NetworkDomainAllowlist = append([]string(nil), req.NetworkDomainAllowlist...)
 	return req
 }
 
@@ -1174,13 +1279,161 @@ func validateProvisionRequest(req ProvisionRequest) error {
 	return nil
 }
 
-func providerCreateRequest(req ProvisionRequest, nodeID, token, deploymentID string) CreateRequest {
+type leadBootPlan struct {
+	prep      LeadBootPrep
+	checkout  string
+	backend   string
+	agentRole string
+}
+
+func (p leadBootPlan) needsPrep() bool {
+	return p.prep.Repo != nil || p.prep.PromptText != ""
+}
+
+func (b *Broker) resolveLeadBootPlan(ctx context.Context, req ProvisionRequest, logEmptyRepo bool) (leadBootPlan, error) {
+	backend, agentRole := b.resolveLeadEnvValues(ctx, req)
+	plan := leadBootPlan{
+		backend:   backend,
+		agentRole: agentRole,
+	}
+	plan.prep.Timeout = b.effectiveLeadBootPrepTimeout()
+	if req.PromptText != "" {
+		promptPath := promptPathFromCommand(effectiveLeadCommand(req))
+		if promptPath == "" {
+			promptPath = defaultLeadPromptPath
+		}
+		if !strings.HasPrefix(strings.TrimSpace(promptPath), "/") {
+			return leadBootPlan{}, fmt.Errorf("lead prompt path must be absolute: %w", domain.ErrInvalid)
+		}
+		plan.prep.PromptPath = promptPath
+		plan.prep.PromptText = req.PromptText
+	}
+
+	repo, err := b.resolveLeadRepo(ctx, req, logEmptyRepo)
+	if err != nil || repo == nil {
+		return plan, err
+	}
+	checkout, err := leadRepoCheckoutPath(repo.Name)
+	if err != nil {
+		return leadBootPlan{}, err
+	}
+	_, host, err := NormalizeRepoCloneRemote(repo.RemoteURL)
+	if err != nil {
+		return leadBootPlan{}, fmt.Errorf("resolve lead repo clone remote for %q: %w", repo.Name, err)
+	}
+	if err := enforceCloneHostAllowlist(req.NetworkDomainAllowlist, host); err != nil {
+		return leadBootPlan{}, err
+	}
+	plan.checkout = checkout
+	plan.prep.Repo = &RepoClone{
+		Name:      repo.Name,
+		RemoteURL: repo.RemoteURL,
+		Ref:       strings.TrimSpace(repo.DefaultBranch),
+		Checkout:  checkout,
+	}
+	plan.prep.GitToken = req.GitToken
+	return plan, nil
+}
+
+func (b *Broker) resolveLeadEnvValues(ctx context.Context, req ProvisionRequest) (backend string, agentRole string) {
+	backend = strings.TrimSpace(req.Backend)
+	agentRole = strings.TrimSpace(req.AgentRole)
+	if backend != "" && agentRole != "" {
+		return backend, agentRole
+	}
+	agent, err := b.store.Agents().Get(ctx, req.WorkspaceKey, req.AgentName)
+	if err != nil || agent == nil {
+		return backend, agentRole
+	}
+	if backend == "" {
+		backend = strings.TrimSpace(agent.Backend)
+	}
+	if agentRole == "" {
+		agentRole = strings.TrimSpace(agent.RoleName)
+	}
+	return backend, agentRole
+}
+
+func (b *Broker) resolveLeadRepo(ctx context.Context, req ProvisionRequest, logEmpty bool) (*domain.Repo, error) {
+	repos, err := b.store.Repos().List(ctx, req.WorkspaceKey)
+	if err != nil {
+		return nil, err
+	}
+	repos = nonNilRepos(repos)
+	switch len(repos) {
+	case 0:
+		if logEmpty {
+			slog.InfoContext(ctx, "lead placement has no repos; booting without checkout",
+				"workspace", req.WorkspaceKey,
+				"agent", req.AgentName)
+		}
+		return nil, nil
+	case 1:
+		return repos[0], nil
+	default:
+		return selectNamedLeadRepo(repos, req.RepoName)
+	}
+}
+
+func nonNilRepos(in []*domain.Repo) []*domain.Repo {
+	// Allocates rather than filtering in place: the input is the store's
+	// return value, and mutating its backing array would corrupt any store
+	// that hands out an internal slice.
+	out := make([]*domain.Repo, 0, len(in))
+	for _, repo := range in {
+		if repo != nil {
+			out = append(out, repo)
+		}
+	}
+	return out
+}
+
+func selectNamedLeadRepo(repos []*domain.Repo, name string) (*domain.Repo, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, fmt.Errorf("repo name required when workspace has %d repos: %w", len(repos), domain.ErrInvalid)
+	}
+	for _, repo := range repos {
+		if strings.TrimSpace(repo.Name) == name {
+			return repo, nil
+		}
+	}
+	return nil, fmt.Errorf("repo %q not found among %d workspace repos: %w", name, len(repos), domain.ErrNotFound)
+}
+
+func leadRepoCheckoutPath(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" || strings.HasPrefix(name, "/") {
+		return "", fmt.Errorf("repo name %q cannot form a lead checkout path: %w", name, domain.ErrInvalid)
+	}
+	for _, part := range strings.Split(name, "/") {
+		if part == "" || part == "." || part == ".." {
+			return "", fmt.Errorf("repo name %q cannot form a lead checkout path: %w", name, domain.ErrInvalid)
+		}
+	}
+	return path.Join(leadCheckoutRoot, name), nil
+}
+
+func enforceCloneHostAllowlist(allowlist []string, host string) error {
+	host = strings.ToLower(strings.TrimSpace(host))
+	if host == "" || len(allowlist) == 0 {
+		return nil
+	}
+	for _, entry := range allowlist {
+		if strings.EqualFold(strings.TrimSpace(entry), host) {
+			return nil
+		}
+	}
+	return fmt.Errorf("lead repo clone host %q is not in network domain allowlist: %w", host, domain.ErrInvalid)
+}
+
+func providerCreateRequest(req ProvisionRequest, nodeID, token, deploymentID string, bootPlan leadBootPlan) CreateRequest {
 	labels := copyMap(req.Labels)
 	labels[PlacementLabelKey] = nodeID
 	labels[EnvironmentLabelKey] = deploymentID
 	labels["loom-workspace"] = req.WorkspaceKey
 	labels["loom-agent"] = req.AgentName
-	env := leadEnv(req.Env, req.WorkspaceKey, req.AgentName, nodeID, token)
+	env := leadEnv(req.Env, req.WorkspaceKey, req.AgentName, nodeID, token, bootPlan)
 	return CreateRequest{
 		WorkspaceKey:           req.WorkspaceKey,
 		AgentName:              req.AgentName,
@@ -1192,24 +1445,59 @@ func providerCreateRequest(req ProvisionRequest, nodeID, token, deploymentID str
 	}
 }
 
-func processSpec(req ProvisionRequest, node *domain.Node, token string) ProcessSpec {
+func processSpec(req ProvisionRequest, node *domain.Node, token string, bootPlan leadBootPlan) ProcessSpec {
 	spec := req.Process
 	spec.SessionID = LeadPTYSessionID
-	spec.Command = append([]string(nil), spec.Command...)
-	if len(spec.Command) == 0 {
-		spec.Command = []string{"loom", "--workspace", req.WorkspaceKey, "lead"}
+	spec.Command = effectiveLeadCommand(req)
+	if bootPlan.prep.PromptPath != "" && !commandHasPrompt(spec.Command) {
+		spec.Command = append(spec.Command, "--prompt", bootPlan.prep.PromptPath)
 	}
-	spec.Env = leadEnv(spec.Env, req.WorkspaceKey, req.AgentName, node.NodeID, token)
+	if bootPlan.checkout != "" {
+		spec.WorkingDir = bootPlan.checkout
+	}
+	spec.Env = leadEnv(spec.Env, req.WorkspaceKey, req.AgentName, node.NodeID, token, bootPlan)
 	spec.TTY = true
 	return spec
 }
 
-func leadEnv(base map[string]string, workspace, agent, nodeID, token string) map[string]string {
+func effectiveLeadCommand(req ProvisionRequest) []string {
+	command := append([]string(nil), req.Process.Command...)
+	if len(command) == 0 {
+		return []string{"loom", "--workspace", req.WorkspaceKey, "lead"}
+	}
+	return command
+}
+
+func commandHasPrompt(command []string) bool {
+	return promptPathFromCommand(command) != ""
+}
+
+func promptPathFromCommand(command []string) string {
+	for i, arg := range command {
+		arg = strings.TrimSpace(arg)
+		if arg == "--prompt" && i+1 < len(command) {
+			return strings.TrimSpace(command[i+1])
+		}
+		if value, ok := strings.CutPrefix(arg, "--prompt="); ok {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func leadEnv(base map[string]string, workspace, agent, nodeID, token string, bootPlan leadBootPlan) map[string]string {
 	env := copyMap(base)
 	env["LOOM_WORKSPACE"] = workspace
 	env["LOOM_AGENT_NAME"] = agent
 	env["LOOM_LEAD_PLACEMENT_ID"] = nodeID
 	env[OccupantTokenEnv] = token
+	env["TERM"] = "xterm-256color"
+	if bootPlan.backend != "" {
+		env["LOOM_BACKEND"] = bootPlan.backend
+	}
+	if bootPlan.agentRole != "" {
+		env["LOOM_AGENT_ROLE"] = bootPlan.agentRole
+	}
 	return env
 }
 

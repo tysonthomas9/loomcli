@@ -13,6 +13,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/leadtoken"
 	"github.com/tysonthomas9/loomcli/internal/placement"
 	"github.com/tysonthomas9/loomcli/internal/placement/daytona"
+	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // TestLiveLeadPlacementEndToEnd drives the real broker against the real Daytona
@@ -31,11 +32,11 @@ func TestLiveLeadPlacementEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("daytona.New: %v", err)
 	}
-	store := memstore.New()
+	st := memstore.New()
 	key := []byte("0123456789abcdef0123456789abcdef")
 
 	broker, err := placement.NewBroker(placement.Config{
-		Store:        store,
+		Store:        st,
 		Provider:     provider,
 		TokenKey:     key,
 		DeploymentID: "mac-e2e",
@@ -48,6 +49,17 @@ func TestLiveLeadPlacementEndToEnd(t *testing.T) {
 	defer cancel()
 
 	const ws, agent = "LIVE-E2E", "nova"
+	repoURL := strings.TrimSpace(os.Getenv("LOOM_E2E_REPO_URL"))
+	if repoURL == "" {
+		repoURL = "https://github.com/octocat/Hello-World"
+	}
+	if _, err := st.Repos().Create(ctx, store.RepoCreate{
+		WorkspaceKey: ws,
+		Name:         "repo",
+		RemoteURL:    repoURL,
+	}); err != nil {
+		t.Fatalf("seed repo: %v", err)
+	}
 
 	var placedNodeID, placedSandboxID string
 	t.Cleanup(func() {
@@ -81,6 +93,7 @@ func TestLiveLeadPlacementEndToEnd(t *testing.T) {
 		SnapshotRef:  "loom-lead-poc-v2",
 		Caps:         []string{placement.CapLeadSession},
 		Resource:     placement.ResourceSize{VCPU: 2, MemGiB: 4},
+		PromptText:   "Live Daytona lead placement prompt upload proof.\n",
 		NetworkDomainAllowlist: []string{
 			"app.daytona.io", "api.anthropic.com", "registry.npmjs.org", "github.com",
 		},
@@ -95,12 +108,16 @@ func TestLiveLeadPlacementEndToEnd(t *testing.T) {
 	t.Logf("  provider sandbox = %s", placedSandboxID)
 	t.Logf("  state            = %s (generation %d)", res.Node.Placement.State, res.Node.Placement.Generation)
 	t.Logf("  lead started     = %v (err=%q)", res.LeadStarted, res.LeadStartError)
+	t.Logf("  repo             = %s", repoURL)
 
 	if res.Node.Placement.State != domain.PlacementStateActive {
 		t.Errorf("state = %q, want active at the spend boundary", res.Node.Placement.State)
 	}
 	if placedSandboxID == "" {
 		t.Fatal("no sandbox id recorded -- the spend boundary was not reached")
+	}
+	if !res.LeadStarted || res.LeadStartError != "" {
+		t.Fatalf("lead did not survive repo/prompt boot prep: started=%v err=%q", res.LeadStarted, res.LeadStartError)
 	}
 
 	// --- The occupant token the sandbox holds -----------------------------

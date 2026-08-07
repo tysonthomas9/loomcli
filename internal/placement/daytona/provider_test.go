@@ -2,6 +2,7 @@ package daytona
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	sdkerrors "github.com/daytonaio/daytona/libs/sdk-go/pkg/errors"
 
@@ -524,6 +526,268 @@ func TestListPtySessionsAndKillUseToolbox(t *testing.T) {
 	}
 }
 
+func TestPrepareLeadBootExecTimeoutExitCodeAndSuccess(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		body    string
+		wantErr string
+	}{
+		{name: "missing exit code", body: `{}`, wantErr: "no exitCode"},
+		{name: "nonzero exit code", body: `{"exitCode":2,"stderr":"bad path"}`, wantErr: "exit code 2"},
+		{name: "success", body: `{"exitCode":0,"result":"ok"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var captured toolboxExecuteRequest
+			provider := newTestProvider(t, func(req *http.Request) (*http.Response, error) {
+				switch {
+				case req.Method == http.MethodGet && req.URL.Path == "/api/sandbox/sandbox-1":
+					return jsonResponse(http.StatusOK, sandboxBody("sandbox-1", "started", "https://daytona.test/toolbox", nil)), nil
+				case req.Method == http.MethodPost && req.URL.Path == "/toolbox/sandbox-1/process/execute":
+					captured = decodeExecuteRequest(t, req)
+					return jsonResponse(http.StatusOK, tc.body), nil
+				default:
+					t.Fatalf("unexpected request %s %s", req.Method, req.URL.Path)
+					return nil, nil
+				}
+			})
+
+			err := provider.PrepareLeadBoot(context.Background(), "sandbox-1", placement.LeadBootPrep{
+				PromptPath: "/tmp/loom-lead-prompt.md",
+				PromptText: "hello",
+			})
+			// The exec timeout derives from the remaining context budget, so
+			// it is the prep budget minus elapsed time -- never the toolbox's
+			// 10-second default.
+			budget := int(defaultLeadBootPrepTimeout / time.Second)
+			if captured.Timeout <= budget-30 || captured.Timeout > budget {
+				t.Fatalf("timeout = %d, want within (%d, %d]", captured.Timeout, budget-30, budget)
+			}
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("PrepareLeadBoot: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("PrepareLeadBoot = %v, want error containing %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestPrepareLeadBootIdempotentCheckoutSkipsClone(t *testing.T) {
+	var commands []string
+	provider := newPrepProvider(t, func(req toolboxExecuteRequest) string {
+		commands = append(commands, req.Command)
+		if len(commands) > 1 {
+			t.Fatalf("unexpected extra exec command: %s", req.Command)
+		}
+		return executeBody(0, "git", "")
+	})
+
+	err := provider.PrepareLeadBoot(context.Background(), "sandbox-1", placement.LeadBootPrep{
+		Repo: &placement.RepoClone{
+			Name:      "repo",
+			RemoteURL: "https://github.com/o/r",
+			Checkout:  "/root/workspace/repo",
+		},
+	})
+	if err != nil {
+		t.Fatalf("PrepareLeadBoot: %v", err)
+	}
+	if len(commands) != 1 || !strings.Contains(commands[0], "rev-parse --is-inside-work-tree") {
+		t.Fatalf("commands = %v, want only rev-parse idempotency check", commands)
+	}
+}
+
+func TestPrepareLeadBootCloneNormalizesSSHRemote(t *testing.T) {
+	var commands []string
+	provider := newPrepProvider(t, func(req toolboxExecuteRequest) string {
+		commands = append(commands, req.Command)
+		switch len(commands) {
+		case 1:
+			return executeBody(0, "absent", "")
+		case 2:
+			return executeBody(0, "", "")
+		case 3:
+			return executeBody(0, "https://github.com/o/r", "")
+		default:
+			t.Fatalf("unexpected exec command %d: %s", len(commands), req.Command)
+			return ""
+		}
+	})
+
+	err := provider.PrepareLeadBoot(context.Background(), "sandbox-1", placement.LeadBootPrep{
+		Repo: &placement.RepoClone{
+			Name:      "repo",
+			RemoteURL: "git@github.com:o/r.git",
+			Ref:       "main",
+			Checkout:  "/root/workspace/repo",
+		},
+	})
+	if err != nil {
+		t.Fatalf("PrepareLeadBoot: %v", err)
+	}
+	clone := commands[1]
+	for _, want := range []string{
+		"git clone --depth 1 --single-branch",
+		"--branch 'main'",
+		"'https://github.com/o/r'",
+		// Atomicity: stage into .partial and rename into place, so a killed
+		// clone leaves nothing at the checkout path.
+		"rm -rf '/root/workspace/repo.partial'",
+		"'/root/workspace/repo.partial' && mv '/root/workspace/repo.partial' '/root/workspace/repo'",
+	} {
+		if !strings.Contains(clone, want) {
+			t.Fatalf("clone command %q missing %q", clone, want)
+		}
+	}
+	if strings.Contains(clone, "git@github.com") {
+		t.Fatalf("clone command was not normalized: %s", clone)
+	}
+}
+
+func TestPrepareLeadBootRejectsUnsupportedRemoteBeforeExec(t *testing.T) {
+	for _, remote := range []string{"http://github.com/o/r", "ssh://github.com/o/r"} {
+		t.Run(remote, func(t *testing.T) {
+			var calls int
+			provider := newTestProvider(t, func(req *http.Request) (*http.Response, error) {
+				calls++
+				t.Fatalf("unexpected HTTP request for invalid remote: %s %s", req.Method, req.URL.Path)
+				return nil, nil
+			})
+
+			err := provider.PrepareLeadBoot(context.Background(), "sandbox-1", placement.LeadBootPrep{
+				Repo: &placement.RepoClone{RemoteURL: remote, Checkout: "/root/workspace/repo"},
+			})
+			if err == nil {
+				t.Fatal("PrepareLeadBoot succeeded, want invalid remote error")
+			}
+			if calls != 0 {
+				t.Fatalf("HTTP calls = %d, want none", calls)
+			}
+		})
+	}
+}
+
+func TestPrepareLeadBootTokenCloneRedactsErrors(t *testing.T) {
+	const token = "ghp_SECRET"
+	var cloneCommand string
+	provider := newPrepProvider(t, func(req toolboxExecuteRequest) string {
+		switch {
+		case strings.Contains(req.Command, "rev-parse"):
+			return executeBody(0, "absent", "")
+		case strings.Contains(req.Command, " clone "):
+			cloneCommand = req.Command
+			return executeBody(2, "", "fatal: "+req.Command+" token "+token)
+		default:
+			t.Fatalf("unexpected exec command: %s", req.Command)
+			return ""
+		}
+	})
+
+	err := provider.PrepareLeadBoot(context.Background(), "sandbox-1", placement.LeadBootPrep{
+		Repo: &placement.RepoClone{
+			Name:      "repo",
+			RemoteURL: "https://github.com/o/r",
+			Checkout:  "/root/workspace/repo",
+		},
+		GitToken: func() (string, error) { return token, nil },
+	})
+	if err == nil {
+		t.Fatal("PrepareLeadBoot succeeded, want clone error")
+	}
+	if !strings.Contains(cloneCommand, "http.https://github.com/.extraheader=AUTHORIZATION: basic ") {
+		t.Fatalf("clone command missing host-derived extraheader: %s", cloneCommand)
+	}
+	for _, leaked := range []string{token, cloneCommand, "AUTHORIZATION: basic"} {
+		if strings.Contains(err.Error(), leaked) {
+			t.Fatalf("error leaked %q: %v", leaked, err)
+		}
+	}
+}
+
+func TestPrepareLeadBootNilGitTokenClonesWithoutExtraHeader(t *testing.T) {
+	var clone string
+	provider := newPrepProvider(t, func(req toolboxExecuteRequest) string {
+		switch {
+		case strings.Contains(req.Command, "rev-parse"):
+			return executeBody(0, "absent", "")
+		case strings.Contains(req.Command, " clone "):
+			clone = req.Command
+			return executeBody(0, "", "")
+		case strings.Contains(req.Command, "remote.origin.url"):
+			return executeBody(0, "https://github.com/o/r", "")
+		default:
+			t.Fatalf("unexpected exec command: %s", req.Command)
+			return ""
+		}
+	})
+
+	err := provider.PrepareLeadBoot(context.Background(), "sandbox-1", placement.LeadBootPrep{
+		Repo: &placement.RepoClone{RemoteURL: "https://github.com/o/r", Checkout: "/root/workspace/repo"},
+	})
+	if err != nil {
+		t.Fatalf("PrepareLeadBoot: %v", err)
+	}
+	if strings.Contains(clone, "-c 'http.") {
+		t.Fatalf("unauthenticated clone carried http extraheader: %s", clone)
+	}
+}
+
+func TestPrepareLeadBootPromptWriteDecodesExactText(t *testing.T) {
+	const prompt = "line one\nline 'two'\n"
+	var command string
+	provider := newPrepProvider(t, func(req toolboxExecuteRequest) string {
+		command = req.Command
+		return executeBody(0, "", "")
+	})
+
+	err := provider.PrepareLeadBoot(context.Background(), "sandbox-1", placement.LeadBootPrep{
+		PromptPath: "/tmp/loom-lead-prompt.md",
+		PromptText: prompt,
+	})
+	if err != nil {
+		t.Fatalf("PrepareLeadBoot: %v", err)
+	}
+	encoded := between(t, command, "printf %s '", "' | base64 -d")
+	decoded, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		t.Fatalf("decode prompt payload: %v", err)
+	}
+	if string(decoded) != prompt {
+		t.Fatalf("decoded prompt = %q, want %q", decoded, prompt)
+	}
+	// Atomicity: write to .tmp then rename, so a lead mid-read of the prompt
+	// file never observes a truncated file.
+	if !strings.Contains(command, "> '/tmp/loom-lead-prompt.md.tmp' && mv -f '/tmp/loom-lead-prompt.md.tmp' '/tmp/loom-lead-prompt.md'") {
+		t.Fatalf("prompt write is not write-then-rename: %s", command)
+	}
+}
+
+func TestPrepareLeadBootRejectsCredentialBearingPersistedRemote(t *testing.T) {
+	provider := newPrepProvider(t, func(req toolboxExecuteRequest) string {
+		switch {
+		case strings.Contains(req.Command, "rev-parse"):
+			return executeBody(0, "absent", "")
+		case strings.Contains(req.Command, " clone "):
+			return executeBody(0, "", "")
+		case strings.Contains(req.Command, "remote.origin.url"):
+			return executeBody(0, "https://x-access-token@github.com/o/r", "")
+		default:
+			t.Fatalf("unexpected exec command: %s", req.Command)
+			return ""
+		}
+	})
+
+	err := provider.PrepareLeadBoot(context.Background(), "sandbox-1", placement.LeadBootPrep{
+		Repo: &placement.RepoClone{RemoteURL: "https://github.com/o/r", Checkout: "/root/workspace/repo"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "credential-bearing") {
+		t.Fatalf("PrepareLeadBoot = %v, want credential persistence error", err)
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -542,6 +806,60 @@ func newTestProvider(t *testing.T, roundTrip roundTripFunc) *Provider {
 		t.Fatalf("New: %v", err)
 	}
 	return provider
+}
+
+func newPrepProvider(t *testing.T, execute func(toolboxExecuteRequest) string) *Provider {
+	t.Helper()
+	return newTestProvider(t, func(req *http.Request) (*http.Response, error) {
+		switch {
+		case req.Method == http.MethodGet && req.URL.Path == "/api/sandbox/sandbox-1":
+			return jsonResponse(http.StatusOK, sandboxBody("sandbox-1", "started", "https://daytona.test/toolbox", nil)), nil
+		case req.Method == http.MethodPost && req.URL.Path == "/toolbox/sandbox-1/process/execute":
+			return jsonResponse(http.StatusOK, execute(decodeExecuteRequest(t, req))), nil
+		default:
+			t.Fatalf("unexpected request %s %s", req.Method, req.URL.Path)
+			return nil, nil
+		}
+	})
+}
+
+func decodeExecuteRequest(t *testing.T, req *http.Request) toolboxExecuteRequest {
+	t.Helper()
+	var payload toolboxExecuteRequest
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		t.Fatalf("read execute body: %v", err)
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("decode execute body: %v", err)
+	}
+	return payload
+}
+
+func executeBody(exitCode int, result, stderr string) string {
+	body, err := json.Marshal(map[string]any{
+		"exitCode": exitCode,
+		"result":   result,
+		"stderr":   stderr,
+	})
+	if err != nil {
+		panic(err)
+	}
+	return string(body)
+}
+
+func between(t *testing.T, value, prefix, suffix string) string {
+	t.Helper()
+	start := strings.Index(value, prefix)
+	if start < 0 {
+		t.Fatalf("%q missing prefix %q", value, prefix)
+	}
+	start += len(prefix)
+	end := strings.Index(value[start:], suffix)
+	if end < 0 {
+		t.Fatalf("%q missing suffix %q", value, suffix)
+	}
+	return value[start : start+end]
 }
 
 func jsonResponse(status int, body string) *http.Response {
