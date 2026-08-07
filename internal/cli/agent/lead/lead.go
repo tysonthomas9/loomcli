@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -22,6 +23,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/epicrunner"
+	"github.com/tysonthomas9/loomcli/internal/placement"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -422,9 +424,24 @@ func heartbeatLeadSession(handle *bootstrap.StoreHandle, ws, sid string, stopHB 
 	}
 }
 
+// refuseSandboxShell reports whether this process is a sandboxed lead
+// placement occupant (ticket 14): dropping to an interactive shell there is a
+// billed zombie that also defeats the placement PTY-exit discriminator, so
+// the lead must exit non-zero instead.
+func refuseSandboxShell(w io.Writer) bool {
+	if os.Getenv(placement.OccupantTokenEnv) == "" {
+		return false
+	}
+	_, _ = fmt.Fprintln(w, "refusing to drop to an interactive shell in a sandboxed lead placement")
+	return true
+}
+
 // execShell replaces the current process with an interactive shell.
 // Falls back to running the shell as a subprocess if exec fails.
 func execShell(workDir string) {
+	if refuseSandboxShell(os.Stderr) {
+		os.Exit(1)
+	}
 	shell := os.Getenv("SHELL")
 	if shell == "" {
 		shell = "/bin/bash"
