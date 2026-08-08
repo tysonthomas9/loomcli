@@ -5,6 +5,10 @@ package serve
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"strings"
+	"time"
+
 	"github.com/tysonthomas9/loomcli/internal/app/prreviewer"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
@@ -13,9 +17,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"net/http"
-	"strings"
-	"time"
 )
 
 // AgentsCapability is the composition-owned Phase 5 Agents handle. Consumers

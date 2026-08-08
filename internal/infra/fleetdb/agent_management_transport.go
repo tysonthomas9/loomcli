@@ -1,4 +1,4 @@
-package agentmanagement
+package fleetdb
 
 import (
 	"context"
@@ -11,13 +11,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	fleettransport "github.com/tysonthomas9/loomcli/internal/infra/fleetdb/transport"
 	"github.com/tysonthomas9/loomcli/internal/store"
-)
-
-const (
-	FleetDelegatedActorHeader      = fleettransport.FleetDelegatedActorHeader
-	AgentOwnershipLeaseTokenHeader = "X-Agent-Ownership-Lease-Token" //nolint:gosec // HTTP header name, not credential material.
 )
 
 var (
@@ -26,14 +20,14 @@ var (
 	ErrAgentServiceIdempotencyConflict      = errors.New("fleetdb: agent service idempotency conflict")
 	ErrAgentServiceUnsupportedIdentityPatch = errors.New("fleetdb: unsupported agent service identity patch")
 	ErrAgentRoleRevisionConflict            = errors.New("fleetdb: agent role revision conflict")
-	ErrAgentManagementInvalidDelegatedActor = fleettransport.ErrInvalidDelegatedActor
+	ErrAgentManagementInvalidDelegatedActor = errFleetInvalidDelegatedActor
 )
 
-// Requester is the AgentManagement transport's complete dependency surface.
+// agentManagementRequester is the transport's complete dependency surface.
 // Role reads and creates preserve the process-wide client's existing wire
 // behavior; CAS role mutations continue to use the exact atomic commands.
-type Requester interface {
-	fleettransport.Requester
+type agentManagementRequester interface {
+	fleetRequester
 	GetRole(context.Context, string, string) (*domain.Role, error)
 	ListRoles(context.Context, string) ([]*domain.Role, error)
 	CreateRole(context.Context, store.RoleCreate) (*domain.Role, error)
@@ -270,12 +264,12 @@ type AgentOwnershipReleaseInput struct {
 }
 
 type agentManagementStore struct {
-	client Requester
+	client agentManagementRequester
 }
 
 var _ AgentManagementTransport = (*agentManagementStore)(nil)
 
-func New(client Requester) AgentManagementTransport {
+func newAgentManagementTransport(client agentManagementRequester) AgentManagementTransport {
 	return &agentManagementStore{client: client}
 }
 
@@ -316,8 +310,8 @@ func (transport *agentManagementStore) ListAgentServices(
 	var response struct {
 		AgentServices []*domain.AgentService `json:"agent_services"`
 	}
-	path := fleettransport.WithQuery(
-		"/api/v1/"+fleettransport.PathEscape(workspace)+"/agent-services",
+	path := withQuery(
+		"/api/v1/"+pathEscape(workspace)+"/agent-services",
 		values,
 	)
 	if err := transport.client.Do(ctx, http.MethodGet, path, nil, &response); err != nil {
@@ -713,8 +707,8 @@ func (transport *agentManagementStore) ListAgentOwnership(
 	var response struct {
 		AgentOwnershipLeases []*domain.AgentOwnershipLease `json:"agent_ownership_leases"`
 	}
-	path := fleettransport.WithQuery(
-		"/api/v1/"+fleettransport.PathEscape(workspace)+"/agent-ownership-leases",
+	path := withQuery(
+		"/api/v1/"+pathEscape(workspace)+"/agent-ownership-leases",
 		values,
 	)
 	if err := transport.client.Do(ctx, http.MethodGet, path, nil, &response); err != nil {
@@ -783,10 +777,6 @@ func (transport *agentManagementStore) ReleaseAgentOwnership(
 	return &out, nil
 }
 
-func delegatedActorHeaders(actor string) (map[string]string, error) {
-	return fleettransport.DelegatedActorHeaders(actor)
-}
-
 func ownershipHeaders(actor, token string) (map[string]string, error) {
 	headers, err := delegatedActorHeaders(actor)
 	if err != nil {
@@ -824,8 +814,4 @@ func cloneAgentManagementFloat64(value *float64) *float64 {
 	}
 	out := *value
 	return &out
-}
-
-func pathEscape(value string) string {
-	return fleettransport.PathEscape(value)
 }

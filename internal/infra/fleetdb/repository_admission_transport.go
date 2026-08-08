@@ -1,4 +1,4 @@
-package repositoryadmission
+package fleetdb
 
 import (
 	"context"
@@ -12,8 +12,6 @@ import (
 	"time"
 
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
-
-	fleettransport "github.com/tysonthomas9/loomcli/internal/infra/fleetdb/transport"
 )
 
 const (
@@ -216,12 +214,12 @@ type RepositoryAdmissionAbortInput struct {
 }
 
 type repositoryAdmissionStore struct {
-	client fleettransport.Requester
+	client fleetRequester
 }
 
 var _ RepositoryAdmissionTransport = (*repositoryAdmissionStore)(nil)
 
-func New(client fleettransport.Requester) RepositoryAdmissionTransport {
+func newRepositoryAdmissionTransport(client fleetRequester) RepositoryAdmissionTransport {
 	return &repositoryAdmissionStore{client: client}
 }
 
@@ -755,12 +753,4 @@ func sameRepositoryAdmissionWorkspaceFinalization(
 	}
 	return left.State == right.State &&
 		left.DefaultBranch == right.DefaultBranch
-}
-
-func pathEscape(value string) string {
-	return fleettransport.PathEscape(value)
-}
-
-func withQuery(path string, query url.Values) string {
-	return fleettransport.WithQuery(path, query)
 }

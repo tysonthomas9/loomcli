@@ -1,4 +1,4 @@
-package repositoryadmission
+package fleetdb
 
 import (
 	"encoding/hex"

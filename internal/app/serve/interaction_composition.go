@@ -5,11 +5,12 @@ package serve
 import (
 	"context"
 	"fmt"
+	"time"
+
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
-	"time"
 )
 
 // InteractionCapability is the narrow composition-owned Interaction handle.

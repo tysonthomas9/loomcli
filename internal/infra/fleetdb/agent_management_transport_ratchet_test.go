@@ -1,4 +1,4 @@
-package agentmanagement
+package fleetdb
 
 import (
 	"go/ast"
@@ -10,12 +10,13 @@ import (
 )
 
 func TestAgentManagementCASMutationsHaveNoLegacyFallbackCallsites(t *testing.T) {
-	source, err := os.ReadFile("transport.go")
+	const sourcePath = "agent_management_transport.go"
+	source, err := os.ReadFile(sourcePath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	files := token.NewFileSet()
-	parsed, err := parser.ParseFile(files, "transport.go", source, 0)
+	parsed, err := parser.ParseFile(files, sourcePath, source, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

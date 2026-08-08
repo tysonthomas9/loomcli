@@ -15,9 +15,9 @@ package fleetdb
 //     template statically would need real data-flow analysis, which is
 //     disproportionate for ~130 routes that change rarely.
 //  2. The table cannot silently rot: TestFleetDBClientCallSiteCount counts
-//     the root package plus capability child packages for service-client and
-//     direct Client do/doWithHeaders/doWithHeadersStatus/doRaw/doBytes call
-//     sites and extracted Requester Do/DoWithHeaders call sites, and
+//     the FleetDB adapter package's service-client and direct Client
+//     do/doWithHeaders/doWithHeadersStatus/doRaw/doBytes call sites plus the
+//     owner-scoped Requester Do/DoWithHeaders call sites, and
 //     fails when the count drifts from expectedClientCallSites, forcing the
 //     editor of the client to revisit the table.
 //  3. The spec snapshot (testdata/fleetdb-openapi.yaml) cannot silently rot:
@@ -443,7 +443,7 @@ func TestFleetDBSpecSnapshotFresh(t *testing.T) {
 
 // TestFleetDBClientCallSiteCount is the tripwire that keeps clientRoutes
 // honest: it counts root-package service-client calls (s.client.do), direct
-// Client receiver calls (c.do), and extracted capability Requester calls
+// Client receiver calls (c.do), and owner-scoped capability Requester calls
 // (s.client.Do) in this package tree's non-test sources. client.go is excluded
 // because Client.do delegates to Client.doWithHeaders and capabilityRequester
 // delegates back into Client; those internal transport hops are not API routes.

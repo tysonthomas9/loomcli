@@ -1,4 +1,4 @@
-package agentprovisioning
+package fleetdb
 
 import (
 	"context"
@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	fleettransport "github.com/tysonthomas9/loomcli/internal/infra/fleetdb/transport"
 )
 
 var (
@@ -201,17 +200,17 @@ type AgentProvisioningGrantResult struct {
 	RevokedAt       *time.Time `json:"revoked_at,omitempty"`
 }
 
-type agentProvisioningStepGuardInput struct {
+type agentProvisioningStepGuardWire struct {
 	ExpectedProvisioningGenerationID string `json:"expected_provisioning_generation_id"`
 }
 
 type agentProvisioningStore struct {
-	client fleettransport.Requester
+	client fleetRequester
 }
 
 var _ AgentProvisioningTransport = (*agentProvisioningStore)(nil)
 
-func New(client fleettransport.Requester) AgentProvisioningTransport {
+func newAgentProvisioningTransport(client fleetRequester) AgentProvisioningTransport {
 	return &agentProvisioningStore{client: client}
 }
 
@@ -222,7 +221,7 @@ func (store *agentProvisioningStore) BeginAgentProvisioning(
 ) (*AgentProvisioningRecord, error) {
 	var out AgentProvisioningRecord
 	path := "/api/v1/" + pathEscape(workspace) + "/agent-provisioning"
-	headers, err := fleettransport.DelegatedActorHeaders(input.DelegatedActor)
+	headers, err := delegatedActorHeaders(input.DelegatedActor)
 	if err != nil {
 		return nil, err
 	}
@@ -385,7 +384,7 @@ func (store *agentProvisioningStore) ensureAgentProvisioningStep(
 		ctx,
 		"POST",
 		path,
-		agentProvisioningStepGuardInput{
+		agentProvisioningStepGuardWire{
 			ExpectedProvisioningGenerationID: provisioningGenerationID,
 		},
 		out,
@@ -403,7 +402,7 @@ func mapAgentProvisioningError(err error) error {
 	switch {
 	case errors.Is(err, domain.ErrNotFound):
 		sentinel = ErrAgentProvisioningNotFound
-	case errors.Is(err, fleettransport.ErrRevisionConflict):
+	case errors.Is(err, errFleetRevisionConflict):
 		sentinel = ErrAgentProvisioningConcurrentWrite
 	case errors.Is(err, domain.ErrInvalidTransition):
 		sentinel = ErrAgentProvisioningInvalidTransition
@@ -415,12 +414,4 @@ func mapAgentProvisioningError(err error) error {
 		return err
 	}
 	return fmt.Errorf("agent provisioning transport: %w", errors.Join(sentinel, err))
-}
-
-func pathEscape(value string) string {
-	return fleettransport.PathEscape(value)
-}
-
-func withQuery(path string, query url.Values) string {
-	return fleettransport.WithQuery(path, query)
 }

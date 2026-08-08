@@ -1,4 +1,4 @@
-package repositoryadmission
+package fleetdb
 
 import (
 	"context"
@@ -402,7 +402,7 @@ func newRepositoryAdmissionResponseTransport(
 	response any,
 ) RepositoryAdmissionTransport {
 	t.Helper()
-	return New(repositoryAdmissionResponseRequester{response: response})
+	return newRepositoryAdmissionTransport(repositoryAdmissionResponseRequester{response: response})
 }
 
 type repositoryAdmissionResponseRequester struct {

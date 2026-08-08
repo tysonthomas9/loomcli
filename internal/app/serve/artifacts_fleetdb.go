@@ -4,11 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
+
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	artifactfleetdb "github.com/tysonthomas9/loomcli/internal/modules/artifacts/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"time"
 )
 
 // artifactsFleetDBTransport is the composition-owned DTO/error bridge from

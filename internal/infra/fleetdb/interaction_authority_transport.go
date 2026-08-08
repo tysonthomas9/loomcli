@@ -1,16 +1,14 @@
-package interaction
+package fleetdb
 
 import (
 	"context"
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	fleettransport "github.com/tysonthomas9/loomcli/internal/infra/fleetdb/transport"
 )
 
 var (
@@ -70,24 +68,24 @@ type InteractionTransport interface {
 	InteractionMutationTransport
 }
 
-// Requester is the complete dependency surface for Interaction's atomic
+// interactionRequester is the complete dependency surface for Interaction's atomic
 // commands and post-validation immutable AgentSession identity read.
-type Requester interface {
-	fleettransport.Requester
+type interactionRequester interface {
+	fleetRequester
 	GetAgentSession(context.Context, string, string) (*domain.AgentSession, error)
 }
 
 type interactionStore struct {
-	client Requester
+	client interactionRequester
 }
 
 var _ InteractionAuthorityTransport = (*interactionStore)(nil)
 
-func New(client Requester) InteractionTransport {
+func newInteractionTransport(client interactionRequester) InteractionTransport {
 	return &interactionStore{client: client}
 }
 
-type validateInteractionSessionAuthorityRequest struct {
+type interactionAuthorityRequestWire struct {
 	SessionID    string `json:"session_id"`
 	AgentID      string `json:"agent_id"`
 	NodeID       string `json:"node_id"`
@@ -95,7 +93,7 @@ type validateInteractionSessionAuthorityRequest struct {
 	FencingToken int64  `json:"fencing_token"`
 }
 
-type validateInteractionSessionAuthorityResponse struct {
+type interactionAuthorityResponseWire struct {
 	Lease *domain.AgentLease `json:"lease"`
 }
 
@@ -110,11 +108,11 @@ func (store *interactionStore) ValidateSessionAuthority(
 		return nil, err
 	}
 
-	request := validateInteractionSessionAuthorityRequest{
+	request := interactionAuthorityRequestWire{
 		SessionID: proof.SessionID, AgentID: proof.AgentID, NodeID: proof.NodeID,
 		LeaseID: proof.LeaseID, FencingToken: proof.FencingToken,
 	}
-	var response validateInteractionSessionAuthorityResponse
+	var response interactionAuthorityResponseWire
 	path := "/api/v1/" + pathEscape(proof.WorkspaceKey) + "/agent-session-authority/validate"
 	err := store.client.DoWithHeaders(ctx,
 		http.MethodPost,
@@ -238,12 +236,4 @@ func mapInteractionAuthorityError(operation string, err error) error {
 		sentinel = ErrInteractionUnavailable
 	}
 	return fmt.Errorf("%s: %w", operation, errors.Join(sentinel, err))
-}
-
-func pathEscape(value string) string {
-	return fleettransport.PathEscape(value)
-}
-
-func withQuery(path string, query url.Values) string {
-	return fleettransport.WithQuery(path, query)
 }

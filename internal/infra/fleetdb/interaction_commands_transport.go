@@ -1,4 +1,4 @@
-package interaction
+package fleetdb
 
 import (
 	"context"
@@ -946,10 +946,4 @@ func validateInteractionStartResult(result *InteractionSessionStartResult) error
 		return fmt.Errorf("FleetDB returned an incomplete Interaction start: %w", ErrInteractionInvalidPersistedState)
 	}
 	return nil
-}
-
-func bodyPtr[T any](body map[string]any, key string, value *T) {
-	if value != nil {
-		body[key] = *value
-	}
 }
