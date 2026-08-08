@@ -616,6 +616,20 @@ replication of Zhu et al.: prompt exhortation does nothing (p>0.8).
   that checkpoint is unexercised), or the parked CI-style feedback arm.
   Cost note: fork total $270.65 for two runs.
 
+#### ⚠️ SUPERSEDED + RETRACTED (2026-08-08): the "0.9375 ceiling" note below
+#### was WRONG — the constant was a CONTAMINATION BUG, not a ceiling. Full
+#### correction: docs/CORRECTION-replica-ux-contamination.md. A leaked b2d
+#### host node squatted the judge's port 18000; every run from b2d onward was
+#### browsed against b2d's app. CLEAN re-judged replica-ux: b2e 0.828, run19
+#### (tasks1) 0.219, run20 0.9375, run21 (dual1) 0.5625, B2k (leadm1) 0.8125.
+#### RETRACTED: run19 real site partial 0.409 (NOT 0.769) — does NOT beat the
+#### board; the SPA is broken past auth (matches its official frontend_gate=
+#### False). The "ux invariant/ceiling" LAW is void (judge discriminates
+#### 0.22->0.94). Correctness (official verifier) + B2j starvation + B2k
+#### maintainability-instrument inertness all STAND. Judge hardened
+#### (free-port + podman-port identity guards). Found via user challenge +
+#### codex audit.
+
 #### MEASUREMENT NOTE (2026-08-08, user challenge): the constant 0.9375 is a
 #### CEILING, not a judge bug — verified three ways
 Challenge: six consecutive runs at replica-ux EXACTLY 0.9375 looks like an

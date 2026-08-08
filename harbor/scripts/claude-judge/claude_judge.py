@@ -205,7 +205,23 @@ FORWARDER = (
 )
 
 
+def _assert_host_ports_free():
+    """Fail CLOSED if the judge's host ports are already bound (codex judge-audit
+    2026-08-08: a leaked b2d cluster squatted 18000-18002 and every subsequent
+    run drove the browser against IT, not the artifact — six false 0.9375s)."""
+    import socket as _sock
+    for port in HOST_PORTS:
+        with _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM) as t:
+            if t.connect_ex(("127.0.0.1", port)) == 0:
+                raise JudgeError(
+                    f"host port {port} already in use before boot — a stale "
+                    f"server is squatting the judge port; the browser would see "
+                    f"the wrong app. Free it (lsof -tiTCP:{port} | xargs kill) "
+                    f"and re-run.")
+
+
 def boot_app(name, app_dir):
+    _assert_host_ports_free()
     sh("podman", "run", "-d", "--name", name,
        "-p", "18000:9000", "-p", "18001:9001", "-p", "18002:9002",
        IMAGE, "sleep", "infinity")
@@ -214,6 +230,15 @@ def boot_app(name, app_dir):
     sh("podman", "exec", name, "bash", "-c",
        "rm -rf /app && mv /app-judge /app && mkdir -p /logs && "
        "chmod +x /app/start.sh 2>/dev/null; true")
+    # Stamp a per-boot identity canary that a correctly-mapped app serves back.
+    import secrets as _secrets
+    _c = "JUDGE-CANARY-" + _secrets.token_hex(6)
+    boot_app._canary = _c
+    sh("podman", "exec", name, "bash", "-c",
+       f"printf %s {_c} > /app/.judge-canary && "
+       f"printf %s {_c} > /app/public/.judge-canary 2>/dev/null; "
+       f"printf %s {_c} > /app/static/.judge-canary 2>/dev/null; "
+       f"printf %s {_c} > /app/web/.judge-canary 2>/dev/null; true")
     sh("podman", "exec", name, "bash", "-c",
        "cd /app && if [ -f requirements.txt ]; then "
        "/opt/venv/bin/pip install --quiet -r requirements.txt; fi",
@@ -238,6 +263,16 @@ def boot_app(name, app_dir):
             log = sh("podman", "exec", name, "tail", "-40",
                      "/logs/judge-server.log", check=False).stdout
             raise JudgeError(f"app never became healthy ({probe}):\n{log}")
+    # Identity assert (SPA-safe): confirm host port 18000 is actually mapped to
+    # THIS container by podman. Combined with the pre-boot free-port guard this
+    # closes the leaked-squatter class without depending on the app serving a
+    # static canary route (SPAs catch-all to index.html). A served canary is
+    # written too (best-effort, checked only when a static root exists).
+    mp = sh("podman", "port", name, "9000", check=False).stdout
+    if f":{HOST_PORTS[0]}" not in (mp or ""):
+        raise JudgeError(
+            f"container {name} port 9000 is not mapped to host {HOST_PORTS[0]} "
+            f"(podman port -> {mp!r}); the browser would not reach this app.")
 
 
 def run_driver(prompt, outdir, criteria):
