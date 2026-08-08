@@ -466,9 +466,24 @@ func optionalInt64(value int64) *int64 {
 // strict filter so credentials never leak into a remote sandbox.
 func taskRunnerBaseEnvForRequest(req TaskExecRequest, env []string) []string {
 	if isLocalTaskRunner(req) {
-		return platformruntime.FilterSubprocessEnv(platformruntime.SubprocessEnvDriverLocalTaskRunner, env)
+		filtered := platformruntime.FilterSubprocessEnv(platformruntime.SubprocessEnvDriverLocalTaskRunner, env)
+		if executable, err := os.Executable(); err == nil {
+			return platformruntime.PinExecutableDirOnPath(filtered, executable)
+		}
+		return filtered
 	}
 	return platformruntime.FilterSubprocessEnv(platformruntime.SubprocessEnvDriverRemote, env)
+}
+
+func prepareTaskRunnerLoginShellEnv(req TaskExecRequest, env []string) ([]string, func(), error) {
+	if !isLocalTaskRunner(req) {
+		return env, func() {}, nil
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolve task runner host executable: %w", err)
+	}
+	return platformruntime.PinExecutableDirForLoginShell(env, executable)
 }
 
 func lastJSONLine(stdout []byte) ([]byte, error) {

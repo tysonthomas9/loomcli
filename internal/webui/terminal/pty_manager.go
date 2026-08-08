@@ -28,7 +28,6 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -94,28 +93,7 @@ func terminalSpawnEnv(base []string) []string {
 // plain `loom` commands from its shell. Without this pin an older user-global
 // binary can win PATH and speak an incompatible local FleetDB protocol.
 func pinCurrentLoomOnPath(env []string) []string {
-	executable := strings.TrimSpace(loomExecutableForTerminal())
-	if executable == "" || executable == "loom" || !filepath.IsAbs(executable) {
-		return env
-	}
-	executableDir := filepath.Clean(filepath.Dir(executable))
-	pathValue := ""
-	out := make([]string, 0, len(env)+1)
-	for _, entry := range env {
-		name, value, ok := strings.Cut(entry, "=")
-		if ok && name == "PATH" {
-			pathValue = value
-			continue
-		}
-		out = append(out, entry)
-	}
-	pathEntries := []string{executableDir}
-	for _, entry := range filepath.SplitList(pathValue) {
-		if filepath.Clean(entry) != executableDir {
-			pathEntries = append(pathEntries, entry)
-		}
-	}
-	return append(out, "PATH="+strings.Join(pathEntries, string(os.PathListSeparator)))
+	return platformruntime.PinExecutableDirOnPath(env, loomExecutableForTerminal())
 }
 
 func terminalSessionEnv(base []string, key SessionKey) []string {

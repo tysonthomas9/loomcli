@@ -1,7 +1,9 @@
 package runtime //nolint:revive // The approved target architecture names this platform mechanism runtime.
 
 import (
+	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -106,6 +108,16 @@ var driverLocalTaskRunnerEnv = subprocessEnvPolicy{
 		"GOOGLE_API_KEY":                 {},
 		"GOOGLE_APPLICATION_CREDENTIALS": {},
 		"CURSOR_API_KEY":                 {},
+		// Backend executable overrides are trusted-local operator controls.
+		// The bundled runner documents and consumes this closed set; admitting
+		// them here keeps fail-closed binary selection intact across the Driver
+		// subprocess boundary without widening remote workflow environments.
+		"LOOM_CLAUDE_BIN":       {},
+		"LOOM_CODEX_BIN":        {},
+		"LOOM_CURSOR_BIN":       {},
+		"LOOM_GEMINI_BIN":       {},
+		"LOOM_LOCALDOGFOOD_BIN": {},
+		"LOOM_OPENCODE_BIN":     {},
 	}),
 	allowPrefixes: driverRemoteEnv.allowPrefixes,
 }
@@ -152,6 +164,87 @@ var sensitiveSubprocessEnvFragments = []string{
 // CurrentSubprocessEnv filters the current process environment for profile.
 func CurrentSubprocessEnv(profile SubprocessEnvProfile) []string {
 	return FilterSubprocessEnv(profile, os.Environ())
+}
+
+// PinExecutableDirOnPath makes plain sibling-command lookups resolve beside
+// the executable that launched the current process. Packaged Desktop keeps
+// its loom sidecar there; pinning that directory prevents an older global
+// install from speaking an incompatible local protocol. Invalid or relative
+// executable paths leave the environment unchanged.
+func PinExecutableDirOnPath(env []string, executable string) []string {
+	executable = strings.TrimSpace(executable)
+	if executable == "" || !filepath.IsAbs(executable) {
+		return env
+	}
+	executableDir := filepath.Clean(filepath.Dir(executable))
+	pathValue := ""
+	out := make([]string, 0, len(env)+1)
+	for _, entry := range env {
+		name, value, ok := strings.Cut(entry, "=")
+		if ok && name == "PATH" {
+			pathValue = value
+			continue
+		}
+		out = append(out, entry)
+	}
+	pathEntries := []string{executableDir}
+	for _, entry := range filepath.SplitList(pathValue) {
+		if filepath.Clean(entry) != executableDir {
+			pathEntries = append(pathEntries, entry)
+		}
+	}
+	return append(out, "PATH="+strings.Join(pathEntries, string(os.PathListSeparator)))
+}
+
+// PinExecutableDirForLoginShell preserves the executable pin across model
+// backends that launch login shells. Codex intentionally restores a captured
+// user shell environment for tool calls, which can replace the PATH inherited
+// by the backend process. A run-scoped ZDOTDIR/BASH_ENV reapplies only the
+// trusted sibling directory without reading or modifying user dotfiles.
+//
+// The returned cleanup must remain deferred until the backend child exits.
+func PinExecutableDirForLoginShell(env []string, executable string) ([]string, func(), error) {
+	executable = strings.TrimSpace(executable)
+	if executable == "" || !filepath.IsAbs(executable) {
+		return env, func() {}, nil
+	}
+	executableDir := filepath.Clean(filepath.Dir(executable))
+	profileDir, err := os.MkdirTemp("", "loom-task-shell-*")
+	if err != nil {
+		return nil, nil, fmt.Errorf("create task shell profile: %w", err)
+	}
+	cleanup := func() { _ = os.RemoveAll(profileDir) }
+	profile := []byte("if [ -n \"${LOOM_PINNED_EXECUTABLE_DIR:-}\" ]; then\n" +
+		"  export PATH=\"${LOOM_PINNED_EXECUTABLE_DIR}:${PATH}\"\n" +
+		"fi\n")
+	for _, name := range []string{".zshenv", ".zprofile"} {
+		if err := os.WriteFile(filepath.Join(profileDir, name), profile, 0o600); err != nil {
+			cleanup()
+			return nil, nil, fmt.Errorf("write task zsh profile %s: %w", name, err)
+		}
+	}
+	bashProfilePath := filepath.Join(profileDir, "shell-env")
+	if err := os.WriteFile(bashProfilePath, profile, 0o600); err != nil {
+		cleanup()
+		return nil, nil, fmt.Errorf("write task bash profile: %w", err)
+	}
+	pinned := PinExecutableDirOnPath(env, executable)
+	pinned = replaceSubprocessEnv(pinned, "ZDOTDIR", profileDir)
+	pinned = replaceSubprocessEnv(pinned, "BASH_ENV", bashProfilePath)
+	pinned = replaceSubprocessEnv(pinned, "LOOM_PINNED_EXECUTABLE_DIR", executableDir)
+	return pinned, cleanup, nil
+}
+
+func replaceSubprocessEnv(env []string, name, value string) []string {
+	out := make([]string, 0, len(env)+1)
+	for _, entry := range env {
+		entryName, _, ok := strings.Cut(entry, "=")
+		if ok && entryName == name {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return append(out, name+"="+value)
 }
 
 // FilterSubprocessEnv returns only ambient variables admitted by profile.

@@ -134,6 +134,26 @@ func TestTaskRunnerEnvAPIBaseURL(t *testing.T) {
 	}
 }
 
+func TestLocalTaskRunnerBaseEnvPinsCurrentLoomBeforeAmbientPath(t *testing.T) {
+	req := TaskExecRequest{RunnerEntrypoint: LocalTaskRunnerEntrypoint}
+	got := envMap(taskRunnerBaseEnvForRequest(req, []string{
+		"PATH=/usr/bin:/bin",
+		"HOME=/tmp/home",
+		"LOOM_CODEX_BIN=/definitely/missing/codex",
+	}))
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPrefix := filepath.Dir(executable) + string(os.PathListSeparator)
+	if !strings.HasPrefix(got["PATH"], wantPrefix) {
+		t.Fatalf("PATH = %q, want current Loom directory prefix %q", got["PATH"], wantPrefix)
+	}
+	if got["LOOM_CODEX_BIN"] != "/definitely/missing/codex" {
+		t.Fatalf("LOOM_CODEX_BIN = %q, want trusted-local operator override", got["LOOM_CODEX_BIN"])
+	}
+}
+
 // The configured/legacy backend path is a two-hop launch: HostBridge first
 // filters the serve environment and appends its owner-minted TaskRun facade,
 // then the selected backend CLI applies its own child filter. Pin the first

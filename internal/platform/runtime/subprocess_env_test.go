@@ -1,10 +1,99 @@
 package runtime //nolint:revive // The approved target architecture names this platform mechanism runtime.
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 )
+
+func TestPinExecutableDirOnPathPrefersPackagedSiblingAndDeduplicates(t *testing.T) {
+	executable := filepath.Join(string(filepath.Separator), "Applications", "Loom Agents.app", "Contents", "MacOS", "loom")
+	executableDir := filepath.Dir(executable)
+	got := PinExecutableDirOnPath([]string{
+		"HOME=/tmp/home",
+		"PATH=/usr/bin" + string(filepath.ListSeparator) + executableDir + string(filepath.ListSeparator) + "/bin",
+	}, executable)
+	wantPath := executableDir + string(filepath.ListSeparator) + "/usr/bin" + string(filepath.ListSeparator) + "/bin"
+	if !slices.Equal(got, []string{"HOME=/tmp/home", "PATH=" + wantPath}) {
+		t.Fatalf("PinExecutableDirOnPath() = %q, want HOME plus pinned PATH %q", got, wantPath)
+	}
+}
+
+func TestPinExecutableDirOnPathRejectsRelativeExecutable(t *testing.T) {
+	env := []string{"PATH=/usr/bin", "HOME=/tmp/home"}
+	if got := PinExecutableDirOnPath(env, "loom"); !slices.Equal(got, env) {
+		t.Fatalf("PinExecutableDirOnPath() = %q, want unchanged %q", got, env)
+	}
+}
+
+func TestPinExecutableDirForLoginShellWritesScopedProfiles(t *testing.T) {
+	executable := filepath.Join(string(filepath.Separator), "Applications", "Loom Agents.app", "Contents", "MacOS", "loom")
+	got, cleanup, err := PinExecutableDirForLoginShell([]string{
+		"PATH=/usr/bin",
+		"ZDOTDIR=/user/config",
+		"BASH_ENV=/user/bash-env",
+	}, executable)
+	if err != nil {
+		t.Fatalf("PinExecutableDirForLoginShell: %v", err)
+	}
+	t.Cleanup(cleanup)
+	env := subprocessEnvMap(got)
+	if env["LOOM_PINNED_EXECUTABLE_DIR"] != filepath.Dir(executable) {
+		t.Fatalf("pinned executable dir = %q", env["LOOM_PINNED_EXECUTABLE_DIR"])
+	}
+	if !strings.HasPrefix(env["PATH"], filepath.Dir(executable)+string(os.PathListSeparator)) {
+		t.Fatalf("PATH = %q, want executable directory first", env["PATH"])
+	}
+	for _, profile := range []string{
+		filepath.Join(env["ZDOTDIR"], ".zshenv"),
+		filepath.Join(env["ZDOTDIR"], ".zprofile"),
+		env["BASH_ENV"],
+	} {
+		content, err := os.ReadFile(profile)
+		if err != nil {
+			t.Fatalf("read shell profile %q: %v", profile, err)
+		}
+		if !strings.Contains(string(content), "LOOM_PINNED_EXECUTABLE_DIR") {
+			t.Fatalf("shell profile %q does not restore pinned PATH: %q", profile, content)
+		}
+	}
+	cleanup()
+	if _, err := os.Stat(env["ZDOTDIR"]); !os.IsNotExist(err) {
+		t.Fatalf("shell profile directory remains after cleanup: %v", err)
+	}
+}
+
+func TestPinExecutableDirForLoginShellSurvivesZshLoginStartup(t *testing.T) {
+	zsh, err := exec.LookPath("zsh")
+	if err != nil {
+		t.Skip("zsh is not installed")
+	}
+	binDir := t.TempDir()
+	executable := filepath.Join(binDir, "loom")
+	if err := os.WriteFile(executable, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatalf("write fake executable: %v", err)
+	}
+	env, cleanup, err := PinExecutableDirForLoginShell([]string{
+		"PATH=/usr/bin:/bin",
+		"HOME=" + t.TempDir(),
+	}, executable)
+	if err != nil {
+		t.Fatalf("PinExecutableDirForLoginShell: %v", err)
+	}
+	t.Cleanup(cleanup)
+	cmd := exec.Command(zsh, "-lc", "command -v loom") //nolint:norawexec // This integration test must exercise real login-shell startup.
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("zsh login lookup: %v: %s", err, out)
+	}
+	if got := strings.TrimSpace(string(out)); got != executable {
+		t.Fatalf("zsh resolved loom = %q, want %q", got, executable)
+	}
+}
 
 func TestSubprocessEnvProfilesPreserveTrustPlacement(t *testing.T) {
 	env := []string{
@@ -22,6 +111,7 @@ func TestSubprocessEnvProfilesPreserveTrustPlacement(t *testing.T) {
 		"OPENAI_API_KEY=openai-secret",
 		"CLAUDE_CODE_OAUTH_TOKEN=claude-secret",
 		"GOOGLE_APPLICATION_CREDENTIALS=/secrets/google.json",
+		"LOOM_CODEX_BIN=/definitely/missing/codex",
 		"CUSTOM_VAR=value",
 		"malformed",
 	}
@@ -55,7 +145,7 @@ func TestSubprocessEnvProfilesPreserveTrustPlacement(t *testing.T) {
 				"LOOM_WORKTREE_PATH", "LOOM_CONFIG_DIR", "LOOM_HOST_BRIDGE_HELPER",
 				"LOOM_DRIVER_TASK_RUNNER_CMD_JSON", "LOOM_DRIVER_TASK_RUNNER_CMD",
 				"OPENAI_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN",
-				"GOOGLE_APPLICATION_CREDENTIALS", "CUSTOM_VAR",
+				"GOOGLE_APPLICATION_CREDENTIALS", "LOOM_CODEX_BIN", "CUSTOM_VAR",
 			},
 		},
 		{
@@ -69,7 +159,7 @@ func TestSubprocessEnvProfilesPreserveTrustPlacement(t *testing.T) {
 			forbidden: []string{
 				"CODEX_HOME", "CLAUDE_CONFIG_DIR", "LOOM_WORKTREE_PATH",
 				"OPENAI_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN",
-				"GOOGLE_APPLICATION_CREDENTIALS", "CUSTOM_VAR",
+				"GOOGLE_APPLICATION_CREDENTIALS", "LOOM_CODEX_BIN", "CUSTOM_VAR",
 			},
 		},
 		{
@@ -79,7 +169,7 @@ func TestSubprocessEnvProfilesPreserveTrustPlacement(t *testing.T) {
 				"PATH", "HOME", "LANG", "LC_ALL", "CODEX_HOME", "LOOM_CONFIG_DIR",
 				"LOOM_HOST_BRIDGE_HELPER", "LOOM_DRIVER_TASK_RUNNER_CMD_JSON",
 				"LOOM_DRIVER_TASK_RUNNER_CMD", "OPENAI_API_KEY",
-				"CLAUDE_CODE_OAUTH_TOKEN", "GOOGLE_APPLICATION_CREDENTIALS",
+				"CLAUDE_CODE_OAUTH_TOKEN", "GOOGLE_APPLICATION_CREDENTIALS", "LOOM_CODEX_BIN",
 			},
 			forbidden: []string{
 				"CLAUDE_CONFIG_DIR", "LOOM_WORKTREE_PATH", "CUSTOM_VAR",

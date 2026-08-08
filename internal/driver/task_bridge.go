@@ -398,6 +398,11 @@ func (e HostBridgeTaskExecutor) runBuiltInFlueWorkflow(ctx context.Context, req 
 		cmd.Dir = worktree
 	}
 	baseEnv := taskRunnerBaseEnvForRequest(req, os.Environ())
+	baseEnv, shellCleanup, err := prepareTaskRunnerLoginShellEnv(req, baseEnv)
+	if err != nil {
+		return bridgeTaskRunnerResult{}, err
+	}
+	defer shellCleanup()
 	env := append([]string{}, baseEnv...)
 	env = append(env, e.taskRunnerEnv(req, string(input), baseEnv)...)
 	cmd.Env = env
@@ -453,6 +458,11 @@ func (e HostBridgeTaskExecutor) runCommand(ctx context.Context, req TaskExecRequ
 		cmd.Dir = worktree
 	}
 	baseEnv := taskRunnerBaseEnvForRequest(req, os.Environ())
+	baseEnv, shellCleanup, err := prepareTaskRunnerLoginShellEnv(req, baseEnv)
+	if err != nil {
+		return bridgeTaskRunnerResult{}, err
+	}
+	defer shellCleanup()
 	env := append([]string{}, baseEnv...)
 	env = append(env, e.taskRunnerEnv(req, string(input), baseEnv)...)
 	cmd.Env = env

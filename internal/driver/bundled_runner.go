@@ -109,7 +109,12 @@ func RunBundledTaskRunner(ctx context.Context, opts BundledRunnerOptions) (json.
 	if wt := strings.TrimSpace(opts.Worktree); wt != "" {
 		cmd.Dir = wt
 	}
-	cmd.Env = buildLeafRunnerEnv(opts, entrypoint, requestJSON)
+	leafEnv, shellCleanup, err := prepareBundledTaskRunnerEnv(opts, entrypoint, requestJSON)
+	if err != nil {
+		return nil, err
+	}
+	defer shellCleanup()
+	cmd.Env = leafEnv
 	cmd.Stdin = strings.NewReader(requestJSON)
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
@@ -131,6 +136,21 @@ func RunBundledTaskRunner(ctx context.Context, opts BundledRunnerOptions) (json.
 	return json.RawMessage(append([]byte{}, payload...)), nil
 }
 
+func prepareBundledTaskRunnerEnv(opts BundledRunnerOptions, entrypoint, requestJSON string) ([]string, func(), error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return nil, nil, fmt.Errorf("bundled runner: resolve host executable: %w", err)
+	}
+	env, cleanup, err := platformruntime.PinExecutableDirForLoginShell(
+		buildLeafRunnerEnv(opts, entrypoint, requestJSON),
+		executable,
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("bundled runner: prepare login shell: %w", err)
+	}
+	return env, cleanup, nil
+}
+
 // buildLeafRunnerEnv assembles the environment for the bundled Node launcher.
 // Every launch path applies the same trusted-local filter at the final child
 // boundary; callers are not trusted to have inherited a previously scrubbed
@@ -138,6 +158,14 @@ func RunBundledTaskRunner(ctx context.Context, opts BundledRunnerOptions) (json.
 // the Node launcher.
 func buildLeafRunnerEnv(opts BundledRunnerOptions, entrypoint, requestJSON string) []string {
 	env := platformruntime.CurrentSubprocessEnv(platformruntime.SubprocessEnvDriverLocalTaskRunner)
+	// This is the final subprocess boundary before the model backend starts.
+	// The outer Driver launcher already pins its own PATH, but the bundled
+	// runner rebuilds the environment here from the current process. Re-pin it
+	// so ordinary `loom data` commands issued by the model resolve to the
+	// packaged sibling CLI instead of an older user-global installation.
+	if executable, err := os.Executable(); err == nil {
+		env = platformruntime.PinExecutableDirOnPath(env, executable)
+	}
 	env = append(env,
 		"LOOM_TASK_RUNNER_SERVER_PATH="+opts.ServerPath,
 		"LOOM_TASK_RUNNER_BUNDLE_ROOT="+filepath.Dir(opts.ServerPath),
