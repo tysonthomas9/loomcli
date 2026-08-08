@@ -386,35 +386,80 @@ func latestActiveDaytonaLeadPlacement(ctx context.Context, st store.Store, works
 		return nil, service.ErrInternal("failed to list lead placements", err)
 	}
 	var best *domain.Node
+	var latestAnyState *domain.Node
 	for _, node := range nodes {
-		if !terminalNodeMatchesDaytonaLead(node, agentName) {
+		if !terminalNodeMatchesDaytonaLeadAnyState(node, agentName) {
 			continue
 		}
-		if best == nil ||
-			node.Placement.Generation > best.Placement.Generation ||
-			(node.Placement.Generation == best.Placement.Generation && node.UpdatedAt.After(best.UpdatedAt)) {
+		if latestAnyState == nil || newerPlacement(node, latestAnyState) {
+			latestAnyState = node
+		}
+		if terminalNodeMatchesDaytonaLead(node, agentName) && (best == nil || newerPlacement(node, best)) {
 			best = node
 		}
 	}
 	if best == nil {
+		// Attach-time self-heal provisioning is deferred; agent-create owns
+		// eager provisioning for now, so surface the latest placement state.
+		if latestAnyState != nil {
+			return nil, service.ErrValidation(daytonaLeadPlacementAttachError(latestAnyState))
+		}
 		return nil, service.ErrValidation("Daytona lead has no active placement to attach")
 	}
 	return best, nil
 }
 
+func newerPlacement(candidate, current *domain.Node) bool {
+	if current == nil || current.Placement == nil {
+		return true
+	}
+	if candidate == nil || candidate.Placement == nil {
+		return false
+	}
+	return candidate.Placement.Generation > current.Placement.Generation ||
+		(candidate.Placement.Generation == current.Placement.Generation && candidate.UpdatedAt.After(current.UpdatedAt))
+}
+
 func terminalNodeMatchesDaytonaLead(node *domain.Node, agentName string) bool {
+	if !terminalNodeMatchesDaytonaLeadAnyState(node, agentName) {
+		return false
+	}
+	return node.Placement.State == domain.PlacementStateActive &&
+		strings.TrimSpace(node.Placement.SandboxID) != ""
+}
+
+func terminalNodeMatchesDaytonaLeadAnyState(node *domain.Node, agentName string) bool {
 	if node == nil || node.Placement == nil {
 		return false
 	}
-	if node.RuntimeProvider != domain.RuntimeProviderDaytona ||
-		node.Placement.State != domain.PlacementStateActive ||
-		strings.TrimSpace(node.Placement.SandboxID) == "" {
+	if node.RuntimeProvider != domain.RuntimeProviderDaytona {
 		return false
 	}
 	if node.OwnerActor == "agent:"+agentName {
 		return true
 	}
 	return slices.Contains(node.Labels, "loom-agent="+agentName)
+}
+
+func daytonaLeadPlacementAttachError(node *domain.Node) string {
+	if node == nil || node.Placement == nil {
+		return "Daytona lead has no active placement to attach"
+	}
+	switch node.Placement.State {
+	case domain.PlacementStateProvisioning:
+		return "lead sandbox is still provisioning"
+	case domain.PlacementStateReleased, domain.PlacementStateLost:
+		if detail := strings.TrimSpace(node.Placement.LastDeleteError); detail != "" {
+			return "lead sandbox provisioning failed: " + detail
+		}
+		return fmt.Sprintf("lead sandbox provisioning failed: placement state %q", node.Placement.State)
+	case domain.PlacementStateReleasing:
+		return "lead sandbox is releasing"
+	case domain.PlacementStateActive:
+		return "lead sandbox active placement has no sandbox id"
+	default:
+		return fmt.Sprintf("lead sandbox state %q is not attachable", node.Placement.State)
+	}
 }
 
 func agentLaunchCwd(workspace string, agent *domain.Agent) string {

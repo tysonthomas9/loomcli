@@ -124,7 +124,11 @@ func (app *Server) buildInfraModules() {
 
 	if storeBacked {
 		app.connectorDispatcher = app.buildConnectorDispatcher()
-		app.wsModules = append(app.wsModules, agents.NewModule(app.agentSvc, app.hub))
+		agentModule := agents.NewModule(app.agentSvc, app.hub, nil)
+		if app.config.LeadProvisioner != nil {
+			agentModule = agents.NewModule(app.agentSvc, app.hub, app.config.LeadProvisioner)
+		}
+		app.wsModules = append(app.wsModules, agentModule)
 		app.wsModules = append(app.wsModules, onboarding.NewModule(app.issueSvc, app.agentSvc))
 		app.wsModules = append(app.wsModules, workflows.NewModule(app.config.Store))
 		app.wsModules = append(app.wsModules, webhooks.NewModule(app.config.Store))

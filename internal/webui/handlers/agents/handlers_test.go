@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -73,7 +74,7 @@ func TestHandleCreateCarriesInteractiveKindAndPromptFile(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "TEST2"))
 	rr := httptest.NewRecorder()
 
-	HandleCreate(agentSvc, nil).ServeHTTP(rr, req)
+	HandleCreate(agentSvc, nil, nil).ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("status = %d body = %s, want 201", rr.Code, rr.Body.String())
@@ -114,7 +115,7 @@ func TestHandleCreateCarriesInlinePrompt(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "TEST2"))
 	rr := httptest.NewRecorder()
 
-	HandleCreate(agentSvc, nil).ServeHTTP(rr, req)
+	HandleCreate(agentSvc, nil, nil).ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("status = %d body = %s, want 201", rr.Code, rr.Body.String())
@@ -125,6 +126,79 @@ func TestHandleCreateCarriesInlinePrompt(t *testing.T) {
 	}
 	if role.Prompt != "Literal {{ marker }}" {
 		t.Fatalf("role prompt = %q, want literal transport value", role.Prompt)
+	}
+}
+
+func TestHandleCreateStartsProvisioningAsync(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{
+		Key: "TEST2", Name: "Test 2", DefaultBranch: "main",
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	agentSvc := svcimpl.NewAgentService(nil, nil, nil, st)
+	provisioner := &fakeLeadProvisioner{calls: make(chan provisionCall, 1)}
+	body := []byte(`{
+		"name":"review-nova",
+		"role_name":"pr-review",
+		"kind":"interactive",
+		"prompt_file":"builtin:pr-review",
+		"backend":"codex"
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST2/agents", bytes.NewReader(body))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "TEST2"))
+	req.Header.Set("X-Actor", "tester")
+	rr := httptest.NewRecorder()
+
+	HandleCreate(agentSvc, nil, provisioner).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d body = %s, want 201", rr.Code, rr.Body.String())
+	}
+	select {
+	case got := <-provisioner.calls:
+		if got.ws != "TEST2" || got.name != "review-nova" {
+			t.Fatalf("provision call = %+v, want TEST2/review-nova", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for async provisioning call")
+	}
+}
+
+func TestHandleCreateProvisionerErrorStillReturnsCreated(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{
+		Key: "TEST2", Name: "Test 2", DefaultBranch: "main",
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	agentSvc := svcimpl.NewAgentService(nil, nil, nil, st)
+	provisioner := &fakeLeadProvisioner{
+		calls: make(chan provisionCall, 1),
+		err:   errors.New("provision failed"),
+	}
+	body := []byte(`{
+		"name":"review-nova",
+		"role_name":"pr-review",
+		"kind":"interactive",
+		"prompt_file":"builtin:pr-review",
+		"backend":"codex"
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST2/agents", bytes.NewReader(body))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "TEST2"))
+	rr := httptest.NewRecorder()
+
+	HandleCreate(agentSvc, nil, provisioner).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d body = %s, want 201", rr.Code, rr.Body.String())
+	}
+	select {
+	case <-provisioner.calls:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for async provisioning call")
 	}
 }
 
@@ -191,4 +265,19 @@ func waitForAgentHubClients(t *testing.T, hub *realtime.Hub, want int) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatalf("hub ClientCount() = %d, want %d", hub.ClientCount(), want)
+}
+
+type provisionCall struct {
+	ws   string
+	name string
+}
+
+type fakeLeadProvisioner struct {
+	calls chan provisionCall
+	err   error
+}
+
+func (f *fakeLeadProvisioner) ProvisionForAgent(_ context.Context, ws, name string) error {
+	f.calls <- provisionCall{ws: ws, name: name}
+	return f.err
 }

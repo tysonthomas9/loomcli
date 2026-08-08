@@ -3,11 +3,14 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -15,7 +18,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/placement"
 	"github.com/tysonthomas9/loomcli/internal/testutil"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
@@ -85,6 +90,165 @@ func TestBuildMonitorCollectDataFnIsLazy(t *testing.T) {
 	if got := backendCalls.Load(); got != 0 {
 		t.Fatalf("buildMonitorCollectDataFn called issue backend before first request: got %d calls", got)
 	}
+}
+
+func TestNewServePlacementBrokerSetsMaxLive(t *testing.T) {
+	t.Setenv(envLoomLeadMaxVCPU, "2")
+	t.Setenv(envLoomLeadMaxMemGiB, "4")
+	t.Setenv("LOOM_DEPLOYMENT_ID", "test-deployment")
+	ctx := context.Background()
+	st := memstore.New()
+	broker, err := newServePlacementBroker(st, newServeTestPlacementProvider(), []byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatalf("newServePlacementBroker: %v", err)
+	}
+
+	if _, err := broker.Provision(ctx, serveTestProvisionRequest("nova")); err != nil {
+		t.Fatalf("first Provision: %v", err)
+	}
+	_, err = broker.Provision(ctx, serveTestProvisionRequest("orion"))
+	if !errors.Is(err, domain.ErrUnschedulable) {
+		t.Fatalf("second Provision = %v, want quota rejection", err)
+	}
+}
+
+func TestBuildLeadProvisionerRequiresBroker(t *testing.T) {
+	t.Setenv("LOOM_DEPLOYMENT_ID", "test-deployment")
+	st := memstore.New()
+	if got := buildLeadProvisioner(st, nil); got != nil {
+		t.Fatalf("buildLeadProvisioner(nil broker) = %#v, want nil", got)
+	}
+	broker, err := newServePlacementBroker(st, newServeTestPlacementProvider(), []byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatalf("newServePlacementBroker: %v", err)
+	}
+	if got := buildLeadProvisioner(st, broker); got == nil {
+		t.Fatal("buildLeadProvisioner(with broker) = nil, want provisioner")
+	}
+}
+
+func serveTestProvisionRequest(agent string) placement.ProvisionRequest {
+	return placement.ProvisionRequest{
+		WorkspaceKey: "WS",
+		AgentName:    agent,
+		SnapshotRef:  "snapshot",
+		Caps:         []string{placement.CapLeadSession},
+		Resource:     placement.ResourceSize{VCPU: 2, MemGiB: 4},
+		Backend:      "codex",
+	}
+}
+
+type serveTestPlacementProvider struct {
+	mu        sync.Mutex
+	next      int
+	sandboxes map[string]placement.ProviderSandbox
+	ptys      map[string][]placement.PtySession
+}
+
+func newServeTestPlacementProvider() *serveTestPlacementProvider {
+	return &serveTestPlacementProvider{
+		sandboxes: make(map[string]placement.ProviderSandbox),
+		ptys:      make(map[string][]placement.PtySession),
+	}
+}
+
+func (p *serveTestPlacementProvider) Create(_ context.Context, req placement.CreateRequest) (placement.CreateResult, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.next++
+	id := "sandbox-" + strconv.Itoa(p.next)
+	p.sandboxes[id] = placement.ProviderSandbox{
+		ID:     id,
+		Labels: copyStringMap(req.Labels),
+		State:  placement.ProviderSandboxRunning,
+	}
+	return placement.CreateResult{SandboxID: id}, nil
+}
+
+func (p *serveTestPlacementProvider) Get(_ context.Context, sandboxID string) (placement.ProviderSandbox, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	sandbox, ok := p.sandboxes[sandboxID]
+	if !ok {
+		return placement.ProviderSandbox{}, placement.ErrSandboxNotFound
+	}
+	return sandbox, nil
+}
+
+func (p *serveTestPlacementProvider) ListManaged(_ context.Context, labels map[string]string) ([]placement.ProviderSandbox, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	var out []placement.ProviderSandbox
+	for _, sandbox := range p.sandboxes {
+		if stringMapContains(sandbox.Labels, labels) {
+			out = append(out, sandbox)
+		}
+	}
+	return out, nil
+}
+
+func (p *serveTestPlacementProvider) Delete(_ context.Context, sandboxID string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.sandboxes, sandboxID)
+	delete(p.ptys, sandboxID)
+	return nil
+}
+
+func (p *serveTestPlacementProvider) UpdateLastActivity(context.Context, string) error {
+	return nil
+}
+
+func (p *serveTestPlacementProvider) SetAutostopInterval(context.Context, string, time.Duration) error {
+	return nil
+}
+
+func (p *serveTestPlacementProvider) PrepareLeadBoot(context.Context, string, placement.LeadBootPrep) error {
+	return nil
+}
+
+func (p *serveTestPlacementProvider) CreatePty(_ context.Context, sandboxID string, spec placement.ProcessSpec) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if _, ok := p.sandboxes[sandboxID]; !ok {
+		return placement.ErrSandboxNotFound
+	}
+	sessionID := strings.TrimSpace(spec.SessionID)
+	if sessionID == "" {
+		sessionID = placement.LeadPTYSessionID
+	}
+	p.ptys[sandboxID] = append(p.ptys[sandboxID], placement.PtySession{SessionID: sessionID})
+	return nil
+}
+
+func (p *serveTestPlacementProvider) ListPtySessions(_ context.Context, sandboxID string) ([]placement.PtySession, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if _, ok := p.sandboxes[sandboxID]; !ok {
+		return nil, placement.ErrSandboxNotFound
+	}
+	return append([]placement.PtySession(nil), p.ptys[sandboxID]...), nil
+}
+
+func (p *serveTestPlacementProvider) KillPtySession(context.Context, string, string) error {
+	return nil
+}
+
+func copyStringMap(in map[string]string) map[string]string {
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func stringMapContains(have, want map[string]string) bool {
+	for k, v := range want {
+		if have[k] != v {
+			return false
+		}
+	}
+	return true
 }
 
 func TestConfigureServeLocalRuntimeModeDefaultsHeadless(t *testing.T) {

@@ -33,12 +33,18 @@ func newAgentSessionTestDeps(t *testing.T) (*memstore.Store, *tabmeta.Store, *re
 
 func createActiveDaytonaLeadPlacement(t *testing.T, st store.Store, workspace, agentName, nodeID, sandboxID string, generation int64) {
 	t.Helper()
+	createDaytonaLeadPlacement(t, st, workspace, agentName, nodeID, sandboxID, generation, domain.PlacementStateActive, "")
+}
+
+func createDaytonaLeadPlacement(t *testing.T, st store.Store, workspace, agentName, nodeID, sandboxID string, generation int64, state domain.PlacementState, lastDeleteError string) {
+	t.Helper()
 	now := time.Now().UTC()
 	placement := &domain.NodePlacement{
 		SandboxID:            sandboxID,
 		Generation:           generation,
-		State:                domain.PlacementStateActive,
+		State:                state,
 		LeadProcessStartedAt: &now,
+		LastDeleteError:      lastDeleteError,
 	}
 	if _, err := st.Nodes().Create(context.Background(), store.NodeCreate{
 		WorkspaceKey:    workspace,
@@ -195,6 +201,38 @@ func TestEnsureAgentTerminalSessionCreatesDaytonaLeadRemoteLaunchSpec(t *testing
 	}
 	if !meta.PTYAlive {
 		t.Fatal("PTYAlive = false, want remote metadata attachable")
+	}
+}
+
+func TestLatestActiveDaytonaLeadPlacementReportsProvisioning(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	createDaytonaLeadPlacement(t, st, "E2E", "nova", "placement-1", "", 1, domain.PlacementStateProvisioning, "")
+
+	_, err := latestActiveDaytonaLeadPlacement(ctx, st, "E2E", "nova")
+	if err == nil || !strings.Contains(err.Error(), "lead sandbox is still provisioning") {
+		t.Fatalf("latestActiveDaytonaLeadPlacement = %v, want provisioning error", err)
+	}
+}
+
+func TestLatestActiveDaytonaLeadPlacementReportsFailedLatestState(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	createDaytonaLeadPlacement(t, st, "E2E", "nova", "placement-1", "sandbox-1", 1, domain.PlacementStateReleased, "create sandbox denied")
+
+	_, err := latestActiveDaytonaLeadPlacement(ctx, st, "E2E", "nova")
+	if err == nil || !strings.Contains(err.Error(), "lead sandbox provisioning failed: create sandbox denied") {
+		t.Fatalf("latestActiveDaytonaLeadPlacement = %v, want failed placement error", err)
+	}
+}
+
+func TestLatestActiveDaytonaLeadPlacementKeepsOriginalMessageWithoutPlacement(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+
+	_, err := latestActiveDaytonaLeadPlacement(ctx, st, "E2E", "nova")
+	if err == nil || !strings.Contains(err.Error(), "Daytona lead has no active placement to attach") {
+		t.Fatalf("latestActiveDaytonaLeadPlacement = %v, want original no-placement error", err)
 	}
 }
 

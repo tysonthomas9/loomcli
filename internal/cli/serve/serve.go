@@ -29,6 +29,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/usagecmd"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr"
 	driverexecutor "github.com/tysonthomas9/loomcli/internal/driver"
+	"github.com/tysonthomas9/loomcli/internal/leadprovision"
 	"github.com/tysonthomas9/loomcli/internal/placement"
 	"github.com/tysonthomas9/loomcli/internal/placement/daytona"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -51,6 +52,9 @@ const envLoomIssueBridgeDisabled = "LOOM_ISSUE_BRIDGE_DISABLED"
 const envLoomIssueBridgeStatePath = "LOOM_ISSUE_BRIDGE_STATE_PATH"
 const envLoomPlacementReaperInterval = "LOOM_PLACEMENT_REAPER_INTERVAL"
 const envLoomPlacementReaperEnforce = "LOOM_PLACEMENT_REAPER_ENFORCE"
+const envLoomLeadMaxVCPU = "LOOM_LEAD_MAX_VCPU"
+const envLoomLeadMaxMemGiB = "LOOM_LEAD_MAX_MEM_GIB"
+const envLoomLeadAllowlist = "LOOM_LEAD_ALLOWLIST"
 
 const monitorCollectionCacheTTL = 10 * time.Second
 
@@ -240,7 +244,8 @@ func runServe(cmd *cobra.Command, args []string) {
 	// buildPlacementBroker returns nil unless Daytona creds + a deployment id
 	// + an occupant-token key are all configured, so this is a no-op on
 	// deployments that do not place leads in sandboxes.
-	startPlacementReaper(ctx, buildPlacementBroker(storeHandle.Store), placementReaperInterval(), placementReaperEnforce())
+	placementBroker := buildPlacementBroker(storeHandle.Store)
+	startPlacementReaper(ctx, placementBroker, placementReaperInterval(), placementReaperEnforce())
 
 	issueBackendFn := cli.WorkspaceAwareIssueBackendForURL(storeHandle.URL(), fleetState.clientCfg.Actor)
 	monitorDefaultWorkspace := resolveMonitorCollectorWorkspace(storeHandle.Store, fleetState.clientCfg.Workspace)
@@ -249,7 +254,7 @@ func runServe(cmd *cobra.Command, args []string) {
 
 	webuiErr := make(chan error, 1)
 	go func() {
-		cfg := buildServerConfig(monitorHandlers, fleetState, storeHandle)
+		cfg := buildServerConfig(monitorHandlers, fleetState, storeHandle, placementBroker)
 		webuiErr <- webuiapp.StartServer(ctx, cfg)
 	}()
 
@@ -475,11 +480,7 @@ func buildPlacementBroker(st store.Store) *placement.Broker {
 		slog.Error("placement broker disabled: construct Daytona provider", "err", err)
 		return nil
 	}
-	broker, err := placement.NewBroker(placement.Config{
-		Store:    st,
-		Provider: provider,
-		TokenKey: tokenKey,
-	})
+	broker, err := newServePlacementBroker(st, provider, tokenKey)
 	if err != nil {
 		// Most commonly a missing LOOM_DEPLOYMENT_ID (required so provider
 		// sandboxes carry the loom-env label the reaper scopes to).
@@ -488,6 +489,67 @@ func buildPlacementBroker(st store.Store) *placement.Broker {
 	}
 	slog.Info("Placement broker enabled (Daytona lead sandboxes)")
 	return broker
+}
+
+func newServePlacementBroker(st store.Store, provider placement.Provider, tokenKey []byte) (*placement.Broker, error) {
+	// POC operating note: one Codex auth.json (ChatGPT OAuth, including a
+	// refresh token) is seeded into every lead sandbox. If OpenAI rotates the
+	// refresh token, concurrent leads can invalidate each other's token. The
+	// small default MaxLive (about four 2/4 leads) bounds this shared-OAuth
+	// blast radius; the real fix (post-POC, ticket 08 §2) is per-lead
+	// short-lived tokens. Revoke the codex + claude creds at POC close.
+	return placement.NewBroker(placement.Config{
+		Store:    st,
+		Provider: provider,
+		TokenKey: tokenKey,
+		MaxLive: placement.ResourceSize{
+			VCPU:   leadMaxVCPU(),
+			MemGiB: leadMaxMemGiB(),
+		},
+	})
+}
+
+func buildLeadProvisioner(st store.Store, broker *placement.Broker) *leadprovision.Provisioner {
+	if st == nil || broker == nil {
+		return nil
+	}
+	return leadprovision.New(
+		broker,
+		st,
+		bootstrap.LoomDir(),
+		leadAllowlist(),
+		daytona.DefaultSnapshotName,
+		leadprovision.DefaultResource(),
+	)
+}
+
+func leadMaxVCPU() int {
+	return boundedIntEnv(envLoomLeadMaxVCPU, 8, 64)
+}
+
+func leadMaxMemGiB() int {
+	return boundedIntEnv(envLoomLeadMaxMemGiB, 16, 128)
+}
+
+// leadAllowlist resolves the network domain allowlist for lead sandboxes.
+// Daytona applies the allowlist at create time only, so a change here affects
+// only newly provisioned sandboxes -- never a lead already running.
+func leadAllowlist() []string {
+	raw := strings.TrimSpace(os.Getenv(envLoomLeadAllowlist))
+	if raw == "" {
+		return leadprovision.DefaultAllowlist()
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	if len(out) == 0 {
+		return leadprovision.DefaultAllowlist()
+	}
+	return out
 }
 
 func driverExecutorEnabled() bool {
@@ -640,7 +702,7 @@ func buildMonitorHandlers(collectDataFn metricscmd.CollectDataFn, staleDetectorH
 	}
 }
 
-func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState, storeHandle *bootstrap.StoreHandle) webui.ServerConfig {
+func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState, storeHandle *bootstrap.StoreHandle, placementBroker *placement.Broker) webui.ServerConfig {
 	gitOps := opsimpl.NewGitOps()
 	resolvedBackend := cli.ResolveBackendName()
 	log.Printf("Terminal backend: %s", resolvedBackend)
@@ -657,6 +719,7 @@ func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState, sto
 		cfg.DriverAPIToken = driverAPIToken()
 		cfg.DriverAPIBaseURL = driverAPIBaseURL()
 		cfg.DriverRunTokenKey = driverRunTokenKey()
+		cfg.LeadProvisioner = buildLeadProvisioner(storeHandle.Store, placementBroker)
 	}
 	applyFleetConfig(&cfg, fs)
 	applyWorkspaceConfig(&cfg)

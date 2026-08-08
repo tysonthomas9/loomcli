@@ -1,8 +1,10 @@
 package agents
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -51,9 +53,10 @@ func visibleInteractivePrompts() []domain.BuiltinInteractivePrompt {
 	return out
 }
 
-func HandleCreate(agentSvc service.AgentService, hub *realtime.Hub) http.HandlerFunc {
+func HandleCreate(agentSvc service.AgentService, hub *realtime.Hub, provisioner leadProvisioner) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ws := requestWorkspaceID(r)
+		actor := r.Header.Get("X-Actor")
 		ctx, span := startSpan(r.Context(), "service.Agent.Create",
 			attribute.String("loom.workspace", ws))
 		defer span.End()
@@ -82,7 +85,18 @@ func HandleCreate(agentSvc service.AgentService, hub *realtime.Hub) http.Handler
 			handler.HandleServiceError(w, err)
 			return
 		}
-		broadcastAgentRefresh(hub, ws, created.Name, r.Header.Get("X-Actor"))
+		broadcastAgentRefresh(hub, ws, created.Name, actor)
+		if provisioner != nil {
+			go func(ws, name, actor string) {
+				pctx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
+				defer cancel()
+				if err := provisioner.ProvisionForAgent(pctx, ws, name); err != nil {
+					slog.Error("eager lead provisioning failed", "ws", ws, "agent", name, "err", err)
+					return
+				}
+				broadcastAgentRefresh(hub, ws, name, actor)
+			}(ws, created.Name, actor)
+		}
 		handler.WriteJSON(w, http.StatusCreated, created)
 	}
 }
