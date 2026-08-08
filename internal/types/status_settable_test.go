@@ -88,6 +88,68 @@ func TestValidateSettableStatus_CoversEveryBuiltinStatus(t *testing.T) {
 	}
 }
 
+// IsSystemManaged is the single naming of the server-owned trio, so it has to be
+// exactly that trio: too wide and a status stops being settable, too narrow and a
+// client can ask for a transition the write path does not perform.
+func TestIsSystemManaged(t *testing.T) {
+	systemManaged := map[Status]bool{
+		StatusTombstone: true, StatusPinned: true, StatusHooked: true,
+	}
+	for _, s := range BuiltinStatuses() {
+		if got := s.IsSystemManaged(); got != systemManaged[s] {
+			t.Errorf("Status(%q).IsSystemManaged() = %v, want %v", s, got, systemManaged[s])
+		}
+	}
+	// Nothing outside the vocabulary is the server's to set either.
+	for _, s := range []Status{"", "waiting", "Pinned", " hooked"} {
+		if s.IsSystemManaged() {
+			t.Errorf("Status(%q).IsSystemManaged() = true, want false", s)
+		}
+	}
+}
+
+// UserFacingStatuses is the list two API validators read instead of keeping one
+// each: the DTO layer's isAPIStatus and the frontend's USER_SELECTABLE_STATUSES
+// (pinned to it by TestFrontendStatusVocabulary). It has to be the built-in list
+// minus exactly the system-managed statuses, in the same order.
+func TestUserFacingStatuses(t *testing.T) {
+	got := UserFacingStatuses()
+
+	var want []Status
+	for _, s := range BuiltinStatuses() {
+		if !s.IsSystemManaged() {
+			want = append(want, s)
+		}
+	}
+	if len(got) != len(want) {
+		t.Fatalf("UserFacingStatuses() = %v (%d), want %v (%d)", got, len(got), want, len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("UserFacingStatuses()[%d] = %q, want %q — order must match BuiltinStatuses",
+				i, got[i], want[i])
+		}
+	}
+
+	// Spelled out once, so a change to either the vocabulary or the trio has to be
+	// looked at rather than absorbed by a derivation that agrees with itself.
+	expect := []Status{StatusOpen, StatusInProgress, StatusBlocked, StatusDeferred, StatusReview, StatusClosed}
+	if len(got) != len(expect) {
+		t.Fatalf("UserFacingStatuses() = %v, want %v", got, expect)
+	}
+	for i := range expect {
+		if got[i] != expect[i] {
+			t.Errorf("UserFacingStatuses()[%d] = %q, want %q", i, got[i], expect[i])
+		}
+	}
+
+	// Wider than the PATCH whitelist on purpose: closed and in_progress are
+	// user-facing words that happen to need their own endpoints.
+	if err := ValidateSettableStatus(StatusClosed); err == nil {
+		t.Error("ValidateSettableStatus(closed) = nil — the two cuts have been collapsed into one")
+	}
+}
+
 // BuiltinStatuses is what lets the parity checks walk the whole vocabulary
 // instead of re-listing it, so it has to actually be whole.
 func TestBuiltinStatuses(t *testing.T) {
