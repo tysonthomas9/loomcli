@@ -161,12 +161,43 @@ compliance). Lead (B2k): decomposition shape vs runs 19/20 (task count,
 module plan), refactor-vs-functional corrective mix, verify-task filing rate
 (zero-sum watch). Both: everything in the audit instrument set.
 
+## Variant POC (2026-08-07, ~$1-2 — RUN, results in trials repo docs/archpoc/)
+
+Four judgment-style variants of the architect prompt, each a REAL codex
+session judging five PLANTED stimuli (good design, copy-paste design,
+clean diff, cycle diff, god-file diff) through the exact rev-4.1 label
+protocol on a toy repo, identical stimuli across variants:
+
+| variant | style | verdicts | notes |
+|---|---|---|---|
+| v1 | generic engineering judgment | 5/5 | clean protocol, ~4.7 min |
+| v2 | research-informed criteria | 5/5 | principled vocabulary in feedback |
+| v3 | strict 8-item checklist, cite-per-rejection | 4/5 by key — but the "miss" was a TRUE finding | rejected the "clean" diff because its appended test classes sit after unittest.main() and never execute on direct run — a real latent defect the fixture author and v1/v2/v4 all missed (verified empirically) |
+| v4 | justify every ruling incl. approvals | 5/5 | ARCH-NOTEs present; ~6 min |
+
+All four: correct label protocol (arch-ok / needs-revision / arch-rework
+with ARCH-FEEDBACK on every rejection), zero forbidden status changes.
+POC mechanics lessons folded into the runner: worktree prune before
+branch reuse; checkout dir named after the repo; --source-repo values
+must be registered repos (the qa-verify lesson, again).
+
+DECISION: **v2 (research-informed) for the full B2j run** — verdict-tied
+with v1 on these stimuli, but its criteria vocabulary gives coders
+actionable feedback grounded in the evidence-ranked list. v3 held as the
+escalation option: its demonstrated strictness catches real subtle
+defects AND is exactly the rejection-spiral risk (it would have spent a
+rework loop on a defect invisible to the standard runner). v4's mandatory
+approval notes not adopted — the post-run rubber-stamp audit covers that
+need without in-run token cost.
+
 ## Ladder
 
-1. Free: stub assertions for B2j wiring (arch session bring-up, delivery,
-   no status changes possible), prompt purity re-read, `bash -n`.
-2. Codex vet of both arm diffs (standing discipline — five for five on
+1. ~~Variant POC~~ DONE (above).
+2. Free: stub assertions for B2j wiring (arch session bring-up, delivery,
+   arch-gate/arch-ok/arch-rework flow, fail-open timeout), prompt purity
+   re-read, `bash -n`.
+3. Codex vet of both arm diffs (standing discipline — five for five on
    catching real bugs).
-3. Two paid runs, sequential: `loom-generic-tasks-arch-1`, then
-   `loom-generic-tasks-leadm-1` (~$180–200 each), replica judge, full audit
-   toolchain post-run, then the fork verdict.
+4. Two paid runs, sequential: `loom-generic-tasks-arch-1` (v2 prompt),
+   then `loom-generic-tasks-leadm-1` (~$180–200 each), replica judge,
+   full audit toolchain post-run, then the fork verdict.
