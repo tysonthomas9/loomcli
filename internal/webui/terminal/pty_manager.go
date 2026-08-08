@@ -38,6 +38,7 @@ import (
 	"github.com/creack/pty"
 
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
+	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
@@ -73,7 +74,7 @@ const termEnv = "TERM=xterm-256color"
 const workspaceEnvPrefix = "LOOM_WORKSPACE="
 
 func terminalSpawnEnv(base []string) []string {
-	filtered := pinCurrentLoomOnPath(interaction.FilterChildBaseEnv(base))
+	filtered := pinCurrentLoomOnPath(platformruntime.FilterSubprocessEnv(platformruntime.SubprocessEnvInteractionChild, base))
 	env := make([]string, 0, len(filtered)+1)
 	for _, entry := range filtered {
 		switch {

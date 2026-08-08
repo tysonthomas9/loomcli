@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
+	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
 )
 
 const (
@@ -111,7 +111,7 @@ func prepareCodexLeadRuntime(cfg CodexLeadRuntimeConfig) (string, string, []stri
 // config. This lets commands run by the interactive Lead resolve the Desktop
 // workspace without inheriting stale or forged operator scope or credentials.
 func codexLeadRuntimeBaseEnv(cfg CodexLeadRuntimeConfig, base []string) []string {
-	env := interaction.FilterChildBaseEnv(base)
+	env := platformruntime.FilterSubprocessEnv(platformruntime.SubprocessEnvInteractionChild, base)
 	workspace := strings.TrimSpace(cfg.Workspace)
 	if workspace != "" {
 		env = replaceEnvironmentValue(env, "LOOM_WORKSPACE", workspace)

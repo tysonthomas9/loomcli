@@ -744,7 +744,7 @@ func retryExecutionRequest(candidate RetryCandidate) ExecutionDispatchRequest {
 	}
 	return ExecutionDispatchRequest{
 		WorkspaceKey:            candidate.Event.WorkspaceKey,
-		IdempotencyKey:          deliveryDispatchIdempotencyKey(candidate.Event.IdempotencyKey, candidate.Delivery.TriggerBindingID),
+		IdempotencyKey:          DeliveryDispatchIdempotencyKey(candidate.Event.IdempotencyKey, candidate.Delivery.TriggerBindingID),
 		ExpectedDeliveryStatus:  candidate.Delivery.Status,
 		ExpectedDeliveryAttempt: candidate.Delivery.Attempt,
 		DriverID:                candidate.Target.DriverID,

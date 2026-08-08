@@ -87,22 +87,20 @@ if [[ -s "$tmp" ]]; then
     case "$file" in
       internal/bootstrap/openstore.go | \
       internal/bootstrap/embedded.go | \
-      internal/app/serve/artifacts.go | \
       internal/app/serve/artifacts_fleetdb.go | \
-      internal/app/serve/automationcomposition/automation_execution.go | \
-      internal/app/serve/automationcomposition/automation_fleetdb.go | \
-      internal/app/serve/automationcomposition/workflow_catalog.go | \
+      internal/app/serve/automation_execution.go | \
+      internal/app/serve/automation_fleetdb.go | \
+      internal/app/serve/automation_workflow_catalog.go | \
       internal/app/serve/execution.go | \
       internal/app/serve/execution_driver_run_fleetdb.go | \
       internal/app/serve/execution_task_run_ports.go | \
       internal/app/serve/execution_task_run_recovery.go | \
-      internal/app/serve/sourcecontrolcomposition/source_control.go | \
-      internal/app/serve/sourcecontrolcomposition/connectors_fleetdb.go | \
-      internal/app/serve/agentcomposition/provisioning.go | \
-      internal/app/serve/agentcomposition/agents.go | \
-      internal/app/serve/agentcomposition/agents_fleetdb.go | \
-      internal/app/serve/interactioncomposition/interaction_fleetdb.go | \
-      internal/app/serve/interactioncomposition/interaction_transcript.go | \
+      internal/app/serve/source_control_composition.go | \
+      internal/app/serve/agents_provisioning.go | \
+      internal/app/serve/agents_composition.go | \
+      internal/app/serve/agents_fleetdb.go | \
+      internal/app/serve/interaction_fleetdb.go | \
+      internal/app/serve/interaction_transcript.go | \
       internal/app/serve/workflow_catalog.go | \
       internal/app/serve/workflow_catalog_fleetdb.go | \
       internal/app/agentprovisioning/fleetdb/adapter.go | \

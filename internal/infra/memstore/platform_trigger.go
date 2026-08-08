@@ -450,7 +450,7 @@ func (s *triggerRouteStore) DispatchTriggerRouteV2(ctx context.Context, ws, rout
 		leg := triggerRouteLeg{
 			RunID:          "run-" + shortTriggerHash(event.EventID, binding.BindingID),
 			DeliveryID:     "delivery-" + event.EventID + "-" + binding.BindingID,
-			IdempotencyKey: compositeTriggerIdempotencyKey(in.IdempotencyKey, binding.BindingID),
+			IdempotencyKey: automation.DeliveryDispatchIdempotencyKey(in.IdempotencyKey, binding.BindingID),
 		}
 		if legacy {
 			leg = triggerRouteLeg{
@@ -899,17 +899,6 @@ func (s *driverRunStore) hasIdempotencyKey(ws, idempotencyKey string) bool {
 func shortTriggerHash(parts ...string) string {
 	sum := sha256.Sum256([]byte(strings.Join(parts, "|")))
 	return hex.EncodeToString(sum[:])[:12]
-}
-
-// compositeTriggerIdempotencyKey scopes the ingress idempotency key to one
-// fan-out leg ({idempotencyKey}#{bindingID}) so each matched binding's run
-// dedups independently. An absent ingress key stays absent — there is nothing
-// to dedup on.
-func compositeTriggerIdempotencyKey(idempotencyKey, bindingID string) string {
-	if idempotencyKey == "" {
-		return ""
-	}
-	return idempotencyKey + "#" + bindingID
 }
 
 // runID returns the caller-supplied id, or a generated monotonic one. fleet-db

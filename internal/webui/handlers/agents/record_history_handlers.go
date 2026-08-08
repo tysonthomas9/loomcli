@@ -5,7 +5,6 @@ import (
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/webui/handlers/runhistory"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
 
@@ -18,7 +17,7 @@ func (m *Module) listAgentRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := agentRouteValue(r, "id", "name")
-	limit, ok := runhistory.ParseRunLimit(w, r)
+	limit, ok := handler.ParseRunLimit(w, r)
 	if !ok {
 		return
 	}
@@ -56,5 +55,5 @@ func (m *Module) runsForAgent(ctx context.Context, ws, agentID string, limit int
 	if err != nil {
 		return nil, err
 	}
-	return runhistory.SortAndTrim(runs, limit), nil
+	return handler.SortAndTrim(runs, limit), nil
 }

@@ -17,7 +17,7 @@ import (
 //
 // Hook ordering matters: FleetBackendHook must register first so that by
 // the time Activate fires, ResourceKeyFleetBackend is in the workspace's
-// resource bag. appinfra.RegisterHooks enforces this.
+// resource bag. app.RegisterHooks enforces this.
 type FleetSubscriberHook struct {
 	multiSub *subscription.MultiWorkspaceSubscriber
 	registry *coordinator.WorkspaceRegistry

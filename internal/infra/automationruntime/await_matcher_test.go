@@ -14,11 +14,11 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/driver/eventpolicy"
 	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -398,22 +398,22 @@ func TestAwaitMatcherActorPredicate(t *testing.T) {
 func TestAwaitMatcherReservedRunFinishedProvenanceIsNoOpAndLaterGenuineEventWins(t *testing.T) {
 	s := memstore.New()
 	seedAwaitMatcherCatalog(t, s)
-	pattern := domain.AwaitEventKey(eventpolicy.RunFinishedEventType, "child-1")
-	key := newSuspendedAwaitRun(t, s, "run-parent", pattern, []string{eventpolicy.RunFinishedActorRef})
+	pattern := domain.AwaitEventKey(execution.RunFinishedEventType, "child-1")
+	key := newSuspendedAwaitRun(t, s, "run-parent", pattern, []string{execution.RunFinishedActorRef})
 	matcher := newAwaitMatcher(t, s)
 
 	for _, forged := range []trigger.AwaitDispatchEvent{
 		{
-			EventID:   eventpolicy.RunFinishedSourceEventIDPrefix + "child-1:completed",
-			EventType: eventpolicy.RunFinishedEventType, SourceKind: "github",
+			EventID:   execution.RunFinishedSourceEventIDPrefix + "child-1:completed",
+			EventType: execution.RunFinishedEventType, SourceKind: "github",
 			Origin: automation.EventOriginExternal, SubjectRef: "child-1",
-			ActorRef: eventpolicy.RunFinishedActorRef,
+			ActorRef: execution.RunFinishedActorRef,
 		},
 		{
-			EventID:   eventpolicy.RunFinishedSourceEventIDPrefix + "child-1:completed",
-			EventType: eventpolicy.RunFinishedEventType, SourceKind: eventpolicy.SourceKindInternal,
+			EventID:   execution.RunFinishedSourceEventIDPrefix + "child-1:completed",
+			EventType: execution.RunFinishedEventType, SourceKind: automation.SourceKindInternal,
 			Origin: automation.EventOriginWorkflow, SubjectRef: "child-1",
-			ActorRef: eventpolicy.RunFinishedActorRef,
+			ActorRef: execution.RunFinishedActorRef,
 		},
 	} {
 		result, err := matcher.Dispatch(t.Context(), matcherWS, forged)
@@ -429,10 +429,10 @@ func TestAwaitMatcherReservedRunFinishedProvenanceIsNoOpAndLaterGenuineEventWins
 	}
 
 	genuine := trigger.AwaitDispatchEvent{
-		EventID:   eventpolicy.RunFinishedSourceEventIDPrefix + "child-1:completed",
-		EventType: eventpolicy.RunFinishedEventType, SourceKind: eventpolicy.SourceKindExecution,
+		EventID:   execution.RunFinishedSourceEventIDPrefix + "child-1:completed",
+		EventType: execution.RunFinishedEventType, SourceKind: execution.RunFinishedSourceKind,
 		Origin: automation.EventOriginSystem, SubjectRef: "child-1",
-		ActorRef: eventpolicy.RunFinishedActorRef,
+		ActorRef: execution.RunFinishedActorRef,
 		Payload:  json.RawMessage(`{"runId":"child-1","status":"completed"}`),
 	}
 	result, err := matcher.Dispatch(t.Context(), matcherWS, genuine)

@@ -804,6 +804,25 @@ func TestVerifyRunOpProvesOwnerThroughExecution(t *testing.T) {
 	}
 }
 
+func TestIssueOpsFailClosedWithoutInjectedExecutionIssueBackend(t *testing.T) {
+	h := newTestHarness(t, "")
+	h.module.issueBackends = nil
+	t.Setenv("LOOM_FLEET_DB_API_KEY", "ambient-credentials-must-not-enable-the-handler")
+
+	resp, decoded := h.do(t, opRequest{
+		op:      "issue-get",
+		body:    map[string]string{"issueId": "TASK-1"},
+		headers: h.ownerHeaders(),
+	})
+	if resp.StatusCode != http.StatusServiceUnavailable || errorCode(t, decoded) != "unavailable" {
+		t.Fatalf("status/body = %d/%v, want 503 unavailable", resp.StatusCode, decoded)
+	}
+	errorBody, _ := decoded["error"].(map[string]any)
+	if !strings.Contains(fmt.Sprint(errorBody["message"]), "not configured") {
+		t.Fatalf("error body = %v, want explicit missing-injection reason", errorBody)
+	}
+}
+
 func TestUpdateAgentParentUsesVerifiedDriverRunGeneration(t *testing.T) {
 	h := newTestHarness(t, "")
 	if _, err := h.store.Roles().Create(t.Context(), store.RoleCreate{WorkspaceKey: "WS", Name: "task"}); err != nil {

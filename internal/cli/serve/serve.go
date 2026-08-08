@@ -20,9 +20,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/metricscmd"
-	"github.com/tysonthomas9/loomcli/internal/cli/serve/monitorwire"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/opsimpl"
-	"github.com/tysonthomas9/loomcli/internal/cli/serve/runtimecomposition"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/runtimewire"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/serveadapter"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr"
@@ -235,7 +233,7 @@ func runServe(cmd *cobra.Command, args []string) {
 		storeHandle.FleetDBClientAPIKey(),
 		fleetState.clientCfg.Actor,
 	)
-	taskReadyCallbacks := runtimecomposition.BuildTaskReadyBridgeCallbacks(
+	taskReadyCallbacks := buildTaskReadyBridgeCallbacks(
 		storeHandle.Store.Repos(),
 		issueBackendFn,
 	)
@@ -263,18 +261,18 @@ func runServe(cmd *cobra.Command, args []string) {
 		log.Fatal("failed to compose outbox dispatcher: Interaction chat commands are required")
 	}
 	runtimeConfig := buildServeRuntimeConfig()
-	runtimecomposition.StartOutboxDispatcher(
+	startOutboxDispatcher(
 		ctx,
 		storeHandle.Store,
 		cfg.ExecutionCapability,
 		capabilities.interaction.ChatMessenger(),
 		runtimeConfig.WorkspaceScope,
 	)
-	stopRuntime, err := runtimecomposition.Start(
+	stopRuntime, err := startServeRuntime(
 		ctx,
 		storeHandle,
 		cfg,
-		runtimecomposition.Capabilities{
+		serveRuntimeCapabilities{
 			WorkflowCatalog: capabilities.workflowCatalog,
 			Automation:      capabilities.automation,
 			Runtime:         capabilities.runtime,
@@ -334,7 +332,7 @@ func buildMonitorCollectDataFn(workspaceHint string, issueBackendFn metricscmd.I
 	// one initial fetch and then uses workspace SSE mutations to trigger
 	// additional refreshes, so an unconditional server-side warmer just creates
 	// idle fleet-db fanout and OTEL spans.
-	return monitorwire.BuildCollectDataFn(workspaceHint, issueBackendFn, monitorCollectionCacheTTL)
+	return buildCollectDataFn(workspaceHint, issueBackendFn, monitorCollectionCacheTTL)
 }
 
 func resolveMonitorCollectorWorkspace(st store.Store, fallbackWorkspace string) string {
@@ -603,7 +601,7 @@ func warnNonLocalBind() {
 }
 
 func initUsageStore() {
-	usageHandler = monitorwire.BuildUsageHandler(cli.GetWorkspaceRuntimeDir())
+	usageHandler = buildUsageHandler(cli.GetWorkspaceRuntimeDir())
 }
 
 func buildMonitorHandlers(
@@ -614,7 +612,7 @@ func buildMonitorHandlers(
 	defaultWorkspace string,
 	monitorStoreDataSource *metricscmd.MonitorStoreDataSource,
 ) webui.MonitorHandlers {
-	return monitorwire.BuildHandlers(
+	return composeMonitorHandlers(
 		collectDataFn, staleDetectorHandler, issueBackendFn, defaultWorkspace, usageHandler,
 		monitorStoreDataSource, metricscmd.HandleWorkspaces(st), st.DriverRuns(),
 	)

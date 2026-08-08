@@ -134,6 +134,106 @@ func TestTaskRunnerEnvAPIBaseURL(t *testing.T) {
 	}
 }
 
+// The configured/legacy backend path is a two-hop launch: HostBridge first
+// filters the serve environment and appends its owner-minted TaskRun facade,
+// then the selected backend CLI applies its own child filter. Pin the first
+// hop for every built-in backend so the backend tests can prove the second hop
+// without substituting ambient FleetDB authority for the scoped facade.
+func TestHostBridgeTaskRunDataEnvelopeCoversEveryBuiltInBackend(t *testing.T) {
+	ambient := []string{
+		"PATH=/usr/bin",
+		"OPENAI_API_KEY=model-provider-secret",
+		"LOOM_WORKSPACE=FORGED",
+		"LOOM_DRIVER_WORKSPACE=FORGED",
+		"LOOM_TASK_RUN_API_URL=https://forged.invalid",
+		"LOOM_TASK_RUN_ID=forged-run",
+		"LOOM_TASK_ID=FORGED-1",
+		"LOOM_TASK_RUN_NODE_ID=forged-node",
+		"LOOM_TASK_RUN_LEASE_ID=forged-lease",
+		"LOOM_TASK_RUN_LEASE_TOKEN=forged-task-token",
+		"LOOM_TASK_RUN_FENCING_TOKEN=999",
+		"LOOM_FLEET_DB_URL=https://fleet.invalid",
+		"LOOM_FLEET_DB_API_KEY=fleet-secret",
+		"LOOM_FLEET_DB_ACTOR=forged-actor",
+		"LOOM_DRIVER_FLEET_DB_URL=https://driver-fleet.invalid",
+		"LOOM_DRIVER_FLEET_DB_API_KEY=driver-fleet-secret",
+		"LOOM_DRIVER_FLEET_DB_ACTOR=driver-run:forged",
+		"LOOM_FLEET_API_KEY=legacy-fleet-secret",
+		"FLEET_TOKEN=fleet-token",
+		"GITHUB_TOKEN=forge-secret",
+		"GH_TOKEN=forge-secret",
+	}
+	executor := HostBridgeTaskExecutor{
+		WorktreePath: "/worktree",
+		APIBaseURL:   testTaskRunAPIURL,
+	}
+
+	for _, backend := range []string{"codex", "claude", "gemini", "opencode", "cursor"} {
+		t.Run(backend, func(t *testing.T) {
+			req := hostBridgeTaskExecRequest()
+			req.Runner = LocalTaskRunnerEntrypoint
+			req.RunnerKind = RunnerKindFlueWorkflow
+			req.RunnerEntrypoint = LocalTaskRunnerEntrypoint
+			req.RunnerTrustLevel = workflowcatalog.DriverTrustTrusted
+			input, err := json.Marshal(map[string]any{
+				ManagedAgentPolicyInputKey: ManagedAgentPolicy{
+					Version:        1,
+					AgentServiceID: "agent-" + backend,
+					RoleName:       "role-" + backend,
+					Backend:        backend,
+				},
+			})
+			if err != nil {
+				t.Fatalf("marshal managed-agent policy: %v", err)
+			}
+			req.Input = input
+			requestJSON, err := json.Marshal(req)
+			if err != nil {
+				t.Fatalf("marshal TaskRun request: %v", err)
+			}
+
+			base := taskRunnerBaseEnvForRequest(req, ambient)
+			env := append(append([]string{}, base...), executor.taskRunnerEnv(req, string(requestJSON), base)...)
+			want := map[string]string{
+				TaskRunnerBackendEnv:          backend,
+				"LOOM_WORKTREE_PATH":          "/worktree",
+				"LOOM_TASK_RUN_API_URL":       testTaskRunAPIURL,
+				"LOOM_WORKSPACE":              req.WorkspaceKey,
+				"LOOM_DRIVER_WORKSPACE":       req.WorkspaceKey,
+				"LOOM_TASK_RUN_ID":            req.TaskRunID,
+				"LOOM_TASK_ID":                req.TaskID,
+				"LOOM_TASK_RUN_NODE_ID":       req.NodeID,
+				"LOOM_TASK_RUN_LEASE_ID":      req.LeaseID,
+				"LOOM_TASK_RUN_LEASE_TOKEN":   req.LeaseToken,
+				"LOOM_TASK_RUN_FENCING_TOKEN": strconv.FormatInt(req.FencingToken, 10),
+				"LOOM_TASK_RUN_REQUEST_JSON":  string(requestJSON),
+			}
+			for key, value := range want {
+				count := 0
+				got := ""
+				for _, entry := range env {
+					if strings.HasPrefix(entry, key+"=") {
+						count++
+						got = strings.TrimPrefix(entry, key+"=")
+					}
+				}
+				if count != 1 || got != value {
+					t.Errorf("%s = %q across %d entries, want exact owner value %q once; env=%v", key, got, count, value, env)
+				}
+			}
+			for _, forbidden := range []string{
+				"LOOM_FLEET_DB_URL", "LOOM_FLEET_DB_API_KEY", "LOOM_FLEET_DB_ACTOR",
+				"LOOM_DRIVER_FLEET_DB_URL", "LOOM_DRIVER_FLEET_DB_API_KEY", "LOOM_DRIVER_FLEET_DB_ACTOR",
+				"LOOM_FLEET_API_KEY", "FLEET_TOKEN", "GITHUB_TOKEN", "GH_TOKEN",
+			} {
+				if envHasAny(env, forbidden) {
+					t.Errorf("forbidden host authority %s reached %s TaskRun runner env", forbidden, backend)
+				}
+			}
+		})
+	}
+}
+
 func TestTaskRunnerAdmittedRepositoryRemoteEnvIsTrustedLocalOnly(t *testing.T) {
 	executor := HostBridgeTaskExecutor{
 		WorktreePath:     "/wt",

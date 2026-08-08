@@ -17,7 +17,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/webui/handlers/runhistory"
 	serverhandler "github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
@@ -523,7 +522,7 @@ func (module *Module) listAgentActivity(response http.ResponseWriter, request *h
 		writeError(response, http.StatusBadRequest, "invalid", "canonical workspace and agent id are required")
 		return
 	}
-	limit, ok := runhistory.ParseRunLimit(response, request)
+	limit, ok := serverhandler.ParseRunLimit(response, request)
 	if !ok {
 		return
 	}

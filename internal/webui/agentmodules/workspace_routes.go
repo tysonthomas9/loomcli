@@ -74,7 +74,7 @@ func newWorkspaceModules(deps Deps, automationModules automationroutes.Modules) 
 			DaytonaProvider: deps.DaytonaProvider,
 		}),
 		driverapi.NewModule(driverapi.Config{
-			Store: deps.Store, FleetBaseURL: deps.FleetBaseURL, APIBaseURL: deps.DriverAPIBaseURL,
+			Store: deps.Store, APIBaseURL: deps.DriverAPIBaseURL,
 			IssueBackends: deps.ExecutionIssueBackends,
 			APIToken:      deps.DriverAPIToken, RunTokenKey: deps.DriverRunTokenKey,
 			LocalSettingsDir: deps.LocalSettingsDir, LocalRepoPath: storeadapter.ResolveRepoPath,

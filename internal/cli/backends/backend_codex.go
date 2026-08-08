@@ -116,6 +116,7 @@ func buildCodexNonInteractiveArgs(prompt string) []string {
 func buildBackendEnv(workDir, agentName string) []string {
 	env := appendLoomExecutableDirToPath(cli.FilteredEnv())
 	env = preserveSupervisorShellPin(env)
+	env = appendTaskRunDataEnvelope(env)
 	env = append(env, "LOOM_WORKTREE_PATH="+workDir)
 	if agentName != "" {
 		env = append(env, "LOOM_AGENT_NAME="+agentName)

@@ -18,6 +18,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/driver/daytonahost"
 	"github.com/tysonthomas9/loomcli/internal/driver/sandbox"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
 )
 
 // DaytonaTaskRunnerEntrypoint is the provider-blind Daytona task runner. It
@@ -40,7 +41,7 @@ func RunDaytonaProviderHost(
 	inherited := os.Environ()
 	return daytonahost.Run(ctx, opts, daytonahost.Runtime{
 		NodePath:     processNodePath(""),
-		BaseEnv:      scopedSubprocessBaseEnv(inherited),
+		BaseEnv:      platformruntime.FilterSubprocessEnv(platformruntime.SubprocessEnvDriverRemote, inherited),
 		InheritedEnv: inherited,
 	})
 }
@@ -136,7 +137,7 @@ func RunBundledTaskRunner(ctx context.Context, opts BundledRunnerOptions) (json.
 // environment. In particular, forge and control-plane credentials never reach
 // the Node launcher.
 func buildLeafRunnerEnv(opts BundledRunnerOptions, entrypoint, requestJSON string) []string {
-	env := localTaskRunnerBaseEnv(os.Environ())
+	env := platformruntime.CurrentSubprocessEnv(platformruntime.SubprocessEnvDriverLocalTaskRunner)
 	env = append(env,
 		"LOOM_TASK_RUNNER_SERVER_PATH="+opts.ServerPath,
 		"LOOM_TASK_RUNNER_BUNDLE_ROOT="+filepath.Dir(opts.ServerPath),
@@ -294,7 +295,7 @@ func (r NodeRunner) runtimeEnv(req RunRequest, input []byte) ([]string, error) {
 }
 
 func flueRuntimeEnv(req RunRequest, input []byte, execTaskCommand []string) ([]string, error) {
-	env := driverRuntimeBaseEnv(os.Environ())
+	env := platformruntime.CurrentSubprocessEnv(platformruntime.SubprocessEnvDriverRemote)
 	env = append(env,
 		"LOOM_DRIVER_WORKSPACE="+req.Run.WorkspaceKey,
 		"LOOM_DRIVER_RUN_ID="+req.Run.RunID,

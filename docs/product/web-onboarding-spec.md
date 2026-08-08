@@ -558,7 +558,7 @@ internal/webui/frontend/src/components/BackendSetupTerminal/BackendSetupTerminal
 ```
 internal/webui/app/routes.go
 internal/webui/app/server_app.go        (handler wiring)
-internal/webui/handlermux/handlers.go   (struct field)
+internal/webui/app/top_level_handlers.go   (struct field)
 internal/webui/frontend/src/App.tsx     (onboarding action provider)
 internal/webui/frontend/src/components/RedirectToWorkspace/RedirectToWorkspace.tsx
 internal/webui/frontend/src/components/EmptyWorkspaceBoard/EmptyWorkspaceBoard.tsx

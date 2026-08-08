@@ -43,7 +43,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/driver/eventpolicy"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -181,7 +180,7 @@ func (m *AwaitMatcher) Dispatch(ctx context.Context, ws string, ev AwaitDispatch
 	case m.SystemTimeoutLane && (!isTimeout || ev.ActorRef != domain.AwaitTimeoutActor):
 		return result, fmt.Errorf("await dispatch: timeout lane requires a canonical timeout id and actor: %w", domain.ErrInvalid)
 	}
-	if !isTimeout && !eventpolicy.EligibleForAwait(
+	if !isTimeout && !automation.EligibleForAwait(
 		ev.EventType, string(ev.Origin), ev.SourceKind, ev.ActorRef, ev.EventID,
 	) {
 		// Provenance is immutable. Treat a historical or forged reserved event

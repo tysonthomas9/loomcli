@@ -16,7 +16,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	fleetbackend "github.com/tysonthomas9/loomcli/internal/backend/fleet"
-	"github.com/tysonthomas9/loomcli/internal/webui/app/capabilitycomposition"
+	webuiapp "github.com/tysonthomas9/loomcli/internal/webui/app"
 	issuehandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/issues"
 )
 
@@ -354,7 +354,7 @@ func TestLocalModeEntrypointTitleLookupUsesFleetSearchBeyondFirstPage(t *testing
 		t.Fatalf("create fleet backend: %v", err)
 	}
 
-	workItems, err := capabilitycomposition.NewWorkItems(func(context.Context) backend.IssueBackend {
+	workItems, err := webuiapp.NewWorkItems(func(context.Context) backend.IssueBackend {
 		return fleetIssueBackend
 	})
 	if err != nil {

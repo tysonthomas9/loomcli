@@ -8,7 +8,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/platform/identity"
 )
 
 // MutationTransport is the exact missing FleetDB contract for Interaction.
@@ -114,7 +113,7 @@ func New(
 	return &Adapter{
 		AuthorityAdapter: authorityAdapter,
 		mutations:        mutationTransport,
-		newLeaseID:       identity.NewUUID,
+		newLeaseID:       interaction.NewUUID,
 	}, nil
 }
 

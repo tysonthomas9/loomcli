@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/driver/eventpolicy"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -255,7 +254,7 @@ func (reconciler *AwaitEventReconciler) runWorkspace(ctx context.Context, worksp
 			}
 			continue
 		}
-		if !eventpolicy.EligibleForAwait(
+		if !automation.EligibleForAwait(
 			event.EventType, event.Origin, event.SourceKind,
 			event.ActorRef, canonicalID,
 		) {

@@ -738,7 +738,7 @@
   },
   "ratchets": {
     "composite_store": {
-      "max_production_files": 18,
+      "max_production_files": 15,
       "max_outside_composition": 0,
       "composition_prefixes": [
         "internal/bootstrap/",
@@ -746,7 +746,6 @@
         "internal/cli/serve/",
         "internal/infra/",
         "internal/webui/app/",
-        "internal/webui/modbuilder/",
         "internal/webui/server_config.go"
       ],
       "allowed_production_file_uses": [
@@ -755,18 +754,15 @@
         "internal/cli/serve/metricscmd/handlers.go",
         "internal/cli/serve/metricscmd/monitor_store_data_source.go",
         "internal/cli/serve/opsimpl/gitops.go",
-        "internal/cli/serve/runtimecomposition/loops.go",
-        "internal/cli/serve/runtimecomposition/runtime.go",
         "internal/cli/serve/serve.go",
+        "internal/cli/serve/serve_runtime.go",
+        "internal/cli/serve/serve_runtime_loops.go",
         "internal/cli/serve/serveadapter/serveadapter.go",
         "internal/cli/serve/workspacemgr/workspace_store.go",
         "internal/infra/fleetdb/client.go",
         "internal/infra/memstore/store.go",
+        "internal/webui/app/composition_modules.go",
         "internal/webui/app/server_workspace.go",
-        "internal/webui/modbuilder/agentcomposition/modules.go",
-        "internal/webui/modbuilder/modbuilder.go",
-        "internal/webui/modbuilder/reviewcomposition/modules.go",
-        "internal/webui/modbuilder/sessioncomposition/modules.go",
         "internal/webui/server_config.go"
       ]
     },
@@ -798,7 +794,6 @@
         {"file": "internal/webui/handlers/prreview/module.go", "import": "github.com/tysonthomas9/loomcli/internal/store"},
         {"file": "internal/webui/handlers/prreview/reviewer.go", "import": "github.com/tysonthomas9/loomcli/internal/backend/api/gen"},
         {"file": "internal/webui/handlers/roles/module.go", "import": "github.com/tysonthomas9/loomcli/internal/store"},
-        {"file": "internal/webui/handlers/runhistory/runhistory.go", "import": "github.com/tysonthomas9/loomcli/internal/store"},
         {"file": "internal/webui/handlers/taskrunapi/module.go", "import": "github.com/tysonthomas9/loomcli/internal/backend"},
         {"file": "internal/webui/handlers/taskrunapi/module.go", "import": "github.com/tysonthomas9/loomcli/internal/backend/fleet"},
         {"file": "internal/webui/handlers/taskrunapi/module.go", "import": "github.com/tysonthomas9/loomcli/internal/store"},

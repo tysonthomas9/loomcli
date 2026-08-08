@@ -12,7 +12,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/driver/runnersettings"
 )
 
 const NoopTaskProviderEnvVar = "LOOM_DRIVER_ENABLE_TEST_NOOP_PROVIDER"
@@ -51,7 +50,7 @@ func (e HostBridgeTaskExecutor) resolveTaskRunnerBackend(req TaskExecRequest, ag
 	if backend := strings.TrimSpace(agentPolicy.Backend); backend != "" {
 		return backend
 	}
-	if backend := runnersettings.RuntimeProvider(req.WorkspaceKey); backend != "" {
+	if backend := runtimeProvider(req.WorkspaceKey); backend != "" {
 		return backend
 	}
 	return defaultTaskRunnerBackend
@@ -60,7 +59,7 @@ func (e HostBridgeTaskExecutor) resolveTaskRunnerBackend(req TaskExecRequest, ag
 // RuntimeProviderForWorkspace exposes the driver's canonical local execution
 // provider resolution to inbound adapters without leaking its settings store.
 func RuntimeProviderForWorkspace(workspace string) string {
-	return runnersettings.RuntimeProvider(workspace)
+	return runtimeProvider(workspace)
 }
 
 type localTaskRunnerAgentPolicy = ManagedAgentPolicy

@@ -21,6 +21,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/app/prreviewer"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/infra/connectorscatalog"
 	"github.com/tysonthomas9/loomcli/internal/infra/connectorsproviders"
 	"github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
@@ -34,7 +35,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
-	"github.com/tysonthomas9/loomcli/internal/webui/app/connectorcomposition"
 	localsettingshandler "github.com/tysonthomas9/loomcli/internal/webui/handlers/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
@@ -594,10 +594,7 @@ func newPRReviewHarnessWithCredential(
 
 	var dispatcher connectors.Dispatcher
 	if withDispatcher {
-		dispatcher = connectorcomposition.BuildDispatcher(h.store, h.dataDir, 10*time.Second)
-		if dispatcher == nil {
-			t.Fatal("BuildDispatcher returned nil")
-		}
+		dispatcher = buildTestConnectorDispatcher(t, h.store, h.dataDir)
 	}
 	h.module = NewModule(
 		h.store,
@@ -639,10 +636,7 @@ func (h *prReviewHarness) setSettingsGitHubToken(t *testing.T, token string) {
 
 func (h *prReviewHarness) rebuildWithDataDir(t *testing.T, dataDir string) {
 	t.Helper()
-	dispatcher := connectorcomposition.BuildDispatcher(h.store, dataDir, 10*time.Second)
-	if dispatcher == nil {
-		t.Fatal("BuildDispatcher returned nil")
-	}
+	dispatcher := buildTestConnectorDispatcher(t, h.store, dataDir)
 	h.dataDir = dataDir
 	h.module = NewModule(
 		h.store,
@@ -659,6 +653,28 @@ func (h *prReviewHarness) rebuildWithDataDir(t *testing.T, dataDir string) {
 	)
 	h.mux = http.NewServeMux()
 	h.module.Register(h.mux)
+}
+
+func buildTestConnectorDispatcher(t *testing.T, st prReviewStore, dataDir string) connectors.Dispatcher {
+	t.Helper()
+	vault, err := connectorsvault.NewVaultFromEnvOrKeyFile(dataDir)
+	if err != nil {
+		t.Fatalf("NewVaultFromEnvOrKeyFile: %v", err)
+	}
+	catalog, err := connectorscatalog.New(st.Connectors(), st.ConnectorGrants(), st.ConnectorCalls())
+	if err != nil {
+		t.Fatalf("new connector catalog: %v", err)
+	}
+	dispatcher, err := connectors.NewDispatch(
+		catalog,
+		vault,
+		connectorsproviders.Default(&http.Client{Timeout: 10 * time.Second}),
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("new connector dispatcher: %v", err)
+	}
+	return dispatcher
 }
 
 func (h *prReviewHarness) seedWorkspace(t *testing.T) {

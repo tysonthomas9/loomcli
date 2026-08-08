@@ -15,8 +15,6 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/tysonthomas9/loomcli/internal/app/serve/automationcomposition"
-
 	"github.com/tysonthomas9/loomcli/internal/app/workflowbinding"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
@@ -80,7 +78,7 @@ func TestWorkflowCatalogComposesProductionAutomationCapability(t *testing.T) {
 }
 
 func TestConfiguredWorkflowTargetPreparerProjectsTarget(t *testing.T) {
-	preparer := automationcomposition.NewWorkflowTargetPreparer(func(_ context.Context, workspace, workflow string) (WorkflowTarget, error) {
+	preparer := NewWorkflowTargetPreparer(func(_ context.Context, workspace, workflow string) (WorkflowTarget, error) {
 		if workspace == "TEST" && workflow == "custom-workflow" {
 			return WorkflowTarget{DriverID: "driver-1", DriverVersionID: "version-2"}, nil
 		}
@@ -93,7 +91,7 @@ func TestConfiguredWorkflowTargetPreparerProjectsTarget(t *testing.T) {
 	if target.DriverID != "driver-1" || target.DriverVersionID != "version-2" {
 		t.Fatalf("target = %+v", target)
 	}
-	if _, err := automationcomposition.NewWorkflowTargetPreparer(nil).PrepareWorkflowTarget(t.Context(), "TEST", "custom-workflow"); !errors.Is(err, workflowbinding.ErrUnavailable) {
+	if _, err := NewWorkflowTargetPreparer(nil).PrepareWorkflowTarget(t.Context(), "TEST", "custom-workflow"); !errors.Is(err, workflowbinding.ErrUnavailable) {
 		t.Fatalf("nil preparation error = %v, want %v", err, workflowbinding.ErrUnavailable)
 	}
 	if _, err := preparer.PrepareWorkflowTarget(t.Context(), "TEST", "missing"); !errors.Is(err, domain.ErrNotFound) {

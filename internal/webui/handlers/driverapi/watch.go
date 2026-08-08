@@ -107,7 +107,7 @@ func (m *Module) prepareWatch(w http.ResponseWriter, r *http.Request) (watchSess
 		writeDomainOpError(w, err)
 		return watchSession{}, nil, false
 	}
-	issueBackend, err := m.issueBackends(ws, driverpkg.DriverRunActor(parent.RunID))
+	issueBackend, err := m.executionIssueBackend(ws, driverpkg.DriverRunActor(parent.RunID))
 	if err != nil {
 		writeDomainOpError(w, err)
 		return watchSession{}, nil, false

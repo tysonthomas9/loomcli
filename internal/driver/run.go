@@ -23,8 +23,6 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/driver/eventpolicy"
-	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 )
 
@@ -272,26 +270,19 @@ func RunTokenTTL() (time.Duration, error) {
 // run.finished lifecycle emission (ARCHITECTURE-PROPOSAL §7 step 8, chunk
 // AW6). Every server-side terminal transition notifies Execution-owned awaits
 // and publishes a narrow RunOutcome. Production composition maps that outcome
-// into Automation admission; internal/driver never imports Automation or its
-// application workflow. Both legs are best-effort so a publication failure
-// can never roll back an already committed terminal DriverRun transition.
+// into Automation admission. Both legs are best-effort so a publication
+// failure can never roll back an already committed terminal DriverRun
+// transition.
 
 // RunFinishedEventType is the lifecycle event type terminal DriverRun
 // transitions emit. Already normalized (NormalizeInternalEventType is a
 // no-op on it), so the journaled type and the loopback route suffix match.
-const RunFinishedEventType = eventpolicy.RunFinishedEventType
+const RunFinishedEventType = execution.RunFinishedEventType
 
 // RunFinishedActor is the ActorRef stamped on run.finished events: the
 // server itself. Composition awaits require this exact actor in addition to
 // using the reserved run.finished event type.
-const RunFinishedActor = eventpolicy.RunFinishedActorRef
-
-// AutomationEventTrustPolicy exposes Execution's concrete lifecycle-event
-// policy through Automation's consumer-owned port. Composition depends on the
-// driver package, never on the policy implementation subpackage directly.
-func AutomationEventTrustPolicy() automation.EventTrustPolicy {
-	return eventpolicy.Policy{}
-}
+const RunFinishedActor = execution.RunFinishedActorRef
 
 // maxRunFinishedEventIDLength leaves room for the longest valid FleetDB
 // workspace in Automation's 128-character "internal:{workspace}:{eventID}"
@@ -304,12 +295,12 @@ const maxRunFinishedEventIDLength = 86
 // by Automation's idempotency-key limit; the payload and SubjectRef still carry
 // the exact run ID.
 func RunFinishedEventID(runID string, status domain.DriverRunStatus) string {
-	candidate := eventpolicy.RunFinishedSourceEventIDPrefix + runID + ":" + string(status)
+	candidate := execution.RunFinishedSourceEventIDPrefix + runID + ":" + string(status)
 	if len(candidate) <= maxRunFinishedEventIDLength && isSafeRunFinishedEventID(candidate) {
 		return candidate
 	}
 	digest := sha256.Sum256([]byte(runID))
-	return eventpolicy.RunFinishedSourceEventIDPrefix + "h:" + hex.EncodeToString(digest[:20]) + ":" + string(status)
+	return execution.RunFinishedSourceEventIDPrefix + "h:" + hex.EncodeToString(digest[:20]) + ":" + string(status)
 }
 
 func isSafeRunFinishedEventID(value string) bool {

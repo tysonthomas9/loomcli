@@ -471,9 +471,10 @@ type TriggerRouteDispatchResult struct {
 // in that order. It fronts fleet-db's trigger-routes endpoint.
 //
 // Each write is individually idempotent: the event dedups on the dispatch
-// idempotency key, each leg's run dedups on a per-binding composite
-// {idempotencyKey}#{bindingID} key (the legacy single-binding exact path keeps
-// the bare key), and each leg's delivery id is deterministic. The sequence is
+// idempotency key, each leg's run dedups on the Automation-owned per-binding
+// delivery identity (preserving the historical {idempotencyKey}#{bindingID}
+// form when Fleet accepts it; the legacy single-binding exact path keeps the
+// bare key), and each leg's delivery id is deterministic. The sequence is
 // NOT a single transaction: a failure after earlier legs are durable surfaces
 // as an error, and the caller's redelivery re-runs the sequence, deduping the
 // event and every already-admitted run while writing only the missing

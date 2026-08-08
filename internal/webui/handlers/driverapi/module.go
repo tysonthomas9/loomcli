@@ -38,7 +38,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	dependencies "github.com/tysonthomas9/loomcli/internal/webui/driverapidependencies"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/roles"
 )
 
@@ -55,22 +54,15 @@ const (
 	HeaderDriverFencingToken = "X-Loom-Driver-Fencing-Token" //nolint:gosec // header name, not a credential
 )
 
-// IssueBackendFactory builds a workspace-scoped FleetDB issue backend acting
-// as the given actor. Overridable in tests.
-type IssueBackendFactory = dependencies.IssueBackendFactory
-
-// Config is the stable driver API composition contract.
-type Config = dependencies.Config
-
 // Module serves the workspace-scoped driver-op routes.
 type Module struct {
-	store                dependencies.Store
+	store                Store
 	apiToken             string
 	runTokenKey          []byte
 	apiBaseURL           string
 	worktreePath         string
 	localSettingsDir     string
-	sourceControl        dependencies.SourceControl
+	sourceControl        SourceControl
 	localRepoPath        func(workspaceKey, repoName string) string
 	issueBackends        IssueBackendFactory
 	dispatcher           connectorsmodule.Dispatcher
@@ -84,7 +76,7 @@ type Module struct {
 	taskRuns             execution.TaskRunAPI
 	taskRunAuthorities   execution.TaskRunAuthorityResolver
 	workflowCatalog      workflowcatalog.API
-	artifacts            dependencies.Artifacts
+	artifacts            Artifacts
 	interactionChat      interaction.ChatMessenger
 	ops                  map[string]opHandler
 
@@ -96,7 +88,7 @@ type Module struct {
 
 	// deliverAssignment is a test seam over the driver's lead-assignment
 	// delivery facade.
-	deliverAssignment func(ctx context.Context, st dependencies.Store, workspace, leadName string) (driverpkg.AgentMessageDeliveryResult, error)
+	deliverAssignment func(ctx context.Context, st Store, workspace, leadName string) (driverpkg.AgentMessageDeliveryResult, error)
 }
 
 // NewModule constructs the driver API module. Returns nil-safe behavior: with
@@ -135,7 +127,7 @@ func NewModule(cfg Config) *Module { //nolint:funlen // Operation registration i
 
 		deliverAssignment: func(
 			ctx context.Context,
-			st dependencies.Store,
+			st Store,
 			workspace,
 			leadName string,
 		) (driverpkg.AgentMessageDeliveryResult, error) {
@@ -184,9 +176,6 @@ func NewModule(cfg Config) *Module { //nolint:funlen // Operation registration i
 		if wd, err := os.Getwd(); err == nil {
 			m.worktreePath = wd
 		}
-	}
-	if m.issueBackends == nil {
-		m.issueBackends = dependencies.DefaultIssueBackends(cfg.FleetBaseURL)
 	}
 	return m
 }
@@ -426,7 +415,7 @@ func (m *Module) claimReady(ctx context.Context, ws string, id driverIdentity, b
 	}
 	epicID := firstNonEmpty(params.EpicID, parent.EpicID, driverpkg.DriverRunPayloadEpicID(parent.Payload))
 	actor := driverpkg.DriverRunActor(parent.RunID)
-	issueBackend, err := m.issueBackends(ws, actor)
+	issueBackend, err := m.executionIssueBackend(ws, actor)
 	if err != nil {
 		return nil, err
 	}
@@ -480,7 +469,7 @@ func (m *Module) claimTask(ctx context.Context, ws string, id driverIdentity, bo
 		return nil, fmt.Errorf("taskId required: %w", domain.ErrInvalid)
 	}
 	actor := driverpkg.DriverRunActor(parent.RunID)
-	issueBackend, err := m.issueBackends(ws, actor)
+	issueBackend, err := m.executionIssueBackend(ws, actor)
 	if err != nil {
 		return nil, err
 	}
@@ -519,7 +508,7 @@ func (m *Module) claimReview(ctx context.Context, ws string, id driverIdentity, 
 	if taskID == "" {
 		return nil, fmt.Errorf("taskId required: %w", domain.ErrInvalid)
 	}
-	issueBackend, err := m.issueBackends(ws, driverpkg.DriverRunActor(parent.RunID))
+	issueBackend, err := m.executionIssueBackend(ws, driverpkg.DriverRunActor(parent.RunID))
 	if err != nil {
 		return nil, err
 	}
@@ -621,7 +610,7 @@ func (m *Module) epicGet(ctx context.Context, ws string, id driverIdentity, body
 	if epicID == "" {
 		return nil, fmt.Errorf("epic id required: %w", domain.ErrInvalid)
 	}
-	issueBackend, err := m.issueBackends(ws, driverpkg.DriverRunActor(parent.RunID))
+	issueBackend, err := m.executionIssueBackend(ws, driverpkg.DriverRunActor(parent.RunID))
 	if err != nil {
 		return nil, err
 	}
@@ -644,7 +633,7 @@ func (m *Module) epicSnapshot(ctx context.Context, ws string, id driverIdentity,
 		return nil, err
 	}
 	epicID := firstNonEmpty(params.EpicID, parent.EpicID, driverpkg.DriverRunPayloadEpicID(parent.Payload))
-	issueBackend, err := m.issueBackends(ws, driverpkg.DriverRunActor(parent.RunID))
+	issueBackend, err := m.executionIssueBackend(ws, driverpkg.DriverRunActor(parent.RunID))
 	if err != nil {
 		return nil, err
 	}

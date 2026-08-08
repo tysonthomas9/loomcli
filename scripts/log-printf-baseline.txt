@@ -22,10 +22,10 @@ internal/cli/serve/daemonwire/fleet.go
 internal/cli/serve/daemonwire/stale.go
 internal/cli/serve/metricscmd/handlers.go
 internal/cli/serve/metricscmd/metrics.go
-internal/cli/serve/observability/observability.go
+internal/cli/serve/metricscmd/observability.go
+internal/cli/serve/metricscmd/usage.go
 internal/cli/serve/serve.go
 internal/cli/serve/serve_auth.go
-internal/cli/serve/usagecmd/usage.go
 internal/cli/serve/worker/worker_cmd.go
 internal/cli/serve/workspacemgr/sessions.go
 internal/cli/task_router.go

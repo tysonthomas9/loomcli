@@ -11,11 +11,11 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/driver/eventpolicy"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/store/storetest"
 )
@@ -217,8 +217,8 @@ func TestMemstoreAwaitRegistrationSkipsHistoricalForgedRunFinished(t *testing.T)
 		t.Helper()
 		if _, deduped := s.events.create(&automation.Event{
 			WorkspaceKey: ws, EventID: eventID, SourceEventID: sourceEventID,
-			SourceKind: sourceKind, EventType: eventpolicy.RunFinishedEventType,
-			SubjectRef: subject, ActorRef: eventpolicy.RunFinishedActorRef, Origin: origin,
+			SourceKind: sourceKind, EventType: execution.RunFinishedEventType,
+			SubjectRef: subject, ActorRef: execution.RunFinishedActorRef, Origin: origin,
 			OccurredAt: receivedAt, ReceivedAt: receivedAt,
 			Payload: json.RawMessage(`{"runId":"` + subject + `","status":"completed"}`),
 		}); deduped {
@@ -226,26 +226,26 @@ func TestMemstoreAwaitRegistrationSkipsHistoricalForgedRunFinished(t *testing.T)
 		}
 	}
 
-	appendEvent("stored-forged-only", eventpolicy.RunFinishedSourceEventIDPrefix+"child-forged:completed",
+	appendEvent("stored-forged-only", execution.RunFinishedSourceEventIDPrefix+"child-forged:completed",
 		"child-forged", "github", automation.EventOriginExternal, now)
 	forgedOnly, err := s.Awaits().RegisterAwaitAndCheck(ctx, ws, store.AwaitRegistration{
 		InstanceKey: domain.AwaitInstanceKey("parent-forged", 1), RunID: "parent-forged",
-		Pattern:    domain.AwaitEventKey(eventpolicy.RunFinishedEventType, "child-forged"),
-		ActorAllow: []string{eventpolicy.RunFinishedActorRef}, Deadline: now.Add(time.Hour),
+		Pattern:    domain.AwaitEventKey(execution.RunFinishedEventType, "child-forged"),
+		ActorAllow: []string{execution.RunFinishedActorRef}, Deadline: now.Add(time.Hour),
 	})
 	if err != nil || forgedOnly.Satisfied || forgedOnly.Instance.Status != domain.AwaitPending {
 		t.Fatalf("forged-only registration = %+v, %v; want pending", forgedOnly, err)
 	}
 
-	appendEvent("stored-forged-first", eventpolicy.RunFinishedSourceEventIDPrefix+"child-valid:failed",
+	appendEvent("stored-forged-first", execution.RunFinishedSourceEventIDPrefix+"child-valid:failed",
 		"child-valid", "github", automation.EventOriginExternal, now.Add(time.Second))
-	validID := eventpolicy.RunFinishedSourceEventIDPrefix + "child-valid:completed"
-	appendEvent("stored-genuine-later", validID, "child-valid", eventpolicy.SourceKindExecution,
+	validID := execution.RunFinishedSourceEventIDPrefix + "child-valid:completed"
+	appendEvent("stored-genuine-later", validID, "child-valid", execution.RunFinishedSourceKind,
 		automation.EventOriginSystem, now.Add(2*time.Second))
 	genuine, err := s.Awaits().RegisterAwaitAndCheck(ctx, ws, store.AwaitRegistration{
 		InstanceKey: domain.AwaitInstanceKey("parent-valid", 1), RunID: "parent-valid",
-		Pattern:    domain.AwaitEventKey(eventpolicy.RunFinishedEventType, "child-valid"),
-		ActorAllow: []string{eventpolicy.RunFinishedActorRef}, Deadline: now.Add(time.Hour),
+		Pattern:    domain.AwaitEventKey(execution.RunFinishedEventType, "child-valid"),
+		ActorAllow: []string{execution.RunFinishedActorRef}, Deadline: now.Add(time.Hour),
 	})
 	if err != nil || !genuine.Satisfied || genuine.Instance.SatisfiedByEventID != validID {
 		t.Fatalf("registration after forged then genuine = %+v, %v; want %s", genuine, err, validID)

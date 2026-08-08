@@ -2,12 +2,12 @@ package interaction
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"strings"
-
-	"github.com/tysonthomas9/loomcli/internal/platform/identity"
 )
 
 // EnqueueGenerated validates the caller-owned delivery coordinates, assigns a
@@ -33,12 +33,42 @@ func EnqueueGenerated(
 	if enqueuer == nil {
 		return nil, fmt.Errorf("interaction inbox commands are not configured: %w", ErrUnavailable)
 	}
-	messageID, err := identity.NewUUID()
+	messageID, err := NewUUID()
 	if err != nil {
 		return nil, fmt.Errorf("generate inbox message ID: %w", err)
 	}
 	command.MessageID = messageID
 	return enqueuer.Enqueue(ctx, command)
+}
+
+// NewUUID returns an Interaction-owned cryptographically random RFC 4122
+// version 4 identifier for sessions, leases, terminals, and inbox messages.
+func NewUUID() (string, error) {
+	return newUUID(rand.Reader)
+}
+
+func newUUID(random io.Reader) (string, error) {
+	if random == nil {
+		return "", fmt.Errorf("generate UUID: random source is required")
+	}
+	var value [16]byte
+	if _, err := io.ReadFull(random, value[:]); err != nil {
+		return "", fmt.Errorf("generate UUID: %w", err)
+	}
+	value[6] = value[6]&0x0f | 0x40
+	value[8] = value[8]&0x3f | 0x80
+
+	var encoded [36]byte
+	hex.Encode(encoded[0:8], value[0:4])
+	encoded[8] = '-'
+	hex.Encode(encoded[9:13], value[4:6])
+	encoded[13] = '-'
+	hex.Encode(encoded[14:18], value[6:8])
+	encoded[18] = '-'
+	hex.Encode(encoded[19:23], value[8:10])
+	encoded[23] = '-'
+	hex.Encode(encoded[24:36], value[10:16])
+	return string(encoded[:]), nil
 }
 
 // ContentDedupeKey returns a stable content-derived key for one logical inbox

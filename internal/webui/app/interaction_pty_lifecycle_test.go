@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
-	"github.com/tysonthomas9/loomcli/internal/webui/app/capabilitycomposition"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
@@ -44,7 +43,7 @@ func TestInteractionPTYBeforeKillUsesExactServerOwnedPlacement(t *testing.T) {
 		InteractionLeaseID:    "lease-1", InteractionLeaseFencingToken: 7,
 	}}
 	force := &interactionPTYForceStub{}
-	hook := capabilitycomposition.NewInteractionPTYBeforeKill(tabs, force)
+	hook := NewInteractionPTYBeforeKill(tabs, force)
 	key := terminal.SessionKey{Workspace: "WS", Name: "agent-tab"}
 	if err := hook(t.Context(), key, terminal.ExitReasonShutdown); err != nil {
 		t.Fatal(err)
@@ -73,7 +72,7 @@ func TestInteractionPTYBeforeKillFailsClosedForPartialCanonicalIdentity(t *testi
 		InteractionTerminalID: "terminal-1",
 	}}
 	force := &interactionPTYForceStub{}
-	hook := capabilitycomposition.NewInteractionPTYBeforeKill(tabs, force)
+	hook := NewInteractionPTYBeforeKill(tabs, force)
 	if err := hook(
 		t.Context(),
 		terminal.SessionKey{Workspace: "WS", Name: "agent-tab"},

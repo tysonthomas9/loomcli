@@ -14,9 +14,9 @@ adapter_roots:
   - internal/modules
   - internal/webui/handlers
 owner_adapters:
-  - path: internal/app/serve/agentcomposition
+  - path: internal/app/serve/agents_fleetdb.go
     aggregate_owner: agents
-  - path: internal/app/serve/automationcomposition/workflow_catalog.go
+  - path: internal/app/serve/automation_workflow_catalog.go
     aggregate_owner: execution
   - path: internal/app/serve/execution.go
     aggregate_owner: execution
@@ -32,7 +32,7 @@ owner_adapters:
     aggregate_owner: execution
   - path: internal/app/serve/execution_worker_profiles.go
     aggregate_owner: execution
-  - path: internal/app/serve/interactioncomposition
+  - path: internal/app/serve/interaction_fleetdb.go
     aggregate_owner: interaction
   - path: internal/cli/serve/workspacemgr
     aggregate_owner: workspace
@@ -327,8 +327,8 @@ method_sets:
     read_only: [ListTaskStackNodes, ListTaskStacks]
     mutating: [UpdateTaskStackOutcome]
   - name: stack_store
-    read_only: [GetStack, ListNodes, ListStacks]
-    mutating: [AddNode, DeleteStack, EnsureStack, MoveNode, RemoveNode, SetBase, UpdateNode]
+    read_only: [GetStack, ListNodes, ListStacks, load, path]
+    mutating: [AddNode, DeleteStack, EnsureStack, MoveNode, RemoveNode, SetBase, UpdateNode, save, withLock]
   - name: store_repository
     read_only:
       - Events
@@ -825,10 +825,6 @@ receiver_surfaces:
     package: github.com/tysonthomas9/loomcli/internal/store
     method_set: store_repository
     capability_owner: workspace
-  - receiver: github.com/tysonthomas9/loomcli/internal/webui/driverapidependencies.Store
-    package: github.com/tysonthomas9/loomcli/internal/webui/driverapidependencies
-    method_set: composite_store
-    capability_owner: read_projection
   - receiver: github.com/tysonthomas9/loomcli/internal/webui/handlers/agents.agentProjectionStore
     package: github.com/tysonthomas9/loomcli/internal/webui/handlers/agents
     method_set: composite_store
@@ -839,6 +835,10 @@ receiver_surfaces:
     capability_owner: read_projection
   - receiver: github.com/tysonthomas9/loomcli/internal/webui/handlers/connectors.connectorStore
     package: github.com/tysonthomas9/loomcli/internal/webui/handlers/connectors
+    method_set: composite_store
+    capability_owner: read_projection
+  - receiver: github.com/tysonthomas9/loomcli/internal/webui/handlers/driverapi.Store
+    package: github.com/tysonthomas9/loomcli/internal/webui/handlers/driverapi
     method_set: composite_store
     capability_owner: read_projection
   - receiver: github.com/tysonthomas9/loomcli/internal/webui/handlers/prreview.prReviewStore
@@ -914,6 +914,14 @@ function_surfaces:
     function: Default
     access: read-only
     capability_owner: sourcecontrol
+  - package: github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore
+    function: DefaultAdapter
+    access: read-only
+    capability_owner: sourcecontrol
+  - package: github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore
+    function: NewAdapter
+    access: read-only
+    capability_owner: sourcecontrol
   - package: github.com/tysonthomas9/loomcli/internal/modules/agents
     function: New
     access: read-only
@@ -966,6 +974,10 @@ function_surfaces:
     function: OperationRules
     access: read-only
     capability_owner: artifacts
+  - package: github.com/tysonthomas9/loomcli/internal/modules/automation
+    function: IsReservedSystemActorRef
+    access: read-only
+    capability_owner: automation
   - package: github.com/tysonthomas9/loomcli/internal/modules/automation
     function: New
     access: read-only
@@ -1100,6 +1112,10 @@ function_surfaces:
     capability_owner: interaction
   - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
     function: NewLeaseToken
+    access: read-only
+    capability_owner: interaction
+  - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
+    function: NewUUID
     access: read-only
     capability_owner: interaction
   - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
@@ -1267,79 +1283,79 @@ function_surfaces:
     access: read-only
     capability_owner: interaction
 writes:
-    - file: internal/app/serve/agentcomposition/agents_fleetdb.go
+    - file: internal/app/serve/agents_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/agentmanagement.AgentManagementTransport
       method: AcquireAgentOwnership
       count: 1
       aggregate_owner: agents
       disposition: owner_adapter
-    - file: internal/app/serve/agentcomposition/agents_fleetdb.go
+    - file: internal/app/serve/agents_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/agentmanagement.AgentManagementTransport
       method: ApplyAgentServiceLifecycle
       count: 1
       aggregate_owner: agents
       disposition: owner_adapter
-    - file: internal/app/serve/agentcomposition/agents_fleetdb.go
+    - file: internal/app/serve/agents_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/agentmanagement.AgentManagementTransport
       method: ArchiveAgentService
       count: 1
       aggregate_owner: agents
       disposition: owner_adapter
-    - file: internal/app/serve/agentcomposition/agents_fleetdb.go
+    - file: internal/app/serve/agents_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/agentmanagement.AgentManagementTransport
       method: CreateAgentRole
       count: 1
       aggregate_owner: agents
       disposition: owner_adapter
-    - file: internal/app/serve/agentcomposition/agents_fleetdb.go
+    - file: internal/app/serve/agents_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/agentmanagement.AgentManagementTransport
       method: CreateAgentService
       count: 1
       aggregate_owner: agents
       disposition: owner_adapter
-    - file: internal/app/serve/agentcomposition/agents_fleetdb.go
+    - file: internal/app/serve/agents_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/agentmanagement.AgentManagementTransport
       method: DeleteAgentRole
       count: 1
       aggregate_owner: agents
       disposition: owner_adapter
-    - file: internal/app/serve/agentcomposition/agents_fleetdb.go
+    - file: internal/app/serve/agents_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/agentmanagement.AgentManagementTransport
       method: ReleaseAgentOwnership
       count: 1
       aggregate_owner: agents
       disposition: owner_adapter
-    - file: internal/app/serve/agentcomposition/agents_fleetdb.go
+    - file: internal/app/serve/agents_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/agentmanagement.AgentManagementTransport
       method: RenewAgentOwnership
       count: 1
       aggregate_owner: agents
       disposition: owner_adapter
-    - file: internal/app/serve/agentcomposition/agents_fleetdb.go
+    - file: internal/app/serve/agents_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/agentmanagement.AgentManagementTransport
       method: SetAgentServiceDesiredState
       count: 1
       aggregate_owner: agents
       disposition: owner_adapter
-    - file: internal/app/serve/agentcomposition/agents_fleetdb.go
+    - file: internal/app/serve/agents_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/agentmanagement.AgentManagementTransport
       method: SetAgentServiceDesiredStateOwned
       count: 1
       aggregate_owner: agents
       disposition: owner_adapter
-    - file: internal/app/serve/agentcomposition/agents_fleetdb.go
+    - file: internal/app/serve/agents_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/agentmanagement.AgentManagementTransport
       method: UpdateAgentRole
       count: 1
       aggregate_owner: agents
       disposition: owner_adapter
-    - file: internal/app/serve/agentcomposition/agents_fleetdb.go
+    - file: internal/app/serve/agents_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/agentmanagement.AgentManagementTransport
       method: UpdateAgentServiceIdentity
       count: 1
       aggregate_owner: agents
       disposition: owner_adapter
-    - file: internal/app/serve/automationcomposition/workflow_catalog.go
+    - file: internal/app/serve/automation_workflow_catalog.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.AtomicAwaitStore
       method: ResolveAwaitAndResume
       count: 1
@@ -1549,73 +1565,73 @@ writes:
       count: 1
       aggregate_owner: execution
       disposition: owner_adapter
-    - file: internal/app/serve/interactioncomposition/interaction_fleetdb.go
+    - file: internal/app/serve/interaction_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/interaction.InteractionMutationTransport
       method: ClaimInteractionInbox
       count: 1
       aggregate_owner: interaction
       disposition: owner_adapter
-    - file: internal/app/serve/interactioncomposition/interaction_fleetdb.go
+    - file: internal/app/serve/interaction_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/interaction.InteractionMutationTransport
       method: CompleteInteractionInbox
       count: 1
       aggregate_owner: interaction
       disposition: owner_adapter
-    - file: internal/app/serve/interactioncomposition/interaction_fleetdb.go
+    - file: internal/app/serve/interaction_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/interaction.InteractionMutationTransport
       method: CreateInteractionTerminal
       count: 1
       aggregate_owner: interaction
       disposition: owner_adapter
-    - file: internal/app/serve/interactioncomposition/interaction_fleetdb.go
+    - file: internal/app/serve/interaction_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/interaction.InteractionMutationTransport
       method: EnqueueInteractionInbox
       count: 1
       aggregate_owner: interaction
       disposition: owner_adapter
-    - file: internal/app/serve/interactioncomposition/interaction_fleetdb.go
+    - file: internal/app/serve/interaction_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/interaction.InteractionMutationTransport
       method: FinishInteractionSession
       count: 1
       aggregate_owner: interaction
       disposition: owner_adapter
-    - file: internal/app/serve/interactioncomposition/interaction_fleetdb.go
+    - file: internal/app/serve/interaction_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/interaction.InteractionMutationTransport
       method: ForceInterruptInteractionSession
       count: 1
       aggregate_owner: interaction
       disposition: owner_adapter
-    - file: internal/app/serve/interactioncomposition/interaction_fleetdb.go
+    - file: internal/app/serve/interaction_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/interaction.InteractionMutationTransport
       method: HeartbeatInteractionSession
       count: 1
       aggregate_owner: interaction
       disposition: owner_adapter
-    - file: internal/app/serve/interactioncomposition/interaction_fleetdb.go
+    - file: internal/app/serve/interaction_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/interaction.InteractionMutationTransport
       method: InterruptInteractionSessionIfLeaseMissing
       count: 1
       aggregate_owner: interaction
       disposition: owner_adapter
-    - file: internal/app/serve/interactioncomposition/interaction_fleetdb.go
+    - file: internal/app/serve/interaction_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/interaction.InteractionMutationTransport
       method: PatchInteractionSession
       count: 1
       aggregate_owner: interaction
       disposition: owner_adapter
-    - file: internal/app/serve/interactioncomposition/interaction_fleetdb.go
+    - file: internal/app/serve/interaction_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/interaction.InteractionMutationTransport
       method: RecoverInteractionSessionStart
       count: 1
       aggregate_owner: interaction
       disposition: owner_adapter
-    - file: internal/app/serve/interactioncomposition/interaction_fleetdb.go
+    - file: internal/app/serve/interaction_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/interaction.InteractionMutationTransport
       method: StartInteractionSession
       count: 1
       aggregate_owner: interaction
       disposition: owner_adapter
-    - file: internal/app/serve/interactioncomposition/interaction_fleetdb.go
+    - file: internal/app/serve/interaction_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/interaction.InteractionMutationTransport
       method: UpdateInteractionTerminal
       count: 1
@@ -1823,6 +1839,18 @@ writes:
       receiver: github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore.Store
       method: UpdateNode
       count: 2
+      aggregate_owner: sourcecontrol
+      disposition: owner_adapter
+    - file: internal/infra/sourcecontrolstackstore/stackstore.go
+      receiver: '*github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore.LocalStore'
+      method: save
+      count: 1
+      aggregate_owner: sourcecontrol
+      disposition: owner_adapter
+    - file: internal/infra/sourcecontrolstackstore/stackstore.go
+      receiver: '*github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore.LocalStore'
+      method: withLock
+      count: 7
       aggregate_owner: sourcecontrol
       disposition: owner_adapter
     - file: internal/infra/usageprojection/adapter.go

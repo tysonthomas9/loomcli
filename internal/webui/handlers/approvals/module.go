@@ -44,7 +44,6 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/driver/eventpolicy"
 	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
@@ -233,7 +232,7 @@ func (m *Module) postApproval(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) approvalActorAllowed(w http.ResponseWriter, workspace, actor, userID string) bool {
-	if !eventpolicy.IsReservedSystemActorRef(actor) {
+	if !automation.IsReservedSystemActorRef(actor) {
 		return true
 	}
 	m.auditReservedActor(workspace, actor, userID)

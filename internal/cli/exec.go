@@ -8,7 +8,7 @@ import (
 	"os/exec"
 	"strings"
 
-	envfilterpkg "github.com/tysonthomas9/loomcli/internal/cli/envfilter"
+	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
 )
 
 // CommandResult represents the output of a command execution
@@ -84,10 +84,10 @@ func RunGitCommandWithOutput(dir string, args ...string) error {
 
 // FilteredEnv returns os.Environ() filtered through the subprocess allowlist.
 func FilteredEnv() []string {
-	return envfilterpkg.FilteredEnv()
+	return platformruntime.CurrentSubprocessEnv(platformruntime.SubprocessEnvTrustedLocalCLI)
 }
 
 // FilterEnv filters an environment slice through the subprocess allowlist.
 func FilterEnv(env []string) []string {
-	return envfilterpkg.FilterEnv(env)
+	return platformruntime.FilterSubprocessEnv(platformruntime.SubprocessEnvTrustedLocalCLI, env)
 }

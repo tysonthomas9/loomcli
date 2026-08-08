@@ -1,6 +1,7 @@
 package interaction
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"strings"
@@ -60,4 +61,26 @@ func TestContentDedupeKey(t *testing.T) {
 	if first == ContentDedupeKey("driver-message", "WS", "run-2") {
 		t.Fatal("different content produced the same key")
 	}
+}
+
+func TestNewUUIDUsesVersionFourAndRFCVariant(t *testing.T) {
+	value, err := newUUID(bytes.NewReader(make([]byte, 16)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value != "00000000-0000-4000-8000-000000000000" {
+		t.Fatalf("UUID = %q", value)
+	}
+}
+
+func TestNewUUIDFailsClosedWhenRandomnessFails(t *testing.T) {
+	if _, err := newUUID(uuidErrorReader{}); err == nil {
+		t.Fatal("newUUID accepted a failed random source")
+	}
+}
+
+type uuidErrorReader struct{}
+
+func (uuidErrorReader) Read([]byte) (int, error) {
+	return 0, errors.New("random unavailable")
 }

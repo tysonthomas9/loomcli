@@ -23,7 +23,6 @@ import (
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/webui/handlers/runhistory"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
 
@@ -674,7 +673,7 @@ func (m *Module) listBindingRuns(w http.ResponseWriter, r *http.Request) {
 		writeAutomationError(w, automation.ErrInvalidPersistedState, "get trigger binding failed")
 		return
 	}
-	limit, ok := runhistory.ParseRunLimit(w, r)
+	limit, ok := handler.ParseRunLimit(w, r)
 	if !ok {
 		return
 	}
@@ -683,7 +682,7 @@ func (m *Module) listBindingRuns(w http.ResponseWriter, r *http.Request) {
 		writeAutomationError(w, err, "list trigger binding runs failed")
 		return
 	}
-	runs = runhistory.SortAndTrim(runs, limit)
+	runs = handler.SortAndTrim(runs, limit)
 	handler.WriteJSON(w, http.StatusOK, map[string]any{"binding_id": binding.BindingID, "runs": runs})
 }
 

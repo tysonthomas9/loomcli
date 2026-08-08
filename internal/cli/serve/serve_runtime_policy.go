@@ -7,16 +7,15 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/cli/serve/runtimecomposition"
 	driverexecutor "github.com/tysonthomas9/loomcli/internal/driver"
 	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 )
 
 const issueBridgeCursorFileName = "issue-bridge-cursor.json"
 
-func buildServeRuntimeConfig() runtimecomposition.Config {
+func buildServeRuntimeConfig() serveRuntimeConfig {
 	workspaceScope := driverAutomationWorkspaceScope()
-	return runtimecomposition.Config{
+	return serveRuntimeConfig{
 		WorkspaceScope:        workspaceScope,
 		AwaitSweepInterval:    time.Duration(boundedIntEnv(envLoomAwaitSweepInterval, 30, 3600)) * time.Second,
 		AwaitSweepBatch:       boundedIntEnv(envLoomAwaitSweepBatch, trigger.DefaultAwaitTimeoutSweepBatch, 500),
@@ -27,7 +26,7 @@ func buildServeRuntimeConfig() runtimecomposition.Config {
 		DriverAPIBaseURL:      driverAPIBaseURL(),
 		LocalSettingsDir:      bootstrap.LoomDir(),
 		BuildDriverExecutor:   buildDriverExecutor,
-		IssueJournal: runtimecomposition.IssueJournalConfig{
+		IssueJournal: issueJournalConfig{
 			WorkspaceScope: workspaceScope,
 			Interval:       issueBridgeInterval(),
 			StatePath:      issueBridgeStatePath(),

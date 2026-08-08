@@ -22,7 +22,7 @@ prove behavior through FleetDB-backed stores or explicit migration-only code.
 | CLI backend selection | `internal/cli`, `internal/cli/config` | FleetDB defaults, explicit `fleet`/`fleetdb`, invalid backend values, fail-closed errors. |
 | Agent and supervisor flows | `internal/cli/agent`, `internal/cli/automode`, `internal/cli/daemon/...` | Claim flow, task lifecycle, local supervisor state, session metadata, control commands. |
 | Workspace lifecycle | `internal/cli/workspace`, `internal/webui/service`, `internal/webui/app` | Workspace list/create/delete/default, repo groups, FleetDB-backed state agreement between CLI and UI. |
-| WebUI handlers | `internal/webui/handlers/...`, `internal/webui/handlermux` | API behavior through IssueBackend and store-backed workspace services. |
+| WebUI handlers | `internal/webui/handlers/...`, `internal/webui/app` | API behavior through IssueBackend and store-backed workspace services. |
 | Realtime | `internal/webui/server/realtime`, `internal/webui/subscription` | SSE cursor normalization, reconnect catch-up, mutation translation, workspace filtering. |
 | Observability and monitor | `internal/cli/monitor`, `internal/cli/serve/...` | Queue summaries, git sync state, metrics, and no local issue-daemon startup. |
 

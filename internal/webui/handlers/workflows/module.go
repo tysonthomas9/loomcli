@@ -24,7 +24,6 @@ import (
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/webui/handlers/runhistory"
 	"github.com/tysonthomas9/loomcli/internal/webui/readprojection"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -33,8 +32,8 @@ import (
 const maxRunPayloadBytes = 4 << 20
 
 const (
-	defaultRunsLimit = runhistory.DefaultRunsLimit
-	maxRunsLimit     = runhistory.MaxRunsLimit
+	defaultRunsLimit = handler.DefaultRunsLimit
+	maxRunsLimit     = handler.MaxRunsLimit
 )
 
 type Module struct {
@@ -437,7 +436,7 @@ func (m *Module) listWorkflowRuns(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	limit, ok := runhistory.ParseRunLimit(w, r)
+	limit, ok := handler.ParseRunLimit(w, r)
 	if !ok {
 		return
 	}
@@ -460,7 +459,7 @@ func (m *Module) listWorkflowRuns(w http.ResponseWriter, r *http.Request) {
 		writeDomainError(w, err, "list workflow runs failed")
 		return
 	}
-	runs = runhistory.SortAndTrim(runs, limit)
+	runs = handler.SortAndTrim(runs, limit)
 	handler.WriteJSON(w, http.StatusOK, map[string]any{
 		"driver_id":         drv.DriverID,
 		"active_version_id": drv.ActiveVersionID,

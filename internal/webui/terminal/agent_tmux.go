@@ -28,7 +28,7 @@ import (
 
 	"github.com/creack/pty"
 
-	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
+	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
 	"github.com/tysonthomas9/loomcli/internal/platform/workspaceid"
 )
 
@@ -114,7 +114,7 @@ func NewAgentTmuxManager(maxSessions int) (*AgentTmuxManager, error) {
 	}
 	// Ensure child tmux processes share the same socket path as the
 	// auto-mode CLI that created the sessions we're attaching to.
-	env := interaction.FilterChildBaseEnv(os.Environ())
+	env := platformruntime.CurrentSubprocessEnv(platformruntime.SubprocessEnvInteractionChild)
 	hasTmpDir := false
 	for _, e := range env {
 		if strings.HasPrefix(e, "TMUX_TMPDIR=") {

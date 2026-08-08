@@ -12,7 +12,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 
-	"github.com/tysonthomas9/loomcli/internal/app/serve/operatorauth"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
@@ -57,7 +56,7 @@ func TestAgentsCompositionUsesPublicAPIAndTrustedOperatorAttribution(t *testing.
 			if request.Method != http.MethodPost || request.URL.Path != "/api/v1/WS/agent-services" {
 				t.Fatalf("create request = %s %s", request.Method, request.URL.Path)
 			}
-			if got := request.Header.Get(infrafleetdb.FleetDelegatedActorHeader); got != operatorauth.LocalOpenOperatorSubject {
+			if got := request.Header.Get(infrafleetdb.FleetDelegatedActorHeader); got != LocalOpenOperatorSubject {
 				t.Fatalf("delegated actor = %q", got)
 			}
 			body, err := io.ReadAll(request.Body)
@@ -65,14 +64,14 @@ func TestAgentsCompositionUsesPublicAPIAndTrustedOperatorAttribution(t *testing.
 				t.Fatal(err)
 			}
 			if strings.Contains(string(body), "created_by") ||
-				strings.Contains(string(body), operatorauth.LocalOpenOperatorSubject) {
+				strings.Contains(string(body), LocalOpenOperatorSubject) {
 				t.Fatalf("create body leaked audit actor: %s", body)
 			}
 			writeAgentsResponse(t, recorder, domain.AgentService{
 				WorkspaceKey: "WS", ServiceID: "agent-docs", Name: "Docs review",
 				GenerationID: "00112233445566778899aabbccddeeff",
 				Kind:         domain.AgentServiceKindEvent, DesiredState: domain.AgentServiceDesiredRunning,
-				RoleName: "docs", MaxInstances: 1, CreatedBy: operatorauth.LocalOpenOperatorSubject,
+				RoleName: "docs", MaxInstances: 1, CreatedBy: LocalOpenOperatorSubject,
 				CreatedAt: now, UpdatedAt: now,
 			})
 		default:
@@ -115,7 +114,7 @@ func TestAgentsCompositionUsesPublicAPIAndTrustedOperatorAttribution(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if created == nil || created.AgentID != "agent-docs" || created.CreatedBy != operatorauth.LocalOpenOperatorSubject {
+	if created == nil || created.AgentID != "agent-docs" || created.CreatedBy != LocalOpenOperatorSubject {
 		t.Fatalf("created = %#v", created)
 	}
 	if calls != 2 {

@@ -12,7 +12,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/webui"
 
-	"github.com/tysonthomas9/loomcli/internal/webui/appinfra"
 	"github.com/tysonthomas9/loomcli/internal/webui/coordinator"
 )
 
@@ -425,7 +424,7 @@ func TestReconcileStoreWorkspaces_UUIDKeys(t *testing.T) {
 		}, nil
 	}
 
-	appinfra.ReconcileStoreWorkspaces(listFn, initialUUID, true, registry, slog.Default())
+	ReconcileStoreWorkspaces(listFn, initialUUID, true, registry, slog.Default())
 
 	// Verify: initial workspace not double-registered, extra workspace added
 	ids := multiPool.WorkspaceIDs()
@@ -470,7 +469,7 @@ func TestStartPeriodicWorkspaceReconcile_PicksUpNewWorkspaces(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	appinfra.StartPeriodicWorkspaceReconcile(ctx, listFn, registry, 25*time.Millisecond, slog.Default())
+	StartPeriodicWorkspaceReconcile(ctx, listFn, registry, 25*time.Millisecond, slog.Default())
 
 	// Confirm only the initial workspace is registered before the second appears.
 	time.Sleep(60 * time.Millisecond)
@@ -515,7 +514,7 @@ func TestReconcileStoreWorkspaces_NameKeys(t *testing.T) {
 		}, nil
 	}
 
-	appinfra.ReconcileStoreWorkspaces(listFn, initialName, true, registry, slog.Default())
+	ReconcileStoreWorkspaces(listFn, initialName, true, registry, slog.Default())
 
 	ids := multiPool.WorkspaceIDs()
 	sort.Strings(ids)
@@ -553,7 +552,7 @@ func TestReconcileStoreWorkspaces_UUIDSkipMatchesInitialID(t *testing.T) {
 			initialUUID: initialPath,
 		}, nil
 	}
-	appinfra.ReconcileStoreWorkspaces(listFn, initialUUID, true, registry, slog.Default())
+	ReconcileStoreWorkspaces(listFn, initialUUID, true, registry, slog.Default())
 
 	// The pool should NOT have been replaced (skip logic worked)
 	poolAfter := multiPool.PoolForWorkspace(initialUUID)

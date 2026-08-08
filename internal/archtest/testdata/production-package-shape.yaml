@@ -13,11 +13,11 @@ semantics:
     - vendor
     - worktrees
 ceilings:
-  total_packages: 230
+  total_packages: 206
   module_packages: 18
-  outside_module_packages: 212
-  one_file_packages: 95
-  one_or_two_file_packages: 122
+  outside_module_packages: 188
+  one_file_packages: 78
+  one_or_two_file_packages: 103
 packages:
   - internal/agenterr
   - internal/agentpolicy
@@ -27,12 +27,7 @@ packages:
   - internal/app/connectorgrants
   - internal/app/prreviewer
   - internal/app/serve
-  - internal/app/serve/agentcomposition
   - internal/app/serve/agentcomposition/owneradapters
-  - internal/app/serve/automationcomposition
-  - internal/app/serve/interactioncomposition
-  - internal/app/serve/operatorauth
-  - internal/app/serve/sourcecontrolcomposition
   - internal/app/systemeventing
   - internal/app/webhookingestion
   - internal/app/workflowauthoring
@@ -66,7 +61,6 @@ packages:
   - internal/cli/data
   - internal/cli/doctor
   - internal/cli/driver
-  - internal/cli/envfilter
   - internal/cli/epic
   - internal/cli/git
   - internal/cli/hooks
@@ -79,14 +73,10 @@ packages:
   - internal/cli/serve/install
   - internal/cli/serve/logroutercmd
   - internal/cli/serve/metricscmd
-  - internal/cli/serve/monitorwire
-  - internal/cli/serve/observability
   - internal/cli/serve/opsimpl
-  - internal/cli/serve/runtimecomposition
   - internal/cli/serve/runtimewire
   - internal/cli/serve/serveadapter
   - internal/cli/serve/serveadapter/daytonabroker
-  - internal/cli/serve/usagecmd
   - internal/cli/serve/worker
   - internal/cli/serve/workspacemgr
   - internal/cli/serve/workspacemgr/admissionstore
@@ -100,10 +90,7 @@ packages:
   - internal/domain
   - internal/driver
   - internal/driver/daytonahost
-  - internal/driver/eventpolicy
   - internal/driver/nativearchive
-  - internal/driver/outboxdelivery
-  - internal/driver/runnersettings
   - internal/driver/runtypes
   - internal/driver/sandbox
   - internal/driver/taskworktree
@@ -170,7 +157,6 @@ packages:
   - internal/ops
   - internal/pathsec
   - internal/platform/authority
-  - internal/platform/identity
   - internal/platform/repositoryremote
   - internal/platform/runtime
   - internal/platform/workspaceid
@@ -195,18 +181,12 @@ packages:
   - internal/webui/agentmodules
   - internal/webui/agentmodules/automationroutes
   - internal/webui/app
-  - internal/webui/app/capabilitycomposition
-  - internal/webui/app/connectorcomposition
   - internal/webui/apperrors
-  - internal/webui/appinfra
-  - internal/webui/appstores
   - internal/webui/coordinator
-  - internal/webui/driverapidependencies
   - internal/webui/editor
   - internal/webui/fileaccess
   - internal/webui/filecoord
   - internal/webui/fleet
-  - internal/webui/handlermux
   - internal/webui/handlers/agents
   - internal/webui/handlers/agentsmanagement
   - internal/webui/handlers/approvals
@@ -222,7 +202,6 @@ packages:
   - internal/webui/handlers/onboarding
   - internal/webui/handlers/prreview
   - internal/webui/handlers/roles
-  - internal/webui/handlers/runhistory
   - internal/webui/handlers/taskrunapi
   - internal/webui/handlers/terminal
   - internal/webui/handlers/triggerbindings
@@ -232,14 +211,11 @@ packages:
   - internal/webui/hooks
   - internal/webui/issuetabs
   - internal/webui/localredis
-  - internal/webui/log
-  - internal/webui/modbuilder
   - internal/webui/readprojection
   - internal/webui/server/dto
   - internal/webui/server/handler
   - internal/webui/server/middleware
   - internal/webui/server/realtime
-  - internal/webui/servercapabilities
   - internal/webui/sessioncoord
   - internal/webui/sessionhistory
   - internal/webui/sourcecontrolcoord

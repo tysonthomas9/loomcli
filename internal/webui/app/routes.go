@@ -4,9 +4,6 @@ import (
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/webui"
-	"github.com/tysonthomas9/loomcli/internal/webui/app/capabilitycomposition"
-	"github.com/tysonthomas9/loomcli/internal/webui/handlermux"
-	"github.com/tysonthomas9/loomcli/internal/webui/modbuilder"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
@@ -36,7 +33,7 @@ func (app *Server) registerRoutes() {
 }
 
 // registerCoreAPIRoutes registers health, config, and error reporting endpoints.
-func (app *Server) registerCoreAPIRoutes(h *handlermux.Handlers) {
+func (app *Server) registerCoreAPIRoutes(h *Handlers) {
 	app.mux.HandleFunc("GET /health", h.Health)
 	app.mux.HandleFunc("GET /api/health", h.APIHealth)
 	app.mux.HandleFunc("POST /api/client-errors", h.ClientErrors)
@@ -44,7 +41,7 @@ func (app *Server) registerCoreAPIRoutes(h *handlermux.Handlers) {
 	app.mux.HandleFunc("GET /api/metrics", h.Metrics)
 	app.mux.HandleFunc("GET /api/config/terminal", h.GetTerminalConfig)
 	if app.config.LocalSettingsDir != "" {
-		settingsHandlers := modbuilder.NewLocalSettingsHandlers(app.config.LocalSettingsDir, app.prReviewCredentialSeeds)
+		settingsHandlers := NewLocalSettingsHandlers(app.config.LocalSettingsDir, app.prReviewCredentialSeeds)
 		app.mux.HandleFunc("GET /api/local/settings", settingsHandlers.Get)
 		app.mux.HandleFunc("PATCH /api/local/settings", settingsHandlers.Patch)
 		app.mux.HandleFunc(
@@ -72,7 +69,7 @@ func (app *Server) registerAuthProxy() {
 }
 
 // registerEditorAndNotifyRoutes registers editor and session notification endpoints.
-func (app *Server) registerEditorAndNotifyRoutes(h *handlermux.Handlers) {
+func (app *Server) registerEditorAndNotifyRoutes(h *Handlers) {
 	app.mux.HandleFunc("GET /api/editors", h.ListEditors)
 	app.mux.HandleFunc("POST /api/editors/open", h.OpenEditor)
 	if h.NotifySessionChange != nil {
@@ -133,23 +130,23 @@ func (app *Server) registerMonitorHandlers() {
 //nolint:funlen // Route registration keeps the workspace transport surface auditable in one table-like block.
 func (app *Server) registerWorkspaceRoutes() {
 	workspaceMW := app.workspaceMiddleware()
-	workspaceProjection := capabilitycomposition.NewWorkspaceHTTPProjection(app.workspaceStore, app.workspaceSvc)
-	app.mux.HandleFunc("GET /api/workspaces/active", handlermux.HandleActiveWorkspace(app.workspaceSvc))
-	app.mux.HandleFunc("GET /api/workspaces", handlermux.HandleWorkspaceCatalogList(app.workspaceCatalog, workspaceProjection))
-	app.mux.HandleFunc("PUT /api/workspaces/default", handlermux.HandleSetDefaultWorkspace())
-	app.mux.HandleFunc("DELETE /api/workspaces/default", handlermux.HandleClearDefaultWorkspace())
-	app.mux.Handle("GET /api/workspaces/{ws}", workspaceMW(handlermux.HandleWorkspaceCatalogGet(app.workspaceCatalog, workspaceProjection)))
-	app.mux.HandleFunc("POST /api/workspaces", handlermux.HandleWorkspaceCreate(app.workspaceSvc))
-	app.mux.HandleFunc("GET /api/workspaces/jobs/{id}", handlermux.HandleGetWorkspaceJob(app.workspaceSvc))
-	app.mux.HandleFunc("PUT /api/workspaces/order", handlermux.HandleWorkspaceReorder())
-	app.mux.Handle("DELETE /api/workspaces/{ws}", workspaceMW(handlermux.HandleWorkspaceDelete(app.workspaceSvc)))
+	workspaceProjection := NewWorkspaceHTTPProjection(app.workspaceStore, app.workspaceSvc)
+	app.mux.HandleFunc("GET /api/workspaces/active", HandleActiveWorkspace(app.workspaceSvc))
+	app.mux.HandleFunc("GET /api/workspaces", HandleWorkspaceCatalogList(app.workspaceCatalog, workspaceProjection))
+	app.mux.HandleFunc("PUT /api/workspaces/default", HandleSetDefaultWorkspace())
+	app.mux.HandleFunc("DELETE /api/workspaces/default", HandleClearDefaultWorkspace())
+	app.mux.Handle("GET /api/workspaces/{ws}", workspaceMW(HandleWorkspaceCatalogGet(app.workspaceCatalog, workspaceProjection)))
+	app.mux.HandleFunc("POST /api/workspaces", HandleWorkspaceCreate(app.workspaceSvc))
+	app.mux.HandleFunc("GET /api/workspaces/jobs/{id}", HandleGetWorkspaceJob(app.workspaceSvc))
+	app.mux.HandleFunc("PUT /api/workspaces/order", HandleWorkspaceReorder())
+	app.mux.Handle("DELETE /api/workspaces/{ws}", workspaceMW(HandleWorkspaceDelete(app.workspaceSvc)))
 	// PATCH handlers are registered on the outer mux (not the nested wsMux)
 	// because Go 1.22+ http.ServeMux has a bug where r.Body.Read() hangs for
 	// PATCH requests routed through a nested mux via wildcard subtree pattern.
-	app.mux.Handle("PATCH /api/workspaces/{ws}/name", workspaceMW(handlermux.HandleWorkspaceCatalogRename(app.workspaceCatalog, workspaceProjection)))
-	app.mux.Handle("GET /api/workspaces/{ws}/config/backend", workspaceMW(handlermux.HandleWorkspaceBackendGet(app.workspaceSvc)))
-	app.mux.Handle("PATCH /api/workspaces/{ws}/config/backend", workspaceMW(handlermux.HandleWorkspaceBackendPatch(app.workspaceSvc)))
-	app.mux.Handle("PATCH /api/workspaces/{ws}/config/design-format", workspaceMW(handlermux.HandleWorkspaceCatalogDesignFormatPatch(app.workspaceCatalog, workspaceProjection)))
+	app.mux.Handle("PATCH /api/workspaces/{ws}/name", workspaceMW(HandleWorkspaceCatalogRename(app.workspaceCatalog, workspaceProjection)))
+	app.mux.Handle("GET /api/workspaces/{ws}/config/backend", workspaceMW(HandleWorkspaceBackendGet(app.workspaceSvc)))
+	app.mux.Handle("PATCH /api/workspaces/{ws}/config/backend", workspaceMW(HandleWorkspaceBackendPatch(app.workspaceSvc)))
+	app.mux.Handle("PATCH /api/workspaces/{ws}/config/design-format", workspaceMW(HandleWorkspaceCatalogDesignFormatPatch(app.workspaceCatalog, workspaceProjection)))
 	if statusHandler := app.config.MonitorHandlers.Status; statusHandler != nil {
 		app.mux.Handle("GET /api/workspaces/{ws}/monitor/status", workspaceMW(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			q := r.URL.Query()
