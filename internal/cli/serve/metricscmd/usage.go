@@ -6,7 +6,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/infra/usageprojection"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -50,11 +49,11 @@ type DailyCost struct {
 
 // InitUsageStore creates a usage store from the given directory.
 // Returns nil if the store cannot be created.
-func InitUsageStore(dir string) *usage.Store {
+func InitUsageStore(dir string) *usage.Projection {
 	if dir == "" {
 		dir = "."
 	}
-	s, err := usageprojection.New(dir)
+	s, err := usage.NewProjection(dir)
 	if err != nil {
 		log.Printf("Warning: failed to create usage store: %v", err)
 		return nil
@@ -63,7 +62,7 @@ func InitUsageStore(dir string) *usage.Store {
 }
 
 // HandleUsage returns an http.HandlerFunc that reads usage data from the given store.
-func HandleUsage(store *usage.Store) http.HandlerFunc {
+func HandleUsage(store *usage.Projection) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			http.Error(w, `{"error":"usage store not initialized"}`, http.StatusServiceUnavailable)

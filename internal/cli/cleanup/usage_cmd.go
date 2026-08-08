@@ -12,7 +12,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/monitor"
-	"github.com/tysonthomas9/loomcli/internal/infra/usageprojection"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -79,7 +78,7 @@ func runUsage(cmd *cobra.Command, _ []string) {
 		loomDir = "."
 	}
 
-	store, err := usageprojection.New(loomDir)
+	store, err := usage.NewProjection(loomDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)

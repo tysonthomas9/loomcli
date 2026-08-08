@@ -8,14 +8,13 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/infra/usageprojection"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
 // recordSessionUsage persists a usage record after an agent invocation finishes.
 // Failures are logged but do not interrupt the auto mode loop.
 // When bridge is non-nil, reads the lock via the bridge; otherwise uses the local filesystem.
-func recordSessionUsage(store *usage.Store, collector *usage.Collector, worktreePath, agentName, parentID string, startedAt, endedAt time.Time, invokeErr error, bridge cli.LockBridge) {
+func recordSessionUsage(store *usage.Projection, collector *usage.Collector, worktreePath, agentName, parentID string, startedAt, endedAt time.Time, invokeErr error, bridge cli.LockBridge) {
 	if store == nil || collector == nil {
 		return
 	}
@@ -44,7 +43,7 @@ func recordSessionUsage(store *usage.Store, collector *usage.Collector, worktree
 	epicID = parentID
 
 	record := collector.Finalize(taskID, epicID, startedAt, endedAt, exitCode)
-	if err := usageprojection.Append(store, record); err != nil {
+	if err := store.Append(record); err != nil {
 		log.Printf("[auto] Warning: failed to record usage: %v", err)
 	}
 }
