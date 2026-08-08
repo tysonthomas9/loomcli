@@ -47,12 +47,22 @@ const (
 	AgentHookActionComment AgentHookActionType = "comment"
 	// AgentHookActionAddLabel stamps a literal label on the owned task.
 	AgentHookActionAddLabel AgentHookActionType = "add_label"
+	// AgentHookActionClose closes the owned task, and must be the last action
+	// in a pipeline.
+	//
+	// It exists so a stage can close without giving up its hand-off. An agent
+	// that closes its own task leaves nothing for the supervisor to write to:
+	// add_label then fails against a terminal issue, so the label the next
+	// stage waits on is never stamped and the pipeline stops. Deferring the
+	// close to the supervisor keeps the writes and the terminal transition in
+	// one ordered sequence it controls.
+	AgentHookActionClose AgentHookActionType = "close"
 )
 
 // IsValid returns true if the action type is a recognized constant.
 func (t AgentHookActionType) IsValid() bool {
 	switch t {
-	case AgentHookActionComment, AgentHookActionAddLabel:
+	case AgentHookActionComment, AgentHookActionAddLabel, AgentHookActionClose:
 		return true
 	}
 	return false
@@ -123,35 +133,63 @@ func (h *AgentHooks) Validate() error {
 		return nil
 	}
 	sawLabel := false
+	sawClose := false
 	for i := range h.OnComplete {
 		a := h.OnComplete[i]
 		if !a.Type.IsValid() {
-			return fmt.Errorf("hooks.on_complete[%d]: unknown action type %q (must be one of: comment, add_label)", i, a.Type)
+			return fmt.Errorf("hooks.on_complete[%d]: unknown action type %q (must be one of: comment, add_label, close)", i, a.Type)
+		}
+		// Nothing may follow the close: every write in this pipeline targets the
+		// task, and a terminal issue rejects further mutation.
+		if sawClose {
+			return fmt.Errorf("hooks.on_complete[%d]: %s action must not follow a close action", i, a.Type)
+		}
+		if err := validateHookAction(i, a, sawLabel); err != nil {
+			return err
 		}
 		switch a.Type {
-		case AgentHookActionComment:
-			if a.Source == "" {
-				return fmt.Errorf("hooks.on_complete[%d]: comment action requires source", i)
-			}
-			if a.Source != AgentHookCommentSourceFinalReply {
-				return fmt.Errorf("hooks.on_complete[%d]: comment source %q must be final_reply", i, a.Source)
-			}
-			if a.Value != "" {
-				return fmt.Errorf("hooks.on_complete[%d]: comment action must not set value", i)
-			}
-			// Write-before-stamp: the artifact must land before the label that
-			// certifies it, so a label is never observable without its comment.
-			if sawLabel {
-				return fmt.Errorf("hooks.on_complete[%d]: comment action must not follow an add_label action", i)
-			}
 		case AgentHookActionAddLabel:
-			if strings.TrimSpace(a.Value) == "" {
-				return fmt.Errorf("hooks.on_complete[%d]: add_label action requires a non-blank value", i)
-			}
-			if a.Source != "" {
-				return fmt.Errorf("hooks.on_complete[%d]: add_label action must not set source", i)
-			}
 			sawLabel = true
+		case AgentHookActionClose:
+			sawClose = true
+		}
+	}
+	return nil
+}
+
+// validateHookAction checks the fields appropriate to one action's type. Split
+// out of Validate so the ordering rules above stay readable as the action
+// vocabulary grows; the two concerns are independent.
+func validateHookAction(i int, a AgentHookAction, sawLabel bool) error {
+	switch a.Type {
+	case AgentHookActionComment:
+		if a.Source == "" {
+			return fmt.Errorf("hooks.on_complete[%d]: comment action requires source", i)
+		}
+		if a.Source != AgentHookCommentSourceFinalReply {
+			return fmt.Errorf("hooks.on_complete[%d]: comment source %q must be final_reply", i, a.Source)
+		}
+		if a.Value != "" {
+			return fmt.Errorf("hooks.on_complete[%d]: comment action must not set value", i)
+		}
+		// Write-before-stamp: the artifact must land before the label that
+		// certifies it, so a label is never observable without its comment.
+		if sawLabel {
+			return fmt.Errorf("hooks.on_complete[%d]: comment action must not follow an add_label action", i)
+		}
+	case AgentHookActionAddLabel:
+		if strings.TrimSpace(a.Value) == "" {
+			return fmt.Errorf("hooks.on_complete[%d]: add_label action requires a non-blank value", i)
+		}
+		if a.Source != "" {
+			return fmt.Errorf("hooks.on_complete[%d]: add_label action must not set source", i)
+		}
+	case AgentHookActionClose:
+		if a.Value != "" {
+			return fmt.Errorf("hooks.on_complete[%d]: close action must not set value", i)
+		}
+		if a.Source != "" {
+			return fmt.Errorf("hooks.on_complete[%d]: close action must not set source", i)
 		}
 	}
 	return nil
