@@ -78,7 +78,7 @@ func TestHooksFromFlags_RemoveLabel(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := hooksFromFlags(tt.commentReply, tt.labels, tt.removeLabels, tt.closeTask, "")
+			got, err := hooksFromFlags(tt.commentReply, false, tt.labels, tt.removeLabels, "", tt.closeTask, "")
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 					t.Fatalf("hooksFromFlags() error = %v, want it to contain %q", err, tt.wantErr)
@@ -105,12 +105,12 @@ func TestHooksFromFlags_RemoveLabel(t *testing.T) {
 // through a parse rather than by calling hooksFromFlags with hand-built slices:
 // a misnamed or non-repeatable flag would pass the unit test and fail the user.
 func TestRegisterHookFlags_RemoveLabelRoundTrips(t *testing.T) {
-	var reply, closeTask bool
+	var reply, writeDesign, closeTask bool
 	var labels, removeLabels []string
-	var cycleSpec string
+	var setStatus, cycleSpec string
 
 	cmd := &cobra.Command{Use: "update", RunE: func(*cobra.Command, []string) error { return nil }}
-	registerHookFlags(cmd, &reply, &labels, &removeLabels, &closeTask, &cycleSpec)
+	registerHookFlags(cmd, &reply, &writeDesign, &labels, &removeLabels, &setStatus, &closeTask, &cycleSpec)
 	cmd.SetArgs([]string{
 		"--on-complete-comment-reply",
 		"--on-complete-remove-label", "needs-review",
@@ -121,7 +121,7 @@ func TestRegisterHookFlags_RemoveLabelRoundTrips(t *testing.T) {
 		t.Fatalf("parse flags: %v", err)
 	}
 
-	hooks, err := hooksFromFlags(reply, labels, removeLabels, closeTask, cycleSpec)
+	hooks, err := hooksFromFlags(reply, writeDesign, labels, removeLabels, setStatus, closeTask, cycleSpec)
 	if err != nil {
 		t.Fatalf("hooksFromFlags: %v", err)
 	}
@@ -141,12 +141,12 @@ func TestRegisterHookFlags_RemoveLabelRoundTrips(t *testing.T) {
 // removed. The only defense is that whoever writes the flag reads about it, so
 // the warning living in the help text is part of the feature, not decoration.
 func TestRegisterHookFlags_RemoveLabelHelpWarnsAboutReArming(t *testing.T) {
-	var reply, closeTask bool
+	var reply, writeDesign, closeTask bool
 	var labels, removeLabels []string
-	var cycleSpec string
+	var setStatus, cycleSpec string
 
 	cmd := &cobra.Command{Use: "update"}
-	registerHookFlags(cmd, &reply, &labels, &removeLabels, &closeTask, &cycleSpec)
+	registerHookFlags(cmd, &reply, &writeDesign, &labels, &removeLabels, &setStatus, &closeTask, &cycleSpec)
 
 	flag := cmd.Flags().Lookup("on-complete-remove-label")
 	if flag == nil {

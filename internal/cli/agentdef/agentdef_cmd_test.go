@@ -14,6 +14,8 @@ func resetHookFlags(t *testing.T) {
 	clear := func() {
 		agentAddCommentReply, agentAddLabels, agentAddRemoveLabels = false, nil, nil
 		agentUpdateCommentReply, agentUpdateLabels, agentUpdateRemoveLabels = false, nil, nil
+		agentAddWriteDesign, agentAddSetStatus = false, ""
+		agentUpdateWriteDesign, agentUpdateSetStatus = false, ""
 		agentUpdateClear = false
 	}
 	clear()
@@ -95,7 +97,7 @@ func TestHooksFromFlags(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := hooksFromFlags(tt.commentReply, tt.labels, nil, tt.closeTask, "")
+			got, err := hooksFromFlags(tt.commentReply, false, tt.labels, nil, "", tt.closeTask, "")
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 					t.Fatalf("hooksFromFlags() error = %v, want it to contain %q", err, tt.wantErr)
