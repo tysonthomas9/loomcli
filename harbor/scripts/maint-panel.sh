@@ -17,13 +17,14 @@ if [ -n "${MAINT_ARTIFACTS:-}" ]; then
   IDS="${IDS# }"
   src_of() { for kv in $MAINT_ARTIFACTS; do [ "${kv%%=*}" = "$1" ] && { echo "${kv#*=}"; return; }; done; }
 else
-IDS="baseline run19 run20 run21"
+IDS="${MX_IDS:-baseline run19 run20 run21}"
 src_of() {
   case "$1" in
     baseline) echo /Users/tyson/codebase/code-agents/loomcli/harbor/trials/codex-baseline-1/slack-clone__BV7wtZv/artifacts/app ;;
     run19)    echo /Users/tyson/codebase/code-agents/loomcli/harbor/trials/loom-generic-tasks-1/slack-clone__tUAmrE8/artifacts/app ;;
     run20)    echo /Users/tyson/codebase/code-agents/loomcli/harbor/trials/loom-generic-tasks-2/slack-clone__RbVFjFP/artifacts/app ;;
     run21)    echo /Users/tyson/codebase/code-agents/loomcli/harbor/trials/loom-generic-tasks-dual-1/slack-clone__jxozk75/artifacts/app ;;
+    leadm1)   ls -d /Users/tyson/codebase/code-agents/loomcli/harbor/trials/loom-generic-tasks-leadm-1/slack-clone__*/artifacts/app | head -1 ;;
   esac
 }
 fi
@@ -198,6 +199,7 @@ SRCS = {kv.split('=',1)[0]: kv.split('=',1)[1] for kv in _override} if _override
  'run19':'/Users/tyson/codebase/code-agents/loomcli/harbor/trials/loom-generic-tasks-1/slack-clone__tUAmrE8/artifacts/app',
  'run20':'/Users/tyson/codebase/code-agents/loomcli/harbor/trials/loom-generic-tasks-2/slack-clone__RbVFjFP/artifacts/app',
  'run21':'/Users/tyson/codebase/code-agents/loomcli/harbor/trials/loom-generic-tasks-dual-1/slack-clone__jxozk75/artifacts/app',
+ 'leadm1':__import__('glob').glob('/Users/tyson/codebase/code-agents/loomcli/harbor/trials/loom-generic-tasks-leadm-1/slack-clone__*/artifacts/app')[0],
 }
 TEST_RE = re.compile(r'(^|/)(tests?)/|(^|/)test_[^/]*\.py$|\.(test|spec)\.[cm]?[jt]s$|(^|/)conftest\.py$')
 SKIP = re.compile(r'(^|/)(\.git|node_modules|__pycache__|data)/|package-lock\.json|\.lock$|timer\.sh$')
@@ -254,8 +256,8 @@ json.dump(m, open(OUT,'w'), indent=1)
 
 # reference-set annotations only; any other artifact id renders '-' (the display
 # block must never KeyError on a new trial — codex B2h-vet finding 1 class)
-LANG = {'baseline':'JS','run19':'JS','run20':'PY','run21':'PY'}
-GATES = {'baseline':'2/5','run19':'3/5','run20':'0/5','run21':'0/5'}
+LANG = {'baseline':'JS','run19':'JS','run20':'PY','run21':'PY','leadm1':'PY'}
+GATES = {'baseline':'2/5','run19':'3/5','run20':'0/5','run21':'0/5','leadm1':'0/5'}
 rows = [('metric', *ids), ('language', *[LANG.get(i,'-') for i in ids]), ('gates', *[GATES.get(i,'-') for i in ids])]
 keys = ['prod_files','prod_sloc','files_per_kloc','file_sloc_median','file_sloc_p90','file_sloc_max',
         'functions','ccn_median','ccn_p90','ccn_gt10_pct','fn_nloc_p90','fn_nloc_gt60_pct',

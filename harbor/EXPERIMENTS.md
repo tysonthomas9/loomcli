@@ -583,6 +583,39 @@ reached it.
   ~40% lower total ($79 vs $178) because idle workers cost nothing —
   starvation is cheap, which itself is diagnostic.
 
+#### B2k AS-RUN (2026-08-08, loom-generic-tasks-leadm-1, run 23) + FORK VERDICT
+B2k: 25/25 integrated (fully drained), $191.42, deadline finalize — but
+**0/5 gates, API 49/129 (family WORST), replica-ux 0.9375 → site 0.469.**
+The maintainability sentence was INERT on every channel: ZERO refactor
+tasks filed (its most concrete instruction), verify-task machinery
+unaffected (34 filed/34 closed — no zero-sum attention theft), and the
+artifact structurally indistinguishable-from-untreated (median file 100.5
+≈ run21; dup 1.85% = family worst; max file 935). Most test code of any
+run (41 files, ratio 0.57) against the worst independent API score — the
+test-volume/correctness inversion at its most extreme. Behavioral
+replication of Zhu et al.: prompt exhortation does nothing (p>0.8).
+
+**FORK VERDICT (B2j vs B2k, both from frozen commit daddc68d1):**
+- Exhortation (B2k): INERT — pre-registered category confirmed.
+- Authority (B2j): not "ineffective" or "unexercised" but a category the
+  pre-registration lacked: OVER-EXERCISED — design-stage authority
+  without rejection bounds starved the pipeline to zero.
+- CRITICAL SCOPE NOTE: the integration-stage gate — the checkpoint we
+  hardened through two vets and 43 lifecycle assertions — was NEVER
+  TESTED in vivo: no candidate ever reached it. Integration-stage
+  authority remains an open question; design-stage authority as wired is
+  answered (destructive without bounds).
+- UX LAW extended: SIX consecutive runs at replica-ux 0.9375 (19, 20, 21,
+  dual, arch-n/a excluded, leadm) — the persistent-product-QA half is
+  invariant under every intervention tried; all variance lives in the
+  correctness half.
+- NEXT (pre-registered options): B2j-rev2 (bounded authority: 2-rejection
+  cap, first-drafts-only design gate, starvation valve — and note the
+  campaign evidence pattern actually favors testing INTEGRATION-stage
+  authority alone, since the task machinery demonstrably moves agents and
+  that checkpoint is unexercised), or the parked CI-style feedback arm.
+  Cost note: fork total $270.65 for two runs.
+
 ### B3. fractal-generic — infrastructure COMMITTED
 Mission mode `generic` (verbatim spec + finish sentence — the hardcoded
 preamble is bypassed; strip-vet #3); hidden reserve pinned to 0; concurrency
