@@ -61,16 +61,24 @@ func (h *captureHandler) countAtLeast(level slog.Level) int {
 	return n
 }
 
-// seedBulkKeys writes n persistable string keys through one pipeline.
+// seedBulkKeys writes n persistable string keys in bounded pipelines. Keeping
+// setup writes bounded prevents the Redis client's write deadline from turning
+// a heavily loaded race run into a failure before the snapshot operation under
+// test starts.
 func seedBulkKeys(t *testing.T, m *Manager, n int) {
 	t.Helper()
 	ctx := context.Background()
-	pipe := m.Client().Pipeline()
-	for i := 0; i < n; i++ {
-		pipe.Set(ctx, fmt.Sprintf("terminal:meta:bulk:%05d", i), "x", 0)
-	}
-	if _, err := pipe.Exec(ctx); err != nil {
-		t.Fatalf("seed bulk keys: %v", err)
+	const batchSize = 5000
+	for start := 0; start < n; start += batchSize {
+		end := min(start+batchSize, n)
+		if _, err := m.Client().Pipelined(ctx, func(pipe redis.Pipeliner) error {
+			for i := start; i < end; i++ {
+				pipe.Set(ctx, fmt.Sprintf("terminal:meta:bulk:%05d", i), "x", 0)
+			}
+			return nil
+		}); err != nil {
+			t.Fatalf("seed bulk keys [%d,%d): %v", start, end, err)
+		}
 	}
 }
 
