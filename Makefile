@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify test-e2e-github-webhook test-e2e-github-webhook-live
+.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down fleetdb-regression-up fleetdb-regression-down ensure-frontend-dist local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify test-e2e-github-webhook test-e2e-github-webhook-live
 
 # Default target
 all: build
@@ -157,13 +157,59 @@ fleetdb-empty-down:
 	fi; \
 	$$compose -f test/fleetdb/docker-compose.empty.yml down -v --remove-orphans
 
-# Start the local-mode dogfood stack: fleet-db, loom serve, workspace daemon
-# manager, a deterministic planner/coder backend, and the Web UI.
-local-mode-frontend-dist:
+# Guard for every UI-bearing compose stack. The Web UI bundle is gitignored
+# build output, and compose bind-mounts $(FRONTEND_DIR)/dist into the Caddy
+# sidecar. Docker silently substitutes an empty directory when the bind-mount
+# source is missing, so a stack started from a clean checkout comes up "healthy"
+# and serves 404 with nothing in any log. Build it once on the host instead.
+ensure-frontend-dist:
 	@if [ ! -f "$(FRONTEND_DIR)/dist/index.html" ]; then \
 	  echo "Web UI dist is missing; building it once on the host..."; \
 	  $(MAKE) build-frontend; \
 	fi
+
+# Start the fleet-db regression stack: redis, fleet-db, loom serve on the
+# fleet-db backend, the Web UI sidecar, and a one-shot fixture seeder.
+#
+# Engine support: this stack needs docker compose >= 2.22, which is where
+# `additional_contexts: fdb-source: "service:fleet-db"` (the build-time edge the
+# seeder image depends on) landed. The podman-compose / `podman compose`
+# fallbacks below are kept for parity with fleetdb-empty-up, but they are not
+# known to implement `service:` build contexts: on those engines the seeder
+# build degrades back to the original "pull access denied" failure. Use docker
+# compose for the regression stack.
+fleetdb-regression-up: ensure-frontend-dist
+	@echo "Starting fleet-db regression stack (API http://localhost:8082, UI http://localhost:8083)..."
+	@set -e; \
+	if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then \
+	  compose="docker compose"; \
+	elif command -v podman-compose >/dev/null 2>&1; then \
+	  compose="podman-compose"; \
+	elif command -v podman >/dev/null 2>&1 && podman compose version >/dev/null 2>&1; then \
+	  compose="podman compose"; \
+	else \
+	  echo "docker compose or podman compose is required" >&2; \
+	  exit 127; \
+	fi; \
+	$$compose -f test/fleetdb/docker-compose.regression.yml up --build -d
+
+fleetdb-regression-down:
+	@set -e; \
+	if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then \
+	  compose="docker compose"; \
+	elif command -v podman-compose >/dev/null 2>&1; then \
+	  compose="podman-compose"; \
+	elif command -v podman >/dev/null 2>&1 && podman compose version >/dev/null 2>&1; then \
+	  compose="podman compose"; \
+	else \
+	  echo "docker compose or podman compose is required" >&2; \
+	  exit 127; \
+	fi; \
+	$$compose -f test/fleetdb/docker-compose.regression.yml down -v --remove-orphans
+
+# Start the local-mode dogfood stack: fleet-db, loom serve, workspace daemon
+# manager, a deterministic planner/coder backend, and the Web UI.
+local-mode-frontend-dist: ensure-frontend-dist
 
 local-mode-up: local-mode-frontend-dist
 	@echo "Starting local-mode dogfood stack ($(LOCAL_MODE_COMPOSE_PROJECT)) on http://localhost:$${LOCAL_MODE_UI_PORT:-8283}/ws/LOCALMODE/kanban..."
