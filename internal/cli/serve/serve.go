@@ -29,6 +29,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/usagecmd"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr"
 	driverexecutor "github.com/tysonthomas9/loomcli/internal/driver"
+	"github.com/tysonthomas9/loomcli/internal/placement"
+	"github.com/tysonthomas9/loomcli/internal/placement/daytona"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	webuiapp "github.com/tysonthomas9/loomcli/internal/webui/app"
@@ -234,10 +236,11 @@ func runServe(cmd *cobra.Command, args []string) {
 	startTriggerDeliverySweeper(ctx, storeHandle.Store)
 	startAwaitTimeoutSweeper(ctx, storeHandle.Store)
 	startIssueJournalBridge(ctx, storeHandle.Store)
-	// TODO(5c-4): construct the Daytona provider and placement Broker here,
-	// then pass it to startPlacementReaper. Serve does not yet own that
-	// provisioning surface, and this ticket is limited to the reaper itself.
-	startPlacementReaper(ctx, nil, placementReaperInterval(), placementReaperEnforce())
+	// The reaper needs the same broker that will drive provisioning (5c-4b).
+	// buildPlacementBroker returns nil unless Daytona creds + a deployment id
+	// + an occupant-token key are all configured, so this is a no-op on
+	// deployments that do not place leads in sandboxes.
+	startPlacementReaper(ctx, buildPlacementBroker(storeHandle.Store), placementReaperInterval(), placementReaperEnforce())
 
 	issueBackendFn := cli.WorkspaceAwareIssueBackendForURL(storeHandle.URL(), fleetState.clientCfg.Actor)
 	monitorDefaultWorkspace := resolveMonitorCollectorWorkspace(storeHandle.Store, fleetState.clientCfg.Workspace)
@@ -449,6 +452,42 @@ func driverRunTokenKey() []byte {
 		return nil
 	}
 	return key
+}
+
+// buildPlacementBroker constructs the Daytona placement broker when this
+// deployment is configured to place leads in sandboxes. It returns nil (and
+// logs once) unless DAYTONA_API_KEY, LOOM_DEPLOYMENT_ID, and an occupant-token
+// signing key are all present -- the broker mints occupant tokens with the same
+// key the leadapi module verifies (DriverRunTokenKey), so a mismatch would make
+// every sandboxed lead's API call fail. Callers treat nil as "sandbox placement
+// disabled".
+func buildPlacementBroker(st store.Store) *placement.Broker {
+	if strings.TrimSpace(os.Getenv(daytona.APIKeyEnv)) == "" {
+		return nil
+	}
+	tokenKey := driverRunTokenKey()
+	if len(tokenKey) == 0 {
+		slog.Warn("placement broker disabled: no occupant-token signing key (set LOOM_RUN_TOKEN_SIGNING_KEY)")
+		return nil
+	}
+	provider, err := daytona.New(daytona.Config{})
+	if err != nil {
+		slog.Error("placement broker disabled: construct Daytona provider", "err", err)
+		return nil
+	}
+	broker, err := placement.NewBroker(placement.Config{
+		Store:    st,
+		Provider: provider,
+		TokenKey: tokenKey,
+	})
+	if err != nil {
+		// Most commonly a missing LOOM_DEPLOYMENT_ID (required so provider
+		// sandboxes carry the loom-env label the reaper scopes to).
+		slog.Error("placement broker disabled: construct broker", "err", err)
+		return nil
+	}
+	slog.Info("Placement broker enabled (Daytona lead sandboxes)")
+	return broker
 }
 
 func driverExecutorEnabled() bool {
