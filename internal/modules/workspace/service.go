@@ -7,8 +7,6 @@ import (
 	"strings"
 )
 
-const maxWorkspaceNameLength = 64
-
 type Service struct {
 	store        CatalogStore
 	repositories RepositoryCatalogStore
@@ -302,19 +300,7 @@ func validatedRepository(value *Repository, workspaceKey, operation string) (*Re
 }
 
 func validateName(name string) error {
-	if name == "" {
-		return fmt.Errorf("workspace name is required: %w", ErrInvalid)
-	}
-	if len(name) > maxWorkspaceNameLength {
-		return fmt.Errorf("workspace name is too long (max %d characters): %w", maxWorkspaceNameLength, ErrInvalid)
-	}
-	for _, value := range name {
-		if !((value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z') ||
-			(value >= '0' && value <= '9') || value == '-' || value == '_') {
-			return fmt.Errorf("workspace name must contain only alphanumeric characters, hyphens, and underscores: %w", ErrInvalid)
-		}
-	}
-	return nil
+	return ValidateName(name)
 }
 
 func validState(state State) bool {

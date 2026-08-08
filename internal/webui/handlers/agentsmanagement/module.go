@@ -6,7 +6,6 @@ package agentsmanagement
 import (
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -14,6 +13,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
+	serverhandler "github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
@@ -330,14 +330,14 @@ func canonicalWorkspace(response http.ResponseWriter, request *http.Request) (st
 }
 
 func decodeOneObject(response http.ResponseWriter, request *http.Request, output any) error {
-	decoder := json.NewDecoder(http.MaxBytesReader(response, request.Body, maxRequestBytes))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(output); err != nil {
-		return errors.New("invalid Agent JSON: " + err.Error())
-	}
-	var extra any
-	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+	err := serverhandler.DecodeOneJSON(response, request, output, serverhandler.JSONDecodeOptions{
+		MaxBytes: maxRequestBytes, DisallowUnknownFields: true,
+	})
+	if errors.Is(err, serverhandler.ErrTrailingJSON) {
 		return errors.New("agent request must contain exactly one JSON object")
+	}
+	if err != nil {
+		return errors.New("invalid Agent JSON: " + err.Error())
 	}
 	return nil
 }

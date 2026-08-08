@@ -173,11 +173,64 @@ func TestServiceCreateWithExplicitRepositorySkipsAdmission(t *testing.T) {
 	}
 }
 
+func TestServiceCreatePersistsCanonicalTitle(t *testing.T) {
+	store := &fakeStore{
+		created: &IssueSummary{ID: "TASK-1", Title: "Proof", Status: "open", SourceRepo: "loomcli", Repo: "loomcli"},
+		claimed: &IssueDetail{ID: "TASK-1", Title: "Proof", Status: "open", SourceRepo: "loomcli", Repo: "loomcli", Labels: []string{}, Dependencies: []Dependency{}, Dependents: []Dependency{}, Comments: []*Comment{}},
+	}
+	service, _ := New(store)
+	if _, err := service.Create(context.Background(), CreateCommand{
+		Title: "  Proof  ", IssueType: "task", Priority: 2, SourceRepo: "loomcli",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if store.createdCommand.Title != "Proof" {
+		t.Fatalf("persisted title = %q, want canonical Proof", store.createdCommand.Title)
+	}
+}
+
 func TestServiceCreateRejectsInvalidInputBeforePersistence(t *testing.T) {
 	store := &fakeStore{}
 	service, _ := New(store)
 	if _, err := service.Create(context.Background(), CreateCommand{IssueType: "task", Priority: 2}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("expected invalid create, got %v", err)
+	}
+	if store.createdCommand.IssueType != "" || store.admissionChecks != 0 {
+		t.Fatalf("invalid create reached persistence: %#v", store.createdCommand)
+	}
+}
+
+func TestServiceCreateEnforcesOwnerValidationLimits(t *testing.T) {
+	store := &fakeStore{}
+	service, _ := New(store)
+	for _, test := range []struct {
+		name    string
+		command CreateCommand
+	}{
+		{
+			name: "title",
+			command: CreateCommand{
+				Title: strings.Repeat("a", MaxTitleLength+1), IssueType: "task", Priority: 2,
+			},
+		},
+		{
+			name: "labels",
+			command: CreateCommand{
+				Title: "Proof", IssueType: "task", Priority: 2, Labels: make([]string, MaxLabels+1),
+			},
+		},
+		{
+			name: "dependencies",
+			command: CreateCommand{
+				Title: "Proof", IssueType: "task", Priority: 2, Dependencies: make([]string, MaxDependencies+1),
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := service.Create(context.Background(), test.command); !errors.Is(err, ErrInvalid) {
+				t.Fatalf("Create() error = %v, want ErrInvalid", err)
+			}
+		})
 	}
 	if store.createdCommand.IssueType != "" || store.admissionChecks != 0 {
 		t.Fatalf("invalid create reached persistence: %#v", store.createdCommand)
