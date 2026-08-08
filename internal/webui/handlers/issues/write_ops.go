@@ -3,12 +3,24 @@ package issues
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
+
+func decodeOptionalIssueJSON(w http.ResponseWriter, r *http.Request, dst any) error {
+	if r.Body == nil {
+		return nil
+	}
+	err := handler.DecodeOneJSON(w, r, dst, handler.JSONDecodeOptions{MaxBytes: handler.MaxRequestBody})
+	if errors.Is(err, io.EOF) {
+		return nil
+	}
+	return err
+}
 
 // HandleReopenWorkItem routes reopening through the Work Items owner command.
 func HandleReopenWorkItem(api workitems.API) http.HandlerFunc {
@@ -18,19 +30,16 @@ func HandleReopenWorkItem(api workitems.API) http.HandlerFunc {
 			handler.WriteJSON(w, http.StatusBadRequest, ReopenResponse{Success: false, Error: "missing issue ID"})
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
 		var req ReopenRequest
-		if r.Body != nil && r.ContentLength > 0 {
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				var maxBytesErr *http.MaxBytesError
-				if errors.As(err, &maxBytesErr) {
-					handler.WriteJSON(w, http.StatusRequestEntityTooLarge, ReopenResponse{Success: false, Error: "request body too large (max 1MB)"})
-					return
-				}
-				slog.Warn("invalid request body in HandleReopenWorkItem", "err", err)
-				handler.WriteJSON(w, http.StatusBadRequest, ReopenResponse{Success: false, Error: "invalid request body"})
+		if err := decodeOptionalIssueJSON(w, r, &req); err != nil {
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) {
+				handler.WriteJSON(w, http.StatusRequestEntityTooLarge, ReopenResponse{Success: false, Error: "request body too large (max 1MB)"})
 				return
 			}
+			slog.Warn("invalid request body in HandleReopenWorkItem", "err", err)
+			handler.WriteJSON(w, http.StatusBadRequest, ReopenResponse{Success: false, Error: "invalid request body"})
+			return
 		}
 		if api == nil {
 			handler.HandleWorkItemsError(w, workitems.ErrUnavailable)
@@ -69,9 +78,8 @@ func HandleDeleteWorkItem(api workitems.API) http.HandlerFunc {
 // handleCreateIssue returns a handler that creates a new issue.
 func HandleCreateWorkItem(api workitems.API) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
 		var req IssueCreateRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{MaxBytes: handler.MaxRequestBody}); err != nil {
 			var maxBytesErr *http.MaxBytesError
 			if errors.As(err, &maxBytesErr) {
 				writeIssuesError(w, http.StatusRequestEntityTooLarge, "request body too large (max 1MB)", "REQUEST_TOO_LARGE")
@@ -146,19 +154,16 @@ func HandleCloseWorkItem(api workitems.API) http.HandlerFunc {
 }
 
 func decodeCloseRequest(w http.ResponseWriter, r *http.Request) (CloseRequest, bool) {
-	r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
 	var req CloseRequest
-	if r.Body != nil && r.ContentLength > 0 {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			var maxBytesErr *http.MaxBytesError
-			if errors.As(err, &maxBytesErr) {
-				handler.RespondError(w, http.StatusRequestEntityTooLarge, "request body too large (max 1MB)")
-				return CloseRequest{}, false
-			}
-			slog.Warn("invalid request body in close work item", "err", err)
-			handler.RespondError(w, http.StatusBadRequest, "invalid request body")
+	if err := decodeOptionalIssueJSON(w, r, &req); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			handler.RespondError(w, http.StatusRequestEntityTooLarge, "request body too large (max 1MB)")
 			return CloseRequest{}, false
 		}
+		slog.Warn("invalid request body in close work item", "err", err)
+		handler.RespondError(w, http.StatusBadRequest, "invalid request body")
+		return CloseRequest{}, false
 	}
 	return req, true
 }

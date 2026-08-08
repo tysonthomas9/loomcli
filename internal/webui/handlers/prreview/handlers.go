@@ -1,13 +1,13 @@
 package prreview
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
@@ -187,7 +187,7 @@ func pullRequestArgs(params pullRequestPath) map[string]any {
 // decodeReviewRequest parses and validates a review POST body, writing the
 // HTTP error itself and returning ok=false on failure.
 func decodeReviewRequest(w http.ResponseWriter, r *http.Request) (req gen.PullRequestReviewRequest, event, expectedHeadSha string, ok bool) {
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{}); err != nil {
 		writePRReviewErrorCode(w, http.StatusBadRequest, "invalid", "invalid review request body", false)
 		return req, "", "", false
 	}

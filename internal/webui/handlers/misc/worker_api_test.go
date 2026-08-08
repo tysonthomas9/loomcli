@@ -1,6 +1,7 @@
 package misc
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -156,6 +157,18 @@ func TestHandleWorkerRegister(t *testing.T) {
 			wantCode: http.StatusBadRequest,
 			wantErr:  true,
 		},
+		{
+			name:     "trailing json",
+			body:     `{"workspace":"ws","agent":"a1"} {}`,
+			wantCode: http.StatusBadRequest,
+			wantErr:  true,
+		},
+		{
+			name:     "oversized body",
+			body:     `{"workspace":"ws","agent":"` + strings.Repeat("x", 1<<20) + `"}`,
+			wantCode: http.StatusBadRequest,
+			wantErr:  true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -307,6 +320,18 @@ func TestHandleWorkerState(t *testing.T) {
 			name:     "invalid json",
 			workerID: "w1",
 			body:     `{bad`,
+			wantCode: http.StatusBadRequest,
+		},
+		{
+			name:     "trailing json",
+			workerID: "w1",
+			body:     `{"action":"read"} {}`,
+			wantCode: http.StatusBadRequest,
+		},
+		{
+			name:     "oversized body",
+			workerID: "w1",
+			body:     `{"action":"read","state":"` + strings.Repeat("x", 1<<20) + `"}`,
 			wantCode: http.StatusBadRequest,
 		},
 	}
@@ -700,6 +725,55 @@ func TestHandleWorkerLogs_EmptyLogPath(t *testing.T) {
 	if w.Code != http.StatusInternalServerError {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusInternalServerError)
 	}
+}
+
+func TestWorkerStreamsRejectOversizedBodiesWithoutMutation(t *testing.T) {
+	oversized := strings.Repeat("x", int(maxWorkerStreamBodyBytes)+1)
+
+	t.Run("events", func(t *testing.T) {
+		eventsDir := t.TempDir()
+		eventsPath := filepath.Join(eventsDir, "events.jsonl")
+		original := []byte("existing-event\n")
+		if err := os.WriteFile(eventsPath, original, 0600); err != nil {
+			t.Fatal(err)
+		}
+		registry := NewWorkerRegistry()
+		registry.Register(&WorkerInfo{ID: "w1", Workspace: "ws", Agent: "a1"})
+		req := httptest.NewRequest(http.MethodPost, "/api/internal/workers/w1/events", strings.NewReader(oversized))
+		req.SetPathValue("id", "w1")
+		rec := httptest.NewRecorder()
+
+		handleWorkerEvents(registry, func(string) string { return eventsDir }).ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusRequestEntityTooLarge {
+			t.Fatalf("status = %d, want 413; body = %s", rec.Code, rec.Body.String())
+		}
+		if got, err := os.ReadFile(eventsPath); err != nil || !bytes.Equal(got, original) {
+			t.Fatalf("events file after rejection = %q, %v; want unchanged", got, err)
+		}
+	})
+
+	t.Run("logs", func(t *testing.T) {
+		logPath := filepath.Join(t.TempDir(), "agent.log")
+		original := []byte("existing-log\n")
+		if err := os.WriteFile(logPath, original, 0600); err != nil {
+			t.Fatal(err)
+		}
+		registry := NewWorkerRegistry()
+		registry.Register(&WorkerInfo{ID: "w1", Workspace: "ws", Agent: "a1"})
+		req := httptest.NewRequest(http.MethodPost, "/api/internal/workers/w1/logs", strings.NewReader(oversized))
+		req.SetPathValue("id", "w1")
+		rec := httptest.NewRecorder()
+
+		handleWorkerLogs(registry, func(string, string) string { return logPath }).ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusRequestEntityTooLarge {
+			t.Fatalf("status = %d, want 413; body = %s", rec.Code, rec.Body.String())
+		}
+		if got, err := os.ReadFile(logPath); err != nil || !bytes.Equal(got, original) {
+			t.Fatalf("log file after rejection = %q, %v; want unchanged", got, err)
+		}
+	})
 }
 
 // ---------------------------------------------------------------------------

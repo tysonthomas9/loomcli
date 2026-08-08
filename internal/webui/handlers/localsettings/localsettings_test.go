@@ -321,3 +321,38 @@ func TestHandlePatch_NotifiesOnlyActualGitHubCredentialChanges(t *testing.T) {
 		t.Fatalf("notifications after no-op GitHub clear = %d, want 2", notifications)
 	}
 }
+
+func TestJSONHandlersRejectTrailingValues(t *testing.T) {
+	tests := []struct {
+		name   string
+		handle http.HandlerFunc
+		method string
+		path   string
+		body   string
+	}{
+		{
+			name:   "runtime credential preflight",
+			handle: HandleRuntimeCredentialPreflight(t.TempDir()),
+			method: http.MethodPost,
+			path:   "/api/local/settings/runtime-credentials/preflight",
+			body:   `{"provider":"github"} {}`,
+		},
+		{
+			name:   "settings patch",
+			handle: HandlePatch(t.TempDir()),
+			method: http.MethodPatch,
+			path:   "/api/local/settings",
+			body:   `{} {}`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			req := httptest.NewRequest(test.method, test.path, strings.NewReader(test.body))
+			rec := httptest.NewRecorder()
+			test.handle.ServeHTTP(rec, req)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400; body = %s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}

@@ -297,7 +297,7 @@ func (m *Module) createBinding(w http.ResponseWriter, r *http.Request) { //nolin
 		return
 	}
 	var request createBindingRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBindingBodyBytes)).Decode(&request); err != nil {
+	if err := handler.DecodeOneJSON(w, r, &request, handler.JSONDecodeOptions{MaxBytes: maxBindingBodyBytes}); err != nil {
 		handler.RespondError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
@@ -720,7 +720,7 @@ func (m *Module) patchBinding(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var request updateBindingRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBindingBodyBytes)).Decode(&request); err != nil {
+	if err := handler.DecodeOneJSON(w, r, &request, handler.JSONDecodeOptions{MaxBytes: maxBindingBodyBytes}); err != nil {
 		handler.RespondError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
@@ -931,13 +931,15 @@ func (m *Module) resolveOperator(w http.ResponseWriter, r *http.Request, workspa
 }
 
 func writeAutomationError(w http.ResponseWriter, err error, fallback string) {
+	if classification, ok := handler.ClassifyAuthenticationAuthorityError(err); ok {
+		message := "authentication required"
+		if classification.Status == http.StatusForbidden {
+			message = "forbidden"
+		}
+		handler.RespondError(w, classification.Status, message)
+		return
+	}
 	switch {
-	case errors.Is(err, workflowcataloghttp.ErrUnauthenticated),
-		errors.Is(err, authority.ErrInvalidPrincipal), errors.Is(err, authority.ErrPrincipalExpired):
-		handler.RespondError(w, http.StatusUnauthorized, "authentication required")
-	case errors.Is(err, authority.ErrWorkspaceMismatch), errors.Is(err, authority.ErrActionNotAllowed),
-		errors.Is(err, authority.ErrAdmissionDenied), errors.Is(err, authority.ErrPrincipalClass):
-		handler.RespondError(w, http.StatusForbidden, "forbidden")
 	case errors.Is(err, automation.ErrNotFound), errors.Is(err, domain.ErrNotFound):
 		handler.RespondError(w, http.StatusNotFound, fallback)
 	case errors.Is(err, automation.ErrInvalid), errors.Is(err, automation.ErrWrongWorkspace), errors.Is(err, domain.ErrInvalid):

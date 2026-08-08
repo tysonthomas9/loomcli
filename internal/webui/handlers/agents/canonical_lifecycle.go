@@ -1,7 +1,6 @@
 package agents
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -40,7 +39,7 @@ func (m *Module) resolveCanonicalLifecycleTarget(
 	operation string,
 ) (canonicalLifecycleTarget, bool) {
 	var target canonicalLifecycleTarget
-	if !validCanonicalLifecycleRequest(r) {
+	if !validCanonicalLifecycleRequest(w, r) {
 		writeAgentValidationError(w, "invalid request body")
 		return target, false
 	}
@@ -121,14 +120,14 @@ func (m *Module) applyCanonicalLifecycle(
 	})
 }
 
-func validCanonicalLifecycleRequest(r *http.Request) bool {
+func validCanonicalLifecycleRequest(w http.ResponseWriter, r *http.Request) bool {
 	if r.Body == nil || r.ContentLength == 0 {
 		return true
 	}
-	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
 	var request lifecycleRequest
-	return decoder.Decode(&request) == nil && !decoder.More()
+	return handler.DecodeOneJSON(w, r, &request, handler.JSONDecodeOptions{
+		DisallowUnknownFields: true,
+	}) == nil
 }
 
 func canonicalLifecycleOperation(operation string) (agentsmodule.LifecycleAction, string, bool) {

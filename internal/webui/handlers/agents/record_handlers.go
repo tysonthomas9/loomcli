@@ -3,7 +3,6 @@ package agents
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -67,7 +66,9 @@ func (m *Module) createAgent(w http.ResponseWriter, r *http.Request) {
 	resetAgentCreateBody(r, body)
 
 	var probe createAgentKindProbe
-	if err := json.Unmarshal(body, &probe); err != nil {
+	if err := handler.DecodeOneJSONBytes(body, &probe, handler.JSONDecodeOptions{
+		MaxBytes: handler.MaxRequestBody,
+	}); err != nil {
 		handler.RespondError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
@@ -95,7 +96,9 @@ type promptAgentCreatePlan struct {
 
 func parsePromptAgentCreatePlan(body []byte) (promptAgentCreatePlan, error) {
 	var req createPromptAgentRequest
-	if err := json.Unmarshal(body, &req); err != nil {
+	if err := handler.DecodeOneJSONBytes(body, &req, handler.JSONDecodeOptions{
+		MaxBytes: handler.MaxRequestBody,
+	}); err != nil {
 		return promptAgentCreatePlan{}, errors.New("invalid JSON body")
 	}
 	roleName := strings.TrimSpace(req.Behavior.RoleName)

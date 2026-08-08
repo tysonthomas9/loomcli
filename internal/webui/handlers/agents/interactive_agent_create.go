@@ -1,8 +1,6 @@
 package agents
 
 import (
-	"bytes"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -111,9 +109,10 @@ func parseCanonicalInteractiveAgentCreate(
 	workspace string,
 ) (canonicalInteractiveAgentCreateRequest, string) {
 	var input canonicalInteractiveAgentCreateRequest
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&input); err != nil {
+	if err := handler.DecodeOneJSONBytes(body, &input, handler.JSONDecodeOptions{
+		MaxBytes:              handler.MaxRequestBody,
+		DisallowUnknownFields: true,
+	}); err != nil {
 		return input, "invalid request body"
 	}
 	if input.WorkspaceKey != "" && strings.TrimSpace(input.WorkspaceKey) != workspace {

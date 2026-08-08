@@ -734,3 +734,42 @@ func TestTaskRunWrongWorkspaceRejected(t *testing.T) {
 		t.Fatalf("wrong-workspace get = %d, want 401", resp.StatusCode)
 	}
 }
+
+func TestDecodeStrictParamsUsesExactOnePolicy(t *testing.T) {
+	type params struct {
+		TaskID string `json:"taskId"`
+	}
+
+	got, err := decodeStrictParams[params]([]byte(`{"taskId":"TASK-1"}`))
+	if err != nil || got.TaskID != "TASK-1" {
+		t.Fatalf("decodeStrictParams(valid) = (%+v, %v), want TASK-1", got, err)
+	}
+
+	for name, body := range map[string]string{
+		"unknown field": `{"taskId":"TASK-1","authority":"forged"}`,
+		"trailing JSON": `{"taskId":"TASK-1"} {"taskId":"TASK-2"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := decodeStrictParams[params]([]byte(body))
+			if err == nil || !errors.Is(err, domain.ErrInvalid) {
+				t.Fatalf("decodeStrictParams(%s) error = %T %v, want domain.ErrInvalid", name, err, err)
+			}
+		})
+	}
+}
+
+func TestDecodeParamsUsesExactOnePolicy(t *testing.T) {
+	type params struct {
+		TaskID string `json:"taskId"`
+	}
+
+	got, err := decodeParams[params]([]byte(`{"taskId":"TASK-1"}`))
+	if err != nil || got.TaskID != "TASK-1" {
+		t.Fatalf("decodeParams(valid) = (%+v, %v), want TASK-1", got, err)
+	}
+
+	_, err = decodeParams[params]([]byte(`{"taskId":"TASK-1"} {"taskId":"TASK-2"}`))
+	if err == nil || !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("decodeParams(trailing) error = %T %v, want domain.ErrInvalid", err, err)
+	}
+}

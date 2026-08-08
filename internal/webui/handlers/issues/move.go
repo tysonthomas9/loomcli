@@ -1,7 +1,6 @@
 package issues
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -71,9 +70,8 @@ type MoveResult struct {
 }
 
 func decodeMoveIssueRequest(w http.ResponseWriter, r *http.Request) (MoveIssueRequest, bool) {
-	r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
 	var req MoveIssueRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{MaxBytes: handler.MaxRequestBody}); err != nil {
 		var maxBytesErr *http.MaxBytesError
 		if errors.As(err, &maxBytesErr) {
 			handler.WriteJSON(w, http.StatusRequestEntityTooLarge, MoveIssueResponse{Success: false, Error: "request body too large (max 1MB)"})

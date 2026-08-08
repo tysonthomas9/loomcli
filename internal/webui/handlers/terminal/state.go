@@ -1,7 +1,6 @@
 package terminal
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
@@ -31,7 +30,7 @@ func HandlePatchTerminalState(svc terminal.TerminalService) http.HandlerFunc {
 		var req struct {
 			ActiveTab string `json:"active_tab"`
 		}
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)).Decode(&req); err != nil {
+		if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{}); err != nil {
 			handler.RespondError(w, http.StatusBadRequest, "invalid request body")
 			return
 		}

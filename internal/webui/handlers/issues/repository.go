@@ -48,11 +48,11 @@ func handleSetIssueRepository(command func(context.Context, string, string) (jso
 			return
 		}
 
-		r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
 		var req SetIssueRepositoryRequest
-		decoder := json.NewDecoder(r.Body)
-		decoder.DisallowUnknownFields()
-		if err := decoder.Decode(&req); err != nil {
+		if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{
+			MaxBytes:              handler.MaxRequestBody,
+			DisallowUnknownFields: true,
+		}); err != nil {
 			var maxBytesErr *http.MaxBytesError
 			if errors.As(err, &maxBytesErr) {
 				writeIssuesError(w, http.StatusRequestEntityTooLarge, "request body too large (max 1MB)", "REQUEST_TOO_LARGE")

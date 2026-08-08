@@ -14,7 +14,7 @@ import (
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
-	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
+	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
@@ -44,7 +44,7 @@ type Module struct {
 	sourceControl            sourcecontrol.Materializer
 	interactionChat          interaction.ChatAPI
 	interactionMessenger     interaction.ChatMessenger
-	interactionAuthority     workflowcataloghttp.OperatorAuthorityResolver
+	interactionAuthority     operatorAuthorityResolver
 	localSettingsDir         string
 	checkoutReviewerPRHead   reviewerCheckoutFunc
 	recordReviewerPRContext  reviewerRecordContextFunc
@@ -56,6 +56,13 @@ type Module struct {
 	credentialSeedMu           sync.Mutex
 	credentialSeedGeneration   atomic.Uint64
 	beforeCredentialSeedCommit func()
+}
+
+// operatorAuthorityResolver is the narrow request-authority port consumed by
+// PR Review. Declaring the port at the consumer boundary avoids coupling this
+// delivery adapter to Workflow Catalog's separate HTTP adapter.
+type operatorAuthorityResolver interface {
+	ResolveOperatorAuthority(*http.Request, string, authority.Action) (authority.OperatorAuthority, error)
 }
 
 type prReviewStore interface {
@@ -83,7 +90,7 @@ func NewModule(
 	sourceControl sourcecontrol.Materializer,
 	interactionChat interaction.ChatAPI,
 	interactionMessenger interaction.ChatMessenger,
-	interactionAuthority workflowcataloghttp.OperatorAuthorityResolver,
+	interactionAuthority operatorAuthorityResolver,
 ) *Module {
 	if !connectorsmodule.DispatcherAvailable(disp) {
 		disp = nil

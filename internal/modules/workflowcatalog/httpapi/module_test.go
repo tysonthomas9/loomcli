@@ -427,6 +427,7 @@ func TestMutationRequestValidationIsStable(t *testing.T) {
 		{name: "revision cannot advance", body: `{"expected_revision":9223372036854775807}`},
 		{name: "unknown field", body: `{"actor":"forged"}`},
 		{name: "trailing JSON", body: `{} {}`},
+		{name: "oversized trailing content", body: `{}` + strings.Repeat(" ", maxLifecycleRequestBytes)},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			mux, catalog, _ := newHandler(t)

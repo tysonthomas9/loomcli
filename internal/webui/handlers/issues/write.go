@@ -1,7 +1,6 @@
 package issues
 
 import (
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -52,10 +51,8 @@ func validatePatchRequest(w http.ResponseWriter, r *http.Request) (string, *Patc
 		return "", nil, false
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
-
 	var req PatchIssueRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{MaxBytes: handler.MaxRequestBody}); err != nil {
 		var maxBytesErr *http.MaxBytesError
 		if errors.As(err, &maxBytesErr) {
 			handler.WriteJSON(w, http.StatusRequestEntityTooLarge, PatchIssueResponse{

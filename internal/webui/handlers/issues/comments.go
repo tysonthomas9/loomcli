@@ -1,7 +1,7 @@
 package issues
 
 import (
-	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 
@@ -52,7 +52,12 @@ func HandleAddWorkItemComment(api workitems.API) http.HandlerFunc {
 			return
 		}
 		var req CommentRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{MaxBytes: handler.MaxRequestBody}); err != nil {
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) {
+				handler.WriteJSON(w, http.StatusRequestEntityTooLarge, CommentResponse{Success: false, Error: "request body too large (max 1MB)"})
+				return
+			}
 			slog.Warn("invalid request body in HandleAddWorkItemComment", "err", err)
 			handler.WriteJSON(w, http.StatusBadRequest, CommentResponse{Success: false, Error: "invalid request body"})
 			return

@@ -16,7 +16,6 @@ package connectors
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -32,7 +31,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
-	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -141,7 +139,7 @@ func decodeCreateConnectorRequest(
 	ws string,
 ) (createConnectorRequest, connectorsmodule.CreateConnectorCommand, bool) {
 	var req createConnectorRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxConnectorBodyBytes)).Decode(&req); err != nil {
+	if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{MaxBytes: maxConnectorBodyBytes}); err != nil {
 		handler.RespondError(w, http.StatusBadRequest, "invalid JSON body")
 		return createConnectorRequest{}, connectorsmodule.CreateConnectorCommand{}, false
 	}
@@ -403,7 +401,7 @@ func decodeCreateGrantRequest(
 	connectorID string,
 ) (connectorsmodule.CreateGrantCommand, bool, bool) {
 	var req createGrantRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxConnectorBodyBytes)).Decode(&req); err != nil {
+	if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{MaxBytes: maxConnectorBodyBytes}); err != nil {
 		handler.RespondError(w, http.StatusBadRequest, "invalid JSON body")
 		return connectorsmodule.CreateGrantCommand{}, false, false
 	}
@@ -549,7 +547,7 @@ func decodeReplaceBindingGrantsRequest(
 	ws, connectorID, bindingID string,
 ) (connectorgrants.ReplaceGrantSetRequest, bool) {
 	var req replaceBindingGrantsRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxConnectorBodyBytes)).Decode(&req); err != nil {
+	if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{MaxBytes: maxConnectorBodyBytes}); err != nil {
 		handler.RespondError(w, http.StatusBadRequest, "invalid JSON body")
 		return connectorgrants.ReplaceGrantSetRequest{}, false
 	}
@@ -591,17 +589,13 @@ func (m *Module) authorizeGrantReplacement(w http.ResponseWriter, r *http.Reques
 	}
 	auth, err := m.operatorAuthority.ResolveOperatorAuthority(r, workspace, automation.ActionUpdateBinding)
 	if err != nil {
-		switch {
-		case errors.Is(err, workflowcataloghttp.ErrUnauthenticated),
-			errors.Is(err, authority.ErrInvalidPrincipal),
-			errors.Is(err, authority.ErrPrincipalExpired):
-			handler.RespondError(w, http.StatusUnauthorized, "authentication required")
-		case errors.Is(err, authority.ErrWorkspaceMismatch),
-			errors.Is(err, authority.ErrActionNotAllowed),
-			errors.Is(err, authority.ErrAdmissionDenied),
-			errors.Is(err, authority.ErrPrincipalClass):
-			handler.RespondError(w, http.StatusForbidden, "forbidden")
-		default:
+		if classification, ok := handler.ClassifyAuthenticationAuthorityError(err); ok {
+			message := "authentication required"
+			if classification.Status == http.StatusForbidden {
+				message = "forbidden"
+			}
+			handler.RespondError(w, classification.Status, message)
+		} else {
 			handler.RespondError(w, http.StatusServiceUnavailable, "connector grant authority is unavailable")
 		}
 		return false

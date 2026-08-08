@@ -186,12 +186,15 @@ func requireEmptyBody(w http.ResponseWriter, request *http.Request) error {
 }
 
 func writeMappedError(w http.ResponseWriter, err error) {
+	if classification, ok := serverhandler.ClassifyAuthenticationAuthorityError(err); ok {
+		message := "operator authentication required"
+		if classification.Status == http.StatusForbidden {
+			message = "operator is not allowed to manage this workspace"
+		}
+		writeError(w, classification.Status, classification.Code, message)
+		return
+	}
 	switch {
-	case errors.Is(err, workflowcataloghttp.ErrUnauthenticated):
-		writeError(w, http.StatusUnauthorized, "unauthenticated", "operator authentication required")
-	case errors.Is(err, authority.ErrWorkspaceMismatch), errors.Is(err, authority.ErrAdmissionDenied),
-		errors.Is(err, authority.ErrActionNotAllowed):
-		writeError(w, http.StatusForbidden, "forbidden", "operator is not allowed to manage this workspace")
 	case errors.Is(err, execution.ErrInvalid), errors.Is(err, domain.ErrInvalid):
 		writeError(w, http.StatusBadRequest, "invalid", err.Error())
 	case errors.Is(err, execution.ErrNotFound), errors.Is(err, domain.ErrNotFound):

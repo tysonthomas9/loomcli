@@ -84,7 +84,13 @@ func (r *PatchIssueRequest) Validate() error {
 	}
 
 	var b validationBuilder
+	validatePatchIssueIdentityAndState(&b, r)
+	validatePatchIssueOptionalFields(&b, r)
 
+	return b.build()
+}
+
+func validatePatchIssueIdentityAndState(b *validationBuilder, r *PatchIssueRequest) {
 	// title: if set, must be non-empty and within length (checked on trimmed value)
 	if r.Title != nil {
 		if err := workitems.ValidateTitle(*r.Title); err != nil {
@@ -121,7 +127,9 @@ func (r *PatchIssueRequest) Validate() error {
 			b.add("issue_type", "must be one of: bug, feature, task, epic, chore")
 		}
 	}
+}
 
+func validatePatchIssueOptionalFields(b *validationBuilder, r *PatchIssueRequest) {
 	// estimated_minutes: if set, non-negative
 	if r.EstimatedMinutes != nil && *r.EstimatedMinutes < 0 {
 		b.add("estimated_minutes", "cannot be negative")
@@ -134,11 +142,9 @@ func (r *PatchIssueRequest) Validate() error {
 		}
 	}
 
-	validateOptionalTimestamp(&b, "due_at", r.DueAt)
-	validateOptionalTimestamp(&b, "defer_until", r.DeferUntil)
-	validateLabels(&b, r.SetLabels, r.AddLabels, r.RemoveLabels)
-
-	return b.build()
+	validateOptionalTimestamp(b, "due_at", r.DueAt)
+	validateOptionalTimestamp(b, "defer_until", r.DeferUntil)
+	validateLabels(b, r.SetLabels, r.AddLabels, r.RemoveLabels)
 }
 
 // validateOptionalTimestamp checks that a *string timestamp, if set, is valid RFC3339.

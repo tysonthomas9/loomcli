@@ -2,7 +2,6 @@ package workspace
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -151,9 +150,8 @@ func HandleCatalogRename(api workspacemodule.API, projection CatalogProjection) 
 			handler.WriteJSON(w, http.StatusBadRequest, WorkspaceResponse{Success: false, Error: "workspace ID is required"})
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
 		var req WorkspaceRenameRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{MaxBytes: handler.MaxRequestBody}); err != nil {
 			var maxBytesErr *http.MaxBytesError
 			if errors.As(err, &maxBytesErr) {
 				handler.WriteJSON(w, http.StatusRequestEntityTooLarge, WorkspaceResponse{Success: false, Error: "request body too large"})
@@ -186,9 +184,8 @@ func HandleCatalogDesignFormatPatch(api workspacemodule.API, projection CatalogP
 			handler.WriteJSON(w, http.StatusBadRequest, WorkspaceResponse{Success: false, Error: "workspace ID is required"})
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
 		var req WorkspaceDesignFormatPatchRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{MaxBytes: handler.MaxRequestBody}); err != nil {
 			var maxBytesErr *http.MaxBytesError
 			if errors.As(err, &maxBytesErr) {
 				handler.WriteJSON(w, http.StatusRequestEntityTooLarge, WorkspaceResponse{Success: false, Error: "request body too large"})

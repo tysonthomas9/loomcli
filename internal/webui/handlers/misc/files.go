@@ -1,7 +1,6 @@
 package misc
 
 import (
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -60,18 +59,31 @@ func quotedETag(version string) string {
 }
 
 func decodeOptionalJSONBody(w http.ResponseWriter, r *http.Request, dst any) bool {
+	return decodeJSONBody(w, r, dst, true)
+}
+
+func decodeRequiredJSONBody(w http.ResponseWriter, r *http.Request, dst any) bool {
+	return decodeJSONBody(w, r, dst, false)
+}
+
+func decodeJSONBody(w http.ResponseWriter, r *http.Request, dst any, optional bool) bool {
 	if r.Body == nil {
-		return true
+		if optional {
+			return true
+		}
+		handler.RespondError(w, http.StatusBadRequest, "request body is required")
+		return false
 	}
 	defer r.Body.Close()
-	err := json.NewDecoder(http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)).Decode(dst)
+	err := handler.DecodeOneJSON(w, r, dst, handler.JSONDecodeOptions{})
 	if err == nil {
 		return true
 	}
-	if errors.Is(err, io.EOF) {
+	if optional && errors.Is(err, io.EOF) {
 		return true
 	}
-	if strings.Contains(err.Error(), "http: request body too large") {
+	var maxBytesErr *http.MaxBytesError
+	if errors.As(err, &maxBytesErr) {
 		handler.RespondError(w, http.StatusRequestEntityTooLarge, "request body too large")
 		return false
 	}
@@ -220,17 +232,7 @@ func HandleScopedFileSearch(svc filecoord.FileService) http.HandlerFunc {
 		scope, target, queryRepo := scopeFromQuery(r)
 
 		var req filecoord.FileSearchRequest
-		if r.Body == nil {
-			handler.RespondError(w, http.StatusBadRequest, "request body is required")
-			return
-		}
-		defer r.Body.Close()
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)).Decode(&req); err != nil {
-			if strings.Contains(err.Error(), "http: request body too large") {
-				handler.RespondError(w, http.StatusRequestEntityTooLarge, "request body too large")
-				return
-			}
-			handler.RespondError(w, http.StatusBadRequest, "invalid request body")
+		if !decodeRequiredJSONBody(w, r, &req) {
 			return
 		}
 
@@ -281,19 +283,9 @@ func HandleFileCheckouts(svc filecoord.FileService) http.HandlerFunc {
 func HandleFileCheckoutRepair(svc filecoord.FileService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
-		if r.Body == nil {
-			handler.RespondError(w, http.StatusBadRequest, "request body is required")
-			return
-		}
-		defer r.Body.Close()
 
 		var req filecoord.FileCheckoutRepairRequest
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)).Decode(&req); err != nil {
-			if strings.Contains(err.Error(), "http: request body too large") {
-				handler.RespondError(w, http.StatusRequestEntityTooLarge, "request body too large")
-				return
-			}
-			handler.RespondError(w, http.StatusBadRequest, "invalid request body")
+		if !decodeRequiredJSONBody(w, r, &req) {
 			return
 		}
 
@@ -324,17 +316,7 @@ func HandleScopedFileWrite(svc filecoord.FileService) http.HandlerFunc {
 		reqPath := r.URL.Query().Get("path")
 
 		var req fileWriteRequest
-		if r.Body == nil {
-			handler.RespondError(w, http.StatusBadRequest, "request body is required")
-			return
-		}
-		defer r.Body.Close()
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)).Decode(&req); err != nil {
-			if strings.Contains(err.Error(), "http: request body too large") {
-				handler.RespondError(w, http.StatusRequestEntityTooLarge, "request body too large")
-				return
-			}
-			handler.RespondError(w, http.StatusBadRequest, "invalid request body")
+		if !decodeRequiredJSONBody(w, r, &req) {
 			return
 		}
 
@@ -415,17 +397,7 @@ func HandleScopedFileMove(svc filecoord.FileService) http.HandlerFunc {
 		scope, target, queryRepo := scopeFromQuery(r)
 
 		var req filecoord.FileMoveRequest
-		if r.Body == nil {
-			handler.RespondError(w, http.StatusBadRequest, "request body is required")
-			return
-		}
-		defer r.Body.Close()
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)).Decode(&req); err != nil {
-			if strings.Contains(err.Error(), "http: request body too large") {
-				handler.RespondError(w, http.StatusRequestEntityTooLarge, "request body too large")
-				return
-			}
-			handler.RespondError(w, http.StatusBadRequest, "invalid request body")
+		if !decodeRequiredJSONBody(w, r, &req) {
 			return
 		}
 

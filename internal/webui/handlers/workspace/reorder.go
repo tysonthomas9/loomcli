@@ -1,7 +1,6 @@
 package workspace
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -16,10 +15,8 @@ type workspaceOrderRequest struct {
 // HandleWorkspaceReorder returns a handler that persists a custom workspace display order.
 func HandleWorkspaceReorder() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
-
 		var req workspaceOrderRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{MaxBytes: handler.MaxRequestBody}); err != nil {
 			var maxBytesErr *http.MaxBytesError
 			if errors.As(err, &maxBytesErr) {
 				handler.WriteJSON(w, http.StatusRequestEntityTooLarge, WorkspaceResponse{Success: false, Error: "request body too large"})

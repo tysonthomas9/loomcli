@@ -3,7 +3,6 @@ package fleet
 import (
 	"context"
 	"crypto/subtle"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -97,10 +96,9 @@ func handleFleetRegisterWithStore(store workerRegistrar, tokenCfg *TokenConfig, 
 			}
 		}
 
-		// Parse request body
-		r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
+		// Parse request body.
 		var req FleetRegisterRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{MaxBytes: handler.MaxRequestBody}); err != nil {
 			var maxBytesErr *http.MaxBytesError
 			if errors.As(err, &maxBytesErr) {
 				handler.WriteJSON(w, http.StatusRequestEntityTooLarge, FleetRegisterResponse{

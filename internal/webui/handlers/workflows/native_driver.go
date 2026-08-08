@@ -4,7 +4,6 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -48,14 +47,15 @@ func (m *Module) registerNativeDriver(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var request registerNativeDriverRequest
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, nativearchive.MaxRequestBytes))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid native driver registration JSON")
+	err := handler.DecodeOneJSON(w, r, &request, handler.JSONDecodeOptions{
+		MaxBytes: nativearchive.MaxRequestBytes, DisallowUnknownFields: true,
+	})
+	if errors.Is(err, handler.ErrTrailingJSON) {
+		writeError(w, http.StatusBadRequest, "native driver registration must contain one JSON value")
 		return
 	}
-	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		writeError(w, http.StatusBadRequest, "native driver registration must contain one JSON value")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid native driver registration JSON")
 		return
 	}
 	if err := nativearchive.ValidateArchiveSize(len(request.Archive)); err != nil {

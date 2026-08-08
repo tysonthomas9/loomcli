@@ -34,26 +34,17 @@ func writeMappedError(w http.ResponseWriter, err error) {
 }
 
 func classifyError(err error) (int, string, string) {
-	var admissionErr *authority.AdmissionError
-	if errors.As(err, &admissionErr) {
-		switch admissionErr.Reason {
-		case authority.DenialInvalidAuthority, authority.DenialExpired:
+	if classification, ok := authority.ClassifyAuthenticationAuthorityError(err); ok {
+		switch classification {
+		case authority.AuthenticationAuthorityErrorUnauthenticated,
+			authority.AuthenticationAuthorityErrorInvalidAdmission:
 			return http.StatusUnauthorized, errorCodeUnauthenticated, "authentication required"
-		default:
+		case authority.AuthenticationAuthorityErrorForbidden:
 			return http.StatusForbidden, errorCodeForbidden, "forbidden"
 		}
 	}
 	switch {
-	case errors.Is(err, ErrUnauthenticated),
-		errors.Is(err, authority.ErrInvalidPrincipal),
-		errors.Is(err, authority.ErrPrincipalExpired),
-		errors.Is(err, authority.ErrOpaqueAuthority):
-		return http.StatusUnauthorized, errorCodeUnauthenticated, "authentication required"
-	case errors.Is(err, authority.ErrAdmissionDenied),
-		errors.Is(err, authority.ErrWorkspaceMismatch),
-		errors.Is(err, authority.ErrPrincipalClass),
-		errors.Is(err, authority.ErrActionNotAllowed),
-		errors.Is(err, workflowcatalog.ErrWrongWorkspace):
+	case errors.Is(err, workflowcatalog.ErrWrongWorkspace):
 		return http.StatusForbidden, errorCodeForbidden, "forbidden"
 	case errors.Is(err, workflowcatalog.ErrInvalid):
 		return http.StatusBadRequest, errorCodeInvalidRequest, "invalid workflow catalog request"

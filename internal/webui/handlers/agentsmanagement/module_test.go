@@ -22,6 +22,24 @@ type identityAPIStub struct {
 	calls     int
 }
 
+func TestWriteMappedErrorPreservesGenericAdmissionForbiddenContract(t *testing.T) {
+	for _, reason := range []authority.DenialReason{
+		authority.DenialInvalidAuthority,
+		authority.DenialExpired,
+	} {
+		t.Run(string(reason), func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			writeMappedError(recorder, &authority.AdmissionError{Reason: reason})
+			if recorder.Code != http.StatusForbidden {
+				t.Fatalf("status = %d, want 403; body = %s", recorder.Code, recorder.Body.String())
+			}
+			if body := recorder.Body.String(); !strings.Contains(body, `"code":"forbidden"`) {
+				t.Fatalf("body = %s, want forbidden code", body)
+			}
+		})
+	}
+}
+
 func (stub *identityAPIStub) GetAgent(_ context.Context, workspace, agentID string) (*agents.Agent, error) {
 	return testAgent(workspace, agentID, agents.DesiredRunning), nil
 }

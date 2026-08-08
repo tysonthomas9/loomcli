@@ -48,6 +48,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
@@ -207,7 +208,11 @@ func (m *Module) postApproval(w http.ResponseWriter, r *http.Request) {
 	}
 	approvalAuth, err := m.authority.AuthorityForVerifiedSession(r.Context(), ws, actor)
 	if err != nil {
-		if errors.Is(err, authority.ErrAdmissionDenied) || errors.Is(err, authority.ErrInvalidScope) {
+		if classification, ok := handler.ClassifyAuthenticationAuthorityError(err); ok {
+			writeError(w, classification.Status, classification.Code, "approval authority was denied")
+			return
+		}
+		if errors.Is(err, authority.ErrInvalidScope) {
 			writeError(w, http.StatusForbidden, "forbidden", "approval authority was denied")
 			return
 		}
@@ -258,7 +263,7 @@ func sessionActor(r *http.Request) (actor, userID string, ok bool) {
 // decodeApproval parses and normalizes the request body.
 func decodeApproval(w http.ResponseWriter, r *http.Request) (approvalParams, error) {
 	var params approvalParams
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxApprovalBodyBytes)).Decode(&params); err != nil {
+	if err := handler.DecodeOneJSON(w, r, &params, handler.JSONDecodeOptions{MaxBytes: maxApprovalBodyBytes}); err != nil {
 		return params, fmt.Errorf("decode approval body: %s", err.Error())
 	}
 	params.SubjectRef = strings.TrimSpace(params.SubjectRef)
