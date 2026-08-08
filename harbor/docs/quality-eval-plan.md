@@ -65,9 +65,13 @@ a required approval BEFORE the fast-forward:
   stall the pipeline; endgame-burst candidates timeout-integrate rather
   than die at the deadline (disclosed, measured).
 
-Plus, unchanged from rev 3: refactor corrective tasks against the
-integrated head (`--source-repo app`, quoting the concrete structural
-problem).
+Plus refactor corrective tasks against the integrated head — but BOUNDED
+(rev 4.1, from the QA-feedback analysis): at most two per pass, filed at
+lower priority than behavioral correctives (generic rule: structure
+cleanup yields to user-facing defects under deadline). Three filing minds
+already lost the drain race in run 21 (12/23 correctives dead at
+deadline); the architect's primary authority is the GATE — prevention
+over cure.
 
 **Budget fairness:** arch spend (~$40–70 est.) comes out of the SAME $200
 cap — no cap raise; if an architecture mind is worth having it must pay
@@ -78,6 +82,18 @@ convergence rate per rejected candidate; fail-open caps damage), added
 integration latency (passes from IMPL-DONE to FF vs runs 19–21),
 ARCH-TIMEOUT count (how often authority was actually exercised vs
 bypassed), arch ruling counts and approve:reject ratio.
+
+**Rubber-stamp detection (rev 4.1 — the QA "PASS is weak evidence"
+lesson transferred):** the approve path carries little information by
+default, so scrutiny is analytical, post-run: (a) re-examine APPROVED
+diffs with the held-out instruments — did waved-through changes introduce
+cycles/oversized files anyway?; (b) compare rejected-then-reworked
+resubmissions against their first attempts — did rejections measurably
+improve structure?; (c) approve-rate ≈100% with unchanged held-out
+metrics is verdict-classified as AUTHORITY UNEXERCISED, distinct from
+authority-ineffective. ARCH-FEEDBACK stays mandatory on every rejection
+(anchored to the concrete structural problem) so (b) is computable;
+approvals stay cheap labels.
 
 Product framing: prototypes an `architect` role with gate authority for
 loom's stock role library, the way the qa arms prototyped the verify role.
