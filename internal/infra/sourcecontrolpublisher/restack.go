@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol/stacklineage"
+	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 )
 
 // ConflictResolver resolves a rebase conflict in place. It is called mid-rebase
@@ -54,16 +54,16 @@ func (r *Reconciler) Restack(ctx context.Context, ws string, id sl.StackID, repo
 	if !forgeSupportsPullRequests(r.Forge) {
 		return nil, fmt.Errorf("stackpublish: restack requires a pull-request-capable forge")
 	}
-	stackProjection, err := r.Stacks.GetStack(ctx, ws, string(id))
+	stackProjection, err := r.Stacks.GetStack(ctx, ws, id)
 	if err != nil {
 		return nil, err
 	}
-	nodeProjections, err := r.Stacks.ListStackNodes(ctx, ws, string(id))
+	nodeProjections, err := r.Stacks.ListStackNodes(ctx, ws, id)
 	if err != nil {
 		return nil, err
 	}
-	stack := legacyStack(*stackProjection)
-	nodes := legacyStackNodes(nodeProjections)
+	stack := *stackProjection
+	nodes := nodeProjections
 	ordered, err := sl.Ordered(nodes)
 	if err != nil {
 		return nil, fmt.Errorf("invalid lineage: %w", err)
@@ -95,7 +95,7 @@ func (r *Reconciler) Restack(ctx context.Context, ws string, id sl.StackID, repo
 
 // restackChain cascade-rebases one chain when a merged prefix has left a
 // descendant unsafe to slide.
-func (r *Reconciler) restackChain(ctx context.Context, repoPath, rootBase string, chain []sl.Node, prsByHead map[string]PR, resolver ConflictResolver, report *RestackReport) error {
+func (r *Reconciler) restackChain(ctx context.Context, repoPath, rootBase string, chain []sl.StackNode, prsByHead map[string]PR, resolver ConflictResolver, report *RestackReport) error {
 	oldTip := make(map[string]string, len(chain))
 	for _, u := range chain {
 		t, err := headSHA(ctx, repoPath, u.OutputBranch)
@@ -197,9 +197,9 @@ func conflictedFiles(ctx context.Context, repoPath string) []string {
 }
 
 // chains splits the forest's ordered nodes into per-root chains.
-func chains(ordered []sl.Node) [][]sl.Node {
-	var out [][]sl.Node
-	var cur []sl.Node
+func chains(ordered []sl.StackNode) [][]sl.StackNode {
+	var out [][]sl.StackNode
+	var cur []sl.StackNode
 	for _, n := range ordered {
 		if n.BaseTaskID == "" && len(cur) > 0 {
 			out = append(out, cur)

@@ -79,8 +79,8 @@ func (service *StackLifecycleService) ValidateStack(ctx context.Context, workspa
 	if err != nil {
 		return err
 	}
-	_, err = orderStackNodes(nodes)
-	return err
+	_, err = Ordered(nodes)
+	return classifyLineageValidation(err)
 }
 
 func (service *StackLifecycleService) AddStackNode(ctx context.Context, command AddStackNodeCommand) (*StackNode, error) {
@@ -99,9 +99,9 @@ func (service *StackLifecycleService) AddStackNode(ctx context.Context, command 
 		if err != nil {
 			return nil, err
 		}
-		ordered, err := orderStackNodes(nodes)
+		ordered, err := Ordered(nodes)
 		if err != nil {
-			return nil, err
+			return nil, classifyLineageValidation(err)
 		}
 		if len(ordered) > 0 {
 			base = ordered[len(ordered)-1].TaskID
@@ -230,31 +230,13 @@ func (service *StackLifecycleService) ResolveTaskStackBinding(
 	if !found {
 		return TaskStackBinding{}, false, nil
 	}
-	base, err := slidingStackBase(foundStack, foundNode, foundByTask)
+	base, err := BaseBranchSliding(foundStack, foundNode, foundByTask)
 	if err != nil {
-		return TaskStackBinding{}, false, err
+		return TaskStackBinding{}, false, classifyLineageValidation(err)
 	}
 	return TaskStackBinding{
 		StackID: foundStack.ID, BaseRef: base, OutputBranch: foundNode.OutputBranch,
 	}, true, nil
-}
-
-func slidingStackBase(stack Stack, node StackNode, byTask map[string]StackNode) (string, error) {
-	current := node
-	for hops := 0; hops <= len(byTask); hops++ {
-		if current.BaseTaskID == "" {
-			return stack.RootBase, nil
-		}
-		base, ok := byTask[current.BaseTaskID]
-		if !ok {
-			return "", fmt.Errorf("stack task %q has missing predecessor %q: %w", current.TaskID, current.BaseTaskID, ErrInvalidMaterialization)
-		}
-		if strings.TrimSpace(base.OutputBranch) != "" && base.State != "empty" && base.State != "closed" {
-			return base.OutputBranch, nil
-		}
-		current = base
-	}
-	return "", fmt.Errorf("stack lineage contains a cycle: %w", ErrInvalidMaterialization)
 }
 
 //nolint:funlen,gocognit,cyclop // Reconciliation explicitly validates every lineage and conflict branch before mutation.
@@ -289,8 +271,8 @@ func (service *StackLifecycleService) ReconcileStack(ctx context.Context, comman
 	for index, node := range command.Nodes {
 		topology[index] = StackNode{TaskID: node.TaskID, BaseTaskID: node.BaseTaskID}
 	}
-	if _, err := orderStackNodes(topology); err != nil {
-		return nil, fmt.Errorf("validate desired stack topology: %w", err)
+	if _, err := Ordered(topology); err != nil {
+		return nil, fmt.Errorf("validate desired stack topology: %w", classifyLineageValidation(err))
 	}
 	if _, err := service.EnsureStack(ctx, command.Stack); err != nil {
 		return nil, err
@@ -400,52 +382,9 @@ func projectStackLineage(stack Stack, nodes []StackNode) (map[string]StackLineag
 	return result, nil
 }
 
-func orderStackNodes(nodes []StackNode) ([]StackNode, error) {
-	byTask := make(map[string]StackNode, len(nodes))
-	children := make(map[string][]string, len(nodes))
-	roots := make([]string, 0)
-	for _, node := range nodes {
-		if strings.TrimSpace(node.TaskID) == "" {
-			return nil, fmt.Errorf("stack contains empty task identity: %w", ErrInvalidMaterialization)
-		}
-		if _, duplicate := byTask[node.TaskID]; duplicate {
-			return nil, fmt.Errorf("stack contains duplicate task %q: %w", node.TaskID, ErrInvalidMaterialization)
-		}
-		byTask[node.TaskID] = node
+func classifyLineageValidation(err error) error {
+	if err == nil {
+		return nil
 	}
-	for _, node := range nodes {
-		if node.BaseTaskID == "" {
-			roots = append(roots, node.TaskID)
-			continue
-		}
-		if _, ok := byTask[node.BaseTaskID]; !ok {
-			return nil, fmt.Errorf("stack task %q has missing predecessor %q: %w", node.TaskID, node.BaseTaskID, ErrInvalidMaterialization)
-		}
-		children[node.BaseTaskID] = append(children[node.BaseTaskID], node.TaskID)
-		if len(children[node.BaseTaskID]) > 1 {
-			return nil, fmt.Errorf("stack predecessor %q has multiple successors: %w", node.BaseTaskID, ErrInvalidMaterialization)
-		}
-	}
-	sort.Strings(roots)
-	ordered := make([]StackNode, 0, len(nodes))
-	visited := make(map[string]struct{}, len(nodes))
-	for _, root := range roots {
-		for current := root; current != ""; {
-			if _, seen := visited[current]; seen {
-				return nil, fmt.Errorf("stack lineage contains a cycle: %w", ErrInvalidMaterialization)
-			}
-			visited[current] = struct{}{}
-			ordered = append(ordered, byTask[current])
-			next := children[current]
-			if len(next) == 0 {
-				current = ""
-			} else {
-				current = next[0]
-			}
-		}
-	}
-	if len(ordered) != len(nodes) {
-		return nil, fmt.Errorf("stack lineage contains a cycle: %w", ErrInvalidMaterialization)
-	}
-	return ordered, nil
+	return fmt.Errorf("invalid stack lineage (%v): %w", err, ErrInvalidMaterialization)
 }

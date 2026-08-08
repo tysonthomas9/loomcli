@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
-	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol/stacklineage"
 )
 
 // Reconciler publishes a stack's lineage as stacked PRs.
@@ -65,8 +64,8 @@ type action struct {
 // their base, it produces the reconcile actions. No I/O — unit-tested directly.
 //
 //nolint:cyclop,funlen // The switch mirrors the reconcile state matrix and is covered by table tests.
-func computePlan(stack sl.Stack, ordered []sl.Node, prsByHead map[string]PR, empty map[string]bool) []action {
-	byTask := sl.ByTask(ordered)
+func computePlan(stack sourcecontrol.Stack, ordered []sourcecontrol.StackNode, prsByHead map[string]PR, empty map[string]bool) []action {
+	byTask := sourcecontrol.ByTask(ordered)
 	desired := make(map[string]bool, len(ordered))
 	for _, n := range ordered {
 		desired[n.OutputBranch] = true
@@ -74,8 +73,8 @@ func computePlan(stack sl.Stack, ordered []sl.Node, prsByHead map[string]PR, emp
 
 	// effectiveBase slides past merged/empty predecessors to the first real base,
 	// or RootBase. A merged unit's content is in RootBase; an empty unit adds nothing.
-	var effectiveBase func(n sl.Node) string
-	effectiveBase = func(n sl.Node) string {
+	var effectiveBase func(n sourcecontrol.StackNode) string
+	effectiveBase = func(n sourcecontrol.StackNode) string {
 		if n.BaseTaskID == "" {
 			return stack.RootBase
 		}
@@ -153,28 +152,28 @@ func queuedConflicts(targets []int, queued map[int]bool) []int {
 // idempotent: it re-derives everything from forge truth each run.
 //
 //nolint:cyclop,funlen,gocognit // Publish coordinates preflight, restack safety, forge mutation, and reporting in one transaction.
-func (r *Reconciler) Publish(ctx context.Context, ws string, id sl.StackID, repoPath string, opts Options) (*Report, error) {
-	stackProjection, err := r.Stacks.GetStack(ctx, ws, string(id))
+func (r *Reconciler) Publish(ctx context.Context, ws string, id sourcecontrol.StackID, repoPath string, opts Options) (*Report, error) {
+	stackProjection, err := r.Stacks.GetStack(ctx, ws, id)
 	if err != nil {
 		return nil, err
 	}
-	nodeProjections, err := r.Stacks.ListStackNodes(ctx, ws, string(id))
+	nodeProjections, err := r.Stacks.ListStackNodes(ctx, ws, id)
 	if err != nil {
 		return nil, err
 	}
-	stack := legacyStack(*stackProjection)
-	nodes := legacyStackNodes(nodeProjections)
-	ordered, err := sl.Ordered(nodes)
+	stack := *stackProjection
+	nodes := nodeProjections
+	ordered, err := sourcecontrol.Ordered(nodes)
 	if err != nil {
 		return nil, fmt.Errorf("invalid lineage: %w", err)
 	}
-	byTask := sl.ByTask(ordered)
+	byTask := sourcecontrol.ByTask(ordered)
 
 	// Emptiness: a unit whose branch adds no commits over its lineage base. Only
 	// checked for branches present locally; missing ones surface at push time.
 	empty := map[string]bool{}
 	for _, n := range ordered {
-		base, berr := sl.BaseBranch(stack, n, byTask)
+		base, berr := sourcecontrol.BaseBranch(stack, n, byTask)
 		if berr != nil {
 			return nil, fmt.Errorf("base for %s: %w", n.TaskID, berr)
 		}
@@ -196,7 +195,7 @@ func (r *Reconciler) Publish(ctx context.Context, ws string, id sl.StackID, repo
 		return nil, err
 	}
 
-	prefix := sl.StackBranchPrefix(id)
+	prefix := sourcecontrol.StackBranchPrefix(id)
 	prs, err := r.Forge.ListStackPRs(ctx, owner, repo, prefix)
 	if err != nil {
 		return nil, err
@@ -356,7 +355,7 @@ func (r *Reconciler) Publish(ctx context.Context, ws string, id sl.StackID, repo
 			}
 		case actMerged:
 			_ = r.Stacks.RecordStackNodePublication(ctx, sourcecontrol.RecordStackNodePublicationCommand{
-				WorkspaceKey: ws, StackID: string(id), TaskID: a.TaskID, State: sourcecontrol.StackPublicationMerged,
+				WorkspaceKey: ws, StackID: id, TaskID: a.TaskID, State: sourcecontrol.StackPublicationMerged,
 			})
 			report.Merged = append(report.Merged, a.TaskID)
 		case actEmpty:
@@ -369,7 +368,7 @@ func (r *Reconciler) Publish(ctx context.Context, ws string, id sl.StackID, repo
 				report.Closed = append(report.Closed, a.Branch)
 			}
 			_ = r.Stacks.RecordStackNodePublication(ctx, sourcecontrol.RecordStackNodePublicationCommand{
-				WorkspaceKey: ws, StackID: string(id), TaskID: a.TaskID, State: sourcecontrol.StackPublicationEmpty,
+				WorkspaceKey: ws, StackID: id, TaskID: a.TaskID, State: sourcecontrol.StackPublicationEmpty,
 			})
 			report.Empty = append(report.Empty, a.TaskID)
 		case actClose:
@@ -397,7 +396,7 @@ func (r *Reconciler) Publish(ctx context.Context, ws string, id sl.StackID, repo
 	return report, nil
 }
 
-func (r *Reconciler) publishBranchesOnly(ctx context.Context, ws string, id sl.StackID, repoPath string, ordered []sl.Node, empty map[string]bool, opts Options) (*Report, error) {
+func (r *Reconciler) publishBranchesOnly(ctx context.Context, ws string, id sourcecontrol.StackID, repoPath string, ordered []sourcecontrol.StackNode, empty map[string]bool, opts Options) (*Report, error) {
 	message := "pushed branches to local origin (no PRs)"
 	if opts.DryRun {
 		message = "would push branches to local origin (no PRs)"
@@ -422,7 +421,7 @@ func (r *Reconciler) publishBranchesOnly(ctx context.Context, ws string, id sl.S
 	for _, n := range ordered {
 		if empty[n.OutputBranch] {
 			if err := r.Stacks.RecordStackNodePublication(ctx, sourcecontrol.RecordStackNodePublicationCommand{
-				WorkspaceKey: ws, StackID: string(id), TaskID: n.TaskID, State: sourcecontrol.StackPublicationEmpty,
+				WorkspaceKey: ws, StackID: id, TaskID: n.TaskID, State: sourcecontrol.StackPublicationEmpty,
 			}); err != nil {
 				return report, fmt.Errorf("mark branch empty %s: %w", n.TaskID, err)
 			}
@@ -435,10 +434,10 @@ func (r *Reconciler) publishBranchesOnly(ctx context.Context, ws string, id sl.S
 	return report, nil
 }
 
-func (r *Reconciler) markPublished(ctx context.Context, ws string, id sl.StackID, a action, repoPath string, pr PR) error {
+func (r *Reconciler) markPublished(ctx context.Context, ws string, id sourcecontrol.StackID, a action, repoPath string, pr PR) error {
 	sha, _ := headSHA(ctx, repoPath, a.Branch)
 	return r.Stacks.RecordStackNodePublication(ctx, sourcecontrol.RecordStackNodePublicationCommand{
-		WorkspaceKey: ws, StackID: string(id), TaskID: a.TaskID,
+		WorkspaceKey: ws, StackID: id, TaskID: a.TaskID,
 		State: sourcecontrol.StackPublicationPublished, PRNumber: pr.Number, PRURL: pr.URL, OutputSHA: sha,
 	})
 }

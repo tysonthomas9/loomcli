@@ -9,7 +9,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
 	stackstore "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
-	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol/stacklineage"
 )
 
 // baseOf returns the planned BaseTaskID for a task, or "<absent>" if the task
@@ -108,11 +107,11 @@ func TestPlanEpicForest_IgnoresOutOfEpicAndSelfEdges(t *testing.T) {
 // and runs the same Ordered() validation the stackstore uses.
 func assertOrderable(t *testing.T, plan []projectedNode) {
 	t.Helper()
-	nodes := make([]sl.Node, 0, len(plan))
+	nodes := make([]sourcecontrol.StackNode, 0, len(plan))
 	for _, n := range plan {
-		nodes = append(nodes, sl.Node{TaskID: n.TaskID, BaseTaskID: n.BaseTaskID})
+		nodes = append(nodes, sourcecontrol.StackNode{TaskID: n.TaskID, BaseTaskID: n.BaseTaskID})
 	}
-	if _, err := sl.Ordered(nodes); err != nil {
+	if _, err := sourcecontrol.Ordered(nodes); err != nil {
 		t.Fatalf("projected forest is not a valid linear forest: %v\nplan=%+v", err, plan)
 	}
 }
@@ -142,7 +141,7 @@ func TestProjectEpicStack_BuildsForestAndIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("projectEpicStack: %v", err)
 	}
-	if proj.StackID != sl.StackID("epic:EPIC-1") {
+	if proj.StackID != sourcecontrol.StackID("epic:EPIC-1") {
 		t.Fatalf("stack id = %q, want epic:EPIC-1", proj.StackID)
 	}
 	if len(proj.Created) != 3 {
@@ -150,18 +149,18 @@ func TestProjectEpicStack_BuildsForestAndIsIdempotent(t *testing.T) {
 	}
 
 	// The stored stack reflects the DAG as a linear chain on the right repo/base.
-	stack, err := sstore.GetStack(ctx, ws, proj.StackID)
+	stack, err := sstore.GetStackRecord(ctx, ws, proj.StackID)
 	if err != nil {
 		t.Fatalf("GetStack: %v", err)
 	}
-	if stack.RepoName != repo || stack.RootBase != root {
+	if stack.Repository != repo || stack.RootBase != root {
 		t.Fatalf("stack = %+v, want repo=%s root=%s", stack, repo, root)
 	}
-	nodes, err := sstore.ListNodes(ctx, ws, proj.StackID)
+	nodes, err := sstore.ListStackNodeRecords(ctx, ws, proj.StackID)
 	if err != nil {
 		t.Fatalf("ListNodes: %v", err)
 	}
-	byTask := map[string]sl.Node{}
+	byTask := map[string]sourcecontrol.StackNode{}
 	for _, n := range nodes {
 		byTask[n.TaskID] = n
 	}
@@ -181,7 +180,7 @@ func TestProjectEpicStack_BuildsForestAndIsIdempotent(t *testing.T) {
 		if n.OutputBranch == "" {
 			t.Fatalf("node %s has no output branch", n.TaskID)
 		}
-		if n.State != sl.NodeStatePending {
+		if n.State != sourcecontrol.NodeStatePending {
 			t.Fatalf("node %s state = %q, want pending", n.TaskID, n.State)
 		}
 	}
@@ -199,7 +198,7 @@ func TestProjectEpicStack_BuildsForestAndIsIdempotent(t *testing.T) {
 	if len(proj2.Created) != 0 || len(proj2.Reparented) != 0 {
 		t.Fatalf("re-run mutated the stack: created=%v reparented=%v", proj2.Created, proj2.Reparented)
 	}
-	nodes2, _ := sstore.ListNodes(ctx, ws, proj.StackID)
+	nodes2, _ := sstore.ListStackNodeRecords(ctx, ws, proj.StackID)
 	for _, n := range nodes2 {
 		if branchBefore[n.TaskID] != n.OutputBranch {
 			t.Fatalf("node %s branch changed on re-run: %q → %q", n.TaskID, branchBefore[n.TaskID], n.OutputBranch)
@@ -274,22 +273,18 @@ func TestSanitizeLockSegment(t *testing.T) {
 	}
 }
 
-func mustNodes(t *testing.T, ctx context.Context, s *stackstore.LocalStore, ws string, id sl.StackID) []sl.Node {
+func mustNodes(t *testing.T, ctx context.Context, s *stackstore.LocalStore, ws string, id sourcecontrol.StackID) []sourcecontrol.StackNode {
 	t.Helper()
-	nodes, err := s.ListNodes(ctx, ws, id)
+	nodes, err := s.ListStackNodeRecords(ctx, ws, id)
 	if err != nil {
 		t.Fatalf("ListNodes: %v", err)
 	}
 	return nodes
 }
 
-func mustStackLifecycle(t *testing.T, store stackstore.Store) sourcecontrol.StackLifecycle {
+func mustStackLifecycle(t *testing.T, store sourcecontrol.StackLifecycleStore) sourcecontrol.StackLifecycle {
 	t.Helper()
-	adapter, err := stackstore.NewAdapter(store)
-	if err != nil {
-		t.Fatalf("compose stack adapter: %v", err)
-	}
-	service, err := sourcecontrol.NewStackLifecycle(adapter, time.Now)
+	service, err := sourcecontrol.NewStackLifecycle(store, time.Now)
 	if err != nil {
 		t.Fatalf("compose stack lifecycle: %v", err)
 	}

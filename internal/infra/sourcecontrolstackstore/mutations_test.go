@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol/stacklineage"
+	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 )
 
 // Mutation-coverage gaps ported from git-town's lineage/delete/swap/set-parent
@@ -21,14 +21,14 @@ func seedChain(t *testing.T, s *LocalStore, ids ...string) {
 		if i > 0 {
 			base = ids[i-1]
 		}
-		_, err := s.AddNode(context.Background(), ws, "epic:E1", id, base, "")
+		_, err := s.AddStackNodeRecord(context.Background(), ws, "epic:E1", id, base, "")
 		require.NoError(t, err)
 	}
 }
 
 func taskOrder(t *testing.T, s *LocalStore) []string {
 	t.Helper()
-	nodes, err := s.ListNodes(context.Background(), ws, "epic:E1")
+	nodes, err := s.ListStackNodeRecords(context.Background(), ws, "epic:E1")
 	require.NoError(t, err)
 	out := make([]string, len(nodes))
 	for i, n := range nodes {
@@ -44,10 +44,10 @@ func TestRemoveNode_SequentialCascade(t *testing.T) {
 	s := newStore(t)
 	seedChain(t, s, "T1", "T2", "T3", "T4")
 
-	require.NoError(t, s.RemoveNode(ctx, ws, "epic:E1", "T1"))
+	require.NoError(t, s.RemoveStackNodeRecord(ctx, ws, "epic:E1", "T1"))
 	assert.Equal(t, []string{"T2", "T3", "T4"}, taskOrder(t, s))
 
-	require.NoError(t, s.RemoveNode(ctx, ws, "epic:E1", "T2"))
+	require.NoError(t, s.RemoveStackNodeRecord(ctx, ws, "epic:E1", "T2"))
 	got := taskOrder(t, s)
 	assert.Equal(t, []string{"T3", "T4"}, got)
 	byTask := sl.ByTask(mustNodes(t, s))
@@ -60,7 +60,7 @@ func TestRemoveNode_Leaf(t *testing.T) {
 	ctx := context.Background()
 	s := newStore(t)
 	seedChain(t, s, "T1", "T2", "T3")
-	require.NoError(t, s.RemoveNode(ctx, ws, "epic:E1", "T3"))
+	require.NoError(t, s.RemoveStackNodeRecord(ctx, ws, "epic:E1", "T3"))
 	assert.Equal(t, []string{"T1", "T2"}, taskOrder(t, s))
 	byTask := sl.ByTask(mustNodes(t, s))
 	assert.Equal(t, "T1", byTask["T2"].BaseTaskID, "T2 base unchanged after leaf removal")
@@ -71,7 +71,7 @@ func TestRemoveNode_NonExistent(t *testing.T) {
 	ctx := context.Background()
 	s := newStore(t)
 	seedChain(t, s, "T1", "T2", "T3")
-	assert.ErrorIs(t, s.RemoveNode(ctx, ws, "epic:E1", "ghost"), ErrNodeNotFound)
+	assert.ErrorIs(t, s.RemoveStackNodeRecord(ctx, ws, "epic:E1", "ghost"), ErrNodeNotFound)
 	assert.Equal(t, []string{"T1", "T2", "T3"}, taskOrder(t, s), "stack unchanged")
 }
 
@@ -80,7 +80,7 @@ func TestSetBase_Idempotent(t *testing.T) {
 	ctx := context.Background()
 	s := newStore(t)
 	seedChain(t, s, "T1", "T2", "T3")
-	require.NoError(t, s.SetBase(ctx, ws, "epic:E1", "T2", "T1")) // already T1
+	require.NoError(t, s.SetStackNodeBaseRecord(ctx, ws, "epic:E1", "T2", "T1")) // already T1
 	assert.Equal(t, []string{"T1", "T2", "T3"}, taskOrder(t, s))
 }
 
@@ -89,7 +89,7 @@ func TestMoveNode_NonAdjacent(t *testing.T) {
 	ctx := context.Background()
 	s := newStore(t)
 	seedChain(t, s, "T1", "T2", "T3", "T4")
-	require.NoError(t, s.MoveNode(ctx, ws, "epic:E1", "T4", "T1"))
+	require.NoError(t, s.MoveStackNodeRecord(ctx, ws, "epic:E1", "T4", "T1"))
 	assert.Equal(t, []string{"T1", "T4", "T2", "T3"}, taskOrder(t, s))
 }
 
@@ -98,7 +98,7 @@ func TestMoveNode_RootReRoots(t *testing.T) {
 	ctx := context.Background()
 	s := newStore(t)
 	seedChain(t, s, "T1", "T2", "T3")
-	require.NoError(t, s.MoveNode(ctx, ws, "epic:E1", "T1", "T3"))
+	require.NoError(t, s.MoveStackNodeRecord(ctx, ws, "epic:E1", "T1", "T3"))
 	assert.Equal(t, []string{"T2", "T3", "T1"}, taskOrder(t, s))
 	byTask := sl.ByTask(mustNodes(t, s))
 	assert.Equal(t, "", byTask["T2"].BaseTaskID, "T2 is the new root")
@@ -108,7 +108,7 @@ func TestMoveNode_UnknownTarget(t *testing.T) {
 	ctx := context.Background()
 	s := newStore(t)
 	seedChain(t, s, "T1", "T2")
-	assert.ErrorIs(t, s.MoveNode(ctx, ws, "epic:E1", "T2", "ghost"), ErrNodeNotFound)
+	assert.ErrorIs(t, s.MoveStackNodeRecord(ctx, ws, "epic:E1", "T2", "ghost"), ErrNodeNotFound)
 }
 
 // Linear invariant: add --after an already-occupied unit would branch → rejected.
@@ -117,19 +117,19 @@ func TestAddNode_AfterOccupiedBranches(t *testing.T) {
 	ctx := context.Background()
 	s := newStore(t)
 	seedChain(t, s, "T1", "T2")
-	_, err := s.AddNode(ctx, ws, "epic:E1", "TX", "T1", "")
+	_, err := s.AddStackNodeRecord(ctx, ws, "epic:E1", "TX", "T1", "")
 	assert.ErrorIs(t, err, sl.ErrBranching)
 
 	// Insert TX between T1 and T2 via the supported add-then-move.
-	_, err = s.AddNode(ctx, ws, "epic:E1", "TX", "T2", "") // append at tail
+	_, err = s.AddStackNodeRecord(ctx, ws, "epic:E1", "TX", "T2", "") // append at tail
 	require.NoError(t, err)
-	require.NoError(t, s.MoveNode(ctx, ws, "epic:E1", "TX", "T1"))
+	require.NoError(t, s.MoveStackNodeRecord(ctx, ws, "epic:E1", "TX", "T1"))
 	assert.Equal(t, []string{"T1", "TX", "T2"}, taskOrder(t, s))
 }
 
-func mustNodes(t *testing.T, s *LocalStore) []sl.Node {
+func mustNodes(t *testing.T, s *LocalStore) []sl.StackNode {
 	t.Helper()
-	nodes, err := s.ListNodes(context.Background(), ws, "epic:E1")
+	nodes, err := s.ListStackNodeRecords(context.Background(), ws, "epic:E1")
 	require.NoError(t, err)
 	return nodes
 }

@@ -23,7 +23,6 @@ import (
 	stackstore "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
-	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol/stacklineage"
 )
 
 var stackCmd = &cobra.Command{
@@ -60,11 +59,7 @@ func openStackLifecycle() (sourcecontrol.StackLifecycle, error) {
 	if err != nil {
 		return nil, err
 	}
-	adapter, err := stackstore.NewAdapter(store)
-	if err != nil {
-		return nil, err
-	}
-	return sourcecontrol.NewStackLifecycle(adapter, time.Now)
+	return sourcecontrol.NewStackLifecycle(store, time.Now)
 }
 
 var shaRe = regexp.MustCompile(`^[0-9a-fA-F]{7,40}$`)
@@ -268,7 +263,7 @@ func statusCmd() *cobra.Command {
 				}
 			}
 			rec := &stackpublish.Reconciler{Stacks: st, Forge: forge}
-			report, err := rec.StackStatus(cmd.Context(), ws, sl.StackID(id), rp)
+			report, err := rec.StackStatus(cmd.Context(), ws, id, rp)
 			if err != nil {
 				return err
 			}
@@ -509,7 +504,7 @@ func restackCmd() *cobra.Command {
 				return errors.New("no GitHub token (set GITHUB_TOKEN/GH_TOKEN or run `gh auth login`)")
 			}
 			rec := &stackpublish.Reconciler{Stacks: st, Forge: stackpublish.NewGitHubForge(token, nil, "")}
-			report, err := rec.Restack(cmd.Context(), ws, sl.StackID(id), path, newResolver(headless))
+			report, err := rec.Restack(cmd.Context(), ws, id, path, newResolver(headless))
 			if err != nil {
 				return err
 			}
@@ -576,7 +571,7 @@ func publishCmd() *cobra.Command {
 			if autoRebase {
 				opts.Resolver = newResolver(headless)
 			}
-			report, err := rec.Publish(cmd.Context(), ws, sl.StackID(id), path, opts)
+			report, err := rec.Publish(cmd.Context(), ws, id, path, opts)
 			if err != nil {
 				return err
 			}

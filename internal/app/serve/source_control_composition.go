@@ -8,6 +8,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
+	"time"
+
 	"github.com/tysonthomas9/loomcli/internal/gitauth"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	infralocalgit "github.com/tysonthomas9/loomcli/internal/infra/localgit"
@@ -16,9 +20,6 @@ import (
 	connectorsfleetdb "github.com/tysonthomas9/loomcli/internal/modules/connectors/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"strconv"
-	"strings"
-	"time"
 )
 
 const (
@@ -375,15 +376,15 @@ func NewSourceControlCapabilityWithFleetDB(
 }
 
 func newDefaultStackServices(now func() time.Time) (sourcecontrol.TaskOutcomeRecorder, sourcecontrol.StackLifecycle) {
-	adapter, err := infrastackstore.DefaultAdapter()
+	store, err := infrastackstore.Default()
 	if err != nil {
 		return nil, nil
 	}
-	outcomes, err := sourcecontrol.NewTaskOutcomes(adapter, now)
+	outcomes, err := sourcecontrol.NewTaskOutcomes(store, now)
 	if err != nil {
 		return nil, nil
 	}
-	stacks, err := sourcecontrol.NewStackLifecycle(adapter, now)
+	stacks, err := sourcecontrol.NewStackLifecycle(store, now)
 	if err != nil {
 		return nil, nil
 	}

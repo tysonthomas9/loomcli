@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	. "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol/stacklineage"
+	. "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 )
 
 func TestOutputBranchName_Sanitization(t *testing.T) {
@@ -48,14 +48,14 @@ func TestAssignBranch_CollisionSuffix(t *testing.T) {
 }
 
 // linear builds a simple linear chain T1->T2->...->Tn with assigned branches.
-func linear(ids ...string) []Node {
-	nodes := make([]Node, len(ids))
+func linear(ids ...string) []StackNode {
+	nodes := make([]StackNode, len(ids))
 	for i, id := range ids {
 		base := ""
 		if i > 0 {
 			base = ids[i-1]
 		}
-		nodes[i] = Node{TaskID: id, BaseTaskID: base, OutputBranch: OutputBranchName("epic:E", id)}
+		nodes[i] = StackNode{TaskID: id, BaseTaskID: base, OutputBranch: OutputBranchName("epic:E", id)}
 	}
 	return nodes
 }
@@ -80,7 +80,7 @@ func TestOrdered_EmptyAndSingle(t *testing.T) {
 
 func TestOrdered_Forest(t *testing.T) {
 	// Two parallel linear chains off the same base: A1->A2 and B1->B2->B3.
-	nodes := []Node{
+	nodes := []StackNode{
 		{TaskID: "B1"}, {TaskID: "B2", BaseTaskID: "B1"}, {TaskID: "B3", BaseTaskID: "B2"},
 		{TaskID: "A1"}, {TaskID: "A2", BaseTaskID: "A1"},
 	}
@@ -95,33 +95,33 @@ func TestOrdered_Forest(t *testing.T) {
 	assert.Equal(t, []string{"A1", "A2", "B1", "B2", "B3"}, got)
 
 	// Branching within a chain is still rejected (a unit can't have two successors).
-	branched := []Node{{TaskID: "A1"}, {TaskID: "A2", BaseTaskID: "A1"}, {TaskID: "A3", BaseTaskID: "A1"}}
+	branched := []StackNode{{TaskID: "A1"}, {TaskID: "A2", BaseTaskID: "A1"}, {TaskID: "A3", BaseTaskID: "A1"}}
 	_, err = Ordered(branched)
 	assert.ErrorIs(t, err, ErrBranching)
 }
 
 func TestOrdered_Errors(t *testing.T) {
 	t.Run("self-parent", func(t *testing.T) {
-		_, err := Ordered([]Node{{TaskID: "A", BaseTaskID: "A"}})
+		_, err := Ordered([]StackNode{{TaskID: "A", BaseTaskID: "A"}})
 		assert.ErrorIs(t, err, ErrCycle)
 	})
 	t.Run("missing predecessor", func(t *testing.T) {
-		_, err := Ordered([]Node{{TaskID: "B", BaseTaskID: "ghost"}, {TaskID: "A"}})
+		_, err := Ordered([]StackNode{{TaskID: "B", BaseTaskID: "ghost"}, {TaskID: "A"}})
 		assert.ErrorIs(t, err, ErrMissingPredecessor)
 	})
 	t.Run("no root", func(t *testing.T) {
 		// A->B, B->A : no node with empty base.
-		_, err := Ordered([]Node{{TaskID: "A", BaseTaskID: "B"}, {TaskID: "B", BaseTaskID: "A"}})
+		_, err := Ordered([]StackNode{{TaskID: "A", BaseTaskID: "B"}, {TaskID: "B", BaseTaskID: "A"}})
 		assert.ErrorIs(t, err, ErrNoRoot)
 	})
 	t.Run("branching (multiple successors)", func(t *testing.T) {
 		// A is root; both B and C base on A.
-		_, err := Ordered([]Node{{TaskID: "A"}, {TaskID: "B", BaseTaskID: "A"}, {TaskID: "C", BaseTaskID: "A"}})
+		_, err := Ordered([]StackNode{{TaskID: "A"}, {TaskID: "B", BaseTaskID: "A"}, {TaskID: "C", BaseTaskID: "A"}})
 		assert.ErrorIs(t, err, ErrBranching)
 	})
 	t.Run("cycle below root", func(t *testing.T) {
 		// A root; B->C, C->B (unreachable from A).
-		_, err := Ordered([]Node{{TaskID: "A"}, {TaskID: "B", BaseTaskID: "C"}, {TaskID: "C", BaseTaskID: "B"}})
+		_, err := Ordered([]StackNode{{TaskID: "A"}, {TaskID: "B", BaseTaskID: "C"}, {TaskID: "C", BaseTaskID: "B"}})
 		assert.ErrorIs(t, err, ErrCycle)
 	})
 }
@@ -146,12 +146,12 @@ func TestBaseBranch_FailClosed(t *testing.T) {
 	stack := Stack{ID: "epic:E", RootBase: "main"}
 
 	// Predecessor missing → error, never RootBase.
-	n := Node{TaskID: "T2", BaseTaskID: "T1"}
-	_, err := BaseBranch(stack, n, map[string]Node{"T2": n})
+	n := StackNode{TaskID: "T2", BaseTaskID: "T1"}
+	_, err := BaseBranch(stack, n, map[string]StackNode{"T2": n})
 	assert.ErrorIs(t, err, ErrMissingPredecessor)
 
 	// Predecessor present but no assigned branch → error, never RootBase.
-	byTask := map[string]Node{
+	byTask := map[string]StackNode{
 		"T1": {TaskID: "T1"}, // OutputBranch empty
 		"T2": {TaskID: "T2", BaseTaskID: "T1"},
 	}

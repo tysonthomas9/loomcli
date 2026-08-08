@@ -15,7 +15,6 @@ import (
 	stackpublish "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolpublisher"
 	stackstore "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
-	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol/stacklineage"
 )
 
 // reconcileEpicStack runs the Stage-4 post-drain reconcile: once the epic has
@@ -49,11 +48,7 @@ func reconcileEpicStack(ctx context.Context, ws string, proj *EpicStackProjectio
 	if err != nil {
 		return fmt.Errorf("open stack store: %w", err)
 	}
-	adapter, err := stackstore.NewAdapter(sstore)
-	if err != nil {
-		return err
-	}
-	stacks, err := sourcecontrol.NewStackLifecycle(adapter, time.Now)
+	stacks, err := sourcecontrol.NewStackLifecycle(sstore, time.Now)
 	if err != nil {
 		return err
 	}
@@ -97,12 +92,12 @@ func reconcileEpicStack(ctx context.Context, ws string, proj *EpicStackProjectio
 // stackReconcileLockDir returns a per-stack lock directory under the loom dir, so
 // concurrent reconciles of different stacks never contend while same-stack
 // triggers serialize.
-func stackReconcileLockDir(id sl.StackID) (string, error) {
+func stackReconcileLockDir(id sourcecontrol.StackID) (string, error) {
 	loomDir := bootstrap.LoomDir()
 	if loomDir == "" {
 		return "", stackstore.ErrLoomDirMissing
 	}
-	dir := filepath.Join(loomDir, "stack-locks", sanitizeLockSegment(string(id)))
+	dir := filepath.Join(loomDir, "stack-locks", sanitizeLockSegment(id))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", fmt.Errorf("create stack lock dir: %w", err)
 	}

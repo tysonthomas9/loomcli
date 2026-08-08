@@ -105,11 +105,7 @@ func TestStackLifecycleOwnsPublicationStateAndPreservesEvidence(t *testing.T) {
 	ctx := context.Background()
 	clock := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
 	store := stackstore.New(t.TempDir())
-	adapter, err := stackstore.NewAdapter(store)
-	if err != nil {
-		t.Fatalf("compose adapter: %v", err)
-	}
-	service, err := sourcecontrol.NewStackLifecycle(adapter, func() time.Time { return clock })
+	service, err := sourcecontrol.NewStackLifecycle(store, func() time.Time { return clock })
 	if err != nil {
 		t.Fatalf("compose lifecycle: %v", err)
 	}
@@ -166,11 +162,7 @@ func TestStackLifecycleOwnsPublicationStateAndPreservesEvidence(t *testing.T) {
 
 func newStackLifecycle(t *testing.T) sourcecontrol.StackLifecycle {
 	t.Helper()
-	adapter, err := stackstore.NewAdapter(stackstore.New(t.TempDir()))
-	if err != nil {
-		t.Fatalf("compose adapter: %v", err)
-	}
-	service, err := sourcecontrol.NewStackLifecycle(adapter, time.Now)
+	service, err := sourcecontrol.NewStackLifecycle(stackstore.New(t.TempDir()), time.Now)
 	if err != nil {
 		t.Fatalf("compose lifecycle: %v", err)
 	}

@@ -25,6 +25,16 @@ var (
 	// an admission is unavailable. Admission materialization never falls back
 	// to an ordinary committed repository lookup.
 	ErrRepositoryAdmissionNotFound = errors.New("source control: repository admission not found")
+	// ErrNoRoot means a non-empty stack has no root task.
+	ErrNoRoot = errors.New("source control: stack has no root task")
+	// ErrCycle means stack parent pointers contain a cycle.
+	ErrCycle = errors.New("source control: stack lineage cycle detected")
+	// ErrMissingPredecessor means a task names a base task absent from its stack.
+	ErrMissingPredecessor = errors.New("source control: stack predecessor not found")
+	// ErrBranching means one task has multiple successors in a linear stack.
+	ErrBranching = errors.New("source control: stack task has multiple successors")
+	// ErrNoOutputBranch means a predecessor has no stable output branch.
+	ErrNoOutputBranch = errors.New("source control: stack predecessor has no output branch")
 )
 
 // RefChangedError reports that a fetched immutable subject no longer matches

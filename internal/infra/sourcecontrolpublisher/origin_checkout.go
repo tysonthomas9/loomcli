@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol/stacklineage"
+	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 )
 
 // PublishFromOrigin provisions an ephemeral checkout of repoURL, fetches the

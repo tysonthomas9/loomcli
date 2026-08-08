@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol/stacklineage"
+	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 )
 
 func TestWithStackSection(t *testing.T) {
@@ -38,7 +38,7 @@ func TestWithStackSection(t *testing.T) {
 
 func TestRenderStackListing(t *testing.T) {
 	id := sl.StackID("epic:E")
-	ordered := []sl.Node{
+	ordered := []sl.StackNode{
 		{TaskID: "T1", OutputBranch: sl.OutputBranchName(id, "T1")},
 		{TaskID: "T2", OutputBranch: sl.OutputBranchName(id, "T2")},
 	}

@@ -11,11 +11,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol/stacklineage"
+	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 )
 
 func TestChains(t *testing.T) {
-	ordered := []sl.Node{
+	ordered := []sl.StackNode{
 		{TaskID: "A1"}, {TaskID: "A2", BaseTaskID: "A1"},
 		{TaskID: "B1"}, {TaskID: "B2", BaseTaskID: "B1"}, {TaskID: "B3", BaseTaskID: "B2"},
 	}
@@ -25,7 +25,7 @@ func TestChains(t *testing.T) {
 	assert.Equal(t, []string{"B1", "B2", "B3"}, taskIDs(got[1]))
 }
 
-func taskIDs(ns []sl.Node) []string {
+func taskIDs(ns []sl.StackNode) []string {
 	out := make([]string, len(ns))
 	for i, n := range ns {
 		out[i] = n.TaskID

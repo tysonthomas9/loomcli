@@ -221,27 +221,52 @@ type TaskStackOutcomeMutation struct {
 	PublishedAt *time.Time
 }
 
-// Stack is Source Control's public stack-lineage projection. Callers receive
-// product coordinates and publication state without depending on the local
-// stackstore representation.
+// StackID identifies a Source Control stack. The conventional forms are
+// "epic:<id>", "manual:<name>", and "auto:<scope>".
+type StackID = string
+
+// CommitMode controls how a task's work becomes the commit on its output branch.
+type CommitMode = string
+
+const (
+	CommitModeLoom   CommitMode = "loom_commit"
+	CommitModeAgent  CommitMode = "agent_commit"
+	CommitModeSquash CommitMode = "squash_on_publish"
+)
+
+// NodeState is the lifecycle state of one task slot in a stack.
+type NodeState = string
+
+const (
+	NodeStatePending    NodeState = "pending"
+	NodeStatePublished  NodeState = "published"
+	NodeStateConflicted NodeState = "conflicted"
+	NodeStateEmpty      NodeState = "empty"
+	NodeStateMerged     NodeState = "merged"
+	NodeStateClosed     NodeState = "closed"
+)
+
+// Stack is Source Control's canonical stack-lineage model. The local adapter
+// persists this exact shape, so callers, policy, and persistence no longer
+// maintain parallel representations or mapper layers.
 type Stack struct {
-	ID                string    `json:"id"`
-	WorkspaceKey      string    `json:"workspaceKey"`
-	Repository        string    `json:"repoName"`
-	RootBase          string    `json:"rootBase"`
-	DefaultCommitMode string    `json:"defaultCommitMode,omitempty"`
-	CreatedAt         time.Time `json:"createdAt"`
-	UpdatedAt         time.Time `json:"updatedAt"`
+	ID                StackID    `json:"id"`
+	WorkspaceKey      string     `json:"workspaceKey"`
+	Repository        string     `json:"repoName"`
+	RootBase          string     `json:"rootBase"`
+	DefaultCommitMode CommitMode `json:"defaultCommitMode,omitempty"`
+	CreatedAt         time.Time  `json:"createdAt"`
+	UpdatedAt         time.Time  `json:"updatedAt"`
 }
 
-// StackNode is one task's stable slot in a Source Control stack.
+// StackNode is Source Control's canonical model for one stable task slot.
 type StackNode struct {
-	StackID         string     `json:"stackId"`
+	StackID         StackID    `json:"stackId"`
 	TaskID          string     `json:"taskId"`
 	BaseTaskID      string     `json:"baseTaskId,omitempty"`
 	OutputBranch    string     `json:"outputBranch"`
-	CommitMode      string     `json:"commitMode,omitempty"`
-	State           string     `json:"state"`
+	CommitMode      CommitMode `json:"commitMode,omitempty"`
+	State           NodeState  `json:"state"`
 	PRNumber        int        `json:"prNumber,omitempty"`
 	PRURL           string     `json:"prUrl,omitempty"`
 	OutputSHA       string     `json:"outputSha,omitempty"`

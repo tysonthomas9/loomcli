@@ -6,13 +6,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol/stacklineage"
+	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 )
 
 const sid sl.StackID = "epic:E1"
 
-func node(id, base string) sl.Node {
-	return sl.Node{StackID: sid, TaskID: id, BaseTaskID: base, OutputBranch: sl.OutputBranchName(sid, id)}
+func node(id, base string) sl.StackNode {
+	return sl.StackNode{StackID: sid, TaskID: id, BaseTaskID: base, OutputBranch: sl.OutputBranchName(sid, id)}
 }
 
 func br(id string) string { return sl.OutputBranchName(sid, id) }
@@ -31,7 +31,7 @@ func byKind(actions []action) map[string]action {
 
 func TestComputePlan_FreshCreate(t *testing.T) {
 	stack := sl.Stack{ID: sid, RootBase: "main"}
-	ordered := []sl.Node{node("T1", ""), node("T2", "T1"), node("T3", "T2")}
+	ordered := []sl.StackNode{node("T1", ""), node("T2", "T1"), node("T3", "T2")}
 	got := byKind(computePlan(stack, ordered, map[string]PR{}, nil))
 
 	require.Equal(t, actCreate, got["T1"].Kind)
@@ -42,7 +42,7 @@ func TestComputePlan_FreshCreate(t *testing.T) {
 
 func TestComputePlan_Idempotent(t *testing.T) {
 	stack := sl.Stack{ID: sid, RootBase: "main"}
-	ordered := []sl.Node{node("T1", ""), node("T2", "T1"), node("T3", "T2")}
+	ordered := []sl.StackNode{node("T1", ""), node("T2", "T1"), node("T3", "T2")}
 	prs := map[string]PR{
 		br("T1"): {Number: 1, Head: br("T1"), Base: "main", State: "open"},
 		br("T2"): {Number: 2, Head: br("T2"), Base: br("T1"), State: "open"},
@@ -56,7 +56,7 @@ func TestComputePlan_Idempotent(t *testing.T) {
 func TestComputePlan_ReorderSwap(t *testing.T) {
 	stack := sl.Stack{ID: sid, RootBase: "main"}
 	// Desired after swap: T1 -> T3 -> T2.
-	ordered := []sl.Node{node("T1", ""), node("T3", "T1"), node("T2", "T3")}
+	ordered := []sl.StackNode{node("T1", ""), node("T3", "T1"), node("T2", "T3")}
 	// Current PRs reflect the OLD order T1->T2->T3.
 	prs := map[string]PR{
 		br("T1"): {Number: 1, Head: br("T1"), Base: "main", State: "open"},
@@ -74,7 +74,7 @@ func TestComputePlan_ReorderSwap(t *testing.T) {
 func TestComputePlan_DropClosesOrphan(t *testing.T) {
 	stack := sl.Stack{ID: sid, RootBase: "main"}
 	// T2 dropped; desired is T1 -> T3 (reparented onto T1).
-	ordered := []sl.Node{node("T1", ""), node("T3", "T1")}
+	ordered := []sl.StackNode{node("T1", ""), node("T3", "T1")}
 	prs := map[string]PR{
 		br("T1"): {Number: 1, Head: br("T1"), Base: "main", State: "open"},
 		br("T2"): {Number: 2, Head: br("T2"), Base: br("T1"), State: "open"}, // orphan
@@ -88,7 +88,7 @@ func TestComputePlan_DropClosesOrphan(t *testing.T) {
 
 func TestComputePlan_MergedSlide(t *testing.T) {
 	stack := sl.Stack{ID: sid, RootBase: "main"}
-	ordered := []sl.Node{node("T1", ""), node("T2", "T1")}
+	ordered := []sl.StackNode{node("T1", ""), node("T2", "T1")}
 	prs := map[string]PR{
 		br("T1"): {Number: 1, Head: br("T1"), Base: "main", State: "closed", Merged: true},
 		br("T2"): {Number: 2, Head: br("T2"), Base: br("T1"), State: "open"},
@@ -101,7 +101,7 @@ func TestComputePlan_MergedSlide(t *testing.T) {
 
 func TestComputePlan_Empty(t *testing.T) {
 	stack := sl.Stack{ID: sid, RootBase: "main"}
-	ordered := []sl.Node{node("T1", ""), node("T2", "T1"), node("T3", "T2")}
+	ordered := []sl.StackNode{node("T1", ""), node("T2", "T1"), node("T3", "T2")}
 	empty := map[string]bool{br("T2"): true}
 	got := byKind(computePlan(stack, ordered, map[string]PR{}, empty))
 	assert.Equal(t, actEmpty, got["T2"].Kind, "empty unit gets no PR")
