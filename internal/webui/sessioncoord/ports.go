@@ -3,9 +3,9 @@ package sessioncoord
 import (
 	"context"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
-	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
 )
 
 // TranscriptEvents is the canonical transcript shape exposed by WebUI session
@@ -15,7 +15,7 @@ type TranscriptEvents = []transcript.Event
 
 // HistoryReader is the session-history projection needed by the UI.
 type HistoryReader interface {
-	List(ctx context.Context, workspaceID, issueID string) ([]sessionhistory.SessionRecord, error)
+	List(ctx context.Context, workspaceID, issueID string) ([]SessionRecord, error)
 }
 
 // SessionService defines business logic for session audit trail operations.
@@ -44,7 +44,7 @@ type SessionService interface {
 	GetSessionDiff(ctx context.Context, wsID, taskID, sessionID string) (string, error)
 
 	// ListSessionHistory returns session history records for an issue.
-	ListSessionHistory(ctx context.Context, wsID, issueID string) ([]sessionhistory.SessionRecord, error)
+	ListSessionHistory(ctx context.Context, wsID, issueID string) ([]SessionRecord, error)
 
 	// GetSessionScrollback returns scrollback content for a completed session.
 	GetSessionScrollback(ctx context.Context, wsID, issueID, recordID string) (*SessionScrollbackResult, error)
@@ -80,6 +80,19 @@ type SessionDetailData struct {
 	IsActive bool `json:"is_active"`
 }
 
-// SessionScrollbackResult is retained as a source-compatible alias while
-// callers migrate to the session-history read projection.
-type SessionScrollbackResult = sessionhistory.ScrollbackResult
+// SessionRecord keeps WebUI callers source-compatible with Interaction's
+// canonical terminal audit projection.
+type SessionRecord = interaction.SessionHistoryRecord
+
+// SessionScrollbackResult is the read projection for one completed session's
+// captured terminal output.
+type SessionScrollbackResult struct {
+	Content string
+	Lines   int
+}
+
+// ValidateSessionHistoryIssueID keeps WebUI callers source-compatible with
+// Interaction's canonical validation policy.
+func ValidateSessionHistoryIssueID(id string) error {
+	return interaction.ValidateSessionHistoryIssueID(id)
+}

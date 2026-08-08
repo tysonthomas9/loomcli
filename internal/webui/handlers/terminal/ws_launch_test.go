@@ -14,7 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
+	"github.com/tysonthomas9/loomcli/internal/webui/localredis"
 	webuterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
@@ -39,18 +39,18 @@ type signalingAttachPTYSource struct {
 func (s *signalingAttachPTYSource) AttachSession(
 	key webuterminal.SessionKey,
 	cols, rows uint16,
-	launch *tabmeta.LaunchSpec,
+	launch *webuterminal.LaunchSpec,
 ) (webuterminal.Attachment, bool, error) {
 	s.once.Do(func() { close(s.attachCalled) })
 	return s.PTYSource.AttachSession(key, cols, rows, launch)
 }
 
-func newTabMetaStoreForWSTest(t *testing.T) *tabmeta.Store {
+func newTabMetaStoreForWSTest(t *testing.T) *localredis.TabMetadataStore {
 	t.Helper()
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
-	return tabmeta.NewStore(rdb, nil)
+	return localredis.NewTabMetadataStore(rdb, nil)
 }
 
 func TestLaunchSpecRejectsUUIDSessionWithoutMetadata(t *testing.T) {
@@ -116,7 +116,7 @@ func TestAgentTerminalAttachRequiresStartAfterStop(t *testing.T) {
 
 	tabStore := newTabMetaStoreForWSTest(t)
 	now := time.Now().UTC()
-	if err := tabStore.Set(ctx, &tabmeta.TabMetadata{
+	if err := tabStore.Set(ctx, &webuterminal.TabMetadata{
 		Workspace:   "E2E",
 		SessionName: "term_reviewer",
 		Label:       "reviewer",
@@ -124,7 +124,7 @@ func TestAgentTerminalAttachRequiresStartAfterStop(t *testing.T) {
 		AgentID:     "reviewer",
 		Role:        "lead",
 		Writable:    true,
-		Launch:      &tabmeta.LaunchSpec{Argv: []string{"-c", "cat"}},
+		Launch:      &webuterminal.LaunchSpec{Argv: []string{"-c", "cat"}},
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}); err != nil {
@@ -209,7 +209,7 @@ func TestAgentTerminalAttachRejectsDaemonSupervisedWorkerStoredLaunch(t *testing
 
 	tabStore := newTabMetaStoreForWSTest(t)
 	now := time.Now().UTC()
-	if err := tabStore.Set(ctx, &tabmeta.TabMetadata{
+	if err := tabStore.Set(ctx, &webuterminal.TabMetadata{
 		Workspace:   "E2E",
 		SessionName: "term_advanced_worker",
 		Label:       "advanced-worker",
@@ -217,7 +217,7 @@ func TestAgentTerminalAttachRejectsDaemonSupervisedWorkerStoredLaunch(t *testing
 		AgentID:     "advanced-worker",
 		Role:        "task",
 		Writable:    true,
-		Launch:      &tabmeta.LaunchSpec{Argv: []string{"-c", "cat"}},
+		Launch:      &webuterminal.LaunchSpec{Argv: []string{"-c", "cat"}},
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}); err != nil {
@@ -264,7 +264,7 @@ func TestAgentTerminalAttachCannotSpawnDuringStopSnapshotGap(t *testing.T) {
 
 	tabStore := newTabMetaStoreForWSTest(t)
 	now := time.Now().UTC()
-	if err := tabStore.Set(ctx, &tabmeta.TabMetadata{
+	if err := tabStore.Set(ctx, &webuterminal.TabMetadata{
 		Workspace:   "E2E",
 		SessionName: "term_reviewer_race",
 		Label:       "reviewer-race",
@@ -272,7 +272,7 @@ func TestAgentTerminalAttachCannotSpawnDuringStopSnapshotGap(t *testing.T) {
 		AgentID:     "reviewer-race",
 		Role:        "lead",
 		Writable:    true,
-		Launch:      &tabmeta.LaunchSpec{Argv: []string{"-c", "cat"}},
+		Launch:      &webuterminal.LaunchSpec{Argv: []string{"-c", "cat"}},
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}); err != nil {

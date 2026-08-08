@@ -164,6 +164,21 @@ func TestHandleOpenEditor_EmptyBody(t *testing.T) {
 	}
 }
 
+func TestHandleOpenEditor_RejectsTrailingJSON(t *testing.T) {
+	cache := newEditorCache(time.Minute, fakeDetectedEditors(nil))
+	launch, _, _ := fakeLauncher(nil)
+	open := handleOpenEditor(cache, launch)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/editors/open", strings.NewReader(`{"editor_id":"vscode","path":"/tmp"} {}`))
+	req.RemoteAddr = "127.0.0.1:12345"
+	rec := httptest.NewRecorder()
+	open.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestHandleOpenEditor_MissingEditorID(t *testing.T) {
 	cache := newEditorCache(time.Minute, fakeDetectedEditors(nil))
 	launch, _, _ := fakeLauncher(nil)

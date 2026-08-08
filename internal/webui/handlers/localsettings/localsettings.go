@@ -1,7 +1,6 @@
 package localsettings
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -102,9 +101,8 @@ func HandleGet(dataDir string) http.HandlerFunc {
 // grant mutation.
 func HandleRuntimeCredentialPreflight(dataDir string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
 		var req runtimeCredentialPreflightRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{}); err != nil {
 			var maxBytesErr *http.MaxBytesError
 			if errors.As(err, &maxBytesErr) {
 				handler.WriteJSON(w, http.StatusRequestEntityTooLarge, runtimeCredentialPreflightResponse{
@@ -160,9 +158,8 @@ func HandlePatch(dataDir string, options ...PatchOptions) http.HandlerFunc {
 		opts = options[0]
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
 		var req patchRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{}); err != nil {
 			var maxBytesErr *http.MaxBytesError
 			if errors.As(err, &maxBytesErr) {
 				handler.WriteJSON(w, http.StatusRequestEntityTooLarge, response{Success: false, Error: "request body too large"})

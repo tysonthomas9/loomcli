@@ -13,7 +13,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
-	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
@@ -455,7 +454,7 @@ func TestServer_ConfigDefaults_ExplicitValuesPreserved(t *testing.T) {
 
 func TestInteractiveRuntimeTabSourceMapsTerminalMetadata(t *testing.T) {
 	source := interactiveRuntimeTabSource{terminalService: &stubTerminalService{
-		tabs: []tabmeta.TabMetadata{{
+		tabs: []terminal.TabMetadata{{
 			SessionName: "lead-a",
 			Kind:        "agent",
 			AgentID:     "agent-a",

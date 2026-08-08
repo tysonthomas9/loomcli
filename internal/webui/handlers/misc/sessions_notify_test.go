@@ -109,6 +109,39 @@ func TestNotifySessionChange_InvalidJSON(t *testing.T) {
 	}
 }
 
+func TestNotifySessionChange_RejectsTrailingAndOversizedBodies(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "trailing JSON",
+			body: `{"task_id":"task-1","session_id":"sess-1"} {}`,
+		},
+		{
+			name: "oversized body",
+			body: `{"task_id":"task-1","session_id":"` + strings.Repeat("x", 1<<20) + `"}`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			hub := realtime.NewHub()
+			go hub.Run()
+			defer hub.Stop()
+
+			notify := handleNotifySessionChange(hub, "valid-token")
+			req := httptest.NewRequest(http.MethodPost, sessions.NotifyPath, strings.NewReader(test.body))
+			req.Header.Set("Authorization", "Bearer valid-token")
+			rec := httptest.NewRecorder()
+			notify.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400; body = %s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
 func TestNotifySessionChange_MissingTaskID(t *testing.T) {
 	hub := realtime.NewHub()
 	go hub.Run()

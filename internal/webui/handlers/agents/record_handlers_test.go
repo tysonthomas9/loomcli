@@ -240,6 +240,20 @@ func TestUnifiedAgentCreateRejectsOversizedBodyWithServiceErrorEnvelope(t *testi
 	assertAgentErrorWireResponse(t, rec, true)
 }
 
+func TestUnifiedAgentCreateRejectsTrailingJSON(t *testing.T) {
+	rec := doAgentRequest(
+		t,
+		newAgentsMux(newAgentRecordStore(t)),
+		http.MethodPost,
+		"/api/workspaces/WS/agents",
+		`{"kind":"prompt","name":"docs"} {}`,
+	)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("trailing JSON create status = %d body=%s, want 400", rec.Code, rec.Body.String())
+	}
+	assertAgentErrorWireResponse(t, rec, false)
+}
+
 func TestUnifiedRoutesIgnoreUnrelatedBindingIdentityCollision(t *testing.T) {
 	for _, ownerKind := range []string{"record"} {
 		t.Run(ownerKind, func(t *testing.T) {

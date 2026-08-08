@@ -11,8 +11,47 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
+	serverhandler "github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
+
+func TestDecodeOptionalRequest(t *testing.T) {
+	tests := []struct {
+		name       string
+		body       string
+		wantOK     bool
+		wantStatus int
+		wantTarget string
+	}{
+		{name: "empty uses defaults", body: "", wantOK: true, wantStatus: http.StatusOK},
+		{name: "one value", body: `{"target":"main"}`, wantOK: true, wantStatus: http.StatusOK, wantTarget: "main"},
+		{name: "malformed", body: `{`, wantStatus: http.StatusBadRequest},
+		{name: "trailing value", body: `{"target":"main"} {}`, wantStatus: http.StatusBadRequest},
+		{
+			name:       "oversized",
+			body:       `{"target":"` + strings.Repeat("a", serverhandler.MaxRequestBody) + `"}`,
+			wantStatus: http.StatusRequestEntityTooLarge,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(test.body))
+			w := httptest.NewRecorder()
+			var request gitPushRequest
+			ok := decodeOptionalRequest(w, r, &request)
+			if ok != test.wantOK {
+				t.Fatalf("decodeOptionalRequest() = %v, want %v; body = %s", ok, test.wantOK, w.Body.String())
+			}
+			if w.Code != test.wantStatus {
+				t.Fatalf("status = %d, want %d; body = %s", w.Code, test.wantStatus, w.Body.String())
+			}
+			if ok && request.Target != test.wantTarget {
+				t.Fatalf("target = %q, want %q", request.Target, test.wantTarget)
+			}
+		})
+	}
+}
 
 // mockGitOps implements ops.GitOps for testing.
 type mockGitOps struct {

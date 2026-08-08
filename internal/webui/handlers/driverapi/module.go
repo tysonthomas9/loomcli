@@ -16,9 +16,7 @@
 package driverapi
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -38,8 +36,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	dependencies "github.com/tysonthomas9/loomcli/internal/webui/driverapidependencies"
-	"github.com/tysonthomas9/loomcli/internal/webui/handlers/roles"
+	serverhandler "github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
 
 // maxDriverOpBodyBytes caps inbound driver-op payloads.
@@ -55,24 +52,40 @@ const (
 	HeaderDriverFencingToken = "X-Loom-Driver-Fencing-Token" //nolint:gosec // header name, not a credential
 )
 
-// IssueBackendFactory builds a workspace-scoped FleetDB issue backend acting
-// as the given actor. Overridable in tests.
-type IssueBackendFactory = dependencies.IssueBackendFactory
+type IssueBackendFactory func(workspace, actor string) (backend.IssueBackend, error)
 
-// Config is the stable driver API composition contract.
-type Config = dependencies.Config
+// Store is the legacy read-only projection boundary still needed by the
+// driver HTTP adapter while mutations enter through capability APIs.
+type Store interface {
+	store.OrchestrationSessionStore
+	Awaits() store.AwaitStore
+	TriggerEvents() store.TriggerEventStore
+	TriggerBindings() store.TriggerBindingStore
+	TriggerDeliveries() store.TriggerDeliveryStore
+	Roles() store.RoleStore
+	Repos() store.RepoStore
+	AgentServices() store.AgentServiceStore
+	TaskRuns() store.TaskRunStore
+	TaskRunEvents() store.TaskRunEventStore
+	DriverRuns() store.DriverRunStore
+	Drivers() store.DriverStore
+	DriverVersions() store.DriverVersionStore
+	Nodes() store.NodeStore
+	WorkerProfiles() store.WorkerProfileStore
+}
 
 // Module serves the workspace-scoped driver-op routes.
 type Module struct {
-	store                dependencies.Store
+	store                Store
 	apiToken             string
 	runTokenKey          []byte
 	apiBaseURL           string
 	worktreePath         string
 	localSettingsDir     string
-	sourceControl        dependencies.SourceControl
+	sourceControl        SourceControl
 	localRepoPath        func(workspaceKey, repoName string) string
 	issueBackends        IssueBackendFactory
+	rolePrompts          RolePromptReader
 	dispatcher           connectorsmodule.Dispatcher
 	workflowEventing     *workfloweventing.Workflow
 	eventAwaits          WorkflowEventAwaitDispatcher
@@ -84,7 +97,7 @@ type Module struct {
 	taskRuns             execution.TaskRunAPI
 	taskRunAuthorities   execution.TaskRunAuthorityResolver
 	workflowCatalog      workflowcatalog.API
-	artifacts            dependencies.Artifacts
+	artifacts            Artifacts
 	interactionChat      interaction.ChatMessenger
 	ops                  map[string]opHandler
 
@@ -96,7 +109,7 @@ type Module struct {
 
 	// deliverAssignment is a test seam over the driver's lead-assignment
 	// delivery facade.
-	deliverAssignment func(ctx context.Context, st dependencies.Store, workspace, leadName string) (driverpkg.AgentMessageDeliveryResult, error)
+	deliverAssignment func(ctx context.Context, st Store, workspace, leadName string) (driverpkg.AgentMessageDeliveryResult, error)
 }
 
 // NewModule constructs the driver API module. Returns nil-safe behavior: with
@@ -115,6 +128,7 @@ func NewModule(cfg Config) *Module { //nolint:funlen // Operation registration i
 		sourceControl:        cfg.SourceControl,
 		localRepoPath:        cfg.LocalRepoPath,
 		issueBackends:        cfg.IssueBackends,
+		rolePrompts:          cfg.RolePrompts,
 		dispatcher:           cfg.Dispatcher,
 		workflowEventing:     cfg.WorkflowEventing,
 		eventAwaits:          cfg.EventAwaits,
@@ -135,7 +149,7 @@ func NewModule(cfg Config) *Module { //nolint:funlen // Operation registration i
 
 		deliverAssignment: func(
 			ctx context.Context,
-			st dependencies.Store,
+			st Store,
 			workspace,
 			leadName string,
 		) (driverpkg.AgentMessageDeliveryResult, error) {
@@ -184,9 +198,6 @@ func NewModule(cfg Config) *Module { //nolint:funlen // Operation registration i
 		if wd, err := os.Getwd(); err == nil {
 			m.worktreePath = wd
 		}
-	}
-	if m.issueBackends == nil {
-		m.issueBackends = dependencies.DefaultIssueBackends(cfg.FleetBaseURL)
 	}
 	return m
 }
@@ -376,17 +387,15 @@ func (m *Module) verifyRun(ctx context.Context, ws string, id driverIdentity, bo
 }
 
 func decodeNoParams(body []byte) error {
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
 	var params struct{}
-	if err := decoder.Decode(&params); err != nil {
-		return fmt.Errorf("decode driver op params: %s: %w", err.Error(), domain.ErrInvalid)
+	err := serverhandler.DecodeOneJSONBytes(body, &params, serverhandler.JSONDecodeOptions{
+		MaxBytes:              maxDriverOpBodyBytes,
+		DisallowUnknownFields: true,
+	})
+	if errors.Is(err, serverhandler.ErrTrailingJSON) {
+		err = errors.New("multiple JSON values")
 	}
-	var extra any
-	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		if err == nil {
-			err = fmt.Errorf("multiple JSON values")
-		}
+	if err != nil {
 		return fmt.Errorf("decode driver op params: %s: %w", err.Error(), domain.ErrInvalid)
 	}
 	return nil
@@ -394,8 +403,9 @@ func decodeNoParams(body []byte) error {
 
 func decodeParams[T any](body []byte) (T, error) {
 	var params T
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	if err := decoder.Decode(&params); err != nil {
+	if err := serverhandler.DecodeOneJSONBytes(body, &params, serverhandler.JSONDecodeOptions{
+		MaxBytes: maxDriverOpBodyBytes,
+	}); err != nil {
 		return params, fmt.Errorf("decode driver op params: %s: %w", err.Error(), domain.ErrInvalid)
 	}
 	return params, nil
@@ -426,7 +436,7 @@ func (m *Module) claimReady(ctx context.Context, ws string, id driverIdentity, b
 	}
 	epicID := firstNonEmpty(params.EpicID, parent.EpicID, driverpkg.DriverRunPayloadEpicID(parent.Payload))
 	actor := driverpkg.DriverRunActor(parent.RunID)
-	issueBackend, err := m.issueBackends(ws, actor)
+	issueBackend, err := m.executionIssueBackend(ws, actor)
 	if err != nil {
 		return nil, err
 	}
@@ -480,7 +490,7 @@ func (m *Module) claimTask(ctx context.Context, ws string, id driverIdentity, bo
 		return nil, fmt.Errorf("taskId required: %w", domain.ErrInvalid)
 	}
 	actor := driverpkg.DriverRunActor(parent.RunID)
-	issueBackend, err := m.issueBackends(ws, actor)
+	issueBackend, err := m.executionIssueBackend(ws, actor)
 	if err != nil {
 		return nil, err
 	}
@@ -519,7 +529,7 @@ func (m *Module) claimReview(ctx context.Context, ws string, id driverIdentity, 
 	if taskID == "" {
 		return nil, fmt.Errorf("taskId required: %w", domain.ErrInvalid)
 	}
-	issueBackend, err := m.issueBackends(ws, driverpkg.DriverRunActor(parent.RunID))
+	issueBackend, err := m.executionIssueBackend(ws, driverpkg.DriverRunActor(parent.RunID))
 	if err != nil {
 		return nil, err
 	}
@@ -582,9 +592,9 @@ func (m *Module) claimDriverRunWorkItem(
 // the read-only surface a prompt agent uses to materialize its role's prompt at
 // dispatch time, so "one prompt edit updates every agent" without passing the
 // prompt as raw input. Workspace-scoped, run-token authenticated like the other
-// driverapi reads (verifyParent). The prompt body is loaded through the roles
-// module's shared loader (roles.ReadPromptBody) — the one place role prompts are
-// read from <workspace>/.loom/prompts.
+// driverapi reads (verifyParent). The composition root injects the shared
+// machine-local prompt reader so this HTTP adapter does not reach through a
+// sibling HTTP handler.
 func (m *Module) roleGet(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
 	params, err := decodeParams[struct {
 		Name string `json:"name"`
@@ -599,11 +609,18 @@ func (m *Module) roleGet(ctx context.Context, ws string, id driverIdentity, body
 	if name == "" {
 		return nil, fmt.Errorf("name required: %w", domain.ErrInvalid)
 	}
+	if m.rolePrompts == nil {
+		return nil, backend.ErrUnavailable(
+			"driver-api.role-prompt-reader",
+			"role prompt reader is not configured",
+			nil,
+		)
+	}
 	role, err := m.store.Roles().Get(ctx, ws, name)
 	if err != nil {
 		return nil, fmt.Errorf("get role: %w", err)
 	}
-	return map[string]any{"role": role, "prompt": roles.ReadPromptBody(role)}, nil
+	return map[string]any{"role": role, "prompt": m.rolePrompts(role)}, nil
 }
 
 func (m *Module) epicGet(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
@@ -621,7 +638,7 @@ func (m *Module) epicGet(ctx context.Context, ws string, id driverIdentity, body
 	if epicID == "" {
 		return nil, fmt.Errorf("epic id required: %w", domain.ErrInvalid)
 	}
-	issueBackend, err := m.issueBackends(ws, driverpkg.DriverRunActor(parent.RunID))
+	issueBackend, err := m.executionIssueBackend(ws, driverpkg.DriverRunActor(parent.RunID))
 	if err != nil {
 		return nil, err
 	}
@@ -644,7 +661,7 @@ func (m *Module) epicSnapshot(ctx context.Context, ws string, id driverIdentity,
 		return nil, err
 	}
 	epicID := firstNonEmpty(params.EpicID, parent.EpicID, driverpkg.DriverRunPayloadEpicID(parent.Payload))
-	issueBackend, err := m.issueBackends(ws, driverpkg.DriverRunActor(parent.RunID))
+	issueBackend, err := m.executionIssueBackend(ws, driverpkg.DriverRunActor(parent.RunID))
 	if err != nil {
 		return nil, err
 	}

@@ -1,7 +1,6 @@
 package workspace
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -26,9 +25,8 @@ func HandleAddWorkspaceRepos(svc workspacecoord.WorkspaceService) http.HandlerFu
 			return
 		}
 
-		r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
 		var req workspacecoord.WorkspaceAddReposRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{MaxBytes: handler.MaxRequestBody}); err != nil {
 			var maxBytesErr *http.MaxBytesError
 			if errors.As(err, &maxBytesErr) {
 				handler.RespondError(w, http.StatusRequestEntityTooLarge, "request body too large")

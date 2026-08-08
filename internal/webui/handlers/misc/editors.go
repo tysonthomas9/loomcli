@@ -1,7 +1,6 @@
 package misc
 
 import (
-	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
@@ -185,10 +184,8 @@ func HandleOpenEditor(cache *EditorCache, launch editorLaunchFunc) http.HandlerF
 			return
 		}
 
-		r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
-
 		var req EditorOpenRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{}); err != nil {
 			var maxBytesErr *http.MaxBytesError
 			if errors.As(err, &maxBytesErr) {
 				handler.RespondError(w, http.StatusRequestEntityTooLarge, "request body too large")

@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	stackstore "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore"
-	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol/stacklineage"
+	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 )
 
 func remoteRef(t *testing.T, origin, ref string) string {
@@ -119,8 +119,8 @@ func TestPublishLocalOriginPathPushesBranchesOnly(t *testing.T) {
 	const ws = "WS"
 
 	store := stackstore.New(t.TempDir())
-	require.NoError(t, store.EnsureStack(ctx, sl.Stack{ID: id, WorkspaceKey: ws, RepoName: "repo", RootBase: "main"}))
-	node, err := store.AddNode(ctx, ws, id, "T1", "", sl.CommitModeLoom)
+	require.NoError(t, store.EnsureStackRecord(ctx, sl.Stack{ID: id, WorkspaceKey: ws, Repository: "repo", RootBase: "main"}))
+	node, err := store.AddStackNodeRecord(ctx, ws, id, "T1", "", sl.CommitModeLoom)
 	require.NoError(t, err)
 
 	git(t, work, "checkout", "-q", "-B", node.OutputBranch, "main")
@@ -143,7 +143,7 @@ func TestPublishLocalOriginPathPushesBranchesOnly(t *testing.T) {
 	assert.Empty(t, report.PRURLs)
 	assert.Equal(t, head, remoteRef(t, origin, "refs/heads/"+node.OutputBranch))
 
-	nodes, err := store.ListNodes(ctx, ws, id)
+	nodes, err := store.ListStackNodeRecords(ctx, ws, id)
 	require.NoError(t, err)
 	require.Len(t, nodes, 1)
 	assert.Equal(t, sl.NodeStatePublished, nodes[0].State)

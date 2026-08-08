@@ -61,6 +61,17 @@ func TestHandleClientErrors_InvalidJSON(t *testing.T) {
 	}
 }
 
+func TestHandleClientErrors_RejectsTrailingJSON(t *testing.T) {
+	limiter := newTestClientErrorLimiter()
+	defer limiter.Stop()
+
+	rec := postClientError(handleClientErrors(limiter), `{"type":"test","message":"some error"} {}`)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", rec.Code)
+	}
+}
+
 func TestHandleClientErrors_MissingType(t *testing.T) {
 	limiter := newTestClientErrorLimiter()
 	defer limiter.Stop()

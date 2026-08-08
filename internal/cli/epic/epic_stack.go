@@ -14,17 +14,15 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	stackstore "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore"
-	infrastackstore "github.com/tysonthomas9/loomcli/internal/infra/stackstoreadapter"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
-	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol/stacklineage"
 )
 
 // epicStackID is the deterministic stack id for an epic. The publisher
 // (Stage 4) and `loom stack` use the same "<kind>:<value>" convention, so a
 // re-run, a manual `loom stack publish`, and the post-drain reconcile all
 // converge on one stack record.
-func epicStackID(epicID string) sl.StackID {
-	return sl.StackID("epic:" + strings.TrimSpace(epicID))
+func epicStackID(epicID string) sourcecontrol.StackID {
+	return "epic:" + strings.TrimSpace(epicID)
 }
 
 // epicTask is the minimal projection input: a task and the in-epic tasks that
@@ -132,7 +130,7 @@ func planEpicForest(tasks []epicTask) ([]projectedNode, projectionStats) {
 
 // EpicStackProjection is the result of projecting an epic into the stackstore.
 type EpicStackProjection struct {
-	StackID    sl.StackID
+	StackID    sourcecontrol.StackID
 	RepoName   string
 	RepoURL    string // origin remote of the repo the stack is scoped to (for the reconcile checkout)
 	RootBase   string
@@ -208,7 +206,7 @@ func projectEpicStack(ctx context.Context, ib backend.IssueBackend, stacks sourc
 	}
 	result, err := stacks.ReconcileStack(ctx, sourcecontrol.ReconcileStackCommand{
 		Stack: sourcecontrol.EnsureStackCommand{
-			WorkspaceKey: ws, StackID: string(stackID), Repository: repoName, RootBase: rootBase,
+			WorkspaceKey: ws, StackID: stackID, Repository: repoName, RootBase: rootBase,
 		},
 		Nodes: desired,
 	})
@@ -257,11 +255,7 @@ func projectEpicStackForRun(ctx context.Context, handle *bootstrap.StoreHandle, 
 	if err != nil {
 		return nil, fmt.Errorf("open stack store: %w", err)
 	}
-	adapter, err := infrastackstore.New(sstore)
-	if err != nil {
-		return nil, err
-	}
-	stacks, err := sourcecontrol.NewStackLifecycle(adapter, time.Now)
+	stacks, err := sourcecontrol.NewStackLifecycle(sstore, time.Now)
 	if err != nil {
 		return nil, err
 	}

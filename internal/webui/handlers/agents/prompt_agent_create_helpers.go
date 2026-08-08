@@ -16,7 +16,6 @@ import (
 	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
-	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	rolehandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/roles"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
@@ -344,8 +343,6 @@ func writeAgentProvisioningError(
 	fallback string,
 ) {
 	switch {
-	case errors.Is(err, workflowcataloghttp.ErrUnauthenticated):
-		handler.RespondError(w, http.StatusUnauthorized, "authentication required")
 	case errors.Is(err, agentprovisioning.ErrInvalid),
 		errors.Is(err, domain.ErrInvalid):
 		handler.RespondError(w, http.StatusBadRequest, err.Error())

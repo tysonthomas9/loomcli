@@ -13,7 +13,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/app/webhookingestion"
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/driver/eventpolicy"
 	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
@@ -73,7 +72,7 @@ func (adapter legacyAdmission) AdmitEvent(ctx context.Context, _ automation.Even
 	// Mirror Automation's centralized derived-admission boundary in this
 	// deliberately legacy test adapter. Production always calls the real core;
 	// this keeps signed HTTP regression tests on the same shared policy.
-	if !eventpolicy.EligibleForAdmission(
+	if !automation.EligibleForAdmission(
 		command.EventType, string(automation.EventOriginExternal), command.SourceKind,
 		command.ActorRef, command.SourceEventID,
 	) {

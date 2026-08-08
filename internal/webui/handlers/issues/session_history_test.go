@@ -14,18 +14,19 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/localredis"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
+	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
 )
 
 const testSHWSID = "test-ws-uuid"
 
-func setupSessionHistoryStore(t *testing.T) *sessionhistory.Store {
+func setupSessionHistoryStore(t *testing.T) *localredis.SessionHistoryStore {
 	t.Helper()
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { rdb.Close() })
-	return sessionhistory.NewStore(rdb, nil)
+	return localredis.NewSessionHistoryStore(rdb, nil)
 }
 
 func withSHWSContext(r *http.Request, wsID string) *http.Request {
@@ -37,7 +38,7 @@ func TestHandleListSessionHistory_ReturnsRecords(t *testing.T) {
 	ctx := context.Background()
 
 	// Add a session record.
-	record := sessionhistory.SessionRecord{
+	record := sessioncoord.SessionRecord{
 		ID:          "issue-proj-1:1700000000",
 		SessionName: "issue-proj-1",
 		IssueID:     "proj.1",
@@ -63,8 +64,8 @@ func TestHandleListSessionHistory_ReturnsRecords(t *testing.T) {
 	}
 
 	var resp struct {
-		Success bool                           `json:"success"`
-		Data    []sessionhistory.SessionRecord `json:"data"`
+		Success bool                         `json:"success"`
+		Data    []sessioncoord.SessionRecord `json:"data"`
 	}
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -99,8 +100,8 @@ func TestHandleListSessionHistory_EmptyArrayForUnknownIssue(t *testing.T) {
 	}
 
 	var resp struct {
-		Success bool                           `json:"success"`
-		Data    []sessionhistory.SessionRecord `json:"data"`
+		Success bool                         `json:"success"`
+		Data    []sessioncoord.SessionRecord `json:"data"`
 	}
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -237,7 +238,7 @@ func TestHandleGetSessionScrollback_NoScrollbackAvailable(t *testing.T) {
 	ctx := context.Background()
 
 	// Add a completed record with no scrollback path.
-	record := sessionhistory.SessionRecord{
+	record := sessioncoord.SessionRecord{
 		ID:          "issue-proj-1:1700000000",
 		SessionName: "issue-proj-1",
 		IssueID:     "proj.1",

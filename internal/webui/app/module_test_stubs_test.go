@@ -7,33 +7,31 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/webui/filecoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
-	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
 	"github.com/tysonthomas9/loomcli/internal/webui/sourcecontrolcoord"
-	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
 // stubTerminalService implements TerminalService with no-op defaults for module tests.
 type stubTerminalService struct {
-	tabs []tabmeta.TabMetadata
+	tabs []terminal.TabMetadata
 }
 
 func (s *stubTerminalService) GenerateToken(_ context.Context, _, _, _ string) (string, error) {
 	return "tok", nil
 }
-func (s *stubTerminalService) ListTabs(_ context.Context, _ string) ([]tabmeta.TabMetadata, error) {
-	return append([]tabmeta.TabMetadata(nil), s.tabs...), nil
+func (s *stubTerminalService) ListTabs(_ context.Context, _ string) ([]terminal.TabMetadata, error) {
+	return append([]terminal.TabMetadata(nil), s.tabs...), nil
 }
-func (s *stubTerminalService) GetTab(_ context.Context, _, _ string) (*tabmeta.TabMetadata, error) {
-	return &tabmeta.TabMetadata{}, nil
+func (s *stubTerminalService) GetTab(_ context.Context, _, _ string) (*terminal.TabMetadata, error) {
+	return &terminal.TabMetadata{}, nil
 }
 func (s *stubTerminalService) PatchTab(_ context.Context, _, _ string, _ map[string]string) (*terminal.PatchTabResult, error) {
-	return &terminal.PatchTabResult{Tab: &tabmeta.TabMetadata{}}, nil
+	return &terminal.PatchTabResult{Tab: &terminal.TabMetadata{}}, nil
 }
-func (s *stubTerminalService) PutTab(_ context.Context, _ string, _ *tabmeta.TabMetadata) error {
+func (s *stubTerminalService) PutTab(_ context.Context, _ string, _ *terminal.TabMetadata) error {
 	return nil
 }
-func (s *stubTerminalService) PersistInteractionTabIdentity(_ context.Context, _ string, _ *tabmeta.TabMetadata) error {
+func (s *stubTerminalService) PersistInteractionTabIdentity(_ context.Context, _ string, _ *terminal.TabMetadata) error {
 	return nil
 }
 func (s *stubTerminalService) DeleteTab(_ context.Context, _, _ string) error { return nil }
@@ -63,7 +61,7 @@ func (s *stubSessionService) GetSessionTranscript(_ context.Context, _, _ string
 func (s *stubSessionService) GetSessionDiff(_ context.Context, _, _ string) (string, error) {
 	return "", nil
 }
-func (s *stubSessionService) ListSessionHistory(_ context.Context, _, _ string) ([]sessionhistory.SessionRecord, error) {
+func (s *stubSessionService) ListSessionHistory(_ context.Context, _, _ string) ([]sessioncoord.SessionRecord, error) {
 	return nil, nil
 }
 func (s *stubSessionService) GetSessionScrollback(_ context.Context, _, _, _ string) (*sessioncoord.SessionScrollbackResult, error) {

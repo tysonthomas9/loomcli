@@ -1,7 +1,6 @@
 package issues
 
 import (
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -46,9 +45,8 @@ func HandleAddWorkItemDependency(api workitems.API) http.HandlerFunc {
 			handler.WriteJSON(w, http.StatusBadRequest, DependencyResponse{Success: false, Error: "missing issue ID"})
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
 		var req AddDependencyRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{MaxBytes: handler.MaxRequestBody}); err != nil {
 			var maxBytesErr *http.MaxBytesError
 			if errors.As(err, &maxBytesErr) {
 				handler.WriteJSON(w, http.StatusRequestEntityTooLarge, DependencyResponse{Success: false, Error: "request body too large (max 1MB)"})

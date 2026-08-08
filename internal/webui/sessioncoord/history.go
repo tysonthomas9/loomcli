@@ -9,14 +9,13 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
-	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
 )
 
-func (s *sessionServiceImpl) ListSessionHistory(ctx context.Context, wsID, issueID string) ([]sessionhistory.SessionRecord, error) {
+func (s *sessionServiceImpl) ListSessionHistory(ctx context.Context, wsID, issueID string) ([]SessionRecord, error) {
 	if s.histStore == nil {
 		return nil, apperrors.ErrUnavailable("session history not available (no Redis)")
 	}
-	if err := sessionhistory.ValidateIssueID(issueID); err != nil {
+	if err := ValidateSessionHistoryIssueID(issueID); err != nil {
 		return nil, apperrors.ErrValidation(err.Error())
 	}
 
@@ -32,7 +31,7 @@ func (s *sessionServiceImpl) GetSessionScrollback(ctx context.Context, wsID, iss
 	if s.histStore == nil {
 		return nil, apperrors.ErrUnavailable("session history not available (no Redis)")
 	}
-	if err := sessionhistory.ValidateIssueID(issueID); err != nil {
+	if err := ValidateSessionHistoryIssueID(issueID); err != nil {
 		return nil, apperrors.ErrValidation(err.Error())
 	}
 	if recordID == "" {
@@ -58,7 +57,7 @@ func (s *sessionServiceImpl) GetSessionScrollback(ctx context.Context, wsID, iss
 }
 
 // findSessionRecord returns the record with the given ID, or nil if not found.
-func findSessionRecord(records []sessionhistory.SessionRecord, id string) *sessionhistory.SessionRecord {
+func findSessionRecord(records []SessionRecord, id string) *SessionRecord {
 	for i := range records {
 		if records[i].ID == id {
 			return &records[i]

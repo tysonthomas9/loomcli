@@ -8,7 +8,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
-	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
 // terminalUIStateKey builds the per-workspace Redis hash key that holds
@@ -18,7 +17,7 @@ func terminalUIStateKey(wsID string) string {
 	return "terminal:ui-state:" + wsID
 }
 
-func (s *terminalServiceImpl) ListTabs(ctx context.Context, wsID string) ([]tabmeta.TabMetadata, error) {
+func (s *terminalServiceImpl) ListTabs(ctx context.Context, wsID string) ([]TabMetadata, error) {
 	if s.tabStore == nil {
 		return nil, apperrors.ErrUnavailable("tab metadata not available (no Redis)")
 	}
@@ -28,7 +27,7 @@ func (s *terminalServiceImpl) ListTabs(ctx context.Context, wsID string) ([]tabm
 		return nil, apperrors.ErrInternal("failed to list tab metadata", err)
 	}
 	if tabs == nil {
-		tabs = []tabmeta.TabMetadata{}
+		tabs = []TabMetadata{}
 	}
 	for i := range tabs {
 		tabs[i].PTYAlive = s.ptyAttachable(wsID, &tabs[i])
@@ -37,11 +36,11 @@ func (s *terminalServiceImpl) ListTabs(ctx context.Context, wsID string) ([]tabm
 	return tabs, nil
 }
 
-func (s *terminalServiceImpl) GetTab(ctx context.Context, wsID, session string) (*tabmeta.TabMetadata, error) {
+func (s *terminalServiceImpl) GetTab(ctx context.Context, wsID, session string) (*TabMetadata, error) {
 	if s.tabStore == nil {
 		return nil, apperrors.ErrUnavailable("tab metadata not available (no Redis)")
 	}
-	if err := tabmeta.ValidateSessionName(session); err != nil {
+	if err := ValidateSessionName(session); err != nil {
 		return nil, apperrors.ErrValidation(err.Error())
 	}
 
@@ -61,7 +60,7 @@ func (s *terminalServiceImpl) PatchTab(ctx context.Context, wsID, session string
 	if s.tabStore == nil {
 		return nil, apperrors.ErrUnavailable("tab metadata not available (no Redis)")
 	}
-	if err := tabmeta.ValidateSessionName(session); err != nil {
+	if err := ValidateSessionName(session); err != nil {
 		return nil, apperrors.ErrValidation(err.Error())
 	}
 
@@ -102,11 +101,11 @@ func (s *terminalServiceImpl) PatchTab(ctx context.Context, wsID, session string
 	return &PatchTabResult{Tab: meta, IssueIDChanged: issueIDChanged}, nil
 }
 
-func (s *terminalServiceImpl) PutTab(ctx context.Context, wsID string, meta *tabmeta.TabMetadata) error {
+func (s *terminalServiceImpl) PutTab(ctx context.Context, wsID string, meta *TabMetadata) error {
 	if s.tabStore == nil {
 		return apperrors.ErrUnavailable("tab metadata not available (no Redis)")
 	}
-	if err := tabmeta.ValidateSessionName(meta.SessionName); err != nil {
+	if err := ValidateSessionName(meta.SessionName); err != nil {
 		return apperrors.ErrValidation(err.Error())
 	}
 
@@ -159,7 +158,7 @@ func (s *terminalServiceImpl) PutTab(ctx context.Context, wsID string, meta *tab
 func (s *terminalServiceImpl) PersistInteractionTabIdentity(
 	ctx context.Context,
 	wsID string,
-	meta *tabmeta.TabMetadata,
+	meta *TabMetadata,
 ) error {
 	if s.tabStore == nil {
 		return apperrors.ErrUnavailable("tab metadata not available (no Redis)")
@@ -172,7 +171,7 @@ func (s *terminalServiceImpl) PersistInteractionTabIdentity(
 		meta.InteractionLeaseFencingToken <= 0 {
 		return apperrors.ErrValidation("complete Interaction terminal identity is required")
 	}
-	if err := tabmeta.ValidateSessionName(meta.SessionName); err != nil {
+	if err := ValidateSessionName(meta.SessionName); err != nil {
 		return apperrors.ErrValidation(err.Error())
 	}
 	meta.UpdatedAt = time.Now().UTC()
@@ -186,7 +185,7 @@ func (s *terminalServiceImpl) DeleteTab(ctx context.Context, wsID, session strin
 	if s.tabStore == nil {
 		return apperrors.ErrUnavailable("tab metadata not available (no Redis)")
 	}
-	if err := tabmeta.ValidateSessionName(session); err != nil {
+	if err := ValidateSessionName(session); err != nil {
 		return apperrors.ErrValidation(err.Error())
 	}
 

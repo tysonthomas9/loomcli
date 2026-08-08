@@ -12,7 +12,7 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
-	providers "github.com/tysonthomas9/loomcli/internal/infra/connectorsproviders/providerimpl"
+	providers "github.com/tysonthomas9/loomcli/internal/infra/connectorsproviders"
 	"github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
 	"github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/ops"

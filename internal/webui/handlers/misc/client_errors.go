@@ -1,7 +1,6 @@
 package misc
 
 import (
-	"encoding/json"
 	"log/slog"
 	"math"
 	"net/http"
@@ -128,11 +127,10 @@ func HandleClientErrors(limiter *ClientErrorLimiter) http.HandlerFunc { //nolint
 			return
 		}
 
-		// Cap request body size
-		r.Body = http.MaxBytesReader(w, r.Body, clientErrorMaxBodyBytes)
-
 		var payload clientErrorPayload
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		if err := handler.DecodeOneJSON(w, r, &payload, handler.JSONDecodeOptions{
+			MaxBytes: clientErrorMaxBodyBytes,
+		}); err != nil {
 			handler.RespondError(w, http.StatusBadRequest, "invalid JSON body")
 			return
 		}

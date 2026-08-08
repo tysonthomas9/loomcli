@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol/stacklineage"
+	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 )
 
 // PRMeta carries issue-derived content used to seed a newly created stacked PR's

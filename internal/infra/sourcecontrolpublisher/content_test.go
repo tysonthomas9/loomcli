@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol/stacklineage"
+	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 )
 
 func TestBuildPRTitle(t *testing.T) {

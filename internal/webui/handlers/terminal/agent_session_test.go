@@ -21,16 +21,16 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
-	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
+	"github.com/tysonthomas9/loomcli/internal/webui/localredis"
 	webuiterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
-func newAgentSessionTestDeps(t *testing.T) (*memstore.Store, *tabmeta.Store, *redis.Client) {
+func newAgentSessionTestDeps(t *testing.T) (*memstore.Store, *localredis.TabMetadataStore, *redis.Client) {
 	t.Helper()
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
-	return memstore.New(), tabmeta.NewStore(rdb, nil), rdb
+	return memstore.New(), localredis.NewTabMetadataStore(rdb, nil), rdb
 }
 
 type slowListTerminalService struct {
@@ -49,20 +49,20 @@ type signalingPutTerminalService struct {
 	putCalled chan struct{}
 }
 
-func (s failingPutTerminalService) PutTab(context.Context, string, *tabmeta.TabMetadata) error {
+func (s failingPutTerminalService) PutTab(context.Context, string, *webuiterminal.TabMetadata) error {
 	return s.err
 }
 
 func (s *signalingPutTerminalService) PutTab(
 	ctx context.Context,
 	workspace string,
-	meta *tabmeta.TabMetadata,
+	meta *webuiterminal.TabMetadata,
 ) error {
 	s.once.Do(func() { close(s.putCalled) })
 	return s.TerminalService.PutTab(ctx, workspace, meta)
 }
 
-func (s slowListTerminalService) ListTabs(ctx context.Context, wsID string) ([]tabmeta.TabMetadata, error) {
+func (s slowListTerminalService) ListTabs(ctx context.Context, wsID string) ([]webuiterminal.TabMetadata, error) {
 	tabs, err := s.TerminalService.ListTabs(ctx, wsID)
 	if err != nil {
 		return nil, err
@@ -434,7 +434,7 @@ func TestAgentTerminalLaunchSpecStale_DetectsBackendChange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build cached launch: %v", err)
 	}
-	existing := &tabmeta.TabMetadata{SessionName: "term_old", Launch: cachedLaunch}
+	existing := &webuiterminal.TabMetadata{SessionName: "term_old", Launch: cachedLaunch}
 
 	if agentTerminalLaunchSpecStale(ctx, st, "E2E", existing, agent) {
 		t.Fatal("with no workspace default backend, the cached spec matches what would be built — spec is fresh")
@@ -465,7 +465,7 @@ func TestAgentTerminalLaunchSpecStaleDetectsInteractivePromptFileChange(t *testi
 	if err != nil {
 		t.Fatalf("build cached launch: %v", err)
 	}
-	existing := &tabmeta.TabMetadata{SessionName: "term_old", Launch: cachedLaunch}
+	existing := &webuiterminal.TabMetadata{SessionName: "term_old", Launch: cachedLaunch}
 	if agentTerminalLaunchSpecStale(ctx, st, "E2E", existing, agent) {
 		t.Fatal("unchanged terminal prompt_file should not be stale")
 	}
@@ -487,7 +487,7 @@ func TestAgentTerminalLaunchSpecStale_NilLaunchTreatedStale(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
 	agent := &agents.RuntimeIdentity{WorkspaceKey: "E2E", AgentID: "nova", RoleName: "lead"}
-	existing := &tabmeta.TabMetadata{SessionName: "term_old", Launch: nil}
+	existing := &webuiterminal.TabMetadata{SessionName: "term_old", Launch: nil}
 	if !agentTerminalLaunchSpecStale(ctx, st, "E2E", existing, agent) {
 		t.Fatal("existing tab with nil Launch should be treated as stale")
 	}
@@ -524,7 +524,7 @@ func TestEnsureAgentTerminalSessionSerializesConcurrentCreates(t *testing.T) {
 
 	const workers = 24
 	start := make(chan struct{})
-	metas := make(chan *tabmeta.TabMetadata, workers)
+	metas := make(chan *webuiterminal.TabMetadata, workers)
 	errs := make(chan error, workers)
 	var wg sync.WaitGroup
 	for i := 0; i < workers; i++ {
@@ -633,7 +633,7 @@ func TestEnsureAgentTerminalSessionWaitsForStopLifecycleBoundary(t *testing.T) {
 		}
 	}()
 	type ensureResult struct {
-		meta *tabmeta.TabMetadata
+		meta *webuiterminal.TabMetadata
 		err  error
 	}
 	resultCh := make(chan ensureResult, 1)
@@ -982,7 +982,7 @@ func TestEnsureAgentTerminalSessionReturnsDisabledViewForStoppedCanonicalTab(t *
 	}
 
 	now := time.Now().UTC()
-	persisted := &tabmeta.TabMetadata{
+	persisted := &webuiterminal.TabMetadata{
 		SessionName:                  "term_operator_stopped",
 		Workspace:                    "E2E",
 		Label:                        "agent-operator-stopped",
@@ -991,7 +991,7 @@ func TestEnsureAgentTerminalSessionReturnsDisabledViewForStoppedCanonicalTab(t *
 		Role:                         "operator",
 		Backend:                      "codex",
 		Writable:                     true,
-		Launch:                       &tabmeta.LaunchSpec{Argv: []string{"sh", "-c", "loom lead"}},
+		Launch:                       &webuiterminal.LaunchSpec{Argv: []string{"sh", "-c", "loom lead"}},
 		InteractionSessionID:         "session-stopped",
 		InteractionTerminalID:        "terminal-stopped",
 		InteractionLeaseID:           "lease-stopped",
@@ -1224,7 +1224,7 @@ func TestEnsureAgentTerminalSessionRejectsWorkerWithExistingTerminalTab(t *testi
 	}
 
 	now := time.Now().UTC()
-	if err := tabStore.Set(ctx, &tabmeta.TabMetadata{
+	if err := tabStore.Set(ctx, &webuiterminal.TabMetadata{
 		SessionName: "term_worker_done",
 		Workspace:   "E2E",
 		Label:       "agent-worker-done",
@@ -1233,7 +1233,7 @@ func TestEnsureAgentTerminalSessionRejectsWorkerWithExistingTerminalTab(t *testi
 		Role:        "task",
 		Backend:     "codex",
 		Writable:    true,
-		Launch: &tabmeta.LaunchSpec{
+		Launch: &webuiterminal.LaunchSpec{
 			Argv: []string{"sh", "-c", "loom task worker-done --auto"},
 		},
 		CreatedAt: now,
@@ -1281,7 +1281,7 @@ func TestEnsureAgentTerminalSessionCreatesFreshTabForStaleRunningInteractiveAgen
 	}
 
 	oldTime := time.Now().UTC().Add(-time.Hour)
-	if err := tabStore.Set(ctx, &tabmeta.TabMetadata{
+	if err := tabStore.Set(ctx, &webuiterminal.TabMetadata{
 		SessionName: "term_worker_old",
 		Workspace:   "E2E",
 		Label:       "agent-lead-live",
@@ -1293,7 +1293,7 @@ func TestEnsureAgentTerminalSessionCreatesFreshTabForStaleRunningInteractiveAgen
 		Role:        "lead",
 		Backend:     "codex",
 		Writable:    true,
-		Launch: &tabmeta.LaunchSpec{
+		Launch: &webuiterminal.LaunchSpec{
 			Argv: []string{"sh", "-c", "loom lead"},
 		},
 		CreatedAt: oldTime,
@@ -1303,7 +1303,7 @@ func TestEnsureAgentTerminalSessionCreatesFreshTabForStaleRunningInteractiveAgen
 	}
 
 	type ensureResult struct {
-		meta *tabmeta.TabMetadata
+		meta *webuiterminal.TabMetadata
 		err  error
 	}
 	resultChannel := make(chan ensureResult, 1)

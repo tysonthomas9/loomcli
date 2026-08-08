@@ -20,10 +20,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/metricscmd"
-	"github.com/tysonthomas9/loomcli/internal/cli/serve/monitorwire"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/opsimpl"
-	"github.com/tysonthomas9/loomcli/internal/cli/serve/runtimecomposition"
-	"github.com/tysonthomas9/loomcli/internal/cli/serve/runtimewire"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/serveadapter"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr"
 	driverexecutor "github.com/tysonthomas9/loomcli/internal/driver"
@@ -198,8 +195,8 @@ func runServe(cmd *cobra.Command, args []string) {
 	// sessionhistory, terminal:ui-state) keep working. State is snapshotted
 	// to ~/.loom/terminal-state/snapshot.json every 30s and on shutdown.
 	if serveRedisAddr == "" {
-		if mgr := runtimewire.StartLocalRedis(ctx, serveFleetMode); mgr != nil {
-			fleetState.redisConfig = &runtimewire.FleetRedisConfig{Address: mgr.Addr()}
+		if mgr := startLocalRedis(ctx, serveFleetMode); mgr != nil {
+			fleetState.redisConfig = &fleetRedisConfig{Address: mgr.Addr()}
 		}
 	} else {
 		slog.Info("Redis: using external server", "addr", serveRedisAddr)
@@ -213,7 +210,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	// stale). When either is missing, the /stale-detector endpoint returns 404.
 	var staleDetectorHandler http.HandlerFunc
 	if serveFleetMode && serveRedisAddr != "" {
-		staleDetectorHandler = runtimewire.InitStaleDetectorHandler(ctx, serveRedisAddr, serveRedisPassword)
+		staleDetectorHandler = initStaleDetectorHandler(ctx, serveRedisAddr, serveRedisPassword)
 	}
 	initUsageStore()
 
@@ -235,7 +232,7 @@ func runServe(cmd *cobra.Command, args []string) {
 		storeHandle.FleetDBClientAPIKey(),
 		fleetState.clientCfg.Actor,
 	)
-	taskReadyCallbacks := runtimecomposition.BuildTaskReadyBridgeCallbacks(
+	taskReadyCallbacks := buildTaskReadyBridgeCallbacks(
 		storeHandle.Store.Repos(),
 		issueBackendFn,
 	)
@@ -263,18 +260,18 @@ func runServe(cmd *cobra.Command, args []string) {
 		log.Fatal("failed to compose outbox dispatcher: Interaction chat commands are required")
 	}
 	runtimeConfig := buildServeRuntimeConfig()
-	runtimecomposition.StartOutboxDispatcher(
+	startOutboxDispatcher(
 		ctx,
 		storeHandle.Store,
 		cfg.ExecutionCapability,
 		capabilities.interaction.ChatMessenger(),
 		runtimeConfig.WorkspaceScope,
 	)
-	stopRuntime, err := runtimecomposition.Start(
+	stopRuntime, err := startServeRuntime(
 		ctx,
 		storeHandle,
 		cfg,
-		runtimecomposition.Capabilities{
+		serveRuntimeCapabilities{
 			WorkflowCatalog: capabilities.workflowCatalog,
 			Automation:      capabilities.automation,
 			Runtime:         capabilities.runtime,
@@ -334,7 +331,7 @@ func buildMonitorCollectDataFn(workspaceHint string, issueBackendFn metricscmd.I
 	// one initial fetch and then uses workspace SSE mutations to trigger
 	// additional refreshes, so an unconditional server-side warmer just creates
 	// idle fleet-db fanout and OTEL spans.
-	return monitorwire.BuildCollectDataFn(workspaceHint, issueBackendFn, monitorCollectionCacheTTL)
+	return buildCollectDataFn(workspaceHint, issueBackendFn, monitorCollectionCacheTTL)
 }
 
 func resolveMonitorCollectorWorkspace(st store.Store, fallbackWorkspace string) string {
@@ -551,7 +548,7 @@ type fleetState struct {
 	modeDetected bool
 	clientCfg    config.FleetClientConfig
 	jwtKey       []byte
-	redisConfig  *runtimewire.FleetRedisConfig
+	redisConfig  *fleetRedisConfig
 }
 
 func resolveFleetState(ctx context.Context) fleetState {
@@ -569,7 +566,7 @@ func resolveFleetState(ctx context.Context) fleetState {
 		fs.clientCfg.Actor = resolveFleetClientActorFallback()
 	}
 
-	fs.jwtKey, fs.redisConfig = runtimewire.ResolveFleetJWTKey(ctx, serveRedisAddr, serveRedisPassword)
+	fs.jwtKey, fs.redisConfig = resolveFleetJWTKey(ctx, serveRedisAddr, serveRedisPassword)
 	return fs
 }
 
@@ -603,7 +600,7 @@ func warnNonLocalBind() {
 }
 
 func initUsageStore() {
-	usageHandler = monitorwire.BuildUsageHandler(cli.GetWorkspaceRuntimeDir())
+	usageHandler = buildUsageHandler(cli.GetWorkspaceRuntimeDir())
 }
 
 func buildMonitorHandlers(
@@ -614,7 +611,7 @@ func buildMonitorHandlers(
 	defaultWorkspace string,
 	monitorStoreDataSource *metricscmd.MonitorStoreDataSource,
 ) webui.MonitorHandlers {
-	return monitorwire.BuildHandlers(
+	return composeMonitorHandlers(
 		collectDataFn, staleDetectorHandler, issueBackendFn, defaultWorkspace, usageHandler,
 		monitorStoreDataSource, metricscmd.HandleWorkspaces(st), st.DriverRuns(),
 	)

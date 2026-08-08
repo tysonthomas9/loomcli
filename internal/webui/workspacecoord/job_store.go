@@ -306,7 +306,8 @@ func (s *WorkspaceJobRegistry) evictExpired() {
 }
 
 // sanitizeJobError extracts a user-facing message from a creation error.
-// If the error implements the createErrorer interface (matching workspaceerrors.CreateError),
+// If the error implements the createErrorer interface (matching the Workspace
+// capability's CreateError),
 // use its Message field. Otherwise return a generic message to avoid leaking internals.
 func sanitizeJobError(err error, fallback string) string {
 	type createErrorer interface {

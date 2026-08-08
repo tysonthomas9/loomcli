@@ -5,16 +5,16 @@ package serve
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/app/serve/automationcomposition"
-	"github.com/tysonthomas9/loomcli/internal/app/serve/operatorauth"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	catalogfleetdb "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
@@ -23,23 +23,6 @@ import (
 )
 
 const externalOperatorAuthorityTTL = time.Minute
-
-type WorkflowTarget = automationcomposition.WorkflowTarget
-type WorkflowTargetPreparation = automationcomposition.WorkflowTargetPreparation
-type WorkflowTargetPreparationFactory = automationcomposition.WorkflowTargetPreparationFactory
-type AutomationCapability = automationcomposition.AutomationCapability
-type AutomationBindingOperations = automationcomposition.AutomationBindingOperations
-type AutomationAuditQueries = automationcomposition.AutomationAuditQueries
-
-// OperatorAuthorityResolver is the sole request-authority port required by
-// Workflow Catalog composition.
-type OperatorAuthorityResolver = operatorauth.OperatorAuthorityResolver
-
-// ExternalOperatorResolverFactory keeps identity-middleware adaptation at the
-// outer server boundary while the application root retains ownership of its
-// authority issuer. unauthenticated is the Workflow Catalog transport's
-// sentinel and must be returned for an absent verified identity.
-type ExternalOperatorResolverFactory = operatorauth.ExternalOperatorResolverFactory
 
 // RouteModule is the only value the web server needs from capability
 // composition. Keeping this interface here prevents webui from learning about
@@ -58,13 +41,13 @@ type WorkflowCatalogCapability struct {
 	authoring        workflowcatalog.VersionAuthoringAPI
 	issuer           *authority.Issuer
 	operatorResolver httpapi.OperatorAuthorityResolver
-	automation       *automationcomposition.AutomationCapability
+	automation       *AutomationCapability
 	// automationAwaitResolver is bound only after the shared Execution
 	// capability has been composed. Automation is assembled with Workflow
 	// Catalog earlier in startup, so this private, fail-closed indirection keeps
 	// its synchronous await fast path on the typed Execution command without
 	// exposing an issuer, Store, or mutable resolver to either capability.
-	automationAwaitResolver *automationcomposition.ExecutionAwaitResolverBinding
+	automationAwaitResolver *ExecutionAwaitResolverBinding
 }
 
 func (catalog *WorkflowCatalogCapability) Register(mux *http.ServeMux) {
@@ -247,7 +230,7 @@ type WorkflowCatalogConfig struct {
 	AutomationDriverRuns      store.DriverRunStore
 	AutomationAwaits          store.AwaitStore
 	AutomationWorkspaces      store.WorkspaceStore
-	AutomationWebhookVerifier automationcomposition.WebhookVerifier
+	AutomationWebhookVerifier WebhookVerifier
 	// PrepareWorkflowTarget is held only by the temporary composition adapter
 	// around legacy builtin materialization. It never enters Automation or an
 	// HTTP handler and returns only the prepared target identity.
@@ -307,14 +290,14 @@ func validateWorkflowCatalogHTTPConfig(config WorkflowCatalogConfig) error {
 }
 
 func composeWorkflowCatalogAutomation(config WorkflowCatalogConfig, capability *WorkflowCatalogCapability) error {
-	automationCapability, awaitResolver, err := automationcomposition.ComposeWorkflowCatalogAutomation(
-		automationcomposition.WorkflowCatalogConfig{
+	automationCapability, awaitResolver, err := ComposeWorkflowCatalogAutomation(
+		automationWorkflowCatalogConfig{
 			Workspace: config.Workspace, FleetDBClient: config.FleetDBClient,
 			DriverRuns: config.AutomationDriverRuns, Awaits: config.AutomationAwaits,
 			Workspaces:            config.AutomationWorkspaces,
 			WebhookVerifier:       config.AutomationWebhookVerifier,
 			PrepareWorkflowTarget: config.PrepareWorkflowTarget,
-			Catalog: automationcomposition.CatalogOwner{
+			Catalog: CatalogOwner{
 				Issuer: capability.issuer, EffectiveVersions: capability.EffectiveVersionResolver(),
 				EffectiveVersionAuthority: func(
 					_ context.Context,
@@ -398,15 +381,120 @@ func workflowCatalogOperatorActions() []authority.Action {
 	}
 }
 
-func automationOperatorActions() []authority.Action {
-	return automationcomposition.OperatorActions()
-}
-
-const localOpenOperatorSubject = operatorauth.LocalOpenOperatorSubject
+const localOpenOperatorSubject = LocalOpenOperatorSubject
 
 func newLocalOpenOperatorResolver(
 	issuer *authority.Issuer,
 	actions ...authority.Action,
-) (*operatorauth.LocalOpenOperatorResolver, error) {
-	return operatorauth.NewLocalOpenOperatorResolver(issuer, actions...)
+) (*LocalOpenOperatorResolver, error) {
+	return NewLocalOpenOperatorResolver(issuer, actions...)
+}
+
+// NewSourceControlCapability composes Source Control with the catalog-owned
+// authority seal without publishing that seal outside the serve root.
+func (catalog *WorkflowCatalogCapability) NewSourceControlCapability(
+	localSettingsDir string,
+	repositories sourcecontrol.RepositoryResolver,
+) (*SourceControlCapability, error) {
+	var issuer = catalogIssuer(catalog)
+	return NewSourceControlCapability(localSettingsDir, repositories, issuer)
+}
+
+// NewSourceControlCapabilityWithFleetDB composes the complete Source Control
+// and Connectors boundary against the catalog-owned authority seal.
+func (catalog *WorkflowCatalogCapability) NewSourceControlCapabilityWithFleetDB(
+	localSettingsDir string,
+	repositories sourcecontrol.RepositoryResolver,
+	client *infrafleetdb.Client,
+) (*SourceControlCapability, error) {
+	return NewSourceControlCapabilityWithFleetDB(
+		localSettingsDir,
+		repositories,
+		client,
+		catalogIssuer(catalog),
+	)
+}
+
+// NewAgentProvisioningCapability supplies only the exact owner issuers needed
+// by the cross-aggregate provisioning process.
+func (capability *AgentsCapability) NewAgentProvisioningCapability(
+	catalog *WorkflowCatalogCapability,
+	sourceControl *SourceControlCapability,
+	client *infrafleetdb.Client,
+	config AgentProvisioningConfig,
+) (*AgentProvisioningCapability, error) {
+	owners := AgentProvisioningOwners{}
+	if catalog != nil && catalog.automation != nil &&
+		catalog.automation.BindingOperations() != nil {
+		owners.AutomationIssuer = catalog.issuer
+	}
+	if sourceControl != nil {
+		owners.ConnectorsIssuer = sourceControl.issuer
+	}
+	return capability.newAgentProvisioningCapabilityWithOwners(client, config, owners)
+}
+
+// NewInteractionCapability shares the catalog-owned authority seal with
+// Interaction without exposing the issuer itself.
+func (catalog *WorkflowCatalogCapability) NewInteractionCapability(
+	config InteractionConfig,
+	dependencies InteractionDependencies,
+) (*InteractionCapability, error) {
+	return NewInteractionCapabilityWithIssuer(config, dependencies, catalogIssuer(catalog))
+}
+
+// NewInteractionCapabilityWithFleetDB composes the complete production
+// Interaction boundary against the catalog-owned authority seal.
+func (catalog *WorkflowCatalogCapability) NewInteractionCapabilityWithFleetDB(
+	config InteractionConfig,
+	client *infrafleetdb.Client,
+) (*InteractionCapability, error) {
+	return NewInteractionCapabilityWithFleetDBIssuer(config, client, catalogIssuer(catalog))
+}
+
+func (catalog *WorkflowCatalogCapability) NewInteractionSessionAuthorityResolver(
+	client *infrafleetdb.Client,
+) (InteractionSessionAuthorityResolver, error) {
+	return NewInteractionSessionAuthorityResolver(client, catalogIssuer(catalog))
+}
+
+func catalogIssuer(catalog *WorkflowCatalogCapability) *authority.Issuer {
+	if catalog == nil {
+		return nil
+	}
+	return catalog.issuer
+}
+
+type workflowCatalogRuntimeComponent string
+
+const (
+	// Keep this ID synchronized with the canonical component registration in
+	// internal/archtest/testdata/runtime-components.yaml.
+	workflowCatalogCronSchedulerComponent       workflowCatalogRuntimeComponent = "serve-trigger-cron-scheduler"
+	workflowCatalogBuiltinDistributionComponent workflowCatalogRuntimeComponent = "workflow-catalog-builtin-distribution"
+)
+
+var (
+	errUnregisteredWorkflowCatalogRuntimeComponent = errors.New("workflow catalog: unregistered runtime component")
+
+	workflowCatalogEffectiveVersionRuntimeComponents = map[workflowCatalogRuntimeComponent]struct{}{
+		workflowCatalogCronSchedulerComponent: {},
+	}
+	workflowCatalogManagedAuthoringComponents = map[workflowCatalogRuntimeComponent]struct{}{
+		workflowCatalogBuiltinDistributionComponent: {},
+	}
+)
+
+func validateWorkflowCatalogRuntimeComponent(component workflowCatalogRuntimeComponent) error {
+	if _, ok := workflowCatalogEffectiveVersionRuntimeComponents[component]; !ok {
+		return fmt.Errorf("%w: %q", errUnregisteredWorkflowCatalogRuntimeComponent, component)
+	}
+	return nil
+}
+
+func validateWorkflowCatalogManagedAuthoringComponent(component workflowCatalogRuntimeComponent) error {
+	if _, ok := workflowCatalogManagedAuthoringComponents[component]; !ok {
+		return fmt.Errorf("%w: %q", errUnregisteredWorkflowCatalogRuntimeComponent, component)
+	}
+	return nil
 }

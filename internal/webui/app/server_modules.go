@@ -4,13 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/tysonthomas9/loomcli/internal/webui/app/capabilitycomposition"
-	"github.com/tysonthomas9/loomcli/internal/webui/appinfra"
-	"github.com/tysonthomas9/loomcli/internal/webui/appstores"
-	"github.com/tysonthomas9/loomcli/internal/webui/handlermux"
 	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
-	webuilog "github.com/tysonthomas9/loomcli/internal/webui/log"
-	"github.com/tysonthomas9/loomcli/internal/webui/modbuilder"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
@@ -22,9 +16,9 @@ func (app *Server) buildModules() {
 	storeBacked := app.config.Store != nil
 
 	// Core workspace operations use the workflow-catalog IssueBackend port.
-	opsModule := handlermux.NewWorkspaceOpsModule(app.workspaceSvc, nil).WithWorkItems(app.workItems)
+	opsModule := NewWorkspaceOpsModule(app.workspaceSvc, nil).WithWorkItems(app.workItems)
 	if app.workspaceCatalog != nil && app.workspaceStore != nil && app.workspaceSvc != nil {
-		workspaceProjection := capabilitycomposition.NewWorkspaceHTTPProjection(app.workspaceStore, app.workspaceSvc)
+		workspaceProjection := NewWorkspaceHTTPProjection(app.workspaceStore, app.workspaceSvc)
 		opsModule = opsModule.WithWorkspaceCatalog(app.workspaceCatalog, workspaceProjection)
 	}
 	if app.config.IssueBackendFn != nil {
@@ -45,15 +39,15 @@ func (app *Server) buildModules() {
 
 	// Issue + session modules
 	app.wsModules = append(app.wsModules,
-		modbuilder.NewIssueModules(app.workItems, app.workItemMover, app.sessSvc)...)
+		NewIssueModules(app.workItems, app.workItemMover, app.sessSvc)...)
 
 	// Log module (always added — handles nil agentSvc gracefully)
-	app.wsModules = append(app.wsModules, webuilog.NewModule(app.agentSvc))
+	app.wsModules = append(app.wsModules, NewLogModule(app.agentSvc))
 
 	// SSE subscription
 	if app.hub != nil {
 		app.wsModules = append(app.wsModules,
-			appstores.NewSubscriptionModule(app.hub, app.getMutationsSince,
+			NewSubscriptionModule(app.hub, app.getMutationsSince,
 				middleware.WorkspaceFromContext, app.activateSSESubscriber, app.sseTokens))
 	}
 
@@ -66,10 +60,10 @@ func (app *Server) buildModules() {
 func (app *Server) buildTerminalModules() {
 	if app.termSvc != nil {
 		app.wsModules = append(app.wsModules,
-			capabilitycomposition.NewTerminalModules(
+			NewTerminalModules(
 				app.config.AgentsCapability,
 				app.config.InteractionCapability,
-				modbuilder.TerminalModuleDeps{
+				TerminalModuleDeps{
 					TermSvc:         app.termSvc,
 					AgentSvc:        app.agentSvc,
 					PTYMgr:          app.ptyMgr,
@@ -87,7 +81,7 @@ func (app *Server) buildTerminalModules() {
 
 	if app.issueTabStore != nil {
 		app.wsModules = append(app.wsModules,
-			modbuilder.NewIssueTabModule(app.issueTabStore, app.hub))
+			NewIssueTabModule(app.issueTabStore, app.hub))
 	}
 }
 
@@ -98,16 +92,16 @@ func (app *Server) buildInfraModules() {
 
 	if app.fleetRegistry != nil {
 		app.wsModules = append(app.wsModules,
-			appinfra.NewFleetModule(app.fleetRegistry, app.tokenCfg,
+			NewFleetModule(app.fleetRegistry, app.tokenCfg,
 				app.config.IssueBackendFn, app.claimMetrics, app.fleetRegCfg))
 	}
 
 	if app.diffSvc != nil {
-		app.wsModules = append(app.wsModules, modbuilder.NewDiffModule(app.agentSvc, app.diffSvc))
+		app.wsModules = append(app.wsModules, NewDiffModule(app.agentSvc, app.diffSvc))
 	}
 
 	if app.fileSvc != nil {
-		app.wsModules = append(app.wsModules, modbuilder.NewFileModule(app.fileSvc, middleware.FileAccessConfig{
+		app.wsModules = append(app.wsModules, NewFileModule(app.fileSvc, middleware.FileAccessConfig{
 			RemoteAuth:      app.config.ExtAuthURL != "",
 			ResolveRole:     app.config.WorkspaceRoleResolver,
 			FrontendOrigins: app.config.FrontendOrigins,
@@ -125,12 +119,12 @@ func (app *Server) buildInfraModules() {
 func (app *Server) buildStoreBackedInfraModules() {
 	app.connectorDispatcher = app.buildConnectorDispatcher()
 	unifiedDeps := app.unifiedAgentModuleDeps()
-	app.wsModules = append(app.wsModules, modbuilder.NewUnifiedAgentModules(unifiedDeps)...)
+	app.wsModules = append(app.wsModules, NewUnifiedAgentModules(unifiedDeps)...)
 	app.buildPRReviewModule()
 }
 
-func (app *Server) unifiedAgentModuleDeps() modbuilder.UnifiedAgentModuleDeps {
-	deps := modbuilder.UnifiedAgentModuleDeps{
+func (app *Server) unifiedAgentModuleDeps() UnifiedAgentModuleDeps {
+	deps := UnifiedAgentModuleDeps{
 		Store: app.config.Store, InteractiveAgentRuntime: app.agentRuntime,
 		WorkItems: app.workItems, Hub: app.hub,
 		FleetBaseURL: app.config.FleetDBBaseURL, DriverAPIBaseURL: app.config.DriverAPIBaseURL,
@@ -150,12 +144,12 @@ func (app *Server) unifiedAgentModuleDeps() modbuilder.UnifiedAgentModuleDeps {
 	if capability := app.config.ArtifactsCapability; capability != nil {
 		deps.Artifacts = capability.ArtifactsAPI()
 	}
-	capabilitycomposition.PopulateUnifiedAgentCapabilityDeps(app.config, &deps)
+	PopulateUnifiedAgentCapabilityDeps(app.config, &deps)
 	return deps
 }
 
 func (app *Server) buildPRReviewModule() {
-	prReviewModule := capabilitycomposition.NewPRReviewModule(
+	prReviewModule := NewPRReviewModule(
 		app.config,
 		app.connectorDispatcher,
 		app.agentSvc,

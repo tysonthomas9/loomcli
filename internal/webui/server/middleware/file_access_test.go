@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/webui/fileaccess"
+	"github.com/tysonthomas9/loomcli/internal/webui/filecoord"
 )
 
 func TestFileAccessRemoteRequiresIdentityAndWorkspaceResolver(t *testing.T) {
@@ -93,17 +93,17 @@ func TestFileAccessViewerReadsAndSearchesButCannotWrite(t *testing.T) {
 func TestFileAccessInstallsRoleCapabilities(t *testing.T) {
 	for _, tc := range []struct {
 		role string
-		want fileaccess.Capabilities
+		want filecoord.FileCapabilities
 	}{
-		{role: "viewer", want: fileaccess.Capabilities{Read: true}},
-		{role: "editor", want: fileaccess.Capabilities{Read: true, Write: true, Sensitive: true}},
-		{role: "admin", want: fileaccess.Capabilities{Read: true, Write: true, Sensitive: true}},
+		{role: "viewer", want: filecoord.FileCapabilities{Read: true}},
+		{role: "editor", want: filecoord.FileCapabilities{Read: true, Write: true, Sensitive: true}},
+		{role: "admin", want: filecoord.FileCapabilities{Read: true, Write: true, Sensitive: true}},
 	} {
 		t.Run(tc.role, func(t *testing.T) {
-			var got fileaccess.Capabilities
+			var got filecoord.FileCapabilities
 			cfg := FileAccessConfig{RemoteAuth: true, ResolveRole: func(context.Context, string, UserIdentity) (string, error) { return tc.role, nil }}
 			h := FileAccess(cfg)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				got, _ = fileaccess.FromContext(r.Context())
+				got, _ = filecoord.FileCapabilitiesFromContext(r.Context())
 				w.WriteHeader(http.StatusNoContent)
 			}))
 			req := httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/files/capabilities", nil)

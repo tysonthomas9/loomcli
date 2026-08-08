@@ -2,8 +2,8 @@ package fleet
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"time"
 
@@ -36,9 +36,9 @@ func handleFleetClaim(backendFn IssueBackendFn, claimMetrics *ClaimMetrics) http
 			return
 		}
 		var req FleetClaimRequest
-		if r.Body != nil && r.ContentLength > 0 {
-			r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if r.Body != nil {
+			err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{MaxBytes: handler.MaxRequestBody})
+			if err != nil && !errors.Is(err, io.EOF) {
 				var maxBytesErr *http.MaxBytesError
 				if errors.As(err, &maxBytesErr) {
 					handler.WriteJSON(w, http.StatusRequestEntityTooLarge, FleetClaimResponse{Error: "request body too large (max 1MB)"})

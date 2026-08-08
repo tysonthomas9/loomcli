@@ -16,7 +16,6 @@ import (
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
-	"github.com/tysonthomas9/loomcli/internal/workspaceerrors"
 )
 
 type plannedCloneRepo struct {
@@ -71,8 +70,8 @@ func materializeAddReposClones(
 	}
 	if materializer == nil {
 		cleanupAttachedWorktrees(created)
-		return nil, nil, workspaceerrors.New(
-			workspaceerrors.SecurityViolation,
+		return nil, nil, workspacemodule.NewCreateError(
+			workspacemodule.SecurityViolation,
 			"repository clone requires the Source Control capability",
 			sourcecontrol.ErrUnavailable,
 		)
@@ -113,8 +112,8 @@ func materializeAddReposClones(
 		)
 		if err != nil {
 			rollback()
-			return nil, nil, workspaceerrors.New(
-				workspaceerrors.GitFailed,
+			return nil, nil, workspacemodule.NewCreateError(
+				workspacemodule.GitFailed,
 				fmt.Sprintf("materialize repository %q through Source Control", repository.name),
 				err,
 			)
@@ -129,8 +128,8 @@ func materializeAddReposClones(
 			receipt.RepositoryRef != repository.sourceRepoID ||
 			filepath.Clean(receipt.CheckoutPath) != expectedPath {
 			rollback()
-			return nil, nil, workspaceerrors.New(
-				workspaceerrors.SecurityViolation,
+			return nil, nil, workspacemodule.NewCreateError(
+				workspacemodule.SecurityViolation,
 				fmt.Sprintf("Source Control returned divergent checkout coordinates for %q", repository.name),
 				sourcecontrol.ErrInvalidMaterialization,
 			)
@@ -147,8 +146,8 @@ func materializeAddReposClones(
 		defaultBranch, err := detectRepoDefaultBranch(receipt.CheckoutPath)
 		if err != nil {
 			rollback()
-			return nil, nil, workspaceerrors.New(
-				workspaceerrors.GitFailed,
+			return nil, nil, workspacemodule.NewCreateError(
+				workspacemodule.GitFailed,
 				fmt.Sprintf("detect default branch for cloned repo %q", repository.name),
 				err,
 			)
@@ -165,8 +164,8 @@ func materializeAddReposClones(
 	}
 	if err := applyRequestedCloneBranch(cloned, requestedBranch); err != nil {
 		rollback()
-		return nil, nil, workspaceerrors.New(
-			workspaceerrors.GitFailed,
+		return nil, nil, workspacemodule.NewCreateError(
+			workspacemodule.GitFailed,
 			"validate cloned repository default branch",
 			err,
 		)
@@ -188,8 +187,8 @@ func planCloneRepos(cloneURLs []string, seen map[string]bool) ([]plannedCloneRep
 	for _, rawRemote := range cloneURLs {
 		remoteURL, err := sourcecontrol.ValidateTokenFreeRemote(rawRemote)
 		if err != nil {
-			return nil, workspaceerrors.New(
-				workspaceerrors.SecurityViolation,
+			return nil, workspacemodule.NewCreateError(
+				workspacemodule.SecurityViolation,
 				"repository remote must be canonical and credential-free",
 				err,
 			)
@@ -282,8 +281,8 @@ func createStoreRepo(ctx context.Context, catalog workspacemodule.API, key, bran
 		SourceRepoID:       r.SourceRepoID,
 	}); err != nil {
 		if errors.Is(err, workspacemodule.ErrConflict) {
-			return workspaceerrors.New(
-				workspaceerrors.AlreadyExists,
+			return workspacemodule.NewCreateError(
+				workspacemodule.AlreadyExists,
 				fmt.Sprintf("repository name %q is already registered in this workspace", r.Name),
 				err,
 			)
@@ -303,7 +302,7 @@ func localWorkspacePath(key string) (string, error) {
 			return local.Path, nil
 		}
 	}
-	return "", workspaceerrors.New(workspaceerrors.PathNotFound, fmt.Sprintf("workspace %q has no local path; open it on this machine before adding repos", key), nil)
+	return "", workspacemodule.NewCreateError(workspacemodule.PathNotFound, fmt.Sprintf("workspace %q has no local path; open it on this machine before adding repos", key), nil)
 }
 
 func persistentGitRemoteURL(repoPath, remote string) (string, error) {
@@ -319,8 +318,8 @@ func persistentGitRemoteURL(repoPath, remote string) (string, error) {
 		if !filepath.IsAbs(sourcePath) ||
 			sourcePath == "." ||
 			sourcePath == string(filepath.Separator) {
-			return "", workspaceerrors.New(
-				workspaceerrors.SecurityViolation,
+			return "", workspacemodule.NewCreateError(
+				workspacemodule.SecurityViolation,
 				fmt.Sprintf("repository %q source path is unsafe", filepath.Base(repoPath)),
 				err,
 			)
@@ -333,8 +332,8 @@ func persistentGitRemoteURL(repoPath, remote string) (string, error) {
 	}
 	validated, err := sourcecontrol.ValidateTokenFreeRemote(remoteURL)
 	if err != nil {
-		return "", workspaceerrors.New(
-			workspaceerrors.SecurityViolation,
+		return "", workspacemodule.NewCreateError(
+			workspacemodule.SecurityViolation,
 			fmt.Sprintf("repository %q remote must be credential-free", filepath.Base(repoPath)),
 			err,
 		)
@@ -347,8 +346,8 @@ func persistentGitRemoteURLWithoutConfiguredRemote(repoPath string) (string, err
 	if !filepath.IsAbs(sourcePath) ||
 		sourcePath == "." ||
 		sourcePath == string(filepath.Separator) {
-		return "", workspaceerrors.New(
-			workspaceerrors.SecurityViolation,
+		return "", workspacemodule.NewCreateError(
+			workspacemodule.SecurityViolation,
 			fmt.Sprintf("repository %q source path is unsafe", filepath.Base(repoPath)),
 			nil,
 		)

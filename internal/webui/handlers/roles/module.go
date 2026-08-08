@@ -7,7 +7,6 @@ package roles
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -442,7 +441,7 @@ func (m *Module) createRole(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req createRoleRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRoleBodyBytes)).Decode(&req); err != nil {
+	if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{MaxBytes: maxRoleBodyBytes}); err != nil {
 		handler.RespondError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
@@ -524,7 +523,7 @@ func (m *Module) updateRole(w http.ResponseWriter, r *http.Request) { //nolint:f
 		return
 	}
 	var req updateRoleRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRoleBodyBytes)).Decode(&req); err != nil {
+	if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{MaxBytes: maxRoleBodyBytes}); err != nil {
 		handler.RespondError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
@@ -604,7 +603,7 @@ func (m *Module) cloneRole(w http.ResponseWriter, r *http.Request) { //nolint:fu
 		return
 	}
 	var req cloneRoleRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRoleBodyBytes)).Decode(&req); err != nil {
+	if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{MaxBytes: maxRoleBodyBytes}); err != nil {
 		handler.RespondError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
@@ -802,13 +801,15 @@ func (m *Module) resolveOperator(
 }
 
 func writeRoleError(w http.ResponseWriter, err error, fallback string) {
+	if classification, ok := handler.ClassifyAuthenticationAuthorityError(err); ok {
+		message := "operator authentication required"
+		if classification.Status == http.StatusForbidden {
+			message = "operator is not allowed to manage this workspace"
+		}
+		handler.RespondError(w, classification.Status, message)
+		return
+	}
 	switch {
-	case errors.Is(err, workflowcataloghttp.ErrUnauthenticated):
-		handler.RespondError(w, http.StatusUnauthorized, "operator authentication required")
-	case errors.Is(err, authority.ErrWorkspaceMismatch),
-		errors.Is(err, authority.ErrAdmissionDenied),
-		errors.Is(err, authority.ErrActionNotAllowed):
-		handler.RespondError(w, http.StatusForbidden, "operator is not allowed to manage this workspace")
 	case errors.Is(err, agents.ErrInvalid), errors.Is(err, domain.ErrInvalid):
 		handler.RespondError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, agents.ErrNotFound), errors.Is(err, domain.ErrNotFound):

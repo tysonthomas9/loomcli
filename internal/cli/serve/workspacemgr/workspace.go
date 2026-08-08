@@ -13,8 +13,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr/workspacematerialization"
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
-	"github.com/tysonthomas9/loomcli/internal/workspaceerrors"
 )
 
 type workspaceDirPlan struct {
@@ -35,7 +35,7 @@ func resolveWorkspaceDirForCreate(reqPath, wsName string) (workspaceDirPlan, err
 
 	absDir, err := filepath.Abs(filepath.Clean(wsDir))
 	if err != nil {
-		return workspaceDirPlan{}, workspaceerrors.New(workspaceerrors.PathNotFound, fmt.Sprintf("cannot resolve workspace path %q", wsDir), err)
+		return workspaceDirPlan{}, workspacemodule.NewCreateError(workspacemodule.PathNotFound, fmt.Sprintf("cannot resolve workspace path %q", wsDir), err)
 	}
 	if err := validateWorkspaceCreatePath(absDir); err != nil {
 		return workspaceDirPlan{}, err
@@ -64,21 +64,21 @@ func validateWorkspaceCreatePath(wsDir string) error {
 
 	if info, err := os.Stat(wsDir); err == nil {
 		if !info.IsDir() {
-			return workspaceerrors.New(workspaceerrors.PathNotFound, fmt.Sprintf("workspace path is not a directory: %s", wsDir), nil)
+			return workspacemodule.NewCreateError(workspacemodule.PathNotFound, fmt.Sprintf("workspace path is not a directory: %s", wsDir), nil)
 		}
 		if _, err := os.Stat(filepath.Join(wsDir, ".git")); err == nil {
-			return workspaceerrors.New(workspaceerrors.SecurityViolation, fmt.Sprintf("workspace path must not be an existing git repository: %s", wsDir), nil)
+			return workspacemodule.NewCreateError(workspacemodule.SecurityViolation, fmt.Sprintf("workspace path must not be an existing git repository: %s", wsDir), nil)
 		}
 		empty, err := dirIsEmpty(wsDir)
 		if err != nil {
-			return workspaceerrors.New(workspaceerrors.PathNotFound, fmt.Sprintf("cannot inspect workspace path: %s", wsDir), err)
+			return workspacemodule.NewCreateError(workspacemodule.PathNotFound, fmt.Sprintf("cannot inspect workspace path: %s", wsDir), err)
 		}
 		if !empty {
-			return workspaceerrors.New(workspaceerrors.SecurityViolation, fmt.Sprintf("workspace path must be empty or not exist: %s", wsDir), nil)
+			return workspacemodule.NewCreateError(workspacemodule.SecurityViolation, fmt.Sprintf("workspace path must be empty or not exist: %s", wsDir), nil)
 		}
 		return nil
 	} else if !os.IsNotExist(err) {
-		return workspaceerrors.New(workspaceerrors.PathNotFound, fmt.Sprintf("cannot inspect workspace path: %s", wsDir), err)
+		return workspacemodule.NewCreateError(workspacemodule.PathNotFound, fmt.Sprintf("cannot inspect workspace path: %s", wsDir), err)
 	}
 
 	parent := filepath.Dir(wsDir)
@@ -87,10 +87,10 @@ func validateWorkspaceCreatePath(wsDir string) error {
 	}
 	info, err := os.Stat(parent)
 	if err != nil {
-		return workspaceerrors.New(workspaceerrors.PathNotFound, fmt.Sprintf("workspace parent directory does not exist: %s", parent), err)
+		return workspacemodule.NewCreateError(workspacemodule.PathNotFound, fmt.Sprintf("workspace parent directory does not exist: %s", parent), err)
 	}
 	if !info.IsDir() {
-		return workspaceerrors.New(workspaceerrors.PathNotFound, fmt.Sprintf("workspace parent path is not a directory: %s", parent), nil)
+		return workspacemodule.NewCreateError(workspacemodule.PathNotFound, fmt.Sprintf("workspace parent path is not a directory: %s", parent), nil)
 	}
 	return nil
 }
@@ -127,32 +127,32 @@ func resolveRepoPaths(repoPaths []string) ([]resolvedRepo, error) {
 
 		absPath, err := filepath.Abs(rp)
 		if err != nil {
-			return nil, workspaceerrors.New(workspaceerrors.PathNotFound, fmt.Sprintf("cannot resolve path %q", rp), err)
+			return nil, workspacemodule.NewCreateError(workspacemodule.PathNotFound, fmt.Sprintf("cannot resolve path %q", rp), err)
 		}
 
 		info, err := os.Stat(absPath)
 		if err != nil {
-			return nil, workspaceerrors.New(workspaceerrors.PathNotFound, fmt.Sprintf("repo path does not exist: %s", absPath), err)
+			return nil, workspacemodule.NewCreateError(workspacemodule.PathNotFound, fmt.Sprintf("repo path does not exist: %s", absPath), err)
 		}
 		if !info.IsDir() {
-			return nil, workspaceerrors.New(workspaceerrors.PathNotFound, fmt.Sprintf("repo path is not a directory: %s", absPath), nil)
+			return nil, workspacemodule.NewCreateError(workspacemodule.PathNotFound, fmt.Sprintf("repo path is not a directory: %s", absPath), nil)
 		}
 
 		gitDir := filepath.Join(absPath, ".git")
 		if _, err := os.Stat(gitDir); err != nil {
-			return nil, workspaceerrors.New(workspaceerrors.NotGitRepo, fmt.Sprintf("not a git repository: %s", absPath), err)
+			return nil, workspacemodule.NewCreateError(workspacemodule.NotGitRepo, fmt.Sprintf("not a git repository: %s", absPath), err)
 		}
 
 		baseName := filepath.Base(absPath)
 		if prev, exists := seenNames[baseName]; exists {
-			return nil, workspaceerrors.New(workspaceerrors.PathNotFound, fmt.Sprintf("duplicate repo name %q from paths %s and %s", baseName, prev, absPath), nil)
+			return nil, workspacemodule.NewCreateError(workspacemodule.PathNotFound, fmt.Sprintf("duplicate repo name %q from paths %s and %s", baseName, prev, absPath), nil)
 		}
 		seenNames[baseName] = absPath
 		resolved = append(resolved, resolvedRepo{path: absPath, name: baseName})
 	}
 
 	if len(resolved) == 0 {
-		return nil, workspaceerrors.New(workspaceerrors.PathNotFound, "no valid repos specified", nil)
+		return nil, workspacemodule.NewCreateError(workspacemodule.PathNotFound, "no valid repos specified", nil)
 	}
 	return resolved, nil
 }
@@ -191,8 +191,8 @@ func addWorktreesWithRepoDefault(
 		worktreePath := filepath.Join(wsDir, repo.name)
 		repoConfig, err := worktreeRepoConfig(repo, worktreePath, defaultBranchOverride)
 		if err != nil {
-			return created, nil, workspaceerrors.New(
-				workspaceerrors.GitFailed,
+			return created, nil, workspacemodule.NewCreateError(
+				workspacemodule.GitFailed,
 				fmt.Sprintf("detect default branch for local repo %q", repo.name),
 				err,
 			)
@@ -200,7 +200,7 @@ func addWorktreesWithRepoDefault(
 		worktree, err := createWorkspaceWorktree(repo, worktreePath, worktreeBranch)
 		if err != nil {
 			if errors.Is(err, workspacematerialization.ErrRepositoryNotUsable) {
-				return created, nil, workspaceerrors.New(workspaceerrors.GitFailed, fmt.Sprintf("source repo is not usable for %s", repo.name), err)
+				return created, nil, workspacemodule.NewCreateError(workspacemodule.GitFailed, fmt.Sprintf("source repo is not usable for %s", repo.name), err)
 			}
 			warnSkippedWorktree(ctx, repo.name, worktreePath, err)
 			continue
@@ -338,21 +338,21 @@ func validateWorkspacePath(wsDir string) error {
 	wsDir = filepath.Clean(expandUserPath(wsDir))
 	absDir, err := filepath.Abs(wsDir)
 	if err != nil {
-		return workspaceerrors.New(workspaceerrors.PathNotFound, fmt.Sprintf("cannot resolve workspace path %q", wsDir), err)
+		return workspacemodule.NewCreateError(workspacemodule.PathNotFound, fmt.Sprintf("cannot resolve workspace path %q", wsDir), err)
 	}
 	volumeRoot := filepath.VolumeName(absDir) + string(filepath.Separator)
 	if absDir == volumeRoot {
-		return workspaceerrors.New(workspaceerrors.SecurityViolation, fmt.Sprintf("workspace path is too broad: %s", absDir), nil)
+		return workspacemodule.NewCreateError(workspacemodule.SecurityViolation, fmt.Sprintf("workspace path is too broad: %s", absDir), nil)
 	}
 	if home, err := os.UserHomeDir(); err == nil && home != "" && absDir == filepath.Clean(home) {
-		return workspaceerrors.New(workspaceerrors.SecurityViolation, fmt.Sprintf("workspace path is too broad: %s", absDir), nil)
+		return workspacemodule.NewCreateError(workspacemodule.SecurityViolation, fmt.Sprintf("workspace path is too broad: %s", absDir), nil)
 	}
 	configDir := filepath.Clean(config.GetConfigDir())
 	if absConfigDir, err := filepath.Abs(configDir); err == nil && absDir == absConfigDir {
-		return workspaceerrors.New(workspaceerrors.SecurityViolation, fmt.Sprintf("workspace path is too broad: %s", absDir), nil)
+		return workspacemodule.NewCreateError(workspacemodule.SecurityViolation, fmt.Sprintf("workspace path is too broad: %s", absDir), nil)
 	}
 	if absDir == defaultWorkspaceBase() {
-		return workspaceerrors.New(workspaceerrors.SecurityViolation, fmt.Sprintf("workspace path must be a workspace-specific folder under %s", defaultWorkspaceBase()), nil)
+		return workspacemodule.NewCreateError(workspacemodule.SecurityViolation, fmt.Sprintf("workspace path must be a workspace-specific folder under %s", defaultWorkspaceBase()), nil)
 	}
 	return nil
 }

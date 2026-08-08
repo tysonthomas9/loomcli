@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -36,6 +37,14 @@ func TestBuildLeafRunnerEnvFiltersForgeAndControlPlaneCredentials(t *testing.T) 
 	}
 	if got["LOOM_TASK_RUN_LEASE_TOKEN"] != "task-scoped-token" {
 		t.Fatalf("task-scoped credential missing from leaf envelope: %#v", got)
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatalf("resolve test executable: %v", err)
+	}
+	wantPathPrefix := filepath.Dir(executable) + string(os.PathListSeparator)
+	if !strings.HasPrefix(got["PATH"], wantPathPrefix) {
+		t.Fatalf("leaf PATH = %q, want packaged sibling dir prefix %q", got["PATH"], wantPathPrefix)
 	}
 }
 

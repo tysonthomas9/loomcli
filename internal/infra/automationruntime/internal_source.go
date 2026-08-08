@@ -14,7 +14,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/driver/eventpolicy"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -296,7 +295,7 @@ func (s *InternalSource) dispatchAwaits(ctx context.Context, ws, eventID, eventT
 	if _, err := matcher.Dispatch(ctx, ws, AwaitDispatchEvent{
 		EventID:    eventID,
 		EventType:  eventType,
-		SourceKind: eventpolicy.SourceKindInternal,
+		SourceKind: automation.SourceKindInternal,
 		Origin:     origin,
 		SubjectRef: ev.SubjectRef,
 		ActorRef:   ev.ActorRef,

@@ -28,10 +28,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/fleethttp"
-	agentmanagementtransport "github.com/tysonthomas9/loomcli/internal/infra/fleetdb/agentmanagement"
-	agentprovisioningtransport "github.com/tysonthomas9/loomcli/internal/infra/fleetdb/agentprovisioning"
-	interactiontransport "github.com/tysonthomas9/loomcli/internal/infra/fleetdb/interaction"
-	repositoryadmissiontransport "github.com/tysonthomas9/loomcli/internal/infra/fleetdb/repositoryadmission"
 	"github.com/tysonthomas9/loomcli/internal/store"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -56,127 +52,37 @@ const (
 var ErrRateLimited = errors.New("fleetdb: rate limited")
 
 const (
-	FleetDelegatedActorHeader      = agentmanagementtransport.FleetDelegatedActorHeader
-	AgentOwnershipLeaseTokenHeader = agentmanagementtransport.AgentOwnershipLeaseTokenHeader
-	RepositoryAdmissionCapability  = repositoryadmissiontransport.RepositoryAdmissionCapability
+	FleetDelegatedActorHeader      = "X-Fleet-Delegated-Actor"
+	AgentOwnershipLeaseTokenHeader = "X-Agent-Ownership-Lease-Token" //nolint:gosec // HTTP header name, not credential material.
 )
 
-// Phase 5 capability sentinels remain aliases of the child transport
-// sentinels so errors.Is identity is preserved for every existing caller.
 var (
-	ErrAgentServiceRevisionConflict     = agentmanagementtransport.ErrAgentServiceRevisionConflict
-	ErrAgentServiceDesiredStateConflict = agentmanagementtransport.
-						ErrAgentServiceDesiredStateConflict
-	ErrAgentServiceIdempotencyConflict = agentmanagementtransport.
-						ErrAgentServiceIdempotencyConflict
-	ErrAgentServiceUnsupportedIdentityPatch = agentmanagementtransport.
-						ErrAgentServiceUnsupportedIdentityPatch
-	ErrAgentRoleRevisionConflict            = agentmanagementtransport.ErrAgentRoleRevisionConflict
-	ErrAgentManagementInvalidDelegatedActor = agentmanagementtransport.
-						ErrAgentManagementInvalidDelegatedActor
-
-	ErrAgentProvisioningNotFound        = agentprovisioningtransport.ErrAgentProvisioningNotFound
-	ErrAgentProvisioningInvalid         = agentprovisioningtransport.ErrAgentProvisioningInvalid
-	ErrAgentProvisioningConflict        = agentprovisioningtransport.ErrAgentProvisioningConflict
-	ErrAgentProvisioningConcurrentWrite = agentprovisioningtransport.
-						ErrAgentProvisioningConcurrentWrite
-	ErrAgentProvisioningInvalidTransition = agentprovisioningtransport.
-						ErrAgentProvisioningInvalidTransition
-
-	ErrInteractionInvalid               = interactiontransport.ErrInteractionInvalid
-	ErrInteractionNotFound              = interactiontransport.ErrInteractionNotFound
-	ErrInteractionNotOwner              = interactiontransport.ErrInteractionNotOwner
-	ErrInteractionConflict              = interactiontransport.ErrInteractionConflict
-	ErrInteractionInvalidTransition     = interactiontransport.ErrInteractionInvalidTransition
-	ErrInteractionInvalidPersistedState = interactiontransport.ErrInteractionInvalidPersistedState
-	ErrInteractionUnavailable           = interactiontransport.ErrInteractionUnavailable
-
-	ErrRepositoryAdmissionUnavailable = repositoryadmissiontransport.ErrRepositoryAdmissionUnavailable
-	ErrRepositoryAdmissionNotFound    = repositoryadmissiontransport.ErrRepositoryAdmissionNotFound
-	ErrRepositoryAdmissionInvalid     = repositoryadmissiontransport.ErrRepositoryAdmissionInvalid
-	ErrRepositoryAdmissionConflict    = repositoryadmissiontransport.ErrRepositoryAdmissionConflict
-	ErrRepositoryAdmissionFenceLost   = repositoryadmissiontransport.ErrRepositoryAdmissionFenceLost
-	ErrRepositoryAdmissionState       = repositoryadmissiontransport.ErrRepositoryAdmissionState
+	errFleetInvalidDelegatedActor = errors.New("fleetdb: invalid delegated actor")
+	errFleetRevisionConflict      = errors.New("fleetdb: workflow catalog revision conflict")
 )
 
-// Phase 5 transport aliases preserve the public FleetDB facade while keeping
-// capability-specific wire logic out of the root package.
-type (
-	AgentManagementTransport              = agentmanagementtransport.AgentManagementTransport
-	AgentServiceQuery                     = agentmanagementtransport.AgentServiceQuery
-	AgentServiceLifecycleInput            = agentmanagementtransport.AgentServiceLifecycleInput
-	AgentServiceLifecycleResult           = agentmanagementtransport.AgentServiceLifecycleResult
-	AgentRoleInput                        = agentmanagementtransport.AgentRoleInput
-	AgentRolePatch                        = agentmanagementtransport.AgentRolePatch
-	AgentRoleUpdateInput                  = agentmanagementtransport.AgentRoleUpdateInput
-	AgentRoleDeleteInput                  = agentmanagementtransport.AgentRoleDeleteInput
-	AgentServiceCreateInput               = agentmanagementtransport.AgentServiceCreateInput
-	AgentServiceIdentityPatch             = agentmanagementtransport.AgentServiceIdentityPatch
-	AgentServiceUpdateInput               = agentmanagementtransport.AgentServiceUpdateInput
-	AgentServiceArchiveInput              = agentmanagementtransport.AgentServiceArchiveInput
-	AgentServiceDesiredStateInput         = agentmanagementtransport.AgentServiceDesiredStateInput
-	AgentOwnershipProof                   = agentmanagementtransport.AgentOwnershipProof
-	AgentServiceOwnedDesiredStateInput    = agentmanagementtransport.AgentServiceOwnedDesiredStateInput
-	AgentOwnershipAcquireInput            = agentmanagementtransport.AgentOwnershipAcquireInput
-	AgentOwnershipGrant                   = agentmanagementtransport.AgentOwnershipGrant
-	AgentOwnershipQuery                   = agentmanagementtransport.AgentOwnershipQuery
-	AgentOwnershipRenewInput              = agentmanagementtransport.AgentOwnershipRenewInput
-	AgentOwnershipReleaseInput            = agentmanagementtransport.AgentOwnershipReleaseInput
-	AgentProvisioningTransport            = agentprovisioningtransport.AgentProvisioningTransport
-	AgentProvisioningRoleSpec             = agentprovisioningtransport.AgentProvisioningRoleSpec
-	AgentProvisioningAgentSpec            = agentprovisioningtransport.AgentProvisioningAgentSpec
-	AgentProvisioningBindingSpec          = agentprovisioningtransport.AgentProvisioningBindingSpec
-	AgentProvisioningGrantSpec            = agentprovisioningtransport.AgentProvisioningGrantSpec
-	AgentProvisioningBeginInput           = agentprovisioningtransport.AgentProvisioningBeginInput
-	AgentProvisioningSpec                 = agentprovisioningtransport.AgentProvisioningSpec
-	AgentProvisioningRecord               = agentprovisioningtransport.AgentProvisioningRecord
-	AgentProvisioningProgressInput        = agentprovisioningtransport.AgentProvisioningProgressInput
-	AgentProvisioningRoleResult           = agentprovisioningtransport.AgentProvisioningRoleResult
-	AgentProvisioningAgentResult          = agentprovisioningtransport.AgentProvisioningAgentResult
-	AgentProvisioningBindingResult        = agentprovisioningtransport.AgentProvisioningBindingResult
-	AgentProvisioningGrantResult          = agentprovisioningtransport.AgentProvisioningGrantResult
-	InteractionSessionAuthorityProof      = interactiontransport.InteractionSessionAuthorityProof
-	InteractionSessionAuthorityValidation = interactiontransport.
-						InteractionSessionAuthorityValidation
-	InteractionAuthorityTransport            = interactiontransport.InteractionAuthorityTransport
-	InteractionTransport                     = interactiontransport.InteractionTransport
-	InteractionMutationTransport             = interactiontransport.InteractionMutationTransport
-	InteractionSessionStartInput             = interactiontransport.InteractionSessionStartInput
-	InteractionSessionStartResult            = interactiontransport.InteractionSessionStartResult
-	InteractionSessionStartRecoveryInput     = interactiontransport.InteractionSessionStartRecoveryInput
-	InteractionSessionHeartbeatInput         = interactiontransport.InteractionSessionHeartbeatInput
-	InteractionSessionPatchInput             = interactiontransport.InteractionSessionPatchInput
-	InteractionSessionFinishInput            = interactiontransport.InteractionSessionFinishInput
-	InteractionSessionMutationResult         = interactiontransport.InteractionSessionMutationResult
-	InteractionSessionInterruptResult        = interactiontransport.InteractionSessionInterruptResult
-	InteractionSessionForceInterruptInput    = interactiontransport.InteractionSessionForceInterruptInput
-	InteractionSessionForceInterruptResult   = interactiontransport.InteractionSessionForceInterruptResult
-	InteractionTerminalCreateInput           = interactiontransport.InteractionTerminalCreateInput
-	InteractionTerminalUpdateInput           = interactiontransport.InteractionTerminalUpdateInput
-	InteractionInboxEnqueueInput             = interactiontransport.InteractionInboxEnqueueInput
-	InteractionInboxClaimInput               = interactiontransport.InteractionInboxClaimInput
-	InteractionInboxCompleteInput            = interactiontransport.InteractionInboxCompleteInput
-	InteractionActivity                      = interactiontransport.InteractionActivity
-	RepositoryAdmissionTransport             = repositoryadmissiontransport.RepositoryAdmissionTransport
-	RepositoryAdmissionRepoSpec              = repositoryadmissiontransport.RepositoryAdmissionRepoSpec
-	RepositoryAdmissionSpec                  = repositoryadmissiontransport.RepositoryAdmissionSpec
-	RepositoryAdmissionBeginInput            = repositoryadmissiontransport.RepositoryAdmissionBeginInput
-	RepositoryAdmissionWorkspaceInput        = repositoryadmissiontransport.RepositoryAdmissionWorkspaceInput
-	WorkspaceRepositoryAdmissionBeginInput   = repositoryadmissiontransport.WorkspaceRepositoryAdmissionBeginInput
-	WorkspaceRepositoryAdmissionBeginResult  = repositoryadmissiontransport.WorkspaceRepositoryAdmissionBeginResult
-	RepositoryAdmissionRepoReceipt           = repositoryadmissiontransport.RepositoryAdmissionRepoReceipt
-	RepositoryAdmissionReceipt               = repositoryadmissiontransport.RepositoryAdmissionReceipt
-	RepositoryAdmissionWorkspaceFinalization = repositoryadmissiontransport.
-							RepositoryAdmissionWorkspaceFinalization
-	RepositoryAdmissionRecord             = repositoryadmissiontransport.RepositoryAdmissionRecord
-	RepositoryAdmissionGuard              = repositoryadmissiontransport.RepositoryAdmissionGuard
-	RepositoryAdmissionResolvedBranch     = repositoryadmissiontransport.RepositoryAdmissionResolvedBranch
-	RepositoryAdmissionRenewInput         = repositoryadmissiontransport.RepositoryAdmissionRenewInput
-	RepositoryAdmissionRecoveryClaimInput = repositoryadmissiontransport.RepositoryAdmissionRecoveryClaimInput
-	RepositoryAdmissionCommitInput        = repositoryadmissiontransport.RepositoryAdmissionCommitInput
-	RepositoryAdmissionFailInput          = repositoryadmissiontransport.RepositoryAdmissionFailInput
-	RepositoryAdmissionAbortInput         = repositoryadmissiontransport.RepositoryAdmissionAbortInput
-)
+// fleetRequester is the shared authenticated JSON execution seam for the
+// capability-specific FleetDB transports housed in this adapter package.
+type fleetRequester interface {
+	Do(context.Context, string, string, any, any) error
+	DoWithHeaders(context.Context, string, string, any, any, map[string]string) error
+}
+
+// delegatedActorHeaders validates an audit identity before placing it in the
+// FleetDB-only delegated-actor header. It must never be serialized in a
+// command body.
+func delegatedActorHeaders(actor string) (map[string]string, error) {
+	trimmed := strings.TrimSpace(actor)
+	if trimmed == "" || actor != trimmed || len(actor) > 256 {
+		return nil, errFleetInvalidDelegatedActor
+	}
+	for _, character := range actor {
+		if character < 0x20 || character == 0x7f {
+			return nil, errFleetInvalidDelegatedActor
+		}
+	}
+	return map[string]string{FleetDelegatedActorHeader: actor}, nil
+}
 
 // Config holds connection parameters for the fleet-db HTTP client.
 type Config struct {
@@ -287,11 +193,11 @@ func (c *Client) initializeStores() {
 	c.drivers = &driverStore{client: c}
 	c.versions = &driverVersionStore{client: c}
 	c.catalog = &workflowCatalogStore{client: c}
-	c.provisioning = agentprovisioningtransport.New(capabilityRequests)
-	c.agentManagement = agentmanagementtransport.New(capabilityRequests)
+	c.provisioning = newAgentProvisioningTransport(capabilityRequests)
+	c.agentManagement = newAgentManagementTransport(capabilityRequests)
 	c.ownership = &agentOwnershipLeaseStore{client: c, management: c.agentManagement}
-	c.interaction = interactiontransport.New(capabilityRequests)
-	c.repositoryAdmissions = repositoryadmissiontransport.New(capabilityRequests)
+	c.interaction = newInteractionTransport(capabilityRequests)
+	c.repositoryAdmissions = newRepositoryAdmissionTransport(capabilityRequests)
 	c.automation = &automationStore{client: c}
 	c.profiles = &workerProfileStore{client: c}
 	c.services = &agentServiceStore{client: c}
@@ -313,10 +219,10 @@ func (c *Client) initializeStores() {
 	c.connectorCalls = &connectorAuditStore{client: c}
 }
 
-// capabilityRequester is the private bridge from capability transports to the
-// process-wide FleetDB client. It deliberately exposes only authenticated JSON
-// execution plus the Role and AgentSession dependencies required by the
-// extracted Phase 5 transports.
+// capabilityRequester is the private bridge from owner-scoped transports to
+// the process-wide FleetDB client. It deliberately exposes only authenticated
+// JSON execution plus the Role and AgentSession dependencies those transports
+// require.
 type capabilityRequester struct {
 	client *Client
 }

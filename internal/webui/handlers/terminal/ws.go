@@ -26,7 +26,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
-	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 	webuterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
@@ -77,7 +76,7 @@ type terminalWSParams struct {
 	patterns      []string
 	loomServerURL string
 	store         terminalStore
-	tabMetaStore  *tabmeta.Store
+	tabMetaStore  webuterminal.TabMetadataReader
 	hub           *realtime.Hub
 	// serverStartedAt is used to distinguish "tab metadata from a prior
 	// server process whose PTY is long gone" from "tab metadata just
@@ -110,7 +109,7 @@ func HandleTerminalWS(
 	allowedOrigins []string,
 	loomServerURL string,
 	st terminalStore,
-	tabMetaStore *tabmeta.Store,
+	tabMetaStore webuterminal.TabMetadataReader,
 	hub *realtime.Hub,
 	serverStartedAt time.Time,
 	identities ...terminalAgentIdentity,
@@ -140,7 +139,7 @@ func HandleTerminalWSWithInteraction(
 	allowedOrigins []string,
 	loomServerURL string,
 	st terminalStore,
-	tabMetaStore *tabmeta.Store,
+	tabMetaStore webuterminal.TabMetadataReader,
 	hub *realtime.Hub,
 	serverStartedAt time.Time,
 	interactionDeps InteractionDependencies,
@@ -443,7 +442,7 @@ func runTerminalRelay(
 		injectTerminalContextBanner(att, p.loomServerURL, workspaceNameFromStore(reqCtx, p.store, wsID))
 	}
 
-	realtime.BroadcastSessionIssueEvent(p.tabMetaStore, p.hub, workspace, session)
+	broadcastSessionIssueEvent(p.tabMetaStore, p.hub, workspace, session)
 
 	if !reattach {
 		maybeEmitStaleRestartBanner(reqCtx, conn, p, workspace, session)
@@ -476,6 +475,34 @@ func runTerminalRelay(
 	p.manager.Detach(key, connID)
 
 	return (<-crashCh).WSClose()
+}
+
+// broadcastSessionIssueEvent sends an SSE event when the attached terminal is
+// linked to an issue. The metadata read uses a background timeout because the
+// request context may be invalid after WebSocket hijack.
+func broadcastSessionIssueEvent(
+	tabMetaStore webuterminal.TabMetadataReader,
+	hub *realtime.Hub,
+	workspace, session string,
+) {
+	if tabMetaStore == nil || hub == nil {
+		return
+	}
+	metaCtx, metaCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer metaCancel()
+	meta, err := tabMetaStore.Get(metaCtx, workspace, session)
+	if err != nil || meta == nil || meta.IssueID == "" {
+		return
+	}
+	hub.Broadcast(&realtime.MutationPayload{
+		Type:        "terminal_session_change",
+		EntityType:  "terminal",
+		EntityID:    session,
+		Action:      "terminal.session_change",
+		IssueID:     meta.IssueID,
+		Timestamp:   time.Now().UTC().Format(time.RFC3339Nano),
+		WorkspaceID: meta.Workspace,
+	})
 }
 
 // attachTerminalSession resolves the server-owned launch contract before
@@ -588,7 +615,7 @@ func ensureWorkspacePTYRegistered(ctx context.Context, p *terminalWSParams, work
 	}
 }
 
-func launchSpecForTerminalSession(ctx context.Context, p *terminalWSParams, workspace, session string) (*tabmeta.LaunchSpec, error) {
+func launchSpecForTerminalSession(ctx context.Context, p *terminalWSParams, workspace, session string) (*webuterminal.LaunchSpec, error) {
 	launch, _, err := resolveTerminalLaunch(ctx, p, workspace, session)
 	return launch, err
 }
@@ -597,7 +624,7 @@ func resolveTerminalLaunch(
 	ctx context.Context,
 	p *terminalWSParams,
 	workspace, session string,
-) (*tabmeta.LaunchSpec, string, error) {
+) (*webuterminal.LaunchSpec, string, error) {
 	if p.tabMetaStore == nil {
 		if isUUIDTerminalSession(session) {
 			return nil, "", errTerminalLaunchMetaMissing
@@ -673,12 +700,12 @@ func isUUIDTerminalSession(session string) bool {
 	return strings.HasPrefix(session, "term_")
 }
 
-func legacyLaunchSpecForSession(session string) *tabmeta.LaunchSpec {
+func legacyLaunchSpecForSession(session string) *webuterminal.LaunchSpec {
 	argv := webuterminal.ArgvForSession(session)
 	if len(argv) == 0 {
 		return nil
 	}
-	launch := &tabmeta.LaunchSpec{Argv: argv}
+	launch := &webuterminal.LaunchSpec{Argv: argv}
 	// Generic workspace terminals predate durable agent-tab metadata, so they
 	// do not carry a persisted launch envelope. Re-add only the server-resolved
 	// local data directory; PTYManager separately binds LOOM_WORKSPACE from the

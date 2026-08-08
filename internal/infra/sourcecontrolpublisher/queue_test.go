@@ -16,7 +16,6 @@ import (
 
 	stackstore "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
-	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol/stacklineage"
 )
 
 func TestReparentPRNumbersAndConflicts(t *testing.T) {
@@ -92,7 +91,7 @@ func (s updateFailLifecycle) RecordStackNodePublication(context.Context, sourcec
 	return s.err
 }
 
-func gitRepoWithBranches(t *testing.T, id sl.StackID, tasks ...string) string {
+func gitRepoWithBranches(t *testing.T, id sourcecontrol.StackID, tasks ...string) string {
 	t.Helper()
 	dir := t.TempDir()
 	rg := func(args ...string) {
@@ -110,9 +109,9 @@ func gitRepoWithBranches(t *testing.T, id sl.StackID, tasks ...string) string {
 	for i, task := range tasks {
 		base := "main"
 		if i > 0 {
-			base = sl.OutputBranchName(id, tasks[i-1])
+			base = sourcecontrol.OutputBranchName(id, tasks[i-1])
 		}
-		rg("checkout", "-q", "-B", sl.OutputBranchName(id, task), base)
+		rg("checkout", "-q", "-B", sourcecontrol.OutputBranchName(id, task), base)
 		require.NoError(t, os.WriteFile(filepath.Join(dir, task+".txt"), []byte(task), 0o644))
 		rg("add", "-A")
 		rg("commit", "-q", "-m", task)
@@ -123,15 +122,15 @@ func gitRepoWithBranches(t *testing.T, id sl.StackID, tasks ...string) string {
 
 func TestPublishReturnsErrorWhenMarkPublishedFails(t *testing.T) {
 	ctx := context.Background()
-	id := sl.StackID("epic:E")
+	id := sourcecontrol.StackID("epic:E")
 	repoPath := gitRepoWithBranches(t, id, "A")
 	store := stackstore.New(t.TempDir())
-	require.NoError(t, store.EnsureStack(ctx, sl.Stack{ID: id, WorkspaceKey: "WS", RepoName: "r", RootBase: "main"}))
-	_, err := store.AddNode(ctx, "WS", id, "A", "", sl.CommitModeLoom)
+	require.NoError(t, store.EnsureStackRecord(ctx, sourcecontrol.Stack{ID: id, WorkspaceKey: "WS", Repository: "r", RootBase: "main"}))
+	_, err := store.AddStackNodeRecord(ctx, "WS", id, "A", "", sourcecontrol.CommitModeLoom)
 	require.NoError(t, err)
 
 	persistErr := errors.New("persist published state")
-	forge := &fakeForge{createPR: PR{Number: 42, URL: "https://github.com/o/r/pull/42", Head: sl.OutputBranchName(id, "A"), Base: "main", State: "open"}}
+	forge := &fakeForge{createPR: PR{Number: 42, URL: "https://github.com/o/r/pull/42", Head: sourcecontrol.OutputBranchName(id, "A"), Base: "main", State: "open"}}
 	rec := &Reconciler{
 		Stacks: updateFailLifecycle{StackLifecycle: mustStackLifecycle(t, store), err: persistErr}, Forge: forge,
 	}
@@ -146,19 +145,19 @@ func TestPublishReturnsErrorWhenMarkPublishedFails(t *testing.T) {
 // reparent-target PR is in the merge queue.
 func TestPublish_MergeQueuePreflightAborts(t *testing.T) {
 	ctx := context.Background()
-	id := sl.StackID("epic:Q")
+	id := sourcecontrol.StackID("epic:Q")
 	store := stackstore.New(t.TempDir())
-	require.NoError(t, store.EnsureStack(ctx, sl.Stack{ID: id, WorkspaceKey: "WS", RepoName: "r", RootBase: "main"}))
-	_, err := store.AddNode(ctx, "WS", id, "T1", "", "")
+	require.NoError(t, store.EnsureStackRecord(ctx, sourcecontrol.Stack{ID: id, WorkspaceKey: "WS", Repository: "r", RootBase: "main"}))
+	_, err := store.AddStackNodeRecord(ctx, "WS", id, "T1", "", "")
 	require.NoError(t, err)
-	_, err = store.AddNode(ctx, "WS", id, "T2", "T1", "")
+	_, err = store.AddStackNodeRecord(ctx, "WS", id, "T2", "T1", "")
 	require.NoError(t, err)
 
 	repoPath := gitRepoWithBranches(t, id, "T1", "T2")
 	ff := &fakeForge{
 		prs: []PR{
-			{Number: 101, Head: sl.OutputBranchName(id, "T1"), Base: "main", State: "open"},
-			{Number: 102, Head: sl.OutputBranchName(id, "T2"), Base: "main", State: "open"}, // wrong base → reparent
+			{Number: 101, Head: sourcecontrol.OutputBranchName(id, "T1"), Base: "main", State: "open"},
+			{Number: 102, Head: sourcecontrol.OutputBranchName(id, "T2"), Base: "main", State: "open"}, // wrong base → reparent
 		},
 		queued: map[int]bool{102: true}, // the reparent target is queued
 	}
@@ -174,18 +173,18 @@ func TestPublish_MergeQueuePreflightAborts(t *testing.T) {
 // Dry-run mutates nothing, so it must not be blocked by the queue pre-flight.
 func TestPublish_DryRunSkipsQueueCheck(t *testing.T) {
 	ctx := context.Background()
-	id := sl.StackID("epic:Q")
+	id := sourcecontrol.StackID("epic:Q")
 	store := stackstore.New(t.TempDir())
-	require.NoError(t, store.EnsureStack(ctx, sl.Stack{ID: id, WorkspaceKey: "WS", RepoName: "r", RootBase: "main"}))
-	_, err := store.AddNode(ctx, "WS", id, "T1", "", "")
+	require.NoError(t, store.EnsureStackRecord(ctx, sourcecontrol.Stack{ID: id, WorkspaceKey: "WS", Repository: "r", RootBase: "main"}))
+	_, err := store.AddStackNodeRecord(ctx, "WS", id, "T1", "", "")
 	require.NoError(t, err)
-	_, err = store.AddNode(ctx, "WS", id, "T2", "T1", "")
+	_, err = store.AddStackNodeRecord(ctx, "WS", id, "T2", "T1", "")
 	require.NoError(t, err)
 	repoPath := gitRepoWithBranches(t, id, "T1", "T2")
 	ff := &fakeForge{
 		prs: []PR{
-			{Number: 101, Head: sl.OutputBranchName(id, "T1"), Base: "main", State: "open"},
-			{Number: 102, Head: sl.OutputBranchName(id, "T2"), Base: "main", State: "open"},
+			{Number: 101, Head: sourcecontrol.OutputBranchName(id, "T1"), Base: "main", State: "open"},
+			{Number: 102, Head: sourcecontrol.OutputBranchName(id, "T2"), Base: "main", State: "open"},
 		},
 		queued: map[int]bool{102: true},
 	}

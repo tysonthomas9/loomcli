@@ -9,7 +9,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
-	"github.com/tysonthomas9/loomcli/internal/app/serve/automationcomposition"
 	"github.com/tysonthomas9/loomcli/internal/app/systemeventing"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
@@ -98,7 +97,7 @@ func TestNewRunOutcomeRuntimeRegistrationDoesNotRequireAutomationPublisher(t *te
 		t.Fatalf("registration component = %#v", registration.Component)
 	}
 	if !registration.Policy.Immediate ||
-		registration.Policy.Cadence != automationcomposition.RunOutcomeReconcileCadence {
+		registration.Policy.Cadence != RunOutcomeReconcileCadence {
 		t.Fatalf("registration policy = %+v", registration.Policy)
 	}
 }
@@ -159,7 +158,7 @@ func TestRunOutcomeRuntimePublishesOpaqueRunIDThroughAutomationAdmission(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	publisher, err := automationcomposition.NewDriverRunOutcomePublisher(emitter)
+	publisher, err := NewDriverRunOutcomePublisher(emitter)
 	if err != nil {
 		t.Fatal(err)
 	}

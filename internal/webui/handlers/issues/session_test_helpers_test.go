@@ -12,8 +12,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
+	"github.com/tysonthomas9/loomcli/internal/webui/localredis"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
-	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
 )
 
 type Module interface {
@@ -46,7 +46,7 @@ func (*stubSessionService) GetSessionDiff(context.Context, string, string, strin
 	return "", nil
 }
 
-func (*stubSessionService) ListSessionHistory(context.Context, string, string) ([]sessionhistory.SessionRecord, error) {
+func (*stubSessionService) ListSessionHistory(context.Context, string, string) ([]sessioncoord.SessionRecord, error) {
 	return nil, nil
 }
 
@@ -56,10 +56,10 @@ func (*stubSessionService) GetSessionScrollback(context.Context, string, string,
 
 type testSessionService struct {
 	sessions *sessions.Store
-	history  *sessionhistory.Store
+	history  *localredis.SessionHistoryStore
 }
 
-func NewSessionService(sessionStore *sessions.Store, historyStore *sessionhistory.Store) sessioncoord.SessionService {
+func NewSessionService(sessionStore *sessions.Store, historyStore *localredis.SessionHistoryStore) sessioncoord.SessionService {
 	return &testSessionService{sessions: sessionStore, history: historyStore}
 }
 
@@ -128,11 +128,11 @@ func (s *testSessionService) GetSessionDiff(_ context.Context, _, _, sessionID s
 	return diff, nil
 }
 
-func (s *testSessionService) ListSessionHistory(ctx context.Context, workspaceID, issueID string) ([]sessionhistory.SessionRecord, error) {
+func (s *testSessionService) ListSessionHistory(ctx context.Context, workspaceID, issueID string) ([]sessioncoord.SessionRecord, error) {
 	if s.history == nil {
 		return nil, apperrors.ErrUnavailable("session history not available (no Redis)")
 	}
-	if err := sessionhistory.ValidateIssueID(issueID); err != nil {
+	if err := sessioncoord.ValidateSessionHistoryIssueID(issueID); err != nil {
 		return nil, apperrors.ErrValidation(err.Error())
 	}
 	records, err := s.history.List(ctx, workspaceID, issueID)
@@ -146,7 +146,7 @@ func (s *testSessionService) GetSessionScrollback(ctx context.Context, workspace
 	if s.history == nil {
 		return nil, apperrors.ErrUnavailable("session history not available (no Redis)")
 	}
-	if err := sessionhistory.ValidateIssueID(issueID); err != nil {
+	if err := sessioncoord.ValidateSessionHistoryIssueID(issueID); err != nil {
 		return nil, apperrors.ErrValidation(err.Error())
 	}
 	if recordID == "" {
@@ -156,7 +156,7 @@ func (s *testSessionService) GetSessionScrollback(ctx context.Context, workspace
 	if err != nil {
 		return nil, apperrors.ErrInternal("failed to get session history", err)
 	}
-	var found *sessionhistory.SessionRecord
+	var found *sessioncoord.SessionRecord
 	for index := range records {
 		if records[index].ID == recordID {
 			found = &records[index]

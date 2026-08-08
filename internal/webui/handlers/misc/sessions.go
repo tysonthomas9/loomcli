@@ -2,7 +2,6 @@ package misc
 
 import (
 	"crypto/subtle"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -200,7 +199,7 @@ func HandleNotifySessionChange(hub *realtime.Hub, notifyToken string) http.Handl
 		}
 
 		var req sessionNotifyRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{}); err != nil {
 			http.Error(w, "Bad Request", http.StatusBadRequest)
 			return
 		}

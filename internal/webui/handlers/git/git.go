@@ -1,8 +1,8 @@
 package git
 
 import (
-	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"regexp"
 	"strings"
@@ -18,6 +18,27 @@ import (
 // Rejects names starting with '-' or containing '..'.
 // Keep in sync with internal/cli/git.go:gitRefPattern
 var validGitRef = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_./-]*$`)
+
+func decodeOptionalRequest(w http.ResponseWriter, r *http.Request, dst any) bool {
+	if r.Body == nil {
+		return true
+	}
+	defer r.Body.Close()
+	err := handler.DecodeOneJSON(w, r, dst, handler.JSONDecodeOptions{MaxBytes: handler.MaxRequestBody})
+	if err == nil {
+		return true
+	}
+	if errors.Is(err, io.EOF) {
+		return true
+	}
+	var maxBytesErr *http.MaxBytesError
+	if errors.As(err, &maxBytesErr) {
+		handler.RespondError(w, http.StatusRequestEntityTooLarge, "request body too large")
+		return false
+	}
+	handler.RespondError(w, http.StatusBadRequest, "invalid request body")
+	return false
+}
 
 // writeAgentGitError maps a service error to an HTTP response for agent git handlers.
 // ServiceErrors use HandleServiceError; other errors use the given fallback status.
@@ -44,9 +65,8 @@ func HandleGitPush(svc agentcoord.AgentService) http.HandlerFunc {
 		wsID := middleware.WorkspaceFromContext(r.Context())
 
 		var req gitPushRequest
-		if r.Body != nil {
-			defer r.Body.Close()
-			_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req)
+		if !decodeOptionalRequest(w, r, &req) {
+			return
 		}
 
 		target := req.Target
@@ -102,9 +122,8 @@ func HandleGitPull(svc agentcoord.AgentService) http.HandlerFunc {
 		wsID := middleware.WorkspaceFromContext(r.Context())
 
 		var req gitPullRequest
-		if r.Body != nil {
-			defer r.Body.Close()
-			_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req)
+		if !decodeOptionalRequest(w, r, &req) {
+			return
 		}
 
 		source := req.Source
@@ -172,9 +191,8 @@ func HandleGitPR(svc agentcoord.AgentService) http.HandlerFunc {
 		wsID := middleware.WorkspaceFromContext(r.Context())
 
 		var req gitPRRequest
-		if r.Body != nil {
-			defer r.Body.Close()
-			_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req)
+		if !decodeOptionalRequest(w, r, &req) {
+			return
 		}
 
 		target := req.Target
@@ -225,9 +243,8 @@ func HandleGitReset(svc agentcoord.AgentService) http.HandlerFunc {
 		wsID := middleware.WorkspaceFromContext(r.Context())
 
 		var req gitResetRequest
-		if r.Body != nil {
-			defer r.Body.Close()
-			_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req)
+		if !decodeOptionalRequest(w, r, &req) {
+			return
 		}
 
 		branch := req.Branch
@@ -299,7 +316,7 @@ func HandleGitTargetUpdate(svc agentcoord.AgentService) http.HandlerFunc {
 		var req gitTargetRequest
 		if r.Body != nil {
 			defer r.Body.Close()
-			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+			if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{MaxBytes: handler.MaxRequestBody}); err != nil {
 				handler.RespondError(w, http.StatusBadRequest, "invalid request body")
 				return
 			}

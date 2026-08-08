@@ -16,6 +16,7 @@ import (
 	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
+	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 )
 
@@ -459,19 +460,30 @@ func optionalInt64(value int64) *int64 {
 	return &value
 }
 
-func taskRunnerBaseEnv(env []string) []string {
-	return scopedSubprocessBaseEnv(env)
-}
-
 // taskRunnerBaseEnvForRequest selects the subprocess base env for a task runner
 // by entrypoint: the local task runner gets the trusted-local provider-cred
 // superset (§4.3); every other runner (Daytona/remote/node-module) keeps the
 // strict filter so credentials never leak into a remote sandbox.
 func taskRunnerBaseEnvForRequest(req TaskExecRequest, env []string) []string {
 	if isLocalTaskRunner(req) {
-		return localTaskRunnerBaseEnv(env)
+		filtered := platformruntime.FilterSubprocessEnv(platformruntime.SubprocessEnvDriverLocalTaskRunner, env)
+		if executable, err := os.Executable(); err == nil {
+			return platformruntime.PinExecutableDirOnPath(filtered, executable)
+		}
+		return filtered
 	}
-	return taskRunnerBaseEnv(env)
+	return platformruntime.FilterSubprocessEnv(platformruntime.SubprocessEnvDriverRemote, env)
+}
+
+func prepareTaskRunnerLoginShellEnv(req TaskExecRequest, env []string) ([]string, func(), error) {
+	if !isLocalTaskRunner(req) {
+		return env, func() {}, nil
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolve task runner host executable: %w", err)
+	}
+	return platformruntime.PinExecutableDirForLoginShell(env, executable)
 }
 
 func lastJSONLine(stdout []byte) ([]byte, error) {

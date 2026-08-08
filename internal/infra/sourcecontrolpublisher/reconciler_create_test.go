@@ -10,13 +10,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	stackstore "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore"
-	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol/stacklineage"
+	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 )
 
 // repoWithOwnedCommit builds an offline repo (dummy origin) whose stack branch
 // for taskID has a single owned commit with the given subject, and returns the
 // repo path plus a store with a one-node stack rooted on main.
-func repoWithOwnedCommit(t *testing.T, ctx context.Context, id sl.StackID, taskID, subject string) (string, stackstore.Store) {
+func repoWithOwnedCommit(t *testing.T, ctx context.Context, id sl.StackID, taskID, subject string) (string, sl.StackLifecycleStore) {
 	t.Helper()
 	dir := t.TempDir()
 	git(t, dir, "init", "-q")
@@ -36,8 +36,8 @@ func repoWithOwnedCommit(t *testing.T, ctx context.Context, id sl.StackID, taskI
 	git(t, dir, "checkout", "-q", "main")
 
 	store := stackstore.New(t.TempDir())
-	require.NoError(t, store.EnsureStack(ctx, sl.Stack{ID: id, WorkspaceKey: "WS", RepoName: "r", RootBase: "main"}))
-	_, err := store.AddNode(ctx, "WS", id, taskID, "", sl.CommitModeLoom)
+	require.NoError(t, store.EnsureStackRecord(ctx, sl.Stack{ID: id, WorkspaceKey: "WS", Repository: "r", RootBase: "main"}))
+	_, err := store.AddStackNodeRecord(ctx, "WS", id, taskID, "", sl.CommitModeLoom)
 	require.NoError(t, err)
 	return dir, store
 }

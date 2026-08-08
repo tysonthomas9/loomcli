@@ -41,8 +41,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/connectorscatalog"
-	"github.com/tysonthomas9/loomcli/internal/infra/connectorsproviders"
-	providers "github.com/tysonthomas9/loomcli/internal/infra/connectorsproviders/providerimpl"
+	providers "github.com/tysonthomas9/loomcli/internal/infra/connectorsproviders"
 	"github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
@@ -307,7 +306,7 @@ func newE2EHarness(t *testing.T) *e2eHarness {
 	h.provisionWorkspace(t)
 
 	registry := providers.NewRegistry()
-	if err := registry.Register(domain.ConnectorSourceGitHub,
+	if err := registry.Register(connectorsmodule.ConnectorSourceGitHub,
 		providers.NewGitHub(h.github.server.Client(), h.github.server.URL)); err != nil {
 		t.Fatalf("Register github provider: %v", err)
 	}
@@ -315,11 +314,7 @@ func newE2EHarness(t *testing.T) *e2eHarness {
 	if err != nil {
 		t.Fatalf("New connector catalog: %v", err)
 	}
-	providerRegistry, err := connectorsproviders.New(registry)
-	if err != nil {
-		t.Fatalf("New provider registry: %v", err)
-	}
-	dispatcher, err := connectorsmodule.NewDispatch(catalog, h.vault, providerRegistry, nil)
+	dispatcher, err := connectorsmodule.NewDispatch(catalog, h.vault, registry, nil)
 	if err != nil {
 		t.Fatalf("New connector dispatcher: %v", err)
 	}

@@ -14,9 +14,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/app/workitemmove"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
-	"github.com/tysonthomas9/loomcli/internal/webui/app/capabilitycomposition"
-	"github.com/tysonthomas9/loomcli/internal/webui/appinfra"
-	"github.com/tysonthomas9/loomcli/internal/webui/appstores"
 	"github.com/tysonthomas9/loomcli/internal/webui/filecoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
@@ -113,7 +110,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 
 	app.initialWorkspaceID = config.InitialWorkspaceID
 
-	app.workItems, err = capabilitycomposition.NewWorkItems(config.IssueBackendFn)
+	app.workItems, err = NewWorkItems(config.IssueBackendFn)
 	if err != nil {
 		return nil, fmt.Errorf("compose Work Items capability: %w", err)
 	}
@@ -121,7 +118,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 		app.workspaceStore = config.Store.Workspaces()
 		app.workspaceCatalog = config.WorkspaceCatalog
 		if app.workspaceCatalog == nil {
-			app.workspaceCatalog, err = capabilitycomposition.NewWorkspaceCapability(app.workspaceStore, config.Store.Repos())
+			app.workspaceCatalog, err = NewWorkspaceCapability(app.workspaceStore, config.Store.Repos())
 			if err != nil {
 				return nil, fmt.Errorf("compose Workspace capability: %w", err)
 			}
@@ -135,19 +132,19 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	}
 
 	// Create SSE hub for real-time push notifications
-	app.hub = appstores.NewHub()
+	app.hub = NewHub()
 	go app.hub.Run()
 	cleanups = append(cleanups, func() { app.hub.Stop() })
 
 	// Bridge per-workspace backend mutations to SSE clients.
-	app.multiSub = appstores.NewMultiSub(ctx, app.hub, config.Logger)
-	app.getMutationsSince = appstores.GetMutationsSinceFn(app.multiSub)
+	app.multiSub = NewMultiSub(ctx, app.hub, config.Logger)
+	app.getMutationsSince = GetMutationsSinceFn(app.multiSub)
 	cleanups = append(cleanups, func() { app.multiSub.Stop() })
 
 	// Main web terminal manager: one *PTYManager per workspace, dispatched by
 	// SessionKey.Workspace. Per-workspace managers are created lazily on first
 	// AttachSession and use workspace.Path as the shell's cwd. Workspaces are
-	// registered via PTYHook (see appinfra.RegisterHooks wiring).
+	// registered via PTYHook (see RegisterHooks wiring).
 	app.ptyMgr = terminal.NewMultiPTYManager(config.TerminalCmd, config.MaxTerminalSessions)
 	cleanups = append(cleanups, func() { _ = app.ptyMgr.Close() })
 	logger.Info("multi pty manager initialized", "component", "terminal", "default_command", config.TerminalCmd)
@@ -171,7 +168,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	// Terminal auth for one-time WebSocket tokens.
 	{
 		var authErr error
-		app.termAuth, authErr = appstores.NewTerminalAuth()
+		app.termAuth, authErr = NewTerminalAuth()
 		if authErr != nil {
 			logger.Warn("failed to initialize terminal auth; token endpoint disabled", "err", authErr)
 		} else {
@@ -182,7 +179,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	// Initialize SSE token exchange store (external auth mode only).
 	if config.ExtAuthURL != "" {
 		var sseErr error
-		app.sseTokens, sseErr = appstores.NewTokenStore()
+		app.sseTokens, sseErr = NewTokenStore()
 		if sseErr != nil {
 			logger.Warn("failed to initialize SSE token store", "err", sseErr)
 		} else {
@@ -192,7 +189,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 
 	// Fleet store registry and JWT config for worker registration.
 	if config.FleetRedis != nil {
-		app.fleetRegistry, err = appinfra.InitFleetRegistry(*config.FleetRedis, config.Logger)
+		app.fleetRegistry, err = InitFleetRegistry(*config.FleetRedis, config.Logger)
 		if err != nil {
 			logger.Warn("failed to initialize fleet store registry", "component", "fleet", "err", err)
 		} else {
@@ -209,7 +206,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 				}
 			}
 			if app.fleetRegistry != nil {
-				app.tokenCfg = appinfra.NewFleetTokenConfig(jwtKey, time.Hour)
+				app.tokenCfg = NewFleetTokenConfig(jwtKey, time.Hour)
 				logger.Info("fleet store registry initialized", "component", "fleet", "redis_address", config.FleetRedis.Address)
 			}
 		}
@@ -217,14 +214,14 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 
 	// Initialize fleet claim metrics
 	if app.fleetRegistry != nil {
-		app.claimMetrics = appinfra.NewFleetClaimMetrics()
+		app.claimMetrics = NewFleetClaimMetrics()
 	}
 
 	// Construct lifecycle hooks.
-	app.registry = appinfra.NewWorkspaceRegistry(config.Logger)
+	app.registry = NewWorkspaceRegistry(config.Logger)
 	cleanups = append(cleanups, func() { _ = app.registry.Close() })
 
-	appinfra.RegisterHooks(app.registry, appinfra.HookConfig{
+	RegisterHooks(app.registry, HookConfig{
 		MultiSub:    app.multiSub,
 		TermMgr:     app.agentTmuxMgr,
 		PTYMultiMgr: app.ptyMgr,
@@ -241,19 +238,19 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 
 	// Reconcile all store workspaces. Subscribers for secondary workspaces
 	// activate lazily via the workspace SSE token/stream routes.
-	appinfra.ReconcileStoreWorkspaces(workspacePathsFn, app.initialWorkspaceID, false, app.registry, config.Logger)
+	ReconcileStoreWorkspaces(workspacePathsFn, app.initialWorkspaceID, false, app.registry, config.Logger)
 
 	// Periodic re-reconcile: workspaces created out-of-band (CLI
 	// `loom workspace create` while serve is running, or another
 	// loom-serve instance against shared fleet-db) need to be picked up
 	// without a serve restart. Without this, terminal attach for those
 	// workspaces fails with "workspace not registered" until restart.
-	appinfra.StartPeriodicWorkspaceReconcile(ctx, workspacePathsFn, app.registry, 15*time.Second, config.Logger)
+	StartPeriodicWorkspaceReconcile(ctx, workspacePathsFn, app.registry, 15*time.Second, config.Logger)
 
 	// Build fleet registration config.
 	if config.FleetAPIKey != "" && app.fleetRegistry != nil {
 		var regCleanup func()
-		app.fleetRegCfg, regCleanup = appinfra.NewFleetRegisterConfig(config.FleetAPIKey, config.FleetRedis, config.Logger)
+		app.fleetRegCfg, regCleanup = NewFleetRegisterConfig(config.FleetAPIKey, config.FleetRedis, config.Logger)
 		if regCleanup != nil {
 			cleanups = append(cleanups, regCleanup)
 		}
@@ -264,19 +261,19 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 
 	if config.FleetRedis != nil {
 		var tmCleanup func()
-		app.tabMetaStore, tmCleanup = appstores.InitTabMeta(ctx, config.FleetRedis, config.Logger)
+		app.tabMetaStore, tmCleanup = InitTabMeta(ctx, config.FleetRedis, config.Logger)
 		cleanups = append(cleanups, tmCleanup)
 	}
 
 	if config.FleetRedis != nil {
 		var itCleanup func()
-		app.issueTabStore, itCleanup = appstores.InitIssueTabs(ctx, config.FleetRedis, app.initialWorkspaceID, config.Logger)
+		app.issueTabStore, itCleanup = InitIssueTabs(ctx, config.FleetRedis, app.initialWorkspaceID, config.Logger)
 		cleanups = append(cleanups, itCleanup)
 	}
 
 	if config.FleetRedis != nil {
 		var shCleanup func()
-		app.sessionHistoryStore, shCleanup = appstores.InitSessionHistory(ctx, config.FleetRedis, app.initialWorkspaceID, config.Logger)
+		app.sessionHistoryStore, shCleanup = InitSessionHistory(ctx, config.FleetRedis, app.initialWorkspaceID, config.Logger)
 		cleanups = append(cleanups, shCleanup)
 	}
 
@@ -370,9 +367,9 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 
 	// Initialize agent service after terminal metadata so interactive lifecycle
 	// authority can bind process-local PTYs to server-owned agent tabs.
-	app.ptyMgr.SetBeforeKill(capabilitycomposition.NewInteractionPTYBeforeKill(
+	app.ptyMgr.SetBeforeKill(NewInteractionPTYBeforeKill(
 		app.tabMetaStore,
-		capabilitycomposition.InteractionForceInterrupter(config.InteractionCapability),
+		InteractionForceInterrupter(config.InteractionCapability),
 	))
 	interactiveController := agentcoord.NewInteractiveRuntimeController(
 		interactiveRuntimeTabSource{terminalService: app.termSvc},
@@ -487,7 +484,7 @@ func (app *Server) ensureStoreBackedSSESubscriber(ctx context.Context, wsID stri
 	if be == nil {
 		return
 	}
-	if err := app.multiSub.EnsureActive(ctx, wsID, be, appstores.ActivationReasonSSE); err != nil {
+	if err := app.multiSub.EnsureActive(ctx, wsID, be, ActivationReasonSSE); err != nil {
 		logger.Warn("failed to start store-backed workspace subscriber",
 			"workspace", wsID, "err", err)
 	}

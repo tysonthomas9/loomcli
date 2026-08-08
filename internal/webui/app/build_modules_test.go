@@ -7,7 +7,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
-	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
+	"github.com/tysonthomas9/loomcli/internal/webui/localredis"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
@@ -26,10 +26,10 @@ func TestServer_BuildModules_ZeroValue(t *testing.T) {
 	// registered whenever there is no store (its Register no-ops without an
 	// agent service).
 	wantTypes := []string{
-		"*handlermux.WorkspaceOpsModule",
+		"*app.WorkspaceOpsModule",
 		"*issues.IssueModule",
 		"*issues.SessionModule",
-		"*log.Module",
+		"*app.LogModule",
 		"*git.PullRequestListModule",
 	}
 	for i, mod := range app.wsModules {
@@ -50,7 +50,7 @@ func TestServer_BuildModules_AllDeps(t *testing.T) {
 	app := Server{
 		hub:           hub,
 		termSvc:       &stubTerminalService{},
-		issueTabStore: issuetabs.NewStore(nil, nil),
+		issueTabStore: localredis.NewIssueTabStore(nil, nil),
 		fleetRegistry: &fleet.StoreRegistry{},
 		diffSvc:       &stubDiffService{},
 		fileSvc:       &stubFileService{},
@@ -77,10 +77,10 @@ func TestServer_BuildModules_StoreBacked(t *testing.T) {
 		t.Fatalf("len(wsModules) = %d, want 18", got)
 	}
 	wantTypes := []string{
-		"*handlermux.WorkspaceOpsModule",
+		"*app.WorkspaceOpsModule",
 		"*issues.IssueModule",
 		"*issues.SessionModule",
-		"*log.Module",
+		"*app.LogModule",
 		"*agents.Module",
 		"*agentsmanagement.Module",
 		"*interactionmanagement.Module",

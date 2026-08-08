@@ -18,6 +18,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/driver/daytonahost"
 	"github.com/tysonthomas9/loomcli/internal/driver/sandbox"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
 )
 
 // DaytonaTaskRunnerEntrypoint is the provider-blind Daytona task runner. It
@@ -40,7 +41,7 @@ func RunDaytonaProviderHost(
 	inherited := os.Environ()
 	return daytonahost.Run(ctx, opts, daytonahost.Runtime{
 		NodePath:     processNodePath(""),
-		BaseEnv:      scopedSubprocessBaseEnv(inherited),
+		BaseEnv:      platformruntime.FilterSubprocessEnv(platformruntime.SubprocessEnvDriverRemote, inherited),
 		InheritedEnv: inherited,
 	})
 }
@@ -108,7 +109,12 @@ func RunBundledTaskRunner(ctx context.Context, opts BundledRunnerOptions) (json.
 	if wt := strings.TrimSpace(opts.Worktree); wt != "" {
 		cmd.Dir = wt
 	}
-	cmd.Env = buildLeafRunnerEnv(opts, entrypoint, requestJSON)
+	leafEnv, shellCleanup, err := prepareBundledTaskRunnerEnv(opts, entrypoint, requestJSON)
+	if err != nil {
+		return nil, err
+	}
+	defer shellCleanup()
+	cmd.Env = leafEnv
 	cmd.Stdin = strings.NewReader(requestJSON)
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
@@ -130,13 +136,36 @@ func RunBundledTaskRunner(ctx context.Context, opts BundledRunnerOptions) (json.
 	return json.RawMessage(append([]byte{}, payload...)), nil
 }
 
+func prepareBundledTaskRunnerEnv(opts BundledRunnerOptions, entrypoint, requestJSON string) ([]string, func(), error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return nil, nil, fmt.Errorf("bundled runner: resolve host executable: %w", err)
+	}
+	env, cleanup, err := platformruntime.PinExecutableDirForLoginShell(
+		buildLeafRunnerEnv(opts, entrypoint, requestJSON),
+		executable,
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("bundled runner: prepare login shell: %w", err)
+	}
+	return env, cleanup, nil
+}
+
 // buildLeafRunnerEnv assembles the environment for the bundled Node launcher.
 // Every launch path applies the same trusted-local filter at the final child
 // boundary; callers are not trusted to have inherited a previously scrubbed
 // environment. In particular, forge and control-plane credentials never reach
 // the Node launcher.
 func buildLeafRunnerEnv(opts BundledRunnerOptions, entrypoint, requestJSON string) []string {
-	env := localTaskRunnerBaseEnv(os.Environ())
+	env := platformruntime.CurrentSubprocessEnv(platformruntime.SubprocessEnvDriverLocalTaskRunner)
+	// This is the final subprocess boundary before the model backend starts.
+	// The outer Driver launcher already pins its own PATH, but the bundled
+	// runner rebuilds the environment here from the current process. Re-pin it
+	// so ordinary `loom data` commands issued by the model resolve to the
+	// packaged sibling CLI instead of an older user-global installation.
+	if executable, err := os.Executable(); err == nil {
+		env = platformruntime.PinExecutableDirOnPath(env, executable)
+	}
 	env = append(env,
 		"LOOM_TASK_RUNNER_SERVER_PATH="+opts.ServerPath,
 		"LOOM_TASK_RUNNER_BUNDLE_ROOT="+filepath.Dir(opts.ServerPath),
@@ -294,7 +323,7 @@ func (r NodeRunner) runtimeEnv(req RunRequest, input []byte) ([]string, error) {
 }
 
 func flueRuntimeEnv(req RunRequest, input []byte, execTaskCommand []string) ([]string, error) {
-	env := driverRuntimeBaseEnv(os.Environ())
+	env := platformruntime.CurrentSubprocessEnv(platformruntime.SubprocessEnvDriverRemote)
 	env = append(env,
 		"LOOM_DRIVER_WORKSPACE="+req.Run.WorkspaceKey,
 		"LOOM_DRIVER_RUN_ID="+req.Run.RunID,

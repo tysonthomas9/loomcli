@@ -12,7 +12,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/driver/eventpolicy"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -140,7 +139,7 @@ func (s *awaitStore) matchJournalLocked(ws string, inst *domain.AwaitInstance) *
 		// workflow rows (including rows backfilled into a new await index)
 		// cannot satisfy registration-time catch-up merely by copying the
 		// system actor name.
-		if !eventpolicy.EligibleForAwait(
+		if !automation.EligibleForAwait(
 			event.EventType, string(event.Origin), event.SourceKind,
 			event.ActorRef, eventID,
 		) {

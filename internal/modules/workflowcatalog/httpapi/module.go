@@ -5,7 +5,6 @@ package httpapi
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -14,13 +13,15 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
+	"github.com/tysonthomas9/loomcli/internal/platform/httptransport"
 )
 
 const maxLifecycleRequestBytes = 1 << 20
 
 // ErrUnauthenticated is returned by resolvers when the request has no valid
-// credential from which an operator authority can be derived.
-var ErrUnauthenticated = errors.New("workflow catalog http: unauthenticated")
+// credential from which an operator authority can be derived. It aliases the
+// platform sentinel so every inbound adapter shares one classification.
+var ErrUnauthenticated = authority.ErrUnauthenticated
 
 // OperatorAuthorityResolver verifies request credentials and derives one
 // action- and workspace-scoped operator authority. Implementations must never
@@ -281,18 +282,17 @@ func decodeLifecycleRequest(w http.ResponseWriter, r *http.Request) (versionLife
 	if r.Body == nil || r.Body == http.NoBody || r.ContentLength == 0 {
 		return request, nil
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxLifecycleRequestBytes)
-	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&request); err != nil {
+	if err := httptransport.DecodeOneJSONRequest(w, r, &request, httptransport.JSONDecodeOptions{
+		MaxBytes:              maxLifecycleRequestBytes,
+		DisallowUnknownFields: true,
+	}); err != nil {
 		if errors.Is(err, io.EOF) {
 			return request, nil
 		}
+		if errors.Is(err, httptransport.ErrTrailingJSON) {
+			return versionLifecycleRequest{}, errors.New("request body contains trailing content")
+		}
 		return versionLifecycleRequest{}, err
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return versionLifecycleRequest{}, errors.New("request body contains trailing content")
 	}
 	return request, nil
 }

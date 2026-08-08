@@ -10,7 +10,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
-	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
+	"github.com/tysonthomas9/loomcli/internal/webui/localredis"
 )
 
 // fakePTYSource stubs the PTYSource interface so service-level liveness
@@ -59,7 +59,7 @@ func newLivenessTestSvc(t *testing.T) (*terminalServiceImpl, *fakePTYSource, *mi
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
-	store := tabmeta.NewStore(rdb, nil)
+	store := localredis.NewTabMetadataStore(rdb, nil)
 	fake := newFakePTYSource()
 	svc := &terminalServiceImpl{
 		tabStore:    store,
@@ -76,7 +76,7 @@ func putTestTab(t *testing.T, svc *terminalServiceImpl, wsID, name string) {
 
 func putTestTabAt(t *testing.T, svc *terminalServiceImpl, wsID, name string, at time.Time) {
 	t.Helper()
-	meta := &tabmeta.TabMetadata{
+	meta := &TabMetadata{
 		SessionName: name,
 		Workspace:   wsID,
 		Label:       name,
@@ -148,7 +148,7 @@ func TestListTabs_DoesNotTreatAgentMetadataWithoutLaunchAsAttachable(t *testing.
 	startedAt := time.Date(2026, 5, 5, 1, 0, 0, 0, time.UTC)
 	svc.startedAt = startedAt
 
-	if err := svc.tabStore.Set(ctx, &tabmeta.TabMetadata{
+	if err := svc.tabStore.Set(ctx, &TabMetadata{
 		SessionName: "term_stopped_agent",
 		Workspace:   ws,
 		Label:       "agent-worker-done",
@@ -219,7 +219,7 @@ func TestPutTab_RejectsOverwriteWhenPTYIsLive(t *testing.T) {
 	// Live session: PutTab should refuse to replace.
 	putTestTab(t, svc, ws, "sess")
 	fake.alive[SessionKey{Workspace: ws, Name: "sess"}] = true
-	meta := &tabmeta.TabMetadata{SessionName: "sess", Workspace: ws, Label: "replacement"}
+	meta := &TabMetadata{SessionName: "sess", Workspace: ws, Label: "replacement"}
 	err := svc.PutTab(ctx, ws, meta)
 	var svcErr *apperrors.ServiceError
 	if !errors.As(err, &svcErr) || svcErr.Kind != apperrors.KindConflict {
@@ -235,7 +235,7 @@ func TestPutTab_AllowsCreateWhenPTYIsLiveButMetadataMissing(t *testing.T) {
 	// The frontend can open the WebSocket before its metadata PUT completes.
 	// In that race the PTY exists, but this is still a create, not a replace.
 	fake.alive[SessionKey{Workspace: ws, Name: "sess"}] = true
-	meta := &tabmeta.TabMetadata{SessionName: "sess", Workspace: ws, Label: "new tab"}
+	meta := &TabMetadata{SessionName: "sess", Workspace: ws, Label: "new tab"}
 	if err := svc.PutTab(ctx, ws, meta); err != nil {
 		t.Fatalf("PutTab create with live PTY but missing metadata: %v", err)
 	}
@@ -255,7 +255,7 @@ func TestPutTab_AllowsReclaimWhenPTYIsDead(t *testing.T) {
 
 	// Stale metadata from a prior process, no live PTY — replace OK.
 	putTestTab(t, svc, ws, "sess")
-	meta := &tabmeta.TabMetadata{SessionName: "sess", Workspace: ws, Label: "reclaimed"}
+	meta := &TabMetadata{SessionName: "sess", Workspace: ws, Label: "reclaimed"}
 	if err := svc.PutTab(ctx, ws, meta); err != nil {
 		t.Fatalf("PutTab reclaim: %v", err)
 	}
@@ -272,7 +272,7 @@ func TestPutTabRejectsDeadCanonicalAgentTabReplacement(t *testing.T) {
 	svc, fake, _ := newLivenessTestSvc(t)
 	ctx := context.Background()
 	const ws = "w"
-	if err := svc.tabStore.Set(ctx, &tabmeta.TabMetadata{
+	if err := svc.tabStore.Set(ctx, &TabMetadata{
 		SessionName: "agent-tab", Workspace: ws, Kind: "agent", AgentID: "agent-1",
 		InteractionSessionID: "session-old", InteractionTerminalID: "terminal-old",
 	}); err != nil {
@@ -282,7 +282,7 @@ func TestPutTabRejectsDeadCanonicalAgentTabReplacement(t *testing.T) {
 	if fake.HasSession(key) {
 		t.Fatal("fixture unexpectedly has a process-local PTY")
 	}
-	err := svc.PutTab(ctx, ws, &tabmeta.TabMetadata{
+	err := svc.PutTab(ctx, ws, &TabMetadata{
 		SessionName: "agent-tab", Workspace: ws, Label: "ordinary replacement",
 	})
 	var typed *apperrors.ServiceError
@@ -301,19 +301,19 @@ func TestPutTabRejectsDeadCanonicalAgentTabReplacement(t *testing.T) {
 
 func TestPersistInteractionTabIdentityRequiresCompleteCanonicalOwner(t *testing.T) {
 	svc, _, _ := newLivenessTestSvc(t)
-	valid := &tabmeta.TabMetadata{
+	valid := &TabMetadata{
 		Workspace: "w", SessionName: "agent-tab", Kind: "agent", AgentID: "agent-1",
 		InteractionSessionID: "session-1", InteractionTerminalID: "terminal-1",
 		InteractionLeaseID: "lease-1", InteractionLeaseFencingToken: 4,
 	}
 
-	for name, meta := range map[string]*tabmeta.TabMetadata{
+	for name, meta := range map[string]*TabMetadata{
 		"nil":                 nil,
-		"wrong workspace":     func() *tabmeta.TabMetadata { value := *valid; value.Workspace = "other"; return &value }(),
-		"missing session":     func() *tabmeta.TabMetadata { value := *valid; value.InteractionSessionID = ""; return &value }(),
-		"missing terminal":    func() *tabmeta.TabMetadata { value := *valid; value.InteractionTerminalID = ""; return &value }(),
-		"missing lease":       func() *tabmeta.TabMetadata { value := *valid; value.InteractionLeaseID = ""; return &value }(),
-		"missing lease fence": func() *tabmeta.TabMetadata { value := *valid; value.InteractionLeaseFencingToken = 0; return &value }(),
+		"wrong workspace":     func() *TabMetadata { value := *valid; value.Workspace = "other"; return &value }(),
+		"missing session":     func() *TabMetadata { value := *valid; value.InteractionSessionID = ""; return &value }(),
+		"missing terminal":    func() *TabMetadata { value := *valid; value.InteractionTerminalID = ""; return &value }(),
+		"missing lease":       func() *TabMetadata { value := *valid; value.InteractionLeaseID = ""; return &value }(),
+		"missing lease fence": func() *TabMetadata { value := *valid; value.InteractionLeaseFencingToken = 0; return &value }(),
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := svc.PersistInteractionTabIdentity(t.Context(), "w", meta)
@@ -371,7 +371,7 @@ func TestDeleteTabMetadataOnlyStillInvokesLifecycleKill(t *testing.T) {
 	svc, fake, _ := newLivenessTestSvc(t)
 	ctx := context.Background()
 	const ws = "w"
-	if err := svc.tabStore.Set(ctx, &tabmeta.TabMetadata{
+	if err := svc.tabStore.Set(ctx, &TabMetadata{
 		SessionName: "agent-tab", Workspace: ws, Kind: "agent", AgentID: "agent-1",
 		InteractionSessionID: "session-old", InteractionTerminalID: "terminal-old",
 	}); err != nil {
@@ -396,7 +396,7 @@ func TestDeleteTabWaitsForAgentLifecycleBoundary(t *testing.T) {
 	svc, fake, _ := newLivenessTestSvc(t)
 	ctx := context.Background()
 	const ws = "w"
-	if err := svc.tabStore.Set(ctx, &tabmeta.TabMetadata{
+	if err := svc.tabStore.Set(ctx, &TabMetadata{
 		SessionName: "agent-tab", Workspace: ws, Kind: "agent", AgentID: "agent-1",
 		InteractionSessionID: "session-1", InteractionTerminalID: "terminal-1",
 	}); err != nil {

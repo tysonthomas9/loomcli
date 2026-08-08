@@ -1,7 +1,6 @@
 package issues
 
 import (
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"time"
@@ -105,9 +104,8 @@ func handleSaveIssueTabs(tabs interaction.IssueTabStateAPI, hub *realtime.Hub) h
 // decodeAndSaveTabState decodes the request body and persists the tab state.
 // Returns the saved state, or writes an error response and returns an error.
 func decodeAndSaveTabState(tabs interaction.IssueTabStateAPI, r *http.Request, w http.ResponseWriter, wsID, issueID string) (*interaction.IssueTabState, error) {
-	r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
 	var req issueTabSaveRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{MaxBytes: handler.MaxRequestBody}); err != nil {
 		handler.WriteJSON(w, http.StatusBadRequest, issueTabResponse{Success: false, Error: "invalid request body"})
 		return nil, err
 	}

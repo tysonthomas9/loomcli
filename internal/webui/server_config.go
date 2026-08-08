@@ -13,46 +13,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/servercapabilities"
 	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 )
-
-// AutomationCapability is the narrow composition handle consumed by the web
-// application and the serve lifecycle root. It exposes no issuer, persistence
-// transport, or process-wide Store.
-type AutomationCapability = servercapabilities.Automation
-
-// AgentsCapability is the narrow Phase 5 identity handle published by serve
-// composition. Web adapters receive the public API and request-bound operator
-// resolver only; the Fleet transport and issuer remain private.
-type AgentsCapability = servercapabilities.Agents
-
-// AgentProvisioningCapability is the narrow request-facing process-manager
-// handle. Web adapters can begin and converge one durable intent, but cannot
-// recover pending work or reach any capability issuer or Fleet transport.
-type AgentProvisioningCapability = servercapabilities.AgentProvisioning
-
-// InteractionSessionAuthorityResolver derives one action-scoped
-// SessionAuthority from a raw child lease proof after durable validation. The
-// concrete issuer and FleetDB credential verifier remain in serve composition.
-type InteractionSessionAuthorityResolver = servercapabilities.InteractionSessionAuthorityResolver
-
-// InteractionCapability is the Phase 5 session, terminal, inbox, and combined
-// activity handle. The web layer receives only capability commands/queries and
-// a request-bound operator resolver; raw lease credentials remain inside
-// server-derived SessionAuthority values.
-type InteractionCapability = servercapabilities.Interaction
-
-// ExecutionCapability is the narrow active Phase 4 composition handle. Web
-// adapters receive intent APIs and exact-purpose authority resolvers only;
-// the shared issuer, admission registry, and persistence adapters stay in
-// app/serve.
-type ExecutionCapability = servercapabilities.Execution
-
-// ArtifactsCapability is the narrow owner-fenced lifecycle handle published
-// by serve composition. Web modules receive only the module API, never the
-// low-level FleetDB transport or the process-wide Store mutation surface.
-type ArtifactsCapability = servercapabilities.Artifacts
 
 const (
 	DefaultPort            = 8080
@@ -109,16 +71,16 @@ type ServerConfig struct {
 	// module. Web UI composition only registers it; it never receives the
 	// capability's persistence adapter or low-level FleetDB client.
 	WorkflowCatalogModule     interface{ Register(*http.ServeMux) }
-	WorkflowCatalogAPI        servercapabilities.WorkflowCatalogAPI
-	WorkflowCatalogAuthoring  servercapabilities.WorkflowCatalogVersionAuthoringAPI
-	WorkflowCatalogOperator   servercapabilities.WorkflowCatalogOperatorAuthorityResolver
-	WorkflowTargetPreparation func(context.Context, string, string) (*servercapabilities.WorkflowCatalogDriver, error)
+	WorkflowCatalogAPI        WorkflowCatalogAPI
+	WorkflowCatalogAuthoring  WorkflowCatalogVersionAuthoringAPI
+	WorkflowCatalogOperator   WorkflowCatalogOperatorAuthorityResolver
+	WorkflowTargetPreparation func(context.Context, string, string) (*WorkflowCatalogDriver, error)
 	AutomationCapability      AutomationCapability
 	AgentsCapability          AgentsCapability
 	AgentProvisioning         AgentProvisioningCapability
-	SourceControl             servercapabilities.SourceControlMaterializer
-	WorkspaceSourceControl    servercapabilities.RepositoryAdmissionMaterializer
-	WorkspaceCatalog          servercapabilities.WorkspaceAPI
+	SourceControl             SourceControlMaterializer
+	WorkspaceSourceControl    RepositoryAdmissionMaterializer
+	WorkspaceCatalog          WorkspaceAPI
 	InteractionCapability     InteractionCapability
 	MonitorHandlers           MonitorHandlers                    // Pre-built handlers for monitor/metrics endpoints (injected by cli)
 	GitOps                    ops.GitOps                         // Git operations interface (optional; nil disables git endpoints)
@@ -148,15 +110,15 @@ type ServerConfig struct {
 	// clients used behind the run-token-authenticated DriverRun and TaskRun
 	// facades. Embedded mode captures its process-local service credential in
 	// this closure instead of exporting it through environment state.
-	ExecutionIssueBackends func(workspace, actor string) (servercapabilities.IssueBackend, error)
-	DriverAPIToken         string                                   // Optional shared bearer token required by the driver-op HTTP API (LOOM_DRIVER_API_TOKEN)
-	DriverAPIBaseURL       string                                   // This serve process's own driver/task-run API base URL, required by task runners as LOOM_TASK_RUN_API_URL
-	DriverRunTokenKey      []byte                                   // HS256 signing key for run-scoped driver-op tokens (LOOM_RUN_TOKEN_SIGNING_KEY or ephemeral); nil disables the token auth path
-	ExecutionCapability    ExecutionCapability                      // Active Execution APIs and typed authority resolvers; nil fails mutating execution routes closed
-	DaytonaProvider        servercapabilities.DaytonaProviderBroker // Host-owned, owner-fenced Daytona provider operation; nil fails closed.
-	ArtifactsCapability    ArtifactsCapability                      // Active owner-fenced Artifact lifecycle; nil fails artifact mutations closed
-	Logger                 *slog.Logger                             // Structured logger (optional; nil falls back to slog.Default())
-	SentryDSN              string                                   // Sentry/GlitchTip DSN for error tracking (optional; empty disables)
+	ExecutionIssueBackends func(workspace, actor string) (IssueBackend, error)
+	DriverAPIToken         string                // Optional shared bearer token required by the driver-op HTTP API (LOOM_DRIVER_API_TOKEN)
+	DriverAPIBaseURL       string                // This serve process's own driver/task-run API base URL, required by task runners as LOOM_TASK_RUN_API_URL
+	DriverRunTokenKey      []byte                // HS256 signing key for run-scoped driver-op tokens (LOOM_RUN_TOKEN_SIGNING_KEY or ephemeral); nil disables the token auth path
+	ExecutionCapability    ExecutionCapability   // Active Execution APIs and typed authority resolvers; nil fails mutating execution routes closed
+	DaytonaProvider        DaytonaProviderBroker // Host-owned, owner-fenced Daytona provider operation; nil fails closed.
+	ArtifactsCapability    ArtifactsCapability   // Active owner-fenced Artifact lifecycle; nil fails artifact mutations closed
+	Logger                 *slog.Logger          // Structured logger (optional; nil falls back to slog.Default())
+	SentryDSN              string                // Sentry/GlitchTip DSN for error tracking (optional; empty disables)
 	// IssueBackendFn returns the active backend.IssueBackend wrapped at server
 	// composition by the Work Items capability's narrow durable adapter. When
 	// nil, Work Items HTTP and onboarding routes remain unavailable.
@@ -168,7 +130,7 @@ type ServerConfig struct {
 	// The ctx carries the per-request workspace ID via middleware.WithWorkspace,
 	// allowing the closure to construct a per-workspace fleet-db backend in
 	// cloud mode. Local wirings return the process-global fleet-db backend.
-	IssueBackendFn func(ctx context.Context) servercapabilities.IssueBackend
+	IssueBackendFn func(ctx context.Context) IssueBackend
 }
 
 // WorkspaceIDResolverFn resolves a workspace name to its stable UUID.

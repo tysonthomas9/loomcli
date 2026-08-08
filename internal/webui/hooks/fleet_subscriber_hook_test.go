@@ -191,7 +191,7 @@ func TestFleetSubscriberHook_Activate_StartsSubscriber(t *testing.T) {
 	hook, multiSub, registry := newFleetSubscriberHookEnv(t)
 
 	// Add hook to registry AFTER the resource provider, mirroring what
-	// appinfra.RegisterHooks does (FleetBackendHook before FleetSubscriberHook).
+	// app.RegisterHooks does (FleetBackendHook before FleetSubscriberHook).
 	registerFleetWorkspaceWithBackend(t, registry, "ws-fleet-1")
 	if err := registry.AddHook(hook); err != nil {
 		t.Fatalf("AddHook(fleet-subscriber): %v", err)

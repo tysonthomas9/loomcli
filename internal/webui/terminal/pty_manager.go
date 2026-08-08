@@ -28,7 +28,6 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -38,7 +37,7 @@ import (
 	"github.com/creack/pty"
 
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
-	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
+	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
 )
 
 // ErrPTYMaxSessionsReached is returned by AttachSession when the concurrent-
@@ -73,7 +72,7 @@ const termEnv = "TERM=xterm-256color"
 const workspaceEnvPrefix = "LOOM_WORKSPACE="
 
 func terminalSpawnEnv(base []string) []string {
-	filtered := pinCurrentLoomOnPath(interaction.FilterChildBaseEnv(base))
+	filtered := pinCurrentLoomOnPath(platformruntime.FilterSubprocessEnv(platformruntime.SubprocessEnvInteractionChild, base))
 	env := make([]string, 0, len(filtered)+1)
 	for _, entry := range filtered {
 		switch {
@@ -94,28 +93,7 @@ func terminalSpawnEnv(base []string) []string {
 // plain `loom` commands from its shell. Without this pin an older user-global
 // binary can win PATH and speak an incompatible local FleetDB protocol.
 func pinCurrentLoomOnPath(env []string) []string {
-	executable := strings.TrimSpace(loomExecutableForTerminal())
-	if executable == "" || executable == "loom" || !filepath.IsAbs(executable) {
-		return env
-	}
-	executableDir := filepath.Clean(filepath.Dir(executable))
-	pathValue := ""
-	out := make([]string, 0, len(env)+1)
-	for _, entry := range env {
-		name, value, ok := strings.Cut(entry, "=")
-		if ok && name == "PATH" {
-			pathValue = value
-			continue
-		}
-		out = append(out, entry)
-	}
-	pathEntries := []string{executableDir}
-	for _, entry := range filepath.SplitList(pathValue) {
-		if filepath.Clean(entry) != executableDir {
-			pathEntries = append(pathEntries, entry)
-		}
-	}
-	return append(out, "PATH="+strings.Join(pathEntries, string(os.PathListSeparator)))
+	return platformruntime.PinExecutableDirOnPath(env, loomExecutableForTerminal())
 }
 
 func terminalSessionEnv(base []string, key SessionKey) []string {
@@ -301,7 +279,7 @@ func (m *PTYManager) SetBeforeKill(hook BeforeKillFunc) {
 // reattached is true when the returned attachment is to a session that
 // existed before this call (typical for page refresh or network blip).
 // Callers should check Attachment.Scrollback() for replay bytes.
-func (m *PTYManager) AttachSession(key SessionKey, cols, rows uint16, launch *tabmeta.LaunchSpec) (att Attachment, reattached bool, err error) {
+func (m *PTYManager) AttachSession(key SessionKey, cols, rows uint16, launch *LaunchSpec) (att Attachment, reattached bool, err error) {
 	if cols == 0 {
 		cols = 80
 	}
@@ -380,9 +358,9 @@ func (m *PTYManager) EnsureSession(key SessionKey, cols, rows uint16, argv []str
 			m.mu.Unlock()
 			return false, ErrPTYMaxSessionsReached
 		}
-		var launch *tabmeta.LaunchSpec
+		var launch *LaunchSpec
 		if len(argv) > 0 {
-			launch = &tabmeta.LaunchSpec{Argv: argv}
+			launch = &LaunchSpec{Argv: argv}
 		}
 		newSess, spawnErr := m.spawnSession(key, cols, rows, launch)
 		if spawnErr != nil {
@@ -415,7 +393,7 @@ func (m *PTYManager) WriteToSession(key SessionKey, p []byte) error {
 }
 
 // spawnSession must be called with m.mu held.
-func (m *PTYManager) spawnSession(key SessionKey, cols, rows uint16, launch *tabmeta.LaunchSpec) (*ptySession, error) {
+func (m *PTYManager) spawnSession(key SessionKey, cols, rows uint16, launch *LaunchSpec) (*ptySession, error) {
 	var useArgv []string
 	if launch != nil {
 		useArgv = launch.Argv

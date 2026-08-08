@@ -5,30 +5,24 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	legacyproviders "github.com/tysonthomas9/loomcli/internal/infra/connectorsproviders/providerimpl"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 )
 
 type providerStub struct {
-	call legacyproviders.CallSpec
+	call CallSpec
 }
 
-func (stub *providerStub) Call(_ context.Context, call legacyproviders.CallSpec) (legacyproviders.CallResult, error) {
+func (stub *providerStub) Call(_ context.Context, call CallSpec) (CallResult, error) {
 	stub.call = call
-	return legacyproviders.CallResult{
-		Status: 201, Body: map[string]any{"ok": true}, Decision: domain.ConnectorCallGranted,
+	return CallResult{
+		Status: 201, Body: map[string]any{"ok": true}, Decision: connectorsmodule.ConnectorCallGranted,
 	}, nil
 }
 
-func TestRegistryAdaptsOwnerProviderCall(t *testing.T) {
-	legacy := legacyproviders.NewRegistry()
+func TestRegistryUsesOwnerProviderCall(t *testing.T) {
+	registry := NewRegistry()
 	stub := &providerStub{}
-	if err := legacy.Register(domain.ConnectorSourceGitHub, stub); err != nil {
-		t.Fatal(err)
-	}
-	registry, err := New(legacy)
-	if err != nil {
+	if err := registry.Register(connectorsmodule.ConnectorSourceGitHub, stub); err != nil {
 		t.Fatal(err)
 	}
 	provider, err := registry.Get(connectorsmodule.ConnectorSourceGitHub)
@@ -43,18 +37,16 @@ func TestRegistryAdaptsOwnerProviderCall(t *testing.T) {
 		t.Fatalf("Call = %+v, %v", result, err)
 	}
 	if stub.call.Credential != "secret" || stub.call.IdempotencyKey != "call-1" {
-		t.Fatalf("legacy call = %+v", stub.call)
+		t.Fatalf("owner call = %+v", stub.call)
 	}
 }
 
 func TestRegistryFailsClosed(t *testing.T) {
-	if _, err := New(nil); !errors.Is(err, connectorsmodule.ErrUnavailable) {
-		t.Fatalf("New(nil) = %v", err)
+	var unavailable *Registry
+	if _, err := unavailable.Get(connectorsmodule.ConnectorSourceGitHub); !errors.Is(err, connectorsmodule.ErrUnavailable) {
+		t.Fatalf("nil registry Get = %v", err)
 	}
-	registry, err := New(legacyproviders.NewRegistry())
-	if err != nil {
-		t.Fatal(err)
-	}
+	registry := NewRegistry()
 	if _, err := registry.Get(connectorsmodule.ConnectorSourceGitHub); !errors.Is(err, connectorsmodule.ErrNotFound) {
 		t.Fatalf("Get missing = %v", err)
 	}

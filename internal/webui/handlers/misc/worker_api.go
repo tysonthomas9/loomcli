@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -101,12 +102,28 @@ type workerRegisterResponse struct {
 	Token    string `json:"token,omitempty"`
 }
 
+const maxWorkerStreamBodyBytes int64 = 1 << 20
+
+func readWorkerStreamBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxWorkerStreamBodyBytes))
+	if err == nil {
+		return body, true
+	}
+	var maxBytesErr *http.MaxBytesError
+	if errors.As(err, &maxBytesErr) {
+		handler.RespondError(w, http.StatusRequestEntityTooLarge, "request body too large")
+		return nil, false
+	}
+	handler.RespondError(w, http.StatusBadRequest, "failed to read body")
+	return nil, false
+}
+
 // HandleWorkerRegister registers a new remote worker.
 // If validateWorkspace is non-nil, the workspace UUID is validated at registration time.
 func HandleWorkerRegister(registry *WorkerRegistry, validateWorkspace func(id string) bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req workerRegisterRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{}); err != nil {
 			handler.RespondError(w, http.StatusBadRequest, "invalid request body")
 			return
 		}
@@ -186,7 +203,7 @@ func handleWorkerState(registry *WorkerRegistry, resolveWorktreePath func(worksp
 		}
 
 		var req workerStateRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{}); err != nil {
 			handler.RespondError(w, http.StatusBadRequest, "invalid request body")
 			return
 		}
@@ -247,9 +264,8 @@ func handleWorkerEvents(registry *WorkerRegistry, resolveEventsDir func(workspac
 			return
 		}
 
-		body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1MB limit
-		if err != nil {
-			handler.RespondError(w, http.StatusBadRequest, "failed to read body")
+		body, ok := readWorkerStreamBody(w, r)
+		if !ok {
 			return
 		}
 
@@ -280,9 +296,8 @@ func handleWorkerLogs(registry *WorkerRegistry, resolveLogPath func(workspace, a
 			return
 		}
 
-		body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1MB limit
-		if err != nil {
-			handler.RespondError(w, http.StatusBadRequest, "failed to read body")
+		body, ok := readWorkerStreamBody(w, r)
+		if !ok {
 			return
 		}
 

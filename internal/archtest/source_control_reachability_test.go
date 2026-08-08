@@ -24,7 +24,7 @@ func TestPhase5SourceControlProductionReachabilityRatchet(t *testing.T) {
 	}
 
 	required := map[string][]string{
-		"internal/app/serve/sourcecontrolcomposition/source_control.go": {
+		"internal/app/serve/source_control_composition.go": {
 			"MaterializeWorkspace",
 			"FetchRepositoryRef",
 		},
@@ -140,7 +140,7 @@ func TestPhase5SourceControlProductionReachabilityRatchet(t *testing.T) {
 		"PrepareRepositoryCheckout",
 	})
 	for _, path := range productionGoFilesBelow(t, root, "internal") {
-		if path == "internal/app/serve/sourcecontrolcomposition/source_control.go" {
+		if path == "internal/app/serve/source_control_composition.go" {
 			continue
 		}
 		facts := loadSourceControlFileFacts(t, root, path)
@@ -192,7 +192,7 @@ func TestPhase5SourceControlProductionReachabilityRatchet(t *testing.T) {
 		"internal/modules/connectors/",
 	}
 	credentialOwnerFiles := map[string]bool{
-		"internal/app/serve/sourcecontrolcomposition/source_control.go": true,
+		"internal/app/serve/source_control_composition.go": true,
 	}
 	for _, path := range productionGoFilesBelow(t, root, "internal") {
 		if credentialOwnerFiles[path] || pathHasAnyPrefix(path, credentialOwnerPrefixes) {

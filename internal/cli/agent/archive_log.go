@@ -18,7 +18,7 @@ import (
 // returned file and must Close it.
 //
 // This lives in the agent package (rather than each caller importing
-// internal/webui/log directly) so daemon-side callers like the supervisor can
+// internal/logstore directly) so daemon-side callers like the supervisor can
 // archive agent output without taking on an extra cross-cutting import.
 func OpenAgentArchiveLog(workspaceID, agentName string) (*os.File, error) {
 	archivePath, err := webuilog.GetAgentLogPath(workspaceID, agentName)

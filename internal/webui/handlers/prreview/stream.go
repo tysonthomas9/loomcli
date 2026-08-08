@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
-	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
@@ -254,34 +253,17 @@ func writeReviewerStatus(sw *realtime.Writer, lastStatus *string, snap reviewerS
 
 //nolint:funlen // Keep the exhaustive authority and Interaction error-to-HTTP classification in one auditable response matrix.
 func writeReviewerConversationError(w http.ResponseWriter, err error) {
-	var admissionErr *authority.AdmissionError
-	if errors.As(err, &admissionErr) {
-		writeReviewerAdmissionError(w, admissionErr)
+	if classification, ok := authority.ClassifyAuthenticationAuthorityError(err); ok {
+		status, code, message := http.StatusForbidden, "forbidden", "operator is not allowed to read this workspace"
+		switch classification {
+		case authority.AuthenticationAuthorityErrorUnauthenticated,
+			authority.AuthenticationAuthorityErrorInvalidAdmission:
+			status, code, message = http.StatusUnauthorized, "unauthenticated", "operator authentication required"
+		}
+		writePRReviewErrorCode(w, status, code, message, false)
 		return
 	}
 	switch {
-	case errors.Is(err, workflowcataloghttp.ErrUnauthenticated),
-		errors.Is(err, authority.ErrInvalidPrincipal),
-		errors.Is(err, authority.ErrPrincipalExpired),
-		errors.Is(err, authority.ErrOpaqueAuthority):
-		writePRReviewErrorCode(
-			w,
-			http.StatusUnauthorized,
-			"unauthenticated",
-			"operator authentication required",
-			false,
-		)
-	case errors.Is(err, authority.ErrAdmissionDenied),
-		errors.Is(err, authority.ErrWorkspaceMismatch),
-		errors.Is(err, authority.ErrPrincipalClass),
-		errors.Is(err, authority.ErrActionNotAllowed):
-		writePRReviewErrorCode(
-			w,
-			http.StatusForbidden,
-			"forbidden",
-			"operator is not allowed to read this workspace",
-			false,
-		)
 	case errors.Is(err, interaction.ErrUnavailable):
 		writePRReviewErrorCode(
 			w,
@@ -313,30 +295,6 @@ func writeReviewerConversationError(w http.ResponseWriter, err error) {
 			"upstream_error",
 			"failed to resolve reviewer conversation",
 			true,
-		)
-	}
-}
-
-func writeReviewerAdmissionError(
-	w http.ResponseWriter,
-	admissionErr *authority.AdmissionError,
-) {
-	switch admissionErr.Reason {
-	case authority.DenialInvalidAuthority, authority.DenialExpired:
-		writePRReviewErrorCode(
-			w,
-			http.StatusUnauthorized,
-			"unauthenticated",
-			"operator authentication required",
-			false,
-		)
-	default:
-		writePRReviewErrorCode(
-			w,
-			http.StatusForbidden,
-			"forbidden",
-			"operator is not allowed to read this workspace",
-			false,
 		)
 	}
 }

@@ -19,7 +19,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/workspace"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/infra/sessionstoreadapter"
-	"github.com/tysonthomas9/loomcli/internal/infra/usageprojection"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
@@ -247,12 +246,12 @@ func exitCodeFromErr(invokeErr error) int {
 
 // appendUsageRecord persists a usage record to the workspace usage.jsonl.
 func appendUsageRecord(rec usage.SessionUsage) {
-	store, err := usageprojection.New(cli.GetWorkspaceRuntimeDir())
+	store, err := usage.NewProjection(cli.GetWorkspaceRuntimeDir())
 	if err != nil {
 		log.Printf("[agent] Warning: usage store unavailable: %v", err)
 		return
 	}
-	if err := usageprojection.Append(store, rec); err != nil {
+	if err := store.Append(rec); err != nil {
 		log.Printf("[agent] Warning: failed to record usage: %v", err)
 	}
 }

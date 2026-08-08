@@ -10,9 +10,9 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/pathsec"
+	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
-	"github.com/tysonthomas9/loomcli/internal/webui/servercapabilities"
 )
 
 // Compile-time check.
@@ -27,7 +27,7 @@ type diffServiceImpl struct {
 	scope     WorkspaceScope
 }
 
-type IssueBackendProvider func(context.Context) servercapabilities.IssueBackend
+type IssueBackendProvider func(context.Context) webui.IssueBackend
 type WorkspaceScope func(context.Context, string) context.Context
 
 // NewDiffService creates a new DiffService implementation.

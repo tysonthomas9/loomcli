@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
 	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
 
 type canonicalInteractiveCreatorStub struct {
@@ -152,5 +154,27 @@ func TestCreateInteractiveAgentPropagatesCanonicalNotFound(t *testing.T) {
 	creator := &canonicalInteractiveCreatorStub{}
 	if _, err := creator.GetRole(t.Context(), "WS", "missing"); !errors.Is(err, agentsmodule.ErrNotFound) {
 		t.Fatalf("GetRole error = %v", err)
+	}
+}
+
+func TestParseCanonicalInteractiveAgentCreateUsesBoundedExactOnePolicy(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "unknown field", body: `{"name":"lead","role_name":"lead","unexpected":true}`},
+		{name: "trailing JSON", body: `{"name":"lead","role_name":"lead"} {}`},
+		{
+			name: "oversized",
+			body: `{"name":"` + strings.Repeat("x", handler.MaxRequestBody) + `","role_name":"lead"}`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if _, message := parseCanonicalInteractiveAgentCreate([]byte(test.body), "WS"); message != "invalid request body" {
+				t.Fatalf("validation message = %q, want invalid request body", message)
+			}
+		})
 	}
 }

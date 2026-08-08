@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	. "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol/stacklineage"
+	. "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 )
 
 // Ported from git-town lineage_test.go (Ancestor/Ancestors/Root over deep chains)
@@ -51,7 +51,7 @@ func TestNextToMergeUnits(t *testing.T) {
 
 func TestNextToMergeUnits_Forest(t *testing.T) {
 	// Two parallel chains: A1->A2 and B1->B2. Both chain-bottoms are next.
-	nodes := []Node{
+	nodes := []StackNode{
 		{TaskID: "A1"}, {TaskID: "A2", BaseTaskID: "A1"},
 		{TaskID: "B1"}, {TaskID: "B2", BaseTaskID: "B1"},
 	}

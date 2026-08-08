@@ -40,11 +40,7 @@ var cursorAuthStatus = defaultCursorAuthStatus
 func buildCursorInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
 	cmd := exec.Command("cursor-agent", "--force", prompt) //nolint:gosec // G204: prompt is from the CLI operator, not untrusted input
 	cmd.Dir = workDir
-	env := append(cli.FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
-	if agentName != "" {
-		env = append(env, "LOOM_AGENT_NAME="+agentName)
-	}
-	cmd.Env = env
+	cmd.Env = buildBackendEnv(workDir, agentName)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -60,11 +56,7 @@ func defaultCursorInvoker(workDir, prompt, agentName string) error {
 
 		cmd := exec.Command("cursor-agent", "-p", "--force", prompt) //nolint:gosec // G204: prompt is from the CLI operator, not untrusted input
 		cmd.Dir = workDir
-		env := append(cli.FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
-		if agentName != "" {
-			env = append(env, "LOOM_AGENT_NAME="+agentName)
-		}
-		cmd.Env = env
+		cmd.Env = buildBackendEnv(workDir, agentName)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		return cmd.Run()
@@ -79,11 +71,6 @@ func defaultCursorInvoker(workDir, prompt, agentName string) error {
 }
 
 func defaultCursorNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
-	env := append(cli.FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
-	if agentName != "" {
-		env = append(env, "LOOM_AGENT_NAME="+agentName)
-	}
-
 	fmt.Println("Launching Cursor agent (non-interactive)...")
 	fmt.Println("")
 
@@ -93,7 +80,7 @@ func defaultCursorNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 		BinaryName:  "cursor-agent",
 		Args:        []string{"-p", "--output-format", "stream-json", "--force", prompt},
 		WorkDir:     workDir,
-		Env:         env,
+		Env:         buildBackendEnv(workDir, agentName),
 		Prompt:      "",
 		HarnessName: "", // no built-in classifier; fall back to generic cost/quota patterns
 		LineHandler: func(line string) {

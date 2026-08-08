@@ -804,6 +804,25 @@ func TestVerifyRunOpProvesOwnerThroughExecution(t *testing.T) {
 	}
 }
 
+func TestIssueOpsFailClosedWithoutInjectedExecutionIssueBackend(t *testing.T) {
+	h := newTestHarness(t, "")
+	h.module.issueBackends = nil
+	t.Setenv("LOOM_FLEET_DB_API_KEY", "ambient-credentials-must-not-enable-the-handler")
+
+	resp, decoded := h.do(t, opRequest{
+		op:      "issue-get",
+		body:    map[string]string{"issueId": "TASK-1"},
+		headers: h.ownerHeaders(),
+	})
+	if resp.StatusCode != http.StatusServiceUnavailable || errorCode(t, decoded) != "unavailable" {
+		t.Fatalf("status/body = %d/%v, want 503 unavailable", resp.StatusCode, decoded)
+	}
+	errorBody, _ := decoded["error"].(map[string]any)
+	if !strings.Contains(fmt.Sprint(errorBody["message"]), "not configured") {
+		t.Fatalf("error body = %v, want explicit missing-injection reason", errorBody)
+	}
+}
+
 func TestUpdateAgentParentUsesVerifiedDriverRunGeneration(t *testing.T) {
 	h := newTestHarness(t, "")
 	if _, err := h.store.Roles().Create(t.Context(), store.RoleCreate{WorkspaceKey: "WS", Name: "task"}); err != nil {
@@ -1416,5 +1435,69 @@ func TestDriverAPIInvalidParams(t *testing.T) {
 	}
 	if code := errorCode(t, decoded); code != "invalid" {
 		t.Fatalf("error code = %q, want invalid", code)
+	}
+}
+
+func TestDecodeParamsRejectsTrailingJSON(t *testing.T) {
+	type params struct {
+		TaskID string `json:"taskId"`
+	}
+
+	got, err := decodeParams[params]([]byte(`{"taskId":"TASK-1"}`))
+	if err != nil || got.TaskID != "TASK-1" {
+		t.Fatalf("decodeParams(valid) = (%+v, %v), want TASK-1", got, err)
+	}
+
+	_, err = decodeParams[params]([]byte(`{"taskId":"TASK-1"} {"taskId":"TASK-2"}`))
+	if err == nil || !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("decodeParams(trailing) error = %T %v, want domain.ErrInvalid", err, err)
+	}
+
+	if err := decodeNoParams([]byte(`{} {}`)); err == nil || !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("decodeNoParams(trailing) error = %T %v, want domain.ErrInvalid", err, err)
+	}
+}
+
+func TestRoleGetUsesInjectedPromptReader(t *testing.T) {
+	h := newTestHarness(t, "")
+	if _, err := h.store.Roles().Create(t.Context(), store.RoleCreate{
+		WorkspaceKey: "WS",
+		Name:         "reviewer",
+		Prompt:       "persisted inline prompt",
+		PromptFile:   "/machine-local/reviewer.md",
+	}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+
+	var readRole *domain.Role
+	h.module.rolePrompts = func(role *domain.Role) string {
+		readRole = role
+		return "materialized file prompt"
+	}
+	resp, decoded := h.do(t, opRequest{
+		op:      "role-get",
+		body:    map[string]string{"name": "reviewer"},
+		headers: h.ownerHeaders(),
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status/body = %d/%v, want 200", resp.StatusCode, decoded)
+	}
+	if readRole == nil || readRole.Name != "reviewer" {
+		t.Fatalf("prompt reader role = %+v, want reviewer", readRole)
+	}
+	if got := decoded["prompt"]; got != "materialized file prompt" {
+		t.Fatalf("prompt = %v, want materialized file prompt", got)
+	}
+}
+
+func TestRoleGetFailsClosedWithoutPromptReader(t *testing.T) {
+	h := newTestHarness(t, "")
+	resp, decoded := h.do(t, opRequest{
+		op:      "role-get",
+		body:    map[string]string{"name": "reviewer"},
+		headers: h.ownerHeaders(),
+	})
+	if resp.StatusCode != http.StatusServiceUnavailable || errorCode(t, decoded) != "unavailable" {
+		t.Fatalf("status/body = %d/%v, want 503 unavailable", resp.StatusCode, decoded)
 	}
 }

@@ -18,7 +18,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/driver/eventpolicy"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -71,7 +70,7 @@ func runOutcomeJournalEvent(outcome RunOutcome) *automation.Event {
 	return &automation.Event{
 		WorkspaceKey: outcome.WorkspaceKey,
 		EventID:      RunOutcomeJournalEventID(outcome.WorkspaceKey, outcome.EventID),
-		SourceKind:   eventpolicy.SourceKindExecution, SourceEventID: outcome.EventID,
+		SourceKind:   execution.RunFinishedSourceKind, SourceEventID: outcome.EventID,
 		EventType: outcome.EventType, SubjectRef: outcome.RunID, ActorRef: outcome.ActorRef,
 		EpicID:     outcome.EpicID,
 		Origin:     automation.EventOriginSystem,

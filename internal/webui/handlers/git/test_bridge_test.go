@@ -11,10 +11,10 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/servercapabilities"
 	"github.com/tysonthomas9/loomcli/internal/webui/sourcecontrolcoord"
 )
 
@@ -207,7 +207,7 @@ func (s *stubDiffService) GetIssueDiffStat(_ context.Context, _, _ string) (*sou
 	return &sourcecontrolcoord.IssueDiffStatResult{}, nil
 }
 
-func newTestDiffService(gitOps ops.GitOps, backendFn func(context.Context) servercapabilities.IssueBackend) sourcecontrolcoord.DiffService {
+func newTestDiffService(gitOps ops.GitOps, backendFn func(context.Context) webui.IssueBackend) sourcecontrolcoord.DiffService {
 	return sourcecontrolcoord.NewDiffService(gitOps, backendFn, middleware.WithWorkspace)
 }
 

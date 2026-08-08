@@ -8,15 +8,13 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/webui/appinfra"
-	"github.com/tysonthomas9/loomcli/internal/webui/handlermux"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 )
 
 func wrapWorkspaceCreateFn(
 	innerCreate workspacecoord.WorkspaceCreateFn,
-	registry *appinfra.WorkspaceRegistry,
+	registry *WorkspaceRegistry,
 ) workspacecoord.WorkspaceCreateFn {
 	if innerCreate == nil {
 		return nil
@@ -61,7 +59,7 @@ func wrapWorkspaceCreateFn(
 // after the Workspace owner command has durably deleted the aggregate.
 func wrapWorkspaceDeleteCleanupFn(
 	innerCleanup func(string) error,
-	registry *appinfra.WorkspaceRegistry,
+	registry *WorkspaceRegistry,
 ) func(string) error {
 	if innerCleanup == nil && registry == nil {
 		return nil
@@ -103,7 +101,7 @@ func (app *Server) registerWorkerAPIRoutes() {
 		return
 	}
 
-	handlermux.SetupWorkerAPIRoutes(app.mux, workerToken,
+	SetupWorkerAPIRoutes(app.mux, workerToken,
 		workerResolveWorktree(app.config.Store),
 		workerResolveEventsDir(app.config.Store),
 		workerResolveLogPath(app.config.Store),

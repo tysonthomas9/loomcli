@@ -2,6 +2,7 @@ package driver
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -14,9 +15,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	stackstore "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore"
-	stackstoreadapter "github.com/tysonthomas9/loomcli/internal/infra/stackstoreadapter"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
-	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol/stacklineage"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -85,26 +84,19 @@ func setupLineageFixture(t *testing.T) lineageFixture {
 	}
 
 	stacks := stackstore.New(loomDir)
-	if err := stacks.EnsureStack(ctx, sl.Stack{
+	if err := stacks.EnsureStackRecord(ctx, sourcecontrol.Stack{
 		ID:           "epic-E1",
 		WorkspaceKey: "TEST",
-		RepoName:     "app",
+		Repository:   "app",
 		RootBase:     "main",
 	}); err != nil {
 		t.Fatalf("ensure stack: %v", err)
 	}
-	if _, err := stacks.AddNode(ctx, "TEST", "epic-E1", "task-a", "", sl.CommitModeAgent); err != nil {
+	if _, err := stacks.AddStackNodeRecord(ctx, "TEST", "epic-E1", "task-a", "", sourcecontrol.CommitModeAgent); err != nil {
 		t.Fatalf("add node task-a: %v", err)
 	}
-	if _, err := stacks.AddNode(ctx, "TEST", "epic-E1", "task-b", "task-a", sl.CommitModeAgent); err != nil {
+	if _, err := stacks.AddStackNodeRecord(ctx, "TEST", "epic-E1", "task-b", "task-a", sourcecontrol.CommitModeAgent); err != nil {
 		t.Fatalf("add node task-b: %v", err)
-	}
-	if err := stacks.UpdateNode(ctx, "TEST", "epic-E1", "task-a", func(n *sl.Node) error {
-		n.OutputBranch = predBranch
-		n.State = sl.NodeStatePublished
-		return nil
-	}); err != nil {
-		t.Fatalf("update node task-a: %v", err)
 	}
 
 	return lineageFixture{
@@ -180,13 +172,13 @@ func TestStackLineageLookup_BaseRefForTask(t *testing.T) {
 	ctx := context.Background()
 	loomDir := t.TempDir()
 	stacks := stackstore.New(loomDir)
-	if err := stacks.EnsureStack(ctx, sl.Stack{ID: "epic-E1", WorkspaceKey: "TEST", RepoName: "app", RootBase: "main"}); err != nil {
+	if err := stacks.EnsureStackRecord(ctx, sourcecontrol.Stack{ID: "epic-E1", WorkspaceKey: "TEST", Repository: "app", RootBase: "main"}); err != nil {
 		t.Fatalf("ensure stack: %v", err)
 	}
-	if _, err := stacks.AddNode(ctx, "TEST", "epic-E1", "task-a", "", sl.CommitModeAgent); err != nil {
+	if _, err := stacks.AddStackNodeRecord(ctx, "TEST", "epic-E1", "task-a", "", sourcecontrol.CommitModeAgent); err != nil {
 		t.Fatalf("add task-a: %v", err)
 	}
-	if _, err := stacks.AddNode(ctx, "TEST", "epic-E1", "task-b", "task-a", sl.CommitModeAgent); err != nil {
+	if _, err := stacks.AddStackNodeRecord(ctx, "TEST", "epic-E1", "task-b", "task-a", sourcecontrol.CommitModeAgent); err != nil {
 		t.Fatalf("add task-b: %v", err)
 	}
 	lookup := StackLineageLookup{Bindings: mustTestStackLifecycle(t, stacks)}
@@ -208,10 +200,8 @@ func TestStackLineageLookup_BaseRefForTask(t *testing.T) {
 	// Predecessor with no output branch (empty-diff): Stage 2 slides past it.
 	// task-a is the root, so task-b re-parents onto the stack RootBase ("main")
 	// rather than falling open to the repo default branch.
-	if err := stacks.UpdateNode(ctx, "TEST", "epic-E1", "task-a", func(n *sl.Node) error {
-		n.OutputBranch = ""
-		n.State = sl.NodeStateEmpty
-		return nil
+	if err := stacks.UpdateStackNodePublicationRecord(ctx, "TEST", "epic-E1", "task-a", sourcecontrol.StackNodePublicationMutation{
+		State: sourcecontrol.StackPublicationEmpty,
 	}); err != nil {
 		t.Fatalf("clear task-a branch: %v", err)
 	}
@@ -235,13 +225,13 @@ func TestStackLineageLookup_BaseRefForTask(t *testing.T) {
 func TestStackLineageLookup_RepoScopingAndAmbiguity(t *testing.T) {
 	ctx := context.Background()
 	stacks := stackstore.New(t.TempDir())
-	mustStack := func(id sl.StackID, repo, root string) {
-		if err := stacks.EnsureStack(ctx, sl.Stack{ID: id, WorkspaceKey: "TEST", RepoName: repo, RootBase: root}); err != nil {
+	mustStack := func(id sourcecontrol.StackID, repo, root string) {
+		if err := stacks.EnsureStackRecord(ctx, sourcecontrol.Stack{ID: id, WorkspaceKey: "TEST", Repository: repo, RootBase: root}); err != nil {
 			t.Fatalf("ensure %s: %v", id, err)
 		}
 	}
-	mustNode := func(id sl.StackID, taskID, base string) {
-		if _, err := stacks.AddNode(ctx, "TEST", id, taskID, base, sl.CommitModeAgent); err != nil {
+	mustNode := func(id sourcecontrol.StackID, taskID, base string) {
+		if _, err := stacks.AddStackNodeRecord(ctx, "TEST", id, taskID, base, sourcecontrol.CommitModeAgent); err != nil {
 			t.Fatalf("add %s/%s: %v", id, taskID, err)
 		}
 	}
@@ -263,12 +253,6 @@ func TestStackLineageLookup_RepoScopingAndAmbiguity(t *testing.T) {
 	// Two stacks for the SAME repo both containing the same task id → ambiguous.
 	mustStack("epicA", "app", "main")
 	mustNode("epicA", "dup", "")
-	if err := stacks.UpdateNode(ctx, "TEST", "epicA", "dup", func(n *sl.Node) error {
-		n.BaseTaskID = "missing-in-epicA"
-		return nil
-	}); err != nil {
-		t.Fatalf("corrupt first ambiguous stack: %v", err)
-	}
 	mustStack("epicB", "app", "trunk")
 	mustNode("epicB", "dup", "")
 	if ref, ok, err := lookup.BaseRefForTask(ctx, "TEST", "app", "dup"); err != nil || ok || ref != "" {
@@ -283,24 +267,19 @@ func TestStackLineageLookup_RepoScopingAndAmbiguity(t *testing.T) {
 // nearest usable ancestor under Source Control's owner policy.
 func TestStackLineageLookup_GraphCorruptionSurfaced(t *testing.T) {
 	ctx := context.Background()
-	stacks := stackstore.New(t.TempDir())
-	if err := stacks.EnsureStack(ctx, sl.Stack{ID: "epic", WorkspaceKey: "TEST", RepoName: "app", RootBase: "main"}); err != nil {
+	loomDir := t.TempDir()
+	stacks := stackstore.New(loomDir)
+	if err := stacks.EnsureStackRecord(ctx, sourcecontrol.Stack{ID: "epic", WorkspaceKey: "TEST", Repository: "app", RootBase: "main"}); err != nil {
 		t.Fatalf("ensure: %v", err)
 	}
-	if _, err := stacks.AddNode(ctx, "TEST", "epic", "task-a", "", sl.CommitModeAgent); err != nil {
+	if _, err := stacks.AddStackNodeRecord(ctx, "TEST", "epic", "task-a", "", sourcecontrol.CommitModeAgent); err != nil {
 		t.Fatalf("add a: %v", err)
 	}
-	if _, err := stacks.AddNode(ctx, "TEST", "epic", "task-b", "task-a", sl.CommitModeAgent); err != nil {
+	if _, err := stacks.AddStackNodeRecord(ctx, "TEST", "epic", "task-b", "task-a", sourcecontrol.CommitModeAgent); err != nil {
 		t.Fatalf("add b: %v", err)
 	}
 	// Corrupt the graph: point task-b at a predecessor that is not in the stack.
-	// (UpdateNode does not re-validate, so this models on-disk corruption.)
-	if err := stacks.UpdateNode(ctx, "TEST", "epic", "task-b", func(n *sl.Node) error {
-		n.BaseTaskID = "ghost-task"
-		return nil
-	}); err != nil {
-		t.Fatalf("corrupt: %v", err)
-	}
+	corruptStoredStackNodeBase(t, loomDir, "TEST", "epic", "task-b", "ghost-task")
 	_, ok, err := (StackLineageLookup{Bindings: mustTestStackLifecycle(t, stacks)}).BaseRefForTask(ctx, "TEST", "app", "task-b")
 	if ok {
 		t.Fatalf("corrupt graph returned ok=true, want surfaced error")
@@ -310,13 +289,36 @@ func TestStackLineageLookup_GraphCorruptionSurfaced(t *testing.T) {
 	}
 }
 
-func mustTestStackLifecycle(t *testing.T, store stackstore.Store) sourcecontrol.StackLifecycle {
+func corruptStoredStackNodeBase(t *testing.T, loomDir, workspace, stackID, taskID, baseTaskID string) {
 	t.Helper()
-	adapter, err := stackstoreadapter.New(store)
+	path := filepath.Join(loomDir, "stacks.json")
+	data, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("compose stack adapter: %v", err)
+		t.Fatalf("read stack fixture: %v", err)
 	}
-	service, err := sourcecontrol.NewStackLifecycle(adapter, time.Now)
+	var document map[string]any
+	if err := json.Unmarshal(data, &document); err != nil {
+		t.Fatalf("decode stack fixture: %v", err)
+	}
+	workspaces := document["workspaces"].(map[string]any)
+	workspaceValue := workspaces[workspace].(map[string]any)
+	stacks := workspaceValue["stacks"].(map[string]any)
+	stack := stacks[stackID].(map[string]any)
+	nodes := stack["nodes"].(map[string]any)
+	node := nodes[taskID].(map[string]any)
+	node["baseTaskId"] = baseTaskID
+	data, err = json.MarshalIndent(document, "", "  ")
+	if err != nil {
+		t.Fatalf("encode corrupt stack fixture: %v", err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write corrupt stack fixture: %v", err)
+	}
+}
+
+func mustTestStackLifecycle(t *testing.T, store sourcecontrol.StackLifecycleStore) sourcecontrol.StackLifecycle {
+	t.Helper()
+	service, err := sourcecontrol.NewStackLifecycle(store, time.Now)
 	if err != nil {
 		t.Fatalf("compose stack lifecycle: %v", err)
 	}

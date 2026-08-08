@@ -438,7 +438,7 @@ func reservedDispatchRequest(reserved *ReservationResult, item ReservedDelivery)
 	delivery := item.Delivery
 	return ExecutionDispatchRequest{
 		WorkspaceKey:            event.WorkspaceKey,
-		IdempotencyKey:          deliveryDispatchIdempotencyKey(event.IdempotencyKey, delivery.TriggerBindingID),
+		IdempotencyKey:          DeliveryDispatchIdempotencyKey(event.IdempotencyKey, delivery.TriggerBindingID),
 		ExpectedDeliveryStatus:  delivery.Status,
 		ExpectedDeliveryAttempt: delivery.Attempt,
 		DriverID:                item.Target.DriverID,
@@ -463,10 +463,16 @@ func reservedDispatchRequest(reserved *ReservationResult, item ReservedDelivery)
 	}
 }
 
-// deliveryDispatchIdempotencyKey preserves every historically valid dispatch
-// key byte-for-byte. Only a legacy concatenation Fleet would reject is mapped
+// DeliveryDispatchIdempotencyKey derives the canonical per-binding execution
+// identity for one admitted delivery. It is the Automation-owned policy used
+// by delivery adapters: incomplete event/binding coordinates stay absent, every
+// historically valid {eventIdempotencyKey}#{bindingID} value is preserved
+// byte-for-byte, and only a legacy concatenation Fleet would reject is mapped
 // to a bounded, deterministic digest of the complete legacy value.
-func deliveryDispatchIdempotencyKey(eventIdempotencyKey, bindingID string) string {
+func DeliveryDispatchIdempotencyKey(eventIdempotencyKey, bindingID string) string {
+	if eventIdempotencyKey == "" || bindingID == "" {
+		return ""
+	}
 	legacy := eventIdempotencyKey + "#" + bindingID
 	if deliveryDispatchLegacyKeyAccepted(legacy) {
 		return legacy

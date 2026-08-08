@@ -43,3 +43,12 @@ func TestBuildConnectorDispatcherVaultSourcePrecedence(t *testing.T) {
 		}
 	})
 }
+
+func TestBuildConnectorDispatcherRequiresCompositionStore(t *testing.T) {
+	key := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x42}, 32))
+	t.Setenv(connectorsmodule.VaultKeyEnvVar, key)
+	server := &Server{config: webui.ServerConfig{}}
+	if dispatcher := server.buildConnectorDispatcher(); dispatcher != nil {
+		t.Fatal("buildConnectorDispatcher enabled egress without an injected composition store")
+	}
+}

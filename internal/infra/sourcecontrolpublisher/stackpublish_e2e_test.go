@@ -30,9 +30,7 @@ import (
 
 	stackpublish "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolpublisher"
 	stackstore "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore"
-	stackstoreadapter "github.com/tysonthomas9/loomcli/internal/infra/stackstoreadapter"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
-	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol/stacklineage"
 )
 
 const e2eWS = "E2E"
@@ -63,14 +61,14 @@ func gitT(t *testing.T, dir string, args ...string) string {
 // materialize (re)creates each unit's local branch at base+<task>.txt, in order.
 // Re-running with a different order regenerates the branch commits — exactly the
 // SHA-regenerating behavior a real Loom assembler exhibits.
-func materialize(t *testing.T, repoPath string, id sl.StackID, order []string, rootBase string) {
+func materialize(t *testing.T, repoPath string, id sourcecontrol.StackID, order []string, rootBase string) {
 	t.Helper()
 	for i, task := range order {
 		base := rootBase
 		if i > 0 {
-			base = sl.OutputBranchName(id, order[i-1])
+			base = sourcecontrol.OutputBranchName(id, order[i-1])
 		}
-		branch := sl.OutputBranchName(id, task)
+		branch := sourcecontrol.OutputBranchName(id, task)
 		gitT(t, repoPath, "checkout", "-B", branch, base)
 		// Content is unique per run (id carries a UnixNano suffix) so a re-run
 		// against a repo whose main was polluted by a prior merge still commits.
@@ -82,9 +80,9 @@ func materialize(t *testing.T, repoPath string, id sl.StackID, order []string, r
 }
 
 // prsByHead returns the namespace's PRs keyed by head ref (preferring open).
-func prsByHead(t *testing.T, f stackpublish.Forge, owner, repo string, id sl.StackID) map[string]stackpublish.PR {
+func prsByHead(t *testing.T, f stackpublish.Forge, owner, repo string, id sourcecontrol.StackID) map[string]stackpublish.PR {
 	t.Helper()
-	prs, err := f.ListStackPRs(context.Background(), owner, repo, sl.StackBranchPrefix(id))
+	prs, err := f.ListStackPRs(context.Background(), owner, repo, sourcecontrol.StackBranchPrefix(id))
 	require.NoError(t, err)
 	m := map[string]stackpublish.PR{}
 	for _, p := range prs {
@@ -111,17 +109,15 @@ func TestE2EStackPublisher(t *testing.T) {
 	forge := stackpublish.NewGitHubForge(token, nil, "")
 
 	// Unique stack id per run so the shared repo never collides.
-	id := sl.StackID(fmt.Sprintf("manual:e2e-%d", time.Now().UnixNano()))
+	id := sourcecontrol.StackID(fmt.Sprintf("manual:e2e-%d", time.Now().UnixNano()))
 	store := stackstore.New(t.TempDir())
-	require.NoError(t, store.EnsureStack(ctx, sl.Stack{ID: id, WorkspaceKey: e2eWS, RepoName: repo, RootBase: "main"}))
+	require.NoError(t, store.EnsureStackRecord(ctx, sourcecontrol.Stack{ID: id, WorkspaceKey: e2eWS, Repository: repo, RootBase: "main"}))
 
 	repoPath := t.TempDir()
 	out, err := exec.Command("gh", "repo", "clone", slug, repoPath).CombinedOutput() //nolint:norawexec
 	require.NoErrorf(t, err, "gh repo clone: %s", out)
 
-	adapter, err := stackstoreadapter.New(store)
-	require.NoError(t, err)
-	stacks, err := sourcecontrol.NewStackLifecycle(adapter, time.Now)
+	stacks, err := sourcecontrol.NewStackLifecycle(store, time.Now)
 	require.NoError(t, err)
 	rec := &stackpublish.Reconciler{Stacks: stacks, Forge: forge}
 
@@ -135,12 +131,12 @@ func TestE2EStackPublisher(t *testing.T) {
 		}
 	})
 
-	br := func(task string) string { return sl.OutputBranchName(id, task) }
+	br := func(task string) string { return sourcecontrol.OutputBranchName(id, task) }
 
 	// --- Scenario 1: initial stacked publish ---------------------------------
 	for _, task := range []string{"T1", "T2", "T3"} {
 		base := map[string]string{"T1": "", "T2": "T1", "T3": "T2"}[task]
-		_, e := store.AddNode(ctx, e2eWS, id, task, base, "")
+		_, e := store.AddStackNodeRecord(ctx, e2eWS, id, task, base, "")
 		require.NoError(t, e)
 	}
 	materialize(t, repoPath, id, []string{"T1", "T2", "T3"}, "main")
@@ -179,7 +175,7 @@ func TestE2EStackPublisher(t *testing.T) {
 	assert.Equal(t, baseNum["T1"], prs[br("T1")].Number, "PR numbers stable across idempotent re-run")
 
 	// --- Scenario 3: drop the middle unit ------------------------------------
-	require.NoError(t, store.RemoveNode(ctx, e2eWS, id, "T2"))
+	require.NoError(t, store.RemoveStackNodeRecord(ctx, e2eWS, id, "T2"))
 	materialize(t, repoPath, id, []string{"T1", "T3"}, "main") // T3 reparented onto T1
 	_, err = rec.Publish(ctx, e2eWS, id, repoPath, stackpublish.Options{})
 	require.NoError(t, err)
@@ -193,9 +189,9 @@ func TestE2EStackPublisher(t *testing.T) {
 
 	// --- Scenario 4: reorder/swap (the spr ghost-merge + git-town 422 case) ---
 	// Fresh stack so the swap starts from a clean baseline.
-	id2 := sl.StackID(fmt.Sprintf("manual:e2e-swap-%d", time.Now().UnixNano()))
-	require.NoError(t, store.EnsureStack(ctx, sl.Stack{ID: id2, WorkspaceKey: e2eWS, RepoName: repo, RootBase: "main"}))
-	br2 := func(task string) string { return sl.OutputBranchName(id2, task) }
+	id2 := sourcecontrol.StackID(fmt.Sprintf("manual:e2e-swap-%d", time.Now().UnixNano()))
+	require.NoError(t, store.EnsureStackRecord(ctx, sourcecontrol.Stack{ID: id2, WorkspaceKey: e2eWS, Repository: repo, RootBase: "main"}))
+	br2 := func(task string) string { return sourcecontrol.OutputBranchName(id2, task) }
 	t.Cleanup(func() {
 		for head, pr := range prsByHead(t, forge, owner, repo, id2) {
 			if pr.State == "open" {
@@ -206,7 +202,7 @@ func TestE2EStackPublisher(t *testing.T) {
 	})
 	for _, task := range []string{"U1", "U2", "U3"} {
 		base := map[string]string{"U1": "", "U2": "U1", "U3": "U2"}[task]
-		_, e := store.AddNode(ctx, e2eWS, id2, task, base, "")
+		_, e := store.AddStackNodeRecord(ctx, e2eWS, id2, task, base, "")
 		require.NoError(t, e)
 	}
 	materialize(t, repoPath, id2, []string{"U1", "U2", "U3"}, "main")
@@ -216,7 +212,7 @@ func TestE2EStackPublisher(t *testing.T) {
 	preU3 := swapNum("U3")
 
 	// Swap U2 and U3 → desired U1 -> U3 -> U2.
-	require.NoError(t, store.MoveNode(ctx, e2eWS, id2, "U3", "U1"))
+	require.NoError(t, store.MoveStackNodeRecord(ctx, e2eWS, id2, "U3", "U1"))
 	materialize(t, repoPath, id2, []string{"U1", "U3", "U2"}, "main")
 	_, err = rec.Publish(ctx, e2eWS, id2, repoPath, stackpublish.Options{})
 	require.NoError(t, err, "reorder publish must not 422")
@@ -234,9 +230,9 @@ func TestE2EStackPublisher(t *testing.T) {
 	// --- Scenario 5: external merge → unit terminal, descendant auto-slides ----
 	// Validates decision 1 (fully control-plane authoritative): a PR merged on
 	// GitHub is terminal and its descendants slide to RootBase on the next publish.
-	id3 := sl.StackID(fmt.Sprintf("manual:e2e-merge-%d", time.Now().UnixNano()))
-	require.NoError(t, store.EnsureStack(ctx, sl.Stack{ID: id3, WorkspaceKey: e2eWS, RepoName: repo, RootBase: "main"}))
-	br3 := func(task string) string { return sl.OutputBranchName(id3, task) }
+	id3 := sourcecontrol.StackID(fmt.Sprintf("manual:e2e-merge-%d", time.Now().UnixNano()))
+	require.NoError(t, store.EnsureStackRecord(ctx, sourcecontrol.Stack{ID: id3, WorkspaceKey: e2eWS, Repository: repo, RootBase: "main"}))
+	br3 := func(task string) string { return sourcecontrol.OutputBranchName(id3, task) }
 	t.Cleanup(func() {
 		for head, pr := range prsByHead(t, forge, owner, repo, id3) {
 			if pr.State == "open" {
@@ -247,7 +243,7 @@ func TestE2EStackPublisher(t *testing.T) {
 	})
 	for _, task := range []string{"M1", "M2"} {
 		base := map[string]string{"M1": "", "M2": "M1"}[task]
-		_, e := store.AddNode(ctx, e2eWS, id3, task, base, "")
+		_, e := store.AddStackNodeRecord(ctx, e2eWS, id3, task, base, "")
 		require.NoError(t, e)
 	}
 	materialize(t, repoPath, id3, []string{"M1", "M2"}, "main")
@@ -267,16 +263,16 @@ func TestE2EStackPublisher(t *testing.T) {
 	assert.True(t, prs[br3("M1")].Merged, "M1's PR is merged")
 	assert.Equal(t, "open", prs[br3("M2")].State)
 	assert.Equal(t, "main", prs[br3("M2")].Base, "M2 auto-slides to RootBase past the merged M1")
-	for _, n := range func() []sl.Node { ns, _ := store.ListNodes(ctx, e2eWS, id3); return ns }() {
+	for _, n := range func() []sourcecontrol.StackNode { ns, _ := store.ListStackNodeRecords(ctx, e2eWS, id3); return ns }() {
 		if n.TaskID == "M1" {
-			assert.Equal(t, sl.NodeStateMerged, n.State, "M1 recorded as merged (terminal)")
+			assert.Equal(t, sourcecontrol.NodeStateMerged, n.State, "M1 recorded as merged (terminal)")
 		}
 	}
 
 	// --- Scenario 6: forest — two parallel linear chains off the same base ----
-	id4 := sl.StackID(fmt.Sprintf("manual:e2e-forest-%d", time.Now().UnixNano()))
-	require.NoError(t, store.EnsureStack(ctx, sl.Stack{ID: id4, WorkspaceKey: e2eWS, RepoName: repo, RootBase: "main"}))
-	br4 := func(task string) string { return sl.OutputBranchName(id4, task) }
+	id4 := sourcecontrol.StackID(fmt.Sprintf("manual:e2e-forest-%d", time.Now().UnixNano()))
+	require.NoError(t, store.EnsureStackRecord(ctx, sourcecontrol.Stack{ID: id4, WorkspaceKey: e2eWS, Repository: repo, RootBase: "main"}))
+	br4 := func(task string) string { return sourcecontrol.OutputBranchName(id4, task) }
 	t.Cleanup(func() {
 		for head, pr := range prsByHead(t, forge, owner, repo, id4) {
 			if pr.State == "open" {
@@ -286,7 +282,7 @@ func TestE2EStackPublisher(t *testing.T) {
 		}
 	})
 	for _, e := range []struct{ id, base string }{{"A1", ""}, {"A2", "A1"}, {"B1", ""}, {"B2", "B1"}} {
-		_, ae := store.AddNode(ctx, e2eWS, id4, e.id, e.base, "")
+		_, ae := store.AddStackNodeRecord(ctx, e2eWS, id4, e.id, e.base, "")
 		require.NoError(t, ae)
 	}
 	materialize(t, repoPath, id4, []string{"A1", "A2"}, "main")
@@ -301,9 +297,9 @@ func TestE2EStackPublisher(t *testing.T) {
 	assert.Equal(t, br4("B1"), prs[br4("B2")].Base)
 
 	// --- Scenario 7: a published unit that goes empty has its PR closed --------
-	id5 := sl.StackID(fmt.Sprintf("manual:e2e-empty-%d", time.Now().UnixNano()))
-	require.NoError(t, store.EnsureStack(ctx, sl.Stack{ID: id5, WorkspaceKey: e2eWS, RepoName: repo, RootBase: "main"}))
-	br5 := func(task string) string { return sl.OutputBranchName(id5, task) }
+	id5 := sourcecontrol.StackID(fmt.Sprintf("manual:e2e-empty-%d", time.Now().UnixNano()))
+	require.NoError(t, store.EnsureStackRecord(ctx, sourcecontrol.Stack{ID: id5, WorkspaceKey: e2eWS, Repository: repo, RootBase: "main"}))
+	br5 := func(task string) string { return sourcecontrol.OutputBranchName(id5, task) }
 	t.Cleanup(func() {
 		for head, pr := range prsByHead(t, forge, owner, repo, id5) {
 			if pr.State == "open" {
@@ -312,7 +308,7 @@ func TestE2EStackPublisher(t *testing.T) {
 			_ = exec.Command("git", "-C", repoPath, "push", "origin", "--delete", head).Run() //nolint:norawexec
 		}
 	})
-	_, err = store.AddNode(ctx, e2eWS, id5, "E1", "", "")
+	_, err = store.AddStackNodeRecord(ctx, e2eWS, id5, "E1", "", "")
 	require.NoError(t, err)
 	materialize(t, repoPath, id5, []string{"E1"}, "main")
 	_, err = rec.Publish(ctx, e2eWS, id5, repoPath, stackpublish.Options{})
@@ -326,9 +322,9 @@ func TestE2EStackPublisher(t *testing.T) {
 	assert.Equal(t, "closed", prsByHead(t, forge, owner, repo, id5)[br5("E1")].State, "empty unit's PR is closed")
 
 	// --- Scenario 8: squash-merged predecessor → slide guard fails closed ------
-	id6 := sl.StackID(fmt.Sprintf("manual:e2e-squash-%d", time.Now().UnixNano()))
-	require.NoError(t, store.EnsureStack(ctx, sl.Stack{ID: id6, WorkspaceKey: e2eWS, RepoName: repo, RootBase: "main"}))
-	br6 := func(task string) string { return sl.OutputBranchName(id6, task) }
+	id6 := sourcecontrol.StackID(fmt.Sprintf("manual:e2e-squash-%d", time.Now().UnixNano()))
+	require.NoError(t, store.EnsureStackRecord(ctx, sourcecontrol.Stack{ID: id6, WorkspaceKey: e2eWS, Repository: repo, RootBase: "main"}))
+	br6 := func(task string) string { return sourcecontrol.OutputBranchName(id6, task) }
 	t.Cleanup(func() {
 		for head, pr := range prsByHead(t, forge, owner, repo, id6) {
 			if pr.State == "open" {
@@ -338,7 +334,7 @@ func TestE2EStackPublisher(t *testing.T) {
 		}
 	})
 	for _, e := range []struct{ id, base string }{{"S1", ""}, {"S2", "S1"}} {
-		_, ae := store.AddNode(ctx, e2eWS, id6, e.id, e.base, "")
+		_, ae := store.AddStackNodeRecord(ctx, e2eWS, id6, e.id, e.base, "")
 		require.NoError(t, ae)
 	}
 	materialize(t, repoPath, id6, []string{"S1", "S2"}, "main")

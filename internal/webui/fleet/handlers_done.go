@@ -2,7 +2,6 @@ package fleet
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -64,10 +63,9 @@ func handleFleetDoneWithStore(store fleetDoneStore) http.HandlerFunc { //nolint:
 			return
 		}
 
-		// Parse request body
-		r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
+		// Parse request body.
 		var req FleetDoneRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{MaxBytes: handler.MaxRequestBody}); err != nil {
 			var maxBytesErr *http.MaxBytesError
 			if errors.As(err, &maxBytesErr) {
 				handler.WriteJSON(w, http.StatusRequestEntityTooLarge, FleetDoneResponse{

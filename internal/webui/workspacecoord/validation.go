@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
-	"github.com/tysonthomas9/loomcli/internal/workspaceerrors"
 )
 
 var cloneURLPattern = regexp.MustCompile(`^(https://|git@)`)
@@ -239,16 +238,16 @@ func isBlockedCloneHost(host string) bool {
 
 // classifyWorkspaceCreateError maps a workspace creation error to a ServiceError.
 func classifyWorkspaceCreateError(err error) *ServiceError {
-	var ce *workspaceerrors.CreateError
+	var ce *workspacemodule.CreateError
 	if errors.As(err, &ce) {
 		switch ce.Code {
-		case workspaceerrors.AlreadyExists:
+		case workspacemodule.AlreadyExists:
 			return ErrConflict(ce.Message)
-		case workspaceerrors.PathNotFound, workspaceerrors.NotGitRepo, workspaceerrors.GitFailed:
+		case workspacemodule.PathNotFound, workspacemodule.NotGitRepo, workspacemodule.GitFailed:
 			return ErrValidation(ce.Message)
-		case workspaceerrors.SecurityViolation:
+		case workspacemodule.SecurityViolation:
 			return ErrForbidden(ce.Message)
-		case workspaceerrors.ConfigFailed:
+		case workspacemodule.ConfigFailed:
 			return ErrInternal(ce.Message, err)
 		}
 	}

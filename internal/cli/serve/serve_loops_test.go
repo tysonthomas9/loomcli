@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/cli/serve/runtimecomposition"
 	driverexecutor "github.com/tysonthomas9/loomcli/internal/driver"
 	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
@@ -73,13 +72,13 @@ func TestStartIssueJournalBridge_MemstoreGatedNoLoop(t *testing.T) {
 	// memstore does not implement store.IssueJournalReader, so the bridge must
 	// not start: no cursor state file is ever created.
 	mem := memstore.New()
-	runtimecomposition.StartIssueJournalBridge(
+	startIssueJournalBridge(
 		ctx, mem, nil, nil, nil, &trigger.InternalSource{Store: mem},
 		buildServeRuntimeConfig().IssueJournal,
 	)
 
 	// Also a nil store is a clean no-op.
-	runtimecomposition.StartIssueJournalBridge(
+	startIssueJournalBridge(
 		ctx, nil, nil, nil, nil, nil,
 		buildServeRuntimeConfig().IssueJournal,
 	)
@@ -101,7 +100,7 @@ func TestStartIssueJournalBridge_DisabledFlagHonored(t *testing.T) {
 	// Even with a reader-capable store the disabled flag wins: no loop, no
 	// cursor file.
 	mem := memstore.New()
-	runtimecomposition.StartIssueJournalBridge(
+	startIssueJournalBridge(
 		ctx, readerCapableStore{Store: mem}, nil, nil, nil,
 		&trigger.InternalSource{Store: mem},
 		buildServeRuntimeConfig().IssueJournal,
@@ -129,7 +128,7 @@ func TestStartIssueJournalBridge_EnabledLoopWritesCursorState(t *testing.T) {
 	// A reader-capable store passes the gate; the first pass fast-forwards the
 	// seeded workspace to the (empty) journal tail and persists its cursor, so
 	// the state file appears.
-	runtimecomposition.StartIssueJournalBridge(
+	startIssueJournalBridge(
 		ctx, readerCapableStore{Store: mem}, nil, nil, nil,
 		&trigger.InternalSource{Store: mem},
 		buildServeRuntimeConfig().IssueJournal,
@@ -216,7 +215,7 @@ func TestBuildIssueJournalBridgeAlwaysEnablesTaskReviewEvents(t *testing.T) {
 
 	t.Setenv(envLoomIssueBridgeDisabled, "")
 	t.Setenv(envLoomIssueBridgeStatePath, filepath.Join(t.TempDir(), "cursor.json"))
-	bridge := runtimecomposition.BuildIssueJournalBridge(
+	bridge := buildIssueJournalBridge(
 		readerCapableStore{Store: mem}, nil, nil, nil, source,
 		buildServeRuntimeConfig().IssueJournal,
 	)
@@ -241,7 +240,7 @@ func TestTaskReadyRepositoryRequired(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := runtimecomposition.TaskReadyRepositoryRequired(tt.issueType, tt.sourceRepo, tt.repoCount); got != tt.want {
+			if got := taskReadyRepositoryRequired(tt.issueType, tt.sourceRepo, tt.repoCount); got != tt.want {
 				t.Fatalf("taskReadyRepositoryRequired(%q, %q, %d) = %v, want %v",
 					tt.issueType, tt.sourceRepo, tt.repoCount, got, tt.want)
 			}
@@ -251,13 +250,13 @@ func TestTaskReadyRepositoryRequired(t *testing.T) {
 
 func TestBlockRepositoryRequiredTaskUsesAtomicExtension(t *testing.T) {
 	atomic := &repositoryRequirementTestBackend{result: &backend.RepositoryRequirementResult{Changed: true}}
-	result, err := runtimecomposition.BlockRepositoryRequiredTask(t.Context(), atomic, "TASK-1")
+	result, err := blockRepositoryRequiredTask(t.Context(), atomic, "TASK-1")
 	if err != nil || !result.Blocked || result.DispatchReady != nil || len(atomic.ids) != 1 || atomic.ids[0] != "TASK-1" {
 		t.Fatalf("block result/error/calls = %+v/%v/%v, want changed TASK-1", result, err, atomic.ids)
 	}
 
 	atomic.result = &backend.RepositoryRequirementResult{Replayed: true, Blocked: true}
-	result, err = runtimecomposition.BlockRepositoryRequiredTask(t.Context(), atomic, "TASK-1")
+	result, err = blockRepositoryRequiredTask(t.Context(), atomic, "TASK-1")
 	if err != nil || result.Blocked || result.DispatchReady != nil {
 		t.Fatalf("replayed block result/error = %+v/%v, want suppressed no-op", result, err)
 	}
@@ -269,7 +268,7 @@ func TestBlockRepositoryRequiredTaskUsesAtomicExtension(t *testing.T) {
 			HasDesign: true, Labels: []string{"phase4"}, UpdatedAt: time.Date(2026, 7, 18, 23, 0, 0, 0, time.UTC),
 		},
 	}
-	result, err = runtimecomposition.BlockRepositoryRequiredTask(t.Context(), atomic, "TASK-1")
+	result, err = blockRepositoryRequiredTask(t.Context(), atomic, "TASK-1")
 	if err != nil || result.Blocked || result.DispatchReady == nil {
 		t.Fatalf("dispatch-ready result/error = %+v/%v", result, err)
 	}
@@ -285,7 +284,7 @@ func TestBlockRepositoryRequiredTaskUsesAtomicExtension(t *testing.T) {
 		DispatchReady: true,
 		Issue:         &backend.IssueData{ID: "TASK-COUNT", Status: "open", IssueType: "task"},
 	}
-	result, err = runtimecomposition.BlockRepositoryRequiredTask(t.Context(), atomic, "TASK-COUNT")
+	result, err = blockRepositoryRequiredTask(t.Context(), atomic, "TASK-COUNT")
 	if err != nil || result.DispatchReady == nil || result.DispatchReady.SourceRepo != "" || result.DispatchReady.RepositoryRequired {
 		t.Fatalf("single-repo dispatch result/error = %+v/%v", result, err)
 	}
@@ -296,7 +295,7 @@ func TestBlockRepositoryRequiredTaskUsesAtomicExtension(t *testing.T) {
 			ID: "TASK-REVIEW", Status: "review", IssueType: "task", SourceRepo: "fleet-source",
 		},
 	}
-	result, err = runtimecomposition.BlockRepositoryRequiredTask(t.Context(), atomic, "TASK-REVIEW")
+	result, err = blockRepositoryRequiredTask(t.Context(), atomic, "TASK-REVIEW")
 	if err != nil || result.DispatchReady == nil || result.DispatchReady.Status != "review" ||
 		result.DispatchReady.SourceRepo != "fleet-source" {
 		t.Fatalf("review dispatch result/error = %+v/%v", result, err)
@@ -305,13 +304,13 @@ func TestBlockRepositoryRequiredTaskUsesAtomicExtension(t *testing.T) {
 	atomic.result = &backend.RepositoryRequirementResult{
 		Issue: &backend.IssueData{ID: "TASK-1", Status: "in_progress", IssueType: "task", SourceRepo: "fleet-source"},
 	}
-	result, err = runtimecomposition.BlockRepositoryRequiredTask(t.Context(), atomic, "TASK-1")
+	result, err = blockRepositoryRequiredTask(t.Context(), atomic, "TASK-1")
 	if err != nil || result.Blocked || result.DispatchReady != nil {
 		t.Fatalf("stale non-ready result/error = %+v/%v, want suppressed no-op", result, err)
 	}
 
 	atomic.err = backend.ErrNotFound("BlockRepositoryRequired", "issue deleted")
-	result, err = runtimecomposition.BlockRepositoryRequiredTask(t.Context(), atomic, "TASK-GONE")
+	result, err = blockRepositoryRequiredTask(t.Context(), atomic, "TASK-GONE")
 	if err != nil || result.Blocked || result.DispatchReady != nil {
 		t.Fatalf("deleted block result/error = %+v/%v, want durably stale no-op", result, err)
 	}
@@ -319,7 +318,7 @@ func TestBlockRepositoryRequiredTaskUsesAtomicExtension(t *testing.T) {
 
 func TestBlockRepositoryRequiredTaskFailsClosedWithoutAtomicExtension(t *testing.T) {
 	unsupported := struct{ backend.IssueBackend }{}
-	result, err := runtimecomposition.BlockRepositoryRequiredTask(t.Context(), unsupported, "TASK-1")
+	result, err := blockRepositoryRequiredTask(t.Context(), unsupported, "TASK-1")
 	if result.Blocked || result.DispatchReady != nil || !backend.IsKind(err, backend.KindNotImplemented) {
 		t.Fatalf("unsupported result/error = %+v/%v, want not_implemented", result, err)
 	}

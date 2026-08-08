@@ -5,13 +5,11 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
-	"github.com/tysonthomas9/loomcli/internal/webui/app/capabilitycomposition"
-	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
 type interactionPTYTabStoreStub struct {
-	value *tabmeta.TabMetadata
+	value *terminal.TabMetadata
 	err   error
 }
 
@@ -19,7 +17,7 @@ func (stub *interactionPTYTabStoreStub) Get(
 	context.Context,
 	string,
 	string,
-) (*tabmeta.TabMetadata, error) {
+) (*terminal.TabMetadata, error) {
 	return stub.value, stub.err
 }
 
@@ -37,14 +35,14 @@ func (stub *interactionPTYForceStub) ForceInterrupt(
 }
 
 func TestInteractionPTYBeforeKillUsesExactServerOwnedPlacement(t *testing.T) {
-	tabs := &interactionPTYTabStoreStub{value: &tabmeta.TabMetadata{
+	tabs := &interactionPTYTabStoreStub{value: &terminal.TabMetadata{
 		SessionName: "agent-tab", Workspace: "WS", Kind: "agent",
 		AgentID: "agent-1", InteractionSessionID: "session-1",
 		InteractionTerminalID: "terminal-1",
 		InteractionLeaseID:    "lease-1", InteractionLeaseFencingToken: 7,
 	}}
 	force := &interactionPTYForceStub{}
-	hook := capabilitycomposition.NewInteractionPTYBeforeKill(tabs, force)
+	hook := NewInteractionPTYBeforeKill(tabs, force)
 	key := terminal.SessionKey{Workspace: "WS", Name: "agent-tab"}
 	if err := hook(t.Context(), key, terminal.ExitReasonShutdown); err != nil {
 		t.Fatal(err)
@@ -67,13 +65,13 @@ func TestInteractionPTYBeforeKillUsesExactServerOwnedPlacement(t *testing.T) {
 }
 
 func TestInteractionPTYBeforeKillFailsClosedForPartialCanonicalIdentity(t *testing.T) {
-	tabs := &interactionPTYTabStoreStub{value: &tabmeta.TabMetadata{
+	tabs := &interactionPTYTabStoreStub{value: &terminal.TabMetadata{
 		SessionName: "agent-tab", Workspace: "WS", Kind: "agent",
 		AgentID: "agent-1", InteractionSessionID: "session-1",
 		InteractionTerminalID: "terminal-1",
 	}}
 	force := &interactionPTYForceStub{}
-	hook := capabilitycomposition.NewInteractionPTYBeforeKill(tabs, force)
+	hook := NewInteractionPTYBeforeKill(tabs, force)
 	if err := hook(
 		t.Context(),
 		terminal.SessionKey{Workspace: "WS", Name: "agent-tab"},

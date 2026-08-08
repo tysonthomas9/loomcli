@@ -6,9 +6,10 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
 )
 
-func TestScopedSubprocessBaseEnvFiltersBroadCredentials(t *testing.T) {
+func TestDriverRemoteProfileFiltersBroadCredentials(t *testing.T) {
 	env := []string{
 		"PATH=/usr/bin",
 		"HOME=/home/loom",
@@ -37,7 +38,7 @@ func TestScopedSubprocessBaseEnvFiltersBroadCredentials(t *testing.T) {
 		"malformed",
 	}
 
-	got := envMap(scopedSubprocessBaseEnv(env))
+	got := envMap(platformruntime.FilterSubprocessEnv(platformruntime.SubprocessEnvDriverRemote, env))
 	for _, key := range []string{"PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "LOOM_CONFIG_DIR", "LOOM_HOST_BRIDGE_HELPER", "LOOM_DRIVER_TASK_RUNNER_CMD_JSON", "LOOM_DRIVER_TASK_RUNNER_CMD"} {
 		if _, ok := got[key]; !ok {
 			t.Fatalf("%s missing from filtered env: %+v", key, got)

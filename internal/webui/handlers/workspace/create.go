@@ -1,7 +1,6 @@
 package workspace
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -17,7 +16,6 @@ func HandleWorkspaceCreate(svc workspacecoord.WorkspaceService) http.HandlerFunc
 		ctx, span := startSpan(r.Context(), "service.Workspace.Create")
 		defer span.End()
 
-		r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
 		req, ok := decodeCreateRequest(w, r)
 		if !ok {
 			return
@@ -57,7 +55,7 @@ func HandleWorkspaceCreate(svc workspacecoord.WorkspaceService) http.HandlerFunc
 // and returning ok=false on failure.
 func decodeCreateRequest(w http.ResponseWriter, r *http.Request) (workspacecoord.WorkspaceCreateRequest, bool) {
 	var req workspacecoord.WorkspaceCreateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{MaxBytes: handler.MaxRequestBody}); err != nil {
 		var maxBytesErr *http.MaxBytesError
 		status := http.StatusBadRequest
 		msg := "invalid request body"

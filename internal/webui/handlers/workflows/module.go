@@ -22,9 +22,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
-	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/webui/handlers/runhistory"
 	"github.com/tysonthomas9/loomcli/internal/webui/readprojection"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -33,8 +31,8 @@ import (
 const maxRunPayloadBytes = 4 << 20
 
 const (
-	defaultRunsLimit = runhistory.DefaultRunsLimit
-	maxRunsLimit     = runhistory.MaxRunsLimit
+	defaultRunsLimit = handler.DefaultRunsLimit
+	maxRunsLimit     = handler.MaxRunsLimit
 )
 
 type Module struct {
@@ -127,14 +125,15 @@ type createDriverRunRequest struct {
 
 func decodeDriverRunSubmission(w http.ResponseWriter, r *http.Request) (createDriverRunRequest, string, string, bool) {
 	var request createDriverRunRequest
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRunPayloadBytes))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid DriverRun submission JSON")
+	err := handler.DecodeOneJSON(w, r, &request, handler.JSONDecodeOptions{
+		MaxBytes: maxRunPayloadBytes, DisallowUnknownFields: true,
+	})
+	if errors.Is(err, handler.ErrTrailingJSON) {
+		writeError(w, http.StatusBadRequest, "DriverRun submission must contain exactly one JSON object")
 		return createDriverRunRequest{}, "", "", false
 	}
-	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		writeError(w, http.StatusBadRequest, "DriverRun submission must contain exactly one JSON object")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid DriverRun submission JSON")
 		return createDriverRunRequest{}, "", "", false
 	}
 	workspace := strings.TrimSpace(r.PathValue("ws"))
@@ -437,7 +436,7 @@ func (m *Module) listWorkflowRuns(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	limit, ok := runhistory.ParseRunLimit(w, r)
+	limit, ok := handler.ParseRunLimit(w, r)
 	if !ok {
 		return
 	}
@@ -460,7 +459,7 @@ func (m *Module) listWorkflowRuns(w http.ResponseWriter, r *http.Request) {
 		writeDomainError(w, err, "list workflow runs failed")
 		return
 	}
-	runs = runhistory.SortAndTrim(runs, limit)
+	runs = handler.SortAndTrim(runs, limit)
 	handler.WriteJSON(w, http.StatusOK, map[string]any{
 		"driver_id":         drv.DriverID,
 		"active_version_id": drv.ActiveVersionID,
@@ -526,7 +525,7 @@ type workflowVersionInput struct {
 func parseCreateWorkflowVersionRequest(w http.ResponseWriter, r *http.Request, name string) (workflowVersionInput, bool) {
 	var in workflowVersionInput
 	var req createWorkflowVersionRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRunPayloadBytes)).Decode(&req); err != nil {
+	if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{MaxBytes: maxRunPayloadBytes}); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return in, false
 	}
@@ -943,16 +942,18 @@ func writeDomainError(w http.ResponseWriter, err error, fallback string) {
 	switch {
 	case errors.Is(err, store.ErrDriverRunEventsUnavailable):
 		writeError(w, http.StatusNotImplemented, err.Error())
-	case errors.Is(err, workflowcataloghttp.ErrUnauthenticated),
-		errors.Is(err, authority.ErrInvalidPrincipal),
-		errors.Is(err, authority.ErrPrincipalExpired),
-		errors.Is(err, authority.ErrOpaqueAuthority):
-		writeError(w, http.StatusUnauthorized, "authentication required")
-	case errors.Is(err, authority.ErrAdmissionDenied),
-		errors.Is(err, authority.ErrWorkspaceMismatch),
-		errors.Is(err, authority.ErrPrincipalClass),
-		errors.Is(err, authority.ErrActionNotAllowed),
-		errors.Is(err, workflowcatalog.ErrWrongWorkspace):
+		return
+	}
+	if classification, ok := handler.ClassifyAuthenticationAuthorityError(err); ok {
+		message := "authentication required"
+		if classification.Status == http.StatusForbidden {
+			message = "forbidden"
+		}
+		writeError(w, classification.Status, message)
+		return
+	}
+	switch {
+	case errors.Is(err, workflowcatalog.ErrWrongWorkspace):
 		writeError(w, http.StatusForbidden, "forbidden")
 	case errors.Is(err, execution.ErrInvalid),
 		errors.Is(err, execution.ErrPreflightFailed),

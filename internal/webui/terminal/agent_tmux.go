@@ -28,8 +28,7 @@ import (
 
 	"github.com/creack/pty"
 
-	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
-	"github.com/tysonthomas9/loomcli/internal/platform/workspaceid"
+	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
 )
 
 // ErrTmuxNotFound is returned by NewAgentTmuxManager when the tmux binary is
@@ -114,7 +113,7 @@ func NewAgentTmuxManager(maxSessions int) (*AgentTmuxManager, error) {
 	}
 	// Ensure child tmux processes share the same socket path as the
 	// auto-mode CLI that created the sessions we're attaching to.
-	env := interaction.FilterChildBaseEnv(os.Environ())
+	env := platformruntime.CurrentSubprocessEnv(platformruntime.SubprocessEnvInteractionChild)
 	hasTmpDir := false
 	for _, e := range env {
 		if strings.HasPrefix(e, "TMUX_TMPDIR=") {
@@ -235,7 +234,7 @@ func (m *AgentTmuxManager) FindLatestAgentSession(wsID, agentName string) (strin
 	if err != nil {
 		return "", false, err
 	}
-	wsPrefix := workspaceid.Short(wsID)
+	wsPrefix := platformruntime.ShortWorkspaceID(wsID)
 	pattern := regexp.MustCompile(fmt.Sprintf(
 		`^loom-%s-[a-zA-Z0-9_-]+-%s-[0-9]+$`,
 		regexp.QuoteMeta(wsPrefix),
@@ -370,7 +369,7 @@ func (m *AgentTmuxManager) KillWorkspaceSessions(wsID string) error {
 	if wsID == "" {
 		return fmt.Errorf("wsID must not be empty")
 	}
-	wsPrefix := "loom-" + workspaceid.Short(wsID) + "-"
+	wsPrefix := "loom-" + platformruntime.ShortWorkspaceID(wsID) + "-"
 
 	sessions, err := m.listTmuxSessions()
 	if err != nil {

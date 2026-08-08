@@ -11,6 +11,31 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 )
 
+func automationBindingBody(binding *automation.Binding, create bool) map[string]any {
+	body := map[string]any{
+		"name": binding.Name, "source_kind": binding.SourceKind, "source_ref": binding.SourceRef,
+		"source_config_ref": binding.SourceConfigRef, "route_key": binding.RouteKey, "method": binding.Method,
+		"path_template": binding.PathTemplate, "topic": binding.Topic,
+		"event_type_patterns": append([]string(nil), binding.EventTypePatterns...), "filter_ref": binding.FilterRef,
+		"driver_id": binding.DriverID, "driver_version_id": binding.DriverVersionID,
+		"target_entrypoint": binding.TargetEntrypoint, "target_agent_service_id": binding.TargetAgentServiceID,
+		"concurrency_policy": binding.ConcurrencyPolicy, "idempotency_policy": binding.IdempotencyPolicy,
+		"auth_policy": binding.AuthPolicy, "subject_key_template": binding.SubjectKeyTemplate,
+		"retry_max_attempts": binding.RetryMaxAttempts, "retry_backoff_seconds": binding.RetryBackoffSeconds,
+		"schedule": binding.Schedule, "schedule_timezone": binding.ScheduleTimezone,
+		"permissions": append([]string(nil), binding.Permissions...), "enabled": binding.Enabled,
+	}
+	if create {
+		body["binding_id"] = binding.BindingID
+	}
+	if binding.ActorFilter != nil {
+		body["actor_filter"] = binding.ActorFilter
+	} else if !create {
+		body["actor_filter"] = map[string][]string{}
+	}
+	return body
+}
+
 func (s *automationStore) CreateBinding(ctx context.Context, binding *automation.Binding) (*automation.Binding, error) {
 	if binding == nil || binding.WebhookSecret != "" {
 		return nil, fmt.Errorf("automation create binding rejects webhook_secret: %w", ErrAutomationInvalid)

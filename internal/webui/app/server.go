@@ -22,14 +22,11 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
-	"github.com/tysonthomas9/loomcli/internal/webui/appinfra"
-	"github.com/tysonthomas9/loomcli/internal/webui/appstores"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/sourcecontrolcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/filecoord"
-	"github.com/tysonthomas9/loomcli/internal/webui/handlermux"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
@@ -72,32 +69,32 @@ type Server struct {
 	sessSvc          sessioncoord.SessionService    // always constructed (stores may be nil internally)
 
 	// Real-time
-	hub               *appstores.Hub
-	multiSub          *appstores.MultiWorkspaceSubscriber
-	getMutationsSince appstores.MutationsSinceFn
+	hub               *Hub
+	multiSub          *MultiWorkspaceSubscriber
+	getMutationsSince MutationsSinceFn
 
 	// Workspace lifecycle
-	registry           *appinfra.WorkspaceRegistry
+	registry           *WorkspaceRegistry
 	initialWorkspaceID string
 
 	// Terminal
 	ptyMgr       *terminal.MultiPTYManager  // main web terminal (per-workspace dispatch)
 	agentTmuxMgr *terminal.AgentTmuxManager // agent-view only; nil if tmux unavailable
-	termAuth     *appstores.TerminalAuth    // one-time token issuer (nil disables auth)
+	termAuth     *TerminalAuth              // one-time token issuer (nil disables auth)
 
 	// SSE token exchange (external auth mode only)
-	sseTokens *appstores.TokenStore // nil if ExtAuthURL is empty
+	sseTokens *TokenStore // nil if ExtAuthURL is empty
 
 	// Fleet
-	fleetRegistry *appinfra.FleetStoreRegistry  // nil if Redis unconfigured
-	tokenCfg      *appinfra.FleetTokenConfig    // nil if fleetRegistry is nil
-	claimMetrics  *appinfra.FleetClaimMetrics   // nil if fleetRegistry is nil
-	fleetRegCfg   *appinfra.FleetRegisterConfig // nil if no fleet API key
+	fleetRegistry *FleetStoreRegistry  // nil if Redis unconfigured
+	tokenCfg      *FleetTokenConfig    // nil if fleetRegistry is nil
+	claimMetrics  *FleetClaimMetrics   // nil if fleetRegistry is nil
+	fleetRegCfg   *FleetRegisterConfig // nil if no fleet API key
 
 	// Redis-backed stores
-	tabMetaStore        *appstores.TabMetaStore        // nil if Redis unconfigured
-	issueTabStore       *appstores.IssueTabStore       // nil if Redis unconfigured
-	sessionHistoryStore *appstores.SessionHistoryStore // nil if Redis unconfigured
+	tabMetaStore        *TabMetaStore        // nil if Redis unconfigured
+	issueTabStore       *IssueTabStore       // nil if Redis unconfigured
+	sessionHistoryStore *SessionHistoryStore // nil if Redis unconfigured
 
 	// External auth
 	extAuthMiddleware middleware.Middleware // nil = open mode
@@ -118,8 +115,8 @@ type Server struct {
 	notifyToken     string
 	notifyTokenFile string
 
-	// Pre-built top-level handlers (built by handlermux.BuildHandlers)
-	handlers *handlermux.Handlers
+	// Pre-built top-level handlers.
+	handlers *Handlers
 
 	prReviewCredentialSeeds credentialSeedInvalidator
 
@@ -153,7 +150,7 @@ func (app *Server) buildHandlers() {
 		idleMS = app.ptyMgr.IdleTimeout().Milliseconds()
 		maxSess = app.ptyMgr.MaxSessions()
 	}
-	app.handlers = handlermux.BuildHandlers(handlermux.HandlerDeps{
+	app.handlers = BuildHandlers(HandlerDeps{
 		Hub:                app.hub,
 		ExtAuthURL:         app.config.ExtAuthURL,
 		BackendsHealthH:    backendsHealthH,

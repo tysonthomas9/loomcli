@@ -12,7 +12,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 	webuterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
@@ -33,7 +32,7 @@ type terminalInteractionLifecycle struct {
 	leaseID     string
 	fence       int64
 	rawToken    []byte
-	launch      *tabmeta.LaunchSpec
+	launch      *webuterminal.LaunchSpec
 	terminalSet bool
 }
 
@@ -43,9 +42,9 @@ func prepareTerminalInteractionLaunch(
 	params *terminalWSParams,
 	key webuterminal.SessionKey,
 	agentID string,
-	persisted *tabmeta.LaunchSpec,
+	persisted *webuterminal.LaunchSpec,
 	operator *authority.OperatorAuthority,
-) (*tabmeta.LaunchSpec, *terminalInteractionLifecycle, error) {
+) (*webuterminal.LaunchSpec, *terminalInteractionLifecycle, error) {
 	if params == nil || params.interaction.API == nil ||
 		params.interaction.SessionAuthorities == nil || operator == nil {
 		return nil, nil, fmt.Errorf(
@@ -299,9 +298,9 @@ func loadTerminalInteractionMetadata(
 	ctx context.Context,
 	params *terminalWSParams,
 	key webuterminal.SessionKey,
-) (*tabmeta.TabMetadata, error) {
+) (*webuterminal.TabMetadata, error) {
 	if params.tabMetaStore == nil {
-		return &tabmeta.TabMetadata{}, nil
+		return &webuterminal.TabMetadata{}, nil
 	}
 	meta, err := params.tabMetaStore.Get(ctx, key.Workspace, key.Name)
 	if err != nil {
@@ -315,7 +314,7 @@ func loadTerminalInteractionMetadata(
 
 func terminalInteractionMetadata(
 	key webuterminal.SessionKey,
-	meta *tabmeta.TabMetadata,
+	meta *webuterminal.TabMetadata,
 ) map[string]string {
 	values := map[string]string{
 		"source":       "web_terminal",
@@ -332,7 +331,7 @@ func terminalInteractionMetadata(
 	return values
 }
 
-func terminalInteractionTitle(meta *tabmeta.TabMetadata, agentID string) string {
+func terminalInteractionTitle(meta *webuterminal.TabMetadata, agentID string) string {
 	if meta != nil {
 		if value := strings.TrimSpace(meta.Label); value != "" {
 			return value
@@ -341,11 +340,11 @@ func terminalInteractionTitle(meta *tabmeta.TabMetadata, agentID string) string 
 	return agentID
 }
 
-func cloneTerminalLaunch(value *tabmeta.LaunchSpec) *tabmeta.LaunchSpec {
+func cloneTerminalLaunch(value *webuterminal.LaunchSpec) *webuterminal.LaunchSpec {
 	if value == nil {
 		return nil
 	}
-	result := &tabmeta.LaunchSpec{
+	result := &webuterminal.LaunchSpec{
 		Argv: append([]string(nil), value.Argv...),
 		Cwd:  value.Cwd,
 	}

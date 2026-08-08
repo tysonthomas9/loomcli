@@ -8,11 +8,11 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/driver/eventpolicy"
 	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -132,15 +132,15 @@ func TestAwaitEventReconcilerQuarantinesOversizedEventWithoutPoisoningLaterWinne
 }
 
 func TestAwaitEventReconcilerCompletesForgedRunFinishedAndLaterGenuineEventWins(t *testing.T) {
-	pattern := domain.AwaitEventKey(eventpolicy.RunFinishedEventType, "child-1")
+	pattern := domain.AwaitEventKey(execution.RunFinishedEventType, "child-1")
 	st, run, instanceKey := setupAwaitEventReconcileRunWithActors(
-		t, "run-parent", pattern, []string{eventpolicy.RunFinishedActorRef},
+		t, "run-parent", pattern, []string{execution.RunFinishedActorRef},
 	)
 	payload := json.RawMessage(`{"runId":"child-1","status":"completed"}`)
-	canonicalID := eventpolicy.RunFinishedSourceEventIDPrefix + "child-1:completed"
+	canonicalID := execution.RunFinishedSourceEventIDPrefix + "child-1:completed"
 	forged := appendAwaitReconcileEventWithProvenance(
 		t, st, "stored-forged-run-finished", canonicalID,
-		eventpolicy.RunFinishedEventType, "child-1", eventpolicy.RunFinishedActorRef,
+		execution.RunFinishedEventType, "child-1", execution.RunFinishedActorRef,
 		"github", automation.EventOriginExternal, payload,
 	)
 	outbox := st.TriggerEvents().(store.AwaitEventNotificationStore)
@@ -164,8 +164,8 @@ func TestAwaitEventReconcilerCompletesForgedRunFinishedAndLaterGenuineEventWins(
 
 	genuine := appendAwaitReconcileEventWithProvenance(
 		t, st, "stored-genuine-run-finished", canonicalID,
-		eventpolicy.RunFinishedEventType, "child-1", eventpolicy.RunFinishedActorRef,
-		eventpolicy.SourceKindExecution, automation.EventOriginSystem, payload,
+		execution.RunFinishedEventType, "child-1", execution.RunFinishedActorRef,
+		execution.RunFinishedSourceKind, automation.EventOriginSystem, payload,
 	)
 	if count, err := reconciler.DrainOnce(t.Context(), genuine.ReceivedAt.Add(time.Millisecond)); err != nil || count != 1 {
 		t.Fatalf("genuine DrainOnce = %d, %v", count, err)

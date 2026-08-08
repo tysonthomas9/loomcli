@@ -162,6 +162,58 @@ func TestDecodeOneJSON_StrictPolicy(t *testing.T) {
 	}
 }
 
+func TestDecodeOneJSONRejectsOversizedInitialValue(t *testing.T) {
+	r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"name":"value-that-exceeds-the-bound"}`))
+	w := httptest.NewRecorder()
+	var dst map[string]string
+
+	err := DecodeOneJSON(w, r, &dst, JSONDecodeOptions{MaxBytes: 16})
+	var maxBytesErr *http.MaxBytesError
+	if !errors.As(err, &maxBytesErr) {
+		t.Fatalf("DecodeOneJSON() error = %T %v, want *http.MaxBytesError", err, err)
+	}
+}
+
+func TestDecodeOneJSONRejectsTrailingGarbage(t *testing.T) {
+	r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"name":"ok"} trailing`))
+	w := httptest.NewRecorder()
+	var dst map[string]string
+
+	err := DecodeOneJSON(w, r, &dst, JSONDecodeOptions{})
+	if !errors.Is(err, ErrTrailingJSON) {
+		t.Fatalf("DecodeOneJSON() error = %T %v, want ErrTrailingJSON", err, err)
+	}
+}
+
+func TestDecodeOneJSONBytesUsesSameExactOnePolicy(t *testing.T) {
+	type payload struct {
+		Name string `json:"name"`
+	}
+
+	var got payload
+	if err := DecodeOneJSONBytes([]byte(`{"name":"ok"}`), &got, JSONDecodeOptions{}); err != nil {
+		t.Fatalf("DecodeOneJSONBytes(valid) error = %v", err)
+	}
+	if got.Name != "ok" {
+		t.Fatalf("DecodeOneJSONBytes(valid) name = %q, want ok", got.Name)
+	}
+
+	if err := DecodeOneJSONBytes([]byte(`{"name":"ok"} {}`), &got, JSONDecodeOptions{}); !errors.Is(err, ErrTrailingJSON) {
+		t.Fatalf("DecodeOneJSONBytes(trailing) error = %T %v, want ErrTrailingJSON", err, err)
+	}
+
+	err := DecodeOneJSONBytes([]byte(`{"name":"too-large"}`), &got, JSONDecodeOptions{MaxBytes: 8})
+	var maxBytesErr *http.MaxBytesError
+	if !errors.As(err, &maxBytesErr) {
+		t.Fatalf("DecodeOneJSONBytes(oversized) error = %T %v, want *http.MaxBytesError", err, err)
+	}
+
+	err = DecodeOneJSONBytes([]byte(`{"name":"ok","extra":true}`), &got, JSONDecodeOptions{DisallowUnknownFields: true})
+	if err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("DecodeOneJSONBytes(strict) error = %v, want unknown field", err)
+	}
+}
+
 func TestReadJSON_EmptyBody(t *testing.T) {
 	r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(""))
 	w := httptest.NewRecorder()

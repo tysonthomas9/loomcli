@@ -11,14 +11,15 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
+	"github.com/tysonthomas9/loomcli/internal/webui/localredis"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
 const testWSID = "test-ws-uuid"
 
-func setupIssueTabsTest(t *testing.T) (*issuetabs.Store, *realtime.Hub) {
+func setupIssueTabsTest(t *testing.T) (*localredis.IssueTabStore, *realtime.Hub) {
 	t.Helper()
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
@@ -28,7 +29,7 @@ func setupIssueTabsTest(t *testing.T) (*issuetabs.Store, *realtime.Hub) {
 	go hub.Run()
 	t.Cleanup(func() { hub.Stop() })
 
-	return issuetabs.NewStore(rdb, nil), hub
+	return localredis.NewIssueTabStore(rdb, nil), hub
 }
 
 // withWSContext adds workspace context to a request (simulating WorkspaceMiddleware).
@@ -97,9 +98,9 @@ func TestHandleGetIssueTabs_ReturnsSavedState(t *testing.T) {
 	ctx := context.Background()
 
 	// Pre-save some state
-	state := &issuetabs.IssueTabState{
+	state := &interaction.IssueTabState{
 		IssueID: "PROJ-2",
-		Tabs: []issuetabs.IssueTab{
+		Tabs: []interaction.IssueTab{
 			{ID: "details", Type: "details", Label: "Details", SortOrder: 0},
 			{ID: "logs", Type: "logs", Label: "Logs", SortOrder: 1},
 		},
@@ -122,8 +123,8 @@ func TestHandleGetIssueTabs_ReturnsSavedState(t *testing.T) {
 	}
 
 	var resp struct {
-		Success bool                    `json:"success"`
-		Data    issuetabs.IssueTabState `json:"data"`
+		Success bool                      `json:"success"`
+		Data    interaction.IssueTabState `json:"data"`
 	}
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -209,8 +210,8 @@ func TestHandleSaveIssueTabs_SavesAndReturnsSuccess(t *testing.T) {
 	}
 
 	var resp struct {
-		Success bool                    `json:"success"`
-		Data    issuetabs.IssueTabState `json:"data"`
+		Success bool                      `json:"success"`
+		Data    interaction.IssueTabState `json:"data"`
 	}
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -260,8 +261,8 @@ func TestHandleSaveIssueTabs_BackendFieldPersists(t *testing.T) {
 	}
 
 	var resp struct {
-		Success bool                    `json:"success"`
-		Data    issuetabs.IssueTabState `json:"data"`
+		Success bool                      `json:"success"`
+		Data    interaction.IssueTabState `json:"data"`
 	}
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -361,9 +362,9 @@ func TestHandleDeleteIssueTabs_RemovesState(t *testing.T) {
 	ctx := context.Background()
 
 	// Pre-save state
-	state := &issuetabs.IssueTabState{
+	state := &interaction.IssueTabState{
 		IssueID:     "DEL-ISSUE",
-		Tabs:        []issuetabs.IssueTab{{ID: "details", Type: "details", Label: "Details", SortOrder: 0}},
+		Tabs:        []interaction.IssueTab{{ID: "details", Type: "details", Label: "Details", SortOrder: 0}},
 		ActiveTabID: "details",
 	}
 	if err := store.ReplaceIssueTabs(ctx, testWSID, state); err != nil {
@@ -463,7 +464,7 @@ func TestHandleGetIssueTabs_PoolError(t *testing.T) {
 	// Create a miniredis, get the store, then close the server to simulate pool error
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	store := issuetabs.NewStore(rdb, nil)
+	store := localredis.NewIssueTabStore(rdb, nil)
 
 	// Close Redis to simulate connection failure
 	mr.Close()
@@ -499,9 +500,9 @@ func TestHandleGetIssueTabs_EmptyTabs(t *testing.T) {
 	ctx := context.Background()
 
 	// Save state with an empty tabs slice
-	state := &issuetabs.IssueTabState{
+	state := &interaction.IssueTabState{
 		IssueID:     "EMPTY-TABS",
-		Tabs:        []issuetabs.IssueTab{},
+		Tabs:        []interaction.IssueTab{},
 		ActiveTabID: "",
 	}
 	if err := store.ReplaceIssueTabs(ctx, testWSID, state); err != nil {
@@ -520,8 +521,8 @@ func TestHandleGetIssueTabs_EmptyTabs(t *testing.T) {
 	}
 
 	var resp struct {
-		Success bool                    `json:"success"`
-		Data    issuetabs.IssueTabState `json:"data"`
+		Success bool                      `json:"success"`
+		Data    interaction.IssueTabState `json:"data"`
 	}
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -538,7 +539,7 @@ func TestHandleDeleteIssueTabs_PoolTimeout(t *testing.T) {
 	// Create a miniredis, get the store, then close the server to simulate timeout/pool error
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	store := issuetabs.NewStore(rdb, nil)
+	store := localredis.NewIssueTabStore(rdb, nil)
 
 	// Close Redis to simulate connection failure (pool timeout)
 	mr.Close()

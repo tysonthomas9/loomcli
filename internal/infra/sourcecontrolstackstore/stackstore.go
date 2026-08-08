@@ -2,8 +2,8 @@
 //
 // This iteration ships a loomcli-side LocalStore backed by ~/.loom/stacks.json,
 // using the same configlock + atomic-write discipline as the state cache. The
-// Store interface is the seam: a future FleetDBStore can implement it without
-// touching the reconciler or CLI. See
+// Source Control's owner-owned ports are the seam: a future FleetDB adapter can
+// implement them without touching the reconciler or CLI. See
 // docs/design/2026-06-18-stack-aware-pr-publisher.md.
 package stackstore
 
@@ -20,25 +20,10 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/atomicfile"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/configlock"
-	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol/stacklineage"
+	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 )
 
 const stacksFileVersion = 1
-
-// Store is the lineage persistence contract every caller depends on.
-type Store interface {
-	EnsureStack(ctx context.Context, s sl.Stack) error
-	GetStack(ctx context.Context, ws string, id sl.StackID) (*sl.Stack, error)
-	ListStacks(ctx context.Context, ws string) ([]sl.Stack, error)
-	DeleteStack(ctx context.Context, ws string, id sl.StackID) error
-
-	ListNodes(ctx context.Context, ws string, id sl.StackID) ([]sl.Node, error)
-	AddNode(ctx context.Context, ws string, id sl.StackID, taskID, baseTaskID string, mode sl.CommitMode) (sl.Node, error)
-	MoveNode(ctx context.Context, ws string, id sl.StackID, taskID, afterTaskID string) error
-	SetBase(ctx context.Context, ws string, id sl.StackID, taskID, baseTaskID string) error
-	RemoveNode(ctx context.Context, ws string, id sl.StackID, taskID string) error
-	UpdateNode(ctx context.Context, ws string, id sl.StackID, taskID string, fn func(*sl.Node) error) error
-}
 
 // Sentinel errors.
 var (
@@ -61,16 +46,18 @@ type workspaceStacks struct {
 }
 
 type storedStack struct {
-	Stack sl.Stack            `json:"stack"`
-	Nodes map[string]*sl.Node `json:"nodes,omitempty"` // key = TaskID
+	Stack sl.Stack                 `json:"stack"`
+	Nodes map[string]*sl.StackNode `json:"nodes,omitempty"` // key = TaskID
 }
 
 // LocalStore -----------------------------------------------------------------
 
-// LocalStore implements Store against a single JSON file in a loom directory.
+// LocalStore implements Source Control's persistence ports against a single
+// JSON file in a loom directory.
 type LocalStore struct{ dir string }
 
-var _ Store = (*LocalStore)(nil)
+var _ sl.StackLifecycleStore = (*LocalStore)(nil)
+var _ sl.TaskOutcomeStore = (*LocalStore)(nil)
 
 // New returns a LocalStore rooted at dir (the directory holding stacks.json).
 func New(dir string) *LocalStore { return &LocalStore{dir: dir} }
@@ -146,13 +133,13 @@ func (f *stacksFile) stack(ws string, id sl.StackID) (*storedStack, bool) {
 	if w == nil {
 		return nil, false
 	}
-	st, ok := w.Stacks[string(id)]
+	st, ok := w.Stacks[id]
 	return st, ok
 }
 
 // reads ----------------------------------------------------------------------
 
-func (s *LocalStore) GetStack(_ context.Context, ws string, id sl.StackID) (*sl.Stack, error) {
+func (s *LocalStore) GetStackRecord(_ context.Context, ws string, id sl.StackID) (*sl.Stack, error) {
 	f, err := s.load()
 	if err != nil {
 		return nil, err
@@ -165,7 +152,7 @@ func (s *LocalStore) GetStack(_ context.Context, ws string, id sl.StackID) (*sl.
 	return &cp, nil
 }
 
-func (s *LocalStore) ListStacks(_ context.Context, ws string) ([]sl.Stack, error) {
+func (s *LocalStore) ListStackRecords(_ context.Context, ws string) ([]sl.Stack, error) {
 	f, err := s.load()
 	if err != nil {
 		return nil, err
@@ -182,7 +169,7 @@ func (s *LocalStore) ListStacks(_ context.Context, ws string) ([]sl.Stack, error
 	return out, nil
 }
 
-func (s *LocalStore) ListNodes(_ context.Context, ws string, id sl.StackID) ([]sl.Node, error) {
+func (s *LocalStore) ListStackNodeRecords(_ context.Context, ws string, id sl.StackID) ([]sl.StackNode, error) {
 	f, err := s.load()
 	if err != nil {
 		return nil, err
@@ -194,8 +181,8 @@ func (s *LocalStore) ListNodes(_ context.Context, ws string, id sl.StackID) ([]s
 	return sortedNodes(st), nil
 }
 
-func sortedNodes(st *storedStack) []sl.Node {
-	out := make([]sl.Node, 0, len(st.Nodes))
+func sortedNodes(st *storedStack) []sl.StackNode {
+	out := make([]sl.StackNode, 0, len(st.Nodes))
 	for _, n := range st.Nodes {
 		out = append(out, *n)
 	}
@@ -209,9 +196,9 @@ func sortedNodes(st *storedStack) []sl.Node {
 
 // writes ---------------------------------------------------------------------
 
-// EnsureStack creates the stack header if absent, or updates its mutable fields
+// EnsureStackRecord creates the stack header if absent, or updates its mutable fields
 // (RootBase, DefaultCommitMode) if present.
-func (s *LocalStore) EnsureStack(_ context.Context, in sl.Stack) error {
+func (s *LocalStore) EnsureStackRecord(_ context.Context, in sl.Stack) error {
 	if in.WorkspaceKey == "" || in.ID == "" {
 		return errors.New("stackstore: stack workspaceKey and id are required")
 	}
@@ -222,9 +209,9 @@ func (s *LocalStore) EnsureStack(_ context.Context, in sl.Stack) error {
 			w = &workspaceStacks{Stacks: map[string]*storedStack{}}
 			f.Workspaces[in.WorkspaceKey] = w
 		}
-		if st, ok := w.Stacks[string(in.ID)]; ok {
+		if st, ok := w.Stacks[in.ID]; ok {
 			st.Stack.RootBase = in.RootBase
-			st.Stack.RepoName = in.RepoName
+			st.Stack.Repository = in.Repository
 			if in.DefaultCommitMode != "" {
 				st.Stack.DefaultCommitMode = in.DefaultCommitMode
 			}
@@ -233,37 +220,23 @@ func (s *LocalStore) EnsureStack(_ context.Context, in sl.Stack) error {
 		}
 		in.CreatedAt = now
 		in.UpdatedAt = now
-		w.Stacks[string(in.ID)] = &storedStack{Stack: in, Nodes: map[string]*sl.Node{}}
+		w.Stacks[in.ID] = &storedStack{Stack: in, Nodes: map[string]*sl.StackNode{}}
 		return nil
 	})
 }
 
-func (s *LocalStore) DeleteStack(_ context.Context, ws string, id sl.StackID) error {
-	return s.withLock(func(f *stacksFile) error {
-		w := f.Workspaces[ws]
-		if w == nil {
-			return ErrStackNotFound
-		}
-		if _, ok := w.Stacks[string(id)]; !ok {
-			return ErrStackNotFound
-		}
-		delete(w.Stacks, string(id))
-		return nil
-	})
-}
-
-// AddNode registers taskID in the stack, assigns a collision-free output branch,
+// AddStackNodeRecord registers taskID in the stack, assigns a collision-free output branch,
 // validates the resulting lineage stays linear+acyclic, and persists — all under
 // the lock. baseTaskID == "" means the root unit.
-func (s *LocalStore) AddNode(_ context.Context, ws string, id sl.StackID, taskID, baseTaskID string, mode sl.CommitMode) (sl.Node, error) {
-	var created sl.Node
+func (s *LocalStore) AddStackNodeRecord(_ context.Context, ws string, id sl.StackID, taskID, baseTaskID string, mode sl.CommitMode) (sl.StackNode, error) {
+	var created sl.StackNode
 	err := s.withLock(func(f *stacksFile) error {
 		st, ok := f.stack(ws, id)
 		if !ok {
 			return ErrStackNotFound
 		}
 		if st.Nodes == nil {
-			st.Nodes = map[string]*sl.Node{}
+			st.Nodes = map[string]*sl.StackNode{}
 		}
 		if _, exists := st.Nodes[taskID]; exists {
 			return ErrNodeExists
@@ -279,7 +252,7 @@ func (s *LocalStore) AddNode(_ context.Context, ws string, id sl.StackID, taskID
 			mode = sl.CommitModeLoom
 		}
 		now := time.Now().UTC()
-		node := sl.Node{
+		node := sl.StackNode{
 			StackID:      id,
 			TaskID:       taskID,
 			BaseTaskID:   baseTaskID,
@@ -300,9 +273,9 @@ func (s *LocalStore) AddNode(_ context.Context, ws string, id sl.StackID, taskID
 	return created, err
 }
 
-// SetBase repoints taskID's predecessor to baseTaskID after validating the
+// SetStackNodeBaseRecord repoints taskID's predecessor to baseTaskID after validating the
 // change keeps the lineage linear+acyclic.
-func (s *LocalStore) SetBase(_ context.Context, ws string, id sl.StackID, taskID, baseTaskID string) error {
+func (s *LocalStore) SetStackNodeBaseRecord(_ context.Context, ws string, id sl.StackID, taskID, baseTaskID string) error {
 	return s.withLock(func(f *stacksFile) error {
 		st, ok := f.stack(ws, id)
 		if !ok {
@@ -329,7 +302,7 @@ func (s *LocalStore) SetBase(_ context.Context, ws string, id sl.StackID, taskID
 	})
 }
 
-func (s *LocalStore) RemoveNode(_ context.Context, ws string, id sl.StackID, taskID string) error {
+func (s *LocalStore) RemoveStackNodeRecord(_ context.Context, ws string, id sl.StackID, taskID string) error {
 	return s.withLock(func(f *stacksFile) error {
 		st, ok := f.stack(ws, id)
 		if !ok {
@@ -353,11 +326,11 @@ func (s *LocalStore) RemoveNode(_ context.Context, ws string, id sl.StackID, tas
 	})
 }
 
-// MoveNode splices taskID to sit immediately after afterTaskID in the linear
+// MoveStackNodeRecord splices taskID to sit immediately after afterTaskID in the linear
 // chain, atomically: it detaches the node (reparenting its child onto its old
 // base), inserts it after the target (reparenting the target's old child onto
 // the node), then validates the result stays linear+acyclic before persisting.
-func (s *LocalStore) MoveNode(_ context.Context, ws string, id sl.StackID, taskID, afterTaskID string) error {
+func (s *LocalStore) MoveStackNodeRecord(_ context.Context, ws string, id sl.StackID, taskID, afterTaskID string) error {
 	if taskID == afterTaskID {
 		return sl.ErrCycle
 	}
@@ -386,7 +359,7 @@ func (s *LocalStore) MoveNode(_ context.Context, ws string, id sl.StackID, taskI
 			}
 		}
 		node.BaseTaskID = afterTaskID
-		nodes := make([]sl.Node, 0, len(st.Nodes))
+		nodes := make([]sl.StackNode, 0, len(st.Nodes))
 		for _, n := range st.Nodes {
 			nodes = append(nodes, *n)
 		}
@@ -398,8 +371,8 @@ func (s *LocalStore) MoveNode(_ context.Context, ws string, id sl.StackID, taskI
 	})
 }
 
-// UpdateNode applies fn to the stored node under the lock (reconciler state writes).
-func (s *LocalStore) UpdateNode(_ context.Context, ws string, id sl.StackID, taskID string, fn func(*sl.Node) error) error {
+// updateStackNodeRecord applies fn to the stored node under the lock (reconciler state writes).
+func (s *LocalStore) updateStackNodeRecord(_ context.Context, ws string, id sl.StackID, taskID string, fn func(*sl.StackNode) error) error {
 	return s.withLock(func(f *stacksFile) error {
 		st, ok := f.stack(ws, id)
 		if !ok {
@@ -417,9 +390,91 @@ func (s *LocalStore) UpdateNode(_ context.Context, ws string, id sl.StackID, tas
 	})
 }
 
+// UpdateStackNodePublicationRecord applies the bounded publication mutation
+// exposed by Source Control's owner port.
+func (s *LocalStore) UpdateStackNodePublicationRecord(
+	ctx context.Context,
+	workspace,
+	stackID,
+	taskID string,
+	mutation sl.StackNodePublicationMutation,
+) error {
+	return s.updateStackNodeRecord(ctx, workspace, stackID, taskID, func(node *sl.StackNode) error {
+		node.State = sl.NodeState(mutation.State)
+		if mutation.State == sl.StackPublicationPublished {
+			node.PRNumber = mutation.PRNumber
+			node.PRURL = mutation.PRURL
+		}
+		if mutation.OutputSHA != "" {
+			node.OutputSHA = mutation.OutputSHA
+		}
+		if mutation.PublishedAt != nil {
+			node.LastPublishedAt = cloneTime(mutation.PublishedAt)
+		}
+		return nil
+	})
+}
+
+func (s *LocalStore) ListTaskStacks(ctx context.Context, workspace string) ([]sl.TaskStack, error) {
+	values, err := s.ListStackRecords(ctx, workspace)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]sl.TaskStack, len(values))
+	for index, value := range values {
+		result[index] = sl.TaskStack{
+			StackID: value.ID, WorkspaceKey: value.WorkspaceKey, Repository: value.Repository,
+		}
+	}
+	return result, nil
+}
+
+func (s *LocalStore) ListTaskStackNodes(
+	ctx context.Context,
+	workspace,
+	stackID string,
+) ([]sl.TaskStackNode, error) {
+	values, err := s.ListStackNodeRecords(ctx, workspace, stackID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]sl.TaskStackNode, len(values))
+	for index, value := range values {
+		result[index] = sl.TaskStackNode{TaskID: value.TaskID}
+	}
+	return result, nil
+}
+
+func (s *LocalStore) UpdateTaskStackOutcome(
+	ctx context.Context,
+	workspace,
+	stackID,
+	taskID string,
+	mutation sl.TaskStackOutcomeMutation,
+) error {
+	return s.updateStackNodeRecord(ctx, workspace, stackID, taskID, func(node *sl.StackNode) error {
+		node.State = sl.NodeState(mutation.State)
+		if mutation.OutputSHA != "" {
+			node.OutputSHA = mutation.OutputSHA
+		}
+		if mutation.PublishedAt != nil {
+			node.LastPublishedAt = cloneTime(mutation.PublishedAt)
+		}
+		return nil
+	})
+}
+
+func cloneTime(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	result := *value
+	return &result
+}
+
 // validateWith checks that replacing/adding `node` keeps the stack's lineage valid.
-func validateWith(st *storedStack, node sl.Node) error {
-	nodes := make([]sl.Node, 0, len(st.Nodes)+1)
+func validateWith(st *storedStack, node sl.StackNode) error {
+	nodes := make([]sl.StackNode, 0, len(st.Nodes)+1)
 	for tid, n := range st.Nodes {
 		if tid == node.TaskID {
 			continue

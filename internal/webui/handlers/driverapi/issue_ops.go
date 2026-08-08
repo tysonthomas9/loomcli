@@ -10,13 +10,35 @@ import (
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 )
 
+func (m *Module) executionIssueBackend(workspace, actor string) (backend.IssueBackend, error) {
+	if m == nil || m.issueBackends == nil {
+		return nil, backend.ErrUnavailable(
+			"driver-api.issue-backend",
+			"execution issue backend capability is not configured",
+			nil,
+		)
+	}
+	issueBackend, err := m.issueBackends(workspace, actor)
+	if err != nil {
+		return nil, err
+	}
+	if issueBackend == nil {
+		return nil, backend.ErrUnavailable(
+			"driver-api.issue-backend",
+			"execution issue backend capability returned no backend",
+			nil,
+		)
+	}
+	return issueBackend, nil
+}
+
 func (m *Module) issueBackendForRun(ctx context.Context, ws string, id driverIdentity) (backend.IssueBackend, string, error) {
 	parent, err := m.verifyParent(ctx, ws, id)
 	if err != nil {
 		return nil, "", err
 	}
 	actor := driverpkg.DriverRunActor(parent.RunID)
-	issueBackend, err := m.issueBackends(ws, actor)
+	issueBackend, err := m.executionIssueBackend(ws, actor)
 	if err != nil {
 		return nil, "", err
 	}

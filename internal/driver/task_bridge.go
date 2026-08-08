@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/driver/runnersettings"
 	driversandbox "github.com/tysonthomas9/loomcli/internal/driver/sandbox"
 	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
@@ -399,6 +398,11 @@ func (e HostBridgeTaskExecutor) runBuiltInFlueWorkflow(ctx context.Context, req 
 		cmd.Dir = worktree
 	}
 	baseEnv := taskRunnerBaseEnvForRequest(req, os.Environ())
+	baseEnv, shellCleanup, err := prepareTaskRunnerLoginShellEnv(req, baseEnv)
+	if err != nil {
+		return bridgeTaskRunnerResult{}, err
+	}
+	defer shellCleanup()
 	env := append([]string{}, baseEnv...)
 	env = append(env, e.taskRunnerEnv(req, string(input), baseEnv)...)
 	cmd.Env = env
@@ -454,6 +458,11 @@ func (e HostBridgeTaskExecutor) runCommand(ctx context.Context, req TaskExecRequ
 		cmd.Dir = worktree
 	}
 	baseEnv := taskRunnerBaseEnvForRequest(req, os.Environ())
+	baseEnv, shellCleanup, err := prepareTaskRunnerLoginShellEnv(req, baseEnv)
+	if err != nil {
+		return bridgeTaskRunnerResult{}, err
+	}
+	defer shellCleanup()
 	env := append([]string{}, baseEnv...)
 	env = append(env, e.taskRunnerEnv(req, string(input), baseEnv)...)
 	cmd.Env = env
@@ -747,11 +756,11 @@ func (e HostBridgeTaskExecutor) taskRunnerEnv(req TaskExecRequest, requestJSON s
 }
 
 func (e HostBridgeTaskExecutor) localTaskRunnerSettingsEnv(existing []string) []string {
-	return runnersettings.LocalTaskRunnerEnv(e.LocalSettingsDir, existing)
+	return localTaskRunnerEnv(e.LocalSettingsDir, existing)
 }
 
 func envHasAny(env []string, names ...string) bool {
-	return runnersettings.HasAny(env, names...)
+	return hasAny(env, names...)
 }
 
 func (e HostBridgeTaskExecutor) taskRunnerBundleEnv(req TaskExecRequest) []string {

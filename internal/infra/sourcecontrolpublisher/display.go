@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol/stacklineage"
+	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 )
 
 // Stack-listing section markers in a PR body. The reconciler owns the content
@@ -17,7 +17,7 @@ const (
 
 // renderStackListing renders the stack as a checklist for a PR body, marking the
 // current unit. Only units with a live PR are listed (merged/empty are omitted).
-func renderStackListing(ordered []sl.Node, live map[string]PR, current string, id sl.StackID) string {
+func renderStackListing(ordered []sl.StackNode, live map[string]PR, current string, id sl.StackID) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "📚 **Loom stack** `%s`\n", id)
 	for _, n := range ordered {
@@ -74,11 +74,11 @@ type StatusReport struct {
 // review / mergeable) and a next-to-merge marker. repoPath provides the owner/repo;
 // pass "" to skip the live fetch and return local state only.
 func (r *Reconciler) StackStatus(ctx context.Context, ws string, id sl.StackID, repoPath string) (*StatusReport, error) {
-	nodeProjections, err := r.Stacks.ListStackNodes(ctx, ws, string(id))
+	nodeProjections, err := r.Stacks.ListStackNodes(ctx, ws, id)
 	if err != nil {
 		return nil, err
 	}
-	nodes := legacyStackNodes(nodeProjections)
+	nodes := nodeProjections
 	ordered, err := sl.Ordered(nodes)
 	if err != nil {
 		return nil, fmt.Errorf("invalid lineage: %w", err)

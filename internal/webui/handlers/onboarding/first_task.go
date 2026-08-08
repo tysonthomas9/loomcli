@@ -226,15 +226,17 @@ func writeAgentLifecycleError(w http.ResponseWriter, err error, fallback string)
 		errors.Is(err, workitems.ErrNotImplemented),
 		errors.Is(err, workitems.ErrInvalidPersistedState):
 		handler.HandleWorkItemsError(w, err)
-	case errors.Is(err, workflowcataloghttp.ErrUnauthenticated),
-		errors.Is(err, authority.ErrInvalidPrincipal),
-		errors.Is(err, authority.ErrPrincipalExpired):
-		handler.RespondError(w, http.StatusUnauthorized, "authentication required")
-	case errors.Is(err, authority.ErrWorkspaceMismatch),
-		errors.Is(err, authority.ErrActionNotAllowed),
-		errors.Is(err, authority.ErrAdmissionDenied),
-		errors.Is(err, authority.ErrPrincipalClass):
-		handler.RespondError(w, http.StatusForbidden, "forbidden")
+		return
+	}
+	if classification, ok := handler.ClassifyAuthenticationAuthorityError(err); ok {
+		message := "authentication required"
+		if classification.Status == http.StatusForbidden {
+			message = "forbidden"
+		}
+		handler.RespondError(w, classification.Status, message)
+		return
+	}
+	switch {
 	case errors.Is(err, agentsmodule.ErrNotFound):
 		handler.RespondError(w, http.StatusNotFound, "agent not found")
 	case errors.Is(err, agentsmodule.ErrInvalid):

@@ -21,7 +21,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/types"
-	"github.com/tysonthomas9/loomcli/internal/webui/app/capabilitycomposition"
 	healthhandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/health"
 	hterminal "github.com/tysonthomas9/loomcli/internal/webui/handlers/terminal"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -458,7 +457,7 @@ func TestSetupRoutes_WorkspaceGetUsesCanonicalWorkspace(t *testing.T) {
 	if _, err := st.Workspaces().Create(context.Background(), store.WorkspaceCreate{Key: "canonical-ws", Name: "Canonical"}); err != nil {
 		t.Fatal(err)
 	}
-	catalog, err := capabilitycomposition.NewWorkspaceCapability(st.Workspaces(), st.Repos())
+	catalog, err := NewWorkspaceCapability(st.Workspaces(), st.Repos())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -606,7 +605,7 @@ func TestSetupRoutes_WorkspaceRenamePatchEndpoint(t *testing.T) {
 	if _, err := st.Workspaces().Create(context.Background(), store.WorkspaceCreate{Key: "test-ws", Name: "test-ws"}); err != nil {
 		t.Fatal(err)
 	}
-	catalog, err := capabilitycomposition.NewWorkspaceCapability(st.Workspaces(), st.Repos())
+	catalog, err := NewWorkspaceCapability(st.Workspaces(), st.Repos())
 	if err != nil {
 		t.Fatal(err)
 	}

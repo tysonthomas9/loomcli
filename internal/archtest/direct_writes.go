@@ -243,12 +243,11 @@ func (i DirectWriteInventory) validateMetadata() error {
 		"internal/driver",
 		"internal/infra/agentsbootstrapstore",
 		"internal/infra/connectorscatalog",
-		"internal/infra/connectorsrotation",
 		"internal/infra/sessionstoreadapter",
-		"internal/infra/stackstoreadapter",
-		"internal/infra/usageprojection",
+		"internal/infra/sourcecontrolstackstore",
 		"internal/infra/workspacecatalog",
 		"internal/modules",
+		"internal/usage",
 		"internal/webui/handlers",
 	}
 	if !slices.Equal(i.AdapterRoots, wantRoots) {

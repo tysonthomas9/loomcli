@@ -1,7 +1,6 @@
 package terminal
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
@@ -22,9 +21,8 @@ func HandleStartTerminalSetup(svc terminal.TerminalService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		workspace := middleware.WorkspaceFromContext(r.Context())
 
-		r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
 		var req terminalSetupRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{}); err != nil {
 			handler.WriteJSON(w, http.StatusBadRequest, tabMetadataResponse{
 				Success: false,
 				Error:   "invalid request body",

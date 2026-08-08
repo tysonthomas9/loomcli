@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/infra/connectorsrotation"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -18,7 +17,6 @@ type Catalog struct {
 	connectors store.ConnectorStore
 	grants     store.ConnectorGrantStore
 	audit      store.ConnectorAuditStore
-	rotation   *connectorsrotation.Adapter
 }
 
 var _ connectorsmodule.ManagementStore = (*Catalog)(nil)
@@ -31,15 +29,10 @@ func New(
 	if connectors == nil || grants == nil || audit == nil {
 		return nil, connectorsmodule.ErrUnavailable
 	}
-	rotation, err := connectorsrotation.New(connectors, audit)
-	if err != nil {
-		return nil, err
-	}
 	return &Catalog{
 		connectors: connectors,
 		grants:     grants,
 		audit:      audit,
-		rotation:   rotation,
 	}, nil
 }
 
@@ -92,7 +85,13 @@ func (catalog *Catalog) RotateConnectorSecretsRecord(
 	connectorID string,
 	mutation connectorsmodule.RotateConnectorSecretsMutation,
 ) (*connectorsmodule.Connector, error) {
-	return catalog.rotation.RotateConnectorSecretsRecord(ctx, workspace, connectorID, mutation)
+	value, err := catalog.connectors.RotateSecrets(ctx, workspace, connectorID, store.ConnectorSecretRotation{
+		NewInboundSecret:            mutation.NewInboundSecret,
+		PreviousSecretValidUntil:    mutation.PreviousSecretValidUntil,
+		ExpectedUpdatedAt:           mutation.ExpectedUpdatedAt,
+		NewOutboundCredentialSealed: append([]byte(nil), mutation.NewOutboundCredentialSealed...),
+	})
+	return connectorProjection(value), translateError(err)
 }
 
 func (catalog *Catalog) ResolveCurrentInboundSecretRecord(
@@ -100,7 +99,14 @@ func (catalog *Catalog) ResolveCurrentInboundSecretRecord(
 	workspace,
 	connectorID string,
 ) (string, error) {
-	return catalog.rotation.ResolveCurrentInboundSecretRecord(ctx, workspace, connectorID)
+	value, err := catalog.connectors.ResolveInboundSecret(ctx, workspace, connectorID)
+	if err != nil {
+		return "", translateError(err)
+	}
+	if value == nil {
+		return "", connectorsmodule.ErrInvalidPersistedState
+	}
+	return value.Current, nil
 }
 
 func (catalog *Catalog) ResolveOutboundCredentialSealedRecord(
@@ -108,7 +114,8 @@ func (catalog *Catalog) ResolveOutboundCredentialSealedRecord(
 	workspace,
 	connectorID string,
 ) ([]byte, error) {
-	return catalog.rotation.ResolveOutboundCredentialSealedRecord(ctx, workspace, connectorID)
+	value, err := catalog.connectors.ResolveOutboundCredentialSealed(ctx, workspace, connectorID)
+	return append([]byte(nil), value...), translateError(err)
 }
 
 func (catalog *Catalog) CreateManagementGrant(
@@ -172,7 +179,14 @@ func (catalog *Catalog) AppendConnectorCallRecord(
 	if record == nil {
 		return connectorsmodule.ErrInvalid
 	}
-	return catalog.rotation.AppendConnectorCallRecord(ctx, record)
+	return translateError(catalog.audit.Append(ctx, &domain.ConnectorCallRecord{
+		WorkspaceKey: record.WorkspaceKey, CallID: record.CallID, Seq: record.Seq,
+		RunID: record.RunID, BindingID: record.BindingID, ConnectorID: record.ConnectorID,
+		SourceKind: domain.ConnectorSourceKind(record.SourceKind), Action: record.Action,
+		Resource: record.Resource, Decision: domain.ConnectorCallDecision(record.Decision),
+		UpstreamStatus: record.UpstreamStatus, ErrorClass: record.ErrorClass,
+		SanitizedSummary: record.SanitizedSummary, OccurredAt: record.OccurredAt,
+	}))
 }
 
 func connectorProjection(value *domain.Connector) *connectorsmodule.Connector {

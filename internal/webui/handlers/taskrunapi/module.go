@@ -30,7 +30,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -46,6 +45,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	serverhandler "github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
 
 // maxTaskRunOpBodyBytes caps inbound task-run op payloads (matches the
@@ -306,7 +306,13 @@ func (m *Module) taskRunAuthority(
 
 func decodeParams[T any](body []byte) (T, error) {
 	var params T
-	if err := json.Unmarshal(body, &params); err != nil {
+	err := serverhandler.DecodeOneJSONBytes(body, &params, serverhandler.JSONDecodeOptions{
+		MaxBytes: maxTaskRunOpBodyBytes,
+	})
+	if errors.Is(err, serverhandler.ErrTrailingJSON) {
+		err = errors.New("multiple JSON values")
+	}
+	if err != nil {
 		return params, fmt.Errorf("decode task-run op params: %s: %w", err.Error(), domain.ErrInvalid)
 	}
 	return params, nil
@@ -317,16 +323,14 @@ func decodeParams[T any](body []byte) (T, error) {
 // Unknown fields fail closed so the TaskRun surface cannot widen implicitly.
 func decodeStrictParams[T any](body []byte) (T, error) {
 	var params T
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&params); err != nil {
-		return params, fmt.Errorf("decode task-run op params: %s: %w", err.Error(), domain.ErrInvalid)
+	err := serverhandler.DecodeOneJSONBytes(body, &params, serverhandler.JSONDecodeOptions{
+		MaxBytes:              maxTaskRunOpBodyBytes,
+		DisallowUnknownFields: true,
+	})
+	if errors.Is(err, serverhandler.ErrTrailingJSON) {
+		err = errors.New("multiple JSON values")
 	}
-	var trailing struct{}
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		if err == nil {
-			err = errors.New("multiple JSON values")
-		}
+	if err != nil {
 		return params, fmt.Errorf("decode task-run op params: %s: %w", err.Error(), domain.ErrInvalid)
 	}
 	return params, nil

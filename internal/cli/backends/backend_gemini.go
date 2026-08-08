@@ -46,11 +46,7 @@ func buildGeminiInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
 
 // buildGeminiEnv constructs the environment variables for Gemini subprocess invocations.
 func buildGeminiEnv(workDir, agentName string) []string {
-	env := append(cli.FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
-	if agentName != "" {
-		env = append(env, "LOOM_AGENT_NAME="+agentName)
-	}
-	return env
+	return buildBackendEnv(workDir, agentName)
 }
 
 func defaultGeminiInvoker(workDir, prompt, agentName string) error {

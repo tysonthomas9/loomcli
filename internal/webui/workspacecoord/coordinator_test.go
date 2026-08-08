@@ -13,7 +13,6 @@ import (
 	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/workspaceerrors"
 )
 
 type workspaceAgentDirectoryStub struct {
@@ -470,8 +469,8 @@ func TestStartAsyncAddReposPreparesNormalizedAdmissionAndUsesExactJobID(t *testi
 func TestStartAsyncCreateClassifiesAdmissionConflict(t *testing.T) {
 	coordinator := &testWorkspaceAdmissionCoordinator{
 		prepareCreate: func(context.Context, WorkspaceCreateRequest) (string, error) {
-			return "", workspaceerrors.New(
-				workspaceerrors.AlreadyExists,
+			return "", workspacemodule.NewCreateError(
+				workspacemodule.AlreadyExists,
 				"workspace already exists",
 				errors.New("repository admission conflict"),
 			)
@@ -498,8 +497,8 @@ func TestStartAsyncCreateClassifiesAdmissionConflict(t *testing.T) {
 func TestStartAsyncAddReposClassifiesAdmissionConflict(t *testing.T) {
 	coordinator := &testWorkspaceAdmissionCoordinator{
 		prepareAddRepos: func(context.Context, WorkspaceAddReposRequest) (string, error) {
-			return "", workspaceerrors.New(
-				workspaceerrors.AlreadyExists,
+			return "", workspacemodule.NewCreateError(
+				workspacemodule.AlreadyExists,
 				"repository already exists in workspace",
 				errors.New("repository admission conflict"),
 			)

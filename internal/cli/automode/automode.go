@@ -20,7 +20,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/infra/sessionstoreadapter"
-	"github.com/tysonthomas9/loomcli/internal/infra/usageprojection"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
@@ -145,7 +144,7 @@ type autoLoopCtx struct {
 	yieldFile         string
 	hasAvailableTasks func() (bool, error)
 	generatePrompt    func(string, *config.WorkspaceConfig) string
-	usageStore        *usage.Store
+	usageStore        *usage.Projection
 	sessStore         *sessions.Store
 	updateState       func(string) error
 	clearTaskID       func() error
@@ -276,7 +275,7 @@ func initAutoLoop(opts AutoModeOptions) *autoLoopCtx {
 		log.Fatal("CustomPromptGen must be set on AutoModeOptions")
 	}
 
-	usageStore, usageErr := usageprojection.New(cli.GetWorkspaceRuntimeDir())
+	usageStore, usageErr := usage.NewProjection(cli.GetWorkspaceRuntimeDir())
 	if usageErr != nil {
 		fmt.Printf("[auto] Warning: usage tracking disabled: %v\n", usageErr)
 	}

@@ -373,12 +373,18 @@ func TestWebhookAdmissionMatchesDeterministicallyFiltersActorsAndSnapshotsActive
 
 func TestDeliveryDispatchIdempotencyKeyPreservesLegacyAndBoundsFallback(t *testing.T) {
 	bindingID := "binding-a"
+	if got := DeliveryDispatchIdempotencyKey("", bindingID); got != "" {
+		t.Fatalf("missing event identity produced dispatch key %q", got)
+	}
+	if got := DeliveryDispatchIdempotencyKey("event-a", ""); got != "" {
+		t.Fatalf("missing binding identity produced dispatch key %q", got)
+	}
 	boundaryEventKey := strings.Repeat("e", maxDeliveryDispatchIdempotencyKeyLen-len(bindingID)-1)
 	boundaryLegacy := boundaryEventKey + "#" + bindingID
 	if len(boundaryLegacy) != maxDeliveryDispatchIdempotencyKeyLen {
 		t.Fatalf("boundary fixture length = %d", len(boundaryLegacy))
 	}
-	if got := deliveryDispatchIdempotencyKey(boundaryEventKey, bindingID); got != boundaryLegacy {
+	if got := DeliveryDispatchIdempotencyKey(boundaryEventKey, bindingID); got != boundaryLegacy {
 		t.Fatalf("128-byte legacy key changed to %q", got)
 	}
 
@@ -386,22 +392,22 @@ func TestDeliveryDispatchIdempotencyKeyPreservesLegacyAndBoundsFallback(t *testi
 	legacy := oversizedEventKey + "#" + bindingID
 	wantDigest := sha256.Sum256([]byte(legacy))
 	want := deliveryDispatchHashPrefix + hex.EncodeToString(wantDigest[:])
-	got := deliveryDispatchIdempotencyKey(oversizedEventKey, bindingID)
+	got := DeliveryDispatchIdempotencyKey(oversizedEventKey, bindingID)
 	if got != want || len(got) > maxDeliveryDispatchIdempotencyKeyLen || got != strings.TrimSpace(got) {
 		t.Fatalf("oversized key = %q (%d), want %q", got, len(got), want)
 	}
-	if replay := deliveryDispatchIdempotencyKey(oversizedEventKey, bindingID); replay != got {
+	if replay := DeliveryDispatchIdempotencyKey(oversizedEventKey, bindingID); replay != got {
 		t.Fatalf("oversized key is not deterministic: %q != %q", replay, got)
 	}
-	if distinct := deliveryDispatchIdempotencyKey(oversizedEventKey+"y", bindingID); distinct == got {
+	if distinct := DeliveryDispatchIdempotencyKey(oversizedEventKey+"y", bindingID); distinct == got {
 		t.Fatalf("distinct oversized legacy inputs collided at %q", got)
 	}
 	liveEventKey := internalEventIdempotencyKey("ws", "task-ready-reconcile-v1-"+strings.Repeat("a", 64))
 	liveBindingID := "agent-binding-" + strings.Repeat("b", 32)
-	if live := deliveryDispatchIdempotencyKey(liveEventKey, liveBindingID); !strings.HasPrefix(live, deliveryDispatchHashPrefix) || len(live) > maxDeliveryDispatchIdempotencyKeyLen {
+	if live := DeliveryDispatchIdempotencyKey(liveEventKey, liveBindingID); !strings.HasPrefix(live, deliveryDispatchHashPrefix) || len(live) > maxDeliveryDispatchIdempotencyKeyLen {
 		t.Fatalf("task-ready reconcile dispatch key = %q (%d)", live, len(live))
 	}
-	if noncanonical := deliveryDispatchIdempotencyKey(" "+boundaryEventKey[:8], bindingID); !strings.HasPrefix(noncanonical, deliveryDispatchHashPrefix) {
+	if noncanonical := DeliveryDispatchIdempotencyKey(" "+boundaryEventKey[:8], bindingID); !strings.HasPrefix(noncanonical, deliveryDispatchHashPrefix) {
 		t.Fatalf("non-canonical legacy key was not bounded: %q", noncanonical)
 	}
 	for name, eventKey := range map[string]string{
@@ -410,7 +416,7 @@ func TestDeliveryDispatchIdempotencyKeyPreservesLegacyAndBoundsFallback(t *testi
 		"unicode":        "événement",
 	} {
 		t.Run(name, func(t *testing.T) {
-			key := deliveryDispatchIdempotencyKey(eventKey, bindingID)
+			key := DeliveryDispatchIdempotencyKey(eventKey, bindingID)
 			if !strings.HasPrefix(key, deliveryDispatchHashPrefix) || !deliveryDispatchLegacyKeyAccepted(key) {
 				t.Fatalf("fallback key = %q", key)
 			}
