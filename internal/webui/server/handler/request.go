@@ -4,56 +4,37 @@ package handler
 import (
 	"encoding/json"
 	"errors"
-	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
 
+	"github.com/tysonthomas9/loomcli/internal/platform/httptransport"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 )
 
 // MaxRequestBody is the maximum request body size (1MB) to prevent DoS attacks.
-const MaxRequestBody = 1 << 20
+const MaxRequestBody = httptransport.DefaultMaxJSONBodyBytes
 
 // ErrTrailingJSON reports that a request body contained more than one JSON
 // value or non-whitespace content after the first value.
-var ErrTrailingJSON = errors.New("request body must contain exactly one JSON value")
+var ErrTrailingJSON = httptransport.ErrTrailingJSON
 
 // JSONDecodeOptions defines the transport policy for one JSON request body.
 // The zero MaxBytes value uses MaxRequestBody.
-type JSONDecodeOptions struct {
-	MaxBytes              int64
-	DisallowUnknownFields bool
-}
+type JSONDecodeOptions = httptransport.JSONDecodeOptions
 
 // DecodeOneJSON enforces a bounded body and exactly one top-level JSON value.
 // It intentionally returns decoder errors unchanged so feature adapters can
 // preserve their public error vocabulary while sharing the security policy.
 func DecodeOneJSON(w http.ResponseWriter, r *http.Request, dst any, options JSONDecodeOptions) error {
-	limit := options.MaxBytes
-	if limit <= 0 {
-		limit = MaxRequestBody
-	}
-	r.Body = http.MaxBytesReader(w, r.Body, limit)
-	decoder := json.NewDecoder(r.Body)
-	if options.DisallowUnknownFields {
-		decoder.DisallowUnknownFields()
-	}
-	if err := decoder.Decode(dst); err != nil {
-		return err
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != nil {
-		if errors.Is(err, io.EOF) {
-			return nil
-		}
-		var maxBytesErr *http.MaxBytesError
-		if errors.As(err, &maxBytesErr) {
-			return err
-		}
-		return ErrTrailingJSON
-	}
-	return ErrTrailingJSON
+	return httptransport.DecodeOneJSONRequest(w, r, dst, options)
+}
+
+// DecodeOneJSONBytes applies the same bounded, exact-one policy to a request
+// body that an adapter had to materialize before dispatch (for example, when
+// one authenticated transport fans out to several operation decoders).
+func DecodeOneJSONBytes(data []byte, dst any, options JSONDecodeOptions) error {
+	return httptransport.DecodeOneJSONBytes(data, dst, options)
 }
 
 // DefaultListLimit is the default number of items returned by list endpoints.
