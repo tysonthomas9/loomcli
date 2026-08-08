@@ -30,10 +30,12 @@ export function withoutDurableAgentProjections(
   records: AgentRecordSummary[],
 ): LoomAgentStatus[] {
   if (records.length === 0) return agents;
-  const durableIDs = new Set(
-    records.map((record) => record.id.trim()).filter(Boolean),
+  const durableIdentities = new Set(
+    records
+      .flatMap((record) => [record.id.trim(), record.name.trim()])
+      .filter(Boolean),
   );
-  return agents.filter((agent) => !durableIDs.has(agent.name.trim()));
+  return agents.filter((agent) => !durableIdentities.has(agent.name.trim()));
 }
 
 export function buildAgentAutomationRows(

@@ -37,10 +37,11 @@ function binding(bindingId: string, targetAgentId?: string): TriggerBinding {
 }
 
 describe("agent-section automation rows", () => {
-  it("removes only legacy roster projections whose names equal durable record IDs", () => {
+  it("removes legacy roster projections matching durable record IDs or names", () => {
     const agents = [
       { name: "lead", status: "ready", role: "lead" },
       { name: "agent-record-1", status: "ready", role: "plan" },
+      { name: "Planner", status: "configured", role: "plan" },
       { name: "standalone-worker", status: "ready", role: "task" },
     ] as LoomAgentStatus[];
 
