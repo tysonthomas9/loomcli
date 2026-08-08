@@ -2,6 +2,7 @@ package domain
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -57,12 +58,88 @@ const (
 	// close to the supervisor keeps the writes and the terminal transition in
 	// one ordered sequence it controls.
 	AgentHookActionClose AgentHookActionType = "close"
+	// AgentHookActionCycle advances a bounded review loop: it either re-arms the
+	// previous stage for another round, or stamps the ship label once the
+	// configured number of rounds has run.
+	//
+	// The counter lives in the label set as <prefix><n> rather than in a side
+	// table, because labels are the only per-issue state both stages already
+	// read. The count is the MAX of the parsed counters, so a leftover from a
+	// crashed cleanup is harmless.
+	//
+	// Carries no free text — only the structured Cycle block — so the closed
+	// vocabulary still holds.
+	AgentHookActionCycle AgentHookActionType = "cycle"
 )
+
+// DefaultCycleLabelPrefix is the counter-label prefix when none is configured.
+const DefaultCycleLabelPrefix = "review-cycle="
+
+// AgentHookCycle parameterizes a bounded review loop.
+type AgentHookCycle struct {
+	// Threshold is the number of rounds to run before shipping. Must be >= 1.
+	// A threshold of 1 ships on the first pass and writes no counter at all.
+	Threshold int `json:"threshold" yaml:"threshold"`
+
+	// RearmLabel is removed to hand the task back to the previous stage. It is
+	// removed FIRST, before the counter is bumped: a crash in between repeats a
+	// round, which is safe, whereas bumping first could leave the counter
+	// advanced with the stage never re-armed — indistinguishable from a round
+	// that already ran, silently skipping review.
+	RearmLabel string `json:"rearm_label" yaml:"rearm_label"`
+
+	// ShipLabel is stamped once the threshold is reached, handing the task to
+	// the downstream stage.
+	ShipLabel string `json:"ship_label" yaml:"ship_label"`
+
+	// Prefix overrides DefaultCycleLabelPrefix.
+	Prefix string `json:"prefix,omitempty" yaml:"prefix,omitempty"`
+}
+
+// LabelPrefix returns the configured prefix or the default.
+func (c *AgentHookCycle) LabelPrefix() string {
+	if c == nil || strings.TrimSpace(c.Prefix) == "" {
+		return DefaultCycleLabelPrefix
+	}
+	return c.Prefix
+}
+
+// CounterLabel renders the counter label for n completed rounds.
+func (c *AgentHookCycle) CounterLabel(n int) string {
+	return fmt.Sprintf("%s%d", c.LabelPrefix(), n)
+}
+
+// ParseCounter returns the round count encoded in label, or 0 when it is not a
+// counter for this cycle. Deliberately strict: a stray "review-cycle=1.5" is
+// ignored rather than rounded into a round count.
+func (c *AgentHookCycle) ParseCounter(label string) int {
+	prefix := c.LabelPrefix()
+	if !strings.HasPrefix(label, prefix) {
+		return 0
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(label, prefix)))
+	if err != nil || n < 1 {
+		return 0
+	}
+	return n
+}
+
+// CompletedRounds is the highest counter present. Taking the max rather than a
+// sum keeps a leftover counter from a crashed cleanup harmless.
+func (c *AgentHookCycle) CompletedRounds(labels []string) int {
+	max := 0
+	for _, l := range labels {
+		if n := c.ParseCounter(l); n > max {
+			max = n
+		}
+	}
+	return max
+}
 
 // IsValid returns true if the action type is a recognized constant.
 func (t AgentHookActionType) IsValid() bool {
 	switch t {
-	case AgentHookActionComment, AgentHookActionAddLabel, AgentHookActionClose:
+	case AgentHookActionComment, AgentHookActionAddLabel, AgentHookActionClose, AgentHookActionCycle:
 		return true
 	}
 	return false
@@ -80,6 +157,9 @@ type AgentHookAction struct {
 	Type   AgentHookActionType    `json:"type" yaml:"type"`
 	Source AgentHookCommentSource `json:"source,omitempty" yaml:"source,omitempty"`
 	Value  string                 `json:"value,omitempty" yaml:"value,omitempty"`
+
+	// Cycle is required for Type == cycle and must be unset otherwise.
+	Cycle *AgentHookCycle `json:"cycle,omitempty" yaml:"cycle,omitempty"`
 }
 
 // AgentHooks holds the supervisor-owned hook pipelines for an agent.
@@ -134,15 +214,29 @@ func (h *AgentHooks) Validate() error {
 	}
 	sawLabel := false
 	sawClose := false
+	sawCycle := false
 	for i := range h.OnComplete {
 		a := h.OnComplete[i]
 		if !a.Type.IsValid() {
-			return fmt.Errorf("hooks.on_complete[%d]: unknown action type %q (must be one of: comment, add_label, close)", i, a.Type)
+			return fmt.Errorf("hooks.on_complete[%d]: unknown action type %q (must be one of: comment, add_label, close, cycle)", i, a.Type)
 		}
 		// Nothing may follow the close: every write in this pipeline targets the
 		// task, and a terminal issue rejects further mutation.
 		if sawClose {
 			return fmt.Errorf("hooks.on_complete[%d]: %s action must not follow a close action", i, a.Type)
+		}
+		if a.Type == AgentHookActionCycle && sawCycle {
+			return fmt.Errorf("hooks.on_complete[%d]: only one cycle action is allowed", i)
+		}
+		// cycle + close is self-defeating in BOTH of the cycle's branches, so it
+		// is never what anyone meant: on a re-arm the close immediately closes
+		// the task the cycle just handed back, killing the loop at round one;
+		// on a ship it closes the task the ship label was supposed to route, so
+		// nothing can claim it. Validate exists to make unsatisfiable pipelines
+		// unrepresentable rather than to let them fail quietly at runtime.
+		if a.Type == AgentHookActionClose && sawCycle {
+			return fmt.Errorf("hooks.on_complete[%d]: close action must not be combined with a cycle action "+
+				"(a cycle hands the task to the next stage; closing it makes that hand-off unclaimable)", i)
 		}
 		if err := validateHookAction(i, a, sawLabel); err != nil {
 			return err
@@ -150,6 +244,11 @@ func (h *AgentHooks) Validate() error {
 		switch a.Type {
 		case AgentHookActionAddLabel:
 			sawLabel = true
+		case AgentHookActionCycle:
+			// A cycle writes labels, so later comments would violate
+			// write-before-stamp exactly as they would after add_label.
+			sawLabel = true
+			sawCycle = true
 		case AgentHookActionClose:
 			sawClose = true
 		}
@@ -161,6 +260,9 @@ func (h *AgentHooks) Validate() error {
 // out of Validate so the ordering rules above stay readable as the action
 // vocabulary grows; the two concerns are independent.
 func validateHookAction(i int, a AgentHookAction, sawLabel bool) error {
+	if a.Cycle != nil && a.Type != AgentHookActionCycle {
+		return fmt.Errorf("hooks.on_complete[%d]: %s action must not set cycle", i, a.Type)
+	}
 	switch a.Type {
 	case AgentHookActionComment:
 		if a.Source == "" {
@@ -191,6 +293,31 @@ func validateHookAction(i int, a AgentHookAction, sawLabel bool) error {
 		if a.Source != "" {
 			return fmt.Errorf("hooks.on_complete[%d]: close action must not set source", i)
 		}
+	case AgentHookActionCycle:
+		return validateCycleAction(i, a)
+	}
+	return nil
+}
+
+func validateCycleAction(i int, a AgentHookAction) error {
+	if a.Value != "" || a.Source != "" {
+		return fmt.Errorf("hooks.on_complete[%d]: cycle action must not set value or source", i)
+	}
+	if a.Cycle == nil {
+		return fmt.Errorf("hooks.on_complete[%d]: cycle action requires a cycle block", i)
+	}
+	if a.Cycle.Threshold < 1 {
+		return fmt.Errorf("hooks.on_complete[%d]: cycle threshold must be >= 1, got %d", i, a.Cycle.Threshold)
+	}
+	if strings.TrimSpace(a.Cycle.RearmLabel) == "" {
+		return fmt.Errorf("hooks.on_complete[%d]: cycle action requires a non-blank rearm_label", i)
+	}
+	if strings.TrimSpace(a.Cycle.ShipLabel) == "" {
+		return fmt.Errorf("hooks.on_complete[%d]: cycle action requires a non-blank ship_label", i)
+	}
+	// The loop would re-arm the very label it ships with, so it could never end.
+	if a.Cycle.RearmLabel == a.Cycle.ShipLabel {
+		return fmt.Errorf("hooks.on_complete[%d]: cycle rearm_label and ship_label must differ", i)
 	}
 	return nil
 }

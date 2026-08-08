@@ -285,6 +285,115 @@ func (s *Supervisor) runCompletionHooks(ap *AgentProcess, exitCode int) int {
 	return exitCode
 }
 
+// advanceReviewCycle either re-arms the previous stage for another round or
+// stamps the ship label once the threshold is reached.
+//
+// The counter lives in the label set as <prefix><n>; CompletedRounds takes the
+// max, so a counter left behind by a crashed cleanup is harmless.
+//
+// ORDER IS THE CRASH-SAFETY MECHANISM. There is no atomic multi-label write, so:
+//
+//  1. remove the re-arm label FIRST — this hands the task back to the previous
+//     stage. A crash between 1 and 2 repeats a round: at worst one extra review,
+//     never a skipped one.
+//  2. bump the counter.
+//  3. drop stale lower counters.
+//
+// Bumping first would be wrong in a way that hides: a crash in between leaves
+// the re-arm label present alongside the advanced counter, indistinguishable
+// from a round that already ran, so the next pass skips a review and the task
+// ships under-reviewed.
+//
+// The ship branch writes NO counter, so a shipped task's highest counter is
+// threshold-1, and a threshold of 1 ships with no counter at all. "N rounds ran"
+// is observable from the stage's comments, not from the label.
+func (s *Supervisor) advanceReviewCycle(ctx context.Context, taskID string, cycle *domain.AgentHookCycle) error {
+	if cycle == nil {
+		return fmt.Errorf("cycle action has no cycle block")
+	}
+	issue, err := s.IssueBackend.Get(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("read status and labels: %w", err)
+	}
+
+	// The deliberate-stop check comes FIRST, before any write, for two reasons.
+	// Semantically, `closed` and `blocked` are decisions somebody made — closed
+	// is terminal, blocked is how a stage escalates to a human — and the loop
+	// must not drag a task out of either. Mechanically, a terminal issue also
+	// rejects label mutation server-side (fleet-db's ValidateModifiable), so
+	// checking after the writes would never reach this branch on a real
+	// backend: the run would already have failed on the label instead.
+	//
+	// `review` is deliberately NOT a gate, a departure from the design this is
+	// modeled on. There a reviewer *elects* `review` to escalate, so it is a
+	// deliberate gesture; in loom a planning stage lands there as its ordinary
+	// completion, so honoring it would stall every loop at round one. Use
+	// `blocked` to stop a loop for a human.
+	if issue.Status == "closed" || issue.Status == "blocked" {
+		slog.InfoContext(ctx, "review cycle stopped: task is not available to advance",
+			"task", taskID, "status", issue.Status)
+		return nil
+	}
+
+	completed := cycle.CompletedRounds(issue.Labels) + 1 // this pass finished a round
+
+	if completed >= cycle.Threshold {
+		if err := s.IssueBackend.AddLabel(ctx, taskID, cycle.ShipLabel); err != nil {
+			return fmt.Errorf("stamp %q: %w", cycle.ShipLabel, err)
+		}
+		// The ship label routes the task to the next stage, and that stage can
+		// only claim an `open` task — exactly like the re-arm below. Without
+		// this the loop bounds correctly and then stalls at the hand-off:
+		// ship label stamped, nothing able to act on it.
+		if err := s.reopenForNextStage(ctx, taskID, issue.Status); err != nil {
+			return err
+		}
+		slog.InfoContext(ctx, "review cycle complete; shipping",
+			"task", taskID, "rounds", completed, "threshold", cycle.Threshold, "ship_label", cycle.ShipLabel)
+		return nil
+	}
+
+	if err := s.IssueBackend.RemoveLabel(ctx, taskID, cycle.RearmLabel); err != nil {
+		return fmt.Errorf("re-arm %q: %w", cycle.RearmLabel, err)
+	}
+	if err := s.IssueBackend.AddLabel(ctx, taskID, cycle.CounterLabel(completed)); err != nil {
+		return fmt.Errorf("bump counter to %d: %w", completed, err)
+	}
+	for _, label := range issue.Labels {
+		if n := cycle.ParseCounter(label); n > 0 && n < completed {
+			if err := s.IssueBackend.RemoveLabel(ctx, taskID, label); err != nil {
+				// Cleanup only. CompletedRounds takes the max, so a survivor
+				// cannot change the next decision — do not fail the pipeline.
+				slog.WarnContext(ctx, "stale cycle counter left in place",
+					"task", taskID, "label", label, "err", err)
+			}
+		}
+	}
+	// The re-arm is only real if the previous stage can claim the task again.
+	if err := s.reopenForNextStage(ctx, taskID, issue.Status); err != nil {
+		return err
+	}
+	slog.InfoContext(ctx, "review cycle re-armed",
+		"task", taskID, "round", completed, "threshold", cycle.Threshold, "rearmed", cycle.RearmLabel)
+	return nil
+}
+
+// reopenForNextStage returns the task to the only state another stage can claim
+// from: task_router scores anything that is not `open` as 0 ("not open"), and
+// the clean-exit recovery path trusts whatever status the agent left behind. So
+// a stage that finished at `in_progress` or `review` has to be normalized here,
+// or the hand-off — re-arm or ship — never happens.
+func (s *Supervisor) reopenForNextStage(ctx context.Context, taskID, status string) error {
+	if status == "open" {
+		return nil
+	}
+	open := "open"
+	if err := s.IssueBackend.Update(ctx, taskID, backend.UpdateParams{Status: &open}); err != nil {
+		return fmt.Errorf("return the task to open for the next stage: %w", err)
+	}
+	return nil
+}
+
 // currentCompletionHooks reads the agent's pipeline from the live config rather
 // than from the Entry captured when the AgentProcess was constructed.
 //
@@ -387,6 +496,8 @@ func (s *Supervisor) executeCompletionHooks(
 			err = s.postFinalReplyComment(ctx, ap, taskID, reply)
 		case domain.AgentHookActionAddLabel:
 			err = s.IssueBackend.AddLabel(ctx, taskID, action.Value)
+		case domain.AgentHookActionCycle:
+			err = s.advanceReviewCycle(ctx, taskID, action.Cycle)
 		case domain.AgentHookActionClose:
 			// Ordered last by Validate, so every write above has already
 			// landed. Closing here rather than letting the agent do it is the
