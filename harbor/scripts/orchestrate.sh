@@ -33,6 +33,13 @@ fi
 # Verification-role fork (EXPERIMENTS B2c lead / B2d qa); requires persistence.
 VERIFY_ROLE="${LOOM_MARATHON_VERIFY_ROLE:-off}"
 [ "$STUB" = "1" ] && VERIFY_ROLE=off
+ARCH_MODE="${LOOM_MARATHON_ARCH:-off}"          # B2j: architect session + gate
+LEAD_MAINT="${LOOM_MARATHON_LEAD_MAINT:-0}"     # B2k: lead maintainability prompt
+[ "$STUB" = "1" ] && ARCH_MODE=off
+if [ "$ARCH_MODE" = "on" ] && [ "$LEAD_MAINT" = "1" ]; then
+  echo "[orchestrate] FATAL: arch=on and lead_maint=1 are mutually exclusive arms" >&2
+  exit 1
+fi
 if [ "$VERIFY_ROLE" != "off" ] && [ "$LEAD_MODE" != "persistent" ]; then
   echo "[orchestrate] FATAL: verify_role=$VERIFY_ROLE requires lead_mode=persistent" >&2
   exit 1
@@ -46,6 +53,7 @@ TASKS_SEEDED=0
 
 log() { printf '[orchestrate %s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
 record() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" >> "$INTEG_LOG"; }
+. "$MH/scripts/gatelib.sh"   # integrate()/current_marker()/arch gate machinery
 
 # ---------------------------------------------------------------- bootstrap --
 if ! bash "$MH/scripts/bootstrap.sh"; then
@@ -83,6 +91,8 @@ persistent_lead_start() {
   [ "$VERIFY_ROLE" = "lead-ui" ] && lead_prompt="$PROMPTS/lead-persistent-verifier-ui.md"
   [ "$VERIFY_ROLE" = "tasks" ] && lead_prompt="$PROMPTS/lead-persistent-verifier-tasks.md"
   [ "$VERIFY_ROLE" = "tasks-dual" ] && lead_prompt="$PROMPTS/lead-persistent-verifier-tasks-dual.md"
+  [ "$VERIFY_ROLE" = "tasks" ] && [ "$ARCH_MODE" = "on" ] && lead_prompt="$PROMPTS/lead-persistent-verifier-tasks-arch.md"
+  [ "$VERIFY_ROLE" = "tasks" ] && [ "$LEAD_MAINT" = "1" ] && lead_prompt="$PROMPTS/lead-persistent-verifier-tasks-maint.md"
   cat > "$LOGD/lead-launch.sh" <<LEOF
 #!/usr/bin/env bash
 . "$MH/env.sh"
@@ -129,6 +139,25 @@ QBEOF
   tmux kill-session -t "$QAB_TMUX" 2>/dev/null
   tmux new-session -d -s "$QAB_TMUX" -x 220 -y 50 "$LOGD/qab-launch.sh" || return 1
   tmux pipe-pane -t "$QAB_TMUX" -o "cat >> $LOGD/qab-pane.log" 2>/dev/null || true
+}
+
+# Architect (B2j): a persistent controlled session under agent name `arch`
+# with actor=arch (so created_by attribution works for the refactor audit).
+# Reads code only; acts through labels/comments per the arch prompt protocol.
+ARCH_TMUX=marathon-arch
+persistent_arch_start() {
+  cat > "$LOGD/arch-launch.sh" <<AEOF
+#!/usr/bin/env bash
+. "$MH/env.sh"
+export LOOM_AGENT_NAME=arch
+export LOOM_FLEET_DB_ACTOR=arch
+cd "\$MARATHON_WS_ROOT/app" || exit 1
+exec loom lead --backend codex --prompt "$PROMPTS/arch-persistent.md"
+AEOF
+  chmod +x "$LOGD/arch-launch.sh"
+  tmux kill-session -t "$ARCH_TMUX" 2>/dev/null
+  tmux new-session -d -s "$ARCH_TMUX" -x 220 -y 50 "$LOGD/arch-launch.sh" || return 1
+  tmux pipe-pane -t "$ARCH_TMUX" -o "cat >> $LOGD/arch-pane.log" 2>/dev/null || true
 }
 
 # runtime_status AGENT -> controlled-runtime status for that agent name
@@ -266,40 +295,7 @@ if best:
   done
 }
 
-# current_marker TID -> "attempt|sha" of the LATEST valid IMPL-DONE marker,
-# but only while the task is still an UNLABELED review (else empty). Used to
-# revalidate sweep snapshots immediately before integrate/reopen (a snapshot
-# can be a full critic-session stale — codex vet-B).
-current_marker() {
-  loom data show "$1" -o json 2>/dev/null | python3 -c '
-import json, re, sys
-try:
-    d = json.load(sys.stdin)
-except Exception:
-    sys.exit(0)
-if d.get("status") != "review" or "needs-revision" in (d.get("labels") or []):
-    sys.exit(0)
-best = None
-for c in d.get("comments") or []:
-    m = re.search(r"IMPL-DONE\s+attempt=(\d+)\s+commit=([0-9a-fA-F]{7,40})", c.get("text") or "")
-    if m:
-        best = (m.group(1), m.group(2))
-if best:
-    print(f"{best[0]}|{best[1]}")
-'
-}
-
-# Idempotency ledger: only ever act once per (task, attempt).
-attempt_handled() {
-  grep -Eq " (VERDICT-REJECTED|INTEGRATED|INTEGRATION-FAILED|GATE-SKIP) task=$1 attempt=$2( |$)" "$INTEG_LOG"
-}
-
-reopen_task() {
-  local tid="$1" attempt="$2" reason="$3"
-  loom data comment "$tid" "FEEDBACK attempt=$attempt: $reason" >/dev/null 2>&1
-  loom data update "$tid" --status open --add-label needs-revision \
-    --notes "FEEDBACK attempt=$attempt: $reason" >/dev/null 2>&1
-}
+# current_marker/attempt_handled/reopen_task moved to gatelib.sh (B2j).
 
 # run_critic TID ATTEMPT SHA -> prints APPROVED or CHANGES-REQUESTED
 run_critic() {
@@ -335,65 +331,7 @@ run_critic() {
   echo "$verdict"
 }
 
-# integrate TID ATTEMPT SHA — atomic check-BEFORE-fast-forward. /app only ever
-# advances by FF to an already-checked candidate; a failed check leaves /app
-# byte-identical and the task reopened.
-integrate() {
-  local tid="$1" attempt="$2" sha="$3"
-  local app_before coder_head gate_wt app_after fresh
-  fresh=$(current_marker "$tid")
-  if [ "$fresh" != "$attempt|$sha" ]; then
-    record "GATE-SKIP task=$tid attempt=$attempt reason=stale-resweep fresh=${fresh:-none}"
-    log "integrate: $tid attempt=$attempt no longer current (now: ${fresh:-gone}) — resweeping next pass"
-    return 1
-  fi
-  app_before=$(git -C /app rev-parse HEAD)
-  coder_head=$(git -C "$MARATHON_CODER_WT" rev-parse HEAD)
-  # The single coder branch keeps moving (task N+1 commits land on it while the
-  # sweep runs), so require the candidate to be REACHABLE from the coder head,
-  # not equal to it; /app is still FF-ed to exactly the candidate below.
-  if ! git -C "$MARATHON_CODER_WT" merge-base --is-ancestor "$sha" "$coder_head"; then
-    record "GATE-SKIP task=$tid attempt=$attempt reason=stale-candidate sha=$sha coder_head=$coder_head"
-    reopen_task "$tid" "$attempt" "stale candidate: IMPL-DONE commit $sha is not reachable from the coder branch head $coder_head; recommit and re-signal"
-    return 1
-  fi
-  if ! git -C /app merge-base --is-ancestor "$app_before" "$sha"; then
-    record "GATE-SKIP task=$tid attempt=$attempt reason=app-not-ancestor app=$app_before sha=$sha"
-    reopen_task "$tid" "$attempt" "/app head $app_before is not an ancestor of candidate $sha; rebase onto current /app state"
-    return 1
-  fi
-  gate_wt="/work/gate-$tid-$attempt"
-  git -C /app worktree remove --force "$gate_wt" >/dev/null 2>&1
-  if ! git -C /app worktree add --detach "$gate_wt" "$sha" >/dev/null 2>&1; then
-    record "GATE-SKIP task=$tid attempt=$attempt reason=checkout-failed sha=$sha"
-    reopen_task "$tid" "$attempt" "candidate checkout failed for $sha; recommit and re-signal"
-    return 1
-  fi
-  if timeout 600 bash "$MH/scripts/integration-check.sh" "$gate_wt" \
-      > "$LOGD/check-$tid-$attempt.log" 2>&1; then
-    if git -C /app merge --ff-only "$sha" >/dev/null 2>&1; then
-      app_after=$(git -C /app rev-parse HEAD)
-      record "INTEGRATED task=$tid attempt=$attempt app_before=$app_before app_after=$app_after check=pass"
-      loom data comment "$tid" "INTEGRATED attempt=$attempt app_before=$app_before app_after=$app_after" >/dev/null 2>&1
-      loom data close "$tid" --reason "integrated into /app by harness gate (attempt=$attempt)" >/dev/null 2>&1
-      git -C /app push -q origin main >/dev/null 2>&1 || true
-      log "INTEGRATED $tid attempt=$attempt -> /app now $app_after"
-    else
-      record "GATE-SKIP task=$tid attempt=$attempt reason=ff-failed app=$app_before sha=$sha"
-      reopen_task "$tid" "$attempt" "fast-forward of /app to $sha failed (non-FF history)"
-    fi
-  else
-    app_after=$(git -C /app rev-parse HEAD)
-    record "INTEGRATION-FAILED task=$tid attempt=$attempt app_before=$app_before app_after_unchanged=$app_after candidate=$sha"
-    if [ "$app_before" != "$app_after" ]; then
-      record "INVARIANT-VIOLATION task=$tid attempt=$attempt /app moved during a failed check"
-      log "INVARIANT-VIOLATION: /app moved during failed check for $tid"
-    fi
-    reopen_task "$tid" "$attempt" "integration check failed: $(tail -3 "$LOGD/check-$tid-$attempt.log" | tr '\n' ' ' | cut -c1-400)"
-    log "INTEGRATION-FAILED $tid attempt=$attempt (/app untouched at $app_after)"
-  fi
-  git -C /app worktree remove --force "$gate_wt" >/dev/null 2>&1
-}
+# integrate() moved to gatelib.sh (B2j: gains the optional gate mode).
 
 open_task_count() {
   loom data list --limit 500 -o json 2>/dev/null | python3 -c '
@@ -424,6 +362,7 @@ finalize() {
     tmux kill-session -t "$LEAD_TMUX" 2>/dev/null
     tmux kill-session -t "$QA_TMUX" 2>/dev/null
     tmux kill-session -t "$QAB_TMUX" 2>/dev/null
+    tmux kill-session -t "$ARCH_TMUX" 2>/dev/null
     pkill -9 -f 'codex app-server' 2>/dev/null
     pkill -9 -f 'codex --remote' 2>/dev/null
     CACHE_LEADS="${XDG_CACHE_HOME:-$HOME/.cache}/loom/codex-leads"
@@ -676,6 +615,7 @@ qa_session_up() { # $1 agent-name, $2 start-fn, $3 pane-log
 case "$VERIFY_ROLE" in qa|tasks|tasks-dual)
   qa_session_up qa persistent_qa_start qa-pane.log
   [ "$VERIFY_ROLE" = "tasks-dual" ] && qa_session_up qab persistent_qab_start qab-pane.log
+  [ "$ARCH_MODE" = "on" ] && qa_session_up arch persistent_arch_start arch-pane.log
   ;;
 esac
 
@@ -749,6 +689,16 @@ for lane in ("qa-verify", "qa-verify-backend"):
       lead|lead-ui|tasks|tasks-dual) persistent_pass lead "${PASS_MSG}${VERIFY_INFO}${BACKLOG_NOTE}" >/dev/null ;;
       *) persistent_pass lead "$PASS_MSG" >/dev/null ;;
     esac
+    if [ "$ARCH_MODE" = "on" ]; then
+      # B2j architect pass: honor rulings on parked candidates first (so this
+      # pass's message lists only still-open items), audit refactor filings,
+      # then deliver the design/candidate lists.
+      arch_pending_sweep
+      arch_refactor_audit
+      ARCH_DESIGNS=$(arch_design_list | tr '\n' ' ')
+      ARCH_CANDS=$(arch_cand_list | paste -sd';' - 2>/dev/null || true)
+      persistent_pass arch "Architect pass $PASS. About $REMAIN_MIN minutes of work time remain. Designs in review awaiting your ruling: ${ARCH_DESIGNS:-none}. Integration candidates awaiting your ruling: ${ARCH_CANDS:-none}. Reload each item before ruling and skip any whose status or IMPL-DONE marker no longer matches this listing. Repository checkout: ${MARATHON_ARCH_CHECKOUT:-$MARATHON_VERIFY_CHECKOUT}. Current integrated head: $(git -C "${MARATHON_APP_DIR:-/app}" rev-parse --short HEAD 2>/dev/null). Epic: ${EPIC_ID}." >/dev/null
+    fi
     if [ "$VERIFY_ROLE" = "qa" ] || [ "$VERIFY_ROLE" = "tasks" ]; then
       persistent_pass qa "QA pass $PASS. About $REMAIN_MIN minutes of work time remain.${VERIFY_INFO}" >/dev/null
     elif [ "$VERIFY_ROLE" = "tasks-dual" ]; then
@@ -835,7 +785,11 @@ if has_sub and not has_valid:
       VERDICT=$(run_critic "$tid" "$attempt" "$sha")
       fi
       if [ "$VERDICT" = "APPROVED" ]; then
-        integrate "$tid" "$attempt" "$sha"
+        if [ "$ARCH_MODE" = "on" ]; then
+          integrate "$tid" "$attempt" "$sha" gate
+        else
+          integrate "$tid" "$attempt" "$sha"
+        fi
       else
         record "VERDICT-REJECTED task=$tid attempt=$attempt sha=$sha"
         if [ "$(current_marker "$tid")" = "$attempt|$sha" ]; then
@@ -884,6 +838,10 @@ if has_sub and not has_valid:
   [ "$SLEEP" -gt "$CADENCE" ] && SLEEP="$CADENCE"
   [ "$SLEEP" -gt 0 ] && sleep "$SLEEP"
 done
+
+# B2j: deadline/spend-cap exit must not strand arch-gated candidates
+# (codex B2j-vet finding 7) — timeout-integrate every remaining one.
+[ "$ARCH_MODE" = "on" ] && arch_final_sweep
 
 finalize
 exit 0

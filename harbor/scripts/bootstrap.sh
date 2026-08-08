@@ -156,6 +156,7 @@ done
 VERIFY_ROLE="${LOOM_MARATHON_VERIFY_ROLE:-off}"
 VERIFY_CHECKOUT=""
 VERIFY_CHECKOUT_BACKEND=""
+VERIFY_CHECKOUT_ARCH=""
 if [ "$VERIFY_ROLE" != "off" ]; then
   VERIFY_CHECKOUT="$WS_ROOT/verify-checkout"
   if [ ! -d "$VERIFY_CHECKOUT" ]; then
@@ -163,6 +164,16 @@ if [ "$VERIFY_ROLE" != "off" ]; then
       || die "verify-checkout worktree creation failed"
   fi
   trust_codex_project_path "$VERIFY_CHECKOUT"
+  if [ "${LOOM_MARATHON_ARCH:-off}" = "on" ]; then
+    # B2j architect: its own read-only detached worktree (never runs the app,
+    # so no port coordination needed; shares /app's object store for diffs).
+    VERIFY_CHECKOUT_ARCH="$WS_ROOT/arch-checkout"
+    if [ ! -d "$VERIFY_CHECKOUT_ARCH" ]; then
+      git -C /app worktree add --detach "$VERIFY_CHECKOUT_ARCH" >/dev/null 2>&1 \
+        || die "arch-checkout worktree creation failed"
+    fi
+    trust_codex_project_path "$VERIFY_CHECKOUT_ARCH"
+  fi
   if [ "$VERIFY_ROLE" = "tasks-dual" ]; then
     # Second verifier gets its own checkout; the two QA sessions never run
     # the app simultaneously (orchestrate alternates passes — spec-pinned
@@ -314,13 +325,13 @@ probe_lane() { # $1 lane -> registers the virtual lane repo and proves create+cl
 case "${LOOM_MARATHON_VERIFY_ROLE:-off}" in
 tasks|tasks-dual)
   probe_lane qa-verify
-  PHASH_FILES="lead-persistent-verifier-tasks.md qa-persistent-tasks.md"
   if [ "${LOOM_MARATHON_VERIFY_ROLE:-off}" = "tasks-dual" ]; then
     probe_lane qa-verify-backend
-    PHASH_FILES="lead-persistent-verifier-tasks-dual.md qa-persistent-tasks.md qa-backend-persistent-tasks.md"
   fi
-  for pf in $PHASH_FILES; do
-    log "prompt-hash $pf $( (sha256sum "${LOOM_MARATHON_PROMPTS_DIR:-$MH/prompts}/$pf" 2>/dev/null || shasum -a 256 "${LOOM_MARATHON_PROMPTS_DIR:-$MH/prompts}/$pf" 2>/dev/null) | cut -c1-16)"
+  # Hash EVERY prompt file in the active profile (codex B2j-vet finding 10:
+  # the run manifest must cover all prompts, arch and lead variants included).
+  for pf in "${LOOM_MARATHON_PROMPTS_DIR:-$MH/prompts}"/*.md; do
+    log "prompt-hash $(basename "$pf") $( (sha256sum "$pf" 2>/dev/null || shasum -a 256 "$pf" 2>/dev/null) | cut -c1-16)"
   done
   ;;
 esac
@@ -342,5 +353,6 @@ export MARATHON_CODER_WT="$CODER_WT"
 export MARATHON_PLANNER_WT="$PLANNER_WT"
 export MARATHON_VERIFY_CHECKOUT="$VERIFY_CHECKOUT"
 export MARATHON_VERIFY_CHECKOUT_BACKEND="$VERIFY_CHECKOUT_BACKEND"
+export MARATHON_ARCH_CHECKOUT="$VERIFY_CHECKOUT_ARCH"
 EOF
 log "bootstrap complete (stub=$STUB, max_agents=$MAX_AGENTS)"

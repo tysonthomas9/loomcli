@@ -134,3 +134,6 @@ After completing Step 8 (blocked or needs-revision) or Step 9 (completed), you a
 - Simply EXIT
 
 You have completed ONE task through the full workflow. The human will run you again for the next task.
+
+If the task's comments contain `ARCH-FEEDBACK` entries, address the most
+recent one in your implementation before signaling completion.

@@ -52,6 +52,8 @@ class LoomAgent(BaseInstalledAgent):
         critic: str = "auto",
         lead_mode: str = "oneshot",
         verify_role: str = "off",
+        arch: str = "off",
+        lead_maint: int | str = 0,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
@@ -67,6 +69,8 @@ class LoomAgent(BaseInstalledAgent):
         self._critic = str(critic)
         self._lead_mode = str(lead_mode)
         self._verify_role = str(verify_role)
+        self._arch = str(arch)
+        self._lead_maint = str(lead_maint)
 
     @staticmethod
     @override
@@ -228,6 +232,10 @@ class LoomAgent(BaseInstalledAgent):
             env["LOOM_MARATHON_LEAD_MODE"] = self._lead_mode
         if self._verify_role != "off":
             env["LOOM_MARATHON_VERIFY_ROLE"] = self._verify_role
+        if self._arch != "off":
+            env["LOOM_MARATHON_ARCH"] = self._arch
+        if self._lead_maint not in ("0", "", "off"):
+            env["LOOM_MARATHON_LEAD_MAINT"] = "1"
         if self._stub:
             env["LOOM_MARATHON_STUB"] = "1"
         if self.model_name:
