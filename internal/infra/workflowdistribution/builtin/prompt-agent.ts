@@ -428,6 +428,12 @@ export async function run(ctx) {
   const taskRunId = "promptagent-" + (stringValue(loom.driverRunId) || "run") + "-" + issueId;
   const requestInput = { taskPrompt: prompt, openPullRequest: false };
   requestInput.deliveryMode = isPlanner || isReadOnly ? "patch-back" : "local-branch";
+  if (!isPlanner && !isReadOnly) {
+    // A mutating role has an implementation deliverable. An exit-zero child
+    // with no captured change is not success: it would otherwise let the host
+    // close the card without a patch, branch, or review artifact.
+    requestInput.requireChangeDelivery = true;
+  }
   if (isReview) {
     // A mutating Review role must publish one reviewable branch artifact. It
     // may not silently fall back to patch-back on a non-filesystem origin,

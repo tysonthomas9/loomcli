@@ -66,6 +66,7 @@ func TestPromptAgentWorkflowSourceContract(t *testing.T) {
 		// GAP A: dispatches the builtin runner by name.
 		`runner: "local-task-runner"`,
 		`taskPrompt: prompt`,
+		"requestInput.requireChangeDelivery = true",
 		"requestInput.requireLocalBranchDelivery = true",
 		"requestInput.localBranchName = reviewBranchResume.branch",
 		"requestInput.localBranchBaseRef = reviewBranchResume.headSha",

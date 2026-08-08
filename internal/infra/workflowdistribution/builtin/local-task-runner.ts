@@ -105,6 +105,9 @@ export async function run(ctx = {}) {
   const requireLocalBranchDelivery = booleanValue(
     inputValue(request, "requireLocalBranchDelivery"),
   );
+  const requireChangeDelivery = booleanValue(
+    inputValue(request, "requireChangeDelivery"),
+  );
   const localBranchResume = localBranchResumeSpec(request);
   if (localBranchResume.errorClass) {
     return failed(localBranchResume.errorClass, localBranchResume.errorMessage, {
@@ -338,6 +341,23 @@ export async function run(ctx = {}) {
         transcriptEntries,
         taskUsage,
       });
+    }
+    if (exitCode === 0 && requireChangeDelivery && patchInfo.filesChanged === 0) {
+      logs.push("required change delivery produced no changed files");
+      return failed(
+        "local_change_delivery_missing",
+        "the mutating role completed without producing a reviewable file change",
+        {
+          taskRunId,
+          taskId,
+          backend,
+          request,
+          logs,
+          headBefore,
+          transcriptEntries,
+          taskUsage,
+        },
+      );
     }
 
     // Local filesystem delivery: commit (if needed) in the isolated worktree

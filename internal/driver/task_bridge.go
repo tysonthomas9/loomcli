@@ -688,6 +688,11 @@ func (e HostBridgeTaskExecutor) taskRunnerEnv(req TaskExecRequest, requestJSON s
 	env := []string{
 		"LOOM_TASK_RUN_REQUEST_JSON=" + requestJSON,
 		"LOOM_WORKTREE_PATH=" + strings.TrimSpace(e.WorktreePath),
+		// Built-in role prompts invoke ordinary `loom data` commands, whose
+		// public CLI scope is LOOM_WORKSPACE. Keep that scope host-owned and
+		// identical to the typed driver workspace instead of relying on an
+		// ambient workspace selection in the child process.
+		"LOOM_WORKSPACE=" + req.WorkspaceKey,
 		"LOOM_DRIVER_WORKSPACE=" + req.WorkspaceKey,
 		"LOOM_DRIVER_RUN_ID=" + req.DriverRunID,
 		"LOOM_DRIVER_STEP_ID=" + req.DriverStepID,

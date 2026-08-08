@@ -116,6 +116,10 @@ func waitForTaskRunnerPIDs(t *testing.T, path string) (int, int) {
 func TestTaskRunnerEnvAPIBaseURL(t *testing.T) {
 	req := hostBridgeTaskExecRequest()
 	legacy := HostBridgeTaskExecutor{WorktreePath: "/wt"}.taskRunnerEnv(req, "{}")
+	if !envContains(legacy, "LOOM_WORKSPACE="+req.WorkspaceKey) ||
+		!envContains(legacy, "LOOM_DRIVER_WORKSPACE="+req.WorkspaceKey) {
+		t.Fatalf("task runner env missing host-owned workspace scope: %v", legacy)
+	}
 	for _, entry := range legacy {
 		if strings.HasPrefix(entry, "LOOM_TASK_RUN_API_URL=") {
 			t.Fatalf("legacy env unexpectedly exports the serve API URL: %q", entry)
@@ -158,10 +162,11 @@ func TestTaskRunnerAdmittedRepositoryRemoteEnvIsTrustedLocalOnly(t *testing.T) {
 	localReq.RunnerEntrypoint = LocalTaskRunnerEntrypoint
 	base := taskRunnerBaseEnvForRequest(localReq, []string{
 		"PATH=/bin",
+		"LOOM_WORKSPACE=FORGED",
 		"LOOM_TASK_RUN_REPOSITORY_REMOTE_URL=/private/tmp/forged-repo",
 	})
-	if envHasAny(base, "LOOM_TASK_RUN_REPOSITORY_REMOTE_URL") {
-		t.Fatalf("inherited repository remote bypassed the host-owned seam: %v", base)
+	if envHasAny(base, "LOOM_WORKSPACE", "LOOM_TASK_RUN_REPOSITORY_REMOTE_URL") {
+		t.Fatalf("inherited task scope bypassed the host-owned seam: %v", base)
 	}
 }
 
