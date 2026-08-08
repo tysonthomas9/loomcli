@@ -8,7 +8,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
-	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
 const setupTerminalRows uint16 = 24
@@ -239,7 +238,7 @@ func (s *terminalServiceImpl) upsertSetupTab(ctx context.Context, wsID, session,
 		if tabs, listErr := s.tabStore.List(ctx, wsID); listErr == nil {
 			sortOrder = len(tabs)
 		}
-		meta := &tabmeta.TabMetadata{
+		meta := &TabMetadata{
 			SessionName: session,
 			Workspace:   wsID,
 			Label:       label,

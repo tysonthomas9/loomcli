@@ -2,14 +2,12 @@ package terminal
 
 import (
 	"context"
-
-	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
 // InteractionTerminalIdentityWriter is the narrow owner-bound persistence
 // surface used only after an Interaction session and terminal are established.
 type InteractionTerminalIdentityWriter interface {
-	PersistInteractionTabIdentity(ctx context.Context, wsID string, meta *tabmeta.TabMetadata) error
+	PersistInteractionTabIdentity(ctx context.Context, wsID string, meta *TabMetadata) error
 }
 
 // TerminalService defines the surviving terminal-related business logic after
@@ -25,10 +23,10 @@ type TerminalService interface {
 	GenerateToken(ctx context.Context, wsID, session, userID string) (string, error)
 
 	// --- Tab metadata (Redis) ---
-	ListTabs(ctx context.Context, wsID string) ([]tabmeta.TabMetadata, error)
-	GetTab(ctx context.Context, wsID, session string) (*tabmeta.TabMetadata, error)
+	ListTabs(ctx context.Context, wsID string) ([]TabMetadata, error)
+	GetTab(ctx context.Context, wsID, session string) (*TabMetadata, error)
 	PatchTab(ctx context.Context, wsID, session string, fields map[string]string) (*PatchTabResult, error)
-	PutTab(ctx context.Context, wsID string, meta *tabmeta.TabMetadata) error
+	PutTab(ctx context.Context, wsID string, meta *TabMetadata) error
 	DeleteTab(ctx context.Context, wsID, session string) error
 	ListSessionsByIssue(ctx context.Context) (map[string][]string, error)
 
@@ -42,7 +40,7 @@ type TerminalService interface {
 
 // PatchTabResult contains the patched tab and whether the issue ID changed.
 type PatchTabResult struct {
-	Tab            *tabmeta.TabMetadata
+	Tab            *TabMetadata
 	IssueIDChanged bool
 }
 

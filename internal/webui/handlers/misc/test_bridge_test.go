@@ -20,8 +20,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 	"github.com/tysonthomas9/loomcli/internal/webui/filecoord"
+	"github.com/tysonthomas9/loomcli/internal/webui/localredis"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
-	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
 )
 
 // logger is a package-level variable used by test code to capture log output.
@@ -733,13 +733,13 @@ func (s *stubFileService) MovePathVersionedScoped(_ context.Context, _ string, _
 // testSessionServiceImpl mirrors the root webui.sessionServiceImpl for tests.
 type testSessionServiceImpl struct {
 	sessStore *sessions.Store
-	histStore *sessionhistory.Store
+	histStore *localredis.SessionHistoryStore
 }
 
 // NewSessionService creates a test-local SessionService implementation.
 // This mirrors the root webui.NewSessionService, duplicated here to avoid
 // a circular import (webui → handlers/misc → webui).
-func NewSessionService(sessStore *sessions.Store, histStore *sessionhistory.Store) sessioncoord.SessionService {
+func NewSessionService(sessStore *sessions.Store, histStore *localredis.SessionHistoryStore) sessioncoord.SessionService {
 	return &testSessionServiceImpl{sessStore: sessStore, histStore: histStore}
 }
 
@@ -903,11 +903,11 @@ func (s *testSessionServiceImpl) GetSessionDiff(_ context.Context, _, taskID, se
 	return diff, nil
 }
 
-func (s *testSessionServiceImpl) ListSessionHistory(ctx context.Context, wsID, issueID string) ([]sessionhistory.SessionRecord, error) {
+func (s *testSessionServiceImpl) ListSessionHistory(ctx context.Context, wsID, issueID string) ([]sessioncoord.SessionRecord, error) {
 	if s.histStore == nil {
 		return nil, apperrors.ErrUnavailable("session history not available (no Redis)")
 	}
-	if err := sessionhistory.ValidateIssueID(issueID); err != nil {
+	if err := sessioncoord.ValidateSessionHistoryIssueID(issueID); err != nil {
 		return nil, apperrors.ErrValidation(err.Error())
 	}
 	records, err := s.histStore.List(ctx, wsID, issueID)

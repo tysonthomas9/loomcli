@@ -11,7 +11,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
-	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 	webuterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
@@ -48,7 +47,7 @@ type Module struct {
 	allowedOrigins  []string
 	loomServerURL   string
 	store           terminalStore
-	tabMetaStore    *tabmeta.Store
+	tabMetaStore    webuterminal.TabMetadataReader
 	hub             *realtime.Hub
 	serverStartedAt time.Time
 	agentIdentity   terminalAgentIdentity
@@ -75,7 +74,7 @@ func NewModule(
 	allowedOrigins []string,
 	loomServerURL string,
 	st terminalStore,
-	tabMetaStore *tabmeta.Store,
+	tabMetaStore webuterminal.TabMetadataReader,
 	hub *realtime.Hub,
 	serverStartedAt time.Time,
 	interactionDeps InteractionDependencies,

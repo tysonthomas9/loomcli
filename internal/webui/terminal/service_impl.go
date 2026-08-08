@@ -9,7 +9,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
-	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
 var validTerminalSession = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
@@ -25,7 +24,7 @@ var validTerminalSession = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 // away. nil is acceptable for callers without a PTY backend.
 type terminalServiceImpl struct {
 	termAuth    *realtime.TerminalAuth
-	tabStore    *tabmeta.Store
+	tabStore    TabMetadataStore
 	hub         *realtime.Hub
 	redisClient *redis.Client
 	ptyMgr      PTYSource
@@ -35,7 +34,7 @@ type terminalServiceImpl struct {
 // NewTerminalService creates a new TerminalService implementation.
 func NewTerminalService(
 	termAuth *realtime.TerminalAuth,
-	tabStore *tabmeta.Store,
+	tabStore TabMetadataStore,
 	hub *realtime.Hub,
 	redisClient *redis.Client,
 	ptyMgr PTYSource,
@@ -65,7 +64,7 @@ func (s *terminalServiceImpl) ptyAlive(wsID, session string) bool {
 // attachable because the PTY may not exist until the first WebSocket connects.
 // Metadata from before this server started and without a PTY remains false,
 // which preserves stale-session protection after a server restart.
-func (s *terminalServiceImpl) ptyAttachable(wsID string, meta *tabmeta.TabMetadata) bool {
+func (s *terminalServiceImpl) ptyAttachable(wsID string, meta *TabMetadata) bool {
 	if meta == nil {
 		return false
 	}

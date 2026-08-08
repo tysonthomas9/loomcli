@@ -1,7 +1,6 @@
 package realtime
 
 import (
-	"context"
 	"log/slog"
 	"net/http"
 	"slices"
@@ -10,8 +9,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
 const (
@@ -415,27 +412,4 @@ func (h *Hub) GetActiveSourceRepos() []string {
 		out = append(out, r)
 	}
 	return out
-}
-
-// BroadcastSessionIssueEvent sends an SSE event if the given session is linked to an issue.
-// Uses a background context since the caller's request context may be invalid after WebSocket hijack.
-func BroadcastSessionIssueEvent(tabMetaStore *tabmeta.Store, hub *Hub, workspace, session string) {
-	if tabMetaStore == nil || hub == nil {
-		return
-	}
-	metaCtx, metaCancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer metaCancel()
-	meta, err := tabMetaStore.Get(metaCtx, workspace, session)
-	if err != nil || meta == nil || meta.IssueID == "" {
-		return
-	}
-	hub.Broadcast(&MutationPayload{
-		Type:        "terminal_session_change",
-		EntityType:  "terminal",
-		EntityID:    session,
-		Action:      "terminal.session_change",
-		IssueID:     meta.IssueID,
-		Timestamp:   time.Now().UTC().Format(time.RFC3339Nano),
-		WorkspaceID: meta.Workspace,
-	})
 }

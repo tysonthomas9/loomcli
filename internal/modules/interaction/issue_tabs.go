@@ -47,3 +47,44 @@ func ValidateIssueTabIssueID(id string) error {
 	}
 	return nil
 }
+
+// ValidateAndFilterIssueTabs removes terminal tabs whose sessions no longer
+// exist. Non-terminal tabs are always preserved. If the active tab is
+// removed, the projection falls back to the permanent details tab.
+func ValidateAndFilterIssueTabs(state *IssueTabState, activeSessions []string) *IssueTabState {
+	if state == nil {
+		return nil
+	}
+
+	activeSet := make(map[string]bool, len(activeSessions))
+	for _, session := range activeSessions {
+		activeSet[session] = true
+	}
+
+	filtered := make([]IssueTab, 0, len(state.Tabs))
+	for _, tab := range state.Tabs {
+		if tab.Type == "terminal" && (tab.SessionName == "" || !activeSet[tab.SessionName]) {
+			continue
+		}
+		filtered = append(filtered, tab)
+	}
+
+	activeTabID := state.ActiveTabID
+	activeTabExists := false
+	for _, tab := range filtered {
+		if tab.ID == activeTabID {
+			activeTabExists = true
+			break
+		}
+	}
+	if !activeTabExists {
+		activeTabID = "details"
+	}
+
+	return &IssueTabState{
+		IssueID:     state.IssueID,
+		Tabs:        filtered,
+		ActiveTabID: activeTabID,
+		UpdatedAt:   state.UpdatedAt,
+	}
+}

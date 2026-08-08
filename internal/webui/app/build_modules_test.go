@@ -7,7 +7,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
-	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
+	"github.com/tysonthomas9/loomcli/internal/webui/localredis"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
@@ -50,7 +50,7 @@ func TestServer_BuildModules_AllDeps(t *testing.T) {
 	app := Server{
 		hub:           hub,
 		termSvc:       &stubTerminalService{},
-		issueTabStore: issuetabs.NewStore(nil, nil),
+		issueTabStore: localredis.NewIssueTabStore(nil, nil),
 		fleetRegistry: &fleet.StoreRegistry{},
 		diffSvc:       &stubDiffService{},
 		fileSvc:       &stubFileService{},

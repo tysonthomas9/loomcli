@@ -7,8 +7,6 @@ import (
 	"os"
 	"sync"
 	"time"
-
-	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
 // ErrInvalidWorkspacePath is returned when a workspace's directory path fails
@@ -432,7 +430,7 @@ func (mm *MultiPTYManager) existingManagerForWS(wsID string) *PTYManager {
 // AttachSession routes to the per-workspace PTYManager, creating it lazily
 // if necessary. Returns ErrWorkspaceNotRegistered if key.Workspace is empty
 // or unknown.
-func (mm *MultiPTYManager) AttachSession(key SessionKey, cols, rows uint16, launch *tabmeta.LaunchSpec) (Attachment, bool, error) {
+func (mm *MultiPTYManager) AttachSession(key SessionKey, cols, rows uint16, launch *LaunchSpec) (Attachment, bool, error) {
 	m, err := mm.managerForWS(key.Workspace)
 	if err != nil {
 		return nil, false, err

@@ -29,7 +29,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/sourcecontrolcoord"
-	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
@@ -72,7 +71,7 @@ type TerminalModuleDeps struct {
 	CORSOrigins        []string
 	SelfURL            string
 	Store              store.Store
-	TabMetaStore       *tabmeta.Store
+	TabMetaStore       terminal.TabMetadataStore
 	Hub                *realtime.Hub
 	ServerStartedAt    time.Time
 	Agents             agents.IdentityQueries

@@ -8,7 +8,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
+	"github.com/tysonthomas9/loomcli/internal/webui/localredis"
 )
 
 type setupEnsureCall struct {
@@ -67,7 +67,7 @@ func newSetupTestSvc(t *testing.T, fake *fakeSetupPTYSource) (*terminalServiceIm
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
 	return &terminalServiceImpl{
-		tabStore:    tabmeta.NewStore(rdb, nil),
+		tabStore:    localredis.NewTabMetadataStore(rdb, nil),
 		redisClient: rdb,
 		ptyMgr:      fake,
 	}, mr

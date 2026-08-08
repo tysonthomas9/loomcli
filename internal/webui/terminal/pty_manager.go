@@ -39,7 +39,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
-	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
 // ErrPTYMaxSessionsReached is returned by AttachSession when the concurrent-
@@ -302,7 +301,7 @@ func (m *PTYManager) SetBeforeKill(hook BeforeKillFunc) {
 // reattached is true when the returned attachment is to a session that
 // existed before this call (typical for page refresh or network blip).
 // Callers should check Attachment.Scrollback() for replay bytes.
-func (m *PTYManager) AttachSession(key SessionKey, cols, rows uint16, launch *tabmeta.LaunchSpec) (att Attachment, reattached bool, err error) {
+func (m *PTYManager) AttachSession(key SessionKey, cols, rows uint16, launch *LaunchSpec) (att Attachment, reattached bool, err error) {
 	if cols == 0 {
 		cols = 80
 	}
@@ -381,9 +380,9 @@ func (m *PTYManager) EnsureSession(key SessionKey, cols, rows uint16, argv []str
 			m.mu.Unlock()
 			return false, ErrPTYMaxSessionsReached
 		}
-		var launch *tabmeta.LaunchSpec
+		var launch *LaunchSpec
 		if len(argv) > 0 {
-			launch = &tabmeta.LaunchSpec{Argv: argv}
+			launch = &LaunchSpec{Argv: argv}
 		}
 		newSess, spawnErr := m.spawnSession(key, cols, rows, launch)
 		if spawnErr != nil {
@@ -416,7 +415,7 @@ func (m *PTYManager) WriteToSession(key SessionKey, p []byte) error {
 }
 
 // spawnSession must be called with m.mu held.
-func (m *PTYManager) spawnSession(key SessionKey, cols, rows uint16, launch *tabmeta.LaunchSpec) (*ptySession, error) {
+func (m *PTYManager) spawnSession(key SessionKey, cols, rows uint16, launch *LaunchSpec) (*ptySession, error) {
 	var useArgv []string
 	if launch != nil {
 		useArgv = launch.Argv

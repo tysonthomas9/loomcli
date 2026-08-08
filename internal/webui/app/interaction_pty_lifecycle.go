@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
-	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
@@ -14,7 +13,7 @@ import (
 // converge a process-owned PTY termination into the canonical Interaction
 // lifecycle.
 type InteractionPTYTabStore interface {
-	Get(context.Context, string, string) (*tabmeta.TabMetadata, error)
+	Get(context.Context, string, string) (*terminal.TabMetadata, error)
 }
 
 // InteractionForceInterrupter returns the exact interrupt port published by an

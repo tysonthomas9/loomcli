@@ -1,4 +1,4 @@
-package issuetabs
+package localredis
 
 import (
 	"context"
@@ -7,20 +7,25 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 )
 
-const testWorkspaceID = "test-ws-uuid"
+const issueTabTestWorkspaceID = "test-ws-uuid"
 
-func setupTest(t *testing.T) (*Store, *miniredis.Miniredis) {
+type IssueTab = interaction.IssueTab
+type IssueTabState = interaction.IssueTabState
+
+func setupIssueTabStoreTest(t *testing.T) (*IssueTabStore, *miniredis.Miniredis) {
 	t.Helper()
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { rdb.Close() })
-	return NewStore(rdb, nil), mr
+	return NewIssueTabStore(rdb, nil), mr
 }
 
-func TestSaveAndGet_RoundTrip(t *testing.T) {
-	store, _ := setupTest(t)
+func TestIssueTabSaveAndGetRoundTrip(t *testing.T) {
+	store, _ := setupIssueTabStoreTest(t)
 	ctx := context.Background()
 
 	state := &IssueTabState{
@@ -33,11 +38,11 @@ func TestSaveAndGet_RoundTrip(t *testing.T) {
 		ActiveTabID: "terminal-sess1",
 	}
 
-	if err := store.ReplaceIssueTabs(ctx, testWorkspaceID, state); err != nil {
+	if err := store.ReplaceIssueTabs(ctx, issueTabTestWorkspaceID, state); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
-	got, err := store.Get(ctx, testWorkspaceID, "PROJ-123")
+	got, err := store.Get(ctx, issueTabTestWorkspaceID, "PROJ-123")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -70,8 +75,8 @@ func TestSaveAndGet_RoundTrip(t *testing.T) {
 	}
 }
 
-func TestSaveAndGet_BackendRoundTrip(t *testing.T) {
-	store, _ := setupTest(t)
+func TestIssueTabSaveAndGetBackendRoundTrip(t *testing.T) {
+	store, _ := setupIssueTabStoreTest(t)
 	ctx := context.Background()
 
 	state := &IssueTabState{
@@ -83,11 +88,11 @@ func TestSaveAndGet_BackendRoundTrip(t *testing.T) {
 		ActiveTabID: "terminal-sess1",
 	}
 
-	if err := store.ReplaceIssueTabs(ctx, testWorkspaceID, state); err != nil {
+	if err := store.ReplaceIssueTabs(ctx, issueTabTestWorkspaceID, state); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
-	got, err := store.Get(ctx, testWorkspaceID, "BACKEND-1")
+	got, err := store.Get(ctx, issueTabTestWorkspaceID, "BACKEND-1")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -106,9 +111,9 @@ func TestSaveAndGet_BackendRoundTrip(t *testing.T) {
 	}
 }
 
-func TestGet_NotFound(t *testing.T) {
-	store, _ := setupTest(t)
-	state, err := store.Get(context.Background(), testWorkspaceID, "nonexistent")
+func TestIssueTabGetNotFound(t *testing.T) {
+	store, _ := setupIssueTabStoreTest(t)
+	state, err := store.Get(context.Background(), issueTabTestWorkspaceID, "nonexistent")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -117,17 +122,17 @@ func TestGet_NotFound(t *testing.T) {
 	}
 }
 
-func TestGet_EmptyIssueID(t *testing.T) {
-	store, _ := setupTest(t)
-	_, err := store.Get(context.Background(), testWorkspaceID, "")
+func TestIssueTabGetEmptyIssueID(t *testing.T) {
+	store, _ := setupIssueTabStoreTest(t)
+	_, err := store.Get(context.Background(), issueTabTestWorkspaceID, "")
 	if err == nil {
 		t.Fatal("expected error for empty issue ID")
 	}
 }
 
-func TestSave_EmptyIssueID(t *testing.T) {
-	store, _ := setupTest(t)
-	err := store.ReplaceIssueTabs(context.Background(), testWorkspaceID, &IssueTabState{
+func TestIssueTabSaveEmptyIssueID(t *testing.T) {
+	store, _ := setupIssueTabStoreTest(t)
+	err := store.ReplaceIssueTabs(context.Background(), issueTabTestWorkspaceID, &IssueTabState{
 		IssueID: "",
 		Tabs:    []IssueTab{},
 	})
@@ -136,8 +141,8 @@ func TestSave_EmptyIssueID(t *testing.T) {
 	}
 }
 
-func TestSave_SetsTTL(t *testing.T) {
-	store, mr := setupTest(t)
+func TestIssueTabSaveSetsTTL(t *testing.T) {
+	store, mr := setupIssueTabStoreTest(t)
 	ctx := context.Background()
 
 	state := &IssueTabState{
@@ -146,11 +151,11 @@ func TestSave_SetsTTL(t *testing.T) {
 		ActiveTabID: "details",
 	}
 
-	if err := store.ReplaceIssueTabs(ctx, testWorkspaceID, state); err != nil {
+	if err := store.ReplaceIssueTabs(ctx, issueTabTestWorkspaceID, state); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
-	redisTTL := mr.TTL(issueKey(testWorkspaceID, "TTL-TEST"))
+	redisTTL := mr.TTL(issueTabKey(issueTabTestWorkspaceID, "TTL-TEST"))
 	// TTL should be approximately 24 hours (allow some margin)
 	expected := 24 * time.Hour
 	if redisTTL < expected-time.Minute || redisTTL > expected+time.Minute {
@@ -158,8 +163,8 @@ func TestSave_SetsTTL(t *testing.T) {
 	}
 }
 
-func TestDelete(t *testing.T) {
-	store, _ := setupTest(t)
+func TestIssueTabDelete(t *testing.T) {
+	store, _ := setupIssueTabStoreTest(t)
 	ctx := context.Background()
 
 	state := &IssueTabState{
@@ -168,15 +173,15 @@ func TestDelete(t *testing.T) {
 		ActiveTabID: "details",
 	}
 
-	if err := store.ReplaceIssueTabs(ctx, testWorkspaceID, state); err != nil {
+	if err := store.ReplaceIssueTabs(ctx, issueTabTestWorkspaceID, state); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
-	if err := store.ClearIssueTabs(ctx, testWorkspaceID, "DEL-TEST"); err != nil {
+	if err := store.ClearIssueTabs(ctx, issueTabTestWorkspaceID, "DEL-TEST"); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 
-	got, err := store.Get(ctx, testWorkspaceID, "DEL-TEST")
+	got, err := store.Get(ctx, issueTabTestWorkspaceID, "DEL-TEST")
 	if err != nil {
 		t.Fatalf("Get after delete: %v", err)
 	}
@@ -185,22 +190,22 @@ func TestDelete(t *testing.T) {
 	}
 }
 
-func TestDelete_EmptyIssueID(t *testing.T) {
-	store, _ := setupTest(t)
-	err := store.ClearIssueTabs(context.Background(), testWorkspaceID, "")
+func TestIssueTabDeleteEmptyIssueID(t *testing.T) {
+	store, _ := setupIssueTabStoreTest(t)
+	err := store.ClearIssueTabs(context.Background(), issueTabTestWorkspaceID, "")
 	if err == nil {
 		t.Fatal("expected error for empty issue ID")
 	}
 }
 
-func TestValidateAndFilter_NilState(t *testing.T) {
-	result := ValidateAndFilter(nil, []string{"sess1"})
+func TestValidateAndFilterIssueTabsNilState(t *testing.T) {
+	result := interaction.ValidateAndFilterIssueTabs(nil, []string{"sess1"})
 	if result != nil {
 		t.Fatalf("expected nil, got %+v", result)
 	}
 }
 
-func TestValidateAndFilter_RemovesDeadSessions(t *testing.T) {
+func TestValidateAndFilterIssueTabsRemovesDeadSessions(t *testing.T) {
 	state := &IssueTabState{
 		IssueID: "FILTER-1",
 		Tabs: []IssueTab{
@@ -211,7 +216,7 @@ func TestValidateAndFilter_RemovesDeadSessions(t *testing.T) {
 		ActiveTabID: "details",
 	}
 
-	result := ValidateAndFilter(state, []string{"alive"})
+	result := interaction.ValidateAndFilterIssueTabs(state, []string{"alive"})
 
 	if len(result.Tabs) != 2 {
 		t.Fatalf("len(Tabs) = %d, want 2", len(result.Tabs))
@@ -223,7 +228,7 @@ func TestValidateAndFilter_RemovesDeadSessions(t *testing.T) {
 	}
 }
 
-func TestValidateAndFilter_PreservesNonTerminalTabs(t *testing.T) {
+func TestValidateAndFilterIssueTabsPreservesNonTerminalTabs(t *testing.T) {
 	state := &IssueTabState{
 		IssueID: "FILTER-2",
 		Tabs: []IssueTab{
@@ -235,7 +240,7 @@ func TestValidateAndFilter_PreservesNonTerminalTabs(t *testing.T) {
 	}
 
 	// No active sessions at all
-	result := ValidateAndFilter(state, nil)
+	result := interaction.ValidateAndFilterIssueTabs(state, nil)
 
 	if len(result.Tabs) != 2 {
 		t.Fatalf("len(Tabs) = %d, want 2", len(result.Tabs))
@@ -248,7 +253,7 @@ func TestValidateAndFilter_PreservesNonTerminalTabs(t *testing.T) {
 	}
 }
 
-func TestValidateAndFilter_AllTerminalsDead_FallsBackToPermanentTabs(t *testing.T) {
+func TestValidateAndFilterIssueTabsAllTerminalsDeadFallsBack(t *testing.T) {
 	state := &IssueTabState{
 		IssueID: "FILTER-3",
 		Tabs: []IssueTab{
@@ -259,7 +264,7 @@ func TestValidateAndFilter_AllTerminalsDead_FallsBackToPermanentTabs(t *testing.
 		ActiveTabID: "terminal-a",
 	}
 
-	result := ValidateAndFilter(state, nil)
+	result := interaction.ValidateAndFilterIssueTabs(state, nil)
 
 	if len(result.Tabs) != 1 {
 		t.Fatalf("len(Tabs) = %d, want 1 (only details)", len(result.Tabs))
@@ -269,7 +274,7 @@ func TestValidateAndFilter_AllTerminalsDead_FallsBackToPermanentTabs(t *testing.
 	}
 }
 
-func TestValidateAndFilter_FallsBackActiveTabToDetails(t *testing.T) {
+func TestValidateAndFilterIssueTabsFallsBackActiveTab(t *testing.T) {
 	state := &IssueTabState{
 		IssueID: "FILTER-4",
 		Tabs: []IssueTab{
@@ -279,14 +284,14 @@ func TestValidateAndFilter_FallsBackActiveTabToDetails(t *testing.T) {
 		ActiveTabID: "terminal-dead",
 	}
 
-	result := ValidateAndFilter(state, nil)
+	result := interaction.ValidateAndFilterIssueTabs(state, nil)
 
 	if result.ActiveTabID != "details" {
 		t.Errorf("ActiveTabID = %q, want %q (should fall back when active removed)", result.ActiveTabID, "details")
 	}
 }
 
-func TestValidateAndFilter_KeepsActiveTabWhenStillAlive(t *testing.T) {
+func TestValidateAndFilterIssueTabsKeepsActiveTab(t *testing.T) {
 	state := &IssueTabState{
 		IssueID: "FILTER-5",
 		Tabs: []IssueTab{
@@ -296,14 +301,14 @@ func TestValidateAndFilter_KeepsActiveTabWhenStillAlive(t *testing.T) {
 		ActiveTabID: "terminal-alive",
 	}
 
-	result := ValidateAndFilter(state, []string{"alive"})
+	result := interaction.ValidateAndFilterIssueTabs(state, []string{"alive"})
 
 	if result.ActiveTabID != "terminal-alive" {
 		t.Errorf("ActiveTabID = %q, want %q (active tab still alive)", result.ActiveTabID, "terminal-alive")
 	}
 }
 
-func TestValidateAndFilter_RemovesTerminalWithEmptySessionName(t *testing.T) {
+func TestValidateAndFilterIssueTabsRemovesEmptySession(t *testing.T) {
 	state := &IssueTabState{
 		IssueID: "FILTER-6",
 		Tabs: []IssueTab{
@@ -313,19 +318,19 @@ func TestValidateAndFilter_RemovesTerminalWithEmptySessionName(t *testing.T) {
 		ActiveTabID: "details",
 	}
 
-	result := ValidateAndFilter(state, []string{"anything"})
+	result := interaction.ValidateAndFilterIssueTabs(state, []string{"anything"})
 
 	if len(result.Tabs) != 1 {
 		t.Fatalf("len(Tabs) = %d, want 1 (terminal with empty session_name removed)", len(result.Tabs))
 	}
 }
 
-func TestIsolation_DifferentWorkspaces(t *testing.T) {
+func TestIssueTabIsolationDifferentWorkspaces(t *testing.T) {
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { rdb.Close() })
 
-	store := NewStore(rdb, nil)
+	store := NewIssueTabStore(rdb, nil)
 	ctx := context.Background()
 
 	stateA := &IssueTabState{

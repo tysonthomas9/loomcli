@@ -1,4 +1,4 @@
-package tabmeta
+package localredis
 
 import (
 	"context"
@@ -6,14 +6,14 @@ import (
 	"time"
 )
 
-func TestSetAndGet_WithIssueID(t *testing.T) {
-	store, _ := setupTest(t)
+func TestTabMetadataSetAndGetWithIssueID(t *testing.T) {
+	store, _ := setupTabMetadataStoreTest(t)
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Second)
 
 	meta := &TabMetadata{
 		SessionName: "issue-session",
-		Workspace:   testWorkspace,
+		Workspace:   tabMetadataTestWorkspace,
 		Label:       "Issue Session",
 		Notes:       "",
 		SortOrder:   1,
@@ -26,7 +26,7 @@ func TestSetAndGet_WithIssueID(t *testing.T) {
 		t.Fatalf("Set: %v", err)
 	}
 
-	got, err := store.Get(ctx, testWorkspace, "issue-session")
+	got, err := store.Get(ctx, tabMetadataTestWorkspace, "issue-session")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -38,8 +38,8 @@ func TestSetAndGet_WithIssueID(t *testing.T) {
 	}
 }
 
-func TestListByIssue_Empty(t *testing.T) {
-	store, _ := setupTest(t)
+func TestTabMetadataListByIssueEmpty(t *testing.T) {
+	store, _ := setupTabMetadataStoreTest(t)
 	ctx := context.Background()
 
 	tabs, err := store.ListByIssue(ctx, "no-such-issue")
@@ -51,17 +51,17 @@ func TestListByIssue_Empty(t *testing.T) {
 	}
 }
 
-func TestListByIssue_FiltersCorrectly(t *testing.T) {
-	store, _ := setupTest(t)
+func TestTabMetadataListByIssueFiltersCorrectly(t *testing.T) {
+	store, _ := setupTabMetadataStoreTest(t)
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Second)
 
 	// Create sessions with different issue IDs
 	sessions := []TabMetadata{
-		{SessionName: "s1", Workspace: testWorkspace, Label: "s1", SortOrder: 1, IssueID: "PROJ-1", CreatedAt: now, UpdatedAt: now},
-		{SessionName: "s2", Workspace: testWorkspace, Label: "s2", SortOrder: 2, IssueID: "PROJ-1", CreatedAt: now, UpdatedAt: now},
-		{SessionName: "s3", Workspace: testWorkspace, Label: "s3", SortOrder: 3, IssueID: "PROJ-2", CreatedAt: now, UpdatedAt: now},
-		{SessionName: "s4", Workspace: testWorkspace, Label: "s4", SortOrder: 4, IssueID: "", CreatedAt: now, UpdatedAt: now},
+		{SessionName: "s1", Workspace: tabMetadataTestWorkspace, Label: "s1", SortOrder: 1, IssueID: "PROJ-1", CreatedAt: now, UpdatedAt: now},
+		{SessionName: "s2", Workspace: tabMetadataTestWorkspace, Label: "s2", SortOrder: 2, IssueID: "PROJ-1", CreatedAt: now, UpdatedAt: now},
+		{SessionName: "s3", Workspace: tabMetadataTestWorkspace, Label: "s3", SortOrder: 3, IssueID: "PROJ-2", CreatedAt: now, UpdatedAt: now},
+		{SessionName: "s4", Workspace: tabMetadataTestWorkspace, Label: "s4", SortOrder: 4, IssueID: "", CreatedAt: now, UpdatedAt: now},
 	}
 	for _, s := range sessions {
 		s := s
@@ -99,8 +99,8 @@ func TestListByIssue_FiltersCorrectly(t *testing.T) {
 	}
 }
 
-func TestListIssueSessionMap_Empty(t *testing.T) {
-	store, _ := setupTest(t)
+func TestTabMetadataListIssueSessionMapEmpty(t *testing.T) {
+	store, _ := setupTabMetadataStoreTest(t)
 	ctx := context.Background()
 
 	m, err := store.ListIssueSessionMap(ctx)
@@ -112,16 +112,16 @@ func TestListIssueSessionMap_Empty(t *testing.T) {
 	}
 }
 
-func TestListIssueSessionMap_GroupsByIssue(t *testing.T) {
-	store, _ := setupTest(t)
+func TestTabMetadataListIssueSessionMapGroupsByIssue(t *testing.T) {
+	store, _ := setupTabMetadataStoreTest(t)
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Second)
 
 	sessions := []TabMetadata{
-		{SessionName: "s1", Workspace: testWorkspace, Label: "s1", SortOrder: 1, IssueID: "PROJ-1", CreatedAt: now, UpdatedAt: now},
-		{SessionName: "s2", Workspace: testWorkspace, Label: "s2", SortOrder: 2, IssueID: "PROJ-1", CreatedAt: now, UpdatedAt: now},
-		{SessionName: "s3", Workspace: testWorkspace, Label: "s3", SortOrder: 3, IssueID: "PROJ-2", CreatedAt: now, UpdatedAt: now},
-		{SessionName: "s4", Workspace: testWorkspace, Label: "s4", SortOrder: 4, IssueID: "", CreatedAt: now, UpdatedAt: now},
+		{SessionName: "s1", Workspace: tabMetadataTestWorkspace, Label: "s1", SortOrder: 1, IssueID: "PROJ-1", CreatedAt: now, UpdatedAt: now},
+		{SessionName: "s2", Workspace: tabMetadataTestWorkspace, Label: "s2", SortOrder: 2, IssueID: "PROJ-1", CreatedAt: now, UpdatedAt: now},
+		{SessionName: "s3", Workspace: tabMetadataTestWorkspace, Label: "s3", SortOrder: 3, IssueID: "PROJ-2", CreatedAt: now, UpdatedAt: now},
+		{SessionName: "s4", Workspace: tabMetadataTestWorkspace, Label: "s4", SortOrder: 4, IssueID: "", CreatedAt: now, UpdatedAt: now},
 	}
 	for _, s := range sessions {
 		s := s
@@ -159,15 +159,15 @@ func TestListIssueSessionMap_GroupsByIssue(t *testing.T) {
 	}
 }
 
-func TestListIssueSessionMap_ExcludesEmptyIssueID(t *testing.T) {
-	store, _ := setupTest(t)
+func TestTabMetadataListIssueSessionMapExcludesEmptyIssueID(t *testing.T) {
+	store, _ := setupTabMetadataStoreTest(t)
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Second)
 
 	// Only sessions without issue IDs
 	if err := store.Set(ctx, &TabMetadata{
 		SessionName: "orphan",
-		Workspace:   testWorkspace,
+		Workspace:   tabMetadataTestWorkspace,
 		Label:       "Orphan",
 		SortOrder:   1,
 		IssueID:     "",
@@ -186,14 +186,14 @@ func TestListIssueSessionMap_ExcludesEmptyIssueID(t *testing.T) {
 	}
 }
 
-func TestPatch_IssueID(t *testing.T) {
-	store, _ := setupTest(t)
+func TestTabMetadataPatchIssueID(t *testing.T) {
+	store, _ := setupTabMetadataStoreTest(t)
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Second)
 
 	if err := store.Set(ctx, &TabMetadata{
 		SessionName: "patch-issue",
-		Workspace:   testWorkspace,
+		Workspace:   tabMetadataTestWorkspace,
 		Label:       "test",
 		SortOrder:   1,
 		CreatedAt:   now,
@@ -202,7 +202,7 @@ func TestPatch_IssueID(t *testing.T) {
 		t.Fatalf("Set: %v", err)
 	}
 
-	got, err := store.Patch(ctx, testWorkspace, "patch-issue", map[string]string{"issue_id": "PROJ-99"})
+	got, err := store.Patch(ctx, tabMetadataTestWorkspace, "patch-issue", map[string]string{"issue_id": "PROJ-99"})
 	if err != nil {
 		t.Fatalf("Patch: %v", err)
 	}

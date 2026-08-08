@@ -1,7 +1,6 @@
 package terminal
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -9,7 +8,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
@@ -93,9 +91,8 @@ func HandlePatchTerminalTab(svc terminal.TerminalService) http.HandlerFunc {
 		workspace := middleware.WorkspaceFromContext(r.Context())
 		session := r.PathValue("session")
 
-		r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
 		var req tabPatchRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{}); err != nil {
 			handler.WriteJSON(w, http.StatusBadRequest, tabMetadataResponse{
 				Success: false,
 				Error:   "invalid request body",
@@ -139,9 +136,8 @@ func HandlePutTerminalTab(svc terminal.TerminalService) http.HandlerFunc {
 		workspace := middleware.WorkspaceFromContext(r.Context())
 		session := r.PathValue("session")
 
-		r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
 		var req tabPutRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{}); err != nil {
 			handler.WriteJSON(w, http.StatusBadRequest, tabMetadataResponse{
 				Success: false,
 				Error:   "invalid request body",
@@ -158,7 +154,7 @@ func HandlePutTerminalTab(svc terminal.TerminalService) http.HandlerFunc {
 		}
 
 		now := time.Now().UTC()
-		meta := &tabmeta.TabMetadata{
+		meta := &terminal.TabMetadata{
 			SessionName: session,
 			Workspace:   workspace,
 			Label:       req.Label,

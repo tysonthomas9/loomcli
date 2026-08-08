@@ -1,4 +1,4 @@
-package tabmeta
+package localredis
 
 import (
 	"context"
@@ -9,22 +9,26 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 )
 
-const testWorkspace = "default"
+const tabMetadataTestWorkspace = "default"
 
-func setupTest(t *testing.T) (*Store, *miniredis.Miniredis) {
+type TabMetadata = interaction.TabMetadata
+type LaunchSpec = interaction.LaunchSpec
+
+func setupTabMetadataStoreTest(t *testing.T) (*TabMetadataStore, *miniredis.Miniredis) {
 	t.Helper()
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { rdb.Close() })
-	return NewStore(rdb, nil), mr
+	return NewTabMetadataStore(rdb, nil), mr
 }
 
-func TestGet_NotFound(t *testing.T) {
-	store, _ := setupTest(t)
-	meta, err := store.Get(context.Background(), testWorkspace, "nonexistent")
+func TestTabMetadataGetNotFound(t *testing.T) {
+	store, _ := setupTabMetadataStoreTest(t)
+	meta, err := store.Get(context.Background(), tabMetadataTestWorkspace, "nonexistent")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -33,22 +37,22 @@ func TestGet_NotFound(t *testing.T) {
 	}
 }
 
-func TestGet_InvalidName(t *testing.T) {
-	store, _ := setupTest(t)
-	_, err := store.Get(context.Background(), testWorkspace, "invalid name!")
+func TestTabMetadataGetInvalidName(t *testing.T) {
+	store, _ := setupTabMetadataStoreTest(t)
+	_, err := store.Get(context.Background(), tabMetadataTestWorkspace, "invalid name!")
 	if err == nil {
 		t.Fatal("expected error for invalid session name")
 	}
 }
 
-func TestSetAndGet(t *testing.T) {
-	store, _ := setupTest(t)
+func TestTabMetadataSetAndGet(t *testing.T) {
+	store, _ := setupTabMetadataStoreTest(t)
 	ctx := context.Background()
 
 	now := time.Now().UTC().Truncate(time.Second)
 	meta := &TabMetadata{
 		SessionName:                  "test-session",
-		Workspace:                    testWorkspace,
+		Workspace:                    tabMetadataTestWorkspace,
 		Label:                        "My Session",
 		Notes:                        "Some notes",
 		SortOrder:                    5,
@@ -64,7 +68,7 @@ func TestSetAndGet(t *testing.T) {
 		t.Fatalf("Set: %v", err)
 	}
 
-	got, err := store.Get(ctx, testWorkspace, "test-session")
+	got, err := store.Get(ctx, tabMetadataTestWorkspace, "test-session")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -74,8 +78,8 @@ func TestSetAndGet(t *testing.T) {
 	if got.SessionName != "test-session" {
 		t.Errorf("SessionName = %q, want %q", got.SessionName, "test-session")
 	}
-	if got.Workspace != testWorkspace {
-		t.Errorf("Workspace = %q, want %q", got.Workspace, testWorkspace)
+	if got.Workspace != tabMetadataTestWorkspace {
+		t.Errorf("Workspace = %q, want %q", got.Workspace, tabMetadataTestWorkspace)
 	}
 	if got.Label != "My Session" {
 		t.Errorf("Label = %q, want %q", got.Label, "My Session")
@@ -94,9 +98,9 @@ func TestSetAndGet(t *testing.T) {
 	}
 }
 
-func TestList_Empty(t *testing.T) {
-	store, _ := setupTest(t)
-	tabs, err := store.List(context.Background(), testWorkspace)
+func TestTabMetadataListEmpty(t *testing.T) {
+	store, _ := setupTabMetadataStoreTest(t)
+	tabs, err := store.List(context.Background(), tabMetadataTestWorkspace)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -105,15 +109,15 @@ func TestList_Empty(t *testing.T) {
 	}
 }
 
-func TestList_Multiple(t *testing.T) {
-	store, _ := setupTest(t)
+func TestTabMetadataListMultiple(t *testing.T) {
+	store, _ := setupTabMetadataStoreTest(t)
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Second)
 
 	for i, name := range []string{"session-c", "session-a", "session-b"} {
 		if err := store.Set(ctx, &TabMetadata{
 			SessionName: name,
-			Workspace:   testWorkspace,
+			Workspace:   tabMetadataTestWorkspace,
 			Label:       name,
 			SortOrder:   3 - i, // c=3, a=2, b=1
 			CreatedAt:   now,
@@ -123,7 +127,7 @@ func TestList_Multiple(t *testing.T) {
 		}
 	}
 
-	tabs, err := store.List(ctx, testWorkspace)
+	tabs, err := store.List(ctx, tabMetadataTestWorkspace)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -142,14 +146,14 @@ func TestList_Multiple(t *testing.T) {
 	}
 }
 
-func TestPatch_PartialUpdate(t *testing.T) {
-	store, _ := setupTest(t)
+func TestTabMetadataPatchPartialUpdate(t *testing.T) {
+	store, _ := setupTabMetadataStoreTest(t)
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Second)
 
 	if err := store.Set(ctx, &TabMetadata{
 		SessionName: "test",
-		Workspace:   testWorkspace,
+		Workspace:   tabMetadataTestWorkspace,
 		Label:       "original",
 		Notes:       "original notes",
 		SortOrder:   1,
@@ -160,7 +164,7 @@ func TestPatch_PartialUpdate(t *testing.T) {
 	}
 
 	// Patch only the label
-	got, err := store.Patch(ctx, testWorkspace, "test", map[string]string{"label": "updated"})
+	got, err := store.Patch(ctx, tabMetadataTestWorkspace, "test", map[string]string{"label": "updated"})
 	if err != nil {
 		t.Fatalf("Patch: %v", err)
 	}
@@ -172,22 +176,22 @@ func TestPatch_PartialUpdate(t *testing.T) {
 	}
 }
 
-func TestPatch_NotFound(t *testing.T) {
-	store, _ := setupTest(t)
-	_, err := store.Patch(context.Background(), testWorkspace, "nonexistent", map[string]string{"label": "x"})
+func TestTabMetadataPatchNotFound(t *testing.T) {
+	store, _ := setupTabMetadataStoreTest(t)
+	_, err := store.Patch(context.Background(), tabMetadataTestWorkspace, "nonexistent", map[string]string{"label": "x"})
 	if err == nil {
 		t.Fatal("expected error for patching nonexistent session")
 	}
 }
 
-func TestDelete(t *testing.T) {
-	store, _ := setupTest(t)
+func TestTabMetadataDelete(t *testing.T) {
+	store, _ := setupTabMetadataStoreTest(t)
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Second)
 
 	if err := store.Set(ctx, &TabMetadata{
 		SessionName: "to-delete",
-		Workspace:   testWorkspace,
+		Workspace:   tabMetadataTestWorkspace,
 		Label:       "delete me",
 		SortOrder:   1,
 		CreatedAt:   now,
@@ -196,11 +200,11 @@ func TestDelete(t *testing.T) {
 		t.Fatalf("Set: %v", err)
 	}
 
-	if err := store.Delete(ctx, testWorkspace, "to-delete"); err != nil {
+	if err := store.Delete(ctx, tabMetadataTestWorkspace, "to-delete"); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 
-	got, err := store.Get(ctx, testWorkspace, "to-delete")
+	got, err := store.Get(ctx, tabMetadataTestWorkspace, "to-delete")
 	if err != nil {
 		t.Fatalf("Get after delete: %v", err)
 	}
@@ -209,19 +213,19 @@ func TestDelete(t *testing.T) {
 	}
 }
 
-func TestDelete_InvalidName(t *testing.T) {
-	store, _ := setupTest(t)
-	err := store.Delete(context.Background(), testWorkspace, "")
+func TestTabMetadataDeleteInvalidName(t *testing.T) {
+	store, _ := setupTabMetadataStoreTest(t)
+	err := store.Delete(context.Background(), tabMetadataTestWorkspace, "")
 	if err == nil {
 		t.Fatal("expected error for empty session name")
 	}
 }
 
-func TestEnsureDefaults_CreatesNewSessions(t *testing.T) {
-	store, _ := setupTest(t)
+func TestTabMetadataEnsureDefaultsCreatesNewSessions(t *testing.T) {
+	store, _ := setupTabMetadataStoreTest(t)
 	ctx := context.Background()
 
-	tabs, err := store.EnsureDefaults(ctx, testWorkspace, []string{"session-a", "session-b"})
+	tabs, err := store.EnsureDefaults(ctx, tabMetadataTestWorkspace, []string{"session-a", "session-b"})
 	if err != nil {
 		t.Fatalf("EnsureDefaults: %v", err)
 	}
@@ -244,15 +248,15 @@ func TestEnsureDefaults_CreatesNewSessions(t *testing.T) {
 	}
 }
 
-func TestEnsureDefaults_PreservesExisting(t *testing.T) {
-	store, _ := setupTest(t)
+func TestTabMetadataEnsureDefaultsPreservesExisting(t *testing.T) {
+	store, _ := setupTabMetadataStoreTest(t)
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Second)
 
 	// Pre-create one session with custom label
 	if err := store.Set(ctx, &TabMetadata{
 		SessionName: "existing",
-		Workspace:   testWorkspace,
+		Workspace:   tabMetadataTestWorkspace,
 		Label:       "Custom Label",
 		SortOrder:   5,
 		CreatedAt:   now,
@@ -261,7 +265,7 @@ func TestEnsureDefaults_PreservesExisting(t *testing.T) {
 		t.Fatalf("Set: %v", err)
 	}
 
-	tabs, err := store.EnsureDefaults(ctx, testWorkspace, []string{"existing", "new-session"})
+	tabs, err := store.EnsureDefaults(ctx, tabMetadataTestWorkspace, []string{"existing", "new-session"})
 	if err != nil {
 		t.Fatalf("EnsureDefaults: %v", err)
 	}
@@ -298,15 +302,15 @@ func TestEnsureDefaults_PreservesExisting(t *testing.T) {
 	}
 }
 
-func TestEnsureDefaults_EmptyActiveSessions(t *testing.T) {
-	store, _ := setupTest(t)
+func TestTabMetadataEnsureDefaultsEmptyActiveSessions(t *testing.T) {
+	store, _ := setupTabMetadataStoreTest(t)
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Second)
 
 	// Pre-create metadata for a dead session
 	if err := store.Set(ctx, &TabMetadata{
 		SessionName: "dead-session",
-		Workspace:   testWorkspace,
+		Workspace:   tabMetadataTestWorkspace,
 		Label:       "Dead",
 		SortOrder:   1,
 		CreatedAt:   now,
@@ -316,7 +320,7 @@ func TestEnsureDefaults_EmptyActiveSessions(t *testing.T) {
 	}
 
 	// EnsureDefaults with no active sessions should still return stored metadata
-	tabs, err := store.EnsureDefaults(ctx, testWorkspace, nil)
+	tabs, err := store.EnsureDefaults(ctx, tabMetadataTestWorkspace, nil)
 	if err != nil {
 		t.Fatalf("EnsureDefaults: %v", err)
 	}
@@ -328,7 +332,7 @@ func TestEnsureDefaults_EmptyActiveSessions(t *testing.T) {
 	}
 }
 
-func TestValidateSessionName(t *testing.T) {
+func TestTabMetadataValidateSessionName(t *testing.T) {
 	tests := []struct {
 		name  string
 		valid bool
@@ -345,7 +349,7 @@ func TestValidateSessionName(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		err := ValidateSessionName(tt.name)
+		err := interaction.ValidateTerminalSessionName(tt.name)
 		if tt.valid && err != nil {
 			t.Errorf("ValidateSessionName(%q) = error %v, want nil", tt.name, err)
 		}
@@ -355,8 +359,8 @@ func TestValidateSessionName(t *testing.T) {
 	}
 }
 
-func TestStoreWorkspaceScoping(t *testing.T) {
-	store, _ := setupTest(t)
+func TestTabMetadataStoreWorkspaceScoping(t *testing.T) {
+	store, _ := setupTabMetadataStoreTest(t)
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Second)
 
@@ -433,7 +437,7 @@ func TestStoreWorkspaceScoping(t *testing.T) {
 	}
 }
 
-func TestValidateWorkspaceName(t *testing.T) {
+func TestTabMetadataValidateWorkspaceName(t *testing.T) {
 	tests := []struct {
 		name    string
 		valid   bool
@@ -450,7 +454,7 @@ func TestValidateWorkspaceName(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		err := ValidateWorkspaceName(tt.name)
+		err := validateTabMetadataWorkspaceName(tt.name)
 		if tt.valid && err != nil {
 			t.Errorf("ValidateWorkspaceName(%q) = error %v, want nil", tt.name, err)
 		}

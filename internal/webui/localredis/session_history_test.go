@@ -1,4 +1,4 @@
-package sessionhistory
+package localredis
 
 import (
 	"context"
@@ -7,20 +7,24 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 )
 
-const testWorkspaceID = "test-ws-uuid"
+const sessionHistoryTestWorkspaceID = "test-ws-uuid"
 
-func setupTest(t *testing.T) (*Store, *miniredis.Miniredis) {
+type SessionRecord = interaction.SessionHistoryRecord
+
+func setupSessionHistoryStoreTest(t *testing.T) (*SessionHistoryStore, *miniredis.Miniredis) {
 	t.Helper()
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { rdb.Close() })
-	return NewStore(rdb, nil), mr
+	return NewSessionHistoryStore(rdb, nil), mr
 }
 
-func TestAddAndList_RoundTrip(t *testing.T) {
-	store, _ := setupTest(t)
+func TestSessionHistoryAddAndListRoundTrip(t *testing.T) {
+	store, _ := setupSessionHistoryStoreTest(t)
 	ctx := context.Background()
 
 	record := SessionRecord{
@@ -33,11 +37,11 @@ func TestAddAndList_RoundTrip(t *testing.T) {
 		StartedAt:   time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC),
 	}
 
-	if err := store.Add(ctx, testWorkspaceID, record); err != nil {
+	if err := store.Add(ctx, sessionHistoryTestWorkspaceID, record); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
 
-	records, err := store.List(ctx, testWorkspaceID, "proj-abc.1")
+	records, err := store.List(ctx, sessionHistoryTestWorkspaceID, "proj-abc.1")
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -64,11 +68,11 @@ func TestAddAndList_RoundTrip(t *testing.T) {
 	}
 }
 
-func TestList_EmptySliceForUnknownIssue(t *testing.T) {
-	store, _ := setupTest(t)
+func TestSessionHistoryListEmptySliceForUnknownIssue(t *testing.T) {
+	store, _ := setupSessionHistoryStoreTest(t)
 	ctx := context.Background()
 
-	records, err := store.List(ctx, testWorkspaceID, "unknown-issue.99")
+	records, err := store.List(ctx, sessionHistoryTestWorkspaceID, "unknown-issue.99")
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -80,8 +84,8 @@ func TestList_EmptySliceForUnknownIssue(t *testing.T) {
 	}
 }
 
-func TestList_SortedByMostRecentFirst(t *testing.T) {
-	store, _ := setupTest(t)
+func TestSessionHistoryListSortedByMostRecentFirst(t *testing.T) {
+	store, _ := setupSessionHistoryStoreTest(t)
 	ctx := context.Background()
 
 	// Add three records with different StartedAt times.
@@ -116,12 +120,12 @@ func TestList_SortedByMostRecentFirst(t *testing.T) {
 	}
 
 	for _, r := range records {
-		if err := store.Add(ctx, testWorkspaceID, r); err != nil {
+		if err := store.Add(ctx, sessionHistoryTestWorkspaceID, r); err != nil {
 			t.Fatalf("Add(%s): %v", r.ID, err)
 		}
 	}
 
-	got, err := store.List(ctx, testWorkspaceID, "proj.1")
+	got, err := store.List(ctx, sessionHistoryTestWorkspaceID, "proj.1")
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -141,8 +145,8 @@ func TestList_SortedByMostRecentFirst(t *testing.T) {
 	}
 }
 
-func TestComplete_MarksActiveSession(t *testing.T) {
-	store, _ := setupTest(t)
+func TestSessionHistoryCompleteMarksActiveSession(t *testing.T) {
+	store, _ := setupSessionHistoryStoreTest(t)
 	ctx := context.Background()
 
 	record := SessionRecord{
@@ -155,16 +159,16 @@ func TestComplete_MarksActiveSession(t *testing.T) {
 		StartedAt:   time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC),
 	}
 
-	if err := store.Add(ctx, testWorkspaceID, record); err != nil {
+	if err := store.Add(ctx, sessionHistoryTestWorkspaceID, record); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
 
 	scrollbackPath := "/home/user/.loom/session-scrollback/issue-proj-1.log"
-	if err := store.Complete(ctx, testWorkspaceID, "proj.1", "issue-proj-1", scrollbackPath); err != nil {
+	if err := store.Complete(ctx, sessionHistoryTestWorkspaceID, "proj.1", "issue-proj-1", scrollbackPath); err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
 
-	records, err := store.List(ctx, testWorkspaceID, "proj.1")
+	records, err := store.List(ctx, sessionHistoryTestWorkspaceID, "proj.1")
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -185,8 +189,8 @@ func TestComplete_MarksActiveSession(t *testing.T) {
 	}
 }
 
-func TestComplete_NoOpWhenNoMatchingActiveSession(t *testing.T) {
-	store, _ := setupTest(t)
+func TestSessionHistoryCompleteNoOpWhenNoMatchingActiveSession(t *testing.T) {
+	store, _ := setupSessionHistoryStoreTest(t)
 	ctx := context.Background()
 
 	// Add a completed session (not active).
@@ -200,18 +204,18 @@ func TestComplete_NoOpWhenNoMatchingActiveSession(t *testing.T) {
 		StartedAt:   time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC),
 	}
 
-	if err := store.Add(ctx, testWorkspaceID, record); err != nil {
+	if err := store.Add(ctx, sessionHistoryTestWorkspaceID, record); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
 
 	// Complete for a session name that doesn't match any active session.
-	err := store.Complete(ctx, testWorkspaceID, "proj.1", "nonexistent-session", "/tmp/scrollback.log")
+	err := store.Complete(ctx, sessionHistoryTestWorkspaceID, "proj.1", "nonexistent-session", "/tmp/scrollback.log")
 	if err != nil {
 		t.Fatalf("Complete should be no-op, got error: %v", err)
 	}
 
 	// Verify the existing record was not modified.
-	records, err := store.List(ctx, testWorkspaceID, "proj.1")
+	records, err := store.List(ctx, sessionHistoryTestWorkspaceID, "proj.1")
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -223,19 +227,19 @@ func TestComplete_NoOpWhenNoMatchingActiveSession(t *testing.T) {
 	}
 }
 
-func TestComplete_NoOpForEmptyHistory(t *testing.T) {
-	store, _ := setupTest(t)
+func TestSessionHistoryCompleteNoOpForEmptyHistory(t *testing.T) {
+	store, _ := setupSessionHistoryStoreTest(t)
 	ctx := context.Background()
 
 	// Complete for an issue with no history at all.
-	err := store.Complete(ctx, testWorkspaceID, "proj.1", "issue-proj-1", "/tmp/scrollback.log")
+	err := store.Complete(ctx, sessionHistoryTestWorkspaceID, "proj.1", "issue-proj-1", "/tmp/scrollback.log")
 	if err != nil {
 		t.Fatalf("Complete on empty history should be no-op, got error: %v", err)
 	}
 }
 
-func TestAdd_InvalidIssueID(t *testing.T) {
-	store, _ := setupTest(t)
+func TestSessionHistoryAddInvalidIssueID(t *testing.T) {
+	store, _ := setupSessionHistoryStoreTest(t)
 	ctx := context.Background()
 
 	record := SessionRecord{
@@ -246,29 +250,29 @@ func TestAdd_InvalidIssueID(t *testing.T) {
 		Status:      "active",
 	}
 
-	err := store.Add(ctx, testWorkspaceID, record)
+	err := store.Add(ctx, sessionHistoryTestWorkspaceID, record)
 	if err == nil {
 		t.Fatal("expected error for empty issue ID")
 	}
 }
 
-func TestList_InvalidIssueID(t *testing.T) {
-	store, _ := setupTest(t)
-	_, err := store.List(context.Background(), testWorkspaceID, "")
+func TestSessionHistoryListInvalidIssueID(t *testing.T) {
+	store, _ := setupSessionHistoryStoreTest(t)
+	_, err := store.List(context.Background(), sessionHistoryTestWorkspaceID, "")
 	if err == nil {
 		t.Fatal("expected error for empty issue ID")
 	}
 }
 
-func TestComplete_InvalidIssueID(t *testing.T) {
-	store, _ := setupTest(t)
-	err := store.Complete(context.Background(), testWorkspaceID, "", "session", "/tmp/scrollback.log")
+func TestSessionHistoryCompleteInvalidIssueID(t *testing.T) {
+	store, _ := setupSessionHistoryStoreTest(t)
+	err := store.Complete(context.Background(), sessionHistoryTestWorkspaceID, "", "session", "/tmp/scrollback.log")
 	if err == nil {
 		t.Fatal("expected error for empty issue ID")
 	}
 }
 
-func TestValidateIssueID(t *testing.T) {
+func TestValidateSessionHistoryIssueID(t *testing.T) {
 	tests := []struct {
 		id      string
 		wantErr bool
@@ -283,19 +287,19 @@ func TestValidateIssueID(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		err := ValidateIssueID(tt.id)
+		err := interaction.ValidateSessionHistoryIssueID(tt.id)
 		if (err != nil) != tt.wantErr {
 			t.Errorf("ValidateIssueID(%q) error = %v, wantErr = %v", tt.id, err, tt.wantErr)
 		}
 	}
 }
 
-func TestIsolation_DifferentWorkspaces(t *testing.T) {
+func TestSessionHistoryIsolationDifferentWorkspaces(t *testing.T) {
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { rdb.Close() })
 
-	store := NewStore(rdb, nil)
+	store := NewSessionHistoryStore(rdb, nil)
 	ctx := context.Background()
 
 	recA := SessionRecord{

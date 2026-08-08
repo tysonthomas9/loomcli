@@ -9,7 +9,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 	webuterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
@@ -227,7 +226,7 @@ func (stub *terminalSessionResolverStub) ResolveSessionAuthority(
 func TestPrepareTerminalInteractionLaunchKeepsCredentialEphemeral(t *testing.T) {
 	api := &terminalInteractionAPIStub{}
 	resolver := newTerminalSessionResolverStub()
-	persisted := &tabmeta.LaunchSpec{
+	persisted := &webuterminal.LaunchSpec{
 		Argv: []string{"-lc", "loom agent lead"},
 		Env:  map[string]string{"LOOM_BACKEND": "codex"},
 		Cwd:  "/tmp/worktree",
@@ -301,7 +300,7 @@ func TestPrepareTerminalInteractionLaunchConvergesPersistedPriorGeneration(t *te
 	api := &terminalInteractionAPIStub{}
 	tabs := newTabMetaStoreForWSTest(t)
 	key := webuterminal.SessionKey{Workspace: "WS", Name: "term_ui"}
-	if err := tabs.Set(t.Context(), &tabmeta.TabMetadata{
+	if err := tabs.Set(t.Context(), &webuterminal.TabMetadata{
 		Workspace: key.Workspace, SessionName: key.Name, Kind: "agent",
 		AgentID: "agent-docs", InteractionSessionID: "session-old",
 		InteractionTerminalID: "terminal-old",
@@ -338,7 +337,7 @@ func TestPrepareTerminalInteractionLaunchConvergesPersistedPriorGeneration(t *te
 		params,
 		key,
 		"agent-docs",
-		&tabmeta.LaunchSpec{Argv: []string{"-lc", "true"}},
+		&webuterminal.LaunchSpec{Argv: []string{"-lc", "true"}},
 		&authority.OperatorAuthority{},
 	)
 	if err != nil {
@@ -376,7 +375,7 @@ func TestTerminalLaunchFailureUsesOnlyAtomicFinish(t *testing.T) {
 		params,
 		webuterminal.SessionKey{Workspace: "WS", Name: "term_ui"},
 		"agent-docs",
-		&tabmeta.LaunchSpec{Argv: []string{"-lc", "true"}},
+		&webuterminal.LaunchSpec{Argv: []string{"-lc", "true"}},
 		&authority.OperatorAuthority{},
 	)
 	if err != nil {
@@ -401,7 +400,7 @@ func TestPrepareTerminalInteractionLaunchFailsClosedAndConvergesStartedSession(t
 			&terminalWSParams{interactionNode: "node", loomServerURL: "http://loom"},
 			webuterminal.SessionKey{Workspace: "WS", Name: "term_ui"},
 			"agent-docs",
-			&tabmeta.LaunchSpec{Argv: []string{"-lc", "true"}},
+			&webuterminal.LaunchSpec{Argv: []string{"-lc", "true"}},
 			&authority.OperatorAuthority{},
 		)
 		if !errors.Is(err, interaction.ErrUnavailable) {
@@ -423,7 +422,7 @@ func TestPrepareTerminalInteractionLaunchFailsClosedAndConvergesStartedSession(t
 			params,
 			webuterminal.SessionKey{Workspace: "WS", Name: "term_ui"},
 			"agent-docs",
-			&tabmeta.LaunchSpec{Argv: []string{"-lc", "true"}},
+			&webuterminal.LaunchSpec{Argv: []string{"-lc", "true"}},
 			&authority.OperatorAuthority{},
 		)
 		if err == nil {

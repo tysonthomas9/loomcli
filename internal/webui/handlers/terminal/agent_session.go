@@ -21,7 +21,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 	webuterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
@@ -95,7 +94,7 @@ func ensureAgentTerminalSession(
 	workspace,
 	agentName string,
 	identities ...terminalAgentIdentity,
-) (*tabmeta.TabMetadata, error) {
+) (*webuterminal.TabMetadata, error) {
 	unlock := webuterminal.LockAgentLifecycle(workspace, agentName)
 	locked := true
 	defer func() {
@@ -184,7 +183,7 @@ func agentTerminalLaunchSpecStale(
 	ctx context.Context,
 	st terminalStore,
 	workspace string,
-	existing *tabmeta.TabMetadata,
+	existing *webuterminal.TabMetadata,
 	agent *agents.RuntimeIdentity,
 ) bool {
 	if existing == nil || existing.Launch == nil {
@@ -202,7 +201,7 @@ func agentTerminalLaunchSpecStale(
 	return !slices.Equal(candidate.Argv, existing.Launch.Argv) || candidate.Cwd != existing.Launch.Cwd
 }
 
-func inactiveAgentTerminalSession(existing *tabmeta.TabMetadata) (*tabmeta.TabMetadata, error) {
+func inactiveAgentTerminalSession(existing *webuterminal.TabMetadata) (*webuterminal.TabMetadata, error) {
 	if existing == nil {
 		return nil, apperrors.ErrValidation("agent is not running and has no terminal session")
 	}
@@ -219,7 +218,7 @@ func inactiveAgentTerminalSession(existing *tabmeta.TabMetadata) (*tabmeta.TabMe
 	return &meta, nil
 }
 
-func newAgentTerminalTabPlacement(tabs []tabmeta.TabMetadata, existing *tabmeta.TabMetadata, agentName string) (string, string, int) {
+func newAgentTerminalTabPlacement(tabs []webuterminal.TabMetadata, existing *webuterminal.TabMetadata, agentName string) (string, string, int) {
 	sessionName := "term_" + uuid.NewString()
 	label := "agent-" + agentName
 	sortOrder := len(tabs)
@@ -247,9 +246,9 @@ func ensureTerminalOrchestratorLink(ctx context.Context, st terminalStore, works
 	return agentForLaunch, "lead-" + uuid.NewString()
 }
 
-func newAgentTerminalTabMetadata(workspace, sessionName, label string, sortOrder int, agent *agents.RuntimeIdentity, backend string, launch *tabmeta.LaunchSpec, existing *tabmeta.TabMetadata) *tabmeta.TabMetadata {
+func newAgentTerminalTabMetadata(workspace, sessionName, label string, sortOrder int, agent *agents.RuntimeIdentity, backend string, launch *webuterminal.LaunchSpec, existing *webuterminal.TabMetadata) *webuterminal.TabMetadata {
 	now := time.Now().UTC()
-	meta := &tabmeta.TabMetadata{
+	meta := &webuterminal.TabMetadata{
 		SessionName: sessionName,
 		Workspace:   workspace,
 		Label:       label,
@@ -281,8 +280,8 @@ func isBackgroundWorker(agent *agents.RuntimeIdentity, kind domain.RoleKind) boo
 	return agent != nil && kind != domain.RoleKindInteractive
 }
 
-func selectAgentTerminalTab(tabs []tabmeta.TabMetadata, agentName string) *tabmeta.TabMetadata {
-	var newest *tabmeta.TabMetadata
+func selectAgentTerminalTab(tabs []webuterminal.TabMetadata, agentName string) *webuterminal.TabMetadata {
+	var newest *webuterminal.TabMetadata
 	for i := range tabs {
 		tab := &tabs[i]
 		if tab.Kind != terminalKindAgent || tab.AgentID != agentName {
@@ -298,7 +297,7 @@ func selectAgentTerminalTab(tabs []tabmeta.TabMetadata, agentName string) *tabme
 	return newest
 }
 
-func pruneStaleAgentTerminalTabs(ctx context.Context, svc webuterminal.TerminalService, workspace, agentName, keepSession string, tabs []tabmeta.TabMetadata) {
+func pruneStaleAgentTerminalTabs(ctx context.Context, svc webuterminal.TerminalService, workspace, agentName, keepSession string, tabs []webuterminal.TabMetadata) {
 	for i := range tabs {
 		tab := tabs[i]
 		if tab.SessionName == keepSession || tab.Kind != terminalKindAgent || tab.AgentID != agentName || tab.PTYAlive {
@@ -318,7 +317,7 @@ func pruneStaleAgentTerminalTabs(ctx context.Context, svc webuterminal.TerminalS
 // orchestratorID is the lead → orchestration session id resolved by
 // ensureTerminalOrchestratorLink. It is passed in rather than read off the
 // agent struct because AgentSession is the single source of truth.
-func buildAgentLaunchSpec(ctx context.Context, st terminalStore, workspace, sessionName string, agent *agents.RuntimeIdentity, orchestratorID string) (*tabmeta.LaunchSpec, string, error) {
+func buildAgentLaunchSpec(ctx context.Context, st terminalStore, workspace, sessionName string, agent *agents.RuntimeIdentity, orchestratorID string) (*webuterminal.LaunchSpec, string, error) {
 	role, err := loadAgentLaunchRole(ctx, st, workspace, agent.RoleName)
 	if err != nil {
 		return nil, "", err
@@ -334,7 +333,7 @@ func buildAgentLaunchSpec(ctx context.Context, st terminalStore, workspace, sess
 	}
 	args := append(agentLaunchBaseArgs(workspace, backend), commandArgs...)
 
-	return &tabmeta.LaunchSpec{
+	return &webuterminal.LaunchSpec{
 		Argv: webuterminal.ShellArgvForCommand(args),
 		Env:  agentLaunchEnv(workspace, sessionName, backend, orchestratorID, agent),
 		Cwd:  agentLaunchCwd(workspace, agent),
