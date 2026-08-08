@@ -163,7 +163,7 @@ func TestPhase5AgentsCompatibilityStoreHasSingleCompositionImporter(t *testing.T
 
 func TestPhase5AgentsCompatibilityStoreImportRatchetRejectsProductionBypass(t *testing.T) {
 	root := t.TempDir()
-	writePhase5AgentsOwnershipFixture(t, root, "internal/cli/serve/workspacemgr/agentsbootstrapcomposition/managed.go", `package agentsbootstrapcomposition
+	writePhase5AgentsOwnershipFixture(t, root, "internal/cli/serve/workspacemgr/agents_bootstrap.go", `package workspacemgr
 import _ "github.com/tysonthomas9/loomcli/internal/infra/agentsbootstrapstore"
 `)
 	writePhase5AgentsOwnershipFixture(t, root, "internal/webui/bypass.go", `package webui

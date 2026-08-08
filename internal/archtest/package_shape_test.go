@@ -1,6 +1,7 @@
 package archtest
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"slices"
@@ -234,14 +235,19 @@ func TestRegenerateProductionPackageShapeInventory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	encoded, err := yaml.Marshal(inventory)
-	if err != nil {
+	var encoded bytes.Buffer
+	encoder := yaml.NewEncoder(&encoded)
+	encoder.SetIndent(2)
+	if err := encoder.Encode(inventory); err != nil {
+		t.Fatal(err)
+	}
+	if err := encoder.Close(); err != nil {
 		t.Fatal(err)
 	}
 	header := "# Exact Phase 8 production-package topology ratchet.\n" +
 		"# Generated .go files count as compiled package topology; _test.go files do not.\n" +
 		"# Refresh only after an intentional consolidation review; see package_shape_test.go.\n"
-	if err := os.WriteFile(path, append([]byte(header), encoded...), 0o644); err != nil {
+	if err := os.WriteFile(path, append([]byte(header), encoded.Bytes()...), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := LoadProductionPackageShapeInventory(path); err != nil {

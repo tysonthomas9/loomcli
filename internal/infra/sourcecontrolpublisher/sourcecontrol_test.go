@@ -5,13 +5,12 @@ import (
 	"time"
 
 	stackstore "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore"
-	stackstoreadapter "github.com/tysonthomas9/loomcli/internal/infra/stackstoreadapter"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 )
 
 func mustStackLifecycle(t *testing.T, store stackstore.Store) sourcecontrol.StackLifecycle {
 	t.Helper()
-	adapter, err := stackstoreadapter.New(store)
+	adapter, err := stackstore.NewAdapter(store)
 	if err != nil {
 		t.Fatalf("compose stack adapter: %v", err)
 	}

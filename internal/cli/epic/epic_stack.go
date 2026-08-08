@@ -14,7 +14,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	stackstore "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore"
-	infrastackstore "github.com/tysonthomas9/loomcli/internal/infra/stackstoreadapter"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol/stacklineage"
 )
@@ -257,7 +256,7 @@ func projectEpicStackForRun(ctx context.Context, handle *bootstrap.StoreHandle, 
 	if err != nil {
 		return nil, fmt.Errorf("open stack store: %w", err)
 	}
-	adapter, err := infrastackstore.New(sstore)
+	adapter, err := stackstore.NewAdapter(sstore)
 	if err != nil {
 		return nil, err
 	}

@@ -98,7 +98,7 @@ if [[ -s "$tmp" ]]; then
       internal/app/serve/execution_task_run_recovery.go | \
       internal/app/serve/sourcecontrolcomposition/source_control.go | \
       internal/app/serve/sourcecontrolcomposition/connectors_fleetdb.go | \
-      internal/app/serve/agentcomposition/provisioningcomposition/provisioning.go | \
+      internal/app/serve/agentcomposition/provisioning.go | \
       internal/app/serve/agentcomposition/agents.go | \
       internal/app/serve/agentcomposition/agents_fleetdb.go | \
       internal/app/serve/interactioncomposition/interaction_fleetdb.go | \
@@ -114,7 +114,7 @@ if [[ -s "$tmp" ]]; then
       internal/cli/serve/workspacemgr/repository_admission_lease.go | \
       internal/cli/serve/workspacemgr/repository_admission_process.go | \
       internal/cli/serve/workspacemgr/repository_admission_workspace_operations.go | \
-      internal/cli/serve/serveadapter/catalogcomposition/workflow_catalog.go)
+      internal/cli/serve/serveadapter/workflow_catalog.go)
         ;;
       *)
         printf '%s:%s:%s\n' "$file" "$line" "$text" >>"$disallowed"

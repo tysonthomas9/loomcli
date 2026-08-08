@@ -23,7 +23,7 @@ func TestGitHubReviewAgentRegistersThroughTrustedBuiltinPath(t *testing.T) {
 
 func TestMigratedWorkflowAuthoringCallersCannotRegressToGenericPersistence(t *testing.T) {
 	for _, rel := range []string{
-		"../../../cli/serve/serveadapter/catalogcomposition/workflow_catalog.go",
+		"../../../cli/serve/serveadapter/workflow_catalog.go",
 		"../../../cli/workflow/workflow_cmd.go",
 		"../../../webui/handlers/workflows/module.go",
 		"builtin_authoring.go",

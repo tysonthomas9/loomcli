@@ -4,9 +4,12 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/tysonthomas9/loomcli/internal/app/webhookingestion"
+	"github.com/tysonthomas9/loomcli/internal/app/workflowbinding"
 	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/webui/agentmodules/routecontracts"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/triggerbindings"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/webhooks"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -17,10 +20,20 @@ type Module interface {
 	Register(*http.ServeMux)
 }
 
+// Capabilities contains the Automation-owned application ports needed by the
+// automation route adapter.
+type Capabilities struct {
+	AutomationBindings automation.BindingOperations
+	WorkflowBinding    *workflowbinding.Workflow
+	AutomationAudit    automation.AuditQueries
+	AutomationWebhook  *webhookingestion.Workflow
+	AutomationOperator workflowcataloghttp.OperatorAuthorityResolver
+}
+
 // Deps contains the Automation-owned workflows and narrow legacy ports needed
 // to compose webhook ingestion and trigger bindings.
 type Deps struct {
-	Capabilities    routecontracts.Deps
+	Capabilities    Capabilities
 	Awaits          store.AwaitStore
 	DriverRuns      store.DriverRunStore
 	AwaitResolver   store.AtomicAwaitStore

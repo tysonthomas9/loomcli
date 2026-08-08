@@ -14,7 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/gitauth"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	infralocalgit "github.com/tysonthomas9/loomcli/internal/infra/localgit"
-	infrastackstore "github.com/tysonthomas9/loomcli/internal/infra/stackstoreadapter"
+	infrastackstore "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	connectorsfleetdb "github.com/tysonthomas9/loomcli/internal/modules/connectors/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
@@ -30,7 +30,6 @@ const (
 // the credential source and Connectors broker remain private.
 type SourceControlCapability struct {
 	api      sourcecontrol.API
-	grants   connectors.GrantCommands
 	issuer   *authority.Issuer
 	now      func() time.Time
 	outcomes sourcecontrol.TaskOutcomeRecorder
@@ -47,7 +46,6 @@ type TaskCheckoutCommand = sourcecontrol.TaskCheckoutCommand
 type TaskCheckout = sourcecontrol.TaskCheckout
 type PullRequestCheckoutCommand = sourcecontrol.PullRequestCheckoutCommand
 type PullRequestCheckout = sourcecontrol.PullRequestCheckout
-type GrantCommands = connectors.GrantCommands
 type FleetDBClient = infrafleetdb.Client
 
 var ErrUnavailable = sourcecontrol.ErrUnavailable
@@ -57,15 +55,6 @@ func (capability *SourceControlCapability) SourceControlAPI() sourcecontrol.API 
 		return nil
 	}
 	return capability.api
-}
-
-// ProvisioningGrantCommands returns the narrow owner command used only by the
-// parent composition facade to assemble AgentProvisioning.
-func (capability *SourceControlCapability) ProvisioningGrantCommands() GrantCommands {
-	if capability == nil {
-		return nil
-	}
-	return capability.grants
 }
 
 // SourceControlMaterializer exposes the authority-free application workflow.
@@ -388,7 +377,7 @@ func NewSourceControlCapabilityWithFleetDB(
 }
 
 func newDefaultStackServices(now func() time.Time) (sourcecontrol.TaskOutcomeRecorder, sourcecontrol.StackLifecycle) {
-	adapter, err := infrastackstore.Default()
+	adapter, err := infrastackstore.DefaultAdapter()
 	if err != nil {
 		return nil, nil
 	}
@@ -485,7 +474,7 @@ func composeSourceControlCapability(
 		return nil, err
 	}
 	return &SourceControlCapability{
-		api: service, grants: connectorsService,
+		api:    service,
 		issuer: issuer, now: now,
 	}, nil
 }

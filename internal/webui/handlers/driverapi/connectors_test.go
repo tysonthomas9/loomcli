@@ -16,8 +16,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/connectorscatalog"
-	"github.com/tysonthomas9/loomcli/internal/infra/connectorsproviders"
-	providers "github.com/tysonthomas9/loomcli/internal/infra/connectorsproviders/providerimpl"
+	providers "github.com/tysonthomas9/loomcli/internal/infra/connectorsproviders"
 	"github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
@@ -124,21 +123,17 @@ func newConnectorHarness(t *testing.T) *connectorHarness {
 	provider := &stubProvider{result: providers.CallResult{
 		Status:   http.StatusOK,
 		Body:     map[string]any{"commentId": "c-1"},
-		Decision: domain.ConnectorCallGranted,
+		Decision: connectorsmodule.ConnectorCallGranted,
 	}}
 	registry := providers.NewRegistry()
-	if err := registry.Register(domain.ConnectorSourceGitHub, provider); err != nil {
+	if err := registry.Register(connectorsmodule.ConnectorSourceGitHub, provider); err != nil {
 		t.Fatalf("Register provider: %v", err)
 	}
 	catalog, err := connectorscatalog.New(st.Connectors(), st.ConnectorGrants(), st.ConnectorCalls())
 	if err != nil {
 		t.Fatalf("New connector catalog: %v", err)
 	}
-	providerRegistry, err := connectorsproviders.New(registry)
-	if err != nil {
-		t.Fatalf("New provider registry: %v", err)
-	}
-	dispatcher, err := connectorsmodule.NewDispatch(catalog, vault, providerRegistry, nil)
+	dispatcher, err := connectorsmodule.NewDispatch(catalog, vault, registry, nil)
 	if err != nil {
 		t.Fatalf("New connector dispatcher: %v", err)
 	}
@@ -384,7 +379,7 @@ func TestConnectorDispatchPreconditionSatisfied(t *testing.T) {
 
 func TestConnectorDispatchStaleSubject(t *testing.T) {
 	h := newConnectorHarness(t)
-	h.provider.result = providers.CallResult{Status: http.StatusConflict, Decision: domain.ConnectorCallStaleSubject}
+	h.provider.result = providers.CallResult{Status: http.StatusConflict, Decision: connectorsmodule.ConnectorCallStaleSubject}
 	h.provider.err = &providers.StaleSubject{
 		Action: "github.merge", Resource: "repo:octocat/hello",
 		Expected: "abc123", Reason: "head moved",

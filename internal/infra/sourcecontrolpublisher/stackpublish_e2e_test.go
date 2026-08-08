@@ -30,7 +30,6 @@ import (
 
 	stackpublish "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolpublisher"
 	stackstore "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore"
-	stackstoreadapter "github.com/tysonthomas9/loomcli/internal/infra/stackstoreadapter"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol/stacklineage"
 )
@@ -119,7 +118,7 @@ func TestE2EStackPublisher(t *testing.T) {
 	out, err := exec.Command("gh", "repo", "clone", slug, repoPath).CombinedOutput() //nolint:norawexec
 	require.NoErrorf(t, err, "gh repo clone: %s", out)
 
-	adapter, err := stackstoreadapter.New(store)
+	adapter, err := stackstore.NewAdapter(store)
 	require.NoError(t, err)
 	stacks, err := sourcecontrol.NewStackLifecycle(adapter, time.Now)
 	require.NoError(t, err)

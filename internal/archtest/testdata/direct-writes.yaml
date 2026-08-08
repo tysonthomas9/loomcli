@@ -7,9 +7,8 @@ adapter_roots:
   - internal/driver
   - internal/infra/agentsbootstrapstore
   - internal/infra/connectorscatalog
-  - internal/infra/connectorsrotation
   - internal/infra/sessionstoreadapter
-  - internal/infra/stackstoreadapter
+  - internal/infra/sourcecontrolstackstore
   - internal/infra/usageprojection
   - internal/infra/workspacecatalog
   - internal/modules
@@ -41,11 +40,9 @@ owner_adapters:
     aggregate_owner: agents
   - path: internal/infra/connectorscatalog
     aggregate_owner: connectors
-  - path: internal/infra/connectorsrotation
-    aggregate_owner: connectors
   - path: internal/infra/sessionstoreadapter
     aggregate_owner: interaction
-  - path: internal/infra/stackstoreadapter
+  - path: internal/infra/sourcecontrolstackstore
     aggregate_owner: sourcecontrol
   - path: internal/infra/usageprojection
     aggregate_owner: read_projection
@@ -1691,6 +1688,12 @@ writes:
       aggregate_owner: agents
       disposition: owner_adapter
     - file: internal/infra/connectorscatalog/catalog.go
+      receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorAuditStore
+      method: Append
+      count: 1
+      aggregate_owner: connectors
+      disposition: owner_adapter
+    - file: internal/infra/connectorscatalog/catalog.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorGrantStore
       method: Create
       count: 1
@@ -1708,13 +1711,7 @@ writes:
       count: 1
       aggregate_owner: connectors
       disposition: owner_adapter
-    - file: internal/infra/connectorsrotation/adapter.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorAuditStore
-      method: Append
-      count: 1
-      aggregate_owner: connectors
-      disposition: owner_adapter
-    - file: internal/infra/connectorsrotation/adapter.go
+    - file: internal/infra/connectorscatalog/catalog.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorStore
       method: RotateSecrets
       count: 1
@@ -1792,37 +1789,37 @@ writes:
       count: 1
       aggregate_owner: interaction
       disposition: owner_adapter
-    - file: internal/infra/stackstoreadapter/adapter.go
+    - file: internal/infra/sourcecontrolstackstore/adapter.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore.Store
       method: AddNode
       count: 1
       aggregate_owner: sourcecontrol
       disposition: owner_adapter
-    - file: internal/infra/stackstoreadapter/adapter.go
+    - file: internal/infra/sourcecontrolstackstore/adapter.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore.Store
       method: EnsureStack
       count: 1
       aggregate_owner: sourcecontrol
       disposition: owner_adapter
-    - file: internal/infra/stackstoreadapter/adapter.go
+    - file: internal/infra/sourcecontrolstackstore/adapter.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore.Store
       method: MoveNode
       count: 1
       aggregate_owner: sourcecontrol
       disposition: owner_adapter
-    - file: internal/infra/stackstoreadapter/adapter.go
+    - file: internal/infra/sourcecontrolstackstore/adapter.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore.Store
       method: RemoveNode
       count: 1
       aggregate_owner: sourcecontrol
       disposition: owner_adapter
-    - file: internal/infra/stackstoreadapter/adapter.go
+    - file: internal/infra/sourcecontrolstackstore/adapter.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore.Store
       method: SetBase
       count: 1
       aggregate_owner: sourcecontrol
       disposition: owner_adapter
-    - file: internal/infra/stackstoreadapter/adapter.go
+    - file: internal/infra/sourcecontrolstackstore/adapter.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore.Store
       method: UpdateNode
       count: 2

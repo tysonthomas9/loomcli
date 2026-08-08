@@ -13,25 +13,22 @@ semantics:
     - vendor
     - worktrees
 ceilings:
-  total_packages: 250
+  total_packages: 234
   module_packages: 18
-  outside_module_packages: 232
-  one_file_packages: 115
-  one_or_two_file_packages: 141
+  outside_module_packages: 216
+  one_file_packages: 96
+  one_or_two_file_packages: 123
 packages:
   - internal/agenterr
   - internal/agentpolicy
   - internal/app/agentprovisioning
-  - internal/app/agentprovisioning/agents
-  - internal/app/agentprovisioning/automation
-  - internal/app/agentprovisioning/connectors
   - internal/app/agentprovisioning/fleetdb
   - internal/app/agentsbootstrap
   - internal/app/connectorgrants
   - internal/app/prreviewer
   - internal/app/serve
   - internal/app/serve/agentcomposition
-  - internal/app/serve/agentcomposition/provisioningcomposition
+  - internal/app/serve/agentcomposition/owneradapters
   - internal/app/serve/automationcomposition
   - internal/app/serve/interactioncomposition
   - internal/app/serve/operatorauth
@@ -89,15 +86,11 @@ packages:
   - internal/cli/serve/runtimecomposition
   - internal/cli/serve/runtimewire
   - internal/cli/serve/serveadapter
-  - internal/cli/serve/serveadapter/automationjournal
-  - internal/cli/serve/serveadapter/catalogcomposition
   - internal/cli/serve/serveadapter/daytonabroker
-  - internal/cli/serve/serveadapter/interactioncomposition
   - internal/cli/serve/usagecmd
   - internal/cli/serve/worker
   - internal/cli/serve/workspacemgr
   - internal/cli/serve/workspacemgr/admissionstore
-  - internal/cli/serve/workspacemgr/agentsbootstrapcomposition
   - internal/cli/serve/workspacemgr/workspacematerialization
   - internal/cli/sessionfinalize
   - internal/cli/stack
@@ -131,8 +124,6 @@ packages:
   - internal/infra/automationruntime
   - internal/infra/connectorscatalog
   - internal/infra/connectorsproviders
-  - internal/infra/connectorsproviders/providerimpl
-  - internal/infra/connectorsrotation
   - internal/infra/connectorsvault
   - internal/infra/fleetdb
   - internal/infra/fleetdb/agentmanagement
@@ -148,7 +139,6 @@ packages:
   - internal/infra/sessionstoreadapter
   - internal/infra/sourcecontrolpublisher
   - internal/infra/sourcecontrolstackstore
-  - internal/infra/stackstoreadapter
   - internal/infra/usageprojection
   - internal/infra/workflowdistribution
   - internal/infra/workflowdistribution/authoring
@@ -208,9 +198,6 @@ packages:
   - internal/webui/agentcoord
   - internal/webui/agentmodules
   - internal/webui/agentmodules/automationroutes
-  - internal/webui/agentmodules/routecontracts
-  - internal/webui/agentmodules/supportroutes
-  - internal/webui/agentmodules/workspaceroutes
   - internal/webui/app
   - internal/webui/app/capabilitycomposition
   - internal/webui/app/connectorcomposition
@@ -251,9 +238,6 @@ packages:
   - internal/webui/localredis
   - internal/webui/log
   - internal/webui/modbuilder
-  - internal/webui/modbuilder/agentcomposition
-  - internal/webui/modbuilder/reviewcomposition
-  - internal/webui/modbuilder/sessioncomposition
   - internal/webui/readprojection
   - internal/webui/server/dto
   - internal/webui/server/handler

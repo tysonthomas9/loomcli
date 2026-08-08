@@ -1,9 +1,11 @@
-// Package modbuilder provides compatibility facades for workspace-scoped
-// handler module composition.
+// Package modbuilder constructs workspace-scoped handler modules for the web
+// UI composition root.
 package modbuilder
 
 import (
+	"context"
 	"net/http"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/app/prreviewer"
 	"github.com/tysonthomas9/loomcli/internal/app/workitemmove"
@@ -13,58 +15,117 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
+	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
+	"github.com/tysonthomas9/loomcli/internal/webui/agentmodules"
 	"github.com/tysonthomas9/loomcli/internal/webui/filecoord"
-	"github.com/tysonthomas9/loomcli/internal/webui/modbuilder/agentcomposition"
-	"github.com/tysonthomas9/loomcli/internal/webui/modbuilder/reviewcomposition"
-	"github.com/tysonthomas9/loomcli/internal/webui/modbuilder/sessioncomposition"
+	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/issues"
+	locsettings "github.com/tysonthomas9/loomcli/internal/webui/handlers/localsettings"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/prreview"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/taskrunapi"
+	hterminal "github.com/tysonthomas9/loomcli/internal/webui/handlers/terminal"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/sourcecontrolcoord"
+	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
 // PRReviewModule is the route module plus its credential-cache invalidation
 // surface used by local settings wiring.
-type PRReviewModule = reviewcomposition.PRReviewModule
+type PRReviewModule interface {
+	Register(*http.ServeMux)
+	InvalidateCredentialSeeds()
+}
 
 // CredentialSeedInvalidator is the cross-module notification surface needed
 // when a persisted GitHub runtime credential changes.
-type CredentialSeedInvalidator = reviewcomposition.CredentialSeedInvalidator
+type CredentialSeedInvalidator interface {
+	InvalidateCredentialSeeds()
+}
 
 // LocalSettingsHandlers contains the non-workspace local settings routes.
-type LocalSettingsHandlers = reviewcomposition.LocalSettingsHandlers
+type LocalSettingsHandlers struct {
+	Get                        http.HandlerFunc
+	Patch                      http.HandlerFunc
+	RuntimeCredentialPreflight http.HandlerFunc
+}
 
 // NewIssueModules creates the issue and session modules.
 func NewIssueModules(workItems workitems.API, mover workitemmove.Commands, sessSvc sessioncoord.SessionService) []interface{ Register(*http.ServeMux) } {
-	return sessioncomposition.NewIssueModules(workItems, mover, sessSvc)
+	return []interface{ Register(*http.ServeMux) }{
+		issues.NewIssueModule(workItems, mover),
+		issues.NewSessionModule(sessSvc, issues.SessionModuleOpts{
+			ListTaskSessions:     misc.HandleListTaskSessions(sessSvc),
+			GetSession:           misc.HandleGetSession(sessSvc),
+			GetSessionTranscript: misc.HandleGetSessionTranscript(sessSvc),
+			GetSessionDiff:       misc.HandleGetSessionDiff(sessSvc),
+		}),
+	}
 }
 
 // TerminalModuleDeps holds dependencies for the (now tmux-free) terminal
 // modules. PTYMgr drives the main terminal WS; AgentTmuxMgr is kept only for
 // the live agent-view WS, which still reads auto-mode tmux sessions.
-type TerminalModuleDeps = sessioncomposition.TerminalModuleDeps
+type TerminalModuleDeps struct {
+	TermSvc            terminal.TerminalService
+	AgentSvc           agentcoord.AgentService
+	PTYMgr             terminal.PTYSource
+	AgentTmuxMgr       *terminal.AgentTmuxManager // may be nil when tmux is missing
+	TermAuth           *realtime.TerminalAuth
+	CORSOrigins        []string
+	SelfURL            string
+	Store              store.Store
+	TabMetaStore       *tabmeta.Store
+	Hub                *realtime.Hub
+	ServerStartedAt    time.Time
+	Agents             agents.IdentityQueries
+	Interaction        interaction.API
+	Operator           workflowcataloghttp.OperatorAuthorityResolver
+	SessionAuthorities interface {
+		ResolveSessionAuthority(
+			context.Context,
+			authority.Action,
+			interaction.SessionAuthorityProof,
+		) (authority.SessionAuthority, error)
+	}
+}
 
 // NewTerminalModules creates the terminal tab and main terminal modules.
 func NewTerminalModules(deps TerminalModuleDeps) []interface{ Register(*http.ServeMux) } {
-	return sessioncomposition.NewTerminalModules(deps)
+	return []interface{ Register(*http.ServeMux) }{
+		hterminal.NewTabModule(deps.TermSvc),
+		hterminal.NewModule(
+			deps.TermSvc, deps.AgentSvc, deps.PTYMgr, deps.AgentTmuxMgr,
+			deps.TermAuth, deps.CORSOrigins,
+			deps.SelfURL, deps.Store,
+			deps.TabMetaStore, deps.Hub, deps.ServerStartedAt,
+			hterminal.InteractionDependencies{
+				API: deps.Interaction, Operator: deps.Operator,
+				SessionAuthorities: deps.SessionAuthorities,
+				TerminalIdentities: deps.TermSvc,
+			},
+			deps.Agents),
+	}
 }
 
 // NewIssueTabModule creates the issue tab module.
 func NewIssueTabModule(issueTabs interaction.IssueTabStateAPI, hub *realtime.Hub) interface{ Register(*http.ServeMux) } {
-	return sessioncomposition.NewIssueTabModule(issueTabs, hub)
+	return issues.NewIssueTabModule(issueTabs, hub)
 }
 
 // NewDiffModule creates the git diff module.
 func NewDiffModule(agentSvc agentcoord.AgentService, diffSvc sourcecontrolcoord.DiffService) interface{ Register(*http.ServeMux) } {
-	return reviewcomposition.NewDiffModule(agentSvc, diffSvc)
+	return githandlers.NewModule(agentSvc, diffSvc)
 }
 
 // NewFileModule creates the file operations module.
 func NewFileModule(fileSvc filecoord.FileService, accessCfg ...middleware.FileAccessConfig) interface{ Register(*http.ServeMux) } {
-	return reviewcomposition.NewFileModule(fileSvc, accessCfg...)
+	return misc.NewModule(fileSvc, accessCfg...)
 }
 
 // NewPRReviewModule creates the connector-backed pull request review module.
@@ -85,7 +146,7 @@ func NewPRReviewModule(
 	interactionMessenger interaction.ChatMessenger,
 	interactionAuthority workflowcataloghttp.OperatorAuthorityResolver,
 ) PRReviewModule {
-	return reviewcomposition.NewPRReviewModule(
+	return prreview.NewModule(
 		st,
 		dispatcher,
 		agentSvc,
@@ -103,18 +164,29 @@ func NewPRReviewModule(
 // NewLocalSettingsHandlers wires GitHub credential changes to the PR-review
 // seed cache without coupling either handler package to the other.
 func NewLocalSettingsHandlers(dataDir string, invalidator CredentialSeedInvalidator) LocalSettingsHandlers {
-	return reviewcomposition.NewLocalSettingsHandlers(dataDir, invalidator)
+	options := locsettings.PatchOptions{}
+	if invalidator != nil {
+		options.OnGitHubRuntimeCredentialChanged = invalidator.InvalidateCredentialSeeds
+	}
+	return LocalSettingsHandlers{
+		Get:                        locsettings.HandleGet(dataDir),
+		Patch:                      locsettings.HandlePatch(dataDir, options),
+		RuntimeCredentialPreflight: locsettings.HandleRuntimeCredentialPreflight(dataDir),
+	}
 }
 
 // NewTaskRunAPIModule creates the task-runner HTTP API module
 // (POST /api/workspaces/{ws}/task-run/{op}, lease-token auth) so task runner
 // processes talk to serve instead of holding fleet-db credentials.
 func NewTaskRunAPIModule(st store.Store, fleetBaseURL string, localSettingsDir string) interface{ Register(*http.ServeMux) } {
-	return agentcomposition.NewTaskRunAPIModule(st, fleetBaseURL, localSettingsDir)
+	_ = localSettingsDir // compatibility input only; task runners never receive Local Settings.
+	return taskrunapi.NewModule(taskrunapi.Config{Store: st, FleetBaseURL: fleetBaseURL})
 }
 
-type UnifiedAgentModuleDeps = agentcomposition.UnifiedAgentModuleDeps
+// UnifiedAgentModuleDeps contains the dependencies for unified agent modules.
+type UnifiedAgentModuleDeps = agentmodules.Deps
 
+// NewUnifiedAgentModules creates the unified agent route modules.
 func NewUnifiedAgentModules(deps UnifiedAgentModuleDeps) []interface{ Register(*http.ServeMux) } {
-	return agentcomposition.NewUnifiedAgentModules(deps)
+	return agentmodules.New(deps)
 }

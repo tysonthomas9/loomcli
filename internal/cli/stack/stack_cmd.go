@@ -21,7 +21,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	stackpublish "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolpublisher"
 	stackstore "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore"
-	infrastackstore "github.com/tysonthomas9/loomcli/internal/infra/stackstoreadapter"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol/stacklineage"
@@ -61,7 +60,7 @@ func openStackLifecycle() (sourcecontrol.StackLifecycle, error) {
 	if err != nil {
 		return nil, err
 	}
-	adapter, err := infrastackstore.New(store)
+	adapter, err := stackstore.NewAdapter(store)
 	if err != nil {
 		return nil, err
 	}

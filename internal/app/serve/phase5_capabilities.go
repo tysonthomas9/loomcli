@@ -65,7 +65,6 @@ type AgentProvisioningConfig = agentcomposition.AgentProvisioningConfig
 type SourceControlCapability struct {
 	capability *sourcecontrolcomposition.SourceControlCapability
 	issuer     *authority.Issuer
-	grants     sourcecontrolcomposition.GrantCommands
 }
 
 func (capability *SourceControlCapability) SourceControlAPI() sourcecontrolcomposition.API {
@@ -137,7 +136,6 @@ func (catalog *WorkflowCatalogCapability) NewSourceControlCapability(
 	}
 	return &SourceControlCapability{
 		capability: composed, issuer: issuer,
-		grants: composed.ProvisioningGrantCommands(),
 	}, nil
 }
 
@@ -161,7 +159,6 @@ func (catalog *WorkflowCatalogCapability) NewSourceControlCapabilityWithFleetDB(
 	}
 	return &SourceControlCapability{
 		capability: composed, issuer: issuer,
-		grants: composed.ProvisioningGrantCommands(),
 	}, nil
 }
 
@@ -176,15 +173,12 @@ func (capability *AgentsCapability) NewAgentProvisioningCapability(
 		composed = capability.capability
 	}
 	owners := agentcomposition.AgentProvisioningOwners{}
-	if catalog != nil {
+	if catalog != nil && catalog.automation != nil &&
+		catalog.automation.BindingOperations() != nil {
 		owners.AutomationIssuer = catalog.issuer
-		if catalog.automation != nil {
-			owners.Bindings = catalog.automation.ProvisioningBindingCommands()
-		}
 	}
-	if sourceControl != nil {
+	if sourceControl != nil && sourceControl.capability != nil {
 		owners.ConnectorsIssuer = sourceControl.issuer
-		owners.Grants = sourceControl.grants
 	}
 	return composed.NewAgentProvisioningCapability(client, config, owners)
 }

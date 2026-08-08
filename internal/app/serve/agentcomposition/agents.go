@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/app/prreviewer"
-	"github.com/tysonthomas9/loomcli/internal/app/serve/agentcomposition/provisioningcomposition"
 	"github.com/tysonthomas9/loomcli/internal/app/serve/operatorauth"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
@@ -71,25 +70,6 @@ type API = agents.API
 type PRReviewerCommands = prreviewer.Commands
 type OperatorAuthorityResolver = workflowcataloghttp.OperatorAuthorityResolver
 type FleetDBClient = infrafleetdb.Client
-
-type AgentProvisioningCapability = provisioningcomposition.Capability
-type AgentProvisioningConfig = provisioningcomposition.Config
-type AgentProvisioningOwners = provisioningcomposition.Owners
-
-func (capability *AgentsCapability) NewAgentProvisioningCapability(
-	client *infrafleetdb.Client,
-	config AgentProvisioningConfig,
-	owners AgentProvisioningOwners,
-) (*AgentProvisioningCapability, error) {
-	var owner provisioningcomposition.AgentsOwner
-	if capability != nil {
-		owner = provisioningcomposition.AgentsOwner{
-			Commands: capability.api, Issuer: capability.issuer,
-			OperatorResolver: capability.operatorResolver,
-		}
-	}
-	return provisioningcomposition.New(owner, client, config, owners)
-}
 
 //nolint:funlen // Composition keeps the exact Agents ports, authority issuer, and compatibility adapters visibly co-located.
 func NewAgentsCapability(config AgentsConfig) (*AgentsCapability, error) {
@@ -170,6 +150,6 @@ func agentsOperatorActions() []authority.Action {
 		agents.ActionCreateRole,
 		agents.ActionUpdateRole,
 		agents.ActionDeleteRole,
-		provisioningcomposition.ActionBeginProvisioning,
+		agentProvisioningActionBegin,
 	}
 }

@@ -5,7 +5,6 @@ import (
 	"time"
 
 	stackstore "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore"
-	infrastackstore "github.com/tysonthomas9/loomcli/internal/infra/stackstoreadapter"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol/stacklineage"
 )
@@ -23,7 +22,7 @@ func TestRecordTaskOutcomeOwnsFinalizeBarrier(t *testing.T) {
 	if _, err := lineage.AddNode(ctx, workspace, "epic:E", "B", "A", ""); err != nil {
 		t.Fatal(err)
 	}
-	adapter, err := infrastackstore.New(lineage)
+	adapter, err := stackstore.NewAdapter(lineage)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -14,7 +14,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/configlock"
 	stackpublish "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolpublisher"
 	stackstore "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore"
-	stackstoreadapter "github.com/tysonthomas9/loomcli/internal/infra/stackstoreadapter"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol/stacklineage"
 )
@@ -50,7 +49,7 @@ func reconcileEpicStack(ctx context.Context, ws string, proj *EpicStackProjectio
 	if err != nil {
 		return fmt.Errorf("open stack store: %w", err)
 	}
-	adapter, err := stackstoreadapter.New(sstore)
+	adapter, err := stackstore.NewAdapter(sstore)
 	if err != nil {
 		return err
 	}

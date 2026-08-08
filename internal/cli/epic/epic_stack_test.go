@@ -8,7 +8,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
 	stackstore "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore"
-	infrastackstore "github.com/tysonthomas9/loomcli/internal/infra/stackstoreadapter"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol/stacklineage"
 )
@@ -286,7 +285,7 @@ func mustNodes(t *testing.T, ctx context.Context, s *stackstore.LocalStore, ws s
 
 func mustStackLifecycle(t *testing.T, store stackstore.Store) sourcecontrol.StackLifecycle {
 	t.Helper()
-	adapter, err := infrastackstore.New(store)
+	adapter, err := stackstore.NewAdapter(store)
 	if err != nil {
 		t.Fatalf("compose stack adapter: %v", err)
 	}

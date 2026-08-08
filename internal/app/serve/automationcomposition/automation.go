@@ -28,7 +28,6 @@ type AutomationBindingOperations = automation.BindingOperations
 // AutomationAuditQueries is the read-only surface needed by webhook audit
 // routes. Mutation transports never receive these interfaces as write stores.
 type AutomationAuditQueries = automation.AuditQueries
-type ProvisioningBindingCommands = automation.ProvisioningBindingCommands
 
 // AutomationCapability is a composition-owned handle. Its fields stay
 // private so each consumer can receive only the narrow accessor it needs.
@@ -124,13 +123,6 @@ func (capability *AutomationCapability) RuntimeRegistrations() []platformruntime
 		return nil
 	}
 	return append([]platformruntime.Registration(nil), capability.runtimeComponents...)
-}
-
-func (capability *AutomationCapability) ProvisioningBindingCommands() ProvisioningBindingCommands {
-	if capability == nil {
-		return nil
-	}
-	return capability.bindings
 }
 
 type EffectiveVersionAuthority func(
