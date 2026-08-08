@@ -2621,7 +2621,8 @@ export interface components {
         | "stuck"
         | "done"
         | "stopped"
-        | "dead";
+        | "dead"
+        | "error";
       /** Format: date-time */
       last_activity?: string | null;
       role_type?: string;
@@ -2840,6 +2841,7 @@ export interface components {
         | "done"
         | "stopped"
         | "dead"
+        | "error"
         | null;
     };
     CloseRequest: {
@@ -2947,7 +2949,8 @@ export interface components {
         | "stuck"
         | "done"
         | "stopped"
-        | "dead";
+        | "dead"
+        | "error";
       role_type?: string;
       rig?: string;
       /** Format: date-time */

@@ -64,6 +64,8 @@ type AgentProcess struct {
 	Done     chan struct{} // closed when superviseAgent goroutine exits
 	StopOnce sync.Once     // prevents double-close of StopCh
 
+	tick *tickSlot // this agent's liveness slot (set by registerAgentTick); identity for record/deregister
+
 	StopReason StopReason // why the agent was stopped (set at decision site, empty while running)
 
 	Mu sync.Mutex // protects Cmd, Pid, LogFile, restart tracking, AssignedEpicID, AssignedTaskID, RequestedTaskID, ResumeTaskID, ResumeFailures, RecoveryMode, LastError, CurrentBackendIdx, Session, AgentSessionID, ParentSessionID, AgentLeaseID, AgentLeaseToken, ownership fields, TranscriptPath, BeforeRef, StopReason, LastActivity
@@ -84,18 +86,52 @@ const (
 	StopReasonWatchdog           StopReason = "watchdog"
 	StopReasonBackendUnavailable StopReason = "backend_unavailable"
 	StopReasonEphemeralDone      StopReason = "ephemeral_done" // ephemeral-mode agent exited cleanly after one successful task
-	// StopReasonMaxRetriesBlocked marks an agent that exhausted its restart
-	// budget and is now block-and-retrying on a fixed interval (policy
-	// Decision Retry with OnExhaustion Block) instead of being abandoned.
-	// The supervise goroutine stays alive and the agent self-resumes once a
-	// transient root cause clears.
+	// StopReasonMaxRetriesParked is retained for persisted state written by the
+	// earlier park-and-retry implementation. New max-retry exhaustion uses
+	// StopReasonMaxRetries and is surfaced as error.
+	StopReasonMaxRetriesParked StopReason = "max_retries_parked"
+	// StopReasonMaxRetriesBlocked is retained for v5 state written by the
+	// block-and-retry implementation. New max-retry exhaustion uses
+	// StopReasonMaxRetries and is surfaced as error.
 	StopReasonMaxRetriesBlocked StopReason = "max_retries_blocked"
 	// StopReasonFastFail marks a deterministic failure the policy refuses to
-	// retry or block (Decision FastFail — e.g. ContextOverflow, ModelNotFound
-	// with backends exhausted, or a capped block that never made progress).
-	// Surfaced as "failed" in daemon-status.
+	// retry (Decision FastFail — e.g. ContextOverflow or ModelNotFound with
+	// backends exhausted). Surfaced as error in daemon-status.
 	StopReasonFastFail StopReason = "fast_fail"
 )
+
+// recordTick refreshes this agent's liveness slot by identity. A no-op before
+// registerAgentTick has run (ap.tick nil), so callers need no guard.
+func (ap *AgentProcess) recordTick() {
+	if ap.tick != nil {
+		ap.tick.record()
+	}
+}
+
+// trySetStopReasonDefault records a stop reason without ever blocking the
+// caller. It returns false when the agent mutex is currently owned elsewhere,
+// which is expected on watchdog quarantine paths where the suspect goroutine may
+// be the one holding the lock.
+func (ap *AgentProcess) trySetStopReasonDefault(reason StopReason) bool {
+	if !ap.Mu.TryLock() {
+		return false
+	}
+	defer ap.Mu.Unlock()
+	if ap.StopReason == "" {
+		ap.StopReason = reason
+	}
+	return true
+}
+
+// signalStop asks this agent's supervise loop to stop at its next checkpoint by
+// closing StopCh exactly once. Non-blocking and safe to call concurrently — the
+// liveness watchdog uses it to quarantine a wedged agent without taking locks.
+func (ap *AgentProcess) signalStop() {
+	if ap.StopCh == nil {
+		return
+	}
+	ap.StopOnce.Do(func() { close(ap.StopCh) })
+}
 
 // resolveRemote returns the git remote name for this agent.
 // Uses RepoConfig.Remote if available, otherwise defaults to "origin".

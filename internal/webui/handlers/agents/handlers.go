@@ -251,7 +251,7 @@ func broadcastAgentRefresh(hub *realtime.Hub, workspace, agentName, actor string
 
 func validAgentState(state domain.AgentState) bool {
 	switch state {
-	case "", domain.AgentStateIdle, domain.AgentStateActive, domain.AgentStateStopped:
+	case "", domain.AgentStateIdle, domain.AgentStateActive, domain.AgentStateStopped, domain.AgentStateError:
 		return true
 	default:
 		return false

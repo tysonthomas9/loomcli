@@ -55,9 +55,12 @@ type Supervisor struct {
 	FatalCh   chan error
 	FatalOnce sync.Once
 
-	// Ticks holds *atomic.Int64 UnixNano timestamps keyed by goroutine name.
-	// Watched goroutines call RecordTick at each loop iteration; the liveness
-	// watchdog flags any tick older than the per-name threshold.
+	// Ticks holds *tickSlot values keyed by goroutine name. Each slot's stamp is a
+	// monotonic duration (nanoseconds since monoBase), so staleness is measured on
+	// the monotonic clock and survives a host suspend. Watched goroutines call
+	// RecordTick (core singletons) or ap.recordTick (per-agent, by slot identity)
+	// each loop iteration; the liveness watchdog flags any tick older than the
+	// per-name threshold — fatal for ClassCore, quarantine for ClassAgent.
 	Ticks sync.Map
 
 	// LivenessTimeout overrides the default per-goroutine staleness threshold
@@ -106,16 +109,10 @@ type Supervisor struct {
 	NodeInterval time.Duration
 
 	// backendRecheckInterval is the fixed delay computeBackoff returns for a
-	// BackendUnavailable block (agent's backend CLI missing from PATH). Zero
+	// BackendUnavailable wait (agent's backend CLI missing from PATH). Zero
 	// means use the package default (backendUnavailableRecheckInterval). Tests set a
 	// small value to avoid the 30s wait.
 	backendRecheckInterval time.Duration
-
-	// maxRetriesBlockInterval is the fixed delay computeBackoff returns once an
-	// agent has exhausted its restart budget and blocked (StopReasonMaxRetriesBlocked).
-	// Zero means use the package default (defaultMaxRetriesBlockInterval). Tests set
-	// a small value to avoid the 60s wait.
-	maxRetriesBlockInterval time.Duration
 }
 
 // NewAgent creates an AgentProcess from an agent entry, resolving the worktree path
@@ -212,7 +209,7 @@ func (s *Supervisor) Start() error {
 // see drain.go for that variant.
 func (s *Supervisor) startAgentSupervisor(ap *AgentProcess) {
 	name := GoroutineAgentPrefix + ap.Entry.Worktree
-	s.RegisterTick(name)
+	s.registerAgentTick(ap)
 	s.Wg.Add(1)
 	go s.supervisedAgentBody(name, ap)
 }
@@ -259,12 +256,13 @@ func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 	slog.Info("starting agent supervisor", "worktree", ap.Entry.Worktree, "role", ap.Entry.Role)
 	s.markAgentActive(ap)
 	defer s.markAgentStoppedOnExit(ap)
-	tickName := agentTickName(ap)
 
 	for {
 		// Refreshed at the top of every iteration; while we block in
 		// waitForAgent → cmd.Wait(), startAgentWaitHeartbeat keeps it fresh.
-		s.RecordTick(tickName)
+		// Recorded by slot identity so a same-worktree successor's slot is
+		// never refreshed by this (possibly outgoing) goroutine.
+		ap.recordTick()
 		if s.checkAgentStopSignals(ap) {
 			return
 		}
@@ -319,10 +317,8 @@ func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 		}
 
 		if !s.shouldRestart(ap) {
-			// Terminal stops only: fatal (auth/billing), fast-fail
-			// (deterministic / block-budget escalation), or the
-			// max_retries=0 fail-fast opt-out. Budget exhaustion on
-			// retryable classes blocks-and-retries instead (returns true).
+			// Terminal stops only: fatal/deterministic errors or a retry budget
+			// exhausted into the explicit error state.
 			slog.Warn("supervisor stopping (terminal)", "worktree", ap.Entry.Worktree)
 			return
 		}
@@ -777,7 +773,7 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
 			// The normal pre-flight gate runs before task claim, but this spawn-time
 			// gate remains as a race guard for a backend disappearing after claim and
 			// before exec. Clean up any already-created session/claim/worker before
-			// blocking so the task is immediately claimable again.
+			// waiting so the task is immediately claimable again.
 			s.completeBackendUnavailableCleanup(ap)
 			s.Concurrency.Release(ap.Entry.Role)
 			return
@@ -849,16 +845,11 @@ func (s *Supervisor) postExitCleanup(ap *AgentProcess) {
 	// Keeping as a hook point for future steps.
 }
 
-// sleepBeforeRestart performs interruptible backoff sleep. Returns false if interrupted.
-//
-// One daemon.supervisor.restart span is opened per restart attempt. The span
-// covers the backoff window plus the AgentRestarted event emit; the actual
-// re-spawn that follows is its own daemon.supervisor.spawn child span (via
-// the next iteration of the supervise loop).
 // startBackoffHeartbeat keeps the agent's supervise tick fresh during a long
-// restart wait (a block, or a long exponential backoff). It returns a no-op
-// stopper for short waits that cannot approach the staleness threshold, so
-// callers can always defer the returned function.
+// restart wait (a fixed wait, or a long exponential backoff) so the liveness watchdog
+// does not mistake a healthy, waiting supervise goroutine for a wedged one. It
+// returns a no-op stopper for short waits that cannot approach the staleness
+// threshold, so callers can always `defer` the returned function.
 func (s *Supervisor) startBackoffHeartbeat(ap *AgentProcess, backoff time.Duration) func() {
 	if backoff < agentWaitHeartbeatInterval {
 		return func() {}

@@ -4,7 +4,10 @@ import (
 	"errors"
 	"log"
 	"log/slog"
+	"os/exec"
 	"time"
+
+	"github.com/olesho/harness-wrapper/pkg/discovery"
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/agentpolicy"
@@ -14,10 +17,12 @@ import (
 
 // ErrBackendUnavailable is the sentinel returned by spawnAgent when the
 // agent's effective backend CLI is not on PATH. The supervisor's
-// lifecycle treats this as a clean block — restart budget is preserved
-// and no backoff is set — because the supervise loop re-checks PATH
+// lifecycle treats this as a recoverable wait: restart budget is preserved
+// and no max-retries error is set, because the supervise loop re-checks PATH
 // each iteration and auto-recovers the agent once the binary appears.
 var ErrBackendUnavailable = errors.New("supervisor: backend binary not on PATH")
+
+var lookPath = exec.LookPath
 
 // gateBackendAvailable is the pre-spawn availability check. If the
 // agent's effective backend CLI is not on PATH, the agent is
@@ -42,33 +47,55 @@ func (s *Supervisor) gateBackendAvailable(ap *AgentProcess) error {
 			"worktree", ap.Entry.Worktree, "backend", backend, "err", lookupErr)
 		return nil
 	}
+	info = withExternalBackendBinary(info, backend)
 
 	if info.Installed {
-		// Recovery branch: if the agent was previously blocked for
-		// backend-unavailable and the binary is now back, clear the
-		// state so UIs reflect the recovery before the spawn proceeds.
-		ap.Mu.Lock()
-		wasUnavailable := ap.StopReason == StopReasonBackendUnavailable
-		if wasUnavailable {
-			ap.StopReason = ""
-			ap.LastError = nil
-		}
-		worktree := ap.Entry.Worktree
-		ap.Mu.Unlock()
-		if wasUnavailable {
-			s.markControlPlaneAgentState(ap, domain.AgentStateActive)
-			log.Printf("[daemon] Agent %s: backend %q now on PATH — resuming spawn",
-				worktree, backend)
-		}
+		s.markBackendAvailable(ap, backend)
 		return nil
 	}
 
+	s.markBackendUnavailable(ap, backend, info.InstallHint)
+	return ErrBackendUnavailable
+}
+
+func withExternalBackendBinary(info discovery.Info, backend string) discovery.Info {
+	if info.Installed {
+		return info
+	}
+	if path, ok := lookupExternalBackendBinary(backend); ok {
+		info.Installed = true
+		info.Path = path
+		info.Binary = "loom-backend-" + backend
+	}
+	return info
+}
+
+func (s *Supervisor) markBackendAvailable(ap *AgentProcess, backend string) {
+	// Recovery branch: if the agent was previously waiting on
+	// backend-unavailable and the binary is now back, clear the state so UIs
+	// reflect the recovery before the spawn proceeds.
+	ap.Mu.Lock()
+	wasUnavailable := ap.StopReason == StopReasonBackendUnavailable
+	if wasUnavailable {
+		ap.StopReason = ""
+		ap.LastError = nil
+	}
+	worktree := ap.Entry.Worktree
+	ap.Mu.Unlock()
+	if wasUnavailable {
+		s.markControlPlaneAgentState(ap, domain.AgentStateActive)
+		log.Printf("[daemon] Agent %s: backend %q now on PATH — resuming spawn",
+			worktree, backend)
+	}
+}
+
+func (s *Supervisor) markBackendUnavailable(ap *AgentProcess, backend, installHint string) {
 	ap.Mu.Lock()
 	wasUnavailable := ap.StopReason == StopReasonBackendUnavailable
 	ap.StopReason = StopReasonBackendUnavailable
 	ap.LastError = &agenterr.AgentError{
 		Class:     agenterr.OutcomeFromDomain(agenterr.BackendUnavailableOutcome),
-		Message:   info.InstallHint,
+		Message:   installHint,
 		Backend:   backend,
 		Timestamp: time.Now(),
 	}
@@ -78,9 +105,19 @@ func (s *Supervisor) gateBackendAvailable(ap *AgentProcess) error {
 	s.markControlPlaneAgentState(ap, domain.AgentStateBackendUnavailable)
 	if !wasUnavailable {
 		log.Printf("[daemon] Agent %s: backend %q not on PATH — skipping spawn (%s)",
-			worktree, backend, info.InstallHint)
+			worktree, backend, installHint)
 	}
-	return ErrBackendUnavailable
+}
+
+func lookupExternalBackendBinary(backend string) (string, bool) {
+	if backend == "" {
+		return "", false
+	}
+	path, err := lookPath("loom-backend-" + backend)
+	if err != nil {
+		return "", false
+	}
+	return path, true
 }
 
 // GetEffectiveBackend returns the backend name for the agent's current failover position.

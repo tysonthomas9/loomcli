@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"os"
+	"os/exec"
 	"testing"
 )
 
@@ -12,13 +13,17 @@ import (
 // which re-runs the entire suite and recursively spawns more agents — a
 // fork bomb that exhausts the host (observed: >2000 pids within seconds).
 //
-// /bin/false exists on both Linux and macOS, execs successfully, and exits
-// non-zero immediately, so spawn paths still exercise the full exec +
-// supervise machinery without recursion.
+// The false utility execs successfully and exits non-zero immediately, so
+// spawn paths still exercise the full exec + supervise machinery without
+// recursion. Resolve it from PATH because its absolute location varies.
 //
 // TestHelperProcess self-execs are unaffected: they invoke os.Args[0]
 // directly with -test.run=TestHelperProcess and an env-var mode guard.
 func TestMain(m *testing.M) {
-	loomExecutablePath = func() (string, error) { return "/bin/false", nil }
+	falsePath, err := exec.LookPath("false")
+	if err != nil {
+		panic("false utility not found: " + err.Error())
+	}
+	loomExecutablePath = func() (string, error) { return falsePath, nil }
 	os.Exit(m.Run())
 }

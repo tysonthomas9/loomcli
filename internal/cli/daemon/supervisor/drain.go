@@ -17,6 +17,11 @@ import (
 // to exit after a yield file is written, before escalating to SIGTERM.
 const DefaultYieldTimeout = 60 // seconds
 
+// terminalReplacementWaitTimeout bounds explicit resume while max-retry/fatal
+// finalization is still unwinding. It matches the task-block/comment backend
+// deadline plus a small scheduling cushion.
+const terminalReplacementWaitTimeout = claimOperationTimeout + time.Second
+
 // DrainWithGrace implements a four-phase graceful shutdown sequence:
 // yield file -> wait for voluntary exit -> SIGTERM -> SIGKILL.
 // Returns true if the agent exited from yield alone (SIGTERM was not needed).
@@ -139,9 +144,7 @@ func (s *Supervisor) DrainAgent(name string) error {
 	// Signal the agent to stop (safe against double-close).
 	// ORDERING: StopCh must close BEFORE DrainWithGrace — prevents superviseAgent
 	// from respawning after the subprocess exits via yield.
-	target.StopOnce.Do(func() {
-		close(target.StopCh)
-	})
+	target.signalStop()
 
 	// Yield -> wait -> SIGTERM -> SIGKILL
 	s.DrainWithGrace(target, "config_removed", s.GetYieldTimeout(), s.GetSigtermTimeout())
@@ -193,9 +196,7 @@ func (s *Supervisor) DrainAgentWithReason(name string, reason StopReason) error 
 	// Signal the agent to stop (safe against double-close).
 	// ORDERING: StopCh must close BEFORE DrainWithGrace — prevents superviseAgent
 	// from respawning after the subprocess exits via yield.
-	target.StopOnce.Do(func() {
-		close(target.StopCh)
-	})
+	target.signalStop()
 
 	// Yield -> wait -> SIGTERM -> SIGKILL
 	s.DrainWithGrace(target, string(reason), s.GetYieldTimeout(), s.GetSigtermTimeout())
@@ -247,9 +248,7 @@ func (s *Supervisor) DrainAgentForceful(name string, reason StopReason) error {
 	target.Mu.Unlock()
 
 	// Signal the agent to stop (safe against double-close)
-	target.StopOnce.Do(func() {
-		close(target.StopCh)
-	})
+	target.signalStop()
 
 	// Stop the subprocess directly: SIGTERM -> SIGKILL (no yield)
 	s.StopAgent(target, s.GetSigtermTimeout())
@@ -311,8 +310,14 @@ func (s *Supervisor) AddAgentForTask(entry config.AgentEntry, taskID string, par
 	// Authoritative duplicate check + slice append + WaitGroup increment under
 	// a single write lock so Wg.Add can't race with Stop()'s Wg.Wait.
 	s.AgentsMu.Lock()
-	for _, existing := range s.Agents {
+	for i := 0; i < len(s.Agents); i++ {
+		existing := s.Agents[i]
 		if existing.Entry.Worktree == entry.Worktree {
+			if isReplaceableTerminalAgent(existing) {
+				s.Agents = append(s.Agents[:i], s.Agents[i+1:]...)
+				i--
+				continue
+			}
 			s.AgentsMu.Unlock()
 			return fmt.Errorf("agent %q already exists", entry.Worktree)
 		}
@@ -322,7 +327,7 @@ func (s *Supervisor) AddAgentForTask(entry config.AgentEntry, taskID string, par
 	s.AgentsMu.Unlock()
 
 	name := GoroutineAgentPrefix + ap.Entry.Worktree
-	s.RegisterTick(name)
+	s.registerAgentTick(ap)
 	go s.supervisedAgentBody(name, ap)
 
 	slog.Info("agent added and started", "worktree", entry.Worktree, "role", entry.Role)
@@ -342,16 +347,48 @@ func (s *Supervisor) newRuntimeAgentProcess(entry config.AgentEntry, roleConfig 
 	}
 }
 
-// checkDuplicateAgent does a lock-free probe for an existing agent with the
-// same worktree. Cheap fast-fail before the I/O in AddAgentForTask; the
-// authoritative check happens under AgentsMu.Lock after the I/O.
+// checkDuplicateAgent probes for an existing agent with the same worktree.
+// It fast-fails for live agents, but waits briefly for terminal agents whose
+// Done channel has not closed yet so explicit resume cannot race max-retry
+// finalization. The authoritative check happens under AgentsMu.Lock after the
+// I/O in AddAgentForTask.
 func (s *Supervisor) checkDuplicateAgent(worktree string) error {
+	deadline := time.NewTimer(terminalReplacementWaitTimeout)
+	defer deadline.Stop()
+
+	for {
+		done, err := s.duplicateAgentDone(worktree)
+		if err != nil || done == nil {
+			return err
+		}
+		shutdown := (<-chan struct{})(nil)
+		if s.Shutdown != nil {
+			shutdown = s.Shutdown
+		}
+		select {
+		case <-done:
+		case <-deadline.C:
+			return fmt.Errorf("agent %q already exists", worktree)
+		case <-shutdown:
+			return fmt.Errorf("agent %q replacement interrupted by supervisor shutdown", worktree)
+		}
+	}
+}
+
+func (s *Supervisor) duplicateAgentDone(worktree string) (<-chan struct{}, error) {
 	s.AgentsMu.RLock()
 	defer s.AgentsMu.RUnlock()
 	for _, ap := range s.Agents {
-		if ap.Entry.Worktree == worktree {
-			return fmt.Errorf("agent %q already exists", worktree)
+		if ap.Entry.Worktree != worktree {
+			continue
 		}
+		if isReplaceableTerminalAgent(ap) {
+			return nil, nil
+		}
+		if done, ok := pendingTerminalAgentDone(ap); ok {
+			return done, nil
+		}
+		return nil, fmt.Errorf("agent %q already exists", worktree)
 	}
-	return nil
+	return nil, nil
 }

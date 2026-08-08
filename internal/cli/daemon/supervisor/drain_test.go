@@ -74,6 +74,40 @@ func TestGetYieldTimeout_Negative(t *testing.T) {
 	}
 }
 
+func TestCheckDuplicateAgent_WaitsForTerminalAgentFinalization(t *testing.T) {
+	s := newDrainTestSupervisor(&config.DaemonConfig{})
+	done := make(chan struct{})
+	s.Agents = []*AgentProcess{
+		{
+			Entry:      config.AgentEntry{Worktree: "wt"},
+			Done:       done,
+			StopReason: StopReasonMaxRetries,
+		},
+	}
+
+	result := make(chan error, 1)
+	go func() {
+		result <- s.checkDuplicateAgent("wt")
+	}()
+
+	select {
+	case err := <-result:
+		t.Fatalf("checkDuplicateAgent returned before terminal Done closed: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	close(done)
+
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatalf("checkDuplicateAgent returned error after terminal Done closed: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("checkDuplicateAgent did not return after terminal Done closed")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // DrainWithGrace tests
 // ---------------------------------------------------------------------------

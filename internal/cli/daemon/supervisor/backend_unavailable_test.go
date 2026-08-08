@@ -3,6 +3,8 @@ package supervisor
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -53,7 +55,7 @@ func newBackendUnavailableAgentProcess() *AgentProcess {
 // burning restart budget every cycle. With the gate, the failure is
 // caught up-front, RestartCount stays at zero, and no backoff is
 // scheduled — the supervise loop's sleepBeforeBackendRecheck handles
-// the blocking instead.
+// the waiting instead.
 func TestSpawnAgent_BackendNotOnPATH_DoesNotCrashLoop(t *testing.T) {
 	stubCheckBackend(t, func(name string) (discovery.Info, error) {
 		return discovery.Info{
@@ -129,7 +131,7 @@ func TestSpawnAgent_BackendNotOnPATH_RepeatedDoesNotAccumulate(t *testing.T) {
 }
 
 // TestSpawnAgent_BackendRecoveryClearsState verifies that once the
-// binary becomes available, the next gate run clears the blocked state
+// binary becomes available, the next gate run clears the waiting state
 // (StopReason and LastError) so UIs reflect the recovery before the
 // spawn proceeds.
 func TestSpawnAgent_BackendRecoveryClearsState(t *testing.T) {
@@ -172,14 +174,45 @@ func TestSpawnAgent_BackendRecoveryClearsState(t *testing.T) {
 	}
 }
 
-// TestSpawnAndWait_BackendUnavailable_BlocksWithoutSpawning verifies the
+func TestGateBackendAvailable_ExternalBackendOnPath(t *testing.T) {
+	stubCheckBackend(t, func(name string) (discovery.Info, error) {
+		return discovery.Info{
+			Name: name, Binary: name, Installed: false, InstallHint: "missing",
+		}, nil
+	})
+
+	binDir := t.TempDir()
+	bin := filepath.Join(binDir, "loom-backend-localdogfood")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write external backend: %v", err)
+	}
+	t.Setenv("PATH", binDir)
+
+	s := newBackendUnavailableSupervisor()
+	ap := newBackendUnavailableAgentProcess()
+	ap.Entry.Backend = "localdogfood"
+	ap.StopReason = StopReasonBackendUnavailable
+	ap.LastError = &agenterr.AgentError{Class: agenterr.OutcomeFromDomain(agenterr.BackendUnavailableOutcome), Backend: "localdogfood"}
+
+	if err := s.gateBackendAvailable(ap); err != nil {
+		t.Fatalf("gateBackendAvailable = %v, want nil for external backend on PATH", err)
+	}
+	if ap.StopReason != "" {
+		t.Errorf("StopReason = %q, want cleared recovery state", ap.StopReason)
+	}
+	if ap.LastError != nil && ap.LastError.Class.Is(agenterr.BackendUnavailableOutcome) {
+		t.Errorf("LastError still carries BackendUnavailable after external backend recovery: %+v", ap.LastError)
+	}
+}
+
+// TestSpawnAndWait_BackendUnavailable_WaitsWithoutSpawning verifies the
 // spawnAndWait gate path under #84's void signature: when the backend is
 // missing, no subprocess is started, concurrency is released, and the
 // BackendUnavailable state the gate set (StopReason + LastError) is left intact
-// for the single restart decision to block on. RestartCount stays at 0 — the
-// budget-preserving block itself is shouldRestart + sleepBeforeRestart, asserted
-// by TestShouldRestart_BackendUnavailable_BlocksWithoutEroding below.
-func TestSpawnAndWait_BackendUnavailable_BlocksWithoutSpawning(t *testing.T) {
+// for the single restart decision. RestartCount stays at 0; the
+// budget-preserving wait itself is shouldRestart + sleepBeforeRestart, asserted
+// by TestShouldRestart_BackendUnavailable_WaitsWithoutEroding below.
+func TestSpawnAndWait_BackendUnavailable_WaitsWithoutSpawning(t *testing.T) {
 	stubCheckBackend(t, func(name string) (discovery.Info, error) {
 		return discovery.Info{
 			Name:        name,
@@ -226,7 +259,7 @@ func TestPreFlightSetup_BackendUnavailableDoesNotClaimTask(t *testing.T) {
 	ap.WorktreePath = t.TempDir()
 
 	if s.preFlightSetup(ap) {
-		t.Fatal("preFlightSetup returned true, want backend-unavailable block")
+		t.Fatal("preFlightSetup returned true, want backend-unavailable wait")
 	}
 	if len(mock.Calls) != 0 {
 		t.Fatalf("issue backend was called before backend gate: %#v", mock.Calls)
@@ -302,12 +335,12 @@ func TestSpawnAndWait_BackendUnavailableAfterClaimCleansWorkerState(t *testing.T
 	}
 }
 
-// TestShouldRestart_BackendUnavailable_BlocksWithoutEroding pins the new
+// TestShouldRestart_BackendUnavailable_WaitsWithoutEroding pins the new
 // contract (replacing the old WouldErodeBudget guard): the single restart
-// decision now treats BackendUnavailable as a budget-preserving block — it keeps
+// decision now treats BackendUnavailable as a budget-preserving wait: it keeps
 // retrying, never increments RestartCount, and never trips the max-retries stop
 // reason, so a missing backend recovers indefinitely once the binary returns.
-func TestShouldRestart_BackendUnavailable_BlocksWithoutEroding(t *testing.T) {
+func TestShouldRestart_BackendUnavailable_WaitsWithoutEroding(t *testing.T) {
 	s := newBackendUnavailableSupervisor()
 	ap := newBackendUnavailableAgentProcess()
 
@@ -319,7 +352,7 @@ func TestShouldRestart_BackendUnavailable_BlocksWithoutEroding(t *testing.T) {
 
 	for i := 0; i < 5; i++ {
 		if !s.shouldRestart(ap) {
-			t.Fatalf("iteration %d: shouldRestart = false, want true (BackendUnavailable blocks, never fatal)", i)
+			t.Fatalf("iteration %d: shouldRestart = false, want true (BackendUnavailable waits, never fatal)", i)
 		}
 		if ap.RestartCount != s.getMaxRetries() {
 			t.Fatalf("iteration %d: RestartCount = %d, want %d (budget must not erode)", i, ap.RestartCount, s.getMaxRetries())

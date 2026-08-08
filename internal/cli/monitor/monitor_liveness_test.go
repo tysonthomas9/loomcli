@@ -54,6 +54,9 @@ func TestLoadDaemonManagedAgents_SurfacesTaskIDAndLastActivity(t *testing.T) {
 	if worker.CurrentTaskID != "LOOM-11" {
 		t.Errorf("worker.CurrentTaskID = %q, want %q", worker.CurrentTaskID, "LOOM-11")
 	}
+	if worker.Status != "running" {
+		t.Errorf("worker.Status = %q, want running", worker.Status)
+	}
 	if !worker.LastActivity.Equal(at) {
 		t.Errorf("worker.LastActivity = %v, want %v", worker.LastActivity, at)
 	}

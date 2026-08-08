@@ -548,6 +548,7 @@ describe("IssueCard", () => {
 
       const article = container.querySelector("article");
       expect(article).toHaveAttribute("data-in-backlog", "true");
+      expect(article).toHaveAttribute("data-muted-card", "true");
     });
 
     it("does not render data-in-backlog attribute when isBacklog is false", () => {
@@ -592,6 +593,18 @@ describe("IssueCard", () => {
 
       expect(
         screen.getByLabelText("Issue: Complex Issue (blocked) (backlog)"),
+      ).toBeInTheDocument();
+    });
+
+    it("can render muted styling without backlog aria semantics", () => {
+      const issue = createTestIssue({ title: "Blocked Column Issue" });
+      const { container } = render(<IssueCard issue={issue} isMuted={true} />);
+
+      const article = container.querySelector("article");
+      expect(article).toHaveAttribute("data-muted-card", "true");
+      expect(article).not.toHaveAttribute("data-in-backlog");
+      expect(
+        screen.getByLabelText("Issue: Blocked Column Issue"),
       ).toBeInTheDocument();
     });
   });

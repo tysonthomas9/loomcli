@@ -1,13 +1,24 @@
 package supervisor
 
 import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
+	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/events"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 func newTestSupervisorWithConfig(cfg *config.DaemonConfig) *Supervisor {
@@ -17,6 +28,193 @@ func newTestSupervisorWithConfig(cfg *config.DaemonConfig) *Supervisor {
 		StoppedAgents:  make(map[string]struct{}),
 	}
 	return s
+}
+
+func spawnFailureTestConfig(maxRetries int) *config.DaemonConfig {
+	return &config.DaemonConfig{
+		Daemon: config.DaemonSettings{
+			RestartPolicy: config.RestartPolicy{
+				MaxRetries: config.IntPtr(maxRetries),
+			},
+		},
+	}
+}
+
+// TestMarkSpawnFailure_SetsSyntheticExitState verifies markSpawnFailure records
+// a spawn failure as a synthetic exit: exit code -1, a non-nil SpawnFailure
+// error, and no NoWork flag. It must not touch RestartCount; counting belongs
+// to shouldRestart.
+func TestMarkSpawnFailure_SetsSyntheticExitState(t *testing.T) {
+	s := newTestSupervisorWithConfig(&config.DaemonConfig{Backend: "claude"})
+	ap := &AgentProcess{
+		Entry:        config.AgentEntry{Worktree: "wt", Backend: "claude"},
+		RestartCount: 2,
+	}
+
+	s.markSpawnFailure(ap, errors.New(`exec: "claude": executable file not found in $PATH`))
+
+	ap.Mu.Lock()
+	defer ap.Mu.Unlock()
+	if ap.LastExitCode != -1 {
+		t.Errorf("LastExitCode = %d, want -1", ap.LastExitCode)
+	}
+	if ap.LastError == nil {
+		t.Fatal("LastError = nil, want non-nil SpawnFailure error")
+	}
+	if ap.LastError.Class != agenterr.OutcomeFromDomain(agenterr.SpawnFailureOutcome) {
+		t.Errorf("LastError.Class = %v, want SpawnFailure", ap.LastError.Class)
+	}
+	if ap.LastNoWork {
+		t.Error("LastNoWork = true, want false")
+	}
+	if ap.RestartCount != 2 {
+		t.Errorf("RestartCount = %d, want 2 (markSpawnFailure must not count)", ap.RestartCount)
+	}
+}
+
+// TestSpawnFailure_CountsOnceAndRespectsMaxRetries simulates the supervise loop
+// for repeated spawn failures, starting from a clean prior run. Each failure
+// must count exactly once and, after maxRetries, the agent enters error.
+func TestSpawnFailure_CountsOnceAndRespectsMaxRetries(t *testing.T) {
+	const maxRetries = 3
+	s := newTestSupervisorWithConfig(spawnFailureTestConfig(maxRetries))
+	ap := &AgentProcess{
+		Entry: config.AgentEntry{Worktree: "wt"},
+		// Prior run exited cleanly: the dangerous stale state for the reset branch.
+		LastExitCode: 0,
+		LastError:    nil,
+		RestartCount: 0,
+	}
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		s.markSpawnFailure(ap, errors.New("spawn failed"))
+		if !s.shouldRestart(ap) {
+			t.Fatalf("attempt %d: shouldRestart = false, want true (<= maxRetries)", attempt)
+		}
+		ap.Mu.Lock()
+		count := ap.RestartCount
+		ap.Mu.Unlock()
+		if count != attempt {
+			t.Fatalf("attempt %d: RestartCount = %d, want %d", attempt, count, attempt)
+		}
+	}
+
+	s.markSpawnFailure(ap, errors.New("spawn failed"))
+	if s.shouldRestart(ap) {
+		t.Fatal("shouldRestart = true after budget exhausted, want false")
+	}
+	ap.Mu.Lock()
+	defer ap.Mu.Unlock()
+	if ap.RestartCount != maxRetries+1 {
+		t.Errorf("RestartCount = %d, want %d", ap.RestartCount, maxRetries+1)
+	}
+	if ap.StopReason != StopReasonMaxRetries {
+		t.Errorf("StopReason = %q, want %q", ap.StopReason, StopReasonMaxRetries)
+	}
+}
+
+func TestRealSubprocessExitExhaustsMaxRetriesIntoError(t *testing.T) {
+	const maxRetries = 0
+	binDir := t.TempDir()
+	loomPath := filepath.Join(binDir, "loom")
+	if err := os.WriteFile(loomPath, []byte("#!/bin/sh\necho 'transient crash from real subprocess'\nexit 1\n"), 0755); err != nil {
+		t.Fatalf("write loom shim: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("LOOM_CONFIG_DIR", filepath.Join(t.TempDir(), "loom-config"))
+	t.Setenv("LOOM_WORKSPACE", "")
+	t.Setenv("LOOM_WORKSPACE_ID", "")
+
+	s := newTestSupervisorWithConfig(&config.DaemonConfig{
+		Daemon: config.DaemonSettings{
+			LogDir:    t.TempDir(),
+			EventsDir: t.TempDir(),
+			RestartPolicy: config.RestartPolicy{
+				MaxRetries:     config.IntPtr(maxRetries),
+				BackoffInitial: config.IntPtr(0),
+				BackoffMax:     config.IntPtr(0),
+			},
+		},
+	})
+	s.ProjectDir = t.TempDir()
+	s.Concurrency = NewConcurrencyTracker(nil)
+	s.EmitEvent = func(events.Event) {}
+
+	ap := &AgentProcess{
+		Entry:        config.AgentEntry{Worktree: "real-fail", Role: "plan"},
+		WorktreePath: t.TempDir(),
+		StopCh:       make(chan struct{}),
+	}
+
+	if !s.Concurrency.Acquire(ap.Entry.Role) {
+		t.Fatal("failed to acquire concurrency slot")
+	}
+	if err := s.spawnAgent(ap); err != nil {
+		s.Concurrency.Release(ap.Entry.Role)
+		t.Fatalf("spawnAgent: %v", err)
+	}
+	exitCode := s.waitForAgent(ap)
+	s.classifyAgentExit(ap, exitCode)
+	s.Concurrency.Release(ap.Entry.Role)
+
+	ap.Mu.Lock()
+	recordedExitCode := ap.LastExitCode
+	lastErr := ap.LastError
+	ap.Mu.Unlock()
+	if recordedExitCode != 1 {
+		t.Fatalf("LastExitCode = %d, want 1 from real subprocess", recordedExitCode)
+	}
+	if lastErr == nil {
+		t.Fatal("LastError = nil, want classified subprocess failure")
+	}
+
+	if s.shouldRestart(ap) {
+		t.Fatal("shouldRestart = true after real subprocess exhausted maxRetries=0, want false")
+	}
+	ap.Mu.Lock()
+	defer ap.Mu.Unlock()
+	if ap.RestartCount != 1 {
+		t.Errorf("RestartCount = %d, want 1", ap.RestartCount)
+	}
+	if ap.StopReason != StopReasonMaxRetries {
+		t.Errorf("StopReason = %q, want %q", ap.StopReason, StopReasonMaxRetries)
+	}
+	if _, ok := s.StoppedAgents["real-fail"]; !ok {
+		t.Fatal("agent was not marked stopped for explicit resume")
+	}
+}
+
+// TestSpawnFailure_AfterNonZeroExitNotDoubleCounted verifies that a spawn
+// failure following a non-zero exit is counted exactly once and is classified
+// as SpawnFailure rather than inheriting the previous run's stale error.
+func TestSpawnFailure_AfterNonZeroExitNotDoubleCounted(t *testing.T) {
+	s := newTestSupervisorWithConfig(spawnFailureTestConfig(5))
+	ap := &AgentProcess{
+		Entry: config.AgentEntry{Worktree: "wt"},
+		// Stale state from a prior non-zero exit that was already counted once.
+		LastExitCode: 1,
+		LastError:    &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrTransient), Message: "stale"},
+		RestartCount: 1,
+	}
+
+	s.markSpawnFailure(ap, errors.New("spawn failed"))
+
+	ap.Mu.Lock()
+	if ap.LastError == nil || ap.LastError.Class != agenterr.OutcomeFromDomain(agenterr.SpawnFailureOutcome) {
+		ap.Mu.Unlock()
+		t.Fatalf("LastError = %v, want SpawnFailure", ap.LastError)
+	}
+	ap.Mu.Unlock()
+
+	if !s.shouldRestart(ap) {
+		t.Fatal("shouldRestart = false, want true (under maxRetries)")
+	}
+
+	ap.Mu.Lock()
+	defer ap.Mu.Unlock()
+	if ap.RestartCount != 2 {
+		t.Errorf("RestartCount = %d, want 2 (single increment, no double-count)", ap.RestartCount)
+	}
 }
 
 func TestSupervisor_GetMaxRetries_Default(t *testing.T) {
@@ -168,31 +366,99 @@ func TestSupervisor_ShouldRestart_SuccessfulLongRun(t *testing.T) {
 	}
 }
 
-func TestSupervisor_ShouldRestart_MaxRetriesExceeded_Blocks(t *testing.T) {
+func TestSupervisor_ShouldRestart_MaxRetriesExceeded_ErrorsAndBlocksTask(t *testing.T) {
 	maxRetries := 3
+	mock := clitest.NewMockIssueBackend()
+	control := memstore.New()
+	ctx := context.Background()
+	if _, err := control.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "Test"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := control.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "TEST",
+		Name:         "wt",
+		RoleName:     "task",
+	}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
 	s := newTestSupervisorWithConfig(&config.DaemonConfig{
+		Backend: "claude",
 		Daemon: config.DaemonSettings{
 			RestartPolicy: config.RestartPolicy{
 				MaxRetries: &maxRetries,
 			},
 		},
 	})
+	s.IssueBackend = mock
+	s.ControlStore = control
+	s.WorkspaceID = "TEST"
 
 	ap := &AgentProcess{
-		LastExitCode: 1,
-		LastStart:    time.Now(),
-		RestartCount: 3, // Already at max; the next failure exhausts the budget
+		Entry:          config.AgentEntry{Worktree: "wt", Role: "task"},
+		LastExitCode:   1,
+		LastStart:      time.Now(),
+		LastError:      &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrTransient), Message: "backend crashed"},
+		RestartCount:   3, // Already at max; the next failure exhausts the budget
+		AssignedTaskID: "TASK-1",
 	}
 
-	// Exhausting the budget blocks-and-retries instead of giving up.
-	if !s.shouldRestart(ap) {
-		t.Error("shouldRestart should return true (block) when the budget is exhausted")
+	if s.shouldRestart(ap) {
+		t.Error("shouldRestart should return false when the budget is exhausted")
 	}
-	if ap.StopReason != StopReasonMaxRetriesBlocked {
-		t.Errorf("StopReason = %q, want %q", ap.StopReason, StopReasonMaxRetriesBlocked)
+	if ap.StopReason != StopReasonMaxRetries {
+		t.Errorf("StopReason = %q, want %q", ap.StopReason, StopReasonMaxRetries)
 	}
-	if ap.RestartCount != 0 {
-		t.Errorf("RestartCount = %d, want 0 (reset on block)", ap.RestartCount)
+	if ap.RestartCount != maxRetries+1 {
+		t.Errorf("RestartCount = %d, want %d (preserved for observability)", ap.RestartCount, maxRetries+1)
+	}
+	if _, ok := s.StoppedAgents["wt"]; !ok {
+		t.Fatal("agent was not marked stopped for explicit resume")
+	}
+	agent, err := control.Agents().Get(ctx, "TEST", "wt")
+	if err != nil {
+		t.Fatalf("get control-plane agent: %v", err)
+	}
+	if agent.State != domain.AgentStateError {
+		t.Fatalf("control-plane agent state = %q, want %q", agent.State, domain.AgentStateError)
+	}
+
+	var update *backend.UpdateParams
+	var updateID string
+	var comment *backend.CommentAddParams
+	for _, call := range mock.Calls {
+		switch call.Method {
+		case "Update":
+			updateID = call.Args[0].(string)
+			params := call.Args[1].(backend.UpdateParams)
+			update = &params
+		case "AddComment":
+			params := call.Args[0].(backend.CommentAddParams)
+			comment = &params
+		}
+	}
+	if update == nil {
+		t.Fatal("IssueBackend.Update was not called")
+	}
+	if updateID != "TASK-1" {
+		t.Fatalf("Update issue id = %q, want TASK-1", updateID)
+	}
+	if update.Status == nil || *update.Status != "blocked" {
+		t.Fatalf("Update.Status = %v, want blocked", update.Status)
+	}
+	if update.Assignee == nil || *update.Assignee != "wt" {
+		t.Fatalf("Update.Assignee = %v, want wt", update.Assignee)
+	}
+	if comment == nil {
+		t.Fatal("IssueBackend.AddComment was not called")
+	}
+	if comment.IssueID != "TASK-1" || comment.Author != "loom-daemon" {
+		t.Fatalf("comment target/author = %q/%q, want TASK-1/loom-daemon", comment.IssueID, comment.Author)
+	}
+	if !strings.Contains(comment.Text, "stopped with error") || !strings.Contains(comment.Text, "Automatic retries are stopped") {
+		t.Fatalf("comment text does not explain terminal error: %q", comment.Text)
+	}
+	if strings.Contains(strings.ToLower(comment.Text), "park") {
+		t.Fatalf("comment text should not use parked wording: %q", comment.Text)
 	}
 }
 
@@ -255,6 +521,105 @@ func TestSupervisor_ShouldRestart_BackendUnavailable_PreservesBudget(t *testing.
 	// Backoff is the fixed recheck interval, not exponential off RestartCount.
 	if got := s.computeBackoff(ap); got != backendUnavailableRecheckInterval {
 		t.Errorf("computeBackoff = %v, want %v (fixed recheck)", got, backendUnavailableRecheckInterval)
+	}
+}
+
+// TestSupervisor_ShouldRestart_Exhaustion_StopsUntilExplicitResume verifies the
+// retry-burst contract: failures count up to maxRetries, the exhausting failure
+// enters an error state, and no fresh automatic burst is granted.
+func TestSupervisor_ShouldRestart_Exhaustion_StopsUntilExplicitResume(t *testing.T) {
+	maxRetries := 2
+	s := newTestSupervisorWithConfig(&config.DaemonConfig{
+		Daemon: config.DaemonSettings{RestartPolicy: config.RestartPolicy{MaxRetries: &maxRetries}},
+	})
+	ap := &AgentProcess{
+		Entry:        config.AgentEntry{Worktree: "wt"},
+		LastExitCode: 1,
+		LastStart:    time.Now(),
+		LastError:    &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrTransient)},
+	}
+
+	// Failures within budget count up and keep retrying.
+	for i := 1; i <= maxRetries; i++ {
+		if !s.shouldRestart(ap) {
+			t.Fatalf("iteration %d: shouldRestart = false, want true (within budget)", i)
+		}
+		if ap.StopReason == StopReasonMaxRetries {
+			t.Fatalf("iteration %d: max-retries stop too early (RestartCount=%d, max=%d)", i, ap.RestartCount, maxRetries)
+		}
+	}
+
+	// The exhausting failure enters error and stops automatic retries.
+	if s.shouldRestart(ap) {
+		t.Fatal("exhausting failure: shouldRestart = true, want false")
+	}
+	if ap.StopReason != StopReasonMaxRetries {
+		t.Fatalf("StopReason = %q, want %q", ap.StopReason, StopReasonMaxRetries)
+	}
+	if ap.RestartCount != maxRetries+1 {
+		t.Fatalf("RestartCount = %d, want %d", ap.RestartCount, maxRetries+1)
+	}
+}
+
+// TestSupervisor_ShouldRestart_Fatal_StillStops is the critical
+// regression guard: a fatal error (auth/billing) must stop the agent even when
+// the budget is well past exhausted.
+func TestSupervisor_ShouldRestart_Fatal_StillStops(t *testing.T) {
+	maxRetries := 3
+	s := newTestSupervisorWithConfig(&config.DaemonConfig{
+		Daemon: config.DaemonSettings{RestartPolicy: config.RestartPolicy{MaxRetries: &maxRetries}},
+	})
+
+	for _, class := range []agenterr.Outcome{
+		agenterr.OutcomeFromHarness(wrapper.ErrAuth),
+		agenterr.OutcomeFromHarness(wrapper.ErrBilling),
+	} {
+		ap := &AgentProcess{
+			Entry:        config.AgentEntry{Worktree: "wt"},
+			LastExitCode: 1,
+			LastStart:    time.Now(),
+			LastError:    &agenterr.AgentError{Class: class},
+			RestartCount: maxRetries + 5, // well past the budget
+		}
+		if s.shouldRestart(ap) {
+			t.Errorf("%v: shouldRestart = true, want false (fatal must stop)", class)
+		}
+		if ap.StopReason != StopReasonFatalError {
+			t.Errorf("%v: StopReason = %q, want %q", class, ap.StopReason, StopReasonFatalError)
+		}
+	}
+}
+
+// TestSupervisor_Error_PreservesObservability verifies the durable signals
+// survive a max-retries error: status still carries the terminal reason and the
+// error class that caused it.
+func TestSupervisor_Error_PreservesObservability(t *testing.T) {
+	maxRetries := 1
+	s := newTestSupervisorWithConfig(&config.DaemonConfig{
+		Daemon: config.DaemonSettings{RestartPolicy: config.RestartPolicy{MaxRetries: &maxRetries}},
+	})
+	ap := &AgentProcess{
+		Entry:        config.AgentEntry{Worktree: "wt", Role: "plan"},
+		LastExitCode: 1,
+		LastStart:    time.Now(),
+		LastError:    &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrTransient)},
+		RestartCount: maxRetries, // next failure exhausts
+	}
+	if s.shouldRestart(ap) {
+		t.Fatal("shouldRestart = true, want false (error)")
+	}
+
+	s.Agents = []*AgentProcess{ap}
+	statuses := s.GetAgents()
+	if len(statuses) != 1 {
+		t.Fatalf("len(GetAgents()) = %d, want 1", len(statuses))
+	}
+	st := statuses[0]
+	if st.StopReason != StopReasonMaxRetries {
+		t.Errorf("status.StopReason = %q, want %q", st.StopReason, StopReasonMaxRetries)
+	}
+	if st.LastErrorClass == "" {
+		t.Error("status.LastErrorClass is empty, want the class that caused the error")
 	}
 }
 

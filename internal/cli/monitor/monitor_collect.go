@@ -163,6 +163,9 @@ func buildAgentStatus(deps *cli.Deps, wt cli.WorktreeInfo, daemonManaged map[str
 	var idleChanges []FileChange
 	var idleHandled bool
 	agent.Status, idleChanges, idleHandled = resolveAgentStatus(deps, wt, agentTasks)
+	if daemonInfo.Managed && daemonInfo.Status == "error" {
+		agent.Status = "error"
+	}
 
 	wtDefaultBranch := globalDefaultBranch
 	if wt.Repo != nil {

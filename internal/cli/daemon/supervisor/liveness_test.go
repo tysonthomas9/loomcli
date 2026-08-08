@@ -1,8 +1,9 @@
 package supervisor
 
 import (
+	"os/exec"
 	"strings"
-	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -71,24 +72,129 @@ func TestScanTicksRespectsAgentThreshold(t *testing.T) {
 	}
 }
 
-func TestScanTicksFlagsAgentBeyondThreshold(t *testing.T) {
+// TestScanTicksQuarantinesStaleAgentInsteadOfFatal is the architectural core of
+// this alternative: a wedged per-agent supervise goroutine must be CONTAINED,
+// not escalated to a daemon-fatal. After the scan the agent's tick is gone
+// (quarantined, so it isn't re-flagged) and its StopCh is closed, while the
+// FatalChannel stays empty — the fleet keeps running.
+func TestScanTicksQuarantinesStaleAgentInsteadOfFatal(t *testing.T) {
 	s := newHarnessSupervisor()
 	s.ConfigSnapshot = func() *cfgpkg.DaemonConfig {
 		return &cfgpkg.DaemonConfig{}
 	}
-	name := GoroutineAgentPrefix + "stuck_agent"
-	s.RegisterTick(name)
+	ap := &AgentProcess{
+		Entry:  cfgpkg.AgentEntry{Worktree: "stuck_agent", Role: "task"},
+		StopCh: make(chan struct{}),
+		Done:   make(chan struct{}),
+	}
+	name := agentTickName(ap)
+	s.registerAgentTick(ap)
+	setTickForTest(s, name, time.Now().Add(-1*time.Hour))
+
+	scanRepeated(s)
+
+	// No fatal — one wedged agent must never crash the daemon.
+	select {
+	case err := <-s.FatalChannel():
+		t.Fatalf("stale agent tick escalated to fatal (should quarantine): %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	// Quarantined: tick deregistered so the next scan does not re-flag it.
+	if _, ok := s.LoadTick(name); ok {
+		t.Error("stale agent tick still registered after quarantine")
+	}
+
+	// That single agent was signaled to stop.
+	select {
+	case <-ap.StopCh:
+	default:
+		t.Error("quarantined agent's StopCh was not closed")
+	}
+
+	ap.Mu.Lock()
+	stopReason := ap.StopReason
+	ap.Mu.Unlock()
+	if stopReason != StopReasonWatchdog {
+		t.Errorf("quarantined agent stop reason = %q, want %q", stopReason, StopReasonWatchdog)
+	}
+}
+
+// TestScanTicksStopsStaleAgentProcess proves the quarantine path is not just
+// metadata: when a stale agent has a real subprocess, the watchdog starts an
+// asynchronous StopAgent attempt that terminates it while the daemon stays up.
+func TestScanTicksStopsStaleAgentProcess(t *testing.T) {
+	s := newHarnessSupervisor()
+	sigtermTimeout := 1
+	s.ConfigSnapshot = func() *cfgpkg.DaemonConfig {
+		return &cfgpkg.DaemonConfig{
+			Daemon: cfgpkg.DaemonSettings{
+				RestartPolicy: cfgpkg.RestartPolicy{SigtermTimeout: &sigtermTimeout},
+			},
+		}
+	}
+
+	cmd := exec.Command("sleep", "60") //nolint:norawexec,gosec // test subprocess
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start sleep: %v", err)
+	}
+	waitDone := make(chan struct{})
+	ap := &AgentProcess{
+		Entry:  cfgpkg.AgentEntry{Worktree: "stuck_process_agent", Role: "task"},
+		Cmd:    cmd,
+		Pid:    cmd.Process.Pid,
+		StopCh: make(chan struct{}),
+		Done:   make(chan struct{}),
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		<-waitDone
+	})
+	go func() {
+		_ = cmd.Wait()
+		ap.Mu.Lock()
+		ap.Cmd = nil
+		ap.Pid = 0
+		ap.Mu.Unlock()
+		close(waitDone)
+	}()
+
+	name := agentTickName(ap)
+	s.registerAgentTick(ap)
 	setTickForTest(s, name, time.Now().Add(-1*time.Hour))
 
 	scanRepeated(s)
 
 	select {
+	case <-waitDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("quarantine did not stop the stale agent subprocess")
+	}
+
+	select {
 	case err := <-s.FatalChannel():
-		if !strings.Contains(err.Error(), "stuck_agent") {
-			t.Errorf("error missing stuck agent name: %v", err)
+		t.Fatalf("stale agent process escalated to fatal (should quarantine): %v", err)
+	default:
+	}
+}
+
+// TestScanTicksFlagsStaleCoreGoroutine is the regression guard: the watchdog's
+// real job is preserved — a wedged daemon-lifetime singleton still FATALs.
+func TestScanTicksFlagsStaleCoreGoroutine(t *testing.T) {
+	s := newHarnessSupervisor()
+	s.RegisterTick(GoroutineStateUpdater)
+	setTickForTest(s, GoroutineStateUpdater, time.Now().Add(-1*time.Hour))
+
+	scanRepeated(s)
+
+	select {
+	case err := <-s.FatalChannel():
+		if !strings.Contains(err.Error(), GoroutineStateUpdater) {
+			t.Errorf("error missing stale core goroutine name: %v", err)
 		}
 	case <-time.After(500 * time.Millisecond):
-		t.Fatal("scanTicks did not flag agent past threshold")
+		t.Fatal("scanTicks did not fatal on a wedged core goroutine")
 	}
 }
 
@@ -137,7 +243,7 @@ func TestAgentWaitHeartbeatKeepsTickFresh(t *testing.T) {
 	s := newHarnessSupervisor()
 	ap := &AgentProcess{Entry: cfgpkg.AgentEntry{Worktree: "hb_agent", Role: "task"}}
 	name := agentTickName(ap)
-	s.RegisterTick(name)
+	s.registerAgentTick(ap)
 
 	// Simulate a healthy long-running agent: the supervise loop recorded its
 	// tick once at the top, then blocked in cmd.Wait() for an hour. Without the
@@ -249,9 +355,13 @@ func setTickForTest(s *Supervisor, name string, when time.Time) {
 	if !ok {
 		panic("tick not registered: " + name)
 	}
-	tick, ok := v.(*atomic.Int64)
+	sl, ok := v.(*tickSlot)
 	if !ok {
-		panic("tick is not *atomic.Int64")
+		panic("tick is not *tickSlot")
 	}
-	tick.Store(when.UnixNano())
+	// Mirror record()'s storage: a monotonic duration from monoBase. Callers must
+	// pass a time.Now()-derived `when` (all current callers do), so it carries a
+	// monotonic reading and when.Sub(monoBase) stays on the monotonic clock and
+	// round-trips to the intended age.
+	sl.stamp.Store(int64(when.Sub(monoBase)))
 }

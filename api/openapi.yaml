@@ -4984,7 +4984,7 @@ components:
           type: boolean
         agent_state:
           type: string
-          enum: [idle, spawning, running, working, stuck, done, stopped, dead]
+          enum: [idle, spawning, running, working, stuck, done, stopped, dead, error]
         last_activity:
           type: [string, "null"]
           format: date-time
@@ -5401,7 +5401,7 @@ components:
           type: [string, "null"]
         agent_state:
           type: [string, "null"]
-          enum: [idle, spawning, running, working, stuck, done, stopped, dead, null]
+          enum: [idle, spawning, running, working, stuck, done, stopped, dead, error, null]
 
     CloseRequest:
       type: object
@@ -5626,7 +5626,7 @@ components:
           type: string
         agent_state:
           type: string
-          enum: [idle, spawning, running, working, stuck, done, stopped, dead]
+          enum: [idle, spawning, running, working, stuck, done, stopped, dead, error]
         role_type:
           type: string
         rig:

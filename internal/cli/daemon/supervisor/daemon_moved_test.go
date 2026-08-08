@@ -322,7 +322,7 @@ func TestShouldRestart(t *testing.T) {
 		}
 	})
 
-	t.Run("counter exceeds maxRetries blocks and retries", func(t *testing.T) {
+	t.Run("counter exceeds maxRetries enters error", func(t *testing.T) {
 		config := makeSupervisorConfig(
 			[]cfgpkg.AgentEntry{{Worktree: "test", Role: "plan"}},
 			nil,
@@ -338,20 +338,16 @@ func TestShouldRestart(t *testing.T) {
 		}
 
 		result := s.shouldRestart(ap)
-		// After increment count becomes 4 (> maxRetries 3): instead of giving
-		// up, the policy blocks-and-retries — shouldRestart stays true and the
-		// budget resets so the blocked agent isn't shown as "failed".
-		if !result {
-			t.Error("shouldRestart() = false, want true (blocks after exhaustion)")
+		// After increment count becomes 4 (> maxRetries 3): the agent enters a
+		// terminal error state and waits for explicit resume.
+		if result {
+			t.Error("shouldRestart() = true, want false (error after exhaustion)")
 		}
-		if ap.RestartCount != 0 {
-			t.Errorf("restartCount = %d, want 0 (reset on block)", ap.RestartCount)
+		if ap.RestartCount != 4 {
+			t.Errorf("restartCount = %d, want 4 (preserved for observability)", ap.RestartCount)
 		}
-		if ap.StopReason != StopReasonMaxRetriesBlocked {
-			t.Errorf("StopReason = %q, want %q", ap.StopReason, StopReasonMaxRetriesBlocked)
-		}
-		if ap.BlockCount != 1 {
-			t.Errorf("BlockCount = %d, want 1", ap.BlockCount)
+		if ap.StopReason != StopReasonMaxRetries {
+			t.Errorf("StopReason = %q, want %q", ap.StopReason, StopReasonMaxRetries)
 		}
 	})
 

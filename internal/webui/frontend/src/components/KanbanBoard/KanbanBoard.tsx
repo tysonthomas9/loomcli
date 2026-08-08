@@ -395,7 +395,8 @@ export function KanbanBoard({
                     blockedByDetails: blockedInfo.blockedByDetails,
                   }),
                 })}
-                {...(isMutedColumn && { isBacklog: true })}
+                {...(isMutedColumn && { isMuted: true })}
+                {...(isBacklogColumn && { isBacklog: true })}
                 {...(pendingIds?.has(issue.id) && { isPending: true })}
               />
             );
@@ -424,6 +425,7 @@ export function KanbanBoard({
             const blockedInfo = blockedIssues?.get(activeIssue.id);
             const isMutedCard =
               sourceColumnId === "backlog" || sourceColumnId === "blocked";
+            const isBacklogCard = sourceColumnId === "backlog";
             return (
               <DraggableIssueCard
                 issue={activeIssue}
@@ -435,7 +437,8 @@ export function KanbanBoard({
                     blockedByDetails: blockedInfo.blockedByDetails,
                   }),
                 })}
-                {...(isMutedCard && { isBacklog: true })}
+                {...(isMutedCard && { isMuted: true })}
+                {...(isBacklogCard && { isBacklog: true })}
               />
             );
           })()}

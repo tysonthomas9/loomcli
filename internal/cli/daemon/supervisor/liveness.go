@@ -57,12 +57,65 @@ func (s *Supervisor) livenessWatchdog() {
 
 // scanTicks evaluates every registered tick against its threshold and signals
 // fatal once a tick has been stale for livenessStaleScansBeforeFatal scans in a
-// row. A tick that recovers (fresh again this scan) has its streak reset, so
-// only sustained staleness — a genuinely wedged goroutine — crashes the daemon;
-// transient stalls are ridden out. If the scan-to-scan gap exceeds
-// livenessFreezeGap the process was suspended, not misbehaving, so all streaks
-// are cleared and the scan is skipped.
+// row. A tick that recovers has its streak reset. A stale ClassCore tick (a
+// daemon-lifetime singleton) is fatal after the streak threshold; a stale
+// ClassAgent tick is quarantined so one wedged agent cannot crash the daemon.
+// If the scan-to-scan gap exceeds livenessFreezeGap the process was suspended,
+// not misbehaving, so all streaks are cleared and the scan is skipped.
 func (s *Supervisor) scanTicks(now time.Time) {
+	if s.shouldSkipLivenessScan(now) {
+		return
+	}
+
+	var fatal []string
+	var quarantine []*tickSlot
+	staleNow := make(map[string]struct{})
+
+	s.rangeSlots(func(sl *tickSlot) {
+		threshold := s.thresholdFor(sl.name)
+		age := now.Sub(sl.last())
+		if age <= threshold {
+			return
+		}
+		staleNow[sl.name] = struct{}{}
+		if s.livenessStreak == nil {
+			s.livenessStreak = make(map[string]int)
+		}
+		s.livenessStreak[sl.name]++
+		if s.livenessStreak[sl.name] < livenessStaleScansBeforeFatal {
+			return
+		}
+		if sl.class == ClassAgent {
+			quarantine = append(quarantine, sl)
+			return
+		}
+		fatal = append(fatal, fmt.Sprintf("%s (age=%s, threshold=%s, consecutive_scans=%d)",
+			sl.name, age.Truncate(time.Second), threshold, s.livenessStreak[sl.name]))
+	})
+
+	for name := range s.livenessStreak {
+		if _, ok := staleNow[name]; !ok {
+			delete(s.livenessStreak, name)
+		}
+	}
+
+	for _, sl := range quarantine {
+		if sl.onStale != nil {
+			sl.onStale()
+		}
+	}
+
+	if len(fatal) == 0 {
+		return
+	}
+
+	reason := "liveness watchdog: " + strings.Join(fatal, ", ")
+	slog.Error("supervisor liveness check failed", "stale", fatal)
+	DumpGoroutinesToLog(reason)
+	s.SignalFatal(GoroutineLivenessWatchdog, fmt.Errorf("%s", reason))
+}
+
+func (s *Supervisor) shouldSkipLivenessScan(now time.Time) bool {
 	// Process-suspension guard: a watchdog that did not run for far longer than
 	// its interval means the whole process was frozen. Every tick then looks
 	// ancient regardless of goroutine health — skip the fatal and reset streaks.
@@ -72,45 +125,9 @@ func (s *Supervisor) scanTicks(now time.Time) {
 		slog.Warn("supervisor liveness check skipped: process suspension detected",
 			"gap", now.Sub(prev).Truncate(time.Second))
 		s.livenessStreak = nil
-		return
+		return true
 	}
-
-	var stale []string
-	staleNow := make(map[string]struct{})
-
-	s.RangeTicks(func(name string, t time.Time) {
-		threshold := s.thresholdFor(name)
-		age := now.Sub(t)
-		if age <= threshold {
-			return
-		}
-		staleNow[name] = struct{}{}
-		if s.livenessStreak == nil {
-			s.livenessStreak = make(map[string]int)
-		}
-		s.livenessStreak[name]++
-		if s.livenessStreak[name] >= livenessStaleScansBeforeFatal {
-			stale = append(stale, fmt.Sprintf("%s (age=%s, threshold=%s, consecutive_scans=%d)",
-				name, age.Truncate(time.Second), threshold, s.livenessStreak[name]))
-		}
-	})
-
-	// Reset the streak for any tick that was stale before but recovered this
-	// scan, so a goroutine that briefly stalled then resumed starts fresh.
-	for name := range s.livenessStreak {
-		if _, ok := staleNow[name]; !ok {
-			delete(s.livenessStreak, name)
-		}
-	}
-
-	if len(stale) == 0 {
-		return
-	}
-
-	reason := "liveness watchdog: " + strings.Join(stale, ", ")
-	slog.Error("supervisor liveness check failed", "stale", stale)
-	DumpGoroutinesToLog(reason)
-	s.SignalFatal(GoroutineLivenessWatchdog, fmt.Errorf("%s", reason))
+	return false
 }
 
 // thresholdFor returns the staleness threshold for the named goroutine.
@@ -190,7 +207,6 @@ func (s *Supervisor) startAgentWaitHeartbeat(ap *AgentProcess) func() {
 // startAgentWaitHeartbeatEvery is startAgentWaitHeartbeat with an explicit
 // interval, allowing tests to drive the heartbeat without real-time waits.
 func (s *Supervisor) startAgentWaitHeartbeatEvery(ap *AgentProcess, interval time.Duration) func() {
-	tickName := agentTickName(ap)
 	stop := make(chan struct{})
 	done := make(chan struct{})
 	go func() {
@@ -204,7 +220,10 @@ func (s *Supervisor) startAgentWaitHeartbeatEvery(ap *AgentProcess, interval tim
 			case <-s.Shutdown:
 				return
 			case <-ticker.C:
-				s.RecordTick(tickName)
+				// Record by slot identity, not by name: if this agent's worktree
+				// was re-added, RecordTick(name) would refresh the successor's
+				// slot. ap.recordTick only ever refreshes this goroutine's slot.
+				ap.recordTick()
 			}
 		}
 	}()

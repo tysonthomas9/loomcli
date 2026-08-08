@@ -24,6 +24,7 @@ export type AgentState =
   | "stuck"
   | "done"
   | "stopped"
+  | "error"
   | "dead"
   | "";
 
@@ -37,6 +38,7 @@ export const StateWorking: AgentState = "working";
 export const StateStuck: AgentState = "stuck";
 export const StateDone: AgentState = "done";
 export const StateStopped: AgentState = "stopped";
+export const StateError: AgentState = "error";
 export const StateDead: AgentState = "dead";
 
 /**

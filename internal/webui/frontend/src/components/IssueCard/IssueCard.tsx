@@ -57,6 +57,8 @@ export interface IssueCardProps {
   blockedByDetails?: BlockerRef[];
   /** Whether this card is in the Backlog column (dimmed appearance) */
   isBacklog?: boolean;
+  /** Whether this card should use muted column styling without backlog semantics */
+  isMuted?: boolean;
   /** Column ID this card is displayed in (for conditional rendering) */
   columnId?: string;
   /** Whether this issue has an active terminal session */
@@ -162,6 +164,7 @@ export const IssueCard = memo(function IssueCard({
   blockedBy,
   blockedByDetails,
   isBacklog = false,
+  isMuted = false,
   columnId,
   hasActiveSession,
   dragProps,
@@ -180,6 +183,7 @@ export const IssueCard = memo(function IssueCard({
   const isBlocked = (blockedByCount ?? 0) > 0;
   const isDeferred = issue.is_deferred === true || issue.status === "deferred";
   const reviewType = getReviewType(issue);
+  const isVisuallyMuted = isBacklog || isMuted;
   const agentStore = useAgentStoreInstance();
   // Subscribe with a value-equality selector so an agent poll only re-renders
   // this card when ITS badge actually changes — not every card on every poll.
@@ -234,6 +238,7 @@ export const IssueCard = memo(function IssueCard({
       data-column={columnId}
       data-blocked={isBlocked ? "true" : undefined}
       data-in-backlog={isBacklog ? "true" : undefined}
+      data-muted-card={isVisuallyMuted ? "true" : undefined}
       data-draggable={dragProps ? "true" : undefined}
       data-dragging={isDragging ? "true" : undefined}
       data-optimistic={isPending ? "pending" : undefined}

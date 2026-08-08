@@ -494,6 +494,7 @@ func TestStatusToIcon(t *testing.T) {
 		{"running", "●"},
 		{"starting", "◐"},
 		{"stopped", "○"},
+		{"error", "✗"},
 		{"failed", "✗"},
 		{"unknown", "?"},
 		{"", "?"},
@@ -558,8 +559,8 @@ func TestComputeAgentStatus_StoppedWithDeadPID(t *testing.T) {
 	}
 }
 
-func TestComputeAgentStatus_Failed(t *testing.T) {
-	// High restart count indicates failure
+func TestComputeAgentStatus_Error(t *testing.T) {
+	// High restart count indicates error
 	ap := SupervisedAgentStatus{
 		PID:          0,
 		RestartCount: 4, // > 3 (default max retries)
@@ -567,20 +568,20 @@ func TestComputeAgentStatus_Failed(t *testing.T) {
 
 	status := computeAgentStatus(ap, 3)
 
-	if status != "failed" {
-		t.Errorf("computeAgentStatus() = %q, want %q for high restart count", status, "failed")
+	if status != "error" {
+		t.Errorf("computeAgentStatus() = %q, want %q for high restart count", status, "error")
 	}
 }
 
-func TestComputeAgentStatus_FailedBoundary(t *testing.T) {
+func TestComputeAgentStatus_ErrorBoundary(t *testing.T) {
 	tests := []struct {
 		name         string
 		restartCount int
 		want         string
 	}{
 		{"at limit (3)", 3, "stopped"},
-		{"just over limit (4)", 4, "failed"},
-		{"well over limit (10)", 10, "failed"},
+		{"just over limit (4)", 4, "error"},
+		{"well over limit (10)", 10, "error"},
 	}
 
 	for _, tt := range tests {
@@ -622,9 +623,9 @@ func TestComputeAgentStatus_CustomMaxRetries(t *testing.T) {
 	}{
 		{"below custom limit", 4, 10, "stopped"},
 		{"at custom limit", 10, 10, "stopped"},
-		{"above custom limit", 11, 10, "failed"},
+		{"above custom limit", 11, 10, "error"},
 		{"zero max retries, no restarts", 0, 0, "stopped"},
-		{"zero max retries, one restart", 1, 0, "failed"},
+		{"zero max retries, one restart", 1, 0, "error"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1036,8 +1037,8 @@ func TestComputeAgentStatus_FatalError(t *testing.T) {
 
 	status := computeAgentStatus(ap, 3)
 
-	if status != "failed" {
-		t.Errorf("computeAgentStatus() = %q, want %q for StopReasonFatalError with RestartCount=0", status, "failed")
+	if status != "error" {
+		t.Errorf("computeAgentStatus() = %q, want %q for StopReasonFatalError with RestartCount=0", status, "error")
 	}
 }
 
@@ -1050,15 +1051,41 @@ func TestComputeAgentStatus_MaxRetries_StopReason(t *testing.T) {
 
 	status := computeAgentStatus(ap, 3)
 
-	if status != "failed" {
-		t.Errorf("computeAgentStatus() = %q, want %q for StopReasonMaxRetries", status, "failed")
+	if status != "error" {
+		t.Errorf("computeAgentStatus() = %q, want %q for StopReasonMaxRetries", status, "error")
 	}
 }
 
-func TestComputeAgentStatus_Blocked(t *testing.T) {
-	// A blocked agent (exhausted budget, retrying) is not running and not
-	// failed: RestartCount is reset to 0 and the blocked stop reason yields
-	// "blocked".
+func TestComputeAgentStatus_Error_RunningTakesPrecedence(t *testing.T) {
+	// A live process reads as running even if a stale stop reason is present.
+	ap := SupervisedAgentStatus{
+		PID:          os.Getpid(), // a live process
+		RestartCount: 0,
+		StopReason:   StopReasonMaxRetries,
+	}
+
+	status := computeAgentStatus(ap, 3)
+
+	if status != "running" {
+		t.Errorf("computeAgentStatus() = %q, want %q (running must override a stale error reason)", status, "running")
+	}
+}
+
+func TestComputeAgentStatus_MaxRetriesParkedLegacy(t *testing.T) {
+	ap := SupervisedAgentStatus{
+		PID:          0,
+		RestartCount: 0,
+		StopReason:   StopReasonMaxRetriesParked,
+	}
+
+	status := computeAgentStatus(ap, 3)
+
+	if status != "error" {
+		t.Errorf("computeAgentStatus() = %q, want %q for StopReasonMaxRetriesParked", status, "error")
+	}
+}
+
+func TestComputeAgentStatus_MaxRetriesBlockedLegacy(t *testing.T) {
 	ap := SupervisedAgentStatus{
 		PID:          0,
 		RestartCount: 0,
@@ -1067,14 +1094,13 @@ func TestComputeAgentStatus_Blocked(t *testing.T) {
 
 	status := computeAgentStatus(ap, 3)
 
-	if status != "blocked" {
-		t.Errorf("computeAgentStatus() = %q, want %q for StopReasonMaxRetriesBlocked", status, "blocked")
+	if status != "error" {
+		t.Errorf("computeAgentStatus() = %q, want %q for StopReasonMaxRetriesBlocked", status, "error")
 	}
 }
 
-func TestComputeAgentStatus_Blocked_RunningTakesPrecedence(t *testing.T) {
-	// A re-spawned blocked agent (PID alive) reads as "running" — the running
-	// guard is checked before the blocked stop reason.
+func TestComputeAgentStatus_MaxRetriesBlocked_RunningTakesPrecedence(t *testing.T) {
+	// A live process reads as running even if a legacy stop reason is present.
 	ap := SupervisedAgentStatus{
 		PID:          os.Getpid(), // a live process
 		RestartCount: 0,
@@ -1084,13 +1110,12 @@ func TestComputeAgentStatus_Blocked_RunningTakesPrecedence(t *testing.T) {
 	status := computeAgentStatus(ap, 3)
 
 	if status != "running" {
-		t.Errorf("computeAgentStatus() = %q, want %q (running must override a stale blocked reason)", status, "running")
+		t.Errorf("computeAgentStatus() = %q, want %q (running must override a stale max-retry reason)", status, "running")
 	}
 }
 
 func TestComputeAgentStatus_FastFail(t *testing.T) {
-	// A fast-failed agent (deterministic failure the policy refused to block)
-	// is terminal: surfaced as "failed".
+	// A fast-failed agent is terminal and surfaced as error.
 	ap := SupervisedAgentStatus{
 		PID:        0,
 		StopReason: StopReasonFastFail,
@@ -1098,8 +1123,8 @@ func TestComputeAgentStatus_FastFail(t *testing.T) {
 
 	status := computeAgentStatus(ap, 3)
 
-	if status != "failed" {
-		t.Errorf("computeAgentStatus() = %q, want %q for StopReasonFastFail", status, "failed")
+	if status != "error" {
+		t.Errorf("computeAgentStatus() = %q, want %q for StopReasonFastFail", status, "error")
 	}
 }
 
@@ -1113,7 +1138,7 @@ func TestComputeAgentStatus_Shutdown(t *testing.T) {
 	status := computeAgentStatus(ap, 3)
 
 	if status != "stopped" {
-		t.Errorf("computeAgentStatus() = %q, want %q for StopReasonShutdown (should not be failed)", status, "stopped")
+		t.Errorf("computeAgentStatus() = %q, want %q for StopReasonShutdown (should not be error)", status, "stopped")
 	}
 }
 
@@ -1132,7 +1157,8 @@ func TestComputeAgentStatus_ConfigRemoved(t *testing.T) {
 }
 
 func TestComputeAgentStatus_BackwardCompat(t *testing.T) {
-	// No StopReason set, but RestartCount exceeds maxRetries — old behavior should still work
+	// No StopReason set, but RestartCount exceeds maxRetries — old state files
+	// still project to the current user-facing error status.
 	ap := SupervisedAgentStatus{
 		PID:          0,
 		RestartCount: 5,
@@ -1141,8 +1167,8 @@ func TestComputeAgentStatus_BackwardCompat(t *testing.T) {
 
 	status := computeAgentStatus(ap, 3)
 
-	if status != "failed" {
-		t.Errorf("computeAgentStatus() = %q, want %q for backward-compat (empty StopReason, high RestartCount)", status, "failed")
+	if status != "error" {
+		t.Errorf("computeAgentStatus() = %q, want %q for backward-compat (empty StopReason, high RestartCount)", status, "error")
 	}
 }
 
@@ -1165,7 +1191,7 @@ func TestDaemonAgentStatus_StopReasonJSON(t *testing.T) {
 			status := DaemonAgentStatus{
 				Worktree:   "falcon",
 				Role:       "plan",
-				Status:     "failed",
+				Status:     "error",
 				StopReason: tt.stopReason,
 			}
 
@@ -1315,10 +1341,10 @@ func TestWriteStateFile_WithStopReason(t *testing.T) {
 		t.Fatalf("len(Agents) = %d, want 5", len(state.Agents))
 	}
 
-	// falcon: fatal_error → "failed", StopReason set, StoppedAt set
+	// falcon: fatal_error -> "error", StopReason set, StoppedAt set
 	falcon := state.Agents[0]
-	if falcon.Status != "failed" {
-		t.Errorf("falcon.Status = %q, want %q", falcon.Status, "failed")
+	if falcon.Status != "error" {
+		t.Errorf("falcon.Status = %q, want %q", falcon.Status, "error")
 	}
 	if falcon.StopReason != string(StopReasonFatalError) {
 		t.Errorf("falcon.StopReason = %q, want %q", falcon.StopReason, StopReasonFatalError)
@@ -1327,10 +1353,10 @@ func TestWriteStateFile_WithStopReason(t *testing.T) {
 		t.Error("falcon.StoppedAt should be set for stopped agent with StopReason")
 	}
 
-	// nova: max_retries → "failed", StopReason set
+	// nova: max_retries -> "error", StopReason set
 	nova := state.Agents[1]
-	if nova.Status != "failed" {
-		t.Errorf("nova.Status = %q, want %q", nova.Status, "failed")
+	if nova.Status != "error" {
+		t.Errorf("nova.Status = %q, want %q", nova.Status, "error")
 	}
 	if nova.StopReason != string(StopReasonMaxRetries) {
 		t.Errorf("nova.StopReason = %q, want %q", nova.StopReason, StopReasonMaxRetries)
@@ -1339,7 +1365,7 @@ func TestWriteStateFile_WithStopReason(t *testing.T) {
 		t.Error("nova.StoppedAt should be set for stopped agent with StopReason")
 	}
 
-	// comet: shutdown → "stopped" (not "failed")
+	// comet: shutdown -> "stopped" (not "error")
 	comet := state.Agents[2]
 	if comet.Status != "stopped" {
 		t.Errorf("comet.Status = %q, want %q", comet.Status, "stopped")

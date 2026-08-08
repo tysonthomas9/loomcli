@@ -1,0 +1,140 @@
+package supervisor
+
+import (
+	"log/slog"
+	"sync/atomic"
+	"time"
+)
+
+// GoroutineClass determines how the liveness watchdog responds when a watched
+// goroutine's tick goes stale.
+type GoroutineClass int
+
+const (
+	// ClassCore marks a daemon-lifetime singleton (state updater, config
+	// reconciler, node heartbeat, health checker, the watchdog itself). If one
+	// of these wedges, the daemon as a whole has failed, so a stale core tick
+	// escalates to a process-fatal — the only safe response for a singleton the
+	// daemon cannot function without.
+	ClassCore GoroutineClass = iota
+
+	// ClassAgent marks one per-agent supervise goroutine among many. A wedged
+	// agent goroutine is a localized fault: the watchdog quarantines it (stops
+	// tracking it and signals that single agent to stop) while the rest of the
+	// fleet keeps running. An agent fault must never take down the daemon.
+	ClassAgent
+)
+
+// tickSlot is the watchdog's record for one watched goroutine.
+//
+// The slot pointer is its identity. Deregistration is a compare-and-delete
+// against this exact pointer (see Supervisor.deregister), so a goroutine can
+// only ever retract its own registration — even if a successor later reuses the
+// same name (an agent removed and re-added on the same worktree). Recording
+// also goes through the slot the goroutine owns, never by name, so an outgoing
+// goroutine can never refresh its successor's slot.
+type tickSlot struct {
+	name    string
+	class   GoroutineClass
+	stamp   atomic.Int64 // monotonic-clock duration (ns) since monoBase, set by record()
+	onStale func()       // quarantine action for ClassAgent; nil for ClassCore
+}
+
+// monoBase anchors tick storage. Captured at process start, it carries a
+// monotonic clock reading; ticks are stored as nanosecond durations from it and
+// reconstructed via monoBase.Add, which preserves the monotonic reading. That
+// keeps staleness math (now.Sub(t) in scanTicks) on the monotonic clock, so a
+// host suspend — which freezes the monotonic clock but not the wall clock — does
+// not make ticks look stale and trip the watchdog. Ticks are never persisted, so
+// a per-process base never crosses a process.
+var monoBase = time.Now()
+
+// record stamps the current time on the slot, as a monotonic-clock duration
+// since monoBase so staleness survives a host suspend.
+func (sl *tickSlot) record() {
+	sl.stamp.Store(int64(time.Since(monoBase)))
+}
+
+// last returns the slot's last recorded time, reconstructed via monoBase.Add so
+// the returned time carries a monotonic reading for suspend-immune age math.
+func (sl *tickSlot) last() time.Time {
+	return monoBase.Add(time.Duration(sl.stamp.Load()))
+}
+
+// registerTick allocates a tick slot, primes it to now, and stores it under
+// name. It returns the slot so the owning goroutine can record() and
+// deregister() by identity rather than by name.
+func (s *Supervisor) registerTick(name string, class GoroutineClass, onStale func()) *tickSlot {
+	sl := &tickSlot{name: name, class: class, onStale: onStale}
+	sl.record()
+	s.Ticks.Store(name, sl)
+	return sl
+}
+
+// registerAgentTick registers a ClassAgent slot for ap, wires its quarantine
+// action, and records the slot on ap so the supervise loop and its
+// wait-heartbeat record by identity (ap.tick).
+func (s *Supervisor) registerAgentTick(ap *AgentProcess) {
+	sl := s.registerTick(agentTickName(ap), ClassAgent, nil)
+	sl.onStale = func() { s.quarantineAgent(ap, sl) }
+	ap.tick = sl
+}
+
+// deregister removes a slot from the registry, but only if the registry still
+// holds this exact slot. It is a no-op when a successor already replaced the
+// name or the watchdog already quarantined the slot — that compare-and-delete
+// is what makes same-name reuse safe.
+func (s *Supervisor) deregister(sl *tickSlot) {
+	if sl == nil {
+		return
+	}
+	s.Ticks.CompareAndDelete(sl.name, sl)
+}
+
+// quarantineAgent contains a wedged per-agent supervise goroutine without
+// crashing the daemon. It is invoked only from the watchdog scan, so it must
+// stay non-blocking: it never waits on ap.Mu or AgentsMu, because the wedged
+// goroutine may be holding one and the watchdog must stay responsive.
+//
+// It (1) stops tracking the leaked goroutine so the scan does not re-flag it on
+// every interval, (2) records a watchdog stop reason when the agent mutex is
+// immediately available, (3) signals that single agent to stop via StopCh, and
+// (4) starts an asynchronous process stop attempt. A genuinely deadlocked
+// goroutine can still leak if it owns the state needed to find the process, but
+// the watchdog itself stays live and the daemon keeps supervising the rest of
+// the fleet.
+func (s *Supervisor) quarantineAgent(ap *AgentProcess, sl *tickSlot) {
+	slog.Error("liveness watchdog quarantining wedged agent supervisor (fleet stays up)",
+		"worktree", ap.Entry.Worktree,
+		"tick", sl.name,
+		"age", time.Since(sl.last()).Truncate(time.Second))
+	s.deregister(sl)
+	if !ap.trySetStopReasonDefault(StopReasonWatchdog) {
+		slog.Warn("could not mark quarantined agent stop reason without blocking",
+			"worktree", ap.Entry.Worktree,
+			"reason", StopReasonWatchdog)
+	}
+	ap.signalStop()
+	go s.stopQuarantinedAgent(ap)
+}
+
+// stopQuarantinedAgent runs outside the watchdog scan. StopAgent may need the
+// agent mutex to snapshot Cmd/Pid and may wait for process exit, so the watchdog
+// must never call it inline.
+func (s *Supervisor) stopQuarantinedAgent(ap *AgentProcess) {
+	timeout := time.Duration(DefaultSigtermTimeout) * time.Second
+	if s.ConfigSnapshot != nil {
+		timeout = s.GetSigtermTimeout()
+	}
+	s.StopAgent(ap, timeout)
+}
+
+// rangeSlots iterates over every registered tick slot.
+func (s *Supervisor) rangeSlots(fn func(sl *tickSlot)) {
+	s.Ticks.Range(func(_, v any) bool {
+		if sl, ok := v.(*tickSlot); ok {
+			fn(sl)
+		}
+		return true
+	})
+}

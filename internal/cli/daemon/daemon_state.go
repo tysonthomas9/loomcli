@@ -163,23 +163,19 @@ func computeAgentStatus(ap supervisor.SupervisedAgentStatus, maxRetries int) str
 	if ap.PID > 0 && lockfile.IsProcessRunning(ap.PID) {
 		return "running"
 	}
-	// Blocked (exhausted its restart budget, retrying on a fixed interval):
-	// the supervise goroutine is alive and the agent self-resumes, so it is
-	// not "failed". Checked after the running guard so a re-spawned agent
-	// reads as "running".
-	if ap.StopReason == supervisor.StopReasonMaxRetriesBlocked {
-		return "blocked"
-	}
-	// Not running - check if it failed via stop reason or restart count.
-	// FastFail is a terminal deterministic failure (policy refused to block).
+	// Not running - check if it stopped because of a terminal error reason or
+	// legacy max-retry wait state. Running takes precedence above so stale stop
+	// reasons never hide a live process.
 	if ap.StopReason == supervisor.StopReasonFatalError ||
 		ap.StopReason == supervisor.StopReasonMaxRetries ||
-		ap.StopReason == supervisor.StopReasonFastFail {
-		return "failed"
+		ap.StopReason == supervisor.StopReasonFastFail ||
+		ap.StopReason == supervisor.StopReasonMaxRetriesParked ||
+		ap.StopReason == supervisor.StopReasonMaxRetriesBlocked {
+		return "error"
 	}
-	// High restart count without stop reason still means failed.
+	// High restart count without stop reason still means error.
 	if ap.RestartCount > maxRetries {
-		return "failed"
+		return "error"
 	}
 	return "stopped"
 }

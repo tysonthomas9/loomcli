@@ -66,6 +66,35 @@ func TestGroupAgentsByWorkspace_AllSameWorkspace(t *testing.T) {
 	}
 }
 
+func TestMonitorStatusFromAgentState_Error(t *testing.T) {
+	if got := monitorStatusFromAgentState(domain.AgentStateError); got != "error" {
+		t.Fatalf("monitorStatusFromAgentState(error) = %q, want error", got)
+	}
+}
+
+func TestMergeRuntimeAgentStatus_PreservesErrorOverIdleRuntime(t *testing.T) {
+	got := mergeRuntimeAgentStatus(
+		monitor.AgentStatus{Name: "falcon", Status: "error"},
+		monitor.AgentStatus{Name: "falcon", Status: "ready", Branch: "falcon", DaemonManaged: true},
+	)
+	if got.Status != "error" {
+		t.Fatalf("merged status = %q, want error", got.Status)
+	}
+	if got.Branch != "falcon" || !got.DaemonManaged {
+		t.Fatalf("runtime metadata was not merged: %+v", got)
+	}
+}
+
+func TestMergeRuntimeAgentStatus_ResumedWorkOverridesError(t *testing.T) {
+	got := mergeRuntimeAgentStatus(
+		monitor.AgentStatus{Name: "falcon", Status: "error"},
+		monitor.AgentStatus{Name: "falcon", Status: "working: TEST-1"},
+	)
+	if got.Status != "working: TEST-1" {
+		t.Fatalf("merged status = %q, want resumed working status", got.Status)
+	}
+}
+
 func TestHandleAgents_UsesStoreAgentsAsSourceOfTruth(t *testing.T) {
 	t.Setenv("LOOM_WORKSPACE", "WS1")
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())

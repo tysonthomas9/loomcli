@@ -31,6 +31,7 @@ var NewConcurrencyTracker = supervisor.NewConcurrencyTracker
 const (
 	StopReasonShutdown          = supervisor.StopReasonShutdown
 	StopReasonMaxRetries        = supervisor.StopReasonMaxRetries
+	StopReasonMaxRetriesParked  = supervisor.StopReasonMaxRetriesParked
 	StopReasonMaxRetriesBlocked = supervisor.StopReasonMaxRetriesBlocked
 	StopReasonFastFail          = supervisor.StopReasonFastFail
 	StopReasonFatalError        = supervisor.StopReasonFatalError

@@ -132,7 +132,7 @@ func (s *Supervisor) tryClaimFromReady(ap *AgentProcess, opts backend.ReadyOpts,
 }
 
 func (s *Supervisor) readyIssues(opts backend.ReadyOpts) ([]backend.IssueData, error) {
-	readyCtx, readyCancel := s.operationContext(claimOperationTimeout)
+	readyCtx, readyCancel := s.operationContext()
 	issues, err := s.IssueBackend.Ready(readyCtx, opts)
 	readyCancel()
 	return issues, err
@@ -235,7 +235,7 @@ func conflictHolder(err error) string {
 }
 
 func (s *Supervisor) claimIssueForAgent(ap *AgentProcess, taskID, reason string) error {
-	claimCtx, claimCancel := s.operationContext(claimOperationTimeout)
+	claimCtx, claimCancel := s.operationContext()
 	var err error
 	if ap.Entry.Worktree != "" {
 		if actorBackend, ok := s.IssueBackend.(actorClaimBackend); ok {
@@ -258,11 +258,11 @@ func (s *Supervisor) claimIssueForAgent(ap *AgentProcess, taskID, reason string)
 	return nil
 }
 
-// operationContext returns a context bounded by both the given timeout and
+// operationContext returns a context bounded by both the claim timeout and
 // the supervisor's Shutdown channel, so a slow backend call doesn't outlive
 // supervisor shutdown.
-func (s *Supervisor) operationContext(timeout time.Duration) (context.Context, context.CancelFunc) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+func (s *Supervisor) operationContext() (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithTimeout(context.Background(), claimOperationTimeout)
 	if s.Shutdown == nil {
 		return ctx, cancel
 	}
@@ -324,7 +324,7 @@ func (s *Supervisor) releaseAssignedTaskClaim(ap *AgentProcess, taskID string) {
 	if !ok {
 		return
 	}
-	ctx, cancel := s.operationContext(claimOperationTimeout)
+	ctx, cancel := s.operationContext()
 	defer cancel()
 	if err := releaser.ReleaseIssueAsActor(ctx, taskID, ap.Entry.Worktree); err != nil {
 		slog.Debug("agent task claim release skipped", "worktree", ap.Entry.Worktree, "task_id", taskID, "err", err)
