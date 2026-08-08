@@ -616,6 +616,35 @@ replication of Zhu et al.: prompt exhortation does nothing (p>0.8).
   that checkpoint is unexercised), or the parked CI-style feedback arm.
   Cost note: fork total $270.65 for two runs.
 
+#### MEASUREMENT NOTE (2026-08-08, user challenge): the constant 0.9375 is a
+#### CEILING, not a judge bug — verified three ways
+Challenge: six consecutive runs at replica-ux EXACTLY 0.9375 looks like an
+instrument defect. Verification: (1) DISCRIMINATION — the judge scored b2c
+0.3125 with six criteria failed; not hardcoded. (2) EVIDENCE SPECIFICITY —
+all six 0.9375 verdicts carry run-specific forensics (different hover
+implementations, a measured 55.6px composer height); and five
+independently built codebases (Python AND JS) contain the CHARACTER-
+IDENTICAL empty-state sentence "No messages yet. Start the conversation
+from the composer." — the spec demands only "non-blank copy", so this is
+model-level convergence in the APPS, not judge stereotypy. (3) TEST-
+RETEST — re-judging the run-20 artifact reproduced 0.9375 with the same
+8-PASS+polish-PARTIAL decomposition on fresh driver data (new workspace
+names; cue-count in the polish rationale varied 1-vs-2 but the ternary
+verdict absorbed it).
+ROOT CAUSE: the spec's UI paragraph enumerates the graded surface, so
+every working run builds exactly to it (the QA walk enforces it) → 8
+criteria PASS by construction; polish is the ONE rubric criterion
+exceeding the spec (5 micro-interactions, of which spec-conformant apps
+ship exactly the 2 spec-adjacent ones) → PARTIAL → 7.5/8 = 0.9375 as the
+arithmetic fixed point of "built to spec and not one pixel more".
+CORRECTED CLAIM: not "ux invariant at 0.9375" but "ux SATURATED at the
+instrument's spec-conformance ceiling — the replica cannot separate
+working apps"; with the single official-CUA overlap (b2d official 1.0 vs
+replica 0.9375) indicating the replica's polish grading runs ~1/16
+conservative. Score-half variance claims are unaffected; any future claim
+needing ux discrimination ABOVE the ceiling requires the official CUA or
+a finer-grained polish rubric.
+
 ### B3. fractal-generic — infrastructure COMMITTED
 Mission mode `generic` (verbatim spec + finish sentence — the hardcoded
 preamble is bypassed; strip-vet #3); hidden reserve pinned to 0; concurrency
