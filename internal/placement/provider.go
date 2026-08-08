@@ -149,9 +149,10 @@ const (
 
 // ProviderSandbox is a reconciliation view of provider-side sandbox state.
 type ProviderSandbox struct {
-	ID     string
-	Labels map[string]string
-	State  ProviderSandboxState
+	ID        string
+	Labels    map[string]string
+	State     ProviderSandboxState
+	CreatedAt time.Time
 }
 
 // NormalizeRepoCloneRemote implements the fail-closed remote URL policy for

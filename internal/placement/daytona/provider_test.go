@@ -299,6 +299,49 @@ func TestListManagedReturnsAbsentListedSandbox(t *testing.T) {
 	}
 }
 
+func TestProviderSandboxCreatedAtIsParsed(t *testing.T) {
+	createdAt := "2026-01-02T03:04:05Z"
+	want, err := time.Parse(time.RFC3339, createdAt)
+	if err != nil {
+		t.Fatalf("parse test time: %v", err)
+	}
+	provider := newTestProvider(t, func(req *http.Request) (*http.Response, error) {
+		switch {
+		case req.Method == http.MethodGet && req.URL.Path == "/api/sandbox/sandbox-1":
+			return jsonResponse(http.StatusOK, sandboxBodyWithCreatedAt("sandbox-1", "started", "https://daytona.test/toolbox", map[string]string{
+				placement.PlacementLabelKey: "lead-placement-1",
+			}, createdAt)), nil
+		case req.Method == http.MethodGet && req.URL.Path == "/api/sandbox":
+			return jsonResponse(http.StatusOK, listBodyWithCreatedAt([]string{"sandbox-1"}, []string{"started"}, []map[string]string{{
+				placement.PlacementLabelKey: "lead-placement-1",
+			}}, []string{createdAt})), nil
+		default:
+			t.Fatalf("unexpected request %s %s", req.Method, req.URL.Path)
+			return nil, nil
+		}
+	})
+
+	got, err := provider.Get(context.Background(), "sandbox-1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !got.CreatedAt.Equal(want.UTC()) {
+		t.Fatalf("Get CreatedAt = %s, want %s", got.CreatedAt, want.UTC())
+	}
+	listed, err := provider.ListManaged(context.Background(), map[string]string{
+		placement.PlacementLabelKey: "lead-placement-1",
+	})
+	if err != nil {
+		t.Fatalf("ListManaged: %v", err)
+	}
+	if len(listed) != 1 {
+		t.Fatalf("listed = %d, want 1", len(listed))
+	}
+	if !listed[0].CreatedAt.Equal(want.UTC()) {
+		t.Fatalf("ListManaged CreatedAt = %s, want %s", listed[0].CreatedAt, want.UTC())
+	}
+}
+
 func TestCreatePtyUsesLeadHookEnvAndIgnoresCommand(t *testing.T) {
 	var captured map[string]any
 	provider := newTestProvider(t, func(req *http.Request) (*http.Response, error) {
@@ -929,10 +972,14 @@ func jsonResponse(status int, body string) *http.Response {
 }
 
 func sandboxBody(id, state, toolboxURL string, labels map[string]string) string {
+	return sandboxBodyWithCreatedAt(id, state, toolboxURL, labels, "")
+}
+
+func sandboxBodyWithCreatedAt(id, state, toolboxURL string, labels map[string]string, createdAt string) string {
 	if labels == nil {
 		labels = map[string]string{}
 	}
-	body, err := json.Marshal(map[string]any{
+	values := map[string]any{
 		"id":              id,
 		"organizationId":  "org",
 		"name":            id,
@@ -949,7 +996,11 @@ func sandboxBody(id, state, toolboxURL string, labels map[string]string) string 
 		"disk":            8,
 		"state":           state,
 		"toolboxProxyUrl": toolboxURL,
-	})
+	}
+	if createdAt != "" {
+		values["createdAt"] = createdAt
+	}
+	body, err := json.Marshal(values)
 	if err != nil {
 		panic(err)
 	}
@@ -957,6 +1008,10 @@ func sandboxBody(id, state, toolboxURL string, labels map[string]string) string 
 }
 
 func listBody(ids []string, states []string, labels []map[string]string) string {
+	return listBodyWithCreatedAt(ids, states, labels, nil)
+}
+
+func listBodyWithCreatedAt(ids []string, states []string, labels []map[string]string, createdAt []string) string {
 	items := make([]map[string]any, len(ids))
 	for i := range ids {
 		items[i] = map[string]any{
@@ -973,6 +1028,9 @@ func listBody(ids []string, states []string, labels []map[string]string) string 
 			"state":           states[i],
 			"labels":          labels[i],
 			"toolboxProxyUrl": "https://proxy.test/toolbox",
+		}
+		if len(createdAt) > i && createdAt[i] != "" {
+			items[i]["createdAt"] = createdAt[i]
 		}
 	}
 	body, err := json.Marshal(map[string]any{"items": items, "nextCursor": nil})

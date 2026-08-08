@@ -47,6 +47,8 @@ const envLoomTriggerCronInterval = "LOOM_TRIGGER_CRON_INTERVAL"
 const envLoomIssueBridgeInterval = "LOOM_ISSUE_BRIDGE_INTERVAL"
 const envLoomIssueBridgeDisabled = "LOOM_ISSUE_BRIDGE_DISABLED"
 const envLoomIssueBridgeStatePath = "LOOM_ISSUE_BRIDGE_STATE_PATH"
+const envLoomPlacementReaperInterval = "LOOM_PLACEMENT_REAPER_INTERVAL"
+const envLoomPlacementReaperEnforce = "LOOM_PLACEMENT_REAPER_ENFORCE"
 
 const monitorCollectionCacheTTL = 10 * time.Second
 
@@ -232,6 +234,10 @@ func runServe(cmd *cobra.Command, args []string) {
 	startTriggerDeliverySweeper(ctx, storeHandle.Store)
 	startAwaitTimeoutSweeper(ctx, storeHandle.Store)
 	startIssueJournalBridge(ctx, storeHandle.Store)
+	// TODO(5c-4): construct the Daytona provider and placement Broker here,
+	// then pass it to startPlacementReaper. Serve does not yet own that
+	// provisioning surface, and this ticket is limited to the reaper itself.
+	startPlacementReaper(ctx, nil, placementReaperInterval(), placementReaperEnforce())
 
 	issueBackendFn := cli.WorkspaceAwareIssueBackendForURL(storeHandle.URL(), fleetState.clientCfg.Actor)
 	monitorDefaultWorkspace := resolveMonitorCollectorWorkspace(storeHandle.Store, fleetState.clientCfg.Workspace)

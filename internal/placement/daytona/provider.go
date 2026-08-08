@@ -1065,18 +1065,32 @@ func domainAllowlist(in []string) (string, error) {
 
 func providerSandboxFromAPI(sandbox *apiclient.Sandbox) placement.ProviderSandbox {
 	return placement.ProviderSandbox{
-		ID:     strings.TrimSpace(sandbox.GetId()),
-		Labels: cleanMap(sandbox.GetLabels()),
-		State:  providerState(sandboxState(sandbox)),
+		ID:        strings.TrimSpace(sandbox.GetId()),
+		Labels:    cleanMap(sandbox.GetLabels()),
+		State:     providerState(sandboxState(sandbox)),
+		CreatedAt: providerSandboxCreatedAt(sandbox.GetCreatedAt()),
 	}
 }
 
 func providerSandboxFromListItem(item apiclient.SandboxListItem) placement.ProviderSandbox {
 	return placement.ProviderSandbox{
-		ID:     strings.TrimSpace(item.GetId()),
-		Labels: cleanMap(item.GetLabels()),
-		State:  providerState(item.GetState()),
+		ID:        strings.TrimSpace(item.GetId()),
+		Labels:    cleanMap(item.GetLabels()),
+		State:     providerState(item.GetState()),
+		CreatedAt: providerSandboxCreatedAt(item.GetCreatedAt()),
 	}
+}
+
+func providerSandboxCreatedAt(raw string) time.Time {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}
+	}
+	createdAt, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}
+	}
+	return createdAt.UTC()
 }
 
 func providerState(state apiclient.SandboxState) placement.ProviderSandboxState {

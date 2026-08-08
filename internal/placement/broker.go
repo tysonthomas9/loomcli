@@ -130,8 +130,9 @@ type ReleaseFence struct {
 
 // ListResult contains placement records plus summed live reservations.
 type ListResult struct {
-	Placements   []*domain.Node
-	LiveReserved ResourceSize
+	Placements     []*domain.Node
+	LiveReserved   ResourceSize
+	NeedsAttention []string
 }
 
 // NewBroker validates dependencies and resolves the signing key.
@@ -298,6 +299,9 @@ func (b *Broker) List(ctx context.Context, workspaceKey string) (*ListResult, er
 		result.Placements = append(result.Placements, node)
 		if node.RuntimeProvider == domain.RuntimeProviderDaytona && isQuotaReservedPlacementState(node.Placement.State) {
 			addReservation(&result.LiveReserved, node.Placement)
+		}
+		if PlacementNeedsAttention(node) {
+			result.NeedsAttention = append(result.NeedsAttention, node.NodeID)
 		}
 	}
 	return result, nil
@@ -1090,6 +1094,9 @@ func (b *Broker) providerSandboxesForPlacement(ctx context.Context, placementID 
 			return nil, err
 		}
 		matches = append(matches, confirmed)
+	}
+	if len(matches) > 1 {
+		return nil, fmt.Errorf("placement %q has %d provider sandboxes with label %s: %w", placementID, len(matches), PlacementLabelKey, domain.ErrConflict)
 	}
 	return matches, nil
 }
