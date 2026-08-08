@@ -96,6 +96,72 @@ func TestReadJSON_TrailingContent(t *testing.T) {
 	}
 }
 
+func TestReadJSON_RejectsSecondTopLevelValue(t *testing.T) {
+	r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"name":"first"} {"name":"second"}`))
+	w := httptest.NewRecorder()
+
+	var dst map[string]string
+	err := ReadJSON(w, r, &dst)
+	if err == nil {
+		t.Fatal("expected error for second JSON value, got nil")
+	}
+	var svcErr *apperrors.ServiceError
+	if !errors.As(err, &svcErr) || svcErr.Kind != apperrors.KindValidation {
+		t.Fatalf("expected validation ServiceError, got %T: %v", err, err)
+	}
+}
+
+func TestReadJSON_OversizedTrailingBodyPreservesPayloadTooLarge(t *testing.T) {
+	body := `{"name":"first"}` + strings.Repeat(" ", MaxRequestBody)
+	r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+	w := httptest.NewRecorder()
+
+	var dst map[string]string
+	err := ReadJSON(w, r, &dst)
+	var svcErr *apperrors.ServiceError
+	if !errors.As(err, &svcErr) || svcErr.Kind != apperrors.KindPayloadTooLarge {
+		t.Fatalf("ReadJSON() error = %T %v, want payload-too-large", err, err)
+	}
+}
+
+func TestDecodeOneJSON_StrictPolicy(t *testing.T) {
+	type payload struct {
+		Name string `json:"name"`
+	}
+	tests := []struct {
+		name         string
+		body         string
+		want         error
+		wantMaxBytes bool
+	}{
+		{name: "one object", body: `{"name":"ok"}`},
+		{name: "unknown field", body: `{"name":"ok","extra":true}`, want: errors.New("unknown field")},
+		{name: "second object", body: `{"name":"ok"} {}`, want: ErrTrailingJSON},
+		{name: "oversized trailing body", body: `{"name":"ok"}` + strings.Repeat(" ", 128), wantMaxBytes: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(test.body))
+			w := httptest.NewRecorder()
+			var got payload
+			err := DecodeOneJSON(w, r, &got, JSONDecodeOptions{MaxBytes: 128, DisallowUnknownFields: true})
+			switch {
+			case test.wantMaxBytes:
+				var maxBytesErr *http.MaxBytesError
+				if !errors.As(err, &maxBytesErr) {
+					t.Fatalf("DecodeOneJSON() error = %T %v, want MaxBytesError", err, err)
+				}
+			case test.want == nil && err != nil:
+				t.Fatalf("DecodeOneJSON() error = %v", err)
+			case errors.Is(test.want, ErrTrailingJSON) && !errors.Is(err, ErrTrailingJSON):
+				t.Fatalf("DecodeOneJSON() error = %v, want trailing JSON", err)
+			case test.want != nil && !errors.Is(test.want, ErrTrailingJSON) && (err == nil || !strings.Contains(err.Error(), test.want.Error())):
+				t.Fatalf("DecodeOneJSON() error = %v, want containing %q", err, test.want)
+			}
+		})
+	}
+}
+
 func TestReadJSON_EmptyBody(t *testing.T) {
 	r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(""))
 	w := httptest.NewRecorder()

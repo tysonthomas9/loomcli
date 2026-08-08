@@ -1,15 +1,17 @@
 package dto
 
-import "fmt"
+import (
+	"fmt"
 
-// Validation limit constants. Values match authoritative sources:
-//   - MaxTitleLength: entity/issue.go:169
-//   - MaxLabels: service/issue_impl.go:28
-//   - MaxDependencies: service/issue_impl.go:29
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
+)
+
+// Validation limit constants retain the DTO API while delegating policy to
+// the Work Items owner.
 const (
-	MaxTitleLength  = 500
-	MaxLabels       = 50
-	MaxDependencies = 100
+	MaxTitleLength  = workitems.MaxTitleLength
+	MaxLabels       = workitems.MaxLabels
+	MaxDependencies = workitems.MaxDependencies
 )
 
 // ValidationError holds multiple field-level validation errors collected in
@@ -48,11 +50,7 @@ type FieldError struct {
 // isAPIStatus returns true if s is a user-settable issue status.
 // Internal statuses (tombstone, pinned, hooked) are excluded.
 func isAPIStatus(s string) bool {
-	switch s {
-	case "open", "in_progress", "blocked", "deferred", "review", "closed":
-		return true
-	}
-	return false
+	return workitems.Status(s).IsUserFacing()
 }
 
 // validationBuilder collects field errors during a single validation pass.

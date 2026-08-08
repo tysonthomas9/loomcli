@@ -1,10 +1,8 @@
 # Modular Monolith Migration
 
-- **Status:** Phase 7 complete at `completed_phase: 7`, including all ten
-  capability roots, Observability and Source Control frontend slices, signed
-  packaged-Desktop UI, and the fresh two-runs-per-local-template real-Codex
-  acceptance matrix
-- **Date:** 2026-08-05
+- **Status:** Phase 7 capability extraction complete at `completed_phase: 7`;
+  Phase 8 structural consolidation is in progress
+- **Date:** 2026-08-07
 - **Scope:** `loom serve`, the operator CLI entry surfaces, the Vite frontend counterpart, and the fleet-db contracts those capabilities depend on
 - **Provenance:** [Phase 0 integration baseline](00-phase-0-baseline.md), final [Phase 1 evidence](06-phase-1-decisions-and-evidence.md) at Loom `7e8a6dd2`, [Phase 2 evidence](07-phase-2-decisions-and-evidence.md) at Loom `84cccb761` with FleetDB `430dce8d9`, [Phase 3 evidence](08-phase-3-decisions-and-evidence.md) at core implementation commits Loom `7f95b9bf1` and FleetDB `f1c4e1119`, final [Phase 4 evidence](09-phase-4-decisions-and-evidence.md) at Loom `53cbe2577` with FleetDB `afb688768`, and the appended reliability-validation record at Loom `67c45972f` with FleetDB `9ffa69f60`
 - **Related:** [Unified agent UX](../../design/2026-07-01-unified-agent-ux-proposal.md) · [Durable agent identity](../../design/2026-07-07-agent-identity-record.md) · [Workflow driver authoring](../../design/workflow-driver-authoring-guide.md)
@@ -21,7 +19,11 @@ Migrate the application inside `loom serve` to a **capability-owned modular mono
 - Enforce default-deny capability edges with acyclic compile-time import and synchronous command/query graphs; durable event cycles must be explicit, bounded, and idempotent.
 - Extract one production use case at a time while delivering the existing unified-agent, custom-driver, and supervisor-retirement work.
 
-This is not a package-count project. The pre-guardrail source snapshot already has 165 Go packages; the migration addresses broad dependencies, ambiguous write ownership, handler/CLI orchestration, partial cross-record writes, and authority checks enforced by convention.
+Package count is not a substitute for ownership or public-API compliance. The
+pre-guardrail source snapshot had 165 Go packages, while the Phase 7 completion
+tree has 250 production package directories and 115 one-file packages. Phase 8
+therefore adds shrink-only shape ratchets and removes duplicated knowledge and
+forwarding-only packages while preserving the capability graph.
 
 ## Reading order
 
@@ -42,6 +44,7 @@ This is not a package-count project. The pre-guardrail source snapshot already h
 | [12-phase-5-real-codex-proof.md](12-phase-5-real-codex-proof.md) | How did the packaged-Desktop real-Codex matrix close with 20 local passes and four operator waivers? |
 | [13-phase-6-decisions-and-evidence.md](13-phase-6-decisions-and-evidence.md) | Which supervisor paths were deleted, what replaced them, and which exact gates prove Phase 6? |
 | [14-phase-7-decisions-and-evidence.md](14-phase-7-decisions-and-evidence.md) | Which remaining capability and frontend boundaries closed, and what exact packaged-product matrix completes the migration? |
+| [15-phase-8-consolidation-and-evidence.md](15-phase-8-consolidation-and-evidence.md) | How is post-extraction fragmentation removed without weakening ports-and-adapters boundaries? |
 
 ## Scope boundaries
 
@@ -180,6 +183,14 @@ Product proof also corrected the Observability cache so modular DriverRun
 metrics survive restart. See the
 [Phase 7 record](14-phase-7-decisions-and-evidence.md).
 
+Phase 8 is the post-extraction consolidation. It starts from the exact Phase 7
+completion commit, introduces an exact shrink-only production-package
+inventory, deletes forwarding-only composition/adapter packages, and
+canonicalizes duplicated models and policy implementations under their ten
+declared owners. Its hard exit target is at most 190 production Go package
+directories without creating a replacement generic business-logic bucket. See
+the [Phase 8 plan and evidence](15-phase-8-consolidation-and-evidence.md).
+
 ## Approved architecture decisions
 
 | ID | Outcome |
@@ -201,4 +212,4 @@ historical Phase 1 through Phase 4 evidence remains immutable.
 
 ---
 
-[All migrations](../README.md) · Next: [Current-state evidence](01-current-state.md) · [Phase 7 evidence](14-phase-7-decisions-and-evidence.md)
+[All migrations](../README.md) · Next: [Current-state evidence](01-current-state.md) · [Phase 7 evidence](14-phase-7-decisions-and-evidence.md) · [Phase 8 consolidation](15-phase-8-consolidation-and-evidence.md)

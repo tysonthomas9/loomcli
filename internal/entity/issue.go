@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 // Issue represents a trackable work item.
@@ -164,11 +166,8 @@ func (i *Issue) ValidateWithCustomStatuses(customStatuses []string) error {
 // ValidateWithCustom checks if the issue has valid field values,
 // allowing custom statuses and types in addition to built-in ones.
 func (i *Issue) ValidateWithCustom(customStatuses, customTypes []string) error {
-	if len(i.Title) == 0 {
-		return fmt.Errorf("title is required")
-	}
-	if len(i.Title) > 500 {
-		return fmt.Errorf("title must be 500 characters or less (got %d)", len(i.Title))
+	if err := legacyTitleValidationError(i.Title); err != nil {
+		return err
 	}
 	if i.Priority < 0 || i.Priority > 4 {
 		return fmt.Errorf("priority must be between 0 and 4 (got %d)", i.Priority)
@@ -226,39 +225,26 @@ type IssueStatus string
 
 // Issue status constants.
 const (
-	StatusOpen       IssueStatus = "open"
-	StatusInProgress IssueStatus = "in_progress"
-	StatusBlocked    IssueStatus = "blocked"
-	StatusDeferred   IssueStatus = "deferred"
-	StatusReview     IssueStatus = "review"
-	StatusClosed     IssueStatus = "closed"
-	StatusTombstone  IssueStatus = "tombstone"
-	StatusPinned     IssueStatus = "pinned"
-	StatusHooked     IssueStatus = "hooked"
+	StatusOpen       IssueStatus = IssueStatus(workitems.StatusOpen)
+	StatusInProgress IssueStatus = IssueStatus(workitems.StatusInProgress)
+	StatusBlocked    IssueStatus = IssueStatus(workitems.StatusBlocked)
+	StatusDeferred   IssueStatus = IssueStatus(workitems.StatusDeferred)
+	StatusReview     IssueStatus = IssueStatus(workitems.StatusReview)
+	StatusClosed     IssueStatus = IssueStatus(workitems.StatusClosed)
+	StatusTombstone  IssueStatus = IssueStatus(workitems.StatusTombstone)
+	StatusPinned     IssueStatus = IssueStatus(workitems.StatusPinned)
+	StatusHooked     IssueStatus = IssueStatus(workitems.StatusHooked)
 )
 
 // IsValid checks if the status value is valid (built-in statuses only).
 // Empty string is considered valid (caller handles defaulting).
 func (s IssueStatus) IsValid() bool {
-	switch s {
-	case StatusOpen, StatusInProgress, StatusBlocked, StatusDeferred, StatusReview,
-		StatusClosed, StatusTombstone, StatusPinned, StatusHooked, "":
-		return true
-	}
-	return false
+	return s == "" || workitems.Status(s).IsBuiltIn()
 }
 
 // IsValidWithCustom checks if the status is valid, including custom statuses.
 func (s IssueStatus) IsValidWithCustom(customStatuses []string) bool {
-	if s.IsValid() {
-		return true
-	}
-	for _, custom := range customStatuses {
-		if string(s) == custom {
-			return true
-		}
-	}
-	return false
+	return s == "" || workitems.Status(s).IsValidWithCustom(customStatuses)
 }
 
 // IssueType categorizes the kind of work.
@@ -266,50 +252,33 @@ type IssueType string
 
 // Core work type constants.
 const (
-	TypeBug     IssueType = "bug"
-	TypeFeature IssueType = "feature"
-	TypeTask    IssueType = "task"
-	TypeEpic    IssueType = "epic"
-	TypeChore   IssueType = "chore"
+	TypeBug     IssueType = IssueType(workitems.TypeBug)
+	TypeFeature IssueType = IssueType(workitems.TypeFeature)
+	TypeTask    IssueType = IssueType(workitems.TypeTask)
+	TypeEpic    IssueType = IssueType(workitems.TypeEpic)
+	TypeChore   IssueType = IssueType(workitems.TypeChore)
 )
 
 // IsValid checks if the issue type is a core work type.
 // Empty string is considered valid (caller handles defaulting).
 func (t IssueType) IsValid() bool {
-	switch t {
-	case TypeBug, TypeFeature, TypeTask, TypeEpic, TypeChore, "":
-		return true
-	}
-	return false
+	return t == "" || workitems.IssueType(t).IsBuiltIn()
 }
 
 // IsBuiltIn returns true if the type is a built-in type (same as IsValid for non-empty values).
 func (t IssueType) IsBuiltIn() bool {
-	return t.IsValid()
+	return t == "" || workitems.IssueType(t).IsBuiltIn()
 }
 
 // IsValidWithCustom checks if the issue type is valid, including custom types.
 func (t IssueType) IsValidWithCustom(customTypes []string) bool {
-	if t.IsValid() {
-		return true
-	}
-	for _, custom := range customTypes {
-		if string(t) == custom {
-			return true
-		}
-	}
-	return false
+	return t == "" || workitems.IssueType(t).IsValidWithCustom(customTypes)
 }
 
 // Normalize maps issue type aliases to their canonical form.
 // Case-insensitive: "enhancement" and "feat" map to TypeFeature.
 func (t IssueType) Normalize() IssueType {
-	switch strings.ToLower(string(t)) {
-	case "enhancement", "feat":
-		return TypeFeature
-	default:
-		return t
-	}
+	return IssueType(workitems.IssueType(t).Normalize())
 }
 
 // AgentState represents the self-reported state of an agent.
@@ -330,12 +299,23 @@ const (
 // IsValid checks if the agent state value is valid.
 // Empty string is valid for non-agent records.
 func (s AgentState) IsValid() bool {
-	switch s {
-	case StateIdle, StateSpawning, StateRunning, StateWorking, StateStuck,
-		StateDone, StateStopped, StateDead, "":
-		return true
+	return workitems.AgentState(s).IsValid()
+}
+
+func legacyTitleValidationError(title string) error {
+	err := workitems.ValidateTitle(title)
+	kind, ok := workitems.TitleValidationKindOf(err)
+	if !ok {
+		return nil
 	}
-	return false
+	switch kind {
+	case workitems.TitleRequired:
+		return fmt.Errorf("title is required")
+	case workitems.TitleTooLong:
+		return fmt.Errorf("title must be %d characters or less (got %d)", workitems.MaxTitleLength, len(workitems.CanonicalTitle(title)))
+	default:
+		return fmt.Errorf("title is invalid")
+	}
 }
 
 // MolType categorizes the molecule type for swarm coordination.

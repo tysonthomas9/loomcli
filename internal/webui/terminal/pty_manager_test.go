@@ -388,7 +388,8 @@ func TestNaturalExitCleansLocalStateAndRetriesDurableConvergence(t *testing.T) {
 	m := newTestManager(t)
 	key := SessionKey{Workspace: "ws1", Name: "short-lived-agent"}
 	sentinel := errors.New("fleet unavailable")
-	converged := make(chan struct{}, 1)
+	convergenceStarted := make(chan struct{}, 1)
+	allowConvergence := make(chan struct{})
 	var calls int
 	m.SetBeforeKill(func(_ context.Context, got SessionKey, reason string) error {
 		calls++
@@ -401,7 +402,8 @@ func TestNaturalExitCleansLocalStateAndRetriesDurableConvergence(t *testing.T) {
 		if calls == 1 {
 			return sentinel
 		}
-		converged <- struct{}{}
+		convergenceStarted <- struct{}{}
+		<-allowConvergence
 		return nil
 	})
 	if _, _, err := m.AttachSession(
@@ -415,10 +417,19 @@ func TestNaturalExitCleansLocalStateAndRetriesDurableConvergence(t *testing.T) {
 	waitUntil(t, func() bool { return !m.HasSession(key) }, time.Second,
 		"natural exit retained dead process-local session")
 	select {
-	case <-converged:
+	case <-convergenceStarted:
 	case <-time.After(2 * time.Second):
 		t.Fatal("natural-exit durable convergence was not retried")
 	}
+	if err := m.Kill(key); err != nil {
+		t.Fatalf("idempotent kill during durable convergence: %v", err)
+	}
+	close(allowConvergence)
+	waitUntil(t, func() bool {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		return m.converged[key]
+	}, time.Second, "natural-exit tombstone was not marked converged")
 	if calls != 2 || !m.SessionClosed(key) {
 		t.Fatalf("natural-exit calls=%d closed=%t", calls, m.SessionClosed(key))
 	}
@@ -449,7 +460,10 @@ func TestExplicitKillCanRepairAfterNaturalExitRetriesExhaust(t *testing.T) {
 	waitUntil(t, func() bool { return !m.HasSession(key) }, time.Second,
 		"natural exit retained dead process-local session")
 	waitUntil(t, func() bool {
-		return calls.Load() == int32(beforeKillRetryAttempts)
+		m.mu.Lock()
+		convergenceInFlight := m.converging[key]
+		m.mu.Unlock()
+		return calls.Load() == int32(beforeKillRetryAttempts) && !convergenceInFlight
 	},
 		4*time.Second, "natural-exit retries did not reach bounded exhaustion")
 

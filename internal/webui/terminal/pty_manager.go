@@ -195,7 +195,8 @@ type PTYManager struct {
 	// converged records ended tombstones whose durable Interaction lifecycle
 	// hook completed. Natural exits create an ended tombstone first and only
 	// mark it converged after the synchronous attempt or a retry succeeds.
-	converged map[SessionKey]bool
+	converged  map[SessionKey]bool
+	converging map[SessionKey]bool
 
 	shell string   // absolute path to the login shell (e.g. /bin/bash)
 	argv  []string // default args when a session's argv is nil
@@ -253,6 +254,7 @@ func NewPTYManager(command string, maxSessions int, cwd string) *PTYManager {
 		sessions:    make(map[SessionKey]*ptySession),
 		ended:       make(map[SessionKey]string),
 		converged:   make(map[SessionKey]bool),
+		converging:  make(map[SessionKey]bool),
 		shell:       shell,
 		argv:        argv,
 		env:         env,
@@ -336,6 +338,7 @@ func (m *PTYManager) AttachSession(key SessionKey, cols, rows uint16, launch *ta
 			m.sessions[key] = newSess
 			delete(m.ended, key)
 			delete(m.converged, key)
+			delete(m.converging, key)
 			sess = newSess
 		}
 		m.mu.Unlock()
@@ -498,12 +501,13 @@ func (m *PTYManager) killSession(key SessionKey, reason string) error {
 	hook := m.beforeKill
 	_, ended := m.ended[key]
 	durableConverged := m.converged[key]
+	durableConvergenceInFlight := m.converging[key]
 	m.mu.Unlock()
 
 	// A same-key tombstone proves this manager already completed local
 	// teardown. Do not let a later defense-in-depth Kill turn that committed
 	// success into an availability error by re-running the durable hook.
-	if !ok && ended && durableConverged {
+	if !ok && ended && (durableConverged || durableConvergenceInFlight) {
 		return nil
 	}
 	if reason != ExitReasonExited && hook != nil {
@@ -528,6 +532,7 @@ func (m *PTYManager) killSession(key SessionKey, reason string) error {
 	if reason != "" {
 		m.ended[key] = reason
 		m.converged[key] = reason != ExitReasonExited
+		m.converging[key] = reason == ExitReasonExited
 	}
 	m.mu.Unlock()
 	return sess.close(reason)
@@ -573,24 +578,35 @@ func (m *PTYManager) retryDurableConvergence(
 	time.AfterFunc(beforeKillRetryDelay(attempt), func() {
 		m.mu.Lock()
 		hook := m.beforeKill
+		endedReason, ended := m.ended[key]
+		_, live := m.sessions[key]
+		if hook != nil && ended && !live && endedReason == reason {
+			m.converging[key] = true
+		}
 		m.mu.Unlock()
-		if hook == nil {
+		if hook == nil || !ended || live || endedReason != reason {
 			return
 		}
 		if err := invokeBeforeKill(hook, key, reason); err != nil {
+			m.finishDurableConvergence(key, false)
 			slog.Warn("terminal lifecycle convergence retry failed",
 				"session", key.String(), "reason", reason,
 				"attempt", attempt, "err", err)
 			m.retryDurableConvergence(key, reason, attempt+1)
 			return
 		}
-		m.markDurableConverged(key)
+		m.finishDurableConvergence(key, true)
 	})
 }
 
 func (m *PTYManager) markDurableConverged(key SessionKey) {
+	m.finishDurableConvergence(key, true)
+}
+
+func (m *PTYManager) finishDurableConvergence(key SessionKey, succeeded bool) {
 	m.mu.Lock()
-	if _, ended := m.ended[key]; ended {
+	delete(m.converging, key)
+	if _, ended := m.ended[key]; ended && succeeded {
 		m.converged[key] = true
 	}
 	m.mu.Unlock()
@@ -761,9 +777,11 @@ func (m *PTYManager) onSessionExited(key SessionKey) {
 	hook := m.beforeKill
 	m.mu.Unlock()
 	if hook == nil {
+		m.markDurableConverged(key)
 		return
 	}
 	if err := invokeBeforeKill(hook, key, ExitReasonExited); err != nil {
+		m.finishDurableConvergence(key, false)
 		slog.Warn("terminal natural exit could not converge durable lifecycle",
 			"session", key.String(), "err", err)
 		m.retryDurableConvergence(key, ExitReasonExited, 1)

@@ -152,6 +152,7 @@ func TestWorkerProfileRoutesRejectWrongWorkspaceAndDeniedAuthority(t *testing.T)
 	}{
 		{name: "wrong workspace", err: authority.ErrWorkspaceMismatch},
 		{name: "denied role", err: authority.ErrAdmissionDenied},
+		{name: "action not allowed", err: authority.ErrActionNotAllowed},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

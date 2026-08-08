@@ -5,11 +5,13 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 )
 
 // Workspace name and repo validation constants.
 const (
-	MaxWorkspaceNameLen = 64
+	MaxWorkspaceNameLen = workspacemodule.MaxNameLength
 	MaxRepoNameLen      = 128
 	MaxRemoteNameLen    = 255
 	DefaultRemote       = "origin"
@@ -39,14 +41,15 @@ func (w *Workspace) Validate() error {
 	if w.ID == "" {
 		return fmt.Errorf("id is required")
 	}
-	if w.Name == "" {
-		return fmt.Errorf("name is required")
-	}
-	if len(w.Name) > MaxWorkspaceNameLen {
-		return fmt.Errorf("name exceeds maximum length of %d characters", MaxWorkspaceNameLen)
-	}
-	if !isValidWorkspaceName(w.Name) {
-		return fmt.Errorf("name must contain only alphanumeric characters, hyphens, and underscores")
+	if err := workspacemodule.ValidateName(w.Name); err != nil {
+		switch kind, _ := workspacemodule.NameValidationKindOf(err); kind {
+		case workspacemodule.NameRequired:
+			return fmt.Errorf("name is required")
+		case workspacemodule.NameTooLong:
+			return fmt.Errorf("name exceeds maximum length of %d characters", MaxWorkspaceNameLen)
+		default:
+			return fmt.Errorf("name must contain only alphanumeric characters, hyphens, and underscores")
+		}
 	}
 	if w.Path == "" {
 		return fmt.Errorf("path is required")
@@ -83,20 +86,6 @@ func (w *Workspace) GroupNames() []string {
 	}
 	sort.Strings(names)
 	return names
-}
-
-// isValidWorkspaceName checks that a name contains only alphanumeric characters,
-// hyphens, and underscores.
-func isValidWorkspaceName(name string) bool {
-	if name == "" {
-		return false
-	}
-	for _, c := range name {
-		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_') {
-			return false
-		}
-	}
-	return true
 }
 
 // Repo represents a repository within a workspace.

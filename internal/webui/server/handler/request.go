@@ -4,6 +4,7 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -13,6 +14,47 @@ import (
 
 // MaxRequestBody is the maximum request body size (1MB) to prevent DoS attacks.
 const MaxRequestBody = 1 << 20
+
+// ErrTrailingJSON reports that a request body contained more than one JSON
+// value or non-whitespace content after the first value.
+var ErrTrailingJSON = errors.New("request body must contain exactly one JSON value")
+
+// JSONDecodeOptions defines the transport policy for one JSON request body.
+// The zero MaxBytes value uses MaxRequestBody.
+type JSONDecodeOptions struct {
+	MaxBytes              int64
+	DisallowUnknownFields bool
+}
+
+// DecodeOneJSON enforces a bounded body and exactly one top-level JSON value.
+// It intentionally returns decoder errors unchanged so feature adapters can
+// preserve their public error vocabulary while sharing the security policy.
+func DecodeOneJSON(w http.ResponseWriter, r *http.Request, dst any, options JSONDecodeOptions) error {
+	limit := options.MaxBytes
+	if limit <= 0 {
+		limit = MaxRequestBody
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
+	decoder := json.NewDecoder(r.Body)
+	if options.DisallowUnknownFields {
+		decoder.DisallowUnknownFields()
+	}
+	if err := decoder.Decode(dst); err != nil {
+		return err
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			return err
+		}
+		return ErrTrailingJSON
+	}
+	return ErrTrailingJSON
+}
 
 // DefaultListLimit is the default number of items returned by list endpoints.
 const DefaultListLimit = 100
@@ -26,18 +68,15 @@ const MaxListLimit = 1000
 // that the caller can pass directly to HandleServiceError.
 // ReadJSON applies its own MaxBytesReader; callers should NOT pre-wrap r.Body.
 func ReadJSON(w http.ResponseWriter, r *http.Request, dst any) error {
-	r.Body = http.MaxBytesReader(w, r.Body, MaxRequestBody)
-
-	dec := json.NewDecoder(r.Body)
-	if err := dec.Decode(dst); err != nil {
+	if err := DecodeOneJSON(w, r, dst, JSONDecodeOptions{}); err != nil {
 		var maxBytesErr *http.MaxBytesError
 		if errors.As(err, &maxBytesErr) {
 			return apperrors.ErrPayloadTooLarge("request body too large (max 1MB)")
 		}
+		if errors.Is(err, ErrTrailingJSON) {
+			return apperrors.ErrValidation("request body contains trailing content")
+		}
 		return apperrors.ErrValidation("invalid request body")
-	}
-	if dec.More() {
-		return apperrors.ErrValidation("request body contains trailing content")
 	}
 	return nil
 }

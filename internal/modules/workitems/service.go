@@ -10,13 +10,7 @@ import (
 
 const (
 	maxCommentBytes = 64 * 1024
-	maxLabels       = 50
-	maxDependencies = 100
 )
-
-var validIssueTypes = map[string]bool{
-	"bug": true, "feature": true, "task": true, "epic": true, "chore": true,
-}
 
 // Service owns Work Items lifecycle, availability, comment, and dependency
 // policy over a narrow durable port.
@@ -35,6 +29,7 @@ func New(store Store) (*Service, error) {
 }
 
 func (s *Service) Create(ctx context.Context, command CreateCommand) (*CreatedIssue, error) {
+	command.Title = CanonicalTitle(command.Title)
 	if err := validateCreate(command); err != nil {
 		return nil, err
 	}
@@ -236,34 +231,34 @@ func (s *Service) blockRepositoryRequired(ctx context.Context, issueID string) (
 }
 
 func validateCreate(command CreateCommand) error {
-	if strings.TrimSpace(command.Title) == "" {
-		return fmt.Errorf("title is required: %w", ErrInvalid)
+	if err := ValidateTitle(command.Title); err != nil {
+		return err
 	}
 	if command.IssueType == "" {
 		return fmt.Errorf("issue_type is required: %w", ErrInvalid)
 	}
-	if !validIssueTypes[command.IssueType] {
+	if !IssueType(command.IssueType).IsBuiltIn() {
 		return fmt.Errorf("invalid issue_type: %s (must be bug, feature, task, epic, or chore): %w", command.IssueType, ErrInvalid)
 	}
 	if command.Priority < 0 || command.Priority > 4 {
 		return fmt.Errorf("priority must be between 0 and 4 (got %d): %w", command.Priority, ErrInvalid)
 	}
-	if command.Status != "" && command.Status != "open" && command.Status != "deferred" {
+	if !Status(command.Status).IsCreateStatus() {
 		return fmt.Errorf("status must be open or deferred: %w", ErrInvalid)
 	}
-	if len(command.Labels) > maxLabels {
-		return fmt.Errorf("too many labels (max %d, got %d): %w", maxLabels, len(command.Labels), ErrInvalid)
+	if len(command.Labels) > MaxLabels {
+		return fmt.Errorf("too many labels (max %d, got %d): %w", MaxLabels, len(command.Labels), ErrInvalid)
 	}
-	if len(command.Dependencies) > maxDependencies {
-		return fmt.Errorf("too many dependencies (max %d, got %d): %w", maxDependencies, len(command.Dependencies), ErrInvalid)
+	if len(command.Dependencies) > MaxDependencies {
+		return fmt.Errorf("too many dependencies (max %d, got %d): %w", MaxDependencies, len(command.Dependencies), ErrInvalid)
 	}
 	return nil
 }
 
 func createNeedsRepositoryAdmission(command CreateCommand) bool {
 	status := strings.ToLower(strings.TrimSpace(command.Status))
-	return (status == "" || status == "open") &&
-		!strings.EqualFold(strings.TrimSpace(command.IssueType), "epic") &&
+	return (status == "" || status == string(StatusOpen)) &&
+		!strings.EqualFold(strings.TrimSpace(command.IssueType), string(TypeEpic)) &&
 		strings.TrimSpace(command.SourceRepo) == ""
 }
 

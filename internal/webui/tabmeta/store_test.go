@@ -2,11 +2,14 @@ package tabmeta
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
+
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 )
 
 const testWorkspace = "default"
@@ -432,15 +435,18 @@ func TestStoreWorkspaceScoping(t *testing.T) {
 
 func TestValidateWorkspaceName(t *testing.T) {
 	tests := []struct {
-		name  string
-		valid bool
+		name    string
+		valid   bool
+		wantErr string
 	}{
-		{"default", true},
-		{"my-workspace", true},
-		{"workspace_1", true},
-		{"", false},
-		{"invalid name", false},
-		{"bad:name", false},
+		{"default", true, ""},
+		{"my-workspace", true, ""},
+		{"workspace_1", true, ""},
+		{strings.Repeat("a", workspacemodule.MaxNameLength), true, ""},
+		{"", false, "workspace name is required"},
+		{"invalid name", false, "must match [a-zA-Z0-9_-]+"},
+		{"bad:name", false, "must match [a-zA-Z0-9_-]+"},
+		{strings.Repeat("a", workspacemodule.MaxNameLength+1), false, "workspace name is too long (max 64 characters)"},
 	}
 
 	for _, tt := range tests {
@@ -450,6 +456,9 @@ func TestValidateWorkspaceName(t *testing.T) {
 		}
 		if !tt.valid && err == nil {
 			t.Errorf("ValidateWorkspaceName(%q) = nil, want error", tt.name)
+		}
+		if tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)) {
+			t.Errorf("ValidateWorkspaceName(%q) = %v, want containing %q", tt.name, err, tt.wantErr)
 		}
 	}
 }

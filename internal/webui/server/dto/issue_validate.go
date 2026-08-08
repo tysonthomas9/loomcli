@@ -2,10 +2,9 @@ package dto
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/entity"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 // Validate checks that the CreateIssueRequest is well-formed.
@@ -25,21 +24,25 @@ func (r *CreateIssueRequest) Validate() error {
 }
 
 func validateCreateIssueCore(b *validationBuilder, r *CreateIssueRequest) {
-	trimmed := strings.TrimSpace(r.Title)
-	if trimmed == "" {
-		b.add("title", "is required")
-	} else if len(trimmed) > MaxTitleLength {
-		b.add("title", fmt.Sprintf("must be %d characters or less (got %d)", MaxTitleLength, len(trimmed)))
+	if err := workitems.ValidateTitle(r.Title); err != nil {
+		kind, _ := workitems.TitleValidationKindOf(err)
+		switch kind {
+		case workitems.TitleRequired:
+			b.add("title", "is required")
+		case workitems.TitleTooLong:
+			canonical := workitems.CanonicalTitle(r.Title)
+			b.add("title", fmt.Sprintf("must be %d characters or less (got %d)", MaxTitleLength, len(canonical)))
+		}
 	}
 	if r.IssueType == "" {
 		b.add("issue_type", "is required")
-	} else if !entity.IssueType(r.IssueType).IsValid() {
+	} else if !workitems.IssueType(r.IssueType).IsBuiltIn() {
 		b.add("issue_type", "must be one of: bug, feature, task, epic, chore")
 	}
 	if r.Priority < 0 || r.Priority > 4 {
 		b.add("priority", fmt.Sprintf("must be between 0 and 4 (got %d)", r.Priority))
 	}
-	if r.Status != "" && r.Status != "open" && r.Status != "deferred" {
+	if !workitems.Status(r.Status).IsCreateStatus() {
 		b.add("status", "must be open or deferred")
 	}
 }
@@ -73,6 +76,8 @@ func validateRFC3339Field(b *validationBuilder, field, value string) {
 // Validate checks that the PatchIssueRequest is well-formed.
 // Returns nil if valid (including all-nil fields = no-op update),
 // or *ValidationError with all field errors collected.
+//
+//nolint:funlen // The consolidation layer immediately above this stack base splits these validation groups.
 func (r *PatchIssueRequest) Validate() error {
 	if r == nil {
 		return &ValidationError{Errors: []FieldError{{Field: "request", Message: "is nil"}}}
@@ -82,11 +87,15 @@ func (r *PatchIssueRequest) Validate() error {
 
 	// title: if set, must be non-empty and within length (checked on trimmed value)
 	if r.Title != nil {
-		trimmed := strings.TrimSpace(*r.Title)
-		if trimmed == "" {
-			b.add("title", "cannot be empty")
-		} else if len(trimmed) > MaxTitleLength {
-			b.add("title", fmt.Sprintf("must be %d characters or less (got %d)", MaxTitleLength, len(trimmed)))
+		if err := workitems.ValidateTitle(*r.Title); err != nil {
+			kind, _ := workitems.TitleValidationKindOf(err)
+			switch kind {
+			case workitems.TitleRequired:
+				b.add("title", "cannot be empty")
+			case workitems.TitleTooLong:
+				canonical := workitems.CanonicalTitle(*r.Title)
+				b.add("title", fmt.Sprintf("must be %d characters or less (got %d)", MaxTitleLength, len(canonical)))
+			}
 		}
 	}
 
@@ -108,7 +117,7 @@ func (r *PatchIssueRequest) Validate() error {
 	if r.IssueType != nil {
 		if *r.IssueType == "" {
 			b.add("issue_type", "must be one of: bug, feature, task, epic, chore")
-		} else if !entity.IssueType(*r.IssueType).IsValid() {
+		} else if !workitems.IssueType(*r.IssueType).IsBuiltIn() {
 			b.add("issue_type", "must be one of: bug, feature, task, epic, chore")
 		}
 	}
@@ -120,7 +129,7 @@ func (r *PatchIssueRequest) Validate() error {
 
 	// agent_state: if set, must be valid
 	if r.AgentState != nil {
-		if !entity.AgentState(*r.AgentState).IsValid() {
+		if !workitems.AgentState(*r.AgentState).IsValid() {
 			b.add("agent_state", "must be one of: idle, spawning, running, working, stuck, done, stopped, dead (or empty to clear)")
 		}
 	}

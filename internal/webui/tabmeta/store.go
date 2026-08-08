@@ -19,6 +19,8 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 )
 
 const keyPrefix = "terminal:meta:"
@@ -107,11 +109,21 @@ func ValidateSessionName(name string) error {
 
 // ValidateWorkspaceName returns an error if the workspace name is invalid.
 func ValidateWorkspaceName(name string) error {
-	if name == "" {
-		return fmt.Errorf("workspace name is required")
-	}
-	if !validSessionName.MatchString(name) {
-		return fmt.Errorf("invalid workspace name %q: must match [a-zA-Z0-9_-]+", name)
+	if err := workspacemodule.ValidateName(name); err != nil {
+		kind, ok := workspacemodule.NameValidationKindOf(err)
+		if !ok {
+			return err
+		}
+		switch kind {
+		case workspacemodule.NameRequired:
+			return fmt.Errorf("workspace name is required")
+		case workspacemodule.NameTooLong:
+			return fmt.Errorf("workspace name is too long (max %d characters)", workspacemodule.MaxNameLength)
+		case workspacemodule.NameInvalidCharacters:
+			return fmt.Errorf("invalid workspace name %q: must match [a-zA-Z0-9_-]+", name)
+		default:
+			return err
+		}
 	}
 	return nil
 }

@@ -18,6 +18,7 @@ import (
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/runhistory"
+	serverhandler "github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
@@ -411,15 +412,15 @@ func (module *Module) decodeSessionRequest(
 		writeMappedError(response, interaction.ErrUnavailable)
 		return false
 	}
-	decoder := json.NewDecoder(http.MaxBytesReader(response, request.Body, maxSessionRequestBytes))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(value); err != nil {
-		writeError(response, http.StatusBadRequest, "invalid", "invalid Interaction session JSON")
+	err := serverhandler.DecodeOneJSON(response, request, value, serverhandler.JSONDecodeOptions{
+		MaxBytes: maxSessionRequestBytes, DisallowUnknownFields: true,
+	})
+	if errors.Is(err, serverhandler.ErrTrailingJSON) {
+		writeError(response, http.StatusBadRequest, "invalid", "Interaction request must contain exactly one JSON object")
 		return false
 	}
-	var extra any
-	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		writeError(response, http.StatusBadRequest, "invalid", "Interaction request must contain exactly one JSON object")
+	if err != nil {
+		writeError(response, http.StatusBadRequest, "invalid", "invalid Interaction session JSON")
 		return false
 	}
 	return true

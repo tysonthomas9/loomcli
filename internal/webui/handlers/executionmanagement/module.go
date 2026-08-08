@@ -14,6 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
+	serverhandler "github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
@@ -161,14 +162,14 @@ func (module *Module) resolveOperator(w http.ResponseWriter, request *http.Reque
 }
 
 func decodeOneObject(w http.ResponseWriter, request *http.Request, output any) error {
-	decoder := json.NewDecoder(http.MaxBytesReader(w, request.Body, maxWorkerProfileRequestBytes))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(output); err != nil {
-		return errors.New("invalid worker profile JSON: " + err.Error())
-	}
-	var extra any
-	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+	err := serverhandler.DecodeOneJSON(w, request, output, serverhandler.JSONDecodeOptions{
+		MaxBytes: maxWorkerProfileRequestBytes, DisallowUnknownFields: true,
+	})
+	if errors.Is(err, serverhandler.ErrTrailingJSON) {
 		return errors.New("worker profile request must contain exactly one JSON object")
+	}
+	if err != nil {
+		return errors.New("invalid worker profile JSON: " + err.Error())
 	}
 	return nil
 }
@@ -188,7 +189,8 @@ func writeMappedError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, workflowcataloghttp.ErrUnauthenticated):
 		writeError(w, http.StatusUnauthorized, "unauthenticated", "operator authentication required")
-	case errors.Is(err, authority.ErrWorkspaceMismatch), errors.Is(err, authority.ErrAdmissionDenied):
+	case errors.Is(err, authority.ErrWorkspaceMismatch), errors.Is(err, authority.ErrAdmissionDenied),
+		errors.Is(err, authority.ErrActionNotAllowed):
 		writeError(w, http.StatusForbidden, "forbidden", "operator is not allowed to manage this workspace")
 	case errors.Is(err, execution.ErrInvalid), errors.Is(err, domain.ErrInvalid):
 		writeError(w, http.StatusBadRequest, "invalid", err.Error())

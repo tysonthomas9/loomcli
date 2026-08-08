@@ -8,10 +8,9 @@ import (
 	"regexp"
 	"strings"
 
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/workspaceerrors"
 )
-
-const maxWorkspaceNameLen = 64
 
 var cloneURLPattern = regexp.MustCompile(`^(https://|git@)`)
 
@@ -31,36 +30,33 @@ func ValidateCloneURL(u string) error {
 }
 
 func validateWorkspaceName(name string) *ServiceError {
-	if name == "" {
-		return ErrValidation("name cannot be empty")
-	}
-	if len(name) > maxWorkspaceNameLen {
-		return ErrValidation(fmt.Sprintf("name too long (max %d characters)", maxWorkspaceNameLen))
-	}
-	if !validWorkspaceName(name) {
-		return ErrValidation("name must contain only alphanumeric characters, hyphens, and underscores")
-	}
-	return nil
+	return workspaceNameError(name, "name cannot be empty")
 }
 
-func validWorkspaceName(name string) bool {
-	for _, c := range name {
-		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_') {
-			return false
-		}
+func workspaceNameError(name, requiredMessage string) *ServiceError {
+	err := workspacemodule.ValidateName(name)
+	if err == nil {
+		return nil
 	}
-	return true
+	kind, ok := workspacemodule.NameValidationKindOf(err)
+	if !ok {
+		return ErrValidation(err.Error())
+	}
+	switch kind {
+	case workspacemodule.NameRequired:
+		return ErrValidation(requiredMessage)
+	case workspacemodule.NameTooLong:
+		return ErrValidation(fmt.Sprintf("name too long (max %d characters)", workspacemodule.MaxNameLength))
+	case workspacemodule.NameInvalidCharacters:
+		return ErrValidation("name must contain only alphanumeric characters, hyphens, and underscores")
+	default:
+		return ErrValidation(err.Error())
+	}
 }
 
 func validateWorkspaceCreateRequest(req *WorkspaceCreateRequest) *ServiceError {
-	if req.Name == "" {
-		return ErrValidation("name is required")
-	}
-	if len(req.Name) > maxWorkspaceNameLen {
-		return ErrValidation(fmt.Sprintf("name too long (max %d characters)", maxWorkspaceNameLen))
-	}
-	if !validWorkspaceName(req.Name) {
-		return ErrValidation("name must contain only alphanumeric characters, hyphens, and underscores")
+	if validationErr := workspaceNameError(req.Name, "name is required"); validationErr != nil {
+		return validationErr
 	}
 
 	switch req.Type {

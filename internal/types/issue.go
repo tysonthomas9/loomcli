@@ -190,11 +190,8 @@ func (i *Issue) ValidateWithCustomStatuses(customStatuses []string) error {
 // ValidateWithCustom checks if the issue has valid field values,
 // allowing custom statuses and types in addition to built-in ones.
 func (i *Issue) ValidateWithCustom(customStatuses, customTypes []string) error {
-	if len(i.Title) == 0 {
-		return fmt.Errorf("title is required")
-	}
-	if len(i.Title) > 500 {
-		return fmt.Errorf("title must be 500 characters or less (got %d)", len(i.Title))
+	if err := legacyTitleValidationError(i.Title); err != nil {
+		return err
 	}
 	if i.Priority < 0 || i.Priority > 4 {
 		return fmt.Errorf("priority must be between 0 and 4 (got %d)", i.Priority)
@@ -235,11 +232,8 @@ func (i *Issue) ValidateWithCustom(customStatuses, customTypes []string) error {
 // since the source repo already validated them when the issue was created.
 // This implements "trust the chain below you" from the HOP federation model.
 func (i *Issue) ValidateForImport(customStatuses []string) error {
-	if len(i.Title) == 0 {
-		return fmt.Errorf("title is required")
-	}
-	if len(i.Title) > 500 {
-		return fmt.Errorf("title must be 500 characters or less (got %d)", len(i.Title))
+	if err := legacyTitleValidationError(i.Title); err != nil {
+		return err
 	}
 	if i.Priority < 0 || i.Priority > 4 {
 		return fmt.Errorf("priority must be between 0 and 4 (got %d)", i.Priority)
@@ -272,6 +266,22 @@ func (i *Issue) ValidateForImport(customStatuses []string) error {
 		return fmt.Errorf("invalid agent state: %s", i.AgentState)
 	}
 	return nil
+}
+
+func legacyTitleValidationError(title string) error {
+	err := workitems.ValidateTitle(title)
+	kind, ok := workitems.TitleValidationKindOf(err)
+	if !ok {
+		return nil
+	}
+	switch kind {
+	case workitems.TitleRequired:
+		return fmt.Errorf("title is required")
+	case workitems.TitleTooLong:
+		return fmt.Errorf("title must be %d characters or less (got %d)", workitems.MaxTitleLength, len(workitems.CanonicalTitle(title)))
+	default:
+		return fmt.Errorf("title is invalid")
+	}
 }
 
 // SetDefaults applies default values for fields omitted during JSONL import.
