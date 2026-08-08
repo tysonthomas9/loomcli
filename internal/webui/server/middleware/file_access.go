@@ -8,7 +8,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/webui/fileaccess"
+	"github.com/tysonthomas9/loomcli/internal/webui/filecoord"
 )
 
 // WorkspaceRoleResolver authorizes a user for one canonical workspace.
@@ -62,43 +62,43 @@ func FileAccess(cfg FileAccessConfig) Middleware {
 				return
 			}
 
-			ctx := fileaccess.WithCapabilities(r.Context(), capabilities)
+			ctx := filecoord.WithFileCapabilities(r.Context(), capabilities)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }
 
-func remoteFileCapabilities(r *http.Request, cfg FileAccessConfig, logger *slog.Logger) (fileaccess.Capabilities, bool) {
+func remoteFileCapabilities(r *http.Request, cfg FileAccessConfig, logger *slog.Logger) (filecoord.FileCapabilities, bool) {
 	if !cfg.RemoteAuth {
-		return fileaccess.Capabilities{}, false
+		return filecoord.FileCapabilities{}, false
 	}
 	identity, ok := UserIdentityFromContext(r.Context())
 	if !ok || strings.TrimSpace(identity.UserID) == "" || cfg.ResolveRole == nil {
-		return fileaccess.Capabilities{}, false
+		return filecoord.FileCapabilities{}, false
 	}
 	workspaceID := WorkspaceFromContext(r.Context())
 	if strings.TrimSpace(workspaceID) == "" {
-		return fileaccess.Capabilities{}, false
+		return filecoord.FileCapabilities{}, false
 	}
 	role, err := cfg.ResolveRole(r.Context(), workspaceID, identity)
 	if err != nil {
 		logger.WarnContext(r.Context(), "workspace file role resolution failed",
 			"workspace", workspaceID, "user_id", identity.UserID, "err", err)
-		return fileaccess.Capabilities{}, false
+		return filecoord.FileCapabilities{}, false
 	}
 	return fileCapabilitiesForRole(role)
 }
 
-func fileCapabilitiesForRole(role string) (fileaccess.Capabilities, bool) {
+func fileCapabilitiesForRole(role string) (filecoord.FileCapabilities, bool) {
 	switch normalizeFileRole(role) {
 	case "admin", "owner", "maintainer":
-		return fileaccess.Capabilities{Read: true, Write: true, Sensitive: true}, true
+		return filecoord.FileCapabilities{Read: true, Write: true, Sensitive: true}, true
 	case "editor", "developer", "dev":
-		return fileaccess.Capabilities{Read: true, Write: true, Sensitive: true}, true
+		return filecoord.FileCapabilities{Read: true, Write: true, Sensitive: true}, true
 	case "viewer", "read_only", "readonly", "read-only":
-		return fileaccess.Capabilities{Read: true}, true
+		return filecoord.FileCapabilities{Read: true}, true
 	default:
-		return fileaccess.Capabilities{}, false
+		return filecoord.FileCapabilities{}, false
 	}
 }
 
@@ -142,10 +142,10 @@ func parseLoopbackOrigins(rawOrigins []string) []localFrontendOrigin {
 	return origins
 }
 
-func localFileCapabilities(r *http.Request, origins []localFrontendOrigin) (fileaccess.Capabilities, bool) {
+func localFileCapabilities(r *http.Request, origins []localFrontendOrigin) (filecoord.FileCapabilities, bool) {
 	requestHost := strings.ToLower(requestHostname(r.Host))
 	if !isLoopbackHostname(requestHost) {
-		return fileaccess.Capabilities{}, false
+		return filecoord.FileCapabilities{}, false
 	}
 	rawOrigin := strings.TrimSuffix(strings.TrimSpace(r.Header.Get("Origin")), "/")
 	for _, allowed := range origins {
@@ -154,15 +154,15 @@ func localFileCapabilities(r *http.Request, origins []localFrontendOrigin) (file
 		}
 		if rawOrigin == "" {
 			if strings.EqualFold(r.Host, allowed.authority) {
-				return fileaccess.Capabilities{Read: true, Write: true, Sensitive: true}, true
+				return filecoord.FileCapabilities{Read: true, Write: true, Sensitive: true}, true
 			}
 			continue
 		}
 		if strings.EqualFold(rawOrigin, allowed.origin) {
-			return fileaccess.Capabilities{Read: true, Write: true, Sensitive: true}, true
+			return filecoord.FileCapabilities{Read: true, Write: true, Sensitive: true}, true
 		}
 	}
-	return fileaccess.Capabilities{}, false
+	return filecoord.FileCapabilities{}, false
 }
 
 func requestHostname(authority string) string {
