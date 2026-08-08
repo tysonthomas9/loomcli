@@ -13,9 +13,9 @@ semantics:
     - vendor
     - worktrees
 ceilings:
-  total_packages: 234
+  total_packages: 232
   module_packages: 18
-  outside_module_packages: 216
+  outside_module_packages: 214
   one_file_packages: 96
   one_or_two_file_packages: 123
 packages:
@@ -47,7 +47,6 @@ packages:
   - internal/backend/api/gen
   - internal/backend/backendtest
   - internal/backend/fleet
-  - internal/backend/mapping
   - internal/backendnames
   - internal/bootstrap
   - internal/circuitbreaker
@@ -109,7 +108,6 @@ packages:
   - internal/driver/runtypes
   - internal/driver/sandbox
   - internal/driver/taskworktree
-  - internal/entity
   - internal/epicrunner
   - internal/events
   - internal/events/otelexport
