@@ -1,4 +1,4 @@
-package runtimewire
+package serve
 
 import (
 	"context"
@@ -11,9 +11,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/kv"
 )
 
-// InitStaleDetectorHandler starts a KV-backed stale detector when Redis is
+// initStaleDetectorHandler starts a KV-backed stale detector when Redis is
 // configured and otherwise returns a disabled status handler.
-func InitStaleDetectorHandler(ctx context.Context, redisAddr, redisPassword string) http.HandlerFunc {
+func initStaleDetectorHandler(ctx context.Context, redisAddr, redisPassword string) http.HandlerFunc {
 	if redisAddr == "" {
 		return handleStaleDetectorDisabled
 	}

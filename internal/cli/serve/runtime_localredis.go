@@ -1,4 +1,4 @@
-package runtimewire
+package serve
 
 import (
 	"context"
@@ -9,9 +9,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/localredis"
 )
 
-// StartLocalRedis boots an in-process miniredis for terminal-state persistence
+// startLocalRedis boots an in-process miniredis for terminal-state persistence
 // when no external Redis is configured.
-func StartLocalRedis(ctx context.Context, fleetMode bool) *localredis.Manager {
+func startLocalRedis(ctx context.Context, fleetMode bool) *localredis.Manager {
 	snapshotPath := ""
 	if dir := config.GetConfigDir(); dir != "" {
 		snapshotPath = filepath.Join(dir, "terminal-state", "snapshot.json")

@@ -1,4 +1,4 @@
-package logroutercmd
+package serve
 
 import (
 	"testing"
