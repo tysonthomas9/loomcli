@@ -1,7 +1,7 @@
 # Target Architecture and Capability Boundaries
 
-- **Status:** Target reviewed and approved through Phase 5; the Interaction
-  sole-writer ratchet is zero and the graph is at `completed_phase: 5`
+- **Status:** Target implemented through Phase 8; all ten capability roots,
+  sole-writer rules, and default-deny graph remain enforced after consolidation
 - **Scope:** In-process ownership and dependencies inside `loom serve`, operator CLI transport behavior, and corresponding frontend feature boundaries
 - **Migration:** [Modular Monolith Migration](README.md)
 

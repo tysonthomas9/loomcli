@@ -1,8 +1,8 @@
 # Current-State Evidence
 
-- **Status:** Historical Phase 1 through Phase 5 evidence remains immutable;
-  Phase 6 is complete at `completed_phase: 6`, including fresh signed
-  packaged-Desktop UI and real-Codex planner/coder acceptance
+- **Status:** Historical measurements remain immutable; Phase 8 consolidation
+  is complete at 189 production packages with exact shrink-only topology and
+  packaged-Desktop acceptance
 - **Snapshot:** 2026-07-15, pre-guardrail Loom code head `122d4d79` after refreshing `origin/v5`
 - **Migration:** [Modular Monolith Migration](README.md)
 

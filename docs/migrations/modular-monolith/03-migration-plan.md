@@ -239,6 +239,10 @@ Required proof includes stale-timeout and all-launch-path heartbeat fixes, `LOOM
 
 ## Phase 7 — remaining capabilities and frontend slices
 
+**Complete.** All ten capability roots and the remaining frontend slices are
+active; the exact source, gate, and packaged-product record is in the
+[Phase 7 evidence](14-phase-7-decisions-and-evidence.md).
+
 - Complete the remaining Work Items, Workspace, Source Control, Connectors, and Artifacts scope as active product changes touch it; do not recreate seams already required by Phases 4 and 5.
 - Use Observability as the lower-risk first frontend feature slice; defer Source Control UI movement until the credential-broker seam is stable.
 - Move a full UI route—view, hooks, API mapping, state, components, and tests—behind one feature public entry.
@@ -248,6 +252,23 @@ Required proof includes stale-timeout and all-launch-path heartbeat fixes, `LOOM
 - Reduce `App.tsx` to routing, providers, and shell composition.
 
 Do not combine desktop/SDK distribution or security changes with bulk frontend path movement.
+
+## Phase 8 — post-extraction consolidation
+
+**Complete.** Loom `35e61b31b` reduces production package directories from
+250 to 189 while retaining the ten owner roots and default-deny dependency
+graph. Exact shrink-only topology, knowledge-level consolidation, full gates,
+and packaged product acceptance are recorded in the
+[Phase 8 evidence](15-phase-8-consolidation-and-evidence.md).
+
+- Delete forwarding-only packages and duplicated models, policies, mappers,
+  and execution paths; do not optimize for file count alone.
+- Keep distinct protocol, credential, runtime, replaceable-adapter, and
+  cycle-breaking seams as real ports-and-adapters boundaries.
+- Ratchet total and small-package topology so consolidation cannot silently
+  regress into package-per-constructor structure.
+- Re-run the Phase 7 creation-template matrix plus restart, crash recovery,
+  executable-selection, and unavailable-backend negative rows.
 
 ## Strangler mechanics
 
