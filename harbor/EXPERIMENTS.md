@@ -529,26 +529,28 @@ reporting (SQL-literals-as-comments HIGH, .mjs scope, JS mutation classifier,
 edit-while-running contamination). Scripts: scripts/maint-*.sh; data in the
 trials repo docs/.
 
-### B2i. loom-generic-tasks-quality — quality-instrumented arm (PLANNED)
-Full plan: docs/quality-eval-plan.md. Stage A: per-trial quality scorecard
-(in-container fast panel + own-suite verdict at finalize → quality.json;
-host-side Sonar/Semgrep/mutation post-run). Stage B (the arm, base =
-verify_role=tasks per run 19): advisory QUALITY line per integration
-(complexity/dup/file-size/cycle deltas in the disposable worktree), one-line
-lead quality digest per pass (existing corrective machinery, no new agents —
-audit F4 argues against more verification minds), modest coder-template
-maintainability duty incl. test deadlines (F6), one seed-guidance sentence.
-LEAKAGE RULE (user's objection, folded): instruments split FED-BACK
-(CCN/dup/size/cycles — compliance only, never evidence) vs HELD-OUT
-(Sonar, Semgrep, blinded LLM judge, own-suite-green — the evidence set;
-mutation semi-held-out via the TDD duty, reported with caveat). Inference
-pre-registered: both sets improve → generalized; fed-back only → gaming
-DETECTED (that's the finding). B2i is a treated-vs-untreated TOOLING
-experiment against runs 19–21 — not a blind process measurement (the audit
-already is one). Targets: compliance 0 cycles/median ≤120/dup ≤1%; evidence
-smells/KLOC ≤10, Semgrep ≤0.5/KLOC, judge ≥ untreated, own suite GREEN,
-mutation ≥75%; gates/ux non-regression. Ladder: stub → codex vet → one
-$200 run.
+### B2j/B2k. maintainability-ownership FORK (PLANNED, supersedes B2i rev 2)
+Full plan: docs/quality-eval-plan.md rev 3. User direction: generic loom
+changes only, nothing task-specific; spec delivery untouched. NO metric is
+fed to any agent (rev-2 QUALITY-line loop PARKED as a possible third arm) —
+so the ENTIRE instrument set is held-out and the leakage question vanishes
+structurally. One variable, campaign-style: WHO owns maintainability.
+- B2j: persistent ARCHITECT session (`arch`, 4th controlled mind, vantage =
+  the codebase as a structure): reviews each integrated head read-only,
+  files refactor correctives via the app lane, ARCH: advisory comments on
+  in-review designs; never blocks/edits/runs/changes status. Prototypes an
+  `architect` stock role. +$20-40.
+- B2k: no new agent — the lead's standing prompt gains a short generic
+  maintainability section (decomposition preference, structural bar in
+  design reviews, refactor correctives). Tests "ownership is a sentence";
+  B2e zero-sum shadow watched via lead verify-task filing rate.
+Both: base = verify_role=tasks byte-stable; Stage-A scorecard at finalize
+(invisible to agents) + full audit toolchain post-run. Evidence targets: 0
+cycles, median file ≤120, dup ≤1%, smells/KLOC ≤10, Semgrep ≤0.5/KLOC, own
+suite GREEN, mutation ≥75%, blinded judge ≥ untreated; guards: site ≥0.469,
+integrations ≥19, ≤$200. Fork verdicts pre-registered (ARCH>LEAD → structure
+needs its own mind; LEAD≈ARCH → ship the sentence; both miss → run the
+parked feedback arm). Ladder: stub → codex vet → two sequential runs.
 
 ### B3. fractal-generic — infrastructure COMMITTED
 Mission mode `generic` (verbatim spec + finish sentence — the hardcoded
