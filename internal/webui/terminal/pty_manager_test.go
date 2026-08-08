@@ -460,7 +460,10 @@ func TestExplicitKillCanRepairAfterNaturalExitRetriesExhaust(t *testing.T) {
 	waitUntil(t, func() bool { return !m.HasSession(key) }, time.Second,
 		"natural exit retained dead process-local session")
 	waitUntil(t, func() bool {
-		return calls.Load() == int32(beforeKillRetryAttempts)
+		m.mu.Lock()
+		convergenceInFlight := m.converging[key]
+		m.mu.Unlock()
+		return calls.Load() == int32(beforeKillRetryAttempts) && !convergenceInFlight
 	},
 		4*time.Second, "natural-exit retries did not reach bounded exhaustion")
 
