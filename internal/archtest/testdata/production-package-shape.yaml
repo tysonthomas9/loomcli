@@ -13,11 +13,11 @@ semantics:
     - vendor
     - worktrees
 ceilings:
-  total_packages: 232
+  total_packages: 230
   module_packages: 18
-  outside_module_packages: 214
-  one_file_packages: 96
-  one_or_two_file_packages: 123
+  outside_module_packages: 212
+  one_file_packages: 95
+  one_or_two_file_packages: 122
 packages:
   - internal/agenterr
   - internal/agentpolicy
@@ -97,7 +97,6 @@ packages:
   - internal/cli/workflow
   - internal/cli/workspace
   - internal/configlock
-  - internal/debug
   - internal/domain
   - internal/driver
   - internal/driver/daytonahost
@@ -167,7 +166,6 @@ packages:
   - internal/modules/workitems
   - internal/modules/workspace
   - internal/netutil
-  - internal/notify
   - internal/observability/tracing
   - internal/ops
   - internal/pathsec
