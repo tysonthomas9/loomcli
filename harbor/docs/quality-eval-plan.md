@@ -74,24 +74,63 @@ Explicit non-changes: QA prompts byte-stable (their halves are proven; audit
 F4 says more verification attention ≠ quality); verifier untouched; no
 quality metric ever blocks integration in v1.
 
-## Pre-registered outcomes (vs runs 19–21 as baseline)
+## Leakage and validity (the objection that reshaped this design)
 
-Quality targets for the B2i artifact:
-- median prod file ≤120 SLOC; max ≤500 (runs 19/21 hit this; 20 didn't)
-- 0 import cycles (only run 19 achieved this)
-- duplication ≤1.0%
-- Sonar smells/KLOC ≤10 (best so far 6.2)
+Feeding quality metrics to the agents and then scoring on those same metrics
+would make the result circular: it would measure compliance with a shown
+rubric, not maintainability, and it would invite Goodharting (file-splitting
+to duck size metrics, restructuring duplication below jscpd's token window,
+CCN-shaving that moves complexity into the call graph). Two rules fix this:
+
+1. **Instruments are split into FED-BACK and HELD-OUT sets, fixed before the
+   run.** Fed-back (visible to agents via the QUALITY line and digest — these
+   become *compliance* data and can never support the headline claim): CCN,
+   duplication %, file size, import cycles. Held-out (no prompt, message, or
+   in-container artifact references them in any form — the *evidence* set):
+   Sonar smell density and cognitive/KLOC (different rule engine from
+   anything fed back), Semgrep density, the blinded LLM judge (naming,
+   abstraction, error handling — orthogonal to every fed-back number; the
+   strongest held-out instrument), own-suite-green, and the benchmark
+   gates/ux as non-regression guards. Semi-held-out, flagged: the mutation
+   score — the coder duty "a test that fails without the change" is generic
+   TDD practice but is also exactly what kills mutants, so that instrument is
+   partially coupled to the prompt and is reported with that caveat.
+2. **Inference logic pre-registered:** fed-back improves AND held-out
+   improves → the quality pressure generalized (the claim stands). Fed-back
+   improves but held-out does not → gaming detected (that is the finding;
+   no quality claim). Neither improves → the loop is inert.
+
+Framing consequence: B2i is NOT a measurement of whether the loom process
+naturally writes maintainable code — the audit already answered that,
+unprompted, and B2i's agents are no longer blind. B2i is a treated-vs-
+untreated TOOLING experiment: runs 19–21 are the untreated baseline and the
+claim under test is "loom + a quality loop delivers maintainable code without
+taxing the score" — the product question, and the same standard as real CI
+quality gates, which developers are shown by design. The benchmark eval
+itself (gates/ux/verifier) remains never-referenced, as in every prior arm.
+
+## Pre-registered outcomes (vs runs 19–21 as untreated baseline)
+
+Compliance targets (fed-back set — reported, never evidence):
+- median prod file ≤120 SLOC; max ≤500; 0 import cycles; duplication ≤1.0%
+
+Evidence targets (held-out set — the claim rests here):
+- Sonar smells/KLOC ≤10 and cognitive/KLOC ≤160 (bests so far: 6.2 / 149.8)
+- Semgrep ≤0.5 findings/KLOC
+- blinded LLM-judge maintainability ≥ untreated artifacts (protocol from the
+  hybrid design: fixed anchored rubric, redacted paths, numbered lines)
 - own suite green at finalize (run21 failed this)
-- mutation score ≥75% on the 8-mutant sample (best so far 75%)
+- mutation ≥75% on the 8-mutant sample (semi-held-out; reported with caveat)
 - comment density ≥2% would be a bonus; not a target (nobody hit 0.5%)
 
-Non-regression guards (the real experimental question — does quality pressure
-tax the score?):
-- gates + replica-ux within the observed band of the tasks family
-  (site partial ≥0.469; integrations ≥19; drained or near-drained)
+Non-regression guards (the other half of the experimental question — does
+quality pressure tax the score?):
+- gates + replica-ux within the tasks-family band (site partial ≥0.469;
+  integrations ≥19; drained or near-drained)
 - spend ≤ $200 cap; pass cadence unchanged
-Watch for Goodharting: agents splitting files to game size metrics shows up as
-rising edge counts/cycles — the coupling delta in B1 is the tripwire.
+Goodhart tripwires beyond the split: rising edge count/new cycles alongside
+falling file sizes; duplication migrating just under the 50-token jscpd
+window (checked post-run at min-tokens 30 as a sensitivity pass).
 
 ## Validation ladder (before any spend)
 

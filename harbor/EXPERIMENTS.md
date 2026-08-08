@@ -538,9 +538,17 @@ verify_role=tasks per run 19): advisory QUALITY line per integration
 lead quality digest per pass (existing corrective machinery, no new agents —
 audit F4 argues against more verification minds), modest coder-template
 maintainability duty incl. test deadlines (F6), one seed-guidance sentence.
-Pre-registered targets: 0 cycles, median file ≤120, dup ≤1%, smells/KLOC ≤10,
-own suite GREEN, mutation ≥75%, with gates/ux non-regression as the actual
-experimental question. Ladder: stub → codex vet → one $200 run.
+LEAKAGE RULE (user's objection, folded): instruments split FED-BACK
+(CCN/dup/size/cycles — compliance only, never evidence) vs HELD-OUT
+(Sonar, Semgrep, blinded LLM judge, own-suite-green — the evidence set;
+mutation semi-held-out via the TDD duty, reported with caveat). Inference
+pre-registered: both sets improve → generalized; fed-back only → gaming
+DETECTED (that's the finding). B2i is a treated-vs-untreated TOOLING
+experiment against runs 19–21 — not a blind process measurement (the audit
+already is one). Targets: compliance 0 cycles/median ≤120/dup ≤1%; evidence
+smells/KLOC ≤10, Semgrep ≤0.5/KLOC, judge ≥ untreated, own suite GREEN,
+mutation ≥75%; gates/ux non-regression. Ladder: stub → codex vet → one
+$200 run.
 
 ### B3. fractal-generic — infrastructure COMMITTED
 Mission mode `generic` (verbatim spec + finish sentence — the hardcoded
