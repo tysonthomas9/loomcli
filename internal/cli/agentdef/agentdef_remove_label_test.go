@@ -164,7 +164,7 @@ func TestAgentUpdateHooksPatch_RemoveLabel(t *testing.T) {
 		resetHookFlags(t)
 		agentUpdateRemoveLabels = []string{"needs-review"}
 
-		got, err := agentUpdateHooksPatch()
+		got, err := agentUpdateHooksPatch(false)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -181,7 +181,7 @@ func TestAgentUpdateHooksPatch_RemoveLabel(t *testing.T) {
 		agentUpdateClear = true
 		agentUpdateRemoveLabels = []string{"needs-review"}
 
-		_, err := agentUpdateHooksPatch()
+		_, err := agentUpdateHooksPatch(false)
 		if err == nil || !strings.Contains(err.Error(), "cannot be combined") {
 			t.Fatalf("error = %v, want a conflict error", err)
 		}
@@ -193,7 +193,7 @@ func TestAgentUpdateHooksPatch_RemoveLabel(t *testing.T) {
 	t.Run("the no-op error advertises the flag", func(t *testing.T) {
 		resetHookFlags(t)
 
-		_, err := agentUpdateHooksPatch()
+		_, err := agentUpdateHooksPatch(false)
 		if err == nil || !strings.Contains(err.Error(), "--on-complete-remove-label") {
 			t.Fatalf("error = %v, want the no-op error to list the removal flag", err)
 		}
@@ -203,7 +203,7 @@ func TestAgentUpdateHooksPatch_RemoveLabel(t *testing.T) {
 		resetHookFlags(t)
 		agentUpdateRemoveLabels = []string{" "}
 
-		if _, err := agentUpdateHooksPatch(); err == nil {
+		if _, err := agentUpdateHooksPatch(false); err == nil {
 			t.Fatal("expected a blank-label error")
 		}
 	})

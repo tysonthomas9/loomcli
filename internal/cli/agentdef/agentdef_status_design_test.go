@@ -242,7 +242,7 @@ func TestAgentUpdateHooksPatch_StatusAndDesign(t *testing.T) {
 		resetHookFlags(t)
 		agentUpdateWriteDesign = true
 
-		got, err := agentUpdateHooksPatch()
+		got, err := agentUpdateHooksPatch(false)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -256,7 +256,7 @@ func TestAgentUpdateHooksPatch_StatusAndDesign(t *testing.T) {
 		resetHookFlags(t)
 		agentUpdateSetStatus = "review"
 
-		got, err := agentUpdateHooksPatch()
+		got, err := agentUpdateHooksPatch(false)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -282,7 +282,7 @@ func TestAgentUpdateHooksPatch_StatusAndDesign(t *testing.T) {
 				agentUpdateClear = true
 				tt.set()
 
-				_, err := agentUpdateHooksPatch()
+				_, err := agentUpdateHooksPatch(false)
 				if err == nil || !strings.Contains(err.Error(), "cannot be combined") {
 					t.Fatalf("error = %v, want a conflict error", err)
 				}
@@ -296,7 +296,7 @@ func TestAgentUpdateHooksPatch_StatusAndDesign(t *testing.T) {
 	t.Run("the no-op error advertises both flags", func(t *testing.T) {
 		resetHookFlags(t)
 
-		_, err := agentUpdateHooksPatch()
+		_, err := agentUpdateHooksPatch(false)
 		if err == nil {
 			t.Fatal("expected the no-op error")
 		}
@@ -311,7 +311,7 @@ func TestAgentUpdateHooksPatch_StatusAndDesign(t *testing.T) {
 		resetHookFlags(t)
 		agentUpdateSetStatus = "closed"
 
-		if _, err := agentUpdateHooksPatch(); err == nil ||
+		if _, err := agentUpdateHooksPatch(false); err == nil ||
 			!strings.Contains(err.Error(), "close endpoint") {
 			t.Fatalf("error = %v, want the PATCH-contract refusal", err)
 		}

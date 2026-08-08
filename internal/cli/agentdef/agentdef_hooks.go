@@ -36,20 +36,37 @@ var (
 	agentUpdateClear        bool
 )
 
+// Identity flags on `update`. store.AgentUpdate has supported these fields all
+// along; without CLI exposure, re-scoping an agent to an epic or changing its
+// role meant remove + re-add (and losing its hooks with it).
+var (
+	agentUpdateParent string
+	agentUpdateRole   string
+	agentUpdateMode   string
+)
+
 var agentUpdateCmd = &cobra.Command{
 	Use:   "update <NAME>",
-	Short: "Set or clear an agent's post-run completion hooks",
-	Long: `Set or clear the supervisor-owned on_complete pipeline for an agent.
+	Short: "Update an agent's hooks, epic scope, role, or mode",
+	Long: `Update an existing agent definition.
 
-The supervisor — not the agent's prompt — performs these writes after a
-successful run, in order, stopping at the first failure. A failed write demotes
-the run to failed so the owned task is reopened and retried.
+Completion hooks: the supervisor — not the agent's prompt — performs these
+writes after a successful run, in order, stopping at the first failure. A
+failed write demotes the run to failed so the owned task is reopened and
+retried.
+
+Identity fields: --parent scopes the agent's claims to an epic (empty string
+clears the scope), --role and --mode change how the daemon runs it. Changes
+apply on the daemon's next config poll; a running attempt keeps the entry it
+started with.
 
   loom agentdef update critic --on-complete-comment-reply --on-complete-add-label criticized
   loom agentdef update critic --on-complete-remove-label needs-review --on-complete-add-label reviewed
   loom agentdef update planner --on-complete-write-design --on-complete-set-status review
   loom agentdef update planner --on-complete-set-status "blocked:upstream API decision pending"
-  loom agentdef update critic --clear-on-complete`,
+  loom agentdef update critic --clear-on-complete
+  loom agentdef update worker --parent EPIC-7
+  loom agentdef update worker --parent ""`,
 	Args: cobra.ExactArgs(1),
 	RunE: runAgentUpdate,
 }
@@ -252,30 +269,76 @@ func parseCycleSpec(spec string) (*domain.AgentHookCycle, error) {
 	return cyc, nil
 }
 
-func runAgentUpdate(_ *cobra.Command, args []string) error {
-	hooks, err := agentUpdateHooksPatch()
+func runAgentUpdate(cmd *cobra.Command, args []string) error {
+	patch, identityChanged, err := agentUpdateIdentityPatch(cmd.Flags().Changed)
 	if err != nil {
 		return err
 	}
+	hooks, err := agentUpdateHooksPatch(identityChanged)
+	if err != nil {
+		return err
+	}
+	patch.Hooks = hooks
 	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		a, err := h.Store.Agents().Update(ctx, ws, args[0], store.AgentUpdate{Hooks: hooks})
+		a, err := h.Store.Agents().Update(ctx, ws, args[0], patch)
 		if err != nil {
 			return fmt.Errorf("update agent: %w", err)
 		}
-		if hooks.IsEmpty() {
-			fmt.Printf("Cleared on_complete hooks for %s/%s\n", ws, a.Name)
-			return nil
+		if identityChanged {
+			parent := a.Parent
+			if parent == "" {
+				parent = "(none)"
+			}
+			fmt.Printf("Updated agent %s/%s (role=%s mode=%s parent=%s)\n", ws, a.Name, a.RoleName, a.Mode, parent)
 		}
-		fmt.Printf("Updated on_complete hooks for %s/%s\n", ws, a.Name)
-		printHookPipeline(a.Hooks)
+		switch {
+		case hooks == nil:
+			// hooks untouched
+		case hooks.IsEmpty():
+			fmt.Printf("Cleared on_complete hooks for %s/%s\n", ws, a.Name)
+		default:
+			fmt.Printf("Updated on_complete hooks for %s/%s\n", ws, a.Name)
+			printHookPipeline(a.Hooks)
+		}
 		return nil
 	})
+}
+
+// agentUpdateIdentityPatch builds the non-hook part of the update from the
+// identity flags. changed reports whether a flag was explicitly passed, so
+// `--parent ""` (clear the epic scope) is distinguishable from "not given".
+func agentUpdateIdentityPatch(changed func(string) bool) (store.AgentUpdate, bool, error) {
+	patch := store.AgentUpdate{}
+	touched := false
+	if changed("parent") {
+		p := strings.TrimSpace(agentUpdateParent)
+		patch.Parent = &p
+		touched = true
+	}
+	if changed("role") {
+		r := strings.TrimSpace(agentUpdateRole)
+		if r == "" {
+			return store.AgentUpdate{}, false, fmt.Errorf("--role requires a non-empty role name")
+		}
+		patch.RoleName = &r
+		touched = true
+	}
+	if changed("mode") {
+		m := strings.TrimSpace(agentUpdateMode)
+		if m != "" && m != string(domain.AgentModeEphemeral) && m != string(domain.AgentModeService) {
+			return store.AgentUpdate{}, false, fmt.Errorf("--mode must be %q or %q (empty clears it)", domain.AgentModeEphemeral, domain.AgentModeService)
+		}
+		mode := domain.AgentMode(m)
+		patch.Mode = &mode
+		touched = true
+	}
+	return patch, touched, nil
 }
 
 // agentUpdateHooksPatch resolves the flags to a store patch value: a non-nil
 // empty pipeline means "clear". Conflicting and no-op invocations are errors
 // rather than silent successes, so a typo never looks like it took effect.
-func agentUpdateHooksPatch() (*domain.AgentHooks, error) {
+func agentUpdateHooksPatch(identityChanged bool) (*domain.AgentHooks, error) {
 	setRequested := agentUpdateCommentReply || agentUpdateWriteDesign || len(agentUpdateLabels) > 0 ||
 		len(agentUpdateRemoveLabels) > 0 || agentUpdateSetStatus != "" ||
 		agentUpdateClose || agentUpdateCycle != ""
@@ -286,10 +349,12 @@ func agentUpdateHooksPatch() (*domain.AgentHooks, error) {
 			"--on-complete-set-status, --on-complete-close or --on-complete-cycle")
 	case agentUpdateClear:
 		return &domain.AgentHooks{}, nil
+	case !setRequested && identityChanged:
+		return nil, nil // identity-only update; leave the pipeline untouched
 	case !setRequested:
-		return nil, fmt.Errorf("nothing to update: pass --on-complete-comment-reply, --on-complete-write-design, " +
-			"--on-complete-add-label, --on-complete-remove-label, --on-complete-set-status, " +
-			"--on-complete-close and/or --on-complete-cycle, or --clear-on-complete")
+		return nil, fmt.Errorf("nothing to update: pass --parent/--role/--mode, --on-complete-comment-reply, " +
+			"--on-complete-write-design, --on-complete-add-label, --on-complete-remove-label, " +
+			"--on-complete-set-status, --on-complete-close and/or --on-complete-cycle, or --clear-on-complete")
 	}
 	return hooksFromFlags(agentUpdateCommentReply, agentUpdateWriteDesign, agentUpdateLabels,
 		agentUpdateRemoveLabels, agentUpdateSetStatus, agentUpdateClose, agentUpdateCycle)
