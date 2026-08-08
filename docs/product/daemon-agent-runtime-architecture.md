@@ -240,6 +240,26 @@ agent runner:
     idle/backoff
 ```
 
+The cost of detecting "no work" differs by where it happens, so the supervisor
+backs off differently depending on the site:
+
+- **Pre-spawn** — the claim gate rejects before spawning (one `Ready` query;
+  built-in roles, or any role with a `task_filter`). Cheap, so this keeps a
+  fixed poll (`restart_policy.no_work_backoff`, default 30s) regardless of how
+  long the streak runs.
+- **Post-spawn** — a whole agent process ran (prompt load, backend session,
+  full turn) and still found nothing to act on, whether because it never held
+  a claim or because it explicitly reported `loom complete --no-work` after
+  holding one. This is expensive to repeat, so it backs off exponentially,
+  capped at `restart_policy.no_work_backoff_max` (default 900s).
+
+A custom advisory/read-only role's task-selection logic typically lives in
+its prompt rather than a `task_filter`, so the cheap pre-spawn gate is
+unavailable to it — every no-op costs a full spawn. `loom complete --no-work`
+lets such a role say "nothing to do" explicitly (via a marker file the
+supervisor reads at exit) so it gets the post-spawn exponential backoff
+instead of respawning on the fixed cadence forever.
+
 FleetDB must make the claim atomic. It does not need to pick the task.
 
 ## Required Data Model

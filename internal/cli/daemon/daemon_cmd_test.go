@@ -1411,15 +1411,16 @@ func TestFormatDaemonDuration(t *testing.T) {
 func TestDaemonAgentStatus_NewFields_JSON(t *testing.T) {
 	backoffTime := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
 	status := DaemonAgentStatus{
-		Worktree:       "falcon",
-		Role:           "plan",
-		PID:            12345,
-		Status:         "running",
-		WorktreePath:   "/path/to/falcon",
-		LastErrorClass: "RateLimited",
-		NoWorkCount:    3,
-		BackoffUntil:   backoffTime,
-		RemoteBranch:   "origin/main",
+		Worktree:         "falcon",
+		Role:             "plan",
+		PID:              12345,
+		Status:           "running",
+		WorktreePath:     "/path/to/falcon",
+		LastErrorClass:   "RateLimited",
+		NoWorkCount:      3,
+		NoWorkSpawnCount: 2,
+		BackoffUntil:     backoffTime,
+		RemoteBranch:     "origin/main",
 	}
 
 	data, err := json.Marshal(status)
@@ -1432,7 +1433,7 @@ func TestDaemonAgentStatus_NewFields_JSON(t *testing.T) {
 		t.Fatalf("failed to unmarshal: %v", err)
 	}
 
-	expectedKeys := []string{"worktree_path", "last_error_class", "no_work_count", "backoff_until", "remote_branch"}
+	expectedKeys := []string{"worktree_path", "last_error_class", "no_work_count", "no_work_spawn_count", "backoff_until", "remote_branch"}
 	for _, key := range expectedKeys {
 		if _, ok := m[key]; !ok {
 			t.Errorf("expected JSON key %q not found", key)
@@ -1452,6 +1453,9 @@ func TestDaemonAgentStatus_NewFields_JSON(t *testing.T) {
 	}
 	if roundTrip.NoWorkCount != 3 {
 		t.Errorf("NoWorkCount = %d, want 3", roundTrip.NoWorkCount)
+	}
+	if roundTrip.NoWorkSpawnCount != 2 {
+		t.Errorf("NoWorkSpawnCount = %d, want 2", roundTrip.NoWorkSpawnCount)
 	}
 	if roundTrip.RemoteBranch != "origin/main" {
 		t.Errorf("RemoteBranch = %q, want %q", roundTrip.RemoteBranch, "origin/main")
@@ -1476,7 +1480,7 @@ func TestDaemonAgentStatus_NewFields_OmitEmpty(t *testing.T) {
 		t.Fatalf("failed to unmarshal: %v", err)
 	}
 
-	omittedKeys := []string{"worktree_path", "last_error_class", "no_work_count", "remote_branch"}
+	omittedKeys := []string{"worktree_path", "last_error_class", "no_work_count", "no_work_spawn_count", "remote_branch"}
 	for _, key := range omittedKeys {
 		if _, ok := m[key]; ok {
 			t.Errorf("key %q should be omitted when zero/empty", key)
@@ -1492,14 +1496,15 @@ func TestWriteStateFile_NewFields_RoundTrip(t *testing.T) {
 
 	agents := []SupervisedAgentStatus{
 		{
-			Worktree:       "falcon",
-			Role:           "plan",
-			PID:            0,
-			WorktreePath:   "/path/to/falcon",
-			LastErrorClass: "Timeout",
-			NoWorkCount:    7,
-			BackoffUntil:   backoffTime,
-			RemoteBranch:   "origin/develop",
+			Worktree:         "falcon",
+			Role:             "plan",
+			PID:              0,
+			WorktreePath:     "/path/to/falcon",
+			LastErrorClass:   "Timeout",
+			NoWorkCount:      7,
+			NoWorkSpawnCount: 4,
+			BackoffUntil:     backoffTime,
+			RemoteBranch:     "origin/develop",
 		},
 	}
 
@@ -1526,6 +1531,9 @@ func TestWriteStateFile_NewFields_RoundTrip(t *testing.T) {
 	}
 	if a.NoWorkCount != 7 {
 		t.Errorf("NoWorkCount = %d, want 7", a.NoWorkCount)
+	}
+	if a.NoWorkSpawnCount != 4 {
+		t.Errorf("NoWorkSpawnCount = %d, want 4", a.NoWorkSpawnCount)
 	}
 	if !a.BackoffUntil.Equal(backoffTime) {
 		t.Errorf("BackoffUntil = %v, want %v", a.BackoffUntil, backoffTime)

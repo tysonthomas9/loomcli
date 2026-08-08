@@ -24,6 +24,7 @@ func TestApplyRestartPolicyDefaults_AllNil(t *testing.T) {
 		{"RateLimitNoCount", *rp.RateLimitNoCount, true},
 		{"TimeoutBackoff", *rp.TimeoutBackoff, 5},
 		{"NoWorkBackoff", *rp.NoWorkBackoff, 30},
+		{"NoWorkBackoffMax", *rp.NoWorkBackoffMax, 900},
 		{"IdlePollInterval", *rp.IdlePollInterval, 30},
 	}
 	for _, c := range checks {
@@ -51,6 +52,9 @@ func TestApplyRestartPolicyDefaults_PartiallySet(t *testing.T) {
 	}
 	if *rp.NoWorkBackoff != 30 {
 		t.Errorf("NoWorkBackoff = %d, want 30", *rp.NoWorkBackoff)
+	}
+	if *rp.NoWorkBackoffMax != 900 {
+		t.Errorf("NoWorkBackoffMax = %d, want 900", *rp.NoWorkBackoffMax)
 	}
 }
 
@@ -95,6 +99,9 @@ func TestResolvedConfigForDisplay_Integration(t *testing.T) {
 	if display.Daemon.RestartPolicy.NoWorkBackoff == nil || *display.Daemon.RestartPolicy.NoWorkBackoff != 30 {
 		t.Error("NoWorkBackoff should be 30")
 	}
+	if display.Daemon.RestartPolicy.NoWorkBackoffMax == nil || *display.Daemon.RestartPolicy.NoWorkBackoffMax != 900 {
+		t.Error("NoWorkBackoffMax should be 900")
+	}
 	if *display.Daemon.RestartPolicy.MaxRetries != 3 {
 		t.Errorf("MaxRetries = %d, want 3", *display.Daemon.RestartPolicy.MaxRetries)
 	}
@@ -135,5 +142,8 @@ func TestResolvedConfigForDisplay_DoesNotMutateOriginal(t *testing.T) {
 	}
 	if cfg.Daemon.RestartPolicy.NoWorkBackoff != nil {
 		t.Error("Original NoWorkBackoff should still be nil")
+	}
+	if cfg.Daemon.RestartPolicy.NoWorkBackoffMax != nil {
+		t.Error("Original NoWorkBackoffMax should still be nil")
 	}
 }

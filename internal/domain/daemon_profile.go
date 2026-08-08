@@ -36,11 +36,12 @@ type RestartPolicy struct {
 	RateLimitBackoff *int  `json:"rate_limit_backoff,omitempty"`  // seconds
 	RateLimitMaxWait *int  `json:"rate_limit_max_wait,omitempty"` // seconds
 	RateLimitNoCount *bool `json:"rate_limit_no_count,omitempty"`
-	TimeoutBackoff   *int  `json:"timeout_backoff,omitempty"`    // seconds
-	NoWorkBackoff    *int  `json:"no_work_backoff,omitempty"`    // seconds
-	IdlePollInterval *int  `json:"idle_poll_interval,omitempty"` // seconds
-	YieldTimeout     *int  `json:"yield_timeout,omitempty"`      // seconds
-	SigtermTimeout   *int  `json:"sigterm_timeout,omitempty"`    // seconds
+	TimeoutBackoff   *int  `json:"timeout_backoff,omitempty"`     // seconds
+	NoWorkBackoff    *int  `json:"no_work_backoff,omitempty"`     // seconds
+	NoWorkBackoffMax *int  `json:"no_work_backoff_max,omitempty"` // seconds; cap for the post-spawn no-work exponential backoff
+	IdlePollInterval *int  `json:"idle_poll_interval,omitempty"`  // seconds
+	YieldTimeout     *int  `json:"yield_timeout,omitempty"`       // seconds
+	SigtermTimeout   *int  `json:"sigterm_timeout,omitempty"`     // seconds
 }
 
 // OTelSettings configures the OpenTelemetry exporter on the daemon.

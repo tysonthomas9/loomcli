@@ -294,6 +294,9 @@ func (s *Supervisor) setPreflightError(ap *AgentProcess, class agenterr.Outcome,
 	ap.LastExit = time.Now()
 	ap.LastError = &agenterr.AgentError{Class: class, Message: message}
 	ap.LastNoWork = class.Is(agenterr.NoWorkOutcome)
+	// Detected before spawning (one Ready query) — cheap, so this keeps the
+	// fixed poll cadence rather than the post-spawn exponential backoff.
+	ap.LastNoWorkPostSpawn = false
 	ap.Mu.Unlock()
 }
 

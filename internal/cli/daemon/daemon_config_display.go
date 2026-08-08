@@ -35,6 +35,9 @@ func applyRestartPolicyDefaults(rp *config.RestartPolicy) {
 	if rp.NoWorkBackoff == nil {
 		rp.NoWorkBackoff = config.IntPtr(30)
 	}
+	if rp.NoWorkBackoffMax == nil {
+		rp.NoWorkBackoffMax = config.IntPtr(900)
+	}
 	if rp.IdlePollInterval == nil {
 		rp.IdlePollInterval = config.IntPtr(30)
 	}
@@ -54,57 +57,34 @@ func maskDaemonSecrets(ds *config.DaemonSettings) {
 	}
 }
 
+// cloneIntPtr returns a fresh pointer to a copy of *v, or nil if v is nil.
+func cloneIntPtr(v *int) *int {
+	if v == nil {
+		return nil
+	}
+	c := *v
+	return &c
+}
+
 // deepCopyRestartPolicy returns a deep copy of src with all pointer fields cloned.
 func deepCopyRestartPolicy(src *config.RestartPolicy) config.RestartPolicy {
 	dst := *src
-	if src.MaxRetries != nil {
-		v := *src.MaxRetries
-		dst.MaxRetries = &v
-	}
-	if src.BackoffInitial != nil {
-		v := *src.BackoffInitial
-		dst.BackoffInitial = &v
-	}
-	if src.BackoffMax != nil {
-		v := *src.BackoffMax
-		dst.BackoffMax = &v
-	}
-	if src.OutputTimeout != nil {
-		v := *src.OutputTimeout
-		dst.OutputTimeout = &v
-	}
-	if src.RateLimitBackoff != nil {
-		v := *src.RateLimitBackoff
-		dst.RateLimitBackoff = &v
-	}
-	if src.RateLimitMaxWait != nil {
-		v := *src.RateLimitMaxWait
-		dst.RateLimitMaxWait = &v
-	}
+	dst.MaxRetries = cloneIntPtr(src.MaxRetries)
+	dst.BackoffInitial = cloneIntPtr(src.BackoffInitial)
+	dst.BackoffMax = cloneIntPtr(src.BackoffMax)
+	dst.OutputTimeout = cloneIntPtr(src.OutputTimeout)
+	dst.RateLimitBackoff = cloneIntPtr(src.RateLimitBackoff)
+	dst.RateLimitMaxWait = cloneIntPtr(src.RateLimitMaxWait)
 	if src.RateLimitNoCount != nil {
 		v := *src.RateLimitNoCount
 		dst.RateLimitNoCount = &v
 	}
-	if src.TimeoutBackoff != nil {
-		v := *src.TimeoutBackoff
-		dst.TimeoutBackoff = &v
-	}
-	if src.NoWorkBackoff != nil {
-		v := *src.NoWorkBackoff
-		dst.NoWorkBackoff = &v
-	}
-	if src.IdlePollInterval != nil {
-		v := *src.IdlePollInterval
-		dst.IdlePollInterval = &v
-	}
-	if src.YieldTimeout != nil {
-		v := *src.YieldTimeout
-		dst.YieldTimeout = &v
-	}
-	if src.SigtermTimeout != nil {
-		v := *src.SigtermTimeout
-		dst.SigtermTimeout = &v
-	}
+	dst.TimeoutBackoff = cloneIntPtr(src.TimeoutBackoff)
+	dst.NoWorkBackoff = cloneIntPtr(src.NoWorkBackoff)
+	dst.NoWorkBackoffMax = cloneIntPtr(src.NoWorkBackoffMax)
+	dst.IdlePollInterval = cloneIntPtr(src.IdlePollInterval)
+	dst.YieldTimeout = cloneIntPtr(src.YieldTimeout)
+	dst.SigtermTimeout = cloneIntPtr(src.SigtermTimeout)
 	return dst
 }
 

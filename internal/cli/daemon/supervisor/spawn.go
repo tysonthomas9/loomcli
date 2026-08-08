@@ -64,6 +64,7 @@ func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 
 	cmd.Env = s.appendDaemonEnv(cmd.Env)
 	cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_YIELD_FILE=%s", filepath.Join(ap.WorktreePath, YieldFileName)))
+	cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_NOWORK_FILE=%s", filepath.Join(ap.WorktreePath, NoWorkFileName)))
 	cmd.Env = appendSessionEnv(cmd.Env, ap)
 
 	// Propagate the active trace context so the agent subprocess's bootstrap

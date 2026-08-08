@@ -65,6 +65,9 @@ func (s *Supervisor) handleEpicTransition(ap *AgentProcess) {
 			}
 		}
 		ap.LastNoWork = true
+		// handleEpicTransition is called from spawnAndWait after a real run,
+		// so this is a post-spawn no-work detection.
+		ap.LastNoWorkPostSpawn = true
 		ap.Mu.Unlock()
 	}
 }

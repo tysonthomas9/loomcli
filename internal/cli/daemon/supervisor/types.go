@@ -51,11 +51,13 @@ type AgentProcess struct {
 	LastExitCode   int       // exit code from last run
 	AssignedEpicID string    // epic this agent is currently assigned to (empty = non-epic mode)
 
-	LastError      *agenterr.AgentError // classified error from most recent exit (nil on clean exit)
-	RateRetryCount int                  // consecutive rate-limit retries (separate from RestartCount)
-	LastNoWork     bool                 // true if last exit was due to no claimable tasks
-	NoWorkCount    int                  // consecutive NoWork exits (reset on non-NoWork exit)
-	BlockCount     int                  // block cycles since the last successful run (drives BlockBudget escalation; display-only in the state file, never hydrated across daemon restarts)
+	LastError           *agenterr.AgentError // classified error from most recent exit (nil on clean exit)
+	RateRetryCount      int                  // consecutive rate-limit retries (separate from RestartCount)
+	LastNoWork          bool                 // true if last exit was due to no claimable tasks
+	NoWorkCount         int                  // consecutive NoWork exits (reset on non-NoWork exit)
+	NoWorkSpawnCount    int                  // consecutive POST-SPAWN no-work exits; drives the exponential no-work backoff
+	LastNoWorkPostSpawn bool                 // true if the most recent no-work was detected after a spawn (vs. the cheap pre-spawn claim gate)
+	BlockCount          int                  // block cycles since the last successful run (drives BlockBudget escalation; display-only in the state file, never hydrated across daemon restarts)
 
 	CurrentBackendIdx int       // 0=primary, 1+=fallback index into Entry.FallbackBackends
 	BackoffUntil      time.Time // when current backoff sleep ends (zero if not in backoff)
@@ -66,7 +68,7 @@ type AgentProcess struct {
 
 	StopReason StopReason // why the agent was stopped (set at decision site, empty while running)
 
-	Mu sync.Mutex // protects Cmd, Pid, LogFile, restart tracking, AssignedEpicID, AssignedTaskID, RequestedTaskID, ResumeTaskID, ResumeFailures, RecoveryMode, LastError, CurrentBackendIdx, Session, AgentSessionID, ParentSessionID, AgentLeaseID, AgentLeaseToken, ownership fields, TranscriptPath, BeforeRef, StopReason, LastActivity
+	Mu sync.Mutex // protects Cmd, Pid, LogFile, restart tracking (including NoWorkSpawnCount, LastNoWorkPostSpawn), AssignedEpicID, AssignedTaskID, RequestedTaskID, ResumeTaskID, ResumeFailures, RecoveryMode, LastError, CurrentBackendIdx, Session, AgentSessionID, ParentSessionID, AgentLeaseID, AgentLeaseToken, ownership fields, TranscriptPath, BeforeRef, StopReason, LastActivity
 }
 
 // StopReason identifies why an agent was stopped.
@@ -141,6 +143,7 @@ type SupervisedAgentStatus struct {
 	StopReason             StopReason // why the agent stopped (empty while running)
 	LastErrorClass         string     // string representation of last error class (e.g. "RateLimited")
 	NoWorkCount            int        // consecutive NoWork exits
+	NoWorkSpawnCount       int        // consecutive POST-SPAWN no-work exits (drives the exponential no-work backoff)
 	BlockCount             int        // block cycles since the last successful run
 	BackoffUntil           time.Time  // when backoff sleep ends (zero if not in backoff)
 	RemoteBranch           string     // remote tracking ref (e.g. "origin/main")
