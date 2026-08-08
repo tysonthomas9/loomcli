@@ -1,11 +1,14 @@
 # Phase 7 Decisions and Evidence
 
 - **Status:** Complete
-- **Date:** 2026-08-06
-- **Loom implementation head:** `5adee3407`
+- **Date:** 2026-08-07
+- **Loom implementation head:** `c3b9cb1bc`
+- **Topology-hardening head:** `d8f7f1387`
+- **Initial completion head:** `5adee3407`
 - **FleetDB companion head:** `b71dec5`
-- **Workspaces:** `PHASE7-PROOF-20260804` and fresh cleanup proof
-  `PHASE7-CLEANUP-PROOF`
+- **Workspaces:** `PHASE7-PROOF-20260804`, fresh cleanup proof
+  `PHASE7-CLEANUP-PROOF`, and final packaged restart proof
+  `PHASE7-FINAL-PROOF3-20260807`
 - **Product boundary:** signed packaged Desktop, real Codex, local delivery;
   GitHub mutations explicitly waived by the operator
 
@@ -23,9 +26,9 @@ decision. The current measured inventory is:
 | Guard | Final value |
 | ----- | ----------: |
 | Active capability roots | 10 |
-| Composite Store references | 61 |
-| Composite Store references outside composition | 51 |
-| Legacy handler imports | 29 |
+| Composite Store references | 18 |
+| Composite Store references outside composition | 0 |
+| Legacy handler imports | 27 |
 | Legacy service-handler imports | 0 |
 | Mutation commands | 107 |
 | Primary direct-write rows | 102 |
@@ -68,7 +71,7 @@ the terminal contract to `internal/webui/terminal`.
 
 As a result, `internal/webui/service` and `internal/webui/svcimpl` contain no
 production or test source files, and handlers have zero imports of either
-legacy service package. The 29 remaining handler exceptions are generic
+legacy service package. The 27 remaining handler exceptions are generic
 delivery dependencies measured by the broader handler guard; they are not
 imports of the retired service centers. The exact `internal/app/*` purity rule
 was retained: infrastructure-bearing coordination was not hidden inside a
@@ -88,6 +91,52 @@ insertions and `24,119` deletions, a net removal of `1,638` lines. The larger
 stack additions are the new capability modules, adapters, tests, and evidence;
 the closing commit is the explicit deletion of the displaced legacy
 implementation.
+
+### Post-completion topology hardening
+
+A final ownership audit after the initial completion decision found that the
+source graph still exposed retired horizontal compatibility packages even
+though their capabilities had moved under `internal/modules/*`. The follow-up
+cleanup removes the remaining domain/entity/type aliases and tombstones the
+old `agentinbox`, `connector`, `leadcontrol`, `stacklineage`, `stackpublish`,
+`stackstore`, `trigger`, `webui/service`, `webui/svcimpl`, `workspace`, and
+`workflows` roots so they cannot silently return.
+
+The surviving implementations now live at their actual ownership boundary:
+Interaction owns inbox behavior; Connectors owns catalog and provider
+contracts; Source Control owns lineage while its persistence and publication
+adapters live in infrastructure; Workspace IDs are platform primitives; and
+Automation infrastructure owns trigger delivery plus await reconciliation and
+timeout recovery. Driver composition no longer creates a private stack store
+fallback, so source-control lifecycle state comes only from the composed owner
+port.
+
+The composite Store baseline is now an exact 18-reference allowlist, all at
+composition or compatibility boundaries, with zero capability use outside
+composition. The alias guard rejects any exported alias from the retired
+domain/entity/type buckets, and the legacy-root guard fails if any tombstoned
+package is recreated. The exact architecture pass reports 10 capability
+roots, 18 Store references, zero outside composition, 27 legacy handler
+imports, 102 direct-write rows, 107 mutation commands, 71 runtime components,
+80 goroutine launch sites, all six performance rows, all 11 profiles, and zero
+pending decisions. The last measured architecture analyzer process-tree peak
+was 1.25 GiB under the unchanged 2 GiB ceiling.
+
+Implementation commit `d8f7f1387` changes 359 files with 3,263 insertions and
+5,042 deletions, a net removal of 1,779 lines. The exact source passes the full
+Loom aggregate gate with the companion source and freshly built binary pinned
+to FleetDB `b71dec551`; the generic sibling FleetDB checkout was deliberately
+not used because it has advanced beyond the Phase 7 contract.
+
+Closing runtime commit `55392d01d` also makes the built-in task bridge export
+the typed workspace as host-owned `LOOM_WORKSPACE` and requires mutating roles
+to produce a reviewable file change. An exit-zero coder with no captured change
+now fails as `local_change_delivery_missing`, preserving its real transcript
+instead of closing the card without a patch. Gate commit `c3b9cb1bc` folds the
+Phase 5 Agents mutation scan into the authoritative per-profile architecture
+transaction and removes the duplicate repository-scale race scan. The full
+gate therefore retains the same 11-profile ownership evidence and 2 GiB memory
+ceiling without reloading that typed graph a second time.
 
 ## Frontend feature slices
 
@@ -159,6 +208,38 @@ task to Review. The earlier pre-design event is also visible as a completed
 no-dispatch filter result, proving role-phase selection rather than a duplicate
 coder execution. No GitHub mutation occurred.
 
+### Final packaged planner/coder and restart proof
+
+The signed packaged app was rebuilt from the source subsequently committed at
+`55392d01d` and `c3b9cb1bc`, with embedded prompt-agent digest
+`sha256:157062b5cfc5ce395cfe66a3961b682f00c364450409e07533943ccf1fd93334`.
+All task, agent, status, approval, and enablement mutations in this proof were
+performed through the packaged UI.
+
+UI-created task `PHASE7-FINAL-PROOF3-20260807-2` targeted the admitted
+`hello-world` repository and requested exactly one new file,
+`phase7-packaged-proof4.txt`. Planner
+`agt-phase7-final3-planner-b1d9b8e3` ran real `codex exec --json`, completed
+with exit 0 in 3m35s, persisted the full structured design, exposed its
+transcript, and moved the card through Open, In Progress, and Review. The
+persisted coder definition was disabled from an earlier timeout test; the UI
+showed that state, it was explicitly enabled in the UI, and a new Review
+approval emitted the fresh ready event.
+
+Coder `agt-phase7-final3-coder-845db7f3` then ran real `codex exec --json` and
+completed with exit 0 in 3m11s. Run
+`logs://promptagent-automation-run-fe504c3968ca8f5f6e8848d413a042ea-PHASE7-FINAL-PROOF3-20260807-2`
+reported `local-cli-codex`, one file, `+1/-0`, patch-back applied, and local
+commit `de4c3cf`. Its UI transcript and Diff tab showed only the exact required
+LF-terminated line, and the task converged to Closed. The delivered file has
+SHA-256 `ca59d8c053a27f0c3add5cac78532ee88f75dda9664794573ad344958d330657`.
+
+The packaged Desktop process and all three Loom/Fleet sidecars were then
+stopped and relaunched on a new HTTP port. From a fresh browser session, the UI
+restored the same Closed card, full planner design, four-entry run history,
+coder exit/delivery summary, transcript, and exact Diff tab. This is durable
+restart proof, not an API-only artifact inspection.
+
 ## Failure, restart, and fail-closed proof
 
 UI-created Planner agent `agt-phase7-codex-unavailable-planner-d8836e85`
@@ -189,13 +270,20 @@ successor claim.
 | -------- | ------ |
 | Focused observability/events/serve tests | PASS |
 | Phase 7 architecture guard with 2 GiB process-tree ceiling | PASS; 11 of 11 profiles, zero pending decisions |
-| Loom aggregate `make gate` | PASS at `5adee3407`, with exact FleetDB source and binary at `b71dec5`; Go, architecture, race, and frontend gates passed |
+| Initial-completion Loom aggregate `make gate` | PASS at `5adee3407`, with exact FleetDB source and binary at `b71dec5`; Go, architecture, race, and frontend gates passed |
+| Post-completion-hardening Loom aggregate `make gate` | PASS at `d8f7f1387`, with exact FleetDB source and freshly built binary at `b71dec551`; Go, architecture, race, coverage, and frontend gates passed |
+| Closing Loom aggregate `make gate` | PASS in about 14 minutes for the source committed at `55392d01d` and `c3b9cb1bc`, down from the earlier roughly 45-minute duplicate-scan path and pinned to FleetDB source/binary `b71dec551`; architecture stayed below its 2 GiB process-tree ceiling; 151 of 151 built-in workflow tests passed; frontend passed 396 files and 8,744 tests with one skipped |
 | FleetDB aggregate `make gate` | PASS at `b71dec5`, including static/lint, race, 80.8% aggregate coverage with all 28 package floors, Postgres/API suites, 102-second real-container E2E, crash/restart recovery, and harness evaluation |
 | Paired OpenAPI SHA-256 | `816b0b0ca5a3398238cf56152f6a040e1bc4cc3bd3c5d1e2dde3fa775dca7ef0` |
-| Packaged Loom sidecar SHA-256 | `2ad923ed93c29361babdab665cd06db4da3ff0b83b3a80dc5d3d1cdba8cb8502`; reports `5adee3407` |
+| Initial packaged Loom sidecar SHA-256 | `2ad923ed93c29361babdab665cd06db4da3ff0b83b3a80dc5d3d1cdba8cb8502`; reports `5adee3407` |
 | Packaged FleetDB sidecar SHA-256 | `d943b06c375293929f7719ee3b91fb5a964d41379003e5b4a7947de1089df162`; reports `b71dec5` |
-| Packaged Desktop executable SHA-256 | `eb32e837ca97f79ad3e3815fc67fd54e52212488cdee8f329a9b151c12725623` |
+| Initial packaged Desktop executable SHA-256 | `eb32e837ca97f79ad3e3815fc67fd54e52212488cdee8f329a9b151c12725623` |
 | Packaged Node SHA-256 | `34c0af7cb2ba9eeb14e0675695e3f6da15fa5e98901e62149cf4fc1d594c8fa0` |
+| Hardened packaged Loom sidecar SHA-256 | `ec1f42945811c867d68dc98c96f7e8e046083045ac4de33a73ab1dc64c2627d3`; reports `d8f7f1387` |
+| Hardened packaged Desktop executable SHA-256 | `ff1b62ab6b86ccc84968f89b6976cd99cfe0fd0d9f907e815a11044337932fc1` |
+| Final packaged Loom sidecar SHA-256 | `f40b8c22016a3764946e7b7354a21f19f9051a5c64543848476642ae99ed1954` |
+| Final packaged FleetDB sidecar SHA-256 | `d943b06c375293929f7719ee3b91fb5a964d41379003e5b4a7947de1089df162` |
+| Final packaged Desktop executable SHA-256 | `fa4dc0bb60afbc1f733244815181f645b1f0ef28ce55d182e9cf376d996f0e30` |
 
 Selected local screenshot artifacts and SHA-256 values:
 
@@ -214,6 +302,8 @@ Selected local screenshot artifacts and SHA-256 values:
 | `/tmp/phase7-source-control-route.jpeg` | `ce19e5a39ad45d69c60150fe2a406b0e9e5c0c02e50533d1b4f55cbf7b21b702` |
 | `/tmp/phase7-cleanup-coder-diff.png` | `78430f198053dae639db8c42786eafda24f9684abdf56047110391adc9899d71` |
 | `/tmp/phase7-cleanup-task-review.png` | `e3acaaa3714b5482a3a6f924fc93bb0251e1eed79a3f26769d794b19ea8209d5` |
+| `/tmp/phase7-proof4-coder-diff.png` | `5f309757db3ee54f2e030fb7b5d86f4b817122bd638a75bcfeeeafe9aa8279b5` |
+| `/tmp/phase7-proof4-after-restart-diff.png` | `b9195ff24bb3fa1ec84829ce79a660b817f8121b060006e1e71d2ff28e4d6495` |
 
 The screenshots remain local proof artifacts and are not source-controlled
 generated output.
