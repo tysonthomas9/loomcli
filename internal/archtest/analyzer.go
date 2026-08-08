@@ -196,6 +196,8 @@ func runPhase1Analyses(root string, manifests repositoryManifests, report *Repor
 // disposable caches to bound disk usage; doing both repository-scale loads
 // before deleting that cache avoids recompiling each target twice while still
 // keeping only one complete typed graph live at a time.
+//
+//nolint:funlen // Keep every cache-sharing repository analysis in one auditable per-profile transaction.
 func analyzeProfilesAndDirectWrites(
 	root string,
 	matrix AnalysisMatrix,
@@ -211,6 +213,11 @@ func analyzeProfilesAndDirectWrites(
 	}
 	classifier := newPersistenceClassifier(inventory)
 	directResults := make([]directWriteProfileResult, len(profiles))
+	agentsPatterns, err := phase5AgentsMutationCandidatePatterns(root)
+	if err != nil {
+		return nil, nil, err
+	}
+	agentsResults := make([][]phase5AgentsMutation, len(profiles))
 	violations := []string{}
 	for index, profile := range profiles {
 		profileViolations := []string{}
@@ -224,6 +231,12 @@ func analyzeProfilesAndDirectWrites(
 			}
 			directResults[index].calls, directResults[index].problems, err = snapshotDirectWriteProfileWithEnvironment(
 				root, profile, inventory.AdapterRoots, classifier, environment,
+			)
+			if err != nil || len(agentsPatterns) == 0 {
+				return err
+			}
+			agentsResults[index], err = snapshotPhase5AgentsMutationProfile(
+				root, profile, agentsPatterns, environment,
 			)
 			return err
 		})
@@ -240,6 +253,12 @@ func analyzeProfilesAndDirectWrites(
 	if err != nil {
 		return nil, nil, err
 	}
+	violations = append(
+		violations,
+		phase5AgentsOwnershipViolations(
+			mergePhase5AgentsMutationProfiles(profiles, agentsResults),
+		)...,
+	)
 	return violations, observed, nil
 }
 
