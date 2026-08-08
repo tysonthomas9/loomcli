@@ -61,8 +61,14 @@ var handleListTaskPhases = HandleListTaskPhases
 var handleGetSession = HandleGetSession
 var handleGetSessionDiff = HandleGetSessionDiff
 var handleGetSessionTranscript = HandleGetSessionTranscript
+var handleGetWorkspaceSession = HandleGetWorkspaceSession
+var handleGetWorkspaceSessionDiff = HandleGetWorkspaceSessionDiff
+var handleGetWorkspaceSessionTranscript = HandleGetWorkspaceSessionTranscript
 var handleListTaskSessions = HandleListTaskSessions
+var handleListWorkspaceSessions = HandleListWorkspaceSessions
 var handleNotifySessionChange = HandleNotifySessionChange
+var handleListWorkspaceSessionSubagents = HandleListWorkspaceSessionSubagents
+var handleGetWorkspaceSessionSubagentTranscript = HandleGetWorkspaceSessionSubagentTranscript
 var handleWorkerRegister = HandleWorkerRegister
 
 // ---------------------------------------------------------------------------
@@ -782,6 +788,38 @@ func (s *testSessionServiceImpl) ListTaskSessions(_ context.Context, _, taskID s
 	return items, nil
 }
 
+func (s *testSessionServiceImpl) ListWorkspaceSessions(_ context.Context, _ string, opts service.WorkspaceSessionListOptions) ([]service.SessionListItem, int, error) {
+	if s.sessStore == nil {
+		return nil, 0, service.ErrUnavailable("session store not available")
+	}
+	records, err := s.sessStore.Query(sessions.Filter{
+		Since: opts.Since,
+		Until: opts.Until,
+	})
+	if err != nil {
+		return nil, 0, service.ErrInternal("failed to list sessions", err)
+	}
+	total := len(records)
+	if opts.Limit > 0 && len(records) > opts.Limit {
+		records = records[:opts.Limit]
+	}
+	items := make([]service.SessionListItem, 0, len(records))
+	for _, rec := range records {
+		item := service.SessionListItem{
+			SessionRecord: rec,
+			IsActive:      rec.Status == sessions.StatusRunning,
+		}
+		if info, err := os.Stat(s.sessStore.NativeTranscriptPath(rec.SessionID)); err == nil && info.Size() > 0 {
+			item.HasTranscript = true
+		}
+		if diff, err := s.sessStore.ReadDiff(rec.SessionID); err == nil && diff != "" {
+			item.HasDiff = true
+		}
+		items = append(items, item)
+	}
+	return items, total, nil
+}
+
 func (s *testSessionServiceImpl) GetSession(_ context.Context, _, taskID, sessionID string) (*service.SessionDetailData, error) {
 	if s.sessStore == nil {
 		return nil, service.ErrUnavailable("session store not available")
@@ -801,6 +839,26 @@ func (s *testSessionServiceImpl) GetSession(_ context.Context, _, taskID, sessio
 	}
 	if meta.TaskID != taskID {
 		return nil, service.ErrNotFound("session not found")
+	}
+	return &service.SessionDetailData{
+		SessionMetadata: *meta,
+		IsActive:        meta.Status == sessions.StatusRunning,
+	}, nil
+}
+
+func (s *testSessionServiceImpl) GetWorkspaceSession(_ context.Context, _, sessionID string) (*service.SessionDetailData, error) {
+	if s.sessStore == nil {
+		return nil, service.ErrUnavailable("session store not available")
+	}
+	if sessionID == "" || !validSessionID.MatchString(sessionID) {
+		return nil, service.ErrValidation("invalid session ID")
+	}
+	meta, err := s.sessStore.LoadMetadata(sessionID)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, service.ErrNotFound("session not found")
+		}
+		return nil, service.ErrInternal("failed to load session", err)
 	}
 	return &service.SessionDetailData{
 		SessionMetadata: *meta,
@@ -838,6 +896,23 @@ func (s *testSessionServiceImpl) GetSessionTranscript(_ context.Context, _, task
 	return events, nil
 }
 
+func (s *testSessionServiceImpl) GetWorkspaceSessionTranscript(_ context.Context, _, sessionID string) ([]transcript.Event, error) {
+	if s.sessStore == nil {
+		return nil, service.ErrUnavailable("session store not available")
+	}
+	if sessionID == "" || !validSessionID.MatchString(sessionID) {
+		return nil, service.ErrValidation("invalid session ID")
+	}
+	events, loadErr := s.sessStore.LoadNativeEvents(sessionID)
+	if loadErr != nil {
+		return nil, service.ErrInternal("failed to load transcript", loadErr)
+	}
+	if events == nil {
+		events = []transcript.Event{}
+	}
+	return events, nil
+}
+
 func (s *testSessionServiceImpl) ListSessionSubagents(_ context.Context, _, _, sessionID string) ([]string, error) {
 	if s.sessStore == nil {
 		return nil, service.ErrUnavailable("session store not available")
@@ -854,6 +929,10 @@ func (s *testSessionServiceImpl) ListSessionSubagents(_ context.Context, _, _, s
 		}
 	}
 	return ids, nil
+}
+
+func (s *testSessionServiceImpl) ListWorkspaceSessionSubagents(ctx context.Context, wsID, sessionID string) ([]string, error) {
+	return s.ListSessionSubagents(ctx, wsID, "", sessionID)
 }
 
 func (s *testSessionServiceImpl) GetSessionSubagentTranscript(_ context.Context, _, _, sessionID, subagentID string) ([]transcript.Event, error) {
@@ -884,6 +963,10 @@ func (s *testSessionServiceImpl) GetSessionSubagentTranscript(_ context.Context,
 	return events, nil
 }
 
+func (s *testSessionServiceImpl) GetWorkspaceSessionSubagentTranscript(ctx context.Context, wsID, sessionID, subagentID string) ([]transcript.Event, error) {
+	return s.GetSessionSubagentTranscript(ctx, wsID, "", sessionID, subagentID)
+}
+
 func (s *testSessionServiceImpl) GetSessionDiff(_ context.Context, _, taskID, sessionID string) (string, error) {
 	if s.sessStore == nil {
 		return "", service.ErrUnavailable("session store not available")
@@ -903,6 +986,23 @@ func (s *testSessionServiceImpl) GetSessionDiff(_ context.Context, _, taskID, se
 	}
 	if meta.TaskID != taskID {
 		return "", service.ErrNotFound("session not found")
+	}
+	diff, diffErr := s.sessStore.ReadDiff(sessionID)
+	if diffErr != nil {
+		if errors.Is(diffErr, os.ErrNotExist) {
+			return "", service.ErrNotFound("diff not found")
+		}
+		return "", service.ErrInternal("failed to read diff", diffErr)
+	}
+	return diff, nil
+}
+
+func (s *testSessionServiceImpl) GetWorkspaceSessionDiff(_ context.Context, _, sessionID string) (string, error) {
+	if s.sessStore == nil {
+		return "", service.ErrUnavailable("session store not available")
+	}
+	if sessionID == "" || !validSessionID.MatchString(sessionID) {
+		return "", service.ErrValidation("invalid session ID")
 	}
 	diff, diffErr := s.sessStore.ReadDiff(sessionID)
 	if diffErr != nil {

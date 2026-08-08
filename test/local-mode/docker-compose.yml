@@ -78,6 +78,13 @@ services:
       LOOM_FLEET_DB_ACTOR: local-mode-harness@fixture.local
       LOOM_FLEET_ACTOR: local-mode-harness@fixture.local
       LOOM_BACKEND: localdogfood
+      LOOM_SDK_ROOT: /opt/loom/sdk
+      # Points inside the whole-repo mount (not a runtime-only mount): pnpm
+      # installs runtime deps as symlinks into the monorepo root's
+      # node_modules/.pnpm store, which only resolve when the full checkout is
+      # mounted.
+      LOOM_FLUE_RUNTIME_ROOT: /opt/flue/repo/packages/runtime
+      LOOM_REAL_FLUE_CMD_JSON: '["node","/opt/flue/repo/packages/cli/bin/flue.mjs"]'
       LOOM_SERVER_URL: http://127.0.0.1:8080
       LOOM_WEBUI_URL: http://127.0.0.1:8080
       LOCAL_MODE_API_URL: "http://localhost:${LOCAL_MODE_API_PORT:-8282}"
@@ -94,6 +101,14 @@ services:
     volumes:
       - loom-data:/root/.loom
       - loom-workspace:/workspace
+      # Built-in workflow materialization needs @flue/runtime plus its installed
+      # pure-JS runtime dependencies, and the Flue CLI wrapper imports
+      # packages/cli/dist/flue.js. Mount the WHOLE sibling checkout read-only:
+      # pnpm-installed dependencies are symlinks into the monorepo root's
+      # node_modules/.pnpm store, so a packages/runtime-only mount would leave
+      # them dangling. The default is relative to this compose file:
+      # test/local-mode/../../../flue == the sibling ../flue checkout.
+      - ${FLUE_REPO:-../../../flue}:/opt/flue/repo:ro
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/config > /dev/null 2>&1"]
       interval: 5s

@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "session_id": "20260716-193728-codex-planner--5541b5e0",
+  "task_id": "LOCALMODE-5",
+  "agent_name": "codex-planner",
+  "backend": "codex",
+  "phase": "planning",
+  "transcript_format": "raw",
+  "started_at": "2026-07-16T19:37:28.422993836Z",
+  "ended_at": "2026-07-16T19:40:52.938637825Z",
+  "duration_s": 204.515643989,
+  "status": "completed",
+  "exit_code": 0,
+  "input_tokens": 299064,
+  "output_tokens": 8596,
+  "cache_read_tokens": 260864,
+  "cache_write_tokens": 0,
+  "estimated_cost_usd": 0,
+  "files_changed": 0,
+  "lines_added": 0,
+  "lines_removed": 0,
+  "attempt_num": 0
+}

@@ -88,6 +88,12 @@ export async function exerciseLoomDriverClientSurface(): Promise<void> {
   await client.taskRuns.active({ epicId: "EPIC-1", limit: 5 });
   await client.taskRuns.recoverStale({ maxAgeSeconds: 300, errorClass: "stale" });
 
+  // evals
+  await client.evals.listUnevaluated({ promptVersion: "v1" });
+  await client.evals.getTranscript({ sessionId: "sess-1", promptVersion: "v1" });
+  await client.evals.putMetric({ sessionId: "sess-1", promptVersion: "v1", status: "failed", errorClass: "judge_error" });
+  await client.evals.rejudge({ sessionId: "sess-1" });
+
   // connectors
   const granted: LoomConnectorCallResult = await client.connectors.github.merge({ expectedHeadSha: "sha-1" });
   expectType<"granted">(granted.decision);

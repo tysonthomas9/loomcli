@@ -1,0 +1,34 @@
+{
+  "session_id": "20260716-193040-codex-coder--2d920713",
+  "judge_model": "gpt-5.6-sol",
+  "judge_prompt_version": "v1",
+  "eval_id": "eval-20260716-193040-codex-coder--2d920713-v1",
+  "validation_warnings": [],
+  "result": {
+    "scores": {
+      "outcome_success": 78,
+      "instruction_adherence": 94,
+      "efficiency": 90,
+      "tool_use_quality": 97
+    },
+    "score_rationales": {
+      "outcome_success": "The requested one-line fixture was created, verified, and committed (entries 22, 25, 29), but mandatory publication and task closure remained incomplete because the remote was unusable (entries 42\u201345).",
+      "instruction_adherence": "The agent followed the prescribed claim, focused implementation, testing, specific-file commit, stack setup, dry-run, external-blocker update, and completion-signal workflow in order (entries 9\u201347).",
+      "efficiency": "Nearly every operation advanced the narrow task or satisfied a mandated workflow checkpoint, with only minor extra inspection and repeated verification of the one-line file (entries 14\u201325).",
+      "tool_use_quality": "Tool calls were precise and outputs were acted upon, notably initializing the absent stack after the show failure (entries 31\u201336) and correctly converting the publication error into the required blocker path (entries 42\u201347)."
+    },
+    "error_taxonomy_tags": [
+      "incomplete_task",
+      "env_or_dependency_failure"
+    ],
+    "improvement_categories": {
+      "harness": [
+        "Change local-mode fixture repository setup so that it provides either a parseable GitHub-style remote or supported local publication, allowing mandatory stack publish and task closure to succeed (entry 42)."
+      ],
+      "linter": [],
+      "prompt": [],
+      "skill": []
+    },
+    "judge_summary": "The session successfully produced, checked, and committed the exact one-line fixture change. Its strongest aspect was disciplined tool use and faithful handling of the workflow, including correct adaptation to an absent stack. The final publication and task closure were not achieved because the harness supplied a local-path origin that Loom could not parse, so the agent appropriately marked the task blocked rather than claiming full completion."
+  }
+}

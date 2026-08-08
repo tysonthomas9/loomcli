@@ -135,6 +135,53 @@ func TestAgentSessionFilter_KindAndParent(t *testing.T) {
 	}
 }
 
+func TestAgentSessionListPage_TimeFilterSortTotalLimit(t *testing.T) {
+	st := New()
+	ctx := t.Context()
+	base := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
+
+	create := func(id string, startedAt time.Time, kind domain.AgentSessionKind, parent string) {
+		t.Helper()
+		if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+			WorkspaceKey:    "WS",
+			SessionID:       id,
+			AgentID:         "worker-a",
+			Kind:            kind,
+			ParentSessionID: parent,
+			Status:          domain.AgentSessionCompleted,
+			StartedAt:       startedAt,
+		}); err != nil {
+			t.Fatalf("create %s: %v", id, err)
+		}
+	}
+	create("too-old", base.Add(-2*time.Hour), domain.AgentSessionKindTask, "orch-1")
+	create("oldest-match", base.Add(-50*time.Minute), domain.AgentSessionKindTask, "orch-1")
+	create("middle-match", base.Add(-30*time.Minute), domain.AgentSessionKindTask, "orch-1")
+	create("newest-match", base.Add(-10*time.Minute), domain.AgentSessionKindTask, "orch-1")
+	create("kind-mismatch", base.Add(-5*time.Minute), domain.AgentSessionKindOrchestration, "orch-1")
+	create("parent-mismatch", base.Add(-4*time.Minute), domain.AgentSessionKindTask, "other")
+	create("too-new", base.Add(10*time.Minute), domain.AgentSessionKindTask, "orch-1")
+
+	since := base.Add(-time.Hour)
+	until := base
+	got, total, err := st.AgentSessions().ListPage(ctx, "WS", store.AgentSessionFilter{
+		Kind:            domain.AgentSessionKindTask,
+		ParentSessionID: "orch-1",
+		Since:           &since,
+		Until:           &until,
+		Limit:           2,
+	})
+	if err != nil {
+		t.Fatalf("ListPage: %v", err)
+	}
+	if total != 3 {
+		t.Fatalf("total = %d, want 3", total)
+	}
+	if ids := sessionIDs(got); len(ids) != 2 || ids[0] != "newest-match" || ids[1] != "middle-match" {
+		t.Fatalf("ids = %v, want [newest-match middle-match]", ids)
+	}
+}
+
 func sessionIDs(sessions []*domain.AgentSession) []string {
 	ids := make([]string, 0, len(sessions))
 	for _, s := range sessions {

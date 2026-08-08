@@ -13,6 +13,7 @@ import (
 
 var handleWorkspaceBackendPatch = HandleWorkspaceBackendPatch
 var handleWorkspaceDesignFormatPatch = HandleWorkspaceDesignFormatPatch
+var handleWorkspaceEvalPolicyPatch = HandleWorkspaceEvalPolicyPatch
 var handleWorkspaceCreate = HandleWorkspaceCreate
 var handleWorkspaceDelete = HandleWorkspaceDelete
 var handleWorkspaceRename = HandleWorkspaceRename
@@ -44,6 +45,7 @@ type mockWorkspaceService struct {
 	getWorkspaceBackendFn        func(ctx context.Context, wsID string) (*service.BackendConfigData, error)
 	patchWorkspaceBackendFn      func(ctx context.Context, wsID string, backend string) (*ops.WorkspaceData, error)
 	patchWorkspaceDesignFormatFn func(ctx context.Context, wsID string, designFormat string) (*ops.WorkspaceData, error)
+	patchWorkspaceEvalPolicyFn   func(ctx context.Context, wsID string, patch service.WorkspaceEvalPolicyPatch) (*ops.WorkspaceData, error)
 }
 
 func (m *mockWorkspaceService) GetActiveWorkspace(ctx context.Context) (*ops.WorkspaceData, error) {
@@ -133,6 +135,13 @@ func (m *mockWorkspaceService) PatchWorkspaceBackend(ctx context.Context, wsID s
 func (m *mockWorkspaceService) PatchWorkspaceDesignFormat(ctx context.Context, wsID string, designFormat string) (*ops.WorkspaceData, error) {
 	if m.patchWorkspaceDesignFormatFn != nil {
 		return m.patchWorkspaceDesignFormatFn(ctx, wsID, designFormat)
+	}
+	return nil, service.ErrUnavailable("not available")
+}
+
+func (m *mockWorkspaceService) PatchWorkspaceEvalPolicy(ctx context.Context, wsID string, patch service.WorkspaceEvalPolicyPatch) (*ops.WorkspaceData, error) {
+	if m.patchWorkspaceEvalPolicyFn != nil {
+		return m.patchWorkspaceEvalPolicyFn(ctx, wsID, patch)
 	}
 	return nil, service.ErrUnavailable("not available")
 }

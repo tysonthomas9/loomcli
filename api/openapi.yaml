@@ -38,6 +38,8 @@ tags:
     description: Issue audit events and SSE mutation stream
   - name: sessions
     description: Session audit trail (task-scoped)
+  - name: evals
+    description: Session evaluation dashboard and administration
   - name: session-history
     description: Session history (issue-scoped, Redis-backed)
   - name: logs
@@ -492,6 +494,116 @@ paths:
                 $ref: "#/components/schemas/MessageResponse"
         "400":
           description: Invalid design format
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/workspaces/{ws}/config/eval-policy:
+    patch:
+      operationId: patchWorkspaceEvalPolicy
+      tags: [config]
+      summary: Set workspace session-eval policy knobs
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkspaceEvalPolicyPatchRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "400":
+          description: Invalid eval policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/workspaces/{ws}/eval-rollup:
+    get:
+      operationId: getEvalRollup
+      tags: [evals]
+      summary: Get session-eval dashboard rollups
+      description: |
+        Computes rollups in loomcli over `session-evals` whose `created_at`
+        falls in the requested window. Daily buckets are used by default;
+        windows of 48 hours or less use hourly UTC buckets.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: since
+          in: query
+          description: RFC3339 lower bound on eval created_at. Defaults to until minus 7 days.
+          schema:
+            type: string
+            format: date-time
+        - name: until
+          in: query
+          description: RFC3339 upper bound on eval created_at. Defaults to now.
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Session-eval dashboard rollup
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvalRollupResponse"
+        "400":
+          description: Invalid time window
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: fleet-db must be upgraded for eval failure-class scans
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/workspaces/{ws}/evals/cron:
+    get:
+      operationId: getEvalsCron
+      tags: [evals]
+      summary: Get session-eval cron provisioning state
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Session-eval cron state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvalCronResponse"
+    put:
+      operationId: putEvalsCron
+      tags: [evals]
+      summary: Enable or pause the session-eval cron binding
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EvalCronPutRequest"
+      responses:
+        "200":
+          description: Session-eval cron state after the change
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvalCronResponse"
+        "400":
+          description: Invalid request body or provisioning validation failure
           content:
             application/json:
               schema:
@@ -1308,6 +1420,297 @@ paths:
                 type: string
         "404":
           description: Record not found
+
+  # ── Sessions (Workspace-Scoped Traces) ─────────────────────────────────
+  /api/workspaces/{ws}/sessions:
+    get:
+      operationId: listWorkspaceSessions
+      tags: [sessions]
+      summary: List workspace sessions for Traces
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: since
+          in: query
+          description: RFC3339 lower bound on started_at. Defaults to now minus 7 days when neither since nor until is provided.
+          schema:
+            type: string
+            format: date-time
+        - name: until
+          in: query
+          description: RFC3339 upper bound on started_at.
+          schema:
+            type: string
+            format: date-time
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: agent_id
+          in: query
+          schema:
+            type: string
+        - name: kind
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 200
+            maximum: 1000
+      responses:
+        "200":
+          description: Workspace session list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    required: [sessions, total, limit]
+                    properties:
+                      sessions:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/SessionResponse"
+                      total:
+                        type: integer
+                        description: Pre-truncation count matching the server-side filters.
+                      limit:
+                        type: integer
+        "400":
+          description: Invalid query parameter
+        "502":
+          description: fleet-db must be upgraded for server-side session time filtering
+
+  /api/workspaces/{ws}/sessions/{sessionId}:
+    get:
+      operationId: getWorkspaceSession
+      tags: [sessions]
+      summary: Get workspace session metadata
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Session detail
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: "#/components/schemas/SessionResponse"
+        "404":
+          description: Session not found
+
+  /api/workspaces/{ws}/sessions/{sessionId}/eval:
+    get:
+      operationId: getWorkspaceSessionEval
+      tags: [evals, sessions]
+      summary: Get a workspace session's eval state
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Session eval state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionEvalStateResponse"
+        "404":
+          description: Session or stamped eval record not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/workspaces/{ws}/sessions/{sessionId}/rejudge:
+    post:
+      operationId: rejudgeWorkspaceSession
+      tags: [evals, sessions]
+      summary: Request re-judging for a workspace session
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Re-judge request accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvalRejudgeResponse"
+        "400":
+          description: Session is not a valid eval candidate
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Re-judge request conflicted with current state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/workspaces/{ws}/sessions/{sessionId}/transcript:
+    get:
+      operationId: getWorkspaceSessionTranscript
+      tags: [sessions]
+      summary: Get workspace session transcript entries
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Transcript
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      session_id:
+                        type: string
+                      entries:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/TranscriptEntry"
+        "404":
+          description: Session not found
+
+  /api/workspaces/{ws}/sessions/{sessionId}/diff:
+    get:
+      operationId: getWorkspaceSessionDiff
+      tags: [sessions]
+      summary: Get workspace session git diff
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Diff content
+          content:
+            text/plain:
+              schema:
+                type: string
+        "404":
+          description: Session not found
+
+  /api/workspaces/{ws}/sessions/{sessionId}/subagents:
+    get:
+      operationId: listWorkspaceSessionSubagents
+      tags: [sessions]
+      summary: List captured subagent IDs for a workspace session
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Subagent list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      session_id:
+                        type: string
+                      subagent_ids:
+                        type: array
+                        items:
+                          type: string
+        "404":
+          description: Session not found
+
+  /api/workspaces/{ws}/sessions/{sessionId}/subagents/{subagentId}/transcript:
+    get:
+      operationId: getWorkspaceSessionSubagentTranscript
+      tags: [sessions]
+      summary: Get workspace session subagent transcript entries
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: subagentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Subagent transcript
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      session_id:
+                        type: string
+                      entries:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/TranscriptEntry"
+        "404":
+          description: Session not found
 
   # ── Sessions (Task-Scoped Audit Trail) ──────────────────────────────────
   /api/workspaces/{ws}/tasks/{taskId}/sessions:
@@ -4917,6 +5320,19 @@ components:
           type: string
           enum: [markdown, html]
           description: Durable format of the hydrated design body.
+        eval_sampling_percent:
+          type: integer
+          minimum: 1
+          maximum: 100
+          description: Session-eval deterministic sampling percent. Omitted or zero means default 100.
+        eval_batch_size:
+          type: integer
+          minimum: 1
+          description: Session-eval batch size. The driver op clamps the effective value to 100.
+        eval_lookback_days:
+          type: integer
+          minimum: 1
+          description: Session-eval lookback window in days. Omitted or zero means default 30.
         has_design:
           type: boolean
           description: True for either a legacy inline or artifact-backed design.
@@ -5574,6 +5990,20 @@ components:
           type: string
           enum: [markdown, html]
 
+    WorkspaceEvalPolicyPatchRequest:
+      type: object
+      properties:
+        eval_sampling_percent:
+          type: integer
+          minimum: 1
+          maximum: 100
+        eval_batch_size:
+          type: integer
+          minimum: 1
+        eval_lookback_days:
+          type: integer
+          minimum: 1
+
     # ── Config Schemas ──────────────────────────────────────────────────
     BackendConfigResponse:
       type: object
@@ -5658,6 +6088,355 @@ components:
         status:
           type: string
 
+    # ── Eval Schemas ────────────────────────────────────────────────────
+    EvalRollupResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/EvalRollupData"
+        error:
+          type: string
+
+    EvalRollupData:
+      type: object
+      required:
+        - since
+        - until
+        - eval_count
+        - score_averages
+        - score_buckets
+        - tag_frequencies
+        - insights
+        - failure_classes
+        - judge_prompt_versions
+      properties:
+        since:
+          type: string
+          format: date-time
+        until:
+          type: string
+          format: date-time
+        eval_count:
+          type: integer
+        score_averages:
+          $ref: "#/components/schemas/EvalScoreAverages"
+        score_buckets:
+          type: array
+          items:
+            $ref: "#/components/schemas/EvalScoreBucket"
+        tag_frequencies:
+          type: array
+          items:
+            $ref: "#/components/schemas/EvalTagFrequency"
+        insights:
+          $ref: "#/components/schemas/EvalInsights"
+        failure_classes:
+          type: array
+          items:
+            $ref: "#/components/schemas/EvalFailureClass"
+        judge_prompt_versions:
+          type: array
+          items:
+            $ref: "#/components/schemas/EvalJudgePromptVersion"
+
+    EvalScoreAverages:
+      type: object
+      required: [outcome_success, instruction_adherence, efficiency, tool_use_quality]
+      properties:
+        outcome_success:
+          type: number
+          format: double
+        instruction_adherence:
+          type: number
+          format: double
+        efficiency:
+          type: number
+          format: double
+        tool_use_quality:
+          type: number
+          format: double
+
+    EvalScoreBucket:
+      type: object
+      required: [bucket_start, eval_count, averages]
+      properties:
+        bucket_start:
+          type: string
+          format: date-time
+        eval_count:
+          type: integer
+        averages:
+          $ref: "#/components/schemas/EvalScoreAverages"
+
+    EvalTagFrequency:
+      type: object
+      required: [tag, count]
+      properties:
+        tag:
+          type: string
+        count:
+          type: integer
+
+    EvalInsights:
+      type: object
+      required: [harness, linter, prompt, skill]
+      properties:
+        harness:
+          type: array
+          items:
+            $ref: "#/components/schemas/EvalInsight"
+        linter:
+          type: array
+          items:
+            $ref: "#/components/schemas/EvalInsight"
+        prompt:
+          type: array
+          items:
+            $ref: "#/components/schemas/EvalInsight"
+        skill:
+          type: array
+          items:
+            $ref: "#/components/schemas/EvalInsight"
+
+    EvalInsight:
+      type: object
+      required: [text, session_id, eval_id, created_at]
+      properties:
+        text:
+          type: string
+        session_id:
+          type: string
+        eval_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    EvalFailureClass:
+      type: object
+      required: [error_class, count]
+      properties:
+        error_class:
+          type: string
+        count:
+          type: integer
+
+    EvalJudgePromptVersion:
+      type: object
+      required: [version, count]
+      properties:
+        version:
+          type: string
+        count:
+          type: integer
+
+    SessionEvalStateResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/SessionEvalState"
+        error:
+          type: string
+
+    SessionEvalState:
+      type: object
+      required: [eval_status, eval_error_class, eval_prompt_version, eval_requested]
+      properties:
+        eval_status:
+          type: string
+          enum: [done, failed, none]
+        eval_error_class:
+          type: [string, "null"]
+        eval_prompt_version:
+          type: [string, "null"]
+        eval_requested:
+          type: boolean
+        # Absent when no eval record exists for the session; a oneOf-with-null
+        # union is 3.1-legal but unsupported by oapi-codegen.
+        eval:
+          $ref: "#/components/schemas/SessionEval"
+
+    EvalRejudgeResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/EvalRejudgeResult"
+        error:
+          type: string
+
+    EvalRejudgeResult:
+      type: object
+      required: [requested, binding_enabled]
+      properties:
+        requested:
+          type: boolean
+        binding_enabled:
+          type: boolean
+
+    EvalCronResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/EvalCronState"
+        error:
+          type: string
+
+    EvalCronState:
+      type: object
+      required: [provisioned, enabled, schedule]
+      properties:
+        provisioned:
+          type: boolean
+        enabled:
+          type: boolean
+        schedule:
+          type: [string, "null"]
+
+    EvalCronPutRequest:
+      type: object
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean
+
+    SessionEval:
+      type: object
+      required:
+        - eval_id
+        - session_id
+        - agent_id
+        - workspace_key
+        - scores
+        - score_rationales
+        - error_taxonomy_tags
+        - improvement_categories
+        - judge_summary
+        - judge_model
+        - judge_prompt_version
+        - eval_cost
+        - session_started_at
+        - session_ended_at
+        - created_at
+        - updated_at
+      properties:
+        eval_id:
+          type: string
+        session_id:
+          type: string
+        task_id:
+          type: string
+        agent_id:
+          type: string
+        workspace_key:
+          type: string
+        scores:
+          $ref: "#/components/schemas/SessionEvalScores"
+        score_rationales:
+          $ref: "#/components/schemas/SessionEvalScoreRationales"
+        error_taxonomy_tags:
+          type: array
+          items:
+            type: string
+        improvement_categories:
+          $ref: "#/components/schemas/SessionEvalImprovementCategories"
+        judge_summary:
+          type: string
+        judge_model:
+          type: string
+        judge_prompt_version:
+          type: string
+        eval_cost:
+          $ref: "#/components/schemas/SessionEvalCost"
+        session_started_at:
+          type: string
+          format: date-time
+        session_ended_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    SessionEvalScores:
+      type: object
+      required: [outcome_success, instruction_adherence, efficiency, tool_use_quality]
+      properties:
+        outcome_success:
+          type: integer
+        instruction_adherence:
+          type: integer
+        efficiency:
+          type: integer
+        tool_use_quality:
+          type: integer
+
+    SessionEvalScoreRationales:
+      type: object
+      required: [outcome_success, instruction_adherence, efficiency, tool_use_quality]
+      properties:
+        outcome_success:
+          type: string
+        instruction_adherence:
+          type: string
+        efficiency:
+          type: string
+        tool_use_quality:
+          type: string
+
+    SessionEvalImprovementCategories:
+      type: object
+      required: [harness, linter, prompt, skill]
+      properties:
+        harness:
+          type: array
+          items:
+            type: string
+        linter:
+          type: array
+          items:
+            type: string
+        prompt:
+          type: array
+          items:
+            type: string
+        skill:
+          type: array
+          items:
+            type: string
+
+    SessionEvalCost:
+      type: object
+      required: [input_tokens, output_tokens, total_tokens]
+      properties:
+        input_tokens:
+          type: integer
+          format: int64
+        output_tokens:
+          type: integer
+          format: int64
+        total_tokens:
+          type: integer
+          format: int64
+
     # ── Session Schemas ─────────────────────────────────────────────────
     SessionResponse:
       type: object
@@ -5690,6 +6469,8 @@ components:
         epic_id:
           type: string
         agent_name:
+          type: string
+        kind:
           type: string
         backend:
           type: string

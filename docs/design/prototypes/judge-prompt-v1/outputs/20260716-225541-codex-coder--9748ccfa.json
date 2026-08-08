@@ -1,0 +1,34 @@
+{
+  "session_id": "20260716-225541-codex-coder--9748ccfa",
+  "judge_model": "gpt-5.6-sol",
+  "judge_prompt_version": "v1",
+  "eval_id": "eval-20260716-225541-codex-coder--9748ccfa-v1",
+  "validation_warnings": [],
+  "result": {
+    "scores": {
+      "outcome_success": 79,
+      "instruction_adherence": 98,
+      "efficiency": 92,
+      "tool_use_quality": 96
+    },
+    "score_rationales": {
+      "outcome_success": "The exact one-line append was committed and verified by the gate and focused assertions (entries 55\u201368), but mandatory publication failed and the task remained blocked rather than closed (entries 83\u201391).",
+      "instruction_adherence": "The agent followed the required 900-second foreground wait before editing, made only the scoped change, ran the mandatory gate, committed selectively, and correctly used the external-blocker procedure when publication proved impossible (entries 14\u201368, 83\u201391).",
+      "efficiency": "Apart from polling the explicitly required long-running sleep, nearly every operation advanced implementation, verification, delivery, or diagnosis, with only minor orchestration overhead (entries 14\u201351, 53\u201391).",
+      "tool_use_quality": "Tool calls were precise and results-driven, including exact diff assertions, selective staging, stack setup, and immediate diagnosis of the failed dry-run through parallel remote and help inspection (entries 57\u201368, 70\u201389)."
+    },
+    "error_taxonomy_tags": [
+      "incomplete_task",
+      "env_or_dependency_failure"
+    ],
+    "improvement_categories": {
+      "harness": [
+        "Change fixture repository provisioning so mandatory stacked-PR workflows have a parseable GitHub-style origin or an explicit local publication stub, allowing verified work to be published and closed instead of blocked (entries 83, 86, 88)."
+      ],
+      "linter": [],
+      "prompt": [],
+      "skill": []
+    },
+    "judge_summary": "The session correctly waited 900 seconds, appended exactly the requested line, committed only that file, and visibly passed the repository gate plus focused content and diff checks. Its strongest aspect was disciplined instruction and tool handling; its outcome remained incomplete only because Loom could not publish from the fixture\u2019s local-path origin, so the agent correctly marked the task blocked and signaled completion."
+  }
+}

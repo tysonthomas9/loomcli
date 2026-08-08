@@ -1,14 +1,18 @@
 package misc
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // newTestSessionStore creates a sessions.Store rooted in a temporary directory.
@@ -119,6 +123,182 @@ func TestListTaskSessions_WithData(t *testing.T) {
 	if resp.Data.Sessions[0].TaskID != "loom-xyz789" {
 		t.Errorf("task_id = %q, want %q", resp.Data.Sessions[0].TaskID, "loom-xyz789")
 	}
+}
+
+type workspaceListStub struct {
+	service.SessionService
+	items   []service.SessionListItem
+	total   int
+	err     error
+	gotWS   string
+	gotOpts service.WorkspaceSessionListOptions
+}
+
+func (s *workspaceListStub) ListWorkspaceSessions(_ context.Context, wsID string, opts service.WorkspaceSessionListOptions) ([]service.SessionListItem, int, error) {
+	s.gotWS = wsID
+	s.gotOpts = opts
+	if s.err != nil {
+		return nil, 0, s.err
+	}
+	return s.items, s.total, nil
+}
+
+func TestListWorkspaceSessions_DefaultsClampAndResponseShape(t *testing.T) {
+	now := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
+	oldNow := workspaceSessionsNow
+	workspaceSessionsNow = func() time.Time { return now }
+	t.Cleanup(func() { workspaceSessionsNow = oldNow })
+
+	stub := &workspaceListStub{
+		items: []service.SessionListItem{{
+			SessionRecord: sessions.SessionRecord{SessionID: "sess-1", AgentName: "nova", Status: sessions.StatusCompleted, StartedAt: now},
+			Kind:          domain.AgentSessionKindTask,
+		}},
+		total: 3,
+	}
+	handler := handleListWorkspaceSessions(stub)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/sessions?status=completed&agent_id=nova&kind=task&limit=5000", nil)
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	if stub.gotOpts.Limit != workspaceSessionsMaxLimit {
+		t.Fatalf("limit = %d, want clamp %d", stub.gotOpts.Limit, workspaceSessionsMaxLimit)
+	}
+	if !stub.gotOpts.Since.Equal(now.Add(-7*24*time.Hour)) || !stub.gotOpts.Until.IsZero() {
+		t.Fatalf("since/until = %s/%s, want default since and empty until", stub.gotOpts.Since, stub.gotOpts.Until)
+	}
+	if stub.gotOpts.Status != domain.AgentSessionCompleted || stub.gotOpts.AgentID != "nova" || stub.gotOpts.Kind != domain.AgentSessionKindTask {
+		t.Fatalf("opts = %+v", stub.gotOpts)
+	}
+	var resp WorkspaceSessionListResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.Success || resp.Data == nil {
+		t.Fatalf("response success/data = %v/%#v error=%q", resp.Success, resp.Data, resp.Error)
+	}
+	if resp.Data.Total != 3 || resp.Data.Limit != workspaceSessionsMaxLimit || len(resp.Data.Sessions) != 1 {
+		t.Fatalf("data = %+v", resp.Data)
+	}
+}
+
+func TestListWorkspaceSessions_InvalidSinceReturns400(t *testing.T) {
+	handler := handleListWorkspaceSessions(&workspaceListStub{})
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/sessions?since=not-a-date", nil)
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusBadRequest)
+	}
+	var resp WorkspaceSessionListResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Success || resp.Error != "invalid since: must be RFC3339" {
+		t.Fatalf("resp = %+v", resp)
+	}
+}
+
+func TestListWorkspaceSessions_MissingTotalSkewReturns502(t *testing.T) {
+	stub := &workspaceListStub{err: service.ErrBadGateway("fleet-db must be upgraded: agent-sessions list response is missing total for server-side session time filtering")}
+	handler := handleListWorkspaceSessions(stub)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/sessions?since=2026-07-16T00:00:00Z", nil)
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusBadGateway)
+	}
+	var resp WorkspaceSessionListResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Success || resp.Error != "fleet-db must be upgraded: agent-sessions list response is missing total for server-side session time filtering" {
+		t.Fatalf("resp = %+v", resp)
+	}
+}
+
+func TestWorkspaceSessionHandlers_LocalStore(t *testing.T) {
+	t.Setenv("LOOM_REDACT_TRANSCRIPTS", "off")
+	store := newTestSessionStore(t)
+	sess := createTestSession(t, store, "loom-workspace")
+	native := filepath.Join(t.TempDir(), "native.jsonl")
+	payload := []byte(`{"type":"user","uuid":"u1","message":{"content":"Hello workspace"}}` + "\n")
+	if err := os.WriteFile(native, payload, 0o600); err != nil {
+		t.Fatalf("write native: %v", err)
+	}
+	if err := store.SyncNativeTranscript(sess.SessionID(), native, sessions.TranscriptFormatRaw); err != nil {
+		t.Fatalf("SyncNativeTranscript: %v", err)
+	}
+	svc := NewSessionService(store, nil)
+
+	t.Run("detail", func(t *testing.T) {
+		handler := handleGetWorkspaceSession(svc)
+		req := httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/sessions/"+sess.SessionID(), nil)
+		req.SetPathValue("sessionId", sess.SessionID())
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+		}
+	})
+
+	t.Run("transcript", func(t *testing.T) {
+		handler := handleGetWorkspaceSessionTranscript(svc)
+		req := httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/sessions/"+sess.SessionID()+"/transcript", nil)
+		req.SetPathValue("sessionId", sess.SessionID())
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+		}
+		var resp TranscriptResponse
+		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if !resp.Success || resp.Data == nil || len(resp.Data.Entries) != 1 {
+			t.Fatalf("resp = %+v", resp)
+		}
+	})
+
+	t.Run("diff", func(t *testing.T) {
+		handler := handleGetWorkspaceSessionDiff(svc)
+		req := httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/sessions/"+sess.SessionID()+"/diff", nil)
+		req.SetPathValue("sessionId", sess.SessionID())
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+		}
+		if rr.Body.String() == "" {
+			t.Fatal("diff body is empty")
+		}
+	})
+
+	t.Run("subagents", func(t *testing.T) {
+		handler := handleListWorkspaceSessionSubagents(svc)
+		req := httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/sessions/"+sess.SessionID()+"/subagents", nil)
+		req.SetPathValue("sessionId", sess.SessionID())
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+		}
+		var resp SubagentListResponse
+		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if !resp.Success || resp.Data == nil || len(resp.Data.SubagentIDs) != 0 {
+			t.Fatalf("resp = %+v", resp)
+		}
+	})
 }
 
 func TestGetSession_NotFound(t *testing.T) {

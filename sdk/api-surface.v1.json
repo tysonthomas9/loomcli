@@ -100,6 +100,10 @@
     "task-run-get": { "method": "POST", "fields": ["taskRunId"] },
     "active-task-runs": { "method": "POST", "fields": ["epicId", "limit"] },
     "recover-stale-tasks": { "method": "POST", "fields": ["staleBefore", "maxAgeSeconds", "errorClass", "errorMessage"] },
+    "sessions-list-unevaluated": { "method": "POST", "fields": ["promptVersion"] },
+    "session-transcript-get": { "method": "POST", "fields": ["sessionId", "promptVersion"] },
+    "eval-metric-put": { "method": "POST", "fields": ["sessionId", "promptVersion", "status", "errorClass", "eval"] },
+    "eval-rejudge": { "method": "POST", "fields": ["sessionId"] },
     "complete-task": {
       "method": "POST",
       "fields": ["taskId", "taskRunId", "reason", "completionId", "leaseToken", "logsRef", "artifactsRef", "artifactIds"]
@@ -120,6 +124,7 @@
       "agents": ["list", "orchestrationSession", "updateParent", "deliverAssignment", "message"],
       "tasks": ["claimReady", "complete", "release"],
       "taskRuns": ["request", "get", "await", "active", "recoverStale"],
+      "evals": ["listUnevaluated", "getTranscript", "putMetric", "rejudge"],
       "connectors": ["dispatch", "github", "slack", "datadog"],
       "events": ["await", "list"],
       "workflows": ["start", "await"]

@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "session_id": "20260716-225956-fixture-child-coder--ed284335",
+  "task_id": "LOCALMODE-9",
+  "agent_name": "fixture-child-coder",
+  "backend": "codex",
+  "phase": "implementation",
+  "transcript_format": "raw",
+  "started_at": "2026-07-16T22:59:56.173765374Z",
+  "ended_at": "2026-07-16T23:01:47.84258172Z",
+  "duration_s": 111.668816346,
+  "status": "completed",
+  "exit_code": 0,
+  "input_tokens": 311348,
+  "output_tokens": 3923,
+  "cache_read_tokens": 278272,
+  "cache_write_tokens": 0,
+  "estimated_cost_usd": 0,
+  "files_changed": 1,
+  "lines_added": 1,
+  "lines_removed": 0,
+  "files_touched": [
+    "local-mode-agent-output.txt"
+  ],
+  "attempt_num": 0
+}

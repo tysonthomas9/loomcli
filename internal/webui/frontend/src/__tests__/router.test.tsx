@@ -20,19 +20,22 @@ import { describe, it, expect, vi } from "vitest";
 // ---------------------------------------------------------------------------
 
 const KanbanPage = () => null;
-vi.mock("@/views/KanbanPage", () => ({ KanbanPage }));
+vi.mock("@/views/boards/KanbanPage", () => ({ KanbanPage }));
 
 const TablePage = () => null;
-vi.mock("@/views/TablePage", () => ({ TablePage }));
+vi.mock("@/views/boards/TablePage", () => ({ TablePage }));
 
 const GraphPage = () => null;
-vi.mock("@/views/GraphPage", () => ({ GraphPage }));
+vi.mock("@/views/boards/GraphPage", () => ({ GraphPage }));
 
 const MonitorPage = () => null;
 vi.mock("@/views/MonitorPage", () => ({ MonitorPage }));
 
 const ObservabilityPage = () => null;
 vi.mock("@/views/ObservabilityPage", () => ({ ObservabilityPage }));
+
+const TracesPage = () => null;
+vi.mock("@/views/TracesPage", () => ({ TracesPage }));
 
 const SettingsPage = () => null;
 vi.mock("@/views/SettingsPage", () => ({ SettingsPage }));
@@ -119,6 +122,7 @@ describe("router view routes", () => {
       expect(paths).toContain("graph");
       expect(paths).toContain("monitor");
       expect(paths).toContain("observability");
+      expect(paths).toContain("traces");
       expect(paths).toContain("terminal");
       expect(paths).toContain("settings");
       expect(paths).toContain("workspace");
@@ -140,6 +144,7 @@ describe("router view routes", () => {
       ["graph", GraphPage],
       ["monitor", MonitorPage],
       ["observability", ObservabilityPage],
+      ["traces", TracesPage],
       ["settings", SettingsPage],
       ["workspace", WorkspacePage],
       ["files", FilesPage],

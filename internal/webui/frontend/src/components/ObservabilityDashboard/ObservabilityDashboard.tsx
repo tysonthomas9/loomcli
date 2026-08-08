@@ -1,9 +1,10 @@
 /**
  * ObservabilityDashboard container component.
- * Fetches metrics via useObservabilityMetrics and renders 5 presentational panels.
+ * Fetches metrics via useObservabilityMetrics and renders observability panels.
  */
 
 import { ErrorDisplay, LoadingSkeleton } from "@/components";
+import { EvalDashboard } from "@/components/EvalDashboard";
 import { useObservabilityMetrics } from "@/hooks";
 
 import { AgentUtilizationBars } from "./AgentUtilizationBars";
@@ -124,6 +125,8 @@ export function ObservabilityDashboard({
           <EpicProgress tasksByEpic={m?.tasks_by_epic ?? {}} />
         </div>
       </section>
+
+      <EvalDashboard />
     </div>
   );
 }

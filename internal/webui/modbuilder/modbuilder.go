@@ -9,7 +9,9 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/evaladmin"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/approvals"
+	evalhandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/evals"
 	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/issues"
 	locsettings "github.com/tysonthomas9/loomcli/internal/webui/handlers/localsettings"
@@ -49,10 +51,16 @@ func NewIssueModules(issueSvc service.IssueService, sessSvc service.SessionServi
 	return []interface{ Register(*http.ServeMux) }{
 		issues.NewIssueModule(issueSvc, st),
 		issues.NewSessionModule(sessSvc, issues.SessionModuleOpts{
-			ListTaskSessions:     misc.HandleListTaskSessions(sessSvc),
-			GetSession:           misc.HandleGetSession(sessSvc),
-			GetSessionTranscript: misc.HandleGetSessionTranscript(sessSvc),
-			GetSessionDiff:       misc.HandleGetSessionDiff(sessSvc),
+			ListTaskSessions:                      misc.HandleListTaskSessions(sessSvc),
+			GetSession:                            misc.HandleGetSession(sessSvc),
+			GetSessionTranscript:                  misc.HandleGetSessionTranscript(sessSvc),
+			GetSessionDiff:                        misc.HandleGetSessionDiff(sessSvc),
+			ListWorkspaceSessions:                 misc.HandleListWorkspaceSessions(sessSvc),
+			GetWorkspaceSession:                   misc.HandleGetWorkspaceSession(sessSvc),
+			GetWorkspaceSessionTranscript:         misc.HandleGetWorkspaceSessionTranscript(sessSvc),
+			GetWorkspaceSessionDiff:               misc.HandleGetWorkspaceSessionDiff(sessSvc),
+			ListWorkspaceSessionSubagents:         misc.HandleListWorkspaceSessionSubagents(sessSvc),
+			GetWorkspaceSessionSubagentTranscript: misc.HandleGetWorkspaceSessionSubagentTranscript(sessSvc),
 		}),
 	}
 }
@@ -106,6 +114,12 @@ func NewFileModule(fileSvc service.FileService, accessCfg ...middleware.FileAcce
 // session identity, never request data).
 func NewApprovalsModule(st store.Store) interface{ Register(*http.ServeMux) } {
 	return approvals.NewModule(st)
+}
+
+// NewEvalAdminModule creates the session-eval dashboard and administration
+// route module.
+func NewEvalAdminModule(st store.Store) interface{ Register(*http.ServeMux) } {
+	return evalhandlers.NewModule(evaladmin.NewEvalAdminService(st))
 }
 
 // NewPRReviewModule creates the connector-backed pull request review module.

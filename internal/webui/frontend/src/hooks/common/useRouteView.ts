@@ -21,13 +21,13 @@ const VALID_VIEW_SEGMENTS: ReadonlySet<string> = new Set<ViewMode>([
   "graph",
   "monitor",
   "observability",
+  "traces",
   "terminal",
   "agents",
   "prs",
   "workspace",
   "settings",
   "files",
-  "agents",
 ]);
 
 export interface UseRouteViewReturn {

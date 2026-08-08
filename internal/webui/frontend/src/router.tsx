@@ -89,22 +89,30 @@ const viewRoutes = [
   {
     path: "kanban",
     lazy: () =>
-      import("@/views/KanbanPage").then((m) => ({ Component: m.KanbanPage })),
+      import("@/views/boards/KanbanPage").then((m) => ({
+        Component: m.KanbanPage,
+      })),
   },
   {
     path: "list",
     lazy: () =>
-      import("@/views/ListPage").then((m) => ({ Component: m.ListPage })),
+      import("@/views/boards/ListPage").then((m) => ({
+        Component: m.ListPage,
+      })),
   },
   {
     path: "table",
     lazy: () =>
-      import("@/views/TablePage").then((m) => ({ Component: m.TablePage })),
+      import("@/views/boards/TablePage").then((m) => ({
+        Component: m.TablePage,
+      })),
   },
   {
     path: "graph",
     lazy: () =>
-      import("@/views/GraphPage").then((m) => ({ Component: m.GraphPage })),
+      import("@/views/boards/GraphPage").then((m) => ({
+        Component: m.GraphPage,
+      })),
   },
   {
     path: "monitor",
@@ -116,6 +124,13 @@ const viewRoutes = [
     lazy: () =>
       import("@/views/ObservabilityPage").then((m) => ({
         Component: m.ObservabilityPage,
+      })),
+  },
+  {
+    path: "traces",
+    lazy: () =>
+      import("@/views/TracesPage").then((m) => ({
+        Component: m.TracesPage,
       })),
   },
   {

@@ -2,11 +2,14 @@ package store
 
 import (
 	"context"
+	"errors"
 	"io"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
+
+var ErrServerCapability = errors.New("server capability unavailable")
 
 type NodeCreate struct {
 	WorkspaceKey    string
@@ -54,6 +57,7 @@ type AgentSessionCreate struct {
 	Status          domain.AgentSessionStatus
 	Phase           string
 	Attempt         int
+	StartedAt       time.Time
 	Metadata        map[string]string
 }
 
@@ -62,6 +66,8 @@ type AgentSessionFilter struct {
 	NodeID  string
 	TaskID  string
 	Status  domain.AgentSessionStatus
+	Since   *time.Time
+	Until   *time.Time
 	// Kind narrows the query to one session kind (orchestration, task,
 	// terminal, maintenance, ad_hoc). The data model has always carried
 	// AgentSession.Kind, but the filter interface didn't expose it, so
@@ -96,6 +102,8 @@ type AgentSessionStore interface {
 	Create(ctx context.Context, in AgentSessionCreate) (*domain.AgentSession, error)
 	Get(ctx context.Context, workspaceKey, sessionID string) (*domain.AgentSession, error)
 	List(ctx context.Context, workspaceKey string, filter AgentSessionFilter) ([]*domain.AgentSession, error)
+	// ListPage returns sessions matching filter plus the pre-truncation match count.
+	ListPage(ctx context.Context, workspaceKey string, filter AgentSessionFilter) (items []*domain.AgentSession, total int, err error)
 	Heartbeat(ctx context.Context, workspaceKey, sessionID string) (*domain.AgentSession, error)
 	Update(ctx context.Context, workspaceKey, sessionID string, patch AgentSessionUpdate) (*domain.AgentSession, error)
 }

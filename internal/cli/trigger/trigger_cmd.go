@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 
@@ -48,8 +49,9 @@ var (
 	bindCreateJSON      bool
 	bindCreateRouter    routerBindingFlags
 
-	bindUpdateJSON   bool
-	bindUpdateRouter routerBindingFlags
+	bindUpdateJSON    bool
+	bindUpdateEnabled string
+	bindUpdateRouter  routerBindingFlags
 
 	bindListSource  string
 	bindListEnabled bool
@@ -216,6 +218,13 @@ func (f *routerBindingFlags) patch(flags *pflag.FlagSet) (store.TriggerBindingUp
 	if flags.Changed("event-pattern") {
 		v := append([]string(nil), f.patterns...)
 		patch.EventTypePatterns = &v
+	}
+	if flags.Changed("enabled") {
+		enabled, err := strconv.ParseBool(strings.TrimSpace(bindUpdateEnabled))
+		if err != nil {
+			return store.TriggerBindingUpdate{}, fmt.Errorf("--enabled must be true or false")
+		}
+		patch.Enabled = &enabled
 	}
 	if patch == (store.TriggerBindingUpdate{}) {
 		return store.TriggerBindingUpdate{}, fmt.Errorf("no fields to update: pass at least one flag")
@@ -601,6 +610,7 @@ func init() {
 	registerRouterBindingFlags(bindingsCreateCmd, &bindCreateRouter)
 
 	bindingsUpdateCmd.Flags().BoolVar(&bindUpdateJSON, "json", false, "JSON output")
+	bindingsUpdateCmd.Flags().StringVar(&bindUpdateEnabled, "enabled", "", "set binding enabled state: true|false")
 	registerRouterBindingFlags(bindingsUpdateCmd, &bindUpdateRouter)
 
 	bindingsListCmd.Flags().StringVar(&bindListSource, "source-kind", "", "filter by source kind")

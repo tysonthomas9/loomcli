@@ -57,6 +57,9 @@ func (m *mockWorkspaceService) PatchWorkspaceBackend(_ context.Context, _ string
 func (m *mockWorkspaceService) PatchWorkspaceDesignFormat(_ context.Context, _ string, _ string) (*ops.WorkspaceData, error) {
 	return nil, service.ErrUnavailable("not available")
 }
+func (m *mockWorkspaceService) PatchWorkspaceEvalPolicy(_ context.Context, _ string, _ service.WorkspaceEvalPolicyPatch) (*ops.WorkspaceData, error) {
+	return nil, service.ErrUnavailable("not available")
+}
 
 // stubErrorPool implements daemon.Pool, returning errors from Get.
 type stubErrorPool struct{}

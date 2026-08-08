@@ -101,6 +101,12 @@ export class LoomDriverClient {
       active: (input = {}) => this.activeTaskRuns(input),
       recoverStale: (input = {}) => this.recoverStaleTaskRuns(input),
     });
+    this.evals = Object.freeze({
+      listUnevaluated: (input = {}) => this.listUnevaluatedSessions(input),
+      getTranscript: (input = {}) => this.getSessionTranscript(input),
+      putMetric: (input = {}) => this.putEvalMetric(input),
+      rejudge: (input = {}) => this.rejudgeSession(input),
+    });
     this.connectorCallSeqs = new Map();
     this.connectors = buildConnectorsNamespace(this);
     this.awaitSeq = 0;
@@ -352,6 +358,35 @@ export class LoomDriverClient {
       maxAgeSeconds: input.maxAgeSeconds || "",
       errorClass: input.errorClass || "",
       errorMessage: input.errorMessage || "",
+    });
+  }
+
+  async listUnevaluatedSessions(input = {}) {
+    return this.#httpCall("sessions-list-unevaluated", {
+      promptVersion: input.promptVersion || "",
+    });
+  }
+
+  async getSessionTranscript(input = {}) {
+    return this.#httpCall("session-transcript-get", {
+      sessionId: input.sessionId || "",
+      promptVersion: input.promptVersion || "",
+    });
+  }
+
+  async putEvalMetric(input = {}) {
+    return this.#httpCall("eval-metric-put", {
+      sessionId: input.sessionId || "",
+      promptVersion: input.promptVersion || "",
+      status: input.status || "",
+      errorClass: input.errorClass || "",
+      eval: input.eval,
+    }, { rawKeys: ["eval"] });
+  }
+
+  async rejudgeSession(input = {}) {
+    return this.#httpCall("eval-rejudge", {
+      sessionId: input.sessionId || "",
     });
   }
 

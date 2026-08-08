@@ -1,0 +1,18 @@
+# Optional FleetDB compatibility override for local-mode.
+#
+# Use when you need to force the stack to build fleet-db from a specific
+# compatible checkout:
+#
+#   FLEET_DB_REPO=/absolute/path/to/fleet-db \
+#   LOCAL_MODE_COMPOSE_FILES=test/local-mode/docker-compose.fleetdb-sibling.yml \
+#   make local-mode-up
+#
+# The default context is relative to this compose file and resolves to the
+# sibling ../fleet-db checkout from the loomcli repo root.
+
+services:
+  fleet-db:
+    image: ${LOCAL_MODE_FLEETDB_IMAGE:-loomcli-local-mode-fleet-db:latest}
+    build:
+      context: ${FLEET_DB_REPO:-../../../fleet-db}
+      dockerfile: deploy/docker/Dockerfile

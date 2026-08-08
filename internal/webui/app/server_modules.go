@@ -134,6 +134,7 @@ func (app *Server) buildInfraModules() {
 		app.prReviewCredentialSeeds = prReviewModule
 		app.wsModules = append(app.wsModules, prReviewModule)
 		app.wsModules = append(app.wsModules, modbuilder.NewApprovalsModule(app.config.Store))
+		app.wsModules = append(app.wsModules, modbuilder.NewEvalAdminModule(app.config.Store))
 		app.wsModules = append(app.wsModules, modbuilder.NewTaskRunAPIModule(app.config.Store, app.config.FleetDBBaseURL, app.config.LocalSettingsDir))
 		app.wsModules = append(app.wsModules, driverapi.NewModule(driverapi.Config{
 			Store:            app.config.Store,

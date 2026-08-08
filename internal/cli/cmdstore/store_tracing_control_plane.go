@@ -88,6 +88,19 @@ func (t *tracedAgentSessionStore) List(ctx context.Context, ws string, filter st
 	)
 }
 
+func (t *tracedAgentSessionStore) ListPage(ctx context.Context, ws string, filter store.AgentSessionFilter) ([]*domain.AgentSession, int, error) {
+	ctx, span := startStoreSpan(ctx, "AgentSessions", "ListPage", attribute.String("loom.workspace", ws))
+	items, total, err := t.inner.ListPage(ctx, ws, filter)
+	if err == nil {
+		span.SetAttributes(
+			attribute.Int("result.count", len(items)),
+			attribute.Int("result.total", total),
+		)
+	}
+	finish(span, err)
+	return items, total, err
+}
+
 func (t *tracedAgentSessionStore) Heartbeat(ctx context.Context, ws, sessionID string) (*domain.AgentSession, error) {
 	return traced(ctx, "AgentSessions", "Heartbeat", func(ctx context.Context) (*domain.AgentSession, error) {
 		return t.inner.Heartbeat(ctx, ws, sessionID)

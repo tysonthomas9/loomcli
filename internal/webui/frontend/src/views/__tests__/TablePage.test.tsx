@@ -53,7 +53,7 @@ vi.mock("@/hooks", () => ({
   }),
 }));
 
-import { TablePage } from "../TablePage";
+import { TablePage } from "../boards/TablePage";
 
 describe("TablePage", () => {
   it("renders without crashing", () => {

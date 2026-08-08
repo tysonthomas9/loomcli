@@ -18,6 +18,10 @@ import type {
   UseBackendsReturn,
   UseLocalSettingsReturn,
 } from "@/hooks/workspace";
+import type {
+  UseEvalCronResult,
+  UseWorkspaceEvalPolicyReturn,
+} from "@/hooks/evals";
 import type { UseTerminalFontReturn } from "@/hooks/terminal";
 import type { BackendConfigData } from "@/api/common";
 
@@ -47,6 +51,11 @@ vi.mock("@/hooks/terminal", async () => {
   return { ...actual, useTerminalFont: vi.fn() };
 });
 
+vi.mock("@/hooks/evals", () => ({
+  useEvalCron: vi.fn(),
+  useWorkspaceEvalPolicy: vi.fn(),
+}));
+
 vi.mock("@/hooks/ui", async () => {
   const actual =
     await vi.importActual<typeof import("@/hooks/ui")>("@/hooks/ui");
@@ -70,6 +79,7 @@ import {
 } from "@/hooks/workspace";
 import { useTerminalFont } from "@/hooks/terminal";
 import { useToast } from "@/hooks/ui";
+import { useEvalCron, useWorkspaceEvalPolicy } from "@/hooks/evals";
 
 const mockUseBackendConfig = vi.mocked(useBackendConfig);
 const mockUseBackends = vi.mocked(useBackends);
@@ -78,6 +88,8 @@ const mockUseWorkspaceDesignFormat = vi.mocked(useWorkspaceDesignFormat);
 const mockUseWorkspaceContext = vi.mocked(useWorkspaceContext);
 const mockUseTerminalFont = vi.mocked(useTerminalFont);
 const mockUseToast = vi.mocked(useToast);
+const mockUseEvalCron = vi.mocked(useEvalCron);
+const mockUseWorkspaceEvalPolicy = vi.mocked(useWorkspaceEvalPolicy);
 
 /**
  * Helper to create a mock BackendConfigData.
@@ -176,6 +188,39 @@ function createMockLocalSettingsReturn(
   };
 }
 
+function createMockEvalCronReturn(
+  overrides?: Partial<UseEvalCronResult>,
+): UseEvalCronResult {
+  return {
+    cron: {
+      provisioned: true,
+      enabled: true,
+      schedule: "0 * * * *",
+    },
+    isLoading: false,
+    isSaving: false,
+    error: null,
+    refetch: vi.fn().mockResolvedValue(undefined),
+    setEnabled: vi.fn().mockResolvedValue({
+      provisioned: true,
+      enabled: true,
+      schedule: "0 * * * *",
+    }),
+    ...overrides,
+  };
+}
+
+function createMockEvalPolicyReturn(
+  overrides?: Partial<UseWorkspaceEvalPolicyReturn>,
+): UseWorkspaceEvalPolicyReturn {
+  return {
+    isSaving: false,
+    error: null,
+    updateEvalPolicy: vi.fn().mockResolvedValue(true),
+    ...overrides,
+  };
+}
+
 describe("SettingsView", () => {
   const mockShowToast = vi.fn();
 
@@ -205,6 +250,8 @@ describe("SettingsView", () => {
     mockUseBackends.mockReturnValue(createMockBackendsReturn());
     mockUseTerminalFont.mockReturnValue(createMockFontReturn());
     mockUseLocalSettings.mockReturnValue(createMockLocalSettingsReturn());
+    mockUseEvalCron.mockReturnValue(createMockEvalCronReturn());
+    mockUseWorkspaceEvalPolicy.mockReturnValue(createMockEvalPolicyReturn());
     mockUseWorkspaceContext.mockReturnValue({
       workspaceId: "ALPHA",
       workspace: {
@@ -217,6 +264,9 @@ describe("SettingsView", () => {
         workspaces: [],
         default_workspace: "",
         design_format: "markdown",
+        eval_sampling_percent: 100,
+        eval_batch_size: 25,
+        eval_lookback_days: 30,
       },
       refetch: vi.fn(),
     } as ReturnType<typeof useWorkspaceContext>);
@@ -652,6 +702,102 @@ describe("SettingsView", () => {
         "Design format updated successfully",
         { type: "success" },
       );
+    });
+  });
+
+  describe("session evals", () => {
+    it("disables the eval policy save button when policy values are unchanged", () => {
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+
+      render(<SettingsView />);
+
+      expect(screen.getByTestId("eval-policy-panel")).toBeInTheDocument();
+      expect(screen.getByTestId("eval-policy-sampling")).toHaveValue(100);
+      expect(screen.getByTestId("eval-policy-batch-size")).toHaveValue(25);
+      expect(screen.getByTestId("eval-policy-lookback-days")).toHaveValue(30);
+      expect(screen.getByTestId("eval-policy-save")).toBeDisabled();
+    });
+
+    it("patches only changed eval policy fields", async () => {
+      const updateEvalPolicy = vi.fn().mockResolvedValue(true);
+      mockUseWorkspaceEvalPolicy.mockReturnValue(
+        createMockEvalPolicyReturn({ updateEvalPolicy }),
+      );
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+
+      render(<SettingsView />);
+
+      fireEvent.change(screen.getByTestId("eval-policy-batch-size"), {
+        target: { value: "40" },
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("eval-policy-save"));
+      });
+
+      expect(updateEvalPolicy).toHaveBeenCalledWith({
+        eval_batch_size: 40,
+      });
+      expect(mockShowToast).toHaveBeenCalledWith("Session eval policy saved", {
+        type: "success",
+      });
+    });
+
+    it("disables eval policy save when client validation fails", () => {
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+
+      render(<SettingsView />);
+
+      fireEvent.change(screen.getByTestId("eval-policy-sampling"), {
+        target: { value: "0" },
+      });
+
+      expect(
+        screen.getByText("Sampling percent must be between 1 and 100"),
+      ).toBeInTheDocument();
+      expect(screen.getByTestId("eval-policy-save")).toBeDisabled();
+    });
+
+    it("enables an unprovisioned eval cron binding from the settings button", async () => {
+      const setEnabled = vi.fn().mockResolvedValue({
+        provisioned: true,
+        enabled: true,
+        schedule: "0 * * * *",
+      });
+      mockUseEvalCron.mockReturnValue(
+        createMockEvalCronReturn({
+          cron: { provisioned: false, enabled: false, schedule: null },
+          setEnabled,
+        }),
+      );
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+
+      render(<SettingsView />);
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("evals-enable-toggle"));
+      });
+
+      expect(setEnabled).toHaveBeenCalledWith(true);
+      expect(mockShowToast).toHaveBeenCalledWith("Session evals enabled", {
+        type: "success",
+      });
+    });
+
+    it("pauses a provisioned eval cron binding from the toggle", async () => {
+      const setEnabled = vi.fn().mockResolvedValue({
+        provisioned: true,
+        enabled: false,
+        schedule: "0 * * * *",
+      });
+      mockUseEvalCron.mockReturnValue(createMockEvalCronReturn({ setEnabled }));
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+
+      render(<SettingsView />);
+
+      fireEvent.click(screen.getByTestId("evals-enable-toggle"));
+
+      expect(setEnabled).toHaveBeenCalledWith(false);
     });
   });
 

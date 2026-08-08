@@ -70,11 +70,17 @@ describe("NavRail", () => {
       expect(screen.getByLabelText("Files")).toBeInTheDocument();
     });
 
-    it("renders exactly five navigation buttons", () => {
+    it("renders a Traces navigation button", () => {
+      render(<NavRail activeView="kanban" onChange={() => {}} />);
+
+      expect(screen.getByLabelText("Traces")).toBeInTheDocument();
+    });
+
+    it("renders exactly six navigation buttons", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
       const buttons = screen.getAllByRole("button");
-      expect(buttons).toHaveLength(5);
+      expect(buttons).toHaveLength(6);
     });
 
     it("renders tooltips for each button", () => {
@@ -90,6 +96,7 @@ describe("NavRail", () => {
       expect(tooltipTexts).not.toContain("Agents");
       expect(tooltipTexts).toContain("Pull Requests");
       expect(tooltipTexts).toContain("Terminal");
+      expect(tooltipTexts).toContain("Traces");
       expect(tooltipTexts).toContain("Settings");
     });
 
@@ -103,19 +110,23 @@ describe("NavRail", () => {
         screen.getByRole("tooltip", { name: "Terminal" }),
       ).toBeInTheDocument();
       expect(
+        screen.getByRole("tooltip", { name: "Traces" }),
+      ).toBeInTheDocument();
+      expect(
         screen.getByRole("tooltip", { name: "Settings" }),
       ).toBeInTheDocument();
     });
 
-    it("renders buttons in correct order: Workspaces, Pull Requests, Terminal, Files, Settings", () => {
+    it("renders buttons in correct order: Workspaces, Pull Requests, Terminal, Traces, Files, Settings", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
       const buttons = screen.getAllByRole("button");
       expect(buttons[0]).toHaveAccessibleName("Workspaces");
       expect(buttons[1]).toHaveAccessibleName("Pull Requests");
       expect(buttons[2]).toHaveAccessibleName("Terminal");
-      expect(buttons[3]).toHaveAccessibleName("Files");
-      expect(buttons[4]).toHaveAccessibleName("Settings");
+      expect(buttons[3]).toHaveAccessibleName("Traces");
+      expect(buttons[4]).toHaveAccessibleName("Files");
+      expect(buttons[5]).toHaveAccessibleName("Settings");
     });
 
     it("has navigation landmark with aria-label", () => {
@@ -162,6 +173,14 @@ describe("NavRail", () => {
       expect(terminalButton).toHaveAttribute("data-active");
     });
 
+    it("marks Traces as active when activeView is traces", () => {
+      render(<NavRail activeView="traces" onChange={() => {}} />);
+
+      const tracesButton = screen.getByLabelText("Traces");
+
+      expect(tracesButton).toHaveAttribute("data-active");
+    });
+
     it("applies custom className", () => {
       render(
         <NavRail
@@ -194,6 +213,16 @@ describe("NavRail", () => {
 
       expect(onChange).toHaveBeenCalledTimes(1);
       expect(onChange).toHaveBeenCalledWith("terminal");
+    });
+
+    it('calls onChange with "traces" when Traces button is clicked', () => {
+      const onChange = vi.fn();
+      render(<NavRail activeView="kanban" onChange={onChange} />);
+
+      fireEvent.click(screen.getByLabelText("Traces"));
+
+      expect(onChange).toHaveBeenCalledTimes(1);
+      expect(onChange).toHaveBeenCalledWith("traces");
     });
 
     it('calls onChange with "settings" when Settings button is clicked', () => {

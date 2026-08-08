@@ -319,6 +319,37 @@ func TestRouterBindingFlagsPatch(t *testing.T) {
 	})
 }
 
+func TestRouterBindingFlagsPatchEnabled(t *testing.T) {
+	orig := bindUpdateEnabled
+	t.Cleanup(func() { bindUpdateEnabled = orig })
+
+	cmd := &cobra.Command{Use: "test"}
+	var f routerBindingFlags
+	registerRouterBindingFlags(cmd, &f)
+	cmd.Flags().StringVar(&bindUpdateEnabled, "enabled", "", "set binding enabled state")
+	if err := cmd.Flags().Parse([]string{"--enabled", "false"}); err != nil {
+		t.Fatalf("parse flags: %v", err)
+	}
+	patch, err := f.patch(cmd.Flags())
+	if err != nil {
+		t.Fatalf("patch() error = %v", err)
+	}
+	if patch.Enabled == nil || *patch.Enabled {
+		t.Fatalf("Enabled = %v, want false", patch.Enabled)
+	}
+
+	cmd = &cobra.Command{Use: "test"}
+	f = routerBindingFlags{}
+	registerRouterBindingFlags(cmd, &f)
+	cmd.Flags().StringVar(&bindUpdateEnabled, "enabled", "", "set binding enabled state")
+	if err := cmd.Flags().Parse([]string{"--enabled", "maybe"}); err != nil {
+		t.Fatalf("parse invalid bool should still parse as string: %v", err)
+	}
+	if _, err := f.patch(cmd.Flags()); err == nil || !strings.Contains(err.Error(), "--enabled must be true or false") {
+		t.Fatalf("patch invalid enabled err = %v", err)
+	}
+}
+
 func TestNewBindingCreateInputCarriesRouterFields(t *testing.T) {
 	// newBindingCreateInput reads the package-level create flag state; set it
 	// directly and restore afterwards so other tests see clean state.

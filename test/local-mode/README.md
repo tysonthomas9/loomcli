@@ -61,6 +61,7 @@ Useful commands:
 ```sh
 make local-mode-verify
 make local-mode-codex-verify
+make local-mode-evals-verify
 make local-mode-logs
 make local-mode-down
 ```
@@ -73,6 +74,27 @@ transcripts, and produced the coder diff artifact. Override
 Use `make local-mode-codex-verify` after `make local-mode-codex-up`; it
 defaults the verifier to the Codex stack's seeded `LOCALMODE-2` and
 `LOCALMODE-3` tasks.
+
+`make local-mode-evals-verify` runs the standing session-eval dogfood path
+against a running stack. The default mode is the deterministic plain stack:
+
+```sh
+make local-mode-up
+make local-mode-evals-verify
+```
+
+For the full live loop, start the Codex stack and opt into Codex mode:
+
+```sh
+make local-mode-codex-up
+LOCAL_MODE_EVALS_MODE=codex make local-mode-evals-verify
+```
+
+The plain mode proves eval workflow provisioning, the codex-less preflight
+defer path, and the Traces read path without judge spend. The Codex mode is
+live: it uses mounted Codex auth and can spend judge tokens while asserting the
+session-evals record, session `eval_status=done`, eval rollup, and optional UI
+surfaces when `agent-browser` is available.
 
 The stack uses Docker/Podman volumes, so sessions and workspace files survive
 container restarts until `make local-mode-down` removes the stack volumes.
@@ -114,6 +136,28 @@ Codex override for `make local-mode-codex-up`:
 ```sh
 LOCAL_MODE_COMPOSE_FILES=/tmp/fleetdb-review.yml make local-mode-up
 ```
+
+The local-mode image can materialize built-in Flue workflows. Startup now
+preflights the sibling Flue checkout before compose starts. By default Make
+looks at `../flue` from the repo root, then exports an absolute `FLUE_REPO` to
+compose; direct compose users should use the compose-file-relative default
+`../../../flue` or pass an absolute `FLUE_REPO`. The checkout must have
+`packages/runtime/node_modules/hono`,
+`packages/runtime/node_modules/@hono/node-server`, and a built
+`packages/cli/dist/flue.js`.
+
+To force a compatible sibling FleetDB checkout for session-evals,
+artifact-content, and list-extension support, use the documented override:
+
+```sh
+FLEET_DB_REPO=/absolute/path/to/fleet-db \
+LOCAL_MODE_COMPOSE_FILES=test/local-mode/docker-compose.fleetdb-sibling.yml \
+make local-mode-up
+```
+
+If `FLEET_DB_REPO` is omitted, the override builds from `../../../fleet-db`
+relative to `test/local-mode/docker-compose.fleetdb-sibling.yml`, which is the
+sibling `../fleet-db` checkout from the repo root.
 
 Image tags default to the Compose project name for parallel builds. Override
 `LOCAL_MODE_FLEETDB_IMAGE`, `LOCAL_MODE_LOOM_IMAGE`, or

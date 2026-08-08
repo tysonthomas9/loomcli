@@ -6,7 +6,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
-	"github.com/tysonthomas9/loomcli/internal/sessions"
+	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
@@ -59,16 +59,40 @@ func (s *stubTerminalService) StartSetup(_ context.Context, _ string, req servic
 // stubSessionService implements SessionService with no-op defaults for module tests.
 type stubSessionService struct{}
 
-func (s *stubSessionService) ListTaskSessions(_ context.Context, _ string) ([]service.SessionListItem, error) {
+func (s *stubSessionService) ListTaskSessions(_ context.Context, _, _ string) ([]service.SessionListItem, error) {
 	return nil, nil
 }
-func (s *stubSessionService) GetSession(_ context.Context, _, _ string) (*service.SessionDetailData, error) {
+func (s *stubSessionService) ListWorkspaceSessions(_ context.Context, _ string, _ service.WorkspaceSessionListOptions) ([]service.SessionListItem, int, error) {
+	return nil, 0, nil
+}
+func (s *stubSessionService) GetSession(_ context.Context, _, _, _ string) (*service.SessionDetailData, error) {
 	return &service.SessionDetailData{}, nil
 }
-func (s *stubSessionService) GetSessionTranscript(_ context.Context, _, _ string) ([]sessions.TranscriptEntry, error) {
+func (s *stubSessionService) GetWorkspaceSession(_ context.Context, _, _ string) (*service.SessionDetailData, error) {
+	return &service.SessionDetailData{}, nil
+}
+func (s *stubSessionService) GetSessionTranscript(_ context.Context, _, _, _ string) ([]transcript.Event, error) {
 	return nil, nil
 }
-func (s *stubSessionService) GetSessionDiff(_ context.Context, _, _ string) (string, error) {
+func (s *stubSessionService) GetWorkspaceSessionTranscript(_ context.Context, _, _ string) ([]transcript.Event, error) {
+	return nil, nil
+}
+func (s *stubSessionService) GetSessionSubagentTranscript(_ context.Context, _, _, _, _ string) ([]transcript.Event, error) {
+	return nil, nil
+}
+func (s *stubSessionService) GetWorkspaceSessionSubagentTranscript(_ context.Context, _, _, _ string) ([]transcript.Event, error) {
+	return nil, nil
+}
+func (s *stubSessionService) ListSessionSubagents(_ context.Context, _, _, _ string) ([]string, error) {
+	return nil, nil
+}
+func (s *stubSessionService) ListWorkspaceSessionSubagents(_ context.Context, _, _ string) ([]string, error) {
+	return nil, nil
+}
+func (s *stubSessionService) GetSessionDiff(_ context.Context, _, _, _ string) (string, error) {
+	return "", nil
+}
+func (s *stubSessionService) GetWorkspaceSessionDiff(_ context.Context, _, _ string) (string, error) {
 	return "", nil
 }
 func (s *stubSessionService) ListSessionHistory(_ context.Context, _, _ string) ([]sessionhistory.SessionRecord, error) {

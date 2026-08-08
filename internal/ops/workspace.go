@@ -2,16 +2,19 @@ package ops
 
 // WorkspaceData represents the full workspace topology returned by the API.
 type WorkspaceData struct {
-	ID               string               `json:"id"`
-	Name             string               `json:"name"`
-	Path             string               `json:"path"`
-	Repos            []WorkspaceRepo      `json:"repos"`
-	Groups           []string             `json:"groups"`
-	Agents           []WorkspaceAgentInfo `json:"agents"`
-	Workspaces       []WorkspaceSummary   `json:"workspaces"`
-	WorkspaceOrder   []string             `json:"workspace_order,omitempty"`
-	DefaultWorkspace string               `json:"default_workspace"`
-	DesignFormat     string               `json:"design_format,omitempty"`
+	ID                  string               `json:"id"`
+	Name                string               `json:"name"`
+	Path                string               `json:"path"`
+	Repos               []WorkspaceRepo      `json:"repos"`
+	Groups              []string             `json:"groups"`
+	Agents              []WorkspaceAgentInfo `json:"agents"`
+	Workspaces          []WorkspaceSummary   `json:"workspaces"`
+	WorkspaceOrder      []string             `json:"workspace_order,omitempty"`
+	DefaultWorkspace    string               `json:"default_workspace"`
+	DesignFormat        string               `json:"design_format,omitempty"`
+	EvalSamplingPercent int                  `json:"eval_sampling_percent,omitempty"`
+	EvalBatchSize       int                  `json:"eval_batch_size,omitempty"`
+	EvalLookbackDays    int                  `json:"eval_lookback_days,omitempty"`
 }
 
 // WorkspaceSummary provides a lightweight summary of a configured workspace.

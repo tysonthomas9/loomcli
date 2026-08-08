@@ -108,6 +108,9 @@ export interface WorkspaceData {
   workspace_order?: string[];
   default_workspace: string;
   design_format?: "markdown" | "html";
+  eval_sampling_percent?: number;
+  eval_batch_size?: number;
+  eval_lookback_days?: number;
 }
 
 // ============= Response Types =============

@@ -78,6 +78,15 @@ const (
 	AgentSessionExpired   AgentSessionStatus = "expired"
 )
 
+func (s AgentSessionStatus) IsTerminal() bool {
+	switch s {
+	case AgentSessionCompleted, AgentSessionFailed, AgentSessionCancelled, AgentSessionExpired:
+		return true
+	default:
+		return false
+	}
+}
+
 type AgentSession struct {
 	WorkspaceKey    string             `json:"workspace_key"`
 	SessionID       string             `json:"session_id"`

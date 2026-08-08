@@ -155,6 +155,10 @@ func NewModule(cfg Config) *Module {
 		"release-task":                m.releaseTask,
 		"connector-dispatch":          m.connectorDispatch,
 		"emit-event":                  m.emitEvent,
+		"sessions-list-unevaluated":   m.sessionsListUnevaluated,
+		"session-transcript-get":      m.sessionTranscriptGet,
+		"eval-metric-put":             m.evalMetricPut,
+		"eval-rejudge":                m.evalRejudge,
 	}
 	if m.worktreePath == "" {
 		if wd, err := os.Getwd(); err == nil {
@@ -806,6 +810,9 @@ func writeDomainOpError(w http.ResponseWriter, err error) {
 		return
 	}
 	if writeAwaitOpError(w, err) {
+		return
+	}
+	if writeStatusOpError(w, err) {
 		return
 	}
 	switch {

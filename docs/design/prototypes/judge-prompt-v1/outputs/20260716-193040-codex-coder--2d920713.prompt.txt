@@ -1,0 +1,945 @@
+You are an evaluation judge for autonomous coding-agent sessions. You will be
+given (1) a SESSION RECORD header — ground truth from the harness about how
+the session ended, (2) the session's complete transcript, verbatim, and (3)
+the full diff the session produced, when one exists. Produce a single JSON
+object matching the provided output schema. Output nothing else.
+
+## Trust rules
+
+- Judge artifacts, not claims. Agents routinely narrate success on failed
+  work. `outcome_success` must rest on evidence: the diff, file contents
+  shown in tool results, command output, test results. A confident closing
+  summary is not evidence.
+- The SESSION RECORD header is harness ground truth for how the session
+  ended (status, exit_code, error_class). The transcript may end mid-run
+  with no terminal marker — that means the session was killed, not that the
+  work stopped cleanly. `error_class` may be `Unknown` even for kills.
+- Do not run commands or read files yourself. Reason only from the provided
+  material.
+
+## Scores
+
+Four dimensions, each an integer 0–100. They are independent: a session with
+status `completed` can score very low on efficiency; a killed session can
+still score well on tool_use_quality for the work it did do. Never let one
+dimension bleed into another, and never default to the middle — commit to a
+band first, then place within it. Scores of 95+ require positive evidence of
+excellence, not merely the absence of problems.
+
+Shared band meaning: 0–19 failing · 20–39 poor · 40–59 mixed · 60–79 good
+with real gaps · 80–94 strong · 95–100 exemplary, with in-session proof.
+
+**outcome_success** — did the session deliver the outcome its prompt asked
+for, as evidenced by artifacts?
+- 0–19: no usable progress toward the requested outcome, or net harm.
+- 20–39: visible attempt; the deliverable is absent, broken, or unusable.
+- 40–59: partial — a meaningful piece exists, but the core ask is unmet.
+- 60–79: substantially delivered, with concrete gaps (an unmet requirement,
+  no verification, a loose end the prompt asked to tie).
+- 80–94: the ask is fully delivered; only minor deviations.
+- 95–100: fully delivered AND verified within the session (tests run, output
+  checked), with the verification visible in the transcript.
+
+**instruction_adherence** — were the prompt's explicit instructions and
+constraints followed, regardless of outcome? Count only instructions
+actually present in the transcript's system/user content.
+- 0–19: ignored or inverted central instructions.
+- 20–39: multiple explicit instructions violated, or one central one.
+- 40–59: mostly followed; at least one clear violation of a stated
+  requirement or constraint.
+- 60–79: followed with minor lapses (formatting, a skipped step of a stated
+  procedure) but nothing the prompt marked as critical.
+- 80–94: all explicit instructions followed.
+- 95–100: all followed, including judgment calls that honored the prompt's
+  intent where instructions were ambiguous — cite the moment.
+
+**efficiency** — useful-work density relative to the size of the task: did
+the session spend its time and tokens on work that moved the task forward?
+- 0–19: the session is dominated by waste — idle waiting, loops, repeated
+  dead-end attempts (e.g. minutes-long foreground sleeps).
+- 20–39: major detours or waits that dwarf the useful work.
+- 40–59: noticeable waste — redundant re-reads, re-running unchanged
+  commands, exploring far beyond the task's needs — but useful work
+  dominates.
+- 60–79: minor slack only (an extra verification pass, a small re-read).
+- 80–94: tight — nearly every step advances the task.
+- 95–100: tight AND well-sequenced for the task's size; no step you could
+  point to and delete.
+
+**tool_use_quality** — were tool calls well-chosen and well-formed, and were
+their results actually used?
+- 0–19: pervasive misuse — malformed calls, wrong tools, output ignored.
+- 20–39: repeated failing calls with no adaptation, or results routinely
+  misread.
+- 40–59: works, but with clear misuse moments (retrying an identical failing
+  call, wrong tool for the job, parsing errors shrugged off).
+- 60–79: competent; occasional clumsy call or unread result.
+- 80–94: consistently correct calls, errors noticed and adapted to.
+- 95–100: exemplary — precise calls, failures diagnosed from tool output and
+  corrected on the next step; cite an example.
+
+## Error taxonomy tags
+
+`error_taxonomy_tags`: zero or more tags, each either from this allowlist or
+`other:<snake_case>` when nothing on the list fits. Tag only what the
+transcript or header evidences; an empty array is the correct output for a
+clean session. Tags record what went wrong in THIS session — do not echo the
+status field as a tag.
+
+- `false_success_claim` — the agent asserted completion/success that the
+  artifacts contradict or cannot support.
+- `incomplete_task` — the session ended (cleanly or not) with the core ask
+  unmet.
+- `instruction_violation` — an explicit prompt instruction or constraint was
+  broken.
+- `idle_wait` — meaningful wall-clock spent deliberately waiting (sleeps,
+  polling loops) rather than working.
+- `redundant_work` — repeated or unnecessary operations at material scale
+  (re-reading unchanged files, re-running identical commands).
+- `tool_misuse` — malformed/wrong tool calls, or tool output misread or
+  ignored.
+- `hallucinated_state` — the agent referenced files, results, or prior steps
+  that do not exist in the session.
+- `scope_creep` — changes or actions beyond what the task asked for.
+- `env_or_dependency_failure` — blocked by the environment (missing tools,
+  network, permissions), not by the agent's own choices.
+- `killed_or_truncated` — the transcript ends mid-run with no terminal
+  marker (watchdog kill, timeout, crash).
+- `unsafe_operation` — a destructive or risky action outside the task's
+  mandate (mass deletion, force-push, credential exposure).
+- `verification_skipped` — the agent declared work done without any check it
+  could have run.
+
+## Improvement insights
+
+`improvement_categories` has four fixed keys. Each holds 0–3 insight
+strings; an empty list is better than filler — most sessions should produce
+insights in at most one or two categories. An insight must be:
+(a) grounded in a specific moment of this session (cite the entry seq),
+(b) actionable as a change to that category's artifact, and
+(c) general — it would help future sessions, not just re-litigate this one.
+Phrase each as "Change X so that Y", one sentence.
+
+- `harness`: the supervisor/runtime around the agent — watchdogs, timeouts,
+  tool availability, sandboxing, transcript/diff capture.
+- `linter`: automated checks (linters, CI gates, validators) that would have
+  caught a mistake this session made.
+- `prompt`: the agent's own system/workflow prompt — instructions that were
+  missing, ambiguous, or misleading for this session.
+- `skill`: repo skills/runbooks/docs the agent lacked or misused (e.g. a
+  documented procedure that would have replaced its improvisation).
+
+## Summary
+
+`judge_summary`: 2–4 sentences. What the session actually did, the decisive
+evidence behind your lowest and highest scores, and any tag worth a reader's
+attention. Written for a dashboard reader who has not seen the transcript.
+
+`score_rationales`: for each dimension, one sentence naming the evidence
+(cite entry seq numbers) that placed the score in its band.
+
+Return ONLY the JSON object. No markdown, no commentary.
+
+
+=== SESSION RECORD (harness ground truth) ===
+session_id:        20260716-193040-codex-coder--2d920713
+agent:             codex-coder (kind: task, backend: codex)
+task:              LOCALMODE-3 (title unavailable in fixture)
+phase:             implementation
+final_status:      completed
+exit_code:         0
+error_class:       (none recorded)
+started_at:        2026-07-16T19:30:40.14904745Z
+ended_at:          2026-07-16T19:32:47.622997985Z
+duration_s:        127.473950535
+parent_session_id: (none)
+attempt:           0
+tokens:            in=302428 out=4216
+diff_stat:         files_changed=1 +1 -0
+
+=== TRANSCRIPT (49 canonical entries, verbatim, no truncation) ===
+
+-- entry 0 | 2026-07-16T19:30:50.328Z | SYSTEM text
+<permissions instructions>
+Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `danger-full-access`: No filesystem sandboxing - all commands are permitted. Network access is enabled.
+Approval policy is currently never. Do not provide the `sandbox_permissions` for any reason, commands will be rejected.
+</permissions instructions>
+
+-- entry 1 | 2026-07-16T19:30:50.328Z | SYSTEM text
+<skills_instructions>
+## Skills
+A skill is a set of instructions provided through a `SKILL.md` source. Below is the list of skills that can be used. Each entry includes a name, description, and source locator. `file` locators are on the host filesystem, `environment resource` locators are owned by an execution environment, `orchestrator resource` locators are opaque non-filesystem resources, and `custom resource` locators use their provider's access mechanism.
+### Available skills
+- imagegen: Generate or edit raster images when the task benefits from AI-created bitmap visuals such as photos, illustrations, textures, sprites, mockups, or transparent-background cutouts. Use when Codex should create a brand-new image, transform an existing image, or derive visual variants from references, and the output should be a bitmap asset rather than repo-native code or vector. Do not use when the task is better handled by editing existing SVG/vector/code-native assets, extending an established icon or logo system, or building the visual directly in HTML/CSS/canvas. (file: /root/.codex/skills/.system/imagegen/SKILL.md)
+- openai-docs: Use when the user asks how to build with OpenAI products or APIs, asks about Codex itself or choosing Codex surfaces, needs up-to-date official documentation with citations, help choosing the latest model for a use case, or model upgrade and prompt-upgrade guidance; use OpenAI docs MCP tools for non-Codex docs questions, use the Codex manual helper first for broad Codex self-knowledge, and restrict fallback browsing to official OpenAI domains. (file: /root/.codex/skills/.system/openai-docs/SKILL.md)
+- plugin-creator: Create and scaffold plugin directories for Codex with a required `.codex-plugin/plugin.json`, optional plugin folders/files, valid manifest defaults, and personal-marketplace entries by default. Use when Codex needs to create a new personal plugin, add optional plugin structure, generate or update marketplace entries for plugin ordering and availability metadata, or update an existing local plugin during development with the CLI-driven cachebuster and reinstall flow. (file: /root/.codex/skills/.system/plugin-creator/SKILL.md)
+- skill-creator: Guide for creating effective skills. This skill should be used when users want to create a new skill (or update an existing skill) that extends Codex's capabilities with specialized knowledge, workflows, or tool integrations. (file: /root/.codex/skills/.system/skill-creator/SKILL.md)
+- skill-installer: Install Codex skills into $CODEX_HOME/skills from a curated list or a GitHub repo path. Use when a user asks to list installable skills, install a curated skill, or install a skill from another repo (including private repos). (file: /root/.codex/skills/.system/skill-installer/SKILL.md)
+</skills_instructions>
+
+-- entry 2 | 2026-07-16T19:30:50.328Z | SYSTEM text
+<apps_instructions>
+## Apps (Connectors)
+Apps (Connectors) can be explicitly triggered in user messages in the format `[$app-name](app://{connector_id})`. Apps can also be implicitly triggered as long as the context suggests usage of available apps.
+An app is equivalent to a set of MCP tools within the `codex_apps` MCP.
+An installed app's MCP tools are either provided to you already, or can be lazy-loaded through the `tool_search` tool. If `tool_search` is available, the apps that are searchable by `tools_search` will be listed by it.
+Do not additionally call list_mcp_resources or list_mcp_resource_templates for apps.
+</apps_instructions>
+
+-- entry 3 | 2026-07-16T19:30:50.328Z | SYSTEM text
+You are `/root`, the primary agent in a team of agents collaborating to fulfill the user's goals.
+
+At the start of your turn, you are the active agent.
+You can spawn sub-agents to handle subtasks, and those sub-agents can spawn their own sub-agents.
+All agents in the team, including the agents that you can assign tasks to, are equally intelligent and capable, and have access to the same set of tools.
+
+You can use `spawn_agent` to create a new agent, `followup_task` to give an existing agent a new task and trigger a turn, and `send_message` to pass a message to a running agent without triggering a turn.
+Child agents can also spawn their own sub-agents.
+You can decide how much context you want to propagate to your sub-agents with the `fork_turns` parameter.
+
+You will receive messages in the analysis channel in the form:
+```
+Message Type: MESSAGE | FINAL_ANSWER
+Task name: <recipient>
+Sender: <author>
+Payload:
+<payload text>
+```
+They may be addressed as to=/root
+
+Note that collaboration tools cannot be called from inside `functions.exec`. Call `spawn_agent`, `send_message`, `followup_task`, `wait_agent`, `interrupt_agent`, and `list_agents` only as direct tool calls using the recipient shown in their tool definitions, such as `to=functions.collaboration.spawn_agent`, since they are intentionally absent from the `functions.exec` `tools.*` namespace. Available tools in `functions.exec` are explicitly described with a `tools` namespace in the developer message.
+
+All agents share the same directory. In detail:
+- All agents have access to the same container and filesystem as you.
+- All agents use the same current working directory.
+- As a result, edits made by one agent are immediately visible to all other agents.
+
+There are 4 available concurrency slots, meaning that up to 4 agents can be active at once, including you.
+
+-- entry 4 | 2026-07-16T19:30:50.328Z | SYSTEM text
+<multi_agent_mode>Do not spawn sub-agents unless the user or applicable AGENTS.md/skill instructions explicitly ask for sub-agents, delegation, or parallel agent work.</multi_agent_mode>
+
+-- entry 5 | 2026-07-16T19:30:50.328Z | USER text
+<recommended_plugins>
+Here is a list of plugins that are available but not installed. If the user's query would benefit from one of these plugins, use the `request_plugin_install` tool to suggest that they install it. Pass the parenthesized ID as `plugin_id`. For example, suggest the Google Drive plugin if the query could possibly be better answered with access to Google Drive.
+
+- Atlassian Rovo (atlassian-rovo@openai-curated-remote)
+- Box (box@openai-curated-remote)
+- Figma (figma@openai-curated-remote)
+- GitHub (github@openai-curated-remote)
+- Gmail (gmail@openai-curated-remote)
+- Google Calendar (google-calendar@openai-curated-remote)
+- Google Drive (google-drive@openai-curated-remote)
+- Notion (notion@openai-curated-remote)
+- Outlook Calendar (outlook-calendar@openai-curated-remote)
+- Outlook Email (outlook-email@openai-curated-remote)
+- SharePoint (sharepoint@openai-curated-remote)
+- Slack (slack@openai-curated-remote)
+- Teams (teams@openai-curated-remote)
+</recommended_plugins>
+
+-- entry 6 | 2026-07-16T19:30:50.328Z | USER text
+<environment_context>
+  <cwd>/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-coder</cwd>
+  <shell>bash</shell>
+  <current_date>2026-07-16</current_date>
+  <timezone>Etc/UTC</timezone>
+  <filesystem><workspace_roots><root>/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-coder</root></workspace_roots><permission_profile type="disabled"><file_system type="unrestricted" /></permission_profile></filesystem>
+</environment_context>
+
+-- entry 7 | 2026-07-16T19:30:50.333Z | USER text
+## WORKFLOW: Implementation Task (Code, Test, Commit)
+
+You are a disciplined software engineer. Follow this workflow EXACTLY for ONE task.
+
+**Your agent name is: codex-coder** (Loom actor is set automatically)
+
+### Workspace Mode: Multi-Repo Environment
+You are working in a multi-repo workspace. The workspace root is your current working directory.
+Repositories are subdirectories within this workspace:
+
+| Repo | Path | Default Branch |
+|------|------|----------------|
+| source-repo | .//root/.loom/workspaces/LOCALMODE/source-repo | localmode |
+
+**Important workspace rules:**
+- Run `loom data` commands from the workspace root (current directory)
+- Run git commands (git status, git add, git commit, git push) from the specific repo subdirectory
+- Run build/test commands from the specific repo subdirectory
+- Changes may span multiple repos — coordinate commits across them
+
+
+### Multi-Agent Safety Rules
+
+You are running in a parallel multi-agent environment. Follow these rules strictly:
+
+- **Only modify files directly related to your assigned task** — do not touch files outside your task scope
+- **Never run** `git stash`, `git checkout main`, or `git clean` outside your assigned worktree
+- **Never force-push or reset --hard** without explicit instruction from the user
+- **If you encounter files/changes from another agent**, leave them alone — do not modify, revert, or clean them up
+- **Commit only your changes** — do not stage unrelated modifications with `git add -A` or `git add .`; use specific file paths
+- **If your worktree has unexpected state**, report it via task notes or `loom complete` rather than cleaning it up
+- **Do not switch branches** — you are confined to your assigned worktree branch
+
+### Step 1: Load Your Pre-Assigned Task
+- Your task has been pre-assigned by the Fleet API: LOCALMODE-3
+- Run 'loom data show LOCALMODE-3 --output json' to load the full task details
+- Read the JSON `design`, `description`, `acceptance_criteria`, and `depends_on` fields
+- The supervisor or Fleet API has already claimed this task
+- Run 'loom claim LOCALMODE-3' to register with the agent monitor
+- IMPORTANT: Do NOT run 'loom data ready' — your task is already assigned
+- If the task does not exist, has an empty JSON `design` field, or has 'needs-revision' label:
+  1. Print the error
+  2. Run 'loom complete'
+  3. EXIT immediately
+- Follow the pre-approved plan in the JSON `design` field
+
+### Step 2: Review the Design
+Before writing any code:
+- Read and understand the JSON `design` field thoroughly
+- Identify the files to create/modify as specified in the design
+- Note any edge cases or dependencies mentioned
+- Check if any dependencies are missing or incomplete
+- If a required dependency is not ready, go to Step 8a (External Blocker)
+- ONLY proceed to Step 3 after you fully understand the plan AND all dependencies are met
+
+### Step 3: Implement
+- Follow the design plan exactly
+- Keep changes minimal and focused ONLY on this task
+- Follow existing code patterns in the codebase
+- Do not refactor unrelated code
+- Do not add features beyond the task scope
+
+### Step 4: Manual Testing
+- Run/build the code to verify it compiles
+- Test the functionality manually to verify it works
+- Test edge cases you identified in planning
+- If it fails: debug, fix, and re-test before proceeding
+- Do NOT proceed until manual testing passes
+
+### Step 5: Write Tests
+- Write unit tests for your changes, following existing test patterns in the codebase
+- Verify tests pass by running the test command (e.g., 'go test ./...' or 'npm test')
+- For Go suites, isolate config state: run 'LOOM_CONFIG_DIR=$(mktemp -d) go test ./...' (or use scripts/test.sh, which isolates automatically)
+- If tests fail, fix the code or tests until they pass
+
+### Step 6: Code Review
+- Review your own changes for bugs, security issues, code quality, and adherence to project conventions
+- Check for common issues: error handling, edge cases, naming consistency
+- Document and fix all issues found
+
+
+
+### Step 7: Fix Review Issues
+- Address ALL issues identified in code review
+- Re-run tests after making fixes
+- If changes were significant, spawn another code review agent
+- Repeat until review passes with no major issues
+
+### Step 8: Handle Inability to Complete
+
+If at ANY point you discover the task cannot be completed, FIRST choose the
+correct failure path. The two paths are not interchangeable:
+
+**Step 8a — External Blocker (needs a human to unblock)**
+Use this ONLY when nothing in this codebase can move the task forward:
+- Missing dependency on another in-flight task
+- Waiting on a third-party API / approval / merge
+- A bug in code outside the design's scope blocks this work
+
+Procedure:
+1. Set the blocked status AND the reason in ONE call. The reason is REQUIRED —
+   `--status blocked` is rejected without notes — so the board shows a human why
+   it's blocked and what unblocks it (include any blocking task ID):
+   loom data update <id> --status blocked --notes "BLOCKED: <detailed external reason + any blocking task ID>"
+2. Commit any partial work (if meaningful):
+   git add <files> && git commit -m "WIP: <task-id> - blocked on <reason>"
+5. If you committed partial work, publish it with the stacked PR commands in Step 9.
+6. Signal completion: loom complete
+7. EXIT immediately
+
+Blocked tasks DO NOT get re-claimed by any agent; they sit until a human reviews.
+
+**Step 8b — Design Unviable (auto-route back to the planner)**
+Use this when the design itself is wrong and the work CAN move forward with a
+revised plan. Symptoms:
+- The design's approach violates an acceptance criterion you cannot
+  satisfy by faithful implementation (e.g. catastrophic regressions
+  against existing eval gates).
+- Implementing the design exactly would require touching files or
+  introducing semantics the design did not anticipate.
+- You can articulate a concrete corrective direction the planner should
+  take ("move dedup before LCS"; "drop normalised-equality predicate";
+  etc.).
+
+Procedure:
+1. Document the design flaw and your proposed revision direction:
+   loom data update <id> --notes "NEEDS-REVISION: <what's wrong with the
+   design + concrete next-iteration direction + evidence>"
+2. Commit any salvageable infrastructure (tests, helpers, params) with
+   feature flags OFF so a future implementation can re-enable them:
+   git add <files> && git commit -m "WIP: <task-id> - design revision pending"
+3. If you committed salvageable work, publish it with the stacked PR commands in Step 9.
+4. Flip the task back to the planner:
+   loom data update <id> --status open --labels +needs-revision
+5. Signal completion: loom complete
+6. EXIT immediately
+
+The planner watches for `needs-revision` and will re-design against the
+existing design + your NEEDS-REVISION feedback without human intervention.
+
+**If you cannot tell which path applies**, prefer 8b (needs-revision):
+the planner is cheaper to re-engage than a human, and 8b is non-terminal
+— if the next iteration also fails, the worker can still escalate to 8a.
+
+### Step 9: Complete and Signal
+- Run the quality gate (MANDATORY - DO NOT SKIP):
+  - If the repo has a Makefile with a `gate` target, run `make gate`
+  - Otherwise run the manual test command(s) from the task design or acceptance criteria
+- If the gate or manual test fails, fix ALL failures and re-run until it passes
+- Do NOT commit or push with failing tests
+- Stage and commit: git add <files> && git commit -m "<brief description> (<task-id>)"
+- Publish through Loom stacked PR delivery (MANDATORY):
+  - Determine the stack id: use `epic:<epic-id>` for child tasks; use `task:<task-id>` for standalone tasks.
+  - Determine the repo name and base branch from the task `source_repo`, the parent epic, or the workspace repo table. If they are ambiguous, add task notes explaining the missing stack inputs, do not close the task, and run `loom complete`.
+  - Ensure the stack exists:
+    `loom stack show <stack-id> --json` or `loom stack init <stack-id> --repo <repo-name> --base <base-branch> --commit-mode agent_commit`
+  - Ensure this task is registered in that stack. If it is absent, run:
+    `loom stack add <task-id> --stack <stack-id> --commit-mode agent_commit`
+  - Read this task's `outputBranch` from `loom stack show <stack-id> --json`.
+  - Materialize your committed HEAD onto that output branch without switching branches:
+    `git branch -f <output-branch> HEAD`
+  - Dry-run first:
+    `loom stack publish <stack-id> --repo-path <repo-path> --dry-run --json`
+  - If the dry-run succeeds, publish:
+    `loom stack publish <stack-id> --repo-path <repo-path> --json`
+  - Do not use direct integration or direct branch pushes as the completion path.
+- Run 'loom data close <id> --reason "Completed with tests and code review"'
+- Signal completion: loom complete
+
+### CRITICAL: STOP
+After completing Step 8 (blocked or needs-revision) or Step 9 (completed), you are DONE.
+- Do NOT run 'loom data ready' again
+- Do NOT pick up another task
+- Do NOT continue working
+- Simply EXIT
+
+You have completed ONE task through the full workflow. The human will run you again for the next task.
+
+-- entry 8 | 2026-07-16T19:30:56.862Z | ASSISTANT text
+I’m loading the pre-assigned `LOCALMODE-3` task and registering the claim first. I’ll verify its design, dependencies, and repository state before changing any files.
+
+-- entry 9 | 2026-07-16T19:30:57.509Z | ASSISTANT tool_use [exec call_ZBxpflEve5u4kpZaAJHRAtk9]
+const r = await tools.exec_command({
+  cmd: "loom data show LOCALMODE-3 --output json",
+  workdir: "/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-coder",
+  yield_time_ms: 10000,
+  max_output_tokens: 20000
+});
+text(r.output);
+
+
+-- entry 10 | 2026-07-16T19:30:57.587Z | TOOL tool_result [ call_ZBxpflEve5u4kpZaAJHRAtk9]
+Script completed
+Wall time 0.1 seconds
+Output:
+{
+  "id": "LOCALMODE-3",
+  "title": "Local mode coder dogfood",
+  "status": "in_progress",
+  "priority": 0,
+  "issue_type": "task",
+  "assignee": "codex-coder",
+  "owner": "local-mode-harness@fixture.local",
+  "source_repo": "source-repo",
+  "parent": "LOCALMODE-1",
+  "design": "Approved design: append a short local-mode dogfood result to local-mode-agent-output.txt, commit it, then close the task.",
+  "has_design": true,
+  "created_at": "2026-07-16T19:30:39.777921581Z",
+  "updated_at": "2026-07-16T19:30:39.777921581Z",
+  "description": "Coder agent should claim this task and make a small committed fixture change."
+}
+
+
+-- entry 11 | 2026-07-16T19:31:01.104Z | ASSISTANT tool_use [exec call_9ZuBYma8DHHbEynFxiyNgeXz]
+const r = await tools.exec_command({
+  cmd: "loom claim LOCALMODE-3",
+  workdir: "/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-coder",
+  yield_time_ms: 10000,
+  max_output_tokens: 20000
+});
+text(r.output);
+
+
+-- entry 12 | 2026-07-16T19:31:01.152Z | TOOL tool_result [ call_9ZuBYma8DHHbEynFxiyNgeXz]
+Script completed
+Wall time 0.0 seconds
+Output:
+time=2026-07-16T19:31:01.126Z level=INFO msg="opened cloud fleet-db client" url=http://fleet-db:8080
+Claimed task: LOCALMODE-3
+Title: Local mode coder dogfood
+
+
+-- entry 13 | 2026-07-16T19:31:04.796Z | ASSISTANT text
+The design is valid and narrowly scoped: append one short dogfood result to `local-mode-agent-output.txt`, commit it, publish through the parent epic’s stack, and close the task. No dependency field is present, so there is no declared prerequisite to wait on; I’m now checking the target file, repo conventions, and worktree state.
+
+-- entry 14 | 2026-07-16T19:31:11.185Z | ASSISTANT tool_use [exec call_fdrR8PzDkYp53hZZPD7qNdRD]
+const results = await Promise.all([
+  tools.exec_command({
+    cmd: "git status --short --branch",
+    workdir: "/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-coder",
+    yield_time_ms: 10000,
+    max_output_tokens: 10000
+  }),
+  tools.exec_command({
+    cmd: "git rev-parse --show-toplevel && git branch --show-current",
+    workdir: "/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-coder",
+    yield_time_ms: 10000,
+    max_output_tokens: 10000
+  }),
+  tools.exec_command({
+    cmd: "if [ -f local-mode-agent-output.txt ]; then sed -n '1,160p' local-mode-agent-output.txt; else echo 'MISSING local-mode-agent-output.txt'; fi",
+    workdir: "/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-coder",
+    yield_time_ms: 10000,
+    max_output_tokens: 10000
+  }),
+  tools.exec_command({
+    cmd: "rg --files -g 'Makefile' -g 'makefile' -g 'GNUmakefile' -g 'AGENTS.md' -g '*test*' | sed -n '1,120p'",
+    workdir: "/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-coder",
+    yield_time_ms: 10000,
+    max_output_tokens: 10000
+  })
+]);
+results.forEach((r, i) => {
+  text(`RESULT ${i + 1}\n${r.output}`);
+});
+
+
+-- entry 15 | 2026-07-16T19:31:11.247Z | TOOL tool_result [ call_fdrR8PzDkYp53hZZPD7qNdRD]
+Script completed
+Wall time 0.0 seconds
+Output:
+RESULT 1
+## codex-coder
+?? .agent.lock
+?? .agent.lock.flock
+RESULT 2
+/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-coder
+codex-coder
+RESULT 3
+MISSING local-mode-agent-output.txt
+RESULT 4
+Makefile
+
+
+-- entry 16 | 2026-07-16T19:31:19.403Z | ASSISTANT tool_use [exec call_QqAlxUYDnJ29jOYNPUlNKcGt]
+const results = await Promise.all([
+  tools.exec_command({
+    cmd: "sed -n '1,220p' Makefile",
+    workdir: "/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-coder",
+    yield_time_ms: 10000,
+    max_output_tokens: 10000
+  }),
+  tools.exec_command({
+    cmd: "rg --files -g '!/.git' | sed -n '1,160p'",
+    workdir: "/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-coder",
+    yield_time_ms: 10000,
+    max_output_tokens: 10000
+  }),
+  tools.exec_command({
+    cmd: "git log --oneline --decorate -8 && git ls-tree -r --name-only HEAD | sed -n '1,160p'",
+    workdir: "/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-coder",
+    yield_time_ms: 10000,
+    max_output_tokens: 10000
+  })
+]);
+results.forEach((r, i) => text(`RESULT ${i + 1}\n${r.output}`));
+
+
+-- entry 17 | 2026-07-16T19:31:19.481Z | TOOL tool_result [ call_QqAlxUYDnJ29jOYNPUlNKcGt]
+Script completed
+Wall time 0.1 seconds
+Output:
+RESULT 1
+gate:
+	@echo "local mode gate ok"
+RESULT 2
+README.md
+Makefile
+RESULT 3
+43a3516 (HEAD -> codex-coder, origin/main, origin/localmode, main, localmode, codex-planner) Initial local mode fixture
+Makefile
+README.md
+
+
+-- entry 18 | 2026-07-16T19:31:25.15Z | ASSISTANT text
+The repository is a minimal fixture with only a README and a `Makefile`; the requested output file does not yet exist, so “append” means creating it with the first result line. The existing `.agent.lock*` files are monitor artifacts and will remain untouched.
+
+-- entry 19 | 2026-07-16T19:31:25.804Z | ASSISTANT tool_use [exec call_V0cw9RLoCzXorL4PCS6jDbb5]
+const patch = "*** Begin Patch\n*** Add File: /root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-coder/local-mode-agent-output.txt\n+LOCALMODE-3: local mode coder dogfood completed successfully.\n*** End Patch";
+text(await tools.apply_patch(patch));
+
+
+-- entry 20 | 2026-07-16T19:31:25.848Z | TOOL tool_result [ call_V0cw9RLoCzXorL4PCS6jDbb5]
+Script completed
+Wall time 0.0 seconds
+Output:
+{}
+
+-- entry 21 | 2026-07-16T19:31:33.502Z | ASSISTANT tool_use [exec call_1zTQRtvahbkbT0lcLfJc8vdw]
+const results = await Promise.all([
+  tools.exec_command({
+    cmd: "make gate",
+    workdir: "/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-coder",
+    yield_time_ms: 10000,
+    max_output_tokens: 10000
+  }),
+  tools.exec_command({
+    cmd: "test \"$(wc -l < local-mode-agent-output.txt)\" -eq 1 && rg -n '^LOCALMODE-3: local mode coder dogfood completed successfully\\.$' local-mode-agent-output.txt",
+    workdir: "/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-coder",
+    yield_time_ms: 10000,
+    max_output_tokens: 10000
+  }),
+  tools.exec_command({
+    cmd: "git diff --no-index -- /dev/null local-mode-agent-output.txt; git status --short",
+    workdir: "/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-coder",
+    yield_time_ms: 10000,
+    max_output_tokens: 10000
+  })
+]);
+results.forEach((r, i) => text(`RESULT ${i + 1} (exit ${r.exit_code})\n${r.output}`));
+
+
+-- entry 22 | 2026-07-16T19:31:33.562Z | TOOL tool_result [ call_1zTQRtvahbkbT0lcLfJc8vdw]
+Script completed
+Wall time 0.0 seconds
+Output:
+RESULT 1 (exit 0)
+local mode gate ok
+RESULT 2 (exit 0)
+1:LOCALMODE-3: local mode coder dogfood completed successfully.
+RESULT 3 (exit 0)
+diff --git a/local-mode-agent-output.txt b/local-mode-agent-output.txt
+new file mode 100644
+index 0000000..cd014a3
+--- /dev/null
++++ b/local-mode-agent-output.txt
+@@ -0,0 +1 @@
++LOCALMODE-3: local mode coder dogfood completed successfully.
+?? .agent.lock
+?? .agent.lock.flock
+?? local-mode-agent-output.txt
+
+
+-- entry 23 | 2026-07-16T19:31:39.48Z | ASSISTANT text
+Implementation and edge checks pass: the file has exactly one newline-terminated result line, and the repository gate succeeds. This content-only fixture has no unit-test framework or executable behavior, so the focused line assertion plus the project’s mandatory `make gate` serve as its tests; I’m completing the final diff review before committing only the requested file.
+
+-- entry 24 | 2026-07-16T19:31:44.792Z | ASSISTANT tool_use [exec call_LqnXcQT25TREKa2Tubaiyr9A]
+const results = await Promise.all([
+  tools.exec_command({
+    cmd: "sed -n '1,160p' README.md",
+    workdir: "/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-coder",
+    yield_time_ms: 10000,
+    max_output_tokens: 10000
+  }),
+  tools.exec_command({
+    cmd: "tail -c 1 local-mode-agent-output.txt | od -An -t x1 && wc -l -w -c local-mode-agent-output.txt",
+    workdir: "/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-coder",
+    yield_time_ms: 10000,
+    max_output_tokens: 10000
+  }),
+  tools.exec_command({
+    cmd: "make gate && test \"$(wc -l < local-mode-agent-output.txt)\" -eq 1 && rg -q '^LOCALMODE-3: local mode coder dogfood completed successfully\\.$' local-mode-agent-output.txt",
+    workdir: "/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-coder",
+    yield_time_ms: 10000,
+    max_output_tokens: 10000
+  })
+]);
+results.forEach((r, i) => text(`RESULT ${i + 1} (exit ${r.exit_code})\n${r.output}`));
+
+
+-- entry 25 | 2026-07-16T19:31:44.855Z | TOOL tool_result [ call_LqnXcQT25TREKa2Tubaiyr9A]
+Script completed
+Wall time 0.0 seconds
+Output:
+RESULT 1 (exit 0)
+# Local Mode Dogfood Repo
+RESULT 2 (exit 0)
+ 0a
+ 1  7 62 local-mode-agent-output.txt
+RESULT 3 (exit 0)
+local mode gate ok
+
+
+-- entry 26 | 2026-07-16T19:31:50.656Z | ASSISTANT tool_use [exec call_DUmBBGP3e2EhnCRnJuJdUcC8]
+const r = await tools.exec_command({
+  cmd: "git add local-mode-agent-output.txt && git diff --cached --check && git diff --cached --stat && git diff --cached",
+  workdir: "/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-coder",
+  yield_time_ms: 10000,
+  max_output_tokens: 20000
+});
+text(r.output);
+
+
+-- entry 27 | 2026-07-16T19:31:50.713Z | TOOL tool_result [ call_DUmBBGP3e2EhnCRnJuJdUcC8]
+Script completed
+Wall time 0.0 seconds
+Output:
+ local-mode-agent-output.txt | 1 +
+ 1 file changed, 1 insertion(+)
+diff --git a/local-mode-agent-output.txt b/local-mode-agent-output.txt
+new file mode 100644
+index 0000000..cd014a3
+--- /dev/null
++++ b/local-mode-agent-output.txt
+@@ -0,0 +1 @@
++LOCALMODE-3: local mode coder dogfood completed successfully.
+
+
+-- entry 28 | 2026-07-16T19:31:53.672Z | ASSISTANT tool_use [exec call_FS2BhPeMJibi1PvSL6Bl7G88]
+const r = await tools.exec_command({
+  cmd: "git commit -m \"Record local mode coder dogfood result (LOCALMODE-3)\"",
+  workdir: "/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-coder",
+  yield_time_ms: 30000,
+  max_output_tokens: 20000
+});
+text(r.output);
+
+
+-- entry 29 | 2026-07-16T19:31:53.745Z | TOOL tool_result [ call_FS2BhPeMJibi1PvSL6Bl7G88]
+Script completed
+Wall time 0.1 seconds
+Output:
+[codex-coder 173176b] Record local mode coder dogfood result (LOCALMODE-3)
+ 1 file changed, 1 insertion(+)
+ create mode 100644 local-mode-agent-output.txt
+
+
+-- entry 30 | 2026-07-16T19:31:56.929Z | ASSISTANT text
+Self-review found no scope, formatting, or correctness issues, and commit `173176b` contains only the requested fixture file. I’m now registering/materializing it on the `epic:LOCALMODE-1` stack, dry-running publication, then publishing and closing the task.
+
+-- entry 31 | 2026-07-16T19:31:58.287Z | ASSISTANT tool_use [exec call_CTSzxTjeOMvFkzWsZVEpMBhL]
+const r = await tools.exec_command({
+  cmd: "loom stack show epic:LOCALMODE-1 --json",
+  workdir: "/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-coder",
+  yield_time_ms: 10000,
+  max_output_tokens: 30000
+});
+text(r.output);
+
+
+-- entry 32 | 2026-07-16T19:31:58.363Z | TOOL tool_result [ call_CTSzxTjeOMvFkzWsZVEpMBhL]
+Script completed
+Wall time 0.1 seconds
+Output:
+Error: stackstore: stack not found
+Usage:
+  loom stack show <stack-id> [flags]
+
+Flags:
+  -h, --help   help for show
+      --json   JSON output
+
+Global Flags:
+      --backend string      AI backend CLI to use (codex, claude, opencode). Env: LOOM_BACKEND
+      --log-format string   Log format (text|json) (default "text")
+      --log-output string   Log output destination (stderr|<filepath>) (default "stderr")
+      --server string       Remote loom server base URL. When set, CLI uses HTTP API backend instead of local FleetDB. Env: LOOM_SERVER_URL
+      --workspace string    Workspace ID. Env: LOOM_WORKSPACE
+
+stackstore: stack not found
+
+
+-- entry 33 | 2026-07-16T19:32:01.642Z | ASSISTANT tool_use [exec call_FJZIrkheyKT9GDANJ3eRiiqb]
+const r = await tools.exec_command({
+  cmd: "loom stack init epic:LOCALMODE-1 --repo source-repo --base localmode --commit-mode agent_commit",
+  workdir: "/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-coder",
+  yield_time_ms: 10000,
+  max_output_tokens: 30000
+});
+text(r.output);
+
+
+-- entry 34 | 2026-07-16T19:32:01.696Z | TOOL tool_result [ call_FJZIrkheyKT9GDANJ3eRiiqb]
+Script completed
+Wall time 0.0 seconds
+Output:
+stack epic:LOCALMODE-1 ready (repo=source-repo base=localmode)
+
+
+-- entry 35 | 2026-07-16T19:32:05.094Z | ASSISTANT tool_use [exec call_y0gZw4qAAvXAt5Rj7Nukl7la]
+const r = await tools.exec_command({
+  cmd: "loom stack show epic:LOCALMODE-1 --json",
+  workdir: "/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-coder",
+  yield_time_ms: 10000,
+  max_output_tokens: 30000
+});
+text(r.output);
+
+
+-- entry 36 | 2026-07-16T19:32:05.166Z | TOOL tool_result [ call_y0gZw4qAAvXAt5Rj7Nukl7la]
+Script completed
+Wall time 0.1 seconds
+Output:
+{
+  "nodes": null,
+  "stack": {
+    "id": "epic:LOCALMODE-1",
+    "workspaceKey": "LOCALMODE",
+    "repoName": "source-repo",
+    "rootBase": "localmode",
+    "defaultCommitMode": "agent_commit",
+    "createdAt": "2026-07-16T19:32:01.672073653Z",
+    "updatedAt": "2026-07-16T19:32:01.672073653Z"
+  }
+}
+
+
+-- entry 37 | 2026-07-16T19:32:08.287Z | ASSISTANT tool_use [exec call_l58vrQPKiGHd3paoBhesEvfI]
+const r = await tools.exec_command({
+  cmd: "loom stack add LOCALMODE-3 --stack epic:LOCALMODE-1 --commit-mode agent_commit",
+  workdir: "/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-coder",
+  yield_time_ms: 10000,
+  max_output_tokens: 30000
+});
+text(r.output);
+
+
+-- entry 38 | 2026-07-16T19:32:08.361Z | TOOL tool_result [ call_l58vrQPKiGHd3paoBhesEvfI]
+Script completed
+Wall time 0.1 seconds
+Output:
+added LOCALMODE-3 (base=<root> branch=loom/stack/epic-LOCALMODE-1/LOCALMODE-3)
+
+
+-- entry 39 | 2026-07-16T19:32:11.182Z | ASSISTANT tool_use [exec call_vK6VDRGdn9G0JmqUV11LJ4AF]
+const r = await tools.exec_command({
+  cmd: "loom stack show epic:LOCALMODE-1 --json",
+  workdir: "/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-coder",
+  yield_time_ms: 10000,
+  max_output_tokens: 30000
+});
+text(r.output);
+
+
+-- entry 40 | 2026-07-16T19:32:11.259Z | TOOL tool_result [ call_vK6VDRGdn9G0JmqUV11LJ4AF]
+Script completed
+Wall time 0.1 seconds
+Output:
+{
+  "nodes": [
+    {
+      "stackId": "epic:LOCALMODE-1",
+      "taskId": "LOCALMODE-3",
+      "outputBranch": "loom/stack/epic-LOCALMODE-1/LOCALMODE-3",
+      "commitMode": "agent_commit",
+      "state": "pending",
+      "createdAt": "2026-07-16T19:32:08.336969704Z",
+      "updatedAt": "2026-07-16T19:32:08.336969704Z"
+    }
+  ],
+  "stack": {
+    "id": "epic:LOCALMODE-1",
+    "workspaceKey": "LOCALMODE",
+    "repoName": "source-repo",
+    "rootBase": "localmode",
+    "defaultCommitMode": "agent_commit",
+    "createdAt": "2026-07-16T19:32:01.672073653Z",
+    "updatedAt": "2026-07-16T19:32:08.336969704Z"
+  }
+}
+
+
+-- entry 41 | 2026-07-16T19:32:16.264Z | ASSISTANT tool_use [exec call_vMgpYa0QlS3ak0wnzplVAg71]
+const r = await tools.exec_command({
+  cmd: "git branch -f loom/stack/epic-LOCALMODE-1/LOCALMODE-3 HEAD && loom stack publish epic:LOCALMODE-1 --repo-path /root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-coder --dry-run --json",
+  workdir: "/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-coder",
+  yield_time_ms: 30000,
+  max_output_tokens: 30000
+});
+text(r.output);
+
+
+-- entry 42 | 2026-07-16T19:32:16.337Z | TOOL tool_result [ call_vMgpYa0QlS3ak0wnzplVAg71]
+Script completed
+Wall time 0.1 seconds
+Output:
+Error: stackpublish: cannot parse owner/repo from origin "/workspace/source-repo-origin.git"
+Usage:
+  loom stack publish <stack-id> [flags]
+
+Flags:
+      --auto-rebase        rebase descendants of merged units onto the live base (agent resolves conflicts) instead of failing closed
+      --dry-run            compute the plan without mutating GitHub
+      --headless           with --auto-rebase, resolve conflicts headlessly (non-interactive)
+  -h, --help               help for publish
+      --json               JSON output
+      --repo-path string   local checkout to push from (default: from loom state)
+
+Global Flags:
+      --backend string      AI backend CLI to use (codex, claude, opencode). Env: LOOM_BACKEND
+      --log-format string   Log format (text|json) (default "text")
+      --log-output string   Log output destination (stderr|<filepath>) (default "stderr")
+      --server string       Remote loom server base URL. When set, CLI uses HTTP API backend instead of local FleetDB. Env: LOOM_SERVER_URL
+      --workspace string    Workspace ID. Env: LOOM_WORKSPACE
+
+stackpublish: cannot parse owner/repo from origin "/workspace/source-repo-origin.git"
+
+
+-- entry 43 | 2026-07-16T19:32:34.397Z | ASSISTANT text
+The mandatory stacked-publication dry run is blocked by the workspace’s local-only Git remote: Loom rejects origin `/workspace/source-repo-origin.git` because it cannot derive a GitHub `owner/repo`. The code and commit are complete, but publication cannot proceed from this repository configuration; per the workflow’s external-blocker path, I’m recording the exact unblock condition and signaling completion without closing the task.
+
+-- entry 44 | 2026-07-16T19:32:38.08Z | ASSISTANT tool_use [exec call_nKSey7iv01ymAFUNN79INTqx]
+const r = await tools.exec_command({
+  cmd: "loom data update LOCALMODE-3 --status blocked --notes \"BLOCKED: Implementation and tests are complete in commit 173176b, but mandatory stacked publication cannot proceed because source-repo origin is the local path /workspace/source-repo-origin.git; 'loom stack publish epic:LOCALMODE-1 --dry-run' fails with 'cannot parse owner/repo from origin'. A human must configure a GitHub-style owner/repo remote (or provide Loom local-remote publication support) before the stack can be published and the task closed.\"",
+  workdir: "/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-coder",
+  yield_time_ms: 10000,
+  max_output_tokens: 30000
+});
+text(r.output);
+
+
+-- entry 45 | 2026-07-16T19:32:38.143Z | TOOL tool_result [ call_nKSey7iv01ymAFUNN79INTqx]
+Script completed
+Wall time 0.1 seconds
+Output:
+updated LOCALMODE-3
+
+
+-- entry 46 | 2026-07-16T19:32:41.854Z | ASSISTANT tool_use [exec call_3TbJmvT46brpbMlmkES9sJm1]
+const r = await tools.exec_command({
+  cmd: "loom complete",
+  workdir: "/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-coder",
+  yield_time_ms: 10000,
+  max_output_tokens: 30000
+});
+text(r.output);
+
+
+-- entry 47 | 2026-07-16T19:32:41.916Z | TOOL tool_result [ call_3TbJmvT46brpbMlmkES9sJm1]
+Script completed
+Wall time 0.1 seconds
+Output:
+Task completion signaled
+
+
+-- entry 48 | 2026-07-16T19:32:46.927Z | ASSISTANT text
+Implemented and committed [local-mode-agent-output.txt](/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-coder/local-mode-agent-output.txt).
+
+- Commit: `173176b`
+- Tests: `make gate` and focused content assertion passed
+- Task marked `blocked`, not closed
+- Blocker: Loom cannot publish from local origin `/workspace/source-repo-origin.git`; it requires a GitHub-style `owner/repo` remote or local-remote publication support
+- `loom complete` signaled successfully
+
+=== FULL DIFF PRODUCED BY THE SESSION ===
+diff --git a/local-mode-agent-output.txt b/local-mode-agent-output.txt
+new file mode 100644
+index 0000000..cd014a3
+--- /dev/null
++++ b/local-mode-agent-output.txt
+@@ -0,0 +1 @@
++LOCALMODE-3: local mode coder dogfood completed successfully.
+
+
+Return ONLY the JSON object matching the output schema.

@@ -10,13 +10,13 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
-// Both built-ins are registered and discoverable through the generalized
+// Source-tree built-ins are registered and discoverable through the generalized
 // registry: BuiltinWorkflowNames returns them sorted, and each resolves to a
 // single-entrypoint spec at workflows/{name}.ts. BuiltinWorkflow returns a
 // defensive copy of the files map (mutating it must not corrupt the registry).
-func TestBuiltinWorkflowRegistryListsBothBuiltins(t *testing.T) {
+func TestBuiltinWorkflowRegistryListsSourceTreeBuiltins(t *testing.T) {
 	names := BuiltinWorkflowNames()
-	want := []string{BuiltinEpicRunnerWorkflowName, BuiltinGitHubReviewAgentWorkflowName}
+	want := []string{BuiltinEpicRunnerWorkflowName, BuiltinGitHubReviewAgentWorkflowName, BuiltinSessionEvalAgentWorkflowName}
 	if len(names) != len(want) {
 		t.Fatalf("BuiltinWorkflowNames() = %v, want %v", names, want)
 	}
@@ -41,6 +41,8 @@ func TestBuiltinWorkflowRegistryListsBothBuiltins(t *testing.T) {
 		if name == BuiltinEpicRunnerWorkflowName {
 			wantFiles = 4
 		} else if name == BuiltinGitHubReviewAgentWorkflowName {
+			wantFiles = 2
+		} else if name == BuiltinSessionEvalAgentWorkflowName {
 			wantFiles = 2
 		}
 		if len(spec.Files) != wantFiles {

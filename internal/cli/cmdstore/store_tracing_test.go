@@ -13,7 +13,7 @@ import (
 
 // TestTracedArtifactStore_ForwardsReadContent guards the cross-node transcript path:
 // the tracing wrapper must expose ArtifactContentReader and forward to the inner store.
-// Without this the type assertion in session_service.readTranscriptRef fails and a
+// Without this the type assertion in transcriptref.Resolve fails and a
 // non-owning serve node silently falls back to the node-local artifact URI (which it
 // can't read) — exactly the 500 the distributed smoke caught.
 func TestTracedArtifactStore_ForwardsReadContent(t *testing.T) {

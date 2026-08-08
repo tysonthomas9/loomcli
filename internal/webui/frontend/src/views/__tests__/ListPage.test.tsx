@@ -66,7 +66,7 @@ function createMockIssue(overrides: Partial<Issue> = {}): Issue {
   };
 }
 
-import { ListPage } from "../ListPage";
+import { ListPage } from "../boards/ListPage";
 
 describe("ListPage", () => {
   beforeEach(() => {

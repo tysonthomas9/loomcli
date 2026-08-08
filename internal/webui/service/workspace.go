@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
 )
@@ -23,6 +24,25 @@ const (
 
 func ValidWorkspaceDesignFormat(format string) bool {
 	return format == WorkspaceDesignFormatMarkdown || format == WorkspaceDesignFormatHTML
+}
+
+type WorkspaceEvalPolicyPatch struct {
+	EvalSamplingPercent *int
+	EvalBatchSize       *int
+	EvalLookbackDays    *int
+}
+
+func ValidateWorkspaceEvalPolicyPatch(p WorkspaceEvalPolicyPatch) error {
+	if p.EvalSamplingPercent != nil && (*p.EvalSamplingPercent < 1 || *p.EvalSamplingPercent > 100) {
+		return fmt.Errorf("eval_sampling_percent must be between 1 and 100")
+	}
+	if p.EvalBatchSize != nil && *p.EvalBatchSize < 1 {
+		return fmt.Errorf("eval_batch_size must be at least 1")
+	}
+	if p.EvalLookbackDays != nil && *p.EvalLookbackDays < 1 {
+		return fmt.Errorf("eval_lookback_days must be at least 1")
+	}
+	return nil
 }
 
 // JobStore is implemented by WorkspaceJobStore for async workspace creation.
@@ -90,4 +110,7 @@ type WorkspaceService interface {
 	// PatchWorkspaceDesignFormat updates the workspace's planner design output
 	// and rendering format. Valid values are markdown and html.
 	PatchWorkspaceDesignFormat(ctx context.Context, wsID string, designFormat string) (*ops.WorkspaceData, error)
+
+	// PatchWorkspaceEvalPolicy updates the workspace's session-eval policy knobs.
+	PatchWorkspaceEvalPolicy(ctx context.Context, wsID string, patch WorkspaceEvalPolicyPatch) (*ops.WorkspaceData, error)
 }

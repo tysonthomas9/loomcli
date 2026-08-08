@@ -37,14 +37,17 @@ func (s *workspaceStore) Create(_ context.Context, in store.WorkspaceCreate) (*d
 	}
 	now := time.Now().UTC()
 	ws := &domain.Workspace{
-		Key:           in.Key,
-		Name:          in.Name,
-		Description:   in.Description,
-		DefaultBranch: in.DefaultBranch,
-		DesignFormat:  in.DesignFormat,
-		State:         domain.WorkspaceStateReady,
-		CreatedAt:     now,
-		UpdatedAt:     now,
+		Key:                 in.Key,
+		Name:                in.Name,
+		Description:         in.Description,
+		DefaultBranch:       in.DefaultBranch,
+		DesignFormat:        in.DesignFormat,
+		EvalSamplingPercent: in.EvalSamplingPercent,
+		EvalBatchSize:       in.EvalBatchSize,
+		EvalLookbackDays:    in.EvalLookbackDays,
+		State:               domain.WorkspaceStateReady,
+		CreatedAt:           now,
+		UpdatedAt:           now,
 	}
 	s.items[in.Key] = ws
 	return cloneWorkspace(ws), nil
@@ -103,6 +106,15 @@ func (s *workspaceStore) Update(_ context.Context, key string, patch store.Works
 	}
 	if patch.DesignFormat != nil {
 		ws.DesignFormat = *patch.DesignFormat
+	}
+	if patch.EvalSamplingPercent != nil {
+		ws.EvalSamplingPercent = *patch.EvalSamplingPercent
+	}
+	if patch.EvalBatchSize != nil {
+		ws.EvalBatchSize = *patch.EvalBatchSize
+	}
+	if patch.EvalLookbackDays != nil {
+		ws.EvalLookbackDays = *patch.EvalLookbackDays
 	}
 	if patch.State != nil {
 		ws.State = *patch.State

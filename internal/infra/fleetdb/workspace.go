@@ -28,37 +28,49 @@ type workspaceWire struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 	// Optional fields fleet-db may add (state, default_branch, etc.).
 	// Decoded if present, ignored if absent.
-	State         string `json:"state,omitempty"`
-	ErrorMessage  string `json:"error_message,omitempty"`
-	DefaultBranch string `json:"default_branch,omitempty"`
-	DesignFormat  string `json:"design_format,omitempty"`
+	State               string `json:"state,omitempty"`
+	ErrorMessage        string `json:"error_message,omitempty"`
+	DefaultBranch       string `json:"default_branch,omitempty"`
+	DesignFormat        string `json:"design_format,omitempty"`
+	EvalSamplingPercent int    `json:"eval_sampling_percent,omitempty"`
+	EvalBatchSize       int    `json:"eval_batch_size,omitempty"`
+	EvalLookbackDays    int    `json:"eval_lookback_days,omitempty"`
 }
 
 func (w workspaceWire) toDomain() *domain.Workspace {
 	return &domain.Workspace{
-		Key:           w.Key,
-		Name:          w.Name,
-		Description:   w.Description,
-		State:         domain.WorkspaceState(w.State),
-		ErrorMessage:  w.ErrorMessage,
-		DefaultBranch: w.DefaultBranch,
-		DesignFormat:  w.DesignFormat,
-		CreatedAt:     w.CreatedAt,
-		UpdatedAt:     w.UpdatedAt,
+		Key:                 w.Key,
+		Name:                w.Name,
+		Description:         w.Description,
+		State:               domain.WorkspaceState(w.State),
+		ErrorMessage:        w.ErrorMessage,
+		DefaultBranch:       w.DefaultBranch,
+		DesignFormat:        w.DesignFormat,
+		EvalSamplingPercent: w.EvalSamplingPercent,
+		EvalBatchSize:       w.EvalBatchSize,
+		EvalLookbackDays:    w.EvalLookbackDays,
+		CreatedAt:           w.CreatedAt,
+		UpdatedAt:           w.UpdatedAt,
 	}
 }
 
 func (s *workspaceStore) Create(ctx context.Context, in store.WorkspaceCreate) (*domain.Workspace, error) {
 	body := struct {
-		Key          string `json:"key"`
-		Name         string `json:"name"`
-		Description  string `json:"description,omitempty"`
-		DesignFormat string `json:"design_format,omitempty"`
+		Key                 string `json:"key"`
+		Name                string `json:"name"`
+		Description         string `json:"description,omitempty"`
+		DesignFormat        string `json:"design_format,omitempty"`
+		EvalSamplingPercent int    `json:"eval_sampling_percent,omitempty"`
+		EvalBatchSize       int    `json:"eval_batch_size,omitempty"`
+		EvalLookbackDays    int    `json:"eval_lookback_days,omitempty"`
 	}{
-		Key:          in.Key,
-		Name:         in.Name,
-		Description:  in.Description,
-		DesignFormat: in.DesignFormat,
+		Key:                 in.Key,
+		Name:                in.Name,
+		Description:         in.Description,
+		DesignFormat:        in.DesignFormat,
+		EvalSamplingPercent: in.EvalSamplingPercent,
+		EvalBatchSize:       in.EvalBatchSize,
+		EvalLookbackDays:    in.EvalLookbackDays,
 	}
 	var resp workspaceWire
 	if err := s.client.do(ctx, "POST", "/api/v1/admin/workspaces", body, &resp); err != nil {
@@ -110,18 +122,24 @@ func (s *workspaceStore) List(ctx context.Context) ([]*domain.Workspace, error) 
 }
 
 func (s *workspaceStore) Update(ctx context.Context, key string, patch store.WorkspaceUpdate) (*domain.Workspace, error) {
-	// Of this client-side patch shape, fleet-db's admin PATCH persists name
-	// and design_format. Lifecycle/default-branch fields are supported by
-	// in-process stores but are not persisted through fleet-db.
-	if patch.Name == nil && patch.DesignFormat == nil {
+	// Of this client-side patch shape, fleet-db's admin PATCH persists a
+	// subset. Lifecycle/default-branch fields are supported by in-process
+	// stores but are not persisted through fleet-db.
+	if patch.Name == nil && patch.DesignFormat == nil && patch.EvalSamplingPercent == nil && patch.EvalBatchSize == nil && patch.EvalLookbackDays == nil {
 		return s.Get(ctx, key)
 	}
 	body := struct {
-		Name         *string `json:"name,omitempty"`
-		DesignFormat *string `json:"design_format,omitempty"`
+		Name                *string `json:"name,omitempty"`
+		DesignFormat        *string `json:"design_format,omitempty"`
+		EvalSamplingPercent *int    `json:"eval_sampling_percent,omitempty"`
+		EvalBatchSize       *int    `json:"eval_batch_size,omitempty"`
+		EvalLookbackDays    *int    `json:"eval_lookback_days,omitempty"`
 	}{
-		Name:         patch.Name,
-		DesignFormat: patch.DesignFormat,
+		Name:                patch.Name,
+		DesignFormat:        patch.DesignFormat,
+		EvalSamplingPercent: patch.EvalSamplingPercent,
+		EvalBatchSize:       patch.EvalBatchSize,
+		EvalLookbackDays:    patch.EvalLookbackDays,
 	}
 	if err := s.client.do(ctx, "PATCH", "/api/v1/admin/workspaces/"+pathEscape(key), body, nil); err != nil {
 		return nil, err
