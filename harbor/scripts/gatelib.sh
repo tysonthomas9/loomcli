@@ -47,13 +47,14 @@ reopen_task() {
   loom data comment "$tid" "FEEDBACK attempt=$attempt: $reason" >/dev/null 2>&1
   loom data update "$tid" --status open --add-label needs-revision \
     --notes "FEEDBACK attempt=$attempt: $reason" >/dev/null 2>&1
+  arch_strip "$tid"   # wiring-vet finding 1: no arch approval survives a reopen
 }
 
 # arch_strip TID — remove every architect label (stale-approval hygiene,
 # codex B2j-vet finding 4: labels must never survive a phase transition).
 arch_strip() {
   loom data update "$1" --remove-label arch-gate --remove-label arch-impl-ok \
-    --remove-label arch-rework >/dev/null 2>&1 || true
+    --remove-label arch-rework --remove-label arch-design-ok >/dev/null 2>&1 || true
 }
 
 # integrate TID ATTEMPT SHA [gate] — atomic check-BEFORE-fast-forward. /app
@@ -146,14 +147,39 @@ print(f"{status}|{labels}|{best[0]}|{best[1]}")
 '
 }
 
-# arch_pending_sweep — honor architect rulings on parked candidates, with the
-# stale-ruling rule (vet finding 6) and the 2-pass fail-open (finding 7).
+# arch_pending_sweep — honor architect rulings on parked candidates.
+# FIFO QUEUE DISCIPLINE (wiring-vet finding 2): the single coder branch is
+# linear, so a later candidate CONTAINS every earlier parked one. Only the
+# queue HEAD may integrate (approve/timeout); when a candidate is rejected,
+# every later pending candidate whose history contains it is cascaded back
+# to the coder for rebase. Blocked rows have their age clock bumped so the
+# fail-open counts from unblocking, not from gating.
+# BUSY-PAUSE (finding 3): with ARCH_BUSY=1 (architect turn in flight) the
+# sweep only bumps clocks — no timeouts can fire mid-ruling.
 arch_pending_sweep() {
   [ -s "$ARCH_PENDING" ] || return 0
   local tmp="$ARCH_PENDING.new"; : > "$tmp"
+  if [ "${ARCH_BUSY:-0}" = "1" ]; then
+    awk -v OFS=' ' '{ $5 = $5 + 1; print }' "$ARCH_PENDING" > "$tmp"
+    mv "$tmp" "$ARCH_PENDING"
+    return 0
+  fi
   local tid attempt sha base first st status labels mattempt msha
+  local blocked=0 rejected_shas=""
   while read -r tid attempt sha base first; do
     [ -n "$tid" ] || continue
+    # cascade: does this candidate contain a just-rejected predecessor?
+    local casc=""
+    for r in $rejected_shas; do
+      if git -C "$APP_DIR" merge-base --is-ancestor "$r" "$sha" 2>/dev/null; then casc="$r"; break; fi
+    done
+    if [ -n "$casc" ]; then
+      arch_strip "$tid"
+      loom data comment "$tid" "ARCH-FEEDBACK: predecessor commit $casc in this candidate's history was rejected by the architecture review; rebase onto the current integrated head and re-signal." >/dev/null 2>&1
+      loom data update "$tid" --status open --add-label arch-rework --assignee "" >/dev/null 2>&1
+      record "ARCH-CASCADE-REWORK task=$tid attempt=$attempt contains_rejected=$casc"
+      continue
+    fi
     st=$(arch_task_state "$tid")
     status="${st%%|*}"; st="${st#*|}"
     labels="${st%%|*}"; st="${st#*|}"
@@ -170,25 +196,36 @@ arch_pending_sweep() {
     case ",$labels," in
       *,arch-rework,*)
         if [ "$status" = "review" ]; then
-          # protocol repair: architect rejected but forgot the status change
           loom data update "$tid" --status open --assignee "" >/dev/null 2>&1
           record "ARCH-REJECT-REPAIRED task=$tid attempt=$attempt (status forced open)"
         fi
         record "ARCH-REJECTED task=$tid attempt=$attempt"
+        rejected_shas="$rejected_shas $sha"
         continue ;;
       *,arch-impl-ok,*)
-        arch_strip "$tid"
-        record "ARCH-APPROVED task=$tid attempt=$attempt"
-        integrate "$tid" "$attempt" "$sha"
+        if [ "$blocked" = 0 ]; then
+          arch_strip "$tid"
+          record "ARCH-APPROVED task=$tid attempt=$attempt"
+          integrate "$tid" "$attempt" "$sha"
+          continue
+        fi
+        record "ARCH-QUEUE-HOLD task=$tid attempt=$attempt reason=earlier-candidate-unresolved"
+        blocked=1
+        printf '%s %s %s %s %s\n' "$tid" "$attempt" "$sha" "$base" "$(( first + 1 ))" >> "$tmp"
         continue ;;
     esac
-    if [ $(( ${PASS:-0} - first )) -ge 2 ]; then
+    if [ "$blocked" = 0 ] && [ $(( ${PASS:-0} - first )) -ge 2 ]; then
       arch_strip "$tid"
       record "ARCH-TIMEOUT task=$tid attempt=$attempt waited_passes=$(( ${PASS:-0} - first ))"
       integrate "$tid" "$attempt" "$sha"
       continue
     fi
-    printf '%s %s %s %s %s\n' "$tid" "$attempt" "$sha" "$base" "$first" >> "$tmp"
+    if [ "$blocked" = 1 ]; then
+      printf '%s %s %s %s %s\n' "$tid" "$attempt" "$sha" "$base" "$(( first + 1 ))" >> "$tmp"
+    else
+      printf '%s %s %s %s %s\n' "$tid" "$attempt" "$sha" "$base" "$first" >> "$tmp"
+    fi
+    blocked=1
   done < "$ARCH_PENDING"
   mv "$tmp" "$ARCH_PENDING"
 }
@@ -198,6 +235,8 @@ arch_pending_sweep() {
 arch_final_sweep() {
   [ -s "$ARCH_PENDING" ] || return 0
   local tid attempt sha base first
+  # FIFO file order: integrating in order means each later candidate only
+  # ever lands on top of already-integrated predecessors.
   while read -r tid attempt sha base first; do
     [ -n "$tid" ] || continue
     arch_strip "$tid"

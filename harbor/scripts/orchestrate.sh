@@ -40,6 +40,10 @@ if [ "$ARCH_MODE" = "on" ] && [ "$LEAD_MAINT" = "1" ]; then
   echo "[orchestrate] FATAL: arch=on and lead_maint=1 are mutually exclusive arms" >&2
   exit 1
 fi
+if [ "$ARCH_MODE" = "on" ] && { [ "$LEAD_MODE" != "persistent" ] || [ "$VERIFY_ROLE" != "tasks" ]; }; then
+  echo "[orchestrate] FATAL: arch=on requires lead_mode=persistent and verify_role=tasks (wiring-vet finding 4)" >&2
+  exit 1
+fi
 if [ "$VERIFY_ROLE" != "off" ] && [ "$LEAD_MODE" != "persistent" ]; then
   echo "[orchestrate] FATAL: verify_role=$VERIFY_ROLE requires lead_mode=persistent" >&2
   exit 1
@@ -692,8 +696,12 @@ for lane in ("qa-verify", "qa-verify-backend"):
     if [ "$ARCH_MODE" = "on" ]; then
       # B2j architect pass: honor rulings on parked candidates first (so this
       # pass's message lists only still-open items), audit refactor filings,
-      # then deliver the design/candidate lists.
-      arch_pending_sweep
+      # then deliver the design/candidate lists. If the architect's turn is
+      # still in flight, the sweep only bumps clocks (wiring-vet finding 3:
+      # a timeout must never race an active ruling).
+      ARCH_BUSY=0
+      [ "$(runtime_status arch)" = "active" ] && ARCH_BUSY=1
+      ARCH_BUSY="$ARCH_BUSY" arch_pending_sweep
       arch_refactor_audit
       ARCH_DESIGNS=$(arch_design_list | tr '\n' ' ')
       ARCH_CANDS=$(arch_cand_list | paste -sd';' - 2>/dev/null || true)
@@ -840,8 +848,20 @@ if has_sub and not has_valid:
 done
 
 # B2j: deadline/spend-cap exit must not strand arch-gated candidates
-# (codex B2j-vet finding 7) — timeout-integrate every remaining one.
-[ "$ARCH_MODE" = "on" ] && arch_final_sweep
+# (codex B2j-vet finding 7) — timeout-integrate every remaining one. First
+# quiesce the architect (wiring-vet finding 3: never timeout-integrate under
+# an in-flight ruling), take the final refactor audit (finding 5), then kill
+# the session so it cannot mutate the board mid-sweep.
+if [ "$ARCH_MODE" = "on" ]; then
+  for _ in $(seq 1 18); do
+    [ "$(runtime_status arch)" = "active" ] || break
+    sleep 5
+  done
+  arch_refactor_audit
+  tmux kill-session -t "$ARCH_TMUX" 2>/dev/null
+  ARCH_BUSY=0 arch_pending_sweep
+  arch_final_sweep
+fi
 
 finalize
 exit 0

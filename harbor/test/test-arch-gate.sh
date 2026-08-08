@@ -164,6 +164,55 @@ DL=$(arch_design_list | tr '\n' ' ')
 assert "S8 clean design listed"            grep -q "$T7" <<<"$DL"
 if ! printf '%s' "$DL" | grep -q "$T8"; then ok "S8 malformed-marker task excluded"; else bad "S8 malformed excluded"; fi
 
+# ============================ S9: FIFO queue hold =============================
+T9A=$(mktask t9a); S9A=$(commit_cand f9a.txt c9a)
+impl_ready "$T9A" 1 "$S9A"
+T9B=$(mktask t9b); S9B=$(commit_cand f9b.txt c9b)   # child of S9A on the branch
+impl_ready "$T9B" 1 "$S9B"
+PASS=20; integrate "$T9A" 1 "$S9A" gate; integrate "$T9B" 1 "$S9B" gate
+loom data update "$T9B" --add-label arch-impl-ok >/dev/null 2>&1   # approve ONLY the later one
+PASS=21; arch_pending_sweep
+if grep -q "ARCH-QUEUE-HOLD task=$T9B" "$INTEG_LOG"; then ok "S9 later approval held behind unresolved head"; else bad "S9 queue hold missing"; fi
+if [ "$(git -C "$T/app" rev-parse HEAD)" != "$S9B" ]; then ok "S9 blocked candidate NOT integrated"; else bad "S9 blocked candidate merged"; fi
+loom data update "$T9A" --add-label arch-impl-ok >/dev/null 2>&1
+PASS=22; arch_pending_sweep
+if [ "$(git -C "$T/app" rev-parse HEAD)" = "$S9B" ] && grep -q "INTEGRATED task=$T9A attempt=1" "$INTEG_LOG" && grep -q "INTEGRATED task=$T9B attempt=1" "$INTEG_LOG"; then ok "S9 both integrated in order after head approval"; else bad "S9 ordered integration failed (head=$(git -C "$T/app" rev-parse HEAD))"; fi
+
+# ============================ S10: rejected-predecessor cascade ===============
+T10A=$(mktask t10a); S10A=$(commit_cand f10a.txt c10a)
+impl_ready "$T10A" 1 "$S10A"
+T10B=$(mktask t10b); S10B=$(commit_cand f10b.txt c10b)  # contains S10A
+impl_ready "$T10B" 1 "$S10B"
+PASS=23; integrate "$T10A" 1 "$S10A" gate; integrate "$T10B" 1 "$S10B" gate
+loom data comment "$T10A" "ARCH-FEEDBACK: bad structure" >/dev/null 2>&1
+loom data update "$T10A" --status open --add-label arch-rework --assignee "" >/dev/null 2>&1
+APP_S10=$(git -C "$T/app" rev-parse HEAD)
+PASS=24; arch_pending_sweep
+if grep -q "ARCH-CASCADE-REWORK task=$T10B attempt=1 contains_rejected=$S10A" "$INTEG_LOG"; then ok "S10 descendant cascaded to rework"; else bad "S10 cascade missing"; fi
+ST=$(status_of "$T10B"); L=$(labels_of "$T10B")
+if [ "$ST" = open ] && printf '%s' "$L" | grep -q arch-rework && ! printf '%s' "$L" | grep -q needs-revision; then ok "S10 descendant coder-routable"; else bad "S10 descendant routing (st=$ST labels=$L)"; fi
+if [ "$(git -C "$T/app" rev-parse HEAD)" = "$APP_S10" ]; then ok "S10 nothing merged"; else bad "S10 /app moved"; fi
+if ! test -s "$ARCH_PENDING"; then ok "S10 pending fully drained"; else bad "S10 pending residue: $(cat "$ARCH_PENDING")"; fi
+
+# ============================ S11: reopen strips design approval ==============
+T11=$(mktask t11)
+loom data update "$T11" --design "d" --status review --add-label arch-design-ok >/dev/null 2>&1
+loom data comment "$T11" "IMPL-DONE attempt=1 commit=deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" >/dev/null 2>&1
+reopen_task "$T11" 1 "some failure"
+L=$(labels_of "$T11")
+if ! printf '%s' "$L" | grep -q arch-design-ok && printf '%s' "$L" | grep -q needs-revision; then ok "S11 reopen strips arch-design-ok"; else bad "S11 reopen strip (labels=$L)"; fi
+
+# ============================ S12: busy-pause =================================
+T12=$(mktask t12); S12A=$(commit_cand f12.txt c12)
+impl_ready "$T12" 1 "$S12A"
+PASS=30; integrate "$T12" 1 "$S12A" gate
+PASS=40; ARCH_BUSY=1 arch_pending_sweep    # way past timeout, but arch busy
+if ! grep -q "ARCH-TIMEOUT task=$T12" "$INTEG_LOG"; then ok "S12 no timeout while architect busy"; else bad "S12 timeout fired under busy"; fi
+if grep -q "^$T12 1 $S12A" "$ARCH_PENDING"; then ok "S12 still pending, clock bumped"; else bad "S12 pending lost"; fi
+loom data update "$T12" --add-label arch-impl-ok >/dev/null 2>&1
+PASS=41; arch_pending_sweep
+if [ "$(git -C "$T/app" rev-parse HEAD)" = "$S12A" ]; then ok "S12 integrates after busy clears"; else bad "S12 post-busy integrate"; fi
+
 echo "----"
 if [ "$FAILS" = 0 ]; then echo "== ARCH-GATE LIFECYCLE: ALL SCENARIOS PROVEN =="; else echo "== ARCH-GATE LIFECYCLE: $FAILS FAILURES =="; fi
 rm -rf "$T"

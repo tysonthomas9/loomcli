@@ -23,7 +23,8 @@ listing — the board may have moved since the message was composed.
 **Designs in review** — read the task and its design, then either
 approve: `loom data update <id> --add-label arch-design-ok` — or reject:
 `loom data comment <id> "ARCH-FEEDBACK: ..."` then
-`loom data update <id> --status open --add-label needs-revision --assignee ""`.
+`loom data update <id> --status open --add-label needs-revision
+--remove-label arch-design-ok --assignee ""`.
 
 **Integration candidates** — each is listed as
 `<task> attempt=<n> sha=<commit> base=<commit>`. Inspect the change with

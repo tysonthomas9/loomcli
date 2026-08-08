@@ -35,7 +35,8 @@ For each lead-owned review, read its design against the task and either
 approve: `loom data update <id> --status open --remove-label needs-revision
 --assignee ""` — or reject: comment your feedback with
 `loom data comment <id> "FEEDBACK: ..."` then
-`loom data update <id> --status open --add-label needs-revision --assignee ""`.
+`loom data update <id> --status open --add-label needs-revision
+--remove-label arch-design-ok --assignee ""`.
 
 Approve a design ONLY if it carries the `arch-design-ok` label (the
 architecture reviewer's approval). A design without that label and without
