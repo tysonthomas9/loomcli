@@ -1,8 +1,8 @@
 # Modular Monolith Migration
 
-- **Status:** Phase 7 capability extraction complete at `completed_phase: 7`;
-  Phase 8 structural consolidation is in progress
-- **Date:** 2026-08-07
+- **Status:** Phase 8 structural consolidation complete; the modular monolith
+  is ratcheted to 189 production packages with all capability boundaries green
+- **Date:** 2026-08-08
 - **Scope:** `loom serve`, the operator CLI entry surfaces, the Vite frontend counterpart, and the fleet-db contracts those capabilities depend on
 - **Provenance:** [Phase 0 integration baseline](00-phase-0-baseline.md), final [Phase 1 evidence](06-phase-1-decisions-and-evidence.md) at Loom `7e8a6dd2`, [Phase 2 evidence](07-phase-2-decisions-and-evidence.md) at Loom `84cccb761` with FleetDB `430dce8d9`, [Phase 3 evidence](08-phase-3-decisions-and-evidence.md) at core implementation commits Loom `7f95b9bf1` and FleetDB `f1c4e1119`, final [Phase 4 evidence](09-phase-4-decisions-and-evidence.md) at Loom `53cbe2577` with FleetDB `afb688768`, and the appended reliability-validation record at Loom `67c45972f` with FleetDB `9ffa69f60`
 - **Related:** [Unified agent UX](../../design/2026-07-01-unified-agent-ux-proposal.md) · [Durable agent identity](../../design/2026-07-07-agent-identity-record.md) · [Workflow driver authoring](../../design/workflow-driver-authoring-guide.md)
@@ -21,9 +21,10 @@ Migrate the application inside `loom serve` to a **capability-owned modular mono
 
 Package count is not a substitute for ownership or public-API compliance. The
 pre-guardrail source snapshot had 165 Go packages, while the Phase 7 completion
-tree has 250 production package directories and 115 one-file packages. Phase 8
-therefore adds shrink-only shape ratchets and removes duplicated knowledge and
-forwarding-only packages while preserving the capability graph.
+tree had 250 production package directories and 115 one-file packages. Phase 8
+adds shrink-only shape ratchets and removes duplicated knowledge and
+forwarding-only packages while preserving the capability graph. The completed
+tree has 189 production packages and 67 one-file packages.
 
 ## Reading order
 
@@ -183,13 +184,17 @@ Product proof also corrected the Observability cache so modular DriverRun
 metrics survive restart. See the
 [Phase 7 record](14-phase-7-decisions-and-evidence.md).
 
-Phase 8 is the post-extraction consolidation. It starts from the exact Phase 7
-completion commit, introduces an exact shrink-only production-package
-inventory, deletes forwarding-only composition/adapter packages, and
-canonicalizes duplicated models and policy implementations under their ten
-declared owners. Its hard exit target is at most 190 production Go package
-directories without creating a replacement generic business-logic bucket. See
-the [Phase 8 plan and evidence](15-phase-8-consolidation-and-evidence.md).
+Phase 8 completes the post-extraction consolidation at Loom `35e61b31b` with
+the unchanged FleetDB companion `b71dec551`. Starting from exact Phase 7 commit
+`46bb9a841`, it reduces production package directories from 250 to 189,
+outside-module packages from 232 to 172, one-file packages from 115 to 67, and
+one-or-two-file packages from 141 to 89. The exact shrink-only inventory,
+default-deny capability graph, ownership ledgers, all 11 build profiles,
+full Loom and FleetDB gates, 16-run packaged template matrix, crash recovery,
+unavailable-backend fail-closed row, exact-package restart, and transcript
+persistence all pass. No generic replacement business-logic bucket or FleetDB
+contract change was introduced. See the
+[Phase 8 plan and evidence](15-phase-8-consolidation-and-evidence.md).
 
 ## Approved architecture decisions
 

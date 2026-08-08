@@ -1,7 +1,9 @@
 # Phase 8 Consolidation and Evidence
 
-- **Status:** In progress
+- **Status:** Complete
 - **Base:** Phase 7 completion commit `46bb9a8416d291d686cf32c58fa872a097cdba3d`
+- **Implementation head:** `35e61b31b879a6f0fb0b1f7f18a8491b187b0f1d`
+- **Companion FleetDB:** unchanged at `b71dec551082fc10e1d8ceab11a645f46d308a62`
 - **Purpose:** Remove structural fragmentation and duplicated product knowledge
   without weakening capability ownership or ports-and-adapters boundaries.
 - **Target:** At most 190 production Go package directories under `internal/`.
@@ -102,9 +104,104 @@ Phase 8 completes only when:
   durable transcripts/diffs, restart recovery, and unavailable-backend
   fail-closed behavior.
 
-Evidence is appended here as each stacked change is committed and validated;
-an implementation commit is not treated as proof for a command that was not
-run against that exact tree.
+## Completion result
+
+Phase 8 removed 61 production package directories and closed below the hard
+ceiling without introducing a generic business-logic bucket. Relative to the
+Phase 7 base, the implementation changes 493 files with 11,121 insertions and
+19,865 deletions: a net reduction of 8,744 lines.
+
+| Shape measure | Phase 7 | Phase 8 | Change |
+|---|---:|---:|---:|
+| Production packages under `internal/` | 250 | 189 | -61 |
+| Packages under `internal/modules/` | 18 | 17 | -1 |
+| Packages outside `internal/modules/` | 232 | 172 | -60 |
+| One-file packages | 115 | 67 | -48 |
+| One-or-two-file packages | 141 | 89 | -52 |
+
+`production-package-shape.yaml` records the exact 189-package inventory and
+all five ceilings. The guard rejects additions, stale deleted rows, or any
+increase in total, module, outside-module, one-file, or one-or-two-file counts.
+It permits a mechanical refresh only when the package set shrinks.
+
+## Delivered consolidation
+
+| Area | Result |
+|---|---|
+| Work Items and Workspace | Canonical model, status, validation, identity, and naming policy live with their capability owners; the dead representation chain and forwarding policy packages are gone. |
+| FleetDB adapters | Capability transports and operation fragments are folded into owner adapters while the shared low-level FleetDB client remains one infrastructure boundary. |
+| Source Control | Stack lineage and ordering policy are colocated with the Source Control owner; local persistence remains an adapter behind owner ports. |
+| Interaction and Usage | UI persistence and usage projection logic are consolidated without merging their aggregates. |
+| CLI and WebUI composition | Forwarding-only serve, file, automation-route, projection, and request-policy packages are ordinary files in their owning composition or adapter package. |
+| HTTP and authority | Bounded decoding and authentication/authority classification are shared platform mechanisms; capability-specific error mapping remains at each adapter. |
+| Runtime security | One trust-profile subprocess environment policy owns filtering. Trusted local task runners preserve the closed backend executable-override set; remote workflows remain fail-closed. |
+| Packaged command resolution | Host bridge, bundled runner, and terminal paths pin the packaged sibling `loom` executable, including login-shell startup, instead of allowing an older global binary to win `PATH`. |
+
+The consolidation preserves all ten declared capability roots. The final
+architecture guard reports Store `15/0`, 26 legacy handler exceptions, 98
+direct-write rows, 107 mutation commands, 71 runtime components, 80 goroutine
+launch definitions, six measured performance rows, zero pending architecture
+decisions, and all 11 build profiles plus the all-files AST pass. Visible
+measured candidate passes peaked at 1,195.3 MiB and 1,236.4 MiB; the exact final
+aggregate gate also passed the same 2,048 MiB architecture-memory ceiling.
+
+## Product acceptance
+
+The packaged Desktop workspace `PHASE8-PROOF-20260808` exercised all eight
+local creation templates with two successful real-Codex runs per template:
+Behavior Planner, Coder, Bug Triage, Documentation Review, Local Review,
+interactive Lead, interactive PR Review, and interactive Custom. GitHub-backed
+mutations were not required for this Loom-only consolidation.
+
+The targeted reliability rows additionally proved:
+
+- configured and live agent projections render once, using durable ID or name
+  identity, and switching agents preserves transcript loading;
+- all agents, tasks, run history, transcripts, diffs, and repository state
+  survive a packaged Desktop restart;
+- task `PHASE8-PROOF-20260808-11` resolves bare `loom data` calls to the
+  packaged sibling binary, rejects deletion while claimed with HTTP 409, and
+  recovers the same owner-fenced run after the native Codex child is killed;
+- task `PHASE8-PROOF-20260808-12` with an intentionally missing Codex binary
+  fails in 0.4 seconds as `local_backend_unavailable`, records zero tokens and
+  no transcript/diff, and remains Blocked for review;
+- after restoring normal executable selection, task
+  `PHASE8-PROOF-20260808-13` completes via `local-cli-codex` in 2m16s, saves
+  its design, moves to Review, and exposes the durable transcript under run
+  `automation-run-7998b4d097ff1cef69992806bf1ae3cb`; and
+- the exact final gated tree `0709f1ebc` package rebuild starts on a fresh service port,
+  reloads all 13 durable tasks and eight unique agent rows, and displays the
+  completed canary transcript with every autonomous agent still disabled.
+
+## Validation record
+
+| Check | Exact result |
+|---|---|
+| Loom `make gate` on tree `0709f1ebc` | PASS: Go, frontend, lint, architecture, characterization, supervisor-disabled validation, race, coverage, and aggregate gate. Published implementation head `35e61b31b` has the same production tree plus bounded test-only CI synchronization. |
+| FleetDB `make gate` at `b71dec551` | PASS; Phase 8 changes no FleetDB source or OpenAPI contract |
+| Frontend Vitest | 8,744 passed, 1 skipped; focused durable-agent projection test 3/3 |
+| Frontend production build | PASS |
+| Driver/runtime/terminal focused Go suites | PASS |
+| Natural-exit convergence race regression | PASS for 50 consecutive race-enabled repetitions; full terminal race package PASS |
+| Exact Desktop package build | PASS on production tree `0709f1ebc`, unchanged by published test-only head `35e61b31b`; generated workflow output remained uncommitted and the source tree remained clean |
+
+The aggregate gate initially exposed two useful release blockers: a function
+length violation in the new runner setup and a reproducible terminal
+natural-exit convergence race. The first was extracted into a dedicated
+environment-preparation helper. The second was fixed in production by fencing
+durable convergence while it is in flight, with a deterministic regression
+that issues an idempotent kill during the hook. Both fixes are included in the
+green implementation head above.
+
+The stacked CI runs also reproduced a pre-existing harness flaw under parallel
+race load: the 100,000-key Redis setup used one unbounded pipeline and could
+hit the client write deadline before the measured close operation began. The
+published implementation head seeds the same keys in bounded 5,000-command
+pipelines without changing the eight-second close budget or production code.
+The exact test passed 10/10 under `-race` while the full localredis race suite
+ran concurrently. The terminal retry-exhaustion regression also waits for the
+in-flight convergence fence to clear before asserting repair; that boundary
+passed 100/100 under `-race` plus the full terminal race suite.
 
 ---
 

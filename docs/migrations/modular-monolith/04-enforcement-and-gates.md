@@ -1,8 +1,8 @@
 # Enforcement, Validation, and Stop Conditions
 
-- **Status:** Phase 7 complete at `completed_phase: 7`, including source
-  architecture, legacy service-center retirement, daemon-free runtime, signed
-  packaged-Desktop UI, and real-Codex acceptance
+- **Status:** Phase 8 consolidation complete, including exact shrink-only
+  package topology, bounded-memory architecture analysis, full repository
+  gates, and packaged-Desktop acceptance
 - **Purpose:** Define the fitness functions that distinguish a real modular monolith from a folder reorganization
 - **Migration:** [Modular Monolith Migration](README.md)
 
@@ -32,6 +32,19 @@ The post-completion topology source is committed at Loom `d8f7f1387`; the
 closing runtime and gate hardening is committed through `c3b9cb1bc`. That exact
 tree passes the full aggregate gate with the FleetDB `b71dec551` companion
 source and binary.
+
+**Phase 8 status:** Loom `35e61b31b` retains all ten capability owners while
+reducing the production topology from 250 to 189 package directories. The
+exact inventory ratchets 17 module packages, 172 outside-module packages, 67
+one-file packages, and 89 one-or-two-file packages. The final guard reports
+Store `15/0`, 26 legacy handler exceptions, 98 direct writes, 107 mutation
+commands, 71 runtime components, 80 goroutine definitions, six measured
+performance rows, zero pending decisions, and 11/11 build profiles. The exact
+full Loom gate and unchanged FleetDB `b71dec551` gate pass. Packaged acceptance
+proves all eight local templates twice, restart/transcript persistence,
+owner-fenced crash recovery, unavailable-backend fail-closed behavior, and an
+exact-head package restart. See the
+[Phase 8 evidence](15-phase-8-consolidation-and-evidence.md).
 
 **Phase 6 status:** Loom `02daec339` with FleetDB `51b8a493` passes both full
 gates, the byte-identical paired contract, and the fresh supervisor-disabled
