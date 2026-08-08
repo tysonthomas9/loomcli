@@ -13,11 +13,11 @@ semantics:
     - vendor
     - worktrees
 ceilings:
-  total_packages: 206
-  module_packages: 18
-  outside_module_packages: 188
-  one_file_packages: 78
-  one_or_two_file_packages: 103
+  total_packages: 189
+  module_packages: 17
+  outside_module_packages: 172
+  one_file_packages: 67
+  one_or_two_file_packages: 89
 packages:
   - internal/agenterr
   - internal/agentpolicy
@@ -51,7 +51,6 @@ packages:
   - internal/cli/agentdef
   - internal/cli/automode
   - internal/cli/backendapi
-  - internal/cli/backendcheck
   - internal/cli/backends
   - internal/cli/cleanup
   - internal/cli/clitest
@@ -70,11 +69,8 @@ packages:
   - internal/cli/repo
   - internal/cli/role
   - internal/cli/serve
-  - internal/cli/serve/install
-  - internal/cli/serve/logroutercmd
   - internal/cli/serve/metricscmd
   - internal/cli/serve/opsimpl
-  - internal/cli/serve/runtimewire
   - internal/cli/serve/serveadapter
   - internal/cli/serve/serveadapter/daytonabroker
   - internal/cli/serve/worker
@@ -110,11 +106,6 @@ packages:
   - internal/infra/connectorsproviders
   - internal/infra/connectorsvault
   - internal/infra/fleetdb
-  - internal/infra/fleetdb/agentmanagement
-  - internal/infra/fleetdb/agentprovisioning
-  - internal/infra/fleetdb/interaction
-  - internal/infra/fleetdb/repositoryadmission
-  - internal/infra/fleetdb/transport
   - internal/infra/interactionchat
   - internal/infra/interactionclient
   - internal/infra/interactionlead
@@ -123,7 +114,6 @@ packages:
   - internal/infra/sessionstoreadapter
   - internal/infra/sourcecontrolpublisher
   - internal/infra/sourcecontrolstackstore
-  - internal/infra/usageprojection
   - internal/infra/workflowdistribution
   - internal/infra/workflowdistribution/authoring
   - internal/infra/workspacecatalog
@@ -146,7 +136,6 @@ packages:
   - internal/modules/interaction
   - internal/modules/interaction/fleetdb
   - internal/modules/sourcecontrol
-  - internal/modules/sourcecontrol/stacklineage
   - internal/modules/workflowcatalog
   - internal/modules/workflowcatalog/fleetdb
   - internal/modules/workflowcatalog/httpapi
@@ -157,9 +146,9 @@ packages:
   - internal/ops
   - internal/pathsec
   - internal/platform/authority
+  - internal/platform/httptransport
   - internal/platform/repositoryremote
   - internal/platform/runtime
-  - internal/platform/workspaceid
   - internal/roleprompts
   - internal/runtimectx
   - internal/runtimepreflight
@@ -179,12 +168,10 @@ packages:
   - internal/webui
   - internal/webui/agentcoord
   - internal/webui/agentmodules
-  - internal/webui/agentmodules/automationroutes
   - internal/webui/app
   - internal/webui/apperrors
   - internal/webui/coordinator
   - internal/webui/editor
-  - internal/webui/fileaccess
   - internal/webui/filecoord
   - internal/webui/fleet
   - internal/webui/handlers/agents
@@ -209,7 +196,6 @@ packages:
   - internal/webui/handlers/workflows
   - internal/webui/handlers/workspace
   - internal/webui/hooks
-  - internal/webui/issuetabs
   - internal/webui/localredis
   - internal/webui/readprojection
   - internal/webui/server/dto
@@ -217,11 +203,8 @@ packages:
   - internal/webui/server/middleware
   - internal/webui/server/realtime
   - internal/webui/sessioncoord
-  - internal/webui/sessionhistory
   - internal/webui/sourcecontrolcoord
   - internal/webui/storeadapter
   - internal/webui/subscription
-  - internal/webui/tabmeta
   - internal/webui/terminal
   - internal/webui/workspacecoord
-  - internal/workspaceerrors

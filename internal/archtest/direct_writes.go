@@ -245,9 +245,9 @@ func (i DirectWriteInventory) validateMetadata() error {
 		"internal/infra/connectorscatalog",
 		"internal/infra/sessionstoreadapter",
 		"internal/infra/sourcecontrolstackstore",
-		"internal/infra/usageprojection",
 		"internal/infra/workspacecatalog",
 		"internal/modules",
+		"internal/usage",
 		"internal/webui/handlers",
 	}
 	if !slices.Equal(i.AdapterRoots, wantRoots) {

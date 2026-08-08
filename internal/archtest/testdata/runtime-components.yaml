@@ -37,10 +37,10 @@ goroutine_launches:
   - {file: "internal/cli/monitor/monitor_collect.go", function: "runParallelTaskQueries", site: "go#4", callee: "<anonymous>", disposition: bounded, reason: "task-query fan-out is channel-joined before monitor collection returns"}
   - {file: "internal/cli/monitor/monitor_collect.go", function: "runParallelTaskQueries", site: "go#5", callee: "<anonymous>", disposition: bounded, reason: "task-query fan-out is channel-joined before monitor collection returns"}
   - {file: "internal/cli/root.go", function: "Execute", site: "go#1", callee: "<anonymous>", disposition: command, reason: "one-shot trace-flush signal relay owned by the foreground CLI invocation"}
-  - {file: "internal/cli/serve/logroutercmd/logrouter_cmd.go", function: "runLogRouter", site: "go#1", callee: "<anonymous>", disposition: command, reason: "one-shot signal-to-context relay owned by the foreground log-router command"}
-  - {file: "internal/cli/serve/logroutercmd/logrouter_cmd.go", function: "runLogRouter", site: "go#2", callee: "watcher.Watch", disposition: component, component_ids: [logrouter-lock-watcher]}
+  - {file: "internal/cli/serve/logrouter_cmd.go", function: "runLogRouter", site: "go#1", callee: "<anonymous>", disposition: command, reason: "one-shot signal-to-context relay owned by the foreground log-router command"}
+  - {file: "internal/cli/serve/logrouter_cmd.go", function: "runLogRouter", site: "go#2", callee: "watcher.Watch", disposition: component, component_ids: [logrouter-lock-watcher]}
   - {file: "internal/cli/serve/metricscmd/collector.go", function: "cachedCollector.startBackground", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [serve-metrics-cache-refresh]}
-  - {file: "internal/cli/serve/runtimewire/stale.go", function: "InitStaleDetectorHandler", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [redis-stale-worker-detector]}
+  - {file: "internal/cli/serve/runtime_stale.go", function: "initStaleDetectorHandler", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [redis-stale-worker-detector]}
   - {file: "internal/cli/serve/serve.go", function: "runServe", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [web-http-server]}
   - {file: "internal/cli/serve/serve_cache.go", function: "cachedValue.startBackground", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [serve-generic-cache-refresh]}
   - {file: "internal/cli/serve/serve_runtime_loops.go", function: "startIssueJournalBridge", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [serve-issue-journal-bridge]}
