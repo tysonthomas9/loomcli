@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/tysonthomas9/loomcli/internal/app/workfloweventing"
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
@@ -13,33 +13,15 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
-
-type IssueBackendFactory func(workspace, actor string) (backend.IssueBackend, error)
 
 type SourceControl = sourcecontrol.Materializer
 type Artifacts = artifactsmodule.API
 
-// Store is the legacy read-only projection boundary still needed by the
-// driver HTTP adapter while mutations enter through capability APIs.
-type Store interface {
-	store.OrchestrationSessionStore
-	Awaits() store.AwaitStore
-	TriggerEvents() store.TriggerEventStore
-	TriggerBindings() store.TriggerBindingStore
-	TriggerDeliveries() store.TriggerDeliveryStore
-	Roles() store.RoleStore
-	Repos() store.RepoStore
-	AgentServices() store.AgentServiceStore
-	TaskRuns() store.TaskRunStore
-	TaskRunEvents() store.TaskRunEventStore
-	DriverRuns() store.DriverRunStore
-	Drivers() store.DriverStore
-	DriverVersions() store.DriverVersionStore
-	Nodes() store.NodeStore
-	WorkerProfiles() store.WorkerProfileStore
-}
+// RolePromptReader materializes the prompt body for a persisted role. The
+// composition root supplies the machine-local prompt-file adapter so this HTTP
+// adapter does not depend on a sibling HTTP handler.
+type RolePromptReader func(*domain.Role) string
 
 // WorkflowEventAwaitDispatcher is the narrow post-admission AW7 seam.
 type WorkflowEventAwaitDispatcher interface {
@@ -58,6 +40,7 @@ type Config struct {
 	SourceControl    SourceControl
 	LocalRepoPath    func(workspaceKey, repoName string) string
 	IssueBackends    IssueBackendFactory
+	RolePrompts      RolePromptReader
 	Dispatcher       connectorsmodule.Dispatcher
 	WorkflowEventing *workfloweventing.Workflow
 	EventAwaits      WorkflowEventAwaitDispatcher
