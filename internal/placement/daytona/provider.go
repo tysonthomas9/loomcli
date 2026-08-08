@@ -400,7 +400,51 @@ func (p *Provider) PrepareLeadBoot(ctx context.Context, sandboxID string, prep p
 			return err
 		}
 	}
+	for _, file := range prep.Files {
+		if err := p.writeSandboxFile(ctx, sandbox, file); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// writeSandboxFile seeds one prep file (e.g. the codex auth.json drop, ticket
+// 08). Contents may be credentials: the base64 payload is passed as a
+// redaction so it can never surface in a prep error, and the write is
+// atomic (write-then-rename) like the prompt's.
+func (p *Provider) writeSandboxFile(ctx context.Context, sandbox *apiclient.Sandbox, file placement.SandboxFile) error {
+	filePath := strings.TrimSpace(file.Path)
+	if filePath == "" || !strings.HasPrefix(filePath, "/") {
+		return fmt.Errorf("sandbox seed file path must be absolute: %w", domain.ErrInvalid)
+	}
+	mode := strings.TrimSpace(file.Mode)
+	if mode != "" && !isOctalMode(mode) {
+		return fmt.Errorf("sandbox seed file mode %q must be octal: %w", mode, domain.ErrInvalid)
+	}
+	encoded := base64.StdEncoding.EncodeToString(file.Content)
+	cmd := "mkdir -p " + shellQuote(path.Dir(filePath)) +
+		" && printf %s " + shellQuote(encoded) + " | base64 -d > " + shellQuote(filePath+".tmp")
+	if mode != "" {
+		cmd += " && chmod " + mode + " " + shellQuote(filePath+".tmp")
+	}
+	cmd += " && mv -f " + shellQuote(filePath+".tmp") + " " + shellQuote(filePath)
+	_, err := p.execLeadPrep(ctx, sandbox, cmd, encoded)
+	if err != nil {
+		return fmt.Errorf("seed sandbox file %q: %w", filePath, err)
+	}
+	return nil
+}
+
+func isOctalMode(mode string) bool {
+	if len(mode) < 3 || len(mode) > 4 {
+		return false
+	}
+	for _, r := range mode {
+		if r < '0' || r > '7' {
+			return false
+		}
+	}
+	return true
 }
 
 // CreatePty creates the requested PTY session if absent. ProcessSpec.Command is

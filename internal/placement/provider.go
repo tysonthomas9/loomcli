@@ -96,8 +96,22 @@ type LeadBootPrep struct {
 	GitToken   func() (string, error)
 	PromptPath string
 	PromptText string
+	// Files are seeded into the sandbox before the lead PTY starts (ticket 08:
+	// the codex auth.json drop rides this). Contents may be credentials and
+	// must never appear in logs or errors.
+	Files []SandboxFile
 	// Timeout bounds each prep exec command. Zero uses the provider default.
 	Timeout time.Duration
+}
+
+// SandboxFile is a file seeded into the sandbox during lead-boot prep.
+type SandboxFile struct {
+	// Path is the absolute in-sandbox destination.
+	Path string
+	// Content is written atomically (write-then-rename).
+	Content []byte
+	// Mode is an octal chmod string (e.g. "600"). Empty leaves the default.
+	Mode string
 }
 
 // RepoClone describes the one-shot checkout a provider should create before

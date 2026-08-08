@@ -765,6 +765,63 @@ func TestPrepareLeadBootPromptWriteDecodesExactText(t *testing.T) {
 	}
 }
 
+func TestPrepareLeadBootSeedsFilesAtomicallyWithModeAndRedaction(t *testing.T) {
+	content := `{"tokens":{"access":"SECRET-TOKEN-VALUE"}}`
+	var command string
+	provider := newPrepProvider(t, func(req toolboxExecuteRequest) string {
+		command = req.Command
+		return executeBody(0, "", "")
+	})
+
+	err := provider.PrepareLeadBoot(context.Background(), "sandbox-1", placement.LeadBootPrep{
+		Files: []placement.SandboxFile{{Path: "/root/.codex/auth.json", Content: []byte(content), Mode: "600"}},
+	})
+	if err != nil {
+		t.Fatalf("PrepareLeadBoot: %v", err)
+	}
+	encoded := between(t, command, "printf %s '", "' | base64 -d")
+	decoded, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil || string(decoded) != content {
+		t.Fatalf("decoded seed file = %q, %v, want original content", decoded, err)
+	}
+	for _, want := range []string{
+		"> '/root/.codex/auth.json.tmp'",
+		"chmod 600 '/root/.codex/auth.json.tmp'",
+		"mv -f '/root/.codex/auth.json.tmp' '/root/.codex/auth.json'",
+	} {
+		if !strings.Contains(command, want) {
+			t.Fatalf("seed command %q missing %q", command, want)
+		}
+	}
+
+	// Failure path: neither the raw content nor its base64 may leak.
+	failing := newPrepProvider(t, func(req toolboxExecuteRequest) string {
+		return executeBody(1, "", "wrote "+base64.StdEncoding.EncodeToString([]byte(content))+" badly")
+	})
+	err = failing.PrepareLeadBoot(context.Background(), "sandbox-1", placement.LeadBootPrep{
+		Files: []placement.SandboxFile{{Path: "/root/.codex/auth.json", Content: []byte(content)}},
+	})
+	if err == nil {
+		t.Fatal("PrepareLeadBoot = nil error, want seed failure")
+	}
+	if strings.Contains(err.Error(), "SECRET-TOKEN-VALUE") ||
+		strings.Contains(err.Error(), base64.StdEncoding.EncodeToString([]byte(content))) {
+		t.Fatalf("seed failure leaked file content: %v", err)
+	}
+
+	for _, bad := range []placement.SandboxFile{
+		{Path: "relative/auth.json", Content: []byte("x")},
+		{Path: "", Content: []byte("x")},
+		{Path: "/root/x", Content: []byte("x"), Mode: "rw-"},
+		{Path: "/root/x", Content: []byte("x"), Mode: "60000"},
+	} {
+		err := provider.PrepareLeadBoot(context.Background(), "sandbox-1", placement.LeadBootPrep{Files: []placement.SandboxFile{bad}})
+		if err == nil {
+			t.Fatalf("PrepareLeadBoot(%+v) = nil error, want validation error", bad)
+		}
+	}
+}
+
 func TestPrepareLeadBootRejectsCredentialBearingPersistedRemote(t *testing.T) {
 	provider := newPrepProvider(t, func(req toolboxExecuteRequest) string {
 		switch {

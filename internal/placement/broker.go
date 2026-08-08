@@ -102,8 +102,12 @@ type ProvisionRequest struct {
 	RepoName               string
 	GitToken               func() (string, error)
 	PromptText             string
-	Backend                string
-	AgentRole              string
+	// SeedFiles are written into the sandbox before the lead PTY starts
+	// (ticket 08's credential drop). Contents may be secrets; they are never
+	// logged and never appear in errors.
+	SeedFiles []SandboxFile
+	Backend   string
+	AgentRole string
 }
 
 // ProvisionResult is returned by Provision for both created and existing rows.
@@ -1287,7 +1291,7 @@ type leadBootPlan struct {
 }
 
 func (p leadBootPlan) needsPrep() bool {
-	return p.prep.Repo != nil || p.prep.PromptText != ""
+	return p.prep.Repo != nil || p.prep.PromptText != "" || len(p.prep.Files) > 0
 }
 
 func (b *Broker) resolveLeadBootPlan(ctx context.Context, req ProvisionRequest, logEmptyRepo bool) (leadBootPlan, error) {
@@ -1297,6 +1301,7 @@ func (b *Broker) resolveLeadBootPlan(ctx context.Context, req ProvisionRequest, 
 		agentRole: agentRole,
 	}
 	plan.prep.Timeout = b.effectiveLeadBootPrepTimeout()
+	plan.prep.Files = append([]SandboxFile(nil), req.SeedFiles...)
 	if req.PromptText != "" {
 		promptPath := promptPathFromCommand(effectiveLeadCommand(req))
 		if promptPath == "" {

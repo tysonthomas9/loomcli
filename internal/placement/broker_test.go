@@ -195,6 +195,29 @@ func TestProvisionPrepFailureCompensatesAndLeavesNoActivePlacement(t *testing.T)
 	}
 }
 
+// Seed files must reach prep (before any PTY exists) and must by themselves
+// make prep run -- the credential drop can be the only prep work.
+func TestProvisionSeedFilesReachPrep(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	provider := &fakeProvider{}
+	broker := mustBroker(t, st, provider)
+
+	req := testProvisionRequest("nova", 2, 4)
+	req.SeedFiles = []SandboxFile{{Path: "/root/.codex/auth.json", Content: []byte(`{"t":1}`), Mode: "600"}}
+	if _, err := broker.Provision(ctx, req); err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+	if got := provider.prepCallCount(); got != 1 {
+		t.Fatalf("prep calls = %d, want 1 for seed-files-only prep", got)
+	}
+	prep := provider.prepCall(t, 0)
+	if len(prep.Files) != 1 || prep.Files[0].Path != "/root/.codex/auth.json" ||
+		string(prep.Files[0].Content) != `{"t":1}` || prep.Files[0].Mode != "600" {
+		t.Fatalf("prep files = %+v, want the seeded auth.json", prep.Files)
+	}
+}
+
 // A prep-failure compensation whose delete the provider has not yet confirmed
 // must leave the placement `releasing` (re-driven by the next Provision), never
 // stamp `released` over a possibly-live sandbox. Regression: the first
