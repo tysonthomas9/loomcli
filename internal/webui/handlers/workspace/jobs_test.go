@@ -7,13 +7,14 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
+	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 )
 
 func TestHandleGetWorkspaceJob_NotFound(t *testing.T) {
 	svc := &mockWorkspaceService{
-		getWorkspaceJobFn: func(_ context.Context, _ string) (*service.WorkspaceJob, error) {
-			return nil, service.ErrNotFound("job not found")
+		getWorkspaceJobFn: func(_ context.Context, _ string) (*workspacecoord.WorkspaceJob, error) {
+			return nil, apperrors.ErrNotFound("job not found")
 		},
 	}
 
@@ -44,10 +45,10 @@ func TestHandleGetWorkspaceJob_MissingID(t *testing.T) {
 
 func TestHandleGetWorkspaceJob_RunningJob(t *testing.T) {
 	svc := &mockWorkspaceService{
-		getWorkspaceJobFn: func(_ context.Context, jobID string) (*service.WorkspaceJob, error) {
-			return &service.WorkspaceJob{
+		getWorkspaceJobFn: func(_ context.Context, jobID string) (*workspacecoord.WorkspaceJob, error) {
+			return &workspacecoord.WorkspaceJob{
 				ID:       jobID,
-				Status:   service.JobStatusRunning,
+				Status:   workspacecoord.JobStatusRunning,
 				Progress: "cloning repository...",
 			}, nil
 		},
@@ -65,17 +66,17 @@ func TestHandleGetWorkspaceJob_RunningJob(t *testing.T) {
 
 	var resp map[string]any
 	json.NewDecoder(rec.Body).Decode(&resp)
-	if resp["status"] != string(service.JobStatusRunning) {
-		t.Errorf("expected status %q, got %v", service.JobStatusRunning, resp["status"])
+	if resp["status"] != string(workspacecoord.JobStatusRunning) {
+		t.Errorf("expected status %q, got %v", workspacecoord.JobStatusRunning, resp["status"])
 	}
 }
 
 func TestHandleGetWorkspaceJob_CompletedJob(t *testing.T) {
 	svc := &mockWorkspaceService{
-		getWorkspaceJobFn: func(_ context.Context, jobID string) (*service.WorkspaceJob, error) {
-			return &service.WorkspaceJob{
+		getWorkspaceJobFn: func(_ context.Context, jobID string) (*workspacecoord.WorkspaceJob, error) {
+			return &workspacecoord.WorkspaceJob{
 				ID:          jobID,
-				Status:      service.JobStatusDone,
+				Status:      workspacecoord.JobStatusDone,
 				WorkspaceID: "ws-done",
 			}, nil
 		},
@@ -93,8 +94,8 @@ func TestHandleGetWorkspaceJob_CompletedJob(t *testing.T) {
 
 	var resp map[string]any
 	json.NewDecoder(rec.Body).Decode(&resp)
-	if resp["status"] != string(service.JobStatusDone) {
-		t.Errorf("expected status %q, got %v", service.JobStatusDone, resp["status"])
+	if resp["status"] != string(workspacecoord.JobStatusDone) {
+		t.Errorf("expected status %q, got %v", workspacecoord.JobStatusDone, resp["status"])
 	}
 	if resp["workspace_id"] != "ws-done" {
 		t.Errorf("expected workspace_id %q, got %v", "ws-done", resp["workspace_id"])
@@ -103,10 +104,10 @@ func TestHandleGetWorkspaceJob_CompletedJob(t *testing.T) {
 
 func TestHandleGetWorkspaceJob_FailedJob(t *testing.T) {
 	svc := &mockWorkspaceService{
-		getWorkspaceJobFn: func(_ context.Context, jobID string) (*service.WorkspaceJob, error) {
-			return &service.WorkspaceJob{
+		getWorkspaceJobFn: func(_ context.Context, jobID string) (*workspacecoord.WorkspaceJob, error) {
+			return &workspacecoord.WorkspaceJob{
 				ID:     jobID,
-				Status: service.JobStatusFailed,
+				Status: workspacecoord.JobStatusFailed,
 				Error:  "workspace creation failed",
 			}, nil
 		},
@@ -124,8 +125,8 @@ func TestHandleGetWorkspaceJob_FailedJob(t *testing.T) {
 
 	var resp map[string]any
 	json.NewDecoder(rec.Body).Decode(&resp)
-	if resp["status"] != string(service.JobStatusFailed) {
-		t.Errorf("expected status %q, got %v", service.JobStatusFailed, resp["status"])
+	if resp["status"] != string(workspacecoord.JobStatusFailed) {
+		t.Errorf("expected status %q, got %v", workspacecoord.JobStatusFailed, resp["status"])
 	}
 	if resp["error"] != "workspace creation failed" {
 		t.Errorf("expected error %q, got %v", "workspace creation failed", resp["error"])

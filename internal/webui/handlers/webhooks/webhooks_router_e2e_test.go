@@ -20,10 +20,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/trigger"
 )
 
 const (
@@ -39,14 +43,14 @@ func routerE2EStore(t *testing.T) *memstore.Store {
 	ctx := context.Background()
 	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
 		WorkspaceKey: routerE2EWS, DriverID: "pr-review", Name: "pr-review",
-		OwnerType: domain.DriverOwnerSystem, Status: domain.DriverStatusActive,
+		OwnerType: workflowcatalog.DriverOwnerSystem, Status: workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatalf("seed driver: %v", err)
 	}
 	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
 		WorkspaceKey: routerE2EWS, VersionID: "v1", DriverID: "pr-review", Version: 1,
 		SourceDigest: "sha256:src", BundleDigest: "sha256:bundle",
-		ValidationStatus: domain.DriverVersionValidationPassed,
+		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("seed driver version: %v", err)
 	}
@@ -134,11 +138,11 @@ func routerE2EGet(t *testing.T, mux *http.ServeMux, path string, out any) {
 }
 
 // routerE2EOnlyEvent fetches the workspace's single trigger event over HTTP.
-func routerE2EOnlyEvent(t *testing.T, mux *http.ServeMux) *domain.TriggerEvent {
+func routerE2EOnlyEvent(t *testing.T, mux *http.ServeMux) *automation.Event {
 	t.Helper()
 	var page struct {
-		Events []*domain.TriggerEvent `json:"trigger_events"`
-		Count  int                    `json:"count"`
+		Events []*automation.Event `json:"trigger_events"`
+		Count  int                 `json:"count"`
 	}
 	routerE2EGet(t, mux, "/api/workspaces/"+routerE2EWS+"/trigger-events", &page)
 	if page.Count != 1 || len(page.Events) != 1 {
@@ -148,9 +152,9 @@ func routerE2EOnlyEvent(t *testing.T, mux *http.ServeMux) *domain.TriggerEvent {
 }
 
 // routerE2EDelivery fetches one persisted delivery over HTTP.
-func routerE2EDelivery(t *testing.T, mux *http.ServeMux, deliveryID string) *domain.TriggerDelivery {
+func routerE2EDelivery(t *testing.T, mux *http.ServeMux, deliveryID string) *automation.Delivery {
 	t.Helper()
-	var delivery domain.TriggerDelivery
+	var delivery automation.Delivery
 	routerE2EGet(t, mux, "/api/workspaces/"+routerE2EWS+"/trigger-deliveries/"+deliveryID, &delivery)
 	return &delivery
 }
@@ -238,14 +242,14 @@ func TestRouterE2EWebhookFanOutTraceAndOrigin(t *testing.T) {
 	if event.SignatureStatus != "verified" || event.RawPayloadDigest == "" || event.IdempotencyKey != "github:fan-1" {
 		t.Fatalf("event verification = %+v", event)
 	}
-	if event.Origin != domain.TriggerEventOriginExternal || event.HopDepth != 0 {
+	if event.Origin != automation.EventOriginExternal || event.HopDepth != 0 {
 		t.Fatalf("event origin = %q hop %d, want external at hop 0", event.Origin, event.HopDepth)
 	}
 
 	// Walk every leg: Delivery -> Run linkage by id, per-leg composite
 	// idempotency key, rendered default subject key per binding.
 	for _, leg := range resp.Deliveries {
-		if leg.Status != domain.TriggerDeliveryDispatched || leg.DeliveryID == "" || leg.RunID == "" {
+		if leg.Status != automation.DeliveryDispatched || leg.DeliveryID == "" || leg.RunID == "" {
 			t.Fatalf("leg incomplete: %+v", leg)
 		}
 		delivery := routerE2EDelivery(t, mux, leg.DeliveryID)
@@ -346,7 +350,7 @@ func TestRouterE2EReplaceSupersedeStorm(t *testing.T) {
 	st := routerE2EStore(t)
 	routerE2EBinding(t, st, store.TriggerBindingCreate{
 		BindingID: "b-replace", RouteKey: "github.pull_request.synchronize", WebhookSecret: routerE2ESecret,
-		ConcurrencyPolicy:  domain.TriggerBindingConcurrencyReplace,
+		ConcurrencyPolicy:  automation.ConcurrencyReplace,
 		SubjectKeyTemplate: "{{subject_ref}}@{{attrs.base_ref}}",
 	})
 	mux := routerE2EMux(st)
@@ -356,7 +360,7 @@ func TestRouterE2EReplaceSupersedeStorm(t *testing.T) {
 	legs := make([]store.TriggerRouteDelivery, 0, 3)
 	for i, sha := range []string{"sha-aaa", "sha-bbb", "sha-ccc"} {
 		resp := routerE2EPost(t, mux, fmt.Sprintf("storm-%d", i+1), routerE2EPRBody("synchronize", sha))
-		if len(resp.Deliveries) != 1 || resp.Deliveries[0].Status != domain.TriggerDeliveryDispatched {
+		if len(resp.Deliveries) != 1 || resp.Deliveries[0].Status != automation.DeliveryDispatched {
 			t.Fatalf("storm post %d legs = %+v, want one dispatched leg", i+1, resp.Deliveries)
 		}
 		legs = append(legs, resp.Deliveries[0])
@@ -376,8 +380,8 @@ func TestRouterE2EReplaceSupersedeStorm(t *testing.T) {
 
 	// Loser deliveries audit as superseded, carrying the rendered subject key.
 	var superseded struct {
-		Deliveries []*domain.TriggerDelivery `json:"trigger_deliveries"`
-		Count      int                       `json:"count"`
+		Deliveries []*automation.Delivery `json:"trigger_deliveries"`
+		Count      int                    `json:"count"`
 	}
 	routerE2EGet(t, mux, "/api/workspaces/"+routerE2EWS+"/trigger-deliveries?status=superseded", &superseded)
 	if superseded.Count != 2 {
@@ -385,11 +389,11 @@ func TestRouterE2EReplaceSupersedeStorm(t *testing.T) {
 	}
 	for i, leg := range legs[:2] {
 		delivery := routerE2EDelivery(t, mux, leg.DeliveryID)
-		if delivery.Status != domain.TriggerDeliverySuperseded || delivery.SubjectKey != subjectKey || delivery.DriverRunID != leg.RunID {
+		if delivery.Status != automation.DeliverySuperseded || delivery.SubjectKey != subjectKey || delivery.DriverRunID != leg.RunID {
 			t.Fatalf("loser delivery %d = %+v, want superseded for %q run %s", i+1, delivery, subjectKey, leg.RunID)
 		}
 	}
-	if delivery := routerE2EDelivery(t, mux, legs[2].DeliveryID); delivery.Status != domain.TriggerDeliveryDispatched || delivery.SubjectKey != subjectKey {
+	if delivery := routerE2EDelivery(t, mux, legs[2].DeliveryID); delivery.Status != automation.DeliveryDispatched || delivery.SubjectKey != subjectKey {
 		t.Fatalf("winner delivery = %+v, want dispatched for %q", delivery, subjectKey)
 	}
 
@@ -399,7 +403,7 @@ func TestRouterE2EReplaceSupersedeStorm(t *testing.T) {
 	if len(replay.Deliveries) != 1 {
 		t.Fatalf("replay legs = %+v, want 1", replay.Deliveries)
 	}
-	if leg := replay.Deliveries[0]; leg.Status != domain.TriggerDeliverySuperseded || leg.RunID != legs[1].RunID {
+	if leg := replay.Deliveries[0]; leg.Status != automation.DeliverySuperseded || leg.RunID != legs[1].RunID {
 		t.Fatalf("replayed loser leg = %+v, want superseded run %s", leg, legs[1].RunID)
 	}
 	if run, err := st.DriverRuns().Get(ctx, routerE2EWS, legs[2].RunID); err != nil || run.Status != domain.DriverRunQueued {
@@ -419,12 +423,12 @@ func TestRouterE2EForbidRejectsAndQueuePromotesViaSweeper(t *testing.T) {
 	st := routerE2EStore(t)
 	routerE2EBinding(t, st, store.TriggerBindingCreate{
 		BindingID: "b-forbid", RouteKey: "github.pull_request.opened", WebhookSecret: routerE2ESecret,
-		ConcurrencyPolicy: domain.TriggerBindingConcurrencyForbid,
+		ConcurrencyPolicy: automation.ConcurrencyForbid,
 	})
 	routerE2EBinding(t, st, store.TriggerBindingCreate{
 		BindingID:           "b-queue",
 		EventTypePatterns:   []string{"github.pull_request.opened"},
-		ConcurrencyPolicy:   domain.TriggerBindingConcurrencyQueue,
+		ConcurrencyPolicy:   automation.ConcurrencyQueue,
 		RetryBackoffSeconds: 30,
 	})
 	mux := routerE2EMux(st)
@@ -432,8 +436,8 @@ func TestRouterE2EForbidRejectsAndQueuePromotesViaSweeper(t *testing.T) {
 
 	// First webhook: subject free, both legs dispatch queued runs.
 	first := routerE2EPost(t, mux, "fq-1", routerE2EPRBody("opened", "sha-1"))
-	if len(first.Deliveries) != 2 || first.Deliveries[0].Status != domain.TriggerDeliveryDispatched ||
-		first.Deliveries[1].Status != domain.TriggerDeliveryDispatched {
+	if len(first.Deliveries) != 2 || first.Deliveries[0].Status != automation.DeliveryDispatched ||
+		first.Deliveries[1].Status != automation.DeliveryDispatched {
 		t.Fatalf("first webhook legs = %+v, want both dispatched", first.Deliveries)
 	}
 	queueRunID := first.Deliveries[1].RunID
@@ -445,17 +449,17 @@ func TestRouterE2EForbidRejectsAndQueuePromotesViaSweeper(t *testing.T) {
 		t.Fatalf("second webhook legs = %+v, want 2", second.Deliveries)
 	}
 	forbidLeg, queueLeg := second.Deliveries[0], second.Deliveries[1]
-	if forbidLeg.Status != domain.TriggerDeliveryRejected || forbidLeg.RejectionReason != "concurrency_forbid" || forbidLeg.RunID != "" {
+	if forbidLeg.Status != automation.DeliveryRejected || forbidLeg.RejectionReason != "concurrency_forbid" || forbidLeg.RunID != "" {
 		t.Fatalf("forbid leg = %+v, want rejected concurrency_forbid without run", forbidLeg)
 	}
-	if queueLeg.Status != domain.TriggerDeliveryHeld || queueLeg.RunID != "" {
+	if queueLeg.Status != automation.DeliveryHeld || queueLeg.RunID != "" {
 		t.Fatalf("queue leg = %+v, want held without run", queueLeg)
 	}
 	held := routerE2EDelivery(t, mux, queueLeg.DeliveryID)
-	if held.Status != domain.TriggerDeliveryHeld || held.Attempt != 1 || held.NextRetryAt == nil {
+	if held.Status != automation.DeliveryHeld || held.Attempt != 1 || held.NextRetryAt == nil {
 		t.Fatalf("held delivery = %+v, want held attempt 1 with next_retry_at", held)
 	}
-	if rejected := routerE2EDelivery(t, mux, forbidLeg.DeliveryID); rejected.Status != domain.TriggerDeliveryRejected ||
+	if rejected := routerE2EDelivery(t, mux, forbidLeg.DeliveryID); rejected.Status != automation.DeliveryRejected ||
 		rejected.RejectionReason != "concurrency_forbid" || rejected.DriverRunID != "" {
 		t.Fatalf("rejected delivery = %+v, want audited forbid rejection", rejected)
 	}
@@ -478,7 +482,7 @@ func TestRouterE2EForbidRejectsAndQueuePromotesViaSweeper(t *testing.T) {
 	}
 
 	promoted := routerE2EDelivery(t, mux, queueLeg.DeliveryID)
-	if promoted.Status != domain.TriggerDeliveryDispatched || promoted.Attempt != 2 ||
+	if promoted.Status != automation.DeliveryDispatched || promoted.Attempt != 2 ||
 		promoted.NextRetryAt != nil || promoted.DriverRunID == "" {
 		t.Fatalf("promoted delivery = %+v, want dispatched attempt 2 with run", promoted)
 	}
@@ -486,7 +490,7 @@ func TestRouterE2EForbidRejectsAndQueuePromotesViaSweeper(t *testing.T) {
 		t.Fatalf("promoted run = %+v (err %v), want queued", run, err)
 	}
 	// The forbid rejection is final: same recorded state, still no run.
-	if rejected := routerE2EDelivery(t, mux, forbidLeg.DeliveryID); rejected.Status != domain.TriggerDeliveryRejected || rejected.DriverRunID != "" {
+	if rejected := routerE2EDelivery(t, mux, forbidLeg.DeliveryID); rejected.Status != automation.DeliveryRejected || rejected.DriverRunID != "" {
 		t.Fatalf("rejected delivery after sweep = %+v, want unchanged", rejected)
 	}
 	if events, runs, deliveries := routerE2ECounts(t, st); events != 2 || runs != 3 || deliveries != 4 {
@@ -547,15 +551,15 @@ func TestRouterE2ECronTickDispatchAndReplicaDedup(t *testing.T) {
 	if event.IdempotencyKey != tickKey || event.SourceEventID != tickKey {
 		t.Fatalf("cron event keys = %+v, want %q", event, tickKey)
 	}
-	if event.Origin != domain.TriggerEventOriginExternal || event.HopDepth != 0 {
+	if event.Origin != automation.EventOriginExternal || event.HopDepth != 0 {
 		t.Fatalf("cron event origin = %q hop %d, want route-dispatch external at hop 0", event.Origin, event.HopDepth)
 	}
 
 	var page struct {
-		Deliveries []*domain.TriggerDelivery `json:"trigger_deliveries"`
+		Deliveries []*automation.Delivery `json:"trigger_deliveries"`
 	}
 	routerE2EGet(t, mux, "/api/workspaces/"+routerE2EWS+"/trigger-deliveries", &page)
-	if len(page.Deliveries) != 1 || page.Deliveries[0].Status != domain.TriggerDeliveryDispatched {
+	if len(page.Deliveries) != 1 || page.Deliveries[0].Status != automation.DeliveryDispatched {
 		t.Fatalf("cron deliveries = %+v, want one dispatched", page.Deliveries)
 	}
 	run, err := st.DriverRuns().Get(ctx, routerE2EWS, page.Deliveries[0].DriverRunID)

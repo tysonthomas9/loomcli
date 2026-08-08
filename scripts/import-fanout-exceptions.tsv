@@ -1,0 +1,6 @@
+# package	exact_count	rationale
+internal/webui/app	22	HTTP composition root injects focused delivery coordinators after umbrella service retirement
+internal/webui/handlers/agents	20	Agent delivery routes combine lifecycle session transcript and terminal ports
+internal/webui/modbuilder	19	Compatibility composition delegates to focused agent review and session assemblers
+internal/webui/handlers/prreview	19	PR review delivery coordinates connector agent interaction source-control and terminal ports
+internal/webui/agentmodules/routecontracts	19	Workspace route contract enumerates capability ports for explicit composition

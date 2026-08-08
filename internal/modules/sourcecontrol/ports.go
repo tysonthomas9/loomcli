@@ -49,3 +49,27 @@ type CheckoutInspector interface {
 	MatchRemote(context.Context, string, string, string) (CheckoutMatch, error)
 	ResolveCommit(context.Context, string, string) (string, error)
 }
+
+// TaskOutcomeStore is the Source Control persistence port for the narrow
+// stack-lineage transition used by Execution's finalize barrier.
+type TaskOutcomeStore interface {
+	ListTaskStacks(context.Context, string) ([]TaskStack, error)
+	ListTaskStackNodes(context.Context, string, string) ([]TaskStackNode, error)
+	UpdateTaskStackOutcome(context.Context, string, string, string, TaskStackOutcomeMutation) error
+}
+
+// StackLifecycleStore is the persistence port for Source Control-owned stack
+// topology. Its implementation may retain the legacy local JSON format while
+// callers migrate, but all policy and public mutations enter through
+// StackLifecycle.
+type StackLifecycleStore interface {
+	EnsureStackRecord(context.Context, Stack) error
+	GetStackRecord(context.Context, string, string) (*Stack, error)
+	ListStackRecords(context.Context, string) ([]Stack, error)
+	ListStackNodeRecords(context.Context, string, string) ([]StackNode, error)
+	AddStackNodeRecord(context.Context, string, string, string, string, string) (StackNode, error)
+	MoveStackNodeRecord(context.Context, string, string, string, string) error
+	SetStackNodeBaseRecord(context.Context, string, string, string, string) error
+	RemoveStackNodeRecord(context.Context, string, string, string) error
+	UpdateStackNodePublicationRecord(context.Context, string, string, string, StackNodePublicationMutation) error
+}

@@ -2,12 +2,13 @@ package interactioncomposition
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"testing"
 	"time"
 
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
-	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 )
@@ -156,14 +157,20 @@ type interactionTranscriptStoreStub struct{}
 
 func (*interactionTranscriptStoreStub) CreateContent(
 	context.Context,
+	authority.SessionAuthority,
 	interaction.TranscriptArtifactCreate,
 ) (string, error) {
 	return "transcript-session-1", nil
 }
 
 func TestInteractionTranscriptArtifactStoreRejectsDivergentRetry(t *testing.T) {
-	persistence := memstore.New()
-	adapter := newInteractionTranscriptArtifactStore(persistence.Artifacts())
+	issuer := authority.NewIssuer()
+	persistence := &sessionArtifactTransportStub{}
+	adapter, err := newInteractionTranscriptArtifactStore(persistence, issuer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth := interactionTranscriptTestAuthority(t, issuer)
 	command := interaction.TranscriptArtifactCreate{
 		WorkspaceKey: "WS",
 		ArtifactID:   "transcript-session-1",
@@ -171,16 +178,162 @@ func TestInteractionTranscriptArtifactStoreRejectsDivergentRetry(t *testing.T) {
 		SessionID:    "session-1",
 		Content:      []byte("{\"seq\":1,\"text\":\"first\"}\n"),
 	}
-	if artifactID, err := adapter.CreateContent(t.Context(), command); err != nil || artifactID != command.ArtifactID {
+	if artifactID, err := adapter.CreateContent(t.Context(), auth, command); err != nil || artifactID != command.ArtifactID {
 		t.Fatalf("first transcript publish = %q, %v", artifactID, err)
 	}
-	if artifactID, err := adapter.CreateContent(t.Context(), command); err != nil || artifactID != command.ArtifactID {
+	if artifactID, err := adapter.CreateContent(t.Context(), auth, command); err != nil || artifactID != command.ArtifactID {
 		t.Fatalf("exact transcript replay = %q, %v", artifactID, err)
 	}
 	command.Content = []byte("{\"seq\":1,\"text\":\"different\"}\n")
-	if _, err := adapter.CreateContent(t.Context(), command); !errors.Is(err, interaction.ErrConflict) {
+	if _, err := adapter.CreateContent(t.Context(), auth, command); !errors.Is(err, interaction.ErrConflict) {
 		t.Fatalf("divergent transcript replay error = %v, want conflict", err)
 	}
+}
+
+func TestInteractionTranscriptArtifactStorePreservesLeaseCredentialForSessionAttachment(t *testing.T) {
+	issuer := authority.NewIssuer()
+	adapter, err := newInteractionTranscriptArtifactStore(&sessionArtifactTransportStub{}, issuer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	principal, err := issuer.DeriveVerifiedPrincipal(authority.PrincipalClaims{
+		Subject: "session:session-1", Class: authority.ClassSession, Workspace: "WS",
+		Actions: []authority.Action{interaction.ActionPublishTranscript}, ExpiresAt: time.Now().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const credential = "one-use-session-credential"
+	auth, err := issuer.IssueSessionForOwnerWithCredential(
+		principal,
+		"WS",
+		interaction.ActionPublishTranscript,
+		authority.SessionOwner{
+			SessionID: "session-1", AgentID: "agent-1", NodeID: "node-1", LeaseID: "lease-1", FencingToken: 1,
+		},
+		[]byte(credential),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = adapter.CreateContent(t.Context(), auth, interaction.TranscriptArtifactCreate{
+		WorkspaceKey: "WS", ArtifactID: "transcript-session-1", AgentID: "agent-1", SessionID: "session-1",
+		Content: []byte("{\"text\":\"hello\"}\n"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := auth.SessionOwner().ConsumeLeaseCredential()
+	defer clear(got)
+	if string(got) != credential {
+		t.Fatalf("lease credential after Artifact lifecycle = %q, want preserved one-use credential", got)
+	}
+}
+
+func TestInteractionTranscriptArtifactStoreRejectsForeignPublishAuthority(t *testing.T) {
+	issuer := authority.NewIssuer()
+	adapter, err := newInteractionTranscriptArtifactStore(&sessionArtifactTransportStub{}, issuer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreignAuthority := interactionTranscriptTestAuthority(t, authority.NewIssuer())
+	_, err = adapter.CreateContent(t.Context(), foreignAuthority, interaction.TranscriptArtifactCreate{
+		WorkspaceKey: "WS", ArtifactID: "transcript-session-1", AgentID: "agent-1", SessionID: "session-1",
+		Content: []byte("{\"text\":\"hello\"}\n"),
+	})
+	if !errors.Is(err, authority.ErrAdmissionDenied) || !errors.Is(err, interaction.ErrNotOwner) {
+		t.Fatalf("foreign publish authority error = %v, want admission denied and not owner", err)
+	}
+}
+
+type sessionArtifactTransportStub struct {
+	artifact *infrafleetdb.Artifact
+}
+
+func (stub *sessionArtifactTransportStub) CreateSession(
+	_ context.Context,
+	owner infrafleetdb.SessionArtifactOwner,
+	command infrafleetdb.SessionArtifactCreateCommand,
+) (*infrafleetdb.Artifact, error) {
+	if stub.artifact != nil {
+		return nil, infrafleetdb.ErrArtifactsConflict
+	}
+	now := time.Now()
+	stub.artifact = &infrafleetdb.Artifact{
+		WorkspaceKey: owner.WorkspaceKey, ArtifactID: command.ArtifactID, AgentID: owner.AgentID,
+		SessionID: owner.SessionID, TaskID: command.TaskID, OwnerType: "session", OwnerID: owner.SessionID,
+		Type: command.Type, Summary: command.Summary, MIMEType: command.MIMEType,
+		SizeBytes: command.SizeBytes, ContentHash: command.ContentHash, Visibility: command.Visibility,
+		RedactionStatus: command.RedactionStatus, DurableStatus: "declared", Metadata: command.Metadata,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	return cloneSessionArtifact(stub.artifact), nil
+}
+
+func (stub *sessionArtifactTransportStub) UploadSession(
+	_ context.Context,
+	_ infrafleetdb.SessionArtifactOwner,
+	command infrafleetdb.ArtifactUploadCommand,
+) (*infrafleetdb.Artifact, error) {
+	sum := sha256.Sum256(command.Content)
+	stub.artifact.ContentHash = "sha256:" + hex.EncodeToString(sum[:])
+	stub.artifact.SizeBytes = int64(len(command.Content))
+	stub.artifact.MIMEType = command.MIMEType
+	stub.artifact.DurableStatus = "uploading"
+	return cloneSessionArtifact(stub.artifact), nil
+}
+
+func (stub *sessionArtifactTransportStub) FinalizeSession(
+	_ context.Context,
+	_ infrafleetdb.SessionArtifactOwner,
+	_ infrafleetdb.ArtifactFinalizeCommand,
+) (*infrafleetdb.Artifact, error) {
+	now := time.Now()
+	stub.artifact.DurableStatus = "finalized"
+	stub.artifact.FinalizedAt = &now
+	return cloneSessionArtifact(stub.artifact), nil
+}
+
+func (stub *sessionArtifactTransportStub) GetSession(
+	context.Context,
+	infrafleetdb.SessionArtifactOwner,
+	string,
+) (*infrafleetdb.Artifact, error) {
+	if stub.artifact == nil {
+		return nil, infrafleetdb.ErrArtifactsNotFound
+	}
+	return cloneSessionArtifact(stub.artifact), nil
+}
+
+func cloneSessionArtifact(value *infrafleetdb.Artifact) *infrafleetdb.Artifact {
+	if value == nil {
+		return nil
+	}
+	result := *value
+	result.Metadata = cloneInteractionMap(value.Metadata)
+	if value.FinalizedAt != nil {
+		finalized := *value.FinalizedAt
+		result.FinalizedAt = &finalized
+	}
+	return &result
+}
+
+func interactionTranscriptTestAuthority(t *testing.T, issuer *authority.Issuer) authority.SessionAuthority {
+	t.Helper()
+	principal, err := issuer.DeriveVerifiedPrincipal(authority.PrincipalClaims{
+		Subject: "session:session-1", Class: authority.ClassSession, Workspace: "WS",
+		Actions: []authority.Action{interaction.ActionPublishTranscript}, ExpiresAt: time.Now().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth, err := issuer.IssueSessionForOwner(principal, "WS", interaction.ActionPublishTranscript, authority.SessionOwner{
+		SessionID: "session-1", AgentID: "agent-1", NodeID: "node-1", LeaseID: "lease-1", FencingToken: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return auth
 }
 
 type interactionForceCommandsStub struct {

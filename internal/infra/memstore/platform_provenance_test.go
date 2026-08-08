@@ -3,7 +3,10 @@ package memstore
 import (
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -17,14 +20,14 @@ func TestDispatchTriggerRouteStampsExternalProvenance(t *testing.T) {
 
 	if _, err := s.Drivers().Create(ctx, store.DriverCreate{
 		WorkspaceKey: "WS", DriverID: "driver-1", Name: "build",
-		OwnerType: domain.DriverOwnerSystem, Status: domain.DriverStatusActive,
+		OwnerType: workflowcatalog.DriverOwnerSystem, Status: workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatalf("Create driver: %v", err)
 	}
 	if _, err := s.DriverVersions().Create(ctx, store.DriverVersionCreate{
 		WorkspaceKey: "WS", VersionID: "version-1", DriverID: "driver-1", Version: 1,
 		SourceDigest: "sha256:source-v1", BundleDigest: "sha256:bundle-v1",
-		ValidationStatus: domain.DriverVersionValidationPassed,
+		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
 	}
@@ -48,7 +51,7 @@ func TestDispatchTriggerRouteStampsExternalProvenance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get trigger event %q: %v", run.SourceRef, err)
 	}
-	if event.Origin != domain.TriggerEventOriginExternal || event.HopDepth != 0 {
+	if event.Origin != automation.EventOriginExternal || event.HopDepth != 0 {
 		t.Fatalf("dispatched provenance = %s/%d, want external/0", event.Origin, event.HopDepth)
 	}
 }

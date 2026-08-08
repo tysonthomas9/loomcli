@@ -9,7 +9,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
@@ -221,8 +221,8 @@ func TestPutTab_RejectsOverwriteWhenPTYIsLive(t *testing.T) {
 	fake.alive[SessionKey{Workspace: ws, Name: "sess"}] = true
 	meta := &tabmeta.TabMetadata{SessionName: "sess", Workspace: ws, Label: "replacement"}
 	err := svc.PutTab(ctx, ws, meta)
-	var svcErr *service.ServiceError
-	if !errors.As(err, &svcErr) || svcErr.Kind != service.KindConflict {
+	var svcErr *apperrors.ServiceError
+	if !errors.As(err, &svcErr) || svcErr.Kind != apperrors.KindConflict {
 		t.Fatalf("expected ServiceError.Kind=Conflict, got %v", err)
 	}
 }
@@ -285,8 +285,8 @@ func TestPutTabRejectsDeadCanonicalAgentTabReplacement(t *testing.T) {
 	err := svc.PutTab(ctx, ws, &tabmeta.TabMetadata{
 		SessionName: "agent-tab", Workspace: ws, Label: "ordinary replacement",
 	})
-	var typed *service.ServiceError
-	if !errors.As(err, &typed) || typed.Kind != service.KindConflict {
+	var typed *apperrors.ServiceError
+	if !errors.As(err, &typed) || typed.Kind != apperrors.KindConflict {
 		t.Fatalf("PutTab error = %v, want canonical replacement conflict", err)
 	}
 	got, getErr := svc.tabStore.Get(ctx, ws, key.Name)
@@ -296,6 +296,40 @@ func TestPutTabRejectsDeadCanonicalAgentTabReplacement(t *testing.T) {
 	if got == nil || got.InteractionSessionID != "session-old" ||
 		got.InteractionTerminalID != "terminal-old" {
 		t.Fatalf("canonical identity was overwritten: %+v", got)
+	}
+}
+
+func TestPersistInteractionTabIdentityRequiresCompleteCanonicalOwner(t *testing.T) {
+	svc, _, _ := newLivenessTestSvc(t)
+	valid := &tabmeta.TabMetadata{
+		Workspace: "w", SessionName: "agent-tab", Kind: "agent", AgentID: "agent-1",
+		InteractionSessionID: "session-1", InteractionTerminalID: "terminal-1",
+		InteractionLeaseID: "lease-1", InteractionLeaseFencingToken: 4,
+	}
+
+	for name, meta := range map[string]*tabmeta.TabMetadata{
+		"nil":                 nil,
+		"wrong workspace":     func() *tabmeta.TabMetadata { value := *valid; value.Workspace = "other"; return &value }(),
+		"missing session":     func() *tabmeta.TabMetadata { value := *valid; value.InteractionSessionID = ""; return &value }(),
+		"missing terminal":    func() *tabmeta.TabMetadata { value := *valid; value.InteractionTerminalID = ""; return &value }(),
+		"missing lease":       func() *tabmeta.TabMetadata { value := *valid; value.InteractionLeaseID = ""; return &value }(),
+		"missing lease fence": func() *tabmeta.TabMetadata { value := *valid; value.InteractionLeaseFencingToken = 0; return &value }(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := svc.PersistInteractionTabIdentity(t.Context(), "w", meta)
+			var typed *apperrors.ServiceError
+			if !errors.As(err, &typed) || typed.Kind != apperrors.KindValidation {
+				t.Fatalf("error = %v, want validation", err)
+			}
+		})
+	}
+
+	if err := svc.PersistInteractionTabIdentity(t.Context(), "w", valid); err != nil {
+		t.Fatalf("persist valid Interaction identity: %v", err)
+	}
+	got, err := svc.tabStore.Get(t.Context(), "w", "agent-tab")
+	if err != nil || got == nil || got.InteractionSessionID != "session-1" || got.InteractionLeaseFencingToken != 4 {
+		t.Fatalf("persisted identity = %+v, err=%v", got, err)
 	}
 }
 

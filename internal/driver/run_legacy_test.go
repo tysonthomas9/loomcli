@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -128,7 +130,7 @@ func CreateDriverRun(ctx context.Context, s store.Store, opts RunOptions) (*doma
 	})
 }
 
-func resolveDriverRunVersion(ctx context.Context, s store.Store, workspaceKey, driverID, versionID string) (*domain.Driver, *domain.DriverVersion, error) {
+func resolveDriverRunVersion(ctx context.Context, s store.Store, workspaceKey, driverID, versionID string) (*workflowcatalog.Driver, *workflowcatalog.DriverVersion, error) {
 	if strings.TrimSpace(versionID) == "" {
 		return activeDriverVersion(ctx, s, workspaceKey, driverID)
 	}
@@ -140,7 +142,7 @@ func resolveDriverRunVersion(ctx context.Context, s store.Store, workspaceKey, d
 	if err != nil {
 		return nil, nil, fmt.Errorf("get driver version: %w", err)
 	}
-	if version.DriverID != driver.DriverID || version.ValidationStatus != domain.DriverVersionValidationPassed {
+	if version.DriverID != driver.DriverID || version.ValidationStatus != workflowcatalog.DriverVersionValidationPassed {
 		return nil, nil, fmt.Errorf("driver %q version %q is not a passed version for this driver: %w", driver.DriverID, version.VersionID, domain.ErrInvalid)
 	}
 	return driver, version, nil

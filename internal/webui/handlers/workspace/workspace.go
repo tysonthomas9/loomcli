@@ -5,7 +5,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 )
 
 // WorkspaceResponse wraps workspace data for JSON response.
@@ -17,7 +17,7 @@ type WorkspaceResponse struct {
 }
 
 // HandleActiveWorkspace returns the active workspace topology.
-func HandleActiveWorkspace(svc service.WorkspaceService) http.HandlerFunc {
+func HandleActiveWorkspace(svc workspacecoord.WorkspaceService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		data, err := svc.GetActiveWorkspace(r.Context())
 		if err != nil {

@@ -1358,6 +1358,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/agents/{id}/activity": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Interaction session and Execution batch activity for an agent
+     * @description Returns the Interaction-owned read projection for one canonical agent, newest first. Agent sessions remain distinct from Automation DriverRun history and preserve task references for task-side-panel navigation.
+     */
+    get: operations["listAgentActivity"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/agents/{id}/sessions/{session_id}/transcript": {
     parameters: {
       query?: never;
@@ -3362,13 +3382,39 @@ export interface components {
       /** @description Reserved empty compatibility member. Interaction owns runtime sessions; canonical Agent history is exposed through `runs`. */
       sessions: components["schemas"]["AgentHistorySession"][];
     };
+    AgentActivityResponse: {
+      agent_id: string;
+      activity: components["schemas"]["AgentActivity"][];
+      count: number;
+    };
+    AgentActivity: {
+      workspace_key: string;
+      agent_id: string;
+      /** @enum {string} */
+      kind: "agent_session" | "batch_run";
+      source_id: string;
+      task_id?: string;
+      status: string;
+      summary?: string;
+      /** Format: date-time */
+      started_at: string;
+      /** Format: date-time */
+      finished_at?: string;
+    };
     AgentHistorySession: {
       workspace_key: string;
       session_id: string;
       agent_id: string;
       node_id?: string;
       /** @enum {string} */
-      kind: "task" | "orchestration" | "terminal" | "maintenance" | "ad_hoc";
+      kind:
+        | "interactive"
+        | "review"
+        | "task"
+        | "orchestration"
+        | "terminal"
+        | "maintenance"
+        | "ad_hoc";
       task_id?: string;
       terminal_id?: string;
       parent_session_id?: string;
@@ -3383,7 +3429,8 @@ export interface components {
         | "completed"
         | "failed"
         | "cancelled"
-        | "expired";
+        | "expired"
+        | "interrupted";
       phase?: string;
       attempt?: number;
       /** Format: date-time */
@@ -7148,6 +7195,69 @@ export interface operations {
       };
     };
   };
+  listAgentActivity: {
+    parameters: {
+      query?: {
+        limit?: number;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Canonical Agent identifier */
+        id: components["parameters"]["AgentId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Agent activity, newest first */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AgentActivityResponse"];
+        };
+      };
+      /** @description Invalid agent identifier or limit */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AgentErrorResponse"];
+        };
+      };
+      /** @description Operator authentication required */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AgentErrorResponse"];
+        };
+      };
+      /** @description Agent activity projection failed */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AgentErrorResponse"];
+        };
+      };
+      /** @description Interaction activity is unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AgentErrorResponse"];
+        };
+      };
+    };
+  };
   getAgentSessionTranscript: {
     parameters: {
       query?: never;
@@ -9326,7 +9436,10 @@ export interface operations {
   };
   getObservabilityMetrics: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Workspace ID or name whose durable driver runs should be projected */
+        workspace?: string;
+      };
       header?: never;
       path?: never;
       cookie?: never;

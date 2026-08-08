@@ -21,16 +21,12 @@ const mockActions = {
   showToast: vi.fn(),
 };
 
-vi.mock("@/hooks/workspace", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/hooks/workspace")>();
-  return {
-    ...actual,
-    useRunEpicWorkflow: () => ({
-      runEpic,
-      isRunningEpic: () => false,
-    }),
-  };
-});
+vi.mock("@/hooks/workspace/useRunEpicWorkflow", () => ({
+  useRunEpicWorkflow: () => ({
+    runEpic,
+    isRunningEpic: () => false,
+  }),
+}));
 
 vi.mock("@/contexts/WorkspaceViewContext", async (importOriginal) => {
   const actual =
@@ -49,7 +45,7 @@ vi.mock("zustand", () => ({
   ) => selector({ agents: [] }),
 }));
 
-vi.mock("@/hooks/common", () => ({
+vi.mock("@/hooks/common/useStoreContext", () => ({
   useAgentStoreInstance: () => ({}),
 }));
 

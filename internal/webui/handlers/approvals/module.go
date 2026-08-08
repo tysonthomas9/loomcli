@@ -45,8 +45,10 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver/eventpolicy"
+	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/trigger"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
@@ -71,9 +73,15 @@ const (
 
 // Module serves the workspace-scoped approval route.
 type Module struct {
-	store  store.Store
-	awaits AwaitDispatcher
-	logger *slog.Logger
+	store     approvalStore
+	awaits    AwaitDispatcher
+	journal   automation.ApprovalJournal
+	authority automation.ApprovalAuthorityProvider
+	logger    *slog.Logger
+}
+
+type approvalStore interface {
+	Awaits() store.AwaitStore
 }
 
 // AwaitDispatcher is the Execution-backed mutation surface used after the
@@ -84,9 +92,11 @@ type AwaitDispatcher interface {
 }
 
 type Config struct {
-	Store  store.Store
-	Awaits AwaitDispatcher
-	Logger *slog.Logger
+	Store     approvalStore
+	Awaits    AwaitDispatcher
+	Journal   automation.ApprovalJournal
+	Authority automation.ApprovalAuthorityProvider
+	Logger    *slog.Logger
 }
 
 // New constructs the approvals module. Nil Store keeps route registration
@@ -96,7 +106,10 @@ func New(config Config) *Module {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Module{store: config.Store, awaits: config.Awaits, logger: logger}
+	return &Module{
+		store: config.Store, awaits: config.Awaits, journal: config.Journal,
+		authority: config.Authority, logger: logger,
+	}
 }
 
 func (m *Module) Register(mux *http.ServeMux) {
@@ -156,6 +169,8 @@ type approvalResponse struct {
 
 // postApproval is the endpoint flow: verified identity -> eligible-approver
 // check -> journal-first append -> matcher dispatch.
+//
+//nolint:funlen // The handler preserves identity, eligibility, authority, journal, and dispatch ordering.
 func (m *Module) postApproval(w http.ResponseWriter, r *http.Request) {
 	ws := r.PathValue("ws")
 	actor, userID, ok := sessionActor(r)
@@ -163,8 +178,8 @@ func (m *Module) postApproval(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "unauthenticated", "approval requires a verified session identity")
 		return
 	}
-	if m.awaits == nil {
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "Execution await resolution is unavailable")
+	if m.awaits == nil || m.journal == nil || m.authority == nil {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "approval journal or await resolution is unavailable")
 		return
 	}
 	if !m.approvalActorAllowed(w, ws, actor, userID) {
@@ -191,7 +206,16 @@ func (m *Module) postApproval(w http.ResponseWriter, r *http.Request) {
 			fmt.Sprintf("session actor %q is not an eligible approver for %q", actor, subjectKey))
 		return
 	}
-	eventID, payload, err := m.emitApproval(r.Context(), ws, params, actor, userID)
+	approvalAuth, err := m.authority.AuthorityForVerifiedSession(r.Context(), ws, actor)
+	if err != nil {
+		if errors.Is(err, authority.ErrAdmissionDenied) || errors.Is(err, authority.ErrInvalidScope) {
+			writeError(w, http.StatusForbidden, "forbidden", "approval authority was denied")
+			return
+		}
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "approval authority is unavailable")
+		return
+	}
+	eventID, payload, err := m.emitApproval(r.Context(), approvalAuth, ws, params, actor, userID)
 	if err != nil {
 		if errors.Is(err, errApprovalPayloadTooLarge) {
 			writeError(w, http.StatusRequestEntityTooLarge, "await_payload_too_large", err.Error())
@@ -290,7 +314,14 @@ func actorEligible(pending []*domain.AwaitInstance, actor string) bool {
 // returns its id plus the marshaled decision payload. The appender is required:
 // returning success without a durable event would reopen the registration
 // race this endpoint exists to close.
-func (m *Module) emitApproval(ctx context.Context, ws string, params approvalParams, actor, userID string) (string, json.RawMessage, error) {
+func (m *Module) emitApproval(
+	ctx context.Context,
+	auth authority.OperatorAuthority,
+	ws string,
+	params approvalParams,
+	actor,
+	userID string,
+) (string, json.RawMessage, error) {
 	eventID, err := newApprovalEventID()
 	if err != nil {
 		return "", nil, err
@@ -304,30 +335,20 @@ func (m *Module) emitApproval(ctx context.Context, ws string, params approvalPar
 	if err != nil {
 		return "", nil, fmt.Errorf("encode approval payload: %w", err)
 	}
-	if len(payload) > domain.DefaultAwaitResumePayloadCap {
+	if len(payload) > automation.MaxApprovalPayloadBytes {
 		return "", nil, fmt.Errorf("%w: %d bytes exceeds %d",
-			errApprovalPayloadTooLarge, len(payload), domain.DefaultAwaitResumePayloadCap)
+			errApprovalPayloadTooLarge, len(payload), automation.MaxApprovalPayloadBytes)
 	}
-	appender, ok := m.store.TriggerEvents().(store.TriggerEventAppender)
-	if !ok {
-		return "", nil, fmt.Errorf("approval trigger event journal is unavailable")
+	committed, err := m.journal.JournalApproval(ctx, auth, automation.JournalApprovalCommand{
+		WorkspaceKey: ws, EventID: eventID, EventType: params.EventType,
+		SubjectRef: params.SubjectRef, ActorRef: actor, OccurredAt: now,
+		Payload: append(json.RawMessage(nil), payload...),
+	})
+	if err != nil {
+		return "", nil, err
 	}
-	if _, err := appender.AppendTriggerEvent(ctx, &domain.TriggerEvent{
-		WorkspaceKey:    ws,
-		EventID:         eventID,
-		SourceKind:      approvalSourceKind,
-		SourceEventID:   eventID,
-		EventType:       params.EventType,
-		SubjectRef:      params.SubjectRef,
-		ActorRef:        actor,
-		Payload:         append(json.RawMessage(nil), payload...),
-		Origin:          domain.TriggerEventOriginExternal,
-		OccurredAt:      now,
-		ReceivedAt:      now,
-		IdempotencyKey:  approvalSourceKind + ":" + ws + ":" + eventID,
-		SignatureStatus: "session",
-	}); err != nil {
-		return "", nil, fmt.Errorf("journal approval event: %w", err)
+	if committed == nil || committed.EventID != eventID {
+		return "", nil, automation.ErrInvalidPersistedState
 	}
 	return eventID, payload, nil
 }
@@ -341,7 +362,7 @@ func (m *Module) dispatchApproval(ctx context.Context, ws string, params approva
 		EventID:    eventID,
 		EventType:  params.EventType,
 		SourceKind: approvalSourceKind,
-		Origin:     domain.TriggerEventOriginExternal,
+		Origin:     automation.EventOriginExternal,
 		SubjectRef: params.SubjectRef,
 		ActorRef:   actor,
 		Payload:    payload,

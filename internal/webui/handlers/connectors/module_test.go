@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,10 +12,13 @@ import (
 	"testing"
 	"time"
 
-	connectorvault "github.com/tysonthomas9/loomcli/internal/connector"
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	connectorvault "github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/localsettings"
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -35,13 +39,42 @@ func newTestServerWithStore(t *testing.T, st store.Store) *httptest.Server {
 func newTestServerWithStoreAndSettings(t *testing.T, st store.Store, localSettingsDir string) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
-	NewModule(st, localSettingsDir, connectorTestOperatorResolver{}).Register(mux)
+	NewModule(st, localSettingsDir, &connectorBindingQueries{store: st.TriggerBindings()}, connectorTestOperatorResolver{}).Register(mux)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	return srv
 }
 
 type connectorTestOperatorResolver struct{}
+
+type connectorBindingQueries struct {
+	store store.TriggerBindingStore
+}
+
+func (queries *connectorBindingQueries) GetBinding(
+	ctx context.Context,
+	workspace, bindingID string,
+) (*automation.Binding, error) {
+	binding, err := queries.store.Get(ctx, workspace, bindingID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil, errors.Join(automation.ErrNotFound, err)
+		}
+		return nil, err
+	}
+	if binding == nil {
+		return nil, nil
+	}
+	raw, err := json.Marshal(binding)
+	if err != nil {
+		return nil, err
+	}
+	var projected automation.Binding
+	if err := json.Unmarshal(raw, &projected); err != nil {
+		return nil, err
+	}
+	return &projected, nil
+}
 
 func (connectorTestOperatorResolver) ResolveOperatorAuthority(
 	_ *http.Request,
@@ -300,20 +333,20 @@ func TestCreateGrantRejectsDifferentResourceForSameID(t *testing.T) {
 	}
 }
 
-func seedGrantReplacementFixture(t *testing.T) (store.Store, *domain.TriggerBinding) {
+func seedGrantReplacementFixture(t *testing.T) (store.Store, *automation.Binding) {
 	t.Helper()
 	st := memstore.New()
 	ctx := context.Background()
 	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
 		WorkspaceKey: "WS", DriverID: "review-loop", Name: "review-loop",
-		OwnerType: domain.DriverOwnerSystem, Status: domain.DriverStatusActive,
+		OwnerType: workflowcatalog.DriverOwnerSystem, Status: workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatalf("create driver: %v", err)
 	}
 	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
 		WorkspaceKey: "WS", VersionID: "review-loop-v1", DriverID: "review-loop", Version: 1,
 		SourceDigest: "sha256:source", BundleDigest: "sha256:bundle",
-		ValidationStatus: domain.DriverVersionValidationPassed,
+		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("create driver version: %v", err)
 	}
@@ -333,7 +366,7 @@ func seedGrantReplacementFixture(t *testing.T) (store.Store, *domain.TriggerBind
 	return st, binding
 }
 
-func replaceGrantSetBody(binding *domain.TriggerBinding, repo string) map[string]any {
+func replaceGrantSetBody(binding *automation.Binding, repo string) map[string]any {
 	return map[string]any{
 		"expected_binding_created_at": binding.CreatedAt.Format(time.RFC3339Nano),
 		"expected_binding_updated_at": binding.UpdatedAt.Format(time.RFC3339Nano),
@@ -518,7 +551,7 @@ func TestReplaceBindingGrantsRequiresExactDisabledRevisionBeforeMutation(t *test
 func TestReplaceBindingGrantsUsesCanonicalWorkspaceContext(t *testing.T) {
 	st, binding := seedGrantReplacementFixture(t)
 	mux := http.NewServeMux()
-	NewModule(st, "", connectorTestOperatorResolver{}).Register(mux)
+	NewModule(st, "", &connectorBindingQueries{store: st.TriggerBindings()}, connectorTestOperatorResolver{}).Register(mux)
 	raw, err := json.Marshal(replaceGrantSetBody(binding, "acme/alpha"))
 	if err != nil {
 		t.Fatalf("marshal request: %v", err)

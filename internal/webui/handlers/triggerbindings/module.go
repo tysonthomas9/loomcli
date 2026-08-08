@@ -18,11 +18,11 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/app/workflowbinding"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/trigger"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/runhistory"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
@@ -106,7 +106,7 @@ func New(config Config) *Module {
 // NewModule is retained only so older composition continues to compile while
 // it migrates to New(Config). It is intentionally inert: a composite Store is
 // no longer an authorized trigger-binding management dependency.
-func NewModule(store.Store) *Module { return &Module{} }
+func NewModule(any) *Module { return &Module{} }
 
 func (m *Module) Register(mux *http.ServeMux) {
 	if m == nil || mux == nil || !m.active {
@@ -212,7 +212,11 @@ func (m *Module) listBindings(w http.ResponseWriter, r *http.Request) {
 
 // DecorateBinding remains a read-only compatibility helper for the existing
 // agent DTO adapter. Trigger-binding management no longer uses a Store.
-func DecorateBinding(ctx context.Context, st store.Store, workspace string, binding *domain.TriggerBinding, now time.Time) BindingDecorators {
+type bindingRunStore interface {
+	DriverRuns() store.DriverRunStore
+}
+
+func DecorateBinding(ctx context.Context, st bindingRunStore, workspace string, binding *automation.Binding, now time.Time) BindingDecorators {
 	if st == nil {
 		return BindingDecorators{NextFireAt: nextLegacyFireFor(binding, now)}
 	}
@@ -223,7 +227,7 @@ func DecorateBinding(ctx context.Context, st store.Store, workspace string, bind
 	}
 }
 
-func bindingID(binding *domain.TriggerBinding) string {
+func bindingID(binding *automation.Binding) string {
 	if binding == nil {
 		return ""
 	}
@@ -264,7 +268,7 @@ func nextAutomationFireFor(binding *automation.Binding, now time.Time) *time.Tim
 	return nextFire(binding.Schedule, binding.ScheduleTimezone, now)
 }
 
-func nextLegacyFireFor(binding *domain.TriggerBinding, now time.Time) *time.Time {
+func nextLegacyFireFor(binding *automation.Binding, now time.Time) *time.Time {
 	if binding == nil || !binding.Enabled || binding.SourceKind != store.CronSourceKind || strings.TrimSpace(binding.Schedule) == "" {
 		return nil
 	}
@@ -902,7 +906,7 @@ func rejectManagedBinding(w http.ResponseWriter, binding *automation.Binding) bo
 // DeleteBindingAndRevokeGrants is an inert compatibility bridge for older
 // agent handlers. Direct Store deletion is intentionally unavailable; callers
 // must migrate to the Automation-backed delete workflow above.
-func DeleteBindingAndRevokeGrants(_ context.Context, _ store.Store, _, bindingID string) (DeleteBindingResult, error) {
+func DeleteBindingAndRevokeGrants(_ context.Context, _ any, _, bindingID string) (DeleteBindingResult, error) {
 	return DeleteBindingResult{BindingID: strings.TrimSpace(bindingID)}, automation.ErrUnavailable
 }
 

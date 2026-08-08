@@ -10,12 +10,12 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/platform/workspaceid"
 	"github.com/tysonthomas9/loomcli/internal/webui/coordinator"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/webui/hooks"
 	"github.com/tysonthomas9/loomcli/internal/webui/subscription"
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
-	"github.com/tysonthomas9/loomcli/internal/workspace"
 )
 
 // Type aliases so the app package can reference concrete types without
@@ -44,7 +44,7 @@ type FleetRedisConfig = fleet.RedisConfig
 
 // ShortWorkspaceID returns a short version of a workspace ID.
 func ShortWorkspaceID(id string) string {
-	return workspace.ShortWorkspaceID(id)
+	return workspaceid.Short(id)
 }
 
 // NewWorkspaceRegistry creates a new workspace registry.

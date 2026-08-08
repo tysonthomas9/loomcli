@@ -7,7 +7,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestLocalServeStartupTimeoutCoversDurableReplay(t *testing.T) {
+	if localServeStartupTimeout < 2*time.Minute {
+		t.Fatalf("localServeStartupTimeout = %s, want at least 2m for durable FleetDB replay", localServeStartupTimeout)
+	}
+}
 
 func writeServeLog(t *testing.T, dataDir, contents string) {
 	t.Helper()

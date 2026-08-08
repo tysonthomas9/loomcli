@@ -9,7 +9,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // DefaultStaleTaskRunMaxAge is retained as a compatibility alias for host
@@ -144,7 +143,7 @@ func runOwnedStaleTaskRunRecovery(ctx context.Context, recovery *execution.Owned
 
 // resolveSweepWorkspaces is the shared read-only workspace projection used by
 // background reconcilers. It performs no Execution aggregate mutation.
-func resolveSweepWorkspaces(ctx context.Context, source store.Store, configured, label string) ([]string, error) {
+func resolveSweepWorkspaces(ctx context.Context, source workspaceReadStore, configured, label string) ([]string, error) {
 	if configured != "" {
 		return []string{configured}, nil
 	}

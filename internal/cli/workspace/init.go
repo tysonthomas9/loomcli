@@ -11,6 +11,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 )
 
 var (
@@ -131,16 +132,12 @@ func runInitWorkspace(cmd *cobra.Command, _ []string) {
 // workspace exists locally on this machine.
 func validateWorkspaceExists() config.WorkspaceConfig {
 	var out config.WorkspaceConfig
-	if err := cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
-		ws, err := h.Store.Workspaces().Get(ctx, initWorkspace)
+	if err := cmdstore.WithWorkspaceCatalog(func(ctx context.Context, _ *bootstrap.StoreHandle, workspace workspacemodule.API) error {
+		ws, err := workspace.Resolve(ctx, workspacemodule.ResolveQuery{Reference: initWorkspace})
 		if err != nil {
-			if byName, byNameErr := h.Store.Workspaces().GetByName(ctx, initWorkspace); byNameErr == nil {
-				ws = byName
-			} else {
-				return fmt.Errorf("workspace %q not found: %w", initWorkspace, err)
-			}
+			return fmt.Errorf("workspace %q not found: %w", initWorkspace, err)
 		}
-		cfg, err := workspaceLocalConfig(ctx, h, ws.Key)
+		cfg, err := workspaceLocalConfig(ctx, workspace, ws.Key)
 		if err != nil {
 			return err
 		}

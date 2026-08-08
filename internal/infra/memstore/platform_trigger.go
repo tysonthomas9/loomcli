@@ -13,9 +13,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/trigger"
 )
 
 // triggerEventStore is the in-memory TriggerEvent repository. It dedups on
@@ -23,15 +25,15 @@ import (
 // previously-seen key returns the existing event instead of inserting again.
 type triggerEventStore struct {
 	mu            sync.RWMutex
-	items         map[string]map[string]*domain.TriggerEvent // ws -> eventID -> event
-	idempo        map[string]map[string]string               // ws -> idempotencyKey -> eventID
+	items         map[string]map[string]*automation.Event // ws -> eventID -> event
+	idempo        map[string]map[string]string            // ws -> idempotencyKey -> eventID
 	notifications map[string]map[string]*awaitEventNotificationRow
 	seq           int64
 }
 
 func newTriggerEventStore() *triggerEventStore {
 	return &triggerEventStore{
-		items:         make(map[string]map[string]*domain.TriggerEvent),
+		items:         make(map[string]map[string]*automation.Event),
 		idempo:        make(map[string]map[string]string),
 		notifications: make(map[string]map[string]*awaitEventNotificationRow),
 	}
@@ -42,7 +44,7 @@ var (
 	_ store.TriggerEventAppender = (*triggerEventStore)(nil)
 )
 
-func (s *triggerEventStore) Get(_ context.Context, ws, eventID string) (*domain.TriggerEvent, error) {
+func (s *triggerEventStore) Get(_ context.Context, ws, eventID string) (*automation.Event, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	event, ok := s.items[ws][eventID]
@@ -53,10 +55,10 @@ func (s *triggerEventStore) Get(_ context.Context, ws, eventID string) (*domain.
 	return &out, nil
 }
 
-func (s *triggerEventStore) List(_ context.Context, ws string, filter store.TriggerEventFilter) ([]*domain.TriggerEvent, error) {
+func (s *triggerEventStore) List(_ context.Context, ws string, filter store.TriggerEventFilter) ([]*automation.Event, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	out := make([]*domain.TriggerEvent, 0, len(s.items[ws]))
+	out := make([]*automation.Event, 0, len(s.items[ws]))
 	for _, event := range s.items[ws] {
 		if filter.SourceKind != "" && event.SourceKind != filter.SourceKind {
 			continue
@@ -85,7 +87,7 @@ func (s *triggerEventStore) List(_ context.Context, ws string, filter store.Trig
 // against the journaled record instead of double-writing. Appends take the
 // journal mutex, so an await registration scan (platform_await.go) either
 // sees this event or registers pending strictly before it (RULE 2 — no lost wakeup).
-func (s *triggerEventStore) AppendTriggerEvent(_ context.Context, event *domain.TriggerEvent) (*domain.TriggerEvent, error) {
+func (s *triggerEventStore) AppendTriggerEvent(_ context.Context, event *automation.Event) (*automation.Event, error) {
 	if event == nil || event.WorkspaceKey == "" || event.EventID == "" || event.EventType == "" {
 		return nil, fmt.Errorf("trigger event append requires workspace, event id and event type: %w", domain.ErrInvalid)
 	}
@@ -96,7 +98,7 @@ func (s *triggerEventStore) AppendTriggerEvent(_ context.Context, event *domain.
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.items[event.WorkspaceKey] == nil {
-		s.items[event.WorkspaceKey] = make(map[string]*domain.TriggerEvent)
+		s.items[event.WorkspaceKey] = make(map[string]*automation.Event)
 		s.idempo[event.WorkspaceKey] = make(map[string]string)
 	}
 	if existing, ok := s.items[event.WorkspaceKey][event.EventID]; ok {
@@ -121,11 +123,11 @@ func (s *triggerEventStore) AppendTriggerEvent(_ context.Context, event *domain.
 
 // create inserts the event, deduping on idempotency key. The returned bool is
 // true when an existing event was returned instead of inserting a new one.
-func (s *triggerEventStore) create(event *domain.TriggerEvent) (*domain.TriggerEvent, bool) {
+func (s *triggerEventStore) create(event *automation.Event) (*automation.Event, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.items[event.WorkspaceKey] == nil {
-		s.items[event.WorkspaceKey] = make(map[string]*domain.TriggerEvent)
+		s.items[event.WorkspaceKey] = make(map[string]*automation.Event)
 		s.idempo[event.WorkspaceKey] = make(map[string]string)
 	}
 	if event.IdempotencyKey != "" {
@@ -151,24 +153,24 @@ func (s *triggerEventStore) create(event *domain.TriggerEvent) (*domain.TriggerE
 // per-update binding fetch).
 type triggerDeliveryStore struct {
 	mu       sync.RWMutex
-	items    map[string]map[string]*domain.TriggerDelivery // ws -> deliveryID -> delivery
+	items    map[string]map[string]*automation.Delivery // ws -> deliveryID -> delivery
 	bindings *triggerBindingStore
 	// failCreate, when set, lets tests inject delivery write failures to
 	// exercise per-leg redelivery healing (mirrors fleet-db's fake-store
 	// hook). Always nil in production wiring.
-	failCreate func(*domain.TriggerDelivery) error
+	failCreate func(*automation.Delivery) error
 }
 
 func newTriggerDeliveryStore(bindings *triggerBindingStore) *triggerDeliveryStore {
 	return &triggerDeliveryStore{
-		items:    make(map[string]map[string]*domain.TriggerDelivery),
+		items:    make(map[string]map[string]*automation.Delivery),
 		bindings: bindings,
 	}
 }
 
 var _ store.TriggerDeliveryStore = (*triggerDeliveryStore)(nil)
 
-func (s *triggerDeliveryStore) Get(_ context.Context, ws, deliveryID string) (*domain.TriggerDelivery, error) {
+func (s *triggerDeliveryStore) Get(_ context.Context, ws, deliveryID string) (*automation.Delivery, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	delivery, ok := s.items[ws][deliveryID]
@@ -178,10 +180,10 @@ func (s *triggerDeliveryStore) Get(_ context.Context, ws, deliveryID string) (*d
 	return cloneTriggerDelivery(delivery), nil
 }
 
-func (s *triggerDeliveryStore) List(_ context.Context, ws string, filter store.TriggerDeliveryFilter) ([]*domain.TriggerDelivery, error) {
+func (s *triggerDeliveryStore) List(_ context.Context, ws string, filter store.TriggerDeliveryFilter) ([]*automation.Delivery, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	out := make([]*domain.TriggerDelivery, 0, len(s.items[ws]))
+	out := make([]*automation.Delivery, 0, len(s.items[ws]))
 	for _, delivery := range s.items[ws] {
 		if filter.TriggerEventID != "" && delivery.TriggerEventID != filter.TriggerEventID {
 			continue
@@ -205,14 +207,14 @@ func (s *triggerDeliveryStore) List(_ context.Context, ws string, filter store.T
 // ZSET: a mutex-guarded scan over held / retryable-failed deliveries whose
 // due score (NextRetryAt unix seconds, nil = 0 = immediately due) is <= Now,
 // ordered like ZRANGEBYSCORE — ascending score, deliveryID for ties.
-func (s *triggerDeliveryStore) ListDue(_ context.Context, ws string, filter store.TriggerDeliveryDueFilter) ([]*domain.TriggerDelivery, error) {
+func (s *triggerDeliveryStore) ListDue(_ context.Context, ws string, filter store.TriggerDeliveryDueFilter) ([]*automation.Delivery, error) {
 	now := filter.Now
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	out := make([]*domain.TriggerDelivery, 0, len(s.items[ws]))
+	out := make([]*automation.Delivery, 0, len(s.items[ws]))
 	for _, delivery := range s.items[ws] {
 		if !triggerDeliveryInDueIndex(delivery) {
 			continue
@@ -240,7 +242,7 @@ func (s *triggerDeliveryStore) ListDue(_ context.Context, ws string, filter stor
 // count reaches the binding's retry budget is forced terminal
 // (failed/retries_exhausted, NextRetryAt cleared) and final deliveries
 // reject transitions to a different status.
-func (s *triggerDeliveryStore) UpdateResult(ctx context.Context, ws, deliveryID string, update store.TriggerDeliveryResultUpdate) (*domain.TriggerDelivery, error) {
+func (s *triggerDeliveryStore) UpdateResult(ctx context.Context, ws, deliveryID string, update store.TriggerDeliveryResultUpdate) (*automation.Delivery, error) {
 	// The binding lookup happens before the write lock: the binding store
 	// guards itself, and ordering the locks this way keeps the stores free
 	// of nested-lock deadlocks.
@@ -276,13 +278,13 @@ func (s *triggerDeliveryStore) resultMaxAttempts(ctx context.Context, ws, delive
 	}
 	binding, err := s.bindings.Get(ctx, ws, bindingID)
 	if errors.Is(err, domain.ErrNotFound) {
-		return domain.DefaultTriggerRetryMaxAttempts, nil
+		return automation.DefaultTriggerRetryMaxAttempts, nil
 	}
 	if err != nil {
 		return 0, err
 	}
 	if binding.RetryMaxAttempts <= 0 {
-		return domain.DefaultTriggerRetryMaxAttempts, nil
+		return automation.DefaultTriggerRetryMaxAttempts, nil
 	}
 	return binding.RetryMaxAttempts, nil
 }
@@ -291,7 +293,7 @@ func (s *triggerDeliveryStore) resultMaxAttempts(ctx context.Context, ws, delive
 // (mirrors fleet-db's applyTriggerDeliveryResult). Final deliveries reject
 // transitions to a different status; re-applying the same status stays
 // idempotent.
-func applyTriggerDeliveryResult(d *domain.TriggerDelivery, update store.TriggerDeliveryResultUpdate, maxAttempts int, now time.Time) error {
+func applyTriggerDeliveryResult(d *automation.Delivery, update store.TriggerDeliveryResultUpdate, maxAttempts int, now time.Time) error {
 	if !update.Status.IsValid() {
 		return fmt.Errorf("update trigger delivery result: delivery status %q: %w", update.Status, domain.ErrInvalid)
 	}
@@ -307,8 +309,8 @@ func applyTriggerDeliveryResult(d *domain.TriggerDelivery, update store.TriggerD
 	if update.DriverRunID != "" {
 		d.DriverRunID = update.DriverRunID
 	}
-	if d.Status == domain.TriggerDeliveryFailed && d.Attempt >= maxAttempts {
-		d.ErrorClass = domain.TriggerDeliveryErrorRetriesExhausted
+	if d.Status == automation.DeliveryFailed && d.Attempt >= maxAttempts {
+		d.ErrorClass = automation.TriggerDeliveryErrorRetriesExhausted
 		d.NextRetryAt = nil
 	}
 	d.UpdatedAt = now
@@ -320,12 +322,12 @@ func applyTriggerDeliveryResult(d *domain.TriggerDelivery, update store.TriggerD
 // retryable failures. Terminal failures carry error class retries_exhausted
 // and stay out; every other status is not sweeper work. Mirrors fleet-db's
 // due-index membership predicate.
-func triggerDeliveryInDueIndex(d *domain.TriggerDelivery) bool {
+func triggerDeliveryInDueIndex(d *automation.Delivery) bool {
 	switch d.Status {
-	case domain.TriggerDeliveryHeld:
+	case automation.DeliveryHeld:
 		return true
-	case domain.TriggerDeliveryFailed:
-		return d.ErrorClass != domain.TriggerDeliveryErrorRetriesExhausted
+	case automation.DeliveryFailed:
+		return d.ErrorClass != automation.TriggerDeliveryErrorRetriesExhausted
 	default:
 		return false
 	}
@@ -335,20 +337,20 @@ func triggerDeliveryInDueIndex(d *domain.TriggerDelivery) bool {
 // the replace concurrency policy needs (mirrors fleet-db): a dispatched
 // delivery whose queued run is later superseded by a newer event for the
 // same subject.
-func triggerDeliverySupersedeTransition(from, to domain.TriggerDeliveryStatus) bool {
-	return from == domain.TriggerDeliveryDispatched && to == domain.TriggerDeliverySuperseded
+func triggerDeliverySupersedeTransition(from, to automation.DeliveryStatus) bool {
+	return from == automation.DeliveryDispatched && to == automation.DeliverySuperseded
 }
 
 // triggerDeliveryResultFinal reports whether the delivery reached a state
 // the retry sweeper must not move it out of.
-func triggerDeliveryResultFinal(d *domain.TriggerDelivery) bool {
+func triggerDeliveryResultFinal(d *automation.Delivery) bool {
 	switch d.Status {
-	case domain.TriggerDeliveryDispatched, domain.TriggerDeliveryRejected,
-		domain.TriggerDeliveryDuplicate, domain.TriggerDeliverySuperseded,
-		domain.TriggerDeliveryReplayed:
+	case automation.DeliveryDispatched, automation.DeliveryRejected,
+		automation.DeliveryDuplicate, automation.DeliverySuperseded,
+		automation.DeliveryReplayed:
 		return true
-	case domain.TriggerDeliveryFailed:
-		return d.ErrorClass == domain.TriggerDeliveryErrorRetriesExhausted
+	case automation.DeliveryFailed:
+		return d.ErrorClass == automation.TriggerDeliveryErrorRetriesExhausted
 	default:
 		return false
 	}
@@ -365,7 +367,7 @@ func triggerDeliveryDueScore(nextRetryAt *time.Time) int64 {
 
 // cloneTriggerDelivery deep-copies a delivery, including its optional
 // retry timestamp, so callers can never mutate stored state.
-func cloneTriggerDelivery(d *domain.TriggerDelivery) *domain.TriggerDelivery {
+func cloneTriggerDelivery(d *automation.Delivery) *automation.Delivery {
 	out := *d
 	out.NextRetryAt = clonePtr(d.NextRetryAt)
 	return &out
@@ -373,11 +375,11 @@ func cloneTriggerDelivery(d *domain.TriggerDelivery) *domain.TriggerDelivery {
 
 // create inserts a delivery, returning domain.ErrAlreadyExists when one with
 // the same ID is already present (so replays are idempotent).
-func (s *triggerDeliveryStore) create(delivery *domain.TriggerDelivery) error {
+func (s *triggerDeliveryStore) create(delivery *automation.Delivery) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.items[delivery.WorkspaceKey] == nil {
-		s.items[delivery.WorkspaceKey] = make(map[string]*domain.TriggerDelivery)
+		s.items[delivery.WorkspaceKey] = make(map[string]*automation.Delivery)
 	}
 	if _, ok := s.items[delivery.WorkspaceKey][delivery.DeliveryID]; ok {
 		return domain.ErrAlreadyExists
@@ -490,7 +492,7 @@ type triggerRouteLegOutcome struct {
 
 // triggerRouteLegResult shapes one leg's wire delivery (fleet-db's
 // triggerRouteLegResult, on loomcli's camelCase-tagged store type).
-func triggerRouteLegResult(leg triggerRouteLeg, bindingID, runID string, status domain.TriggerDeliveryStatus, rejectionReason string) store.TriggerRouteDelivery {
+func triggerRouteLegResult(leg triggerRouteLeg, bindingID, runID string, status automation.DeliveryStatus, rejectionReason string) store.TriggerRouteDelivery {
 	return store.TriggerRouteDelivery{
 		DeliveryID:      leg.DeliveryID,
 		BindingID:       bindingID,
@@ -511,7 +513,7 @@ const triggerRejectionConcurrencyForbid = "concurrency_forbid"
 // dispatches first; pattern matches follow in binding-id order. A disabled
 // exact binding is skipped, not an error — zero total matches is the caller's
 // not-found.
-func (s *triggerRouteStore) matchTriggerRouteBindings(ctx context.Context, ws, routeKey string) ([]*domain.TriggerBinding, *domain.TriggerBinding, error) {
+func (s *triggerRouteStore) matchTriggerRouteBindings(ctx context.Context, ws, routeKey string) ([]*automation.Binding, *automation.Binding, error) {
 	exact, err := s.bindings.GetByRouteKey(ctx, ws, routeKey)
 	if err != nil {
 		if !errors.Is(err, domain.ErrNotFound) {
@@ -519,7 +521,7 @@ func (s *triggerRouteStore) matchTriggerRouteBindings(ctx context.Context, ws, r
 		}
 		exact = nil
 	}
-	matched := make([]*domain.TriggerBinding, 0, 1)
+	matched := make([]*automation.Binding, 0, 1)
 	if exact != nil && exact.Enabled {
 		matched = append(matched, exact)
 	}
@@ -528,7 +530,7 @@ func (s *triggerRouteStore) matchTriggerRouteBindings(ctx context.Context, ws, r
 	if err != nil {
 		return nil, nil, err
 	}
-	patternMatched := make([]*domain.TriggerBinding, 0, len(all))
+	patternMatched := make([]*automation.Binding, 0, len(all))
 	for _, binding := range all {
 		if exact != nil && binding.BindingID == exact.BindingID {
 			continue
@@ -552,7 +554,7 @@ func (s *triggerRouteStore) matchTriggerRouteBindings(ctx context.Context, ws, r
 // serializes legs end-to-end — the in-memory twin of the atomicity fleet-db's
 // Lua subject gate provides, closing the race where two concurrent dispatches
 // both observe a free subject.
-func (s *triggerRouteStore) dispatchTriggerRouteLeg(ctx context.Context, ws string, binding *domain.TriggerBinding, event *domain.TriggerEvent, leg triggerRouteLeg, in store.TriggerRouteDispatch, now time.Time) (*triggerRouteLegOutcome, error) {
+func (s *triggerRouteStore) dispatchTriggerRouteLeg(ctx context.Context, ws string, binding *automation.Binding, event *automation.Event, leg triggerRouteLeg, in store.TriggerRouteDispatch, now time.Time) (*triggerRouteLegOutcome, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	subjectKey := renderTriggerSubjectKey(binding, event, in.SubjectAttrs)
@@ -575,13 +577,13 @@ func (s *triggerRouteStore) dispatchTriggerRouteLeg(ctx context.Context, ws stri
 	if err != nil {
 		return nil, err
 	}
-	deliveryErr := s.deliveries.create(&domain.TriggerDelivery{
+	deliveryErr := s.deliveries.create(&automation.Delivery{
 		WorkspaceKey:     ws,
 		DeliveryID:       leg.DeliveryID,
 		TriggerEventID:   event.EventID,
 		TriggerBindingID: binding.BindingID,
 		SubjectKey:       subjectKey,
-		Status:           domain.TriggerDeliveryDispatched,
+		Status:           automation.DeliveryDispatched,
 		DriverRunID:      run.RunID,
 		Attempt:          1,
 		CreatedAt:        now,
@@ -595,8 +597,8 @@ func (s *triggerRouteStore) dispatchTriggerRouteLeg(ctx context.Context, ws stri
 	}
 	// Subject-level supersede only fires when the delivery was freshly
 	// written — an idempotent redelivery must not re-collapse queued siblings.
-	status := domain.TriggerDeliveryDispatched
-	if binding.ConcurrencyPolicy == domain.TriggerBindingConcurrencyReplace {
+	status := automation.DeliveryDispatched
+	if binding.ConcurrencyPolicy == automation.ConcurrencyReplace {
 		status = s.applyTriggerReplacePolicy(ctx, ws, binding, run, subjectKey)
 	}
 	return &triggerRouteLegOutcome{run: run, delivery: triggerRouteLegResult(leg, binding.BindingID, run.RunID, status, "")}, nil
@@ -612,9 +614,9 @@ func (s *triggerRouteStore) dispatchTriggerRouteLeg(ctx context.Context, ws stri
 // idempotency-key hit on an existing run bypasses the gate entirely — the leg
 // was already admitted and the run/delivery creates heal it. Legs with no
 // subject key or other policies pass through unchanged.
-func (s *triggerRouteStore) gateTriggerLegConcurrency(ctx context.Context, ws string, binding *domain.TriggerBinding, event *domain.TriggerEvent, leg triggerRouteLeg, subjectKey string, now time.Time) (outcome *triggerRouteLegOutcome, handled bool, err error) {
+func (s *triggerRouteStore) gateTriggerLegConcurrency(ctx context.Context, ws string, binding *automation.Binding, event *automation.Event, leg triggerRouteLeg, subjectKey string, now time.Time) (outcome *triggerRouteLegOutcome, handled bool, err error) {
 	policy := binding.ConcurrencyPolicy
-	if policy != domain.TriggerBindingConcurrencyForbid && policy != domain.TriggerBindingConcurrencyQueue {
+	if policy != automation.ConcurrencyForbid && policy != automation.ConcurrencyQueue {
 		return nil, false, nil
 	}
 	if subjectKey == "" {
@@ -626,7 +628,7 @@ func (s *triggerRouteStore) gateTriggerLegConcurrency(ctx context.Context, ws st
 	if busy := s.busySubjectRun(ctx, ws, binding.BindingID, subjectKey, leg.RunID); busy == "" {
 		return nil, false, nil
 	}
-	delivery := &domain.TriggerDelivery{
+	delivery := &automation.Delivery{
 		WorkspaceKey:     ws,
 		DeliveryID:       leg.DeliveryID,
 		TriggerEventID:   event.EventID,
@@ -636,11 +638,11 @@ func (s *triggerRouteStore) gateTriggerLegConcurrency(ctx context.Context, ws st
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}
-	if policy == domain.TriggerBindingConcurrencyForbid {
-		delivery.Status = domain.TriggerDeliveryRejected
+	if policy == automation.ConcurrencyForbid {
+		delivery.Status = automation.DeliveryRejected
 		delivery.RejectionReason = triggerRejectionConcurrencyForbid
 	} else {
-		delivery.Status = domain.TriggerDeliveryHeld
+		delivery.Status = automation.DeliveryHeld
 		next := now.Add(triggerBindingRetryBackoff(binding))
 		delivery.NextRetryAt = &next
 	}
@@ -665,7 +667,7 @@ func (s *triggerRouteStore) gateTriggerLegConcurrency(ctx context.Context, ws st
 func (s *triggerRouteStore) busySubjectRun(ctx context.Context, ws, bindingID, subjectKey, excludeRunID string) string {
 	dispatched, err := s.deliveries.List(ctx, ws, store.TriggerDeliveryFilter{
 		TriggerBindingID: bindingID,
-		Status:           domain.TriggerDeliveryDispatched,
+		Status:           automation.DeliveryDispatched,
 	})
 	if err != nil {
 		return ""
@@ -691,16 +693,16 @@ func (s *triggerRouteStore) busySubjectRun(ctx context.Context, ws, bindingID, s
 // queue-policy delivery whose subject has freed is promoted to dispatched
 // against the newly admitted run — the promotion path the retry sweeper
 // drives.
-func (s *triggerRouteStore) healTriggerRouteLeg(ctx context.Context, ws string, binding *domain.TriggerBinding, leg triggerRouteLeg, run *domain.DriverRun) *triggerRouteLegOutcome {
+func (s *triggerRouteStore) healTriggerRouteLeg(ctx context.Context, ws string, binding *automation.Binding, leg triggerRouteLeg, run *domain.DriverRun) *triggerRouteLegOutcome {
 	existing, err := s.deliveries.Get(ctx, ws, leg.DeliveryID)
 	if err != nil {
 		// The conflicting delivery vanished between writes; the run is
 		// durable either way, report the dispatched leg.
-		return &triggerRouteLegOutcome{run: run, delivery: triggerRouteLegResult(leg, binding.BindingID, run.RunID, domain.TriggerDeliveryDispatched, "")}
+		return &triggerRouteLegOutcome{run: run, delivery: triggerRouteLegResult(leg, binding.BindingID, run.RunID, automation.DeliveryDispatched, "")}
 	}
-	if existing.Status == domain.TriggerDeliveryHeld {
+	if existing.Status == automation.DeliveryHeld {
 		promoted, perr := s.deliveries.UpdateResult(ctx, ws, leg.DeliveryID, store.TriggerDeliveryResultUpdate{
-			Status:      domain.TriggerDeliveryDispatched,
+			Status:      automation.DeliveryDispatched,
 			Attempt:     existing.Attempt + 1,
 			DriverRunID: run.RunID,
 		})
@@ -723,13 +725,13 @@ func (s *triggerRouteStore) healTriggerRouteLeg(ctx context.Context, ws string, 
 // never fails dispatch. Returns the status of THIS leg's delivery: superseded
 // when a concurrent newer dispatch out-raced the freshly admitted run,
 // dispatched otherwise.
-func (s *triggerRouteStore) applyTriggerReplacePolicy(ctx context.Context, ws string, binding *domain.TriggerBinding, admitted *domain.DriverRun, subjectKey string) domain.TriggerDeliveryStatus {
+func (s *triggerRouteStore) applyTriggerReplacePolicy(ctx context.Context, ws string, binding *automation.Binding, admitted *domain.DriverRun, subjectKey string) automation.DeliveryStatus {
 	if subjectKey == "" {
-		return domain.TriggerDeliveryDispatched
+		return automation.DeliveryDispatched
 	}
 	queued := s.queuedSubjectRuns(ctx, ws, binding.BindingID, subjectKey)
 	if len(queued) == 0 {
-		return domain.TriggerDeliveryDispatched
+		return automation.DeliveryDispatched
 	}
 	// Winner = newest queued run for the subject by persisted trigger-event
 	// order. Dispatches can interleave around event creation, so run CreatedAt is
@@ -740,7 +742,7 @@ func (s *triggerRouteStore) applyTriggerReplacePolicy(ctx context.Context, ws st
 			winner = candidate
 		}
 	}
-	status := domain.TriggerDeliveryDispatched
+	status := automation.DeliveryDispatched
 	for _, candidate := range queued {
 		run := candidate.run
 		if run.RunID == winner.run.RunID {
@@ -751,7 +753,7 @@ func (s *triggerRouteStore) applyTriggerReplacePolicy(ctx context.Context, ws st
 		}
 		s.markTriggerRunDeliveriesSuperseded(ctx, ws, run)
 		if run.RunID == admitted.RunID {
-			status = domain.TriggerDeliverySuperseded
+			status = automation.DeliverySuperseded
 		}
 	}
 	return status
@@ -761,13 +763,13 @@ func (s *triggerRouteStore) applyTriggerReplacePolicy(ctx context.Context, ws st
 // (binding, rendered subject key), via the deliveries that carry the key.
 type queuedSubjectRun struct {
 	run   *domain.DriverRun
-	event *domain.TriggerEvent
+	event *automation.Event
 }
 
 func (s *triggerRouteStore) queuedSubjectRuns(ctx context.Context, ws, bindingID, subjectKey string) []queuedSubjectRun {
 	dispatched, err := s.deliveries.List(ctx, ws, store.TriggerDeliveryFilter{
 		TriggerBindingID: bindingID,
-		Status:           domain.TriggerDeliveryDispatched,
+		Status:           automation.DeliveryDispatched,
 	})
 	if err != nil {
 		return nil
@@ -803,11 +805,11 @@ func (s *triggerRouteStore) markTriggerRunDeliveriesSuperseded(ctx context.Conte
 		return
 	}
 	for _, delivery := range deliveries {
-		if delivery.DriverRunID != lost.RunID || delivery.Status == domain.TriggerDeliverySuperseded {
+		if delivery.DriverRunID != lost.RunID || delivery.Status == automation.DeliverySuperseded {
 			continue
 		}
 		if _, err := s.deliveries.UpdateResult(ctx, ws, delivery.DeliveryID, store.TriggerDeliveryResultUpdate{
-			Status:     domain.TriggerDeliverySuperseded,
+			Status:     automation.DeliverySuperseded,
 			Attempt:    delivery.Attempt,
 			ErrorClass: "superseded",
 		}); err != nil {
@@ -816,7 +818,7 @@ func (s *triggerRouteStore) markTriggerRunDeliveriesSuperseded(ctx context.Conte
 	}
 }
 
-func triggerEventBefore(a, b *domain.TriggerEvent) bool {
+func triggerEventBefore(a, b *automation.Event) bool {
 	if a == nil || b == nil {
 		return false
 	}
@@ -842,10 +844,10 @@ func triggerEventSequence(id string) (int64, bool) {
 // triggerBindingRetryBackoff resolves the binding's retry backoff used for
 // held (queue-policy) deliveries, defaulting defensively for records written
 // before the retry fields existed (mirrors fleet-db).
-func triggerBindingRetryBackoff(binding *domain.TriggerBinding) time.Duration {
+func triggerBindingRetryBackoff(binding *automation.Binding) time.Duration {
 	seconds := binding.RetryBackoffSeconds
 	if seconds <= 0 {
-		seconds = domain.DefaultTriggerRetryBackoffSeconds
+		seconds = automation.DefaultTriggerRetryBackoffSeconds
 	}
 	return time.Duration(seconds) * time.Second
 }
@@ -860,7 +862,7 @@ func triggerBindingRetryBackoff(binding *domain.TriggerBinding) time.Duration {
 // falls back to the default key with a warning instead of failing ingest: the
 // default groups the delivery under the implicit per-binding subject scope,
 // the conservative concurrency grouping.
-func renderTriggerSubjectKey(binding *domain.TriggerBinding, event *domain.TriggerEvent, attrs map[string]string) string {
+func renderTriggerSubjectKey(binding *automation.Binding, event *automation.Event, attrs map[string]string) string {
 	in := trigger.SubjectInputs{
 		WorkspaceKey: event.WorkspaceKey,
 		BindingID:    binding.BindingID,
@@ -924,7 +926,7 @@ func (s *triggerRouteStore) runID(supplied string) string {
 
 // dispatchTriggerEvent builds the TriggerEvent to persist, applying the same
 // field defaults as fleet-db's dispatch path.
-func dispatchTriggerEvent(ws string, binding *domain.TriggerBinding, in store.TriggerRouteDispatch, now time.Time) *domain.TriggerEvent {
+func dispatchTriggerEvent(ws string, binding *automation.Binding, in store.TriggerRouteDispatch, now time.Time) *automation.Event {
 	eventType := in.EventType
 	if eventType == "" {
 		eventType = "trigger_route_requested"
@@ -937,7 +939,7 @@ func dispatchTriggerEvent(ws string, binding *domain.TriggerBinding, in store.Tr
 	if signatureStatus == "" {
 		signatureStatus = "not_applicable"
 	}
-	return &domain.TriggerEvent{
+	return &automation.Event{
 		WorkspaceKey:     ws,
 		TriggerBindingID: binding.BindingID,
 		SourceKind:       binding.SourceKind,
@@ -948,7 +950,7 @@ func dispatchTriggerEvent(ws string, binding *domain.TriggerBinding, in store.Tr
 		// Structural provenance: route dispatch is the webhook ingest lane,
 		// so the origin is always stamped external at hop depth 0 here —
 		// never copied from caller input (mirrors fleet-db's stamping).
-		Origin:           domain.TriggerEventOriginExternal,
+		Origin:           automation.EventOriginExternal,
 		HopDepth:         0,
 		OccurredAt:       now,
 		ReceivedAt:       now,

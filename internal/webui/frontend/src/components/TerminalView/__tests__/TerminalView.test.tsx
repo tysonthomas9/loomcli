@@ -1257,6 +1257,36 @@ describe("TerminalView", () => {
       expect(onConsumed).toHaveBeenCalled();
     });
 
+    it("keeps an embedded agent view pinned after its pending request is consumed", async () => {
+      sessionStorage.setItem("terminal-active-tab", "session-1");
+      setMetadata([
+        ...DEFAULT_METADATA,
+        {
+          session_name: "term_existing_fox",
+          label: "agent-fox",
+          kind: "agent",
+          agent_id: "fox",
+          role: "lead",
+          backend: "codex",
+          writable: true,
+        },
+      ]);
+
+      render(<TerminalView hideTabs selectedAgentName="fox" />);
+
+      await waitFor(() =>
+        expect(
+          screen.getByTestId("terminal-instance-term_existing_fox"),
+        ).toBeInTheDocument(),
+      );
+      expect(
+        screen.queryByTestId("terminal-instance-session-1"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("terminal-instance-session-2"),
+      ).not.toBeInTheDocument();
+    });
+
     it("does not create agent tab when no pendingAgentName is provided", () => {
       setMetadata(DEFAULT_METADATA);
       render(<TerminalView />);

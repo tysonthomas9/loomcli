@@ -26,9 +26,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
-	vault "github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	vault "github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 )
 
 var connectorCmd = &cobra.Command{
@@ -88,8 +88,13 @@ func runCreate(cmd *cobra.Command, _ []string) error {
 	if err := p.validate(); err != nil {
 		return err
 	}
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		return createConnector(ctx, h.Store, ws, p, cmd.InOrStdin(), cmd.OutOrStdout())
+	return cmdstore.WithActiveConnectorManagement(func(
+		ctx context.Context,
+		_ *bootstrap.StoreHandle,
+		management connectorsmodule.Management,
+		ws string,
+	) error {
+		return createConnector(ctx, management, ws, p, cmd.InOrStdin(), cmd.OutOrStdout())
 	})
 }
 
@@ -110,20 +115,27 @@ func (p *createParams) validate() error {
 // secrets, seals the outbound credential client-side-of-store (on the direct
 // store path the CLI is the control plane), creates the connector, and prints
 // the redacted result.
-func createConnector(ctx context.Context, st store.Store, ws string, p createParams, stdin io.Reader, out io.Writer) error {
+func createConnector(
+	ctx context.Context,
+	management connectorsmodule.Management,
+	ws string,
+	p createParams,
+	stdin io.Reader,
+	out io.Writer,
+) error {
 	id := p.connectorID
 	if id == "" {
 		id = string(p.source)
 	}
-	in := store.ConnectorCreate{
+	in := connectorsmodule.CreateConnectorCommand{
 		WorkspaceKey:        ws,
 		ConnectorID:         id,
-		SourceKind:          p.source,
+		SourceKind:          connectorsmodule.ConnectorSourceKind(p.source),
 		DisplayName:         p.displayName,
 		InboundEndpointPath: p.endpoint,
 	}
 	if p.disabled {
-		in.Status = domain.ConnectorStatusDisabled
+		in.Status = connectorsmodule.ConnectorStatusDisabled
 	}
 	r := bufio.NewReader(stdin)
 	if p.secretStdin {
@@ -144,7 +156,7 @@ func createConnector(ctx context.Context, st store.Store, ws string, p createPar
 		}
 		in.OutboundCredentialSealed = sealed
 	}
-	conn, err := st.Connectors().Create(ctx, in)
+	conn, err := management.CreateConnector(ctx, in)
 	if err != nil {
 		return fmt.Errorf("create connector: %w", err)
 	}
@@ -172,17 +184,29 @@ var listCmd = &cobra.Command{
 }
 
 func runList(cmd *cobra.Command, _ []string) error {
-	filter := store.ConnectorFilter{
-		SourceKind: domain.ConnectorSourceKind(strings.TrimSpace(listSource)),
-		Status:     domain.ConnectorStatus(strings.TrimSpace(listStatus)),
+	filter := connectorsmodule.ConnectorFilter{
+		SourceKind: connectorsmodule.ConnectorSourceKind(strings.TrimSpace(listSource)),
+		Status:     connectorsmodule.ConnectorStatus(strings.TrimSpace(listStatus)),
 	}
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		return listConnectors(ctx, h.Store, ws, filter, listJSON, cmd.OutOrStdout())
+	return cmdstore.WithActiveConnectorManagement(func(
+		ctx context.Context,
+		_ *bootstrap.StoreHandle,
+		management connectorsmodule.Management,
+		ws string,
+	) error {
+		return listConnectors(ctx, management, ws, filter, listJSON, cmd.OutOrStdout())
 	})
 }
 
-func listConnectors(ctx context.Context, st store.Store, ws string, filter store.ConnectorFilter, jsonOut bool, out io.Writer) error {
-	conns, err := st.Connectors().List(ctx, ws, filter)
+func listConnectors(
+	ctx context.Context,
+	management connectorsmodule.Management,
+	ws string,
+	filter connectorsmodule.ConnectorFilter,
+	jsonOut bool,
+	out io.Writer,
+) error {
+	conns, err := management.ListConnectors(ctx, connectorsmodule.ListConnectorsQuery{WorkspaceKey: ws, Filter: filter})
 	if err != nil {
 		return fmt.Errorf("list connectors: %w", err)
 	}
@@ -195,7 +219,7 @@ func listConnectors(ctx context.Context, st store.Store, ws string, filter store
 
 // renderConnectorsList writes the human-readable connector listing. Pure
 // helper so tests can exercise it directly.
-func renderConnectorsList(w io.Writer, conns []*domain.Connector) {
+func renderConnectorsList(w io.Writer, conns []*connectorsmodule.Connector) {
 	if len(conns) == 0 {
 		_, _ = fmt.Fprintln(w, "No connectors.")
 		return
@@ -205,7 +229,7 @@ func renderConnectorsList(w io.Writer, conns []*domain.Connector) {
 	}
 }
 
-func formatConnectorRow(c *domain.Connector) string {
+func formatConnectorRow(c *connectorsmodule.Connector) string {
 	row := fmt.Sprintf("%-24s source=%-9s status=%-9s", c.ConnectorID, c.SourceKind, c.Status)
 	if c.DisplayName != "" {
 		row += fmt.Sprintf(" name=%q", c.DisplayName)
@@ -256,7 +280,23 @@ func runRotate(cmd *cobra.Command, args []string) error {
 		jsonOut:     rotateJSON,
 	}
 	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		return rotateConnector(ctx, h.Store, ws, p, cmd.InOrStdin(), cmd.OutOrStdout())
+		var (
+			management connectorsmodule.Management
+			err        error
+		)
+		if p.credStdin {
+			sealer, sealErr := newConnectorVault()
+			if sealErr != nil {
+				return fmt.Errorf("connector vault: %w", sealErr)
+			}
+			management, err = cmdstore.ConnectorManagementWithSecrets(h, sealer)
+		} else {
+			management, err = cmdstore.ConnectorManagement(h)
+		}
+		if err != nil {
+			return err
+		}
+		return rotateConnector(ctx, management, ws, p, cmd.InOrStdin(), cmd.OutOrStdout())
 	})
 }
 
@@ -266,34 +306,33 @@ func runRotate(cmd *cobra.Command, args []string) error {
 // seals any replacement outbound credential through the vault seam before the
 // single store write, and journals a rotation record in the connector-call
 // audit trail.
-func rotateConnector(ctx context.Context, st store.Store, ws string, p rotateParams, stdin io.Reader, out io.Writer) error {
+func rotateConnector(
+	ctx context.Context,
+	management connectorsmodule.Management,
+	ws string,
+	p rotateParams,
+	stdin io.Reader,
+	out io.Writer,
+) error {
 	r := bufio.NewReader(stdin)
 	secret, err := readSecretLine(r, "new inbound secret")
 	if err != nil {
 		return err
 	}
-	req := vault.RotateRequest{
+	req := connectorsmodule.RotateConnectorCommand{
 		WorkspaceKey:     ws,
 		ConnectorID:      p.connectorID,
 		NewInboundSecret: secret,
 		InboundWindow:    p.window,
 	}
-	var sealer vault.Sealer
 	if p.credStdin {
 		cred, err := readSecretLine(r, "new outbound credential")
 		if err != nil {
 			return err
 		}
-		// The CLI and serve resolve the same vault from bootstrap.LoomDir;
-		// the key is only required when re-sealing a credential.
-		s, err := newConnectorVault()
-		if err != nil {
-			return fmt.Errorf("connector vault: %w", err)
-		}
-		sealer = s
 		req.NewCredential = []byte(cred)
 	}
-	conn, err := vault.Rotate(ctx, st.Connectors(), st.ConnectorCalls(), sealer, req)
+	conn, err := management.RotateConnector(ctx, req)
 	if err != nil {
 		return fmt.Errorf("rotate connector secrets: %w", err)
 	}
@@ -349,8 +388,8 @@ var grantListCmd = &cobra.Command{
 	RunE:  runGrantList,
 }
 
-func newGrantCreateInput(ws string) (store.ConnectorGrantCreate, error) {
-	in := store.ConnectorGrantCreate{
+func newGrantCreateInput(ws string) (connectorsmodule.CreateGrantCommand, error) {
+	in := connectorsmodule.CreateGrantCommand{
 		WorkspaceKey:    ws,
 		GrantID:         strings.TrimSpace(grantCreateID),
 		ConnectorID:     strings.TrimSpace(grantCreateConnector),
@@ -371,17 +410,28 @@ func newGrantCreateInput(ws string) (store.ConnectorGrantCreate, error) {
 }
 
 func runGrantCreate(cmd *cobra.Command, _ []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+	return cmdstore.WithActiveConnectorManagement(func(
+		ctx context.Context,
+		_ *bootstrap.StoreHandle,
+		management connectorsmodule.Management,
+		ws string,
+	) error {
 		in, err := newGrantCreateInput(ws)
 		if err != nil {
 			return err
 		}
-		return createGrant(ctx, h.Store, in, grantCreateJSON, cmd.OutOrStdout())
+		return createGrant(ctx, management, in, grantCreateJSON, cmd.OutOrStdout())
 	})
 }
 
-func createGrant(ctx context.Context, st store.Store, in store.ConnectorGrantCreate, jsonOut bool, out io.Writer) error {
-	grant, err := st.ConnectorGrants().Create(ctx, in)
+func createGrant(
+	ctx context.Context,
+	management connectorsmodule.Management,
+	in connectorsmodule.CreateGrantCommand,
+	jsonOut bool,
+	out io.Writer,
+) error {
+	grant, err := management.CreateGrant(ctx, in)
 	if err != nil {
 		return fmt.Errorf("create connector grant: %w", err)
 	}
@@ -394,13 +444,18 @@ func createGrant(ctx context.Context, st store.Store, in store.ConnectorGrantCre
 }
 
 func runGrantRevoke(cmd *cobra.Command, args []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		return revokeGrant(ctx, h.Store, ws, strings.TrimSpace(args[0]), cmd.OutOrStdout())
+	return cmdstore.WithActiveConnectorManagement(func(
+		ctx context.Context,
+		_ *bootstrap.StoreHandle,
+		management connectorsmodule.Management,
+		ws string,
+	) error {
+		return revokeGrant(ctx, management, ws, strings.TrimSpace(args[0]), cmd.OutOrStdout())
 	})
 }
 
-func revokeGrant(ctx context.Context, st store.Store, ws, grantID string, out io.Writer) error {
-	if err := st.ConnectorGrants().Revoke(ctx, ws, grantID); err != nil {
+func revokeGrant(ctx context.Context, management connectorsmodule.Management, ws, grantID string, out io.Writer) error {
+	if err := management.RevokeGrant(ctx, connectorsmodule.RevokeGrantCommand{WorkspaceKey: ws, GrantID: grantID}); err != nil {
 		return fmt.Errorf("revoke connector grant: %w", err)
 	}
 	_, _ = fmt.Fprintf(out, "Revoked grant %s\n", grantID)
@@ -410,26 +465,34 @@ func revokeGrant(ctx context.Context, st store.Store, ws, grantID string, out io
 func runGrantList(cmd *cobra.Command, _ []string) error {
 	binding := strings.TrimSpace(grantListBinding)
 	connectorID := strings.TrimSpace(grantListConnector)
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		return listGrants(ctx, h.Store, ws, binding, connectorID, grantListJSON, cmd.OutOrStdout())
+	return cmdstore.WithActiveConnectorManagement(func(
+		ctx context.Context,
+		_ *bootstrap.StoreHandle,
+		management connectorsmodule.Management,
+		ws string,
+	) error {
+		return listGrants(ctx, management, ws, binding, connectorID, grantListJSON, cmd.OutOrStdout())
 	})
 }
 
-func listGrants(ctx context.Context, st store.Store, ws, bindingID, connectorID string, jsonOut bool, out io.Writer) error {
-	var (
-		grants []*domain.ConnectorGrant
-		err    error
-	)
+func listGrants(
+	ctx context.Context,
+	management connectorsmodule.Management,
+	ws,
+	bindingID,
+	connectorID string,
+	jsonOut bool,
+	out io.Writer,
+) error {
 	switch {
 	case bindingID != "" && connectorID != "":
 		return fmt.Errorf("pass exactly one of --binding or --connector, not both")
-	case bindingID != "":
-		grants, err = st.ConnectorGrants().ListByBinding(ctx, ws, bindingID)
-	case connectorID != "":
-		grants, err = st.ConnectorGrants().ListByConnector(ctx, ws, connectorID)
-	default:
+	case bindingID == "" && connectorID == "":
 		return fmt.Errorf("one of --binding or --connector is required")
 	}
+	grants, err := management.ListGrants(ctx, connectorsmodule.ListGrantsQuery{
+		WorkspaceKey: ws, BindingID: bindingID, ConnectorID: connectorID,
+	})
 	if err != nil {
 		return fmt.Errorf("list connector grants: %w", err)
 	}
@@ -442,7 +505,7 @@ func listGrants(ctx context.Context, st store.Store, ws, bindingID, connectorID 
 
 // renderGrantsList writes the human-readable grant listing. Pure helper so
 // tests can exercise it directly.
-func renderGrantsList(w io.Writer, grants []*domain.ConnectorGrant) {
+func renderGrantsList(w io.Writer, grants []*connectorsmodule.ConnectorGrant) {
 	if len(grants) == 0 {
 		_, _ = fmt.Fprintln(w, "No active grants (egress is deny-by-default).")
 		return
@@ -473,7 +536,7 @@ var auditCmd = &cobra.Command{
 type auditParams struct {
 	runID     string
 	bindingID string
-	decision  domain.ConnectorCallDecision
+	decision  connectorsmodule.ConnectorCallDecision
 	limit     int
 	jsonOut   bool
 }
@@ -492,29 +555,28 @@ func runAudit(cmd *cobra.Command, _ []string) error {
 	p := auditParams{
 		runID:     strings.TrimSpace(auditRun),
 		bindingID: strings.TrimSpace(auditBinding),
-		decision:  domain.ConnectorCallDecision(strings.TrimSpace(auditDecision)),
+		decision:  connectorsmodule.ConnectorCallDecision(strings.TrimSpace(auditDecision)),
 		limit:     auditLimit,
 		jsonOut:   auditJSON,
 	}
 	if err := p.validate(); err != nil {
 		return err
 	}
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		return listAudit(ctx, h.Store, ws, p, cmd.OutOrStdout())
+	return cmdstore.WithActiveConnectorManagement(func(
+		ctx context.Context,
+		_ *bootstrap.StoreHandle,
+		management connectorsmodule.Management,
+		ws string,
+	) error {
+		return listAudit(ctx, management, ws, p, cmd.OutOrStdout())
 	})
 }
 
-func listAudit(ctx context.Context, st store.Store, ws string, p auditParams, out io.Writer) error {
-	filter := store.ConnectorCallFilter{Decision: p.decision, Limit: p.limit}
-	var (
-		records []*domain.ConnectorCallRecord
-		err     error
-	)
-	if p.runID != "" {
-		records, err = st.ConnectorCalls().ListByRun(ctx, ws, p.runID, filter)
-	} else {
-		records, err = st.ConnectorCalls().ListByBinding(ctx, ws, p.bindingID, filter)
-	}
+func listAudit(ctx context.Context, management connectorsmodule.Management, ws string, p auditParams, out io.Writer) error {
+	records, err := management.ListCalls(ctx, connectorsmodule.ListCallsQuery{
+		WorkspaceKey: ws, RunID: p.runID, BindingID: p.bindingID,
+		Filter: connectorsmodule.ConnectorCallFilter{Decision: p.decision, Limit: p.limit},
+	})
 	if err != nil {
 		return fmt.Errorf("list connector calls: %w", err)
 	}
@@ -527,7 +589,7 @@ func listAudit(ctx context.Context, st store.Store, ws string, p auditParams, ou
 
 // renderCallsList writes the human-readable audit listing. Pure helper so
 // tests can exercise it directly.
-func renderCallsList(w io.Writer, records []*domain.ConnectorCallRecord) {
+func renderCallsList(w io.Writer, records []*connectorsmodule.ConnectorCallRecord) {
 	if len(records) == 0 {
 		_, _ = fmt.Fprintln(w, "No connector calls.")
 		return
@@ -537,7 +599,7 @@ func renderCallsList(w io.Writer, records []*domain.ConnectorCallRecord) {
 	}
 }
 
-func formatCallRow(r *domain.ConnectorCallRecord) string {
+func formatCallRow(r *connectorsmodule.ConnectorCallRecord) string {
 	row := fmt.Sprintf("%-40s decision=%-21s action=%-24s binding=%s", r.CallID, r.Decision, r.Action, r.BindingID)
 	if r.Resource != "" {
 		row += " resource=" + r.Resource

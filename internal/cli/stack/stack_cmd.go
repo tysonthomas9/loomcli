@@ -12,16 +12,19 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
+	stackpublish "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolpublisher"
+	stackstore "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore"
+	infrastackstore "github.com/tysonthomas9/loomcli/internal/infra/stackstoreadapter"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
-	sl "github.com/tysonthomas9/loomcli/internal/stacklineage"
-	"github.com/tysonthomas9/loomcli/internal/stackpublish"
-	"github.com/tysonthomas9/loomcli/internal/stackstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
+	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol/stacklineage"
 )
 
 var stackCmd = &cobra.Command{
@@ -52,6 +55,18 @@ func activeWorkspace() (string, error) {
 }
 
 func openStore() (*stackstore.LocalStore, error) { return stackstore.Default() }
+
+func openStackLifecycle() (sourcecontrol.StackLifecycle, error) {
+	store, err := openStore()
+	if err != nil {
+		return nil, err
+	}
+	adapter, err := infrastackstore.New(store)
+	if err != nil {
+		return nil, err
+	}
+	return sourcecontrol.NewStackLifecycle(adapter, time.Now)
+}
 
 var shaRe = regexp.MustCompile(`^[0-9a-fA-F]{7,40}$`)
 
@@ -122,15 +137,15 @@ func initCmd() *cobra.Command {
 			if strings.TrimSpace(repo) == "" {
 				return errors.New("--repo is required")
 			}
-			st, err := openStore()
+			stacks, err := openStackLifecycle()
 			if err != nil {
 				return err
 			}
-			stack := sl.Stack{
-				ID: sl.StackID(args[0]), WorkspaceKey: ws, RepoName: repo,
-				RootBase: base, DefaultCommitMode: sl.CommitMode(mode),
-			}
-			if err := st.EnsureStack(cmd.Context(), stack); err != nil {
+			stack, err := stacks.EnsureStack(cmd.Context(), sourcecontrol.EnsureStackCommand{
+				WorkspaceKey: ws, StackID: args[0], Repository: repo,
+				RootBase: base, DefaultCommitMode: mode,
+			})
+			if err != nil {
 				return err
 			}
 			if jsonOut {
@@ -158,23 +173,23 @@ func listCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			st, err := openStore()
+			stacks, err := openStackLifecycle()
 			if err != nil {
 				return err
 			}
-			stacks, err := st.ListStacks(cmd.Context(), ws)
+			values, err := stacks.ListStacks(cmd.Context(), ws)
 			if err != nil {
 				return err
 			}
 			if jsonOut {
-				return cmdstore.WriteJSON(stacks)
+				return cmdstore.WriteJSON(values)
 			}
-			if len(stacks) == 0 {
+			if len(values) == 0 {
 				fmt.Println("no stacks")
 				return nil
 			}
-			for _, s := range stacks {
-				fmt.Printf("%s  repo=%s base=%s\n", s.ID, s.RepoName, s.RootBase)
+			for _, s := range values {
+				fmt.Printf("%s  repo=%s base=%s\n", s.ID, s.Repository, s.RootBase)
 			}
 			return nil
 		},
@@ -198,14 +213,14 @@ func showCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			nodes, err := st.ListNodes(cmd.Context(), ws, id)
+			nodes, err := st.ListStackNodes(cmd.Context(), ws, id)
 			if err != nil {
 				return err
 			}
 			if jsonOut {
 				return cmdstore.WriteJSON(map[string]any{"stack": stack, "nodes": nodes})
 			}
-			fmt.Printf("%s  repo=%s base=%s\n", stack.ID, stack.RepoName, stack.RootBase)
+			fmt.Printf("%s  repo=%s base=%s\n", stack.ID, stack.Repository, stack.RootBase)
 			for _, n := range nodes {
 				fmt.Printf("  %-16s base=%-16s branch=%s state=%s\n",
 					n.TaskID, baseOrRoot(n, stack.RootBase), n.OutputBranch, n.State)
@@ -235,7 +250,7 @@ func statusCmd() *cobra.Command {
 				return err
 			}
 			// Enrich with live PR health when a repo checkout + token resolve.
-			path, _ := resolveRepoPath(ws, stack.RepoName, repoPath)
+			path, _ := resolveRepoPath(ws, stack.Repository, repoPath)
 			token := resolveGitHubToken(cmd.Context())
 			rp := ""
 			forge := stackpublish.Forge(stackpublish.NewGitHubForge(token, nil, ""))
@@ -253,8 +268,8 @@ func statusCmd() *cobra.Command {
 					}
 				}
 			}
-			rec := &stackpublish.Reconciler{Store: st, Forge: forge}
-			report, err := rec.StackStatus(cmd.Context(), ws, id, rp)
+			rec := &stackpublish.Reconciler{Stacks: st, Forge: forge}
+			report, err := rec.StackStatus(cmd.Context(), ws, sl.StackID(id), rp)
 			if err != nil {
 				return err
 			}
@@ -306,11 +321,11 @@ func validateCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			nodes, err := st.ListNodes(cmd.Context(), ws, id)
+			nodes, err := st.ListStackNodes(cmd.Context(), ws, id)
 			if err != nil {
 				return err
 			}
-			_, oerr := sl.Ordered(nodes)
+			oerr := st.ValidateStack(cmd.Context(), ws, id)
 			if jsonOut {
 				res := map[string]any{"ok": oerr == nil}
 				if oerr != nil {
@@ -337,33 +352,35 @@ func addCmd() *cobra.Command {
 		Short: "Register a task in a stack (appends to the tip; --after to chain, --root for a parallel chain)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ws, st, id, err := loadCtxFlag(stackID)
+			ws, err := activeWorkspace()
+			if err != nil {
+				return err
+			}
+			if strings.TrimSpace(stackID) == "" {
+				return errors.New("--stack is required")
+			}
+			stacks, err := openStackLifecycle()
 			if err != nil {
 				return err
 			}
 			if root && after != "" {
 				return errors.New("--root and --after are mutually exclusive")
 			}
-			base := after
-			// --root starts a new parallel chain off the stack base. Otherwise, with
-			// no --after, append to the current tip (the tail of the last chain).
-			if !root && base == "" {
-				nodes, lerr := st.ListNodes(cmd.Context(), ws, id)
-				if lerr != nil {
-					return lerr
-				}
-				if ordered, oerr := sl.Ordered(nodes); oerr == nil && len(ordered) > 0 {
-					base = ordered[len(ordered)-1].TaskID
-				}
-			}
-			node, err := st.AddNode(cmd.Context(), ws, id, args[0], base, sl.CommitMode(mode))
+			node, err := stacks.AddStackNode(cmd.Context(), sourcecontrol.AddStackNodeCommand{
+				WorkspaceKey: ws, StackID: stackID, TaskID: args[0],
+				AfterTaskID: after, Root: root, CommitMode: mode,
+			})
 			if err != nil {
 				return err
 			}
 			if jsonOut {
 				return cmdstore.WriteJSON(node)
 			}
-			fmt.Printf("added %s (base=%s branch=%s)\n", node.TaskID, baseOrRoot(node, "<root>"), node.OutputBranch)
+			base := node.BaseTaskID
+			if base == "" {
+				base = "<root>"
+			}
+			fmt.Printf("added %s (base=%s branch=%s)\n", node.TaskID, base, node.OutputBranch)
 			return nil
 		},
 	}
@@ -383,14 +400,20 @@ func moveCmd() *cobra.Command {
 		Short: "Reorder a unit to sit after another unit",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ws, st, id, err := loadCtxFlag(stackID)
+			ws, err := activeWorkspace()
+			if err != nil {
+				return err
+			}
+			stacks, err := openStackLifecycle()
 			if err != nil {
 				return err
 			}
 			if after == "" {
 				return errors.New("--after is required")
 			}
-			if err := st.MoveNode(cmd.Context(), ws, id, args[0], after); err != nil {
+			if err := stacks.MoveStackNode(cmd.Context(), sourcecontrol.MoveStackNodeCommand{
+				WorkspaceKey: ws, StackID: stackID, TaskID: args[0], AfterTaskID: after,
+			}); err != nil {
 				return err
 			}
 			fmt.Printf("moved %s after %s\n", args[0], after)
@@ -410,11 +433,17 @@ func setBaseCmd() *cobra.Command {
 		Short: "Set a unit's predecessor (\"\" for root)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ws, st, id, err := loadCtxFlag(stackID)
+			ws, err := activeWorkspace()
 			if err != nil {
 				return err
 			}
-			if err := st.SetBase(cmd.Context(), ws, id, args[0], baseTask); err != nil {
+			stacks, err := openStackLifecycle()
+			if err != nil {
+				return err
+			}
+			if err := stacks.SetStackNodeBase(cmd.Context(), sourcecontrol.SetStackNodeBaseCommand{
+				WorkspaceKey: ws, StackID: stackID, TaskID: args[0], BaseTaskID: baseTask,
+			}); err != nil {
 				return err
 			}
 			fmt.Printf("set base of %s to %q\n", args[0], baseTask)
@@ -434,11 +463,17 @@ func removeCmd() *cobra.Command {
 		Short: "Remove a unit (children reparent onto its predecessor)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ws, st, id, err := loadCtxFlag(stackID)
+			ws, err := activeWorkspace()
 			if err != nil {
 				return err
 			}
-			if err := st.RemoveNode(cmd.Context(), ws, id, args[0]); err != nil {
+			stacks, err := openStackLifecycle()
+			if err != nil {
+				return err
+			}
+			if err := stacks.RemoveStackNode(cmd.Context(), sourcecontrol.RemoveStackNodeCommand{
+				WorkspaceKey: ws, StackID: stackID, TaskID: args[0],
+			}); err != nil {
 				return err
 			}
 			fmt.Printf("removed %s\n", args[0])
@@ -466,7 +501,7 @@ func restackCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			path, err := resolveRepoPath(ws, stack.RepoName, repoPath)
+			path, err := resolveRepoPath(ws, stack.Repository, repoPath)
 			if err != nil {
 				return err
 			}
@@ -474,8 +509,8 @@ func restackCmd() *cobra.Command {
 			if token == "" {
 				return errors.New("no GitHub token (set GITHUB_TOKEN/GH_TOKEN or run `gh auth login`)")
 			}
-			rec := &stackpublish.Reconciler{Store: st, Forge: stackpublish.NewGitHubForge(token, nil, "")}
-			report, err := rec.Restack(cmd.Context(), ws, id, path, newResolver(headless))
+			rec := &stackpublish.Reconciler{Stacks: st, Forge: stackpublish.NewGitHubForge(token, nil, "")}
+			report, err := rec.Restack(cmd.Context(), ws, sl.StackID(id), path, newResolver(headless))
 			if err != nil {
 				return err
 			}
@@ -509,7 +544,7 @@ func publishCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			path, err := resolveRepoPath(ws, stack.RepoName, repoPath)
+			path, err := resolveRepoPath(ws, stack.Repository, repoPath)
 			if err != nil {
 				return err
 			}
@@ -522,8 +557,8 @@ func publishCmd() *cobra.Command {
 				return errors.New("no GitHub token (set GITHUB_TOKEN/GH_TOKEN or run `gh auth login`)")
 			}
 			rec := &stackpublish.Reconciler{
-				Store: st,
-				Forge: forge,
+				Stacks: st,
+				Forge:  forge,
 			}
 			opts := stackpublish.Options{DryRun: dryRun}
 			// Seed PR titles/bodies from issue metadata when available; the
@@ -542,7 +577,7 @@ func publishCmd() *cobra.Command {
 			if autoRebase {
 				opts.Resolver = newResolver(headless)
 			}
-			report, err := rec.Publish(cmd.Context(), ws, id, path, opts)
+			report, err := rec.Publish(cmd.Context(), ws, sl.StackID(id), path, opts)
 			if err != nil {
 				return err
 			}
@@ -576,26 +611,19 @@ func publishCmd() *cobra.Command {
 
 // shared loaders -------------------------------------------------------------
 
-func loadCtx(stackID string) (string, *stackstore.LocalStore, sl.StackID, error) {
+func loadCtx(stackID string) (string, sourcecontrol.StackLifecycle, string, error) {
 	ws, err := activeWorkspace()
 	if err != nil {
 		return "", nil, "", err
 	}
-	st, err := openStore()
+	st, err := openStackLifecycle()
 	if err != nil {
 		return "", nil, "", err
 	}
-	return ws, st, sl.StackID(stackID), nil
+	return ws, st, stackID, nil
 }
 
-func loadCtxFlag(stackID string) (string, *stackstore.LocalStore, sl.StackID, error) {
-	if strings.TrimSpace(stackID) == "" {
-		return "", nil, "", errors.New("--stack is required")
-	}
-	return loadCtx(stackID)
-}
-
-func baseOrRoot(n sl.Node, root string) string {
+func baseOrRoot(n sourcecontrol.StackNode, root string) string {
 	if n.BaseTaskID == "" {
 		return root
 	}

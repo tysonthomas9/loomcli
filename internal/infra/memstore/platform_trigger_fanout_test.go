@@ -4,6 +4,10 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -22,13 +26,13 @@ func setupFanOutBindings(t *testing.T, s *Store, bindings []fanOutBinding) {
 	ctx := t.Context()
 	if _, err := s.Drivers().Create(ctx, store.DriverCreate{
 		WorkspaceKey: "WS", DriverID: "pr-review", Name: "pr-review",
-		OwnerType: domain.DriverOwnerSystem, Status: domain.DriverStatusActive,
+		OwnerType: workflowcatalog.DriverOwnerSystem, Status: workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatalf("Create driver: %v", err)
 	}
 	if _, err := s.DriverVersions().Create(ctx, store.DriverVersionCreate{
 		WorkspaceKey: "WS", VersionID: "v1", DriverID: "pr-review", Version: 1,
-		SourceDigest: "sha256:s", BundleDigest: "sha256:b", ValidationStatus: domain.DriverVersionValidationPassed,
+		SourceDigest: "sha256:s", BundleDigest: "sha256:b", ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
 	}
@@ -79,7 +83,7 @@ func TestDispatchTriggerRouteFanOutDispatch(t *testing.T) {
 		if result.Deliveries[i].BindingID != want {
 			t.Fatalf("delivery[%d] binding = %q, want %q (exact first, then patterns by binding id)", i, result.Deliveries[i].BindingID, want)
 		}
-		if result.Deliveries[i].Status != domain.TriggerDeliveryDispatched {
+		if result.Deliveries[i].Status != automation.DeliveryDispatched {
 			t.Fatalf("delivery[%d] status = %q, want dispatched", i, result.Deliveries[i].Status)
 		}
 	}
@@ -199,7 +203,7 @@ func TestDispatchTriggerRouteFanOutRedeliveryHealsPartialFailure(t *testing.T) {
 	})
 
 	failures := 0
-	s.deliveries.failCreate = func(delivery *domain.TriggerDelivery) error {
+	s.deliveries.failCreate = func(delivery *automation.Delivery) error {
 		if delivery.TriggerBindingID == "binding-pattern" && failures == 0 {
 			failures++
 			return errors.New("injected delivery write failure")

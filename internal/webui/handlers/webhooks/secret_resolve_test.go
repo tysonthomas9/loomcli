@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -273,7 +275,7 @@ func ghConnector(id string) *domain.Connector {
 // and the verifier-side rotation-window re-check.
 func TestResolveInboundSecretCandidates(t *testing.T) {
 	now := time.Now().UTC()
-	binding := &domain.TriggerBinding{
+	binding := &automation.Binding{
 		WorkspaceKey: testWS, BindingID: "b1", SourceKind: "github", Enabled: true,
 	}
 	errBoom := errors.New("fleet-db unreachable")

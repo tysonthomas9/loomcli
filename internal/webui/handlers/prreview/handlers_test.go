@@ -21,19 +21,22 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/app/prreviewer"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/connector"
+	"github.com/tysonthomas9/loomcli/internal/infra/connectorsproviders"
+	"github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
+	"github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
+	"github.com/tysonthomas9/loomcli/internal/webui/app/connectorcomposition"
 	localsettingshandler "github.com/tysonthomas9/loomcli/internal/webui/handlers/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 const (
@@ -434,7 +437,7 @@ const (
 )
 
 type fallbackAgentService struct {
-	service.AgentService
+	agentcoord.AgentService
 
 	called bool
 	ws     string
@@ -546,14 +549,14 @@ func newPRReviewHarness(t *testing.T, withDispatcher bool) *prReviewHarness {
 	return newPRReviewHarnessWithAgent(t, withDispatcher, nil)
 }
 
-func newPRReviewHarnessWithAgent(t *testing.T, withDispatcher bool, agentSvc service.AgentService) *prReviewHarness {
+func newPRReviewHarnessWithAgent(t *testing.T, withDispatcher bool, agentSvc agentcoord.AgentService) *prReviewHarness {
 	return newPRReviewHarnessWithCredential(t, withDispatcher, agentSvc, testCredentialEnv, prReviewTestToken)
 }
 
 func newPRReviewHarnessWithCredential(
 	t *testing.T,
 	withDispatcher bool,
-	agentSvc service.AgentService,
+	agentSvc agentcoord.AgentService,
 	source testCredentialSource,
 	token string,
 ) *prReviewHarness {
@@ -572,35 +575,28 @@ func newPRReviewHarnessWithCredential(
 		inbox: reviewerTestInboxEnqueuer{store: h.store},
 	}
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
-	t.Setenv(connector.GitHubBaseURLEnvVar, h.github.server.URL)
+	t.Setenv(connectorsproviders.GitHubBaseURLEnvVar, h.github.server.URL)
 	switch source {
 	case testCredentialEnv:
-		t.Setenv(connector.VaultKeyEnvVar, base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x42}, 32)))
+		t.Setenv(connectorsvault.VaultKeyEnvVar, base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x42}, 32)))
 		t.Setenv(webuiGitHubTokenEnv, token)
 	case testCredentialSettings:
-		t.Setenv(connector.VaultKeyEnvVar, "")
+		t.Setenv(connectorsvault.VaultKeyEnvVar, "")
 		t.Setenv(webuiGitHubTokenEnv, "")
 		h.setSettingsGitHubToken(t, token)
 	case testCredentialNone:
-		t.Setenv(connector.VaultKeyEnvVar, "")
+		t.Setenv(connectorsvault.VaultKeyEnvVar, "")
 		t.Setenv(webuiGitHubTokenEnv, "")
 	default:
 		t.Fatalf("unknown test credential source %q", source)
 	}
 	h.seedWorkspace(t)
 
-	var dispatcher *connector.Dispatcher
+	var dispatcher connectors.Dispatcher
 	if withDispatcher {
-		vault, err := connector.NewVaultFromEnvOrKeyFile(h.dataDir)
-		if err != nil {
-			t.Fatalf("NewVaultFromEnvOrKeyFile: %v", err)
-		}
-		dispatcher = &connector.Dispatcher{
-			Connectors: h.store.Connectors(),
-			Grants:     h.store.ConnectorGrants(),
-			Audit:      h.store.ConnectorCalls(),
-			Vault:      vault,
-			Providers:  connector.DefaultProviderRegistry(h.github.server.Client()),
+		dispatcher = connectorcomposition.BuildDispatcher(h.store, h.dataDir, 10*time.Second)
+		if dispatcher == nil {
+			t.Fatal("BuildDispatcher returned nil")
 		}
 	}
 	h.module = NewModule(
@@ -643,16 +639,9 @@ func (h *prReviewHarness) setSettingsGitHubToken(t *testing.T, token string) {
 
 func (h *prReviewHarness) rebuildWithDataDir(t *testing.T, dataDir string) {
 	t.Helper()
-	vault, err := connector.NewVaultFromEnvOrKeyFile(dataDir)
-	if err != nil {
-		t.Fatalf("NewVaultFromEnvOrKeyFile: %v", err)
-	}
-	dispatcher := &connector.Dispatcher{
-		Connectors: h.store.Connectors(),
-		Grants:     h.store.ConnectorGrants(),
-		Audit:      h.store.ConnectorCalls(),
-		Vault:      vault,
-		Providers:  connector.DefaultProviderRegistry(h.github.server.Client()),
+	dispatcher := connectorcomposition.BuildDispatcher(h.store, dataDir, 10*time.Second)
+	if dispatcher == nil {
+		t.Fatal("BuildDispatcher returned nil")
 	}
 	h.dataDir = dataDir
 	h.module = NewModule(

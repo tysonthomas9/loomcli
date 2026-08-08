@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // TestDump_SkipsWhenKeyspaceUnchanged verifies the content-hash short
@@ -150,5 +151,43 @@ func TestStreamSnapshotCap(t *testing.T) {
 	wantFirstID := strconvI(overflow+1) + "-0"
 	if len(first) != 1 || first[0].ID != wantFirstID {
 		t.Errorf("first surviving entry ID: want %q, got %v", wantFirstID, first)
+	}
+}
+
+// TestClose_PersistsLargeKeyspaceWithinBudget protects the packaged-app
+// restart path. The old per-key snapshot reader needed three localhost round
+// trips per key and exhausted Close's budget on a production-sized FleetDB
+// keyspace, leaving the last periodic snapshot stale. A batched reader must
+// durably include the sorted tail before shutdown returns.
+func TestClose_PersistsLargeKeyspaceWithinBudget(t *testing.T) {
+	snapPath := filepath.Join(t.TempDir(), "snapshot.json")
+	ctx := context.Background()
+	m, err := NewManager(snapPath, true, nil, withCloseSweepCap(8*time.Second))
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+
+	const keyCount = 100000
+	seedBulkKeys(t, m, keyCount)
+	if err := m.Close(); err != nil {
+		t.Fatalf("Close large keyspace: %v", err)
+	}
+
+	loaded, err := NewManager(snapPath, true, nil)
+	if err != nil {
+		t.Fatalf("reload large snapshot: %v", err)
+	}
+	// Avoid paying for a second 100k-key dump in test cleanup; this manager is
+	// read-only and the durability assertion is the successful replay above.
+	loaded.snapshotPath = ""
+	defer loaded.Close()
+
+	wantTail := "terminal:meta:bulk:99999"
+	got, err := loaded.Client().Get(ctx, wantTail).Result()
+	if err != nil {
+		t.Fatalf("read sorted tail after reload: %v", err)
+	}
+	if got != "x" {
+		t.Fatalf("tail value after reload = %q, want x", got)
 	}
 }

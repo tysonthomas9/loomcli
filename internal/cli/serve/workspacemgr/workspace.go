@@ -13,7 +13,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr/workspacematerialization"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 	"github.com/tysonthomas9/loomcli/internal/workspaceerrors"
 )
 
@@ -311,7 +311,7 @@ func runWorkspaceGitContext(
 func warnSkippedWorktree(ctx context.Context, repoName, worktreePath string, err error) {
 	msg := fmt.Sprintf("Skipped checkout for repo %q at %s: %v", repoName, worktreePath, err)
 	slog.Warn("workspace bootstrap skipped checkout", "repo", repoName, "path", worktreePath, "err", err)
-	service.AddCreateWarning(ctx, msg)
+	workspacecoord.AddCreateWarning(ctx, msg)
 }
 
 // cleanupWorktrees removes created worktrees and, only when Loom created it,

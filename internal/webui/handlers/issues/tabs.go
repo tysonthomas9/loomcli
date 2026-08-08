@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
@@ -24,9 +24,9 @@ type issueTabResponse struct {
 // The tmux-session-aliveness filter that used to live here is gone: without
 // tmux, there are no persistent sessions to validate against. Stale tab
 // entries are the client's responsibility to reap on render.
-func handleGetIssueTabs(store *issuetabs.Store) http.HandlerFunc {
+func handleGetIssueTabs(tabs interaction.IssueTabStateAPI) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if store == nil {
+		if tabs == nil {
 			handler.WriteJSON(w, http.StatusServiceUnavailable, issueTabResponse{
 				Success: false,
 				Error:   "issue tab state not available (no Redis)",
@@ -36,7 +36,7 @@ func handleGetIssueTabs(store *issuetabs.Store) http.HandlerFunc {
 
 		wsID := middleware.WorkspaceFromContext(r.Context())
 		issueID := r.PathValue("issueId")
-		if err := issuetabs.ValidateIssueID(issueID); err != nil {
+		if err := interaction.ValidateIssueTabIssueID(issueID); err != nil {
 			handler.WriteJSON(w, http.StatusBadRequest, issueTabResponse{
 				Success: false,
 				Error:   err.Error(),
@@ -44,7 +44,7 @@ func handleGetIssueTabs(store *issuetabs.Store) http.HandlerFunc {
 			return
 		}
 
-		state, err := store.Get(r.Context(), wsID, issueID)
+		state, err := tabs.GetIssueTabs(r.Context(), wsID, issueID)
 		if err != nil {
 			slog.Error("failed to get issue tab state", "issue_id", issueID, "err", err)
 			handler.WriteJSON(w, http.StatusInternalServerError, issueTabResponse{
@@ -71,14 +71,14 @@ func handleGetIssueTabs(store *issuetabs.Store) http.HandlerFunc {
 
 // issueTabSaveRequest represents the body for PUT /api/issues/{issueId}/tabs.
 type issueTabSaveRequest struct {
-	Tabs        []issuetabs.IssueTab `json:"tabs"`
-	ActiveTabID string               `json:"active_tab_id"`
+	Tabs        []interaction.IssueTab `json:"tabs"`
+	ActiveTabID string                 `json:"active_tab_id"`
 }
 
 // handleSaveIssueTabs saves the full tab state for an issue and broadcasts an SSE event.
-func handleSaveIssueTabs(store *issuetabs.Store, hub *realtime.Hub) http.HandlerFunc {
+func handleSaveIssueTabs(tabs interaction.IssueTabStateAPI, hub *realtime.Hub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if store == nil {
+		if tabs == nil {
 			handler.WriteJSON(w, http.StatusServiceUnavailable, issueTabResponse{
 				Success: false, Error: "issue tab state not available (no Redis)",
 			})
@@ -87,12 +87,12 @@ func handleSaveIssueTabs(store *issuetabs.Store, hub *realtime.Hub) http.Handler
 
 		wsID := middleware.WorkspaceFromContext(r.Context())
 		issueID := r.PathValue("issueId")
-		if err := issuetabs.ValidateIssueID(issueID); err != nil {
+		if err := interaction.ValidateIssueTabIssueID(issueID); err != nil {
 			handler.WriteJSON(w, http.StatusBadRequest, issueTabResponse{Success: false, Error: err.Error()})
 			return
 		}
 
-		state, err := decodeAndSaveTabState(store, r, w, wsID, issueID)
+		state, err := decodeAndSaveTabState(tabs, r, w, wsID, issueID)
 		if err != nil {
 			return // response already written
 		}
@@ -104,7 +104,7 @@ func handleSaveIssueTabs(store *issuetabs.Store, hub *realtime.Hub) http.Handler
 
 // decodeAndSaveTabState decodes the request body and persists the tab state.
 // Returns the saved state, or writes an error response and returns an error.
-func decodeAndSaveTabState(store *issuetabs.Store, r *http.Request, w http.ResponseWriter, wsID, issueID string) (*issuetabs.IssueTabState, error) {
+func decodeAndSaveTabState(tabs interaction.IssueTabStateAPI, r *http.Request, w http.ResponseWriter, wsID, issueID string) (*interaction.IssueTabState, error) {
 	r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
 	var req issueTabSaveRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -112,13 +112,13 @@ func decodeAndSaveTabState(store *issuetabs.Store, r *http.Request, w http.Respo
 		return nil, err
 	}
 
-	state := &issuetabs.IssueTabState{
+	state := &interaction.IssueTabState{
 		IssueID:     issueID,
 		Tabs:        req.Tabs,
 		ActiveTabID: req.ActiveTabID,
 	}
 
-	if err := store.Save(r.Context(), wsID, state); err != nil {
+	if err := tabs.ReplaceIssueTabs(r.Context(), wsID, state); err != nil {
 		slog.Error("failed to save issue tab state", "issue_id", issueID, "err", err)
 		handler.WriteJSON(w, http.StatusInternalServerError, issueTabResponse{
 			Success: false, Error: "failed to save issue tab state",
@@ -144,9 +144,9 @@ func broadcastTabChange(hub *realtime.Hub, wsID, issueID string) {
 }
 
 // handleDeleteIssueTabs removes the tab state for an issue.
-func handleDeleteIssueTabs(store *issuetabs.Store) http.HandlerFunc {
+func handleDeleteIssueTabs(tabs interaction.IssueTabStateAPI) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if store == nil {
+		if tabs == nil {
 			handler.WriteJSON(w, http.StatusServiceUnavailable, issueTabResponse{
 				Success: false,
 				Error:   "issue tab state not available (no Redis)",
@@ -156,7 +156,7 @@ func handleDeleteIssueTabs(store *issuetabs.Store) http.HandlerFunc {
 
 		wsID := middleware.WorkspaceFromContext(r.Context())
 		issueID := r.PathValue("issueId")
-		if err := issuetabs.ValidateIssueID(issueID); err != nil {
+		if err := interaction.ValidateIssueTabIssueID(issueID); err != nil {
 			handler.WriteJSON(w, http.StatusBadRequest, issueTabResponse{
 				Success: false,
 				Error:   err.Error(),
@@ -164,7 +164,7 @@ func handleDeleteIssueTabs(store *issuetabs.Store) http.HandlerFunc {
 			return
 		}
 
-		if err := store.Delete(r.Context(), wsID, issueID); err != nil {
+		if err := tabs.ClearIssueTabs(r.Context(), wsID, issueID); err != nil {
 			slog.Error("failed to delete issue tab state", "issue_id", issueID, "err", err)
 			handler.WriteJSON(w, http.StatusInternalServerError, issueTabResponse{
 				Success: false,

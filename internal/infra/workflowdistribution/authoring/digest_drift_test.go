@@ -11,7 +11,8 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -56,7 +57,7 @@ func registerEpicRunnerAt(t *testing.T, st store.Store, workDir, sourceDigest st
 			{Name: "local-task-runner", Kind: driverpkg.RunnerKindFlueWorkflow, Entrypoint: "local-task-runner"},
 			{Name: "daytona-task-runner", Kind: driverpkg.RunnerKindFlueWorkflow, Entrypoint: "daytona-task-runner"},
 		},
-		Trust: domain.DriverTrustTrusted,
+		Trust: workflowcatalog.DriverTrustTrusted,
 	})
 	if err != nil {
 		t.Fatalf("register epic-runner at digest %s: %v", sourceDigest, err)
@@ -87,7 +88,7 @@ func registerPromptAgentAt(t *testing.T, st store.Store, ws, workDir, sourceDige
 		RunnerSpecs: []driverpkg.DriverRunnerSpec{
 			{Name: "local-task-runner", Kind: driverpkg.RunnerKindFlueWorkflow, Entrypoint: "local-task-runner"},
 		},
-		Trust: domain.DriverTrustTrusted,
+		Trust: workflowcatalog.DriverTrustTrusted,
 	})
 	if err != nil {
 		t.Fatalf("register prompt-agent at digest %s: %v", sourceDigest, err)
@@ -117,7 +118,7 @@ func registerOperatorPromptAgentAt(t *testing.T, st store.Store, ws, workDir, so
 		WorkflowName: BuiltinPromptAgentWorkflowName, SourceRef: "operator://prompt-agent/custom-version",
 		SourceDigest: sourceDigest, CreatedBy: "operator", Activate: true,
 		RunnerSpecs: runners,
-		Trust:       domain.DriverTrustTrusted,
+		Trust:       workflowcatalog.DriverTrustTrusted,
 	})
 	if err != nil {
 		t.Fatalf("register operator prompt-agent at digest %s: %v", sourceDigest, err)
@@ -381,7 +382,7 @@ func TestEnsureBoundPromptAgentWorkflowsUsesPackagedBundleWithoutBuildToolchain(
 	if want := "builtin://workflows/prompt-agent/versions/" + digest; version.SourceRef != want {
 		t.Fatalf("packaged version source_ref = %q, want %q", version.SourceRef, want)
 	}
-	if got := driverpkg.DriverVersionEffectiveTrust(driverRecord, version); got != domain.DriverTrustTrusted {
+	if got := driverpkg.DriverVersionEffectiveTrust(driverRecord, version); got != workflowcatalog.DriverTrustTrusted {
 		t.Fatalf("packaged version trust = %q, want trusted", got)
 	}
 	if !strings.Contains(version.Manifest["runners"], "local-task-runner") {

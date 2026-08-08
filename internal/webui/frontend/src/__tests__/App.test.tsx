@@ -38,6 +38,7 @@ const mockNavigate = vi.fn();
 const mockUseParams = vi.hoisted(() =>
   vi.fn(() => ({ workspaceId: "test-ws-id" })),
 );
+const mockOutletContext = vi.hoisted(() => ({ current: undefined as unknown }));
 vi.mock("react-router-dom", () => ({
   useParams: mockUseParams,
   useNavigate: vi.fn(() => mockNavigate),
@@ -49,7 +50,9 @@ vi.mock("react-router-dom", () => ({
     state: null,
     key: "default",
   })),
-  Outlet: () => {
+  useOutletContext: () => mockOutletContext.current,
+  Outlet: ({ context }: { context?: unknown }) => {
+    mockOutletContext.current = context;
     const view = mockUseRouteView()?.view ?? "kanban";
     return viewRegistry[view]?.() ?? null;
   },
@@ -681,7 +684,7 @@ import { KanbanPage } from "@/views/KanbanPage";
 import { TablePage } from "@/views/TablePage";
 import { GraphPage } from "@/views/GraphPage";
 import { MonitorPage } from "@/views/MonitorPage";
-import { ObservabilityPage } from "@/views/ObservabilityPage";
+import { ObservabilityPage } from "@/features/observability";
 import { SettingsPage } from "@/views/SettingsPage";
 import { WorkspacePage } from "@/views/WorkspacePage";
 import { FilesPage } from "@/views/FilesPage";
@@ -2604,6 +2607,19 @@ describe("App", () => {
 
       // TerminalView should be present even when view is kanban
       expect(await screen.findByTestId("terminal-view")).toBeInTheDocument();
+    });
+
+    it("preserves the same TerminalView instance when the Source Control route opens", async () => {
+      mockStoreState = createMockUseIssuesReturn({});
+      mockUseRouteView.mockReturnValue(createViewStateReturn("kanban"));
+
+      const { rerender } = render(<App />);
+      const before = await screen.findByTestId("terminal-view");
+
+      mockUseRouteView.mockReturnValue(createViewStateReturn("prs"));
+      rerender(<App />);
+
+      expect(await screen.findByTestId("terminal-view")).toBe(before);
     });
 
     it("TerminalView wrapper has display:none when view is not terminal", async () => {

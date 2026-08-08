@@ -1,11 +1,9 @@
 export { KanbanPage } from "./KanbanPage";
 export { AgentsPage } from "./AgentsPage";
 export { ListPage } from "./ListPage";
-export { PRsPage } from "./PRsPage";
 export { TablePage } from "./TablePage";
 export { GraphPage } from "./GraphPage";
 export { MonitorPage } from "./MonitorPage";
-export { ObservabilityPage } from "./ObservabilityPage";
 export { SettingsPage } from "./SettingsPage";
 export { WorkspacePage } from "./WorkspacePage";
 export { FilesPage } from "./FilesPage";

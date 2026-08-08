@@ -8,6 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -23,24 +27,24 @@ func TestGenericDriverRequestsOmitLifecycleActivation(t *testing.T) {
 		}
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/WS/drivers":
-			if body["status"] != string(domain.DriverStatusDraft) ||
-				body["trust_level"] != string(domain.DriverTrustTrusted) {
+			if body["status"] != string(workflowcatalog.DriverStatusDraft) ||
+				body["trust_level"] != string(workflowcatalog.DriverTrustTrusted) {
 				t.Fatalf("generic create lost draft/trust administration: %#v", body)
 			}
-			writeJSON(t, w, domain.Driver{
+			writeJSON(t, w, workflowcatalog.Driver{
 				WorkspaceKey: "WS", DriverID: "driver-1", Name: "driver",
-				Status: domain.DriverStatusDraft, TrustLevel: domain.DriverTrustTrusted,
+				Status: workflowcatalog.DriverStatusDraft, TrustLevel: workflowcatalog.DriverTrustTrusted,
 			})
 		case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/WS/drivers/driver-1":
 			metadata, _ := body["metadata"].(map[string]any)
-			if body["status"] != string(domain.DriverStatusDisabled) ||
-				body["trust_level"] != string(domain.DriverTrustUntrusted) ||
+			if body["status"] != string(workflowcatalog.DriverStatusDisabled) ||
+				body["trust_level"] != string(workflowcatalog.DriverTrustUntrusted) ||
 				metadata["team"] != "runtime" {
 				t.Fatalf("generic patch lost non-activation administration: %#v", body)
 			}
-			writeJSON(t, w, domain.Driver{
+			writeJSON(t, w, workflowcatalog.Driver{
 				WorkspaceKey: "WS", DriverID: "driver-1", Name: "driver",
-				Status: domain.DriverStatusDisabled, TrustLevel: domain.DriverTrustUntrusted,
+				Status: workflowcatalog.DriverStatusDisabled, TrustLevel: workflowcatalog.DriverTrustUntrusted,
 				Metadata: map[string]string{"team": "runtime"},
 			})
 		default:
@@ -55,12 +59,12 @@ func TestGenericDriverRequestsOmitLifecycleActivation(t *testing.T) {
 	}
 	if _, err := client.Drivers().Create(t.Context(), store.DriverCreate{
 		WorkspaceKey: "WS", DriverID: "driver-1", Name: "driver",
-		Status: domain.DriverStatusDraft, TrustLevel: domain.DriverTrustTrusted,
+		Status: workflowcatalog.DriverStatusDraft, TrustLevel: workflowcatalog.DriverTrustTrusted,
 	}); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	disabled := domain.DriverStatusDisabled
-	untrusted := domain.DriverTrustUntrusted
+	disabled := workflowcatalog.DriverStatusDisabled
+	untrusted := workflowcatalog.DriverTrustUntrusted
 	metadata := map[string]string{"team": "runtime"}
 	if _, err := client.Drivers().Update(t.Context(), "WS", "driver-1", store.DriverUpdate{
 		Status: &disabled, TrustLevel: &untrusted, Metadata: &metadata,
@@ -87,7 +91,7 @@ func TestPlatformClientDriverRunLifecycleRoutesAndErrors(t *testing.T) {
 			if req.DriverID != "driver-1" || req.Name != "epic-runner" {
 				t.Fatalf("driver create body = %+v", req)
 			}
-			writeJSON(t, w, domain.Driver{WorkspaceKey: "WS", DriverID: req.DriverID, Name: req.Name, Status: domain.DriverStatusActive})
+			writeJSON(t, w, workflowcatalog.Driver{WorkspaceKey: "WS", DriverID: req.DriverID, Name: req.Name, Status: workflowcatalog.DriverStatusActive})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/WS/drivers/driver-1/versions":
 			var req struct {
 				VersionID    string `json:"version_id"`
@@ -98,12 +102,12 @@ func TestPlatformClientDriverRunLifecycleRoutesAndErrors(t *testing.T) {
 			if req.VersionID != "version-1" || req.Version != 1 || req.BundleDigest != "sha256:bundle" {
 				t.Fatalf("version create body = %+v", req)
 			}
-			writeJSON(t, w, domain.DriverVersion{WorkspaceKey: "WS", VersionID: req.VersionID, DriverID: "driver-1", Version: req.Version})
+			writeJSON(t, w, workflowcatalog.DriverVersion{WorkspaceKey: "WS", VersionID: req.VersionID, DriverID: "driver-1", Version: req.Version})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/WS/driver-versions":
 			if r.URL.Query().Get("validation_status") != "passed" || r.URL.Query().Get("limit") != "1" {
 				t.Fatalf("driver version list query = %s", r.URL.RawQuery)
 			}
-			writeJSON(t, w, map[string]any{"driver_versions": []domain.DriverVersion{{WorkspaceKey: "WS", VersionID: "version-1"}}})
+			writeJSON(t, w, map[string]any{"driver_versions": []workflowcatalog.DriverVersion{{WorkspaceKey: "WS", VersionID: "version-1"}}})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/WS/trigger-bindings":
 			var req struct {
 				BindingID       string `json:"binding_id"`
@@ -115,7 +119,7 @@ func TestPlatformClientDriverRunLifecycleRoutesAndErrors(t *testing.T) {
 			if req.BindingID != "binding-1" || req.RouteKey != "epics.runs.create" || req.DriverVersionID != "version-1" {
 				t.Fatalf("trigger binding create body = %+v", req)
 			}
-			writeJSON(t, w, domain.TriggerBinding{WorkspaceKey: "WS", BindingID: req.BindingID, RouteKey: req.RouteKey, DriverID: req.DriverID, DriverVersionID: req.DriverVersionID, Enabled: true})
+			writeJSON(t, w, automation.Binding{WorkspaceKey: "WS", BindingID: req.BindingID, RouteKey: req.RouteKey, DriverID: req.DriverID, DriverVersionID: req.DriverVersionID, Enabled: true})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/WS/trigger-bindings":
 			if r.URL.Query().Get("route_key") != "" {
 				if r.URL.Query().Get("route_key") != "epics.runs.create" || r.URL.Query().Get("limit") != "1" {
@@ -124,9 +128,9 @@ func TestPlatformClientDriverRunLifecycleRoutesAndErrors(t *testing.T) {
 			} else if r.URL.Query().Get("target_agent_service_id") != "lead" || r.URL.Query().Get("limit") != "1" {
 				t.Fatalf("trigger binding target list query = %s", r.URL.RawQuery)
 			}
-			writeJSON(t, w, map[string]any{"trigger_bindings": []domain.TriggerBinding{{WorkspaceKey: "WS", BindingID: "binding-1", RouteKey: "epics.runs.create", DriverID: "driver-1", DriverVersionID: "version-1", TargetAgentServiceID: "lead", Enabled: true}}})
+			writeJSON(t, w, map[string]any{"trigger_bindings": []automation.Binding{{WorkspaceKey: "WS", BindingID: "binding-1", RouteKey: "epics.runs.create", DriverID: "driver-1", DriverVersionID: "version-1", TargetAgentServiceID: "lead", Enabled: true}}})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/WS/trigger-bindings/binding-1":
-			writeJSON(t, w, domain.TriggerBinding{WorkspaceKey: "WS", BindingID: "binding-1", RouteKey: "epics.runs.create", DriverID: "driver-1", DriverVersionID: "version-1", Enabled: true})
+			writeJSON(t, w, automation.Binding{WorkspaceKey: "WS", BindingID: "binding-1", RouteKey: "epics.runs.create", DriverID: "driver-1", DriverVersionID: "version-1", Enabled: true})
 		case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/WS/trigger-bindings/binding-1":
 			var req struct {
 				Name    *string `json:"name"`
@@ -136,7 +140,7 @@ func TestPlatformClientDriverRunLifecycleRoutesAndErrors(t *testing.T) {
 			if req.Name == nil || *req.Name != "Epic runner route" || req.Enabled == nil || *req.Enabled {
 				t.Fatalf("trigger binding update body = %+v", req)
 			}
-			writeJSON(t, w, domain.TriggerBinding{WorkspaceKey: "WS", BindingID: "binding-1", Name: *req.Name, RouteKey: "epics.runs.create", DriverID: "driver-1", DriverVersionID: "version-1", Enabled: *req.Enabled})
+			writeJSON(t, w, automation.Binding{WorkspaceKey: "WS", BindingID: "binding-1", Name: *req.Name, RouteKey: "epics.runs.create", DriverID: "driver-1", DriverVersionID: "version-1", Enabled: *req.Enabled})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/WS/epics/WS-1/runs":
 			var req struct {
 				RunID          string          `json:"run_id"`
@@ -422,13 +426,13 @@ func TestPlatformClientDriverRunLifecycleRoutesAndErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := client.Drivers().Create(t.Context(), store.DriverCreate{WorkspaceKey: "WS", DriverID: "driver-1", Name: "epic-runner", Status: domain.DriverStatusDraft}); err != nil {
+	if _, err := client.Drivers().Create(t.Context(), store.DriverCreate{WorkspaceKey: "WS", DriverID: "driver-1", Name: "epic-runner", Status: workflowcatalog.DriverStatusDraft}); err != nil {
 		t.Fatalf("Create driver: %v", err)
 	}
 	if _, err := client.DriverVersions().Create(t.Context(), store.DriverVersionCreate{WorkspaceKey: "WS", DriverID: "driver-1", VersionID: "version-1", Version: 1, SourceDigest: "sha256:source", BundleDigest: "sha256:bundle"}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
 	}
-	if versions, err := client.DriverVersions().List(t.Context(), "WS", store.DriverVersionFilter{ValidationStatus: domain.DriverVersionValidationPassed, Limit: 1}); err != nil || len(versions) != 1 {
+	if versions, err := client.DriverVersions().List(t.Context(), "WS", store.DriverVersionFilter{ValidationStatus: workflowcatalog.DriverVersionValidationPassed, Limit: 1}); err != nil || len(versions) != 1 {
 		t.Fatalf("List driver versions = %+v err=%v, want one", versions, err)
 	}
 	if binding, err := client.TriggerBindings().Create(t.Context(), store.TriggerBindingCreate{
@@ -442,7 +446,7 @@ func TestPlatformClientDriverRunLifecycleRoutesAndErrors(t *testing.T) {
 		DriverID:          "driver-1",
 		DriverVersionID:   "version-1",
 		TargetEntrypoint:  "run",
-		ConcurrencyPolicy: domain.TriggerBindingConcurrencyOneActivePerEpic,
+		ConcurrencyPolicy: automation.ConcurrencyOneActivePerEpic,
 		IdempotencyPolicy: "header:Idempotency-Key",
 		AuthPolicy:        "workspace_user",
 		Permissions:       []string{"driver_run.create"},

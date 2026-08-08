@@ -19,7 +19,7 @@ import (
 	"github.com/olesho/harness-wrapper/pkg/transcript/claudecode"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
+	leadcontrol "github.com/tysonthomas9/loomcli/internal/infra/interactionlead"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 )

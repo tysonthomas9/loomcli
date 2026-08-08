@@ -400,6 +400,7 @@ func normalizeCreate(command CreateCommand) (CreateCommand, error) {
 	if err != nil {
 		return CreateCommand{}, err
 	}
+	command.AgentID = strings.TrimSpace(command.AgentID)
 	command.SessionID = strings.TrimSpace(command.SessionID)
 	command.TaskID = strings.TrimSpace(command.TaskID)
 	command.URI = strings.TrimSpace(command.URI)
@@ -561,6 +562,7 @@ func validateCreatedArtifact(artifact *Artifact, command CreateCommand) error {
 		return fmt.Errorf("empty artifact create result: %w", ErrInvalidPersistedState)
 	}
 	if artifact.Type != command.Type || artifact.SizeBytes != command.SizeBytes ||
+		!matchesSuppliedArtifactField(command.AgentID, artifact.AgentID) ||
 		!matchesSuppliedArtifactField(command.SessionID, artifact.SessionID) ||
 		!matchesSuppliedArtifactField(command.TaskID, artifact.TaskID) ||
 		!matchesSuppliedArtifactField(command.URI, artifact.URI) ||

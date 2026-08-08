@@ -22,9 +22,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/connector"
-	"github.com/tysonthomas9/loomcli/internal/connector/providers"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -32,7 +31,7 @@ import (
 // Dispatcher: the server was started without a usable
 // LOOM_CONNECTOR_VAULT_KEY, so connector egress fails closed.
 var errConnectorEgressUnavailable = errors.New(
-	"connector egress is not configured on this server (set " + connector.VaultKeyEnvVar + ")")
+	"connector egress is not configured on this server (set " + connectorsmodule.VaultKeyEnvVar + ")")
 
 // connectorDispatchParams is the camelCase connector-dispatch request body.
 // BindingID is deliberately absent: it is resolved from the verified parent
@@ -64,8 +63,8 @@ type connectorDispatchParams struct {
 // preconditions maps the camelCase wire fields onto the provider-layer
 // Preconditions pair (ExpectedHeadSha for git subjects, ExpectedRevision for
 // everything else).
-func (p connectorDispatchParams) preconditions() providers.Preconditions {
-	return providers.Preconditions{
+func (p connectorDispatchParams) preconditions() connectorsmodule.DispatchPreconditions {
+	return connectorsmodule.DispatchPreconditions{
 		ExpectedHeadSha: strings.TrimSpace(p.Preconditions.ExpectedHeadSha),
 		ExpectedRevision: firstNonEmpty(
 			p.Preconditions.ExpectedIssueRevision,
@@ -106,7 +105,7 @@ func (m *Module) connectorDispatch(ctx context.Context, ws string, id driverIden
 	if err != nil {
 		return nil, err
 	}
-	res, err := m.dispatcher.Dispatch(ctx, connector.Request{
+	res, err := m.dispatcher.Dispatch(ctx, connectorsmodule.DispatchCommand{
 		WorkspaceKey:  ws,
 		RunID:         parent.RunID,
 		BindingID:     bindingID,
@@ -137,8 +136,11 @@ func (m *Module) connectorDispatch(ctx context.Context, ws string, id driverIden
 func (m *Module) resolveParentBindingID(ctx context.Context, ws string, parent *domain.DriverRun) (string, error) {
 	bindingID, err := m.lookupParentBindingID(ctx, ws, parent)
 	if errors.Is(err, domain.ErrNotFound) {
-		return "", fmt.Errorf("driver run %q has no trigger binding; connector egress is deny-by-default: %w",
-			parent.RunID, domain.ErrGrantDenied)
+		return "", fmt.Errorf(
+			"driver run %q has no trigger binding; connector egress is deny-by-default: %w",
+			parent.RunID,
+			errors.Join(connectorsmodule.ErrGrantDenied, domain.ErrGrantDenied),
+		)
 	}
 	if err != nil {
 		return "", err
@@ -196,25 +198,25 @@ func (m *Module) lookupParentBindingID(ctx context.Context, ws string, parent *d
 // sanitized (providers strip credential material before constructing
 // errors), so messages are safe to echo.
 func writeConnectorOpError(w http.ResponseWriter, err error) bool {
-	var (
-		pre   *providers.PreconditionRequired
-		stale *providers.StaleSubject
-		rl    *providers.RateLimited
-		up    *providers.UpstreamError
-	)
-	switch {
-	case errors.Is(err, errConnectorEgressUnavailable):
+	if errors.Is(err, errConnectorEgressUnavailable) {
 		writeOpError(w, http.StatusServiceUnavailable, "unavailable", err.Error(), false)
-	case errors.Is(err, domain.ErrGrantDenied):
-		writeOpError(w, http.StatusForbidden, "grant_denied", err.Error(), false)
-	case errors.As(err, &pre):
+		return true
+	}
+	failure, ok := connectorsmodule.ClassifyDispatchError(err)
+	if !ok {
+		return false
+	}
+	switch failure.Kind {
+	case connectorsmodule.DispatchFailureGrantDenied:
+		writeOpError(w, http.StatusForbidden, string(failure.Kind), err.Error(), false)
+	case connectorsmodule.DispatchFailurePreconditionRequired:
 		writeOpError(w, http.StatusBadRequest, "precondition_required", err.Error(), false)
-	case errors.As(err, &stale):
+	case connectorsmodule.DispatchFailureStaleSubject:
 		writeOpError(w, http.StatusConflict, "stale_subject", err.Error(), false)
-	case errors.As(err, &rl):
+	case connectorsmodule.DispatchFailureRateLimited:
 		writeOpError(w, http.StatusTooManyRequests, "rate_limited", err.Error(), true)
-	case errors.As(err, &up):
-		writeOpError(w, http.StatusBadGateway, "upstream_error", err.Error(), providers.Retryable(err))
+	case connectorsmodule.DispatchFailureUpstream:
+		writeOpError(w, http.StatusBadGateway, "upstream_error", err.Error(), failure.Retryable)
 	default:
 		return false
 	}

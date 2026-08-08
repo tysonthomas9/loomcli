@@ -38,7 +38,7 @@ func TestDiffServiceGetIssueDiffStat_UsesWorkspaceBackend(t *testing.T) {
 	be := &issueLookupBackend{issue: &backend.IssueDetailData{
 		IssueData: backend.IssueData{ID: "TASK-1", Assignee: "coder-1"},
 	}}
-	svc := NewDiffService(gitOps, func(ctx context.Context) backend.IssueBackend {
+	svc := newTestDiffService(gitOps, func(ctx context.Context) backend.IssueBackend {
 		backendWorkspace = middleware.WorkspaceFromContext(ctx)
 		return be
 	})
@@ -60,7 +60,7 @@ func TestDiffServiceGetIssueDiffStat_UsesWorkspaceBackend(t *testing.T) {
 
 func TestDiffServiceGetIssueDiffStat_BackendFailuresFailClosed(t *testing.T) {
 	t.Run("backend missing", func(t *testing.T) {
-		svc := NewDiffService(&mockGitOps{}, func(context.Context) backend.IssueBackend { return nil })
+		svc := newTestDiffService(&mockGitOps{}, func(context.Context) backend.IssueBackend { return nil })
 		if _, err := svc.GetIssueDiffStat(context.Background(), "WS-1", "TASK-1"); err == nil {
 			t.Fatal("GetIssueDiffStat() error = nil, want unavailable error")
 		}
@@ -68,7 +68,7 @@ func TestDiffServiceGetIssueDiffStat_BackendFailuresFailClosed(t *testing.T) {
 
 	t.Run("backend read fails", func(t *testing.T) {
 		be := &issueLookupBackend{err: errors.New("backend down")}
-		svc := NewDiffService(&mockGitOps{}, func(context.Context) backend.IssueBackend { return be })
+		svc := newTestDiffService(&mockGitOps{}, func(context.Context) backend.IssueBackend { return be })
 		if _, err := svc.GetIssueDiffStat(context.Background(), "WS-1", "TASK-1"); err == nil {
 			t.Fatal("GetIssueDiffStat() error = nil, want internal error")
 		}

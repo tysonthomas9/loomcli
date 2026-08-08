@@ -21,9 +21,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/epicrunner"
 	"github.com/tysonthomas9/loomcli/internal/infra/interactionclient"
-	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
+	leadcontrol "github.com/tysonthomas9/loomcli/internal/infra/interactionlead"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // envOrchestratorSessionID is the env var lead injects so descendants
@@ -297,7 +296,7 @@ func (r leadSessionRegistration) Finalize() {
 	}
 }
 
-func (r leadSessionRegistration) Store() store.Store {
+func (r leadSessionRegistration) Store() leadcontrol.RuntimeStore {
 	if r.handle == nil {
 		return nil
 	}
@@ -327,6 +326,14 @@ func registerLeadOrchestratorSession(ctx context.Context, workDir string) leadSe
 		return empty
 	}
 	if !registered {
+		// A generic workspace terminal is intentionally not registered as a
+		// durable Interaction session, but it still belongs to the explicit
+		// workspace selected by the server-owned PTY launch environment. Preserve
+		// that scope for the controlled backend child so its `loom data` commands
+		// do not fall back to an unrelated config directory or fail with "no
+		// active workspace" after the child environment filters ambient LOOM_*.
+		empty.Workspace = strings.TrimSpace(os.Getenv("LOOM_WORKSPACE"))
+		empty.AgentID = resolveLeadAgentID()
 		return empty
 	}
 	proof := client.Proof()

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver/runnersettings"
 )
@@ -139,7 +141,7 @@ type TaskRunRequestOptions struct {
 	RunnerKind         string
 	RunnerEntrypoint   string
 	RunnerVersionID    string
-	RunnerTrustLevel   domain.DriverTrustLevel
+	RunnerTrustLevel   workflowcatalog.DriverTrustLevel
 	ProviderProfile    string
 	ParentSessionID    string
 	ParentNodeID       string
@@ -202,28 +204,28 @@ type TaskRunWorkerOptions struct {
 }
 
 type TaskExecRequest struct {
-	WorkspaceKey     string                  `json:"workspace_key"`
-	DriverRunID      string                  `json:"driver_run_id"`
-	DriverStepID     string                  `json:"driver_step_id,omitempty"`
-	TaskRunID        string                  `json:"task_run_id"`
-	TaskRunAttempt   int                     `json:"task_run_attempt,omitempty"`
-	TaskID           string                  `json:"task_id"`
-	WorkerProfileID  string                  `json:"worker_profile_id,omitempty"`
-	Runner           string                  `json:"runner,omitempty"`
-	RunnerRef        string                  `json:"runner_ref,omitempty"`
-	RunnerKind       string                  `json:"runner_kind,omitempty"`
-	RunnerEntrypoint string                  `json:"runner_entrypoint,omitempty"`
-	RunnerVersionID  string                  `json:"runner_driver_version_id,omitempty"`
-	RunnerTrustLevel domain.DriverTrustLevel `json:"runner_trust_level,omitempty"`
-	ProviderProfile  string                  `json:"provider_profile,omitempty"`
-	ParentSessionID  string                  `json:"parent_session_id,omitempty"`
-	NodeID           string                  `json:"node_id,omitempty"`
-	LeaseID          string                  `json:"lease_id,omitempty"`
-	LeaseToken       string                  `json:"lease_token,omitempty"`
-	FencingToken     int64                   `json:"fencing_token,omitempty"`
-	RunnerPlacement  domain.TaskRunPlacement `json:"runner_placement,omitempty"`
-	SandboxPlacement domain.TaskRunPlacement `json:"sandbox_placement,omitempty"`
-	Input            json.RawMessage         `json:"input,omitempty"`
+	WorkspaceKey     string                           `json:"workspace_key"`
+	DriverRunID      string                           `json:"driver_run_id"`
+	DriverStepID     string                           `json:"driver_step_id,omitempty"`
+	TaskRunID        string                           `json:"task_run_id"`
+	TaskRunAttempt   int                              `json:"task_run_attempt,omitempty"`
+	TaskID           string                           `json:"task_id"`
+	WorkerProfileID  string                           `json:"worker_profile_id,omitempty"`
+	Runner           string                           `json:"runner,omitempty"`
+	RunnerRef        string                           `json:"runner_ref,omitempty"`
+	RunnerKind       string                           `json:"runner_kind,omitempty"`
+	RunnerEntrypoint string                           `json:"runner_entrypoint,omitempty"`
+	RunnerVersionID  string                           `json:"runner_driver_version_id,omitempty"`
+	RunnerTrustLevel workflowcatalog.DriverTrustLevel `json:"runner_trust_level,omitempty"`
+	ProviderProfile  string                           `json:"provider_profile,omitempty"`
+	ParentSessionID  string                           `json:"parent_session_id,omitempty"`
+	NodeID           string                           `json:"node_id,omitempty"`
+	LeaseID          string                           `json:"lease_id,omitempty"`
+	LeaseToken       string                           `json:"lease_token,omitempty"`
+	FencingToken     int64                            `json:"fencing_token,omitempty"`
+	RunnerPlacement  domain.TaskRunPlacement          `json:"runner_placement,omitempty"`
+	SandboxPlacement domain.TaskRunPlacement          `json:"sandbox_placement,omitempty"`
+	Input            json.RawMessage                  `json:"input,omitempty"`
 }
 
 type TaskExecResult struct {

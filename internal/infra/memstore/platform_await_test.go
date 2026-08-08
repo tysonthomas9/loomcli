@@ -10,6 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver/eventpolicy"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -63,13 +67,13 @@ func newMemstoreAwaitHarness(t testing.TB) *storetest.AwaitHarness {
 func memstoreAwaitAppendEvent(s *Store, ws string) func(t testing.TB, eventType, subjectRef, actorRef string) string {
 	return func(t testing.TB, eventType, subjectRef, actorRef string) string {
 		now := time.Now().UTC()
-		event, deduped := s.events.create(&domain.TriggerEvent{
+		event, deduped := s.events.create(&automation.Event{
 			WorkspaceKey: ws,
 			SourceKind:   "test",
 			EventType:    eventType,
 			SubjectRef:   subjectRef,
 			ActorRef:     actorRef,
-			Origin:       domain.TriggerEventOriginExternal,
+			Origin:       automation.EventOriginExternal,
 			OccurredAt:   now,
 			ReceivedAt:   now,
 		})
@@ -86,8 +90,8 @@ func createAwaitRunCatalog(t testing.TB, ctx context.Context, s *Store, ws strin
 		WorkspaceKey: ws,
 		DriverID:     "driver-await",
 		Name:         "await-driver",
-		OwnerType:    domain.DriverOwnerSystem,
-		Status:       domain.DriverStatusActive,
+		OwnerType:    workflowcatalog.DriverOwnerSystem,
+		Status:       workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatalf("Create driver: %v", err)
 	}
@@ -98,7 +102,7 @@ func createAwaitRunCatalog(t testing.TB, ctx context.Context, s *Store, ws strin
 		Version:          1,
 		SourceDigest:     "sha256:source-v1",
 		BundleDigest:     "sha256:bundle-v1",
-		ValidationStatus: domain.DriverVersionValidationPassed,
+		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
 	}
@@ -169,7 +173,7 @@ func TestMemstoreAwaitEventBeforeRegistrationPersistsPayload(t *testing.T) {
 	const ws = "WS"
 	payload := json.RawMessage(`{"approved":true}`)
 	now := time.Now().UTC()
-	event, deduped := s.events.create(&domain.TriggerEvent{
+	event, deduped := s.events.create(&automation.Event{
 		WorkspaceKey:  ws,
 		SourceKind:    "test",
 		SourceEventID: "approval-delivery-123",
@@ -177,7 +181,7 @@ func TestMemstoreAwaitEventBeforeRegistrationPersistsPayload(t *testing.T) {
 		SubjectRef:    "pr/123",
 		ActorRef:      "alice",
 		Payload:       payload,
-		Origin:        domain.TriggerEventOriginExternal,
+		Origin:        automation.EventOriginExternal,
 		OccurredAt:    now,
 		ReceivedAt:    now,
 	})
@@ -209,9 +213,9 @@ func TestMemstoreAwaitRegistrationSkipsHistoricalForgedRunFinished(t *testing.T)
 	const ws = "WS"
 	now := time.Now().UTC()
 
-	appendEvent := func(eventID, sourceEventID, subject, sourceKind string, origin domain.TriggerEventOrigin, receivedAt time.Time) {
+	appendEvent := func(eventID, sourceEventID, subject, sourceKind string, origin automation.EventOrigin, receivedAt time.Time) {
 		t.Helper()
-		if _, deduped := s.events.create(&domain.TriggerEvent{
+		if _, deduped := s.events.create(&automation.Event{
 			WorkspaceKey: ws, EventID: eventID, SourceEventID: sourceEventID,
 			SourceKind: sourceKind, EventType: eventpolicy.RunFinishedEventType,
 			SubjectRef: subject, ActorRef: eventpolicy.RunFinishedActorRef, Origin: origin,
@@ -223,7 +227,7 @@ func TestMemstoreAwaitRegistrationSkipsHistoricalForgedRunFinished(t *testing.T)
 	}
 
 	appendEvent("stored-forged-only", eventpolicy.RunFinishedSourceEventIDPrefix+"child-forged:completed",
-		"child-forged", "github", domain.TriggerEventOriginExternal, now)
+		"child-forged", "github", automation.EventOriginExternal, now)
 	forgedOnly, err := s.Awaits().RegisterAwaitAndCheck(ctx, ws, store.AwaitRegistration{
 		InstanceKey: domain.AwaitInstanceKey("parent-forged", 1), RunID: "parent-forged",
 		Pattern:    domain.AwaitEventKey(eventpolicy.RunFinishedEventType, "child-forged"),
@@ -234,10 +238,10 @@ func TestMemstoreAwaitRegistrationSkipsHistoricalForgedRunFinished(t *testing.T)
 	}
 
 	appendEvent("stored-forged-first", eventpolicy.RunFinishedSourceEventIDPrefix+"child-valid:failed",
-		"child-valid", "github", domain.TriggerEventOriginExternal, now.Add(time.Second))
+		"child-valid", "github", automation.EventOriginExternal, now.Add(time.Second))
 	validID := eventpolicy.RunFinishedSourceEventIDPrefix + "child-valid:completed"
 	appendEvent("stored-genuine-later", validID, "child-valid", eventpolicy.SourceKindExecution,
-		domain.TriggerEventOriginSystem, now.Add(2*time.Second))
+		automation.EventOriginSystem, now.Add(2*time.Second))
 	genuine, err := s.Awaits().RegisterAwaitAndCheck(ctx, ws, store.AwaitRegistration{
 		InstanceKey: domain.AwaitInstanceKey("parent-valid", 1), RunID: "parent-valid",
 		Pattern:    domain.AwaitEventKey(eventpolicy.RunFinishedEventType, "child-valid"),
@@ -251,10 +255,10 @@ func TestMemstoreAwaitRegistrationSkipsHistoricalForgedRunFinished(t *testing.T)
 func TestMemstoreAwaitRegistrationRejectsHistoricalReservedActorOnOrdinaryEvent(t *testing.T) {
 	s := New()
 	now := time.Now().UTC()
-	if _, deduped := s.events.create(&domain.TriggerEvent{
+	if _, deduped := s.events.create(&automation.Event{
 		WorkspaceKey: "WS", EventID: "stored-reserved-actor", SourceEventID: "approval-reserved-1",
 		SourceKind: "github", EventType: "approval.granted", SubjectRef: "deploy-1",
-		ActorRef: "system:approver", Origin: domain.TriggerEventOriginExternal,
+		ActorRef: "system:approver", Origin: automation.EventOriginExternal,
 		OccurredAt: now, ReceivedAt: now,
 	}); deduped {
 		t.Fatal("reserved actor event unexpectedly deduped")
@@ -275,10 +279,10 @@ func TestMemstoreAwaitEventBeforeRegistrationRejectsReservedSourceEventID(t *tes
 	const ws = "WS"
 	instanceKey := domain.AwaitInstanceKey("run-1", 1)
 	now := time.Now().UTC()
-	if _, deduped := s.events.create(&domain.TriggerEvent{
+	if _, deduped := s.events.create(&automation.Event{
 		WorkspaceKey: ws, SourceKind: "test", SourceEventID: domain.AwaitTimeoutEventID(instanceKey),
 		EventType: "approval.granted", SubjectRef: "pr/123", ActorRef: "alice",
-		Origin: domain.TriggerEventOriginExternal, OccurredAt: now, ReceivedAt: now,
+		Origin: automation.EventOriginExternal, OccurredAt: now, ReceivedAt: now,
 	}); deduped {
 		t.Fatal("event unexpectedly deduped")
 	}
@@ -296,24 +300,24 @@ func TestMemstoreAwaitEventBeforeRegistrationSkipsOversizedPayload(t *testing.T)
 	ctx := t.Context()
 	const ws = "WS"
 	now := time.Now().UTC()
-	if _, deduped := s.events.create(&domain.TriggerEvent{
+	if _, deduped := s.events.create(&automation.Event{
 		WorkspaceKey: ws,
 		SourceKind:   "test",
 		EventType:    "approval.granted",
 		SubjectRef:   "pr/123",
 		ActorRef:     "alice",
 		Payload:      json.RawMessage(strings.Repeat("x", domain.DefaultAwaitResumePayloadCap+1)),
-		Origin:       domain.TriggerEventOriginExternal,
+		Origin:       automation.EventOriginExternal,
 		OccurredAt:   now,
 		ReceivedAt:   now,
 	}); deduped {
 		t.Fatal("event unexpectedly deduped")
 	}
 	validPayload := json.RawMessage(`{"approved":true}`)
-	if _, deduped := s.events.create(&domain.TriggerEvent{
+	if _, deduped := s.events.create(&automation.Event{
 		WorkspaceKey: ws, SourceKind: "test", SourceEventID: "valid-after-oversized",
 		EventType: "approval.granted", SubjectRef: "pr/123", ActorRef: "alice", Payload: validPayload,
-		Origin: domain.TriggerEventOriginExternal, OccurredAt: now.Add(time.Second), ReceivedAt: now.Add(time.Second),
+		Origin: automation.EventOriginExternal, OccurredAt: now.Add(time.Second), ReceivedAt: now.Add(time.Second),
 	}); deduped {
 		t.Fatal("valid event unexpectedly deduped")
 	}
@@ -477,14 +481,14 @@ func TestResolveAwaitAndResumeDoesNotDeadlockConcurrentFinish(t *testing.T) {
 		createAwaitRunCatalog(t, ctx, s, ws)
 		sourceEventID := fmt.Sprintf("source-%d", i)
 		now := time.Now().UTC()
-		if _, deduped := s.events.create(&domain.TriggerEvent{
+		if _, deduped := s.events.create(&automation.Event{
 			WorkspaceKey: ws,
 			EventID:      sourceEventID,
 			SourceKind:   "test",
 			EventType:    "source.created",
 			SubjectRef:   sourceEventID,
 			ActorRef:     "system",
-			Origin:       domain.TriggerEventOriginExternal,
+			Origin:       automation.EventOriginExternal,
 			OccurredAt:   now,
 			ReceivedAt:   now,
 		}); deduped {

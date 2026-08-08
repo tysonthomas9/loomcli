@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver/runtypes"
 	"github.com/tysonthomas9/loomcli/internal/driver/sandbox"
@@ -63,7 +65,7 @@ func ResolveSandboxLauncher() (SandboxLauncher, error) {
 }
 
 type Executor struct {
-	Store        store.Store
+	Store        executorStore
 	WorkspaceKey string
 	RunID        string
 	WorkDir      string
@@ -326,7 +328,7 @@ func (e *Executor) nextQueuedRun(ctx context.Context) (*domain.DriverRun, error)
 	return nil, ErrNoQueuedRun
 }
 
-func queuedRunByID(ctx context.Context, s store.Store, ws, runID string) (*domain.DriverRun, error) {
+func queuedRunByID(ctx context.Context, s executorStore, ws, runID string) (*domain.DriverRun, error) {
 	if strings.TrimSpace(ws) == "" {
 		return nil, fmt.Errorf("workspace key required for run %q: %w", runID, domain.ErrInvalid)
 	}
@@ -340,7 +342,7 @@ func queuedRunByID(ctx context.Context, s store.Store, ws, runID string) (*domai
 	return run, nil
 }
 
-func nextQueuedRunInWorkspace(ctx context.Context, s store.Store, ws string) (*domain.DriverRun, error) {
+func nextQueuedRunInWorkspace(ctx context.Context, s executorStore, ws string) (*domain.DriverRun, error) {
 	runs, err := s.DriverRuns().List(ctx, ws, store.DriverRunFilter{Status: domain.DriverRunQueued, Limit: 1})
 	if err != nil {
 		return nil, fmt.Errorf("list queued driver runs: %w", err)
@@ -811,7 +813,7 @@ func heartbeatExecutorNode(ctx context.Context, executor *Executor, ws, nodeID s
 	}
 }
 
-func loadRunRequest(ctx context.Context, workDir string, run *domain.DriverRun, s store.Store) (RunRequest, error) {
+func loadRunRequest(ctx context.Context, workDir string, run *domain.DriverRun, s executorStore) (RunRequest, error) {
 	version, err := s.DriverVersions().Get(ctx, run.WorkspaceKey, run.DriverVersionID)
 	if err != nil {
 		return RunRequest{}, fmt.Errorf("load pinned driver version: %w", err)
@@ -819,7 +821,7 @@ func loadRunRequest(ctx context.Context, workDir string, run *domain.DriverRun, 
 	if version.DriverID != run.DriverID {
 		return RunRequest{}, fmt.Errorf("pinned version %q belongs to driver %q, run wants %q: %w", version.VersionID, version.DriverID, run.DriverID, domain.ErrInvalid)
 	}
-	if version.ValidationStatus != domain.DriverVersionValidationPassed {
+	if version.ValidationStatus != workflowcatalog.DriverVersionValidationPassed {
 		return RunRequest{}, fmt.Errorf("pinned version %q is not passed: %w", version.VersionID, domain.ErrInvalid)
 	}
 	if version.BundleRef == "" {

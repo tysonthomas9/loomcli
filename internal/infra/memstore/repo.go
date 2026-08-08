@@ -7,29 +7,31 @@ import (
 	"sync"
 	"time"
 
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 type repoStore struct {
 	mu    sync.RWMutex
-	items map[string]map[string]*domain.Repo // wsKey → name → Repo
+	items map[string]map[string]*workspacemodule.Repository // wsKey → name → Repo
 }
 
 func newRepoStore() *repoStore {
-	return &repoStore{items: make(map[string]map[string]*domain.Repo)}
+	return &repoStore{items: make(map[string]map[string]*workspacemodule.Repository)}
 }
 
 var _ store.RepoStore = (*repoStore)(nil)
 
-func (s *repoStore) Create(_ context.Context, in store.RepoCreate) (*domain.Repo, error) {
+func (s *repoStore) Create(_ context.Context, in store.RepoCreate) (*workspacemodule.Repository, error) {
 	if in.WorkspaceKey == "" || in.Name == "" {
 		return nil, fmt.Errorf("workspace_key + name required: %w", domain.ErrInvalid)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.items[in.WorkspaceKey] == nil {
-		s.items[in.WorkspaceKey] = make(map[string]*domain.Repo)
+		s.items[in.WorkspaceKey] = make(map[string]*workspacemodule.Repository)
 	}
 	if _, ok := s.items[in.WorkspaceKey][in.Name]; ok {
 		return nil, fmt.Errorf("repo %q in workspace %q: %w", in.Name, in.WorkspaceKey, domain.ErrAlreadyExists)
@@ -39,7 +41,7 @@ func (s *repoStore) Create(_ context.Context, in store.RepoCreate) (*domain.Repo
 	if source == "" {
 		source = in.Name
 	}
-	r := &domain.Repo{
+	r := &workspacemodule.Repository{
 		WorkspaceKey:  in.WorkspaceKey,
 		Name:          in.Name,
 		RemoteURL:     in.RemoteURL,
@@ -54,7 +56,7 @@ func (s *repoStore) Create(_ context.Context, in store.RepoCreate) (*domain.Repo
 	return cloneRepo(r), nil
 }
 
-func (s *repoStore) Get(_ context.Context, ws, name string) (*domain.Repo, error) {
+func (s *repoStore) Get(_ context.Context, ws, name string) (*workspacemodule.Repository, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	r, ok := s.items[ws][name]
@@ -64,11 +66,11 @@ func (s *repoStore) Get(_ context.Context, ws, name string) (*domain.Repo, error
 	return cloneRepo(r), nil
 }
 
-func (s *repoStore) List(_ context.Context, ws string) ([]*domain.Repo, error) {
+func (s *repoStore) List(_ context.Context, ws string) ([]*workspacemodule.Repository, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	wsRepos := s.items[ws]
-	out := make([]*domain.Repo, 0, len(wsRepos))
+	out := make([]*workspacemodule.Repository, 0, len(wsRepos))
 	for _, r := range wsRepos {
 		out = append(out, cloneRepo(r))
 	}
@@ -76,7 +78,7 @@ func (s *repoStore) List(_ context.Context, ws string) ([]*domain.Repo, error) {
 	return out, nil
 }
 
-func (s *repoStore) Update(_ context.Context, ws, name string, patch store.RepoUpdate) (*domain.Repo, error) {
+func (s *repoStore) Update(_ context.Context, ws, name string, patch store.RepoUpdate) (*workspacemodule.Repository, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r, ok := s.items[ws][name]
@@ -112,7 +114,7 @@ func (s *repoStore) Delete(_ context.Context, ws, name string) error {
 	return nil
 }
 
-func cloneRepo(r *domain.Repo) *domain.Repo {
+func cloneRepo(r *workspacemodule.Repository) *workspacemodule.Repository {
 	out := *r
 	out.Groups = append([]string(nil), r.Groups...)
 	return &out

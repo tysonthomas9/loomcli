@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
@@ -63,9 +65,9 @@ func seedExecutablePromptAgentDriver(t *testing.T, st *memstore.Store) {
 		WorkspaceKey: agentRecordTestWS,
 		DriverID:     workflowdefs.BuiltinPromptAgentWorkflowName,
 		Name:         workflowdefs.BuiltinPromptAgentWorkflowName,
-		OwnerType:    domain.DriverOwnerSystem,
-		Status:       domain.DriverStatusActive,
-		TrustLevel:   domain.DriverTrustTrusted,
+		OwnerType:    workflowcatalog.DriverOwnerSystem,
+		Status:       workflowcatalog.DriverStatusActive,
+		TrustLevel:   workflowcatalog.DriverTrustTrusted,
 	}); err != nil {
 		t.Fatalf("create prompt-agent driver fixture: %v", err)
 	}
@@ -80,7 +82,7 @@ func seedExecutablePromptAgentDriver(t *testing.T, st *memstore.Store) {
 		BundleDigest:     "sha256:prompt-agent-test-bundle",
 		Runtime:          "node",
 		Manifest:         map[string]string{"runners": string(runners)},
-		ValidationStatus: domain.DriverVersionValidationPassed,
+		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 		CreatedBy:        "system",
 	}); err != nil {
 		t.Fatalf("create prompt-agent driver version fixture: %v", err)

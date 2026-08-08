@@ -78,7 +78,7 @@ The newest trace under "loom-cli" service shows the full tree:
 | Gap | Reason |
 |---|---|
 | Archive Postgres backend (`database/sql`, not pgxpool) | `otelpgx` doesn't apply; would need `otelsql` migration. |
-| WebSocket / SSE handlers (`internal/webui/log/streamer.go`, `internal/webui/server/realtime/handler.go`) | Long-lived connections; no span model for streamed frames yet. |
+| WebSocket / SSE handlers (`internal/logstore/streamer.go`, `internal/webui/server/realtime/handler.go`) | Long-lived connections; no span model for streamed frames yet. |
 | Daemon supervisor goroutines | Lifecycle decisions infrequent; log search is sufficient. |
 | Recovery service (`fleet-db/internal/recovery/`) | Admin-only, manual operation. |
 | RPC trace-context propagation | JSON-RPC envelope doesn't carry `traceparent`; RPC spans are unrooted on the producer side. |

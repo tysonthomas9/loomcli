@@ -12,7 +12,8 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
+	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
 )
 
 // newTestSessionStore creates a sessions.Store rooted in a temporary directory.
@@ -298,7 +299,7 @@ func TestSessionContentHandlersPreserveUnavailable(t *testing.T) {
 	base := NewSessionService(nil, nil)
 	svc := &sessionContentErrorService{
 		SessionService: base,
-		err:            service.ErrUnavailable("managed content temporarily unavailable"),
+		err:            apperrors.ErrUnavailable("managed content temporarily unavailable"),
 	}
 	for _, tc := range []struct {
 		name    string
@@ -333,7 +334,7 @@ func TestSessionContentHandlersPreserveUnavailable(t *testing.T) {
 }
 
 type sessionContentErrorService struct {
-	service.SessionService
+	sessioncoord.SessionService
 	err error
 }
 

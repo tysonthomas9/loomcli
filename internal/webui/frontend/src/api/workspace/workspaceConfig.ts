@@ -6,7 +6,7 @@
 import { api, ApiError, apiErrorFromResponse } from "@/api/common";
 import { cacheBackendConfig } from "@/api/common/config";
 import type { BackendConfigData } from "@/api/common";
-import type { WorkspaceData } from "./workspace";
+import { fetchWorkspaceApi, type WorkspaceData } from "./workspace";
 
 /**
  * Get the store-backed backend config for a specific workspace.
@@ -63,7 +63,6 @@ export async function updateWorkspaceBackend(
     }
   }
   // Refetch full workspace data after backend update
-  const { fetchWorkspaceApi } = await import("./workspace");
   return fetchWorkspaceApi(workspaceId);
 }
 
@@ -90,6 +89,5 @@ export async function updateWorkspaceDesignFormat(
       );
     }
   }
-  const { fetchWorkspaceApi } = await import("./workspace");
   return fetchWorkspaceApi(workspaceId);
 }

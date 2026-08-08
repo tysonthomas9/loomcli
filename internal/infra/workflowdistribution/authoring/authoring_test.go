@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
@@ -135,7 +134,7 @@ func TestBuildAndAuthorSubmitsOneUntrustedInactiveCatalogCommand(t *testing.T) {
 	if result.Activated {
 		t.Fatal("operator-authored result was activated")
 	}
-	if got := result.Bundle.Manifest[driverpkg.ManifestTrustLevelKey]; got != string(domain.DriverTrustUntrusted) {
+	if got := result.Bundle.Manifest[driverpkg.ManifestTrustLevelKey]; got != string(workflowcatalog.DriverTrustUntrusted) {
 		t.Fatalf("bundle trust = %q, want untrusted", got)
 	}
 	if _, err := os.Stat(filepath.Join(result.Bundle.Root, "dist", "server.mjs")); err != nil {
@@ -175,7 +174,7 @@ func TestBuildAndAuthorManagedStampsCanonicalProvenance(t *testing.T) {
 		api.managedCommand.Manifest["provenance"] != workflowcatalog.ManagedBuiltinProvenance {
 		t.Fatalf("managed command = %+v", api.managedCommand)
 	}
-	if got := result.Bundle.Manifest[driverpkg.ManifestTrustLevelKey]; got != string(domain.DriverTrustTrusted) {
+	if got := result.Bundle.Manifest[driverpkg.ManifestTrustLevelKey]; got != string(workflowcatalog.DriverTrustTrusted) {
 		t.Fatalf("managed bundle trust = %q, want trusted", got)
 	}
 }
@@ -183,7 +182,7 @@ func TestBuildAndAuthorManagedStampsCanonicalProvenance(t *testing.T) {
 func TestBuildAndAuthorRejectsOperatorTrustAndActivationSelection(t *testing.T) {
 	for name, opts := range map[string]BuildAndRegisterOptions{
 		"activate": {Activate: true},
-		"trusted":  {Trust: domain.DriverTrustTrusted},
+		"trusted":  {Trust: workflowcatalog.DriverTrustTrusted},
 	} {
 		t.Run(name, func(t *testing.T) {
 			api := &authoringAPISpy{}

@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -177,7 +179,7 @@ func TestAgentServiceMemstoreScriptedBehaviorParity(t *testing.T) {
 		Version:          2,
 		SourceDigest:     "sha256:source-2",
 		BundleDigest:     "sha256:bundle-2",
-		ValidationStatus: domain.DriverVersionValidationPassed,
+		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("Create second driver version: %v", err)
 	}
@@ -233,8 +235,8 @@ func TestAgentServiceMemstoreReferenceValidation(t *testing.T) {
 		WorkspaceKey: "WS",
 		DriverID:     "driver-1",
 		Name:         "epic-runner",
-		OwnerType:    domain.DriverOwnerSystem,
-		Status:       domain.DriverStatusActive,
+		OwnerType:    workflowcatalog.DriverOwnerSystem,
+		Status:       workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatalf("Create driver: %v", err)
 	}
@@ -245,7 +247,7 @@ func TestAgentServiceMemstoreReferenceValidation(t *testing.T) {
 		Version:          1,
 		SourceDigest:     "sha256:source",
 		BundleDigest:     "sha256:bundle",
-		ValidationStatus: domain.DriverVersionValidationPassed,
+		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
 	}
@@ -332,8 +334,8 @@ func seedAgentServiceRefs(t *testing.T, s *Store) {
 		WorkspaceKey: "WS",
 		DriverID:     "driver-1",
 		Name:         "epic-runner",
-		OwnerType:    domain.DriverOwnerSystem,
-		Status:       domain.DriverStatusActive,
+		OwnerType:    workflowcatalog.DriverOwnerSystem,
+		Status:       workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatalf("Create driver: %v", err)
 	}
@@ -344,7 +346,7 @@ func seedAgentServiceRefs(t *testing.T, s *Store) {
 		Version:          1,
 		SourceDigest:     "sha256:source",
 		BundleDigest:     "sha256:bundle",
-		ValidationStatus: domain.DriverVersionValidationPassed,
+		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
 	}

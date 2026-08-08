@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -390,7 +392,7 @@ func TestNodeRunnerFailsWhenRuntimeReturnsNoResult(t *testing.T) {
 		BundleRoot: root,
 		ServerPath: filepath.Join(root, "dist", "server.mjs"),
 		Manifest:   map[string]string{"workflow_name": "epic-runner"},
-		TrustLevel: domain.DriverTrustTrusted,
+		TrustLevel: workflowcatalog.DriverTrustTrusted,
 	})
 	if err != nil {
 		t.Fatalf("NodeRunner.Run: %v", err)
@@ -414,7 +416,7 @@ func TestNodeRunnerFailsWhenWorkflowResultIsMissingTerminalStatus(t *testing.T) 
 		BundleRoot: root,
 		ServerPath: filepath.Join(root, "dist", "server.mjs"),
 		Manifest:   map[string]string{"workflow_name": "epic-runner"},
-		TrustLevel: domain.DriverTrustTrusted,
+		TrustLevel: workflowcatalog.DriverTrustTrusted,
 	})
 	if err != nil {
 		t.Fatalf("NodeRunner.Run: %v", err)
@@ -483,7 +485,7 @@ if (process.send) {
 			BundleRoot: root,
 			ServerPath: filepath.Join(dist, "server.mjs"),
 			Manifest:   map[string]string{"workflow_name": "epic-runner"},
-			TrustLevel: domain.DriverTrustTrusted,
+			TrustLevel: workflowcatalog.DriverTrustTrusted,
 		})
 		done <- struct {
 			result RunResult
@@ -568,7 +570,7 @@ if (process.send) {
 		BundleRoot: root,
 		ServerPath: filepath.Join(dist, "server.mjs"),
 		Manifest:   map[string]string{"workflow_name": "epic-runner"},
-		TrustLevel: domain.DriverTrustTrusted,
+		TrustLevel: workflowcatalog.DriverTrustTrusted,
 	})
 	if err != nil {
 		t.Fatalf("NodeRunner.Run: %v", err)

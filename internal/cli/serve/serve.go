@@ -28,6 +28,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr"
 	driverexecutor "github.com/tysonthomas9/loomcli/internal/driver"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
+	"github.com/tysonthomas9/loomcli/internal/infra/workspacecatalog"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	webuiapp "github.com/tysonthomas9/loomcli/internal/webui/app"
@@ -615,7 +616,7 @@ func buildMonitorHandlers(
 ) webui.MonitorHandlers {
 	return monitorwire.BuildHandlers(
 		collectDataFn, staleDetectorHandler, issueBackendFn, defaultWorkspace, usageHandler,
-		monitorStoreDataSource, metricscmd.HandleWorkspaces(st),
+		monitorStoreDataSource, metricscmd.HandleWorkspaces(st), st.DriverRuns(),
 	)
 }
 
@@ -672,6 +673,13 @@ func buildServerConfig(
 	cfg.DaytonaProvider = serveadapter.NewDaytonaProviderBroker(cfg.LocalSettingsDir)
 	if storeHandle != nil {
 		fs = applyStoreHandleServerConfig(&cfg, fs, storeHandle, gitOps)
+	}
+	if cfg.Store != nil {
+		workspaceCapability, workspaceErr := workspacecatalog.New(cfg.Store.Workspaces(), cfg.Store.Repos())
+		if workspaceErr != nil {
+			return webui.ServerConfig{}, serveCapabilitySet{}, fmt.Errorf("compose Workspace capability: %w", workspaceErr)
+		}
+		cfg.WorkspaceCatalog = workspaceCapability
 	}
 	applyFleetConfig(&cfg, fs)
 	module, err := buildServeWorkflowCatalogModule(cfg, storeHandle)
@@ -871,15 +879,14 @@ func applyWorkspaceConfigWithAdmission(
 	cfg.WorkspaceIDResolverFn = serveadapter.BuildWorkspaceIDResolverFn(cfg.Store)
 	cfg.InitialWorkspaceID = serveadapter.ResolveInitialWorkspaceID(cfg.Store)
 	applyFleetInitialWorkspaceFallback(cfg, false)
-	cfg.WorkspaceDeleteFn = serveadapter.BuildWorkspaceDeleteFn(cfg.Store)
-	cfg.SetDefaultWorkspaceFn = nil
-	cfg.ClearDefaultWorkspaceFn = nil
+	cfg.WorkspaceDeleteCleanupFn = serveadapter.BuildWorkspaceDeleteCleanupFn()
 	var admissions infrafleetdb.RepositoryAdmissionTransport
 	if storeHandle != nil && storeHandle.FleetDBClient() != nil {
 		admissions = storeHandle.FleetDBClient().RepositoryAdmissions()
 	}
-	operations := workspacemgr.NewStoreBackedWorkspaceAdmissionOperations(
+	operations := workspacemgr.NewStoreBackedWorkspaceAdmissionOperationsWithWorkspace(
 		cfg.Store,
+		cfg.WorkspaceCatalog,
 		admissions,
 		journal,
 		cfg.WorkspaceSourceControl,

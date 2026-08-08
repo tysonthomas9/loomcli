@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -99,6 +101,13 @@ type TaskRunRequestOutcome struct {
 	ArtifactIDs []string
 }
 
+type taskRunRequestStore interface {
+	Drivers() store.DriverStore
+	DriverVersions() store.DriverVersionStore
+	Nodes() store.NodeStore
+	WorkerProfiles() store.WorkerProfileStore
+}
+
 // PrepareTaskRunRequest resolves the requested runner and performs provider
 // preflight without writing TaskRun or DriverStep state. The driver-op HTTP
 // adapter uses this read-only compatibility seam while Execution owns the
@@ -106,7 +115,7 @@ type TaskRunRequestOutcome struct {
 // the legacy Store-writing request helpers.
 func PrepareTaskRunRequest(
 	ctx context.Context,
-	s store.Store,
+	s taskRunRequestStore,
 	opts TaskRunRequestOptions,
 	parent *domain.DriverRun,
 	preflighter TaskProviderPreflighter,
@@ -143,7 +152,7 @@ func normalizeTaskRunRequestOptions(opts TaskRunRequestOptions) TaskRunRequestOp
 	opts.RunnerKind = strings.TrimSpace(opts.RunnerKind)
 	opts.RunnerEntrypoint = strings.TrimSpace(opts.RunnerEntrypoint)
 	opts.RunnerVersionID = strings.TrimSpace(opts.RunnerVersionID)
-	opts.RunnerTrustLevel = domain.DriverTrustLevel(strings.TrimSpace(string(opts.RunnerTrustLevel)))
+	opts.RunnerTrustLevel = workflowcatalog.DriverTrustLevel(strings.TrimSpace(string(opts.RunnerTrustLevel)))
 	opts.ProviderProfile = strings.TrimSpace(opts.ProviderProfile)
 	opts.ParentSessionID = strings.TrimSpace(opts.ParentSessionID)
 	opts.ParentNodeID = strings.TrimSpace(opts.ParentNodeID)
@@ -174,7 +183,7 @@ func preflightTaskRunRequest(ctx context.Context, opts TaskRunRequestOptions, ca
 	return resolved, nil
 }
 
-func resolveTaskRunRequestRunner(ctx context.Context, s store.Store, opts TaskRunRequestOptions, parent *domain.DriverRun) (TaskRunRequestOptions, error) {
+func resolveTaskRunRequestRunner(ctx context.Context, s taskRunRequestStore, opts TaskRunRequestOptions, parent *domain.DriverRun) (TaskRunRequestOptions, error) {
 	if strings.TrimSpace(opts.Runner) == "" {
 		return opts, nil
 	}
@@ -238,7 +247,7 @@ type executeClaimedTaskRunOptions struct {
 	DriverStepID       string
 	TaskID             string
 	ProviderProfile    string
-	RunnerTrustLevel   domain.DriverTrustLevel
+	RunnerTrustLevel   workflowcatalog.DriverTrustLevel
 	ParentSessionID    string
 	LeaseToken         string
 	HeartbeatInterval  time.Duration
@@ -264,7 +273,7 @@ type claimedTaskRunRefs struct {
 	RunnerKind       string
 	RunnerEntrypoint string
 	RunnerVersionID  string
-	RunnerTrustLevel domain.DriverTrustLevel
+	RunnerTrustLevel workflowcatalog.DriverTrustLevel
 	ProviderProfile  string
 	ParentSessionID  string
 	HeartbeatSource  string
@@ -288,7 +297,7 @@ func claimedTaskRunRefsFromOptions(claimed *domain.TaskRun, opts executeClaimedT
 		RunnerKind:       claimed.RunnerKind,
 		RunnerEntrypoint: claimed.RunnerEntrypoint,
 		RunnerVersionID:  claimed.RunnerVersionID,
-		RunnerTrustLevel: domain.DriverTrustLevel(firstNonEmpty(string(opts.RunnerTrustLevel), claimed.RuntimeMetadata["runner_trust_level"])),
+		RunnerTrustLevel: workflowcatalog.DriverTrustLevel(firstNonEmpty(string(opts.RunnerTrustLevel), claimed.RuntimeMetadata["runner_trust_level"])),
 		ProviderProfile:  firstNonEmpty(opts.ProviderProfile, claimed.ProviderProfile),
 		ParentSessionID:  firstNonEmpty(opts.ParentSessionID, claimed.RuntimeMetadata["parent_session_id"]),
 		HeartbeatSource:  firstNonEmpty(opts.HeartbeatSource, "task_run_executor"),

@@ -56,7 +56,7 @@ func TestE2E_WorkflowCatalogPhase2RealFleetDBLoomHTTPAndCLI(t *testing.T) {
 	if cliVersions.DriverID != e2e.driverID || len(cliVersions.Versions) != 1 {
 		t.Fatalf("CLI versions = %+v, want one version for %s", cliVersions, e2e.driverID)
 	}
-	if got := cliVersions.Versions[0]; got.Version == nil || got.Version.VersionID != e2e.versionID || got.Approved || got.Active || got.EffectiveTrust != domain.DriverTrustUntrusted {
+	if got := cliVersions.Versions[0]; got.Version == nil || got.Version.VersionID != e2e.versionID || got.Approved || got.Active || got.EffectiveTrust != workflowcatalog.DriverTrustUntrusted {
 		t.Fatalf("initial CLI version = %+v, want inactive, unapproved, untrusted %s", got, e2e.versionID)
 	}
 
@@ -77,7 +77,7 @@ func TestE2E_WorkflowCatalogPhase2RealFleetDBLoomHTTPAndCLI(t *testing.T) {
 
 	var activated workflowCatalogCLIAction
 	e2e.runCLIJSON(&activated, "workflow", "activate", e2e.driverID, "--version", e2e.versionID, "--json")
-	if activated.Version == nil || activated.Version.VersionID != e2e.versionID || !activated.Active || !activated.Approved || activated.EffectiveTrust != domain.DriverTrustTrusted {
+	if activated.Version == nil || activated.Version.VersionID != e2e.versionID || !activated.Active || !activated.Approved || activated.EffectiveTrust != workflowcatalog.DriverTrustTrusted {
 		t.Fatalf("CLI activate = %+v, want active, approved, trusted", activated)
 	}
 	versions = e2e.listVersionsHTTP(e2e.workspace)
@@ -85,7 +85,7 @@ func TestE2E_WorkflowCatalogPhase2RealFleetDBLoomHTTPAndCLI(t *testing.T) {
 
 	var unapproved workflowCatalogCLIAction
 	e2e.runCLIJSON(&unapproved, "workflow", "unapprove", e2e.driverID, "--version", e2e.versionID, "--json")
-	if unapproved.Version == nil || unapproved.Version.VersionID != e2e.versionID || !unapproved.Active || unapproved.Approved || unapproved.EffectiveTrust != domain.DriverTrustUntrusted {
+	if unapproved.Version == nil || unapproved.Version.VersionID != e2e.versionID || !unapproved.Active || unapproved.Approved || unapproved.EffectiveTrust != workflowcatalog.DriverTrustUntrusted {
 		t.Fatalf("CLI unapprove = %+v, want still-active, unapproved, untrusted", unapproved)
 	}
 
@@ -124,22 +124,22 @@ type workflowCatalogHTTPList struct {
 }
 
 type workflowCatalogHTTPListItem struct {
-	DriverID        string              `json:"driver_id"`
-	Name            string              `json:"name"`
-	Status          domain.DriverStatus `json:"status"`
-	ActiveVersionID string              `json:"active_version_id"`
-	Revision        uint64              `json:"revision"`
+	DriverID        string                       `json:"driver_id"`
+	Name            string                       `json:"name"`
+	Status          workflowcatalog.DriverStatus `json:"status"`
+	ActiveVersionID string                       `json:"active_version_id"`
+	Revision        uint64                       `json:"revision"`
 }
 
 type workflowCatalogHTTPVersions struct {
-	Driver   *domain.Driver          `json:"driver"`
-	Versions []*domain.DriverVersion `json:"versions"`
+	Driver   *workflowcatalog.Driver          `json:"driver"`
+	Versions []*workflowcatalog.DriverVersion `json:"versions"`
 }
 
 type workflowCatalogHTTPAction struct {
-	Action  string                `json:"action"`
-	Driver  *domain.Driver        `json:"driver"`
-	Version *domain.DriverVersion `json:"version"`
+	Action  string                         `json:"action"`
+	Driver  *workflowcatalog.Driver        `json:"driver"`
+	Version *workflowcatalog.DriverVersion `json:"version"`
 }
 
 type workflowCatalogHTTPError struct {
@@ -155,10 +155,10 @@ type workflowCatalogCLIVersions struct {
 }
 
 type workflowCatalogCLIAction struct {
-	Version        *domain.DriverVersion   `json:"version"`
-	Active         bool                    `json:"active"`
-	Approved       bool                    `json:"approved"`
-	EffectiveTrust domain.DriverTrustLevel `json:"effective_trust"`
+	Version        *workflowcatalog.DriverVersion   `json:"version"`
+	Active         bool                             `json:"active"`
+	Approved       bool                             `json:"approved"`
+	EffectiveTrust workflowcatalog.DriverTrustLevel `json:"effective_trust"`
 }
 
 func newWorkflowCatalogPhase2E2E(t *testing.T) *workflowCatalogPhase2E2E {
@@ -277,10 +277,10 @@ func (e *workflowCatalogPhase2E2E) seedPrerequisites() {
 		WorkspaceKey: e.workspace,
 		DriverID:     e.driverID,
 		Name:         e.driverID,
-		OwnerType:    domain.DriverOwnerUser,
+		OwnerType:    workflowcatalog.DriverOwnerUser,
 		OwnerRef:     e.actor,
-		Status:       domain.DriverStatusDraft,
-		TrustLevel:   domain.DriverTrustUntrusted,
+		Status:       workflowcatalog.DriverStatusDraft,
+		TrustLevel:   workflowcatalog.DriverTrustUntrusted,
 		Metadata:     map[string]string{"fixture_metadata": "preserve-me"},
 	})
 	if err != nil {
@@ -299,14 +299,14 @@ func (e *workflowCatalogPhase2E2E) seedPrerequisites() {
 		BundleRef:        "fixture://phase2/bundle",
 		BundleDigest:     "sha256:phase2-bundle",
 		Runtime:          "node",
-		Manifest:         map[string]string{workflowcatalog.ManifestTrustLevelKey: string(domain.DriverTrustUntrusted)},
-		ValidationStatus: domain.DriverVersionValidationPassed,
+		Manifest:         map[string]string{workflowcatalog.ManifestTrustLevelKey: string(workflowcatalog.DriverTrustUntrusted)},
+		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 		CreatedBy:        e.actor,
 	})
 	if err != nil {
 		e.t.Fatalf("seed validated driver version: %v", err)
 	}
-	if version.DriverID != e.driverID || version.ValidationStatus != domain.DriverVersionValidationPassed {
+	if version.DriverID != e.driverID || version.ValidationStatus != workflowcatalog.DriverVersionValidationPassed {
 		e.t.Fatalf("seeded version = %+v", version)
 	}
 }
@@ -450,7 +450,7 @@ func (e *workflowCatalogPhase2E2E) assertFinalDurableState() {
 	if err != nil {
 		e.t.Fatalf("read final durable version: %v", err)
 	}
-	if driver.Revision != 4 || driver.ActiveVersionID != e.versionID || driver.Metadata["fixture_metadata"] != "preserve-me" || workflowcatalog.VersionApproved(driver, version) || workflowcatalog.EffectiveTrust(driver, version) != domain.DriverTrustUntrusted {
+	if driver.Revision != 4 || driver.ActiveVersionID != e.versionID || driver.Metadata["fixture_metadata"] != "preserve-me" || workflowcatalog.VersionApproved(driver, version) || workflowcatalog.EffectiveTrust(driver, version) != workflowcatalog.DriverTrustUntrusted {
 		e.t.Fatalf("final durable state driver=%+v version=%+v, want revision 4, active-but-unapproved, preserved metadata", driver, version)
 	}
 	if _, exists := driver.Metadata[workflowcatalog.ApprovedVersionMetadataKey(e.versionID)]; exists {

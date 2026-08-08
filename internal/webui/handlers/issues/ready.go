@@ -1,35 +1,22 @@
 package issues
 
 import (
-	"context"
 	"fmt"
-	"log/slog"
 	"net/http"
-	"time"
 
 	"net/url"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/types"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
 
-// IssueBackendFn returns the active backend.IssueBackend. Consumed by
-// HandleReadyWithBackend when no daemon pool is available (fleet mode).
-// Defined locally to mirror the git package's identical-shape type
-// without creating a package cross-import in production code.
-//
-// ctx carries the per-request workspace ID so cloud-mode wirings can route
-// to a per-workspace fleet-db backend.
-type IssueBackendFn func(ctx context.Context) backend.IssueBackend
-
 // ReadyIssueWithParent extends Issue with parent info for /api/ready.
 // This enables epic swimlane grouping in the Kanban view.
 type ReadyIssueWithParent struct {
-	*types.Issue
+	*workitems.IssueSummary
 	Parent      *string `json:"parent,omitempty"`       // Parent issue ID (null for root-level issues)
 	ParentTitle *string `json:"parent_title,omitempty"` // Parent issue title for display
-	Repo        *string `json:"repo,omitempty"`         // Repository that owns this issue
 }
 
 // ReadyResponse wraps the ready issues data for JSON response.
@@ -56,122 +43,40 @@ type readyFilter struct {
 	SourceRepos []string
 }
 
-// HandleReadyWithBackend serves ready issues through the owned IssueBackend
-// port. It fails closed when composition did not provide that port.
-func HandleReadyWithBackend(backendFn IssueBackendFn) http.HandlerFunc {
+// HandleReadyWorkItems serves ready issues through the Work Items owner query.
+func HandleReadyWorkItems(queries workitems.ReadyQueries) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !serveReadyViaBackend(w, r, backendFn) {
+		if queries == nil {
 			handler.WriteJSON(w, http.StatusServiceUnavailable, ReadyResponse{Success: false, Error: "issue backend not configured"})
+			return
 		}
-	}
-}
-
-// serveReadyViaBackend materializes a ready-style response from the supplied
-// IssueBackend and writes it to w. Returns true when it served the request
-// (including backend errors), false when no backend is wired so the caller
-// can fall through to the pool-error path.
-//
-//nolint:funlen // Handler keeps the ready response shaping in one place.
-func serveReadyViaBackend(w http.ResponseWriter, r *http.Request, backendFn IssueBackendFn) bool {
-	if backendFn == nil {
-		return false
-	}
-	be := backendFn(r.Context())
-	if be == nil {
-		return false
-	}
-	args, err := parseReadyParams(r)
-	if err != nil {
-		handler.WriteJSON(w, http.StatusBadRequest, ReadyResponse{
-			Success: false,
-			Error:   err.Error(),
+		args, err := parseReadyParams(r)
+		if err != nil {
+			handler.WriteJSON(w, http.StatusBadRequest, ReadyResponse{Success: false, Error: err.Error()})
+			return
+		}
+		values, err := queries.Ready(r.Context(), workitems.AvailabilityQuery{
+			Assignee: args.Assignee, Unassigned: args.Unassigned, Priority: args.Priority,
+			IssueType: args.Type, ParentID: args.ParentID, Limit: args.Limit,
+			SortPolicy: args.SortPolicy, Labels: args.Labels, LabelsAny: args.LabelsAny,
+			MolType: args.MolType, SourceRepos: args.SourceRepos,
 		})
-		return true
-	}
-	opts := backend.ReadyOpts{
-		Assignee:    args.Assignee,
-		Unassigned:  args.Unassigned,
-		Priority:    args.Priority,
-		Type:        args.Type,
-		ParentID:    args.ParentID,
-		Limit:       args.Limit,
-		SortPolicy:  args.SortPolicy,
-		Labels:      args.Labels,
-		LabelsAny:   args.LabelsAny,
-		MolType:     args.MolType,
-		SourceRepos: args.SourceRepos,
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-	defer cancel()
-
-	issues, err := be.Ready(ctx, opts)
-	if err != nil {
-		slog.Error("backend error in HandleReady", "err", err)
-		handler.WriteJSON(w, http.StatusInternalServerError, ReadyResponse{
-			Success: false,
-			Error:   "failed to list ready issues",
-		})
-		return true
-	}
-	// Project each IssueData onto the pool-path wire shape. Parent/Repo are
-	// surfaced from IssueData directly and ParentTitle is left nil.
-	out := make([]*ReadyIssueWithParent, 0, len(issues))
-	for i := range issues {
-		d := &issues[i]
-		iwp := &ReadyIssueWithParent{Issue: issueDataToTypesIssue(d)}
-		if d.Parent != "" {
-			p := d.Parent
-			iwp.Parent = &p
+		if err != nil {
+			handler.HandleWorkItemsError(w, err)
+			return
 		}
-		if d.SourceRepo != "" {
-			r := d.SourceRepo
-			iwp.Repo = &r
+		out := make([]*ReadyIssueWithParent, 0, len(values))
+		for index := range values {
+			value := values[index]
+			item := &ReadyIssueWithParent{IssueSummary: &value}
+			if value.Parent != "" {
+				parent := value.Parent
+				item.Parent = &parent
+			}
+			out = append(out, item)
 		}
-		out = append(out, iwp)
+		handler.WriteJSON(w, http.StatusOK, ReadyResponse{Success: true, Data: out})
 	}
-	handler.WriteJSON(w, http.StatusOK, ReadyResponse{
-		Success: true,
-		Data:    out,
-	})
-	return true
-}
-
-// issueDataToTypesIssue projects a backend.IssueData into the slim
-// *types.Issue shape that ReadyIssueWithParent embeds. Only the fields the
-// backend slim projection populates are carried; unknown fields stay at
-// their zero values (the FE already tolerates missing optional fields on a
-// ready list item).
-//
-// Design must be carried: agents reading the ready queue through the API
-// backend (LOOM_SERVER_URL set) apply the task router's has_design filter
-// (ReadyToImplement = HasDesign && !needs-revision). Dropping it here made
-// every ready task look design-less, so implementation agents could never
-// claim work (perpetual NoWork) while planners — gated on !HasDesign — were
-// unaffected. It is omitempty, so empty designs add nothing to the wire.
-func issueDataToTypesIssue(d *backend.IssueData) *types.Issue {
-	if d == nil {
-		return nil
-	}
-	issue := &types.Issue{
-		ID:               d.ID,
-		Title:            d.Title,
-		Status:           types.Status(d.Status),
-		Priority:         d.Priority,
-		IssueType:        types.IssueType(d.IssueType),
-		Assignee:         d.Assignee,
-		Owner:            d.Owner,
-		Labels:           d.Labels,
-		SourceRepo:       d.SourceRepo,
-		Design:           d.Design,
-		DesignArtifactID: d.DesignArtifactID,
-		DesignFormat:     d.DesignFormat,
-		HasDesign:        d.HasDesign || d.Design != "",
-		CreatedAt:        d.CreatedAt,
-		UpdatedAt:        d.UpdatedAt,
-		DueAt:            d.DueAt,
-		DeferUntil:       d.DeferUntil,
-	}
-	return issue
 }
 
 // parseReadyParams parses and validates ready-list query parameters.

@@ -164,7 +164,9 @@ func loadRepositoryManifests(directory string) (repositoryManifests, error) {
 }
 
 func runPhase1Analyses(root string, manifests repositoryManifests, report *Report) ([]string, error) {
-	profileViolations, err := analyzeProfiles(root, manifests.matrix, manifests.graph, manifests.directWrites.GenericMechanisms)
+	profileViolations, observedWrites, err := analyzeProfilesAndDirectWrites(
+		root, manifests.matrix, manifests.graph, manifests.directWrites,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +174,7 @@ func runPhase1Analyses(root string, manifests repositoryManifests, report *Repor
 	if err != nil {
 		return nil, err
 	}
-	observedWrites, directWriteViolations, err := CheckDirectWrites(root, manifests.matrix, manifests.directWrites)
+	directWriteViolations, err := checkDirectWriteObservations(manifests.directWrites, observedWrites)
 	if err != nil {
 		return nil, err
 	}
@@ -187,6 +189,77 @@ func runPhase1Analyses(root string, manifests repositoryManifests, report *Repor
 		violations = append(violations, err.Error())
 	}
 	return violations, nil
+}
+
+// analyzeProfilesAndDirectWrites keeps the boundary and direct-write scans for
+// one build profile inside the same cache lifetime. Cross-target profiles use
+// disposable caches to bound disk usage; doing both repository-scale loads
+// before deleting that cache avoids recompiling each target twice while still
+// keeping only one complete typed graph live at a time.
+//
+//nolint:funlen // Keep every cache-sharing repository analysis in one auditable per-profile transaction.
+func analyzeProfilesAndDirectWrites(
+	root string,
+	matrix AnalysisMatrix,
+	graph CapabilityGraph,
+	inventory DirectWriteInventory,
+) ([]string, []DirectWriteUse, error) {
+	profiles := append(append([]AnalysisProfile{}, matrix.Release...), matrix.Tagged...)
+	if len(profiles) == 0 {
+		return nil, nil, errors.New("architecture analysis requires at least one declared profile")
+	}
+	if names := directWriteProfileNames(matrix); !slices.Equal(names, inventory.AnalysisProfiles) {
+		return nil, nil, fmt.Errorf("direct-write analysis profiles: got %v, baseline declares %v", names, inventory.AnalysisProfiles)
+	}
+	classifier := newPersistenceClassifier(inventory)
+	directResults := make([]directWriteProfileResult, len(profiles))
+	agentsPatterns, err := phase5AgentsMutationCandidatePatterns(root)
+	if err != nil {
+		return nil, nil, err
+	}
+	agentsResults := make([][]phase5AgentsMutation, len(profiles))
+	violations := []string{}
+	for index, profile := range profiles {
+		profileViolations := []string{}
+		err := withRepositoryProfileCache(profile, func(environment []string) error {
+			var err error
+			profileViolations, err = analyzeProfileWithEnvironment(
+				root, profile, graph, inventory.GenericMechanisms, environment,
+			)
+			if err != nil {
+				return err
+			}
+			directResults[index].calls, directResults[index].problems, err = snapshotDirectWriteProfileWithEnvironment(
+				root, profile, inventory.AdapterRoots, classifier, environment,
+			)
+			if err != nil || len(agentsPatterns) == 0 {
+				return err
+			}
+			agentsResults[index], err = snapshotPhase5AgentsMutationProfile(
+				root, profile, agentsPatterns, environment,
+			)
+			return err
+		})
+		if err != nil {
+			return nil, nil, fmt.Errorf("analyze profile %s: %w", profile.Name, err)
+		}
+		violations = append(violations, profileViolations...)
+	}
+	calls, problems, err := mergeDirectWriteProfileResults(profiles, directResults)
+	if err != nil {
+		return nil, nil, err
+	}
+	observed, err := classifyDirectWriteCalls(calls, problems, classifier, inventory)
+	if err != nil {
+		return nil, nil, err
+	}
+	violations = append(
+		violations,
+		phase5AgentsOwnershipViolations(
+			mergePhase5AgentsMutationProfiles(profiles, agentsResults),
+		)...,
+	)
+	return violations, observed, nil
 }
 
 func validateGraphDecisions(graph CapabilityGraph, baseline Baseline) []string {

@@ -16,7 +16,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
@@ -236,7 +235,7 @@ func TestRegisterNativeDriverUsesCanonicalRequestAuthorityAndTypedLifecycle(t *t
 		DriverName: "Demo",
 		DriverID:   "demo",
 		Activate:   true,
-		Trust:      domain.DriverTrustTrusted,
+		Trust:      workflowcatalog.DriverTrustTrusted,
 	}
 	response := serveNativeDriverRequest(t, handler, request, "Bearer oidc-token")
 	if response.Code != http.StatusCreated {
@@ -294,7 +293,7 @@ func TestRegisterNativeDriverOpenModeDerivesServerOwnedActor(t *testing.T) {
 	response := serveNativeDriverRequest(t, handler, registerNativeDriverRequest{
 		Archive:    nativeHandlerArchive(t, nativeArchiveEntry{name: "server.mjs", body: "export {};\n"}),
 		DriverName: "demo",
-		Trust:      domain.DriverTrustUntrusted,
+		Trust:      workflowcatalog.DriverTrustUntrusted,
 	}, "")
 	if response.Code != http.StatusCreated {
 		t.Fatalf("status = %d body=%s", response.Code, response.Body.String())
@@ -323,7 +322,7 @@ func TestRegisterNativeDriverResolvesEveryRequiredAuthorityBeforeExtraction(t *t
 			response := serveNativeDriverRequest(t, handler, registerNativeDriverRequest{
 				Archive:  []byte("not gzip"),
 				Activate: true,
-				Trust:    domain.DriverTrustTrusted,
+				Trust:    workflowcatalog.DriverTrustTrusted,
 			}, "Bearer oidc-token")
 			if response.Code != http.StatusForbidden {
 				t.Fatalf("status = %d body=%s, want authorization denial before extraction", response.Code, response.Body.String())
@@ -348,18 +347,18 @@ func TestRegisterNativeDriverRejectsUnknownFieldsAndTrustPolicyBeforeAuthoring(t
 			name: "unknown field",
 			body: map[string]any{
 				"archive":    validArchive,
-				"trust":      domain.DriverTrustUntrusted,
+				"trust":      workflowcatalog.DriverTrustUntrusted,
 				"created_by": "forged",
 			},
 		},
 		{
 			name: "unknown trust",
-			body: registerNativeDriverRequest{Archive: validArchive, Trust: domain.DriverTrustLevel("root")},
+			body: registerNativeDriverRequest{Archive: validArchive, Trust: workflowcatalog.DriverTrustLevel("root")},
 		},
 		{
 			name: "untrusted activate",
 			body: registerNativeDriverRequest{
-				Archive: validArchive, Trust: domain.DriverTrustUntrusted, Activate: true,
+				Archive: validArchive, Trust: workflowcatalog.DriverTrustUntrusted, Activate: true,
 			},
 		},
 	}

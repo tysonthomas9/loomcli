@@ -16,15 +16,17 @@ const (
 )
 
 // OperationRules is the complete default-deny Artifacts operation registry.
-// Every public command and owner-fenced query requires an issuer-bound
-// ExecutionAuthority for its exact action.
+// Execution-owned artifacts use ExecutionAuthority for the full lifecycle;
+// interactive session transcripts use SessionAuthority only for their
+// declare/get/upload/finalize lifecycle. References and task-run list queries
+// remain execution-only.
 func OperationRules() []authority.OperationRule {
 	return []authority.OperationRule{
-		authority.Allow(ActionDeclare, authority.ClassExecution),
-		authority.Allow(ActionUpload, authority.ClassExecution),
-		authority.Allow(ActionFinalize, authority.ClassExecution),
+		authority.Allow(ActionDeclare, authority.ClassExecution, authority.ClassSession),
+		authority.Allow(ActionUpload, authority.ClassExecution, authority.ClassSession),
+		authority.Allow(ActionFinalize, authority.ClassExecution, authority.ClassSession),
 		authority.Allow(ActionReference, authority.ClassExecution),
-		authority.Allow(ActionGet, authority.ClassExecution),
+		authority.Allow(ActionGet, authority.ClassExecution, authority.ClassSession),
 		authority.Allow(ActionList, authority.ClassExecution),
 	}
 }
@@ -49,6 +51,7 @@ type ExecutionOwner struct {
 // by design: the service derives them exclusively from ExecutionOwner.
 type CreateCommand struct {
 	ArtifactID      string
+	AgentID         string
 	SessionID       string
 	TaskID          string
 	Type            string
@@ -121,6 +124,59 @@ type ContentAuthorities struct {
 type ContentResult struct {
 	Artifact  *Artifact
 	Reference *ArtifactReference
+}
+
+// SessionOwner binds one session-produced Artifact to the exact validated
+// Interaction lease generation that requested it. The raw lease credential is
+// intentionally absent: Interaction retains it for the subsequent atomic
+// session-reference update.
+type SessionOwner struct {
+	WorkspaceKey string `json:"-"`
+	SessionID    string `json:"-"`
+	AgentID      string `json:"-"`
+	NodeID       string `json:"-"`
+	LeaseID      string `json:"-"`
+	FencingToken int64  `json:"-"`
+}
+
+// SessionContentCommand describes one canonical session-produced content
+// artifact. Ownership fields are absent and are derived from SessionOwner.
+type SessionContentCommand struct {
+	ArtifactID      string
+	TaskID          string
+	Type            string
+	Summary         string
+	MIMEType        string
+	Visibility      string
+	RedactionStatus string
+	Metadata        map[string]string
+	Content         []byte
+}
+
+// SessionContentAuthorities carries one independently issued session
+// authority per durable operation. A publish authority cannot be replayed as
+// a different lifecycle action.
+type SessionContentAuthorities struct {
+	Declare  authority.SessionAuthority
+	Get      authority.SessionAuthority
+	Upload   authority.SessionAuthority
+	Finalize authority.SessionAuthority
+}
+
+// SessionAPI is the session-scoped Artifacts surface consumed by Interaction.
+// It deliberately does not expose generic CRUD, references, or task-run
+// queries.
+type SessionAPI interface {
+	CreateContent(context.Context, SessionContentAuthorities, SessionOwner, SessionContentCommand) (*Artifact, error)
+}
+
+// QueryAPI is the general read-only Artifacts surface consumed by product
+// projections. Metadata reads are workspace-scoped; callers must validate the
+// returned owner tuple before requesting bytes for a task or session view.
+type QueryAPI interface {
+	GetArtifact(context.Context, Query) (*Artifact, error)
+	ListArtifacts(context.Context, SearchQuery) ([]*Artifact, error)
+	ReadArtifactContent(context.Context, Query) ([]byte, error)
 }
 
 // API is the minimal Phase 4 Artifacts lifecycle surface.

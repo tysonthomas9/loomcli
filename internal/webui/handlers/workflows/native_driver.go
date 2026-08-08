@@ -14,7 +14,6 @@ import (
 	"strings"
 
 	appworkflowauthoring "github.com/tysonthomas9/loomcli/internal/app/workflowauthoring"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver/nativearchive"
 	workflowdefs "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution/authoring"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
@@ -25,15 +24,15 @@ import (
 )
 
 type registerNativeDriverRequest struct {
-	Archive      []byte                  `json:"archive"`
-	Manifest     []byte                  `json:"manifest,omitempty"`
-	DriverName   string                  `json:"driver_name,omitempty"`
-	DriverID     string                  `json:"driver_id,omitempty"`
-	WorkflowName string                  `json:"workflow_name,omitempty"`
-	SourceRef    string                  `json:"source_ref,omitempty"`
-	SourceDigest string                  `json:"source_digest,omitempty"`
-	Activate     bool                    `json:"activate,omitempty"`
-	Trust        domain.DriverTrustLevel `json:"trust"`
+	Archive      []byte                           `json:"archive"`
+	Manifest     []byte                           `json:"manifest,omitempty"`
+	DriverName   string                           `json:"driver_name,omitempty"`
+	DriverID     string                           `json:"driver_id,omitempty"`
+	WorkflowName string                           `json:"workflow_name,omitempty"`
+	SourceRef    string                           `json:"source_ref,omitempty"`
+	SourceDigest string                           `json:"source_digest,omitempty"`
+	Activate     bool                             `json:"activate,omitempty"`
+	Trust        workflowcatalog.DriverTrustLevel `json:"trust"`
 }
 
 //nolint:cyclop,funlen // Keep staged archive validation, scoped authority resolution, and catalog authoring in one compensating transaction.
@@ -68,12 +67,12 @@ func (m *Module) registerNativeDriver(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch request.Trust {
-	case domain.DriverTrustTrusted, domain.DriverTrustUntrusted:
+	case workflowcatalog.DriverTrustTrusted, workflowcatalog.DriverTrustUntrusted:
 	default:
 		writeError(w, http.StatusBadRequest, "native driver trust must be trusted or untrusted")
 		return
 	}
-	if request.Activate && request.Trust == domain.DriverTrustUntrusted {
+	if request.Activate && request.Trust == workflowcatalog.DriverTrustUntrusted {
 		writeError(w, http.StatusBadRequest, "an explicitly untrusted native driver cannot be activated because activation requires prior approval")
 		return
 	}
@@ -159,7 +158,7 @@ func resolveNativeDriverAuthorities(
 	r *http.Request,
 	resolver workflowcataloghttp.OperatorAuthorityResolver,
 	workspace string,
-	trust domain.DriverTrustLevel,
+	trust workflowcatalog.DriverTrustLevel,
 	activate bool,
 ) (appworkflowauthoring.NativeAuthoringAuthorities, error) {
 	if r == nil || resolver == nil {

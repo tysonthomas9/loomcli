@@ -5,9 +5,10 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
+	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 type interactivePromptsResponse struct {
@@ -38,19 +39,19 @@ func visibleInteractivePrompts() []domain.BuiltinInteractivePrompt {
 // helpers rather than introducing new dependencies on the global service
 // package during the Phase 6 retirement.
 func writeAgentValidationError(w http.ResponseWriter, message string) {
-	handler.HandleServiceError(w, service.ErrValidation(message))
+	handler.HandleServiceError(w, apperrors.ErrValidation(message))
 }
 
 func writeAgentConflictError(w http.ResponseWriter, message string) {
-	handler.HandleServiceError(w, service.ErrConflict(message))
+	handler.HandleServiceError(w, apperrors.ErrConflict(message))
 }
 
 func writeAgentInternalError(w http.ResponseWriter, message string, cause error) {
-	handler.HandleServiceError(w, service.ErrInternal(message, cause))
+	handler.HandleServiceError(w, apperrors.ErrInternal(message, cause))
 }
 
 func validStoredAgentName(value string) bool {
-	return value != "" && service.ValidStoredAgentName.MatchString(value)
+	return value != "" && agentcoord.ValidStoredAgentName.MatchString(value)
 }
 
 type lifecycleRequest struct{}

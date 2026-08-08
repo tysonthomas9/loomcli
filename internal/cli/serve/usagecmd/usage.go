@@ -7,6 +7,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/infra/usageprojection"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -54,7 +55,7 @@ func InitStore(dir string) *usage.Store {
 	if dir == "" {
 		dir = "."
 	}
-	s, err := usage.NewStore(dir)
+	s, err := usageprojection.New(dir)
 	if err != nil {
 		log.Printf("Warning: failed to create usage store: %v", err)
 		return nil

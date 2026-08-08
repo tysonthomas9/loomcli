@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -19,24 +21,24 @@ func TestTriggerEventAppenderPreservesTrustedEnvelopeAndPayload(t *testing.T) {
 			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
 		}
 		var body struct {
-			EventID         string                    `json:"event_id"`
-			SourceKind      string                    `json:"source_kind"`
-			SourceEventID   string                    `json:"source_event_id"`
-			EventType       string                    `json:"event_type"`
-			SubjectRef      string                    `json:"subject_ref"`
-			ActorRef        string                    `json:"actor_ref"`
-			Origin          domain.TriggerEventOrigin `json:"origin"`
-			EpicID          string                    `json:"epic_id"`
-			OccurredAt      time.Time                 `json:"occurred_at"`
-			ReceivedAt      time.Time                 `json:"received_at"`
-			IdempotencyKey  string                    `json:"idempotency_key"`
-			SignatureStatus string                    `json:"signature_status"`
-			PayloadBase64   []byte                    `json:"payload_base64"`
+			EventID         string                 `json:"event_id"`
+			SourceKind      string                 `json:"source_kind"`
+			SourceEventID   string                 `json:"source_event_id"`
+			EventType       string                 `json:"event_type"`
+			SubjectRef      string                 `json:"subject_ref"`
+			ActorRef        string                 `json:"actor_ref"`
+			Origin          automation.EventOrigin `json:"origin"`
+			EpicID          string                 `json:"epic_id"`
+			OccurredAt      time.Time              `json:"occurred_at"`
+			ReceivedAt      time.Time              `json:"received_at"`
+			IdempotencyKey  string                 `json:"idempotency_key"`
+			SignatureStatus string                 `json:"signature_status"`
+			PayloadBase64   []byte                 `json:"payload_base64"`
 		}
 		decodeJSONBody(t, r, &body)
 		if body.EventID != "execution-await-event-1" || body.SourceEventID != "run-finished:child:completed" ||
 			body.SourceKind != "execution" || body.EventType != "run.finished" || body.SubjectRef != "child" ||
-			body.ActorRef != "system" || body.Origin != domain.TriggerEventOriginSystem || body.EpicID != "EPIC-1" ||
+			body.ActorRef != "system" || body.Origin != automation.EventOriginSystem || body.EpicID != "EPIC-1" ||
 			body.IdempotencyKey != "execution-await:1" || body.SignatureStatus != "internal" ||
 			!body.OccurredAt.Equal(now) || !body.ReceivedAt.Equal(now) || string(body.PayloadBase64) != string(payload) {
 			t.Fatalf("body = %+v payload=%q", body, body.PayloadBase64)
@@ -51,10 +53,10 @@ func TestTriggerEventAppenderPreservesTrustedEnvelopeAndPayload(t *testing.T) {
 		})
 	})
 	appender := client.TriggerEvents().(store.TriggerEventAppender)
-	got, err := appender.AppendTriggerEvent(t.Context(), &domain.TriggerEvent{
+	got, err := appender.AppendTriggerEvent(t.Context(), &automation.Event{
 		WorkspaceKey: "WS", EventID: "execution-await-event-1", SourceKind: "execution",
 		SourceEventID: "run-finished:child:completed", EventType: "run.finished",
-		SubjectRef: "child", ActorRef: "system", Origin: domain.TriggerEventOriginSystem,
+		SubjectRef: "child", ActorRef: "system", Origin: automation.EventOriginSystem,
 		EpicID: "EPIC-1", OccurredAt: now, ReceivedAt: now,
 		IdempotencyKey: "execution-await:1", SignatureStatus: "internal", Payload: payload,
 	})
@@ -80,10 +82,10 @@ func TestTriggerEventAppenderPreservesSessionAttestation(t *testing.T) {
 			"signature_status": "session", "occurred_at": time.Now().UTC(), "received_at": time.Now().UTC(),
 		})
 	})
-	_, err := client.TriggerEvents().(store.TriggerEventAppender).AppendTriggerEvent(t.Context(), &domain.TriggerEvent{
+	_, err := client.TriggerEvents().(store.TriggerEventAppender).AppendTriggerEvent(t.Context(), &automation.Event{
 		WorkspaceKey: "WS", EventID: "approval-1", SourceKind: "approval", SourceEventID: "approval-1",
 		EventType: "approval.granted", SubjectRef: "deploy-1", ActorRef: "user:alice",
-		Origin: domain.TriggerEventOriginExternal, SignatureStatus: "session",
+		Origin: automation.EventOriginExternal, SignatureStatus: "session",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -95,19 +97,19 @@ func TestTriggerEventAppenderRejectsNoncanonicalOrUnattestableEnvelope(t *testin
 		t.Fatalf("invalid envelope reached FleetDB: %s %s", r.Method, r.URL.Path)
 	})
 	appender := client.TriggerEvents().(store.TriggerEventAppender)
-	base := domain.TriggerEvent{
+	base := automation.Event{
 		WorkspaceKey: "WS", EventID: "event-1", SourceKind: "test", SourceEventID: "source-1",
-		EventType: "test.event", Origin: domain.TriggerEventOriginSystem,
+		EventType: "test.event", Origin: automation.EventOriginSystem,
 	}
 	tests := []struct {
 		name   string
-		mutate func(*domain.TriggerEvent)
+		mutate func(*automation.Event)
 	}{
-		{name: "padded source", mutate: func(event *domain.TriggerEvent) { event.SourceEventID = " source-1 " }},
-		{name: "reserved source", mutate: func(event *domain.TriggerEvent) { event.SourceEventID = domain.AwaitTimeoutEventID("run#await-1") }},
-		{name: "system parent", mutate: func(event *domain.TriggerEvent) { event.ParentEventID = "parent-1" }},
-		{name: "caller hop", mutate: func(event *domain.TriggerEvent) { event.HopDepth = 1 }},
-		{name: "unsupported attrs", mutate: func(event *domain.TriggerEvent) { event.SubjectAttrs = map[string]string{"x": "y"} }},
+		{name: "padded source", mutate: func(event *automation.Event) { event.SourceEventID = " source-1 " }},
+		{name: "reserved source", mutate: func(event *automation.Event) { event.SourceEventID = domain.AwaitTimeoutEventID("run#await-1") }},
+		{name: "system parent", mutate: func(event *automation.Event) { event.ParentEventID = "parent-1" }},
+		{name: "caller hop", mutate: func(event *automation.Event) { event.HopDepth = 1 }},
+		{name: "unsupported attrs", mutate: func(event *automation.Event) { event.SubjectAttrs = map[string]string{"x": "y"} }},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

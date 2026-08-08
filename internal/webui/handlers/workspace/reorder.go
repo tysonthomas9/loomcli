@@ -6,7 +6,6 @@ import (
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // workspaceOrderRequest is the JSON body for PUT /api/workspaces/order.
@@ -15,7 +14,7 @@ type workspaceOrderRequest struct {
 }
 
 // HandleWorkspaceReorder returns a handler that persists a custom workspace display order.
-func HandleWorkspaceReorder(svc service.WorkspaceService) http.HandlerFunc {
+func HandleWorkspaceReorder() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
 
@@ -30,11 +29,6 @@ func HandleWorkspaceReorder(svc service.WorkspaceService) http.HandlerFunc {
 			return
 		}
 
-		data, err := svc.ReorderWorkspaces(r.Context(), req.Order)
-		if err != nil {
-			handler.HandleServiceError(w, err)
-			return
-		}
-		handler.WriteJSON(w, http.StatusOK, WorkspaceResponse{Success: true, Data: data})
+		handler.WriteJSON(w, http.StatusNotImplemented, WorkspaceResponse{Success: false, Error: "workspace ordering is not implemented"})
 	}
 }

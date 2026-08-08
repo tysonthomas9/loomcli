@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 )
@@ -37,7 +36,7 @@ func TestBuiltinWorkflowsDeclaringRunner(t *testing.T) {
 // globally resolvable when the OWNING builtin's active version is TRUSTED and
 // still declares it. This exercises the gate without the flue build path.
 func TestActiveTrustedBuiltinRunnerResolvesTrustedOwner(t *testing.T) {
-	catalog := runnerOwnerCatalog(t, "WS", "bug-fix-agent", "local-task-runner", domain.DriverTrustTrusted)
+	catalog := runnerOwnerCatalog(t, "WS", "bug-fix-agent", "local-task-runner", workflowcatalog.DriverTrustTrusted)
 
 	res, err := activeTrustedBuiltinRunner(t.Context(), catalog, "WS", "bug-fix-agent", "local-task-runner")
 	if err != nil {
@@ -57,7 +56,7 @@ func TestActiveTrustedBuiltinRunnerResolvesTrustedOwner(t *testing.T) {
 func TestActiveTrustedBuiltinRunnerRejectsUntrustedOwner(t *testing.T) {
 	// An untrusted driver that (illegitimately) declares the runner name must NOT
 	// be globally resolvable — an untrusted driver can never export its runners.
-	catalog := runnerOwnerCatalog(t, "WS", "bug-fix-agent", "local-task-runner", domain.DriverTrustUntrusted)
+	catalog := runnerOwnerCatalog(t, "WS", "bug-fix-agent", "local-task-runner", workflowcatalog.DriverTrustUntrusted)
 
 	if _, err := activeTrustedBuiltinRunner(t.Context(), catalog, "WS", "bug-fix-agent", "local-task-runner"); err == nil {
 		t.Fatal("untrusted owner resolved a global runner; must fail closed")
@@ -65,7 +64,7 @@ func TestActiveTrustedBuiltinRunnerRejectsUntrustedOwner(t *testing.T) {
 }
 
 func TestActiveTrustedBuiltinRunnerRejectsUndeclaredRunner(t *testing.T) {
-	catalog := runnerOwnerCatalog(t, "WS", "bug-fix-agent", "local-task-runner", domain.DriverTrustTrusted)
+	catalog := runnerOwnerCatalog(t, "WS", "bug-fix-agent", "local-task-runner", workflowcatalog.DriverTrustTrusted)
 
 	_, err := activeTrustedBuiltinRunner(t.Context(), catalog, "WS", "bug-fix-agent", "some-other-runner")
 	if !errors.Is(err, driver.ErrRunnerNotDeclared) {
@@ -78,7 +77,7 @@ func TestActiveTrustedBuiltinRunnerRejectsUndeclaredRunner(t *testing.T) {
 func runnerOwnerCatalog(
 	t *testing.T,
 	ws, name, runnerName string,
-	trust domain.DriverTrustLevel,
+	trust workflowcatalog.DriverTrustLevel,
 ) builtinCatalogStub {
 	t.Helper()
 	runnersJSON, err := json.Marshal([]driver.DriverRunnerSpec{{
@@ -91,7 +90,7 @@ func runnerOwnerCatalog(
 	return builtinCatalogStub{
 		driver: &workflowcatalog.Driver{
 			WorkspaceKey: ws, DriverID: name, Name: name,
-			OwnerType: domain.DriverOwnerSystem, Status: domain.DriverStatusActive,
+			OwnerType: workflowcatalog.DriverOwnerSystem, Status: workflowcatalog.DriverStatusActive,
 			TrustLevel: trust, ActiveVersionID: versionID, Revision: 1,
 		},
 		version: &workflowcatalog.DriverVersion{

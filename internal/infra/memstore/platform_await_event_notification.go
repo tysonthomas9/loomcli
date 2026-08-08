@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -23,7 +25,7 @@ type awaitEventNotificationRow struct {
 
 var _ store.AwaitEventNotificationStore = (*triggerEventStore)(nil)
 
-func (s *triggerEventStore) enqueueAwaitEventNotificationLocked(event *domain.TriggerEvent) {
+func (s *triggerEventStore) enqueueAwaitEventNotificationLocked(event *automation.Event) {
 	if event == nil {
 		return
 	}
@@ -58,7 +60,7 @@ func (s *triggerEventStore) ClaimAwaitEventNotifications(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	type candidate struct {
-		event *domain.TriggerEvent
+		event *automation.Event
 		row   *awaitEventNotificationRow
 	}
 	values := make([]candidate, 0)
@@ -166,7 +168,7 @@ func (s *triggerEventStore) RetryAwaitEventNotification(
 	return nil
 }
 
-func cloneAwaitNotificationEvent(event *domain.TriggerEvent) domain.TriggerEvent {
+func cloneAwaitNotificationEvent(event *automation.Event) automation.Event {
 	out := *event
 	out.Payload = append([]byte(nil), event.Payload...)
 	if event.SubjectAttrs != nil {

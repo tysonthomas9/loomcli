@@ -52,6 +52,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
@@ -112,7 +114,7 @@ func ResolveSandboxLauncher() (SandboxLauncher, error) {
 		// Fail closed at wiring time on an invalid egress declaration rather
 		// than per-run at Launch (trust level only picks the empty-config
 		// default, not validity).
-		if _, err := resolveSandboxEgress(launcher.Egress, domain.DriverTrustTrusted); err != nil {
+		if _, err := resolveSandboxEgress(launcher.Egress, workflowcatalog.DriverTrustTrusted); err != nil {
 			return nil, err
 		}
 		return launcher, nil

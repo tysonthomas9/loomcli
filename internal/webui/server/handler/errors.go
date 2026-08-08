@@ -6,40 +6,42 @@ import (
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
+	"github.com/tysonthomas9/loomcli/internal/modules/workspace"
+	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 )
 
-// kindToStatus maps each service.ErrorKind to its HTTP status code.
+// kindToStatus maps each apperrors.ErrorKind to its HTTP status code.
 // This must stay in sync with service/errors.go (task .9).
-var kindToStatus = map[service.ErrorKind]int{
-	service.KindNotFound:             http.StatusNotFound,
-	service.KindValidation:           http.StatusBadRequest,
-	service.KindUnavailable:          http.StatusServiceUnavailable,
-	service.KindTimeout:              http.StatusGatewayTimeout,
-	service.KindConflict:             http.StatusConflict,
-	service.KindInternal:             http.StatusInternalServerError,
-	service.KindForbidden:            http.StatusForbidden,
-	service.KindUnauthorized:         http.StatusUnauthorized,
-	service.KindLocked:               http.StatusLocked,
-	service.KindPayloadTooLarge:      http.StatusRequestEntityTooLarge,
-	service.KindRateLimited:          http.StatusTooManyRequests,
-	service.KindBadGateway:           http.StatusBadGateway,
-	service.KindNotImplemented:       http.StatusNotImplemented,
-	service.KindStarting:             http.StatusServiceUnavailable,
-	service.KindPreconditionFailed:   http.StatusPreconditionFailed,
-	service.KindPreconditionRequired: http.StatusPreconditionRequired,
+var kindToStatus = map[apperrors.ErrorKind]int{
+	apperrors.KindNotFound:             http.StatusNotFound,
+	apperrors.KindValidation:           http.StatusBadRequest,
+	apperrors.KindUnavailable:          http.StatusServiceUnavailable,
+	apperrors.KindTimeout:              http.StatusGatewayTimeout,
+	apperrors.KindConflict:             http.StatusConflict,
+	apperrors.KindInternal:             http.StatusInternalServerError,
+	apperrors.KindForbidden:            http.StatusForbidden,
+	apperrors.KindUnauthorized:         http.StatusUnauthorized,
+	apperrors.KindLocked:               http.StatusLocked,
+	apperrors.KindPayloadTooLarge:      http.StatusRequestEntityTooLarge,
+	apperrors.KindRateLimited:          http.StatusTooManyRequests,
+	apperrors.KindBadGateway:           http.StatusBadGateway,
+	apperrors.KindNotImplemented:       http.StatusNotImplemented,
+	apperrors.KindStarting:             http.StatusServiceUnavailable,
+	apperrors.KindPreconditionFailed:   http.StatusPreconditionFailed,
+	apperrors.KindPreconditionRequired: http.StatusPreconditionRequired,
 }
 
-// HandleServiceError extracts a *service.ServiceError from err, maps its
+// HandleServiceError extracts a *apperrors.ServiceError from err, maps its
 // Kind to an HTTP status code, logs the full error, and writes a JSON error
-// response. If err is not a *service.ServiceError, it writes 500 with a
+// response. If err is not a *apperrors.ServiceError, it writes 500 with a
 // generic message.
 //
 // The response body is always {"error": "<message>"}. The message comes from
 // ServiceError.Message (not Error()) to avoid leaking cause chains to clients.
 // StatusForKind returns the HTTP status code for the given ErrorKind.
 // Unknown kinds return 500 Internal Server Error.
-func StatusForKind(kind service.ErrorKind) int {
+func StatusForKind(kind apperrors.ErrorKind) int {
 	if status, ok := kindToStatus[kind]; ok {
 		return status
 	}
@@ -47,7 +49,7 @@ func StatusForKind(kind service.ErrorKind) int {
 }
 
 func HandleServiceError(w http.ResponseWriter, err error) {
-	var svcErr *service.ServiceError
+	var svcErr *apperrors.ServiceError
 	if errors.As(err, &svcErr) {
 		status := StatusForKind(svcErr.Kind)
 		slog.Error("service error",
@@ -56,7 +58,7 @@ func HandleServiceError(w http.ResponseWriter, err error) {
 			"msg", svcErr.Message,
 			"err", err,
 		)
-		if svcErr.Kind == service.KindStarting {
+		if svcErr.Kind == apperrors.KindStarting {
 			w.Header().Set("Retry-After", "5")
 		}
 		// Include the kind in the body so frontends can branch on a
@@ -70,6 +72,48 @@ func HandleServiceError(w http.ResponseWriter, err error) {
 	}
 	slog.Error("unexpected error", "err", err)
 	WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+}
+
+// HandleWorkItemsError maps the Work Items capability's public failure
+// vocabulary without translating it back through the legacy Web UI service.
+func HandleWorkItemsError(w http.ResponseWriter, err error) {
+	status := http.StatusInternalServerError
+	message := workitems.PublicErrorMessage(err)
+	switch {
+	case errors.Is(err, workitems.ErrInvalid):
+		status = http.StatusBadRequest
+	case errors.Is(err, workitems.ErrNotFound):
+		status = http.StatusNotFound
+	case errors.Is(err, workitems.ErrConflict):
+		status = http.StatusConflict
+	case errors.Is(err, workitems.ErrUnavailable):
+		status = http.StatusServiceUnavailable
+	case errors.Is(err, workitems.ErrTimeout):
+		status = http.StatusGatewayTimeout
+	case errors.Is(err, workitems.ErrNotImplemented):
+		status = http.StatusNotImplemented
+	}
+	slog.Error("work items error", "status", status, "err", err)
+	WriteJSON(w, status, map[string]string{"error": message})
+}
+
+// HandleWorkspaceError maps the Workspace capability's public failure
+// vocabulary without translating it through the legacy Web UI service.
+func HandleWorkspaceError(w http.ResponseWriter, err error) {
+	status := http.StatusInternalServerError
+	message := workspace.PublicErrorMessage(err)
+	switch {
+	case errors.Is(err, workspace.ErrInvalid):
+		status = http.StatusBadRequest
+	case errors.Is(err, workspace.ErrNotFound):
+		status = http.StatusNotFound
+	case errors.Is(err, workspace.ErrConflict):
+		status = http.StatusConflict
+	case errors.Is(err, workspace.ErrUnavailable):
+		status = http.StatusServiceUnavailable
+	}
+	slog.Error("workspace error", "status", status, "err", err)
+	WriteJSON(w, status, map[string]string{"error": message})
 }
 
 // IsControlPlaneRateLimited reports whether a compatibility dependency
@@ -88,7 +132,7 @@ func IsControlPlaneUnavailable(err error) bool {
 
 // WriteDomainError maps a domain.Err* sentinel to an HTTP status and writes a
 // JSON {"error": ...} body. Store-direct handlers (roles, triggerbindings,
-// webhooks, workflows) receive domain errors rather than service.ServiceError,
+// webhooks, workflows) receive domain errors rather than apperrors.ServiceError,
 // so they share this mapper instead of each re-deriving the table. fallback is
 // the client message for ErrNotFound and unmapped errors.
 func WriteDomainError(w http.ResponseWriter, err error, fallback string) {

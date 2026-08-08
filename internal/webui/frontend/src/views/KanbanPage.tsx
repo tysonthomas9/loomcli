@@ -2,12 +2,12 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { useStore } from "zustand";
 
 import { ErrorBoundary, SwimLaneBoard, AssigneePrompt } from "@/components";
-import { IssueViewGuard } from "@/components/IssueViewGuard";
+import { IssueViewGuard } from "@/components/IssueViewGuard/IssueViewGuard";
 import type { Status } from "@/types";
 import { updateIssue } from "@/api";
 import { useRecentAssignees } from "@/hooks";
-import { useIssueStoreInstance } from "@/hooks/common";
-import { useRunEpicWorkflow } from "@/hooks/workspace";
+import { useIssueStoreInstance } from "@/hooks/common/useStoreContext";
+import { useRunEpicWorkflow } from "@/hooks/workspace/useRunEpicWorkflow";
 import {
   useWorkspaceViewData,
   useWorkspaceViewActions,

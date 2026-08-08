@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/gitbranch"
@@ -23,7 +25,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 	"github.com/tysonthomas9/loomcli/internal/workspaceerrors"
 )
 
@@ -176,7 +178,7 @@ func (materializer *testRepositoryMaterializer) CreateWorkspaceWithRepositoryAdm
 		}
 		return nil, err
 	}
-	state := domain.WorkspaceState(input.Workspace.State)
+	state := workspacemodule.State(input.Workspace.State)
 	if state != "" {
 		workspace, err = materializer.store.Workspaces().Update(
 			ctx,
@@ -421,7 +423,7 @@ func (materializer *testRepositoryMaterializer) CommitRepositoryAdmission(
 		})
 	}
 	if input.WorkspaceFinalization != nil {
-		state := domain.WorkspaceStateReady
+		state := workspacemodule.StateReady
 		branch := input.WorkspaceFinalization.DefaultBranch
 		empty := ""
 		if _, err := materializer.store.Workspaces().Update(
@@ -482,7 +484,7 @@ func (materializer *testRepositoryMaterializer) FailRepositoryAdmission(
 	result := cloneTestAdmission(record)
 	materializer.mu.Unlock()
 	if createsWorkspace && !input.Retryable {
-		state := domain.WorkspaceStateError
+		state := workspacemodule.StateError
 		message := input.ErrorClass
 		_, _ = materializer.store.Workspaces().Update(
 			ctx,
@@ -509,7 +511,7 @@ func buildTestAddReposWithAdmission(
 	t *testing.T,
 	st store.Store,
 	materializer *testRepositoryMaterializer,
-) service.WorkspaceAddReposFn {
+) workspacecoord.WorkspaceAddReposFn {
 	t.Helper()
 	journal, err := newLocalRepositoryAdmissionJournalAt(
 		filepath.Join(t.TempDir(), "admissions"),
@@ -530,7 +532,7 @@ func buildTestCreateWithAdmission(
 	t *testing.T,
 	st store.Store,
 	materializer *testRepositoryMaterializer,
-) service.WorkspaceCreateFn {
+) workspacecoord.WorkspaceCreateFn {
 	t.Helper()
 	journal, err := newLocalRepositoryAdmissionJournalAt(
 		filepath.Join(t.TempDir(), "admissions"),
@@ -556,7 +558,7 @@ func TestStoreBackedCreateEmptyWorkspaceCreatesStoreAndLocalState(t *testing.T) 
 	createFn := BuildStoreBackedCreateWorkspace(st)
 	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
 
-	result, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+	result, err := createFn(context.Background(), workspacecoord.WorkspaceCreateRequest{
 		Name:   "my-ws",
 		Type:   "empty",
 		Repos:  []string{src},
@@ -641,7 +643,7 @@ func TestStoreBackedCreateEmptyWorkspaceRejectsCredentialBearingLocalRemote(t *t
 	wsPath := filepath.Join(loomDir, "workspaces", "private-ws")
 	_, err := BuildStoreBackedCreateWorkspace(st)(
 		t.Context(),
-		service.WorkspaceCreateRequest{
+		workspacecoord.WorkspaceCreateRequest{
 			Name:  "private-ws",
 			Type:  "empty",
 			Repos: []string{src},
@@ -677,7 +679,7 @@ func TestStoreBackedCreateEmptyWorkspaceAllowsExternalEmptyPath(t *testing.T) {
 	st := memstore.New()
 	createFn := BuildStoreBackedCreateWorkspace(st)
 
-	result, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+	result, err := createFn(context.Background(), workspacecoord.WorkspaceCreateRequest{
 		Name: "external-ws",
 		Type: "empty",
 		Path: externalPath,
@@ -713,7 +715,7 @@ func TestStoreBackedCreateWorkspaceRejectsExternalNonEmptyPath(t *testing.T) {
 	st := memstore.New()
 	createFn := BuildStoreBackedCreateWorkspace(st)
 
-	_, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+	_, err := createFn(context.Background(), workspacecoord.WorkspaceCreateRequest{
 		Name: "external-ws",
 		Type: "empty",
 		Path: externalPath,
@@ -740,7 +742,7 @@ func TestAddWorktreesRecoversCorruptBranchRef(t *testing.T) {
 	corruptWorkspaceBranchRef(t, src, "local-coder")
 
 	wsDir := filepath.Join(t.TempDir(), "workspace")
-	ctx := service.WithCreateWarnings(context.Background())
+	ctx := workspacecoord.WithCreateWarnings(context.Background())
 	created, repos, err := addWorktrees(ctx, []resolvedRepo{{path: src, name: "app"}}, wsDir, "local-coder")
 	if err != nil {
 		t.Fatalf("addWorktrees: %v", err)
@@ -748,7 +750,7 @@ func TestAddWorktreesRecoversCorruptBranchRef(t *testing.T) {
 	if len(created) != 1 || len(repos) != 1 {
 		t.Fatalf("created=%d repos=%d, want one each", len(created), len(repos))
 	}
-	if warnings := service.GetCreateWarnings(ctx); len(warnings) != 0 {
+	if warnings := workspacecoord.GetCreateWarnings(ctx); len(warnings) != 0 {
 		t.Fatalf("warnings = %v, want none", warnings)
 	}
 	if got := strings.TrimSpace(gitOutput(t, filepath.Join(wsDir, "app"), "rev-parse", "HEAD")); got != agentSHA {
@@ -767,7 +769,7 @@ func TestAddWorktreesSkipsUnrecoverableCheckoutWithWarning(t *testing.T) {
 		t.Fatalf("write blocked checkout marker: %v", err)
 	}
 
-	ctx := service.WithCreateWarnings(context.Background())
+	ctx := workspacecoord.WithCreateWarnings(context.Background())
 	created, repos, err := addWorktrees(ctx, []resolvedRepo{{path: src, name: "app"}}, wsDir, "local-coder")
 	if err != nil {
 		t.Fatalf("addWorktrees returned fatal error: %v", err)
@@ -778,7 +780,7 @@ func TestAddWorktreesSkipsUnrecoverableCheckoutWithWarning(t *testing.T) {
 	if len(repos) != 0 {
 		t.Fatalf("repos = %#v, want skipped checkout omitted from runnable state", repos)
 	}
-	warnings := service.GetCreateWarnings(ctx)
+	warnings := workspacecoord.GetCreateWarnings(ctx)
 	if len(warnings) != 1 || !strings.Contains(warnings[0], "Skipped checkout") {
 		t.Fatalf("warnings = %v, want skipped checkout warning", warnings)
 	}
@@ -792,7 +794,7 @@ func TestStoreBackedAddReposAttachesLocalRepoToEmptyWorkspace(t *testing.T) {
 	createFn := BuildStoreBackedCreateWorkspace(st)
 	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
 
-	if _, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+	if _, err := createFn(context.Background(), workspacecoord.WorkspaceCreateRequest{
 		Name: "my-ws",
 		Type: "empty",
 		Path: wsPath,
@@ -802,7 +804,7 @@ func TestStoreBackedAddReposAttachesLocalRepoToEmptyWorkspace(t *testing.T) {
 
 	src := initTestGitRepo(t, t.TempDir(), "api")
 	addFn := BuildStoreBackedAddRepos(st)
-	result, err := addFn(context.Background(), service.WorkspaceAddReposRequest{
+	result, err := addFn(context.Background(), workspacecoord.WorkspaceAddReposRequest{
 		WorkspaceID: "MY-WS",
 		Repos:       []string{src},
 		Branch:      "feature-work",
@@ -845,7 +847,7 @@ func TestStoreBackedAddReposAutoDetectsLocalRepoDefaultBranch(t *testing.T) {
 	st := memstore.New()
 	createFn := BuildStoreBackedCreateWorkspace(st)
 	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
-	if _, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+	if _, err := createFn(context.Background(), workspacecoord.WorkspaceCreateRequest{
 		Name: "my-ws",
 		Type: "empty",
 		Path: wsPath,
@@ -864,7 +866,7 @@ func TestStoreBackedAddReposAutoDetectsLocalRepoDefaultBranch(t *testing.T) {
 	runGit(t, src, "push", "--set-upstream", "origin", "main")
 	runGit(t, src, "checkout", "-b", "feature/current-work")
 	addFn := BuildStoreBackedAddRepos(st)
-	if _, err := addFn(context.Background(), service.WorkspaceAddReposRequest{
+	if _, err := addFn(context.Background(), workspacecoord.WorkspaceAddReposRequest{
 		WorkspaceID: "MY-WS",
 		Repos:       []string{src},
 	}); err != nil {
@@ -964,7 +966,7 @@ func TestStoreBackedAddReposAttachesCheckedOutExistingDefaultBranch(t *testing.T
 	st := memstore.New()
 	createFn := BuildStoreBackedCreateWorkspace(st)
 	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
-	if _, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+	if _, err := createFn(context.Background(), workspacecoord.WorkspaceCreateRequest{
 		Name: "my-ws",
 		Type: "empty",
 		Path: wsPath,
@@ -976,7 +978,7 @@ func TestStoreBackedAddReposAttachesCheckedOutExistingDefaultBranch(t *testing.T
 	branch := strings.TrimSpace(gitOutput(t, src, "branch", "--show-current"))
 	sourceSHA := strings.TrimSpace(gitOutput(t, src, "rev-parse", "HEAD"))
 	addFn := BuildStoreBackedAddRepos(st)
-	if _, err := addFn(context.Background(), service.WorkspaceAddReposRequest{
+	if _, err := addFn(context.Background(), workspacecoord.WorkspaceAddReposRequest{
 		WorkspaceID: "MY-WS",
 		Repos:       []string{src},
 		Branch:      branch,
@@ -1012,7 +1014,7 @@ func TestStoreBackedAddReposDoesNotPersistSkippedCheckout(t *testing.T) {
 	st := memstore.New()
 	createFn := BuildStoreBackedCreateWorkspace(st)
 	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
-	if _, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+	if _, err := createFn(context.Background(), workspacecoord.WorkspaceCreateRequest{
 		Name: "my-ws",
 		Type: "empty",
 		Path: wsPath,
@@ -1030,7 +1032,7 @@ func TestStoreBackedAddReposDoesNotPersistSkippedCheckout(t *testing.T) {
 	}
 
 	addFn := BuildStoreBackedAddRepos(st)
-	if _, err := addFn(context.Background(), service.WorkspaceAddReposRequest{
+	if _, err := addFn(context.Background(), workspacecoord.WorkspaceAddReposRequest{
 		WorkspaceID: "MY-WS",
 		Repos:       []string{src},
 		Branch:      "feature-work",
@@ -1066,7 +1068,7 @@ func TestStoreBackedAddReposRollsBackPartialLocalAttach(t *testing.T) {
 	st := memstore.New()
 	createFn := BuildStoreBackedCreateWorkspace(st)
 	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
-	if _, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+	if _, err := createFn(context.Background(), workspacecoord.WorkspaceCreateRequest{
 		Name: "my-ws",
 		Type: "empty",
 		Path: wsPath,
@@ -1089,7 +1091,7 @@ func TestStoreBackedAddReposRollsBackPartialLocalAttach(t *testing.T) {
 	}
 
 	addFn := BuildStoreBackedAddRepos(st)
-	if _, err := addFn(context.Background(), service.WorkspaceAddReposRequest{
+	if _, err := addFn(context.Background(), workspacecoord.WorkspaceAddReposRequest{
 		WorkspaceID: "MY-WS",
 		Repos:       []string{firstSrc, secondSrc},
 		Branch:      branch,
@@ -1137,7 +1139,7 @@ func TestStoreBackedAddReposClassifiesLocalRepoNameCollisionAndRollsBack(t *test
 	base := memstore.New()
 	createFn := BuildStoreBackedCreateWorkspace(base)
 	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
-	if _, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+	if _, err := createFn(context.Background(), workspacecoord.WorkspaceCreateRequest{
 		Name: "my-ws",
 		Type: "empty",
 		Path: wsPath,
@@ -1148,7 +1150,7 @@ func TestStoreBackedAddReposClassifiesLocalRepoNameCollisionAndRollsBack(t *test
 	src := initTestGitRepo(t, t.TempDir(), "shared-repo")
 	st := &repoFailStore{Store: base, err: domain.ErrAlreadyExists}
 	addFn := BuildStoreBackedAddRepos(st)
-	_, err := addFn(context.Background(), service.WorkspaceAddReposRequest{
+	_, err := addFn(context.Background(), workspacecoord.WorkspaceAddReposRequest{
 		WorkspaceID: "MY-WS",
 		Repos:       []string{src},
 		Branch:      "proof-work",
@@ -1177,7 +1179,7 @@ func TestStoreBackedAddReposClassifiesCloneRepoNameCollisionAndRetainsCheckoutFo
 	base := memstore.New()
 	createFn := BuildStoreBackedCreateWorkspace(base)
 	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
-	if _, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+	if _, err := createFn(context.Background(), workspacecoord.WorkspaceCreateRequest{
 		Name: "my-ws",
 		Type: "empty",
 		Path: wsPath,
@@ -1188,7 +1190,7 @@ func TestStoreBackedAddReposClassifiesCloneRepoNameCollisionAndRetainsCheckoutFo
 	remote := initTestGitRepo(t, t.TempDir(), "shared-clone")
 	st := &repoFailStore{Store: base, err: domain.ErrAlreadyExists}
 	addFn := buildTestAddReposWithAdmission(t, st, sourceControlFor(st))
-	_, err := addFn(context.Background(), service.WorkspaceAddReposRequest{
+	_, err := addFn(context.Background(), workspacecoord.WorkspaceAddReposRequest{
 		WorkspaceID: "MY-WS",
 		CloneURLs:   []string{remote},
 	})
@@ -1242,7 +1244,7 @@ func TestStoreBackedAddReposClonesRemoteRepoToEmptyWorkspace(t *testing.T) {
 	createFn := BuildStoreBackedCreateWorkspace(st)
 	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
 
-	if _, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+	if _, err := createFn(context.Background(), workspacecoord.WorkspaceCreateRequest{
 		Name: "my-ws",
 		Type: "empty",
 		Path: wsPath,
@@ -1254,7 +1256,7 @@ func TestStoreBackedAddReposClonesRemoteRepoToEmptyWorkspace(t *testing.T) {
 	sourceBranch := strings.TrimSpace(gitOutput(t, src, "branch", "--show-current"))
 	materializer := sourceControlFor(st)
 	addFn := buildTestAddReposWithAdmission(t, st, materializer)
-	result, err := addFn(context.Background(), service.WorkspaceAddReposRequest{
+	result, err := addFn(context.Background(), workspacecoord.WorkspaceAddReposRequest{
 		WorkspaceID: "MY-WS",
 		CloneURLs:   []string{src},
 	})
@@ -1293,7 +1295,7 @@ func TestStoreBackedAddReposClonesRemoteRepoToEmptyWorkspace(t *testing.T) {
 	// A failed clone still crosses only the opaque repository-reference port;
 	// the remote remains behind the test resolver.
 	missingRemote := filepath.Join(t.TempDir(), "missing-private.git")
-	if _, err := addFn(context.Background(), service.WorkspaceAddReposRequest{
+	if _, err := addFn(context.Background(), workspacecoord.WorkspaceAddReposRequest{
 		WorkspaceID: "MY-WS",
 		CloneURLs:   []string{missingRemote},
 	}); err == nil {
@@ -1312,7 +1314,7 @@ func TestStoreBackedRemoteCloneFailsClosedWithoutSourceControl(t *testing.T) {
 	st := memstore.New()
 	createFn := BuildStoreBackedCreateWorkspace(st)
 	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
-	if _, err := createFn(t.Context(), service.WorkspaceCreateRequest{
+	if _, err := createFn(t.Context(), workspacecoord.WorkspaceCreateRequest{
 		Name: "my-ws",
 		Type: "empty",
 		Path: wsPath,
@@ -1320,7 +1322,7 @@ func TestStoreBackedRemoteCloneFailsClosedWithoutSourceControl(t *testing.T) {
 		t.Fatalf("create empty workspace: %v", err)
 	}
 	remote := initTestGitRepo(t, t.TempDir(), "private-repo")
-	_, err := BuildStoreBackedAddRepos(st)(t.Context(), service.WorkspaceAddReposRequest{
+	_, err := BuildStoreBackedAddRepos(st)(t.Context(), workspacecoord.WorkspaceAddReposRequest{
 		WorkspaceID: "MY-WS",
 		CloneURLs:   []string{remote},
 	})
@@ -1335,7 +1337,7 @@ func TestStoreBackedRemoteCloneFailsClosedWithoutSourceControl(t *testing.T) {
 		t.Fatalf("fail-closed clone created a checkout: %v", statErr)
 	}
 
-	_, err = BuildStoreBackedCreateWorkspace(st)(t.Context(), service.WorkspaceCreateRequest{
+	_, err = BuildStoreBackedCreateWorkspace(st)(t.Context(), workspacecoord.WorkspaceCreateRequest{
 		Name:      "clone-without-owner",
 		Type:      "clone",
 		CloneURLs: []string{remote},
@@ -1358,7 +1360,7 @@ func TestStoreBackedRemoteCloneRejectsCredentialBearingRemoteBeforePersistence(t
 	st := memstore.New()
 	createFn := BuildStoreBackedCreateWorkspace(st)
 	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
-	if _, err := createFn(t.Context(), service.WorkspaceCreateRequest{
+	if _, err := createFn(t.Context(), workspacecoord.WorkspaceCreateRequest{
 		Name: "my-ws",
 		Type: "empty",
 		Path: wsPath,
@@ -1368,7 +1370,7 @@ func TestStoreBackedRemoteCloneRejectsCredentialBearingRemoteBeforePersistence(t
 	materializer := sourceControlFor(st)
 	_, err := buildTestAddReposWithAdmission(t, st, materializer)(
 		t.Context(),
-		service.WorkspaceAddReposRequest{
+		workspacecoord.WorkspaceAddReposRequest{
 			WorkspaceID: "MY-WS",
 			CloneURLs: []string{
 				"https://operator:plaintext-secret@example.test/private.git",
@@ -1398,7 +1400,7 @@ func TestStoreBackedAddReposRejectsCredentialBearingLocalRemote(t *testing.T) {
 	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
 	if _, err := BuildStoreBackedCreateWorkspace(st)(
 		t.Context(),
-		service.WorkspaceCreateRequest{Name: "my-ws", Type: "empty", Path: wsPath},
+		workspacecoord.WorkspaceCreateRequest{Name: "my-ws", Type: "empty", Path: wsPath},
 	); err != nil {
 		t.Fatalf("create empty workspace: %v", err)
 	}
@@ -1413,7 +1415,7 @@ func TestStoreBackedAddReposRejectsCredentialBearingLocalRemote(t *testing.T) {
 	)
 	_, err := BuildStoreBackedAddRepos(st)(
 		t.Context(),
-		service.WorkspaceAddReposRequest{
+		workspacecoord.WorkspaceAddReposRequest{
 			WorkspaceID: "MY-WS",
 			Repos:       []string{src},
 			Branch:      strings.TrimSpace(gitOutput(t, src, "branch", "--show-current")),
@@ -1456,7 +1458,7 @@ func TestStoreBackedAddReposPersistsEachClonesDetectedDefaultBranch(t *testing.T
 	st := memstore.New()
 	createFn := BuildStoreBackedCreateWorkspace(st)
 	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
-	if _, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+	if _, err := createFn(context.Background(), workspacecoord.WorkspaceCreateRequest{
 		Name: "my-ws",
 		Type: "empty",
 		Path: wsPath,
@@ -1470,7 +1472,7 @@ func TestStoreBackedAddReposPersistsEachClonesDetectedDefaultBranch(t *testing.T
 	runGit(t, beta, "branch", "-m", "master")
 
 	addFn := buildTestAddReposWithAdmission(t, st, sourceControlFor(st))
-	if _, err := addFn(context.Background(), service.WorkspaceAddReposRequest{
+	if _, err := addFn(context.Background(), workspacecoord.WorkspaceAddReposRequest{
 		WorkspaceID: "MY-WS",
 		CloneURLs:   []string{alpha, beta},
 	}); err != nil {
@@ -1497,7 +1499,7 @@ func TestStoreBackedAddReposRejectsExplicitMissingCloneBranch(t *testing.T) {
 	st := memstore.New()
 	createFn := BuildStoreBackedCreateWorkspace(st)
 	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
-	if _, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+	if _, err := createFn(context.Background(), workspacecoord.WorkspaceCreateRequest{
 		Name: "my-ws",
 		Type: "empty",
 		Path: wsPath,
@@ -1508,7 +1510,7 @@ func TestStoreBackedAddReposRejectsExplicitMissingCloneBranch(t *testing.T) {
 	src := initTestGitRepo(t, t.TempDir(), "hello-world")
 	runGit(t, src, "branch", "-m", "master")
 	addFn := buildTestAddReposWithAdmission(t, st, sourceControlFor(st))
-	_, err := addFn(context.Background(), service.WorkspaceAddReposRequest{
+	_, err := addFn(context.Background(), workspacecoord.WorkspaceAddReposRequest{
 		WorkspaceID: "MY-WS",
 		CloneURLs:   []string{src},
 		Branch:      "main",
@@ -1532,7 +1534,7 @@ func TestStoreBackedAddReposRejectsEmptyRemoteWithoutCommittedDefaultBranch(t *t
 	st := memstore.New()
 	createFn := BuildStoreBackedCreateWorkspace(st)
 	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
-	if _, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+	if _, err := createFn(context.Background(), workspacecoord.WorkspaceCreateRequest{
 		Name: "my-ws",
 		Type: "empty",
 		Path: wsPath,
@@ -1547,7 +1549,7 @@ func TestStoreBackedAddReposRejectsEmptyRemoteWithoutCommittedDefaultBranch(t *t
 	runGit(t, emptyRemote, "init")
 
 	addFn := buildTestAddReposWithAdmission(t, st, sourceControlFor(st))
-	_, err := addFn(context.Background(), service.WorkspaceAddReposRequest{
+	_, err := addFn(context.Background(), workspacecoord.WorkspaceAddReposRequest{
 		WorkspaceID: "MY-WS",
 		CloneURLs:   []string{emptyRemote},
 	})
@@ -1574,7 +1576,7 @@ func TestStoreBackedCreateEmptyWorkspaceRollsBackOnRepoStoreError(t *testing.T) 
 	createFn := BuildStoreBackedCreateWorkspace(st)
 	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
 
-	if _, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+	if _, err := createFn(context.Background(), workspacecoord.WorkspaceCreateRequest{
 		Name:   "my-ws",
 		Type:   "empty",
 		Repos:  []string{src},
@@ -1609,7 +1611,7 @@ func TestStoreBackedCreateEmptyWorkspaceClassifiesCreateRace(t *testing.T) {
 	st := &workspaceCreateRaceStore{Store: memstore.New()}
 	createFn := BuildStoreBackedCreateWorkspace(st)
 
-	_, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+	_, err := createFn(context.Background(), workspacecoord.WorkspaceCreateRequest{
 		Name: "my-ws",
 		Type: "empty",
 		Path: filepath.Join(loomDir, "workspaces", "my-ws"),
@@ -1630,7 +1632,7 @@ func TestStoreBackedCreateEmptyWorkspaceRollsBackLocalStateOnReadyUpdateError(t 
 	st := &workspaceReadyUpdateFailStore{Store: memstore.New()}
 	createFn := BuildStoreBackedCreateWorkspace(st)
 
-	_, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+	_, err := createFn(context.Background(), workspacecoord.WorkspaceCreateRequest{
 		Name: "rollback-ws",
 		Type: "empty",
 		Path: filepath.Join(loomDir, "workspaces", "rollback-ws"),
@@ -1664,7 +1666,7 @@ func TestStoreBackedCreateCloneWorkspacePersistsLifecycleAndRepos(t *testing.T) 
 	createFn := buildTestCreateWithAdmission(t, st, materializer)
 	wsPath := filepath.Join(loomDir, "workspaces", "clone-ws")
 
-	result, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+	result, err := createFn(context.Background(), workspacecoord.WorkspaceCreateRequest{
 		Name:      "clone-ws",
 		Type:      "clone",
 		CloneURLs: []string{src},
@@ -1684,7 +1686,7 @@ func TestStoreBackedCreateCloneWorkspacePersistsLifecycleAndRepos(t *testing.T) 
 	if err != nil {
 		t.Fatalf("workspace not stored: %v", err)
 	}
-	if ws.State != domain.WorkspaceStateReady {
+	if ws.State != workspacemodule.StateReady {
 		t.Fatalf("workspace state = %q, want ready", ws.State)
 	}
 	repos, err := st.Repos().List(context.Background(), "CLONE-WS")
@@ -1722,7 +1724,7 @@ func TestStoreBackedCreateCloneWorkspacePersistsLifecycleAndRepos(t *testing.T) 
 	// A failed clone still carries only the opaque repository reference over
 	// the Workspace-to-Source-Control port.
 	missingRemote := filepath.Join(t.TempDir(), "missing-private.git")
-	if _, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+	if _, err := createFn(context.Background(), workspacecoord.WorkspaceCreateRequest{
 		Name:      "clone-ws-auth-fallback",
 		Type:      "clone",
 		CloneURLs: []string{missingRemote},
@@ -1798,7 +1800,7 @@ func TestStoreBackedCreateCloneWorkspaceRecoversBeginLostBeforeLocalBind(t *test
 		journal,
 		materializer,
 	)
-	result, err := createFn(t.Context(), service.WorkspaceCreateRequest{
+	result, err := createFn(t.Context(), workspacecoord.WorkspaceCreateRequest{
 		Name: "crash-recovery", Type: "clone",
 		CloneURLs: []string{src}, Path: wsPath,
 	})
@@ -1842,7 +1844,7 @@ func TestStoreBackedCreateCloneWorkspaceRecoversPartialCheckoutAndReplaysCommit(
 		t.Fatalf("new admission journal: %v", err)
 	}
 	wsPath := filepath.Join(loomDir, "workspaces", "partial-recovery")
-	request := service.WorkspaceCreateRequest{
+	request := workspacecoord.WorkspaceCreateRequest{
 		Name: "partial-recovery", Type: "clone",
 		CloneURLs: []string{alpha, beta}, Path: wsPath,
 	}
@@ -1940,7 +1942,7 @@ func TestStoreBackedCreateCloneWorkspaceNormalizesRepoNameForFleetStore(t *testi
 	createFn := buildTestCreateWithAdmission(t, st, sourceControlFor(st))
 	wsPath := filepath.Join(loomDir, "workspaces", "clone-ws")
 
-	_, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+	_, err := createFn(context.Background(), workspacecoord.WorkspaceCreateRequest{
 		Name:      "clone-ws",
 		Type:      "clone",
 		CloneURLs: []string{src},
@@ -1984,7 +1986,7 @@ func TestStoreBackedCreateCloneWorkspaceClassifiesCreateRace(t *testing.T) {
 	)
 	src := initTestGitRepo(t, t.TempDir(), "app")
 
-	_, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+	_, err := createFn(context.Background(), workspacecoord.WorkspaceCreateRequest{
 		Name:      "clone-ws",
 		Type:      "clone",
 		CloneURLs: []string{src},
@@ -2014,7 +2016,7 @@ func TestStoreBackedCreateCloneWorkspaceRetainsDurableCreatingStateOnRetryableFa
 	createFn := buildTestCreateWithAdmission(t, st, sourceControlFor(st))
 	wsPath := filepath.Join(loomDir, "workspaces", "clone-ws")
 
-	_, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+	_, err := createFn(context.Background(), workspacecoord.WorkspaceCreateRequest{
 		Name:      "clone-ws",
 		Type:      "clone",
 		CloneURLs: []string{filepath.Join(t.TempDir(), "missing")},
@@ -2028,7 +2030,7 @@ func TestStoreBackedCreateCloneWorkspaceRetainsDurableCreatingStateOnRetryableFa
 	if getErr != nil {
 		t.Fatalf("durable creating workspace was lost: %v", getErr)
 	}
-	if workspace.State != domain.WorkspaceStateCreating {
+	if workspace.State != workspacemodule.StateCreating {
 		t.Fatalf("workspace state = %q, want creating for recovery", workspace.State)
 	}
 	if _, statErr := os.Stat(wsPath); statErr != nil {
@@ -2056,7 +2058,7 @@ func TestStoreBackedCreateCloneWorkspaceKeepsPreexistingExternalRootOnFailure(t 
 	st := memstore.New()
 	createFn := buildTestCreateWithAdmission(t, st, sourceControlFor(st))
 
-	_, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+	_, err := createFn(context.Background(), workspacecoord.WorkspaceCreateRequest{
 		Name:      "clone-ws",
 		Type:      "clone",
 		CloneURLs: []string{filepath.Join(t.TempDir(), "missing")},
@@ -2091,7 +2093,7 @@ type workspaceCreateRaceWorkspaceStore struct {
 	store.WorkspaceStore
 }
 
-func (s workspaceCreateRaceWorkspaceStore) Create(context.Context, store.WorkspaceCreate) (*domain.Workspace, error) {
+func (s workspaceCreateRaceWorkspaceStore) Create(context.Context, store.WorkspaceCreate) (*workspacemodule.Workspace, error) {
 	return nil, domain.ErrAlreadyExists
 }
 
@@ -2107,8 +2109,8 @@ type workspaceReadyUpdateFailWorkspaceStore struct {
 	store.WorkspaceStore
 }
 
-func (s workspaceReadyUpdateFailWorkspaceStore) Update(ctx context.Context, key string, patch store.WorkspaceUpdate) (*domain.Workspace, error) {
-	if patch.State != nil && *patch.State == domain.WorkspaceStateReady {
+func (s workspaceReadyUpdateFailWorkspaceStore) Update(ctx context.Context, key string, patch store.WorkspaceUpdate) (*workspacemodule.Workspace, error) {
+	if patch.State != nil && *patch.State == workspacemodule.StateReady {
 		return nil, errors.New("ready update failed")
 	}
 	return s.WorkspaceStore.Update(ctx, key, patch)
@@ -2135,19 +2137,19 @@ func rolesByName(roles []*domain.Role) map[string]*domain.Role {
 	return out
 }
 
-func (r repoFailer) Create(context.Context, store.RepoCreate) (*domain.Repo, error) {
+func (r repoFailer) Create(context.Context, store.RepoCreate) (*workspacemodule.Repository, error) {
 	return nil, r.err
 }
 
-func (r repoFailer) Get(context.Context, string, string) (*domain.Repo, error) {
+func (r repoFailer) Get(context.Context, string, string) (*workspacemodule.Repository, error) {
 	return nil, domain.ErrNotFound
 }
 
-func (r repoFailer) List(context.Context, string) ([]*domain.Repo, error) {
+func (r repoFailer) List(context.Context, string) ([]*workspacemodule.Repository, error) {
 	return nil, nil
 }
 
-func (r repoFailer) Update(context.Context, string, string, store.RepoUpdate) (*domain.Repo, error) {
+func (r repoFailer) Update(context.Context, string, string, store.RepoUpdate) (*workspacemodule.Repository, error) {
 	return nil, r.err
 }
 

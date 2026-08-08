@@ -3,6 +3,8 @@ package types
 import (
 	"fmt"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 // Issue represents a trackable work item.
@@ -60,9 +62,9 @@ type Issue struct {
 	PrefixOverride string `json:"-"` // Completely replace config prefix (for cross-rig creation)
 
 	// ===== Relational Data (populated for export/import) =====
-	Labels       []string      `json:"labels,omitempty"`
-	Dependencies []*Dependency `json:"dependencies,omitempty"`
-	Comments     []*Comment    `json:"comments,omitempty"`
+	Labels       []string             `json:"labels,omitempty"`
+	Dependencies []*Dependency        `json:"dependencies,omitempty"`
+	Comments     []*workitems.Comment `json:"comments,omitempty"`
 
 	// ===== Tombstone Fields (soft-delete support) =====
 	DeletedAt    *time.Time `json:"deleted_at,omitempty"`    // When deleted

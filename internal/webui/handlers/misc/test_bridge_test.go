@@ -17,7 +17,10 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript/backends"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
+	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
+	"github.com/tysonthomas9/loomcli/internal/webui/filecoord"
+	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
 )
 
@@ -74,23 +77,23 @@ var newClientErrorLimiter = NewClientErrorLimiter
 // clientErrorLimiter → ClientErrorLimiter (type alias)
 type clientErrorLimiter = ClientErrorLimiter
 
-// AgentLogResult → service.AgentLogResult
-type AgentLogResult = service.AgentLogResult
+// AgentLogResult → agentcoord.AgentLogResult
+type AgentLogResult = agentcoord.AgentLogResult
 
-// FileReadResult → service.FileReadResult
-type FileReadResult = service.FileReadResult
+// FileReadResult → filecoord.FileReadResult
+type FileReadResult = filecoord.FileReadResult
 
-// FileTreeResult → service.FileTreeResult
-type FileTreeResult = service.FileTreeResult
+// FileTreeResult → filecoord.FileTreeResult
+type FileTreeResult = filecoord.FileTreeResult
 
-// FileTreeEntry → service.FileTreeEntry
-type FileTreeEntry = service.FileTreeEntry
+// FileTreeEntry → filecoord.FileTreeEntry
+type FileTreeEntry = filecoord.FileTreeEntry
 
 // ---------------------------------------------------------------------------
 // Test-local FileService implementation (mirrors svcimpl.fileServiceImpl)
 // ---------------------------------------------------------------------------
 
-// testFileServiceImpl implements service.FileService for handler-level tests.
+// testFileServiceImpl implements filecoord.FileService for handler-level tests.
 // This duplicates the essential logic from svcimpl to avoid the import cycle
 // svcimpl → handlers/misc → svcimpl.
 type testFileServiceImpl struct {
@@ -98,32 +101,32 @@ type testFileServiceImpl struct {
 }
 
 // NewFileService creates a test-local FileService implementation.
-func NewFileService(fileOps ops.FileOps) service.FileService {
+func NewFileService(fileOps ops.FileOps) filecoord.FileService {
 	return &testFileServiceImpl{fileOps: fileOps}
 }
 
 // resolveScopeRootTest mirrors svcimpl.fileServiceImpl.resolveScopeRoot.
-func (s *testFileServiceImpl) resolveScopeRootTest(wsID string, scope service.FileScope, target, repo string) (string, error) {
-	if repo != "" && scope != service.ScopeAgent {
-		return "", service.ErrValidation("repo qualifier is only supported for agent scope")
+func (s *testFileServiceImpl) resolveScopeRootTest(wsID string, scope filecoord.FileScope, target, repo string) (string, error) {
+	if repo != "" && scope != filecoord.ScopeAgent {
+		return "", apperrors.ErrValidation("repo qualifier is only supported for agent scope")
 	}
 	switch scope {
-	case service.ScopeWorkspace:
+	case filecoord.ScopeWorkspace:
 		if target != "" {
-			return "", service.ErrValidation("workspace scope does not take a target")
+			return "", apperrors.ErrValidation("workspace scope does not take a target")
 		}
 		root, err := s.fileOps.ResolveWorkspaceRoot(wsID)
 		if err != nil {
-			return "", service.ErrNotFound(err.Error())
+			return "", apperrors.ErrNotFound(err.Error())
 		}
 		return root, nil
-	case service.ScopeRepo:
+	case filecoord.ScopeRepo:
 		if target == "" {
-			return "", service.ErrValidation("repo scope requires a target")
+			return "", apperrors.ErrValidation("repo scope requires a target")
 		}
 		ws, err := s.fileOps.ResolveWorkspaceData(wsID)
 		if err != nil {
-			return "", service.ErrNotFound(err.Error())
+			return "", apperrors.ErrNotFound(err.Error())
 		}
 		repoName := ""
 		for _, repo := range ws.Repos {
@@ -133,20 +136,20 @@ func (s *testFileServiceImpl) resolveScopeRootTest(wsID string, scope service.Fi
 			}
 		}
 		if repoName == "" {
-			return "", service.ErrNotFound(fmt.Sprintf("repo %q not found", target))
+			return "", apperrors.ErrNotFound(fmt.Sprintf("repo %q not found", target))
 		}
 		root, err := s.fileOps.ResolveWorkspaceRoot(wsID)
 		if err != nil {
-			return "", service.ErrNotFound(err.Error())
+			return "", apperrors.ErrNotFound(err.Error())
 		}
 		return filepath.Join(root, repoName), nil
-	case service.ScopeAgent:
-		if target == "" || !service.IsValidAgentName(target) {
-			return "", service.ErrValidation("invalid agent name")
+	case filecoord.ScopeAgent:
+		if target == "" || !agentcoord.IsValidAgentName(target) {
+			return "", apperrors.ErrValidation("invalid agent name")
 		}
 		ws, err := s.fileOps.ResolveWorkspaceData(wsID)
 		if err != nil {
-			return "", service.ErrNotFound(err.Error())
+			return "", apperrors.ErrNotFound(err.Error())
 		}
 		var found bool
 		for _, agent := range ws.Agents {
@@ -156,7 +159,7 @@ func (s *testFileServiceImpl) resolveScopeRootTest(wsID string, scope service.Fi
 			}
 		}
 		if !found {
-			return "", service.ErrNotFound(fmt.Sprintf("agent %q not found", target))
+			return "", apperrors.ErrNotFound(fmt.Sprintf("agent %q not found", target))
 		}
 		var wt *ops.AgentWorktree
 		if repo != "" {
@@ -165,15 +168,15 @@ func (s *testFileServiceImpl) resolveScopeRootTest(wsID string, scope service.Fi
 			wt, err = s.fileOps.ResolveAgentWorktree(wsID, target)
 		}
 		if err != nil {
-			return "", service.ErrNotFound(fmt.Sprintf("agent worktree %q not found", target))
+			return "", apperrors.ErrNotFound(fmt.Sprintf("agent worktree %q not found", target))
 		}
 		return wt.Path, nil
 	default:
-		return "", service.ErrValidation(fmt.Sprintf("unsupported scope %q", scope))
+		return "", apperrors.ErrValidation(fmt.Sprintf("unsupported scope %q", scope))
 	}
 }
 
-func (s *testFileServiceImpl) ListDirectoryScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, path string) (*service.FileTreeResult, error) {
+func (s *testFileServiceImpl) ListDirectoryScoped(_ context.Context, wsID string, scope filecoord.FileScope, target, repo, path string) (*filecoord.FileTreeResult, error) {
 	root, err := s.resolveScopeRootTest(wsID, scope, target, repo)
 	if err != nil {
 		return nil, err
@@ -188,19 +191,19 @@ func (s *testFileServiceImpl) ListDirectoryScoped(_ context.Context, wsID string
 	fi, err := os.Lstat(fullPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, service.ErrNotFound("directory not found")
+			return nil, apperrors.ErrNotFound("directory not found")
 		}
-		return nil, service.ErrInternal("failed to stat path", err)
+		return nil, apperrors.ErrInternal("failed to stat path", err)
 	}
 	if fi.Mode()&os.ModeSymlink != 0 {
-		return nil, service.ErrForbidden("refusing to follow symlink")
+		return nil, apperrors.ErrForbidden("refusing to follow symlink")
 	}
 	if !fi.IsDir() {
-		return nil, service.ErrValidation("path is not a directory")
+		return nil, apperrors.ErrValidation("path is not a directory")
 	}
 	dirEntries, err := os.ReadDir(fullPath)
 	if err != nil {
-		return nil, service.ErrInternal("failed to read directory", err)
+		return nil, apperrors.ErrInternal("failed to read directory", err)
 	}
 	sort.Slice(dirEntries, func(i, j int) bool {
 		iDir := dirEntries[i].IsDir()
@@ -210,7 +213,7 @@ func (s *testFileServiceImpl) ListDirectoryScoped(_ context.Context, wsID string
 		}
 		return dirEntries[i].Name() < dirEntries[j].Name()
 	})
-	entries := make([]service.FileTreeEntry, 0, len(dirEntries))
+	entries := make([]filecoord.FileTreeEntry, 0, len(dirEntries))
 	for _, de := range dirEntries {
 		if de.Type()&os.ModeSymlink != 0 || strings.EqualFold(de.Name(), ".git") {
 			continue
@@ -219,7 +222,7 @@ func (s *testFileServiceImpl) ListDirectoryScoped(_ context.Context, wsID string
 		if infoErr != nil {
 			continue
 		}
-		entries = append(entries, service.FileTreeEntry{
+		entries = append(entries, filecoord.FileTreeEntry{
 			Name:    de.Name(),
 			IsDir:   de.IsDir(),
 			Size:    info.Size(),
@@ -230,10 +233,10 @@ func (s *testFileServiceImpl) ListDirectoryScoped(_ context.Context, wsID string
 	if relPath == "" {
 		relPath = "."
 	}
-	return &service.FileTreeResult{Path: relPath, Entries: entries}, nil
+	return &filecoord.FileTreeResult{Path: relPath, Entries: entries}, nil
 }
 
-func (s *testFileServiceImpl) ReadFileScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, path string) (*service.FileReadResult, error) {
+func (s *testFileServiceImpl) ReadFileScoped(_ context.Context, wsID string, scope filecoord.FileScope, target, repo, path string) (*filecoord.FileReadResult, error) {
 	root, err := s.resolveScopeRootTest(wsID, scope, target, repo)
 	if err != nil {
 		return nil, err
@@ -248,89 +251,89 @@ func (s *testFileServiceImpl) ReadFileScoped(_ context.Context, wsID string, sco
 	fi, err := os.Lstat(fullPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, service.ErrNotFound("file not found")
+			return nil, apperrors.ErrNotFound("file not found")
 		}
-		return nil, service.ErrInternal("failed to stat file", err)
+		return nil, apperrors.ErrInternal("failed to stat file", err)
 	}
 	if fi.Mode()&os.ModeSymlink != 0 {
-		return nil, service.ErrForbidden("refusing to follow symlink")
+		return nil, apperrors.ErrForbidden("refusing to follow symlink")
 	}
 	if fi.IsDir() {
-		return nil, service.ErrValidation("path is a directory, not a file")
+		return nil, apperrors.ErrValidation("path is a directory, not a file")
 	}
 	f, err := OpenLogFileSecure(fullPath, root)
 	if err != nil {
 		if strings.Contains(err.Error(), "symlink") {
-			return nil, service.ErrForbidden("refusing to follow symlink")
+			return nil, apperrors.ErrForbidden("refusing to follow symlink")
 		}
-		return nil, service.ErrInternal("failed to open file", err)
+		return nil, apperrors.ErrInternal("failed to open file", err)
 	}
 	defer f.Close()
 	truncated := fi.Size() > maxRequestBody
 	data, err := io.ReadAll(io.LimitReader(f, maxRequestBody))
 	if err != nil {
-		return nil, service.ErrInternal("failed to read file", err)
+		return nil, apperrors.ErrInternal("failed to read file", err)
 	}
 	if IsBinaryContent(data) {
-		return &service.FileReadResult{Path: cleanPath, Size: fi.Size(), Binary: true, Truncated: truncated}, nil
+		return &filecoord.FileReadResult{Path: cleanPath, Size: fi.Size(), Binary: true, Truncated: truncated}, nil
 	}
-	return &service.FileReadResult{Path: cleanPath, Content: string(data), Size: fi.Size(), Truncated: truncated}, nil
+	return &filecoord.FileReadResult{Path: cleanPath, Content: string(data), Size: fi.Size(), Truncated: truncated}, nil
 }
 
-func (s *testFileServiceImpl) StatPathScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) (*service.FileStatResult, error) {
-	return &service.FileStatResult{}, nil
+func (s *testFileServiceImpl) StatPathScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _ string) (*filecoord.FileStatResult, error) {
+	return &filecoord.FileStatResult{}, nil
 }
 
-func (s *testFileServiceImpl) ReadFileAtRevScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _ string) (*service.FileReadResult, error) {
-	return &service.FileReadResult{}, nil
+func (s *testFileServiceImpl) ReadFileAtRevScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _, _ string) (*filecoord.FileReadResult, error) {
+	return &filecoord.FileReadResult{}, nil
 }
 
-func (s *testFileServiceImpl) IndexFilesScoped(_ context.Context, wsID string, scope service.FileScope, target, repo string) (*service.FileIndexResult, error) {
+func (s *testFileServiceImpl) IndexFilesScoped(_ context.Context, wsID string, scope filecoord.FileScope, target, repo string) (*filecoord.FileIndexResult, error) {
 	if _, err := s.resolveScopeRootTest(wsID, scope, target, repo); err != nil {
 		return nil, err
 	}
-	return &service.FileIndexResult{Paths: []string{}, Truncated: false}, nil
+	return &filecoord.FileIndexResult{Paths: []string{}, Truncated: false}, nil
 }
 
-func (s *testFileServiceImpl) SearchFilesScoped(_ context.Context, wsID string, scope service.FileScope, target, repo string, _ service.FileSearchRequest) (*service.FileSearchResult, error) {
+func (s *testFileServiceImpl) SearchFilesScoped(_ context.Context, wsID string, scope filecoord.FileScope, target, repo string, _ filecoord.FileSearchRequest) (*filecoord.FileSearchResult, error) {
 	if _, err := s.resolveScopeRootTest(wsID, scope, target, repo); err != nil {
 		return nil, err
 	}
-	return &service.FileSearchResult{Results: []service.FileSearchFileResult{}, LimitHit: false}, nil
+	return &filecoord.FileSearchResult{Results: []filecoord.FileSearchFileResult{}, LimitHit: false}, nil
 }
 
-func (s *testFileServiceImpl) GitStatusScoped(_ context.Context, _ string, _ service.FileScope, _, _ string) (service.FileGitStatusResult, error) {
-	return service.FileGitStatusResult{}, nil
+func (s *testFileServiceImpl) GitStatusScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _ string) (filecoord.FileGitStatusResult, error) {
+	return filecoord.FileGitStatusResult{}, nil
 }
 
-func (s *testFileServiceImpl) ListFileCheckouts(_ context.Context, _ string) (*service.FileCheckoutsResult, error) {
-	return &service.FileCheckoutsResult{}, nil
+func (s *testFileServiceImpl) ListFileCheckouts(_ context.Context, _ string) (*filecoord.FileCheckoutsResult, error) {
+	return &filecoord.FileCheckoutsResult{}, nil
 }
 
-func (s *testFileServiceImpl) RepairCheckout(_ context.Context, wsID string, req service.FileCheckoutRepairRequest) (*ops.RepairResult, error) {
+func (s *testFileServiceImpl) RepairCheckout(_ context.Context, wsID string, req filecoord.FileCheckoutRepairRequest) (*ops.RepairResult, error) {
 	result, err := s.fileOps.RepairCheckout(wsID, req.Scope, req.Target, req.Repo, req.Force)
 	if err != nil {
 		if errors.Is(err, ops.ErrCheckoutTargetNotAllowed) || errors.Is(err, ops.ErrAgentRepoNotAllowed) {
-			return nil, service.ErrValidation("checkout target is not allowed")
+			return nil, apperrors.ErrValidation("checkout target is not allowed")
 		}
 		return nil, err
 	}
 	return &result, nil
 }
 
-func (s *testFileServiceImpl) DiffFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _, _ string) (*service.FileDiffResult, error) {
-	return &service.FileDiffResult{}, nil
+func (s *testFileServiceImpl) DiffFileScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _, _, _ string) (*filecoord.FileDiffResult, error) {
+	return &filecoord.FileDiffResult{}, nil
 }
 
-func (s *testFileServiceImpl) BlameFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) (*service.FileBlameResult, error) {
-	return &service.FileBlameResult{}, nil
+func (s *testFileServiceImpl) BlameFileScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _ string) (*filecoord.FileBlameResult, error) {
+	return &filecoord.FileBlameResult{}, nil
 }
 
-func (s *testFileServiceImpl) HistoryFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) (*service.FileHistoryResult, error) {
-	return &service.FileHistoryResult{}, nil
+func (s *testFileServiceImpl) HistoryFileScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _ string) (*filecoord.FileHistoryResult, error) {
+	return &filecoord.FileHistoryResult{}, nil
 }
 
-func (s *testFileServiceImpl) WriteFileConditionalScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, path, content string, _ service.FileWritePreconditions) (*service.FileMutationResult, error) {
+func (s *testFileServiceImpl) WriteFileConditionalScoped(_ context.Context, wsID string, scope filecoord.FileScope, target, repo, path, content string, _ filecoord.FileWritePreconditions) (*filecoord.FileMutationResult, error) {
 	root, err := s.resolveScopeRootTest(wsID, scope, target, repo)
 	if err != nil {
 		return nil, err
@@ -338,10 +341,10 @@ func (s *testFileServiceImpl) WriteFileConditionalScoped(_ context.Context, wsID
 	if err := testWriteFileAt(root, path, content); err != nil {
 		return nil, err
 	}
-	return &service.FileMutationResult{Success: true, Version: "sha256:test"}, nil
+	return &filecoord.FileMutationResult{Success: true, Version: "sha256:test"}, nil
 }
 
-func (s *testFileServiceImpl) DeletePathVersionedScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, path string, recursive bool, _ string) error {
+func (s *testFileServiceImpl) DeletePathVersionedScoped(_ context.Context, wsID string, scope filecoord.FileScope, target, repo, path string, recursive bool, _ string) error {
 	root, err := s.resolveScopeRootTest(wsID, scope, target, repo)
 	if err != nil {
 		return err
@@ -349,7 +352,7 @@ func (s *testFileServiceImpl) DeletePathVersionedScoped(_ context.Context, wsID 
 	return testDeletePathAt(root, path, recursive)
 }
 
-func (s *testFileServiceImpl) MkdirScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, path string) error {
+func (s *testFileServiceImpl) MkdirScoped(_ context.Context, wsID string, scope filecoord.FileScope, target, repo, path string) error {
 	root, err := s.resolveScopeRootTest(wsID, scope, target, repo)
 	if err != nil {
 		return err
@@ -357,7 +360,7 @@ func (s *testFileServiceImpl) MkdirScoped(_ context.Context, wsID string, scope 
 	return testMkdirAt(root, path)
 }
 
-func (s *testFileServiceImpl) MovePathVersionedScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, from, to string, overwrite bool, _, _ string) (*service.FileMutationResult, error) {
+func (s *testFileServiceImpl) MovePathVersionedScoped(_ context.Context, wsID string, scope filecoord.FileScope, target, repo, from, to string, overwrite bool, _, _ string) (*filecoord.FileMutationResult, error) {
 	root, err := s.resolveScopeRootTest(wsID, scope, target, repo)
 	if err != nil {
 		return nil, err
@@ -365,32 +368,32 @@ func (s *testFileServiceImpl) MovePathVersionedScoped(_ context.Context, wsID st
 	if err := testMovePathAt(root, from, to, overwrite); err != nil {
 		return nil, err
 	}
-	return &service.FileMutationResult{Success: true, Version: "sha256:test"}, nil
+	return &filecoord.FileMutationResult{Success: true, Version: "sha256:test"}, nil
 }
 
 func testScopedFullPath(rootDir, path string, allowEmpty bool) (string, string, error) {
 	if path == "" {
 		if !allowEmpty {
-			return "", "", service.ErrValidation("path parameter is required")
+			return "", "", apperrors.ErrValidation("path parameter is required")
 		}
 		path = "."
 	}
 	if filepath.IsAbs(path) {
-		return "", "", service.ErrForbidden("path outside root")
+		return "", "", apperrors.ErrForbidden("path outside root")
 	}
 	cleanPath := filepath.Clean(path)
 	for _, segment := range strings.Split(cleanPath, string(filepath.Separator)) {
 		if strings.EqualFold(segment, ".git") {
-			return "", "", service.ErrForbidden(".git paths are not available")
+			return "", "", apperrors.ErrForbidden(".git paths are not available")
 		}
 	}
 	fullPath := filepath.Join(rootDir, cleanPath)
 	if err := validatePathWithinDir(fullPath, rootDir); err != nil {
-		return "", "", service.ErrForbidden("path outside root")
+		return "", "", apperrors.ErrForbidden("path outside root")
 	}
 	relPath, err := filepath.Rel(rootDir, fullPath)
 	if err != nil || relPath == ".." || strings.HasPrefix(relPath, ".."+string(filepath.Separator)) || filepath.IsAbs(relPath) {
-		return "", "", service.ErrForbidden("path outside root")
+		return "", "", apperrors.ErrForbidden("path outside root")
 	}
 	if relPath == "" {
 		relPath = "."
@@ -401,7 +404,7 @@ func testScopedFullPath(rootDir, path string, allowEmpty bool) (string, string, 
 func testNoSymlinkComponents(rootDir, fullPath string) error {
 	relPath, err := filepath.Rel(rootDir, fullPath)
 	if err != nil || relPath == ".." || strings.HasPrefix(relPath, ".."+string(filepath.Separator)) || filepath.IsAbs(relPath) {
-		return service.ErrForbidden("path outside root")
+		return apperrors.ErrForbidden("path outside root")
 	}
 	if relPath == "." {
 		return nil
@@ -417,10 +420,10 @@ func testNoSymlinkComponents(rootDir, fullPath string) error {
 			if os.IsNotExist(err) {
 				return nil
 			}
-			return service.ErrInternal("failed to stat path", err)
+			return apperrors.ErrInternal("failed to stat path", err)
 		}
 		if fi.Mode()&os.ModeSymlink != 0 {
-			return service.ErrForbidden("refusing to follow symlink")
+			return apperrors.ErrForbidden("refusing to follow symlink")
 		}
 	}
 	return nil
@@ -429,7 +432,7 @@ func testNoSymlinkComponents(rootDir, fullPath string) error {
 func testExistingParent(fullPath, rootDir string) error {
 	parentDir := filepath.Dir(fullPath)
 	if err := validatePathWithinDir(parentDir, rootDir); err != nil {
-		return service.ErrForbidden("parent directory outside root")
+		return apperrors.ErrForbidden("parent directory outside root")
 	}
 	if err := testNoSymlinkComponents(rootDir, parentDir); err != nil {
 		return err
@@ -437,15 +440,15 @@ func testExistingParent(fullPath, rootDir string) error {
 	parentFi, err := os.Lstat(parentDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return service.ErrNotFound("parent directory does not exist")
+			return apperrors.ErrNotFound("parent directory does not exist")
 		}
-		return service.ErrInternal("failed to stat parent directory", err)
+		return apperrors.ErrInternal("failed to stat parent directory", err)
 	}
 	if parentFi.Mode()&os.ModeSymlink != 0 {
-		return service.ErrForbidden("parent directory is a symlink")
+		return apperrors.ErrForbidden("parent directory is a symlink")
 	}
 	if !parentFi.IsDir() {
-		return service.ErrValidation("parent path is not a directory")
+		return apperrors.ErrValidation("parent path is not a directory")
 	}
 	return nil
 }
@@ -464,17 +467,17 @@ func testWriteFileAt(rootDir, path, content string) error {
 	perm := os.FileMode(0644)
 	if fi, err := os.Lstat(fullPath); err == nil {
 		if fi.Mode()&os.ModeSymlink != 0 {
-			return service.ErrForbidden("refusing to overwrite symlink")
+			return apperrors.ErrForbidden("refusing to overwrite symlink")
 		}
 		if fi.IsDir() {
-			return service.ErrValidation("path is a directory, not a file")
+			return apperrors.ErrValidation("path is a directory, not a file")
 		}
 		perm = fi.Mode().Perm()
 	} else if !os.IsNotExist(err) {
-		return service.ErrInternal("failed to stat file", err)
+		return apperrors.ErrInternal("failed to stat file", err)
 	}
 	if err := os.WriteFile(fullPath, []byte(content), perm); err != nil {
-		return service.ErrInternal("failed to save file", err)
+		return apperrors.ErrInternal("failed to save file", err)
 	}
 	return nil
 }
@@ -493,30 +496,30 @@ func testDeletePathAt(rootDir, path string, recursive bool) error {
 	fi, err := os.Lstat(fullPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return service.ErrNotFound("path not found")
+			return apperrors.ErrNotFound("path not found")
 		}
-		return service.ErrInternal("failed to stat path", err)
+		return apperrors.ErrInternal("failed to stat path", err)
 	}
 	if fi.Mode()&os.ModeSymlink != 0 {
-		return service.ErrForbidden("refusing to follow symlink")
+		return apperrors.ErrForbidden("refusing to follow symlink")
 	}
 	if fi.IsDir() {
 		if recursive {
 			if err := os.RemoveAll(fullPath); err != nil {
-				return service.ErrInternal("failed to delete directory", err)
+				return apperrors.ErrInternal("failed to delete directory", err)
 			}
 			return nil
 		}
 		entries, err := os.ReadDir(fullPath)
 		if err != nil {
-			return service.ErrInternal("failed to read directory", err)
+			return apperrors.ErrInternal("failed to read directory", err)
 		}
 		if len(entries) > 0 {
-			return service.ErrConflict("directory not empty")
+			return apperrors.ErrConflict("directory not empty")
 		}
 	}
 	if err := os.Remove(fullPath); err != nil {
-		return service.ErrInternal("failed to delete path", err)
+		return apperrors.ErrInternal("failed to delete path", err)
 	}
 	return nil
 }
@@ -531,17 +534,17 @@ func testMkdirAt(rootDir, path string) error {
 	}
 	if fi, err := os.Lstat(fullPath); err == nil {
 		if fi.Mode()&os.ModeSymlink != 0 {
-			return service.ErrForbidden("refusing to follow symlink")
+			return apperrors.ErrForbidden("refusing to follow symlink")
 		}
 		if !fi.IsDir() {
-			return service.ErrConflict("file exists at path")
+			return apperrors.ErrConflict("file exists at path")
 		}
 		return nil
 	} else if !os.IsNotExist(err) {
-		return service.ErrInternal("failed to stat path", err)
+		return apperrors.ErrInternal("failed to stat path", err)
 	}
 	if err := os.MkdirAll(fullPath, 0755); err != nil {
-		return service.ErrInternal("failed to create directory", err)
+		return apperrors.ErrInternal("failed to create directory", err)
 	}
 	return nil
 }
@@ -569,24 +572,24 @@ func testMovePathAt(rootDir, from, to string, overwrite bool) error {
 	}
 	if fi, err := os.Lstat(fromPath); err != nil {
 		if os.IsNotExist(err) {
-			return service.ErrNotFound("source path not found")
+			return apperrors.ErrNotFound("source path not found")
 		}
-		return service.ErrInternal("failed to stat source path", err)
+		return apperrors.ErrInternal("failed to stat source path", err)
 	} else if fi.Mode()&os.ModeSymlink != 0 {
-		return service.ErrForbidden("refusing to follow symlink")
+		return apperrors.ErrForbidden("refusing to follow symlink")
 	}
 	if destFi, err := os.Lstat(toPath); err == nil {
 		if destFi.Mode()&os.ModeSymlink != 0 {
-			return service.ErrForbidden("refusing to follow symlink")
+			return apperrors.ErrForbidden("refusing to follow symlink")
 		}
 		if !overwrite {
-			return service.ErrConflict("destination exists")
+			return apperrors.ErrConflict("destination exists")
 		}
 	} else if !os.IsNotExist(err) {
-		return service.ErrInternal("failed to stat destination path", err)
+		return apperrors.ErrInternal("failed to stat destination path", err)
 	}
 	if err := os.Rename(fromPath, toPath); err != nil {
-		return service.ErrInternal("failed to move path", err)
+		return apperrors.ErrInternal("failed to move path", err)
 	}
 	return nil
 }
@@ -597,27 +600,27 @@ func ReadLastNLines(filepath string, n int) ([]string, int64, error) {
 	return readLastNLinesFromFile(filepath, n, nil, 0)
 }
 
-// mockAgentService implements service.AgentService with no-op defaults.
+// mockAgentService implements agentcoord.AgentService with no-op defaults.
 type mockAgentService struct {
-	getTerminalInfoFunc       func(ctx context.Context, wsID, agentName string) (*service.AgentTerminalInfoResult, error)
+	getTerminalInfoFunc       func(ctx context.Context, wsID, agentName string) (*agentcoord.AgentTerminalInfoResult, error)
 	generateTerminalTokenFunc func(ctx context.Context, wsID, agentName, userID string) (string, error)
-	getLogFunc                func(ctx context.Context, wsID, agentName string, lines int, beforeLine int64) (*service.AgentLogResult, error)
-	getDiffStatFunc           func(ctx context.Context, wsID, agentName string) (*service.AgentDiffStatResult, error)
+	getLogFunc                func(ctx context.Context, wsID, agentName string, lines int, beforeLine int64) (*agentcoord.AgentLogResult, error)
+	getDiffStatFunc           func(ctx context.Context, wsID, agentName string) (*agentcoord.AgentDiffStatResult, error)
 	gitPushFunc               func(ctx context.Context, wsID, agentName, target string) (*ops.GitPushResult, error)
-	gitPushAllFunc            func(ctx context.Context, wsID string) (*service.GitPushAllResult, error)
+	gitPushAllFunc            func(ctx context.Context, wsID string) (*agentcoord.GitPushAllResult, error)
 	gitPullFunc               func(ctx context.Context, wsID, agentName, source string) (*ops.GitPullResult, error)
-	gitSyncFunc               func(ctx context.Context, wsID, agentName string) (*service.GitSyncResult, error)
+	gitSyncFunc               func(ctx context.Context, wsID, agentName string) (*agentcoord.GitSyncResult, error)
 	createPRFunc              func(ctx context.Context, wsID, agentName, target string) (*ops.GitPRResult, error)
 	gitResetFunc              func(ctx context.Context, wsID, agentName, branch string, force, push bool) (*ops.GitResetResult, error)
 	gitStatusFunc             func(ctx context.Context, wsID, agentName string) (*ops.GitStatusResult, error)
 	setTargetBranchFunc       func(ctx context.Context, wsID, agentName, branch string) error
 }
 
-func (m *mockAgentService) GetTerminalInfo(ctx context.Context, wsID, agentName string) (*service.AgentTerminalInfoResult, error) {
+func (m *mockAgentService) GetTerminalInfo(ctx context.Context, wsID, agentName string) (*agentcoord.AgentTerminalInfoResult, error) {
 	if m.getTerminalInfoFunc != nil {
 		return m.getTerminalInfoFunc(ctx, wsID, agentName)
 	}
-	return &service.AgentTerminalInfoResult{Agent: agentName, Mode: "archive"}, nil
+	return &agentcoord.AgentTerminalInfoResult{Agent: agentName, Mode: "archive"}, nil
 }
 func (m *mockAgentService) GenerateTerminalToken(ctx context.Context, wsID, agentName, userID string) (string, error) {
 	if m.generateTerminalTokenFunc != nil {
@@ -625,26 +628,26 @@ func (m *mockAgentService) GenerateTerminalToken(ctx context.Context, wsID, agen
 	}
 	return "test-token", nil
 }
-func (m *mockAgentService) GetLog(ctx context.Context, wsID, agentName string, lines int, beforeLine int64) (*service.AgentLogResult, error) {
+func (m *mockAgentService) GetLog(ctx context.Context, wsID, agentName string, lines int, beforeLine int64) (*agentcoord.AgentLogResult, error) {
 	if m.getLogFunc != nil {
 		return m.getLogFunc(ctx, wsID, agentName, lines, beforeLine)
 	}
-	return &service.AgentLogResult{Lines: []string{}, LineCount: 0, StartLine: 1}, nil
+	return &agentcoord.AgentLogResult{Lines: []string{}, LineCount: 0, StartLine: 1}, nil
 }
-func (m *mockAgentService) GetDiffStat(ctx context.Context, wsID, agentName string) (*service.AgentDiffStatResult, error) {
-	return &service.AgentDiffStatResult{}, nil
+func (m *mockAgentService) GetDiffStat(ctx context.Context, wsID, agentName string) (*agentcoord.AgentDiffStatResult, error) {
+	return &agentcoord.AgentDiffStatResult{}, nil
 }
 func (m *mockAgentService) GitPush(ctx context.Context, wsID, agentName, target string) (*ops.GitPushResult, error) {
 	return &ops.GitPushResult{Success: true}, nil
 }
-func (m *mockAgentService) GitPushAll(ctx context.Context, wsID string) (*service.GitPushAllResult, error) {
-	return &service.GitPushAllResult{}, nil
+func (m *mockAgentService) GitPushAll(ctx context.Context, wsID string) (*agentcoord.GitPushAllResult, error) {
+	return &agentcoord.GitPushAllResult{}, nil
 }
 func (m *mockAgentService) GitPull(ctx context.Context, wsID, agentName, source string) (*ops.GitPullResult, error) {
 	return &ops.GitPullResult{Success: true}, nil
 }
-func (m *mockAgentService) GitSync(ctx context.Context, wsID, agentName string) (*service.GitSyncResult, error) {
-	return &service.GitSyncResult{}, nil
+func (m *mockAgentService) GitSync(ctx context.Context, wsID, agentName string) (*agentcoord.GitSyncResult, error) {
+	return &agentcoord.GitSyncResult{}, nil
 }
 func (m *mockAgentService) CreatePR(ctx context.Context, wsID, agentName, target string) (*ops.GitPRResult, error) {
 	return &ops.GitPRResult{}, nil
@@ -668,56 +671,56 @@ func (m *mockAgentService) SetTargetBranch(ctx context.Context, wsID, agentName,
 // Stub types for module tests
 // ---------------------------------------------------------------------------
 
-// stubFileService implements service.FileService with no-op defaults for module tests.
+// stubFileService implements filecoord.FileService with no-op defaults for module tests.
 type stubFileService struct{}
 
-func (s *stubFileService) ListDirectoryScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) (*service.FileTreeResult, error) {
-	return &service.FileTreeResult{}, nil
+func (s *stubFileService) ListDirectoryScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _ string) (*filecoord.FileTreeResult, error) {
+	return &filecoord.FileTreeResult{}, nil
 }
-func (s *stubFileService) ReadFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) (*service.FileReadResult, error) {
-	return &service.FileReadResult{}, nil
+func (s *stubFileService) ReadFileScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _ string) (*filecoord.FileReadResult, error) {
+	return &filecoord.FileReadResult{}, nil
 }
-func (s *stubFileService) StatPathScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) (*service.FileStatResult, error) {
-	return &service.FileStatResult{}, nil
+func (s *stubFileService) StatPathScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _ string) (*filecoord.FileStatResult, error) {
+	return &filecoord.FileStatResult{}, nil
 }
-func (s *stubFileService) ReadFileAtRevScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _ string) (*service.FileReadResult, error) {
-	return &service.FileReadResult{}, nil
+func (s *stubFileService) ReadFileAtRevScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _, _ string) (*filecoord.FileReadResult, error) {
+	return &filecoord.FileReadResult{}, nil
 }
-func (s *stubFileService) IndexFilesScoped(_ context.Context, _ string, _ service.FileScope, _, _ string) (*service.FileIndexResult, error) {
-	return &service.FileIndexResult{}, nil
+func (s *stubFileService) IndexFilesScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _ string) (*filecoord.FileIndexResult, error) {
+	return &filecoord.FileIndexResult{}, nil
 }
-func (s *stubFileService) SearchFilesScoped(_ context.Context, _ string, _ service.FileScope, _, _ string, _ service.FileSearchRequest) (*service.FileSearchResult, error) {
-	return &service.FileSearchResult{}, nil
+func (s *stubFileService) SearchFilesScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _ string, _ filecoord.FileSearchRequest) (*filecoord.FileSearchResult, error) {
+	return &filecoord.FileSearchResult{}, nil
 }
-func (s *stubFileService) GitStatusScoped(_ context.Context, _ string, _ service.FileScope, _, _ string) (service.FileGitStatusResult, error) {
-	return service.FileGitStatusResult{}, nil
+func (s *stubFileService) GitStatusScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _ string) (filecoord.FileGitStatusResult, error) {
+	return filecoord.FileGitStatusResult{}, nil
 }
-func (s *stubFileService) ListFileCheckouts(_ context.Context, _ string) (*service.FileCheckoutsResult, error) {
-	return &service.FileCheckoutsResult{}, nil
+func (s *stubFileService) ListFileCheckouts(_ context.Context, _ string) (*filecoord.FileCheckoutsResult, error) {
+	return &filecoord.FileCheckoutsResult{}, nil
 }
-func (s *stubFileService) RepairCheckout(_ context.Context, _ string, _ service.FileCheckoutRepairRequest) (*ops.RepairResult, error) {
+func (s *stubFileService) RepairCheckout(_ context.Context, _ string, _ filecoord.FileCheckoutRepairRequest) (*ops.RepairResult, error) {
 	return &ops.RepairResult{}, nil
 }
-func (s *stubFileService) DiffFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _, _ string) (*service.FileDiffResult, error) {
-	return &service.FileDiffResult{}, nil
+func (s *stubFileService) DiffFileScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _, _, _ string) (*filecoord.FileDiffResult, error) {
+	return &filecoord.FileDiffResult{}, nil
 }
-func (s *stubFileService) BlameFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) (*service.FileBlameResult, error) {
-	return &service.FileBlameResult{}, nil
+func (s *stubFileService) BlameFileScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _ string) (*filecoord.FileBlameResult, error) {
+	return &filecoord.FileBlameResult{}, nil
 }
-func (s *stubFileService) HistoryFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) (*service.FileHistoryResult, error) {
-	return &service.FileHistoryResult{}, nil
+func (s *stubFileService) HistoryFileScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _ string) (*filecoord.FileHistoryResult, error) {
+	return &filecoord.FileHistoryResult{}, nil
 }
-func (s *stubFileService) WriteFileConditionalScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _ string, _ service.FileWritePreconditions) (*service.FileMutationResult, error) {
-	return &service.FileMutationResult{Success: true}, nil
+func (s *stubFileService) WriteFileConditionalScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _, _ string, _ filecoord.FileWritePreconditions) (*filecoord.FileMutationResult, error) {
+	return &filecoord.FileMutationResult{Success: true}, nil
 }
-func (s *stubFileService) DeletePathVersionedScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string, _ bool, _ string) error {
+func (s *stubFileService) DeletePathVersionedScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _ string, _ bool, _ string) error {
 	return nil
 }
-func (s *stubFileService) MkdirScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) error {
+func (s *stubFileService) MkdirScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _ string) error {
 	return nil
 }
-func (s *stubFileService) MovePathVersionedScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _ string, _ bool, _, _ string) (*service.FileMutationResult, error) {
-	return &service.FileMutationResult{Success: true}, nil
+func (s *stubFileService) MovePathVersionedScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _, _ string, _ bool, _, _ string) (*filecoord.FileMutationResult, error) {
+	return &filecoord.FileMutationResult{Success: true}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -736,24 +739,24 @@ type testSessionServiceImpl struct {
 // NewSessionService creates a test-local SessionService implementation.
 // This mirrors the root webui.NewSessionService, duplicated here to avoid
 // a circular import (webui → handlers/misc → webui).
-func NewSessionService(sessStore *sessions.Store, histStore *sessionhistory.Store) service.SessionService {
+func NewSessionService(sessStore *sessions.Store, histStore *sessionhistory.Store) sessioncoord.SessionService {
 	return &testSessionServiceImpl{sessStore: sessStore, histStore: histStore}
 }
 
-func (s *testSessionServiceImpl) ListTaskSessions(_ context.Context, _, taskID string) ([]service.SessionListItem, error) {
+func (s *testSessionServiceImpl) ListTaskSessions(_ context.Context, _, taskID string) ([]sessioncoord.SessionListItem, error) {
 	if s.sessStore == nil {
-		return nil, service.ErrUnavailable("session store not available")
+		return nil, apperrors.ErrUnavailable("session store not available")
 	}
 	if taskID == "" || !validTaskID.MatchString(taskID) {
-		return nil, service.ErrValidation("invalid task ID: must match [a-zA-Z0-9._-]+")
+		return nil, apperrors.ErrValidation("invalid task ID: must match [a-zA-Z0-9._-]+")
 	}
 	records, err := s.sessStore.SessionsByTask(taskID)
 	if err != nil {
-		return nil, service.ErrInternal("failed to list sessions", err)
+		return nil, apperrors.ErrInternal("failed to list sessions", err)
 	}
-	items := make([]service.SessionListItem, 0, len(records))
+	items := make([]sessioncoord.SessionListItem, 0, len(records))
 	for _, rec := range records {
-		item := service.SessionListItem{
+		item := sessioncoord.SessionListItem{
 			SessionRecord: rec,
 			IsActive:      rec.Status == sessions.StatusRunning,
 		}
@@ -768,27 +771,27 @@ func (s *testSessionServiceImpl) ListTaskSessions(_ context.Context, _, taskID s
 	return items, nil
 }
 
-func (s *testSessionServiceImpl) GetSession(_ context.Context, _, taskID, sessionID string) (*service.SessionDetailData, error) {
+func (s *testSessionServiceImpl) GetSession(_ context.Context, _, taskID, sessionID string) (*sessioncoord.SessionDetailData, error) {
 	if s.sessStore == nil {
-		return nil, service.ErrUnavailable("session store not available")
+		return nil, apperrors.ErrUnavailable("session store not available")
 	}
 	if taskID == "" || !validTaskID.MatchString(taskID) {
-		return nil, service.ErrValidation("invalid task ID")
+		return nil, apperrors.ErrValidation("invalid task ID")
 	}
 	if sessionID == "" || !validSessionID.MatchString(sessionID) {
-		return nil, service.ErrValidation("invalid session ID")
+		return nil, apperrors.ErrValidation("invalid session ID")
 	}
 	meta, err := s.sessStore.LoadMetadata(sessionID)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, service.ErrNotFound("session not found")
+			return nil, apperrors.ErrNotFound("session not found")
 		}
-		return nil, service.ErrInternal("failed to load session", err)
+		return nil, apperrors.ErrInternal("failed to load session", err)
 	}
 	if meta.TaskID != taskID {
-		return nil, service.ErrNotFound("session not found")
+		return nil, apperrors.ErrNotFound("session not found")
 	}
-	return &service.SessionDetailData{
+	return &sessioncoord.SessionDetailData{
 		SessionMetadata: *meta,
 		IsActive:        meta.Status == sessions.StatusRunning,
 	}, nil
@@ -796,27 +799,27 @@ func (s *testSessionServiceImpl) GetSession(_ context.Context, _, taskID, sessio
 
 func (s *testSessionServiceImpl) GetSessionTranscript(_ context.Context, _, taskID, sessionID string) ([]transcript.Event, error) {
 	if s.sessStore == nil {
-		return nil, service.ErrUnavailable("session store not available")
+		return nil, apperrors.ErrUnavailable("session store not available")
 	}
 	if taskID == "" || !validTaskID.MatchString(taskID) {
-		return nil, service.ErrValidation("invalid task ID")
+		return nil, apperrors.ErrValidation("invalid task ID")
 	}
 	if sessionID == "" || !validSessionID.MatchString(sessionID) {
-		return nil, service.ErrValidation("invalid session ID")
+		return nil, apperrors.ErrValidation("invalid session ID")
 	}
 	meta, err := s.sessStore.LoadMetadata(sessionID)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, service.ErrNotFound("session not found")
+			return nil, apperrors.ErrNotFound("session not found")
 		}
-		return nil, service.ErrInternal("failed to load session", err)
+		return nil, apperrors.ErrInternal("failed to load session", err)
 	}
 	if meta.TaskID != taskID {
-		return nil, service.ErrNotFound("session not found")
+		return nil, apperrors.ErrNotFound("session not found")
 	}
 	events, loadErr := s.sessStore.LoadNativeEvents(sessionID)
 	if loadErr != nil {
-		return nil, service.ErrInternal("failed to load transcript", loadErr)
+		return nil, apperrors.ErrInternal("failed to load transcript", loadErr)
 	}
 	if events == nil {
 		events = []transcript.Event{}
@@ -826,11 +829,11 @@ func (s *testSessionServiceImpl) GetSessionTranscript(_ context.Context, _, task
 
 func (s *testSessionServiceImpl) ListSessionSubagents(_ context.Context, _, _, sessionID string) ([]string, error) {
 	if s.sessStore == nil {
-		return nil, service.ErrUnavailable("session store not available")
+		return nil, apperrors.ErrUnavailable("session store not available")
 	}
 	names, err := s.sessStore.ListSubagentTranscripts(sessionID)
 	if err != nil {
-		return nil, service.ErrInternal("list subagents", err)
+		return nil, apperrors.ErrInternal("list subagents", err)
 	}
 	ids := make([]string, 0, len(names))
 	for _, n := range names {
@@ -844,25 +847,25 @@ func (s *testSessionServiceImpl) ListSessionSubagents(_ context.Context, _, _, s
 
 func (s *testSessionServiceImpl) GetSessionSubagentTranscript(_ context.Context, _, _, sessionID, subagentID string) ([]transcript.Event, error) {
 	if s.sessStore == nil {
-		return nil, service.ErrUnavailable("session store not available")
+		return nil, apperrors.ErrUnavailable("session store not available")
 	}
 	if subagentID == "" {
-		return nil, service.ErrValidation("subagent ID is required")
+		return nil, apperrors.ErrValidation("subagent ID is required")
 	}
 	path := s.sessStore.SubagentTranscriptPath(sessionID, subagentID)
 	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
-			return nil, service.ErrNotFound("subagent transcript not found")
+			return nil, apperrors.ErrNotFound("subagent transcript not found")
 		}
-		return nil, service.ErrInternal("stat subagent transcript", err)
+		return nil, apperrors.ErrInternal("stat subagent transcript", err)
 	}
 	meta, err := s.sessStore.LoadMetadata(sessionID)
 	if err != nil {
-		return nil, service.ErrInternal("load metadata", err)
+		return nil, apperrors.ErrInternal("load metadata", err)
 	}
 	events, parseErr := backends.ParseEventsFromFile(meta.Backend, path)
 	if parseErr != nil {
-		return nil, service.ErrInternal("parse subagent transcript", parseErr)
+		return nil, apperrors.ErrInternal("parse subagent transcript", parseErr)
 	}
 	if events == nil {
 		events = []transcript.Event{}
@@ -872,48 +875,48 @@ func (s *testSessionServiceImpl) GetSessionSubagentTranscript(_ context.Context,
 
 func (s *testSessionServiceImpl) GetSessionDiff(_ context.Context, _, taskID, sessionID string) (string, error) {
 	if s.sessStore == nil {
-		return "", service.ErrUnavailable("session store not available")
+		return "", apperrors.ErrUnavailable("session store not available")
 	}
 	if taskID == "" || !validTaskID.MatchString(taskID) {
-		return "", service.ErrValidation("invalid task ID")
+		return "", apperrors.ErrValidation("invalid task ID")
 	}
 	if sessionID == "" || !validSessionID.MatchString(sessionID) {
-		return "", service.ErrValidation("invalid session ID")
+		return "", apperrors.ErrValidation("invalid session ID")
 	}
 	meta, err := s.sessStore.LoadMetadata(sessionID)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return "", service.ErrNotFound("session not found")
+			return "", apperrors.ErrNotFound("session not found")
 		}
-		return "", service.ErrInternal("failed to load session", err)
+		return "", apperrors.ErrInternal("failed to load session", err)
 	}
 	if meta.TaskID != taskID {
-		return "", service.ErrNotFound("session not found")
+		return "", apperrors.ErrNotFound("session not found")
 	}
 	diff, diffErr := s.sessStore.ReadDiff(sessionID)
 	if diffErr != nil {
 		if errors.Is(diffErr, os.ErrNotExist) {
-			return "", service.ErrNotFound("diff not found")
+			return "", apperrors.ErrNotFound("diff not found")
 		}
-		return "", service.ErrInternal("failed to read diff", diffErr)
+		return "", apperrors.ErrInternal("failed to read diff", diffErr)
 	}
 	return diff, nil
 }
 
 func (s *testSessionServiceImpl) ListSessionHistory(ctx context.Context, wsID, issueID string) ([]sessionhistory.SessionRecord, error) {
 	if s.histStore == nil {
-		return nil, service.ErrUnavailable("session history not available (no Redis)")
+		return nil, apperrors.ErrUnavailable("session history not available (no Redis)")
 	}
 	if err := sessionhistory.ValidateIssueID(issueID); err != nil {
-		return nil, service.ErrValidation(err.Error())
+		return nil, apperrors.ErrValidation(err.Error())
 	}
 	records, err := s.histStore.List(ctx, wsID, issueID)
 	if err != nil {
-		return nil, service.ErrInternal("failed to list session history", err)
+		return nil, apperrors.ErrInternal("failed to list session history", err)
 	}
 	return records, nil
 }
 
-func (s *testSessionServiceImpl) GetSessionScrollback(ctx context.Context, wsID, issueID, recordID string) (*service.SessionScrollbackResult, error) {
-	return nil, service.ErrUnavailable("not implemented in test")
+func (s *testSessionServiceImpl) GetSessionScrollback(ctx context.Context, wsID, issueID, recordID string) (*sessioncoord.SessionScrollbackResult, error) {
+	return nil, apperrors.ErrUnavailable("not implemented in test")
 }

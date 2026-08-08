@@ -12,6 +12,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/httpclient"
@@ -38,31 +40,31 @@ type workflowListAPIResponse struct {
 }
 
 type workflowListAPIItem struct {
-	Driver          *domain.Driver          `json:"driver,omitempty"`
-	Version         *domain.DriverVersion   `json:"version,omitempty"`
-	DriverID        string                  `json:"driver_id,omitempty"`
-	Name            string                  `json:"name,omitempty"`
-	Status          domain.DriverStatus     `json:"status,omitempty"`
-	ActiveVersionID string                  `json:"active_version_id,omitempty"`
-	Revision        uint64                  `json:"revision,omitempty"`
-	BuiltIn         bool                    `json:"built_in,omitempty"`
-	Builtin         bool                    `json:"builtin,omitempty"`
-	Approved        *bool                   `json:"approved,omitempty"`
-	EffectiveTrust  domain.DriverTrustLevel `json:"effective_trust,omitempty"`
+	Driver          *workflowcatalog.Driver          `json:"driver,omitempty"`
+	Version         *workflowcatalog.DriverVersion   `json:"version,omitempty"`
+	DriverID        string                           `json:"driver_id,omitempty"`
+	Name            string                           `json:"name,omitempty"`
+	Status          workflowcatalog.DriverStatus     `json:"status,omitempty"`
+	ActiveVersionID string                           `json:"active_version_id,omitempty"`
+	Revision        uint64                           `json:"revision,omitempty"`
+	BuiltIn         bool                             `json:"built_in,omitempty"`
+	Builtin         bool                             `json:"builtin,omitempty"`
+	Approved        *bool                            `json:"approved,omitempty"`
+	EffectiveTrust  workflowcatalog.DriverTrustLevel `json:"effective_trust,omitempty"`
 }
 
 type workflowVersionsAPIResponse struct {
-	Driver          *domain.Driver          `json:"driver,omitempty"`
-	DriverID        string                  `json:"driver_id,omitempty"`
-	ActiveVersionID string                  `json:"active_version_id,omitempty"`
-	Revision        uint64                  `json:"revision,omitempty"`
-	Versions        []*domain.DriverVersion `json:"versions"`
+	Driver          *workflowcatalog.Driver          `json:"driver,omitempty"`
+	DriverID        string                           `json:"driver_id,omitempty"`
+	ActiveVersionID string                           `json:"active_version_id,omitempty"`
+	Revision        uint64                           `json:"revision,omitempty"`
+	Versions        []*workflowcatalog.DriverVersion `json:"versions"`
 }
 
 type workflowVersionActionAPIResponse struct {
-	Action  string                `json:"action"`
-	Driver  *domain.Driver        `json:"driver"`
-	Version *domain.DriverVersion `json:"version"`
+	Action  string                         `json:"action"`
+	Driver  *workflowcatalog.Driver        `json:"driver"`
+	Version *workflowcatalog.DriverVersion `json:"version"`
 }
 
 type workflowAuthorVersionRequest struct {
@@ -73,13 +75,13 @@ type workflowAuthorVersionRequest struct {
 }
 
 type workflowAuthorVersionAPIResponse struct {
-	Driver           *domain.Driver        `json:"driver"`
-	Version          *domain.DriverVersion `json:"version"`
-	CreatedDriver    bool                  `json:"created_driver"`
-	CreatedVersion   bool                  `json:"created_version"`
-	ReusedVersion    bool                  `json:"reused_version"`
-	Activated        bool                  `json:"activated"`
-	BuildDiagnostics string                `json:"build_diagnostics,omitempty"`
+	Driver           *workflowcatalog.Driver        `json:"driver"`
+	Version          *workflowcatalog.DriverVersion `json:"version"`
+	CreatedDriver    bool                           `json:"created_driver"`
+	CreatedVersion   bool                           `json:"created_version"`
+	ReusedVersion    bool                           `json:"reused_version"`
+	Activated        bool                           `json:"activated"`
+	BuildDiagnostics string                         `json:"build_diagnostics,omitempty"`
 }
 
 type workflowManagementAPIError struct {
@@ -139,7 +141,7 @@ func (c *workflowManagementClient) listVersions(ctx context.Context, workflow st
 		return nil, err
 	}
 	if out.Driver == nil {
-		out.Driver = &domain.Driver{
+		out.Driver = &workflowcatalog.Driver{
 			WorkspaceKey:    c.workspace,
 			DriverID:        out.DriverID,
 			ActiveVersionID: out.ActiveVersionID,

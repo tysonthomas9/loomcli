@@ -30,11 +30,5 @@ export type {
   UseJobPollingReturn,
 } from "./useJobPolling";
 
-export { useObservabilityMetrics } from "./useObservabilityMetrics";
-export type {
-  UseObservabilityMetricsOptions,
-  UseObservabilityMetricsResult,
-} from "./useObservabilityMetrics";
-
 export { useUsage } from "./useUsage";
 export type { UseUsageOptions, UseUsageResult } from "./useUsage";

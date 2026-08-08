@@ -7,11 +7,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver/eventpolicy"
+	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/trigger"
 )
 
 func TestAwaitEventReconcilerResolvesPendingAwaitAndCompletesNotification(t *testing.T) {
@@ -35,10 +39,10 @@ func TestAwaitEventReconcilerResolvesPendingAwaitAndCompletesNotification(t *tes
 
 func TestAutomationAwaitEventNotifierRequiresExplicitResolver(t *testing.T) {
 	st := memstore.New()
-	if notifier, err := NewAutomationAwaitEventNotifier(st.Awaits(), st.DriverRuns()); err == nil || notifier != nil {
+	if notifier, err := trigger.NewAutomationAwaitEventNotifier(st.Awaits(), st.DriverRuns()); err == nil || notifier != nil {
 		t.Fatalf("legacy notifier = %T, %v; want fail-closed composition error", notifier, err)
 	}
-	if notifier, err := NewAutomationAwaitEventNotifierWithResolver(st.Awaits(), st.DriverRuns(), nil); err == nil || notifier != nil {
+	if notifier, err := trigger.NewAutomationAwaitEventNotifierWithResolver(st.Awaits(), st.DriverRuns(), nil); err == nil || notifier != nil {
 		t.Fatalf("nil-resolver notifier = %T, %v; want fail-closed composition error", notifier, err)
 	}
 }
@@ -137,7 +141,7 @@ func TestAwaitEventReconcilerCompletesForgedRunFinishedAndLaterGenuineEventWins(
 	forged := appendAwaitReconcileEventWithProvenance(
 		t, st, "stored-forged-run-finished", canonicalID,
 		eventpolicy.RunFinishedEventType, "child-1", eventpolicy.RunFinishedActorRef,
-		"github", domain.TriggerEventOriginExternal, payload,
+		"github", automation.EventOriginExternal, payload,
 	)
 	outbox := st.TriggerEvents().(store.AwaitEventNotificationStore)
 	reconciler, err := NewAwaitEventReconciler(outbox, testAwaitMatcher(t, st), "WS", nil)
@@ -161,7 +165,7 @@ func TestAwaitEventReconcilerCompletesForgedRunFinishedAndLaterGenuineEventWins(
 	genuine := appendAwaitReconcileEventWithProvenance(
 		t, st, "stored-genuine-run-finished", canonicalID,
 		eventpolicy.RunFinishedEventType, "child-1", eventpolicy.RunFinishedActorRef,
-		eventpolicy.SourceKindExecution, domain.TriggerEventOriginSystem, payload,
+		eventpolicy.SourceKindExecution, automation.EventOriginSystem, payload,
 	)
 	if count, err := reconciler.DrainOnce(t.Context(), genuine.ReceivedAt.Add(time.Millisecond)); err != nil || count != 1 {
 		t.Fatalf("genuine DrainOnce = %d, %v", count, err)
@@ -249,14 +253,14 @@ func setupAwaitEventReconcileRunWithActors(
 	}
 	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
 		WorkspaceKey: "WS", DriverID: "driver", Name: "driver",
-		OwnerType: domain.DriverOwnerSystem, Status: domain.DriverStatusActive,
+		OwnerType: workflowcatalog.DriverOwnerSystem, Status: workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
 		WorkspaceKey: "WS", DriverID: "driver", VersionID: "v1", Version: 1,
 		SourceDigest: "sha256:source", BundleDigest: "sha256:bundle",
-		ValidationStatus: domain.DriverVersionValidationPassed,
+		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -288,10 +292,10 @@ func appendAwaitReconcileEvent(
 	st *memstore.Store,
 	storedID, sourceID, eventType, subject, actor string,
 	payload json.RawMessage,
-) *domain.TriggerEvent {
+) *automation.Event {
 	return appendAwaitReconcileEventWithProvenance(
 		t, st, storedID, sourceID, eventType, subject, actor,
-		"test", domain.TriggerEventOriginExternal, payload,
+		"test", automation.EventOriginExternal, payload,
 	)
 }
 
@@ -299,13 +303,13 @@ func appendAwaitReconcileEventWithProvenance(
 	t *testing.T,
 	st *memstore.Store,
 	storedID, sourceID, eventType, subject, actor, sourceKind string,
-	origin domain.TriggerEventOrigin,
+	origin automation.EventOrigin,
 	payload json.RawMessage,
-) *domain.TriggerEvent {
+) *automation.Event {
 	t.Helper()
 	now := time.Now().UTC()
 	appender := st.TriggerEvents().(store.TriggerEventAppender)
-	event, err := appender.AppendTriggerEvent(t.Context(), &domain.TriggerEvent{
+	event, err := appender.AppendTriggerEvent(t.Context(), &automation.Event{
 		WorkspaceKey: "WS", EventID: storedID, SourceEventID: sourceID, SourceKind: sourceKind,
 		EventType: eventType, SubjectRef: subject, ActorRef: actor,
 		Origin: origin, OccurredAt: now, ReceivedAt: now, Payload: payload,

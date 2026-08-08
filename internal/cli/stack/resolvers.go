@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/stackpublish"
+	stackpublish "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolpublisher"
 )
 
 // rebaseConflictPrompt instructs the agent to resolve the conflicted files only —

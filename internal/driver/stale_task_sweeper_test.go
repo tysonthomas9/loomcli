@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -26,8 +28,8 @@ func seedSweeperFixtureAt(t *testing.T, st *memstore.Store, ws string, driverRun
 		WorkspaceKey: ws,
 		DriverID:     "driver-1",
 		Name:         "epic-runner",
-		OwnerType:    domain.DriverOwnerSystem,
-		Status:       domain.DriverStatusActive,
+		OwnerType:    workflowcatalog.DriverOwnerSystem,
+		Status:       workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatalf("Create driver: %v", err)
 	}
@@ -38,7 +40,7 @@ func seedSweeperFixtureAt(t *testing.T, st *memstore.Store, ws string, driverRun
 		Version:          1,
 		SourceDigest:     "sha256:source",
 		BundleDigest:     "sha256:bundle",
-		ValidationStatus: domain.DriverVersionValidationPassed,
+		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
 	}

@@ -398,6 +398,16 @@ func (c *Client) Artifacts() store.ArtifactStore { return c.artifacts }
 // while keeping revision CAS details inside the transport.
 func (c *Client) ArtifactCommands() ArtifactTransport { return c.artifactCommands }
 
+// SessionArtifacts exposes the narrow session-owned Artifact content
+// transport. It shares this Client's authentication, tracing, retry policy,
+// and connection pool and does not expose the legacy composite Store.
+func (c *Client) SessionArtifacts() SessionArtifactTransport {
+	if c == nil {
+		return nil
+	}
+	return &sessionArtifactStore{client: c}
+}
+
 // AgentLeases returns the AgentLeaseStore.
 func (c *Client) AgentLeases() store.AgentLeaseStore { return c.leases }
 

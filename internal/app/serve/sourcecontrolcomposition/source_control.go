@@ -14,11 +14,11 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/gitauth"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	infralocalgit "github.com/tysonthomas9/loomcli/internal/infra/localgit"
+	infrastackstore "github.com/tysonthomas9/loomcli/internal/infra/stackstoreadapter"
 	"github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	connectorsfleetdb "github.com/tysonthomas9/loomcli/internal/modules/connectors/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/stackstore"
 )
 
 const (
@@ -29,11 +29,12 @@ const (
 // Phase 5 checkout materializer. Consumers receive only the Source Control API;
 // the credential source and Connectors broker remain private.
 type SourceControlCapability struct {
-	api     sourcecontrol.API
-	grants  connectors.GrantCommands
-	issuer  *authority.Issuer
-	now     func() time.Time
-	lineage stackstore.Store
+	api      sourcecontrol.API
+	grants   connectors.GrantCommands
+	issuer   *authority.Issuer
+	now      func() time.Time
+	outcomes sourcecontrol.TaskOutcomeRecorder
+	stacks   sourcecontrol.StackLifecycle
 }
 
 type API = sourcecontrol.API
@@ -350,7 +351,7 @@ func NewSourceControlCapability(
 		time.Now,
 	)
 	if capability != nil {
-		capability.lineage, _ = stackstore.Default()
+		capability.outcomes, capability.stacks = newDefaultStackServices(time.Now)
 	}
 	return capability, err
 }
@@ -381,9 +382,25 @@ func NewSourceControlCapabilityWithFleetDB(
 		time.Now,
 	)
 	if capability != nil {
-		capability.lineage, _ = stackstore.Default()
+		capability.outcomes, capability.stacks = newDefaultStackServices(time.Now)
 	}
 	return capability, err
+}
+
+func newDefaultStackServices(now func() time.Time) (sourcecontrol.TaskOutcomeRecorder, sourcecontrol.StackLifecycle) {
+	adapter, err := infrastackstore.Default()
+	if err != nil {
+		return nil, nil
+	}
+	outcomes, err := sourcecontrol.NewTaskOutcomes(adapter, now)
+	if err != nil {
+		return nil, nil
+	}
+	stacks, err := sourcecontrol.NewStackLifecycle(adapter, now)
+	if err != nil {
+		return nil, nil
+	}
+	return outcomes, stacks
 }
 
 func newSourceControlCapability(

@@ -18,6 +18,60 @@ import (
 
 var errUnregisteredAutomationRuntimeAction = errors.New("automation: unregistered runtime component action")
 
+// ApprovalAuthorityProvider converts the identity already verified by web
+// session middleware into one short-lived, approval-only authority. It is
+// separate from the management-role resolver because approval eligibility is
+// decided by the pending await's ActorAllow predicate, not workspace-admin
+// membership.
+type ApprovalAuthorityProvider = automation.ApprovalAuthorityProvider
+
+type automationApprovalAuthorityProvider struct {
+	issuer *authority.Issuer
+	now    func() time.Time
+}
+
+var _ ApprovalAuthorityProvider = (*automationApprovalAuthorityProvider)(nil)
+
+func newAutomationApprovalAuthorityProvider(issuer *authority.Issuer) ApprovalAuthorityProvider {
+	if issuer == nil {
+		return nil
+	}
+	return &automationApprovalAuthorityProvider{issuer: issuer, now: time.Now}
+}
+
+func (provider *automationApprovalAuthorityProvider) AuthorityForVerifiedSession(
+	ctx context.Context,
+	workspace,
+	actorRef string,
+) (authority.OperatorAuthority, error) {
+	if provider == nil || provider.issuer == nil {
+		return authority.OperatorAuthority{}, automation.ErrUnavailable
+	}
+	if ctx == nil {
+		return authority.OperatorAuthority{}, fmt.Errorf("approval authority context is required: %w", authority.ErrInvalidScope)
+	}
+	if err := ctx.Err(); err != nil {
+		return authority.OperatorAuthority{}, err
+	}
+	canonicalWorkspace, canonicalActor := strings.TrimSpace(workspace), strings.TrimSpace(actorRef)
+	if canonicalWorkspace == "" || canonicalWorkspace != workspace ||
+		canonicalActor == "" || canonicalActor != actorRef {
+		return authority.OperatorAuthority{}, authority.ErrInvalidScope
+	}
+	now := time.Now
+	if provider.now != nil {
+		now = provider.now
+	}
+	principal, err := provider.issuer.DeriveVerifiedPrincipal(authority.PrincipalClaims{
+		Subject: canonicalActor, Class: authority.ClassOperator, Workspace: canonicalWorkspace,
+		Actions: []authority.Action{automation.ActionJournalApproval}, ExpiresAt: now().Add(time.Minute),
+	})
+	if err != nil {
+		return authority.OperatorAuthority{}, err
+	}
+	return provider.issuer.IssueOperator(principal, canonicalWorkspace, automation.ActionJournalApproval)
+}
+
 // automationOperationRules is the complete default-deny authority registry
 // for the Phase 3 Automation public API. Queries require no authority value;
 // every mutation is represented here by one exact capability-qualified action.
@@ -34,6 +88,7 @@ func automationOperationRules() []authority.OperationRule {
 		authority.OperatorOnly(automation.ActionDisableManagedBinding),
 		authority.OperatorOnly(automation.ActionDeleteManagedBinding),
 		authority.Allow(automation.ActionEnsureManagedBinding, authority.ClassSystem),
+		authority.OperatorOnly(automation.ActionJournalApproval),
 		authority.OperatorOnly(automation.ActionDispatchBinding),
 		authority.Allow(automation.ActionAdmitEvent,
 			authority.ClassWebhook, authority.ClassExecution, authority.ClassSystem),

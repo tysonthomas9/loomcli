@@ -83,6 +83,10 @@ func TestAgentActivityCombinesInteractionProjectionWithTaskReferences(t *testing
 	if response.Code != http.StatusOK {
 		t.Fatalf("status/body = %d/%s", response.Code, response.Body.String())
 	}
+	if body := response.Body.String(); !strings.Contains(body, `"workspace_key":"WS"`) ||
+		strings.Contains(body, `"WorkspaceKey"`) {
+		t.Fatalf("activity response is not using the public snake-case contract: %s", body)
+	}
 	if api.query.WorkspaceKey != "WS" || api.query.AgentID != "docs" || api.query.Limit != 7 {
 		t.Fatalf("query = %+v", api.query)
 	}

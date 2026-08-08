@@ -19,6 +19,7 @@ type DirectWriteInventory struct {
 	Status                    string                       `yaml:"status"`
 	SourceHead                string                       `yaml:"source_head"`
 	AdapterRoots              []string                     `yaml:"adapter_roots"`
+	OwnerAdapters             []DirectWriteOwnerAdapter    `yaml:"owner_adapters"`
 	AnalysisProfiles          []string                     `yaml:"analysis_profiles"`
 	ClassificationPolicy      string                       `yaml:"classification_policy"`
 	CandidateReceiverSuffixes []string                     `yaml:"candidate_receiver_suffixes"`
@@ -29,6 +30,15 @@ type DirectWriteInventory struct {
 	Writes                    []DirectWriteUse             `yaml:"writes"`
 	GenericMechanisms         []GenericMechanismUse        `yaml:"generic_mechanisms"`
 	LegacyDriver              *LegacyDirectWriteBaseline   `yaml:"legacy_driver,omitempty"`
+}
+
+// DirectWriteOwnerAdapter declares the narrow composition or infrastructure
+// path where one aggregate owner's public port is implemented by concrete
+// persistence. These are target-architecture adapters, not migration debt.
+// Every other observed write remains transitional and must expire.
+type DirectWriteOwnerAdapter struct {
+	Path           string `yaml:"path"`
+	AggregateOwner string `yaml:"aggregate_owner"`
 }
 
 // LegacyDirectWriteBaseline is a strict digest ratchet for a legacy root too
@@ -92,8 +102,14 @@ type DirectWriteUse struct {
 	Method            string `yaml:"method"`
 	Count             int    `yaml:"count"`
 	AggregateOwner    string `yaml:"aggregate_owner"`
-	ExpiresAfterPhase int    `yaml:"expires_after_phase"`
+	Disposition       string `yaml:"disposition"`
+	ExpiresAfterPhase int    `yaml:"expires_after_phase,omitempty"`
 }
+
+const (
+	directWriteDispositionOwnerAdapter = "owner_adapter"
+	directWriteDispositionTransitional = "transitional"
+)
 
 type GenericMechanismUse struct {
 	Mechanism           string   `yaml:"mechanism"`
@@ -153,15 +169,16 @@ func (i DirectWriteInventory) Validate() error {
 	return i.validateGenericMechanisms()
 }
 
-// ValidateCompletedPhase makes the per-row expiry operational. A row may
-// remain only while its last permitted phase is still in the future; once that
-// phase is complete the baseline must be removed together with the write.
+// ValidateCompletedPhase makes transitional row expiry operational. A durable
+// owner adapter has no phase expiry because it is the required implementation
+// side of a public owner port; every other direct write must disappear by its
+// declared final phase.
 func (i DirectWriteInventory) ValidateCompletedPhase(completedPhase int) error {
 	if completedPhase < 1 || completedPhase > 7 {
 		return fmt.Errorf("direct-write completed phase must be between 1 and 7, got %d", completedPhase)
 	}
 	for _, use := range i.Writes {
-		if use.ExpiresAfterPhase <= completedPhase {
+		if use.Disposition == directWriteDispositionTransitional && use.ExpiresAfterPhase <= completedPhase {
 			return fmt.Errorf("direct-write row %s.%s in %s expired after Phase %d but completed_phase is %d", use.Receiver, use.Method, use.File, use.ExpiresAfterPhase, completedPhase)
 		}
 	}
@@ -225,11 +242,20 @@ func (i DirectWriteInventory) validateMetadata() error {
 		"internal/cli",
 		"internal/driver",
 		"internal/infra/agentsbootstrapstore",
+		"internal/infra/connectorscatalog",
+		"internal/infra/connectorsrotation",
+		"internal/infra/sessionstoreadapter",
+		"internal/infra/stackstoreadapter",
+		"internal/infra/usageprojection",
+		"internal/infra/workspacecatalog",
 		"internal/modules",
 		"internal/webui/handlers",
 	}
 	if !slices.Equal(i.AdapterRoots, wantRoots) {
 		return fmt.Errorf("direct-write adapter roots: got %v, want %v", i.AdapterRoots, wantRoots)
+	}
+	if err := i.validateOwnerAdapters(); err != nil {
+		return err
 	}
 	if err := validateSortedUnique("direct-write analysis profile", i.AnalysisProfiles); err != nil {
 		return err
@@ -243,11 +269,12 @@ func (i DirectWriteInventory) validateMetadata() error {
 	return nil
 }
 
+//nolint:cyclop // Each branch enforces a distinct fail-closed inventory invariant.
 func (i DirectWriteInventory) validateWrites() error {
 	classifier := newPersistenceClassifier(i)
 	keys := make([]string, 0, len(i.Writes))
 	for _, use := range i.Writes {
-		if use.File == "" || use.Receiver == "" || use.Method == "" || use.AggregateOwner == "" || use.Count <= 0 || use.ExpiresAfterPhase < 2 {
+		if use.File == "" || use.Receiver == "" || use.Method == "" || use.AggregateOwner == "" || use.Count <= 0 {
 			return fmt.Errorf("invalid direct-write row for %s", use.File)
 		}
 		if !underAnyRoot(use.File, i.AdapterRoots) {
@@ -260,208 +287,64 @@ func (i DirectWriteInventory) validateWrites() error {
 		if use.AggregateOwner == "unassigned_legacy" || use.AggregateOwner != owner {
 			return fmt.Errorf("direct-write row %s.%s owner %q must match declared capability owner %q", use.Receiver, use.Method, use.AggregateOwner, owner)
 		}
+		adapterOwner, isOwnerAdapter := i.ownerAdapterOwner(use.File)
+		switch use.Disposition {
+		case directWriteDispositionOwnerAdapter:
+			if use.ExpiresAfterPhase != 0 {
+				return fmt.Errorf("owner-adapter direct-write row %s must not declare an expiry", use.File)
+			}
+			if !isOwnerAdapter || adapterOwner != use.AggregateOwner {
+				return fmt.Errorf("owner-adapter direct-write row %s owner %q is not declared by owner_adapters", use.File, use.AggregateOwner)
+			}
+		case directWriteDispositionTransitional:
+			if use.ExpiresAfterPhase < 2 || use.ExpiresAfterPhase > 7 {
+				return fmt.Errorf("transitional direct-write row %s requires expires_after_phase between 2 and 7", use.File)
+			}
+			if isOwnerAdapter && adapterOwner == use.AggregateOwner {
+				return fmt.Errorf("direct-write row %s is a declared owner adapter and cannot be labeled transitional", use.File)
+			}
+		default:
+			return fmt.Errorf("direct-write row %s disposition %q must be owner_adapter or transitional", use.File, use.Disposition)
+		}
 		keys = append(keys, directWriteKey(use))
 	}
 	return validateSortedUnique("direct-write row", keys)
 }
 
-func (i DirectWriteInventory) validateGenericMechanisms() error {
-	wantMechanisms := []string{"action_ledger", "lease"}
-	wantAdapterRoots := map[string][]string{
-		"action_ledger": {"internal/modules/execution/fleetdb"},
-		"lease": {
-			"internal/modules/agents/fleetdb",
-			"internal/modules/artifacts/fleetdb",
-			"internal/modules/execution/fleetdb",
-			"internal/modules/interaction/fleetdb",
-		},
-	}
-	gotMechanisms := make([]string, 0, len(i.GenericMechanisms))
-	for _, mechanism := range i.GenericMechanisms {
-		if mechanism.DirectUses != 0 || mechanism.OwnerMapping == "" || mechanism.Enforcement == "" || mechanism.AllowedAdapterRoots == nil {
-			return fmt.Errorf("generic mechanism %s must record zero direct uses plus owner mapping, allowed adapter roots, and enforcement", mechanism.Mechanism)
+func (i DirectWriteInventory) validateOwnerAdapters() error {
+	keys := make([]string, 0, len(i.OwnerAdapters))
+	for index, adapter := range i.OwnerAdapters {
+		adapter.Path = cleanInventoryPath(adapter.Path)
+		if adapter.Path == "" || !underAnyRoot(adapter.Path, i.AdapterRoots) {
+			return fmt.Errorf("direct-write owner adapter path %q is outside the declared adapter roots", adapter.Path)
 		}
-		if err := validateSortedUnique("generic mechanism "+mechanism.Mechanism+" allowed adapter root", mechanism.AllowedAdapterRoots); err != nil {
-			return err
+		if !validPersistenceOwner(adapter.AggregateOwner) || adapter.AggregateOwner == "unassigned_legacy" {
+			return fmt.Errorf("direct-write owner adapter %s has unsupported owner %q", adapter.Path, adapter.AggregateOwner)
 		}
-		if !slices.Equal(mechanism.AllowedAdapterRoots, wantAdapterRoots[mechanism.Mechanism]) {
-			return fmt.Errorf("generic mechanism %s allowed adapter roots: got %v, want %v", mechanism.Mechanism, mechanism.AllowedAdapterRoots, wantAdapterRoots[mechanism.Mechanism])
-		}
-		gotMechanisms = append(gotMechanisms, mechanism.Mechanism)
-	}
-	if !slices.Equal(gotMechanisms, wantMechanisms) {
-		return fmt.Errorf("generic mechanisms: got %v, want %v", gotMechanisms, wantMechanisms)
-	}
-	return nil
-}
-
-func (i DirectWriteInventory) validatePersistencePolicy() error {
-	if err := validateSortedUnique("direct-write candidate receiver suffix", i.CandidateReceiverSuffixes); err != nil {
-		return err
-	}
-	if len(i.CandidateReceiverSuffixes) == 0 {
-		return errors.New("direct-write inventory requires candidate receiver suffixes for undeclared internal persistence surfaces")
-	}
-	packagesByPath, err := validatePersistencePackages(i.PersistencePackages)
-	if err != nil {
-		return err
-	}
-	methodSetsByName, err := validatePersistenceMethodSets(i.MethodSets)
-	if err != nil {
-		return err
-	}
-	if err := validatePersistenceReceiverSurfaces(i.ReceiverSurfaces, packagesByPath, methodSetsByName); err != nil {
-		return err
-	}
-	return validatePersistenceFunctionSurfaces(i.FunctionSurfaces, packagesByPath)
-}
-
-func validatePersistencePackages(packages []PersistencePackage) (map[string]PersistencePackage, error) {
-	if len(packages) == 0 {
-		return nil, errors.New("direct-write inventory requires declared persistence packages")
-	}
-	packagePaths := make([]string, 0, len(packages))
-	packagesByPath := make(map[string]PersistencePackage, len(packages))
-	for _, pkg := range packages {
-		if !strings.HasPrefix(pkg.Path, modulePath+"/internal/") {
-			return nil, fmt.Errorf("direct-write persistence package %q must be below the module internal root", pkg.Path)
-		}
-		if pkg.ReceiverNames == nil || pkg.ReceiverSuffixes == nil || len(pkg.ReceiverNames)+len(pkg.ReceiverSuffixes) == 0 {
-			return nil, fmt.Errorf("direct-write persistence package %s requires explicit receiver_names and receiver_suffixes", pkg.Path)
-		}
-		if err := validateSortedUnique("direct-write persistence receiver name", pkg.ReceiverNames); err != nil {
-			return nil, err
-		}
-		if err := validateSortedUnique("direct-write persistence receiver suffix", pkg.ReceiverSuffixes); err != nil {
-			return nil, err
-		}
-		packagePaths = append(packagePaths, pkg.Path)
-		packagesByPath[pkg.Path] = pkg
-	}
-	if err := validateSortedUnique("direct-write persistence package", packagePaths); err != nil {
-		return nil, err
-	}
-	return packagesByPath, nil
-}
-
-func validatePersistenceMethodSets(methodSets []PersistenceMethodSet) (map[string]PersistenceMethodSet, error) {
-	methodSetNames := make([]string, 0, len(methodSets))
-	methodSetsByName := make(map[string]PersistenceMethodSet, len(methodSets))
-	for _, methodSet := range methodSets {
-		if methodSet.Name == "" || methodSet.ReadOnly == nil || methodSet.Mutating == nil || len(methodSet.ReadOnly)+len(methodSet.Mutating) == 0 {
-			return nil, fmt.Errorf("direct-write method set %q requires explicit non-empty read_only or mutating classifications", methodSet.Name)
-		}
-		if err := validateSortedUnique("direct-write "+methodSet.Name+" read-only method", methodSet.ReadOnly); err != nil {
-			return nil, err
-		}
-		if err := validateSortedUnique("direct-write "+methodSet.Name+" mutating method", methodSet.Mutating); err != nil {
-			return nil, err
-		}
-		readOnly := sliceSet(methodSet.ReadOnly)
-		for _, method := range methodSet.Mutating {
-			if _, duplicate := readOnly[method]; duplicate {
-				return nil, fmt.Errorf("direct-write method set %s classifies %s as both read-only and mutating", methodSet.Name, method)
+		for previous := 0; previous < index; previous++ {
+			other := i.OwnerAdapters[previous]
+			if pathContains(adapter.Path, other.Path) || pathContains(other.Path, adapter.Path) {
+				return fmt.Errorf("direct-write owner adapter paths %s and %s overlap", other.Path, adapter.Path)
 			}
 		}
-		methodSetNames = append(methodSetNames, methodSet.Name)
-		methodSetsByName[methodSet.Name] = methodSet
+		keys = append(keys, adapter.Path+"\x00"+adapter.AggregateOwner)
 	}
-	if err := validateSortedUnique("direct-write method set", methodSetNames); err != nil {
-		return nil, err
-	}
-	return methodSetsByName, nil
+	return validateSortedUnique("direct-write owner adapter", keys)
 }
 
-func validatePersistenceReceiverSurfaces(
-	surfaces []PersistenceReceiverSurface,
-	packagesByPath map[string]PersistencePackage,
-	methodSetsByName map[string]PersistenceMethodSet,
-) error {
-	receivers := make([]string, 0, len(surfaces))
-	for _, surface := range surfaces {
-		pkg, ok := packagesByPath[surface.Package]
-		if !ok {
-			return fmt.Errorf("direct-write receiver %s uses undeclared persistence package %s", surface.Receiver, surface.Package)
+func (i DirectWriteInventory) ownerAdapterOwner(file string) (string, bool) {
+	for _, adapter := range i.OwnerAdapters {
+		if pathContains(adapter.Path, file) {
+			return adapter.AggregateOwner, true
 		}
-		methodSet, ok := methodSetsByName[surface.MethodSet]
-		if !ok {
-			return fmt.Errorf("direct-write receiver %s uses unknown method set %s", surface.Receiver, surface.MethodSet)
-		}
-		receiverPackage, receiverName, ok := splitReceiver(surface.Receiver)
-		if !ok || receiverPackage != surface.Package || !pkg.matchesReceiver(receiverName) {
-			return fmt.Errorf("direct-write receiver surface %s does not match package %s receiver policy", surface.Receiver, surface.Package)
-		}
-		if surface.CapabilityOwner == "" || surface.CapabilityOwner == "unassigned_legacy" {
-			return fmt.Errorf("direct-write receiver %s requires an explicit capability owner", surface.Receiver)
-		}
-		if len(methodSet.Mutating) > 0 && !validPersistenceOwner(surface.CapabilityOwner) {
-			return fmt.Errorf("direct-write receiver %s has unsupported mutating capability owner %s", surface.Receiver, surface.CapabilityOwner)
-		}
-		receivers = append(receivers, surface.Receiver)
 	}
-	if len(receivers) == 0 {
-		return errors.New("direct-write inventory requires declared receiver surfaces")
-	}
-	return validateSortedUnique("direct-write receiver surface", receivers)
+	return "", false
 }
 
-func validatePersistenceFunctionSurfaces(
-	surfaces []PersistenceFunctionSurface,
-	packagesByPath map[string]PersistencePackage,
-) error {
-	keys := make([]string, 0, len(surfaces))
-	for _, surface := range surfaces {
-		if _, ok := packagesByPath[surface.Package]; !ok {
-			return fmt.Errorf("direct-write function %s uses undeclared persistence package %s", surface.Function, surface.Package)
-		}
-		if surface.Function == "" {
-			return errors.New("direct-write persistence function requires a name")
-		}
-		if surface.Access != "read-only" && surface.Access != "mutating" {
-			return fmt.Errorf("direct-write persistence function %s.%s access %q must be read-only or mutating", surface.Package, surface.Function, surface.Access)
-		}
-		if surface.CapabilityOwner == "" || surface.CapabilityOwner == "unassigned_legacy" {
-			return fmt.Errorf("direct-write persistence function %s.%s requires an explicit capability owner", surface.Package, surface.Function)
-		}
-		if !validPersistenceOwner(surface.CapabilityOwner) {
-			return fmt.Errorf("direct-write persistence function %s.%s has unsupported capability owner %s", surface.Package, surface.Function, surface.CapabilityOwner)
-		}
-		keys = append(keys, persistenceFunctionKey(surface.Package, surface.Function))
-	}
-	return validateSortedUnique("direct-write persistence function surface", keys)
-}
-
-func persistenceFunctionKey(packagePath, function string) string {
-	return packagePath + "." + function
-}
-
-func (pkg PersistencePackage) matchesReceiver(name string) bool {
-	if slices.Contains(pkg.ReceiverNames, name) {
-		return true
-	}
-	for _, suffix := range pkg.ReceiverSuffixes {
-		if strings.HasSuffix(name, suffix) {
-			return true
-		}
-	}
-	return false
-}
-
-func splitReceiver(receiver string) (string, string, bool) {
-	named := strings.TrimPrefix(receiver, "*")
-	separator := strings.LastIndex(named, ".")
-	if separator <= 0 || separator == len(named)-1 {
-		return "", "", false
-	}
-	return named[:separator], named[separator+1:], true
-}
-
-func validPersistenceOwner(owner string) bool {
-	return slices.Contains([]string{
-		"agents", "artifacts", "automation", "connectors", "execution", "fleet-db",
-		"interaction", "legacy_tombstone", "read_projection", "sourcecontrol",
-		"workflowcatalog", "workitems", "workspace",
-	}, owner)
+func pathContains(root, path string) bool {
+	root = cleanInventoryPath(root)
+	path = cleanInventoryPath(path)
+	return path == root || strings.HasPrefix(path, root+"/")
 }
 
 func CheckDirectWrites(root string, matrix AnalysisMatrix, inventory DirectWriteInventory) ([]DirectWriteUse, []string, error) {
@@ -473,6 +356,11 @@ func CheckDirectWrites(root string, matrix AnalysisMatrix, inventory DirectWrite
 	if err != nil {
 		return nil, nil, err
 	}
+	violations, err := checkDirectWriteObservations(inventory, observed)
+	return observed, violations, err
+}
+
+func checkDirectWriteObservations(inventory DirectWriteInventory, observed []DirectWriteUse) ([]string, error) {
 	expected := inventory.Writes
 	violations := []string{}
 	expectedByKey := make(map[string]DirectWriteUse, len(expected))
@@ -493,6 +381,9 @@ func CheckDirectWrites(root string, matrix AnalysisMatrix, inventory DirectWrite
 		if baseline.AggregateOwner != use.AggregateOwner {
 			violations = append(violations, fmt.Sprintf("direct persistence write %s.%s owner changed to %s (baseline %s)", use.Receiver, use.Method, use.AggregateOwner, baseline.AggregateOwner))
 		}
+		if baseline.Disposition != use.Disposition || baseline.ExpiresAfterPhase != use.ExpiresAfterPhase {
+			violations = append(violations, fmt.Sprintf("direct persistence write %s.%s in %s lifecycle changed to %s/Phase %d (baseline %s/Phase %d)", use.Receiver, use.Method, use.File, use.Disposition, use.ExpiresAfterPhase, baseline.Disposition, baseline.ExpiresAfterPhase))
+		}
 	}
 	for _, use := range expected {
 		if _, ok := observedByKey[directWriteKey(use)]; !ok {
@@ -501,7 +392,7 @@ func CheckDirectWrites(root string, matrix AnalysisMatrix, inventory DirectWrite
 	}
 	if baseline := inventory.LegacyDriver; baseline != nil {
 		if !rootCoveredByAdapterRoots(baseline.Root, inventory.AdapterRoots) {
-			return nil, nil, fmt.Errorf("legacy driver root %s must be covered by adapter_roots", baseline.Root)
+			return nil, fmt.Errorf("legacy driver root %s must be covered by adapter_roots", baseline.Root)
 		}
 		legacy := directWritesWithinRoot(observed, baseline.Root)
 		rows, sites, digest := directWriteDigest(legacy)
@@ -510,7 +401,7 @@ func CheckDirectWrites(root string, matrix AnalysisMatrix, inventory DirectWrite
 			violations = append(violations, fmt.Sprintf("legacy driver direct-write ratchet changed: rows=%d sites=%d digest=%s owners=%+v (baseline rows=%d sites=%d digest=%s owners=%+v)", rows, sites, digest, owners, baseline.Rows, baseline.Sites, baseline.Digest, baseline.Owners))
 		}
 	}
-	return observed, violations, nil
+	return violations, nil
 }
 
 func rootCoveredByAdapterRoots(root string, adapterRoots []string) bool {
@@ -564,7 +455,7 @@ func snapshotDirectWritesAtRoots(
 	if err != nil {
 		return nil, err
 	}
-	return classifyDirectWriteCalls(calls, problems, classifier)
+	return classifyDirectWriteCalls(calls, problems, classifier, inventory)
 }
 
 func directWriteDigest(uses []DirectWriteUse) (int, int, string) {
@@ -692,6 +583,7 @@ func classifyDirectWriteCalls(
 	calls map[directWriteCallIdentity]directWriteCall,
 	problems map[directWriteProblemIdentity]directWriteProblem,
 	classifier persistenceClassifier,
+	inventory DirectWriteInventory,
 ) ([]DirectWriteUse, error) {
 	unclassified := directWriteProblemMessages(problems)
 	identities := make([]directWriteCallIdentity, 0, len(calls))
@@ -720,7 +612,7 @@ func classifyDirectWriteCalls(
 			strings.Join(unclassified, "\n- "),
 		)
 	}
-	return directWriteRows(counts), nil
+	return directWriteRows(counts, inventory), nil
 }
 
 // ownerCoreUsesOwnDeclaredPort distinguishes target architecture from a
@@ -732,6 +624,9 @@ func ownerCoreUsesOwnDeclaredPort(call directWriteCall, owner string) bool {
 	if owner == "" {
 		return false
 	}
+	if owner == "named_application_workflow" {
+		return namedWorkflowCoreUsesOwnDeclaredPort(call)
+	}
 	prefix := "internal/modules/" + owner + "/"
 	if !strings.HasPrefix(call.file, prefix) {
 		return false
@@ -742,6 +637,28 @@ func ownerCoreUsesOwnDeclaredPort(call directWriteCall, owner string) bool {
 	}
 	receiver := strings.TrimPrefix(call.receiver, "*")
 	return strings.HasPrefix(receiver, modulePath+"/internal/modules/"+owner+".")
+}
+
+// namedWorkflowCoreUsesOwnDeclaredPort applies the same owner-core exemption
+// to an explicitly classified application workflow. The workflow directory
+// name is the aggregate discriminator: a workflow may invoke only a port
+// declared by its own root package, while concrete fleetdb/http adapters stay
+// visible in the direct-write inventory.
+func namedWorkflowCoreUsesOwnDeclaredPort(call directWriteCall) bool {
+	const appPrefix = "internal/app/"
+	if !strings.HasPrefix(call.file, appPrefix) {
+		return false
+	}
+	relative := strings.TrimPrefix(call.file, appPrefix)
+	workflow, remainder, found := strings.Cut(relative, "/")
+	if !found || workflow == "" || remainder == "" {
+		return false
+	}
+	if segment, _, nested := strings.Cut(remainder, "/"); nested && isConcreteAdapterSegment(segment) {
+		return false
+	}
+	receiver := strings.TrimPrefix(call.receiver, "*")
+	return strings.HasPrefix(receiver, modulePath+"/internal/app/"+workflow+".")
 }
 
 func directWriteProblemMessages(problems map[directWriteProblemIdentity]directWriteProblem) []string {

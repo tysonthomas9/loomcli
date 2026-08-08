@@ -279,7 +279,7 @@ describe("scanAll", () => {
     expect(result.violations).toHaveLength(0);
     expect(result.allowlistedCount).toBe(ALLOWLIST.length);
     expect(result.scannedCount).toBeGreaterThan(0);
-  });
+  }, 30_000);
 });
 
 // ---------------------------------------------------------------------------

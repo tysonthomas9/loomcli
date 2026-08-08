@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 // Dependency represents a relationship between issues
@@ -57,7 +59,7 @@ type IssueDetails struct {
 	Labels       []string                       `json:"labels"`
 	Dependencies []*IssueWithDependencyMetadata `json:"dependencies"`
 	Dependents   []*IssueWithDependencyMetadata `json:"dependents"`
-	Comments     []*Comment                     `json:"comments"`
+	Comments     []*workitems.Comment           `json:"comments"`
 	Parent       *string                        `json:"parent,omitempty"`
 }
 
@@ -203,45 +205,6 @@ type Label struct {
 	IssueID string `json:"issue_id"`
 	Label   string `json:"label"`
 }
-
-// Comment represents a comment on an issue
-type Comment struct {
-	ID        int64     `json:"id"`
-	IssueID   string    `json:"issue_id"`
-	Author    string    `json:"author"`
-	Text      string    `json:"text"`
-	CreatedAt time.Time `json:"created_at"`
-}
-
-// Event represents an audit trail entry
-type Event struct {
-	ID        int64     `json:"id"`
-	IssueID   string    `json:"issue_id"`
-	EventType EventType `json:"event_type"`
-	Actor     string    `json:"actor"`
-	OldValue  *string   `json:"old_value,omitempty"`
-	NewValue  *string   `json:"new_value,omitempty"`
-	Comment   *string   `json:"comment,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-}
-
-// EventType categorizes audit trail events
-type EventType string
-
-// Event type constants for audit trail
-const (
-	EventCreated           EventType = "issue.created"
-	EventUpdated           EventType = "issue.updated"
-	EventStatusChanged     EventType = "issue.status_changed"
-	EventCommented         EventType = "issue.commented"
-	EventClosed            EventType = "issue.closed"
-	EventReopened          EventType = "issue.reopened"
-	EventDependencyAdded   EventType = "issue.dependency_added"
-	EventDependencyRemoved EventType = "issue.dependency_removed"
-	EventLabelAdded        EventType = "issue.label_added"
-	EventLabelRemoved      EventType = "issue.label_removed"
-	EventCompacted         EventType = "issue.compacted"
-)
 
 // BondRef tracks compound molecule lineage.
 // When protos or molecules are bonded together, BondRefs record

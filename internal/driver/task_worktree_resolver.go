@@ -8,10 +8,11 @@ import (
 	"sort"
 	"strings"
 
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver/taskworktree"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
-	"github.com/tysonthomas9/loomcli/internal/stackstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -53,26 +54,35 @@ func LineageFromInput(input json.RawMessage) (TaskLineage, bool) {
 	return taskworktree.LineageFromInput(input)
 }
 
-// StackLineageLookup adapts stackstore into the TaskLineageLookup consumed by
-// the worktree resolver.
-type StackLineageLookup = taskworktree.StackLineageLookup
+// StackLineageLookup narrows Source Control's stack binding query to the base
+// ref lookup consumed by the worktree resolver.
+type StackLineageLookup struct {
+	Bindings sourcecontrol.StackBindingResolver
+}
 
 var _ TaskLineageLookup = StackLineageLookup{}
 
-// DefaultStackLineageLookup returns a lineage lookup backed by the per-user loom
-// stack store, or nil when the loom directory cannot be resolved.
-func DefaultStackLineageLookup() TaskLineageLookup {
-	lookup := taskworktree.DefaultStackLineageLookup()
-	if lookup == nil {
-		return nil
+func (lookup StackLineageLookup) BaseRefForTask(
+	ctx context.Context,
+	workspaceKey,
+	repoName,
+	taskID string,
+) (string, bool, error) {
+	if lookup.Bindings == nil {
+		return "", false, nil
 	}
-	return *lookup
+	binding, ok, err := lookup.Bindings.ResolveTaskStackBinding(ctx, workspaceKey, repoName, taskID)
+	return binding.BaseRef, ok, err
 }
 
-// DefaultStackStore returns the per-user loom stack store, or nil when the loom
-// directory cannot be resolved.
-func DefaultStackStore() stackstore.Store {
-	return taskworktree.DefaultStackStore()
+// StackBindingResolverFor reuses the composed Source Control capability when
+// available. Callers without Source Control composition retain the legacy
+// default-branch behavior instead of opening a second private stack store.
+func StackBindingResolverFor(materializer sourcecontrol.Materializer) sourcecontrol.StackBindingResolver {
+	if resolver, ok := materializer.(sourcecontrol.StackBindingResolver); ok && resolver != nil {
+		return resolver
+	}
+	return nil
 }
 
 // resolveStackRepoName resolves the workspace repo Name a non-local task targets.
@@ -97,8 +107,23 @@ func (e HostBridgeTaskExecutor) resolveStackRepoName(ctx context.Context, req Ta
 
 // stackBindingForTask returns the task's stack binding when the task belongs to
 // a stack for repoName.
-func stackBindingForTask(ctx context.Context, store stackstore.Store, workspaceKey, repoName, taskID string) (TaskLineage, bool, error) {
-	return taskworktree.BindingForTask(ctx, store, workspaceKey, repoName, taskID)
+func stackBindingForTask(
+	ctx context.Context,
+	resolver sourcecontrol.StackBindingResolver,
+	workspaceKey,
+	repoName,
+	taskID string,
+) (TaskLineage, bool, error) {
+	if resolver == nil {
+		return TaskLineage{}, false, nil
+	}
+	binding, ok, err := resolver.ResolveTaskStackBinding(ctx, workspaceKey, repoName, taskID)
+	if err != nil || !ok {
+		return TaskLineage{}, ok, err
+	}
+	return TaskLineage{
+		StackID: binding.StackID, BaseRef: binding.BaseRef, OutputBranch: binding.OutputBranch,
+	}, true, nil
 }
 
 // finalizeStackNode records the completed task's stack node state/SHA before
@@ -137,7 +162,7 @@ func taskOutcomeRecorder(materializer sourcecontrol.Materializer) sourcecontrol.
 }
 
 type LocalTaskWorktreeResolver struct {
-	Store store.Store
+	Store taskWorktreeStore
 	// SourceControl is the authority-free application materializer. Production
 	// task runs fail closed when it is unavailable; neither this resolver nor
 	// taskworktree receives Local Settings or a credential source.
@@ -147,6 +172,11 @@ type LocalTaskWorktreeResolver struct {
 	// per-task worktree is cut from the task's lineage base so each stacked task
 	// diffs on top of its predecessor — making the worktree base equal the PR base.
 	Lineage TaskLineageLookup
+}
+
+type taskWorktreeStore interface {
+	Repos() store.RepoStore
+	WorkerProfiles() store.WorkerProfileStore
 }
 
 //nolint:funlen // Resolution validates workspace state, repo selection, checkout, lineage base, and worktree creation.
@@ -222,7 +252,7 @@ func (r LocalTaskWorktreeResolver) ResolveTaskWorktree(ctx context.Context, req 
 	}, nil
 }
 
-func (r LocalTaskWorktreeResolver) selectRepo(ctx context.Context, workspaceKey string, repos []*domain.Repo, req TaskExecRequest) (*domain.Repo, error) {
+func (r LocalTaskWorktreeResolver) selectRepo(ctx context.Context, workspaceKey string, repos []*workspacemodule.Repository, req TaskExecRequest) (*workspacemodule.Repository, error) {
 	taskSelectors := taskWorktreeRepoSelectors(req)
 	var profileSelectors []string
 	if req.WorkerProfileID != "" {
@@ -263,7 +293,7 @@ func (r LocalTaskWorktreeResolver) selectRepo(ctx context.Context, workspaceKey 
 	}
 
 	if len(profileSelectors) > 0 {
-		matches := make([]*domain.Repo, 0, len(repos))
+		matches := make([]*workspacemodule.Repository, 0, len(repos))
 		for _, repo := range repos {
 			for _, selector := range profileSelectors {
 				if repoMatchesExactSelector(repo, selector) {
@@ -335,14 +365,14 @@ func repoSelectorKey(key string) bool {
 	}
 }
 
-func findRepoBySelector(repos []*domain.Repo, selector string) *domain.Repo {
+func findRepoBySelector(repos []*workspacemodule.Repository, selector string) *workspacemodule.Repository {
 	selector = strings.TrimSpace(selector)
 	if selector == "" {
 		return nil
 	}
 	want := normalizedRepoToken(selector)
 	wantBase := normalizedRepoToken(repoBasename(selector))
-	var exact []*domain.Repo
+	var exact []*workspacemodule.Repository
 	for _, repo := range repos {
 		if repoMatchesExactSelector(repo, want) {
 			exact = append(exact, repo)
@@ -358,7 +388,7 @@ func findRepoBySelector(repos []*domain.Repo, selector string) *domain.Repo {
 	// Backward-compatible basename fallback is allowed only when it identifies
 	// exactly one workspace repo. Qualified selectors such as org-a/app must
 	// never silently select org-b/app just because both basenames are "app".
-	var fallback []*domain.Repo
+	var fallback []*workspacemodule.Repository
 	for _, repo := range repos {
 		if repo == nil {
 			continue
@@ -385,7 +415,7 @@ func findRepoBySelector(repos []*domain.Repo, selector string) *domain.Repo {
 	return nil
 }
 
-func repoMatchesExactSelector(repo *domain.Repo, selector string) bool {
+func repoMatchesExactSelector(repo *workspacemodule.Repository, selector string) bool {
 	if repo == nil {
 		return false
 	}
@@ -458,7 +488,7 @@ func repoBasename(value string) string {
 // yet) falls back to the default branch rather than failing the run; the Stage-2
 // finalize barrier is what guarantees the predecessor branch exists before a
 // dependent dispatches, and the Stage-2 sliding resolver handles empty ancestors.
-func (r LocalTaskWorktreeResolver) baseBranchForTask(ctx context.Context, workspaceKey string, selected *domain.Repo, req TaskExecRequest) string {
+func (r LocalTaskWorktreeResolver) baseBranchForTask(ctx context.Context, workspaceKey string, selected *workspacemodule.Repository, req TaskExecRequest) string {
 	fallback := repoDefaultBranch(selected)
 	if r.Lineage == nil {
 		return fallback
@@ -484,7 +514,7 @@ func (r LocalTaskWorktreeResolver) baseBranchForTask(ctx context.Context, worksp
 	return fallback
 }
 
-func repoDefaultBranch(repo *domain.Repo) string {
+func repoDefaultBranch(repo *workspacemodule.Repository) string {
 	if repo == nil {
 		return ""
 	}

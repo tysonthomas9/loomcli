@@ -15,6 +15,29 @@ type transportStub struct {
 	createCommand artifacts.CreateCommand
 }
 
+type sessionTransportStub struct {
+	err     error
+	owner   artifacts.SessionOwner
+	command artifacts.CreateCommand
+}
+
+func (stub *sessionTransportStub) CreateSession(_ context.Context, owner artifacts.SessionOwner, command artifacts.CreateCommand) (*artifacts.Artifact, error) {
+	stub.owner, stub.command = owner, command
+	return &artifacts.Artifact{ArtifactID: command.ArtifactID}, stub.err
+}
+
+func (stub *sessionTransportStub) UploadSession(context.Context, artifacts.SessionOwner, artifacts.UploadCommand) (*artifacts.Artifact, error) {
+	return &artifacts.Artifact{ArtifactID: "artifact-1"}, stub.err
+}
+
+func (stub *sessionTransportStub) FinalizeSession(context.Context, artifacts.SessionOwner, artifacts.FinalizeCommand) (*artifacts.Artifact, error) {
+	return &artifacts.Artifact{ArtifactID: "artifact-1"}, stub.err
+}
+
+func (stub *sessionTransportStub) GetSession(context.Context, artifacts.SessionOwner, artifacts.GetQuery) (*artifacts.Artifact, error) {
+	return &artifacts.Artifact{ArtifactID: "artifact-1"}, stub.err
+}
+
 func (stub *transportStub) Create(_ context.Context, owner artifacts.ExecutionOwner, command artifacts.CreateCommand) (*artifacts.Artifact, error) {
 	stub.createOwner = owner
 	stub.createCommand = command
@@ -129,5 +152,28 @@ func TestAdapterMapsTransportErrors(t *testing.T) {
 				t.Fatalf("Create error = %v, want %v and original transport error", err, test.want)
 			}
 		})
+	}
+}
+
+func TestSessionAdapterDelegatesOwnerAndMapsErrors(t *testing.T) {
+	transport := &sessionTransportStub{}
+	adapter, err := NewSession(transport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := artifacts.SessionOwner{WorkspaceKey: "WS", SessionID: "session-1", AgentID: "agent-1"}
+	command := artifacts.CreateCommand{ArtifactID: "artifact-1", AgentID: "agent-1", SessionID: "session-1", Type: "transcript"}
+	value, err := adapter.CreateSession(t.Context(), owner, command)
+	if err != nil || value.ArtifactID != command.ArtifactID || transport.owner != owner ||
+		transport.command.AgentID != command.AgentID || transport.command.SessionID != command.SessionID {
+		t.Fatalf("CreateSession = %#v, %v; owner %#v command %#v", value, err, transport.owner, transport.command)
+	}
+
+	transport.err = ErrTransportConflict
+	if _, err := adapter.UploadSession(t.Context(), owner, artifacts.UploadCommand{ArtifactID: command.ArtifactID}); !errors.Is(err, artifacts.ErrAlreadyExists) || !errors.Is(err, ErrTransportConflict) {
+		t.Fatalf("UploadSession conflict = %v", err)
+	}
+	if _, err := NewSession(nil); !errors.Is(err, artifacts.ErrUnavailable) {
+		t.Fatalf("NewSession(nil) = %v, want unavailable", err)
 	}
 }

@@ -7,10 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
 	"github.com/spf13/cobra"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/trigger"
+	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 )
 
 // parseRouterFlags registers the Router v2 flag set on a throwaway command and
@@ -236,7 +237,7 @@ func TestRouterBindingFlagsPatch(t *testing.T) {
 		if patch.SubjectKeyTemplate == nil || *patch.SubjectKeyTemplate != "{{subject_ref}}" {
 			t.Fatalf("SubjectKeyTemplate = %v, want {{subject_ref}}", patch.SubjectKeyTemplate)
 		}
-		if patch.ConcurrencyPolicy == nil || *patch.ConcurrencyPolicy != domain.TriggerBindingConcurrencyReplace {
+		if patch.ConcurrencyPolicy == nil || *patch.ConcurrencyPolicy != automation.ConcurrencyReplace {
 			t.Fatalf("ConcurrencyPolicy = %v, want replace", patch.ConcurrencyPolicy)
 		}
 		if patch.RetryMaxAttempts == nil || *patch.RetryMaxAttempts != 7 {
@@ -262,7 +263,7 @@ func TestRouterBindingFlagsPatch(t *testing.T) {
 				if v != nil {
 					t.Fatalf("%s = %v, want nil", name, *v)
 				}
-			case *domain.TriggerActorFilter:
+			case *automation.ActorFilter:
 				if v != nil {
 					t.Fatalf("%s = %+v, want nil", name, v)
 				}
@@ -348,7 +349,7 @@ func TestNewBindingCreateRequestCarriesRouterFields(t *testing.T) {
 		EventTypePatterns:   []string{"github.pull_request.*"},
 		DriverID:            "drv-1",
 		DriverVersionID:     "ver-1",
-		ConcurrencyPolicy:   domain.TriggerBindingConcurrencyQueue,
+		ConcurrencyPolicy:   automation.ConcurrencyQueue,
 		SubjectKeyTemplate:  "{{subject_ref}}",
 		RetryMaxAttempts:    9,
 		RetryBackoffSeconds: 45,
@@ -373,12 +374,12 @@ func TestNewBindingCreateRequestCarriesRouterFields(t *testing.T) {
 // output, including the new Router v2 columns, so format drift is deliberate.
 func TestRenderBindingsListGolden(t *testing.T) {
 	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
-	bindings := []*domain.TriggerBinding{
+	bindings := []*automation.Binding{
 		{
 			BindingID:           "binding-github-pr-opened",
 			RouteKey:            "github.pull_request.opened",
 			DriverID:            "drv-epic-runner",
-			ConcurrencyPolicy:   domain.TriggerBindingConcurrencyOneActivePerEpic,
+			ConcurrencyPolicy:   automation.ConcurrencyOneActivePerEpic,
 			RetryMaxAttempts:    5,
 			RetryBackoffSeconds: 30,
 			Enabled:             true,
@@ -389,7 +390,7 @@ func TestRenderBindingsListGolden(t *testing.T) {
 			BindingID:           "binding-nightly-report",
 			SourceKind:          "cron",
 			DriverID:            "drv-reporter",
-			ConcurrencyPolicy:   domain.TriggerBindingConcurrencyForbid,
+			ConcurrencyPolicy:   automation.ConcurrencyForbid,
 			RetryMaxAttempts:    2,
 			RetryBackoffSeconds: 60,
 			Schedule:            "0 3 * * *",

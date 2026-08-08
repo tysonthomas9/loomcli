@@ -5,6 +5,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -72,9 +74,9 @@ func TestTriggerRouteFanOutWire(t *testing.T) {
 		t.Fatalf("PrimaryRun = %#v, want nil (the router-v2 wire returns no run bodies)", result.PrimaryRun)
 	}
 	want := []store.TriggerRouteDelivery{
-		{DeliveryID: "delivery-event-1-binding-exact", BindingID: "binding-exact", RunID: "run-exact", Status: domain.TriggerDeliveryDispatched},
-		{DeliveryID: "delivery-event-1-binding-pattern-a", BindingID: "binding-pattern-a", RunID: "run-aaa", Status: domain.TriggerDeliveryDispatched},
-		{DeliveryID: "delivery-event-1-binding-pattern-b", BindingID: "binding-pattern-b", RunID: "run-bbb", Status: domain.TriggerDeliveryHeld, RejectionReason: "queue policy hold"},
+		{DeliveryID: "delivery-event-1-binding-exact", BindingID: "binding-exact", RunID: "run-exact", Status: automation.DeliveryDispatched},
+		{DeliveryID: "delivery-event-1-binding-pattern-a", BindingID: "binding-pattern-a", RunID: "run-aaa", Status: automation.DeliveryDispatched},
+		{DeliveryID: "delivery-event-1-binding-pattern-b", BindingID: "binding-pattern-b", RunID: "run-bbb", Status: automation.DeliveryHeld, RejectionReason: "queue policy hold"},
 	}
 	if len(result.Deliveries) != len(want) {
 		t.Fatalf("deliveries = %#v, want %d legs", result.Deliveries, len(want))

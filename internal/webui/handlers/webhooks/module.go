@@ -14,10 +14,8 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/app/webhookingestion"
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
-	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/trigger"
 )
 
 // maxWebhookPayloadBytes caps the inbound webhook body. GitHub deliveries are
@@ -73,7 +71,7 @@ func New(config Config) *Module {
 // must use New before enabling these routes.
 //
 // Deprecated: use New.
-func NewModule(_ store.Store) *Module {
+func NewModule(_ any) *Module {
 	return New(Config{})
 }
 
@@ -162,7 +160,7 @@ func (m *Module) notifyAwaits(ctx context.Context, ws, sourceKind string, event 
 		EventID:    event.DeliveryID,
 		EventType:  event.EventType,
 		SourceKind: sourceKind,
-		Origin:     domain.TriggerEventOriginExternal,
+		Origin:     automation.EventOriginExternal,
 		SubjectRef: event.SubjectRef,
 		ActorRef:   event.ActorRef,
 		Payload:    json.RawMessage(body),

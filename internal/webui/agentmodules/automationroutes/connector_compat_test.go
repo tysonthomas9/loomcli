@@ -12,14 +12,14 @@ import (
 
 type bindingStoreStub struct {
 	store.TriggerBindingStore
-	update func(context.Context, string, string, store.TriggerBindingUpdate) (*domain.TriggerBinding, error)
+	update func(context.Context, string, string, store.TriggerBindingUpdate) (*automation.Binding, error)
 }
 
 func (stub *bindingStoreStub) Update(
 	ctx context.Context,
 	workspace, bindingID string,
 	patch store.TriggerBindingUpdate,
-) (*domain.TriggerBinding, error) {
+) (*automation.Binding, error) {
 	return stub.update(ctx, workspace, bindingID, patch)
 }
 
@@ -46,12 +46,12 @@ func TestStoreConnectorCompatibilityConfigureBindingSecret(t *testing.T) {
 		_ context.Context,
 		workspace, bindingID string,
 		patch store.TriggerBindingUpdate,
-	) (*domain.TriggerBinding, error) {
+	) (*automation.Binding, error) {
 		gotWorkspace, gotBinding = workspace, bindingID
 		if patch.WebhookSecret != nil {
 			gotSecret = *patch.WebhookSecret
 		}
-		return &domain.TriggerBinding{}, nil
+		return &automation.Binding{}, nil
 	}}
 	compatibility := newStoreConnectorCompatibility(bindings, nil)
 

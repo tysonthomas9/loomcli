@@ -80,6 +80,7 @@ func TestLaunchSpecRejectsUUIDSessionWithoutTabStore(t *testing.T) {
 }
 
 func TestLaunchSpecKeepsLegacyNamedLeadTabs(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", "/trusted/loom-data")
 	ctx := context.Background()
 	p := &terminalWSParams{tabMetaStore: newTabMetaStoreForWSTest(t)}
 
@@ -89,6 +90,9 @@ func TestLaunchSpecKeepsLegacyNamedLeadTabs(t *testing.T) {
 	}
 	if launch == nil || len(launch.Argv) == 0 {
 		t.Fatalf("launch = %#v, want legacy lead argv", launch)
+	}
+	if got := launch.Env["LOOM_CONFIG_DIR"]; got != "/trusted/loom-data" {
+		t.Fatalf("LOOM_CONFIG_DIR = %q, want trusted Desktop data directory", got)
 	}
 }
 

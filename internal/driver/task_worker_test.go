@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
@@ -545,7 +547,7 @@ func TestTaskWorkerRunOnceKeepsFlueTaskRunDistinctFromInteractionSession(t *test
 		Status:           domain.TaskRunQueued,
 		RuntimeMetadata: map[string]string{
 			"parent_session_id":  "lead-session-1",
-			"runner_trust_level": string(domain.DriverTrustTrusted),
+			"runner_trust_level": string(workflowcatalog.DriverTrustTrusted),
 		},
 	}); err != nil {
 		t.Fatalf("Create queued task run: %v", err)
@@ -594,7 +596,7 @@ func TestTaskWorkerRunOnceRefusesUntrustedQueuedNamedRunner(t *testing.T) {
 		RunnerEntrypoint: "local-task-runner",
 		Status:           domain.TaskRunQueued,
 		RuntimeMetadata: map[string]string{
-			"runner_trust_level": string(domain.DriverTrustUntrusted),
+			"runner_trust_level": string(workflowcatalog.DriverTrustUntrusted),
 		},
 	}); err != nil {
 		t.Fatalf("Create queued task run: %v", err)
@@ -626,7 +628,7 @@ func TestTaskWorkerRunOnceRefusesUntrustedQueuedNamedRunner(t *testing.T) {
 	}
 	if outcome.Run.RuntimeMetadata[ErrorCodeOutputKey] != ErrorClassSandboxRequired ||
 		outcome.Run.RuntimeMetadata[SandboxLauncherOutputKey] != SandboxProviderProcess ||
-		outcome.Run.RuntimeMetadata["runner_trust_level"] != string(domain.DriverTrustUntrusted) {
+		outcome.Run.RuntimeMetadata["runner_trust_level"] != string(workflowcatalog.DriverTrustUntrusted) {
 		t.Fatalf("runtime metadata = %+v, want sandbox refusal persisted", outcome.Run.RuntimeMetadata)
 	}
 	if _, err := os.Stat(ranPath); !errors.Is(err, os.ErrNotExist) {
@@ -744,7 +746,7 @@ func TestTaskWorkerRetryPersistsDistinctAttemptTranscriptsAndCompletes(t *testin
 		RunnerEntrypoint: LocalTaskRunnerEntrypoint,
 		Status:           domain.TaskRunQueued,
 		RuntimeMetadata: map[string]string{
-			"runner_trust_level": string(domain.DriverTrustTrusted),
+			"runner_trust_level": string(workflowcatalog.DriverTrustTrusted),
 		},
 	}); err != nil {
 		t.Fatalf("Create queued task run: %v", err)

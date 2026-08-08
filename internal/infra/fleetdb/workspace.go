@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -34,12 +36,12 @@ type workspaceWire struct {
 	DesignFormat  string `json:"design_format,omitempty"`
 }
 
-func (w workspaceWire) toDomain() *domain.Workspace {
-	return &domain.Workspace{
+func (w workspaceWire) toDomain() *workspacemodule.Workspace {
+	return &workspacemodule.Workspace{
 		Key:           w.Key,
 		Name:          w.Name,
 		Description:   w.Description,
-		State:         domain.WorkspaceState(w.State),
+		State:         workspacemodule.State(w.State),
 		ErrorMessage:  w.ErrorMessage,
 		DefaultBranch: w.DefaultBranch,
 		DesignFormat:  w.DesignFormat,
@@ -48,7 +50,7 @@ func (w workspaceWire) toDomain() *domain.Workspace {
 	}
 }
 
-func (s *workspaceStore) Create(ctx context.Context, in store.WorkspaceCreate) (*domain.Workspace, error) {
+func (s *workspaceStore) Create(ctx context.Context, in store.WorkspaceCreate) (*workspacemodule.Workspace, error) {
 	body := struct {
 		Key           string `json:"key"`
 		Name          string `json:"name"`
@@ -69,7 +71,7 @@ func (s *workspaceStore) Create(ctx context.Context, in store.WorkspaceCreate) (
 	return resp.toDomain(), nil
 }
 
-func (s *workspaceStore) Get(ctx context.Context, key string) (*domain.Workspace, error) {
+func (s *workspaceStore) Get(ctx context.Context, key string) (*workspacemodule.Workspace, error) {
 	var resp workspaceWire
 	if err := s.client.do(ctx, "GET", "/api/v1/admin/workspaces/"+pathEscape(key), nil, &resp); err != nil {
 		return nil, err
@@ -77,7 +79,7 @@ func (s *workspaceStore) Get(ctx context.Context, key string) (*domain.Workspace
 	return resp.toDomain(), nil
 }
 
-func (s *workspaceStore) GetByName(ctx context.Context, name string) (*domain.Workspace, error) {
+func (s *workspaceStore) GetByName(ctx context.Context, name string) (*workspacemodule.Workspace, error) {
 	// Fleet-db does not currently expose a name-lookup endpoint, so we
 	// fall back to List + scan. List is cheap (workspace count is tiny);
 	// upgrade to a dedicated endpoint if it ever becomes a hotspot.
@@ -93,21 +95,21 @@ func (s *workspaceStore) GetByName(ctx context.Context, name string) (*domain.Wo
 	return nil, fmt.Errorf("fleetdb: workspace name %q: %w", name, domain.ErrNotFound)
 }
 
-func (s *workspaceStore) List(ctx context.Context) ([]*domain.Workspace, error) {
+func (s *workspaceStore) List(ctx context.Context) ([]*workspacemodule.Workspace, error) {
 	var resp struct {
 		Workspaces []workspaceWire `json:"workspaces"`
 	}
 	if err := s.client.do(ctx, "GET", "/api/v1/admin/workspaces", nil, &resp); err != nil {
 		return nil, err
 	}
-	out := make([]*domain.Workspace, 0, len(resp.Workspaces))
+	out := make([]*workspacemodule.Workspace, 0, len(resp.Workspaces))
 	for _, w := range resp.Workspaces {
 		out = append(out, w.toDomain())
 	}
 	return out, nil
 }
 
-func (s *workspaceStore) Update(ctx context.Context, key string, patch store.WorkspaceUpdate) (*domain.Workspace, error) {
+func (s *workspaceStore) Update(ctx context.Context, key string, patch store.WorkspaceUpdate) (*workspacemodule.Workspace, error) {
 	if patch.Name == nil &&
 		patch.Description == nil &&
 		patch.State == nil &&
@@ -119,7 +121,7 @@ func (s *workspaceStore) Update(ctx context.Context, key string, patch store.Wor
 	body := struct {
 		Name          *string                `json:"name,omitempty"`
 		Description   *string                `json:"description,omitempty"`
-		State         *domain.WorkspaceState `json:"state,omitempty"`
+		State         *workspacemodule.State `json:"state,omitempty"`
 		ErrorMessage  *string                `json:"error_message,omitempty"`
 		DefaultBranch *string                `json:"default_branch,omitempty"`
 		DesignFormat  *string                `json:"design_format,omitempty"`

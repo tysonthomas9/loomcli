@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	dependencies "github.com/tysonthomas9/loomcli/internal/webui/driverapidependencies"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -25,7 +27,7 @@ func listDueOutboxRows(t *testing.T, st store.Store) []*domain.OutboxRecord {
 
 func TestDeliverLeadAssignmentEnqueuesOutboxOnPending(t *testing.T) {
 	h := newTestHarness(t, "")
-	h.module.deliverAssignment = func(context.Context, store.Store, string, string) (driverpkg.AgentMessageDeliveryResult, error) {
+	h.module.deliverAssignment = func(context.Context, dependencies.Store, string, string) (driverpkg.AgentMessageDeliveryResult, error) {
 		return driverpkg.AgentMessageDeliveryResult{State: "pending", Reason: "lead has no orchestration session"}, nil
 	}
 
@@ -78,7 +80,7 @@ func TestDeliverLeadAssignmentSkipsOutboxOnDeliveredAndUnsupported(t *testing.T)
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newTestHarness(t, "")
-			h.module.deliverAssignment = func(context.Context, store.Store, string, string) (driverpkg.AgentMessageDeliveryResult, error) {
+			h.module.deliverAssignment = func(context.Context, dependencies.Store, string, string) (driverpkg.AgentMessageDeliveryResult, error) {
 				return driverpkg.AgentMessageDeliveryResult{State: tc.state}, nil
 			}
 			resp, decoded := h.do(t, opRequest{

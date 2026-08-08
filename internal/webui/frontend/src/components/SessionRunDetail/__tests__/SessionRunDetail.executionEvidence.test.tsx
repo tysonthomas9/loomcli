@@ -164,6 +164,27 @@ describe("SessionRunDetail execution evidence", () => {
     expect(screen.queryByText("$0")).not.toBeInTheDocument();
   });
 
+  it("labels an interrupted fallback outcome as aborted", () => {
+    render(
+      <SessionRunDetail
+        taskId=""
+        agentId="phase7-lead"
+        session={createSession({
+          status: "aborted",
+          last_error: "server PTY killed",
+        })}
+      />,
+    );
+
+    expect(screen.getByTestId("run-error-banner")).toHaveTextContent(
+      "Run aborted",
+    );
+    expect(screen.getByTestId("run-error-banner")).toHaveTextContent(
+      "server PTY killed",
+    );
+    expect(screen.queryByText("Run failed")).not.toBeInTheDocument();
+  });
+
   it("does not turn non-HTTP execution metadata into a link", () => {
     render(
       <SessionRunDetail

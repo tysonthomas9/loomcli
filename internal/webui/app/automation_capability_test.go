@@ -42,6 +42,10 @@ func (*agentRouteAutomationCapability) WebhookWorkflow() *webhookingestion.Workf
 }
 func (*agentRouteAutomationCapability) WorkflowBinding() *workflowbinding.Workflow   { return nil }
 func (*agentRouteAutomationCapability) WorkflowEventing() *workfloweventing.Workflow { return nil }
+func (*agentRouteAutomationCapability) ApprovalJournal() automation.ApprovalJournal  { return nil }
+func (*agentRouteAutomationCapability) ApprovalAuthorityProvider() automation.ApprovalAuthorityProvider {
+	return nil
+}
 func (*agentRouteAutomationCapability) IssueJournalEmitter() systemeventing.IssueJournalEmitter {
 	return nil
 }
@@ -87,7 +91,7 @@ func (queries *agentRouteBindingQueries) ListBindings(ctx context.Context, works
 	return projected, nil
 }
 
-func projectAgentRouteBinding(binding *domain.TriggerBinding) (*automation.Binding, error) {
+func projectAgentRouteBinding(binding *automation.Binding) (*automation.Binding, error) {
 	if binding == nil {
 		return nil, nil
 	}

@@ -9,8 +9,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
-	"github.com/tysonthomas9/loomcli/internal/webui/svcimpl"
+	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
+	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
 )
 
 func TestFlueTaskRunIsOwnedByTaskSessionsNotAgentHistory(t *testing.T) {
@@ -51,7 +51,7 @@ func TestFlueTaskRunIsOwnedByTaskSessionsNotAgentHistory(t *testing.T) {
 		t.Fatalf("agent history sessions = %+v, want none", history.Sessions)
 	}
 
-	taskSessions, err := svcimpl.NewSessionService(st, nil).ListTaskSessions(
+	taskSessions, err := sessioncoord.NewSessionService(st, nil).ListTaskSessions(
 		ctx,
 		agentRecordTestWS,
 		"TASK-SHARED-1",
@@ -126,7 +126,7 @@ func TestAgentSessionTranscriptRouteReturnsCanonicalEntriesAndEnforcesOwner(t *t
 	}); err != nil {
 		t.Fatalf("create interactive session: %v", err)
 	}
-	transcripts, ok := svcimpl.NewSessionService(st, nil).(service.AgentSessionTranscriptService)
+	transcripts, ok := sessioncoord.NewSessionService(st, nil).(sessioncoord.AgentSessionTranscriptService)
 	if !ok {
 		t.Fatal("session service does not implement AgentSessionTranscriptService")
 	}
@@ -270,7 +270,7 @@ func TestAgentSessionTranscriptRoutePreservesUnavailable(t *testing.T) {
 	module := New(Config{
 		Store: memstore.New(),
 		SessionTranscripts: agentSessionTranscriptErrorService{
-			err: service.ErrUnavailable("transcript content is temporarily unavailable"),
+			err: apperrors.ErrUnavailable("transcript content is temporarily unavailable"),
 		},
 		WorkspaceFromContext: func(context.Context) string {
 			return agentRecordTestWS

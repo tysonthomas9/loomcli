@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/workspace"
+	"github.com/tysonthomas9/loomcli/internal/platform/workspaceid"
 )
 
 // IsTmuxAvailable checks if tmux is installed and available.
@@ -78,8 +78,8 @@ func canonicalizePath(path string) string {
 }
 
 func initTmuxLoop(opts AutoModeOptions) *tmuxLoopCtx {
-	wsID := workspace.ResolveWorkspaceID(opts.WorkspaceID)
-	wsPrefix := workspace.ShortWorkspaceID(wsID)
+	wsID := workspaceid.Resolve(opts.WorkspaceID)
+	wsPrefix := workspaceid.Short(wsID)
 	sessionName := fmt.Sprintf("loom-%s-%s-%s-%d", wsPrefix, opts.AgentType, opts.AgentName, os.Getpid())
 	logFile := resolveTmuxLogFile(wsID, opts.AgentName)
 

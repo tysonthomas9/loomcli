@@ -17,11 +17,11 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"nhooyr.io/websocket" //nolint:staticcheck // SA1019: websocket migration tracked separately
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
@@ -76,7 +76,7 @@ type terminalWSParams struct {
 	auth          *realtime.TerminalAuth
 	patterns      []string
 	loomServerURL string
-	store         store.Store
+	store         terminalStore
 	tabMetaStore  *tabmeta.Store
 	hub           *realtime.Hub
 	// serverStartedAt is used to distinguish "tab metadata from a prior
@@ -109,7 +109,7 @@ func HandleTerminalWS(
 	auth *realtime.TerminalAuth,
 	allowedOrigins []string,
 	loomServerURL string,
-	st store.Store,
+	st terminalStore,
 	tabMetaStore *tabmeta.Store,
 	hub *realtime.Hub,
 	serverStartedAt time.Time,
@@ -139,7 +139,7 @@ func HandleTerminalWSWithInteraction(
 	auth *realtime.TerminalAuth,
 	allowedOrigins []string,
 	loomServerURL string,
-	st store.Store,
+	st terminalStore,
 	tabMetaStore *tabmeta.Store,
 	hub *realtime.Hub,
 	serverStartedAt time.Time,
@@ -640,7 +640,7 @@ func resolveTerminalLaunch(
 
 func authorizeAgentTerminalLaunch(
 	ctx context.Context,
-	st store.Store,
+	st terminalStore,
 	workspace,
 	agentID string,
 	identities ...terminalAgentIdentity,
@@ -678,7 +678,16 @@ func legacyLaunchSpecForSession(session string) *tabmeta.LaunchSpec {
 	if len(argv) == 0 {
 		return nil
 	}
-	return &tabmeta.LaunchSpec{Argv: argv}
+	launch := &tabmeta.LaunchSpec{Argv: argv}
+	// Generic workspace terminals predate durable agent-tab metadata, so they
+	// do not carry a persisted launch envelope. Re-add only the server-resolved
+	// local data directory; PTYManager separately binds LOOM_WORKSPACE from the
+	// workspace-scoped SessionKey. This keeps child `loom` commands on the same
+	// Desktop registry without admitting ambient credentials or product scope.
+	if configDir := strings.TrimSpace(bootstrap.LoomDir()); configDir != "" {
+		launch.Env = map[string]string{"LOOM_CONFIG_DIR": configDir}
+	}
+	return launch
 }
 
 func initialTerminalSizeFromRequest(r *http.Request) (uint16, uint16) {
@@ -745,7 +754,7 @@ func injectTerminalContextBanner(att webuterminal.Attachment, loomServerURL stri
 	}
 }
 
-func workspaceNameFromStore(ctx context.Context, st store.Store, wsID string) string {
+func workspaceNameFromStore(ctx context.Context, st terminalStore, wsID string) string {
 	if st == nil || wsID == "" {
 		return ""
 	}

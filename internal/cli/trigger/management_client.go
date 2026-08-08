@@ -12,6 +12,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/httpclient"
 )
@@ -32,55 +34,55 @@ type triggerManagementClient struct {
 }
 
 type triggerBindingsAPIResponse struct {
-	Bindings []*domain.TriggerBinding `json:"bindings"`
+	Bindings []*automation.Binding `json:"bindings"`
 }
 
 type triggerEventsAPIResponse struct {
-	Events []*domain.TriggerEvent `json:"trigger_events"`
-	Count  int                    `json:"count"`
+	Events []*automation.Event `json:"trigger_events"`
+	Count  int                 `json:"count"`
 }
 
 type triggerDeliveriesAPIResponse struct {
-	Deliveries []*domain.TriggerDelivery `json:"trigger_deliveries"`
-	Count      int                       `json:"count"`
+	Deliveries []*automation.Delivery `json:"trigger_deliveries"`
+	Count      int                    `json:"count"`
 }
 
 // triggerBindingCreateRequest intentionally mirrors the long-standing CLI
 // flag surface rather than the UI's smaller form. The management handler must
 // preserve every field; the client never falls back to direct persistence.
 type triggerBindingCreateRequest struct {
-	Workflow            string                                 `json:"workflow,omitempty"`
-	DriverID            string                                 `json:"driver_id,omitempty"`
-	DriverVersionID     string                                 `json:"driver_version_id,omitempty"`
-	RouteKey            string                                 `json:"route_key"`
-	SourceKind          string                                 `json:"source_kind,omitempty"`
-	Name                string                                 `json:"name,omitempty"`
-	BindingID           string                                 `json:"binding_id,omitempty"`
-	Secret              string                                 `json:"secret,omitempty"`
-	Entrypoint          string                                 `json:"entrypoint,omitempty"`
-	EventTypePatterns   []string                               `json:"event_type_patterns,omitempty"`
-	Enabled             *bool                                  `json:"enabled,omitempty"`
-	SubjectKeyTemplate  string                                 `json:"subject_key_template,omitempty"`
-	ConcurrencyPolicy   domain.TriggerBindingConcurrencyPolicy `json:"concurrency_policy,omitempty"`
-	ActorFilter         *domain.TriggerActorFilter             `json:"actor_filter,omitempty"`
-	RetryMaxAttempts    int                                    `json:"retry_max_attempts,omitempty"`
-	RetryBackoffSeconds int                                    `json:"retry_backoff_seconds,omitempty"`
-	Schedule            string                                 `json:"schedule,omitempty"`
-	ScheduleTimezone    string                                 `json:"schedule_timezone,omitempty"`
+	Workflow            string                              `json:"workflow,omitempty"`
+	DriverID            string                              `json:"driver_id,omitempty"`
+	DriverVersionID     string                              `json:"driver_version_id,omitempty"`
+	RouteKey            string                              `json:"route_key"`
+	SourceKind          string                              `json:"source_kind,omitempty"`
+	Name                string                              `json:"name,omitempty"`
+	BindingID           string                              `json:"binding_id,omitempty"`
+	Secret              string                              `json:"secret,omitempty"`
+	Entrypoint          string                              `json:"entrypoint,omitempty"`
+	EventTypePatterns   []string                            `json:"event_type_patterns,omitempty"`
+	Enabled             *bool                               `json:"enabled,omitempty"`
+	SubjectKeyTemplate  string                              `json:"subject_key_template,omitempty"`
+	ConcurrencyPolicy   automation.BindingConcurrencyPolicy `json:"concurrency_policy,omitempty"`
+	ActorFilter         *automation.ActorFilter             `json:"actor_filter,omitempty"`
+	RetryMaxAttempts    int                                 `json:"retry_max_attempts,omitempty"`
+	RetryBackoffSeconds int                                 `json:"retry_backoff_seconds,omitempty"`
+	Schedule            string                              `json:"schedule,omitempty"`
+	ScheduleTimezone    string                              `json:"schedule_timezone,omitempty"`
 }
 
 // triggerBindingPatchRequest retains omitted-versus-explicit-zero semantics.
 // clear_actor_filter represents the legacy CLI's single-empty-value clear.
 type triggerBindingPatchRequest struct {
-	EventTypePatterns   *[]string                               `json:"event_type_patterns,omitempty"`
-	SubjectKeyTemplate  *string                                 `json:"subject_key_template,omitempty"`
-	ConcurrencyPolicy   *domain.TriggerBindingConcurrencyPolicy `json:"concurrency_policy,omitempty"`
-	ActorFilter         *domain.TriggerActorFilter              `json:"actor_filter,omitempty"`
-	ClearActorFilter    bool                                    `json:"clear_actor_filter,omitempty"`
-	RetryMaxAttempts    *int                                    `json:"retry_max_attempts,omitempty"`
-	RetryBackoffSeconds *int                                    `json:"retry_backoff_seconds,omitempty"`
-	Schedule            *string                                 `json:"schedule,omitempty"`
-	ScheduleTimezone    *string                                 `json:"schedule_timezone,omitempty"`
+	EventTypePatterns   *[]string                            `json:"event_type_patterns,omitempty"`
+	SubjectKeyTemplate  *string                              `json:"subject_key_template,omitempty"`
+	ConcurrencyPolicy   *automation.BindingConcurrencyPolicy `json:"concurrency_policy,omitempty"`
+	ActorFilter         *automation.ActorFilter              `json:"actor_filter,omitempty"`
+	ClearActorFilter    bool                                 `json:"clear_actor_filter,omitempty"`
+	RetryMaxAttempts    *int                                 `json:"retry_max_attempts,omitempty"`
+	RetryBackoffSeconds *int                                 `json:"retry_backoff_seconds,omitempty"`
+	Schedule            *string                              `json:"schedule,omitempty"`
+	ScheduleTimezone    *string                              `json:"schedule_timezone,omitempty"`
 }
 
 type deleteBindingAPIResponse struct {
@@ -127,7 +129,7 @@ func newTriggerManagementClient(_ context.Context) (*triggerManagementClient, er
 	return client, nil
 }
 
-func (c *triggerManagementClient) listBindings(ctx context.Context) ([]*domain.TriggerBinding, error) {
+func (c *triggerManagementClient) listBindings(ctx context.Context) ([]*automation.Binding, error) {
 	var out triggerBindingsAPIResponse
 	if err := c.doJSON(ctx, http.MethodGet, c.workspacePath("/trigger-bindings"), nil, &out, nil); err != nil {
 		return nil, err
@@ -135,7 +137,7 @@ func (c *triggerManagementClient) listBindings(ctx context.Context) ([]*domain.T
 	return out.Bindings, nil
 }
 
-func (c *triggerManagementClient) getBinding(ctx context.Context, bindingID string) (*domain.TriggerBinding, error) {
+func (c *triggerManagementClient) getBinding(ctx context.Context, bindingID string) (*automation.Binding, error) {
 	bindings, err := c.listBindings(ctx)
 	if err != nil {
 		return nil, err
@@ -149,16 +151,16 @@ func (c *triggerManagementClient) getBinding(ctx context.Context, bindingID stri
 	return nil, fmt.Errorf("trigger binding %q: %w", bindingID, domain.ErrNotFound)
 }
 
-func (c *triggerManagementClient) createBinding(ctx context.Context, input triggerBindingCreateRequest) (*domain.TriggerBinding, error) {
-	var out domain.TriggerBinding
+func (c *triggerManagementClient) createBinding(ctx context.Context, input triggerBindingCreateRequest) (*automation.Binding, error) {
+	var out automation.Binding
 	if err := c.doJSON(ctx, http.MethodPost, c.workspacePath("/trigger-bindings")+"?create_only=true", input, &out, nil); err != nil {
 		return nil, err
 	}
 	return &out, validateTriggerBindingResponse(&out)
 }
 
-func (c *triggerManagementClient) updateBinding(ctx context.Context, bindingID string, patch triggerBindingPatchRequest) (*domain.TriggerBinding, error) {
-	var out domain.TriggerBinding
+func (c *triggerManagementClient) updateBinding(ctx context.Context, bindingID string, patch triggerBindingPatchRequest) (*automation.Binding, error) {
+	var out automation.Binding
 	path := c.workspacePath("/trigger-bindings/" + url.PathEscape(strings.TrimSpace(bindingID)))
 	if err := c.doJSON(ctx, http.MethodPatch, path, patch, &out, nil); err != nil {
 		return nil, err
@@ -190,7 +192,7 @@ func (c *triggerManagementClient) runBinding(ctx context.Context, bindingID stri
 	return &out, nil
 }
 
-func (c *triggerManagementClient) listEvents(ctx context.Context, sourceKind string, limit int) ([]*domain.TriggerEvent, error) {
+func (c *triggerManagementClient) listEvents(ctx context.Context, sourceKind string, limit int) ([]*automation.Event, error) {
 	query := url.Values{}
 	if sourceKind = strings.TrimSpace(sourceKind); sourceKind != "" {
 		query.Set("source_kind", sourceKind)
@@ -205,8 +207,8 @@ func (c *triggerManagementClient) listEvents(ctx context.Context, sourceKind str
 	return out.Events, nil
 }
 
-func (c *triggerManagementClient) getEvent(ctx context.Context, eventID string) (*domain.TriggerEvent, error) {
-	var out domain.TriggerEvent
+func (c *triggerManagementClient) getEvent(ctx context.Context, eventID string) (*automation.Event, error) {
+	var out automation.Event
 	path := c.workspacePath("/trigger-events/" + url.PathEscape(strings.TrimSpace(eventID)))
 	if err := c.doJSON(ctx, http.MethodGet, path, nil, &out, nil); err != nil {
 		return nil, err
@@ -217,7 +219,7 @@ func (c *triggerManagementClient) getEvent(ctx context.Context, eventID string) 
 	return &out, nil
 }
 
-func (c *triggerManagementClient) listDeliveries(ctx context.Context, eventID, status string, limit int) ([]*domain.TriggerDelivery, error) {
+func (c *triggerManagementClient) listDeliveries(ctx context.Context, eventID, status string, limit int) ([]*automation.Delivery, error) {
 	query := url.Values{}
 	if eventID = strings.TrimSpace(eventID); eventID != "" {
 		query.Set("trigger_event_id", eventID)
@@ -235,8 +237,8 @@ func (c *triggerManagementClient) listDeliveries(ctx context.Context, eventID, s
 	return out.Deliveries, nil
 }
 
-func (c *triggerManagementClient) getDelivery(ctx context.Context, deliveryID string) (*domain.TriggerDelivery, error) {
-	var out domain.TriggerDelivery
+func (c *triggerManagementClient) getDelivery(ctx context.Context, deliveryID string) (*automation.Delivery, error) {
+	var out automation.Delivery
 	path := c.workspacePath("/trigger-deliveries/" + url.PathEscape(strings.TrimSpace(deliveryID)))
 	if err := c.doJSON(ctx, http.MethodGet, path, nil, &out, nil); err != nil {
 		return nil, err
@@ -247,7 +249,7 @@ func (c *triggerManagementClient) getDelivery(ctx context.Context, deliveryID st
 	return &out, nil
 }
 
-func validateTriggerBindingResponse(binding *domain.TriggerBinding) error {
+func validateTriggerBindingResponse(binding *automation.Binding) error {
 	if binding == nil || strings.TrimSpace(binding.BindingID) == "" || strings.TrimSpace(binding.WorkspaceKey) == "" {
 		return fmt.Errorf("trigger management API returned an incomplete binding result")
 	}

@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
@@ -31,9 +33,9 @@ func TestAutomationTransportUsesSharedClientAndBindingBoundary(t *testing.T) {
 		if _, exists := body["webhook_secret"]; exists {
 			t.Errorf("create body leaked webhook_secret: %s", body["webhook_secret"])
 		}
-		_ = json.NewEncoder(w).Encode(domain.TriggerBinding{
+		_ = json.NewEncoder(w).Encode(automation.Binding{
 			WorkspaceKey: "WS", BindingID: "binding-a", SourceKind: "github",
-			DriverID: "driver-a", DriverVersionID: "version-a", ConcurrencyPolicy: domain.TriggerBindingConcurrencyAllow,
+			DriverID: "driver-a", DriverVersionID: "version-a", ConcurrencyPolicy: automation.ConcurrencyAllow,
 		})
 	}))
 	defer server.Close()
@@ -44,10 +46,10 @@ func TestAutomationTransportUsesSharedClientAndBindingBoundary(t *testing.T) {
 	if client.Automation() == nil || client.Automation() != client.Automation() {
 		t.Fatal("Automation did not reuse one shared transport surface")
 	}
-	binding := &domain.TriggerBinding{
+	binding := &automation.Binding{
 		WorkspaceKey: "WS", BindingID: "binding-a", Name: "binding-a", SourceKind: "github",
 		RouteKey: "github.push", DriverID: "driver-a", DriverVersionID: "version-a",
-		ConcurrencyPolicy: domain.TriggerBindingConcurrencyAllow,
+		ConcurrencyPolicy: automation.ConcurrencyAllow,
 	}
 	if got, err := client.Automation().CreateBinding(t.Context(), binding); err != nil || got.BindingID != "binding-a" {
 		t.Fatalf("CreateBinding = %+v, %v", got, err)
@@ -69,7 +71,7 @@ func TestAutomationTransportPreservesMatchOrderAndRawPayloadBytes(t *testing.T) 
 		case r.Method == http.MethodGet && r.URL.EscapedPath() == "/api/v1/WS/automation/binding-matches/github.issue.opened":
 			_ = json.NewEncoder(w).Encode(AutomationBindingMatchSnapshot{
 				WorkspaceKey: "WS", RouteKey: "github.issue.opened", BindingSetRevision: 7,
-				Bindings: []*domain.TriggerBinding{
+				Bindings: []*automation.Binding{
 					{WorkspaceKey: "WS", BindingID: "exact", RouteKey: "github.issue.opened", Enabled: true},
 					{WorkspaceKey: "WS", BindingID: "a-pattern", EventTypePatterns: []string{"github.*.*"}, Enabled: true},
 					{WorkspaceKey: "WS", BindingID: "z-pattern", EventTypePatterns: []string{"github.*.*"}, Enabled: true},
@@ -97,14 +99,14 @@ func TestAutomationTransportPreservesMatchOrderAndRawPayloadBytes(t *testing.T) 
 				Event: &automationEventWire{
 					WorkspaceKey: "WS", EventID: "event-1", TriggerBindingID: "exact", SourceKind: "github",
 					SourceEventID: "delivery-1", EventType: "issue.opened", RouteKey: "github.issue.opened",
-					Origin: domain.TriggerEventOriginExternal, OccurredAt: now, ReceivedAt: now,
+					Origin: automation.EventOriginExternal, OccurredAt: now, ReceivedAt: now,
 					IdempotencyKey: "github:delivery-1", PayloadBase64: payload,
 				},
-				Deliveries: []*domain.TriggerDelivery{{
+				Deliveries: []*automation.Delivery{{
 					WorkspaceKey: "WS", DeliveryID: "delivery-a", TriggerEventID: "event-1", TriggerBindingID: "exact",
-					Status: domain.TriggerDeliveryAccepted, DriverID: "driver-a", DriverVersionID: "version-a",
+					Status: automation.DeliveryAccepted, DriverID: "driver-a", DriverVersionID: "version-a",
 					TargetEntrypoint: "run", TargetAgentServiceID: "agent-service-a", SourceKind: "github",
-					ConcurrencyPolicy: domain.TriggerBindingConcurrencyQueue, RetryMaxAttempts: 5, RetryBackoffSeconds: 30,
+					ConcurrencyPolicy: automation.ConcurrencyQueue, RetryMaxAttempts: 5, RetryBackoffSeconds: 30,
 					Attempt: 1, CreatedAt: now, UpdatedAt: now,
 				}},
 				EffectiveVersions: []AutomationCatalogGuard{{
@@ -129,7 +131,7 @@ func TestAutomationTransportPreservesMatchOrderAndRawPayloadBytes(t *testing.T) 
 	}
 	result, err := transport.ReserveEvent(t.Context(), AutomationEventReservation{
 		WorkspaceKey: "WS", RouteKey: "github.issue.opened", IdempotencyKey: "github:delivery-1",
-		Origin: domain.TriggerEventOriginExternal, BindingSetRevision: 7,
+		Origin: automation.EventOriginExternal, BindingSetRevision: 7,
 		MatchedBindingIDs: []string{"exact", "a-pattern", "z-pattern"},
 		CatalogGuards: []AutomationCatalogGuard{{
 			BindingID: "exact", DriverID: "driver-a", VersionID: "version-a", DriverRevision: 9,
@@ -168,7 +170,7 @@ func TestAutomationTransportAdmissionReplayOnlyOmitsMutableSnapshots(t *testing.
 	client, _ := New(Config{BaseURL: server.URL})
 	result, err := client.Automation().ReserveEvent(t.Context(), AutomationEventReservation{
 		WorkspaceKey: "WS", RouteKey: "github.push", IdempotencyKey: "github:delivery-1",
-		ReplayOnly: true, Origin: domain.TriggerEventOriginExternal, EventType: "push",
+		ReplayOnly: true, Origin: automation.EventOriginExternal, EventType: "push",
 	})
 	if err != nil || result == nil || !result.Replayed {
 		t.Fatalf("replay result = %#v, %v", result, err)
@@ -202,7 +204,7 @@ func TestAutomationTransportWorkflowReplayCarriesCurrentOwnerPrecondition(t *tes
 	client, _ := New(Config{BaseURL: server.URL})
 	result, err := client.Automation().ReserveEvent(t.Context(), AutomationEventReservation{
 		WorkspaceKey: "WS", RouteKey: "workflow.done", IdempotencyKey: "internal:WS:emission-1",
-		ReplayOnly: true, Origin: domain.TriggerEventOriginWorkflow, EmittingRunID: "run-1",
+		ReplayOnly: true, Origin: automation.EventOriginWorkflow, EmittingRunID: "run-1",
 		NodeID: "node-b", LeaseID: "lease-b", FencingToken: 8,
 		SourceEventID: "emission-1", EventType: "workflow.done", Payload: []byte(`{"stable":true}`),
 	})
@@ -229,7 +231,7 @@ func TestAutomationTransportFreshAdmissionIncludesEmptyEffectiveVersions(t *test
 	client, _ := New(Config{BaseURL: server.URL})
 	_, err := client.Automation().ReserveEvent(t.Context(), AutomationEventReservation{
 		WorkspaceKey: "WS", RouteKey: "github.push", IdempotencyKey: "github:delivery-1",
-		Origin: domain.TriggerEventOriginExternal, BindingSetRevision: 7,
+		Origin: automation.EventOriginExternal, BindingSetRevision: 7,
 		MatchedBindingIDs: []string{"binding-1"}, EventType: "push",
 	})
 	if err != nil {
@@ -240,16 +242,16 @@ func TestAutomationTransportFreshAdmissionIncludesEmptyEffectiveVersions(t *test
 func TestAutomationTransportSelectsTrustedAdmissionRoutes(t *testing.T) {
 	tests := []struct {
 		name    string
-		origin  domain.TriggerEventOrigin
+		origin  automation.EventOrigin
 		runID   string
 		nodeID  string
 		leaseID string
 		fence   int64
 		path    string
 	}{
-		{name: "external", origin: domain.TriggerEventOriginExternal, path: "/api/v1/WS/automation/admissions/external/route.one"},
-		{name: "system", origin: domain.TriggerEventOriginSystem, path: "/api/v1/WS/automation/admissions/system/route.one"},
-		{name: "workflow", origin: domain.TriggerEventOriginWorkflow, runID: "run/one", nodeID: "node-1", leaseID: "lease-1", fence: 9,
+		{name: "external", origin: automation.EventOriginExternal, path: "/api/v1/WS/automation/admissions/external/route.one"},
+		{name: "system", origin: automation.EventOriginSystem, path: "/api/v1/WS/automation/admissions/system/route.one"},
+		{name: "workflow", origin: automation.EventOriginWorkflow, runID: "run/one", nodeID: "node-1", leaseID: "lease-1", fence: 9,
 			path: "/api/v1/WS/driver-runs/run%2Fone/automation/admissions/route.one"},
 	}
 	for _, test := range tests {
@@ -258,7 +260,7 @@ func TestAutomationTransportSelectsTrustedAdmissionRoutes(t *testing.T) {
 				if r.URL.EscapedPath() != test.path {
 					t.Errorf("path = %q, want %q", r.URL.EscapedPath(), test.path)
 				}
-				if test.origin == domain.TriggerEventOriginWorkflow {
+				if test.origin == automation.EventOriginWorkflow {
 					var body automationAdmissionBody
 					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 						t.Errorf("decode workflow admission body: %v", err)
@@ -280,7 +282,7 @@ func TestAutomationTransportSelectsTrustedAdmissionRoutes(t *testing.T) {
 		})
 	}
 	client, _ := New(Config{BaseURL: "http://unused.invalid"})
-	if _, err := client.Automation().ReserveEvent(t.Context(), AutomationEventReservation{Origin: domain.TriggerEventOriginWorkflow}); !errors.Is(err, ErrAutomationInvalid) {
+	if _, err := client.Automation().ReserveEvent(t.Context(), AutomationEventReservation{Origin: automation.EventOriginWorkflow}); !errors.Is(err, ErrAutomationInvalid) {
 		t.Fatalf("missing workflow run = %v", err)
 	}
 }
@@ -288,11 +290,11 @@ func TestAutomationTransportSelectsTrustedAdmissionRoutes(t *testing.T) {
 func TestAutomationTransportClaimDispatchTransitionAndOriginFilter(t *testing.T) {
 	now := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
 	payload := []byte("{ \"retry\" : true }")
-	delivery := &domain.TriggerDelivery{
+	delivery := &automation.Delivery{
 		WorkspaceKey: "WS", DeliveryID: "delivery-1", TriggerEventID: "event-system", TriggerBindingID: "binding-a",
-		Status: domain.TriggerDeliveryFailed, DriverID: "driver-a", DriverVersionID: "version-a",
+		Status: automation.DeliveryFailed, DriverID: "driver-a", DriverVersionID: "version-a",
 		TargetEntrypoint: "run", TargetAgentServiceID: "agent-service-a", SourceKind: "internal",
-		ConcurrencyPolicy: domain.TriggerBindingConcurrencyQueue, RetryMaxAttempts: 5, RetryBackoffSeconds: 30,
+		ConcurrencyPolicy: automation.ConcurrencyQueue, RetryMaxAttempts: 5, RetryBackoffSeconds: 30,
 		Attempt: 2, NextRetryAt: ptrTime(now), CreatedAt: now, UpdatedAt: now,
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -302,8 +304,8 @@ func TestAutomationTransportClaimDispatchTransitionAndOriginFilter(t *testing.T)
 				t.Errorf("origin-filtered list sent premature limit: %s", r.URL.RawQuery)
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"trigger_events": []automationEventWire{
-				{WorkspaceKey: "WS", EventID: "event-external", Origin: domain.TriggerEventOriginExternal},
-				{WorkspaceKey: "WS", EventID: "event-system", Origin: domain.TriggerEventOriginSystem, PayloadBase64: payload},
+				{WorkspaceKey: "WS", EventID: "event-external", Origin: automation.EventOriginExternal},
+				{WorkspaceKey: "WS", EventID: "event-system", Origin: automation.EventOriginSystem, PayloadBase64: payload},
 			}})
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/claim-due"):
 			if r.Header.Get("Idempotency-Key") != "claim-key" {
@@ -311,7 +313,7 @@ func TestAutomationTransportClaimDispatchTransitionAndOriginFilter(t *testing.T)
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"deliveries": []automationClaimedDeliveryWire{{
-					Event:    automationEventWire{WorkspaceKey: "WS", EventID: "event-system", Origin: domain.TriggerEventOriginSystem, PayloadBase64: payload},
+					Event:    automationEventWire{WorkspaceKey: "WS", EventID: "event-system", Origin: automation.EventOriginSystem, PayloadBase64: payload},
 					Delivery: delivery,
 				}}, "count": 1,
 			})
@@ -325,10 +327,10 @@ func TestAutomationTransportClaimDispatchTransitionAndOriginFilter(t *testing.T)
 				t.Errorf("dispatch body = %s", body)
 			}
 			dispatched := *delivery
-			dispatched.Status, dispatched.DriverRunID = domain.TriggerDeliveryDispatched, "run-1"
+			dispatched.Status, dispatched.DriverRunID = automation.DeliveryDispatched, "run-1"
 			_ = json.NewEncoder(w).Encode(automationDeliveryDispatchWire{
 				Event: &automationEventWire{
-					WorkspaceKey: "WS", EventID: "event-system", Origin: domain.TriggerEventOriginSystem,
+					WorkspaceKey: "WS", EventID: "event-system", Origin: automation.EventOriginSystem,
 					PayloadBase64: payload,
 				},
 				Delivery: &dispatched,
@@ -347,7 +349,7 @@ func TestAutomationTransportClaimDispatchTransitionAndOriginFilter(t *testing.T)
 				t.Errorf("transition body included caller attempt: %+v", body)
 			}
 			out := *delivery
-			out.Status, out.DriverRunID = domain.TriggerDeliveryDispatched, "run-1"
+			out.Status, out.DriverRunID = automation.DeliveryDispatched, "run-1"
 			_ = json.NewEncoder(w).Encode(out)
 		default:
 			http.NotFound(w, r)
@@ -356,7 +358,7 @@ func TestAutomationTransportClaimDispatchTransitionAndOriginFilter(t *testing.T)
 	defer server.Close()
 	client, _ := New(Config{BaseURL: server.URL})
 	transport := client.Automation()
-	events, err := transport.ListEvents(t.Context(), "WS", AutomationEventFilter{Origin: domain.TriggerEventOriginSystem, Limit: 1})
+	events, err := transport.ListEvents(t.Context(), "WS", AutomationEventFilter{Origin: automation.EventOriginSystem, Limit: 1})
 	if err != nil || len(events) != 1 || events[0].EventID != "event-system" || !bytes.Equal(events[0].Payload, payload) {
 		t.Fatalf("ListEvents = %+v, %v", events, err)
 	}
@@ -366,7 +368,7 @@ func TestAutomationTransportClaimDispatchTransitionAndOriginFilter(t *testing.T)
 	}
 	dispatched, err := transport.DispatchAutomationDelivery(t.Context(), AutomationDeliveryDispatch{
 		WorkspaceKey: "WS", DeliveryID: "delivery-1", IdempotencyKey: "dispatch-key",
-		ExpectedStatus: domain.TriggerDeliveryFailed, ExpectedAttempt: 2,
+		ExpectedStatus: automation.DeliveryFailed, ExpectedAttempt: 2,
 	})
 	if err != nil || dispatched.Outcome != AutomationDeliveryDispatchRun ||
 		dispatched.Delivery.DriverRunID != "run-1" || dispatched.DriverRun.RunID != "run-1" ||
@@ -375,10 +377,10 @@ func TestAutomationTransportClaimDispatchTransitionAndOriginFilter(t *testing.T)
 	}
 	transitioned, err := transport.TransitionDelivery(t.Context(), AutomationDeliveryTransition{
 		WorkspaceKey: "WS", DeliveryID: "delivery-1", IdempotencyKey: "transition-key",
-		ExpectedStatus: domain.TriggerDeliveryFailed, ExpectedAttempt: 2,
-		Status: domain.TriggerDeliveryDispatched, DriverRunID: "run-1",
+		ExpectedStatus: automation.DeliveryFailed, ExpectedAttempt: 2,
+		Status: automation.DeliveryDispatched, DriverRunID: "run-1",
 	})
-	if err != nil || transitioned.Status != domain.TriggerDeliveryDispatched || transitioned.DriverRunID != "run-1" {
+	if err != nil || transitioned.Status != automation.DeliveryDispatched || transitioned.DriverRunID != "run-1" {
 		t.Fatalf("TransitionDelivery = %+v, %v", transitioned, err)
 	}
 }
@@ -641,11 +643,11 @@ func TestAutomationTransportUsesExactManagedAndUnmanagedBindingRoutes(t *testing
 	createdAt := time.Date(2026, 7, 16, 12, 0, 0, 123000000, time.UTC)
 	updatedAt := createdAt.Add(time.Second)
 	nextUpdatedAt := updatedAt.Add(time.Microsecond)
-	managed := &domain.TriggerBinding{
+	managed := &automation.Binding{
 		WorkspaceKey: "WS", BindingID: "managed-a", RouteKey: "github.push",
 		TargetAgentServiceID: "agent-service-a", CreatedAt: createdAt, UpdatedAt: updatedAt,
 	}
-	unmanaged := &domain.TriggerBinding{
+	unmanaged := &automation.Binding{
 		WorkspaceKey: "WS", BindingID: "ordinary-a", RouteKey: "github.issue",
 		CreatedAt: createdAt, UpdatedAt: nextUpdatedAt,
 	}
@@ -654,18 +656,18 @@ func TestAutomationTransportUsesExactManagedAndUnmanagedBindingRoutes(t *testing
 		got = append(got, r.Method+" "+r.URL.EscapedPath())
 		switch r.URL.EscapedPath() {
 		case "/api/v1/WS/automation/managed-bindings":
-			var body domain.TriggerBinding
+			var body automation.Binding
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.TargetAgentServiceID != "agent-service-a" {
 				t.Errorf("managed create body = %+v, %v", body, err)
 			}
 			_ = json.NewEncoder(w).Encode(managed)
 		case "/api/v1/WS/automation/managed-bindings/managed-a/replace":
 			var body struct {
-				ExpectedTargetAgentServiceID string                 `json:"expected_target_agent_service_id"`
-				ExpectedRouteKey             string                 `json:"expected_route_key"`
-				ExpectedCreatedAt            time.Time              `json:"expected_created_at"`
-				ExpectedUpdatedAt            time.Time              `json:"expected_updated_at"`
-				Binding                      *domain.TriggerBinding `json:"binding"`
+				ExpectedTargetAgentServiceID string              `json:"expected_target_agent_service_id"`
+				ExpectedRouteKey             string              `json:"expected_route_key"`
+				ExpectedCreatedAt            time.Time           `json:"expected_created_at"`
+				ExpectedUpdatedAt            time.Time           `json:"expected_updated_at"`
+				Binding                      *automation.Binding `json:"binding"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil ||
 				body.ExpectedTargetAgentServiceID != "agent-service-a" || body.ExpectedRouteKey != "github.push" ||
@@ -684,10 +686,10 @@ func TestAutomationTransportUsesExactManagedAndUnmanagedBindingRoutes(t *testing
 			w.WriteHeader(http.StatusNoContent)
 		case "/api/v1/WS/automation/unmanaged-bindings/ordinary-a/replace":
 			var body struct {
-				ExpectedRouteKey  string                 `json:"expected_route_key"`
-				ExpectedCreatedAt time.Time              `json:"expected_created_at"`
-				ExpectedUpdatedAt time.Time              `json:"expected_updated_at"`
-				Binding           *domain.TriggerBinding `json:"binding"`
+				ExpectedRouteKey  string              `json:"expected_route_key"`
+				ExpectedCreatedAt time.Time           `json:"expected_created_at"`
+				ExpectedUpdatedAt time.Time           `json:"expected_updated_at"`
+				Binding           *automation.Binding `json:"binding"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.ExpectedRouteKey != "github.issue" ||
 				!body.ExpectedCreatedAt.Equal(createdAt) || !body.ExpectedUpdatedAt.Equal(updatedAt) ||
@@ -792,7 +794,7 @@ func TestAutomationTransportMapsMachineReadableErrors(t *testing.T) {
 			defer server.Close()
 			client, _ := New(Config{BaseURL: server.URL})
 			_, err := client.Automation().ReserveEvent(context.Background(), AutomationEventReservation{
-				WorkspaceKey: "WS", RouteKey: "route", IdempotencyKey: "idem", Origin: domain.TriggerEventOriginExternal,
+				WorkspaceKey: "WS", RouteKey: "route", IdempotencyKey: "idem", Origin: automation.EventOriginExternal,
 			})
 			if !errors.Is(err, test.want) {
 				t.Fatalf("error = %v, want %v", err, test.want)

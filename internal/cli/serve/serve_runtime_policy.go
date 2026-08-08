@@ -9,6 +9,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/runtimecomposition"
 	driverexecutor "github.com/tysonthomas9/loomcli/internal/driver"
+	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 )
 
 const issueBridgeCursorFileName = "issue-bridge-cursor.json"
@@ -18,7 +19,7 @@ func buildServeRuntimeConfig() runtimecomposition.Config {
 	return runtimecomposition.Config{
 		WorkspaceScope:        workspaceScope,
 		AwaitSweepInterval:    time.Duration(boundedIntEnv(envLoomAwaitSweepInterval, 30, 3600)) * time.Second,
-		AwaitSweepBatch:       boundedIntEnv(envLoomAwaitSweepBatch, driverexecutor.DefaultAwaitTimeoutSweepBatch, 500),
+		AwaitSweepBatch:       boundedIntEnv(envLoomAwaitSweepBatch, trigger.DefaultAwaitTimeoutSweepBatch, 500),
 		DriverExecutorEnabled: driverExecutorEnabled(),
 		TaskWorkerConcurrency: driverTaskWorkerConcurrency(),
 		TaskWorkerRunnerID:    os.Getenv("LOOM_DRIVER_TASK_WORKER_RUNNER_ID"),

@@ -191,6 +191,26 @@ func TestAutomationOperationRulesDefaultDenyEveryWrongClass(t *testing.T) {
 	}
 }
 
+func TestAutomationApprovalAuthorityBindsVerifiedSessionActor(t *testing.T) {
+	issuer := authority.NewIssuer()
+	now := time.Now()
+	provider := &automationApprovalAuthorityProvider{issuer: issuer, now: func() time.Time { return now }}
+	value, err := provider.AuthorityForVerifiedSession(t.Context(), "TEST", "reviewer@example.test")
+	if err != nil {
+		t.Fatalf("AuthorityForVerifiedSession: %v", err)
+	}
+	if value.Subject() != "reviewer@example.test" || value.Workspace() != "TEST" ||
+		value.Action() != automation.ActionJournalApproval || !value.ExpiresAt().Equal(now.Add(time.Minute)) {
+		t.Fatalf("approval authority = subject:%q workspace:%q action:%q expiry:%s",
+			value.Subject(), value.Workspace(), value.Action(), value.ExpiresAt())
+	}
+	for _, candidate := range [][2]string{{"", "reviewer@example.test"}, {" TEST ", "reviewer@example.test"}, {"TEST", ""}, {"TEST", " reviewer@example.test "}} {
+		if _, err := provider.AuthorityForVerifiedSession(t.Context(), candidate[0], candidate[1]); !errors.Is(err, authority.ErrInvalidScope) {
+			t.Fatalf("invalid approval source %q/%q error = %v", candidate[0], candidate[1], err)
+		}
+	}
+}
+
 func TestAutomationWebhookAuthorityProviderBindsVerifiedSource(t *testing.T) {
 	issuer := authority.NewIssuer()
 	provider := &automationWebhookAuthorityProvider{issuer: issuer, now: time.Now}

@@ -7,6 +7,10 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -15,7 +19,7 @@ type driverStore struct{ client *Client }
 
 var _ store.DriverStore = (*driverStore)(nil)
 
-func (s *driverStore) Create(ctx context.Context, in store.DriverCreate) (*domain.Driver, error) {
+func (s *driverStore) Create(ctx context.Context, in store.DriverCreate) (*workflowcatalog.Driver, error) {
 	body := map[string]any{
 		"driver_id":   in.DriverID,
 		"name":        in.Name,
@@ -26,22 +30,22 @@ func (s *driverStore) Create(ctx context.Context, in store.DriverCreate) (*domai
 		"trust_level": in.TrustLevel,
 		"metadata":    in.Metadata,
 	}
-	var out domain.Driver
+	var out workflowcatalog.Driver
 	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/drivers", body, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (s *driverStore) Get(ctx context.Context, ws, driverID string) (*domain.Driver, error) {
-	var out domain.Driver
+func (s *driverStore) Get(ctx context.Context, ws, driverID string) (*workflowcatalog.Driver, error) {
+	var out workflowcatalog.Driver
 	if err := s.client.do(ctx, "GET", "/api/v1/"+pathEscape(ws)+"/drivers/"+pathEscape(driverID), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (s *driverStore) List(ctx context.Context, ws string, filter store.DriverFilter) ([]*domain.Driver, error) {
+func (s *driverStore) List(ctx context.Context, ws string, filter store.DriverFilter) ([]*workflowcatalog.Driver, error) {
 	q := url.Values{}
 	if filter.Name != "" {
 		q.Set("name", filter.Name)
@@ -54,19 +58,19 @@ func (s *driverStore) List(ctx context.Context, ws string, filter store.DriverFi
 	}
 	path := withQuery("/api/v1/"+pathEscape(ws)+"/drivers", q)
 	var resp struct {
-		Drivers []*domain.Driver `json:"drivers"`
+		Drivers []*workflowcatalog.Driver `json:"drivers"`
 	}
 	if err := s.client.do(ctx, "GET", path, nil, &resp); err != nil {
 		return nil, err
 	}
 	if resp.Drivers == nil {
-		resp.Drivers = []*domain.Driver{}
+		resp.Drivers = []*workflowcatalog.Driver{}
 	}
 	return resp.Drivers, nil
 }
 
-func (s *driverStore) Update(ctx context.Context, ws, driverID string, patch store.DriverUpdate) (*domain.Driver, error) {
-	var out domain.Driver
+func (s *driverStore) Update(ctx context.Context, ws, driverID string, patch store.DriverUpdate) (*workflowcatalog.Driver, error) {
+	var out workflowcatalog.Driver
 	if err := s.client.do(ctx, "PATCH", "/api/v1/"+pathEscape(ws)+"/drivers/"+pathEscape(driverID), driverUpdateBody(patch), &out); err != nil {
 		return nil, err
 	}
@@ -77,7 +81,7 @@ type driverVersionStore struct{ client *Client }
 
 var _ store.DriverVersionStore = (*driverVersionStore)(nil)
 
-func (s *driverVersionStore) Create(ctx context.Context, in store.DriverVersionCreate) (*domain.DriverVersion, error) {
+func (s *driverVersionStore) Create(ctx context.Context, in store.DriverVersionCreate) (*workflowcatalog.DriverVersion, error) {
 	body := map[string]any{
 		"version_id":        in.VersionID,
 		"version":           in.Version,
@@ -91,7 +95,7 @@ func (s *driverVersionStore) Create(ctx context.Context, in store.DriverVersionC
 		"validation_status": in.ValidationStatus,
 		"created_by":        in.CreatedBy,
 	}
-	var out domain.DriverVersion
+	var out workflowcatalog.DriverVersion
 	path := "/api/v1/" + pathEscape(in.WorkspaceKey) + "/drivers/" + pathEscape(in.DriverID) + "/versions"
 	if err := s.client.do(ctx, "POST", path, body, &out); err != nil {
 		return nil, err
@@ -99,8 +103,8 @@ func (s *driverVersionStore) Create(ctx context.Context, in store.DriverVersionC
 	return &out, nil
 }
 
-func (s *driverVersionStore) Get(ctx context.Context, ws, versionID string) (*domain.DriverVersion, error) {
-	var out domain.DriverVersion
+func (s *driverVersionStore) Get(ctx context.Context, ws, versionID string) (*workflowcatalog.DriverVersion, error) {
+	var out workflowcatalog.DriverVersion
 	path := "/api/v1/" + pathEscape(ws) + "/driver-versions/" + pathEscape(versionID)
 	if err := s.client.do(ctx, "GET", path, nil, &out); err != nil {
 		return nil, err
@@ -108,7 +112,7 @@ func (s *driverVersionStore) Get(ctx context.Context, ws, versionID string) (*do
 	return &out, nil
 }
 
-func (s *driverVersionStore) List(ctx context.Context, ws string, filter store.DriverVersionFilter) ([]*domain.DriverVersion, error) {
+func (s *driverVersionStore) List(ctx context.Context, ws string, filter store.DriverVersionFilter) ([]*workflowcatalog.DriverVersion, error) {
 	q := url.Values{}
 	if filter.ValidationStatus != "" {
 		q.Set("validation_status", string(filter.ValidationStatus))
@@ -122,13 +126,13 @@ func (s *driverVersionStore) List(ctx context.Context, ws string, filter store.D
 	}
 	path = withQuery(path, q)
 	var resp struct {
-		DriverVersions []*domain.DriverVersion `json:"driver_versions"`
+		DriverVersions []*workflowcatalog.DriverVersion `json:"driver_versions"`
 	}
 	if err := s.client.do(ctx, "GET", path, nil, &resp); err != nil {
 		return nil, err
 	}
 	if resp.DriverVersions == nil {
-		resp.DriverVersions = []*domain.DriverVersion{}
+		resp.DriverVersions = []*workflowcatalog.DriverVersion{}
 	}
 	return resp.DriverVersions, nil
 }
@@ -137,7 +141,7 @@ type triggerBindingStore struct{ client *Client }
 
 var _ store.TriggerBindingStore = (*triggerBindingStore)(nil)
 
-func (s *triggerBindingStore) Create(ctx context.Context, in store.TriggerBindingCreate) (*domain.TriggerBinding, error) {
+func (s *triggerBindingStore) Create(ctx context.Context, in store.TriggerBindingCreate) (*automation.Binding, error) {
 	in = in.WithDerivedRoute()
 	body := map[string]any{
 		"binding_id":              in.BindingID,
@@ -170,7 +174,7 @@ func (s *triggerBindingStore) Create(ctx context.Context, in store.TriggerBindin
 	if !in.ActorFilter.IsZero() {
 		body["actor_filter"] = in.ActorFilter
 	}
-	var out domain.TriggerBinding
+	var out automation.Binding
 	path := "/api/v1/" + pathEscape(in.WorkspaceKey) + "/trigger-bindings"
 	if err := s.client.do(ctx, "POST", path, body, &out); err != nil {
 		return nil, err
@@ -178,15 +182,15 @@ func (s *triggerBindingStore) Create(ctx context.Context, in store.TriggerBindin
 	return &out, nil
 }
 
-func (s *triggerBindingStore) Get(ctx context.Context, ws, bindingID string) (*domain.TriggerBinding, error) {
-	var out domain.TriggerBinding
+func (s *triggerBindingStore) Get(ctx context.Context, ws, bindingID string) (*automation.Binding, error) {
+	var out automation.Binding
 	if err := s.client.do(ctx, "GET", "/api/v1/"+pathEscape(ws)+"/trigger-bindings/"+pathEscape(bindingID), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (s *triggerBindingStore) GetByRouteKey(ctx context.Context, ws, routeKey string) (*domain.TriggerBinding, error) {
+func (s *triggerBindingStore) GetByRouteKey(ctx context.Context, ws, routeKey string) (*automation.Binding, error) {
 	bindings, err := s.List(ctx, ws, store.TriggerBindingFilter{RouteKey: routeKey, Limit: 1})
 	if err != nil {
 		return nil, err
@@ -197,7 +201,7 @@ func (s *triggerBindingStore) GetByRouteKey(ctx context.Context, ws, routeKey st
 	return bindings[0], nil
 }
 
-func (s *triggerBindingStore) List(ctx context.Context, ws string, filter store.TriggerBindingFilter) ([]*domain.TriggerBinding, error) {
+func (s *triggerBindingStore) List(ctx context.Context, ws string, filter store.TriggerBindingFilter) ([]*automation.Binding, error) {
 	q := url.Values{}
 	if filter.SourceKind != "" {
 		q.Set("source_kind", filter.SourceKind)
@@ -219,19 +223,19 @@ func (s *triggerBindingStore) List(ctx context.Context, ws string, filter store.
 	}
 	path := withQuery("/api/v1/"+pathEscape(ws)+"/trigger-bindings", q)
 	var resp struct {
-		TriggerBindings []*domain.TriggerBinding `json:"trigger_bindings"`
+		TriggerBindings []*automation.Binding `json:"trigger_bindings"`
 	}
 	if err := s.client.do(ctx, "GET", path, nil, &resp); err != nil {
 		return nil, err
 	}
 	if resp.TriggerBindings == nil {
-		resp.TriggerBindings = []*domain.TriggerBinding{}
+		resp.TriggerBindings = []*automation.Binding{}
 	}
 	return resp.TriggerBindings, nil
 }
 
-func (s *triggerBindingStore) Update(ctx context.Context, ws, bindingID string, patch store.TriggerBindingUpdate) (*domain.TriggerBinding, error) {
-	var out domain.TriggerBinding
+func (s *triggerBindingStore) Update(ctx context.Context, ws, bindingID string, patch store.TriggerBindingUpdate) (*automation.Binding, error) {
+	var out automation.Binding
 	if err := s.client.do(ctx, "PATCH", "/api/v1/"+pathEscape(ws)+"/trigger-bindings/"+pathEscape(bindingID), triggerBindingUpdateBody(patch), &out); err != nil {
 		return nil, err
 	}

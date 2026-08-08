@@ -39,24 +39,6 @@ export type {
 export { useGitStatus } from "./useGitStatus";
 export type { UseGitStatusOptions, UseGitStatusReturn } from "./useGitStatus";
 
-export { usePullRequests } from "./usePullRequests";
-export type {
-  UsePullRequestsOptions,
-  UsePullRequestsReturn,
-} from "./usePullRequests";
-
-export { usePullRequestDiff } from "./usePullRequestDiff";
-export type {
-  UsePullRequestDiffParams,
-  UsePullRequestDiffResult,
-} from "./usePullRequestDiff";
-
-export { usePRReviewConversation } from "./usePRReviewConversation";
-export type {
-  UsePRReviewConversationParams,
-  UsePRReviewConversationResult,
-} from "./usePRReviewConversation";
-
 export { useRepoFilter, parseReposFromUrl } from "./useRepoFilter";
 export type {
   UseRepoFilterOptions,

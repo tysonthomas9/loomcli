@@ -8,18 +8,106 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	runtimesettings "github.com/tysonthomas9/loomcli/internal/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
+
+func TestHostBridgeTaskExecutorCancellationStopsDescendants(t *testing.T) {
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skipf("sh unavailable: %v", err)
+	}
+
+	childPIDFile := filepath.Join(t.TempDir(), "child.pid")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := (HostBridgeTaskExecutor{WorktreePath: t.TempDir()}).runCommand(
+			ctx,
+			hostBridgeTaskExecRequest(),
+			[]string{sh, "-c", `sleep 60 & printf '%s:%s' "$$" "$!" > "$1"; wait`, "task-runner-test", childPIDFile},
+		)
+		done <- err
+	}()
+
+	launcherPID, childPID := waitForTaskRunnerPIDs(t, childPIDFile)
+	childPGID, err := syscall.Getpgid(childPID)
+	if err != nil {
+		t.Fatalf("get child process group: %v", err)
+	}
+	if childPGID != launcherPID {
+		t.Fatalf("child process group = %d, want launcher pid %d", childPGID, launcherPID)
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("cancelled runner unexpectedly exited successfully")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancelled runner did not exit")
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		err := syscall.Kill(-launcherPID, 0)
+		if errors.Is(err, syscall.ESRCH) {
+			break
+		}
+		if err != nil && !errors.Is(err, syscall.EPERM) {
+			t.Fatalf("probe runner process group: %v", err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("runner process group %d still exists after cancellation", launcherPID)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+func waitForTaskRunnerPIDs(t *testing.T, path string) (int, int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		raw, err := os.ReadFile(path)
+		if err == nil && strings.TrimSpace(string(raw)) != "" {
+			parts := strings.Split(strings.TrimSpace(string(raw)), ":")
+			if len(parts) != 2 {
+				t.Fatalf("parse runner pids %q: want launcher:child", raw)
+			}
+			launcherPID, parseErr := strconv.Atoi(parts[0])
+			if parseErr != nil {
+				t.Fatalf("parse launcher pid %q: %v", raw, parseErr)
+			}
+			childPID, parseErr := strconv.Atoi(parts[1])
+			if parseErr != nil {
+				t.Fatalf("parse child pid %q: %v", raw, parseErr)
+			}
+			return launcherPID, childPID
+		}
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("read child pid: %v", err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("runner child pid was not written")
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
 
 // TestTaskRunnerEnvAPIBaseURL pins the serve-transport seam: when the
 // executor carries an API base URL, runners get LOOM_TASK_RUN_API_URL (and
@@ -28,6 +116,10 @@ import (
 func TestTaskRunnerEnvAPIBaseURL(t *testing.T) {
 	req := hostBridgeTaskExecRequest()
 	legacy := HostBridgeTaskExecutor{WorktreePath: "/wt"}.taskRunnerEnv(req, "{}")
+	if !envContains(legacy, "LOOM_WORKSPACE="+req.WorkspaceKey) ||
+		!envContains(legacy, "LOOM_DRIVER_WORKSPACE="+req.WorkspaceKey) {
+		t.Fatalf("task runner env missing host-owned workspace scope: %v", legacy)
+	}
 	for _, entry := range legacy {
 		if strings.HasPrefix(entry, "LOOM_TASK_RUN_API_URL=") {
 			t.Fatalf("legacy env unexpectedly exports the serve API URL: %q", entry)
@@ -49,19 +141,19 @@ func TestTaskRunnerAdmittedRepositoryRemoteEnvIsTrustedLocalOnly(t *testing.T) {
 	}
 	req := hostBridgeTaskExecRequest()
 	req.RunnerEntrypoint = LocalTaskRunnerEntrypoint
-	req.RunnerTrustLevel = domain.DriverTrustTrusted
+	req.RunnerTrustLevel = workflowcatalog.DriverTrustTrusted
 	trustedLocal := executor.taskRunnerEnv(req, "{}")
 	if !envContains(trustedLocal, "LOOM_TASK_RUN_REPOSITORY_REMOTE_URL=/private/tmp/admitted-repo") {
 		t.Fatalf("trusted local env missing admitted repository remote: %v", trustedLocal)
 	}
 
-	req.RunnerTrustLevel = domain.DriverTrustUntrusted
+	req.RunnerTrustLevel = workflowcatalog.DriverTrustUntrusted
 	if envHasAny(executor.taskRunnerEnv(req, "{}"), "LOOM_TASK_RUN_REPOSITORY_REMOTE_URL") {
 		t.Fatal("untrusted local runner received admitted repository remote")
 	}
 
 	req.RunnerEntrypoint = "daytona-task-runner"
-	req.RunnerTrustLevel = domain.DriverTrustTrusted
+	req.RunnerTrustLevel = workflowcatalog.DriverTrustTrusted
 	if envHasAny(executor.taskRunnerEnv(req, "{}"), "LOOM_TASK_RUN_REPOSITORY_REMOTE_URL") {
 		t.Fatal("remote runner received admitted repository remote")
 	}
@@ -70,10 +162,11 @@ func TestTaskRunnerAdmittedRepositoryRemoteEnvIsTrustedLocalOnly(t *testing.T) {
 	localReq.RunnerEntrypoint = LocalTaskRunnerEntrypoint
 	base := taskRunnerBaseEnvForRequest(localReq, []string{
 		"PATH=/bin",
+		"LOOM_WORKSPACE=FORGED",
 		"LOOM_TASK_RUN_REPOSITORY_REMOTE_URL=/private/tmp/forged-repo",
 	})
-	if envHasAny(base, "LOOM_TASK_RUN_REPOSITORY_REMOTE_URL") {
-		t.Fatalf("inherited repository remote bypassed the host-owned seam: %v", base)
+	if envHasAny(base, "LOOM_WORKSPACE", "LOOM_TASK_RUN_REPOSITORY_REMOTE_URL") {
+		t.Fatalf("inherited task scope bypassed the host-owned seam: %v", base)
 	}
 }
 
@@ -266,7 +359,7 @@ func TestHostBridgeTaskExecutorPersistsPublishedPatchWithoutPatchBack(t *testing
 	patch := "diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+published\n"
 	req := hostBridgeTaskExecRequest()
 	req.RunnerEntrypoint = LocalTaskRunnerEntrypoint
-	req.RunnerTrustLevel = domain.DriverTrustTrusted
+	req.RunnerTrustLevel = workflowcatalog.DriverTrustTrusted
 
 	executor := HostBridgeTaskExecutor{
 		Store:               st,
@@ -583,7 +676,7 @@ func TestHostBridgeTaskExecutorReusesOutputArtifactsOnRetry(t *testing.T) {
 	}
 	req := hostBridgeTaskExecRequest()
 	req.RunnerKind = RunnerKindFlueWorkflow
-	req.RunnerTrustLevel = domain.DriverTrustTrusted
+	req.RunnerTrustLevel = workflowcatalog.DriverTrustTrusted
 
 	first, err := executor.ExecuteTask(ctx, req)
 	if err != nil {
@@ -633,7 +726,7 @@ func TestHostBridgeTaskExecutorRunsNodeModuleThroughGenericInvoker(t *testing.T)
 	req.Runner = "local-command-runner"
 	req.RunnerKind = RunnerKindNodeModule
 	req.RunnerEntrypoint = "runners/local-command-runner.mjs"
-	req.RunnerTrustLevel = domain.DriverTrustTrusted
+	req.RunnerTrustLevel = workflowcatalog.DriverTrustTrusted
 	req.Input = json.RawMessage(`{"message":"hello"}`)
 	executor := HostBridgeTaskExecutor{
 		WorktreePath: worktree,
@@ -690,14 +783,14 @@ func TestHostBridgeTaskExecutorPreflightsBuiltInFlueWorkflowWithoutCommand(t *te
 	if _, err := executor.PreflightTaskProvider(context.Background(), TaskRunRequestOptions{
 		Runner:           "daytona-task-runner",
 		RunnerKind:       RunnerKindFlueWorkflow,
-		RunnerTrustLevel: domain.DriverTrustTrusted,
+		RunnerTrustLevel: workflowcatalog.DriverTrustTrusted,
 	}); err != nil {
 		t.Fatalf("PreflightTaskProvider flue-workflow err = %v, want nil", err)
 	}
 	if _, err := executor.PreflightTaskProvider(context.Background(), TaskRunRequestOptions{
 		Runner:           "node-runner",
 		RunnerKind:       RunnerKindNodeModule,
-		RunnerTrustLevel: domain.DriverTrustTrusted,
+		RunnerTrustLevel: workflowcatalog.DriverTrustTrusted,
 	}); !errors.Is(err, domain.ErrInvalid) {
 		t.Fatalf("PreflightTaskProvider node-module err = %v, want ErrInvalid", err)
 	}
@@ -714,7 +807,7 @@ func TestHostBridgeTaskExecutorRefusesUntrustedNamedRunner(t *testing.T) {
 	req.RunnerKind = RunnerKindFlueWorkflow
 	req.RunnerEntrypoint = "local-task-runner"
 	req.RunnerVersionID = "driver-version-untrusted"
-	req.RunnerTrustLevel = domain.DriverTrustUntrusted
+	req.RunnerTrustLevel = workflowcatalog.DriverTrustUntrusted
 
 	result, err := executor.ExecuteTask(context.Background(), req)
 	if err != nil {
@@ -725,7 +818,7 @@ func TestHostBridgeTaskExecutorRefusesUntrustedNamedRunner(t *testing.T) {
 	}
 	if result.RuntimeMetadata[ErrorCodeOutputKey] != ErrorClassSandboxRequired ||
 		result.RuntimeMetadata[SandboxLauncherOutputKey] != SandboxProviderProcess ||
-		result.RuntimeMetadata["runner_trust_level"] != string(domain.DriverTrustUntrusted) {
+		result.RuntimeMetadata["runner_trust_level"] != string(workflowcatalog.DriverTrustUntrusted) {
 		t.Fatalf("runtime metadata = %+v, want sandbox refusal audit", result.RuntimeMetadata)
 	}
 	if _, err := os.Stat(ranPath); !errors.Is(err, os.ErrNotExist) {
@@ -734,7 +827,7 @@ func TestHostBridgeTaskExecutorRefusesUntrustedNamedRunner(t *testing.T) {
 	if _, err := executor.PreflightTaskProvider(context.Background(), TaskRunRequestOptions{
 		Runner:           "local-task-runner",
 		RunnerKind:       RunnerKindFlueWorkflow,
-		RunnerTrustLevel: domain.DriverTrustUntrusted,
+		RunnerTrustLevel: workflowcatalog.DriverTrustUntrusted,
 	}); !errors.Is(err, domain.ErrInvalid) || !strings.Contains(err.Error(), ErrorClassSandboxRequired) {
 		t.Fatalf("PreflightTaskProvider err = %v, want ErrInvalid containing %s", err, ErrorClassSandboxRequired)
 	}
@@ -752,9 +845,9 @@ func TestHostBridgeTaskExecutorRunsFlueWorkflowThroughGenericInvoker(t *testing.
 		WorkspaceKey: "WS",
 		DriverID:     "epic-runner",
 		Name:         "epic-runner",
-		OwnerType:    domain.DriverOwnerUser,
-		Status:       domain.DriverStatusActive,
-		TrustLevel:   domain.DriverTrustTrusted,
+		OwnerType:    workflowcatalog.DriverOwnerUser,
+		Status:       workflowcatalog.DriverStatusActive,
+		TrustLevel:   workflowcatalog.DriverTrustTrusted,
 	}); err != nil {
 		t.Fatalf("Create driver: %v", err)
 	}
@@ -811,7 +904,7 @@ setInterval(() => {}, 1000);
 		BundleDigest:     bundleDigest,
 		Runtime:          RuntimeFlueNode,
 		Manifest:         manifest,
-		ValidationStatus: domain.DriverVersionValidationPassed,
+		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 		CreatedBy:        "tester",
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
@@ -823,7 +916,7 @@ setInterval(() => {}, 1000);
 	req.RunnerKind = RunnerKindFlueWorkflow
 	req.RunnerEntrypoint = "local-task-runner"
 	req.RunnerVersionID = "driver-version-1"
-	req.RunnerTrustLevel = domain.DriverTrustTrusted
+	req.RunnerTrustLevel = workflowcatalog.DriverTrustTrusted
 	executor := HostBridgeTaskExecutor{
 		Store:        st,
 		WorktreePath: worktree,
@@ -880,9 +973,9 @@ func TestTaskRunnerEnvIncludesFlueBundleForRunnerVersion(t *testing.T) {
 		WorkspaceKey: "WS",
 		DriverID:     "epic-runner",
 		Name:         "epic-runner",
-		OwnerType:    domain.DriverOwnerUser,
-		Status:       domain.DriverStatusActive,
-		TrustLevel:   domain.DriverTrustTrusted,
+		OwnerType:    workflowcatalog.DriverOwnerUser,
+		Status:       workflowcatalog.DriverStatusActive,
+		TrustLevel:   workflowcatalog.DriverTrustTrusted,
 	}); err != nil {
 		t.Fatalf("Create driver: %v", err)
 	}
@@ -915,14 +1008,14 @@ func TestTaskRunnerEnvIncludesFlueBundleForRunnerVersion(t *testing.T) {
 		BundleDigest:     digest,
 		Runtime:          RuntimeFlueNode,
 		Manifest:         manifest,
-		ValidationStatus: domain.DriverVersionValidationPassed,
+		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
 	}
 	req := hostBridgeTaskExecRequest()
 	req.RunnerKind = RunnerKindFlueWorkflow
 	req.RunnerVersionID = "driver-version-1"
-	req.RunnerTrustLevel = domain.DriverTrustTrusted
+	req.RunnerTrustLevel = workflowcatalog.DriverTrustTrusted
 	env := HostBridgeTaskExecutor{Store: st, WorktreePath: worktree}.taskRunnerEnv(req, "{}")
 	if !envContains(env, "LOOM_TASK_RUNNER_BUNDLE_ROOT="+bundleRoot) {
 		t.Fatalf("env missing bundle root: %v", env)

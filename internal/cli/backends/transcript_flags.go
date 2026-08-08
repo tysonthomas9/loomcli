@@ -8,8 +8,7 @@ import (
 	"github.com/olesho/harness-wrapper/pkg/transcript"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/sessions"
-	"github.com/tysonthomas9/loomcli/internal/sessions/eventstore"
+	"github.com/tysonthomas9/loomcli/internal/infra/sessionstoreadapter"
 )
 
 // The loom-side P3 rollout flags (env-gated, default OFF so there is no behavior
@@ -72,7 +71,7 @@ func eventStoreSink(workDir string) (func(transcript.EventEnvelope) error, strin
 	}
 	// Resolve the session dir through the SAME source of truth the serving side
 	// reads from (sessions.Store.SessionDir), so writer + reader can't diverge.
-	store, err := sessions.NewStore(runtimeDir)
+	store, err := sessionstoreadapter.New(runtimeDir)
 	if err != nil {
 		return nil, ""
 	}
@@ -84,5 +83,5 @@ func eventStoreSink(workDir string) (func(transcript.EventEnvelope) error, strin
 	if info, err := cli.ReadLockFile(workDir); err == nil && info != nil && info.RunID != "" {
 		runID = info.RunID // stable across resume — the dedup/replay-collapse key
 	}
-	return eventstore.Open(sessionDir).AppendEnvelope, runID
+	return sessionstoreadapter.EnvelopeAppender(store, sid), runID
 }

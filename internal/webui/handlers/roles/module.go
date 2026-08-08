@@ -33,9 +33,14 @@ const maxRoleBodyBytes = 1 << 20
 // machine-local workspace directory, so it holds the store directly (the same
 // shape as the workflows/webhooks modules).
 type Module struct {
-	store     store.Store
+	store     roleWorkspaceStore
 	roles     RoleAPI
 	authority workflowcataloghttp.OperatorAuthorityResolver
+}
+
+type roleWorkspaceStore interface {
+	Workspaces() store.WorkspaceStore
+	Repos() store.RepoStore
 }
 
 type RoleAPI interface {
@@ -44,7 +49,7 @@ type RoleAPI interface {
 }
 
 type Config struct {
-	Store     store.Store
+	Store     roleWorkspaceStore
 	Roles     RoleAPI
 	Authority workflowcataloghttp.OperatorAuthorityResolver
 }
@@ -176,7 +181,7 @@ func (m *Module) listRoles(w http.ResponseWriter, r *http.Request) {
 
 func EnsureRole(
 	ctx context.Context,
-	st store.Store,
+	st roleWorkspaceStore,
 	api RoleAPI,
 	auth authority.OperatorAuthority,
 	ws string,
@@ -192,7 +197,7 @@ func EnsureRole(
 // EnsureRoleWithReceipt is EnsureRole with a compensating ownership receipt.
 func EnsureRoleWithReceipt(
 	ctx context.Context,
-	st store.Store,
+	st roleWorkspaceStore,
 	api RoleAPI,
 	auth authority.OperatorAuthority,
 	ws string,
@@ -248,7 +253,7 @@ func EnsureRoleWithReceipt(
 
 func buildEnsuredRoleCreate(
 	ctx context.Context,
-	st store.Store,
+	st roleWorkspaceStore,
 	ws string,
 	name string,
 	req EnsureRoleRequest,
@@ -291,7 +296,7 @@ func buildEnsuredRoleCreate(
 // RoleStore exposes only name-based Delete, so check-then-delete could remove a
 // concurrently edited, recreated, or newly adopted role. An exact retry safely
 // reuses the retained definition.
-func (*EnsureRoleResult) Compensate(context.Context, store.Store, string) error {
+func (*EnsureRoleResult) Compensate(context.Context, roleWorkspaceStore, string) error {
 	return nil
 }
 
@@ -890,7 +895,7 @@ func (m *Module) writeRolePrompt(ctx context.Context, ws, roleName, filename, co
 	return writeRolePrompt(ctx, m.store, ws, roleName, filename, content)
 }
 
-func writeRolePrompt(ctx context.Context, st store.Store, ws, roleName, filename, content string) (string, error) {
+func writeRolePrompt(ctx context.Context, st roleWorkspaceStore, ws, roleName, filename, content string) (string, error) {
 	wsPath := strings.TrimSpace(storeadapter.ResolveOrHealWorkspacePath(ctx, st, ws))
 	if wsPath == "" {
 		return "", fmt.Errorf("workspace path unavailable; cannot persist role prompt")
@@ -898,14 +903,14 @@ func writeRolePrompt(ctx context.Context, st store.Store, ws, roleName, filename
 	return roleprompts.WritePromptFile(wsPath, roleName, filename, content)
 }
 
-func ensureRolePrompt(ctx context.Context, st store.Store, ws, roleName, filename, content string) (string, error) {
+func ensureRolePrompt(ctx context.Context, st roleWorkspaceStore, ws, roleName, filename, content string) (string, error) {
 	receipt, err := ensureRolePromptWithReceipt(ctx, st, ws, roleName, filename, content)
 	return receipt.Path, err
 }
 
 func ensureRolePromptWithReceipt(
 	ctx context.Context,
-	st store.Store,
+	st roleWorkspaceStore,
 	ws, roleName, filename, content string,
 ) (roleprompts.PromptFileReceipt, error) {
 	wsPath := strings.TrimSpace(storeadapter.ResolveOrHealWorkspacePath(ctx, st, ws))

@@ -4,7 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
+	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -151,15 +153,15 @@ func newLegacyReconciliationQueues(
 
 func NewAwaitEventReconciler(
 	outbox store.AwaitEventNotificationStore,
-	dispatcher awaitEventDispatcher,
+	dispatcher trigger.AwaitEventDispatcher,
 	workspace string,
 	workspaces RunOutcomeWorkspaceLister,
-) (*AwaitEventReconciler, error) {
+) (*trigger.AwaitEventReconciler, error) {
 	queue, authorities, err := newLegacyReconciliationQueues(outbox, nil)
 	if err != nil {
 		return nil, err
 	}
-	return NewAwaitEventReconcilerWithExecution(
+	return trigger.NewAwaitEventReconcilerWithExecution(
 		queue, authorities, dispatcher, workspace, workspaces,
 		string(execution.AwaitTimeoutComponentID)+"-test",
 	)
@@ -250,7 +252,7 @@ func testRunOutcomeQueue(
 	return newLegacyReconciliationQueues(nil, outbox)
 }
 
-func testAwaitEvent(workspace, eventID, sourceEventID, eventType, subjectRef, sourceKind string, origin domain.TriggerEventOrigin, actor string, payload []byte) execution.AwaitEvent {
+func testAwaitEvent(workspace, eventID, sourceEventID, eventType, subjectRef, sourceKind string, origin automation.EventOrigin, actor string, payload []byte) execution.AwaitEvent {
 	return execution.AwaitEvent{
 		WorkspaceKey: workspace, EventID: eventID, SourceEventID: sourceEventID,
 		EventType: eventType, SubjectRef: subjectRef, SourceKind: sourceKind,

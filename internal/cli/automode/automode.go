@@ -19,6 +19,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/events"
+	"github.com/tysonthomas9/loomcli/internal/infra/sessionstoreadapter"
+	"github.com/tysonthomas9/loomcli/internal/infra/usageprojection"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
@@ -274,13 +276,13 @@ func initAutoLoop(opts AutoModeOptions) *autoLoopCtx {
 		log.Fatal("CustomPromptGen must be set on AutoModeOptions")
 	}
 
-	usageStore, usageErr := usage.NewStore(cli.GetWorkspaceRuntimeDir())
+	usageStore, usageErr := usageprojection.New(cli.GetWorkspaceRuntimeDir())
 	if usageErr != nil {
 		fmt.Printf("[auto] Warning: usage tracking disabled: %v\n", usageErr)
 	}
 	ctx.usageStore = usageStore
 
-	sessStore, sessErr := sessions.NewStore(cli.GetWorkspaceRuntimeDir())
+	sessStore, sessErr := sessionstoreadapter.New(cli.GetWorkspaceRuntimeDir())
 	if sessErr != nil {
 		log.Printf("[auto] Warning: session store unavailable: %v", sessErr)
 	}

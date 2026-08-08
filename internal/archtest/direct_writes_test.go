@@ -14,15 +14,18 @@ func TestCheckedInDirectWriteInventoryStrictCounts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(inventory.Writes) != 225 {
-		t.Fatalf("direct-write rows = %d, want strict Phase 6 baseline of 225", len(inventory.Writes))
+	if len(inventory.Writes) != 102 {
+		t.Fatalf("direct-write rows = %d, want current migration ratchet of 102", len(inventory.Writes))
 	}
 	totalSites := 0
 	for _, use := range inventory.Writes {
 		totalSites += use.Count
 	}
-	if totalSites != 230 {
-		t.Fatalf("direct-write sites = %d, want strict Phase 6 baseline of 230", totalSites)
+	if totalSites != 106 {
+		t.Fatalf("direct-write sites = %d, want current migration ratchet of 106", totalSites)
+	}
+	if err := inventory.ValidateCompletedPhase(7); err != nil {
+		t.Fatalf("checked-in inventory is not ready for Phase 7 completion: %v", err)
 	}
 }
 
@@ -194,6 +197,45 @@ func apply(port workflowcatalog.VersionLifecycleStore) error { return port.Appro
 	}
 	if len(uses) != 1 || uses[0].File != "internal/modules/workflowcatalog/fleetdb/adapter.go" || uses[0].Method != "ApproveVersion" {
 		t.Fatalf("direct writes = %+v, want only the concrete adapter call retained", uses)
+	}
+}
+
+func TestSnapshotDirectWritesAllowsNamedWorkflowCoreThroughOwnDeclaredPortOnly(t *testing.T) {
+	root := t.TempDir()
+	writeDirectWriteModule(t, root)
+	writeGoFile(t, root, "internal/app/agentprovisioning/ports.go", `package agentprovisioning
+type ProgressStore interface { Save() error }
+`)
+	writeGoFile(t, root, "internal/app/agentprovisioning/manager.go", `package agentprovisioning
+func persist(port ProgressStore) error { return port.Save() }
+`)
+	writeGoFile(t, root, "internal/app/agentprovisioning/fleetdb/adapter.go", `package fleetdb
+import "github.com/tysonthomas9/loomcli/internal/app/agentprovisioning"
+func persist(port agentprovisioning.ProgressStore) error { return port.Save() }
+`)
+
+	matrix := oneDirectWriteProfile()
+	inventory := DirectWriteInventory{
+		AdapterRoots:              []string{"internal/app"},
+		AnalysisProfiles:          directWriteProfileNames(matrix),
+		CandidateReceiverSuffixes: []string{"Repository", "Store"},
+		PersistencePackages: []PersistencePackage{{
+			Path: modulePath + "/internal/app/agentprovisioning", ReceiverNames: []string{"ProgressStore"}, ReceiverSuffixes: []string{},
+		}},
+		MethodSets: []PersistenceMethodSet{{
+			Name: "progress", ReadOnly: []string{}, Mutating: []string{"Save"},
+		}},
+		ReceiverSurfaces: []PersistenceReceiverSurface{{
+			Receiver: modulePath + "/internal/app/agentprovisioning.ProgressStore",
+			Package:  modulePath + "/internal/app/agentprovisioning", MethodSet: "progress", CapabilityOwner: "named_application_workflow",
+		}},
+	}
+	uses, err := SnapshotDirectWrites(root, matrix, inventory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(uses) != 1 || uses[0].File != "internal/app/agentprovisioning/fleetdb/adapter.go" || uses[0].Method != "Save" {
+		t.Fatalf("direct writes = %+v, want only the concrete workflow adapter call retained", uses)
 	}
 }
 
@@ -376,22 +418,95 @@ func TestDirectWritePersistencePolicyRejectsUnassignedOwner(t *testing.T) {
 	}
 }
 
+func TestDirectWritePersistencePolicyAllowsExplicitCandidateSurfaceWithoutClassifyingWholePackage(t *testing.T) {
+	inventory := directWriteTestInventory(oneDirectWriteProfile())
+	const packagePath = modulePath + "/internal/example"
+	const receiver = packagePath + ".projectionStore"
+	inventory.MethodSets = append([]PersistenceMethodSet{{
+		Name: "projection", ReadOnly: []string{"Workspaces"}, Mutating: []string{},
+	}}, inventory.MethodSets...)
+	inventory.ReceiverSurfaces = append([]PersistenceReceiverSurface{{
+		Receiver: receiver, Package: packagePath,
+		MethodSet: "projection", CapabilityOwner: "read_projection",
+	}}, inventory.ReceiverSurfaces...)
+	if err := inventory.validatePersistencePolicy(); err != nil {
+		t.Fatalf("validate narrow candidate surface: %v", err)
+	}
+	classifier := newPersistenceClassifier(inventory)
+	if classifier.isPersistenceFunctionPackage(packagePath) {
+		t.Fatal("declaring one narrow candidate receiver classified every package helper as persistence")
+	}
+	access, owner, ok := classifier.classify(receiver, "Workspaces")
+	if !ok || access != persistenceReadOnly || owner != "read_projection" {
+		t.Fatalf("candidate receiver classification = (%v, %q, %t), want read-only read_projection", access, owner, ok)
+	}
+}
+
 func TestDirectWriteInventoryRejectsExpiredRowsForCompletedPhase(t *testing.T) {
 	inventory := directWriteTestInventory(oneDirectWriteProfile())
 	inventory.Writes = []DirectWriteUse{{
 		File: "internal/cli/write.go", Receiver: modulePath + "/internal/store.WorkspaceStore",
-		Method: "Create", Count: 1, AggregateOwner: "workspace", ExpiresAfterPhase: 2,
+		Method: "Create", Count: 1, AggregateOwner: "workspace", Disposition: directWriteDispositionTransitional, ExpiresAfterPhase: 2,
 	}}
 	if err := inventory.ValidateCompletedPhase(2); err == nil || !strings.Contains(err.Error(), "expired after Phase 2") {
 		t.Fatalf("ValidateCompletedPhase error = %v, want expired-row rejection", err)
 	}
 }
 
+func TestDirectWriteInventoryAllowsDeclaredOwnerAdapterAtPhase7(t *testing.T) {
+	inventory := directWriteTestInventory(oneDirectWriteProfile())
+	inventory.OwnerAdapters = []DirectWriteOwnerAdapter{{
+		Path: "internal/cli/workspaceadapter", AggregateOwner: "workspace",
+	}}
+	inventory.Writes = []DirectWriteUse{{
+		File: "internal/cli/workspaceadapter/write.go", Receiver: modulePath + "/internal/store.WorkspaceStore",
+		Method: "Create", Count: 1, AggregateOwner: "workspace", Disposition: directWriteDispositionOwnerAdapter,
+	}}
+	if err := inventory.validateOwnerAdapters(); err != nil {
+		t.Fatal(err)
+	}
+	if err := inventory.validateWrites(); err != nil {
+		t.Fatal(err)
+	}
+	if err := inventory.ValidateCompletedPhase(7); err != nil {
+		t.Fatalf("durable owner adapter rejected at Phase 7: %v", err)
+	}
+}
+
+func TestDirectWriteInventoryRejectsForgedOwnerAdapterDisposition(t *testing.T) {
+	inventory := directWriteTestInventory(oneDirectWriteProfile())
+	inventory.OwnerAdapters = []DirectWriteOwnerAdapter{{
+		Path: "internal/cli/workspaceadapter", AggregateOwner: "workspace",
+	}}
+	inventory.Writes = []DirectWriteUse{{
+		File: "internal/cli/rogue/write.go", Receiver: modulePath + "/internal/store.WorkspaceStore",
+		Method: "Create", Count: 1, AggregateOwner: "workspace", Disposition: directWriteDispositionOwnerAdapter,
+	}}
+	if err := inventory.validateWrites(); err == nil || !strings.Contains(err.Error(), "is not declared by owner_adapters") {
+		t.Fatalf("validateWrites error = %v, want undeclared owner-adapter rejection", err)
+	}
+}
+
+func TestDirectWriteInventoryRejectsOwnerAdapterOwnerMismatch(t *testing.T) {
+	inventory := directWriteTestInventory(oneDirectWriteProfile())
+	inventory.OwnerAdapters = []DirectWriteOwnerAdapter{{
+		Path: "internal/cli/workspaceadapter", AggregateOwner: "interaction",
+	}}
+	inventory.Writes = []DirectWriteUse{{
+		File: "internal/cli/workspaceadapter/write.go", Receiver: modulePath + "/internal/store.WorkspaceStore",
+		Method: "Create", Count: 1, AggregateOwner: "workspace", Disposition: directWriteDispositionOwnerAdapter,
+	}}
+	if err := inventory.validateWrites(); err == nil || !strings.Contains(err.Error(), "is not declared by owner_adapters") {
+		t.Fatalf("validateWrites error = %v, want owner mismatch rejection", err)
+	}
+}
+
 func TestDirectWriteRowsPreserveLegacyDriverPhase6Expiry(t *testing.T) {
+	inventory := DirectWriteInventory{OwnerAdapters: []DirectWriteOwnerAdapter{{Path: "internal/app/serve/agents.go", AggregateOwner: "agents"}}}
 	rows := directWriteRows(map[directWriteCountKey]int{
 		{file: "internal/driver/register.go", receiver: "driver.Store", method: "Create", owner: "workflowcatalog"}: 1,
 		{file: "internal/app/serve/agents.go", receiver: "agents.Store", method: "Create", owner: "agents"}:         1,
-	})
+	}, inventory)
 	if len(rows) != 2 {
 		t.Fatalf("direct-write rows = %+v, want 2", rows)
 	}
@@ -402,8 +517,8 @@ func TestDirectWriteRowsPreserveLegacyDriverPhase6Expiry(t *testing.T) {
 	if got := expiryByFile["internal/driver/register.go"]; got != legacyDriverDirectWriteExpiresAfterPhase {
 		t.Fatalf("driver expiry = %d, want %d", got, legacyDriverDirectWriteExpiresAfterPhase)
 	}
-	if got := expiryByFile["internal/app/serve/agents.go"]; got != 7 {
-		t.Fatalf("non-driver expiry = %d, want 7", got)
+	if got := expiryByFile["internal/app/serve/agents.go"]; got != 0 {
+		t.Fatalf("owner adapter expiry = %d, want 0", got)
 	}
 }
 

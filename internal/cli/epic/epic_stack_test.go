@@ -3,11 +3,14 @@ package epic
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
-	sl "github.com/tysonthomas9/loomcli/internal/stacklineage"
-	"github.com/tysonthomas9/loomcli/internal/stackstore"
+	stackstore "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore"
+	infrastackstore "github.com/tysonthomas9/loomcli/internal/infra/stackstoreadapter"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
+	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol/stacklineage"
 )
 
 // baseOf returns the planned BaseTaskID for a task, or "<absent>" if the task
@@ -135,7 +138,8 @@ func TestProjectEpicStack_BuildsForestAndIsIdempotent(t *testing.T) {
 
 	sstore := stackstore.New(t.TempDir())
 
-	proj, err := projectEpicStack(ctx, ib, sstore, ws, epicID, repo, root)
+	stacks := mustStackLifecycle(t, sstore)
+	proj, err := projectEpicStack(ctx, ib, stacks, ws, epicID, repo, root)
 	if err != nil {
 		t.Fatalf("projectEpicStack: %v", err)
 	}
@@ -189,7 +193,7 @@ func TestProjectEpicStack_BuildsForestAndIsIdempotent(t *testing.T) {
 	for _, n := range nodes {
 		branchBefore[n.TaskID] = n.OutputBranch
 	}
-	proj2, err := projectEpicStack(ctx, ib, sstore, ws, epicID, repo, root)
+	proj2, err := projectEpicStack(ctx, ib, stacks, ws, epicID, repo, root)
 	if err != nil {
 		t.Fatalf("projectEpicStack (re-run): %v", err)
 	}
@@ -211,13 +215,14 @@ func TestProjectEpicStack_MidChainReparent(t *testing.T) {
 	ctx := context.Background()
 	const ws, epicID, repo, root = "WS", "EPIC-9", "acme/widgets", "main"
 	sstore := stackstore.New(t.TempDir())
+	stacks := mustStackLifecycle(t, sstore)
 
 	ib := clitest.NewMockIssueBackend()
 	ib.ListResult = []backend.IssueData{
 		{ID: "T-A", Status: "open", Parent: epicID},
 		{ID: "T-B", Status: "open", Parent: epicID, BlockedBy: []string{"T-A"}, BlockedByCount: 1},
 	}
-	if _, err := projectEpicStack(ctx, ib, sstore, ws, epicID, repo, root); err != nil {
+	if _, err := projectEpicStack(ctx, ib, stacks, ws, epicID, repo, root); err != nil {
 		t.Fatalf("initial projection: %v", err)
 	}
 	branchB := ""
@@ -235,7 +240,7 @@ func TestProjectEpicStack_MidChainReparent(t *testing.T) {
 		{ID: "T-A", Status: "open", Parent: epicID},
 		{ID: "T-B", Status: "open", Parent: epicID},
 	}
-	proj, err := projectEpicStack(ctx, ib, sstore, ws, epicID, repo, root)
+	proj, err := projectEpicStack(ctx, ib, stacks, ws, epicID, repo, root)
 	if err != nil {
 		t.Fatalf("re-projection: %v", err)
 	}
@@ -277,4 +282,17 @@ func mustNodes(t *testing.T, ctx context.Context, s *stackstore.LocalStore, ws s
 		t.Fatalf("ListNodes: %v", err)
 	}
 	return nodes
+}
+
+func mustStackLifecycle(t *testing.T, store stackstore.Store) sourcecontrol.StackLifecycle {
+	t.Helper()
+	adapter, err := infrastackstore.New(store)
+	if err != nil {
+		t.Fatalf("compose stack adapter: %v", err)
+	}
+	service, err := sourcecontrol.NewStackLifecycle(adapter, time.Now)
+	if err != nil {
+		t.Fatalf("compose stack lifecycle: %v", err)
+	}
+	return service
 }

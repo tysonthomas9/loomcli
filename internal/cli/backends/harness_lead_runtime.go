@@ -8,8 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/tysonthomas9/loomcli/internal/infra/interactionchat"
-	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	leadcontrol "github.com/tysonthomas9/loomcli/internal/infra/interactionlead"
 )
 
 // envLeadControlled is the escape hatch for the controlled lead runtime.
@@ -32,7 +31,7 @@ var runHarnessLead = leadcontrol.RunHarnessLeadRuntime
 // LegacyInteractionChatDependencies adapts the remaining provider-specific
 // lead runtime at the CLI backend composition edge. Interaction receives only
 // operations and never receives the composite Store.
-func LegacyInteractionChatDependencies(st store.Store) interactionchat.LeadRuntimeDependencies {
+func LegacyInteractionChatDependencies(st leadcontrol.RuntimeStore) interactionchat.LeadRuntimeDependencies {
 	return leadcontrol.LegacyInteractionChatDependencies(st)
 }
 
@@ -43,7 +42,7 @@ func LegacyInteractionChatDependencies(st store.Store) interactionchat.LeadRunti
 // case the caller should fall back to a plain interactive launch.
 func RunControlledLeadRuntime(
 	ctx context.Context,
-	st store.Store,
+	st leadcontrol.RuntimeStore,
 	sessionRuntime leadcontrol.SessionRuntime,
 	workspace string,
 	leadName string,

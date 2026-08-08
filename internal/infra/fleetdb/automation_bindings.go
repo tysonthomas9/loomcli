@@ -8,17 +8,17 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 )
 
-func (s *automationStore) CreateBinding(ctx context.Context, binding *domain.TriggerBinding) (*domain.TriggerBinding, error) {
+func (s *automationStore) CreateBinding(ctx context.Context, binding *automation.Binding) (*automation.Binding, error) {
 	if binding == nil || binding.WebhookSecret != "" {
 		return nil, fmt.Errorf("automation create binding rejects webhook_secret: %w", ErrAutomationInvalid)
 	}
 	if strings.TrimSpace(binding.TargetAgentServiceID) != "" {
 		return nil, ErrAutomationManagedBindingConflict
 	}
-	var out domain.TriggerBinding
+	var out automation.Binding
 	path := "/api/v1/" + pathEscape(binding.WorkspaceKey) + "/trigger-bindings"
 	if err := s.client.do(ctx, http.MethodPost, path, automationBindingBody(binding, true), &out); err != nil {
 		return nil, err
@@ -26,8 +26,8 @@ func (s *automationStore) CreateBinding(ctx context.Context, binding *domain.Tri
 	return &out, nil
 }
 
-func (s *automationStore) GetBinding(ctx context.Context, workspace, bindingID string) (*domain.TriggerBinding, error) {
-	var out domain.TriggerBinding
+func (s *automationStore) GetBinding(ctx context.Context, workspace, bindingID string) (*automation.Binding, error) {
+	var out automation.Binding
 	path := "/api/v1/" + pathEscape(workspace) + "/trigger-bindings/" + pathEscape(bindingID)
 	if err := s.client.do(ctx, http.MethodGet, path, nil, &out); err != nil {
 		return nil, err
@@ -35,7 +35,7 @@ func (s *automationStore) GetBinding(ctx context.Context, workspace, bindingID s
 	return &out, nil
 }
 
-func (s *automationStore) ListBindings(ctx context.Context, workspace string, filter AutomationBindingFilter) ([]*domain.TriggerBinding, error) {
+func (s *automationStore) ListBindings(ctx context.Context, workspace string, filter AutomationBindingFilter) ([]*automation.Binding, error) {
 	query := url.Values{}
 	queryValue(query, "source_kind", filter.SourceKind)
 	queryValue(query, "route_key", filter.RouteKey)
@@ -46,23 +46,23 @@ func (s *automationStore) ListBindings(ctx context.Context, workspace string, fi
 	}
 	queryLimit(query, filter.Limit)
 	var out struct {
-		Bindings []*domain.TriggerBinding `json:"trigger_bindings"`
+		Bindings []*automation.Binding `json:"trigger_bindings"`
 	}
 	path := withQuery("/api/v1/"+pathEscape(workspace)+"/trigger-bindings", query)
 	if err := s.client.do(ctx, http.MethodGet, path, nil, &out); err != nil {
 		return nil, err
 	}
 	if out.Bindings == nil {
-		out.Bindings = []*domain.TriggerBinding{}
+		out.Bindings = []*automation.Binding{}
 	}
 	return out.Bindings, nil
 }
 
-func (s *automationStore) UpdateBinding(ctx context.Context, binding *domain.TriggerBinding) (*domain.TriggerBinding, error) {
+func (s *automationStore) UpdateBinding(ctx context.Context, binding *automation.Binding) (*automation.Binding, error) {
 	if binding == nil || binding.WebhookSecret != "" {
 		return nil, fmt.Errorf("automation update binding rejects webhook_secret: %w", ErrAutomationInvalid)
 	}
-	var out domain.TriggerBinding
+	var out automation.Binding
 	path := "/api/v1/" + pathEscape(binding.WorkspaceKey) + "/trigger-bindings/" + pathEscape(binding.BindingID)
 	if err := s.client.do(ctx, http.MethodPatch, path, automationBindingBody(binding, false), &out); err != nil {
 		return nil, err
@@ -75,7 +75,7 @@ func (s *automationStore) DeleteBinding(ctx context.Context, workspace, bindingI
 	return s.client.do(ctx, http.MethodDelete, path, nil, nil)
 }
 
-func (s *automationStore) ReplaceUnmanagedBinding(ctx context.Context, replacement AutomationUnmanagedBindingReplacement) (*domain.TriggerBinding, error) {
+func (s *automationStore) ReplaceUnmanagedBinding(ctx context.Context, replacement AutomationUnmanagedBindingReplacement) (*automation.Binding, error) {
 	if err := validateAutomationUnmanagedBindingSnapshot(replacement.Expected); err != nil {
 		return nil, err
 	}
@@ -95,7 +95,7 @@ func (s *automationStore) ReplaceUnmanagedBinding(ctx context.Context, replaceme
 		"expected_updated_at": replacement.Expected.ExpectedUpdatedAt,
 		"binding":             replacement.Binding,
 	}
-	var out domain.TriggerBinding
+	var out automation.Binding
 	path := "/api/v1/" + pathEscape(replacement.Expected.WorkspaceKey) + "/automation/unmanaged-bindings/" +
 		pathEscape(replacement.Expected.BindingID) + "/replace"
 	if err := s.client.do(ctx, http.MethodPost, path, body, &out); err != nil {
@@ -127,11 +127,11 @@ func validateAutomationUnmanagedBindingSnapshot(expected AutomationUnmanagedBind
 	return nil
 }
 
-func (s *automationStore) CreateManagedBinding(ctx context.Context, binding *domain.TriggerBinding) (*domain.TriggerBinding, error) {
+func (s *automationStore) CreateManagedBinding(ctx context.Context, binding *automation.Binding) (*automation.Binding, error) {
 	if binding == nil || binding.WebhookSecret != "" || strings.TrimSpace(binding.TargetAgentServiceID) == "" {
 		return nil, fmt.Errorf("automation managed binding create requires owner and rejects webhook_secret: %w", ErrAutomationInvalid)
 	}
-	var out domain.TriggerBinding
+	var out automation.Binding
 	path := "/api/v1/" + pathEscape(binding.WorkspaceKey) + "/automation/managed-bindings"
 	if err := s.client.do(ctx, http.MethodPost, path, binding, &out); err != nil {
 		return nil, err
@@ -139,7 +139,7 @@ func (s *automationStore) CreateManagedBinding(ctx context.Context, binding *dom
 	return &out, nil
 }
 
-func (s *automationStore) ReplaceManagedBinding(ctx context.Context, replacement AutomationManagedBindingReplacement) (*domain.TriggerBinding, error) {
+func (s *automationStore) ReplaceManagedBinding(ctx context.Context, replacement AutomationManagedBindingReplacement) (*automation.Binding, error) {
 	if err := validateAutomationManagedBindingSnapshot(replacement.Expected); err != nil {
 		return nil, err
 	}
@@ -160,7 +160,7 @@ func (s *automationStore) ReplaceManagedBinding(ctx context.Context, replacement
 		"expected_updated_at":              replacement.Expected.ExpectedUpdatedAt,
 		"binding":                          replacement.Binding,
 	}
-	var out domain.TriggerBinding
+	var out automation.Binding
 	path := "/api/v1/" + pathEscape(replacement.Expected.WorkspaceKey) + "/automation/managed-bindings/" +
 		pathEscape(replacement.Expected.BindingID) + "/replace"
 	if err := s.client.do(ctx, http.MethodPost, path, body, &out); err != nil {
@@ -201,7 +201,7 @@ func (s *automationStore) MatchBindings(ctx context.Context, workspace, routeKey
 		return nil, err
 	}
 	if out.Bindings == nil {
-		out.Bindings = []*domain.TriggerBinding{}
+		out.Bindings = []*automation.Binding{}
 	}
 	return &out, nil
 }

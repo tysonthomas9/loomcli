@@ -15,6 +15,8 @@ package sandbox
 import (
 	"fmt"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver/runtypes"
 )
@@ -95,13 +97,13 @@ func RefuseUntrustedPlacement(req runtypes.RunRequest, launcher SandboxLauncher)
 // RecordTrustPlacementDecision stamps the policy inputs onto the run output
 // (§9.6 audit): every run records the trust level it executed (or was
 // refused) under and the launcher the runner resolved.
-func RecordTrustPlacementDecision(result *runtypes.RunResult, trust domain.DriverTrustLevel, launcherProvider string) {
+func RecordTrustPlacementDecision(result *runtypes.RunResult, trust workflowcatalog.DriverTrustLevel, launcherProvider string) {
 	if result.Output == nil {
 		result.Output = map[string]string{}
 	}
-	level := domain.DriverTrustUntrusted
+	level := workflowcatalog.DriverTrustUntrusted
 	if trust.Trusted() {
-		level = domain.DriverTrustTrusted
+		level = workflowcatalog.DriverTrustTrusted
 	}
 	result.Output[TrustLevelOutputKey] = string(level)
 	result.Output[SandboxLauncherOutputKey] = launcherProvider

@@ -1,5 +1,7 @@
 package sourcecontrol
 
+import "time"
+
 // MaterializeCommand contains only opaque Workspace-owned references. The
 // public Source Control API does not accept a remote URL, so embedded URL
 // credentials cannot cross this boundary even as a rejected request.
@@ -190,4 +192,160 @@ type PullRequestCheckout struct {
 	HeadCommit    string
 	BaseRef       string
 	BaseCommit    string
+}
+
+// TaskStack is the Source-Control-owned projection needed to locate one task's
+// stack without exposing the local stackstore representation to callers.
+type TaskStack struct {
+	StackID      string
+	WorkspaceKey string
+	Repository   string
+}
+
+type TaskStackNode struct {
+	TaskID string
+}
+
+type TaskOutcomeState string
+
+const (
+	TaskOutcomePublished TaskOutcomeState = "published"
+	TaskOutcomeEmpty     TaskOutcomeState = "empty"
+)
+
+// TaskStackOutcomeMutation is the exact lineage state transition derived from
+// trusted runner delivery evidence by Source Control.
+type TaskStackOutcomeMutation struct {
+	State       TaskOutcomeState
+	OutputSHA   string
+	PublishedAt *time.Time
+}
+
+// Stack is Source Control's public stack-lineage projection. Callers receive
+// product coordinates and publication state without depending on the local
+// stackstore representation.
+type Stack struct {
+	ID                string    `json:"id"`
+	WorkspaceKey      string    `json:"workspaceKey"`
+	Repository        string    `json:"repoName"`
+	RootBase          string    `json:"rootBase"`
+	DefaultCommitMode string    `json:"defaultCommitMode,omitempty"`
+	CreatedAt         time.Time `json:"createdAt"`
+	UpdatedAt         time.Time `json:"updatedAt"`
+}
+
+// StackNode is one task's stable slot in a Source Control stack.
+type StackNode struct {
+	StackID         string     `json:"stackId"`
+	TaskID          string     `json:"taskId"`
+	BaseTaskID      string     `json:"baseTaskId,omitempty"`
+	OutputBranch    string     `json:"outputBranch"`
+	CommitMode      string     `json:"commitMode,omitempty"`
+	State           string     `json:"state"`
+	PRNumber        int        `json:"prNumber,omitempty"`
+	PRURL           string     `json:"prUrl,omitempty"`
+	OutputSHA       string     `json:"outputSha,omitempty"`
+	LastPublishedAt *time.Time `json:"lastPublishedAt,omitempty"`
+	CreatedAt       time.Time  `json:"createdAt"`
+	UpdatedAt       time.Time  `json:"updatedAt"`
+}
+
+type EnsureStackCommand struct {
+	WorkspaceKey      string
+	StackID           string
+	Repository        string
+	RootBase          string
+	DefaultCommitMode string
+}
+
+type AddStackNodeCommand struct {
+	WorkspaceKey string
+	StackID      string
+	TaskID       string
+	AfterTaskID  string
+	Root         bool
+	CommitMode   string
+}
+
+type MoveStackNodeCommand struct {
+	WorkspaceKey string
+	StackID      string
+	TaskID       string
+	AfterTaskID  string
+}
+
+type SetStackNodeBaseCommand struct {
+	WorkspaceKey string
+	StackID      string
+	TaskID       string
+	BaseTaskID   string
+}
+
+type RemoveStackNodeCommand struct {
+	WorkspaceKey string
+	StackID      string
+	TaskID       string
+}
+
+// DesiredStackNode is a caller-computed topology input. Source Control owns
+// the idempotent reconciliation and stable output-branch preservation.
+type DesiredStackNode struct {
+	TaskID     string
+	BaseTaskID string
+}
+
+type ReconcileStackCommand struct {
+	Stack EnsureStackCommand
+	Nodes []DesiredStackNode
+}
+
+type StackLineage struct {
+	StackID      string `json:"stackId,omitempty"`
+	BaseRef      string `json:"baseRef,omitempty"`
+	OutputBranch string `json:"outputBranch,omitempty"`
+}
+
+type ReconcileStackResult struct {
+	Stack      Stack
+	Nodes      []StackNode
+	Created    []string
+	Reparented []string
+	Lineage    map[string]StackLineage
+}
+
+type StackPublicationState string
+
+const (
+	StackPublicationPublished StackPublicationState = "published"
+	StackPublicationMerged    StackPublicationState = "merged"
+	StackPublicationEmpty     StackPublicationState = "empty"
+)
+
+// RecordStackNodePublicationCommand is the bounded publication outcome a
+// Source Control publisher may record. Source Control supplies the timestamp
+// and persistence mapping.
+type RecordStackNodePublicationCommand struct {
+	WorkspaceKey string
+	StackID      string
+	TaskID       string
+	State        StackPublicationState
+	PRNumber     int
+	PRURL        string
+	OutputSHA    string
+}
+
+type StackNodePublicationMutation struct {
+	State       StackPublicationState
+	PRNumber    int
+	PRURL       string
+	OutputSHA   string
+	PublishedAt *time.Time
+}
+
+// TaskStackBinding is the exact stack materialization input Execution needs
+// before creating a task worktree.
+type TaskStackBinding struct {
+	StackID      string
+	BaseRef      string
+	OutputBranch string
 }

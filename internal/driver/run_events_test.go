@@ -10,6 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -73,13 +77,13 @@ func seedRunFinishedBinding(t *testing.T, st *memstore.Store) {
 	ctx := t.Context()
 	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
 		WorkspaceKey: "TEST", DriverID: "composer", Name: "composer",
-		OwnerType: domain.DriverOwnerSystem, Status: domain.DriverStatusActive,
+		OwnerType: workflowcatalog.DriverOwnerSystem, Status: workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatalf("Create driver: %v", err)
 	}
 	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
 		WorkspaceKey: "TEST", VersionID: "v1", DriverID: "composer", Version: 1,
-		SourceDigest: "sha256:s", BundleDigest: "sha256:b", ValidationStatus: domain.DriverVersionValidationPassed,
+		SourceDigest: "sha256:s", BundleDigest: "sha256:b", ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
 	}
@@ -87,7 +91,7 @@ func seedRunFinishedBinding(t *testing.T, st *memstore.Store) {
 		WorkspaceKey: "TEST", BindingID: "b-run-finished", Name: "b-run-finished",
 		SourceKind: "internal", RouteKey: "internal." + RunFinishedEventType,
 		DriverID: "composer", DriverVersionID: "v1", TargetEntrypoint: "run",
-		ConcurrencyPolicy: domain.TriggerBindingConcurrencyAllow, Enabled: true,
+		ConcurrencyPolicy: automation.ConcurrencyAllow, Enabled: true,
 	}); err != nil {
 		t.Fatalf("Create trigger binding: %v", err)
 	}
@@ -97,10 +101,10 @@ func journalParentEvent(t *testing.T, st *memstore.Store, eventID string, hopDep
 	t.Helper()
 	appender := st.TriggerEvents().(store.TriggerEventAppender)
 	now := time.Now().UTC()
-	if _, err := appender.AppendTriggerEvent(t.Context(), &domain.TriggerEvent{
+	if _, err := appender.AppendTriggerEvent(t.Context(), &automation.Event{
 		WorkspaceKey: "TEST", EventID: eventID, SourceKind: "internal",
 		EventType: "issue.created", SubjectRef: "issue#1",
-		Origin: domain.TriggerEventOriginWorkflow, HopDepth: hopDepth,
+		Origin: automation.EventOriginWorkflow, HopDepth: hopDepth,
 		OccurredAt: now, ReceivedAt: now, IdempotencyKey: "idem-" + eventID,
 	}); err != nil {
 		t.Fatalf("AppendTriggerEvent(%s): %v", eventID, err)
@@ -289,13 +293,13 @@ func suspendedCompositionParent(t *testing.T, st *memstore.Store, childRunID str
 	ctx := t.Context()
 	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
 		WorkspaceKey: "TEST", DriverID: "composer", Name: "composer",
-		OwnerType: domain.DriverOwnerSystem, Status: domain.DriverStatusActive,
+		OwnerType: workflowcatalog.DriverOwnerSystem, Status: workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
 		WorkspaceKey: "TEST", VersionID: "v1", DriverID: "composer", Version: 1,
-		SourceDigest: "sha256:s", BundleDigest: "sha256:b", ValidationStatus: domain.DriverVersionValidationPassed,
+		SourceDigest: "sha256:s", BundleDigest: "sha256:b", ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatal(err)
 	}

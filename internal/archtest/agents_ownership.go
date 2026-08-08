@@ -181,7 +181,7 @@ func snapshotPhase5AgentsMutations(
 	}
 	wg.Wait()
 
-	merged := map[phase5AgentsMutationIdentity]phase5AgentsMutation{}
+	profileMutations := make([][]phase5AgentsMutation, len(results))
 	for index, result := range results {
 		if result.err != nil {
 			return nil, fmt.Errorf(
@@ -190,7 +190,18 @@ func snapshotPhase5AgentsMutations(
 				result.err,
 			)
 		}
-		for _, mutation := range result.mutations {
+		profileMutations[index] = result.mutations
+	}
+	return mergePhase5AgentsMutationProfiles(profiles, profileMutations), nil
+}
+
+func mergePhase5AgentsMutationProfiles(
+	profiles []AnalysisProfile,
+	results [][]phase5AgentsMutation,
+) []phase5AgentsMutation {
+	merged := map[phase5AgentsMutationIdentity]phase5AgentsMutation{}
+	for index, result := range results {
+		for _, mutation := range result {
 			current, ok := merged[mutation.phase5AgentsMutationIdentity]
 			if !ok {
 				current = mutation
@@ -220,7 +231,18 @@ func snapshotPhase5AgentsMutations(
 		}
 		return strings.Compare(left.method, right.method)
 	})
-	return mutations, nil
+	return mutations
+}
+
+func phase5AgentsOwnershipViolations(mutations []phase5AgentsMutation) []string {
+	violations := make([]string, 0)
+	for _, mutation := range mutations {
+		if !isPhase5AgentsMutationAllowed(mutation) {
+			violations = append(violations, mutation.withProfiles())
+		}
+	}
+	slices.Sort(violations)
+	return violations
 }
 
 func phase5AgentsMutationCandidatePatterns(root string) ([]string, error) {
@@ -402,15 +424,10 @@ func isPhase5AgentsMutationAllowed(mutation phase5AgentsMutation) bool {
 		return mutation.file == "internal/infra/agentsbootstrapstore/adapter.go"
 	case legacyAgentServiceStoreReceiver, legacyRoleStoreReceiver:
 		// agentsbootstrapstore is the bounded role/service bootstrap adapter.
-		// FleetDB adapters remain owner-side
-		// transport implementations. cmdstore's exact files are transparent
-		// telemetry decorators: they forward an already-authorized call and do
-		// not originate an aggregate mutation.
+		// FleetDB adapters remain owner-side transport implementations.
 		return mutation.file == "internal/infra/agentsbootstrapstore/adapter.go" ||
 			strings.HasPrefix(mutation.file, "internal/modules/agents/fleetdb/") ||
-			strings.HasPrefix(mutation.file, "internal/infra/fleetdb/") ||
-			mutation.file == "internal/cli/cmdstore/store_tracing_core_entities.go" ||
-			mutation.file == "internal/cli/cmdstore/store_tracing_platform.go"
+			strings.HasPrefix(mutation.file, "internal/infra/fleetdb/")
 	default:
 		return false
 	}
@@ -421,7 +438,7 @@ const (
 )
 
 var phase5AgentsCompatibilityCompositions = map[string]struct{}{
-	"internal/cli/serve/workspacemgr/agents_bootstrap.go": {},
+	"internal/cli/serve/workspacemgr/agentsbootstrapcomposition/managed.go": {},
 }
 
 // snapshotPhase5AgentsCompatibilityImportBlockers enforces agentscompatstore

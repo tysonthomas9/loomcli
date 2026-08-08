@@ -371,6 +371,10 @@
   gap: 16px;
 }
 
+.workflowDetailIdentity {
+  min-width: 0;
+}
+
 .workflowDetailTitle {
   font-size: 15px;
   font-weight: 700;
@@ -381,7 +385,9 @@
   color: var(--color-text-tertiary);
   font-family: var(--font-mono);
   font-size: 11px;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .workflowStatusBadge {
@@ -489,13 +495,38 @@
   font-size: 12px;
 }
 
-.workflowNoSessionNote {
+.workflowTranscriptState {
+  margin-top: 10px;
+  border: 1px solid var(--color-border-light);
   border-radius: var(--radius-sm);
   padding: 10px 12px;
   background: var(--color-bg-hover);
   color: var(--color-text-secondary);
   font-size: 12px;
   line-height: 1.5;
+}
+
+.workflowTranscriptState[data-state="absent"] {
+  border-color: rgba(245, 158, 11, 0.3);
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.workflowTranscriptLabel {
+  color: var(--color-text-tertiary);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.workflowTranscriptTitle {
+  margin-top: 2px;
+  color: var(--color-text-primary);
+  font-weight: 700;
+}
+
+.workflowTranscriptDescription {
+  margin-top: 2px;
 }
 
 /* ============= Detail View (right column) ============= */

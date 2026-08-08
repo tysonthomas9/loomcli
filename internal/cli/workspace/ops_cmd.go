@@ -19,6 +19,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 )
 
 var (
@@ -214,15 +215,15 @@ func withWorkspaceOpsStatus(args []string, fn func(*WorkspaceOpsStatus) error) e
 
 func workspaceOpsStatusForArgs(args []string) (*WorkspaceOpsStatus, error) {
 	var loaded *WorkspaceOpsStatus
-	err := cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
-		key, err := pickWorkspaceKey(ctx, h.Store, args)
+	err := cmdstore.WithWorkspaceCatalog(func(ctx context.Context, h *bootstrap.StoreHandle, workspace workspacemodule.API) error {
+		key, err := pickWorkspaceKey(ctx, workspace, args)
 		if err != nil {
 			return err
 		}
 		if err := os.Setenv(bootstrap.EnvWorkspace, key); err != nil {
 			return err
 		}
-		ws, repos, agents, roles, err := gatherWorkspaceDetails(ctx, h.Store, key)
+		ws, repos, agents, roles, err := gatherWorkspaceDetails(ctx, h.Store, workspace, key)
 		if err != nil {
 			return err
 		}
@@ -244,8 +245,8 @@ func workspaceOpsStatusForArgs(args []string) (*WorkspaceOpsStatus, error) {
 
 func buildWorkspaceOpsStatus(
 	ctx context.Context,
-	ws *domain.Workspace,
-	repos []*domain.Repo,
+	ws *workspacemodule.Workspace,
+	repos []*workspacemodule.Repository,
 	agents []*domain.AgentService,
 	roles []*domain.Role,
 ) (*WorkspaceOpsStatus, error) {
@@ -273,7 +274,7 @@ func buildWorkspaceOpsStatus(
 // newWorkspaceOpsStatus seeds the response struct, populates the
 // local-runtime block, and records the local-runtime-unhealthy warning
 // when applicable.
-func newWorkspaceOpsStatus(ws *domain.Workspace, localState bootstrap.WorkspaceLocalState, dataDir string, runtime *local.RuntimeStatusSnapshot, runtimeErr error, repoCap, agentCap int) *WorkspaceOpsStatus {
+func newWorkspaceOpsStatus(ws *workspacemodule.Workspace, localState bootstrap.WorkspaceLocalState, dataDir string, runtime *local.RuntimeStatusSnapshot, runtimeErr error, repoCap, agentCap int) *WorkspaceOpsStatus {
 	status := &WorkspaceOpsStatus{
 		Workspace: WorkspaceOpsWorkspace{
 			Key:       ws.Key,
@@ -365,8 +366,8 @@ func shouldEnsureLocalRuntime(status *WorkspaceOpsStatus) bool {
 
 // collectOpsRepos appends a WorkspaceOpsRepo for each non-nil repo and
 // returns a name-keyed lookup used during agent validation.
-func collectOpsRepos(status *WorkspaceOpsStatus, repos []*domain.Repo, localState bootstrap.WorkspaceLocalState) map[string]*domain.Repo {
-	repoByName := map[string]*domain.Repo{}
+func collectOpsRepos(status *WorkspaceOpsStatus, repos []*workspacemodule.Repository, localState bootstrap.WorkspaceLocalState) map[string]*workspacemodule.Repository {
+	repoByName := map[string]*workspacemodule.Repository{}
 	for _, repo := range repos {
 		if repo == nil {
 			continue
@@ -393,7 +394,7 @@ func collectRolesByName(roles []*domain.Role) map[string]*domain.Role {
 	return rolesByName
 }
 
-func collectOpsAgents(status *WorkspaceOpsStatus, agents []*domain.AgentService, localState bootstrap.WorkspaceLocalState, repoByName map[string]*domain.Repo, rolesByName map[string]*domain.Role) {
+func collectOpsAgents(status *WorkspaceOpsStatus, agents []*domain.AgentService, localState bootstrap.WorkspaceLocalState, repoByName map[string]*workspacemodule.Repository, rolesByName map[string]*domain.Role) {
 	for _, agent := range agents {
 		if agent == nil {
 			continue
@@ -404,7 +405,7 @@ func collectOpsAgents(status *WorkspaceOpsStatus, agents []*domain.AgentService,
 	}
 }
 
-func workspaceStateString(state domain.WorkspaceState) string {
+func workspaceStateString(state workspacemodule.State) string {
 	if state == "" {
 		return "ready"
 	}
@@ -418,7 +419,7 @@ func repoLocalPath(localState bootstrap.WorkspaceLocalState, name string) string
 //nolint:funlen // Linear "build status struct then collect problems with their per-problem Reason side-effect"; extracting the unknown_role / missing_worktree blocks would require returning the Runnable side-effect alongside the problem, which obscures more than it clarifies.
 func workspaceOpsAgentStatus(
 	localState bootstrap.WorkspaceLocalState,
-	repoByName map[string]*domain.Repo,
+	repoByName map[string]*workspacemodule.Repository,
 	rolesByName map[string]*domain.Role,
 	agent *domain.AgentService,
 ) (WorkspaceOpsAgent, []WorkspaceOpsProblem) {
@@ -521,7 +522,7 @@ func agentBackendProblem(agentID, backend string) (WorkspaceOpsProblem, bool) {
 // agentEffectiveBackend resolves the backend name an agent would run
 // under, using the precedence chain visible from the workspace surface:
 // agent override → CLI/env default.
-func agentWorktreePath(localState bootstrap.WorkspaceLocalState, repoByName map[string]*domain.Repo, agentID string, runtime agentsmodule.RuntimeMetadata) string {
+func agentWorktreePath(localState bootstrap.WorkspaceLocalState, repoByName map[string]*workspacemodule.Repository, agentID string, runtime agentsmodule.RuntimeMetadata) string {
 	if localState.Agents != nil && localState.Agents[agentID].Worktree != "" {
 		return localState.Agents[agentID].Worktree
 	}

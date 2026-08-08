@@ -1845,6 +1845,35 @@ describe("local-task-runner pull-request delivery gating", () => {
     assert.equal(refExists(origin, "refs/heads/loom/T-REQUIRED-EMPTY"), false);
   });
 
+  it("required change delivery fails closed when a mutating backend produces no files", async () => {
+    process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.LOOM_CODEX_BIN = fakeBin;
+    process.env.FAKE_EXIT_CODE = "0";
+    delete process.env.FAKE_WRITE_FILE;
+    process.env.LOOM_TASK_RUN_REQUEST_JSON = JSON.stringify({
+      task_run_id: "tr-required-empty-change",
+      task_id: "T-REQUIRED-EMPTY-CHANGE",
+      runner: "local-task-runner",
+      workspace_key: "ws",
+      input: {
+        title: "Required implementation change",
+        deliveryMode: "local-branch",
+        requireChangeDelivery: true,
+      },
+    });
+
+    const out = await run();
+
+    assert.equal(out.status, "failed");
+    assert.equal(out.errorClass, "local_change_delivery_missing");
+    assert.equal(out.exitCode, 1);
+    assert.ok(
+      out.transcript_entries.some((entry) => entry.role === "assistant" && entry.text === "did the work"),
+      "zero-change failure must preserve the real backend transcript",
+    );
+  });
+
   it("deliveryMode=local-branch force-pushes rework to the same task branch", async () => {
     const origin = createBareOrigin("rework-origin");
     process.env.LOOM_TASK_RUNNER_BACKEND = "codex";

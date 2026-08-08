@@ -114,7 +114,7 @@ const viewRoutes = [
   {
     path: "observability",
     lazy: () =>
-      import("@/views/ObservabilityPage").then((m) => ({
+      import("@/features/observability").then((m) => ({
         Component: m.ObservabilityPage,
       })),
   },
@@ -130,7 +130,9 @@ const viewRoutes = [
   {
     path: "prs",
     lazy: () =>
-      import("@/views/PRsPage").then((m) => ({ Component: m.PRsPage })),
+      import("@/features/source-control").then((m) => ({
+        Component: m.SourceControlPage,
+      })),
   },
   {
     path: "settings",

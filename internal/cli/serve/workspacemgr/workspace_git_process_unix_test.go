@@ -7,18 +7,21 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
 
 func TestRunWorkspaceGitContextCancelsGitProcessGroup(t *testing.T) {
 	binDir := t.TempDir()
-	started := filepath.Join(t.TempDir(), "started")
-	survived := filepath.Join(t.TempDir(), "survived")
+	childPIDPath := filepath.Join(t.TempDir(), "child-pid")
 	script := "#!/bin/sh\n" +
-		"touch '" + started + "'\n" +
-		"(sleep 0.4; touch '" + survived + "') &\n" +
-		"wait\n"
+		"sleep 30 &\n" +
+		"child=$!\n" +
+		"printf '%s\\n' \"$child\" > '" + childPIDPath + "'\n" +
+		"wait \"$child\"\n"
 	if err := os.WriteFile(filepath.Join(binDir, "git"), []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake git: %v", err)
 	}
@@ -31,13 +34,22 @@ func TestRunWorkspaceGitContextCancelsGitProcessGroup(t *testing.T) {
 		_, err := runWorkspaceGitContext(ctx, workDir, "worktree", "add")
 		result <- err
 	}()
-	deadline := time.Now().Add(time.Second)
+	deadline := time.Now().Add(2 * time.Second)
+	childPID := 0
 	for {
-		if _, err := os.Stat(started); err == nil {
+		pidBytes, err := os.ReadFile(childPIDPath)
+		if err == nil {
+			childPID, err = strconv.Atoi(strings.TrimSpace(string(pidBytes)))
+			if err != nil || childPID <= 0 {
+				t.Fatalf("invalid fake Git child PID %q: %v", pidBytes, err)
+			}
 			break
 		}
+		if !os.IsNotExist(err) {
+			t.Fatalf("read fake Git child PID: %v", err)
+		}
 		if time.Now().After(deadline) {
-			t.Fatal("fake Git process did not start")
+			t.Fatal("fake Git child process did not start")
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
@@ -46,8 +58,18 @@ func TestRunWorkspaceGitContextCancelsGitProcessGroup(t *testing.T) {
 	if err := <-result; !errors.Is(err, fenceErr) {
 		t.Fatalf("Git cancellation error = %v, want fence cause", err)
 	}
-	time.Sleep(500 * time.Millisecond)
-	if _, err := os.Stat(survived); !os.IsNotExist(err) {
-		t.Fatalf("Git child survived process-group cancellation: stat error = %v", err)
+	deadline = time.Now().Add(2 * time.Second)
+	for {
+		err := syscall.Kill(childPID, 0)
+		if errors.Is(err, syscall.ESRCH) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("probe fake Git child %d: %v", childPID, err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("Git child %d survived process-group cancellation", childPID)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

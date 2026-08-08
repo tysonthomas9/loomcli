@@ -8,9 +8,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/app/systemeventing"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/serveadapter"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/trigger"
 )
 
 type systemAuthorityProviderFunc func(context.Context, systemeventing.VerifiedSource) (authority.SystemAuthority, error)
@@ -50,7 +50,7 @@ func TestAutomationIssueJournalEmitterUsesNamedSystemWorkflow(t *testing.T) {
 	}
 	emitter := serveadapter.NewAutomationIssueJournalEmitter(journalEvents, nil)
 	result, err := emitter.Emit(t.Context(), "WS", trigger.InternalEvent{
-		EventID: "fleet-journal-1", EventType: "issue.create", Origin: domain.TriggerEventOriginSystem,
+		EventID: "fleet-journal-1", EventType: "issue.create", Origin: automation.EventOriginSystem,
 		ActorRef: "journal-actor", SubjectRef: "issue:1", Payload: []byte(`{"status":"open"}`),
 	})
 	if err != nil {
@@ -62,7 +62,7 @@ func TestAutomationIssueJournalEmitterUsesNamedSystemWorkflow(t *testing.T) {
 	if gotCommand.SourceKind != automation.SourceKindInternal || gotCommand.SourceEventID != "fleet-journal-1" || gotCommand.ActorRef != "" {
 		t.Fatalf("admission command = %+v", gotCommand)
 	}
-	if result == nil || result.EventType != "issue.created" || result.RouteKey != "internal.issue.created" || result.Origin != domain.TriggerEventOriginSystem {
+	if result == nil || result.EventType != "issue.created" || result.RouteKey != "internal.issue.created" || result.Origin != automation.EventOriginSystem {
 		t.Fatalf("mapped result = %+v", result)
 	}
 }
@@ -84,10 +84,10 @@ func TestAutomationIssueJournalEmitterMapsNoListenerAndRejectsForgedOrigin(t *te
 		t.Fatal(err)
 	}
 	emitter := serveadapter.NewAutomationIssueJournalEmitter(journalEvents, nil)
-	if _, err := emitter.Emit(t.Context(), "WS", trigger.InternalEvent{EventID: "event-1", EventType: "issue.create", Origin: domain.TriggerEventOriginSystem}); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := emitter.Emit(t.Context(), "WS", trigger.InternalEvent{EventID: "event-1", EventType: "issue.create", Origin: automation.EventOriginSystem}); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("no listener error = %v, want domain.ErrNotFound", err)
 	}
-	if _, err := emitter.Emit(t.Context(), "WS", trigger.InternalEvent{EventID: "event-2", EventType: "issue.create", Origin: domain.TriggerEventOriginWorkflow}); !errors.Is(err, domain.ErrInvalid) {
+	if _, err := emitter.Emit(t.Context(), "WS", trigger.InternalEvent{EventID: "event-2", EventType: "issue.create", Origin: automation.EventOriginWorkflow}); !errors.Is(err, domain.ErrInvalid) {
 		t.Fatalf("forged origin error = %v, want domain.ErrInvalid", err)
 	}
 	if got := serveadapter.NewAutomationIssueJournalEmitter(nil, nil); got != nil {

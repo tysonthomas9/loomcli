@@ -9,14 +9,16 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/app/webhookingestion"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver/eventpolicy"
+	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/trigger"
 )
 
 const (
@@ -31,14 +33,14 @@ func seedStore(t *testing.T, enabled bool) *memstore.Store {
 	ctx := context.Background()
 	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
 		WorkspaceKey: testWS, DriverID: "github-pr-review", Name: "github-pr-review",
-		Status: domain.DriverStatusActive,
+		Status: workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatalf("seed driver: %v", err)
 	}
 	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
 		WorkspaceKey: testWS, VersionID: "v1", DriverID: "github-pr-review", Version: 1,
 		SourceDigest: "sha256:src", BundleDigest: "sha256:bundle",
-		ValidationStatus: domain.DriverVersionValidationPassed,
+		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("seed version: %v", err)
 	}
@@ -220,7 +222,7 @@ func TestReceiveWebhookDispatchesDriverRun(t *testing.T) {
 		t.Fatalf("want 1 delivery leg, got %d: %+v", len(resp.Deliveries), resp.Deliveries)
 	}
 	leg := resp.Deliveries[0]
-	if leg.BindingID != "b1" || leg.RunID == "" || leg.DeliveryID == "" || leg.Status != domain.TriggerDeliveryDispatched {
+	if leg.BindingID != "b1" || leg.RunID == "" || leg.DeliveryID == "" || leg.Status != automation.DeliveryDispatched {
 		t.Fatalf("unexpected delivery leg: %+v", leg)
 	}
 	var raw map[string]json.RawMessage
@@ -353,7 +355,7 @@ func TestReceiveWebhookFanOutResponseListsAllDeliveries(t *testing.T) {
 		t.Fatalf("unexpected leg order: %+v", resp.Deliveries)
 	}
 	for i, leg := range resp.Deliveries {
-		if leg.RunID == "" || leg.DeliveryID == "" || leg.Status != domain.TriggerDeliveryDispatched {
+		if leg.RunID == "" || leg.DeliveryID == "" || leg.Status != automation.DeliveryDispatched {
 			t.Errorf("leg %d incomplete: %+v", i, leg)
 		}
 	}
@@ -424,8 +426,8 @@ func (s dispatcherOverrideStore) TriggerRoutes() store.TriggerRouteDispatcher { 
 func TestReceiveWebhookSurfacesRejectedLegAndPlumbsSubjectAttrs(t *testing.T) {
 	stub := &stubDispatcher{result: &store.TriggerRouteDispatchResult{
 		Deliveries: []store.TriggerRouteDelivery{
-			{DeliveryID: "delivery-e1-b1", BindingID: "b1", RunID: "run-aaa", Status: domain.TriggerDeliveryDispatched},
-			{DeliveryID: "delivery-e1-b3", BindingID: "b3-forbid", Status: domain.TriggerDeliveryRejected,
+			{DeliveryID: "delivery-e1-b1", BindingID: "b1", RunID: "run-aaa", Status: automation.DeliveryDispatched},
+			{DeliveryID: "delivery-e1-b3", BindingID: "b3-forbid", Status: automation.DeliveryRejected,
 				RejectionReason: "concurrency policy forbid: active run for subject acme/widgets#7"},
 		},
 	}}
@@ -439,7 +441,7 @@ func TestReceiveWebhookSurfacesRejectedLegAndPlumbsSubjectAttrs(t *testing.T) {
 		t.Fatalf("want 2 delivery legs, got %d: %+v", len(resp.Deliveries), resp.Deliveries)
 	}
 	rejected := resp.Deliveries[1]
-	if rejected.Status != domain.TriggerDeliveryRejected || rejected.RejectionReason == "" || rejected.RunID != "" {
+	if rejected.Status != automation.DeliveryRejected || rejected.RejectionReason == "" || rejected.RunID != "" {
 		t.Errorf("rejected leg not surfaced: %+v", rejected)
 	}
 

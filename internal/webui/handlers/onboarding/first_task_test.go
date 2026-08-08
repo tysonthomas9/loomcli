@@ -9,14 +9,13 @@ import (
 	"testing"
 
 	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/types"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 func TestHandleRunFirstTaskCreatesClaimableTaskAndQueuesAgentStart(t *testing.T) {
 	issueSvc := &stubIssueService{
-		createFunc: func(_ context.Context, params service.CreateIssueParams) (json.RawMessage, error) {
+		createFunc: func(_ context.Context, params workitems.CreateCommand) (*workitems.CreatedIssue, error) {
 			if params.Title != "Explore Hello-World onboarding" {
 				t.Fatalf("Title = %q", params.Title)
 			}
@@ -26,11 +25,7 @@ func TestHandleRunFirstTaskCreatesClaimableTaskAndQueuesAgentStart(t *testing.T)
 			if params.SourceRepo != "Hello-World" {
 				t.Fatalf("SourceRepo = %q", params.SourceRepo)
 			}
-			return json.RawMessage(`{"id":"task-1","title":"Explore Hello-World onboarding"}`), nil
-		},
-		patchFunc: func(_ context.Context, params service.PatchIssueParams) error {
-			t.Fatalf("PatchIssue should not pre-claim the first task; got %#v", params)
-			return nil
+			return createdWorkItem("task-1", "Explore Hello-World onboarding"), nil
 		},
 	}
 	agentSvc := &stubAgentService{
@@ -73,15 +68,11 @@ func TestHandleRunFirstTaskCreatesClaimableTaskAndQueuesAgentStart(t *testing.T)
 
 func TestHandleRunFirstTaskKeepsTaskClaimableForExecution(t *testing.T) {
 	issueSvc := &stubIssueService{
-		createFunc: func(_ context.Context, params service.CreateIssueParams) (json.RawMessage, error) {
+		createFunc: func(_ context.Context, params workitems.CreateCommand) (*workitems.CreatedIssue, error) {
 			if params.Status != "open" || params.Assignee != "" {
 				t.Fatalf("created task must remain claimable, got status=%q assignee=%q", params.Status, params.Assignee)
 			}
-			return json.RawMessage(`{"id":"task-1"}`), nil
-		},
-		patchFunc: func(_ context.Context, params service.PatchIssueParams) error {
-			t.Fatalf("PatchIssue should not run before daemon claim; got %#v", params)
-			return nil
+			return createdWorkItem("task-1", "Explore Hello-World onboarding"), nil
 		},
 	}
 	agentSvc := &stubAgentService{
@@ -108,16 +99,12 @@ func TestHandleRunFirstTaskKeepsTaskClaimableForExecution(t *testing.T) {
 func TestHandleRunFirstTaskDeletesCreatedIssueWhenStartFails(t *testing.T) {
 	var deletedIssueID string
 	issueSvc := &stubIssueService{
-		createFunc: func(context.Context, service.CreateIssueParams) (json.RawMessage, error) {
-			return json.RawMessage(`{"id":"task-1"}`), nil
+		createFunc: func(context.Context, workitems.CreateCommand) (*workitems.CreatedIssue, error) {
+			return createdWorkItem("task-1", "Explore Hello-World onboarding"), nil
 		},
-		patchFunc: func(_ context.Context, params service.PatchIssueParams) error {
-			t.Fatalf("PatchIssue should not run when lifecycle fails; got %#v", params)
-			return nil
-		},
-		deleteFunc: func(_ context.Context, issueID string) (json.RawMessage, error) {
-			deletedIssueID = issueID
-			return json.RawMessage(`{"deleted_count":1}`), nil
+		deleteFunc: func(_ context.Context, command workitems.DeleteCommand) (workitems.DeleteResult, error) {
+			deletedIssueID = command.IssueID
+			return workitems.DeleteResult{DeletedCount: 1, DeletedIDs: []string{command.IssueID}}, nil
 		},
 	}
 	agentSvc := &stubAgentService{
@@ -153,14 +140,14 @@ func TestHandleRunFirstTaskCleanupRunsWithLiveContextWhenClientDisconnects(t *te
 	var deleteCalled bool
 	var deletedID string
 	issueSvc := &stubIssueService{
-		createFunc: func(context.Context, service.CreateIssueParams) (json.RawMessage, error) {
-			return json.RawMessage(`{"id":"task-1"}`), nil
+		createFunc: func(context.Context, workitems.CreateCommand) (*workitems.CreatedIssue, error) {
+			return createdWorkItem("task-1", "Explore Hello-World onboarding"), nil
 		},
-		deleteFunc: func(ctx context.Context, id string) (json.RawMessage, error) {
+		deleteFunc: func(ctx context.Context, command workitems.DeleteCommand) (workitems.DeleteResult, error) {
 			deleteCalled = true
 			deleteCtxErr = ctx.Err()
-			deletedID = id
-			return json.RawMessage(`{"deleted_count":1}`), nil
+			deletedID = command.IssueID
+			return workitems.DeleteResult{DeletedCount: 1, DeletedIDs: []string{command.IssueID}}, nil
 		},
 	}
 	agentSvc := &stubAgentService{
@@ -196,7 +183,7 @@ func TestHandleRunFirstTaskCleanupRunsWithLiveContextWhenClientDisconnects(t *te
 
 func TestHandleRunFirstTaskRejectsUnknownAgent(t *testing.T) {
 	issueSvc := &stubIssueService{
-		createFunc: func(context.Context, service.CreateIssueParams) (json.RawMessage, error) {
+		createFunc: func(context.Context, workitems.CreateCommand) (*workitems.CreatedIssue, error) {
 			t.Fatal("CreateIssue should not be called")
 			return nil, nil
 		},
@@ -220,67 +207,70 @@ func TestHandleRunFirstTaskRejectsUnknownAgent(t *testing.T) {
 }
 
 type stubIssueService struct {
-	createFunc func(context.Context, service.CreateIssueParams) (json.RawMessage, error)
-	patchFunc  func(context.Context, service.PatchIssueParams) error
-	deleteFunc func(context.Context, string) (json.RawMessage, error)
+	createFunc func(context.Context, workitems.CreateCommand) (*workitems.CreatedIssue, error)
+	deleteFunc func(context.Context, workitems.DeleteCommand) (workitems.DeleteResult, error)
 }
 
-func (s *stubIssueService) GetIssue(context.Context, string) (json.RawMessage, error) {
-	return nil, service.ErrNotImplemented("not implemented")
+func createdWorkItem(id, title string) *workitems.CreatedIssue {
+	return &workitems.CreatedIssue{Summary: &workitems.IssueSummary{ID: id, Title: title, Status: "open", IssueType: "task"}}
 }
-func (s *stubIssueService) ListIssues(context.Context, service.ListIssuesParams) (*service.ListIssuesResult, error) {
-	return nil, service.ErrNotImplemented("not implemented")
-}
-func (s *stubIssueService) CreateIssue(ctx context.Context, params service.CreateIssueParams) (json.RawMessage, error) {
+
+func (s *stubIssueService) Create(ctx context.Context, command workitems.CreateCommand) (*workitems.CreatedIssue, error) {
 	if s.createFunc != nil {
-		return s.createFunc(ctx, params)
+		return s.createFunc(ctx, command)
 	}
-	return nil, service.ErrNotImplemented("not implemented")
+	return nil, workitems.ErrNotImplemented
 }
-func (s *stubIssueService) PatchIssue(ctx context.Context, params service.PatchIssueParams) error {
-	if s.patchFunc != nil {
-		return s.patchFunc(ctx, params)
-	}
-	return nil
+func (s *stubIssueService) List(context.Context, workitems.ListQuery) (*workitems.ListResult, error) {
+	return nil, workitems.ErrNotImplemented
 }
-func (s *stubIssueService) CloseIssue(context.Context, service.CloseIssueParams) (json.RawMessage, error) {
-	return nil, service.ErrNotImplemented("not implemented")
+func (s *stubIssueService) Ready(context.Context, workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
+	return nil, workitems.ErrNotImplemented
 }
-func (s *stubIssueService) ReopenIssue(context.Context, service.ReopenIssueParams) error {
-	return service.ErrNotImplemented("not implemented")
+func (s *stubIssueService) Search(context.Context, workitems.SearchQuery) ([]workitems.IssueSummary, error) {
+	return nil, workitems.ErrNotImplemented
 }
-func (s *stubIssueService) ClaimIssue(context.Context, service.ClaimIssueParams) (json.RawMessage, error) {
-	return nil, service.ErrNotImplemented("not implemented")
+func (s *stubIssueService) Get(context.Context, workitems.GetQuery) (*workitems.IssueDetail, error) {
+	return nil, workitems.ErrNotImplemented
 }
-func (s *stubIssueService) DeleteIssue(ctx context.Context, issueID string) (json.RawMessage, error) {
+func (s *stubIssueService) Patch(context.Context, workitems.PatchCommand) (*workitems.IssueDetail, error) {
+	return nil, workitems.ErrNotImplemented
+}
+func (s *stubIssueService) Close(context.Context, workitems.CloseCommand) (*workitems.CloseResult, error) {
+	return nil, workitems.ErrNotImplemented
+}
+func (s *stubIssueService) Claim(context.Context, workitems.ClaimCommand) (*workitems.IssueDetail, error) {
+	return nil, workitems.ErrNotImplemented
+}
+func (s *stubIssueService) Reopen(context.Context, workitems.ReopenCommand) error {
+	return workitems.ErrNotImplemented
+}
+func (s *stubIssueService) AssignRepository(context.Context, workitems.AssignRepositoryCommand) (*workitems.IssueSummary, error) {
+	return nil, workitems.ErrNotImplemented
+}
+func (s *stubIssueService) Delete(ctx context.Context, command workitems.DeleteCommand) (workitems.DeleteResult, error) {
 	if s.deleteFunc != nil {
-		return s.deleteFunc(ctx, issueID)
+		return s.deleteFunc(ctx, command)
 	}
-	return nil, service.ErrNotImplemented("not implemented")
+	return workitems.DeleteResult{}, workitems.ErrNotImplemented
 }
-func (s *stubIssueService) AddComment(context.Context, service.AddCommentParams) (*types.Comment, error) {
-	return nil, service.ErrNotImplemented("not implemented")
+func (s *stubIssueService) ListEvents(context.Context, workitems.ListEventsQuery) ([]*workitems.Event, error) {
+	return nil, workitems.ErrNotImplemented
 }
-func (s *stubIssueService) ListComments(context.Context, string) ([]*types.Comment, error) {
-	return nil, service.ErrNotImplemented("not implemented")
+func (s *stubIssueService) AddComment(context.Context, workitems.AddCommentCommand) (*workitems.Comment, error) {
+	return nil, workitems.ErrNotImplemented
 }
-func (s *stubIssueService) AddDependency(context.Context, service.AddDependencyParams) error {
-	return service.ErrNotImplemented("not implemented")
+func (s *stubIssueService) ListComments(context.Context, workitems.ListCommentsQuery) ([]*workitems.Comment, error) {
+	return nil, workitems.ErrNotImplemented
 }
-func (s *stubIssueService) RemoveDependency(context.Context, service.RemoveDependencyParams) error {
-	return service.ErrNotImplemented("not implemented")
+func (s *stubIssueService) AddDependency(context.Context, workitems.AddDependencyCommand) error {
+	return workitems.ErrNotImplemented
 }
-func (s *stubIssueService) ListDependencies(context.Context, string) (json.RawMessage, error) {
-	return nil, service.ErrNotImplemented("not implemented")
+func (s *stubIssueService) RemoveDependency(context.Context, workitems.RemoveDependencyCommand) error {
+	return workitems.ErrNotImplemented
 }
-func (s *stubIssueService) ListEvents(context.Context, service.EventListParams) ([]*types.Event, error) {
-	return nil, service.ErrNotImplemented("not implemented")
-}
-func (s *stubIssueService) MoveIssue(context.Context, service.MoveIssueParams) (*service.MoveIssueResult, error) {
-	return nil, service.ErrNotImplemented("not implemented")
-}
-func (s *stubIssueService) SearchIssues(context.Context, service.SearchIssuesParams) (json.RawMessage, error) {
-	return nil, service.ErrNotImplemented("not implemented")
+func (s *stubIssueService) ListDependencies(context.Context, workitems.ListDependenciesQuery) ([]workitems.Dependency, error) {
+	return nil, workitems.ErrNotImplemented
 }
 
 type stubAgentService struct {

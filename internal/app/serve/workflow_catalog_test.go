@@ -68,7 +68,8 @@ func TestWorkflowCatalogComposesProductionAutomationCapability(t *testing.T) {
 	if capability == nil || capability.BindingOperations() == nil ||
 		capability.WebhookWorkflow() == nil || capability.WorkflowEventing() == nil ||
 		capability.WorkflowBinding() == nil ||
-		capability.IssueJournalEmitter() == nil || capability.RunOutcomePublisher() == nil {
+		capability.IssueJournalEmitter() == nil || capability.ApprovalJournal() == nil ||
+		capability.ApprovalAuthorityProvider() == nil || capability.RunOutcomePublisher() == nil {
 		t.Fatalf("Automation capability = %#v", capability)
 	}
 	registrations := capability.RuntimeRegistrations()

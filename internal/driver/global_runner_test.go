@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -15,13 +17,13 @@ import (
 
 // trustedBuiltinRunnerOwner builds an in-memory trusted builtin owner (driver +
 // version whose manifest declares local-task-runner) for an injected resolver.
-func trustedBuiltinRunnerOwner(t *testing.T, trust domain.DriverTrustLevel) (*domain.Driver, *domain.DriverVersion) {
+func trustedBuiltinRunnerOwner(t *testing.T, trust workflowcatalog.DriverTrustLevel) (*workflowcatalog.Driver, *workflowcatalog.DriverVersion) {
 	t.Helper()
 	runnersJSON, err := json.Marshal([]DriverRunnerSpec{{Name: "local-task-runner", Kind: RunnerKindFlueWorkflow, Entrypoint: "local-task-runner"}})
 	if err != nil {
 		t.Fatalf("marshal runners: %v", err)
 	}
-	version := &domain.DriverVersion{
+	version := &workflowcatalog.DriverVersion{
 		VersionID: "bug-fix-agent-v1",
 		DriverID:  "bug-fix-agent",
 		Manifest: map[string]string{
@@ -29,7 +31,7 @@ func trustedBuiltinRunnerOwner(t *testing.T, trust domain.DriverTrustLevel) (*do
 			ManifestTrustLevelKey: string(trust),
 		},
 	}
-	driverRow := &domain.Driver{DriverID: "bug-fix-agent", TrustLevel: trust, ActiveVersionID: version.VersionID}
+	driverRow := &workflowcatalog.Driver{DriverID: "bug-fix-agent", TrustLevel: trust, ActiveVersionID: version.VersionID}
 	return driverRow, version
 }
 
@@ -41,8 +43,8 @@ func registerUntrustedCaller(t *testing.T, st *memstore.Store) *domain.DriverRun
 	ctx := context.Background()
 	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
 		WorkspaceKey: "WS", DriverID: "custom-agent", Name: "custom-agent",
-		OwnerType: domain.DriverOwnerUser, Status: domain.DriverStatusActive,
-		TrustLevel: domain.DriverTrustUntrusted,
+		OwnerType: workflowcatalog.DriverOwnerUser, Status: workflowcatalog.DriverStatusActive,
+		TrustLevel: workflowcatalog.DriverTrustUntrusted,
 	}); err != nil {
 		t.Fatalf("create caller driver: %v", err)
 	}
@@ -50,8 +52,8 @@ func registerUntrustedCaller(t *testing.T, st *memstore.Store) *domain.DriverRun
 		WorkspaceKey: "WS", VersionID: "custom-agent-v1", DriverID: "custom-agent", Version: 1,
 		SourceDigest: "sha256:custom", BundleDigest: "sha256:custom",
 		Runtime:          RuntimeFlueNode,
-		Manifest:         map[string]string{ManifestTrustLevelKey: string(domain.DriverTrustUntrusted)}, // declares no runners
-		ValidationStatus: domain.DriverVersionValidationPassed,
+		Manifest:         map[string]string{ManifestTrustLevelKey: string(workflowcatalog.DriverTrustUntrusted)}, // declares no runners
+		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("create caller version: %v", err)
 	}
@@ -74,7 +76,7 @@ func registerUntrustedCaller(t *testing.T, st *memstore.Store) *domain.DriverRun
 func TestResolveTaskRunRequestRunnerGlobalFallbackUsesBuiltinOwner(t *testing.T) {
 	st := memstore.New()
 	parent := registerUntrustedCaller(t, st)
-	builtinDriver, builtinVersion := trustedBuiltinRunnerOwner(t, domain.DriverTrustTrusted)
+	builtinDriver, builtinVersion := trustedBuiltinRunnerOwner(t, workflowcatalog.DriverTrustTrusted)
 
 	restore := swapGlobalRunnerResolver(func(_ context.Context, _, runnerName string) (*GlobalRunnerResolution, error) {
 		if runnerName != "local-task-runner" {
@@ -127,7 +129,7 @@ func TestResolveTaskRunRequestRunnerUnknownRunnerSameError(t *testing.T) {
 func TestResolveTaskRunRequestRunnerUntrustedOwnerNotResolvable(t *testing.T) {
 	st := memstore.New()
 	parent := registerUntrustedCaller(t, st)
-	untrustedDriver, untrustedVersion := trustedBuiltinRunnerOwner(t, domain.DriverTrustUntrusted)
+	untrustedDriver, untrustedVersion := trustedBuiltinRunnerOwner(t, workflowcatalog.DriverTrustUntrusted)
 
 	restore := swapGlobalRunnerResolver(func(_ context.Context, _, runnerName string) (*GlobalRunnerResolution, error) {
 		return &GlobalRunnerResolution{Driver: untrustedDriver, Version: untrustedVersion, Spec: DriverRunnerSpec{Name: runnerName, Kind: RunnerKindFlueWorkflow, Entrypoint: runnerName}}, nil

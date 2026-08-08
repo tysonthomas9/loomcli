@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
+
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/types"
 )
@@ -184,7 +186,7 @@ func TestGet_HappyPath(t *testing.T) {
 		Labels:       []string{"label-1"},
 		Dependencies: []*types.IssueWithDependencyMetadata{},
 		Dependents:   []*types.IssueWithDependencyMetadata{},
-		Comments:     []*types.Comment{},
+		Comments:     []*workitems.Comment{},
 	}
 
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
@@ -1845,7 +1847,7 @@ func TestListComments_HappyPath(t *testing.T) {
 		Labels:       []string{},
 		Dependencies: []*types.IssueWithDependencyMetadata{},
 		Dependents:   []*types.IssueWithDependencyMetadata{},
-		Comments: []*types.Comment{
+		Comments: []*workitems.Comment{
 			{ID: 2, IssueID: "test-1", Author: "user2", Text: "c2", CreatedAt: now.Add(time.Second)},
 			{ID: 1, IssueID: "test-1", Author: "user", Text: "c1", CreatedAt: now},
 		},
@@ -1881,7 +1883,7 @@ func TestListComments_NoComments(t *testing.T) {
 		Labels:       []string{},
 		Dependencies: []*types.IssueWithDependencyMetadata{},
 		Dependents:   []*types.IssueWithDependencyMetadata{},
-		Comments:     []*types.Comment{},
+		Comments:     []*workitems.Comment{},
 	}
 
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {

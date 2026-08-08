@@ -4,12 +4,12 @@ import (
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 )
 
 // HandleGetWorkspaceJob returns a handler that polls the status of an async
 // workspace mutation job.
-func HandleGetWorkspaceJob(svc service.WorkspaceService) http.HandlerFunc {
+func HandleGetWorkspaceJob(svc workspacecoord.WorkspaceService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		if id == "" {

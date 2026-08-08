@@ -56,7 +56,7 @@ const (
 // package tree's non-test sources.
 // When you add/remove/move a client call, update clientRoutes below FIRST, then
 // bump this constant.
-const expectedClientCallSites = 237
+const expectedClientCallSites = 243
 
 // clientRoute is one method+path template the client issues. Path params are
 // written as {} (already normalized).
@@ -141,6 +141,8 @@ var clientRoutes = []clientRoute{
 	{"GET", "/api/v1/{}/connector-grants"},
 	{"POST", "/api/v1/{}/connector-audit"},
 	{"GET", "/api/v1/{}/connector-audit"},
+	// connector_grant_commands.go reuses connector-grant create/list above
+	// through the narrow Connectors-owned transport; both call sites count.
 
 	// control_plane.go — nodes, sessions, workers, terminals, artifacts,
 	// leases, commands, inbox.
@@ -167,6 +169,9 @@ var clientRoutes = []clientRoute{
 	{"GET", "/api/v1/{}/artifacts/{}/content"},
 	{"POST", "/api/v1/{}/artifacts/{}/finalize"},
 	{"PATCH", "/api/v1/{}/artifacts/{}"},
+	// session_artifacts.go reuses create/get/content/finalize above through a
+	// narrow session-owned transport; those four call sites are counted by the
+	// ratchet without duplicating the unique route table.
 	// artifact_commands.go — owner-fenced lifecycle and scoped queries.
 	{"POST", "/api/v1/{}/artifact-commands/create"},
 	{"POST", "/api/v1/{}/artifacts/{}/commands/upload"},

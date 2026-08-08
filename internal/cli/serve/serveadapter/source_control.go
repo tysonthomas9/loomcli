@@ -2,7 +2,6 @@ package serveadapter
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io/fs"
 	"net/url"
@@ -11,9 +10,10 @@ import (
 	"strings"
 	"time"
 
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/app/agentprovisioning"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -396,19 +396,19 @@ func (resolver *sourceControlRepositoryResolver) resolveRepository(
 	ctx context.Context,
 	workspaceKey,
 	repositoryRef string,
-) (*domain.Repo, error) {
+) (*workspacemodule.Repository, error) {
 	repository, err := resolver.repositories.Get(ctx, workspaceKey, repositoryRef)
 	if err == nil {
 		return validateSourceControlRepository(repository, workspaceKey, repositoryRef)
 	}
-	if !errors.Is(err, domain.ErrNotFound) {
+	if !store.IsNotFound(err) {
 		return nil, fmt.Errorf("resolve repository %q: %w", repositoryRef, err)
 	}
 	repositories, listErr := resolver.repositories.List(ctx, workspaceKey)
 	if listErr != nil {
 		return nil, fmt.Errorf("list repositories for reference %q: %w", repositoryRef, listErr)
 	}
-	var matched *domain.Repo
+	var matched *workspacemodule.Repository
 	for _, candidate := range repositories {
 		if candidate == nil {
 			return nil, fmt.Errorf("repository list contains a nil projection: %w", sourcecontrol.ErrInvalid)
@@ -430,16 +430,16 @@ func (resolver *sourceControlRepositoryResolver) resolveRepository(
 		matched = candidate
 	}
 	if matched == nil {
-		return nil, fmt.Errorf("repository reference %q: %w", repositoryRef, domain.ErrNotFound)
+		return nil, fmt.Errorf("repository reference %q: %w", repositoryRef, workspacemodule.ErrNotFound)
 	}
 	return validateSourceControlRepository(matched, workspaceKey, repositoryRef)
 }
 
 func validateSourceControlRepository(
-	repository *domain.Repo,
+	repository *workspacemodule.Repository,
 	workspaceKey,
 	repositoryRef string,
-) (*domain.Repo, error) {
+) (*workspacemodule.Repository, error) {
 	if repository == nil || repository.WorkspaceKey != workspaceKey ||
 		!safeLocalPathSegment(repository.Name) ||
 		!safeTokenFreeRemote(repository.RemoteURL) {

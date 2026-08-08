@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/connector"
+	"github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
 )
 
 const (
@@ -432,12 +432,12 @@ func normalizeRuntimeCredentialProvider(provider string) string {
 	}
 }
 
-func runtimeCredentialVault(dataDir string) (*connector.Vault, error) {
+func runtimeCredentialVault(dataDir string) (*connectorsvault.Vault, error) {
 	key, err := runtimeCredentialKey(dataDir)
 	if err != nil {
 		return nil, err
 	}
-	return connector.NewVault(key)
+	return connectorsvault.NewVault(key)
 }
 
 func runtimeCredentialKey(dataDir string) ([]byte, error) {

@@ -26,7 +26,7 @@ func TestProductionAwaitDispatchDoesNotFallbackToRawAtomicStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(root, "internal", "trigger", "await_matcher.go")
+	path := filepath.Join(root, "internal", "infra", "automationruntime", "await_matcher.go")
 	files := token.NewFileSet()
 	parsed, err := parser.ParseFile(files, path, nil, 0)
 	if err != nil {
@@ -64,17 +64,17 @@ func TestCheckedInManifestsAndRepository(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := len(report.CompositeStoreFiles), 67; got != want {
+	if got, want := len(report.CompositeStoreFiles), 18; got != want {
 		t.Fatalf("composite Store file count = %d, want %d; files = %v", got, want, report.CompositeStoreFiles)
 	}
-	if got, want := len(report.CompositeStoreOutside), 57; got != want {
+	if got, want := len(report.CompositeStoreOutside), 0; got != want {
 		t.Fatalf("outside-composition Store file count = %d, want %d", got, want)
 	}
-	if got, want := len(report.LegacyHandlerImports), 82; got != want {
+	if got, want := len(report.LegacyHandlerImports), 27; got != want {
 		t.Fatalf("legacy handler imports = %d, want %d", got, want)
 	}
 	if got, want := report.ModuleRoots, checkedInModuleRoots; !slices.Equal(got, want) {
-		t.Fatalf("module roots = %v, want active Phase 5 extractions %v", got, want)
+		t.Fatalf("module roots = %v, want active capability extractions %v", got, want)
 	}
 	if got, want := len(report.PendingDecisions), 0; got != want {
 		t.Fatalf("pending decisions = %d, want %d", got, want)
@@ -82,10 +82,10 @@ func TestCheckedInManifestsAndRepository(t *testing.T) {
 	if got, want := report.AnalysisProfilesEnforced, 11; got != want {
 		t.Fatalf("enforced analysis profiles = %d, want %d", got, want)
 	}
-	if got, want := report.MutationCommands, 105; got != want {
+	if got, want := report.MutationCommands, 107; got != want {
 		t.Fatalf("mutation commands = %d, want %d", got, want)
 	}
-	if got, want := report.DirectPersistenceWrites, 225; got != want {
+	if got, want := report.DirectPersistenceWrites, 102; got != want {
 		t.Fatalf("direct persistence-write rows = %d, want %d", got, want)
 	}
 	if got, want := report.RuntimeComponents, 71; got != want {
@@ -205,7 +205,7 @@ func TestMutationLedgerMatchesProductionExecutionMutationInventory(t *testing.T)
 		t.Fatalf("Execution action exclusions observed = %v, want all documented exclusions %v", observedExclusions, exclusions)
 	}
 	slices.Sort(want)
-	if gotCount, wantCount := len(got), 42; gotCount != wantCount {
+	if gotCount, wantCount := len(got), 43; gotCount != wantCount {
 		t.Fatalf("Execution mutation commands = %d, want %d; commands = %v", gotCount, wantCount, got)
 	}
 	if !slices.Equal(got, want) {
@@ -351,10 +351,10 @@ func TestPhase4LedgerDistinguishesReceiptsFromStateConvergence(t *testing.T) {
 	}
 
 	immutableReceiptMarkers := map[string]string{
-		"artifacts.declare":                             "An exact retry returns",
-		"artifacts.finalize":                            "Exact command-receipt replay",
+		"artifacts.declare":                             "an exact finalized digest returns without rewriting",
+		"artifacts.finalize":                            "returns an exact finalized match without rewriting",
 		"artifacts.reference":                           "immutable receipt",
-		"artifacts.upload":                              "Exact command-receipt replay",
+		"artifacts.upload":                              "a finalized exact match is returned without another upload",
 		"execution.append-log":                          "Exact request replay",
 		"execution.claim-driver-run":                    "Exact request replay",
 		"execution.claim-driver-run-work-item":          "Exact request replay",
@@ -463,13 +463,18 @@ func TestPhase5InteractionLedgerPinsDeliveryAuthorityAndAttemptFencing(t *testin
 	}
 }
 
+// TestCheckedInPhase6ArchitectureContracts keeps the completed Phase 6
+// contract monotonic after later migration phases advance the checked graph.
+// Historical acceptance required equality at Phase 6; current heads must keep
+// at least those roots and commands while allowing the Phase 7 ratchet to add
+// owners and commands.
 func TestCheckedInPhase6ArchitectureContracts(t *testing.T) {
 	graph, err := LoadCapabilityGraph(filepath.Join("testdata", "capability-graph.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if graph.CompletedPhase != 6 {
-		t.Fatalf("completed phase = %d, want 6", graph.CompletedPhase)
+	if graph.CompletedPhase < 6 {
+		t.Fatalf("completed phase = %d, want at least 6", graph.CompletedPhase)
 	}
 	statusByCapability := make(map[string]string, len(graph.Capabilities))
 	for _, capability := range graph.Capabilities {
@@ -486,6 +491,46 @@ func TestCheckedInPhase6ArchitectureContracts(t *testing.T) {
 		"workflowcatalog",
 	} {
 		if statusByCapability[capability] != "active" {
+			t.Fatalf("Phase 6 capability %s status = %q, want active", capability, statusByCapability[capability])
+		}
+	}
+	ledger, err := LoadMutationLedger(filepath.Join("testdata", "mutation-ledger.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ledger.Commands) < 105 {
+		t.Fatalf("mutation commands = %d, want at least the 105 Phase 6 commands", len(ledger.Commands))
+	}
+}
+
+func TestCheckedInPhase7ArchitectureContracts(t *testing.T) {
+	graph, err := LoadCapabilityGraph(filepath.Join("testdata", "capability-graph.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if graph.CompletedPhase != 7 {
+		t.Fatalf("completed phase = %d, want 7", graph.CompletedPhase)
+	}
+	if len(graph.LegacyPaths) != 0 {
+		t.Fatalf("legacy paths remain after Phase 7 completion: %+v", graph.LegacyPaths)
+	}
+	statusByCapability := make(map[string]string, len(graph.Capabilities))
+	for _, capability := range graph.Capabilities {
+		statusByCapability[capability.Name] = capability.Status
+	}
+	for _, capability := range []string{
+		"agents",
+		"artifacts",
+		"automation",
+		"connectors",
+		"execution",
+		"interaction",
+		"sourcecontrol",
+		"workitems",
+		"workflowcatalog",
+		"workspace",
+	} {
+		if statusByCapability[capability] != "active" {
 			t.Fatalf("capability %s status = %q, want active", capability, statusByCapability[capability])
 		}
 	}
@@ -494,8 +539,8 @@ func TestCheckedInPhase6ArchitectureContracts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ledger.Commands) != 105 {
-		t.Fatalf("mutation commands = %d, want 105", len(ledger.Commands))
+	if len(ledger.Commands) != 107 {
+		t.Fatalf("mutation commands = %d, want 107", len(ledger.Commands))
 	}
 }
 
@@ -527,8 +572,7 @@ func TestPhase5InteractionOwnershipBlockerRatchet(t *testing.T) {
 		}
 		rel = filepath.ToSlash(rel)
 		if strings.HasPrefix(rel, "internal/infra/") ||
-			strings.HasPrefix(rel, "internal/modules/interaction/") ||
-			rel == "internal/cli/cmdstore/store_tracing_control_plane.go" {
+			strings.HasPrefix(rel, "internal/modules/interaction/") {
 			return nil
 		}
 		contents, err := os.ReadFile(path) // #nosec G122 -- WalkDir is rooted in the checked-out repository and does not follow symlinks.
@@ -557,8 +601,8 @@ func TestPhase5InteractionOwnershipBlockerRatchet(t *testing.T) {
 			observed,
 		)
 	}
-	if graph.CompletedPhase != 6 {
-		t.Fatalf("completed_phase = %d after zero direct Interaction aggregate mutation blockers, want 6", graph.CompletedPhase)
+	if graph.CompletedPhase != 7 {
+		t.Fatalf("completed_phase = %d after zero direct Interaction aggregate mutation blockers, want 7", graph.CompletedPhase)
 	}
 }
 
@@ -624,6 +668,115 @@ func TestRetiredLegacyWorkflowsPathCannotReturn(t *testing.T) {
 	slices.Sort(observed)
 	if len(observed) != 0 {
 		t.Fatalf("retired internal/workflows callers = %v, want none", observed)
+	}
+}
+
+func TestPhase7RetiredHorizontalRootsCannotReturn(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	retired := []string{
+		"internal/agentinbox",
+		"internal/connector",
+		"internal/leadcontrol",
+		"internal/modules/sourcecontrol/stackpublish",
+		"internal/stacklineage",
+		"internal/stackpublish",
+		"internal/stackstore",
+		"internal/trigger",
+		"internal/webui/service",
+		"internal/webui/svcimpl",
+		"internal/workspace",
+		"internal/workflows",
+	}
+	for _, relative := range retired {
+		relative := relative
+		t.Run(strings.ReplaceAll(relative, "/", "_"), func(t *testing.T) {
+			retiredRoot := filepath.Join(root, filepath.FromSlash(relative))
+			if walkErr := filepath.WalkDir(retiredRoot, func(path string, entry os.DirEntry, walkErr error) error {
+				if walkErr != nil {
+					return walkErr
+				}
+				if !entry.IsDir() {
+					t.Errorf("retired horizontal root contains %s", path)
+				}
+				return nil
+			}); walkErr != nil && !os.IsNotExist(walkErr) {
+				t.Fatal(walkErr)
+			}
+
+			importPath := "github.com/tysonthomas9/loomcli/" + relative
+			var callers []string
+			walkErr := filepath.WalkDir(filepath.Join(root, "internal"), func(path string, entry os.DirEntry, walkErr error) error {
+				if walkErr != nil {
+					return walkErr
+				}
+				if entry.IsDir() || !strings.HasSuffix(path, ".go") {
+					return nil
+				}
+				parsed, parseErr := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
+				if parseErr != nil {
+					return parseErr
+				}
+				for _, imported := range parsed.Imports {
+					value, unquoteErr := strconv.Unquote(imported.Path.Value)
+					if unquoteErr != nil {
+						return unquoteErr
+					}
+					if value == importPath || strings.HasPrefix(value, importPath+"/") {
+						rel, relErr := filepath.Rel(root, path)
+						if relErr != nil {
+							return relErr
+						}
+						callers = append(callers, filepath.ToSlash(rel))
+						break
+					}
+				}
+				return nil
+			})
+			if walkErr != nil {
+				t.Fatal(walkErr)
+			}
+			slices.Sort(callers)
+			if len(callers) != 0 {
+				t.Fatalf("retired horizontal root callers = %v, want none", callers)
+			}
+		})
+	}
+}
+
+func TestPhase7LegacyTypeBucketsCannotPublishAliases(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, relative := range []string{"internal/domain", "internal/entity", "internal/types"} {
+		relative := relative
+		t.Run(strings.ReplaceAll(relative, "/", "_"), func(t *testing.T) {
+			files, err := filepath.Glob(filepath.Join(root, filepath.FromSlash(relative), "*.go"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, path := range files {
+				parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, declaration := range parsed.Decls {
+					generic, ok := declaration.(*ast.GenDecl)
+					if !ok || generic.Tok != token.TYPE {
+						continue
+					}
+					for _, specification := range generic.Specs {
+						typeSpec, ok := specification.(*ast.TypeSpec)
+						if ok && typeSpec.Assign.IsValid() {
+							t.Errorf("legacy compatibility alias %s remains in %s", typeSpec.Name.Name, path)
+						}
+					}
+				}
+			}
+		})
 	}
 }
 

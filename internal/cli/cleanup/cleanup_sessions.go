@@ -4,13 +4,14 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/infra/sessionstoreadapter"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
 // cleanupSessions purges old session directories and compacts the sessions index.
 // Returns (purged count, compacted entry count, error).
 func cleanupSessions(runtimeDir string, maxAge time.Duration, dryRun bool) (int, int, error) {
-	store, err := sessions.NewStore(runtimeDir)
+	store, err := sessionstoreadapter.New(runtimeDir)
 	if err != nil {
 		return 0, 0, fmt.Errorf("open session store: %w", err)
 	}
@@ -20,13 +21,13 @@ func cleanupSessions(runtimeDir string, maxAge time.Duration, dryRun bool) (int,
 	}
 
 	// Purge old session directories.
-	purged, err := store.PurgeOlderThan(maxAge)
+	purged, err := sessionstoreadapter.PurgeOlderThan(store, maxAge)
 	if err != nil {
 		return purged, 0, fmt.Errorf("purge sessions: %w", err)
 	}
 
 	// Compact index AFTER purge so orphaned entries are detected.
-	compacted, err := store.CompactIndex()
+	compacted, err := sessionstoreadapter.CompactIndex(store)
 	if err != nil {
 		return purged, 0, fmt.Errorf("compact sessions index: %w", err)
 	}

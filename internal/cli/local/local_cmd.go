@@ -38,6 +38,13 @@ var (
 	localServiceMaxRestartDelay = 30 * time.Second
 )
 
+// localServeStartupTimeout includes replaying the embedded FleetDB snapshot
+// and rebuilding its in-memory indexes before the HTTP health endpoint can
+// answer. Production desktop state can legitimately contain hundreds of
+// thousands of keys, so this budget must cover a full durable restart rather
+// than only a fresh-store boot.
+const localServeStartupTimeout = 2 * time.Minute
+
 var localCmd = &cobra.Command{
 	Use:     "local",
 	Short:   "Manage the local desktop runtime",
@@ -402,11 +409,11 @@ func wrapServeStartupError(dataDir string, healthErr error) error {
 	}
 }
 
-// awaitServeHealthy polls the serve URL until it becomes ready or the
-// 30s budget expires. Marks the runtime info accordingly; on timeout the
+// awaitServeHealthy polls the serve URL until it becomes ready or the startup
+// budget expires. Marks the runtime info accordingly; on timeout the
 // child serve process is killed.
 func awaitServeHealthy(ctx context.Context, cfg *localServiceConfig, info *runtimeInfo, serveCmd *exec.Cmd) error {
-	waitCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	waitCtx, cancel := context.WithTimeout(ctx, localServeStartupTimeout)
 	defer cancel()
 	if err := waitForRuntime(waitCtx, cfg.url); err != nil {
 		wrapped := wrapServeStartupError(cfg.dataDir, err)

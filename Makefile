@@ -693,8 +693,8 @@ check-go:
 	@./scripts/check-go-api-staleness.sh
 # The production architecture pass above, or CI's separate measured job, runs
 # the full repository scan and enforces the exact checked-in snapshot. Keep
-# focused archtest coverage in the race pass, but do not repeat its
-# repository-scale integration test.
+# focused archtest coverage in the race pass, but do not repeat the two
+# repository-scale scans already enforced by that measured transaction.
 	@echo "=== [15/16] Go: test with race detector ==="
 	@set -e; coverage_profile=; \
 	cleanup_coverage() { \
@@ -709,7 +709,9 @@ check-go:
 	trap 'exit 143' TERM; \
 	coverage_profile=$$(mktemp "$${TMPDIR:-/tmp}/loom-coverage.XXXXXX"); \
 	./scripts/with-clean-loom-env.sh go test -p $(GATE_GO_TEST_PARALLELISM) -race -covermode=atomic \
-		-coverprofile="$$coverage_profile" -skip '^TestCheckedInManifestsAndRepository$$' -timeout 15m ./...; \
+		-coverprofile="$$coverage_profile" \
+		-skip '^(TestCheckedInManifestsAndRepository|TestPhase5AgentsOwnershipBlockerRatchet)$$' \
+		-timeout 15m ./...; \
 	echo "=== [16/16] Go: coverage threshold ==="; \
 	COVERAGE_PROFILE="$$coverage_profile" COVERAGE_THRESHOLD=60 ./scripts/check-coverage.sh
 	@echo "=== Go quality gates PASSED ==="

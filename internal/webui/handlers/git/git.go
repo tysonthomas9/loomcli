@@ -8,9 +8,10 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
+	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // validGitRef matches safe git ref names: alphanumeric, hyphens, underscores, dots, slashes.
@@ -21,7 +22,7 @@ var validGitRef = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_./-]*$`)
 // writeAgentGitError maps a service error to an HTTP response for agent git handlers.
 // ServiceErrors use HandleServiceError; other errors use the given fallback status.
 func writeAgentGitError(w http.ResponseWriter, err error, fallbackStatus int) {
-	var svcErr *service.ServiceError
+	var svcErr *apperrors.ServiceError
 	if errors.As(err, &svcErr) {
 		handler.HandleServiceError(w, err)
 		return
@@ -37,7 +38,7 @@ type gitPushRequest struct {
 
 // HandleGitPush handles POST /api/agents/{name}/git/push
 // Merges the agent's worktree branch INTO the target branch (loom push semantics).
-func HandleGitPush(svc service.AgentService) http.HandlerFunc {
+func HandleGitPush(svc agentcoord.AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		agentName := r.PathValue("name")
 		wsID := middleware.WorkspaceFromContext(r.Context())
@@ -73,7 +74,7 @@ func HandleGitPush(svc service.AgentService) http.HandlerFunc {
 
 // HandleGitPushAll handles POST /api/git/push-all
 // Pushes all agent worktree branches to their target branches.
-func HandleGitPushAll(svc service.AgentService) http.HandlerFunc {
+func HandleGitPushAll(svc agentcoord.AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
 
@@ -95,7 +96,7 @@ type gitPullRequest struct {
 
 // HandleGitPull handles POST /api/agents/{name}/git/pull
 // Merges the source branch INTO the agent's worktree branch.
-func HandleGitPull(svc service.AgentService) http.HandlerFunc {
+func HandleGitPull(svc agentcoord.AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		agentName := r.PathValue("name")
 		wsID := middleware.WorkspaceFromContext(r.Context())
@@ -131,7 +132,7 @@ func HandleGitPull(svc service.AgentService) http.HandlerFunc {
 
 // HandleGitSync handles POST /api/agents/{name}/git/sync
 // Full push+pull cycle: first push to target, then pull from target.
-func HandleGitSync(svc service.AgentService) http.HandlerFunc {
+func HandleGitSync(svc agentcoord.AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		agentName := r.PathValue("name")
 		wsID := middleware.WorkspaceFromContext(r.Context())
@@ -165,7 +166,7 @@ type gitPRRequest struct {
 
 // HandleGitPR handles POST /api/agents/{name}/git/pr
 // Creates a GitHub PR from the agent's worktree branch.
-func HandleGitPR(svc service.AgentService) http.HandlerFunc {
+func HandleGitPR(svc agentcoord.AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		agentName := r.PathValue("name")
 		wsID := middleware.WorkspaceFromContext(r.Context())
@@ -218,7 +219,7 @@ type lockInfoResp struct {
 
 // HandleGitReset handles POST /api/agents/{name}/git/reset
 // Hard resets the worktree to a branch.
-func HandleGitReset(svc service.AgentService) http.HandlerFunc {
+func HandleGitReset(svc agentcoord.AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		agentName := r.PathValue("name")
 		wsID := middleware.WorkspaceFromContext(r.Context())
@@ -262,7 +263,7 @@ func HandleGitReset(svc service.AgentService) http.HandlerFunc {
 
 // HandleGitStatus handles GET /api/agents/{name}/git/status
 // Returns detailed git status for the agent's worktree.
-func HandleGitStatus(svc service.AgentService) http.HandlerFunc {
+func HandleGitStatus(svc agentcoord.AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		agentName := r.PathValue("name")
 		wsID := middleware.WorkspaceFromContext(r.Context())
@@ -290,7 +291,7 @@ type gitTargetResponse struct {
 
 // HandleGitTargetUpdate handles PATCH /api/agents/{name}/git/target
 // Changes the target/integration branch for a worktree.
-func HandleGitTargetUpdate(svc service.AgentService) http.HandlerFunc {
+func HandleGitTargetUpdate(svc agentcoord.AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		agentName := r.PathValue("name")
 		wsID := middleware.WorkspaceFromContext(r.Context())

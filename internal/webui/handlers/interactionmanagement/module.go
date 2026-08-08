@@ -73,7 +73,7 @@ func (module *Module) Register(mux *http.ServeMux) {
 		return
 	}
 	mux.HandleFunc(
-		"GET /api/workspaces/{ws}/agents/{agentId}/activity",
+		"GET /api/workspaces/{ws}/agents/{id}/activity",
 		module.listAgentActivity,
 	)
 	mux.HandleFunc(
@@ -517,7 +517,7 @@ func sessionLeaseTTL(response http.ResponseWriter, seconds int) (time.Duration, 
 
 func (module *Module) listAgentActivity(response http.ResponseWriter, request *http.Request) {
 	workspace := canonicalWorkspaceFromRequest(request)
-	agentID := strings.TrimSpace(request.PathValue("agentId"))
+	agentID := strings.TrimSpace(request.PathValue("id"))
 	if workspace == "" || agentID == "" {
 		writeError(response, http.StatusBadRequest, "invalid", "canonical workspace and agent id are required")
 		return

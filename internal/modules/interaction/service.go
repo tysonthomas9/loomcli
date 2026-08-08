@@ -93,7 +93,7 @@ func (service *Service) persistOwnedTranscript(
 	session *AgentSession,
 ) (*AgentSession, error) {
 	artifactID := "transcript-" + command.SessionID
-	persistedID, err := service.transcripts.CreateContent(ctx, TranscriptArtifactCreate{
+	persistedID, err := service.transcripts.CreateContent(ctx, auth, TranscriptArtifactCreate{
 		WorkspaceKey: command.WorkspaceKey,
 		ArtifactID:   artifactID,
 		AgentID:      session.AgentID,

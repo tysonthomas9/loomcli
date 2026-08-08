@@ -7,25 +7,27 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/app/workitemmove"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/issues"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
 	hterminal "github.com/tysonthomas9/loomcli/internal/webui/handlers/terminal"
-	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
 // NewIssueModules creates the issue and session modules.
-func NewIssueModules(issueSvc service.IssueService, sessSvc service.SessionService, st store.Store) []interface{ Register(*http.ServeMux) } {
+func NewIssueModules(workItems workitems.API, mover workitemmove.Commands, sessSvc sessioncoord.SessionService) []interface{ Register(*http.ServeMux) } {
 	return []interface{ Register(*http.ServeMux) }{
-		issues.NewIssueModule(issueSvc, st),
+		issues.NewIssueModule(workItems, mover),
 		issues.NewSessionModule(sessSvc, issues.SessionModuleOpts{
 			ListTaskSessions:     misc.HandleListTaskSessions(sessSvc),
 			GetSession:           misc.HandleGetSession(sessSvc),
@@ -39,8 +41,8 @@ func NewIssueModules(issueSvc service.IssueService, sessSvc service.SessionServi
 // modules. PTYMgr drives the main terminal WS; AgentTmuxMgr is kept only for
 // the live agent-view WS, which still reads auto-mode tmux sessions.
 type TerminalModuleDeps struct {
-	TermSvc            service.TerminalService
-	AgentSvc           service.AgentService
+	TermSvc            terminal.TerminalService
+	AgentSvc           agentcoord.AgentService
 	PTYMgr             terminal.PTYSource
 	AgentTmuxMgr       *terminal.AgentTmuxManager // may be nil when tmux is missing
 	TermAuth           *realtime.TerminalAuth
@@ -74,12 +76,13 @@ func NewTerminalModules(deps TerminalModuleDeps) []interface{ Register(*http.Ser
 			hterminal.InteractionDependencies{
 				API: deps.Interaction, Operator: deps.Operator,
 				SessionAuthorities: deps.SessionAuthorities,
+				TerminalIdentities: deps.TermSvc,
 			},
 			deps.Agents),
 	}
 }
 
 // NewIssueTabModule creates the issue tab module.
-func NewIssueTabModule(issueTabStore *issuetabs.Store, hub *realtime.Hub) interface{ Register(*http.ServeMux) } {
-	return issues.NewIssueTabModule(issueTabStore, hub)
+func NewIssueTabModule(issueTabs interaction.IssueTabStateAPI, hub *realtime.Hub) interface{ Register(*http.ServeMux) } {
+	return issues.NewIssueTabModule(issueTabs, hub)
 }

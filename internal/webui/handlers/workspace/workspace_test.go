@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 )
 
 func TestHandleActiveWorkspace_EmptyResponse(t *testing.T) {
@@ -90,7 +90,7 @@ func TestHandleActiveWorkspace_WithRepos(t *testing.T) {
 func TestHandleActiveWorkspace_ConfigError(t *testing.T) {
 	svc := &mockWorkspaceService{
 		getActiveWorkspaceFn: func(_ context.Context) (*ops.WorkspaceData, error) {
-			return nil, service.ErrInternal("config broken", nil)
+			return nil, apperrors.ErrInternal("config broken", nil)
 		},
 	}
 	handler := handleActiveWorkspace(svc)

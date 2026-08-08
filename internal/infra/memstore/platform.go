@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -15,16 +17,16 @@ import (
 
 type driverStore struct {
 	mu    sync.RWMutex
-	items map[string]map[string]*domain.Driver
+	items map[string]map[string]*workflowcatalog.Driver
 }
 
 func newDriverStore() *driverStore {
-	return &driverStore{items: make(map[string]map[string]*domain.Driver)}
+	return &driverStore{items: make(map[string]map[string]*workflowcatalog.Driver)}
 }
 
 var _ store.DriverStore = (*driverStore)(nil)
 
-func (s *driverStore) Create(_ context.Context, in store.DriverCreate) (*domain.Driver, error) {
+func (s *driverStore) Create(_ context.Context, in store.DriverCreate) (*workflowcatalog.Driver, error) {
 	if in.WorkspaceKey == "" || in.DriverID == "" || in.Name == "" {
 		return nil, fmt.Errorf("workspace_key + driver_id + name required: %w", domain.ErrInvalid)
 	}
@@ -40,7 +42,7 @@ func (s *driverStore) Create(_ context.Context, in store.DriverCreate) (*domain.
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.items[in.WorkspaceKey] == nil {
-		s.items[in.WorkspaceKey] = make(map[string]*domain.Driver)
+		s.items[in.WorkspaceKey] = make(map[string]*workflowcatalog.Driver)
 	}
 	if _, ok := s.items[in.WorkspaceKey][in.DriverID]; ok {
 		return nil, fmt.Errorf("driver %q in workspace %q: %w", in.DriverID, in.WorkspaceKey, domain.ErrAlreadyExists)
@@ -48,19 +50,19 @@ func (s *driverStore) Create(_ context.Context, in store.DriverCreate) (*domain.
 	now := time.Now().UTC()
 	ownerType := in.OwnerType
 	if ownerType == "" {
-		ownerType = domain.DriverOwnerUser
+		ownerType = workflowcatalog.DriverOwnerUser
 	}
 	status := in.Status
 	if status == "" {
-		status = domain.DriverStatusDraft
+		status = workflowcatalog.DriverStatusDraft
 	}
 	trust := in.TrustLevel
 	if trust == "" {
 		// Unknown/missing = untrusted (fail closed) — mirrors fleet-db's
 		// Driver.Validate stamp; registration paths set an explicit level.
-		trust = domain.DriverTrustUntrusted
+		trust = workflowcatalog.DriverTrustUntrusted
 	}
-	driver := &domain.Driver{
+	driver := &workflowcatalog.Driver{
 		WorkspaceKey: in.WorkspaceKey,
 		DriverID:     in.DriverID,
 		Name:         in.Name,
@@ -77,7 +79,7 @@ func (s *driverStore) Create(_ context.Context, in store.DriverCreate) (*domain.
 	return cloneDriver(driver), nil
 }
 
-func (s *driverStore) Get(_ context.Context, ws, driverID string) (*domain.Driver, error) {
+func (s *driverStore) Get(_ context.Context, ws, driverID string) (*workflowcatalog.Driver, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	driver, ok := s.items[ws][driverID]
@@ -87,10 +89,10 @@ func (s *driverStore) Get(_ context.Context, ws, driverID string) (*domain.Drive
 	return cloneDriver(driver), nil
 }
 
-func (s *driverStore) List(_ context.Context, ws string, filter store.DriverFilter) ([]*domain.Driver, error) {
+func (s *driverStore) List(_ context.Context, ws string, filter store.DriverFilter) ([]*workflowcatalog.Driver, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	out := make([]*domain.Driver, 0, len(s.items[ws]))
+	out := make([]*workflowcatalog.Driver, 0, len(s.items[ws]))
 	for _, driver := range s.items[ws] {
 		if driverMatchesMem(driver, filter) {
 			out = append(out, cloneDriver(driver))
@@ -103,14 +105,14 @@ func (s *driverStore) List(_ context.Context, ws string, filter store.DriverFilt
 	return out, nil
 }
 
-func (s *driverStore) Update(_ context.Context, ws, driverID string, patch store.DriverUpdate) (*domain.Driver, error) {
+func (s *driverStore) Update(_ context.Context, ws, driverID string, patch store.DriverUpdate) (*workflowcatalog.Driver, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	driver, ok := s.items[ws][driverID]
 	if !ok {
 		return nil, fmt.Errorf("driver %q in workspace %q: %w", driverID, ws, domain.ErrNotFound)
 	}
-	if patch.Status != nil && *patch.Status == domain.DriverStatusActive {
+	if patch.Status != nil && *patch.Status == workflowcatalog.DriverStatusActive {
 		return nil, fmt.Errorf("active status is lifecycle-owned; use Workflow Catalog ActivateVersion: %w", domain.ErrInvalid)
 	}
 	var replacementMetadata map[string]string
@@ -152,7 +154,7 @@ func (s *driverStore) Update(_ context.Context, ws, driverID string, patch store
 func (s *Store) ApproveDriverVersionForTest(
 	ctx context.Context,
 	workspace, driverID, versionID string,
-) (*domain.Driver, error) {
+) (*workflowcatalog.Driver, error) {
 	version, err := s.versions.Get(ctx, workspace, versionID)
 	if err != nil {
 		return nil, err
@@ -160,7 +162,7 @@ func (s *Store) ApproveDriverVersionForTest(
 	if version.DriverID != driverID {
 		return nil, fmt.Errorf("version %q is not owned by driver %q: %w", versionID, driverID, domain.ErrInvalid)
 	}
-	if version.ValidationStatus != domain.DriverVersionValidationPassed {
+	if version.ValidationStatus != workflowcatalog.DriverVersionValidationPassed {
 		return nil, fmt.Errorf("version %q has not passed validation: %w", versionID, domain.ErrInvalid)
 	}
 
@@ -184,7 +186,7 @@ func (s *Store) ApproveDriverVersionForTest(
 func (s *Store) UnapproveDriverVersionForTest(
 	ctx context.Context,
 	workspace, driverID, versionID string,
-) (*domain.Driver, error) {
+) (*workflowcatalog.Driver, error) {
 	version, err := s.versions.Get(ctx, workspace, versionID)
 	if err != nil {
 		return nil, err
@@ -211,7 +213,7 @@ func (s *Store) UnapproveDriverVersionForTest(
 func (s *Store) ActivateDriverVersionForTest(
 	ctx context.Context,
 	workspace, driverID, versionID string,
-) (*domain.Driver, error) {
+) (*workflowcatalog.Driver, error) {
 	version, err := s.versions.Get(ctx, workspace, versionID)
 	if err != nil {
 		return nil, err
@@ -219,7 +221,7 @@ func (s *Store) ActivateDriverVersionForTest(
 	if version.DriverID != driverID {
 		return nil, fmt.Errorf("version %q is not owned by driver %q: %w", versionID, driverID, domain.ErrInvalid)
 	}
-	if version.ValidationStatus != domain.DriverVersionValidationPassed {
+	if version.ValidationStatus != workflowcatalog.DriverVersionValidationPassed {
 		return nil, fmt.Errorf("version %q has not passed validation: %w", versionID, domain.ErrInvalid)
 	}
 
@@ -233,7 +235,7 @@ func (s *Store) ActivateDriverVersionForTest(
 		return nil, fmt.Errorf("version %q is not approved: %w", versionID, domain.ErrInvalid)
 	}
 	driver.ActiveVersionID = versionID
-	driver.Status = domain.DriverStatusActive
+	driver.Status = workflowcatalog.DriverStatusActive
 	driver.Revision++
 	driver.UpdatedAt = time.Now().UTC()
 	return cloneDriver(driver), nil
@@ -275,17 +277,17 @@ func (s *driverStore) exists(ws, driverID string) bool {
 
 type driverVersionStore struct {
 	mu      sync.RWMutex
-	items   map[string]map[string]*domain.DriverVersion
+	items   map[string]map[string]*workflowcatalog.DriverVersion
 	drivers *driverStore
 }
 
 func newDriverVersionStore(drivers *driverStore) *driverVersionStore {
-	return &driverVersionStore{items: make(map[string]map[string]*domain.DriverVersion), drivers: drivers}
+	return &driverVersionStore{items: make(map[string]map[string]*workflowcatalog.DriverVersion), drivers: drivers}
 }
 
 var _ store.DriverVersionStore = (*driverVersionStore)(nil)
 
-func (s *driverVersionStore) Create(_ context.Context, in store.DriverVersionCreate) (*domain.DriverVersion, error) {
+func (s *driverVersionStore) Create(_ context.Context, in store.DriverVersionCreate) (*workflowcatalog.DriverVersion, error) {
 	if in.WorkspaceKey == "" || in.VersionID == "" || in.DriverID == "" || in.Version <= 0 || in.SourceDigest == "" || in.BundleDigest == "" {
 		return nil, fmt.Errorf("workspace_key + version_id + driver_id + version + source_digest + bundle_digest required: %w", domain.ErrInvalid)
 	}
@@ -295,16 +297,16 @@ func (s *driverVersionStore) Create(_ context.Context, in store.DriverVersionCre
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.items[in.WorkspaceKey] == nil {
-		s.items[in.WorkspaceKey] = make(map[string]*domain.DriverVersion)
+		s.items[in.WorkspaceKey] = make(map[string]*workflowcatalog.DriverVersion)
 	}
 	if _, ok := s.items[in.WorkspaceKey][in.VersionID]; ok {
 		return nil, fmt.Errorf("driver version %q in workspace %q: %w", in.VersionID, in.WorkspaceKey, domain.ErrAlreadyExists)
 	}
 	status := in.ValidationStatus
 	if status == "" {
-		status = domain.DriverVersionValidationPending
+		status = workflowcatalog.DriverVersionValidationPending
 	}
-	version := &domain.DriverVersion{
+	version := &workflowcatalog.DriverVersion{
 		WorkspaceKey:     in.WorkspaceKey,
 		VersionID:        in.VersionID,
 		DriverID:         in.DriverID,
@@ -324,7 +326,7 @@ func (s *driverVersionStore) Create(_ context.Context, in store.DriverVersionCre
 	return cloneDriverVersion(version), nil
 }
 
-func (s *driverVersionStore) Get(_ context.Context, ws, versionID string) (*domain.DriverVersion, error) {
+func (s *driverVersionStore) Get(_ context.Context, ws, versionID string) (*workflowcatalog.DriverVersion, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	version, ok := s.items[ws][versionID]
@@ -334,10 +336,10 @@ func (s *driverVersionStore) Get(_ context.Context, ws, versionID string) (*doma
 	return cloneDriverVersion(version), nil
 }
 
-func (s *driverVersionStore) List(_ context.Context, ws string, filter store.DriverVersionFilter) ([]*domain.DriverVersion, error) {
+func (s *driverVersionStore) List(_ context.Context, ws string, filter store.DriverVersionFilter) ([]*workflowcatalog.DriverVersion, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	out := make([]*domain.DriverVersion, 0, len(s.items[ws]))
+	out := make([]*workflowcatalog.DriverVersion, 0, len(s.items[ws]))
 	for _, version := range s.items[ws] {
 		if driverVersionMatchesMem(version, filter) {
 			out = append(out, cloneDriverVersion(version))
@@ -359,18 +361,18 @@ func (s *driverVersionStore) belongsToDriver(ws, versionID, driverID string) boo
 
 type triggerBindingStore struct {
 	mu       sync.RWMutex
-	items    map[string]map[string]*domain.TriggerBinding
+	items    map[string]map[string]*automation.Binding
 	versions *driverVersionStore
 	services *agentServiceStore
 }
 
 func newTriggerBindingStore(versions *driverVersionStore, services *agentServiceStore) *triggerBindingStore {
-	return &triggerBindingStore{items: make(map[string]map[string]*domain.TriggerBinding), versions: versions, services: services}
+	return &triggerBindingStore{items: make(map[string]map[string]*automation.Binding), versions: versions, services: services}
 }
 
 var _ store.TriggerBindingStore = (*triggerBindingStore)(nil)
 
-func (s *triggerBindingStore) Create(_ context.Context, in store.TriggerBindingCreate) (*domain.TriggerBinding, error) {
+func (s *triggerBindingStore) Create(_ context.Context, in store.TriggerBindingCreate) (*automation.Binding, error) {
 	in = in.WithDerivedRoute()
 	if err := s.validateTriggerBindingCreate(in); err != nil {
 		return nil, err
@@ -378,7 +380,7 @@ func (s *triggerBindingStore) Create(_ context.Context, in store.TriggerBindingC
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.items[in.WorkspaceKey] == nil {
-		s.items[in.WorkspaceKey] = make(map[string]*domain.TriggerBinding)
+		s.items[in.WorkspaceKey] = make(map[string]*automation.Binding)
 	}
 	if _, ok := s.items[in.WorkspaceKey][in.BindingID]; ok {
 		return nil, fmt.Errorf("trigger binding %q in workspace %q: %w", in.BindingID, in.WorkspaceKey, domain.ErrAlreadyExists)
@@ -419,9 +421,9 @@ func (s *triggerBindingStore) ensureTriggerBindingRouteAvailableLocked(in store.
 	return nil
 }
 
-func newTriggerBindingMem(in store.TriggerBindingCreate) *domain.TriggerBinding {
+func newTriggerBindingMem(in store.TriggerBindingCreate) *automation.Binding {
 	now := time.Now().UTC()
-	return &domain.TriggerBinding{
+	return &automation.Binding{
 		WorkspaceKey:         in.WorkspaceKey,
 		BindingID:            in.BindingID,
 		Name:                 in.Name,
@@ -444,8 +446,8 @@ func newTriggerBindingMem(in store.TriggerBindingCreate) *domain.TriggerBinding 
 		WebhookSecret:        in.WebhookSecret,
 		SubjectKeyTemplate:   in.SubjectKeyTemplate,
 		ActorFilter:          normalizedActorFilterMem(in.ActorFilter),
-		RetryMaxAttempts:     defaultRetryFieldMem(in.RetryMaxAttempts, domain.DefaultTriggerRetryMaxAttempts),
-		RetryBackoffSeconds:  defaultRetryFieldMem(in.RetryBackoffSeconds, domain.DefaultTriggerRetryBackoffSeconds),
+		RetryMaxAttempts:     defaultRetryFieldMem(in.RetryMaxAttempts, automation.DefaultTriggerRetryMaxAttempts),
+		RetryBackoffSeconds:  defaultRetryFieldMem(in.RetryBackoffSeconds, automation.DefaultTriggerRetryBackoffSeconds),
 		Schedule:             in.Schedule,
 		ScheduleTimezone:     in.ScheduleTimezone,
 		Permissions:          append([]string(nil), in.Permissions...),
@@ -455,14 +457,14 @@ func newTriggerBindingMem(in store.TriggerBindingCreate) *domain.TriggerBinding 
 	}
 }
 
-func defaultTriggerBindingConcurrencyMem(policy domain.TriggerBindingConcurrencyPolicy) domain.TriggerBindingConcurrencyPolicy {
+func defaultTriggerBindingConcurrencyMem(policy automation.BindingConcurrencyPolicy) automation.BindingConcurrencyPolicy {
 	if policy == "" {
-		return domain.TriggerBindingConcurrencyOneActivePerEpic
+		return automation.ConcurrencyOneActivePerEpic
 	}
 	return policy
 }
 
-func (s *triggerBindingStore) Get(_ context.Context, ws, bindingID string) (*domain.TriggerBinding, error) {
+func (s *triggerBindingStore) Get(_ context.Context, ws, bindingID string) (*automation.Binding, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	binding, ok := s.items[ws][bindingID]
@@ -472,7 +474,7 @@ func (s *triggerBindingStore) Get(_ context.Context, ws, bindingID string) (*dom
 	return redactedTriggerBinding(binding), nil
 }
 
-func (s *triggerBindingStore) GetByRouteKey(_ context.Context, ws, routeKey string) (*domain.TriggerBinding, error) {
+func (s *triggerBindingStore) GetByRouteKey(_ context.Context, ws, routeKey string) (*automation.Binding, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for _, binding := range s.items[ws] {
@@ -495,10 +497,10 @@ func (s *triggerBindingStore) ResolveWebhookSecret(_ context.Context, ws, bindin
 	return binding.WebhookSecret, nil
 }
 
-func (s *triggerBindingStore) List(_ context.Context, ws string, filter store.TriggerBindingFilter) ([]*domain.TriggerBinding, error) {
+func (s *triggerBindingStore) List(_ context.Context, ws string, filter store.TriggerBindingFilter) ([]*automation.Binding, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	out := make([]*domain.TriggerBinding, 0, len(s.items[ws]))
+	out := make([]*automation.Binding, 0, len(s.items[ws]))
 	for _, binding := range s.items[ws] {
 		if triggerBindingMatchesMem(binding, filter) {
 			out = append(out, redactedTriggerBinding(binding))
@@ -511,7 +513,7 @@ func (s *triggerBindingStore) List(_ context.Context, ws string, filter store.Tr
 	return out, nil
 }
 
-func (s *triggerBindingStore) Update(_ context.Context, ws, bindingID string, patch store.TriggerBindingUpdate) (*domain.TriggerBinding, error) {
+func (s *triggerBindingStore) Update(_ context.Context, ws, bindingID string, patch store.TriggerBindingUpdate) (*automation.Binding, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	binding, ok := s.items[ws][bindingID]
@@ -556,7 +558,7 @@ func (s *triggerBindingStore) Delete(_ context.Context, ws, bindingID string) er
 	return nil
 }
 
-func (s *triggerBindingStore) getForValidation(ws, bindingID string) (*domain.TriggerBinding, bool) {
+func (s *triggerBindingStore) getForValidation(ws, bindingID string) (*automation.Binding, bool) {
 	if s == nil {
 		return nil, false
 	}

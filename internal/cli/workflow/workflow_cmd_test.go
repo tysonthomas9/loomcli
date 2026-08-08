@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -111,7 +113,7 @@ func TestWorkflowManagementAndStoreLaneCommandsJSON(t *testing.T) {
 		t.Fatalf("runWorkflowApprove: %v", err)
 	}
 	approved := decodeWorkflowVersionOutput(t, approvedJSON)
-	if !approved.Approved || approved.EffectiveTrust != domain.DriverTrustTrusted || approved.Version.VersionID != "version-1" {
+	if !approved.Approved || approved.EffectiveTrust != workflowcatalog.DriverTrustTrusted || approved.Version.VersionID != "version-1" {
 		t.Fatalf("approved output = %+v, want trusted approved version-1", approved)
 	}
 
@@ -122,7 +124,7 @@ func TestWorkflowManagementAndStoreLaneCommandsJSON(t *testing.T) {
 		t.Fatalf("runWorkflowUnapprove: %v", err)
 	}
 	unapproved := decodeWorkflowVersionOutput(t, unapprovedJSON)
-	if unapproved.Approved || unapproved.EffectiveTrust != domain.DriverTrustUntrusted {
+	if unapproved.Approved || unapproved.EffectiveTrust != workflowcatalog.DriverTrustUntrusted {
 		t.Fatalf("unapproved output = %+v, want untrusted unapproved version", unapproved)
 	}
 

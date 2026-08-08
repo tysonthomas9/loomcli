@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
@@ -186,7 +188,7 @@ func TestWebhookDispatchResumesAwaitingRun(t *testing.T) {
 		t.Fatalf("satisfied row = %+v, want webhook body inline", satisfied)
 	}
 	// The admitted fan-out leg is untouched by the matcher pass.
-	if resp.Deliveries[0].Status != domain.TriggerDeliveryDispatched {
+	if resp.Deliveries[0].Status != automation.DeliveryDispatched {
 		t.Fatalf("delivery = %+v, want dispatched", resp.Deliveries[0])
 	}
 }

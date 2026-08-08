@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,7 +16,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 )
 
 var (
@@ -123,7 +125,7 @@ func runWorkspaceCreate(cmd *cobra.Command, args []string) {
 
 	if err := cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
 		create := workspacemgr.BuildStoreBackedCreateWorkspace(h.Store)
-		result, err := create(ctx, service.WorkspaceCreateRequest{
+		result, err := create(ctx, workspacecoord.WorkspaceCreateRequest{
 			Name:   wsName,
 			Type:   "empty",
 			Repos:  repoPaths,
@@ -175,8 +177,8 @@ func runWorkspaceList(cmd *cobra.Command, args []string) {
 
 //nolint:gocognit,funlen // CLI table/JSON output branches share one store read path.
 func runFleetWorkspaceList() error {
-	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
-		workspaces, err := h.Store.Workspaces().List(ctx)
+	return cmdstore.WithWorkspaceCatalog(func(ctx context.Context, _ *bootstrap.StoreHandle, workspace workspacemodule.API) error {
+		workspaces, err := workspace.List(ctx, workspacemodule.ListQuery{})
 		if err != nil {
 			return fmt.Errorf("list workspaces: %w", err)
 		}
@@ -205,7 +207,7 @@ func runFleetWorkspaceList() error {
 			}
 			items := make([]fleetWorkspaceListItem, 0, len(workspaces))
 			for _, ws := range workspaces {
-				repos, err := h.Store.Repos().List(ctx, ws.Key)
+				repos, err := workspace.ListRepositories(ctx, workspacemodule.ListRepositoriesQuery{WorkspaceReference: ws.Key})
 				if err != nil {
 					return fmt.Errorf("list repos for %s: %w", ws.Key, err)
 				}
@@ -226,7 +228,7 @@ func runFleetWorkspaceList() error {
 		}
 
 		for _, ws := range workspaces {
-			repos, err := h.Store.Repos().List(ctx, ws.Key)
+			repos, err := workspace.ListRepositories(ctx, workspacemodule.ListRepositoriesQuery{WorkspaceReference: ws.Key})
 			if err != nil {
 				return fmt.Errorf("list repos for %s: %w", ws.Key, err)
 			}
@@ -247,16 +249,12 @@ func runFleetWorkspaceList() error {
 func runWorkspaceRemove(cmd *cobra.Command, args []string) {
 	deps := cli.GetDeps(cmd)
 	wsName := args[0]
-	if err := cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
-		ws, err := h.Store.Workspaces().Get(ctx, wsName)
+	if err := cmdstore.WithWorkspaceCatalog(func(ctx context.Context, _ *bootstrap.StoreHandle, workspace workspacemodule.API) error {
+		ws, err := workspace.Resolve(ctx, workspacemodule.ResolveQuery{Reference: wsName})
 		if err != nil {
-			if byName, byNameErr := h.Store.Workspaces().GetByName(ctx, wsName); byNameErr == nil {
-				ws = byName
-			} else {
-				return fmt.Errorf("workspace %q not found: %w", wsName, err)
-			}
+			return fmt.Errorf("workspace %q not found: %w", wsName, err)
 		}
-		local, err := workspaceLocalConfig(ctx, h, ws.Key)
+		local, err := workspaceLocalConfig(ctx, workspace, ws.Key)
 		if err != nil {
 			return err
 		}
@@ -264,7 +262,7 @@ func runWorkspaceRemove(cmd *cobra.Command, args []string) {
 			checkRunningAgentsOrExit(local)
 			removeWorktrees(deps, local)
 		}
-		if err := h.Store.Workspaces().Delete(ctx, ws.Key); err != nil && !cmdstore.IsNotFound(err) {
+		if _, err := workspace.Delete(ctx, workspacemodule.DeleteCommand{Reference: ws.Key}); err != nil && !errors.Is(err, workspacemodule.ErrNotFound) {
 			return fmt.Errorf("delete workspace from fleet-db: %w", err)
 		}
 		if err := deleteWorkspaceLocalState(ws.Key); err != nil {
@@ -278,21 +276,18 @@ func runWorkspaceRemove(cmd *cobra.Command, args []string) {
 	}
 }
 
-func workspaceLocalConfig(ctx context.Context, h *bootstrap.StoreHandle, key string) (config.WorkspaceConfig, error) {
+func workspaceLocalConfig(ctx context.Context, workspace workspacemodule.API, key string) (config.WorkspaceConfig, error) {
 	sc, _ := bootstrap.LoadStateCache()
 	local := bootstrap.WorkspaceLocalState{}
 	if sc != nil {
 		local = sc.Workspaces[key]
 	}
-	repoRows, err := h.Store.Repos().List(ctx, key)
+	repoRows, err := workspace.ListRepositories(ctx, workspacemodule.ListRepositoriesQuery{WorkspaceReference: key})
 	if err != nil {
 		return config.WorkspaceConfig{}, fmt.Errorf("list repos for %s: %w", key, err)
 	}
 	repos := make([]config.RepoConfig, 0, len(repoRows))
 	for _, repo := range repoRows {
-		if repo == nil {
-			continue
-		}
 		path := local.Repos[repo.Name]
 		if path == "" && local.Path != "" {
 			path = filepath.Join(local.Path, repo.Name)

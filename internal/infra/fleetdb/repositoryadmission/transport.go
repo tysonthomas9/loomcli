@@ -11,7 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	fleettransport "github.com/tysonthomas9/loomcli/internal/infra/fleetdb/transport"
 )
 
@@ -128,14 +129,14 @@ type WorkspaceRepositoryAdmissionBeginInput struct {
 }
 
 type WorkspaceRepositoryAdmissionBeginResult struct {
-	Workspace        *domain.Workspace          `json:"workspace"`
+	Workspace        *workspacemodule.Workspace `json:"workspace"`
 	Admission        *RepositoryAdmissionRecord `json:"admission"`
 	WorkspaceEventID string                     `json:"workspace_event_id"`
 }
 
 type RepositoryAdmissionRepoReceipt struct {
-	Repository domain.Repo `json:"repository"`
-	EventID    string      `json:"event_id"`
+	Repository workspacemodule.Repository `json:"repository"`
+	EventID    string                     `json:"event_id"`
 }
 
 type RepositoryAdmissionReceipt struct {

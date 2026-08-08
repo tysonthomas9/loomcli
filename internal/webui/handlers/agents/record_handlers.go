@@ -20,9 +20,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/dto"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 func (m *Module) listAgents(w http.ResponseWriter, r *http.Request) {
@@ -61,7 +61,7 @@ func (m *Module) createAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, handler.MaxRequestBody))
 	if err != nil {
-		handler.HandleServiceError(w, service.ErrPayloadTooLarge("request body too large (max 1MB)"))
+		handler.HandleServiceError(w, apperrors.ErrPayloadTooLarge("request body too large (max 1MB)"))
 		return
 	}
 	resetAgentCreateBody(r, body)
@@ -148,7 +148,7 @@ func (m *Module) resolvePromptAgentDriverForCreate(
 //nolint:funlen // Keep prompt-agent validation, authority resolution, provisioning, and compatibility projection in one compensating transaction.
 func (m *Module) createPromptAgent(w http.ResponseWriter, r *http.Request, body []byte) {
 	if m.store == nil || m.provisioning == nil || m.provisioningAuthority == nil {
-		handler.HandleServiceError(w, service.ErrUnavailable("fleet-db store not configured"))
+		handler.HandleServiceError(w, apperrors.ErrUnavailable("fleet-db store not configured"))
 		return
 	}
 	ws, ok := m.requireCanonicalWorkspace(w, r)
@@ -404,7 +404,7 @@ func (m *Module) requireAgentRunsStore(w http.ResponseWriter) bool {
 	if m.store != nil {
 		return true
 	}
-	handler.HandleServiceError(w, service.ErrUnavailable("fleet-db store not configured"))
+	handler.HandleServiceError(w, apperrors.ErrUnavailable("fleet-db store not configured"))
 	return false
 }
 
@@ -424,7 +424,7 @@ func (m *Module) listAgentServiceRunsForHistory(
 func (m *Module) setRecordEnabled(enabled bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if m.store == nil {
-			handler.HandleServiceError(w, service.ErrUnavailable("fleet-db store not configured"))
+			handler.HandleServiceError(w, apperrors.ErrUnavailable("fleet-db store not configured"))
 			return
 		}
 		ws, ok := m.requireCanonicalWorkspace(w, r)

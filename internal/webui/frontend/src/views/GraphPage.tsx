@@ -1,6 +1,6 @@
 import { lazy, Suspense } from "react";
 import { ErrorBoundary, LoadingSkeleton } from "@/components";
-import { IssueViewGuard } from "@/components/IssueViewGuard";
+import { IssueViewGuard } from "@/components/IssueViewGuard/IssueViewGuard";
 import {
   useWorkspaceViewData,
   useWorkspaceViewActions,

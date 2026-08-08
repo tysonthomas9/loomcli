@@ -1,12 +1,13 @@
 package app
 
 import (
-	"net/http"
 	"os"
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/connector"
+	"github.com/tysonthomas9/loomcli/internal/webui/app/connectorcomposition"
+
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 )
 
 // Connector egress wiring for the driver-op HTTP API (CV9). Kept out of
@@ -31,23 +32,12 @@ const (
 // "unavailable" error — when serve has no store or no usable vault key:
 // without the key sealed credentials can never be opened, so refusing every
 // dispatch up front is strictly safer than failing per-call mid-flow.
-func (app *Server) buildConnectorDispatcher() *connector.Dispatcher {
-	if app.config.Store == nil {
-		return nil
-	}
-	vault, err := connector.NewVaultFromEnvOrKeyFile(app.config.LocalSettingsDir)
-	if err != nil {
-		return nil
-	}
-	client := &http.Client{Timeout: connectorUpstreamTimeout()}
-	registry := connector.DefaultProviderRegistry(client)
-	return &connector.Dispatcher{
-		Connectors: app.config.Store.Connectors(),
-		Grants:     app.config.Store.ConnectorGrants(),
-		Audit:      app.config.Store.ConnectorCalls(),
-		Vault:      vault,
-		Providers:  registry,
-	}
+func (app *Server) buildConnectorDispatcher() connectorsmodule.Dispatcher {
+	return connectorcomposition.BuildDispatcher(
+		app.config.Store,
+		app.config.LocalSettingsDir,
+		connectorUpstreamTimeout(),
+	)
 }
 
 // connectorUpstreamTimeout resolves the provider HTTP client timeout from

@@ -11,8 +11,41 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/trigger"
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	"github.com/tysonthomas9/loomcli/internal/store"
 )
+
+type workspaceReadStore interface {
+	Workspaces() store.WorkspaceStore
+}
+
+type awaitTimeoutStore interface {
+	workspaceReadStore
+	Awaits() store.AwaitStore
+	DriverRuns() store.DriverRunStore
+}
+
+type executorStore interface {
+	workspaceReadStore
+	Awaits() store.AwaitStore
+	Drivers() store.DriverStore
+	DriverVersions() store.DriverVersionStore
+	DriverRuns() store.DriverRunStore
+	TriggerEvents() store.TriggerEventStore
+}
+
+type taskWorkerStore interface {
+	workspaceReadStore
+	DriverVersions() store.DriverVersionStore
+	Repos() store.RepoStore
+	WorkerProfiles() store.WorkerProfileStore
+}
+
+type driverRunReadStore interface {
+	Drivers() store.DriverStore
+	DriverVersions() store.DriverVersionStore
+	TriggerEvents() store.TriggerEventStore
+}
 
 // CompositionMaxDepthEnvVar overrides the composition depth cap (a positive
 // integer: the deepest ParentRunID chain a child run may sit on).
@@ -20,7 +53,7 @@ const CompositionMaxDepthEnvVar = "LOOM_COMPOSITION_MAX_DEPTH"
 
 // DefaultCompositionMaxDepth bounds workflow nesting when no override is
 // configured, matching the internal-event hop-depth cap.
-const DefaultCompositionMaxDepth = trigger.DefaultInternalEventHopDepthCap
+const DefaultCompositionMaxDepth = automation.DefaultInternalEventHopDepthCap
 
 // ChildRunSourceKind is the immutable provenance discriminator for a child
 // DriverRun created through Execution's parent-fenced composition command.

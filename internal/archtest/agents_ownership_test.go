@@ -114,19 +114,32 @@ func TestPhase5AgentsOwnershipBlockerRatchet(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var blockers []string
-	for _, mutation := range mutations {
-		if isPhase5AgentsMutationAllowed(mutation) {
-			continue
-		}
-		blockers = append(blockers, mutation.withProfiles())
-	}
-	slices.Sort(blockers)
+	blockers := phase5AgentsOwnershipViolations(mutations)
 	if len(blockers) != 0 {
 		t.Fatalf(
 			"Phase 5 Agents ownership has persistence mutation blockers outside owner commands: %v",
 			blockers,
 		)
+	}
+}
+
+func TestMergePhase5AgentsMutationProfilesPreservesProfileEvidence(t *testing.T) {
+	identity := phase5AgentsMutationIdentity{
+		file: "internal/example/example.go", line: 7, column: 9,
+		receiver: agentsRoleStoreReceiver, method: "DeleteRole",
+	}
+	merged := mergePhase5AgentsMutationProfiles(
+		[]AnalysisProfile{{Name: "linux"}, {Name: "integration"}},
+		[][]phase5AgentsMutation{
+			{{phase5AgentsMutationIdentity: identity}},
+			{{phase5AgentsMutationIdentity: identity}},
+		},
+	)
+	if len(merged) != 1 {
+		t.Fatalf("merged mutations = %#v, want one deduplicated mutation", merged)
+	}
+	if got := merged[0].withProfiles(); !strings.Contains(got, "profiles: integration, linux") {
+		t.Fatalf("merged mutation = %q, want both sorted profiles", got)
 	}
 }
 
@@ -150,7 +163,7 @@ func TestPhase5AgentsCompatibilityStoreHasSingleCompositionImporter(t *testing.T
 
 func TestPhase5AgentsCompatibilityStoreImportRatchetRejectsProductionBypass(t *testing.T) {
 	root := t.TempDir()
-	writePhase5AgentsOwnershipFixture(t, root, "internal/cli/serve/workspacemgr/agents_bootstrap.go", `package workspacemgr
+	writePhase5AgentsOwnershipFixture(t, root, "internal/cli/serve/workspacemgr/agentsbootstrapcomposition/managed.go", `package agentsbootstrapcomposition
 import _ "github.com/tysonthomas9/loomcli/internal/infra/agentsbootstrapstore"
 `)
 	writePhase5AgentsOwnershipFixture(t, root, "internal/webui/bypass.go", `package webui
@@ -317,12 +330,6 @@ func TestPhase5AgentsMutationAllowlistIsReceiverAndPathSpecific(t *testing.T) {
 			receiver: legacyAgentServiceStoreReceiver,
 			method:   "Create",
 			file:     "internal/infra/agentsbootstrapstore/adapter.go",
-		},
-		{
-			name:     "legacy role tracing adapter",
-			receiver: legacyRoleStoreReceiver,
-			method:   "Update",
-			file:     "internal/cli/cmdstore/store_tracing_core_entities.go",
 		},
 	}
 	for _, family := range families {

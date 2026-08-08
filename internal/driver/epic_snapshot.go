@@ -113,7 +113,11 @@ func LoadEpicSnapshot(ctx context.Context, issueBackend backend.IssueBackend, op
 	}, nil
 }
 
-func ListActiveTaskRuns(ctx context.Context, s store.Store, opts ActiveTaskRunsOptions) (*ActiveTaskRuns, error) {
+type taskRunListStore interface {
+	TaskRuns() store.TaskRunStore
+}
+
+func ListActiveTaskRuns(ctx context.Context, s taskRunListStore, opts ActiveTaskRunsOptions) (*ActiveTaskRuns, error) {
 	if s == nil {
 		return nil, fmt.Errorf("store required: %w", domain.ErrInvalid)
 	}

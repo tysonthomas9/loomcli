@@ -10,10 +10,10 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr/admissionstore"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 	"github.com/tysonthomas9/loomcli/internal/workspaceerrors"
 )
 
@@ -28,7 +28,7 @@ type cloneWorkspaceAdmissionPlan struct {
 //nolint:funlen // Clone preparation validates workspace identity, repository specifications, and recovery journal intent before side effects.
 func prepareStoreBackedCloneWorkspaceAdmission(
 	ctx context.Context,
-	req service.WorkspaceCreateRequest,
+	req workspacecoord.WorkspaceCreateRequest,
 	process *repositoryAdmissionProcess,
 ) (cloneWorkspaceAdmissionPlan, error) {
 	if len(req.CloneURLs) == 0 {
@@ -38,7 +38,7 @@ func prepareStoreBackedCloneWorkspaceAdmission(
 			nil,
 		)
 	}
-	key := service.WorkspaceKeyFromName(req.Name)
+	key := workspacecoord.WorkspaceKeyFromName(req.Name)
 	planned, err := planCloneRepos(req.CloneURLs, make(map[string]bool))
 	if err != nil {
 		return cloneWorkspaceAdmissionPlan{}, err
@@ -62,7 +62,7 @@ func prepareStoreBackedCloneWorkspaceAdmission(
 	record, err := process.prepareCreate(
 		ctx,
 		infrafleetdb.RepositoryAdmissionWorkspaceInput{
-			Key: key, Name: req.Name, State: string(domain.WorkspaceStateCreating),
+			Key: key, Name: req.Name, State: string(workspacemodule.StateCreating),
 			DefaultBranch: initialBranch,
 		},
 		wsPlan.path,
@@ -90,12 +90,12 @@ func prepareStoreBackedCloneWorkspaceAdmission(
 func createStoreBackedCloneWorkspaceAdmission(
 	ctx context.Context,
 	s admissionstore.Store,
-	req service.WorkspaceCreateRequest,
+	req workspacecoord.WorkspaceCreateRequest,
 	process *repositoryAdmissionProcess,
-) (service.WorkspaceCreateResult, error) {
+) (workspacecoord.WorkspaceCreateResult, error) {
 	plan, err := prepareStoreBackedCloneWorkspaceAdmission(ctx, req, process)
 	if err != nil {
-		return service.WorkspaceCreateResult{}, err
+		return workspacecoord.WorkspaceCreateResult{}, err
 	}
 	if plan.record.State == "committed" {
 		process.forgetPreparedRepositoryAdmission(plan.record.AdmissionID)
@@ -107,7 +107,7 @@ func createStoreBackedCloneWorkspaceAdmission(
 		plan.path,
 	)
 	if err != nil {
-		return service.WorkspaceCreateResult{}, err
+		return workspacecoord.WorkspaceCreateResult{}, err
 	}
 	defer release()
 	plan.record = ownedRecord
@@ -116,20 +116,20 @@ func createStoreBackedCloneWorkspaceAdmission(
 		return checkErr
 	}
 	if err := verifyOwnership(materializationCtx); err != nil {
-		return service.WorkspaceCreateResult{}, err
+		return workspacecoord.WorkspaceCreateResult{}, err
 	}
 	if err := os.MkdirAll(plan.path, 0o755); err != nil {
-		return service.WorkspaceCreateResult{}, process.failMaterialization(
+		return workspacecoord.WorkspaceCreateResult{}, process.failMaterialization(
 			materializationCtx,
 			plan.record,
 			fmt.Errorf("cannot create workspace directory: %w", err),
 		)
 	}
 	if err := verifyOwnership(materializationCtx); err != nil {
-		return service.WorkspaceCreateResult{}, err
+		return workspacecoord.WorkspaceCreateResult{}, err
 	}
 	if err := saveLocalWorkspaceState(plan.key, plan.path, nil, true); err != nil {
-		return service.WorkspaceCreateResult{}, process.failMaterialization(
+		return workspacecoord.WorkspaceCreateResult{}, process.failMaterialization(
 			materializationCtx,
 			plan.record,
 			err,
@@ -148,14 +148,14 @@ func createStoreBackedCloneWorkspaceAdmission(
 		verifyOwnership,
 	)
 	if err != nil {
-		return service.WorkspaceCreateResult{}, process.failMaterialization(
+		return workspacecoord.WorkspaceCreateResult{}, process.failMaterialization(
 			materializationCtx,
 			plan.record,
 			err,
 		)
 	}
 	if len(repositories) != len(plan.specs) {
-		return service.WorkspaceCreateResult{}, process.failMaterialization(
+		return workspacecoord.WorkspaceCreateResult{}, process.failMaterialization(
 			materializationCtx,
 			plan.record,
 			workspaceerrors.New(
@@ -166,20 +166,20 @@ func createStoreBackedCloneWorkspaceAdmission(
 		)
 	}
 	if err := verifyOwnership(materializationCtx); err != nil {
-		return service.WorkspaceCreateResult{}, err
+		return workspacecoord.WorkspaceCreateResult{}, err
 	}
 	if err := saveLocalWorkspaceState(plan.key, plan.path, repositories, true); err != nil {
-		return service.WorkspaceCreateResult{}, process.failMaterialization(
+		return workspacecoord.WorkspaceCreateResult{}, process.failMaterialization(
 			materializationCtx,
 			plan.record,
 			err,
 		)
 	}
 	if err := verifyOwnership(materializationCtx); err != nil {
-		return service.WorkspaceCreateResult{}, err
+		return workspacecoord.WorkspaceCreateResult{}, err
 	}
 	if err := seedBuiltInRoles(materializationCtx, s, plan.key, plan.path); err != nil {
-		return service.WorkspaceCreateResult{}, process.failMaterialization(
+		return workspacecoord.WorkspaceCreateResult{}, process.failMaterialization(
 			materializationCtx,
 			plan.record,
 			fmt.Errorf("seed built-in roles: %w", err),
@@ -187,7 +187,7 @@ func createStoreBackedCloneWorkspaceAdmission(
 	}
 	defaultBranch := repositories[0].DefaultBranch
 	if err := verifyOwnership(materializationCtx); err != nil {
-		return service.WorkspaceCreateResult{}, err
+		return workspacecoord.WorkspaceCreateResult{}, err
 	}
 	committed, err := process.commit(
 		materializationCtx,
@@ -198,12 +198,12 @@ func createStoreBackedCloneWorkspaceAdmission(
 		},
 	)
 	if err != nil {
-		return service.WorkspaceCreateResult{}, err
+		return workspacecoord.WorkspaceCreateResult{}, err
 	}
 	if committed.State != "committed" {
-		return service.WorkspaceCreateResult{}, infrafleetdb.ErrRepositoryAdmissionInvalid
+		return workspacecoord.WorkspaceCreateResult{}, infrafleetdb.ErrRepositoryAdmissionInvalid
 	}
-	return service.WorkspaceCreateResult{WorkspaceID: plan.key, WorkspacePath: plan.path}, nil
+	return workspacecoord.WorkspaceCreateResult{WorkspaceID: plan.key, WorkspacePath: plan.path}, nil
 }
 
 type addRepositoriesAdmissionPlan struct {
@@ -221,11 +221,11 @@ type addRepositoriesAdmissionPlan struct {
 //nolint:funlen,cyclop // Preparation resolves the exact complete batch before one durable Begin.
 func prepareAddReposToStoreBackedWorkspaceAdmission(
 	ctx context.Context,
-	s admissionstore.Store,
-	req service.WorkspaceAddReposRequest,
+	catalog workspacemodule.API,
+	req workspacecoord.WorkspaceAddReposRequest,
 	process *repositoryAdmissionProcess,
 ) (addRepositoriesAdmissionPlan, error) {
-	key, workspace, err := resolveWorkspaceForAddRepos(ctx, s, req.WorkspaceID)
+	key, workspace, err := resolveWorkspaceForAddRepos(ctx, catalog, req.WorkspaceID)
 	if err != nil {
 		return addRepositoriesAdmissionPlan{}, err
 	}
@@ -237,7 +237,7 @@ func prepareAddReposToStoreBackedWorkspaceAdmission(
 	if err != nil {
 		return addRepositoriesAdmissionPlan{}, err
 	}
-	seen, err := dedupAddReposAgainstExisting(ctx, s, key, localRepos)
+	seen, err := dedupAddReposAgainstExisting(ctx, catalog, key, localRepos)
 	if err != nil {
 		return addRepositoriesAdmissionPlan{}, err
 	}
@@ -302,17 +302,18 @@ func prepareAddReposToStoreBackedWorkspaceAdmission(
 func addReposToStoreBackedWorkspaceAdmission(
 	ctx context.Context,
 	s admissionstore.Store,
-	req service.WorkspaceAddReposRequest,
+	catalog workspacemodule.API,
+	req workspacecoord.WorkspaceAddReposRequest,
 	process *repositoryAdmissionProcess,
-) (service.WorkspaceCreateResult, error) {
+) (workspacecoord.WorkspaceCreateResult, error) {
 	plan, err := prepareAddReposToStoreBackedWorkspaceAdmission(
 		ctx,
-		s,
+		catalog,
 		req,
 		process,
 	)
 	if err != nil {
-		return service.WorkspaceCreateResult{}, err
+		return workspacecoord.WorkspaceCreateResult{}, err
 	}
 	if plan.record.State == "committed" {
 		process.forgetPreparedRepositoryAdmission(plan.record.AdmissionID)
@@ -330,7 +331,7 @@ func addReposToStoreBackedWorkspaceAdmission(
 		plan.workspacePath,
 	)
 	if err != nil {
-		return service.WorkspaceCreateResult{}, err
+		return workspacecoord.WorkspaceCreateResult{}, err
 	}
 	defer release()
 	plan.record = ownedRecord
@@ -347,7 +348,7 @@ func addReposToStoreBackedWorkspaceAdmission(
 		verifyOwnership,
 	)
 	if err != nil {
-		return service.WorkspaceCreateResult{}, process.failMaterialization(
+		return workspacecoord.WorkspaceCreateResult{}, process.failMaterialization(
 			materializationCtx,
 			plan.record,
 			err,
@@ -366,7 +367,7 @@ func addReposToStoreBackedWorkspaceAdmission(
 		verifyOwnership,
 	)
 	if err != nil {
-		return service.WorkspaceCreateResult{}, process.failMaterialization(
+		return workspacecoord.WorkspaceCreateResult{}, process.failMaterialization(
 			materializationCtx,
 			plan.record,
 			err,
@@ -376,7 +377,7 @@ func addReposToStoreBackedWorkspaceAdmission(
 	repositories = append(repositories, materializedLocal...)
 	repositories = append(repositories, cloned...)
 	if len(repositories) != len(plan.specs) {
-		return service.WorkspaceCreateResult{}, process.failMaterialization(
+		return workspacecoord.WorkspaceCreateResult{}, process.failMaterialization(
 			materializationCtx,
 			plan.record,
 			workspaceerrors.New(
@@ -387,7 +388,7 @@ func addReposToStoreBackedWorkspaceAdmission(
 		)
 	}
 	if err := verifyOwnership(materializationCtx); err != nil {
-		return service.WorkspaceCreateResult{}, err
+		return workspacecoord.WorkspaceCreateResult{}, err
 	}
 	if err := saveLocalWorkspaceState(
 		plan.key,
@@ -395,14 +396,14 @@ func addReposToStoreBackedWorkspaceAdmission(
 		repositories,
 		true,
 	); err != nil {
-		return service.WorkspaceCreateResult{}, process.failMaterialization(
+		return workspacecoord.WorkspaceCreateResult{}, process.failMaterialization(
 			materializationCtx,
 			plan.record,
 			err,
 		)
 	}
 	if err := verifyOwnership(materializationCtx); err != nil {
-		return service.WorkspaceCreateResult{}, err
+		return workspacecoord.WorkspaceCreateResult{}, err
 	}
 	if _, err := process.commit(
 		materializationCtx,
@@ -411,15 +412,15 @@ func addReposToStoreBackedWorkspaceAdmission(
 		nil,
 	); err != nil {
 		if errors.Is(err, infrafleetdb.ErrRepositoryAdmissionConflict) {
-			return service.WorkspaceCreateResult{}, workspaceerrors.New(
+			return workspacecoord.WorkspaceCreateResult{}, workspaceerrors.New(
 				workspaceerrors.AlreadyExists,
 				"one or more repository names are already registered in this workspace",
 				err,
 			)
 		}
-		return service.WorkspaceCreateResult{}, err
+		return workspacecoord.WorkspaceCreateResult{}, err
 	}
-	return service.WorkspaceCreateResult{
+	return workspacecoord.WorkspaceCreateResult{
 		WorkspaceID: plan.key, WorkspacePath: plan.workspacePath,
 	}, nil
 }
@@ -568,9 +569,9 @@ func replayCommittedRepositoryAdmission(
 	record *infrafleetdb.RepositoryAdmissionRecord,
 	workspacePath string,
 	seedRoles bool,
-) (service.WorkspaceCreateResult, error) {
+) (workspacecoord.WorkspaceCreateResult, error) {
 	if !validCommittedRepositoryAdmissionReplay(record, seedRoles) {
-		return service.WorkspaceCreateResult{}, infrafleetdb.ErrRepositoryAdmissionInvalid
+		return workspacecoord.WorkspaceCreateResult{}, infrafleetdb.ErrRepositoryAdmissionInvalid
 	}
 	repositories := make([]config.RepoConfig, 0, len(record.Receipt.Repositories))
 	for _, receipt := range record.Receipt.Repositories {
@@ -587,7 +588,7 @@ func replayCommittedRepositoryAdmission(
 		repositories,
 		true,
 	); err != nil {
-		return service.WorkspaceCreateResult{}, err
+		return workspacecoord.WorkspaceCreateResult{}, err
 	}
 	if seedRoles {
 		if err := seedBuiltInRoles(
@@ -596,10 +597,10 @@ func replayCommittedRepositoryAdmission(
 			record.WorkspaceKey,
 			workspacePath,
 		); err != nil {
-			return service.WorkspaceCreateResult{}, err
+			return workspacecoord.WorkspaceCreateResult{}, err
 		}
 	}
-	return service.WorkspaceCreateResult{
+	return workspacecoord.WorkspaceCreateResult{
 		WorkspaceID: record.WorkspaceKey, WorkspacePath: workspacePath,
 	}, nil
 }

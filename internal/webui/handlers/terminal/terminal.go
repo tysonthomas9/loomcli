@@ -8,7 +8,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
 // validTerminalSession matches alphanumeric characters, hyphens, and underscores.
@@ -34,7 +34,7 @@ func originHosts(origins []string) []string {
 }
 
 // HandleTerminalToken returns a handler that generates a one-time terminal auth token.
-func HandleTerminalToken(svc service.TerminalService) http.HandlerFunc {
+func HandleTerminalToken(svc terminal.TerminalService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		session := r.URL.Query().Get("session")
 

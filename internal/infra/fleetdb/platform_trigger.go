@@ -6,6 +6,8 @@ import (
 	"net/url"
 	"strconv"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -20,19 +22,19 @@ var _ store.TriggerEventAppender = (*triggerEventStore)(nil)
 // boundary; Fleet attests the Loom service and stamps/validates provenance.
 func (s *triggerEventStore) AppendTriggerEvent(
 	ctx context.Context,
-	event *domain.TriggerEvent,
-) (*domain.TriggerEvent, error) {
+	event *automation.Event,
+) (*automation.Event, error) {
 	if event == nil || event.WorkspaceKey == "" || event.SourceKind == "" || event.EventType == "" {
 		return nil, fmt.Errorf("append trigger event requires workspace, source kind, and event type: %w", domain.ErrInvalid)
 	}
 	canonicalID, canonical := event.CanonicalEventID()
 	validProvenance := false
 	switch event.Origin {
-	case domain.TriggerEventOriginSystem:
+	case automation.EventOriginSystem:
 		validProvenance = event.ParentEventID == ""
-	case domain.TriggerEventOriginExternal:
+	case automation.EventOriginExternal:
 		validProvenance = event.ParentEventID == "" && event.SignatureStatus == "session" && event.ActorRef != ""
-	case "", domain.TriggerEventOriginWorkflow:
+	case "", automation.EventOriginWorkflow:
 		validProvenance = true
 	}
 	if !canonical || domain.IsAwaitTimeoutEventID(canonicalID) || event.RouteKey != "" ||
@@ -59,7 +61,7 @@ func (s *triggerEventStore) AppendTriggerEvent(
 	return out.event(), nil
 }
 
-func (s *triggerEventStore) Get(ctx context.Context, ws, eventID string) (*domain.TriggerEvent, error) {
+func (s *triggerEventStore) Get(ctx context.Context, ws, eventID string) (*automation.Event, error) {
 	var out automationEventWire
 	path := "/api/v1/" + pathEscape(ws) + "/trigger-events/" + pathEscape(eventID)
 	if err := s.client.do(ctx, "GET", path, nil, &out); err != nil {
@@ -68,7 +70,7 @@ func (s *triggerEventStore) Get(ctx context.Context, ws, eventID string) (*domai
 	return out.event(), nil
 }
 
-func (s *triggerEventStore) List(ctx context.Context, ws string, filter store.TriggerEventFilter) ([]*domain.TriggerEvent, error) {
+func (s *triggerEventStore) List(ctx context.Context, ws string, filter store.TriggerEventFilter) ([]*automation.Event, error) {
 	q := url.Values{}
 	if filter.SourceKind != "" {
 		q.Set("source_kind", filter.SourceKind)
@@ -92,7 +94,7 @@ func (s *triggerEventStore) List(ctx context.Context, ws string, filter store.Tr
 	if err := s.client.do(ctx, "GET", path, nil, &resp); err != nil {
 		return nil, err
 	}
-	out := make([]*domain.TriggerEvent, 0, len(resp.TriggerEvents))
+	out := make([]*automation.Event, 0, len(resp.TriggerEvents))
 	for index := range resp.TriggerEvents {
 		out = append(out, resp.TriggerEvents[index].event())
 	}
@@ -103,8 +105,8 @@ type triggerDeliveryStore struct{ client *Client }
 
 var _ store.TriggerDeliveryStore = (*triggerDeliveryStore)(nil)
 
-func (s *triggerDeliveryStore) Get(ctx context.Context, ws, deliveryID string) (*domain.TriggerDelivery, error) {
-	var out domain.TriggerDelivery
+func (s *triggerDeliveryStore) Get(ctx context.Context, ws, deliveryID string) (*automation.Delivery, error) {
+	var out automation.Delivery
 	path := "/api/v1/" + pathEscape(ws) + "/trigger-deliveries/" + pathEscape(deliveryID)
 	if err := s.client.do(ctx, "GET", path, nil, &out); err != nil {
 		return nil, err
@@ -112,7 +114,7 @@ func (s *triggerDeliveryStore) Get(ctx context.Context, ws, deliveryID string) (
 	return &out, nil
 }
 
-func (s *triggerDeliveryStore) List(ctx context.Context, ws string, filter store.TriggerDeliveryFilter) ([]*domain.TriggerDelivery, error) {
+func (s *triggerDeliveryStore) List(ctx context.Context, ws string, filter store.TriggerDeliveryFilter) ([]*automation.Delivery, error) {
 	q := url.Values{}
 	if filter.TriggerEventID != "" {
 		q.Set("trigger_event_id", filter.TriggerEventID)
@@ -131,13 +133,13 @@ func (s *triggerDeliveryStore) List(ctx context.Context, ws string, filter store
 		path += "?" + encoded
 	}
 	var resp struct {
-		TriggerDeliveries []*domain.TriggerDelivery `json:"trigger_deliveries"`
+		TriggerDeliveries []*automation.Delivery `json:"trigger_deliveries"`
 	}
 	if err := s.client.do(ctx, "GET", path, nil, &resp); err != nil {
 		return nil, err
 	}
 	if resp.TriggerDeliveries == nil {
-		resp.TriggerDeliveries = []*domain.TriggerDelivery{}
+		resp.TriggerDeliveries = []*automation.Delivery{}
 	}
 	return resp.TriggerDeliveries, nil
 }

@@ -11,7 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -251,13 +252,13 @@ func TestBuiltinEpicRunnerWorkflowSourceParsesAsJavaScript(t *testing.T) {
 }
 
 func TestSubmissionTrustDefaultsUntrustedFailClosed(t *testing.T) {
-	if got := submissionTrust(""); got != domain.DriverTrustUntrusted {
+	if got := submissionTrust(""); got != workflowcatalog.DriverTrustUntrusted {
 		t.Fatalf("submissionTrust(\"\") = %q, want untrusted (external submissions fail closed)", got)
 	}
-	if got := submissionTrust(domain.DriverTrustTrusted); got != domain.DriverTrustTrusted {
+	if got := submissionTrust(workflowcatalog.DriverTrustTrusted); got != workflowcatalog.DriverTrustTrusted {
 		t.Fatalf("submissionTrust(trusted) = %q, want trusted (builtin path)", got)
 	}
-	if got := submissionTrust(domain.DriverTrustUntrusted); got != domain.DriverTrustUntrusted {
+	if got := submissionTrust(workflowcatalog.DriverTrustUntrusted); got != workflowcatalog.DriverTrustUntrusted {
 		t.Fatalf("submissionTrust(untrusted) = %q, want untrusted", got)
 	}
 }
@@ -396,7 +397,7 @@ func TestBuildAndRegisterCustomSourceWithRealFlue(t *testing.T) {
 	if result.Driver.ActiveVersionID != "" {
 		t.Fatalf("driver active version = %q, want non-active custom build", result.Driver.ActiveVersionID)
 	}
-	if result.Version.Manifest[driverpkg.ManifestTrustLevelKey] != string(domain.DriverTrustUntrusted) {
+	if result.Version.Manifest[driverpkg.ManifestTrustLevelKey] != string(workflowcatalog.DriverTrustUntrusted) {
 		t.Fatalf("version trust = %q, want untrusted", result.Version.Manifest[driverpkg.ManifestTrustLevelKey])
 	}
 	if result.Version.BuildDiagnostics != diagnostics {
@@ -409,7 +410,7 @@ func TestBuildAndRegisterCustomSourceWithRealFlue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("approve test fixture version: %v", err)
 	}
-	if got := driverpkg.DriverVersionEffectiveTrust(driverRecord, result.Version); got != domain.DriverTrustTrusted {
+	if got := driverpkg.DriverVersionEffectiveTrust(driverRecord, result.Version); got != workflowcatalog.DriverTrustTrusted {
 		t.Fatalf("approved version trust = %q, want trusted", got)
 	}
 	run, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{

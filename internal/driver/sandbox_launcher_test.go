@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
@@ -148,7 +150,7 @@ func sandboxSeamRunRequest(root string) RunRequest {
 		Manifest:   map[string]string{"workflow_name": "epic-runner"},
 		// Seam tests exercise launch mechanics, not the SB3 trust gate (see
 		// sandbox_policy_test.go): a trusted request passes every launcher.
-		TrustLevel: domain.DriverTrustTrusted,
+		TrustLevel: workflowcatalog.DriverTrustTrusted,
 	}
 }
 

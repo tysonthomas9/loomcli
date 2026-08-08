@@ -15,6 +15,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/git"
 	"github.com/tysonthomas9/loomcli/internal/cli/sessionfinalize"
 	"github.com/tysonthomas9/loomcli/internal/events"
+	"github.com/tysonthomas9/loomcli/internal/infra/sessionstoreadapter"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
@@ -22,7 +23,7 @@ func createAutoSession(ctx *autoLoopCtx, prompt string) *sessions.Session {
 	if ctx.sessStore == nil {
 		return nil
 	}
-	sess, _ := ctx.sessStore.CreateSession(sessions.CreateOptions{
+	sess, _ := sessionstoreadapter.Create(ctx.sessStore, sessions.CreateOptions{
 		AgentName: ctx.opts.AgentName, Backend: cli.ResolveBackendName(),
 		EpicID: ctx.opts.ParentID, Prompt: prompt, AttemptNum: ctx.state.TasksCompleted + 1,
 	})

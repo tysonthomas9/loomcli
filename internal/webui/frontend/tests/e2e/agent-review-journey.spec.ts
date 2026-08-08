@@ -105,7 +105,9 @@ const mockLoomTasks = {
     { id: "loom-104", title: "Add rate limiter", priority: 2 },
   ],
   needs_review: [],
-  in_progress: [{ id: "loom-103", title: "Fix authentication bug", priority: 1 }],
+  in_progress: [
+    { id: "loom-103", title: "Fix authentication bug", priority: 1 },
+  ],
   backlog: [],
   closed: [],
   timestamp: "2026-01-15T10:00:00Z",
@@ -363,6 +365,24 @@ async function setupBaseMocks(page: Page) {
       body: JSON.stringify(mockLoomStatus),
     });
   });
+  await page.route("**/api/workspaces/*/monitor/status", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(mockLoomStatus),
+    });
+  });
+  await page.route("**/api/workspaces/*/agents/*/runs*", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        agent_id: "ember",
+        runs: [],
+        sessions: [],
+      }),
+    });
+  });
   await page.route("**/api/monitor/tasks", async (route) => {
     await route.fulfill({
       status: 200,
@@ -592,7 +612,7 @@ test.describe("E2E Journey: Review agent code changes", () => {
     await page.close();
   });
 
-  test("Step 1-3: Open agent panel and verify Info tab", async () => {
+  test("Step 1-3: Open routed agent detail and verify Runs and Info tabs", async () => {
     const sidebar = page.getByRole("complementary");
 
     // Wait for agent data to load
@@ -603,25 +623,29 @@ test.describe("E2E Journey: Review agent code changes", () => {
     // Click ember agent card in sidebar
     await sidebar.getByRole("button", { name: "Agent: ember" }).click();
 
-    // Wait for panel to open
-    const panel = page.getByTestId("agent-detail-panel");
-    await expect(panel).toHaveAttribute("data-state", "open");
+    // Agents are route-owned editor surfaces now, not slide-over drawers.
+    await expect(page).toHaveURL(/\/ws\/default\/agents\/ember$/);
+    const detail = page.getByRole("region", { name: "Agent details" });
+    await expect(detail.getByTestId("agent-editor-groups")).toBeVisible();
 
-    // Verify agent name in header
-    await expect(panel.locator("h2")).toContainText("ember");
+    // Run history is the default surface and a successful empty response must
+    // render the intentional empty state rather than an API error.
+    const runsTab = detail.getByRole("button", { name: "Runs" });
+    await expect(runsTab).toHaveAttribute("aria-current", "page");
+    await expect(detail.getByTestId("agent-history-no-runs")).toBeVisible();
+    await expect(detail.getByText(/API Error:/)).toBeHidden();
 
-    // Verify Info tab is default selected
-    await expect(page.locator("#agent-panel-tab-info")).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-
-    // Verify current task section shows task info
-    await expect(panel.getByText("Fix authentication bug")).toBeVisible();
-
-    // Verify agent metadata in the Info tab
-    await expect(panel.getByText("/tmp/worktrees/ember")).toBeVisible();
-    await expect(panel.getByLabel("Info").getByText("fix-auth-bug")).toBeVisible();
+    // The route keeps the complete review surface available through editor
+    // tabs. Verify the monitor-backed identity metadata on Info.
+    const infoTab = detail.getByRole("button", { name: "Info" });
+    await infoTab.click();
+    await expect(infoTab).toHaveAttribute("aria-current", "page");
+    const visiblePane = detail.locator('[role="tabpanel"]:visible');
+    await expect(
+      visiblePane.getByRole("heading", { name: "ember" }),
+    ).toBeVisible();
+    await expect(visiblePane.getByText("fix-auth-bug")).toBeVisible();
+    await expect(visiblePane.getByText("loomcli")).toBeVisible();
   });
 
   test("Step 4-5: Panel mutual exclusivity (agent → issue → agent)", async () => {

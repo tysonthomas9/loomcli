@@ -102,6 +102,7 @@ if [[ -s "$tmp" ]]; then
       internal/app/serve/agentcomposition/agents.go | \
       internal/app/serve/agentcomposition/agents_fleetdb.go | \
       internal/app/serve/interactioncomposition/interaction_fleetdb.go | \
+      internal/app/serve/interactioncomposition/interaction_transcript.go | \
       internal/app/serve/workflow_catalog.go | \
       internal/app/serve/workflow_catalog_fleetdb.go | \
       internal/app/agentprovisioning/fleetdb/adapter.go | \

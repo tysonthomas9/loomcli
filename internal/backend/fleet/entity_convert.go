@@ -3,6 +3,8 @@ package fleet
 import (
 	"fmt"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
+
 	"github.com/tysonthomas9/loomcli/internal/entity"
 	"github.com/tysonthomas9/loomcli/internal/types"
 )
@@ -228,9 +230,9 @@ func dependencyMetasToEntities(parentID string, iwdms []*types.IssueWithDependen
 	return result
 }
 
-// CommentToEntity converts a types.Comment to an entity.Comment.
+// CommentToEntity converts a workitems.Comment to an entity.Comment.
 // Returns nil for nil input.
-func CommentToEntity(c *types.Comment) *entity.Comment {
+func CommentToEntity(c *workitems.Comment) *entity.Comment {
 	if c == nil {
 		return nil
 	}
@@ -243,9 +245,9 @@ func CommentToEntity(c *types.Comment) *entity.Comment {
 	}
 }
 
-// CommentsToEntities converts a slice of *types.Comment to []*entity.Comment.
+// CommentsToEntities converts a slice of *workitems.Comment to []*entity.Comment.
 // Nil entries are filtered. Nil or empty input returns a non-nil empty slice.
-func CommentsToEntities(cs []*types.Comment) []*entity.Comment {
+func CommentsToEntities(cs []*workitems.Comment) []*entity.Comment {
 	result := make([]*entity.Comment, 0, len(cs))
 	for _, c := range cs {
 		if c != nil {

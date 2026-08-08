@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -44,8 +46,8 @@ func TestListActiveTaskRunsReturnsQueuedAndRunningOnly(t *testing.T) {
 		WorkspaceKey: "WS",
 		DriverID:     "driver-1",
 		Name:         "driver-1",
-		OwnerType:    domain.DriverOwnerSystem,
-		Status:       domain.DriverStatusActive,
+		OwnerType:    workflowcatalog.DriverOwnerSystem,
+		Status:       workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatalf("Create driver: %v", err)
 	}
@@ -57,7 +59,7 @@ func TestListActiveTaskRunsReturnsQueuedAndRunningOnly(t *testing.T) {
 		SourceDigest:     "sha256:source",
 		BundleDigest:     "sha256:bundle",
 		Runtime:          RuntimeFlueNode,
-		ValidationStatus: domain.DriverVersionValidationPassed,
+		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
 	}

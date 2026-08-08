@@ -9,8 +9,8 @@ import (
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 	webuterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
@@ -27,6 +27,7 @@ type InteractionDependencies struct {
 	API                interaction.API
 	Operator           workflowcataloghttp.OperatorAuthorityResolver
 	SessionAuthorities InteractionSessionAuthorityResolver
+	TerminalIdentities webuterminal.InteractionTerminalIdentityWriter
 }
 
 // Module registers the surviving workspace-scoped terminal routes: the
@@ -39,14 +40,14 @@ type InteractionDependencies struct {
 // session-status) are gone — each WebSocket now owns a fresh PTY with
 // wterm-style wire, so there are no persistent sessions to manage.
 type Module struct {
-	termSvc         service.TerminalService
-	agentSvc        service.AgentService // may be nil — agent routes skipped
+	termSvc         webuterminal.TerminalService
+	agentSvc        agentcoord.AgentService // may be nil — agent routes skipped
 	ptyMgr          webuterminal.PTYSource
 	agentTmuxMgr    *webuterminal.AgentTmuxManager // may be nil — tmux missing
 	termAuth        *realtime.TerminalAuth         // may be nil — token routes skipped
 	allowedOrigins  []string
 	loomServerURL   string
-	store           store.Store
+	store           terminalStore
 	tabMetaStore    *tabmeta.Store
 	hub             *realtime.Hub
 	serverStartedAt time.Time
@@ -54,19 +55,26 @@ type Module struct {
 	interaction     InteractionDependencies
 }
 
+type terminalStore interface {
+	store.OrchestrationSessionStore
+	Roles() store.RoleStore
+	Workspaces() store.WorkspaceStore
+	Repos() store.RepoStore
+}
+
 // NewModule returns a Module. Any of agentSvc, agentTmuxMgr, and termAuth
 // may be nil — routes that depend on them will simply not be registered.
 // ptyMgr must be non-nil when terminal routes should be served; pass nil
 // (the interface, not a typed-nil pointer) to skip registration.
 func NewModule(
-	termSvc service.TerminalService,
-	agentSvc service.AgentService,
+	termSvc webuterminal.TerminalService,
+	agentSvc agentcoord.AgentService,
 	ptyMgr webuterminal.PTYSource,
 	agentTmuxMgr *webuterminal.AgentTmuxManager,
 	termAuth *realtime.TerminalAuth,
 	allowedOrigins []string,
 	loomServerURL string,
-	st store.Store,
+	st terminalStore,
 	tabMetaStore *tabmeta.Store,
 	hub *realtime.Hub,
 	serverStartedAt time.Time,

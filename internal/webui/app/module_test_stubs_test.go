@@ -5,9 +5,12 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/filecoord"
+	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
+	"github.com/tysonthomas9/loomcli/internal/webui/sourcecontrolcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
+	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
 // stubTerminalService implements TerminalService with no-op defaults for module tests.
@@ -24,10 +27,13 @@ func (s *stubTerminalService) ListTabs(_ context.Context, _ string) ([]tabmeta.T
 func (s *stubTerminalService) GetTab(_ context.Context, _, _ string) (*tabmeta.TabMetadata, error) {
 	return &tabmeta.TabMetadata{}, nil
 }
-func (s *stubTerminalService) PatchTab(_ context.Context, _, _ string, _ map[string]string) (*service.PatchTabResult, error) {
-	return &service.PatchTabResult{Tab: &tabmeta.TabMetadata{}}, nil
+func (s *stubTerminalService) PatchTab(_ context.Context, _, _ string, _ map[string]string) (*terminal.PatchTabResult, error) {
+	return &terminal.PatchTabResult{Tab: &tabmeta.TabMetadata{}}, nil
 }
 func (s *stubTerminalService) PutTab(_ context.Context, _ string, _ *tabmeta.TabMetadata) error {
+	return nil
+}
+func (s *stubTerminalService) PersistInteractionTabIdentity(_ context.Context, _ string, _ *tabmeta.TabMetadata) error {
 	return nil
 }
 func (s *stubTerminalService) DeleteTab(_ context.Context, _, _ string) error { return nil }
@@ -38,18 +44,18 @@ func (s *stubTerminalService) GetTerminalState(_ context.Context, _ string) (str
 	return "", nil
 }
 func (s *stubTerminalService) PatchTerminalState(_ context.Context, _, _ string) error { return nil }
-func (s *stubTerminalService) StartSetup(_ context.Context, _ string, req service.TerminalSetupRequest) (*service.TerminalSetupResult, error) {
-	return &service.TerminalSetupResult{Backend: req.Backend, Action: req.Action}, nil
+func (s *stubTerminalService) StartSetup(_ context.Context, _ string, req terminal.TerminalSetupRequest) (*terminal.TerminalSetupResult, error) {
+	return &terminal.TerminalSetupResult{Backend: req.Backend, Action: req.Action}, nil
 }
 
 // stubSessionService implements SessionService with no-op defaults for module tests.
 type stubSessionService struct{}
 
-func (s *stubSessionService) ListTaskSessions(_ context.Context, _ string) ([]service.SessionListItem, error) {
+func (s *stubSessionService) ListTaskSessions(_ context.Context, _ string) ([]sessioncoord.SessionListItem, error) {
 	return nil, nil
 }
-func (s *stubSessionService) GetSession(_ context.Context, _, _ string) (*service.SessionDetailData, error) {
-	return &service.SessionDetailData{}, nil
+func (s *stubSessionService) GetSession(_ context.Context, _, _ string) (*sessioncoord.SessionDetailData, error) {
+	return &sessioncoord.SessionDetailData{}, nil
 }
 func (s *stubSessionService) GetSessionTranscript(_ context.Context, _, _ string) ([]sessions.TranscriptEntry, error) {
 	return nil, nil
@@ -60,8 +66,8 @@ func (s *stubSessionService) GetSessionDiff(_ context.Context, _, _ string) (str
 func (s *stubSessionService) ListSessionHistory(_ context.Context, _, _ string) ([]sessionhistory.SessionRecord, error) {
 	return nil, nil
 }
-func (s *stubSessionService) GetSessionScrollback(_ context.Context, _, _, _ string) (*service.SessionScrollbackResult, error) {
-	return &service.SessionScrollbackResult{}, nil
+func (s *stubSessionService) GetSessionScrollback(_ context.Context, _, _, _ string) (*sessioncoord.SessionScrollbackResult, error) {
+	return &sessioncoord.SessionScrollbackResult{}, nil
 }
 
 // stubDiffService implements DiffService with no-op defaults for module tests.
@@ -76,58 +82,58 @@ func (s *stubDiffService) DiffFiles(_ context.Context, _, _, _, _ string) ([]ops
 func (s *stubDiffService) DiffFilePatch(_ context.Context, _, _, _, _, _ string) (*ops.DiffFilePatchResult, error) {
 	return &ops.DiffFilePatchResult{}, nil
 }
-func (s *stubDiffService) GetIssueDiffStat(_ context.Context, _, _ string) (*service.IssueDiffStatResult, error) {
-	return &service.IssueDiffStatResult{}, nil
+func (s *stubDiffService) GetIssueDiffStat(_ context.Context, _, _ string) (*sourcecontrolcoord.IssueDiffStatResult, error) {
+	return &sourcecontrolcoord.IssueDiffStatResult{}, nil
 }
 
 // stubFileService implements FileService with no-op defaults for module tests.
 type stubFileService struct{}
 
-func (s *stubFileService) ListDirectoryScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) (*service.FileTreeResult, error) {
-	return &service.FileTreeResult{}, nil
+func (s *stubFileService) ListDirectoryScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _ string) (*filecoord.FileTreeResult, error) {
+	return &filecoord.FileTreeResult{}, nil
 }
-func (s *stubFileService) ReadFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) (*service.FileReadResult, error) {
-	return &service.FileReadResult{}, nil
+func (s *stubFileService) ReadFileScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _ string) (*filecoord.FileReadResult, error) {
+	return &filecoord.FileReadResult{}, nil
 }
-func (s *stubFileService) StatPathScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) (*service.FileStatResult, error) {
-	return &service.FileStatResult{}, nil
+func (s *stubFileService) StatPathScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _ string) (*filecoord.FileStatResult, error) {
+	return &filecoord.FileStatResult{}, nil
 }
-func (s *stubFileService) ReadFileAtRevScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _ string) (*service.FileReadResult, error) {
-	return &service.FileReadResult{}, nil
+func (s *stubFileService) ReadFileAtRevScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _, _ string) (*filecoord.FileReadResult, error) {
+	return &filecoord.FileReadResult{}, nil
 }
-func (s *stubFileService) IndexFilesScoped(_ context.Context, _ string, _ service.FileScope, _, _ string) (*service.FileIndexResult, error) {
-	return &service.FileIndexResult{}, nil
+func (s *stubFileService) IndexFilesScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _ string) (*filecoord.FileIndexResult, error) {
+	return &filecoord.FileIndexResult{}, nil
 }
-func (s *stubFileService) SearchFilesScoped(_ context.Context, _ string, _ service.FileScope, _, _ string, _ service.FileSearchRequest) (*service.FileSearchResult, error) {
-	return &service.FileSearchResult{}, nil
+func (s *stubFileService) SearchFilesScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _ string, _ filecoord.FileSearchRequest) (*filecoord.FileSearchResult, error) {
+	return &filecoord.FileSearchResult{}, nil
 }
-func (s *stubFileService) GitStatusScoped(_ context.Context, _ string, _ service.FileScope, _, _ string) (service.FileGitStatusResult, error) {
-	return service.FileGitStatusResult{}, nil
+func (s *stubFileService) GitStatusScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _ string) (filecoord.FileGitStatusResult, error) {
+	return filecoord.FileGitStatusResult{}, nil
 }
-func (s *stubFileService) ListFileCheckouts(_ context.Context, _ string) (*service.FileCheckoutsResult, error) {
-	return &service.FileCheckoutsResult{}, nil
+func (s *stubFileService) ListFileCheckouts(_ context.Context, _ string) (*filecoord.FileCheckoutsResult, error) {
+	return &filecoord.FileCheckoutsResult{}, nil
 }
-func (s *stubFileService) RepairCheckout(_ context.Context, _ string, _ service.FileCheckoutRepairRequest) (*ops.RepairResult, error) {
+func (s *stubFileService) RepairCheckout(_ context.Context, _ string, _ filecoord.FileCheckoutRepairRequest) (*ops.RepairResult, error) {
 	return &ops.RepairResult{}, nil
 }
-func (s *stubFileService) DiffFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _, _ string) (*service.FileDiffResult, error) {
-	return &service.FileDiffResult{}, nil
+func (s *stubFileService) DiffFileScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _, _, _ string) (*filecoord.FileDiffResult, error) {
+	return &filecoord.FileDiffResult{}, nil
 }
-func (s *stubFileService) BlameFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) (*service.FileBlameResult, error) {
-	return &service.FileBlameResult{}, nil
+func (s *stubFileService) BlameFileScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _ string) (*filecoord.FileBlameResult, error) {
+	return &filecoord.FileBlameResult{}, nil
 }
-func (s *stubFileService) HistoryFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) (*service.FileHistoryResult, error) {
-	return &service.FileHistoryResult{}, nil
+func (s *stubFileService) HistoryFileScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _ string) (*filecoord.FileHistoryResult, error) {
+	return &filecoord.FileHistoryResult{}, nil
 }
-func (s *stubFileService) WriteFileConditionalScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _ string, _ service.FileWritePreconditions) (*service.FileMutationResult, error) {
-	return &service.FileMutationResult{Success: true}, nil
+func (s *stubFileService) WriteFileConditionalScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _, _ string, _ filecoord.FileWritePreconditions) (*filecoord.FileMutationResult, error) {
+	return &filecoord.FileMutationResult{Success: true}, nil
 }
-func (s *stubFileService) DeletePathVersionedScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string, _ bool, _ string) error {
+func (s *stubFileService) DeletePathVersionedScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _ string, _ bool, _ string) error {
 	return nil
 }
-func (s *stubFileService) MkdirScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) error {
+func (s *stubFileService) MkdirScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _ string) error {
 	return nil
 }
-func (s *stubFileService) MovePathVersionedScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _ string, _ bool, _, _ string) (*service.FileMutationResult, error) {
-	return &service.FileMutationResult{Success: true}, nil
+func (s *stubFileService) MovePathVersionedScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _, _ string, _ bool, _, _ string) (*filecoord.FileMutationResult, error) {
+	return &filecoord.FileMutationResult{Success: true}, nil
 }

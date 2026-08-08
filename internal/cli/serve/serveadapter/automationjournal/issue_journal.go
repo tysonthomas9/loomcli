@@ -9,8 +9,8 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/app/systemeventing"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
-	"github.com/tysonthomas9/loomcli/internal/trigger"
 )
 
 // automationIssueJournalEmitter is the composition adapter from the legacy
@@ -44,7 +44,7 @@ func (emitter *automationIssueJournalEmitter) Emit(
 		return nil, systemeventing.ErrUnavailable
 	}
 	workspace = strings.TrimSpace(workspace)
-	if workspace == "" || event.Origin != domain.TriggerEventOriginSystem {
+	if workspace == "" || event.Origin != automation.EventOriginSystem {
 		return nil, fmt.Errorf("issue journal emitter requires a system event and workspace: %w", domain.ErrInvalid)
 	}
 	result, err := emitter.emitter.EmitIssueJournal(ctx, workspace, event.ActorRef, systemeventing.EmitRequest{

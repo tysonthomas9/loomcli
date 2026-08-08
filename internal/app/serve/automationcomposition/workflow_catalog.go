@@ -9,8 +9,9 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/app/webhookingestion"
 	"github.com/tysonthomas9/loomcli/internal/app/workflowbinding"
-	"github.com/tysonthomas9/loomcli/internal/driver"
+	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	automationfleetdb "github.com/tysonthomas9/loomcli/internal/modules/automation/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
@@ -24,6 +25,27 @@ type DriverRunStore = store.DriverRunStore
 type AwaitStore = store.AwaitStore
 type WorkspaceStore = store.WorkspaceStore
 type WebhookVerifier = webhookingestion.Verifier
+
+// NewAwaitEventReconcilerWithExecutionStores composes Automation's durable
+// await-notification loop without exposing its infrastructure type to the
+// outer serve package.
+func NewAwaitEventReconcilerWithExecutionStores(
+	queue execution.AwaitEventNotificationAPI,
+	authorities execution.SystemAuthorityResolver,
+	awaits store.AwaitStore,
+	driverRuns store.DriverRunStore,
+	resolver store.AtomicAwaitStore,
+	workspace string,
+	workspaces interface {
+		ListWorkspaceKeys(context.Context) ([]string, error)
+	},
+	componentID string,
+) (*trigger.AwaitEventReconciler, error) {
+	return trigger.NewAwaitEventReconcilerWithExecutionStores(
+		queue, authorities, awaits, driverRuns, resolver,
+		workspace, workspaces, componentID,
+	)
+}
 
 // WorkflowTarget is the composition projection of one prepared legacy
 // workflow.
@@ -125,6 +147,7 @@ func (binding *ExecutionAwaitResolverBinding) ResolveAwaitAndResume(
 	return resolver.ResolveAwaitAndResume(ctx, workspace, instanceKey, eventID, payload, actor)
 }
 
+//nolint:funlen // Composition intentionally wires the complete capability graph in one visible sequence.
 func ComposeWorkflowCatalogAutomation(
 	config WorkflowCatalogConfig,
 ) (*AutomationCapability, *ExecutionAwaitResolverBinding, error) {
@@ -138,9 +161,13 @@ func ComposeWorkflowCatalogAutomation(
 	if err != nil {
 		return nil, nil, fmt.Errorf("compose automation FleetDB adapter: %w", err)
 	}
+	approvalEvents, ok := config.FleetDBClient.TriggerEvents().(automation.ApprovalEventStore)
+	if !ok {
+		return nil, nil, fmt.Errorf("compose automation approval journal: %w", automation.ErrUnavailable)
+	}
 	workspaceLister := newAutomationWorkspaceLister(config.Workspaces)
 	awaitResolver := &ExecutionAwaitResolverBinding{}
-	awaitNotifier, err := driver.NewAutomationAwaitEventNotifierWithResolver(
+	awaitNotifier, err := trigger.NewAutomationAwaitEventNotifierWithResolver(
 		config.Awaits,
 		config.DriverRuns,
 		awaitResolver,
@@ -161,7 +188,7 @@ func ComposeWorkflowCatalogAutomation(
 			bindings: automationAdapter, unmanagedBindings: automationAdapter,
 			managedBindings: automationAdapter, matcher: automationAdapter,
 			events: automationAdapter, deliveries: automationAdapter,
-			admissions: automationAdapter,
+			admissions: automationAdapter, approvalEvents: approvalEvents,
 			execution: newAutomationExecutionPort(
 				config.DriverRuns,
 				newAutomationFleetExecutionDispatch(config.FleetDBClient),

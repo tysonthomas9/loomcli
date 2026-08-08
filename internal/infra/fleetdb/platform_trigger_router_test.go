@@ -5,7 +5,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -19,14 +20,14 @@ func TestTriggerBindingRouterFieldsWire(t *testing.T) {
 			var body map[string]any
 			decodeJSONBody(t, r, &body)
 			checkRouterCreateBody(t, body)
-			writeJSON(t, w, domain.TriggerBinding{
+			writeJSON(t, w, automation.Binding{
 				WorkspaceKey:        "WS",
 				BindingID:           "binding-router",
 				SourceKind:          "cron",
 				DriverID:            "driver-1",
 				DriverVersionID:     "version-1",
 				SubjectKeyTemplate:  "{{subject_ref}}|{{attrs.repo}}",
-				ActorFilter:         &domain.TriggerActorFilter{ExcludeActorKinds: []string{"workflow"}, AllowActors: []string{"agent:lead"}},
+				ActorFilter:         &automation.ActorFilter{ExcludeActorKinds: []string{"workflow"}, AllowActors: []string{"agent:lead"}},
 				RetryMaxAttempts:    3,
 				RetryBackoffSeconds: 60,
 				Schedule:            "*/5 * * * *",
@@ -39,12 +40,12 @@ func TestTriggerBindingRouterFieldsWire(t *testing.T) {
 			if _, ok := body["actor_filter"]; ok {
 				t.Fatalf("create without filter sent actor_filter = %v", body["actor_filter"])
 			}
-			writeJSON(t, w, domain.TriggerBinding{WorkspaceKey: "WS2", BindingID: "binding-plain", DriverID: "driver-1", DriverVersionID: "version-1", Enabled: true})
+			writeJSON(t, w, automation.Binding{WorkspaceKey: "WS2", BindingID: "binding-plain", DriverID: "driver-1", DriverVersionID: "version-1", Enabled: true})
 		case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/WS/trigger-bindings/binding-router":
 			var body map[string]any
 			decodeJSONBody(t, r, &body)
 			checkRouterUpdateBody(t, body)
-			writeJSON(t, w, domain.TriggerBinding{WorkspaceKey: "WS", BindingID: "binding-router", SubjectKeyTemplate: "{{event_type}}", RetryMaxAttempts: 7, Enabled: true})
+			writeJSON(t, w, automation.Binding{WorkspaceKey: "WS", BindingID: "binding-router", SubjectKeyTemplate: "{{event_type}}", RetryMaxAttempts: 7, Enabled: true})
 		case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/WS/trigger-bindings/binding-untouched":
 			var body map[string]any
 			decodeJSONBody(t, r, &body)
@@ -53,7 +54,7 @@ func TestTriggerBindingRouterFieldsWire(t *testing.T) {
 					t.Fatalf("router-field-free patch sent %q = %v", key, body[key])
 				}
 			}
-			writeJSON(t, w, domain.TriggerBinding{WorkspaceKey: "WS", BindingID: "binding-untouched", Name: "renamed", Enabled: true})
+			writeJSON(t, w, automation.Binding{WorkspaceKey: "WS", BindingID: "binding-untouched", Name: "renamed", Enabled: true})
 		default:
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
 		}
@@ -73,7 +74,7 @@ func TestTriggerBindingRouterFieldsWire(t *testing.T) {
 		DriverID:            "driver-1",
 		DriverVersionID:     "version-1",
 		SubjectKeyTemplate:  "{{subject_ref}}|{{attrs.repo}}",
-		ActorFilter:         &domain.TriggerActorFilter{ExcludeActorKinds: []string{"workflow"}, AllowActors: []string{"agent:lead"}},
+		ActorFilter:         &automation.ActorFilter{ExcludeActorKinds: []string{"workflow"}, AllowActors: []string{"agent:lead"}},
 		RetryMaxAttempts:    3,
 		RetryBackoffSeconds: 60,
 		Schedule:            "*/5 * * * *",
@@ -101,7 +102,7 @@ func TestTriggerBindingRouterFieldsWire(t *testing.T) {
 
 	template := "{{event_type}}"
 	attempts := 7
-	clearFilter := domain.TriggerActorFilter{}
+	clearFilter := automation.ActorFilter{}
 	updated, err := client.TriggerBindings().Update(t.Context(), "WS", "binding-router", store.TriggerBindingUpdate{
 		SubjectKeyTemplate: &template,
 		ActorFilter:        &clearFilter,

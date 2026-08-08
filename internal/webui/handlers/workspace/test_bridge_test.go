@@ -4,7 +4,8 @@ import (
 	"context"
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
+	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 )
 
 // ---------------------------------------------------------------------------
@@ -12,39 +13,26 @@ import (
 // ---------------------------------------------------------------------------
 
 var handleWorkspaceBackendPatch = HandleWorkspaceBackendPatch
-var handleWorkspaceDesignFormatPatch = HandleWorkspaceDesignFormatPatch
 var handleWorkspaceCreate = HandleWorkspaceCreate
 var handleWorkspaceDelete = HandleWorkspaceDelete
-var handleWorkspaceRename = HandleWorkspaceRename
-var handleWorkspaceReorder = HandleWorkspaceReorder
 var handleActiveWorkspace = HandleActiveWorkspace
-var handleListWorkspaces = HandleListWorkspaces
-var handleGetWorkspace = HandleGetWorkspace
 var handleGetWorkspaceJob = HandleGetWorkspaceJob
-var handleSetDefaultWorkspace = HandleSetDefaultWorkspace
-var handleClearDefaultWorkspace = HandleClearDefaultWorkspace
 
 // ---------------------------------------------------------------------------
 // mockWorkspaceService — local copy for handler-level testing
 // ---------------------------------------------------------------------------
 
 type mockWorkspaceService struct {
-	getActiveWorkspaceFn         func(ctx context.Context) (*ops.WorkspaceData, error)
-	listWorkspacesFn             func(ctx context.Context) ([]service.WorkspaceListItem, error)
-	getWorkspaceFn               func(ctx context.Context, wsID string) (*ops.WorkspaceData, error)
-	createWorkspaceFn            func(ctx context.Context, req service.WorkspaceCreateRequest) (*ops.WorkspaceData, []string, error)
-	addWorkspaceReposFn          func(ctx context.Context, req service.WorkspaceAddReposRequest) (*ops.WorkspaceData, error)
-	startAsyncAddReposFn         func(ctx context.Context, req service.WorkspaceAddReposRequest) (string, error)
-	startAsyncCreateFn           func(ctx context.Context, req service.WorkspaceCreateRequest) (string, error)
-	getWorkspaceJobFn            func(ctx context.Context, jobID string) (*service.WorkspaceJob, error)
-	deleteWorkspaceFn            func(ctx context.Context, wsID string) (*ops.WorkspaceData, error)
-	renameWorkspaceFn            func(ctx context.Context, wsID string, newName string) (*ops.WorkspaceData, error)
-	reorderWorkspacesFn          func(ctx context.Context, order []string) (*ops.WorkspaceData, error)
-	setDefaultWorkspaceFn        func(ctx context.Context, name string) (*ops.WorkspaceData, error)
-	clearDefaultWorkspaceFn      func(ctx context.Context) (*ops.WorkspaceData, error)
-	getWorkspaceBackendFn        func(ctx context.Context, wsID string) (*service.BackendConfigData, error)
-	patchWorkspaceBackendFn      func(ctx context.Context, wsID string, backend string) (*ops.WorkspaceData, error)
-	patchWorkspaceDesignFormatFn func(ctx context.Context, wsID string, designFormat string) (*ops.WorkspaceData, error)
+	getActiveWorkspaceFn    func(ctx context.Context) (*ops.WorkspaceData, error)
+	getWorkspaceFn          func(ctx context.Context, wsID string) (*ops.WorkspaceData, error)
+	createWorkspaceFn       func(ctx context.Context, req workspacecoord.WorkspaceCreateRequest) (*ops.WorkspaceData, []string, error)
+	addWorkspaceReposFn     func(ctx context.Context, req workspacecoord.WorkspaceAddReposRequest) (*ops.WorkspaceData, error)
+	startAsyncAddReposFn    func(ctx context.Context, req workspacecoord.WorkspaceAddReposRequest) (string, error)
+	startAsyncCreateFn      func(ctx context.Context, req workspacecoord.WorkspaceCreateRequest) (string, error)
+	getWorkspaceJobFn       func(ctx context.Context, jobID string) (*workspacecoord.WorkspaceJob, error)
+	deleteWorkspaceFn       func(ctx context.Context, wsID string) (*ops.WorkspaceData, error)
+	getWorkspaceBackendFn   func(ctx context.Context, wsID string) (*workspacecoord.BackendConfigData, error)
+	patchWorkspaceBackendFn func(ctx context.Context, wsID string, backend string) (*ops.WorkspaceData, error)
 }
 
 func (m *mockWorkspaceService) GetActiveWorkspace(ctx context.Context) (*ops.WorkspaceData, error) {
@@ -53,93 +41,57 @@ func (m *mockWorkspaceService) GetActiveWorkspace(ctx context.Context) (*ops.Wor
 	}
 	return &ops.WorkspaceData{}, nil
 }
-func (m *mockWorkspaceService) ListWorkspaces(ctx context.Context) ([]service.WorkspaceListItem, error) {
-	if m.listWorkspacesFn != nil {
-		return m.listWorkspacesFn(ctx)
-	}
-	return nil, nil
-}
 func (m *mockWorkspaceService) GetWorkspace(ctx context.Context, wsID string) (*ops.WorkspaceData, error) {
 	if m.getWorkspaceFn != nil {
 		return m.getWorkspaceFn(ctx, wsID)
 	}
-	return nil, service.ErrNotFound("not found")
+	return nil, apperrors.ErrNotFound("not found")
 }
-func (m *mockWorkspaceService) CreateWorkspace(ctx context.Context, req service.WorkspaceCreateRequest) (*ops.WorkspaceData, []string, error) {
+func (m *mockWorkspaceService) CreateWorkspace(ctx context.Context, req workspacecoord.WorkspaceCreateRequest) (*ops.WorkspaceData, []string, error) {
 	if m.createWorkspaceFn != nil {
 		return m.createWorkspaceFn(ctx, req)
 	}
-	return nil, nil, service.ErrUnavailable("not available")
+	return nil, nil, apperrors.ErrUnavailable("not available")
 }
-func (m *mockWorkspaceService) AddWorkspaceRepos(ctx context.Context, req service.WorkspaceAddReposRequest) (*ops.WorkspaceData, error) {
+func (m *mockWorkspaceService) AddWorkspaceRepos(ctx context.Context, req workspacecoord.WorkspaceAddReposRequest) (*ops.WorkspaceData, error) {
 	if m.addWorkspaceReposFn != nil {
 		return m.addWorkspaceReposFn(ctx, req)
 	}
-	return nil, service.ErrUnavailable("not available")
+	return nil, apperrors.ErrUnavailable("not available")
 }
-func (m *mockWorkspaceService) StartAsyncAddRepos(ctx context.Context, req service.WorkspaceAddReposRequest) (string, error) {
+func (m *mockWorkspaceService) StartAsyncAddRepos(ctx context.Context, req workspacecoord.WorkspaceAddReposRequest) (string, error) {
 	if m.startAsyncAddReposFn != nil {
 		return m.startAsyncAddReposFn(ctx, req)
 	}
-	return "", service.ErrUnavailable("not available")
+	return "", apperrors.ErrUnavailable("not available")
 }
-func (m *mockWorkspaceService) StartAsyncCreate(ctx context.Context, req service.WorkspaceCreateRequest) (string, error) {
+func (m *mockWorkspaceService) StartAsyncCreate(ctx context.Context, req workspacecoord.WorkspaceCreateRequest) (string, error) {
 	if m.startAsyncCreateFn != nil {
 		return m.startAsyncCreateFn(ctx, req)
 	}
-	return "", service.ErrUnavailable("not available")
+	return "", apperrors.ErrUnavailable("not available")
 }
-func (m *mockWorkspaceService) GetWorkspaceJob(ctx context.Context, jobID string) (*service.WorkspaceJob, error) {
+func (m *mockWorkspaceService) GetWorkspaceJob(ctx context.Context, jobID string) (*workspacecoord.WorkspaceJob, error) {
 	if m.getWorkspaceJobFn != nil {
 		return m.getWorkspaceJobFn(ctx, jobID)
 	}
-	return nil, service.ErrNotFound("not found")
+	return nil, apperrors.ErrNotFound("not found")
 }
 func (m *mockWorkspaceService) DeleteWorkspace(ctx context.Context, wsID string) (*ops.WorkspaceData, error) {
 	if m.deleteWorkspaceFn != nil {
 		return m.deleteWorkspaceFn(ctx, wsID)
 	}
-	return nil, service.ErrUnavailable("not available")
+	return nil, apperrors.ErrUnavailable("not available")
 }
-func (m *mockWorkspaceService) RenameWorkspace(ctx context.Context, wsID string, newName string) (*ops.WorkspaceData, error) {
-	if m.renameWorkspaceFn != nil {
-		return m.renameWorkspaceFn(ctx, wsID, newName)
-	}
-	return nil, service.ErrUnavailable("not available")
-}
-func (m *mockWorkspaceService) ReorderWorkspaces(ctx context.Context, order []string) (*ops.WorkspaceData, error) {
-	if m.reorderWorkspacesFn != nil {
-		return m.reorderWorkspacesFn(ctx, order)
-	}
-	return nil, service.ErrUnavailable("not available")
-}
-func (m *mockWorkspaceService) SetDefaultWorkspace(ctx context.Context, name string) (*ops.WorkspaceData, error) {
-	if m.setDefaultWorkspaceFn != nil {
-		return m.setDefaultWorkspaceFn(ctx, name)
-	}
-	return nil, service.ErrUnavailable("not available")
-}
-func (m *mockWorkspaceService) ClearDefaultWorkspace(ctx context.Context) (*ops.WorkspaceData, error) {
-	if m.clearDefaultWorkspaceFn != nil {
-		return m.clearDefaultWorkspaceFn(ctx)
-	}
-	return nil, service.ErrUnavailable("not available")
-}
-func (m *mockWorkspaceService) GetWorkspaceBackend(ctx context.Context, wsID string) (*service.BackendConfigData, error) {
+func (m *mockWorkspaceService) GetWorkspaceBackend(ctx context.Context, wsID string) (*workspacecoord.BackendConfigData, error) {
 	if m.getWorkspaceBackendFn != nil {
 		return m.getWorkspaceBackendFn(ctx, wsID)
 	}
-	return nil, service.ErrUnavailable("not available")
+	return nil, apperrors.ErrUnavailable("not available")
 }
 func (m *mockWorkspaceService) PatchWorkspaceBackend(ctx context.Context, wsID string, backend string) (*ops.WorkspaceData, error) {
 	if m.patchWorkspaceBackendFn != nil {
 		return m.patchWorkspaceBackendFn(ctx, wsID, backend)
 	}
-	return nil, service.ErrUnavailable("not available")
-}
-func (m *mockWorkspaceService) PatchWorkspaceDesignFormat(ctx context.Context, wsID string, designFormat string) (*ops.WorkspaceData, error) {
-	if m.patchWorkspaceDesignFormatFn != nil {
-		return m.patchWorkspaceDesignFormatFn(ctx, wsID, designFormat)
-	}
-	return nil, service.ErrUnavailable("not available")
+	return nil, apperrors.ErrUnavailable("not available")
 }

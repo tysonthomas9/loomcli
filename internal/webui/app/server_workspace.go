@@ -8,21 +8,20 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/appinfra"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlermux"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
+	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 )
 
 func wrapWorkspaceCreateFn(
-	innerCreate service.WorkspaceCreateFn,
+	innerCreate workspacecoord.WorkspaceCreateFn,
 	registry *appinfra.WorkspaceRegistry,
-) service.WorkspaceCreateFn {
+) workspacecoord.WorkspaceCreateFn {
 	if innerCreate == nil {
 		return nil
 	}
-	return func(ctx context.Context, req service.WorkspaceCreateRequest) (service.WorkspaceCreateResult, error) {
+	return func(ctx context.Context, req workspacecoord.WorkspaceCreateRequest) (workspacecoord.WorkspaceCreateResult, error) {
 		result, err := innerCreate(ctx, req)
 		if err != nil {
 			return result, err
@@ -34,7 +33,7 @@ func wrapWorkspaceCreateFn(
 		if wsID == "" {
 			logger.Error("workspace creation returned empty WorkspaceID — skipping runtime registration",
 				"workspace", req.Name)
-			service.AddCreateWarning(ctx, "Could not register workspace runtime — workspace may not auto-connect until restart")
+			workspacecoord.AddCreateWarning(ctx, "Could not register workspace runtime — workspace may not auto-connect until restart")
 			return result, nil
 		}
 
@@ -42,14 +41,14 @@ func wrapWorkspaceCreateFn(
 		if wsDir == "" {
 			logger.Warn("workspace creation returned empty WorkspacePath — skipping runtime registration",
 				"workspace", req.Name)
-			service.AddCreateWarning(ctx, "Could not determine workspace directory for runtime registration")
+			workspacecoord.AddCreateWarning(ctx, "Could not determine workspace directory for runtime registration")
 			return result, nil
 		}
 
 		if err := registry.Register(wsID, wsDir); err != nil {
 			logger.Warn("workspace created but runtime registration failed",
 				"workspace", req.Name, "workspace_id", wsID, "err", err)
-			service.AddCreateWarning(ctx, "Workspace created but runtime registration failed — some features may be unavailable until restart")
+			workspacecoord.AddCreateWarning(ctx, "Workspace created but runtime registration failed — some features may be unavailable until restart")
 		}
 		// Subscriber activation is deferred to the workspace SSE token/stream
 		// routes so ordinary REST traffic does not start FleetDB long-polls.
@@ -58,48 +57,25 @@ func wrapWorkspaceCreateFn(
 	}
 }
 
-// wrapWorkspaceDeleteFn wraps a workspace deletion function with post-deletion
-// cleanup. After the inner delete succeeds, it deregisters the workspace from
-// the WorkspaceRegistry (closing pools and stopping subscribers) and the
-// FleetStoreRegistry (stopping fleet Store and TimeoutEnforcer).
-func wrapWorkspaceDeleteFn(
-	innerDelete func(name string) error,
+// wrapWorkspaceDeleteCleanupFn composes machine-local cleanup that runs only
+// after the Workspace owner command has durably deleted the aggregate.
+func wrapWorkspaceDeleteCleanupFn(
+	innerCleanup func(string) error,
 	registry *appinfra.WorkspaceRegistry,
-	resolveID webui.WorkspaceIDResolverFn,
-) func(name string) error {
-	if innerDelete == nil {
+) func(string) error {
+	if innerCleanup == nil && registry == nil {
 		return nil
 	}
-	return func(name string) error {
-		// Prefer the argument as the cleanup key. Store-backed workspace
-		// delete passes the stable fleet-db key here, so resolver failures
-		// must not leak runtime pools/subscribers/terminal managers.
-		wsID := name
-		if resolveID != nil {
-			if id, err := resolveID(name); err != nil {
-				logger.Warn("failed to resolve workspace ID for deletion cleanup; using delete key",
-					"workspace", name, "err", err)
-			} else if id == "" {
-				logger.Warn("workspace ID resolver returned empty ID for deletion cleanup; using delete key",
-					"workspace", name)
-			} else {
-				wsID = id
-			}
+	return func(key string) error {
+		var cleanupErr error
+		if innerCleanup != nil {
+			cleanupErr = innerCleanup(key)
 		}
-
-		// 2. Perform the config deletion (the critical path — always proceed).
-		if err := innerDelete(name); err != nil {
-			return err
+		if key != "" && registry != nil {
+			registry.Deregister(key)
+			logger.Info("workspace runtime cleaned up after owner deletion", "workspace_id", key)
 		}
-
-		// 3. Clean up pool, subscriber, and fleet state atomically.
-		if wsID != "" && registry != nil {
-			registry.Deregister(wsID)
-			logger.Info("workspace cleaned up after deletion",
-				"workspace", name, "id", wsID)
-		}
-
-		return nil
+		return cleanupErr
 	}
 }
 

@@ -3,38 +3,36 @@ package prreview
 import (
 	"context"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
 	"sort"
 	"strings"
+	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/connector"
-	"github.com/tysonthomas9/loomcli/internal/connector/providers"
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
 	"github.com/tysonthomas9/loomcli/internal/localsettings"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 )
 
-const prReviewWriteAction = providers.ActionGitHubReviewPost
+const prReviewWriteAction = connectorsmodule.ActionGitHubReviewPost
 
 const credentialSeedAttempts = 2
 
 var prReadActions = []string{
-	providers.ActionGitHubPullRequestRead,
-	providers.ActionGitHubPullsList,
-	providers.ActionGitHubCompareRead,
+	connectorsmodule.ActionGitHubPullRequestRead,
+	connectorsmodule.ActionGitHubPullsList,
+	connectorsmodule.ActionGitHubCompareRead,
 }
 
 var prReviewSubmissionActions = []string{
-	providers.ActionGitHubPullRequestRead,
+	connectorsmodule.ActionGitHubPullRequestRead,
 	prReviewWriteAction,
 }
 
 func (m *Module) ensureConnectorAndGrants(ctx context.Context, ws, owner, repo string, actions []string) error {
-	if m == nil || m.dispatcher == nil {
+	if m == nil || m.dispatcher == nil || m.connectorManagement == nil {
 		return errEgressUnavailable
 	}
 	// Fast-path: once the connector + requested action set for this canonical repo are
@@ -69,16 +67,16 @@ func (m *Module) ensureConnectorAndGrants(ctx context.Context, ws, owner, repo s
 	return errEgressUnavailable
 }
 
-func (m *Module) prepareCredentialSeed(ws string) (string, connector.Sealer, []byte, error) {
+func (m *Module) prepareCredentialSeed(ws string) (string, connectorsvault.Sealer, []byte, error) {
 	token, err := m.resolveGitHubToken()
 	if err != nil {
 		return "", nil, nil, err
 	}
-	sealer, err := connector.NewVaultFromEnvOrKeyFile(m.localSettingsDir)
+	sealer, err := connectorsvault.NewVaultFromEnvOrKeyFile(m.localSettingsDir)
 	if err != nil {
 		return "", nil, nil, errEgressUnavailable
 	}
-	sealed, err := sealer.Seal([]byte(token), connector.CredentialAAD(ws, connectorID))
+	sealed, err := sealer.Seal([]byte(token), connectorsvault.CredentialAAD(ws, connectorID))
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("seal webui github credential: %w", err)
 	}
@@ -88,20 +86,20 @@ func (m *Module) prepareCredentialSeed(ws string) (string, connector.Sealer, []b
 func (m *Module) seedConnectorAndGrants(
 	ctx context.Context,
 	ws, owner, repo, token string,
-	sealer connector.Sealer,
+	sealer connectorsvault.Sealer,
 	sealed []byte,
 	actions []string,
 ) error {
-	if _, err := m.store.Connectors().Create(ctx, store.ConnectorCreate{
+	if _, err := m.connectorManagement.CreateConnector(ctx, connectorsmodule.CreateConnectorCommand{
 		WorkspaceKey:             ws,
 		ConnectorID:              connectorID,
-		SourceKind:               domain.ConnectorSourceGitHub,
+		SourceKind:               connectorsmodule.ConnectorSourceGitHub,
 		DisplayName:              "GitHub (web UI PR review)",
 		OutboundCredentialSealed: sealed,
-		Status:                   domain.ConnectorStatusActive,
+		Status:                   connectorsmodule.ConnectorStatusActive,
 		CreatedBy:                bindingID,
 	}); err != nil {
-		if !errors.Is(err, domain.ErrConnectorExists) && !errors.Is(err, domain.ErrAlreadyExists) {
+		if !errors.Is(err, connectorsmodule.ErrAlreadyExists) {
 			return fmt.Errorf("seed webui github connector: %w", err)
 		}
 		if err := m.rotateConnectorCredentialIfChanged(ctx, ws, token, sealer); err != nil {
@@ -110,14 +108,14 @@ func (m *Module) seedConnectorAndGrants(
 	}
 	resourcePattern := prResource(owner, repo)
 	for _, action := range actions {
-		if _, err := m.store.ConnectorGrants().Create(ctx, store.ConnectorGrantCreate{
+		if _, err := m.connectorManagement.CreateGrant(ctx, connectorsmodule.CreateGrantCommand{
 			WorkspaceKey:    ws,
 			GrantID:         grantID(owner, repo, action),
 			ConnectorID:     connectorID,
 			BindingID:       bindingID,
 			Action:          action,
 			ResourcePattern: resourcePattern,
-		}); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
+		}); err != nil && !errors.Is(err, connectorsmodule.ErrAlreadyExists) {
 			return fmt.Errorf("seed webui github grant %q: %w", action, err)
 		}
 	}
@@ -163,73 +161,25 @@ func (m *Module) githubTokenConfigured() bool {
 func (m *Module) rotateConnectorCredentialIfChanged(
 	ctx context.Context,
 	ws, token string,
-	sealer connector.Sealer,
+	sealer connectorsvault.Sealer,
 ) error {
-	same, err := m.connectorCredentialMatches(ctx, ws, token, sealer)
+	vaultAdapter, err := connectorsvault.New(sealer)
 	if err != nil {
-		return err
+		return fmt.Errorf("compose webui connector credential vault: %w", err)
 	}
-	if same {
-		return nil
-	}
-
-	inbound, err := m.store.Connectors().ResolveInboundSecret(ctx, ws, connectorID)
+	management, err := connectorsmodule.NewManagementWithCredentialVault(
+		m.connectorManagementStore, vaultAdapter, time.Now,
+	)
 	if err != nil {
-		return fmt.Errorf("resolve webui github inbound secret: %w", err)
+		return fmt.Errorf("compose webui connector secret lifecycle: %w", err)
 	}
-	inboundSecret := ""
-	if inbound != nil {
-		inboundSecret = inbound.Current
-	}
-	if inboundSecret == "" {
-		// Rotate requires an inbound leg. This connector has no inbound
-		// endpoint, so legacy outbound-only records need an opaque value.
-		inboundSecret, err = randomHex(32)
-		if err != nil {
-			return fmt.Errorf("generate webui github rotation secret: %w", err)
-		}
-	}
-	if _, err := connector.Rotate(
-		ctx,
-		m.store.Connectors(),
-		m.store.ConnectorCalls(),
-		sealer,
-		connector.RotateRequest{
-			WorkspaceKey:     ws,
-			ConnectorID:      connectorID,
-			NewInboundSecret: inboundSecret,
-			NewCredential:    []byte(token),
-		},
-	); err != nil {
-		return fmt.Errorf("rotate webui github credential: %w", err)
+	credential := []byte(token)
+	if _, err := management.SynchronizeConnectorCredential(ctx, connectorsmodule.SynchronizeConnectorCredentialCommand{
+		WorkspaceKey: ws, ConnectorID: connectorID, DesiredCredential: credential,
+	}); err != nil {
+		return fmt.Errorf("synchronize webui github credential: %w", err)
 	}
 	return nil
-}
-
-func (m *Module) connectorCredentialMatches(
-	ctx context.Context,
-	ws, token string,
-	sealer connector.Sealer,
-) (bool, error) {
-	sealed, err := m.store.Connectors().ResolveOutboundCredentialSealed(ctx, ws, connectorID)
-	if err != nil {
-		return false, fmt.Errorf("resolve webui github credential: %w", err)
-	}
-	if len(sealed) == 0 {
-		return false, nil
-	}
-	current, err := sealer.Unseal(sealed, connector.CredentialAAD(ws, connectorID))
-	if err != nil {
-		if errors.Is(err, connector.ErrUnseal) {
-			return false, nil
-		}
-		return false, fmt.Errorf("unseal webui github credential: %w", err)
-	}
-	same := subtle.ConstantTimeCompare(current, []byte(token)) == 1
-	for i := range current {
-		current[i] = 0
-	}
-	return same, nil
 }
 
 func grantSeedCacheKey(ws, resource string, actions []string) string {

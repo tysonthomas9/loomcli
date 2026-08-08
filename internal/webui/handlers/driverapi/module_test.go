@@ -19,6 +19,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
+	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
@@ -27,7 +28,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/testutil"
-	"github.com/tysonthomas9/loomcli/internal/trigger"
 )
 
 // fakeIssueBackend embeds the interface so only the methods the driver ops
@@ -76,7 +76,7 @@ func (adapter testLegacyEventAdmission) AdmitEvent(ctx context.Context, _ automa
 	}
 	sourceResult, err := (&trigger.InternalSource{Store: adapter.st}).Emit(ctx, command.WorkspaceKey, trigger.InternalEvent{
 		EventID: command.SourceEventID, EventType: command.EventType,
-		Origin: domain.TriggerEventOriginWorkflow, ParentEventID: parent.SourceRef,
+		Origin: automation.EventOriginWorkflow, ParentEventID: parent.SourceRef,
 		EmittedByRunID: parent.RunID, SubjectRef: command.SubjectRef,
 		ActorRef: driverpkg.DriverRunActor(parent.RunID),
 		EpicID:   firstNonEmpty(parent.EpicID, driverpkg.DriverRunPayloadEpicID(parent.Payload)),
@@ -642,8 +642,8 @@ func newTestHarness(t *testing.T, apiToken string) *testHarness {
 		WorkspaceKey: "WS",
 		DriverID:     "driver-1",
 		Name:         "epic-runner",
-		OwnerType:    domain.DriverOwnerSystem,
-		Status:       domain.DriverStatusActive,
+		OwnerType:    workflowcatalog.DriverOwnerSystem,
+		Status:       workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatalf("Create driver: %v", err)
 	}
@@ -654,7 +654,7 @@ func newTestHarness(t *testing.T, apiToken string) *testHarness {
 		Version:          1,
 		SourceDigest:     "sha256:source",
 		BundleDigest:     "sha256:bundle",
-		ValidationStatus: domain.DriverVersionValidationPassed,
+		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
 	}

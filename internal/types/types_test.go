@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 func TestIssueValidation(t *testing.T) {
@@ -1619,7 +1621,7 @@ func TestIssueDetailsJSONStructure(t *testing.T) {
 			Labels:       []string{},
 			Dependencies: []*IssueWithDependencyMetadata{},
 			Dependents:   []*IssueWithDependencyMetadata{},
-			Comments:     []*Comment{},
+			Comments:     []*workitems.Comment{},
 		}
 
 		// Serialize to JSON
@@ -1737,7 +1739,7 @@ func TestIssueDetailsJSONStructure(t *testing.T) {
 					DependencyType: DepBlocks,
 				},
 			},
-			Comments: []*Comment{
+			Comments: []*workitems.Comment{
 				{ID: 1, IssueID: "test-3", Author: "author", Text: "comment text"},
 			},
 		}
@@ -1797,7 +1799,7 @@ func TestIssueDetailsJSONStructure(t *testing.T) {
 			Labels:       []string{},
 			Dependencies: []*IssueWithDependencyMetadata{},
 			Dependents:   []*IssueWithDependencyMetadata{},
-			Comments:     []*Comment{},
+			Comments:     []*workitems.Comment{},
 		}
 
 		// Serialize

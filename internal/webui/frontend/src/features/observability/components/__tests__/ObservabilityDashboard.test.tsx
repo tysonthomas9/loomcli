@@ -1,0 +1,270 @@
+/**
+ * @vitest-environment jsdom
+ */
+
+/**
+ * Unit tests for ObservabilityDashboard container component.
+ */
+
+import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import "@testing-library/jest-dom";
+
+import type { MetricsSnapshot } from "../../types";
+import type { UseObservabilityMetricsResult } from "../../useObservabilityMetrics";
+
+// vi.mock() is hoisted by Vitest above all imports, so the mock is guaranteed
+// to be in place before ObservabilityDashboard resolves its dependencies.
+// A dynamic await import() is unnecessary and introduces an async gap that
+// causes flakiness under CPU pressure.
+import { ObservabilityDashboard } from "../ObservabilityDashboard";
+
+/**
+ * Create a complete mock MetricsSnapshot for testing.
+ */
+function createMetrics(
+  overrides: Partial<MetricsSnapshot> = {},
+): MetricsSnapshot {
+  return {
+    timestamp: "2026-03-05T12:00:00Z",
+    tasks_completed_last_hour: 8,
+    tasks_completed_24h: 120,
+    avg_task_duration_sec: 95,
+    lines_changed_last_hour: 450,
+    error_rate_pct: 3.5,
+    restart_count_24h: 2,
+    restarts_by_agent: { alpha: 1, beta: 1 },
+    agent_utilization: { alpha: 0.8, beta: 0.5 },
+    tasks_by_role: { developer: 80, reviewer: 40 },
+    tasks_by_epic: { "epic-auth": 50, "epic-ui": 30 },
+    tasks_by_agent: { alpha: 70, beta: 50 },
+    hourly_completions: [
+      {
+        hour: "2026-03-05T10:00:00Z",
+        completed: 5,
+        failed: 1,
+        avg_duration: 60,
+      },
+      {
+        hour: "2026-03-05T11:00:00Z",
+        completed: 3,
+        failed: 0,
+        avg_duration: 45,
+      },
+    ],
+    total_tasks_completed: 200,
+    total_tasks_failed: 10,
+    total_restarts: 5,
+    ...overrides,
+  };
+}
+
+let mockHookResult: UseObservabilityMetricsResult;
+
+vi.mock("../../useObservabilityMetrics", () => ({
+  useObservabilityMetrics: () => mockHookResult,
+}));
+
+describe("ObservabilityDashboard", () => {
+  beforeEach(() => {
+    mockHookResult = {
+      metrics: createMetrics(),
+      isLoading: false,
+      error: null,
+      isConnected: true,
+      lastUpdated: new Date("2026-03-05T12:00:00Z"),
+      refetch: vi.fn(),
+    };
+  });
+
+  function renderDashboard(className?: string) {
+    return render(<ObservabilityDashboard className={className} />);
+  }
+
+  describe("rendering all panels", () => {
+    it("renders MetricsCards values", () => {
+      renderDashboard();
+
+      expect(screen.getByText("Tasks / Hour")).toBeInTheDocument();
+      expect(screen.getByText("8")).toBeInTheDocument();
+      expect(screen.getByText("Avg Duration")).toBeInTheDocument();
+      expect(screen.getByText("Lines / Hour")).toBeInTheDocument();
+      expect(screen.getByText("Error Rate")).toBeInTheDocument();
+    });
+
+    it("renders Task Timeline section", () => {
+      renderDashboard();
+
+      expect(screen.getByText("Hourly Completions (24h)")).toBeInTheDocument();
+    });
+
+    it("renders Agent Utilization section", () => {
+      renderDashboard();
+
+      expect(screen.getByLabelText("Agent Utilization")).toBeInTheDocument();
+    });
+
+    it("renders Errors & Restarts section", () => {
+      renderDashboard();
+
+      expect(screen.getByLabelText("Errors & Restarts")).toBeInTheDocument();
+    });
+
+    it("renders Epic Progress section", () => {
+      renderDashboard();
+
+      expect(screen.getByLabelText("Epic Progress")).toBeInTheDocument();
+    });
+  });
+
+  describe("loading state", () => {
+    it("shows LoadingSkeleton.Observability when isLoading=true and no metrics yet", () => {
+      mockHookResult = {
+        metrics: null,
+        isLoading: true,
+        error: null,
+        isConnected: false,
+        lastUpdated: null,
+        refetch: vi.fn(),
+      };
+
+      renderDashboard();
+
+      expect(
+        screen.getByTestId("loading-skeleton-observability"),
+      ).toBeInTheDocument();
+    });
+
+    it("does not show skeleton when metrics exist even if isLoading", () => {
+      mockHookResult = {
+        metrics: createMetrics(),
+        isLoading: true,
+        error: null,
+        isConnected: true,
+        lastUpdated: new Date(),
+        refetch: vi.fn(),
+      };
+
+      renderDashboard();
+
+      expect(
+        screen.queryByTestId("loading-skeleton-observability"),
+      ).not.toBeInTheDocument();
+      expect(screen.getByText("Tasks / Hour")).toBeInTheDocument();
+    });
+  });
+
+  describe("error state", () => {
+    it("shows ErrorDisplay when error and no metrics", () => {
+      mockHookResult = {
+        metrics: null,
+        isLoading: false,
+        error: new Error("Network failure"),
+        isConnected: false,
+        lastUpdated: null,
+        refetch: vi.fn(),
+      };
+
+      renderDashboard();
+
+      expect(screen.getByTestId("error-display")).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Try again" }),
+      ).toBeInTheDocument();
+    });
+
+    it("shows error details with the error message", () => {
+      mockHookResult = {
+        metrics: null,
+        isLoading: false,
+        error: new Error("Network failure"),
+        isConnected: false,
+        lastUpdated: null,
+        refetch: vi.fn(),
+      };
+
+      renderDashboard();
+
+      expect(screen.getByText("Network failure")).toBeInTheDocument();
+    });
+
+    it("does not show error state when metrics exist despite error", () => {
+      mockHookResult = {
+        metrics: createMetrics(),
+        isLoading: false,
+        error: new Error("Stale data"),
+        isConnected: false,
+        lastUpdated: new Date(),
+        refetch: vi.fn(),
+      };
+
+      renderDashboard();
+
+      expect(screen.queryByTestId("error-display")).not.toBeInTheDocument();
+      expect(screen.getByText("Tasks / Hour")).toBeInTheDocument();
+    });
+  });
+
+  describe("503 state", () => {
+    it("shows observability-not-configured ErrorDisplay for 503 errors", () => {
+      mockHookResult = {
+        metrics: null,
+        isLoading: false,
+        error: new Error("Observability metrics: 503 Service Unavailable"),
+        isConnected: false,
+        lastUpdated: null,
+        refetch: vi.fn(),
+      };
+
+      renderDashboard();
+
+      expect(screen.getByTestId("error-display")).toBeInTheDocument();
+      expect(
+        screen.getByRole("heading", { name: /Observability not configured/i }),
+      ).toBeInTheDocument();
+    });
+  });
+
+  describe("stale data indicator", () => {
+    it("shows stale data indicator when disconnected but have metrics", () => {
+      mockHookResult = {
+        metrics: createMetrics(),
+        isLoading: false,
+        error: null,
+        isConnected: false,
+        lastUpdated: new Date("2026-03-05T12:00:00Z"),
+        refetch: vi.fn(),
+      };
+
+      renderDashboard();
+
+      expect(screen.getByText(/Data may be stale/)).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /retry/i }),
+      ).toBeInTheDocument();
+    });
+
+    it("does not show stale indicator when connected", () => {
+      mockHookResult = {
+        metrics: createMetrics(),
+        isLoading: false,
+        error: null,
+        isConnected: true,
+        lastUpdated: new Date(),
+        refetch: vi.fn(),
+      };
+
+      renderDashboard();
+
+      expect(screen.queryByText(/Data may be stale/)).not.toBeInTheDocument();
+    });
+  });
+
+  describe("className", () => {
+    it("applies custom className", () => {
+      const { container } = renderDashboard("my-custom-class");
+
+      expect(container.firstChild).toHaveClass("my-custom-class");
+    });
+  });
+});

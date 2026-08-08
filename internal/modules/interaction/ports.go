@@ -102,7 +102,7 @@ type TranscriptArtifactCreate struct {
 // TranscriptArtifactStore is the narrow Artifacts capability consumed by
 // Interaction. It deliberately exposes no generic artifact CRUD surface.
 type TranscriptArtifactStore interface {
-	CreateContent(context.Context, TranscriptArtifactCreate) (string, error)
+	CreateContent(context.Context, authority.SessionAuthority, TranscriptArtifactCreate) (string, error)
 }
 
 type TerminalUpdate struct {

@@ -363,6 +363,7 @@ for (const legacyFilter of ["", "any"]) {
     assert.deepEqual(one(calls, "issues.get"), { issueId: TASK_ID });
     const request = taskRunRequest(calls);
     assert.equal(request.input.deliveryMode, "local-branch");
+    assert.equal(request.input.requireChangeDelivery, true);
     assert.deepEqual(one(calls, "issues.update"), {
       issueId: TASK_ID,
       status: "closed",
@@ -811,6 +812,7 @@ test("a verified bug card is read before claim and runs the read-only lifecycle"
   assert.deepEqual(one(calls, "tasks.claim"), { taskId: TASK_ID, actor: "prompt-agent" });
   const request = taskRunRequest(calls);
   assert.equal(request.input.deliveryMode, "patch-back");
+  assert.equal(request.input.requireChangeDelivery, undefined);
   assert.equal(request.input.taskOutcomeMode, "bug-triage");
   assert.equal(request.retainWorkItemClaim, true);
   assert.ok(callIndex(calls, "issues.get") < callIndex(calls, "tasks.claim"));
@@ -1107,6 +1109,7 @@ test("a read-only custom role hands designed work to review without closing it",
   assert.equal(result.outcome, "read-only-review");
   const request = taskRunRequest(calls);
   assert.equal(request.input.deliveryMode, "patch-back");
+  assert.equal(request.input.requireChangeDelivery, undefined);
   assert.deepEqual(one(calls, "issues.update"), {
     issueId: TASK_ID,
     status: "review",
@@ -1172,6 +1175,7 @@ test("a filterless coder closes patch-back work only after the terminal receipt"
   assert.equal(request.runner, "local-task-runner");
   assert.equal(request.input.taskPrompt, "one-off prompt");
   assert.equal(request.input.deliveryMode, "local-branch");
+  assert.equal(request.input.requireChangeDelivery, true);
   assert.deepEqual(one(calls, "issues.update"), {
     issueId: TASK_ID,
     status: "closed",
@@ -1201,6 +1205,7 @@ test("planner completion verifies the persisted design before host review handof
   assert.match(result.summary, /design handoff/);
   const request = taskRunRequest(calls);
   assert.equal(request.input.deliveryMode, "patch-back");
+  assert.equal(request.input.requireChangeDelivery, undefined);
   const issueReads = named(calls, "issues.get");
   assert.equal(issueReads.length, 2);
   assert.deepEqual(one(calls, "issues.update"), {

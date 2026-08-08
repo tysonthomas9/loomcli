@@ -3,8 +3,8 @@ package misc
 import (
 	"net/http"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/filecoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // Module registers the workspace file operation routes on a [*http.ServeMux].
@@ -12,13 +12,13 @@ import (
 // The module is only constructed when fileSvc is non-nil.
 // All routes are unconditional within this module.
 type Module struct {
-	fileSvc service.FileService
+	fileSvc filecoord.FileService
 	access  middleware.Middleware
 }
 
 // NewModule returns a Module that will register routes using the
-// given file service.
-func NewModule(fileSvc service.FileService, accessCfg ...middleware.FileAccessConfig) *Module {
+// given file filecoord.
+func NewModule(fileSvc filecoord.FileService, accessCfg ...middleware.FileAccessConfig) *Module {
 	cfg := middleware.FileAccessConfig{}
 	if len(accessCfg) > 0 {
 		cfg = accessCfg[0]

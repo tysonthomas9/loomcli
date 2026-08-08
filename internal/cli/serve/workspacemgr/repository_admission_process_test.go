@@ -6,8 +6,9 @@ import (
 	"testing"
 	"time"
 
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 )
 
@@ -536,7 +537,7 @@ func testCommittedRepositoryAdmission(
 		AdmissionID:     committed.AdmissionID,
 		SpecFingerprint: committed.SpecFingerprint,
 		Repositories: []infrafleetdb.RepositoryAdmissionRepoReceipt{{
-			Repository: domain.Repo{
+			Repository: workspacemodule.Repository{
 				WorkspaceKey:  committed.WorkspaceKey,
 				Name:          "app",
 				RemoteURL:     "https://example.com/acme/app.git",

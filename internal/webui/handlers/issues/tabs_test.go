@@ -105,7 +105,7 @@ func TestHandleGetIssueTabs_ReturnsSavedState(t *testing.T) {
 		},
 		ActiveTabID: "details",
 	}
-	if err := store.Save(ctx, testWSID, state); err != nil {
+	if err := store.ReplaceIssueTabs(ctx, testWSID, state); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
@@ -366,7 +366,7 @@ func TestHandleDeleteIssueTabs_RemovesState(t *testing.T) {
 		Tabs:        []issuetabs.IssueTab{{ID: "details", Type: "details", Label: "Details", SortOrder: 0}},
 		ActiveTabID: "details",
 	}
-	if err := store.Save(ctx, testWSID, state); err != nil {
+	if err := store.ReplaceIssueTabs(ctx, testWSID, state); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
@@ -504,7 +504,7 @@ func TestHandleGetIssueTabs_EmptyTabs(t *testing.T) {
 		Tabs:        []issuetabs.IssueTab{},
 		ActiveTabID: "",
 	}
-	if err := store.Save(ctx, testWSID, state); err != nil {
+	if err := store.ReplaceIssueTabs(ctx, testWSID, state); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 

@@ -13,7 +13,7 @@ import (
 var ErrFilterNotSupported = errors.New("filter not supported by backend")
 
 // ErrorKind categorizes backend-layer errors into domain-level failure modes.
-// The service layer maps these to service.ErrorKind for HTTP status mapping.
+// The service layer maps these to apperrors.ErrorKind for HTTP status mapping.
 type ErrorKind string
 
 const (
@@ -30,7 +30,7 @@ const (
 // BackendError represents a typed backend-layer error.
 // Implementations of IssueBackend return *BackendError to indicate
 // categorized failures. The service layer extracts the Kind via
-// errors.As for mapping to service.ErrorKind.
+// errors.As for mapping to apperrors.ErrorKind.
 type BackendError struct {
 	Kind    ErrorKind
 	Op      string // The backend operation that failed (e.g., "Get", "List").

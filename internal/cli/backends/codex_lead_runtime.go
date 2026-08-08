@@ -4,14 +4,13 @@ import (
 	"context"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	leadcontrol "github.com/tysonthomas9/loomcli/internal/infra/interactionlead"
 )
 
 // RunCodexLeadRuntime starts a controlled Codex app-server runtime for an interactive lead session.
 func RunCodexLeadRuntime(
 	ctx context.Context,
-	st store.Store,
+	st leadcontrol.RuntimeStore,
 	sessionRuntime leadcontrol.SessionRuntime,
 	workspace string,
 	leadName string,

@@ -8,8 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 func TestHandleAgentDiffStat(t *testing.T) {
@@ -55,7 +55,7 @@ func TestHandleAgentDiffStat(t *testing.T) {
 	t.Run("missing agent name returns 400", func(t *testing.T) {
 		svc := &mockAgentService{
 			getDiffStatFunc: func(_ context.Context, _, agentName string) (*AgentDiffStatResult, error) {
-				return nil, service.ErrValidation("missing agent name")
+				return nil, apperrors.ErrValidation("missing agent name")
 			},
 		}
 		handler := handleAgentDiffStat(svc)
@@ -75,7 +75,7 @@ func TestHandleAgentDiffStat(t *testing.T) {
 	t.Run("agent not found returns 404", func(t *testing.T) {
 		svc := &mockAgentService{
 			getDiffStatFunc: func(_ context.Context, _, agentName string) (*AgentDiffStatResult, error) {
-				return nil, service.ErrNotFound(fmt.Sprintf("agent worktree %q not found", agentName))
+				return nil, apperrors.ErrNotFound(fmt.Sprintf("agent worktree %q not found", agentName))
 			},
 		}
 		handler := handleAgentDiffStat(svc)
@@ -95,7 +95,7 @@ func TestHandleAgentDiffStat(t *testing.T) {
 	t.Run("missing workspace ID still calls service", func(t *testing.T) {
 		svc := &mockAgentService{
 			getDiffStatFunc: func(_ context.Context, wsID, agentName string) (*AgentDiffStatResult, error) {
-				return nil, service.ErrNotFound(fmt.Sprintf("agent worktree %q not found", agentName))
+				return nil, apperrors.ErrNotFound(fmt.Sprintf("agent worktree %q not found", agentName))
 			},
 		}
 		handler := handleAgentDiffStat(svc)

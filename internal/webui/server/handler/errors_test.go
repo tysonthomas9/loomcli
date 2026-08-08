@@ -8,7 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 )
 
 func TestHandleServiceError_AllKinds(t *testing.T) {
@@ -20,85 +20,85 @@ func TestHandleServiceError_AllKinds(t *testing.T) {
 	}{
 		{
 			name:       "KindNotFound",
-			err:        service.ErrNotFound("thing not found"),
+			err:        apperrors.ErrNotFound("thing not found"),
 			wantStatus: http.StatusNotFound,
 			wantMsg:    "thing not found",
 		},
 		{
 			name:       "KindValidation",
-			err:        service.ErrValidation("bad input"),
+			err:        apperrors.ErrValidation("bad input"),
 			wantStatus: http.StatusBadRequest,
 			wantMsg:    "bad input",
 		},
 		{
 			name:       "KindUnavailable",
-			err:        service.ErrUnavailable("service down"),
+			err:        apperrors.ErrUnavailable("service down"),
 			wantStatus: http.StatusServiceUnavailable,
 			wantMsg:    "service down",
 		},
 		{
 			name:       "KindTimeout",
-			err:        service.ErrTimeout("took too long"),
+			err:        apperrors.ErrTimeout("took too long"),
 			wantStatus: http.StatusGatewayTimeout,
 			wantMsg:    "took too long",
 		},
 		{
 			name:       "KindConflict",
-			err:        service.ErrConflict("already exists"),
+			err:        apperrors.ErrConflict("already exists"),
 			wantStatus: http.StatusConflict,
 			wantMsg:    "already exists",
 		},
 		{
 			name:       "KindInternal",
-			err:        service.ErrInternal("something broke", errors.New("db fail")),
+			err:        apperrors.ErrInternal("something broke", errors.New("db fail")),
 			wantStatus: http.StatusInternalServerError,
 			wantMsg:    "something broke",
 		},
 		{
 			name:       "KindForbidden",
-			err:        service.ErrForbidden("no access"),
+			err:        apperrors.ErrForbidden("no access"),
 			wantStatus: http.StatusForbidden,
 			wantMsg:    "no access",
 		},
 		{
 			name:       "KindUnauthorized",
-			err:        service.ErrUnauthorized("bad token"),
+			err:        apperrors.ErrUnauthorized("bad token"),
 			wantStatus: http.StatusUnauthorized,
 			wantMsg:    "bad token",
 		},
 		{
 			name:       "KindLocked",
-			err:        service.ErrLocked("resource locked"),
+			err:        apperrors.ErrLocked("resource locked"),
 			wantStatus: http.StatusLocked,
 			wantMsg:    "resource locked",
 		},
 		{
 			name:       "KindPayloadTooLarge",
-			err:        service.ErrPayloadTooLarge("too big"),
+			err:        apperrors.ErrPayloadTooLarge("too big"),
 			wantStatus: http.StatusRequestEntityTooLarge,
 			wantMsg:    "too big",
 		},
 		{
 			name:       "KindRateLimited",
-			err:        service.ErrRateLimited("slow down"),
+			err:        apperrors.ErrRateLimited("slow down"),
 			wantStatus: http.StatusTooManyRequests,
 			wantMsg:    "slow down",
 		},
 		{
 			name:       "KindBadGateway",
-			err:        service.ErrBadGateway("upstream failed"),
+			err:        apperrors.ErrBadGateway("upstream failed"),
 			wantStatus: http.StatusBadGateway,
 			wantMsg:    "upstream failed",
 		},
 		{
 			name:       "KindNotImplemented",
-			err:        service.ErrNotImplemented("coming soon"),
+			err:        apperrors.ErrNotImplemented("coming soon"),
 			wantStatus: http.StatusNotImplemented,
 			wantMsg:    "coming soon",
 		},
 		{
 			name:       "KindStarting",
-			err:        service.ErrStarting("workspace is loading"),
+			err:        apperrors.ErrStarting("workspace is loading"),
 			wantStatus: http.StatusServiceUnavailable,
 			wantMsg:    "workspace is loading",
 		},
@@ -128,7 +128,7 @@ func TestHandleServiceError_AllKinds(t *testing.T) {
 }
 
 func TestHandleServiceError_WrappedError(t *testing.T) {
-	inner := service.ErrNotFound("thing missing")
+	inner := apperrors.ErrNotFound("thing missing")
 	wrapped := fmt.Errorf("outer context: %w", inner)
 
 	w := httptest.NewRecorder()
@@ -174,7 +174,7 @@ func TestHandleServiceError_MessageVsError(t *testing.T) {
 	// ErrInternal includes a Cause, so Error() returns "internal: msg: cause"
 	// but the response body should only contain the Message field, not the full chain.
 	cause := errors.New("db connection refused")
-	svcErr := service.ErrInternal("something went wrong", cause)
+	svcErr := apperrors.ErrInternal("something went wrong", cause)
 
 	w := httptest.NewRecorder()
 	HandleServiceError(w, svcErr)
@@ -198,7 +198,7 @@ func TestHandleServiceError_MessageVsError(t *testing.T) {
 }
 
 func TestHandleServiceError_UnknownKind(t *testing.T) {
-	svcErr := service.NewServiceError("custom_unknown", "mysterious failure", nil)
+	svcErr := apperrors.NewServiceError("custom_unknown", "mysterious failure", nil)
 
 	w := httptest.NewRecorder()
 	HandleServiceError(w, svcErr)
@@ -229,21 +229,21 @@ func TestHandleServiceError_KindStarting(t *testing.T) {
 	}{
 		{
 			name:           "KindStarting returns 503 with Retry-After header",
-			err:            service.ErrStarting("workspace is loading"),
+			err:            apperrors.ErrStarting("workspace is loading"),
 			wantStatus:     http.StatusServiceUnavailable,
 			wantRetryAfter: "5",
 			wantMsg:        "workspace is loading",
 		},
 		{
 			name:           "KindUnavailable does NOT set Retry-After header",
-			err:            service.ErrUnavailable("service down"),
+			err:            apperrors.ErrUnavailable("service down"),
 			wantStatus:     http.StatusServiceUnavailable,
 			wantRetryAfter: "",
 			wantMsg:        "service down",
 		},
 		{
 			name:           "KindTimeout does NOT set Retry-After header",
-			err:            service.ErrTimeout("took too long"),
+			err:            apperrors.ErrTimeout("took too long"),
 			wantStatus:     http.StatusGatewayTimeout,
 			wantRetryAfter: "",
 			wantMsg:        "took too long",
@@ -281,7 +281,7 @@ func TestHandleServiceError_KindStarting(t *testing.T) {
 func TestHandleServiceError_KindStarting_InAllKindsTable(t *testing.T) {
 	// Verify KindStarting is present and correct in the AllKinds table test above
 	w := httptest.NewRecorder()
-	HandleServiceError(w, service.ErrStarting("loading"))
+	HandleServiceError(w, apperrors.ErrStarting("loading"))
 
 	resp := w.Result()
 	defer resp.Body.Close()
@@ -298,25 +298,25 @@ func TestHandleServiceError_KindStarting_InAllKindsTable(t *testing.T) {
 
 func TestStatusForKind(t *testing.T) {
 	tests := []struct {
-		kind service.ErrorKind
+		kind apperrors.ErrorKind
 		want int
 	}{
-		{service.KindNotFound, http.StatusNotFound},
-		{service.KindValidation, http.StatusBadRequest},
-		{service.KindUnavailable, http.StatusServiceUnavailable},
-		{service.KindTimeout, http.StatusGatewayTimeout},
-		{service.KindConflict, http.StatusConflict},
-		{service.KindInternal, http.StatusInternalServerError},
-		{service.KindForbidden, http.StatusForbidden},
-		{service.KindUnauthorized, http.StatusUnauthorized},
-		{service.KindLocked, http.StatusLocked},
-		{service.KindPayloadTooLarge, http.StatusRequestEntityTooLarge},
-		{service.KindRateLimited, http.StatusTooManyRequests},
-		{service.KindBadGateway, http.StatusBadGateway},
-		{service.KindNotImplemented, http.StatusNotImplemented},
-		{service.KindStarting, http.StatusServiceUnavailable},
-		{service.KindPreconditionFailed, http.StatusPreconditionFailed},
-		{service.KindPreconditionRequired, http.StatusPreconditionRequired},
+		{apperrors.KindNotFound, http.StatusNotFound},
+		{apperrors.KindValidation, http.StatusBadRequest},
+		{apperrors.KindUnavailable, http.StatusServiceUnavailable},
+		{apperrors.KindTimeout, http.StatusGatewayTimeout},
+		{apperrors.KindConflict, http.StatusConflict},
+		{apperrors.KindInternal, http.StatusInternalServerError},
+		{apperrors.KindForbidden, http.StatusForbidden},
+		{apperrors.KindUnauthorized, http.StatusUnauthorized},
+		{apperrors.KindLocked, http.StatusLocked},
+		{apperrors.KindPayloadTooLarge, http.StatusRequestEntityTooLarge},
+		{apperrors.KindRateLimited, http.StatusTooManyRequests},
+		{apperrors.KindBadGateway, http.StatusBadGateway},
+		{apperrors.KindNotImplemented, http.StatusNotImplemented},
+		{apperrors.KindStarting, http.StatusServiceUnavailable},
+		{apperrors.KindPreconditionFailed, http.StatusPreconditionFailed},
+		{apperrors.KindPreconditionRequired, http.StatusPreconditionRequired},
 	}
 	for _, tt := range tests {
 		t.Run(string(tt.kind), func(t *testing.T) {
@@ -328,7 +328,7 @@ func TestStatusForKind(t *testing.T) {
 }
 
 func TestStatusForKind_UnknownKind(t *testing.T) {
-	got := StatusForKind(service.ErrorKind("totally_unknown"))
+	got := StatusForKind(apperrors.ErrorKind("totally_unknown"))
 	if got != http.StatusInternalServerError {
 		t.Errorf("StatusForKind(unknown) = %d, want %d", got, http.StatusInternalServerError)
 	}
@@ -336,23 +336,23 @@ func TestStatusForKind_UnknownKind(t *testing.T) {
 
 func TestKindToStatus_Completeness(t *testing.T) {
 	// All ErrorKind constants defined in service/errors.go.
-	allKinds := []service.ErrorKind{
-		service.KindNotFound,
-		service.KindValidation,
-		service.KindUnavailable,
-		service.KindTimeout,
-		service.KindConflict,
-		service.KindInternal,
-		service.KindForbidden,
-		service.KindUnauthorized,
-		service.KindLocked,
-		service.KindPayloadTooLarge,
-		service.KindRateLimited,
-		service.KindBadGateway,
-		service.KindNotImplemented,
-		service.KindStarting,
-		service.KindPreconditionFailed,
-		service.KindPreconditionRequired,
+	allKinds := []apperrors.ErrorKind{
+		apperrors.KindNotFound,
+		apperrors.KindValidation,
+		apperrors.KindUnavailable,
+		apperrors.KindTimeout,
+		apperrors.KindConflict,
+		apperrors.KindInternal,
+		apperrors.KindForbidden,
+		apperrors.KindUnauthorized,
+		apperrors.KindLocked,
+		apperrors.KindPayloadTooLarge,
+		apperrors.KindRateLimited,
+		apperrors.KindBadGateway,
+		apperrors.KindNotImplemented,
+		apperrors.KindStarting,
+		apperrors.KindPreconditionFailed,
+		apperrors.KindPreconditionRequired,
 	}
 
 	for _, kind := range allKinds {

@@ -54,7 +54,7 @@
  * =========================== */
 .boardToolbar {
   display: grid;
-  grid-template-columns: 1fr calc(100vw / 3) 1fr;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   grid-template-areas: "tabs search actions";
   align-items: center;
   gap: 16px;
@@ -72,9 +72,10 @@
 
 .boardToolbarSearch {
   grid-area: search;
-  justify-self: stretch;
+  justify-self: center;
   min-width: 0;
   width: 100%;
+  max-width: calc(100vw / 3);
 }
 
 .boardToolbarActions {

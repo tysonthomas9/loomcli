@@ -361,7 +361,7 @@ test.describe("API data flows through to all views", () => {
     await setupMocks(page)
   })
 
-  test("KanbanBoard displays API data then table shows same issues after switch", async ({
+  test("KanbanBoard displays API data then list shows same issues after switch", async ({
     page,
   }) => {
     await navigateAndWait(page, "/?groupBy=none")
@@ -392,20 +392,21 @@ test.describe("API data flows through to all views", () => {
     await expect(doneColumn.getByRole("list").locator("> [role='button']")).toHaveCount(1)
     await expect(doneColumn.getByText("Closed Chore Delta")).toBeVisible()
 
-    // Switch to Table view
-    const tableTab = page.getByRole("tab", { name: "List" })
-    await tableTab.click()
+    // Switch to List view. This also proves the onboarding side panel leaves
+    // the board toolbar interactive at the desktop viewport.
+    const listTab = page.getByRole("tab", { name: "List" })
+    await listTab.click()
 
-    const issueTable = page.getByTestId("issue-table")
-    await expect(issueTable).toBeVisible()
+    const issueList = page.getByTestId("list-page")
+    await expect(issueList).toBeVisible()
 
-    // Verify same issues appear in the table
-    await expect(issueTable.getByText("Open Task Alpha")).toBeVisible()
-    await expect(issueTable.getByText("Open Bug Beta")).toBeVisible()
-    await expect(issueTable.getByText("In Progress Feature")).toBeVisible()
-    await expect(issueTable.getByText("Review Task Gamma")).toBeVisible()
-    await expect(issueTable.getByText("Closed Chore Delta")).toBeVisible()
-    await expect(issueTable.getByText("Open Feature Epsilon")).toBeVisible()
+    // Verify same issues appear in the list
+    await expect(issueList.getByText("Open Task Alpha")).toBeVisible()
+    await expect(issueList.getByText("Open Bug Beta")).toBeVisible()
+    await expect(issueList.getByText("In Progress Feature")).toBeVisible()
+    await expect(issueList.getByText("Review Task Gamma")).toBeVisible()
+    await expect(issueList.getByText("Closed Chore Delta")).toBeVisible()
+    await expect(issueList.getByText("Open Feature Epsilon")).toBeVisible()
   })
 
   test("filtered data is consistent across kanban and table views", async ({

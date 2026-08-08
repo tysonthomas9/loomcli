@@ -13,7 +13,7 @@ import { api, apiErrorFromResponse, cleanQuery } from "@/api/common";
 export async function fetchUsage(params?: UsageParams): Promise<UsageResponse> {
   const { data, error, response } = await api.GET("/api/monitor/usage", {
     params: {
-      query: cleanQuery({
+      query: cleanQuery<UsageParams>({
         agent: params?.agent,
         backend: params?.backend,
         epic: params?.epic,

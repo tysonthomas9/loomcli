@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/tysonthomas9/loomcli/internal/infra/sessionstoreadapter"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
@@ -25,7 +26,7 @@ func dispatchHookEvent(event *HookEvent, runtimeDir, sessionID string) error { /
 		return nil
 	}
 
-	store, err := sessions.NewStore(runtimeDir)
+	store, err := sessionstoreadapter.New(runtimeDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "loom hook: failed to create session store: %v\n", err)
 		return nil
@@ -36,7 +37,7 @@ func dispatchHookEvent(event *HookEvent, runtimeDir, sessionID string) error { /
 	// calling on every hook event is safe and keeps the UI's view close to
 	// the agent's live progress.
 	if event.SessionRef != "" {
-		if err := store.SyncNativeTranscript(sessionID, event.SessionRef, sessions.TranscriptFormatRaw); err != nil {
+		if err := sessionstoreadapter.SyncNativeTranscript(store, sessionID, event.SessionRef, sessions.TranscriptFormatRaw); err != nil {
 			fmt.Fprintf(os.Stderr, "loom hook: failed to sync native transcript: %v\n", err)
 		}
 	}
@@ -46,7 +47,7 @@ func dispatchHookEvent(event *HookEvent, runtimeDir, sessionID string) error { /
 	// sessions/<sid>/subagents/ so the UI can render nested subagent work.
 	if event.Type == HookSubagentEnd && event.SubagentID != "" && event.SessionRef != "" {
 		subPath := deriveSubagentPath(event.SessionRef, event.SubagentID)
-		if err := store.SyncSubagentTranscript(sessionID, event.SubagentID, subPath); err != nil {
+		if err := sessionstoreadapter.SyncSubagentTranscript(store, sessionID, event.SubagentID, subPath); err != nil {
 			fmt.Fprintf(os.Stderr, "loom hook: failed to sync subagent transcript: %v\n", err)
 		}
 	}
@@ -103,7 +104,7 @@ func captureTokenUsage(store *sessions.Store, sessionID, transcriptPath, backend
 		CacheWriteTokens: tok.CacheWriteTokens,
 	})
 
-	if err := store.SaveMetadata(sessionID, meta); err != nil {
+	if err := sessionstoreadapter.SaveMetadata(store, sessionID, meta); err != nil {
 		fmt.Fprintf(os.Stderr, "loom hook: failed to save metadata with token usage: %v\n", err)
 	}
 }

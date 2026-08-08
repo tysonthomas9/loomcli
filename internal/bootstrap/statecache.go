@@ -169,3 +169,19 @@ func MutateWorkspaceLocalState(wsKey string, fn func(*WorkspaceLocalState) error
 		return nil
 	})
 }
+
+// RemoveWorkspaceLocalState removes one deleted Workspace's machine-local
+// checkout projection and clears the selected-workspace hint when it points to
+// that Workspace. Durable Workspace deletion belongs to the Workspace module.
+func RemoveWorkspaceLocalState(wsKey string) error {
+	if wsKey == "" {
+		return errors.New("statecache: workspace key is required")
+	}
+	return MutateStateCache(func(sc *StateCache) error {
+		delete(sc.Workspaces, wsKey)
+		if sc.LastWorkspace == wsKey {
+			sc.LastWorkspace = ""
+		}
+		return nil
+	})
+}

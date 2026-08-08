@@ -5,11 +5,10 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // handleListSessionHistory returns session history records for an issue.
-func handleListSessionHistory(svc service.SessionService) http.HandlerFunc {
+func handleListSessionHistory(svc SessionHistoryQueries) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
 		issueID := r.PathValue("issueId")
@@ -28,7 +27,7 @@ func handleListSessionHistory(svc service.SessionService) http.HandlerFunc {
 }
 
 // handleGetSessionScrollback returns the scrollback content for a completed session.
-func handleGetSessionScrollback(svc service.SessionService) http.HandlerFunc {
+func handleGetSessionScrollback(svc SessionHistoryQueries) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
 		issueID := r.PathValue("issueId")

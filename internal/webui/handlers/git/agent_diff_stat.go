@@ -3,9 +3,10 @@ package git
 import (
 	"net/http"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/sourcecontrolcoord"
 )
 
 // DiffStatResponse is the JSON shape for agent diff-stat endpoints.
@@ -17,7 +18,7 @@ type DiffStatResponse struct {
 
 // HandleAgentDiffStat returns diff statistics (added/removed lines, branch)
 // for an agent's worktree, resolved directly by agent name.
-func HandleAgentDiffStat(svc service.AgentService) http.HandlerFunc {
+func HandleAgentDiffStat(svc agentcoord.AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		agentName := r.PathValue("name")
 		wsID := middleware.WorkspaceFromContext(r.Context())
@@ -37,7 +38,7 @@ func HandleAgentDiffStat(svc service.AgentService) http.HandlerFunc {
 }
 
 // HandleGetIssueDiffStat returns diff statistics for an issue's assigned agent worktree.
-func HandleGetIssueDiffStat(svc service.DiffService) http.HandlerFunc {
+func HandleGetIssueDiffStat(svc sourcecontrolcoord.DiffService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		issueID := r.PathValue("id")
 		wsID := middleware.WorkspaceFromContext(r.Context())

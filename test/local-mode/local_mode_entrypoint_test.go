@@ -16,8 +16,8 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	fleetbackend "github.com/tysonthomas9/loomcli/internal/backend/fleet"
+	"github.com/tysonthomas9/loomcli/internal/webui/app/capabilitycomposition"
 	issuehandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/issues"
-	webservice "github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 type provenanceMarker struct {
@@ -354,11 +354,14 @@ func TestLocalModeEntrypointTitleLookupUsesFleetSearchBeyondFirstPage(t *testing
 		t.Fatalf("create fleet backend: %v", err)
 	}
 
-	svc := webservice.NewIssueServiceWithBackend(nil, func(context.Context) backend.IssueBackend {
+	workItems, err := capabilitycomposition.NewWorkItems(func(context.Context) backend.IssueBackend {
 		return fleetIssueBackend
 	})
+	if err != nil {
+		t.Fatalf("compose Work Items: %v", err)
+	}
 	mux := http.NewServeMux()
-	issuehandlers.NewIssueModule(svc, nil).Register(mux)
+	issuehandlers.NewIssueModule(workItems, nil).Register(mux)
 	loomServer := httptest.NewServer(mux)
 	t.Cleanup(loomServer.Close)
 	loomURL, err := url.Parse(loomServer.URL)

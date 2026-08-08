@@ -37,17 +37,26 @@ describe("sessionless workflow run UI", () => {
     render(<WorkflowRunDetail run={repositoryGuardRun()} />);
     expect(screen.getByText("Automation run")).toBeInTheDocument();
     expect(
+      screen.getByTitle("automation-run-repository-guard"),
+    ).toHaveTextContent("automation-run-repository-guard");
+    expect(
       screen.getByText(
         "Repository selection is required before an agent task can start.",
       ),
     ).toBeInTheDocument();
     expect(screen.getByText("Repository Required")).toBeInTheDocument();
     expect(screen.getByText("trigger-event-task-10")).toBeInTheDocument();
+    const transcriptState = screen.getByTestId("workflow-transcript-state");
+    expect(transcriptState).toHaveAttribute("data-state", "absent");
+    expect(transcriptState).toHaveTextContent("No transcript created");
+    expect(transcriptState).toHaveTextContent(
+      /finished without starting an agent session.*no agent transcript or diff exists/i,
+    );
+    const outcome = screen.getByText("Outcome").parentElement;
     expect(
-      screen.getByText(
-        /No agent session was recorded.*no agent transcript or diff/i,
-      ),
-    ).toBeInTheDocument();
+      transcriptState.compareDocumentPosition(outcome as Node) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it("describes an active workflow as pending rather than completed", () => {
@@ -69,9 +78,10 @@ describe("sessionless workflow run UI", () => {
         "The automation is queued and has not started an agent session yet.",
       ),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText(/An agent session is not available yet.*will update/i),
-    ).toBeInTheDocument();
+    const transcriptState = screen.getByTestId("workflow-transcript-state");
+    expect(transcriptState).toHaveAttribute("data-state", "pending");
+    expect(transcriptState).toHaveTextContent("Waiting for an agent session");
+    expect(transcriptState).toHaveTextContent(/will update if it does/i);
     expect(screen.queryByText(/automation completed/i)).not.toBeInTheDocument();
   });
 

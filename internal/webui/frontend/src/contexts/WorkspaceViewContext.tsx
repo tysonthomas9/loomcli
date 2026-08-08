@@ -1,13 +1,12 @@
 /**
- * WorkspaceViewContext — shell-to-view communication layer.
+ * WorkspaceViewContext — route-scoped shell-to-view contract.
  *
- * Splits into two React contexts to prevent action-only consumers
- * from re-rendering when data changes:
- *   - WorkspaceViewDataContext: reactive data (issues, filters, connection state)
- *   - WorkspaceViewActionsContext: stable callbacks (handlers, navigation)
+ * App supplies this contract through React Router's active Outlet. The legacy
+ * hook names remain while route screens migrate incrementally, but there is no
+ * application-wide provider or hidden cross-route state.
  */
 
-import { createContext, useContext, type ReactNode } from "react";
+import { useOutletContext } from "react-router-dom";
 
 import type { BlockedInfo } from "@/types/issue";
 import type { GroupByOption, FilterState } from "@/hooks/issues";
@@ -129,40 +128,11 @@ export const NO_WORKSPACE_VIEW_ACTIONS: WorkspaceViewActions = {
   setPendingIssueContext: noop,
 };
 
-// ---------------------------------------------------------------------------
-// Contexts
-// ---------------------------------------------------------------------------
-
-const WorkspaceViewDataContext = createContext<WorkspaceViewData>(
-  NO_WORKSPACE_VIEW_DATA,
-);
-
-const WorkspaceViewActionsContext = createContext<WorkspaceViewActions>(
-  NO_WORKSPACE_VIEW_ACTIONS,
-);
-
-// ---------------------------------------------------------------------------
-// Provider
-// ---------------------------------------------------------------------------
-
-interface WorkspaceViewProviderProps {
-  data: WorkspaceViewData;
-  actions: WorkspaceViewActions;
-  children: ReactNode;
-}
-
-export function WorkspaceViewProvider({
-  data,
-  actions,
-  children,
-}: WorkspaceViewProviderProps) {
-  return (
-    <WorkspaceViewDataContext.Provider value={data}>
-      <WorkspaceViewActionsContext.Provider value={actions}>
-        {children}
-      </WorkspaceViewActionsContext.Provider>
-    </WorkspaceViewDataContext.Provider>
-  );
+export interface WorkspaceViewRouteContext {
+  workspaceView?: {
+    data: WorkspaceViewData;
+    actions: WorkspaceViewActions;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -170,9 +140,15 @@ export function WorkspaceViewProvider({
 // ---------------------------------------------------------------------------
 
 export function useWorkspaceViewData(): WorkspaceViewData {
-  return useContext(WorkspaceViewDataContext);
+  return (
+    useOutletContext<WorkspaceViewRouteContext | null>()?.workspaceView?.data ??
+    NO_WORKSPACE_VIEW_DATA
+  );
 }
 
 export function useWorkspaceViewActions(): WorkspaceViewActions {
-  return useContext(WorkspaceViewActionsContext);
+  return (
+    useOutletContext<WorkspaceViewRouteContext | null>()?.workspaceView
+      ?.actions ?? NO_WORKSPACE_VIEW_ACTIONS
+  );
 }

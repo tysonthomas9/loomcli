@@ -11,12 +11,13 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/managementapi"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	workflows "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution/authoring"
 )
@@ -172,24 +173,24 @@ func init() {
 }
 
 type workflowBuildOutput struct {
-	OK                   bool                         `json:"ok"`
-	Status               string                       `json:"status"`
-	Driver               *domain.Driver               `json:"driver,omitempty"`
-	Version              *domain.DriverVersion        `json:"version,omitempty"`
-	Diagnostics          string                       `json:"diagnostics,omitempty"`
-	Error                string                       `json:"error,omitempty"`
-	ErrorClass           string                       `json:"error_class,omitempty"`
-	SourceDigest         string                       `json:"source_digest,omitempty"`
-	MissingPrerequisites []string                     `json:"missing_prerequisites,omitempty"`
-	Source               *workflows.LocalSource       `json:"source,omitempty"`
-	Runners              []driverpkg.DriverRunnerSpec `json:"runners,omitempty"`
+	OK                   bool                           `json:"ok"`
+	Status               string                         `json:"status"`
+	Driver               *workflowcatalog.Driver        `json:"driver,omitempty"`
+	Version              *workflowcatalog.DriverVersion `json:"version,omitempty"`
+	Diagnostics          string                         `json:"diagnostics,omitempty"`
+	Error                string                         `json:"error,omitempty"`
+	ErrorClass           string                         `json:"error_class,omitempty"`
+	SourceDigest         string                         `json:"source_digest,omitempty"`
+	MissingPrerequisites []string                       `json:"missing_prerequisites,omitempty"`
+	Source               *workflows.LocalSource         `json:"source,omitempty"`
+	Runners              []driverpkg.DriverRunnerSpec   `json:"runners,omitempty"`
 }
 
 type workflowVersionOutput struct {
-	Version        *domain.DriverVersion   `json:"version"`
-	Active         bool                    `json:"active"`
-	Approved       bool                    `json:"approved"`
-	EffectiveTrust domain.DriverTrustLevel `json:"effective_trust"`
+	Version        *workflowcatalog.DriverVersion   `json:"version"`
+	Active         bool                             `json:"active"`
+	Approved       bool                             `json:"approved"`
+	EffectiveTrust workflowcatalog.DriverTrustLevel `json:"effective_trust"`
 }
 
 func runWorkflowClone(_ *cobra.Command, args []string) error {
@@ -371,7 +372,7 @@ func runWorkflowList(cmd *cobra.Command, _ []string) error {
 func workflowListOutputItem(ctx context.Context, client *workflowManagementClient, apiItem workflowListAPIItem) map[string]any {
 	driver := apiItem.Driver
 	if driver == nil {
-		driver = &domain.Driver{
+		driver = &workflowcatalog.Driver{
 			DriverID:        apiItem.DriverID,
 			Name:            apiItem.Name,
 			Status:          apiItem.Status,
@@ -410,7 +411,7 @@ func workflowListOutputItem(ctx context.Context, client *workflowManagementClien
 	return item
 }
 
-func workflowListActiveVersion(ctx context.Context, client *workflowManagementClient, driver *domain.Driver) *domain.DriverVersion {
+func workflowListActiveVersion(ctx context.Context, client *workflowManagementClient, driver *workflowcatalog.Driver) *workflowcatalog.DriverVersion {
 	versions, err := client.listVersions(ctx, driver.DriverID)
 	if err != nil {
 		return nil

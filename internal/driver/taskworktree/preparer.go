@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
@@ -46,7 +48,7 @@ func Open(workspaceKey string) (*Preparer, error) {
 // resolution.
 func (p *Preparer) Prepare(
 	ctx context.Context,
-	repo *domain.Repo,
+	repo *workspacemodule.Repository,
 	repoPath string,
 	taskRunID string,
 	baseRef string,

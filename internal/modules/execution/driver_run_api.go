@@ -22,6 +22,7 @@ const (
 	ActionAwaitDriverRun                 authority.Action = "execution.await-driver-run"
 	ActionResolveDriverAwait             authority.Action = "execution.resolve-driver-await"
 	ActionBindWorkerProfileParent        authority.Action = "execution.bind-worker-profile-parent"
+	ActionEnqueueLeadAssignment          authority.Action = "execution.enqueue-lead-assignment"
 )
 
 // DriverRunOperationRules is the default-deny registry for the DriverRun and
@@ -45,6 +46,7 @@ func DriverRunOperationRules() []authority.OperationRule {
 		authority.Allow(ActionAwaitDriverRun, authority.ClassExecution),
 		authority.Allow(ActionResolveDriverAwait, authority.ClassSystem),
 		authority.Allow(ActionBindWorkerProfileParent, authority.ClassExecution),
+		authority.Allow(ActionEnqueueLeadAssignment, authority.ClassExecution),
 	}
 }
 
@@ -68,6 +70,7 @@ type DriverRunAPI interface {
 	AwaitDriverRun(context.Context, authority.ExecutionAuthority, AwaitDriverRunCommand) (*DriverAwaitResult, error)
 	ResolveDriverAwait(context.Context, authority.SystemAuthority, ResolveDriverAwaitCommand) error
 	BindWorkerProfileParent(context.Context, authority.ExecutionAuthority, BindWorkerProfileParentCommand) (*WorkerProfile, error)
+	EnqueueLeadAssignment(context.Context, authority.ExecutionAuthority, EnqueueLeadAssignmentCommand) (*OutboxDelivery, error)
 }
 
 // DriverRunAuthorityResolver derives one exact run-bound authority after the

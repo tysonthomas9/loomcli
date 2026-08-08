@@ -5,14 +5,18 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
+
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/fleet"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
-	sl "github.com/tysonthomas9/loomcli/internal/stacklineage"
-	"github.com/tysonthomas9/loomcli/internal/stackstore"
+	stackstore "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore"
+	infrastackstore "github.com/tysonthomas9/loomcli/internal/infra/stackstoreadapter"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
+	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol/stacklineage"
 )
 
 // epicStackID is the deterministic stack id for an epic. The publisher
@@ -139,7 +143,7 @@ type EpicStackProjection struct {
 }
 
 // projectEpicStack reads an epic's child-task DAG from the issue backend and
-// upserts it into the stackstore as a forest of linear chains. It is
+// asks Source Control to reconcile it as a forest of linear chains. It is
 // idempotent: re-running keeps every existing node's stable OutputBranch
 // (never re-AddNode), only repointing a base via SetBase when lineage changed.
 // New tasks are added in dependency order so each node's base already exists.
@@ -148,13 +152,13 @@ type EpicStackProjection struct {
 // scopes lineage lookups per repo); rootBase is the branch chain roots build on.
 //
 //nolint:cyclop,funlen,gocognit // Projection combines backend snapshot normalization with stackstore upsert ordering.
-func projectEpicStack(ctx context.Context, ib backend.IssueBackend, sstore stackstore.Store, ws, epicID, repoName, rootBase string) (*EpicStackProjection, error) {
+func projectEpicStack(ctx context.Context, ib backend.IssueBackend, stacks sourcecontrol.StackLifecycle, ws, epicID, repoName, rootBase string) (*EpicStackProjection, error) {
 	ws = strings.TrimSpace(ws)
 	epicID = strings.TrimSpace(epicID)
 	repoName = strings.TrimSpace(repoName)
 	rootBase = strings.TrimSpace(rootBase)
-	if ib == nil || sstore == nil {
-		return nil, fmt.Errorf("issue backend and stack store are required")
+	if ib == nil || stacks == nil {
+		return nil, fmt.Errorf("issue backend and Source Control stack lifecycle are required")
 	}
 	if ws == "" || epicID == "" || repoName == "" || rootBase == "" {
 		return nil, fmt.Errorf("workspace, epic id, repo name, and root base are required")
@@ -198,94 +202,29 @@ func projectEpicStack(ctx context.Context, ib backend.IssueBackend, sstore stack
 	plan, stats := planEpicForest(tasks)
 
 	stackID := epicStackID(epicID)
-	if err := sstore.EnsureStack(ctx, sl.Stack{
-		ID:           stackID,
-		WorkspaceKey: ws,
-		RepoName:     repoName,
-		RootBase:     rootBase,
-	}); err != nil {
-		return nil, fmt.Errorf("ensure stack %s: %w", stackID, err)
+	desired := make([]sourcecontrol.DesiredStackNode, len(plan))
+	for index, node := range plan {
+		desired[index] = sourcecontrol.DesiredStackNode{TaskID: node.TaskID, BaseTaskID: node.BaseTaskID}
 	}
-
-	existing := map[string]sl.Node{}
-	if nodes, err := sstore.ListNodes(ctx, ws, stackID); err == nil {
-		for _, n := range nodes {
-			existing[n.TaskID] = n
-		}
-	} else if err != nil {
-		return nil, fmt.Errorf("list nodes for %s: %w", stackID, err)
-	}
-
-	res := &EpicStackProjection{StackID: stackID, RepoName: repoName, RootBase: rootBase, Stats: stats}
-
-	// Upsert in dependency order: a node's base must already exist before it is
-	// added (AddNode validates the predecessor). Roots first, then any node
-	// whose base is already inserted/present — a Kahn-style sweep.
-	inserted := map[string]struct{}{}
-	for id := range existing {
-		inserted[id] = struct{}{}
-	}
-	remaining := append([]projectedNode(nil), plan...)
-	for progress := true; progress && len(remaining) > 0; {
-		progress = false
-		next := remaining[:0]
-		for _, n := range remaining {
-			_, baseReady := inserted[n.BaseTaskID]
-			if n.BaseTaskID != "" && !baseReady {
-				next = append(next, n) // base not yet inserted; defer
-				continue
-			}
-			if cur, ok := existing[n.TaskID]; ok {
-				if cur.BaseTaskID != n.BaseTaskID {
-					if err := sstore.SetBase(ctx, ws, stackID, n.TaskID, n.BaseTaskID); err != nil {
-						return nil, fmt.Errorf("repoint %s base: %w", n.TaskID, err)
-					}
-					res.Reparented = append(res.Reparented, n.TaskID)
-				}
-			} else {
-				if _, err := sstore.AddNode(ctx, ws, stackID, n.TaskID, n.BaseTaskID, ""); err != nil {
-					return nil, fmt.Errorf("add node %s: %w", n.TaskID, err)
-				}
-				res.Created = append(res.Created, n.TaskID)
-			}
-			inserted[n.TaskID] = struct{}{}
-			progress = true
-		}
-		remaining = next
-	}
-	sort.Strings(res.Created)
-	sort.Strings(res.Reparented)
-	lineage, err := projectedLineage(ctx, sstore, ws, stackID)
+	result, err := stacks.ReconcileStack(ctx, sourcecontrol.ReconcileStackCommand{
+		Stack: sourcecontrol.EnsureStackCommand{
+			WorkspaceKey: ws, StackID: string(stackID), Repository: repoName, RootBase: rootBase,
+		},
+		Nodes: desired,
+	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("reconcile stack %s: %w", stackID, err)
 	}
-	res.Lineage = lineage
-	return res, nil
-}
-
-func projectedLineage(ctx context.Context, sstore stackstore.Store, ws string, stackID sl.StackID) (map[string]driverpkg.TaskLineage, error) {
-	st, err := sstore.GetStack(ctx, ws, stackID)
-	if err != nil {
-		return nil, fmt.Errorf("load projected stack %s: %w", stackID, err)
-	}
-	nodes, err := sstore.ListNodes(ctx, ws, stackID)
-	if err != nil {
-		return nil, fmt.Errorf("list projected nodes for %s: %w", stackID, err)
-	}
-	byTask := sl.ByTask(nodes)
-	lineage := make(map[string]driverpkg.TaskLineage, len(nodes))
-	for _, n := range nodes {
-		base, err := sl.BaseBranch(*st, n, byTask)
-		if err != nil {
-			return nil, fmt.Errorf("resolve projected base for %s: %w", n.TaskID, err)
-		}
-		lineage[n.TaskID] = driverpkg.TaskLineage{
-			StackID:      string(st.ID),
-			BaseRef:      base,
-			OutputBranch: n.OutputBranch,
+	lineage := make(map[string]driverpkg.TaskLineage, len(result.Lineage))
+	for taskID, value := range result.Lineage {
+		lineage[taskID] = driverpkg.TaskLineage{
+			StackID: value.StackID, BaseRef: value.BaseRef, OutputBranch: value.OutputBranch,
 		}
 	}
-	return lineage, nil
+	return &EpicStackProjection{
+		StackID: stackID, RepoName: repoName, RootBase: rootBase, Stats: stats,
+		Created: result.Created, Reparented: result.Reparented, Lineage: lineage,
+	}, nil
 }
 
 // projectEpicStackForRun is the `loom epic run` wiring for stacked mode: it
@@ -318,7 +257,15 @@ func projectEpicStackForRun(ctx context.Context, handle *bootstrap.StoreHandle, 
 	if err != nil {
 		return nil, fmt.Errorf("open stack store: %w", err)
 	}
-	proj, err := projectEpicStack(ctx, ib, sstore, ws, epicID, repoName, rootBase)
+	adapter, err := infrastackstore.New(sstore)
+	if err != nil {
+		return nil, err
+	}
+	stacks, err := sourcecontrol.NewStackLifecycle(adapter, time.Now)
+	if err != nil {
+		return nil, err
+	}
+	proj, err := projectEpicStack(ctx, ib, stacks, ws, epicID, repoName, rootBase)
 	if err != nil {
 		return nil, err
 	}
@@ -331,7 +278,7 @@ func projectEpicStackForRun(ctx context.Context, handle *bootstrap.StoreHandle, 
 // repo Name, so this must return the same Name. It is deliberately strict: with
 // more than one workspace repo and no --repo-url to disambiguate, it errors
 // rather than guessing and scoping lineage to the wrong repo.
-func resolveEpicStackRepo(ctx context.Context, handle *bootstrap.StoreHandle, ws, repoURL, baseBranch string) (selected *domain.Repo, rootBase string, err error) {
+func resolveEpicStackRepo(ctx context.Context, handle *bootstrap.StoreHandle, ws, repoURL, baseBranch string) (selected *workspacemodule.Repository, rootBase string, err error) {
 	repos, err := handle.Store.Repos().List(ctx, ws)
 	if err != nil {
 		return nil, "", fmt.Errorf("list workspace repos: %w", err)

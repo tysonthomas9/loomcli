@@ -15,13 +15,13 @@ import (
 	"strings"
 	"time"
 
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/app/prreviewer"
 	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
-	"github.com/tysonthomas9/loomcli/internal/connector"
-	"github.com/tysonthomas9/loomcli/internal/connector/providers"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 )
@@ -129,7 +129,7 @@ func (m *Module) resolveRepositoryRef(
 	if err != nil {
 		return "", "", false, err
 	}
-	var matched *domain.Repo
+	var matched *workspacemodule.Repository
 	for _, workspaceRepo := range repositories {
 		if workspaceRepo == nil {
 			return "", "", false, sourcecontrol.ErrInvalidMaterialization
@@ -304,12 +304,12 @@ func (m *Module) fetchPullRequestHead(w http.ResponseWriter, r *http.Request, ws
 		writePRReviewError(w, err)
 		return "", "", "", false
 	}
-	res, err := m.dispatcher.Dispatch(r.Context(), connector.Request{
+	res, err := m.dispatcher.Dispatch(r.Context(), connectorsmodule.DispatchCommand{
 		WorkspaceKey: ws,
-		RunID:        syntheticRunID(r, params, providers.ActionGitHubPullRequestRead),
+		RunID:        syntheticRunID(r, params, connectorsmodule.ActionGitHubPullRequestRead),
 		BindingID:    bindingID,
 		ConnectorID:  connectorID,
-		Action:       providers.ActionGitHubPullRequestRead,
+		Action:       connectorsmodule.ActionGitHubPullRequestRead,
 		Resource:     prResource(params.owner, params.repo),
 		Args:         pullRequestArgs(params),
 		CallSeq:      0,

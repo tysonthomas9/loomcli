@@ -29,7 +29,6 @@ import {
 } from "./instances";
 import type { TerminalInstanceHandle } from "./instances";
 import {
-  TerminalTabBar,
   MAX_TABS,
   BACKEND_BRAND_COLORS,
   type TabState,
@@ -42,6 +41,7 @@ import {
   useUnreadTracking,
   useWorkspaceTabState,
 } from "./tabs";
+import { TerminalTabBar } from "./tabs/TerminalTabBar";
 import styles from "./TerminalView.module.css";
 
 export interface TerminalInputRequest {
@@ -70,6 +70,13 @@ interface TerminalViewProps {
   pendingAgentName?: string | undefined;
   /** Called after pendingAgentName has been processed. */
   onAgentNameConsumed?: (() => void) | undefined;
+  /**
+   * Keeps an embedded terminal surface pinned to this agent after the
+   * one-shot pendingAgentName request has been consumed. Without this, a
+   * restored generic terminal can become visible when the user leaves the
+   * agent route and later returns to the same agent.
+   */
+  selectedAgentName?: string | undefined;
   /**
    * When true, hide the tab bar above the terminal pane. Used by embedded
    * surfaces (e.g. the /agents view) where the parent already provides agent
@@ -134,6 +141,7 @@ export function TerminalView({
   onNavigateToSettings,
   pendingAgentName,
   onAgentNameConsumed,
+  selectedAgentName,
   hideTabs = false,
   onSplitControlsChange,
 }: TerminalViewProps): JSX.Element {
@@ -756,14 +764,22 @@ export function TerminalView({
     if (!hideTabs) return visibleTabs;
 
     const activeTab = tabs.find((tab) => tab.id === activeTabId);
-    const targetAgentName = pendingAgentName ?? activeTab?.agentName;
+    const targetAgentName =
+      pendingAgentName ?? selectedAgentName ?? activeTab?.agentName;
     if (targetAgentName) {
       const agentTab = tabs.find((tab) => tab.agentName === targetAgentName);
       return agentTab ? [agentTab] : [];
     }
 
     return activeTab ? [activeTab] : [];
-  }, [activeTabId, hideTabs, pendingAgentName, tabs, visibleTabs]);
+  }, [
+    activeTabId,
+    hideTabs,
+    pendingAgentName,
+    selectedAgentName,
+    tabs,
+    visibleTabs,
+  ]);
 
   const paneActiveTabId = paneTabs.some((tab) => tab.id === activeTabId)
     ? activeTabId

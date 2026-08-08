@@ -3,9 +3,6 @@ package domain
 import (
 	"encoding/json"
 	"time"
-
-	"github.com/tysonthomas9/loomcli/internal/modules/automation"
-	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 )
 
 type PlatformEvent struct {
@@ -25,50 +22,6 @@ type PlatformEventsPage struct {
 	Events []PlatformEvent `json:"events"`
 	Cursor string          `json:"cursor"`
 }
-
-// DriverOwnerType is owned by Workflow Catalog. This alias preserves the
-// legacy domain import path while callers migrate to the capability API.
-type DriverOwnerType = workflowcatalog.DriverOwnerType
-
-const (
-	DriverOwnerUser      = workflowcatalog.DriverOwnerUser
-	DriverOwnerTeam      = workflowcatalog.DriverOwnerTeam
-	DriverOwnerLeadAgent = workflowcatalog.DriverOwnerLeadAgent
-	DriverOwnerSystem    = workflowcatalog.DriverOwnerSystem
-)
-
-type DriverStatus = workflowcatalog.DriverStatus
-
-const (
-	DriverStatusDraft    = workflowcatalog.DriverStatusDraft
-	DriverStatusActive   = workflowcatalog.DriverStatusActive
-	DriverStatusDisabled = workflowcatalog.DriverStatusDisabled
-	DriverStatusArchived = workflowcatalog.DriverStatusArchived
-)
-
-// DriverTrustLevel classifies who vouches for a driver's bundle content and
-// gates where its workflow runtimes may execute (§7 step 9 sandbox placement
-// policy): trusted drivers (builtin/operator-registered) may run in a host
-// process; untrusted drivers (externally submitted bundles) require an
-// isolating sandbox launcher and the executor refuses anything else.
-type DriverTrustLevel = workflowcatalog.DriverTrustLevel
-
-const (
-	DriverTrustTrusted   = workflowcatalog.DriverTrustTrusted
-	DriverTrustUntrusted = workflowcatalog.DriverTrustUntrusted
-)
-
-type Driver = workflowcatalog.Driver
-
-type DriverVersionValidationStatus = workflowcatalog.DriverVersionValidationStatus
-
-const (
-	DriverVersionValidationPending = workflowcatalog.DriverVersionValidationPending
-	DriverVersionValidationPassed  = workflowcatalog.DriverVersionValidationPassed
-	DriverVersionValidationFailed  = workflowcatalog.DriverVersionValidationFailed
-)
-
-type DriverVersion = workflowcatalog.DriverVersion
 
 type WorkerProfile struct {
 	WorkspaceKey  string            `json:"workspace_key"`
@@ -140,84 +93,6 @@ type AgentService struct {
 	CreatedAt       time.Time                `json:"created_at"`
 	UpdatedAt       time.Time                `json:"updated_at"`
 }
-
-// Retry defaults mirror fleet-db's write-time defaults for trigger binding
-// retry fields: 5 attempts with 30s exponential backoff (the sweeper caps
-// backoff at 1h).
-const (
-	DefaultTriggerRetryMaxAttempts    = automation.DefaultTriggerRetryMaxAttempts
-	DefaultTriggerRetryBackoffSeconds = automation.DefaultTriggerRetryBackoffSeconds
-)
-
-// TriggerActorFilter scopes which event actors a binding reacts to. It is most
-// relevant for source_kind=internal bindings where workflow-emitted events
-// could otherwise feed back into workflows. Loopback protection itself is
-// structural (event origin + hop_depth), so the filter is advisory and a
-// missing filter on an internal binding is accepted.
-type TriggerActorFilter = automation.ActorFilter
-
-type TriggerBindingConcurrencyPolicy = automation.BindingConcurrencyPolicy
-
-const (
-	TriggerBindingConcurrencyAllow            = automation.ConcurrencyAllow
-	TriggerBindingConcurrencyForbid           = automation.ConcurrencyForbid
-	TriggerBindingConcurrencyReplace          = automation.ConcurrencyReplace
-	TriggerBindingConcurrencyQueue            = automation.ConcurrencyQueue
-	TriggerBindingConcurrencyOneActivePerEpic = automation.ConcurrencyOneActivePerEpic
-)
-
-// TriggerBinding is owned by Automation. This alias preserves the legacy
-// domain import while callers migrate to the capability API.
-type TriggerBinding = automation.Binding
-
-// TriggerEventOrigin mirrors fleet-db's structural event provenance: every
-// trigger event carries a server-stamped origin so workflow-originated events
-// are distinguishable from genuine external ones. Webhook ingest stamps
-// external (hop depth 0), the workflow events API stamps workflow (hop depth
-// parent+1, capped), and system schedulers stamp system.
-type TriggerEventOrigin = automation.EventOrigin
-
-const (
-	TriggerEventOriginExternal = automation.EventOriginExternal
-	TriggerEventOriginWorkflow = automation.EventOriginWorkflow
-	TriggerEventOriginSystem   = automation.EventOriginSystem
-)
-
-// TriggerEvent is owned by Automation. This alias preserves the legacy domain
-// import while callers migrate to the capability API.
-type TriggerEvent = automation.Event
-
-// TriggerDeliveryStatus enumerates the lifecycle of a TriggerDelivery.
-type TriggerDeliveryStatus = automation.DeliveryStatus
-
-const (
-	TriggerDeliveryAccepted   = automation.DeliveryAccepted
-	TriggerDeliveryRejected   = automation.DeliveryRejected
-	TriggerDeliveryDuplicate  = automation.DeliveryDuplicate
-	TriggerDeliveryQueued     = automation.DeliveryQueued
-	TriggerDeliveryDispatched = automation.DeliveryDispatched
-	TriggerDeliveryFailed     = automation.DeliveryFailed
-	TriggerDeliveryReplayed   = automation.DeliveryReplayed
-	// TriggerDeliverySuperseded marks a delivery replaced by a newer event for
-	// the same subject key (replace concurrency policy). TriggerDeliveryHeld
-	// holds a delivery behind an active run for its subject key (queue
-	// concurrency policy); the retry sweeper promotes it. Both are additive
-	// enum values on the fleet-db v1 wire.
-	TriggerDeliverySuperseded = automation.DeliverySuperseded
-	TriggerDeliveryHeld       = automation.DeliveryHeld
-)
-
-// TriggerDeliveryErrorRetriesExhausted is the terminal error class stamped on
-// a failed delivery once its binding's RetryMaxAttempts budget is spent
-// (mirrors fleet-db's write-time rule). A failed delivery carrying it is
-// final and leaves the retry due-index.
-const TriggerDeliveryErrorRetriesExhausted = automation.TriggerDeliveryErrorRetriesExhausted
-
-// TriggerDelivery links a TriggerEvent to the binding that matched it and the
-// DriverRun it enqueued.
-// TriggerDelivery is owned by Automation. This alias preserves the legacy
-// domain import while callers migrate to the capability API.
-type TriggerDelivery = automation.Delivery
 
 type DriverRunStatus string
 

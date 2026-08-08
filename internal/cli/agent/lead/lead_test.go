@@ -367,9 +367,14 @@ func TestGenerateLeadPrompt_NotEmpty(t *testing.T) {
 
 func TestStandaloneLeadWithoutSessionEnvelopeIsUnregistered(t *testing.T) {
 	clearSessionEnvelopeForTest(t)
+	t.Setenv("LOOM_WORKSPACE", "  PROOF-WS  ")
+	t.Setenv(envAgentName, "  standalone-lead  ")
 	registration := registerLeadOrchestratorSession(t.Context(), t.TempDir())
 	if registration.Err() != nil || registration.Runtime() != nil || registration.SessionID != "" {
 		t.Fatalf("standalone registration = %+v, want unregistered", registration)
+	}
+	if registration.Workspace != "PROOF-WS" || registration.AgentID != "standalone-lead" {
+		t.Fatalf("standalone scope = workspace %q agent %q, want PROOF-WS/standalone-lead", registration.Workspace, registration.AgentID)
 	}
 }
 

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 )
 
 func TestValidRepositoryAdmissionBranchMatchesFleetDBConstraints(t *testing.T) {
@@ -228,7 +228,7 @@ func TestValidateWorkspaceRepositoryAdmissionBeginResultBindsProjection(
 		{
 			name: "workspace state",
 			mutate: func(result *WorkspaceRepositoryAdmissionBeginResult) {
-				result.Workspace.State = domain.WorkspaceStateReady
+				result.Workspace.State = workspacemodule.StateReady
 			},
 		},
 		{
@@ -266,11 +266,11 @@ func TestValidateWorkspaceRepositoryAdmissionBeginResultBindsProjection(
 				DesignFormat:  "markdown",
 			}
 			result := &WorkspaceRepositoryAdmissionBeginResult{
-				Workspace: &domain.Workspace{
+				Workspace: &workspacemodule.Workspace{
 					Key:           workspace.Key,
 					Name:          workspace.Name,
 					Description:   workspace.Description,
-					State:         domain.WorkspaceState(workspace.State),
+					State:         workspacemodule.State(workspace.State),
 					DefaultBranch: workspace.DefaultBranch,
 					DesignFormat:  workspace.DesignFormat,
 					CreatedAt:     record.CreatedAt,
@@ -524,7 +524,7 @@ func exactRepositoryAdmissionReceiptRecord() *RepositoryAdmissionRecord {
 			AdmissionID:     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 			SpecFingerprint: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 			Repositories: []RepositoryAdmissionRepoReceipt{{
-				Repository: domain.Repo{
+				Repository: workspacemodule.Repository{
 					WorkspaceKey:  "WORK",
 					Name:          "app",
 					RemoteURL:     "https://example.com/acme/app.git",

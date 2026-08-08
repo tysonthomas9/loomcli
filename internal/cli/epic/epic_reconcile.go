@@ -7,13 +7,16 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/stack"
 	"github.com/tysonthomas9/loomcli/internal/configlock"
-	sl "github.com/tysonthomas9/loomcli/internal/stacklineage"
-	"github.com/tysonthomas9/loomcli/internal/stackpublish"
-	"github.com/tysonthomas9/loomcli/internal/stackstore"
+	stackpublish "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolpublisher"
+	stackstore "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore"
+	stackstoreadapter "github.com/tysonthomas9/loomcli/internal/infra/stackstoreadapter"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
+	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol/stacklineage"
 )
 
 // reconcileEpicStack runs the Stage-4 post-drain reconcile: once the epic has
@@ -26,6 +29,8 @@ import (
 // a reconcile failure is a warning, not an epic failure — it is fully
 // re-runnable via `loom stack publish <stack>`. It never uses os.Getwd(); the
 // checkout is provisioned by PublishFromOrigin in a temp dir.
+//
+//nolint:funlen // Reconciliation is an ordered transaction across the stack projection and Git refs.
 func reconcileEpicStack(ctx context.Context, ws string, proj *EpicStackProjection) error {
 	if proj == nil {
 		return nil
@@ -45,9 +50,17 @@ func reconcileEpicStack(ctx context.Context, ws string, proj *EpicStackProjectio
 	if err != nil {
 		return fmt.Errorf("open stack store: %w", err)
 	}
+	adapter, err := stackstoreadapter.New(sstore)
+	if err != nil {
+		return err
+	}
+	stacks, err := sourcecontrol.NewStackLifecycle(adapter, time.Now)
+	if err != nil {
+		return err
+	}
 	rec := &stackpublish.Reconciler{
-		Store: sstore,
-		Forge: forge,
+		Stacks: stacks,
+		Forge:  forge,
 	}
 	opts := stackpublish.Options{Resolver: stack.HeadlessResolver()}
 

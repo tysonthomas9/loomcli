@@ -18,8 +18,8 @@ import {
   useWorkspaceViewData,
   useWorkspaceViewActions,
 } from "@/contexts/WorkspaceViewContext";
-import { useAgentStoreInstance } from "@/hooks/common";
-import { useRunEpicWorkflow } from "@/hooks/workspace";
+import { useAgentStoreInstance } from "@/hooks/common/useStoreContext";
+import { useRunEpicWorkflow } from "@/hooks/workspace/useRunEpicWorkflow";
 import type { Issue, Status } from "@/types";
 import { buildEpicLeadClaims } from "@/utils/agentRole";
 import { formatIssueId, formatStatusLabel, isPRUrl } from "@/utils/issue";
@@ -296,6 +296,7 @@ export function ListPage(): JSX.Element {
                           type="button"
                           className={styles.row}
                           onClick={() => handleIssueClick(issue)}
+                          data-testid={`list-issue-row-${issue.id}`}
                         >
                           <span
                             className={styles.dot}

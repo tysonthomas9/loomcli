@@ -2,13 +2,14 @@ package artifacts
 
 import "time"
 
-// OwnerType identifies the aggregate that produced an artifact. Phase 4
-// exposes only task-run execution ownership; session ownership lands with
-// Interaction and uses a distinct authority contract.
+// OwnerType identifies the aggregate that produced an artifact. Execution and
+// Interaction use distinct typed authority contracts even though both retain
+// durable references to this Artifacts-owned aggregate.
 type OwnerType string
 
 const (
 	OwnerTaskRun OwnerType = "task_run"
+	OwnerSession OwnerType = "session"
 )
 
 // DurableStatus is the Artifacts-owned content lifecycle.
@@ -26,6 +27,7 @@ const (
 type Artifact struct {
 	WorkspaceKey    string
 	ArtifactID      string
+	AgentID         string
 	SessionID       string
 	TaskID          string
 	OwnerType       OwnerType
@@ -63,6 +65,34 @@ type ArtifactReference struct {
 type ReferenceResult struct {
 	Artifact  *Artifact
 	Reference *ArtifactReference
+}
+
+// Query identifies one Artifact within a workspace. Read-only callers never
+// provide an execution lease or session credential; their consuming feature
+// remains responsible for applying its own task/session visibility policy to
+// the returned owner projection before requesting content.
+type Query struct {
+	WorkspaceKey string
+	ArtifactID   string
+}
+
+// SearchFilter is the general read-only Artifacts query vocabulary used by UI
+// projections. Every nonempty field is an exact filter and is revalidated on
+// every returned row by the owner service.
+type SearchFilter struct {
+	AgentID       string
+	SessionID     string
+	TaskID        string
+	OwnerType     OwnerType
+	OwnerID       string
+	Type          string
+	DurableStatus DurableStatus
+	Limit         int
+}
+
+type SearchQuery struct {
+	WorkspaceKey string
+	Filter       SearchFilter
 }
 
 func cloneArtifact(in *Artifact) *Artifact {

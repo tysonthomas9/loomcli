@@ -10,8 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
+
 	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/types"
 )
 
 type fleetCommentWire struct {
@@ -23,9 +24,9 @@ type fleetCommentWire struct {
 }
 
 // toTypesComment projects the fleet-db wire shape back into loom's
-// canonical types.Comment so downstream helpers (commentToData, service
+// canonical workitems.Comment so downstream helpers (commentToData, service
 // handlers, FE JSON) don't have to know about the dialect gap.
-func (w fleetCommentWire) toTypesComment() types.Comment {
+func (w fleetCommentWire) toTypesComment() workitems.Comment {
 	var id int64
 	if len(w.ID) > 0 {
 		raw := strings.Trim(strings.TrimSpace(string(w.ID)), `"`)
@@ -33,7 +34,7 @@ func (w fleetCommentWire) toTypesComment() types.Comment {
 			id = n
 		}
 	}
-	return types.Comment{
+	return workitems.Comment{
 		ID:        id,
 		IssueID:   w.IssueID,
 		Author:    w.Author,

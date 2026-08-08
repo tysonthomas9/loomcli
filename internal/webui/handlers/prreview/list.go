@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/connector"
-	"github.com/tysonthomas9/loomcli/internal/connector/providers"
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
@@ -80,7 +80,7 @@ func (m *Module) listPullRequests(w http.ResponseWriter, r *http.Request) {
 // repo, accumulating per-repo warnings instead of failing the whole list.
 // attempted/failed let the caller distinguish "no repo was eligible" from
 // "the connector tried and failed everywhere".
-func (m *Module) connectorListPullRequests(r *http.Request, ws, state string, repos []*domain.Repo) (prs []ops.GitPullRequest, warnings []string, attempted, failed int) {
+func (m *Module) connectorListPullRequests(r *http.Request, ws, state string, repos []*workspacemodule.Repository) (prs []ops.GitPullRequest, warnings []string, attempted, failed int) {
 	prs = []ops.GitPullRequest{}
 	for _, workspaceRepo := range repos {
 		owner, repo, ok := parseGitHubOwnerRepo(workspaceRepo.RemoteURL)
@@ -120,12 +120,12 @@ func (m *Module) connectorListPullRequestsForRepo(
 ) (prs []ops.GitPullRequest, truncated bool, err error) {
 	prs = []ops.GitPullRequest{}
 	for page := 1; page <= maxPullsListPages; page++ {
-		res, dispatchErr := m.dispatcher.Dispatch(r.Context(), connector.Request{
+		res, dispatchErr := m.dispatcher.Dispatch(r.Context(), connectorsmodule.DispatchCommand{
 			WorkspaceKey: ws,
 			RunID:        listRunID(r, owner, repo),
 			BindingID:    bindingID,
 			ConnectorID:  connectorID,
-			Action:       providers.ActionGitHubPullsList,
+			Action:       connectorsmodule.ActionGitHubPullsList,
 			Resource:     prResource(owner, repo),
 			Args: map[string]any{
 				"owner":   owner,
@@ -197,7 +197,7 @@ func listRunID(r *http.Request, owner, repo string) string {
 	if identity, ok := middleware.UserIdentityFromContext(r.Context()); ok && strings.TrimSpace(identity.UserID) != "" {
 		userID = strings.TrimSpace(identity.UserID)
 	}
-	return "webui-review:" + userID + ":" + owner + "/" + repo + ":list:" + providers.ActionGitHubPullsList
+	return "webui-review:" + userID + ":" + owner + "/" + repo + ":list:" + connectorsmodule.ActionGitHubPullsList
 }
 
 func pullRequestsFromBody(owner, repo, sourceRepo string, body map[string]any) []ops.GitPullRequest {

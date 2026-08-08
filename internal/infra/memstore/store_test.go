@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -24,7 +26,7 @@ func TestWorkspaceCRUD(t *testing.T) {
 	if created.Key != "MYWS" || created.Name != "My Workspace" {
 		t.Fatalf("Create returned wrong fields: %+v", created)
 	}
-	if created.State != domain.WorkspaceStateReady {
+	if created.State != workspacemodule.StateReady {
 		t.Errorf("expected default state=ready, got %q", created.State)
 	}
 

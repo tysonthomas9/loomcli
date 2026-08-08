@@ -13,7 +13,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/webui"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 )
 
 // waitForServerReady polls the health endpoint until the server is ready.
@@ -93,15 +93,15 @@ func TestServerRunStopsWorkspaceJobsBeforeReturning(t *testing.T) {
 	unwound := make(chan struct{})
 	app.jobStore.StartPrepared(
 		"shutdown-order-job",
-		service.WorkspaceCreateRequest{Name: "shutdown-order", Type: "clone"},
+		workspacecoord.WorkspaceCreateRequest{Name: "shutdown-order", Type: "clone"},
 		func(
 			ctx context.Context,
-			_ service.WorkspaceCreateRequest,
-		) (service.WorkspaceCreateResult, error) {
+			_ workspacecoord.WorkspaceCreateRequest,
+		) (workspacecoord.WorkspaceCreateResult, error) {
 			close(started)
 			<-ctx.Done()
 			close(unwound)
-			return service.WorkspaceCreateResult{}, context.Cause(ctx)
+			return workspacecoord.WorkspaceCreateResult{}, context.Cause(ctx)
 		},
 	)
 	select {

@@ -3,7 +3,8 @@ package git
 import (
 	"net/http"
 
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
+	"github.com/tysonthomas9/loomcli/internal/webui/sourcecontrolcoord"
 )
 
 // Module registers the 13 workspace-scoped git operation and diff routes
@@ -12,13 +13,13 @@ import (
 // The module is only constructed when ops.GitOps is non-nil. All routes are
 // unconditional within this module.
 type Module struct {
-	agentSvc service.AgentService
-	diffSvc  service.DiffService
+	agentSvc agentcoord.AgentService
+	diffSvc  sourcecontrolcoord.DiffService
 }
 
 // NewModule returns a Module that will register routes using the given
 // agent service and diff service.
-func NewModule(agentSvc service.AgentService, diffSvc service.DiffService) *Module {
+func NewModule(agentSvc agentcoord.AgentService, diffSvc sourcecontrolcoord.DiffService) *Module {
 	return &Module{
 		agentSvc: agentSvc,
 		diffSvc:  diffSvc,

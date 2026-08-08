@@ -172,6 +172,7 @@ export function AgentDetailMain({
               isActive={true}
               pendingAgentName={terminalAgentName}
               onAgentNameConsumed={handleAgentNameConsumed}
+              selectedAgentName={agentName}
               pendingTerminalInput={pendingTerminalInput}
               onTerminalInputConsumed={onTerminalInputConsumed}
               hideTabs

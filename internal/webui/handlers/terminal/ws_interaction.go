@@ -164,15 +164,14 @@ func prepareTerminalInteractionLaunch(
 		return nil, nil, fmt.Errorf("open Interaction terminal: %w", err)
 	}
 	lifecycle.terminalSet = true
-	if params.tabMetaStore != nil {
+	if params.interaction.TerminalIdentities != nil {
 		meta.Workspace = key.Workspace
 		meta.SessionName = key.Name
 		meta.InteractionSessionID = lifecycle.sessionID
 		meta.InteractionTerminalID = lifecycle.terminalID
 		meta.InteractionLeaseID = lifecycle.leaseID
 		meta.InteractionLeaseFencingToken = lifecycle.fence
-		meta.UpdatedAt = time.Now().UTC()
-		if err := params.tabMetaStore.Set(ctx, meta); err != nil {
+		if err := params.interaction.TerminalIdentities.PersistInteractionTabIdentity(ctx, key.Workspace, meta); err != nil {
 			lifecycle.abort(ctx, "terminal_identity_persist_failed")
 			return nil, nil, fmt.Errorf(
 				"persist Interaction terminal identity: %w",

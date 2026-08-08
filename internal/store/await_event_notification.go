@@ -4,19 +4,19 @@ import (
 	"context"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 )
 
 // AwaitEventNotification is one durable trigger-event notification claimed
 // by Execution's await reconciler. Event.EventID is the outbox identity;
 // SourceEventID (when present) is the canonical resume/audit identity.
 type AwaitEventNotification struct {
-	Event            domain.TriggerEvent `json:"event"`
-	Attempt          int                 `json:"attempt"`
-	DurableEventID   string              `json:"durable_event_id,omitempty"`
-	CanonicalEventID string              `json:"canonical_event_id,omitempty"`
-	PayloadOversized bool                `json:"payload_oversized,omitempty"`
-	PayloadSize      int                 `json:"payload_size,omitempty"`
+	Event            automation.Event `json:"event"`
+	Attempt          int              `json:"attempt"`
+	DurableEventID   string           `json:"durable_event_id,omitempty"`
+	CanonicalEventID string           `json:"canonical_event_id,omitempty"`
+	PayloadOversized bool             `json:"payload_oversized,omitempty"`
+	PayloadSize      int              `json:"payload_size,omitempty"`
 }
 
 type AwaitEventNotificationClaim struct {

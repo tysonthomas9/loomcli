@@ -7,7 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
+	leadcontrol "github.com/tysonthomas9/loomcli/internal/infra/interactionlead"
 )
 
 func installFakeHarnessLead(t *testing.T) *leadcontrol.HarnessLeadRuntimeConfig {

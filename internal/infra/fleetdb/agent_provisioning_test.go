@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
@@ -133,7 +135,7 @@ func TestAgentProvisioningTransportUsesServerOwnedIntentAndProgressRoutes(t *tes
 					WorkspaceKey: "space/name", ServiceID: "agent-1",
 				})
 			case 7:
-				_ = json.NewEncoder(w).Encode(domain.TriggerBinding{
+				_ = json.NewEncoder(w).Encode(automation.Binding{
 					WorkspaceKey: "space/name", BindingID: "binding-1",
 				})
 			case 8:

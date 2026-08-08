@@ -21,6 +21,7 @@ import { memo, useEffect, useState } from "react";
 
 import { getAvatarColor } from "@/utils/colorUtils";
 import { getStatusDotColor, getStatusLabel } from "@/utils/agent";
+import { shortRunErrorLabel } from "@/utils/runError";
 
 import type { CardAgentView } from "./cardAgentView";
 import styles from "./AgentRow.module.css";
@@ -41,30 +42,6 @@ export interface AgentRowProps {
 
 /** Re-render the relative-time label this often. */
 const RELATIVE_TIME_TICK_MS = 10_000;
-
-/**
- * Human labels for the agent error_class values fleet-db derives (which mirror
- * loom's agenterr.ErrorClass). Anything unmapped falls back to "run failed" so
- * a new class still reads as an error rather than vanishing. The raw class is
- * kept as the badge's hover title for precision.
- */
-const ERROR_CLASS_LABELS: Record<string, string> = {
-  SpawnFailure: "launch failed",
-  BackendUnavailable: "backend unavailable",
-  RateLimited: "rate limited",
-  AuthFailure: "auth failed",
-  BillingError: "billing error",
-  Timeout: "timed out",
-  ContextOverflow: "context overflow",
-  ModelNotFound: "model not found",
-  LockConflict: "lock conflict",
-};
-
-/** Map an error_class to a short badge label, or undefined when absent. */
-function errorClassLabel(cls: string | undefined): string | undefined {
-  if (!cls) return undefined;
-  return ERROR_CLASS_LABELS[cls] ?? "run failed";
-}
 
 /**
  * Format a relative-time label suitable for the activity slot.
@@ -117,7 +94,7 @@ function computeSlot(
         title: undefined,
       };
     case "missing": {
-      const label = errorClassLabel(view.errorClass);
+      const label = shortRunErrorLabel(view.errorClass);
       return {
         text: label ? `agent missing · ${label}` : "agent missing",
         state: "missing",

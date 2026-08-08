@@ -4,9 +4,9 @@ import (
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 type pullRequestsData struct {
@@ -21,7 +21,7 @@ type pullRequestsResponse struct {
 }
 
 // HandleListPullRequests handles GET /api/workspaces/{ws}/pull-requests?state=all|open|merged|review
-func HandleListPullRequests(svc service.AgentService) http.HandlerFunc {
+func HandleListPullRequests(svc agentcoord.AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
 		state := r.URL.Query().Get("state")

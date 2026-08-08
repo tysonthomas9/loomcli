@@ -1,13 +1,56 @@
 schema_version: 1
 status: complete
-source_head: 7d33f3468e86d95781d68e322afe8477804b1188
+source_head: 2242517f5206cd8e38de75f5765d70ca32269587
 adapter_roots:
   - internal/app
   - internal/cli
   - internal/driver
   - internal/infra/agentsbootstrapstore
+  - internal/infra/connectorscatalog
+  - internal/infra/connectorsrotation
+  - internal/infra/sessionstoreadapter
+  - internal/infra/stackstoreadapter
+  - internal/infra/usageprojection
+  - internal/infra/workspacecatalog
   - internal/modules
   - internal/webui/handlers
+owner_adapters:
+  - path: internal/app/serve/agentcomposition
+    aggregate_owner: agents
+  - path: internal/app/serve/automationcomposition/workflow_catalog.go
+    aggregate_owner: execution
+  - path: internal/app/serve/execution.go
+    aggregate_owner: execution
+  - path: internal/app/serve/execution_outbox_delivery.go
+    aggregate_owner: execution
+  - path: internal/app/serve/execution_reconciliation_queues.go
+    aggregate_owner: execution
+  - path: internal/app/serve/execution_task_run_convergence.go
+    aggregate_owner: execution
+  - path: internal/app/serve/execution_task_run_ports.go
+    aggregate_owner: execution
+  - path: internal/app/serve/execution_task_run_recovery.go
+    aggregate_owner: execution
+  - path: internal/app/serve/execution_worker_profiles.go
+    aggregate_owner: execution
+  - path: internal/app/serve/interactioncomposition
+    aggregate_owner: interaction
+  - path: internal/cli/serve/workspacemgr
+    aggregate_owner: workspace
+  - path: internal/infra/agentsbootstrapstore
+    aggregate_owner: agents
+  - path: internal/infra/connectorscatalog
+    aggregate_owner: connectors
+  - path: internal/infra/connectorsrotation
+    aggregate_owner: connectors
+  - path: internal/infra/sessionstoreadapter
+    aggregate_owner: interaction
+  - path: internal/infra/stackstoreadapter
+    aggregate_owner: sourcecontrol
+  - path: internal/infra/usageprojection
+    aggregate_owner: read_projection
+  - path: internal/infra/workspacecatalog
+    aggregate_owner: workspace
 analysis_profiles:
   - container
   - darwin-amd64
@@ -45,32 +88,41 @@ persistence_packages:
   - path: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/repositoryadmission
     receiver_names: [RepositoryAdmissionTransport]
     receiver_suffixes: []
+  - path: github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore
+    receiver_names: [LocalStore, Store]
+    receiver_suffixes: []
   - path: github.com/tysonthomas9/loomcli/internal/modules/agents
     receiver_names: [AgentIdentityStore, BootstrapStore, DesiredStateStore, LifecycleStore, OwnershipStore, RolePromptRepairStore, RoleStore]
     receiver_suffixes: []
   - path: github.com/tysonthomas9/loomcli/internal/modules/artifacts
-    receiver_names: [Store]
+    receiver_names: [QueryStore, SessionStore, Store]
     receiver_suffixes: []
   - path: github.com/tysonthomas9/loomcli/internal/modules/automation
-    receiver_names: [AdmissionStore, BindingStore, ManagedBindingStore, UnmanagedBindingStore]
+    receiver_names: [AdmissionStore, ApprovalEventStore, BindingStore, ManagedBindingStore, UnmanagedBindingStore]
     receiver_suffixes: []
   - path: github.com/tysonthomas9/loomcli/internal/modules/connectors
-    receiver_names: [ConnectorGrantStore]
+    receiver_names: [ConnectorGrantStore, DispatchStore, ManagementStore, SecretLifecycleStore]
     receiver_suffixes: []
   - path: github.com/tysonthomas9/loomcli/internal/modules/interaction
     receiver_names: [InboxStore, SessionStore, TerminalStore, TranscriptArtifactStore]
     receiver_suffixes: []
+  - path: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
+    receiver_names: [StackLifecycleStore, TaskOutcomeStore]
+    receiver_suffixes: []
   - path: github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog
     receiver_names: [AuthoringStore, VersionLifecycleStore]
+    receiver_suffixes: []
+  - path: github.com/tysonthomas9/loomcli/internal/modules/workitems
+    receiver_names: [Store]
+    receiver_suffixes: []
+  - path: github.com/tysonthomas9/loomcli/internal/modules/workspace
+    receiver_names: [CatalogStore, RepositoryCatalogStore]
     receiver_suffixes: []
   - path: github.com/tysonthomas9/loomcli/internal/sessions
     receiver_names: [Session, Store]
     receiver_suffixes: []
   - path: github.com/tysonthomas9/loomcli/internal/sessions/eventstore
     receiver_names: [Store]
-    receiver_suffixes: []
-  - path: github.com/tysonthomas9/loomcli/internal/stackstore
-    receiver_names: [LocalStore, Store]
     receiver_suffixes: []
   - path: github.com/tysonthomas9/loomcli/internal/store
     receiver_names: []
@@ -110,9 +162,15 @@ method_sets:
   - name: artifacts_port
     read_only: [Get, List]
     mutating: [Create, Finalize, Reference, Upload]
+  - name: artifacts_query
+    read_only: [GetArtifactRecord, ListArtifactRecords, ReadArtifactContent]
+    mutating: []
+  - name: artifacts_session_port
+    read_only: [GetSession]
+    mutating: [CreateSession, FinalizeSession, UploadSession]
   - name: automation_persistence
     read_only: [GetBinding, ListBindings]
-    mutating: [CreateBinding, CreateManagedBinding, DeleteBinding, DeleteManagedBindingIfUnchanged, DeleteUnmanagedBindingIfUnchanged, ReplaceManagedBinding, ReplaceUnmanagedBinding, ReserveEvent, TransitionDelivery, UpdateBinding]
+    mutating: [AppendTriggerEvent, CreateBinding, CreateManagedBinding, DeleteBinding, DeleteManagedBindingIfUnchanged, DeleteUnmanagedBindingIfUnchanged, ReplaceManagedBinding, ReplaceUnmanagedBinding, ReserveEvent, TransitionDelivery, UpdateBinding]
   - name: composite_store
     read_only:
       - AgentInboxMessages
@@ -144,9 +202,18 @@ method_sets:
       - Workers
       - Workspaces
     mutating: []
+  - name: connectors_dispatch
+    read_only: [GetConnectorRecord, ListGrantRecordsByBinding, ResolveOutboundCredentialSealedRecord]
+    mutating: [AppendConnectorCallRecord]
   - name: connectors_grants
     read_only: [ListGrantsByBinding]
     mutating: [CreateGrant]
+  - name: connectors_management
+    read_only: [GetConnectorRecord, ListCallRecordsByBinding, ListCallRecordsByRun, ListConnectorRecords, ListGrantRecordsByBinding, ListGrantRecordsByConnector]
+    mutating: [CreateConnectorRecord, CreateManagementGrant, RevokeGrantRecord]
+  - name: connectors_secret_lifecycle
+    read_only: [GetConnectorRecord, ResolveCurrentInboundSecretRecord, ResolveOutboundCredentialSealedRecord]
+    mutating: [AppendConnectorCallRecord, RotateConnectorSecretsRecord]
   - name: fleetdb_agent_management_transport
     read_only: [GetAgentOwnership, GetAgentRole, GetAgentService, ListAgentOwnership, ListAgentRoles, ListAgentServices]
     mutating: [AcquireAgentOwnership, ApplyAgentServiceLifecycle, ArchiveAgentService, CreateAgentRole, CreateAgentService, DeleteAgentRole, ReleaseAgentOwnership, RenewAgentOwnership, SetAgentServiceDesiredState, SetAgentServiceDesiredStateOwned, UpdateAgentRole, UpdateAgentServiceIdentity]
@@ -165,6 +232,7 @@ method_sets:
       - Awaits
       - Close
       - ConnectorCalls
+      - ConnectorGrantCommands
       - ConnectorGrants
       - Connectors
       - DriverRuns
@@ -179,6 +247,7 @@ method_sets:
       - RepositoryAdmissions
       - RequireCapabilities
       - Roles
+      - SessionArtifacts
       - SetAPIKey
       - SetAuthToken
       - TaskRunEvents
@@ -218,7 +287,7 @@ method_sets:
     read_only: [Close, Get]
     mutating: [Delete, Save]
   - name: metrics_store
-    read_only: [Prune, ReplayFromFile, Snapshot]
+    read_only: [Observe, Prune, ReplayFromFile, Snapshot]
     mutating: []
   - name: session
     read_only: [SessionID]
@@ -254,6 +323,12 @@ method_sets:
       - SyncNativeTranscript
       - SyncSubagentTranscript
       - UpdatePrompt
+  - name: sourcecontrol_stack_lifecycle
+    read_only: [GetStackRecord, ListStackNodeRecords, ListStackRecords]
+    mutating: [AddStackNodeRecord, EnsureStackRecord, MoveStackNodeRecord, RemoveStackNodeRecord, SetStackNodeBaseRecord, UpdateStackNodePublicationRecord]
+  - name: sourcecontrol_task_outcomes
+    read_only: [ListTaskStackNodes, ListTaskStacks]
+    mutating: [UpdateTaskStackOutcome]
   - name: stack_store
     read_only: [GetStack, ListNodes, ListStacks]
     mutating: [AddNode, DeleteStack, EnsureStack, MoveNode, RemoveNode, SetBase, UpdateNode]
@@ -344,9 +419,18 @@ method_sets:
   - name: workflowcatalog_authoring
     read_only: []
     mutating: [AuthorVersion]
+  - name: workitems_port
+    read_only: [Blocked, Deferred, Get, List, ListComments, ListDependencies, ListEvents, Ready, RequireRepositoryAdmission, Search]
+    mutating: [AddComment, AddDependency, AssignRepository, BlockRepositoryRequired, Claim, Close, Create, Delete, Patch, RemoveDependency, Reopen]
   - name: workspace_admission_store
     read_only: [AgentServices, Agents, Repos, Roles, Workspaces]
     mutating: []
+  - name: workspace_catalog
+    read_only: [GetByKey, GetByName, List]
+    mutating: [Create, Delete, Rename, SetDesignFormat, SetLifecycle]
+  - name: workspace_repository_catalog
+    read_only: [Get, List]
+    mutating: [Create, Delete, Update]
 receiver_surfaces:
   - receiver: "*github.com/tysonthomas9/loomcli/internal/events.MetricsStore"
     package: github.com/tysonthomas9/loomcli/internal/events
@@ -356,6 +440,10 @@ receiver_surfaces:
     package: github.com/tysonthomas9/loomcli/internal/infra/fleetdb
     method_set: fleetdb_client
     capability_owner: fleet-db
+  - receiver: "*github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore.LocalStore"
+    package: github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore
+    method_set: stack_store
+    capability_owner: sourcecontrol
   - receiver: "*github.com/tysonthomas9/loomcli/internal/sessions.Session"
     package: github.com/tysonthomas9/loomcli/internal/sessions
     method_set: session
@@ -368,10 +456,6 @@ receiver_surfaces:
     package: github.com/tysonthomas9/loomcli/internal/sessions/eventstore
     method_set: session_event_store
     capability_owner: interaction
-  - receiver: "*github.com/tysonthomas9/loomcli/internal/stackstore.LocalStore"
-    package: github.com/tysonthomas9/loomcli/internal/stackstore
-    method_set: stack_store
-    capability_owner: sourcecontrol
   - receiver: "*github.com/tysonthomas9/loomcli/internal/usage.Store"
     package: github.com/tysonthomas9/loomcli/internal/usage
     method_set: usage
@@ -387,11 +471,51 @@ receiver_surfaces:
   - receiver: github.com/tysonthomas9/loomcli/internal/app/agentprovisioning.ProgressStore
     package: github.com/tysonthomas9/loomcli/internal/app/agentprovisioning
     method_set: agentprovisioning_progress
-    capability_owner: agents
+    capability_owner: named_application_workflow
+  - receiver: github.com/tysonthomas9/loomcli/internal/cli/config.configStore
+    package: github.com/tysonthomas9/loomcli/internal/cli/config
+    method_set: composite_store
+    capability_owner: read_projection
   - receiver: github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr/admissionstore.Store
     package: github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr/admissionstore
     method_set: workspace_admission_store
     capability_owner: workspace
+  - receiver: github.com/tysonthomas9/loomcli/internal/cli/workspace.workspaceDetailStore
+    package: github.com/tysonthomas9/loomcli/internal/cli/workspace
+    method_set: composite_store
+    capability_owner: read_projection
+  - receiver: github.com/tysonthomas9/loomcli/internal/driver.awaitTimeoutStore
+    package: github.com/tysonthomas9/loomcli/internal/driver
+    method_set: composite_store
+    capability_owner: read_projection
+  - receiver: github.com/tysonthomas9/loomcli/internal/driver.driverRunReadStore
+    package: github.com/tysonthomas9/loomcli/internal/driver
+    method_set: composite_store
+    capability_owner: read_projection
+  - receiver: github.com/tysonthomas9/loomcli/internal/driver.executorStore
+    package: github.com/tysonthomas9/loomcli/internal/driver
+    method_set: composite_store
+    capability_owner: read_projection
+  - receiver: github.com/tysonthomas9/loomcli/internal/driver.hostBridgeStore
+    package: github.com/tysonthomas9/loomcli/internal/driver
+    method_set: composite_store
+    capability_owner: read_projection
+  - receiver: github.com/tysonthomas9/loomcli/internal/driver.taskRunListStore
+    package: github.com/tysonthomas9/loomcli/internal/driver
+    method_set: composite_store
+    capability_owner: read_projection
+  - receiver: github.com/tysonthomas9/loomcli/internal/driver.taskRunRequestStore
+    package: github.com/tysonthomas9/loomcli/internal/driver
+    method_set: composite_store
+    capability_owner: read_projection
+  - receiver: github.com/tysonthomas9/loomcli/internal/driver.taskWorktreeStore
+    package: github.com/tysonthomas9/loomcli/internal/driver
+    method_set: composite_store
+    capability_owner: read_projection
+  - receiver: github.com/tysonthomas9/loomcli/internal/driver.workspaceReadStore
+    package: github.com/tysonthomas9/loomcli/internal/driver
+    method_set: composite_store
+    capability_owner: read_projection
   - receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/agentmanagement.AgentManagementTransport
     package: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/agentmanagement
     method_set: fleetdb_agent_management_transport
@@ -408,6 +532,14 @@ receiver_surfaces:
     package: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/repositoryadmission
     method_set: fleetdb_repository_admission_transport
     capability_owner: workspace
+  - receiver: github.com/tysonthomas9/loomcli/internal/infra/interactionlead.RuntimeStore
+    package: github.com/tysonthomas9/loomcli/internal/infra/interactionlead
+    method_set: composite_store
+    capability_owner: read_projection
+  - receiver: github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore.Store
+    package: github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore
+    method_set: stack_store
+    capability_owner: sourcecontrol
   - receiver: github.com/tysonthomas9/loomcli/internal/modules/agents.AgentIdentityStore
     package: github.com/tysonthomas9/loomcli/internal/modules/agents
     method_set: agents_identity
@@ -436,11 +568,23 @@ receiver_surfaces:
     package: github.com/tysonthomas9/loomcli/internal/modules/agents
     method_set: agents_roles
     capability_owner: agents
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/artifacts.QueryStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/artifacts
+    method_set: artifacts_query
+    capability_owner: artifacts
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/artifacts.SessionStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/artifacts
+    method_set: artifacts_session_port
+    capability_owner: artifacts
   - receiver: github.com/tysonthomas9/loomcli/internal/modules/artifacts.Store
     package: github.com/tysonthomas9/loomcli/internal/modules/artifacts
     method_set: artifacts_port
     capability_owner: artifacts
   - receiver: github.com/tysonthomas9/loomcli/internal/modules/automation.AdmissionStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/automation
+    method_set: automation_persistence
+    capability_owner: automation
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/automation.ApprovalEventStore
     package: github.com/tysonthomas9/loomcli/internal/modules/automation
     method_set: automation_persistence
     capability_owner: automation
@@ -460,6 +604,18 @@ receiver_surfaces:
     package: github.com/tysonthomas9/loomcli/internal/modules/connectors
     method_set: connectors_grants
     capability_owner: connectors
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/connectors.DispatchStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/connectors
+    method_set: connectors_dispatch
+    capability_owner: connectors
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/connectors.ManagementStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/connectors
+    method_set: connectors_management
+    capability_owner: connectors
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/connectors.SecretLifecycleStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/connectors
+    method_set: connectors_secret_lifecycle
+    capability_owner: connectors
   - receiver: github.com/tysonthomas9/loomcli/internal/modules/interaction.InboxStore
     package: github.com/tysonthomas9/loomcli/internal/modules/interaction
     method_set: interaction_inbox
@@ -476,6 +632,14 @@ receiver_surfaces:
     package: github.com/tysonthomas9/loomcli/internal/modules/interaction
     method_set: interaction_transcript
     capability_owner: interaction
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol.StackLifecycleStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
+    method_set: sourcecontrol_stack_lifecycle
+    capability_owner: sourcecontrol
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol.TaskOutcomeStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
+    method_set: sourcecontrol_task_outcomes
+    capability_owner: sourcecontrol
   - receiver: github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog.AuthoringStore
     package: github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog
     method_set: workflowcatalog_authoring
@@ -484,10 +648,18 @@ receiver_surfaces:
     package: github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog
     method_set: store_repository
     capability_owner: workflowcatalog
-  - receiver: github.com/tysonthomas9/loomcli/internal/stackstore.Store
-    package: github.com/tysonthomas9/loomcli/internal/stackstore
-    method_set: stack_store
-    capability_owner: sourcecontrol
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/workitems.Store
+    package: github.com/tysonthomas9/loomcli/internal/modules/workitems
+    method_set: workitems_port
+    capability_owner: workitems
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/workspace.CatalogStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/workspace
+    method_set: workspace_catalog
+    capability_owner: workspace
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/workspace.RepositoryCatalogStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/workspace
+    method_set: workspace_repository_catalog
+    capability_owner: workspace
   - receiver: github.com/tysonthomas9/loomcli/internal/store.AgentInboxMessageStore
     package: github.com/tysonthomas9/loomcli/internal/store
     method_set: store_repository
@@ -656,6 +828,42 @@ receiver_surfaces:
     package: github.com/tysonthomas9/loomcli/internal/store
     method_set: store_repository
     capability_owner: workspace
+  - receiver: github.com/tysonthomas9/loomcli/internal/webui/driverapidependencies.Store
+    package: github.com/tysonthomas9/loomcli/internal/webui/driverapidependencies
+    method_set: composite_store
+    capability_owner: read_projection
+  - receiver: github.com/tysonthomas9/loomcli/internal/webui/handlers/agents.agentProjectionStore
+    package: github.com/tysonthomas9/loomcli/internal/webui/handlers/agents
+    method_set: composite_store
+    capability_owner: read_projection
+  - receiver: github.com/tysonthomas9/loomcli/internal/webui/handlers/approvals.approvalStore
+    package: github.com/tysonthomas9/loomcli/internal/webui/handlers/approvals
+    method_set: composite_store
+    capability_owner: read_projection
+  - receiver: github.com/tysonthomas9/loomcli/internal/webui/handlers/connectors.connectorStore
+    package: github.com/tysonthomas9/loomcli/internal/webui/handlers/connectors
+    method_set: composite_store
+    capability_owner: read_projection
+  - receiver: github.com/tysonthomas9/loomcli/internal/webui/handlers/prreview.prReviewStore
+    package: github.com/tysonthomas9/loomcli/internal/webui/handlers/prreview
+    method_set: composite_store
+    capability_owner: read_projection
+  - receiver: github.com/tysonthomas9/loomcli/internal/webui/handlers/taskrunapi.taskRunProjectionStore
+    package: github.com/tysonthomas9/loomcli/internal/webui/handlers/taskrunapi
+    method_set: composite_store
+    capability_owner: read_projection
+  - receiver: github.com/tysonthomas9/loomcli/internal/webui/handlers/terminal.terminalStore
+    package: github.com/tysonthomas9/loomcli/internal/webui/handlers/terminal
+    method_set: composite_store
+    capability_owner: read_projection
+  - receiver: github.com/tysonthomas9/loomcli/internal/webui/handlers/triggerbindings.bindingRunStore
+    package: github.com/tysonthomas9/loomcli/internal/webui/handlers/triggerbindings
+    method_set: composite_store
+    capability_owner: read_projection
+  - receiver: github.com/tysonthomas9/loomcli/internal/webui/handlers/workflows.workflowProjectionStore
+    package: github.com/tysonthomas9/loomcli/internal/webui/handlers/workflows
+    method_set: composite_store
+    capability_owner: read_projection
 function_surfaces:
   - package: github.com/tysonthomas9/loomcli/internal/app/agentprovisioning
     function: New
@@ -705,6 +913,10 @@ function_surfaces:
     function: Phase5FoundationCapabilities
     access: read-only
     capability_owner: read_projection
+  - package: github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore
+    function: Default
+    access: read-only
+    capability_owner: sourcecontrol
   - package: github.com/tysonthomas9/loomcli/internal/modules/agents
     function: New
     access: read-only
@@ -746,6 +958,14 @@ function_surfaces:
     access: read-only
     capability_owner: artifacts
   - package: github.com/tysonthomas9/loomcli/internal/modules/artifacts
+    function: NewQuery
+    access: read-only
+    capability_owner: artifacts
+  - package: github.com/tysonthomas9/loomcli/internal/modules/artifacts
+    function: NewSession
+    access: read-only
+    capability_owner: artifacts
+  - package: github.com/tysonthomas9/loomcli/internal/modules/artifacts
     function: OperationRules
     access: read-only
     capability_owner: artifacts
@@ -770,6 +990,10 @@ function_surfaces:
     access: read-only
     capability_owner: automation
   - package: github.com/tysonthomas9/loomcli/internal/modules/automation
+    function: WithApprovalEventStore
+    access: read-only
+    capability_owner: automation
+  - package: github.com/tysonthomas9/loomcli/internal/modules/automation
     function: WithAwaitEventNotifier
     access: read-only
     capability_owner: automation
@@ -782,7 +1006,67 @@ function_surfaces:
     access: read-only
     capability_owner: automation
   - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
+    function: ActionsForSource
+    access: read-only
+    capability_owner: connectors
+  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
+    function: ClassifyDispatchError
+    access: read-only
+    capability_owner: connectors
+  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
+    function: ConnectorCallID
+    access: read-only
+    capability_owner: connectors
+  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
+    function: CredentialAAD
+    access: read-only
+    capability_owner: connectors
+  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
+    function: DecisionForDispatchError
+    access: read-only
+    capability_owner: connectors
+  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
+    function: DispatcherAvailable
+    access: read-only
+    capability_owner: connectors
+  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
+    function: EvaluateGrantAuthorization
+    access: read-only
+    capability_owner: connectors
+  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
+    function: IsIrreversibleAction
+    access: read-only
+    capability_owner: connectors
+  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
+    function: MatchGrantResource
+    access: read-only
+    capability_owner: connectors
+  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
+    function: MissingActionPreconditions
+    access: read-only
+    capability_owner: connectors
+  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
     function: New
+    access: read-only
+    capability_owner: connectors
+  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
+    function: NewDispatch
+    access: read-only
+    capability_owner: connectors
+  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
+    function: NewManagement
+    access: read-only
+    capability_owner: connectors
+  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
+    function: NewManagementWithCredentialVault
+    access: read-only
+    capability_owner: connectors
+  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
+    function: NewManagementWithSecrets
+    access: read-only
+    capability_owner: connectors
+  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
+    function: NewSecretLifecycle
     access: read-only
     capability_owner: connectors
   - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
@@ -790,11 +1074,23 @@ function_surfaces:
     access: read-only
     capability_owner: connectors
   - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
+    function: NormalizeAction
+    access: read-only
+    capability_owner: connectors
+  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
     function: OperationRules
+    access: read-only
+    capability_owner: connectors
+  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
+    function: RequiredActionPreconditions
     access: read-only
     capability_owner: connectors
   - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
     function: ChatOperationRules
+    access: read-only
+    capability_owner: interaction
+  - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
+    function: ContentDedupeKey
     access: read-only
     capability_owner: interaction
   - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
@@ -821,6 +1117,54 @@ function_surfaces:
     function: SessionEnvelope
     access: read-only
     capability_owner: interaction
+  - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
+    function: ValidateIssueTabIssueID
+    access: read-only
+    capability_owner: interaction
+  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
+    function: New
+    access: read-only
+    capability_owner: sourcecontrol
+  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
+    function: NewConnectorsGitReadBroker
+    access: read-only
+    capability_owner: sourcecontrol
+  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
+    function: NewStackLifecycle
+    access: read-only
+    capability_owner: sourcecontrol
+  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
+    function: NewTaskOutcomes
+    access: read-only
+    capability_owner: sourcecontrol
+  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
+    function: OperationRules
+    access: read-only
+    capability_owner: sourcecontrol
+  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
+    function: ParseRepositoryAdmissionMaterializationID
+    access: read-only
+    capability_owner: sourcecontrol
+  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
+    function: RepositoryAdmissionMaterializationID
+    access: read-only
+    capability_owner: sourcecontrol
+  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
+    function: ValidatePullRequestCheckoutCommand
+    access: read-only
+    capability_owner: sourcecontrol
+  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
+    function: ValidateRepositoryAdmissionCheckoutCommand
+    access: read-only
+    capability_owner: sourcecontrol
+  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
+    function: ValidateTaskCheckoutCommand
+    access: read-only
+    capability_owner: sourcecontrol
+  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
+    function: ValidateTokenFreeRemote
+    access: read-only
+    capability_owner: sourcecontrol
   - package: github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog
     function: BuiltinSourceRef
     access: read-only
@@ -845,6 +1189,22 @@ function_surfaces:
     function: VersionApproved
     access: read-only
     capability_owner: workflowcatalog
+  - package: github.com/tysonthomas9/loomcli/internal/modules/workitems
+    function: New
+    access: read-only
+    capability_owner: workitems
+  - package: github.com/tysonthomas9/loomcli/internal/modules/workspace
+    function: New
+    access: read-only
+    capability_owner: workspace
+  - package: github.com/tysonthomas9/loomcli/internal/modules/workspace
+    function: WithRepositoryCatalog
+    access: read-only
+    capability_owner: workspace
+  - package: github.com/tysonthomas9/loomcli/internal/sessions
+    function: DecodeDiffStatsMetadata
+    access: read-only
+    capability_owner: interaction
   - package: github.com/tysonthomas9/loomcli/internal/sessions
     function: EncodeDiffStatsMetadata
     access: read-only
@@ -865,14 +1225,14 @@ function_surfaces:
     function: Open
     access: read-only
     capability_owner: interaction
-  - package: github.com/tysonthomas9/loomcli/internal/stackstore
-    function: Default
-    access: read-only
-    capability_owner: sourcecontrol
   - package: github.com/tysonthomas9/loomcli/internal/store
     function: DefaultBindingID
     access: read-only
     capability_owner: automation
+  - package: github.com/tysonthomas9/loomcli/internal/store
+    function: IsNotFound
+    access: read-only
+    capability_owner: workspace
   - package: github.com/tysonthomas9/loomcli/internal/store
     function: OrchestrationSessionFor
     access: read-only
@@ -910,1356 +1270,618 @@ function_surfaces:
     access: read-only
     capability_owner: interaction
 writes:
-    - file: internal/app/agentprovisioning/manager.go
-      receiver: github.com/tysonthomas9/loomcli/internal/app/agentprovisioning.ProgressStore
-      method: Begin
-      count: 1
-      aggregate_owner: agents
-      expires_after_phase: 7
-    - file: internal/app/agentprovisioning/manager.go
-      receiver: github.com/tysonthomas9/loomcli/internal/app/agentprovisioning.ProgressStore
-      method: Save
-      count: 1
-      aggregate_owner: agents
-      expires_after_phase: 7
     - file: internal/app/serve/agentcomposition/agents_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/agentmanagement.AgentManagementTransport
       method: AcquireAgentOwnership
       count: 1
       aggregate_owner: agents
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/agentcomposition/agents_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/agentmanagement.AgentManagementTransport
       method: ApplyAgentServiceLifecycle
       count: 1
       aggregate_owner: agents
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/agentcomposition/agents_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/agentmanagement.AgentManagementTransport
       method: ArchiveAgentService
       count: 1
       aggregate_owner: agents
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/agentcomposition/agents_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/agentmanagement.AgentManagementTransport
       method: CreateAgentRole
       count: 1
       aggregate_owner: agents
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/agentcomposition/agents_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/agentmanagement.AgentManagementTransport
       method: CreateAgentService
       count: 1
       aggregate_owner: agents
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/agentcomposition/agents_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/agentmanagement.AgentManagementTransport
       method: DeleteAgentRole
       count: 1
       aggregate_owner: agents
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/agentcomposition/agents_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/agentmanagement.AgentManagementTransport
       method: ReleaseAgentOwnership
       count: 1
       aggregate_owner: agents
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/agentcomposition/agents_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/agentmanagement.AgentManagementTransport
       method: RenewAgentOwnership
       count: 1
       aggregate_owner: agents
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/agentcomposition/agents_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/agentmanagement.AgentManagementTransport
       method: SetAgentServiceDesiredState
       count: 1
       aggregate_owner: agents
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/agentcomposition/agents_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/agentmanagement.AgentManagementTransport
       method: SetAgentServiceDesiredStateOwned
       count: 1
       aggregate_owner: agents
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/agentcomposition/agents_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/agentmanagement.AgentManagementTransport
       method: UpdateAgentRole
       count: 1
       aggregate_owner: agents
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/agentcomposition/agents_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/agentmanagement.AgentManagementTransport
       method: UpdateAgentServiceIdentity
       count: 1
       aggregate_owner: agents
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/automationcomposition/workflow_catalog.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.AtomicAwaitStore
       method: ResolveAwaitAndResume
       count: 1
       aggregate_owner: execution
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/execution.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.AtomicAwaitStore
       method: ResolveAwaitAndResume
       count: 1
       aggregate_owner: execution
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/execution.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.AwaitStore
       method: RegisterAwaitAndCheck
       count: 1
       aggregate_owner: execution
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/execution.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunStore
       method: Claim
       count: 1
       aggregate_owner: execution
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/execution.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunStore
       method: Create
       count: 1
       aggregate_owner: execution
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/execution.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunStore
       method: Finish
       count: 1
       aggregate_owner: execution
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/execution.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunStore
       method: Heartbeat
       count: 1
       aggregate_owner: execution
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/execution.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunStore
       method: RecoverStale
       count: 1
       aggregate_owner: execution
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/execution.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunStore
       method: ResumeAwaiting
       count: 1
       aggregate_owner: execution
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/execution.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunStore
       method: Suspend
       count: 1
       aggregate_owner: execution
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/execution.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.TaskRunStore
       method: AppendLog
       count: 1
       aggregate_owner: execution
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/execution.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.TaskRunStore
       method: Complete
       count: 1
       aggregate_owner: execution
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/execution.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.TaskRunStore
       method: Heartbeat
       count: 1
       aggregate_owner: execution
-      expires_after_phase: 7
+      disposition: owner_adapter
+    - file: internal/app/serve/execution_outbox_delivery.go
+      receiver: github.com/tysonthomas9/loomcli/internal/store.OutboxStore
+      method: Create
+      count: 1
+      aggregate_owner: execution
+      disposition: owner_adapter
     - file: internal/app/serve/execution_outbox_delivery.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.OutboxStore
       method: MarkResult
       count: 1
       aggregate_owner: execution
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/execution_reconciliation_queues.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.AwaitEventNotificationStore
       method: ClaimAwaitEventNotifications
       count: 1
       aggregate_owner: execution
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/execution_reconciliation_queues.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.AwaitEventNotificationStore
       method: CompleteAwaitEventNotification
       count: 1
       aggregate_owner: execution
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/execution_reconciliation_queues.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.AwaitEventNotificationStore
       method: RetryAwaitEventNotification
       count: 1
       aggregate_owner: execution
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/execution_reconciliation_queues.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunOutcomeStore
       method: ClaimDriverRunOutcomes
       count: 1
       aggregate_owner: execution
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/execution_reconciliation_queues.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunOutcomeStore
       method: CompleteDriverRunOutcome
       count: 1
       aggregate_owner: execution
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/execution_reconciliation_queues.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunOutcomeStore
       method: RetryDriverRunOutcome
       count: 1
       aggregate_owner: execution
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/execution_reconciliation_queues.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.TerminalDriverRunWorkRecoveryQueueStore
       method: ClaimTerminalDriverRunWorkRecoveries
       count: 1
       aggregate_owner: execution
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/execution_reconciliation_queues.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.TerminalDriverRunWorkRecoveryQueueStore
       method: CompleteTerminalDriverRunWorkRecovery
       count: 1
       aggregate_owner: execution
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/execution_reconciliation_queues.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.TerminalDriverRunWorkRecoveryQueueStore
       method: RetryTerminalDriverRunWorkRecovery
       count: 1
       aggregate_owner: execution
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/execution_task_run_convergence.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.OutboxStore
       method: Create
       count: 1
       aggregate_owner: execution
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/execution_task_run_convergence.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.TaskRunEventStore
       method: Append
       count: 1
       aggregate_owner: execution
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/execution_task_run_convergence.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.TaskRunTerminalConvergenceStore
       method: CompleteTaskRunTerminalConvergence
       count: 1
       aggregate_owner: execution
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/execution_task_run_convergence.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.TerminalDriverStepRepairStore
       method: RepairTerminalDriverStep
       count: 1
       aggregate_owner: execution
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/execution_task_run_ports.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.NodeStore
       method: Create
       count: 1
       aggregate_owner: execution
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/execution_task_run_ports.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.NodeStore
       method: Heartbeat
       count: 1
       aggregate_owner: execution
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/execution_task_run_ports.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.NodeStore
       method: Update
       count: 2
       aggregate_owner: execution
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/execution_task_run_recovery.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunStore
       method: RecoverStaleTaskRuns
       count: 1
       aggregate_owner: execution
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/execution_worker_profiles.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.WorkerProfileStore
       method: Create
       count: 1
       aggregate_owner: execution
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/execution_worker_profiles.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.WorkerProfileStore
       method: Delete
       count: 1
       aggregate_owner: execution
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/execution_worker_profiles.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.WorkerProfileStore
       method: Update
       count: 1
       aggregate_owner: execution
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/interactioncomposition/interaction_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/interaction.InteractionMutationTransport
       method: ClaimInteractionInbox
       count: 1
       aggregate_owner: interaction
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/interactioncomposition/interaction_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/interaction.InteractionMutationTransport
       method: CompleteInteractionInbox
       count: 1
       aggregate_owner: interaction
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/interactioncomposition/interaction_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/interaction.InteractionMutationTransport
       method: CreateInteractionTerminal
       count: 1
       aggregate_owner: interaction
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/interactioncomposition/interaction_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/interaction.InteractionMutationTransport
       method: EnqueueInteractionInbox
       count: 1
       aggregate_owner: interaction
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/interactioncomposition/interaction_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/interaction.InteractionMutationTransport
       method: FinishInteractionSession
       count: 1
       aggregate_owner: interaction
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/interactioncomposition/interaction_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/interaction.InteractionMutationTransport
       method: ForceInterruptInteractionSession
       count: 1
       aggregate_owner: interaction
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/interactioncomposition/interaction_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/interaction.InteractionMutationTransport
       method: HeartbeatInteractionSession
       count: 1
       aggregate_owner: interaction
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/interactioncomposition/interaction_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/interaction.InteractionMutationTransport
       method: InterruptInteractionSessionIfLeaseMissing
       count: 1
       aggregate_owner: interaction
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/interactioncomposition/interaction_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/interaction.InteractionMutationTransport
       method: PatchInteractionSession
       count: 1
       aggregate_owner: interaction
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/interactioncomposition/interaction_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/interaction.InteractionMutationTransport
       method: RecoverInteractionSessionStart
       count: 1
       aggregate_owner: interaction
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/interactioncomposition/interaction_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/interaction.InteractionMutationTransport
       method: StartInteractionSession
       count: 1
       aggregate_owner: interaction
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/app/serve/interactioncomposition/interaction_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/interaction.InteractionMutationTransport
       method: UpdateInteractionTerminal
       count: 1
       aggregate_owner: interaction
-      expires_after_phase: 7
-    - file: internal/app/serve/interactioncomposition/interaction_transcript.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store
-      method: UploadContentArtifact
-      count: 1
-      aggregate_owner: artifacts
-      expires_after_phase: 7
-    - file: internal/app/serve/sourcecontrolcomposition/connectors_fleetdb.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorGrantStore
-      method: Create
-      count: 1
-      aggregate_owner: connectors
-      expires_after_phase: 7
-    - file: internal/app/serve/sourcecontrolcomposition/stack_lineage.go
-      receiver: github.com/tysonthomas9/loomcli/internal/stackstore.Store
-      method: UpdateNode
-      count: 1
-      aggregate_owner: sourcecontrol
-      expires_after_phase: 7
-    - file: internal/cli/agent/plan.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
-      method: CreateSession
-      count: 1
-      aggregate_owner: interaction
-      expires_after_phase: 7
-    - file: internal/cli/agent/plan.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/usage.Store'
-      method: Append
-      count: 1
-      aggregate_owner: read_projection
-      expires_after_phase: 7
-    - file: internal/cli/agent/plan.go
-      receiver: github.com/tysonthomas9/loomcli/internal/sessions
-      method: NewStore
-      count: 1
-      aggregate_owner: interaction
-      expires_after_phase: 7
-    - file: internal/cli/agent/plan.go
-      receiver: github.com/tysonthomas9/loomcli/internal/usage
-      method: NewStore
-      count: 1
-      aggregate_owner: read_projection
-      expires_after_phase: 7
-    - file: internal/cli/automode/automode.go
-      receiver: github.com/tysonthomas9/loomcli/internal/sessions
-      method: NewStore
-      count: 1
-      aggregate_owner: interaction
-      expires_after_phase: 7
-    - file: internal/cli/automode/automode.go
-      receiver: github.com/tysonthomas9/loomcli/internal/usage
-      method: NewStore
-      count: 1
-      aggregate_owner: read_projection
-      expires_after_phase: 7
-    - file: internal/cli/automode/automode_task.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
-      method: CreateSession
-      count: 1
-      aggregate_owner: interaction
-      expires_after_phase: 7
-    - file: internal/cli/automode/automode_usage.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/usage.Store'
-      method: Append
-      count: 1
-      aggregate_owner: read_projection
-      expires_after_phase: 7
-    - file: internal/cli/backends/transcript_flags.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions/eventstore.Store'
-      method: AppendEnvelope
-      count: 1
-      aggregate_owner: interaction
-      expires_after_phase: 7
-    - file: internal/cli/backends/transcript_flags.go
-      receiver: github.com/tysonthomas9/loomcli/internal/sessions
-      method: NewStore
-      count: 1
-      aggregate_owner: interaction
-      expires_after_phase: 7
-    - file: internal/cli/cleanup/cleanup_sessions.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
-      method: CompactIndex
-      count: 1
-      aggregate_owner: interaction
-      expires_after_phase: 7
-    - file: internal/cli/cleanup/cleanup_sessions.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
-      method: PurgeOlderThan
-      count: 1
-      aggregate_owner: interaction
-      expires_after_phase: 7
-    - file: internal/cli/cleanup/cleanup_sessions.go
-      receiver: github.com/tysonthomas9/loomcli/internal/sessions
-      method: NewStore
-      count: 1
-      aggregate_owner: interaction
-      expires_after_phase: 7
-    - file: internal/cli/cleanup/cleanup_usage.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/usage.Store'
-      method: PurgeOlderThan
-      count: 1
-      aggregate_owner: read_projection
-      expires_after_phase: 7
-    - file: internal/cli/cleanup/cleanup_usage.go
-      receiver: github.com/tysonthomas9/loomcli/internal/usage
-      method: NewStore
-      count: 1
-      aggregate_owner: read_projection
-      expires_after_phase: 7
-    - file: internal/cli/cleanup/sessions_cmd.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
-      method: PurgeOlderThan
-      count: 1
-      aggregate_owner: interaction
-      expires_after_phase: 7
-    - file: internal/cli/cleanup/sessions_cmd.go
-      receiver: github.com/tysonthomas9/loomcli/internal/sessions
-      method: NewStore
-      count: 1
-      aggregate_owner: interaction
-      expires_after_phase: 7
-    - file: internal/cli/cleanup/usage_cmd.go
-      receiver: github.com/tysonthomas9/loomcli/internal/usage
-      method: NewStore
-      count: 1
-      aggregate_owner: read_projection
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_connector.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorAuditStore
-      method: Append
-      count: 1
-      aggregate_owner: connectors
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_connector.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorGrantStore
-      method: Create
-      count: 1
-      aggregate_owner: connectors
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_connector.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorGrantStore
-      method: Revoke
-      count: 1
-      aggregate_owner: connectors
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_connector.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorStore
-      method: Create
-      count: 1
-      aggregate_owner: connectors
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_connector.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorStore
-      method: RotateSecrets
-      count: 1
-      aggregate_owner: connectors
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_control_plane.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.AgentInboxMessageStore
-      method: ClaimNext
-      count: 1
-      aggregate_owner: interaction
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_control_plane.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.AgentInboxMessageStore
-      method: Complete
-      count: 1
-      aggregate_owner: interaction
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_control_plane.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.AgentInboxMessageStore
-      method: Create
-      count: 1
-      aggregate_owner: interaction
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_control_plane.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.AgentLeaseStore
-      method: Create
-      count: 1
-      aggregate_owner: interaction
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_control_plane.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.AgentLeaseStore
-      method: Heartbeat
-      count: 1
-      aggregate_owner: interaction
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_control_plane.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.AgentLeaseStore
-      method: Release
-      count: 1
-      aggregate_owner: interaction
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_control_plane.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.AgentOwnershipLeaseOwnedStore
-      method: HeartbeatOwned
-      count: 1
-      aggregate_owner: agents
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_control_plane.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.AgentOwnershipLeaseOwnedStore
-      method: ReleaseOwned
-      count: 1
-      aggregate_owner: agents
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_control_plane.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.AgentOwnershipLeaseStore
-      method: Acquire
-      count: 1
-      aggregate_owner: agents
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_control_plane.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.AgentOwnershipLeaseStore
-      method: Heartbeat
-      count: 2
-      aggregate_owner: agents
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_control_plane.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.AgentOwnershipLeaseStore
-      method: Release
-      count: 2
-      aggregate_owner: agents
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_control_plane.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.AgentSessionStore
-      method: Create
-      count: 1
-      aggregate_owner: interaction
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_control_plane.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.AgentSessionStore
-      method: Heartbeat
-      count: 1
-      aggregate_owner: interaction
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_control_plane.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.AgentSessionStore
-      method: Update
-      count: 1
-      aggregate_owner: interaction
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_control_plane.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.ArtifactStore
-      method: Create
-      count: 1
-      aggregate_owner: artifacts
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_control_plane.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.ArtifactStore
-      method: Finalize
-      count: 1
-      aggregate_owner: artifacts
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_control_plane.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.ArtifactStore
-      method: Update
-      count: 1
-      aggregate_owner: artifacts
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_control_plane.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.ArtifactStore
-      method: UploadContent
-      count: 1
-      aggregate_owner: artifacts
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_control_plane.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.NodeStore
-      method: Create
-      count: 1
-      aggregate_owner: execution
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_control_plane.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.NodeStore
-      method: Heartbeat
-      count: 1
-      aggregate_owner: execution
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_control_plane.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.NodeStore
-      method: Update
-      count: 1
-      aggregate_owner: execution
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_control_plane.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.TerminalSessionStore
-      method: Create
-      count: 1
-      aggregate_owner: interaction
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_control_plane.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.TerminalSessionStore
-      method: Update
-      count: 1
-      aggregate_owner: interaction
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_control_plane.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.WorkerStore
-      method: Deregister
-      count: 1
-      aggregate_owner: execution
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_control_plane.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.WorkerStore
-      method: Heartbeat
-      count: 1
-      aggregate_owner: execution
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_core_entities.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.RepoStore
-      method: Create
-      count: 1
-      aggregate_owner: workspace
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_core_entities.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.RepoStore
-      method: Delete
-      count: 1
-      aggregate_owner: workspace
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_core_entities.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.RepoStore
-      method: Update
-      count: 1
-      aggregate_owner: workspace
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_core_entities.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.RoleStore
-      method: Create
-      count: 1
-      aggregate_owner: agents
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_core_entities.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.RoleStore
-      method: Delete
-      count: 1
-      aggregate_owner: agents
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_core_entities.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.RoleStore
-      method: Update
-      count: 1
-      aggregate_owner: agents
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_core_entities.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.WorkspaceStore
-      method: Create
-      count: 1
-      aggregate_owner: workspace
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_core_entities.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.WorkspaceStore
-      method: Delete
-      count: 1
-      aggregate_owner: workspace
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_core_entities.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.WorkspaceStore
-      method: Update
-      count: 1
-      aggregate_owner: workspace
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.AgentServiceStore
-      method: Create
-      count: 1
-      aggregate_owner: agents
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.AgentServiceStore
-      method: Delete
-      count: 1
-      aggregate_owner: agents
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.AgentServiceStore
-      method: Update
-      count: 1
-      aggregate_owner: agents
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.AtomicAwaitStore
-      method: ResolveAwaitAndResume
-      count: 1
-      aggregate_owner: execution
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.AwaitStore
-      method: RegisterAwaitAndCheck
-      count: 1
-      aggregate_owner: execution
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.AwaitStore
-      method: ResolveAwait
-      count: 1
-      aggregate_owner: execution
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunOutcomeStore
-      method: ClaimDriverRunOutcomes
-      count: 1
-      aggregate_owner: execution
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunOutcomeStore
-      method: CompleteDriverRunOutcome
-      count: 1
-      aggregate_owner: execution
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunOutcomeStore
-      method: RetryDriverRunOutcome
-      count: 1
-      aggregate_owner: execution
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunStore
-      method: Claim
-      count: 1
-      aggregate_owner: execution
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunStore
-      method: Create
-      count: 1
-      aggregate_owner: execution
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunStore
-      method: CreateEpic
-      count: 1
-      aggregate_owner: execution
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunStore
-      method: Finish
-      count: 1
-      aggregate_owner: execution
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunStore
-      method: Heartbeat
-      count: 1
-      aggregate_owner: execution
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunStore
-      method: RecoverStale
-      count: 1
-      aggregate_owner: execution
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunStore
-      method: RecoverStaleTaskRuns
-      count: 1
-      aggregate_owner: execution
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunStore
-      method: ResumeAwaiting
-      count: 1
-      aggregate_owner: execution
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunStore
-      method: Suspend
-      count: 1
-      aggregate_owner: execution
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.DriverStepStore
-      method: Create
-      count: 1
-      aggregate_owner: execution
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.DriverStepStore
-      method: CreateForRun
-      count: 1
-      aggregate_owner: execution
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.DriverStepStore
-      method: Update
-      count: 1
-      aggregate_owner: execution
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.DriverStore
-      method: Create
-      count: 1
-      aggregate_owner: workflowcatalog
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.DriverStore
-      method: Update
-      count: 1
-      aggregate_owner: workflowcatalog
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.DriverVersionStore
-      method: Create
-      count: 1
-      aggregate_owner: workflowcatalog
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.OutboxStore
-      method: Create
-      count: 1
-      aggregate_owner: execution
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.OutboxStore
-      method: MarkResult
-      count: 1
-      aggregate_owner: execution
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.RunOutcomeAwaitStore
-      method: ResolveRunOutcomeAwaitAndResume
-      count: 1
-      aggregate_owner: execution
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.TaskRunEventStore
-      method: Append
-      count: 1
-      aggregate_owner: execution
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.TaskRunStore
-      method: AppendLog
-      count: 1
-      aggregate_owner: execution
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.TaskRunStore
-      method: ClaimQueued
-      count: 1
-      aggregate_owner: execution
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.TaskRunStore
-      method: Complete
-      count: 1
-      aggregate_owner: execution
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.TaskRunStore
-      method: Create
-      count: 1
-      aggregate_owner: execution
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.TaskRunStore
-      method: Finish
-      count: 1
-      aggregate_owner: execution
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.TaskRunStore
-      method: Heartbeat
-      count: 1
-      aggregate_owner: execution
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.TaskRunStore
-      method: Requeue
-      count: 1
-      aggregate_owner: execution
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.TaskRunTerminalConvergenceStore
-      method: CompleteTaskRunTerminalConvergence
-      count: 1
-      aggregate_owner: execution
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.TerminalDriverRunWorkRecoveryQueueStore
-      method: ClaimTerminalDriverRunWorkRecoveries
-      count: 1
-      aggregate_owner: execution
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.TerminalDriverRunWorkRecoveryQueueStore
-      method: CompleteTerminalDriverRunWorkRecovery
-      count: 1
-      aggregate_owner: execution
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.TerminalDriverRunWorkRecoveryQueueStore
-      method: RetryTerminalDriverRunWorkRecovery
-      count: 1
-      aggregate_owner: execution
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.TriggerBindingStore
-      method: Create
-      count: 1
-      aggregate_owner: automation
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.TriggerBindingStore
-      method: Delete
-      count: 1
-      aggregate_owner: automation
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.TriggerBindingStore
-      method: Update
-      count: 1
-      aggregate_owner: automation
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.WorkerProfileStore
-      method: Create
-      count: 1
-      aggregate_owner: execution
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.WorkerProfileStore
-      method: Delete
-      count: 1
-      aggregate_owner: execution
-      expires_after_phase: 7
-    - file: internal/cli/cmdstore/store_tracing_platform.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.WorkerProfileStore
-      method: Update
-      count: 1
-      aggregate_owner: execution
-      expires_after_phase: 7
-    - file: internal/cli/connector/connector_cmd.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorGrantStore
-      method: Create
-      count: 1
-      aggregate_owner: connectors
-      expires_after_phase: 7
-    - file: internal/cli/connector/connector_cmd.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorGrantStore
-      method: Revoke
-      count: 1
-      aggregate_owner: connectors
-      expires_after_phase: 7
-    - file: internal/cli/connector/connector_cmd.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorStore
-      method: Create
-      count: 1
-      aggregate_owner: connectors
-      expires_after_phase: 7
-    - file: internal/cli/doctor/doctor_checks_stale.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
-      method: ReIndex
-      count: 1
-      aggregate_owner: interaction
-      expires_after_phase: 7
-    - file: internal/cli/doctor/doctor_checks_stale.go
-      receiver: github.com/tysonthomas9/loomcli/internal/sessions
-      method: NewStore
-      count: 1
-      aggregate_owner: interaction
-      expires_after_phase: 7
-    - file: internal/cli/doctor/doctor_checks_transcripts.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
-      method: ReIndex
-      count: 1
-      aggregate_owner: interaction
-      expires_after_phase: 7
-    - file: internal/cli/doctor/doctor_checks_transcripts.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
-      method: SaveMetadata
-      count: 1
-      aggregate_owner: interaction
-      expires_after_phase: 7
-    - file: internal/cli/doctor/doctor_checks_transcripts.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
-      method: SyncNativeTranscript
-      count: 1
-      aggregate_owner: interaction
-      expires_after_phase: 7
-    - file: internal/cli/doctor/doctor_checks_transcripts.go
-      receiver: github.com/tysonthomas9/loomcli/internal/sessions
-      method: NewStore
-      count: 1
-      aggregate_owner: interaction
-      expires_after_phase: 7
-    - file: internal/cli/epic/epic_stack.go
-      receiver: github.com/tysonthomas9/loomcli/internal/stackstore.Store
-      method: AddNode
-      count: 1
-      aggregate_owner: sourcecontrol
-      expires_after_phase: 7
-    - file: internal/cli/epic/epic_stack.go
-      receiver: github.com/tysonthomas9/loomcli/internal/stackstore.Store
-      method: EnsureStack
-      count: 1
-      aggregate_owner: sourcecontrol
-      expires_after_phase: 7
-    - file: internal/cli/epic/epic_stack.go
-      receiver: github.com/tysonthomas9/loomcli/internal/stackstore.Store
-      method: SetBase
-      count: 1
-      aggregate_owner: sourcecontrol
-      expires_after_phase: 7
-    - file: internal/cli/hooks/hooks_dispatch.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
-      method: SaveMetadata
-      count: 1
-      aggregate_owner: interaction
-      expires_after_phase: 7
-    - file: internal/cli/hooks/hooks_dispatch.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
-      method: SyncNativeTranscript
-      count: 1
-      aggregate_owner: interaction
-      expires_after_phase: 7
-    - file: internal/cli/hooks/hooks_dispatch.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
-      method: SyncSubagentTranscript
-      count: 1
-      aggregate_owner: interaction
-      expires_after_phase: 7
-    - file: internal/cli/hooks/hooks_dispatch.go
-      receiver: github.com/tysonthomas9/loomcli/internal/sessions
-      method: NewStore
-      count: 1
-      aggregate_owner: interaction
-      expires_after_phase: 7
-    - file: internal/cli/repo/repo_cmd.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.RepoStore
-      method: Create
-      count: 1
-      aggregate_owner: workspace
-      expires_after_phase: 7
-    - file: internal/cli/repo/repo_cmd.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.RepoStore
-      method: Delete
-      count: 2
-      aggregate_owner: workspace
-      expires_after_phase: 7
-    - file: internal/cli/serve/serveadapter/serveadapter.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.WorkspaceStore
-      method: Delete
-      count: 1
-      aggregate_owner: workspace
-      expires_after_phase: 7
-    - file: internal/cli/serve/usagecmd/usage.go
-      receiver: github.com/tysonthomas9/loomcli/internal/usage
-      method: NewStore
-      count: 1
-      aggregate_owner: read_projection
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/cli/serve/workspacemgr/repository_admission_journal.go
       receiver: github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr/admissionstore
       method: NewRepositoryAdmissionJournal
       count: 1
       aggregate_owner: workspace
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/cli/serve/workspacemgr/repository_admission_journal.go
       receiver: github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr/admissionstore
       method: NewRepositoryAdmissionJournalAt
       count: 1
       aggregate_owner: workspace
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/cli/serve/workspacemgr/repository_admission_lease.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/repositoryadmission.RepositoryAdmissionTransport
       method: ClaimRepositoryAdmissionRecovery
       count: 1
       aggregate_owner: workspace
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/cli/serve/workspacemgr/repository_admission_lease.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/repositoryadmission.RepositoryAdmissionTransport
       method: RenewRepositoryAdmission
       count: 1
       aggregate_owner: workspace
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/cli/serve/workspacemgr/repository_admission_process.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/repositoryadmission.RepositoryAdmissionTransport
       method: BeginRepositoryAdmission
       count: 1
       aggregate_owner: workspace
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/cli/serve/workspacemgr/repository_admission_process.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/repositoryadmission.RepositoryAdmissionTransport
       method: CommitRepositoryAdmission
       count: 1
       aggregate_owner: workspace
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/cli/serve/workspacemgr/repository_admission_process.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/repositoryadmission.RepositoryAdmissionTransport
       method: CreateWorkspaceWithRepositoryAdmission
       count: 1
       aggregate_owner: workspace
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/cli/serve/workspacemgr/repository_admission_process.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb/repositoryadmission.RepositoryAdmissionTransport
       method: FailRepositoryAdmission
       count: 1
       aggregate_owner: workspace
-      expires_after_phase: 7
-    - file: internal/cli/serve/workspacemgr/workspace_store.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.RepoStore
-      method: Create
-      count: 1
-      aggregate_owner: workspace
-      expires_after_phase: 7
-    - file: internal/cli/serve/workspacemgr/workspace_store.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.WorkspaceStore
-      method: Create
-      count: 1
-      aggregate_owner: workspace
-      expires_after_phase: 7
-    - file: internal/cli/serve/workspacemgr/workspace_store.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.WorkspaceStore
-      method: Delete
-      count: 1
-      aggregate_owner: workspace
-      expires_after_phase: 7
-    - file: internal/cli/serve/workspacemgr/workspace_store_repository_materialization.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.RepoStore
-      method: Create
-      count: 1
-      aggregate_owner: workspace
-      expires_after_phase: 7
-    - file: internal/cli/serve/workspacemgr/workspace_store_repository_materialization.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.RepoStore
-      method: Delete
-      count: 2
-      aggregate_owner: workspace
-      expires_after_phase: 7
-    - file: internal/cli/serve/workspacemgr/workspace_store_repository_materialization.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.WorkspaceStore
-      method: Create
-      count: 1
-      aggregate_owner: workspace
-      expires_after_phase: 7
-    - file: internal/cli/serve/workspacemgr/workspace_store_repository_materialization.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.WorkspaceStore
-      method: Delete
-      count: 1
-      aggregate_owner: workspace
-      expires_after_phase: 7
-    - file: internal/cli/serve/workspacemgr/workspace_store_repository_materialization.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.WorkspaceStore
-      method: Update
-      count: 1
-      aggregate_owner: workspace
-      expires_after_phase: 7
-    - file: internal/cli/sessionfinalize/finalize_worktree.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Session'
-      method: Finalize
-      count: 1
-      aggregate_owner: interaction
-      expires_after_phase: 7
-    - file: internal/cli/sessionfinalize/finalize_worktree.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Session'
-      method: SyncLatestClaudeTranscript
-      count: 1
-      aggregate_owner: interaction
-      expires_after_phase: 7
-    - file: internal/cli/sessionfinalize/finalize_worktree.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Session'
-      method: SyncLatestCodexRollout
-      count: 1
-      aggregate_owner: interaction
-      expires_after_phase: 7
-    - file: internal/cli/stack/stack_cmd.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/stackstore.LocalStore'
-      method: AddNode
-      count: 1
-      aggregate_owner: sourcecontrol
-      expires_after_phase: 7
-    - file: internal/cli/stack/stack_cmd.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/stackstore.LocalStore'
-      method: EnsureStack
-      count: 1
-      aggregate_owner: sourcecontrol
-      expires_after_phase: 7
-    - file: internal/cli/stack/stack_cmd.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/stackstore.LocalStore'
-      method: MoveNode
-      count: 1
-      aggregate_owner: sourcecontrol
-      expires_after_phase: 7
-    - file: internal/cli/stack/stack_cmd.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/stackstore.LocalStore'
-      method: RemoveNode
-      count: 1
-      aggregate_owner: sourcecontrol
-      expires_after_phase: 7
-    - file: internal/cli/stack/stack_cmd.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/stackstore.LocalStore'
-      method: SetBase
-      count: 1
-      aggregate_owner: sourcecontrol
-      expires_after_phase: 7
-    - file: internal/cli/workspace/workspace_cmd.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.WorkspaceStore
-      method: Delete
-      count: 1
-      aggregate_owner: workspace
-      expires_after_phase: 7
-    - file: internal/cli/workspace/workspacev2_cmd.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.WorkspaceStore
-      method: Create
-      count: 1
-      aggregate_owner: workspace
-      expires_after_phase: 7
-    - file: internal/cli/workspace/workspacev2_cmd.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.WorkspaceStore
-      method: Update
-      count: 1
-      aggregate_owner: workspace
-      expires_after_phase: 7
-    - file: internal/cli/worktree_resolve.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.RepoStore
-      method: Update
-      count: 1
-      aggregate_owner: workspace
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/infra/agentsbootstrapstore/adapter.go
       receiver: github.com/tysonthomas9/loomcli/internal/modules/agents.RolePromptRepairStore
       method: SetPromptFileIfEmpty
       count: 1
       aggregate_owner: agents
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/infra/agentsbootstrapstore/adapter.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.AgentServiceStore
       method: Create
       count: 1
       aggregate_owner: agents
-      expires_after_phase: 7
+      disposition: owner_adapter
     - file: internal/infra/agentsbootstrapstore/adapter.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.RoleStore
       method: Create
       count: 1
       aggregate_owner: agents
-      expires_after_phase: 7
-    - file: internal/webui/handlers/approvals/module.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.TriggerEventAppender
-      method: AppendTriggerEvent
-      count: 1
-      aggregate_owner: automation
-      expires_after_phase: 7
-    - file: internal/webui/handlers/connectors/module.go
+      disposition: owner_adapter
+    - file: internal/infra/connectorscatalog/catalog.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorGrantStore
       method: Create
       count: 1
       aggregate_owner: connectors
-      expires_after_phase: 7
-    - file: internal/webui/handlers/connectors/module.go
+      disposition: owner_adapter
+    - file: internal/infra/connectorscatalog/catalog.go
+      receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorGrantStore
+      method: Revoke
+      count: 1
+      aggregate_owner: connectors
+      disposition: owner_adapter
+    - file: internal/infra/connectorscatalog/catalog.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorStore
       method: Create
       count: 1
       aggregate_owner: connectors
-      expires_after_phase: 7
-    - file: internal/webui/handlers/driverapi/module.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.OutboxStore
+      disposition: owner_adapter
+    - file: internal/infra/connectorsrotation/adapter.go
+      receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorAuditStore
+      method: Append
+      count: 1
+      aggregate_owner: connectors
+      disposition: owner_adapter
+    - file: internal/infra/connectorsrotation/adapter.go
+      receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorStore
+      method: RotateSecrets
+      count: 1
+      aggregate_owner: connectors
+      disposition: owner_adapter
+    - file: internal/infra/sessionstoreadapter/adapter.go
+      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Session'
+      method: Finalize
+      count: 1
+      aggregate_owner: interaction
+      disposition: owner_adapter
+    - file: internal/infra/sessionstoreadapter/adapter.go
+      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Session'
+      method: SyncLatestClaudeTranscript
+      count: 1
+      aggregate_owner: interaction
+      disposition: owner_adapter
+    - file: internal/infra/sessionstoreadapter/adapter.go
+      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Session'
+      method: SyncLatestCodexRollout
+      count: 1
+      aggregate_owner: interaction
+      disposition: owner_adapter
+    - file: internal/infra/sessionstoreadapter/adapter.go
+      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
+      method: CompactIndex
+      count: 1
+      aggregate_owner: interaction
+      disposition: owner_adapter
+    - file: internal/infra/sessionstoreadapter/adapter.go
+      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
+      method: CreateSession
+      count: 1
+      aggregate_owner: interaction
+      disposition: owner_adapter
+    - file: internal/infra/sessionstoreadapter/adapter.go
+      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
+      method: PurgeOlderThan
+      count: 1
+      aggregate_owner: interaction
+      disposition: owner_adapter
+    - file: internal/infra/sessionstoreadapter/adapter.go
+      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
+      method: ReIndex
+      count: 1
+      aggregate_owner: interaction
+      disposition: owner_adapter
+    - file: internal/infra/sessionstoreadapter/adapter.go
+      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
+      method: SaveMetadata
+      count: 1
+      aggregate_owner: interaction
+      disposition: owner_adapter
+    - file: internal/infra/sessionstoreadapter/adapter.go
+      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
+      method: SyncNativeTranscript
+      count: 1
+      aggregate_owner: interaction
+      disposition: owner_adapter
+    - file: internal/infra/sessionstoreadapter/adapter.go
+      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
+      method: SyncSubagentTranscript
+      count: 1
+      aggregate_owner: interaction
+      disposition: owner_adapter
+    - file: internal/infra/sessionstoreadapter/adapter.go
+      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions/eventstore.Store'
+      method: AppendEnvelope
+      count: 1
+      aggregate_owner: interaction
+      disposition: owner_adapter
+    - file: internal/infra/sessionstoreadapter/adapter.go
+      receiver: github.com/tysonthomas9/loomcli/internal/sessions
+      method: NewStore
+      count: 1
+      aggregate_owner: interaction
+      disposition: owner_adapter
+    - file: internal/infra/stackstoreadapter/adapter.go
+      receiver: github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore.Store
+      method: AddNode
+      count: 1
+      aggregate_owner: sourcecontrol
+      disposition: owner_adapter
+    - file: internal/infra/stackstoreadapter/adapter.go
+      receiver: github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore.Store
+      method: EnsureStack
+      count: 1
+      aggregate_owner: sourcecontrol
+      disposition: owner_adapter
+    - file: internal/infra/stackstoreadapter/adapter.go
+      receiver: github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore.Store
+      method: MoveNode
+      count: 1
+      aggregate_owner: sourcecontrol
+      disposition: owner_adapter
+    - file: internal/infra/stackstoreadapter/adapter.go
+      receiver: github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore.Store
+      method: RemoveNode
+      count: 1
+      aggregate_owner: sourcecontrol
+      disposition: owner_adapter
+    - file: internal/infra/stackstoreadapter/adapter.go
+      receiver: github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore.Store
+      method: SetBase
+      count: 1
+      aggregate_owner: sourcecontrol
+      disposition: owner_adapter
+    - file: internal/infra/stackstoreadapter/adapter.go
+      receiver: github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore.Store
+      method: UpdateNode
+      count: 2
+      aggregate_owner: sourcecontrol
+      disposition: owner_adapter
+    - file: internal/infra/usageprojection/adapter.go
+      receiver: '*github.com/tysonthomas9/loomcli/internal/usage.Store'
+      method: Append
+      count: 1
+      aggregate_owner: read_projection
+      disposition: owner_adapter
+    - file: internal/infra/usageprojection/adapter.go
+      receiver: '*github.com/tysonthomas9/loomcli/internal/usage.Store'
+      method: PurgeOlderThan
+      count: 1
+      aggregate_owner: read_projection
+      disposition: owner_adapter
+    - file: internal/infra/usageprojection/adapter.go
+      receiver: github.com/tysonthomas9/loomcli/internal/usage
+      method: NewStore
+      count: 1
+      aggregate_owner: read_projection
+      disposition: owner_adapter
+    - file: internal/infra/workspacecatalog/catalog.go
+      receiver: github.com/tysonthomas9/loomcli/internal/store.RepoStore
       method: Create
       count: 1
-      aggregate_owner: execution
-      expires_after_phase: 7
-    - file: internal/webui/handlers/issues/tabs.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/webui/issuetabs.Store'
+      aggregate_owner: workspace
+      disposition: owner_adapter
+    - file: internal/infra/workspacecatalog/catalog.go
+      receiver: github.com/tysonthomas9/loomcli/internal/store.RepoStore
       method: Delete
       count: 1
-      aggregate_owner: interaction
-      expires_after_phase: 7
-    - file: internal/webui/handlers/issues/tabs.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/webui/issuetabs.Store'
-      method: Save
+      aggregate_owner: workspace
+      disposition: owner_adapter
+    - file: internal/infra/workspacecatalog/catalog.go
+      receiver: github.com/tysonthomas9/loomcli/internal/store.RepoStore
+      method: Update
       count: 1
-      aggregate_owner: interaction
-      expires_after_phase: 7
-    - file: internal/webui/handlers/prreview/seed.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorGrantStore
+      aggregate_owner: workspace
+      disposition: owner_adapter
+    - file: internal/infra/workspacecatalog/catalog.go
+      receiver: github.com/tysonthomas9/loomcli/internal/store.WorkspaceStore
       method: Create
       count: 1
-      aggregate_owner: connectors
-      expires_after_phase: 7
-    - file: internal/webui/handlers/prreview/seed.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorStore
-      method: Create
+      aggregate_owner: workspace
+      disposition: owner_adapter
+    - file: internal/infra/workspacecatalog/catalog.go
+      receiver: github.com/tysonthomas9/loomcli/internal/store.WorkspaceStore
+      method: Delete
       count: 1
-      aggregate_owner: connectors
-      expires_after_phase: 7
-    - file: internal/webui/handlers/terminal/ws_interaction.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/webui/tabmeta.Store'
-      method: Set
-      count: 1
-      aggregate_owner: interaction
-      expires_after_phase: 7
+      aggregate_owner: workspace
+      disposition: owner_adapter
+    - file: internal/infra/workspacecatalog/catalog.go
+      receiver: github.com/tysonthomas9/loomcli/internal/store.WorkspaceStore
+      method: Update
+      count: 3
+      aggregate_owner: workspace
+      disposition: owner_adapter
 generic_mechanisms:
   - mechanism: action_ledger
     direct_uses: 0

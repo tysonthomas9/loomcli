@@ -7,8 +7,7 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
-	"github.com/tysonthomas9/loomcli/internal/connector"
-	"github.com/tysonthomas9/loomcli/internal/connector/providers"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
@@ -50,12 +49,12 @@ func (m *Module) getPullRequest(w http.ResponseWriter, r *http.Request) {
 		writePRReviewError(w, err)
 		return
 	}
-	res, err := m.dispatcher.Dispatch(r.Context(), connector.Request{
+	res, err := m.dispatcher.Dispatch(r.Context(), connectorsmodule.DispatchCommand{
 		WorkspaceKey: ws,
-		RunID:        syntheticRunID(r, params, providers.ActionGitHubPullRequestRead),
+		RunID:        syntheticRunID(r, params, connectorsmodule.ActionGitHubPullRequestRead),
 		BindingID:    bindingID,
 		ConnectorID:  connectorID,
-		Action:       providers.ActionGitHubPullRequestRead,
+		Action:       connectorsmodule.ActionGitHubPullRequestRead,
 		Resource:     prResource(params.owner, params.repo),
 		Args:         pullRequestArgs(params),
 		CallSeq:      0,
@@ -76,13 +75,13 @@ func (m *Module) getPullRequestDiff(w http.ResponseWriter, r *http.Request) {
 		writePRReviewError(w, err)
 		return
 	}
-	runID := syntheticRunID(r, params, providers.ActionGitHubCompareRead)
-	detail, err := m.dispatcher.Dispatch(r.Context(), connector.Request{
+	runID := syntheticRunID(r, params, connectorsmodule.ActionGitHubCompareRead)
+	detail, err := m.dispatcher.Dispatch(r.Context(), connectorsmodule.DispatchCommand{
 		WorkspaceKey: ws,
 		RunID:        runID,
 		BindingID:    bindingID,
 		ConnectorID:  connectorID,
-		Action:       providers.ActionGitHubPullRequestRead,
+		Action:       connectorsmodule.ActionGitHubPullRequestRead,
 		Resource:     prResource(params.owner, params.repo),
 		Args:         pullRequestArgs(params),
 		CallSeq:      0,
@@ -93,12 +92,12 @@ func (m *Module) getPullRequestDiff(w http.ResponseWriter, r *http.Request) {
 	}
 	baseRef := stringValue(detail.Body["baseRef"])
 	headSha := stringValue(detail.Body["headSha"])
-	res, err := m.dispatcher.Dispatch(r.Context(), connector.Request{
+	res, err := m.dispatcher.Dispatch(r.Context(), connectorsmodule.DispatchCommand{
 		WorkspaceKey: ws,
 		RunID:        runID,
 		BindingID:    bindingID,
 		ConnectorID:  connectorID,
-		Action:       providers.ActionGitHubCompareRead,
+		Action:       connectorsmodule.ActionGitHubCompareRead,
 		Resource:     prResource(params.owner, params.repo),
 		Args: map[string]any{
 			"owner": params.owner,
@@ -106,7 +105,7 @@ func (m *Module) getPullRequestDiff(w http.ResponseWriter, r *http.Request) {
 			"base":  baseRef,
 			"head":  headSha,
 		},
-		Preconditions: providers.Preconditions{ExpectedHeadSha: headSha},
+		Preconditions: connectorsmodule.DispatchPreconditions{ExpectedHeadSha: headSha},
 		CallSeq:       1,
 	})
 	if err != nil {
@@ -141,15 +140,15 @@ func (m *Module) postReview(w http.ResponseWriter, r *http.Request) {
 		writePRReviewErrorCode(w, http.StatusInternalServerError, "internal", "failed to prepare the review request", false)
 		return
 	}
-	res, err := m.dispatcher.Dispatch(r.Context(), connector.Request{
+	res, err := m.dispatcher.Dispatch(r.Context(), connectorsmodule.DispatchCommand{
 		WorkspaceKey:  ws,
 		RunID:         runID,
 		BindingID:     bindingID,
 		ConnectorID:   connectorID,
-		Action:        providers.ActionGitHubReviewPost,
+		Action:        connectorsmodule.ActionGitHubReviewPost,
 		Resource:      prResource(params.owner, params.repo),
 		Args:          args,
-		Preconditions: providers.Preconditions{ExpectedHeadSha: expectedHeadSha},
+		Preconditions: connectorsmodule.DispatchPreconditions{ExpectedHeadSha: expectedHeadSha},
 		CallSeq:       0,
 	})
 	if err != nil {
@@ -217,7 +216,7 @@ func reviewSubmissionRunID(r *http.Request, params pullRequestPath) (string, err
 	if err != nil {
 		return "", fmt.Errorf("review run id nonce: %w", err)
 	}
-	return syntheticRunID(r, params, providers.ActionGitHubReviewPost) + ":" + nonce, nil
+	return syntheticRunID(r, params, connectorsmodule.ActionGitHubReviewPost) + ":" + nonce, nil
 }
 
 func syntheticRunID(r *http.Request, params pullRequestPath, action string) string {

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
@@ -58,7 +60,7 @@ type AutomationManagedBindingSnapshot struct {
 
 type AutomationManagedBindingReplacement struct {
 	Expected AutomationManagedBindingSnapshot
-	Binding  *domain.TriggerBinding
+	Binding  *automation.Binding
 }
 
 type AutomationUnmanagedBindingSnapshot struct {
@@ -71,28 +73,28 @@ type AutomationUnmanagedBindingSnapshot struct {
 
 type AutomationUnmanagedBindingReplacement struct {
 	Expected AutomationUnmanagedBindingSnapshot
-	Binding  *domain.TriggerBinding
+	Binding  *automation.Binding
 }
 
 type AutomationEventFilter struct {
 	BindingID  string
 	SourceKind string
-	Origin     domain.TriggerEventOrigin
+	Origin     automation.EventOrigin
 	Limit      int
 }
 
 type AutomationDeliveryFilter struct {
 	EventID   string
 	BindingID string
-	Status    domain.TriggerDeliveryStatus
+	Status    automation.DeliveryStatus
 	Limit     int
 }
 
 type AutomationBindingMatchSnapshot struct {
-	WorkspaceKey       string                   `json:"workspace_key"`
-	RouteKey           string                   `json:"route_key"`
-	BindingSetRevision uint64                   `json:"binding_set_revision"`
-	Bindings           []*domain.TriggerBinding `json:"bindings"`
+	WorkspaceKey       string                `json:"workspace_key"`
+	RouteKey           string                `json:"route_key"`
+	BindingSetRevision uint64                `json:"binding_set_revision"`
+	Bindings           []*automation.Binding `json:"bindings"`
 }
 
 type AutomationCatalogGuard struct {
@@ -112,7 +114,7 @@ type AutomationEventReservation struct {
 	RouteKey           string
 	IdempotencyKey     string
 	ReplayOnly         bool
-	Origin             domain.TriggerEventOrigin
+	Origin             automation.EventOrigin
 	EmittingRunID      string
 	NodeID             string
 	LeaseID            string
@@ -132,15 +134,15 @@ type AutomationEventReservation struct {
 }
 
 type AutomationReservationResult struct {
-	Event             *domain.TriggerEvent
-	Deliveries        []*domain.TriggerDelivery
+	Event             *automation.Event
+	Deliveries        []*automation.Delivery
 	EffectiveVersions []AutomationCatalogGuard
 	Replayed          bool
 }
 
 type AutomationClaimedDelivery struct {
-	Event    *domain.TriggerEvent
-	Delivery *domain.TriggerDelivery
+	Event    *automation.Event
+	Delivery *automation.Delivery
 }
 
 type AutomationCronClaim struct {
@@ -179,9 +181,9 @@ type AutomationDeliveryTransition struct {
 	WorkspaceKey    string
 	DeliveryID      string
 	IdempotencyKey  string
-	ExpectedStatus  domain.TriggerDeliveryStatus
+	ExpectedStatus  automation.DeliveryStatus
 	ExpectedAttempt int
-	Status          domain.TriggerDeliveryStatus
+	Status          automation.DeliveryStatus
 	DriverRunID     string
 	RejectionReason string
 	NextRetryAt     *time.Time
@@ -195,7 +197,7 @@ type AutomationDeliveryDispatch struct {
 	WorkspaceKey    string
 	DeliveryID      string
 	IdempotencyKey  string
-	ExpectedStatus  domain.TriggerDeliveryStatus
+	ExpectedStatus  automation.DeliveryStatus
 	ExpectedAttempt int
 }
 
@@ -258,8 +260,8 @@ const (
 // outcome. Event.Payload contains the exact admission bytes decoded from the
 // payload_base64 wire field.
 type AutomationDeliveryDispatchResult struct {
-	Event            *domain.TriggerEvent
-	Delivery         *domain.TriggerDelivery
+	Event            *automation.Event
+	Delivery         *automation.Delivery
 	DriverRun        *domain.DriverRun
 	Outcome          AutomationDeliveryDispatchOutcome
 	BusyRunID        string
@@ -272,35 +274,35 @@ type AutomationDeliveryDispatchResult struct {
 // Automation surface. Capability mapping and policy remain in the module-local
 // adapter and core respectively.
 type AutomationTransport interface {
-	CreateBinding(context.Context, *domain.TriggerBinding) (*domain.TriggerBinding, error)
-	GetBinding(context.Context, string, string) (*domain.TriggerBinding, error)
-	ListBindings(context.Context, string, AutomationBindingFilter) ([]*domain.TriggerBinding, error)
-	UpdateBinding(context.Context, *domain.TriggerBinding) (*domain.TriggerBinding, error)
+	CreateBinding(context.Context, *automation.Binding) (*automation.Binding, error)
+	GetBinding(context.Context, string, string) (*automation.Binding, error)
+	ListBindings(context.Context, string, AutomationBindingFilter) ([]*automation.Binding, error)
+	UpdateBinding(context.Context, *automation.Binding) (*automation.Binding, error)
 	DeleteBinding(context.Context, string, string) error
-	ReplaceUnmanagedBinding(context.Context, AutomationUnmanagedBindingReplacement) (*domain.TriggerBinding, error)
+	ReplaceUnmanagedBinding(context.Context, AutomationUnmanagedBindingReplacement) (*automation.Binding, error)
 	DeleteUnmanagedBindingIfUnchanged(context.Context, AutomationUnmanagedBindingSnapshot) error
-	CreateManagedBinding(context.Context, *domain.TriggerBinding) (*domain.TriggerBinding, error)
-	ReplaceManagedBinding(context.Context, AutomationManagedBindingReplacement) (*domain.TriggerBinding, error)
+	CreateManagedBinding(context.Context, *automation.Binding) (*automation.Binding, error)
+	ReplaceManagedBinding(context.Context, AutomationManagedBindingReplacement) (*automation.Binding, error)
 	DeleteManagedBindingIfUnchanged(context.Context, AutomationManagedBindingSnapshot) error
 	MatchBindings(context.Context, string, string) (*AutomationBindingMatchSnapshot, error)
-	GetEvent(context.Context, string, string) (*domain.TriggerEvent, error)
-	ListEvents(context.Context, string, AutomationEventFilter) ([]*domain.TriggerEvent, error)
-	GetDelivery(context.Context, string, string) (*domain.TriggerDelivery, error)
-	ListDeliveries(context.Context, string, AutomationDeliveryFilter) ([]*domain.TriggerDelivery, error)
+	GetEvent(context.Context, string, string) (*automation.Event, error)
+	ListEvents(context.Context, string, AutomationEventFilter) ([]*automation.Event, error)
+	GetDelivery(context.Context, string, string) (*automation.Delivery, error)
+	ListDeliveries(context.Context, string, AutomationDeliveryFilter) ([]*automation.Delivery, error)
 	ReserveEvent(context.Context, AutomationEventReservation) (*AutomationReservationResult, error)
 	ClaimDueCron(context.Context, AutomationCronClaim) ([]AutomationCronOccurrence, error)
 	CompleteCron(context.Context, AutomationCronCompletion) error
 	DispatchAutomationBinding(context.Context, AutomationBindingDispatch) (*AutomationBindingDispatchResult, error)
 	ClaimDueDeliveries(context.Context, string, string, time.Time, time.Time, int) ([]AutomationClaimedDelivery, error)
 	DispatchAutomationDelivery(context.Context, AutomationDeliveryDispatch) (*AutomationDeliveryDispatchResult, error)
-	TransitionDelivery(context.Context, AutomationDeliveryTransition) (*domain.TriggerDelivery, error)
+	TransitionDelivery(context.Context, AutomationDeliveryTransition) (*automation.Delivery, error)
 }
 
 type automationStore struct{ client *Client }
 
 var _ AutomationTransport = (*automationStore)(nil)
 
-func (s *automationStore) GetEvent(ctx context.Context, workspace, eventID string) (*domain.TriggerEvent, error) {
+func (s *automationStore) GetEvent(ctx context.Context, workspace, eventID string) (*automation.Event, error) {
 	var wire automationEventWire
 	path := "/api/v1/" + pathEscape(workspace) + "/trigger-events/" + pathEscape(eventID)
 	if err := s.client.do(ctx, http.MethodGet, path, nil, &wire); err != nil {
@@ -309,7 +311,7 @@ func (s *automationStore) GetEvent(ctx context.Context, workspace, eventID strin
 	return wire.event(), nil
 }
 
-func (s *automationStore) ListEvents(ctx context.Context, workspace string, filter AutomationEventFilter) ([]*domain.TriggerEvent, error) {
+func (s *automationStore) ListEvents(ctx context.Context, workspace string, filter AutomationEventFilter) ([]*automation.Event, error) {
 	query := url.Values{}
 	queryValue(query, "trigger_binding_id", filter.BindingID)
 	queryValue(query, "source_kind", filter.SourceKind)
@@ -326,7 +328,7 @@ func (s *automationStore) ListEvents(ctx context.Context, workspace string, filt
 	if err := s.client.do(ctx, http.MethodGet, path, nil, &out); err != nil {
 		return nil, err
 	}
-	events := make([]*domain.TriggerEvent, 0, len(out.Events))
+	events := make([]*automation.Event, 0, len(out.Events))
 	for index := range out.Events {
 		event := out.Events[index].event()
 		if filter.Origin != "" && event.Origin != filter.Origin {
@@ -340,8 +342,8 @@ func (s *automationStore) ListEvents(ctx context.Context, workspace string, filt
 	return events, nil
 }
 
-func (s *automationStore) GetDelivery(ctx context.Context, workspace, deliveryID string) (*domain.TriggerDelivery, error) {
-	var out domain.TriggerDelivery
+func (s *automationStore) GetDelivery(ctx context.Context, workspace, deliveryID string) (*automation.Delivery, error) {
+	var out automation.Delivery
 	path := "/api/v1/" + pathEscape(workspace) + "/trigger-deliveries/" + pathEscape(deliveryID)
 	if err := s.client.do(ctx, http.MethodGet, path, nil, &out); err != nil {
 		return nil, err
@@ -349,21 +351,21 @@ func (s *automationStore) GetDelivery(ctx context.Context, workspace, deliveryID
 	return &out, nil
 }
 
-func (s *automationStore) ListDeliveries(ctx context.Context, workspace string, filter AutomationDeliveryFilter) ([]*domain.TriggerDelivery, error) {
+func (s *automationStore) ListDeliveries(ctx context.Context, workspace string, filter AutomationDeliveryFilter) ([]*automation.Delivery, error) {
 	query := url.Values{}
 	queryValue(query, "trigger_event_id", filter.EventID)
 	queryValue(query, "trigger_binding_id", filter.BindingID)
 	queryValue(query, "status", string(filter.Status))
 	queryLimit(query, filter.Limit)
 	var out struct {
-		Deliveries []*domain.TriggerDelivery `json:"trigger_deliveries"`
+		Deliveries []*automation.Delivery `json:"trigger_deliveries"`
 	}
 	path := withQuery("/api/v1/"+pathEscape(workspace)+"/trigger-deliveries", query)
 	if err := s.client.do(ctx, http.MethodGet, path, nil, &out); err != nil {
 		return nil, err
 	}
 	if out.Deliveries == nil {
-		out.Deliveries = []*domain.TriggerDelivery{}
+		out.Deliveries = []*automation.Delivery{}
 	}
 	return out.Deliveries, nil
 }
@@ -521,8 +523,8 @@ func (s *automationStore) DispatchAutomationDelivery(
 	dispatch AutomationDeliveryDispatch,
 ) (*AutomationDeliveryDispatchResult, error) {
 	body := struct {
-		ExpectedStatus  domain.TriggerDeliveryStatus `json:"expected_status"`
-		ExpectedAttempt int                          `json:"expected_attempt"`
+		ExpectedStatus  automation.DeliveryStatus `json:"expected_status"`
+		ExpectedAttempt int                       `json:"expected_attempt"`
 	}{ExpectedStatus: dispatch.ExpectedStatus, ExpectedAttempt: dispatch.ExpectedAttempt}
 	var wire automationDeliveryDispatchWire
 	path := "/api/v1/" + pathEscape(dispatch.WorkspaceKey) + "/automation/deliveries/" + pathEscape(dispatch.DeliveryID) + "/dispatch"
@@ -533,21 +535,21 @@ func (s *automationStore) DispatchAutomationDelivery(
 	return wire.result(), nil
 }
 
-func (s *automationStore) TransitionDelivery(ctx context.Context, transition AutomationDeliveryTransition) (*domain.TriggerDelivery, error) {
+func (s *automationStore) TransitionDelivery(ctx context.Context, transition AutomationDeliveryTransition) (*automation.Delivery, error) {
 	body := struct {
-		ExpectedStatus  domain.TriggerDeliveryStatus `json:"expected_status"`
-		ExpectedAttempt int                          `json:"expected_attempt"`
-		Status          domain.TriggerDeliveryStatus `json:"status"`
-		DriverRunID     string                       `json:"driver_run_id,omitempty"`
-		RejectionReason string                       `json:"rejection_reason,omitempty"`
-		NextRetryAt     *time.Time                   `json:"next_retry_at,omitempty"`
-		ErrorClass      string                       `json:"error_class,omitempty"`
+		ExpectedStatus  automation.DeliveryStatus `json:"expected_status"`
+		ExpectedAttempt int                       `json:"expected_attempt"`
+		Status          automation.DeliveryStatus `json:"status"`
+		DriverRunID     string                    `json:"driver_run_id,omitempty"`
+		RejectionReason string                    `json:"rejection_reason,omitempty"`
+		NextRetryAt     *time.Time                `json:"next_retry_at,omitempty"`
+		ErrorClass      string                    `json:"error_class,omitempty"`
 	}{
 		ExpectedStatus: transition.ExpectedStatus, ExpectedAttempt: transition.ExpectedAttempt,
 		Status: transition.Status, DriverRunID: transition.DriverRunID,
 		RejectionReason: transition.RejectionReason, NextRetryAt: transition.NextRetryAt, ErrorClass: transition.ErrorClass,
 	}
-	var out domain.TriggerDelivery
+	var out automation.Delivery
 	path := "/api/v1/" + pathEscape(transition.WorkspaceKey) + "/automation/deliveries/" + pathEscape(transition.DeliveryID) + "/transition"
 	headers := map[string]string{"Idempotency-Key": transition.IdempotencyKey}
 	if err := s.client.doWithHeaders(ctx, http.MethodPost, path, body, &out, headers); err != nil {
@@ -576,10 +578,10 @@ type automationAdmissionBody struct {
 }
 
 type automationReservationWire struct {
-	Event             *automationEventWire      `json:"event"`
-	Deliveries        []*domain.TriggerDelivery `json:"deliveries"`
-	EffectiveVersions []AutomationCatalogGuard  `json:"effective_versions"`
-	Replayed          bool                      `json:"replayed"`
+	Event             *automationEventWire     `json:"event"`
+	Deliveries        []*automation.Delivery   `json:"deliveries"`
+	EffectiveVersions []AutomationCatalogGuard `json:"effective_versions"`
+	Replayed          bool                     `json:"replayed"`
 }
 
 func (wire automationReservationWire) result() *AutomationReservationResult {
@@ -595,13 +597,13 @@ func (wire automationReservationWire) result() *AutomationReservationResult {
 }
 
 type automationClaimedDeliveryWire struct {
-	Event    automationEventWire     `json:"event"`
-	Delivery *domain.TriggerDelivery `json:"delivery"`
+	Event    automationEventWire  `json:"event"`
+	Delivery *automation.Delivery `json:"delivery"`
 }
 
 type automationDeliveryDispatchWire struct {
 	Event            *automationEventWire              `json:"event"`
-	Delivery         *domain.TriggerDelivery           `json:"delivery"`
+	Delivery         *automation.Delivery              `json:"delivery"`
 	DriverRun        *domain.DriverRun                 `json:"driver_run,omitempty"`
 	Outcome          AutomationDeliveryDispatchOutcome `json:"outcome"`
 	BusyRunID        string                            `json:"busy_run_id,omitempty"`
@@ -623,33 +625,33 @@ func (wire automationDeliveryDispatchWire) result() *AutomationDeliveryDispatchR
 }
 
 type automationEventWire struct {
-	WorkspaceKey     string                    `json:"workspace_key"`
-	EventID          string                    `json:"event_id"`
-	TriggerBindingID string                    `json:"trigger_binding_id,omitempty"`
-	SourceKind       string                    `json:"source_kind"`
-	SourceEventID    string                    `json:"source_event_id,omitempty"`
-	EventType        string                    `json:"event_type"`
-	RouteKey         string                    `json:"route_key,omitempty"`
-	SubjectRef       string                    `json:"subject_ref,omitempty"`
-	ActorRef         string                    `json:"actor_ref,omitempty"`
-	EmittingRunID    string                    `json:"emitting_run_id,omitempty"`
-	ParentEventID    string                    `json:"parent_event_id,omitempty"`
-	EpicID           string                    `json:"epic_id,omitempty"`
-	Origin           domain.TriggerEventOrigin `json:"origin,omitempty"`
-	HopDepth         int                       `json:"hop_depth,omitempty"`
-	OccurredAt       time.Time                 `json:"occurred_at"`
-	ReceivedAt       time.Time                 `json:"received_at"`
-	IdempotencyKey   string                    `json:"idempotency_key,omitempty"`
-	RawPayloadRef    string                    `json:"raw_payload_ref,omitempty"`
-	RawPayloadDigest string                    `json:"raw_payload_digest,omitempty"`
-	SignatureStatus  string                    `json:"signature_status,omitempty"`
-	ReplayOfEventID  string                    `json:"replay_of_event_id,omitempty"`
-	PayloadBase64    []byte                    `json:"payload_base64,omitempty"`
-	SubjectAttrs     map[string]string         `json:"subject_attrs,omitempty"`
+	WorkspaceKey     string                 `json:"workspace_key"`
+	EventID          string                 `json:"event_id"`
+	TriggerBindingID string                 `json:"trigger_binding_id,omitempty"`
+	SourceKind       string                 `json:"source_kind"`
+	SourceEventID    string                 `json:"source_event_id,omitempty"`
+	EventType        string                 `json:"event_type"`
+	RouteKey         string                 `json:"route_key,omitempty"`
+	SubjectRef       string                 `json:"subject_ref,omitempty"`
+	ActorRef         string                 `json:"actor_ref,omitempty"`
+	EmittingRunID    string                 `json:"emitting_run_id,omitempty"`
+	ParentEventID    string                 `json:"parent_event_id,omitempty"`
+	EpicID           string                 `json:"epic_id,omitempty"`
+	Origin           automation.EventOrigin `json:"origin,omitempty"`
+	HopDepth         int                    `json:"hop_depth,omitempty"`
+	OccurredAt       time.Time              `json:"occurred_at"`
+	ReceivedAt       time.Time              `json:"received_at"`
+	IdempotencyKey   string                 `json:"idempotency_key,omitempty"`
+	RawPayloadRef    string                 `json:"raw_payload_ref,omitempty"`
+	RawPayloadDigest string                 `json:"raw_payload_digest,omitempty"`
+	SignatureStatus  string                 `json:"signature_status,omitempty"`
+	ReplayOfEventID  string                 `json:"replay_of_event_id,omitempty"`
+	PayloadBase64    []byte                 `json:"payload_base64,omitempty"`
+	SubjectAttrs     map[string]string      `json:"subject_attrs,omitempty"`
 }
 
-func (wire automationEventWire) event() *domain.TriggerEvent {
-	event := &domain.TriggerEvent{
+func (wire automationEventWire) event() *automation.Event {
+	event := &automation.Event{
 		WorkspaceKey: wire.WorkspaceKey, EventID: wire.EventID, TriggerBindingID: wire.TriggerBindingID,
 		SourceKind: wire.SourceKind, SourceEventID: wire.SourceEventID, EventType: wire.EventType,
 		RouteKey: wire.RouteKey, SubjectRef: wire.SubjectRef, ActorRef: wire.ActorRef,
@@ -667,11 +669,11 @@ func (wire automationEventWire) event() *domain.TriggerEvent {
 func automationAdmissionPath(reservation AutomationEventReservation) (string, error) {
 	base := "/api/v1/" + pathEscape(reservation.WorkspaceKey)
 	switch reservation.Origin {
-	case domain.TriggerEventOriginExternal:
+	case automation.EventOriginExternal:
 		return base + "/automation/admissions/external/" + pathEscape(reservation.RouteKey), nil
-	case domain.TriggerEventOriginSystem:
+	case automation.EventOriginSystem:
 		return base + "/automation/admissions/system/" + pathEscape(reservation.RouteKey), nil
-	case domain.TriggerEventOriginWorkflow:
+	case automation.EventOriginWorkflow:
 		if reservation.EmittingRunID == "" || reservation.NodeID == "" || reservation.LeaseID == "" || reservation.FencingToken <= 0 {
 			return "", fmt.Errorf("workflow automation reservation requires emitting run owner and fence: %w", ErrAutomationInvalid)
 		}
@@ -837,7 +839,7 @@ func automationWorkspaceKeyValid(value string) bool {
 	return len(value) == 1 || last != '-'
 }
 
-func automationBindingBody(binding *domain.TriggerBinding, create bool) map[string]any {
+func automationBindingBody(binding *automation.Binding, create bool) map[string]any {
 	body := map[string]any{
 		"name": binding.Name, "source_kind": binding.SourceKind, "source_ref": binding.SourceRef,
 		"source_config_ref": binding.SourceConfigRef, "route_key": binding.RouteKey, "method": binding.Method,

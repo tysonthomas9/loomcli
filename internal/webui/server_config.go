@@ -14,7 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/servercapabilities"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 )
 
 // AutomationCapability is the narrow composition handle consumed by the web
@@ -118,16 +118,15 @@ type ServerConfig struct {
 	AgentProvisioning         AgentProvisioningCapability
 	SourceControl             servercapabilities.SourceControlMaterializer
 	WorkspaceSourceControl    servercapabilities.RepositoryAdmissionMaterializer
+	WorkspaceCatalog          servercapabilities.WorkspaceAPI
 	InteractionCapability     InteractionCapability
-	MonitorHandlers           MonitorHandlers             // Pre-built handlers for monitor/metrics endpoints (injected by cli)
-	GitOps                    ops.GitOps                  // Git operations interface (optional; nil disables git endpoints)
-	FileOps                   ops.FileOps                 // File operations interface (optional; nil disables file endpoints)
-	WorkspaceDeleteFn         func(name string) error     // Workspace deletion function; nil = deletion unavailable
-	SetDefaultWorkspaceFn     func(name string) error     // Deprecated compatibility hook; default workspace selection is disabled.
-	ClearDefaultWorkspaceFn   func() error                // Deprecated compatibility hook; default workspace selection is disabled.
-	WorkspaceCreateFn         service.WorkspaceCreateFn   // Workspace creation function; nil = creation unavailable
-	WorkspaceAddReposFn       service.WorkspaceAddReposFn // Attach local repos to an existing workspace; nil = unavailable
-	WorkspaceAdmissions       service.WorkspaceAdmissionCoordinator
+	MonitorHandlers           MonitorHandlers                    // Pre-built handlers for monitor/metrics endpoints (injected by cli)
+	GitOps                    ops.GitOps                         // Git operations interface (optional; nil disables git endpoints)
+	FileOps                   ops.FileOps                        // File operations interface (optional; nil disables file endpoints)
+	WorkspaceDeleteCleanupFn  func(key string) error             // Machine-local cleanup after an owner-command deletion.
+	WorkspaceCreateFn         workspacecoord.WorkspaceCreateFn   // Workspace creation function; nil = creation unavailable
+	WorkspaceAddReposFn       workspacecoord.WorkspaceAddReposFn // Attach local repos to an existing workspace; nil = unavailable
+	WorkspaceAdmissions       workspacecoord.WorkspaceAdmissionCoordinator
 	InitialWorkspaceID        string                // Stable key of the initial workspace
 	WorkspaceIDResolverFn     WorkspaceIDResolverFn // Resolves workspace name → UUID; nil = no resolution available
 	// Store is the transitional unified state store for workspace configuration
@@ -158,12 +157,9 @@ type ServerConfig struct {
 	ArtifactsCapability    ArtifactsCapability                      // Active owner-fenced Artifact lifecycle; nil fails artifact mutations closed
 	Logger                 *slog.Logger                             // Structured logger (optional; nil falls back to slog.Default())
 	SentryDSN              string                                   // Sentry/GlitchTip DSN for error tracking (optional; empty disables)
-	// IssueBackendFn returns the active backend.IssueBackend used by the
-	// webui issue service for the migrated CRUD operations (Get, Create,
-	// Update/Patch, Close, Claim, Delete, AddComment, AddDependency,
-	// RemoveDependency, ListEvents). When nil, the service falls back to
-	// returning ErrUnavailable from those operations. Wired through
-	// service.IssueBackendProvider; see service.NewIssueServiceWithBackend.
+	// IssueBackendFn returns the active backend.IssueBackend wrapped at server
+	// composition by the Work Items capability's narrow durable adapter. When
+	// nil, Work Items HTTP and onboarding routes remain unavailable.
 	//
 	// Threaded as a closure rather than a backend.IssueBackend field so the
 	// cli wiring can resolve the backend lazily without webui depending on

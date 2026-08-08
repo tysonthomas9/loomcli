@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // deleteRequest creates a DELETE request with workspace UUID in context.
@@ -70,7 +70,7 @@ func TestHandleWorkspaceDelete_MissingWorkspaceID(t *testing.T) {
 func TestHandleWorkspaceDelete_UnknownUUID(t *testing.T) {
 	svc := &mockWorkspaceService{
 		deleteWorkspaceFn: func(_ context.Context, wsID string) (*ops.WorkspaceData, error) {
-			return nil, service.ErrNotFound(fmt.Sprintf("workspace with ID %q not found", wsID))
+			return nil, apperrors.ErrNotFound(fmt.Sprintf("workspace with ID %q not found", wsID))
 		},
 	}
 	handler := handleWorkspaceDelete(svc)
@@ -87,7 +87,7 @@ func TestHandleWorkspaceDelete_UnknownUUID(t *testing.T) {
 func TestHandleWorkspaceDelete_HasRunningAgents(t *testing.T) {
 	svc := &mockWorkspaceService{
 		deleteWorkspaceFn: func(_ context.Context, _ string) (*ops.WorkspaceData, error) {
-			return nil, service.ErrConflict("workspace has running agents")
+			return nil, apperrors.ErrConflict("workspace has running agents")
 		},
 	}
 	handler := handleWorkspaceDelete(svc)
@@ -104,7 +104,7 @@ func TestHandleWorkspaceDelete_HasRunningAgents(t *testing.T) {
 func TestHandleWorkspaceDelete_Unavailable(t *testing.T) {
 	svc := &mockWorkspaceService{
 		deleteWorkspaceFn: func(_ context.Context, _ string) (*ops.WorkspaceData, error) {
-			return nil, service.ErrUnavailable("workspace deletion not available")
+			return nil, apperrors.ErrUnavailable("workspace deletion not available")
 		},
 	}
 	handler := handleWorkspaceDelete(svc)

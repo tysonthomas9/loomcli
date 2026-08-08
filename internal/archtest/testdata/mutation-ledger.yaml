@@ -310,32 +310,32 @@ commands:
     negative_tests: [empty_patch, expired_operator, parent_in_patch, runtime_state_in_patch, unauthenticated, wrong_action, wrong_workspace]
     fault_injection_tests: [concurrent_request, duplicate_request, lost_response_after_commit]
   - id: artifacts.declare
-    phase: 4
+    phase: 7
     aggregate_owner: artifacts
-    coordinating_owner: execution
-    mechanism_discriminator: artifact:task_run
+    coordinating_owner: execution_and_interaction
+    mechanism_discriminator: artifact:task_run_or_session
     instance_owner: artifacts
-    accepted_authority: [execution]
-    durable_commands: [fleetdb.declare_execution_artifact.v1]
-    transaction_or_saga_boundary: FleetDB verifies the exact TaskRun owner resource, holder, lease, and fence while idempotently reserving the Artifact identity in one owner command.
-    idempotency_key: workspace_id:task_run_id:artifact_id:declare
+    accepted_authority: [execution, session]
+    durable_commands: [fleetdb.create_session_artifact.v1, fleetdb.declare_execution_artifact.v1]
+    transaction_or_saga_boundary: TaskRun declarations remain one FleetDB owner-fenced command. For a session transcript, Artifacts verifies an issuer-bound exact Session generation before the generic create; Interaction later revalidates that generation in its atomic transcript-reference patch.
+    idempotency_key: workspace_id:owner_type:owner_id:artifact_id:declare
     semantic_events_or_read_models: [artifacts.lifecycle.v1]
-    retry_restart_behavior: An exact retry returns the declared Artifact; a changed definition under the same identity is a terminal conflict and never falls back to generic Artifact create.
-    negative_tests: [expired_execution, owner_mismatch, stale_fence, unauthenticated, wrong_action, wrong_resource, wrong_workspace]
+    retry_restart_behavior: TaskRun declaration replays its owner-command receipt. Session content treats an occupied identity as a read-and-compare recovery point; an exact finalized digest returns without rewriting, an incomplete exact envelope resumes upload, and any changed owner, metadata, or content conflicts.
+    negative_tests: [expired_authority, foreign_issuer, owner_mismatch, stale_fence, unauthenticated, wrong_action, wrong_resource, wrong_workspace]
     fault_injection_tests: [concurrent_request, duplicate_request, lost_response_after_commit]
   - id: artifacts.finalize
-    phase: 4
+    phase: 7
     aggregate_owner: artifacts
-    coordinating_owner: execution
-    mechanism_discriminator: artifact:task_run
+    coordinating_owner: execution_and_interaction
+    mechanism_discriminator: artifact:task_run_or_session
     instance_owner: artifacts
-    accepted_authority: [execution]
-    durable_commands: [fleetdb.finalize_execution_artifact.v1]
-    transaction_or_saga_boundary: FleetDB validates staged content, expected revision, and the exact TaskRun owner fence before one CAS transition publishes immutable finalized metadata.
-    idempotency_key: workspace_id:task_run_id:artifact_id:content_hash:finalize
+    accepted_authority: [execution, session]
+    durable_commands: [fleetdb.finalize_execution_artifact.v1, fleetdb.finalize_session_artifact.v1]
+    transaction_or_saga_boundary: TaskRun finalization remains one FleetDB owner-fenced revision CAS. Session finalization is admitted by Artifacts for the exact issuer-bound Session generation and seals the same content digest before Interaction atomically attaches the Artifact to that still-live generation.
+    idempotency_key: workspace_id:owner_type:owner_id:artifact_id:content_hash:finalize
     semantic_events_or_read_models: [artifacts.lifecycle.v1]
-    retry_restart_behavior: Exact command-receipt replay returns the original finalized Artifact snapshot even after later owner or projection changes. Loom retries the same deterministic command ID through a bounded 128-revision window ending at the current Artifact revision to find that receipt; divergent metadata or content under the same identity conflicts without rewriting the Artifact.
-    negative_tests: [content_mismatch, expired_execution, owner_mismatch, stale_fence, unauthenticated, wrong_action, wrong_resource, wrong_workspace]
+    retry_restart_behavior: TaskRun command-receipt replay returns the original finalized snapshot even after later owner changes. Session retry first compares the complete Artifact envelope and digest, returns an exact finalized match without rewriting, or resumes only the same incomplete Artifact; divergent metadata or content conflicts.
+    negative_tests: [content_mismatch, expired_authority, foreign_issuer, owner_mismatch, stale_fence, unauthenticated, wrong_action, wrong_resource, wrong_workspace]
     fault_injection_tests: [concurrent_finalize, duplicate_request, lost_response_after_commit]
   - id: artifacts.reference
     phase: 4
@@ -352,18 +352,18 @@ commands:
     negative_tests: [artifact_not_finalized, divergent_reference_result, expired_execution, owner_mismatch, stale_fence, stale_revision, unauthenticated, wrong_action, wrong_resource, wrong_workspace]
     fault_injection_tests: [concurrent_request, duplicate_request, lost_response_after_commit, response_validation]
   - id: artifacts.upload
-    phase: 4
+    phase: 7
     aggregate_owner: artifacts
-    coordinating_owner: execution
-    mechanism_discriminator: artifact_upload:task_run
+    coordinating_owner: execution_and_interaction
+    mechanism_discriminator: artifact_upload:task_run_or_session
     instance_owner: artifacts
-    accepted_authority: [execution]
-    durable_commands: [fleetdb.upload_execution_artifact.v1]
-    transaction_or_saga_boundary: FleetDB verifies the exact TaskRun owner fence and expected Artifact revision before writing a content-addressed object, then attaches its URI and digest with an owner-fenced revision CAS; a losing race can leave only an unreferenced object eligible for garbage collection.
-    idempotency_key: workspace_id:task_run_id:artifact_id:content_hash:upload
+    accepted_authority: [execution, session]
+    durable_commands: [fleetdb.upload_execution_artifact.v1, fleetdb.upload_session_artifact.v1]
+    transaction_or_saga_boundary: TaskRun upload remains owner-fenced in FleetDB. Session upload is admitted by Artifacts for the exact issuer-bound Session generation, validates the returned owner and digest, and can leave only an unreferenced finalized Artifact if the later Interaction reference patch rejects a stale generation.
+    idempotency_key: workspace_id:owner_type:owner_id:artifact_id:content_hash:upload
     semantic_events_or_read_models: [artifacts.lifecycle.v1]
-    retry_restart_behavior: Exact command-receipt replay returns the original uploaded Artifact snapshot without rewriting content. The deterministic identity binds the content digest, MIME type, and size; different bytes or metadata under that identity conflict without a separate upload lease.
-    negative_tests: [content_mismatch, expired_execution, owner_mismatch, stale_fence, stale_revision, unauthenticated, wrong_action, wrong_resource, wrong_workspace]
+    retry_restart_behavior: TaskRun command-receipt replay returns the original uploaded snapshot. Session retry reaches upload only for the same non-finalized semantic envelope, then validates returned owner, MIME type, size, and digest; a finalized exact match is returned without another upload.
+    negative_tests: [content_mismatch, expired_authority, foreign_issuer, owner_mismatch, stale_fence, stale_revision, unauthenticated, wrong_action, wrong_resource, wrong_workspace]
     fault_injection_tests: [content_write_before_metadata, duplicate_request, lost_response_after_commit]
   - id: automation.admit-event
     phase: 3
@@ -519,6 +519,20 @@ commands:
     retry_restart_behavior: Deterministic provisioning replay converges on one binding; same-ID divergent state is a permanent conflict and ordinary operator commands cannot take ownership.
     negative_tests: [divergent_binding, expired_system_authority, owner_mismatch, unauthenticated, wrong_action, wrong_component, wrong_workspace]
     fault_injection_tests: [concurrent_request, duplicate_request, lost_response_after_commit]
+  - id: automation.journal-approval
+    phase: 7
+    aggregate_owner: automation
+    coordinating_owner: automation
+    mechanism_discriminator: session_approval_journal
+    instance_owner: automation
+    accepted_authority: [operator]
+    durable_commands: ["POST /api/v1/{workspace}/trigger-events"]
+    transaction_or_saga_boundary: Automation validates the approval-only authority, exact verified-session actor, bounded payload, and immutable session-attested envelope before FleetDB atomically appends the journal event without requiring or dispatching a trigger binding.
+    idempotency_key: workspace_id:approval_event_id
+    semantic_events_or_read_models: [automation.event.v1, execution.await_event.v1]
+    retry_restart_behavior: FleetDB preserves the caller-minted event ID and idempotency key, so exact replay returns the same durable decision while a divergent duplicate conflicts; later await registration can discover the event even when no binding existed at decision time.
+    negative_tests: [expired_operator, forged_actor, invalid_event_type, oversized_payload, unauthenticated, wrong_action, wrong_workspace]
+    fault_injection_tests: [duplicate_request, lost_response_after_commit, register_await_after_commit]
   - id: automation.retry-deliveries
     phase: 3
     aggregate_owner: automation
@@ -813,6 +827,20 @@ commands:
     retry_restart_behavior: Retry converges on absence; an unknown or already-removed profile is handled by the route's explicit not-found contract rather than a different mutation path.
     negative_tests: [expired_operator, unauthenticated, wrong_action, wrong_workspace]
     fault_injection_tests: [lost_response_after_commit, repeated_delete]
+  - id: execution.enqueue-lead-assignment
+    phase: 7
+    aggregate_owner: execution
+    coordinating_owner: execution
+    mechanism_discriminator: lead_assignment:driver_run_owner
+    instance_owner: execution
+    accepted_authority: [execution]
+    durable_commands: ["POST /api/v1/{workspace}/outbox"]
+    transaction_or_saga_boundary: Execution validates the exact DriverRun authority and derives the driver-run and dedupe identities before its private outbox port durably enqueues the lead assignment.
+    idempotency_key: workspace_id:driver_run_id:target_agent
+    semantic_events_or_read_models: [execution.lead_delivery_outbox.v1]
+    retry_restart_behavior: Exact replay converges on the same deduped pending row; the server-side dispatcher resumes delivery after restart without workflow-side retry loops.
+    negative_tests: [expired_execution, invalid_target_agent, owner_mismatch, stale_fence, unauthenticated, wrong_action, wrong_resource, wrong_workspace]
+    fault_injection_tests: [duplicate_request, lost_response_after_commit, process_stop_before_dispatch]
   - id: execution.exhaust-task-run-retries
     phase: 4
     aggregate_owner: execution

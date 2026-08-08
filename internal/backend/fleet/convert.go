@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
+
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/types"
 )
@@ -327,8 +329,8 @@ func dependencyMetaToData(parentID string, iwdm *types.IssueWithDependencyMetada
 	}
 }
 
-// commentToData converts types.Comment to backend.CommentData.
-func commentToData(c *types.Comment) backend.CommentData {
+// commentToData converts workitems.Comment to backend.CommentData.
+func commentToData(c *workitems.Comment) backend.CommentData {
 	return backend.CommentData{
 		ID:        c.ID,
 		IssueID:   c.IssueID,
@@ -338,8 +340,8 @@ func commentToData(c *types.Comment) backend.CommentData {
 	}
 }
 
-// eventToData converts types.Event to backend.EventData.
-func eventToData(e *types.Event) backend.EventData {
+// eventToData converts workitems.Event to backend.EventData.
+func eventToData(e *workitems.Event) backend.EventData {
 	return backend.EventData{
 		ID:        strconv.FormatInt(e.ID, 10),
 		IssueID:   e.IssueID,
@@ -474,7 +476,7 @@ func closeResultJSONToData(cr *closeResultJSON) *backend.CloseResult {
 }
 
 // fleetMutationEvent mirrors fleet-db's Event shape (see openapi.yaml
-// components.schemas.Event). It is distinct from types.Event, which models an
+// components.schemas.Event). It is distinct from workitems.Event, which models an
 // audit-trail row keyed by a numeric issue-scoped ID; fleet's Event is a
 // Redis Stream entry keyed by a timestamped string ID with action/entity
 // dimensions and before/after JSON snapshots.

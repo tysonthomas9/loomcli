@@ -1,18 +1,10 @@
 package app
 
 import (
-	"context"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/ops"
-	"github.com/tysonthomas9/loomcli/internal/webui/handlers/issues"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // newTestSSEClientWithWorkspace creates a testSSEClient with a specific workspace ID.
@@ -253,122 +245,5 @@ func TestMultiWorkspace_TwoTabSSEIndependence(t *testing.T) {
 
 		// Drain tab1 which legitimately received the ws-alpha mutation
 		tab1.DrainMutations()
-	})
-}
-
-// --- Test 7: Cross-Workspace Move ---
-
-func TestMultiWorkspace_CrossWorkspaceMove(t *testing.T) {
-	t.Run("successful cross-workspace move", func(t *testing.T) {
-		svc := &mockIssueService{
-			moveIssueFunc: func(ctx context.Context, params service.MoveIssueParams) (*service.MoveIssueResult, error) {
-				if params.IssueID != "src-001" {
-					t.Errorf("expected IssueID src-001, got %s", params.IssueID)
-				}
-				if params.TargetWorkspace != "beta" {
-					t.Errorf("expected TargetWorkspace beta, got %s", params.TargetWorkspace)
-				}
-				return &service.MoveIssueResult{
-					SourceID: "src-001",
-					TargetID: "tgt-001",
-				}, nil
-			},
-		}
-
-		workspaces := []ops.WorkspaceSummary{
-			{ID: "ws-alpha-uuid", Name: "alpha", Path: "/ws/alpha", Active: true},
-			{ID: "ws-beta-uuid", Name: "beta", Path: "/ws/beta", Active: false},
-		}
-		wsCfg := testWorkspaceStore("alpha", workspaces)
-
-		handler := issues.HandleMoveIssue(svc, wsCfg)
-
-		body := `{"target_workspace":"beta"}`
-		req := httptest.NewRequest(http.MethodPost, "/api/workspaces/ws-alpha/issues/src-001/move", strings.NewReader(body))
-		req.SetPathValue("id", "src-001")
-		rec := httptest.NewRecorder()
-
-		handler.ServeHTTP(rec, req)
-
-		if rec.Code != http.StatusOK {
-			t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
-		}
-
-		var resp issues.MoveIssueResponse
-		if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-			t.Fatal(err)
-		}
-		if !resp.Success {
-			t.Errorf("expected success=true, got error: %s", resp.Error)
-		}
-		if resp.Data.SourceID != "src-001" {
-			t.Errorf("expected SourceID src-001, got %s", resp.Data.SourceID)
-		}
-		if resp.Data.TargetID != "tgt-001" {
-			t.Errorf("expected TargetID tgt-001, got %s", resp.Data.TargetID)
-		}
-	})
-
-	t.Run("move to non-existent workspace returns 400", func(t *testing.T) {
-		svc := &mockIssueService{
-			moveIssueFunc: func(ctx context.Context, params service.MoveIssueParams) (*service.MoveIssueResult, error) {
-				_, err := params.Validator.ValidateTarget(params.TargetWorkspace)
-				if err != nil {
-					return nil, err
-				}
-				return nil, nil
-			},
-		}
-
-		workspaces := []ops.WorkspaceSummary{
-			{Name: "alpha", Path: "/ws/alpha", Active: true},
-		}
-		wsCfg := testWorkspaceStore("alpha", workspaces)
-
-		handler := issues.HandleMoveIssue(svc, wsCfg)
-
-		body := `{"target_workspace":"nonexistent"}`
-		req := httptest.NewRequest(http.MethodPost, "/api/workspaces/alpha/issues/src-001/move", strings.NewReader(body))
-		req.SetPathValue("ws", "alpha")
-		req.SetPathValue("id", "src-001")
-		rec := httptest.NewRecorder()
-
-		handler.ServeHTTP(rec, req)
-
-		if rec.Code != http.StatusBadRequest {
-			t.Errorf("expected 400, got %d: %s", rec.Code, rec.Body.String())
-		}
-	})
-
-	t.Run("move to same workspace returns 400", func(t *testing.T) {
-		svc := &mockIssueService{
-			moveIssueFunc: func(ctx context.Context, params service.MoveIssueParams) (*service.MoveIssueResult, error) {
-				_, err := params.Validator.ValidateTarget(params.TargetWorkspace)
-				if err != nil {
-					return nil, err
-				}
-				return nil, nil
-			},
-		}
-
-		workspaces := []ops.WorkspaceSummary{
-			{Name: "alpha", Path: "/ws/alpha", Active: true},
-			{Name: "beta", Path: "/ws/beta", Active: false},
-		}
-		wsCfg := testWorkspaceStore("alpha", workspaces)
-
-		handler := issues.HandleMoveIssue(svc, wsCfg)
-
-		body := `{"target_workspace":"alpha"}`
-		req := httptest.NewRequest(http.MethodPost, "/api/workspaces/alpha/issues/src-001/move", strings.NewReader(body))
-		req.SetPathValue("ws", "alpha")
-		req.SetPathValue("id", "src-001")
-		rec := httptest.NewRecorder()
-
-		handler.ServeHTTP(rec, req)
-
-		if rec.Code != http.StatusBadRequest {
-			t.Errorf("expected 400, got %d: %s", rec.Code, rec.Body.String())
-		}
 	})
 }

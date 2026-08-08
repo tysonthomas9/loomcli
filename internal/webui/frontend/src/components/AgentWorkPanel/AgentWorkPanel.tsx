@@ -16,7 +16,10 @@ import { useMemo, type KeyboardEvent } from "react";
 import { useStore } from "zustand";
 
 import { useWorkspaceViewActions } from "@/contexts/WorkspaceViewContext";
-import { useAgentStoreInstance, useIssueStoreInstance } from "@/hooks";
+import {
+  useAgentStoreInstance,
+  useIssueStoreInstance,
+} from "@/hooks/common/useStoreContext";
 import { useAgentWorkPanelViewState } from "@/hooks/ui/useAgentWorkPanelViewState";
 import { useWorkspaceContext } from "@/hooks/workspace";
 import {

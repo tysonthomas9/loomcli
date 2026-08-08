@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
@@ -139,17 +141,17 @@ func refuseUntrustedTaskRunnerExecution(req TaskExecRequest) (TaskExecResult, bo
 		RuntimeMetadata: map[string]string{
 			ErrorCodeOutputKey:       ErrorClassSandboxRequired,
 			RetryableOutputKey:       "false",
-			"runner_trust_level":     string(domain.DriverTrustUntrusted),
+			"runner_trust_level":     string(workflowcatalog.DriverTrustUntrusted),
 			SandboxLauncherOutputKey: SandboxProviderProcess,
 		},
 	}, true
 }
 
-func taskRunnerTrustLevel(trust domain.DriverTrustLevel) domain.DriverTrustLevel {
+func taskRunnerTrustLevel(trust workflowcatalog.DriverTrustLevel) workflowcatalog.DriverTrustLevel {
 	if trust.Trusted() {
-		return domain.DriverTrustTrusted
+		return workflowcatalog.DriverTrustTrusted
 	}
-	return domain.DriverTrustUntrusted
+	return workflowcatalog.DriverTrustUntrusted
 }
 
 func taskExecUsesFlueRuntime(req TaskExecRequest) bool {

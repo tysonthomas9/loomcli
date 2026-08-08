@@ -6,13 +6,14 @@ import (
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/app/prreviewer"
-	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/webui"
+	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/modbuilder"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
 // NewTerminalModules adds the identity and Interaction capability projections
@@ -46,6 +47,8 @@ func PopulateUnifiedAgentCapabilityDeps(
 		deps.AutomationAudit = capability.AuditQueries()
 		deps.AutomationWebhook = capability.WebhookWorkflow()
 		deps.AutomationEventing = capability.WorkflowEventing()
+		deps.AutomationApprovalJournal = capability.ApprovalJournal()
+		deps.AutomationApprovalAuthority = capability.ApprovalAuthorityProvider()
 		deps.AutomationOperator = capability.OperatorAuthorityResolver()
 	}
 	if capability := config.AgentsCapability; capability != nil {
@@ -80,9 +83,9 @@ func PopulateUnifiedAgentCapabilityDeps(
 // so the module retains its existing fail-closed behavior.
 func NewPRReviewModule(
 	config webui.ServerConfig,
-	dispatcher *connector.Dispatcher,
-	agentService service.AgentService,
-	terminalService service.TerminalService,
+	dispatcher connectorsmodule.Dispatcher,
+	agentService agentcoord.AgentService,
+	terminalService terminal.TerminalService,
 ) modbuilder.PRReviewModule {
 	var reviewerProvisioning prreviewer.Commands
 	var reviewerAgents agents.IdentityQueries
