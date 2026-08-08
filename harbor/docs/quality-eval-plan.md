@@ -19,32 +19,68 @@ vanishes structurally rather than by instrument-splitting.
 Base for both arms: `verify_role=tasks`, the proven run-19 configuration,
 byte-stable except for the single change per arm.
 
-### Arm B2j — a dedicated ARCHITECT agent
+### Arm B2j — a dedicated ARCHITECT agent WITH AUTHORITY (rev 4)
 
-A fourth persistent controlled session (same proven machinery as lead/qa),
-agent name `arch`, holding one vantage: the structure of the system. Per the
-campaign law — minds verify what their vantage makes visible — QA's vantage
-is the product, the lead's is the plan; nobody currently looks at the code
-AS A CODEBASE. The architect does, generically:
+Rev-4 change (user decision + research): the only matched-baseline study
+found prompt exhortation had no effect on architectural smells (p>0.8),
+while our own campaign shows agents reliably respond to the task machinery
+(reopens get reworked, feedback gets addressed). So the architect gets
+AUTHORITY at two checkpoints, exercised entirely through the existing
+board machinery — labels, comments, statuses. No tool output is ever piped
+to any agent; the architect reads code and diffs and forms its own
+judgment, so the held-out instruments stay uncontaminated.
 
-- Receives the spec verbatim (READY protocol, like QA), then on each pass
-  whose message lists integrations: reads the integrated head in its own
-  read-only checkout and assesses structure — module boundaries and
-  responsibilities, dependency direction and cycles, duplication, size and
-  complexity of the pieces, whether tests accompany behavior.
-- Acts through the existing task machinery ONLY:
-  - files refactor/structure corrective tasks (`--source-repo app`, parent
-    epic), each quoting the concrete structural problem observed;
-  - may comment `ARCH: ...` advisory feedback on design tasks sitting in
-    review (inert to the lead's review-routing protocol, which keys on the
-    exact IMPL-DONE marker form and the needs-revision label).
-- Never blocks anything, never edits code, never runs the app (structure
-  review is reading — no port conflicts, so no alternation machinery
-  needed), never changes any task status. Cost estimate +$20–40/run.
+A fourth persistent controlled session (same proven runtime as lead/qa),
+agent name `arch`, vantage: the codebase as a structure. Receives the spec
+verbatim (READY protocol). Never edits code, never runs the app (reading
+only — no port conflicts, no alternation), never touches tasks outside the
+protocol below.
 
-Product framing: this prototypes an `architect` role for loom's stock role
-library (plan / task / review / architect), the same way the qa arms
-prototyped the verify role.
+**Checkpoint 1 — design stage (change is cheapest here).** Each pass
+message lists designs in review. Arch marks each `--add-label arch-ok`, or
+rejects: `ARCH-FEEDBACK:` comment + `needs-revision` + status open (the
+standard plan-rework route; planner revises). Lead prompt (B2j variant):
+approve only designs carrying `arch-ok`; fail-open — a design in review
+across two of the lead's passes with no arch ruling is the lead's to
+decide (a silent architect never blocks planning).
+
+**Checkpoint 2 — integration stage.** The harness gate is unchanged
+(deterministic check in the disposable worktree, FF-only, atomic) but gains
+a required approval BEFORE the fast-forward:
+- Sweep finds a valid candidate (IMPL-DONE marker, check passed) → labels
+  it `arch-gate` instead of integrating.
+- Arch's next pass message lists all arch-gate candidates; its checkout
+  shares /app's object store, so `git diff <app-head>..<candidate>` is
+  free. Batch ruling per pass → typical added latency ≤1 pass.
+- APPROVE: `--add-label arch-ok` → next sweep fast-forwards and closes
+  exactly as today (labels cleaned at close).
+- REJECT: `ARCH-FEEDBACK:` comment + `--add-label arch-rework` + status
+  open. Deliberately NOT `needs-revision` (that means plan-stage rework
+  and would misroute to the planner); open + has_design → the coder
+  reclaims, reads feedback, revises, IMPL-DONE attempt n+1, same gate.
+  Coder template gains one line: address ARCH-FEEDBACK comments on
+  reclaimed tasks.
+- FAIL-OPEN DEADLINE: a candidate un-ruled for 2 passes integrates anyway
+  with an `ARCH-TIMEOUT` record. The architect can slow a merge, never
+  stall the pipeline; endgame-burst candidates timeout-integrate rather
+  than die at the deadline (disclosed, measured).
+
+Plus, unchanged from rev 3: refactor corrective tasks against the
+integrated head (`--source-repo app`, quoting the concrete structural
+problem).
+
+**Budget fairness:** arch spend (~$40–70 est.) comes out of the SAME $200
+cap — no cap raise; if an architecture mind is worth having it must pay
+for itself. Displaced spend is part of the measured trade.
+
+**New risks, pre-registered as observables:** rejection-spiral (rework
+convergence rate per rejected candidate; fail-open caps damage), added
+integration latency (passes from IMPL-DONE to FF vs runs 19–21),
+ARCH-TIMEOUT count (how often authority was actually exercised vs
+bypassed), arch ruling counts and approve:reject ratio.
+
+Product framing: prototypes an `architect` role with gate authority for
+loom's stock role library, the way the qa arms prototyped the verify role.
 
 ### Arm B2k — the lead owns maintainability
 
