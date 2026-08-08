@@ -552,6 +552,37 @@ integrations ≥19, ≤$200. Fork verdicts pre-registered (ARCH>LEAD → structu
 needs its own mind; LEAD≈ARCH → ship the sentence; both miss → run the
 parked feedback arm). Ladder: stub → codex vet → two sequential runs.
 
+#### B2j AS-RUN (2026-08-08, loom-generic-tasks-arch-1, run 22) — DESIGN-GATE
+#### STARVATION: integrated=0, score 0.0, $79.23
+The architect exercised its design authority immediately and substantively
+(4 distinct spec-anchored rejections: IRC bind contract, fail-fast-vs-
+resilience supervision conflicts) — and the pipeline NEVER RECOVERED. The
+single planner spent the whole run redesigning the two foundational tasks
+(start.sh launcher, node supervisor) under review cycles from TWO
+reviewers (arch approvals were granted and later invalidated across
+redesign rounds — the label churned through the event store); 8 of 11
+tasks were never designed; the coder never made a single commit; the
+verifier found no /app/start.sh (setup:false, reward 0). qa-verify: 0
+filed (correct per duty — nothing ever integrated). Replica ux: NOT run
+(no application exists to judge). Wiring itself behaved perfectly: zero
+protocol violations, no gate ever engaged because no candidate ever
+reached it.
+- VERDICT: authority at the DESIGN stage without rejection bounds is a
+  pipeline-serializing hazard: fail-open covers a SILENT architect, but
+  nothing bounds REPEATED rejections, and one planner behind a strict
+  design gate starves everything downstream. The rejection-spiral risk
+  materialized at the checkpoint we considered cheap, not the one we
+  guarded (integration).
+- B2j-rev2 FIX (pre-registered for any rerun): (1) rejection bound — a
+  design rejected twice is decided by the lead (arch comment becomes
+  advisory); (2) arch design-gate applies to FIRST drafts only; redesign
+  rounds go straight to the lead; (3) starvation valve — if no task has
+  reached implementation by pass N (~8), the design gate becomes
+  advisory for the remainder; (4) consider a second planner.
+- Comparison note: same spend rate as untreated runs (~$2.4/pass) but
+  ~40% lower total ($79 vs $178) because idle workers cost nothing —
+  starvation is cheap, which itself is diagnostic.
+
 ### B3. fractal-generic — infrastructure COMMITTED
 Mission mode `generic` (verbatim spec + finish sentence — the hardcoded
 preamble is bypassed; strip-vet #3); hidden reserve pinned to 0; concurrency
