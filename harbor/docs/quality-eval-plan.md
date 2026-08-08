@@ -37,33 +37,51 @@ only — no port conflicts, no alternation), never touches tasks outside the
 protocol below.
 
 **Checkpoint 1 — design stage (change is cheapest here).** Each pass
-message lists designs in review. Arch marks each `--add-label arch-ok`, or
-rejects: `ARCH-FEEDBACK:` comment + `needs-revision` + status open (the
-standard plan-rework route; planner revises). Lead prompt (B2j variant):
-approve only designs carrying `arch-ok`; fail-open — a design in review
-across two of the lead's passes with no arch ruling is the lead's to
-decide (a silent architect never blocks planning).
+message lists designs in review — composed by the HARNESS, which includes
+only review tasks whose comments contain no `IMPL-DONE` text at all
+(malformed-marker tasks belong to the anti-wedge valve, not the architect
+— codex B2j-vet finding 8). Arch marks each `--add-label arch-design-ok`
+(phase-scoped label — finding 4: a design approval must never
+stale-approve the later implementation), or rejects: `ARCH-FEEDBACK:`
+comment + `needs-revision` + status open (the standard plan-rework route;
+planner revises). Lead prompt (B2j variant): approve only designs
+carrying `arch-design-ok`; fail-open — a design in review across two of
+the lead's passes with no arch ruling is the lead's to decide (a silent
+architect never blocks planning).
 
-**Checkpoint 2 — integration stage.** The harness gate is unchanged
-(deterministic check in the disposable worktree, FF-only, atomic) but gains
-a required approval BEFORE the fast-forward:
-- Sweep finds a valid candidate (IMPL-DONE marker, check passed) → labels
-  it `arch-gate` instead of integrating.
-- Arch's next pass message lists all arch-gate candidates; its checkout
-  shares /app's object store, so `git diff <app-head>..<candidate>` is
-  free. Batch ruling per pass → typical added latency ≤1 pass.
-- APPROVE: `--add-label arch-ok` → next sweep fast-forwards and closes
-  exactly as today (labels cleaned at close).
+**Checkpoint 2 — integration stage.** The harness gate keeps its
+deterministic check and atomic FF-only merge, but `integrate()` is SPLIT
+into candidate-validation and final-merge phases (finding 3 — today there
+is no seam between check-pass and merge to insert a gate into); the merge
+phase re-runs marker revalidation before FF (approval or timeout may be
+passes old).
+- Sweep validates a candidate (IMPL-DONE marker, check passed) → labels
+  it `arch-gate` instead of merging.
+- Arch's next pass message lists candidates with FULL IDENTITY —
+  `task attempt sha base` (finding 5): its checkout shares /app's object
+  store, so `git diff <base>..<sha>` is free and diffs the exact base the
+  harness recorded. Batch ruling per pass → typical latency ≤1 pass.
+- STALE-RULING RULE (finding 6): the arch must reload each item before
+  ruling and no-op if its status/attempt/sha no longer match the listing;
+  the harness honors `arch-impl-ok` ONLY when it matches the latest valid
+  IMPL-DONE attempt+sha, ignores and strips it otherwise, and strips all
+  arch labels whenever a task reopens (finding 4).
+- APPROVE: `--add-label arch-impl-ok` → next sweep re-validates and
+  fast-forwards exactly as today (labels cleaned at close).
 - REJECT: `ARCH-FEEDBACK:` comment + `--add-label arch-rework` + status
-  open. Deliberately NOT `needs-revision` (that means plan-stage rework
-  and would misroute to the planner); open + has_design → the coder
-  reclaims, reads feedback, revises, IMPL-DONE attempt n+1, same gate.
-  Coder template gains one line: address ARCH-FEEDBACK comments on
-  reclaimed tasks.
+  open. Deliberately NOT `needs-revision` (plan-stage rework — would
+  misroute to the planner; readiness ignores all labels except
+  needs-revision, so open+has_design returns to the coder). The coder
+  template (fleet_task-override.md) gains one line: on reclaiming a task,
+  address the latest ARCH-FEEDBACK comment (finding 9 — the filter
+  routing works today but the worker prompt must say it).
 - FAIL-OPEN DEADLINE: a candidate un-ruled for 2 passes integrates anyway
-  with an `ARCH-TIMEOUT` record. The architect can slow a merge, never
-  stall the pipeline; endgame-burst candidates timeout-integrate rather
-  than die at the deadline (disclosed, measured).
+  with an `ARCH-TIMEOUT` record — and a FINAL ARCH-TIMEOUT SWEEP runs
+  before finalize on BOTH exit paths, deadline and spend-cap (finding 7:
+  the loop breaks at the top, so without the final sweep, gated
+  candidates would be stranded dead at the end).
+- The ≤2-refactor-tasks-per-pass bound is harness-audited, not just
+  prompted (finding 11).
 
 Plus refactor corrective tasks against the integrated head — but BOUNDED
 (rev 4.1, from the QA-feedback analysis): at most two per pass, filed at
@@ -99,6 +117,12 @@ Product framing: prototypes an `architect` role with gate authority for
 loom's stock role library, the way the qa arms prototyped the verify role.
 
 ### Arm B2k — the lead owns maintainability
+
+ORDER-CONFOUND RULE (codex B2j-vet finding 10): both arms run from the
+SAME frozen post-wiring commit and manifest; bootstrap hashes ALL prompts
+(arch + B2k lead variant included); B2k uses the same orchestrator with
+the architect disabled by kwarg, never by code edits; no patching between
+the two runs.
 
 No new agent. The lead's standing prompt (loom-generic, applies to any
 problem) gains one short section: maintainability is part of the job —
@@ -156,12 +180,17 @@ ized — report it.
 ## Observables
 
 Architect: tasks filed (count/type/aging, drained?), ARCH comments and
-whether commented designs were revised, zero status-changes (protocol
+whether commented designs were revised, zero FORBIDDEN status-changes (protocol
 compliance). Lead (B2k): decomposition shape vs runs 19/20 (task count,
 module plan), refactor-vs-functional corrective mix, verify-task filing rate
 (zero-sum watch). Both: everything in the audit instrument set.
 
 ## Variant POC (2026-08-07, ~$1-2 — RUN, results in trials repo docs/archpoc/)
+
+FRAMING (codex B2j-vet finding 1): this is a SMOKE TEST of protocol
+compliance and basic smell sensitivity — n=1, single pass, author-planted
+stimuli. "v1/v2/v4 at 5/5" means the stimuli did not separate them
+(ceiling), not that they are equivalent.
 
 Four judgment-style variants of the architect prompt, each a REAL codex
 session judging five PLANTED stimuli (good design, copy-paste design,
@@ -181,9 +210,13 @@ POC mechanics lessons folded into the runner: worktree prune before
 branch reuse; checkout dir named after the repo; --source-repo values
 must be registered repos (the qa-verify lesson, again).
 
-DECISION: **v2 (research-informed) for the full B2j run** — verdict-tied
-with v1 on these stimuli, but its criteria vocabulary gives coders
-actionable feedback grounded in the evidence-ranked list. v3 held as the
+DECISION: **v2 (research-informed) for the full B2j run** — selected on
+research grounds plus POC protocol-compliance, NOT on the ceilinged POC
+score (codex vet: selection AGREE, "research/pragmatic choice"). One
+narrow sentence added to the v2 prompt from the v3 lesson: behavior
+changes whose accompanying tests are obviously non-executable or never
+run are rejectable — without adopting v3's approve-only-when-every-item-
+passes rigidity. v3 held as the
 escalation option: its demonstrated strictness catches real subtle
 defects AND is exactly the rejection-spiral risk (it would have spent a
 rework loop on a defect invisible to the standard runner). v4's mandatory
@@ -193,8 +226,12 @@ need without in-run token cost.
 ## Ladder
 
 1. ~~Variant POC~~ DONE (above).
-2. Free: stub assertions for B2j wiring (arch session bring-up, delivery,
-   arch-gate/arch-ok/arch-rework flow, fail-open timeout), prompt purity
+2. Free: stub LIFECYCLE POC for the full gate machinery (codex vet's
+   cheapest-booster): arch-gate -> arch-rework -> revised attempt ->
+   arch-impl-ok -> integrate, PLUS stale-ruling no-op, ARCH-TIMEOUT
+   fail-open (in-loop and final sweep on both exit paths), label-strip on
+   reopen, malformed-marker exclusion from the design list, and
+   arch-rework reclaimed by the CODER not the planner. Prompt purity
    re-read, `bash -n`.
 3. Codex vet of both arm diffs (standing discipline — five for five on
    catching real bugs).
