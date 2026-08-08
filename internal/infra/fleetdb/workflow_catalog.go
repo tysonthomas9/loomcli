@@ -10,7 +10,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	fleettransport "github.com/tysonthomas9/loomcli/internal/infra/fleetdb/transport"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -22,7 +21,7 @@ var (
 	ErrWorkflowCatalogInvalid = domain.ErrInvalid
 	// These transport sentinels preserve FleetDB's machine-readable lifecycle
 	// failures until the capability adapter maps them to catalog-owned errors.
-	ErrWorkflowCatalogRevisionConflict    = fleettransport.ErrRevisionConflict
+	ErrWorkflowCatalogRevisionConflict    = errFleetRevisionConflict
 	ErrWorkflowCatalogVersionOwnership    = errors.New("fleetdb: workflow catalog version ownership mismatch")
 	ErrWorkflowCatalogVersionNotValidated = errors.New("fleetdb: workflow catalog version not validated")
 	ErrWorkflowCatalogVersionNotApproved  = errors.New("fleetdb: workflow catalog version not approved")
@@ -179,7 +178,7 @@ func (s *workflowCatalogStore) author(
 	if input.ExpectedRevision >= uint64(math.MaxInt64) {
 		return nil, fmt.Errorf("workflow catalog expected revision cannot advance within FleetDB's signed persistence range: %w", ErrWorkflowCatalogInvalid)
 	}
-	headers, err := fleettransport.DelegatedActorHeaders(input.DelegatedActor)
+	headers, err := delegatedActorHeaders(input.DelegatedActor)
 	if err != nil {
 		return nil, fmt.Errorf("workflow catalog delegated actor is invalid: %w", ErrWorkflowCatalogInvalid)
 	}
