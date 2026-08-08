@@ -2,12 +2,20 @@ package supervisor
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
+	"time"
+	"unicode/utf8"
 
+	"github.com/tysonthomas9/loomcli/internal/agenterr"
+	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/backendnames"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/sessionfinalize"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
@@ -203,4 +211,331 @@ func finalizeLocalSession(
 		slog.Warn("session finalization failed", "worktree", ap.Entry.Worktree, "err", err)
 	}
 	return result
+}
+
+// ---------------------------------------------------------------------------
+// Completion hooks
+//
+// The supervisor-owned on_complete pipeline. It lives beside session finalize
+// because it runs at the same seam and reuses the same per-session transcript
+// the finalize path reads.
+// ---------------------------------------------------------------------------
+
+const (
+	// completionHookTimeout bounds the whole pipeline. A hook that cannot
+	// finish in this window fails closed rather than holding the claim open.
+	completionHookTimeout = 60 * time.Second
+
+	transcriptPollEvery = 250 * time.Millisecond
+
+	// maxCommentBytes mirrors fleet-db's models.MaxCommentBodyLength. The
+	// reserve leaves room for the per-chunk header inside that budget.
+	maxCommentBytes    = 10000
+	chunkHeaderReserve = 64
+)
+
+// transcriptFlushWindow bounds how long we wait for the leaf to finish writing
+// its transcript after the process exited. Past it we fail closed: a missing
+// artifact must reopen the task, never silently skip the comment. Variable so
+// tests can shrink it.
+var transcriptFlushWindow = 15 * time.Second
+
+// completionHookSkipReasons are the stop reasons that mean the turn did not
+// conclude on its own. A hook must not certify a run that was cut short.
+var completionHookSkipReasons = map[StopReason]bool{
+	StopReasonShutdown:           true,
+	StopReasonYielded:            true,
+	StopReasonWatchdog:           true,
+	StopReasonManualStop:         true,
+	StopReasonConfigRemoved:      true,
+	StopReasonBackendUnavailable: true,
+}
+
+// runCompletionHooks executes the agent's configured on_complete pipeline and
+// returns the effective exit code for the rest of the exit path.
+//
+// It runs after exit classification but BEFORE finalizeAgentSession, because
+// the session id, the claim lock, and the transcript all still exist at that
+// point, and because a hook failure must be able to demote the run before the
+// session status, checkpoint, and post-mortem recovery are decided. On failure
+// it records a synthetic failure (exit -1 + CompletionHookFailure) so the owned
+// task is reopened and retried under normal policy; the already-emitted
+// AgentStopped process event keeps its factual exit code 0.
+func (s *Supervisor) runCompletionHooks(ap *AgentProcess, exitCode int) int {
+	hooks, taskID, ok := s.completionHookTarget(ap, exitCode)
+	if !ok {
+		return exitCode
+	}
+
+	ap.Mu.Lock()
+	sessionID := ap.AgentSessionID
+	ap.Mu.Unlock()
+
+	ctx, cancel := s.operationContext(completionHookTimeout)
+	defer cancel()
+
+	if err := s.executeCompletionHooks(ctx, ap, hooks, taskID, sessionID); err != nil {
+		slog.Warn("completion hook failed; demoting run so the task is reopened",
+			"worktree", ap.Entry.Worktree, "task_id", taskID, "session_id", sessionID, "err", err)
+		s.markCompletionHookFailure(ap, err)
+		return -1
+	}
+	slog.Info("completion hooks applied",
+		"worktree", ap.Entry.Worktree, "task_id", taskID, "actions", len(hooks.OnComplete))
+	return exitCode
+}
+
+// completionHookTarget reports whether this exit is eligible for hooks and, if
+// so, the pipeline and the task to write to. Everything except a clean,
+// self-concluded run that owned a task is skipped, preserving pre-hook behavior.
+func (s *Supervisor) completionHookTarget(ap *AgentProcess, exitCode int) (*domain.AgentHooks, string, bool) {
+	hooks := ap.Entry.Hooks
+	if hooks.IsEmpty() || exitCode != 0 {
+		return nil, "", false
+	}
+	if s.IssueBackend == nil {
+		// The configured writes cannot happen at all. Skipping silently would
+		// report success for a run whose hooks never ran, so say so loudly.
+		// It stays a skip rather than a demotion because no retry can conjure a
+		// backend: demoting would only reopen the task and loop until the
+		// agent's block budget is gone.
+		slog.Warn("completion hooks configured but no issue backend is available; skipping them",
+			"worktree", ap.Entry.Worktree, "actions", len(hooks.OnComplete))
+		return nil, "", false
+	}
+	ap.Mu.Lock()
+	lastErr := ap.LastError
+	stopReason := ap.StopReason
+	ap.Mu.Unlock()
+	// classifyAgentExit leaves LastError nil only on a clean, task-bearing exit;
+	// a no-work idle exit sets NoWorkOutcome and is not a completed turn.
+	if lastErr != nil || completionHookSkipReasons[stopReason] {
+		return nil, "", false
+	}
+	if IsYieldRequested(ap.WorktreePath) {
+		return nil, "", false
+	}
+	taskID := s.taskIDForFinalize(ap)
+	if taskID == "" {
+		return nil, "", false
+	}
+	return hooks, taskID, true
+}
+
+// executeCompletionHooks performs the configured writes strictly in stored
+// order, stopping at the first error. Reply text is never logged.
+func (s *Supervisor) executeCompletionHooks(
+	ctx context.Context,
+	ap *AgentProcess,
+	hooks *domain.AgentHooks,
+	taskID, sessionID string,
+) error {
+	// Defensive re-validation: fleet-db rejects a bad pipeline at write time,
+	// but a definition written by an older or newer peer could still violate
+	// the write-before-stamp order. Refuse to execute it rather than silently
+	// reordering or skipping the offending action.
+	if err := hooks.Validate(); err != nil {
+		return fmt.Errorf("stored on_complete pipeline is invalid: %w", err)
+	}
+
+	var reply string
+	if completionHooksNeedReply(hooks) {
+		var err error
+		reply, err = s.finalAssistantReply(ctx, ap, sessionID)
+		if err != nil {
+			return err
+		}
+	}
+
+	for i, action := range hooks.OnComplete {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("on_complete[%d] (%s): %w", i, action.Type, err)
+		}
+		var err error
+		switch action.Type {
+		case domain.AgentHookActionComment:
+			err = s.postFinalReplyComment(ctx, ap, taskID, reply)
+		case domain.AgentHookActionAddLabel:
+			err = s.IssueBackend.AddLabel(ctx, taskID, action.Value)
+		default:
+			// Unreachable: Validate above rejects unknown types. Kept so a new
+			// action added to the vocabulary but not to this switch fails the
+			// run instead of being silently skipped.
+			err = fmt.Errorf("unsupported action type %q", action.Type)
+		}
+		if err != nil {
+			return fmt.Errorf("on_complete[%d] (%s): %w", i, action.Type, err)
+		}
+	}
+	return nil
+}
+
+func completionHooksNeedReply(hooks *domain.AgentHooks) bool {
+	for _, a := range hooks.OnComplete {
+		if a.Type == domain.AgentHookActionComment {
+			return true
+		}
+	}
+	return false
+}
+
+// postFinalReplyComment posts the reply as one or more comments, in order. A
+// reply longer than the server's byte cap is split at rune boundaries with
+// stable part headers; every chunk must land before the caller moves on to a
+// label action.
+func (s *Supervisor) postFinalReplyComment(ctx context.Context, ap *AgentProcess, taskID, reply string) error {
+	chunks := chunkComment(reply, maxCommentBytes-chunkHeaderReserve)
+	for i, chunk := range chunks {
+		text := chunk
+		if len(chunks) > 1 {
+			text = fmt.Sprintf("[final reply - part %d/%d]\n\n%s", i+1, len(chunks), chunk)
+		}
+		if _, err := s.IssueBackend.AddComment(ctx, backend.CommentAddParams{
+			IssueID: taskID,
+			Author:  ap.Entry.Worktree,
+			Text:    text,
+		}); err != nil {
+			return fmt.Errorf("post comment chunk %d/%d: %w", i+1, len(chunks), err)
+		}
+	}
+	return nil
+}
+
+// chunkComment splits s into pieces of at most budget bytes, never splitting a
+// UTF-8 sequence. It always returns at least one chunk.
+func chunkComment(s string, budget int) []string {
+	if budget <= 0 || len(s) <= budget {
+		return []string{s}
+	}
+	var chunks []string
+	for len(s) > budget {
+		cut := budget
+		// Back off to the start of the rune that straddles the boundary.
+		for cut > 0 && !utf8.RuneStart(s[cut]) {
+			cut--
+		}
+		if cut == 0 {
+			// A single rune wider than the budget cannot happen for valid UTF-8
+			// with a sane budget, but never emit an empty chunk and spin.
+			cut = budget
+		}
+		chunks = append(chunks, s[:cut])
+		s = s[cut:]
+	}
+	if s != "" {
+		chunks = append(chunks, s)
+	}
+	return chunks
+}
+
+// mirrorNativeTranscript copies the backend's own transcript into this run's
+// session, the way sessionfinalize.WithWorktree does at finalize.
+//
+// Hooks run BEFORE finalize, so without this the raw backends have nothing for
+// the extraction to read: codex mirrors its rollout only inside finalize, and
+// the daemon-mode subprocess adopts the inherited session as nil, so its own
+// finalize no-ops too. Claude usually needs nothing here because `loom hooks`
+// mirrors its transcript live on every hook event — hence the caller reads
+// first and only mirrors on a miss, which also keeps a canonical TS-leaf
+// transcript (which finalize still reads for usage and the transcript_ref
+// artifact) from being overwritten by a raw stream.
+//
+// Best-effort by design: the return value only sharpens the diagnosis when the
+// reply cannot be found.
+func (s *Supervisor) mirrorNativeTranscript(ap *AgentProcess) error {
+	ap.Mu.Lock()
+	sess := ap.Session
+	ap.Mu.Unlock()
+	if sess == nil {
+		return fmt.Errorf("no local session handle for this run")
+	}
+	switch sess.Meta.Backend {
+	case backendnames.Codex:
+		path, err := sess.SyncLatestCodexRollout(ap.WorktreePath, sess.Meta.StartedAt)
+		if err == nil && path == "" {
+			return fmt.Errorf("no codex rollout for %s since %s",
+				ap.WorktreePath, sess.Meta.StartedAt.Format(time.RFC3339))
+		}
+		return err
+	case backendnames.Claude:
+		// Empty claudeUUID: newest-by-mtime in the worktree's project dir, the
+		// same resolution the supervisor's finalize uses.
+		path, err := sess.SyncLatestClaudeTranscript(ap.WorktreePath, "", sess.Meta.StartedAt)
+		if err == nil && path == "" {
+			return fmt.Errorf("no claude transcript for %s since %s",
+				ap.WorktreePath, sess.Meta.StartedAt.Format(time.RFC3339))
+		}
+		return err
+	default:
+		return nil
+	}
+}
+
+// finalAssistantReply returns the run's final assistant prose, waiting a
+// bounded window for the leaf to flush its transcript. Missing or empty output
+// is an error: a configured comment action must never be silently skipped.
+func (s *Supervisor) finalAssistantReply(ctx context.Context, ap *AgentProcess, sessionID string) (string, error) {
+	if sessionID == "" {
+		return "", fmt.Errorf("extract final reply: no session id for this run")
+	}
+	sessStore, err := sessions.NewStore(cli.GetWorkspaceRuntimeDir())
+	if err != nil {
+		return "", fmt.Errorf("extract final reply: open session store: %w", err)
+	}
+	// Read before mirroring: the TS leaf writes its canonical transcript before
+	// exiting and Claude's live hook dispatch keeps the session's copy current,
+	// so those runs answer immediately and never have their transcript rewritten.
+	if reply, readErr := sessStore.FinalAssistantReply(sessionID); readErr == nil && reply != "" {
+		return reply, nil
+	}
+	// Nothing to read yet — mirror the backend's native transcript here rather
+	// than waiting for a finalize that only runs after this pipeline.
+	mirrorNote := ""
+	if mirrorErr := s.mirrorNativeTranscript(ap); mirrorErr != nil {
+		mirrorNote = fmt.Sprintf(" (mirroring the backend transcript also failed: %v)", mirrorErr)
+		slog.Warn("could not mirror the native transcript for a completion hook",
+			"worktree", ap.Entry.Worktree, "session_id", sessionID, "err", mirrorErr)
+	}
+	deadline := time.Now().Add(transcriptFlushWindow)
+	var lastErr error
+	for {
+		// Session ids are unique per attempt, so this can never read a prior
+		// run's transcript.
+		reply, err := sessStore.FinalAssistantReply(sessionID)
+		if err != nil {
+			lastErr = err
+		} else if reply != "" {
+			return reply, nil
+		}
+		if time.Now().After(deadline) {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return "", fmt.Errorf("extract final reply: %w", ctx.Err())
+		case <-time.After(transcriptPollEvery):
+		}
+	}
+	if lastErr != nil {
+		return "", fmt.Errorf("extract final reply for session %s: %w%s", sessionID, lastErr, mirrorNote)
+	}
+	return "", fmt.Errorf("extract final reply for session %s: no substantive assistant output within %s%s",
+		sessionID, transcriptFlushWindow, mirrorNote)
+}
+
+// markCompletionHookFailure converts the clean run into a synthetic failure so
+// session finalize, the checkpoint, and post-mortem recovery all see a failed
+// run and the owned task returns to open for a bounded retry.
+func (s *Supervisor) markCompletionHookFailure(ap *AgentProcess, cause error) {
+	ap.Mu.Lock()
+	defer ap.Mu.Unlock()
+	ap.LastExitCode = -1
+	ap.LastNoWork = false
+	ap.LastError = &agenterr.AgentError{
+		Class:     agenterr.OutcomeFromDomain(agenterr.CompletionHookFailureOutcome),
+		ExitCode:  -1,
+		Message:   cause.Error(),
+		Backend:   ap.Entry.Backend,
+		Timestamp: time.Now(),
+	}
 }
