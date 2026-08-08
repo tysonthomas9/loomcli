@@ -17,7 +17,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
-	"github.com/tysonthomas9/loomcli/internal/workspaceerrors"
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 )
 
 const (
@@ -65,8 +65,8 @@ func (process *repositoryAdmissionProcess) repositoryAdmissionOwnerLease() time.
 }
 
 func repositoryAdmissionUnavailable() error {
-	return workspaceerrors.New(
-		workspaceerrors.SecurityViolation,
+	return workspacemodule.NewCreateError(
+		workspacemodule.SecurityViolation,
 		"repository admission requires the durable FleetDB and Source Control capabilities",
 		errors.Join(
 			infrafleetdb.ErrRepositoryAdmissionUnavailable,
@@ -692,10 +692,10 @@ func repositoryAdmissionFailureClass(err error) (string, bool) {
 		errors.Is(err, sourcecontrol.ErrIdempotencyConflict) {
 		return "materialization_rejected", false
 	}
-	var createErr *workspaceerrors.CreateError
+	var createErr *workspacemodule.CreateError
 	if errors.As(err, &createErr) {
 		switch createErr.Code {
-		case workspaceerrors.GitFailed, workspaceerrors.ConfigFailed:
+		case workspacemodule.GitFailed, workspacemodule.ConfigFailed:
 			return "materialization_failed", true
 		default:
 			return "materialization_rejected", false
@@ -766,8 +766,8 @@ func (process *repositoryAdmissionProcess) resolveCreateWorkspacePath(
 	path = expandUserPath(path)
 	absolute, err := filepath.Abs(filepath.Clean(path))
 	if err != nil {
-		return workspaceDirPlan{}, workspaceerrors.New(
-			workspaceerrors.PathNotFound,
+		return workspaceDirPlan{}, workspacemodule.NewCreateError(
+			workspacemodule.PathNotFound,
 			fmt.Sprintf("cannot resolve workspace path %q", path),
 			err,
 		)

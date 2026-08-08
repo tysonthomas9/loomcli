@@ -1,25 +1,25 @@
-package workspaceerrors_test
+package workspace_test
 
 import (
 	"errors"
 	"fmt"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/workspaceerrors"
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 )
 
 func TestCodeString(t *testing.T) {
 	tests := []struct {
-		code workspaceerrors.Code
+		code workspacemodule.Code
 		want string
 	}{
-		{workspaceerrors.AlreadyExists, "AlreadyExists"},
-		{workspaceerrors.PathNotFound, "PathNotFound"},
-		{workspaceerrors.NotGitRepo, "NotGitRepo"},
-		{workspaceerrors.GitFailed, "GitFailed"},
-		{workspaceerrors.ConfigFailed, "ConfigFailed"},
-		{workspaceerrors.SecurityViolation, "SecurityViolation"},
-		{workspaceerrors.Code(99), "Unknown"},
+		{workspacemodule.AlreadyExists, "AlreadyExists"},
+		{workspacemodule.PathNotFound, "PathNotFound"},
+		{workspacemodule.NotGitRepo, "NotGitRepo"},
+		{workspacemodule.GitFailed, "GitFailed"},
+		{workspacemodule.ConfigFailed, "ConfigFailed"},
+		{workspacemodule.SecurityViolation, "SecurityViolation"},
+		{workspacemodule.Code(99), "Unknown"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.want, func(t *testing.T) {
@@ -31,15 +31,15 @@ func TestCodeString(t *testing.T) {
 }
 
 func TestCodeDistinctValues(t *testing.T) {
-	codes := []workspaceerrors.Code{
-		workspaceerrors.AlreadyExists,
-		workspaceerrors.PathNotFound,
-		workspaceerrors.NotGitRepo,
-		workspaceerrors.GitFailed,
-		workspaceerrors.ConfigFailed,
-		workspaceerrors.SecurityViolation,
+	codes := []workspacemodule.Code{
+		workspacemodule.AlreadyExists,
+		workspacemodule.PathNotFound,
+		workspacemodule.NotGitRepo,
+		workspacemodule.GitFailed,
+		workspacemodule.ConfigFailed,
+		workspacemodule.SecurityViolation,
 	}
-	seen := make(map[workspaceerrors.Code]bool)
+	seen := make(map[workspacemodule.Code]bool)
 	for _, c := range codes {
 		if seen[c] {
 			t.Errorf("duplicate iota value %d for code %s", c, c)
@@ -48,9 +48,9 @@ func TestCodeDistinctValues(t *testing.T) {
 	}
 }
 
-func TestNewWithNilCause(t *testing.T) {
-	err := workspaceerrors.New(workspaceerrors.AlreadyExists, "workspace foo exists", nil)
-	if err.Code != workspaceerrors.AlreadyExists {
+func TestNewCreateErrorWithNilCause(t *testing.T) {
+	err := workspacemodule.NewCreateError(workspacemodule.AlreadyExists, "workspace foo exists", nil)
+	if err.Code != workspacemodule.AlreadyExists {
 		t.Errorf("Code = %v, want AlreadyExists", err.Code)
 	}
 	if err.Message != "workspace foo exists" {
@@ -61,10 +61,10 @@ func TestNewWithNilCause(t *testing.T) {
 	}
 }
 
-func TestNewWithCause(t *testing.T) {
+func TestNewCreateErrorWithCause(t *testing.T) {
 	cause := fmt.Errorf("permission denied")
-	err := workspaceerrors.New(workspaceerrors.PathNotFound, "cannot access /tmp/ws", cause)
-	if err.Code != workspaceerrors.PathNotFound {
+	err := workspacemodule.NewCreateError(workspacemodule.PathNotFound, "cannot access /tmp/ws", cause)
+	if err.Code != workspacemodule.PathNotFound {
 		t.Errorf("Code = %v, want PathNotFound", err.Code)
 	}
 	if err.Cause != cause {
@@ -73,7 +73,7 @@ func TestNewWithCause(t *testing.T) {
 }
 
 func TestErrorFormatWithoutCause(t *testing.T) {
-	err := workspaceerrors.New(workspaceerrors.NotGitRepo, "not a repo", nil)
+	err := workspacemodule.NewCreateError(workspacemodule.NotGitRepo, "not a repo", nil)
 	want := "workspaceerrors [NotGitRepo]: not a repo"
 	if got := err.Error(); got != want {
 		t.Errorf("Error() = %q, want %q", got, want)
@@ -82,7 +82,7 @@ func TestErrorFormatWithoutCause(t *testing.T) {
 
 func TestErrorFormatWithCause(t *testing.T) {
 	cause := fmt.Errorf("exit status 128")
-	err := workspaceerrors.New(workspaceerrors.GitFailed, "clone failed", cause)
+	err := workspacemodule.NewCreateError(workspacemodule.GitFailed, "clone failed", cause)
 	want := "workspaceerrors [GitFailed]: clone failed: exit status 128"
 	if got := err.Error(); got != want {
 		t.Errorf("Error() = %q, want %q", got, want)
@@ -90,7 +90,7 @@ func TestErrorFormatWithCause(t *testing.T) {
 }
 
 func TestUnwrapNilCause(t *testing.T) {
-	err := workspaceerrors.New(workspaceerrors.ConfigFailed, "write failed", nil)
+	err := workspacemodule.NewCreateError(workspacemodule.ConfigFailed, "write failed", nil)
 	if got := err.Unwrap(); got != nil {
 		t.Errorf("Unwrap() = %v, want nil", got)
 	}
@@ -98,28 +98,28 @@ func TestUnwrapNilCause(t *testing.T) {
 
 func TestUnwrapNonNilCause(t *testing.T) {
 	cause := fmt.Errorf("disk full")
-	err := workspaceerrors.New(workspaceerrors.ConfigFailed, "write failed", cause)
+	err := workspacemodule.NewCreateError(workspacemodule.ConfigFailed, "write failed", cause)
 	if got := err.Unwrap(); got != cause {
 		t.Errorf("Unwrap() = %v, want %v", got, cause)
 	}
 }
 
 func TestErrorsAs(t *testing.T) {
-	orig := workspaceerrors.New(workspaceerrors.SecurityViolation, "path escape", nil)
+	orig := workspacemodule.NewCreateError(workspacemodule.SecurityViolation, "path escape", nil)
 	wrapped := fmt.Errorf("create workspace: %w", orig)
 
-	var target *workspaceerrors.CreateError
+	var target *workspacemodule.CreateError
 	if !errors.As(wrapped, &target) {
 		t.Fatal("errors.As failed to find *CreateError through fmt.Errorf wrap")
 	}
-	if target.Code != workspaceerrors.SecurityViolation {
+	if target.Code != workspacemodule.SecurityViolation {
 		t.Errorf("target.Code = %v, want SecurityViolation", target.Code)
 	}
 }
 
 func TestErrorsIsWithSentinel(t *testing.T) {
 	sentinel := fmt.Errorf("sentinel error")
-	err := workspaceerrors.New(workspaceerrors.GitFailed, "op failed", sentinel)
+	err := workspacemodule.NewCreateError(workspacemodule.GitFailed, "op failed", sentinel)
 	if !errors.Is(err, sentinel) {
 		t.Error("errors.Is failed to find sentinel through Unwrap chain")
 	}
@@ -127,13 +127,13 @@ func TestErrorsIsWithSentinel(t *testing.T) {
 
 func TestErrorsIsNilCause(t *testing.T) {
 	sentinel := fmt.Errorf("sentinel error")
-	err := workspaceerrors.New(workspaceerrors.GitFailed, "op failed", nil)
+	err := workspacemodule.NewCreateError(workspacemodule.GitFailed, "op failed", nil)
 	if errors.Is(err, sentinel) {
 		t.Error("errors.Is should return false when cause is nil")
 	}
 }
 
 func TestErrorInterfaceSatisfaction(t *testing.T) {
-	var _ error = (*workspaceerrors.CreateError)(nil)
-	var _ error = workspaceerrors.New(workspaceerrors.AlreadyExists, "test", nil)
+	var _ error = (*workspacemodule.CreateError)(nil)
+	var _ error = workspacemodule.NewCreateError(workspacemodule.AlreadyExists, "test", nil)
 }

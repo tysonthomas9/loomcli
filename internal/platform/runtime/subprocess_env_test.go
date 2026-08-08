@@ -1,4 +1,4 @@
-package runtime
+package runtime //nolint:revive // The approved target architecture names this platform mechanism runtime.
 
 import (
 	"slices"

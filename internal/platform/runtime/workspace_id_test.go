@@ -1,8 +1,8 @@
-package workspaceid
+package runtime //nolint:revive // The approved target architecture names this platform mechanism runtime.
 
 import "testing"
 
-func TestShort(t *testing.T) {
+func TestShortWorkspaceID(t *testing.T) {
 	tests := []struct {
 		name string
 		id   string
@@ -15,16 +15,16 @@ func TestShort(t *testing.T) {
 		{name: "long", id: "abcdefghi", want: "abcdefgh"},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := Short(tt.id); got != tt.want {
-				t.Fatalf("Short(%q) = %q, want %q", tt.id, got, tt.want)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := ShortWorkspaceID(test.id); got != test.want {
+				t.Fatalf("ShortWorkspaceID(%q) = %q, want %q", test.id, got, test.want)
 			}
 		})
 	}
 }
 
-func TestResolve(t *testing.T) {
+func TestResolveWorkspaceID(t *testing.T) {
 	tests := []struct {
 		name   string
 		id     string
@@ -37,11 +37,11 @@ func TestResolve(t *testing.T) {
 		{name: "absent", want: ""},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv("LOOM_WORKSPACE_ID", tt.envVal)
-			if got := Resolve(tt.id); got != tt.want {
-				t.Fatalf("Resolve(%q) = %q, want %q", tt.id, got, tt.want)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("LOOM_WORKSPACE_ID", test.envVal)
+			if got := ResolveWorkspaceID(test.id); got != test.want {
+				t.Fatalf("ResolveWorkspaceID(%q) = %q, want %q", test.id, got, test.want)
 			}
 		})
 	}

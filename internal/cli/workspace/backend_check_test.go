@@ -1,4 +1,4 @@
-package backendcheck
+package workspace
 
 import (
 	"testing"
@@ -35,7 +35,7 @@ func TestCheckBackendUsesRegisteredBackendHealth(t *testing.T) {
 		},
 	})
 
-	info, err := CheckBackend("localdogfood")
+	info, err := checkBackend("localdogfood")
 	if err != nil {
 		t.Fatalf("CheckBackend returned error: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestCheckBackendUsesRegisteredBackendMissingMessage(t *testing.T) {
 		},
 	})
 
-	info, err := CheckBackend("gone")
+	info, err := checkBackend("gone")
 	if err != nil {
 		t.Fatalf("CheckBackend returned error: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestCheckBackendUsesRegisteredBackendMissingMessage(t *testing.T) {
 func TestCheckBackendFallsBackToDiscoveryForUnregisteredName(t *testing.T) {
 	cli.TestingResetBackendState(t)
 
-	info, err := CheckBackend("definitely-not-on-path-backendcheck")
+	info, err := checkBackend("definitely-not-on-path-backendcheck")
 	if err != nil {
 		t.Fatalf("CheckBackend returned error: %v", err)
 	}

@@ -1,4 +1,4 @@
-package workspaceerrors
+package workspace
 
 import "fmt"
 
@@ -40,8 +40,8 @@ type CreateError struct {
 	Cause   error  // Underlying error, may be nil
 }
 
-// New returns a new CreateError. cause may be nil.
-func New(code Code, msg string, cause error) *CreateError {
+// NewCreateError returns a new CreateError. cause may be nil.
+func NewCreateError(code Code, msg string, cause error) *CreateError {
 	return &CreateError{Code: code, Message: msg, Cause: cause}
 }
 

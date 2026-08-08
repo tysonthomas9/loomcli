@@ -26,7 +26,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
-	"github.com/tysonthomas9/loomcli/internal/workspaceerrors"
 )
 
 type testRepositoryMaterializer struct {
@@ -650,9 +649,9 @@ func TestStoreBackedCreateEmptyWorkspaceRejectsCredentialBearingLocalRemote(t *t
 			Path:  wsPath,
 		},
 	)
-	var createErr *workspaceerrors.CreateError
+	var createErr *workspacemodule.CreateError
 	if !errors.As(err, &createErr) ||
-		createErr.Code != workspaceerrors.SecurityViolation ||
+		createErr.Code != workspacemodule.SecurityViolation ||
 		!errors.Is(err, sourcecontrol.ErrInvalid) {
 		t.Fatalf("credential-bearing local remote error = %v, want security violation", err)
 	}
@@ -1155,8 +1154,8 @@ func TestStoreBackedAddReposClassifiesLocalRepoNameCollisionAndRollsBack(t *test
 		Repos:       []string{src},
 		Branch:      "proof-work",
 	})
-	var createErr *workspaceerrors.CreateError
-	if !errors.As(err, &createErr) || createErr.Code != workspaceerrors.AlreadyExists {
+	var createErr *workspacemodule.CreateError
+	if !errors.As(err, &createErr) || createErr.Code != workspacemodule.AlreadyExists {
 		t.Fatalf("error = %v, want AlreadyExists workspace error", err)
 	}
 	if !strings.Contains(createErr.Message, "already registered in this workspace") {
@@ -1194,8 +1193,8 @@ func TestStoreBackedAddReposClassifiesCloneRepoNameCollisionAndRetainsCheckoutFo
 		WorkspaceID: "MY-WS",
 		CloneURLs:   []string{remote},
 	})
-	var createErr *workspaceerrors.CreateError
-	if !errors.As(err, &createErr) || createErr.Code != workspaceerrors.AlreadyExists {
+	var createErr *workspacemodule.CreateError
+	if !errors.As(err, &createErr) || createErr.Code != workspacemodule.AlreadyExists {
 		t.Fatalf("error = %v, want AlreadyExists workspace error", err)
 	}
 	if !strings.Contains(createErr.Message, "already registered in this workspace") {
@@ -1326,9 +1325,9 @@ func TestStoreBackedRemoteCloneFailsClosedWithoutSourceControl(t *testing.T) {
 		WorkspaceID: "MY-WS",
 		CloneURLs:   []string{remote},
 	})
-	var createErr *workspaceerrors.CreateError
+	var createErr *workspacemodule.CreateError
 	if !errors.As(err, &createErr) ||
-		createErr.Code != workspaceerrors.SecurityViolation ||
+		createErr.Code != workspacemodule.SecurityViolation ||
 		!errors.Is(err, sourcecontrol.ErrUnavailable) {
 		t.Fatalf("add clone error = %v, want fail-closed Source Control error", err)
 	}
@@ -1344,7 +1343,7 @@ func TestStoreBackedRemoteCloneFailsClosedWithoutSourceControl(t *testing.T) {
 		Path:      filepath.Join(loomDir, "workspaces", "clone-without-owner"),
 	})
 	if !errors.As(err, &createErr) ||
-		createErr.Code != workspaceerrors.SecurityViolation ||
+		createErr.Code != workspacemodule.SecurityViolation ||
 		!errors.Is(err, sourcecontrol.ErrUnavailable) {
 		t.Fatalf("create clone error = %v, want fail-closed Source Control error", err)
 	}
@@ -1377,9 +1376,9 @@ func TestStoreBackedRemoteCloneRejectsCredentialBearingRemoteBeforePersistence(t
 			},
 		},
 	)
-	var createErr *workspaceerrors.CreateError
+	var createErr *workspacemodule.CreateError
 	if !errors.As(err, &createErr) ||
-		createErr.Code != workspaceerrors.SecurityViolation ||
+		createErr.Code != workspacemodule.SecurityViolation ||
 		!errors.Is(err, sourcecontrol.ErrInvalid) {
 		t.Fatalf("credential-bearing remote error = %v, want security violation", err)
 	}
@@ -1421,9 +1420,9 @@ func TestStoreBackedAddReposRejectsCredentialBearingLocalRemote(t *testing.T) {
 			Branch:      strings.TrimSpace(gitOutput(t, src, "branch", "--show-current")),
 		},
 	)
-	var createErr *workspaceerrors.CreateError
+	var createErr *workspacemodule.CreateError
 	if !errors.As(err, &createErr) ||
-		createErr.Code != workspaceerrors.SecurityViolation ||
+		createErr.Code != workspacemodule.SecurityViolation ||
 		!errors.Is(err, sourcecontrol.ErrInvalid) {
 		t.Fatalf("credential-bearing local attach error = %v, want security violation", err)
 	}
@@ -1616,11 +1615,11 @@ func TestStoreBackedCreateEmptyWorkspaceClassifiesCreateRace(t *testing.T) {
 		Type: "empty",
 		Path: filepath.Join(loomDir, "workspaces", "my-ws"),
 	})
-	var createErr *workspaceerrors.CreateError
+	var createErr *workspacemodule.CreateError
 	if !errors.As(err, &createErr) {
 		t.Fatalf("error = %v, want workspace create error", err)
 	}
-	if createErr.Code != workspaceerrors.AlreadyExists {
+	if createErr.Code != workspacemodule.AlreadyExists {
 		t.Fatalf("error code = %s, want AlreadyExists", createErr.Code)
 	}
 }
@@ -1992,11 +1991,11 @@ func TestStoreBackedCreateCloneWorkspaceClassifiesCreateRace(t *testing.T) {
 		CloneURLs: []string{src},
 		Path:      filepath.Join(loomDir, "workspaces", "clone-ws"),
 	})
-	var createErr *workspaceerrors.CreateError
+	var createErr *workspacemodule.CreateError
 	if !errors.As(err, &createErr) {
 		t.Fatalf("error = %v, want workspace create error", err)
 	}
-	if createErr.Code != workspaceerrors.AlreadyExists {
+	if createErr.Code != workspacemodule.AlreadyExists {
 		t.Fatalf("error code = %s, want AlreadyExists", createErr.Code)
 	}
 	records, listErr := journal.List(context.Background())

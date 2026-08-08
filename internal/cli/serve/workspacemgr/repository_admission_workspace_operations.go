@@ -14,7 +14,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
-	"github.com/tysonthomas9/loomcli/internal/workspaceerrors"
 )
 
 type cloneWorkspaceAdmissionPlan struct {
@@ -32,8 +31,8 @@ func prepareStoreBackedCloneWorkspaceAdmission(
 	process *repositoryAdmissionProcess,
 ) (cloneWorkspaceAdmissionPlan, error) {
 	if len(req.CloneURLs) == 0 {
-		return cloneWorkspaceAdmissionPlan{}, workspaceerrors.New(
-			workspaceerrors.PathNotFound,
+		return cloneWorkspaceAdmissionPlan{}, workspacemodule.NewCreateError(
+			workspacemodule.PathNotFound,
 			"no clone URLs specified",
 			nil,
 		)
@@ -72,8 +71,8 @@ func prepareStoreBackedCloneWorkspaceAdmission(
 	)
 	if err != nil {
 		if errors.Is(err, infrafleetdb.ErrRepositoryAdmissionConflict) {
-			return cloneWorkspaceAdmissionPlan{}, workspaceerrors.New(
-				workspaceerrors.AlreadyExists,
+			return cloneWorkspaceAdmissionPlan{}, workspacemodule.NewCreateError(
+				workspacemodule.AlreadyExists,
 				fmt.Sprintf("workspace %q or one of its repositories conflicts with an existing repository admission", req.Name),
 				err,
 			)
@@ -158,8 +157,8 @@ func createStoreBackedCloneWorkspaceAdmission(
 		return workspacecoord.WorkspaceCreateResult{}, process.failMaterialization(
 			materializationCtx,
 			plan.record,
-			workspaceerrors.New(
-				workspaceerrors.GitFailed,
+			workspacemodule.NewCreateError(
+				workspacemodule.GitFailed,
 				"one or more repository checkouts were not materialized",
 				nil,
 			),
@@ -258,8 +257,8 @@ func prepareAddReposToStoreBackedWorkspaceAdmission(
 	)
 	if err != nil {
 		if errors.Is(err, infrafleetdb.ErrRepositoryAdmissionConflict) {
-			return addRepositoriesAdmissionPlan{}, workspaceerrors.New(
-				workspaceerrors.AlreadyExists,
+			return addRepositoriesAdmissionPlan{}, workspacemodule.NewCreateError(
+				workspacemodule.AlreadyExists,
 				fmt.Sprintf("one or more repositories conflict with an existing repository admission in workspace %q", key),
 				err,
 			)
@@ -380,8 +379,8 @@ func addReposToStoreBackedWorkspaceAdmission(
 		return workspacecoord.WorkspaceCreateResult{}, process.failMaterialization(
 			materializationCtx,
 			plan.record,
-			workspaceerrors.New(
-				workspaceerrors.GitFailed,
+			workspacemodule.NewCreateError(
+				workspacemodule.GitFailed,
 				"one or more repository checkouts were not materialized",
 				nil,
 			),
@@ -412,8 +411,8 @@ func addReposToStoreBackedWorkspaceAdmission(
 		nil,
 	); err != nil {
 		if errors.Is(err, infrafleetdb.ErrRepositoryAdmissionConflict) {
-			return workspacecoord.WorkspaceCreateResult{}, workspaceerrors.New(
-				workspaceerrors.AlreadyExists,
+			return workspacecoord.WorkspaceCreateResult{}, workspacemodule.NewCreateError(
+				workspacemodule.AlreadyExists,
 				"one or more repository names are already registered in this workspace",
 				err,
 			)

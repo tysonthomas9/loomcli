@@ -1,8 +1,4 @@
-// Package backendcheck is the single seam between loom code and the
-// in-tree harness CLI discovery primitive. It exists as its own package
-// (rather than a var in internal/cli) to keep internal/cli's import
-// fanout and file count under the project's per-package gates.
-package backendcheck
+package workspace
 
 import (
 	"fmt"
@@ -12,18 +8,14 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 )
 
-// CheckBackend reports whether a named backend is installed and, when a
+// checkBackend reports whether a named backend is installed and, when a
 // version probe is registered, at what version. Registered Loom backends
 // with health checks are authoritative; raw CLI names fall back to
 // harness-wrapper PATH discovery.
 //
-// Production code reads CheckBackend; tests reassign it to inject a
-// fake without spawning subprocesses or mutating PATH:
-//
-//	prev := backendcheck.CheckBackend
-//	backendcheck.CheckBackend = func(string) (discovery.Info, error) { ... }
-//	t.Cleanup(func() { backendcheck.CheckBackend = prev })
-var CheckBackend = lookupBackend
+// Tests may reassign the variable to inject a fake without spawning
+// subprocesses or mutating PATH.
+var checkBackend = lookupBackend
 
 func lookupBackend(name string) (discovery.Info, error) {
 	if hs, ok := backends.CheckBackendHealth(name); ok {

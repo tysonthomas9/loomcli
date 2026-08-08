@@ -13,7 +13,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/cli/backendcheck"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/local"
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -506,7 +505,7 @@ func agentBackendProblem(agentID, backend string) (WorkspaceOpsProblem, bool) {
 	if eff == "" {
 		return WorkspaceOpsProblem{}, false
 	}
-	info, err := backendcheck.CheckBackend(eff)
+	info, err := checkBackend(eff)
 	if err != nil || info.Installed {
 		return WorkspaceOpsProblem{}, false
 	}
