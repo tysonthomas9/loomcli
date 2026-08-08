@@ -3,7 +3,6 @@ package agentmodules
 import (
 	"net/http"
 
-	"github.com/tysonthomas9/loomcli/internal/webui/agentmodules/automationroutes"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agents"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agentsmanagement"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/approvals"
@@ -23,7 +22,7 @@ import (
 // grouping the concrete HTTP adapters behind one workspace composition seam.
 //
 //nolint:funlen // This ordered composition table keeps route precedence and one-pass dependency wiring auditable together.
-func newWorkspaceModules(deps Deps, automationModules automationroutes.Modules) []interface{ Register(*http.ServeMux) } {
+func newWorkspaceModules(deps Deps, automationModules automationRouteModules) []interface{ Register(*http.ServeMux) } {
 	onboardingModule := onboarding.NewModule(deps.WorkItems, deps.Agents, deps.AgentsOperator)
 	taskWorkflowRuns := newTaskWorkflowRunReader(deps)
 
@@ -76,6 +75,7 @@ func newWorkspaceModules(deps Deps, automationModules automationroutes.Modules) 
 		driverapi.NewModule(driverapi.Config{
 			Store: deps.Store, APIBaseURL: deps.DriverAPIBaseURL,
 			IssueBackends: deps.ExecutionIssueBackends,
+			RolePrompts:   roles.ReadPromptBody,
 			APIToken:      deps.DriverAPIToken, RunTokenKey: deps.DriverRunTokenKey,
 			LocalSettingsDir: deps.LocalSettingsDir, LocalRepoPath: storeadapter.ResolveRepoPath,
 			SourceControl:    deps.SourceControl,

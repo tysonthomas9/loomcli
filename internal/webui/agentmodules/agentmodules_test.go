@@ -16,7 +16,7 @@ func TestProductionCompositionUsesAutomationAwareAgentsConstructor(t *testing.T)
 	if err != nil {
 		t.Fatalf("read root production composition: %v", err)
 	}
-	automationSource, err := os.ReadFile("automationroutes/routes.go")
+	automationSource, err := os.ReadFile("automation_routes.go")
 	if err != nil {
 		t.Fatalf("read Automation production composition: %v", err)
 	}

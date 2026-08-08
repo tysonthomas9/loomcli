@@ -1,4 +1,4 @@
-package automationroutes
+package agentmodules
 
 import (
 	"context"
@@ -15,14 +15,15 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
-// Module is the workspace route registration contract shared by web modules.
-type Module interface {
+// automationRouteModule is the route registration contract shared by the
+// automation-facing composition group.
+type automationRouteModule interface {
 	Register(*http.ServeMux)
 }
 
 // Capabilities contains the Automation-owned application ports needed by the
 // automation route adapter.
-type Capabilities struct {
+type automationRouteCapabilities struct {
 	AutomationBindings automation.BindingOperations
 	WorkflowBinding    *workflowbinding.Workflow
 	AutomationAudit    automation.AuditQueries
@@ -32,8 +33,8 @@ type Capabilities struct {
 
 // Deps contains the Automation-owned workflows and narrow legacy ports needed
 // to compose webhook ingestion and trigger bindings.
-type Deps struct {
-	Capabilities    Capabilities
+type automationRouteDeps struct {
+	Capabilities    automationRouteCapabilities
 	Awaits          store.AwaitStore
 	DriverRuns      store.DriverRunStore
 	AwaitResolver   store.AtomicAwaitStore
@@ -42,37 +43,37 @@ type Deps struct {
 	AgentServices   store.AgentServiceStore
 }
 
-// EventAwaitDispatcher is the shared post-admission await notification seam.
-type EventAwaitDispatcher interface {
+// eventAwaitDispatcher is the shared post-admission await notification seam.
+type eventAwaitDispatcher interface {
 	Dispatch(context.Context, string, trigger.AwaitDispatchEvent) (*trigger.AwaitDispatchResult, error)
 }
 
-// BindingGrantCompatibility is the connector cleanup seam shared with agent
+// bindingGrantCompatibility is the connector cleanup seam shared with agent
 // deletion while Connectors remains a later migration phase.
-type BindingGrantCompatibility interface {
+type bindingGrantCompatibility interface {
 	RevokeBindingGrants(context.Context, string, string) (int, error)
 }
 
 // Modules names each route group so the parent composition can preserve the
 // long-standing registration order while this package owns its dependencies.
-type Modules struct {
-	Webhooks             Module
-	TriggerBindings      Module
-	EventAwaits          EventAwaitDispatcher
-	BindingGrants        BindingGrantCompatibility
+type automationRouteModules struct {
+	Webhooks             automationRouteModule
+	TriggerBindings      automationRouteModule
+	EventAwaits          eventAwaitDispatcher
+	BindingGrants        bindingGrantCompatibility
 	WorkspaceFromContext func(context.Context) string
 }
 
 // New composes the Automation and binding-facing HTTP modules.
-func New(deps Deps) Modules {
-	var eventAwaits EventAwaitDispatcher
+func newAutomationRouteModules(deps automationRouteDeps) automationRouteModules {
+	var eventAwaits eventAwaitDispatcher
 	if deps.Awaits != nil && deps.DriverRuns != nil && deps.AwaitResolver != nil {
 		eventAwaits = trigger.NewAwaitMatcherWithResolver(deps.Awaits, deps.DriverRuns, deps.AwaitResolver)
 	}
 	connectorCompatibility := newStoreConnectorCompatibility(deps.TriggerBindings, deps.ConnectorGrants)
 	agentIdentityCompatibility := newStoreAgentIdentityCompatibility(deps.AgentServices)
 
-	return Modules{
+	return automationRouteModules{
 		Webhooks: webhooks.New(webhooks.Config{
 			Workflow:   deps.Capabilities.AutomationWebhook,
 			Automation: deps.Capabilities.AutomationAudit,

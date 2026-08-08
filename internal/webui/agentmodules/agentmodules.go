@@ -4,12 +4,11 @@ import (
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/driver"
-	"github.com/tysonthomas9/loomcli/internal/webui/agentmodules/automationroutes"
 )
 
-func resolveAutomationDeps(deps Deps) automationroutes.Deps {
-	result := automationroutes.Deps{
-		Capabilities: automationroutes.Capabilities{
+func resolveAutomationDeps(deps Deps) automationRouteDeps {
+	result := automationRouteDeps{
+		Capabilities: automationRouteCapabilities{
 			AutomationBindings: deps.AutomationBindings,
 			WorkflowBinding:    deps.WorkflowBinding,
 			AutomationAudit:    deps.AutomationAudit,
@@ -34,6 +33,6 @@ func resolveAutomationDeps(deps Deps) automationroutes.Deps {
 }
 
 func New(deps Deps) []interface{ Register(*http.ServeMux) } {
-	automationModules := automationroutes.New(resolveAutomationDeps(deps))
+	automationModules := newAutomationRouteModules(resolveAutomationDeps(deps))
 	return newWorkspaceModules(deps, automationModules)
 }

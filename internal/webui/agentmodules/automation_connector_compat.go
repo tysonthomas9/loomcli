@@ -1,4 +1,4 @@
-package automationroutes
+package agentmodules
 
 import (
 	"context"

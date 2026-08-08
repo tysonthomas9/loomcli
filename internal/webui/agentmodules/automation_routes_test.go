@@ -1,4 +1,4 @@
-package automationroutes
+package agentmodules
 
 import (
 	"testing"
@@ -9,7 +9,7 @@ import (
 
 func TestNewRequiresExplicitAwaitResolver(t *testing.T) {
 	st := memstore.New()
-	withoutResolver := New(Deps{Awaits: st.Awaits(), DriverRuns: st.DriverRuns()})
+	withoutResolver := newAutomationRouteModules(automationRouteDeps{Awaits: st.Awaits(), DriverRuns: st.DriverRuns()})
 	if withoutResolver.EventAwaits != nil {
 		t.Fatal("EventAwaits composed without an explicit Execution resolver")
 	}
@@ -18,7 +18,7 @@ func TestNewRequiresExplicitAwaitResolver(t *testing.T) {
 	if !ok {
 		t.Fatalf("memstore awaits %T does not implement store.AtomicAwaitStore", st.Awaits())
 	}
-	withResolver := New(Deps{
+	withResolver := newAutomationRouteModules(automationRouteDeps{
 		Awaits: st.Awaits(), DriverRuns: st.DriverRuns(), AwaitResolver: resolver,
 	})
 	if withResolver.EventAwaits == nil {
