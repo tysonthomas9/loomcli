@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 )
 

@@ -76,6 +76,8 @@ func validateRFC3339Field(b *validationBuilder, field, value string) {
 // Validate checks that the PatchIssueRequest is well-formed.
 // Returns nil if valid (including all-nil fields = no-op update),
 // or *ValidationError with all field errors collected.
+//
+//nolint:funlen // The consolidation layer immediately above this stack base splits these validation groups.
 func (r *PatchIssueRequest) Validate() error {
 	if r == nil {
 		return &ValidationError{Errors: []FieldError{{Field: "request", Message: "is nil"}}}
