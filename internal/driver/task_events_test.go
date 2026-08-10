@@ -158,11 +158,7 @@ func TestClaimAndExecuteTaskRunEmitsLifecycleEvents(t *testing.T) {
 				t.Fatalf("event next eligible at = %v, want nil on non-requeued events", last.NextEligibleAt)
 			}
 
-			blocker, ok := st.(interface{ TaskBlocked(ws, taskID string) bool })
-			if !ok {
-				t.Fatalf("store %T does not expose TaskBlocked test observable", st)
-			}
-			if got := blocker.TaskBlocked("TEST", "TEST-EVT-2"); got != tc.wantBlockedTask {
+			if got := st.TaskBlocked("TEST", "TEST-EVT-2"); got != tc.wantBlockedTask {
 				t.Fatalf("task blocked = %v, want %v", got, tc.wantBlockedTask)
 			}
 

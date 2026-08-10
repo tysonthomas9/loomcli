@@ -160,7 +160,6 @@ method_sets:
       - AgentOwnershipLeases
       - AgentServices
       - AgentSessions
-      - Artifacts
       - Awaits
       - ConnectorCalls
       - ConnectorGrants
@@ -209,7 +208,7 @@ method_sets:
       - AgentServices
       - AgentSessions
       - ArtifactCommands
-      - Artifacts
+      - ArtifactQueries
       - Automation
       - Awaits
       - Close
@@ -669,14 +668,6 @@ receiver_surfaces:
     package: github.com/tysonthomas9/loomcli/internal/store
     method_set: store_repository
     capability_owner: interaction
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.ArtifactContentReader
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: artifacts
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.ArtifactStore
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: artifacts
   - receiver: github.com/tysonthomas9/loomcli/internal/store.AtomicAwaitStore
     package: github.com/tysonthomas9/loomcli/internal/store
     method_set: store_repository

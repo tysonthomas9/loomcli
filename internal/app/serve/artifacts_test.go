@@ -57,16 +57,20 @@ func (stub *artifactsInfraTransportStub) List(context.Context, infrafleetdb.Arti
 
 func TestNewArtifactsCapabilityFailsClosedWithoutSharedTransport(t *testing.T) {
 	executionCapability := &ExecutionCapability{issuer: authority.NewIssuer()}
-	capability, err := executionCapability.NewArtifactsCapability(nil)
+	queries := memstore.New().ArtifactQueries()
+	capability, err := executionCapability.NewArtifactsCapability(nil, queries)
 	if capability != nil || !errors.Is(err, artifacts.ErrUnavailable) {
-		t.Fatalf("execution.NewArtifactsCapability(nil) = %#v, %v; want nil, ErrUnavailable", capability, err)
+		t.Fatalf("execution.NewArtifactsCapability(nil, queries) = %#v, %v; want nil, ErrUnavailable", capability, err)
 	}
-	if capability, err := (*ExecutionCapability)(nil).NewArtifactsCapability(&artifactsInfraTransportStub{}); capability != nil || err == nil {
+	if capability, err := (*ExecutionCapability)(nil).NewArtifactsCapability(&artifactsInfraTransportStub{}, queries); capability != nil || err == nil {
 		t.Fatalf("nil Execution capability composition = %#v, %v; want fail closed", capability, err)
 	}
 	var nilCapability *ArtifactsCapability
 	if api := nilCapability.ArtifactsAPI(); api != nil {
 		t.Fatalf("nil capability API = %#v, want nil", api)
+	}
+	if queries := nilCapability.ArtifactQueries(); queries != nil {
+		t.Fatalf("nil capability queries = %#v, want nil", queries)
 	}
 }
 
@@ -89,11 +93,12 @@ func TestArtifactsCapabilityPreservesOwnerAndCompleteCreateEnvelope(t *testing.T
 		Visibility: command.Visibility, RedactionStatus: command.RedactionStatus,
 		DurableStatus: "declared", Metadata: map[string]string{"runner": "local"},
 	}}
-	executionCapability, err := NewExecutionCapability(executionTestDependencies(t, memstore.New()))
+	st := memstore.New()
+	executionCapability, err := NewExecutionCapability(executionTestDependencies(t, st))
 	if err != nil {
 		t.Fatalf("NewExecutionCapability: %v", err)
 	}
-	capability, err := executionCapability.NewArtifactsCapability(stub)
+	capability, err := executionCapability.NewArtifactsCapability(stub, st.ArtifactQueries())
 	if err != nil {
 		t.Fatalf("NewArtifactsCapability: %v", err)
 	}

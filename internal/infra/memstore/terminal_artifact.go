@@ -2,16 +2,13 @@ package memstore
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
-	"io"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -93,339 +90,15 @@ func (s *terminalSessionStore) Update(_ context.Context, ws, terminalID string, 
 
 type artifactStore struct {
 	mu      sync.RWMutex
-	items   map[string]map[string]*domain.Artifact
+	items   map[string]map[string]*artifacts.Artifact
 	content map[string]map[string][]byte
 }
 
 func newArtifactStore() *artifactStore {
 	return &artifactStore{
-		items:   make(map[string]map[string]*domain.Artifact),
+		items:   make(map[string]map[string]*artifacts.Artifact),
 		content: make(map[string]map[string][]byte),
 	}
-}
-
-func (s *artifactStore) Create(_ context.Context, in store.ArtifactCreate) (*domain.Artifact, error) {
-	if in.WorkspaceKey == "" || in.ArtifactID == "" || in.Type == "" {
-		return nil, fmt.Errorf("workspace_key + artifact_id + type required: %w", domain.ErrInvalid)
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.items[in.WorkspaceKey] == nil {
-		s.items[in.WorkspaceKey] = make(map[string]*domain.Artifact)
-	}
-	artifact := newArtifactMem(in, time.Now().UTC())
-	s.items[in.WorkspaceKey][in.ArtifactID] = artifact
-	return cloneArtifact(artifact), nil
-}
-
-func newArtifactMem(in store.ArtifactCreate, now time.Time) *domain.Artifact {
-	artifact := &domain.Artifact{
-		WorkspaceKey:    in.WorkspaceKey,
-		ArtifactID:      in.ArtifactID,
-		AgentID:         in.AgentID,
-		SessionID:       in.SessionID,
-		TerminalID:      in.TerminalID,
-		TaskID:          in.TaskID,
-		OwnerType:       in.OwnerType,
-		OwnerID:         in.OwnerID,
-		Type:            in.Type,
-		URI:             in.URI,
-		Summary:         in.Summary,
-		MIMEType:        in.MIMEType,
-		SizeBytes:       in.SizeBytes,
-		Checksum:        in.Checksum,
-		ContentHash:     in.ContentHash,
-		Visibility:      in.Visibility,
-		RedactionStatus: in.RedactionStatus,
-		DurableStatus:   defaultArtifactDurableStatusMem(in),
-		Metadata:        cloneMap(in.Metadata),
-		CreatedAt:       now,
-		UpdatedAt:       now,
-	}
-	normalizeArtifactHashesMem(artifact)
-	if artifact.DurableStatus == "finalized" {
-		artifact.FinalizedAt = &now
-	}
-	return artifact
-}
-
-func defaultArtifactDurableStatusMem(in store.ArtifactCreate) string {
-	if in.DurableStatus != "" {
-		return in.DurableStatus
-	}
-	if in.URI == "" {
-		return "declared"
-	}
-	return "finalized"
-}
-
-func normalizeArtifactHashesMem(artifact *domain.Artifact) {
-	if artifact.ContentHash == "" {
-		artifact.ContentHash = artifact.Checksum
-	}
-	if artifact.Checksum == "" {
-		artifact.Checksum = artifact.ContentHash
-	}
-}
-
-func (s *artifactStore) Get(_ context.Context, ws, artifactID string) (*domain.Artifact, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	artifact, ok := s.items[ws][artifactID]
-	if !ok {
-		return nil, fmt.Errorf("artifact %q in workspace %q: %w", artifactID, ws, domain.ErrNotFound)
-	}
-	return cloneArtifact(artifact), nil
-}
-
-func (s *artifactStore) List(_ context.Context, ws string, filter store.ArtifactFilter) ([]*domain.Artifact, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	out := make([]*domain.Artifact, 0, len(s.items[ws]))
-	for _, artifact := range s.items[ws] {
-		if artifactMatchesMem(artifact, filter) {
-			out = append(out, cloneArtifact(artifact))
-		}
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
-	if filter.Limit > 0 && len(out) > filter.Limit {
-		out = out[:filter.Limit]
-	}
-	return out, nil
-}
-
-func (s *artifactStore) UploadContent(ctx context.Context, ws, artifactID string, upload store.ArtifactContentUpload) (*domain.Artifact, error) {
-	if upload.Body == nil {
-		return nil, fmt.Errorf("artifact content body required: %w", domain.ErrInvalid)
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	body, err := io.ReadAll(upload.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read artifact content: %w", err)
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	sum := sha256.Sum256(body)
-	contentHash := "sha256:" + hex.EncodeToString(sum[:])
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	artifact, ok := s.items[ws][artifactID]
-	if !ok {
-		return nil, fmt.Errorf("artifact %q in workspace %q: %w", artifactID, ws, domain.ErrNotFound)
-	}
-	if artifact.DurableStatus == "finalized" {
-		return nil, fmt.Errorf("artifact %q in workspace %q is finalized: %w", artifactID, ws, domain.ErrInvalidTransition)
-	}
-	if s.content[ws] == nil {
-		s.content[ws] = make(map[string][]byte)
-	}
-	s.content[ws][artifactID] = append([]byte(nil), body...)
-
-	artifact.URI = fmt.Sprintf("mem://artifacts/%s/%s/%s", ws, artifactID, contentHash)
-	artifact.SizeBytes = int64(len(body))
-	artifact.Checksum = contentHash
-	artifact.ContentHash = contentHash
-	if upload.MIMEType != "" {
-		artifact.MIMEType = upload.MIMEType
-	}
-	artifact.DurableStatus = "uploading"
-	artifact.UpdatedAt = time.Now().UTC()
-	return cloneArtifact(artifact), nil
-}
-
-func (s *artifactStore) ReadContent(ctx context.Context, ws, artifactID string) ([]byte, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if _, ok := s.items[ws][artifactID]; !ok {
-		return nil, fmt.Errorf("artifact %q in workspace %q: %w", artifactID, ws, domain.ErrNotFound)
-	}
-	body, ok := s.content[ws][artifactID]
-	if !ok {
-		return nil, fmt.Errorf("artifact %q content in workspace %q: %w", artifactID, ws, domain.ErrNotFound)
-	}
-	return append([]byte(nil), body...), nil
-}
-
-func (s *artifactStore) Finalize(ctx context.Context, ws, artifactID string, finalize store.ArtifactFinalize) (*domain.Artifact, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	artifact, ok := s.items[ws][artifactID]
-	if !ok {
-		return nil, fmt.Errorf("artifact %q in workspace %q: %w", artifactID, ws, domain.ErrNotFound)
-	}
-	now := time.Now().UTC()
-	candidate := cloneArtifact(artifact)
-	applyArtifactFinalizeMem(candidate, finalize, now)
-	if err := s.verifyFinalizedArtifactContentMem(ws, artifactID, candidate); err != nil {
-		return nil, err
-	}
-	*artifact = *candidate
-	return cloneArtifact(artifact), nil
-}
-
-func (s *artifactStore) Update(_ context.Context, ws, artifactID string, patch store.ArtifactUpdate) (*domain.Artifact, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	artifact, ok := s.items[ws][artifactID]
-	if !ok {
-		return nil, fmt.Errorf("artifact %q in workspace %q: %w", artifactID, ws, domain.ErrNotFound)
-	}
-	applyArtifactUpdateMem(artifact, patch, time.Now().UTC())
-	return cloneArtifact(artifact), nil
-}
-
-func applyArtifactUpdateMem(artifact *domain.Artifact, patch store.ArtifactUpdate, now time.Time) {
-	applyArtifactOwnershipUpdateMem(artifact, patch)
-	applyArtifactContentUpdateMem(artifact, patch)
-	applyArtifactLifecycleUpdateMem(artifact, patch, now)
-}
-
-func applyArtifactOwnershipUpdateMem(artifact *domain.Artifact, patch store.ArtifactUpdate) {
-	if patch.AgentID != nil {
-		artifact.AgentID = *patch.AgentID
-	}
-	if patch.SessionID != nil {
-		artifact.SessionID = *patch.SessionID
-	}
-	if patch.TerminalID != nil {
-		artifact.TerminalID = *patch.TerminalID
-	}
-	if patch.TaskID != nil {
-		artifact.TaskID = *patch.TaskID
-	}
-	if patch.OwnerType != nil {
-		artifact.OwnerType = *patch.OwnerType
-	}
-	if patch.OwnerID != nil {
-		artifact.OwnerID = *patch.OwnerID
-	}
-	if patch.Type != nil {
-		artifact.Type = *patch.Type
-	}
-}
-
-func applyArtifactContentUpdateMem(artifact *domain.Artifact, patch store.ArtifactUpdate) {
-	if patch.Summary != nil {
-		artifact.Summary = *patch.Summary
-	}
-	if patch.Metadata != nil {
-		artifact.Metadata = cloneMap(*patch.Metadata)
-	}
-	if patch.URI != nil {
-		artifact.URI = *patch.URI
-	}
-	if patch.MIMEType != nil {
-		artifact.MIMEType = *patch.MIMEType
-	}
-	if patch.SizeBytes != nil {
-		artifact.SizeBytes = *patch.SizeBytes
-	}
-	if patch.Checksum != nil {
-		artifact.Checksum = *patch.Checksum
-	}
-	if patch.ContentHash != nil {
-		artifact.ContentHash = *patch.ContentHash
-	}
-}
-
-func applyArtifactLifecycleUpdateMem(artifact *domain.Artifact, patch store.ArtifactUpdate, now time.Time) {
-	if patch.Visibility != nil {
-		artifact.Visibility = *patch.Visibility
-	}
-	if patch.RedactionStatus != nil {
-		artifact.RedactionStatus = *patch.RedactionStatus
-	}
-	if patch.DurableStatus != nil {
-		artifact.DurableStatus = *patch.DurableStatus
-	}
-	if patch.FinalizedAt != nil {
-		finalizedAt := *patch.FinalizedAt
-		artifact.FinalizedAt = &finalizedAt
-	}
-	artifact.UpdatedAt = now
-	normalizeArtifactHashesMem(artifact)
-	if artifact.DurableStatus == "finalized" && artifact.FinalizedAt == nil {
-		finalizedAt := artifact.UpdatedAt
-		artifact.FinalizedAt = &finalizedAt
-	}
-}
-
-func applyArtifactFinalizeMem(artifact *domain.Artifact, finalize store.ArtifactFinalize, now time.Time) {
-	if finalize.URI != nil {
-		artifact.URI = *finalize.URI
-	}
-	if finalize.Summary != nil {
-		artifact.Summary = *finalize.Summary
-	}
-	if finalize.MIMEType != nil {
-		artifact.MIMEType = *finalize.MIMEType
-	}
-	if finalize.SizeBytes != nil {
-		artifact.SizeBytes = *finalize.SizeBytes
-	}
-	if finalize.Checksum != nil {
-		artifact.Checksum = *finalize.Checksum
-	}
-	if finalize.ContentHash != nil {
-		artifact.ContentHash = *finalize.ContentHash
-	}
-	if finalize.Visibility != nil {
-		artifact.Visibility = *finalize.Visibility
-	}
-	if finalize.RedactionStatus != nil {
-		artifact.RedactionStatus = *finalize.RedactionStatus
-	}
-	if finalize.Metadata != nil {
-		artifact.Metadata = cloneMap(*finalize.Metadata)
-	}
-	if artifact.ContentHash == "" {
-		artifact.ContentHash = artifact.Checksum
-	}
-	if artifact.Checksum == "" {
-		artifact.Checksum = artifact.ContentHash
-	}
-	artifact.DurableStatus = "finalized"
-	finalizedAt := now
-	artifact.FinalizedAt = &finalizedAt
-	artifact.UpdatedAt = now
-}
-
-func (s *artifactStore) verifyFinalizedArtifactContentMem(ws, artifactID string, artifact *domain.Artifact) error {
-	if strings.TrimSpace(artifact.URI) == "" {
-		return fmt.Errorf("artifact %q in workspace %q requires uri before finalize: %w", artifactID, ws, domain.ErrInvalidTransition)
-	}
-	body, hasContent := s.content[ws][artifactID]
-	if !hasContent {
-		return nil
-	}
-	if artifact.SizeBytes != int64(len(body)) {
-		return fmt.Errorf("artifact %q in workspace %q size mismatch: %w", artifactID, ws, domain.ErrInvalidTransition)
-	}
-	sum := sha256.Sum256(body)
-	actual := "sha256:" + hex.EncodeToString(sum[:])
-	if expected := strings.TrimSpace(firstNonEmptyArtifactMem(artifact.ContentHash, artifact.Checksum)); expected != "" && !strings.EqualFold(actual, expected) {
-		return fmt.Errorf("artifact %q in workspace %q content hash mismatch: %w", artifactID, ws, domain.ErrInvalidTransition)
-	}
-	return nil
-}
-
-func firstNonEmptyArtifactMem(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return value
-		}
-	}
-	return ""
 }
 
 func cloneTerminalSession(t *domain.TerminalSession) *domain.TerminalSession {
@@ -435,7 +108,7 @@ func cloneTerminalSession(t *domain.TerminalSession) *domain.TerminalSession {
 	return &out
 }
 
-func cloneArtifact(a *domain.Artifact) *domain.Artifact {
+func cloneArtifact(a *artifacts.Artifact) *artifacts.Artifact {
 	out := *a
 	out.Metadata = cloneMap(a.Metadata)
 	out.FinalizedAt = clonePtr(a.FinalizedAt)
@@ -444,10 +117,6 @@ func cloneArtifact(a *domain.Artifact) *domain.Artifact {
 
 func terminalMatches(t *domain.TerminalSession, f store.TerminalSessionFilter) bool {
 	return (f.AgentID == "" || t.AgentID == f.AgentID) && (f.SessionID == "" || t.SessionID == f.SessionID) && (f.NodeID == "" || t.NodeID == f.NodeID) && (f.TaskID == "" || t.TaskID == f.TaskID) && (f.Status == "" || t.Status == f.Status)
-}
-
-func artifactMatchesMem(a *domain.Artifact, f store.ArtifactFilter) bool {
-	return (f.AgentID == "" || a.AgentID == f.AgentID) && (f.SessionID == "" || a.SessionID == f.SessionID) && (f.TerminalID == "" || a.TerminalID == f.TerminalID) && (f.TaskID == "" || a.TaskID == f.TaskID) && (f.OwnerType == "" || a.OwnerType == f.OwnerType) && (f.OwnerID == "" || a.OwnerID == f.OwnerID) && (f.Type == "" || a.Type == f.Type) && (f.Status == "" || a.DurableStatus == f.Status)
 }
 
 type agentLeaseStore struct {

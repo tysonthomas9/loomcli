@@ -572,7 +572,7 @@ func TestCaptureCodexInteractiveTranscriptPersistsSessionArtifactAndRef(t *testi
 		t.Fatalf("concurrent metadata was lost: %#v", session.Metadata)
 	}
 
-	artifact, err := st.Artifacts().Get(ctx, "WS", "transcript-lead-session")
+	artifact, err := st.ArtifactQueries().GetArtifactRecord(ctx, "WS", "transcript-lead-session")
 	if err != nil {
 		t.Fatalf("get transcript artifact: %v", err)
 	}
@@ -585,11 +585,7 @@ func TestCaptureCodexInteractiveTranscriptPersistsSessionArtifactAndRef(t *testi
 	if artifact.Metadata["transcript_truncated"] != "" {
 		t.Fatalf("small transcript incorrectly marked truncated: %#v", artifact.Metadata)
 	}
-	reader, ok := st.Artifacts().(store.ArtifactContentReader)
-	if !ok {
-		t.Fatal("memstore artifacts do not implement ArtifactContentReader")
-	}
-	content, err := reader.ReadContent(ctx, "WS", artifact.ArtifactID)
+	content, err := st.ArtifactQueries().ReadArtifactContent(ctx, "WS", artifact.ArtifactID)
 	if err != nil {
 		t.Fatalf("read transcript content: %v", err)
 	}

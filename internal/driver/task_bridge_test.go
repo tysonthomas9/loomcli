@@ -429,7 +429,7 @@ func TestHostBridgeTaskExecutorAppliesPatchUploadsAndFinalizesArtifact(t *testin
 	if result.RuntimeMetadata["patch_back_status"] != PatchBackApplied {
 		t.Fatalf("metadata = %+v, want patch-back applied", result.RuntimeMetadata)
 	}
-	artifact, err := st.Artifacts().Get(ctx, "WS", "patch-task-run-1")
+	artifact, err := st.ArtifactQueries().GetArtifactRecord(ctx, "WS", "patch-task-run-1")
 	if err != nil {
 		t.Fatalf("get artifact: %v", err)
 	}
@@ -505,20 +505,14 @@ func TestHostBridgeTaskExecutorPersistsPublishedPatchWithoutPatchBack(t *testing
 	if _, ok := result.RuntimeMetadata["patch_back_status"]; ok {
 		t.Fatalf("published delivery unexpectedly attempted patch-back: %+v", result.RuntimeMetadata)
 	}
-	artifact, err := st.Artifacts().Get(ctx, "WS", "patch-task-run-1")
+	artifact, err := st.ArtifactQueries().GetArtifactRecord(ctx, "WS", "patch-task-run-1")
 	if err != nil {
 		t.Fatalf("get patch artifact: %v", err)
 	}
 	if artifact.Type != "patch" || artifact.DurableStatus != "finalized" || artifact.ContentHash == "" {
 		t.Fatalf("patch artifact = %+v, want finalized exact diff evidence", artifact)
 	}
-	contentReader, ok := st.Artifacts().(interface {
-		ReadContent(context.Context, string, string) ([]byte, error)
-	})
-	if !ok {
-		t.Fatal("artifact store does not expose ReadContent")
-	}
-	content, err := contentReader.ReadContent(ctx, "WS", "patch-task-run-1")
+	content, err := st.ArtifactQueries().ReadArtifactContent(ctx, "WS", "patch-task-run-1")
 	if err != nil {
 		t.Fatalf("read patch artifact content: %v", err)
 	}
@@ -559,7 +553,7 @@ func TestHostBridgeTaskExecutorPreservesFinalizedPatchArtifactOnConflict(t *test
 	if result.RuntimeMetadata["patch_preserved"] != "true" || result.RuntimeMetadata["patch_back_status"] != PatchBackConflict {
 		t.Fatalf("metadata = %+v, want preserved patch conflict", result.RuntimeMetadata)
 	}
-	artifact, err := st.Artifacts().Get(ctx, "WS", "patch-task-run-1")
+	artifact, err := st.ArtifactQueries().GetArtifactRecord(ctx, "WS", "patch-task-run-1")
 	if err != nil {
 		t.Fatalf("get artifact: %v", err)
 	}
@@ -609,7 +603,7 @@ func TestHostBridgeTaskExecutorThroughRequestTaskRun(t *testing.T) {
 	if len(outcome.ArtifactIDs) != 1 || outcome.ArtifactIDs[0] != "patch-task-run-1" {
 		t.Fatalf("outcome artifact ids = %+v, want patch artifact", outcome.ArtifactIDs)
 	}
-	artifact, err := st.Artifacts().Get(ctx, "TEST", "patch-task-run-1")
+	artifact, err := st.ArtifactQueries().GetArtifactRecord(ctx, "TEST", "patch-task-run-1")
 	if err != nil {
 		t.Fatalf("get artifact: %v", err)
 	}
@@ -674,7 +668,7 @@ func TestHostBridgeTaskExecutorRegistersFinalizedRunnerArtifacts(t *testing.T) {
 	if outcome.Run.ArtifactsRef != "artifacts://task-run-1" {
 		t.Fatalf("artifacts ref = %q, want default task-run artifact ref", outcome.Run.ArtifactsRef)
 	}
-	artifact, err := st.Artifacts().Get(ctx, "TEST", "artifact-task-run-1")
+	artifact, err := st.ArtifactQueries().GetArtifactRecord(ctx, "TEST", "artifact-task-run-1")
 	if err != nil {
 		t.Fatalf("get runner artifact: %v", err)
 	}
@@ -739,7 +733,7 @@ func TestHostBridgeTaskExecutorPersistsFlueTranscriptWithoutSessionShadow(t *tes
 	if _, err := st.AgentSessions().Get(ctx, "TEST", "flue-task-run-1"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("batch TaskRun created Interaction AgentSession shadow: err=%v", err)
 	}
-	transcriptArtifact, err := st.Artifacts().Get(ctx, "TEST", "transcript-task-run-1")
+	transcriptArtifact, err := st.ArtifactQueries().GetArtifactRecord(ctx, "TEST", "transcript-task-run-1")
 	if err != nil {
 		t.Fatalf("get transcript artifact: %v", err)
 	}
@@ -748,13 +742,7 @@ func TestHostBridgeTaskExecutorPersistsFlueTranscriptWithoutSessionShadow(t *tes
 		transcriptArtifact.Type != "transcript" {
 		t.Fatalf("transcript artifact = %+v, want finalized transcript owned only by TaskRun", transcriptArtifact)
 	}
-	contentReader, ok := st.Artifacts().(interface {
-		ReadContent(context.Context, string, string) ([]byte, error)
-	})
-	if !ok {
-		t.Fatal("artifact store does not expose ReadContent")
-	}
-	content, err := contentReader.ReadContent(ctx, "TEST", "transcript-task-run-1")
+	content, err := st.ArtifactQueries().ReadArtifactContent(ctx, "TEST", "transcript-task-run-1")
 	if err != nil {
 		t.Fatalf("read transcript artifact content: %v", err)
 	}

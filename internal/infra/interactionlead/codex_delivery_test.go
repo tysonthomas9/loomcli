@@ -417,7 +417,7 @@ func seedAssignedLeadIdentity(t *testing.T, st store.Store) {
 	}
 }
 
-func setCodexRuntimeMetadata(t *testing.T, st store.Store, workspace, sessionID, endpoint, threadID string) {
+func setCodexRuntimeMetadata(t *testing.T, st sessionRuntimeFixtureStore, workspace, sessionID, endpoint, threadID string) {
 	t.Helper()
 	ctx := context.Background()
 	if err := UpdateCodexRuntimeMetadata(ctx, testSessionRuntime(st), workspace, sessionID, CodexRuntimeMetadata{

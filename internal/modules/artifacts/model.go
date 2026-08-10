@@ -25,27 +25,28 @@ const (
 // Artifact is the transport-neutral Artifacts aggregate returned by public
 // commands. Metadata is defensively copied at the module boundary.
 type Artifact struct {
-	WorkspaceKey    string
-	ArtifactID      string
-	AgentID         string
-	SessionID       string
-	TaskID          string
-	OwnerType       OwnerType
-	OwnerID         string
-	Type            string
-	URI             string
-	Summary         string
-	MIMEType        string
-	SizeBytes       int64
-	Checksum        string
-	ContentHash     string
-	Visibility      string
-	RedactionStatus string
-	DurableStatus   DurableStatus
-	Metadata        map[string]string
-	FinalizedAt     *time.Time
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	WorkspaceKey    string            `json:"workspace_key"`
+	ArtifactID      string            `json:"artifact_id"`
+	AgentID         string            `json:"agent_id,omitempty"`
+	SessionID       string            `json:"session_id,omitempty"`
+	TerminalID      string            `json:"terminal_id,omitempty"`
+	TaskID          string            `json:"task_id,omitempty"`
+	OwnerType       OwnerType         `json:"owner_type,omitempty"`
+	OwnerID         string            `json:"owner_id,omitempty"`
+	Type            string            `json:"type"`
+	URI             string            `json:"uri,omitempty"`
+	Summary         string            `json:"summary,omitempty"`
+	MIMEType        string            `json:"mime_type,omitempty"`
+	SizeBytes       int64             `json:"size_bytes,omitempty"`
+	Checksum        string            `json:"checksum,omitempty"`
+	ContentHash     string            `json:"content_hash,omitempty"`
+	Visibility      string            `json:"visibility,omitempty"`
+	RedactionStatus string            `json:"redaction_status,omitempty"`
+	DurableStatus   DurableStatus     `json:"durable_status,omitempty"`
+	Metadata        map[string]string `json:"metadata,omitempty"`
+	FinalizedAt     *time.Time        `json:"finalized_at,omitempty"`
+	CreatedAt       time.Time         `json:"created_at"`
+	UpdatedAt       time.Time         `json:"updated_at"`
 }
 
 // ArtifactReference is the immutable durable association committed by the

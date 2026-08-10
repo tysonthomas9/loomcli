@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -165,7 +166,9 @@ func (s *Store) AgentSessions() store.AgentSessionStore { return s.sessions }
 
 func (s *Store) TerminalSessions() store.TerminalSessionStore { return s.terminals }
 
-func (s *Store) Artifacts() store.ArtifactStore { return s.artifacts }
+// ArtifactQueries exposes the Artifacts-owned read port implemented by the
+// same in-memory persistence adapter used by lifecycle tests.
+func (s *Store) ArtifactQueries() artifacts.QueryStore { return s.artifacts }
 
 func (s *Store) AgentLeases() store.AgentLeaseStore { return s.leases }
 

@@ -17,7 +17,10 @@ func BuildArtifactsCapability(execution *appserve.ExecutionCapability, handle *b
 	if handle == nil || handle.FleetDBClient() == nil {
 		return nil, fmt.Errorf("compose Artifacts: shared FleetDB client is required")
 	}
-	return execution.NewArtifactsCapability(handle.FleetDBClient().ArtifactCommands())
+	return execution.NewArtifactsCapability(
+		handle.FleetDBClient().ArtifactCommands(),
+		handle.FleetDBClient().ArtifactQueries(),
+	)
 }
 
 // BuildExecutionAndArtifactsCapabilities composes the adjacent Phase 4

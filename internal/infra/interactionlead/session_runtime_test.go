@@ -6,18 +6,24 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-// storeBackedSessionRuntime is a legacy-store test double only. Production
+type sessionRuntimeFixtureStore interface {
+	store.Store
+	SeedArtifact(context.Context, artifacts.Artifact, []byte) (*artifacts.Artifact, error)
+}
+
+// storeBackedSessionRuntime is an owner-typed test double only. Production
 // child code receives the owner-fenced HTTP client.
 type storeBackedSessionRuntime struct {
-	store     store.Store
+	store     sessionRuntimeFixtureStore
 	published []interaction.PublishTranscriptCommand
 }
 
-func testSessionRuntime(st store.Store) SessionRuntime {
+func testSessionRuntime(st sessionRuntimeFixtureStore) SessionRuntime {
 	return &storeBackedSessionRuntime{store: st}
 }
 
@@ -87,11 +93,11 @@ func (runtime *storeBackedSessionRuntime) PublishTranscript(
 		return err
 	}
 	artifactID := "transcript-" + command.SessionID
-	if _, err := store.UploadContentArtifact(ctx, runtime.store.Artifacts(), store.ArtifactCreate{
+	if _, err := runtime.store.SeedArtifact(ctx, artifacts.Artifact{
 		WorkspaceKey: command.WorkspaceKey, ArtifactID: artifactID,
 		AgentID: session.AgentID, SessionID: session.SessionID, TaskID: session.TaskID,
-		OwnerType: "session", OwnerID: session.SessionID, Type: "transcript",
-		MIMEType: "application/x-ndjson", DurableStatus: "declared",
+		OwnerType: artifacts.OwnerSession, OwnerID: session.SessionID, Type: "transcript",
+		MIMEType: "application/x-ndjson", DurableStatus: artifacts.StatusFinalized,
 		Metadata: command.Metadata,
 	}, command.Content); err != nil {
 		return err

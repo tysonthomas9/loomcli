@@ -36,7 +36,6 @@ type Store interface {
 	Nodes() NodeStore
 	AgentSessions() AgentSessionStore
 	TerminalSessions() TerminalSessionStore
-	Artifacts() ArtifactStore
 	AgentLeases() AgentLeaseStore
 	AgentOwnershipLeases() AgentOwnershipLeaseStore
 	AgentInboxMessages() AgentInboxMessageStore

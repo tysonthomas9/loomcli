@@ -799,17 +799,11 @@ func TestTaskWorkerRetryPersistsDistinctAttemptTranscriptsAndCompletes(t *testin
 		t.Fatalf("successful retry transcript ref = %q, want attempt-2 artifact", second.Run.RuntimeMetadata["transcript_ref"])
 	}
 
-	contentReader, ok := st.Artifacts().(interface {
-		ReadContent(context.Context, string, string) ([]byte, error)
-	})
-	if !ok {
-		t.Fatal("artifact store does not expose ReadContent")
-	}
-	firstContent, err := contentReader.ReadContent(ctx, "TEST", firstTranscriptID)
+	firstContent, err := st.ArtifactQueries().ReadArtifactContent(ctx, "TEST", firstTranscriptID)
 	if err != nil {
 		t.Fatalf("read first transcript: %v", err)
 	}
-	secondContent, err := contentReader.ReadContent(ctx, "TEST", secondTranscriptID)
+	secondContent, err := st.ArtifactQueries().ReadArtifactContent(ctx, "TEST", secondTranscriptID)
 	if err != nil {
 		t.Fatalf("read second transcript: %v", err)
 	}

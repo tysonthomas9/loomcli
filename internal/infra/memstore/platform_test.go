@@ -9,6 +9,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -1149,21 +1150,21 @@ func TestPlatformTaskRunCompleteRequiresReadyArtifacts(t *testing.T) {
 		RequiredArtifactIDs: []string{"missing-artifact"},
 		RequireArtifacts:    true,
 	}
-	if _, err := s.TaskRuns().Complete(ctx, "WS", "task-run-artifact-1", base); !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("Complete missing artifact err = %v, want ErrNotFound", err)
+	if _, err := s.TaskRuns().Complete(ctx, "WS", "task-run-artifact-1", base); !errors.Is(err, artifacts.ErrNotFound) {
+		t.Fatalf("Complete missing artifact err = %v, want artifacts.ErrNotFound", err)
 	}
 
-	if _, err := s.Artifacts().Create(ctx, store.ArtifactCreate{
+	if _, err := s.SeedArtifact(ctx, artifacts.Artifact{
 		WorkspaceKey:  "WS",
 		ArtifactID:    "artifact-wrong-owner",
 		TaskID:        "WS-4",
-		OwnerType:     "task_run",
+		OwnerType:     artifacts.OwnerTaskRun,
 		OwnerID:       "other-task-run",
 		Type:          "patch",
 		URI:           "artifact://wrong-owner",
 		ContentHash:   "sha256:wrong-owner",
-		DurableStatus: "finalized",
-	}); err != nil {
+		DurableStatus: artifacts.StatusFinalized,
+	}, nil); err != nil {
 		t.Fatalf("Create wrong-owner artifact: %v", err)
 	}
 	base.CompletionID = "completion-artifact-wrong-owner"
@@ -1172,17 +1173,17 @@ func TestPlatformTaskRunCompleteRequiresReadyArtifacts(t *testing.T) {
 		t.Fatalf("Complete wrong-owner artifact err = %v, want ErrInvalidTransition", err)
 	}
 
-	if _, err := s.Artifacts().Create(ctx, store.ArtifactCreate{
+	if _, err := s.SeedArtifact(ctx, artifacts.Artifact{
 		WorkspaceKey:  "WS",
 		ArtifactID:    "artifact-wrong-task",
 		TaskID:        "WS-other",
-		OwnerType:     "task_run",
+		OwnerType:     artifacts.OwnerTaskRun,
 		OwnerID:       "task-run-artifact-1",
 		Type:          "patch",
 		URI:           "artifact://wrong-task",
 		ContentHash:   "sha256:wrong-task",
-		DurableStatus: "finalized",
-	}); err != nil {
+		DurableStatus: artifacts.StatusFinalized,
+	}, nil); err != nil {
 		t.Fatalf("Create wrong-task artifact: %v", err)
 	}
 	base.CompletionID = "completion-artifact-wrong-task"
@@ -1191,15 +1192,15 @@ func TestPlatformTaskRunCompleteRequiresReadyArtifacts(t *testing.T) {
 		t.Fatalf("Complete wrong-task artifact err = %v, want ErrInvalidTransition", err)
 	}
 
-	if _, err := s.Artifacts().Create(ctx, store.ArtifactCreate{
+	if _, err := s.SeedArtifact(ctx, artifacts.Artifact{
 		WorkspaceKey:  "WS",
 		ArtifactID:    "artifact-empty-hash",
 		TaskID:        "WS-4",
-		OwnerType:     "task_run",
+		OwnerType:     artifacts.OwnerTaskRun,
 		OwnerID:       "task-run-artifact-1",
 		Type:          "patch",
-		DurableStatus: "finalized",
-	}); err != nil {
+		DurableStatus: artifacts.StatusFinalized,
+	}, nil); err != nil {
 		t.Fatalf("Create empty-hash artifact: %v", err)
 	}
 	base.CompletionID = "completion-artifact-empty-hash"
@@ -1208,16 +1209,16 @@ func TestPlatformTaskRunCompleteRequiresReadyArtifacts(t *testing.T) {
 		t.Fatalf("Complete empty-hash artifact err = %v, want ErrInvalidTransition", err)
 	}
 
-	if _, err := s.Artifacts().Create(ctx, store.ArtifactCreate{
+	if _, err := s.SeedArtifact(ctx, artifacts.Artifact{
 		WorkspaceKey:  "WS",
 		ArtifactID:    "artifact-declared",
 		TaskID:        "WS-4",
-		OwnerType:     "task_run",
+		OwnerType:     artifacts.OwnerTaskRun,
 		OwnerID:       "task-run-artifact-1",
 		Type:          "patch",
 		ContentHash:   "sha256:declared",
-		DurableStatus: "declared",
-	}); err != nil {
+		DurableStatus: artifacts.StatusDeclared,
+	}, nil); err != nil {
 		t.Fatalf("Create declared artifact: %v", err)
 	}
 	base.CompletionID = "completion-artifact-declared"
@@ -1226,10 +1227,12 @@ func TestPlatformTaskRunCompleteRequiresReadyArtifacts(t *testing.T) {
 		t.Fatalf("Complete declared artifact err = %v, want ErrInvalidTransition", err)
 	}
 
-	uri := "artifact://artifact-declared"
-	if _, err := s.Artifacts().Finalize(ctx, "WS", "artifact-declared", store.ArtifactFinalize{
-		URI: &uri,
-	}); err != nil {
+	if _, err := s.SeedArtifact(ctx, artifacts.Artifact{
+		WorkspaceKey: "WS", ArtifactID: "artifact-declared", TaskID: "WS-4",
+		OwnerType: artifacts.OwnerTaskRun, OwnerID: "task-run-artifact-1", Type: "patch",
+		URI: "artifact://artifact-declared", ContentHash: "sha256:declared",
+		DurableStatus: artifacts.StatusFinalized,
+	}, nil); err != nil {
 		t.Fatalf("Finalize artifact: %v", err)
 	}
 	base.CompletionID = "completion-artifact-finalized"
@@ -1260,17 +1263,17 @@ func TestPlatformTaskRunCompleteRequiresCloudSafeArtifactsForCloudSandbox(t *tes
 	}); err != nil {
 		t.Fatalf("Create cloud artifact task run: %v", err)
 	}
-	if _, err := s.Artifacts().Create(ctx, store.ArtifactCreate{
+	if _, err := s.SeedArtifact(ctx, artifacts.Artifact{
 		WorkspaceKey:  "WS",
 		ArtifactID:    "artifact-cloud-file",
 		TaskID:        "WS-4",
-		OwnerType:     "task_run",
+		OwnerType:     artifacts.OwnerTaskRun,
 		OwnerID:       "task-run-cloud-artifact",
 		Type:          "patch",
 		URI:           "file:///tmp/patch.diff",
 		ContentHash:   "sha256:cloud-file",
-		DurableStatus: "finalized",
-	}); err != nil {
+		DurableStatus: artifacts.StatusFinalized,
+	}, nil); err != nil {
 		t.Fatalf("Create cloud file artifact: %v", err)
 	}
 	running, err := s.TaskRuns().Get(ctx, "WS", "task-run-cloud-artifact")
@@ -1312,8 +1315,12 @@ func TestPlatformTaskRunCompleteRequiresCloudSafeArtifactsForCloudSandbox(t *tes
 		t.Fatalf("Complete cloud file artifact err = %v, want ErrInvalidTransition", err)
 	}
 
-	uri := "artifact://artifact-cloud-file"
-	if _, err := s.Artifacts().Update(ctx, "WS", "artifact-cloud-file", store.ArtifactUpdate{URI: &uri}); err != nil {
+	if _, err := s.SeedArtifact(ctx, artifacts.Artifact{
+		WorkspaceKey: "WS", ArtifactID: "artifact-cloud-file", TaskID: "WS-4",
+		OwnerType: artifacts.OwnerTaskRun, OwnerID: "task-run-cloud-artifact", Type: "patch",
+		URI: "artifact://artifact-cloud-file", ContentHash: "sha256:cloud-file",
+		DurableStatus: artifacts.StatusFinalized,
+	}, nil); err != nil {
 		t.Fatalf("Update cloud artifact URI: %v", err)
 	}
 	complete.CompletionID = "completion-cloud-safe"

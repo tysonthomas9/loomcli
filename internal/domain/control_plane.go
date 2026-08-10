@@ -134,31 +134,6 @@ type TerminalSession struct {
 	UpdatedAt       time.Time             `json:"updated_at"`
 }
 
-type Artifact struct {
-	WorkspaceKey    string            `json:"workspace_key"`
-	ArtifactID      string            `json:"artifact_id"`
-	AgentID         string            `json:"agent_id,omitempty"`
-	SessionID       string            `json:"session_id,omitempty"`
-	TerminalID      string            `json:"terminal_id,omitempty"`
-	TaskID          string            `json:"task_id,omitempty"`
-	OwnerType       string            `json:"owner_type,omitempty"`
-	OwnerID         string            `json:"owner_id,omitempty"`
-	Type            string            `json:"type"`
-	URI             string            `json:"uri,omitempty"`
-	Summary         string            `json:"summary,omitempty"`
-	MIMEType        string            `json:"mime_type,omitempty"`
-	SizeBytes       int64             `json:"size_bytes,omitempty"`
-	Checksum        string            `json:"checksum,omitempty"`
-	ContentHash     string            `json:"content_hash,omitempty"`
-	Visibility      string            `json:"visibility,omitempty"`
-	RedactionStatus string            `json:"redaction_status,omitempty"`
-	DurableStatus   string            `json:"durable_status,omitempty"`
-	Metadata        map[string]string `json:"metadata,omitempty"`
-	FinalizedAt     *time.Time        `json:"finalized_at,omitempty"`
-	CreatedAt       time.Time         `json:"created_at"`
-	UpdatedAt       time.Time         `json:"updated_at"`
-}
-
 type AgentLeaseStatus string
 
 const (

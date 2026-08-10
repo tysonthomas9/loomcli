@@ -41,7 +41,6 @@ type ProjectionStore interface {
 	WorkerProfiles() store.WorkerProfileStore
 	TaskRuns() store.TaskRunStore
 	TaskRunEvents() store.TaskRunEventStore
-	Artifacts() store.ArtifactStore
 	TriggerBindings() store.TriggerBindingStore
 	TriggerEvents() store.TriggerEventStore
 	TriggerDeliveries() store.TriggerDeliveryStore

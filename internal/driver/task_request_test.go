@@ -675,7 +675,7 @@ func TestRequestTaskRunRejectsStaleParentOwner(t *testing.T) {
 	}
 }
 
-func setupRunningDriverRun(t *testing.T) (context.Context, store.Store, *domain.DriverRun) {
+func setupRunningDriverRun(t *testing.T) (context.Context, *memstore.Store, *domain.DriverRun) {
 	t.Helper()
 	ctx, st, run := setupQueuedDriverRun(t)
 	registerTaskWorkerNode(t, ctx, st, "node-1", []string{"codex-default", "local-noop", "noop", "remote-sandbox", "daytona", "flue-local"}, []string{"git", "shell"})
@@ -686,7 +686,7 @@ func setupRunningDriverRun(t *testing.T) (context.Context, store.Store, *domain.
 	return ctx, st, claimed
 }
 
-func setupQueuedDriverRun(t *testing.T) (context.Context, store.Store, *domain.DriverRun) {
+func setupQueuedDriverRun(t *testing.T) (context.Context, *memstore.Store, *domain.DriverRun) {
 	t.Helper()
 	ctx := context.Background()
 	root := t.TempDir()

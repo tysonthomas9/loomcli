@@ -100,7 +100,12 @@ func (taskWorkerTestAuthorities) ResolveDriverRunAuthority(context.Context, stri
 	return authority.ExecutionAuthority{}, nil
 }
 
-func wireTaskWorkerTestExecution(worker *TaskWorker, st store.Store) {
+type taskWorkerTestStore interface {
+	store.Store
+	bridgeArtifactFixtureStore
+}
+
+func wireTaskWorkerTestExecution(worker *TaskWorker, st taskWorkerTestStore) {
 	adapter := taskWorkerTestExecution{store: st}
 	worker.Execution = adapter
 	worker.TaskRunAuthorities = taskWorkerTestAuthorities{}

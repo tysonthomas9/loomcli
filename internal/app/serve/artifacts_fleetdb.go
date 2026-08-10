@@ -215,7 +215,15 @@ func cloneArtifactTimePointer(value *time.Time) *time.Time {
 // Artifact lifecycle. Consumers receive only the module API; the shared
 // FleetDB transport and its service credentials remain inside composition.
 type ArtifactsCapability struct {
-	api artifacts.API
+	api     artifacts.API
+	queries artifacts.QueryAPI
+}
+
+func (capability *ArtifactsCapability) ArtifactQueries() artifacts.QueryAPI {
+	if capability == nil {
+		return nil
+	}
+	return capability.queries
 }
 
 func (capability *ArtifactsCapability) ArtifactsAPI() artifacts.API {
@@ -227,14 +235,21 @@ func (capability *ArtifactsCapability) ArtifactsAPI() artifacts.API {
 
 // NewArtifactsCapability composes Artifacts with the same private authority
 // issuer as Execution. The issuer remains sealed inside serve composition.
-func (capability *ExecutionCapability) NewArtifactsCapability(transport infrafleetdb.ArtifactTransport) (*ArtifactsCapability, error) {
+func (capability *ExecutionCapability) NewArtifactsCapability(
+	transport infrafleetdb.ArtifactTransport,
+	queries artifacts.QueryStore,
+) (*ArtifactsCapability, error) {
 	if capability == nil || capability.issuer == nil {
 		return nil, fmt.Errorf("compose Artifacts: shared Execution authority issuer is required")
 	}
-	return newArtifactsCapability(transport, capability.issuer)
+	return newArtifactsCapability(transport, queries, capability.issuer)
 }
 
-func newArtifactsCapability(transport infrafleetdb.ArtifactTransport, issuer *authority.Issuer) (*ArtifactsCapability, error) {
+func newArtifactsCapability(
+	transport infrafleetdb.ArtifactTransport,
+	queryStore artifacts.QueryStore,
+	issuer *authority.Issuer,
+) (*ArtifactsCapability, error) {
 	adapter, err := artifactfleetdb.New(newArtifactsFleetDBTransport(transport))
 	if err != nil {
 		return nil, fmt.Errorf("compose Artifacts: %w", err)
@@ -250,5 +265,9 @@ func newArtifactsCapability(transport infrafleetdb.ArtifactTransport, issuer *au
 	if err != nil {
 		return nil, fmt.Errorf("compose Artifacts service: %w", err)
 	}
-	return &ArtifactsCapability{api: service}, nil
+	queries, err := artifacts.NewQuery(queryStore)
+	if err != nil {
+		return nil, fmt.Errorf("compose Artifacts queries: %w", err)
+	}
+	return &ArtifactsCapability{api: service, queries: queries}, nil
 }

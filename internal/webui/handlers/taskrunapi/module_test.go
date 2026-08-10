@@ -18,6 +18,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/testutil"
@@ -123,7 +124,7 @@ func (f *fakeIssueBackend) Get(_ context.Context, _ string) (*backend.IssueDetai
 
 type testHarness struct {
 	server  *httptest.Server
-	store   store.Store
+	store   *memstore.Store
 	backend *fakeIssueBackend
 	designs *taskRunWorkItemDesignPortStub
 	module  *Module
@@ -522,7 +523,7 @@ func TestTaskRunArtifactLifecycle(t *testing.T) {
 	if artifact["durableStatus"] != "declared" {
 		t.Fatalf("declared artifact status = %v", artifact["durableStatus"])
 	}
-	persisted, err := h.store.Artifacts().Get(context.Background(), "WS", "artifact-1")
+	persisted, err := h.store.ArtifactQueries().GetArtifactRecord(context.Background(), "WS", "artifact-1")
 	if err != nil {
 		t.Fatalf("get declared artifact: %v", err)
 	}
@@ -583,20 +584,20 @@ func TestTaskRunArtifactMutationFailsClosedWithoutCapability(t *testing.T) {
 	if resp.StatusCode != http.StatusServiceUnavailable || errorCode(t, decoded) != "unavailable" {
 		t.Fatalf("artifact-declare without capability = %d %v, want 503 unavailable", resp.StatusCode, decoded)
 	}
-	if _, err := h.store.Artifacts().Get(context.Background(), "WS", "artifact-unavailable"); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := h.store.ArtifactQueries().GetArtifactRecord(context.Background(), "WS", "artifact-unavailable"); !errors.Is(err, artifactsmodule.ErrNotFound) {
 		t.Fatalf("artifact persisted without capability, get error = %v", err)
 	}
 }
 
 func TestTaskRunArtifactForeignOwnerHidden(t *testing.T) {
 	h := newHarness(t)
-	if _, err := h.store.Artifacts().Create(context.Background(), store.ArtifactCreate{
+	if _, err := h.store.SeedArtifact(context.Background(), artifactsmodule.Artifact{
 		WorkspaceKey: "WS",
 		ArtifactID:   "foreign-1",
-		OwnerType:    taskRunOwnerType,
+		OwnerType:    artifactsmodule.OwnerTaskRun,
 		OwnerID:      "task-run-other",
 		Type:         "patch",
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("create foreign artifact: %v", err)
 	}
 	for _, op := range []string{"artifact-get", "artifact-finalize"} {

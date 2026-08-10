@@ -16,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/localnodeconfig"
+	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -70,7 +71,7 @@ func TestHostBridgeTaskExecutorFailsClosedOnInvalidResult(t *testing.T) {
 				t.Fatalf("file content = %q, want unchanged (no patch applied)", repo.read("file.txt"))
 			}
 			// No artifacts of any kind reached the store.
-			artifacts, err := st.Artifacts().List(ctx, "WS", store.ArtifactFilter{})
+			artifacts, err := st.ArtifactQueries().ListArtifactRecords(ctx, "WS", artifactsmodule.SearchFilter{})
 			if err != nil {
 				t.Fatalf("list artifacts: %v", err)
 			}

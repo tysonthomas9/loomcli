@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 type classifyRoundTripFunc func(*http.Request) (*http.Response, error)
@@ -40,9 +39,9 @@ func TestClassifyHTTPError_RateLimitRemainsRetryable(t *testing.T) {
 	if !errors.Is(err, ErrRateLimited) {
 		t.Fatalf("err = %v, want errors.Is ErrRateLimited", err)
 	}
-	if !errors.Is(err, store.ErrControlPlaneRateLimited) {
+	if !errors.Is(err, domain.ErrRateLimited) {
 		t.Fatalf(
-			"err = %v, want errors.Is ErrControlPlaneRateLimited",
+			"err = %v, want errors.Is domain.ErrRateLimited",
 			err,
 		)
 	}
@@ -65,9 +64,9 @@ func TestClassifyHTTPError_ServerFailureIsControlPlaneUnavailable(
 		http.StatusServiceUnavailable,
 		[]byte(`{"error":{"code":"unavailable","message":"try again"}}`),
 	)
-	if !errors.Is(err, store.ErrControlPlaneUnavailable) {
+	if !errors.Is(err, domain.ErrUnavailable) {
 		t.Fatalf(
-			"err = %v, want errors.Is ErrControlPlaneUnavailable",
+			"err = %v, want errors.Is domain.ErrUnavailable",
 			err,
 		)
 	}
@@ -95,9 +94,9 @@ func TestClientTransportFailureIsControlPlaneUnavailable(t *testing.T) {
 		"WS",
 		"session-1",
 	)
-	if !errors.Is(err, store.ErrControlPlaneUnavailable) {
+	if !errors.Is(err, domain.ErrUnavailable) {
 		t.Fatalf(
-			"err = %v, want errors.Is ErrControlPlaneUnavailable",
+			"err = %v, want errors.Is domain.ErrUnavailable",
 			err,
 		)
 	}

@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/infra/artifactcatalog"
 	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
@@ -32,6 +31,12 @@ var errNoUsableSessionStores = errors.New("no usable local session stores")
 
 func sessionControlPlaneReadError(message string, err error) error {
 	switch {
+	case errors.Is(err, domain.ErrNotFound), errors.Is(err, artifactsmodule.ErrNotFound):
+		return apperrors.NewServiceError(
+			apperrors.KindNotFound,
+			message,
+			err,
+		)
 	case errors.Is(err, domain.ErrRateLimited):
 		return apperrors.NewServiceError(
 			apperrors.KindRateLimited,
@@ -63,24 +68,32 @@ type ProjectionReader interface {
 	storeadapter.WorkspaceTopologyReader
 	TaskRuns() store.TaskRunStore
 	AgentSessions() store.AgentSessionStore
-	Artifacts() store.ArtifactStore
+}
+
+// ProjectionReaderWithArtifactQueries is the convenience composition surface
+// used by tests and narrow callers that hold a concrete persistence adapter.
+// Runtime Web UI composition injects the Artifacts capability QueryAPI
+// directly instead of routing it through the horizontal Store interface.
+type ProjectionReaderWithArtifactQueries interface {
+	ProjectionReader
+	ArtifactQueries() artifactsmodule.QueryStore
 }
 
 // NewSessionService creates a new SessionService implementation.
-func NewSessionService(st ProjectionReader, histStore HistoryReader) SessionService {
+func NewSessionService(st ProjectionReaderWithArtifactQueries, histStore HistoryReader) SessionService {
 	return NewSessionServiceWithRuntimeDir(st, histStore, "")
 }
 
 // NewSessionServiceWithRuntimeDir creates a SessionService that also searches
 // the daemon/runtime session store used by local desktop mode.
-func NewSessionServiceWithRuntimeDir(st ProjectionReader, histStore HistoryReader, runtimeDir string) SessionService {
+func NewSessionServiceWithRuntimeDir(st ProjectionReaderWithArtifactQueries, histStore HistoryReader, runtimeDir string) SessionService {
 	return NewSessionServiceWithArtifactQueries(st, histStore, runtimeDir, composeArtifactQueries(st))
 }
 
 // NewSessionServiceWithArtifactQueries composes session UI projections over
 // the Artifacts owner query surface. Production and boundary tests can inject
-// the capability directly; legacy constructors above retain compatibility by
-// adapting the composite Store once at composition time.
+// the capability directly; the convenience constructors derive it from the
+// owner-owned query port exposed by the projection reader.
 func NewSessionServiceWithArtifactQueries(
 	st ProjectionReader,
 	histStore HistoryReader,
@@ -90,12 +103,11 @@ func NewSessionServiceWithArtifactQueries(
 	return &sessionServiceImpl{store: st, artifacts: artifactQueries, histStore: histStore, runtimeDir: runtimeDir}
 }
 
-func composeArtifactQueries(st ProjectionReader) artifactsmodule.QueryAPI {
-	catalog, err := artifactcatalog.FromProvider(st)
-	if err != nil {
+func composeArtifactQueries(st ProjectionReaderWithArtifactQueries) artifactsmodule.QueryAPI {
+	if st == nil {
 		return nil
 	}
-	queries, err := artifactsmodule.NewQuery(catalog)
+	queries, err := artifactsmodule.NewQuery(st.ArtifactQueries())
 	if err != nil {
 		return nil
 	}
