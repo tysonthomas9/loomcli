@@ -381,34 +381,13 @@ func (s *Supervisor) clearAgentSessionState(ap *AgentProcess) {
 	ap.ResumeTaskID = ""          // per-cycle; re-detected in preFlightSetup (ResumeFailures persists)
 	ap.RecoveryMode = recoverCold // per-cycle; re-classified in preFlightSetup
 	ap.LastActivity = time.Time{}
+	// A child that died while parked on an interactive prompt never sends its
+	// "end", so the in-flight count must not survive into the next cycle: a
+	// stale pending count would suspend the output-timeout watchdog for an
+	// agent that is no longer waiting on anything.
+	ap.InputWaitPending = 0
+	ap.InputWaitSince = time.Time{}
 	ap.Mu.Unlock()
-}
-
-// RecordAgentActivity advances ap.LastActivity for the named agent toward the
-// observed PTY-output timestamp. It is a no-op if the agent isn't currently
-// supervised. Out-of-order heartbeats never regress the stored value — callers
-// can safely retry without ever rewinding the timestamp.
-func (s *Supervisor) RecordAgentActivity(agentName string, at time.Time) {
-	if agentName == "" || at.IsZero() {
-		return
-	}
-	s.AgentsMu.RLock()
-	var target *AgentProcess
-	for _, ap := range s.Agents {
-		if ap.Entry.Worktree == agentName {
-			target = ap
-			break
-		}
-	}
-	s.AgentsMu.RUnlock()
-	if target == nil {
-		return
-	}
-	target.Mu.Lock()
-	if at.After(target.LastActivity) {
-		target.LastActivity = at
-	}
-	target.Mu.Unlock()
 }
 
 // preFlightSetup verifies the backend is spawnable, then runs recovery,
