@@ -8,3 +8,6 @@
 # this records the ceiling. Shrink or remove the entry when the package is
 # split; do not raise it without recording why here.
 internal/cli/daemon/supervisor 28
+# internal/cli gained the daemon input-await seam (agent_input_await.go) with
+# the human answer path; 26th file, same sub-split end state applies.
+internal/cli 26

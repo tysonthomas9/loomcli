@@ -103,6 +103,36 @@ func (c *AgentIPCClient) InputWait(phase string) error {
 	return ipcResponseToError(resp, "ipc.input_wait")
 }
 
+// inputOp sends a pending-input operation (open/close) and returns any error.
+func (c *AgentIPCClient) inputOp(op string, args json.RawMessage) error {
+	_, err := c.inputOpData(op, args)
+	return err
+}
+
+// inputOpData sends a pending-input operation and returns the response body.
+// Ops ride the same one-shot request shape as everything else; the piggybacked
+// LastActivityAt is deliberately included so a long poll loop keeps liveness
+// fresh even though the harness itself is silent at a dialog.
+func (c *AgentIPCClient) inputOpData(op string, args json.RawMessage) (json.RawMessage, error) {
+	req := AgentIPCRequest{
+		Operation:      op,
+		AgentName:      c.AgentName,
+		SessionID:      c.SessionID,
+		LeaseID:        c.LeaseID,
+		LeaseToken:     c.LeaseToken,
+		LastActivityAt: c.snapshotActivity(),
+		Args:           args,
+	}
+	resp, err := sendAgentIPCRequest(c.SocketPath, req)
+	if err != nil {
+		return nil, err
+	}
+	if err := ipcResponseToError(resp, "ipc."+op); err != nil {
+		return nil, err
+	}
+	return resp.Data, nil
+}
+
 // Claim atomically claims an issue for this agent. Pass lockTTL=0 to use the
 // server's default TTL. Returns *backend.BackendError with KindConflict if
 // already claimed, KindNotFound if issue missing.

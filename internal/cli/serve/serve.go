@@ -627,6 +627,7 @@ func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimp
 		FrontendDir:          serveFrontendDir,
 		MonitorHandlers:      monitorHandlers,
 		AgentControlFn:       daemonwire.BuildAgentControlFn(),
+		AgentInputFn:         daemonwire.BuildAgentInputFn(),
 		DaemonSupervisorFn:   daemonwire.BuildDaemonSupervisorFn(),
 		DaemonConfigFn:       daemonwire.BuildDaemonConfigFn(),
 		AgentQueueFn:         daemonwire.BuildAgentQueueFn(),
