@@ -56,6 +56,7 @@ func (s *roleStore) Create(_ context.Context, in store.RoleCreate) (*domain.Role
 		AllowedTools:   append([]string(nil), in.AllowedTools...),
 		DeniedTools:    append([]string(nil), in.DeniedTools...),
 		MaxBudgetUSD:   clonePtr(in.MaxBudgetUSD),
+		MaxRunDuration: clonePtr(in.MaxRunDuration),
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
@@ -147,6 +148,9 @@ func (s *roleStore) Update(_ context.Context, ws, name string, patch store.RoleU
 	if patch.MaxBudgetUSD != nil {
 		r.MaxBudgetUSD = clonePtr(*patch.MaxBudgetUSD)
 	}
+	if patch.MaxRunDuration != nil {
+		r.MaxRunDuration = clonePtr(*patch.MaxRunDuration)
+	}
 	r.UpdatedAt = time.Now().UTC()
 	return cloneRole(r), nil
 }
@@ -181,5 +185,6 @@ func cloneRole(r *domain.Role) *domain.Role {
 	out.MaxPriority = clonePtr(r.MaxPriority)
 	out.MaxConcurrency = clonePtr(r.MaxConcurrency)
 	out.MaxBudgetUSD = clonePtr(r.MaxBudgetUSD)
+	out.MaxRunDuration = clonePtr(r.MaxRunDuration)
 	return &out
 }

@@ -95,6 +95,12 @@ func MergeRoleConfig(base, overlay cfgpkg.RoleConfig) cfgpkg.RoleConfig {
 	if overlay.MaxBudgetUSD != nil {
 		base.MaxBudgetUSD = overlay.MaxBudgetUSD
 	}
+	// A pointer, so an explicit 0 survives the merge: "this role opts out of the
+	// run-duration cap" has to be expressible, and a plain int could not tell it
+	// apart from "unset, inherit the daemon default".
+	if overlay.MaxRunDuration != nil {
+		base.MaxRunDuration = overlay.MaxRunDuration
+	}
 	if overlay.Backend != "" {
 		base.Backend = overlay.Backend
 	}

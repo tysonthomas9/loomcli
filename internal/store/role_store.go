@@ -28,6 +28,7 @@ type RoleCreate struct {
 	AllowedTools   []string
 	DeniedTools    []string
 	MaxBudgetUSD   *float64
+	MaxRunDuration *int
 }
 
 // RoleUpdate is the partial-update payload for roles.
@@ -52,6 +53,7 @@ type RoleUpdate struct {
 	AllowedTools   *[]string
 	DeniedTools    *[]string
 	MaxBudgetUSD   **float64
+	MaxRunDuration **int
 }
 
 // RoleStore is the persistence interface for Role entities. Roles are

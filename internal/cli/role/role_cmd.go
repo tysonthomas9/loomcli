@@ -86,6 +86,7 @@ var roleSetCmd = &cobra.Command{
   max_priority    integer
   max_concurrency integer
   max_budget_usd  float
+  max_run_duration integer (seconds; 0 disables the run-duration cap)
   skills          comma-separated list
   path_patterns   comma-separated list
   allowed_tools   comma-separated list
@@ -110,6 +111,7 @@ var roleUnsetCmd = &cobra.Command{
   max_priority    *int     (clear)
   max_concurrency *int     (clear)
   max_budget_usd  *float64 (clear)
+  max_run_duration *int    (clear — the role falls back to the daemon default)
   input_policy    (clear — the role then auto-answers no harness prompt)
   description / kind / prompt / prompt_file / model / task_filter / backend / effort  (set to "")
   skills / path_patterns / allowed_tools / denied_tools      (set to empty list)
@@ -365,6 +367,21 @@ func buildRolePatch(key, value string, unset bool) (store.RoleUpdate, error) {
 		}
 		ptr := &f
 		patch.MaxBudgetUSD = &ptr
+	case "max_run_duration":
+		if unset {
+			var nilInt *int
+			patch.MaxRunDuration = &nilInt
+			return patch, nil
+		}
+		n, err := strconv.Atoi(value)
+		if err != nil {
+			return patch, fmt.Errorf("max_run_duration must be an integer number of seconds: %w", err)
+		}
+		// 0 is accepted, not rejected: it is how a role says "no wall-clock cap
+		// on my runs". Clearing the field (unset) means something different —
+		// inherit the daemon default — which is why both spellings exist.
+		ptr := &n
+		patch.MaxRunDuration = &ptr
 	case "skills":
 		patch.Skills = sliceCSVPtr(value)
 	case "path_patterns":

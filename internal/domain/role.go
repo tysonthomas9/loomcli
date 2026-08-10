@@ -193,6 +193,13 @@ type Role struct {
 	DeniedTools    []string `json:"denied_tools,omitempty"`
 	MaxBudgetUSD   *float64 `json:"max_budget_usd,omitempty"`
 
+	// MaxRunDuration caps a single supervised run's wall-clock age, in
+	// seconds. The time-domain sibling of MaxBudgetUSD: one bounds what a run
+	// may spend, this bounds how long it may take. Nil inherits the daemon-wide
+	// default; <= 0 disables the cap for this role. Enforced by the supervisor's
+	// health checker, not by the agent — see supervisor/run_duration.go.
+	MaxRunDuration *int `json:"max_run_duration,omitempty"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
