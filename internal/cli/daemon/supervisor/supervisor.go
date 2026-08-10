@@ -441,7 +441,9 @@ func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
 		ap.Mu.Lock()
 		ap.ResumeFailures = 0 // cold-starting ⇒ let a future interruption recover again
 		ap.Mu.Unlock()
-		if err := s.recoverAgent(ap, 0); err != nil {
+		// Cold start: nothing here is being continued, so recovery takes its
+		// fully destructive form (incomplete=false).
+		if err := s.recoverAgent(ap, 0, false); err != nil {
 			slog.Warn("pre-flight recovery failed", "worktree", ap.Entry.Worktree, "err", err)
 		}
 	}
@@ -841,7 +843,7 @@ func (s *Supervisor) postMortemRecovery(ap *AgentProcess, exitCode int) {
 		slog.Info("skipping post-mortem recovery for yield exit", "worktree", ap.Entry.Worktree)
 		return
 	}
-	if err := s.recoverAgent(ap, exitCode); err != nil {
+	if err := s.recoverAgent(ap, exitCode, isIncompleteRun(ap)); err != nil {
 		slog.Warn("post-mortem recovery failed", "worktree", ap.Entry.Worktree, "err", err)
 	}
 }

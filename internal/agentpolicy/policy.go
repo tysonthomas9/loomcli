@@ -156,6 +156,17 @@ func decideDomain(d agenterr.DomainOutcome) Disposition {
 		// permission) must still stop rather than spin — so bounded counted
 		// retry with the default backoff, then Block.
 		return Disposition{Decision: Retry, Backoff: BPDefault, OnExhaustion: Block, BlockBudget: defaultBlockBudget}
+	case agenterr.IncompleteRunOutcome:
+		// The turn ended before the task did. Retrying is the right move — the
+		// worktree, the checkpoint and (across a daemon restart) the session id
+		// are all preserved for it — but it is a COUNTED retry: an agent that
+		// keeps handing back unfinished turns without ever signaling
+		// completion is the exact spiral max_retries exists to catch, and the
+		// clean-success reset would otherwise zero the budget every cycle.
+		// Bounded block escalation (defaultBlockBudget) so a task that can
+		// never be finished surfaces as failed instead of consuming turns
+		// forever; a run that does complete resets the budget as usual.
+		return Disposition{Decision: Retry, Backoff: BPDefault, OnExhaustion: Block, BlockBudget: defaultBlockBudget}
 	default:
 		return Disposition{Decision: Retry, Backoff: BPDefault, OnExhaustion: Block, BlockBudget: defaultBlockBudget}
 	}

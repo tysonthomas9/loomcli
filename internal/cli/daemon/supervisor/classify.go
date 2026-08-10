@@ -6,6 +6,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/agent"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
 
@@ -56,12 +57,64 @@ func (s *Supervisor) classifyAgentExit(ap *AgentProcess, exitCode int) {
 		ap.LastNoWork = false
 		ap.Mu.Unlock()
 		log.Printf("[daemon] Agent %s: classified error: %v", ap.Entry.Worktree, ae)
+	} else if s.runLeftClaimHeld(ap, taskID) {
+		s.markIncompleteRun(ap, taskID, backend)
 	} else {
 		ap.Mu.Lock()
 		ap.LastError = nil
 		ap.LastNoWork = false
 		ap.Mu.Unlock()
 	}
+}
+
+// markIncompleteRun records an exit-0 run whose claim was never released: the
+// turn ended, the task did not.
+//
+// Without this outcome the run is indistinguishable from a completed one — a
+// daemon worker always carries a task id, so it fell through to the
+// clean-success arm and every downstream consumer treated the unfinished work
+// as delivered: the checkpoint cleared, the untracked WIP git-cleaned, the
+// restart/block budgets zeroed and the quarantine ledger evicted. The distinct
+// class is what lets those paths tell the two apart; it is a counted retry
+// (agentpolicy.Decide), not a success.
+func (s *Supervisor) markIncompleteRun(ap *AgentProcess, taskID, backend string) {
+	ap.Mu.Lock()
+	ap.LastError = &agenterr.AgentError{
+		Class:     agenterr.OutcomeFromDomain(agenterr.IncompleteRunOutcome),
+		Message:   "exited 0 without releasing the claim on " + taskID,
+		Backend:   backend,
+		Timestamp: time.Now(),
+	}
+	ap.LastNoWork = false
+	ap.Mu.Unlock()
+	log.Printf("[daemon] Agent %s: exited 0 but task %s is still claimed — treating the run as incomplete",
+		ap.Entry.Worktree, taskID)
+}
+
+// runLeftClaimHeld reports whether an exit-0 run left its fleet claim in place,
+// which means the agent never reached `loom complete` and the task is unfinished.
+//
+// Reached only for exit 0 with a task attached; every other shape is already
+// classified by the time we get here. Costs one GET on the exit path, bounded by
+// the same timeout as the supervisor's other claim operations, and answers false
+// whenever it cannot tell — see ClaimStillHeld for why the ambiguity has to fall
+// back to the established clean-success behavior.
+func (s *Supervisor) runLeftClaimHeld(ap *AgentProcess, taskID string) bool {
+	if s.IssueBackend == nil || taskID == "" {
+		return false
+	}
+	ctx, cancel := s.operationContext(claimOperationTimeout)
+	defer cancel()
+	return agent.ClaimStillHeld(ctx, s.IssueBackend, taskID, ap.Entry.Worktree)
+}
+
+// isIncompleteRun reports whether classifyAgentExit tagged this exit as a run
+// that ended without finishing its task. The single predicate every path that
+// would otherwise destroy the run's state consults.
+func isIncompleteRun(ap *AgentProcess) bool {
+	ap.Mu.Lock()
+	defer ap.Mu.Unlock()
+	return ap.LastError != nil && ap.LastError.Class.Is(agenterr.IncompleteRunOutcome)
 }
 
 // markSpawnFailure records a spawn failure as a synthetic agent exit so the
@@ -101,12 +154,23 @@ func (s *Supervisor) markSpawnFailure(ap *AgentProcess, spawnErr error) {
 
 // handleAgentCheckpoint saves a checkpoint on non-zero exit (before recovery clears the
 // worktree) or clears the checkpoint on successful exit. For yield exits (exit 0 with
-// yield file present), a yield checkpoint is saved instead of clearing.
+// yield file present), a yield checkpoint is saved instead of clearing. An incomplete
+// exit-0 run is treated the same way: the work is unfinished, so the checkpoint is the
+// only thing that carries it into the next cycle.
 func (s *Supervisor) handleAgentCheckpoint(ap *AgentProcess, exitCode int) {
 	if exitCode == 0 {
 		// Check if this was a yield exit — save checkpoint instead of clearing
 		if IsYieldRequested(ap.WorktreePath) {
 			s.saveYieldCheckpoint(ap)
+			return
+		}
+		// Exit 0 with the claim still held is a preemption in all but name: the
+		// task is unfinished, so clearing here would throw away the one record
+		// of what the turn achieved. Save it under the IncompleteRun class (the
+		// exit code stays 0 — it was not a crash) so a cold-started next cycle
+		// re-derives the WIP through injectCheckpointIfNotResuming.
+		if isIncompleteRun(ap) {
+			s.saveAgentCheckpoint(ap, exitCode)
 			return
 		}
 		lockDir := cli.ResolveLockDir(ap.WorktreePath)

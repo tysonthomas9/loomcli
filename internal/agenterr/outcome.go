@@ -16,6 +16,7 @@ const (
 	SpawnFailureOutcome                        // supervisor could not exec the agent subprocess
 	BackendUnavailableOutcome                  // backend CLI binary not on PATH (folded from wrapper ErrBinaryNotFound)
 	CompletionHookFailureOutcome               // the subprocess exited 0 but a configured on_complete hook write failed
+	IncompleteRunOutcome                       // agent exited 0 but never released its task claim (turn ended before the task did)
 )
 
 func (d DomainOutcome) String() string {
@@ -30,6 +31,8 @@ func (d DomainOutcome) String() string {
 		return "BackendUnavailable"
 	case CompletionHookFailureOutcome:
 		return "CompletionHookFailure"
+	case IncompleteRunOutcome:
+		return "IncompleteRun"
 	default:
 		return "None"
 	}
