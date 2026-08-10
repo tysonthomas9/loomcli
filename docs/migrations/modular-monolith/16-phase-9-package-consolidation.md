@@ -3,7 +3,9 @@
 - **Status:** In progress
 - **Base:** Phase 8 documentation head `1fc9d887c517fad60728afdfcf3c28375d84ece3`
 - **Wave 9.1 implementation:** `da9105472`
-- **Working branch:** `modular-monolith-phase9-01-types-ratchet`
+- **Wave 9.2 implementation:** `ec263bfa3`
+- **Stacked branches:** `modular-monolith-phase9-01-types-ratchet`, then
+  `modular-monolith-phase9-02-shallow-seams`
 - **Purpose:** Reduce the residual package surface toward 160 production Go
   packages without weakening capability ownership, consumer-owned ports, or
   independently replaceable adapters.
@@ -29,8 +31,8 @@ The deletion test for every wave is:
 | Wave | Target | Intended reduction |
 |---|---|---|
 | 9.1 | Retire the horizontal `internal/types` model plane | Remove dead product models and mappings; move live Work Items policy to its owner |
-| 9.2 | Collapse residual legacy model and repository planes | Replace cross-capability repositories with owner ports and delete unused horizontal interfaces |
-| 9.3 | Fold shallow composition packages | Move constructor-only and one-consumer forwarding seams into their composition root |
+| 9.2 | Fold shallow seams with no durable boundary reason | Make reusable E2E helpers test-only and move one-consumer validation to its enforcing consumer |
+| 9.3 | Collapse residual legacy model and repository planes | Replace cross-capability repositories with owner ports and delete unused horizontal interfaces |
 | 9.4 | Deepen remaining adapter seams | Keep protocol, credential, platform, and independently replaceable adapter boundaries; remove mapping-only siblings |
 | 9.5 | Reproduce the full product proof | Run aggregate gates and packaged journeys before declaring the lower package target complete |
 
@@ -80,6 +82,54 @@ exact inventory separately rejects any unreviewed replacement package.
 The aggregate gate initially rejected a new nineteenth import on
 `internal/cli`. The final tree removes that cross-package edge instead of
 raising or waiving the exact fanout ceiling; the uninterrupted rerun passes.
+
+## Wave 9.2 result
+
+The second slice removes two packages whose abstractions fail the boundary
+test:
+
+- `internal/backend/backendtest` was a reusable, build-tagged E2E suite used
+  only by one `internal/cli` test file. Its implementation now lives beside
+  that tagged test, so it remains shared across all four backend modes without
+  compiling as a production package.
+- `internal/pathsec` had one live validator and one entirely unused sensitive
+  path classifier. The live diff-path traversal rule is now private to
+  `sourcecontrolcoord`, its sole enforcing consumer; the dead classifier and
+  its tests are deleted.
+
+The review retained small packages that still have a boundary reason,
+including external adapter translation in `artifactcatalog`, scoped system
+authority in `agentsbootstrap`, shared HTTP protocol parsing, driver
+cycle-breaking contracts, and isolated Git worktree materialization. No owner,
+port, external adapter, or public production API was added.
+
+The exact package-shape ratchet now moves as follows:
+
+| Shape measure | Phase 8 | Wave 9.1 | Wave 9.2 | Phase 9 change |
+|---|---:|---:|---:|---:|
+| Production packages under `internal/` | 189 | 188 | 186 | -3 |
+| Packages under `internal/modules/` | 17 | 17 | 17 | 0 |
+| Packages outside `internal/modules/` | 172 | 171 | 169 | -3 |
+| One-file packages | 67 | 67 | 65 | -2 |
+| One-or-two-file packages | 89 | 89 | 87 | -2 |
+
+Both retired roots are guarded against recreation or re-import, and the exact
+inventory rejects an unreviewed replacement package.
+
+## Wave 9.2 validation
+
+| Check | Result |
+|---|---|
+| Source-control path validation and ordinary CLI packages | PASS |
+| `issuebackend_e2e` tagged CLI compilation | PASS |
+| Retired-root and exact package-shape tests | PASS |
+| Measured `make check-architecture` | PASS: 11/11 profiles, 10 roots, 98 direct-write rows, zero pending decisions; peak process-tree RSS 1,168.5 MiB under 2,048 MiB |
+| Aggregate `make gate` against FleetDB `b71dec551` | PASS: both Go and frontend quality lanes; the already-passed measured architecture lane was not duplicated inside the aggregate run |
+
+The first aggregate attempt reached generated-API staleness after all earlier
+lanes passed, then the sandbox denied DNS access to the Go module proxy. The
+approved uninterrupted rerun passed; this was an execution-environment
+failure, not a source failure.
 
 Later waves must update this document with the selected package candidates,
 the boundary reason retained or removed for each, exact shape changes, and
