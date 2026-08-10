@@ -25,34 +25,23 @@ var (
 	_ GrantCommands = (*Service)(nil)
 )
 
-func New(executor GitReadExecutor, admission *authority.Admission) (*Service, error) {
-	if executor == nil || admission == nil {
-		return nil, fmt.Errorf("compose Connectors Git broker: executor and admission are required: %w", ErrUnavailable)
-	}
-	return &Service{
-		executor:    executor,
-		admission:   admission,
-		coordinator: newGitReadCoordinator(),
-	}, nil
-}
-
-// NewWithGrants composes the complete Phase 5 Connectors boundary. New
-// remains available for the existing Git-only composition while migration is
-// in progress; its EnsureGrant method fails closed with ErrUnavailable.
-func NewWithGrants(
+// New composes the complete Connectors Git-read and grant surface. Missing
+// persistence fails at composition time rather than leaving a command that
+// can only fail at runtime.
+func New(
 	executor GitReadExecutor,
 	grants ConnectorGrantStore,
 	admission *authority.Admission,
 ) (*Service, error) {
-	service, err := New(executor, admission)
-	if err != nil {
-		return nil, err
+	if executor == nil || grants == nil || admission == nil {
+		return nil, fmt.Errorf("compose Connectors: executor, grant store, and admission are required: %w", ErrUnavailable)
 	}
-	if grants == nil {
-		return nil, fmt.Errorf("compose Connectors grants: grant store is required: %w", ErrUnavailable)
-	}
-	service.grants = grants
-	return service, nil
+	return &Service{
+		executor:    executor,
+		grants:      grants,
+		admission:   admission,
+		coordinator: newGitReadCoordinator(),
+	}, nil
 }
 
 // EnsureGrant creates or reuses one exact active binding-scoped Connector

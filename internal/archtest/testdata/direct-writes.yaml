@@ -213,7 +213,6 @@ method_sets:
       - Awaits
       - Close
       - ConnectorCalls
-      - ConnectorGrantCommands
       - ConnectorGrants
       - Connectors
       - DriverRuns
@@ -1035,10 +1034,6 @@ function_surfaces:
     capability_owner: connectors
   - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
     function: NewSecretLifecycle
-    access: read-only
-    capability_owner: connectors
-  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
-    function: NewWithGrants
     access: read-only
     capability_owner: connectors
   - package: github.com/tysonthomas9/loomcli/internal/modules/connectors

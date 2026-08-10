@@ -244,6 +244,10 @@ func (s *connectorGrantStore) CreateManagementGrant(_ context.Context, in connec
 	return cloneGrant(grant), nil
 }
 
+func (s *connectorGrantStore) CreateGrant(ctx context.Context, in connectorsmodule.CreateGrantMutation) (*connectorsmodule.ConnectorGrant, error) {
+	return s.CreateManagementGrant(ctx, in)
+}
+
 // Revoke marks the grant revoked. Revoking an already-revoked grant fails
 // wrapping connectors.ErrGrantRevoked.
 func (s *connectorGrantStore) RevokeGrantRecord(_ context.Context, ws, grantID string) error {
@@ -274,6 +278,10 @@ func (s *connectorGrantStore) ListGrantRecordsByBinding(_ context.Context, ws, b
 		out = append(out, cloneGrant(grant))
 	}
 	return out, nil
+}
+
+func (s *connectorGrantStore) ListGrantsByBinding(ctx context.Context, ws, bindingID string) ([]*connectorsmodule.ConnectorGrant, error) {
+	return s.ListGrantRecordsByBinding(ctx, ws, bindingID)
 }
 
 func (s *connectorGrantStore) ListGrantRecordsByConnector(_ context.Context, ws, connectorID string) ([]*connectorsmodule.ConnectorGrant, error) {
@@ -376,9 +384,16 @@ type connectorCatalog struct {
 }
 
 var _ connectorsmodule.ManagementStore = (*connectorCatalog)(nil)
+var _ connectorsmodule.ConnectorGrantStore = (*connectorCatalog)(nil)
 
 // Connectors returns the Connectors-owned persistence adapter.
 func (s *Store) Connectors() connectorsmodule.ManagementStore {
+	return &connectorCatalog{
+		connectorStore: s.conns, connectorGrantStore: s.grants, connectorAuditStore: s.audits,
+	}
+}
+
+func (s *Store) ConnectorGrants() connectorsmodule.ConnectorGrantStore {
 	return &connectorCatalog{
 		connectorStore: s.conns, connectorGrantStore: s.grants, connectorAuditStore: s.audits,
 	}

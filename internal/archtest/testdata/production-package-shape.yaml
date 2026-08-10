@@ -13,11 +13,11 @@ semantics:
     - vendor
     - worktrees
 ceilings:
-  total_packages: 183
-  module_packages: 16
+  total_packages: 182
+  module_packages: 15
   outside_module_packages: 167
-  one_file_packages: 63
-  one_or_two_file_packages: 84
+  one_file_packages: 62
+  one_or_two_file_packages: 83
 packages:
   - internal/agenterr
   - internal/agentpolicy
@@ -127,7 +127,6 @@ packages:
   - internal/modules/automation
   - internal/modules/automation/fleetdb
   - internal/modules/connectors
-  - internal/modules/connectors/fleetdb
   - internal/modules/execution
   - internal/modules/interaction
   - internal/modules/interaction/fleetdb

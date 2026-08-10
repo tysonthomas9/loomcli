@@ -305,28 +305,15 @@ func TestEnsureGrantRejectsInvalidFleetResponses(t *testing.T) {
 	}
 }
 
-func TestNewWithGrantsRejectsMissingStoreAndGitOnlyFailsClosed(t *testing.T) {
+func TestNewRejectsMissingGrantStore(t *testing.T) {
 	issuer := authority.NewIssuer()
 	admission, err := issuer.NewAdmission(OperationRules()...)
 	if err != nil {
 		t.Fatal(err)
 	}
 	executor := gitReadExecutorFunc(func(context.Context, GitReadCommand) error { return nil })
-	if _, err := NewWithGrants(executor, nil, admission); !errors.Is(err, ErrUnavailable) {
-		t.Fatalf("NewWithGrants nil store error = %v", err)
-	}
-	service, err := New(executor, admission)
-	if err != nil {
-		t.Fatal(err)
-	}
-	command := validEnsureGrantCommand()
-	_, err = service.EnsureGrant(
-		t.Context(),
-		issueEnsureGrantAuthority(t, issuer, command.WorkspaceKey),
-		command,
-	)
-	if !errors.Is(err, ErrUnavailable) {
-		t.Fatalf("Git-only EnsureGrant error = %v, want unavailable", err)
+	if _, err := New(executor, nil, admission); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("New nil grant store error = %v", err)
 	}
 }
 
@@ -337,7 +324,7 @@ func newGrantService(t *testing.T, store ConnectorGrantStore) (*authority.Issuer
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := NewWithGrants(
+	service, err := New(
 		gitReadExecutorFunc(func(context.Context, GitReadCommand) error { return nil }),
 		store,
 		admission,

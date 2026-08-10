@@ -684,6 +684,7 @@ func TestRetiredHorizontalRootsCannotReturn(t *testing.T) {
 		"internal/infra/connectorscatalog",
 		"internal/leadcontrol",
 		"internal/modules/artifacts/fleetdb",
+		"internal/modules/connectors/fleetdb",
 		"internal/modules/sourcecontrol/stackpublish",
 		"internal/pathsec",
 		"internal/stacklineage",
@@ -764,6 +765,30 @@ func TestRetiredConnectorModelAndRepositoryPlaneCannotReturn(t *testing.T) {
 	} {
 		if _, statErr := os.Stat(filepath.Join(root, filepath.FromSlash(relative))); !os.IsNotExist(statErr) {
 			t.Errorf("retired connector plane file %s returned (stat error: %v)", relative, statErr)
+		}
+	}
+}
+
+func TestRetiredConnectorCompatibilityConstructorsCannotReturn(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for relative, forbidden := range map[string]string{
+		"internal/modules/connectors/service.go":           "NewWithGrants",
+		"internal/app/serve/source_control_composition.go": "NewSourceControlCapability",
+		"internal/app/serve/workflow_catalog.go":           "NewSourceControlCapability",
+	} {
+		path := filepath.Join(root, filepath.FromSlash(relative))
+		parsed, parseErr := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+		if parseErr != nil {
+			t.Fatal(parseErr)
+		}
+		for _, declaration := range parsed.Decls {
+			function, ok := declaration.(*ast.FuncDecl)
+			if ok && function.Name.Name == forbidden {
+				t.Errorf("retired Connector compatibility constructor %s returned in %s", forbidden, relative)
+			}
 		}
 	}
 }

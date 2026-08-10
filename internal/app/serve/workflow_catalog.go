@@ -390,16 +390,6 @@ func newLocalOpenOperatorResolver(
 	return NewLocalOpenOperatorResolver(issuer, actions...)
 }
 
-// NewSourceControlCapability composes Source Control with the catalog-owned
-// authority seal without publishing that seal outside the serve root.
-func (catalog *WorkflowCatalogCapability) NewSourceControlCapability(
-	localSettingsDir string,
-	repositories sourcecontrol.RepositoryResolver,
-) (*SourceControlCapability, error) {
-	var issuer = catalogIssuer(catalog)
-	return NewSourceControlCapability(localSettingsDir, repositories, issuer)
-}
-
 // NewSourceControlCapabilityWithFleetDB composes the complete Source Control
 // and Connectors boundary against the catalog-owned authority seal.
 func (catalog *WorkflowCatalogCapability) NewSourceControlCapabilityWithFleetDB(

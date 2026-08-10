@@ -6,7 +6,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -17,7 +16,6 @@ import (
 	infralocalgit "github.com/tysonthomas9/loomcli/internal/infra/localgit"
 	infrastackstore "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/connectors"
-	connectorsfleetdb "github.com/tysonthomas9/loomcli/internal/modules/connectors/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 )
@@ -320,34 +318,8 @@ func stableSourceControlCoordinate(kind string, values ...string) string {
 	return hex.EncodeToString(hash.Sum(nil)[:16])
 }
 
-// NewSourceControlCapability composes the minimal Source Control and
-// Connectors seam against the server's private issuer. Local Settings is read
-// just in time by gitauth; no plaintext credential is retained here.
-func NewSourceControlCapability(
-	localSettingsDir string,
-	repositories sourcecontrol.RepositoryResolver,
-	issuer *authority.Issuer,
-) (*SourceControlCapability, error) {
-	if issuer == nil {
-		return nil, fmt.Errorf("compose Source Control authority: Workflow Catalog authority is unavailable")
-	}
-	capability, err := newSourceControlCapability(
-		issuer,
-		gitauth.NewLocalSettingsSource(localSettingsDir),
-		repositories,
-		infralocalgit.Inspector{},
-		time.Now,
-	)
-	if capability != nil {
-		capability.outcomes, capability.stacks = newDefaultStackServices(time.Now)
-	}
-	return capability, err
-}
-
-// NewSourceControlCapabilityWithFleetDB composes the complete Phase 5
-// Source Control + Connectors boundary. The Git-only constructor above remains
-// for isolated materializer tests; production AgentProvisioning requires this
-// complete grant-capable composition.
+// NewSourceControlCapabilityWithFleetDB composes the complete Source Control
+// and Connectors seam. Missing grant persistence fails during composition.
 func NewSourceControlCapabilityWithFleetDB(
 	localSettingsDir string,
 	repositories sourcecontrol.RepositoryResolver,
@@ -357,16 +329,15 @@ func NewSourceControlCapabilityWithFleetDB(
 	if issuer == nil {
 		return nil, fmt.Errorf("compose Source Control authority: Workflow Catalog authority is unavailable")
 	}
-	grantAdapter, err := connectorsfleetdb.New(newConnectorsFleetDBTransport(client))
-	if err != nil {
-		return nil, fmt.Errorf("compose Connectors grant adapter: %w", err)
+	if client == nil {
+		return nil, fmt.Errorf("compose Connectors grant adapter: %w", connectors.ErrUnavailable)
 	}
 	capability, err := newSourceControlCapabilityWithGrants(
 		issuer,
 		gitauth.NewLocalSettingsSource(localSettingsDir),
 		repositories,
 		infralocalgit.Inspector{},
-		grantAdapter,
+		client.ConnectorGrants(),
 		time.Now,
 	)
 	if capability != nil {
@@ -391,23 +362,6 @@ func newDefaultStackServices(now func() time.Time) (sourcecontrol.TaskOutcomeRec
 	return outcomes, stacks
 }
 
-func newSourceControlCapability(
-	issuer *authority.Issuer,
-	credentialSource gitauth.Source,
-	repositories sourcecontrol.RepositoryResolver,
-	inspector sourcecontrol.CheckoutInspector,
-	now func() time.Time,
-) (*SourceControlCapability, error) {
-	return composeSourceControlCapability(
-		issuer,
-		credentialSource,
-		repositories,
-		inspector,
-		nil,
-		now,
-	)
-}
-
 func newSourceControlCapabilityWithGrants(
 	issuer *authority.Issuer,
 	credentialSource gitauth.Source,
@@ -419,24 +373,6 @@ func newSourceControlCapabilityWithGrants(
 	if grants == nil {
 		return nil, fmt.Errorf("compose Source Control Connectors grants: %w", connectors.ErrUnavailable)
 	}
-	return composeSourceControlCapability(
-		issuer,
-		credentialSource,
-		repositories,
-		inspector,
-		grants,
-		now,
-	)
-}
-
-func composeSourceControlCapability(
-	issuer *authority.Issuer,
-	credentialSource gitauth.Source,
-	repositories sourcecontrol.RepositoryResolver,
-	inspector sourcecontrol.CheckoutInspector,
-	grants connectors.ConnectorGrantStore,
-	now func() time.Time,
-) (*SourceControlCapability, error) {
 	if issuer == nil || repositories == nil || inspector == nil || now == nil {
 		return nil, fmt.Errorf("compose Source Control: issuer, repository resolver, checkout inspector, and clock are required")
 	}
@@ -444,16 +380,11 @@ func composeSourceControlCapability(
 	if err != nil {
 		return nil, fmt.Errorf("compose Connectors admission: %w", err)
 	}
-	var connectorsService *connectors.Service
-	if grants == nil {
-		connectorsService, err = connectors.New(infralocalgit.New(credentialSource), connectorsAdmission)
-	} else {
-		connectorsService, err = connectors.NewWithGrants(
-			infralocalgit.New(credentialSource),
-			grants,
-			connectorsAdmission,
-		)
-	}
+	connectorsService, err := connectors.New(
+		infralocalgit.New(credentialSource),
+		grants,
+		connectorsAdmission,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("compose Connectors Git broker: %w", err)
 	}
@@ -566,85 +497,6 @@ func (provider *sourceControlBrokerAuthorityProvider) AuthorityForGitRead(
 		connectors.ActionExecuteGitRead,
 		reason,
 	)
-}
-
-type connectorsFleetDBTransport struct {
-	grants infrafleetdb.ConnectorGrantTransport
-}
-
-var _ connectorsfleetdb.Transport = (*connectorsFleetDBTransport)(nil)
-
-func newConnectorsFleetDBTransport(client *infrafleetdb.Client) connectorsfleetdb.Transport {
-	if client == nil {
-		return nil
-	}
-	return &connectorsFleetDBTransport{grants: client.ConnectorGrantCommands()}
-}
-
-func (transport *connectorsFleetDBTransport) CreateConnectorGrant(
-	ctx context.Context,
-	input connectorsfleetdb.CreateConnectorGrantWire,
-) (*connectorsfleetdb.ConnectorGrantWire, error) {
-	value, err := transport.grants.CreateConnectorGrant(ctx, infrafleetdb.ConnectorGrantCreateCommand{
-		WorkspaceKey: input.WorkspaceKey, GrantID: input.GrantID,
-		ConnectorID: input.ConnectorID, BindingID: input.BindingID,
-		Action: input.Action, ResourcePattern: input.ResourcePattern,
-	})
-	return connectorGrantWire(value), translateConnectorsFleetDBError(err)
-}
-
-func (transport *connectorsFleetDBTransport) ListConnectorGrants(
-	ctx context.Context,
-	workspace string,
-	filter connectorsfleetdb.ConnectorGrantFilterWire,
-) ([]*connectorsfleetdb.ConnectorGrantWire, error) {
-	values, err := transport.grants.ListConnectorGrantsByBinding(ctx, workspace, filter.BindingID)
-	if err != nil {
-		return nil, translateConnectorsFleetDBError(err)
-	}
-	out := make([]*connectorsfleetdb.ConnectorGrantWire, len(values))
-	for index, value := range values {
-		out[index] = connectorGrantWire(value)
-	}
-	return out, nil
-}
-
-func connectorGrantWire(value *infrafleetdb.ConnectorGrantRecord) *connectorsfleetdb.ConnectorGrantWire {
-	if value == nil {
-		return nil
-	}
-	return &connectorsfleetdb.ConnectorGrantWire{
-		WorkspaceKey: value.WorkspaceKey, GrantID: value.GrantID,
-		ConnectorID: value.ConnectorID, BindingID: value.BindingID,
-		Action: value.Action, ResourcePattern: value.ResourcePattern,
-		CreatedAt: value.CreatedAt, RevokedAt: cloneConnectorTime(value.RevokedAt),
-	}
-}
-
-func cloneConnectorTime(value *time.Time) *time.Time {
-	if value == nil {
-		return nil
-	}
-	cloned := *value
-	return &cloned
-}
-
-func translateConnectorsFleetDBError(err error) error {
-	if err == nil {
-		return nil
-	}
-	var translated error
-	switch {
-	case errors.Is(err, infrafleetdb.ErrConnectorGrantNotFound):
-		translated = connectorsfleetdb.ErrTransportNotFound
-	case errors.Is(err, infrafleetdb.ErrConnectorGrantInvalid):
-		translated = connectorsfleetdb.ErrTransportInvalid
-	case errors.Is(err, infrafleetdb.ErrConnectorGrantConflict):
-		translated = connectorsfleetdb.ErrTransportConflict
-	default:
-		translated = connectorsfleetdb.ErrTransportUnavailable
-	}
-	return errors.Join(translated, err)
 }
 
 var _ sourcecontrol.TaskOutcomeRecorder = (*SourceControlCapability)(nil)
