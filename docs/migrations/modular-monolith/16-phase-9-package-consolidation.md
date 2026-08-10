@@ -6,10 +6,12 @@
 - **Wave 9.2 implementation:** `ec263bfa3`
 - **Wave 9.3 implementation:** `a4333c31a`
 - **Wave 9.4 implementation:** `bfb1ac9e8`
+- **Wave 9.5 implementation:** `72870b85b`
 - **Stacked branches:** `modular-monolith-phase9-01-types-ratchet`, then
   `modular-monolith-phase9-02-shallow-seams`, then
   `modular-monolith-phase9-03-legacy-planes`, then
-  `modular-monolith-phase9-04-adapter-seams`
+  `modular-monolith-phase9-04-adapter-seams`, then
+  `modular-monolith-phase9-05-artifact-adapter`
 - **Purpose:** Reduce the residual package surface toward 160 production Go
   packages without weakening capability ownership, consumer-owned ports, or
   independently replaceable adapters.
@@ -38,7 +40,9 @@ The deletion test for every wave is:
 | 9.2 | Fold shallow seams with no durable boundary reason | Make reusable E2E helpers test-only and move one-consumer validation to its enforcing consumer |
 | 9.3 | Collapse residual legacy model and repository planes | Replace cross-capability repositories with owner ports and delete unused horizontal interfaces |
 | 9.4 | Deepen remaining adapter seams | Keep protocol, credential, platform, and independently replaceable adapter boundaries; remove mapping-only siblings |
-| 9.5 | Reproduce the full product proof | Run aggregate gates and packaged journeys before declaring the lower package target complete |
+| 9.5 | Retire duplicate owner-adapter layers | Remove forwarding/error-remapping packages that add no independently replaceable boundary |
+| 9.6+ | Continue complete-plane and shallow-seam deletion | Apply the deletion test to each selected candidate; do not retain fallback facades |
+| Final | Reproduce the full product proof | Run aggregate gates and packaged journeys before declaring the lower package target complete |
 
 The target of 160 is directional until each candidate passes the boundary and
 deletion tests. Ownership and replaceability take precedence over a round
@@ -241,6 +245,46 @@ The first aggregate attempt correctly rejected a temporary twenty-sixth file
 in the FleetDB adapter package. The final implementation folds the query port
 into the existing Artifact adapter, returns the package to its exact 25-file
 ceiling, and passes without raising a threshold or adding an allowlist.
+
+## Wave 9.5 result
+
+The fifth slice removes the second, forwarding-only Artifact FleetDB adapter.
+The composition-owned FleetDB bridges already map the external transport DTOs
+and now implement the owner-defined `artifacts.Store` and
+`artifacts.SessionStore` ports directly. The deleted
+`internal/modules/artifacts/fleetdb` package only delegated the same methods
+and remapped the same errors a second time; it was neither an independently
+replaceable protocol adapter nor an owner policy boundary.
+
+The removal deletes three files and 339 net lines without creating a
+replacement package. Artifacts remains one of the ten capability roots, while
+the removed module subpackage is added to the retired-root guard. Its unused
+generic-lease allowance is also deleted, and the exact `internal/app/serve`
+import-fanout exception tightens from 33 to 32.
+
+The exact package-shape ratchet now moves as follows:
+
+| Shape measure | Phase 8 | Wave 9.1 | Wave 9.2 | Wave 9.3 | Wave 9.4 | Wave 9.5 | Phase 9 change |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Production packages under `internal/` | 189 | 188 | 186 | 185 | 184 | 183 | -6 |
+| Packages under `internal/modules/` | 17 | 17 | 17 | 17 | 17 | 16 | -1 |
+| Packages outside `internal/modules/` | 172 | 171 | 169 | 168 | 167 | 167 | -5 |
+| One-file packages | 67 | 67 | 65 | 64 | 63 | 63 | -4 |
+| One-or-two-file packages | 89 | 89 | 87 | 86 | 85 | 84 | -5 |
+
+## Wave 9.5 validation
+
+| Check | Result |
+|---|---|
+| Artifacts and Interaction composition suites plus all-`internal` compilation | PASS |
+| Retired-root, exact package-shape, direct-write policy, import-fanout, and package-size ratchets | PASS |
+| Measured `make check-architecture` | PASS: 11/11 profiles, 10 roots, 93 direct-write rows, 25 legacy handler imports, 107 reviewed mutation commands, 71 runtime components, 80 goroutine launches, all six performance rows measured, and zero pending decisions; peak process-tree RSS 1,202.6 MiB under 2,048 MiB |
+| Aggregate `make gate` against the paired FleetDB source and binary | PASS: all Go and frontend quality gates |
+
+The first aggregate attempt stopped because the deleted import lowered
+`internal/app/serve` fanout below its checked-in exact exception. The final
+tree lowers the exception to the observed 32 and passes; no threshold or
+allowlist was widened.
 
 Later waves must update this document with the selected package candidates,
 the boundary reason retained or removed for each, exact shape changes, and
