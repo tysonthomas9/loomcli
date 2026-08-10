@@ -9,7 +9,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 
 	"github.com/tysonthomas9/loomcli/internal/app/webhookingestion"
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -39,8 +39,13 @@ func errInboundUnverified() error {
 // binding DTO cross into webhookingestion or Automation.
 type CompatibilityVerifierConfig struct {
 	Bindings   store.TriggerBindingStore
-	Connectors store.ConnectorStore
+	Connectors connectorSecretSource
 	Now        func() time.Time
+}
+
+type connectorSecretSource interface {
+	ListConnectorRecords(context.Context, string, connectorsmodule.ConnectorFilter) ([]*connectorsmodule.Connector, error)
+	ResolveInboundSecretsRecord(context.Context, string, string) (*connectorsmodule.InboundSecrets, error)
 }
 
 // CompatibilityVerifier adapts the legacy binding/connector secret stores to
@@ -48,7 +53,7 @@ type CompatibilityVerifierConfig struct {
 // plaintext secret material never leaves this adapter.
 type CompatibilityVerifier struct {
 	bindings   store.TriggerBindingStore
-	connectors store.ConnectorStore
+	connectors connectorSecretSource
 	adapters   registry
 	now        func() time.Time
 }
@@ -136,7 +141,7 @@ func (v *CompatibilityVerifier) resolveInboundSecretCandidates(ctx context.Conte
 // source (or the store has no connector wiring at all) and the caller may
 // use the back-compat binding-secret path.
 func (v *CompatibilityVerifier) connectorSecretCandidates(ctx context.Context, ws, sourceKind string, now time.Time) (candidates []inboundSecretCandidate, found bool, err error) {
-	kind := domain.ConnectorSourceKind(sourceKind)
+	kind := connectorsmodule.ConnectorSourceKind(sourceKind)
 	if !kind.Valid() {
 		// Source kinds outside the connector enum (e.g. cron) never have
 		// connectors.
@@ -146,19 +151,16 @@ func (v *CompatibilityVerifier) connectorSecretCandidates(ctx context.Context, w
 	if cs == nil {
 		return nil, false, nil
 	}
-	conns, err := cs.List(ctx, ws, store.ConnectorFilter{SourceKind: kind, Status: domain.ConnectorStatusActive})
+	conns, err := cs.ListConnectorRecords(ctx, ws, connectorsmodule.ConnectorFilter{
+		SourceKind: kind, Status: connectorsmodule.ConnectorStatusActive,
+	})
 	if err != nil {
-		if errors.Is(err, errors.ErrUnsupported) {
-			// Store without connector persistence (fail-closed placeholder):
-			// keep the pre-connector binding-secret path working.
-			return nil, false, nil
-		}
 		return nil, false, err
 	}
 	for _, conn := range conns {
-		secrets, err := cs.ResolveInboundSecret(ctx, ws, conn.ConnectorID)
+		secrets, err := cs.ResolveInboundSecretsRecord(ctx, ws, conn.ConnectorID)
 		if err != nil {
-			if errors.Is(err, domain.ErrConnectorNotFound) {
+			if errors.Is(err, connectorsmodule.ErrNotFound) {
 				// Deleted between List and Resolve: treat as absent.
 				continue
 			}

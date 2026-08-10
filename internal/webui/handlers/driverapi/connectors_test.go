@@ -14,8 +14,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/infra/connectorscatalog"
 	providers "github.com/tysonthomas9/loomcli/internal/infra/connectorsproviders"
 	"github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
@@ -103,15 +101,15 @@ func newConnectorHarness(t *testing.T) *connectorHarness {
 	if err != nil {
 		t.Fatalf("Seal credential: %v", err)
 	}
-	if _, err := st.Connectors().Create(ctx, store.ConnectorCreate{
+	if _, err := st.Connectors().CreateConnectorRecord(ctx, connectorsmodule.CreateConnectorMutation{
 		WorkspaceKey: "WS", ConnectorID: "gh-main",
-		SourceKind:               domain.ConnectorSourceGitHub,
+		SourceKind:               connectorsmodule.ConnectorSourceGitHub,
 		OutboundCredentialSealed: sealed,
 	}); err != nil {
 		t.Fatalf("Create connector: %v", err)
 	}
 	for i, action := range []string{"github.issues.comment", "github.merge"} {
-		if _, err := st.ConnectorGrants().Create(ctx, store.ConnectorGrantCreate{
+		if _, err := st.Connectors().CreateManagementGrant(ctx, connectorsmodule.CreateGrantMutation{
 			WorkspaceKey: "WS", GrantID: fmt.Sprintf("grant-%d", i+1),
 			ConnectorID: "gh-main", BindingID: "binding-1",
 			Action: action, ResourcePattern: "repo:octocat/hello",
@@ -129,11 +127,7 @@ func newConnectorHarness(t *testing.T) *connectorHarness {
 	if err := registry.Register(connectorsmodule.ConnectorSourceGitHub, provider); err != nil {
 		t.Fatalf("Register provider: %v", err)
 	}
-	catalog, err := connectorscatalog.New(st.Connectors(), st.ConnectorGrants(), st.ConnectorCalls())
-	if err != nil {
-		t.Fatalf("New connector catalog: %v", err)
-	}
-	dispatcher, err := connectorsmodule.NewDispatch(catalog, vault, registry, nil)
+	dispatcher, err := connectorsmodule.NewDispatch(st.Connectors(), vault, registry, nil)
 	if err != nil {
 		t.Fatalf("New connector dispatcher: %v", err)
 	}
@@ -203,9 +197,9 @@ func (h *connectorHarness) doRaw(t *testing.T, body any, headers map[string]stri
 	return resp.StatusCode, raw
 }
 
-func (h *connectorHarness) auditRecords(t *testing.T) []*domain.ConnectorCallRecord {
+func (h *connectorHarness) auditRecords(t *testing.T) []*connectorsmodule.ConnectorCallRecord {
 	t.Helper()
-	records, err := h.store.ConnectorCalls().ListByRun(context.Background(), "WS", h.runID, store.ConnectorCallFilter{})
+	records, err := h.store.Connectors().ListCallRecordsByRun(context.Background(), "WS", h.runID, connectorsmodule.ConnectorCallFilter{})
 	if err != nil {
 		t.Fatalf("ListByRun: %v", err)
 	}
@@ -269,7 +263,7 @@ func TestConnectorDispatchHappyPath(t *testing.T) {
 	if got, want := strings.Join(keys, ","), "body,callId,decision,status"; got != want {
 		t.Fatalf("response keys = %q, want %q", got, want)
 	}
-	wantCallID := domain.ConnectorCallID(h.runID, "github.issues.comment", 1)
+	wantCallID := connectorsmodule.ConnectorCallID(h.runID, "github.issues.comment", 1)
 	if decoded["callId"] != wantCallID || decoded["decision"] != "granted" || decoded["status"] != float64(200) {
 		t.Fatalf("response = %v, want callId=%q decision=granted status=200", decoded, wantCallID)
 	}
@@ -296,7 +290,7 @@ func TestConnectorDispatchHappyPath(t *testing.T) {
 		t.Fatalf("audit rows = %d, want 1", len(records))
 	}
 	rec := records[0]
-	if rec.Decision != domain.ConnectorCallGranted || rec.BindingID != h.bindingID ||
+	if rec.Decision != connectorsmodule.ConnectorCallGranted || rec.BindingID != h.bindingID ||
 		rec.ConnectorID != "gh-main" || rec.UpstreamStatus != 200 || rec.CallID != wantCallID {
 		t.Fatalf("audit row = %+v, want granted/%s/gh-main/200/%s", rec, h.bindingID, wantCallID)
 	}
@@ -313,7 +307,7 @@ func TestConnectorDispatchGrantDenied(t *testing.T) {
 		t.Fatalf("provider calls = %d on denied grant, want 0", len(h.provider.calls))
 	}
 	records := h.auditRecords(t)
-	if len(records) != 1 || records[0].Decision != domain.ConnectorCallDenied {
+	if len(records) != 1 || records[0].Decision != connectorsmodule.ConnectorCallDenied {
 		t.Fatalf("audit rows = %+v, want exactly one denied row", records)
 	}
 }
@@ -338,7 +332,7 @@ func TestConnectorDispatchNoBindingDeniedWithoutAudit(t *testing.T) {
 	if code := errorCode(t, decoded); code != "grant_denied" {
 		t.Fatalf("error code = %q, want grant_denied", code)
 	}
-	records, err := h.store.ConnectorCalls().ListByRun(context.Background(), "WS", h.runID, store.ConnectorCallFilter{})
+	records, err := h.store.Connectors().ListCallRecordsByRun(context.Background(), "WS", h.runID, connectorsmodule.ConnectorCallFilter{})
 	if err != nil {
 		t.Fatalf("ListByRun: %v", err)
 	}
@@ -359,7 +353,7 @@ func TestConnectorDispatchPreconditionRequired(t *testing.T) {
 		t.Fatalf("provider calls = %d before precondition, want 0", len(h.provider.calls))
 	}
 	records := h.auditRecords(t)
-	if len(records) != 1 || records[0].Decision != domain.ConnectorCallPreconditionRequired {
+	if len(records) != 1 || records[0].Decision != connectorsmodule.ConnectorCallPreconditionRequired {
 		t.Fatalf("audit rows = %+v, want one precondition_required row", records)
 	}
 }
@@ -392,7 +386,7 @@ func TestConnectorDispatchStaleSubject(t *testing.T) {
 	}
 	assertOpErrorCode(t, raw, "stale_subject", false)
 	records := h.auditRecords(t)
-	if len(records) != 1 || records[0].Decision != domain.ConnectorCallStaleSubject {
+	if len(records) != 1 || records[0].Decision != connectorsmodule.ConnectorCallStaleSubject {
 		t.Fatalf("audit rows = %+v, want one stale_subject row", records)
 	}
 }

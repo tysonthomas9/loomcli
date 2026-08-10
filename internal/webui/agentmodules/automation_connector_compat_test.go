@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -24,19 +24,19 @@ func (stub *bindingStoreStub) Update(
 }
 
 type grantStoreStub struct {
-	store.ConnectorGrantStore
-	listByBinding func(context.Context, string, string) ([]*domain.ConnectorGrant, error)
+	connectorsmodule.ManagementStore
+	listByBinding func(context.Context, string, string) ([]*connectorsmodule.ConnectorGrant, error)
 	revoke        func(context.Context, string, string) error
 }
 
-func (stub *grantStoreStub) ListByBinding(
+func (stub *grantStoreStub) ListGrantRecordsByBinding(
 	ctx context.Context,
 	workspace, bindingID string,
-) ([]*domain.ConnectorGrant, error) {
+) ([]*connectorsmodule.ConnectorGrant, error) {
 	return stub.listByBinding(ctx, workspace, bindingID)
 }
 
-func (stub *grantStoreStub) Revoke(ctx context.Context, workspace, grantID string) error {
+func (stub *grantStoreStub) RevokeGrantRecord(ctx context.Context, workspace, grantID string) error {
 	return stub.revoke(ctx, workspace, grantID)
 }
 
@@ -67,9 +67,9 @@ func TestStoreConnectorCompatibilityRevokeBindingGrants(t *testing.T) {
 	var gotWorkspace, gotBinding string
 	var revoked []string
 	grants := &grantStoreStub{
-		listByBinding: func(_ context.Context, workspace, bindingID string) ([]*domain.ConnectorGrant, error) {
+		listByBinding: func(_ context.Context, workspace, bindingID string) ([]*connectorsmodule.ConnectorGrant, error) {
 			gotWorkspace, gotBinding = workspace, bindingID
-			return []*domain.ConnectorGrant{
+			return []*connectorsmodule.ConnectorGrant{
 				nil,
 				{GrantID: "grant-new"},
 				{GrantID: "grant-already-revoked"},
@@ -82,7 +82,7 @@ func TestStoreConnectorCompatibilityRevokeBindingGrants(t *testing.T) {
 			}
 			revoked = append(revoked, grantID)
 			if grantID == "grant-already-revoked" {
-				return domain.ErrGrantRevoked
+				return connectorsmodule.ErrGrantRevoked
 			}
 			return nil
 		},

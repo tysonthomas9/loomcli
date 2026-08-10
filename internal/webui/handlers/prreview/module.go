@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/app/prreviewer"
-	"github.com/tysonthomas9/loomcli/internal/infra/connectorscatalog"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
@@ -68,9 +67,7 @@ type operatorAuthorityResolver interface {
 type prReviewStore interface {
 	Workspaces() store.WorkspaceStore
 	Repos() store.RepoStore
-	Connectors() store.ConnectorStore
-	ConnectorGrants() store.ConnectorGrantStore
-	ConnectorCalls() store.ConnectorAuditStore
+	Connectors() connectorsmodule.ManagementStore
 }
 
 // NewModule constructs the pull request review route module. localSettingsDir
@@ -113,11 +110,8 @@ func NewModule(
 		streamHeartbeatInterval: reviewerStreamHeartbeatInterval,
 	}
 	if st != nil {
-		adapter, err := connectorscatalog.New(st.Connectors(), st.ConnectorGrants(), st.ConnectorCalls())
-		if err == nil {
-			module.connectorManagementStore = adapter
-			module.connectorManagement, _ = connectorsmodule.NewManagement(adapter)
-		}
+		module.connectorManagementStore = st.Connectors()
+		module.connectorManagement, _ = connectorsmodule.NewManagement(module.connectorManagementStore)
 	}
 	return module
 }

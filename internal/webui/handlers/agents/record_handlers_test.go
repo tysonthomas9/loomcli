@@ -16,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/triggerbindings"
@@ -95,7 +96,7 @@ func TestUnifiedLegacyBindingFallbackIsRetired(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create legacy binding: %v", err)
 	}
-	if _, err := st.ConnectorGrants().Create(ctx, store.ConnectorGrantCreate{
+	if _, err := st.Connectors().CreateManagementGrant(ctx, connectorsmodule.CreateGrantMutation{
 		WorkspaceKey: agentRecordTestWS, GrantID: "legacy-grant", ConnectorID: "github",
 		BindingID: "legacy-review", Action: "pulls.comment", ResourcePattern: "repo:o/r",
 	}); err != nil {
@@ -119,7 +120,7 @@ func TestUnifiedLegacyBindingFallbackIsRetired(t *testing.T) {
 	if err != nil || unchanged.Name != "Legacy review" {
 		t.Fatalf("retired route mutated binding = %+v err=%v", unchanged, err)
 	}
-	grants, err := st.ConnectorGrants().ListByBinding(ctx, agentRecordTestWS, "legacy-review")
+	grants, err := st.Connectors().ListGrantRecordsByBinding(ctx, agentRecordTestWS, "legacy-review")
 	if err != nil || len(grants) != 1 {
 		t.Fatalf("retired route mutated grants = %+v err=%v", grants, err)
 	}
@@ -772,7 +773,7 @@ func TestAgentEnableDisableFanoutAndBindingGuard(t *testing.T) {
 		ManualDispatch: &testBindingOperations{store: st}, OperatorAuthority: testOperatorAuthorityResolver{},
 		WorkspaceFromContext: func(context.Context) string { return agentRecordTestWS }, Runs: st.DriverRuns(),
 		Connectors: testTriggerConnectorCompatibility{
-			testBindingGrantCompatibility{grants: st.ConnectorGrants()},
+			testBindingGrantCompatibility{grants: st.Connectors()},
 		},
 	}).Register(mux)
 	created := createPromptAgentForTest(t, mux)
@@ -811,7 +812,7 @@ func TestAgentDeleteDeletesBindingsRevokesGrantsAndArchivesRecord(t *testing.T) 
 	mux := newAgentsMux(st)
 	created := createPromptAgentForTest(t, mux)
 	bindingID := created.Bindings[0].BindingID
-	if _, err := st.ConnectorGrants().Create(context.Background(), store.ConnectorGrantCreate{
+	if _, err := st.Connectors().CreateManagementGrant(context.Background(), connectorsmodule.CreateGrantMutation{
 		WorkspaceKey: agentRecordTestWS, GrantID: "grant-1", ConnectorID: "github",
 		BindingID: bindingID, Action: "github.comment", ResourcePattern: "repo:o/r",
 	}); err != nil {
@@ -825,7 +826,7 @@ func TestAgentDeleteDeletesBindingsRevokesGrantsAndArchivesRecord(t *testing.T) 
 	if _, err := st.TriggerBindings().Get(context.Background(), agentRecordTestWS, bindingID); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("binding get err = %v, want ErrNotFound", err)
 	}
-	grants, err := st.ConnectorGrants().ListByBinding(context.Background(), agentRecordTestWS, bindingID)
+	grants, err := st.Connectors().ListGrantRecordsByBinding(context.Background(), agentRecordTestWS, bindingID)
 	if err != nil || len(grants) != 0 {
 		t.Fatalf("active grants after delete = %+v err=%v", grants, err)
 	}

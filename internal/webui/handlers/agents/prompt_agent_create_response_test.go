@@ -192,7 +192,7 @@ func TestPromptAgentCreatePostCommitReadFailureReturnsCommittedSuccess(t *testin
 				persistedBindings[0].TargetAgentServiceID != response.ID || !persistedBindings[0].Enabled {
 				t.Fatalf("committed bindings = %+v, want exactly one enabled owned binding", persistedBindings)
 			}
-			grants, err := base.ConnectorGrants().ListByBinding(
+			grants, err := base.Connectors().ListGrantRecordsByBinding(
 				context.Background(),
 				agentRecordTestWS,
 				response.Bindings[0].BindingID,

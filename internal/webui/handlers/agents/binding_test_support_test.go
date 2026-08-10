@@ -14,6 +14,7 @@ import (
 	workflowdefs "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution/authoring"
 	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
@@ -508,7 +509,7 @@ func (api *testAgentRecordAPI) ApplyLifecycle(
 				return nil, mapTestAgentRecordError(err)
 			}
 		case agentsmodule.LifecycleDelete:
-			grants, err := api.store.ConnectorGrants().ListByBinding(
+			grants, err := api.store.Connectors().ListGrantRecordsByBinding(
 				ctx,
 				command.WorkspaceKey,
 				binding.BindingID,
@@ -517,7 +518,7 @@ func (api *testAgentRecordAPI) ApplyLifecycle(
 				return nil, mapTestAgentRecordError(err)
 			}
 			for _, grant := range grants {
-				if err := api.store.ConnectorGrants().Revoke(
+				if err := api.store.Connectors().RevokeGrantRecord(
 					ctx,
 					command.WorkspaceKey,
 					grant.GrantID,
@@ -627,7 +628,9 @@ func mapTestAgentRecordError(err error) error {
 	}
 }
 
-type testBindingGrantCompatibility struct{ grants store.ConnectorGrantStore }
+type testBindingGrantCompatibility struct {
+	grants connectorsmodule.ManagementStore
+}
 
 type testTriggerConnectorCompatibility struct {
 	testBindingGrantCompatibility
@@ -638,7 +641,7 @@ func (testTriggerConnectorCompatibility) ConfigureBindingSecret(context.Context,
 }
 
 func (c testBindingGrantCompatibility) RevokeBindingGrants(ctx context.Context, workspace, bindingID string) (int, error) {
-	grants, err := c.grants.ListByBinding(ctx, workspace, bindingID)
+	grants, err := c.grants.ListGrantRecordsByBinding(ctx, workspace, bindingID)
 	if err != nil {
 		return 0, err
 	}
@@ -647,8 +650,8 @@ func (c testBindingGrantCompatibility) RevokeBindingGrants(ctx context.Context, 
 		if grant == nil {
 			continue
 		}
-		if err := c.grants.Revoke(ctx, workspace, grant.GrantID); err != nil {
-			if errors.Is(err, domain.ErrGrantRevoked) {
+		if err := c.grants.RevokeGrantRecord(ctx, workspace, grant.GrantID); err != nil {
+			if errors.Is(err, connectorsmodule.ErrGrantRevoked) {
 				continue
 			}
 			return revoked, err
@@ -669,7 +672,7 @@ func newTestAgentsModule(agentSvc agentcoord.AgentService, st store.Store, hub *
 		bindings := &testBindingOperations{store: st}
 		provisioning := newTestAgentProvisioning(st, bindings)
 		config.Bindings = bindings
-		config.BindingGrants = testBindingGrantCompatibility{grants: st.ConnectorGrants()}
+		config.BindingGrants = testBindingGrantCompatibility{grants: st.Connectors()}
 		config.Provisioning = provisioning
 		config.ProvisioningAuthority = provisioning
 		config.PrepareWorkflowTarget = testWorkflowTargetPreparation(st)

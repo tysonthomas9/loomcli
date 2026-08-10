@@ -14,6 +14,7 @@ import (
 	"io"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/connectors"
 )
 
 // IsNotFound classifies the legacy persistence sentinel without forcing
@@ -53,9 +54,7 @@ type Store interface {
 	TaskRunEvents() TaskRunEventStore
 	Outbox() OutboxStore
 	Awaits() AwaitStore
-	Connectors() ConnectorStore
-	ConnectorGrants() ConnectorGrantStore
-	ConnectorCalls() ConnectorAuditStore
+	Connectors() connectors.ManagementStore
 	Workers() WorkerStore
 	Roles() RoleStore
 	io.Closer

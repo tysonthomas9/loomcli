@@ -780,7 +780,6 @@
         {"file": "internal/webui/handlers/agents/record_dto.go", "import": "github.com/tysonthomas9/loomcli/internal/store"},
         {"file": "internal/webui/handlers/agents/record_handlers.go", "import": "github.com/tysonthomas9/loomcli/internal/store"},
         {"file": "internal/webui/handlers/approvals/module.go", "import": "github.com/tysonthomas9/loomcli/internal/store"},
-        {"file": "internal/webui/handlers/connectors/module.go", "import": "github.com/tysonthomas9/loomcli/internal/store"},
         {"file": "internal/webui/handlers/driverapi/connectors.go", "import": "github.com/tysonthomas9/loomcli/internal/store"},
         {"file": "internal/webui/handlers/driverapi/issue_ops.go", "import": "github.com/tysonthomas9/loomcli/internal/backend"},
         {"file": "internal/webui/handlers/driverapi/module.go", "import": "github.com/tysonthomas9/loomcli/internal/backend"},

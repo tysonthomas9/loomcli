@@ -8,6 +8,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/app/workflowbinding"
 	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/triggerbindings"
@@ -39,7 +40,7 @@ type automationRouteDeps struct {
 	DriverRuns      store.DriverRunStore
 	AwaitResolver   store.AtomicAwaitStore
 	TriggerBindings store.TriggerBindingStore
-	ConnectorGrants store.ConnectorGrantStore
+	Connectors      connectorsmodule.ManagementStore
 	AgentServices   store.AgentServiceStore
 }
 
@@ -70,7 +71,7 @@ func newAutomationRouteModules(deps automationRouteDeps) automationRouteModules 
 	if deps.Awaits != nil && deps.DriverRuns != nil && deps.AwaitResolver != nil {
 		eventAwaits = trigger.NewAwaitMatcherWithResolver(deps.Awaits, deps.DriverRuns, deps.AwaitResolver)
 	}
-	connectorCompatibility := newStoreConnectorCompatibility(deps.TriggerBindings, deps.ConnectorGrants)
+	connectorCompatibility := newStoreConnectorCompatibility(deps.TriggerBindings, deps.Connectors)
 	agentIdentityCompatibility := newStoreAgentIdentityCompatibility(deps.AgentServices)
 
 	return automationRouteModules{

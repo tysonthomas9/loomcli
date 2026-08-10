@@ -1,4 +1,4 @@
-package domain
+package connectors
 
 import (
 	"errors"
@@ -9,18 +9,15 @@ import (
 func validConnector() Connector {
 	now := time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC)
 	return Connector{
-		WorkspaceKey:             "ws-1",
-		ConnectorID:              "conn-github-main",
-		SourceKind:               ConnectorSourceGitHub,
-		DisplayName:              "GitHub (main org)",
-		InboundEndpointPath:      "/hooks/conn-github-main",
-		InboundSecret:            "inbound-secret",
-		PreviousInboundSecret:    "old-secret",
-		OutboundCredentialSealed: []byte("ciphertext"),
-		Status:                   ConnectorStatusActive,
-		CreatedBy:                "tyson",
-		CreatedAt:                now,
-		UpdatedAt:                now,
+		WorkspaceKey:        "ws-1",
+		ConnectorID:         "conn-github-main",
+		SourceKind:          ConnectorSourceGitHub,
+		DisplayName:         "GitHub (main org)",
+		InboundEndpointPath: "/hooks/conn-github-main",
+		Status:              ConnectorStatusActive,
+		CreatedBy:           "tyson",
+		CreatedAt:           now,
+		UpdatedAt:           now,
 	}
 }
 
@@ -59,31 +56,6 @@ func TestConnectorValidate(t *testing.T) {
 				t.Fatalf("Validate() = %v, want errors.Is(%v)", err, tt.wantErr)
 			}
 		})
-	}
-}
-
-func TestConnectorRedacted(t *testing.T) {
-	c := validConnector()
-	r := c.Redacted()
-
-	if r.InboundSecret != "" || r.PreviousInboundSecret != "" {
-		t.Fatalf("Redacted() kept inbound secrets: %+v", r)
-	}
-	if r.OutboundCredentialSealed != nil {
-		t.Fatalf("Redacted() kept sealed credential: %+v", r)
-	}
-	if r.HasOutboundCredential() {
-		t.Fatal("redacted copy reports HasOutboundCredential")
-	}
-	// Non-secret fields survive.
-	if r.WorkspaceKey != c.WorkspaceKey || r.ConnectorID != c.ConnectorID ||
-		r.SourceKind != c.SourceKind || r.InboundEndpointPath != c.InboundEndpointPath ||
-		r.Status != c.Status {
-		t.Fatalf("Redacted() altered non-secret fields: %+v", r)
-	}
-	// Original is untouched.
-	if c.InboundSecret != "inbound-secret" || !c.HasOutboundCredential() {
-		t.Fatalf("Redacted() mutated the original: %+v", c)
 	}
 }
 
@@ -250,22 +222,7 @@ func TestConnectorCallID(t *testing.T) {
 	}
 }
 
-func TestConnectorSentinelChains(t *testing.T) {
-	tests := []struct {
-		name   string
-		err    error
-		target error
-	}{
-		{name: "exists wraps already exists", err: ErrConnectorExists, target: ErrAlreadyExists},
-		{name: "not found wraps not found", err: ErrConnectorNotFound, target: ErrNotFound},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if !errors.Is(tt.err, tt.target) {
-				t.Fatalf("errors.Is(%v, %v) = false", tt.err, tt.target)
-			}
-		})
-	}
+func TestConnectorSentinelsStayDistinct(t *testing.T) {
 	if errors.Is(ErrGrantDenied, ErrGrantRevoked) {
 		t.Fatal("ErrGrantDenied and ErrGrantRevoked must stay distinct")
 	}

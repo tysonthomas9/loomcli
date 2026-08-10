@@ -16,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
@@ -379,7 +380,7 @@ func (c *testConnectorCompatibility) ConfigureBindingSecret(_ context.Context, w
 }
 
 func (c *testConnectorCompatibility) RevokeBindingGrants(ctx context.Context, workspace, bindingID string) (int, error) {
-	grants, err := c.store.ConnectorGrants().ListByBinding(ctx, workspace, bindingID)
+	grants, err := c.store.Connectors().ListGrantRecordsByBinding(ctx, workspace, bindingID)
 	if err != nil {
 		return 0, err
 	}
@@ -388,8 +389,8 @@ func (c *testConnectorCompatibility) RevokeBindingGrants(ctx context.Context, wo
 		if grant == nil {
 			continue
 		}
-		if err := c.store.ConnectorGrants().Revoke(ctx, workspace, grant.GrantID); err != nil {
-			if errors.Is(err, domain.ErrGrantRevoked) {
+		if err := c.store.Connectors().RevokeGrantRecord(ctx, workspace, grant.GrantID); err != nil {
+			if errors.Is(err, connectorsmodule.ErrGrantRevoked) {
 				continue
 			}
 			return revoked, err
@@ -1247,7 +1248,7 @@ func TestDeleteBinding_GoneAndGrantsRevoked(t *testing.T) {
 
 	// Seed two active grants for the binding (memstore grants need no connector FK).
 	for i, action := range []string{"github.pull_request.read", "github.compare.read"} {
-		if _, err := st.ConnectorGrants().Create(ctx, store.ConnectorGrantCreate{
+		if _, err := st.Connectors().CreateManagementGrant(ctx, connectorsmodule.CreateGrantMutation{
 			WorkspaceKey:    "WS",
 			GrantID:         "grant-" + string(rune('a'+i)),
 			ConnectorID:     "github",
@@ -1278,7 +1279,7 @@ func TestDeleteBinding_GoneAndGrantsRevoked(t *testing.T) {
 		t.Fatalf("binding s2 still present after delete")
 	}
 	// Grants are revoked (ListByBinding excludes revoked grants).
-	grants, err := st.ConnectorGrants().ListByBinding(ctx, "WS", "s2")
+	grants, err := st.Connectors().ListGrantRecordsByBinding(ctx, "WS", "s2")
 	if err != nil {
 		t.Fatalf("list grants: %v", err)
 	}
@@ -1302,7 +1303,7 @@ func TestDeleteBinding_GoneAndGrantsRevoked(t *testing.T) {
 // when the caller cannot distinguish an original miss from a lost response.
 func TestDeleteBinding_MissingConverges(t *testing.T) {
 	mux, st := seededMux(t)
-	if _, err := st.ConnectorGrants().Create(t.Context(), store.ConnectorGrantCreate{
+	if _, err := st.Connectors().CreateManagementGrant(t.Context(), connectorsmodule.CreateGrantMutation{
 		WorkspaceKey: "WS", GrantID: "orphan-grant", ConnectorID: "github", BindingID: "missing",
 		Action: "github.pull_request.read", ResourcePattern: "repo:o/r",
 	}); err != nil {

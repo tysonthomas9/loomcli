@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/infra/connectorscatalog"
 	"github.com/tysonthomas9/loomcli/internal/infra/connectorsproviders"
 	"github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
@@ -42,16 +41,8 @@ func (app *Server) buildConnectorDispatcher() connectorsmodule.Dispatcher {
 	if err != nil {
 		return nil
 	}
-	catalog, err := connectorscatalog.New(
-		app.config.Store.Connectors(),
-		app.config.Store.ConnectorGrants(),
-		app.config.Store.ConnectorCalls(),
-	)
-	if err != nil {
-		return nil
-	}
 	dispatcher, err := connectorsmodule.NewDispatch(
-		catalog,
+		app.config.Store.Connectors(),
 		vault,
 		connectorsproviders.Default(&http.Client{Timeout: connectorUpstreamTimeout()}),
 		nil,

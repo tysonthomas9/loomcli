@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	legacydomain "github.com/tysonthomas9/loomcli/internal/domain"
 	domain "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 )
 
@@ -146,7 +145,7 @@ func assertNoCredential(t *testing.T, err error) {
 
 func TestGitHubActionsPassActionGrammar(t *testing.T) {
 	for _, action := range GitHubActions() {
-		if err := legacydomain.ValidateConnectorAction(action); err != nil {
+		if err := domain.ValidateConnectorAction(action); err != nil {
 			t.Errorf("action %q fails the CV1 grammar: %v", action, err)
 		}
 	}

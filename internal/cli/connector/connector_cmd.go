@@ -7,7 +7,7 @@
 //
 // Secrets NEVER travel on argv (process-listing leak) and are NEVER echoed
 // back: the store layer redacts every Get/List/Create/Rotate response
-// (domain.Connector.Redacted), and this package only ever prints those
+// (Connectors-owned projections), and this package only ever prints those
 // redacted results.
 package connector
 
@@ -26,7 +26,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	vault "github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 )
@@ -65,7 +64,7 @@ var createCmd = &cobra.Command{
 // createParams carries the validated create inputs into the testable core.
 type createParams struct {
 	connectorID string
-	source      domain.ConnectorSourceKind
+	source      connectorsmodule.ConnectorSourceKind
 	displayName string
 	endpoint    string
 	secretStdin bool
@@ -77,7 +76,7 @@ type createParams struct {
 func runCreate(cmd *cobra.Command, _ []string) error {
 	p := createParams{
 		connectorID: strings.TrimSpace(createID),
-		source:      domain.ConnectorSourceKind(strings.TrimSpace(createSource)),
+		source:      connectorsmodule.ConnectorSourceKind(strings.TrimSpace(createSource)),
 		displayName: strings.TrimSpace(createName),
 		endpoint:    strings.TrimSpace(createEndpoint),
 		secretStdin: createSecretStdin,
@@ -130,7 +129,7 @@ func createConnector(
 	in := connectorsmodule.CreateConnectorCommand{
 		WorkspaceKey:        ws,
 		ConnectorID:         id,
-		SourceKind:          connectorsmodule.ConnectorSourceKind(p.source),
+		SourceKind:          p.source,
 		DisplayName:         p.displayName,
 		InboundEndpointPath: p.endpoint,
 	}
@@ -302,7 +301,7 @@ func runRotate(cmd *cobra.Command, args []string) error {
 
 // rotateConnector drives the CV13 rotation ceremony (connector.Rotate): the
 // orchestration computes the dual-secret window (zero window applies the 15m
-// default, explicit windows are capped at domain.MaxConnectorSecretOverlap),
+// default, explicit windows are capped at connectors.MaxConnectorSecretOverlap),
 // seals any replacement outbound credential through the vault seam before the
 // single store write, and journals a rotation record in the connector-call
 // audit trail.
@@ -400,7 +399,7 @@ func newGrantCreateInput(ws string) (connectorsmodule.CreateGrantCommand, error)
 	if in.ConnectorID == "" || in.BindingID == "" || in.Action == "" || in.ResourcePattern == "" {
 		return in, fmt.Errorf("--connector, --binding, --action and --resource are all required")
 	}
-	if err := domain.ValidateConnectorAction(in.Action); err != nil {
+	if err := connectorsmodule.ValidateConnectorAction(in.Action); err != nil {
 		return in, fmt.Errorf("--action: %w", err)
 	}
 	if in.GrantID == "" {

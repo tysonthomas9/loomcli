@@ -70,7 +70,7 @@ func TestCheckedInManifestsAndRepository(t *testing.T) {
 	if got, want := len(report.CompositeStoreOutside), 0; got != want {
 		t.Fatalf("outside-composition Store file count = %d, want %d", got, want)
 	}
-	if got, want := len(report.LegacyHandlerImports), 26; got != want {
+	if got, want := len(report.LegacyHandlerImports), 25; got != want {
 		t.Fatalf("legacy handler imports = %d, want %d", got, want)
 	}
 	if got, want := report.ModuleRoots, checkedInModuleRoots; !slices.Equal(got, want) {
@@ -85,7 +85,7 @@ func TestCheckedInManifestsAndRepository(t *testing.T) {
 	if got, want := report.MutationCommands, 107; got != want {
 		t.Fatalf("mutation commands = %d, want %d", got, want)
 	}
-	if got, want := report.DirectPersistenceWrites, 98; got != want {
+	if got, want := report.DirectPersistenceWrites, 93; got != want {
 		t.Fatalf("direct persistence-write rows = %d, want %d", got, want)
 	}
 	if got, want := report.RuntimeComponents, 71; got != want {
@@ -680,6 +680,7 @@ func TestRetiredHorizontalRootsCannotReturn(t *testing.T) {
 		"internal/agentinbox",
 		"internal/backend/backendtest",
 		"internal/connector",
+		"internal/infra/connectorscatalog",
 		"internal/leadcontrol",
 		"internal/modules/sourcecontrol/stackpublish",
 		"internal/pathsec",
@@ -746,6 +747,22 @@ func TestRetiredHorizontalRootsCannotReturn(t *testing.T) {
 				t.Fatalf("retired horizontal root callers = %v, want none", callers)
 			}
 		})
+	}
+}
+
+func TestRetiredConnectorModelAndRepositoryPlaneCannotReturn(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, relative := range []string{
+		"internal/domain/connector.go",
+		"internal/store/connector_store.go",
+		"internal/store/connector_unimplemented.go",
+	} {
+		if _, statErr := os.Stat(filepath.Join(root, filepath.FromSlash(relative))); !os.IsNotExist(statErr) {
+			t.Errorf("retired connector plane file %s returned (stat error: %v)", relative, statErr)
+		}
 	}
 }
 

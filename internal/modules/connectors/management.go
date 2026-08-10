@@ -122,18 +122,22 @@ func (service *ManagementService) SynchronizeConnectorCredential(
 				return cloneConnector(current), nil
 			}
 		}
-		inbound, resolveErr := service.secretStore.ResolveCurrentInboundSecretRecord(ctx, workspace, connectorID)
+		inbound, resolveErr := service.secretStore.ResolveInboundSecretsRecord(ctx, workspace, connectorID)
 		if resolveErr != nil {
 			return nil, fmt.Errorf("resolve connector inbound secret: %w", resolveErr)
 		}
-		if inbound == "" {
-			inbound, err = randomInboundSecret()
+		if inbound == nil {
+			return nil, ErrInvalidPersistedState
+		}
+		currentInbound := inbound.Current
+		if currentInbound == "" {
+			currentInbound, err = randomInboundSecret()
 			if err != nil {
 				return nil, err
 			}
 		}
 		rotated, rotateErr := service.RotateConnector(ctx, RotateConnectorCommand{
-			WorkspaceKey: workspace, ConnectorID: connectorID, NewInboundSecret: inbound,
+			WorkspaceKey: workspace, ConnectorID: connectorID, NewInboundSecret: currentInbound,
 			NewCredential:     append([]byte(nil), command.DesiredCredential...),
 			ExpectedUpdatedAt: current.UpdatedAt,
 		})

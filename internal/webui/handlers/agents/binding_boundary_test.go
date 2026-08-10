@@ -14,6 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -64,7 +65,7 @@ func TestLegacyBindingPatchIsNotAnAgentRoute(t *testing.T) {
 			return authority.OperatorAuthority{}, nil
 		}),
 		WorkspaceFromContext: func(context.Context) string { return agentRecordTestWS },
-		BindingGrants:        testBindingGrantCompatibility{grants: st.ConnectorGrants()},
+		BindingGrants:        testBindingGrantCompatibility{grants: st.Connectors()},
 	})
 	mux := http.NewServeMux()
 	module.Register(mux)
@@ -112,7 +113,7 @@ func TestManagedBindingLifecycleUsesExactActions(t *testing.T) {
 		ProvisioningAuthority: provisioning,
 		PrepareWorkflowTarget: testWorkflowTargetPreparation(st),
 		WorkspaceFromContext:  func(context.Context) string { return agentRecordTestWS },
-		BindingGrants:         testBindingGrantCompatibility{grants: st.ConnectorGrants()},
+		BindingGrants:         testBindingGrantCompatibility{grants: st.Connectors()},
 	})
 	mux := http.NewServeMux()
 	module.Register(mux)
@@ -208,7 +209,7 @@ func TestManagedAgentDeleteResumesAfterParkOrArchiveFailure(t *testing.T) {
 			base := newAgentRecordStore(t)
 			created := createPromptAgentForTest(t, newAgentsMux(base))
 			bindingID := created.Bindings[0].BindingID
-			if _, err := base.ConnectorGrants().Create(context.Background(), store.ConnectorGrantCreate{
+			if _, err := base.Connectors().CreateManagementGrant(context.Background(), connectorsmodule.CreateGrantMutation{
 				WorkspaceKey: agentRecordTestWS, GrantID: "grant-1", ConnectorID: "github",
 				BindingID: bindingID, Action: "github.comment", ResourcePattern: "repo:o/r",
 			}); err != nil {
@@ -223,7 +224,7 @@ func TestManagedAgentDeleteResumesAfterParkOrArchiveFailure(t *testing.T) {
 				AgentRecords:         &testAgentRecordAPI{store: faultStore},
 				AgentRecordAuthority: testOperatorAuthorityResolver{},
 				WorkspaceFromContext: func(context.Context) string { return agentRecordTestWS },
-				BindingGrants:        testBindingGrantCompatibility{grants: faultStore.ConnectorGrants()},
+				BindingGrants:        testBindingGrantCompatibility{grants: faultStore.Connectors()},
 			})
 			mux := http.NewServeMux()
 			module.Register(mux)
@@ -242,7 +243,7 @@ func TestManagedAgentDeleteResumesAfterParkOrArchiveFailure(t *testing.T) {
 			if _, err := base.TriggerBindings().Get(context.Background(), agentRecordTestWS, bindingID); !errors.Is(err, domain.ErrNotFound) {
 				t.Fatalf("binding after %s failure err=%v, want already deleted", failStep, err)
 			}
-			grants, err := base.ConnectorGrants().ListByBinding(context.Background(), agentRecordTestWS, bindingID)
+			grants, err := base.Connectors().ListGrantRecordsByBinding(context.Background(), agentRecordTestWS, bindingID)
 			if err != nil || len(grants) != 0 {
 				t.Fatalf("grants after %s failure = %+v err=%v, want revoked", failStep, grants, err)
 			}

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/triggerbindings"
 )
@@ -16,7 +16,7 @@ import (
 // legacy per-binding webhook secrets and binding-scoped grants. It receives
 // only the two narrow stores it needs; neither HTTP handler nor Automation
 // receives those persistence interfaces. Connectors replaces it in Phase 5.
-func newStoreConnectorCompatibility(bindings store.TriggerBindingStore, grants store.ConnectorGrantStore) triggerbindings.ConnectorCompatibility {
+func newStoreConnectorCompatibility(bindings store.TriggerBindingStore, grants connectorsmodule.ManagementStore) triggerbindings.ConnectorCompatibility {
 	if bindings == nil && grants == nil {
 		return nil
 	}
@@ -25,7 +25,7 @@ func newStoreConnectorCompatibility(bindings store.TriggerBindingStore, grants s
 
 type storeConnectorCompatibility struct {
 	bindings store.TriggerBindingStore
-	grants   store.ConnectorGrantStore
+	grants   connectorsmodule.ManagementStore
 }
 
 func (compatibility *storeConnectorCompatibility) ConfigureBindingSecret(
@@ -59,7 +59,7 @@ func (compatibility *storeConnectorCompatibility) RevokeBindingGrants(
 	if workspaceKey == "" || bindingID == "" {
 		return 0, automation.ErrInvalid
 	}
-	grants, err := compatibility.grants.ListByBinding(ctx, workspaceKey, bindingID)
+	grants, err := compatibility.grants.ListGrantRecordsByBinding(ctx, workspaceKey, bindingID)
 	if err != nil {
 		return 0, fmt.Errorf("list binding connector grants: %w", err)
 	}
@@ -68,8 +68,8 @@ func (compatibility *storeConnectorCompatibility) RevokeBindingGrants(
 		if grant == nil {
 			continue
 		}
-		if err := compatibility.grants.Revoke(ctx, workspaceKey, grant.GrantID); err != nil {
-			if errors.Is(err, domain.ErrGrantRevoked) {
+		if err := compatibility.grants.RevokeGrantRecord(ctx, workspaceKey, grant.GrantID); err != nil {
+			if errors.Is(err, connectorsmodule.ErrGrantRevoked) {
 				continue
 			}
 			return revoked, fmt.Errorf("revoke binding connector grant %q: %w", grant.GrantID, err)

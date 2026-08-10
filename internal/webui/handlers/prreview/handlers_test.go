@@ -21,7 +21,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/app/prreviewer"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/infra/connectorscatalog"
 	"github.com/tysonthomas9/loomcli/internal/infra/connectorsproviders"
 	"github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
@@ -661,12 +660,8 @@ func buildTestConnectorDispatcher(t *testing.T, st prReviewStore, dataDir string
 	if err != nil {
 		t.Fatalf("NewVaultFromEnvOrKeyFile: %v", err)
 	}
-	catalog, err := connectorscatalog.New(st.Connectors(), st.ConnectorGrants(), st.ConnectorCalls())
-	if err != nil {
-		t.Fatalf("new connector catalog: %v", err)
-	}
 	dispatcher, err := connectors.NewDispatch(
-		catalog,
+		st.Connectors(),
 		vault,
 		connectorsproviders.Default(&http.Client{Timeout: 10 * time.Second}),
 		nil,
@@ -774,7 +769,7 @@ func (h *prReviewHarness) patchLocalSettings(t *testing.T, body string, onGitHub
 
 func assertGrantActions(t *testing.T, h *prReviewHarness, want []string) {
 	t.Helper()
-	grants, err := h.store.ConnectorGrants().ListByBinding(context.Background(), prReviewTestWorkspace, bindingID)
+	grants, err := h.store.Connectors().ListGrantRecordsByBinding(context.Background(), prReviewTestWorkspace, bindingID)
 	if err != nil {
 		t.Fatalf("ListByBinding: %v", err)
 	}

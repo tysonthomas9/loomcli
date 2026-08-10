@@ -8,15 +8,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 )
 
-func connectorCreate(connectorID string) store.ConnectorCreate {
-	return store.ConnectorCreate{
+func connectorCreate(connectorID string) connectorsmodule.CreateConnectorMutation {
+	return connectorsmodule.CreateConnectorMutation{
 		WorkspaceKey:             "WS",
 		ConnectorID:              connectorID,
-		SourceKind:               domain.ConnectorSourceGitHub,
+		SourceKind:               connectorsmodule.ConnectorSourceGitHub,
 		DisplayName:              "GitHub main",
 		InboundEndpointPath:      "/hooks/" + connectorID,
 		InboundSecret:            "inbound-secret-1",
@@ -25,47 +24,34 @@ func connectorCreate(connectorID string) store.ConnectorCreate {
 	}
 }
 
-func assertRedacted(t *testing.T, label string, conn *domain.Connector) {
-	t.Helper()
-	if conn.InboundSecret != "" {
-		t.Errorf("%s: InboundSecret = %q, want empty", label, conn.InboundSecret)
-	}
-	if conn.PreviousInboundSecret != "" {
-		t.Errorf("%s: PreviousInboundSecret = %q, want empty", label, conn.PreviousInboundSecret)
-	}
-	if conn.OutboundCredentialSealed != nil {
-		t.Errorf("%s: OutboundCredentialSealed has %d bytes, want nil", label, len(conn.OutboundCredentialSealed))
-	}
-}
-
 func TestConnectorCreate(t *testing.T) {
 	ctx := t.Context()
 
 	tests := []struct {
 		name    string
-		mutate  func(*store.ConnectorCreate)
+		mutate  func(*connectorsmodule.CreateConnectorMutation)
 		wantErr error
 	}{
 		{name: "valid"},
 		{
 			name:    "missing connector id",
-			mutate:  func(in *store.ConnectorCreate) { in.ConnectorID = "" },
-			wantErr: domain.ErrInvalid,
+			mutate:  func(in *connectorsmodule.CreateConnectorMutation) { in.ConnectorID = "" },
+			wantErr: connectorsmodule.ErrInvalid,
 		},
 		{
 			name:    "unknown source kind",
-			mutate:  func(in *store.ConnectorCreate) { in.SourceKind = "gitlab" },
-			wantErr: domain.ErrInvalid,
+			mutate:  func(in *connectorsmodule.CreateConnectorMutation) { in.SourceKind = "gitlab" },
+			wantErr: connectorsmodule.ErrInvalid,
 		},
 		{
 			name:    "unknown status",
-			mutate:  func(in *store.ConnectorCreate) { in.Status = "paused" },
-			wantErr: domain.ErrInvalid,
+			mutate:  func(in *connectorsmodule.CreateConnectorMutation) { in.Status = "paused" },
+			wantErr: connectorsmodule.ErrInvalid,
 		},
 		{
 			name:    "endpoint path without slash",
-			mutate:  func(in *store.ConnectorCreate) { in.InboundEndpointPath = "hooks/gh" },
-			wantErr: domain.ErrInvalid,
+			mutate:  func(in *connectorsmodule.CreateConnectorMutation) { in.InboundEndpointPath = "hooks/gh" },
+			wantErr: connectorsmodule.ErrInvalid,
 		},
 	}
 	for _, tc := range tests {
@@ -75,7 +61,7 @@ func TestConnectorCreate(t *testing.T) {
 			if tc.mutate != nil {
 				tc.mutate(&in)
 			}
-			conn, err := s.Connectors().Create(ctx, in)
+			conn, err := s.Connectors().CreateConnectorRecord(ctx, in)
 			if tc.wantErr != nil {
 				if !errors.Is(err, tc.wantErr) {
 					t.Fatalf("Create error = %v, want %v", err, tc.wantErr)
@@ -85,10 +71,9 @@ func TestConnectorCreate(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Create: %v", err)
 			}
-			if conn.Status != domain.ConnectorStatusActive {
+			if conn.Status != connectorsmodule.ConnectorStatusActive {
 				t.Errorf("default Status = %q, want active", conn.Status)
 			}
-			assertRedacted(t, "Create result", conn)
 		})
 	}
 }
@@ -97,19 +82,16 @@ func TestConnectorCreateDuplicate(t *testing.T) {
 	ctx := t.Context()
 	s := New()
 
-	if _, err := s.Connectors().Create(ctx, connectorCreate("gh-main")); err != nil {
+	if _, err := s.Connectors().CreateConnectorRecord(ctx, connectorCreate("gh-main")); err != nil {
 		t.Fatalf("first create: %v", err)
 	}
-	_, err := s.Connectors().Create(ctx, connectorCreate("gh-main"))
-	if !errors.Is(err, domain.ErrConnectorExists) {
-		t.Fatalf("duplicate create error = %v, want domain.ErrConnectorExists", err)
-	}
-	if !errors.Is(err, domain.ErrAlreadyExists) {
-		t.Fatalf("duplicate create error = %v, want to also match domain.ErrAlreadyExists", err)
+	_, err := s.Connectors().CreateConnectorRecord(ctx, connectorCreate("gh-main"))
+	if !errors.Is(err, connectorsmodule.ErrAlreadyExists) {
+		t.Fatalf("duplicate create error = %v, want connectorsmodule.ErrAlreadyExists", err)
 	}
 
 	// Multiple named connectors per source kind coexist under distinct ids.
-	if _, err := s.Connectors().Create(ctx, connectorCreate("gh-staging")); err != nil {
+	if _, err := s.Connectors().CreateConnectorRecord(ctx, connectorCreate("gh-staging")); err != nil {
 		t.Fatalf("second named connector for same source kind: %v", err)
 	}
 }
@@ -118,34 +100,34 @@ func TestConnectorRedactionOnEveryPublicReadPath(t *testing.T) {
 	ctx := t.Context()
 	s := New()
 
-	if _, err := s.Connectors().Create(ctx, connectorCreate("gh-main")); err != nil {
+	if _, err := s.Connectors().CreateConnectorRecord(ctx, connectorCreate("gh-main")); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	rotated, err := s.Connectors().RotateSecrets(ctx, "WS", "gh-main", store.ConnectorSecretRotation{
+	rotated, err := s.Connectors().RotateConnectorSecretsRecord(ctx, "WS", "gh-main", connectorsmodule.RotateConnectorSecretsMutation{
 		NewInboundSecret: "inbound-secret-2",
 	})
 	if err != nil {
 		t.Fatalf("rotate: %v", err)
 	}
-	assertRedacted(t, "RotateSecrets result", rotated)
+	if rotated.PreviousSecretValidUntil == nil {
+		t.Errorf("Rotate dropped PreviousSecretValidUntil; rotation metadata must stay public")
+	}
 
-	got, err := s.Connectors().Get(ctx, "WS", "gh-main")
+	got, err := s.Connectors().GetConnectorRecord(ctx, "WS", "gh-main")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	assertRedacted(t, "Get result", got)
 	if got.PreviousSecretValidUntil == nil {
 		t.Errorf("Get dropped PreviousSecretValidUntil; rotation window metadata should survive redaction")
 	}
 
-	listed, err := s.Connectors().List(ctx, "WS", store.ConnectorFilter{})
+	listed, err := s.Connectors().ListConnectorRecords(ctx, "WS", connectorsmodule.ConnectorFilter{})
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
 	if len(listed) != 1 {
 		t.Fatalf("list returned %d connectors, want 1", len(listed))
 	}
-	assertRedacted(t, "List result", listed[0])
 }
 
 func TestConnectorList(t *testing.T) {
@@ -153,28 +135,28 @@ func TestConnectorList(t *testing.T) {
 	s := New()
 
 	slack := connectorCreate("slack-ops")
-	slack.SourceKind = domain.ConnectorSourceSlack
+	slack.SourceKind = connectorsmodule.ConnectorSourceSlack
 	disabled := connectorCreate("gh-disabled")
-	disabled.Status = domain.ConnectorStatusDisabled
-	for _, in := range []store.ConnectorCreate{connectorCreate("gh-main"), slack, disabled} {
-		if _, err := s.Connectors().Create(ctx, in); err != nil {
+	disabled.Status = connectorsmodule.ConnectorStatusDisabled
+	for _, in := range []connectorsmodule.CreateConnectorMutation{connectorCreate("gh-main"), slack, disabled} {
+		if _, err := s.Connectors().CreateConnectorRecord(ctx, in); err != nil {
 			t.Fatalf("create %s: %v", in.ConnectorID, err)
 		}
 	}
 
 	tests := []struct {
 		name    string
-		filter  store.ConnectorFilter
+		filter  connectorsmodule.ConnectorFilter
 		wantIDs []string
 	}{
-		{name: "all sorted by id", filter: store.ConnectorFilter{}, wantIDs: []string{"gh-disabled", "gh-main", "slack-ops"}},
-		{name: "by source kind", filter: store.ConnectorFilter{SourceKind: domain.ConnectorSourceGitHub}, wantIDs: []string{"gh-disabled", "gh-main"}},
-		{name: "by status", filter: store.ConnectorFilter{Status: domain.ConnectorStatusActive}, wantIDs: []string{"gh-main", "slack-ops"}},
-		{name: "limit", filter: store.ConnectorFilter{Limit: 1}, wantIDs: []string{"gh-disabled"}},
+		{name: "all sorted by id", filter: connectorsmodule.ConnectorFilter{}, wantIDs: []string{"gh-disabled", "gh-main", "slack-ops"}},
+		{name: "by source kind", filter: connectorsmodule.ConnectorFilter{SourceKind: connectorsmodule.ConnectorSourceGitHub}, wantIDs: []string{"gh-disabled", "gh-main"}},
+		{name: "by status", filter: connectorsmodule.ConnectorFilter{Status: connectorsmodule.ConnectorStatusActive}, wantIDs: []string{"gh-main", "slack-ops"}},
+		{name: "limit", filter: connectorsmodule.ConnectorFilter{Limit: 1}, wantIDs: []string{"gh-disabled"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			listed, err := s.Connectors().List(ctx, "WS", tc.filter)
+			listed, err := s.Connectors().ListConnectorRecords(ctx, "WS", tc.filter)
 			if err != nil {
 				t.Fatalf("list: %v", err)
 			}
@@ -194,11 +176,11 @@ func TestConnectorPrivilegedResolveRoundTrip(t *testing.T) {
 	ctx := t.Context()
 	s := New()
 
-	if _, err := s.Connectors().Create(ctx, connectorCreate("gh-main")); err != nil {
+	if _, err := s.Connectors().CreateConnectorRecord(ctx, connectorCreate("gh-main")); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
-	secrets, err := s.Connectors().ResolveInboundSecret(ctx, "WS", "gh-main")
+	secrets, err := s.Connectors().ResolveInboundSecretsRecord(ctx, "WS", "gh-main")
 	if err != nil {
 		t.Fatalf("resolve inbound: %v", err)
 	}
@@ -209,7 +191,7 @@ func TestConnectorPrivilegedResolveRoundTrip(t *testing.T) {
 		t.Errorf("Previous = (%q, %v), want empty outside a rotation window", secrets.Previous, secrets.PreviousValidUntil)
 	}
 
-	sealed, err := s.Connectors().ResolveOutboundCredentialSealed(ctx, "WS", "gh-main")
+	sealed, err := s.Connectors().ResolveOutboundCredentialSealedRecord(ctx, "WS", "gh-main")
 	if err != nil {
 		t.Fatalf("resolve outbound: %v", err)
 	}
@@ -218,19 +200,19 @@ func TestConnectorPrivilegedResolveRoundTrip(t *testing.T) {
 	}
 
 	for name, call := range map[string]func() error{
-		"Get": func() error { _, err := s.Connectors().Get(ctx, "WS", "missing"); return err },
+		"Get": func() error { _, err := s.Connectors().GetConnectorRecord(ctx, "WS", "missing"); return err },
 		"ResolveInboundSecret": func() error {
-			_, err := s.Connectors().ResolveInboundSecret(ctx, "WS", "missing")
+			_, err := s.Connectors().ResolveInboundSecretsRecord(ctx, "WS", "missing")
 			return err
 		},
 		"ResolveOutboundCredentialSealed": func() error {
-			_, err := s.Connectors().ResolveOutboundCredentialSealed(ctx, "WS", "missing")
+			_, err := s.Connectors().ResolveOutboundCredentialSealedRecord(ctx, "WS", "missing")
 			return err
 		},
-		"workspace isolation": func() error { _, err := s.Connectors().Get(ctx, "OTHER", "gh-main"); return err },
+		"workspace isolation": func() error { _, err := s.Connectors().GetConnectorRecord(ctx, "OTHER", "gh-main"); return err },
 	} {
-		if err := call(); !errors.Is(err, domain.ErrConnectorNotFound) {
-			t.Errorf("%s missing connector error = %v, want domain.ErrConnectorNotFound", name, err)
+		if err := call(); !errors.Is(err, connectorsmodule.ErrNotFound) {
+			t.Errorf("%s missing connector error = %v, want connectorsmodule.ErrNotFound", name, err)
 		}
 	}
 }
@@ -240,18 +222,18 @@ func TestConnectorRotateSecrets(t *testing.T) {
 
 	t.Run("default overlap window", func(t *testing.T) {
 		s := New()
-		if _, err := s.Connectors().Create(ctx, connectorCreate("gh-main")); err != nil {
+		if _, err := s.Connectors().CreateConnectorRecord(ctx, connectorCreate("gh-main")); err != nil {
 			t.Fatalf("create: %v", err)
 		}
 		before := time.Now().UTC()
-		if _, err := s.Connectors().RotateSecrets(ctx, "WS", "gh-main", store.ConnectorSecretRotation{
+		if _, err := s.Connectors().RotateConnectorSecretsRecord(ctx, "WS", "gh-main", connectorsmodule.RotateConnectorSecretsMutation{
 			NewInboundSecret: "inbound-secret-2",
 		}); err != nil {
 			t.Fatalf("rotate: %v", err)
 		}
 		after := time.Now().UTC()
 
-		secrets, err := s.Connectors().ResolveInboundSecret(ctx, "WS", "gh-main")
+		secrets, err := s.Connectors().ResolveInboundSecretsRecord(ctx, "WS", "gh-main")
 		if err != nil {
 			t.Fatalf("resolve: %v", err)
 		}
@@ -261,8 +243,8 @@ func TestConnectorRotateSecrets(t *testing.T) {
 		if secrets.Previous != "inbound-secret-1" {
 			t.Errorf("Previous = %q, want demoted inbound-secret-1", secrets.Previous)
 		}
-		lo := before.Add(domain.DefaultConnectorSecretOverlap)
-		hi := after.Add(domain.DefaultConnectorSecretOverlap)
+		lo := before.Add(connectorsmodule.DefaultConnectorSecretOverlap)
+		hi := after.Add(connectorsmodule.DefaultConnectorSecretOverlap)
 		if secrets.PreviousValidUntil.Before(lo) || secrets.PreviousValidUntil.After(hi) {
 			t.Errorf("PreviousValidUntil = %v, want within [%v, %v]", secrets.PreviousValidUntil, lo, hi)
 		}
@@ -270,23 +252,23 @@ func TestConnectorRotateSecrets(t *testing.T) {
 
 	t.Run("expected generation is atomic", func(t *testing.T) {
 		s := New()
-		created, err := s.Connectors().Create(ctx, connectorCreate("gh-main"))
+		created, err := s.Connectors().CreateConnectorRecord(ctx, connectorCreate("gh-main"))
 		if err != nil {
 			t.Fatalf("create: %v", err)
 		}
-		if _, err := s.Connectors().RotateSecrets(ctx, "WS", "gh-main", store.ConnectorSecretRotation{
+		if _, err := s.Connectors().RotateConnectorSecretsRecord(ctx, "WS", "gh-main", connectorsmodule.RotateConnectorSecretsMutation{
 			NewInboundSecret:  "winner",
 			ExpectedUpdatedAt: created.UpdatedAt,
 		}); err != nil {
 			t.Fatalf("winner rotate: %v", err)
 		}
-		if _, err := s.Connectors().RotateSecrets(ctx, "WS", "gh-main", store.ConnectorSecretRotation{
+		if _, err := s.Connectors().RotateConnectorSecretsRecord(ctx, "WS", "gh-main", connectorsmodule.RotateConnectorSecretsMutation{
 			NewInboundSecret:  "stale",
 			ExpectedUpdatedAt: created.UpdatedAt,
-		}); !errors.Is(err, domain.ErrConflict) {
-			t.Fatalf("stale rotate = %v, want domain.ErrConflict", err)
+		}); !errors.Is(err, connectorsmodule.ErrRotationConflict) {
+			t.Fatalf("stale rotate = %v, want connectorsmodule.ErrRotationConflict", err)
 		}
-		secrets, err := s.Connectors().ResolveInboundSecret(ctx, "WS", "gh-main")
+		secrets, err := s.Connectors().ResolveInboundSecretsRecord(ctx, "WS", "gh-main")
 		if err != nil {
 			t.Fatalf("resolve: %v", err)
 		}
@@ -297,21 +279,21 @@ func TestConnectorRotateSecrets(t *testing.T) {
 
 	t.Run("window capped at max overlap", func(t *testing.T) {
 		s := New()
-		if _, err := s.Connectors().Create(ctx, connectorCreate("gh-main")); err != nil {
+		if _, err := s.Connectors().CreateConnectorRecord(ctx, connectorCreate("gh-main")); err != nil {
 			t.Fatalf("create: %v", err)
 		}
 		before := time.Now().UTC()
-		if _, err := s.Connectors().RotateSecrets(ctx, "WS", "gh-main", store.ConnectorSecretRotation{
+		if _, err := s.Connectors().RotateConnectorSecretsRecord(ctx, "WS", "gh-main", connectorsmodule.RotateConnectorSecretsMutation{
 			NewInboundSecret:         "inbound-secret-2",
 			PreviousSecretValidUntil: before.Add(48 * time.Hour),
 		}); err != nil {
 			t.Fatalf("rotate: %v", err)
 		}
-		secrets, err := s.Connectors().ResolveInboundSecret(ctx, "WS", "gh-main")
+		secrets, err := s.Connectors().ResolveInboundSecretsRecord(ctx, "WS", "gh-main")
 		if err != nil {
 			t.Fatalf("resolve: %v", err)
 		}
-		maxUntil := time.Now().UTC().Add(domain.MaxConnectorSecretOverlap)
+		maxUntil := time.Now().UTC().Add(connectorsmodule.MaxConnectorSecretOverlap)
 		if secrets.PreviousValidUntil.After(maxUntil) {
 			t.Errorf("PreviousValidUntil = %v, want capped at <= %v", secrets.PreviousValidUntil, maxUntil)
 		}
@@ -319,16 +301,16 @@ func TestConnectorRotateSecrets(t *testing.T) {
 
 	t.Run("expired window hides previous secret", func(t *testing.T) {
 		s := New()
-		if _, err := s.Connectors().Create(ctx, connectorCreate("gh-main")); err != nil {
+		if _, err := s.Connectors().CreateConnectorRecord(ctx, connectorCreate("gh-main")); err != nil {
 			t.Fatalf("create: %v", err)
 		}
-		if _, err := s.Connectors().RotateSecrets(ctx, "WS", "gh-main", store.ConnectorSecretRotation{
+		if _, err := s.Connectors().RotateConnectorSecretsRecord(ctx, "WS", "gh-main", connectorsmodule.RotateConnectorSecretsMutation{
 			NewInboundSecret:         "inbound-secret-2",
 			PreviousSecretValidUntil: time.Now().UTC().Add(-time.Minute),
 		}); err != nil {
 			t.Fatalf("rotate: %v", err)
 		}
-		secrets, err := s.Connectors().ResolveInboundSecret(ctx, "WS", "gh-main")
+		secrets, err := s.Connectors().ResolveInboundSecretsRecord(ctx, "WS", "gh-main")
 		if err != nil {
 			t.Fatalf("resolve: %v", err)
 		}
@@ -339,16 +321,16 @@ func TestConnectorRotateSecrets(t *testing.T) {
 
 	t.Run("outbound credential replacement and retention", func(t *testing.T) {
 		s := New()
-		if _, err := s.Connectors().Create(ctx, connectorCreate("gh-main")); err != nil {
+		if _, err := s.Connectors().CreateConnectorRecord(ctx, connectorCreate("gh-main")); err != nil {
 			t.Fatalf("create: %v", err)
 		}
 		// Nil leaves the sealed credential in place.
-		if _, err := s.Connectors().RotateSecrets(ctx, "WS", "gh-main", store.ConnectorSecretRotation{
+		if _, err := s.Connectors().RotateConnectorSecretsRecord(ctx, "WS", "gh-main", connectorsmodule.RotateConnectorSecretsMutation{
 			NewInboundSecret: "inbound-secret-2",
 		}); err != nil {
 			t.Fatalf("rotate keep: %v", err)
 		}
-		sealed, err := s.Connectors().ResolveOutboundCredentialSealed(ctx, "WS", "gh-main")
+		sealed, err := s.Connectors().ResolveOutboundCredentialSealedRecord(ctx, "WS", "gh-main")
 		if err != nil {
 			t.Fatalf("resolve after keep: %v", err)
 		}
@@ -356,13 +338,13 @@ func TestConnectorRotateSecrets(t *testing.T) {
 			t.Errorf("sealed after nil rotation = %q, want original retained", sealed)
 		}
 		// Non-nil replaces it (re-seal sweep path).
-		if _, err := s.Connectors().RotateSecrets(ctx, "WS", "gh-main", store.ConnectorSecretRotation{
+		if _, err := s.Connectors().RotateConnectorSecretsRecord(ctx, "WS", "gh-main", connectorsmodule.RotateConnectorSecretsMutation{
 			NewInboundSecret:            "inbound-secret-3",
 			NewOutboundCredentialSealed: []byte("resealed-ciphertext"),
 		}); err != nil {
 			t.Fatalf("rotate replace: %v", err)
 		}
-		sealed, err = s.Connectors().ResolveOutboundCredentialSealed(ctx, "WS", "gh-main")
+		sealed, err = s.Connectors().ResolveOutboundCredentialSealedRecord(ctx, "WS", "gh-main")
 		if err != nil {
 			t.Fatalf("resolve after replace: %v", err)
 		}
@@ -373,28 +355,28 @@ func TestConnectorRotateSecrets(t *testing.T) {
 
 	t.Run("empty new secret rejected", func(t *testing.T) {
 		s := New()
-		if _, err := s.Connectors().Create(ctx, connectorCreate("gh-main")); err != nil {
+		if _, err := s.Connectors().CreateConnectorRecord(ctx, connectorCreate("gh-main")); err != nil {
 			t.Fatalf("create: %v", err)
 		}
-		_, err := s.Connectors().RotateSecrets(ctx, "WS", "gh-main", store.ConnectorSecretRotation{})
-		if !errors.Is(err, domain.ErrInvalid) {
-			t.Fatalf("rotate without secret error = %v, want domain.ErrInvalid", err)
+		_, err := s.Connectors().RotateConnectorSecretsRecord(ctx, "WS", "gh-main", connectorsmodule.RotateConnectorSecretsMutation{})
+		if !errors.Is(err, connectorsmodule.ErrInvalid) {
+			t.Fatalf("rotate without secret error = %v, want connectorsmodule.ErrInvalid", err)
 		}
 	})
 
 	t.Run("missing connector", func(t *testing.T) {
 		s := New()
-		_, err := s.Connectors().RotateSecrets(ctx, "WS", "missing", store.ConnectorSecretRotation{
+		_, err := s.Connectors().RotateConnectorSecretsRecord(ctx, "WS", "missing", connectorsmodule.RotateConnectorSecretsMutation{
 			NewInboundSecret: "inbound-secret-2",
 		})
-		if !errors.Is(err, domain.ErrConnectorNotFound) {
-			t.Fatalf("rotate missing error = %v, want domain.ErrConnectorNotFound", err)
+		if !errors.Is(err, connectorsmodule.ErrNotFound) {
+			t.Fatalf("rotate missing error = %v, want connectorsmodule.ErrNotFound", err)
 		}
 	})
 }
 
-func grantCreate(grantID, bindingID string) store.ConnectorGrantCreate {
-	return store.ConnectorGrantCreate{
+func grantCreate(grantID, bindingID string) connectorsmodule.CreateGrantMutation {
+	return connectorsmodule.CreateGrantMutation{
 		WorkspaceKey:    "WS",
 		GrantID:         grantID,
 		ConnectorID:     "gh-main",
@@ -409,24 +391,24 @@ func TestConnectorGrantCreate(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		mutate  func(*store.ConnectorGrantCreate)
+		mutate  func(*connectorsmodule.CreateGrantMutation)
 		wantErr error
 	}{
 		{name: "valid"},
 		{
 			name:    "missing binding id",
-			mutate:  func(in *store.ConnectorGrantCreate) { in.BindingID = "" },
-			wantErr: domain.ErrInvalid,
+			mutate:  func(in *connectorsmodule.CreateGrantMutation) { in.BindingID = "" },
+			wantErr: connectorsmodule.ErrInvalid,
 		},
 		{
 			name:    "single segment action",
-			mutate:  func(in *store.ConnectorGrantCreate) { in.Action = "merge" },
-			wantErr: domain.ErrInvalid,
+			mutate:  func(in *connectorsmodule.CreateGrantMutation) { in.Action = "merge" },
+			wantErr: connectorsmodule.ErrInvalid,
 		},
 		{
 			name:    "missing resource pattern",
-			mutate:  func(in *store.ConnectorGrantCreate) { in.ResourcePattern = "" },
-			wantErr: domain.ErrInvalid,
+			mutate:  func(in *connectorsmodule.CreateGrantMutation) { in.ResourcePattern = "" },
+			wantErr: connectorsmodule.ErrInvalid,
 		},
 	}
 	for _, tc := range tests {
@@ -436,7 +418,7 @@ func TestConnectorGrantCreate(t *testing.T) {
 			if tc.mutate != nil {
 				tc.mutate(&in)
 			}
-			grant, err := s.ConnectorGrants().Create(ctx, in)
+			grant, err := s.Connectors().CreateManagementGrant(ctx, in)
 			if tc.wantErr != nil {
 				if !errors.Is(err, tc.wantErr) {
 					t.Fatalf("Create error = %v, want %v", err, tc.wantErr)
@@ -457,27 +439,27 @@ func TestConnectorGrantRevokeFiltering(t *testing.T) {
 	ctx := t.Context()
 	s := New()
 
-	if _, err := s.ConnectorGrants().Create(ctx, grantCreate("grant-1", "binding-1")); err != nil {
+	if _, err := s.Connectors().CreateManagementGrant(ctx, grantCreate("grant-1", "binding-1")); err != nil {
 		t.Fatalf("create grant-1: %v", err)
 	}
-	if _, err := s.ConnectorGrants().Create(ctx, grantCreate("grant-2", "binding-1")); err != nil {
+	if _, err := s.Connectors().CreateManagementGrant(ctx, grantCreate("grant-2", "binding-1")); err != nil {
 		t.Fatalf("create grant-2: %v", err)
 	}
-	if _, err := s.ConnectorGrants().Create(ctx, grantCreate("grant-1", "binding-1")); !errors.Is(err, domain.ErrAlreadyExists) {
-		t.Fatalf("duplicate grant error = %v, want domain.ErrAlreadyExists", err)
+	if _, err := s.Connectors().CreateManagementGrant(ctx, grantCreate("grant-1", "binding-1")); !errors.Is(err, connectorsmodule.ErrAlreadyExists) {
+		t.Fatalf("duplicate grant error = %v, want connectorsmodule.ErrAlreadyExists", err)
 	}
 
-	if err := s.ConnectorGrants().Revoke(ctx, "WS", "grant-1"); err != nil {
+	if err := s.Connectors().RevokeGrantRecord(ctx, "WS", "grant-1"); err != nil {
 		t.Fatalf("revoke: %v", err)
 	}
-	if err := s.ConnectorGrants().Revoke(ctx, "WS", "grant-1"); !errors.Is(err, domain.ErrGrantRevoked) {
-		t.Fatalf("double revoke error = %v, want domain.ErrGrantRevoked", err)
+	if err := s.Connectors().RevokeGrantRecord(ctx, "WS", "grant-1"); !errors.Is(err, connectorsmodule.ErrGrantRevoked) {
+		t.Fatalf("double revoke error = %v, want connectorsmodule.ErrGrantRevoked", err)
 	}
-	if err := s.ConnectorGrants().Revoke(ctx, "WS", "missing"); !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("revoke missing error = %v, want domain.ErrNotFound", err)
+	if err := s.Connectors().RevokeGrantRecord(ctx, "WS", "missing"); !errors.Is(err, connectorsmodule.ErrNotFound) {
+		t.Fatalf("revoke missing error = %v, want connectorsmodule.ErrNotFound", err)
 	}
 
-	byBinding, err := s.ConnectorGrants().ListByBinding(ctx, "WS", "binding-1")
+	byBinding, err := s.Connectors().ListGrantRecordsByBinding(ctx, "WS", "binding-1")
 	if err != nil {
 		t.Fatalf("list by binding: %v", err)
 	}
@@ -485,7 +467,7 @@ func TestConnectorGrantRevokeFiltering(t *testing.T) {
 		t.Fatalf("ListByBinding after revoke = %+v, want only grant-2", byBinding)
 	}
 
-	byConnector, err := s.ConnectorGrants().ListByConnector(ctx, "WS", "gh-main")
+	byConnector, err := s.Connectors().ListGrantRecordsByConnector(ctx, "WS", "gh-main")
 	if err != nil {
 		t.Fatalf("list by connector: %v", err)
 	}
@@ -495,7 +477,7 @@ func TestConnectorGrantRevokeFiltering(t *testing.T) {
 
 	// Deny-by-default: a binding with no grants resolves to an empty set, not
 	// an error — the enforcement layer turns absence into ErrGrantDenied.
-	none, err := s.ConnectorGrants().ListByBinding(ctx, "WS", "binding-without-grants")
+	none, err := s.Connectors().ListGrantRecordsByBinding(ctx, "WS", "binding-without-grants")
 	if err != nil {
 		t.Fatalf("list unknown binding: %v", err)
 	}
@@ -504,18 +486,18 @@ func TestConnectorGrantRevokeFiltering(t *testing.T) {
 	}
 }
 
-func connectorCallRecord(runID, action string, seq int) *domain.ConnectorCallRecord {
-	return &domain.ConnectorCallRecord{
+func connectorCallRecord(runID, action string, seq int) *connectorsmodule.ConnectorCallRecord {
+	return &connectorsmodule.ConnectorCallRecord{
 		WorkspaceKey: "WS",
-		CallID:       domain.ConnectorCallID(runID, action, seq),
+		CallID:       connectorsmodule.ConnectorCallID(runID, action, seq),
 		Seq:          seq,
 		RunID:        runID,
 		BindingID:    "binding-1",
 		ConnectorID:  "gh-main",
-		SourceKind:   domain.ConnectorSourceGitHub,
+		SourceKind:   connectorsmodule.ConnectorSourceGitHub,
 		Action:       action,
 		Resource:     "repo:octocat/hello",
-		Decision:     domain.ConnectorCallGranted,
+		Decision:     connectorsmodule.ConnectorCallGranted,
 		OccurredAt:   time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC),
 	}
 }
@@ -524,69 +506,69 @@ func TestConnectorAuditAppend(t *testing.T) {
 	ctx := t.Context()
 	s := New()
 
-	if err := s.ConnectorCalls().Append(ctx, connectorCallRecord("run-1", "github.merge", 1)); err != nil {
+	if err := s.Connectors().AppendConnectorCallRecord(ctx, connectorCallRecord("run-1", "github.merge", 1)); err != nil {
 		t.Fatalf("append: %v", err)
 	}
-	if err := s.ConnectorCalls().Append(ctx, connectorCallRecord("run-1", "github.merge", 1)); !errors.Is(err, domain.ErrAlreadyExists) {
-		t.Fatalf("duplicate append error = %v, want domain.ErrAlreadyExists", err)
+	if err := s.Connectors().AppendConnectorCallRecord(ctx, connectorCallRecord("run-1", "github.merge", 1)); !errors.Is(err, connectorsmodule.ErrAlreadyExists) {
+		t.Fatalf("duplicate append error = %v, want connectorsmodule.ErrAlreadyExists", err)
 	}
 
 	mismatched := connectorCallRecord("run-1", "github.merge", 2)
 	mismatched.CallID = "run-1#github.merge#999"
-	if err := s.ConnectorCalls().Append(ctx, mismatched); !errors.Is(err, domain.ErrInvalid) {
-		t.Fatalf("mismatched call id error = %v, want domain.ErrInvalid", err)
+	if err := s.Connectors().AppendConnectorCallRecord(ctx, mismatched); !errors.Is(err, connectorsmodule.ErrInvalid) {
+		t.Fatalf("mismatched call id error = %v, want connectorsmodule.ErrInvalid", err)
 	}
 
 	denied := connectorCallRecord("run-1", "slack.chat.post_message", 2)
-	denied.Decision = domain.ConnectorCallDenied
+	denied.Decision = connectorsmodule.ConnectorCallDenied
 	denied.OccurredAt = denied.OccurredAt.Add(time.Second)
-	if err := s.ConnectorCalls().Append(ctx, denied); err != nil {
+	if err := s.Connectors().AppendConnectorCallRecord(ctx, denied); err != nil {
 		t.Fatalf("append denied: %v", err)
 	}
 	otherRun := connectorCallRecord("run-2", "github.merge", 1)
 	otherRun.BindingID = "binding-2"
 	otherRun.OccurredAt = otherRun.OccurredAt.Add(2 * time.Second)
-	if err := s.ConnectorCalls().Append(ctx, otherRun); err != nil {
+	if err := s.Connectors().AppendConnectorCallRecord(ctx, otherRun); err != nil {
 		t.Fatalf("append other run: %v", err)
 	}
 
 	tests := []struct {
 		name        string
-		list        func() ([]*domain.ConnectorCallRecord, error)
+		list        func() ([]*connectorsmodule.ConnectorCallRecord, error)
 		wantCallIDs []string
 	}{
 		{
 			name: "by run",
-			list: func() ([]*domain.ConnectorCallRecord, error) {
-				return s.ConnectorCalls().ListByRun(ctx, "WS", "run-1", store.ConnectorCallFilter{})
+			list: func() ([]*connectorsmodule.ConnectorCallRecord, error) {
+				return s.Connectors().ListCallRecordsByRun(ctx, "WS", "run-1", connectorsmodule.ConnectorCallFilter{})
 			},
 			wantCallIDs: []string{"run-1#github.merge#1", "run-1#slack.chat.post_message#2"},
 		},
 		{
 			name: "by run with decision filter",
-			list: func() ([]*domain.ConnectorCallRecord, error) {
-				return s.ConnectorCalls().ListByRun(ctx, "WS", "run-1", store.ConnectorCallFilter{Decision: domain.ConnectorCallDenied})
+			list: func() ([]*connectorsmodule.ConnectorCallRecord, error) {
+				return s.Connectors().ListCallRecordsByRun(ctx, "WS", "run-1", connectorsmodule.ConnectorCallFilter{Decision: connectorsmodule.ConnectorCallDenied})
 			},
 			wantCallIDs: []string{"run-1#slack.chat.post_message#2"},
 		},
 		{
 			name: "by run with limit",
-			list: func() ([]*domain.ConnectorCallRecord, error) {
-				return s.ConnectorCalls().ListByRun(ctx, "WS", "run-1", store.ConnectorCallFilter{Limit: 1})
+			list: func() ([]*connectorsmodule.ConnectorCallRecord, error) {
+				return s.Connectors().ListCallRecordsByRun(ctx, "WS", "run-1", connectorsmodule.ConnectorCallFilter{Limit: 1})
 			},
 			wantCallIDs: []string{"run-1#github.merge#1"},
 		},
 		{
 			name: "by binding",
-			list: func() ([]*domain.ConnectorCallRecord, error) {
-				return s.ConnectorCalls().ListByBinding(ctx, "WS", "binding-2", store.ConnectorCallFilter{})
+			list: func() ([]*connectorsmodule.ConnectorCallRecord, error) {
+				return s.Connectors().ListCallRecordsByBinding(ctx, "WS", "binding-2", connectorsmodule.ConnectorCallFilter{})
 			},
 			wantCallIDs: []string{"run-2#github.merge#1"},
 		},
 		{
 			name: "workspace isolation",
-			list: func() ([]*domain.ConnectorCallRecord, error) {
-				return s.ConnectorCalls().ListByRun(ctx, "OTHER", "run-1", store.ConnectorCallFilter{})
+			list: func() ([]*connectorsmodule.ConnectorCallRecord, error) {
+				return s.Connectors().ListCallRecordsByRun(ctx, "OTHER", "run-1", connectorsmodule.ConnectorCallFilter{})
 			},
 			wantCallIDs: []string{},
 		},
@@ -620,7 +602,7 @@ func TestConnectorAuditConcurrentAppendSeqMonotonic(t *testing.T) {
 		wg.Add(1)
 		go func(seq int) {
 			defer wg.Done()
-			if err := s.ConnectorCalls().Append(ctx, connectorCallRecord("run-1", "github.merge", seq)); err != nil {
+			if err := s.Connectors().AppendConnectorCallRecord(ctx, connectorCallRecord("run-1", "github.merge", seq)); err != nil {
 				errs <- fmt.Errorf("seq %d: %w", seq, err)
 			}
 		}(i)
@@ -631,7 +613,7 @@ func TestConnectorAuditConcurrentAppendSeqMonotonic(t *testing.T) {
 		t.Errorf("concurrent append: %v", err)
 	}
 
-	records, err := s.ConnectorCalls().ListByRun(ctx, "WS", "run-1", store.ConnectorCallFilter{})
+	records, err := s.Connectors().ListCallRecordsByRun(ctx, "WS", "run-1", connectorsmodule.ConnectorCallFilter{})
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}

@@ -25,13 +25,11 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/app/connectorgrants"
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/infra/connectorscatalog"
 	"github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
 	"github.com/tysonthomas9/loomcli/internal/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
@@ -53,9 +51,7 @@ type Module struct {
 }
 
 type connectorStore interface {
-	Connectors() store.ConnectorStore
-	ConnectorGrants() store.ConnectorGrantStore
-	ConnectorCalls() store.ConnectorAuditStore
+	Connectors() connectorsmodule.ManagementStore
 }
 
 func NewModule(
@@ -69,11 +65,8 @@ func NewModule(
 		module.operatorAuthority = operatorAuthorities[0]
 	}
 	if st != nil {
-		adapter, adapterErr := connectorscatalog.New(st.Connectors(), st.ConnectorGrants(), st.ConnectorCalls())
-		if adapterErr == nil {
-			module.managementStore = adapter
-			module.management, _ = connectorsmodule.NewManagement(adapter)
-		}
+		module.managementStore = st.Connectors()
+		module.management, _ = connectorsmodule.NewManagement(module.managementStore)
 		module.grantSets, _ = connectorgrants.New(automationBindings, module.management)
 	}
 	return module
@@ -189,7 +182,7 @@ func (m *Module) respondWithExistingConnector(
 		handler.WriteJSON(w, http.StatusOK, ensured)
 		return true
 	}
-	if !errors.Is(err, domain.ErrNotFound) {
+	if !errors.Is(err, connectorsmodule.ErrNotFound) {
 		handler.WriteDomainError(w, err, "get connector failed")
 		return true
 	}
@@ -292,7 +285,8 @@ func (m *Module) createNewConnector(
 		handler.WriteJSON(w, http.StatusCreated, conn)
 		return
 	}
-	if errors.Is(err, domain.ErrAlreadyExists) || errors.Is(err, domain.ErrConflict) {
+	if errors.Is(err, connectorsmodule.ErrAlreadyExists) || errors.Is(err, connectorsmodule.ErrConflict) ||
+		errors.Is(err, domain.ErrAlreadyExists) || errors.Is(err, domain.ErrConflict) {
 		existing, fetchErr := m.management.GetConnector(r.Context(), connectorsmodule.GetConnectorQuery{
 			WorkspaceKey: in.WorkspaceKey, ConnectorID: in.ConnectorID,
 		})
@@ -385,7 +379,8 @@ func (m *Module) createGrant(w http.ResponseWriter, r *http.Request) {
 	// Close the create race without weakening the exact-authority check. A
 	// concurrent identical ensure returns the winner; a different winner fails
 	// closed so callers cannot enable a binding against stale scope.
-	if errors.Is(err, domain.ErrAlreadyExists) || errors.Is(err, domain.ErrConflict) {
+	if errors.Is(err, connectorsmodule.ErrAlreadyExists) || errors.Is(err, connectorsmodule.ErrConflict) ||
+		errors.Is(err, domain.ErrAlreadyExists) || errors.Is(err, domain.ErrConflict) {
 		if existing := m.findGrant(r.Context(), ws, connectorID, expected.GrantID); existing != nil {
 			m.writeExistingGrant(w, existing, expected)
 			return

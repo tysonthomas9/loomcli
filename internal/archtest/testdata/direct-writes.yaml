@@ -6,7 +6,6 @@ adapter_roots:
   - internal/cli
   - internal/driver
   - internal/infra/agentsbootstrapstore
-  - internal/infra/connectorscatalog
   - internal/infra/sessionstoreadapter
   - internal/infra/sourcecontrolstackstore
   - internal/infra/workspacecatalog
@@ -38,8 +37,6 @@ owner_adapters:
     aggregate_owner: workspace
   - path: internal/infra/agentsbootstrapstore
     aggregate_owner: agents
-  - path: internal/infra/connectorscatalog
-    aggregate_owner: connectors
   - path: internal/infra/sessionstoreadapter
     aggregate_owner: interaction
   - path: internal/infra/sourcecontrolstackstore
@@ -197,7 +194,7 @@ method_sets:
     read_only: [GetConnectorRecord, ListCallRecordsByBinding, ListCallRecordsByRun, ListConnectorRecords, ListGrantRecordsByBinding, ListGrantRecordsByConnector]
     mutating: [CreateConnectorRecord, CreateManagementGrant, RevokeGrantRecord]
   - name: connectors_secret_lifecycle
-    read_only: [GetConnectorRecord, ResolveCurrentInboundSecretRecord, ResolveOutboundCredentialSealedRecord]
+    read_only: [GetConnectorRecord, ResolveInboundSecretsRecord, ResolveOutboundCredentialSealedRecord]
     mutating: [AppendConnectorCallRecord, RotateConnectorSecretsRecord]
   - name: fleetdb_agent_management_transport
     read_only: [GetAgentOwnership, GetAgentRole, GetAgentService, ListAgentOwnership, ListAgentRoles, ListAgentServices]
@@ -692,18 +689,6 @@ receiver_surfaces:
     package: github.com/tysonthomas9/loomcli/internal/store
     method_set: store_repository
     capability_owner: execution
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorAuditStore
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: connectors
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorGrantStore
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: connectors
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorStore
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: connectors
   - receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunCancelSupport
     package: github.com/tysonthomas9/loomcli/internal/store
     method_set: store_repository
@@ -1075,6 +1060,10 @@ function_surfaces:
     capability_owner: connectors
   - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
     function: RequiredActionPreconditions
+    access: read-only
+    capability_owner: connectors
+  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
+    function: ValidateConnectorAction
     access: read-only
     capability_owner: connectors
   - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
@@ -1701,36 +1690,6 @@ writes:
       method: Create
       count: 1
       aggregate_owner: agents
-      disposition: owner_adapter
-    - file: internal/infra/connectorscatalog/catalog.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorAuditStore
-      method: Append
-      count: 1
-      aggregate_owner: connectors
-      disposition: owner_adapter
-    - file: internal/infra/connectorscatalog/catalog.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorGrantStore
-      method: Create
-      count: 1
-      aggregate_owner: connectors
-      disposition: owner_adapter
-    - file: internal/infra/connectorscatalog/catalog.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorGrantStore
-      method: Revoke
-      count: 1
-      aggregate_owner: connectors
-      disposition: owner_adapter
-    - file: internal/infra/connectorscatalog/catalog.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorStore
-      method: Create
-      count: 1
-      aggregate_owner: connectors
-      disposition: owner_adapter
-    - file: internal/infra/connectorscatalog/catalog.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorStore
-      method: RotateSecrets
-      count: 1
-      aggregate_owner: connectors
       disposition: owner_adapter
     - file: internal/infra/sessionstoreadapter/adapter.go
       receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Session'

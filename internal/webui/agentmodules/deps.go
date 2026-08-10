@@ -45,9 +45,7 @@ type ProjectionStore interface {
 	TriggerBindings() store.TriggerBindingStore
 	TriggerEvents() store.TriggerEventStore
 	TriggerDeliveries() store.TriggerDeliveryStore
-	Connectors() store.ConnectorStore
-	ConnectorGrants() store.ConnectorGrantStore
-	ConnectorCalls() store.ConnectorAuditStore
+	Connectors() connectorsmodule.ManagementStore
 }
 
 // Deps contains the capability ports used by the workspace route composition.

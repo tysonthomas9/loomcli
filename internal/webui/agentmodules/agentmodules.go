@@ -20,7 +20,7 @@ func resolveAutomationDeps(deps Deps) automationRouteDeps {
 		result.Awaits = deps.Store.Awaits()
 		result.DriverRuns = deps.Store.DriverRuns()
 		result.TriggerBindings = deps.Store.TriggerBindings()
-		result.ConnectorGrants = deps.Store.ConnectorGrants()
+		result.Connectors = deps.Store.Connectors()
 		result.AgentServices = deps.Store.AgentServices()
 	}
 	if deps.ExecutionDriverRuns != nil && deps.ExecutionSystemAuthorities != nil {

@@ -7,8 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 )
 
 // connectorTestServer is the fake fleet-db for the connector control-plane
@@ -209,10 +208,10 @@ func TestConnectorClientConnectorRoutes(t *testing.T) {
 	}
 	now := time.Date(2026, 6, 12, 10, 0, 0, 0, time.UTC)
 
-	created, err := client.Connectors().Create(t.Context(), store.ConnectorCreate{
+	created, err := client.Connectors().CreateConnectorRecord(t.Context(), connectorsmodule.CreateConnectorMutation{
 		WorkspaceKey:             "WS",
 		ConnectorID:              "gh-main",
-		SourceKind:               domain.ConnectorSourceGitHub,
+		SourceKind:               connectorsmodule.ConnectorSourceGitHub,
 		DisplayName:              "GitHub main",
 		InboundEndpointPath:      "/hooks/github/gh-main",
 		InboundSecret:            "whsec-1",
@@ -222,15 +221,13 @@ func TestConnectorClientConnectorRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if created.ConnectorID != "gh-main" || created.SourceKind != domain.ConnectorSourceGitHub || created.Status != domain.ConnectorStatusActive {
+	if created.ConnectorID != "gh-main" || created.SourceKind != connectorsmodule.ConnectorSourceGitHub || created.Status != connectorsmodule.ConnectorStatusActive {
 		t.Fatalf("Create connector = %+v", created)
 	}
-	// fleet-db returns redacted connectors from Create/Get/List.
-	if created.InboundSecret != "" || created.HasOutboundCredential() {
-		t.Fatalf("Create returned unredacted connector: %+v", created)
-	}
+	// The public connector projection cannot carry secret material; secrets are
+	// available only through the privileged management port.
 
-	got, err := client.Connectors().Get(t.Context(), "WS", "gh-main")
+	got, err := client.Connectors().GetConnectorRecord(t.Context(), "WS", "gh-main")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -238,9 +235,9 @@ func TestConnectorClientConnectorRoutes(t *testing.T) {
 		t.Fatalf("Get connector = %+v", got)
 	}
 
-	listed, err := client.Connectors().List(t.Context(), "WS", store.ConnectorFilter{
-		SourceKind: domain.ConnectorSourceGitHub,
-		Status:     domain.ConnectorStatusActive,
+	listed, err := client.Connectors().ListConnectorRecords(t.Context(), "WS", connectorsmodule.ConnectorFilter{
+		SourceKind: connectorsmodule.ConnectorSourceGitHub,
+		Status:     connectorsmodule.ConnectorStatusActive,
 		Limit:      5,
 	})
 	if err != nil {
@@ -250,7 +247,7 @@ func TestConnectorClientConnectorRoutes(t *testing.T) {
 		t.Fatalf("List = %+v", listed)
 	}
 
-	rotated, err := client.Connectors().RotateSecrets(t.Context(), "WS", "gh-main", store.ConnectorSecretRotation{
+	rotated, err := client.Connectors().RotateConnectorSecretsRecord(t.Context(), "WS", "gh-main", connectorsmodule.RotateConnectorSecretsMutation{
 		NewInboundSecret:  "whsec-2",
 		ExpectedUpdatedAt: now,
 	})
@@ -269,14 +266,14 @@ func TestConnectorClientResolveSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	secrets, err := client.Connectors().ResolveInboundSecret(t.Context(), "WS", "gh-main")
+	secrets, err := client.Connectors().ResolveInboundSecretsRecord(t.Context(), "WS", "gh-main")
 	if err != nil {
 		t.Fatalf("ResolveInboundSecret: %v", err)
 	}
 	if secrets.Current != "whsec-2" || secrets.Previous != "whsec-1" || !secrets.PreviousValidUntil.After(time.Now().UTC()) {
 		t.Fatalf("ResolveInboundSecret = %+v", secrets)
 	}
-	expired, err := client.Connectors().ResolveInboundSecret(t.Context(), "WS", "gh-expired")
+	expired, err := client.Connectors().ResolveInboundSecretsRecord(t.Context(), "WS", "gh-expired")
 	if err != nil {
 		t.Fatalf("ResolveInboundSecret expired: %v", err)
 	}
@@ -284,7 +281,7 @@ func TestConnectorClientResolveSecrets(t *testing.T) {
 		t.Fatalf("ResolveInboundSecret expired = %+v, want current only", expired)
 	}
 
-	sealed, err := client.Connectors().ResolveOutboundCredentialSealed(t.Context(), "WS", "gh-main")
+	sealed, err := client.Connectors().ResolveOutboundCredentialSealedRecord(t.Context(), "WS", "gh-main")
 	if err != nil {
 		t.Fatalf("ResolveOutboundCredentialSealed: %v", err)
 	}
@@ -302,7 +299,7 @@ func TestConnectorClientGrantAndAuditRoutes(t *testing.T) {
 	}
 	now := time.Date(2026, 6, 12, 10, 0, 0, 0, time.UTC)
 
-	grant, err := client.ConnectorGrants().Create(t.Context(), store.ConnectorGrantCreate{
+	grant, err := client.Connectors().CreateManagementGrant(t.Context(), connectorsmodule.CreateGrantMutation{
 		WorkspaceKey:    "WS",
 		GrantID:         "grant-1",
 		ConnectorID:     "gh-main",
@@ -317,7 +314,7 @@ func TestConnectorClientGrantAndAuditRoutes(t *testing.T) {
 		t.Fatalf("grant Create = %+v", grant)
 	}
 
-	byBinding, err := client.ConnectorGrants().ListByBinding(t.Context(), "WS", "binding-1")
+	byBinding, err := client.Connectors().ListGrantRecordsByBinding(t.Context(), "WS", "binding-1")
 	if err != nil {
 		t.Fatalf("ListByBinding: %v", err)
 	}
@@ -325,7 +322,7 @@ func TestConnectorClientGrantAndAuditRoutes(t *testing.T) {
 		t.Fatalf("ListByBinding = %+v", byBinding)
 	}
 
-	byConnector, err := client.ConnectorGrants().ListByConnector(t.Context(), "WS", "gh-main")
+	byConnector, err := client.Connectors().ListGrantRecordsByConnector(t.Context(), "WS", "gh-main")
 	if err != nil {
 		t.Fatalf("ListByConnector: %v", err)
 	}
@@ -333,41 +330,41 @@ func TestConnectorClientGrantAndAuditRoutes(t *testing.T) {
 		t.Fatalf("ListByConnector = %+v", byConnector)
 	}
 
-	if err := client.ConnectorGrants().Revoke(t.Context(), "WS", "grant-1"); err != nil {
+	if err := client.Connectors().RevokeGrantRecord(t.Context(), "WS", "grant-1"); err != nil {
 		t.Fatalf("Revoke: %v", err)
 	}
 
-	rec := &domain.ConnectorCallRecord{
+	rec := &connectorsmodule.ConnectorCallRecord{
 		WorkspaceKey:     "WS",
-		CallID:           domain.ConnectorCallID("run-1", "github.merge", 1),
+		CallID:           connectorsmodule.ConnectorCallID("run-1", "github.merge", 1),
 		Seq:              1,
 		RunID:            "run-1",
 		BindingID:        "binding-1",
 		ConnectorID:      "gh-main",
-		SourceKind:       domain.ConnectorSourceGitHub,
+		SourceKind:       connectorsmodule.ConnectorSourceGitHub,
 		Action:           "github.merge",
 		Resource:         "repo:octocat/hello",
-		Decision:         domain.ConnectorCallGranted,
+		Decision:         connectorsmodule.ConnectorCallGranted,
 		UpstreamStatus:   200,
 		SanitizedSummary: "merged PR 7",
 		OccurredAt:       now,
 	}
-	if err := client.ConnectorCalls().Append(t.Context(), rec); err != nil {
+	if err := client.Connectors().AppendConnectorCallRecord(t.Context(), rec); err != nil {
 		t.Fatalf("audit Append: %v", err)
 	}
 
-	byRun, err := client.ConnectorCalls().ListByRun(t.Context(), "WS", "run-1", store.ConnectorCallFilter{
-		Decision: domain.ConnectorCallGranted,
+	byRun, err := client.Connectors().ListCallRecordsByRun(t.Context(), "WS", "run-1", connectorsmodule.ConnectorCallFilter{
+		Decision: connectorsmodule.ConnectorCallGranted,
 		Limit:    10,
 	})
 	if err != nil {
 		t.Fatalf("ListByRun: %v", err)
 	}
-	if len(byRun) != 1 || byRun[0].CallID != "run-1#github.merge#1" || byRun[0].Decision != domain.ConnectorCallGranted {
+	if len(byRun) != 1 || byRun[0].CallID != "run-1#github.merge#1" || byRun[0].Decision != connectorsmodule.ConnectorCallGranted {
 		t.Fatalf("ListByRun = %+v", byRun)
 	}
 
-	byBindingCalls, err := client.ConnectorCalls().ListByBinding(t.Context(), "WS", "binding-1", store.ConnectorCallFilter{})
+	byBindingCalls, err := client.Connectors().ListCallRecordsByBinding(t.Context(), "WS", "binding-1", connectorsmodule.ConnectorCallFilter{})
 	if err != nil {
 		t.Fatalf("audit ListByBinding: %v", err)
 	}
@@ -378,10 +375,10 @@ func TestConnectorClientGrantAndAuditRoutes(t *testing.T) {
 
 // TestConnectorClientErrorClassification asserts the HTTP error → CV1
 // sentinel mapping: 409 already_exists on connector create →
-// domain.ErrConnectorExists, 404 → domain.ErrConnectorNotFound (each also
+// connectorsmodule.ErrAlreadyExists, 404 → connectorsmodule.ErrNotFound,
 // matching its generic counterpart), 409 invalid_transition on grant revoke
-// → domain.ErrGrantRevoked, and duplicate audit appends →
-// domain.ErrAlreadyExists.
+// → connectorsmodule.ErrGrantRevoked, and duplicate audit appends →
+// connectorsmodule.ErrAlreadyExists.
 func TestConnectorClientErrorClassification(t *testing.T) {
 	ts := connectorTestServer(t)
 	defer ts.Close()
@@ -391,67 +388,67 @@ func TestConnectorClientErrorClassification(t *testing.T) {
 	}
 
 	t.Run("create duplicate connector", func(t *testing.T) {
-		_, err := client.Connectors().Create(t.Context(), store.ConnectorCreate{
+		_, err := client.Connectors().CreateConnectorRecord(t.Context(), connectorsmodule.CreateConnectorMutation{
 			WorkspaceKey: "WS",
 			ConnectorID:  "gh-dupe",
-			SourceKind:   domain.ConnectorSourceGitHub,
+			SourceKind:   connectorsmodule.ConnectorSourceGitHub,
 		})
-		if !errors.Is(err, domain.ErrConnectorExists) || !errors.Is(err, domain.ErrAlreadyExists) {
-			t.Fatalf("Create dupe err = %v, want ErrConnectorExists", err)
+		if !errors.Is(err, connectorsmodule.ErrAlreadyExists) {
+			t.Fatalf("Create dupe err = %v, want ErrAlreadyExists", err)
 		}
 	})
 
 	t.Run("get missing connector", func(t *testing.T) {
-		_, err := client.Connectors().Get(t.Context(), "WS", "missing")
-		if !errors.Is(err, domain.ErrConnectorNotFound) || !errors.Is(err, domain.ErrNotFound) {
-			t.Fatalf("Get missing err = %v, want ErrConnectorNotFound", err)
+		_, err := client.Connectors().GetConnectorRecord(t.Context(), "WS", "missing")
+		if !errors.Is(err, connectorsmodule.ErrNotFound) {
+			t.Fatalf("Get missing err = %v, want ErrNotFound", err)
 		}
 	})
 
 	t.Run("resolve missing connector", func(t *testing.T) {
-		_, err := client.Connectors().ResolveInboundSecret(t.Context(), "WS", "missing")
-		if !errors.Is(err, domain.ErrConnectorNotFound) {
-			t.Fatalf("ResolveInboundSecret missing err = %v, want ErrConnectorNotFound", err)
+		_, err := client.Connectors().ResolveInboundSecretsRecord(t.Context(), "WS", "missing")
+		if !errors.Is(err, connectorsmodule.ErrNotFound) {
+			t.Fatalf("ResolveInboundSecret missing err = %v, want ErrNotFound", err)
 		}
 	})
 
 	t.Run("revoke already-revoked grant", func(t *testing.T) {
-		err := client.ConnectorGrants().Revoke(t.Context(), "WS", "grant-revoked")
-		if !errors.Is(err, domain.ErrGrantRevoked) {
+		err := client.Connectors().RevokeGrantRecord(t.Context(), "WS", "grant-revoked")
+		if !errors.Is(err, connectorsmodule.ErrGrantRevoked) {
 			t.Fatalf("Revoke revoked err = %v, want ErrGrantRevoked", err)
 		}
 	})
 
 	t.Run("append duplicate audit row", func(t *testing.T) {
-		err := client.ConnectorCalls().Append(t.Context(), &domain.ConnectorCallRecord{
+		err := client.Connectors().AppendConnectorCallRecord(t.Context(), &connectorsmodule.ConnectorCallRecord{
 			WorkspaceKey: "WS",
-			CallID:       domain.ConnectorCallID("run-dupe", "github.merge", 1),
+			CallID:       connectorsmodule.ConnectorCallID("run-dupe", "github.merge", 1),
 			Seq:          1,
 			RunID:        "run-dupe",
 			BindingID:    "binding-1",
 			ConnectorID:  "gh-main",
-			SourceKind:   domain.ConnectorSourceGitHub,
+			SourceKind:   connectorsmodule.ConnectorSourceGitHub,
 			Action:       "github.merge",
-			Decision:     domain.ConnectorCallGranted,
+			Decision:     connectorsmodule.ConnectorCallGranted,
 			OccurredAt:   time.Now().UTC(),
 		})
-		if !errors.Is(err, domain.ErrAlreadyExists) {
+		if !errors.Is(err, connectorsmodule.ErrAlreadyExists) {
 			t.Fatalf("Append dupe err = %v, want ErrAlreadyExists", err)
 		}
 	})
 
 	t.Run("append invalid record fails client-side", func(t *testing.T) {
-		err := client.ConnectorCalls().Append(t.Context(), &domain.ConnectorCallRecord{
+		err := client.Connectors().AppendConnectorCallRecord(t.Context(), &connectorsmodule.ConnectorCallRecord{
 			WorkspaceKey: "WS",
 			CallID:       "mismatched",
 			RunID:        "run-1",
 			BindingID:    "binding-1",
 			ConnectorID:  "gh-main",
-			SourceKind:   domain.ConnectorSourceGitHub,
+			SourceKind:   connectorsmodule.ConnectorSourceGitHub,
 			Action:       "github.merge",
-			Decision:     domain.ConnectorCallGranted,
+			Decision:     connectorsmodule.ConnectorCallGranted,
 		})
-		if !errors.Is(err, domain.ErrInvalid) {
+		if !errors.Is(err, connectorsmodule.ErrInvalid) {
 			t.Fatalf("Append invalid err = %v, want ErrInvalid", err)
 		}
 	})

@@ -266,7 +266,7 @@ func TestAgentServiceHandlerUsesManagedCoreCASForCreateUpdateAndDelete(t *testin
 		ProvisioningAuthority: provisioning,
 		PrepareWorkflowTarget: testWorkflowTargetPreparation(countingStore),
 		WorkspaceFromContext:  func(context.Context) string { return agentRecordTestWS },
-		BindingGrants:         testBindingGrantCompatibility{grants: st.ConnectorGrants()},
+		BindingGrants:         testBindingGrantCompatibility{grants: st.Connectors()},
 	})
 	mux := http.NewServeMux()
 	module.Register(mux)

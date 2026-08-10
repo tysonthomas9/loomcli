@@ -40,7 +40,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/app/webhookingestion"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
-	"github.com/tysonthomas9/loomcli/internal/infra/connectorscatalog"
 	providers "github.com/tysonthomas9/loomcli/internal/infra/connectorsproviders"
 	"github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
@@ -310,11 +309,7 @@ func newE2EHarness(t *testing.T) *e2eHarness {
 		providers.NewGitHub(h.github.server.Client(), h.github.server.URL)); err != nil {
 		t.Fatalf("Register github provider: %v", err)
 	}
-	catalog, err := connectorscatalog.New(h.store.Connectors(), h.store.ConnectorGrants(), h.store.ConnectorCalls())
-	if err != nil {
-		t.Fatalf("New connector catalog: %v", err)
-	}
-	dispatcher, err := connectorsmodule.NewDispatch(catalog, h.vault, registry, nil)
+	dispatcher, err := connectorsmodule.NewDispatch(h.store.Connectors(), h.vault, registry, nil)
 	if err != nil {
 		t.Fatalf("New connector dispatcher: %v", err)
 	}
@@ -395,9 +390,9 @@ func (h *e2eHarness) provisionWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Seal credential: %v", err)
 	}
-	if _, err := h.store.Connectors().Create(ctx, store.ConnectorCreate{
+	if _, err := h.store.Connectors().CreateConnectorRecord(ctx, connectorsmodule.CreateConnectorMutation{
 		WorkspaceKey: e2eWorkspace, ConnectorID: "gh-main",
-		SourceKind:               domain.ConnectorSourceGitHub,
+		SourceKind:               connectorsmodule.ConnectorSourceGitHub,
 		DisplayName:              "GitHub (main)",
 		InboundSecret:            inboundSecretV1,
 		OutboundCredentialSealed: sealed,
@@ -409,7 +404,7 @@ func (h *e2eHarness) provisionWorkspace(t *testing.T) {
 	// Deny-by-default: ONLY merge and pull_request.read on repo:octocat/hello
 	// are granted. Everything else must refuse with grant_denied.
 	for i, action := range []string{"github.merge", "github.pull_request.read"} {
-		if _, err := h.store.ConnectorGrants().Create(ctx, store.ConnectorGrantCreate{
+		if _, err := h.store.Connectors().CreateManagementGrant(ctx, connectorsmodule.CreateGrantMutation{
 			WorkspaceKey: e2eWorkspace, GrantID: fmt.Sprintf("grant-%d", i+1),
 			ConnectorID: "gh-main", BindingID: "binding-1",
 			Action: action, ResourcePattern: "repo:octocat/hello",
@@ -702,7 +697,7 @@ func TestConnectorEndToEnd(t *testing.T) {
 		t.Fatalf("fresh merge: status = %d, want 200 (body %s)", status, raw)
 	}
 	callID, decision, upstreamStatus, body := decodeDispatch(t, raw)
-	wantMergeCallID := domain.ConnectorCallID(h.runID, "github.merge", 4)
+	wantMergeCallID := connectorsmodule.ConnectorCallID(h.runID, "github.merge", 4)
 	if callID != wantMergeCallID || decision != "granted" || upstreamStatus != 200 || body["merged"] != true {
 		t.Fatalf("fresh merge = %s/%s/%d/%v, want %s/granted/200/merged",
 			callID, decision, upstreamStatus, body, wantMergeCallID)
@@ -719,9 +714,9 @@ func TestConnectorEndToEnd(t *testing.T) {
 		t.Fatalf("upstream calls = %d, want 3 (stale merge, read, fresh merge)", len(calls))
 	}
 	wantKeys := []string{
-		domain.ConnectorCallID(h.runID, "github.merge", 2),
-		domain.ConnectorCallID(h.runID, "github.pull_request.read", 3),
-		domain.ConnectorCallID(h.runID, "github.merge", 4),
+		connectorsmodule.ConnectorCallID(h.runID, "github.merge", 2),
+		connectorsmodule.ConnectorCallID(h.runID, "github.pull_request.read", 3),
+		connectorsmodule.ConnectorCallID(h.runID, "github.merge", 4),
 	}
 	for i, call := range calls {
 		if call.Authorization != "Bearer "+outboundCredentialV1 {
@@ -735,18 +730,14 @@ func TestConnectorEndToEnd(t *testing.T) {
 	// (7) Audit journal: one row per dispatch — denied AND granted AND stale —
 	// all attributed to the server-resolved binding, never caller-supplied.
 	assertAuditTrail(t, h, map[string]auditExpectation{
-		domain.ConnectorCallID(h.runID, "github.issue_comment.post", 1): {domain.ConnectorCallDenied, 0},
-		domain.ConnectorCallID(h.runID, "github.merge", 2):              {domain.ConnectorCallStaleSubject, 409},
-		domain.ConnectorCallID(h.runID, "github.pull_request.read", 3):  {domain.ConnectorCallGranted, 200},
-		domain.ConnectorCallID(h.runID, "github.merge", 4):              {domain.ConnectorCallGranted, 200},
+		connectorsmodule.ConnectorCallID(h.runID, "github.issue_comment.post", 1): {connectorsmodule.ConnectorCallDenied, 0},
+		connectorsmodule.ConnectorCallID(h.runID, "github.merge", 2):              {connectorsmodule.ConnectorCallStaleSubject, 409},
+		connectorsmodule.ConnectorCallID(h.runID, "github.pull_request.read", 3):  {connectorsmodule.ConnectorCallGranted, 200},
+		connectorsmodule.ConnectorCallID(h.runID, "github.merge", 4):              {connectorsmodule.ConnectorCallGranted, 200},
 	})
 
 	// (8) Mid-flight rotation: both secrets rotate while the run is live.
-	catalog, err := connectorscatalog.New(h.store.Connectors(), h.store.ConnectorGrants(), h.store.ConnectorCalls())
-	if err != nil {
-		t.Fatalf("New connector catalog for rotation: %v", err)
-	}
-	management, err := connectorsmodule.NewManagementWithSecrets(catalog, h.vault, time.Now)
+	management, err := connectorsmodule.NewManagementWithSecrets(h.store.Connectors(), h.vault, time.Now)
 	if err != nil {
 		t.Fatalf("New connector management for rotation: %v", err)
 	}
@@ -802,13 +793,13 @@ func TestConnectorEndToEnd(t *testing.T) {
 
 // auditExpectation pins one journal row's decision and upstream status.
 type auditExpectation struct {
-	decision domain.ConnectorCallDecision
+	decision connectorsmodule.ConnectorCallDecision
 	status   int
 }
 
 func assertAuditTrail(t *testing.T, h *e2eHarness, want map[string]auditExpectation) {
 	t.Helper()
-	records, err := h.store.ConnectorCalls().ListByRun(context.Background(), e2eWorkspace, h.runID, store.ConnectorCallFilter{})
+	records, err := h.store.Connectors().ListCallRecordsByRun(context.Background(), e2eWorkspace, h.runID, connectorsmodule.ConnectorCallFilter{})
 	if err != nil {
 		t.Fatalf("ListByRun: %v", err)
 	}
@@ -843,11 +834,11 @@ func assertNoSecretMaterial(t *testing.T, h *e2eHarness) {
 		blobs[fmt.Sprintf("http response %d", i)] = resp
 	}
 
-	runRows, err := h.store.ConnectorCalls().ListByRun(ctx, e2eWorkspace, h.runID, store.ConnectorCallFilter{})
+	runRows, err := h.store.Connectors().ListCallRecordsByRun(ctx, e2eWorkspace, h.runID, connectorsmodule.ConnectorCallFilter{})
 	if err != nil {
 		t.Fatalf("ListByRun: %v", err)
 	}
-	rotationRows, err := h.store.ConnectorCalls().ListByBinding(ctx, e2eWorkspace, connectorsmodule.RotationAuditBindingID, store.ConnectorCallFilter{})
+	rotationRows, err := h.store.Connectors().ListCallRecordsByBinding(ctx, e2eWorkspace, connectorsmodule.RotationAuditBindingID, connectorsmodule.ConnectorCallFilter{})
 	if err != nil {
 		t.Fatalf("ListByBinding rotation rows: %v", err)
 	}
@@ -862,7 +853,7 @@ func assertNoSecretMaterial(t *testing.T, h *e2eHarness) {
 		blobs[fmt.Sprintf("audit row %d (%s)", i, rec.CallID)] = encoded
 	}
 
-	conn, err := h.store.Connectors().Get(ctx, e2eWorkspace, "gh-main")
+	conn, err := h.store.Connectors().GetConnectorRecord(ctx, e2eWorkspace, "gh-main")
 	if err != nil {
 		t.Fatalf("Get connector: %v", err)
 	}
