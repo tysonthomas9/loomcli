@@ -3,8 +3,12 @@ package backends
 import (
 	"context"
 	"io"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fullCapabilityBackend implements Backend and all 6 optional interfaces.
@@ -44,6 +48,58 @@ func (p *partialCapabilityBackend) Meta() BackendMeta {
 
 func (p *partialCapabilityBackend) HealthCheck() HealthStatus {
 	return HealthStatus{Healthy: false, Message: "not ready"}
+}
+
+// writeProbeScript drops an executable /bin/sh fixture in a temp dir and
+// returns its path, for use as a fake "<binary> --version" target.
+func writeProbeScript(t *testing.T, name, body string) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("probe fixtures are /bin/sh scripts")
+	}
+	path := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+body+"\n"), 0o755); err != nil {
+		t.Fatalf("write probe fixture: %v", err)
+	}
+	return path
+}
+
+// TestDetectBinaryVersionGivesUpOnAHungBinary pins the bound that makes
+// `loom workspace ops ensure-runtime` interruptible. Nothing between the
+// ops deadline and this subprocess carries a context, so an unbounded
+// --version wedges the command outright rather than failing it.
+//
+// The real bound is VersionProbeTimeout (20s); the test shrinks it so it
+// does not have to spend 20s proving the point.
+func TestDetectBinaryVersionGivesUpOnAHungBinary(t *testing.T) {
+	// exec, so the kill lands on sleep itself rather than on a shell
+	// whose surviving child would hold the stdout pipe open.
+	script := writeProbeScript(t, "hung-cli", "exec sleep 300")
+
+	prev := VersionProbeTimeout
+	VersionProbeTimeout = 150 * time.Millisecond
+	t.Cleanup(func() { VersionProbeTimeout = prev })
+
+	start := time.Now()
+	got := detectBinaryVersion(script)
+	elapsed := time.Since(start)
+
+	if got != "" {
+		t.Fatalf("detectBinaryVersion = %q, want \"\" — a timeout must look like any other probe failure", got)
+	}
+	if elapsed > 5*time.Second {
+		t.Fatalf("detectBinaryVersion blocked for %s with a %s bound; the timeout did not fire", elapsed, VersionProbeTimeout)
+	}
+}
+
+// TestDetectBinaryVersionReadsFirstLine guards the happy path the bound
+// must not disturb: callers still get the first line of --version output.
+func TestDetectBinaryVersionReadsFirstLine(t *testing.T) {
+	script := writeProbeScript(t, "chatty-cli", "echo '  1.2.3 (build 7)  '\necho 'trailing noise'")
+
+	if got := detectBinaryVersion(script); got != "1.2.3 (build 7)" {
+		t.Fatalf("detectBinaryVersion = %q, want %q", got, "1.2.3 (build 7)")
+	}
 }
 
 func TestInspectCapabilities_NoOptionalInterfaces(t *testing.T) {
