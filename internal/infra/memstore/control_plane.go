@@ -224,6 +224,9 @@ func (s *agentSessionStore) Update(_ context.Context, ws, sessionID string, patc
 	if patch.NodeID != nil {
 		session.NodeID = *patch.NodeID
 	}
+	if patch.TerminalID != nil {
+		session.TerminalID = *patch.TerminalID
+	}
 	if patch.TaskID != nil {
 		session.TaskID = *patch.TaskID
 	}

@@ -20,6 +20,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -46,6 +47,8 @@ type Module struct {
 	tokenKey []byte
 	ops      map[string]leadOp
 	now      func() time.Time
+
+	sessionEnsureMu sync.Mutex
 }
 
 // NewModule constructs the lead API module. Nil-safe: with a nil store,
@@ -57,7 +60,14 @@ func NewModule(cfg Config) *Module {
 		now:      func() time.Time { return time.Now().UTC() },
 	}
 	m.ops = map[string]leadOp{
-		"heartbeat": {handler: m.heartbeat, cap: leadtoken.CapLeadSession},
+		"agent-get":      {handler: m.agentGet, cap: leadtoken.CapLeadAssignment},
+		"heartbeat":      {handler: m.heartbeat, cap: leadtoken.CapLeadSession},
+		"inbox-claim":    {handler: m.inboxClaim, cap: leadtoken.CapLeadInbox},
+		"inbox-complete": {handler: m.inboxComplete, cap: leadtoken.CapLeadInbox},
+		"inbox-list":     {handler: m.inboxList, cap: leadtoken.CapLeadInbox},
+		"session-ensure": {handler: m.sessionEnsure, cap: leadtoken.CapLeadSession},
+		"session-get":    {handler: m.sessionGet, cap: leadtoken.CapLeadSession},
+		"session-update": {handler: m.sessionUpdate, cap: leadtoken.CapLeadSession},
 	}
 	return m
 }
@@ -326,9 +336,25 @@ type nodeResult struct {
 }
 
 type sessionResult struct {
-	SessionID     string    `json:"sessionId"`
-	AgentID       string    `json:"agentId"`
-	LastHeartbeat time.Time `json:"lastHeartbeat"`
+	SessionID       string                    `json:"sessionId"`
+	AgentID         string                    `json:"agentId"`
+	NodeID          string                    `json:"nodeId,omitempty"`
+	Kind            domain.AgentSessionKind   `json:"kind,omitempty"`
+	TaskID          string                    `json:"taskId,omitempty"`
+	TerminalID      string                    `json:"terminalId,omitempty"`
+	ParentSessionID string                    `json:"parentSessionId,omitempty"`
+	Status          domain.AgentSessionStatus `json:"status,omitempty"`
+	Phase           string                    `json:"phase,omitempty"`
+	Attempt         int                       `json:"attempt,omitempty"`
+	StartedAt       *time.Time                `json:"startedAt,omitempty"`
+	LastHeartbeat   time.Time                 `json:"lastHeartbeat"`
+	FinishedAt      *time.Time                `json:"finishedAt,omitempty"`
+	Summary         string                    `json:"summary,omitempty"`
+	ErrorClass      string                    `json:"errorClass,omitempty"`
+	ExitCode        *int                      `json:"exitCode,omitempty"`
+	Metadata        map[string]string         `json:"metadata,omitempty"`
+	CreatedAt       *time.Time                `json:"createdAt,omitempty"`
+	UpdatedAt       *time.Time                `json:"updatedAt,omitempty"`
 }
 
 func decodeEmptyParams(body []byte) error {

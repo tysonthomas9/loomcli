@@ -83,6 +83,7 @@ type AgentSessionFilter struct {
 
 type AgentSessionUpdate struct {
 	NodeID        *string
+	TerminalID    *string
 	TaskID        *string
 	Status        *domain.AgentSessionStatus
 	Phase         *string

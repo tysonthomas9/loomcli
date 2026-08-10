@@ -24,6 +24,10 @@ import (
 const (
 	// CapLeadSession authorizes the sandboxed lead to call lead session APIs.
 	CapLeadSession = "lead:session"
+	// CapLeadAssignment authorizes the sandboxed lead to read its assignment.
+	CapLeadAssignment = "lead:assignment"
+	// CapLeadInbox authorizes the sandboxed lead to drain its inbox.
+	CapLeadInbox = "lead:inbox"
 
 	// DefaultOccupantTokenTTL is the default lifetime for a lead occupant
 	// token. Tokens share driver.ResolveRunTokenSigningKey's signing key; an

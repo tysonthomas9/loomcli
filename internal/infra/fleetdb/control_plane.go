@@ -510,6 +510,9 @@ func agentSessionUpdateBody(patch store.AgentSessionUpdate) map[string]any {
 	if patch.NodeID != nil {
 		body["node_id"] = *patch.NodeID
 	}
+	if patch.TerminalID != nil {
+		body["terminal_id"] = *patch.TerminalID
+	}
 	if patch.TaskID != nil {
 		body["task_id"] = *patch.TaskID
 	}
