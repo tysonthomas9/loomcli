@@ -260,19 +260,18 @@ func TestHasUnclosedBlockers(t *testing.T) {
 }
 
 func TestIsDirectBlocker(t *testing.T) {
-	blocking := []string{"blocks", "conditional-blocks", "waits-for"}
-	for _, typ := range blocking {
-		if !isDirectBlocker(typ) {
-			t.Errorf("isDirectBlocker(%q) = false, want true", typ)
+	for _, dependencyType := range []string{"blocks", "conditional-blocks", "waits-for"} {
+		if !isDirectBlocker(dependencyType) {
+			t.Errorf("isDirectBlocker(%q) = false, want true", dependencyType)
 		}
 	}
-	nonBlocking := []string{"parent-child", "related", "discovered-from", "replies-to",
-		"relates-to", "duplicates", "supersedes", "authored-by",
-		"assigned-to", "approved-by", "attests", "tracks", "until",
-		"caused-by", "validates", "delegated-from", ""}
-	for _, typ := range nonBlocking {
-		if isDirectBlocker(typ) {
-			t.Errorf("isDirectBlocker(%q) = true, want false", typ)
+	for _, dependencyType := range []string{
+		"parent-child", "related", "discovered-from", "replies-to", "relates-to",
+		"duplicates", "supersedes", "authored-by", "assigned-to", "approved-by",
+		"attests", "tracks", "until", "caused-by", "validates", "delegated-from", "",
+	} {
+		if isDirectBlocker(dependencyType) {
+			t.Errorf("isDirectBlocker(%q) = true, want false", dependencyType)
 		}
 	}
 }

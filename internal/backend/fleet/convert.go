@@ -6,15 +6,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
-
 	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/types"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
-// fleetIssueWire mirrors fleet-db's wire shape so unmarshal captures
-// `type` into a struct field. types.Issue tags the same field as
-// `issue_type`, so fleet responses need this projection step.
+// fleetIssueWire mirrors fleet-db's wire shape and projects directly to the
+// canonical backend representation consumed by the Work Items adapter.
 type fleetIssueWire struct {
 	ID               string     `json:"id,omitempty"`
 	Title            string     `json:"title,omitempty"`
@@ -45,51 +42,32 @@ type fleetIssueWire struct {
 	CloseReason      string     `json:"close_reason,omitempty"`
 }
 
-// toIssue projects the wire shape to the canonical types.Issue.
-func (w fleetIssueWire) toIssue() types.Issue {
-	return types.Issue{
-		ID:                 w.ID,
-		Title:              w.Title,
+func (w fleetIssueWire) toIssueData() backend.IssueData {
+	labels := append([]string(nil), w.Labels...)
+	if labels == nil {
+		labels = []string{}
+	}
+	return backend.IssueData{
+		ID: w.ID, Title: w.Title, Status: w.Status, Priority: w.Priority,
+		IssueType: w.Type, Assignee: w.Assignee, Owner: w.Owner, Labels: labels,
+		SourceRepo: w.sourceRepo(), Parent: w.parent(), Design: w.Design,
+		DesignArtifactID: w.DesignArtifactID, DesignFormat: w.DesignFormat,
+		HasDesign: w.HasDesign || w.Design != "", Notes: w.Notes,
+		CreatedBy: w.CreatedBy, CreatedAt: w.CreatedAt, UpdatedAt: w.UpdatedAt,
+		ClosedAt: w.ClosedAt, CloseReason: w.CloseReason, ExternalRef: w.ExternalRef,
+		DueAt: w.DueAt, DeferUntil: w.DeferUntil,
+	}
+}
+
+func (w fleetIssueWire) toIssueDetailData() backend.IssueDetailData {
+	return backend.IssueDetailData{
+		IssueData:          w.toIssueData(),
 		Description:        w.Description,
 		AcceptanceCriteria: w.Acceptance,
-		Notes:              w.Notes,
-		Status:             types.Status(w.Status),
-		Priority:           w.Priority,
-		IssueType:          types.IssueType(w.Type),
-		Assignee:           w.Assignee,
-		Owner:              w.Owner,
-		Labels:             w.Labels,
-		SourceRepo:         w.sourceRepo(),
-		Design:             w.Design,
-		DesignArtifactID:   w.DesignArtifactID,
-		DesignFormat:       w.DesignFormat,
-		HasDesign:          w.HasDesign || w.Design != "",
-		ExternalRef:        strOrNil(w.ExternalRef),
-		CreatedAt:          w.CreatedAt,
-		CreatedBy:          w.CreatedBy,
-		UpdatedAt:          w.UpdatedAt,
-		DueAt:              w.DueAt,
-		DeferUntil:         w.DeferUntil,
-		ClosedAt:           w.ClosedAt,
-		CloseReason:        w.CloseReason,
+		Dependencies:       []backend.DependencyData{},
+		Dependents:         []backend.DependencyData{},
+		Comments:           []backend.CommentData{},
 	}
-}
-
-// strOrNil maps a fleet-db wire string to the optional *string the canonical
-// types.Issue uses (empty -> nil). derefStr is its inverse for the slim
-// backend.IssueData projection (nil -> "").
-func strOrNil(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
-}
-
-func derefStr(p *string) string {
-	if p == nil {
-		return ""
-	}
-	return *p
 }
 
 func (w fleetIssueWire) parent() string {
@@ -113,25 +91,18 @@ type fleetIssueWithCountsWire struct {
 	DependentCount  int `json:"dependent_count,omitempty"`
 }
 
-// toIssueData projects the wire shape directly to backend.IssueData with
-// counts populated. Used by the list / Get paths instead of going through
-// types.IssueWithCounts so the type-tag mismatch (`type` vs `issue_type`)
-// is resolved at the wire boundary.
+// toIssueData projects the fleet wire shape directly to the backend adapter
+// representation with counts populated.
 func (w fleetIssueWithCountsWire) toIssueData() backend.IssueData {
-	issue := w.toIssue()
-	d := issueToData(&issue)
-	if parent := w.parent(); parent != "" {
-		d.Parent = parent
-	}
+	d := w.fleetIssueWire.toIssueData()
 	d.DependencyCount = w.DependencyCount
 	d.DependentCount = w.DependentCount
 	return d
 }
 
 // readyIssueWithParent mirrors webui.ReadyIssueWithParent for JSON parsing.
-// Embeds fleetIssueWire (not types.Issue) so fleet-db's `type` field is
-// captured during unmarshal — see fleetIssueWire docstring for the
-// type-vs-issue_type rename rationale.
+// Embeds fleetIssueWire so fleet-db's `type` field is captured during
+// unmarshal.
 type readyIssueWithParent struct {
 	fleetIssueWire
 	Parent      *string `json:"parent,omitempty"`
@@ -139,18 +110,19 @@ type readyIssueWithParent struct {
 	Repo        *string `json:"repo,omitempty"`
 }
 
-// blockedIssueWire mirrors types.BlockedIssue but embeds fleetIssueWire so
-// fleet-db's `type` field survives unmarshal. types.BlockedIssue embeds
-// types.Issue (json tag `issue_type`) and would silently drop the type
-// field on every fleet response.
-//
 // The BlockedByDetails field is captured for unmarshal completeness only;
 // IssueData carries the summary blocker fields used by kanban/list views.
 type blockedIssueWire struct {
 	fleetIssueWire
-	BlockedByCount   int                `json:"blocked_by_count,omitempty"`
-	BlockedBy        []string           `json:"blocked_by,omitempty"`
-	BlockedByDetails []types.BlockerRef `json:"blocked_by_details,omitempty"`
+	BlockedByCount   int              `json:"blocked_by_count,omitempty"`
+	BlockedBy        []string         `json:"blocked_by,omitempty"`
+	BlockedByDetails []blockerRefWire `json:"blocked_by_details,omitempty"`
+}
+
+type blockerRefWire struct {
+	ID       string `json:"id"`
+	Title    string `json:"title"`
+	Priority int    `json:"priority"`
 }
 
 // blockedIssueResponseWire mirrors fleet-db's native blocked response shape:
@@ -178,155 +150,8 @@ type countIssuesResponse struct {
 
 // closeResultJSON is the JSON structure returned by the close endpoint.
 type closeResultJSON struct {
-	Closed    *types.Issue   `json:"closed,omitempty"`
-	Unblocked []*types.Issue `json:"unblocked,omitempty"`
-}
-
-// issueToData converts types.Issue to backend.IssueData (slim projection).
-func issueToData(issue *types.Issue) backend.IssueData {
-	labels := make([]string, 0)
-	if len(issue.Labels) > 0 {
-		labels = issue.Labels
-	}
-	return backend.IssueData{
-		ID:               issue.ID,
-		Title:            issue.Title,
-		Status:           string(issue.Status),
-		Priority:         issue.Priority,
-		IssueType:        string(issue.IssueType),
-		Assignee:         issue.Assignee,
-		Owner:            issue.Owner,
-		Labels:           labels,
-		SourceRepo:       issue.SourceRepo,
-		Design:           issue.Design,
-		DesignArtifactID: issue.DesignArtifactID,
-		DesignFormat:     issue.DesignFormat,
-		HasDesign:        issue.HasDesign || issue.Design != "",
-		Notes:            issue.Notes,
-		ExternalRef:      derefStr(issue.ExternalRef),
-		CreatedAt:        issue.CreatedAt,
-		UpdatedAt:        issue.UpdatedAt,
-		DueAt:            issue.DueAt,
-		DeferUntil:       issue.DeferUntil,
-		CreatedBy:        issue.CreatedBy,
-		ClosedAt:         issue.ClosedAt,
-		CloseReason:      issue.CloseReason,
-	}
-}
-
-// issueWithCountsToData converts types.IssueWithCounts to backend.IssueData.
-func issueWithCountsToData(iwc *types.IssueWithCounts) backend.IssueData {
-	if iwc.Issue == nil {
-		return backend.IssueData{
-			DependencyCount: iwc.DependencyCount,
-			DependentCount:  iwc.DependentCount,
-		}
-	}
-	d := issueToData(iwc.Issue)
-	d.DependencyCount = iwc.DependencyCount
-	d.DependentCount = iwc.DependentCount
-	return d
-}
-
-// issuesWithCountsToData converts a slice of *types.IssueWithCounts.
-func issuesWithCountsToData(issues []*types.IssueWithCounts) []backend.IssueData {
-	result := make([]backend.IssueData, 0, len(issues))
-	for _, iwc := range issues {
-		if iwc != nil {
-			result = append(result, issueWithCountsToData(iwc))
-		}
-	}
-	return result
-}
-
-// detailsToDetailData converts types.IssueDetails to backend.IssueDetailData.
-func detailsToDetailData(details *types.IssueDetails) backend.IssueDetailData {
-	d := backend.IssueDetailData{
-		IssueData: issueToData(&details.Issue),
-	}
-
-	// Content fields.
-	d.Description = details.Description
-	d.Design = details.Design
-	d.AcceptanceCriteria = details.AcceptanceCriteria
-	d.Notes = details.Notes
-
-	// Lifecycle. CreatedBy/ClosedAt/CloseReason are populated by
-	// issueToData via the embedded IssueData; no duplicate assignment.
-	d.ClosedBySession = details.ClosedBySession
-
-	// External integration.
-	d.ExternalRef = derefStr(details.ExternalRef)
-	d.EstimatedMinutes = details.EstimatedMinutes
-
-	// Parent.
-	if details.Parent != nil {
-		d.IssueData.Parent = *details.Parent
-	}
-
-	// Labels (override from IssueDetails which has its own Labels field).
-	labels := make([]string, 0)
-	if len(details.Labels) > 0 {
-		labels = details.Labels
-	}
-	d.IssueData.Labels = labels
-
-	// Relational data.
-	detailsPopulateRelations(&d, details)
-
-	return d
-}
-
-// detailsPopulateRelations fills in Dependencies, Dependents, and Comments.
-func detailsPopulateRelations(d *backend.IssueDetailData, details *types.IssueDetails) {
-	deps := make([]backend.DependencyData, 0, len(details.Dependencies))
-	for _, iwdm := range details.Dependencies {
-		if iwdm != nil {
-			deps = append(deps, dependencyMetaToData(details.Issue.ID, iwdm))
-		}
-	}
-	d.Dependencies = deps
-
-	dependents := make([]backend.DependencyData, 0, len(details.Dependents))
-	for _, iwdm := range details.Dependents {
-		if iwdm != nil {
-			dependents = append(dependents, backend.DependencyData{
-				IssueID:     iwdm.Issue.ID,
-				DependsOnID: details.Issue.ID,
-				Type:        string(iwdm.DependencyType),
-				Title:       iwdm.Issue.Title,
-				Status:      string(iwdm.Issue.Status),
-				Priority:    iwdm.Issue.Priority,
-				IssueType:   string(iwdm.Issue.IssueType),
-				CreatedAt:   iwdm.Issue.CreatedAt,
-				CreatedBy:   iwdm.Issue.CreatedBy,
-			})
-		}
-	}
-	d.Dependents = dependents
-
-	comments := make([]backend.CommentData, 0, len(details.Comments))
-	for _, c := range details.Comments {
-		if c != nil {
-			comments = append(comments, commentToData(c))
-		}
-	}
-	d.Comments = comments
-}
-
-// dependencyMetaToData converts types.IssueWithDependencyMetadata to backend.DependencyData.
-func dependencyMetaToData(parentID string, iwdm *types.IssueWithDependencyMetadata) backend.DependencyData {
-	return backend.DependencyData{
-		IssueID:     parentID,
-		DependsOnID: iwdm.Issue.ID,
-		Type:        string(iwdm.DependencyType),
-		Title:       iwdm.Issue.Title,
-		Status:      string(iwdm.Issue.Status),
-		Priority:    iwdm.Issue.Priority,
-		IssueType:   string(iwdm.Issue.IssueType),
-		CreatedAt:   iwdm.Issue.CreatedAt,
-		CreatedBy:   iwdm.Issue.CreatedBy,
-	}
+	Closed    *fleetIssueWire   `json:"closed,omitempty"`
+	Unblocked []*fleetIssueWire `json:"unblocked,omitempty"`
 }
 
 // commentToData converts workitems.Comment to backend.CommentData.
@@ -358,8 +183,7 @@ func readyIssuesToData(issues []*readyIssueWithParent) []backend.IssueData {
 		if riwp == nil {
 			continue
 		}
-		issue := riwp.fleetIssueWire.toIssue()
-		d := issueToData(&issue)
+		d := riwp.fleetIssueWire.toIssueData()
 		if parent := riwp.fleetIssueWire.parent(); parent != "" {
 			d.Parent = parent
 		}
@@ -381,8 +205,7 @@ func blockedIssuesToData(issues []*blockedIssueWire) []backend.IssueData {
 		if bi == nil {
 			continue
 		}
-		issue := bi.fleetIssueWire.toIssue()
-		d := issueToData(&issue)
+		d := bi.fleetIssueWire.toIssueData()
 		if parent := bi.fleetIssueWire.parent(); parent != "" {
 			d.Parent = parent
 		}
@@ -442,8 +265,7 @@ func blockedIssueResponsesToData(issues []blockedIssueResponseWire) []backend.Is
 		if entry.Issue.ID == "" {
 			continue
 		}
-		issue := entry.Issue.toIssue()
-		d := issueToData(&issue)
+		d := entry.Issue.toIssueData()
 		if parent := entry.Issue.parent(); parent != "" {
 			d.Parent = parent
 		}
@@ -464,12 +286,12 @@ func closeResultJSONToData(cr *closeResultJSON) *backend.CloseResult {
 		Unblocked: make([]backend.IssueData, 0),
 	}
 	if cr.Closed != nil {
-		closed := issueToData(cr.Closed)
+		closed := cr.Closed.toIssueData()
 		result.Closed = &closed
 	}
 	for _, u := range cr.Unblocked {
 		if u != nil {
-			result.Unblocked = append(result.Unblocked, issueToData(u))
+			result.Unblocked = append(result.Unblocked, u.toIssueData())
 		}
 	}
 	return result

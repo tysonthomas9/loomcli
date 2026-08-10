@@ -42,11 +42,13 @@ func TestFleetClaim_DirectBackendExplicitIssue(t *testing.T) {
 	be := &claimTestBackend{details: map[string]*backend.IssueDetailData{
 		"TASK-1": {
 			IssueData: backend.IssueData{
-				ID:        "TASK-1",
-				Title:     "Direct claim",
-				Status:    "in_progress",
-				IssueType: "task",
-				Labels:    []string{"phase6"},
+				ID:          "TASK-1",
+				Title:       "Direct claim",
+				Status:      "in_progress",
+				IssueType:   "task",
+				Labels:      []string{"phase6"},
+				SourceRepo:  "loomcli",
+				ExternalRef: "local-branch:phase9@abc123",
 			},
 			Description: "claimed through IssueBackend",
 		},
@@ -61,8 +63,9 @@ func TestFleetClaim_DirectBackendExplicitIssue(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d; body = %s", w.Code, http.StatusOK, w.Body.String())
 	}
+	responseBody := append([]byte(nil), w.Body.Bytes()...)
 	var response FleetClaimResponse
-	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+	if err := json.NewDecoder(bytes.NewReader(responseBody)).Decode(&response); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 	if !response.Success || response.Payload == nil || response.Payload.Issue == nil {
@@ -73,6 +76,20 @@ func TestFleetClaim_DirectBackendExplicitIssue(t *testing.T) {
 	}
 	if got := response.Payload.Issue.Description; got != "claimed through IssueBackend" {
 		t.Fatalf("description = %q", got)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(responseBody, &raw); err != nil {
+		t.Fatalf("decode raw response: %v", err)
+	}
+	payload := raw["payload"].(map[string]any)
+	issue := payload["issue"].(map[string]any)
+	if issue["source_repo"] != "loomcli" || issue["external_ref"] != "local-branch:phase9@abc123" {
+		t.Fatalf("compatibility issue identity = %#v", issue)
+	}
+	for _, forbidden := range []string{"repo", "dependencies", "dependents", "comments"} {
+		if _, exists := issue[forbidden]; exists {
+			t.Fatalf("compatibility issue unexpectedly added %q: %#v", forbidden, issue)
+		}
 	}
 	if len(be.claimCalls) != 1 || be.claimCalls[0] != "TASK-1" {
 		t.Fatalf("claim calls = %v, want [TASK-1]", be.claimCalls)

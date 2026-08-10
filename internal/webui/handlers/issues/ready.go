@@ -7,7 +7,6 @@ import (
 	"net/url"
 
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
-	"github.com/tysonthomas9/loomcli/internal/types"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
 
@@ -110,13 +109,13 @@ func parseReadyParams(r *http.Request) (*readyFilter, error) {
 // parseReadyValidatedStrings parses and validates mol_type and sort parameters.
 func parseReadyValidatedStrings(q url.Values, args *readyFilter) error {
 	if v := handler.ParseStringParam(q, "mol_type"); v != "" {
-		if !types.MolType(v).IsValid() {
+		if !workitems.MoleculeType(v).IsValid() {
 			return fmt.Errorf("invalid mol_type: %s (must be swarm, patrol, or work)", v)
 		}
 		args.MolType = v
 	}
 	if v := handler.ParseStringParam(q, "sort"); v != "" {
-		if !types.SortPolicy(v).IsValid() {
+		if !workitems.SortPolicy(v).IsValid() {
 			return fmt.Errorf("invalid sort policy: %s (must be hybrid, priority, or oldest)", v)
 		}
 		args.SortPolicy = v

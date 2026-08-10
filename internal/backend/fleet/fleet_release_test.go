@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/types"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 // ReleaseClaim tests (LOOM-1).
@@ -25,10 +25,10 @@ func TestReleaseClaim_InProgressPostsToReleaseEndpoint(t *testing.T) {
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1"):
-			respondOK(w, types.Issue{
+			respondOK(w, testIssue{
 				ID:        "test-1",
 				Title:     "T",
-				Status:    types.StatusInProgress,
+				Status:    workitems.StatusInProgress,
 				Assignee:  "planner",
 				CreatedAt: time.Now(),
 				UpdatedAt: time.Now(),
@@ -64,10 +64,10 @@ func TestReleaseClaim_ReviewPostsToReleaseLockEndpoint(t *testing.T) {
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1"):
-			respondOK(w, types.Issue{
+			respondOK(w, testIssue{
 				ID:        "test-1",
 				Title:     "T",
-				Status:    types.StatusReview,
+				Status:    workitems.StatusReview,
 				Assignee:  "planner",
 				CreatedAt: time.Now(),
 				UpdatedAt: time.Now(),
@@ -101,10 +101,10 @@ func TestReleaseClaim_DifferentAssigneeIsNoop(t *testing.T) {
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1"):
-			respondOK(w, types.Issue{
+			respondOK(w, testIssue{
 				ID:        "test-1",
 				Title:     "T",
-				Status:    types.StatusInProgress,
+				Status:    workitems.StatusInProgress,
 				Assignee:  "new-worker",
 				CreatedAt: time.Now(),
 				UpdatedAt: time.Now(),
@@ -132,10 +132,10 @@ func TestReleaseClaim_EmptyAssigneeFastPath(t *testing.T) {
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1"):
-			respondOK(w, types.Issue{
+			respondOK(w, testIssue{
 				ID:        "test-1",
 				Title:     "T",
-				Status:    types.StatusOpen,
+				Status:    workitems.StatusOpen,
 				Assignee:  "",
 				CreatedAt: time.Now(),
 				UpdatedAt: time.Now(),
@@ -164,10 +164,10 @@ func TestReleaseClaim_PropagatesServerError(t *testing.T) {
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1"):
-			respondOK(w, types.Issue{
+			respondOK(w, testIssue{
 				ID:        "test-1",
 				Title:     "T",
-				Status:    types.StatusReview,
+				Status:    workitems.StatusReview,
 				Assignee:  "planner",
 				CreatedAt: time.Now(),
 				UpdatedAt: time.Now(),
@@ -224,10 +224,10 @@ func TestUpdate_ReviewOrBlockedFromInProgress_ReleasesClaim(t *testing.T) {
 			fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 				switch {
 				case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1"):
-					respondOK(w, types.Issue{
+					respondOK(w, testIssue{
 						ID:        "test-1",
 						Title:     "T",
-						Status:    types.StatusInProgress,
+						Status:    workitems.StatusInProgress,
 						Assignee:  "planner",
 						CreatedAt: time.Now(),
 						UpdatedAt: time.Now(),
@@ -298,10 +298,10 @@ func TestUpdate_ReviewFromInProgress_NoAssigneeChange_PreservesAssignee(t *testi
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1"):
-			respondOK(w, types.Issue{
+			respondOK(w, testIssue{
 				ID:        "test-1",
 				Title:     "T",
-				Status:    types.StatusInProgress,
+				Status:    workitems.StatusInProgress,
 				Assignee:  "planner",
 				CreatedAt: time.Now(),
 				UpdatedAt: time.Now(),
@@ -349,10 +349,10 @@ func TestUpdate_ReviewFromOpen_NoRelease(t *testing.T) {
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1"):
-			respondOK(w, types.Issue{
+			respondOK(w, testIssue{
 				ID:        "test-1",
 				Title:     "T",
-				Status:    types.StatusOpen,
+				Status:    workitems.StatusOpen,
 				Assignee:  "",
 				CreatedAt: time.Now(),
 				UpdatedAt: time.Now(),
@@ -405,10 +405,10 @@ func TestUpdate_QuarantineShape_OpenToBlockedWithLabelAndUnassign(t *testing.T) 
 			if labeled { // waitForLabelState polls until the label projects
 				labels = []string{"loom:quarantined"}
 			}
-			respondOK(w, types.Issue{
+			respondOK(w, testIssue{
 				ID:        "test-q1",
 				Title:     "stalled task",
-				Status:    types.StatusOpen,
+				Status:    workitems.StatusOpen,
 				Labels:    labels,
 				CreatedAt: time.Now(),
 				UpdatedAt: time.Now(),

@@ -3,8 +3,6 @@ package fleet
 import (
 	"encoding/json"
 	"time"
-
-	"github.com/tysonthomas9/loomcli/internal/types"
 )
 
 // APIResponse is the standard fleet server response envelope.
@@ -13,13 +11,6 @@ type APIResponse struct {
 	Success bool            `json:"success"`
 	Data    json.RawMessage `json:"data,omitempty"`
 	Error   string          `json:"error,omitempty"`
-}
-
-// ClaimResult is the parsed response from the fleet claim endpoint.
-// It wraps a WorkHandoffPayload containing the claimed issue, its labels,
-// and dependencies.
-type ClaimResult struct {
-	Payload *types.WorkHandoffPayload `json:"payload"`
 }
 
 // RegisterResult is the parsed response from the fleet register endpoint.

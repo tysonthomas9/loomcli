@@ -671,7 +671,7 @@ func TestRetiredLegacyWorkflowsPathCannotReturn(t *testing.T) {
 	}
 }
 
-func TestPhase7RetiredHorizontalRootsCannotReturn(t *testing.T) {
+func TestRetiredHorizontalRootsCannotReturn(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatal(err)
@@ -685,6 +685,7 @@ func TestPhase7RetiredHorizontalRootsCannotReturn(t *testing.T) {
 		"internal/stackpublish",
 		"internal/stackstore",
 		"internal/trigger",
+		"internal/types",
 		"internal/webui/service",
 		"internal/webui/svcimpl",
 		"internal/workspace",
@@ -751,7 +752,7 @@ func TestPhase7LegacyTypeBucketsCannotPublishAliases(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, relative := range []string{"internal/domain", "internal/entity", "internal/types"} {
+	for _, relative := range []string{"internal/domain", "internal/entity"} {
 		relative := relative
 		t.Run(strings.ReplaceAll(relative, "/", "_"), func(t *testing.T) {
 			files, err := filepath.Glob(filepath.Join(root, filepath.FromSlash(relative), "*.go"))

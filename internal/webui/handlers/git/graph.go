@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/types"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
 
@@ -23,9 +22,9 @@ type IssueBackendFn func(ctx context.Context) backend.IssueBackend
 
 // BlockedResponse wraps the blocked issues data for JSON response.
 type BlockedResponse struct {
-	Success bool                  `json:"success"`
-	Data    []*types.BlockedIssue `json:"data,omitempty"`
-	Error   string                `json:"error,omitempty"`
+	Success bool                `json:"success"`
+	Data    []backend.IssueData `json:"data,omitempty"`
+	Error   string              `json:"error,omitempty"`
 }
 
 // GraphDependency represents a dependency relationship for graph visualization.

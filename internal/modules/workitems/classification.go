@@ -202,3 +202,44 @@ func (state AgentState) IsValid() bool {
 		return false
 	}
 }
+
+// MoleculeType classifies the legacy molecule coordination mode accepted by
+// ready-work queries. Work Items owns the query vocabulary even though most
+// callers leave it empty.
+type MoleculeType string
+
+const (
+	MoleculeTypeSwarm  MoleculeType = "swarm"
+	MoleculeTypePatrol MoleculeType = "patrol"
+	MoleculeTypeWork   MoleculeType = "work"
+)
+
+// IsValid permits an omitted molecule type, which means ordinary work.
+func (moleculeType MoleculeType) IsValid() bool {
+	switch moleculeType {
+	case "", MoleculeTypeSwarm, MoleculeTypePatrol, MoleculeTypeWork:
+		return true
+	default:
+		return false
+	}
+}
+
+// SortPolicy controls ready-work ordering.
+type SortPolicy string
+
+const (
+	SortPolicyHybrid   SortPolicy = "hybrid"
+	SortPolicyPriority SortPolicy = "priority"
+	SortPolicyOldest   SortPolicy = "oldest"
+)
+
+// IsValid permits an omitted policy so the Work Items implementation can use
+// its default ordering.
+func (policy SortPolicy) IsValid() bool {
+	switch policy {
+	case "", SortPolicyHybrid, SortPolicyPriority, SortPolicyOldest:
+		return true
+	default:
+		return false
+	}
+}

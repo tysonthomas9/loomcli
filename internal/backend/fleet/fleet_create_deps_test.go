@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/types"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 // depRowWire mirrors one row of fleet-db's GET /issues/{id}/deps response for
@@ -52,12 +52,12 @@ func TestCreate_WithDependencies_ComposesDepsCalls(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(apiResponse{Success: true}) //nolint:errcheck
 		case r.Method == "POST" && strings.HasSuffix(path, "/issues"):
-			respondOK(w, types.Issue{
+			respondOK(w, testIssue{
 				ID:        "new-1",
 				Title:     "Milestone 1",
-				Status:    types.StatusOpen,
+				Status:    workitems.StatusOpen,
 				Priority:  2,
-				IssueType: types.TypeTask,
+				IssueType: workitems.TypeTask,
 				CreatedAt: now,
 				UpdatedAt: now,
 			})
@@ -125,11 +125,11 @@ func TestCreate_DependencyAddFails_ErrorNamesCreatedIssue(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 			json.NewEncoder(w).Encode(apiResponse{Success: false, Error: "issue ghost-9 not found"}) //nolint:errcheck
 		case r.Method == "POST" && strings.HasSuffix(path, "/issues"):
-			respondOK(w, types.Issue{
+			respondOK(w, testIssue{
 				ID:        "new-2",
 				Title:     "Milestone 2",
-				Status:    types.StatusOpen,
-				IssueType: types.TypeTask,
+				Status:    workitems.StatusOpen,
+				IssueType: workitems.TypeTask,
 				CreatedAt: now,
 				UpdatedAt: now,
 			})

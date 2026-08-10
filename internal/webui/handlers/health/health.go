@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/types"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
@@ -46,9 +45,9 @@ type MetricsResponse struct {
 
 // StatsResponse wraps the statistics data for JSON response.
 type StatsResponse struct {
-	Success bool              `json:"success"`
-	Data    *types.Statistics `json:"data,omitempty"`
-	Error   string            `json:"error,omitempty"`
+	Success bool               `json:"success"`
+	Data    *backend.StatsData `json:"data,omitempty"`
+	Error   string             `json:"error,omitempty"`
 }
 
 // HandleHealth returns the process liveness response.
@@ -101,19 +100,7 @@ func serveStatsViaBackend(w http.ResponseWriter, r *http.Request, backendFn Issu
 		})
 		return
 	}
-	stats := &types.Statistics{
-		TotalIssues:             data.TotalIssues,
-		OpenIssues:              data.OpenIssues,
-		InProgressIssues:        data.InProgressIssues,
-		ClosedIssues:            data.ClosedIssues,
-		BlockedIssues:           data.BlockedIssues,
-		DeferredIssues:          data.DeferredIssues,
-		ReadyIssues:             data.ReadyIssues,
-		TombstoneIssues:         data.TombstoneIssues,
-		PinnedIssues:            data.PinnedIssues,
-		EpicsEligibleForClosure: data.EpicsEligibleForClosure,
-	}
-	handler.WriteJSON(w, http.StatusOK, StatsResponse{Success: true, Data: stats})
+	handler.WriteJSON(w, http.StatusOK, StatsResponse{Success: true, Data: data})
 }
 
 // HandleMetrics returns a handler that exposes SSE hub runtime metrics.

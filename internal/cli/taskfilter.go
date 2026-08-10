@@ -74,16 +74,16 @@ func IsWorkableTask(issue backend.IssueData) bool {
 
 // --- Level 3: Agent predicates ---
 
-// isDirectBlocker reports whether a plain-string dependency type directly
-// creates blockage. Mirrors types.DependencyType.IsDirectBlocker() for the
-// backend.DependencyData struct whose Type field is a plain string.
-// Unlike AffectsReadyWork, this excludes parent-child which only propagates
-// existing blockage transitively but does not itself create a blocking relationship.
-// SYNC: Must stay aligned with internal/types/relations.go:IsDirectBlocker()
-func isDirectBlocker(depType string) bool {
-	return depType == "blocks" ||
-		depType == "conditional-blocks" ||
-		depType == "waits-for"
+// isDirectBlocker is the task-selection policy for dependency edges. It is the
+// sole live consumer of this classification; parent-child only propagates an
+// existing block and does not itself create one.
+func isDirectBlocker(dependencyType string) bool {
+	switch dependencyType {
+	case "blocks", "conditional-blocks", "waits-for":
+		return true
+	default:
+		return false
+	}
 }
 
 // HasUnclosedBlockers returns true if any blocking dependency is still unclosed.

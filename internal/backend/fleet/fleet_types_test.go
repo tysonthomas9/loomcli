@@ -36,58 +36,6 @@ func TestAPIResponse_Unmarshal_Error(t *testing.T) {
 	}
 }
 
-func TestClaimResult_Unmarshal(t *testing.T) {
-	raw := `{
-		"payload": {
-			"issue": {
-				"id": "task-1",
-				"title": "Do work",
-				"status": "open",
-				"priority": 2,
-				"issue_type": "task",
-				"created_at": "2026-01-01T00:00:00Z",
-				"updated_at": "2026-01-01T00:00:00Z"
-			},
-			"labels": ["urgent", "fleet"],
-			"dependencies": [
-				{
-					"issue_id": "task-1",
-					"depends_on_id": "task-0",
-					"type": "blocks",
-					"created_at": "2026-01-01T00:00:00Z"
-				}
-			],
-			"reason": "load balancing",
-			"priority_override": 1
-		}
-	}`
-	var cr ClaimResult
-	if err := json.Unmarshal([]byte(raw), &cr); err != nil {
-		t.Fatalf("Unmarshal: %v", err)
-	}
-	if cr.Payload == nil {
-		t.Fatal("Payload should not be nil")
-	}
-	if cr.Payload.Issue == nil {
-		t.Fatal("Payload.Issue should not be nil")
-	}
-	if cr.Payload.Issue.ID != "task-1" {
-		t.Errorf("Issue.ID = %q, want %q", cr.Payload.Issue.ID, "task-1")
-	}
-	if len(cr.Payload.Labels) != 2 {
-		t.Errorf("Labels len = %d, want 2", len(cr.Payload.Labels))
-	}
-	if len(cr.Payload.Dependencies) != 1 {
-		t.Errorf("Dependencies len = %d, want 1", len(cr.Payload.Dependencies))
-	}
-	if cr.Payload.Reason != "load balancing" {
-		t.Errorf("Reason = %q, want %q", cr.Payload.Reason, "load balancing")
-	}
-	if cr.Payload.PriorityOverride == nil || *cr.Payload.PriorityOverride != 1 {
-		t.Errorf("PriorityOverride = %v, want 1", cr.Payload.PriorityOverride)
-	}
-}
-
 func TestRegisterResult_Unmarshal(t *testing.T) {
 	raw := `{"token":"abc-123-xyz"}`
 	var rr RegisterResult

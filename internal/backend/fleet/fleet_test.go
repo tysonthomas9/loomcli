@@ -11,10 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
-
 	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/types"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 // newTestServer creates a mock fleet server and returns a FleetBackend pointing at it.
@@ -169,23 +167,23 @@ func TestSetAuthToken(t *testing.T) {
 
 func TestGet_HappyPath(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
-	details := types.IssueDetails{
-		Issue: types.Issue{
+	details := testIssueDetails{
+		testIssue: testIssue{
 			ID:                 "issue-1",
 			Title:              "Test Issue",
 			Description:        "description",
 			Design:             "design",
 			AcceptanceCriteria: "acceptance",
 			Notes:              "BLOCKED: missing origin remote",
-			Status:             types.StatusOpen,
+			Status:             workitems.StatusOpen,
 			Priority:           2,
-			IssueType:          types.TypeTask,
+			IssueType:          workitems.TypeTask,
 			CreatedAt:          now,
 			UpdatedAt:          now,
 		},
 		Labels:       []string{"label-1"},
-		Dependencies: []*types.IssueWithDependencyMetadata{},
-		Dependents:   []*types.IssueWithDependencyMetadata{},
+		Dependencies: []*testIssueWithDependencyMetadata{},
+		Dependents:   []*testIssueWithDependencyMetadata{},
 		Comments:     []*workitems.Comment{},
 	}
 
@@ -267,13 +265,13 @@ func TestGet_ServerError(t *testing.T) {
 
 func TestList_HappyPath(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
-	issues := []*types.IssueWithCounts{
+	issues := []*testIssueWithCounts{
 		{
-			Issue:           &types.Issue{ID: "a", Title: "A", Status: types.StatusOpen, CreatedAt: now, UpdatedAt: now},
+			testIssue:       &testIssue{ID: "a", Title: "A", Status: workitems.StatusOpen, CreatedAt: now, UpdatedAt: now},
 			DependencyCount: 1,
 		},
 		{
-			Issue: &types.Issue{ID: "b", Title: "B", Status: types.StatusClosed, CreatedAt: now, UpdatedAt: now, ClosedAt: &now},
+			testIssue: &testIssue{ID: "b", Title: "B", Status: workitems.StatusClosed, CreatedAt: now, UpdatedAt: now, ClosedAt: &now},
 		},
 	}
 
@@ -301,7 +299,7 @@ func TestList_QueryParams(t *testing.T) {
 	var gotQuery string
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		gotQuery = r.URL.RawQuery
-		respondOK(w, []*types.IssueWithCounts{})
+		respondOK(w, []*testIssueWithCounts{})
 	})
 	defer ts.Close()
 
@@ -331,10 +329,10 @@ func TestList_ClientFiltersMultipleReposWithoutServerLimit(t *testing.T) {
 	var gotQuery string
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		gotQuery = r.URL.RawQuery
-		respondOK(w, []*types.IssueWithCounts{
-			{Issue: &types.Issue{ID: "a", Title: "A", Status: types.StatusOpen, SourceRepo: "repo-a", CreatedAt: now, UpdatedAt: now}},
-			{Issue: &types.Issue{ID: "b", Title: "B", Status: types.StatusOpen, SourceRepo: "repo-b", CreatedAt: now, UpdatedAt: now}},
-			{Issue: &types.Issue{ID: "c", Title: "C", Status: types.StatusOpen, SourceRepo: "repo-c", CreatedAt: now, UpdatedAt: now}},
+		respondOK(w, []*testIssueWithCounts{
+			{testIssue: &testIssue{ID: "a", Title: "A", Status: workitems.StatusOpen, SourceRepo: "repo-a", CreatedAt: now, UpdatedAt: now}},
+			{testIssue: &testIssue{ID: "b", Title: "B", Status: workitems.StatusOpen, SourceRepo: "repo-b", CreatedAt: now, UpdatedAt: now}},
+			{testIssue: &testIssue{ID: "c", Title: "C", Status: workitems.StatusOpen, SourceRepo: "repo-c", CreatedAt: now, UpdatedAt: now}},
 		})
 	})
 	defer ts.Close()
@@ -357,7 +355,7 @@ func TestList_ClientFiltersMultipleReposWithoutServerLimit(t *testing.T) {
 func TestList_UnsupportedFilter_Single(t *testing.T) {
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		t.Error("RPC call should not be made when unsupported filter is set")
-		respondOK(w, []*types.IssueWithCounts{})
+		respondOK(w, []*testIssueWithCounts{})
 	})
 	defer ts.Close()
 
@@ -380,7 +378,7 @@ func TestList_UnsupportedFilter_Single(t *testing.T) {
 func TestList_UnsupportedFilter_Multiple(t *testing.T) {
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		t.Error("RPC call should not be made when unsupported filters are set")
-		respondOK(w, []*types.IssueWithCounts{})
+		respondOK(w, []*testIssueWithCounts{})
 	})
 	defer ts.Close()
 
@@ -406,7 +404,7 @@ func TestList_UnsupportedFilter_Multiple(t *testing.T) {
 
 func TestList_EmptyOpts_NoError(t *testing.T) {
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
-		respondOK(w, []*types.IssueWithCounts{})
+		respondOK(w, []*testIssueWithCounts{})
 	})
 	defer ts.Close()
 
@@ -420,9 +418,9 @@ func TestList_EmptyOpts_NoError(t *testing.T) {
 
 func TestGetChildren_HappyPath(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
-	issues := []*types.IssueWithCounts{
-		{Issue: &types.Issue{ID: "c1", Title: "Child 1", Status: types.StatusOpen, CreatedAt: now, UpdatedAt: now}},
-		{Issue: &types.Issue{ID: "c2", Title: "Child 2", Status: types.StatusOpen, CreatedAt: now, UpdatedAt: now}},
+	issues := []*testIssueWithCounts{
+		{testIssue: &testIssue{ID: "c1", Title: "Child 1", Status: workitems.StatusOpen, CreatedAt: now, UpdatedAt: now}},
+		{testIssue: &testIssue{ID: "c2", Title: "Child 2", Status: workitems.StatusOpen, CreatedAt: now, UpdatedAt: now}},
 	}
 
 	var gotPath string
@@ -468,7 +466,7 @@ func TestGetChildren_EmptyID(t *testing.T) {
 
 func TestGetChildren_Empty(t *testing.T) {
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
-		respondOK(w, []*types.IssueWithCounts{})
+		respondOK(w, []*testIssueWithCounts{})
 	})
 	defer ts.Close()
 	result, err := fb.GetChildren(context.Background(), "epic-1")
@@ -484,9 +482,9 @@ func TestGetChildren_Empty(t *testing.T) {
 
 func TestSearchIssues_HappyPath(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
-	issues := []*types.IssueWithCounts{
-		{Issue: &types.Issue{ID: "s1", Title: "Auth bug in login", Status: types.StatusOpen, CreatedAt: now, UpdatedAt: now}},
-		{Issue: &types.Issue{ID: "s2", Title: "Auth bug: refresh token", Status: types.StatusOpen, CreatedAt: now, UpdatedAt: now}},
+	issues := []*testIssueWithCounts{
+		{testIssue: &testIssue{ID: "s1", Title: "Auth bug in login", Status: workitems.StatusOpen, CreatedAt: now, UpdatedAt: now}},
+		{testIssue: &testIssue{ID: "s2", Title: "Auth bug: refresh token", Status: workitems.StatusOpen, CreatedAt: now, UpdatedAt: now}},
 	}
 
 	var gotPath string
@@ -549,7 +547,7 @@ func TestSearchIssues_NegativeLimit(t *testing.T) {
 
 func TestSearchIssues_Empty(t *testing.T) {
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
-		respondOK(w, []*types.IssueWithCounts{})
+		respondOK(w, []*testIssueWithCounts{})
 	})
 	defer ts.Close()
 	result, err := fb.SearchIssues(context.Background(), "nothing", 10)
@@ -649,12 +647,12 @@ func TestCreate_HappyPath(t *testing.T) {
 			t.Errorf("Method = %q, want POST", r.Method)
 		}
 		json.NewDecoder(r.Body).Decode(&gotBody) //nolint:errcheck
-		respondOK(w, types.Issue{
+		respondOK(w, testIssue{
 			ID:        "new-1",
 			Title:     "New Issue",
-			Status:    types.StatusOpen,
+			Status:    workitems.StatusOpen,
 			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueType: workitems.TypeTask,
 			CreatedAt: now,
 			UpdatedAt: now,
 		})
@@ -771,7 +769,7 @@ func TestUpdate_StatusInProgressWithAssigneeClaimsAsAssignee(t *testing.T) {
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1"):
-			respondOK(w, types.Issue{ID: "test-1", Title: "T", Status: types.StatusOpen, CreatedAt: time.Now(), UpdatedAt: time.Now()})
+			respondOK(w, testIssue{ID: "test-1", Title: "T", Status: workitems.StatusOpen, CreatedAt: time.Now(), UpdatedAt: time.Now()})
 		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/issues/test-1/claim"):
 			gotClaim = true
 			gotActor = r.Header.Get("X-Actor")
@@ -807,10 +805,10 @@ func TestUpdate_StatusOpenClearsAssigneeOnAlreadyOpenIssue(t *testing.T) {
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1"):
-			respondOK(w, types.Issue{
+			respondOK(w, testIssue{
 				ID:        "test-1",
 				Title:     "T",
-				Status:    types.StatusOpen,
+				Status:    workitems.StatusOpen,
 				Assignee:  "old-agent",
 				CreatedAt: time.Now(),
 				UpdatedAt: time.Now(),
@@ -849,10 +847,10 @@ func TestUpdate_StatusOpenAfterReopenClearsAssignee(t *testing.T) {
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1"):
-			respondOK(w, types.Issue{
+			respondOK(w, testIssue{
 				ID:        "test-1",
 				Title:     "T",
-				Status:    types.StatusClosed,
+				Status:    workitems.StatusClosed,
 				Assignee:  "old-agent",
 				CreatedAt: time.Now(),
 				UpdatedAt: time.Now(),
@@ -1192,9 +1190,9 @@ func TestClose_HappyPath(t *testing.T) {
 			}
 		}
 		respondOK(w, closeResultJSON{
-			Closed: &types.Issue{ID: "test-1", Title: "Done", Status: types.StatusClosed, CreatedAt: now, UpdatedAt: now, ClosedAt: &now},
-			Unblocked: []*types.Issue{
-				{ID: "freed-1", Title: "Free", Status: types.StatusOpen, CreatedAt: now, UpdatedAt: now},
+			Closed: &fleetIssueWire{ID: "test-1", Title: "Done", Status: string(workitems.StatusClosed), CreatedAt: now, UpdatedAt: now, ClosedAt: &now},
+			Unblocked: []*fleetIssueWire{
+				{ID: "freed-1", Title: "Free", Status: string(workitems.StatusOpen), CreatedAt: now, UpdatedAt: now},
 			},
 		})
 	})
@@ -1220,7 +1218,7 @@ func TestClose_NoUnblockedIssues(t *testing.T) {
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		// fleet-db currently returns closed issue but no unblocked issues (fleet-q6ox)
 		respondOK(w, closeResultJSON{
-			Closed: &types.Issue{ID: "T-10", Title: "Done", Status: types.StatusClosed, CreatedAt: now, UpdatedAt: now, ClosedAt: &now},
+			Closed: &fleetIssueWire{ID: "T-10", Title: "Done", Status: string(workitems.StatusClosed), CreatedAt: now, UpdatedAt: now, ClosedAt: &now},
 		})
 	})
 	defer ts.Close()
@@ -1246,7 +1244,7 @@ func TestClose_NoUnblockedIssues(t *testing.T) {
 func TestClose_BareIssueResponse(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
-		respondOK(w, types.Issue{ID: "T-11", Title: "Done", Status: types.StatusClosed, CreatedAt: now, UpdatedAt: now, ClosedAt: &now})
+		respondOK(w, testIssue{ID: "T-11", Title: "Done", Status: workitems.StatusClosed, CreatedAt: now, UpdatedAt: now, ClosedAt: &now})
 	})
 	defer ts.Close()
 
@@ -1724,7 +1722,7 @@ func TestReady_HappyPath(t *testing.T) {
 		}
 		respondOK(w, []*readyIssueWithParent{
 			{
-				fleetIssueWire: fleetIssueWire{ID: "r-1", Title: "Ready", Status: string(types.StatusOpen), CreatedAt: now, UpdatedAt: now},
+				fleetIssueWire: fleetIssueWire{ID: "r-1", Title: "Ready", Status: string(workitems.StatusOpen), CreatedAt: now, UpdatedAt: now},
 				Parent:         &parent,
 			},
 		})
@@ -1751,8 +1749,8 @@ func TestReady_ClientFiltersSourceReposWithoutServerLimit(t *testing.T) {
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		gotQuery = r.URL.RawQuery
 		respondOK(w, []*readyIssueWithParent{
-			{fleetIssueWire: fleetIssueWire{ID: "repo-a", Title: "A", Status: string(types.StatusOpen), CreatedAt: now, UpdatedAt: now}, Repo: &repoA},
-			{fleetIssueWire: fleetIssueWire{ID: "repo-b", Title: "B", Status: string(types.StatusOpen), CreatedAt: now, UpdatedAt: now}, Repo: &repoB},
+			{fleetIssueWire: fleetIssueWire{ID: "repo-a", Title: "A", Status: string(workitems.StatusOpen), CreatedAt: now, UpdatedAt: now}, Repo: &repoA},
+			{fleetIssueWire: fleetIssueWire{ID: "repo-b", Title: "B", Status: string(workitems.StatusOpen), CreatedAt: now, UpdatedAt: now}, Repo: &repoB},
 		})
 	})
 	defer ts.Close()
@@ -1784,7 +1782,7 @@ func TestDeferred_HappyPath(t *testing.T) {
 			Count  int                     `json:"count"`
 		}{Issues: []*readyIssueWithParent{
 			{
-				fleetIssueWire: fleetIssueWire{ID: "d-1", Title: "Deferred", Status: string(types.StatusOpen), Type: "task", ParentID: parent, CreatedAt: now, UpdatedAt: now},
+				fleetIssueWire: fleetIssueWire{ID: "d-1", Title: "Deferred", Status: string(workitems.StatusOpen), Type: "task", ParentID: parent, CreatedAt: now, UpdatedAt: now},
 			},
 		}, Count: 1})
 	})
@@ -1797,7 +1795,7 @@ func TestDeferred_HappyPath(t *testing.T) {
 	if len(result) != 1 {
 		t.Fatalf("len = %d, want 1", len(result))
 	}
-	if result[0].ID != "d-1" || result[0].Parent != parent || result[0].Status != string(types.StatusOpen) {
+	if result[0].ID != "d-1" || result[0].Parent != parent || result[0].Status != string(workitems.StatusOpen) {
 		t.Fatalf("deferred result = %+v", result[0])
 	}
 }
@@ -1810,9 +1808,9 @@ func TestBlocked_HappyPath(t *testing.T) {
 		if got, want := r.URL.Path, "/api/v1/test-ws/issues/blocked"; got != want {
 			t.Errorf("path = %q, want %q", got, want)
 		}
-		respondOK(w, []*types.BlockedIssue{
+		respondOK(w, []*testBlockedIssue{
 			{
-				Issue:          types.Issue{ID: "b-1", Title: "Blocked", Status: types.StatusBlocked, CreatedAt: now, UpdatedAt: now},
+				testIssue:      testIssue{ID: "b-1", Title: "Blocked", Status: workitems.StatusBlocked, CreatedAt: now, UpdatedAt: now},
 				BlockedBy:      []string{"dep-1"},
 				BlockedByCount: 1,
 			},
@@ -1836,17 +1834,17 @@ func TestBlocked_HappyPath(t *testing.T) {
 
 func TestListComments_HappyPath(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
-	details := types.IssueDetails{
-		Issue: types.Issue{
+	details := testIssueDetails{
+		testIssue: testIssue{
 			ID:        "test-1",
 			Title:     "Test",
-			Status:    types.StatusOpen,
+			Status:    workitems.StatusOpen,
 			CreatedAt: now,
 			UpdatedAt: now,
 		},
 		Labels:       []string{},
-		Dependencies: []*types.IssueWithDependencyMetadata{},
-		Dependents:   []*types.IssueWithDependencyMetadata{},
+		Dependencies: []*testIssueWithDependencyMetadata{},
+		Dependents:   []*testIssueWithDependencyMetadata{},
 		Comments: []*workitems.Comment{
 			{ID: 2, IssueID: "test-1", Author: "user2", Text: "c2", CreatedAt: now.Add(time.Second)},
 			{ID: 1, IssueID: "test-1", Author: "user", Text: "c1", CreatedAt: now},
@@ -1872,17 +1870,17 @@ func TestListComments_HappyPath(t *testing.T) {
 
 func TestListComments_NoComments(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
-	details := types.IssueDetails{
-		Issue: types.Issue{
+	details := testIssueDetails{
+		testIssue: testIssue{
 			ID:        "test-1",
 			Title:     "Test",
-			Status:    types.StatusOpen,
+			Status:    workitems.StatusOpen,
 			CreatedAt: now,
 			UpdatedAt: now,
 		},
 		Labels:       []string{},
-		Dependencies: []*types.IssueWithDependencyMetadata{},
-		Dependents:   []*types.IssueWithDependencyMetadata{},
+		Dependencies: []*testIssueWithDependencyMetadata{},
+		Dependents:   []*testIssueWithDependencyMetadata{},
 		Comments:     []*workitems.Comment{},
 	}
 

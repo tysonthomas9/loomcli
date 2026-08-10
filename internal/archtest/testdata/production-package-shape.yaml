@@ -1,4 +1,4 @@
-# Exact Phase 8 production-package topology ratchet.
+# Exact Phase 9 production-package topology ratchet.
 # Generated .go files count as compiled package topology; _test.go files do not.
 # Refresh only after an intentional consolidation review; see package_shape_test.go.
 schema_version: 1
@@ -13,9 +13,9 @@ semantics:
     - vendor
     - worktrees
 ceilings:
-  total_packages: 189
+  total_packages: 188
   module_packages: 17
-  outside_module_packages: 172
+  outside_module_packages: 171
   one_file_packages: 67
   one_or_two_file_packages: 89
 packages:
@@ -163,7 +163,6 @@ packages:
   - internal/store
   - internal/store/storetest
   - internal/testutil
-  - internal/types
   - internal/usage
   - internal/webui
   - internal/webui/agentcoord

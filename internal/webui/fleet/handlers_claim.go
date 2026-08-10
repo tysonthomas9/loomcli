@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/types"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
 
@@ -21,9 +20,60 @@ type FleetClaimRequest struct {
 }
 
 type FleetClaimResponse struct {
-	Success bool                      `json:"success"`
-	Payload *types.WorkHandoffPayload `json:"payload,omitempty"`
-	Error   string                    `json:"error,omitempty"`
+	Success bool                `json:"success"`
+	Payload *WorkHandoffPayload `json:"payload,omitempty"`
+	Error   string              `json:"error,omitempty"`
+}
+
+// WorkHandoffPayload is the adapter-private Fleet compatibility response.
+// Keeping the transport DTO here preserves the legacy JSON contract without
+// reintroducing a public horizontal product model.
+type WorkHandoffPayload struct {
+	Issue            *fleetClaimIssue       `json:"issue"`
+	Labels           []string               `json:"labels,omitempty"`
+	Dependencies     []fleetClaimDependency `json:"dependencies,omitempty"`
+	Reason           string                 `json:"reason,omitempty"`
+	Deadline         *time.Time             `json:"deadline,omitempty"`
+	PriorityOverride *int                   `json:"priority_override,omitempty"`
+}
+
+type fleetClaimIssue struct {
+	ID                 string     `json:"id"`
+	Title              string     `json:"title"`
+	Description        string     `json:"description,omitempty"`
+	Design             string     `json:"design,omitempty"`
+	DesignArtifactID   string     `json:"design_artifact_id,omitempty"`
+	DesignFormat       string     `json:"design_format,omitempty"`
+	HasDesign          bool       `json:"has_design"`
+	AcceptanceCriteria string     `json:"acceptance_criteria,omitempty"`
+	Notes              string     `json:"notes,omitempty"`
+	Status             string     `json:"status,omitempty"`
+	Priority           int        `json:"priority"`
+	IssueType          string     `json:"issue_type,omitempty"`
+	Assignee           string     `json:"assignee,omitempty"`
+	Owner              string     `json:"owner,omitempty"`
+	EstimatedMinutes   *int       `json:"estimated_minutes,omitempty"`
+	CreatedAt          time.Time  `json:"created_at"`
+	CreatedBy          string     `json:"created_by,omitempty"`
+	UpdatedAt          time.Time  `json:"updated_at"`
+	ClosedAt           *time.Time `json:"closed_at,omitempty"`
+	CloseReason        string     `json:"close_reason,omitempty"`
+	ClosedBySession    string     `json:"closed_by_session,omitempty"`
+	DueAt              *time.Time `json:"due_at,omitempty"`
+	DeferUntil         *time.Time `json:"defer_until,omitempty"`
+	ExternalRef        string     `json:"external_ref,omitempty"`
+	SourceRepo         string     `json:"source_repo,omitempty"`
+	Labels             []string   `json:"labels,omitempty"`
+}
+
+type fleetClaimDependency struct {
+	IssueID     string    `json:"issue_id"`
+	DependsOnID string    `json:"depends_on_id"`
+	Type        string    `json:"type"`
+	CreatedAt   time.Time `json:"created_at"`
+	CreatedBy   string    `json:"created_by,omitempty"`
+	Metadata    string    `json:"metadata,omitempty"`
+	ThreadID    string    `json:"thread_id,omitempty"`
 }
 
 type IssueBackendFn func(context.Context) backend.IssueBackend
@@ -103,27 +153,23 @@ func claimIssueWithBackend(w http.ResponseWriter, ctx context.Context, be backen
 	recordClaim(metrics, ClaimResultSuccess)
 	handler.WriteJSON(w, http.StatusOK, FleetClaimResponse{
 		Success: true,
-		Payload: &types.WorkHandoffPayload{Issue: issue, Labels: issue.Labels},
+		Payload: &WorkHandoffPayload{Issue: issue, Labels: issue.Labels},
 	})
 	return true
 }
 
-func issueDetailToWorkHandoff(d *backend.IssueDetailData) *types.Issue {
-	issue := &types.Issue{
+func issueDetailToWorkHandoff(d *backend.IssueDetailData) *fleetClaimIssue {
+	return &fleetClaimIssue{
 		ID: d.ID, Title: d.Title, Description: d.Description, Design: d.Design,
 		DesignArtifactID: d.DesignArtifactID, DesignFormat: d.DesignFormat,
 		HasDesign: d.HasDesign, AcceptanceCriteria: d.AcceptanceCriteria, Notes: d.Notes,
-		Status: types.Status(d.Status), Priority: d.Priority, IssueType: types.IssueType(d.IssueType),
+		Status: d.Status, Priority: d.Priority, IssueType: d.IssueType,
 		Assignee: d.Assignee, Owner: d.Owner, EstimatedMinutes: d.EstimatedMinutes,
 		CreatedAt: d.CreatedAt, CreatedBy: d.CreatedBy, UpdatedAt: d.UpdatedAt,
 		ClosedAt: d.ClosedAt, CloseReason: d.CloseReason, ClosedBySession: d.ClosedBySession,
-		DueAt: d.DueAt, DeferUntil: d.DeferUntil, SourceRepo: d.SourceRepo, Labels: d.Labels,
+		DueAt: d.DueAt, DeferUntil: d.DeferUntil, SourceRepo: d.SourceRepo,
+		ExternalRef: d.ExternalRef, Labels: append([]string(nil), d.Labels...),
 	}
-	if d.ExternalRef != "" {
-		v := d.ExternalRef
-		issue.ExternalRef = &v
-	}
-	return issue
 }
 
 func recordClaim(m *ClaimMetrics, result string) {
