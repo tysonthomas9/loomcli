@@ -23,13 +23,6 @@ type SessionAwareBackend interface {
 	LastSessionID(workDir string) string
 }
 
-// ToolAwareBackend is an optional interface for backends that support
-// restricting which tools the agent may or may not use.
-type ToolAwareBackend interface {
-	SetAllowedTools(tools []string)
-	SetDeniedTools(tools []string)
-}
-
 // HealthCheckableBackend is an optional interface for backends that can
 // report their installation and readiness status.
 type HealthCheckableBackend interface {
@@ -90,7 +83,6 @@ type BackendCapabilities struct {
 
 	Streaming StreamingBackend
 	Sessions  SessionAwareBackend
-	Tools     ToolAwareBackend
 	Health    HealthCheckableBackend
 	Config    ConfigurableBackend
 	Meta      MetadataProvider
@@ -128,10 +120,12 @@ func InspectCapabilities(b cli.Backend) BackendCapabilities {
 		caps.HasSessions = true
 		caps.Sessions = s
 	}
-	if t, ok := b.(ToolAwareBackend); ok {
-		caps.HasToolControl = true
-		caps.Tools = t
-	}
+	// Tool control is a static per-backend fact (which CLI flags exist), not
+	// an optional Go interface: the old ToolAwareBackend interface shipped for
+	// months with zero implementations while the config it implied was
+	// silently ignored. SupportsToolControl reads the same capability table
+	// ValidateSafetyKnobs enforces.
+	caps.HasToolControl = SupportsToolControl(b.Name())
 	if h, ok := b.(HealthCheckableBackend); ok {
 		caps.HasHealthCheck = true
 		caps.Health = h

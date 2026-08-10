@@ -91,6 +91,12 @@ func renderPrompt(name string, data promptTemplateData) string {
 		}
 	}
 
+	// Soft layer of the read_only knob: the hard enforcement is the backend
+	// flag mapping (backends.ValidateSafetyKnobs and friends); the preamble
+	// tells the model WHY writes are denied so it reports instead of retrying.
+	if preamble := ReadOnlyPreamble(); preamble != "" {
+		return preamble + "\n\n" + buf.String()
+	}
 	return buf.String()
 }
 

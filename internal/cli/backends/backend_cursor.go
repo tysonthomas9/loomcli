@@ -52,6 +52,9 @@ func buildCursorInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
 }
 
 func defaultCursorInvoker(workDir, prompt, agentName string) error {
+	if err := validateSafetyKnobsFromEnv("cursor"); err != nil {
+		return err
+	}
 	// When stdin is not a TTY (e.g. daemon subprocess), Cursor interactive
 	// mode may fail. Fall back to non-interactive print mode which works headlessly.
 	if !isTerminal(os.Stdin) {
@@ -79,6 +82,9 @@ func defaultCursorInvoker(workDir, prompt, agentName string) error {
 }
 
 func defaultCursorNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
+	if err := validateSafetyKnobsFromEnv("cursor"); err != nil {
+		return err
+	}
 	env := append(cli.FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
 	if agentName != "" {
 		env = append(env, "LOOM_AGENT_NAME="+agentName)

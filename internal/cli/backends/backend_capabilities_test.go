@@ -19,9 +19,6 @@ func (f *fullCapabilityBackend) InvokeStreaming(_ context.Context, _, _, _ strin
 func (f *fullCapabilityBackend) ContinueSession(_, _, _ string) error { return nil }
 func (f *fullCapabilityBackend) LastSessionID(_ string) string        { return "sess-1" }
 
-func (f *fullCapabilityBackend) SetAllowedTools(_ []string) {}
-func (f *fullCapabilityBackend) SetDeniedTools(_ []string)  {}
-
 func (f *fullCapabilityBackend) HealthCheck() HealthStatus {
 	return HealthStatus{Healthy: true, Installed: true, Version: "1.0", APIKeySet: true}
 }
@@ -78,9 +75,6 @@ func TestInspectCapabilities_NoOptionalInterfaces(t *testing.T) {
 	if caps.Sessions != nil {
 		t.Error("expected Sessions=nil")
 	}
-	if caps.Tools != nil {
-		t.Error("expected Tools=nil")
-	}
 	if caps.Health != nil {
 		t.Error("expected Health=nil")
 	}
@@ -102,8 +96,11 @@ func TestInspectCapabilities_AllInterfaces(t *testing.T) {
 	if !caps.HasSessions {
 		t.Error("expected HasSessions=true")
 	}
-	if !caps.HasToolControl {
-		t.Error("expected HasToolControl=true")
+	if caps.HasToolControl {
+		// Tool control is table-driven by backend name (SupportsToolControl),
+		// not an implementable interface; a fake named anything but "claude"
+		// reports false regardless of what it implements.
+		t.Error("expected HasToolControl=false for a non-claude fake")
 	}
 	if !caps.HasHealthCheck {
 		t.Error("expected HasHealthCheck=true")
@@ -120,9 +117,6 @@ func TestInspectCapabilities_AllInterfaces(t *testing.T) {
 	}
 	if caps.Sessions == nil {
 		t.Error("expected Sessions!=nil")
-	}
-	if caps.Tools == nil {
-		t.Error("expected Tools!=nil")
 	}
 	if caps.Health == nil {
 		t.Error("expected Health!=nil")
@@ -174,7 +168,7 @@ func TestInspectCapabilities_NilBackend(t *testing.T) {
 		caps.HasHealthCheck || caps.HasConfig || caps.HasMeta {
 		t.Error("expected all Has* flags to be false for nil backend")
 	}
-	if caps.Streaming != nil || caps.Sessions != nil || caps.Tools != nil ||
+	if caps.Streaming != nil || caps.Sessions != nil ||
 		caps.Health != nil || caps.Config != nil || caps.Meta != nil {
 		t.Error("expected all typed fields to be nil for nil backend")
 	}
@@ -187,7 +181,7 @@ func TestBackendCapabilities_ZeroValue(t *testing.T) {
 		caps.HasHealthCheck || caps.HasConfig || caps.HasMeta {
 		t.Error("expected all Has* flags to be false on zero value")
 	}
-	if caps.Streaming != nil || caps.Sessions != nil || caps.Tools != nil ||
+	if caps.Streaming != nil || caps.Sessions != nil ||
 		caps.Health != nil || caps.Config != nil || caps.Meta != nil {
 		t.Error("expected all typed fields to be nil on zero value")
 	}
