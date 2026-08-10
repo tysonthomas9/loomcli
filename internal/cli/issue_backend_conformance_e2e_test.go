@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/backend/backendtest"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
@@ -52,7 +51,7 @@ func TestE2E_IssueBackendConformance_AllModes(t *testing.T) {
 			"LOOM_SERVER_URL":    "",
 		})
 		createLocalWorkspace(t, configDir, workspace)
-		backendtest.RunIssueBackendConformance(t, backendtest.IssueBackendSuiteConfig{
+		runIssueBackendConformance(t, issueBackendSuiteConfig{
 			NewBackend: func(testing.TB) backend.IssueBackend {
 				return newFleetDBIssueBackend()
 			},
@@ -74,7 +73,7 @@ func TestE2E_IssueBackendConformance_AllModes(t *testing.T) {
 			"LOOM_FLEET_URL":        "",
 			"LOOM_SERVER_URL":       "",
 		})
-		backendtest.RunIssueBackendConformance(t, backendtest.IssueBackendSuiteConfig{
+		runIssueBackendConformance(t, issueBackendSuiteConfig{
 			NewBackend: func(testing.TB) backend.IssueBackend {
 				return newFleetDBIssueBackend()
 			},
@@ -94,7 +93,7 @@ func TestE2E_IssueBackendConformance_AllModes(t *testing.T) {
 			"LOOM_FLEET_DB_URL":  "",
 			"LOOM_SERVER_URL":    "",
 		})
-		backendtest.RunIssueBackendConformance(t, backendtest.IssueBackendSuiteConfig{
+		runIssueBackendConformance(t, issueBackendSuiteConfig{
 			NewBackend: func(t testing.TB) backend.IssueBackend {
 				t.Helper()
 				ib, err := createFleetIssueBackend()
@@ -120,7 +119,7 @@ func TestE2E_IssueBackendConformance_AllModes(t *testing.T) {
 			"LOOM_FLEET_DB_URL":  "",
 			"LOOM_FLEET_URL":     "",
 		})
-		backendtest.RunIssueBackendConformance(t, backendtest.IssueBackendSuiteConfig{
+		runIssueBackendConformance(t, issueBackendSuiteConfig{
 			NewBackend: func(t testing.TB) backend.IssueBackend {
 				t.Helper()
 				ib, err := createAPIIssueBackend()

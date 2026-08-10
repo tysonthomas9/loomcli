@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
-	"github.com/tysonthomas9/loomcli/internal/pathsec"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
@@ -19,6 +19,14 @@ import (
 var _ DiffService = (*diffServiceImpl)(nil)
 
 var validGitRef = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_./-]*$`)
+
+func validateDiffPath(path string) bool {
+	if path == "" || strings.HasPrefix(path, "/") {
+		return false
+	}
+	cleaned := filepath.Clean(path)
+	return cleaned != "." && cleaned != ".." && !strings.HasPrefix(cleaned, "../")
+}
 
 // diffServiceImpl is the concrete implementation of DiffService.
 type diffServiceImpl struct {
@@ -135,7 +143,7 @@ func (s *diffServiceImpl) DiffFilePatch(ctx context.Context, wsID, agentName, fr
 	if filePath == "" {
 		return nil, apperrors.ErrValidation("missing required parameter: path")
 	}
-	if !pathsec.ValidateDiffPath(filePath) {
+	if !validateDiffPath(filePath) {
 		return nil, apperrors.ErrValidation("invalid path: must be relative with no '..' traversal")
 	}
 

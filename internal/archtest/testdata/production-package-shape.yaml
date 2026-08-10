@@ -13,11 +13,11 @@ semantics:
     - vendor
     - worktrees
 ceilings:
-  total_packages: 188
+  total_packages: 186
   module_packages: 17
-  outside_module_packages: 171
-  one_file_packages: 67
-  one_or_two_file_packages: 89
+  outside_module_packages: 169
+  one_file_packages: 65
+  one_or_two_file_packages: 87
 packages:
   - internal/agenterr
   - internal/agentpolicy
@@ -40,7 +40,6 @@ packages:
   - internal/backend
   - internal/backend/api
   - internal/backend/api/gen
-  - internal/backend/backendtest
   - internal/backend/fleet
   - internal/backendnames
   - internal/bootstrap
@@ -144,7 +143,6 @@ packages:
   - internal/netutil
   - internal/observability/tracing
   - internal/ops
-  - internal/pathsec
   - internal/platform/authority
   - internal/platform/httptransport
   - internal/platform/repositoryremote

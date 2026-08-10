@@ -1,4 +1,7 @@
-package backendtest
+//go:build issuebackend_e2e
+// +build issuebackend_e2e
+
+package cli
 
 import (
 	"context"
@@ -10,8 +13,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 )
 
-// IssueBackendSuiteConfig configures the shared IssueBackend conformance suite.
-type IssueBackendSuiteConfig struct {
+// issueBackendSuiteConfig configures the IssueBackend conformance suite.
+type issueBackendSuiteConfig struct {
 	// NewBackend returns a backend wired to an isolated workspace. It may return
 	// the same backend instance across calls if the implementation is safe for
 	// sequential use.
@@ -22,13 +25,13 @@ type IssueBackendSuiteConfig struct {
 	SupportsExplicitCreateID bool
 }
 
-// RunIssueBackendConformance runs behavior that every IssueBackend should share
+// runIssueBackendConformance runs behavior that every IssueBackend should share
 // regardless of whether callers reached it through local fleet-db, cloud
 // fleet-db, direct fleet, or the Loom API backend.
-func RunIssueBackendConformance(t *testing.T, cfg IssueBackendSuiteConfig) {
+func runIssueBackendConformance(t *testing.T, cfg issueBackendSuiteConfig) {
 	t.Helper()
 	if cfg.NewBackend == nil {
-		t.Fatal("IssueBackendSuiteConfig.NewBackend is required")
+		t.Fatal("issueBackendSuiteConfig.NewBackend is required")
 	}
 
 	t.Run("CreateListGetUpdateCloseReopen", func(t *testing.T) {
@@ -76,7 +79,7 @@ func runReadyAndBlockedAgreeOnUnblockedIssue(t *testing.T, ib backend.IssueBacke
 	}
 }
 
-func runExplicitCreateID(t *testing.T, cfg IssueBackendSuiteConfig) {
+func runExplicitCreateID(t *testing.T, cfg issueBackendSuiteConfig) {
 	t.Helper()
 	if !cfg.SupportsExplicitCreateID {
 		t.Skip("backend does not currently honor CreateParams.ID")
