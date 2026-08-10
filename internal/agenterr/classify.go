@@ -64,6 +64,37 @@ const AgentLaunchFailedMarker = "loom: agent process failed to launch"
 // agentLaunchFailedRe is the precompiled matcher used by classifyFromText.
 var agentLaunchFailedRe = regexp.MustCompile(regexp.QuoteMeta(AgentLaunchFailedMarker))
 
+// AuthRequiredMarker and UsageLimitedMarker are the stable log markers the
+// inner backend subprocess emits when the harness itself declared the turn
+// terminal for one of the two BLAMELESS reasons: the login has expired, or the
+// quota window is exhausted.
+//
+// These exist because the harness now tells us categorically. Before, a
+// logged-out or quota-walled turn arrived here as prose in a log tail, and the
+// residual regex table had to guess from wording that varies by harness and
+// changes without notice. A miss classified an expired login as Unknown, which
+// means "bounded restart then block": the agent burned its restart budget
+// re-running a turn that could not possibly succeed, and the real cause never
+// reached the operator. Reading the harness's own verdict removes the guess.
+//
+// The two classes they map to are the ones the policy already treats as not
+// the agent's fault — AuthFailure stops fatally with an operator-actionable
+// message, RateLimited retries UNCOUNTED with the rate-limit backoff — and
+// neither is quarantine-eligible, so a quota window cannot push a task toward
+// quarantine.
+//
+// Stable string contract: changing either requires updating the emitter
+// (internal/cli/backends.terminalTurnInvocationError).
+const (
+	AuthRequiredMarker = "loom: harness login expired or re-authentication required"
+	UsageLimitedMarker = "loom: harness usage or session limit reached"
+)
+
+var (
+	authRequiredRe = regexp.MustCompile(regexp.QuoteMeta(AuthRequiredMarker))
+	usageLimitedRe = regexp.MustCompile(regexp.QuoteMeta(UsageLimitedMarker))
+)
+
 // timeoutHintRe recognizes timeout-worded errors. The wrapper refines its
 // retry hits by the matched phrase; loom additionally upgrades a Transient
 // whose surrounding text names a timeout, preserving the distinct Timeout
@@ -127,6 +158,54 @@ func ClassifyFromOutput(output string, exitCode int, backend string) *AgentError
 	return classifyFromText(output, exitCode, backend)
 }
 
+// classifyHarnessMarkers matches the explicit, categorical markers that
+// outrank every pattern-based inference: the loom-side backend-missing
+// marker, a wrapper launch failure, and the harness's own terminal verdict
+// (auth required / usage limited). Returns nil when none apply.
+func classifyHarnessMarkers(text string) *classifyResult {
+	// 1. Cross-cutting wrapper signal: the loom-side translator prepends this
+	//    marker when the backend CLI is missing. It outranks everything else.
+	if backendUnavailableRe.MatchString(text) {
+		return &classifyResult{Class: OutcomeFromDomain(BackendUnavailableOutcome), Message: "backend binary not on PATH"}
+	}
+
+	// A wrapper launch failure (PTY/exec) means the backend process never
+	// started — typically the backend binary was mid-update and momentarily
+	// unexecutable ("exec format error"). Treat it as a retryable SpawnFailure
+	// and keep the reason so it surfaces instead of a generic Unknown.
+	if agentLaunchFailedRe.MatchString(text) {
+		return &classifyResult{
+			Class:   OutcomeFromDomain(SpawnFailureOutcome),
+			Message: "agent process failed to launch (backend binary may be updating or incompatible)",
+		}
+	}
+
+	// The harness's own terminal verdict outranks any pattern matching: it is
+	// a categorical statement, not an inference from wording. Both are
+	// blameless — see the marker docs — so returning here rather than falling
+	// through to the residual table is what keeps a quota window from
+	// consuming an agent's restart budget.
+	if authRequiredRe.MatchString(text) {
+		return &classifyResult{
+			Class:   OutcomeFromHarness(wrapper.ErrAuth),
+			Message: "harness login expired or re-authentication required — renew the harness login",
+		}
+	}
+	if usageLimitedRe.MatchString(text) {
+		result := &classifyResult{
+			Class:   OutcomeFromHarness(wrapper.ErrRateLimited),
+			Message: "harness usage or session limit reached — retry after the quota window resets",
+		}
+		// A usage wall often states when it lifts. Honor it if present; the
+		// rate-limit backoff has its own default otherwise.
+		if d := parseRetryAfter(text); d > 0 {
+			result.RetryAfter = d
+		}
+		return result
+	}
+	return nil
+}
+
 // classifyFromText is the shared classification implementation. It is a thin
 // adapter over the harness-wrapper classifier (the single source of truth for
 // cost / rate-limit / transport / API-error fingerprints), with a small
@@ -134,24 +213,8 @@ func ClassifyFromOutput(output string, exitCode int, backend string) *AgentError
 func classifyFromText(text string, exitCode int, backend string) *AgentError {
 	now := time.Now()
 
-	var result *classifyResult
-
-	// 1. Cross-cutting wrapper signal: the loom-side translator prepends this
-	//    marker when the backend CLI is missing. It outranks everything else.
-	if backendUnavailableRe.MatchString(text) {
-		result = &classifyResult{Class: OutcomeFromDomain(BackendUnavailableOutcome), Message: "backend binary not on PATH"}
-	}
-
-	// A wrapper launch failure (PTY/exec) means the backend process never
-	// started — typically the backend binary was mid-update and momentarily
-	// unexecutable ("exec format error"). Treat it as a retryable SpawnFailure
-	// and keep the reason so it surfaces instead of a generic Unknown.
-	if result == nil && agentLaunchFailedRe.MatchString(text) {
-		result = &classifyResult{
-			Class:   OutcomeFromDomain(SpawnFailureOutcome),
-			Message: "agent process failed to launch (backend binary may be updating or incompatible)",
-		}
-	}
+	// Explicit markers and the harness's terminal verdict come first.
+	result := classifyHarnessMarkers(text)
 
 	// 2. Primary: harness-wrapper owns the cost/rate-limit/transport/API-error
 	//    patterns. Run its classifier as a one-shot over the captured text and
