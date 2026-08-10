@@ -1,7 +1,7 @@
 # Modular Monolith Migration
 
-- **Status:** Phase 9 package consolidation in progress; its first two slices
-  ratchet the modular monolith to 186 production packages
+- **Status:** Phase 9 package consolidation in progress; its first three slices
+  ratchet the modular monolith to 185 production packages
 - **Date:** 2026-08-10
 - **Scope:** `loom serve`, the operator CLI entry surfaces, the Vite frontend counterpart, and the fleet-db contracts those capabilities depend on
 - **Provenance:** [Phase 0 integration baseline](00-phase-0-baseline.md), final [Phase 1 evidence](06-phase-1-decisions-and-evidence.md) at Loom `7e8a6dd2`, [Phase 2 evidence](07-phase-2-decisions-and-evidence.md) at Loom `84cccb761` with FleetDB `430dce8d9`, [Phase 3 evidence](08-phase-3-decisions-and-evidence.md) at core implementation commits Loom `7f95b9bf1` and FleetDB `f1c4e1119`, final [Phase 4 evidence](09-phase-4-decisions-and-evidence.md) at Loom `53cbe2577` with FleetDB `afb688768`, and the appended reliability-validation record at Loom `67c45972f` with FleetDB `9ffa69f60`
@@ -206,12 +206,15 @@ classification policy to its owner or enforcing consumer, and makes the
 FleetDB adapter project private wire records directly to the existing backend
 compatibility DTOs. Wave 9.2 then makes the sole-consumer IssueBackend E2E
 suite test-only and folds diff-path traversal validation into its source-control
-consumer while deleting an unused sensitive-path classifier. Together the
-waves reduce the exact production shape from 189 to 186 packages,
-outside-module packages from 172 to 169, one-file packages from 67 to 65, and
-one-or-two-file packages from 89 to 87. The remaining waves target legacy
-repository/model planes and mapping-only adapter siblings, subject to the same
-ownership, adapter, and full-gate proof requirements. See the
+consumer while deleting an unused sensitive-path classifier. Wave 9.3 moves
+the remaining connector models and persistence contracts into their declared
+owner, makes FleetDB and memstore implement that port directly, and deletes
+the horizontal domain, composite-repository, placeholder, and mapping-only
+catalog layers. Together the waves reduce the exact production shape from 189
+to 185 packages, outside-module packages from 172 to 168, one-file packages
+from 67 to 64, and one-or-two-file packages from 89 to 86. The remaining waves
+target mapping-only adapter siblings and reproduce the packaged product proof,
+subject to the same ownership, adapter, and full-gate requirements. See the
 [Phase 9 plan](16-phase-9-package-consolidation.md).
 
 ## Approved architecture decisions

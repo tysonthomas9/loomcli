@@ -4,8 +4,10 @@
 - **Base:** Phase 8 documentation head `1fc9d887c517fad60728afdfcf3c28375d84ece3`
 - **Wave 9.1 implementation:** `da9105472`
 - **Wave 9.2 implementation:** `ec263bfa3`
+- **Wave 9.3 implementation:** `a4333c31a`
 - **Stacked branches:** `modular-monolith-phase9-01-types-ratchet`, then
-  `modular-monolith-phase9-02-shallow-seams`
+  `modular-monolith-phase9-02-shallow-seams`, then
+  `modular-monolith-phase9-03-legacy-planes`
 - **Purpose:** Reduce the residual package surface toward 160 production Go
   packages without weakening capability ownership, consumer-owned ports, or
   independently replaceable adapters.
@@ -130,6 +132,63 @@ The first aggregate attempt reached generated-API staleness after all earlier
 lanes passed, then the sandbox denied DNS access to the Go module proxy. The
 approved uninterrupted rerun passed; this was an execution-environment
 failure, not a source failure.
+
+## Wave 9.3 result
+
+The third slice retires the duplicate Connectors model, repository, and mapping
+planes. `internal/modules/connectors` now owns the redacted connector, grant,
+call-record, validation, and privileged inbound-secret persistence shapes.
+FleetDB and memstore implement its `ManagementStore` directly, while webhook
+verification declares a two-method consumer-owned secret source rather than
+depending on the full owner port.
+
+The following compatibility layers are deleted rather than renamed:
+
+- `internal/domain/connector.go`;
+- `internal/store/connector_store.go` and its unimplemented placeholder; and
+- the mapping-only `internal/infra/connectorscatalog` package.
+
+The composite Store now exposes one Connectors-owned management port instead
+of three horizontal connector/grant/audit repositories. CLI, WebUI, agent,
+driver, PR-review, and webhook composition use that owner port directly. The
+two real adapters remain independently replaceable: the FleetDB HTTP adapter
+translates transport errors to Connectors-owned categories, and memstore
+retains the in-process contract implementation. Public connector projections
+cannot carry credential or inbound-secret material; privileged secret reads
+remain behind the owner persistence port and narrow inbound verifier seam.
+
+The exact package-shape ratchet now moves as follows:
+
+| Shape measure | Phase 8 | Wave 9.1 | Wave 9.2 | Wave 9.3 | Phase 9 change |
+|---|---:|---:|---:|---:|---:|
+| Production packages under `internal/` | 189 | 188 | 186 | 185 | -4 |
+| Packages under `internal/modules/` | 17 | 17 | 17 | 17 | 0 |
+| Packages outside `internal/modules/` | 172 | 171 | 169 | 168 | -4 |
+| One-file packages | 67 | 67 | 65 | 64 | -3 |
+| One-or-two-file packages | 89 | 89 | 87 | 86 | -3 |
+
+Retirement guards reject recreation of the catalog root and the three deleted
+model/repository files. The ownership inventory also drops five obsolete
+catalog write rows, reducing exact direct persistence writes from 98 to 93 and
+sites from 107 to 102. Removing the Store dependency from the connector HTTP
+module lowers legacy handler imports from 26 to 25; exact import-fanout
+ceilings fall from 42 to 41 for WebUI composition and from 19 to 18 for PR
+review.
+
+## Wave 9.3 validation
+
+| Check | Result |
+|---|---|
+| Connectors owner, FleetDB, memstore, provider, CLI, and affected WebUI behavior suites | PASS |
+| Paired FleetDB OpenAPI snapshot and adapter contract | PASS against companion `fleet-db-modular-monolith-phase7`; no contract change required |
+| Retired-root, retired-file, exact package-shape, and direct-write ratchets | PASS |
+| Measured `make check-architecture` | PASS: 11/11 profiles, 10 roots, 93 direct-write rows, 25 legacy handler imports, zero pending decisions; peak process-tree RSS 1,263.4 MiB under 2,048 MiB |
+| Aggregate `make gate` against the paired FleetDB binary | PASS: all Go and frontend quality gates |
+
+The aggregate gate exposed three stale exact expectations after behavior was
+already green: two import-fanout ceilings and the direct-write row/site count.
+All were lowered to the observed values; no ceiling, threshold, or allowlist
+was widened.
 
 Later waves must update this document with the selected package candidates,
 the boundary reason retained or removed for each, exact shape changes, and
