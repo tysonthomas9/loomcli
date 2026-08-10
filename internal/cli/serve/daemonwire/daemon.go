@@ -266,6 +266,7 @@ func roleConfigFromDomain(r *domain.Role) config.RoleConfig {
 		Effort:         r.Effort,
 		PathPatterns:   append([]string(nil), r.PathPatterns...),
 		Skills:         append([]string(nil), r.Skills...),
+		InputPolicy:    r.InputPolicy.Clone(),
 		MaxPriority:    cloneIntPtr(r.MaxPriority),
 		MaxConcurrency: cloneIntPtr(r.MaxConcurrency),
 		ReadOnly:       r.ReadOnly,

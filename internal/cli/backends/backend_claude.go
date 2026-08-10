@@ -368,16 +368,26 @@ func invokeClaudeRunTurn(ctx context.Context, workDir, prompt, agentName, resume
 	if onActivity != nil {
 		raw.onActivity = onActivity
 	}
+	// Interactive prompts the harness raises mid-turn (folder trust, the
+	// permission-acceptance screen) are resolved from the ROLE's input policy.
+	// The default with no policy configured is deny-everything, and that is a
+	// decision rather than a fallthrough: resolveRoleInputPolicy returns nil
+	// for an absent or malformed policy, and DispositionFor reads nil as deny.
+	// See backend_input_policy.go for why loom does not adopt harness-wrapper's
+	// auto-accept default, which would say yes to a skip-all-permissions screen.
+	inputPolicy, onInputRequest := inputPolicyTurnFields(resolveRoleInputPolicy())
 	res, err := claudeRunTurn(ctx, claudeRunTurnConfig{
-		Harness:       "claude",
-		BinaryPath:    "claude",
-		Args:          buildClaudeRunTurnArgs(resumeID),
-		WorkingDir:    workDir,
-		Env:           buildClaudeEnv(workDir, agentName),
-		Prompt:        prompt,
-		ExitAfterTurn: true,
-		Output:        output,
-		Model:         resolveAgentModel(),
+		Harness:        "claude",
+		BinaryPath:     "claude",
+		Args:           buildClaudeRunTurnArgs(resumeID),
+		WorkingDir:     workDir,
+		Env:            buildClaudeEnv(workDir, agentName),
+		Prompt:         prompt,
+		ExitAfterTurn:  true,
+		Output:         output,
+		Model:          resolveAgentModel(),
+		InputPolicy:    inputPolicy,
+		OnInputRequest: onInputRequest,
 	})
 	// RunTurn drives Claude Code's interactive TUI, which does not expose the
 	// stream-json usage records consumed by collectClaudeStreamUsage — which is
