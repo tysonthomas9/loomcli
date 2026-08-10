@@ -344,8 +344,8 @@ func BenchmarkGetReadyWork_Large(b *testing.B) {
 
 ### Location
 
-- `internal/types/` - ID generation benchmarks
-- `internal/rpc/` - RPC performance benchmarks
+Benchmarks live beside the capability or adapter they measure. Retired
+horizontal packages such as `internal/types` are not benchmark locations.
 
 ### Running
 
