@@ -11,10 +11,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 )
 
-// DefaultStaleTaskRunMaxAge is retained as a compatibility alias for host
-// composition and existing callers. Execution owns the recovery policy.
-const DefaultStaleTaskRunMaxAge = execution.DefaultStaleTaskRunMaxAge
-
 func (e *Executor) startHeartbeats(ctx context.Context, claimed *domain.DriverRun, nodeID, leaseToken string, cancelRun context.CancelFunc) (context.CancelFunc, <-chan struct{}) {
 	hbCtx, stopHeartbeat := context.WithCancel(ctx)
 	interval := e.heartbeatInterval()
@@ -34,7 +30,7 @@ func (e *Executor) startHeartbeats(ctx context.Context, claimed *domain.DriverRu
 func (e *Executor) staleTaskRunRecoveryInterval() time.Duration {
 	maxAge := e.StaleTaskRunMaxAge
 	if maxAge <= 0 {
-		maxAge = DefaultStaleTaskRunMaxAge
+		maxAge = execution.DefaultStaleTaskRunMaxAge
 	}
 	interval := maxAge / 4
 	heartbeat := e.heartbeatInterval()

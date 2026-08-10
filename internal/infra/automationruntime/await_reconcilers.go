@@ -48,17 +48,6 @@ type automationAwaitEventNotifier struct {
 
 var _ automation.AwaitEventNotifier = (*automationAwaitEventNotifier)(nil)
 
-// NewAutomationAwaitEventNotifier is the retired Store-only compatibility
-// constructor. Mutation authority must be injected explicitly.
-//
-// Deprecated: use NewAutomationAwaitEventNotifierWithResolver.
-func NewAutomationAwaitEventNotifier(
-	_ store.AwaitStore,
-	_ store.DriverRunStore,
-) (automation.AwaitEventNotifier, error) {
-	return nil, fmt.Errorf("compose automation await notifier without Execution resolver: %w", automation.ErrUnavailable)
-}
-
 func NewAutomationAwaitEventNotifierWithResolver(
 	awaits store.AwaitStore,
 	driverRuns store.DriverRunStore,

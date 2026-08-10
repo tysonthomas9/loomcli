@@ -39,9 +39,6 @@ func TestAwaitEventReconcilerResolvesPendingAwaitAndCompletesNotification(t *tes
 
 func TestAutomationAwaitEventNotifierRequiresExplicitResolver(t *testing.T) {
 	st := memstore.New()
-	if notifier, err := trigger.NewAutomationAwaitEventNotifier(st.Awaits(), st.DriverRuns()); err == nil || notifier != nil {
-		t.Fatalf("legacy notifier = %T, %v; want fail-closed composition error", notifier, err)
-	}
 	if notifier, err := trigger.NewAutomationAwaitEventNotifierWithResolver(st.Awaits(), st.DriverRuns(), nil); err == nil || notifier != nil {
 		t.Fatalf("nil-resolver notifier = %T, %v; want fail-closed composition error", notifier, err)
 	}

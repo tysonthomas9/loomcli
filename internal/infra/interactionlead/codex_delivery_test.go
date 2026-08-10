@@ -10,7 +10,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-func TestDeliverCurrentAssignmentToCodexStartsTurnWhenIdle(t *testing.T) {
+func TestCodexDeliverCurrentAssignmentStartsTurnWhenIdle(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
 	createAssignedLeadSession(t, st, "idle", nil)
@@ -20,7 +20,7 @@ func TestDeliverCurrentAssignmentToCodexStartsTurnWhenIdle(t *testing.T) {
 
 	result, err := deliverCurrentAssignmentOwned(ctx, st, testSessionRuntime(st), "WS", "nova")
 	if err != nil {
-		t.Fatalf("DeliverCurrentAssignmentToCodex() error = %v", err)
+		t.Fatalf("deliverCurrentAssignmentOwned() error = %v", err)
 	}
 	if result.State != DeliveryStateDelivered {
 		t.Fatalf("delivery state = %q, want delivered (reason: %s)", result.State, result.Reason)
@@ -42,7 +42,7 @@ func TestDeliverCurrentAssignmentToCodexStartsTurnWhenIdle(t *testing.T) {
 	}
 }
 
-func TestDeliverCurrentAssignmentToCodexLeavesBusyThreadPending(t *testing.T) {
+func TestCodexDeliverCurrentAssignmentLeavesBusyThreadPending(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
 	createAssignedLeadSession(t, st, "busy", nil)
@@ -52,7 +52,7 @@ func TestDeliverCurrentAssignmentToCodexLeavesBusyThreadPending(t *testing.T) {
 
 	result, err := deliverCurrentAssignmentOwned(ctx, st, testSessionRuntime(st), "WS", "nova")
 	if err != nil {
-		t.Fatalf("DeliverCurrentAssignmentToCodex() error = %v", err)
+		t.Fatalf("deliverCurrentAssignmentOwned() error = %v", err)
 	}
 	if result.State != DeliveryStatePending {
 		t.Fatalf("delivery state = %q, want pending", result.State)
@@ -86,7 +86,7 @@ func TestDeliverCurrentAssignmentToCodexLeavesBusyThreadPending(t *testing.T) {
 	}
 
 	if _, err := deliverCurrentAssignmentOwned(ctx, st, testSessionRuntime(st), "WS", "nova"); err != nil {
-		t.Fatalf("retry DeliverCurrentAssignmentToCodex() error = %v", err)
+		t.Fatalf("retry deliverCurrentAssignmentOwned() error = %v", err)
 	}
 	queued = queuedInboxMessagesForTest(t, st, "WS", "nova", "lead-session")
 	if len(queued) != 1 {
@@ -96,7 +96,7 @@ func TestDeliverCurrentAssignmentToCodexLeavesBusyThreadPending(t *testing.T) {
 	fake.status = CodexThreadStatus{Type: "idle"}
 	result, err = deliverPendingLeadMessagesOwned(ctx, st, testSessionRuntime(st), "WS", "nova")
 	if err != nil {
-		t.Fatalf("DeliverPendingLeadMessagesToCodex() error = %v", err)
+		t.Fatalf("deliverPendingLeadMessagesOwned() error = %v", err)
 	}
 	if result.State != DeliveryStateDelivered {
 		t.Fatalf("delivery state = %q, want delivered (reason: %s)", result.State, result.Reason)
@@ -116,7 +116,7 @@ func TestDeliverCurrentAssignmentToCodexLeavesBusyThreadPending(t *testing.T) {
 	}
 }
 
-func TestDeliverCurrentAssignmentToCodexLeavesStartingRuntimePending(t *testing.T) {
+func TestCodexDeliverCurrentAssignmentLeavesStartingRuntimePending(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
 	createAssignedLeadSession(t, st, "starting", map[string]string{
@@ -125,7 +125,7 @@ func TestDeliverCurrentAssignmentToCodexLeavesStartingRuntimePending(t *testing.
 
 	result, err := deliverCurrentAssignmentOwned(ctx, st, testSessionRuntime(st), "WS", "nova")
 	if err != nil {
-		t.Fatalf("DeliverCurrentAssignmentToCodex() error = %v", err)
+		t.Fatalf("deliverCurrentAssignmentOwned() error = %v", err)
 	}
 	if result.State != DeliveryStatePending {
 		t.Fatalf("delivery state = %q, want pending", result.State)
@@ -142,7 +142,7 @@ func TestDeliverCurrentAssignmentToCodexLeavesStartingRuntimePending(t *testing.
 	}
 }
 
-func TestDeliverCurrentAssignmentToCodexDoesNotMarkUnsupportedRuntimeFailed(t *testing.T) {
+func TestCodexDeliverCurrentAssignmentDoesNotMarkUnsupportedRuntimeFailed(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
 	createAssignedLeadSession(t, st, "unsupported", map[string]string{
@@ -151,7 +151,7 @@ func TestDeliverCurrentAssignmentToCodexDoesNotMarkUnsupportedRuntimeFailed(t *t
 
 	result, err := deliverCurrentAssignmentOwned(ctx, st, testSessionRuntime(st), "WS", "nova")
 	if err != nil {
-		t.Fatalf("DeliverCurrentAssignmentToCodex() error = %v", err)
+		t.Fatalf("deliverCurrentAssignmentOwned() error = %v", err)
 	}
 	if result.State != DeliveryStateUnsupported {
 		t.Fatalf("delivery state = %q, want unsupported", result.State)
@@ -165,7 +165,7 @@ func TestDeliverCurrentAssignmentToCodexDoesNotMarkUnsupportedRuntimeFailed(t *t
 	}
 }
 
-func TestDeliverLeadMessageToCodexStartsTurnWhenIdle(t *testing.T) {
+func TestCodexDeliverLeadMessageStartsTurnWhenIdle(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
 	createAssignedLeadSession(t, st, "message", nil)
@@ -176,7 +176,7 @@ func TestDeliverLeadMessageToCodexStartsTurnWhenIdle(t *testing.T) {
 	const message = "Task TASK-1 completed under the active epic-runner workflow."
 	result, err := deliverLeadMessageOwned(ctx, st, testSessionRuntime(st), "WS", "nova", message)
 	if err != nil {
-		t.Fatalf("DeliverLeadMessageToCodex() error = %v", err)
+		t.Fatalf("deliverLeadMessageOwned() error = %v", err)
 	}
 	if result.State != DeliveryStateDelivered {
 		t.Fatalf("delivery state = %q, want delivered (reason: %s)", result.State, result.Reason)
@@ -194,7 +194,7 @@ func TestDeliverLeadMessageToCodexStartsTurnWhenIdle(t *testing.T) {
 	}
 }
 
-func TestDeliverLeadMessageToCodexQueuesBusyThreadAndDrainsWhenIdle(t *testing.T) {
+func TestCodexDeliverLeadMessageQueuesBusyThreadAndDrainsWhenIdle(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
 	createAssignedLeadSession(t, st, "queued-message", nil)
@@ -205,7 +205,7 @@ func TestDeliverLeadMessageToCodexQueuesBusyThreadAndDrainsWhenIdle(t *testing.T
 	const message = "Task TASK-1 completed under the active epic-runner workflow."
 	result, err := deliverLeadMessageOwned(ctx, st, testSessionRuntime(st), "WS", "nova", message)
 	if err != nil {
-		t.Fatalf("DeliverLeadMessageToCodex() error = %v", err)
+		t.Fatalf("deliverLeadMessageOwned() error = %v", err)
 	}
 	if result.State != DeliveryStatePending {
 		t.Fatalf("delivery state = %q, want pending", result.State)
@@ -220,7 +220,7 @@ func TestDeliverLeadMessageToCodexQueuesBusyThreadAndDrainsWhenIdle(t *testing.T
 	}
 
 	if _, err := deliverLeadMessageOwned(ctx, st, testSessionRuntime(st), "WS", "nova", message); err != nil {
-		t.Fatalf("retry DeliverLeadMessageToCodex() error = %v", err)
+		t.Fatalf("retry deliverLeadMessageOwned() error = %v", err)
 	}
 	queued = queuedInboxMessagesForTest(t, st, "WS", "nova", "lead-session")
 	if len(queued) != 1 || queued[0].Body != message {
@@ -230,7 +230,7 @@ func TestDeliverLeadMessageToCodexQueuesBusyThreadAndDrainsWhenIdle(t *testing.T
 	fake.status = CodexThreadStatus{Type: "idle"}
 	result, err = deliverLeadMessageOwned(ctx, st, testSessionRuntime(st), "WS", "nova", message)
 	if err != nil {
-		t.Fatalf("idle DeliverLeadMessageToCodex() error = %v", err)
+		t.Fatalf("idle deliverLeadMessageOwned() error = %v", err)
 	}
 	if result.State != DeliveryStateDelivered {
 		t.Fatalf("delivery state = %q, want delivered (reason: %s)", result.State, result.Reason)
@@ -246,14 +246,14 @@ func TestDeliverLeadMessageToCodexQueuesBusyThreadAndDrainsWhenIdle(t *testing.T
 	}
 }
 
-func TestDeliverLeadMessageToCodexQueuesBeforeSessionAndDrainsLater(t *testing.T) {
+func TestCodexDeliverLeadMessageQueuesBeforeSessionAndDrainsLater(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
 
 	const message = "Task TASK-1 completed before the lead runtime was ready."
 	result, err := deliverLeadMessageOwned(ctx, st, testSessionRuntime(st), "WS", "nova", message)
 	if err != nil {
-		t.Fatalf("DeliverLeadMessageToCodex() error = %v", err)
+		t.Fatalf("deliverLeadMessageOwned() error = %v", err)
 	}
 	if result.State != DeliveryStatePending || result.InboxMessageID == "" {
 		t.Fatalf("delivery result = %#v, want pending with inbox message", result)
@@ -278,7 +278,7 @@ func TestDeliverLeadMessageToCodexQueuesBeforeSessionAndDrainsLater(t *testing.T
 
 	result, err = deliverPendingLeadMessagesOwned(ctx, st, testSessionRuntime(st), "WS", "nova")
 	if err != nil {
-		t.Fatalf("DeliverPendingLeadMessagesToCodex() error = %v", err)
+		t.Fatalf("deliverPendingLeadMessagesOwned() error = %v", err)
 	}
 	if result.State != DeliveryStateDelivered {
 		t.Fatalf("delivery state = %q, want delivered (reason: %s)", result.State, result.Reason)
@@ -291,14 +291,14 @@ func TestDeliverLeadMessageToCodexQueuesBeforeSessionAndDrainsLater(t *testing.T
 	}
 }
 
-func TestDeliverLeadMessageToCodexDoesNotDuplicateSessionlessMessageAfterSessionStarts(t *testing.T) {
+func TestCodexDeliverLeadMessageDoesNotDuplicateSessionlessMessageAfterSessionStarts(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
 
 	const message = "Task TASK-1 completed before the lead runtime was ready."
 	result, err := deliverLeadMessageOwned(ctx, st, testSessionRuntime(st), "WS", "nova", message)
 	if err != nil {
-		t.Fatalf("sessionless DeliverLeadMessageToCodex() error = %v", err)
+		t.Fatalf("sessionless deliverLeadMessageOwned() error = %v", err)
 	}
 	if result.State != DeliveryStatePending || result.InboxMessageID == "" {
 		t.Fatalf("delivery result = %#v, want pending with inbox message", result)
@@ -319,7 +319,7 @@ func TestDeliverLeadMessageToCodexDoesNotDuplicateSessionlessMessageAfterSession
 
 	result, err = deliverLeadMessageOwned(ctx, st, testSessionRuntime(st), "WS", "nova", message)
 	if err != nil {
-		t.Fatalf("retry DeliverLeadMessageToCodex() error = %v", err)
+		t.Fatalf("retry deliverLeadMessageOwned() error = %v", err)
 	}
 	if result.State != DeliveryStatePending {
 		t.Fatalf("delivery state = %q, want pending", result.State)
@@ -333,7 +333,7 @@ func TestDeliverLeadMessageToCodexDoesNotDuplicateSessionlessMessageAfterSession
 	}
 }
 
-func TestDeliverPendingLeadMessagesToCodexDrainsQueueWithoutNewMessage(t *testing.T) {
+func TestCodexDeliverPendingLeadMessagesDrainsQueueWithoutNewMessage(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
 	createAssignedLeadSession(t, st, "pending-queue-drain", nil)
@@ -344,7 +344,7 @@ func TestDeliverPendingLeadMessagesToCodexDrainsQueueWithoutNewMessage(t *testin
 	const message = "Task TASK-2 completed after the workflow exited."
 	result, err := deliverLeadMessageOwned(ctx, st, testSessionRuntime(st), "WS", "nova", message)
 	if err != nil {
-		t.Fatalf("queue DeliverLeadMessageToCodex() error = %v", err)
+		t.Fatalf("queue deliverLeadMessageOwned() error = %v", err)
 	}
 	if result.State != DeliveryStatePending {
 		t.Fatalf("delivery state = %q, want pending", result.State)
@@ -353,7 +353,7 @@ func TestDeliverPendingLeadMessagesToCodexDrainsQueueWithoutNewMessage(t *testin
 	fake.status = CodexThreadStatus{Type: "idle"}
 	result, err = deliverPendingLeadMessagesOwned(ctx, st, testSessionRuntime(st), "WS", "nova")
 	if err != nil {
-		t.Fatalf("DeliverPendingLeadMessagesToCodex() error = %v", err)
+		t.Fatalf("deliverPendingLeadMessagesOwned() error = %v", err)
 	}
 	if result.State != DeliveryStateDelivered {
 		t.Fatalf("delivery state = %q, want delivered (reason: %s)", result.State, result.Reason)

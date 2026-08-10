@@ -793,6 +793,140 @@ func TestRetiredConnectorCompatibilityConstructorsCannotReturn(t *testing.T) {
 	}
 }
 
+func TestRetiredSourceCompatibilityAPIsCannotReturn(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, relative := range []string{
+		"internal/driver/stale_task_sweeper_legacy_test.go",
+		"internal/driver/stale_task_sweeper_test.go",
+	} {
+		if _, statErr := os.Stat(filepath.Join(root, filepath.FromSlash(relative))); !os.IsNotExist(statErr) {
+			t.Errorf("retired compatibility test implementation %s returned (stat error: %v)", relative, statErr)
+		}
+	}
+	files := map[string]map[string]struct{}{
+		"internal/infra/interactionlead/codex_delivery.go": {
+			"DeliverCurrentAssignmentToCodex": {}, "DeliverLeadMessageToCodex": {},
+			"DeliverLeadMessageToCodexWithOptions": {}, "DeliverPendingLeadMessagesToCodex": {},
+		},
+		"internal/infra/automationruntime/await_reconcilers.go": {
+			"NewAutomationAwaitEventNotifier": {},
+		},
+		"internal/webui/handlers/webhooks/module.go":        {"NewModule": {}},
+		"internal/webui/handlers/triggerbindings/module.go": {"NewModule": {}},
+		"internal/infra/workflowdistribution/authoring/builtin_authoring.go": {
+			"EnsureBuiltinWorkflowAuthored": {}, "EnsureBoundPromptAgentWorkflowsAuthored": {},
+		},
+		"internal/driver/stale_task_sweeper.go":       {"DefaultStaleTaskRunMaxAge": {}},
+		"internal/webui/storeadapter/storeadapter.go": {"DefaultWorkspaceKey": {}},
+	}
+	for relative, forbidden := range files {
+		parsed, parseErr := parser.ParseFile(
+			token.NewFileSet(), filepath.Join(root, filepath.FromSlash(relative)), nil, 0,
+		)
+		if parseErr != nil {
+			t.Fatal(parseErr)
+		}
+		for _, declaration := range parsed.Decls {
+			switch value := declaration.(type) {
+			case *ast.FuncDecl:
+				if _, retired := forbidden[value.Name.Name]; retired {
+					t.Errorf("retired compatibility function %s returned in %s", value.Name.Name, relative)
+				}
+			case *ast.GenDecl:
+				for _, spec := range value.Specs {
+					values, ok := spec.(*ast.ValueSpec)
+					if !ok {
+						continue
+					}
+					for _, name := range values.Names {
+						if _, retired := forbidden[name.Name]; retired {
+							t.Errorf("retired compatibility value %s returned in %s", name.Name, relative)
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestHandwrittenProductionAPIsDoNotRemainDeprecated(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	internalRoot := filepath.Join(root, "internal")
+	var deprecated []string
+	err = filepath.WalkDir(internalRoot, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			relative, relErr := filepath.Rel(internalRoot, path)
+			if relErr != nil {
+				return relErr
+			}
+			if relative == "archtest" || relative == filepath.Join("backend", "api", "gen") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		parsed, parseErr := parser.ParseFile(token.NewFileSet(), path, nil, parser.ParseComments)
+		if parseErr != nil {
+			return parseErr
+		}
+		for _, comment := range parsed.Comments {
+			if strings.Contains(comment.Text(), "Deprecated:") {
+				relative, relErr := filepath.Rel(root, path)
+				if relErr != nil {
+					return relErr
+				}
+				deprecated = append(deprecated, filepath.ToSlash(relative))
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(deprecated)
+	if len(deprecated) != 0 {
+		t.Fatalf("handwritten production Deprecated declarations returned: %v", deprecated)
+	}
+}
+
+func TestWorkflowHTTPModuleRequiresTypedConfig(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "internal", "webui", "handlers", "workflows", "module.go")
+	parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, declaration := range parsed.Decls {
+		function, ok := declaration.(*ast.FuncDecl)
+		if !ok || function.Name.Name != "NewModule" {
+			continue
+		}
+		if function.Type.Params == nil || len(function.Type.Params.List) != 1 {
+			t.Fatal("workflows.NewModule must accept exactly one typed Config")
+		}
+		parameter, ok := function.Type.Params.List[0].Type.(*ast.Ident)
+		if !ok || parameter.Name != "Config" {
+			t.Fatalf("workflows.NewModule parameter = %T, want Config", function.Type.Params.List[0].Type)
+		}
+		return
+	}
+	t.Fatal("workflows.NewModule is missing")
+}
+
 func TestRetiredArtifactModelAndRepositoryPlaneCannotReturn(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {

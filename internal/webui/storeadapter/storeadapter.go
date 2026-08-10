@@ -261,9 +261,3 @@ func resolveRepoPath(wsKey, repoName string) string {
 func ResolveRepoPath(wsKey, repoName string) string {
 	return resolveRepoPath(wsKey, repoName)
 }
-
-// DefaultWorkspaceKey is retained for compatibility with older callers.
-// Default workspace selection has been removed, so it always returns empty.
-func DefaultWorkspaceKey() string {
-	return ""
-}

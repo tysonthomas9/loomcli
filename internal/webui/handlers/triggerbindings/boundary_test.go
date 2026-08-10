@@ -304,16 +304,6 @@ func TestDeleteDisablesRevokesThenDeletesAndCanResume(t *testing.T) {
 	}
 }
 
-func TestLegacyConstructorIsInert(t *testing.T) {
-	mux := http.NewServeMux()
-	NewModule(nil).Register(mux)
-	response := httptest.NewRecorder()
-	mux.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/trigger-bindings", nil))
-	if response.Code != http.StatusNotFound {
-		t.Fatalf("legacy constructor registered routes: status=%d", response.Code)
-	}
-}
-
 func TestHandlerHasNoDirectBindingWriteOrDriverRunFallback(t *testing.T) {
 	source, err := os.ReadFile("module.go")
 	if err != nil {

@@ -102,11 +102,6 @@ func New(config Config) *Module {
 	}
 }
 
-// NewModule is retained only so older composition continues to compile while
-// it migrates to New(Config). It is intentionally inert: a composite Store is
-// no longer an authorized trigger-binding management dependency.
-func NewModule(any) *Module { return &Module{} }
-
 func (m *Module) Register(mux *http.ServeMux) {
 	if m == nil || mux == nil || !m.active {
 		return

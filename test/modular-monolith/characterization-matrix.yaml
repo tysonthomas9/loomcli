@@ -42,15 +42,17 @@ rows:
       - Binding failure retains the durable agent-service step so provisioning recovery can resume without duplicating prior work.
 
   - id: execution-recovery
-    package: ./internal/driver
-    test_regex: '^TestStaleTaskSweeperRunOnce$'
+    package: ./internal/modules/execution
+    test_regex: '^Test(OwnedStaleTaskRunRecovery(UsesExactParentOwnerAndSafeCutoff|DefaultsAndRejectsMissingOwner)|RecoverStaleChildTaskRunsIsBoundToExactParentOwnerAndReplays)$'
     expected_tests:
-      - TestStaleTaskSweeperRunOnce
+      - TestOwnedStaleTaskRunRecoveryUsesExactParentOwnerAndSafeCutoff
+      - TestOwnedStaleTaskRunRecoveryDefaultsAndRejectsMissingOwner
+      - TestRecoverStaleChildTaskRunsIsBoundToExactParentOwnerAndReplays
     timeout: 2m
     expected_behavior:
-      - Stale task runs belonging to running driver runs are failed with the stale_task_run classification and a finished timestamp.
-      - Fresh task runs and task runs whose driver is not running remain untouched.
-      - The default recovery threshold is twenty minutes and workspace scoping is preserved.
+      - Recovery is bound to the exact live parent DriverRun owner and rejects foreign, stale, or incomplete ownership.
+      - Recovery uses a deterministic replay-safe request and preserves the stale_task_run classification.
+      - The default recovery threshold is twenty minutes, and forward or backward wall-clock jumps cannot create an unsafe cutoff.
 
   - id: agent-retry-policy
     package: ./internal/agentpolicy
