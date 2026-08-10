@@ -320,6 +320,10 @@ func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 	ctx, cancel := contextFromShutdown(context.Background(), shutdown)
 	defer cancel()
 
+	if roleExecutor() == RoleExecutorConversation {
+		return runClaudeConversation(ctx, workDir, prompt, agentName, resumeID, collector)
+	}
+
 	res, err := runClaudeTurnWithRetry(ctx, func() (claudeRunTurnResult, error) {
 		return invokeClaudeRunTurn(ctx, workDir, prompt, agentName, resumeID, cli.DaemonActivityObserver(), collector)
 	})

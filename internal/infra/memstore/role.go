@@ -45,6 +45,7 @@ func (s *roleStore) Create(_ context.Context, in store.RoleCreate) (*domain.Role
 		PromptFile:     in.PromptFile,
 		Model:          in.Model,
 		TaskFilter:     in.TaskFilter,
+		Executor:       in.Executor,
 		Backend:        in.Backend,
 		Effort:         in.Effort,
 		PathPatterns:   append([]string(nil), in.PathPatterns...),
@@ -86,7 +87,6 @@ func (s *roleStore) List(_ context.Context, ws string) ([]*domain.Role, error) {
 	return out, nil
 }
 
-//nolint:funlen // Patch application mirrors the store.RoleUpdate surface area.
 func (s *roleStore) Update(_ context.Context, ws, name string, patch store.RoleUpdate) (*domain.Role, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -94,6 +94,15 @@ func (s *roleStore) Update(_ context.Context, ws, name string, patch store.RoleU
 	if !ok {
 		return nil, fmt.Errorf("role %q in workspace %q: %w", name, ws, domain.ErrNotFound)
 	}
+	applyRoleDefinitionPatch(r, patch)
+	applyRoleControlPatch(r, patch)
+	r.UpdatedAt = time.Now().UTC()
+	return cloneRole(r), nil
+}
+
+// applyRoleDefinitionPatch applies the definition half of the patch: what the
+// role is, how it prompts, and which backend runs it.
+func applyRoleDefinitionPatch(r *domain.Role, patch store.RoleUpdate) {
 	if patch.Description != nil {
 		r.Description = *patch.Description
 	}
@@ -112,6 +121,9 @@ func (s *roleStore) Update(_ context.Context, ws, name string, patch store.RoleU
 	if patch.TaskFilter != nil {
 		r.TaskFilter = *patch.TaskFilter
 	}
+	if patch.Executor != nil {
+		r.Executor = *patch.Executor
+	}
 	if patch.Backend != nil {
 		r.Backend = *patch.Backend
 	}
@@ -124,6 +136,11 @@ func (s *roleStore) Update(_ context.Context, ws, name string, patch store.RoleU
 	if patch.Skills != nil {
 		r.Skills = append([]string(nil), (*patch.Skills)...)
 	}
+}
+
+// applyRoleControlPatch applies the routing and safety half of the patch:
+// label constraints, input policy, and the run/spend bounds.
+func applyRoleControlPatch(r *domain.Role, patch store.RoleUpdate) {
 	if patch.InputPolicy != nil {
 		// Deep-copied on the way in as well as on the way out: the caller keeps
 		// a reference to the Kinds map it built, and a shared map would let it
@@ -151,8 +168,6 @@ func (s *roleStore) Update(_ context.Context, ws, name string, patch store.RoleU
 	if patch.MaxRunDuration != nil {
 		r.MaxRunDuration = clonePtr(*patch.MaxRunDuration)
 	}
-	r.UpdatedAt = time.Now().UTC()
-	return cloneRole(r), nil
 }
 
 func (s *roleStore) Delete(_ context.Context, ws, name string) error {
