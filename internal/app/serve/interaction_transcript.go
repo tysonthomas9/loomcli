@@ -8,7 +8,6 @@ import (
 
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/artifacts"
-	artifactfleetdb "github.com/tysonthomas9/loomcli/internal/modules/artifacts/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 )
@@ -29,9 +28,9 @@ func newInteractionTranscriptArtifactStore(
 	transport infrafleetdb.SessionArtifactTransport,
 	issuer *authority.Issuer,
 ) (*interactionTranscriptArtifacts, error) {
-	adapter, err := artifactfleetdb.NewSession(newInteractionArtifactsFleetDBTransport(transport))
-	if err != nil {
-		return nil, fmt.Errorf("compose Interaction transcript Artifacts adapter: %w", err)
+	store := newInteractionArtifactsFleetDBTransport(transport)
+	if store == nil {
+		return nil, fmt.Errorf("compose Interaction transcript Artifacts adapter: %w", artifacts.ErrUnavailable)
 	}
 	if issuer == nil {
 		return nil, fmt.Errorf("compose Interaction transcript Artifacts authority: %w", interaction.ErrUnavailable)
@@ -44,7 +43,7 @@ func newInteractionTranscriptArtifactStore(
 	if err != nil {
 		return nil, fmt.Errorf("compose Interaction transcript Artifacts admission: %w", err)
 	}
-	service, err := artifacts.NewSession(adapter, admission)
+	service, err := artifacts.NewSession(store, admission)
 	if err != nil {
 		return nil, err
 	}
@@ -154,9 +153,9 @@ type interactionArtifactsFleetDBTransport struct {
 	transport infrafleetdb.SessionArtifactTransport
 }
 
-var _ artifactfleetdb.SessionTransport = (*interactionArtifactsFleetDBTransport)(nil)
+var _ artifacts.SessionStore = (*interactionArtifactsFleetDBTransport)(nil)
 
-func newInteractionArtifactsFleetDBTransport(transport infrafleetdb.SessionArtifactTransport) artifactfleetdb.SessionTransport {
+func newInteractionArtifactsFleetDBTransport(transport infrafleetdb.SessionArtifactTransport) artifacts.SessionStore {
 	if transport == nil {
 		return nil
 	}
@@ -238,17 +237,17 @@ func translateInteractionArtifactTransportError(err error) error {
 	var mapped error
 	switch {
 	case errors.Is(err, infrafleetdb.ErrArtifactsNotFound):
-		mapped = artifactfleetdb.ErrTransportNotFound
+		mapped = artifacts.ErrNotFound
 	case errors.Is(err, infrafleetdb.ErrArtifactsInvalid):
-		mapped = artifactfleetdb.ErrTransportInvalid
+		mapped = artifacts.ErrInvalid
 	case errors.Is(err, infrafleetdb.ErrArtifactsConflict):
-		mapped = artifactfleetdb.ErrTransportConflict
+		mapped = artifacts.ErrAlreadyExists
 	case errors.Is(err, infrafleetdb.ErrArtifactsNotOwner):
-		mapped = artifactfleetdb.ErrTransportNotOwner
+		mapped = artifacts.ErrNotOwner
 	case errors.Is(err, infrafleetdb.ErrArtifactsInvalidTransition):
-		mapped = artifactfleetdb.ErrTransportInvalidTransition
+		mapped = artifacts.ErrInvalidTransition
 	case errors.Is(err, infrafleetdb.ErrArtifactsUnavailable):
-		mapped = artifactfleetdb.ErrTransportUnavailable
+		mapped = artifacts.ErrUnavailable
 	default:
 		return err
 	}

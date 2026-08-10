@@ -1,7 +1,7 @@
 # package	exact_count	rationale
 internal/webui/app	41	HTTP composition root directly wires capability ports, route modules, stores, and delivery coordinators
 internal/webui/agentmodules	38	Agent route composition owns the folded automation routes and projects the explicit capabilities used by autonomous and interactive agent surfaces
-internal/app/serve	33	Process composition root wires capability owners to runtime and infrastructure adapters
+internal/app/serve	32	Process composition root wires capability owners to runtime and infrastructure adapters
 internal/cli/serve/serveadapter	27	Serve adapter assembles the local runtime boundary and its external process dependencies
 internal/cli/serve	27	Serve command composition owns the folded install log-router and runtime wiring alongside startup loops monitoring and lifecycle
 internal/webui	22	Web delivery root exposes the public server capability contract and top-level construction

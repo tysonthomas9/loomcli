@@ -10,7 +10,6 @@ import (
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/artifacts"
-	artifactfleetdb "github.com/tysonthomas9/loomcli/internal/modules/artifacts/fleetdb"
 	executionmodule "github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 )
@@ -239,12 +238,12 @@ func TestArtifactsFleetDBTransportErrorVocabulary(t *testing.T) {
 		input error
 		want  error
 	}{
-		{infrafleetdb.ErrArtifactsNotFound, artifactfleetdb.ErrTransportNotFound},
-		{infrafleetdb.ErrArtifactsInvalid, artifactfleetdb.ErrTransportInvalid},
-		{infrafleetdb.ErrArtifactsConflict, artifactfleetdb.ErrTransportConflict},
-		{infrafleetdb.ErrArtifactsNotOwner, artifactfleetdb.ErrTransportNotOwner},
-		{infrafleetdb.ErrArtifactsInvalidTransition, artifactfleetdb.ErrTransportInvalidTransition},
-		{infrafleetdb.ErrArtifactsUnavailable, artifactfleetdb.ErrTransportUnavailable},
+		{infrafleetdb.ErrArtifactsNotFound, artifacts.ErrNotFound},
+		{infrafleetdb.ErrArtifactsInvalid, artifacts.ErrInvalid},
+		{infrafleetdb.ErrArtifactsConflict, artifacts.ErrAlreadyExists},
+		{infrafleetdb.ErrArtifactsNotOwner, artifacts.ErrNotOwner},
+		{infrafleetdb.ErrArtifactsInvalidTransition, artifacts.ErrInvalidTransition},
+		{infrafleetdb.ErrArtifactsUnavailable, artifacts.ErrUnavailable},
 	}
 	for _, test := range tests {
 		translated := translateArtifactsFleetDBError(test.input)

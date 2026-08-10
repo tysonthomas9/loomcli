@@ -683,6 +683,7 @@ func TestRetiredHorizontalRootsCannotReturn(t *testing.T) {
 		"internal/infra/artifactcatalog",
 		"internal/infra/connectorscatalog",
 		"internal/leadcontrol",
+		"internal/modules/artifacts/fleetdb",
 		"internal/modules/sourcecontrol/stackpublish",
 		"internal/pathsec",
 		"internal/stacklineage",

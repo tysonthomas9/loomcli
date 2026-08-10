@@ -698,7 +698,6 @@ func genericMechanismTestPolicies() []GenericMechanismUse {
 		{Mechanism: "action_ledger", AllowedAdapterRoots: []string{"internal/modules/execution/fleetdb"}},
 		{Mechanism: "lease", AllowedAdapterRoots: []string{
 			"internal/modules/agents/fleetdb",
-			"internal/modules/artifacts/fleetdb",
 			"internal/modules/execution/fleetdb",
 			"internal/modules/interaction/fleetdb",
 		}},

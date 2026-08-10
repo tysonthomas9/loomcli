@@ -8,7 +8,6 @@ import (
 
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/artifacts"
-	artifactfleetdb "github.com/tysonthomas9/loomcli/internal/modules/artifacts/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 )
 
@@ -19,9 +18,9 @@ type artifactsFleetDBTransport struct {
 	transport infrafleetdb.ArtifactTransport
 }
 
-var _ artifactfleetdb.Transport = (*artifactsFleetDBTransport)(nil)
+var _ artifacts.Store = (*artifactsFleetDBTransport)(nil)
 
-func newArtifactsFleetDBTransport(transport infrafleetdb.ArtifactTransport) artifactfleetdb.Transport {
+func newArtifactsFleetDBTransport(transport infrafleetdb.ArtifactTransport) artifacts.Store {
 	if transport == nil {
 		return nil
 	}
@@ -151,17 +150,17 @@ func translateArtifactsFleetDBError(err error) error {
 	var translated error
 	switch {
 	case errors.Is(err, infrafleetdb.ErrArtifactsNotFound):
-		translated = artifactfleetdb.ErrTransportNotFound
+		translated = artifacts.ErrNotFound
 	case errors.Is(err, infrafleetdb.ErrArtifactsInvalid):
-		translated = artifactfleetdb.ErrTransportInvalid
+		translated = artifacts.ErrInvalid
 	case errors.Is(err, infrafleetdb.ErrArtifactsConflict):
-		translated = artifactfleetdb.ErrTransportConflict
+		translated = artifacts.ErrAlreadyExists
 	case errors.Is(err, infrafleetdb.ErrArtifactsNotOwner):
-		translated = artifactfleetdb.ErrTransportNotOwner
+		translated = artifacts.ErrNotOwner
 	case errors.Is(err, infrafleetdb.ErrArtifactsInvalidTransition):
-		translated = artifactfleetdb.ErrTransportInvalidTransition
+		translated = artifacts.ErrInvalidTransition
 	case errors.Is(err, infrafleetdb.ErrArtifactsUnavailable):
-		translated = artifactfleetdb.ErrTransportUnavailable
+		translated = artifacts.ErrUnavailable
 	default:
 		return err
 	}
@@ -250,18 +249,18 @@ func newArtifactsCapability(
 	queryStore artifacts.QueryStore,
 	issuer *authority.Issuer,
 ) (*ArtifactsCapability, error) {
-	adapter, err := artifactfleetdb.New(newArtifactsFleetDBTransport(transport))
-	if err != nil {
-		return nil, fmt.Errorf("compose Artifacts: %w", err)
-	}
 	if issuer == nil {
 		return nil, fmt.Errorf("compose Artifacts: shared Execution authority issuer is required")
+	}
+	store := newArtifactsFleetDBTransport(transport)
+	if store == nil {
+		return nil, fmt.Errorf("compose Artifacts: %w", artifacts.ErrUnavailable)
 	}
 	admission, err := issuer.NewAdmission(artifacts.OperationRules()...)
 	if err != nil {
 		return nil, fmt.Errorf("compose Artifacts admission: %w", err)
 	}
-	service, err := artifacts.New(adapter, admission)
+	service, err := artifacts.New(store, admission)
 	if err != nil {
 		return nil, fmt.Errorf("compose Artifacts service: %w", err)
 	}

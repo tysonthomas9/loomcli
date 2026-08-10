@@ -1832,7 +1832,6 @@ generic_mechanisms:
     owner_mapping: agent_service=agents;driver_run|task_run=execution;terminal=interaction;artifact_upload=artifacts
     allowed_adapter_roots:
       - internal/modules/agents/fleetdb
-      - internal/modules/artifacts/fleetdb
       - internal/modules/execution/fleetdb
       - internal/modules/interaction/fleetdb
     enforcement: Reject any generic Lease accessor outside an owner-scoped adapter; dedicated legacy AgentLease APIs remain separately ratcheted.
