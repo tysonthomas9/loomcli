@@ -112,6 +112,44 @@ func TestNewServePlacementBrokerSetsMaxLive(t *testing.T) {
 	}
 }
 
+func TestNewServePlacementBrokerInjectsLeadAPIBaseURL(t *testing.T) {
+	t.Setenv("LOOM_DEPLOYMENT_ID", "test-deployment")
+	t.Setenv(envLoomLeadAPIBaseURL, "https://serve.example.com")
+	st := memstore.New()
+	provider := newServeTestPlacementProvider()
+	broker, err := newServePlacementBroker(st, provider, []byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatalf("newServePlacementBroker: %v", err)
+	}
+
+	if _, err := broker.Provision(context.Background(), serveTestProvisionRequest("nova")); err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+	call := provider.createRequest(t, 0)
+	if got := call.Env["LOOM_LEAD_API_URL"]; got != "https://serve.example.com" {
+		t.Fatalf("LOOM_LEAD_API_URL = %q, want public serve URL", got)
+	}
+}
+
+func TestNewServePlacementBrokerOmitsLeadAPIBaseURLWhenUnset(t *testing.T) {
+	t.Setenv("LOOM_DEPLOYMENT_ID", "test-deployment")
+	t.Setenv(envLoomLeadAPIBaseURL, "")
+	st := memstore.New()
+	provider := newServeTestPlacementProvider()
+	broker, err := newServePlacementBroker(st, provider, []byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatalf("newServePlacementBroker: %v", err)
+	}
+
+	if _, err := broker.Provision(context.Background(), serveTestProvisionRequest("nova")); err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+	call := provider.createRequest(t, 0)
+	if _, ok := call.Env["LOOM_LEAD_API_URL"]; ok {
+		t.Fatalf("LOOM_LEAD_API_URL injected despite empty %s: %#v", envLoomLeadAPIBaseURL, call.Env)
+	}
+}
+
 func TestBuildLeadProvisionerRequiresBroker(t *testing.T) {
 	t.Setenv("LOOM_DEPLOYMENT_ID", "test-deployment")
 	st := memstore.New()
@@ -139,10 +177,11 @@ func serveTestProvisionRequest(agent string) placement.ProvisionRequest {
 }
 
 type serveTestPlacementProvider struct {
-	mu        sync.Mutex
-	next      int
-	sandboxes map[string]placement.ProviderSandbox
-	ptys      map[string][]placement.PtySession
+	mu             sync.Mutex
+	next           int
+	createRequests []placement.CreateRequest
+	sandboxes      map[string]placement.ProviderSandbox
+	ptys           map[string][]placement.PtySession
 }
 
 func newServeTestPlacementProvider() *serveTestPlacementProvider {
@@ -157,12 +196,23 @@ func (p *serveTestPlacementProvider) Create(_ context.Context, req placement.Cre
 	defer p.mu.Unlock()
 	p.next++
 	id := "sandbox-" + strconv.Itoa(p.next)
+	p.createRequests = append(p.createRequests, cloneServeCreateRequest(req))
 	p.sandboxes[id] = placement.ProviderSandbox{
 		ID:     id,
 		Labels: copyStringMap(req.Labels),
 		State:  placement.ProviderSandboxRunning,
 	}
 	return placement.CreateResult{SandboxID: id}, nil
+}
+
+func (p *serveTestPlacementProvider) createRequest(t *testing.T, idx int) placement.CreateRequest {
+	t.Helper()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.createRequests) <= idx {
+		t.Fatalf("create requests = %d, want index %d", len(p.createRequests), idx)
+	}
+	return cloneServeCreateRequest(p.createRequests[idx])
 }
 
 func (p *serveTestPlacementProvider) Get(_ context.Context, sandboxID string) (placement.ProviderSandbox, error) {
@@ -239,6 +289,14 @@ func copyStringMap(in map[string]string) map[string]string {
 	for k, v := range in {
 		out[k] = v
 	}
+	return out
+}
+
+func cloneServeCreateRequest(in placement.CreateRequest) placement.CreateRequest {
+	out := in
+	out.Labels = copyStringMap(in.Labels)
+	out.Env = copyStringMap(in.Env)
+	out.NetworkDomainAllowlist = append([]string(nil), in.NetworkDomainAllowlist...)
 	return out
 }
 

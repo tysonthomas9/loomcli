@@ -16,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/epicrunner"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/placement"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
@@ -264,6 +265,66 @@ func TestResolveLeadAgentIDDefaultsToLead(t *testing.T) {
 
 	if got := resolveLeadAgentID(); got != "lead" {
 		t.Fatalf("resolveLeadAgentID() = %q, want lead", got)
+	}
+}
+
+func TestOpenLeadSessionStoreSandboxRequiresAPIURL(t *testing.T) {
+	t.Setenv(placement.OccupantTokenEnv, "occupant-token")
+	t.Setenv(bootstrap.EnvWorkspace, "WS")
+	t.Setenv(envLeadAPIURL, "")
+
+	called := false
+	orig := openLeadFleetStore
+	openLeadFleetStore = func(ctx context.Context) (*bootstrap.StoreHandle, error) {
+		called = true
+		return nil, errors.New("should not be called")
+	}
+	t.Cleanup(func() { openLeadFleetStore = orig })
+
+	handle, ws, err := openLeadSessionStore(context.Background())
+	if err == nil {
+		t.Fatal("openLeadSessionStore() succeeded, want preflight error")
+	}
+	if handle != nil || ws != "" {
+		t.Fatalf("handle/ws = %#v/%q, want nil/empty", handle, ws)
+	}
+	if !strings.Contains(err.Error(), envLeadAPIURL) {
+		t.Fatalf("error = %v, want %s guidance", err, envLeadAPIURL)
+	}
+	if called {
+		t.Fatal("sandbox preflight called fleet store opener")
+	}
+}
+
+func TestOpenLeadSessionStoreHostPathUsesFleetStore(t *testing.T) {
+	t.Setenv(placement.OccupantTokenEnv, "")
+	t.Setenv(bootstrap.EnvWorkspace, "WS")
+
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(context.Background(), store.WorkspaceCreate{
+		Key:  "WS",
+		Name: "Workspace",
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+
+	called := false
+	orig := openLeadFleetStore
+	openLeadFleetStore = func(ctx context.Context) (*bootstrap.StoreHandle, error) {
+		called = true
+		return &bootstrap.StoreHandle{Store: st}, nil
+	}
+	t.Cleanup(func() { openLeadFleetStore = orig })
+
+	handle, ws, err := openLeadSessionStore(context.Background())
+	if err != nil {
+		t.Fatalf("openLeadSessionStore(): %v", err)
+	}
+	if !called {
+		t.Fatal("host path did not call fleet store opener")
+	}
+	if handle == nil || handle.Store != st || ws != "WS" {
+		t.Fatalf("handle/ws = %#v/%q, want memstore/WS", handle, ws)
 	}
 }
 

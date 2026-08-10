@@ -51,6 +51,7 @@ type Config struct {
 	ParkingAutostopInterval time.Duration
 	LeadBootPrepTimeout     time.Duration
 	DeploymentID            string
+	LeadAPIBaseURL          string
 	// DeleteConfirmBackoff is the first delay in the poll that proves a
 	// delete completed; it doubles per attempt. Exposed so tests do not sleep
 	// for seconds. Zero uses the default.
@@ -71,6 +72,7 @@ type Broker struct {
 	parkingAutostopInterval time.Duration
 	leadBootPrepTimeout     time.Duration
 	deploymentID            string
+	leadAPIBaseURL          string
 	deleteConfirmBackoff    time.Duration
 	now                     func() time.Time
 
@@ -171,6 +173,7 @@ func NewBroker(cfg Config) (*Broker, error) {
 		parkingAutostopInterval: parkingAutostopInterval,
 		leadBootPrepTimeout:     leadBootPrepTimeout,
 		deploymentID:            deploymentID,
+		leadAPIBaseURL:          strings.TrimSpace(cfg.LeadAPIBaseURL),
 		deleteConfirmBackoff:    confirmBackoff,
 		now:                     now,
 		locks:                   make(map[placementLockKey]*sync.Mutex),
@@ -350,7 +353,7 @@ func (b *Broker) createSandbox(ctx context.Context, req ProvisionRequest, node *
 	// a reaper; this does not make an in-process crash atomic.
 	createCtx, cancel := detachedTimeout(ctx, detachedCreateTimeout)
 	defer cancel()
-	created, err := b.provider.Create(createCtx, providerCreateRequest(req, node.NodeID, token, b.deploymentID, bootPlan))
+	created, err := b.provider.Create(createCtx, providerCreateRequest(req, node.NodeID, token, b.deploymentID, b.leadAPIBaseURL, bootPlan))
 	sandboxID := strings.TrimSpace(created.SandboxID)
 	if err != nil {
 		if sandboxID != "" {
@@ -698,7 +701,7 @@ func (b *Broker) tryStartLeadProcess(ctx context.Context, req ProvisionRequest, 
 	}
 	startCtx, cancel := detachedTimeout(ctx, detachedProviderOperationTimeout)
 	defer cancel()
-	if err := b.provider.CreatePty(startCtx, sandboxID, processSpec(req, node, token, bootPlan)); err != nil && !errors.Is(err, ErrPtySessionAlreadyExists) {
+	if err := b.provider.CreatePty(startCtx, sandboxID, processSpec(req, node, token, b.leadAPIBaseURL, bootPlan)); err != nil && !errors.Is(err, ErrPtySessionAlreadyExists) {
 		return leadBootOutcome{node: node}, err
 	}
 	// Confirms the PTY was not already gone at first observation. This catches
@@ -1439,13 +1442,13 @@ func enforceCloneHostAllowlist(allowlist []string, host string) error {
 	return fmt.Errorf("lead repo clone host %q is not in network domain allowlist: %w", host, domain.ErrInvalid)
 }
 
-func providerCreateRequest(req ProvisionRequest, nodeID, token, deploymentID string, bootPlan leadBootPlan) CreateRequest {
+func providerCreateRequest(req ProvisionRequest, nodeID, token, deploymentID, leadAPIBaseURL string, bootPlan leadBootPlan) CreateRequest {
 	labels := copyMap(req.Labels)
 	labels[PlacementLabelKey] = nodeID
 	labels[EnvironmentLabelKey] = deploymentID
 	labels["loom-workspace"] = req.WorkspaceKey
 	labels["loom-agent"] = req.AgentName
-	env := leadEnv(req.Env, req.WorkspaceKey, req.AgentName, nodeID, token, bootPlan)
+	env := leadEnv(req.Env, req.WorkspaceKey, req.AgentName, nodeID, token, leadAPIBaseURL, bootPlan)
 	return CreateRequest{
 		WorkspaceKey:           req.WorkspaceKey,
 		AgentName:              req.AgentName,
@@ -1457,7 +1460,7 @@ func providerCreateRequest(req ProvisionRequest, nodeID, token, deploymentID str
 	}
 }
 
-func processSpec(req ProvisionRequest, node *domain.Node, token string, bootPlan leadBootPlan) ProcessSpec {
+func processSpec(req ProvisionRequest, node *domain.Node, token, leadAPIBaseURL string, bootPlan leadBootPlan) ProcessSpec {
 	spec := req.Process
 	spec.SessionID = LeadPTYSessionID
 	spec.Command = effectiveLeadCommand(req)
@@ -1467,7 +1470,7 @@ func processSpec(req ProvisionRequest, node *domain.Node, token string, bootPlan
 	if bootPlan.checkout != "" {
 		spec.WorkingDir = bootPlan.checkout
 	}
-	spec.Env = leadEnv(spec.Env, req.WorkspaceKey, req.AgentName, node.NodeID, token, bootPlan)
+	spec.Env = leadEnv(spec.Env, req.WorkspaceKey, req.AgentName, node.NodeID, token, leadAPIBaseURL, bootPlan)
 	spec.TTY = true
 	return spec
 }
@@ -1497,12 +1500,15 @@ func promptPathFromCommand(command []string) string {
 	return ""
 }
 
-func leadEnv(base map[string]string, workspace, agent, nodeID, token string, bootPlan leadBootPlan) map[string]string {
+func leadEnv(base map[string]string, workspace, agent, nodeID, token, leadAPIBaseURL string, bootPlan leadBootPlan) map[string]string {
 	env := copyMap(base)
 	env["LOOM_WORKSPACE"] = workspace
 	env["LOOM_AGENT_NAME"] = agent
 	env["LOOM_LEAD_PLACEMENT_ID"] = nodeID
 	env[OccupantTokenEnv] = token
+	if strings.TrimSpace(leadAPIBaseURL) != "" {
+		env["LOOM_LEAD_API_URL"] = strings.TrimSpace(leadAPIBaseURL)
+	}
 	env["TERM"] = "xterm-256color"
 	if bootPlan.backend != "" {
 		env["LOOM_BACKEND"] = bootPlan.backend

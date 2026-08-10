@@ -536,6 +536,36 @@ func TestBrokerUsesDeploymentIDFromEnv(t *testing.T) {
 	}
 }
 
+func TestLeadEnvInjectsLeadAPIURLWhenConfigured(t *testing.T) {
+	env := leadEnv(
+		map[string]string{"CUSTOM": "value"},
+		"WS",
+		"nova",
+		"placement-1",
+		"occupant-token",
+		" https://serve.example.com ",
+		leadBootPlan{},
+	)
+
+	if got := env["LOOM_LEAD_API_URL"]; got != "https://serve.example.com" {
+		t.Fatalf("LOOM_LEAD_API_URL = %q, want public serve URL", got)
+	}
+	if got := env["CUSTOM"]; got != "value" {
+		t.Fatalf("CUSTOM = %q, want value", got)
+	}
+	if got := env[OccupantTokenEnv]; got != "occupant-token" {
+		t.Fatalf("%s was not propagated", OccupantTokenEnv)
+	}
+}
+
+func TestLeadEnvOmitsLeadAPIURLWhenUnconfigured(t *testing.T) {
+	env := leadEnv(nil, "WS", "nova", "placement-1", "occupant-token", "", leadBootPlan{})
+
+	if _, ok := env["LOOM_LEAD_API_URL"]; ok {
+		t.Fatalf("LOOM_LEAD_API_URL injected despite empty LeadAPIBaseURL: %#v", env)
+	}
+}
+
 func TestProvisionCompensatesWhenRecordIDWriteFails(t *testing.T) {
 	ctx := context.Background()
 	base := memstore.New()

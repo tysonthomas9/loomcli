@@ -55,6 +55,7 @@ const envLoomPlacementReaperEnforce = "LOOM_PLACEMENT_REAPER_ENFORCE"
 const envLoomLeadMaxVCPU = "LOOM_LEAD_MAX_VCPU"
 const envLoomLeadMaxMemGiB = "LOOM_LEAD_MAX_MEM_GIB"
 const envLoomLeadAllowlist = "LOOM_LEAD_ALLOWLIST"
+const envLoomLeadAPIBaseURL = "LOOM_LEAD_API_BASE_URL"
 
 const monitorCollectionCacheTTL = 10 * time.Second
 
@@ -499,14 +500,24 @@ func newServePlacementBroker(st store.Store, provider placement.Provider, tokenK
 	// blast radius; the real fix (post-POC, ticket 08 §2) is per-lead
 	// short-lived tokens. Revoke the codex + claude creds at POC close.
 	return placement.NewBroker(placement.Config{
-		Store:    st,
-		Provider: provider,
-		TokenKey: tokenKey,
+		Store:          st,
+		Provider:       provider,
+		TokenKey:       tokenKey,
+		LeadAPIBaseURL: leadAPIBaseURL(),
 		MaxLive: placement.ResourceSize{
 			VCPU:   leadMaxVCPU(),
 			MemGiB: leadMaxMemGiB(),
 		},
 	})
+}
+
+// leadAPIBaseURL is the public serve origin injected into Daytona lead
+// sandboxes as LOOM_LEAD_API_URL. It must be reachable from inside the
+// sandbox; behind a proxy, set LOOM_LEAD_API_BASE_URL to that public origin.
+// When unset, the broker injects no URL and sandbox leads fail their
+// preflight loudly instead of falling back to a local fleet-db.
+func leadAPIBaseURL() string {
+	return strings.TrimSpace(os.Getenv(envLoomLeadAPIBaseURL))
 }
 
 func buildLeadProvisioner(st store.Store, broker *placement.Broker) *leadprovision.Provisioner {

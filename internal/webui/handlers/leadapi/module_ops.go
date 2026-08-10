@@ -183,6 +183,11 @@ func (m *Module) sessionUpdate(ctx context.Context, ws string, id occupantIdenti
 		patch.Status = &status
 		apply = true
 	}
+	if params.TerminalID != nil {
+		terminalID := strings.TrimSpace(*params.TerminalID)
+		patch.TerminalID = &terminalID
+		apply = true
+	}
 	if params.FinishedAt != nil {
 		finishedAt := params.FinishedAt
 		patch.FinishedAt = &finishedAt

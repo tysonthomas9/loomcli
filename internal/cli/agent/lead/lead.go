@@ -23,6 +23,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/epicrunner"
+	"github.com/tysonthomas9/loomcli/internal/leadclient"
 	"github.com/tysonthomas9/loomcli/internal/placement"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -33,6 +34,7 @@ import (
 const envOrchestratorSessionID = "LOOM_ORCHESTRATOR_SESSION_ID"
 const envAgentName = "LOOM_AGENT_NAME"
 const envAgentTerminalID = "LOOM_AGENT_TERMINAL_ID"
+const envLeadAPIURL = "LOOM_LEAD_API_URL"
 
 const leadHeartbeatInterval = 30 * time.Second
 const leadStoreOpTimeout = 10 * time.Second
@@ -42,6 +44,8 @@ const leadStoreOpTimeout = 10 * time.Second
 // --message flag.
 var leadMessage string
 var leadPromptFile string
+
+var openLeadFleetStore = cmdstore.OpenStore
 
 var leadCmd = &cobra.Command{
 	Use:     "lead",
@@ -171,9 +175,10 @@ func loadLeadRolePrompt(ctx context.Context, registration leadSessionRegistratio
 	if st == nil || ws == "" {
 		openCtx, cancel := context.WithTimeout(ctx, leadStoreOpTimeout)
 		defer cancel()
-		var ok bool
-		handle, ws, ok = openLeadSessionStore(openCtx)
-		if !ok {
+		var err error
+		handle, ws, err = openLeadSessionStore(openCtx)
+		if err != nil {
+			slog.Debug("lead inline prompt lookup: store unavailable", "err", err)
 			return ""
 		}
 		defer func() { _ = handle.Close() }()
@@ -213,8 +218,9 @@ func applyLeadPromptContext(prompt string) string {
 }
 
 func currentLeadAssignmentPrompt(ctx context.Context) string {
-	handle, ws, ok := openLeadSessionStore(ctx)
-	if !ok {
+	handle, ws, err := openLeadSessionStore(ctx)
+	if err != nil {
+		slog.Debug("lead assignment context: store unavailable", "err", err)
 		return ""
 	}
 	defer func() { _ = handle.Close() }()
@@ -287,50 +293,90 @@ func (r leadSessionRegistration) Store() store.Store {
 func registerLeadOrchestratorSession(ctx context.Context, workDir string) leadSessionRegistration {
 	noop := func() {}
 	empty := leadSessionRegistration{finalize: noop}
-	handle, ws, ok := openLeadSessionStore(ctx)
-	if !ok {
+	handle, ws, err := openLeadSessionStore(ctx)
+	if err != nil {
+		if sandboxLeadStoreRequired() {
+			fmt.Fprintf(os.Stderr, "Error opening sandbox lead store: %v\n", err)
+			os.Exit(1)
+		}
+		slog.Debug("lead orchestrator session: store unavailable, continuing without registration", "err", err)
 		return empty
 	}
 
 	sid := resolveLeadOrchestratorSessionID()
 	agentID := resolveLeadAgentID()
-	if err := createLeadSession(ctx, handle, ws, sid, agentID, workDir); err != nil {
+	// createLeadSession returns the effective session id: on the host this
+	// echoes sid, but in a sandbox session-ensure adopts-or-mints its own
+	// server-side SessionID, and descendants must inherit that one.
+	effectiveSID, err := createLeadSession(ctx, handle, ws, sid, agentID, workDir)
+	if err != nil {
 		_ = handle.Close()
+		if sandboxLeadStoreRequired() {
+			fmt.Fprintf(os.Stderr, "Error registering sandbox lead session: %v\n", err)
+			os.Exit(1)
+		}
 		slog.Warn("lead orchestrator session: create failed, continuing without registration", "err", err)
 		return empty
 	}
 
-	activateLeadSessionEnv(sid)
-	fmt.Printf("Lead session: %s (orchestrator linkage active)\n\n", sid)
-	stopHB, wg := startLeadSessionHeartbeat(handle, ws, sid)
+	activateLeadSessionEnv(effectiveSID)
+	fmt.Printf("Lead session: %s (orchestrator linkage active)\n\n", effectiveSID)
+	stopHB, wg := startLeadSessionHeartbeat(handle, ws, effectiveSID)
 	return leadSessionRegistration{
 		handle:    handle,
 		Workspace: ws,
-		SessionID: sid,
+		SessionID: effectiveSID,
 		AgentID:   agentID,
-		finalize:  leadSessionFinalizer(handle, ws, sid, stopHB, wg),
+		finalize:  leadSessionFinalizer(handle, ws, effectiveSID, stopHB, wg),
 	}
 }
 
-func openLeadSessionStore(ctx context.Context) (*bootstrap.StoreHandle, string, bool) {
-	handle, err := cmdstore.OpenStore(ctx)
+func openLeadSessionStore(ctx context.Context) (*bootstrap.StoreHandle, string, error) {
+	if token := strings.TrimSpace(os.Getenv(placement.OccupantTokenEnv)); token != "" {
+		baseURL := strings.TrimSpace(os.Getenv(envLeadAPIURL))
+		if baseURL == "" {
+			return nil, "", fmt.Errorf("%s is required for sandbox lead store", envLeadAPIURL)
+		}
+		ws := strings.TrimSpace(os.Getenv("LOOM_WORKSPACE"))
+		if ws == "" {
+			return nil, "", fmt.Errorf("LOOM_WORKSPACE is required for sandbox lead store")
+		}
+		shim, err := leadclient.New(leadclient.Config{
+			BaseURL:       baseURL,
+			WorkspaceKey:  ws,
+			OccupantToken: token,
+		})
+		if err != nil {
+			return nil, "", err
+		}
+		return &bootstrap.StoreHandle{Store: shim}, ws, nil
+	}
+
+	handle, err := openLeadFleetStore(ctx)
 	if err != nil {
-		slog.Debug("lead orchestrator session: store unavailable, continuing without registration", "err", err)
-		return nil, "", false
+		return nil, "", err
 	}
 	ws, err := bootstrap.ResolveActiveWorkspaceKey(ctx, handle.Store.Workspaces())
 	if err != nil {
 		_ = handle.Close()
-		slog.Debug("lead orchestrator session: no active workspace, continuing without registration", "err", err)
-		return nil, "", false
+		return nil, "", err
 	}
-	return handle, ws, true
+	return handle, ws, nil
 }
 
-func createLeadSession(ctx context.Context, handle *bootstrap.StoreHandle, ws, sid, agentID, workDir string) error {
+func sandboxLeadStoreRequired() bool {
+	return strings.TrimSpace(os.Getenv(placement.OccupantTokenEnv)) != ""
+}
+
+// createLeadSession creates (or, in a sandbox, adopts via session-ensure) the
+// lead's orchestration session and returns the effective session id. On the
+// host Create echoes sid; in a sandbox the server mints/adopts its own
+// SessionID, which the caller must propagate so descendants attribute to the
+// real session. On the host's already-exists path the id is the requested sid.
+func createLeadSession(ctx context.Context, handle *bootstrap.StoreHandle, ws, sid, agentID, workDir string) (string, error) {
 	createCtx, createCancel := context.WithTimeout(ctx, leadStoreOpTimeout)
 	defer createCancel()
-	_, err := handle.Store.AgentSessions().Create(createCtx, store.AgentSessionCreate{
+	created, err := handle.Store.AgentSessions().Create(createCtx, store.AgentSessionCreate{
 		WorkspaceKey: ws,
 		SessionID:    sid,
 		AgentID:      agentID,
@@ -343,9 +389,15 @@ func createLeadSession(ctx context.Context, handle *bootstrap.StoreHandle, ws, s
 		},
 	})
 	if errors.Is(err, domain.ErrAlreadyExists) {
-		return nil
+		return sid, nil
 	}
-	return err
+	if err != nil {
+		return "", err
+	}
+	if created != nil && strings.TrimSpace(created.SessionID) != "" {
+		return created.SessionID, nil
+	}
+	return sid, nil
 }
 
 func leadSessionActor() string {
