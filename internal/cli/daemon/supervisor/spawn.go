@@ -140,6 +140,13 @@ func appendRoleEnv(env []string, ap *AgentProcess) []string {
 			fmt.Sprintf("LOOM_CLAUDE_EFFORT=%s", ap.RoleConfig.Effort),
 		)
 	}
+	if ap.RoleConfig.Model != "" {
+		// Consumed by resolveAgentModel(): claude TurnConfig.Model /
+		// --model, codex -c model=, opencode --model fallback. Without this
+		// the role's model field was stored and displayed but never reached
+		// any backend.
+		env = append(env, fmt.Sprintf("LOOM_AGENT_MODEL=%s", ap.RoleConfig.Model))
+	}
 	return env
 }
 

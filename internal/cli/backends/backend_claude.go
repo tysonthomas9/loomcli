@@ -213,6 +213,9 @@ func buildClaudeInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
 	if effort := resolveAgentEffort(); effort != "" {
 		args = append(args, "--effort", effort)
 	}
+	if model := resolveAgentModel(); model != "" {
+		args = append(args, "--model", model)
+	}
 	args = append(args, prompt)
 	cmd := exec.Command("claude", args...) //nolint:gosec // G204: intentional subprocess launch for claude CLI
 	cmd.Dir = workDir
@@ -225,6 +228,15 @@ func buildClaudeInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
 
 // defaultClaudeInvoker is the real Claude invocation
 func defaultClaudeInvoker(workDir, prompt, agentName string) error {
+	// When stdin is not a TTY (e.g. daemon subprocess), Claude's interactive
+	// TUI renders nothing on the inherited pipes and the run dies silently
+	// under the watchdog. Fall back to the harness-backed non-interactive
+	// path, mirroring defaultCodexInvoker's guard.
+	if !isTerminal(os.Stdin) {
+		shutdown := make(chan struct{})
+		return claudeNonInteractiveInvoker(workDir, prompt, agentName, shutdown, nil)
+	}
+
 	cmd := buildClaudeInteractiveCmd(workDir, prompt, agentName)
 
 	fmt.Println("Launching Claude agent...")
@@ -344,6 +356,7 @@ func invokeClaudeRunTurn(ctx context.Context, workDir, prompt, agentName, resume
 		Prompt:        prompt,
 		ExitAfterTurn: true,
 		Output:        output,
+		Model:         resolveAgentModel(),
 	})
 	// RunTurn drives Claude Code's interactive TUI, which does not expose the
 	// stream-json usage records consumed by collectClaudeStreamUsage. Keep the

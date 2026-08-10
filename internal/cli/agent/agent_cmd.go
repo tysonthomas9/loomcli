@@ -11,6 +11,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/workspace"
+	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
 var (
@@ -153,7 +154,15 @@ func runAgentDaemon(worktreePath, agentName string, promptGen func(string, *conf
 
 	ws, _ := config.ResolveActiveWorkspace()
 	prompt := promptGen(agentName, ws)
-	if err := cli.InvokeAgent(worktreePath, prompt, agentName); err != nil {
+	// Daemon-spawned subprocesses have no controlling TTY. InvokeAgent's
+	// interactive path inherits the daemon's stdin/stdout, which makes backend
+	// TUIs render nothing — the supervisor watchdog then times the silent run
+	// out at 15 min (same failure the built-in roles route around in
+	// runTaskDaemon/runPlanDaemon). Use the wrapper-backed non-interactive
+	// path: PTY + stream-json, retry policy, and liveness ticks.
+	shutdown := automode.SetupSignalHandler()
+	collector := usage.NewCollector(cli.GetBackendName(), agentName)
+	if err := cli.InvokeAgentNonInteractive(worktreePath, prompt, agentName, shutdown, collector); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		cli.ExitWithFlush(1)
 	}
