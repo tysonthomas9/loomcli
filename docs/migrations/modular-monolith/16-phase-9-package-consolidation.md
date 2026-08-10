@@ -5,9 +5,11 @@
 - **Wave 9.1 implementation:** `da9105472`
 - **Wave 9.2 implementation:** `ec263bfa3`
 - **Wave 9.3 implementation:** `a4333c31a`
+- **Wave 9.4 implementation:** `bfb1ac9e8`
 - **Stacked branches:** `modular-monolith-phase9-01-types-ratchet`, then
   `modular-monolith-phase9-02-shallow-seams`, then
-  `modular-monolith-phase9-03-legacy-planes`
+  `modular-monolith-phase9-03-legacy-planes`, then
+  `modular-monolith-phase9-04-adapter-seams`
 - **Purpose:** Reduce the residual package surface toward 160 production Go
   packages without weakening capability ownership, consumer-owned ports, or
   independently replaceable adapters.
@@ -189,6 +191,56 @@ The aggregate gate exposed three stale exact expectations after behavior was
 already green: two import-fanout ceilings and the direct-write row/site count.
 All were lowered to the observed values; no ceiling, threshold, or allowlist
 was widened.
+
+## Wave 9.4 result
+
+The fourth slice deletes the duplicate Artifact model and repository plane.
+`internal/modules/artifacts` is now the sole owner of Artifact records and its
+command and query ports. FleetDB and memstore implement those ports directly;
+runtime composition receives the owner query API from `ArtifactsCapability`
+instead of discovering it through the horizontal composite Store.
+
+The following compatibility surfaces are physically deleted:
+
+- `domain.Artifact`;
+- `store.ArtifactStore`, `ArtifactContentReader`, upload DTOs, and
+  `Store.Artifacts()`; and
+- the mapping-only `internal/infra/artifactcatalog` package.
+
+No fallback repository or compatibility facade replaces them. The existing
+FleetDB command adapter is deepened with the owner query implementation rather
+than adding another shallow package, while memstore remains the second real
+adapter and exposes only the owner ports. Retirement guards reject the old
+files, exact type and method names, and any attempt to expose Artifact queries
+again from `internal/store` or `internal/domain`.
+
+The exact package-shape ratchet now moves as follows:
+
+| Shape measure | Phase 8 | Wave 9.1 | Wave 9.2 | Wave 9.3 | Wave 9.4 | Phase 9 change |
+|---|---:|---:|---:|---:|---:|---:|
+| Production packages under `internal/` | 189 | 188 | 186 | 185 | 184 | -5 |
+| Packages under `internal/modules/` | 17 | 17 | 17 | 17 | 17 | 0 |
+| Packages outside `internal/modules/` | 172 | 171 | 169 | 168 | 167 | -5 |
+| One-file packages | 67 | 67 | 65 | 64 | 63 | -4 |
+| One-or-two-file packages | 89 | 89 | 87 | 86 | 85 | -4 |
+
+The direct-write inventory remains at 93 rows and the legacy handler-import
+inventory remains at 25. This wave removes a repository plane and one package
+without relabeling existing writes or weakening an import boundary.
+
+## Wave 9.4 validation
+
+| Check | Result |
+|---|---|
+| Artifacts owner, FleetDB, memstore, driver, WebUI, and session-projection suites | PASS |
+| Retired-file, retired-type, exact package-shape, package-size, and direct-write ratchets | PASS |
+| Measured `make check-architecture` | PASS: 11/11 profiles, 10 roots, 93 direct-write rows, 25 legacy handler imports, 107 reviewed mutation commands, 71 runtime components, 80 goroutine launches, all six performance rows measured, and zero pending decisions; peak process-tree RSS 1,201.7 MiB under 2,048 MiB |
+| Aggregate `make gate` against the paired FleetDB source and binary | PASS: all Go and frontend quality gates |
+
+The first aggregate attempt correctly rejected a temporary twenty-sixth file
+in the FleetDB adapter package. The final implementation folds the query port
+into the existing Artifact adapter, returns the package to its exact 25-file
+ceiling, and passes without raising a threshold or adding an allowlist.
 
 Later waves must update this document with the selected package candidates,
 the boundary reason retained or removed for each, exact shape changes, and
