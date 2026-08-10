@@ -1,7 +1,7 @@
 # Modular Monolith Migration
 
-- **Status:** Phase 9 package consolidation in progress; its first five slices
-  ratchet the modular monolith to 183 production packages
+- **Status:** Phase 9 package consolidation in progress; its first six slices
+  ratchet the modular monolith to 182 production packages
 - **Date:** 2026-08-10
 - **Scope:** `loom serve`, the operator CLI entry surfaces, the Vite frontend counterpart, and the fleet-db contracts those capabilities depend on
 - **Provenance:** [Phase 0 integration baseline](00-phase-0-baseline.md), final [Phase 1 evidence](06-phase-1-decisions-and-evidence.md) at Loom `7e8a6dd2`, [Phase 2 evidence](07-phase-2-decisions-and-evidence.md) at Loom `84cccb761` with FleetDB `430dce8d9`, [Phase 3 evidence](08-phase-3-decisions-and-evidence.md) at core implementation commits Loom `7f95b9bf1` and FleetDB `f1c4e1119`, final [Phase 4 evidence](09-phase-4-decisions-and-evidence.md) at Loom `53cbe2577` with FleetDB `afb688768`, and the appended reliability-validation record at Loom `67c45972f` with FleetDB `9ffa69f60`
@@ -220,10 +220,14 @@ packages from 67 to 63, and one-or-two-file packages from 89 to 85. Wave 9.5
 removes the forwarding-only Artifacts FleetDB subpackage, lets the composition
 bridge implement the owner ports directly, and tightens the exact shape again
 to 183 packages and 84 one-or-two-file packages without changing the ten
-capability owners. The remaining waves continue deleting residual
-compatibility and shallow adapter seams before reproducing the packaged
-product proof, subject to the same ownership, adapter, and full-gate
-requirements. See the [Phase 9 plan](16-phase-9-package-consolidation.md).
+capability owners. Wave 9.6 then removes the duplicate Connectors grant
+transport/adapter plane and the Git-only runtime-failing compatibility
+constructor. FleetDB and memstore now implement the Connectors grant owner port
+directly, reducing the exact shape to 182 packages, 62 one-file packages, and
+83 one-or-two-file packages. The remaining waves must inventory and delete
+known transitional production paths in addition to removing residual shallow
+packages; an empty capability-graph `legacy_paths` list alone is not completion
+proof. See the [Phase 9 plan](16-phase-9-package-consolidation.md).
 
 ## Approved architecture decisions
 
