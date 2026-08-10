@@ -363,10 +363,13 @@ func invokeClaudeRunTurn(ctx context.Context, workDir, prompt, agentName, resume
 		Model:         resolveAgentModel(),
 	})
 	// RunTurn drives Claude Code's interactive TUI, which does not expose the
-	// stream-json usage records consumed by collectClaudeStreamUsage. Keep the
-	// collector accepted for API compatibility; usage remains unavailable until
-	// Harness Wrapper surfaces transcript usage metadata.
-	_ = collector
+	// stream-json usage records consumed by collectClaudeStreamUsage — which is
+	// why this used to be a bare `_ = collector` and every Claude run booked 0
+	// tokens / $0. Read the totals back out of Claude Code's own transcript
+	// instead, keyed by the session id RunTurn reports. Strictly best-effort:
+	// accumulateHarnessUsage cannot error, so a missing or unreadable transcript
+	// leaves the turn result and the exit code exactly as they were.
+	accumulateHarnessUsage(collector, "claude", res.Session.HarnessSessionID, workDir)
 	if err != nil && claudeRunTurnEvidence(res, raw.String()) == "" {
 		res.Turn.Text = raw.String()
 	}
