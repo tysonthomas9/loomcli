@@ -86,10 +86,13 @@ func runPlan(cmd *cobra.Command, args []string) {
 		argName = args[0]
 	}
 
+	cli.SetDaemonMode(planDaemonMode)
+
 	target, err := workspace.ResolveAgentTarget(argName, "")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		cli.ExitWithFlush(1)
+		return
 	}
 
 	worktreePath := target.WorkDir
