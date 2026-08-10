@@ -8,12 +8,14 @@
 - **Wave 9.4 implementation:** `bfb1ac9e8`
 - **Wave 9.5 implementation:** `72870b85b`
 - **Wave 9.6 implementation:** `830541155`
+- **Wave 9.7 implementation:** `9722a8bed`
 - **Stacked branches:** `modular-monolith-phase9-01-types-ratchet`, then
   `modular-monolith-phase9-02-shallow-seams`, then
   `modular-monolith-phase9-03-legacy-planes`, then
   `modular-monolith-phase9-04-adapter-seams`, then
   `modular-monolith-phase9-05-artifact-adapter`, then
-  `modular-monolith-phase9-06-connectors-adapter`
+  `modular-monolith-phase9-06-connectors-adapter`, then
+  `modular-monolith-phase9-07-legacy-runtime`
 - **Purpose:** Reduce the residual package surface toward 160 production Go
   packages without weakening capability ownership, consumer-owned ports, or
   independently replaceable adapters.
@@ -346,6 +348,53 @@ The first aggregate attempt found that the deleted composition import lowered
 `internal/app/serve` fanout from 32 to 31. The exact exception was lowered and
 the uninterrupted rerun passed. No threshold, allowlist, package, or fallback
 facade was added.
+
+## Wave 9.7 result
+
+The seventh slice deletes dead source-compatibility APIs rather than carrying
+them behind deprecation comments or test-only legacy implementations. It
+physically removes 11 compatibility functions or values across Interaction,
+Automation, Workflow Distribution, Driver, Webhooks, Trigger Bindings, and the
+web store adapter. The Workflows HTTP module constructor now accepts only its
+typed `Config`; its store-only `any` constructor path is gone.
+
+The obsolete Driver stale-task sweeper implementation tests are also deleted.
+Characterization now exercises the Execution owner's recovery API directly,
+including exact parent ownership, fencing, replay safety, and the 20-minute
+default cutoff. This removes 448 lines of tests for an implementation that no
+longer owns the behavior instead of preserving a second recovery model for
+test coverage.
+
+An architecture guard now rejects handwritten production APIs with
+`Deprecated:` declarations, and explicit tombstones prevent the 11 removed
+symbols and the two deleted legacy test files from returning. The slice removes
+499 net lines while leaving the exact package shape and import fanout unchanged:
+182 production packages, 15 module packages, 167 packages outside modules, 62
+one-file packages, and 83 one-or-two-file packages.
+
+The architecture metric named `legacy handler imports` still reports **25**.
+Those are not historical labels: they are an exact allowlist of live handler
+imports into the horizontal `store` or `backend` surfaces. Likewise, active
+Driver shared-token/header authentication fallback remains runtime legacy.
+Phase 9 is not legacy-free until those executable paths are deleted and their
+allowlists require zero.
+
+## Wave 9.7 validation
+
+| Check | Result |
+|---|---|
+| Interaction, Driver, Serve, Automation, Webhooks, Trigger Bindings, Workflows, Workflow Distribution, store adapter, and all-`internal` compilation | PASS |
+| Retired-source-API, typed-constructor, handwritten-deprecation, package-shape, direct-write policy, and exact import-fanout ratchets | PASS |
+| Measured `make check-architecture` on the implementation source | PASS: 11/11 profiles, 10 roots, 93 direct-write rows, 25 live legacy-handler allowances, 107 reviewed mutation commands, 71 runtime components, 80 goroutine launches, all six performance rows measured, and zero pending decisions; peak process-tree RSS 1,223.1 MiB under 2,048 MiB |
+| Characterization matrix after replacing the obsolete Driver sweeper row with Execution-owner recovery tests | PASS: all 6/6 rows |
+| Aggregate `make gate` against the paired FleetDB source and binary | PASS: all Go and frontend quality gates |
+
+The first aggregate attempt correctly rejected the characterization row that
+still named the deleted Driver sweeper test. After moving that row to the
+Execution owner, the uninterrupted aggregate rerun passed. A later duplicate
+RSS-measured architecture invocation stalled in its measurement wrapper and
+was interrupted; it does not replace the completed same-source architecture
+pass above.
 
 Later waves must update this document with the selected package candidates,
 the boundary reason retained or removed for each, exact shape changes, and

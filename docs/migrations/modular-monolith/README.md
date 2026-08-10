@@ -1,6 +1,6 @@
 # Modular Monolith Migration
 
-- **Status:** Phase 9 package consolidation in progress; its first six slices
+- **Status:** Phase 9 package consolidation in progress; its first seven slices
   ratchet the modular monolith to 182 production packages
 - **Date:** 2026-08-10
 - **Scope:** `loom serve`, the operator CLI entry surfaces, the Vite frontend counterpart, and the fleet-db contracts those capabilities depend on
@@ -224,10 +224,17 @@ capability owners. Wave 9.6 then removes the duplicate Connectors grant
 transport/adapter plane and the Git-only runtime-failing compatibility
 constructor. FleetDB and memstore now implement the Connectors grant owner port
 directly, reducing the exact shape to 182 packages, 62 one-file packages, and
-83 one-or-two-file packages. The remaining waves must inventory and delete
-known transitional production paths in addition to removing residual shallow
-packages; an empty capability-graph `legacy_paths` list alone is not completion
-proof. See the [Phase 9 plan](16-phase-9-package-consolidation.md).
+83 one-or-two-file packages. Wave 9.7 then physically removes 11 dead
+source-compatibility functions or values, deletes the obsolete test-only Driver
+stale-recovery implementation, characterizes the Execution owner instead, and
+guards against handwritten deprecated production APIs returning. It removes
+499 net lines without changing the package count or widening import fanout.
+The 25 `legacy handler imports` remain live allowlisted compatibility edges,
+not historical labels, and the Driver still has an active shared-token/header
+authentication fallback. The remaining waves must delete those runtime paths
+in addition to removing residual shallow packages; an empty capability-graph
+`legacy_paths` list alone is not completion proof. See the
+[Phase 9 plan](16-phase-9-package-consolidation.md).
 
 ## Approved architecture decisions
 
