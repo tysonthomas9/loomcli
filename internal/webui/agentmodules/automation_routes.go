@@ -41,7 +41,7 @@ type automationRouteDeps struct {
 	Awaits          store.AwaitStore
 	DriverRuns      store.DriverRunStore
 	AwaitResolver   store.AtomicAwaitStore
-	Connectors      connectorsmodule.BindingLifecycle
+	Connectors      connectorsmodule.BindingGrantLifecycle
 	AgentIdentities agents.IdentityQueries
 }
 
@@ -55,7 +55,7 @@ type bindingGrantCleanup interface {
 }
 
 type connectorBindingGrantCleanup struct {
-	lifecycle connectorsmodule.BindingLifecycle
+	lifecycle connectorsmodule.BindingGrantLifecycle
 }
 
 func (cleanup connectorBindingGrantCleanup) RevokeBindingGrants(

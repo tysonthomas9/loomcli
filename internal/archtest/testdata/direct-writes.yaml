@@ -83,7 +83,7 @@ persistence_packages:
     receiver_names: [AdmissionStore, ApprovalEventStore, BindingStore, ManagedBindingStore, UnmanagedBindingStore]
     receiver_suffixes: []
   - path: github.com/tysonthomas9/loomcli/internal/modules/connectors
-    receiver_names: [BindingLifecycleStore, ConnectorGrantStore, DispatchStore, ManagementStore, SecretLifecycleStore]
+    receiver_names: [ConnectorGrantStore, DispatchStore, ManagementStore, SecretLifecycleStore]
     receiver_suffixes: []
   - path: github.com/tysonthomas9/loomcli/internal/modules/interaction
     receiver_names: [InboxStore, SessionStore, TerminalStore, TranscriptArtifactStore]
@@ -174,9 +174,6 @@ method_sets:
       - Workers
       - Workspaces
     mutating: []
-  - name: connectors_binding_lifecycle
-    read_only: []
-    mutating: [ConfigureBindingSecretRecord]
   - name: connectors_dispatch
     read_only: [GetConnectorRecord, ListGrantRecordsByBinding, ResolveOutboundCredentialSealedRecord]
     mutating: [AppendConnectorCallRecord]
@@ -331,7 +328,6 @@ method_sets:
       - ReadContent
       - ResolveInboundSecret
       - ResolveOutboundCredentialSealed
-      - ResolveWebhookSecret
     mutating:
       - Ack
       - Acquire
@@ -565,10 +561,6 @@ receiver_surfaces:
     package: github.com/tysonthomas9/loomcli/internal/modules/automation
     method_set: automation_persistence
     capability_owner: automation
-  - receiver: github.com/tysonthomas9/loomcli/internal/modules/connectors.BindingLifecycleStore
-    package: github.com/tysonthomas9/loomcli/internal/modules/connectors
-    method_set: connectors_binding_lifecycle
-    capability_owner: connectors
   - receiver: github.com/tysonthomas9/loomcli/internal/modules/connectors.ConnectorGrantStore
     package: github.com/tysonthomas9/loomcli/internal/modules/connectors
     method_set: connectors_grants

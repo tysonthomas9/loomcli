@@ -180,9 +180,6 @@ func validatePersistedBinding(binding *Binding, workspace, bindingID string) err
 	if bindingID != "" && binding.BindingID != bindingID {
 		return ErrInvalidPersistedState
 	}
-	if binding.WebhookSecret != "" {
-		return ErrInvalidPersistedState
-	}
 	return nil
 }
 

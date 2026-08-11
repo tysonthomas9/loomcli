@@ -94,7 +94,7 @@ func testBindingMatchesDefinition(
 	existing *automation.Binding,
 	expected automation.BindingDefinition,
 ) bool {
-	if existing == nil || existing.WebhookSecret != "" {
+	if existing == nil {
 		return false
 	}
 	if expected.RouteKey == "" {
@@ -635,10 +635,6 @@ type testBindingGrantCleanup struct {
 
 type testTriggerConnectorLifecycle struct {
 	grants connectorsmodule.ManagementStore
-}
-
-func (testTriggerConnectorLifecycle) ConfigureBindingSecret(context.Context, connectorsmodule.ConfigureBindingSecretCommand) error {
-	return nil
 }
 
 func (c testTriggerConnectorLifecycle) RevokeBindingGrants(

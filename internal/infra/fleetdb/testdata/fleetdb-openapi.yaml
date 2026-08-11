@@ -3270,35 +3270,6 @@ paths:
         "409":
           $ref: "#/components/responses/Conflict"
 
-  /api/v1/{workspace}/trigger-bindings/{binding_id}/webhook-secret:
-    parameters:
-      - $ref: "#/components/parameters/Workspace"
-      - $ref: "#/components/parameters/TriggerBindingID"
-    get:
-      tags: [Trigger Bindings]
-      summary: Get a trigger binding's webhook signing secret
-      description: |
-        Returns the plaintext webhook signing secret for the binding. Guarded
-        by the trigger-binding-secret-read permission so the secret is not
-        exposed on the ordinary read/list surfaces; used by the webhook
-        verifier to check inbound signatures.
-      operationId: getTriggerBindingWebhookSecret
-      responses:
-        "200":
-          description: Webhook signing secret
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [binding_id, webhook_secret]
-                properties:
-                  binding_id:
-                    type: string
-                  webhook_secret:
-                    type: string
-        "404":
-          $ref: "#/components/responses/NotFound"
-
   /api/v1/{workspace}/connectors:
     parameters:
       - $ref: "#/components/parameters/Workspace"
@@ -4037,9 +4008,9 @@ paths:
       summary: Create an AgentService-owned TriggerBinding
       description: >-
         Dedicated service-identity lane for managed bindings. The body
-        workspace must match the route, target_agent_service_id must be
-        non-empty, and webhook_secret is rejected. Generic TriggerBinding
-        creation cannot establish managed ownership.
+        workspace must match the route and target_agent_service_id must be
+        non-empty. Generic TriggerBinding creation cannot establish managed
+        ownership.
       operationId: createManagedAutomationBinding
       requestBody:
         required: true

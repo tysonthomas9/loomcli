@@ -28,7 +28,6 @@ type CreateGrantMutation struct {
 // deliberately absent; narrow consumers depend on smaller local interfaces.
 type ManagementStore interface {
 	SecretLifecycleStore
-	BindingLifecycleStore
 	CreateConnectorRecord(context.Context, CreateConnectorMutation) (*Connector, error)
 	ListConnectorRecords(context.Context, string, ConnectorFilter) ([]*Connector, error)
 	CreateManagementGrant(context.Context, CreateGrantMutation) (*ConnectorGrant, error)
@@ -37,13 +36,6 @@ type ManagementStore interface {
 	ListGrantRecordsByConnector(context.Context, string, string) ([]*ConnectorGrant, error)
 	ListCallRecordsByRun(context.Context, string, string, ConnectorCallFilter) ([]*ConnectorCallRecord, error)
 	ListCallRecordsByBinding(context.Context, string, string, ConnectorCallFilter) ([]*ConnectorCallRecord, error)
-}
-
-// BindingLifecycleStore is the Connector-owned persistence seam for secret
-// material attached to an Automation binding. Grant cleanup reuses the
-// ManagementStore grant methods so one adapter owns the complete operation.
-type BindingLifecycleStore interface {
-	ConfigureBindingSecretRecord(context.Context, string, string, string) error
 }
 
 type SecretLifecycleStore interface {

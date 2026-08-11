@@ -332,33 +332,6 @@ func (service *ManagementService) RevokeGrant(ctx context.Context, command Revok
 	return service.store.RevokeGrantRecord(ctx, workspace, grantID)
 }
 
-// ConfigureBindingSecret persists one inbound signing secret through the
-// Connector-owned privileged adapter. The secret never enters Automation's
-// binding model or a public result.
-func (service *ManagementService) ConfigureBindingSecret(
-	ctx context.Context,
-	command ConfigureBindingSecretCommand,
-) error {
-	workspace, err := requireCanonical("workspace", command.WorkspaceKey)
-	if err != nil {
-		return err
-	}
-	bindingID, err := requireCanonical("binding id", command.BindingID)
-	if err != nil {
-		return err
-	}
-	if command.Secret == "" {
-		return fmt.Errorf("binding secret is required: %w", ErrInvalid)
-	}
-	if service == nil || service.store == nil {
-		return ErrUnavailable
-	}
-	if err := service.store.ConfigureBindingSecretRecord(ctx, workspace, bindingID, command.Secret); err != nil {
-		return fmt.Errorf("configure binding secret: %w", err)
-	}
-	return nil
-}
-
 // RevokeBindingGrants converges a binding to no active Connector grants. A
 // repeated revoke is success and does not increment the changed-row count.
 func (service *ManagementService) RevokeBindingGrants(

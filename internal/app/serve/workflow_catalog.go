@@ -227,10 +227,10 @@ type WorkflowCatalogConfig struct {
 	// These narrow stores are used only by composition-time compatibility
 	// adapters whose owner capabilities land in later phases. Automation core
 	// never receives the composite Store or any of these repository types.
-	AutomationDriverRuns      store.DriverRunStore
-	AutomationAwaits          store.AwaitStore
-	AutomationWorkspaces      store.WorkspaceStore
-	AutomationWebhookVerifier WebhookVerifier
+	AutomationDriverRuns             store.DriverRunStore
+	AutomationAwaits                 store.AwaitStore
+	AutomationWorkspaces             store.WorkspaceStore
+	AutomationWebhookVerifierFactory WebhookVerifierFactory
 	// PrepareWorkflowTarget is held only by the temporary composition adapter
 	// around legacy builtin materialization. It never enters Automation or an
 	// HTTP handler and returns only the prepared target identity.
@@ -294,9 +294,9 @@ func composeWorkflowCatalogAutomation(config WorkflowCatalogConfig, capability *
 		automationWorkflowCatalogConfig{
 			Workspace: config.Workspace, FleetDBClient: config.FleetDBClient,
 			DriverRuns: config.AutomationDriverRuns, Awaits: config.AutomationAwaits,
-			Workspaces:            config.AutomationWorkspaces,
-			WebhookVerifier:       config.AutomationWebhookVerifier,
-			PrepareWorkflowTarget: config.PrepareWorkflowTarget,
+			Workspaces:             config.AutomationWorkspaces,
+			WebhookVerifierFactory: config.AutomationWebhookVerifierFactory,
+			PrepareWorkflowTarget:  config.PrepareWorkflowTarget,
 			Catalog: CatalogOwner{
 				Issuer: capability.issuer, EffectiveVersions: capability.EffectiveVersionResolver(),
 				EffectiveVersionAuthority: func(

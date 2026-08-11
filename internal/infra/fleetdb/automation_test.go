@@ -54,12 +54,8 @@ func TestAutomationTransportUsesSharedClientAndBindingBoundary(t *testing.T) {
 	if got, err := client.Automation().CreateBinding(t.Context(), binding); err != nil || got.BindingID != "binding-a" {
 		t.Fatalf("CreateBinding = %+v, %v", got, err)
 	}
-	binding.WebhookSecret = "plaintext"
-	if _, err := client.Automation().CreateBinding(t.Context(), binding); !errors.Is(err, ErrAutomationInvalid) {
-		t.Fatalf("secret CreateBinding = %v", err)
-	}
 	if requests.Load() != 1 {
-		t.Fatalf("secret request reached HTTP: %d requests", requests.Load())
+		t.Fatalf("CreateBinding requests = %d, want 1", requests.Load())
 	}
 }
 

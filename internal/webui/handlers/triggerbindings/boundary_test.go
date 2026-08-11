@@ -92,8 +92,7 @@ func (s *stubBindingAPI) DispatchBinding(ctx context.Context, auth authority.Ope
 }
 
 type connectorLifecycleStub struct {
-	configure func(context.Context, connectorsmodule.ConfigureBindingSecretCommand) error
-	revoke    func(context.Context, connectorsmodule.BindingGrantCleanupCommand) (int, error)
+	revoke func(context.Context, connectorsmodule.BindingGrantCleanupCommand) (int, error)
 }
 
 type allowUnattachedBindingIdentity struct{}
@@ -112,13 +111,6 @@ func (unexpectedWorkflowTargetPreparer) PrepareWorkflowTarget(context.Context, s
 	panic("explicit driver request unexpectedly prepared a workflow target")
 }
 
-func (s *connectorLifecycleStub) ConfigureBindingSecret(ctx context.Context, command connectorsmodule.ConfigureBindingSecretCommand) error {
-	if s.configure == nil {
-		return nil
-	}
-	return s.configure(ctx, command)
-}
-
 func (s *connectorLifecycleStub) RevokeBindingGrants(ctx context.Context, command connectorsmodule.BindingGrantCleanupCommand) (int, error) {
 	if s.revoke == nil {
 		return 0, nil
@@ -126,7 +118,7 @@ func (s *connectorLifecycleStub) RevokeBindingGrants(ctx context.Context, comman
 	return s.revoke(ctx, command)
 }
 
-func registerBoundaryModule(api *stubBindingAPI, resolver workflowcataloghttp.OperatorAuthorityResolver, connectors connectorsmodule.BindingLifecycle) *http.ServeMux {
+func registerBoundaryModule(api *stubBindingAPI, resolver workflowcataloghttp.OperatorAuthorityResolver, connectors connectorsmodule.BindingGrantLifecycle) *http.ServeMux {
 	createWorkflow, err := workflowbinding.New(unexpectedWorkflowTargetPreparer{}, api)
 	if err != nil {
 		panic(err)
@@ -205,49 +197,32 @@ func TestMutationAuthorityFailuresStopBeforeAutomation(t *testing.T) {
 	}
 }
 
-func TestCreateKeepsSecretOutOfAutomation(t *testing.T) {
-	const secret = "connector-only-secret"
-	var commandJSON []byte
+func TestCreateRejectsRetiredBindingSecretField(t *testing.T) {
+	called := false
 	api := &stubBindingAPI{
 		get: func(context.Context, string, string) (*automation.Binding, error) {
 			return nil, automation.ErrNotFound
 		},
 		create: func(_ context.Context, _ authority.OperatorAuthority, command automation.CreateBindingCommand) (*automation.Binding, error) {
-			commandJSON, _ = json.Marshal(command)
-			return &automation.Binding{
-				WorkspaceKey: command.WorkspaceKey, BindingID: command.Definition.BindingID,
-				Name: command.Definition.Name, SourceKind: command.Definition.SourceKind,
-				RouteKey: command.Definition.RouteKey, DriverID: "driver-1", DriverVersionID: "version-1",
-				Enabled: command.Definition.Enabled,
-			}, nil
+			called = true
+			return nil, errors.New("must not be called")
 		},
 	}
-	var connectorSecret string
-	connectors := &connectorLifecycleStub{configure: func(_ context.Context, command connectorsmodule.ConfigureBindingSecretCommand) error {
-		if command.WorkspaceKey != "CANONICAL" || command.BindingID != "github-binding" {
-			t.Fatalf("connector scope = %q/%q", command.WorkspaceKey, command.BindingID)
-		}
-		connectorSecret = command.Secret
-		return nil
-	}}
 	resolver := operatorResolverFunc(func(*http.Request, string, authority.Action) (authority.OperatorAuthority, error) {
 		return authority.OperatorAuthority{}, nil
 	})
-	mux := registerBoundaryModule(api, resolver, connectors)
+	mux := registerBoundaryModule(api, resolver, nil)
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/alias/trigger-bindings", strings.NewReader(
-		`{"driver_id":"driver-1","binding_id":"github-binding","route_key":"github.pull_request.opened","source_kind":"github","secret":"`+secret+`","enabled":true}`,
+		`{"driver_id":"driver-1","binding_id":"github-binding","route_key":"github.pull_request.opened","source_kind":"github","secret":"retired","enabled":true}`,
 	))
 	req.Header.Set("Authorization", "Bearer operator")
 	response := httptest.NewRecorder()
 	mux.ServeHTTP(response, req)
-	if response.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201; body=%s", response.Code, response.Body.String())
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", response.Code, response.Body.String())
 	}
-	if connectorSecret != secret {
-		t.Fatalf("connector secret = %q, want supplied secret", connectorSecret)
-	}
-	if strings.Contains(string(commandJSON), secret) || strings.Contains(response.Body.String(), secret) || strings.Contains(response.Body.String(), "webhook_secret") {
-		t.Fatalf("secret crossed Automation or response boundary: command=%s response=%s", commandJSON, response.Body.String())
+	if called {
+		t.Fatal("Automation create was invoked for a retired binding-secret request")
 	}
 }
 

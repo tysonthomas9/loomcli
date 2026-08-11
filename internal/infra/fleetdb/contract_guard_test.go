@@ -56,7 +56,7 @@ const (
 // package tree's non-test sources.
 // When you add/remove/move a client call, update clientRoutes below FIRST, then
 // bump this constant.
-const expectedClientCallSites = 238
+const expectedClientCallSites = 236
 
 // clientRoute is one method+path template the client issues. Path params are
 // written as {} (already normalized).
@@ -272,7 +272,6 @@ var clientRoutes = []clientRoute{
 	{"PATCH", "/api/v1/{}/trigger-bindings/{}"},
 	// The DELETE whose absence from spec+server this guard exists to catch.
 	{"DELETE", "/api/v1/{}/trigger-bindings/{}"},
-	{"GET", "/api/v1/{}/trigger-bindings/{}/webhook-secret"},
 	{"POST", "/api/v1/{}/driver-runs"},
 	{"POST", "/api/v1/{}/epics/{}/runs"},
 	{"GET", "/api/v1/{}/driver-runs/{}"},

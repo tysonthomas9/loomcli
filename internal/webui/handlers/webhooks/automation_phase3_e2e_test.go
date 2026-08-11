@@ -36,7 +36,7 @@ const (
 	automationPhase3DriverID          = "github-pr-review"
 	automationPhase3VersionID         = "github-pr-review-v1"
 	automationPhase3BindingID         = "binding-github-pr-opened"
-	automationPhase3WebhookSecret     = "e2e-webhook-secret"
+	automationPhase3InboundSecret     = "e2e-webhook-secret"
 	automationPhase3PerformanceSample = 30
 	automationPhase3P50BudgetMS       = 100.0
 	automationPhase3P95BudgetMS       = 250.0
@@ -66,9 +66,6 @@ func TestE2E_AutomationPhase3RealFleetDBLoomHTTPAndCLI(t *testing.T) {
 		&created,
 	)
 	assertAutomationPhase3Binding(t, &created, automationPhase3BindingID, automation.ConcurrencyAllow)
-	if created.WebhookSecret != "" {
-		t.Fatalf("public create leaked webhook secret: %+v", created)
-	}
 
 	var listed []*automation.Binding
 	e2e.runAutomationPhase3CLIJSON(&listed, "trigger", "bindings", "list", "--source-kind", "github", "--json")
@@ -160,7 +157,6 @@ func TestE2E_AutomationPhase3WebhookPerformance(t *testing.T) {
 		"--driver", automationPhase3DriverID,
 		"--driver-version", automationPhase3VersionID,
 		"--entrypoint", "run",
-		"--secret", automationPhase3WebhookSecret,
 		"--concurrency-policy", "allow",
 		"--json",
 	)
@@ -263,6 +259,7 @@ func (e *githubWebhookE2E) seedAutomationPhase3Target() {
 	if err != nil || activated == nil || activated.CommittedRevision != 3 || activated.Driver == nil || activated.Driver.ActiveVersionID != automationPhase3VersionID {
 		e.t.Fatalf("activate Phase 3 fixture = %+v, %v", activated, err)
 	}
+	e.createGitHubConnector(ctx, automationPhase3InboundSecret)
 }
 
 func (e *githubWebhookE2E) automationPhase3CreateBindingBody() map[string]any {
@@ -275,7 +272,6 @@ func (e *githubWebhookE2E) automationPhase3CreateBindingBody() map[string]any {
 		"driver_id":         automationPhase3DriverID,
 		"driver_version_id": automationPhase3VersionID,
 		"entrypoint":        "run",
-		"secret":            automationPhase3WebhookSecret,
 		"enabled":           enabled,
 	}
 }

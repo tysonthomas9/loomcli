@@ -50,7 +50,7 @@ type Config struct {
 	OperatorAuthority    workflowcataloghttp.OperatorAuthorityResolver
 	WorkspaceFromContext func(context.Context) string
 	Runs                 RunQueries
-	Connectors           connectors.BindingLifecycle
+	Connectors           connectors.BindingGrantLifecycle
 	AgentIdentities      agents.IdentityQueries
 }
 
@@ -62,7 +62,7 @@ type Module struct {
 	operatorAuthority    workflowcataloghttp.OperatorAuthorityResolver
 	workspaceFromContext func(context.Context) string
 	runs                 RunQueries
-	connectors           connectors.BindingLifecycle
+	connectors           connectors.BindingGrantLifecycle
 	agentIdentities      agents.IdentityQueries
 	active               bool
 }
@@ -100,7 +100,6 @@ type createBindingRequest struct {
 	SourceKind          string                              `json:"source_kind,omitempty"`
 	Name                string                              `json:"name,omitempty"`
 	BindingID           string                              `json:"binding_id,omitempty"`
-	Secret              string                              `json:"secret,omitempty"`
 	Entrypoint          string                              `json:"entrypoint,omitempty"`
 	EventTypePatterns   []string                            `json:"event_type_patterns,omitempty"`
 	SubjectKeyTemplate  string                              `json:"subject_key_template,omitempty"`
@@ -253,7 +252,9 @@ func (m *Module) createBinding(w http.ResponseWriter, r *http.Request) { //nolin
 		return
 	}
 	var request createBindingRequest
-	if err := handler.DecodeOneJSON(w, r, &request, handler.JSONDecodeOptions{MaxBytes: maxBindingBodyBytes}); err != nil {
+	if err := handler.DecodeOneJSON(w, r, &request, handler.JSONDecodeOptions{
+		MaxBytes: maxBindingBodyBytes, DisallowUnknownFields: true,
+	}); err != nil {
 		handler.RespondError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
@@ -266,11 +267,6 @@ func (m *Module) createBinding(w http.ResponseWriter, r *http.Request) { //nolin
 	enabled := true
 	if request.Enabled != nil {
 		enabled = *request.Enabled
-	}
-	secret := request.Secret
-	if sourceKind == "github" && enabled && strings.TrimSpace(secret) == "" {
-		handler.RespondError(w, http.StatusBadRequest, "secret is required to enable a github trigger binding")
-		return
 	}
 	schedule := strings.TrimSpace(request.Schedule)
 	if sourceKind == automation.SourceKindCron && schedule == "" {
@@ -311,7 +307,7 @@ func (m *Module) createBinding(w http.ResponseWriter, r *http.Request) { //nolin
 		// Browser/gallery activation uses POST as an idempotent ensure by
 		// default. The standalone CLI historically exposed strict create
 		// semantics, so its authenticated management request opts into a 409
-		// without mutating the existing binding or its secret.
+		// without mutating the existing binding.
 		if r.URL.Query().Get("create_only") == "true" {
 			writeAutomationError(w, fmt.Errorf("trigger binding %q already exists: %w", bindingID, automation.ErrConflict), "create trigger binding failed")
 			return
@@ -322,9 +318,6 @@ func (m *Module) createBinding(w http.ResponseWriter, r *http.Request) { //nolin
 		}
 		if err := m.validateEnsureIdentity(r.Context(), workspace, request, existing, sourceKind, routeKey, driverID, workflowName); err != nil {
 			writeAutomationError(w, err, "create trigger binding failed")
-			return
-		}
-		if !m.configureSecret(w, r, workspace, existing.BindingID, secret) {
 			return
 		}
 		handler.WriteJSON(w, http.StatusOK, existing)
@@ -372,9 +365,6 @@ func (m *Module) createBinding(w http.ResponseWriter, r *http.Request) { //nolin
 			return
 		}
 		writeAutomationError(w, identityErr, "check created trigger binding identifier failed")
-		return
-	}
-	if !m.configureSecret(w, r, workspace, binding.BindingID, secret) {
 		return
 	}
 	handler.WriteJSON(w, http.StatusCreated, binding)
@@ -501,25 +491,6 @@ func bindingEnsureConflict(bindingID, field, existing, requested string) error {
 		"trigger binding %q has %s %q, not requested %q: %w",
 		bindingID, field, existing, requested, automation.ErrConflict,
 	)
-}
-
-func (m *Module) configureSecret(w http.ResponseWriter, r *http.Request, workspace, bindingID, secret string) bool {
-	if secret == "" {
-		return true
-	}
-	if m.connectors == nil {
-		writeAutomationError(w, automation.ErrUnavailable, "configure trigger binding secret failed")
-		return false
-	}
-	if err := m.connectors.ConfigureBindingSecret(r.Context(), connectors.ConfigureBindingSecretCommand{
-		WorkspaceKey: workspace,
-		BindingID:    bindingID,
-		Secret:       secret,
-	}); err != nil {
-		writeAutomationError(w, err, "configure trigger binding secret failed")
-		return false
-	}
-	return true
 }
 
 func (m *Module) setEnabled(enabled bool) http.HandlerFunc {

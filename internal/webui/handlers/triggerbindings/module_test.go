@@ -375,19 +375,7 @@ func mapTestAutomationError(err error) error {
 }
 
 type testConnectorLifecycle struct {
-	store   store.Store
-	mu      sync.Mutex
-	secrets map[string]string
-}
-
-func (c *testConnectorLifecycle) ConfigureBindingSecret(_ context.Context, command connectorsmodule.ConfigureBindingSecretCommand) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.secrets == nil {
-		c.secrets = make(map[string]string)
-	}
-	c.secrets[command.WorkspaceKey+"/"+command.BindingID] = command.Secret
-	return nil
+	store store.Store
 }
 
 func (c *testConnectorLifecycle) RevokeBindingGrants(ctx context.Context, command connectorsmodule.BindingGrantCleanupCommand) (int, error) {
@@ -1017,16 +1005,12 @@ func TestCreateBinding_RequiresRouteKey(t *testing.T) {
 	}
 }
 
-func TestCreateBinding_GithubRequiresSecret(t *testing.T) {
+func TestCreateBinding_GithubDoesNotCarryConnectorSecret(t *testing.T) {
 	mux, _ := seededMux(t)
-	// Enabled github binding with no secret must be rejected before it is stored.
 	rec := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings",
 		`{"workflow":"github-review-agent","route_key":"github.pull_request.opened","source_kind":"github","enabled":true}`)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "secret") {
-		t.Fatalf("expected secret-required error, got %s", rec.Body.String())
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
 	}
 }
 

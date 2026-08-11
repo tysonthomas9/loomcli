@@ -19,8 +19,8 @@
 //
 // Secrets note: fleet-db only ever returns inbound secrets and the sealed
 // outbound credential ciphertext from the privileged /secrets route, which
-// backs ResolveInboundSecretsRecord / ResolveOutboundCredentialSealedRecord (the
-// ResolveWebhookSecret pattern). Get/List decode fleet-db's already-redacted
+// backs ResolveInboundSecretsRecord / ResolveOutboundCredentialSealedRecord.
+// Get/List decode fleet-db's already-redacted
 // responses. Plaintext outbound credentials never transit this client:
 // serve's vault layer seals before create/rotation.
 package fleetdb
@@ -65,26 +65,6 @@ func (c *Client) ConnectorGrants() connectorsmodule.ConnectorGrantStore {
 		connectorStore: c.connectors, connectorGrantStore: c.connectorGrants, connectorAuditStore: c.connectorCalls,
 		client: c,
 	}
-}
-
-func (catalog *connectorCatalog) ConfigureBindingSecretRecord(
-	ctx context.Context,
-	workspace, bindingID, secret string,
-) error {
-	if catalog == nil || catalog.client == nil {
-		return connectorsmodule.ErrUnavailable
-	}
-	var out struct {
-		BindingID string `json:"binding_id"`
-	}
-	path := "/api/v1/" + pathEscape(workspace) + "/trigger-bindings/" + pathEscape(bindingID)
-	if err := catalog.client.do(ctx, "PATCH", path, map[string]any{"webhook_secret": secret}, &out); err != nil {
-		return connectorOwnerError(err)
-	}
-	if out.BindingID != bindingID {
-		return connectorsmodule.ErrInvalidPersistedState
-	}
-	return nil
 }
 
 // --- sentinel remapping ---

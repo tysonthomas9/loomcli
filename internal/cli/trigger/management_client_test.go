@@ -226,7 +226,7 @@ func TestTriggerManagementDuplicateCreatePreservesConflictExitClass(t *testing.T
 	enabled := true
 	_, err = client.createBinding(context.Background(), triggerBindingCreateRequest{
 		BindingID: "binding-pr", Name: "PR", SourceKind: "github", RouteKey: "github.pull_request.opened",
-		DriverID: "reviewer", DriverVersionID: "version-1", Secret: "secret", Enabled: &enabled,
+		DriverID: "reviewer", DriverVersionID: "version-1", Enabled: &enabled,
 	})
 	if !errors.Is(err, domain.ErrConflict) || !strings.Contains(err.Error(), "code=already_exists") {
 		t.Fatalf("duplicate create error = %v, want conflict exit class", err)
@@ -264,7 +264,7 @@ func TestTriggerManagementClientUsesNoOpenCredentialAndPreservesAllRoutesAndFiel
 	enabled := true
 	created, err := client.createBinding(ctx, triggerBindingCreateRequest{
 		DriverID: "reviewer", DriverVersionID: "version-1", BindingID: "binding-created", Name: "Created",
-		SourceKind: "github", RouteKey: "github.pull_request.opened", Secret: "secret", Enabled: &enabled,
+		SourceKind: "github", RouteKey: "github.pull_request.opened", Enabled: &enabled,
 		EventTypePatterns: []string{"github.pull_request.*"}, SubjectKeyTemplate: "{{subject_ref}}",
 		ConcurrencyPolicy: automation.ConcurrencyQueue,
 		ActorFilter:       &automation.ActorFilter{ExcludeActorKinds: []string{"workflow"}},
@@ -350,7 +350,6 @@ func TestTriggerManagementCommandJSONCompatibility(t *testing.T) {
 	bindCreateRouteKey = "github.pull_request.opened"
 	bindCreateDriver = "reviewer"
 	bindCreateVersion = "version-1"
-	bindCreateSecret = "secret"
 	bindCreateBindingID = "binding-created"
 	bindCreateName = "Created"
 	bindCreateSource = "github"
@@ -464,7 +463,6 @@ func TestTriggerManagementCommandTextCompatibility(t *testing.T) {
 	bindCreateRouteKey = "github.pull_request.opened"
 	bindCreateDriver = "reviewer"
 	bindCreateVersion = "version-1"
-	bindCreateSecret = "secret"
 	bindCreateBindingID = "binding-created"
 	bindCreateName = "Created"
 	bindCreateSource = "github"
@@ -595,23 +593,23 @@ func containsString(values []string, want string) bool {
 func restoreTriggerCommandGlobals(t *testing.T) {
 	t.Helper()
 	type state struct {
-		createRoute, createWorkflow, createDriver, createVersion, createSecret, createName, createSource, createID, createEntry string
-		createDisabled, createJSON                                                                                              bool
-		createRouter                                                                                                            routerBindingFlags
-		updateJSON                                                                                                              bool
-		updateRouter                                                                                                            routerBindingFlags
-		listSource                                                                                                              string
-		listEnabled, listJSON, deleteJSON, runJSON                                                                              bool
-		eventSource                                                                                                             string
-		eventLimit                                                                                                              int
-		eventJSON                                                                                                               bool
-		deliveryEvent, deliveryStatus                                                                                           string
-		deliveryLimit                                                                                                           int
-		deliveryJSON                                                                                                            bool
+		createRoute, createWorkflow, createDriver, createVersion, createName, createSource, createID, createEntry string
+		createDisabled, createJSON                                                                                bool
+		createRouter                                                                                              routerBindingFlags
+		updateJSON                                                                                                bool
+		updateRouter                                                                                              routerBindingFlags
+		listSource                                                                                                string
+		listEnabled, listJSON, deleteJSON, runJSON                                                                bool
+		eventSource                                                                                               string
+		eventLimit                                                                                                int
+		eventJSON                                                                                                 bool
+		deliveryEvent, deliveryStatus                                                                             string
+		deliveryLimit                                                                                             int
+		deliveryJSON                                                                                              bool
 	}
 	saved := state{
 		createRoute: bindCreateRouteKey, createWorkflow: bindCreateWorkflow, createDriver: bindCreateDriver,
-		createVersion: bindCreateVersion, createSecret: bindCreateSecret, createName: bindCreateName,
+		createVersion: bindCreateVersion, createName: bindCreateName,
 		createSource: bindCreateSource, createID: bindCreateBindingID, createEntry: bindCreateEntry,
 		createDisabled: bindCreateDisabled, createJSON: bindCreateJSON, createRouter: bindCreateRouter,
 		updateJSON: bindUpdateJSON, updateRouter: bindUpdateRouter,
@@ -622,7 +620,7 @@ func restoreTriggerCommandGlobals(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		bindCreateRouteKey, bindCreateWorkflow, bindCreateDriver, bindCreateVersion = saved.createRoute, saved.createWorkflow, saved.createDriver, saved.createVersion
-		bindCreateSecret, bindCreateName, bindCreateSource, bindCreateBindingID, bindCreateEntry = saved.createSecret, saved.createName, saved.createSource, saved.createID, saved.createEntry
+		bindCreateName, bindCreateSource, bindCreateBindingID, bindCreateEntry = saved.createName, saved.createSource, saved.createID, saved.createEntry
 		bindCreateDisabled, bindCreateJSON, bindCreateRouter = saved.createDisabled, saved.createJSON, saved.createRouter
 		bindUpdateJSON, bindUpdateRouter = saved.updateJSON, saved.updateRouter
 		bindListSource, bindListEnabled, bindListJSON = saved.listSource, saved.listEnabled, saved.listJSON
@@ -631,7 +629,7 @@ func restoreTriggerCommandGlobals(t *testing.T) {
 		delivListEvent, delivListStatus, delivListLimit, delivListJSON = saved.deliveryEvent, saved.deliveryStatus, saved.deliveryLimit, saved.deliveryJSON
 	})
 	bindCreateRouteKey, bindCreateWorkflow, bindCreateDriver, bindCreateVersion = "", "", "", ""
-	bindCreateSecret, bindCreateName, bindCreateSource, bindCreateBindingID, bindCreateEntry = "", "", "", "", ""
+	bindCreateName, bindCreateSource, bindCreateBindingID, bindCreateEntry = "", "", "", ""
 	bindCreateDisabled, bindCreateJSON, bindCreateRouter = false, false, routerBindingFlags{}
 	bindUpdateJSON, bindUpdateRouter = false, routerBindingFlags{}
 	bindListSource, bindListEnabled, bindListJSON = "", false, false

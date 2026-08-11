@@ -50,49 +50,49 @@ type ProjectionStore interface {
 
 // Deps contains the capability ports used by the workspace route composition.
 type Deps struct {
-	Store                         ProjectionStore
-	InteractiveAgentRuntime       agentcoord.InteractiveAgentRuntime
-	AgentSessionTranscripts       sessioncoord.AgentSessionTranscriptService
-	WorkItems                     workitems.API
-	Hub                           *realtime.Hub
-	FleetBaseURL                  string
-	ExecutionIssueBackends        func(workspace, actor string) (backend.IssueBackend, error)
-	DriverAPIBaseURL              string
-	DriverRunTokenKey             []byte
-	LocalSettingsDir              string
-	SourceControl                 sourcecontrol.Materializer
-	Dispatcher                    connectorsmodule.Dispatcher
-	ConnectorBindingLifecycle     connectorsmodule.BindingLifecycle
-	AutomationBindings            automation.BindingOperations
-	WorkflowBinding               *workflowbinding.Workflow
-	AutomationAudit               automation.AuditQueries
-	AutomationWebhook             *webhookingestion.Workflow
-	AutomationEventing            *workfloweventing.Workflow
-	AutomationApprovalJournal     automation.ApprovalJournal
-	AutomationApprovalAuthority   automation.ApprovalAuthorityProvider
-	AutomationOperator            workflowcataloghttp.OperatorAuthorityResolver
-	Agents                        agents.API
-	AgentsOperator                workflowcataloghttp.OperatorAuthorityResolver
-	AgentProvisioning             agentprovisioning.Commands
-	AgentProvisioningOperator     workflowcataloghttp.OperatorAuthorityResolver
-	Interaction                   interaction.API
-	InteractionOperator           workflowcataloghttp.OperatorAuthorityResolver
-	InteractionSessionAuthorities interaction.SessionAuthorityResolver
-	InteractionChat               interaction.ChatMessenger
-	WorkflowCatalog               workflowcatalog.API
-	WorkflowCatalogAuthoring      workflowcatalog.VersionAuthoringAPI
-	WorkflowCatalogOperator       workflowcataloghttp.OperatorAuthorityResolver
-	WorkflowTargetPreparation     func(context.Context, string, string) (*workflowcatalog.Driver, error)
-	WorkflowBackendHealth         workflows.BackendHealthQuery
-	Artifacts                     artifacts.API
-	ExecutionTaskRuns             execution.TaskRunAPI
-	DaytonaProvider               execution.DaytonaProviderBroker
-	ExecutionTaskRunRequests      execution.TaskRunRequestAPI
-	ExecutionTaskRunRecovery      execution.TaskRunRecoveryAPI
-	ExecutionTaskRunAuthorities   execution.TaskRunAuthorityResolver
-	ExecutionWorkerProfiles       execution.WorkerProfileAPI
-	ExecutionDriverRuns           execution.DriverRunAPI
-	ExecutionDriverRunAuthorities execution.DriverRunAuthorityResolver
-	ExecutionSystemAuthorities    execution.SystemAuthorityResolver
-	ExecutionOperator             workflowcataloghttp.OperatorAuthorityResolver
+	Store                          ProjectionStore
+	InteractiveAgentRuntime        agentcoord.InteractiveAgentRuntime
+	AgentSessionTranscripts        sessioncoord.AgentSessionTranscriptService
+	WorkItems                      workitems.API
+	Hub                            *realtime.Hub
+	FleetBaseURL                   string
+	ExecutionIssueBackends         func(workspace, actor string) (backend.IssueBackend, error)
+	DriverAPIBaseURL               string
+	DriverRunTokenKey              []byte
+	LocalSettingsDir               string
+	SourceControl                  sourcecontrol.Materializer
+	Dispatcher                     connectorsmodule.Dispatcher
+	ConnectorBindingGrantLifecycle connectorsmodule.BindingGrantLifecycle
+	AutomationBindings             automation.BindingOperations
+	WorkflowBinding                *workflowbinding.Workflow
+	AutomationAudit                automation.AuditQueries
+	AutomationWebhook              *webhookingestion.Workflow
+	AutomationEventing             *workfloweventing.Workflow
+	AutomationApprovalJournal      automation.ApprovalJournal
+	AutomationApprovalAuthority    automation.ApprovalAuthorityProvider
+	AutomationOperator             workflowcataloghttp.OperatorAuthorityResolver
+	Agents                         agents.API
+	AgentsOperator                 workflowcataloghttp.OperatorAuthorityResolver
+	AgentProvisioning              agentprovisioning.Commands
+	AgentProvisioningOperator      workflowcataloghttp.OperatorAuthorityResolver
+	Interaction                    interaction.API
+	InteractionOperator            workflowcataloghttp.OperatorAuthorityResolver
+	InteractionSessionAuthorities  interaction.SessionAuthorityResolver
+	InteractionChat                interaction.ChatMessenger
+	WorkflowCatalog                workflowcatalog.API
+	WorkflowCatalogAuthoring       workflowcatalog.VersionAuthoringAPI
+	WorkflowCatalogOperator        workflowcataloghttp.OperatorAuthorityResolver
+	WorkflowTargetPreparation      func(context.Context, string, string) (*workflowcatalog.Driver, error)
+	WorkflowBackendHealth          workflows.BackendHealthQuery
+	Artifacts                      artifacts.API
+	ExecutionTaskRuns              execution.TaskRunAPI
+	DaytonaProvider                execution.DaytonaProviderBroker
+	ExecutionTaskRunRequests       execution.TaskRunRequestAPI
+	ExecutionTaskRunRecovery       execution.TaskRunRecoveryAPI
+	ExecutionTaskRunAuthorities    execution.TaskRunAuthorityResolver
+	ExecutionWorkerProfiles        execution.WorkerProfileAPI
+	ExecutionDriverRuns            execution.DriverRunAPI
+	ExecutionDriverRunAuthorities  execution.DriverRunAuthorityResolver
+	ExecutionSystemAuthorities     execution.SystemAuthorityResolver
+	ExecutionOperator              workflowcataloghttp.OperatorAuthorityResolver
 }

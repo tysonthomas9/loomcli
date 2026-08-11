@@ -19,6 +19,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	workflowdefs "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution/authoring"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
@@ -495,9 +496,11 @@ func BuildWorkflowCatalogModule(config WorkflowCatalogConfig) (*WorkflowCatalogM
 			appConfig.AutomationDriverRuns = config.StoreHandle.Store.DriverRuns()
 			appConfig.AutomationAwaits = config.StoreHandle.Store.Awaits()
 			appConfig.AutomationWorkspaces = config.StoreHandle.Store.Workspaces()
-			appConfig.AutomationWebhookVerifier = webhooks.NewCompatibilityVerifier(webhooks.CompatibilityVerifierConfig{
-				Bindings: config.StoreHandle.Store.TriggerBindings(), Connectors: config.StoreHandle.Store.Connectors(),
-			})
+			appConfig.AutomationWebhookVerifierFactory = func(bindings automation.BindingQueries) appserve.WebhookVerifier {
+				return webhooks.NewVerifier(webhooks.VerifierConfig{
+					Bindings: bindings, Connectors: config.StoreHandle.Store.Connectors(),
+				})
+			}
 		}
 	}
 	module, err := appserve.NewWorkflowCatalogModule(appConfig)

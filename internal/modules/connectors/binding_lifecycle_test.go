@@ -9,22 +9,9 @@ import (
 
 type bindingLifecycleStoreFake struct {
 	ManagementStore
-	configured ConfigureBindingSecretCommand
-	grants     []*ConnectorGrant
-	revoked    map[string]int
-	revokeErr  map[string]error
-}
-
-func (store *bindingLifecycleStoreFake) ConfigureBindingSecretRecord(
-	_ context.Context,
-	workspace, bindingID, secret string,
-) error {
-	store.configured = ConfigureBindingSecretCommand{
-		WorkspaceKey: workspace,
-		BindingID:    bindingID,
-		Secret:       secret,
-	}
-	return nil
+	grants    []*ConnectorGrant
+	revoked   map[string]int
+	revokeErr map[string]error
 }
 
 func (store *bindingLifecycleStoreFake) ListGrantRecordsByBinding(
@@ -48,7 +35,7 @@ func (store *bindingLifecycleStoreFake) RevokeGrantRecord(
 	return nil
 }
 
-func TestBindingLifecycleOwnsSecretPersistenceAndGrantCleanup(t *testing.T) {
+func TestBindingGrantLifecycleOwnsGrantCleanup(t *testing.T) {
 	createdAt := time.Now().UTC()
 	store := &bindingLifecycleStoreFake{
 		grants: []*ConnectorGrant{
@@ -60,17 +47,6 @@ func TestBindingLifecycleOwnsSecretPersistenceAndGrantCleanup(t *testing.T) {
 	management, err := NewManagement(store)
 	if err != nil {
 		t.Fatal(err)
-	}
-	secret := ConfigureBindingSecretCommand{
-		WorkspaceKey: "WORK",
-		BindingID:    "binding-1",
-		Secret:       "super-secret",
-	}
-	if err := management.ConfigureBindingSecret(t.Context(), secret); err != nil {
-		t.Fatalf("ConfigureBindingSecret: %v", err)
-	}
-	if store.configured != secret {
-		t.Fatalf("configured = %+v, want %+v", store.configured, secret)
 	}
 	revoked, err := management.RevokeBindingGrants(t.Context(), BindingGrantCleanupCommand{
 		WorkspaceKey: "WORK",
@@ -84,17 +60,11 @@ func TestBindingLifecycleOwnsSecretPersistenceAndGrantCleanup(t *testing.T) {
 	}
 }
 
-func TestBindingLifecycleRejectsInvalidInputAndPersistedGrant(t *testing.T) {
+func TestBindingGrantLifecycleRejectsInvalidPersistedGrant(t *testing.T) {
 	store := &bindingLifecycleStoreFake{grants: []*ConnectorGrant{nil}}
 	management, err := NewManagement(store)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if err := management.ConfigureBindingSecret(t.Context(), ConfigureBindingSecretCommand{
-		WorkspaceKey: "WORK",
-		BindingID:    "binding-1",
-	}); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("empty secret error = %v, want %v", err, ErrInvalid)
 	}
 	if _, err := management.RevokeBindingGrants(t.Context(), BindingGrantCleanupCommand{
 		WorkspaceKey: "WORK",

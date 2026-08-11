@@ -381,7 +381,6 @@ type connectorCatalog struct {
 	*connectorStore
 	*connectorGrantStore
 	*connectorAuditStore
-	bindings *triggerBindingStore
 }
 
 var _ connectorsmodule.ManagementStore = (*connectorCatalog)(nil)
@@ -391,33 +390,11 @@ var _ connectorsmodule.ConnectorGrantStore = (*connectorCatalog)(nil)
 func (s *Store) Connectors() connectorsmodule.ManagementStore {
 	return &connectorCatalog{
 		connectorStore: s.conns, connectorGrantStore: s.grants, connectorAuditStore: s.audits,
-		bindings: s.bindings,
 	}
 }
 
 func (s *Store) ConnectorGrants() connectorsmodule.ConnectorGrantStore {
 	return &connectorCatalog{
 		connectorStore: s.conns, connectorGrantStore: s.grants, connectorAuditStore: s.audits,
-		bindings: s.bindings,
 	}
-}
-
-func (catalog *connectorCatalog) ConfigureBindingSecretRecord(
-	_ context.Context,
-	workspace, bindingID, secret string,
-) error {
-	if catalog == nil || catalog.bindings == nil {
-		return connectorsmodule.ErrUnavailable
-	}
-	catalog.bindings.mu.Lock()
-	defer catalog.bindings.mu.Unlock()
-	binding, ok := catalog.bindings.items[workspace][bindingID]
-	if !ok {
-		return fmt.Errorf("binding %q in workspace %q: %w", bindingID, workspace, connectorsmodule.ErrNotFound)
-	}
-	updated := cloneTriggerBinding(binding)
-	updated.WebhookSecret = secret
-	updated.UpdatedAt = time.Now().UTC()
-	catalog.bindings.items[workspace][bindingID] = updated
-	return nil
 }

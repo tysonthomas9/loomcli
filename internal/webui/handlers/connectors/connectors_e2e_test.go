@@ -68,10 +68,7 @@ const (
 	inboundSecretV1 = "whsec-e2e-inbound-v1"
 	inboundSecretV2 = "whsec-e2e-inbound-v2"
 
-	// legacyBindingSecret is configured on the TriggerBinding. Once a
-	// connector exists for the source kind it must STOP verifying (the
-	// connector inbound secret is the verification root, CV12).
-	legacyBindingSecret = "legacy-binding-secret-do-not-accept"
+	invalidInboundSecret = "invalid-inbound-secret-do-not-accept"
 )
 
 // e2eSecrets is every string the §9.5 leak scan hunts for.
@@ -80,7 +77,7 @@ var e2eSecrets = []string{
 	outboundCredentialV2,
 	inboundSecretV1,
 	inboundSecretV2,
-	legacyBindingSecret,
+	invalidInboundSecret,
 }
 
 // --- fake GitHub upstream -------------------------------------------------
@@ -232,6 +229,17 @@ func (adapter connectorE2EAdmission) AdmitEvent(ctx context.Context, _ automatio
 
 type connectorE2EQueries struct{ st store.Store }
 
+func (adapter connectorE2EQueries) GetBinding(ctx context.Context, workspace, bindingID string) (*automation.Binding, error) {
+	return adapter.st.TriggerBindings().Get(ctx, workspace, bindingID)
+}
+
+func (adapter connectorE2EQueries) ListBindings(ctx context.Context, workspace string, filter automation.BindingFilter) ([]*automation.Binding, error) {
+	return adapter.st.TriggerBindings().List(ctx, workspace, store.TriggerBindingFilter{
+		SourceKind: filter.SourceKind, RouteKey: filter.RouteKey, DriverID: filter.DriverID,
+		TargetAgentServiceID: filter.TargetAgentServiceID, Enabled: filter.Enabled, Limit: filter.Limit,
+	})
+}
+
 func (adapter connectorE2EQueries) GetEvent(ctx context.Context, workspace, eventID string) (*automation.Event, error) {
 	return adapter.st.TriggerEvents().Get(ctx, workspace, eventID)
 }
@@ -338,8 +346,8 @@ func newE2EHarness(t *testing.T) *e2eHarness {
 		Execution: executionCapability.DriverRunAPI(), ExecutionAuthorities: executionCapability.DriverRunAuthorityResolver(),
 	}).Register(mux)
 	workflow, err := webhookingestion.New(
-		webhooks.NewCompatibilityVerifier(webhooks.CompatibilityVerifierConfig{
-			Bindings: h.store.TriggerBindings(), Connectors: h.store.Connectors(),
+		webhooks.NewVerifier(webhooks.VerifierConfig{
+			Bindings: connectorE2EQueries{st: h.store}, Connectors: h.store.Connectors(),
 		}),
 		connectorE2EAuthorityProvider{}, connectorE2EAdmission{st: h.store},
 	)
@@ -379,9 +387,6 @@ func (h *e2eHarness) provisionWorkspace(t *testing.T) {
 		WorkspaceKey: e2eWorkspace, BindingID: "binding-1", Name: "PR opened",
 		SourceKind: "github", RouteKey: "github.pull_request.opened",
 		DriverID: "driver-1", DriverVersionID: "version-1", Enabled: true,
-		// Legacy per-binding secret: must STOP verifying once the workspace
-		// holds a github connector (the connector becomes the root).
-		WebhookSecret: legacyBindingSecret,
 	}); err != nil {
 		t.Fatalf("Create trigger binding: %v", err)
 	}
@@ -601,10 +606,9 @@ func TestConnectorEndToEnd(t *testing.T) {
 	ctx := context.Background()
 
 	// (1) Ingress: a delivery signed with the connector's inbound secret is
-	// the ONLY one that verifies. The legacy binding secret and a tampered
-	// signature both get the uniform 401.
-	status, raw := h.postGitHubWebhook(t, "e2e-delivery-legacy", legacyBindingSecret, webhookPayload())
-	assertUniform401(t, "legacy binding secret", status, raw)
+	// the ONLY one that verifies. Invalid signatures get the uniform 401.
+	status, raw := h.postGitHubWebhook(t, "e2e-delivery-invalid", invalidInboundSecret, webhookPayload())
+	assertUniform401(t, "invalid connector secret", status, raw)
 	status, raw = h.postGitHubWebhook(t, "e2e-delivery-tampered", "completely-wrong-secret", webhookPayload())
 	assertUniform401(t, "tampered signature", status, raw)
 

@@ -37,8 +37,8 @@ func automationBindingBody(binding *automation.Binding, create bool) map[string]
 }
 
 func (s *automationStore) CreateBinding(ctx context.Context, binding *automation.Binding) (*automation.Binding, error) {
-	if binding == nil || binding.WebhookSecret != "" {
-		return nil, fmt.Errorf("automation create binding rejects webhook_secret: %w", ErrAutomationInvalid)
+	if binding == nil {
+		return nil, fmt.Errorf("automation create binding requires binding: %w", ErrAutomationInvalid)
 	}
 	if strings.TrimSpace(binding.TargetAgentServiceID) != "" {
 		return nil, ErrAutomationManagedBindingConflict
@@ -84,8 +84,8 @@ func (s *automationStore) ListBindings(ctx context.Context, workspace string, fi
 }
 
 func (s *automationStore) UpdateBinding(ctx context.Context, binding *automation.Binding) (*automation.Binding, error) {
-	if binding == nil || binding.WebhookSecret != "" {
-		return nil, fmt.Errorf("automation update binding rejects webhook_secret: %w", ErrAutomationInvalid)
+	if binding == nil {
+		return nil, fmt.Errorf("automation update binding requires binding: %w", ErrAutomationInvalid)
 	}
 	var out automation.Binding
 	path := "/api/v1/" + pathEscape(binding.WorkspaceKey) + "/trigger-bindings/" + pathEscape(binding.BindingID)
@@ -104,9 +104,9 @@ func (s *automationStore) ReplaceUnmanagedBinding(ctx context.Context, replaceme
 	if err := validateAutomationUnmanagedBindingSnapshot(replacement.Expected); err != nil {
 		return nil, err
 	}
-	if replacement.Binding == nil || replacement.Binding.WebhookSecret != "" ||
+	if replacement.Binding == nil ||
 		strings.TrimSpace(replacement.Binding.TargetAgentServiceID) != "" {
-		return nil, fmt.Errorf("automation unmanaged binding replacement rejects nil binding, owner, or webhook_secret: %w", ErrAutomationInvalid)
+		return nil, fmt.Errorf("automation unmanaged binding replacement rejects nil binding or owner: %w", ErrAutomationInvalid)
 	}
 	if replacement.Binding.WorkspaceKey != replacement.Expected.WorkspaceKey ||
 		replacement.Binding.BindingID != replacement.Expected.BindingID ||
@@ -153,8 +153,8 @@ func validateAutomationUnmanagedBindingSnapshot(expected AutomationUnmanagedBind
 }
 
 func (s *automationStore) CreateManagedBinding(ctx context.Context, binding *automation.Binding) (*automation.Binding, error) {
-	if binding == nil || binding.WebhookSecret != "" || strings.TrimSpace(binding.TargetAgentServiceID) == "" {
-		return nil, fmt.Errorf("automation managed binding create requires owner and rejects webhook_secret: %w", ErrAutomationInvalid)
+	if binding == nil || strings.TrimSpace(binding.TargetAgentServiceID) == "" {
+		return nil, fmt.Errorf("automation managed binding create requires owner: %w", ErrAutomationInvalid)
 	}
 	var out automation.Binding
 	path := "/api/v1/" + pathEscape(binding.WorkspaceKey) + "/automation/managed-bindings"
@@ -168,8 +168,8 @@ func (s *automationStore) ReplaceManagedBinding(ctx context.Context, replacement
 	if err := validateAutomationManagedBindingSnapshot(replacement.Expected); err != nil {
 		return nil, err
 	}
-	if replacement.Binding == nil || replacement.Binding.WebhookSecret != "" {
-		return nil, fmt.Errorf("automation managed binding replacement rejects nil binding or webhook_secret: %w", ErrAutomationInvalid)
+	if replacement.Binding == nil {
+		return nil, fmt.Errorf("automation managed binding replacement requires binding: %w", ErrAutomationInvalid)
 	}
 	if replacement.Binding.WorkspaceKey != replacement.Expected.WorkspaceKey ||
 		replacement.Binding.BindingID != replacement.Expected.BindingID ||

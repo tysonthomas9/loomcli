@@ -96,46 +96,6 @@ func TestConnectorCreateDuplicate(t *testing.T) {
 	}
 }
 
-func TestConnectorBindingSecretLifecycle(t *testing.T) {
-	ctx := t.Context()
-	s := newRouterTestStore(t)
-	if _, err := s.TriggerBindings().Create(ctx, routerBindingCreate("binding-1")); err != nil {
-		t.Fatalf("create trigger binding: %v", err)
-	}
-	management, err := connectorsmodule.NewManagement(s.Connectors())
-	if err != nil {
-		t.Fatalf("new connector management: %v", err)
-	}
-	if err := management.ConfigureBindingSecret(ctx, connectorsmodule.ConfigureBindingSecretCommand{
-		WorkspaceKey: "WS",
-		BindingID:    "binding-1",
-		Secret:       "binding-secret",
-	}); err != nil {
-		t.Fatalf("configure binding secret: %v", err)
-	}
-	secret, err := s.TriggerBindings().ResolveWebhookSecret(ctx, "WS", "binding-1")
-	if err != nil {
-		t.Fatalf("resolve binding secret: %v", err)
-	}
-	if secret != "binding-secret" {
-		t.Fatalf("resolved binding secret = %q, want binding-secret", secret)
-	}
-	publicBinding, err := s.TriggerBindings().Get(ctx, "WS", "binding-1")
-	if err != nil {
-		t.Fatalf("get public binding: %v", err)
-	}
-	if publicBinding.WebhookSecret != "" {
-		t.Fatal("public binding leaked its configured secret")
-	}
-	if err := management.ConfigureBindingSecret(ctx, connectorsmodule.ConfigureBindingSecretCommand{
-		WorkspaceKey: "WS",
-		BindingID:    "missing",
-		Secret:       "binding-secret",
-	}); !errors.Is(err, connectorsmodule.ErrNotFound) {
-		t.Fatalf("missing binding error = %v, want %v", err, connectorsmodule.ErrNotFound)
-	}
-}
-
 func TestConnectorRedactionOnEveryPublicReadPath(t *testing.T) {
 	ctx := t.Context()
 	s := New()

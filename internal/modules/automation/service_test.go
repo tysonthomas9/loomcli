@@ -283,15 +283,6 @@ func TestOrdinaryBindingConditionalMutationsRejectManagedConversionAndRecreation
 	}
 }
 
-func TestBindingRejectsPlaintextSecretAtCoreBoundary(t *testing.T) {
-	h := newTestHarness(t)
-	binding := seedBinding("legacy-secret", "github.secret")
-	binding.WebhookSecret = "plaintext"
-	h.persistence.seedBinding(binding)
-	_, err := h.service.GetBinding(context.Background(), "ws", "legacy-secret")
-	assertErrorIs(t, err, ErrInvalidPersistedState)
-}
-
 func TestWebhookAdmissionMatchesDeterministicallyFiltersActorsAndSnapshotsActiveTarget(t *testing.T) {
 	h := newTestHarness(t)
 	exact := seedBinding("z-exact", "github.issue.opened")

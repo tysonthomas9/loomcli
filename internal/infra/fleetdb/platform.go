@@ -162,7 +162,6 @@ func (s *triggerBindingStore) Create(ctx context.Context, in store.TriggerBindin
 		"concurrency_policy":      in.ConcurrencyPolicy,
 		"idempotency_policy":      in.IdempotencyPolicy,
 		"auth_policy":             in.AuthPolicy,
-		"webhook_secret":          in.WebhookSecret,
 		"subject_key_template":    in.SubjectKeyTemplate,
 		"retry_max_attempts":      in.RetryMaxAttempts,
 		"retry_backoff_seconds":   in.RetryBackoffSeconds,
@@ -249,17 +248,6 @@ func (s *triggerBindingStore) Update(ctx context.Context, ws, bindingID string, 
 // gap like the pre-route 405 era cannot recur silently.
 func (s *triggerBindingStore) Delete(ctx context.Context, ws, bindingID string) error {
 	return s.client.do(ctx, "DELETE", "/api/v1/"+pathEscape(ws)+"/trigger-bindings/"+pathEscape(bindingID), nil, nil)
-}
-
-func (s *triggerBindingStore) ResolveWebhookSecret(ctx context.Context, ws, bindingID string) (string, error) {
-	var out struct {
-		WebhookSecret string `json:"webhook_secret"`
-	}
-	path := "/api/v1/" + pathEscape(ws) + "/trigger-bindings/" + pathEscape(bindingID) + "/webhook-secret"
-	if err := s.client.do(ctx, "GET", path, nil, &out); err != nil {
-		return "", err
-	}
-	return out.WebhookSecret, nil
 }
 
 func (s *driverRunStore) Create(ctx context.Context, in store.DriverRunCreate) (*domain.DriverRun, error) {
@@ -874,7 +862,6 @@ func triggerBindingUpdateBody(patch store.TriggerBindingUpdate) map[string]any {
 	bodyPtr(body, "concurrency_policy", patch.ConcurrencyPolicy)
 	bodyPtr(body, "idempotency_policy", patch.IdempotencyPolicy)
 	bodyPtr(body, "auth_policy", patch.AuthPolicy)
-	bodyPtr(body, "webhook_secret", patch.WebhookSecret)
 	bodyPtr(body, "subject_key_template", patch.SubjectKeyTemplate)
 	if patch.ActorFilter != nil {
 		// Replace-whole semantics: an empty object clears the filter.

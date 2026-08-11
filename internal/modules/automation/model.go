@@ -77,20 +77,16 @@ type Binding struct {
 	ConcurrencyPolicy    BindingConcurrencyPolicy `json:"concurrency_policy"`
 	IdempotencyPolicy    string                   `json:"idempotency_policy,omitempty"`
 	AuthPolicy           string                   `json:"auth_policy,omitempty"`
-	// WebhookSecret is retained only as a redacted compatibility projection.
-	// Automation rejects nonempty values; secret ownership stays in Connectors
-	// and the webhook-ingestion workflow.
-	WebhookSecret       string       `json:"webhook_secret,omitempty"`
-	SubjectKeyTemplate  string       `json:"subject_key_template,omitempty"`
-	ActorFilter         *ActorFilter `json:"actor_filter,omitempty"`
-	RetryMaxAttempts    int          `json:"retry_max_attempts,omitempty"`
-	RetryBackoffSeconds int          `json:"retry_backoff_seconds,omitempty"`
-	Schedule            string       `json:"schedule,omitempty"`
-	ScheduleTimezone    string       `json:"schedule_timezone,omitempty"`
-	Permissions         []string     `json:"permissions,omitempty"`
-	Enabled             bool         `json:"enabled"`
-	CreatedAt           time.Time    `json:"created_at"`
-	UpdatedAt           time.Time    `json:"updated_at"`
+	SubjectKeyTemplate   string                   `json:"subject_key_template,omitempty"`
+	ActorFilter          *ActorFilter             `json:"actor_filter,omitempty"`
+	RetryMaxAttempts     int                      `json:"retry_max_attempts,omitempty"`
+	RetryBackoffSeconds  int                      `json:"retry_backoff_seconds,omitempty"`
+	Schedule             string                   `json:"schedule,omitempty"`
+	ScheduleTimezone     string                   `json:"schedule_timezone,omitempty"`
+	Permissions          []string                 `json:"permissions,omitempty"`
+	Enabled              bool                     `json:"enabled"`
+	CreatedAt            time.Time                `json:"created_at"`
+	UpdatedAt            time.Time                `json:"updated_at"`
 }
 
 type EventOrigin string

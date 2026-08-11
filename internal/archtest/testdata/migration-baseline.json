@@ -791,7 +791,6 @@
         {"file": "internal/webui/handlers/taskrunapi/module.go", "import": "github.com/tysonthomas9/loomcli/internal/store"},
         {"file": "internal/webui/handlers/terminal/agent_session.go", "import": "github.com/tysonthomas9/loomcli/internal/store"},
         {"file": "internal/webui/handlers/terminal/module.go", "import": "github.com/tysonthomas9/loomcli/internal/store"},
-        {"file": "internal/webui/handlers/webhooks/secret_resolve.go", "import": "github.com/tysonthomas9/loomcli/internal/store"},
         {"file": "internal/webui/handlers/workflows/module.go", "import": "github.com/tysonthomas9/loomcli/internal/store"}
       ]
     },
