@@ -171,6 +171,14 @@ example:
 <loom-runtime>/<workspace>/<lead>/codex/
 ```
 
+The app-server and its remote TUI also use a lead-scoped `CODEX_HOME`. Loom
+seeds that home with the user's `config.toml`, `auth.json`, and global
+`AGENTS.md`, but does not copy historical sessions or SQLite databases. A large
+shared Codex history can otherwise be reconciled into every new `sqlite_home`
+before the listener binds, making interactive lead startup exceed its readiness
+deadline. The app-server launcher owns a dedicated process group so timeout and
+shutdown cleanup includes package-manager shims and their native Codex child.
+
 This isolates lead conversations, makes cleanup clear, and avoids accidental
 cross-workspace subscriptions. A shared app-server can be reconsidered later
 only after the per-lead adapter is stable.

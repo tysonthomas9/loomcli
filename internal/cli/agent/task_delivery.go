@@ -127,7 +127,7 @@ func finalizeDaemonTaskDelivery(ctx context.Context, issues backend.IssueBackend
 	if err != nil {
 		return taskdelivery.Receipt{}, fmt.Errorf("read delivered checkout status: %w", err)
 	}
-	receipt, err := taskdelivery.AcceptCommittedCheckout(plan, beforeSHA, strings.TrimSpace(afterSHA), strings.TrimSpace(status) == "")
+	receipt, err := taskdelivery.AcceptCommittedCheckout(plan, beforeSHA, strings.TrimSpace(afterSHA), daemonCheckoutClean(status))
 	if err != nil {
 		return taskdelivery.Receipt{}, err
 	}
@@ -144,4 +144,30 @@ func finalizeDaemonTaskDelivery(ctx context.Context, issues backend.IssueBackend
 		return taskdelivery.Receipt{}, fmt.Errorf("signal host-delivered task completion: %w", err)
 	}
 	return receipt, nil
+}
+
+// daemonCheckoutClean reports whether the agent left a clean, committed
+// checkout. Loom's daemon writes lock and checkpoint bookkeeping at the root of
+// the same worktree, so those untracked files are not delivery changes. Only
+// untracked entries with the exact Loom-owned root filenames are ignored;
+// tracked changes and similarly named files elsewhere remain dirty.
+func daemonCheckoutClean(status string) bool {
+	ignored := map[string]struct{}{
+		cli.LockFileName:                   {},
+		cli.LockFileName + ".flock":        {},
+		config.CheckpointFileName:          {},
+		config.CheckpointFileName + ".tmp": {},
+	}
+	for _, line := range strings.Split(status, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "?? ") {
+			if _, ok := ignored[strings.TrimPrefix(line, "?? ")]; ok {
+				continue
+			}
+		}
+		return false
+	}
+	return true
 }
