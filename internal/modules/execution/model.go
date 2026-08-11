@@ -31,6 +31,15 @@ const (
 	StatusCancelled Status = "cancelled"
 )
 
+func (status Status) IsTerminal() bool {
+	switch status {
+	case StatusSucceeded, StatusFailed, StatusBlocked, StatusCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
 // Owner is the exact resource-bound lease/fence envelope returned by the
 // authoritative claim transaction.
 type Owner struct {

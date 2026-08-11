@@ -614,7 +614,7 @@ func TestSessionServiceAgentSessionTranscriptUsesAgentOwnership(t *testing.T) {
 		WorkspaceKey: "WS",
 		SessionID:    "interactive-1",
 		AgentID:      "local-review",
-		Kind:         domain.AgentSessionKindOrchestration,
+		Kind:         domain.AgentSessionKindInteractive,
 		Status:       domain.AgentSessionCompleted,
 		// Fleet's interaction transcript command stores the canonical artifact
 		// ID directly. The reader also retains artifact:// compatibility for
@@ -773,7 +773,7 @@ func TestSessionServiceAgentTranscriptPreservesManagedContentFailureKind(t *test
 		WorkspaceKey: "WS",
 		SessionID:    "interactive-errors",
 		AgentID:      "local-review",
-		Kind:         domain.AgentSessionKindOrchestration,
+		Kind:         domain.AgentSessionKindInteractive,
 		Status:       domain.AgentSessionCompleted,
 		Metadata:     map[string]string{"transcript_ref": "artifact://" + finalized.ArtifactID},
 	}); err != nil {
@@ -857,7 +857,7 @@ func TestSessionServiceAgentTranscriptRejectsUnfinalizedArtifact(t *testing.T) {
 				WorkspaceKey: "WS",
 				SessionID:    sessionID,
 				AgentID:      "local-review",
-				Kind:         domain.AgentSessionKindOrchestration,
+				Kind:         domain.AgentSessionKindInteractive,
 				Status:       domain.AgentSessionCompleted,
 				Metadata:     map[string]string{"transcript_ref": "artifact://" + artifactID},
 			}); err != nil {

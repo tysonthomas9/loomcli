@@ -219,10 +219,13 @@ func startIssueJournalBridge(
 	repositoryRequiredBlocker trigger.TaskReadyRepositoryRequiredBlocker,
 	source trigger.InternalEventEmitter,
 	config issueJournalConfig,
-) {
-	bridge := buildIssueJournalBridge(st, issueLookup, readySnapshots, repositoryRequiredBlocker, source, config)
+) error {
+	bridge, err := buildIssueJournalBridge(st, issueLookup, readySnapshots, repositoryRequiredBlocker, source, config)
+	if err != nil {
+		return err
+	}
 	if bridge == nil {
-		return
+		return nil
 	}
 	interval := config.Interval
 	slog.Info("Issue journal bridge enabled", "workspace", bridge.WorkspaceKey, "interval", interval,
@@ -246,6 +249,7 @@ func startIssueJournalBridge(
 			}
 		}
 	}()
+	return nil
 }
 
 func buildIssueJournalBridge(
@@ -255,26 +259,31 @@ func buildIssueJournalBridge(
 	repositoryRequiredBlocker trigger.TaskReadyRepositoryRequiredBlocker,
 	source trigger.InternalEventEmitter,
 	config issueJournalConfig,
-) *trigger.IssueJournalBridge {
+) (*trigger.IssueJournalBridge, error) {
 	if st == nil || source == nil {
 		if st != nil {
 			slog.Info("issue journal bridge disabled: Automation system eventing is unavailable")
 		}
-		return nil
+		return nil, nil
 	}
 	if config.Disabled {
 		slog.Info("issue journal bridge disabled: LOOM_ISSUE_BRIDGE_DISABLED set")
-		return nil
+		return nil, nil
 	}
 	reader, ok := st.TriggerEvents().(store.IssueJournalReader)
 	if !ok {
 		slog.Info("issue journal bridge disabled: store has no journal reader")
-		return nil
+		return nil, nil
+	}
+	if (config.EmitTaskReady || config.EmitTaskReview) && (issueLookup == nil || repositoryRequiredBlocker == nil) {
+		return nil, fmt.Errorf("compose issue journal task lanes: current issue lookup and repository admission are required")
+	}
+	if config.EmitTaskReady && readySnapshots == nil {
+		return nil, fmt.Errorf("compose issue journal task-ready lane: current ready snapshots are required")
 	}
 	cursors, err := trigger.NewFileIssueJournalCursorStore(config.StatePath, slog.Default())
 	if err != nil {
-		slog.Error("issue journal bridge disabled: cannot load cursor state", "err", err)
-		return nil
+		return nil, fmt.Errorf("compose issue journal cursor store: %w", err)
 	}
 	return &trigger.IssueJournalBridge{
 		Store:  st,
@@ -293,7 +302,7 @@ func buildIssueJournalBridge(
 		IssueLookup:               issueLookup,
 		ReadySnapshots:            readySnapshots,
 		RepositoryRequiredBlocker: repositoryRequiredBlocker,
-	}
+	}, nil
 }
 
 // taskReadyRepositoryRequired reports whether a runnable issue without an

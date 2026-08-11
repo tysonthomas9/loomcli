@@ -20,6 +20,10 @@ const (
 	DriverRunSuspendedAwait DriverRunStatus = "suspended_awaiting_event"
 )
 
+func (status DriverAwaitStatus) IsTerminal() bool {
+	return status == DriverAwaitSatisfied || status == DriverAwaitTimedOut
+}
+
 func (status DriverRunStatus) IsTerminal() bool {
 	switch status {
 	case DriverRunCompleted, DriverRunFailed, DriverRunNeedsReview, DriverRunCancelled:
@@ -61,6 +65,18 @@ type DriverRun struct {
 	ResumeSourceEventID   string
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
+}
+
+// DriverRunQuery is Execution's consumer-owned run-history filter. It keeps
+// query callers independent of the horizontal repository filter model.
+type DriverRunQuery struct {
+	WorkspaceKey   string
+	DriverID       string
+	EpicID         string
+	ParentRunID    string
+	AgentServiceID string
+	Status         DriverRunStatus
+	Limit          int
 }
 
 type SubmitDriverRunCommand struct {

@@ -9,6 +9,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -54,7 +55,7 @@ func DriverVersionEffectiveTrust(driver *workflowcatalog.Driver, version *workfl
 // here (not in internal/driver/sandbox) because it depends on
 // DriverVersionEffectiveTrust; the sandbox package owns only the admission
 // decision once a trust level is known.
-func driverTrustLevel(ctx context.Context, drivers store.DriverStore, run *domain.DriverRun, version *workflowcatalog.DriverVersion) (workflowcatalog.DriverTrustLevel, error) {
+func driverTrustLevel(ctx context.Context, drivers store.DriverStore, run *execution.DriverRun, version *workflowcatalog.DriverVersion) (workflowcatalog.DriverTrustLevel, error) {
 	driver, err := drivers.Get(ctx, run.WorkspaceKey, run.DriverID)
 	if errors.Is(err, domain.ErrNotFound) {
 		return workflowcatalog.DriverTrustUntrusted, nil

@@ -50,7 +50,6 @@ type HookConfig struct {
 	PTYMultiMgr *terminal.MultiPTYManager
 	FleetReg    *fleet.StoreRegistry
 	FleetURL    string
-	FleetWS     string
 	FleetKey    string
 	FleetActor  string // X-Actor header value (fleet-db --auth-dev-mode)
 	FleetMode   bool
@@ -81,7 +80,7 @@ func RegisterHooks(registry *WorkspaceRegistry, cfg HookConfig) RegisteredHooks 
 		// FleetBackendHook MUST be added before FleetSubscriberHook so that
 		// by the time FleetSubscriberHook.Activate fires, the FleetBackend
 		// resource is already in the workspace handle.
-		_ = registry.AddHook(hooks.NewFleetBackendHook(cfg.FleetURL, cfg.FleetWS, cfg.FleetKey, cfg.FleetActor, cfg.Logger))
+		_ = registry.AddHook(hooks.NewFleetBackendHook(cfg.FleetURL, cfg.FleetKey, cfg.FleetActor, cfg.Logger))
 	}
 
 	// FleetDB-backed SSE push: FleetSubscriberHook bridges the per-workspace

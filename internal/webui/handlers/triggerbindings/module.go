@@ -18,7 +18,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/app/workflowbinding"
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/modules/connectors"
@@ -230,7 +229,7 @@ func nextAutomationFireFor(binding *automation.Binding, now time.Time) *time.Tim
 }
 
 func nextFire(schedule, timezone string, now time.Time) *time.Time {
-	next, err := trigger.NextFire(schedule, timezone, now)
+	next, err := automation.NextScheduledFire(schedule, timezone, now)
 	if err != nil {
 		return nil
 	}
@@ -733,7 +732,7 @@ func buildBindingPatch(w http.ResponseWriter, existing *automation.Binding, requ
 			return patch, false
 		}
 		schedule := strings.TrimSpace(*request.Schedule)
-		if err := trigger.ValidateSchedule(schedule); err != nil {
+		if err := automation.ValidateSchedule(schedule); err != nil {
 			handler.RespondError(w, http.StatusBadRequest, err.Error())
 			return patch, false
 		}
@@ -745,7 +744,7 @@ func buildBindingPatch(w http.ResponseWriter, existing *automation.Binding, requ
 			return patch, false
 		}
 		timezone := strings.TrimSpace(*request.ScheduleTimezone)
-		if err := trigger.ValidateScheduleTimezone(timezone); err != nil {
+		if err := automation.ValidateScheduleTimezone(timezone); err != nil {
 			handler.RespondError(w, http.StatusBadRequest, err.Error())
 			return patch, false
 		}

@@ -48,9 +48,7 @@ func TestSessionRouteMigration_OldFlatRoutesReturn404(t *testing.T) {
 	// "handler returns error").
 	sessDir := t.TempDir()
 
-	wsExistsFn := func(id string) bool { return id == "test-ws" }
-
-	app := &Server{config: webui.ServerConfig{}, wsExistsFn: wsExistsFn}
+	app := &Server{config: webui.ServerConfig{}, wsResolveFn: testWorkspaceResolver("test-ws")}
 	app.sessSvc = sessioncoord.NewSessionService(testSessionWorkspaceStore(t, sessDir), nil)
 	setupTestRoutes(t, app)
 
@@ -91,9 +89,7 @@ func TestSessionRouteMigration_OldFlatRoutesReturn404(t *testing.T) {
 func TestSessionRouteMigration_WorkspaceScopedRoutesRegistered(t *testing.T) {
 	sessDir := t.TempDir()
 
-	wsExistsFn := func(id string) bool { return id == "test-ws" }
-
-	app := &Server{config: webui.ServerConfig{}, wsExistsFn: wsExistsFn}
+	app := &Server{config: webui.ServerConfig{}, wsResolveFn: testWorkspaceResolver("test-ws")}
 	app.sessSvc = sessioncoord.NewSessionService(testSessionWorkspaceStore(t, sessDir), nil)
 	setupTestRoutes(t, app)
 
@@ -140,9 +136,7 @@ func TestSessionRouteMigration_WorkspaceScopedRoutesRegistered(t *testing.T) {
 func TestSessionRouteMigration_UnknownWorkspaceReturns404(t *testing.T) {
 	sessDir := t.TempDir()
 
-	wsExistsFn := func(id string) bool { return id == "test-ws" }
-
-	app := &Server{config: webui.ServerConfig{}, wsExistsFn: wsExistsFn}
+	app := &Server{config: webui.ServerConfig{}, wsResolveFn: testWorkspaceResolver("test-ws")}
 	app.sessSvc = sessioncoord.NewSessionService(testSessionWorkspaceStore(t, sessDir), nil)
 	setupTestRoutes(t, app)
 
@@ -177,9 +171,7 @@ func TestSessionRouteMigration_UnknownWorkspaceReturns404(t *testing.T) {
 func TestSessionRouteMigration_WorkspaceScopedListReturnsJSON(t *testing.T) {
 	sessDir := t.TempDir()
 
-	wsExistsFn := func(id string) bool { return id == "test-ws" }
-
-	app := &Server{config: webui.ServerConfig{}, wsExistsFn: wsExistsFn}
+	app := &Server{config: webui.ServerConfig{}, wsResolveFn: testWorkspaceResolver("test-ws")}
 	app.sessSvc = sessioncoord.NewSessionService(testSessionWorkspaceStore(t, sessDir), nil)
 	setupTestRoutes(t, app)
 
@@ -224,9 +216,7 @@ func TestSessionRouteMigration_WorkspaceScopedSessionWithData(t *testing.T) {
 	sessStore, sessDir := newTestSessionStoreWithDir(t)
 	sess := createTestSession(t, sessStore, "loom-routed")
 
-	wsExistsFn := func(id string) bool { return id == "test-ws" }
-
-	app := &Server{config: webui.ServerConfig{}, wsExistsFn: wsExistsFn}
+	app := &Server{config: webui.ServerConfig{}, wsResolveFn: testWorkspaceResolver("test-ws")}
 	app.sessSvc = sessioncoord.NewSessionService(testSessionWorkspaceStore(t, sessDir), nil)
 	setupTestRoutes(t, app)
 
@@ -260,9 +250,7 @@ func TestSessionRouteMigration_WorkspaceScopedDiffEndpoint(t *testing.T) {
 	sessStore, sessDir := newTestSessionStoreWithDir(t)
 	sess := createTestSession(t, sessStore, "loom-diffrouted")
 
-	wsExistsFn := func(id string) bool { return id == "test-ws" }
-
-	app := &Server{config: webui.ServerConfig{}, wsExistsFn: wsExistsFn}
+	app := &Server{config: webui.ServerConfig{}, wsResolveFn: testWorkspaceResolver("test-ws")}
 	app.sessSvc = sessioncoord.NewSessionService(testSessionWorkspaceStore(t, sessDir), nil)
 	setupTestRoutes(t, app)
 
@@ -304,9 +292,7 @@ func TestSessionRouteMigration_WorkspaceScopedTranscriptEndpoint(t *testing.T) {
 		t.Fatalf("SyncNativeTranscript: %v", err)
 	}
 
-	wsExistsFn := func(id string) bool { return id == "test-ws" }
-
-	app := &Server{config: webui.ServerConfig{}, wsExistsFn: wsExistsFn}
+	app := &Server{config: webui.ServerConfig{}, wsResolveFn: testWorkspaceResolver("test-ws")}
 	app.sessSvc = sessioncoord.NewSessionService(testSessionWorkspaceStore(t, sessDir), nil)
 	setupTestRoutes(t, app)
 

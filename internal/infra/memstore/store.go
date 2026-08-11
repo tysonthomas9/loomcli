@@ -39,7 +39,6 @@ type Store struct {
 	bindings   *triggerBindingStore
 	events     *triggerEventStore
 	deliveries *triggerDeliveryStore
-	routes     *triggerRouteStore
 	runs       *driverRunStore
 	steps      *driverStepStore
 	taskRuns   *taskRunStore
@@ -73,7 +72,6 @@ func New() *Store { //nolint:funlen // Constructor wiring is deliberately explic
 	events := newTriggerEventStore()
 	runs.events = events
 	deliveries := newTriggerDeliveryStore(bindings)
-	routes := &triggerRouteStore{bindings: bindings, events: events, deliveries: deliveries, runs: runs}
 	awaits := newAwaitStore(events)
 	awaits.runs = runs
 	ownership := newAgentOwnershipLeaseStore()
@@ -97,7 +95,6 @@ func New() *Store { //nolint:funlen // Constructor wiring is deliberately explic
 		bindings:   bindings,
 		events:     events,
 		deliveries: deliveries,
-		routes:     routes,
 		runs:       runs,
 		steps:      steps,
 		taskRuns:   taskRuns,
@@ -189,8 +186,6 @@ func (s *Store) TriggerBindings() store.TriggerBindingStore { return s.bindings 
 func (s *Store) TriggerEvents() store.TriggerEventStore { return s.events }
 
 func (s *Store) TriggerDeliveries() store.TriggerDeliveryStore { return s.deliveries }
-
-func (s *Store) TriggerRoutes() store.TriggerRouteDispatcher { return s.routes }
 
 func (s *Store) DriverRuns() store.DriverRunStore { return s.runs }
 

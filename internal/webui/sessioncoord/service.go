@@ -429,7 +429,7 @@ func firstNonEmptySessionValue(values ...string) string {
 	return ""
 }
 
-//nolint:funlen // Keep canonical TaskRun projection, legacy compatibility merge, and evidence enrichment in one deterministic query.
+//nolint:funlen // Keep canonical Execution and Interaction projections plus evidence enrichment in one deterministic query.
 func (s *sessionServiceImpl) controlPlaneTaskSessions(ctx context.Context, wsID, taskID string) ([]SessionListItem, error) {
 	if s.store == nil {
 		return nil, nil
@@ -451,7 +451,6 @@ func (s *sessionServiceImpl) controlPlaneTaskSessions(ctx context.Context, wsID,
 	}
 	artifactKinds := s.taskRunArtifactKinds(ctx, wsID, taskID)
 	items := make([]SessionListItem, 0, len(taskRuns)+len(records))
-	representedTaskRuns := make(map[string]struct{}, len(taskRuns))
 	representedSessionIDs := make(map[string]struct{}, len(taskRuns))
 	for _, run := range taskRuns {
 		if run == nil || run.WorkspaceKey != wsID || run.TaskID != taskID {
@@ -463,14 +462,10 @@ func (s *sessionServiceImpl) controlPlaneTaskSessions(ctx context.Context, wsID,
 		}
 		fillExecutionTaskRunEvidence(&item, run, artifactKinds)
 		items = append(items, item)
-		representedTaskRuns[run.TaskRunID] = struct{}{}
 		representedSessionIDs[item.SessionID] = struct{}{}
 	}
 	for _, rec := range records {
 		if rec == nil {
-			continue
-		}
-		if _, represented := representedTaskRuns[legacyAgentSessionTaskRunID(rec)]; represented {
 			continue
 		}
 		if _, represented := representedSessionIDs[rec.SessionID]; represented {
@@ -600,8 +595,8 @@ func (s *sessionServiceImpl) GetSession(ctx context.Context, wsID, taskID, sessi
 		return nil, apperrors.ErrValidation("invalid session ID")
 	}
 	// Execution owns batch-attempt identity. Resolve it before consulting the
-	// legacy file store so a stale local session with the same route ID cannot
-	// shadow the canonical TaskRun lifecycle or evidence.
+	// local interactive-session store so a colliding local ID cannot shadow the
+	// canonical TaskRun lifecycle or evidence.
 	if run, runErr := s.executionTaskRunForSession(ctx, wsID, taskID, sessionID); runErr == nil {
 		return &SessionDetailData{
 			SessionMetadata: sessions.SessionMetadata{SessionRecord: sessionRecordFromTaskRun(run)},
@@ -612,7 +607,7 @@ func (s *sessionServiceImpl) GetSession(ctx context.Context, wsID, taskID, sessi
 	}
 	store, err := s.findStoreForSession(ctx, wsID, sessionID)
 	if err != nil {
-		// Execution TaskRuns and legacy control-plane task sessions do not
+		// Execution TaskRuns and Interaction sessions do not
 		// necessarily have file-store metadata. List/get/transcript must resolve
 		// the same durable projection so a row returned by the list endpoint
 		// remains navigable.
@@ -663,9 +658,8 @@ func (s *sessionServiceImpl) controlPlaneSessionRecord(ctx context.Context, wsID
 	return rec, nil
 }
 
-// controlPlaneSession resolves batch attempts from Execution TaskRun first.
-// AgentSession remains only as a compatibility fallback for historical rows
-// and for task-associated Interaction sessions.
+// controlPlaneSession resolves batch attempts from Execution TaskRun first and
+// task-associated interactive sessions from Interaction second.
 func (s *sessionServiceImpl) controlPlaneSession(ctx context.Context, wsID, taskID, sessionID string) (*SessionDetailData, error) {
 	run, runErr := s.executionTaskRunForSession(ctx, wsID, taskID, sessionID)
 	if runErr == nil {
@@ -695,7 +689,7 @@ func (s *sessionServiceImpl) GetSessionTranscript(ctx context.Context, wsID, tas
 		return nil, apperrors.ErrValidation("invalid session ID")
 	}
 	// TaskRun artifacts are the canonical transcript for batch attempts. A
-	// same-named local session is only compatibility data and must not win.
+	// same-named local interaction session must not win.
 	if run, runErr := s.executionTaskRunForSession(ctx, wsID, taskID, sessionID); runErr == nil {
 		return s.executionTaskRunTranscript(ctx, wsID, run)
 	} else if !serviceErrorNotFound(runErr) {

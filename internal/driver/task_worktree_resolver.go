@@ -401,7 +401,6 @@ func findRepoBySelector(repos []*workspacemodule.Repository, selector string) *w
 		return nil
 	}
 	want := normalizedRepoToken(selector)
-	wantBase := normalizedRepoToken(repoBasename(selector))
 	var exact []*workspacemodule.Repository
 	for _, repo := range repos {
 		if repoMatchesExactSelector(repo, want) {
@@ -413,34 +412,6 @@ func findRepoBySelector(repos []*workspacemodule.Repository, selector string) *w
 	}
 	if len(exact) > 1 {
 		return nil
-	}
-
-	// Backward-compatible basename fallback is allowed only when it identifies
-	// exactly one workspace repo. Qualified selectors such as org-a/app must
-	// never silently select org-b/app just because both basenames are "app".
-	var fallback []*workspacemodule.Repository
-	for _, repo := range repos {
-		if repo == nil {
-			continue
-		}
-		candidates := []string{
-			repo.Name,
-			firstNonEmpty(repo.SourceRepoID, repo.Name),
-			repo.RemoteURL,
-			repo.Remote,
-			repoBasename(repo.RemoteURL),
-			repoBasename(repo.Remote),
-		}
-		for _, candidate := range candidates {
-			got := normalizedRepoToken(candidate)
-			if got != "" && got == wantBase {
-				fallback = append(fallback, repo)
-				break
-			}
-		}
-	}
-	if len(fallback) == 1 {
-		return fallback[0]
 	}
 	return nil
 }
@@ -494,19 +465,6 @@ func normalizedRepoToken(value string) string {
 	value = strings.TrimSpace(strings.ToLower(value))
 	value = strings.TrimSuffix(value, ".git")
 	value = strings.Trim(value, "/")
-	return value
-}
-
-func repoBasename(value string) string {
-	value = strings.TrimSpace(value)
-	value = strings.TrimSuffix(value, ".git")
-	value = strings.TrimRight(value, "/")
-	if value == "" {
-		return ""
-	}
-	if idx := strings.LastIndexAny(value, "/:"); idx >= 0 && idx+1 < len(value) {
-		return value[idx+1:]
-	}
 	return value
 }
 

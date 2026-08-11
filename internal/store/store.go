@@ -46,7 +46,6 @@ type Store interface {
 	TriggerBindings() TriggerBindingStore
 	TriggerEvents() TriggerEventStore
 	TriggerDeliveries() TriggerDeliveryStore
-	TriggerRoutes() TriggerRouteDispatcher
 	DriverRuns() DriverRunStore
 	DriverSteps() DriverStepStore
 	TaskRuns() TaskRunStore

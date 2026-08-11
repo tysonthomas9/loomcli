@@ -28,10 +28,7 @@ const (
 	taskReadyRouteKey                    = "internal.task.ready"
 	promptAgentDriverID                  = "prompt-agent"
 	taskReadyReconcileSourceEventPrefix  = "task-ready-reconcile-"
-	taskReadyExhaustedRecoverySuffix     = "-exhausted-recovery-v1"
 	taskReadyExhaustedRecoveryHashPrefix = "task-ready-reconcile-exhausted-recovery-v1-"
-	maxTaskReadyRecoverySourceEventIDLen = 128
-	maxDeliveryDispatchIdempotencyKeyLen = 128
 	deliveryDispatchHashPrefix           = "delivery-dispatch:sha256:"
 	internalAdmissionHashPrefix          = "internal:sha256:"
 )
@@ -207,16 +204,11 @@ func exhaustedTaskReadyReplayNeedsRecovery(result *AdmissionResult) bool {
 }
 
 func isTaskReadyExhaustedRecoverySourceEventID(sourceEventID string) bool {
-	return strings.HasSuffix(sourceEventID, taskReadyExhaustedRecoverySuffix) ||
-		strings.HasPrefix(sourceEventID, taskReadyExhaustedRecoveryHashPrefix)
+	return strings.HasPrefix(sourceEventID, taskReadyExhaustedRecoveryHashPrefix)
 }
 
 func taskReadyExhaustedRecoverySourceEventID(sourceEventID string) string {
-	legacy := sourceEventID + taskReadyExhaustedRecoverySuffix
-	if len(legacy) <= maxTaskReadyRecoverySourceEventIDLen {
-		return legacy
-	}
-	sum := sha256.Sum256([]byte(legacy))
+	sum := sha256.Sum256([]byte(sourceEventID))
 	return taskReadyExhaustedRecoveryHashPrefix + hex.EncodeToString(sum[:])
 }
 
@@ -465,32 +457,14 @@ func reservedDispatchRequest(reserved *ReservationResult, item ReservedDelivery)
 
 // DeliveryDispatchIdempotencyKey derives the canonical per-binding execution
 // identity for one admitted delivery. It is the Automation-owned policy used
-// by delivery adapters: incomplete event/binding coordinates stay absent, every
-// historically valid {eventIdempotencyKey}#{bindingID} value is preserved
-// byte-for-byte, and only a legacy concatenation Fleet would reject is mapped
-// to a bounded, deterministic digest of the complete legacy value.
+// by delivery adapters: incomplete event/binding coordinates stay absent and
+// every complete identity uses the same bounded digest representation.
 func DeliveryDispatchIdempotencyKey(eventIdempotencyKey, bindingID string) string {
 	if eventIdempotencyKey == "" || bindingID == "" {
 		return ""
 	}
-	legacy := eventIdempotencyKey + "#" + bindingID
-	if deliveryDispatchLegacyKeyAccepted(legacy) {
-		return legacy
-	}
-	sum := sha256.Sum256([]byte(legacy))
+	sum := sha256.Sum256([]byte(eventIdempotencyKey + "#" + bindingID))
 	return deliveryDispatchHashPrefix + hex.EncodeToString(sum[:])
-}
-
-func deliveryDispatchLegacyKeyAccepted(key string) bool {
-	if key == "" || len(key) > maxDeliveryDispatchIdempotencyKeyLen {
-		return false
-	}
-	for _, char := range key {
-		if char < 0x21 || char > 0x7e {
-			return false
-		}
-	}
-	return true
 }
 
 func initialDeliveryTransition(workspace string, delivery *Delivery) DeliveryTransition {
@@ -831,12 +805,10 @@ func eventActorKind(origin EventOrigin, actor string) string {
 	return kind
 }
 
-func internalEventIdempotencyKey(workspace, sourceEventID string) string {
-	legacy := "internal:" + workspace + ":" + sourceEventID
-	if deliveryDispatchLegacyKeyAccepted(legacy) {
-		return legacy
-	}
-	sum := sha256.Sum256([]byte(legacy))
+// InternalEventIdempotencyKey derives Automation's canonical identity for an
+// internally emitted event.
+func InternalEventIdempotencyKey(workspace, sourceEventID string) string {
+	sum := sha256.Sum256([]byte(workspace + ":" + sourceEventID))
 	return internalAdmissionHashPrefix + hex.EncodeToString(sum[:])
 }
 

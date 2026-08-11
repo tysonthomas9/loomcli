@@ -85,7 +85,10 @@ func (b *IssueJournalBridge) emitTaskReview(ctx context.Context, ws string, ev s
 	// fallback repository or deletion of its sole fallback after lookup. The
 	// atomic command returns the canonical Review projection or blocks/suppresses
 	// this generation; a stale pre-read never becomes dispatch authority.
-	if snapshot != nil && taskReadyNeedsRepositoryAdmission(*snapshot) && b.RepositoryRequiredBlocker != nil {
+	if snapshot != nil && taskReadyNeedsRepositoryAdmission(*snapshot) {
+		if b.RepositoryRequiredBlocker == nil {
+			return false, fmt.Errorf("task.review requires repository admission: %w", domain.ErrInvalid)
+		}
 		admission, blockErr := b.RepositoryRequiredBlocker(ctx, ws, snapshot.TaskID)
 		if blockErr != nil {
 			return false, fmt.Errorf("admit repository for review task %q in workspace %q: %w", snapshot.TaskID, ws, blockErr)
@@ -137,7 +140,7 @@ func (b *IssueJournalBridge) toTaskReviewEvent(
 	ev store.JournalEvent,
 ) (InternalEvent, bool, *TaskReadySnapshot, error) {
 	if b.IssueLookup == nil {
-		return InternalEvent{}, false, nil, nil
+		return InternalEvent{}, false, nil, fmt.Errorf("task.review requires current issue lookup: %w", domain.ErrInvalid)
 	}
 	snapshot, err := b.IssueLookup(ctx, ws, ev.EntityID)
 	if err != nil {

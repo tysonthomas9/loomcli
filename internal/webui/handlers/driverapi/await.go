@@ -131,7 +131,7 @@ func (m *Module) awaitDriverRun(
 	ctx context.Context,
 	ws string,
 	id driverIdentity,
-	parent *domain.DriverRun,
+	parent *execution.DriverRun,
 	pattern string,
 	actorAllow []string,
 	timeoutMs int64,
@@ -180,7 +180,7 @@ func (m *Module) executionAwaitEventResponse(ctx context.Context, ws string, out
 		return awaitEventResponse{}
 	}
 	resp := awaitEventResponse{Status: outcome.Status}
-	inst := legacyExecutionAwaitInstance(outcome.Instance)
+	inst := outcome.Instance
 	if inst == nil {
 		return resp
 	}
@@ -193,23 +193,10 @@ func (m *Module) executionAwaitEventResponse(ctx context.Context, ws string, out
 	return resp
 }
 
-func legacyExecutionAwaitInstance(instance *execution.DriverAwaitInstance) *domain.AwaitInstance {
-	if instance == nil {
-		return nil
-	}
-	return &domain.AwaitInstance{
-		WorkspaceKey: instance.WorkspaceKey, InstanceKey: instance.InstanceKey, RunID: instance.RunID,
-		Pattern: instance.Pattern, ActorAllow: append([]string(nil), instance.ActorAllow...),
-		Deadline: instance.Deadline, RegisteredAt: instance.RegisteredAt, Status: domain.AwaitStatus(instance.Status),
-		SatisfiedByEventID: instance.SatisfiedByEventID, SatisfiedActor: instance.SatisfiedActor,
-		SatisfiedPayload: append([]byte(nil), instance.SatisfiedPayload...), ResumedAt: instance.ResumedAt,
-	}
-}
-
 // awaitWireEvent builds the recorded-event payload from the terminal await
 // row, enriching actor/occurredAt from the trigger-event journal best-effort
 // (synthetic timeout events are not journaled).
-func (m *Module) awaitWireEvent(ctx context.Context, ws string, inst *domain.AwaitInstance) *awaitWireEvent {
+func (m *Module) awaitWireEvent(ctx context.Context, ws string, inst *execution.DriverAwaitInstance) *awaitWireEvent {
 	event := &awaitWireEvent{ID: inst.SatisfiedByEventID, Payload: inst.SatisfiedPayload}
 	if inst.ResumedAt != nil {
 		event.OccurredAt = *inst.ResumedAt

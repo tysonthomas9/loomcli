@@ -109,7 +109,7 @@ func (m *Module) receiveWebhook(w http.ResponseWriter, r *http.Request) {
 
 	idempotencyKey := name + ":" + event.DeliveryID
 	result, err := m.workflow.Ingest(r.Context(), webhookingestion.IngestRequest{
-		WorkspaceKey: ws, SourceKind: name, RouteKey: event.RouteKey,
+		WorkspaceKey: ws, SourceKind: name, SourceRef: event.RouteKey, RouteKey: event.RouteKey,
 		SourceEventID: event.DeliveryID, EventType: event.EventType,
 		SubjectRef: event.SubjectRef, ActorRef: event.ActorRef,
 		RawPayloadDigest: payloadDigest(normalizedPayload(body)),

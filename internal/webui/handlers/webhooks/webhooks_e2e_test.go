@@ -25,9 +25,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 
 	appserve "github.com/tysonthomas9/loomcli/internal/app/serve"
+	appworkflowauthoring "github.com/tysonthomas9/loomcli/internal/app/workflowauthoring"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	workflowauthoring "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution/authoring"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
@@ -145,10 +145,15 @@ type liveGitHubPR struct {
 // githubWebhookResponse pins the BREAKING router-v2 202 wire: deliveries[]
 // only, no top-level driver_run_id / driver_run.
 type githubWebhookResponse struct {
-	Status         string                       `json:"status"`
-	RouteKey       string                       `json:"route_key"`
-	IdempotencyKey string                       `json:"idempotency_key"`
-	Deliveries     []store.TriggerRouteDelivery `json:"deliveries"`
+	Status         string `json:"status"`
+	RouteKey       string `json:"route_key"`
+	IdempotencyKey string `json:"idempotency_key"`
+	Deliveries     []struct {
+		DeliveryID string                    `json:"delivery_id"`
+		BindingID  string                    `json:"trigger_binding_id"`
+		RunID      string                    `json:"driver_run_id"`
+		Status     automation.DeliveryStatus `json:"status"`
+	} `json:"deliveries"`
 }
 
 // primaryRunID returns the first delivery leg's run id — the exact-RouteKey
@@ -607,16 +612,23 @@ func (e *githubWebhookE2E) registerLiveGitHubDriver(live liveGitHubPR) *automati
 	if err != nil {
 		e.t.Fatalf("authorize live GitHub driver activation: %v", err)
 	}
-	registered, err := workflowauthoring.AuthorNativeFlueDriver(
+	coordinator, err := appworkflowauthoring.NewWithNative(
+		workflowauthoring.NewBundleStager(),
+		workflowauthoring.NewNativeBundleStager(),
+	)
+	if err != nil {
+		e.t.Fatalf("compose live GitHub driver authoring: %v", err)
+	}
+	registered, err := coordinator.AuthorNative(
 		ctx,
 		catalog.CatalogAPI(),
 		catalog.VersionAuthoringAPI(),
-		workflowauthoring.NativeAuthoringAuthorities{
+		appworkflowauthoring.NativeAuthoringAuthorities{
 			Author:   author,
 			Approve:  &approve,
 			Activate: &activate,
 		},
-		driverpkg.RegisterFlueOptions{
+		appworkflowauthoring.NativeOptions{
 			WorkspaceKey: e.workspace,
 			WorkDir:      e.workDir,
 			DistPath:     "dist",
@@ -624,7 +636,6 @@ func (e *githubWebhookE2E) registerLiveGitHubDriver(live liveGitHubPR) *automati
 			DriverID:     "github-pr-review",
 			WorkflowName: "github-pr-review",
 			SourceRef:    "github-live-e2e://" + live.Repo + "#" + strconv.Itoa(live.Number),
-			CreatedBy:    e.actor,
 			Activate:     true,
 			Trust:        workflowcatalog.DriverTrustTrusted,
 		},

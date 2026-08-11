@@ -400,20 +400,17 @@ func latestAgentSessionsForMonitor(ctx context.Context, st store.Store, wsKey st
 	return out
 }
 
-// latestOrchestrationSessionsForMonitor returns the most recent
-// orchestration session per lead agent. Single bulk query replaces a
-// per-agent OrchestrationSessionIDFor call inside the agent loop.
-func latestOrchestrationSessionsForMonitor(ctx context.Context, st store.Store, wsKey string) map[string]*domain.AgentSession {
+func latestInteractiveSessionsForMonitor(ctx context.Context, st store.Store, wsKey string) map[string]*domain.AgentSession {
 	out := make(map[string]*domain.AgentSession)
 	if st == nil || st.AgentSessions() == nil || wsKey == "" {
 		return out
 	}
 	sessions, err := st.AgentSessions().List(ctx, wsKey, store.AgentSessionFilter{
-		Kind:  domain.AgentSessionKindOrchestration,
+		Kind:  domain.AgentSessionKindInteractive,
 		Limit: 10000,
 	})
 	if err != nil {
-		log.Printf("Failed to list orchestration sessions for monitor response: %v", err)
+		log.Printf("Failed to list interactive sessions for monitor response: %v", err)
 		return out
 	}
 	for _, session := range sessions {

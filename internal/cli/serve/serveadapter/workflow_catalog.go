@@ -141,7 +141,7 @@ func RefreshBoundPromptAgentWorkflows(
 	}
 	return coordinator.RefreshBoundPromptAgentWorkflows(
 		ctx,
-		workflowdefs.NewBoundPromptAgentIndex(handle.Store),
+		workflowdefs.NewBoundPromptAgentIndex(handle.Store.Workspaces(), handle.Store.TriggerBindings()),
 		module.CatalogAPI(),
 		module.VersionAuthoringAPI(),
 		module,

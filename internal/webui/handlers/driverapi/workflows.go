@@ -59,7 +59,7 @@ func normalizedWorkflowStartPayload(input json.RawMessage) (json.RawMessage, err
 	return payload, nil
 }
 
-func workflowStartOwner(parent *domain.DriverRun, id driverIdentity) (execution.Owner, error) {
+func workflowStartOwner(parent *execution.DriverRun, id driverIdentity) (execution.Owner, error) {
 	fence, err := id.FencingToken()
 	if err != nil {
 		return execution.Owner{}, err
@@ -123,15 +123,11 @@ func (m *Module) workflowsStart(ctx context.Context, ws string, id driverIdentit
 	if err != nil {
 		return nil, err
 	}
-	child, err := driverpkg.LegacyDriverRunSnapshot(childSnapshot)
-	if err != nil {
-		return nil, err
-	}
 	return workflowsStartResponse{
-		ChildRunID:   child.RunID,
-		WorkflowName: child.DriverID,
-		Status:       string(child.Status),
-		ParentRunID:  child.ParentRunID,
+		ChildRunID:   childSnapshot.RunID,
+		WorkflowName: childSnapshot.DriverID,
+		Status:       string(childSnapshot.Status),
+		ParentRunID:  childSnapshot.ParentRunID,
 	}, nil
 }
 
@@ -202,7 +198,7 @@ func (m *Module) workflowsAwait(ctx context.Context, ws string, id driverIdentit
 	if childRunID == "" {
 		return nil, fmt.Errorf("childRunId required: %w", domain.ErrInvalid)
 	}
-	child, err := m.store.DriverRuns().Get(ctx, ws, childRunID)
+	child, err := m.execution.GetDriverRun(ctx, ws, childRunID)
 	if err != nil {
 		return nil, err
 	}
@@ -218,11 +214,11 @@ func (m *Module) workflowsAwait(ctx context.Context, ws string, id driverIdentit
 	}
 	resp := workflowsAwaitResponse{awaitEventResponse: m.executionAwaitEventResponse(ctx, ws, outcome)}
 	if outcome.Status != execution.DriverAwaitOutcomeSuspended {
-		if fresh, getErr := m.store.DriverRuns().Get(ctx, ws, childRunID); getErr == nil {
+		if fresh, getErr := m.execution.GetDriverRun(ctx, ws, childRunID); getErr == nil {
 			child = fresh
 		}
 		if outcome.Instance != nil && outcome.Instance.Status == execution.DriverAwaitSatisfied {
-			if err := driverpkg.ValidateSatisfiedChildAwait(ctx, legacyExecutionAwaitInstance(outcome.Instance), child); err != nil {
+			if err := driverpkg.ValidateSatisfiedChildAwait(ctx, outcome.Instance, child); err != nil {
 				return nil, err
 			}
 		}
@@ -234,11 +230,11 @@ func (m *Module) workflowsAwait(ctx context.Context, ws string, id driverIdentit
 // workflowsAwaitChild renders the child outcome, re-reading the run so a
 // satisfied await reports the terminal state recorded AFTER the await was
 // registered (the child fetched at validation time may predate its finish).
-func (m *Module) workflowsAwaitChild(ctx context.Context, ws string, child *domain.DriverRun) *workflowsAwaitChild {
+func (m *Module) workflowsAwaitChild(ctx context.Context, ws string, child *execution.DriverRun) *workflowsAwaitChild {
 	if child == nil {
 		return nil
 	}
-	if fresh, err := m.store.DriverRuns().Get(ctx, ws, child.RunID); err == nil {
+	if fresh, err := m.execution.GetDriverRun(ctx, ws, child.RunID); err == nil {
 		child = fresh
 	}
 	return &workflowsAwaitChild{

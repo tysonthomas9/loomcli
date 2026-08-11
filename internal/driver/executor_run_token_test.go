@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -55,7 +55,7 @@ func TestExecutorRunOnceFailsClosedWithoutRunTokenKey(t *testing.T) {
 	if runner.calls != 0 {
 		t.Fatalf("runner calls = %d, want 0 when run-token signing is unavailable", runner.calls)
 	}
-	if result == nil || result.Final == nil || result.Final.Status != domain.DriverRunFailed {
+	if result == nil || result.Final == nil || result.Final.Status != execution.DriverRunFailed {
 		t.Fatalf("result = %+v, want terminal failed run", result)
 	}
 }
@@ -69,14 +69,14 @@ func TestExecutorRunOnceFailsClosedWithInvalidRunTokenTTL(t *testing.T) {
 	if runner.calls != 0 {
 		t.Fatalf("runner calls = %d, want 0 with invalid run-token TTL", runner.calls)
 	}
-	if result == nil || result.Final == nil || result.Final.Status != domain.DriverRunFailed {
+	if result == nil || result.Final == nil || result.Final.Status != execution.DriverRunFailed {
 		t.Fatalf("result = %+v, want terminal failed run", result)
 	}
 }
 
 // runOnceWithRunTokenKey registers a Flue driver, queues one run and executes
 // RunOnce with a recording runner, returning the runner and the claimed run.
-func runOnceWithRunTokenKey(t *testing.T, key []byte) (*recordingRunner, *domain.DriverRun) {
+func runOnceWithRunTokenKey(t *testing.T, key []byte) (*recordingRunner, *execution.DriverRun) {
 	t.Helper()
 	runner, result, err := runOnceWithRunTokenKeyResult(t, key)
 	if err != nil {
@@ -85,7 +85,7 @@ func runOnceWithRunTokenKey(t *testing.T, key []byte) (*recordingRunner, *domain
 	if runner.calls != 1 {
 		t.Fatalf("runner calls = %d, want 1", runner.calls)
 	}
-	if result.Claimed == nil || result.Claimed.LeaseID != "lease-1" || result.Claimed.FencingToken == 0 {
+	if result.Claimed == nil || result.Claimed.Owner.LeaseID != "lease-1" || result.Claimed.Owner.FencingToken == 0 {
 		t.Fatalf("claimed = %+v, want lease-1 with fencing token", result.Claimed)
 	}
 	return runner, result.Claimed
@@ -100,14 +100,14 @@ func runOnceWithRunTokenKeyResult(t *testing.T, key []byte) (*recordingRunner, *
 		t.Fatalf("Create workspace: %v", err)
 	}
 	writeFlueDist(t, root, "epic-runner", "done")
-	registered, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "epic-runner", CreatedBy: "tester", Activate: true})
+	registered, err := SeedFlueDriverFixture(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "epic-runner", CreatedBy: "tester", Activate: true})
 	if err != nil {
-		t.Fatalf("RegisterFlueDriver: %v", err)
+		t.Fatalf("SeedFlueDriverFixture: %v", err)
 	}
-	if _, err := CreateDriverRun(ctx, st, RunOptions{WorkspaceKey: "TEST", DriverID: registered.Driver.DriverID, EpicID: "TEST-1", RunID: "run-1"}); err != nil {
+	if _, err := createDriverRunFixture(ctx, st, driverRunFixtureOptions{WorkspaceKey: "TEST", DriverID: registered.Driver.DriverID, EpicID: "TEST-1", RunID: "run-1"}); err != nil {
 		t.Fatalf("CreateDriverRun: %v", err)
 	}
-	runner := &recordingRunner{result: RunResult{Status: domain.DriverRunCompleted, Summary: "driver completed"}}
+	runner := &recordingRunner{result: RunResult{Status: execution.DriverRunCompleted, Summary: "driver completed"}}
 	executor := testExecutor(st, Executor{
 		Store:             st,
 		WorkspaceKey:      "TEST",
@@ -123,14 +123,14 @@ func runOnceWithRunTokenKeyResult(t *testing.T, key []byte) (*recordingRunner, *
 	return runner, result, err
 }
 
-func assertRunTokenBoundToClaim(t *testing.T, claims *RunTokenClaims, claimed *domain.DriverRun) {
+func assertRunTokenBoundToClaim(t *testing.T, claims *RunTokenClaims, claimed *execution.DriverRun) {
 	t.Helper()
 	if claims.WorkspaceKey != claimed.WorkspaceKey || claims.RunID != claimed.RunID {
 		t.Fatalf("token run identity = %s/%s, want %s/%s", claims.WorkspaceKey, claims.RunID, claimed.WorkspaceKey, claimed.RunID)
 	}
-	if claims.NodeID != claimed.NodeID || claims.LeaseID != claimed.LeaseID || claims.FencingToken != claimed.FencingToken {
+	if claims.NodeID != claimed.Owner.NodeID || claims.LeaseID != claimed.Owner.LeaseID || claims.FencingToken != claimed.Owner.FencingToken {
 		t.Fatalf("token lease binding = %s/%s/%d, want %s/%s/%d",
-			claims.NodeID, claims.LeaseID, claims.FencingToken, claimed.NodeID, claimed.LeaseID, claimed.FencingToken)
+			claims.NodeID, claims.LeaseID, claims.FencingToken, claimed.Owner.NodeID, claimed.Owner.LeaseID, claimed.Owner.FencingToken)
 	}
 	if len(claims.Caps) != 0 {
 		t.Fatalf("token caps = %v, want reserved-but-empty", claims.Caps)
@@ -154,12 +154,10 @@ func TestFlueRuntimeEnvInjectsRunToken(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			env, err := flueRuntimeEnv(RunRequest{
-				Run: &domain.DriverRun{
+				Run: &execution.DriverRun{
 					WorkspaceKey: "TEST",
 					RunID:        "run-1",
-					NodeID:       "node-1",
-					LeaseID:      "lease-1",
-					FencingToken: 42,
+					Owner:        execution.Owner{NodeID: "node-1", LeaseID: "lease-1", FencingToken: 42},
 				},
 				BundleRoot: "/tmp/bundle",
 				ServerPath: "/tmp/bundle/dist/server.mjs",

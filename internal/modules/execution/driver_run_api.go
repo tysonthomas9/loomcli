@@ -55,6 +55,8 @@ func DriverRunOperationRules() []authority.OperationRule {
 // remain on read models while Phase 4 moves every live lifecycle mutation
 // through this API.
 type DriverRunAPI interface {
+	GetDriverRun(context.Context, string, string) (*DriverRun, error)
+	ListDriverRuns(context.Context, DriverRunQuery) ([]*DriverRun, error)
 	SubmitDriverRun(context.Context, authority.OperatorAuthority, SubmitDriverRunCommand) (*DriverRun, error)
 	StartChildDriverRun(context.Context, authority.ExecutionAuthority, StartChildDriverRunCommand) (*DriverRun, error)
 	CascadeChildDriverRuns(context.Context, authority.ExecutionAuthority, CascadeChildDriverRunsCommand) (CascadeChildDriverRunsResult, error)

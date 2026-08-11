@@ -16,10 +16,8 @@ import (
 // verification cannot leak plaintext connector credentials back to the
 // workflow.
 type VerificationRequest struct {
-	WorkspaceKey string
-	SourceKind   string
-	// SourceRef is optional for compatibility with legacy GitHub bindings;
-	// RouteKey remains the exact ingress binding address in that lane.
+	WorkspaceKey       string
+	SourceKind         string
 	SourceRef          string
 	RouteKey           string
 	PresentedSignature string

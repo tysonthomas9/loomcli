@@ -88,7 +88,7 @@ type taskReadyReconcileIdentity struct {
 }
 
 func (b *IssueJournalBridge) reconcileTaskReadyOnce(ctx context.Context, ws string, out *IssueJournalSweepResult) error {
-	if !b.EmitTaskReady || b.ReadySnapshots == nil || b.taskReadyReconciliationDone(ws) {
+	if !b.EmitTaskReady || b.taskReadyReconciliationDone(ws) {
 		return nil
 	}
 

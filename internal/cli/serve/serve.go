@@ -858,7 +858,6 @@ func applyFleetConfig(cfg *webui.ServerConfig, fs fleetState) {
 	cfg.FleetAPIKey = serveFleetAPIKey
 	cfg.FleetMode = fs.modeDetected
 	cfg.FleetClientURL = fs.clientCfg.URL
-	cfg.FleetClientWorkspace = fs.clientCfg.Workspace
 	cfg.FleetClientAPIKey = fs.clientCfg.APIKey
 	cfg.FleetClientActor = fs.clientCfg.Actor
 	// Store-backed serve uses FleetDB directly, either embedded local or
@@ -883,12 +882,10 @@ func applyWorkspaceConfigWithAdmission(
 	agentsCommands workspacemgr.ManagedAgentsCommands,
 ) *workspacemgr.StoreBackedWorkspaceAdmissionOperations {
 	if cfg.Store == nil {
-		applyFleetInitialWorkspaceFallback(cfg, true)
 		return nil
 	}
 	cfg.WorkspaceIDResolverFn = serveadapter.BuildWorkspaceIDResolverFn(cfg.Store)
 	cfg.InitialWorkspaceID = serveadapter.ResolveInitialWorkspaceID(cfg.Store)
-	applyFleetInitialWorkspaceFallback(cfg, false)
 	cfg.WorkspaceDeleteCleanupFn = serveadapter.BuildWorkspaceDeleteCleanupFn()
 	var admissions infrafleetdb.RepositoryAdmissionTransport
 	if storeHandle != nil && storeHandle.FleetDBClient() != nil {
@@ -913,20 +910,6 @@ func applyWorkspaceConfigWithAdmission(
 		return nil
 	}
 	return operations
-}
-
-func applyFleetInitialWorkspaceFallback(cfg *webui.ServerConfig, force bool) {
-	if cfg == nil || !cfg.FleetClient || cfg.FleetClientWorkspace == "" {
-		return
-	}
-	if cfg.Store != nil {
-		if _, err := cfg.Store.Workspaces().Get(context.Background(), cfg.FleetClientWorkspace); err != nil {
-			return
-		}
-	}
-	if force || cfg.InitialWorkspaceID == "" || cfg.InitialWorkspaceID == "workspace" || cfg.InitialWorkspaceID == "default" {
-		cfg.InitialWorkspaceID = cfg.FleetClientWorkspace
-	}
 }
 
 func applyCORSConfig(cfg *webui.ServerConfig) {

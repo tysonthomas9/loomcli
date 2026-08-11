@@ -197,10 +197,12 @@ func startServeRuntime(
 		}
 	}
 	issueJournalSource, runOutcomes := serveAutomationRuntimePorts(storeHandle, cfg, automationCapability)
-	startIssueJournalBridge(
+	if err := startIssueJournalBridge(
 		ctx, storeHandle.Store, callbacks.issueLookup, callbacks.readySnapshots,
 		callbacks.repositoryRequiredBlocker, issueJournalSource, config.IssueJournal,
-	)
+	); err != nil {
+		return nil, err
+	}
 	executionPasses, err := buildExecutionRuntimePasses(
 		storeHandle.Store, runOutcomes, cfg.ExecutionCapability, cfg.ArtifactsCapability,
 		cfg.SourceControl, cfg.TaskStackBindings, cfg.TaskOutcomes, config,

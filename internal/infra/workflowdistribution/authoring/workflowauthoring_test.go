@@ -11,11 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
-
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
-	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	workflowdistribution "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution"
 )
 
 func TestBuiltinEpicRunnerWorkflowSourceIncludesReconcilePrimitives(t *testing.T) {
@@ -251,18 +248,6 @@ func TestBuiltinEpicRunnerWorkflowSourceParsesAsJavaScript(t *testing.T) {
 	}
 }
 
-func TestSubmissionTrustDefaultsUntrustedFailClosed(t *testing.T) {
-	if got := submissionTrust(""); got != workflowcatalog.DriverTrustUntrusted {
-		t.Fatalf("submissionTrust(\"\") = %q, want untrusted (external submissions fail closed)", got)
-	}
-	if got := submissionTrust(workflowcatalog.DriverTrustTrusted); got != workflowcatalog.DriverTrustTrusted {
-		t.Fatalf("submissionTrust(trusted) = %q, want trusted (builtin path)", got)
-	}
-	if got := submissionTrust(workflowcatalog.DriverTrustUntrusted); got != workflowcatalog.DriverTrustUntrusted {
-		t.Fatalf("submissionTrust(untrusted) = %q, want untrusted", got)
-	}
-}
-
 func TestCloneBuiltinSourceWritesLocalSourceLayout(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".loom", "workflows", BuiltinEpicRunnerWorkflowName)
 	manifest, err := CloneBuiltinSource(BuiltinEpicRunnerWorkflowName, root)
@@ -351,82 +336,6 @@ func TestReadLocalSourceDoesNotInferUndeclaredSiblingRunners(t *testing.T) {
 	}
 }
 
-func TestBuildAndRegisterCustomSourceWithRealFlue(t *testing.T) {
-	repoRoot := workflowTestRepoRoot(t)
-	flueRoot := workflowTestFlueRepoRoot(t, repoRoot)
-	flueBin := filepath.Join(flueRoot, "packages", "cli", "bin", "flue.mjs")
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skipf("node unavailable: %v", err)
-	}
-	flueCmd, err := json.Marshal([]string{node, flueBin})
-	if err != nil {
-		t.Fatalf("encode flue cmd: %v", err)
-	}
-	t.Setenv("LOOM_REAL_FLUE_CMD_JSON", string(flueCmd))
-	t.Setenv("LOOM_REAL_FLUE_CMD", "")
-	t.Setenv("LOOM_SDK_ROOT", filepath.Join(repoRoot, "sdk"))
-	t.Setenv("FLUE_RUNTIME_ROOT", filepath.Join(flueRoot, "packages", "runtime"))
-	t.Setenv("DAYTONA_SDK_ROOT", filepath.Join(flueRoot, "node_modules", ".pnpm", "node_modules", "@daytona", "sdk"))
-
-	ctx := context.Background()
-	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "CUSTOM", Name: "custom"}); err != nil {
-		t.Fatalf("create workspace: %v", err)
-	}
-	files := map[string]string{
-		"workflows/custom-smoke.ts": "export async function run(ctx) { return { marker: ctx.payload?.marker || 'custom-marker' }; }\n",
-	}
-	workDir := t.TempDir()
-	result, diagnostics, err := BuildAndRegister(ctx, st, BuildAndRegisterOptions{
-		WorkspaceKey: "CUSTOM",
-		Name:         "custom-smoke",
-		Entrypoint:   "workflows/custom-smoke.ts",
-		Files:        files,
-		Activate:     false,
-		SourceRef:    "test://custom-smoke",
-		CreatedBy:    "test",
-		WorkDir:      workDir,
-		Manifest: map[string]string{
-			"workflow_dependencies": `{"@daytona/sdk":"optional-local","@flue/runtime":"local","@loom/sdk":"local"}`,
-		},
-	})
-	if err != nil {
-		t.Fatalf("BuildAndRegister diagnostics:\n%s\nerr: %v", diagnostics, err)
-	}
-	if result.Driver.ActiveVersionID != "" {
-		t.Fatalf("driver active version = %q, want non-active custom build", result.Driver.ActiveVersionID)
-	}
-	if result.Version.Manifest[driverpkg.ManifestTrustLevelKey] != string(workflowcatalog.DriverTrustUntrusted) {
-		t.Fatalf("version trust = %q, want untrusted", result.Version.Manifest[driverpkg.ManifestTrustLevelKey])
-	}
-	if result.Version.BuildDiagnostics != diagnostics {
-		t.Fatalf("stored diagnostics = %q, returned %q", result.Version.BuildDiagnostics, diagnostics)
-	}
-	if result.Version.Manifest["workflow_dependencies"] != `{"@daytona/sdk":"optional-local","@flue/runtime":"local","@loom/sdk":"local"}` {
-		t.Fatalf("workflow dependency provenance = %q", result.Version.Manifest["workflow_dependencies"])
-	}
-	driverRecord, err := st.ApproveDriverVersionForTest(ctx, "CUSTOM", result.Driver.DriverID, result.Version.VersionID)
-	if err != nil {
-		t.Fatalf("approve test fixture version: %v", err)
-	}
-	if got := driverpkg.DriverVersionEffectiveTrust(driverRecord, result.Version); got != workflowcatalog.DriverTrustTrusted {
-		t.Fatalf("approved version trust = %q, want trusted", got)
-	}
-	run, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
-		WorkspaceKey: "CUSTOM", RunID: "run-custom-preview",
-		DriverID: result.Driver.DriverID, DriverVersionID: result.Version.VersionID,
-		Entrypoint: driverpkg.EntrypointRun, SourceKind: "test", SourceRef: "workflow fixture",
-		Payload: json.RawMessage(`{"marker":"custom-marker"}`),
-	})
-	if err != nil {
-		t.Fatalf("CreateDriverRun preview: %v", err)
-	}
-	if run.DriverVersionID != result.Version.VersionID {
-		t.Fatalf("run pinned version = %q, want %q", run.DriverVersionID, result.Version.VersionID)
-	}
-}
-
 func TestFlueRuntimeRootHonorsLoomPrefixedEnv(t *testing.T) {
 	runtimeRoot := t.TempDir()
 	if err := os.WriteFile(filepath.Join(runtimeRoot, "package.json"), []byte(`{"name":"@flue/runtime"}`+"\n"), 0o644); err != nil {
@@ -436,7 +345,7 @@ func TestFlueRuntimeRootHonorsLoomPrefixedEnv(t *testing.T) {
 	t.Setenv("FLUE_RUNTIME_ROOT", "")
 	t.Setenv("FLUE_REPO", "")
 
-	got, err := flueRuntimeRoot()
+	got, err := workflowdistribution.FlueRuntimeRoot()
 	if err != nil {
 		t.Fatalf("flueRuntimeRoot returned error: %v", err)
 	}
@@ -460,7 +369,7 @@ func TestDaytonaSDKRootDerivesFromResolvedFlueRuntimeRoot(t *testing.T) {
 	t.Setenv("DAYTONA_SDK_ROOT", "")
 	t.Setenv("FLUE_REPO", "")
 
-	got, err := daytonaSDKRoot(runtimeRoot)
+	got, err := workflowdistribution.DaytonaSDKRoot(runtimeRoot)
 	if err != nil {
 		t.Fatalf("daytonaSDKRoot returned error: %v", err)
 	}
@@ -491,7 +400,7 @@ func TestLinkFlueBuildDependenciesLinksRequiredRuntimeDependencies(t *testing.T)
 	t.Setenv("DAYTONA_SDK_ROOT", "")
 
 	buildRoot := t.TempDir()
-	if err := linkFlueBuildDependencies(buildRoot); err != nil {
+	if err := workflowdistribution.LinkFlueBuildDependencies(buildRoot); err != nil {
 		t.Fatalf("linkFlueBuildDependencies returned error: %v", err)
 	}
 	link := filepath.Join(buildRoot, "node_modules", "valibot")
@@ -530,7 +439,7 @@ func TestLinkFlueBuildDependenciesDoesNotResolveDaytonaSDK(t *testing.T) {
 	t.Setenv("DAYTONA_SDK_ROOT", missingDaytonaRoot)
 
 	buildRoot := t.TempDir()
-	if err := linkFlueBuildDependencies(buildRoot); err != nil {
+	if err := workflowdistribution.LinkFlueBuildDependencies(buildRoot); err != nil {
 		t.Fatalf("linkFlueBuildDependencies consulted unused DAYTONA_SDK_ROOT: %v", err)
 	}
 	if _, err := os.Lstat(filepath.Join(buildRoot, "node_modules", "@daytona")); !errors.Is(err, os.ErrNotExist) {

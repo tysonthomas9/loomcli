@@ -5,7 +5,6 @@ import (
 	"errors"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	automationfleetdb "github.com/tysonthomas9/loomcli/internal/modules/automation/fleetdb"
@@ -278,11 +277,7 @@ func translateAutomationFleetDBError(err error) error {
 		translated = automationfleetdb.ErrTransportAdmissionReplayNotFound
 	case errors.Is(err, infrafleetdb.ErrAutomationDeliveryNotFound):
 		translated = automationfleetdb.ErrTransportDeliveryNotFound
-	case errors.Is(err, infrafleetdb.ErrAutomationBindingNotFound), errors.Is(err, domain.ErrNotFound):
-		// The legacy trigger-binding CRUD endpoint still reports the shared
-		// domain not-found sentinel, while newer atomic Automation operations
-		// use the capability-specific binding sentinel. Both represent the
-		// same consumer-owned transport condition at this boundary.
+	case errors.Is(err, infrafleetdb.ErrAutomationBindingNotFound):
 		translated = automationfleetdb.ErrTransportNotFound
 	case errors.Is(err, infrafleetdb.ErrAutomationDeliveryTransitionConflict):
 		translated = automationfleetdb.ErrTransportDeliveryTransitionConflict

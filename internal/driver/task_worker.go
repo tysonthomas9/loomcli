@@ -269,19 +269,17 @@ func (w *TaskWorker) claimAndExecuteTaskRun(ctx context.Context, workspace, node
 		}
 		return nil, fmt.Errorf("claim queued TaskRun: %w", err)
 	}
-	claimed, err := legacyTaskRunFromExecution(claim.Run)
-	if err != nil {
-		return nil, err
+	claimed := claim.Run
+	if claimed == nil || strings.TrimSpace(claimed.TaskRunID) == "" {
+		return nil, fmt.Errorf("execution returned no TaskRun: %w", execution.ErrConflict)
 	}
 	clearTaskWorkerPendingClaim(claimState, command.RequestID)
 	leaseToken := command.LeaseToken
-	owner := execution.Owner{
-		ResourceKind: execution.ResourceTaskRun, ResourceID: claimed.TaskRunID,
-		NodeID: claimed.NodeID, LeaseID: claimed.LeaseID, LeaseToken: leaseToken, FencingToken: claimed.FencingToken,
-	}
+	owner := claimed.Owner
+	owner.LeaseToken = leaseToken
 	opts := executeClaimedTaskRunOptions{
 		WorkspaceKey: claimed.WorkspaceKey, DriverRunID: claimed.DriverRunID, DriverStepID: claimed.DriverStepID,
-		TaskID: claimed.TaskID, ProviderProfile: claimed.ProviderProfile,
+		TaskID: claimed.WorkItemID, ProviderProfile: claimed.ProviderProfile,
 		RunnerTrustLevel: workflowcatalog.DriverTrustLevel(claimed.RuntimeMetadata["runner_trust_level"]),
 		ParentSessionID:  claimed.RuntimeMetadata["parent_session_id"], LeaseToken: leaseToken,
 		HeartbeatInterval: w.HeartbeatInterval, CloseTaskOnSuccess: true, MaxAttempts: w.maxAttempts(),
@@ -390,7 +388,7 @@ func (w *TaskWorker) taskRunLease(nodeID string) (string, string) {
 }
 
 type executedTaskRunState struct {
-	claimed     *domain.TaskRun
+	claimed     *execution.TaskRun
 	owner       execution.Owner
 	opts        executeClaimedTaskRunOptions
 	leaseToken  string
@@ -404,7 +402,7 @@ type executedTaskRunState struct {
 func (w *TaskWorker) finishExecutedTaskRun(
 	ctx context.Context,
 	workspace string,
-	claimed *domain.TaskRun,
+	claimed *execution.TaskRun,
 	owner execution.Owner,
 	opts executeClaimedTaskRunOptions,
 	refs claimedTaskRunRefs,
@@ -444,8 +442,10 @@ func (w *TaskWorker) requeueExecutedTaskRun(ctx context.Context, workspace strin
 	if err != nil {
 		return nil, fmt.Errorf("requeue TaskRun: %w", err)
 	}
-	run, err := legacyTaskRunFromExecution(result.Run)
-	return &TaskRunRequestOutcome{Run: run, LeaseToken: state.leaseToken, ArtifactIDs: state.artifactIDs}, err
+	if result.Run == nil {
+		return nil, fmt.Errorf("requeue TaskRun returned no run: %w", execution.ErrConflict)
+	}
+	return &TaskRunRequestOutcome{Run: result.Run, LeaseToken: state.leaseToken, ArtifactIDs: state.artifactIDs}, nil
 }
 
 func (w *TaskWorker) exhaustExecutedTaskRun(ctx context.Context, workspace string, state executedTaskRunState) (*TaskRunRequestOutcome, error) {
@@ -468,8 +468,10 @@ func (w *TaskWorker) exhaustExecutedTaskRun(ctx context.Context, workspace strin
 	if err != nil {
 		return nil, fmt.Errorf("exhaust TaskRun retries: %w", err)
 	}
-	run, err := legacyTaskRunFromExecution(result.Run)
-	return &TaskRunRequestOutcome{Run: run, LeaseToken: state.leaseToken, ArtifactIDs: state.artifactIDs}, err
+	if result.Run == nil {
+		return nil, fmt.Errorf("exhaust TaskRun retries returned no run: %w", execution.ErrConflict)
+	}
+	return &TaskRunRequestOutcome{Run: result.Run, LeaseToken: state.leaseToken, ArtifactIDs: state.artifactIDs}, nil
 }
 
 func (w *TaskWorker) finalizeExecutedTaskRun(ctx context.Context, workspace string, state executedTaskRunState) (*TaskRunRequestOutcome, error) {
@@ -503,8 +505,13 @@ func (w *TaskWorker) finalizeExecutedTaskRun(ctx context.Context, workspace stri
 	return &TaskRunRequestOutcome{Run: state.claimed, LeaseToken: state.leaseToken, ArtifactIDs: state.artifactIDs}, nil
 }
 
-func applyExecutedTaskRunResult(claimed *domain.TaskRun, result TaskExecResult, completion taskExecCompletion, metadata map[string]string, exitCode int, finishedAt time.Time) {
-	claimed.Status = completion.Status
+func applyExecutedTaskRunResult(claimed *execution.TaskRun, result TaskExecResult, completion taskExecCompletion, metadata map[string]string, exitCode int, finishedAt time.Time) {
+	claimed.Status = execution.StatusFailed
+	if completion.Status == domain.TaskRunCompleted {
+		claimed.Status = execution.StatusSucceeded
+	} else if completion.Status == domain.TaskRunCancelled {
+		claimed.Status = execution.StatusCancelled
+	}
 	claimed.ExitCode = &exitCode
 	claimed.LogsRef = result.LogsRef
 	claimed.ArtifactsRef = result.ArtifactsRef
@@ -516,7 +523,7 @@ func applyExecutedTaskRunResult(claimed *domain.TaskRun, result TaskExecResult, 
 
 func (w *TaskWorker) startExecutionTaskRunHeartbeat(
 	ctx context.Context,
-	run *domain.TaskRun,
+	run *execution.TaskRun,
 	owner execution.Owner,
 	refs claimedTaskRunRefs,
 ) context.CancelFunc {
@@ -559,50 +566,6 @@ func executionTaskRunPlacement(value domain.TaskRunPlacement) execution.Placemen
 		Provider: value.Provider, NodeID: value.NodeID, RunnerID: value.RunnerID,
 		SandboxID: value.SandboxID, CWD: value.CWD, RepoRef: value.RepoRef,
 	}
-}
-
-func legacyTaskRunFromExecution(run *execution.TaskRun) (*domain.TaskRun, error) {
-	if run == nil || strings.TrimSpace(run.TaskRunID) == "" {
-		return nil, fmt.Errorf("execution returned no TaskRun: %w", execution.ErrConflict)
-	}
-	status := domain.TaskRunStatus(run.Status)
-	if run.Status == execution.StatusSucceeded {
-		status = domain.TaskRunCompleted
-	}
-	legacy := &domain.TaskRun{
-		WorkspaceKey: run.WorkspaceKey, TaskRunID: run.TaskRunID, DriverRunID: run.DriverRunID,
-		DriverStepID: run.DriverStepID, TaskID: run.WorkItemID, WorkerProfileID: run.WorkerProfileID,
-		Runner: run.Runner, RunnerRef: run.RunnerRef, RunnerKind: run.RunnerKind,
-		RunnerEntrypoint: run.RunnerEntrypoint, RunnerVersionID: run.RunnerVersionID,
-		ProviderProfile: run.ProviderProfile, TargetNodeID: run.TargetNodeID, Status: status,
-		NodeID: run.Owner.NodeID, LeaseID: run.Owner.LeaseID, FencingToken: run.Owner.FencingToken,
-		RunnerPlacement: domain.TaskRunPlacement{
-			Provider: run.RunnerPlacement.Provider, NodeID: run.RunnerPlacement.NodeID,
-			RunnerID: run.RunnerPlacement.RunnerID, SandboxID: run.RunnerPlacement.SandboxID,
-			CWD: run.RunnerPlacement.CWD, RepoRef: run.RunnerPlacement.RepoRef,
-		},
-		SandboxPlacement: domain.TaskRunPlacement{
-			Provider: run.SandboxPlacement.Provider, NodeID: run.SandboxPlacement.NodeID,
-			RunnerID: run.SandboxPlacement.RunnerID, SandboxID: run.SandboxPlacement.SandboxID,
-			CWD: run.SandboxPlacement.CWD, RepoRef: run.SandboxPlacement.RepoRef,
-		},
-		Input: append([]byte(nil), run.Input...), ExitCode: run.ExitCode, LogsRef: run.LogsRef,
-		ArtifactsRef: run.ArtifactsRef, InputTokens: run.InputTokens, OutputTokens: run.OutputTokens,
-		CacheReadTokens: run.CacheReadTokens, CacheWriteTokens: run.CacheWriteTokens,
-		EstimatedCostUSD: run.EstimatedCostUSD, RuntimeMetadata: cloneStringMap(run.RuntimeMetadata),
-		ErrorClass: run.ErrorClass, ErrorMessage: run.ErrorMessage, FinishedAt: run.FinishedAt,
-		CreatedAt: run.CreatedAt, UpdatedAt: run.UpdatedAt,
-	}
-	if run.NextEligibleAt != nil {
-		legacy.NextEligibleAt = *run.NextEligibleAt
-	}
-	if run.StartedAt != nil {
-		legacy.StartedAt = *run.StartedAt
-	}
-	if run.LastHeartbeat != nil {
-		legacy.LastHeartbeat = *run.LastHeartbeat
-	}
-	return legacy, nil
 }
 
 func (w *TaskWorker) convergeTerminalTaskRun(ctx context.Context, workspace, taskRunID string) error {
@@ -844,6 +807,34 @@ func TaskRunResultFromOutcome(outcome *TaskRunRequestOutcome) TaskRunRequestResu
 	if outcome == nil {
 		return TaskRunRequestResult{}
 	}
-	result := TaskRunResultFromDomain(outcome.Run, outcome.ArtifactIDs)
+	result := TaskRunResultFromExecution(outcome.Run, outcome.ArtifactIDs)
 	return result
+}
+
+func TaskRunResultFromExecution(run *execution.TaskRun, artifactIDs ...[]string) TaskRunRequestResult {
+	if run == nil {
+		return TaskRunRequestResult{}
+	}
+	status := domain.TaskRunStatus(run.Status)
+	switch run.Status {
+	case execution.StatusSucceeded:
+		status = domain.TaskRunCompleted
+	case execution.StatusBlocked:
+		status = domain.TaskRunFailed
+	}
+	ids := []string(nil)
+	if len(artifactIDs) > 0 {
+		ids = normalizeArtifactIDs(artifactIDs[0])
+	}
+	return TaskRunRequestResult{
+		ID: run.TaskRunID, TaskRunID: run.TaskRunID, DriverStepID: run.DriverStepID,
+		TaskID: run.WorkItemID, Status: status, ExitCode: run.ExitCode, LogsRef: run.LogsRef,
+		ArtifactsRef: run.ArtifactsRef, ArtifactIDs: ids, InputTokens: run.InputTokens,
+		OutputTokens: run.OutputTokens, CacheReadTokens: run.CacheReadTokens,
+		CacheWriteTokens: run.CacheWriteTokens, EstimatedCostUSD: run.EstimatedCostUSD,
+		ErrorClass: run.ErrorClass, ErrorMessage: run.ErrorMessage, FinishedAt: run.FinishedAt,
+		Runner: run.Runner, RunnerRef: run.RunnerRef, RunnerKind: run.RunnerKind,
+		RunnerEntrypoint: run.RunnerEntrypoint, RunnerVersionID: run.RunnerVersionID,
+		ProviderProfile: run.ProviderProfile, RuntimeMetadata: cloneStringMap(run.RuntimeMetadata),
+	}
 }

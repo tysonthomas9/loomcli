@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -24,6 +25,26 @@ type runOutcomeCascadeProbe struct {
 	terminalErr      error
 	terminalErrors   map[string]error
 	err              error
+}
+
+type recordingRunOutcomePublisher struct {
+	mu       sync.Mutex
+	outcomes []RunOutcome
+	err      error
+}
+
+func (publisher *recordingRunOutcomePublisher) PublishRunOutcome(_ context.Context, outcome RunOutcome) error {
+	publisher.mu.Lock()
+	defer publisher.mu.Unlock()
+	outcome.Payload = append(json.RawMessage(nil), outcome.Payload...)
+	publisher.outcomes = append(publisher.outcomes, outcome)
+	return publisher.err
+}
+
+func (publisher *recordingRunOutcomePublisher) snapshot() []RunOutcome {
+	publisher.mu.Lock()
+	defer publisher.mu.Unlock()
+	return append([]RunOutcome(nil), publisher.outcomes...)
 }
 
 func (probe *runOutcomeCascadeProbe) RecoverTerminalDriverRunWork(
@@ -187,12 +208,12 @@ func TestRunOutcomeReconcilerFailureRestartConvergesWithoutDuplicate(t *testing.
 
 	failing := &recordingRunOutcomePublisher{err: errors.New("automation unavailable")}
 	outbox := st.DriverRuns().(store.DriverRunOutcomeStore)
-	notifier, err := NewRunOutcomeAwaitNotifier(st.Awaits())
+	notifier, err := newTestRunOutcomeAwaitNotifier(st.Awaits())
 	if err != nil {
 		t.Fatal(err)
 	}
 	journal := st.TriggerEvents().(store.TriggerEventAppender)
-	first, err := NewRunOutcomeReconciler(outbox, notifier, journal, failing, "WS", nil)
+	first, err := newTestRunOutcomeReconciler(outbox, notifier, journal, failing, "WS", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +228,7 @@ func TestRunOutcomeReconcilerFailureRestartConvergesWithoutDuplicate(t *testing.
 	// A new reconciler models a process restart. The persisted retry time keeps
 	// it quiet before backoff, then the same deterministic event converges.
 	succeeding := &recordingRunOutcomePublisher{}
-	restarted, err := NewRunOutcomeReconciler(outbox, notifier, journal, succeeding, "WS", nil)
+	restarted, err := newTestRunOutcomeReconciler(outbox, notifier, journal, succeeding, "WS", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +255,7 @@ func TestRunOutcomeReconcilerFailureRestartConvergesWithoutDuplicate(t *testing.
 
 func TestRunOutcomeReconcilerRecoversFinalizeBeforeCascadeCrash(t *testing.T) {
 	st, outbox, _, finishedAt := setupDurableCompositionOutcome(t)
-	notifier, err := NewRunOutcomeAwaitNotifier(st.Awaits())
+	notifier, err := newTestRunOutcomeAwaitNotifier(st.Awaits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,7 +295,7 @@ func TestRunOutcomeReconcilerRecoversFinalizeBeforeCascadeCrash(t *testing.T) {
 		!command.CascadedAt.Equal(finishedAt) || command.MaxDepth != DefaultCompositionMaxDepth {
 		t.Fatalf("recovery command = %+v", command)
 	}
-	if command.Reason != childDriverRunCascadeReason(domain.DriverRunCompleted) || command.ErrorClass != childDriverRunCascadeErrorClass {
+	if command.Reason != childDriverRunCascadeReason(execution.DriverRunCompleted) || command.ErrorClass != childDriverRunCascadeErrorClass {
 		t.Fatalf("recovery policy = reason %q class %q", command.Reason, command.ErrorClass)
 	}
 	if authorities.action != execution.ActionRecoverChildDriverRunCascade ||
@@ -306,7 +327,7 @@ func TestRunOutcomeReconcilerRecoversFinalizeBeforeCascadeCrash(t *testing.T) {
 
 func TestRunOutcomeReconcilerRetriesTerminalWorkBeforeChildCascade(t *testing.T) {
 	st, outbox, _, finishedAt := setupDurableCompositionOutcome(t)
-	notifier, err := NewRunOutcomeAwaitNotifier(st.Awaits())
+	notifier, err := newTestRunOutcomeAwaitNotifier(st.Awaits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -335,7 +356,7 @@ func TestRunOutcomeReconcilerRetriesTerminalWorkBeforeChildCascade(t *testing.T)
 
 func TestRunOutcomeReconcilerTerminalWorkQueueContinuesAfterRowFailure(t *testing.T) {
 	st, outbox, _, finishedAt := setupDurableCompositionOutcome(t)
-	notifier, err := NewRunOutcomeAwaitNotifier(st.Awaits())
+	notifier, err := newTestRunOutcomeAwaitNotifier(st.Awaits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -374,7 +395,7 @@ func TestRunOutcomeReconcilerTerminalWorkQueueContinuesAfterRowFailure(t *testin
 
 func TestRunOutcomeReconcilerRecoveryClaimFailureDoesNotBlockOrdinaryDelivery(t *testing.T) {
 	st, outbox, _, finishedAt := setupDurableCompositionOutcome(t)
-	notifier, err := NewRunOutcomeAwaitNotifier(st.Awaits())
+	notifier, err := newTestRunOutcomeAwaitNotifier(st.Awaits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -409,7 +430,7 @@ func TestRunOutcomeReconcilerRecoveryClaimFailureDoesNotBlockOrdinaryDelivery(t 
 
 func TestRunOutcomeReconcilerOrdinaryClaimFailureDoesNotBlockRecovery(t *testing.T) {
 	st, outbox, _, finishedAt := setupDurableCompositionOutcome(t)
-	notifier, err := NewRunOutcomeAwaitNotifier(st.Awaits())
+	notifier, err := newTestRunOutcomeAwaitNotifier(st.Awaits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -443,7 +464,7 @@ func TestRunOutcomeReconcilerOrdinaryClaimFailureDoesNotBlockRecovery(t *testing
 
 func TestRunOutcomeReconcilerSameRunInterleavingUsesDeterministicRecoveryAndSeparateClaims(t *testing.T) {
 	st, outbox, _, finishedAt := setupDurableCompositionOutcome(t)
-	notifier, err := NewRunOutcomeAwaitNotifier(st.Awaits())
+	notifier, err := newTestRunOutcomeAwaitNotifier(st.Awaits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -488,11 +509,11 @@ func TestRunOutcomeReconcilerSameRunInterleavingUsesDeterministicRecoveryAndSepa
 
 func TestRunOutcomeReconcilerRecoversCompositionWithoutSynchronousEmitOrAutomation(t *testing.T) {
 	st, outbox, parent, finishedAt := setupDurableCompositionOutcome(t)
-	notifier, err := NewRunOutcomeAwaitNotifier(st.Awaits())
+	notifier, err := newTestRunOutcomeAwaitNotifier(st.Awaits())
 	if err != nil {
 		t.Fatal(err)
 	}
-	reconciler, err := NewRunOutcomeReconciler(
+	reconciler, err := newTestRunOutcomeReconciler(
 		outbox, notifier, st.TriggerEvents().(store.TriggerEventAppender), nil, "WS", nil,
 	)
 	if err != nil {
@@ -507,11 +528,11 @@ func TestRunOutcomeReconcilerRecoversCompositionWithoutSynchronousEmitOrAutomati
 
 func TestRunOutcomeReconcilerJournalsBeforeLateRegistrationWithoutAutomation(t *testing.T) {
 	st, outbox, _, finishedAt := setupDurableCompositionOutcome(t)
-	notifier, err := NewRunOutcomeAwaitNotifier(st.Awaits())
+	notifier, err := newTestRunOutcomeAwaitNotifier(st.Awaits())
 	if err != nil {
 		t.Fatal(err)
 	}
-	reconciler, err := NewRunOutcomeReconciler(
+	reconciler, err := newTestRunOutcomeReconciler(
 		outbox, notifier, st.TriggerEvents().(store.TriggerEventAppender), nil, "WS", nil,
 	)
 	if err != nil {
@@ -536,7 +557,7 @@ func TestRunOutcomeReconcilerJournalsBeforeLateRegistrationWithoutAutomation(t *
 
 func TestRunOutcomeReconcilerJournalClosesListRegisterRace(t *testing.T) {
 	st, outbox, _, finishedAt := setupDurableCompositionOutcome(t)
-	inner, err := NewRunOutcomeAwaitNotifier(st.Awaits())
+	inner, err := newTestRunOutcomeAwaitNotifier(st.Awaits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -544,7 +565,7 @@ func TestRunOutcomeReconcilerJournalClosesListRegisterRace(t *testing.T) {
 	notifier := &registerAfterRunOutcomeListNotifier{
 		inner: inner, awaits: st.Awaits(), parent: lateParent,
 	}
-	reconciler, err := NewRunOutcomeReconciler(
+	reconciler, err := newTestRunOutcomeReconciler(
 		outbox, notifier, st.TriggerEvents().(store.TriggerEventAppender), nil, "WS", nil,
 	)
 	if err != nil {
@@ -565,11 +586,11 @@ func TestRunOutcomeReconcilerBoundsHugeTerminalPayloadWithoutStrandingParent(t *
 		strings.Repeat("summary\x00", 20000),
 		strings.Repeat("error\x00", 10000),
 	)
-	notifier, err := NewRunOutcomeAwaitNotifier(st.Awaits())
+	notifier, err := newTestRunOutcomeAwaitNotifier(st.Awaits())
 	if err != nil {
 		t.Fatal(err)
 	}
-	reconciler, err := NewRunOutcomeReconciler(
+	reconciler, err := newTestRunOutcomeReconciler(
 		outbox, notifier, st.TriggerEvents().(store.TriggerEventAppender), nil, "WS", nil,
 	)
 	if err != nil {
@@ -594,13 +615,13 @@ func TestRunOutcomeReconcilerBoundsHugeTerminalPayloadWithoutStrandingParent(t *
 
 func TestRunOutcomeReconcilerResponseLossAfterAtomicResolveConvergesOnRestart(t *testing.T) {
 	st, outbox, parent, finishedAt := setupDurableCompositionOutcome(t)
-	atomicNotifier, err := NewRunOutcomeAwaitNotifier(st.Awaits())
+	atomicNotifier, err := newTestRunOutcomeAwaitNotifier(st.Awaits())
 	if err != nil {
 		t.Fatal(err)
 	}
 	losingResponse := &responseLossRunOutcomeAwaitNotifier{inner: atomicNotifier}
 	journal := st.TriggerEvents().(store.TriggerEventAppender)
-	first, err := NewRunOutcomeReconciler(outbox, losingResponse, journal, nil, "WS", nil)
+	first, err := newTestRunOutcomeReconciler(outbox, losingResponse, journal, nil, "WS", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -612,7 +633,7 @@ func TestRunOutcomeReconcilerResponseLossAfterAtomicResolveConvergesOnRestart(t 
 	// is already queued even though the durable outcome is scheduled to retry.
 	assertParentResumedByChildOutcome(t, st, parent.RunID)
 
-	restarted, err := NewRunOutcomeReconciler(outbox, atomicNotifier, journal, nil, "WS", nil)
+	restarted, err := newTestRunOutcomeReconciler(outbox, atomicNotifier, journal, nil, "WS", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -765,4 +786,12 @@ func assertNoClaimableRunOutcomes(t *testing.T, outbox store.DriverRunOutcomeSto
 	if len(values) != 0 {
 		t.Fatalf("claimable completed outcomes = %+v", values)
 	}
+}
+
+func newTestRunOutcomeAwaitNotifier(awaits store.AwaitStore) (RunOutcomeAwaitNotifier, error) {
+	resolver, ok := awaits.(store.RunOutcomeAwaitStore)
+	if !ok {
+		return nil, errors.New("test await store lacks run-outcome resolver")
+	}
+	return NewRunOutcomeAwaitNotifierWithResolver(awaits, resolver)
 }

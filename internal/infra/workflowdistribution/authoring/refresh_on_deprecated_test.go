@@ -1,17 +1,10 @@
 package authoring
 
 import (
-	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
-
-	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
-	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // activeManifestRunnersAreStale forces a refresh when the active manifest
@@ -87,84 +80,6 @@ func TestWorkflowRunnerNameSetExcludesOpenShell(t *testing.T) {
 	for _, want := range []string{"local-task-runner", "daytona-task-runner"} {
 		if _, ok := set[want]; !ok {
 			t.Fatalf("derived runner set missing %q: %+v", want, set)
-		}
-	}
-}
-
-// EnsureBuiltinWorkflow re-registers an active version whose manifest still
-// declares the deprecated openshell runner, even when its source digest would
-// otherwise look current (§4.6 refresh-on-deprecated).
-func TestEnsureBuiltinWorkflowRefreshesDeprecatedRunnerManifest(t *testing.T) {
-	ctx := context.Background()
-	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "BUILTIN", Name: "Builtins"}); err != nil {
-		t.Fatalf("create workspace: %v", err)
-	}
-	name := BuiltinGitHubReviewAgentWorkflowName
-	spec, ok := BuiltinWorkflow(name)
-	if !ok {
-		t.Fatal("github-review-agent builtin missing")
-	}
-	digest := mustSourceDigest(t, spec.Files)
-
-	workDir := t.TempDir()
-	t.Chdir(workDir)
-	installFakeWorkflowBuildDeps(t)
-
-	// Register an active version at the CURRENT source digest but with a
-	// manifest that still declares the deprecated openshell runner.
-	staleDist := filepath.Join(t.TempDir(), "dist")
-	if err := os.MkdirAll(staleDist, 0o755); err != nil {
-		t.Fatalf("create stale dist: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(staleDist, "server.mjs"), []byte("export {};\n"), 0o644); err != nil {
-		t.Fatalf("write stale server: %v", err)
-	}
-	deprecated, err := registerFlueDriverForLegacyTest(ctx, st, driverpkg.RegisterFlueOptions{
-		WorkspaceKey: "BUILTIN",
-		WorkDir:      workDir,
-		DistPath:     staleDist,
-		DriverName:   name,
-		DriverID:     name,
-		WorkflowName: name,
-		SourceRef:    "builtin://workflows/github-review-agent/versions/" + digest,
-		SourceDigest: digest,
-		CreatedBy:    "system",
-		Activate:     true,
-		RunnerSpecs: []driverpkg.DriverRunnerSpec{
-			{Name: "github-review-task-runner", Kind: driverpkg.RunnerKindFlueWorkflow, Entrypoint: "github-review-task-runner"},
-			{Name: "openshell-task-runner", Kind: driverpkg.RunnerKindFlueWorkflow, Entrypoint: "openshell-task-runner"},
-		},
-		Trust: workflowcatalog.DriverTrustTrusted,
-	})
-	if err != nil {
-		t.Fatalf("register deprecated driver: %v", err)
-	}
-
-	if err := EnsureBuiltinWorkflow(ctx, st, "BUILTIN", name); err != nil {
-		t.Fatalf("EnsureBuiltinWorkflow returned error: %v", err)
-	}
-	driver, err := st.Drivers().Get(ctx, "BUILTIN", name)
-	if err != nil {
-		t.Fatalf("get driver: %v", err)
-	}
-	if driver.ActiveVersionID == deprecated.Version.VersionID {
-		t.Fatalf("active version stayed on deprecated-runner manifest %q", driver.ActiveVersionID)
-	}
-	version, err := st.DriverVersions().Get(ctx, "BUILTIN", driver.ActiveVersionID)
-	if err != nil {
-		t.Fatalf("get active version: %v", err)
-	}
-	if got := version.Manifest["runners"]; got == "" {
-		t.Fatalf("refreshed manifest runners empty, want derived runner list")
-	}
-	var runners []driverpkg.DriverRunnerSpec
-	if err := json.Unmarshal([]byte(version.Manifest["runners"]), &runners); err != nil {
-		t.Fatalf("decode refreshed runners: %v", err)
-	}
-	for _, runner := range runners {
-		if runner.Name == "openshell-task-runner" {
-			t.Fatalf("refreshed manifest still declares openshell-task-runner: %+v", runners)
 		}
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -135,12 +136,14 @@ func (s *stubSandboxLauncher) Launch(_ context.Context, spec LaunchSpec) (Sandbo
 
 func sandboxSeamRunRequest(root string) RunRequest {
 	return RunRequest{
-		Run: &domain.DriverRun{
-			WorkspaceKey:    "TEST",
-			RunID:           "run-seam",
-			NodeID:          "node-1",
-			LeaseID:         "lease-1",
-			FencingToken:    7,
+		Run: &execution.DriverRun{
+			WorkspaceKey: "TEST",
+			RunID:        "run-seam",
+			Owner: execution.Owner{
+				NodeID:       "node-1",
+				LeaseID:      "lease-1",
+				FencingToken: 7,
+			},
 			Payload:         json.RawMessage(`{"hello":"sandbox"}`),
 			DriverID:        "driver-1",
 			DriverVersionID: "version-1",
@@ -165,7 +168,7 @@ func TestNodeRunnerRoutesThroughInjectedSandboxLauncher(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NodeRunner.Run: %v", err)
 	}
-	if result.Status != domain.DriverRunCompleted || result.Summary != "container ok" {
+	if result.Status != execution.DriverRunCompleted || result.Summary != "container ok" {
 		t.Fatalf("result = %+v, want completed container ok", result)
 	}
 	spec := launcher.spec
@@ -217,7 +220,7 @@ func TestNodeRunnerDefaultLauncherRecordsProcessPlacement(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NodeRunner.Run: %v", err)
 	}
-	if result.Status != domain.DriverRunCompleted {
+	if result.Status != execution.DriverRunCompleted {
 		t.Fatalf("result = %+v, want completed", result)
 	}
 	var placement domain.TaskRunPlacement

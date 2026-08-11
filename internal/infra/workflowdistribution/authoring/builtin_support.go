@@ -13,17 +13,17 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-type legacyBuiltinSupport struct{}
+type builtinSupport struct{}
 
 func NewBuiltinSupport() appworkflowauthoring.BuiltinSupport {
-	return legacyBuiltinSupport{}
+	return builtinSupport{}
 }
 
-func (legacyBuiltinSupport) BuiltinNames() []string {
+func (builtinSupport) BuiltinNames() []string {
 	return workflowdistribution.BuiltinWorkflowNames()
 }
 
-func (legacyBuiltinSupport) Builtin(name string) (appworkflowauthoring.BuiltinSpec, bool) {
+func (builtinSupport) Builtin(name string) (appworkflowauthoring.BuiltinSpec, bool) {
 	spec, ok := workflowdistribution.BuiltinWorkflow(name)
 	if !ok {
 		return appworkflowauthoring.BuiltinSpec{}, false
@@ -37,11 +37,11 @@ func (legacyBuiltinSupport) Builtin(name string) (appworkflowauthoring.BuiltinSp
 	}, true
 }
 
-func (legacyBuiltinSupport) SourceDigest(files map[string]string) (string, error) {
+func (builtinSupport) SourceDigest(files map[string]string) (string, error) {
 	return workflowdistribution.SourceDigest(files)
 }
 
-func (legacyBuiltinSupport) AssessVersion(
+func (builtinSupport) AssessVersion(
 	version *workflowcatalog.DriverVersion,
 	fresh []appworkflowauthoring.RunnerSpec,
 ) appworkflowauthoring.BuiltinVersionAssessment {
@@ -64,7 +64,7 @@ func (legacyBuiltinSupport) AssessVersion(
 	}
 }
 
-func (legacyBuiltinSupport) DeclaredRunner(
+func (builtinSupport) DeclaredRunner(
 	version *workflowcatalog.DriverVersion,
 	runnerName string,
 ) (appworkflowauthoring.RunnerSpec, error) {
@@ -77,7 +77,7 @@ func (legacyBuiltinSupport) DeclaredRunner(
 	}, nil
 }
 
-func (legacyBuiltinSupport) WorkDir() string {
+func (builtinSupport) WorkDir() string {
 	return builtinWorkflowWorkDir()
 }
 
@@ -120,23 +120,25 @@ func builtinWorkflowWorkDir() string {
 	return workDir
 }
 
-type legacyBoundPromptAgentIndex struct {
-	index BoundPromptAgentIndex
+type boundPromptAgentIndex struct {
+	workspaces store.WorkspaceStore
+	bindings   store.TriggerBindingStore
 }
 
 func NewBoundPromptAgentIndex(
-	index BoundPromptAgentIndex,
+	workspaces store.WorkspaceStore,
+	bindings store.TriggerBindingStore,
 ) appworkflowauthoring.BoundPromptAgentIndex {
-	if index == nil {
+	if workspaces == nil || bindings == nil {
 		return nil
 	}
-	return legacyBoundPromptAgentIndex{index: index}
+	return boundPromptAgentIndex{workspaces: workspaces, bindings: bindings}
 }
 
-func (adapter legacyBoundPromptAgentIndex) ListWorkspaceKeys(
+func (adapter boundPromptAgentIndex) ListWorkspaceKeys(
 	ctx context.Context,
 ) ([]string, error) {
-	workspaces, err := adapter.index.Workspaces().List(ctx)
+	workspaces, err := adapter.workspaces.List(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -149,12 +151,12 @@ func (adapter legacyBoundPromptAgentIndex) ListWorkspaceKeys(
 	return keys, nil
 }
 
-func (adapter legacyBoundPromptAgentIndex) HasEnabledPromptAgentBinding(
+func (adapter boundPromptAgentIndex) HasEnabledPromptAgentBinding(
 	ctx context.Context,
 	workspace string,
 ) (bool, error) {
 	enabled := true
-	bindings, err := adapter.index.TriggerBindings().List(
+	bindings, err := adapter.bindings.List(
 		ctx,
 		workspace,
 		store.TriggerBindingFilter{

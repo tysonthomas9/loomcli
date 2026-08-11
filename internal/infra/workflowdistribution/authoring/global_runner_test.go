@@ -1,11 +1,14 @@
 package authoring
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 
+	appworkflowauthoring "github.com/tysonthomas9/loomcli/internal/app/workflowauthoring"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 )
@@ -30,6 +33,49 @@ func TestBuiltinWorkflowsDeclaringRunner(t *testing.T) {
 	if got := builtinWorkflowsDeclaringRunner(driver.OpenShellRunnerName); len(got) != 0 {
 		t.Fatalf("openshell owners = %v, want none (deny-listed)", got)
 	}
+}
+
+func builtinWorkflowsDeclaringRunner(runnerName string) []string {
+	support := builtinSupport{}
+	names := []string{}
+	for _, name := range support.BuiltinNames() {
+		spec, ok := support.Builtin(name)
+		if !ok {
+			continue
+		}
+		for _, runner := range spec.Runners {
+			if runner.Name == runnerName {
+				names = append(names, name)
+				break
+			}
+		}
+	}
+	return names
+}
+
+func activeTrustedBuiltinRunner(
+	ctx context.Context,
+	catalog workflowcatalog.API,
+	workspace,
+	workflowName,
+	runnerName string,
+) (*driver.GlobalRunnerResolution, error) {
+	result, err := appworkflowauthoring.ResolveActiveBuiltinRunner(
+		ctx, catalog, NewBuiltinSupport(), workspace, workflowName, runnerName,
+	)
+	if errors.Is(err, workflowcatalog.ErrNotFound) {
+		return nil, domain.ErrNotFound
+	}
+	if errors.Is(err, workflowcatalog.ErrInvalid) {
+		return nil, domain.ErrInvalid
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &driver.GlobalRunnerResolution{
+		Driver: result.Driver, Version: result.Version,
+		Spec: driver.DriverRunnerSpec{Name: result.Spec.Name, Kind: result.Spec.Kind, Entrypoint: result.Spec.Entrypoint},
+	}, nil
 }
 
 // activeTrustedBuiltinRunner is the store-backed trust gate: a runner is only

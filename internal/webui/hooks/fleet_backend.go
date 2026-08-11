@@ -13,30 +13,27 @@ import (
 // to the workspace being registered and provides it to downstream hooks via the
 // resource bag.
 type FleetBackendHook struct {
-	baseURL     string
-	workspaceID string // explicit fallback workspace ID for legacy registrations
-	apiKey      string
-	actor       string // X-Actor header (fleet-db --auth-dev-mode); empty = no header
-	logger      *slog.Logger
+	baseURL string
+	apiKey  string
+	actor   string // X-Actor header (fleet-db --auth-dev-mode); empty = no header
+	logger  *slog.Logger
 }
 
 // NewFleetBackendHook creates a FleetBackendHook. baseURL must not be empty.
-// workspaceID is only used when a registration context has no workspace
-// ID. Normal fleet-db mode scopes each backend to ctx.WorkspaceID. actor is
-// the X-Actor header value used for fleet-db's
+// Every registration must supply its canonical workspace ID. actor is the
+// X-Actor header value used for fleet-db's
 // --auth-dev-mode (typically the loom agent name); empty means no header
 // is sent and fleet-db will reject the request unless a JWT is configured
 // via apiKey. A nil logger defaults to slog.Default().
-func NewFleetBackendHook(baseURL, workspaceID, apiKey, actor string, logger *slog.Logger) *FleetBackendHook {
+func NewFleetBackendHook(baseURL, apiKey, actor string, logger *slog.Logger) *FleetBackendHook {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &FleetBackendHook{
-		baseURL:     baseURL,
-		workspaceID: workspaceID,
-		apiKey:      apiKey,
-		actor:       actor,
-		logger:      logger,
+		baseURL: baseURL,
+		apiKey:  apiKey,
+		actor:   actor,
+		logger:  logger,
 	}
 }
 
@@ -50,14 +47,13 @@ func (h *FleetBackendHook) Critical() bool { return false }
 // OnRegister creates a FleetBackend for the workspace and stores it.
 func (h *FleetBackendHook) OnRegister(ctx *coordinator.RegistrationContext) error {
 	id := ctx.WorkspaceID
-	fleetWorkspaceID := id
-	if fleetWorkspaceID == "" {
-		fleetWorkspaceID = h.workspaceID
+	if id == "" {
+		return fmt.Errorf("create fleet backend: workspace ID is required")
 	}
 
 	fb, err := fleet.New(fleet.Config{
 		BaseURL:     h.baseURL,
-		WorkspaceID: fleetWorkspaceID,
+		WorkspaceID: id,
 		APIKey:      h.apiKey,
 		Actor:       h.actor,
 	})

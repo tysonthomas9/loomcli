@@ -60,7 +60,7 @@ func TestWebhookConnectorSecretAuthority(t *testing.T) {
 		seed       func(t *testing.T, st store.Store)
 		signSecret string
 		wantStatus int
-		wantEvents int
+		wantCalls  int
 	}{
 		{
 			name: "connector secret verifies",
@@ -69,7 +69,7 @@ func TestWebhookConnectorSecretAuthority(t *testing.T) {
 			},
 			signSecret: connSecret,
 			wantStatus: http.StatusAccepted,
-			wantEvents: 1,
+			wantCalls:  1,
 		},
 		{
 			name: "wrong secret rejected when connector exists",
@@ -78,14 +78,14 @@ func TestWebhookConnectorSecretAuthority(t *testing.T) {
 			},
 			signSecret: testSecret,
 			wantStatus: http.StatusUnauthorized,
-			wantEvents: 0,
+			wantCalls:  0,
 		},
 		{
 			name:       "no connector fails closed",
 			seed:       func(*testing.T, store.Store) {},
 			signSecret: testSecret,
 			wantStatus: http.StatusUnauthorized,
-			wantEvents: 0,
+			wantCalls:  0,
 		},
 		{
 			name: "connector for another source fails closed",
@@ -94,7 +94,7 @@ func TestWebhookConnectorSecretAuthority(t *testing.T) {
 			},
 			signSecret: testSecret,
 			wantStatus: http.StatusUnauthorized,
-			wantEvents: 0,
+			wantCalls:  0,
 		},
 		{
 			name: "disabled connector fails closed",
@@ -103,7 +103,7 @@ func TestWebhookConnectorSecretAuthority(t *testing.T) {
 			},
 			signSecret: testSecret,
 			wantStatus: http.StatusUnauthorized,
-			wantEvents: 0,
+			wantCalls:  0,
 		},
 		{
 			name: "any active connector for the source kind verifies",
@@ -113,7 +113,7 @@ func TestWebhookConnectorSecretAuthority(t *testing.T) {
 			},
 			signSecret: "secret-b",
 			wantStatus: http.StatusAccepted,
-			wantEvents: 1,
+			wantCalls:  1,
 		},
 		{
 			name: "tampered signature 401 with connector",
@@ -122,14 +122,15 @@ func TestWebhookConnectorSecretAuthority(t *testing.T) {
 			},
 			signSecret: "not-the-secret",
 			wantStatus: http.StatusUnauthorized,
-			wantEvents: 0,
+			wantCalls:  0,
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			st := seedStoreWithoutConnector(t, true)
 			tc.seed(t, st)
-			mux := newServer(st)
+			admission := &testAdmission{}
+			mux := newServerWithPorts(st, admission, testAutomationQueries{})
 
 			rr := httptest.NewRecorder()
 			mux.ServeHTTP(rr, signedRequestWith(tc.signSecret, "delivery-1", prOpenedBody))
@@ -139,11 +140,10 @@ func TestWebhookConnectorSecretAuthority(t *testing.T) {
 			if tc.wantStatus == http.StatusUnauthorized && rr.Body.String() != uniform401Body {
 				t.Errorf("401 body = %q, want uniform %q", rr.Body.String(), uniform401Body)
 			}
-			// Auth failures must never persist a TriggerEvent (existing e2e
-			// invariant preserved on the connector path).
-			events, _ := st.TriggerEvents().List(context.Background(), testWS, store.TriggerEventFilter{})
-			if len(events) != tc.wantEvents {
-				t.Fatalf("trigger events = %d, want %d", len(events), tc.wantEvents)
+			// Verification failures must never cross Automation's admission
+			// port; successful verification crosses it exactly once.
+			if calls := len(admission.commands); calls != tc.wantCalls {
+				t.Fatalf("admission calls = %d, want %d", calls, tc.wantCalls)
 			}
 		})
 	}

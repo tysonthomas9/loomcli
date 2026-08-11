@@ -19,7 +19,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
-	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
@@ -57,61 +56,32 @@ type fakeRelease struct {
 	actor string
 }
 
-// testWorkflowEventAuthorityProvider and testLegacyEventAdmission are
-// deliberately test-only compatibility wiring for the pre-Phase-3 memstore
-// route suites. Production driverapi has no InternalSource or TriggerRoutes
-// fallback.
+// These narrow test adapters keep the generic driver-route harness at the
+// Workflow Eventing interface. Automation admission behavior is tested by the
+// Automation module, not reimplemented in HTTP tests.
 type testWorkflowEventAuthorityProvider struct{}
 
 func (testWorkflowEventAuthorityProvider) AuthorityForVerifiedRun(context.Context, workfloweventing.VerifiedRun) (authority.ExecutionAuthority, error) {
 	return authority.ExecutionAuthority{}, nil
 }
 
-type testLegacyEventAdmission struct{ st store.Store }
+type testEventAdmission struct{}
 
-func (adapter testLegacyEventAdmission) AdmitEvent(ctx context.Context, _ automation.EventAuthority, command automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
-	parent, err := adapter.st.DriverRuns().Get(ctx, command.WorkspaceKey, "run-1")
-	if err != nil {
-		return nil, err
-	}
-	sourceResult, err := (&trigger.InternalSource{Store: adapter.st}).Emit(ctx, command.WorkspaceKey, trigger.InternalEvent{
-		EventID: command.SourceEventID, EventType: command.EventType,
-		Origin: automation.EventOriginWorkflow, ParentEventID: parent.SourceRef,
-		EmittedByRunID: parent.RunID, SubjectRef: command.SubjectRef,
-		ActorRef: driverpkg.DriverRunActor(parent.RunID),
-		EpicID:   firstNonEmpty(parent.EpicID, driverpkg.DriverRunPayloadEpicID(parent.Payload)),
-		Payload:  command.Payload, SubjectAttrs: command.SubjectAttrs,
-	})
-	if err != nil {
-		return nil, err
-	}
-	result := &automation.AdmissionResult{
-		Dropped: sourceResult.Dropped, DropReason: sourceResult.DropReason,
-		EventType: sourceResult.EventType, RouteKey: sourceResult.RouteKey,
-		Origin: sourceResult.Origin, HopDepth: sourceResult.HopDepth,
-	}
-	if sourceResult.Dropped {
-		return result, nil
-	}
-	result.Event = &automation.Event{
-		WorkspaceKey: command.WorkspaceKey, SourceKind: automation.SourceKindInternal,
-		SourceEventID: command.SourceEventID, EventType: sourceResult.EventType,
-		RouteKey: sourceResult.RouteKey, SubjectRef: command.SubjectRef,
-		ActorRef: driverpkg.DriverRunActor(parent.RunID), EmittingRunID: parent.RunID,
-		ParentEventID: parent.SourceRef, EpicID: firstNonEmpty(parent.EpicID, driverpkg.DriverRunPayloadEpicID(parent.Payload)),
-		Origin: sourceResult.Origin, HopDepth: sourceResult.HopDepth,
-	}
-	if sourceResult.Dispatch != nil {
-		result.Deliveries = make([]*automation.Delivery, 0, len(sourceResult.Dispatch.Deliveries))
-		for _, delivery := range sourceResult.Dispatch.Deliveries {
-			result.Deliveries = append(result.Deliveries, &automation.Delivery{
-				DeliveryID: delivery.DeliveryID, TriggerBindingID: delivery.BindingID,
-				DriverRunID: delivery.RunID, Status: delivery.Status,
-				RejectionReason: delivery.RejectionReason,
-			})
-		}
-	}
-	return result, nil
+func (testEventAdmission) AdmitEvent(_ context.Context, _ automation.EventAuthority, command automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
+	return &automation.AdmissionResult{
+		EventType: command.EventType,
+		RouteKey:  "internal." + strings.TrimSpace(command.EventType),
+		Origin:    automation.EventOriginWorkflow,
+		HopDepth:  1,
+		Event: &automation.Event{
+			WorkspaceKey:  command.WorkspaceKey,
+			SourceEventID: command.SourceEventID,
+			EventType:     command.EventType,
+			SubjectRef:    command.SubjectRef,
+			Origin:        automation.EventOriginWorkflow,
+			HopDepth:      1,
+		},
+	}, nil
 }
 
 func (f *fakeIssueBackend) Ready(_ context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
@@ -675,7 +645,7 @@ func newTestHarness(t *testing.T) *testHarness {
 	// Every harness carries a run-token signing key; every request authenticates
 	// through the same token-only seam as a workflow runtime.
 	runTokenKey := bytes.Repeat([]byte{0x42}, 32)
-	eventWorkflow, err := workfloweventing.New(testWorkflowEventAuthorityProvider{}, testLegacyEventAdmission{st: st})
+	eventWorkflow, err := workfloweventing.New(testWorkflowEventAuthorityProvider{}, testEventAdmission{})
 	if err != nil {
 		t.Fatalf("new test workflow eventing: %v", err)
 	}
@@ -684,6 +654,7 @@ func newTestHarness(t *testing.T) *testHarness {
 		t.Fatal("test DriverStep store lacks terminal repair support")
 	}
 	taskRunCommands := &testTaskRunClaimPort{store: st, requestReceipts: make(map[string]execution.RequestTaskRunResult)}
+	mutations := testutil.TaskRunMutationAdapter{TaskRuns: st.TaskRuns()}
 	executionCapability, err := appserve.NewExecutionCapability(appserve.ExecutionDependencies{
 		TaskRuns: st.TaskRuns(), DriverRuns: st.DriverRuns(), DriverSteps: st.DriverSteps(),
 		TerminalStepRepairs: repairs, TaskRunEvents: st.TaskRunEvents(), Nodes: st.Nodes(),
@@ -691,7 +662,8 @@ func newTestHarness(t *testing.T) *testHarness {
 		Workspaces: st.Workspaces(), AtomicTaskRunRequests: taskRunCommands, AtomicTaskRunClaims: taskRunCommands,
 		AtomicTaskRunWorkItemDesign: taskRunCommands,
 		AtomicTaskRunRequeues:       taskRunCommands, AtomicTaskRunRetryExhaustion: taskRunCommands,
-		AllowLegacyStoreAdapters: true,
+		StaleChildTaskRunRecovery: testutil.StaticTaskRunRecoveryPort{},
+		TaskRunHeartbeats:         mutations, TaskRunLogs: mutations, TaskRunFinalizer: mutations,
 	})
 	if err != nil {
 		t.Fatalf("new test Execution capability: %v", err)

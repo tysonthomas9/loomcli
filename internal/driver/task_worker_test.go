@@ -176,7 +176,7 @@ func TestTaskWorkerRunOnceClaimsQueuedTaskRunAndClosesTask(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
-	if outcome.Run.TaskRunID != "task-run-worker-loop" || outcome.Run.Status != domain.TaskRunCompleted {
+	if outcome.Run.TaskRunID != "task-run-worker-loop" || outcome.Run.Status != execution.StatusSucceeded {
 		t.Fatalf("outcome run = %+v, want completed task-run-worker-loop", outcome.Run)
 	}
 	if executor.req.NodeID != "task-worker-node-1" || executor.req.LeaseToken == "" {
@@ -187,10 +187,10 @@ func TestTaskWorkerRunOnceClaimsQueuedTaskRunAndClosesTask(t *testing.T) {
 	}
 	replayed, err := st.TaskRuns().Complete(ctx, "TEST", "task-run-worker-loop", store.TaskRunComplete{
 		CompletionID: "worker-complete-task-run-worker-loop",
-		NodeID:       outcome.Run.NodeID,
-		LeaseID:      outcome.Run.LeaseID,
+		NodeID:       outcome.Run.Owner.NodeID,
+		LeaseID:      outcome.Run.Owner.LeaseID,
 		LeaseToken:   executor.req.LeaseToken,
-		FencingToken: outcome.Run.FencingToken,
+		FencingToken: outcome.Run.Owner.FencingToken,
 		Status:       domain.TaskRunCompleted,
 	})
 	if err != nil {
@@ -303,7 +303,7 @@ func TestTaskWorkerUnscopedIdleLifecycleIsBoundedAcrossConcurrencySlots(t *testi
 	if err != nil {
 		t.Fatalf("RunOnce after work arrived: %v", err)
 	}
-	if outcome == nil || outcome.Run == nil || outcome.Run.TaskRunID != "task-run-after-idle" || outcome.Run.Status != domain.TaskRunCompleted {
+	if outcome == nil || outcome.Run == nil || outcome.Run.TaskRunID != "task-run-after-idle" || outcome.Run.Status != execution.StatusSucceeded {
 		t.Fatalf("outcome after idle = %+v, want completed task-run-after-idle", outcome)
 	}
 	registrations, heartbeats, activations, claims = counted.counts()
@@ -430,7 +430,7 @@ func TestTaskWorkerBlockedLifecycleWorkspaceDoesNotBlockAnotherClone(t *testing.
 		if result.err != nil {
 			t.Fatalf("unrelated workspace RunOnce: %v", result.err)
 		}
-		if result.outcome == nil || result.outcome.Run == nil || result.outcome.Run.TaskRunID != "task-run-unblocked" || result.outcome.Run.Status != domain.TaskRunCompleted {
+		if result.outcome == nil || result.outcome.Run == nil || result.outcome.Run.TaskRunID != "task-run-unblocked" || result.outcome.Run.Status != execution.StatusSucceeded {
 			t.Fatalf("unrelated workspace outcome = %+v, want completed task-run-unblocked", result.outcome)
 		}
 	case <-time.After(time.Second):
@@ -486,7 +486,7 @@ func TestTaskWorkerRunOnceReplaysExactClaimEnvelopeAfterLostResponse(t *testing.
 	if len(lost.commands) != 2 || !lost.sameEnvelope {
 		t.Fatalf("claim envelope was not replayed exactly; calls=%d same=%v", len(lost.commands), lost.sameEnvelope)
 	}
-	if outcome.Run.TaskRunID != "task-run-worker-lost-response" || outcome.Run.Status != domain.TaskRunCompleted ||
+	if outcome.Run.TaskRunID != "task-run-worker-lost-response" || outcome.Run.Status != execution.StatusSucceeded ||
 		executor.req.LeaseToken == "" || executor.req.LeaseToken != lost.commands[0].LeaseToken {
 		t.Fatalf("replayed outcome=%+v executor task=%q", outcome.Run, executor.req.TaskRunID)
 	}
@@ -573,7 +573,7 @@ func TestTaskWorkerRunOnceKeepsFlueTaskRunDistinctFromInteractionSession(t *test
 	if err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
-	if outcome.Run.Status != domain.TaskRunCompleted {
+	if outcome.Run.Status != execution.StatusSucceeded {
 		t.Fatalf("outcome status = %s error=%s, want completed", outcome.Run.Status, outcome.Run.ErrorMessage)
 	}
 	if _, err := st.AgentSessions().Get(ctx, "TEST", "flue-task-run-worker-flue"); !errors.Is(err, domain.ErrNotFound) {
@@ -623,7 +623,7 @@ func TestTaskWorkerRunOnceRefusesUntrustedQueuedNamedRunner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
-	if outcome.Run.Status != domain.TaskRunFailed || outcome.Run.ErrorClass != ErrorClassSandboxRequired {
+	if outcome.Run.Status != execution.StatusFailed || outcome.Run.ErrorClass != ErrorClassSandboxRequired {
 		t.Fatalf("outcome = %+v, want failed %s", outcome.Run, ErrorClassSandboxRequired)
 	}
 	if outcome.Run.RuntimeMetadata[ErrorCodeOutputKey] != ErrorClassSandboxRequired ||
@@ -689,7 +689,7 @@ func TestTaskWorkerRunOnceRetriesThenBlocksFailedTaskRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunOnce first: %v", err)
 	}
-	if first.Run.Status != domain.TaskRunQueued || first.Run.NodeID != "" || first.Run.LeaseID != "" || first.Run.FencingToken != 0 {
+	if first.Run.Status != execution.StatusQueued || first.Run.Owner.NodeID != "" || first.Run.Owner.LeaseID != "" || first.Run.Owner.FencingToken != 0 {
 		t.Fatalf("first outcome = %+v, want requeued unowned task run", first.Run)
 	}
 	if first.Run.RuntimeMetadata["scheduler_state"] != "retrying" || first.Run.RuntimeMetadata["scheduler_attempt"] != "1" || first.Run.RuntimeMetadata["scheduler_max_attempts"] != "2" {
@@ -718,7 +718,7 @@ func TestTaskWorkerRunOnceRetriesThenBlocksFailedTaskRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunOnce second: %v", err)
 	}
-	if second.Run.Status != domain.TaskRunFailed || second.Run.NodeID != "task-worker-node-1" {
+	if second.Run.Status != execution.StatusFailed || second.Run.Owner.NodeID != "task-worker-node-1" {
 		t.Fatalf("second outcome = %+v, want blocked failed owned terminal task run", second.Run)
 	}
 	if second.Run.RuntimeMetadata["scheduler_state"] != "blocked" || second.Run.RuntimeMetadata["scheduler_attempt"] != "2" || second.Run.RuntimeMetadata["scheduler_max_attempts"] != "2" {
@@ -776,7 +776,7 @@ func TestTaskWorkerRetryPersistsDistinctAttemptTranscriptsAndCompletes(t *testin
 	}
 	firstTranscriptID := "transcript-" + taskRunID
 	firstLogsID := "logs-" + taskRunID
-	if first.Run.Status != domain.TaskRunQueued ||
+	if first.Run.Status != execution.StatusQueued ||
 		!slices.Equal(first.ArtifactIDs, []string{firstTranscriptID, firstLogsID}) {
 		t.Fatalf("first outcome = %+v artifacts=%v, want requeued with first-attempt evidence", first.Run, first.ArtifactIDs)
 	}
@@ -791,7 +791,7 @@ func TestTaskWorkerRetryPersistsDistinctAttemptTranscriptsAndCompletes(t *testin
 	}
 	secondTranscriptID := firstTranscriptID + "-attempt-2"
 	secondLogsID := firstLogsID + "-attempt-2"
-	if second.Run.Status != domain.TaskRunCompleted ||
+	if second.Run.Status != execution.StatusSucceeded ||
 		!slices.Equal(second.ArtifactIDs, []string{secondTranscriptID, secondLogsID}) {
 		t.Fatalf("second outcome = %+v artifacts=%v, want successful retry with attempt-2 evidence", second.Run, second.ArtifactIDs)
 	}

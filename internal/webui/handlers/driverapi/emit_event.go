@@ -69,7 +69,7 @@ func (m *Module) emitEvent(ctx context.Context, ws string, id driverIdentity, bo
 	}
 	result, err := m.workflowEventing.Emit(ctx, workfloweventing.VerifiedRun{
 		WorkspaceKey: parent.WorkspaceKey, RunID: parent.RunID, Status: string(parent.Status),
-		NodeID: parent.NodeID, LeaseID: parent.LeaseID, FencingToken: parent.FencingToken,
+		NodeID: parent.Owner.NodeID, LeaseID: parent.Owner.LeaseID, FencingToken: parent.Owner.FencingToken,
 	}, workfloweventing.EmitRequest{
 		WorkspaceKey: ws, EventID: params.EventID, EventType: params.EventType,
 		SubjectRef: params.SubjectRef, Payload: params.Payload, SubjectAttrs: params.SubjectAttrs,

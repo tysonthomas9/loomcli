@@ -346,7 +346,7 @@ func createAssignedLeadSessionWithBackend(t *testing.T, st store.Store, backend 
 		WorkspaceKey: "WS",
 		SessionID:    "lead-session",
 		AgentID:      "nova",
-		Kind:         domain.AgentSessionKindOrchestration,
+		Kind:         domain.AgentSessionKindInteractive,
 		Status:       domain.AgentSessionRunning,
 		Metadata:     map[string]string{"actor": "test"},
 	}); err != nil {

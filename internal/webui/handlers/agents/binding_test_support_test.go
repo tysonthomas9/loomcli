@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	appworkflowauthoring "github.com/tysonthomas9/loomcli/internal/app/workflowauthoring"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	workflowdefs "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution/authoring"
 	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
@@ -706,11 +707,15 @@ func testWorkflowTargetPreparation(
 			if digestErr != nil {
 				return nil, digestErr
 			}
-			_, _, buildErr := workflowdefs.BuildAndAuthorManaged(
+			coordinator, coordinatorErr := appworkflowauthoring.New(workflowdefs.NewBundleStager())
+			if coordinatorErr != nil {
+				return nil, coordinatorErr
+			}
+			_, _, buildErr := coordinator.AuthorManaged(
 				ctx,
 				testUnexpectedManagedAuthoring{},
 				authority.SystemAuthority{},
-				workflowdefs.BuildAndRegisterOptions{
+				appworkflowauthoring.BuildOptions{
 					WorkspaceKey:  workspace,
 					Name:          workflow,
 					Entrypoint:    spec.Entrypoint,

@@ -13,9 +13,9 @@ package driverapi
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-
-	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
+	"strings"
 )
 
 // bindingConfig is the "binding-config" op handler. Flow: verify the caller
@@ -46,12 +46,12 @@ func (m *Module) bindingConfig(ctx context.Context, ws string, id driverIdentity
 	if err != nil {
 		return nil, fmt.Errorf("get trigger binding %q: %w", bindingID, err)
 	}
-	// The run-input object parsed from source_config_ref (trigger.BindingRunInput)
-	// is returned at the top level so a prompt agent reads binding.config().roleName
+	// The config object parsed from source_config_ref is returned at the top
+	// level so a prompt agent reads binding.config().roleName
 	// directly; the reserved context keys below are stamped AFTER the copy so they
 	// always win over any colliding run-input field.
 	result := map[string]any{}
-	for k, v := range trigger.BindingRunInput(binding) {
+	for k, v := range bindingConfigObject(binding.SourceConfigRef) {
 		result[k] = v
 	}
 	result["bindingId"] = binding.BindingID
@@ -60,4 +60,16 @@ func (m *Module) bindingConfig(ctx context.Context, ws string, id driverIdentity
 		result["schedule"] = binding.Schedule
 	}
 	return result, nil
+}
+
+func bindingConfigObject(raw string) map[string]json.RawMessage {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw[0] != '{' {
+		return nil
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &object); err != nil || len(object) == 0 {
+		return nil
+	}
+	return object
 }

@@ -54,7 +54,7 @@ type step9Fixture struct {
 	ctx  context.Context
 	st   store.Store
 	root string
-	reg  *driver.RegisterFlueResult
+	reg  *driver.FlueDriverFixture
 	exec *appserve.ExecutionCapability
 }
 
@@ -123,7 +123,7 @@ func newStep9Fixture(t *testing.T, trust workflowcatalog.DriverTrustLevel) *step
 	step9WriteFlueDist(t, root)
 	// Trust is stamped here exactly like the external submission path
 	// (workflows.BuildAndRegister) stamps it: server-side, never client input.
-	reg, err := driver.RegisterFlueDriver(ctx, st, driver.RegisterFlueOptions{
+	reg, err := driver.SeedFlueDriverFixture(ctx, st, driver.RegisterFlueOptions{
 		WorkspaceKey: "TEST",
 		WorkDir:      root,
 		DistPath:     "dist",
@@ -134,12 +134,13 @@ func newStep9Fixture(t *testing.T, trust workflowcatalog.DriverTrustLevel) *step
 		Trust:        trust,
 	})
 	if err != nil {
-		t.Fatalf("RegisterFlueDriver: %v", err)
+		t.Fatalf("SeedFlueDriverFixture: %v", err)
 	}
 	repairs, ok := st.DriverSteps().(store.TerminalDriverStepRepairStore)
 	if !ok {
 		t.Fatal("step9 memstore lacks terminal DriverStep repair support")
 	}
+	mutations := testutil.TaskRunMutationAdapter{TaskRuns: st.TaskRuns()}
 	executionCapability, err := appserve.NewExecutionCapability(appserve.ExecutionDependencies{
 		TaskRuns: st.TaskRuns(), DriverRuns: st.DriverRuns(), DriverSteps: st.DriverSteps(),
 		TerminalStepRepairs: repairs, TaskRunEvents: st.TaskRunEvents(), Nodes: st.Nodes(),
@@ -147,7 +148,8 @@ func newStep9Fixture(t *testing.T, trust workflowcatalog.DriverTrustLevel) *step
 		Workspaces: st.Workspaces(), AtomicTaskRunRequests: step9TaskRunClaimPort{}, AtomicTaskRunClaims: step9TaskRunClaimPort{},
 		AtomicTaskRunWorkItemDesign: step9TaskRunClaimPort{},
 		AtomicTaskRunRequeues:       step9TaskRunClaimPort{}, AtomicTaskRunRetryExhaustion: step9TaskRunClaimPort{},
-		AllowLegacyStoreAdapters: true,
+		StaleChildTaskRunRecovery: testutil.StaticTaskRunRecoveryPort{},
+		TaskRunHeartbeats:         mutations, TaskRunLogs: mutations, TaskRunFinalizer: mutations,
 	})
 	if err != nil {
 		t.Fatalf("compose step9 Execution: %v", err)
@@ -172,13 +174,13 @@ func step9WriteFlueDist(t *testing.T, root string) {
 
 func (f *step9Fixture) queueRun(t *testing.T, runID, epicID string) {
 	t.Helper()
-	if _, err := driver.CreateDriverRun(f.ctx, f.st, driver.RunOptions{
-		WorkspaceKey: "TEST",
-		DriverID:     f.reg.Driver.DriverID,
-		EpicID:       epicID,
-		RunID:        runID,
+	if _, err := f.st.DriverRuns().Create(f.ctx, store.DriverRunCreate{
+		WorkspaceKey: "TEST", RunID: runID,
+		DriverID: f.reg.Driver.DriverID, DriverVersionID: f.reg.Version.VersionID,
+		Entrypoint: driver.EntrypointRun, SourceKind: "test", SourceRef: "step9-fixture",
+		EpicID: epicID, Payload: json.RawMessage(`{}`),
 	}); err != nil {
-		t.Fatalf("CreateDriverRun %s: %v", runID, err)
+		t.Fatalf("create driver-run fixture %s: %v", runID, err)
 	}
 }
 
@@ -242,7 +244,7 @@ func TestStep9UntrustedDriverRefusedOutsideSandbox(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
-	if result.Final == nil || result.Final.Status != domain.DriverRunFailed {
+	if result.Final == nil || result.Final.Status != execution.DriverRunFailed {
 		t.Fatalf("final = %+v, want failed", result.Final)
 	}
 	if result.Final.ErrorClass != driver.ErrorClassSandboxRequired {
@@ -324,7 +326,7 @@ func TestStep9WorkflowEnvHoldsOnlyRunToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
-	if result.Final == nil || result.Final.Status != domain.DriverRunCompleted {
+	if result.Final == nil || result.Final.Status != execution.DriverRunCompleted {
 		t.Fatalf("final = %+v, want completed through the isolating capture launcher", result.Final)
 	}
 	env := envPairs(t, capture.spec.Env)
@@ -367,7 +369,7 @@ func assertStep9EnvAllowlisted(t *testing.T, env map[string]string) {
 // assertStep9RunTokenBound proves the exported LOOM_RUN_TOKEN is the token
 // minted at THIS claim — not the stale parent value — and that its claims
 // bind the claimed lease tuple with caps reserved-but-empty.
-func assertStep9RunTokenBound(t *testing.T, env map[string]string, claimed *domain.DriverRun) {
+func assertStep9RunTokenBound(t *testing.T, env map[string]string, claimed *execution.DriverRun) {
 	t.Helper()
 	token := env["LOOM_RUN_TOKEN"]
 	if token == "" || token == "stale-parent-token" {
@@ -380,9 +382,9 @@ func assertStep9RunTokenBound(t *testing.T, env map[string]string, claimed *doma
 	if claims.WorkspaceKey != claimed.WorkspaceKey || claims.RunID != claimed.RunID {
 		t.Fatalf("token identity = %s/%s, want %s/%s", claims.WorkspaceKey, claims.RunID, claimed.WorkspaceKey, claimed.RunID)
 	}
-	if claims.NodeID != claimed.NodeID || claims.LeaseID != claimed.LeaseID || claims.FencingToken != claimed.FencingToken {
+	if claims.NodeID != claimed.Owner.NodeID || claims.LeaseID != claimed.Owner.LeaseID || claims.FencingToken != claimed.Owner.FencingToken {
 		t.Fatalf("token lease binding = %s/%s/%d, want %s/%s/%d",
-			claims.NodeID, claims.LeaseID, claims.FencingToken, claimed.NodeID, claimed.LeaseID, claimed.FencingToken)
+			claims.NodeID, claims.LeaseID, claims.FencingToken, claimed.Owner.NodeID, claimed.Owner.LeaseID, claimed.Owner.FencingToken)
 	}
 	if len(claims.Caps) != 0 {
 		t.Fatalf("token caps = %v, want reserved-but-empty", claims.Caps)

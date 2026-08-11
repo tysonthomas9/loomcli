@@ -56,12 +56,11 @@ type Node struct {
 type AgentSessionKind string
 
 const (
-	AgentSessionKindTask          AgentSessionKind = "task"
-	AgentSessionKindInteractive   AgentSessionKind = "interactive"
-	AgentSessionKindOrchestration AgentSessionKind = "orchestration"
-	AgentSessionKindTerminal      AgentSessionKind = "terminal"
-	AgentSessionKindMaintenance   AgentSessionKind = "maintenance"
-	AgentSessionKindAdHoc         AgentSessionKind = "ad_hoc"
+	AgentSessionKindTask        AgentSessionKind = "task"
+	AgentSessionKindInteractive AgentSessionKind = "interactive"
+	AgentSessionKindTerminal    AgentSessionKind = "terminal"
+	AgentSessionKindMaintenance AgentSessionKind = "maintenance"
+	AgentSessionKindAdHoc       AgentSessionKind = "ad_hoc"
 )
 
 type AgentSessionStatus string

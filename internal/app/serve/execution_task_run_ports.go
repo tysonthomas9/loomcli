@@ -105,7 +105,7 @@ func (adapter *fleetTaskRunCommandPort) ClaimTaskRun(ctx context.Context, comman
 		NodeID: command.NodeID, RunnerID: command.RunnerID, LeaseID: command.LeaseID, LeaseToken: command.LeaseToken,
 		ClaimTTL: command.LeaseTTL, SupportedProviders: append([]string(nil), command.SupportedProviders...),
 		Capabilities: append([]string(nil), command.Capabilities...), WorkerProfileIDs: append([]string(nil), command.WorkerProfileIDs...),
-		RunnerPlacement: legacyExecutionPlacement(command.RunnerPlacement), SandboxPlacement: legacyExecutionPlacement(command.SandboxPlacement),
+		RunnerPlacement: storedExecutionPlacement(command.RunnerPlacement), SandboxPlacement: storedExecutionPlacement(command.SandboxPlacement),
 	})
 	if err != nil {
 		return execution.ClaimTaskRunResult{}, mapFleetExecutionPortError(err)
@@ -146,7 +146,7 @@ func (adapter *fleetTaskRunCommandPort) requestTaskRun(ctx context.Context, comm
 		RunnerKind: command.RunnerKind, RunnerEntrypoint: command.RunnerEntrypoint, RunnerVersionID: command.RunnerVersionID,
 		ProviderProfile: command.ProviderProfile, TargetNodeID: command.TargetNodeID,
 		RequiredCapabilities: append([]string(nil), command.RequiredCapabilities...),
-		RunnerPlacement:      legacyExecutionPlacement(command.RunnerPlacement), SandboxPlacement: legacyExecutionPlacement(command.SandboxPlacement),
+		RunnerPlacement:      storedExecutionPlacement(command.RunnerPlacement), SandboxPlacement: storedExecutionPlacement(command.SandboxPlacement),
 		RuntimeMetadata: cloneExecutionStringMap(command.RuntimeMetadata), Input: append([]byte(nil), command.Input...),
 		RequestedAt: command.RequestedAt, ReplayOnly: replayOnly,
 	})
@@ -437,7 +437,7 @@ func executionPlacement(value domain.TaskRunPlacement) execution.Placement {
 	return execution.Placement{Provider: value.Provider, NodeID: value.NodeID, RunnerID: value.RunnerID, SandboxID: value.SandboxID, CWD: value.CWD, RepoRef: value.RepoRef}
 }
 
-func legacyExecutionPlacement(value execution.Placement) domain.TaskRunPlacement {
+func storedExecutionPlacement(value execution.Placement) domain.TaskRunPlacement {
 	return domain.TaskRunPlacement{Provider: value.Provider, NodeID: value.NodeID, RunnerID: value.RunnerID, SandboxID: value.SandboxID, CWD: value.CWD, RepoRef: value.RepoRef}
 }
 

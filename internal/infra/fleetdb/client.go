@@ -142,7 +142,6 @@ type Client struct {
 	bindings             *triggerBindingStore
 	events               *triggerEventStore
 	deliveries           *triggerDeliveryStore
-	routes               *triggerRouteStore
 	runs                 *driverRunStore
 	steps                *driverStepStore
 	taskRuns             *taskRunStore
@@ -205,7 +204,6 @@ func (c *Client) initializeStores() {
 	c.bindings = &triggerBindingStore{client: c}
 	c.events = &triggerEventStore{client: c}
 	c.deliveries = &triggerDeliveryStore{client: c}
-	c.routes = &triggerRouteStore{client: c}
 	c.runs = &driverRunStore{client: c}
 	c.steps = &driverStepStore{client: c}
 	c.taskRuns = &taskRunStore{client: c}
@@ -385,9 +383,6 @@ func (c *Client) TriggerEvents() store.TriggerEventStore { return c.events }
 
 // TriggerDeliveries returns the TriggerDeliveryStore.
 func (c *Client) TriggerDeliveries() store.TriggerDeliveryStore { return c.deliveries }
-
-// TriggerRoutes returns the TriggerRouteDispatcher.
-func (c *Client) TriggerRoutes() store.TriggerRouteDispatcher { return c.routes }
 
 // DriverRuns returns the DriverRunStore.
 func (c *Client) DriverRuns() store.DriverRunStore { return c.runs }

@@ -14,7 +14,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	workflowdistribution "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
-	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 )
 
 const (
@@ -33,33 +32,6 @@ var ErrBuildToolchainUnavailable = workflowdistribution.ErrBuildToolchainUnavail
 type Spec = workflowdistribution.Spec
 type SourceManifest = workflowdistribution.SourceManifest
 type LocalSource = workflowdistribution.LocalSource
-
-type BuildAndRegisterOptions struct {
-	WorkspaceKey string
-	Name         string
-	// DriverID pins authoring to an existing aggregate whose durable ID differs
-	// from its display name. Empty derives the canonical slug from Name.
-	DriverID     string
-	Entrypoint   string
-	Files        map[string]string
-	Activate     bool
-	SourceRef    string
-	SourceDigest string
-	CreatedBy    string
-	WorkDir      string
-	Runners      []driver.DriverRunnerSpec
-	Manifest     map[string]string
-	// DeriveRunners is reserved for trusted built-in template registration.
-	DeriveRunners bool
-	// Trust is server-selected. External submissions default untrusted.
-	Trust workflowcatalog.DriverTrustLevel
-	// RequestID is the durable lost-response replay key submitted to Workflow
-	// Catalog's atomic authoring command. When omitted, BuildAndAuthor derives
-	// one from the content-addressed driver/version identity.
-	RequestID string
-	// ExpectedRevision is zero only when the driver is expected not to exist.
-	ExpectedRevision uint64
-}
 
 func BuiltinWorkflowNames() []string {
 	return workflowdistribution.BuiltinWorkflowNames()
@@ -116,62 +88,17 @@ func RedactBuildDiagnostics(input string) string {
 	return workflowdistribution.RedactBuildDiagnostics(input)
 }
 
-// BuildAndAuthor builds and stages an operator-authored workflow bundle, then
-// submits exactly one atomic Workflow Catalog command. Operator submissions
-// are always untrusted and inactive; audit identity is derived by the catalog
-// from auth rather than from CreatedBy.
-func BuildAndAuthor(
-	ctx context.Context,
-	api workflowcatalog.VersionAuthoringAPI,
-	auth authority.OperatorAuthority,
-	opts BuildAndRegisterOptions,
-) (*driver.RegisterFlueResult, string, error) {
-	coordinator, err := appworkflowauthoring.New(legacyBundleStager{})
-	if err != nil {
-		return nil, "", err
-	}
-	result, diagnostics, err := coordinator.AuthorOperator(
-		ctx,
-		api,
-		auth,
-		applicationBuildOptions(opts),
-	)
-	return legacyAuthoringResult(result), diagnostics, err
-}
-
-// BuildAndAuthorManaged is the system-only authoring lane for canonical
-// embedded workflows. It forces trusted placement and canonical managed
-// provenance; activation is applied atomically when requested.
-func BuildAndAuthorManaged(
-	ctx context.Context,
-	api workflowcatalog.VersionAuthoringAPI,
-	auth authority.SystemAuthority,
-	opts BuildAndRegisterOptions,
-) (*driver.RegisterFlueResult, string, error) {
-	coordinator, err := appworkflowauthoring.New(legacyBundleStager{})
-	if err != nil {
-		return nil, "", err
-	}
-	result, diagnostics, err := coordinator.AuthorManaged(
-		ctx,
-		api,
-		auth,
-		applicationBuildOptions(opts),
-	)
-	return legacyAuthoringResult(result), diagnostics, err
-}
-
-type legacyBundleStager struct{}
+type bundleStager struct{}
 
 func NewBundleStager() appworkflowauthoring.BundleStager {
-	return legacyBundleStager{}
+	return bundleStager{}
 }
 
 func NewNativeBundleStager() appworkflowauthoring.NativeBundleStager {
-	return legacyBundleStager{}
+	return bundleStager{}
 }
 
-func (legacyBundleStager) BuildAndStage(
+func (bundleStager) BuildAndStage(
 	ctx context.Context,
 	options appworkflowauthoring.BuildOptions,
 ) (appworkflowauthoring.StagedBundle, string, error) {
@@ -199,7 +126,7 @@ func (legacyBundleStager) BuildAndStage(
 		return nil, output, err
 	}
 	defer built.Cleanup()
-	runnerSpecs := legacyRunnerSpecs(options.Runners)
+	runnerSpecs := driverRunnerSpecs(options.Runners)
 	if len(runnerSpecs) == 0 && options.DeriveRunners {
 		runnerSpecs = deriveWorkflowRunnerSpecs(options.Entrypoint, options.Files)
 	}
@@ -217,10 +144,10 @@ func (legacyBundleStager) BuildAndStage(
 	if err != nil {
 		return nil, output, err
 	}
-	return &legacyStagedBundle{staged: staged}, output, nil
+	return &stagedBundle{staged: staged}, output, nil
 }
 
-func (legacyBundleStager) StageNative(
+func (bundleStager) StageNative(
 	_ context.Context,
 	options appworkflowauthoring.NativeOptions,
 ) (appworkflowauthoring.StagedBundle, error) {
@@ -230,21 +157,21 @@ func (legacyBundleStager) StageNative(
 		DriverName: options.DriverName, DriverID: options.DriverID,
 		WorkflowName: options.WorkflowName, SourceRef: options.SourceRef,
 		SourceDigest: options.SourceDigest, Activate: options.Activate,
-		RunnerSpecs: legacyRunnerSpecs(options.Runners),
+		RunnerSpecs: driverRunnerSpecs(options.Runners),
 		Manifest:    options.Manifest, Trust: options.Trust,
 	})
 	if err != nil {
 		return nil, err
 	}
-	return &legacyStagedBundle{staged: staged}, nil
+	return &stagedBundle{staged: staged}, nil
 }
 
-type legacyStagedBundle struct {
+type stagedBundle struct {
 	staged      *driver.StagedFlueRegistration
 	cleanupRoot string
 }
 
-func (bundle *legacyStagedBundle) Metadata() appworkflowauthoring.StagedMetadata {
+func (bundle *stagedBundle) Metadata() appworkflowauthoring.StagedMetadata {
 	if bundle == nil || bundle.staged == nil {
 		return appworkflowauthoring.StagedMetadata{}
 	}
@@ -258,7 +185,7 @@ func (bundle *legacyStagedBundle) Metadata() appworkflowauthoring.StagedMetadata
 	}
 }
 
-func (bundle *legacyStagedBundle) Bundle() *appworkflowauthoring.Bundle {
+func (bundle *stagedBundle) Bundle() *appworkflowauthoring.Bundle {
 	if bundle == nil || bundle.staged == nil || bundle.staged.Bundle == nil {
 		return nil
 	}
@@ -270,14 +197,14 @@ func (bundle *legacyStagedBundle) Bundle() *appworkflowauthoring.Bundle {
 	}
 }
 
-func (bundle *legacyStagedBundle) Promote() error {
+func (bundle *stagedBundle) Promote() error {
 	if bundle == nil || bundle.staged == nil {
 		return workflowcatalog.ErrInvalidPersistedState
 	}
 	return bundle.staged.Promote()
 }
 
-func (bundle *legacyStagedBundle) Cleanup() {
+func (bundle *stagedBundle) Cleanup() {
 	if bundle == nil {
 		return
 	}
@@ -290,23 +217,7 @@ func (bundle *legacyStagedBundle) Cleanup() {
 	}
 }
 
-func applicationBuildOptions(options BuildAndRegisterOptions) appworkflowauthoring.BuildOptions {
-	runners := make([]appworkflowauthoring.RunnerSpec, 0, len(options.Runners))
-	for _, runner := range options.Runners {
-		runners = append(runners, appworkflowauthoring.RunnerSpec{
-			Name: runner.Name, Kind: runner.Kind, Entrypoint: runner.Entrypoint,
-		})
-	}
-	return appworkflowauthoring.BuildOptions{
-		WorkspaceKey: options.WorkspaceKey, Name: options.Name, DriverID: options.DriverID,
-		Entrypoint: options.Entrypoint, Files: options.Files, Activate: options.Activate,
-		SourceRef: options.SourceRef, SourceDigest: options.SourceDigest, WorkDir: options.WorkDir,
-		Runners: runners, Manifest: options.Manifest, DeriveRunners: options.DeriveRunners,
-		Trust: options.Trust, RequestID: options.RequestID, ExpectedRevision: options.ExpectedRevision,
-	}
-}
-
-func legacyRunnerSpecs(runners []appworkflowauthoring.RunnerSpec) []driver.DriverRunnerSpec {
+func driverRunnerSpecs(runners []appworkflowauthoring.RunnerSpec) []driver.DriverRunnerSpec {
 	out := make([]driver.DriverRunnerSpec, 0, len(runners))
 	for _, runner := range runners {
 		out = append(out, driver.DriverRunnerSpec{
@@ -326,43 +237,12 @@ func applicationRunnerSpecs(runners []driver.DriverRunnerSpec) []appworkflowauth
 	return out
 }
 
-func legacyAuthoringResult(result *appworkflowauthoring.Result) *driver.RegisterFlueResult {
-	if result == nil {
-		return nil
-	}
-	var bundle *driver.Bundle
-	if result.Bundle != nil {
-		bundle = &driver.Bundle{
-			Root: result.Bundle.Root, BundleRef: result.Bundle.BundleRef,
-			SourceRef: result.Bundle.SourceRef, SourceDigest: result.Bundle.SourceDigest,
-			BundleDigest: result.Bundle.BundleDigest,
-			Manifest:     cloneWorkflowManifest(result.Bundle.Manifest),
-			Diagnostics:  result.Bundle.Diagnostics,
-		}
-	}
-	return &driver.RegisterFlueResult{
-		Driver: result.Driver, Version: result.Version, Bundle: bundle,
-		CreatedDriver: result.CreatedDriver, CreatedVersion: result.CreatedVersion,
-		ReusedVersion: result.ReusedVersion, Activated: result.Activated,
-	}
-}
-
 func cloneWorkflowManifest(in map[string]string) map[string]string {
 	out := make(map[string]string, len(in)+1)
 	for key, value := range in {
 		out[key] = value
 	}
 	return out
-}
-
-func workflowRunnerSpecs(opts BuildAndRegisterOptions) []driver.DriverRunnerSpec {
-	if len(opts.Runners) > 0 {
-		return opts.Runners
-	}
-	if !opts.DeriveRunners {
-		return nil
-	}
-	return deriveWorkflowRunnerSpecs(opts.Entrypoint, opts.Files)
 }
 
 func deriveWorkflowRunnerSpecs(entrypoint string, files map[string]string) []driver.DriverRunnerSpec {
@@ -379,22 +259,4 @@ func activeManifestRunnersAreStale(manifest map[string]string, fresh map[string]
 
 func manifestMissingFreshRunners(manifest map[string]string, fresh map[string]struct{}) []string {
 	return workflowdistribution.ManifestMissingFreshRunners(manifest, fresh)
-}
-
-// Test-only compatibility helpers remain while legacy package tests are
-// migrated with the final facade deletion.
-func flueRuntimeRoot() (string, error) {
-	return workflowdistribution.FlueRuntimeRoot()
-}
-
-func daytonaSDKRoot(runtimeRoot string) (string, error) {
-	return workflowdistribution.DaytonaSDKRoot(runtimeRoot)
-}
-
-func linkFlueBuildDependencies(root string) error {
-	return workflowdistribution.LinkFlueBuildDependencies(root)
-}
-
-func classifyFlueBuildError(cause error, output string) error {
-	return workflowdistribution.ClassifyFlueBuildError(cause, output)
 }

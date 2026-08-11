@@ -16,7 +16,7 @@ const testFleetURL = "http://localhost:0"
 
 func newTestFleetBackendHook(t *testing.T) *FleetBackendHook {
 	t.Helper()
-	return NewFleetBackendHook(testFleetURL, "test-ws", "test-key", "test-actor", slog.Default())
+	return NewFleetBackendHook(testFleetURL, "test-key", "test-actor", slog.Default())
 }
 
 func TestFleetBackendHook_Name(t *testing.T) {
@@ -71,7 +71,7 @@ func TestFleetBackendHook_OnRegisterScopesBackendToRegisteredWorkspace(t *testin
 	}))
 	defer srv.Close()
 
-	hook := NewFleetBackendHook(srv.URL, "DEFAULT", "", "test-actor", slog.Default())
+	hook := NewFleetBackendHook(srv.URL, "", "test-actor", slog.Default())
 	ctx := regCtx("DEMO-WS", "/tmp/demo")
 	if err := hook.OnRegister(ctx); err != nil {
 		t.Fatalf("OnRegister returned error: %v", err)
@@ -108,7 +108,7 @@ func TestFleetBackendHook_V2MutationWaitCarriesAPIKey(t *testing.T) {
 	}))
 	defer server.Close()
 
-	hook := NewFleetBackendHook(server.URL, "", serviceCredential, "local-service", slog.Default())
+	hook := NewFleetBackendHook(server.URL, serviceCredential, "local-service", slog.Default())
 	ctx := regCtx("SECURE", "/tmp/secure")
 	if err := hook.OnRegister(ctx); err != nil {
 		t.Fatalf("OnRegister: %v", err)
@@ -130,7 +130,7 @@ func TestFleetBackendHook_V2MutationWaitCarriesAPIKey(t *testing.T) {
 }
 
 func TestFleetBackendHook_EmptyWorkspaceRequiresExplicitWorkspace(t *testing.T) {
-	hook := NewFleetBackendHook(testFleetURL, "", "", "test-actor", slog.Default())
+	hook := NewFleetBackendHook(testFleetURL, "", "test-actor", slog.Default())
 	ctx := regCtx("", "/tmp/demo")
 
 	if err := hook.OnRegister(ctx); err == nil {
@@ -143,7 +143,7 @@ func TestFleetBackendHook_EmptyWorkspaceRequiresExplicitWorkspace(t *testing.T) 
 
 func TestFleetBackendHook_OnRegister_Error(t *testing.T) {
 	// Empty baseURL causes fleet.New to fail.
-	hook := NewFleetBackendHook("", "test-ws", "test-key", "test-actor", slog.Default())
+	hook := NewFleetBackendHook("", "test-key", "test-actor", slog.Default())
 
 	ctx := regCtx("ws-fleet-err", "/tmp/ws-err")
 	if err := hook.OnRegister(ctx); err == nil {

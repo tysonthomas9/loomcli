@@ -93,9 +93,8 @@ type taskDiffResponse struct {
 // the delivery, and HostBridgeTaskExecutor only creates patch_artifact_id when a
 // patch is returned. The robust local input is therefore the review card's
 // external_ref stamp plus either the workspace repo's filesystem origin or its
-// verified machine-local checkout. The checkout fallback lets a legacy
-// Execution-owned Task Runner hand work to Local Review when GitHub PR
-// delivery is unavailable without pretending the commit was published.
+// verified machine-local checkout. Those are the two supported local-branch
+// repository locations; neither implies that the commit was published.
 //
 // Auth is the same run-scoped verifyParent model as role-get: a trusted
 // workflow run may read only cards/repos inside its workspace. The operation is

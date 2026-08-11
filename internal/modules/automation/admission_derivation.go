@@ -149,7 +149,7 @@ func (s *Service) deriveExecutionAdmission(ctx context.Context, eventAuth EventA
 	derived.epicID = strings.TrimSpace(emission.EpicID)
 	derived.origin = EventOriginWorkflow
 	derived.signatureStatus = SignatureStatusInternal
-	derived.idempotencyKey = internalEventIdempotencyKey(derived.workspace, derived.sourceEventID)
+	derived.idempotencyKey = InternalEventIdempotencyKey(derived.workspace, derived.sourceEventID)
 	derived.parentEventID = strings.TrimSpace(emission.ParentEventID)
 	if derived.parentEventID == "" {
 		derived.hopDepth = 1
@@ -235,7 +235,7 @@ func deriveSystemSource(command AdmitEventCommand, derived *derivedAdmission) er
 		derived.eventType = eventType
 		derived.routeKey = "internal." + eventType
 		derived.sourceRef = strings.TrimSpace(command.SourceRef)
-		derived.idempotencyKey = internalEventIdempotencyKey(derived.workspace, derived.sourceEventID)
+		derived.idempotencyKey = InternalEventIdempotencyKey(derived.workspace, derived.sourceEventID)
 		return nil
 	default:
 		return fmt.Errorf("system authority cannot emit source kind %q: %w", derived.sourceKind, ErrInvalid)

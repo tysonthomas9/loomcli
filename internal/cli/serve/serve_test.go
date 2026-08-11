@@ -314,19 +314,6 @@ func TestApplyWorkspaceConfig_StoreWithoutAgentsCommandsFailsClosed(t *testing.T
 	}
 }
 
-func TestApplyWorkspaceConfig_FleetClientWorkspaceOverridesCwdFallback(t *testing.T) {
-	cfg := webui.ServerConfig{
-		FleetClient:          true,
-		FleetClientWorkspace: "PARITY",
-	}
-
-	applyWorkspaceConfig(&cfg, workspaceAgentsCommandsStub{})
-
-	if cfg.InitialWorkspaceID != "PARITY" {
-		t.Fatalf("InitialWorkspaceID = %q, want PARITY", cfg.InitialWorkspaceID)
-	}
-}
-
 func TestApplyFleetConfig_StoreBackedServeDoesNotExpectDaemon(t *testing.T) {
 	cfg := webui.ServerConfig{Store: memstore.New()}
 

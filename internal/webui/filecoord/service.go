@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"golang.org/x/sync/singleflight"
@@ -32,22 +31,15 @@ type fileServiceImpl struct {
 	indexBuilds   singleflight.Group
 	indexBuilder  func(context.Context, string, string, bool) (*FileIndexResult, error)
 	mutationLocks pathLockSet
-
-	historyCleanupOnce sync.Once
-	historyCleanupDone chan struct{}
-	historyCleanupMu   sync.Mutex
-	historyCleanupErr  error
 }
 
 // NewFileService creates a new FileService implementation.
 func NewFileService(fileOps ops.FileOps) FileService {
 	svc := &fileServiceImpl{
-		fileOps:            fileOps,
-		indexCache:         newFileIndexCache(fileIndexCacheMaxEntries, fileIndexCacheMaxBytes, fileIndexCacheTTL),
-		historyCleanupDone: make(chan struct{}),
+		fileOps:    fileOps,
+		indexCache: newFileIndexCache(fileIndexCacheMaxEntries, fileIndexCacheMaxBytes, fileIndexCacheTTL),
 	}
 	svc.indexBuilder = svc.buildFileIndex
-	svc.startLegacyHistoryCleanup()
 	return svc
 }
 

@@ -106,7 +106,7 @@ func TestHandleAgents_UsesCanonicalAgentsAsSourceOfTruth(t *testing.T) {
 		WorkspaceKey: "WS1",
 		SessionID:    "lead-session",
 		AgentID:      "falcon",
-		Kind:         domain.AgentSessionKindOrchestration,
+		Kind:         domain.AgentSessionKindInteractive,
 		Status:       domain.AgentSessionRunning,
 	}); err != nil {
 		t.Fatal(err)

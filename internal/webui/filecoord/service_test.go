@@ -199,26 +199,6 @@ func scopedSvc(root string) FileService {
 	return NewFileService(scopedMockFileOps{wsRoot: root})
 }
 
-func waitLegacyHistoryCleanupForTest(t *testing.T, svc FileService) {
-	t.Helper()
-	impl, ok := svc.(*fileServiceImpl)
-	if !ok {
-		t.Fatalf("service = %T, want *fileServiceImpl", svc)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	select {
-	case <-impl.historyCleanupDone:
-	case <-ctx.Done():
-		t.Fatalf("legacy history cleanup: %v", ctx.Err())
-	}
-	impl.historyCleanupMu.Lock()
-	defer impl.historyCleanupMu.Unlock()
-	if err := impl.historyCleanupErr; err != nil {
-		t.Fatalf("legacy history cleanup: %v", err)
-	}
-}
-
 func writeScopedFile(ctx context.Context, svc FileService, wsID string, scope FileScope, target, repo, path, content string) error {
 	_, err := svc.WriteFileConditionalScoped(ctx, wsID, scope, target, repo, path, content, FileWritePreconditions{})
 	return err
@@ -1144,81 +1124,6 @@ func TestMapGitInspectionErrorPreservesKinds(t *testing.T) {
 		if !ok || serviceErr.Kind != tc.want {
 			t.Fatalf("kind %q mapped to %T %+v, want %q", tc.kind, err, err, tc.want)
 		}
-	}
-}
-
-func TestFileServiceImpl_StartupCleansLegacySaveHistoryOnce(t *testing.T) {
-	wsRoot := t.TempDir()
-	dataDir := t.TempDir()
-	legacy := filepath.Join(dataDir, legacySaveHistoryDirName)
-	sibling := filepath.Join(dataDir, "keep")
-	mustWrite(t, filepath.Join(legacy, "nested", "snapshot.json"), "plaintext")
-	mustWrite(t, filepath.Join(sibling, "data.txt"), "keep")
-
-	svc := NewFileService(scopedMockFileOps{wsRoot: wsRoot, dataDir: dataDir})
-	waitLegacyHistoryCleanupForTest(t, svc)
-
-	if _, err := os.Lstat(legacy); !os.IsNotExist(err) {
-		t.Fatalf("legacy history still exists: %v", err)
-	}
-	if got, err := os.ReadFile(filepath.Join(sibling, "data.txt")); err != nil || string(got) != "keep" {
-		t.Fatalf("sibling changed: %q, %v", got, err)
-	}
-
-	mustWrite(t, filepath.Join(legacy, "snapshot.json"), "plaintext-again")
-	if _, err := svc.WriteFileConditionalScoped(context.Background(), "ws", ScopeWorkspace, "", "", "file.txt", "secret plaintext", FileWritePreconditions{}); err != nil {
-		t.Fatalf("save: %v", err)
-	}
-	if _, err := os.Lstat(legacy); err != nil {
-		t.Fatalf("legacy history was cleaned outside startup: %v", err)
-	}
-}
-
-func TestFileServiceImpl_SaveCreatesNoPlaintextSnapshot(t *testing.T) {
-	wsRoot := t.TempDir()
-	dataDir := t.TempDir()
-	svc := NewFileService(scopedMockFileOps{wsRoot: wsRoot, dataDir: dataDir})
-	waitLegacyHistoryCleanupForTest(t, svc)
-
-	if _, err := svc.WriteFileConditionalScoped(context.Background(), "ws", ScopeWorkspace, "", "", "file.txt", "secret plaintext", FileWritePreconditions{}); err != nil {
-		t.Fatalf("save: %v", err)
-	}
-	if _, err := os.Lstat(filepath.Join(dataDir, legacySaveHistoryDirName)); !os.IsNotExist(err) {
-		t.Fatalf("legacy history path exists after save: %v", err)
-	}
-}
-
-func TestCleanupLegacySaveHistoryExactAndIdempotent(t *testing.T) {
-	dataDir := t.TempDir()
-	legacy := filepath.Join(dataDir, legacySaveHistoryDirName)
-	sibling := filepath.Join(dataDir, "keep")
-	mustWrite(t, filepath.Join(legacy, "nested", "snapshot.json"), "plaintext")
-	mustWrite(t, filepath.Join(sibling, "data.txt"), "keep")
-	for i := 0; i < 2; i++ {
-		if err := cleanupLegacySaveHistory(dataDir); err != nil {
-			t.Fatalf("cleanup %d: %v", i, err)
-		}
-	}
-	if _, err := os.Lstat(legacy); !os.IsNotExist(err) {
-		t.Fatalf("legacy history still exists: %v", err)
-	}
-	if got, err := os.ReadFile(filepath.Join(sibling, "data.txt")); err != nil || string(got) != "keep" {
-		t.Fatalf("sibling changed: %q, %v", got, err)
-	}
-}
-
-func TestCleanupLegacySaveHistoryRefusesSymlink(t *testing.T) {
-	dataDir := t.TempDir()
-	outside := t.TempDir()
-	mustWrite(t, filepath.Join(outside, "snapshot.json"), "keep")
-	if err := os.Symlink(outside, filepath.Join(dataDir, legacySaveHistoryDirName)); err != nil {
-		t.Skipf("symlink unavailable: %v", err)
-	}
-	if err := cleanupLegacySaveHistory(dataDir); err == nil {
-		t.Fatal("cleanup followed legacy history symlink")
-	}
-	if got, err := os.ReadFile(filepath.Join(outside, "snapshot.json")); err != nil || string(got) != "keep" {
-		t.Fatalf("outside target changed: %q, %v", got, err)
 	}
 }
 

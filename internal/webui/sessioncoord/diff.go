@@ -19,7 +19,7 @@ func (s *sessionServiceImpl) GetSessionDiff(ctx context.Context, wsID, taskID, s
 		return "", apperrors.ErrValidation("invalid session ID")
 	}
 	// As with detail and transcript, prefer the canonical TaskRun artifact over
-	// any stale local session that happens to reuse the compatibility route ID.
+	// any local interaction session that happens to reuse the route ID.
 	if run, runErr := s.executionTaskRunForSession(ctx, wsID, taskID, sessionID); runErr == nil {
 		return s.executionTaskRunDiff(ctx, wsID, run)
 	} else if !serviceErrorNotFound(runErr) {

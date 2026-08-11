@@ -77,6 +77,7 @@ type DriverRunRecoveryPort interface {
 
 type DriverRunQueryPort interface {
 	GetDriverRun(context.Context, string, string) (*DriverRun, error)
+	ListDriverRuns(context.Context, DriverRunQuery) ([]*DriverRun, error)
 }
 
 type DriverAwaitResolutionPort interface {

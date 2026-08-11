@@ -10,6 +10,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -147,7 +148,7 @@ func TestSnapshotManagedAgentPolicyStripsReservedKeyForUnmanagedRun(t *testing.T
 	snapshot, err := h.module.snapshotManagedAgentPolicy(
 		t.Context(),
 		"WS",
-		&domain.DriverRun{},
+		&execution.DriverRun{},
 		input,
 	)
 	if err != nil {
@@ -209,7 +210,7 @@ func newManagedAgentPolicyHarness(t *testing.T) *managedAgentPolicyHarness {
 	}
 }
 
-func seedManagedAgentPolicy(t *testing.T, h *managedAgentPolicyHarness) *domain.DriverRun {
+func seedManagedAgentPolicy(t *testing.T, h *managedAgentPolicyHarness) *execution.DriverRun {
 	t.Helper()
 	budget := 3.25
 	if _, err := h.store.Roles().Create(t.Context(), store.RoleCreate{
@@ -234,7 +235,7 @@ func seedManagedAgentPolicy(t *testing.T, h *managedAgentPolicyHarness) *domain.
 	}); err != nil {
 		t.Fatalf("create managed agent service: %v", err)
 	}
-	return &domain.DriverRun{AgentServiceID: "managed-agent"}
+	return &execution.DriverRun{AgentServiceID: "managed-agent"}
 }
 
 func decodeManagedAgentPolicy(

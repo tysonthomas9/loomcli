@@ -10,6 +10,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -96,7 +97,7 @@ type TaskRunRequestResult struct {
 }
 
 type TaskRunRequestOutcome struct {
-	Run         *domain.TaskRun
+	Run         *execution.TaskRun
 	LeaseToken  string
 	ArtifactIDs []string
 }
@@ -117,7 +118,7 @@ func PrepareTaskRunRequest(
 	ctx context.Context,
 	s taskRunRequestStore,
 	opts TaskRunRequestOptions,
-	parent *domain.DriverRun,
+	parent *execution.DriverRun,
 	preflighter TaskProviderPreflighter,
 ) (TaskRunRequestOptions, error) {
 	if s == nil || parent == nil {
@@ -127,7 +128,7 @@ func PrepareTaskRunRequest(
 	if err := validateTaskRunRequestOptions(opts); err != nil {
 		return opts, err
 	}
-	if parent.WorkspaceKey != opts.WorkspaceKey || parent.RunID != opts.DriverRunID || parent.Status != domain.DriverRunRunning {
+	if parent.WorkspaceKey != opts.WorkspaceKey || parent.RunID != opts.DriverRunID || parent.Status != execution.DriverRunRunning {
 		return opts, fmt.Errorf("parent driver run does not match active request owner: %w", domain.ErrNotOwner)
 	}
 	resolved, err := resolveTaskRunRequestRunner(ctx, s, opts, parent)
@@ -183,7 +184,7 @@ func preflightTaskRunRequest(ctx context.Context, opts TaskRunRequestOptions, ca
 	return resolved, nil
 }
 
-func resolveTaskRunRequestRunner(ctx context.Context, s taskRunRequestStore, opts TaskRunRequestOptions, parent *domain.DriverRun) (TaskRunRequestOptions, error) {
+func resolveTaskRunRequestRunner(ctx context.Context, s taskRunRequestStore, opts TaskRunRequestOptions, parent *execution.DriverRun) (TaskRunRequestOptions, error) {
 	if strings.TrimSpace(opts.Runner) == "" {
 		return opts, nil
 	}
@@ -228,7 +229,7 @@ func resolveTaskRunRequestRunner(ctx context.Context, s taskRunRequestStore, opt
 // — and its trust level — so the runner executes under its own trust, never the
 // (possibly untrusted) caller's. See global_runner.go for the security
 // reasoning.
-func resolveGlobalRunnerRequest(ctx context.Context, opts TaskRunRequestOptions, parent *domain.DriverRun) (TaskRunRequestOptions, error) {
+func resolveGlobalRunnerRequest(ctx context.Context, opts TaskRunRequestOptions, parent *execution.DriverRun) (TaskRunRequestOptions, error) {
 	res, err := resolveGlobalRunner(ctx, opts.WorkspaceKey, opts.Runner)
 	if err != nil {
 		return opts, err
@@ -286,12 +287,12 @@ type taskExecCompletion struct {
 	ErrorMessage string
 }
 
-func claimedTaskRunRefsFromOptions(claimed *domain.TaskRun, opts executeClaimedTaskRunOptions) claimedTaskRunRefs {
+func claimedTaskRunRefsFromOptions(claimed *execution.TaskRun, opts executeClaimedTaskRunOptions) claimedTaskRunRefs {
 	return claimedTaskRunRefs{
 		WorkspaceKey:     firstNonEmpty(opts.WorkspaceKey, claimed.WorkspaceKey),
 		DriverRunID:      firstNonEmpty(opts.DriverRunID, claimed.DriverRunID),
 		DriverStepID:     firstNonEmpty(opts.DriverStepID, claimed.DriverStepID),
-		TaskID:           firstNonEmpty(opts.TaskID, claimed.TaskID),
+		TaskID:           firstNonEmpty(opts.TaskID, claimed.WorkItemID),
 		Runner:           claimed.Runner,
 		RunnerRef:        claimed.RunnerRef,
 		RunnerKind:       claimed.RunnerKind,
@@ -304,7 +305,7 @@ func claimedTaskRunRefsFromOptions(claimed *domain.TaskRun, opts executeClaimedT
 	}
 }
 
-func taskExecRequest(claimed *domain.TaskRun, opts executeClaimedTaskRunOptions, refs claimedTaskRunRefs) TaskExecRequest {
+func taskExecRequest(claimed *execution.TaskRun, opts executeClaimedTaskRunOptions, refs claimedTaskRunRefs) TaskExecRequest {
 	return TaskExecRequest{
 		WorkspaceKey:     refs.WorkspaceKey,
 		DriverRunID:      refs.DriverRunID,
@@ -321,13 +322,20 @@ func taskExecRequest(claimed *domain.TaskRun, opts executeClaimedTaskRunOptions,
 		RunnerTrustLevel: refs.RunnerTrustLevel,
 		ProviderProfile:  refs.ProviderProfile,
 		ParentSessionID:  refs.ParentSessionID,
-		NodeID:           claimed.NodeID,
-		LeaseID:          claimed.LeaseID,
+		NodeID:           claimed.Owner.NodeID,
+		LeaseID:          claimed.Owner.LeaseID,
 		LeaseToken:       opts.LeaseToken,
-		FencingToken:     claimed.FencingToken,
-		RunnerPlacement:  claimed.RunnerPlacement,
-		SandboxPlacement: claimed.SandboxPlacement,
+		FencingToken:     claimed.Owner.FencingToken,
+		RunnerPlacement:  domainTaskRunPlacement(claimed.RunnerPlacement),
+		SandboxPlacement: domainTaskRunPlacement(claimed.SandboxPlacement),
 		Input:            claimed.Input,
+	}
+}
+
+func domainTaskRunPlacement(value execution.Placement) domain.TaskRunPlacement {
+	return domain.TaskRunPlacement{
+		Provider: value.Provider, NodeID: value.NodeID, RunnerID: value.RunnerID,
+		SandboxID: value.SandboxID, CWD: value.CWD, RepoRef: value.RepoRef,
 	}
 }
 

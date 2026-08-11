@@ -109,7 +109,7 @@ func (m *Module) taskRequestExecutor() driverpkg.HostBridgeTaskExecutor {
 	}
 }
 
-func taskRunRequestCommand(ws string, parent *domain.DriverRun, owner execution.Owner, opts driverpkg.TaskRunRequestOptions) execution.RequestTaskRunCommand {
+func taskRunRequestCommand(ws string, parent *execution.DriverRun, owner execution.Owner, opts driverpkg.TaskRunRequestOptions) execution.RequestTaskRunCommand {
 	taskRunID := strings.TrimSpace(opts.TaskRunID)
 	if taskRunID == "" {
 		taskRunID = execution.RequestedTaskRunID(parent.RunID, opts.TaskID)
@@ -182,7 +182,7 @@ func (m *Module) execTask(ctx context.Context, ws string, id driverIdentity, bod
 func (m *Module) snapshotManagedAgentPolicy(
 	ctx context.Context,
 	ws string,
-	parent *domain.DriverRun,
+	parent *execution.DriverRun,
 	input json.RawMessage,
 ) (json.RawMessage, error) {
 	agentServiceID := strings.TrimSpace(parent.AgentServiceID)

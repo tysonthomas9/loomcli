@@ -353,7 +353,6 @@ method_sets:
       - CreateForRun
       - Delete
       - Deregister
-      - DispatchTriggerRoute
       - DispatchTriggerRouteV2
       - Finalize
       - Finish

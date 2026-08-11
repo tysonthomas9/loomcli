@@ -21,6 +21,26 @@ type readerCapableEvents struct {
 	store.TriggerEventStore
 }
 
+type discardIssueJournalEmitter struct{}
+
+func (discardIssueJournalEmitter) Emit(context.Context, string, trigger.InternalEvent) (*trigger.InternalEmitResult, error) {
+	return &trigger.InternalEmitResult{}, nil
+}
+
+func issueJournalTaskLaneTestPorts() (
+	trigger.TaskReadyIssueLookup,
+	trigger.TaskReadySnapshotLister,
+	trigger.TaskReadyRepositoryRequiredBlocker,
+) {
+	return func(context.Context, string, string) (trigger.TaskReadySnapshot, error) {
+			return trigger.TaskReadySnapshot{}, nil
+		}, func(context.Context, string) ([]trigger.TaskReadySnapshot, error) {
+			return nil, nil
+		}, func(context.Context, string, string) (trigger.TaskReadyRepositoryRequiredResult, error) {
+			return trigger.TaskReadyRepositoryRequiredResult{}, nil
+		}
+}
+
 type repositoryRequirementTestBackend struct {
 	backend.IssueBackend
 	result *backend.RepositoryRequirementResult
@@ -71,16 +91,20 @@ func TestStartIssueJournalBridge_MemstoreGatedNoLoop(t *testing.T) {
 	// memstore does not implement store.IssueJournalReader, so the bridge must
 	// not start: no cursor state file is ever created.
 	mem := memstore.New()
-	startIssueJournalBridge(
-		ctx, mem, nil, nil, nil, &trigger.InternalSource{Store: mem},
+	if err := startIssueJournalBridge(
+		ctx, mem, nil, nil, nil, discardIssueJournalEmitter{},
 		buildServeRuntimeConfig().IssueJournal,
-	)
+	); err != nil {
+		t.Fatalf("start memstore-gated bridge: %v", err)
+	}
 
 	// Also a nil store is a clean no-op.
-	startIssueJournalBridge(
+	if err := startIssueJournalBridge(
 		ctx, nil, nil, nil, nil, nil,
 		buildServeRuntimeConfig().IssueJournal,
-	)
+	); err != nil {
+		t.Fatalf("start nil-store bridge: %v", err)
+	}
 
 	if _, err := os.Stat(statePath); !os.IsNotExist(err) {
 		t.Fatalf("cursor state file created for memstore-gated serve: stat err = %v", err)
@@ -99,11 +123,13 @@ func TestStartIssueJournalBridge_DisabledFlagHonored(t *testing.T) {
 	// Even with a reader-capable store the disabled flag wins: no loop, no
 	// cursor file.
 	mem := memstore.New()
-	startIssueJournalBridge(
+	if err := startIssueJournalBridge(
 		ctx, readerCapableStore{Store: mem}, nil, nil, nil,
-		&trigger.InternalSource{Store: mem},
+		discardIssueJournalEmitter{},
 		buildServeRuntimeConfig().IssueJournal,
-	)
+	); err != nil {
+		t.Fatalf("start disabled bridge: %v", err)
+	}
 
 	if _, err := os.Stat(statePath); !os.IsNotExist(err) {
 		t.Fatalf("cursor state file created while bridge disabled: stat err = %v", err)
@@ -127,11 +153,14 @@ func TestStartIssueJournalBridge_EnabledLoopWritesCursorState(t *testing.T) {
 	// A reader-capable store passes the gate; the first pass fast-forwards the
 	// seeded workspace to the (empty) journal tail and persists its cursor, so
 	// the state file appears.
-	startIssueJournalBridge(
-		ctx, readerCapableStore{Store: mem}, nil, nil, nil,
-		&trigger.InternalSource{Store: mem},
+	issueLookup, readySnapshots, repositoryAdmission := issueJournalTaskLaneTestPorts()
+	if err := startIssueJournalBridge(
+		ctx, readerCapableStore{Store: mem}, issueLookup, readySnapshots, repositoryAdmission,
+		discardIssueJournalEmitter{},
 		buildServeRuntimeConfig().IssueJournal,
-	)
+	); err != nil {
+		t.Fatalf("start enabled bridge: %v", err)
+	}
 
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
@@ -210,16 +239,23 @@ func TestDriverStaleTaskMaxAgeDefersToExecutionDefault(t *testing.T) {
 
 func TestBuildIssueJournalBridgeAlwaysEnablesTaskReviewEvents(t *testing.T) {
 	mem := memstore.New()
-	source := &trigger.InternalSource{Store: mem}
+	source := discardIssueJournalEmitter{}
 
 	t.Setenv(envLoomIssueBridgeDisabled, "")
 	t.Setenv(envLoomIssueBridgeStatePath, filepath.Join(t.TempDir(), "cursor.json"))
-	bridge := buildIssueJournalBridge(
+	if bridge, err := buildIssueJournalBridge(
 		readerCapableStore{Store: mem}, nil, nil, nil, source,
 		buildServeRuntimeConfig().IssueJournal,
+	); err == nil || bridge != nil {
+		t.Fatalf("missing task-lane ports returned bridge/error = %+v/%v, want fail-closed composition error", bridge, err)
+	}
+	issueLookup, readySnapshots, repositoryAdmission := issueJournalTaskLaneTestPorts()
+	bridge, err := buildIssueJournalBridge(
+		readerCapableStore{Store: mem}, issueLookup, readySnapshots, repositoryAdmission, source,
+		buildServeRuntimeConfig().IssueJournal,
 	)
-	if bridge == nil || !bridge.EmitTaskReview {
-		t.Fatalf("bridge = %+v, want generic task-review lane enabled", bridge)
+	if err != nil || bridge == nil || !bridge.EmitTaskReview {
+		t.Fatalf("bridge/error = %+v/%v, want generic task-review lane enabled", bridge, err)
 	}
 }
 

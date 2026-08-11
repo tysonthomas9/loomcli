@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	automationfleetdb "github.com/tysonthomas9/loomcli/internal/modules/automation/fleetdb"
@@ -154,7 +153,6 @@ func TestAutomationFleetDBTransportErrorVocabulary(t *testing.T) {
 		{infrafleetdb.ErrAutomationAdmissionReplayNotFound, automationfleetdb.ErrTransportAdmissionReplayNotFound},
 		{infrafleetdb.ErrAutomationDeliveryNotFound, automationfleetdb.ErrTransportDeliveryNotFound},
 		{infrafleetdb.ErrAutomationBindingNotFound, automationfleetdb.ErrTransportNotFound},
-		{domain.ErrNotFound, automationfleetdb.ErrTransportNotFound},
 		{infrafleetdb.ErrAutomationDeliveryTransitionConflict, automationfleetdb.ErrTransportDeliveryTransitionConflict},
 		{infrafleetdb.ErrAutomationPayloadDigestMismatch, automationfleetdb.ErrTransportPayloadDigestMismatch},
 		{infrafleetdb.ErrAutomationCronOccurrenceNotFound, automationfleetdb.ErrTransportCronOccurrenceNotFound},

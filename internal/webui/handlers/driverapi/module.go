@@ -310,7 +310,7 @@ func (m *Module) serveAuthorizedOp(w http.ResponseWriter, r *http.Request, handl
 type opHandler func(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error)
 
 // verifyParent proves the caller owns a running parent DriverRun.
-func (m *Module) verifyParent(ctx context.Context, ws string, id driverIdentity) (*domain.DriverRun, error) {
+func (m *Module) verifyParent(ctx context.Context, ws string, id driverIdentity) (*execution.DriverRun, error) {
 	run, _, err := m.verifyParentWithOwner(ctx, ws, id)
 	return run, err
 }
@@ -319,7 +319,7 @@ func (m *Module) verifyParentWithOwner(
 	ctx context.Context,
 	ws string,
 	id driverIdentity,
-) (*domain.DriverRun, execution.Owner, error) {
+) (*execution.DriverRun, execution.Owner, error) {
 	if m.execution == nil || m.executionAuthorities == nil {
 		return nil, execution.Owner{},
 			fmt.Errorf("execution DriverRun verification capability is unavailable: %w", execution.ErrUnavailable)
@@ -338,8 +338,7 @@ func (m *Module) verifyParentWithOwner(
 	if err != nil {
 		return nil, execution.Owner{}, err
 	}
-	legacy, err := driverpkg.LegacyDriverRunSnapshot(run)
-	return legacy, owner, err
+	return run, owner, nil
 }
 
 func driverRunExecutionOwner(id driverIdentity, runID string) (execution.Owner, error) {
@@ -361,7 +360,11 @@ func (m *Module) verifyRun(ctx context.Context, ws string, id driverIdentity, bo
 	if err := decodeNoParams(body); err != nil {
 		return nil, err
 	}
-	return m.verifyParent(ctx, ws, id)
+	run, err := m.verifyParent(ctx, ws, id)
+	if err != nil {
+		return nil, err
+	}
+	return newVerifiedDriverRunResponse(run)
 }
 
 func decodeNoParams(body []byte) error {
@@ -531,7 +534,7 @@ func (m *Module) claimDriverRunWorkItem(
 	ctx context.Context,
 	ws string,
 	id driverIdentity,
-	parent *domain.DriverRun,
+	parent *execution.DriverRun,
 	issue backend.IssueData,
 	requiredStatus string,
 ) (*driverpkg.ClaimedTask, error) {

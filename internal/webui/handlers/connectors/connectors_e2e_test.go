@@ -1,9 +1,9 @@
 // Package connectors holds the connector + vault end-to-end verification
 // suite (CV14): a workspace admin provisions a connector and deny-by-default
 // grants through the same store surface the `loom connector` CLI drives, a
-// signed GitHub webhook is verified against the connector's inbound secret
-// and admits a workflow run, and that run — holding ONLY its run-scoped
-// driver identity — performs connector egress through the full production
+// signed GitHub webhook is verified against the connector's inbound secret,
+// and a claimed run fixture — holding ONLY its run-scoped driver identity —
+// performs connector egress through the full production
 // pipeline: driver-op HTTP surface → server-side binding resolution → grant
 // check → just-in-time vault unseal → real GitHub provider against a stub
 // upstream → connector-call journal rows for granted AND refused outcomes.
@@ -38,7 +38,6 @@ import (
 
 	appserve "github.com/tysonthomas9/loomcli/internal/app/serve"
 	"github.com/tysonthomas9/loomcli/internal/app/webhookingestion"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	providers "github.com/tysonthomas9/loomcli/internal/infra/connectorsproviders"
 	"github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
@@ -197,34 +196,42 @@ type e2eHarness struct {
 
 	runTokenKey []byte
 	runToken    string
+	admission   *connectorE2EAdmission
 }
 
-// connectorE2EAdmission is test-only compatibility wiring for this legacy
-// memstore journey. Production webhook transport has no TriggerRoutes
-// fallback; it receives the real Automation API from serve composition.
-type connectorE2EAdmission struct{ st store.Store }
+// connectorE2EAdmission records the Webhook Ingestion -> Automation seam. The
+// Automation module owns matching, reservation, and dispatch tests; this
+// connector proof does not recreate those behaviors.
+type connectorE2EAdmission struct {
+	mu       sync.Mutex
+	commands []automation.AdmitEventCommand
+}
 
-func (adapter connectorE2EAdmission) AdmitEvent(ctx context.Context, _ automation.EventAuthority, command automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
-	result, err := adapter.st.TriggerRoutes().DispatchTriggerRouteV2(ctx, command.WorkspaceKey, command.RouteKey, store.TriggerRouteDispatch{
-		IdempotencyKey: command.SourceKind + ":" + command.SourceEventID,
-		SourceEventID:  command.SourceEventID, EventType: command.EventType,
-		SubjectRef: command.SubjectRef, ActorRef: command.ActorRef,
-		SignatureStatus: "verified", RawPayloadRef: command.RawPayloadRef,
-		RawPayloadDigest: command.RawPayloadDigest, Payload: command.Payload,
-		SubjectAttrs: command.SubjectAttrs,
-	})
-	if err != nil {
-		return nil, err
-	}
-	deliveries := make([]*automation.Delivery, 0, len(result.Deliveries))
-	for _, delivery := range result.Deliveries {
-		deliveries = append(deliveries, &automation.Delivery{
-			DeliveryID: delivery.DeliveryID, TriggerBindingID: delivery.BindingID,
-			DriverRunID: delivery.RunID, Status: delivery.Status,
-			RejectionReason: delivery.RejectionReason,
-		})
-	}
-	return &automation.AdmissionResult{Deliveries: deliveries}, nil
+func (adapter *connectorE2EAdmission) AdmitEvent(_ context.Context, _ automation.EventAuthority, command automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
+	adapter.mu.Lock()
+	adapter.commands = append(adapter.commands, command)
+	adapter.mu.Unlock()
+	return &automation.AdmissionResult{
+		EventType: command.EventType,
+		RouteKey:  command.RouteKey,
+		Origin:    automation.EventOriginExternal,
+		Event: &automation.Event{
+			WorkspaceKey:  command.WorkspaceKey,
+			SourceKind:    command.SourceKind,
+			SourceEventID: command.SourceEventID,
+			EventType:     command.EventType,
+			RouteKey:      command.RouteKey,
+			SubjectRef:    command.SubjectRef,
+			ActorRef:      command.ActorRef,
+			Origin:        automation.EventOriginExternal,
+		},
+	}, nil
+}
+
+func (adapter *connectorE2EAdmission) callCount() int {
+	adapter.mu.Lock()
+	defer adapter.mu.Unlock()
+	return len(adapter.commands)
 }
 
 type connectorE2EQueries struct{ st store.Store }
@@ -302,6 +309,7 @@ func newE2EHarness(t *testing.T) *e2eHarness {
 		store:       memstore.New(),
 		github:      newFakeGitHub(t),
 		runTokenKey: bytes.Repeat([]byte{0x51}, 32),
+		admission:   &connectorE2EAdmission{},
 	}
 
 	vault, err := connectorsvault.NewVault(bytes.Repeat([]byte{0x42}, 32))
@@ -326,6 +334,7 @@ func newE2EHarness(t *testing.T) *e2eHarness {
 		t.Fatal("test DriverStep store lacks terminal repair support")
 	}
 	taskRunCommands := connectorE2ETaskRunCommands{}
+	mutations := testutil.TaskRunMutationAdapter{TaskRuns: h.store.TaskRuns()}
 	executionCapability, err := appserve.NewExecutionCapability(appserve.ExecutionDependencies{
 		TaskRuns: h.store.TaskRuns(), DriverRuns: h.store.DriverRuns(), DriverSteps: h.store.DriverSteps(),
 		TerminalStepRepairs: repairs, TaskRunEvents: h.store.TaskRunEvents(), Nodes: h.store.Nodes(),
@@ -334,7 +343,8 @@ func newE2EHarness(t *testing.T) *e2eHarness {
 		AtomicTaskRunRequests: taskRunCommands, AtomicTaskRunClaims: taskRunCommands,
 		AtomicTaskRunWorkItemDesign: taskRunCommands,
 		AtomicTaskRunRequeues:       taskRunCommands, AtomicTaskRunRetryExhaustion: taskRunCommands,
-		AllowLegacyStoreAdapters: true,
+		StaleChildTaskRunRecovery: testutil.StaticTaskRunRecoveryPort{},
+		TaskRunHeartbeats:         mutations, TaskRunLogs: mutations, TaskRunFinalizer: mutations,
 	})
 	if err != nil {
 		t.Fatalf("new Execution capability: %v", err)
@@ -349,7 +359,7 @@ func newE2EHarness(t *testing.T) *e2eHarness {
 		webhooks.NewVerifier(webhooks.VerifierConfig{
 			Bindings: connectorE2EQueries{st: h.store}, Connectors: h.store.Connectors(),
 		}),
-		connectorE2EAuthorityProvider{}, connectorE2EAdmission{st: h.store},
+		connectorE2EAuthorityProvider{}, h.admission,
 	)
 	if err != nil {
 		t.Fatalf("new webhook ingestion workflow: %v", err)
@@ -506,8 +516,30 @@ func (h *e2eHarness) do(t *testing.T, req *http.Request) (int, []byte) {
 	return resp.StatusCode, raw
 }
 
-// claimRun claims the webhook-admitted run as a worker node would, giving the
-// suite the run-scoped identity the workflow holds — and nothing else.
+// seedAndClaimRun starts the connector proof at Execution's public outcome: a
+// queued run stamped with its server-owned trigger-binding provenance. Webhook
+// admission-to-run behavior belongs to Automation's own tests.
+func (h *e2eHarness) seedAndClaimRun(t *testing.T) {
+	t.Helper()
+	run, err := h.store.DriverRuns().Create(t.Context(), store.DriverRunCreate{
+		WorkspaceKey:     e2eWorkspace,
+		RunID:            "connector-proof-run",
+		DriverID:         "driver-1",
+		DriverVersionID:  "version-1",
+		Entrypoint:       driver.EntrypointRun,
+		SourceKind:       "github",
+		SourceRef:        "connector-proof",
+		TriggerBindingID: "binding-1",
+		Payload:          webhookPayload(),
+	})
+	if err != nil {
+		t.Fatalf("create connector proof run: %v", err)
+	}
+	h.claimRun(t, run.RunID)
+}
+
+// claimRun claims the seeded run as a worker node would, giving the suite the
+// run-scoped identity the workflow holds — and nothing else.
 func (h *e2eHarness) claimRun(t *testing.T, runID string) {
 	t.Helper()
 	claimed, err := h.store.DriverRuns().Claim(context.Background(), e2eWorkspace, runID, "node-1", "lease-1")
@@ -534,23 +566,6 @@ func (h *e2eHarness) claimRun(t *testing.T, runID string) {
 	if leaseToken == "" {
 		t.Fatal("derived DriverRun lease token is empty")
 	}
-}
-
-// primaryRunID extracts deliveries[0].driver_run_id from a 202 dispatch body.
-func primaryRunID(t *testing.T, raw []byte) string {
-	t.Helper()
-	var decoded struct {
-		Deliveries []struct {
-			DriverRunID string `json:"driver_run_id"`
-		} `json:"deliveries"`
-	}
-	if err := json.Unmarshal(raw, &decoded); err != nil {
-		t.Fatalf("decode webhook response: %v (body %s)", err, raw)
-	}
-	if len(decoded.Deliveries) == 0 || decoded.Deliveries[0].DriverRunID == "" {
-		t.Fatalf("webhook response carries no admitted run: %s", raw)
-	}
-	return decoded.Deliveries[0].DriverRunID
 }
 
 // decodeDispatch decodes the camelCase connector-dispatch success body.
@@ -606,7 +621,8 @@ func TestConnectorEndToEnd(t *testing.T) {
 	ctx := context.Background()
 
 	// (1) Ingress: a delivery signed with the connector's inbound secret is
-	// the ONLY one that verifies. Invalid signatures get the uniform 401.
+	// the ONLY one that crosses the Webhook Ingestion -> Automation seam.
+	// Invalid signatures get the uniform 401.
 	status, raw := h.postGitHubWebhook(t, "e2e-delivery-invalid", invalidInboundSecret, webhookPayload())
 	assertUniform401(t, "invalid connector secret", status, raw)
 	status, raw = h.postGitHubWebhook(t, "e2e-delivery-tampered", "completely-wrong-secret", webhookPayload())
@@ -616,20 +632,13 @@ func TestConnectorEndToEnd(t *testing.T) {
 	if status != http.StatusAccepted {
 		t.Fatalf("verified webhook: status = %d, want 202 (body %s)", status, raw)
 	}
-	runID := primaryRunID(t, raw)
-
-	// The refused deliveries must not have admitted runs or persisted events.
-	events, err := h.store.TriggerEvents().List(ctx, e2eWorkspace, store.TriggerEventFilter{})
-	if err != nil {
-		t.Fatalf("List trigger events: %v", err)
-	}
-	if len(events) != 1 {
-		t.Fatalf("trigger events = %d, want exactly the verified delivery", len(events))
+	if calls := h.admission.callCount(); calls != 1 {
+		t.Fatalf("Automation admission calls = %d, want only the verified delivery", calls)
 	}
 
-	// (2) The workflow claims its run and now holds only the run-scoped
+	// (2) The workflow claims its fixture run and now holds only the run-scoped
 	// driver identity — no vault key, no credential, no admin store handle.
-	h.claimRun(t, runID)
+	h.seedAndClaimRun(t)
 
 	// (3) Deny-by-default: an ungranted action refuses with grant_denied,
 	// journaled, and the provider is never contacted.
@@ -904,9 +913,9 @@ func TestConnectorE2EWorkflowEnvNeverSeesSecrets(t *testing.T) {
 		APIBaseURL:      "http://127.0.0.1:1",
 	}
 	res, err := runner.Run(context.Background(), driver.RunRequest{
-		Run: &domain.DriverRun{
+		Run: &execution.DriverRun{
 			WorkspaceKey: e2eWorkspace, RunID: "run-env-probe", DriverID: "driver-1",
-			NodeID: "node-1", LeaseID: "lease-1", FencingToken: 7,
+			Owner: execution.Owner{NodeID: "node-1", LeaseID: "lease-1", FencingToken: 7},
 		},
 		BundleRoot: bundleRoot,
 		ServerPath: filepath.Join(bundleRoot, "flue-server.mjs"),
@@ -918,7 +927,7 @@ func TestConnectorE2EWorkflowEnvNeverSeesSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NodeRunner.Run: %v", err)
 	}
-	if res.Status != domain.DriverRunCompleted {
+	if res.Status != execution.DriverRunCompleted {
 		t.Fatalf("stub run status = %q (%s), want completed", res.Status, res.Summary)
 	}
 

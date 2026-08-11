@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/app/systemeventing"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 )
 
@@ -53,8 +53,8 @@ func TestAutomationDriverRunOutcomePublisherMapsTrustedEnvelope(t *testing.T) {
 	occurredAt := time.Date(2026, 7, 16, 3, 4, 5, 0, time.UTC)
 	payload := json.RawMessage(`{"runId":"run-1","status":"failed"}`)
 	outcome := driver.RunOutcome{
-		WorkspaceKey: "WS", EventID: driver.RunFinishedEventID("run-1", domain.DriverRunFailed),
-		EventType: driver.RunFinishedEventType, RunID: "run-1", Status: domain.DriverRunFailed,
+		WorkspaceKey: "WS", EventID: driver.RunFinishedEventID("run-1", execution.DriverRunFailed),
+		EventType: driver.RunFinishedEventType, RunID: "run-1", Status: execution.DriverRunFailed,
 		ActorRef: driver.RunFinishedActor, ParentEventID: "event-parent", EpicID: "EPIC-1",
 		OccurredAt: occurredAt, Payload: payload,
 	}
@@ -98,9 +98,9 @@ func TestAutomationDriverRunOutcomePublisherRejectsForgedEnvelope(t *testing.T) 
 		t.Fatal(err)
 	}
 	for _, outcome := range []driver.RunOutcome{
-		{WorkspaceKey: "WS", EventID: "forged", EventType: driver.RunFinishedEventType, RunID: "run-1", Status: domain.DriverRunCompleted, ActorRef: driver.RunFinishedActor},
-		{WorkspaceKey: "WS", EventID: driver.RunFinishedEventID("run-1", domain.DriverRunRunning), EventType: driver.RunFinishedEventType, RunID: "run-1", Status: domain.DriverRunRunning, ActorRef: driver.RunFinishedActor},
-		{WorkspaceKey: "WS", EventID: driver.RunFinishedEventID("run-1", domain.DriverRunCompleted), EventType: driver.RunFinishedEventType, RunID: "run-1", Status: domain.DriverRunCompleted, ActorRef: "operator"},
+		{WorkspaceKey: "WS", EventID: "forged", EventType: driver.RunFinishedEventType, RunID: "run-1", Status: execution.DriverRunCompleted, ActorRef: driver.RunFinishedActor},
+		{WorkspaceKey: "WS", EventID: driver.RunFinishedEventID("run-1", execution.DriverRunRunning), EventType: driver.RunFinishedEventType, RunID: "run-1", Status: execution.DriverRunRunning, ActorRef: driver.RunFinishedActor},
+		{WorkspaceKey: "WS", EventID: driver.RunFinishedEventID("run-1", execution.DriverRunCompleted), EventType: driver.RunFinishedEventType, RunID: "run-1", Status: execution.DriverRunCompleted, ActorRef: "operator"},
 	} {
 		if err := publisher.PublishRunOutcome(t.Context(), outcome); !errors.Is(err, systemeventing.ErrInvalidRequest) {
 			t.Fatalf("forged outcome %+v error = %v", outcome, err)

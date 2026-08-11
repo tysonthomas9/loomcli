@@ -12,6 +12,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -38,7 +39,7 @@ func trustedBuiltinRunnerOwner(t *testing.T, trust workflowcatalog.DriverTrustLe
 // registerUntrustedCaller seeds an UNTRUSTED custom driver + version that does
 // NOT declare local-task-runner, plus returns a running parent DriverRun pinned
 // to it — the caller a global-fallback must resolve on behalf of.
-func registerUntrustedCaller(t *testing.T, st *memstore.Store) *domain.DriverRun {
+func registerUntrustedCaller(t *testing.T, st *memstore.Store) *execution.DriverRun {
 	t.Helper()
 	ctx := context.Background()
 	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
@@ -66,7 +67,7 @@ func registerUntrustedCaller(t *testing.T, st *memstore.Store) *domain.DriverRun
 	if _, err := st.UnapproveDriverVersionForTest(ctx, "WS", "custom-agent", "custom-agent-v1"); err != nil {
 		t.Fatalf("restore caller version to active-untrusted: %v", err)
 	}
-	return &domain.DriverRun{RunID: "run-1", DriverID: "custom-agent", DriverVersionID: "custom-agent-v1", Status: domain.DriverRunRunning}
+	return &execution.DriverRun{RunID: "run-1", DriverID: "custom-agent", DriverVersionID: "custom-agent-v1", Status: execution.DriverRunRunning}
 }
 
 // An untrusted custom driver that never bundled local-task-runner resolves it

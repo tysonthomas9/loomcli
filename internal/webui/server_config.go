@@ -96,18 +96,17 @@ type ServerConfig struct {
 	// Store is the transitional unified state store for workspace configuration
 	// not yet migrated behind capability-owned APIs. Local and distributed modes
 	// both use it as the authoritative source for those remaining records.
-	Store                store.Store
-	BackendOps           ops.BackendOps // Backend health operations interface (optional; nil disables backend health endpoint)
-	ScrollbackMaxLines   int            // Maximum lines per scrollback buffer (0 = default 10000)
-	NotifyTokenDir       string         // Directory to write notify.token (typically runtime dir); empty = token file not written
-	SessionRuntimeDir    string         // Runtime dir searched for local agent sessions; empty = workspace/repo stores only
-	LocalSettingsDir     string         // Desktop-local settings directory; empty disables /api/local/settings
-	FleetMode            bool           // When true, skip local daemon lifecycle hooks; fleet server manages agents
-	FleetClientURL       string         // Fleet server URL for fleet-mode workers (e.g., "http://fleet.example.com"); empty = no fleet client
-	FleetClientWorkspace string         // Explicit fleet server workspace ID; empty = unset.
-	FleetClientAPIKey    string         // Pre-shared API key for fleet worker backend auth
-	FleetClientActor     string         // X-Actor header value for fleet-db --auth-dev-mode (typically the loom agent name)
-	FleetDBBaseURL       string         // fleet-db HTTP base URL backing Store; used by the driver-op API to build issue backends
+	Store              store.Store
+	BackendOps         ops.BackendOps // Backend health operations interface (optional; nil disables backend health endpoint)
+	ScrollbackMaxLines int            // Maximum lines per scrollback buffer (0 = default 10000)
+	NotifyTokenDir     string         // Directory to write notify.token (typically runtime dir); empty = token file not written
+	SessionRuntimeDir  string         // Runtime dir searched for local agent sessions; empty = workspace/repo stores only
+	LocalSettingsDir   string         // Desktop-local settings directory; empty disables /api/local/settings
+	FleetMode          bool           // When true, skip local daemon lifecycle hooks; fleet server manages agents
+	FleetClientURL     string         // Fleet server URL for fleet-mode workers (e.g., "http://fleet.example.com"); empty = no fleet client
+	FleetClientAPIKey  string         // Pre-shared API key for fleet worker backend auth
+	FleetClientActor   string         // X-Actor header value for fleet-db --auth-dev-mode (typically the loom agent name)
+	FleetDBBaseURL     string         // fleet-db HTTP base URL backing Store; used by the driver-op API to build issue backends
 	// ExecutionIssueBackends builds the workspace- and actor-scoped FleetDB
 	// clients used behind the run-token-authenticated DriverRun and TaskRun
 	// facades. Embedded mode captures its process-local service credential in

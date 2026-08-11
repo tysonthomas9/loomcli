@@ -10,14 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/modules/automation"
-
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
-	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 )
 
 var triggerCmd = &cobra.Command{
@@ -156,7 +154,7 @@ func (f *routerBindingFlags) validate() error {
 		return fmt.Errorf("--concurrency-policy %q is invalid: must be one of allow, forbid, replace, queue, one_active_per_epic", p)
 	}
 	for _, pattern := range f.patterns {
-		if err := trigger.ValidatePattern(pattern); err != nil {
+		if err := automation.ValidateEventPattern(pattern); err != nil {
 			return fmt.Errorf("--event-pattern %q: %w", pattern, err)
 		}
 	}

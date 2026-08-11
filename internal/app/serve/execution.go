@@ -194,22 +194,16 @@ type ExecutionDependencies struct {
 	AtomicTaskRunWorkItemDesign  execution.TaskRunWorkItemDesignPort
 	AtomicTaskRunRequeues        execution.TaskRunRequeuePort
 	AtomicTaskRunRetryExhaustion execution.TaskRunRetryExhaustionPort
+	StaleChildTaskRunRecovery    execution.TaskRunStaleChildRecoveryPort
+	TaskRunHeartbeats            execution.HeartbeatPort
+	TaskRunLogs                  execution.LogPort
+	TaskRunFinalizer             execution.FinalizePort
 	FleetExecution               fleetdb.ExecutionTransport
-	AllowLegacyStoreAdapters     bool
 }
 
-type executionTaskRunMutationPort interface {
-	execution.HeartbeatPort
-	execution.LogPort
-	execution.FinalizePort
-}
-
-// NewExecutionCapability composes the first production Execution caller
-// slice. The Store-backed adapter is a bounded migration compatibility seam;
-// Execution core receives only its three consumer-owned TaskRun ports. The
-// Fleet-native atomic claim/start adapter is intentionally composed later,
-// once its paired transport contract is final, and never falls back here to a
-// sequence of Work Item + TaskRun writes.
+// NewExecutionCapability composes Execution from consumer-owned ports. Fleet
+// production composition supplies the transport adapter; focused tests may
+// supply the three mutation ports directly.
 func NewExecutionCapability(dependencies ExecutionDependencies) (*ExecutionCapability, error) {
 	return newExecutionCapability(dependencies, authority.NewIssuer(), nil)
 }
@@ -238,11 +232,12 @@ func newExecutionCapability(
 	return newExecutionCapabilityHandle(service, issuer, operatorAuthorities, convergenceSource, convergenceCheckpoints, recoveryScopes), nil
 }
 
-func newExecutionTaskRunMutationPort(dependencies ExecutionDependencies) executionTaskRunMutationPort {
+func newExecutionTaskRunMutationPorts(dependencies ExecutionDependencies) (execution.HeartbeatPort, execution.LogPort, execution.FinalizePort) {
 	if dependencies.FleetExecution != nil {
-		return &executionTaskRunTransportAdapter{transport: dependencies.FleetExecution}
+		adapter := &executionTaskRunTransportAdapter{transport: dependencies.FleetExecution}
+		return adapter, adapter, adapter
 	}
-	return &executionTaskRunStoreAdapter{taskRuns: dependencies.TaskRuns}
+	return dependencies.TaskRunHeartbeats, dependencies.TaskRunLogs, dependencies.TaskRunFinalizer
 }
 
 func newExecutionDriverRunDependencies(dependencies ExecutionDependencies) (execution.DriverRunDependencies, error) {
@@ -300,9 +295,12 @@ func newExecutionConvergenceDependencies(dependencies ExecutionDependencies) (ex
 }
 
 func newExecutionRecoveryDependencies(dependencies ExecutionDependencies) (execution.TaskRunRecoveryDependencies, error) {
+	recoveries := dependencies.StaleChildTaskRunRecovery
+	if recoveries == nil && dependencies.FleetExecution != nil {
+		recoveries = &executionTaskRunFleetRecoveryAdapter{transport: dependencies.FleetExecution}
+	}
 	return NewExecutionTaskRunRecoveryDependencies(ExecutionTaskRunRecoveryDependencies{
-		Workspaces: dependencies.Workspaces, Transport: dependencies.FleetExecution,
-		LegacyDriverRuns: dependencies.DriverRuns, AllowLegacyStoreAdapters: dependencies.AllowLegacyStoreAdapters,
+		Workspaces: dependencies.Workspaces, ChildRecoveries: recoveries,
 	})
 }
 
@@ -329,9 +327,9 @@ func newExecutionServiceDependencies(
 	if err != nil {
 		return execution.Dependencies{}, nil, nil, nil, err
 	}
-	taskRunMutations := newExecutionTaskRunMutationPort(dependencies)
+	taskRunHeartbeats, taskRunLogs, taskRunFinalizer := newExecutionTaskRunMutationPorts(dependencies)
 	return execution.Dependencies{
-		Heartbeats: taskRunMutations, Logs: taskRunMutations, Finalizer: taskRunMutations,
+		Heartbeats: taskRunHeartbeats, Logs: taskRunLogs, Finalizer: taskRunFinalizer,
 		DriverRuns: driverRuns, TaskRuns: taskRuns, Workers: workers, Convergence: convergence,
 		TaskRunRecovery: recovery, AwaitEvents: queueAdapter, RunOutcomes: queueAdapter,
 		TerminalWorkRecoveries: queueAdapter,
@@ -390,14 +388,14 @@ func validateExecutionDependencies(dependencies ExecutionDependencies, issuer *a
 		dependencies.AtomicTaskRunWorkItemDesign == nil,
 		dependencies.AtomicTaskRunRequeues == nil,
 		dependencies.AtomicTaskRunRetryExhaustion == nil,
+		dependencies.FleetExecution == nil && dependencies.TaskRunHeartbeats == nil,
+		dependencies.FleetExecution == nil && dependencies.TaskRunLogs == nil,
+		dependencies.FleetExecution == nil && dependencies.TaskRunFinalizer == nil,
 	}
 	for _, missing := range requiredPortsMissing {
 		if missing {
 			return fmt.Errorf("compose Execution: all TaskRun, DriverRun, worker, convergence, Await, and atomic-claim ports are required")
 		}
-	}
-	if dependencies.FleetExecution == nil && !dependencies.AllowLegacyStoreAdapters {
-		return fmt.Errorf("compose Execution: Fleet Execution owner transport is required")
 	}
 	if issuer == nil {
 		return fmt.Errorf("compose Execution: authority issuer is required")
@@ -453,7 +451,7 @@ func (adapter *executionTaskRunTransportAdapter) Finalize(
 	ctx context.Context,
 	command execution.FinalizeCommand,
 ) (execution.FinalizeResult, error) {
-	status, err := legacyTaskRunStatus(command.Classification.Status)
+	status, err := storedTaskRunStatus(command.Classification.Status)
 	if err != nil {
 		return execution.FinalizeResult{}, err
 	}
@@ -482,115 +480,6 @@ func (adapter *executionTaskRunTransportAdapter) Finalize(
 	return execution.FinalizeResult{Owner: owner, Status: command.Classification.Status, FinishedAt: finishedAt}, nil
 }
 
-// executionTaskRunStoreAdapter is the explicitly opted-in legacy test seam.
-// Production composition fails closed unless FleetExecution is present.
-type executionTaskRunStoreAdapter struct {
-	taskRuns store.TaskRunStore
-}
-
-func (adapter *executionTaskRunStoreAdapter) Heartbeat(
-	ctx context.Context,
-	command execution.HeartbeatCommand,
-) (execution.HeartbeatResult, error) {
-	run, err := adapter.taskRuns.Heartbeat(ctx, command.WorkspaceKey, command.Owner.ResourceID, store.TaskRunHeartbeat{
-		NodeID:          command.Owner.NodeID,
-		LeaseID:         command.Owner.LeaseID,
-		LeaseToken:      command.Owner.LeaseToken,
-		FencingToken:    command.Owner.FencingToken,
-		RuntimeMetadata: cloneExecutionStringMap(command.RuntimeMetadata),
-		LogsRef:         command.LogsRef,
-		ArtifactsRef:    command.ArtifactsRef,
-		HeartbeatAt:     command.At,
-	})
-	if err != nil {
-		return execution.HeartbeatResult{}, err
-	}
-	owner, err := executionOwnerFromTaskRun(command.Owner.LeaseToken, run)
-	if err != nil {
-		return execution.HeartbeatResult{}, err
-	}
-	return execution.HeartbeatResult{Owner: owner}, nil
-}
-
-func (adapter *executionTaskRunStoreAdapter) AppendLog(
-	ctx context.Context,
-	command execution.AppendLogCommand,
-) (execution.LogEntry, error) {
-	entry, err := adapter.taskRuns.AppendLog(ctx, command.WorkspaceKey, command.Owner.ResourceID, store.TaskRunLogAppend{
-		RequestID:    command.RequestID,
-		NodeID:       command.Owner.NodeID,
-		LeaseID:      command.Owner.LeaseID,
-		LeaseToken:   command.Owner.LeaseToken,
-		FencingToken: command.Owner.FencingToken,
-		Stream:       command.Stream,
-		Text:         command.Text,
-		Timestamp:    command.Timestamp,
-	})
-	if err != nil {
-		return execution.LogEntry{}, err
-	}
-	if entry == nil {
-		return execution.LogEntry{}, fmt.Errorf("append TaskRun log returned no entry: %w", execution.ErrConflict)
-	}
-	return execution.LogEntry{
-		TaskRunID: entry.TaskRunID,
-		Sequence:  entry.Sequence,
-		Stream:    entry.Stream,
-		Text:      entry.Text,
-		Timestamp: entry.Timestamp,
-	}, nil
-}
-
-func (adapter *executionTaskRunStoreAdapter) Finalize(
-	ctx context.Context,
-	command execution.FinalizeCommand,
-) (execution.FinalizeResult, error) {
-	status, err := legacyTaskRunStatus(command.Classification.Status)
-	if err != nil {
-		return execution.FinalizeResult{}, err
-	}
-	run, err := adapter.taskRuns.Complete(ctx, command.WorkspaceKey, command.Owner.ResourceID, store.TaskRunComplete{
-		CompletionID:        command.RequestID,
-		NodeID:              command.Owner.NodeID,
-		LeaseID:             command.Owner.LeaseID,
-		LeaseToken:          command.Owner.LeaseToken,
-		FencingToken:        command.Owner.FencingToken,
-		Status:              status,
-		ExitCode:            command.ExitCode,
-		LogsRef:             command.LogsRef,
-		ArtifactsRef:        command.ArtifactsRef,
-		RequiredArtifactIDs: append([]string(nil), command.RequiredArtifactIDs...),
-		RequireArtifacts:    command.RequireArtifacts,
-		InputTokens:         command.InputTokens,
-		OutputTokens:        command.OutputTokens,
-		CacheReadTokens:     command.CacheReadTokens,
-		CacheWriteTokens:    command.CacheWriteTokens,
-		EstimatedCostUSD:    command.EstimatedCostUSD,
-		RuntimeMetadata:     cloneExecutionStringMap(command.RuntimeMetadata),
-		ErrorClass:          command.Classification.ErrorClass,
-		ErrorMessage:        command.Classification.Summary,
-		CloseTask:           command.CloseWorkItem,
-		CloseReason:         command.CloseReason,
-		FinishedAt:          command.FinishedAt,
-	})
-	if err != nil {
-		return execution.FinalizeResult{}, err
-	}
-	owner, err := executionOwnerFromTaskRun(command.Owner.LeaseToken, run)
-	if err != nil {
-		return execution.FinalizeResult{}, err
-	}
-	finishedAt := command.FinishedAt
-	if run.FinishedAt != nil {
-		finishedAt = *run.FinishedAt
-	}
-	return execution.FinalizeResult{
-		Owner:      owner,
-		Status:     command.Classification.Status,
-		FinishedAt: finishedAt,
-	}, nil
-}
-
 func executionOwnerFromTaskRun(leaseToken string, run *domain.TaskRun) (execution.Owner, error) {
 	if run == nil || strings.TrimSpace(run.TaskRunID) == "" || strings.TrimSpace(run.NodeID) == "" || strings.TrimSpace(run.LeaseID) == "" || run.FencingToken <= 0 {
 		return execution.Owner{}, fmt.Errorf("invalid persisted TaskRun owner: %w", execution.ErrConflict)
@@ -605,7 +494,7 @@ func executionOwnerFromTaskRun(leaseToken string, run *domain.TaskRun) (executio
 	}, nil
 }
 
-func legacyTaskRunStatus(status execution.Status) (domain.TaskRunStatus, error) {
+func storedTaskRunStatus(status execution.Status) (domain.TaskRunStatus, error) {
 	switch status {
 	case execution.StatusSucceeded:
 		return domain.TaskRunCompleted, nil
@@ -662,6 +551,44 @@ func (adapter *executionDriverRunStoreAdapter) GetDriverRun(
 	return executionDriverRunSnapshot(run)
 }
 
+func (adapter *executionDriverRunStoreAdapter) ListDriverRuns(
+	ctx context.Context,
+	query execution.DriverRunQuery,
+) ([]*execution.DriverRun, error) {
+	status, err := storedDriverRunQueryStatus(query.Status)
+	if err != nil {
+		return nil, err
+	}
+	storeLimit := query.Limit
+	if query.ParentRunID != "" {
+		storeLimit = 0
+	}
+	runs, err := adapter.driverRuns.List(ctx, query.WorkspaceKey, store.DriverRunFilter{
+		DriverID: query.DriverID, EpicID: query.EpicID,
+		AgentServiceID: query.AgentServiceID, Status: status, Limit: storeLimit,
+	})
+	if err != nil {
+		return nil, translateDriverRunStoreError(err)
+	}
+	snapshots, err := executionDriverRunSnapshots(runs)
+	if err != nil {
+		return nil, err
+	}
+	if query.ParentRunID == "" {
+		return snapshots, nil
+	}
+	filtered := make([]*execution.DriverRun, 0, len(snapshots))
+	for _, snapshot := range snapshots {
+		if snapshot.ParentRunID == query.ParentRunID {
+			filtered = append(filtered, snapshot)
+			if query.Limit > 0 && len(filtered) == query.Limit {
+				break
+			}
+		}
+	}
+	return filtered, nil
+}
+
 func (adapter *executionDriverRunStoreAdapter) ResolveAndResumeDriverAwait(
 	ctx context.Context,
 	command execution.ResolveDriverAwaitCommand,
@@ -713,7 +640,7 @@ func (adapter *executionDriverRunStoreAdapter) FinalizeDriverRun(
 	ctx context.Context,
 	command execution.FinalizeDriverRunCommand,
 ) (*execution.DriverRun, error) {
-	status, err := legacyDriverRunStatus(command.Status)
+	status, err := storedDriverRunStatus(command.Status)
 	if err != nil {
 		return nil, err
 	}
@@ -833,6 +760,21 @@ func executionDriverRunSnapshot(run *domain.DriverRun) (*execution.DriverRun, er
 	}, nil
 }
 
+func storedDriverRunQueryStatus(status execution.DriverRunStatus) (domain.DriverRunStatus, error) {
+	if status == "" {
+		return "", nil
+	}
+	mapped := domain.DriverRunStatus(status)
+	switch mapped {
+	case domain.DriverRunQueued, domain.DriverRunRunning, domain.DriverRunCompleted,
+		domain.DriverRunFailed, domain.DriverRunNeedsReview, domain.DriverRunCancelled,
+		domain.DriverRunSuspendedAwaitingEvent:
+		return mapped, nil
+	default:
+		return "", fmt.Errorf("unsupported DriverRun query status %q: %w", status, execution.ErrInvalid)
+	}
+}
+
 func executionDriverAwaitSnapshot(instance *domain.AwaitInstance) (*execution.DriverAwaitInstance, error) {
 	if instance == nil || strings.TrimSpace(instance.InstanceKey) == "" || strings.TrimSpace(instance.RunID) == "" {
 		return nil, fmt.Errorf("invalid persisted DriverRun await: %w", execution.ErrConflict)
@@ -864,7 +806,7 @@ func executionDriverRunStatus(status domain.DriverRunStatus) (execution.DriverRu
 	}
 }
 
-func legacyDriverRunStatus(status execution.DriverRunStatus) (domain.DriverRunStatus, error) {
+func storedDriverRunStatus(status execution.DriverRunStatus) (domain.DriverRunStatus, error) {
 	mapped := domain.DriverRunStatus(status)
 	if !mapped.IsTerminal() {
 		return "", fmt.Errorf("unsupported terminal DriverRun status %q: %w", status, execution.ErrInvalid)

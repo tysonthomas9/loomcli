@@ -136,7 +136,7 @@ func activeTrustedBuiltinRunner(
 }
 
 // ResolveActiveBuiltinRunner exposes the app-owned active-version trust policy
-// to infrastructure adapter tests and legacy runtime bridges.
+// to infrastructure adapters and their tests.
 func ResolveActiveBuiltinRunner(
 	ctx context.Context,
 	catalog workflowcatalog.API,

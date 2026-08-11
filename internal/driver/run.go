@@ -277,8 +277,7 @@ func RunTokenTTL() (time.Duration, error) {
 // transition.
 
 // RunFinishedEventType is the lifecycle event type terminal DriverRun
-// transitions emit. Already normalized (NormalizeInternalEventType is a
-// no-op on it), so the journaled type and the loopback route suffix match.
+// transitions emit.
 const RunFinishedEventType = execution.RunFinishedEventType
 
 // RunFinishedActor is the ActorRef stamped on run.finished events: the
@@ -296,7 +295,7 @@ const maxRunFinishedEventIDLength = 86
 // IDs use a collision-resistant bounded hash so publication cannot be poisoned
 // by Automation's idempotency-key limit; the payload and SubjectRef still carry
 // the exact run ID.
-func RunFinishedEventID(runID string, status domain.DriverRunStatus) string {
+func RunFinishedEventID[Status ~string](runID string, status Status) string {
 	candidate := execution.RunFinishedSourceEventIDPrefix + runID + ":" + string(status)
 	if len(candidate) <= maxRunFinishedEventIDLength && isSafeRunFinishedEventID(candidate) {
 		return candidate
@@ -340,7 +339,7 @@ func emitRunFinishedEventWithExecution(
 	ctx context.Context,
 	s driverRunReadStore,
 	publisher RunOutcomePublisher,
-	run *domain.DriverRun,
+	run *execution.DriverRun,
 	queue execution.DriverRunOutcomeAPI,
 	terminalWorkQueue execution.TerminalDriverRunWorkRecoveryQueueAPI,
 	cascades execution.DriverRunAPI,
@@ -376,10 +375,7 @@ func emitRunFinishedEventWithExecution(
 }
 
 // newRunOutcome maps trusted DriverRun state onto the narrow outbound port.
-// This stays in the already-baselined legacy Execution file while the Phase 4
-// extraction still supplies a composite Store; the new port definition itself
-// has no persistence dependency.
-func newRunOutcome(ctx context.Context, st driverRunReadStore, run *domain.DriverRun) RunOutcome {
+func newRunOutcome(ctx context.Context, st driverRunReadStore, run *execution.DriverRun) RunOutcome {
 	occurredAt := time.Now().UTC()
 	if run.FinishedAt != nil && !run.FinishedAt.IsZero() {
 		occurredAt = run.FinishedAt.UTC()
@@ -413,7 +409,7 @@ func dispatchRunFinishedAwaits(ctx context.Context, notifier RunOutcomeAwaitNoti
 // marshalRunFinishedPayload encodes the resume/fan-out payload; nil (with a
 // log record) on the never-expected marshal failure so the lifecycle event
 // still propagates without it.
-func marshalRunFinishedPayload(ctx context.Context, run *domain.DriverRun) json.RawMessage {
+func marshalRunFinishedPayload(ctx context.Context, run *execution.DriverRun) json.RawMessage {
 	payload, err := marshalBoundedRunFinishedPayload(
 		run.RunID, run.Status, run.Summary, run.ErrorClass, run.ParentRunID,
 	)
@@ -427,7 +423,7 @@ func marshalRunFinishedPayload(ctx context.Context, run *domain.DriverRun) json.
 // runFinishedParentEvent returns the durable admitting event when SourceRef
 // names one. Automation derives hop depth from that persisted parent. Free-
 // form source refs remain parentless system roots.
-func runFinishedParentEvent(ctx context.Context, s driverRunReadStore, run *domain.DriverRun) string {
+func runFinishedParentEvent(ctx context.Context, s driverRunReadStore, run *execution.DriverRun) string {
 	parentEventID := strings.TrimSpace(run.SourceRef)
 	if parentEventID == "" {
 		return ""

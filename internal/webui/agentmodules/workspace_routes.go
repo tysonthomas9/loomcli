@@ -133,7 +133,6 @@ func newTaskWorkflowRunReader(deps Deps) readprojection.TaskWorkflowRunReader {
 	return readprojection.NewTaskWorkflowRunReader(
 		deps.Store.TaskRuns(),
 		deps.Store.TriggerEvents(),
-		deps.Store.TriggerDeliveries(),
 		deps.Store.DriverRuns(),
 	)
 }

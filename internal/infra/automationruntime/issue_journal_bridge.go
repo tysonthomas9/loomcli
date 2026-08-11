@@ -1,8 +1,8 @@
 package trigger
 
 // IssueJournalBridge is the A4 loopback bridge: it polls fleet-db's issue
-// mutation journal and re-enters each issue lifecycle entry into the trigger
-// router through InternalSource.Emit, stamped origin=system. It is the
+// mutation journal and submits each issue lifecycle entry to Automation's
+// admitted system-event workflow, stamped origin=system. It is the
 // system-origin sibling of the workflow-origin emit lane (the driver-op
 // "emit-event" API): both land on the same loopback ingress, both carry
 // structural provenance, neither one filters actors.
@@ -10,7 +10,7 @@ package trigger
 // DETERMINISTIC EVENT IDS / IDEMPOTENT REPLAY. Every journal entry becomes an
 // InternalEvent whose EventID is "fleet-journal-{streamID}". Because the
 // loopback idempotency key is internal:{ws}:fleet-journal-{streamID}
-// (InternalEventIdempotencyKey, internal_source.go), every re-emission of the
+// (automation.InternalEventIdempotencyKey), every re-emission of the
 // same journal entry dedups exactly-once in the dispatch path — the
 // TriggerEvent and every fan-out leg collapse onto the stored record. The
 // cursor is therefore an OPTIMIZATION, not a correctness boundary: losing it
@@ -110,15 +110,13 @@ type IssueJournalCursorStore interface {
 // into the trigger router as a system-origin internal event. RunOnce is shaped
 // like DeliverySweeper.RunOnce: per workspace, load the cursor, page the
 // reader, emit allowed events, advance the cursor only past durably-handled
-// entries. The zero value plus Store, Source and Reader is ready to use and is
+// entries. Required ports are validated before every pass and the bridge is
 // safe for concurrent RunOnce calls.
 type IssueJournalBridge struct {
 	// Store resolves the sweep's workspace set (mirrors DeliverySweeper).
 	Store workspaceLister
-	// Source is the loopback ingress every journal entry re-enters through.
 	// Source is the single system-event admission seam. Production serve
-	// supplies an Automation-backed emitter; InternalSource is retained only as
-	// the legacy conformance implementation used by isolated trigger tests.
+	// supplies an Automation-backed emitter.
 	Source InternalEventEmitter
 	// Reader is the issue-journal read capability (store.IssueJournalReader,
 	// the fleet-db-only capability from A4-1). Required.
@@ -149,14 +147,13 @@ type IssueJournalBridge struct {
 	// journal entry's After snapshot is a DELTA (only the changed fields): an
 	// absent design key there means UNKNOWN, not "no design" — emitting a
 	// false hasDesign mis-routes the planner/coder phase gate both ways (the
-	// 2026-07-07 approve-transition bug). Nil disables lookup; the payload then
-	// OMITS unknowable keys so the claim gate falls back to claim-then-check.
+	// 2026-07-07 approve-transition bug). Required when either task lane is on.
 	IssueLookup TaskReadyIssueLookup
 	// ReadySnapshots lists the CURRENT canonical Ready view for startup
 	// reconciliation. Unlike replaying the journal from zero, this admits only
 	// tasks that are ready now, so enabling task-ready events after the shared
 	// journal cursor has advanced cannot strand an existing task or create a
-	// historical triage storm. Nil preserves the journal-only compatibility path.
+	// historical triage storm. Required when task-ready emission is on.
 	ReadySnapshots TaskReadySnapshotLister
 	// RepositoryRequiredBlocker is the Work Items-owned commit-time admission
 	// command used for every non-epic task without an explicit repository. The
@@ -164,21 +161,18 @@ type IssueJournalBridge struct {
 	// fallback can race deletion of that sole Repo. The bridge never writes an
 	// issue directly: a successful block suppresses task.ready delivery; when
 	// the command instead observes a commit-time ready task, its canonical
-	// projection replaces the stale event payload and dispatch continues. Nil
-	// preserves the event-only compatibility path used by alternate hosts.
+	// projection replaces the stale event payload and dispatch continues.
+	// Required when either task lane is on.
 	RepositoryRequiredBlocker TaskReadyRepositoryRequiredBlocker
 	// WorkspaceKey scopes the sweep to one workspace. Empty sweeps every known
 	// workspace (mirrors DeliverySweeper/CronScheduler).
 	WorkspaceKey string
-	// Cursors persists the per-workspace resume cursor; nil uses the bridge's
-	// in-memory store.
+	// Cursors persists the per-workspace resume cursor. Required.
 	Cursors IssueJournalCursorStore
 	// Logger receives skip/backoff audit records (slog.Default when nil).
 	Logger *slog.Logger
 
 	mu sync.Mutex
-	// memCursors backs the in-memory cursor store when Cursors is nil.
-	memCursors map[string]string
 	// failures counts consecutive workspace-pass failures (snapshot, reader or
 	// admission), driving exponential skip backoff; reset after a clean pass.
 	failures map[string]int
@@ -226,8 +220,14 @@ type IssueJournalSweepResult struct {
 // going past per-workspace errors and returns them joined; a non-nil result is
 // returned even when some workspaces errored.
 func (b *IssueJournalBridge) RunOnce(ctx context.Context) (*IssueJournalSweepResult, error) {
-	if b == nil || b.Store == nil || b.Source == nil || b.Reader == nil {
-		return nil, fmt.Errorf("issue journal bridge: store, source and reader are required: %w", domain.ErrInvalid)
+	if b == nil || b.Store == nil || b.Source == nil || b.Reader == nil || b.Cursors == nil {
+		return nil, fmt.Errorf("issue journal bridge: store, source, reader and cursor store are required: %w", domain.ErrInvalid)
+	}
+	if (b.EmitTaskReady || b.EmitTaskReview) && (b.IssueLookup == nil || b.RepositoryRequiredBlocker == nil) {
+		return nil, fmt.Errorf("issue journal bridge: task lanes require current issue lookup and repository admission: %w", domain.ErrInvalid)
+	}
+	if b.EmitTaskReady && b.ReadySnapshots == nil {
+		return nil, fmt.Errorf("issue journal bridge: task-ready emission requires current ready snapshots: %w", domain.ErrInvalid)
 	}
 	workspaces, err := b.workspaceKeys(ctx)
 	if err != nil {
@@ -530,29 +530,13 @@ func (b *IssueJournalBridge) logger() *slog.Logger {
 	return slog.Default()
 }
 
-// loadCursor reads the workspace's resume cursor through the configured store
-// (in-memory fallback when nil).
+// loadCursor reads the workspace's resume cursor through the required store.
 func (b *IssueJournalBridge) loadCursor(ws string) (string, bool) {
-	if b.Cursors != nil {
-		return b.Cursors.Load(ws)
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	cursor, ok := b.memCursors[ws]
-	return cursor, ok
+	return b.Cursors.Load(ws)
 }
 
 func (b *IssueJournalBridge) saveCursor(ws, cursor string) {
-	if b.Cursors != nil {
-		b.Cursors.Save(ws, cursor)
-		return
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.memCursors == nil {
-		b.memCursors = make(map[string]string)
-	}
-	b.memCursors[ws] = cursor
+	b.Cursors.Save(ws, cursor)
 }
 
 // inBackoffWindow reports whether this pass should skip the workspace because

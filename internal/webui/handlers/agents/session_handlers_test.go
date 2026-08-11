@@ -121,7 +121,7 @@ func TestAgentSessionTranscriptRouteReturnsCanonicalEntriesAndEnforcesOwner(t *t
 		WorkspaceKey: agentRecordTestWS,
 		SessionID:    "interactive-1",
 		AgentID:      "local-review",
-		Kind:         domain.AgentSessionKindOrchestration,
+		Kind:         domain.AgentSessionKindInteractive,
 		Status:       domain.AgentSessionCompleted,
 		Metadata:     map[string]string{"transcript_ref": "artifact://" + finalized.ArtifactID},
 	}); err != nil {

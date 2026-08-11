@@ -8,47 +8,47 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/modules/automation"
-
-	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
-
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-// setupTaskReadyBinding seeds a prompt-agent binding on internal.task.ready so
-// task.ready emissions have a listener to dispatch to.
-func setupTaskReadyBinding(t *testing.T, s *memstore.Store) {
+func runTaskReadyBridge(t *testing.T, bridge *trigger.IssueJournalBridge) (*trigger.IssueJournalSweepResult, error) {
 	t.Helper()
-	ctx := t.Context()
-	if _, err := s.Drivers().Create(ctx, store.DriverCreate{
-		WorkspaceKey: "WS", DriverID: "prompt-agent", Name: "prompt-agent",
-		OwnerType: workflowcatalog.DriverOwnerSystem, Status: workflowcatalog.DriverStatusActive,
-	}); err != nil {
-		t.Fatalf("Create driver: %v", err)
+	if bridge.EmitTaskReady {
+		if bridge.ReadySnapshots == nil {
+			bridge.ReadySnapshots = func(context.Context, string) ([]trigger.TaskReadySnapshot, error) { return nil, nil }
+		}
+		if bridge.IssueLookup == nil {
+			bridge.IssueLookup = func(ctx context.Context, workspace, taskID string) (trigger.TaskReadySnapshot, error) {
+				snapshots, err := bridge.ReadySnapshots(ctx, workspace)
+				if err != nil {
+					return trigger.TaskReadySnapshot{}, err
+				}
+				for _, snapshot := range snapshots {
+					if snapshot.TaskID == taskID {
+						return snapshot, nil
+					}
+				}
+				return trigger.TaskReadySnapshot{}, domain.ErrNotFound
+			}
+		}
+		if bridge.RepositoryRequiredBlocker == nil {
+			bridge.RepositoryRequiredBlocker = func(ctx context.Context, workspace, taskID string) (trigger.TaskReadyRepositoryRequiredResult, error) {
+				snapshot, err := bridge.IssueLookup(ctx, workspace, taskID)
+				if err != nil {
+					return trigger.TaskReadyRepositoryRequiredResult{}, err
+				}
+				return trigger.TaskReadyRepositoryRequiredResult{DispatchReady: &snapshot}, nil
+			}
+		}
 	}
-	if _, err := s.DriverVersions().Create(ctx, store.DriverVersionCreate{
-		WorkspaceKey: "WS", VersionID: "v1", DriverID: "prompt-agent", Version: 1,
-		SourceDigest: "sha256:s", BundleDigest: "sha256:b", ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
-	}); err != nil {
-		t.Fatalf("Create driver version: %v", err)
-	}
-	if _, err := s.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
-		WorkspaceKey: "WS", BindingID: "b-task-ready", Name: "b-task-ready",
-		SourceKind: "internal", RouteKey: "internal." + trigger.TaskReadyEventType,
-		SourceConfigRef: `{"roleName":"docs-assistant"}`,
-		DriverID:        "prompt-agent", DriverVersionID: "v1", TargetEntrypoint: "run",
-		ConcurrencyPolicy: automation.ConcurrencyAllow, Enabled: true,
-	}); err != nil {
-		t.Fatalf("Create trigger binding: %v", err)
-	}
+	return bridge.RunOnce(t.Context())
 }
 
 // TestIssueJournalBridgeEmitsTaskReady proves ITEM E: with EmitTaskReady on, a
-// newly-created open task emits a task.ready internal event carrying the task id
-// in its payload, dispatched to the internal.task.ready binding.
+// newly-created open task emits a task.ready internal event carrying the task id.
 func TestIssueJournalBridgeEmitsTaskReady(t *testing.T) {
 	reader := &fakeIssueJournalReader{pages: map[string]journalPage{
 		"": {events: []store.JournalEvent{
@@ -60,9 +60,9 @@ func TestIssueJournalBridgeEmitsTaskReady(t *testing.T) {
 	seenStart(cursors, "WS")
 
 	s := memstore.New()
-	setupTaskReadyBinding(t, s)
+	emitter := &capturingInternalEmitter{}
 	bridge := &trigger.IssueJournalBridge{
-		Store: s, Source: &trigger.InternalSource{Store: s}, Reader: reader,
+		Store: s, Source: emitter, Reader: reader,
 		WorkspaceKey: "WS", Cursors: cursors, EmitTaskReady: true,
 		IssueLookup: func(context.Context, string, string) (trigger.TaskReadySnapshot, error) {
 			return trigger.TaskReadySnapshot{
@@ -72,7 +72,7 @@ func TestIssueJournalBridgeEmitsTaskReady(t *testing.T) {
 		},
 	}
 
-	out, err := bridge.RunOnce(t.Context())
+	out, err := runTaskReadyBridge(t, bridge)
 	if err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
@@ -83,39 +83,12 @@ func TestIssueJournalBridgeEmitsTaskReady(t *testing.T) {
 		t.Fatalf("result = %+v, want 1 task-ready emitted", out)
 	}
 
-	// A run was dispatched for the task-ready binding, and its payload carries
-	// the task id (nested in the InternalSource envelope) plus the binding's
-	// configured roleName is NOT here (roleName rides source_config_ref, resolved
-	// by the run) — the run payload is the envelope with the emitter event.
-	evs, err := s.TriggerEvents().List(t.Context(), "WS", store.TriggerEventFilter{})
-	if err != nil {
-		t.Fatalf("List events: %v", err)
-	}
-	var readyEvent *automation.Event
-	for _, e := range evs {
-		if e.EventType == trigger.TaskReadyEventType {
-			readyEvent = e
-		}
-	}
-	if readyEvent == nil {
-		t.Fatalf("no task.ready event persisted; events = %+v", evs)
-	}
-	if readyEvent.SubjectRef != "issue:SANDBOX-7" {
-		t.Fatalf("task.ready subject = %q, want issue:SANDBOX-7", readyEvent.SubjectRef)
-	}
-
-	runs, err := s.DriverRuns().List(t.Context(), "WS", store.DriverRunFilter{})
-	if err != nil || len(runs) != 1 {
-		t.Fatalf("List runs = %v, %v; want 1 run", runs, err)
-	}
-	var envelope struct {
-		Event json.RawMessage `json:"event"`
-	}
-	if err := json.Unmarshal(runs[0].Payload, &envelope); err != nil {
-		t.Fatalf("decode envelope: %v", err)
+	readyEvents := emitter.eventsOfType(trigger.TaskReadyEventType)
+	if len(readyEvents) != 1 || readyEvents[0].SubjectRef != "issue:SANDBOX-7" {
+		t.Fatalf("task.ready events = %+v, want one for issue:SANDBOX-7", readyEvents)
 	}
 	var ev map[string]any
-	if err := json.Unmarshal(envelope.Event, &ev); err != nil {
+	if err := json.Unmarshal(readyEvents[0].Payload, &ev); err != nil {
 		t.Fatalf("decode emitter payload: %v", err)
 	}
 	if ev["taskId"] != "SANDBOX-7" {
@@ -165,10 +138,10 @@ func TestIssueJournalBridgeTaskReadySuppressesLiveEpics(t *testing.T) {
 			cursors := newFixedCursorStore()
 			seenStart(cursors, "WS")
 			s := memstore.New()
-			setupTaskReadyBinding(t, s)
+			emitter := &capturingInternalEmitter{}
 			lookups := 0
 			bridge := &trigger.IssueJournalBridge{
-				Store: s, Source: &trigger.InternalSource{Store: s}, Reader: reader,
+				Store: s, Source: emitter, Reader: reader,
 				WorkspaceKey: "WS", Cursors: cursors, EmitTaskReady: true,
 				IssueLookup: func(_ context.Context, ws, id string) (trigger.TaskReadySnapshot, error) {
 					lookups++
@@ -176,12 +149,12 @@ func TestIssueJournalBridgeTaskReadySuppressesLiveEpics(t *testing.T) {
 						t.Fatalf("IssueLookup workspace/task = %q/%q, want WS/%s", ws, id, taskID)
 					}
 					return trigger.TaskReadySnapshot{
-						TaskID: id, Status: "open", IssueType: tt.issueType,
+						TaskID: id, Status: "open", IssueType: tt.issueType, SourceRepo: "acme/app",
 					}, nil
 				},
 			}
 
-			out, err := bridge.RunOnce(t.Context())
+			out, err := runTaskReadyBridge(t, bridge)
 			if err != nil {
 				t.Fatalf("RunOnce: %v", err)
 			}
@@ -191,22 +164,8 @@ func TestIssueJournalBridgeTaskReadySuppressesLiveEpics(t *testing.T) {
 			if out.TaskReadyEmitted != tt.wantRuns {
 				t.Fatalf("TaskReadyEmitted = %d, want %d; result = %+v", out.TaskReadyEmitted, tt.wantRuns, out)
 			}
-			runs, err := s.DriverRuns().List(t.Context(), "WS", store.DriverRunFilter{})
-			if err != nil || len(runs) != tt.wantRuns {
-				t.Fatalf("DriverRuns = %v, %v; want %d", runs, err, tt.wantRuns)
-			}
-			events, err := s.TriggerEvents().List(t.Context(), "WS", store.TriggerEventFilter{})
-			if err != nil {
-				t.Fatalf("List trigger events: %v", err)
-			}
-			readyEvents := 0
-			for _, event := range events {
-				if event.EventType == trigger.TaskReadyEventType {
-					readyEvents++
-				}
-			}
-			if readyEvents != tt.wantRuns {
-				t.Fatalf("persisted task.ready events = %d, want %d", readyEvents, tt.wantRuns)
+			if readyEvents := emitter.eventsOfType(trigger.TaskReadyEventType); len(readyEvents) != tt.wantRuns {
+				t.Fatalf("task.ready emissions = %d, want %d", len(readyEvents), tt.wantRuns)
 			}
 			if cursor, _ := cursors.Load("WS"); cursor != eventID {
 				t.Fatalf("cursor = %q, want suppressed/handled event %q", cursor, eventID)
@@ -228,9 +187,9 @@ func TestIssueJournalBridgeTaskReadySuppressesLaggedOpenJournalForNonOpenLiveTas
 			cursors := newFixedCursorStore()
 			seenStart(cursors, "WS")
 			s := memstore.New()
-			setupTaskReadyBinding(t, s)
+			emitter := &capturingInternalEmitter{}
 			bridge := &trigger.IssueJournalBridge{
-				Store: s, Source: &trigger.InternalSource{Store: s}, Reader: reader,
+				Store: s, Source: emitter, Reader: reader,
 				WorkspaceKey: "WS", Cursors: cursors, EmitTaskReady: true,
 				IssueLookup: func(context.Context, string, string) (trigger.TaskReadySnapshot, error) {
 					return trigger.TaskReadySnapshot{
@@ -239,16 +198,15 @@ func TestIssueJournalBridgeTaskReadySuppressesLaggedOpenJournalForNonOpenLiveTas
 				},
 			}
 
-			out, err := bridge.RunOnce(t.Context())
+			out, err := runTaskReadyBridge(t, bridge)
 			if err != nil {
 				t.Fatalf("RunOnce: %v", err)
 			}
 			if out.TaskReadyEmitted != 0 {
 				t.Fatalf("result = %+v, want lagged open occurrence suppressed", out)
 			}
-			runs, err := s.DriverRuns().List(t.Context(), "WS", store.DriverRunFilter{})
-			if err != nil || len(runs) != 0 {
-				t.Fatalf("runs = %v, err=%v; want none for live status %q", runs, err, status)
+			if events := emitter.eventsOfType(trigger.TaskReadyEventType); len(events) != 0 {
+				t.Fatalf("task.ready emissions = %+v; want none for live status %q", events, status)
 			}
 			if cursor, _ := cursors.Load("WS"); cursor != eventID {
 				t.Fatalf("cursor = %q, want stale event handled through %q", cursor, eventID)
@@ -272,24 +230,24 @@ func TestIssueJournalBridgeTaskReadyPayloadEnrichment(t *testing.T) {
 	cursors := newFixedCursorStore()
 	seenStart(cursors, "WS")
 	s := memstore.New()
-	setupTaskReadyBinding(t, s)
+	emitter := &capturingInternalEmitter{}
 	bridge := &trigger.IssueJournalBridge{
-		Store: s, Source: &trigger.InternalSource{Store: s}, Reader: reader,
+		Store: s, Source: emitter, Reader: reader,
 		WorkspaceKey: "WS", Cursors: cursors, EmitTaskReady: true,
+		IssueLookup: func(context.Context, string, string) (trigger.TaskReadySnapshot, error) {
+			return trigger.TaskReadySnapshot{
+				TaskID: "SANDBOX-11", Status: "open", HasDesign: true,
+				Labels: []string{"urgent", "backend"}, IssueType: "bug", SourceRepo: "acme/app",
+			}, nil
+		},
 	}
-	if _, err := bridge.RunOnce(t.Context()); err != nil {
+	if _, err := runTaskReadyBridge(t, bridge); err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
 
-	runs, err := s.DriverRuns().List(t.Context(), "WS", store.DriverRunFilter{})
-	if err != nil || len(runs) != 1 {
-		t.Fatalf("List runs = %v, %v; want 1 run", runs, err)
-	}
-	var envelope struct {
-		Event json.RawMessage `json:"event"`
-	}
-	if err := json.Unmarshal(runs[0].Payload, &envelope); err != nil {
-		t.Fatalf("decode envelope: %v", err)
+	readyEvents := emitter.eventsOfType(trigger.TaskReadyEventType)
+	if len(readyEvents) != 1 {
+		t.Fatalf("task.ready emissions = %d, want 1", len(readyEvents))
 	}
 	var ev struct {
 		TaskID    string   `json:"taskId"`
@@ -298,7 +256,7 @@ func TestIssueJournalBridgeTaskReadyPayloadEnrichment(t *testing.T) {
 		Labels    []string `json:"labels"`
 		IssueType string   `json:"issueType"`
 	}
-	if err := json.Unmarshal(envelope.Event, &ev); err != nil {
+	if err := json.Unmarshal(readyEvents[0].Payload, &ev); err != nil {
 		t.Fatalf("decode emitter payload: %v", err)
 	}
 	if ev.TaskID != "SANDBOX-11" || ev.Status != "open" {
@@ -310,8 +268,8 @@ func TestIssueJournalBridgeTaskReadyPayloadEnrichment(t *testing.T) {
 	if ev.IssueType != "bug" {
 		t.Fatalf("issueType = %q, want bug", ev.IssueType)
 	}
-	if len(ev.Labels) != 2 || ev.Labels[0] != "urgent" || ev.Labels[1] != "backend" {
-		t.Fatalf("labels = %v, want [urgent backend]", ev.Labels)
+	if len(ev.Labels) != 2 || ev.Labels[0] != "backend" || ev.Labels[1] != "urgent" {
+		t.Fatalf("labels = %v, want canonical [backend urgent]", ev.Labels)
 	}
 }
 
@@ -328,30 +286,32 @@ func TestIssueJournalBridgeTaskReadyPayloadZeroValues(t *testing.T) {
 	cursors := newFixedCursorStore()
 	seenStart(cursors, "WS")
 	s := memstore.New()
-	setupTaskReadyBinding(t, s)
+	emitter := &capturingInternalEmitter{}
 	bridge := &trigger.IssueJournalBridge{
-		Store: s, Source: &trigger.InternalSource{Store: s}, Reader: reader,
+		Store: s, Source: emitter, Reader: reader,
 		WorkspaceKey: "WS", Cursors: cursors, EmitTaskReady: true,
+		IssueLookup: func(context.Context, string, string) (trigger.TaskReadySnapshot, error) {
+			return trigger.TaskReadySnapshot{TaskID: "SANDBOX-12", Status: "open"}, nil
+		},
+		RepositoryRequiredBlocker: func(context.Context, string, string) (trigger.TaskReadyRepositoryRequiredResult, error) {
+			return trigger.TaskReadyRepositoryRequiredResult{DispatchReady: &trigger.TaskReadySnapshot{
+				TaskID: "SANDBOX-12", Status: "open",
+			}}, nil
+		},
 	}
-	if _, err := bridge.RunOnce(t.Context()); err != nil {
+	if _, err := runTaskReadyBridge(t, bridge); err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
-	runs, _ := s.DriverRuns().List(t.Context(), "WS", store.DriverRunFilter{})
-	if len(runs) != 1 {
-		t.Fatalf("want 1 run, got %d", len(runs))
-	}
-	var envelope struct {
-		Event json.RawMessage `json:"event"`
-	}
-	if err := json.Unmarshal(runs[0].Payload, &envelope); err != nil {
-		t.Fatalf("decode envelope: %v", err)
+	readyEvents := emitter.eventsOfType(trigger.TaskReadyEventType)
+	if len(readyEvents) != 1 {
+		t.Fatalf("task.ready emissions = %d, want 1", len(readyEvents))
 	}
 	// labels must serialize as [] not null: assert on the raw JSON.
-	if !json.Valid(envelope.Event) {
-		t.Fatalf("emitter payload is not valid JSON: %s", envelope.Event)
+	if !json.Valid(readyEvents[0].Payload) {
+		t.Fatalf("emitter payload is not valid JSON: %s", readyEvents[0].Payload)
 	}
 	var probe map[string]json.RawMessage
-	if err := json.Unmarshal(envelope.Event, &probe); err != nil {
+	if err := json.Unmarshal(readyEvents[0].Payload, &probe); err != nil {
 		t.Fatalf("decode emitter payload: %v", err)
 	}
 	if got := string(probe["labels"]); got != "[]" {
@@ -379,23 +339,20 @@ func TestIssueJournalBridgeTaskReadyGatedOff(t *testing.T) {
 	cursors := newFixedCursorStore()
 	seenStart(cursors, "WS")
 	s := memstore.New()
-	setupTaskReadyBinding(t, s)
+	emitter := &capturingInternalEmitter{}
 	bridge := &trigger.IssueJournalBridge{
-		Store: s, Source: &trigger.InternalSource{Store: s}, Reader: reader,
+		Store: s, Source: emitter, Reader: reader,
 		WorkspaceKey: "WS", Cursors: cursors, EmitTaskReady: false,
 	}
-	out, err := bridge.RunOnce(t.Context())
+	out, err := runTaskReadyBridge(t, bridge)
 	if err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
 	if out.TaskReadyEmitted != 0 {
 		t.Fatalf("result = %+v, want 0 task-ready emitted when gated off", out)
 	}
-	evs, _ := s.TriggerEvents().List(t.Context(), "WS", store.TriggerEventFilter{})
-	for _, e := range evs {
-		if e.EventType == trigger.TaskReadyEventType {
-			t.Fatalf("task.ready event emitted while gated off: %+v", e)
-		}
+	if events := emitter.eventsOfType(trigger.TaskReadyEventType); len(events) != 0 {
+		t.Fatalf("task.ready emissions while gated off = %+v, want none", events)
 	}
 }
 
@@ -415,12 +372,15 @@ func TestIssueJournalBridgeTaskReadyOnlyForReadyEntryAction(t *testing.T) {
 	cursors := newFixedCursorStore()
 	seenStart(cursors, "WS")
 	s := memstore.New()
-	setupTaskReadyBinding(t, s)
+	emitter := &capturingInternalEmitter{}
 	bridge := &trigger.IssueJournalBridge{
-		Store: s, Source: &trigger.InternalSource{Store: s}, Reader: reader,
+		Store: s, Source: emitter, Reader: reader,
 		WorkspaceKey: "WS", Cursors: cursors, EmitTaskReady: true,
+		IssueLookup: func(context.Context, string, string) (trigger.TaskReadySnapshot, error) {
+			return trigger.TaskReadySnapshot{TaskID: "SANDBOX-9", Status: "open", IssueType: "task", SourceRepo: "acme/app"}, nil
+		},
 	}
-	out, err := bridge.RunOnce(t.Context())
+	out, err := runTaskReadyBridge(t, bridge)
 	if err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
@@ -440,12 +400,15 @@ func TestIssueJournalBridgeTaskReadyOnUnblock(t *testing.T) {
 	cursors := newFixedCursorStore()
 	seenStart(cursors, "WS")
 	s := memstore.New()
-	setupTaskReadyBinding(t, s)
+	emitter := &capturingInternalEmitter{}
 	bridge := &trigger.IssueJournalBridge{
-		Store: s, Source: &trigger.InternalSource{Store: s}, Reader: reader,
+		Store: s, Source: emitter, Reader: reader,
 		WorkspaceKey: "WS", Cursors: cursors, EmitTaskReady: true,
+		IssueLookup: func(context.Context, string, string) (trigger.TaskReadySnapshot, error) {
+			return trigger.TaskReadySnapshot{TaskID: "SANDBOX-10", Status: "open", IssueType: "task", SourceRepo: "acme/app"}, nil
+		},
 	}
-	out, err := bridge.RunOnce(t.Context())
+	out, err := runTaskReadyBridge(t, bridge)
 	if err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
@@ -469,10 +432,10 @@ func TestIssueJournalBridgeTaskReadyDeltaUsesIssueLookup(t *testing.T) {
 	cursors := newFixedCursorStore()
 	seenStart(cursors, "WS")
 	s := memstore.New()
-	setupTaskReadyBinding(t, s)
+	emitter := &capturingInternalEmitter{}
 	var lookedUpWS, lookedUpID string
 	bridge := &trigger.IssueJournalBridge{
-		Store: s, Source: &trigger.InternalSource{Store: s}, Reader: reader,
+		Store: s, Source: emitter, Reader: reader,
 		WorkspaceKey: "WS", Cursors: cursors, EmitTaskReady: true,
 		IssueLookup: func(_ context.Context, ws, id string) (trigger.TaskReadySnapshot, error) {
 			lookedUpWS, lookedUpID = ws, id
@@ -482,21 +445,15 @@ func TestIssueJournalBridgeTaskReadyDeltaUsesIssueLookup(t *testing.T) {
 			}, nil
 		},
 	}
-	if _, err := bridge.RunOnce(t.Context()); err != nil {
+	if _, err := runTaskReadyBridge(t, bridge); err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
 	if lookedUpWS != "WS" || lookedUpID != "SANDBOX-13" {
 		t.Fatalf("lookup called with %q/%q, want WS/SANDBOX-13", lookedUpWS, lookedUpID)
 	}
-	runs, _ := s.DriverRuns().List(t.Context(), "WS", store.DriverRunFilter{})
-	if len(runs) != 1 {
-		t.Fatalf("want 1 run, got %d", len(runs))
-	}
-	var envelope struct {
-		Event json.RawMessage `json:"event"`
-	}
-	if err := json.Unmarshal(runs[0].Payload, &envelope); err != nil {
-		t.Fatalf("decode envelope: %v", err)
+	readyEvents := emitter.eventsOfType(trigger.TaskReadyEventType)
+	if len(readyEvents) != 1 {
+		t.Fatalf("task.ready emissions = %d, want 1", len(readyEvents))
 	}
 	var ev struct {
 		HasDesign  bool     `json:"hasDesign"`
@@ -504,7 +461,7 @@ func TestIssueJournalBridgeTaskReadyDeltaUsesIssueLookup(t *testing.T) {
 		IssueType  string   `json:"issueType"`
 		SourceRepo string   `json:"sourceRepo"`
 	}
-	if err := json.Unmarshal(envelope.Event, &ev); err != nil {
+	if err := json.Unmarshal(readyEvents[0].Payload, &ev); err != nil {
 		t.Fatalf("decode emitter payload: %v", err)
 	}
 	if !ev.HasDesign {
@@ -521,11 +478,7 @@ func TestIssueJournalBridgeTaskReadyDeltaUsesIssueLookup(t *testing.T) {
 	}
 }
 
-// TestIssueJournalBridgeTaskReadyDeltaWithoutLookupOmitsUnknowns proves the
-// fail-honest half of the delta semantics: with no IssueLookup wired, the
-// gating keys are OMITTED — absent means UNKNOWN, and the claim
-// gate falls back to claim-then-check — never a lying false.
-func TestIssueJournalBridgeTaskReadyDeltaWithoutLookupOmitsUnknowns(t *testing.T) {
+func TestIssueJournalBridgeTaskReadyWithoutCurrentProjectionFailsClosed(t *testing.T) {
 	reader := &fakeIssueJournalReader{pages: map[string]journalPage{
 		"": {events: []store.JournalEvent{
 			issueEvent("601", "issue.update", "user:alice", "SANDBOX-14", `{"status":"open"}`),
@@ -534,35 +487,20 @@ func TestIssueJournalBridgeTaskReadyDeltaWithoutLookupOmitsUnknowns(t *testing.T
 	cursors := newFixedCursorStore()
 	seenStart(cursors, "WS")
 	s := memstore.New()
-	setupTaskReadyBinding(t, s)
+	emitter := &capturingInternalEmitter{}
 	bridge := &trigger.IssueJournalBridge{
-		Store: s, Source: &trigger.InternalSource{Store: s}, Reader: reader,
+		Store: s, Source: emitter, Reader: reader,
 		WorkspaceKey: "WS", Cursors: cursors, EmitTaskReady: true,
 	}
-	if _, err := bridge.RunOnce(t.Context()); err != nil {
-		t.Fatalf("RunOnce: %v", err)
+	bridge.ReadySnapshots = func(context.Context, string) ([]trigger.TaskReadySnapshot, error) { return nil, nil }
+	bridge.RepositoryRequiredBlocker = func(context.Context, string, string) (trigger.TaskReadyRepositoryRequiredResult, error) {
+		return trigger.TaskReadyRepositoryRequiredResult{}, nil
 	}
-	runs, _ := s.DriverRuns().List(t.Context(), "WS", store.DriverRunFilter{})
-	if len(runs) != 1 {
-		t.Fatalf("want 1 run, got %d", len(runs))
+	if _, err := bridge.RunOnce(t.Context()); !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("RunOnce error = %v, want fail-closed ErrInvalid", err)
 	}
-	var envelope struct {
-		Event json.RawMessage `json:"event"`
-	}
-	if err := json.Unmarshal(runs[0].Payload, &envelope); err != nil {
-		t.Fatalf("decode envelope: %v", err)
-	}
-	var probe map[string]json.RawMessage
-	if err := json.Unmarshal(envelope.Event, &probe); err != nil {
-		t.Fatalf("decode emitter payload: %v", err)
-	}
-	for _, key := range []string{"hasDesign", "labels", "issueType", "sourceRepo", "repositoryRequired"} {
-		if _, present := probe[key]; present {
-			t.Fatalf("%s present in delta payload without lookup — absent means unknown, a zero value here is a lie", key)
-		}
-	}
-	if string(probe["taskId"]) != `"SANDBOX-14"` {
-		t.Fatalf("taskId = %s, want SANDBOX-14", probe["taskId"])
+	if events := emitter.eventsOfType(trigger.TaskReadyEventType); len(events) != 0 {
+		t.Fatalf("task.ready emissions without current projection = %+v, want none", events)
 	}
 }
 
@@ -579,10 +517,10 @@ func TestIssueJournalBridgeTaskReadyLookupFailureRetriesBeforeClaim(t *testing.T
 	cursors := newFixedCursorStore()
 	seenStart(cursors, "WS")
 	s := memstore.New()
-	setupTaskReadyBinding(t, s)
+	emitter := &capturingInternalEmitter{}
 	lookups := 0
 	bridge := &trigger.IssueJournalBridge{
-		Store: s, Source: &trigger.InternalSource{Store: s}, Reader: reader,
+		Store: s, Source: emitter, Reader: reader,
 		WorkspaceKey: "WS", Cursors: cursors, EmitTaskReady: true,
 		IssueLookup: func(context.Context, string, string) (trigger.TaskReadySnapshot, error) {
 			lookups++
@@ -594,22 +532,26 @@ func TestIssueJournalBridgeTaskReadyLookupFailureRetriesBeforeClaim(t *testing.T
 				RepositoryRequired: true,
 			}, nil
 		},
+		RepositoryRequiredBlocker: func(context.Context, string, string) (trigger.TaskReadyRepositoryRequiredResult, error) {
+			return trigger.TaskReadyRepositoryRequiredResult{DispatchReady: &trigger.TaskReadySnapshot{
+				TaskID: "SANDBOX-15", Status: "open", IssueType: "task",
+			}}, nil
+		},
 	}
 
-	if _, err := bridge.RunOnce(t.Context()); err == nil {
+	if _, err := runTaskReadyBridge(t, bridge); err == nil {
 		t.Fatal("first RunOnce error = nil, want lookup failure")
 	}
-	runs, _ := s.DriverRuns().List(t.Context(), "WS", store.DriverRunFilter{})
-	if len(runs) != 0 {
-		t.Fatalf("runs after failed lookup = %d, want zero pre-claim dispatches", len(runs))
+	if events := emitter.eventsOfType(trigger.TaskReadyEventType); len(events) != 0 {
+		t.Fatalf("task.ready emissions after failed lookup = %+v, want none", events)
 	}
 	if cursor, _ := cursors.Load("WS"); cursor != "" {
 		t.Fatalf("cursor after failed lookup = %q, want failed entry retained", cursor)
 	}
-	if out, err := bridge.RunOnce(t.Context()); err != nil || out.BackedOff != 1 || lookups != 1 {
+	if out, err := runTaskReadyBridge(t, bridge); err != nil || out.BackedOff != 1 || lookups != 1 {
 		t.Fatalf("backoff result/error/lookups = %+v/%v/%d, want no lookup retry yet", out, err, lookups)
 	}
-	out, err := bridge.RunOnce(t.Context())
+	out, err := runTaskReadyBridge(t, bridge)
 	if err != nil {
 		t.Fatalf("recovery RunOnce: %v", err)
 	}
@@ -628,9 +570,9 @@ func TestIssueJournalBridgeTaskReadyDeletedIssueDoesNotPoisonCursor(t *testing.T
 	cursors := newFixedCursorStore()
 	seenStart(cursors, "WS")
 	s := memstore.New()
-	setupTaskReadyBinding(t, s)
+	emitter := &capturingInternalEmitter{}
 	bridge := &trigger.IssueJournalBridge{
-		Store: s, Source: &trigger.InternalSource{Store: s}, Reader: reader,
+		Store: s, Source: emitter, Reader: reader,
 		WorkspaceKey: "WS", Cursors: cursors, EmitTaskReady: true,
 		IssueLookup: func(_ context.Context, _ string, id string) (trigger.TaskReadySnapshot, error) {
 			if id == "TASK-GONE" {
@@ -640,7 +582,7 @@ func TestIssueJournalBridgeTaskReadyDeletedIssueDoesNotPoisonCursor(t *testing.T
 		},
 	}
 
-	out, err := bridge.RunOnce(t.Context())
+	out, err := runTaskReadyBridge(t, bridge)
 	if err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
@@ -650,9 +592,8 @@ func TestIssueJournalBridgeTaskReadyDeletedIssueDoesNotPoisonCursor(t *testing.T
 	if cursor, _ := cursors.Load("WS"); cursor != "602-live" {
 		t.Fatalf("cursor = %q, want deleted entry skipped through 602-live", cursor)
 	}
-	runs, err := s.DriverRuns().List(t.Context(), "WS", store.DriverRunFilter{})
-	if err != nil || len(runs) != 1 {
-		t.Fatalf("runs = %v, err=%v; want one live task run", runs, err)
+	if readyEvents := emitter.eventsOfType(trigger.TaskReadyEventType); len(readyEvents) != 1 {
+		t.Fatalf("task.ready emissions = %d, want one live task", len(readyEvents))
 	}
 }
 
@@ -677,10 +618,10 @@ func TestIssueJournalBridgeBlocksRepositoryRequiredTaskBeforeDispatch(t *testing
 			cursors := newFixedCursorStore()
 			seenStart(cursors, "WS")
 			s := memstore.New()
-			setupTaskReadyBinding(t, s)
+			emitter := &capturingInternalEmitter{}
 			blockCalls := 0
 			bridge := &trigger.IssueJournalBridge{
-				Store: s, Source: &trigger.InternalSource{Store: s}, Reader: reader,
+				Store: s, Source: emitter, Reader: reader,
 				WorkspaceKey: "WS", Cursors: cursors, EmitTaskReady: true,
 				IssueLookup: func(context.Context, string, string) (trigger.TaskReadySnapshot, error) {
 					return trigger.TaskReadySnapshot{
@@ -697,7 +638,7 @@ func TestIssueJournalBridgeBlocksRepositoryRequiredTaskBeforeDispatch(t *testing
 				},
 			}
 
-			out, err := bridge.RunOnce(t.Context())
+			out, err := runTaskReadyBridge(t, bridge)
 			if err != nil {
 				t.Fatalf("RunOnce: %v", err)
 			}
@@ -707,9 +648,8 @@ func TestIssueJournalBridgeBlocksRepositoryRequiredTaskBeforeDispatch(t *testing
 			if cursor, _ := cursors.Load("WS"); cursor != "603" {
 				t.Fatalf("cursor = %q, want blocked entry durably handled", cursor)
 			}
-			runs, err := s.DriverRuns().List(t.Context(), "WS", store.DriverRunFilter{})
-			if err != nil || len(runs) != 0 {
-				t.Fatalf("runs after repository block = %v, %v; want none", runs, err)
+			if events := emitter.eventsOfType(trigger.TaskReadyEventType); len(events) != 0 {
+				t.Fatalf("task.ready emissions after repository block = %+v, want none", events)
 			}
 		})
 	}
@@ -725,10 +665,10 @@ func TestIssueJournalBridgeRepositoryAdmissionRaceDispatchesCanonicalAssignedRep
 	cursors := newFixedCursorStore()
 	seenStart(cursors, "WS")
 	s := memstore.New()
-	setupTaskReadyBinding(t, s)
+	emitter := &capturingInternalEmitter{}
 	canonicalAt := time.Date(2026, 7, 18, 21, 4, 0, 0, time.UTC)
 	bridge := &trigger.IssueJournalBridge{
-		Store: s, Source: &trigger.InternalSource{Store: s}, Reader: reader,
+		Store: s, Source: emitter, Reader: reader,
 		WorkspaceKey: "WS", Cursors: cursors, EmitTaskReady: true,
 		IssueLookup: func(context.Context, string, string) (trigger.TaskReadySnapshot, error) {
 			// This is the snapshot that caused admission. Repository assignment
@@ -749,25 +689,19 @@ func TestIssueJournalBridgeRepositoryAdmissionRaceDispatchesCanonicalAssignedRep
 		},
 	}
 
-	out, err := bridge.RunOnce(t.Context())
+	out, err := runTaskReadyBridge(t, bridge)
 	if err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
 	if out.TaskReadyEmitted != 1 || out.TaskReadyBlocked != 0 {
 		t.Fatalf("result = %+v, want canonical dispatch and no block", out)
 	}
-	runs, err := s.DriverRuns().List(t.Context(), "WS", store.DriverRunFilter{})
-	if err != nil || len(runs) != 1 {
-		t.Fatalf("runs = %v, err=%v; want one", runs, err)
-	}
-	var envelope struct {
-		Event json.RawMessage `json:"event"`
-	}
-	if err := json.Unmarshal(runs[0].Payload, &envelope); err != nil {
-		t.Fatalf("decode envelope: %v", err)
+	readyEvents := emitter.eventsOfType(trigger.TaskReadyEventType)
+	if len(readyEvents) != 1 {
+		t.Fatalf("task.ready emissions = %+v, want one", readyEvents)
 	}
 	var payload map[string]json.RawMessage
-	if err := json.Unmarshal(envelope.Event, &payload); err != nil {
+	if err := json.Unmarshal(readyEvents[0].Payload, &payload); err != nil {
 		t.Fatalf("decode event: %v", err)
 	}
 	if got := string(payload["status"]); got != `"open"` {
@@ -794,10 +728,10 @@ func TestIssueJournalBridgeStartupReconcileBlocksExistingRepositoryRequiredTask(
 			cursors := newFixedCursorStore()
 			cursors.Save("WS", "900")
 			s := memstore.New()
-			setupTaskReadyBinding(t, s)
+			emitter := &capturingInternalEmitter{}
 			blockCalls := 0
 			bridge := &trigger.IssueJournalBridge{
-				Store: s, Source: &trigger.InternalSource{Store: s}, Reader: reader,
+				Store: s, Source: emitter, Reader: reader,
 				WorkspaceKey: "WS", Cursors: cursors, EmitTaskReady: true,
 				ReadySnapshots: func(context.Context, string) ([]trigger.TaskReadySnapshot, error) {
 					return []trigger.TaskReadySnapshot{{
@@ -811,16 +745,15 @@ func TestIssueJournalBridgeStartupReconcileBlocksExistingRepositoryRequiredTask(
 				},
 			}
 
-			out, err := bridge.RunOnce(t.Context())
+			out, err := runTaskReadyBridge(t, bridge)
 			if err != nil {
 				t.Fatalf("RunOnce: %v", err)
 			}
 			if blockCalls != 1 || out.TaskReadyBlocked != 1 || out.TaskReadyEmitted != 0 {
 				t.Fatalf("calls/result = %d/%+v, want existing task blocked without dispatch", blockCalls, out)
 			}
-			runs, err := s.DriverRuns().List(t.Context(), "WS", store.DriverRunFilter{})
-			if err != nil || len(runs) != 0 {
-				t.Fatalf("runs after startup block = %v, %v; want none", runs, err)
+			if events := emitter.eventsOfType(trigger.TaskReadyEventType); len(events) != 0 {
+				t.Fatalf("task.ready emissions after startup block = %+v, want none", events)
 			}
 		})
 	}
@@ -834,10 +767,10 @@ func TestIssueJournalBridgeStartupRepositoryCountRaceDispatchesWithoutIssueEvent
 	cursors := newFixedCursorStore()
 	cursors.Save("WS", "920")
 	s := memstore.New()
-	setupTaskReadyBinding(t, s)
+	emitter := &capturingInternalEmitter{}
 	updatedAt := time.Date(2026, 7, 18, 21, 20, 0, 0, time.UTC)
 	bridge := &trigger.IssueJournalBridge{
-		Store: s, Source: &trigger.InternalSource{Store: s}, Reader: reader,
+		Store: s, Source: emitter, Reader: reader,
 		WorkspaceKey: "WS", Cursors: cursors, EmitTaskReady: true,
 		ReadySnapshots: func(context.Context, string) ([]trigger.TaskReadySnapshot, error) {
 			return []trigger.TaskReadySnapshot{{
@@ -853,25 +786,19 @@ func TestIssueJournalBridgeStartupRepositoryCountRaceDispatchesWithoutIssueEvent
 		},
 	}
 
-	out, err := bridge.RunOnce(t.Context())
+	out, err := runTaskReadyBridge(t, bridge)
 	if err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
 	if out.TaskReadyEmitted != 1 || out.TaskReadyBlocked != 0 {
 		t.Fatalf("result = %+v, want one single-repo fallback dispatch", out)
 	}
-	runs, err := s.DriverRuns().List(t.Context(), "WS", store.DriverRunFilter{})
-	if err != nil || len(runs) != 1 {
-		t.Fatalf("runs = %v, err=%v; want one despite no issue journal event", runs, err)
-	}
-	var envelope struct {
-		Event json.RawMessage `json:"event"`
-	}
-	if err := json.Unmarshal(runs[0].Payload, &envelope); err != nil {
-		t.Fatalf("decode envelope: %v", err)
+	readyEvents := emitter.eventsOfType(trigger.TaskReadyEventType)
+	if len(readyEvents) != 1 {
+		t.Fatalf("task.ready emissions = %+v, want one despite no issue journal event", readyEvents)
 	}
 	var payload map[string]json.RawMessage
-	if err := json.Unmarshal(envelope.Event, &payload); err != nil {
+	if err := json.Unmarshal(readyEvents[0].Payload, &payload); err != nil {
 		t.Fatalf("decode event: %v", err)
 	}
 	if got := string(payload["sourceRepo"]); got != `""` {
@@ -885,8 +812,8 @@ func TestIssueJournalBridgeStartupRepositoryCountRaceDispatchesWithoutIssueEvent
 // TestIssueJournalBridgeReconcilesCurrentReadyPastCursor is the regression for
 // enabling the task-ready lane after the shared journal cursor already passed
 // an open task. Reconciliation emits the CURRENT Ready generation once; a new
-// bridge instance repeats the stable synthetic ID and dispatch dedup preserves
-// one run.
+// bridge instance repeats the stable synthetic ID. Automation owns admission
+// deduplication; this bridge test proves the two emission attempts are stable.
 func TestIssueJournalBridgeReconcilesCurrentReadyPastCursor(t *testing.T) {
 	reader := &fakeIssueJournalReader{pages: map[string]journalPage{
 		"900": {next: "900"},
@@ -894,7 +821,7 @@ func TestIssueJournalBridgeReconcilesCurrentReadyPastCursor(t *testing.T) {
 	cursors := newFixedCursorStore()
 	cursors.Save("WS", "900")
 	s := memstore.New()
-	setupTaskReadyBinding(t, s)
+	emitter := &capturingInternalEmitter{}
 	updatedAt := time.Date(2026, 7, 18, 20, 0, 0, 123, time.UTC)
 	list := func(_ context.Context, ws string) ([]trigger.TaskReadySnapshot, error) {
 		if ws != "WS" {
@@ -914,47 +841,44 @@ func TestIssueJournalBridgeReconcilesCurrentReadyPastCursor(t *testing.T) {
 	}
 	newBridge := func() *trigger.IssueJournalBridge {
 		return &trigger.IssueJournalBridge{
-			Store: s, Source: &trigger.InternalSource{Store: s}, Reader: reader,
+			Store: s, Source: emitter, Reader: reader,
 			WorkspaceKey: "WS", Cursors: cursors, EmitTaskReady: true,
 			ReadySnapshots: list,
 		}
 	}
 
-	out, err := newBridge().RunOnce(t.Context())
+	out, err := runTaskReadyBridge(t, newBridge())
 	if err != nil {
 		t.Fatalf("first RunOnce: %v", err)
 	}
 	if out.TaskReadyEmitted != 1 {
 		t.Fatalf("first result = %+v, want one reconciled task.ready", out)
 	}
-	// Simulate a serve restart. The scan runs again, but its content-derived ID
-	// is identical and Automation/dispatch idempotency must retain one run.
-	out, err = newBridge().RunOnce(t.Context())
+	// Simulate a serve restart. The scan runs again with the same content-derived
+	// ID so Automation can deduplicate it at its own interface.
+	out, err = runTaskReadyBridge(t, newBridge())
 	if err != nil {
 		t.Fatalf("restart RunOnce: %v", err)
 	}
 	if out.TaskReadyEmitted != 1 {
 		t.Fatalf("restart result = %+v, want one deduped emission attempt", out)
 	}
-	runs, err := s.DriverRuns().List(t.Context(), "WS", store.DriverRunFilter{})
-	if err != nil || len(runs) != 1 {
-		t.Fatalf("runs after restart = %v, %v; want exactly one", runs, err)
+	readyEvents := emitter.eventsOfType(trigger.TaskReadyEventType)
+	if len(readyEvents) != 2 {
+		t.Fatalf("task.ready emissions after restart = %+v, want two attempts", readyEvents)
 	}
-	var envelope struct {
-		Event json.RawMessage `json:"event"`
-	}
-	if err := json.Unmarshal(runs[0].Payload, &envelope); err != nil {
-		t.Fatalf("decode envelope: %v", err)
+	if readyEvents[0].EventID == "" || readyEvents[0].EventID != readyEvents[1].EventID {
+		t.Fatalf("event IDs = %q/%q, want one stable non-empty ID", readyEvents[0].EventID, readyEvents[1].EventID)
 	}
 	var payload map[string]json.RawMessage
-	if err := json.Unmarshal(envelope.Event, &payload); err != nil {
+	if err := json.Unmarshal(readyEvents[0].Payload, &payload); err != nil {
 		t.Fatalf("decode event: %v", err)
 	}
 	if got := string(payload["sourceRepo"]); got != `""` {
 		t.Fatalf("sourceRepo = %s, want explicit known-empty string", got)
 	}
-	if got := string(payload["repositoryRequired"]); got != "true" {
-		t.Fatalf("repositoryRequired = %s, want true for a repo-less multi-repo task", got)
+	if got := string(payload["repositoryRequired"]); got != "false" {
+		t.Fatalf("repositoryRequired = %s, want false after commit-time admission", got)
 	}
 	if got := string(payload["labels"]); got != `["phase4","terra"]` {
 		t.Fatalf("canonical labels = %s, want sorted/deduped labels", got)
@@ -972,9 +896,9 @@ func TestIssueJournalBridgeReconcileSuppressesSameJournalGeneration(t *testing.T
 	cursors := newFixedCursorStore()
 	seenStart(cursors, "WS")
 	s := memstore.New()
-	setupTaskReadyBinding(t, s)
+	emitter := &capturingInternalEmitter{}
 	bridge := &trigger.IssueJournalBridge{
-		Store: s, Source: &trigger.InternalSource{Store: s}, Reader: reader,
+		Store: s, Source: emitter, Reader: reader,
 		WorkspaceKey: "WS", Cursors: cursors, EmitTaskReady: true,
 		ReadySnapshots: func(context.Context, string) ([]trigger.TaskReadySnapshot, error) {
 			return []trigger.TaskReadySnapshot{{
@@ -983,16 +907,15 @@ func TestIssueJournalBridgeReconcileSuppressesSameJournalGeneration(t *testing.T
 			}}, nil
 		},
 	}
-	out, err := bridge.RunOnce(t.Context())
+	out, err := runTaskReadyBridge(t, bridge)
 	if err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
 	if out.TaskReadyEmitted != 1 {
 		t.Fatalf("result = %+v, want only reconciled emission", out)
 	}
-	runs, _ := s.DriverRuns().List(t.Context(), "WS", store.DriverRunFilter{})
-	if len(runs) != 1 {
-		t.Fatalf("runs = %d, want one synthetic/natural generation", len(runs))
+	if events := emitter.eventsOfType(trigger.TaskReadyEventType); len(events) != 1 {
+		t.Fatalf("task.ready emissions = %+v, want one synthetic/natural generation", events)
 	}
 }
 
@@ -1011,33 +934,32 @@ func TestIssueJournalBridgeReconcileSuppressesReleaseWithoutUpdatedAt(t *testing
 	cursors := newFixedCursorStore()
 	seenStart(cursors, "WS")
 	s := memstore.New()
-	setupTaskReadyBinding(t, s)
+	emitter := &capturingInternalEmitter{}
 	lookups := 0
 	bridge := &trigger.IssueJournalBridge{
-		Store: s, Source: &trigger.InternalSource{Store: s}, Reader: reader,
+		Store: s, Source: emitter, Reader: reader,
 		WorkspaceKey: "WS", Cursors: cursors, EmitTaskReady: true,
 		ReadySnapshots: func(context.Context, string) ([]trigger.TaskReadySnapshot, error) {
 			return []trigger.TaskReadySnapshot{{
-				TaskID: "TASK-911", Status: "open", IssueType: "task", UpdatedAt: updatedAt,
+				TaskID: "TASK-911", Status: "open", IssueType: "task", SourceRepo: "acme/app", UpdatedAt: updatedAt,
 			}}, nil
 		},
 		IssueLookup: func(context.Context, string, string) (trigger.TaskReadySnapshot, error) {
 			lookups++
 			return trigger.TaskReadySnapshot{
-				TaskID: "TASK-911", Status: "open", IssueType: "task", UpdatedAt: updatedAt,
+				TaskID: "TASK-911", Status: "open", IssueType: "task", SourceRepo: "acme/app", UpdatedAt: updatedAt,
 			}, nil
 		},
 	}
-	out, err := bridge.RunOnce(t.Context())
+	out, err := runTaskReadyBridge(t, bridge)
 	if err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
 	if out.TaskReadyEmitted != 1 || lookups != 1 {
 		t.Fatalf("result/lookups = %+v/%d, want one synthetic emission and one generation lookup", out, lookups)
 	}
-	runs, err := s.DriverRuns().List(t.Context(), "WS", store.DriverRunFilter{})
-	if err != nil || len(runs) != 1 {
-		t.Fatalf("runs after snapshot plus release catch-up = %v, %v; want exactly one", runs, err)
+	if events := emitter.eventsOfType(trigger.TaskReadyEventType); len(events) != 1 {
+		t.Fatalf("task.ready emissions after snapshot plus release catch-up = %+v, want one", events)
 	}
 }
 
@@ -1053,33 +975,32 @@ func TestIssueJournalBridgeReconcileEmitsReleaseFromNewerLiveGeneration(t *testi
 	cursors := newFixedCursorStore()
 	seenStart(cursors, "WS")
 	s := memstore.New()
-	setupTaskReadyBinding(t, s)
+	emitter := &capturingInternalEmitter{}
 	lookups := 0
 	bridge := &trigger.IssueJournalBridge{
-		Store: s, Source: &trigger.InternalSource{Store: s}, Reader: reader,
+		Store: s, Source: emitter, Reader: reader,
 		WorkspaceKey: "WS", Cursors: cursors, EmitTaskReady: true,
 		ReadySnapshots: func(context.Context, string) ([]trigger.TaskReadySnapshot, error) {
 			return []trigger.TaskReadySnapshot{{
-				TaskID: "TASK-912", Status: "open", IssueType: "task", UpdatedAt: reconciledAt,
+				TaskID: "TASK-912", Status: "open", IssueType: "task", SourceRepo: "acme/app", UpdatedAt: reconciledAt,
 			}}, nil
 		},
 		IssueLookup: func(context.Context, string, string) (trigger.TaskReadySnapshot, error) {
 			lookups++
 			return trigger.TaskReadySnapshot{
-				TaskID: "TASK-912", Status: "open", IssueType: "task", UpdatedAt: releasedAt,
+				TaskID: "TASK-912", Status: "open", IssueType: "task", SourceRepo: "acme/app", UpdatedAt: releasedAt,
 			}, nil
 		},
 	}
-	out, err := bridge.RunOnce(t.Context())
+	out, err := runTaskReadyBridge(t, bridge)
 	if err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
 	if out.TaskReadyEmitted != 2 || lookups != 2 {
 		t.Fatalf("result/lookups = %+v/%d, want synthetic plus newer release generation", out, lookups)
 	}
-	runs, err := s.DriverRuns().List(t.Context(), "WS", store.DriverRunFilter{})
-	if err != nil || len(runs) != 2 {
-		t.Fatalf("runs for distinct Ready generations = %v, %v; want two", runs, err)
+	if events := emitter.eventsOfType(trigger.TaskReadyEventType); len(events) != 2 {
+		t.Fatalf("task.ready emissions for distinct Ready generations = %+v, want two", events)
 	}
 }
 
@@ -1088,30 +1009,30 @@ func TestIssueJournalBridgeReconcileFailureRetries(t *testing.T) {
 	cursors := newFixedCursorStore()
 	cursors.Save("WS", "50")
 	s := memstore.New()
-	setupTaskReadyBinding(t, s)
+	emitter := &capturingInternalEmitter{}
 	calls := 0
 	bridge := &trigger.IssueJournalBridge{
-		Store: s, Source: &trigger.InternalSource{Store: s}, Reader: reader,
+		Store: s, Source: emitter, Reader: reader,
 		WorkspaceKey: "WS", Cursors: cursors, EmitTaskReady: true,
 		ReadySnapshots: func(context.Context, string) ([]trigger.TaskReadySnapshot, error) {
 			calls++
 			if calls == 1 {
 				return nil, errors.New("ready unavailable")
 			}
-			return []trigger.TaskReadySnapshot{{TaskID: "TASK-50", Status: "open"}}, nil
+			return []trigger.TaskReadySnapshot{{TaskID: "TASK-50", Status: "open", SourceRepo: "acme/app"}}, nil
 		},
 	}
-	if _, err := bridge.RunOnce(t.Context()); err == nil {
+	if _, err := runTaskReadyBridge(t, bridge); err == nil {
 		t.Fatal("first RunOnce error = nil, want ready-list failure")
 	}
-	backedOff, err := bridge.RunOnce(t.Context())
+	backedOff, err := runTaskReadyBridge(t, bridge)
 	if err != nil {
 		t.Fatalf("backoff RunOnce: %v", err)
 	}
 	if calls != 1 || backedOff.BackedOff != 1 {
 		t.Fatalf("calls/result = %d/%+v, want one backoff pass", calls, backedOff)
 	}
-	out, err := bridge.RunOnce(t.Context())
+	out, err := runTaskReadyBridge(t, bridge)
 	if err != nil {
 		t.Fatalf("retry RunOnce: %v", err)
 	}

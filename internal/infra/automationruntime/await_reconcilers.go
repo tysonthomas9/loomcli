@@ -646,7 +646,8 @@ func awaitTimeoutRecord(res *AwaitDispatchResult, instanceKey string) (AwaitMatc
 // process with the SystemTimeoutLane carve-out enabled.
 func (s *AwaitTimeoutSweeper) matcher() *AwaitMatcher {
 	return &AwaitMatcher{
-		Store:             s.Store,
+		AwaitStore:        s.Store.Awaits(),
+		DriverRunStore:    s.Store.DriverRuns(),
 		AtomicResolver:    s.Resolver,
 		Logger:            s.Logger,
 		SystemTimeoutLane: true,

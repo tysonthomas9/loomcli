@@ -970,6 +970,44 @@ func TestRetiredSourceCompatibilityAPIsCannotReturn(t *testing.T) {
 	for _, relative := range []string{
 		"internal/driver/stale_task_sweeper_legacy_test.go",
 		"internal/driver/stale_task_sweeper_test.go",
+		"internal/driver/await_op_legacy_test.go",
+		"internal/driver/await_op_test.go",
+		"internal/driver/composition_legacy_test.go",
+		"internal/driver/composition_test.go",
+		"internal/driver/run_events_test.go",
+		"internal/driver/run_legacy_test.go",
+		"internal/driver/run_test.go",
+		"internal/driver/register_legacy_test.go",
+		"internal/driver/task_close_suppression_test.go",
+		"internal/driver/task_events_legacy_test.go",
+		"internal/driver/task_events_test.go",
+		"internal/driver/task_request_e2e_input_test.go",
+		"internal/driver/task_request_input_test.go",
+		"internal/driver/task_request_legacy_test.go",
+		"internal/driver/task_request_test.go",
+		"internal/driver/task_retry_test.go",
+		"internal/infra/automationruntime/internal_source.go",
+		"internal/infra/automationruntime/internal_source_test.go",
+		"internal/infra/automationruntime/binding_run_input.go",
+		"internal/infra/automationruntime/binding_run_input_test.go",
+		"internal/infra/automationruntime/cron.go",
+		"internal/infra/automationruntime/cron_test.go",
+		"internal/infra/automationruntime/delivery_sweeper.go",
+		"internal/infra/automationruntime/delivery_sweeper_test.go",
+		"internal/infra/automationruntime/pattern.go",
+		"internal/infra/automationruntime/pattern_test.go",
+		"internal/infra/automationruntime/issue_journal_bridge_task_review_integration_test.go",
+		"internal/infra/workflowdistribution/authoring/builtin_authoring.go",
+		"internal/infra/workflowdistribution/authoring/native_authoring.go",
+		"internal/infra/workflowdistribution/authoring/legacy_authoring_test.go",
+		"internal/infra/workflowdistribution/authoring/legacy_compat_test.go",
+		"internal/infra/fleetdb/webhook_dispatch_test.go",
+		"internal/infra/fleetdb/platform_trigger_fanout_test.go",
+		"internal/infra/memstore/platform_trigger_test.go",
+		"internal/infra/memstore/platform_trigger_fanout_test.go",
+		"internal/infra/memstore/platform_provenance_test.go",
+		"internal/webui/handlers/webhooks/await_dispatch_test.go",
+		"internal/webui/handlers/webhooks/webhooks_router_e2e_test.go",
 	} {
 		if _, statErr := os.Stat(filepath.Join(root, filepath.FromSlash(relative))); !os.IsNotExist(statErr) {
 			t.Errorf("retired compatibility test implementation %s returned (stat error: %v)", relative, statErr)
@@ -985,11 +1023,8 @@ func TestRetiredSourceCompatibilityAPIsCannotReturn(t *testing.T) {
 		},
 		"internal/webui/handlers/webhooks/module.go":        {"NewModule": {}},
 		"internal/webui/handlers/triggerbindings/module.go": {"NewModule": {}},
-		"internal/infra/workflowdistribution/authoring/builtin_authoring.go": {
-			"EnsureBuiltinWorkflowAuthored": {}, "EnsureBoundPromptAgentWorkflowsAuthored": {},
-		},
-		"internal/driver/stale_task_sweeper.go":       {"DefaultStaleTaskRunMaxAge": {}},
-		"internal/webui/storeadapter/storeadapter.go": {"DefaultWorkspaceKey": {}},
+		"internal/driver/stale_task_sweeper.go":             {"DefaultStaleTaskRunMaxAge": {}},
+		"internal/webui/storeadapter/storeadapter.go":       {"DefaultWorkspaceKey": {}},
 	}
 	for relative, forbidden := range files {
 		parsed, parseErr := parser.ParseFile(
@@ -1016,6 +1051,43 @@ func TestRetiredSourceCompatibilityAPIsCannotReturn(t *testing.T) {
 						}
 					}
 				}
+			}
+		}
+	}
+}
+
+func TestRetiredCompatibilitySurfacesCannotReturn(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for relative, forbidden := range map[string][]string{
+		"internal/app/serve/execution_task_run_recovery.go": {
+			"LegacyDriverRuns", "AllowLegacyStoreAdapters", "executionTaskRunLegacyRecoveryAdapter",
+		},
+		"internal/app/serve/execution.go":                                     {"LegacyDriverRuns:"},
+		"internal/driver/task_worker.go":                                      {"legacyTaskRunFromExecution"},
+		"internal/driver/task_worktree_resolver.go":                           {"repoBasename"},
+		"internal/domain/control_plane.go":                                    {"AgentSessionKindOrchestration"},
+		"internal/webui/app/server.go":                                        {"wsExistsFn"},
+		"internal/webui/sessioncoord/execution_projection.go":                 {"legacyAgentSessionTaskRunID"},
+		"internal/modules/automation/admission.go":                            {"deliveryDispatchLegacyKeyAccepted", "taskReadyExhaustedRecoverySuffix"},
+		"internal/infra/automationruntime/issue_journal_bridge_task_ready.go": {"snapshotSourceRepo"},
+		"internal/store/platform_store.go": {
+			"TriggerRouteDispatcher", "TriggerRouteDispatch", "TriggerRouteDelivery", "PrimaryRun *domain.DriverRun",
+		},
+		"internal/infra/memstore/platform_trigger.go": {
+			"triggerRouteStore", "DispatchTriggerRouteV2", "legacy := exact", "runID(supplied",
+		},
+		"internal/infra/fleetdb/platform_trigger.go": {"triggerRouteStore", "DispatchTriggerRouteV2"},
+	} {
+		content, readErr := os.ReadFile(filepath.Join(root, filepath.FromSlash(relative)))
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		for _, fragment := range forbidden {
+			if strings.Contains(string(content), fragment) {
+				t.Errorf("retired Execution recovery Store fallback %q returned in %s", fragment, relative)
 			}
 		}
 	}

@@ -227,7 +227,6 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 		PTYMultiMgr: app.ptyMgr,
 		FleetReg:    app.fleetRegistry,
 		FleetURL:    config.FleetClientURL,
-		FleetWS:     config.FleetClientWorkspace,
 		FleetKey:    config.FleetClientAPIKey,
 		FleetActor:  config.FleetClientActor,
 		FleetMode:   config.FleetMode,
@@ -327,11 +326,6 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 		}
 		return middleware.WorkspaceRef{}, false
 	}
-	app.wsExistsFn = func(id string) bool {
-		_, ok := app.wsResolveFn(context.Background(), id)
-		return ok
-	}
-
 	// Initialize workspace service layer. FleetDB Store is the authoritative
 	// workspace source in both local and distributed modes.
 	var workspaceAgents workspacecoord.WorkspaceAgentDirectory

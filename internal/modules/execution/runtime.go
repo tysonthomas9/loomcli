@@ -16,9 +16,8 @@ const (
 	OutboxDeliveryComponentID     platformruntime.ComponentID = "execution-outbox-delivery"
 )
 
-// RuntimePass is the compatibility seam used while the legacy driver package
-// remains through Phase 6. A pass is bounded; Platform Runtime owns repetition,
-// cancellation, backoff, and health.
+// RuntimePass is Execution's bounded unit of scheduled work. Platform Runtime
+// owns repetition, cancellation, backoff, and health.
 type RuntimePass interface {
 	RunOnce(context.Context) error
 }

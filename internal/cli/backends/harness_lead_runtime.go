@@ -7,7 +7,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/tysonthomas9/loomcli/internal/infra/interactionchat"
 	leadcontrol "github.com/tysonthomas9/loomcli/internal/infra/interactionlead"
 )
 
@@ -27,13 +26,6 @@ func leadControlDisabled() bool {
 
 // runHarnessLead is a test seam over the harness lead runtime.
 var runHarnessLead = leadcontrol.RunHarnessLeadRuntime
-
-// LegacyInteractionChatDependencies adapts the remaining provider-specific
-// lead runtime at the CLI backend composition edge. Interaction receives only
-// operations and never receives the composite Store.
-func LegacyInteractionChatDependencies(st leadcontrol.RuntimeStore) interactionchat.LeadRuntimeDependencies {
-	return leadcontrol.LegacyInteractionChatDependencies(st)
-}
 
 // RunControlledLeadRuntime launches the controlled lead runtime for the given
 // backend: the Codex app-server runtime for codex, the harness-wrapper PTY

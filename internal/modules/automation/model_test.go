@@ -218,7 +218,7 @@ func TestEventFingerprintExcludesExecutionOwnerPrecondition(t *testing.T) {
 		Event: &Event{
 			WorkspaceKey: "ws", SourceKind: SourceKindInternal, SourceEventID: "emission-1",
 			EventType: "issue.created", RouteKey: "internal.issue.created", Origin: EventOriginWorkflow,
-			EmittingRunID: "run-1", IdempotencyKey: "internal:ws:emission-1",
+			EmittingRunID: "run-1", IdempotencyKey: InternalEventIdempotencyKey("ws", "emission-1"),
 		},
 		ExecutionNodeID: "node-a", ExecutionLeaseID: "lease-a", ExecutionFence: 7,
 		Payload: []byte(`{"issue":"LOOM-1"}`),

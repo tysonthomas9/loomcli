@@ -27,7 +27,7 @@ type Runner interface {
 
 // RunRequest is the Driver-owned input to one workflow runtime invocation.
 type RunRequest struct {
-	Run          *domain.DriverRun
+	Run          *execution.DriverRun
 	Version      *workflowcatalog.DriverVersion
 	BundleRoot   string
 	WorkflowPath string
@@ -45,7 +45,7 @@ type RunRequest struct {
 
 // RunResult is the Driver-owned terminal result of one workflow invocation.
 type RunResult struct {
-	Status     domain.DriverRunStatus
+	Status     execution.DriverRunStatus
 	Summary    string
 	ErrorClass string
 	Output     map[string]string
@@ -135,9 +135,9 @@ type Executor struct {
 }
 
 type ExecutionResult struct {
-	Run     *domain.DriverRun
-	Claimed *domain.DriverRun
-	Final   *domain.DriverRun
+	Run     *execution.DriverRun
+	Claimed *execution.DriverRun
+	Final   *execution.DriverRun
 	Skipped bool
 }
 
@@ -197,18 +197,18 @@ func (e *Executor) RunOnce(ctx context.Context) (*ExecutionResult, error) {
 	return result, nil
 }
 
-func (e *Executor) runClaimed(ctx context.Context, workDir string, claimed *domain.DriverRun) RunResult {
+func (e *Executor) runClaimed(ctx context.Context, workDir string, claimed *execution.DriverRun) RunResult {
 	runner := e.Runner
 	if runner == nil {
 		runner = NodeRunner{APIBaseURL: e.APIBaseURL, Launcher: e.SandboxLauncher}
 	}
 	req, err := loadRunRequest(ctx, workDir, claimed, e.Store)
 	if err != nil {
-		return RunResult{Status: domain.DriverRunFailed, Summary: err.Error(), ErrorClass: "bundle_verification"}
+		return RunResult{Status: execution.DriverRunFailed, Summary: err.Error(), ErrorClass: "bundle_verification"}
 	}
 	runToken, err := e.mintRunToken(claimed)
 	if err != nil {
-		return RunResult{Status: domain.DriverRunFailed, Summary: err.Error(), ErrorClass: "driver_auth"}
+		return RunResult{Status: execution.DriverRunFailed, Summary: err.Error(), ErrorClass: "driver_auth"}
 	}
 	req.RunToken = runToken
 	runResult, runErr := runner.Run(ctx, req)
@@ -216,9 +216,9 @@ func (e *Executor) runClaimed(ctx context.Context, workDir string, claimed *doma
 		// The runner context was cancelled under it (cooperative cancel
 		// request or executor shutdown): the run is cancelled, not failed —
 		// mirroring NodeRunner's own ctx-cancelled mapping.
-		runResult = RunResult{Status: domain.DriverRunCancelled, Summary: "driver run cancelled: " + runErr.Error(), ErrorClass: "driver_cancelled"}
+		runResult = RunResult{Status: execution.DriverRunCancelled, Summary: "driver run cancelled: " + runErr.Error(), ErrorClass: "driver_cancelled"}
 	} else if runErr != nil {
-		runResult = RunResult{Status: domain.DriverRunFailed, Summary: runErr.Error(), ErrorClass: "driver_runtime"}
+		runResult = RunResult{Status: execution.DriverRunFailed, Summary: runErr.Error(), ErrorClass: "driver_runtime"}
 	} else {
 		runResult = requireExplicitTerminalRunResult(runResult)
 	}
@@ -233,7 +233,7 @@ func (e *Executor) runClaimed(ctx context.Context, workDir string, claimed *doma
 // is the hard run-duration cap, not the lease window. Token issuance is
 // mandatory: a claimed run fails before workflow launch when signing is not
 // available.
-func (e *Executor) mintRunToken(claimed *domain.DriverRun) (string, error) {
+func (e *Executor) mintRunToken(claimed *execution.DriverRun) (string, error) {
 	if len(e.RunTokenKey) == 0 || claimed == nil {
 		return "", fmt.Errorf("driver run-token signing key and claimed run are required: %w", domain.ErrInvalid)
 	}
@@ -244,9 +244,9 @@ func (e *Executor) mintRunToken(claimed *domain.DriverRun) (string, error) {
 	token, err := MintRunToken(RunTokenClaims{
 		WorkspaceKey: claimed.WorkspaceKey,
 		RunID:        claimed.RunID,
-		NodeID:       claimed.NodeID,
-		LeaseID:      claimed.LeaseID,
-		FencingToken: claimed.FencingToken,
+		NodeID:       claimed.Owner.NodeID,
+		LeaseID:      claimed.Owner.LeaseID,
+		FencingToken: claimed.Owner.FencingToken,
 	}, e.RunTokenKey, ttl)
 	if err != nil {
 		return "", fmt.Errorf("mint driver run token for %s: %w", claimed.RunID, err)
@@ -304,7 +304,7 @@ func (e *Executor) recoverStaleWorkspace(ctx context.Context, ws string, recover
 		return nil, err
 	}
 	for _, runID := range result.RecoveredRunIDs {
-		run, getErr := e.Store.DriverRuns().Get(ctx, ws, runID)
+		run, getErr := e.Execution.GetDriverRun(ctx, ws, runID)
 		if getErr != nil {
 			slog.WarnContext(ctx, "load recovered driver run for run.finished emission failed",
 				"workspace", ws, "runID", runID, "error", getErr)
@@ -315,12 +315,12 @@ func (e *Executor) recoverStaleWorkspace(ctx context.Context, ws string, recover
 	return result, nil
 }
 
-func (e *Executor) nextQueuedRun(ctx context.Context) (*domain.DriverRun, error) {
+func (e *Executor) nextQueuedRun(ctx context.Context) (*execution.DriverRun, error) {
 	if strings.TrimSpace(e.RunID) != "" {
-		return queuedRunByID(ctx, e.Store, e.WorkspaceKey, e.RunID)
+		return queuedRunByID(ctx, e.Execution, e.WorkspaceKey, e.RunID)
 	}
 	if e.WorkspaceKey != "" {
-		return nextQueuedRunInWorkspace(ctx, e.Store, e.WorkspaceKey)
+		return nextQueuedRunInWorkspace(ctx, e.Execution, e.WorkspaceKey)
 	}
 	workspaces, err := e.Store.Workspaces().List(ctx)
 	if err != nil {
@@ -330,7 +330,7 @@ func (e *Executor) nextQueuedRun(ctx context.Context) (*domain.DriverRun, error)
 		if ws == nil {
 			continue
 		}
-		run, err := nextQueuedRunInWorkspace(ctx, e.Store, ws.Key)
+		run, err := nextQueuedRunInWorkspace(ctx, e.Execution, ws.Key)
 		if err == nil {
 			return run, nil
 		}
@@ -341,22 +341,22 @@ func (e *Executor) nextQueuedRun(ctx context.Context) (*domain.DriverRun, error)
 	return nil, ErrNoQueuedRun
 }
 
-func queuedRunByID(ctx context.Context, s executorStore, ws, runID string) (*domain.DriverRun, error) {
+func queuedRunByID(ctx context.Context, runs execution.DriverRunAPI, ws, runID string) (*execution.DriverRun, error) {
 	if strings.TrimSpace(ws) == "" {
 		return nil, fmt.Errorf("workspace key required for run %q: %w", runID, domain.ErrInvalid)
 	}
-	run, err := s.DriverRuns().Get(ctx, ws, runID)
+	run, err := runs.GetDriverRun(ctx, ws, runID)
 	if err != nil {
 		return nil, fmt.Errorf("get queued driver run: %w", err)
 	}
-	if run.Status != domain.DriverRunQueued {
+	if run.Status != execution.DriverRunQueued {
 		return nil, ErrNoQueuedRun
 	}
 	return run, nil
 }
 
-func nextQueuedRunInWorkspace(ctx context.Context, s executorStore, ws string) (*domain.DriverRun, error) {
-	runs, err := s.DriverRuns().List(ctx, ws, store.DriverRunFilter{Status: domain.DriverRunQueued, Limit: 1})
+func nextQueuedRunInWorkspace(ctx context.Context, api execution.DriverRunAPI, ws string) (*execution.DriverRun, error) {
+	runs, err := api.ListDriverRuns(ctx, execution.DriverRunQuery{WorkspaceKey: ws, Status: execution.DriverRunQueued, Limit: 1})
 	if err != nil {
 		return nil, fmt.Errorf("list queued driver runs: %w", err)
 	}
@@ -374,17 +374,17 @@ func nextQueuedRunInWorkspace(ctx context.Context, s executorStore, ws string) (
 // runner that reports suspended while the run is still running under OUR
 // lease lied (no await actually suspended it); it is finished failed so the
 // slot does not leak to the stale sweeper.
-func (e *Executor) settleClaimed(ctx context.Context, claimed *domain.DriverRun, leaseToken string, result RunResult) (*domain.DriverRun, error) {
-	if result.Status != domain.DriverRunSuspendedAwaitingEvent {
+func (e *Executor) settleClaimed(ctx context.Context, claimed *execution.DriverRun, leaseToken string, result RunResult) (*execution.DriverRun, error) {
+	if result.Status != execution.DriverRunSuspendedAwait {
 		return e.finish(ctx, claimed, leaseToken, result)
 	}
-	run, err := e.Store.DriverRuns().Get(ctx, claimed.WorkspaceKey, claimed.RunID)
+	run, err := e.Execution.GetDriverRun(ctx, claimed.WorkspaceKey, claimed.RunID)
 	if err != nil {
 		return nil, fmt.Errorf("read suspended driver run: %w", err)
 	}
-	if run.Status == domain.DriverRunRunning && run.NodeID == claimed.NodeID && run.LeaseID == claimed.LeaseID {
+	if run.Status == execution.DriverRunRunning && run.Owner.NodeID == claimed.Owner.NodeID && run.Owner.LeaseID == claimed.Owner.LeaseID {
 		return e.finish(ctx, claimed, leaseToken, RunResult{
-			Status:     domain.DriverRunFailed,
+			Status:     execution.DriverRunFailed,
 			Summary:    "driver reported suspended but no await suspended the run",
 			ErrorClass: "invalid_driver_result",
 			Output:     result.Output,
@@ -393,7 +393,7 @@ func (e *Executor) settleClaimed(ctx context.Context, claimed *domain.DriverRun,
 	return run, nil
 }
 
-func (e *Executor) finish(ctx context.Context, claimed *domain.DriverRun, leaseToken string, result RunResult) (*domain.DriverRun, error) {
+func (e *Executor) finish(ctx context.Context, claimed *execution.DriverRun, leaseToken string, result RunResult) (*execution.DriverRun, error) {
 	if strings.TrimSpace(result.Summary) == "" {
 		result.Summary = string(result.Status)
 	}
@@ -419,7 +419,7 @@ func (e *Executor) finish(ctx context.Context, claimed *domain.DriverRun, leaseT
 	return final, nil
 }
 
-func (e *Executor) publishRunFinished(ctx context.Context, run *domain.DriverRun) {
+func (e *Executor) publishRunFinished(ctx context.Context, run *execution.DriverRun) {
 	awaitNotifier := e.executionRunOutcomeAwaitNotifier()
 	emitRunFinishedEventWithExecution(
 		ctx, e.Store, e.RunOutcomes, run, e.RunOutcomeQueue, e.TerminalWorkRecoveryQueue, e.Execution,
@@ -429,7 +429,7 @@ func (e *Executor) publishRunFinished(ctx context.Context, run *domain.DriverRun
 
 func (e *Executor) cascadeChildDriverRuns(
 	ctx context.Context,
-	claimed, final *domain.DriverRun,
+	claimed, final *execution.DriverRun,
 	leaseToken string,
 ) error {
 	if e == nil || e.Execution == nil || e.ExecutionAuthorities == nil || claimed == nil || final == nil {
@@ -441,10 +441,10 @@ func (e *Executor) cascadeChildDriverRuns(
 	owner := execution.Owner{
 		ResourceKind: execution.ResourceDriverRun,
 		ResourceID:   claimed.RunID,
-		NodeID:       claimed.NodeID,
-		LeaseID:      claimed.LeaseID,
+		NodeID:       claimed.Owner.NodeID,
+		LeaseID:      claimed.Owner.LeaseID,
 		LeaseToken:   leaseToken,
-		FencingToken: claimed.FencingToken,
+		FencingToken: claimed.Owner.FencingToken,
 	}
 	auth, err := e.ExecutionAuthorities.ResolveDriverRunAuthority(
 		ctx,
@@ -459,7 +459,7 @@ func (e *Executor) cascadeChildDriverRuns(
 	if final.FinishedAt != nil && !final.FinishedAt.IsZero() {
 		cascadedAt = final.FinishedAt.UTC()
 	}
-	status := execution.DriverRunStatus(final.Status)
+	status := final.Status
 	_, err = e.Execution.CascadeChildDriverRuns(ctx, auth, execution.CascadeChildDriverRunsCommand{
 		WorkspaceKey: final.WorkspaceKey,
 		RequestID:    execution.CascadeChildDriverRunsRequestID(final.RunID, status),
@@ -505,16 +505,16 @@ func (e *Executor) executionRunOutcomeAwaitNotifier() RunOutcomeAwaitNotifier {
 // clean suspended report. A run already resolved and re-queued is the same
 // accepted register->suspend window. Anything else (zombie lease, stale
 // recovery) stays an error.
-func (e *Executor) settleDisownedFinish(ctx context.Context, claimed *domain.DriverRun, finishErr error) (*domain.DriverRun, bool) {
+func (e *Executor) settleDisownedFinish(ctx context.Context, claimed *execution.DriverRun, finishErr error) (*execution.DriverRun, bool) {
 	if !errors.Is(finishErr, domain.ErrNotOwner) {
 		return nil, false
 	}
-	run, err := e.Store.DriverRuns().Get(ctx, claimed.WorkspaceKey, claimed.RunID)
+	run, err := e.Execution.GetDriverRun(ctx, claimed.WorkspaceKey, claimed.RunID)
 	if err != nil {
 		return nil, false
 	}
-	suspended := run.Status == domain.DriverRunSuspendedAwaitingEvent
-	requeued := run.Status == domain.DriverRunQueued && run.ResumeSourceEventID != ""
+	suspended := run.Status == execution.DriverRunSuspendedAwait
+	requeued := run.Status == execution.DriverRunQueued && run.ResumeSourceEventID != ""
 	if !suspended && !requeued {
 		return nil, false
 	}
@@ -658,7 +658,7 @@ func (e *Executor) nodeTTL() time.Duration {
 	return ttl
 }
 
-func (e *Executor) claimDriverRun(ctx context.Context, queued *domain.DriverRun, nodeID, leaseID, leaseToken string) (*domain.DriverRun, error) {
+func (e *Executor) claimDriverRun(ctx context.Context, queued *execution.DriverRun, nodeID, leaseID, leaseToken string) (*execution.DriverRun, error) {
 	if e.Execution == nil {
 		return nil, execution.ErrUnavailable
 	}
@@ -678,17 +678,17 @@ func (e *Executor) claimDriverRun(ctx context.Context, queued *domain.DriverRun,
 	if err != nil {
 		return nil, err
 	}
-	return LegacyDriverRunSnapshot(run)
+	return run, nil
 }
 
-func (e *Executor) heartbeatDriverRun(ctx context.Context, claimed *domain.DriverRun, leaseToken string) (*domain.DriverRun, error) {
+func (e *Executor) heartbeatDriverRun(ctx context.Context, claimed *execution.DriverRun, leaseToken string) (*execution.DriverRun, error) {
 	if e.Execution == nil {
 		return nil, execution.ErrUnavailable
 	}
 	if e.ExecutionAuthorities == nil {
 		return nil, fmt.Errorf("execution DriverRun authority resolver required: %w", domain.ErrInvalid)
 	}
-	owner := executionOwnerFromLegacyDriverRun(claimed, leaseToken)
+	owner := executionOwnerFromDriverRun(claimed, leaseToken)
 	auth, err := e.ExecutionAuthorities.ResolveDriverRunAuthority(ctx, claimed.WorkspaceKey, execution.ActionHeartbeatDriverRun, owner)
 	if err != nil {
 		return nil, err
@@ -699,31 +699,31 @@ func (e *Executor) heartbeatDriverRun(ctx context.Context, claimed *domain.Drive
 	if err != nil {
 		return nil, err
 	}
-	return LegacyDriverRunSnapshot(run)
+	return run, nil
 }
 
-func (e *Executor) finalizeDriverRun(ctx context.Context, claimed *domain.DriverRun, leaseToken string, result RunResult) (*domain.DriverRun, error) {
+func (e *Executor) finalizeDriverRun(ctx context.Context, claimed *execution.DriverRun, leaseToken string, result RunResult) (*execution.DriverRun, error) {
 	if e.Execution == nil {
 		return nil, execution.ErrUnavailable
 	}
 	if e.ExecutionAuthorities == nil {
 		return nil, fmt.Errorf("execution DriverRun authority resolver required: %w", domain.ErrInvalid)
 	}
-	owner := executionOwnerFromLegacyDriverRun(claimed, leaseToken)
+	owner := executionOwnerFromDriverRun(claimed, leaseToken)
 	auth, err := e.ExecutionAuthorities.ResolveDriverRunAuthority(ctx, claimed.WorkspaceKey, execution.ActionFinalizeDriverRun, owner)
 	if err != nil {
 		return nil, err
 	}
 	run, err := e.Execution.FinalizeDriverRun(ctx, auth, execution.FinalizeDriverRunCommand{
 		WorkspaceKey: claimed.WorkspaceKey,
-		RequestID:    fmt.Sprintf("driver-run-finalize:%s:%d", claimed.RunID, claimed.FencingToken),
-		Owner:        owner, Status: execution.DriverRunStatus(result.Status), Summary: result.Summary,
+		RequestID:    fmt.Sprintf("driver-run-finalize:%s:%d", claimed.RunID, claimed.Owner.FencingToken),
+		Owner:        owner, Status: result.Status, Summary: result.Summary,
 		ErrorClass: result.ErrorClass, Output: cloneStringMap(result.Output), FinishedAt: time.Now().UTC(),
 	})
 	if err != nil {
 		return nil, err
 	}
-	return LegacyDriverRunSnapshot(run)
+	return run, nil
 }
 
 func (e *Executor) recoverDriverRuns(ctx context.Context, workspace string, recover store.StaleDriverRunRecovery) (*store.StaleDriverRunRecoveryResult, error) {
@@ -765,34 +765,13 @@ func (e *Executor) recoverDriverRuns(ctx context.Context, workspace string, reco
 	}, nil
 }
 
-func executionOwnerFromLegacyDriverRun(run *domain.DriverRun, leaseToken string) execution.Owner {
+func executionOwnerFromDriverRun(run *execution.DriverRun, leaseToken string) execution.Owner {
 	if run == nil {
 		return execution.Owner{}
 	}
-	return execution.Owner{
-		ResourceKind: execution.ResourceDriverRun, ResourceID: run.RunID,
-		NodeID: run.NodeID, LeaseID: run.LeaseID, LeaseToken: leaseToken, FencingToken: run.FencingToken,
-	}
-}
-
-// LegacyDriverRunSnapshot projects Execution's public snapshot onto the
-// shipped DriverRun transport/read model while legacy handlers migrate.
-func LegacyDriverRunSnapshot(run *execution.DriverRun) (*domain.DriverRun, error) {
-	if run == nil {
-		return nil, fmt.Errorf("execution returned no DriverRun: %w", domain.ErrInvalid)
-	}
-	return &domain.DriverRun{
-		WorkspaceKey: run.WorkspaceKey, RunID: run.RunID, DriverID: run.DriverID, DriverVersionID: run.DriverVersionID,
-		Entrypoint: run.Entrypoint, SourceKind: run.SourceKind, SourceRef: run.SourceRef, EpicID: run.EpicID,
-		ParentRunID: run.ParentRunID, TriggerBindingID: run.TriggerBindingID, AgentServiceID: run.AgentServiceID,
-		SubjectKey: run.SubjectKey, Status: domain.DriverRunStatus(run.Status), NodeID: run.Owner.NodeID,
-		LeaseID: run.Owner.LeaseID, FencingToken: run.Owner.FencingToken, IdempotencyKey: run.IdempotencyKey,
-		Payload: append([]byte(nil), run.Payload...), Output: cloneStringMap(run.Output), Summary: run.Summary,
-		ErrorClass: run.ErrorClass, StartedAt: run.StartedAt, LastHeartbeat: run.LastHeartbeat, FinishedAt: run.FinishedAt,
-		AwaitInstanceKey: run.AwaitInstanceKey, SuspendedAt: run.SuspendedAt,
-		CancelRequestedAt: run.CancelRequestedAt, CancelRequestedReason: run.CancelRequestedReason,
-		ResumeSourceEventID: run.ResumeSourceEventID, CreatedAt: run.CreatedAt, UpdatedAt: run.UpdatedAt,
-	}, nil
+	owner := run.Owner
+	owner.LeaseToken = leaseToken
+	return owner
 }
 
 func heartbeatExecutorNode(ctx context.Context, executor *Executor, ws, nodeID string, ttl time.Duration) {
@@ -826,7 +805,7 @@ func heartbeatExecutorNode(ctx context.Context, executor *Executor, ws, nodeID s
 	}
 }
 
-func loadRunRequest(ctx context.Context, workDir string, run *domain.DriverRun, s executorStore) (RunRequest, error) {
+func loadRunRequest(ctx context.Context, workDir string, run *execution.DriverRun, s executorStore) (RunRequest, error) {
 	version, err := s.DriverVersions().Get(ctx, run.WorkspaceKey, run.DriverVersionID)
 	if err != nil {
 		return RunRequest{}, fmt.Errorf("load pinned driver version: %w", err)

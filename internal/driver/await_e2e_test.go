@@ -172,11 +172,17 @@ func (api awaitE2EDriverRunAPI) StartChildDriverRun(
 	_ authority.ExecutionAuthority,
 	command execution.StartChildDriverRunCommand,
 ) (*execution.DriverRun, error) {
-	run, err := driver.StartChildWorkflow(ctx, api.store, driver.StartChildWorkflowOptions{
-		WorkspaceKey: command.WorkspaceKey, ParentRunID: command.Owner.ResourceID,
-		WorkflowName: command.DriverID, Input: command.Payload, IdempotencyKey: command.ChildKey,
-		MaxDepth: command.MaxDepth,
+	command.ChildRunID = execution.ChildDriverRunID(command.Owner.ResourceID, command.ChildKey)
+	run, err := api.store.DriverRuns().Create(ctx, store.DriverRunCreate{
+		WorkspaceKey: command.WorkspaceKey, RunID: command.ChildRunID,
+		DriverID: command.DriverID, DriverVersionID: command.DriverVersionID,
+		Entrypoint: driver.EntrypointRun, SourceKind: driver.ChildRunSourceKind,
+		SourceRef: command.Owner.ResourceID, ParentRunID: command.Owner.ResourceID,
+		IdempotencyKey: command.RequestID, Payload: append(json.RawMessage(nil), command.Payload...),
 	})
+	if errors.Is(err, domain.ErrAlreadyExists) {
+		run, err = api.store.DriverRuns().Get(ctx, command.WorkspaceKey, command.ChildRunID)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -241,13 +247,13 @@ func newAwaitFlows(t *testing.T, st store.Store, ws string) *awaitFlows {
 	}
 	root := t.TempDir()
 	writeAwaitFlowsBundle(t, root)
-	registered, err := driver.RegisterFlueDriver(ctx, st, driver.RegisterFlueOptions{
+	registered, err := driver.SeedFlueDriverFixture(ctx, st, driver.RegisterFlueOptions{
 		WorkspaceKey: ws, WorkDir: root, DistPath: "dist", DriverName: "await-flows",
 		WorkflowName: "await-flows", SourceRef: "workflows/await-flows.ts",
 		CreatedBy: "aw12", Activate: true,
 	})
 	if err != nil {
-		t.Fatalf("RegisterFlueDriver: %v", err)
+		t.Fatalf("SeedFlueDriverFixture: %v", err)
 	}
 	runTokenKey := bytes.Repeat([]byte{0x5a}, 32)
 	server, executionCapability := newAwaitFlowsServer(t, st, runTokenKey)
@@ -262,6 +268,7 @@ func newAwaitFlows(t *testing.T, st store.Store, ws string) *awaitFlows {
 // verified session identity (the production auth middleware's job).
 func newAwaitFlowsServer(t *testing.T, st store.Store, runTokenKey []byte) (*httptest.Server, *appserve.ExecutionCapability) {
 	t.Helper()
+	mutations := testutil.TaskRunMutationAdapter{TaskRuns: st.TaskRuns()}
 	repairs, ok := st.DriverSteps().(store.TerminalDriverStepRepairStore)
 	if !ok {
 		if client, fleet := st.(*fleetdb.Client); fleet {
@@ -278,7 +285,8 @@ func newAwaitFlowsServer(t *testing.T, st store.Store, runTokenKey []byte) (*htt
 		AtomicTaskRunRequests: awaitE2EClaimPort{}, AtomicTaskRunClaims: awaitE2EClaimPort{},
 		AtomicTaskRunWorkItemDesign: awaitE2EClaimPort{},
 		AtomicTaskRunRequeues:       awaitE2EClaimPort{}, AtomicTaskRunRetryExhaustion: awaitE2EClaimPort{},
-		AllowLegacyStoreAdapters: true,
+		StaleChildTaskRunRecovery: testutil.StaticTaskRunRecoveryPort{},
+		TaskRunHeartbeats:         mutations, TaskRunLogs: mutations, TaskRunFinalizer: mutations,
 	})
 	if err != nil {
 		t.Fatalf("compose await E2E Execution: %v", err)
@@ -359,11 +367,17 @@ func (r opRunner) Run(_ context.Context, req driver.RunRequest) (driver.RunResul
 // createRun creates a queued run of the registered workflow driver.
 func (h *awaitFlows) createRun(t *testing.T, runID string) *domain.DriverRun {
 	t.Helper()
-	run, err := driver.CreateDriverRun(h.ctx, h.st, driver.RunOptions{
-		WorkspaceKey: h.ws, DriverID: h.driverID, RunID: runID,
+	catalogDriver, err := h.st.Drivers().Get(h.ctx, h.ws, h.driverID)
+	if err != nil {
+		t.Fatalf("get workflow driver %s: %v", h.driverID, err)
+	}
+	run, err := h.st.DriverRuns().Create(h.ctx, store.DriverRunCreate{
+		WorkspaceKey: h.ws, RunID: runID, DriverID: h.driverID,
+		DriverVersionID: catalogDriver.ActiveVersionID, Entrypoint: driver.EntrypointRun,
+		SourceKind: "test", SourceRef: "await-flow-fixture", Payload: json.RawMessage(`{}`),
 	})
 	if err != nil {
-		t.Fatalf("CreateDriverRun %s: %v", runID, err)
+		t.Fatalf("create driver-run fixture %s: %v", runID, err)
 	}
 	return run
 }
@@ -408,7 +422,7 @@ func (h *awaitFlows) requireRun(t *testing.T, runID string, status domain.Driver
 // --- HTTP wire helpers -----------------------------------------------------
 
 // driverOp POSTs one driver op with the claimed run's verified identity.
-func (h *awaitFlows) driverOp(t *testing.T, run *domain.DriverRun, runToken, op string, body map[string]any) (int, []byte) {
+func (h *awaitFlows) driverOp(t *testing.T, run *execution.DriverRun, runToken, op string, body map[string]any) (int, []byte) {
 	t.Helper()
 	encoded, err := json.Marshal(body)
 	if err != nil {
@@ -453,7 +467,7 @@ type awaitOpResponse struct {
 }
 
 // awaitOp runs one events/await turn for the claimed run.
-func (h *awaitFlows) awaitOp(t *testing.T, run *domain.DriverRun, runToken, pattern string, actors []string, timeoutMs int64, index int) awaitOpResponse {
+func (h *awaitFlows) awaitOp(t *testing.T, run *execution.DriverRun, runToken, pattern string, actors []string, timeoutMs int64, index int) awaitOpResponse {
 	t.Helper()
 	body := map[string]any{"pattern": pattern, "timeoutMs": timeoutMs, "awaitIndex": index}
 	if len(actors) > 0 {
@@ -471,7 +485,7 @@ func (h *awaitFlows) awaitOp(t *testing.T, run *domain.DriverRun, runToken, patt
 }
 
 // startChild runs one workflows/start for the claimed run.
-func (h *awaitFlows) startChild(t *testing.T, run *domain.DriverRun, runToken string, startIndex int) string {
+func (h *awaitFlows) startChild(t *testing.T, run *execution.DriverRun, runToken string, startIndex int) string {
 	t.Helper()
 	status, raw := h.driverOp(t, run, runToken, "workflows/start", map[string]any{
 		"workflowName": h.driverID, "input": map[string]any{"n": 1}, "startIndex": startIndex,
@@ -489,7 +503,7 @@ func (h *awaitFlows) startChild(t *testing.T, run *domain.DriverRun, runToken st
 }
 
 // awaitChild runs one workflows/await for the claimed run.
-func (h *awaitFlows) awaitChild(t *testing.T, run *domain.DriverRun, runToken, childRunID string, index int) awaitOpResponse {
+func (h *awaitFlows) awaitChild(t *testing.T, run *execution.DriverRun, runToken, childRunID string, index int) awaitOpResponse {
 	t.Helper()
 	status, raw := h.driverOp(t, run, runToken, "workflows/await", map[string]any{
 		"childRunId": childRunID, "timeoutMs": awaitE2ETimeoutMs, "awaitIndex": index,
@@ -584,11 +598,11 @@ func requireJournalAppender(t *testing.T, h *awaitFlows) {
 // suspendedResult is the runner-side suspension acknowledgment after an
 // await op suspended the run server-side.
 func suspendedResult() driver.RunResult {
-	return driver.RunResult{Status: domain.DriverRunSuspendedAwaitingEvent, Summary: "workflow suspended awaiting event"}
+	return driver.RunResult{Status: execution.DriverRunSuspendedAwait, Summary: "workflow suspended awaiting event"}
 }
 
 func failedResult(reason string) driver.RunResult {
-	return driver.RunResult{Status: domain.DriverRunFailed, Summary: reason, ErrorClass: "e2e_unexpected"}
+	return driver.RunResult{Status: execution.DriverRunFailed, Summary: reason, ErrorClass: "e2e_unexpected"}
 }
 
 // --- suite entry points ----------------------------------------------------
@@ -681,9 +695,9 @@ func (h *awaitFlows) approvalGateRunner(t *testing.T, pattern string, approvers 
 				json.Unmarshal(resp.Event.Payload, &payload) == nil && payload.Decision != "" {
 				summary += " decision=" + payload.Decision
 			}
-			return driver.RunResult{Status: domain.DriverRunCompleted, Summary: summary}
+			return driver.RunResult{Status: execution.DriverRunCompleted, Summary: summary}
 		case string(domain.AwaitTimedOut):
-			return driver.RunResult{Status: domain.DriverRunNeedsReview, Summary: "approval timed out", ErrorClass: "approval_timeout"}
+			return driver.RunResult{Status: execution.DriverRunNeedsReview, Summary: "approval timed out", ErrorClass: "approval_timeout"}
 		default:
 			return failedResult("unexpected await status " + resp.Status)
 		}
@@ -698,7 +712,7 @@ func testApprovalGateFlow(t *testing.T, h *awaitFlows) {
 
 	// Turn 1 on executor node-1: the await suspends and the run suspends.
 	res1 := h.runExecutorOnce(t, "node-1", "run-gate", runner)
-	if res1.Final.Status != domain.DriverRunSuspendedAwaitingEvent {
+	if res1.Final.Status != execution.DriverRunSuspendedAwait {
 		t.Fatalf("first pass = %+v, want suspended", res1.Final)
 	}
 
@@ -756,13 +770,13 @@ func testApprovalGateFlow(t *testing.T, h *awaitFlows) {
 	// A SECOND executor instance claims the resumed run; the replayed await
 	// returns the recorded decision inline and the run completes.
 	res2 := h.runExecutorOnce(t, "node-2", "run-gate", runner)
-	if res2.Final.Status != domain.DriverRunCompleted ||
+	if res2.Final.Status != execution.DriverRunCompleted ||
 		!strings.Contains(res2.Final.Summary, "satisfied-by="+eventID) ||
 		!strings.Contains(res2.Final.Summary, "decision=approved") {
 		t.Fatalf("final = %+v, want completed with the approval decision", res2.Final)
 	}
-	if res2.Claimed.NodeID != "node-2" {
-		t.Fatalf("resumed run claimed by %q, want node-2 (second executor)", res2.Claimed.NodeID)
+	if res2.Claimed.Owner.NodeID != "node-2" {
+		t.Fatalf("resumed run claimed by %q, want node-2 (second executor)", res2.Claimed.Owner.NodeID)
 	}
 }
 
@@ -782,7 +796,7 @@ func testApprovalBeforeRegistration(t *testing.T, h *awaitFlows) {
 	runner := h.approvalGateRunner(t, pattern, []string{awaitE2EApprover})
 	h.createRun(t, "run-pre")
 	res := h.runExecutorOnce(t, "node-1", "run-pre", runner)
-	if res.Final.Status != domain.DriverRunCompleted ||
+	if res.Final.Status != execution.DriverRunCompleted ||
 		!strings.Contains(res.Final.Summary, "satisfied-by="+eventID) {
 		t.Fatalf("final = %+v, want completed inline by pre-granted approval %s", res.Final, eventID)
 	}
@@ -822,12 +836,12 @@ func testMultiTurnLoopFlow(t *testing.T, h *awaitFlows) {
 			texts = append(texts, payload.Text)
 		}
 		invocations = append(invocations, texts)
-		return driver.RunResult{Status: domain.DriverRunCompleted, Summary: strings.Join(texts, ",")}
+		return driver.RunResult{Status: execution.DriverRunCompleted, Summary: strings.Join(texts, ",")}
 	}}
 
 	h.createRun(t, "run-loop")
 	res := h.runExecutorOnce(t, "node-a", "run-loop", runner)
-	if res.Final.Status != domain.DriverRunSuspendedAwaitingEvent {
+	if res.Final.Status != execution.DriverRunSuspendedAwait {
 		t.Fatalf("turn 1 pass = %+v, want suspended", res.Final)
 	}
 
@@ -856,9 +870,9 @@ func testMultiTurnLoopFlow(t *testing.T, h *awaitFlows) {
 		}
 		h.requireRun(t, "run-loop", domain.DriverRunQueued, step.eventID)
 		res := h.runExecutorOnce(t, step.node, "run-loop", runner)
-		wantStatus := domain.DriverRunSuspendedAwaitingEvent
+		wantStatus := execution.DriverRunSuspendedAwait
 		if i == len(steps)-1 {
-			wantStatus = domain.DriverRunCompleted
+			wantStatus = execution.DriverRunCompleted
 		}
 		if res.Final.Status != wantStatus {
 			t.Fatalf("pass after %s = %+v, want %s", step.eventID, res.Final, wantStatus)
@@ -907,7 +921,7 @@ func (h *awaitFlows) compositionParentRunner(t *testing.T, childIDs *[]string) d
 			if resp.Child == nil {
 				return failedResult("satisfied workflows/await without child outcome")
 			}
-			return driver.RunResult{Status: domain.DriverRunCompleted,
+			return driver.RunResult{Status: execution.DriverRunCompleted,
 				Summary: "child=" + resp.Child.Status + ":" + resp.Child.Summary}
 		default:
 			return failedResult("unexpected workflows/await status " + resp.Status)
@@ -917,7 +931,7 @@ func (h *awaitFlows) compositionParentRunner(t *testing.T, childIDs *[]string) d
 
 func (h *awaitFlows) childRunner() driver.Runner {
 	return opRunner{fn: func(driver.RunRequest) driver.RunResult {
-		return driver.RunResult{Status: domain.DriverRunCompleted, Summary: "child-done"}
+		return driver.RunResult{Status: execution.DriverRunCompleted, Summary: "child-done"}
 	}}
 }
 
@@ -928,7 +942,7 @@ func testCompositionFlow(t *testing.T, h *awaitFlows) {
 
 	// Parent starts the child and suspends on its run.finished.
 	res1 := h.runExecutorOnce(t, "node-p1", "run-parent", parent)
-	if res1.Final.Status != domain.DriverRunSuspendedAwaitingEvent || len(childIDs) != 1 {
+	if res1.Final.Status != execution.DriverRunSuspendedAwait || len(childIDs) != 1 {
 		t.Fatalf("parent pass 1 = %+v (children %v), want suspended after one start", res1.Final, childIDs)
 	}
 	childID := childIDs[0]
@@ -941,7 +955,7 @@ func testCompositionFlow(t *testing.T, h *awaitFlows) {
 	// parent (no internal binding configured — composition is
 	// binding-independent).
 	resChild := h.runExecutorOnce(t, "node-c1", childID, h.childRunner())
-	if resChild.Final.Status != domain.DriverRunCompleted {
+	if resChild.Final.Status != execution.DriverRunCompleted {
 		t.Fatalf("child final = %+v, want completed", resChild.Final)
 	}
 	finishedEventID := driver.RunFinishedEventID(childID, domain.DriverRunCompleted)
@@ -950,7 +964,7 @@ func testCompositionFlow(t *testing.T, h *awaitFlows) {
 	// Parent re-entry on a SECOND executor: the start replays the SAME
 	// deterministic child (no duplicate) and the await replays inline.
 	res2 := h.runExecutorOnce(t, "node-p2", "run-parent", parent)
-	if res2.Final.Status != domain.DriverRunCompleted || res2.Final.Summary != "child=completed:child-done" {
+	if res2.Final.Status != execution.DriverRunCompleted || res2.Final.Summary != "child=completed:child-done" {
 		t.Fatalf("parent final = %+v, want completed with the child outcome", res2.Final)
 	}
 	if len(childIDs) != 2 || childIDs[1] != childID {
@@ -996,19 +1010,19 @@ func testCompositionInlineResolve(t *testing.T, h *awaitFlows) {
 		if resp.Status != string(domain.AwaitSatisfied) || resp.Child == nil {
 			return failedResult("unexpected workflows/await status " + resp.Status)
 		}
-		return driver.RunResult{Status: domain.DriverRunCompleted, Summary: "inline-child=" + resp.Child.Status}
+		return driver.RunResult{Status: execution.DriverRunCompleted, Summary: "inline-child=" + resp.Child.Status}
 	}}
 
 	h.createRun(t, "run-parent2")
 	res1 := h.runExecutorOnce(t, "node-p1", "run-parent2", parent)
-	if res1.Final.Status != domain.DriverRunSuspendedAwaitingEvent || len(childIDs) != 1 {
+	if res1.Final.Status != execution.DriverRunSuspendedAwait || len(childIDs) != 1 {
 		t.Fatalf("parent pass 1 = %+v (children %v), want suspended on the gate", res1.Final, childIDs)
 	}
 	childID := childIDs[0]
 
 	// The child finishes while the parent is still suspended on the unrelated
 	// gate. No internal.run.finished binding is configured.
-	if res := h.runExecutorOnce(t, "node-c1", childID, h.childRunner()); res.Final.Status != domain.DriverRunCompleted {
+	if res := h.runExecutorOnce(t, "node-c1", childID, h.childRunner()); res.Final.Status != execution.DriverRunCompleted {
 		t.Fatalf("child final = %+v, want completed", res.Final)
 	}
 	records := h.dispatchEvent(t, "gate-1", "gate.event", "parent2-go", awaitE2EHumanActor, map[string]any{"go": true})
@@ -1019,7 +1033,7 @@ func testCompositionInlineResolve(t *testing.T, h *awaitFlows) {
 	// Re-entry: the child await registers, re-checks terminal child state, and
 	// satisfies INLINE; the parent completes in this same pass.
 	res2 := h.runExecutorOnce(t, "node-p2", "run-parent2", parent)
-	if res2.Final.Status != domain.DriverRunCompleted || res2.Final.Summary != "inline-child=completed" {
+	if res2.Final.Status != execution.DriverRunCompleted || res2.Final.Summary != "inline-child=completed" {
 		t.Fatalf("parent final = %+v, want completed inline", res2.Final)
 	}
 	if suspendedOnChild {
@@ -1049,7 +1063,7 @@ func (h *awaitFlows) timeoutArmRunner(t *testing.T, pattern string, timeoutMs in
 			if resp.Event == nil || json.Unmarshal(resp.Event.Payload, &payload) != nil || !payload.Timeout {
 				return failedResult("timed_out await without the timeout payload")
 			}
-			return driver.RunResult{Status: domain.DriverRunNeedsReview,
+			return driver.RunResult{Status: execution.DriverRunNeedsReview,
 				Summary: "timeout-arm:" + payload.EventType, ErrorClass: "approval_timeout"}
 		default:
 			return failedResult("unexpected await status " + resp.Status)
@@ -1063,7 +1077,7 @@ func testTimeoutArmFlow(t *testing.T, h *awaitFlows) {
 	h.createRun(t, "run-timeout")
 
 	res1 := h.runExecutorOnce(t, "node-t1", "run-timeout", runner)
-	if res1.Final.Status != domain.DriverRunSuspendedAwaitingEvent {
+	if res1.Final.Status != execution.DriverRunSuspendedAwait {
 		t.Fatalf("first pass = %+v, want suspended", res1.Final)
 	}
 	key := domain.AwaitInstanceKey("run-timeout", 1)
@@ -1081,7 +1095,7 @@ func testTimeoutArmFlow(t *testing.T, h *awaitFlows) {
 
 	// A second executor lands the run on its timeout arm.
 	res2 := h.runExecutorOnce(t, "node-t2", "run-timeout", runner)
-	if res2.Final.Status != domain.DriverRunNeedsReview ||
+	if res2.Final.Status != execution.DriverRunNeedsReview ||
 		res2.Final.Summary != "timeout-arm:"+approvals.DefaultApprovalEventType+".timeout" {
 		t.Fatalf("final = %+v, want needs_review on the timeout arm", res2.Final)
 	}
@@ -1109,7 +1123,7 @@ func testTimeoutRaceExactlyOnce(t *testing.T, h *awaitFlows) {
 	suspendAndAwaitDue := func(runID string) string {
 		h.createRun(t, runID)
 		res := h.runExecutorOnce(t, "node-r-"+runID, runID, runner)
-		if res.Final.Status != domain.DriverRunSuspendedAwaitingEvent {
+		if res.Final.Status != execution.DriverRunSuspendedAwait {
 			t.Fatalf("suspend %s = %+v, want suspended", runID, res.Final)
 		}
 		key := domain.AwaitInstanceKey(runID, 1)
@@ -1174,12 +1188,12 @@ func TestAwaitFlowsDistortedSuspensionReportMemstore(t *testing.T) {
 			return failedResult("unexpected await status " + resp.Status)
 		}
 		// The runtime lies: a terminal failure shape despite the suspend.
-		return driver.RunResult{Status: domain.DriverRunFailed,
+		return driver.RunResult{Status: execution.DriverRunFailed,
 			Summary: "An internal error occurred.", ErrorClass: "internal_error"}
 	}}
 	h.createRun(t, "run-distorted")
 	res := h.runExecutorOnce(t, "node-1", "run-distorted", runner)
-	if res.Final.Status != domain.DriverRunSuspendedAwaitingEvent {
+	if res.Final.Status != execution.DriverRunSuspendedAwait {
 		t.Fatalf("final = %+v, want the suspension acknowledged", res.Final)
 	}
 	h.requireRun(t, "run-distorted", domain.DriverRunSuspendedAwaitingEvent, "")

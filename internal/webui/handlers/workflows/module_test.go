@@ -93,9 +93,43 @@ type workflowRunStoreTestExecution struct {
 	store store.Store
 }
 
-// workflowRunStoreTestCatalog keeps the legacy in-memory fixture behind the
-// Workflow Catalog port. Production code must never regain the direct
-// DriverStore read fallback this adapter replaces.
+func (adapter workflowRunStoreTestExecution) GetDriverRun(
+	ctx context.Context,
+	workspace, runID string,
+) (*execution.DriverRun, error) {
+	run, err := adapter.store.DriverRuns().Get(ctx, workspace, runID)
+	if err != nil {
+		return nil, err
+	}
+	return workflowExecutionRun(run), nil
+}
+
+func (adapter workflowRunStoreTestExecution) ListDriverRuns(
+	ctx context.Context,
+	query execution.DriverRunQuery,
+) ([]*execution.DriverRun, error) {
+	runs, err := adapter.store.DriverRuns().List(ctx, query.WorkspaceKey, store.DriverRunFilter{
+		DriverID: query.DriverID, EpicID: query.EpicID,
+		AgentServiceID: query.AgentServiceID, Status: domain.DriverRunStatus(query.Status),
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*execution.DriverRun, 0, len(runs))
+	for _, run := range runs {
+		if query.ParentRunID != "" && run.ParentRunID != query.ParentRunID {
+			continue
+		}
+		out = append(out, workflowExecutionRun(run))
+		if query.Limit > 0 && len(out) == query.Limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+// workflowRunStoreTestCatalog exposes the in-memory fixture only through the
+// current Workflow Catalog port.
 type workflowRunStoreTestCatalog struct {
 	workflowcatalog.API
 	store *memstore.Store
@@ -270,6 +304,13 @@ func (adapter workflowRunStoreTestExecution) SubmitDriverRun(
 	if err != nil {
 		return nil, err
 	}
+	return workflowExecutionRun(run), nil
+}
+
+func workflowExecutionRun(run *domain.DriverRun) *execution.DriverRun {
+	if run == nil {
+		return nil
+	}
 	return &execution.DriverRun{
 		WorkspaceKey: run.WorkspaceKey, RunID: run.RunID, DriverID: run.DriverID,
 		DriverVersionID: run.DriverVersionID, Entrypoint: run.Entrypoint,
@@ -279,7 +320,7 @@ func (adapter workflowRunStoreTestExecution) SubmitDriverRun(
 		Owner:          execution.Owner{ResourceKind: execution.ResourceDriverRun, ResourceID: run.RunID},
 		IdempotencyKey: run.IdempotencyKey, Payload: append(json.RawMessage(nil), run.Payload...),
 		CreatedAt: run.CreatedAt, UpdatedAt: run.UpdatedAt,
-	}, nil
+	}
 }
 
 type backendHealthQueryFunc func(string) (BackendHealth, bool)
@@ -314,7 +355,7 @@ func newWorkflowTestModule(st *memstore.Store) *Module {
 			return catalog.GetDriver(ctx, workspace, workflow)
 		},
 		TaskWorkflowRuns: readprojection.NewTaskWorkflowRunReader(
-			st.TaskRuns(), st.TriggerEvents(), st.TriggerDeliveries(), st.DriverRuns(),
+			st.TaskRuns(), st.TriggerEvents(), st.DriverRuns(),
 		),
 		BackendHealth: backendHealthQueryFunc(func(string) (BackendHealth, bool) {
 			return BackendHealth{

@@ -120,8 +120,7 @@ func TestRegisterWorkspaceRoutes_IteratesModules(t *testing.T) {
 	mock := &recordingModule{}
 	app.wsModules = []wsModule{mock}
 
-	// wsExistsFn is required by registerWorkspaceRoutes (used in middleware).
-	app.wsExistsFn = func(string) bool { return true }
+	app.wsResolveFn = testWorkspaceResolver()
 
 	app.registerRoutes()
 

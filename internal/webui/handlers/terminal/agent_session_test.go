@@ -576,7 +576,7 @@ func TestEnsureAgentTerminalSessionSerializesConcurrentCreates(t *testing.T) {
 	}
 	var orchestrationSessions int
 	for _, session := range sessions {
-		if session.Kind == domain.AgentSessionKindOrchestration {
+		if session.Kind == domain.AgentSessionKindInteractive {
 			orchestrationSessions++
 		}
 	}

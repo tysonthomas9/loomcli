@@ -33,7 +33,7 @@ func TestRegisteredLeadSessionHeartbeatAdvancesUntilStopped(t *testing.T) {
 		WorkspaceKey: "WS",
 		SessionID:    "lead-session",
 		AgentID:      "lead",
-		Kind:         domain.AgentSessionKindOrchestration,
+		Kind:         domain.AgentSessionKindInteractive,
 		Status:       domain.AgentSessionRunning,
 	}); err != nil {
 		t.Fatalf("create session: %v", err)
@@ -440,7 +440,7 @@ func TestMarkLeadAssignmentDelivered(t *testing.T) {
 		WorkspaceKey: "WS",
 		SessionID:    "lead-session",
 		AgentID:      "nova",
-		Kind:         domain.AgentSessionKindOrchestration,
+		Kind:         domain.AgentSessionKindInteractive,
 		Status:       domain.AgentSessionRunning,
 		Metadata:     map[string]string{"actor": "test"},
 	}); err != nil {

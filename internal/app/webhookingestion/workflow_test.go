@@ -176,7 +176,7 @@ func TestIngestValidatesWorkspaceAndSourceBeforeVerification(t *testing.T) {
 	}
 }
 
-func TestIngestAllowsOptionalSourceRefForLegacyGitHubBinding(t *testing.T) {
+func TestIngestRejectsMissingSourceRef(t *testing.T) {
 	request := validIngestRequest()
 	request.SourceRef = ""
 	var verified VerificationRequest
@@ -197,11 +197,11 @@ func TestIngestAllowsOptionalSourceRefForLegacyGitHubBinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := workflow.Ingest(t.Context(), request); err != nil {
-		t.Fatalf("Ingest legacy source without SourceRef: %v", err)
+	if _, err := workflow.Ingest(t.Context(), request); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("Ingest missing SourceRef error = %v, want ErrInvalidRequest", err)
 	}
-	if verified.SourceRef != "" || derived.SourceRef != "" || verified.RouteKey != request.RouteKey || derived.RouteKey != request.RouteKey {
-		t.Fatalf("legacy source identity = verification:%+v authority:%+v", verified, derived)
+	if verified.WorkspaceKey != "" || derived.WorkspaceKey != "" {
+		t.Fatalf("missing SourceRef reached verification or authority: verification:%+v authority:%+v", verified, derived)
 	}
 }
 

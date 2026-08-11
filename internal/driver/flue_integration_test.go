@@ -17,8 +17,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -48,7 +48,7 @@ export default defineWorkflow({
 `)
 	buildRealFlueProject(t, root, flueCommand)
 
-	registered, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{
+	registered, err := SeedFlueDriverFixture(ctx, st, RegisterFlueOptions{
 		WorkspaceKey: "TEST",
 		WorkDir:      root,
 		DistPath:     "dist",
@@ -59,12 +59,12 @@ export default defineWorkflow({
 		Activate:     true,
 	})
 	if err != nil {
-		t.Fatalf("RegisterFlueDriver after real Flue build %q: %v", strings.Join(flueCommand, " "), err)
+		t.Fatalf("SeedFlueDriverFixture after real Flue build %q: %v", strings.Join(flueCommand, " "), err)
 	}
 	if got := registered.Version.Manifest["server_ref"]; got != "dist/server.mjs" {
 		t.Fatalf("server_ref = %q, want dist/server.mjs", got)
 	}
-	run, err := CreateDriverRun(ctx, st, RunOptions{
+	run, err := createDriverRunFixture(ctx, st, driverRunFixtureOptions{
 		WorkspaceKey: "TEST",
 		DriverID:     registered.Driver.DriverID,
 		EpicID:       "TEST-1",
@@ -78,7 +78,7 @@ export default defineWorkflow({
 	if err != nil {
 		t.Fatalf("Claim: %v", err)
 	}
-	req, err := loadRunRequest(ctx, root, claimed, st)
+	req, err := loadRunRequest(ctx, root, testExecutionDriverRunSnapshot(claimed), st)
 	if err != nil {
 		t.Fatalf("loadRunRequest: %v", err)
 	}
@@ -87,7 +87,7 @@ export default defineWorkflow({
 	if err != nil {
 		t.Fatalf("NodeRunner.Run: %v", err)
 	}
-	if result.Status != domain.DriverRunCompleted || result.Summary != "real flue ok" {
+	if result.Status != execution.DriverRunCompleted || result.Summary != "real flue ok" {
 		t.Fatalf("result = %+v, want completed real flue ok", result)
 	}
 }
@@ -124,7 +124,7 @@ func TestRealFlueBuiltinEpicRunnerWatchLoopSmoke(t *testing.T) {
 	}
 	writeRealFlueProject(t, root, "epic-runner", builtinEpicRunnerSource(t))
 	buildRealFlueProject(t, root, flueCommand)
-	registered, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{
+	registered, err := SeedFlueDriverFixture(ctx, st, RegisterFlueOptions{
 		WorkspaceKey: "TEST",
 		WorkDir:      root,
 		DistPath:     "dist",
@@ -135,7 +135,7 @@ func TestRealFlueBuiltinEpicRunnerWatchLoopSmoke(t *testing.T) {
 		Activate:     true,
 	})
 	if err != nil {
-		t.Fatalf("RegisterFlueDriver after real Flue build %q: %v", strings.Join(flueCommand, " "), err)
+		t.Fatalf("SeedFlueDriverFixture after real Flue build %q: %v", strings.Join(flueCommand, " "), err)
 	}
 
 	// Each case gets its own epic: a finished NodeRunner invocation leaves the
@@ -146,7 +146,7 @@ func TestRealFlueBuiltinEpicRunnerWatchLoopSmoke(t *testing.T) {
 		epicID        string
 		runner        string
 		failTask      string
-		wantStatus    domain.DriverRunStatus
+		wantStatus    execution.DriverRunStatus
 		wantSummary   string
 		wantError     string
 		wantExecuted  string
@@ -156,7 +156,7 @@ func TestRealFlueBuiltinEpicRunnerWatchLoopSmoke(t *testing.T) {
 			name:          "watch-driven DAG drain completes",
 			epicID:        "TEST-1",
 			runner:        "local-task-runner",
-			wantStatus:    domain.DriverRunCompleted,
+			wantStatus:    execution.DriverRunCompleted,
 			wantSummary:   "Epic drained TEST-1: TEST-A,TEST-B,TEST-C,TEST-D",
 			wantExecuted:  "TEST-A,TEST-B,TEST-C,TEST-D",
 			wantCompleted: []string{"TEST-A", "TEST-B", "TEST-C", "TEST-D"},
@@ -166,7 +166,7 @@ func TestRealFlueBuiltinEpicRunnerWatchLoopSmoke(t *testing.T) {
 			epicID:        "TEST-2",
 			runner:        "daytona-task-runner",
 			failTask:      "TEST-C",
-			wantStatus:    domain.DriverRunNeedsReview,
+			wantStatus:    execution.DriverRunNeedsReview,
 			wantSummary:   "TEST-C",
 			wantError:     "epic_tasks_blocked",
 			wantExecuted:  "TEST-A,TEST-B,TEST-C,TEST-D",
@@ -191,7 +191,7 @@ func TestRealFlueBuiltinEpicRunnerWatchLoopSmoke(t *testing.T) {
 
 			runID := fmt.Sprintf("run-epic-watch-%d", i+1)
 			payload := json.RawMessage(`{"epicId":"` + tc.epicID + `","runner":"` + tc.runner + `"}`)
-			run, err := CreateDriverRun(ctx, st, RunOptions{
+			run, err := createDriverRunFixture(ctx, st, driverRunFixtureOptions{
 				WorkspaceKey: "TEST",
 				DriverID:     registered.Driver.DriverID,
 				EpicID:       tc.epicID,
@@ -205,7 +205,7 @@ func TestRealFlueBuiltinEpicRunnerWatchLoopSmoke(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Claim: %v", err)
 			}
-			req, err := loadRunRequest(ctx, root, claimed, st)
+			req, err := loadRunRequest(ctx, root, testExecutionDriverRunSnapshot(claimed), st)
 			if err != nil {
 				t.Fatalf("loadRunRequest: %v", err)
 			}

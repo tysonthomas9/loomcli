@@ -90,6 +90,7 @@ func executionDependenciesForTaskRunAPITest(
 	designPorts ...execution.TaskRunWorkItemDesignPort,
 ) appserve.ExecutionDependencies {
 	t.Helper()
+	mutations := testutil.TaskRunMutationAdapter{TaskRuns: st.TaskRuns()}
 	var designs execution.TaskRunWorkItemDesignPort = executionClaimPortStub{}
 	if len(designPorts) > 0 && designPorts[0] != nil {
 		designs = designPorts[0]
@@ -106,7 +107,8 @@ func executionDependenciesForTaskRunAPITest(
 		AtomicTaskRunRequests: executionClaimPortStub{}, AtomicTaskRunClaims: executionClaimPortStub{},
 		AtomicTaskRunWorkItemDesign: designs,
 		AtomicTaskRunRequeues:       executionClaimPortStub{}, AtomicTaskRunRetryExhaustion: executionClaimPortStub{},
-		AllowLegacyStoreAdapters: true,
+		StaleChildTaskRunRecovery: testutil.StaticTaskRunRecoveryPort{},
+		TaskRunHeartbeats:         mutations, TaskRunLogs: mutations, TaskRunFinalizer: mutations,
 	}
 }
 

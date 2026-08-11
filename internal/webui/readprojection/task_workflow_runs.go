@@ -48,19 +48,14 @@ type triggerEventListPort interface {
 	List(context.Context, string, store.TriggerEventFilter) ([]*automation.Event, error)
 }
 
-type triggerDeliveryListPort interface {
-	List(context.Context, string, store.TriggerDeliveryFilter) ([]*automation.Delivery, error)
-}
-
-type driverRunGetPort interface {
-	Get(context.Context, string, string) (*domain.DriverRun, error)
+type driverRunListPort interface {
+	List(context.Context, string, store.DriverRunFilter) ([]*domain.DriverRun, error)
 }
 
 type taskWorkflowRunReader struct {
 	taskRuns   taskRunListPort
 	events     triggerEventListPort
-	deliveries triggerDeliveryListPort
-	driverRuns driverRunGetPort
+	driverRuns driverRunListPort
 }
 
 // NewTaskWorkflowRunReader constructs the projection from exact-purpose,
@@ -69,16 +64,14 @@ type taskWorkflowRunReader struct {
 func NewTaskWorkflowRunReader(
 	taskRuns taskRunListPort,
 	events triggerEventListPort,
-	deliveries triggerDeliveryListPort,
-	driverRuns driverRunGetPort,
+	driverRuns driverRunListPort,
 ) TaskWorkflowRunReader {
-	if taskRuns == nil || events == nil || deliveries == nil || driverRuns == nil {
+	if taskRuns == nil || events == nil || driverRuns == nil {
 		return nil
 	}
 	return &taskWorkflowRunReader{
 		taskRuns:   taskRuns,
 		events:     events,
-		deliveries: deliveries,
 		driverRuns: driverRuns,
 	}
 }
@@ -91,7 +84,7 @@ func NewTaskWorkflowRunReader(
 //
 // The association is entirely structural and immutable:
 //
-//	issue id -> TriggerEvent.subject_ref -> TriggerDelivery.driver_run_id
+//	issue id -> TriggerEvent.subject_ref -> DriverRun.source_ref
 //
 // Payload fields are deliberately not consulted.
 func (reader *taskWorkflowRunReader) ListTaskWorkflowRuns(
@@ -101,7 +94,7 @@ func (reader *taskWorkflowRunReader) ListTaskWorkflowRuns(
 	workspace := strings.TrimSpace(query.WorkspaceKey)
 	taskID := strings.TrimSpace(query.TaskID)
 	if reader == nil || reader.taskRuns == nil ||
-		reader.events == nil || reader.deliveries == nil || reader.driverRuns == nil {
+		reader.events == nil || reader.driverRuns == nil {
 		return TaskWorkflowRunResult{}, ErrTaskWorkflowRunsUnavailable
 	}
 	if workspace == "" || workspace != query.WorkspaceKey || taskID == "" || taskID != query.TaskID {
@@ -119,13 +112,32 @@ func (reader *taskWorkflowRunReader) ListTaskWorkflowRuns(
 		return TaskWorkflowRunResult{}, err
 	}
 
-	runsByID := make(map[string]*domain.DriverRun)
+	eventIDs := make(map[string]struct{}, len(events))
 	for _, event := range events {
-		if err := reader.collectTaskWorkflowEventRuns(
-			ctx, workspace, subjectRef, event, representedDriverRuns, runsByID,
-		); err != nil {
-			return TaskWorkflowRunResult{}, err
+		// Keep the exact check even when the backing store pushes SubjectRef
+		// down. It is the final no-leakage guard for projection stores.
+		if event == nil || event.WorkspaceKey != workspace || event.SubjectRef != subjectRef {
+			continue
 		}
+		eventIDs[event.EventID] = struct{}{}
+	}
+
+	allRuns, err := reader.driverRuns.List(ctx, workspace, store.DriverRunFilter{})
+	if err != nil {
+		return TaskWorkflowRunResult{}, err
+	}
+	runsByID := make(map[string]*domain.DriverRun)
+	for _, run := range allRuns {
+		if run == nil || run.WorkspaceKey != workspace || strings.TrimSpace(run.RunID) == "" {
+			continue
+		}
+		if _, taskEvent := eventIDs[run.SourceRef]; !taskEvent {
+			continue
+		}
+		if _, represented := representedDriverRuns[run.RunID]; represented {
+			continue
+		}
+		runsByID[run.RunID] = run
 	}
 
 	runs := make([]*domain.DriverRun, 0, len(runsByID))
@@ -140,53 +152,6 @@ func (reader *taskWorkflowRunReader) ListTaskWorkflowRuns(
 		runs = []*domain.DriverRun{}
 	}
 	return TaskWorkflowRunResult{SubjectRef: subjectRef, Runs: runs}, nil
-}
-
-func (reader *taskWorkflowRunReader) collectTaskWorkflowEventRuns(
-	ctx context.Context,
-	workspace, subjectRef string,
-	event *automation.Event,
-	representedDriverRuns map[string]struct{},
-	runsByID map[string]*domain.DriverRun,
-) error {
-	// Keep the exact check even when the backing store pushes SubjectRef down. It
-	// is the final no-leakage guard for compatibility stores.
-	if event == nil || event.WorkspaceKey != workspace || event.SubjectRef != subjectRef {
-		return nil
-	}
-	deliveries, err := reader.deliveries.List(ctx, workspace, store.TriggerDeliveryFilter{
-		TriggerEventID: event.EventID,
-	})
-	if err != nil {
-		return err
-	}
-	for _, delivery := range deliveries {
-		if delivery == nil || delivery.WorkspaceKey != workspace ||
-			delivery.TriggerEventID != event.EventID || strings.TrimSpace(delivery.DriverRunID) == "" {
-			continue
-		}
-		if _, represented := representedDriverRuns[delivery.DriverRunID]; represented {
-			continue
-		}
-		if _, duplicate := runsByID[delivery.DriverRunID]; duplicate {
-			continue
-		}
-		run, err := reader.driverRuns.Get(ctx, workspace, delivery.DriverRunID)
-		if err != nil {
-			// A partially written or concurrently repaired delivery must not make
-			// every other issue run disappear.
-			if errors.Is(err, domain.ErrNotFound) {
-				continue
-			}
-			return err
-		}
-		if run == nil || run.WorkspaceKey != workspace || run.RunID != delivery.DriverRunID ||
-			run.SourceRef != event.EventID || run.TriggerBindingID != delivery.TriggerBindingID {
-			continue
-		}
-		runsByID[run.RunID] = run
-	}
-	return nil
 }
 
 func (reader *taskWorkflowRunReader) representedDriverRunIDs(

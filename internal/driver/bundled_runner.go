@@ -231,7 +231,7 @@ func (r NodeRunner) runBuiltFlueServer(ctx context.Context, req RunRequest, node
 	// spawned, never a silent fallback.
 	if refusal, refused := sandbox.RefuseUntrustedPlacement(req.Run.DriverID, req.TrustLevel, launcher); refused {
 		return RunResult{
-			Status:     domain.DriverRunFailed,
+			Status:     execution.DriverRunFailed,
 			Summary:    refusal.Summary,
 			ErrorClass: refusal.ErrorClass,
 			Output:     refusal.Output,
@@ -284,7 +284,7 @@ func flueRuntimeEnv(req RunRequest, input []byte, execTaskCommand []string) ([]s
 	env = append(env,
 		"LOOM_DRIVER_WORKSPACE="+req.Run.WorkspaceKey,
 		"LOOM_DRIVER_RUN_ID="+req.Run.RunID,
-		"LOOM_DRIVER_NODE_ID="+req.Run.NodeID,
+		"LOOM_DRIVER_NODE_ID="+req.Run.Owner.NodeID,
 	)
 	env = append(env,
 		"LOOM_FLUE_SERVER_PATH="+req.ServerPath,
@@ -316,15 +316,15 @@ func flueRuntimeResult(ctx context.Context, req RunRequest, stdout, stderr strin
 	}
 	lines := strings.Split(out, "\n")
 	var payload struct {
-		Status     domain.DriverRunStatus `json:"status"`
-		Summary    string                 `json:"summary"`
-		ErrorClass string                 `json:"errorClass"`
+		Status     execution.DriverRunStatus `json:"status"`
+		Summary    string                    `json:"summary"`
+		ErrorClass string                    `json:"errorClass"`
 	}
 	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &payload); err != nil {
 		return invalidDriverResult(req, fmt.Sprintf("decode Flue runtime result: %v", err), stdout, stderr)
 	}
 	result := RunResult{Status: payload.Status, Summary: payload.Summary, ErrorClass: payload.ErrorClass, Output: flueRunOutput(req, stdout, stderr)}
-	if result.Status == domain.DriverRunFailed {
+	if result.Status == execution.DriverRunFailed {
 		result.Summary = flueFailedSummary(result.Summary, stderr)
 	}
 	return requireExplicitTerminalRunResult(result)
@@ -333,7 +333,7 @@ func flueRuntimeResult(ctx context.Context, req RunRequest, stdout, stderr strin
 func failedFlueRuntimeResult(ctx context.Context, req RunRequest, stdout, stderr string, runErr error) RunResult {
 	if ctx.Err() != nil {
 		return RunResult{
-			Status:     domain.DriverRunCancelled,
+			Status:     execution.DriverRunCancelled,
 			Summary:    "Flue local runner cancelled",
 			ErrorClass: "driver_cancelled",
 			Output:     flueRunOutput(req, stdout, stderr),
@@ -343,7 +343,7 @@ func failedFlueRuntimeResult(ctx context.Context, req RunRequest, stdout, stderr
 	if msg == "" {
 		msg = runErr.Error()
 	}
-	return RunResult{Status: domain.DriverRunFailed, Summary: msg, ErrorClass: "driver_runtime", Output: flueRunOutput(req, stdout, stderr)}
+	return RunResult{Status: execution.DriverRunFailed, Summary: msg, ErrorClass: "driver_runtime", Output: flueRunOutput(req, stdout, stderr)}
 }
 
 func flueFailedSummary(summary, stderr string) string {
@@ -361,7 +361,7 @@ func requireExplicitTerminalRunResult(result RunResult) RunResult {
 	if result.Status.IsTerminal() {
 		return result
 	}
-	if result.Status == domain.DriverRunSuspendedAwaitingEvent {
+	if result.Status == execution.DriverRunSuspendedAwait {
 		// A suspended report is the runner's clean exit after an await op
 		// suspended the run server-side (AW9/AW11): not a terminal result and
 		// not an error — settleClaimed acknowledges it without a Finish.
@@ -375,7 +375,7 @@ func requireExplicitTerminalRunResult(result RunResult) RunResult {
 	if existing := strings.TrimSpace(result.Summary); existing != "" {
 		summary += ": " + existing
 	}
-	result.Status = domain.DriverRunFailed
+	result.Status = execution.DriverRunFailed
 	result.Summary = summary
 	result.ErrorClass = "invalid_driver_result"
 	return result
@@ -383,7 +383,7 @@ func requireExplicitTerminalRunResult(result RunResult) RunResult {
 
 func invalidDriverResult(req RunRequest, summary, stdout, stderr string) RunResult {
 	return RunResult{
-		Status:     domain.DriverRunFailed,
+		Status:     execution.DriverRunFailed,
 		Summary:    summary,
 		ErrorClass: "invalid_driver_result",
 		Output:     flueRunOutput(req, stdout, stderr),
@@ -463,8 +463,8 @@ func workflowName(req RunRequest) string {
 
 // processNodePath resolves the Node executable for host-process Flue runtimes.
 // An explicit caller override wins. Packaged desktop builds place a pinned Node
-// runtime under Contents/Resources/runtime, so prefer that copy before the
-// legacy executable sibling and PATH fallbacks used by CLI/development installs.
+// runtime under Contents/Resources/runtime. Source and CLI installations use the
+// operator-provided PATH when no packaged runtime exists.
 func processNodePath(override string) string {
 	executable, _ := os.Executable()
 	return resolveProcessNodePath(override, executable)
@@ -477,14 +477,9 @@ func resolveProcessNodePath(override, executable string) string {
 	if executable = strings.TrimSpace(executable); executable != "" {
 		executableDir := filepath.Dir(executable)
 		for _, name := range []string{"node", "node.exe"} {
-			candidates := []string{
-				filepath.Clean(filepath.Join(executableDir, "..", "Resources", "runtime", name)),
-				filepath.Join(executableDir, name),
-			}
-			for _, candidate := range candidates {
-				if isProcessExecutable(candidate) {
-					return candidate
-				}
+			candidate := filepath.Clean(filepath.Join(executableDir, "..", "Resources", "runtime", name))
+			if isProcessExecutable(candidate) {
+				return candidate
 			}
 		}
 	}

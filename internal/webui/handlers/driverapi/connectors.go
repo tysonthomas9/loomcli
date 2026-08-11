@@ -24,6 +24,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -133,7 +134,7 @@ func (m *Module) connectorDispatch(ctx context.Context, ws string, id driverIden
 // grants, so it is refused before any store or provider work happens. This
 // refusal cannot be journaled: without a binding there is no valid
 // ConnectorCallRecord.
-func (m *Module) resolveParentBindingID(ctx context.Context, ws string, parent *domain.DriverRun) (string, error) {
+func (m *Module) resolveParentBindingID(ctx context.Context, ws string, parent *execution.DriverRun) (string, error) {
 	bindingID, err := m.lookupParentBindingID(ctx, ws, parent)
 	if errors.Is(err, domain.ErrNotFound) {
 		return "", fmt.Errorf(
@@ -164,7 +165,7 @@ func (m *Module) resolveParentBindingID(ctx context.Context, ws string, parent *
 // Returns domain.ErrNotFound (wrapped) when the run has no binding lineage;
 // callers map that onto their own policy — connector egress denies-by-default,
 // binding.config surfaces a clean not_found.
-func (m *Module) lookupParentBindingID(ctx context.Context, ws string, parent *domain.DriverRun) (string, error) {
+func (m *Module) lookupParentBindingID(ctx context.Context, ws string, parent *execution.DriverRun) (string, error) {
 	if id := strings.TrimSpace(parent.TriggerBindingID); id != "" {
 		return id, nil
 	}

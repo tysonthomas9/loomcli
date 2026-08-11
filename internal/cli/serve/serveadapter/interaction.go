@@ -6,8 +6,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/app/agentprovisioning"
 	appserve "github.com/tysonthomas9/loomcli/internal/app/serve"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/infra/interactionchat"
+	leadcontrol "github.com/tysonthomas9/loomcli/internal/infra/interactionlead"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
@@ -129,8 +129,15 @@ func BuildInteractionCapability(config InteractionConfig) (*InteractionCapabilit
 	if err != nil {
 		return nil, err
 	}
+	leadDependencies, err := leadcontrol.NewInteractionChatDependencies(leadcontrol.RuntimeDependencies{
+		Sessions: config.StoreHandle.Store, InboxMessages: config.StoreHandle.Store.AgentInboxMessages(),
+		AgentServices: config.StoreHandle.Store.AgentServices(), WorkerProfiles: config.StoreHandle.Store.WorkerProfiles(), Roles: config.StoreHandle.Store.Roles(),
+	})
+	if err != nil {
+		return nil, err
+	}
 	chatRuntime, err := interactionchat.New(
-		backends.LegacyInteractionChatDependencies(config.StoreHandle.Store),
+		leadDependencies,
 		capability.InboxEnqueuer(),
 		config.AgentQueries,
 	)

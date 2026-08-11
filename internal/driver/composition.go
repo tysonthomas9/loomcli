@@ -12,6 +12,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -102,7 +103,7 @@ func ResolveCompositionMaxDepth() int {
 // ValidateSatisfiedChildAwait prevents historical or forged run.finished
 // rows from becoming composition truth. The child terminal record is the
 // authority; event identity, actor, and bounded payload must agree exactly.
-func ValidateSatisfiedChildAwait(ctx context.Context, instance *domain.AwaitInstance, child *domain.DriverRun) error {
+func ValidateSatisfiedChildAwait(ctx context.Context, instance *execution.DriverAwaitInstance, child *execution.DriverRun) error {
 	if instance == nil || child == nil || !child.Status.IsTerminal() {
 		return fmt.Errorf("composition await was satisfied while child is nonterminal: %w", domain.ErrConflict)
 	}

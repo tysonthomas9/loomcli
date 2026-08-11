@@ -110,7 +110,6 @@ type Server struct {
 	jobStore *workspacecoord.WorkspaceJobRegistry
 
 	// Workspace resolver
-	wsExistsFn  func(string) bool // legacy identity resolver used by tests
 	wsResolveFn middleware.WorkspaceResolveFn
 
 	// Notify token for session change endpoint auth
