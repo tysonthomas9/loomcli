@@ -16,6 +16,7 @@
 - **Wave 9.12 implementation:** `a7cc649d7`
 - **Wave 9.13 implementation:** `2eccf26e0`
 - **Wave 9.14 implementation:** `05bbf3ef3`
+- **Wave 9.15 implementation:** `2ee3dfa2a`
 - **Stacked branches:** `modular-monolith-phase9-01-types-ratchet`, then
   `modular-monolith-phase9-02-shallow-seams`, then
   `modular-monolith-phase9-03-legacy-planes`, then
@@ -29,7 +30,8 @@
   `modular-monolith-phase9-11-shallow-runtime`, then
   `modular-monolith-phase9-12-shallow-vocabulary`, then
   `modular-monolith-phase9-13-explicit-context`, then
-  `modular-monolith-phase9-14-session-ownership`
+  `modular-monolith-phase9-14-session-ownership`, then
+  `modular-monolith-phase9-15-native-parser-ownership`
 - **Purpose:** Reduce the residual package surface toward 160 production Go
   packages without weakening capability ownership, consumer-owned ports, or
   independently replaceable adapters.
@@ -726,6 +728,45 @@ The full gate used the exact Phase 7 companion checkout and binary whose
 OpenAPI SHA-256 matches Loom's vendored `816b0b0c…7ef0` snapshot. The final
 race-and-coverage pass ran sequentially; no threshold, allowlist, compatibility
 path, or fallback was added to obtain the green result.
+
+## Wave 9.15 result
+
+The fifteenth slice completes native-transcript parser ownership by deleting
+the remaining Claude and OpenCode subpackages. Claude parsing now delegates
+directly from Sessions to the harness-wrapper parser, and the shared event
+mapping is private to Sessions. OpenCode's wire representation and event mapper
+are likewise owner-private.
+
+The deleted OpenCode package exposed export DTOs, file-reading helpers, and
+modified-file extraction that had no production consumer. The deleted Claude
+package exposed serialization, truncation, modified-file extraction, and
+subagent-ID extraction with no production consumer; its only live parse path
+was already a wrapper delegation. None of those unused APIs was relocated.
+The retained surface is the one Sessions use case: parse the recorded native
+transcript into canonical events.
+
+The exact package shape moves from 175 to 173 production packages. Module
+packages remain 15, packages outside `internal/modules` fall from 160 to 158,
+one-file packages fall from 55 to 53, and one-or-two-file packages fall from 76
+to 74. The implementation deletes 621 net repository lines and guards both
+removed roots against return.
+
+## Wave 9.15 validation
+
+| Check | Result |
+|---|---|
+| Sessions behavior and all-`internal` compilation | PASS |
+| Claude, Codex, and OpenCode owner-surface parsing, including OpenCode tool-result and nil-state regressions | PASS |
+| Retired-root, exact package-shape, and affected lint guards | PASS: both roots absent; exact shape `173 / 15 / 158 / 53 / 74`; zero affected lint issues |
+| Authoritative repository architecture snapshot | PASS in 521.168s at implementation `2ee3dfa2a` |
+| Aggregate `make gate` against FleetDB `b71dec551` | PASS: all Go and frontend quality gates with the matching `816b0b0c…7ef0` OpenAPI snapshot, sanitized Loom runtime variables, `GOMAXPROCS=4`, one Go test worker, two Vitest workers, and a 3 GiB Go soft memory limit |
+
+The first architecture invocation was stopped because its execution wrapper
+yielded without returning a handle, making a trustworthy result impossible to
+capture. The same deterministic command was restarted with a retained handle
+and passed. The complete aggregate gate then passed without a source
+correction, threshold change, allowlist expansion, compatibility path, or
+fallback.
 
 Later waves must update this document with the selected package candidates,
 the boundary reason retained or removed for each, exact shape changes, and

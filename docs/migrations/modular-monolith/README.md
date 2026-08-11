@@ -1,7 +1,7 @@
 # Modular Monolith Migration
 
-- **Status:** Phase 9 package consolidation in progress; its first fourteen
-  slices ratchet the modular monolith to 175 production packages
+- **Status:** Phase 9 package consolidation in progress; its first fifteen
+  slices ratchet the modular monolith to 173 production packages
 - **Date:** 2026-08-10
 - **Scope:** `loom serve`, the operator CLI entry surfaces, the Vite frontend counterpart, and the fleet-db contracts those capabilities depend on
 - **Provenance:** [Phase 0 integration baseline](00-phase-0-baseline.md), final [Phase 1 evidence](06-phase-1-decisions-and-evidence.md) at Loom `7e8a6dd2`, [Phase 2 evidence](07-phase-2-decisions-and-evidence.md) at Loom `84cccb761` with FleetDB `430dce8d9`, [Phase 3 evidence](08-phase-3-decisions-and-evidence.md) at core implementation commits Loom `7f95b9bf1` and FleetDB `f1c4e1119`, final [Phase 4 evidence](09-phase-4-decisions-and-evidence.md) at Loom `53cbe2577` with FleetDB `afb688768`, and the appended reliability-validation record at Loom `67c45972f` with FleetDB `9ffa69f60`
@@ -29,16 +29,18 @@ from that exact shape toward 160 packages by deleting residual horizontal
 models, repositories, and shallow composition seams without merging capability
 owners.
 
-Through Wave 9.14, Phase 9 has retired the residual `internal/types` plane,
+Through Wave 9.15, Phase 9 has retired the residual `internal/types` plane,
 duplicate Connectors and Artifacts repository/model layers, forwarding-only
 owner adapters, runtime and authentication compatibility paths, horizontal
 handler dependencies, three shallow vocabulary packages, and the ambient
 runtime-context package. It also folds native-transcript dispatch into Sessions,
 deletes the forwarding-only Codex parser package, and rejects unknown transcript
-backends instead of falling back to Claude. The exact current shape is 175
-production packages: 15 under `internal/modules`, 160 outside module roots, 55
-one-file packages, and 76 one-or-two-file packages. Known runtime compatibility
-planes remain unfinished work, not accepted target architecture.
+backends instead of falling back to Claude. Wave 9.15 deletes the remaining
+shallow Claude and OpenCode parser packages and their unused public helpers.
+The exact current shape is 173 production packages: 15 under
+`internal/modules`, 158 outside module roots, 53 one-file packages, and 74
+one-or-two-file packages. Known runtime compatibility planes remain unfinished
+work, not accepted target architecture.
 
 ## Reading order
 
@@ -273,9 +275,13 @@ dispatcher and Codex wrapper, makes Sessions select the recorded backend
 parser, and replaces the unknown
 backend's silent Claude fallback with an explicit error. It ratchets the exact
 shape to 175 packages, 160 outside modules, 55 one-file packages, and 76
-one-or-two-file packages. The remaining waves delete the other horizontal
-handler/store edges and residual shallow packages; an empty capability-graph
-`legacy_paths` list alone is not completion proof. See the
+one-or-two-file packages. Wave 9.15 then deletes the remaining Claude and
+OpenCode transcript parser packages, keeps only owner-private parsing behavior
+in Sessions, and ratchets the exact shape to 173 packages, 158 outside modules,
+53 one-file
+packages, and 74 one-or-two-file packages. The remaining waves delete the other
+horizontal handler/store edges and residual shallow packages; an empty
+capability-graph `legacy_paths` list alone is not completion proof. See the
 [Phase 9 plan](16-phase-9-package-consolidation.md).
 
 ## Approved architecture decisions
