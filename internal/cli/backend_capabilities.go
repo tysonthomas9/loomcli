@@ -1,12 +1,12 @@
-// Package backendapi contains the dependency-neutral optional backend
-// capability contracts shared by the CLI registry and concrete backends.
-package backendapi
+package cli
 
 import (
 	"context"
 	"io"
 )
 
+// StreamingBackend is the optional streaming surface implemented by coding
+// backends that can expose their output as a reader.
 type StreamingBackend interface {
 	InvokeStreaming(ctx context.Context, workDir, prompt, agentName string) (io.ReadCloser, error)
 }

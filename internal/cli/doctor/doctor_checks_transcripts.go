@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backendnames"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/infra/sessionstoreadapter"
+	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
@@ -79,7 +79,7 @@ func scanOrphanedClaudeSessions(store *sessions.Store) ([]orphanSession, error) 
 		}
 		id := entry.Name()
 		meta, loadErr := store.LoadMetadata(id)
-		if loadErr != nil || meta.Backend != backendnames.Claude {
+		if loadErr != nil || meta.Backend != platformruntime.ProviderClaude {
 			continue
 		}
 		if meta.Status == sessions.StatusRunning {

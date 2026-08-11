@@ -11,17 +11,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/tysonthomas9/loomcli/internal/cli/backendapi"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
-
-type StreamingBackend = backendapi.StreamingBackend
-type HealthCheckableBackend = backendapi.HealthCheckableBackend
-type MetadataProvider = backendapi.MetadataProvider
-type HealthStatus = backendapi.HealthStatus
-type BackendMeta = backendapi.BackendMeta
-type StreamEvent = backendapi.StreamEvent
-type StreamUsage = backendapi.StreamUsage
 
 // EchoInvocation records the parameters of a single test-backend call.
 type EchoInvocation struct {

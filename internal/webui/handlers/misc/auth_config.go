@@ -14,7 +14,7 @@ import (
 
 	"golang.org/x/time/rate"
 
-	"github.com/tysonthomas9/loomcli/internal/authmode"
+	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
@@ -134,12 +134,12 @@ func HandleAuthConfig(extAuthURL string, limiter *AuthConfigLimiter, backendName
 		// requests through the auth proxy at /api/auth/*. This makes cookies
 		// first-party and avoids cross-origin issues over HTTP.
 		baseResp = authConfigResponse{
-			Mode:    authmode.ModeOIDC,
+			Mode:    authority.TrustModeOIDC,
 			AuthURL: "", // empty = same-origin proxy at /api/auth/*
 		}
 	} else {
 		baseResp = authConfigResponse{
-			Mode: authmode.ModeOpen,
+			Mode: authority.TrustModeOpen,
 		}
 	}
 

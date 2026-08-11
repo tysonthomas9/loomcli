@@ -5,42 +5,41 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/cli/backendapi"
 )
 
 // StreamingBackend is an optional interface that backends can implement to
 // support streaming responses. Use type assertion or InspectCapabilities to
 // check whether a Backend supports this.
-type StreamingBackend = backendapi.StreamingBackend
+type StreamingBackend = cli.StreamingBackend
 
 // SessionAwareBackend is an optional interface for backends that support
 // resuming or continuing a previous agent session.
-type SessionAwareBackend = backendapi.SessionAwareBackend
+type SessionAwareBackend = cli.SessionAwareBackend
 
 // ToolAwareBackend is an optional interface for backends that support
 // restricting which tools the agent may or may not use.
-type ToolAwareBackend = backendapi.ToolAwareBackend
+type ToolAwareBackend = cli.ToolAwareBackend
 
 // HealthCheckableBackend is an optional interface for backends that can
 // report their installation and readiness status.
-type HealthCheckableBackend = backendapi.HealthCheckableBackend
+type HealthCheckableBackend = cli.HealthCheckableBackend
 
 // ConfigurableBackend is an optional interface for backends that expose
 // runtime-configurable options.
-type ConfigurableBackend = backendapi.ConfigurableBackend
+type ConfigurableBackend = cli.ConfigurableBackend
 
 // MetadataProvider is an optional interface for backends that can report
 // descriptive metadata about themselves.
-type MetadataProvider = backendapi.MetadataProvider
+type MetadataProvider = cli.MetadataProvider
 
 // HealthStatus describes the health and readiness of a backend.
-type HealthStatus = backendapi.HealthStatus
+type HealthStatus = cli.HealthStatus
 
 // BackendOption describes a single configurable option for a backend.
-type BackendOption = backendapi.BackendOption
+type BackendOption = cli.BackendOption
 
 // BackendMeta contains descriptive metadata about a backend.
-type BackendMeta = backendapi.BackendMeta
+type BackendMeta = cli.BackendMeta
 
 // BackendCapabilities reports which optional interfaces a Backend implements.
 // Check the boolean flags (HasStreaming, HasSessions, etc.) or the typed

@@ -678,7 +678,10 @@ func TestRetiredHorizontalRootsCannotReturn(t *testing.T) {
 	}
 	retired := []string{
 		"internal/agentinbox",
+		"internal/authmode",
 		"internal/backend/backendtest",
+		"internal/backendnames",
+		"internal/cli/backendapi",
 		"internal/connector",
 		"internal/infra/artifactcatalog",
 		"internal/infra/connectorscatalog",

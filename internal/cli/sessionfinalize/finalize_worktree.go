@@ -3,9 +3,9 @@ package sessionfinalize
 import (
 	"log/slog"
 
-	"github.com/tysonthomas9/loomcli/internal/backendnames"
 	"github.com/tysonthomas9/loomcli/internal/cli/git"
 	"github.com/tysonthomas9/loomcli/internal/infra/sessionstoreadapter"
+	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
@@ -72,7 +72,7 @@ func WithWorktree(sess *sessions.Session, opts WithWorktreeOptions) (WithWorktre
 }
 
 func syncNativeTranscript(sess *sessions.Session, opts WithWorktreeOptions) {
-	if sess.Meta.Backend == backendnames.Codex {
+	if sess.Meta.Backend == platformruntime.ProviderCodex {
 		path, err := sessionstoreadapter.SyncLatestCodexRollout(sess, opts.WorktreePath, sess.Meta.StartedAt)
 		if err != nil {
 			slog.Warn("codex transcript sync failed",
@@ -87,7 +87,7 @@ func syncNativeTranscript(sess *sessions.Session, opts WithWorktreeOptions) {
 			)
 		}
 	}
-	if sess.Meta.Backend == backendnames.Claude {
+	if sess.Meta.Backend == platformruntime.ProviderClaude {
 		_, _ = sessionstoreadapter.SyncLatestClaudeTranscript(sess, opts.WorktreePath, opts.ClaudeSessionID, sess.Meta.StartedAt)
 	}
 }
