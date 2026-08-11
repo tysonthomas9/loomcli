@@ -9,6 +9,64 @@ import (
 	"time"
 )
 
+func TestPrepareCodexLeadHomeCopiesStaticProfileWithoutHistoricalState(t *testing.T) {
+	t.Parallel()
+
+	sourceHome := t.TempDir()
+	for name, body := range map[string]string{
+		"config.toml": "model = \"gpt-5.6\"\n",
+		"auth.json":   `{"tokens":{"access_token":"test-only"}}`,
+		"AGENTS.md":   "lead instructions\n",
+	} {
+		if err := os.WriteFile(filepath.Join(sourceHome, name), []byte(body), 0600); err != nil {
+			t.Fatalf("write source %s: %v", name, err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(sourceHome, "sessions"), 0700); err != nil {
+		t.Fatalf("create historical state: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceHome, "sessions", "old.jsonl"), []byte("old"), 0600); err != nil {
+		t.Fatalf("write historical state: %v", err)
+	}
+
+	runtimeHome := t.TempDir()
+	leadHome := filepath.Join(runtimeHome, "codex-home")
+	if err := prepareCodexLeadHome(sourceHome, leadHome); err != nil {
+		t.Fatalf("prepareCodexLeadHome() error: %v", err)
+	}
+
+	for _, name := range []string{"config.toml", "auth.json", "AGENTS.md"} {
+		if _, err := os.Stat(filepath.Join(leadHome, name)); err != nil {
+			t.Fatalf("static profile file %s missing: %v", name, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(leadHome, "sessions")); !os.IsNotExist(err) {
+		t.Fatalf("historical sessions copied into lead home, stat error = %v", err)
+	}
+}
+
+func TestWithCodexHomeReplacesInheritedValue(t *testing.T) {
+	t.Parallel()
+
+	env := withCodexHome([]string{"PATH=/bin", "CODEX_HOME=/old", "OTHER=value"}, "/lead")
+	if got := envValue(env, "CODEX_HOME"); got != "/lead" {
+		t.Fatalf("CODEX_HOME = %q, want /lead", got)
+	}
+	if got := envValue(env, "OTHER"); got != "value" {
+		t.Fatalf("OTHER = %q, want value", got)
+	}
+}
+
+func envValue(env []string, key string) string {
+	prefix := key + "="
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			return strings.TrimPrefix(entry, prefix)
+		}
+	}
+	return ""
+}
+
 func TestNewestCodexThreadWaitsForThreadCreatedAfterRuntimeStart(t *testing.T) {
 	startedAt := time.Date(2026, 5, 17, 6, 5, 36, 0, time.UTC)
 	threads := []CodexThread{
