@@ -1,6 +1,6 @@
 # Modular Monolith Migration
 
-- **Status:** Phase 9 package consolidation in progress; its first seven slices
+- **Status:** Phase 9 package consolidation in progress; its first nine slices
   ratchet the modular monolith to 182 production packages
 - **Date:** 2026-08-10
 - **Scope:** `loom serve`, the operator CLI entry surfaces, the Vite frontend counterpart, and the fleet-db contracts those capabilities depend on
@@ -231,9 +231,15 @@ guards against handwritten deprecated production APIs returning. It removes
 499 net lines without changing the package count or widening import fanout.
 The 25 `legacy handler imports` remain live allowlisted compatibility edges,
 not historical labels, and the Driver still has an active shared-token/header
-authentication fallback. The remaining waves must delete those runtime paths
-in addition to removing residual shallow packages; an empty capability-graph
-`legacy_paths` list alone is not completion proof. See the
+authentication fallback. Wave 9.8 deletes that Driver fallback and requires
+signed run-scoped identity throughout the runtime. Wave 9.9 then routes Git
+graph, blocked-list, health statistics, readiness, and config-label delivery
+through narrow Work Items or presentation ports, deletes the dead workspace
+backend setter and config env fallback, and tightens the exact live handler
+imports from 25 to 22. Package shape remains 182 production packages while the
+remaining waves delete the other horizontal handler/store edges and residual
+shallow packages; an empty capability-graph `legacy_paths` list alone is not
+completion proof. See the
 [Phase 9 plan](16-phase-9-package-consolidation.md).
 
 ## Approved architecture decisions

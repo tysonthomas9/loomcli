@@ -10,6 +10,7 @@
 - **Wave 9.6 implementation:** `830541155`
 - **Wave 9.7 implementation:** `9722a8bed`
 - **Wave 9.8 implementation:** `3fdcd3669`
+- **Wave 9.9 implementation:** `520e8a9f8`
 - **Stacked branches:** `modular-monolith-phase9-01-types-ratchet`, then
   `modular-monolith-phase9-02-shallow-seams`, then
   `modular-monolith-phase9-03-legacy-planes`, then
@@ -17,7 +18,8 @@
   `modular-monolith-phase9-05-artifact-adapter`, then
   `modular-monolith-phase9-06-connectors-adapter`, then
   `modular-monolith-phase9-07-legacy-runtime`, then
-  `modular-monolith-phase9-08-driver-auth`
+  `modular-monolith-phase9-08-driver-auth`, then
+  `modular-monolith-phase9-09-handler-ports`
 - **Purpose:** Reduce the residual package surface toward 160 production Go
   packages without weakening capability ownership, consumer-owned ports, or
   independently replaceable adapters.
@@ -449,6 +451,50 @@ composition and a redundant Driver runtime-context struct literal. The final
 tree extracts capability wiring, uses the direct type conversion, and passes
 the targeted linter and uninterrupted aggregate rerun. No lint threshold or
 exception was added.
+
+## Wave 9.9 result
+
+The ninth slice removes three live presentation dependencies on the horizontal
+`backend` plane. Git graph and blocked-list delivery now consume a handler-owned
+query port backed by Work Items `List`, `Get`, and `Blocked` projections. Health
+statistics and workspace readiness consume the separate Work Items
+`StatsQueries` port. `/api/config` receives only a backend-name function from
+composition and can no longer read `LOOM_ISSUE_BACKEND` as a parallel discovery
+path.
+
+`Stats` and `Blocked` intentionally remain separate narrow query interfaces
+rather than growing the broad Work Items `API`. The composition root retains
+the concrete owner service and hands each delivery adapter only its required
+read authority. Blocked-list delivery calls the direct owner query, preserving
+the prior single-purpose read instead of invoking the richer Kanban projection
+and its ready/deferred joins.
+
+The obsolete `WorkspaceOpsModule.issueBackendFn` field,
+`WithIssueBackendFn` setter, conditional wiring, backend import, old
+backend-based handler constructors, and 106-line graph backend test double are
+physically deleted. A tombstone test prevents those symbols and the config env
+fallback from returning. The exact live handler-import ratchet falls from 25 to
+22; no exception is widened. Package shape remains 182 production packages, 15
+module packages, 167 packages outside modules, 62 one-file packages, and 83
+one-or-two-file packages. The slice adds 54 net non-test/non-architecture lines
+to establish the owner projections and typed ports; it does not claim a package
+count reduction.
+
+## Wave 9.9 validation
+
+| Check | Result |
+|---|---|
+| Work Items owner, Git, health, auth config, issue, onboarding, app composition, and all-`internal` compilation | PASS |
+| Removed-handler-symbol and config-fallback tombstones, read-only persistence classification, and exact handler-import ratchet | PASS |
+| Measured `make check-architecture` within the aggregate gate | PASS: 11/11 profiles, 10 roots, 93 direct-write rows, 22 live legacy-handler allowances, 107 reviewed mutation commands, 71 runtime components, 80 goroutine launches, all six performance rows measured, and zero pending decisions; peak process-tree RSS 1,172.9 MiB under 2,048 MiB |
+| Aggregate `make gate` against FleetDB `b71dec551` | PASS: all Go and frontend quality gates with `GOMAXPROCS=4`, two Go test workers, one Vitest worker, and a 3 GiB Go soft memory limit |
+
+The first aggregate invocation accidentally selected the older
+`fleet-db/unified-agents` sibling at `8120c78`; its OpenAPI source predates the
+Phase 7 companion and correctly failed Loom's vendored-spec freshness guard.
+No contract was copied backward. Rebuilding from the documented clean
+`fleet-db-modular-monolith-phase7` worktree at `b71dec551` passed the focused
+contract package and the uninterrupted aggregate rerun.
 
 Later waves must update this document with the selected package candidates,
 the boundary reason retained or removed for each, exact shape changes, and
