@@ -18,9 +18,7 @@ vi.mock("../useWorkspaceContext", () => ({
   useWorkspaceContext: vi.fn(),
 }));
 
-const mockUpdateWorkspaceTaskDelivery = vi.mocked(
-  updateWorkspaceTaskDelivery,
-);
+const mockUpdateWorkspaceTaskDelivery = vi.mocked(updateWorkspaceTaskDelivery);
 const mockUseWorkspaceContext = vi.mocked(useWorkspaceContext);
 
 describe("useTaskDeliveryPolicy", () => {
