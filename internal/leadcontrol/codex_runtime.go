@@ -42,17 +42,9 @@ type CodexLeadRuntimeConfig struct {
 
 func RunCodexLeadRuntime(ctx context.Context, cfg CodexLeadRuntimeConfig) error {
 	cfg = normalizeCodexLeadRuntimeConfig(cfg)
-	runtimeHome, sqliteHome := codexLeadRuntimeDirs(cfg)
-	if err := os.MkdirAll(sqliteHome, 0700); err != nil {
-		return fmt.Errorf("create codex lead runtime directory: %w", err)
-	}
-	codexHome := filepath.Join(runtimeHome, "codex-home")
-	sourceHome, err := codexUserHome()
+	runtimeHome, codexHome, sqliteHome, err := prepareCodexLeadRuntime(cfg)
 	if err != nil {
-		return fmt.Errorf("resolve Codex profile: %w", err)
-	}
-	if err := prepareCodexLeadHome(sourceHome, codexHome); err != nil {
-		return fmt.Errorf("prepare Codex lead profile: %w", err)
+		return err
 	}
 
 	runtimeStartedAt := time.Now().UTC()
@@ -94,6 +86,22 @@ func RunCodexLeadRuntime(ctx context.Context, cfg CodexLeadRuntimeConfig) error 
 	runtime.Status = RuntimeStatusDisconnected
 	_ = UpdateCodexRuntimeMetadata(context.Background(), cfg.Store, cfg.Workspace, cfg.SessionID, runtime)
 	return tuiErr
+}
+
+func prepareCodexLeadRuntime(cfg CodexLeadRuntimeConfig) (string, string, string, error) {
+	runtimeHome, sqliteHome := codexLeadRuntimeDirs(cfg)
+	if err := os.MkdirAll(sqliteHome, 0700); err != nil {
+		return "", "", "", fmt.Errorf("create codex lead runtime directory: %w", err)
+	}
+	codexHome := filepath.Join(runtimeHome, "codex-home")
+	sourceHome, err := codexUserHome()
+	if err != nil {
+		return "", "", "", fmt.Errorf("resolve Codex profile: %w", err)
+	}
+	if err := prepareCodexLeadHome(sourceHome, codexHome); err != nil {
+		return "", "", "", fmt.Errorf("prepare Codex lead profile: %w", err)
+	}
+	return runtimeHome, codexHome, sqliteHome, nil
 }
 
 // persistStartingCodexRuntime builds the starting runtime metadata for a
