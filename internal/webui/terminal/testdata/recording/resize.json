@@ -1,0 +1,12 @@
+{
+  "name": "live-geometry-resize",
+  "cols": 12,
+  "rows": 4,
+  "events": [
+    {"data": "one\r\ntwo"},
+    {"resize": {"cols": 40, "rows": 2}},
+    {"data": "\r\nthree\r\nfour"},
+    {"resize": {"cols": 7, "rows": 3}},
+    {"data": "\r\nfive"}
+  ]
+}

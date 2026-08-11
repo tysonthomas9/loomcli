@@ -31,6 +31,7 @@ type Module struct {
 	store           store.Store
 	tabMetaStore    *tabmeta.Store
 	hub             *realtime.Hub
+	recordings      *webuterminal.RecordingStore
 	serverStartedAt time.Time
 }
 
@@ -49,6 +50,7 @@ func NewModule(
 	st store.Store,
 	tabMetaStore *tabmeta.Store,
 	hub *realtime.Hub,
+	recordings *webuterminal.RecordingStore,
 	serverStartedAt time.Time,
 ) *Module {
 	return &Module{
@@ -62,6 +64,7 @@ func NewModule(
 		store:           st,
 		tabMetaStore:    tabMetaStore,
 		hub:             hub,
+		recordings:      recordings,
 		serverStartedAt: serverStartedAt,
 	}
 }
@@ -88,5 +91,10 @@ func (m *Module) Register(mux *http.ServeMux) {
 	}
 	if m.ptyMgr != nil {
 		mux.HandleFunc("GET /api/workspaces/{ws}/terminal/ws", HandleTerminalWS(m.ptyMgr, m.termAuth, m.allowedOrigins, m.loomServerURL, m.store, m.tabMetaStore, m.hub, m.serverStartedAt))
+	}
+	if m.recordings != nil {
+		mux.HandleFunc("GET /api/workspaces/{ws}/terminal/sessions/{session}/history", HandleTerminalHistory(m.recordings))
+		mux.HandleFunc("GET /api/workspaces/{ws}/terminal/sessions/{session}/history/meta", HandleTerminalHistoryMeta(m.recordings))
+		mux.HandleFunc("GET /api/workspaces/{ws}/terminal/sessions/{session}/history/raw", HandleTerminalHistoryRaw(m.recordings))
 	}
 }

@@ -317,6 +317,16 @@ func runTerminalRelay(reqCtx context.Context, conn *websocket.Conn, p *terminalW
 		maybeEmitStaleRestartBanner(reqCtx, conn, p, workspace, session)
 	}
 
+	// Text control frames are kept separate from binary PTY output. The client
+	// uses this stable coordinate to stop virtual history exactly where the
+	// live xterm screen begins.
+	if historyAttachment, ok := att.(interface{ FirstScreenLine() uint64 }); ok {
+		control := fmt.Sprintf(`{"type":"terminal-history","firstScreenLine":%d}`, historyAttachment.FirstScreenLine())
+		if err := conn.Write(reqCtx, websocket.MessageText, []byte(control)); err != nil { //nolint:staticcheck // SA1019
+			slog.Warn("terminal history coordinate write failed", "session", session, "err", err)
+		}
+	}
+
 	// Emit scrollback replay (reset escape + ring bytes) before going live.
 	if replay := att.Scrollback(); len(replay) > 0 {
 		if err := conn.Write(reqCtx, websocket.MessageBinary, replay); err != nil { //nolint:staticcheck // SA1019

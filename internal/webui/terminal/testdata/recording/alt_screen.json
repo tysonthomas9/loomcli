@@ -1,0 +1,10 @@
+{
+  "name": "alternate-screen-isolation",
+  "cols": 14,
+  "rows": 3,
+  "events": [
+    {"data": "normal\r\ncontent"},
+    {"data": "\u001b[?1049hfull\r\nscreen\r\nnoise"},
+    {"data": "\u001b[?1049l\r\nafter\r\nend"}
+  ]
+}

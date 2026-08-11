@@ -1,0 +1,10 @@
+{
+  "name": "cursor-up-flicker-free-rewrite",
+  "cols": 16,
+  "rows": 4,
+  "events": [
+    {"data": "one\r\ntwo\r\nthree"},
+    {"data": "\r\u001b[2A\u001b[2KONE\r\n\u001b[2KTWO\r\nthree"},
+    {"data": "\r\nfinal"}
+  ]
+}

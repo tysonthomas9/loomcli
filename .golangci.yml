@@ -598,6 +598,22 @@ linters:
         linters:
           - gosec
         text: "G115"
+      # G115: The recording subsystem converts between the widths of terminal
+      # geometry (cols/rows, bounded by the PTY), byte-slice lengths, and the
+      # fixed-width fields of its own on-disk segment format. Each conversion is
+      # bounded by the value it round-trips through, but the bound lives in the
+      # file format rather than in an expression gosec can see.
+      - path: 'internal/webui/terminal/recording_.*\.go'
+        linters:
+          - gosec
+        text: "G115"
+      # G304: Recording files are opened by a path the store builds itself from
+      # components already screened by validRecordingComponent, never from a
+      # request path.
+      - path: 'internal/webui/terminal/recording_.*\.go'
+        linters:
+          - gosec
+        text: "G304"
       # G204: Subprocess launches for bd commands and tmux
       - path: 'internal/kv/reconcile\.go|internal/webui/terminal\.go'
         linters:

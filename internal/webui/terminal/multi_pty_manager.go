@@ -51,6 +51,7 @@ type MultiPTYManager struct {
 
 	gracePeriod time.Duration
 	idleTimeout time.Duration
+	recordings  *RecordingStore
 
 	closed bool
 }
@@ -64,6 +65,18 @@ func NewMultiPTYManager(cmd string, maxPerWS int) *MultiPTYManager {
 		entries:  make(map[string]*wsEntry),
 		cmd:      cmd,
 		maxPerWS: maxPerWS,
+	}
+}
+
+// SetRecordingStore enables durable history for local PTYs created in any
+// workspace. Remote PTYSource implementations are outside this manager.
+func (mm *MultiPTYManager) SetRecordingStore(store *RecordingStore) {
+	mm.mu.Lock()
+	mm.recordings = store
+	existing := mm.snapshotManagersLocked()
+	mm.mu.Unlock()
+	for _, manager := range existing {
+		manager.SetRecordingStore(store)
 	}
 }
 
@@ -292,6 +305,7 @@ func (mm *MultiPTYManager) managerForWS(wsID string) (*PTYManager, error) {
 	// manager, so its own lock is uncontended — there is no cross-lock
 	// ordering concern here even though SetGracePeriod acquires PTYManager.mu.
 	m := NewPTYManager(mm.cmd, mm.maxPerWS, entry.path)
+	m.SetRecordingStore(mm.recordings)
 	if mm.gracePeriod != 0 {
 		m.SetGracePeriod(mm.gracePeriod)
 	}

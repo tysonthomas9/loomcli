@@ -32,6 +32,7 @@ func TestModule_Register_TerminalWSRoute_WithMultiPTYManager(t *testing.T) {
 		nil, // store
 		nil, // tabMetaStore
 		nil, // hub
+		nil, // recordingStore
 		time.Time{},
 	)
 
@@ -54,7 +55,7 @@ func TestModule_Register_TerminalWSRoute_WithMultiPTYManager(t *testing.T) {
 // This is the skip-registration path documented on NewModule.
 func TestModule_Register_TerminalWSRoute_NilPTYMgr(t *testing.T) {
 	mod := NewModule(
-		nil, nil, nil, nil, nil, nil, "", nil, nil, nil, time.Time{},
+		nil, nil, nil, nil, nil, nil, "", nil, nil, nil, nil, time.Time{},
 	)
 
 	mux := http.NewServeMux()

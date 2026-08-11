@@ -88,6 +88,7 @@ func (app *Server) buildTerminalModules() {
 				Store:           app.config.Store,
 				TabMetaStore:    app.tabMetaStore,
 				Hub:             app.hub,
+				RecordingStore:  app.recordings,
 				ServerStartedAt: app.startedAt,
 			})...)
 	}

@@ -73,6 +73,7 @@ const (
 // includedPrefixes are key patterns always persisted.
 var includedPrefixes = []string{
 	"terminal:meta:",
+	"terminal:recording:",
 	"terminal:ui-state", // matches per-workspace "terminal:ui-state:{wsID}" hashes via HasPrefix
 	"ws:",               // matches ws:{wsID}:issue:tabs:* and ws:{wsID}:issue:sessions:*
 }

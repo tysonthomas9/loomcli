@@ -17,6 +17,10 @@ const xtermState = vi.hoisted(() => {
     fitCount: 0,
     onReady: null as null | ((handle: unknown) => void),
     onResize: null as null | ((cols: number, rows: number) => void),
+    rendererProps: null as null | {
+      scrollbackLines?: number;
+      allowParentWheelScroll?: boolean;
+    },
     handle: null as unknown as {
       write: ReturnType<typeof vi.fn>;
       focus: ReturnType<typeof vi.fn>;
@@ -43,14 +47,18 @@ vi.mock("../XTermRenderer", async () => {
     onReady: (handle: unknown) => void;
     onDispose: (handle: unknown) => void;
     onResize: (cols: number, rows: number) => void;
+    scrollbackLines?: number;
+    allowParentWheelScroll?: boolean;
   }) {
+    const { onDispose } = props;
     xtermState.onReady = props.onReady;
     xtermState.onResize = props.onResize;
+    xtermState.rendererProps = props;
     React.useEffect(
       () => () => {
-        props.onDispose(xtermState.handle);
+        onDispose(xtermState.handle);
       },
-      [props.onDispose],
+      [onDispose],
     );
     return React.createElement("div", { "data-testid": "mock-xterm" });
   }
@@ -125,6 +133,8 @@ describe("TerminalInstance", () => {
     xtermState.fitCount = 0;
     xtermState.onReady = null;
     xtermState.onResize = null;
+    xtermState.rendererProps = null;
+    localStorage.removeItem("terminal.history.mode");
     xtermState.handle.write.mockClear();
     xtermState.handle.focus.mockClear();
     xtermState.handle.scrollToBottom.mockClear();
@@ -154,6 +164,43 @@ describe("TerminalInstance", () => {
       expect(view.queryByTestId("mock-xterm")).not.toBeNull();
     },
   );
+
+  it("gives the parent sole wheel and scrollback ownership in virtual mode", async () => {
+    const view = render(
+      <TerminalInstance
+        sessionName="shell-virtual"
+        backendName="shell"
+        isActive
+      />,
+    );
+    await waitFor(() => expect(xtermState.rendererProps).not.toBeNull());
+
+    expect(xtermState.rendererProps?.scrollbackLines).toBe(0);
+    expect(xtermState.rendererProps?.allowParentWheelScroll).toBe(true);
+    expect(view.getByTestId("terminal-history-scroller")).toBeTruthy();
+    expect(
+      view.getByTestId("terminal-wrapper").getAttribute("data-history-mode"),
+    ).toBe("virtual");
+  });
+
+  it("keeps classic mode on xterm's default scrollback and input path", async () => {
+    localStorage.setItem("terminal.history.mode", "classic");
+    const view = render(
+      <TerminalInstance
+        sessionName="shell-classic"
+        backendName="shell"
+        isActive
+      />,
+    );
+    await waitFor(() => expect(xtermState.rendererProps).not.toBeNull());
+
+    expect(xtermState.rendererProps?.scrollbackLines).toBeUndefined();
+    expect(xtermState.rendererProps?.allowParentWheelScroll).toBe(false);
+    expect(view.queryByTestId("terminal-history-scroller")).toBeNull();
+    expect(
+      view.getByTestId("terminal-wrapper").getAttribute("data-history-mode"),
+    ).toBe("classic");
+  });
 
   it("fits the visible pane before opening its first WebSocket", async () => {
     render(

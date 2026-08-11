@@ -2741,6 +2741,51 @@ type TabPutRequest struct {
 	SortOrder int    `json:"sort_order"`
 }
 
+// TerminalHistoryLine defines model for TerminalHistoryLine.
+type TerminalHistoryLine struct {
+	Cols int                  `json:"cols"`
+	I    int64                `json:"i"`
+	Runs []TerminalHistoryRun `json:"runs"`
+	T    int64                `json:"t"`
+}
+
+// TerminalHistoryMeta defines model for TerminalHistoryMeta.
+type TerminalHistoryMeta struct {
+	AltScreen       bool  `json:"altScreen"`
+	Closed          bool  `json:"closed"`
+	Cols            int   `json:"cols"`
+	FirstScreenLine int64 `json:"firstScreenLine"`
+	Gaps            int64 `json:"gaps"`
+
+	// Generation Current opaque PTY-lifetime identity; pass it on every history range request.
+	Generation     string `json:"generation"`
+	HistoryLimited bool   `json:"historyLimited"`
+	Rows           int    `json:"rows"`
+	StartedAt      int64  `json:"startedAt"`
+	TotalLines     int64  `json:"totalLines"`
+
+	// UnhandledSequences Bounded diagnostics for parsed terminal escape sequences the focused recorder did not implement. Count is exact; prefixes is a bounded heavy-hitter map.
+	UnhandledSequences TerminalUnhandledSequences `json:"unhandledSequences"`
+}
+
+// TerminalHistoryResponse A bounded row-only range. Mutable recording coordinates are served by TerminalHistoryMeta.
+type TerminalHistoryResponse struct {
+	// Generation Opaque PTY-lifetime identity for every row in this response.
+	Generation string                `json:"generation"`
+	Lines      []TerminalHistoryLine `json:"lines"`
+}
+
+// TerminalHistoryRun defines model for TerminalHistoryRun.
+type TerminalHistoryRun struct {
+	Bg        *string `json:"bg,omitempty"`
+	Bold      *bool   `json:"bold,omitempty"`
+	Fg        *string `json:"fg,omitempty"`
+	Inverse   *bool   `json:"inverse,omitempty"`
+	Italic    *bool   `json:"italic,omitempty"`
+	Text      string  `json:"text"`
+	Underline *bool   `json:"underline,omitempty"`
+}
+
 // TerminalSessionInfo defines model for TerminalSessionInfo.
 type TerminalSessionInfo struct {
 	// Created Unix timestamp
@@ -2762,6 +2807,12 @@ type TerminalSpawnData struct {
 type TerminalSpawnRequest struct {
 	Backend     string `json:"backend"`
 	SessionName string `json:"session_name"`
+}
+
+// TerminalUnhandledSequences Bounded diagnostics for parsed terminal escape sequences the focused recorder did not implement. Count is exact; prefixes is a bounded heavy-hitter map.
+type TerminalUnhandledSequences struct {
+	Count    int64            `json:"count"`
+	Prefixes map[string]int64 `json:"prefixes"`
 }
 
 // TranscriptEntry Single transcript entry from a session
@@ -3434,6 +3485,16 @@ type GetTerminalSessionStatusParams struct {
 // ListSessionsByIssueParams defines parameters for ListSessionsByIssue.
 type ListSessionsByIssueParams struct {
 	IssueId *string `form:"issue_id,omitempty" json:"issue_id,omitempty"`
+}
+
+// GetTerminalHistoryParams defines parameters for GetTerminalHistory.
+type GetTerminalHistoryParams struct {
+	// Generation Opaque PTY-lifetime identity reported by the no-store metadata endpoint.
+	Generation string `form:"generation" json:"generation"`
+	From       *int64 `form:"from,omitempty" json:"from,omitempty"`
+
+	// Count Number of rows to return; values above 1000 are clamped.
+	Count *int `form:"count,omitempty" json:"count,omitempty"`
 }
 
 // StartTerminalSetupJSONBody defines parameters for StartTerminalSetup.

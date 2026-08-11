@@ -32,6 +32,11 @@ import {
 import type { ReconnectOverlayState } from "./ReconnectingOverlay";
 import { connectWebSocket, encodeResize } from "./terminalConnection";
 import type { XTermRendererHandle } from "./XTermRenderer";
+import { getTerminalHistoryMode } from "./terminalHistoryMode";
+import {
+  VirtualTerminalHistory,
+  type VirtualTerminalHistoryHandle,
+} from "./VirtualTerminalHistory";
 import styles from "./TerminalInstance.module.css";
 
 const LazyXTermRenderer = lazy(async () => {
@@ -136,8 +141,12 @@ export const TerminalInstance = forwardRef<
 ) {
   const { workspaceId } = useWorkspaceContext();
   const xtermInstanceRef = useRef<XTermRendererHandle | null>(null);
+  const virtualHistoryRef = useRef<VirtualTerminalHistoryHandle | null>(null);
   const pendingRendererWritesRef = useRef<Array<string | Uint8Array>>([]);
   const terminalSizeRef = useRef({ cols: 80, rows: 24 });
+  const historyModeRef = useRef(getTerminalHistoryMode());
+  const [firstScreenLine, setFirstScreenLine] = useState<number | undefined>();
+  const [recordingEpoch, setRecordingEpoch] = useState(0);
 
   const syncViewportToBottom = useCallback(() => {
     xtermInstanceRef.current?.scrollToBottom();
@@ -282,6 +291,8 @@ export const TerminalInstance = forwardRef<
         () => {
           clearReconnectTimers();
           onReconnectStateChangeRef.current?.(null);
+          setFirstScreenLine(undefined);
+          setRecordingEpoch((epoch) => epoch + 1);
           if (!initialViewportSyncDoneRef.current) {
             initialViewportSyncDoneRef.current = true;
             syncViewportToBottom();
@@ -317,6 +328,7 @@ export const TerminalInstance = forwardRef<
           onReconnectStateChangeRef.current?.(null);
         },
         terminalSizeRef.current,
+        (line) => setFirstScreenLine(line),
       );
       wsCleanupRef.current = cleanup;
     },
@@ -437,6 +449,7 @@ export const TerminalInstance = forwardRef<
   const handleData = useCallback(
     (data: string) => {
       if (!writable) return;
+      virtualHistoryRef.current?.scrollToBottom();
       const ws = wsRef.current;
       if (ws?.readyState === WebSocket.OPEN) {
         ws.send(data);
@@ -564,11 +577,32 @@ export const TerminalInstance = forwardRef<
         if (!writable) return;
         const ws = wsRef.current;
         if (ws?.readyState === WebSocket.OPEN) {
+          virtualHistoryRef.current?.scrollToBottom();
           ws.send(text);
         }
       },
     }),
     [focus, clearReconnectTimers, writable],
+  );
+
+  const renderer = (
+    <Suspense
+      fallback={
+        <div className={styles.xtermContainer} data-testid="xterm-loading" />
+      }
+    >
+      <LazyXTermRenderer
+        className={styles.xtermContainer}
+        onReady={handleXTermReady}
+        onDispose={handleXTermDispose}
+        onData={handleData}
+        onBinary={handleBinary}
+        onResize={handleResize}
+        onFocus={() => onTerminalFocusRef.current?.()}
+        scrollbackLines={historyModeRef.current === "virtual" ? 0 : undefined}
+        allowParentWheelScroll={historyModeRef.current === "virtual"}
+      />
+    </Suspense>
   );
 
   return (
@@ -577,22 +611,21 @@ export const TerminalInstance = forwardRef<
       data-testid="terminal-wrapper"
       data-terminal-input
       data-terminal-renderer="xterm"
+      data-history-mode={historyModeRef.current}
     >
-      <Suspense
-        fallback={
-          <div className={styles.xtermContainer} data-testid="xterm-loading" />
-        }
-      >
-        <LazyXTermRenderer
-          className={styles.xtermContainer}
-          onReady={handleXTermReady}
-          onDispose={handleXTermDispose}
-          onData={handleData}
-          onBinary={handleBinary}
-          onResize={handleResize}
-          onFocus={() => onTerminalFocusRef.current?.()}
-        />
-      </Suspense>
+      {historyModeRef.current === "virtual" ? (
+        <VirtualTerminalHistory
+          ref={virtualHistoryRef}
+          sessionName={sessionName}
+          isActive={isActive}
+          recordingEpoch={recordingEpoch}
+          firstScreenLine={firstScreenLine}
+        >
+          {renderer}
+        </VirtualTerminalHistory>
+      ) : (
+        renderer
+      )}
     </div>
   );
 });

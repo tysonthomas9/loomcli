@@ -147,6 +147,8 @@ type PTYManager struct {
 	env   []string // cached environment including TERM=xterm-256color
 	cwd   string   // initial working directory for spawned shells (required; no default)
 
+	recordingStore *RecordingStore
+
 	max     int
 	counter atomic.Uint64
 
@@ -208,6 +210,14 @@ func NewPTYManager(command string, maxSessions int, cwd string) *PTYManager {
 	m.reaperWG.Add(1)
 	go m.reapLoop()
 	return m
+}
+
+// SetRecordingStore enables durable recording for every subsequently-created
+// local PTY session. Existing sessions are deliberately not retrofitted.
+func (m *PTYManager) SetRecordingStore(store *RecordingStore) {
+	m.mu.Lock()
+	m.recordingStore = store
+	m.mu.Unlock()
 }
 
 // SetGracePeriod overrides the post-detach grace period before a session is
@@ -275,7 +285,7 @@ func (m *PTYManager) AttachSession(key SessionKey, cols, rows uint16, launch *ta
 		m.mu.Unlock()
 
 		if existed {
-			_ = pty.Setsize(sess.pty, &pty.Winsize{Cols: cols, Rows: rows})
+			_ = sess.resize(cols, rows)
 		}
 
 		sess.cancelKillTimer()
@@ -326,7 +336,7 @@ func (m *PTYManager) EnsureSession(key SessionKey, cols, rows uint16, argv []str
 	}
 	m.mu.Unlock()
 
-	_ = pty.Setsize(sess.pty, &pty.Winsize{Cols: cols, Rows: rows})
+	_ = sess.resize(cols, rows)
 	sess.cancelKillTimer()
 	return false, nil
 }
@@ -370,7 +380,20 @@ func (m *PTYManager) spawnSession(key SessionKey, cols, rows uint16, launch *tab
 		return nil, fmt.Errorf("pty.StartWithSize: %w", err)
 	}
 
-	sess := newPtySession(key, ptmx, cmd)
+	var recorder *SessionRecorder
+	if m.recordingStore != nil {
+		recorder, err = m.recordingStore.StartRecording(key, cols, rows)
+		if err != nil {
+			_ = ptmx.Close()
+			if cmd.Process != nil {
+				_ = cmd.Process.Kill()
+				_ = cmd.Wait()
+			}
+			return nil, fmt.Errorf("start terminal recording: %w", err)
+		}
+	}
+
+	sess := newPtySession(key, ptmx, cmd, recorder)
 	go sess.drain(m)
 	return sess, nil
 }

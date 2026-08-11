@@ -258,6 +258,35 @@ describe("connectWebSocket", () => {
     expect(m.write).not.toHaveBeenCalled();
   });
 
+  it("intercepts terminal history coordinates instead of writing them to xterm", async () => {
+    const m = makeMocks();
+    const onHistoryCoordinate = vi.fn();
+    connectWebSocket(
+      "ws1",
+      "session1",
+      m.write,
+      m.wsRef,
+      m.setConnectionState,
+      undefined,
+      undefined,
+      m.onOutput,
+      undefined,
+      undefined,
+      { cols: 80, rows: 24 },
+      onHistoryCoordinate,
+    );
+
+    shared.resolveToken!({ token: "tok" });
+    await vi.waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    MockWebSocket.instances[0]?.simulateMessage(
+      JSON.stringify({ type: "terminal-history", firstScreenLine: 1234 }),
+    );
+    await waitForBufferedFlush();
+
+    expect(onHistoryCoordinate).toHaveBeenCalledWith(1234);
+    expect(m.write).not.toHaveBeenCalled();
+  });
+
   it("normal lifecycle: connects, receives data, and cleans up", async () => {
     const m = makeMocks();
     const cleanup = connectWebSocket(

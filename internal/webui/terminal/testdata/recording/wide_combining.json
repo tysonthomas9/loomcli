@@ -1,0 +1,10 @@
+{
+  "name": "wide-cjk-and-combining-marks",
+  "cols": 10,
+  "rows": 3,
+  "oracleSkip": "vt10x treats every Unicode code point as one cell and cannot represent wide or combining cells",
+  "events": [
+    {"data": "A界éZ\r\n"},
+    {"data": "界́X\r\nend"}
+  ]
+}

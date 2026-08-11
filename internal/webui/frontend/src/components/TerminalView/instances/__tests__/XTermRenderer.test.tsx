@@ -23,6 +23,12 @@ const xtermMocks = vi.hoisted(() => {
     focus = vi.fn();
     scrollToBottom = vi.fn();
     scrollToLine = vi.fn();
+    wheelHandler: ((event: WheelEvent) => boolean) | undefined;
+    attachCustomWheelEventHandler = vi.fn(
+      (handler: (event: WheelEvent) => boolean) => {
+        this.wheelHandler = handler;
+      },
+    );
     buffer = {
       active: { baseY: 0, viewportY: 0, cursorY: 0 },
     };
@@ -105,6 +111,7 @@ describe("XTermRenderer", () => {
     const terminal = xtermMocks.MockTerminal.instances[0];
     expect(terminal).toBeDefined();
     expect(terminal?.options.scrollback).toBe(10_000);
+    expect(terminal?.attachCustomWheelEventHandler).not.toHaveBeenCalled();
 
     const handle = onReady.mock.calls[0]?.[0] as XTermRendererHandle;
     act(() => terminal?.dataListener?.("hello"));
@@ -149,6 +156,32 @@ describe("XTermRenderer", () => {
     expect(terminal?.binaryDisposable.dispose).toHaveBeenCalledOnce();
     expect(terminal?.resizeDisposable.dispose).toHaveBeenCalledOnce();
     expect(terminal?.dispose).toHaveBeenCalledOnce();
+  });
+
+  it("leaves wheel events to the scrollable parent when requested", async () => {
+    const onReady = vi.fn();
+    const view = render(
+      <XTermRenderer
+        onReady={onReady}
+        onDispose={vi.fn()}
+        onData={vi.fn()}
+        onBinary={vi.fn()}
+        onResize={vi.fn()}
+        scrollbackLines={0}
+        allowParentWheelScroll
+      />,
+    );
+
+    await waitFor(() => expect(onReady).toHaveBeenCalledOnce());
+    const terminal = xtermMocks.MockTerminal.instances[0];
+    expect(terminal?.options.scrollback).toBe(0);
+    expect(terminal?.attachCustomWheelEventHandler).toHaveBeenCalledOnce();
+
+    const event = new WheelEvent("wheel", { cancelable: true, deltaY: -100 });
+    expect(terminal?.wheelHandler?.(event)).toBe(false);
+    expect(event.defaultPrevented).toBe(false);
+
+    view.unmount();
   });
 
   it("keeps a scrolled-up buffer line anchored while fitting", async () => {

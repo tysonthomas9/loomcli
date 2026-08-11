@@ -98,6 +98,7 @@ export function connectWebSocket(
   onBackendCrash?: (reason: string) => void,
   onSessionKilled?: () => void,
   initialSize?: { cols: number; rows: number },
+  onHistoryCoordinate?: (firstScreenLine: number) => void,
 ): () => void {
   setConnectionState("connecting");
 
@@ -212,6 +213,21 @@ export function connectWebSocket(
       ws.onmessage = (ev: MessageEvent) => {
         if (cancelled) return;
         if (typeof ev.data === "string") {
+          try {
+            const control = JSON.parse(ev.data) as {
+              type?: string;
+              firstScreenLine?: number;
+            };
+            if (
+              control.type === "terminal-history" &&
+              typeof control.firstScreenLine === "number"
+            ) {
+              onHistoryCoordinate?.(control.firstScreenLine);
+              return;
+            }
+          } catch {
+            // Non-JSON text frames remain valid terminal output.
+          }
           pendingWrites.push(ev.data);
         } else if (ev.data instanceof ArrayBuffer) {
           pendingWrites.push(new Uint8Array(ev.data));

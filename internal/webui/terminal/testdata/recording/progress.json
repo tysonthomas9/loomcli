@@ -1,0 +1,10 @@
+{
+  "name": "carriage-return-progress-and-erase-line",
+  "cols": 24,
+  "rows": 3,
+  "events": [
+    {"data": "\u001b]0;loom progress\u0007\u001b[?25lDownloading 0%\r"},
+    {"data": "\u001b[2KDownloading 50%\r"},
+    {"data": "\u001b[KDone\u001b[?25h\r\nnext"}
+  ]
+}

@@ -1,6 +1,7 @@
 package svcimpl
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -21,12 +22,13 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
+	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
 // Compile-time check.
 var _ service.SessionService = (*sessionServiceImpl)(nil)
 
-var userHomeDir = os.UserHomeDir
+var recordingRootResolver = terminal.DefaultRecordingRoot
 
 // sessionServiceImpl is the concrete implementation of SessionService.
 type sessionServiceImpl struct {
@@ -885,16 +887,29 @@ func findSessionRecord(records []sessionhistory.SessionRecord, id string) *sessi
 
 // readScrollbackFile validates the path, reads the file, and returns the result.
 func readScrollbackFile(scrollbackPath string) (*service.SessionScrollbackResult, error) {
-	homeDir, err := userHomeDir()
-	if err != nil {
-		return nil, service.ErrInternal("resolve home directory", err)
+	recordingRoot, err := recordingRootResolver()
+	if err != nil || strings.TrimSpace(recordingRoot) == "" {
+		return nil, service.ErrInternal("resolve loom directory", errors.New("empty loom directory"))
 	}
-	if strings.TrimSpace(homeDir) == "" {
-		return nil, service.ErrInternal("resolve home directory", errors.New("empty home directory"))
-	}
-	expectedPrefix := filepath.Clean(homeDir+"/.loom/session-scrollback") + string(os.PathSeparator)
+	// The recording store owns the recordings root, so ask it rather than
+	// resolving the loom dir a second way here; the legacy scrollback files
+	// are its sibling under the same loom dir. TestScrollbackRootsAreSiblings
+	// pins that relationship so it cannot drift silently.
+	loomDir := filepath.Dir(recordingRoot)
 	cleanPath := filepath.Clean(scrollbackPath)
-	if !strings.HasPrefix(cleanPath+string(os.PathSeparator), expectedPrefix) {
+	allowedRoots := []string{
+		filepath.Join(loomDir, "session-scrollback"),
+		recordingRoot,
+	}
+	allowed := false
+	for _, root := range allowedRoots {
+		rel, relErr := filepath.Rel(filepath.Clean(root), cleanPath)
+		if relErr == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
 		return nil, service.ErrValidation("invalid scrollback path")
 	}
 
@@ -908,6 +923,10 @@ func readScrollbackFile(scrollbackPath string) (*service.SessionScrollbackResult
 	}
 	defer f.Close()
 
+	if filepath.Base(cleanPath) == "lines.jsonl" {
+		return readRecordedScrollback(f)
+	}
+
 	content, err := io.ReadAll(f)
 	if err != nil {
 		logger.Error("failed to read scrollback file", "path", scrollbackPath, "err", err)
@@ -920,4 +939,28 @@ func readScrollbackFile(scrollbackPath string) (*service.SessionScrollbackResult
 		lines = strings.Count(text, "\n") + 1
 	}
 	return &service.SessionScrollbackResult{Content: text, Lines: lines}, nil
+}
+
+func readRecordedScrollback(r io.Reader) (*service.SessionScrollbackResult, error) {
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 4<<10), 1<<20)
+	var text strings.Builder
+	lines := 0
+	for scanner.Scan() {
+		var line terminal.RecordingLine
+		if err := json.Unmarshal(scanner.Bytes(), &line); err != nil {
+			return nil, service.ErrInternal("failed to decode terminal recording", err)
+		}
+		if lines > 0 {
+			text.WriteByte('\n')
+		}
+		for _, run := range line.Runs {
+			text.WriteString(run.Text)
+		}
+		lines++
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, service.ErrInternal("failed to read terminal recording", err)
+	}
+	return &service.SessionScrollbackResult{Content: text.String(), Lines: lines}, nil
 }
