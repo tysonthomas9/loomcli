@@ -8,10 +8,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/app/agentsbootstrap"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
-	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr/admissionstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/infra/workspacecatalog"
@@ -37,8 +35,11 @@ type repositoryCheckoutMaterializer interface {
 // mode. Existing-dir ("empty") creation writes workspace/repo metadata to the
 // store as the source of truth and records only local checkout paths in
 // ~/.loom/state.json.
-func BuildStoreBackedCreateWorkspace(s storepkg.Store) workspacecoord.WorkspaceCreateFn {
-	return BuildStoreBackedCreateWorkspaceWithSourceControl(s, nil)
+func BuildStoreBackedCreateWorkspace(
+	s storepkg.Store,
+	agentsCommands ManagedAgentsCommands,
+) workspacecoord.WorkspaceCreateFn {
+	return BuildStoreBackedCreateWorkspaceWithSourceControl(s, agentsCommands, nil)
 }
 
 // BuildStoreBackedCreateWorkspaceWithSourceControl is the UI/runtime variant.
@@ -47,10 +48,12 @@ func BuildStoreBackedCreateWorkspace(s storepkg.Store) workspacecoord.WorkspaceC
 // never cross this boundary.
 func BuildStoreBackedCreateWorkspaceWithSourceControl(
 	s storepkg.Store,
+	agentsCommands ManagedAgentsCommands,
 	materializer repositoryCheckoutMaterializer,
 ) workspacecoord.WorkspaceCreateFn {
 	return BuildStoreBackedCreateWorkspaceWithAdmission(
 		s,
+		agentsCommands,
 		nil,
 		nil,
 		materializer,
@@ -63,6 +66,7 @@ func BuildStoreBackedCreateWorkspaceWithSourceControl(
 // binds that admission to this machine's checkout root.
 func BuildStoreBackedCreateWorkspaceWithAdmission(
 	s storepkg.Store,
+	agentsCommands ManagedAgentsCommands,
 	admissions infrafleetdb.RepositoryAdmissionTransport,
 	journal *RepositoryAdmissionJournal,
 	materializer repositoryCheckoutMaterializer,
@@ -74,6 +78,7 @@ func BuildStoreBackedCreateWorkspaceWithAdmission(
 	operations := NewStoreBackedWorkspaceAdmissionOperationsWithWorkspace(
 		s,
 		catalog,
+		agentsCommands,
 		admissions,
 		journal,
 		materializer,
@@ -87,8 +92,11 @@ func BuildStoreBackedCreateWorkspaceWithAdmission(
 // BuildStoreBackedAddRepos returns a repo attachment function for fleet-db
 // store mode. It creates git worktrees, then registers those repos in the
 // store and local state cache as one rollback-aware operation.
-func BuildStoreBackedAddRepos(s storepkg.Store) workspacecoord.WorkspaceAddReposFn {
-	return BuildStoreBackedAddReposWithSourceControl(s, nil)
+func BuildStoreBackedAddRepos(
+	s storepkg.Store,
+	agentsCommands ManagedAgentsCommands,
+) workspacecoord.WorkspaceAddReposFn {
+	return BuildStoreBackedAddReposWithSourceControl(s, agentsCommands, nil)
 }
 
 // BuildStoreBackedAddReposWithSourceControl is the UI/runtime variant. Local
@@ -96,10 +104,12 @@ func BuildStoreBackedAddRepos(s storepkg.Store) workspacecoord.WorkspaceAddRepos
 // the credential-free Source Control materializer.
 func BuildStoreBackedAddReposWithSourceControl(
 	s storepkg.Store,
+	agentsCommands ManagedAgentsCommands,
 	materializer repositoryCheckoutMaterializer,
 ) workspacecoord.WorkspaceAddReposFn {
 	return BuildStoreBackedAddReposWithAdmission(
 		s,
+		agentsCommands,
 		nil,
 		nil,
 		materializer,
@@ -111,6 +121,7 @@ func BuildStoreBackedAddReposWithSourceControl(
 // FleetDB Repo records until one owner-fenced Commit publishes the full set.
 func BuildStoreBackedAddReposWithAdmission(
 	s storepkg.Store,
+	agentsCommands ManagedAgentsCommands,
 	admissions infrafleetdb.RepositoryAdmissionTransport,
 	journal *RepositoryAdmissionJournal,
 	materializer repositoryCheckoutMaterializer,
@@ -122,6 +133,7 @@ func BuildStoreBackedAddReposWithAdmission(
 	operations := NewStoreBackedWorkspaceAdmissionOperationsWithWorkspace(
 		s,
 		catalog,
+		agentsCommands,
 		admissions,
 		journal,
 		materializer,
@@ -135,8 +147,8 @@ func BuildStoreBackedAddReposWithAdmission(
 //nolint:cyclop,funlen,gocognit // Orchestrates filesystem, git, and store rollback steps for one workflow.
 func createStoreBackedEmptyWorkspace(
 	ctx context.Context,
-	s admissionstore.Store,
 	catalog workspacemodule.API,
+	agentsCommands ManagedAgentsCommands,
 	req workspacecoord.WorkspaceCreateRequest,
 ) (workspacecoord.WorkspaceCreateResult, error) {
 	if req.Type != "empty" {
@@ -209,7 +221,7 @@ func createStoreBackedEmptyWorkspace(
 			slog.Warn("failed to rollback store workspace create", "workspace", key, "err", err)
 		}
 	}
-	if err := seedBuiltInRoles(ctx, s, key, wsDir); err != nil {
+	if err := seedBuiltInRoles(ctx, agentsCommands, key, wsDir); err != nil {
 		rollbackStore()
 		cleanupWorktrees(wsPlan, created)
 		return workspacecoord.WorkspaceCreateResult{}, fmt.Errorf("seed built-in roles: %w", err)
@@ -436,7 +448,16 @@ func materializeAddReposWorktrees(
 // prompt_agent_missing_prompt). Writing the prompt file is best-effort: a write
 // failure logs and leaves PromptFile empty, and EnsureBuiltinRolePrompts
 // materializes it at the next serve start.
-func seedBuiltInRoles(ctx context.Context, s admissionstore.Store, key, wsDir string) error { //nolint:funlen // Built-in role seeding preserves exact definitions and per-role prompt repair behavior.
+//
+//nolint:funlen // Built-in role seeding preserves exact definitions and per-role prompt repair behavior.
+func seedBuiltInRoles(
+	ctx context.Context,
+	commands ManagedAgentsCommands,
+	key, wsDir string,
+) error {
+	if commands == nil {
+		return agents.ErrUnavailable
+	}
 	roles := []storepkg.RoleCreate{
 		{
 			WorkspaceKey: key,
@@ -457,13 +478,6 @@ func seedBuiltInRoles(ctx context.Context, s admissionstore.Store, key, wsDir st
 			Kind:         string(domain.RoleKindInteractive),
 			Description:  "Lead/orchestrator terminal",
 		},
-	}
-	commands, err := newManagedAgentsCommands(
-		s.Roles(),
-		s.AgentServices(),
-	)
-	if err != nil {
-		return err
 	}
 	for _, role := range roles {
 		if cause := context.Cause(ctx); cause != nil {
@@ -519,16 +533,16 @@ func seedRolePromptFile(wsDir, roleName string) string {
 // clobbered. Run once at serve start. Best-effort: a workspace without a local
 // path, a missing role, or a write/update failure is logged and skipped without
 // aborting the sweep.
-func EnsureBuiltinRolePrompts(ctx context.Context, s storepkg.Store) error {
+func EnsureBuiltinRolePrompts(
+	ctx context.Context,
+	s storepkg.Store,
+	commands ManagedAgentsCommands,
+) error {
 	if s == nil {
 		return nil
 	}
-	commands, err := newManagedAgentsCommands(
-		s.Roles(),
-		s.AgentServices(),
-	)
-	if err != nil {
-		return err
+	if commands == nil {
+		return agents.ErrUnavailable
 	}
 	workspaces, err := s.Workspaces().List(ctx)
 	if err != nil {
@@ -552,22 +566,19 @@ func EnsureBuiltinRolePrompts(ctx context.Context, s storepkg.Store) error {
 
 // ensureBuiltinRolePrompt materializes one builtin role's default prompt body
 // when (and only when) its PromptFile is empty.
-func ensureBuiltinRolePrompt(ctx context.Context, s storepkg.Store, key, wsDir, roleName string) {
-	commands, err := newManagedAgentsCommands(
-		s.Roles(),
-		s.AgentServices(),
-	)
-	if err != nil {
-		slog.Warn("failed to compose Agents role prompt repair", "role", roleName, "workspace", key, "err", err)
-		return
-	}
+func ensureBuiltinRolePrompt(
+	ctx context.Context,
+	s storepkg.Store,
+	commands ManagedAgentsCommands,
+	key, wsDir, roleName string,
+) {
 	ensureBuiltinRolePromptWithCommands(ctx, s, commands, key, wsDir, roleName)
 }
 
 func ensureBuiltinRolePromptWithCommands(
 	ctx context.Context,
 	s storepkg.Store,
-	commands agentsbootstrap.ManagedCommands,
+	commands ManagedAgentsCommands,
 	key, wsDir, roleName string,
 ) {
 	role, err := s.Roles().Get(ctx, key, roleName)

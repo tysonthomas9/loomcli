@@ -1,12 +1,14 @@
 package serveadapter
 
 import (
+	"context"
 	"fmt"
 	"os"
 
 	"github.com/tysonthomas9/loomcli/internal/app/agentprovisioning"
 	appserve "github.com/tysonthomas9/loomcli/internal/app/serve"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
 	"github.com/tysonthomas9/loomcli/internal/webui"
@@ -32,6 +34,26 @@ type AgentsCapability struct {
 	provisioning  *appserve.AgentProvisioningCapability
 	sourceControl *appserve.SourceControlCapability
 	workspaceList agentprovisioning.WorkspaceLister
+}
+
+func (capability *AgentsCapability) EnsureRole(
+	ctx context.Context,
+	command agents.EnsureRoleCommand,
+) (*agents.Role, error) {
+	if capability == nil || capability.capability == nil {
+		return nil, agents.ErrUnavailable
+	}
+	return capability.capability.EnsureRole(ctx, command)
+}
+
+func (capability *AgentsCapability) RepairRolePromptFile(
+	ctx context.Context,
+	command agents.RepairManagedRolePromptFileCommand,
+) (*agents.Role, bool, error) {
+	if capability == nil || capability.capability == nil {
+		return nil, false, agents.ErrUnavailable
+	}
+	return capability.capability.RepairRolePromptFile(ctx, command)
 }
 
 func (capability *AgentsCapability) AgentProvisioningCommands() agentprovisioning.Commands {

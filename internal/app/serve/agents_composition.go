@@ -44,6 +44,70 @@ func (capability *AgentsCapability) AgentsAPI() agents.API {
 	return capability.api
 }
 
+// EnsureRole implements workspace management's consumer-owned bootstrap port.
+// The application root derives exact system authority; workspace management
+// never receives the Agents issuer or a persistence adapter.
+func (capability *AgentsCapability) EnsureRole(
+	ctx context.Context,
+	command agents.EnsureRoleCommand,
+) (*agents.Role, error) {
+	auth, err := capability.workspaceBootstrapAuthority(
+		ctx, command.WorkspaceKey, agents.ActionEnsureManagedRole, command.RequestID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return capability.api.EnsureManagedRole(ctx, auth, command)
+}
+
+// RepairRolePromptFile implements workspace management's monotonic repair
+// port without exposing generic Role update authority.
+func (capability *AgentsCapability) RepairRolePromptFile(
+	ctx context.Context,
+	command agents.RepairManagedRolePromptFileCommand,
+) (*agents.Role, bool, error) {
+	auth, err := capability.workspaceBootstrapAuthority(
+		ctx, command.WorkspaceKey, agents.ActionRepairManagedRolePromptFile, command.RequestID,
+	)
+	if err != nil {
+		return nil, false, err
+	}
+	return capability.api.RepairManagedRolePromptFile(ctx, auth, command)
+}
+
+func (capability *AgentsCapability) workspaceBootstrapAuthority(
+	ctx context.Context,
+	workspace string,
+	action authority.Action,
+	requestID string,
+) (authority.SystemAuthority, error) {
+	if capability == nil || capability.api == nil || capability.issuer == nil {
+		return authority.SystemAuthority{}, agents.ErrUnavailable
+	}
+	if ctx == nil {
+		return authority.SystemAuthority{}, fmt.Errorf("workspace bootstrap authority context is required: %w", authority.ErrInvalidScope)
+	}
+	if err := ctx.Err(); err != nil {
+		return authority.SystemAuthority{}, err
+	}
+	workspace = strings.TrimSpace(workspace)
+	requestID = strings.TrimSpace(requestID)
+	if workspace == "" || requestID == "" {
+		return authority.SystemAuthority{}, fmt.Errorf("workspace bootstrap scope and request ID are required: %w", authority.ErrInvalidScope)
+	}
+	const subject = "workspace-bootstrap"
+	principal, err := capability.issuer.DeriveVerifiedPrincipal(authority.PrincipalClaims{
+		Subject: subject, Class: authority.ClassSystem, Workspace: workspace,
+		Actions: []authority.Action{action}, ExpiresAt: time.Now().Add(time.Minute),
+	})
+	if err != nil {
+		return authority.SystemAuthority{}, err
+	}
+	return capability.issuer.IssueSystem(
+		principal, workspace, action, subject+" exact request "+requestID,
+	)
+}
+
 func (capability *AgentsCapability) OperatorAuthorityResolver() workflowcataloghttp.OperatorAuthorityResolver {
 	if capability == nil {
 		return nil

@@ -30,6 +30,7 @@ func TestWorkspaceAdmissionCoordinatorPreparesDurablyBeforeMaterialization(t *te
 	}
 	operations := NewStoreBackedWorkspaceAdmissionOperations(
 		st,
+		managedAgentsForTest(st),
 		transport,
 		journal,
 		transport,
@@ -77,6 +78,7 @@ func TestWorkspaceAdmissionCoordinatorPreparesDurablyBeforeMaterialization(t *te
 	}
 	restarted := NewStoreBackedWorkspaceAdmissionOperations(
 		st,
+		managedAgentsForTest(st),
 		transport,
 		journal,
 		transport,
@@ -136,6 +138,7 @@ func TestWorkspaceAdmissionRuntimeRecoversRetryablePartialCheckout(t *testing.T)
 	transport.failNextMaterializeError = sourcecontrol.ErrUnavailable
 	first := NewStoreBackedWorkspaceAdmissionOperations(
 		st,
+		managedAgentsForTest(st),
 		transport,
 		journal,
 		transport,
@@ -152,6 +155,7 @@ func TestWorkspaceAdmissionRuntimeRecoversRetryablePartialCheckout(t *testing.T)
 
 	restarted := NewStoreBackedWorkspaceAdmissionOperations(
 		st,
+		managedAgentsForTest(st),
 		transport,
 		journal,
 		transport,
@@ -196,6 +200,7 @@ func TestWorkspaceAdmissionLeaseRenewalTracksOnlyActiveMaterialization(t *testin
 	}
 	operations := NewStoreBackedWorkspaceAdmissionOperations(
 		st,
+		managedAgentsForTest(st),
 		transport,
 		journal,
 		transport,
@@ -311,6 +316,7 @@ func TestWorkspaceAdmissionRuntimeRecoversUnstartedPreparedJobWithoutRenewingIt(
 	}
 	operations := NewStoreBackedWorkspaceAdmissionOperations(
 		st,
+		managedAgentsForTest(st),
 		transport,
 		journal,
 		transport,
@@ -401,6 +407,7 @@ func TestWorkspaceAdmissionRuntimeClaimsExpiredOwnerAfterHardCrash(t *testing.T)
 	}
 	first := NewStoreBackedWorkspaceAdmissionOperations(
 		st,
+		managedAgentsForTest(st),
 		transport,
 		journal,
 		transport,
@@ -426,6 +433,7 @@ func TestWorkspaceAdmissionRuntimeClaimsExpiredOwnerAfterHardCrash(t *testing.T)
 	// A new serve incarnation cannot steal a live lease.
 	restarted := NewStoreBackedWorkspaceAdmissionOperations(
 		st,
+		managedAgentsForTest(st),
 		transport,
 		journal,
 		transport,

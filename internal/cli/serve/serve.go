@@ -220,13 +220,6 @@ func runServe(cmd *cobra.Command, args []string) {
 		log.Fatalf("failed to open fleet-db store: %v", storeErr)
 	}
 	defer func() { _ = storeHandle.Close() }()
-	// Backfill TS-contract prompt bodies for the builtin plan/task roles in
-	// existing workspaces (idempotent; never clobbers a customized prompt), so
-	// the prompt-agent role-reuse lane works for workspaces created before the
-	// bodies were seeded. Best-effort — a failure logs and serve continues.
-	if err := workspacemgr.EnsureBuiltinRolePrompts(ctx, storeHandle.Store); err != nil {
-		slog.Warn("builtin role prompt backfill failed", "err", err)
-	}
 	issueBackendFn := cli.WorkspaceAwareIssueBackendForConfig(
 		storeHandle.URL(),
 		storeHandle.FleetDBClientAPIKey(),
@@ -250,6 +243,14 @@ func runServe(cmd *cobra.Command, args []string) {
 	cfg, capabilities, err := buildServerConfig(monitorHandlers, fleetState, storeHandle)
 	if err != nil {
 		log.Fatalf("failed to compose serve capabilities: %v", err)
+	}
+	// Backfill TS-contract prompt bodies only after the Agents capability has
+	// been composed. Workspace management receives owner commands, never the
+	// horizontal Role or Agent stores.
+	if err := workspacemgr.EnsureBuiltinRolePrompts(
+		ctx, storeHandle.Store, capabilities.agents,
+	); err != nil {
+		slog.Warn("builtin role prompt backfill failed", "err", err)
 	}
 	if cfg.AgentsCapability == nil || cfg.AgentsCapability.AgentsAPI() == nil {
 		log.Fatal("failed to compose monitor: canonical Agents directory is required")
@@ -650,6 +651,7 @@ func applyStoreHandleServerConfig(
 type serveCapabilitySet struct {
 	workflowCatalog     *serveadapter.WorkflowCatalogModule
 	automation          *serveadapter.AutomationCapability
+	agents              *serveadapter.AgentsCapability
 	interaction         *serveadapter.InteractionCapability
 	workspaceAdmissions *workspacemgr.StoreBackedWorkspaceAdmissionOperations
 	runtime             []serveadapter.RuntimeContributor
@@ -723,6 +725,7 @@ func buildServerConfig(
 			return webui.ServerConfig{}, serveCapabilitySet{}, agentsErr
 		}
 		cfg.AgentsCapability = agentsCapability
+		capabilities.agents = agentsCapability
 		gitOps.WithAgentQueries(agentsCapability.AgentsAPI())
 		cfg.SourceControl = agentsCapability.SourceControlMaterializer()
 		cfg.WorkspaceSourceControl = agentsCapability.RepositoryAdmissionMaterializer()
@@ -766,6 +769,7 @@ func buildServerConfig(
 		&cfg,
 		storeHandle,
 		repositoryAdmissionJournal,
+		capabilities.agents,
 	)
 	if workspaceAdmissions != nil {
 		capabilities.workspaceAdmissions = workspaceAdmissions
@@ -863,14 +867,18 @@ func applyFleetConfig(cfg *webui.ServerConfig, fs fleetState) {
 
 // applyWorkspaceConfig wires store-backed workspace operations into the webui
 // server. Nil-store serve leaves workspace management unavailable.
-func applyWorkspaceConfig(cfg *webui.ServerConfig) {
-	_ = applyWorkspaceConfigWithAdmission(cfg, nil, nil)
+func applyWorkspaceConfig(
+	cfg *webui.ServerConfig,
+	agentsCommands workspacemgr.ManagedAgentsCommands,
+) {
+	_ = applyWorkspaceConfigWithAdmission(cfg, nil, nil, agentsCommands)
 }
 
 func applyWorkspaceConfigWithAdmission(
 	cfg *webui.ServerConfig,
 	storeHandle *bootstrap.StoreHandle,
 	journal *workspacemgr.RepositoryAdmissionJournal,
+	agentsCommands workspacemgr.ManagedAgentsCommands,
 ) *workspacemgr.StoreBackedWorkspaceAdmissionOperations {
 	if cfg.Store == nil {
 		applyFleetInitialWorkspaceFallback(cfg, true)
@@ -887,10 +895,14 @@ func applyWorkspaceConfigWithAdmission(
 	operations := workspacemgr.NewStoreBackedWorkspaceAdmissionOperationsWithWorkspace(
 		cfg.Store,
 		cfg.WorkspaceCatalog,
+		agentsCommands,
 		admissions,
 		journal,
 		cfg.WorkspaceSourceControl,
 	)
+	if operations == nil {
+		return nil
+	}
 	cfg.WorkspaceCreateFn = operations.CreateWorkspace
 	cfg.WorkspaceAddReposFn = operations.AddWorkspaceRepos
 	if len(operations.RuntimeRegistrations()) > 0 {

@@ -15,6 +15,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/cli/serve/serveadapter"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr"
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
@@ -124,7 +125,14 @@ func runWorkspaceCreate(cmd *cobra.Command, args []string) {
 	repoPaths := parseRepoPaths()
 
 	if err := cmdstore.WithStore(cmd.Context(), func(ctx context.Context, h *bootstrap.StoreHandle) error {
-		create := workspacemgr.BuildStoreBackedCreateWorkspace(h.Store)
+		agentsCapability, err := serveadapter.BuildAgentsCapability(serveadapter.AgentsConfig{
+			StoreHandle: h,
+			Workspace:   wsName,
+		})
+		if err != nil {
+			return fmt.Errorf("compose Agents for workspace creation: %w", err)
+		}
+		create := workspacemgr.BuildStoreBackedCreateWorkspace(h.Store, agentsCapability)
 		result, err := create(ctx, workspacecoord.WorkspaceCreateRequest{
 			Name:   wsName,
 			Type:   "empty",

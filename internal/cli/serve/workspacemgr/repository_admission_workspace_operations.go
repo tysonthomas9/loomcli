@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
-	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr/admissionstore"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
@@ -88,7 +87,7 @@ func prepareStoreBackedCloneWorkspaceAdmission(
 //nolint:funlen,cyclop // One durable process coordinates FleetDB, local checkout state, roles, and terminal commit.
 func createStoreBackedCloneWorkspaceAdmission(
 	ctx context.Context,
-	s admissionstore.Store,
+	agentsCommands ManagedAgentsCommands,
 	req workspacecoord.WorkspaceCreateRequest,
 	process *repositoryAdmissionProcess,
 ) (workspacecoord.WorkspaceCreateResult, error) {
@@ -98,7 +97,7 @@ func createStoreBackedCloneWorkspaceAdmission(
 	}
 	if plan.record.State == "committed" {
 		process.forgetPreparedRepositoryAdmission(plan.record.AdmissionID)
-		return replayCommittedRepositoryAdmission(ctx, s, plan.record, plan.path, true)
+		return replayCommittedRepositoryAdmission(ctx, agentsCommands, plan.record, plan.path, true)
 	}
 	materializationCtx, ownedRecord, release, err := process.beginMaterialization(
 		ctx,
@@ -177,7 +176,7 @@ func createStoreBackedCloneWorkspaceAdmission(
 	if err := verifyOwnership(materializationCtx); err != nil {
 		return workspacecoord.WorkspaceCreateResult{}, err
 	}
-	if err := seedBuiltInRoles(materializationCtx, s, plan.key, plan.path); err != nil {
+	if err := seedBuiltInRoles(materializationCtx, agentsCommands, plan.key, plan.path); err != nil {
 		return workspacecoord.WorkspaceCreateResult{}, process.failMaterialization(
 			materializationCtx,
 			plan.record,
@@ -300,7 +299,6 @@ func prepareAddReposToStoreBackedWorkspaceAdmission(
 //nolint:funlen,cyclop // Existing-workspace admission spans local worktrees, Source Control, and one FleetDB commit.
 func addReposToStoreBackedWorkspaceAdmission(
 	ctx context.Context,
-	s admissionstore.Store,
 	catalog workspacemodule.API,
 	req workspacecoord.WorkspaceAddReposRequest,
 	process *repositoryAdmissionProcess,
@@ -318,7 +316,7 @@ func addReposToStoreBackedWorkspaceAdmission(
 		process.forgetPreparedRepositoryAdmission(plan.record.AdmissionID)
 		return replayCommittedRepositoryAdmission(
 			ctx,
-			s,
+			nil,
 			plan.record,
 			plan.workspacePath,
 			false,
@@ -564,7 +562,7 @@ func sameGitCommonDirectoryContext(
 
 func replayCommittedRepositoryAdmission(
 	ctx context.Context,
-	s admissionstore.Store,
+	agentsCommands ManagedAgentsCommands,
 	record *infrafleetdb.RepositoryAdmissionRecord,
 	workspacePath string,
 	seedRoles bool,
@@ -592,7 +590,7 @@ func replayCommittedRepositoryAdmission(
 	if seedRoles {
 		if err := seedBuiltInRoles(
 			ctx,
-			s,
+			agentsCommands,
 			record.WorkspaceKey,
 			workspacePath,
 		); err != nil {

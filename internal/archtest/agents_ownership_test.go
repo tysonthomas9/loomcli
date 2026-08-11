@@ -143,44 +143,6 @@ func TestMergePhase5AgentsMutationProfilesPreservesProfileEvidence(t *testing.T)
 	}
 }
 
-func TestPhase5AgentsCompatibilityStoreHasSingleCompositionImporter(t *testing.T) {
-	root, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
-		t.Fatal(err)
-	}
-	blockers, err := snapshotPhase5AgentsCompatibilityImportBlockers(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(blockers) != 0 {
-		t.Fatalf(
-			"Agents compatibility store imported outside %s: %v",
-			"the exact Agents compatibility composition edges",
-			blockers,
-		)
-	}
-}
-
-func TestPhase5AgentsCompatibilityStoreImportRatchetRejectsProductionBypass(t *testing.T) {
-	root := t.TempDir()
-	writePhase5AgentsOwnershipFixture(t, root, "internal/cli/serve/workspacemgr/agents_bootstrap.go", `package workspacemgr
-import _ "github.com/tysonthomas9/loomcli/internal/infra/agentsbootstrapstore"
-`)
-	writePhase5AgentsOwnershipFixture(t, root, "internal/webui/bypass.go", `package webui
-import _ "github.com/tysonthomas9/loomcli/internal/infra/agentsbootstrapstore"
-`)
-	writePhase5AgentsOwnershipFixture(t, root, "internal/webui/bypass_test.go", `package webui
-import _ "github.com/tysonthomas9/loomcli/internal/infra/agentsbootstrapstore"
-`)
-	blockers, err := snapshotPhase5AgentsCompatibilityImportBlockers(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(blockers) != 1 || !strings.HasPrefix(blockers[0], "internal/webui/bypass.go:") {
-		t.Fatalf("compatstore import blockers = %v, want production bypass only", blockers)
-	}
-}
-
 func TestCollectPhase5AgentsMutationPackageUsesDeclaringInterfaceType(t *testing.T) {
 	root := t.TempDir()
 	writePhase5AgentsOwnershipFixture(t, root, "go.mod", "module github.com/tysonthomas9/loomcli\n\ngo 1.24\n")
@@ -198,9 +160,6 @@ type AgentServiceStore interface {
 type RoleStore interface {
 	DeleteRole()
 	GetRole()
-}
-type RolePromptRepairStore interface {
-	SetPromptFileIfEmpty()
 }
 type AgentIdentityStore interface {
 	ArchiveAgent()
@@ -225,7 +184,6 @@ func mutate(
 	legacyRole store.RoleStore,
 	legacyAgent store.AgentServiceStore,
 	role agents.RoleStore,
-	prompt agents.RolePromptRepairStore,
 	identity agents.AgentIdentityStore,
 	desired agents.DesiredStateStore,
 	lifecycle agents.LifecycleStore,
@@ -237,7 +195,6 @@ func mutate(
 	legacyAgent.List()
 	role.DeleteRole()
 	role.GetRole()
-	prompt.SetPromptFileIfEmpty()
 	identity.ArchiveAgent()
 	desired.SetDesiredStateOwned()
 	lifecycle.ApplyLifecycle()
@@ -260,7 +217,7 @@ func mutate(
 		t.Fatalf("load fixture = %#v", loaded)
 	}
 	mutations := collectPhase5AgentsMutationPackage(root, loaded[0])
-	if len(mutations) != 8 {
+	if len(mutations) != 7 {
 		t.Fatalf("mutations = %#v, want one mutation per receiver family", mutations)
 	}
 	got := make(map[string]string, len(mutations))
@@ -271,7 +228,6 @@ func mutate(
 		legacyRoleStoreReceiver:          "Create",
 		legacyAgentServiceStoreReceiver:  "Update",
 		agentsRoleStoreReceiver:          "DeleteRole",
-		agentsRolePromptStoreReceiver:    "SetPromptFileIfEmpty",
 		agentsAgentIdentityStoreReceiver: "ArchiveAgent",
 		agentsDesiredStateStoreReceiver:  "SetDesiredStateOwned",
 		agentsLifecycleStoreReceiver:     "ApplyLifecycle",
@@ -296,12 +252,6 @@ func TestPhase5AgentsMutationAllowlistIsReceiverAndPathSpecific(t *testing.T) {
 			file:     "internal/modules/agents/role_management.go",
 		},
 		{
-			name:     "owned role prompt repair",
-			receiver: agentsRolePromptStoreReceiver,
-			method:   "SetPromptFileIfEmpty",
-			file:     "internal/infra/agentsbootstrapstore/adapter.go",
-		},
-		{
 			name:     "owned identity",
 			receiver: agentsAgentIdentityStoreReceiver,
 			method:   "UpdateAgent",
@@ -324,12 +274,6 @@ func TestPhase5AgentsMutationAllowlistIsReceiverAndPathSpecific(t *testing.T) {
 			receiver: agentsOwnershipStoreReceiver,
 			method:   "RenewOwnership",
 			file:     "internal/modules/agents/service.go",
-		},
-		{
-			name:     "bootstrap agent service adapter",
-			receiver: legacyAgentServiceStoreReceiver,
-			method:   "Create",
-			file:     "internal/infra/agentsbootstrapstore/adapter.go",
 		},
 	}
 	for _, family := range families {

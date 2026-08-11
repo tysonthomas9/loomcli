@@ -13,17 +13,16 @@ semantics:
     - vendor
     - worktrees
 ceilings:
-  total_packages: 169
+  total_packages: 167
   module_packages: 15
-  outside_module_packages: 154
-  one_file_packages: 49
-  one_or_two_file_packages: 70
+  outside_module_packages: 152
+  one_file_packages: 47
+  one_or_two_file_packages: 68
 packages:
   - internal/agenterr
   - internal/agentpolicy
   - internal/app/agentprovisioning
   - internal/app/agentprovisioning/fleetdb
-  - internal/app/agentsbootstrap
   - internal/app/connectorgrants
   - internal/app/prreviewer
   - internal/app/serve
@@ -94,7 +93,6 @@ packages:
   - internal/harness
   - internal/harness/fakeharness/mock
   - internal/httpclient
-  - internal/infra/agentsbootstrapstore
   - internal/infra/automationruntime
   - internal/infra/connectorsproviders
   - internal/infra/connectorsvault

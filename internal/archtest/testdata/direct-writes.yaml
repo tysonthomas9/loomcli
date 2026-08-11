@@ -1,11 +1,10 @@
 schema_version: 1
 status: complete
-source_head: 89d23035b2b50ea8f1ad0bcb5964f2df45543cc0
+source_head: aeeb29f93f40c8698d3bca0fca32468b9ad1bd39
 adapter_roots:
   - internal/app
   - internal/cli
   - internal/driver
-  - internal/infra/agentsbootstrapstore
   - internal/infra/sourcecontrolstackstore
   - internal/infra/workspacecatalog
   - internal/modules
@@ -35,8 +34,6 @@ owner_adapters:
     aggregate_owner: interaction
   - path: internal/cli/serve/workspacemgr
     aggregate_owner: workspace
-  - path: internal/infra/agentsbootstrapstore
-    aggregate_owner: agents
   - path: internal/infra/sourcecontrolstackstore
     aggregate_owner: sourcecontrol
   - path: internal/infra/workspacecatalog
@@ -77,7 +74,7 @@ persistence_packages:
     receiver_names: [LocalStore]
     receiver_suffixes: []
   - path: github.com/tysonthomas9/loomcli/internal/modules/agents
-    receiver_names: [AgentIdentityStore, BootstrapStore, DesiredStateStore, LifecycleStore, OwnershipStore, RolePromptRepairStore, RoleStore]
+    receiver_names: [AgentIdentityStore, DesiredStateStore, LifecycleStore, OwnershipStore, RoleStore]
     receiver_suffixes: []
   - path: github.com/tysonthomas9/loomcli/internal/modules/artifacts
     receiver_names: [QueryStore, SessionStore, Store]
@@ -120,9 +117,6 @@ method_sets:
   - name: agentprovisioning_progress
     read_only: [Get, ListPending]
     mutating: [Begin, Save]
-  - name: agents_bootstrap
-    read_only: []
-    mutating: [EnsureAgent, EnsureRole, RepairManagedRolePromptFile]
   - name: agents_identity
     read_only: []
     mutating: [ArchiveAgent, CreateAgent, UpdateAgent]
@@ -134,7 +128,7 @@ method_sets:
     mutating: [AcquireOwnership, ReleaseOwnership, RenewOwnership]
   - name: agents_roles
     read_only: [GetRole, ListRoles]
-    mutating: [CreateRole, DeleteRole, SetPromptFileIfEmpty, UpdateRole]
+    mutating: [CreateRole, DeleteRole, UpdateRole]
   - name: agents_state
     read_only: []
     mutating: [SetDesiredState, SetDesiredStateOwned]
@@ -520,10 +514,6 @@ receiver_surfaces:
     package: github.com/tysonthomas9/loomcli/internal/modules/agents
     method_set: agents_identity
     capability_owner: agents
-  - receiver: github.com/tysonthomas9/loomcli/internal/modules/agents.BootstrapStore
-    package: github.com/tysonthomas9/loomcli/internal/modules/agents
-    method_set: agents_bootstrap
-    capability_owner: agents
   - receiver: github.com/tysonthomas9/loomcli/internal/modules/agents.DesiredStateStore
     package: github.com/tysonthomas9/loomcli/internal/modules/agents
     method_set: agents_state
@@ -535,10 +525,6 @@ receiver_surfaces:
   - receiver: github.com/tysonthomas9/loomcli/internal/modules/agents.OwnershipStore
     package: github.com/tysonthomas9/loomcli/internal/modules/agents
     method_set: agents_ownership
-    capability_owner: agents
-  - receiver: github.com/tysonthomas9/loomcli/internal/modules/agents.RolePromptRepairStore
-    package: github.com/tysonthomas9/loomcli/internal/modules/agents
-    method_set: agents_roles
     capability_owner: agents
   - receiver: github.com/tysonthomas9/loomcli/internal/modules/agents.RoleStore
     package: github.com/tysonthomas9/loomcli/internal/modules/agents
@@ -873,14 +859,6 @@ function_surfaces:
     function: Default
     access: read-only
     capability_owner: sourcecontrol
-  - package: github.com/tysonthomas9/loomcli/internal/modules/agents
-    function: New
-    access: read-only
-    capability_owner: agents
-  - package: github.com/tysonthomas9/loomcli/internal/modules/agents
-    function: NewBootstrapService
-    access: read-only
-    capability_owner: agents
   - package: github.com/tysonthomas9/loomcli/internal/modules/agents
     function: NewWithLifecycle
     access: read-only
@@ -1651,24 +1629,6 @@ writes:
       method: FailRepositoryAdmission
       count: 1
       aggregate_owner: workspace
-      disposition: owner_adapter
-    - file: internal/infra/agentsbootstrapstore/adapter.go
-      receiver: github.com/tysonthomas9/loomcli/internal/modules/agents.RolePromptRepairStore
-      method: SetPromptFileIfEmpty
-      count: 1
-      aggregate_owner: agents
-      disposition: owner_adapter
-    - file: internal/infra/agentsbootstrapstore/adapter.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.AgentServiceStore
-      method: Create
-      count: 1
-      aggregate_owner: agents
-      disposition: owner_adapter
-    - file: internal/infra/agentsbootstrapstore/adapter.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.RoleStore
-      method: Create
-      count: 1
-      aggregate_owner: agents
       disposition: owner_adapter
     - file: internal/infra/sourcecontrolstackstore/stackstore.go
       receiver: '*github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore.LocalStore'

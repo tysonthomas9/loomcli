@@ -23,7 +23,7 @@ func TestSeedBuiltInRolesWritesPromptFiles(t *testing.T) {
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	if err := seedBuiltInRoles(ctx, st, "WS", wsDir); err != nil {
+	if err := seedBuiltInRoles(ctx, managedAgentsForTest(st), "WS", wsDir); err != nil {
 		t.Fatalf("seedBuiltInRoles: %v", err)
 	}
 
@@ -77,7 +77,7 @@ func TestEnsureBuiltinRolePromptIdempotency(t *testing.T) {
 	}
 
 	// Empty PromptFile → materialized.
-	ensureBuiltinRolePrompt(ctx, st, "WS", wsDir, "plan")
+	ensureBuiltinRolePrompt(ctx, st, managedAgentsForTest(st), "WS", wsDir, "plan")
 	planRole, err := st.Roles().Get(ctx, "WS", "plan")
 	if err != nil {
 		t.Fatalf("get plan role: %v", err)
@@ -101,7 +101,7 @@ func TestEnsureBuiltinRolePromptIdempotency(t *testing.T) {
 	if _, err := st.Roles().Update(ctx, "WS", "task", store.RoleUpdate{PromptFile: &customPath}); err != nil {
 		t.Fatalf("set custom PromptFile: %v", err)
 	}
-	ensureBuiltinRolePrompt(ctx, st, "WS", wsDir, "task")
+	ensureBuiltinRolePrompt(ctx, st, managedAgentsForTest(st), "WS", wsDir, "task")
 	taskRole, err := st.Roles().Get(ctx, "WS", "task")
 	if err != nil {
 		t.Fatalf("get task role: %v", err)
@@ -137,7 +137,7 @@ func TestEnsureBuiltinRolePromptsBackfillsExistingWorkspace(t *testing.T) {
 		t.Fatalf("save local workspace state: %v", err)
 	}
 
-	if err := EnsureBuiltinRolePrompts(ctx, st); err != nil {
+	if err := EnsureBuiltinRolePrompts(ctx, st, managedAgentsForTest(st)); err != nil {
 		t.Fatalf("EnsureBuiltinRolePrompts: %v", err)
 	}
 	planRole, err := st.Roles().Get(ctx, "WS", "plan")
@@ -150,7 +150,7 @@ func TestEnsureBuiltinRolePromptsBackfillsExistingWorkspace(t *testing.T) {
 
 	// Second sweep must not change the already-materialized PromptFile.
 	firstPath := planRole.PromptFile
-	if err := EnsureBuiltinRolePrompts(ctx, st); err != nil {
+	if err := EnsureBuiltinRolePrompts(ctx, st, managedAgentsForTest(st)); err != nil {
 		t.Fatalf("second EnsureBuiltinRolePrompts: %v", err)
 	}
 	planRole2, _ := st.Roles().Get(ctx, "WS", "plan")

@@ -85,7 +85,7 @@ func TestCheckedInManifestsAndRepository(t *testing.T) {
 	if got, want := report.MutationCommands, 107; got != want {
 		t.Fatalf("mutation commands = %d, want %d", got, want)
 	}
-	if got, want := report.DirectPersistenceWrites, 89; got != want {
+	if got, want := report.DirectPersistenceWrites, 86; got != want {
 		t.Fatalf("direct persistence-write rows = %d, want %d", got, want)
 	}
 	if got, want := report.RuntimeComponents, 71; got != want {
@@ -678,12 +678,14 @@ func TestRetiredHorizontalRootsCannotReturn(t *testing.T) {
 	}
 	retired := []string{
 		"internal/agentinbox",
+		"internal/app/agentsbootstrap",
 		"internal/authmode",
 		"internal/backend/backendtest",
 		"internal/backendnames",
 		"internal/cli/backendapi",
 		"internal/connector",
 		"internal/driver/runtypes",
+		"internal/infra/agentsbootstrapstore",
 		"internal/infra/artifactcatalog",
 		"internal/infra/connectorscatalog",
 		"internal/infra/sessionstoreadapter",
@@ -781,6 +783,53 @@ func TestRetiredDriverRunContractBridgeCannotReturn(t *testing.T) {
 	} {
 		if strings.Contains(string(content), forbidden) {
 			t.Errorf("retired Driver run-contract compatibility %q returned", forbidden)
+		}
+	}
+}
+
+func TestRetiredAgentsBootstrapCompatibilityCannotReturn(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "internal", "modules", "agents", "bootstrap.go")); !os.IsNotExist(statErr) {
+		t.Errorf("retired Agents bootstrap implementation returned: %v", statErr)
+	}
+	for _, relative := range []string{
+		"internal/modules/agents",
+		"internal/infra/memstore",
+	} {
+		files, globErr := filepath.Glob(filepath.Join(root, filepath.FromSlash(relative), "*.go"))
+		if globErr != nil {
+			t.Fatal(globErr)
+		}
+		for _, path := range files {
+			if strings.HasSuffix(path, "_test.go") {
+				continue
+			}
+			parsed, parseErr := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+			if parseErr != nil {
+				t.Fatal(parseErr)
+			}
+			for _, declaration := range parsed.Decls {
+				switch value := declaration.(type) {
+				case *ast.FuncDecl:
+					if value.Name.Name == "NewBootstrapService" || value.Name.Name == "SetPromptFileIfEmpty" {
+						t.Errorf("retired Agents bootstrap function %s returned in %s", value.Name.Name, path)
+					}
+				case *ast.GenDecl:
+					for _, specification := range value.Specs {
+						typeSpec, ok := specification.(*ast.TypeSpec)
+						if !ok {
+							continue
+						}
+						switch typeSpec.Name.Name {
+						case "BootstrapAPI", "BootstrapService", "BootstrapStore", "RolePromptRepairStore":
+							t.Errorf("retired Agents bootstrap type %s returned in %s", typeSpec.Name.Name, path)
+						}
+					}
+				}
+			}
 		}
 	}
 }

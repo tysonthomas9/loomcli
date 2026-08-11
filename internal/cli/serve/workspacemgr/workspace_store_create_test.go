@@ -521,6 +521,7 @@ func buildTestAddReposWithAdmission(
 	}
 	return BuildStoreBackedAddReposWithAdmission(
 		st,
+		managedAgentsForTest(st),
 		materializer,
 		journal,
 		materializer,
@@ -542,6 +543,7 @@ func buildTestCreateWithAdmission(
 	}
 	return BuildStoreBackedCreateWorkspaceWithAdmission(
 		st,
+		managedAgentsForTest(st),
 		materializer,
 		journal,
 		materializer,
@@ -554,7 +556,7 @@ func TestStoreBackedCreateEmptyWorkspaceCreatesStoreAndLocalState(t *testing.T) 
 
 	src := initTestGitRepo(t, t.TempDir(), "app")
 	st := memstore.New()
-	createFn := BuildStoreBackedCreateWorkspace(st)
+	createFn := BuildStoreBackedCreateWorkspace(st, managedAgentsForTest(st))
 	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
 
 	result, err := createFn(context.Background(), workspacecoord.WorkspaceCreateRequest{
@@ -640,7 +642,7 @@ func TestStoreBackedCreateEmptyWorkspaceRejectsCredentialBearingLocalRemote(t *t
 	)
 	st := memstore.New()
 	wsPath := filepath.Join(loomDir, "workspaces", "private-ws")
-	_, err := BuildStoreBackedCreateWorkspace(st)(
+	_, err := BuildStoreBackedCreateWorkspace(st, managedAgentsForTest(st))(
 		t.Context(),
 		workspacecoord.WorkspaceCreateRequest{
 			Name:  "private-ws",
@@ -676,7 +678,7 @@ func TestStoreBackedCreateEmptyWorkspaceAllowsExternalEmptyPath(t *testing.T) {
 	}
 
 	st := memstore.New()
-	createFn := BuildStoreBackedCreateWorkspace(st)
+	createFn := BuildStoreBackedCreateWorkspace(st, managedAgentsForTest(st))
 
 	result, err := createFn(context.Background(), workspacecoord.WorkspaceCreateRequest{
 		Name: "external-ws",
@@ -712,7 +714,7 @@ func TestStoreBackedCreateWorkspaceRejectsExternalNonEmptyPath(t *testing.T) {
 	}
 
 	st := memstore.New()
-	createFn := BuildStoreBackedCreateWorkspace(st)
+	createFn := BuildStoreBackedCreateWorkspace(st, managedAgentsForTest(st))
 
 	_, err := createFn(context.Background(), workspacecoord.WorkspaceCreateRequest{
 		Name: "external-ws",
@@ -790,7 +792,7 @@ func TestStoreBackedAddReposAttachesLocalRepoToEmptyWorkspace(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", loomDir)
 
 	st := memstore.New()
-	createFn := BuildStoreBackedCreateWorkspace(st)
+	createFn := BuildStoreBackedCreateWorkspace(st, managedAgentsForTest(st))
 	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
 
 	if _, err := createFn(context.Background(), workspacecoord.WorkspaceCreateRequest{
@@ -802,7 +804,7 @@ func TestStoreBackedAddReposAttachesLocalRepoToEmptyWorkspace(t *testing.T) {
 	}
 
 	src := initTestGitRepo(t, t.TempDir(), "api")
-	addFn := BuildStoreBackedAddRepos(st)
+	addFn := BuildStoreBackedAddRepos(st, managedAgentsForTest(st))
 	result, err := addFn(context.Background(), workspacecoord.WorkspaceAddReposRequest{
 		WorkspaceID: "MY-WS",
 		Repos:       []string{src},
@@ -844,7 +846,7 @@ func TestStoreBackedAddReposAutoDetectsLocalRepoDefaultBranch(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", loomDir)
 
 	st := memstore.New()
-	createFn := BuildStoreBackedCreateWorkspace(st)
+	createFn := BuildStoreBackedCreateWorkspace(st, managedAgentsForTest(st))
 	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
 	if _, err := createFn(context.Background(), workspacecoord.WorkspaceCreateRequest{
 		Name: "my-ws",
@@ -864,7 +866,7 @@ func TestStoreBackedAddReposAutoDetectsLocalRepoDefaultBranch(t *testing.T) {
 	runGit(t, src, "remote", "add", "origin", origin)
 	runGit(t, src, "push", "--set-upstream", "origin", "main")
 	runGit(t, src, "checkout", "-b", "feature/current-work")
-	addFn := BuildStoreBackedAddRepos(st)
+	addFn := BuildStoreBackedAddRepos(st, managedAgentsForTest(st))
 	if _, err := addFn(context.Background(), workspacecoord.WorkspaceAddReposRequest{
 		WorkspaceID: "MY-WS",
 		Repos:       []string{src},
@@ -963,7 +965,7 @@ func TestStoreBackedAddReposAttachesCheckedOutExistingDefaultBranch(t *testing.T
 	t.Setenv("LOOM_CONFIG_DIR", loomDir)
 
 	st := memstore.New()
-	createFn := BuildStoreBackedCreateWorkspace(st)
+	createFn := BuildStoreBackedCreateWorkspace(st, managedAgentsForTest(st))
 	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
 	if _, err := createFn(context.Background(), workspacecoord.WorkspaceCreateRequest{
 		Name: "my-ws",
@@ -976,7 +978,7 @@ func TestStoreBackedAddReposAttachesCheckedOutExistingDefaultBranch(t *testing.T
 	src := initTestGitRepo(t, t.TempDir(), "api")
 	branch := strings.TrimSpace(gitOutput(t, src, "branch", "--show-current"))
 	sourceSHA := strings.TrimSpace(gitOutput(t, src, "rev-parse", "HEAD"))
-	addFn := BuildStoreBackedAddRepos(st)
+	addFn := BuildStoreBackedAddRepos(st, managedAgentsForTest(st))
 	if _, err := addFn(context.Background(), workspacecoord.WorkspaceAddReposRequest{
 		WorkspaceID: "MY-WS",
 		Repos:       []string{src},
@@ -1011,7 +1013,7 @@ func TestStoreBackedAddReposDoesNotPersistSkippedCheckout(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", loomDir)
 
 	st := memstore.New()
-	createFn := BuildStoreBackedCreateWorkspace(st)
+	createFn := BuildStoreBackedCreateWorkspace(st, managedAgentsForTest(st))
 	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
 	if _, err := createFn(context.Background(), workspacecoord.WorkspaceCreateRequest{
 		Name: "my-ws",
@@ -1030,7 +1032,7 @@ func TestStoreBackedAddReposDoesNotPersistSkippedCheckout(t *testing.T) {
 		t.Fatalf("write blocked checkout marker: %v", err)
 	}
 
-	addFn := BuildStoreBackedAddRepos(st)
+	addFn := BuildStoreBackedAddRepos(st, managedAgentsForTest(st))
 	if _, err := addFn(context.Background(), workspacecoord.WorkspaceAddReposRequest{
 		WorkspaceID: "MY-WS",
 		Repos:       []string{src},
@@ -1065,7 +1067,7 @@ func TestStoreBackedAddReposRollsBackPartialLocalAttach(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", loomDir)
 
 	st := memstore.New()
-	createFn := BuildStoreBackedCreateWorkspace(st)
+	createFn := BuildStoreBackedCreateWorkspace(st, managedAgentsForTest(st))
 	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
 	if _, err := createFn(context.Background(), workspacecoord.WorkspaceCreateRequest{
 		Name: "my-ws",
@@ -1089,7 +1091,7 @@ func TestStoreBackedAddReposRollsBackPartialLocalAttach(t *testing.T) {
 		t.Fatalf("write blocked checkout marker: %v", err)
 	}
 
-	addFn := BuildStoreBackedAddRepos(st)
+	addFn := BuildStoreBackedAddRepos(st, managedAgentsForTest(st))
 	if _, err := addFn(context.Background(), workspacecoord.WorkspaceAddReposRequest{
 		WorkspaceID: "MY-WS",
 		Repos:       []string{firstSrc, secondSrc},
@@ -1136,7 +1138,7 @@ func TestStoreBackedAddReposClassifiesLocalRepoNameCollisionAndRollsBack(t *test
 	t.Setenv("LOOM_CONFIG_DIR", loomDir)
 
 	base := memstore.New()
-	createFn := BuildStoreBackedCreateWorkspace(base)
+	createFn := BuildStoreBackedCreateWorkspace(base, managedAgentsForTest(base))
 	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
 	if _, err := createFn(context.Background(), workspacecoord.WorkspaceCreateRequest{
 		Name: "my-ws",
@@ -1148,7 +1150,7 @@ func TestStoreBackedAddReposClassifiesLocalRepoNameCollisionAndRollsBack(t *test
 
 	src := initTestGitRepo(t, t.TempDir(), "shared-repo")
 	st := &repoFailStore{Store: base, err: domain.ErrAlreadyExists}
-	addFn := BuildStoreBackedAddRepos(st)
+	addFn := BuildStoreBackedAddRepos(st, managedAgentsForTest(st))
 	_, err := addFn(context.Background(), workspacecoord.WorkspaceAddReposRequest{
 		WorkspaceID: "MY-WS",
 		Repos:       []string{src},
@@ -1176,7 +1178,7 @@ func TestStoreBackedAddReposClassifiesCloneRepoNameCollisionAndRetainsCheckoutFo
 	t.Setenv("LOOM_CONFIG_DIR", loomDir)
 
 	base := memstore.New()
-	createFn := BuildStoreBackedCreateWorkspace(base)
+	createFn := BuildStoreBackedCreateWorkspace(base, managedAgentsForTest(base))
 	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
 	if _, err := createFn(context.Background(), workspacecoord.WorkspaceCreateRequest{
 		Name: "my-ws",
@@ -1240,7 +1242,7 @@ func TestStoreBackedAddReposClonesRemoteRepoToEmptyWorkspace(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", loomDir)
 
 	st := memstore.New()
-	createFn := BuildStoreBackedCreateWorkspace(st)
+	createFn := BuildStoreBackedCreateWorkspace(st, managedAgentsForTest(st))
 	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
 
 	if _, err := createFn(context.Background(), workspacecoord.WorkspaceCreateRequest{
@@ -1311,7 +1313,7 @@ func TestStoreBackedRemoteCloneFailsClosedWithoutSourceControl(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", loomDir)
 
 	st := memstore.New()
-	createFn := BuildStoreBackedCreateWorkspace(st)
+	createFn := BuildStoreBackedCreateWorkspace(st, managedAgentsForTest(st))
 	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
 	if _, err := createFn(t.Context(), workspacecoord.WorkspaceCreateRequest{
 		Name: "my-ws",
@@ -1321,7 +1323,7 @@ func TestStoreBackedRemoteCloneFailsClosedWithoutSourceControl(t *testing.T) {
 		t.Fatalf("create empty workspace: %v", err)
 	}
 	remote := initTestGitRepo(t, t.TempDir(), "private-repo")
-	_, err := BuildStoreBackedAddRepos(st)(t.Context(), workspacecoord.WorkspaceAddReposRequest{
+	_, err := BuildStoreBackedAddRepos(st, managedAgentsForTest(st))(t.Context(), workspacecoord.WorkspaceAddReposRequest{
 		WorkspaceID: "MY-WS",
 		CloneURLs:   []string{remote},
 	})
@@ -1336,7 +1338,7 @@ func TestStoreBackedRemoteCloneFailsClosedWithoutSourceControl(t *testing.T) {
 		t.Fatalf("fail-closed clone created a checkout: %v", statErr)
 	}
 
-	_, err = BuildStoreBackedCreateWorkspace(st)(t.Context(), workspacecoord.WorkspaceCreateRequest{
+	_, err = BuildStoreBackedCreateWorkspace(st, managedAgentsForTest(st))(t.Context(), workspacecoord.WorkspaceCreateRequest{
 		Name:      "clone-without-owner",
 		Type:      "clone",
 		CloneURLs: []string{remote},
@@ -1357,7 +1359,7 @@ func TestStoreBackedRemoteCloneRejectsCredentialBearingRemoteBeforePersistence(t
 	t.Setenv("LOOM_CONFIG_DIR", loomDir)
 
 	st := memstore.New()
-	createFn := BuildStoreBackedCreateWorkspace(st)
+	createFn := BuildStoreBackedCreateWorkspace(st, managedAgentsForTest(st))
 	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
 	if _, err := createFn(t.Context(), workspacecoord.WorkspaceCreateRequest{
 		Name: "my-ws",
@@ -1397,7 +1399,7 @@ func TestStoreBackedAddReposRejectsCredentialBearingLocalRemote(t *testing.T) {
 
 	st := memstore.New()
 	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
-	if _, err := BuildStoreBackedCreateWorkspace(st)(
+	if _, err := BuildStoreBackedCreateWorkspace(st, managedAgentsForTest(st))(
 		t.Context(),
 		workspacecoord.WorkspaceCreateRequest{Name: "my-ws", Type: "empty", Path: wsPath},
 	); err != nil {
@@ -1412,7 +1414,7 @@ func TestStoreBackedAddReposRejectsCredentialBearingLocalRemote(t *testing.T) {
 		"origin",
 		"https://operator:plaintext-secret@example.test/private.git",
 	)
-	_, err := BuildStoreBackedAddRepos(st)(
+	_, err := BuildStoreBackedAddRepos(st, managedAgentsForTest(st))(
 		t.Context(),
 		workspacecoord.WorkspaceAddReposRequest{
 			WorkspaceID: "MY-WS",
@@ -1455,7 +1457,7 @@ func TestStoreBackedAddReposPersistsEachClonesDetectedDefaultBranch(t *testing.T
 	t.Setenv("LOOM_CONFIG_DIR", loomDir)
 
 	st := memstore.New()
-	createFn := BuildStoreBackedCreateWorkspace(st)
+	createFn := BuildStoreBackedCreateWorkspace(st, managedAgentsForTest(st))
 	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
 	if _, err := createFn(context.Background(), workspacecoord.WorkspaceCreateRequest{
 		Name: "my-ws",
@@ -1496,7 +1498,7 @@ func TestStoreBackedAddReposRejectsExplicitMissingCloneBranch(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", loomDir)
 
 	st := memstore.New()
-	createFn := BuildStoreBackedCreateWorkspace(st)
+	createFn := BuildStoreBackedCreateWorkspace(st, managedAgentsForTest(st))
 	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
 	if _, err := createFn(context.Background(), workspacecoord.WorkspaceCreateRequest{
 		Name: "my-ws",
@@ -1531,7 +1533,7 @@ func TestStoreBackedAddReposRejectsEmptyRemoteWithoutCommittedDefaultBranch(t *t
 	t.Setenv("LOOM_CONFIG_DIR", loomDir)
 
 	st := memstore.New()
-	createFn := BuildStoreBackedCreateWorkspace(st)
+	createFn := BuildStoreBackedCreateWorkspace(st, managedAgentsForTest(st))
 	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
 	if _, err := createFn(context.Background(), workspacecoord.WorkspaceCreateRequest{
 		Name: "my-ws",
@@ -1572,7 +1574,7 @@ func TestStoreBackedCreateEmptyWorkspaceRollsBackOnRepoStoreError(t *testing.T) 
 	src := initTestGitRepo(t, t.TempDir(), "app")
 	base := memstore.New()
 	st := &repoFailStore{Store: base, err: errors.New("repo create failed")}
-	createFn := BuildStoreBackedCreateWorkspace(st)
+	createFn := BuildStoreBackedCreateWorkspace(st, managedAgentsForTest(st))
 	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
 
 	if _, err := createFn(context.Background(), workspacecoord.WorkspaceCreateRequest{
@@ -1608,7 +1610,7 @@ func TestStoreBackedCreateEmptyWorkspaceClassifiesCreateRace(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", loomDir)
 
 	st := &workspaceCreateRaceStore{Store: memstore.New()}
-	createFn := BuildStoreBackedCreateWorkspace(st)
+	createFn := BuildStoreBackedCreateWorkspace(st, managedAgentsForTest(st))
 
 	_, err := createFn(context.Background(), workspacecoord.WorkspaceCreateRequest{
 		Name: "my-ws",
@@ -1629,7 +1631,7 @@ func TestStoreBackedCreateEmptyWorkspaceRollsBackLocalStateOnReadyUpdateError(t 
 	t.Setenv("LOOM_CONFIG_DIR", loomDir)
 
 	st := &workspaceReadyUpdateFailStore{Store: memstore.New()}
-	createFn := BuildStoreBackedCreateWorkspace(st)
+	createFn := BuildStoreBackedCreateWorkspace(st, managedAgentsForTest(st))
 
 	_, err := createFn(context.Background(), workspacecoord.WorkspaceCreateRequest{
 		Name: "rollback-ws",
@@ -1795,6 +1797,7 @@ func TestStoreBackedCreateCloneWorkspaceRecoversBeginLostBeforeLocalBind(t *test
 
 	createFn := BuildStoreBackedCreateWorkspaceWithAdmission(
 		st,
+		managedAgentsForTest(st),
 		materializer,
 		journal,
 		materializer,
@@ -1852,6 +1855,7 @@ func TestStoreBackedCreateCloneWorkspaceRecoversPartialCheckoutAndReplaysCommit(
 
 	firstCreate := BuildStoreBackedCreateWorkspaceWithAdmission(
 		st,
+		managedAgentsForTest(st),
 		materializer,
 		journal,
 		materializer,
@@ -1880,6 +1884,7 @@ func TestStoreBackedCreateCloneWorkspaceRecoversPartialCheckoutAndReplaysCommit(
 
 	restartedCreate := BuildStoreBackedCreateWorkspaceWithAdmission(
 		st,
+		managedAgentsForTest(st),
 		materializer,
 		journal,
 		materializer,
@@ -1910,6 +1915,7 @@ func TestStoreBackedCreateCloneWorkspaceRecoversPartialCheckoutAndReplaysCommit(
 
 	replayCreate := BuildStoreBackedCreateWorkspaceWithAdmission(
 		st,
+		managedAgentsForTest(st),
 		materializer,
 		journal,
 		materializer,
@@ -1979,6 +1985,7 @@ func TestStoreBackedCreateCloneWorkspaceClassifiesCreateRace(t *testing.T) {
 	}
 	createFn := BuildStoreBackedCreateWorkspaceWithAdmission(
 		st,
+		managedAgentsForTest(st),
 		materializer,
 		journal,
 		materializer,

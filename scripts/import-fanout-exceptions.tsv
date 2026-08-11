@@ -7,4 +7,3 @@ internal/cli/serve	27	Serve command composition owns the folded install log-rout
 internal/webui	22	Web delivery root exposes the public server capability contract and top-level construction
 internal/webui/handlers/agents	19	Agent delivery routes combine lifecycle session transcript and terminal ports
 internal/webui/handlers/prreview	15	PR review delivery coordinates connector agent interaction source-control and terminal ports
-internal/cli/serve/workspacemgr	18	Workspace runtime composition coordinates admission materialization execution and local workspace lifecycle ports
