@@ -132,7 +132,7 @@ func (m *mockGitOps) CheckGhInstalled() error {
 	return nil
 }
 
-func (m *mockGitOps) SetRepoDefaultBranch(workspaceID, repoName, branch string) error {
+func (m *mockGitOps) SetRepoDefaultBranch(_ context.Context, workspaceID, repoName, branch string) error {
 	if m.setRepoDefaultFunc != nil {
 		return m.setRepoDefaultFunc(repoName, branch)
 	}
@@ -1394,11 +1394,11 @@ func (m *wsCaptureMockGitOps) ListAgentWorktrees(workspaceID string) ([]ops.Agen
 	return m.mockGitOps.ListAgentWorktrees(workspaceID)
 }
 
-func (m *wsCaptureMockGitOps) SetRepoDefaultBranch(workspaceID, repoName, branch string) error {
+func (m *wsCaptureMockGitOps) SetRepoDefaultBranch(ctx context.Context, workspaceID, repoName, branch string) error {
 	if m.captureSetRepoWS != nil {
 		m.captureSetRepoWS(workspaceID)
 	}
-	return m.mockGitOps.SetRepoDefaultBranch(workspaceID, repoName, branch)
+	return m.mockGitOps.SetRepoDefaultBranch(ctx, workspaceID, repoName, branch)
 }
 
 func TestGitPushAll_DefaultRemote(t *testing.T) {

@@ -195,8 +195,8 @@ func runWorkerServiceAdd(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runWorkerServiceList(_ *cobra.Command, _ []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+func runWorkerServiceList(cmd *cobra.Command, _ []string) error {
+	return cmdstore.WithActiveWorkspace(cmd.Context(), func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
 		desiredState, err := parseAgentServiceDesiredState(workerServiceListDesiredState, true)
 		if err != nil {
 			return err
@@ -232,8 +232,8 @@ func runWorkerServiceList(_ *cobra.Command, _ []string) error {
 	})
 }
 
-func runWorkerServiceShow(_ *cobra.Command, args []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+func runWorkerServiceShow(cmd *cobra.Command, args []string) error {
+	return cmdstore.WithActiveWorkspace(cmd.Context(), func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
 		svc, err := h.Store.AgentServices().Get(ctx, ws, args[0])
 		if err != nil {
 			return fmt.Errorf("get agent service: %w", err)

@@ -1,6 +1,7 @@
 package doctor
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -30,8 +31,8 @@ type orphanSession struct {
 // transcript was never captured — e.g. non-interactive fleet runs, which have no
 // Claude Code hooks installed — and, with --fix, backfills agent_transcript.jsonl
 // plus token usage from Claude Code's own ~/.claude/projects transcript.
-func checkOrphanedTranscripts() CheckResult {
-	sessStore, err := sessionstoreadapter.New(cli.GetWorkspaceRuntimeDir())
+func checkOrphanedTranscripts(ctx context.Context) CheckResult {
+	sessStore, err := sessionstoreadapter.New(ctx, cli.GetWorkspaceRuntimeDir())
 	if err != nil {
 		return CheckResult{} // skip — sessions store not available
 	}
@@ -52,7 +53,7 @@ func checkOrphanedTranscripts() CheckResult {
 		}
 	}
 	if doctorFix {
-		return fixOrphanedTranscripts(sessStore, orphans)
+		return fixOrphanedTranscripts(ctx, sessStore, orphans)
 	}
 	return CheckResult{
 		Name:    "orphaned_transcripts",
@@ -102,7 +103,7 @@ func scanOrphanedClaudeSessions(store *sessions.Store) ([]orphanSession, error) 
 // agent name + start time and backfills the transcript and token usage. Agents
 // run sequentially per worktree (lock-serialized), so matching the earliest
 // session to the earliest unclaimed transcript lines runs up reliably.
-func fixOrphanedTranscripts(store *sessions.Store, orphans []orphanSession) CheckResult {
+func fixOrphanedTranscripts(ctx context.Context, store *sessions.Store, orphans []orphanSession) CheckResult {
 	workspaceToken := filepath.Base(cli.GetWorkspaceRuntimeDir())
 	claimed := make(map[string]bool)
 	fixed, unmatched := 0, 0
@@ -119,7 +120,7 @@ func fixOrphanedTranscripts(store *sessions.Store, orphans []orphanSession) Chec
 			continue
 		}
 		claimed[src] = true
-		if err := backfillSession(store, o, src); err != nil {
+		if err := backfillSession(ctx, store, o, src); err != nil {
 			details = append(details, fmt.Sprintf("failed: %s: %v", o.sessionID, err))
 			continue
 		}
@@ -141,11 +142,11 @@ func fixOrphanedTranscripts(store *sessions.Store, orphans []orphanSession) Chec
 
 // backfillSession mirrors the transcript into the session and records token
 // usage, mirroring the hook-based captureTokenUsage path.
-func backfillSession(store *sessions.Store, o orphanSession, srcPath string) error {
+func backfillSession(ctx context.Context, store *sessions.Store, o orphanSession, srcPath string) error {
 	if err := sessionstoreadapter.SyncNativeTranscript(store, o.sessionID, srcPath, sessions.TranscriptFormatRaw); err != nil {
 		return err
 	}
-	tok, err := sessions.SumTranscriptUsage(srcPath)
+	tok, err := sessions.SumTranscriptUsage(ctx, srcPath)
 	if err != nil {
 		return err
 	}

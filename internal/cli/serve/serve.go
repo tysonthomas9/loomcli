@@ -549,7 +549,7 @@ type fleetState struct {
 
 func resolveFleetState(ctx context.Context) fleetState {
 	fs := fleetState{}
-	if dc, dcErr := config.LoadRuntimeConfig("."); dcErr == nil {
+	if dc, dcErr := config.LoadRuntimeConfig(ctx, "."); dcErr == nil {
 		fs.modeDetected = cli.IsFleetMode(dc)
 	} else {
 		fs.modeDetected = cli.IsFleetModeFromEnv()

@@ -53,26 +53,26 @@ func TestMapTaskFilter(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotFn, err := mapTaskFilter(tt.filter, "")
+			gotFn, err := mapTaskFilter(t.Context(), tt.filter, "")
 
 			if tt.wantErr {
 				if err == nil {
-					t.Errorf("mapTaskFilter(%q, \"\") expected error, got nil", tt.filter)
+					t.Errorf("mapTaskFilter(t.Context(), %q, \"\") expected error, got nil", tt.filter)
 					return
 				}
 				if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
-					t.Errorf("mapTaskFilter(%q, \"\") error = %q, want to contain %q", tt.filter, err.Error(), tt.errContains)
+					t.Errorf("mapTaskFilter(t.Context(), %q, \"\") error = %q, want to contain %q", tt.filter, err.Error(), tt.errContains)
 				}
 				return
 			}
 
 			if err != nil {
-				t.Errorf("mapTaskFilter(%q, \"\") unexpected error: %v", tt.filter, err)
+				t.Errorf("mapTaskFilter(t.Context(), %q, \"\") unexpected error: %v", tt.filter, err)
 				return
 			}
 
 			if gotFn == nil {
-				t.Errorf("mapTaskFilter(%q, \"\") returned nil function", tt.filter)
+				t.Errorf("mapTaskFilter(t.Context(), %q, \"\") returned nil function", tt.filter)
 				return
 			}
 
@@ -183,13 +183,13 @@ func TestMapTaskFilter_WithParentID(t *testing.T) {
 			}})
 
 			// Get the function from mapTaskFilter
-			taskCheckFn, err := mapTaskFilter(tt.filter, tt.parentID)
+			taskCheckFn, err := mapTaskFilter(t.Context(), tt.filter, tt.parentID)
 			if err != nil {
-				t.Fatalf("mapTaskFilter(%q, %q) unexpected error: %v", tt.filter, tt.parentID, err)
+				t.Fatalf("mapTaskFilter(t.Context(), %q, %q) unexpected error: %v", tt.filter, tt.parentID, err)
 			}
 
 			if taskCheckFn == nil {
-				t.Fatalf("mapTaskFilter(%q, %q) returned nil function", tt.filter, tt.parentID)
+				t.Fatalf("mapTaskFilter(t.Context(), %q, %q) returned nil function", tt.filter, tt.parentID)
 			}
 
 			// Call the returned function
@@ -204,14 +204,14 @@ func TestMapTaskFilter_WithParentID(t *testing.T) {
 
 			// Verify the args match expected
 			if len(capturedArgs) != len(tt.expectedArgs) {
-				t.Errorf("mapTaskFilter(%q, %q) closure args length = %d, want %d\nGot: %v\nWant: %v",
+				t.Errorf("mapTaskFilter(t.Context(), %q, %q) closure args length = %d, want %d\nGot: %v\nWant: %v",
 					tt.filter, tt.parentID, len(capturedArgs), len(tt.expectedArgs), capturedArgs, tt.expectedArgs)
 				return
 			}
 
 			for i, arg := range tt.expectedArgs {
 				if capturedArgs[i] != arg {
-					t.Errorf("mapTaskFilter(%q, %q) closure arg[%d] = %q, want %q\nGot: %v\nWant: %v",
+					t.Errorf("mapTaskFilter(t.Context(), %q, %q) closure arg[%d] = %q, want %q\nGot: %v\nWant: %v",
 						tt.filter, tt.parentID, i, capturedArgs[i], arg, capturedArgs, tt.expectedArgs)
 				}
 			}
@@ -240,7 +240,7 @@ func TestMapTaskFilter_ParentIDCapturedInClosure(t *testing.T) {
 
 	// Create a closure with a specific parentID
 	parentID := "EPIC-555"
-	taskCheckFn, err := mapTaskFilter("needs_design", parentID)
+	taskCheckFn, err := mapTaskFilter(t.Context(), "needs_design", parentID)
 	if err != nil {
 		t.Fatalf("mapTaskFilter() unexpected error: %v", err)
 	}
@@ -286,7 +286,7 @@ Do the work!`
 	}
 
 	gen := makeCustomPromptGen(promptFile)
-	result := gen("falcon", nil)
+	result := gen("falcon")
 
 	// Verify template interpolation
 	if !strings.Contains(result, "You are agent falcon") {
@@ -307,7 +307,7 @@ func TestMakeCustomPromptGen_PrependsReadOnlyPolicy(t *testing.T) {
 		t.Fatalf("write prompt: %v", err)
 	}
 
-	result := makeCustomPromptGen(promptFile)("falcon", nil)
+	result := makeCustomPromptGen(promptFile)("falcon")
 
 	if !strings.HasPrefix(result, "IMPORTANT: You are running in REPOSITORY READ-ONLY mode.") {
 		t.Fatalf("custom role prompt missing read-only preamble: %q", result)
@@ -333,7 +333,7 @@ Just plain text.`
 	}
 
 	gen := makeCustomPromptGen(promptFile)
-	result := gen("nova", nil)
+	result := gen("nova")
 
 	if result != rawContent {
 		t.Errorf("expected raw content, got: %s", result)
@@ -343,7 +343,7 @@ Just plain text.`
 func TestMakeCustomPromptGen_MissingFile(t *testing.T) {
 	t.Parallel()
 	gen := makeCustomPromptGen("/nonexistent/path/prompt.txt")
-	result := gen("spark", nil)
+	result := gen("spark")
 
 	// Should return an error message
 	if !strings.Contains(result, "Error: could not load prompt file") {
@@ -362,7 +362,7 @@ func TestMakeCustomPromptGen_InvalidTemplate(t *testing.T) {
 	}
 
 	gen := makeCustomPromptGen(promptFile)
-	result := gen("falcon", nil)
+	result := gen("falcon")
 
 	// Should fallback to raw content since template parsing failed
 	// but we can still read the file
@@ -371,7 +371,7 @@ func TestMakeCustomPromptGen_InvalidTemplate(t *testing.T) {
 	}
 }
 
-func TestMakeCustomPromptGen_WithWorkspace(t *testing.T) {
+func TestMakeCustomPromptGen_RendersAgentVariables(t *testing.T) {
 	t.Parallel()
 	// Create a temporary template file
 	tmpDir := t.TempDir()
@@ -382,17 +382,8 @@ Worktree: {{.WorktreeName}}`
 		t.Fatalf("failed to create test file: %v", err)
 	}
 
-	// Create a mock workspace config
-	workspace := &WorkspaceConfig{
-		Path: "/test/workspace",
-		Repos: []RepoConfig{
-			{Name: "api", Path: "api"},
-			{Name: "web", Path: "web"},
-		},
-	}
-
 	gen := makeCustomPromptGen(promptFile)
-	result := gen("ember", workspace)
+	result := gen("ember")
 
 	// Agent name should be used for both AgentName and WorktreeName
 	if !strings.Contains(result, "Agent: ember") {

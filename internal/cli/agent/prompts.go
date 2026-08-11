@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bytes"
+	"context"
 	"embed"
 	"fmt"
 	"log"
@@ -368,7 +369,7 @@ func GenerateLeadPrompt() string {
 // GenerateTerminalPrompt creates the base prompt for the interactive terminal
 // agent runtime. Empty promptFile preserves the built-in lead prompt; a custom
 // prompt file replaces that base and still receives the terminal safety rules.
-func GenerateTerminalPrompt(promptFile string) (string, error) {
+func GenerateTerminalPrompt(ctx context.Context, promptFile string) (string, error) {
 	promptFile = strings.TrimSpace(promptFile)
 	if promptFile == "" {
 		return GenerateLeadPrompt(), nil
@@ -380,7 +381,7 @@ func GenerateTerminalPrompt(promptFile string) (string, error) {
 		}
 		return renderPrompt(id, terminalPromptTemplateData()), nil
 	}
-	path, err := resolveTerminalPromptPath(promptFile)
+	path, err := resolveTerminalPromptPath(ctx, promptFile)
 	if err != nil {
 		return "", err
 	}
@@ -428,7 +429,7 @@ func terminalPromptIdentity() (agentName, role string) {
 	return agentName, role
 }
 
-func resolveTerminalPromptPath(promptFile string) (string, error) {
+func resolveTerminalPromptPath(ctx context.Context, promptFile string) (string, error) {
 	promptFile = strings.TrimSpace(promptFile)
 	if filepath.IsAbs(promptFile) {
 		return promptFile, nil
@@ -441,7 +442,7 @@ func resolveTerminalPromptPath(promptFile string) (string, error) {
 			return "", fmt.Errorf("resolve prompt file %q relative to cwd: %w", promptFile, statErr)
 		}
 	}
-	if ws, err := config.ResolveActiveWorkspace(); err == nil && ws != nil && strings.TrimSpace(ws.Path) != "" {
+	if ws, err := config.ResolveActiveWorkspace(ctx); err == nil && ws != nil && strings.TrimSpace(ws.Path) != "" {
 		candidate := filepath.Join(ws.Path, promptFile)
 		if _, statErr := os.Stat(candidate); statErr == nil {
 			return candidate, nil

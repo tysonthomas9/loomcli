@@ -153,7 +153,7 @@ func TestHandleAgents_UsesCanonicalAgentsAsSourceOfTruth(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/monitor/agents", nil)
 	rr := httptest.NewRecorder()
 
-	monitorDataSource := NewMonitorDataSourceWithTTL(func() *monitor.MonitorData { return data }, nil, time.Minute)
+	monitorDataSource := NewMonitorDataSourceWithTTL(func(context.Context) *monitor.MonitorData { return data }, nil, time.Minute)
 	storeDataSource := NewMonitorStoreDataSourceWithTTL(st, time.Minute)
 	storeDataSource.SetAgentDirectory(directory)
 	HandleAgentsWithSources(monitorDataSource, storeDataSource).ServeHTTP(rr, req)
@@ -210,7 +210,7 @@ func TestHandleStatus_ActiveStoreAgentWithoutWorkIsReady(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/monitor/status", nil)
 	rr := httptest.NewRecorder()
-	monitorDataSource := NewMonitorDataSourceWithTTL(func() *monitor.MonitorData {
+	monitorDataSource := NewMonitorDataSourceWithTTL(func(context.Context) *monitor.MonitorData {
 		return &monitor.MonitorData{Timestamp: time.Unix(1, 0).UTC()}
 	}, nil, time.Minute)
 	storeDataSource := NewMonitorStoreDataSourceWithTTL(st, time.Minute)
@@ -243,7 +243,7 @@ func TestHandleStatus_DerivesPlanningFromInProgressTaskWithoutRuntimeAgent(t *te
 
 	req := httptest.NewRequest(http.MethodGet, "/api/monitor/status", nil)
 	rr := httptest.NewRecorder()
-	monitorDataSource := NewMonitorDataSourceWithTTL(func() *monitor.MonitorData {
+	monitorDataSource := NewMonitorDataSourceWithTTL(func(context.Context) *monitor.MonitorData {
 		return &monitor.MonitorData{
 			Timestamp: time.Unix(1, 0).UTC(),
 			AgentTasks: map[string]monitor.TaskInfo{
@@ -296,7 +296,7 @@ func TestHandleAgents_EmptyWorkspaceDoesNotLeakRuntimeAgents(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/monitor/agents?workspace=WS1", nil)
 	rr := httptest.NewRecorder()
-	monitorDataSource := NewMonitorDataSourceWithTTL(func() *monitor.MonitorData {
+	monitorDataSource := NewMonitorDataSourceWithTTL(func(context.Context) *monitor.MonitorData {
 		return &monitor.MonitorData{
 			Timestamp: time.Unix(1, 0).UTC(),
 			Agents: []monitor.AgentStatus{
@@ -334,7 +334,7 @@ func TestHandleAgents_UsesWorkspaceQueryOverActiveWorkspace(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/monitor/agents?workspace=WS2", nil)
 	rr := httptest.NewRecorder()
-	monitorDataSource := NewMonitorDataSourceWithTTL(func() *monitor.MonitorData {
+	monitorDataSource := NewMonitorDataSourceWithTTL(func(context.Context) *monitor.MonitorData {
 		return &monitor.MonitorData{Timestamp: time.Unix(1, 0).UTC()}
 	}, nil, time.Minute)
 	storeDataSource := NewMonitorStoreDataSourceWithTTL(st, time.Minute)
@@ -385,7 +385,7 @@ func TestHandleStatusWithBackend_UsesWorkspaceScopedIssueBackend(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/monitor/status?workspace=WS2", nil)
 	rr := httptest.NewRecorder()
-	HandleStatusWithBackend(func() *monitor.MonitorData { return cachedData }, st, backendFn).ServeHTTP(rr, req)
+	HandleStatusWithBackend(func(context.Context) *monitor.MonitorData { return cachedData }, st, backendFn).ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rr.Code)
@@ -436,7 +436,7 @@ func TestMonitorDataSource_CachesWorkspaceCollectionAcrossEndpoints(t *testing.T
 		}
 		return scopedBackend
 	}
-	dataSource := NewMonitorDataSourceWithTTL(func() *monitor.MonitorData {
+	dataSource := NewMonitorDataSourceWithTTL(func(context.Context) *monitor.MonitorData {
 		t.Fatal("fallback collector should not be used for workspace request")
 		return nil
 	}, backendFn, time.Minute)
@@ -468,7 +468,7 @@ func TestMonitorDataSource_CachesWorkspaceCollectionAcrossEndpoints(t *testing.T
 func TestMonitorDataSource_DefaultWorkspaceUsesWarmCollector(t *testing.T) {
 	collectCalls := 0
 	backendFnCalls := 0
-	dataSource := NewMonitorDataSourceWithDefaultWorkspace(func() *monitor.MonitorData {
+	dataSource := NewMonitorDataSourceWithDefaultWorkspace(func(context.Context) *monitor.MonitorData {
 		collectCalls++
 		return &monitor.MonitorData{Timestamp: time.Unix(1, 0).UTC()}
 	}, func(ctx context.Context) backend.IssueBackend {
@@ -512,7 +512,7 @@ func TestMonitorStoreDataSource_CachesWorkspaceMetadataAcrossEndpoints(t *testin
 	})
 
 	counted := newCountingStore(base)
-	dataSource := NewMonitorDataSourceWithTTL(func() *monitor.MonitorData {
+	dataSource := NewMonitorDataSourceWithTTL(func(context.Context) *monitor.MonitorData {
 		return &monitor.MonitorData{Timestamp: time.Unix(1, 0).UTC()}
 	}, nil, time.Minute)
 	storeDataSource := NewMonitorStoreDataSourceWithTTL(counted, time.Minute)

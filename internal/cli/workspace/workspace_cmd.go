@@ -123,7 +123,7 @@ func runWorkspaceCreate(cmd *cobra.Command, args []string) {
 	branch := validateCreateInputs(wsName)
 	repoPaths := parseRepoPaths()
 
-	if err := cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
+	if err := cmdstore.WithStore(cmd.Context(), func(ctx context.Context, h *bootstrap.StoreHandle) error {
 		create := workspacemgr.BuildStoreBackedCreateWorkspace(h.Store)
 		result, err := create(ctx, workspacecoord.WorkspaceCreateRequest{
 			Name:   wsName,
@@ -169,15 +169,15 @@ func parseRepoPaths() []string {
 }
 
 func runWorkspaceList(cmd *cobra.Command, args []string) {
-	if err := runFleetWorkspaceList(); err != nil {
+	if err := runFleetWorkspaceList(cmd.Context()); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
 //nolint:gocognit,funlen // CLI table/JSON output branches share one store read path.
-func runFleetWorkspaceList() error {
-	return cmdstore.WithWorkspaceCatalog(func(ctx context.Context, _ *bootstrap.StoreHandle, workspace workspacemodule.API) error {
+func runFleetWorkspaceList(parent context.Context) error {
+	return cmdstore.WithWorkspaceCatalog(parent, func(ctx context.Context, _ *bootstrap.StoreHandle, workspace workspacemodule.API) error {
 		workspaces, err := workspace.List(ctx, workspacemodule.ListQuery{})
 		if err != nil {
 			return fmt.Errorf("list workspaces: %w", err)
@@ -249,7 +249,7 @@ func runFleetWorkspaceList() error {
 func runWorkspaceRemove(cmd *cobra.Command, args []string) {
 	deps := cli.GetDeps(cmd)
 	wsName := args[0]
-	if err := cmdstore.WithWorkspaceCatalog(func(ctx context.Context, _ *bootstrap.StoreHandle, workspace workspacemodule.API) error {
+	if err := cmdstore.WithWorkspaceCatalog(cmd.Context(), func(ctx context.Context, _ *bootstrap.StoreHandle, workspace workspacemodule.API) error {
 		ws, err := workspace.Resolve(ctx, workspacemodule.ResolveQuery{Reference: wsName})
 		if err != nil {
 			return fmt.Errorf("workspace %q not found: %w", wsName, err)

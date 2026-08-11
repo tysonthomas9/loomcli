@@ -1023,7 +1023,7 @@ func TestResetWorktree_RefusesWithActiveLock(t *testing.T) {
 	t.Cleanup(func() { os.Chdir(origDir) })
 
 	// Create an active lock (current process PID so IsProcessRunning returns true)
-	err := AcquireLock(wtPath, "task", "falcon")
+	err := AcquireLock(t.Context(), wtPath, "task", "falcon")
 	if err != nil {
 		t.Fatalf("failed to acquire lock: %v", err)
 	}
@@ -1088,7 +1088,7 @@ func TestResetWorktree_RefusesWithActiveLock_ShowsTaskID(t *testing.T) {
 	t.Cleanup(func() { os.Chdir(origDir) })
 
 	// Create a lock with task ID
-	err := AcquireLock(wtPath, "task", "falcon")
+	err := AcquireLock(t.Context(), wtPath, "task", "falcon")
 	if err != nil {
 		t.Fatalf("failed to acquire lock: %v", err)
 	}
@@ -1144,7 +1144,7 @@ func TestResetWorktree_ForceOverridesLock(t *testing.T) {
 	t.Cleanup(func() { os.Chdir(origDir) })
 
 	// Create an active lock
-	err := AcquireLock(wtPath, "task", "falcon")
+	err := AcquireLock(t.Context(), wtPath, "task", "falcon")
 	if err != nil {
 		t.Fatalf("failed to acquire lock: %v", err)
 	}

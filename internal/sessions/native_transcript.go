@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/atomicfile"
-	"github.com/tysonthomas9/loomcli/internal/runtimectx"
 	"github.com/tysonthomas9/loomcli/internal/sessions/redact"
 )
 
@@ -45,7 +44,7 @@ func (s *Store) SyncNativeTranscript(sessionID, srcPath, format string) error {
 	if srcPath == "" {
 		return nil
 	}
-	_, span := startSpan(runtimectx.RootContext(), "service.Sessions.SyncNativeTranscript",
+	_, span := startSpan(s.ctx, "service.Sessions.SyncNativeTranscript",
 		attrLoomSessionID(sessionID),
 	)
 	defer span.End()

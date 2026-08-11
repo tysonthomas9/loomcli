@@ -187,7 +187,7 @@ func TestDriverTaskRunMaxAttempts(t *testing.T) {
 func withMockData(t *testing.T, data *MonitorData, fn func()) {
 	t.Helper()
 	orig := collectDataFunc
-	collectDataFunc = func() *MonitorData { return data }
+	collectDataFunc = func(context.Context) *MonitorData { return data }
 	t.Cleanup(func() { collectDataFunc = orig })
 	fn()
 }

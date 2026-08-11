@@ -118,7 +118,7 @@ func composeArtifactQueries(st ProjectionReaderWithArtifactQueries) artifactsmod
 // Agent worktrees store sessions in their own directories, so we need to
 // search across all repos to find sessions for a given task.
 func (s *sessionServiceImpl) storesForWorkspace(ctx context.Context, wsID string) ([]*sessions.Store, error) {
-	collection := newSessionStoreCollection()
+	collection := newSessionStoreCollection(ctx)
 	s.addRuntimeSessionStoreCandidates(wsID, collection)
 	if err := s.addWorkspaceSessionStores(ctx, wsID, collection); err != nil {
 		return nil, err
@@ -130,12 +130,13 @@ func (s *sessionServiceImpl) storesForWorkspace(ctx context.Context, wsID string
 }
 
 type sessionStoreCollection struct {
+	ctx    context.Context
 	stores []*sessions.Store
 	seen   map[string]struct{}
 }
 
-func newSessionStoreCollection() *sessionStoreCollection {
-	return &sessionStoreCollection{seen: make(map[string]struct{})}
+func newSessionStoreCollection(ctx context.Context) *sessionStoreCollection {
+	return &sessionStoreCollection{ctx: ctx, seen: make(map[string]struct{})}
 }
 
 func (c *sessionStoreCollection) add(runtimeDir string) {
@@ -150,7 +151,7 @@ func (c *sessionStoreCollection) add(runtimeDir string) {
 		return
 	}
 	c.seen[key] = struct{}{}
-	st, err := sessions.NewStore(runtimeDir)
+	st, err := sessions.NewStore(c.ctx, runtimeDir)
 	if err != nil {
 		logger.Warn("failed to open local session store", "runtime_dir", runtimeDir, "err", err)
 		return
@@ -291,7 +292,7 @@ func (s *sessionServiceImpl) findStoreForSession(ctx context.Context, wsID, sess
 	// stale. Check those local candidates first so loading a transcript, diff,
 	// or detail does not depend on a control-plane fanout.
 	if validSessionID.MatchString(sessionID) {
-		collection := newSessionStoreCollection()
+		collection := newSessionStoreCollection(ctx)
 		s.addRuntimeSessionStoreCandidates(wsID, collection)
 		if st := storeOwningSession(collection.stores, sessionID); st != nil {
 			return st, nil

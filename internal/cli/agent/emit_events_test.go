@@ -46,14 +46,14 @@ func TestEmitTaskLifecycleEvents(t *testing.T) {
 
 	// 1. TaskClaimed (the daemon-mode emit path; LOOM_ASSIGNED_TASK_ID
 	// would be the source in production).
-	emitTaskClaimedFromEnv("plan-agent", "loomcli-42")
+	emitTaskClaimedFromEnv(t.Context(), "plan-agent", "loomcli-42")
 
 	// 2. TaskCompleted on success — duration carried, task id recovered
 	// from the lock file written by the simulated `loom claim`.
-	emitTaskLifecycleResult("plan-agent", worktree, time.Now().Add(-2*time.Second), nil)
+	emitTaskLifecycleResult(t.Context(), "plan-agent", worktree, time.Now().Add(-2*time.Second), nil)
 
 	// 3. TaskFailed on error — classifier kicks in, ErrorClass populated.
-	emitTaskLifecycleResult("plan-agent", worktree, time.Now().Add(-1*time.Second), errors.New("simulated agent failure"))
+	emitTaskLifecycleResult(t.Context(), "plan-agent", worktree, time.Now().Add(-1*time.Second), errors.New("simulated agent failure"))
 
 	// Force the JSONL writer to flush. Bus.Close drains the buffer to
 	// disk; reset re-creates the singleton on the next call so other

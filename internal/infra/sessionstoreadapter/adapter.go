@@ -4,6 +4,7 @@
 package sessionstoreadapter
 
 import (
+	"context"
 	"time"
 
 	"github.com/olesho/harness-wrapper/pkg/transcript"
@@ -12,8 +13,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/sessions/eventstore"
 )
 
-func New(runtimeDir string) (*sessions.Store, error) {
-	return sessions.NewStore(runtimeDir)
+func New(ctx context.Context, runtimeDir string) (*sessions.Store, error) {
+	return sessions.NewStore(ctx, runtimeDir)
 }
 
 func Create(store *sessions.Store, options sessions.CreateOptions) (*sessions.Session, error) {

@@ -9,7 +9,6 @@ import (
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -111,8 +110,7 @@ func GetConfigDir() string {
 
 // LoadConfig reads the workspace topology from FleetDB and overlays
 // machine-local checkout paths from bootstrap state.json.
-func LoadConfig() (*LoomConfig, error) {
-	ctx := cmdstore.RootContext()
+func LoadConfig(ctx context.Context) (*LoomConfig, error) {
 	dataDir := bootstrap.LoomDir()
 	if dataDir == "" {
 		return nil, errors.New("cannot determine loom data directory")
@@ -132,8 +130,7 @@ func GetWorkspaceDir(name string) string {
 
 // ResolveActiveWorkspace returns the active FleetDB workspace projected into the
 // historical WorkspaceConfig DTO used by prompt and daemon code.
-func ResolveActiveWorkspace() (*WorkspaceConfig, error) {
-	ctx := cmdstore.RootContext()
+func ResolveActiveWorkspace(ctx context.Context) (*WorkspaceConfig, error) {
 	key, err := bootstrap.ResolveActiveWorkspaceKey(ctx, nil)
 	if err != nil {
 		if errors.Is(err, bootstrap.ErrNoActiveWorkspace) {

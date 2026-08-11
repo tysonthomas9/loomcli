@@ -22,14 +22,14 @@ func buildCollectDataFn(
 	issueBackendFn metricscmd.IssueBackendFn,
 	cacheTTL time.Duration,
 ) metricscmd.CollectDataFn {
-	collectFn := func() *monitor.MonitorData {
+	collectFn := func(ctx context.Context) *monitor.MonitorData {
 		if workspaceHint != "" && issueBackendFn != nil {
-			ctx := middleware.WithWorkspace(context.Background(), workspaceHint)
+			ctx = middleware.WithWorkspace(ctx, workspaceHint)
 			if be := issueBackendFn(ctx); be != nil {
-				return monitor.CollectMonitorDataWithIssueBackend(be, monitorCollectionLimit, "")
+				return monitor.CollectMonitorDataWithIssueBackend(ctx, be, monitorCollectionLimit, "")
 			}
 		}
-		return monitor.CollectMonitorData(monitorCollectionLimit, "")
+		return monitor.CollectMonitorData(ctx, monitorCollectionLimit, "")
 	}
 	return metricscmd.NewCollectorFunc(cacheTTL, collectFn)
 }

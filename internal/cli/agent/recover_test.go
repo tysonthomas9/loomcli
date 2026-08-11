@@ -72,7 +72,7 @@ func TestCloseTask_Success(t *testing.T) {
 		return nil, nil
 	}
 
-	closeTask(deps, "task-123", "Tests pass")
+	closeTask(t.Context(), deps, "task-123", "Tests pass")
 
 	if !tracker.Called("Close") {
 		t.Error("CloseIssue was not called")
@@ -86,7 +86,7 @@ func TestCloseTask_Failure(t *testing.T) {
 	tracker.CloseErr = errors.New("task not found")
 
 	// closeTask prints warning but doesn't panic
-	closeTask(deps, "task-456", "Done")
+	closeTask(t.Context(), deps, "task-456", "Done")
 }
 
 func TestResetTask_Success(t *testing.T) {
@@ -107,7 +107,7 @@ func TestResetTask_Success(t *testing.T) {
 		return nil
 	}
 
-	resetTask(deps, "task-789")
+	resetTask(t.Context(), deps, "task-789")
 
 	if !tracker.Called("Get") {
 		t.Error("GetIssue was not called")
@@ -125,7 +125,7 @@ func TestResetTask_Failure(t *testing.T) {
 	tracker.UpdateErr = errors.New("invalid task")
 
 	// resetTask prints warning and manual instructions but doesn't panic
-	resetTask(deps, "task-789")
+	resetTask(t.Context(), deps, "task-789")
 }
 
 func TestResetTask_AlreadyReview(t *testing.T) {
@@ -134,7 +134,7 @@ func TestResetTask_AlreadyReview(t *testing.T) {
 
 	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{ID: "task-789", Status: "review"}}
 
-	resetTask(deps, "task-789")
+	resetTask(t.Context(), deps, "task-789")
 
 	if tracker.Called("Update") {
 		t.Error("UpdateIssue should not be called when task is already in review")
@@ -147,7 +147,7 @@ func TestResetTask_AlreadyClosed(t *testing.T) {
 
 	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{ID: "task-789", Status: "closed"}}
 
-	resetTask(deps, "task-789")
+	resetTask(t.Context(), deps, "task-789")
 
 	if tracker.Called("Update") {
 		t.Error("UpdateIssue should not be called when task is already closed")
@@ -160,7 +160,7 @@ func TestResetTask_SkipsBlocked(t *testing.T) {
 
 	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{ID: "task-789", Status: "blocked"}}
 
-	resetTask(deps, "task-789")
+	resetTask(t.Context(), deps, "task-789")
 
 	if tracker.Called("Update") {
 		t.Error("UpdateIssue should not be called for a blocked task (daemon quarantine / human block must not be flipped back to open)")
@@ -174,7 +174,7 @@ func TestResetTask_GetIssueFails(t *testing.T) {
 	tracker.GetErr = errors.New("not found")
 
 	// When GetIssue fails, resetTask should still attempt UpdateIssue
-	resetTask(deps, "task-789")
+	resetTask(t.Context(), deps, "task-789")
 
 	if !tracker.Called("Update") {
 		t.Error("UpdateIssue should still be called when GetIssue fails")
@@ -225,7 +225,7 @@ func TestResetTaskOwnedByAgent_RequiresExactCurrentState(t *testing.T) {
 			tracker.GetResult = tc.detail
 			tracker.GetErr = tc.getErr
 
-			err := resetTaskOwnedByAgent(deps, "task-1", "agent-a")
+			err := resetTaskOwnedByAgent(t.Context(), deps, "task-1", "agent-a")
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("resetTaskOwnedByAgent error = %v, wantErr=%v", err, tc.wantErr)
 			}
@@ -254,7 +254,7 @@ func TestAnalyzeTaskCompletion_Completed(t *testing.T) {
 	mock.InstallOn(deps)
 	installTextAnalysisResult(t, deps, "COMPLETED: Feature X was fully implemented with tests\n")
 
-	completed, reason := analyzeTaskCompletion(deps, "/test/worktree", "task-abc")
+	completed, reason := analyzeTaskCompletion(t.Context(), deps, "/test/worktree", "task-abc")
 
 	if !completed {
 		t.Error("expected completed=true")
@@ -282,7 +282,7 @@ func TestAnalyzeTaskCompletion_Incomplete(t *testing.T) {
 	mock.InstallOn(deps)
 	installTextAnalysisResult(t, deps, "INCOMPLETE: No commits found that implement the tests\n")
 
-	completed, reason := analyzeTaskCompletion(deps, "/test/worktree", "task-def")
+	completed, reason := analyzeTaskCompletion(t.Context(), deps, "/test/worktree", "task-def")
 
 	if completed {
 		t.Error("expected completed=false")
@@ -298,7 +298,7 @@ func TestAnalyzeTaskCompletion_IssueLookupFails(t *testing.T) {
 
 	tracker.GetErr = errors.New("task not found")
 
-	completed, reason := analyzeTaskCompletion(deps, "/test/worktree", "task-notfound")
+	completed, reason := analyzeTaskCompletion(t.Context(), deps, "/test/worktree", "task-notfound")
 
 	if completed {
 		t.Error("expected completed=false when GetIssueText fails")
@@ -326,7 +326,7 @@ func TestAnalyzeTaskCompletion_ClaudeFails(t *testing.T) {
 	mock.InstallOn(deps)
 	installTextAnalysisError(t, deps, errors.New("exit status 1"))
 
-	completed, reason := analyzeTaskCompletion(deps, "/test/worktree", "task-xyz")
+	completed, reason := analyzeTaskCompletion(t.Context(), deps, "/test/worktree", "task-xyz")
 
 	if completed {
 		t.Error("expected completed=false when claude fails")
@@ -354,7 +354,7 @@ func TestAnalyzeTaskCompletion_ParsesMultilineResponse(t *testing.T) {
 	mock.InstallOn(deps)
 	installTextAnalysisResult(t, deps, "Let me analyze this...\n\nLooking at the commits:\nCOMPLETED: All requirements met\n\nDone.\n")
 
-	completed, reason := analyzeTaskCompletion(deps, "/test/worktree", "task-multi")
+	completed, reason := analyzeTaskCompletion(t.Context(), deps, "/test/worktree", "task-multi")
 
 	if !completed {
 		t.Error("expected completed=true for multiline response with COMPLETED")
@@ -382,7 +382,7 @@ func TestAnalyzeTaskCompletion_CaseInsensitive(t *testing.T) {
 	mock.InstallOn(deps)
 	installTextAnalysisResult(t, deps, "Completed: work was done correctly\n")
 
-	completed, reason := analyzeTaskCompletion(deps, "/test/worktree", "task-case")
+	completed, reason := analyzeTaskCompletion(t.Context(), deps, "/test/worktree", "task-case")
 
 	if !completed {
 		t.Error("expected completed=true for lowercase 'Completed'")
@@ -410,7 +410,7 @@ func TestAnalyzeTaskCompletion_ReasonWithColons(t *testing.T) {
 	mock.InstallOn(deps)
 	installTextAnalysisResult(t, deps, "INCOMPLETE: Missing: tests, docs, and coverage\n")
 
-	completed, reason := analyzeTaskCompletion(deps, "/test/worktree", "task-colon")
+	completed, reason := analyzeTaskCompletion(t.Context(), deps, "/test/worktree", "task-colon")
 
 	if completed {
 		t.Error("expected completed=false")
@@ -439,7 +439,7 @@ func TestAnalyzeTaskCompletion_UnparseableResponse(t *testing.T) {
 	mock.InstallOn(deps)
 	installTextAnalysisResult(t, deps, "I'm not sure about this task.\n")
 
-	completed, reason := analyzeTaskCompletion(deps, "/test/worktree", "task-unparse")
+	completed, reason := analyzeTaskCompletion(t.Context(), deps, "/test/worktree", "task-unparse")
 
 	if completed {
 		t.Error("expected completed=false when response is unparseable")
@@ -467,7 +467,7 @@ func TestHandleOrphanedTask_AnalyzeComplete(t *testing.T) {
 	mock.InstallOn(deps)
 	installTextAnalysisResult(t, deps, "COMPLETED: Task was finished\n")
 
-	handleOrphanedTask(deps, "/test/worktree", "task-orphan1", true)
+	handleOrphanedTask(t.Context(), deps, "/test/worktree", "task-orphan1", true)
 
 	if !tracker.Called("Close") {
 		t.Error("CloseIssue should be called for completed task")
@@ -492,7 +492,7 @@ func TestHandleOrphanedTask_AnalyzeIncomplete(t *testing.T) {
 	mock.InstallOn(deps)
 	installTextAnalysisResult(t, deps, "INCOMPLETE: No work found\n")
 
-	handleOrphanedTask(deps, "/test/worktree", "task-orphan2", true)
+	handleOrphanedTask(t.Context(), deps, "/test/worktree", "task-orphan2", true)
 
 	if !tracker.Called("Update") {
 		t.Error("UpdateIssue should be called for incomplete task")
@@ -505,7 +505,7 @@ func TestHandleOrphanedTask_NoAnalyze(t *testing.T) {
 
 	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{ID: "task-orphan3", Status: "in_progress"}}
 
-	handleOrphanedTask(deps, "/test/worktree", "task-orphan3", false)
+	handleOrphanedTask(t.Context(), deps, "/test/worktree", "task-orphan3", false)
 
 	// Get is called by resetTask to check current status before resetting,
 	// but GetIssueText (now removed) should not be called for analysis.
@@ -706,7 +706,7 @@ func TestResetOrphanedAgentTasks_FindsAndResetsMultiple(t *testing.T) {
 	}
 	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{Status: "in_progress", Assignee: "falcon"}}
 
-	resetOrphanedAgentTasks(deps, "/test/worktree", "falcon", "", false)
+	resetOrphanedAgentTasks(t.Context(), deps, "/test/worktree", "falcon", "", false)
 
 	if !tracker.Called("List") {
 		t.Error("List should be called")
@@ -729,7 +729,7 @@ func TestResetOrphanedAgentTasks_SkipsAlreadyHandled(t *testing.T) {
 	}
 	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{Status: "in_progress", Assignee: "ember"}}
 
-	resetOrphanedAgentTasks(deps, "/test/worktree", "ember", "task-1", false)
+	resetOrphanedAgentTasks(t.Context(), deps, "/test/worktree", "ember", "task-1", false)
 
 	// Only task-2 should be processed (task-1 is alreadyHandledTaskID)
 	if tracker.CallCount("Get") != 1 {
@@ -746,7 +746,7 @@ func TestResetOrphanedAgentTasks_NoOrphanedTasks(t *testing.T) {
 
 	tracker.ListResult = []backend.IssueData{}
 
-	resetOrphanedAgentTasks(deps, "/test/worktree", "falcon", "", false)
+	resetOrphanedAgentTasks(t.Context(), deps, "/test/worktree", "falcon", "", false)
 
 	if !tracker.Called("List") {
 		t.Error("List should be called")
@@ -763,7 +763,7 @@ func TestResetOrphanedAgentTasks_IssueListFails(t *testing.T) {
 	tracker.ListErr = errors.New("connection failed")
 
 	// Should not panic
-	resetOrphanedAgentTasks(deps, "/test/worktree", "falcon", "", false)
+	resetOrphanedAgentTasks(t.Context(), deps, "/test/worktree", "falcon", "", false)
 }
 
 func TestResetOrphanedAgentTasks_EmptyAgentName(t *testing.T) {
@@ -771,7 +771,7 @@ func TestResetOrphanedAgentTasks_EmptyAgentName(t *testing.T) {
 	deps, _, _, _, _ := NewTestDeps(t)
 
 	// Should return immediately with no commands
-	resetOrphanedAgentTasks(deps, "/test/worktree", "", "", false)
+	resetOrphanedAgentTasks(t.Context(), deps, "/test/worktree", "", "", false)
 }
 
 func TestRecoverWorktree_NoLock(t *testing.T) {
@@ -797,7 +797,7 @@ func TestRecoverWorktree_NoLock(t *testing.T) {
 	})
 	mock.Install()
 
-	err := RecoverWorktree(tmpDir, "test-agent", -1)
+	err := RecoverWorktree(t.Context(), tmpDir, "test-agent", -1)
 	if err != nil {
 		t.Errorf("expected nil error, got: %v", err)
 	}
@@ -839,7 +839,7 @@ func TestRecoverWorktree_StaleLock(t *testing.T) {
 	// its Exec/Git fakes, so install the recovery backend afterwards.
 	setDefaultIssueBackend(tracker)
 
-	err := RecoverWorktree(tmpDir, "test-agent", -1)
+	err := RecoverWorktree(t.Context(), tmpDir, "test-agent", -1)
 	if err != nil {
 		t.Errorf("expected nil error, got: %v", err)
 	}
@@ -865,7 +865,7 @@ func TestRecoverWorktree_LockCheckError(t *testing.T) {
 	mock := NewCommandMock(t, []CommandStub{})
 	mock.Install()
 
-	err := RecoverWorktree(tmpDir, "test-agent", -1)
+	err := RecoverWorktree(t.Context(), tmpDir, "test-agent", -1)
 	if err == nil {
 		t.Error("expected error when CheckLock fails, got nil")
 	}
@@ -889,7 +889,7 @@ func TestRecoverWorktree_EmptyAgentName(t *testing.T) {
 	})
 	mock.Install()
 
-	err := RecoverWorktree(tmpDir, "", -1)
+	err := RecoverWorktree(t.Context(), tmpDir, "", -1)
 	if err != nil {
 		t.Errorf("expected nil error, got: %v", err)
 	}
@@ -1005,7 +1005,7 @@ func TestAnalyzeTaskCompletion_WorkspaceMode(t *testing.T) {
 	mock.Install()
 	installTextAnalysisResult(t, defaultDeps, "COMPLETED: Both backend and frontend implemented across repos\n")
 
-	completed, reason := analyzeTaskCompletion(defaultDeps, "/test/worktree", "task-ws1")
+	completed, reason := analyzeTaskCompletion(t.Context(), defaultDeps, "/test/worktree", "task-ws1")
 
 	if !completed {
 		t.Error("expected completed=true in workspace mode")
@@ -1066,7 +1066,7 @@ func TestAnalyzeTaskCompletion_WorkspaceMode_NoCommitsInAnyRepo(t *testing.T) {
 	mock.Install()
 	installTextAnalysisResult(t, defaultDeps, "INCOMPLETE: No commits found\n")
 
-	completed, _ := analyzeTaskCompletion(defaultDeps, "/test/worktree", "task-empty")
+	completed, _ := analyzeTaskCompletion(t.Context(), defaultDeps, "/test/worktree", "task-empty")
 
 	if completed {
 		t.Error("expected completed=false when no commits found in workspace")
@@ -1135,7 +1135,7 @@ func TestAnalyzeTaskCompletion_WorkspaceMode_PartialResults(t *testing.T) {
 	mock.Install()
 	installTextAnalysisResult(t, defaultDeps, "INCOMPLETE: Only backend work done in repo1\n")
 
-	completed, reason := analyzeTaskCompletion(defaultDeps, "/test/worktree", "task-partial")
+	completed, reason := analyzeTaskCompletion(t.Context(), defaultDeps, "/test/worktree", "task-partial")
 
 	if completed {
 		t.Error("expected completed=false")
@@ -1331,7 +1331,7 @@ func TestRecoverWorktree_WorkspaceStaleLock(t *testing.T) {
 	setDefaultIssueBackend(tracker)
 
 	// Pass repoDir as worktreePath -- lock is at repoDir (per-worktree)
-	err := RecoverWorktree(repoDir, "test-agent", -1)
+	err := RecoverWorktree(t.Context(), repoDir, "test-agent", -1)
 	if err != nil {
 		t.Errorf("expected nil error, got: %v", err)
 	}
@@ -1367,7 +1367,7 @@ func TestAnalyzeTaskCompletion_TruncatesLongTaskDetails(t *testing.T) {
 	mock.InstallOn(deps)
 	analysis := installTextAnalysisResult(t, deps, "INCOMPLETE: Truncation test\n")
 
-	analyzeTaskCompletion(deps, "/test/worktree", "task-trunc1")
+	analyzeTaskCompletion(t.Context(), deps, "/test/worktree", "task-trunc1")
 
 	// Inspect the prompt passed to Claude analysis.
 	calls := analysis.Calls()
@@ -1410,7 +1410,7 @@ func TestAnalyzeTaskCompletion_TruncatesLongGitOutput(t *testing.T) {
 	mock.InstallOn(deps)
 	analysis := installTextAnalysisResult(t, deps, "INCOMPLETE: Truncation test\n")
 
-	analyzeTaskCompletion(deps, "/test/worktree", "task-trunc2")
+	analyzeTaskCompletion(t.Context(), deps, "/test/worktree", "task-trunc2")
 
 	// Inspect the prompt passed to Claude analysis.
 	calls := analysis.Calls()
@@ -1455,7 +1455,7 @@ func TestAnalyzeTaskCompletion_XMLDelimitersInPrompt(t *testing.T) {
 	mock.InstallOn(deps)
 	analysis := installTextAnalysisResult(t, deps, "COMPLETED: XML test passed\n")
 
-	analyzeTaskCompletion(deps, "/test/worktree", "task-xml")
+	analyzeTaskCompletion(t.Context(), deps, "/test/worktree", "task-xml")
 
 	// Inspect the prompt passed to Claude analysis.
 	calls := analysis.Calls()
@@ -1529,7 +1529,7 @@ func TestAnalyzeTaskCompletion_AntiInjectionInstruction(t *testing.T) {
 	mock.InstallOn(deps)
 	analysis := installTextAnalysisResult(t, deps, "INCOMPLETE: Anti-injection test\n")
 
-	analyzeTaskCompletion(deps, "/test/worktree", "task-inject")
+	analyzeTaskCompletion(t.Context(), deps, "/test/worktree", "task-inject")
 
 	// Inspect the prompt passed to Claude analysis.
 	calls := analysis.Calls()

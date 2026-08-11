@@ -46,7 +46,7 @@ type GitOps interface {
 
 	// SetRepoDefaultBranch updates the target branch for a named repo.
 	// workspaceID scopes resolution to a specific workspace (empty = default).
-	SetRepoDefaultBranch(workspaceID, repoName, branch string) error
+	SetRepoDefaultBranch(ctx context.Context, workspaceID, repoName, branch string) error
 
 	// ListAgentWorktrees returns all agent worktrees.
 	// workspaceID scopes discovery to a specific workspace (empty = default).

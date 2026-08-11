@@ -11,7 +11,7 @@ import (
 )
 
 func TestAdapterOwnsLocalSessionMutations(t *testing.T) {
-	store, err := New(t.TempDir())
+	store, err := New(t.Context(), t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestAdapterOwnsLocalSessionMutations(t *testing.T) {
 }
 
 func TestEnvelopeAppenderRetainsSessionScopedSink(t *testing.T) {
-	store, err := New(t.TempDir())
+	store, err := New(t.Context(), t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

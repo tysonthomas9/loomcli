@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,7 +19,7 @@ import (
 // the function always returns nil so the hook process exits 0. Returns nil
 // immediately (no-op) when event is nil, or when runtimeDir / sessionID are
 // missing (non-loom agent session).
-func dispatchHookEvent(event *HookEvent, runtimeDir, sessionID string) error { //nolint:unparam // always nil by design: hooks must exit 0
+func dispatchHookEvent(ctx context.Context, event *HookEvent, runtimeDir, sessionID string) error { //nolint:unparam // always nil by design: hooks must exit 0
 	if event == nil {
 		return nil
 	}
@@ -26,7 +27,7 @@ func dispatchHookEvent(event *HookEvent, runtimeDir, sessionID string) error { /
 		return nil
 	}
 
-	store, err := sessionstoreadapter.New(runtimeDir)
+	store, err := sessionstoreadapter.New(ctx, runtimeDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "loom hook: failed to create session store: %v\n", err)
 		return nil
@@ -55,7 +56,7 @@ func dispatchHookEvent(event *HookEvent, runtimeDir, sessionID string) error { /
 	// On SessionEnd, capture token usage from Claude's transcript and patch
 	// session metadata.
 	if event.Type == HookSessionEnd && event.SessionRef != "" {
-		captureTokenUsage(store, sessionID, event.SessionRef, event.Backend)
+		captureTokenUsage(ctx, store, sessionID, event.SessionRef, event.Backend)
 	}
 
 	return nil
@@ -74,8 +75,8 @@ func deriveSubagentPath(parentTranscriptPath, subagentID string) string {
 
 // captureTokenUsage reads the Claude transcript, sums token usage, and
 // patches session metadata. Errors are logged to stderr and never propagated.
-func captureTokenUsage(store *sessions.Store, sessionID, transcriptPath, backend string) {
-	tok, err := sessions.SumTranscriptUsage(transcriptPath)
+func captureTokenUsage(ctx context.Context, store *sessions.Store, sessionID, transcriptPath, backend string) {
+	tok, err := sessions.SumTranscriptUsage(ctx, transcriptPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "loom hook: failed to sum transcript usage: %v\n", err)
 		return

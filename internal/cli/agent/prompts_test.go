@@ -653,7 +653,7 @@ func TestGenerateConflictResolutionPrompt_DelegatesToInternal(t *testing.T) {
 }
 
 func TestGenerateTerminalPromptUsesBuiltInLeadWhenPromptFileEmpty(t *testing.T) {
-	prompt, err := GenerateTerminalPrompt("")
+	prompt, err := GenerateTerminalPrompt(t.Context(), "")
 	if err != nil {
 		t.Fatalf("GenerateTerminalPrompt empty: %v", err)
 	}
@@ -666,7 +666,7 @@ func TestGenerateTerminalPromptBuiltinPRReview(t *testing.T) {
 	t.Setenv("LOOM_AGENT_NAME", "review-nova")
 	t.Setenv("LOOM_AGENT_ROLE", "pr-review")
 
-	prompt, err := GenerateTerminalPrompt("builtin:pr-review")
+	prompt, err := GenerateTerminalPrompt(t.Context(), "builtin:pr-review")
 	if err != nil {
 		t.Fatalf("GenerateTerminalPrompt builtin pr-review: %v", err)
 	}
@@ -687,7 +687,7 @@ func TestGenerateTerminalPromptBuiltinPRReview(t *testing.T) {
 }
 
 func TestGenerateTerminalPromptBuiltinLeadMatchesLeadPrompt(t *testing.T) {
-	prompt, err := GenerateTerminalPrompt("builtin:lead")
+	prompt, err := GenerateTerminalPrompt(t.Context(), "builtin:lead")
 	if err != nil {
 		t.Fatalf("GenerateTerminalPrompt builtin lead: %v", err)
 	}
@@ -700,7 +700,7 @@ func TestGenerateTerminalPromptBuiltinLeadMatchesLeadPrompt(t *testing.T) {
 }
 
 func TestGenerateTerminalPromptBuiltinUnknownErrors(t *testing.T) {
-	_, err := GenerateTerminalPrompt("builtin:nope")
+	_, err := GenerateTerminalPrompt(t.Context(), "builtin:nope")
 	if err == nil {
 		t.Fatal("GenerateTerminalPrompt builtin:nope error = nil, want error")
 	}
@@ -717,7 +717,7 @@ func TestGenerateTerminalPromptCustomReplacesBaseAndAppendsSafety(t *testing.T) 
 		t.Fatalf("write prompt: %v", err)
 	}
 
-	prompt, err := GenerateTerminalPrompt(promptFile)
+	prompt, err := GenerateTerminalPrompt(t.Context(), promptFile)
 	if err != nil {
 		t.Fatalf("GenerateTerminalPrompt custom: %v", err)
 	}
@@ -747,7 +747,7 @@ func TestGenerateTerminalPromptTextPreservesLiteralTextAndAppendsSafetyOnce(t *t
 }
 
 func TestGenerateTerminalPromptMissingFileErrors(t *testing.T) {
-	_, err := GenerateTerminalPrompt(filepath.Join(t.TempDir(), "missing.md"))
+	_, err := GenerateTerminalPrompt(t.Context(), filepath.Join(t.TempDir(), "missing.md"))
 	if err == nil {
 		t.Fatal("GenerateTerminalPrompt missing file error = nil, want error")
 	}
@@ -1368,7 +1368,7 @@ func TestResolveActiveWorkspace_NoConfig(t *testing.T) {
 
 	os.Setenv("LOOM_CONFIG_DIR", configDir)
 
-	ws, err := ResolveActiveWorkspace()
+	ws, err := ResolveActiveWorkspace(t.Context())
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -1526,7 +1526,7 @@ func TestStepBuilders_CapabilityDriven(t *testing.T) {
 }
 
 func TestGenerateTerminalPromptBuiltinPRReviewCheckout(t *testing.T) {
-	got, err := GenerateTerminalPrompt("builtin:pr-review-checkout")
+	got, err := GenerateTerminalPrompt(t.Context(), "builtin:pr-review-checkout")
 	if err != nil {
 		t.Fatalf("GenerateTerminalPrompt builtin pr-review-checkout: %v", err)
 	}

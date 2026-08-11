@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -47,7 +48,7 @@ func runClaim(cmd *cobra.Command, args []string) {
 	}
 
 	// Resolve the task title through the active issue backend.
-	taskTitle := getTaskTitle(taskID)
+	taskTitle := getTaskTitle(cmd.Context(), taskID)
 
 	// Update the lock file. Best-effort: the lock file is bookkeeping for
 	// 'loom monitor' only — the actual task claim is owned by the daemon/
@@ -59,7 +60,7 @@ func runClaim(cmd *cobra.Command, args []string) {
 	}
 
 	// Emit task_claimed event (best-effort)
-	emitTaskClaimedEvent(taskID, taskTitle)
+	emitTaskClaimedEvent(cmd.Context(), taskID, taskTitle)
 
 	// Clear stale checkpoint if it's for a different task
 	lockDir := cli.ResolveLockDir(cwd)
@@ -82,8 +83,8 @@ func runClaim(cmd *cobra.Command, args []string) {
 // cli.initAgentEventBus, so the previous fallback behavior is preserved.
 // When the bus is unavailable (mkdir failure on first use) emission is
 // skipped silently — same best-effort contract as before.
-func emitTaskClaimedEvent(taskID, taskTitle string) {
-	bus := cli.AgentEventBus()
+func emitTaskClaimedEvent(ctx context.Context, taskID, taskTitle string) {
+	bus := cli.AgentEventBus(ctx)
 	if bus == nil {
 		return
 	}
@@ -97,8 +98,8 @@ func emitTaskClaimedEvent(taskID, taskTitle string) {
 	}
 }
 
-func getTaskTitle(taskID string) string {
-	ctx, cancel := cmdstore.SignalContext()
+func getTaskTitle(parent context.Context, taskID string) string {
+	ctx, cancel := cmdstore.SignalContext(parent)
 	defer cancel()
 	detail, err := cli.DefaultIssueBackend().Get(ctx, taskID)
 	if err != nil || detail == nil {

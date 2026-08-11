@@ -69,9 +69,9 @@ func TestResolveWorkerWorkspace_AlreadyUUID(t *testing.T) {
 	// When workspace is already a valid UUID, it should be returned as-is
 	// without attempting to load config.
 	uuid := "550e8400-e29b-41d4-a716-446655440000"
-	got := resolveWorkerWorkspace(uuid)
+	got := resolveWorkerWorkspace(t.Context(), uuid)
 	if got != uuid {
-		t.Errorf("resolveWorkerWorkspace(%q) = %q, want %q", uuid, got, uuid)
+		t.Errorf("resolveWorkerWorkspace(t.Context(), %q) = %q, want %q", uuid, got, uuid)
 	}
 }
 
@@ -79,7 +79,7 @@ func TestResolveWorkerWorkspace_NonUUIDFallsBack(t *testing.T) {
 	// When workspace is not a UUID and config is unavailable, the original
 	// value should be returned as-is (graceful fallback).
 	name := "my-workspace"
-	got := resolveWorkerWorkspace(name)
+	got := resolveWorkerWorkspace(t.Context(), name)
 	// Without a valid config file, it should fall back to returning the name.
 	// We can't easily assert what it returns beyond "no panic", but since
 	// LoadConfig will fail in a test env without config, we expect the name back.

@@ -127,7 +127,7 @@ func runClaudeHook(cmd *cobra.Command, hookName string) error {
 		return nil // Always exit 0
 	}
 
-	_ = dispatchHookEvent(event, runtimeDir, sessionID)
+	_ = dispatchHookEvent(cmd.Context(), event, runtimeDir, sessionID)
 	maybeWriteClaudeAssignmentContext(cmd, hookName)
 
 	// Yield check for stop hook (defense-in-depth)

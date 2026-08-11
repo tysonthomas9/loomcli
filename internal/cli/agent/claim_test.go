@@ -46,7 +46,7 @@ func TestRunClaim_Success(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	runClaim(nil, []string{"loom-123"})
+	runClaim(commandWithContext(t), []string{"loom-123"})
 
 	w.Close()
 	os.Stdout = oldStdout
@@ -112,7 +112,7 @@ func TestRunClaim_NoTitle(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	runClaim(nil, []string{"loom-456"})
+	runClaim(commandWithContext(t), []string{"loom-456"})
 
 	w.Close()
 	os.Stdout = oldStdout
@@ -138,7 +138,7 @@ func TestGetTaskTitle_Success(t *testing.T) {
 	setDefaultIssueBackend(mock)
 	t.Cleanup(func() { setDefaultIssueBackend(nil) })
 
-	title := getTaskTitle("loom-789")
+	title := getTaskTitle(t.Context(), "loom-789")
 	if title != "My Task Title" {
 		t.Errorf("expected 'My Task Title', got %q", title)
 	}
@@ -153,7 +153,7 @@ func TestGetTaskTitle_IssueLookupError(t *testing.T) {
 	setDefaultIssueBackend(mock)
 	t.Cleanup(func() { setDefaultIssueBackend(nil) })
 
-	title := getTaskTitle("loom-error")
+	title := getTaskTitle(t.Context(), "loom-error")
 	if title != "" {
 		t.Errorf("expected empty string on error, got %q", title)
 	}
@@ -168,7 +168,7 @@ func TestGetTaskTitle_NilIssue(t *testing.T) {
 	setDefaultIssueBackend(mock)
 	t.Cleanup(func() { setDefaultIssueBackend(nil) })
 
-	title := getTaskTitle("loom-empty")
+	title := getTaskTitle(t.Context(), "loom-empty")
 	if title != "" {
 		t.Errorf("expected empty string on nil issue, got %q", title)
 	}
@@ -185,7 +185,7 @@ func TestGetTaskTitle_PassesCorrectID(t *testing.T) {
 	setDefaultIssueBackend(mock)
 	t.Cleanup(func() { setDefaultIssueBackend(nil) })
 
-	getTaskTitle("loom-123")
+	getTaskTitle(t.Context(), "loom-123")
 	if capturedID != "loom-123" {
 		t.Errorf("expected GetIssue called with 'loom-123', got %q", capturedID)
 	}
@@ -217,7 +217,7 @@ func TestRunClaim_LockUpdateFailureIsNonFatal(t *testing.T) {
 	rErr, wErr, _ := os.Pipe()
 	os.Stdout, os.Stderr = wOut, wErr
 
-	runClaim(nil, []string{"loom-789"})
+	runClaim(commandWithContext(t), []string{"loom-789"})
 
 	wOut.Close()
 	wErr.Close()

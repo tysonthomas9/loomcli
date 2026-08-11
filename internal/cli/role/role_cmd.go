@@ -156,8 +156,8 @@ func runRoleAdd(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runRoleList(_ *cobra.Command, _ []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+func runRoleList(cmd *cobra.Command, _ []string) error {
+	return cmdstore.WithActiveWorkspace(cmd.Context(), func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
 		roles, err := h.Store.Roles().List(ctx, ws)
 		if err != nil {
 			return fmt.Errorf("list roles: %w", err)
@@ -180,8 +180,8 @@ func runRoleList(_ *cobra.Command, _ []string) error {
 	})
 }
 
-func runRoleShow(_ *cobra.Command, args []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+func runRoleShow(cmd *cobra.Command, args []string) error {
+	return cmdstore.WithActiveWorkspace(cmd.Context(), func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
 		r, err := h.Store.Roles().Get(ctx, ws, args[0])
 		if err != nil {
 			return fmt.Errorf("get role: %w", err)

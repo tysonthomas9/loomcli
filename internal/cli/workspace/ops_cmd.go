@@ -150,13 +150,13 @@ type WorkspaceOpsProblem struct {
 }
 
 func runWorkspaceOpsStatus(cmd *cobra.Command, args []string) error {
-	return withWorkspaceOpsStatus(args, func(status *WorkspaceOpsStatus) error {
+	return withWorkspaceOpsStatus(cmd.Context(), args, func(status *WorkspaceOpsStatus) error {
 		return renderWorkspaceOpsStatus(cmd, status)
 	})
 }
 
 func runWorkspaceOpsEnsureRuntime(cmd *cobra.Command, args []string) error {
-	initial, err := workspaceOpsStatusForArgs(args)
+	initial, err := workspaceOpsStatusForArgs(cmd.Context(), args)
 	if err != nil {
 		return err
 	}
@@ -197,24 +197,24 @@ func runWorkspaceOpsEnsureRuntime(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	status, err := workspaceOpsStatusForArgs([]string{key})
+	status, err := workspaceOpsStatusForArgs(cmd.Context(), []string{key})
 	if err != nil {
 		return fmt.Errorf("refresh workspace runtime status: %w", err)
 	}
 	return renderWorkspaceOpsStatus(cmd, status)
 }
 
-func withWorkspaceOpsStatus(args []string, fn func(*WorkspaceOpsStatus) error) error {
-	status, err := workspaceOpsStatusForArgs(args)
+func withWorkspaceOpsStatus(ctx context.Context, args []string, fn func(*WorkspaceOpsStatus) error) error {
+	status, err := workspaceOpsStatusForArgs(ctx, args)
 	if err != nil {
 		return err
 	}
 	return fn(status)
 }
 
-func workspaceOpsStatusForArgs(args []string) (*WorkspaceOpsStatus, error) {
+func workspaceOpsStatusForArgs(parent context.Context, args []string) (*WorkspaceOpsStatus, error) {
 	var loaded *WorkspaceOpsStatus
-	err := cmdstore.WithWorkspaceCatalog(func(ctx context.Context, h *bootstrap.StoreHandle, workspace workspacemodule.API) error {
+	err := cmdstore.WithWorkspaceCatalog(parent, func(ctx context.Context, h *bootstrap.StoreHandle, workspace workspacemodule.API) error {
 		key, err := pickWorkspaceKey(ctx, workspace, args)
 		if err != nil {
 			return err

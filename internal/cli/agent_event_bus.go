@@ -32,12 +32,12 @@ var (
 // be created); callers should handle that as "no event sink".
 //
 // Safe to call concurrently. Idempotent.
-func AgentEventBus() *events.Bus {
-	agentBusOnce.Do(initAgentEventBus)
+func AgentEventBus(ctx context.Context) *events.Bus {
+	agentBusOnce.Do(func() { initAgentEventBus(ctx) })
 	return agentBus
 }
 
-func initAgentEventBus() {
+func initAgentEventBus(ctx context.Context) {
 	dir := os.Getenv("LOOM_EVENTS_DIR")
 	if dir == "" {
 		// Default events location alongside the loom data dir; mirrors the
@@ -54,7 +54,7 @@ func initAgentEventBus() {
 		return
 	}
 
-	bus := events.NewBus(dir)
+	bus := events.NewBus(ctx, dir)
 
 	// Wire otelexport into the bus, sharing the global TracerProvider so
 	// emitted spans land in the same exporter as everything else. We pass

@@ -17,7 +17,7 @@ import (
 // creation, before any transcript content exists, and never cleared).
 func TestSessionServiceListTaskSessionsControlPlaneUsesDiskTruth(t *testing.T) {
 	runtimeDir := t.TempDir()
-	sessStore, err := sessions.NewStore(runtimeDir)
+	sessStore, err := sessions.NewStore(t.Context(), runtimeDir)
 	if err != nil {
 		t.Fatalf("new session store: %v", err)
 	}

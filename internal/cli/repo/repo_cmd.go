@@ -81,8 +81,8 @@ func init() {
 	cli.RegisterCommand(repoCmd)
 }
 
-func runRepoAdd(_ *cobra.Command, args []string) error {
-	return cmdstore.WithActiveWorkspaceCatalog(func(ctx context.Context, _ *bootstrap.StoreHandle, workspace workspacemodule.API, ws string) error {
+func runRepoAdd(cmd *cobra.Command, args []string) error {
+	return cmdstore.WithActiveWorkspaceCatalog(cmd.Context(), func(ctx context.Context, _ *bootstrap.StoreHandle, workspace workspacemodule.API, ws string) error {
 		name := strings.TrimSpace(args[0])
 		localPath, cloned, err := ensureRepoLocalCheckout(ctx, ws, name, args[1])
 		if err != nil {
@@ -170,8 +170,8 @@ func rememberRepoLocalPath(ws, name, repoPath string) error {
 	return localworkspace.RememberRepoPath(ws, name, repoPath)
 }
 
-func runRepoList(_ *cobra.Command, _ []string) error {
-	return cmdstore.WithActiveWorkspaceCatalog(func(ctx context.Context, _ *bootstrap.StoreHandle, workspace workspacemodule.API, ws string) error {
+func runRepoList(cmd *cobra.Command, _ []string) error {
+	return cmdstore.WithActiveWorkspaceCatalog(cmd.Context(), func(ctx context.Context, _ *bootstrap.StoreHandle, workspace workspacemodule.API, ws string) error {
 		repos, err := workspace.ListRepositories(ctx, workspacemodule.ListRepositoriesQuery{WorkspaceReference: ws})
 		if err != nil {
 			return fmt.Errorf("list repos: %w", err)
@@ -190,8 +190,8 @@ func runRepoList(_ *cobra.Command, _ []string) error {
 	})
 }
 
-func runRepoShow(_ *cobra.Command, args []string) error {
-	return cmdstore.WithActiveWorkspaceCatalog(func(ctx context.Context, _ *bootstrap.StoreHandle, workspace workspacemodule.API, ws string) error {
+func runRepoShow(cmd *cobra.Command, args []string) error {
+	return cmdstore.WithActiveWorkspaceCatalog(cmd.Context(), func(ctx context.Context, _ *bootstrap.StoreHandle, workspace workspacemodule.API, ws string) error {
 		r, err := workspace.GetRepository(ctx, workspacemodule.GetRepositoryQuery{WorkspaceReference: ws, Name: args[0]})
 		if err != nil {
 			return fmt.Errorf("get repo: %w", err)
@@ -215,8 +215,8 @@ func runRepoShow(_ *cobra.Command, args []string) error {
 	})
 }
 
-func runRepoRemove(_ *cobra.Command, args []string) error {
-	return cmdstore.WithActiveWorkspaceCatalog(func(ctx context.Context, _ *bootstrap.StoreHandle, workspace workspacemodule.API, ws string) error {
+func runRepoRemove(cmd *cobra.Command, args []string) error {
+	return cmdstore.WithActiveWorkspaceCatalog(cmd.Context(), func(ctx context.Context, _ *bootstrap.StoreHandle, workspace workspacemodule.API, ws string) error {
 		if _, err := workspace.UnregisterRepository(ctx, workspacemodule.UnregisterRepositoryCommand{WorkspaceReference: ws, Name: args[0]}); err != nil {
 			return fmt.Errorf("remove repo: %w", err)
 		}

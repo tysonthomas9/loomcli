@@ -1,6 +1,7 @@
 package automode
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,11 +14,8 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
-	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
-	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
-	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/infra/sessionstoreadapter"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
@@ -32,13 +30,13 @@ type AutoModeOptions struct {
 	AgentType       string // "plan" or "task"
 	AgentName       string
 	WorktreePath    string
-	WorkspaceID     string                                       // Stable workspace UUID (falls back to LOOM_WORKSPACE_ID env)
-	ParentID        string                                       // Epic ID to scope task discovery to (empty = all tasks)
-	CustomPromptGen func(string, *config.WorkspaceConfig) string // Custom prompt generator (overrides AgentType selection)
-	CustomTaskCheck func() (bool, error)                         // Custom task availability check (overrides AgentType selection)
-	BackoffBase     time.Duration                                // Base backoff duration for no-progress retries (default 30s)
-	TaskPause       time.Duration                                // Pause after task completion before checking for next (default 2s)
-	EventBus        events.Emitter                               // Event emission for observability (nil = no events)
+	WorkspaceID     string               // Stable workspace UUID (falls back to LOOM_WORKSPACE_ID env)
+	ParentID        string               // Epic ID to scope task discovery to (empty = all tasks)
+	Prompt          func(string) string  // Required prompt builder; composition resolves all prompt inputs before the loop starts.
+	CustomTaskCheck func() (bool, error) // Custom task availability check (overrides AgentType selection)
+	BackoffBase     time.Duration        // Base backoff duration for no-progress retries (default 30s)
+	TaskPause       time.Duration        // Pause after task completion before checking for next (default 2s)
+	EventBus        events.Emitter       // Event emission for observability (nil = no events)
 
 	// Rate-limit circuit breaker configuration. If any is 0, defaults are applied
 	// (10m window, 5 threshold, 5m cooldown). Set RateLimitThreshold to a
@@ -138,12 +136,13 @@ func agentClaimedTask(worktreePath, agentName string, bridge cli.LockBridge) boo
 
 // autoLoopCtx holds runtime state for the auto mode loop.
 type autoLoopCtx struct {
+	ctx               context.Context
 	opts              AutoModeOptions
 	state             *AutoModeState
 	deps              *cli.Deps
 	yieldFile         string
 	hasAvailableTasks func() (bool, error)
-	generatePrompt    func(string, *config.WorkspaceConfig) string
+	generatePrompt    func(string) string
 	usageStore        *usage.Projection
 	sessStore         *sessions.Store
 	updateState       func(string) error
@@ -182,8 +181,8 @@ type autoLoopCtx struct {
 }
 
 // RunAutoModeLoop runs the auto mode loop for either plan or task agents.
-func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
-	ctx := initAutoLoop(opts)
+func RunAutoModeLoop(parent context.Context, opts AutoModeOptions, shutdown chan struct{}) {
+	ctx := initAutoLoop(parent, opts)
 	printAutoModeHeader(opts)
 
 	for {
@@ -221,7 +220,7 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 }
 
 // applyAutoModeDefaults fills zero-value fields in opts with sensible defaults.
-func applyAutoModeDefaults(opts *AutoModeOptions) {
+func applyAutoModeDefaults(ctx context.Context, opts *AutoModeOptions) {
 	if opts.Deps == nil {
 		opts.Deps = cli.GetDeps(nil)
 	}
@@ -235,7 +234,7 @@ func applyAutoModeDefaults(opts *AutoModeOptions) {
 		// Use the process-wide agent bus so emitted task/agent events flow
 		// to its otelexport subscriber. Falls back to NopBus when the bus
 		// can't be constructed (e.g., events dir not writable).
-		if bus := cli.AgentEventBus(); bus != nil {
+		if bus := cli.AgentEventBus(ctx); bus != nil {
 			opts.EventBus = bus
 		} else {
 			opts.EventBus = events.NopBus{}
@@ -252,11 +251,12 @@ func applyAutoModeDefaults(opts *AutoModeOptions) {
 	}
 }
 
-func initAutoLoop(opts AutoModeOptions) *autoLoopCtx {
-	applyAutoModeDefaults(&opts)
+func initAutoLoop(parent context.Context, opts AutoModeOptions) *autoLoopCtx {
+	applyAutoModeDefaults(parent, &opts)
 	d := opts.Deps
 
 	ctx := &autoLoopCtx{
+		ctx:       parent,
 		opts:      opts,
 		deps:      d,
 		yieldFile: os.Getenv("LOOM_YIELD_FILE"),
@@ -268,12 +268,11 @@ func initAutoLoop(opts AutoModeOptions) *autoLoopCtx {
 		rateLimitBreaker: newRateLimitBreaker(opts.RateLimitWindow, opts.RateLimitCooldown, opts.RateLimitThreshold),
 	}
 
-	ctx.hasAvailableTasks = resolveTaskChecker(opts)
-	if opts.CustomPromptGen != nil {
-		ctx.generatePrompt = opts.CustomPromptGen
-	} else {
-		log.Fatal("CustomPromptGen must be set on AutoModeOptions")
+	ctx.hasAvailableTasks = resolveTaskChecker(parent, opts)
+	if opts.Prompt == nil {
+		panic("automode: Prompt is required")
 	}
+	ctx.generatePrompt = opts.Prompt
 
 	usageStore, usageErr := usage.NewProjection(cli.GetWorkspaceRuntimeDir())
 	if usageErr != nil {
@@ -281,7 +280,7 @@ func initAutoLoop(opts AutoModeOptions) *autoLoopCtx {
 	}
 	ctx.usageStore = usageStore
 
-	sessStore, sessErr := sessionstoreadapter.New(cli.GetWorkspaceRuntimeDir())
+	sessStore, sessErr := sessionstoreadapter.New(parent, cli.GetWorkspaceRuntimeDir())
 	if sessErr != nil {
 		log.Printf("[auto] Warning: session store unavailable: %v", sessErr)
 	}
@@ -294,15 +293,17 @@ func initAutoLoop(opts AutoModeOptions) *autoLoopCtx {
 	return ctx
 }
 
-func resolveTaskChecker(opts AutoModeOptions) func() (bool, error) {
+func resolveTaskChecker(ctx context.Context, opts AutoModeOptions) func() (bool, error) {
 	if opts.CustomTaskCheck != nil {
 		return opts.CustomTaskCheck
 	}
 	if opts.AgentType == "plan" {
-		return func() (bool, error) { return HasAvailablePlanningTasks(opts.ParentID, os.Getenv("LOOM_AGENT_REPO")) }
+		return func() (bool, error) {
+			return HasAvailablePlanningTasks(ctx, opts.ParentID, os.Getenv("LOOM_AGENT_REPO"))
+		}
 	}
 	return func() (bool, error) {
-		return HasAvailableImplementationTasks(opts.ParentID, os.Getenv("LOOM_AGENT_REPO"))
+		return HasAvailableImplementationTasks(ctx, opts.ParentID, os.Getenv("LOOM_AGENT_REPO"))
 	}
 }
 
@@ -397,8 +398,6 @@ func runAutoTask(ctx *autoLoopCtx, shutdown chan struct{}) bool {
 	fmt.Printf("\n[auto] === Starting task %d ===\n\n", ctx.state.TasksCompleted+1)
 
 	beforeRef := CaptureHEADRef(ctx.opts.WorktreePath)
-	workspace := resolveActiveWorkspaceForAutomode()
-
 	// Arm resume BEFORE building the prompt so generatePrompt skips the redundant
 	// checkpoint context when we're resuming the prior Claude session (the
 	// resumed session already carries it). Resume-first / checkpoint-fallback.
@@ -409,7 +408,7 @@ func runAutoTask(ctx *autoLoopCtx, shutdown chan struct{}) bool {
 	}
 	defer backends.ClearResumeSessionID()
 
-	prompt := ctx.generatePrompt(ctx.opts.AgentName, workspace)
+	prompt := ctx.generatePrompt(ctx.opts.AgentName)
 	sess := createAutoSession(ctx, prompt)
 
 	backendName := cli.GetBackendName()
@@ -543,39 +542,4 @@ func formatTimeout(timeout int) string {
 		return "none"
 	}
 	return fmt.Sprintf("%dm", timeout)
-}
-
-// resolveActiveWorkspaceForAutomode returns the active FleetDB workspace as a
-// *config.WorkspaceConfig.
-// The synthesized *config.WorkspaceConfig only carries fields used by
-// the prompt builders (Repos, Path, ID, DesignFormat).
-func resolveActiveWorkspaceForAutomode() *config.WorkspaceConfig {
-	ctx, cancel := cmdstore.SignalContext()
-	defer cancel()
-	if h, err := cmdstore.OpenStore(ctx); err == nil {
-		defer func() { _ = h.Close() }()
-		key, keyErr := bootstrap.ResolveActiveWorkspaceKey(ctx, h.Store.Workspaces())
-		if keyErr == nil {
-			ws, _ := h.Store.Workspaces().Get(ctx, key)
-			repos, _ := h.Store.Repos().List(ctx, key)
-			if ws != nil {
-				out := &config.WorkspaceConfig{
-					ID:           ws.Key,
-					Path:         "", // resolved at call site via state cache; not material for prompts
-					DesignFormat: ws.DesignFormat,
-				}
-				for _, r := range repos {
-					out.Repos = append(out.Repos, config.RepoConfig{
-						Name:          r.Name,
-						DefaultBranch: r.DefaultBranch,
-						Remote:        r.Remote,
-						SourceRepoID:  r.SourceRepoID,
-						Groups:        r.Groups,
-					})
-				}
-				return out
-			}
-		}
-	}
-	return nil
 }

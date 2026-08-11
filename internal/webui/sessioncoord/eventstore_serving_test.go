@@ -16,7 +16,7 @@ import (
 // event into the session's events.jsonl, returning the store + session id.
 func seedEventStore(t *testing.T) (*sessions.Store, string) {
 	t.Helper()
-	store, err := sessions.NewStore(t.TempDir())
+	store, err := sessions.NewStore(t.Context(), t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestEventStoreSubagentEvents(t *testing.T) {
 
 func TestEventStoreEmptyFallsBack(t *testing.T) {
 	t.Setenv("LOOM_SERVE_FROM_EVENTSTORE", "1")
-	store, err := sessions.NewStore(t.TempDir())
+	store, err := sessions.NewStore(t.Context(), t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

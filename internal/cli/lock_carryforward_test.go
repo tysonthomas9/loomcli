@@ -29,7 +29,7 @@ func writeStaleLock(t *testing.T, dir string, info LockInfo) {
 
 func TestAcquireLock_AssignsRunID(t *testing.T) {
 	dir := t.TempDir()
-	if err := AcquireLock(dir, "plan", "falcon"); err != nil {
+	if err := AcquireLock(t.Context(), dir, "plan", "falcon"); err != nil {
 		t.Fatalf("AcquireLock: %v", err)
 	}
 	info, err := ReadLockFile(dir)
@@ -54,7 +54,7 @@ func TestAcquireLock_CarriesResumeForwardAcrossStaleReplacement(t *testing.T) {
 	})
 
 	// Acquiring over a stale lock must preserve the resume continuity, not wipe it.
-	if err := AcquireLock(dir, "task", "falcon"); err != nil {
+	if err := AcquireLock(t.Context(), dir, "task", "falcon"); err != nil {
 		t.Fatalf("AcquireLock over stale lock: %v", err)
 	}
 	info, err := ReadLockFile(dir)
@@ -77,7 +77,7 @@ func TestAcquireLock_CarriesResumeForwardAcrossStaleReplacement(t *testing.T) {
 
 func TestUpdateLock_ConcurrentNoLostUpdate(t *testing.T) {
 	dir := t.TempDir()
-	if err := AcquireLock(dir, "plan", "falcon"); err != nil {
+	if err := AcquireLock(t.Context(), dir, "plan", "falcon"); err != nil {
 		t.Fatalf("AcquireLock: %v", err)
 	}
 	const n = 50
@@ -106,7 +106,7 @@ func TestUpdateLock_ConcurrentNoLostUpdate(t *testing.T) {
 
 func TestUpdateLockClaudeSessionID_RoundTripAndOwnership(t *testing.T) {
 	dir := t.TempDir()
-	if err := AcquireLock(dir, "task", "falcon"); err != nil {
+	if err := AcquireLock(t.Context(), dir, "task", "falcon"); err != nil {
 		t.Fatalf("AcquireLock: %v", err)
 	}
 	if err := UpdateLockClaudeSessionID(dir, "sid-1"); err != nil {

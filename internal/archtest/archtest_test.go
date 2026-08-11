@@ -690,6 +690,7 @@ func TestRetiredHorizontalRootsCannotReturn(t *testing.T) {
 		"internal/modules/connectors/fleetdb",
 		"internal/modules/sourcecontrol/stackpublish",
 		"internal/pathsec",
+		"internal/runtimectx",
 		"internal/runtimepreflight",
 		"internal/stacklineage",
 		"internal/stackpublish",
@@ -754,6 +755,51 @@ func TestRetiredHorizontalRootsCannotReturn(t *testing.T) {
 				t.Fatalf("retired horizontal root callers = %v, want none", callers)
 			}
 		})
+	}
+}
+
+func TestRetiredAmbientRuntimeContextCannotReturn(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	forbidden := []string{
+		"cmdstore.RootContext()",
+		"runtimectx.RootContext()",
+		"runtimectx.SetRootContext(",
+		"events.SetContextProvider(",
+		"func SetRootContext(",
+		"func RootContext()",
+		"func SetContextProvider(",
+		"ambientCtxProvider",
+	}
+	err = filepath.WalkDir(filepath.Join(root, "internal"), func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			if entry.Name() == "archtest" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		content, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		for _, fragment := range forbidden {
+			if strings.Contains(string(content), fragment) {
+				relative, _ := filepath.Rel(root, path)
+				t.Errorf("retired ambient runtime-context fallback %q returned in %s", fragment, filepath.ToSlash(relative))
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

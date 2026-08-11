@@ -174,7 +174,7 @@ func TestHasAvailablePlanningTasks_Success(t *testing.T) {
 	})
 	mock.Install()
 
-	available, err := HasAvailablePlanningTasks("", "")
+	available, err := HasAvailablePlanningTasks(t.Context(), "", "")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -191,7 +191,7 @@ func TestHasAvailablePlanningTasks_SkipsTasksWithDesign(t *testing.T) {
 	})
 	mock.Install()
 
-	available, err := HasAvailablePlanningTasks("", "")
+	available, err := HasAvailablePlanningTasks(t.Context(), "", "")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -207,7 +207,7 @@ func TestHasAvailablePlanningTasks_ReadyError(t *testing.T) {
 	})
 	mock.Install()
 
-	_, err := HasAvailablePlanningTasks("", "")
+	_, err := HasAvailablePlanningTasks(t.Context(), "", "")
 	if err == nil {
 		t.Error("expected error when issue-store command fails")
 	}
@@ -225,7 +225,7 @@ func TestGetAvailablePlanningTasks_Success(t *testing.T) {
 	})
 	mock.Install()
 
-	tasks, err := GetAvailablePlanningTasks("", "")
+	tasks, err := GetAvailablePlanningTasks(t.Context(), "", "")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -245,7 +245,7 @@ func TestGetAvailablePlanningTasks_ReturnsEmpty(t *testing.T) {
 	})
 	mock.Install()
 
-	tasks, err := GetAvailablePlanningTasks("", "")
+	tasks, err := GetAvailablePlanningTasks(t.Context(), "", "")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -261,7 +261,7 @@ func TestGetAvailablePlanningTasks_ReadyError(t *testing.T) {
 	})
 	mock.Install()
 
-	_, err := GetAvailablePlanningTasks("", "")
+	_, err := GetAvailablePlanningTasks(t.Context(), "", "")
 	if err == nil {
 		t.Error("expected error when issue-store command fails")
 	}

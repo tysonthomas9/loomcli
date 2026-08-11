@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -538,11 +539,10 @@ func (r *Resolver) GetDefaultBranch() string {
 }
 
 // SetRepoDefaultBranch updates the default branch for a named repo in FleetDB.
-func (r *Resolver) SetRepoDefaultBranch(repoName, branch string) error {
+func (r *Resolver) SetRepoDefaultBranch(ctx context.Context, repoName, branch string) error {
 	if r.Mode != ModeWorkspace || r.Config == nil {
 		return fmt.Errorf("target branch update only supported in workspace mode")
 	}
-	ctx := cmdstore.RootContext()
 	dataDir := bootstrap.LoomDir()
 	if dataDir == "" {
 		return fmt.Errorf("cannot determine loom data directory")

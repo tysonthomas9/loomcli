@@ -313,7 +313,7 @@ func (s *agentServiceImpl) GitStatus(_ context.Context, wsID, agentName string) 
 	return result, nil
 }
 
-func (s *agentServiceImpl) SetTargetBranch(_ context.Context, wsID, agentName, branch string) error {
+func (s *agentServiceImpl) SetTargetBranch(ctx context.Context, wsID, agentName, branch string) error {
 	wt, err := s.resolveAgentWorktree(wsID, agentName)
 	if err != nil {
 		return err
@@ -323,7 +323,7 @@ func (s *agentServiceImpl) SetTargetBranch(_ context.Context, wsID, agentName, b
 		return apperrors.ErrValidation("target branch update only supported in workspace mode")
 	}
 
-	if err := s.gitOps.SetRepoDefaultBranch(wsID, wt.RepoName, branch); err != nil {
+	if err := s.gitOps.SetRepoDefaultBranch(ctx, wsID, wt.RepoName, branch); err != nil {
 		return fmt.Errorf("updating target branch: %w", err)
 	}
 	return nil

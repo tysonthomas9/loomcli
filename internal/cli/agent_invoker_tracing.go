@@ -1,13 +1,13 @@
 package cli
 
 import (
+	"context"
 	"os"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/observability/tracing"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
@@ -19,29 +19,31 @@ const agentInvokerTracerName = "github.com/tysonthomas9/loomcli/internal/cli/bac
 
 // tracedAgentInvoker wraps an AgentInvoker and emits one span per Invoke*
 // call. Spans nest under the active root span (typically loom.cli.plan or
-// loom.cli.task) via cmdstore.RootContext, giving sub-task granularity for
-// "how long was spent in the LLM" vs other work the agent does.
+// loom.cli.task) via the context supplied when dependencies are composed,
+// giving sub-task granularity for "how long was spent in the LLM" vs other
+// work the agent does.
 //
 // Per the trace contract §6, prompt content is NEVER recorded as a span
 // attribute. Only prompt.bytes is captured. Same for usage tokens (numeric
 // only, no text).
 type tracedAgentInvoker struct {
+	ctx   context.Context
 	inner AgentInvoker
 }
 
 // wrapAgentInvokerWithTracing returns a tracing-decorated AgentInvoker.
 // When the global TracerProvider is no-op (tracing disabled), the overhead
 // is one span construction + immediate end per call. Cheap.
-func wrapAgentInvokerWithTracing(inner AgentInvoker) AgentInvoker {
+func wrapAgentInvokerWithTracing(ctx context.Context, inner AgentInvoker) AgentInvoker {
 	if inner == nil {
 		return nil
 	}
-	return &tracedAgentInvoker{inner: inner}
+	return &tracedAgentInvoker{ctx: ctx, inner: inner}
 }
 
 func (t *tracedAgentInvoker) InvokeInteractive(workDir, prompt, agentName string) error {
 	tracer := tracing.Tracer(agentInvokerTracerName)
-	ctx, span := tracer.Start(cmdstore.RootContext(),
+	ctx, span := tracer.Start(t.ctx,
 		"loom.backend."+GetBackendName()+".invoke_interactive",
 		trace.WithAttributes(
 			attribute.String("loom.agent", agentName),
@@ -63,7 +65,7 @@ func (t *tracedAgentInvoker) InvokeInteractive(workDir, prompt, agentName string
 
 func (t *tracedAgentInvoker) InvokeNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
 	tracer := tracing.Tracer(agentInvokerTracerName)
-	_, span := tracer.Start(cmdstore.RootContext(),
+	_, span := tracer.Start(t.ctx,
 		"loom.backend."+GetBackendName()+".invoke_non_interactive",
 		trace.WithAttributes(
 			attribute.String("loom.agent", agentName),

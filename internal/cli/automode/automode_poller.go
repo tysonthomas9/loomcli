@@ -1,6 +1,7 @@
 package automode
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -10,7 +11,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
 
@@ -61,9 +61,9 @@ func (p *adaptivePoller) hadNoActivity() {
 // One span per call (`automode.poll.cycle`) — one cycle of the poller, even
 // when the result set is empty. The span ends when this function returns;
 // downstream IssueBackend calls inherit it as parent.
-func fetchReadyIssues(parentID string, repoLabel string) ([]backend.IssueData, error) {
+func fetchReadyIssues(parent context.Context, parentID string, repoLabel string) ([]backend.IssueData, error) {
 	cycleStart := time.Now()
-	ctx, span := startPollSpan(cmdstore.RootContext(), parentID, repoLabel)
+	ctx, span := startPollSpan(parent, parentID, repoLabel)
 	defer span.End()
 
 	ib := cli.DefaultIssueBackend()
@@ -97,8 +97,8 @@ func fetchReadyIssues(parentID string, repoLabel string) ([]backend.IssueData, e
 // (ready tasks without a design OR with needs-revision label, excluding epics)
 // When parentID is non-empty, only tasks under that epic are returned.
 // When repoLabel is non-empty, only tasks labeled repo:<name> are returned.
-func GetAvailablePlanningTasks(parentID string, repoLabel string) ([]backend.IssueData, error) {
-	candidates, err := fetchReadyIssues(parentID, repoLabel)
+func GetAvailablePlanningTasks(ctx context.Context, parentID string, repoLabel string) ([]backend.IssueData, error) {
+	candidates, err := fetchReadyIssues(ctx, parentID, repoLabel)
 	if err != nil {
 		return nil, err
 	}
@@ -114,8 +114,8 @@ func GetAvailablePlanningTasks(parentID string, repoLabel string) ([]backend.Iss
 
 // HasAvailablePlanningTasks checks if there are tasks that need planning
 // (ready tasks without a design OR with needs-revision label, excluding epics)
-func HasAvailablePlanningTasks(parentID string, repoLabel string) (bool, error) {
-	tasks, err := GetAvailablePlanningTasks(parentID, repoLabel)
+func HasAvailablePlanningTasks(ctx context.Context, parentID string, repoLabel string) (bool, error) {
+	tasks, err := GetAvailablePlanningTasks(ctx, parentID, repoLabel)
 	if err != nil {
 		return false, err
 	}
@@ -126,8 +126,8 @@ func HasAvailablePlanningTasks(parentID string, repoLabel string) (bool, error) 
 // (ready tasks WITH an approved design, excluding tasks with needs-revision label and epics)
 // When parentID is non-empty, only tasks under that epic are returned.
 // When repoLabel is non-empty, only tasks labeled repo:<name> are returned.
-func GetAvailableImplementationTasks(parentID string, repoLabel string) ([]backend.IssueData, error) {
-	candidates, err := fetchReadyIssues(parentID, repoLabel)
+func GetAvailableImplementationTasks(ctx context.Context, parentID string, repoLabel string) ([]backend.IssueData, error) {
+	candidates, err := fetchReadyIssues(ctx, parentID, repoLabel)
 	if err != nil {
 		return nil, err
 	}
@@ -143,8 +143,8 @@ func GetAvailableImplementationTasks(parentID string, repoLabel string) ([]backe
 
 // HasAvailableImplementationTasks checks if there are tasks ready for implementation
 // (ready tasks WITH an approved design, excluding tasks with needs-revision label and epics)
-func HasAvailableImplementationTasks(parentID string, repoLabel string) (bool, error) {
-	tasks, err := GetAvailableImplementationTasks(parentID, repoLabel)
+func HasAvailableImplementationTasks(ctx context.Context, parentID string, repoLabel string) (bool, error) {
+	tasks, err := GetAvailableImplementationTasks(ctx, parentID, repoLabel)
 	if err != nil {
 		return false, err
 	}
@@ -155,8 +155,8 @@ func HasAvailableImplementationTasks(parentID string, repoLabel string) (bool, e
 // Used by custom roles with task_filter=any.
 // When parentID is non-empty, only tasks under that epic are returned.
 // When repoLabel is non-empty, only tasks labeled repo:<name> are returned.
-func GetAnyAvailableTasks(parentID string, repoLabel string) ([]backend.IssueData, error) {
-	candidates, err := fetchReadyIssues(parentID, repoLabel)
+func GetAnyAvailableTasks(ctx context.Context, parentID string, repoLabel string) ([]backend.IssueData, error) {
+	candidates, err := fetchReadyIssues(ctx, parentID, repoLabel)
 	if err != nil {
 		return nil, err
 	}
@@ -172,8 +172,8 @@ func GetAnyAvailableTasks(parentID string, repoLabel string) ([]backend.IssueDat
 
 // HasAnyAvailableTasks checks if there are any ready tasks regardless of design status.
 // Used by custom roles with task_filter=any.
-func HasAnyAvailableTasks(parentID string, repoLabel string) (bool, error) {
-	tasks, err := GetAnyAvailableTasks(parentID, repoLabel)
+func HasAnyAvailableTasks(ctx context.Context, parentID string, repoLabel string) (bool, error) {
+	tasks, err := GetAnyAvailableTasks(ctx, parentID, repoLabel)
 	if err != nil {
 		return false, err
 	}
@@ -184,14 +184,14 @@ func HasAnyAvailableTasks(parentID string, repoLabel string) (bool, error) {
 // SelectBestTask instead of the generic Has*Tasks functions. Returns nil if the role
 // has no routing constraints (Skills, MaxPriority, and TaskFilter all unset), signaling
 // the caller to use default task checking.
-func BuildRouterTaskCheck(rc config.RoleConfig, ae config.AgentEntry, parentID string) func() (bool, error) {
+func BuildRouterTaskCheck(ctx context.Context, rc config.RoleConfig, ae config.AgentEntry, parentID string) func() (bool, error) {
 	constraints := cli.MergeRoleConstraints(rc, ae)
 	repoLabel := ae.Repo
 	if len(constraints.Skills) == 0 && constraints.MaxPriority == nil && constraints.TaskFilter == "" && repoLabel == "" && len(constraints.SourceRepos) == 0 {
 		return nil
 	}
 	return func() (bool, error) {
-		issues, err := fetchReadyIssues(parentID, repoLabel)
+		issues, err := fetchReadyIssues(ctx, parentID, repoLabel)
 		if err != nil {
 			return false, err
 		}

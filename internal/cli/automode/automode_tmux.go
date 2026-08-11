@@ -1,6 +1,7 @@
 package automode
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -31,9 +32,9 @@ type tmuxLoopCtx struct {
 	idleStart             time.Time
 }
 
-func RunAutoModeTmux(opts AutoModeOptions, shutdown chan struct{}) {
+func RunAutoModeTmux(parent context.Context, opts AutoModeOptions, shutdown chan struct{}) {
 	opts.WorktreePath = canonicalizePath(opts.WorktreePath)
-	ctx := initTmuxLoop(opts)
+	ctx := initTmuxLoop(parent, opts)
 	printTmuxHeader(ctx)
 
 	fmt.Print("\x1b[?1004l")
@@ -77,7 +78,7 @@ func canonicalizePath(path string) string {
 	return path
 }
 
-func initTmuxLoop(opts AutoModeOptions) *tmuxLoopCtx {
+func initTmuxLoop(ctx context.Context, opts AutoModeOptions) *tmuxLoopCtx {
 	wsID := platformruntime.ResolveWorkspaceID(opts.WorkspaceID)
 	wsPrefix := platformruntime.ShortWorkspaceID(wsID)
 	sessionName := fmt.Sprintf("loom-%s-%s-%s-%d", wsPrefix, opts.AgentType, opts.AgentName, os.Getpid())
@@ -88,7 +89,7 @@ func initTmuxLoop(opts AutoModeOptions) *tmuxLoopCtx {
 		sessionName:       sessionName,
 		logFile:           logFile,
 		yieldFile:         os.Getenv("LOOM_YIELD_FILE"),
-		hasAvailableTasks: resolveTaskChecker(opts),
+		hasAvailableTasks: resolveTaskChecker(ctx, opts),
 		idleStart:         time.Now(),
 	}
 }

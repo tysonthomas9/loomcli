@@ -7,7 +7,7 @@ import (
 )
 
 func TestLoadNativeEvents_ReturnsNilWhenMissing(t *testing.T) {
-	store, err := NewStore(t.TempDir())
+	store, err := NewStore(t.Context(), t.TempDir())
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -31,7 +31,7 @@ func TestLoadNativeEvents_ParsesClaude(t *testing.T) {
 	// Disable redaction for this test so the assertion on event text is deterministic.
 	t.Setenv("LOOM_REDACT_TRANSCRIPTS", "off")
 
-	store, err := NewStore(t.TempDir())
+	store, err := NewStore(t.Context(), t.TempDir())
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestLoadNativeEvents_ParsesClaude(t *testing.T) {
 func TestLoadNativeEvents_ParsesCanonicalTSLeafTranscript(t *testing.T) {
 	t.Setenv("LOOM_REDACT_TRANSCRIPTS", "off")
 
-	store, err := NewStore(t.TempDir())
+	store, err := NewStore(t.Context(), t.TempDir())
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestLoadNativeEvents_ParsesCanonicalTSLeafTranscript(t *testing.T) {
 func TestLoadNativeEvents_MarkerIsAuthoritative(t *testing.T) {
 	t.Setenv("LOOM_REDACT_TRANSCRIPTS", "off")
 
-	store, err := NewStore(t.TempDir())
+	store, err := NewStore(t.Context(), t.TempDir())
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}

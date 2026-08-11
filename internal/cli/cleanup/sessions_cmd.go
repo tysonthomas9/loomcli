@@ -31,7 +31,7 @@ var sessionsCleanCmd = &cobra.Command{
 			return fmt.Errorf("invalid --older-than value %q: %w", sessionsOlderThan, err)
 		}
 
-		store, err := sessionstoreadapter.New(cli.GetWorkspaceRuntimeDir())
+		store, err := sessionstoreadapter.New(cmd.Context(), cli.GetWorkspaceRuntimeDir())
 		if err != nil {
 			return fmt.Errorf("open session store: %w", err)
 		}

@@ -2,6 +2,7 @@ package worker
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	agentcli "github.com/tysonthomas9/loomcli/internal/cli/agent"
 	"github.com/tysonthomas9/loomcli/internal/cli/automode"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
@@ -132,11 +134,11 @@ func isUUIDFormat(s string) bool {
 // If it's a name and local config is available, the name is resolved to a UUID.
 // If resolution fails (no local config, unknown name), the value is returned as-is
 // and the server will reject it at registration time.
-func resolveWorkerWorkspace(workspace string) string {
+func resolveWorkerWorkspace(ctx context.Context, workspace string) string {
 	if isUUIDFormat(workspace) {
 		return workspace
 	}
-	cfg, err := config.LoadConfig()
+	cfg, err := config.LoadConfig(ctx)
 	if err != nil || cfg == nil {
 		return workspace
 	}
@@ -150,7 +152,7 @@ func resolveWorkerWorkspace(workspace string) string {
 
 func runWorker(cmd *cobra.Command, args []string) {
 	workerToken, worktreePath := validateWorkerFlags()
-	workerWorkspace = resolveWorkerWorkspace(workerWorkspace)
+	workerWorkspace = resolveWorkerWorkspace(cmd.Context(), workerWorkspace)
 	printWorkerBanner(worktreePath)
 
 	reg, authToken := registerAndGetToken(workerToken)
@@ -158,17 +160,20 @@ func runWorker(cmd *cobra.Command, args []string) {
 
 	shutdown := setupWorkerShutdown()
 
-	if err := cli.AcquireLock(worktreePath, "worker", workerAgent); err != nil {
+	if err := cli.AcquireLock(cmd.Context(), worktreePath, "worker", workerAgent); err != nil {
 		fmt.Fprintf(os.Stderr, "Error acquiring lock: %v\n", err)
 		deregisterWorker(workerControlPlane, authToken, reg.WorkerID)
 		os.Exit(1)
 	}
 	defer func() { _ = cli.ReleaseLock(worktreePath) }()
 
-	automode.RunAutoModeLoop(automode.AutoModeOptions{
+	automode.RunAutoModeLoop(cmd.Context(), automode.AutoModeOptions{
 		Interval: workerInterval, MaxTasks: workerMaxTasks, IdleTimeout: workerIdleTimeout,
 		AgentType: "task", AgentName: workerAgent, WorktreePath: worktreePath,
 		ParentID: workerParentID, LockBridge: lockBridge, EventEmitter: eventEmitter,
+		Prompt: func(name string) string {
+			return agentcli.GenerateTaskPrompt(name, nil, workerParentID, workerBackend)
+		},
 	}, shutdown)
 
 	cleanupWorkerResources(logForwarder, eventEmitter, authToken, reg.WorkerID)

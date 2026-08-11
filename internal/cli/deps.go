@@ -146,7 +146,7 @@ func (defaultExecContextRunner) Run(ctx context.Context, dir, name string, args 
 }
 
 // DefaultDeps returns a Deps populated with real (production) implementations.
-func DefaultDeps() *Deps {
+func DefaultDeps(ctx context.Context) *Deps {
 	var issueBackend backend.IssueBackend
 
 	switch ResolveIssueBackendType() {
@@ -184,7 +184,7 @@ func DefaultDeps() *Deps {
 		// Wrap the default git runner with tracing so every git subprocess
 		// (push/pull/fetch/merge/status/etc.) emits a sub-span under the
 		// active loom.cli span. See git_runner_tracing.go.
-		Git:          wrapGitRunnerWithTracing(defaultGitRunner{}),
+		Git:          wrapGitRunnerWithTracing(ctx, defaultGitRunner{}),
 		Exec:         defaultExecRunner{},
 		FS:           defaultFileSystem{},
 		Logger:       slog.Default(),
@@ -195,7 +195,7 @@ func DefaultDeps() *Deps {
 		// Wrap the registry-backed invoker with tracing so every backend call
 		// from agent flows (plan/task/automode/etc.) emits a sub-span under
 		// the active loom.cli span. See agent_invoker_tracing.go.
-		Agent: wrapAgentInvokerWithTracing(registryAgentInvoker{}),
+		Agent: wrapAgentInvokerWithTracing(ctx, registryAgentInvoker{}),
 	}
 }
 
@@ -214,7 +214,7 @@ var defaultDeps *Deps
 // test override).
 func ensureDefaultDeps() *Deps {
 	if defaultDeps == nil {
-		defaultDeps = DefaultDeps()
+		defaultDeps = DefaultDeps(context.Background())
 	}
 	return defaultDeps
 }

@@ -46,7 +46,7 @@ func init() {
 	cli.RegisterCommand(cleanupCmd)
 }
 
-func runCleanup(_ *cobra.Command, _ []string) error {
+func runCleanup(cmd *cobra.Command, _ []string) error {
 	runtimeDir := cli.GetWorkspaceRuntimeDir()
 
 	sessDur, err := parseDayDuration(cleanupSessionsAge)
@@ -64,7 +64,7 @@ func runCleanup(_ *cobra.Command, _ []string) error {
 
 	var hasError bool
 
-	sp, sc, se := cleanupSessions(runtimeDir, sessDur, cleanupDryRun)
+	sp, sc, se := cleanupSessions(cmd.Context(), runtimeDir, sessDur, cleanupDryRun)
 	hasError = printCleanupResult("Sessions", sp, sc, se) || hasError
 
 	up, ue := cleanupUsage(runtimeDir, usageDur, cleanupDryRun)

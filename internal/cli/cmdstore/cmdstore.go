@@ -17,7 +17,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/runtimectx"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -58,28 +57,12 @@ func ensureFleetDBEnvFromFleetEnv() {
 	}
 }
 
-// SetRootContext is a thin alias for runtimectx.SetRootContext kept so
-// existing cli-layer callers don't need to migrate. The backing store
-// lives in runtimectx so infra packages can read RootContext without
-// importing cli/cmdstore.
-func SetRootContext(ctx context.Context) {
-	runtimectx.SetRootContext(ctx)
-}
-
-// RootContext is a thin alias for runtimectx.RootContext kept so
-// existing cli-layer callers don't need to migrate. New code should
-// prefer runtimectx.RootContext directly (or, better, thread ctx through).
-func RootContext() context.Context {
-	return runtimectx.RootContext()
-}
-
 // SignalContext returns a context cancelled on SIGINT/SIGTERM. CLI
 // commands use this so Ctrl+C propagates cleanly to fleet-db RPCs and
-// the embedded subprocess shutdown. Inherits from the root context set
-// by SetRootContext, which lets a trace span installed at CLI startup
-// parent every command's context-attached spans.
-func SignalContext() (context.Context, context.CancelFunc) {
-	return signal.NotifyContext(runtimectx.RootContext(), os.Interrupt, syscall.SIGTERM)
+// the embedded subprocess shutdown. The caller supplies the command context,
+// preserving trace and cancellation ancestry without process-global state.
+func SignalContext(parent context.Context) (context.Context, context.CancelFunc) {
+	return signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
 }
 
 // ActiveWorkspace resolves the explicit active workspace key
@@ -111,8 +94,8 @@ func WriteJSON(v any) error {
 // WithStore opens a Store, runs fn, then closes the handle. Builds the
 // signal-aware context internally. Use from RunE handlers that need
 // the store but don't care about the active workspace.
-func WithStore(fn func(ctx context.Context, h *bootstrap.StoreHandle) error) error {
-	ctx, cancel := SignalContext()
+func WithStore(parent context.Context, fn func(ctx context.Context, h *bootstrap.StoreHandle) error) error {
+	ctx, cancel := SignalContext(parent)
 	defer cancel()
 	h, err := OpenStore(ctx)
 	if err != nil {
@@ -124,8 +107,8 @@ func WithStore(fn func(ctx context.Context, h *bootstrap.StoreHandle) error) err
 
 // WithActiveWorkspace opens a Store, resolves the explicit active
 // workspace key, and runs fn with both.
-func WithActiveWorkspace(fn func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error) error {
-	return WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
+func WithActiveWorkspace(parent context.Context, fn func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error) error {
+	return WithStore(parent, func(ctx context.Context, h *bootstrap.StoreHandle) error {
 		ws, err := ActiveWorkspace(ctx, h.Store)
 		if err != nil {
 			return err

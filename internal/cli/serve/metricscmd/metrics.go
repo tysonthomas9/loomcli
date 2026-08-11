@@ -10,15 +10,15 @@ import (
 
 // HandleMetrics returns an http.HandlerFunc that renders Prometheus-style metrics.
 // The collectDataFn is called to get task data on each request.
-func HandleMetrics(collectDataFn func() *monitor.MonitorData) http.HandlerFunc {
+func HandleMetrics(collectDataFn CollectDataFn) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 
 		// Collect task data
-		data := collectDataFn()
+		data := collectDataFn(r.Context())
 
 		// Get ready tasks broken down by priority
-		readyByPriority := monitor.CollectReadyTasksByPriority(10000)
+		readyByPriority := monitor.CollectReadyTasksByPriority(r.Context(), 10000)
 
 		// Get in-progress count
 		inProgress := 0

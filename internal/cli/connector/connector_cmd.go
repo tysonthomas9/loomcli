@@ -87,7 +87,7 @@ func runCreate(cmd *cobra.Command, _ []string) error {
 	if err := p.validate(); err != nil {
 		return err
 	}
-	return cmdstore.WithActiveConnectorManagement(func(
+	return cmdstore.WithActiveConnectorManagement(cmd.Context(), func(
 		ctx context.Context,
 		_ *bootstrap.StoreHandle,
 		management connectorsmodule.Management,
@@ -187,7 +187,7 @@ func runList(cmd *cobra.Command, _ []string) error {
 		SourceKind: connectorsmodule.ConnectorSourceKind(strings.TrimSpace(listSource)),
 		Status:     connectorsmodule.ConnectorStatus(strings.TrimSpace(listStatus)),
 	}
-	return cmdstore.WithActiveConnectorManagement(func(
+	return cmdstore.WithActiveConnectorManagement(cmd.Context(), func(
 		ctx context.Context,
 		_ *bootstrap.StoreHandle,
 		management connectorsmodule.Management,
@@ -278,7 +278,7 @@ func runRotate(cmd *cobra.Command, args []string) error {
 		window:      rotateWindow,
 		jsonOut:     rotateJSON,
 	}
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+	return cmdstore.WithActiveWorkspace(cmd.Context(), func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
 		var (
 			management connectorsmodule.Management
 			err        error
@@ -409,7 +409,7 @@ func newGrantCreateInput(ws string) (connectorsmodule.CreateGrantCommand, error)
 }
 
 func runGrantCreate(cmd *cobra.Command, _ []string) error {
-	return cmdstore.WithActiveConnectorManagement(func(
+	return cmdstore.WithActiveConnectorManagement(cmd.Context(), func(
 		ctx context.Context,
 		_ *bootstrap.StoreHandle,
 		management connectorsmodule.Management,
@@ -443,7 +443,7 @@ func createGrant(
 }
 
 func runGrantRevoke(cmd *cobra.Command, args []string) error {
-	return cmdstore.WithActiveConnectorManagement(func(
+	return cmdstore.WithActiveConnectorManagement(cmd.Context(), func(
 		ctx context.Context,
 		_ *bootstrap.StoreHandle,
 		management connectorsmodule.Management,
@@ -464,7 +464,7 @@ func revokeGrant(ctx context.Context, management connectorsmodule.Management, ws
 func runGrantList(cmd *cobra.Command, _ []string) error {
 	binding := strings.TrimSpace(grantListBinding)
 	connectorID := strings.TrimSpace(grantListConnector)
-	return cmdstore.WithActiveConnectorManagement(func(
+	return cmdstore.WithActiveConnectorManagement(cmd.Context(), func(
 		ctx context.Context,
 		_ *bootstrap.StoreHandle,
 		management connectorsmodule.Management,
@@ -561,7 +561,7 @@ func runAudit(cmd *cobra.Command, _ []string) error {
 	if err := p.validate(); err != nil {
 		return err
 	}
-	return cmdstore.WithActiveConnectorManagement(func(
+	return cmdstore.WithActiveConnectorManagement(cmd.Context(), func(
 		ctx context.Context,
 		_ *bootstrap.StoreHandle,
 		management connectorsmodule.Management,

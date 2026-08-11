@@ -1,6 +1,7 @@
 package monitor
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -8,28 +9,27 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 )
 
-func CollectMonitorData(readyLimit int, branch string) *MonitorData {
+func CollectMonitorData(ctx context.Context, readyLimit int, branch string) *MonitorData {
 	// Copy cli.GetDeps(nil) and override IssueBackend with the global backend
 	// (respects setDefaultIssueBackend used by tests).
 	d := *cli.GetDeps(nil)
 	d.IssueBackend = cli.DefaultIssueBackend()
-	return collectMonitorDataDeps(&d, readyLimit, branch)
+	return collectMonitorDataDeps(ctx, &d, readyLimit, branch)
 }
 
-func CollectMonitorDataWithIssueBackend(issueBackend backend.IssueBackend, readyLimit int, branch string) *MonitorData {
+func CollectMonitorDataWithIssueBackend(ctx context.Context, issueBackend backend.IssueBackend, readyLimit int, branch string) *MonitorData {
 	d := *cli.GetDeps(nil)
 	if issueBackend != nil {
 		d.IssueBackend = issueBackend
 	} else {
 		d.IssueBackend = cli.DefaultIssueBackend()
 	}
-	return collectMonitorDataDeps(&d, readyLimit, branch)
+	return collectMonitorDataDeps(ctx, &d, readyLimit, branch)
 }
 
-func collectMonitorDataDeps(deps *cli.Deps, readyLimit int, branch string) *MonitorData {
+func collectMonitorDataDeps(ctx context.Context, deps *cli.Deps, readyLimit int, branch string) *MonitorData {
 	data := &MonitorData{Timestamp: time.Now()}
 
 	// Start stats and store sync collection in parallel with task collection.
@@ -43,7 +43,7 @@ func collectMonitorDataDeps(deps *cli.Deps, readyLimit int, branch string) *Moni
 
 	go func() {
 		defer wg.Done()
-		stats = collectStatisticsDeps(deps)
+		stats = collectStatisticsDeps(ctx, deps)
 	}()
 
 	go func() {
@@ -52,11 +52,11 @@ func collectMonitorDataDeps(deps *cli.Deps, readyLimit int, branch string) *Moni
 	}()
 
 	// Collect tasks (internally parallel) to get agent-task mapping
-	data.Tasks, data.NeedsPlanningTasks, data.ReadyToImplement, data.ReviewTasks, data.InProgressTasks, data.BacklogTasks, data.ClosedTasks, data.AgentTasks = collectTaskStatusDeps(deps, readyLimit)
+	data.Tasks, data.NeedsPlanningTasks, data.ReadyToImplement, data.ReviewTasks, data.InProgressTasks, data.BacklogTasks, data.ClosedTasks, data.AgentTasks = collectTaskStatusDeps(ctx, deps, readyLimit)
 
 	// Collect agents, passing the task map for fallback lookup
 	var taskIDToAgents map[string][]string
-	data.Agents, taskIDToAgents = collectAgentStatusDeps(deps, data.AgentTasks, branch)
+	data.Agents, taskIDToAgents = collectAgentStatusDeps(ctx, deps, data.AgentTasks, branch)
 
 	// Detect task conflicts (multiple agents claiming same task)
 	data.TaskConflicts = make(map[string][]string)
@@ -76,13 +76,13 @@ func collectMonitorDataDeps(deps *cli.Deps, readyLimit int, branch string) *Moni
 	return data
 }
 
-func collectAgentStatus(agentTasks map[string]TaskInfo, branch string) ([]AgentStatus, map[string][]string) {
+func collectAgentStatus(ctx context.Context, agentTasks map[string]TaskInfo, branch string) ([]AgentStatus, map[string][]string) {
 	d := *cli.GetDeps(nil)
 	d.IssueBackend = cli.DefaultIssueBackend()
-	return collectAgentStatusDeps(&d, agentTasks, branch)
+	return collectAgentStatusDeps(ctx, &d, agentTasks, branch)
 }
 
-func collectAgentStatusDeps(deps *cli.Deps, agentTasks map[string]TaskInfo, branch string) ([]AgentStatus, map[string][]string) {
+func collectAgentStatusDeps(ctx context.Context, deps *cli.Deps, agentTasks map[string]TaskInfo, branch string) ([]AgentStatus, map[string][]string) {
 	allWorktrees, err := cli.DiscoverAgentWorktrees()
 	if err != nil {
 		allWorktrees = nil
@@ -121,14 +121,14 @@ func collectAgentStatusDeps(deps *cli.Deps, agentTasks map[string]TaskInfo, bran
 
 	agents := make([]AgentStatus, 0, len(worktrees))
 	for _, wt := range worktrees {
-		agent := buildAgentStatus(deps, wt, agentTasks, taskIDToAgents, globalDefaultBranch, githubURL, branch)
+		agent := buildAgentStatus(ctx, deps, wt, agentTasks, taskIDToAgents, globalDefaultBranch, githubURL, branch)
 		agents = append(agents, agent)
 	}
 	return agents, taskIDToAgents
 }
 
 // buildAgentStatus constructs the status for a single worktree agent.
-func buildAgentStatus(deps *cli.Deps, wt cli.WorktreeInfo, agentTasks map[string]TaskInfo, taskIDToAgents map[string][]string, globalDefaultBranch, githubURL, branch string) AgentStatus {
+func buildAgentStatus(ctx context.Context, deps *cli.Deps, wt cli.WorktreeInfo, agentTasks map[string]TaskInfo, taskIDToAgents map[string][]string, globalDefaultBranch, githubURL, branch string) AgentStatus {
 	agent := AgentStatus{
 		Name: wt.Name, Branch: wt.Branch, Workspace: wt.Workspace,
 	}
@@ -149,7 +149,7 @@ func buildAgentStatus(deps *cli.Deps, wt cli.WorktreeInfo, agentTasks map[string
 
 	var idleChanges []FileChange
 	var idleHandled bool
-	agent.Status, idleChanges, idleHandled = resolveAgentStatus(deps, wt, agentTasks)
+	agent.Status, idleChanges, idleHandled = resolveAgentStatus(ctx, deps, wt, agentTasks)
 
 	wtDefaultBranch := globalDefaultBranch
 	if wt.Repo != nil {
@@ -180,14 +180,14 @@ func lockHasActiveTaskClaim(lockInfo *cli.LockInfo) bool {
 // When the worktree is idle (no lock, no in-progress task), it also returns
 // the file changes derived from the same git status invocation, with idle=true,
 // so the caller can avoid a redundant git subprocess.
-func resolveAgentStatus(deps *cli.Deps, wt cli.WorktreeInfo, agentTasks map[string]TaskInfo) (status string, changes []FileChange, idle bool) {
+func resolveAgentStatus(ctx context.Context, deps *cli.Deps, wt cli.WorktreeInfo, agentTasks map[string]TaskInfo) (status string, changes []FileChange, idle bool) {
 	lockInfo, running, _ := cli.CheckLock(wt.Path)
-	lockStatus := cli.GetLockStatus(wt.Path)
+	lockStatus := cli.GetLockStatus(ctx, wt.Path)
 	if lockStatus != "" {
 		if !running {
 			lockInfo = nil
 		}
-		return refineLockStatus(deps, lockStatus, lockInfo, wt.Name, agentTasks), nil, false
+		return refineLockStatus(ctx, deps, lockStatus, lockInfo, wt.Name, agentTasks), nil, false
 	}
 	if task, ok := agentTasks[wt.Name]; ok && task.Status == "in_progress" {
 		return fmt.Sprintf("error: %s", task.ID), nil, false
@@ -197,7 +197,7 @@ func resolveAgentStatus(deps *cli.Deps, wt cli.WorktreeInfo, agentTasks map[stri
 }
 
 // refineLockStatus enriches a lock status with task details when needed.
-func refineLockStatus(deps *cli.Deps, lockStatus string, lockInfo *cli.LockInfo, agentName string, agentTasks map[string]TaskInfo) string {
+func refineLockStatus(ctx context.Context, deps *cli.Deps, lockStatus string, lockInfo *cli.LockInfo, agentName string, agentTasks map[string]TaskInfo) string {
 	if !strings.Contains(lockStatus, "...") && !strings.HasPrefix(lockStatus, "idle ") {
 		return lockStatus
 	}
@@ -210,16 +210,16 @@ func refineLockStatus(deps *cli.Deps, lockStatus string, lockInfo *cli.LockInfo,
 		durationPart = lockStatus[idx:]
 	}
 	if strings.Contains(lockStatus, "...") {
-		return refineLockTaskStatus(deps, lockStatus, task, durationPart)
+		return refineLockTaskStatus(ctx, deps, lockStatus, task, durationPart)
 	}
 	if lockInfo == nil || lockInfo.TaskID != "" || lockInfo.State == cli.StateIdle || !strings.HasPrefix(lockStatus, "idle (") {
 		return lockStatus
 	}
-	return refineLockTaskStatus(deps, lockStatusForCommand(lockInfo.Command), task, durationPart)
+	return refineLockTaskStatus(ctx, deps, lockStatusForCommand(lockInfo.Command), task, durationPart)
 }
 
-func refineLockTaskStatus(deps *cli.Deps, lockStatus string, task TaskInfo, durationPart string) string {
-	taskStatus := cli.GetTaskStatusDeps(deps, task.ID)
+func refineLockTaskStatus(ctx context.Context, deps *cli.Deps, lockStatus string, task TaskInfo, durationPart string) string {
+	taskStatus := cli.GetTaskStatusDeps(ctx, deps, task.ID)
 	switch taskStatus {
 	case "needs_review":
 		if strings.HasPrefix(lockStatus, "planning:") {
@@ -339,10 +339,10 @@ func collectAgentCommits(deps *cli.Deps, wt cli.WorktreeInfo, agentBranch, defau
 	return commits
 }
 
-func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, map[string]TaskInfo) {
+func collectTaskStatus(ctx context.Context, readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, map[string]TaskInfo) {
 	d := *cli.GetDeps(nil)
 	d.IssueBackend = cli.DefaultIssueBackend()
-	return collectTaskStatusDeps(&d, readyLimit)
+	return collectTaskStatusDeps(ctx, &d, readyLimit)
 }
 
 // taskQueryResults holds the raw results from parallel issue queries.
@@ -351,8 +351,8 @@ type taskQueryResults struct {
 	readyErr, inProgressErr, reviewErr, backlogErr, closedErr                error
 }
 
-func collectTaskStatusDeps(deps *cli.Deps, readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, map[string]TaskInfo) {
-	qr := runParallelTaskQueries(deps, readyLimit)
+func collectTaskStatusDeps(ctx context.Context, deps *cli.Deps, readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, map[string]TaskInfo) {
+	qr := runParallelTaskQueries(ctx, deps, readyLimit)
 
 	var summary TaskSummary
 	agentTasks := make(map[string]TaskInfo)
@@ -376,11 +376,10 @@ func collectTaskStatusDeps(deps *cli.Deps, readyLimit int) (TaskSummary, []TaskI
 	return summary, needsPlanningTasks, readyToImplementTasks, reviewTasks, inProgressTasks, backlogTasks, closedTasks, agentTasks
 }
 
-func runParallelTaskQueries(deps *cli.Deps, readyLimit int) taskQueryResults {
+func runParallelTaskQueries(ctx context.Context, deps *cli.Deps, readyLimit int) taskQueryResults {
 	var qr taskQueryResults
 	var wg sync.WaitGroup
 	ib := deps.IssueBackend
-	ctx := cmdstore.RootContext()
 
 	wg.Add(5)
 	go func() {
@@ -545,16 +544,16 @@ func collectSyncStatus(agents []AgentStatus) SyncInfo {
 	return completeSyncStatus(info, agents)
 }
 
-func collectStatistics() MonitorStats {
+func collectStatistics(ctx context.Context) MonitorStats {
 	d := *cli.GetDeps(nil)
 	d.IssueBackend = cli.DefaultIssueBackend()
-	return collectStatisticsDeps(&d)
+	return collectStatisticsDeps(ctx, &d)
 }
 
-func collectStatisticsDeps(deps *cli.Deps) MonitorStats {
+func collectStatisticsDeps(ctx context.Context, deps *cli.Deps) MonitorStats {
 	var stats MonitorStats
 
-	statsData, err := deps.IssueBackend.Stats(cmdstore.RootContext())
+	statsData, err := deps.IssueBackend.Stats(ctx)
 	if err == nil && statsData != nil {
 		stats.Open = statsData.OpenIssues
 		stats.Closed = statsData.ClosedIssues
@@ -571,16 +570,9 @@ func collectStatisticsDeps(deps *cli.Deps) MonitorStats {
 			stats.Remaining = 0
 		}
 
-		reviewCount, countErr := deps.IssueBackend.Count(cmdstore.RootContext(), backend.CountOpts{Status: "review"})
+		reviewCount, countErr := deps.IssueBackend.Count(ctx, backend.CountOpts{Status: "review"})
 		if countErr == nil {
 			stats.Review = reviewCount
-		} else {
-			// Fallback for older backends without Count support.
-			stats.Review = stats.Total - stats.Open - stats.InProgress - stats.Closed -
-				stats.Blocked - statsData.DeferredIssues - statsData.PinnedIssues
-			if stats.Review < 0 {
-				stats.Review = 0
-			}
 		}
 	}
 
@@ -590,14 +582,14 @@ func collectStatisticsDeps(deps *cli.Deps) MonitorStats {
 // collectReadyTasksByPriority returns counts of ready tasks grouped by priority (0-4).
 // It iterates ready tasks (excluding epics, in_progress, and review) and returns
 // a map of priority -> count for Prometheus metrics.
-func CollectReadyTasksByPriority(readyLimit int) map[int]int {
+func CollectReadyTasksByPriority(ctx context.Context, readyLimit int) map[int]int {
 	counts := make(map[int]int)
 	// Initialize all priorities to 0
 	for i := 0; i <= 4; i++ {
 		counts[i] = 0
 	}
 
-	issues, err := cli.DefaultIssueBackend().Ready(cmdstore.RootContext(), backend.ReadyOpts{Limit: readyLimit})
+	issues, err := cli.DefaultIssueBackend().Ready(ctx, backend.ReadyOpts{Limit: readyLimit})
 	if err != nil {
 		return counts
 	}

@@ -8,19 +8,19 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/monitor"
 )
 
-// CollectDataFn is a function that returns cached monitor data.
-type CollectDataFn = func() *monitor.MonitorData
+// CollectDataFn returns cached monitor data for the caller's context.
+type CollectDataFn = func(context.Context) *monitor.MonitorData
 
 // NewCollector creates a cached monitor data collector with the given TTL.
 // It uses singleflight-style coalescing: concurrent callers share one collection.
 func NewCollector(ttl time.Duration) CollectDataFn {
-	return NewCollectorFunc(ttl, func() *monitor.MonitorData { return monitor.CollectMonitorData(10000, "") })
+	return NewCollectorFunc(ttl, func(ctx context.Context) *monitor.MonitorData { return monitor.CollectMonitorData(ctx, 10000, "") })
 }
 
 // NewCollectorFunc creates a cached monitor data collector around collectFn.
 func NewCollectorFunc(ttl time.Duration, collectFn CollectDataFn) CollectDataFn {
 	if collectFn == nil {
-		collectFn = func() *monitor.MonitorData { return monitor.CollectMonitorData(10000, "") }
+		panic("metricscmd: nil monitor collector")
 	}
 	cv := &cachedCollector{
 		ttl:       ttl,
@@ -34,14 +34,14 @@ func NewCollectorFunc(ttl time.Duration, collectFn CollectDataFn) CollectDataFn 
 // HTTP handlers always read pre-warmed data, eliminating cache-miss latency.
 // The background goroutine exits when ctx is canceled.
 func NewCollectorWithBackground(ctx context.Context, ttl, interval time.Duration) CollectDataFn {
-	return NewCollectorWithBackgroundFunc(ctx, ttl, interval, func() *monitor.MonitorData { return monitor.CollectMonitorData(10000, "") })
+	return NewCollectorWithBackgroundFunc(ctx, ttl, interval, func(ctx context.Context) *monitor.MonitorData { return monitor.CollectMonitorData(ctx, 10000, "") })
 }
 
 // NewCollectorWithBackgroundFunc creates a cached monitor data collector around
 // collectFn and refreshes it every interval in the background.
 func NewCollectorWithBackgroundFunc(ctx context.Context, ttl, interval time.Duration, collectFn CollectDataFn) CollectDataFn {
 	if collectFn == nil {
-		collectFn = func() *monitor.MonitorData { return monitor.CollectMonitorData(10000, "") }
+		panic("metricscmd: nil monitor collector")
 	}
 	cv := &cachedCollector{
 		ttl:       ttl,
@@ -56,7 +56,7 @@ func NewCollectorWithBackgroundFunc(ctx context.Context, ttl, interval time.Dura
 // collection runs — the rest wait and share the same result.
 type cachedCollector struct {
 	ttl       time.Duration
-	collectFn func() *monitor.MonitorData
+	collectFn CollectDataFn
 
 	mu       sync.Mutex
 	cached   *monitor.MonitorData
@@ -74,7 +74,7 @@ func (c *cachedCollector) startBackground(ctx context.Context, interval time.Dur
 	// if the background hasn't finished yet — this avoids blocking server startup.
 	go func() {
 		// Immediate first collection to warm the cache
-		result := c.collectFn()
+		result := c.collectFn(ctx)
 		collectedAt := time.Now()
 		c.mu.Lock()
 		// Don't roll back fresher data written by an in-flight get().
@@ -93,7 +93,7 @@ func (c *cachedCollector) startBackground(ctx context.Context, interval time.Dur
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				result := c.collectFn()
+				result := c.collectFn(ctx)
 				collectedAt := time.Now()
 				c.mu.Lock()
 				// Don't roll back fresher data written by an in-flight get().
@@ -111,7 +111,7 @@ func (c *cachedCollector) startBackground(ctx context.Context, interval time.Dur
 
 // get returns cached data if fresh, otherwise triggers a single collection
 // that all concurrent callers share.
-func (c *cachedCollector) get() *monitor.MonitorData {
+func (c *cachedCollector) get(ctx context.Context) *monitor.MonitorData {
 	c.mu.Lock()
 
 	// Fast path: cache is fresh
@@ -147,7 +147,7 @@ func (c *cachedCollector) get() *monitor.MonitorData {
 	}()
 
 	// Perform collection outside the lock
-	data := c.collectFn()
+	data := c.collectFn(ctx)
 	collectedAt := time.Now()
 
 	c.mu.Lock()

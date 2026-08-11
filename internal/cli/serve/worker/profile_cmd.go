@@ -157,8 +157,8 @@ func runWorkerProfileAdd(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runWorkerProfileList(_ *cobra.Command, _ []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+func runWorkerProfileList(cmd *cobra.Command, _ []string) error {
+	return cmdstore.WithActiveWorkspace(cmd.Context(), func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
 		enabled, err := parseOptionalBool(workerProfileListEnabled)
 		if err != nil {
 			return fmt.Errorf("enabled must be true/false: %w", err)
@@ -186,8 +186,8 @@ func runWorkerProfileList(_ *cobra.Command, _ []string) error {
 	})
 }
 
-func runWorkerProfileShow(_ *cobra.Command, args []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+func runWorkerProfileShow(cmd *cobra.Command, args []string) error {
+	return cmdstore.WithActiveWorkspace(cmd.Context(), func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
 		profile, err := h.Store.WorkerProfiles().Get(ctx, ws, args[0])
 		if err != nil {
 			return fmt.Errorf("get worker profile: %w", err)

@@ -110,11 +110,11 @@ type StatusResponse struct {
 type IssueBackendFn func(ctx context.Context) backend.IssueBackend
 
 // HandleStatus returns an HTTP handler for the full status endpoint.
-func HandleStatus(collectDataFn func() *monitor.MonitorData, st store.Store) http.HandlerFunc {
+func HandleStatus(collectDataFn CollectDataFn, st store.Store) http.HandlerFunc {
 	return HandleStatusWithBackend(collectDataFn, st, nil)
 }
 
-func HandleStatusWithBackend(collectDataFn func() *monitor.MonitorData, st store.Store, backendFn IssueBackendFn) http.HandlerFunc {
+func HandleStatusWithBackend(collectDataFn CollectDataFn, st store.Store, backendFn IssueBackendFn) http.HandlerFunc {
 	return HandleStatusWithDataSource(NewMonitorDataSource(collectDataFn, backendFn), st)
 }
 
@@ -160,11 +160,11 @@ func HandleStatusWithSources(dataSource *MonitorDataSource, storeDataSource *Mon
 }
 
 // HandleAgents returns an HTTP handler for the agents endpoint.
-func HandleAgents(collectDataFn func() *monitor.MonitorData, st store.Store) http.HandlerFunc {
+func HandleAgents(collectDataFn CollectDataFn, st store.Store) http.HandlerFunc {
 	return HandleAgentsWithBackend(collectDataFn, st, nil)
 }
 
-func HandleAgentsWithBackend(collectDataFn func() *monitor.MonitorData, st store.Store, backendFn IssueBackendFn) http.HandlerFunc {
+func HandleAgentsWithBackend(collectDataFn CollectDataFn, st store.Store, backendFn IssueBackendFn) http.HandlerFunc {
 	return HandleAgentsWithDataSource(NewMonitorDataSource(collectDataFn, backendFn), st)
 }
 
@@ -204,11 +204,11 @@ func HandleAgentsWithSources(dataSource *MonitorDataSource, storeDataSource *Mon
 }
 
 // HandleTasks returns an HTTP handler for the tasks endpoint.
-func HandleTasks(collectDataFn func() *monitor.MonitorData) http.HandlerFunc {
+func HandleTasks(collectDataFn CollectDataFn) http.HandlerFunc {
 	return HandleTasksWithBackend(collectDataFn, nil)
 }
 
-func HandleTasksWithBackend(collectDataFn func() *monitor.MonitorData, backendFn IssueBackendFn) http.HandlerFunc {
+func HandleTasksWithBackend(collectDataFn CollectDataFn, backendFn IssueBackendFn) http.HandlerFunc {
 	return HandleTasksWithDataSource(NewMonitorDataSource(collectDataFn, backendFn))
 }
 
@@ -247,11 +247,11 @@ func HandleTasksWithDataSource(dataSource *MonitorDataSource) http.HandlerFunc {
 }
 
 // HandleStats returns an HTTP handler for the stats endpoint.
-func HandleStats(collectDataFn func() *monitor.MonitorData) http.HandlerFunc {
+func HandleStats(collectDataFn CollectDataFn) http.HandlerFunc {
 	return HandleStatsWithBackend(collectDataFn, nil)
 }
 
-func HandleStatsWithBackend(collectDataFn func() *monitor.MonitorData, backendFn IssueBackendFn) http.HandlerFunc {
+func HandleStatsWithBackend(collectDataFn CollectDataFn, backendFn IssueBackendFn) http.HandlerFunc {
 	return HandleStatsWithDataSource(NewMonitorDataSource(collectDataFn, backendFn))
 }
 
@@ -271,14 +271,14 @@ func HandleStatsWithDataSource(dataSource *MonitorDataSource) http.HandlerFunc {
 	}
 }
 
-func monitorDataForRequest(r *http.Request, collectDataFn func() *monitor.MonitorData, backendFn IssueBackendFn) *monitor.MonitorData {
+func monitorDataForRequest(r *http.Request, collectDataFn CollectDataFn, backendFn IssueBackendFn) *monitor.MonitorData {
 	return NewMonitorDataSource(collectDataFn, backendFn).Resolve(r)
 }
 
 // HandleSync returns an HTTP handler for the sync endpoint.
-func HandleSync(collectDataFn func() *monitor.MonitorData) http.HandlerFunc {
+func HandleSync(collectDataFn CollectDataFn) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		data := collectDataFn()
+		data := collectDataFn(r.Context())
 		if data == nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusServiceUnavailable)

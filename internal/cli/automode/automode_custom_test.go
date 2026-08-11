@@ -43,7 +43,7 @@ func TestAutoModeOptions_CustomFields(t *testing.T) {
 		WorktreePath: "/path/to/worktree",
 		BackoffBase:  10 * time.Millisecond,
 		TaskPause:    10 * time.Millisecond,
-		CustomPromptGen: func(agentName string, ws *WorkspaceConfig) string {
+		Prompt: func(agentName string) string {
 			promptCalled = true
 			return "custom prompt for " + agentName
 		},
@@ -54,12 +54,12 @@ func TestAutoModeOptions_CustomFields(t *testing.T) {
 	}
 
 	// Verify custom prompt gen works
-	result := opts.CustomPromptGen("falcon", nil)
+	result := opts.Prompt("falcon")
 	if !promptCalled {
-		t.Error("CustomPromptGen was not called")
+		t.Error("Prompt was not called")
 	}
 	if result != "custom prompt for falcon" {
-		t.Errorf("CustomPromptGen returned %q, want %q", result, "custom prompt for falcon")
+		t.Errorf("Prompt returned %q, want %q", result, "custom prompt for falcon")
 	}
 
 	// Verify custom task check works
@@ -79,7 +79,7 @@ func TestAutoModeOptions_CustomFields(t *testing.T) {
 // RunAutoModeLoop Custom Prompt/Task Check Tests
 // ============================================================================
 
-func TestRunAutoModeLoop_CustomPromptGen(t *testing.T) {
+func TestRunAutoModeLoop_Prompt(t *testing.T) {
 	tmpDir := t.TempDir()
 	setupLockFile(t, tmpDir)
 
@@ -106,7 +106,7 @@ func TestRunAutoModeLoop_CustomPromptGen(t *testing.T) {
 		WorktreePath: tmpDir,
 		BackoffBase:  10 * time.Millisecond,
 		TaskPause:    10 * time.Millisecond,
-		CustomPromptGen: func(agentName string, ws *WorkspaceConfig) string {
+		Prompt: func(agentName string) string {
 			return "custom prompt for " + agentName
 		},
 		CustomTaskCheck: func() (bool, error) {
@@ -116,7 +116,7 @@ func TestRunAutoModeLoop_CustomPromptGen(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		RunAutoModeLoop(opts, shutdown)
+		RunAutoModeLoop(t.Context(), opts, shutdown)
 		close(done)
 	}()
 
@@ -171,15 +171,15 @@ func TestRunAutoModeLoop_CustomFieldsFallback(t *testing.T) {
 		WorktreePath: tmpDir,
 		BackoffBase:  10 * time.Millisecond,
 		TaskPause:    10 * time.Millisecond,
-		// Only set CustomPromptGen, NOT CustomTaskCheck — CustomPromptGen works independently
-		CustomPromptGen: func(agentName string, ws *WorkspaceConfig) string {
+		// Only set Prompt, NOT CustomTaskCheck — Prompt works independently
+		Prompt: func(agentName string) string {
 			return "custom prompt for " + agentName
 		},
 	}
 
 	done := make(chan struct{})
 	go func() {
-		RunAutoModeLoop(opts, shutdown)
+		RunAutoModeLoop(t.Context(), opts, shutdown)
 		close(done)
 	}()
 
@@ -190,7 +190,7 @@ func TestRunAutoModeLoop_CustomFieldsFallback(t *testing.T) {
 		t.Fatal("RunAutoModeLoop did not exit")
 	}
 
-	// CustomPromptGen is decoupled from CustomTaskCheck, so the custom prompt
+	// Prompt is decoupled from CustomTaskCheck, so the custom prompt
 	// should be used even when CustomTaskCheck is nil (default task check used).
 	customPrompt := "custom prompt for fallback-agent"
 	if receivedPrompt != customPrompt {
@@ -199,7 +199,7 @@ func TestRunAutoModeLoop_CustomFieldsFallback(t *testing.T) {
 }
 
 func TestRunAutoModeLoop_CustomTaskCheckOnlyFallback(t *testing.T) {
-	// When only CustomTaskCheck is set (not CustomPromptGen), CustomTaskCheck is used
+	// When only CustomTaskCheck is set (not Prompt), CustomTaskCheck is used
 	// for task availability, and the default AgentType-based prompt gen is used.
 	tmpDir := t.TempDir()
 	setupLockFile(t, tmpDir)
@@ -230,18 +230,18 @@ func TestRunAutoModeLoop_CustomTaskCheckOnlyFallback(t *testing.T) {
 		WorktreePath: tmpDir,
 		BackoffBase:  10 * time.Millisecond,
 		TaskPause:    10 * time.Millisecond,
-		// CustomTaskCheck is set independently of CustomPromptGen
+		// CustomTaskCheck is set independently of Prompt
 		CustomTaskCheck: func() (bool, error) {
 			return true, nil
 		},
-		CustomPromptGen: func(name string, _ *WorkspaceConfig) string {
+		Prompt: func(name string) string {
 			return "test-task-prompt-for-" + name
 		},
 	}
 
 	done := make(chan struct{})
 	go func() {
-		RunAutoModeLoop(opts, shutdown)
+		RunAutoModeLoop(t.Context(), opts, shutdown)
 		close(done)
 	}()
 
@@ -252,7 +252,7 @@ func TestRunAutoModeLoop_CustomTaskCheckOnlyFallback(t *testing.T) {
 		t.Fatal("RunAutoModeLoop did not exit")
 	}
 
-	// Should receive the CustomPromptGen prompt
+	// Should receive the Prompt prompt
 	expectedPrompt := "test-task-prompt-for-taskcheck-agent"
 	if receivedPrompt != expectedPrompt {
 		t.Errorf("Received prompt %q, want %q", receivedPrompt, expectedPrompt)
@@ -370,7 +370,7 @@ func TestGetAvailablePlanningTasks(t *testing.T) {
 			}
 			setDefaultIssueBackend(mock)
 
-			got, err := GetAvailablePlanningTasks("", "")
+			got, err := GetAvailablePlanningTasks(t.Context(), "", "")
 			if (err != nil) != tt.wantErr {
 				t.Errorf("GetAvailablePlanningTasks() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -504,7 +504,7 @@ func TestGetAvailableImplementationTasks(t *testing.T) {
 			}
 			setDefaultIssueBackend(mock)
 
-			got, err := GetAvailableImplementationTasks("", "")
+			got, err := GetAvailableImplementationTasks(t.Context(), "", "")
 			if (err != nil) != tt.wantErr {
 				t.Errorf("GetAvailableImplementationTasks() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -638,7 +638,7 @@ func TestGetAnyAvailableTasks(t *testing.T) {
 			}
 			setDefaultIssueBackend(mock)
 
-			got, err := GetAnyAvailableTasks("", "")
+			got, err := GetAnyAvailableTasks(t.Context(), "", "")
 			if (err != nil) != tt.wantErr {
 				t.Errorf("GetAnyAvailableTasks() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -677,7 +677,7 @@ func TestHasAvailableDelegatesToGet(t *testing.T) {
 	setDefaultIssueBackend(mock)
 
 	// HasAvailablePlanningTasks should return true (T-1 has no design)
-	hasPlan, err := HasAvailablePlanningTasks("", "")
+	hasPlan, err := HasAvailablePlanningTasks(t.Context(), "", "")
 	if err != nil {
 		t.Fatalf("HasAvailablePlanningTasks() error = %v", err)
 	}
@@ -686,7 +686,7 @@ func TestHasAvailableDelegatesToGet(t *testing.T) {
 	}
 
 	// HasAvailableImplementationTasks should return true (T-2 has design)
-	hasImpl, err := HasAvailableImplementationTasks("", "")
+	hasImpl, err := HasAvailableImplementationTasks(t.Context(), "", "")
 	if err != nil {
 		t.Fatalf("HasAvailableImplementationTasks() error = %v", err)
 	}
@@ -695,7 +695,7 @@ func TestHasAvailableDelegatesToGet(t *testing.T) {
 	}
 
 	// HasAnyAvailableTasks should return true (both T-1 and T-2 are open)
-	hasAny, err := HasAnyAvailableTasks("", "")
+	hasAny, err := HasAnyAvailableTasks(t.Context(), "", "")
 	if err != nil {
 		t.Fatalf("HasAnyAvailableTasks() error = %v", err)
 	}
@@ -704,17 +704,17 @@ func TestHasAvailableDelegatesToGet(t *testing.T) {
 	}
 
 	// Verify Get* returns correct counts
-	planTasks, _ := GetAvailablePlanningTasks("", "")
+	planTasks, _ := GetAvailablePlanningTasks(t.Context(), "", "")
 	if len(planTasks) != 1 || planTasks[0].ID != "T-1" {
 		t.Errorf("GetAvailablePlanningTasks() = %v, want [T-1]", planTasks)
 	}
 
-	implTasks, _ := GetAvailableImplementationTasks("", "")
+	implTasks, _ := GetAvailableImplementationTasks(t.Context(), "", "")
 	if len(implTasks) != 1 || implTasks[0].ID != "T-2" {
 		t.Errorf("GetAvailableImplementationTasks() = %v, want [T-2]", implTasks)
 	}
 
-	anyTasks, _ := GetAnyAvailableTasks("", "")
+	anyTasks, _ := GetAnyAvailableTasks(t.Context(), "", "")
 	if len(anyTasks) != 2 {
 		t.Errorf("GetAnyAvailableTasks() returned %d tasks, want 2", len(anyTasks))
 	}
@@ -769,14 +769,14 @@ func TestRunAutoModeLoop_CodexPlanAgentType(t *testing.T) {
 		WorktreePath: tmpDir,
 		BackoffBase:  10 * time.Millisecond,
 		TaskPause:    10 * time.Millisecond,
-		CustomPromptGen: func(name string, _ *WorkspaceConfig) string {
+		Prompt: func(name string) string {
 			return "test-plan-prompt-for-" + name
 		},
 	}
 
 	done := make(chan struct{})
 	go func() {
-		RunAutoModeLoop(opts, shutdown)
+		RunAutoModeLoop(t.Context(), opts, shutdown)
 		close(done)
 	}()
 
@@ -848,14 +848,14 @@ func TestRunAutoModeLoop_CodexMaxTasks(t *testing.T) {
 		WorktreePath: tmpDir,
 		BackoffBase:  10 * time.Millisecond,
 		TaskPause:    10 * time.Millisecond,
-		CustomPromptGen: func(name string, _ *WorkspaceConfig) string {
+		Prompt: func(name string) string {
 			return "test-prompt-for-" + name
 		},
 	}
 
 	done := make(chan struct{})
 	go func() {
-		RunAutoModeLoop(opts, shutdown)
+		RunAutoModeLoop(t.Context(), opts, shutdown)
 		close(done)
 	}()
 
@@ -915,14 +915,14 @@ func TestRunAutoModeLoop_CodexConsecutiveErrors(t *testing.T) {
 		WorktreePath: tmpDir,
 		BackoffBase:  10 * time.Millisecond,
 		TaskPause:    10 * time.Millisecond,
-		CustomPromptGen: func(name string, _ *WorkspaceConfig) string {
+		Prompt: func(name string) string {
 			return "test-prompt-for-" + name
 		},
 	}
 
 	done := make(chan struct{})
 	go func() {
-		RunAutoModeLoop(opts, shutdown)
+		RunAutoModeLoop(t.Context(), opts, shutdown)
 		close(done)
 	}()
 
@@ -987,14 +987,14 @@ func TestRunAutoModeLoop_CodexErrorRecovery(t *testing.T) {
 		WorktreePath: tmpDir,
 		BackoffBase:  10 * time.Millisecond,
 		TaskPause:    10 * time.Millisecond,
-		CustomPromptGen: func(name string, _ *WorkspaceConfig) string {
+		Prompt: func(name string) string {
 			return "test-prompt-for-" + name
 		},
 	}
 
 	done := make(chan struct{})
 	go func() {
-		RunAutoModeLoop(opts, shutdown)
+		RunAutoModeLoop(t.Context(), opts, shutdown)
 		close(done)
 	}()
 
@@ -1174,9 +1174,9 @@ func TestGetAvailablePlanningTasks_WithParentID(t *testing.T) {
 			}
 			setDefaultIssueBackend(mock)
 
-			_, err := GetAvailablePlanningTasks(tt.parentID, "")
+			_, err := GetAvailablePlanningTasks(t.Context(), tt.parentID, "")
 			if err != nil {
-				t.Fatalf("GetAvailablePlanningTasks(%q) unexpected error: %v", tt.parentID, err)
+				t.Fatalf("GetAvailablePlanningTasks(t.Context(), %q) unexpected error: %v", tt.parentID, err)
 			}
 
 			if capturedOpts.ParentID != tt.wantParentID {
@@ -1224,9 +1224,9 @@ func TestGetAvailableImplementationTasks_WithParentID(t *testing.T) {
 			}
 			setDefaultIssueBackend(mock)
 
-			_, err := GetAvailableImplementationTasks(tt.parentID, "")
+			_, err := GetAvailableImplementationTasks(t.Context(), tt.parentID, "")
 			if err != nil {
-				t.Fatalf("GetAvailableImplementationTasks(%q) unexpected error: %v", tt.parentID, err)
+				t.Fatalf("GetAvailableImplementationTasks(t.Context(), %q) unexpected error: %v", tt.parentID, err)
 			}
 
 			if capturedOpts.ParentID != tt.wantParentID {

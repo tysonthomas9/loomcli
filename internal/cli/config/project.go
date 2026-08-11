@@ -109,10 +109,10 @@ type RuntimeConfig struct {
 // LoadRuntimeConfig returns the node-local runtime provider for the active
 // workspace. It deliberately does not open FleetDB or read the retired
 // Role/Agent configuration projection.
-func LoadRuntimeConfig(projectDir string) (*RuntimeConfig, error) {
+func LoadRuntimeConfig(ctx context.Context, projectDir string) (*RuntimeConfig, error) {
 	_ = projectDir
 	dc := &RuntimeConfig{}
-	key, err := bootstrap.ResolveActiveWorkspaceKey(context.Background(), nil)
+	key, err := bootstrap.ResolveActiveWorkspaceKey(ctx, nil)
 	if err != nil {
 		if errors.Is(err, bootstrap.ErrNoActiveWorkspace) {
 			return dc, nil
@@ -150,7 +150,7 @@ func validateAgents(agents []AgentEntry) error {
 // ValidateAgentRepos checks that agent Repo fields reference valid repos in the workspace config.
 // In workspace mode, unknown repo names are hard errors. Outside workspace mode, Repo fields
 // trigger a warning but are not blocking.
-func ValidateAgentRepos(agents []AgentEntry) error {
+func ValidateAgentRepos(ctx context.Context, agents []AgentEntry) error {
 	// Check if any agent uses Repo
 	hasRepo := false
 	for _, a := range agents {
@@ -163,7 +163,7 @@ func ValidateAgentRepos(agents []AgentEntry) error {
 		return nil
 	}
 
-	ws, err := ResolveActiveWorkspace()
+	ws, err := ResolveActiveWorkspace(ctx)
 	if err != nil {
 		return fmt.Errorf("validating agent repos: %w", err)
 	}
@@ -197,8 +197,8 @@ func ValidateAgentRepos(agents []AgentEntry) error {
 
 // resolveRepoPath looks up a repo by name in the active workspace config and returns
 // its absolute path. Returns an error if the repo is not found or the path doesn't exist.
-func resolveRepoPath(repoName string) (string, error) {
-	ws, err := ResolveActiveWorkspace()
+func resolveRepoPath(ctx context.Context, repoName string) (string, error) {
+	ws, err := ResolveActiveWorkspace(ctx)
 	if err != nil {
 		return "", fmt.Errorf("resolving workspace: %w", err)
 	}

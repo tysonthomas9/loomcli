@@ -1,6 +1,7 @@
 package doctor
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -194,8 +195,8 @@ func queryIndexedSessionIDs(store *sessions.Store) (map[string]bool, error) {
 	return ids, nil
 }
 
-func checkStaleSessionRecords() CheckResult {
-	sessStore, err := sessionstoreadapter.New(cli.GetWorkspaceRuntimeDir())
+func checkStaleSessionRecords(ctx context.Context) CheckResult {
+	sessStore, err := sessionstoreadapter.New(ctx, cli.GetWorkspaceRuntimeDir())
 	if err != nil {
 		return CheckResult{} // skip — sessions store not available
 	}

@@ -799,7 +799,7 @@ func (g *GitOpsImpl) CheckGhInstalled() error {
 	return git.CheckGhInstalled()
 }
 
-func (g *GitOpsImpl) SetRepoDefaultBranch(workspaceID, repoName, branch string) error {
+func (g *GitOpsImpl) SetRepoDefaultBranch(ctx context.Context, workspaceID, repoName, branch string) error {
 	resolver, err := cli.NewResolver()
 	if err != nil {
 		return err
@@ -807,7 +807,7 @@ func (g *GitOpsImpl) SetRepoDefaultBranch(workspaceID, repoName, branch string) 
 	if err := scopeResolverToWorkspace(resolver, workspaceID); err != nil {
 		return err
 	}
-	return resolver.SetRepoDefaultBranch(repoName, branch)
+	return resolver.SetRepoDefaultBranch(ctx, repoName, branch)
 }
 
 func (g *GitOpsImpl) ListAgentWorktrees(workspaceID string) ([]ops.AgentWorktree, error) {

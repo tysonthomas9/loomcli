@@ -9,7 +9,6 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/observability/tracing"
 )
 
@@ -19,25 +18,26 @@ const gitRunnerTracerName = "github.com/tysonthomas9/loomcli/internal/cli/git"
 
 // tracedGitRunner wraps a GitRunner and emits one span per git subprocess
 // invocation. Spans nest under the active root span (typically loom.cli.<verb>)
-// via cmdstore.RootContext, giving sub-task granularity for "how long was
-// spent in git" vs other work.
+// via the context supplied when dependencies are composed, giving sub-task
+// granularity for "how long was spent in git" vs other work.
 //
 // Per the trace contract §6, raw arg lists are NEVER recorded as a span
 // attribute (they may contain user-controlled refs, URLs, or refspecs).
 // Only the bounded git subcommand verb (low cardinality) and a numeric
 // arg count are captured.
 type tracedGitRunner struct {
+	ctx   context.Context
 	inner GitRunner
 }
 
 // wrapGitRunnerWithTracing returns a tracing-decorated GitRunner. When the
 // global TracerProvider is no-op (tracing disabled), the overhead is one
 // span construction + immediate end per call.
-func wrapGitRunnerWithTracing(inner GitRunner) GitRunner {
+func wrapGitRunnerWithTracing(ctx context.Context, inner GitRunner) GitRunner {
 	if inner == nil {
 		return nil
 	}
-	return &tracedGitRunner{inner: inner}
+	return &tracedGitRunner{ctx: ctx, inner: inner}
 }
 
 // gitSpanName returns the span name "git.<subcommand>" for the leading
@@ -98,7 +98,7 @@ func recordGitSpanResult(span trace.Span, start time.Time, exitCode int, err err
 
 func (t *tracedGitRunner) Run(dir string, args ...string) CommandResult {
 	tracer := tracing.Tracer(gitRunnerTracerName)
-	ctx, span := tracer.Start(cmdstore.RootContext(),
+	ctx, span := tracer.Start(t.ctx,
 		gitSpanName(args),
 		trace.WithAttributes(gitSpanAttrs(args)...),
 	)
@@ -131,7 +131,7 @@ func (t *tracedGitRunner) RunContext(ctx context.Context, dir string, args ...st
 
 func (t *tracedGitRunner) RunWithOutput(dir string, args ...string) error {
 	tracer := tracing.Tracer(gitRunnerTracerName)
-	ctx, span := tracer.Start(cmdstore.RootContext(),
+	ctx, span := tracer.Start(t.ctx,
 		gitSpanName(args),
 		trace.WithAttributes(gitSpanAttrs(args)...),
 	)

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"time"
@@ -66,6 +67,7 @@ func init() {
 }
 
 func runTask(cmd *cobra.Command, args []string) {
+	ctx := cmd.Context()
 	deps := cli.GetDeps(cmd)
 
 	var argName string
@@ -82,11 +84,11 @@ func runTask(cmd *cobra.Command, args []string) {
 	worktreePath := target.WorkDir
 	agentName := target.AgentName
 
-	routerCheck := cli.RouterTaskCheckFromEnv(taskParentID)
+	routerCheck := cli.RouterTaskCheckFromEnv(ctx, taskParentID)
 
 	if taskAutoMode && automode.IsTmuxAvailable() {
 		shutdown := automode.SetupSignalHandler()
-		automode.RunAutoModeTmux(automode.AutoModeOptions{
+		automode.RunAutoModeTmux(ctx, automode.AutoModeOptions{
 			Interval: taskInterval, MaxTasks: taskMaxTasks, IdleTimeout: taskIdleTimeout,
 			AgentType: "task", AgentName: agentName, WorktreePath: worktreePath,
 			ParentID: taskParentID, CustomTaskCheck: routerCheck,
@@ -94,40 +96,46 @@ func runTask(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	if err := cli.AcquireLock(worktreePath, "task", agentName); err != nil {
+	if err := cli.AcquireLock(ctx, worktreePath, "task", agentName); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		cli.ExitWithFlush(1)
 	}
 	defer func() { _ = cli.ReleaseLock(worktreePath) }()
 
 	if taskAutoMode {
-		runTaskAutoFallback(deps, worktreePath, agentName, routerCheck)
+		runTaskAutoFallback(cmd.Context(), deps, worktreePath, agentName, routerCheck)
 		return
 	}
 
-	runTaskSingleTask(deps, worktreePath, agentName, routerCheck)
+	runTaskSingleTask(cmd.Context(), deps, worktreePath, agentName, routerCheck)
 }
 
 // runTaskAutoFallback handles auto mode without tmux for the task agent.
-func runTaskAutoFallback(deps *cli.Deps, worktreePath, agentName string, routerCheck func() (bool, error)) {
+func runTaskAutoFallback(ctx context.Context, deps *cli.Deps, worktreePath, agentName string, routerCheck func() (bool, error)) {
 	fmt.Println("[auto] tmux not found, using JSON streaming mode")
 	shutdown := automode.SetupSignalHandler()
 	backendName := cli.GetBackendName()
-	promptGen := func(name string, ws *config.WorkspaceConfig) string {
+	ws, err := config.ResolveActiveWorkspace(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error resolving active workspace for task prompt: %v\n", err)
+		cli.ExitWithFlush(1)
+		return
+	}
+	prompt := func(name string) string {
 		return GenerateTaskPrompt(name, ws, taskParentID, backendName)
 	}
-	automode.RunAutoModeLoop(automode.AutoModeOptions{
+	automode.RunAutoModeLoop(ctx, automode.AutoModeOptions{
 		Interval: taskInterval, MaxTasks: taskMaxTasks, IdleTimeout: taskIdleTimeout,
 		AgentType: "task", AgentName: agentName, WorktreePath: worktreePath,
 		ParentID: taskParentID, CustomTaskCheck: routerCheck,
-		CustomPromptGen: promptGen, Deps: deps,
+		Prompt: prompt, Deps: deps,
 	}, shutdown)
 }
 
 // runTaskSingleTask runs a single implementation task.
-func runTaskSingleTask(deps *cli.Deps, worktreePath, agentName string, routerCheck func() (bool, error)) {
+func runTaskSingleTask(ctx context.Context, deps *cli.Deps, worktreePath, agentName string, routerCheck func() (bool, error)) {
 	available, err := cli.CheckTaskAvailability(routerCheck, func() (bool, error) {
-		return automode.HasAvailableImplementationTasks(taskParentID, os.Getenv("LOOM_AGENT_REPO"))
+		return automode.HasAvailableImplementationTasks(ctx, taskParentID, os.Getenv("LOOM_AGENT_REPO"))
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error checking tasks: %v\n", err)
@@ -149,20 +157,20 @@ func runTaskSingleTask(deps *cli.Deps, worktreePath, agentName string, routerChe
 		fmt.Fprintf(os.Stderr, "Warning: could not update lock state: %v\n", err)
 	}
 
-	ws, _ := config.ResolveActiveWorkspace()
+	ws, _ := config.ResolveActiveWorkspace(ctx)
 	prompt := GenerateTaskPrompt(agentName, ws, taskParentID, cli.GetBackendName())
-	sess := createAgentSession(agentName, taskParentID, prompt, "implementation")
+	sess := createAgentSession(ctx, agentName, taskParentID, prompt, "implementation")
 
 	// Single-task mode: the task is self-claimed by the agent during the
 	// run, so the ID is unknown here. Emit with TaskID="" to start the
 	// loom.task span; emitTaskLifecycleResult reads the lock file after
 	// invoke to recover the resolved ID for the close-out event.
-	emitTaskClaimedFromEnv(agentName, "")
+	emitTaskClaimedFromEnv(ctx, agentName, "")
 
 	beforeRef := automode.CaptureHEADRef(worktreePath)
 	startedAt := time.Now()
 	invokeErr := deps.Agent.InvokeInteractive(worktreePath, prompt, agentName)
-	emitTaskLifecycleResult(agentName, worktreePath, startedAt, invokeErr)
+	emitTaskLifecycleResult(ctx, agentName, worktreePath, startedAt, invokeErr)
 	finalizeAgentSession(sess, worktreePath, beforeRef, invokeErr, nil, startedAt, taskParentID)
 
 	if invokeErr != nil {

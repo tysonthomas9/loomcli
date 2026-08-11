@@ -112,14 +112,14 @@ func TestRunAutoModeLoop_YieldBeforeFirstTask(t *testing.T) {
 		WorktreePath: tmpDir,
 		BackoffBase:  10 * time.Millisecond,
 		TaskPause:    10 * time.Millisecond,
-		CustomPromptGen: func(name string, _ *WorkspaceConfig) string {
+		Prompt: func(name string) string {
 			return "test-prompt-for-" + name
 		},
 	}
 
 	done := make(chan struct{})
 	go func() {
-		RunAutoModeLoop(opts, shutdown)
+		RunAutoModeLoop(t.Context(), opts, shutdown)
 		close(done)
 	}()
 
@@ -169,14 +169,14 @@ func TestRunAutoModeLoop_YieldAfterTask(t *testing.T) {
 		WorktreePath: tmpDir,
 		BackoffBase:  10 * time.Millisecond,
 		TaskPause:    10 * time.Millisecond,
-		CustomPromptGen: func(name string, _ *WorkspaceConfig) string {
+		Prompt: func(name string) string {
 			return "test-prompt-for-" + name
 		},
 	}
 
 	done := make(chan struct{})
 	go func() {
-		RunAutoModeLoop(opts, shutdown)
+		RunAutoModeLoop(t.Context(), opts, shutdown)
 		close(done)
 	}()
 
@@ -226,14 +226,14 @@ func TestRunAutoModeLoop_NoYieldFileEnv(t *testing.T) {
 		WorktreePath: tmpDir,
 		BackoffBase:  10 * time.Millisecond,
 		TaskPause:    10 * time.Millisecond,
-		CustomPromptGen: func(name string, _ *WorkspaceConfig) string {
+		Prompt: func(name string) string {
 			return "test-prompt-for-" + name
 		},
 	}
 
 	done := make(chan struct{})
 	go func() {
-		RunAutoModeLoop(opts, shutdown)
+		RunAutoModeLoop(t.Context(), opts, shutdown)
 		close(done)
 	}()
 
@@ -281,14 +281,14 @@ func TestRunAutoModeLoop_YieldWithMalformedJSON(t *testing.T) {
 		WorktreePath: tmpDir,
 		BackoffBase:  10 * time.Millisecond,
 		TaskPause:    10 * time.Millisecond,
-		CustomPromptGen: func(name string, _ *WorkspaceConfig) string {
+		Prompt: func(name string) string {
 			return "test-prompt-for-" + name
 		},
 	}
 
 	done := make(chan struct{})
 	go func() {
-		RunAutoModeLoop(opts, shutdown)
+		RunAutoModeLoop(t.Context(), opts, shutdown)
 		close(done)
 	}()
 

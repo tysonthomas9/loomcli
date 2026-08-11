@@ -55,7 +55,7 @@ func TestTracedGitRunner_Run_EmitsSpan_WithBoundedAttributes(t *testing.T) {
 	exp := installInMemoryExporter(t)
 
 	inner := &fakeGitRunner{runResult: CommandResult{Stdout: "M file.go\n"}}
-	traced := wrapGitRunnerWithTracing(inner)
+	traced := wrapGitRunnerWithTracing(t.Context(), inner)
 
 	res := traced.Run("/tmp/wt", "status", "--porcelain", "feature/secret-branch-name")
 	if res.Err != nil {
@@ -101,7 +101,7 @@ func TestTracedGitRunner_RunWithOutput_RecordsErrorAndExitCode(t *testing.T) {
 	exp := installInMemoryExporter(t)
 
 	inner := &fakeGitRunner{runErr: errors.New("git push failed: remote rejected")}
-	traced := wrapGitRunnerWithTracing(inner)
+	traced := wrapGitRunnerWithTracing(t.Context(), inner)
 
 	if err := traced.RunWithOutput("/tmp/wt", "push", "origin", "feature/x"); err == nil {
 		t.Fatal("expected error from RunWithOutput, got nil")

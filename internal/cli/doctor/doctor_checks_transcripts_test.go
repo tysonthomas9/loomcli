@@ -15,7 +15,7 @@ import (
 // ~/.claude/projects for the same agent so the backfill can correlate it.
 func stageClaudeSession(t *testing.T, runtimeDir, home, agent string, stageCC bool) (*sessions.Store, string) {
 	t.Helper()
-	store, err := sessions.NewStore(runtimeDir)
+	store, err := sessions.NewStore(t.Context(), runtimeDir)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestCheckOrphanedTranscripts_Backfills(t *testing.T) {
 	doctorFix = true
 	t.Cleanup(func() { doctorFix = false })
 
-	res := checkOrphanedTranscripts()
+	res := checkOrphanedTranscripts(t.Context())
 	if res.Status != StatusPass {
 		t.Fatalf("status = %v, summary=%q detail=%q", res.Status, res.Summary, res.Detail)
 	}
@@ -115,7 +115,7 @@ func TestCheckOrphanedTranscripts_BackfillCaseInsensitiveWorkspaceToken(t *testi
 	ResetWorkspaceRuntimeDirCache()
 	t.Cleanup(ResetWorkspaceRuntimeDirCache)
 
-	store, err := sessions.NewStore(runtimeDir)
+	store, err := sessions.NewStore(t.Context(), runtimeDir)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestCheckOrphanedTranscripts_BackfillCaseInsensitiveWorkspaceToken(t *testi
 	doctorFix = true
 	t.Cleanup(func() { doctorFix = false })
 
-	res := checkOrphanedTranscripts()
+	res := checkOrphanedTranscripts(t.Context())
 	if res.Status != StatusPass {
 		t.Fatalf("status = %v; case-only token difference should still backfill (summary=%q detail=%q)", res.Status, res.Summary, res.Detail)
 	}
@@ -162,7 +162,7 @@ func TestCheckOrphanedTranscripts_SkipsRunningSessions(t *testing.T) {
 	stageClaudeSession(t, runtimeDir, home, "jack-worker", true)
 
 	doctorFix = false
-	res := checkOrphanedTranscripts()
+	res := checkOrphanedTranscripts(t.Context())
 	if res.Status != StatusPass {
 		t.Fatalf("status = %v, want pass for running session (summary=%q detail=%q)", res.Status, res.Summary, res.Detail)
 	}
@@ -177,7 +177,7 @@ func TestCheckOrphanedTranscripts_BackfillReindexesEmptyTranscript(t *testing.T)
 	ResetWorkspaceRuntimeDirCache()
 	t.Cleanup(ResetWorkspaceRuntimeDirCache)
 
-	store, err := sessions.NewStore(runtimeDir)
+	store, err := sessions.NewStore(t.Context(), runtimeDir)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -200,7 +200,7 @@ func TestCheckOrphanedTranscripts_BackfillReindexesEmptyTranscript(t *testing.T)
 	doctorFix = true
 	t.Cleanup(func() { doctorFix = false })
 
-	res := checkOrphanedTranscripts()
+	res := checkOrphanedTranscripts(t.Context())
 	if res.Status != StatusPass {
 		t.Fatalf("status = %v, summary=%q detail=%q", res.Status, res.Summary, res.Detail)
 	}
@@ -235,7 +235,7 @@ func TestCheckOrphanedTranscripts_NoFixWarns(t *testing.T) {
 	markSessionCompleted(t, store, sid)
 
 	doctorFix = false
-	res := checkOrphanedTranscripts()
+	res := checkOrphanedTranscripts(t.Context())
 	if res.Status != StatusWarn {
 		t.Fatalf("status = %v, want warn (summary=%q)", res.Status, res.Summary)
 	}

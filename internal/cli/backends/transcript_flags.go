@@ -1,6 +1,7 @@
 package backends
 
 import (
+	"context"
 	"os"
 	"strings"
 
@@ -61,7 +62,7 @@ func loomHookCommand() []string {
 // session, or (nil, "") when the event store is disabled (F2 off) or there is no
 // active session (standalone mode). The sink is a LOCAL append only — no
 // network/UI — honoring harness.Run's bounded-OnEvent contract.
-func eventStoreSink(workDir string) (func(transcript.EventEnvelope) error, string) {
+func eventStoreSink(ctx context.Context, workDir string) (func(transcript.EventEnvelope) error, string) {
 	if !eventStoreWriteEnabled() {
 		return nil, ""
 	}
@@ -71,7 +72,7 @@ func eventStoreSink(workDir string) (func(transcript.EventEnvelope) error, strin
 	}
 	// Resolve the session dir through the SAME source of truth the serving side
 	// reads from (sessions.Store.SessionDir), so writer + reader can't diverge.
-	store, err := sessionstoreadapter.New(runtimeDir)
+	store, err := sessionstoreadapter.New(ctx, runtimeDir)
 	if err != nil {
 		return nil, ""
 	}

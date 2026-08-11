@@ -130,8 +130,8 @@ func bindDriverDeliverAgentMessageFlags(cmd *cobra.Command) {
 	_ = cmd.MarkFlagRequired("message")
 }
 
-func runDriverListAgents(_ *cobra.Command, _ []string) error {
-	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
+func runDriverListAgents(cmd *cobra.Command, _ []string) error {
+	return cmdstore.WithStore(cmd.Context(), func(ctx context.Context, h *bootstrap.StoreHandle) error {
 		ws, _, err := resolveRunningDriverRun(ctx, h, driverListAgentsWorkspaceKey, driverListAgentsDriverRunID)
 		if err != nil {
 			return err
@@ -153,8 +153,8 @@ func runDriverListAgents(_ *cobra.Command, _ []string) error {
 	})
 }
 
-func runDriverAgentOrchestrationSession(_ *cobra.Command, _ []string) error {
-	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
+func runDriverAgentOrchestrationSession(cmd *cobra.Command, _ []string) error {
+	return cmdstore.WithStore(cmd.Context(), func(ctx context.Context, h *bootstrap.StoreHandle) error {
 		ws, _, err := resolveRunningDriverRun(ctx, h, driverAgentSessionWorkspaceKey, driverAgentSessionDriverRunID)
 		if err != nil {
 			return err
@@ -203,8 +203,8 @@ func runDriverUpdateAgentParent(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-func runDriverDeliverLeadAssignment(_ *cobra.Command, _ []string) error {
-	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
+func runDriverDeliverLeadAssignment(cmd *cobra.Command, _ []string) error {
+	return cmdstore.WithStore(cmd.Context(), func(ctx context.Context, h *bootstrap.StoreHandle) error {
 		ws, _, err := resolveRunningDriverRun(ctx, h, driverDeliverLeadWorkspaceKey, driverDeliverLeadDriverRunID)
 		if err != nil {
 			return err
@@ -238,8 +238,8 @@ func runDriverDeliverLeadAssignment(_ *cobra.Command, _ []string) error {
 	})
 }
 
-func runDriverDeliverAgentMessage(_ *cobra.Command, _ []string) error {
-	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
+func runDriverDeliverAgentMessage(cmd *cobra.Command, _ []string) error {
+	return cmdstore.WithStore(cmd.Context(), func(ctx context.Context, h *bootstrap.StoreHandle) error {
 		ws, parent, err := resolveRunningDriverRun(ctx, h, driverDeliverAgentMessageWorkspaceKey, driverDeliverAgentMessageDriverRunID)
 		if err != nil {
 			return err

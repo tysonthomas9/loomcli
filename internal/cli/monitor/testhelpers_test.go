@@ -7,6 +7,8 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
@@ -14,6 +16,13 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
+
+func commandWithContext(t *testing.T) *cobra.Command {
+	t.Helper()
+	cmd := &cobra.Command{}
+	cmd.SetContext(t.Context())
+	return cmd
+}
 
 type CommandResult = cli.CommandResult
 type LockInfo = cli.LockInfo
@@ -135,8 +144,8 @@ func normalizeMonitorAgentNames(t *testing.T, workspaceDir string, agentNames []
 var defaultResolver *cli.Resolver
 
 // collectMonitorData delegates to CollectMonitorData.
-func collectMonitorData(readyLimit int, branch string) *MonitorData {
-	return CollectMonitorData(readyLimit, branch)
+func collectMonitorData(ctx context.Context, readyLimit int, branch string) *MonitorData {
+	return CollectMonitorData(ctx, readyLimit, branch)
 }
 
 // execBridgeGitRunner wraps clitest.ExecBridgeGitRunner for lowercase compat.

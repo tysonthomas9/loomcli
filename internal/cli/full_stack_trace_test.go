@@ -45,7 +45,7 @@ package cli_test
 // Pattern note
 // ------------
 // We construct the events.Bus + otelexport.Exporter directly rather than
-// going through cli.AgentEventBus() so test state is isolated. The
+// going through cli.AgentEventBus(t.Context()) so test state is isolated. The
 // AgentEventBus singleton uses sync.Once and binds to the global
 // TracerProvider on first call, which makes it order-dependent across
 // tests in the same package. The constructed bus exercises exactly the
@@ -64,7 +64,6 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
-	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/events/otelexport"
 )
@@ -95,22 +94,17 @@ func TestFullStackTrace_AgentRun_StructureAssertion(t *testing.T) {
 	otel.SetTextMapPropagator(propagation.TraceContext{})
 	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
 
-	// 2. Wire SetContextProvider so events.Bus.Emit picks up the ambient
-	// CLI root context (the trace context loom.cli.<verb> installs).
-	// Without this, Emit captures context.Background() and the loom.task
-	// span fragments into its own trace — exactly the regression we guard
-	// against.
-	events.SetContextProvider(cmdstore.RootContext)
-	t.Cleanup(func() { events.SetContextProvider(nil) })
+	// 2. Start the simulated CLI root span and pass it directly to the bus.
+	rootCtx, rootSpan := tp.Tracer("test").Start(context.Background(), rootSpanName)
 
 	// 3. Construct a fresh bus + otelexport pair pointed at the in-memory
 	// TracerProvider. Mirrors initAgentEventBus's wiring without touching
-	// the cli.AgentEventBus() singleton (which is order-dependent across
+	// the cli.AgentEventBus(t.Context()) singleton (which is order-dependent across
 	// tests). Disable metrics — this test asserts trace tree shape only.
 	tmp := t.TempDir()
 	t.Setenv("LOOM_EVENTS_DIR", tmp)
 
-	bus := events.NewBus(tmp)
+	bus := events.NewBus(rootCtx, tmp)
 	t.Cleanup(func() { _ = bus.Close() })
 
 	metricsOff := false
@@ -124,14 +118,7 @@ func TestFullStackTrace_AgentRun_StructureAssertion(t *testing.T) {
 	}
 	bus.Subscribe(exporter.HandleEvent)
 
-	// 4. Start the simulated CLI root span (what cli.Execute does) and
-	// publish it as the root context so events.SetContextProvider's
-	// cmdstore.RootContext lookup finds it.
-	rootCtx, rootSpan := tp.Tracer("test").Start(context.Background(), rootSpanName)
-	cmdstore.SetRootContext(rootCtx)
-	t.Cleanup(func() { cmdstore.SetRootContext(context.Background()) })
-
-	// 5. Drive the representative agent flow: claim → complete.
+	// 4. Drive the representative agent flow: claim → complete.
 	// This is the same shape as the agent runtime's task loop.
 	const (
 		agentName = "structure-test-agent"

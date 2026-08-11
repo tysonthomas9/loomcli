@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -13,7 +14,6 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/atomicfile"
-	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
@@ -136,8 +136,8 @@ func ResolveLockDir(path string) string {
 }
 
 // resolveWorkspaceName returns the workspace name for the given path, or empty string if not in a workspace.
-func resolveWorkspaceName(path string) string {
-	cfg, err := config.LoadConfig()
+func resolveWorkspaceName(ctx context.Context, path string) string {
+	cfg, err := config.LoadConfig(ctx)
 	if err != nil || cfg == nil {
 		return ""
 	}
@@ -221,7 +221,7 @@ func acquireLockRetry(worktreePath, lockPath string) (*os.File, error) {
 // AcquireLock attempts to acquire an agent lock for the worktree
 // Returns an error if an agent is already running
 // Uses atomic file creation (O_EXCL) to prevent race conditions
-func AcquireLock(worktreePath, command, agentName string) error {
+func AcquireLock(ctx context.Context, worktreePath, command, agentName string) error {
 	lockDir := ResolveLockDir(worktreePath)
 	lockPath := filepath.Join(lockDir, LockFileName)
 
@@ -230,7 +230,7 @@ func AcquireLock(worktreePath, command, agentName string) error {
 		Command:   command,
 		AgentName: agentName,
 		StartedAt: time.Now(),
-		Workspace: resolveWorkspaceName(worktreePath),
+		Workspace: resolveWorkspaceName(ctx, worktreePath),
 	}
 
 	// Carry resume continuity forward from a STALE (dead-PID) prior lock before
@@ -426,7 +426,7 @@ func ClearStaleLockClaudeSessionID(worktreePath string) error {
 
 // GetLockStatus returns a human-readable status for a worktree's lock
 // Uses explicit state words: planning, working, done, review, idle
-func GetLockStatus(worktreePath string) string {
+func GetLockStatus(ctx context.Context, worktreePath string) string {
 	info, running, err := CheckLock(worktreePath)
 	if err != nil || !running {
 		return ""
@@ -447,7 +447,7 @@ func GetLockStatus(worktreePath string) string {
 
 	if info.TaskID != "" {
 		// Check actual task status
-		taskStatus := getTaskStatus(info.TaskID)
+		taskStatus := getTaskStatus(ctx, info.TaskID)
 		switch taskStatus {
 		case "closed":
 			return fmt.Sprintf("done: %s (%s)", info.TaskID, duration)
@@ -478,14 +478,14 @@ func GetLockStatus(worktreePath string) string {
 
 // getTaskStatus returns the status of a task.
 // Returns "needs_review", "closed", "in_progress", "open", or ""
-func getTaskStatus(taskID string) string {
+func getTaskStatus(ctx context.Context, taskID string) string {
 	d := *ensureDefaultDeps()
 	d.IssueBackend = DefaultIssueBackend()
-	return GetTaskStatusDeps(&d, taskID)
+	return GetTaskStatusDeps(ctx, &d, taskID)
 }
 
-func GetTaskStatusDeps(deps *Deps, taskID string) string {
-	detail, err := deps.IssueBackend.Get(cmdstore.RootContext(), taskID)
+func GetTaskStatusDeps(ctx context.Context, deps *Deps, taskID string) string {
+	detail, err := deps.IssueBackend.Get(ctx, taskID)
 	if err != nil || detail == nil {
 		return ""
 	}

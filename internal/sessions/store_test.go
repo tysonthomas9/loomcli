@@ -14,9 +14,9 @@ import (
 func TestNewStore(t *testing.T) {
 	dir := t.TempDir()
 
-	store, err := NewStore(dir)
+	store, err := NewStore(t.Context(), dir)
 	if err != nil {
-		t.Fatalf("NewStore(%q) error: %v", dir, err)
+		t.Fatalf("NewStore(t.Context(), %q) error: %v", dir, err)
 	}
 	if store == nil {
 		t.Fatal("NewStore returned nil store")
@@ -37,7 +37,7 @@ func TestNewStore(t *testing.T) {
 
 func TestCreateSession(t *testing.T) {
 	dir := t.TempDir()
-	store, err := NewStore(dir)
+	store, err := NewStore(t.Context(), dir)
 	if err != nil {
 		t.Fatalf("NewStore error: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestCreateSession(t *testing.T) {
 
 func TestCreateSession_MetadataFields(t *testing.T) {
 	dir := t.TempDir()
-	store, err := NewStore(dir)
+	store, err := NewStore(t.Context(), dir)
 	if err != nil {
 		t.Fatalf("NewStore error: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestCreateSession_MetadataFields(t *testing.T) {
 
 func TestAppendTranscript(t *testing.T) {
 	dir := t.TempDir()
-	store, err := NewStore(dir)
+	store, err := NewStore(t.Context(), dir)
 	if err != nil {
 		t.Fatalf("NewStore error: %v", err)
 	}
@@ -268,7 +268,7 @@ func TestAppendTranscript(t *testing.T) {
 
 func TestAppendTranscript_Concurrent(t *testing.T) {
 	dir := t.TempDir()
-	store, err := NewStore(dir)
+	store, err := NewStore(t.Context(), dir)
 	if err != nil {
 		t.Fatalf("NewStore error: %v", err)
 	}
@@ -354,7 +354,7 @@ func TestAppendTranscript_Concurrent(t *testing.T) {
 
 func TestAppendTranscript_NonexistentSession(t *testing.T) {
 	dir := t.TempDir()
-	store, err := NewStore(dir)
+	store, err := NewStore(t.Context(), dir)
 	if err != nil {
 		t.Fatalf("NewStore error: %v", err)
 	}
@@ -376,7 +376,7 @@ func TestAppendTranscript_NonexistentSession(t *testing.T) {
 
 func TestAppendTranscript_PathTraversal(t *testing.T) {
 	dir := t.TempDir()
-	store, err := NewStore(dir)
+	store, err := NewStore(t.Context(), dir)
 	if err != nil {
 		t.Fatalf("NewStore error: %v", err)
 	}
@@ -405,7 +405,7 @@ func TestAppendTranscript_PathTraversal(t *testing.T) {
 // resolve through SessionDir, can never diverge.
 func TestSessionDir(t *testing.T) {
 	rt := t.TempDir()
-	store, err := NewStore(rt)
+	store, err := NewStore(t.Context(), rt)
 	if err != nil {
 		t.Fatal(err)
 	}

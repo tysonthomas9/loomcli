@@ -49,8 +49,8 @@ func ActiveWorkspaceCatalog(ctx context.Context, api workspacemodule.API) (strin
 	return workspace.Key, nil
 }
 
-func WithWorkspaceCatalog(fn func(context.Context, *bootstrap.StoreHandle, workspacemodule.API) error) error {
-	return WithStore(func(ctx context.Context, handle *bootstrap.StoreHandle) error {
+func WithWorkspaceCatalog(parent context.Context, fn func(context.Context, *bootstrap.StoreHandle, workspacemodule.API) error) error {
+	return WithStore(parent, func(ctx context.Context, handle *bootstrap.StoreHandle) error {
 		api, err := WorkspaceCatalog(handle)
 		if err != nil {
 			return err
@@ -59,8 +59,8 @@ func WithWorkspaceCatalog(fn func(context.Context, *bootstrap.StoreHandle, works
 	})
 }
 
-func WithActiveWorkspaceCatalog(fn func(context.Context, *bootstrap.StoreHandle, workspacemodule.API, string) error) error {
-	return WithWorkspaceCatalog(func(ctx context.Context, handle *bootstrap.StoreHandle, api workspacemodule.API) error {
+func WithActiveWorkspaceCatalog(parent context.Context, fn func(context.Context, *bootstrap.StoreHandle, workspacemodule.API, string) error) error {
+	return WithWorkspaceCatalog(parent, func(ctx context.Context, handle *bootstrap.StoreHandle, api workspacemodule.API) error {
 		workspace, err := ActiveWorkspaceCatalog(ctx, api)
 		if err != nil {
 			return err

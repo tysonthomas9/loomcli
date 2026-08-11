@@ -132,7 +132,7 @@ func TestSessionServiceExecutionTaskRunOwnsBatchHistoryAndTranscript(t *testing.
 
 	// A stale local session may also reuse the former Flue shadow ID. It must
 	// never override the canonical TaskRun lifecycle, transcript, or patch.
-	localStore, err := sessions.NewStore(runtimeDir)
+	localStore, err := sessions.NewStore(t.Context(), runtimeDir)
 	if err != nil {
 		t.Fatalf("create local session store: %v", err)
 	}
@@ -441,7 +441,7 @@ func TestSessionServiceTranscriptUsesRuntimeStoreBeforeWorkspaceTopology(t *test
 	if err := os.MkdirAll(runtimeDir, 0o700); err != nil {
 		t.Fatalf("create active runtime directory: %v", err)
 	}
-	runtimeStore, err := sessions.NewStore(targetRuntimeDir)
+	runtimeStore, err := sessions.NewStore(t.Context(), targetRuntimeDir)
 	if err != nil {
 		t.Fatalf("new target runtime session store: %v", err)
 	}
@@ -489,7 +489,7 @@ func TestSessionServiceAgentTranscriptEnforcesOwnership(t *testing.T) {
 	if err := os.MkdirAll(runtimeDir, 0o700); err != nil {
 		t.Fatalf("create active runtime directory: %v", err)
 	}
-	localStore, err := sessions.NewStore(workspaceRuntimeDir)
+	localStore, err := sessions.NewStore(t.Context(), workspaceRuntimeDir)
 	if err != nil {
 		t.Fatalf("new workspace session store: %v", err)
 	}
@@ -513,7 +513,7 @@ func TestSessionServiceAgentTranscriptEnforcesOwnership(t *testing.T) {
 	if err := sess.Finalize(sessions.FinalizeOptions{TaskID: "TASK-LOCAL-1", ExitCode: 0}); err != nil {
 		t.Fatalf("finalize local supervised session: %v", err)
 	}
-	activeStore, err := sessions.NewStore(runtimeDir)
+	activeStore, err := sessions.NewStore(t.Context(), runtimeDir)
 	if err != nil {
 		t.Fatalf("new active workspace session store: %v", err)
 	}
@@ -1119,7 +1119,7 @@ func TestSessionServiceControlPlaneDiffMissingPatchArtifact(t *testing.T) {
 func TestSessionServiceLocalDiffMissingFallsBackToControlPlaneArtifact(t *testing.T) {
 	ctx := t.Context()
 	runtimeDir := t.TempDir()
-	sessStore, err := sessions.NewStore(runtimeDir)
+	sessStore, err := sessions.NewStore(t.Context(), runtimeDir)
 	if err != nil {
 		t.Fatalf("new session store: %v", err)
 	}
@@ -1165,7 +1165,7 @@ func TestSessionServiceLocalDiffMissingFallsBackToControlPlaneArtifact(t *testin
 
 func TestSessionServiceLocalDiffMissingWithoutControlPlaneReturnsDiffNotFound(t *testing.T) {
 	runtimeDir := t.TempDir()
-	sessStore, err := sessions.NewStore(runtimeDir)
+	sessStore, err := sessions.NewStore(t.Context(), runtimeDir)
 	if err != nil {
 		t.Fatalf("new session store: %v", err)
 	}
@@ -1307,7 +1307,7 @@ func TestSessionServiceListTaskSessionsEnrichesControlPlaneWithLocalUsage(t *tes
 	ctx := t.Context()
 	runtimeDir := t.TempDir()
 
-	sessStore, err := sessions.NewStore(runtimeDir)
+	sessStore, err := sessions.NewStore(t.Context(), runtimeDir)
 	if err != nil {
 		t.Fatalf("new session store: %v", err)
 	}
@@ -1423,7 +1423,7 @@ func TestSessionServiceListTaskSessionsFallsBackToFileStores(t *testing.T) {
 		t.Fatalf("save state cache: %v", err)
 	}
 
-	sessStore, err := sessions.NewStore(repoPath)
+	sessStore, err := sessions.NewStore(t.Context(), repoPath)
 	if err != nil {
 		t.Fatalf("new session store: %v", err)
 	}
@@ -1489,7 +1489,7 @@ func TestSessionServiceListTaskSessionsSearchesRuntimeDir(t *testing.T) {
 		t.Fatalf("save state cache: %v", err)
 	}
 
-	sessStore, err := sessions.NewStore(runtimeDir)
+	sessStore, err := sessions.NewStore(t.Context(), runtimeDir)
 	if err != nil {
 		t.Fatalf("new runtime session store: %v", err)
 	}
@@ -1521,7 +1521,7 @@ func TestSessionServiceListTaskSessionsSearchesRuntimeDir(t *testing.T) {
 func TestSessionServiceEventStoreSubagentsAreDiscoverable(t *testing.T) {
 	t.Setenv("LOOM_SERVE_FROM_EVENTSTORE", "1")
 	runtimeDir := t.TempDir()
-	sessStore, err := sessions.NewStore(runtimeDir)
+	sessStore, err := sessions.NewStore(t.Context(), runtimeDir)
 	if err != nil {
 		t.Fatalf("new session store: %v", err)
 	}

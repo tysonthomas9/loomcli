@@ -13,36 +13,35 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	clibackends "github.com/tysonthomas9/loomcli/internal/cli/backends"
-	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/git"
 )
 
 // handleOrphanedTask decides whether to close or reopen an orphaned task
-func handleOrphanedTask(deps *cli.Deps, worktreePath, taskID string, analyze bool) {
+func handleOrphanedTask(ctx context.Context, deps *cli.Deps, worktreePath, taskID string, analyze bool) {
 	fmt.Printf("\nHandling orphaned task: %s\n", taskID)
 
 	if analyze {
 		fmt.Println("Analyzing task completion with Claude...")
-		completed, reason := analyzeTaskCompletion(deps, worktreePath, taskID)
+		completed, reason := analyzeTaskCompletion(ctx, deps, worktreePath, taskID)
 
 		if completed {
 			fmt.Printf("Task appears COMPLETE: %s\n", reason)
-			closeTask(deps, taskID, reason)
+			closeTask(ctx, deps, taskID, reason)
 		} else {
 			fmt.Printf("Task appears INCOMPLETE: %s\n", reason)
-			resetTask(deps, taskID)
+			resetTask(ctx, deps, taskID)
 		}
 	} else {
 		fmt.Println("Skipping analysis (--no-analyze)")
-		resetTask(deps, taskID)
+		resetTask(ctx, deps, taskID)
 	}
 }
 
 // analyzeTaskCompletion uses Claude to determine if a task was completed.
 // In workspace mode, it searches git logs across ALL repos in the workspace
 // to give Claude the most complete picture of relevant commits.
-func analyzeTaskCompletion(deps *cli.Deps, worktreePath, taskID string) (completed bool, reason string) {
-	detail, err := deps.IssueBackend.Get(cmdstore.RootContext(), taskID)
+func analyzeTaskCompletion(ctx context.Context, deps *cli.Deps, worktreePath, taskID string) (completed bool, reason string) {
+	detail, err := deps.IssueBackend.Get(ctx, taskID)
 	if err != nil || detail == nil {
 		return false, "Could not fetch task details"
 	}
@@ -53,16 +52,12 @@ func analyzeTaskCompletion(deps *cli.Deps, worktreePath, taskID string) (complet
 
 	prompt := buildCompletionAnalysisPrompt(taskID, taskDetails, gitOutput)
 
-	analysis, err := runCompletionAnalysis(ctxForCompletionAnalysis(), deps, worktreePath, prompt)
+	analysis, err := runCompletionAnalysis(ctx, deps, worktreePath, prompt)
 	if err != nil {
 		return false, fmt.Sprintf("Claude analysis failed: %v", err)
 	}
 
 	return parseCompletionResponse(analysis)
-}
-
-func ctxForCompletionAnalysis() context.Context {
-	return context.Background()
 }
 
 func runCompletionAnalysis(ctx context.Context, deps *cli.Deps, worktreePath, prompt string) (string, error) {
@@ -137,9 +132,9 @@ func parseCompletionResponse(stdout string) (completed bool, reason string) {
 }
 
 // closeTask closes a completed task
-func closeTask(deps *cli.Deps, taskID, reason string) {
+func closeTask(ctx context.Context, deps *cli.Deps, taskID, reason string) {
 	closeReason := fmt.Sprintf("Completed (verified by recovery analysis): %s", reason)
-	_, err := deps.IssueBackend.Close(cmdstore.RootContext(), taskID, backend.CloseParams{Reason: closeReason})
+	_, err := deps.IssueBackend.Close(ctx, taskID, backend.CloseParams{Reason: closeReason})
 	if err != nil {
 		fmt.Printf("Warning: failed to close task: %v\n", err)
 	} else {
@@ -152,9 +147,8 @@ func closeTask(deps *cli.Deps, taskID, reason string) {
 // processed and should not be reset; a blocked task was quarantined by the
 // daemon (or blocked by a human) and must not be flipped back to open by a
 // crash-recovery pass.
-func resetTask(deps *cli.Deps, taskID string) {
+func resetTask(ctx context.Context, deps *cli.Deps, taskID string) {
 	ib := deps.IssueBackend
-	ctx := cmdstore.RootContext()
 
 	// Check current status before resetting
 	detail, err := ib.Get(ctx, taskID)
@@ -186,7 +180,7 @@ func resetTask(deps *cli.Deps, taskID string) {
 // An in_progress task assigned to this agent cannot be claimed by another agent
 // until this reset makes it open, so this check also closes the release-to-reset
 // handoff without broadening the backend API.
-func resetTaskOwnedByAgent(deps *cli.Deps, taskID, agentName string) error {
+func resetTaskOwnedByAgent(ctx context.Context, deps *cli.Deps, taskID, agentName string) error {
 	if deps == nil || deps.IssueBackend == nil {
 		return errors.New("issue backend is unavailable")
 	}
@@ -195,7 +189,6 @@ func resetTaskOwnedByAgent(deps *cli.Deps, taskID, agentName string) error {
 	}
 
 	ib := deps.IssueBackend
-	ctx := cmdstore.RootContext()
 	detail, err := ib.Get(ctx, taskID)
 	if err != nil {
 		if backend.IsKind(err, backend.KindNotFound) {
@@ -371,12 +364,12 @@ func removeDirtyFiles(targets []cleanTarget) {
 
 // resetOrphanedAgentTasks finds all in_progress tasks assigned to the given agent
 // and handles them (analyze or reset). Tasks matching alreadyHandledTaskID are skipped.
-func resetOrphanedAgentTasks(deps *cli.Deps, worktreePath, agentName, alreadyHandledTaskID string, analyze bool) {
+func resetOrphanedAgentTasks(ctx context.Context, deps *cli.Deps, worktreePath, agentName, alreadyHandledTaskID string, analyze bool) {
 	if agentName == "" {
 		return
 	}
 
-	issues, err := deps.IssueBackend.List(cmdstore.RootContext(), backend.ListOpts{Assignee: agentName, Status: "in_progress"})
+	issues, err := deps.IssueBackend.List(ctx, backend.ListOpts{Assignee: agentName, Status: "in_progress"})
 	if err != nil {
 		fmt.Printf("Warning: could not check for orphaned tasks: %v\n", err)
 		return
@@ -397,10 +390,10 @@ func resetOrphanedAgentTasks(deps *cli.Deps, worktreePath, agentName, alreadyHan
 	fmt.Printf("\nFound %d additional orphaned task(s) for agent %s:\n", len(orphaned), agentName)
 	for _, t := range orphaned {
 		if analyze {
-			handleOrphanedTask(deps, worktreePath, t.ID, true)
+			handleOrphanedTask(ctx, deps, worktreePath, t.ID, true)
 			continue
 		}
-		if err := resetTaskOwnedByAgent(deps, t.ID, agentName); err != nil {
+		if err := resetTaskOwnedByAgent(ctx, deps, t.ID, agentName); err != nil {
 			fmt.Printf("Warning: failed to reset orphaned task %s: %v\n", t.ID, err)
 		}
 	}

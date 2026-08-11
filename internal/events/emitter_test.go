@@ -12,7 +12,7 @@ import (
 
 func TestBus_EmitWritesAndNotifies(t *testing.T) {
 	dir := t.TempDir()
-	bus := NewBus(dir)
+	bus := NewBus(t.Context(), dir)
 	defer bus.Close()
 
 	var received Event
@@ -49,7 +49,7 @@ func TestBus_EmitWritesAndNotifies(t *testing.T) {
 
 func TestBus_AutoSetsTimestamp(t *testing.T) {
 	dir := t.TempDir()
-	bus := NewBus(dir)
+	bus := NewBus(t.Context(), dir)
 	defer bus.Close()
 
 	fixed := time.Date(2026, 3, 4, 15, 30, 0, 0, time.UTC)
@@ -86,7 +86,7 @@ func TestBus_AutoSetsTimestamp(t *testing.T) {
 
 func TestBus_MultipleListeners(t *testing.T) {
 	dir := t.TempDir()
-	bus := NewBus(dir)
+	bus := NewBus(t.Context(), dir)
 	defer bus.Close()
 
 	var count int32
@@ -109,7 +109,7 @@ func TestBus_MultipleListeners(t *testing.T) {
 
 func TestBus_ConcurrentEmit(t *testing.T) {
 	dir := t.TempDir()
-	bus := NewBus(dir)
+	bus := NewBus(t.Context(), dir)
 	defer bus.Close()
 
 	var count int64

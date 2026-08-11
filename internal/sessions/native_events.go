@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/tysonthomas9/loomcli/internal/runtimectx"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript/backends"
 )
@@ -19,7 +18,7 @@ import (
 // first hook hasn't fired). Returns an error only for I/O failures or
 // malformed metadata.
 func (s *Store) LoadNativeEvents(sessionID string) ([]transcript.Event, error) {
-	_, span := startSpan(runtimectx.RootContext(), "service.Sessions.LoadNativeEvents",
+	_, span := startSpan(s.ctx, "service.Sessions.LoadNativeEvents",
 		attrLoomSessionID(sessionID),
 	)
 	defer span.End()

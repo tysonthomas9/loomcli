@@ -39,9 +39,10 @@ func ConnectorManagementWithSecrets(
 }
 
 func WithActiveConnectorManagement(
+	parent context.Context,
 	fn func(context.Context, *bootstrap.StoreHandle, connectorsmodule.Management, string) error,
 ) error {
-	return WithActiveWorkspace(func(ctx context.Context, handle *bootstrap.StoreHandle, workspace string) error {
+	return WithActiveWorkspace(parent, func(ctx context.Context, handle *bootstrap.StoreHandle, workspace string) error {
 		management, err := ConnectorManagement(handle)
 		if err != nil {
 			return err

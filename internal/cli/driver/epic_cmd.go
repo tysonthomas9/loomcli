@@ -54,8 +54,8 @@ func bindDriverEpicSnapshotFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&driverEpicSnapshotJSON, "json", false, "JSON output")
 }
 
-func runDriverEpicGet(_ *cobra.Command, _ []string) error {
-	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
+func runDriverEpicGet(cmd *cobra.Command, _ []string) error {
+	return cmdstore.WithStore(cmd.Context(), func(ctx context.Context, h *bootstrap.StoreHandle) error {
 		ws, parent, err := resolveRunningDriverRun(ctx, h, driverEpicGetWorkspaceKey, driverEpicGetDriverRunID)
 		if err != nil {
 			return err
@@ -84,8 +84,8 @@ func runDriverEpicGet(_ *cobra.Command, _ []string) error {
 	})
 }
 
-func runDriverEpicSnapshot(_ *cobra.Command, _ []string) error {
-	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
+func runDriverEpicSnapshot(cmd *cobra.Command, _ []string) error {
+	return cmdstore.WithStore(cmd.Context(), func(ctx context.Context, h *bootstrap.StoreHandle) error {
 		ws, parent, err := resolveRunningDriverRun(ctx, h, driverEpicSnapshotWorkspaceKey, driverEpicSnapshotDriverRunID)
 		if err != nil {
 			return err

@@ -18,7 +18,6 @@ import (
 
 type RoleConfig = config.RoleConfig
 type AgentEntry = config.AgentEntry
-type WorkspaceConfig = config.WorkspaceConfig
 type CommandResult = cli.CommandResult
 type LockInfo = cli.LockInfo
 type ClaudeBackend = backends.ClaudeBackend

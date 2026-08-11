@@ -1,6 +1,7 @@
 package cleanup
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -10,8 +11,8 @@ import (
 
 // cleanupSessions purges old session directories and compacts the sessions index.
 // Returns (purged count, compacted entry count, error).
-func cleanupSessions(runtimeDir string, maxAge time.Duration, dryRun bool) (int, int, error) {
-	store, err := sessionstoreadapter.New(runtimeDir)
+func cleanupSessions(ctx context.Context, runtimeDir string, maxAge time.Duration, dryRun bool) (int, int, error) {
+	store, err := sessionstoreadapter.New(ctx, runtimeDir)
 	if err != nil {
 		return 0, 0, fmt.Errorf("open session store: %w", err)
 	}

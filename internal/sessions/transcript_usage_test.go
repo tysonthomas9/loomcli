@@ -13,7 +13,7 @@ func TestSumTranscriptUsage_EmptyFile(t *testing.T) {
 		t.Fatalf("write empty file: %v", err)
 	}
 
-	usage, err := SumTranscriptUsage(txPath)
+	usage, err := SumTranscriptUsage(t.Context(), txPath)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -32,7 +32,7 @@ func TestSumTranscriptUsage_SingleAssistant(t *testing.T) {
 		t.Fatalf("write file: %v", err)
 	}
 
-	usage, err := SumTranscriptUsage(txPath)
+	usage, err := SumTranscriptUsage(t.Context(), txPath)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestSumTranscriptUsage_MultipleMessages(t *testing.T) {
 		t.Fatalf("write file: %v", err)
 	}
 
-	usage, err := SumTranscriptUsage(txPath)
+	usage, err := SumTranscriptUsage(t.Context(), txPath)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestSumTranscriptUsage_DuplicateMessageIDs(t *testing.T) {
 		t.Fatalf("write file: %v", err)
 	}
 
-	usage, err := SumTranscriptUsage(txPath)
+	usage, err := SumTranscriptUsage(t.Context(), txPath)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestSumTranscriptUsage_NonAssistantSkipped(t *testing.T) {
 		t.Fatalf("write file: %v", err)
 	}
 
-	usage, err := SumTranscriptUsage(txPath)
+	usage, err := SumTranscriptUsage(t.Context(), txPath)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestSumTranscriptUsage_NonAssistantSkipped(t *testing.T) {
 }
 
 func TestSumTranscriptUsage_MissingFile(t *testing.T) {
-	usage, err := SumTranscriptUsage("/nonexistent/path/transcript.jsonl")
+	usage, err := SumTranscriptUsage(t.Context(), "/nonexistent/path/transcript.jsonl")
 	if err != nil {
 		t.Fatalf("expected nil error for missing file, got: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestSumTranscriptUsage_CorruptLine(t *testing.T) {
 		t.Fatalf("write file: %v", err)
 	}
 
-	usage, err := SumTranscriptUsage(txPath)
+	usage, err := SumTranscriptUsage(t.Context(), txPath)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -183,7 +183,7 @@ this line is corrupt
 		t.Fatalf("write file: %v", err)
 	}
 
-	usage, err := SumTranscriptUsage(txPath)
+	usage, err := SumTranscriptUsage(t.Context(), txPath)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
