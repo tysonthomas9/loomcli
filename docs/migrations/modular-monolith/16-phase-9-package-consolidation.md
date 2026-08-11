@@ -768,6 +768,60 @@ and passed. The complete aggregate gate then passed without a source
 correction, threshold change, allowlist expansion, compatibility path, or
 fallback.
 
+## Wave 9.16 result
+
+The sixteenth slice deletes `internal/infra/sessionstoreadapter`, the
+forwarding-only package whose twelve exported functions mirrored Sessions
+store and session methods one for one. Its CLI consumers now cross a
+Sessions-owned `Archive` interface expressed as lifecycle intents: begin a
+session, capture a transcript, append or read event evidence, repair metadata
+or an index entry, and apply or preview retention. Cleanup preview policy and
+stale-index repair coordination moved behind that interface instead of being
+copied into callers. Finalization owns a narrow consumer-side `localSession`
+port, so it no longer depends on the deleted adapter or on public session
+fields.
+
+The slice also deletes `internal/sessions/eventstore`. Its single production
+implementation is now private session event-log machinery, while Sessions
+owns directory creation, append, deduplication, ordering, compaction, and read
+projection. Backend acquisition and WebUI serving no longer import or open a
+second storage package. The former packages are both retired roots; recreating
+either path or importing it fails architecture validation.
+
+The direct-write analyzer now accepts an exact Go file as an owner-adapter
+root. `internal/sessions/archive.go` is therefore the precise Interaction
+adapter seam: its eight Store mutations are owner-classified, while private
+Sessions implementation calls are not mislabeled as caller persistence. No
+production CLI caller directly references `sessions.Store`, `NewStore`, or its
+session persistence methods. Exact direct persistence falls from 93 rows/102
+sites to 89 rows/98 sites without adding a transitional disposition or raising
+a threshold.
+
+The exact package shape moves from 173 to 171 production packages. Module
+packages remain 15, packages outside `internal/modules` fall from 158 to 156,
+one-file packages fall from 53 to 51, and one-or-two-file packages fall from 74
+to 72. The implementation is `4c82d3781579878fc640b9b999a083ada7297c54`.
+
+## Wave 9.16 validation
+
+| Check | Result |
+|---|---|
+| Sessions archive/event-log behavior and every migrated CLI/WebUI consumer | PASS: Sessions, agent, automode, backends, cleanup, Doctor, hooks, finalization, and session coordination; automode completed in 47.760s |
+| All production `internal/...` packages | PASS: every package compiled under the clean exact-pair environment |
+| Retired roots, exact package/direct-write ratchets, exact-file analyzer regression, and affected lint | PASS: shape `171 / 15 / 156 / 51 / 72`; writes `89 / 98`; zero lint issues |
+| Authoritative repository architecture snapshot | PASS in 388.83s at implementation `4c82d3781` |
+| Aggregate `make gate` against FleetDB `b71dec551` | PASS: Go, frontend, race, coverage, dependency, contract, architecture, and build gates with sanitized Loom runtime variables, `GOMAXPROCS=4`, one Go test worker, two Vitest workers, and a 3 GiB Go soft memory limit |
+
+The first authoritative invocation reached Go's default ten-minute test alarm
+while removing its temporary profile cache; it produced no passing evidence.
+The next invocation correctly exposed the stale checked-in 93-row summary and
+then exhausted a temporary volume already occupied by disposable earlier
+caches. The summary was tightened to 89, only Phase 9 temporary build/profile
+caches were removed, and the unchanged full-profile proof passed with a
+20-minute alarm. The subsequent aggregate gate passed without another source
+correction, threshold change, allowlist expansion, compatibility path, or
+fallback.
+
 Later waves must update this document with the selected package candidates,
 the boundary reason retained or removed for each, exact shape changes, and
 same-head evidence.
