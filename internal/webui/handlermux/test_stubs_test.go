@@ -3,6 +3,7 @@ package handlermux
 import (
 	"context"
 
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
@@ -55,6 +56,9 @@ func (m *mockWorkspaceService) PatchWorkspaceBackend(_ context.Context, _ string
 	return nil, service.ErrUnavailable("not available")
 }
 func (m *mockWorkspaceService) PatchWorkspaceDesignFormat(_ context.Context, _ string, _ string) (*ops.WorkspaceData, error) {
+	return nil, service.ErrUnavailable("not available")
+}
+func (m *mockWorkspaceService) PatchWorkspaceTaskDelivery(_ context.Context, _, _ string, _ domain.TaskDeliveryRequirement) (*ops.WorkspaceData, error) {
 	return nil, service.ErrUnavailable("not available")
 }
 

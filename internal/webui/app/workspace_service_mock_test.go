@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
@@ -127,5 +128,9 @@ func (m *mockWorkspaceService) PatchWorkspaceDesignFormat(ctx context.Context, w
 	if m.patchWorkspaceDesignFormatFn != nil {
 		return m.patchWorkspaceDesignFormatFn(ctx, wsID, designFormat)
 	}
+	return nil, service.ErrUnavailable("not available")
+}
+
+func (m *mockWorkspaceService) PatchWorkspaceTaskDelivery(_ context.Context, _, _ string, _ domain.TaskDeliveryRequirement) (*ops.WorkspaceData, error) {
 	return nil, service.ErrUnavailable("not available")
 }

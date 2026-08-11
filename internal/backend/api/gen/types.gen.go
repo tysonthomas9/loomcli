@@ -1052,6 +1052,24 @@ func (e WorkspaceDesignFormatPatchRequestDesignFormat) Valid() bool {
 	}
 }
 
+// Defines values for WorkspaceRepoTaskDeliveryRequirement.
+const (
+	WorkspaceRepoTaskDeliveryRequirementPullRequest WorkspaceRepoTaskDeliveryRequirement = "pull_request"
+	WorkspaceRepoTaskDeliveryRequirementWorkingCopy WorkspaceRepoTaskDeliveryRequirement = "working_copy"
+)
+
+// Valid indicates whether the value is a known member of the WorkspaceRepoTaskDeliveryRequirement enum.
+func (e WorkspaceRepoTaskDeliveryRequirement) Valid() bool {
+	switch e {
+	case WorkspaceRepoTaskDeliveryRequirementPullRequest:
+		return true
+	case WorkspaceRepoTaskDeliveryRequirementWorkingCopy:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for WorkspaceResponseDesignFormat.
 const (
 	Html     WorkspaceResponseDesignFormat = "html"
@@ -1064,6 +1082,45 @@ func (e WorkspaceResponseDesignFormat) Valid() bool {
 	case Html:
 		return true
 	case Markdown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for WorkspaceResponseTaskDeliveryRequirement.
+const (
+	WorkspaceResponseTaskDeliveryRequirementPullRequest WorkspaceResponseTaskDeliveryRequirement = "pull_request"
+	WorkspaceResponseTaskDeliveryRequirementWorkingCopy WorkspaceResponseTaskDeliveryRequirement = "working_copy"
+)
+
+// Valid indicates whether the value is a known member of the WorkspaceResponseTaskDeliveryRequirement enum.
+func (e WorkspaceResponseTaskDeliveryRequirement) Valid() bool {
+	switch e {
+	case WorkspaceResponseTaskDeliveryRequirementPullRequest:
+		return true
+	case WorkspaceResponseTaskDeliveryRequirementWorkingCopy:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for WorkspaceTaskDeliveryPatchRequestTaskDeliveryRequirement.
+const (
+	Empty       WorkspaceTaskDeliveryPatchRequestTaskDeliveryRequirement = ""
+	PullRequest WorkspaceTaskDeliveryPatchRequestTaskDeliveryRequirement = "pull_request"
+	WorkingCopy WorkspaceTaskDeliveryPatchRequestTaskDeliveryRequirement = "working_copy"
+)
+
+// Valid indicates whether the value is a known member of the WorkspaceTaskDeliveryPatchRequestTaskDeliveryRequirement enum.
+func (e WorkspaceTaskDeliveryPatchRequestTaskDeliveryRequirement) Valid() bool {
+	switch e {
+	case Empty:
+		return true
+	case PullRequest:
+		return true
+	case WorkingCopy:
 		return true
 	default:
 		return false
@@ -2948,31 +3005,39 @@ type WorkspaceRenameRequest struct {
 
 // WorkspaceRepo defines model for WorkspaceRepo.
 type WorkspaceRepo struct {
-	DefaultBranch string   `json:"default_branch"`
-	Groups        []string `json:"groups"`
-	Name          string   `json:"name"`
-	Path          string   `json:"path"`
-	Remote        string   `json:"remote"`
-	RemoteUrl     *string  `json:"remote_url,omitempty"`
-	SourceRepoId  *string  `json:"source_repo_id,omitempty"`
+	DefaultBranch           string                                `json:"default_branch"`
+	Groups                  []string                              `json:"groups"`
+	Name                    string                                `json:"name"`
+	Path                    string                                `json:"path"`
+	Remote                  string                                `json:"remote"`
+	RemoteUrl               *string                               `json:"remote_url,omitempty"`
+	SourceRepoId            *string                               `json:"source_repo_id,omitempty"`
+	TaskDeliveryRequirement *WorkspaceRepoTaskDeliveryRequirement `json:"task_delivery_requirement,omitempty"`
 }
+
+// WorkspaceRepoTaskDeliveryRequirement defines model for WorkspaceRepo.TaskDeliveryRequirement.
+type WorkspaceRepoTaskDeliveryRequirement string
 
 // WorkspaceResponse defines model for WorkspaceResponse.
 type WorkspaceResponse struct {
-	Agents           []WorkspaceAgentInfo           `json:"agents"`
-	DefaultWorkspace string                         `json:"default_workspace"`
-	DesignFormat     *WorkspaceResponseDesignFormat `json:"design_format,omitempty"`
-	Groups           []string                       `json:"groups"`
-	Id               string                         `json:"id"`
-	Name             string                         `json:"name"`
-	Path             string                         `json:"path"`
-	Repos            []WorkspaceRepo                `json:"repos"`
-	WorkspaceOrder   *[]string                      `json:"workspace_order,omitempty"`
-	Workspaces       []WorkspaceSummary             `json:"workspaces"`
+	Agents                  []WorkspaceAgentInfo                      `json:"agents"`
+	DefaultWorkspace        string                                    `json:"default_workspace"`
+	DesignFormat            *WorkspaceResponseDesignFormat            `json:"design_format,omitempty"`
+	Groups                  []string                                  `json:"groups"`
+	Id                      string                                    `json:"id"`
+	Name                    string                                    `json:"name"`
+	Path                    string                                    `json:"path"`
+	Repos                   []WorkspaceRepo                           `json:"repos"`
+	TaskDeliveryRequirement *WorkspaceResponseTaskDeliveryRequirement `json:"task_delivery_requirement,omitempty"`
+	WorkspaceOrder          *[]string                                 `json:"workspace_order,omitempty"`
+	Workspaces              []WorkspaceSummary                        `json:"workspaces"`
 }
 
 // WorkspaceResponseDesignFormat defines model for WorkspaceResponse.DesignFormat.
 type WorkspaceResponseDesignFormat string
+
+// WorkspaceResponseTaskDeliveryRequirement defines model for WorkspaceResponse.TaskDeliveryRequirement.
+type WorkspaceResponseTaskDeliveryRequirement string
 
 // WorkspaceSummary defines model for WorkspaceSummary.
 type WorkspaceSummary struct {
@@ -2984,6 +3049,18 @@ type WorkspaceSummary struct {
 	Path      string  `json:"path"`
 	RepoCount int     `json:"repo_count"`
 }
+
+// WorkspaceTaskDeliveryPatchRequest defines model for WorkspaceTaskDeliveryPatchRequest.
+type WorkspaceTaskDeliveryPatchRequest struct {
+	// Repository Repository name. Omit to update the workspace requirement.
+	Repository *string `json:"repository,omitempty"`
+
+	// TaskDeliveryRequirement Empty is only valid for a repository and clears its override.
+	TaskDeliveryRequirement WorkspaceTaskDeliveryPatchRequestTaskDeliveryRequirement `json:"task_delivery_requirement"`
+}
+
+// WorkspaceTaskDeliveryPatchRequestTaskDeliveryRequirement Empty is only valid for a repository and clears its override.
+type WorkspaceTaskDeliveryPatchRequestTaskDeliveryRequirement string
 
 // AgentName defines model for AgentName.
 type AgentName = string
@@ -3510,6 +3587,9 @@ type PatchWorkspaceBackendJSONRequestBody = WorkspaceBackendPatchRequest
 
 // PatchWorkspaceDesignFormatJSONRequestBody defines body for PatchWorkspaceDesignFormat for application/json ContentType.
 type PatchWorkspaceDesignFormatJSONRequestBody = WorkspaceDesignFormatPatchRequest
+
+// PatchWorkspaceTaskDeliveryJSONRequestBody defines body for PatchWorkspaceTaskDelivery for application/json ContentType.
+type PatchWorkspaceTaskDeliveryJSONRequestBody = WorkspaceTaskDeliveryPatchRequest
 
 // WriteScopedFileJSONRequestBody defines body for WriteScopedFile for application/json ContentType.
 type WriteScopedFileJSONRequestBody = FileWriteRequest

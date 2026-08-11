@@ -297,6 +297,23 @@ export interface paths {
     patch: operations["patchWorkspaceDesignFormat"];
     trace?: never;
   };
+  "/api/workspaces/{ws}/config/task-delivery": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /** Set the workspace task delivery requirement or a repository override */
+    patch: operations["patchWorkspaceTaskDelivery"];
+    trace?: never;
+  };
   "/api/workspaces/{ws}/readyz": {
     parameters: {
       query?: never;
@@ -2879,6 +2896,8 @@ export interface components {
       default_workspace: string;
       /** @enum {string} */
       design_format?: "markdown" | "html";
+      /** @enum {string} */
+      task_delivery_requirement?: "working_copy" | "pull_request";
     };
     WorkspaceSummary: {
       id: string;
@@ -2896,6 +2915,8 @@ export interface components {
       remote: string;
       remote_url?: string;
       source_repo_id?: string;
+      /** @enum {string} */
+      task_delivery_requirement?: "working_copy" | "pull_request";
       /** @default [] */
       groups: string[];
     };
@@ -2916,6 +2937,15 @@ export interface components {
     WorkspaceDesignFormatPatchRequest: {
       /** @enum {string} */
       design_format: "markdown" | "html";
+    };
+    WorkspaceTaskDeliveryPatchRequest: {
+      /** @description Repository name. Omit to update the workspace requirement. */
+      repository?: string;
+      /**
+       * @description Empty is only valid for a repository and clears its override.
+       * @enum {string}
+       */
+      task_delivery_requirement: "working_copy" | "pull_request" | "";
     };
     BackendConfigResponse: {
       success: boolean;
@@ -4095,6 +4125,42 @@ export interface operations {
         };
       };
       /** @description Invalid design format */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  patchWorkspaceTaskDelivery: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["WorkspaceTaskDeliveryPatchRequest"];
+      };
+    };
+    responses: {
+      /** @description Updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MessageResponse"];
+        };
+      };
+      /** @description Invalid task delivery requirement */
       400: {
         headers: {
           [name: string]: unknown;

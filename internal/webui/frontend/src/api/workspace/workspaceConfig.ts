@@ -6,7 +6,7 @@
 import { api, ApiError, apiErrorFromResponse } from "@/api/common";
 import { cacheBackendConfig } from "@/api/common/config";
 import type { BackendConfigData } from "@/api/common";
-import type { WorkspaceData } from "./workspace";
+import type { TaskDeliveryRequirement, WorkspaceData } from "./workspace";
 
 /**
  * Get the store-backed backend config for a specific workspace.
@@ -77,6 +77,37 @@ export async function updateWorkspaceDesignFormat(
     {
       params: { path: { ws: workspaceId } },
       body: { design_format: designFormat },
+    },
+  );
+  if (error) throw apiErrorFromResponse(error, response);
+  if (data && typeof data === "object" && "success" in data) {
+    const msg = data as { success: boolean; message?: string };
+    if (!msg.success) {
+      throw new ApiError(
+        response?.status ?? 0,
+        response?.statusText || msg.message || "Unknown error",
+        msg.message,
+      );
+    }
+  }
+  const { fetchWorkspaceApi } = await import("./workspace");
+  return fetchWorkspaceApi(workspaceId);
+}
+
+/** Update the workspace delivery requirement or one repository override. */
+export async function updateWorkspaceTaskDelivery(
+  workspaceId: string,
+  requirement: TaskDeliveryRequirement | "",
+  repository?: string,
+): Promise<WorkspaceData> {
+  const { data, error, response } = await api.PATCH(
+    "/api/workspaces/{ws}/config/task-delivery",
+    {
+      params: { path: { ws: workspaceId } },
+      body: {
+        task_delivery_requirement: requirement,
+        ...(repository ? { repository } : {}),
+      },
     },
   );
   if (error) throw apiErrorFromResponse(error, response);

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 )
 
@@ -90,4 +91,8 @@ type WorkspaceService interface {
 	// PatchWorkspaceDesignFormat updates the workspace's planner design output
 	// and rendering format. Valid values are markdown and html.
 	PatchWorkspaceDesignFormat(ctx context.Context, wsID string, designFormat string) (*ops.WorkspaceData, error)
+
+	// PatchWorkspaceTaskDelivery updates the durable delivery requirement at
+	// workspace scope or, when repoName is set, its repository override.
+	PatchWorkspaceTaskDelivery(ctx context.Context, wsID, repoName string, requirement domain.TaskDeliveryRequirement) (*ops.WorkspaceData, error)
 }

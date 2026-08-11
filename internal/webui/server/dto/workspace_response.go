@@ -16,8 +16,9 @@ type WorkspaceResponse struct {
 	// Initialized to empty slice by mapper; must serialize as [] not null.
 	Workspaces []WorkspaceSummary `json:"workspaces"`
 
-	WorkspaceOrder   []string `json:"workspace_order,omitempty"` // Optional
-	DefaultWorkspace string   `json:"default_workspace"`
+	WorkspaceOrder          []string `json:"workspace_order,omitempty"` // Optional
+	DefaultWorkspace        string   `json:"default_workspace"`
+	TaskDeliveryRequirement string   `json:"task_delivery_requirement,omitempty"`
 }
 
 // WorkspaceSummary is a lightweight summary of a configured workspace.
@@ -35,14 +36,15 @@ type WorkspaceSummary struct {
 
 // WorkspaceRepo represents a repository within a workspace.
 type WorkspaceRepo struct {
-	Name             string `json:"name"`
-	Path             string `json:"path"`
-	DefaultBranch    string `json:"default_branch"`
-	CurrentBranch    string `json:"current_branch,omitempty"`
-	Remote           string `json:"remote"`
-	RemoteURL        string `json:"remote_url,omitempty"`
-	SourceRepoID     string `json:"source_repo_id,omitempty"`
-	IsLinkedWorktree bool   `json:"is_linked_worktree,omitempty"`
+	Name                    string `json:"name"`
+	Path                    string `json:"path"`
+	DefaultBranch           string `json:"default_branch"`
+	CurrentBranch           string `json:"current_branch,omitempty"`
+	Remote                  string `json:"remote"`
+	RemoteURL               string `json:"remote_url,omitempty"`
+	SourceRepoID            string `json:"source_repo_id,omitempty"`
+	IsLinkedWorktree        bool   `json:"is_linked_worktree,omitempty"`
+	TaskDeliveryRequirement string `json:"task_delivery_requirement,omitempty"`
 	// Initialized to empty slice by mapper; must serialize as [] not null.
 	Groups []string `json:"groups"`
 }
