@@ -62,11 +62,10 @@ auth is enabled.
   actor (`FLEET_SEED_ACTOR`) holds a **global admin role** because serve's
   background sweepers — notably the await-timeout sweeper — need
   admin/maintainer rights across workspaces.
-- **loom serve**: `LOOM_DRIVER_LEGACY_AUTH_ENV=0` — **token-only posture**.
-  Workflow runtimes receive ONLY the run-scoped `LOOM_RUN_TOKEN` (minted from
-  `LOOM_RUN_TOKEN_SIGNING_KEY`); the deprecated node-wide
-  `LOOM_DRIVER_API_TOKEN` bearer and lease/fencing identity vars are NOT
-  exported. Bundles must be built against the token-aware SDK v2.
+- **loom serve**: workflow runtimes receive only the run-scoped
+  `LOOM_RUN_TOKEN` (minted from `LOOM_RUN_TOKEN_SIGNING_KEY`). Shared Driver
+  bearers and lease/fencing identity headers are not supported. Bundles must
+  be built against the token-only SDK.
 - **workers**: `LOOM_WORKER_TOKEN` shared-secret bearer against
   `/api/internal/workers/`; `LOOM_FLEET_API_KEY` gates fleet worker
   registration.
@@ -137,9 +136,8 @@ Scaling workers (`podman compose up -d --scale worker=2`) adds 1g / 1.0 /
 
 Default `LOOM_STACK_DRIVER_SANDBOX=` (empty) → serve uses the **process
 launcher**, and the capped `loom-serve` container itself is the isolation
-boundary for workflow runtimes. With `LOOM_DRIVER_LEGACY_AUTH_ENV=0` the
-runtime env is still token-only, so the auth legs of the step-9 gate are
-meaningful here.
+boundary for workflow runtimes. The runtime environment remains token-only,
+so the auth legs of the step-9 gate are meaningful here.
 
 `LOOM_STACK_DRIVER_SANDBOX=container` would require podman **nested inside**
 the serve container — rootless-nesting works on native Linux hosts, not

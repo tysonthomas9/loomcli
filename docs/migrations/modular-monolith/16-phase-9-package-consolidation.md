@@ -9,13 +9,15 @@
 - **Wave 9.5 implementation:** `72870b85b`
 - **Wave 9.6 implementation:** `830541155`
 - **Wave 9.7 implementation:** `9722a8bed`
+- **Wave 9.8 implementation:** `3fdcd3669`
 - **Stacked branches:** `modular-monolith-phase9-01-types-ratchet`, then
   `modular-monolith-phase9-02-shallow-seams`, then
   `modular-monolith-phase9-03-legacy-planes`, then
   `modular-monolith-phase9-04-adapter-seams`, then
   `modular-monolith-phase9-05-artifact-adapter`, then
   `modular-monolith-phase9-06-connectors-adapter`, then
-  `modular-monolith-phase9-07-legacy-runtime`
+  `modular-monolith-phase9-07-legacy-runtime`, then
+  `modular-monolith-phase9-08-driver-auth`
 - **Purpose:** Reduce the residual package surface toward 160 production Go
   packages without weakening capability ownership, consumer-owned ports, or
   independently replaceable adapters.
@@ -395,6 +397,58 @@ Execution owner, the uninterrupted aggregate rerun passed. A later duplicate
 RSS-measured architecture invocation stalled in its measurement wrapper and
 was interrupted; it does not replace the completed same-source architecture
 pass above.
+
+## Wave 9.8 result
+
+The eighth slice deletes the Driver authentication compatibility plane. The
+workspace-scoped Driver API, hidden Driver runtime client, SDK runtime client,
+and executor-to-workflow launch now use exactly one credential: a signed,
+run-scoped `LOOM_RUN_TOKEN` bound to workspace, run, node, lease, and fencing
+generation.
+
+The following executable fallback surfaces are physically removed:
+
+- the node-wide `LOOM_DRIVER_API_TOKEN` configuration and shared Bearer-token
+  comparison;
+- the `LOOM_DRIVER_LEGACY_AUTH_ENV` switch;
+- caller-supplied node, lease, lease-token, and fencing identity headers,
+  flags, environment parsing, and runtime-client options;
+- the SDK `apiToken` option and legacy authentication surface manifest; and
+- executor downgrade behavior when token signing or TTL resolution fails.
+
+Any `X-Loom-Driver-*` identity header is rejected even when it agrees with the
+signed claims. Missing or invalid tokens return an unauthenticated response;
+expired tokens retain the distinct terminal `token_expired` response. A
+claimed run whose executor cannot mint its token fails with `driver_auth`
+before the workflow launcher is called. A malformed operator-provided signing
+key prevents serve configuration from being built. When no operator key is
+configured, serve creates one cryptographically random per-process key; that
+is key-custody selection for the same signed-token scheme, not an alternate
+authentication path.
+
+An architecture tombstone now rejects every removed authentication symbol in
+handwritten production Go. The slice removes 279 net implementation and
+contract lines. Package shape remains unchanged at 182 production packages,
+15 module packages, 167 packages outside modules, 62 one-file packages, and 83
+one-or-two-file packages. The 25 live handler imports into horizontal
+`store`/`backend` surfaces also remain unchanged and are the next deletion
+target; no allowlist or baseline was widened.
+
+## Wave 9.8 validation
+
+| Check | Result |
+|---|---|
+| Driver API, hidden Driver CLI, serve composition, full Driver executor, and all-`internal` compilation | PASS |
+| SDK runtime and frozen surface | PASS: 72/72 Node tests plus TypeScript typecheck |
+| Token-only rejection, missing/malformed signing material, invalid TTL, pre-launch fail-closed, retired-symbol, and step-9 regression tests | PASS |
+| Measured `make check-architecture` | PASS: 11/11 profiles, 10 roots, 93 direct-write rows, 25 live legacy-handler allowances, 107 reviewed mutation commands, 71 runtime components, 80 goroutine launches, all six performance rows measured, and zero pending decisions; peak process-tree RSS 1,196.5 MiB under 2,048 MiB |
+| Aggregate `make gate` against the paired FleetDB source and binary | PASS: all Go and frontend quality gates |
+
+The first aggregate attempt found a three-line `funlen` overage in serve
+composition and a redundant Driver runtime-context struct literal. The final
+tree extracts capability wiring, uses the direct type conversion, and passes
+the targeted linter and uninterrupted aggregate rerun. No lint threshold or
+exception was added.
 
 Later waves must update this document with the selected package candidates,
 the boundary reason retained or removed for each, exact shape changes, and

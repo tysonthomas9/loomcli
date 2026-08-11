@@ -66,15 +66,12 @@ Workflow runtimes authenticate to the driver-op HTTP API with a run-scoped
 bearer token (`LOOM_RUN_TOKEN`, minted at claim). At deploy:
 
 - Set `LOOM_RUN_TOKEN_SIGNING_KEY` (hex, 32 bytes) in the systemd unit so
-  tokens survive serve restarts. Unset, serve falls back to an ephemeral
+  tokens survive serve restarts. When unset, serve generates an ephemeral
   per-process key (single-instance only; in-flight runs die with the process).
-- `LOOM_DRIVER_API_TOKEN` (node-wide static bearer) is DEPRECATED for
-  workflow runtimes. It still reaches them while the
-  `LOOM_DRIVER_LEGACY_AUTH_ENV` fallback is on (default ON for this release).
-  Removal path: rebuild workflow bundles against the token-aware SDK, set
-  `LOOM_DRIVER_LEGACY_AUTH_ENV=0`, verify, and expect the default to flip OFF
-  next release before the switch is removed entirely. CLI/ops header-quad
-  auth is unaffected.
+- Workflow bundles and hidden Driver CLI operations require `LOOM_RUN_TOKEN`.
+  The node-wide `LOOM_DRIVER_API_TOKEN` bearer, identity header quad, and
+  `LOOM_DRIVER_LEGACY_AUTH_ENV` switch no longer exist. Missing, malformed, or
+  unmintable run-token configuration fails closed before workflow launch.
 - Task runners (sdk/runner.js) authenticate to serve's task-run API
   (`/api/workspaces/{ws}/task-run/{op}`) with their per-task-run lease token;
   serve exports `LOOM_TASK_RUN_API_URL` to bridge-spawned runners

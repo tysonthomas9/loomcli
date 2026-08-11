@@ -19,9 +19,9 @@ verification; decided fallback name: `@browseroperator/loom-sdk`).
   `WorkflowSuspended` suspension signal, terminal result helpers.
 - `@loom/sdk/runner`: `TaskRunClient`, `ArtifactHandle`, `RunnerEnv`,
   `LoomAPIError`.
-- Token-only auth: run-scoped `LOOM_RUN_TOKEN` bearer (TTL = max run duration,
-  default 24h; revocation via fenced-run verification). Legacy header-quad
-  retained for CLI/ops only.
+- Token-only auth: required run-scoped `LOOM_RUN_TOKEN` bearer (TTL = max run
+  duration, default 24h; revocation via fenced-run verification). The SDK does
+  not expose a shared-bearer or identity-header fallback.
 - Published TypeScript types for the full surface; strict node16 typecheck
   gate (`tsc -p tsconfig.typecheck.json`) wired into `npm test`.
 - Vendoring guarantee: `driver.js` single-file with zero local imports;
