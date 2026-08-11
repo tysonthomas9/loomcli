@@ -34,6 +34,15 @@ var prReviewSubmissionActions = []string{
 }
 
 func (m *Module) ensureConnectorAndGrants(ctx context.Context, ws, owner, repo string, actions []string) error {
+	return m.ensureConnectorAndGrantsWithSeed(ctx, ws, owner, repo, actions, nil)
+}
+
+func (m *Module) ensureConnectorAndGrantsWithSeed(
+	ctx context.Context,
+	ws, owner, repo string,
+	actions []string,
+	requestSeed *credentialSeedRequestCache,
+) error {
 	if m == nil || m.dispatcher == nil {
 		return errEgressUnavailable
 	}
@@ -46,7 +55,7 @@ func (m *Module) ensureConnectorAndGrants(ctx context.Context, ws, owner, repo s
 		if _, done := m.seeded.Load(cacheKey); done && generation == m.credentialSeedGeneration.Load() {
 			return nil
 		}
-		token, sealer, sealed, err := m.prepareCredentialSeed(ws)
+		seed, err := requestSeed.get(m, ws, generation)
 		if err != nil {
 			return err
 		}
@@ -59,7 +68,7 @@ func (m *Module) ensureConnectorAndGrants(ctx context.Context, ws, owner, repo s
 			m.credentialSeedMu.Unlock()
 			continue
 		}
-		err = m.seedConnectorAndGrants(ctx, ws, owner, repo, token, sealer, sealed, actions)
+		err = m.seedConnectorAndGrants(ctx, ws, owner, repo, seed.token, seed.sealer, seed.sealed, actions)
 		if err == nil && generation == m.credentialSeedGeneration.Load() {
 			m.seeded.Store(cacheKey, struct{}{})
 		}
@@ -67,6 +76,39 @@ func (m *Module) ensureConnectorAndGrants(ctx context.Context, ws, owner, repo s
 		return err
 	}
 	return errEgressUnavailable
+}
+
+type preparedCredentialSeed struct {
+	ws         string
+	generation uint64
+	token      string
+	sealer     connector.Sealer
+	sealed     []byte
+}
+
+type credentialSeedRequestCache struct {
+	seed *preparedCredentialSeed
+}
+
+func (c *credentialSeedRequestCache) get(m *Module, ws string, generation uint64) (*preparedCredentialSeed, error) {
+	if c != nil && c.seed != nil && c.seed.ws == ws && c.seed.generation == generation {
+		return c.seed, nil
+	}
+	token, sealer, sealed, err := m.prepareCredentialSeed(ws)
+	if err != nil {
+		return nil, err
+	}
+	seed := &preparedCredentialSeed{
+		ws:         ws,
+		generation: generation,
+		token:      token,
+		sealer:     sealer,
+		sealed:     sealed,
+	}
+	if c != nil {
+		c.seed = seed
+	}
+	return seed, nil
 }
 
 func (m *Module) prepareCredentialSeed(ws string) (string, connector.Sealer, []byte, error) {

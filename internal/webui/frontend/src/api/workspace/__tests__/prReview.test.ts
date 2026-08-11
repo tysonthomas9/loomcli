@@ -158,6 +158,8 @@ describe("prReview API", () => {
           text: "hello",
         },
       ],
+      cursor: "t1/i1",
+      reset: true,
     };
     mockApiGet.mockResolvedValueOnce({
       data: { success: true, data: conversation },
@@ -172,6 +174,39 @@ describe("prReview API", () => {
       {
         params: {
           path: { ws: "WS", owner: "octocat", repo: "hello", number: 7 },
+        },
+      },
+    );
+    expect(result).toEqual(conversation);
+  });
+
+  it("sends the after cursor as a query param when provided", async () => {
+    const conversation = {
+      state: "idle",
+      messages: [],
+      cursor: "t1/i1",
+      reset: false,
+    };
+    mockApiGet.mockResolvedValueOnce({
+      data: { success: true, data: conversation },
+      error: undefined,
+      response: new Response(null, { status: 200, statusText: "OK" }),
+    });
+
+    const result = await getReviewerConversation(
+      "WS",
+      "octocat",
+      "hello",
+      7,
+      "t1/i1",
+    );
+
+    expect(mockApiGet).toHaveBeenCalledWith(
+      "/api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/conversation",
+      {
+        params: {
+          path: { ws: "WS", owner: "octocat", repo: "hello", number: 7 },
+          query: { after: "t1/i1" },
         },
       },
     );

@@ -2564,9 +2564,17 @@ type PullRequestReviewResult struct {
 
 // ReviewerConversation defines model for ReviewerConversation.
 type ReviewerConversation struct {
+	// Cursor Opaque identity of the LAST message in the underlying list (empty when the list is empty). Pass it back as `after` on the next poll.
+	Cursor string `json:"cursor"`
+
 	// Detail Human-readable context for failed/unsupported states.
-	Detail   *string           `json:"detail,omitempty"`
+	Detail *string `json:"detail,omitempty"`
+
+	// Messages When reset=true, the full message list to replace with. When reset=false, only the messages after the requested cursor to append.
 	Messages []ReviewerMessage `json:"messages"`
+
+	// Reset true when messages is a full snapshot the client must replace with; false when it is an incremental tail the client should append.
+	Reset bool `json:"reset"`
 
 	// State starting | reconnecting | idle | running | failed | unsupported. failed: the reviewer runtime died or its conversation is unreadable. unsupported: the reviewer's backend has no readable conversation (the terminal tab still works); detail says why.
 	State string `json:"state"`
@@ -3383,6 +3391,12 @@ type RunOnboardingFirstTaskJSONBody struct {
 	Priority    *int    `json:"priority,omitempty"`
 	SourceRepo  *string `json:"source_repo,omitempty"`
 	Title       string  `json:"title"`
+}
+
+// GetPullRequestReviewerConversationParams defines parameters for GetPullRequestReviewerConversation.
+type GetPullRequestReviewerConversationParams struct {
+	// After Opaque cursor of the last message the client already holds. Omit for a full snapshot; supply it to receive only newer messages. A cursor that no longer matches any message (session rotated) returns the full list with reset=true.
+	After *string `form:"after,omitempty" json:"after,omitempty"`
 }
 
 // ListReadyParams defines parameters for ListReady.

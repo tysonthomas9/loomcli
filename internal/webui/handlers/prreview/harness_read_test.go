@@ -1,7 +1,6 @@
 package prreview
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -303,35 +302,6 @@ func TestGetReviewerConversationClaudeNoRotationWithoutStartedAt(t *testing.T) {
 	state, _, msgs := decodeConversation(t, raw)
 	if state != "idle" || len(msgs) != 0 {
 		t.Fatalf("state/messages = %q/%+v, want idle with no messages", state, msgs)
-	}
-}
-
-func TestStreamReviewerEmitsClaudeMessages(t *testing.T) {
-	h := newPRReviewHarness(t, false)
-	worktree, projectsRoot := setupClaudeReviewer(t, h, leadcontrol.RuntimeStatusIdle)
-	writeClaudeTranscriptFixture(t, projectsRoot, worktree, []string{
-		`{"type":"user","uuid":"u-prompt","message":{"role":"user","content":"## READ-ONLY PR REVIEWER"},"timestamp":"2026-07-10T12:00:00Z"}`,
-		`{"type":"assistant","uuid":"a-review","message":{"role":"assistant","content":[{"type":"text","text":"LGTM overall."}]},"timestamp":"2026-07-10T12:00:01Z"}`,
-	})
-
-	h.module.streamPollInterval = time.Millisecond
-	ctx, cancel := context.WithCancel(context.Background())
-	time.AfterFunc(50*time.Millisecond, cancel)
-	status, raw := h.streamWithContext(t, ctx, "/api/workspaces/WS/pull-requests/octocat/hello/7/stream")
-	if status != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body %s)", status, raw)
-	}
-	body := string(raw)
-	if !strings.Contains(body, `"state":"idle"`) {
-		t.Fatalf("stream body = %q, want idle status", body)
-	}
-	// Exactly one message event despite many polls (seen-cursor dedupe), and
-	// the prompt bubble is trimmed.
-	if strings.Count(body, "event: message") != 1 || !strings.Contains(body, "LGTM overall.") {
-		t.Fatalf("stream body = %q, want exactly one LGTM message event", body)
-	}
-	if strings.Contains(body, "READ-ONLY PR REVIEWER") {
-		t.Fatalf("stream body leaked the prompt preamble: %q", body)
 	}
 }
 

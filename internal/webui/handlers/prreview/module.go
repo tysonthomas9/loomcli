@@ -6,7 +6,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
@@ -28,15 +27,15 @@ const (
 // grants provide defense in depth. Read grants are seeded on read paths; write
 // grants only on explicit review posts.
 type Module struct {
-	store                   store.Store
-	dispatcher              *connector.Dispatcher
-	agentSvc                service.AgentService
-	terminalSvc             service.TerminalService
-	localSettingsDir        string
-	checkoutReviewerPRHead  reviewerCheckoutFunc
-	dialCodex               func(ctx context.Context, endpoint string) (codexThreadReader, error)
-	streamPollInterval      time.Duration
-	streamHeartbeatInterval time.Duration
+	store                  store.Store
+	dispatcher             *connector.Dispatcher
+	agentSvc               service.AgentService
+	terminalSvc            service.TerminalService
+	localSettingsDir       string
+	checkoutReviewerPRHead reviewerCheckoutFunc
+	dialCodex              func(ctx context.Context, endpoint string) (codexThreadReader, error)
+	reviewerReadersMu      sync.Mutex
+	reviewerReaders        map[string]*reviewerReaderPoolEntry
 	// seeded caches "connector+grants already ensured" by canonical resource
 	// and action set so read and write authority cannot share a cache hit.
 	seeded                     sync.Map
@@ -48,6 +47,12 @@ type Module struct {
 type codexThreadReader interface {
 	ReadThreadWithTurns(ctx context.Context, threadID string) (*leadcontrol.CodexThread, error)
 	Close(reason string) error
+}
+
+type reviewerReaderPoolEntry struct {
+	mu      sync.Mutex
+	client  codexThreadReader
+	dropped bool
 }
 
 // NewModule constructs the pull request review route module. localSettingsDir
@@ -63,14 +68,13 @@ func NewModule(
 	localSettingsDir string,
 ) *Module {
 	return &Module{
-		store:                   st,
-		dispatcher:              disp,
-		agentSvc:                agentSvc,
-		terminalSvc:             terminalSvc,
-		localSettingsDir:        strings.TrimSpace(localSettingsDir),
-		checkoutReviewerPRHead:  localworkspace.EnsureDetachedGitWorktreeAtPRHead,
-		streamPollInterval:      reviewerStreamPollInterval,
-		streamHeartbeatInterval: reviewerStreamHeartbeatInterval,
+		store:                  st,
+		dispatcher:             disp,
+		agentSvc:               agentSvc,
+		terminalSvc:            terminalSvc,
+		localSettingsDir:       strings.TrimSpace(localSettingsDir),
+		checkoutReviewerPRHead: localworkspace.EnsureDetachedGitWorktreeAtPRHead,
+		reviewerReaders:        make(map[string]*reviewerReaderPoolEntry),
 		dialCodex: func(ctx context.Context, endpoint string) (codexThreadReader, error) {
 			return leadcontrol.DialCodexAppServer(ctx, endpoint)
 		},
@@ -100,6 +104,5 @@ func (m *Module) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/review", m.postReview)
 	mux.HandleFunc("POST /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/reviewer", m.ensureReviewer)
 	mux.HandleFunc("POST /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/messages", m.postReviewerMessage)
-	mux.HandleFunc("GET /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/stream", m.streamReviewer)
 	mux.HandleFunc("GET /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/conversation", m.getReviewerConversation)
 }

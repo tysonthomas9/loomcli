@@ -16,18 +16,23 @@ import (
 // canonicalizes owner/repo through the workspace membership check, writing
 // the HTTP error itself on failure. Every PR-scoped handler starts here.
 func (m *Module) resolveAuthorizedPR(w http.ResponseWriter, r *http.Request) (string, pullRequestPath, bool) {
+	ws, params, _, ok := m.resolveAuthorizedPRWithRepo(w, r)
+	return ws, params, ok
+}
+
+func (m *Module) resolveAuthorizedPRWithRepo(w http.ResponseWriter, r *http.Request) (string, pullRequestPath, authorizedRepo, bool) {
 	ws := r.PathValue("ws")
 	params, ok := parsePullRequestPath(r.PathValue("owner"), r.PathValue("repo"), r.PathValue("number"))
 	if !ok {
 		writePRReviewErrorCode(w, http.StatusBadRequest, "invalid", "invalid pull request path", false)
-		return ws, params, false
+		return ws, params, authorizedRepo{}, false
 	}
-	canonOwner, canonRepo, ok := m.authorizeRepo(w, r, ws, params.owner, params.repo)
+	repoInfo, ok := m.authorizeRepoWithInfo(w, r, ws, params.owner, params.repo)
 	if !ok {
-		return ws, params, false
+		return ws, params, authorizedRepo{}, false
 	}
-	params.owner, params.repo = canonOwner, canonRepo
-	return ws, params, true
+	params.owner, params.repo = repoInfo.owner, repoInfo.repo
+	return ws, params, repoInfo, true
 }
 
 func (m *Module) getPullRequest(w http.ResponseWriter, r *http.Request) {
@@ -153,17 +158,25 @@ func (m *Module) postReview(w http.ResponseWriter, r *http.Request) {
 // grant resource/pattern/id and the dispatch resource — so casing can never
 // decouple the seeded grant from the dispatched resource.
 func (m *Module) authorizeRepo(w http.ResponseWriter, r *http.Request, ws, owner, repo string) (canonOwner, canonRepo string, ok bool) {
-	canonOwner, canonRepo, found, err := m.workspaceHasRepo(r.Context(), ws, owner, repo)
+	repoInfo, ok := m.authorizeRepoWithInfo(w, r, ws, owner, repo)
+	if !ok {
+		return "", "", false
+	}
+	return repoInfo.owner, repoInfo.repo, true
+}
+
+func (m *Module) authorizeRepoWithInfo(w http.ResponseWriter, r *http.Request, ws, owner, repo string) (authorizedRepo, bool) {
+	repoInfo, found, err := m.workspaceHasRepo(r.Context(), ws, owner, repo)
 	if err != nil {
 		writePRReviewError(w, err)
-		return "", "", false
+		return authorizedRepo{}, false
 	}
 	if !found {
 		writePRReviewErrorCode(w, http.StatusNotFound, "repo_not_registered",
 			fmt.Sprintf("repository %s/%s is not registered in workspace %s", owner, repo, ws), false)
-		return "", "", false
+		return authorizedRepo{}, false
 	}
-	return canonOwner, canonRepo, true
+	return repoInfo, true
 }
 
 func pullRequestArgs(params pullRequestPath) map[string]any {

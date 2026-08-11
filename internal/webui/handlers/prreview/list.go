@@ -78,6 +78,7 @@ func (m *Module) listPullRequests(w http.ResponseWriter, r *http.Request) {
 // "the connector tried and failed everywhere".
 func (m *Module) connectorListPullRequests(r *http.Request, ws, state string, repos []ops.WorkspaceRepo) (prs []ops.GitPullRequest, warnings []string, attempted, failed int) {
 	prs = []ops.GitPullRequest{}
+	requestSeed := &credentialSeedRequestCache{}
 	for _, workspaceRepo := range repos {
 		owner, repo, ok := parseGitHubOwnerRepo(workspaceRepo.RemoteURL)
 		if !ok {
@@ -89,7 +90,7 @@ func (m *Module) connectorListPullRequests(r *http.Request, ws, state string, re
 			continue
 		}
 		attempted++
-		if err := m.ensureConnectorAndGrants(r.Context(), ws, owner, repo, prReadActions); err != nil {
+		if err := m.ensureConnectorAndGrantsWithSeed(r.Context(), ws, owner, repo, prReadActions, requestSeed); err != nil {
 			failed++
 			warnings = append(warnings, repoWarning(owner, repo, err))
 			continue
