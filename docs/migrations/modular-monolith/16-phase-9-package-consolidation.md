@@ -637,6 +637,55 @@ the populated temporary Go build cache and ran outside the filesystem sandbox
 only because the architecture RSS monitor requires `/bin/ps`. No threshold,
 allowlist, fallback, or compatibility facade was added.
 
+## Wave 9.13 result
+
+The thirteenth slice deletes the process-global `internal/runtimectx` package
+and the ambient context-provider path in `internal/events`. CLI commands now
+thread their Cobra or request context into store opening, workspace resolution,
+session persistence, event emission, monitor collection, and worker execution.
+The deleted root is included in the retired-horizontal-root guard, and a
+dedicated tombstone rejects `RootContext`, `SetRootContext`, and
+`SetContextProvider` if handwritten production source attempts to restore
+them.
+
+Automode no longer opens FleetDB internally to rediscover workspace metadata
+for prompt construction. Planner, task, custom-agent, and remote-worker
+composition resolve their prompt inputs before entering the loop and supply a
+required prompt function. A missing prompt or monitor collector fails fast;
+there is no default prompt builder, ambient workspace lookup, nil-context
+substitution, or legacy constructor. The event bus and session store similarly
+require an explicit context at construction, and HTTP monitor handlers pass the
+request context through workspace-scoped collection.
+
+The exact package shape moves from 178 to 177 production packages. Module
+packages remain 15, packages outside `internal/modules` fall from 163 to 162,
+one-file packages fall from 58 to 57, and one-or-two-file packages fall from 79
+to 78. The implementation commit removes 166 net repository lines and does not
+add a replacement context package or compatibility shim. Direct persistence
+remains exactly 93 rows, and the live legacy-handler allowance remains 19;
+those unresolved edges are later deletion work rather than part of this slice.
+
+## Wave 9.13 validation
+
+| Check | Result |
+|---|---|
+| Events, sessions, session-store adapter, cmdstore, automode, agent, monitor, metrics, worker, session coordination, and all-`internal` compilation | PASS |
+| Retired ambient-context APIs and exact package shape | PASS: `internal/runtimectx` absent; exact shape `177 / 15 / 162 / 57 / 78` |
+| Authoritative repository architecture snapshot | PASS in 536.182s at implementation `2eccf26e0`; every remaining architecture test passed separately in 295.958s |
+| Measured architecture guard in the aggregate gate | PASS: 11/11 profiles, 10 roots, 93 direct-write rows, 19 live legacy-handler allowances, 107 reviewed mutation commands, 71 runtime components, 80 goroutine launches, all six performance rows measured, and zero pending decisions; peak process-tree RSS 1,213.5 MiB under 2,048 MiB |
+| Aggregate `make gate` against FleetDB `b71dec551` | PASS: all Go and frontend quality gates with sanitized Loom runtime variables, `GOMAXPROCS=4`, one Go test worker, two Vitest workers, and a 3 GiB Go soft memory limit |
+
+The first aggregate attempt exposed one static-analysis defect in the new nil
+context rejection test; using a typed nil preserved the fail-fast assertion
+without violating `SA1012`. A later attempt exhausted the host temporary volume
+during race coverage. Clearing only disposable Go build/test artifacts and
+serializing package workers removed the disk spike without weakening the gate.
+Another diagnostic run selected the generic FleetDB checkout at `8120c78` and
+correctly failed the vendored-spec freshness guard. The final proof rebuilt the
+binary from the documented Phase 7 companion at `b71dec551`; its OpenAPI
+SHA-256 exactly matched the vendored `816b0b0c…7ef0` snapshot, the focused route
+contract passed, and the aggregate rerun completed without a source correction.
+
 Later waves must update this document with the selected package candidates,
 the boundary reason retained or removed for each, exact shape changes, and
 same-head evidence.
