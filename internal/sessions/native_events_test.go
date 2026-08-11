@@ -95,13 +95,42 @@ func TestLoadNativeEvents_ParsesCodex(t *testing.T) {
 }
 
 func TestLoadNativeEvents_ParsesOpenCode(t *testing.T) {
-	payload := []byte(`{"info":{"id":"s1"},"messages":[{"info":{"id":"m1","role":"user","time":{"created":0}},"parts":[{"type":"text","text":"howdy"}]}]}`)
+	payload := []byte(`{
+  "info": {"id":"s1"},
+  "messages": [
+    {"info":{"id":"m1","role":"user","time":{"created":1700000000000}},"parts":[{"type":"text","text":"write hello"}]},
+    {"info":{"id":"m2","role":"assistant","time":{"created":1700000001000}},"parts":[
+      {"type":"text","text":"I'll do it."},
+      {"type":"tool","tool":"write","callID":"c1","state":{"input":{"filePath":"/tmp/hello.txt"},"output":"wrote 5 bytes"}}
+    ]}
+  ]
+}`)
 	events, err := loadRawNativeEvents(t, "opencode", payload)
 	if err != nil {
 		t.Fatalf("LoadNativeEvents: %v", err)
 	}
-	if len(events) != 1 || events[0].Role != "user" || events[0].Text != "howdy" {
-		t.Fatalf("events = %+v, want one OpenCode user event", events)
+	if len(events) != 4 {
+		t.Fatalf("want 4 events, got %d: %+v", len(events), events)
+	}
+	if events[0].Role != transcript.RoleUser || events[0].Text != "write hello" {
+		t.Errorf("user event = %+v", events[0])
+	}
+	if events[2].Type != transcript.EventToolUse || events[2].ToolName != "write" || events[2].ToolUseID != "c1" {
+		t.Errorf("tool event = %+v", events[2])
+	}
+	if events[3].Type != transcript.EventToolResult || events[3].Output != "wrote 5 bytes" {
+		t.Errorf("tool result = %+v", events[3])
+	}
+}
+
+func TestLoadNativeEvents_OpenCodeToolWithoutState(t *testing.T) {
+	payload := []byte(`{"messages":[{"info":{"id":"m1","role":"assistant","time":{"created":0}},"parts":[{"type":"tool","tool":"write","callID":"c1","state":null}]}]}`)
+	events, err := loadRawNativeEvents(t, "opencode", payload)
+	if err != nil {
+		t.Fatalf("LoadNativeEvents: %v", err)
+	}
+	if len(events) != 1 || events[0].Type != transcript.EventToolUse || events[0].ToolUseID != "c1" {
+		t.Fatalf("events = %+v, want one tool-use event", events)
 	}
 }
 

@@ -7,12 +7,12 @@ import (
 	"os"
 	"strings"
 
+	hwtranscript "github.com/olesho/harness-wrapper/pkg/transcript"
+	hwclaude "github.com/olesho/harness-wrapper/pkg/transcript/claudecode"
 	hwcodex "github.com/olesho/harness-wrapper/pkg/transcript/codex"
 
 	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
-	"github.com/tysonthomas9/loomcli/internal/sessions/transcript/claude"
-	"github.com/tysonthomas9/loomcli/internal/sessions/transcript/opencode"
 )
 
 // LoadNativeEvents parses a session's captured native transcript into the
@@ -86,14 +86,22 @@ func parseNativeEvents(backend string, data []byte) ([]transcript.Event, error) 
 	backend = strings.TrimSpace(backend)
 	switch backend {
 	case platformruntime.ProviderClaude:
-		return claude.Events(data)
+		return parseClaudeEvents(data)
 	case platformruntime.ProviderCodex:
 		return parseCodexEvents(data)
 	case platformruntime.ProviderOpenCode:
-		return opencode.Events(data)
+		return parseOpenCodeEvents(data)
 	default:
 		return nil, fmt.Errorf("unsupported native transcript backend %q", backend)
 	}
+}
+
+func parseClaudeEvents(data []byte) ([]transcript.Event, error) {
+	wrapperEvents, err := hwclaude.Events(data)
+	if err != nil {
+		return nil, fmt.Errorf("parse Claude transcript: %w", err)
+	}
+	return canonicalWrapperEvents(wrapperEvents), nil
 }
 
 func parseCodexEvents(data []byte) ([]transcript.Event, error) {
@@ -101,11 +109,15 @@ func parseCodexEvents(data []byte) ([]transcript.Event, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse Codex transcript: %w", err)
 	}
+	return canonicalWrapperEvents(wrapperEvents), nil
+}
+
+func canonicalWrapperEvents(wrapperEvents []hwtranscript.Event) []transcript.Event {
 	events := make([]transcript.Event, len(wrapperEvents))
 	for index, event := range wrapperEvents {
 		events[index] = transcript.FromWrapper(event)
 	}
-	return events, nil
+	return events
 }
 
 // decodeCanonicalEvents decodes already-read agent_transcript.jsonl bytes that are
