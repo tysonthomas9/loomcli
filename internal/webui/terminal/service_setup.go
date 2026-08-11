@@ -242,6 +242,8 @@ func (s *terminalServiceImpl) upsertSetupTab(ctx context.Context, wsID, session,
 			SessionName: session,
 			Workspace:   wsID,
 			Label:       label,
+			Kind:        "setup",
+			Backend:     "shell",
 			SortOrder:   sortOrder,
 			CreatedAt:   now,
 			UpdatedAt:   now,
@@ -249,8 +251,12 @@ func (s *terminalServiceImpl) upsertSetupTab(ctx context.Context, wsID, session,
 		if err := s.tabStore.Set(ctx, meta); err != nil {
 			return apperrors.ErrInternal("failed to create setup tab metadata", err)
 		}
-	} else if existing.Label != label {
-		if _, err := s.tabStore.Patch(ctx, wsID, session, map[string]string{"label": label}); err != nil {
+	} else if existing.Label != label || existing.Kind != "setup" || existing.Backend != "shell" {
+		existing.Label = label
+		existing.Kind = "setup"
+		existing.Backend = "shell"
+		existing.UpdatedAt = time.Now().UTC()
+		if err := s.tabStore.Set(ctx, existing); err != nil {
 			return apperrors.ErrInternal("failed to update setup tab metadata", err)
 		}
 	}

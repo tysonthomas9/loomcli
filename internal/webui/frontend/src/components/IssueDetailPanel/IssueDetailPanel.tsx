@@ -53,10 +53,7 @@ import {
   leadAgentRepoNames,
 } from "@/utils/epicRunnerPayload";
 
-import {
-  getBackendFromSessionName,
-  type ConnectionState,
-} from "@/components/TerminalView";
+import { type ConnectionState } from "@/components/TerminalView";
 import { useTaskLogPolling, useTaskSessions } from "@/hooks/terminal";
 import type { SessionRecord } from "@/types/agent";
 
@@ -678,14 +675,10 @@ function DefaultContent({
         closable: t.type !== "details" && t.type !== "sessions",
         metadata:
           t.type === "terminal" && t.session_name
-            ? (() => {
-                const derived = getBackendFromSessionName(t.session_name);
-                return {
-                  sessionName: t.session_name,
-                  backend:
-                    t.backend || (derived !== "unknown" ? derived : undefined),
-                };
-              })()
+            ? {
+                sessionName: t.session_name,
+                backend: t.backend,
+              }
             : undefined,
         connectionState:
           t.type === "terminal"

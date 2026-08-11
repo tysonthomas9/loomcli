@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback } from "react";
 
 import type {
   ConnectionState,
@@ -10,7 +10,6 @@ import type { TabState } from "@/components/TerminalView/tabs";
 interface UseConnectionStateOptions {
   setTabs: React.Dispatch<React.SetStateAction<TabState[]>>;
   instanceRefs: React.MutableRefObject<Map<string, TerminalInstanceHandle>>;
-  onTabConnected?: (tabId: string) => void;
 }
 
 interface UseConnectionStateReturn {
@@ -33,7 +32,6 @@ interface UseConnectionStateReturn {
 export function useConnectionState({
   setTabs,
   instanceRefs,
-  onTabConnected,
 }: UseConnectionStateOptions): UseConnectionStateReturn {
   const [tabHasConnected, setTabHasConnected] = useState<Map<string, boolean>>(
     () => new Map(),
@@ -41,10 +39,6 @@ export function useConnectionState({
   const [tabReconnectState, setTabReconnectState] = useState<
     Map<string, ReconnectOverlayState>
   >(() => new Map());
-
-  // Capture onTabConnected in a ref for stable callbacks
-  const onTabConnectedRef = useRef(onTabConnected);
-  onTabConnectedRef.current = onTabConnected;
 
   const handleConnectionStateChange = useCallback(
     (tabId: string, state: ConnectionState, hasConnected: boolean) => {
@@ -61,10 +55,6 @@ export function useConnectionState({
           next.set(tabId, true);
           return next;
         });
-      }
-
-      if (state === "connected") {
-        onTabConnectedRef.current?.(tabId);
       }
     },
     [setTabs],

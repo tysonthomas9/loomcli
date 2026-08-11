@@ -255,9 +255,7 @@ export function TerminalView({
     onTabLimitReached?.(message);
   }, [announce, onTabLimitReached]);
 
-  // Hook ordering: useSessionSeeding before useConnectionState so
-  // trySeedOnConnect is available as the onTabConnected callback.
-  const { trySeedOnConnect } = useSessionSeeding({
+  useSessionSeeding({
     pendingIssueContext,
     onIssueContextConsumed,
     pendingAgentName,
@@ -283,7 +281,6 @@ export function TerminalView({
   } = useConnectionState({
     setTabs,
     instanceRefs,
-    onTabConnected: trySeedOnConnect,
   });
 
   const { tabUnread, handleOutput, clearTabUnread } = useUnreadTracking({
@@ -622,7 +619,7 @@ export function TerminalView({
   }, [config?.available]);
 
   const handleBackendSelect = useCallback(
-    (backend: string) => {
+    async (backend: string) => {
       if (visibleTabs.length >= MAX_TABS) {
         handleTabLimitReached();
         return;
@@ -632,12 +629,14 @@ export function TerminalView({
         tabs,
         workspaceId,
       );
-      // Persist the tab so it survives a refresh. The WS handler spawns
-      // the PTY on connect; this PUT is just metadata so the server can
-      // return the tab in ListTabs on reload.
-      createTab(sessionName, label, tabs.length).catch((err) =>
-        console.error(`Failed to persist new tab ${sessionName}:`, err),
-      );
+      // Persist the server-owned launch envelope before mounting the terminal
+      // pane, so the first WebSocket attach cannot outrun tab creation.
+      try {
+        await createTab(sessionName, label, tabs.length, backend);
+      } catch (err) {
+        console.error(`Failed to persist new tab ${sessionName}:`, err);
+        return;
+      }
       setTabs((prev) => [
         ...prev,
         {

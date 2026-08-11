@@ -143,11 +143,12 @@ describe("useTerminalMetadata", () => {
       await flushPromises();
 
       await act(async () => {
-        await result.current.createTab("new-sess", "New Tab", 0);
+        await result.current.createTab("new-sess", "New Tab", 0, "codex");
       });
 
       expect(mockPut).toHaveBeenCalledWith("test-ws", "new-sess", {
         session_name: "new-sess",
+        backend: "codex",
         label: "New Tab",
         sort_order: 0,
         notes: "",
@@ -165,7 +166,9 @@ describe("useTerminalMetadata", () => {
       await flushPromises();
 
       await act(async () => {
-        await result.current.createTab("new-sess", "New Tab", 0);
+        await expect(
+          result.current.createTab("new-sess", "New Tab", 0, "codex"),
+        ).rejects.toThrow("Create failed");
       });
 
       expect(result.current.tabs).toEqual([]);

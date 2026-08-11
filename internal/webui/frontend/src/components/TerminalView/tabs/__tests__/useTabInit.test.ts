@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { renderHook } from "@testing-library/react";
+import { renderHook, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type React from "react";
 
@@ -282,7 +282,7 @@ describe("useTabInit", () => {
     expect(createTab).not.toHaveBeenCalled();
   });
 
-  it("creates only default backend tab when no metadata exists", () => {
+  it("creates only default backend tab when no metadata exists", async () => {
     const setTabs = vi.fn();
     const setActiveTabId = vi.fn();
     const createTab = vi.fn().mockResolvedValue(undefined);
@@ -305,7 +305,7 @@ describe("useTabInit", () => {
 
     renderHook(() => useTabInit(args));
 
-    expect(setTabs).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(setTabs).toHaveBeenCalledTimes(1));
     const tabs = setTabs.mock.calls[0][0] as TabState[];
     expect(tabs).toHaveLength(1);
     expect(tabs[0].sessionName).toBe("lead-claude-1");
@@ -318,7 +318,7 @@ describe("useTabInit", () => {
     expect(createTab).toHaveBeenCalledTimes(1);
   });
 
-  it("sanitizes workspace prefix for auto-created tab sessions", () => {
+  it("sanitizes workspace prefix for auto-created tab sessions", async () => {
     const setTabs = vi.fn();
     const setActiveTabId = vi.fn();
     const createTab = vi.fn().mockResolvedValue(undefined);
@@ -342,6 +342,7 @@ describe("useTabInit", () => {
 
     renderHook(() => useTabInit(args));
 
+    await waitFor(() => expect(setTabs).toHaveBeenCalledTimes(1));
     const tabs = setTabs.mock.calls[0][0] as TabState[];
     expect(tabs[0].sessionName).toBe("FleetDBRegressionFixture--lead-claude-1");
     expect(setActiveTabId).toHaveBeenCalledWith(
@@ -351,10 +352,11 @@ describe("useTabInit", () => {
       "FleetDBRegressionFixture--lead-claude-1",
       "lead-claude-1",
       0,
+      "claude",
     );
   });
 
-  it("creates tab for configured default backend", () => {
+  it("creates tab for configured default backend", async () => {
     const setActiveTabId = vi.fn();
     const setTabs = vi.fn();
 
@@ -375,6 +377,7 @@ describe("useTabInit", () => {
 
     renderHook(() => useTabInit(args));
 
+    await waitFor(() => expect(setTabs).toHaveBeenCalledTimes(1));
     // Should create only the configured default backend tab
     const tabs = setTabs.mock.calls[0][0] as TabState[];
     expect(tabs).toHaveLength(1);
@@ -382,7 +385,7 @@ describe("useTabInit", () => {
     expect(setActiveTabId).toHaveBeenCalledWith("lead-codex-1");
   });
 
-  it("falls back to first available backend when default not in list", () => {
+  it("falls back to first available backend when default not in list", async () => {
     const setActiveTabId = vi.fn();
     const setTabs = vi.fn();
 
@@ -403,6 +406,7 @@ describe("useTabInit", () => {
 
     renderHook(() => useTabInit(args));
 
+    await waitFor(() => expect(setTabs).toHaveBeenCalledTimes(1));
     const tabs = setTabs.mock.calls[0][0] as TabState[];
     expect(tabs).toHaveLength(1);
     expect(tabs[0].backendName).toBe("codex");
@@ -532,7 +536,7 @@ describe("useTabInit", () => {
     expect(setActiveTabId).toHaveBeenCalledWith("lead-codex-1");
   });
 
-  it("auto-creates lead tab when metadata is agent-only and excludeAgentTabs is true", () => {
+  it("auto-creates lead tab when metadata is agent-only and excludeAgentTabs is true", async () => {
     const metadata: TabMetadata[] = [
       {
         session_name: "term_agent_session",
@@ -571,13 +575,14 @@ describe("useTabInit", () => {
 
     renderHook(() => useTabInit(args));
 
+    await waitFor(() => expect(setTabs).toHaveBeenCalledTimes(1));
     const tabs = setTabs.mock.calls[0][0] as TabState[];
     expect(tabs).toHaveLength(1);
     expect(tabs[0]?.label).toBe("lead-codex-1");
     expect(createTab).toHaveBeenCalled();
   });
 
-  it("filters shell from auto-created backends", () => {
+  it("filters shell from auto-created backends", async () => {
     const setTabs = vi.fn();
     const setActiveTabId = vi.fn();
     const createTab = vi.fn().mockResolvedValue(undefined);
@@ -600,7 +605,7 @@ describe("useTabInit", () => {
 
     renderHook(() => useTabInit(args));
 
-    expect(setTabs).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(setTabs).toHaveBeenCalledTimes(1));
     const tabs = setTabs.mock.calls[0][0] as TabState[];
     // Shell should be filtered out — only default backend tab created
     expect(tabs).toHaveLength(1);
@@ -646,7 +651,7 @@ describe("useTabInit", () => {
     expect(createTab).not.toHaveBeenCalled();
   });
 
-  it("initializes when isViewActive becomes true", () => {
+  it("initializes when isViewActive becomes true", async () => {
     const setTabs = vi.fn();
     const setActiveTabId = vi.fn();
     const createTab = vi.fn().mockResolvedValue(undefined);
@@ -685,7 +690,7 @@ describe("useTabInit", () => {
 
     // Now should have initialized with single default backend tab
     expect(initializedRef.current).toBe(true);
-    expect(setTabs).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(setTabs).toHaveBeenCalledTimes(1));
     const tabs = setTabs.mock.calls[0][0] as TabState[];
     expect(tabs).toHaveLength(1);
     expect(tabs[0].sessionName).toBe("lead-claude-1");
@@ -694,11 +699,12 @@ describe("useTabInit", () => {
     expect(createTab).toHaveBeenCalledTimes(1);
   });
 
-  it("extracts backend name from session name pattern", () => {
+  it("restores backend from persisted metadata without parsing placement", () => {
     const metadata: TabMetadata[] = [
       {
         session_name: "lead-codex-3",
         label: "Codex 3",
+        backend: "codex",
         notes: "",
         sort_order: 1,
         created_at: "2024-01-01T00:00:00Z",

@@ -109,7 +109,7 @@ func TestStartSetupCreatesTabAndStartsSetupSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get setup tab: %v", err)
 	}
-	if meta == nil || meta.Label != "Codex setup" {
+	if meta == nil || meta.Label != "Codex setup" || meta.Kind != "setup" || meta.Backend != "shell" {
 		t.Fatalf("setup tab metadata = %+v", meta)
 	}
 	if got := mr.HGet(terminalUIStateKey("HELLO-WORLD"), "active_tab"); got != wantSession {

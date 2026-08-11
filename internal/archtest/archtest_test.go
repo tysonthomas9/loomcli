@@ -948,6 +948,47 @@ func TestRetiredDriverAuthenticationFallbackCannotReturn(t *testing.T) {
 	}
 }
 
+func TestRetiredTerminalLaunchFallbackCannotReturn(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := map[string][]string{
+		"internal/webui/terminal/session_command.go": {
+			"ArgvForSession", "session names encode the backend",
+		},
+		"internal/webui/handlers/terminal/ws.go": {
+			"legacyLaunchSpecForSession", "isUUIDTerminalSession",
+		},
+		"internal/webui/frontend/src/components/TerminalView/tabs/terminalTabUtils.ts": {
+			"getBackendFromSessionName", `startsWith("agent-")`,
+		},
+		"internal/webui/frontend/src/components/TerminalView/tabs/useTabInit.ts": {
+			"getBackendFromSessionName", `startsWith("agent-")`,
+		},
+		"internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx": {
+			"getBackendFromSessionName",
+		},
+		"internal/webui/frontend/src/components/TerminalView/instances/useSessionSeeding.ts": {
+			"trySeedOnConnect",
+		},
+		"internal/webui/frontend/src/components/TerminalView/instances/useConnectionState.ts": {
+			"onTabConnected",
+		},
+	}
+	for relative, forbidden := range files {
+		content, readErr := os.ReadFile(filepath.Join(root, filepath.FromSlash(relative)))
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		for _, fragment := range forbidden {
+			if strings.Contains(string(content), fragment) {
+				t.Errorf("retired terminal launch fallback %q returned in %s", fragment, relative)
+			}
+		}
+	}
+}
+
 func TestRetiredHandlerBackendCompatibilityCannotReturn(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {

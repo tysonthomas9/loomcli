@@ -75,7 +75,7 @@ func (s *terminalServiceImpl) ptyAttachable(wsID string, meta *TabMetadata) bool
 	if s.ptyMgr != nil && s.ptyMgr.SessionClosed(key) {
 		return false
 	}
-	if meta.Kind == "agent" && (meta.Launch == nil || len(meta.Launch.Argv) == 0) {
+	if meta.Launch == nil || len(meta.Launch.Argv) == 0 {
 		return false
 	}
 	if s.startedAt.IsZero() || meta.CreatedAt.IsZero() {

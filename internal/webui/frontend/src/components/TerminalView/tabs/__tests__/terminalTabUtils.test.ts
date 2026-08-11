@@ -7,8 +7,8 @@ import { describe, it, expect } from "vitest";
 import {
   extractBaseName,
   generateTabName,
-  getBackendFromSessionName,
   getNextDuplicateName,
+  isAgentMetadata,
   isAgentTab,
   sanitizeSessionName,
   BACKEND_BRAND_COLORS,
@@ -183,34 +183,6 @@ describe("generateTabName (shell backend)", () => {
   });
 });
 
-describe("getBackendFromSessionName (shell backend)", () => {
-  it('returns "shell" for "lead-shell-1"', () => {
-    expect(getBackendFromSessionName("lead-shell-1")).toBe("shell");
-  });
-
-  it('returns "shell" for "lead-shell-5"', () => {
-    expect(getBackendFromSessionName("lead-shell-5")).toBe("shell");
-  });
-
-  it('returns "shell" for setup shell sessions', () => {
-    expect(getBackendFromSessionName("lead-shell-setup-codex")).toBe("shell");
-  });
-
-  it('returns "shell" for workspace-prefixed setup shell sessions', () => {
-    expect(
-      getBackendFromSessionName("HELLO-WORLD--lead-shell-setup-codex"),
-    ).toBe("shell");
-  });
-
-  it('returns "claude" for "lead-claude-1" (non-shell)', () => {
-    expect(getBackendFromSessionName("lead-claude-1")).toBe("claude");
-  });
-
-  it("returns default for non-matching session name", () => {
-    expect(getBackendFromSessionName("talk-to-lead", "claude")).toBe("claude");
-  });
-});
-
 describe("BACKEND_BRAND_COLORS", () => {
   it('includes "shell" with gray color', () => {
     expect(BACKEND_BRAND_COLORS).toHaveProperty("shell");
@@ -254,8 +226,8 @@ describe("isAgentTab", () => {
     expect(isAgentTab({ agentName: "fox", sessionName: "uuid-2" })).toBe(true);
   });
 
-  it("returns true for legacy agent- session-name prefix", () => {
-    expect(isAgentTab({ sessionName: "agent-local-planner" })).toBe(true);
+  it("does not infer agent identity from a session-name prefix", () => {
+    expect(isAgentTab({ sessionName: "agent-local-planner" })).toBe(false);
   });
 
   it("returns false for lead tabs", () => {
@@ -267,8 +239,24 @@ describe("isAgentTab", () => {
 
   it("ignores the user-editable label — a renamed tab stays a plain tab", () => {
     // Renaming a shell tab to "agent-debug" must not hide it from the
-    // Terminal view; classification keys on kind/agentName/sessionName only.
+    // Terminal view; classification keys on server-owned kind/agentName only.
     expect(isAgentTab({ sessionName: "lead-shell-1" })).toBe(false);
+  });
+});
+
+describe("isAgentMetadata", () => {
+  it("requires the complete server-owned discriminator and identity", () => {
+    expect(isAgentMetadata({ kind: "agent", agent_id: "planner" })).toBe(true);
+    expect(isAgentMetadata({ kind: "agent" })).toBe(false);
+    expect(isAgentMetadata({ agent_id: "planner" })).toBe(false);
+  });
+
+  it("does not infer identity from placement names", () => {
+    expect(
+      isAgentMetadata({
+        session_name: "agent-local-planner",
+      }),
+    ).toBe(false);
   });
 });
 

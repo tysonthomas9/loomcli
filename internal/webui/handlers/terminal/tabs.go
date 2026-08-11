@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
@@ -124,10 +126,32 @@ func HandlePatchTerminalTab(svc terminal.TerminalService) http.HandlerFunc {
 
 // tabPutRequest represents the full create-or-replace body for PUT.
 type tabPutRequest struct {
+	Backend   string `json:"backend"`
 	Label     string `json:"label"`
 	SortOrder int    `json:"sort_order"`
 	Notes     string `json:"notes"`
 	Pinned    bool   `json:"pinned"`
+}
+
+func newTabMetadata(workspace, session string, req tabPutRequest) (*terminal.TabMetadata, error) {
+	backend := strings.ToLower(strings.TrimSpace(req.Backend))
+	launch, err := terminal.LaunchSpecForBackend(backend, bootstrap.LoomDir())
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	return &terminal.TabMetadata{
+		SessionName: session,
+		Workspace:   workspace,
+		Label:       req.Label,
+		Notes:       req.Notes,
+		SortOrder:   req.SortOrder,
+		Pinned:      req.Pinned,
+		Backend:     backend,
+		Launch:      launch,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}, nil
 }
 
 // HandlePutTerminalTab creates or replaces tab metadata and broadcasts an SSE event.
@@ -152,17 +176,13 @@ func HandlePutTerminalTab(svc terminal.TerminalService) http.HandlerFunc {
 			})
 			return
 		}
-
-		now := time.Now().UTC()
-		meta := &terminal.TabMetadata{
-			SessionName: session,
-			Workspace:   workspace,
-			Label:       req.Label,
-			Notes:       req.Notes,
-			SortOrder:   req.SortOrder,
-			Pinned:      req.Pinned,
-			CreatedAt:   now,
-			UpdatedAt:   now,
+		meta, err := newTabMetadata(workspace, session, req)
+		if err != nil {
+			handler.WriteJSON(w, http.StatusBadRequest, tabMetadataResponse{
+				Success: false,
+				Error:   err.Error(),
+			})
+			return
 		}
 
 		if err := svc.PutTab(r.Context(), workspace, meta); err != nil {

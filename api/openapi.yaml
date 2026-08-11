@@ -5713,6 +5713,18 @@ components:
       properties:
         issue_id:
           type: string
+        kind:
+          type: string
+          description: Server-owned terminal kind. Agent tabs use `agent`.
+        agent_id:
+          type: string
+        role:
+          type: string
+        backend:
+          type: string
+          description: Validated backend intent used to build the persisted launch envelope.
+        writable:
+          type: boolean
         depends_on_id:
           type: string
         type:
@@ -7215,8 +7227,11 @@ components:
 
     TabPutRequest:
       type: object
-      required: [label, sort_order, notes, pinned]
+      required: [backend, label, sort_order, notes, pinned]
       properties:
+        backend:
+          type: string
+          enum: [shell, claude, codex, opencode, gemini, cursor]
         label:
           type: string
         sort_order:
