@@ -11,6 +11,7 @@
 - **Wave 9.7 implementation:** `9722a8bed`
 - **Wave 9.8 implementation:** `3fdcd3669`
 - **Wave 9.9 implementation:** `520e8a9f8`
+- **Wave 9.10 implementation:** `97df6fd92`
 - **Stacked branches:** `modular-monolith-phase9-01-types-ratchet`, then
   `modular-monolith-phase9-02-shallow-seams`, then
   `modular-monolith-phase9-03-legacy-planes`, then
@@ -19,7 +20,8 @@
   `modular-monolith-phase9-06-connectors-adapter`, then
   `modular-monolith-phase9-07-legacy-runtime`, then
   `modular-monolith-phase9-08-driver-auth`, then
-  `modular-monolith-phase9-09-handler-ports`
+  `modular-monolith-phase9-09-handler-ports`, then
+  `modular-monolith-phase9-10-prreview-ports`
 - **Purpose:** Reduce the residual package surface toward 160 production Go
   packages without weakening capability ownership, consumer-owned ports, or
   independently replaceable adapters.
@@ -495,6 +497,47 @@ Phase 7 companion and correctly failed Loom's vendored-spec freshness guard.
 No contract was copied backward. Rebuilding from the documented clean
 `fleet-db-modular-monolith-phase7` worktree at `b71dec551` passed the focused
 contract package and the uninterrupted aggregate rerun.
+
+## Wave 9.10 result
+
+The tenth slice removes all three remaining PR-review handler dependencies on
+horizontal backend and repository planes. The HTTP adapter now owns its private
+pull-request wire shapes instead of importing generated backend DTOs. Repository
+membership and reviewer materialization consume a two-method, consumer-owned
+`WorkspaceQueries` port backed by the Workspace owner. The PR-review module no
+longer receives `store.Store`, reaches into workspace/repository collections,
+or constructs Connector owner implementations.
+
+The application root now builds Connector dispatch, management, and credential
+sealing from one durable adapter and one vault, then injects those owner
+interfaces. This deletes on-demand vault reconstruction in the handler and
+prevents the sealer used for new credentials from drifting from the vault used
+for synchronization and dispatch. The old eleven-argument PR-review constructor,
+`prReviewStore`, `connectorManagementStore`, and forwarding-only
+`newPRReviewRouteModule` function are physically absent; there is no alternate
+constructor or compatibility facade.
+
+The exact live handler-import ratchet falls from 22 to 19. Import fanout falls
+from 41 to 40 for `internal/webui/app` and from 18 to 15 for
+`internal/webui/handlers/prreview`; both exact exceptions were tightened.
+Package shape remains 182 production packages, 15 module packages, 167 packages
+outside modules, 62 one-file packages, and 83 one-or-two-file packages. This
+slice removes executable horizontal edges and a shallow composition seam; it
+does not claim a package-count reduction.
+
+## Wave 9.10 validation
+
+| Check | Result |
+|---|---|
+| Full PR-review handler behavior, connector composition, and all-`internal` compilation | PASS |
+| Removed backend DTO/store imports, obsolete constructor path, and exact fanout/handler-import ratchets | PASS: no production PR-review import of `internal/backend`, `internal/store`, or `internal/infra/connectorsvault`; exact live handler allowance is 19 |
+| Authoritative repository architecture snapshot | PASS in 408.53s: 11/11 profiles, 10 capability roots, 93 direct-write rows, 19 live legacy-handler allowances, 107 reviewed mutation commands, 71 runtime components, 80 goroutine launches, all six performance rows measured, and zero pending decisions |
+| Aggregate `make gate` against FleetDB `b71dec551` | PASS: all Go and frontend quality gates with `GOMAXPROCS=4`, two Go test workers, one Vitest worker, and a 3 GiB Go soft memory limit |
+
+The first aggregate attempt failed closed because its exact import-fanout
+exceptions still recorded the pre-change values. Tightening app `41 -> 40` and
+PR-review `18 -> 15` made the focused fanout check and uninterrupted aggregate
+rerun pass. No threshold was raised and no exception was added.
 
 Later waves must update this document with the selected package candidates,
 the boundary reason retained or removed for each, exact shape changes, and

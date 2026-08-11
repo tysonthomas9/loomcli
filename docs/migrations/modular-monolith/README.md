@@ -1,6 +1,6 @@
 # Modular Monolith Migration
 
-- **Status:** Phase 9 package consolidation in progress; its first nine slices
+- **Status:** Phase 9 package consolidation in progress; its first ten slices
   ratchet the modular monolith to 182 production packages
 - **Date:** 2026-08-10
 - **Scope:** `loom serve`, the operator CLI entry surfaces, the Vite frontend counterpart, and the fleet-db contracts those capabilities depend on
@@ -236,10 +236,16 @@ signed run-scoped identity throughout the runtime. Wave 9.9 then routes Git
 graph, blocked-list, health statistics, readiness, and config-label delivery
 through narrow Work Items or presentation ports, deletes the dead workspace
 backend setter and config env fallback, and tightens the exact live handler
-imports from 25 to 22. Package shape remains 182 production packages while the
-remaining waves delete the other horizontal handler/store edges and residual
-shallow packages; an empty capability-graph `legacy_paths` list alone is not
-completion proof. See the
+imports from 25 to 22. Wave 9.10 then removes PR-review's two generated-backend
+DTO imports and composite-store import, makes the HTTP adapter own its wire
+shapes, injects a two-method Workspace query port, and composes Connector
+dispatch, management, and credential sealing once at the application root. It
+physically deletes the old positional constructor and forwarding-only route
+composition function, lowers live handler imports from 22 to 19, and tightens
+PR-review import fanout from 18 to 15. Package shape remains 182 production
+packages while the remaining waves delete the other horizontal handler/store
+edges and residual shallow packages; an empty capability-graph `legacy_paths`
+list alone is not completion proof. See the
 [Phase 9 plan](16-phase-9-package-consolidation.md).
 
 ## Approved architecture decisions
