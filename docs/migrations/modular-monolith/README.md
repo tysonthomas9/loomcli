@@ -1,7 +1,7 @@
 # Modular Monolith Migration
 
-- **Status:** Phase 9 package consolidation in progress; its first sixteen
-  slices ratchet the modular monolith to 171 production packages
+- **Status:** Phase 9 package consolidation in progress; its first twenty
+  slices ratchet the modular monolith to 167 production packages
 - **Date:** 2026-08-11
 - **Scope:** `loom serve`, the operator CLI entry surfaces, the Vite frontend counterpart, and the fleet-db contracts those capabilities depend on
 - **Provenance:** [Phase 0 integration baseline](00-phase-0-baseline.md), final [Phase 1 evidence](06-phase-1-decisions-and-evidence.md) at Loom `7e8a6dd2`, [Phase 2 evidence](07-phase-2-decisions-and-evidence.md) at Loom `84cccb761` with FleetDB `430dce8d9`, [Phase 3 evidence](08-phase-3-decisions-and-evidence.md) at core implementation commits Loom `7f95b9bf1` and FleetDB `f1c4e1119`, final [Phase 4 evidence](09-phase-4-decisions-and-evidence.md) at Loom `53cbe2577` with FleetDB `afb688768`, and the appended reliability-validation record at Loom `67c45972f` with FleetDB `9ffa69f60`
@@ -297,7 +297,15 @@ packages, and 71 one-or-two-file packages. Wave 9.19 then deletes the shallow
 local-node-config wrapper and lets Bootstrap own the runtime-provider
 operations for its existing machine-local state cache. It ratchets the exact
 shape to 169 packages, 154 outside modules, 49 one-file packages, and 70
-one-or-two-file packages. The remaining waves delete the other horizontal
+one-or-two-file packages. Wave 9.20 deletes the Agents bootstrap application
+facade and horizontal store adapter, moves the
+monotonic PromptFile repair into the Agents owner over its revisioned Role
+port, requires injected owner commands for workspace creation and startup
+repair, and deletes the legacy Agents constructor and repair-specific
+persistence interface. It ratchets the exact shape to 167 packages, 152
+outside modules, 47 one-file packages, and 68 one-or-two-file packages while
+lowering direct persistence to 86 rows/95 sites and workspacemgr fanout to 14
+with no exception. The remaining waves delete the other horizontal
 handler/store edges and residual shallow packages; an empty
 capability-graph `legacy_paths` list alone is not completion proof. See the
 [Phase 9 plan](16-phase-9-package-consolidation.md).

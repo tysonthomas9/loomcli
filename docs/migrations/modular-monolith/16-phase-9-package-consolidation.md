@@ -21,6 +21,7 @@
 - **Wave 9.17 implementation:** `92eeb4423`
 - **Wave 9.18 implementation:** `7c179fada`
 - **Wave 9.19 implementation:** `c412c3f61`
+- **Wave 9.20 implementation:** `d34fb0ed1`
 - **Stacked branches:** `modular-monolith-phase9-01-types-ratchet`, then
   `modular-monolith-phase9-02-shallow-seams`, then
   `modular-monolith-phase9-03-legacy-planes`, then
@@ -39,7 +40,8 @@
   `modular-monolith-phase9-16-local-session-archive`, then
   `modular-monolith-phase9-17-durable-terminal-launch`, then
   `modular-monolith-phase9-18-driver-run-contract`, then
-  `modular-monolith-phase9-19-local-node-state`
+  `modular-monolith-phase9-19-local-node-state`, then
+  `modular-monolith-phase9-20-agents-bootstrap-composition`
 - **Purpose:** Reduce the residual package surface toward 160 production Go
   packages without weakening capability ownership, consumer-owned ports, or
   independently replaceable adapters.
@@ -939,6 +941,53 @@ to 70.
 | Retired root, exact package shape, import fanout, and affected lint | PASS: shape `169 / 15 / 154 / 49 / 70`; zero affected lint issues |
 | Authoritative repository architecture snapshot | PASS in 390.489s at implementation `c412c3f61` |
 | Aggregate `make gate` against FleetDB `b71dec551` | PASS: Go, frontend, race, coverage, dependency, contract, architecture, and build gates with the matching `816b0b0c…7ef0` OpenAPI snapshot and bounded workers/memory |
+
+## Wave 9.20 result
+
+The twentieth slice deletes both Agents bootstrap compatibility packages:
+`internal/app/agentsbootstrap` and
+`internal/infra/agentsbootstrapstore`. Workspace management no longer
+constructs a private Agents service over the horizontal `store.RoleStore` and
+`store.AgentServiceStore` interfaces. It owns a two-method consumer port, and
+the existing serve application composition implements that port with the
+canonical Agents capability and exact system authority. Both `loom serve` and
+the standalone workspace-create command inject that owner command surface;
+missing composition fails closed.
+
+The startup PromptFile repair is now an Agents-owned command over the normal
+revisioned Role port. Exact replay is read-only, a different non-empty value is
+a conflict, and a concurrent empty-to-value update is resolved through the
+Role CAS and authoritative winner read. The separate `BootstrapAPI`,
+`BootstrapService`, `BootstrapStore`, `RolePromptRepairStore`, legacy
+constructor, and memstore-only repair primitive are deleted rather than moved.
+Architecture guards reject both retired roots and those compatibility symbols
+if they return.
+
+The exact package shape moves from 169 to 167 production packages. Module
+packages remain 15, packages outside `internal/modules` fall from 154 to 152,
+one-file packages fall from 49 to 47, and one-or-two-file packages fall from
+70 to 68. Direct persistence falls from 89 rows/98 sites to 86 rows/95 sites
+because all three bootstrap-adapter mutations disappeared. Workspace manager
+import fanout falls from its exact exception of 18 to 14, so the exception row
+is deleted entirely. The implementation is
+`d34fb0ed12aae5e3476f07e332c80ef7e67de45c`.
+
+## Wave 9.20 validation
+
+| Check | Result |
+|---|---|
+| Agents owner, FleetDB adapter, application composition, serve adapter, workspace manager, CLI workspace, and memstore suites | PASS |
+| All production `internal/...` packages | PASS: every package compiled after deleting both compatibility packages and the legacy constructor |
+| Retired roots/symbols, exact package/direct-write ratchets, import fanout, and affected lint | PASS: shape `167 / 15 / 152 / 47 / 68`; writes `86 / 95`; workspacemgr fanout 14 with no exception; zero lint issues |
+| Authoritative repository architecture snapshot | PASS in 387.091s at implementation `d34fb0ed1` |
+| Aggregate `make gate` against FleetDB `b71dec551` | PASS: all Go and frontend quality gates with the matching `816b0b0c…7ef0` OpenAPI snapshot, sanitized Loom runtime variables, `GOMAXPROCS=4`, one Go test worker, two Vitest workers, and a 3 GiB Go soft memory limit |
+
+The first authoritative invocation completed every repository profile and
+exposed only the stale 89-row summary after the three adapter writes had been
+deleted. The exact row/site snapshot was tightened to 86/95, and the complete
+unchanged-source rerun passed. The subsequent full paired gate passed without
+adding an allowlist, compatibility constructor, persistence receiver, fallback
+path, or contract change.
 
 Later waves must update this document with the selected package candidates,
 the boundary reason retained or removed for each, exact shape changes, and
