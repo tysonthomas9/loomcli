@@ -92,6 +92,13 @@ func (c persistenceClassifier) isPersistenceFunctionPackage(packagePath string) 
 }
 
 func (c persistenceClassifier) isPersistenceCandidate(packagePath, receiverName string) bool {
+	exactReceiver := packagePath + "." + receiverName
+	if _, ok := c.surfaces[exactReceiver]; ok {
+		return true
+	}
+	if _, ok := c.surfaces["*"+exactReceiver]; ok {
+		return true
+	}
 	if pkg, ok := c.packages[packagePath]; ok && pkg.matchesReceiver(receiverName) {
 		return true
 	}

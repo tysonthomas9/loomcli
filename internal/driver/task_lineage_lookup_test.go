@@ -144,8 +144,8 @@ func TestResolveTaskWorktree_RootBasesOnRootBase(t *testing.T) {
 	}
 }
 
-// A task with no lineage falls back to the repo default branch (back-compat).
-func TestResolveTaskWorktree_UnknownTaskFallsBackToDefaultBranch(t *testing.T) {
+// A task with no stack binding uses the repository's declared default branch.
+func TestResolveTaskWorktree_UnknownTaskUsesDefaultBranch(t *testing.T) {
 	f := setupLineageFixture(t)
 	got := resolveHead(t, f.resolver, "task-not-in-stack", "task/run:x")
 	if got != f.mainHead {
@@ -153,8 +153,8 @@ func TestResolveTaskWorktree_UnknownTaskFallsBackToDefaultBranch(t *testing.T) {
 	}
 }
 
-// With no lineage lookup wired, behavior is byte-identical to the default branch.
-func TestResolveTaskWorktree_NilLineageUnchanged(t *testing.T) {
+// A resolver without a stack lookup uses the repository's declared default branch.
+func TestResolveTaskWorktree_NilLineageUsesDefaultBranch(t *testing.T) {
 	f := setupLineageFixture(t)
 	r := LocalTaskWorktreeResolver{
 		Store: f.resolver.Store, SourceControl: testTaskSourceControl{},
@@ -333,17 +333,19 @@ func (errLineage) BaseRefForTask(context.Context, string, string, string) (strin
 	return "", false, errors.New("boom: unreadable stack store")
 }
 
-// Regression for the review's MEDIUM finding: a lineage lookup ERROR must not
-// fail the task run — the resolver logs and falls back to the repo default
-// branch (pre-stacking behavior), so a corrupt stacks.json cannot break dispatch.
-func TestResolveTaskWorktree_LineageErrorFallsBackNotFatal(t *testing.T) {
+func TestResolveTaskWorktree_LineageErrorFailsClosed(t *testing.T) {
 	f := setupLineageFixture(t)
 	r := LocalTaskWorktreeResolver{
 		Store: f.resolver.Store, Lineage: errLineage{},
 		SourceControl: testTaskSourceControl{},
 	}
-	got := resolveHead(t, r, "task-b", "task/run:err")
-	if got != f.mainHead {
-		t.Fatalf("lineage-error worktree HEAD = %s, want default-branch main HEAD %s (must not fail)", got, f.mainHead)
+	_, err := r.ResolveTaskWorktree(t.Context(), TaskExecRequest{
+		WorkspaceKey:     "TEST",
+		TaskRunID:        "task/run:err",
+		TaskID:           "task-b",
+		SandboxPlacement: domain.TaskRunPlacement{RepoRef: "frontend"},
+	}, t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "resolve task stack lineage") {
+		t.Fatalf("lineage-error ResolveTaskWorktree error = %v, want fail-closed lineage error", err)
 	}
 }

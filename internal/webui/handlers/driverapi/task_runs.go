@@ -11,7 +11,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
-	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 )
 
 // execTaskParams is the exec-task request body.
@@ -94,7 +93,6 @@ func (p execTaskParams) requestOptions(ws string, id driverIdentity, fencingToke
 }
 
 func (m *Module) taskRequestExecutor() driverpkg.HostBridgeTaskExecutor {
-	stacks := driverpkg.StackBindingResolverFor(m.sourceControl)
 	return driverpkg.HostBridgeTaskExecutor{
 		Store:            m.store,
 		Artifacts:        m.artifacts,
@@ -103,17 +101,12 @@ func (m *Module) taskRequestExecutor() driverpkg.HostBridgeTaskExecutor {
 		LocalSettingsDir: m.localSettingsDir,
 		WorktreeResolver: driverpkg.LocalTaskWorktreeResolver{
 			Store:         m.store,
-			Lineage:       driverpkg.StackLineageLookup{Bindings: stacks},
+			Lineage:       driverpkg.StackLineageLookup{Bindings: m.stackBindings},
 			SourceControl: m.sourceControl,
 		},
-		StackBindings: stacks,
-		TaskOutcomes:  taskOutcomeRecorder(m.sourceControl),
+		StackBindings: m.stackBindings,
+		TaskOutcomes:  m.taskOutcomes,
 	}
-}
-
-func taskOutcomeRecorder(materializer sourcecontrol.Materializer) sourcecontrol.TaskOutcomeRecorder {
-	recorder, _ := materializer.(sourcecontrol.TaskOutcomeRecorder)
-	return recorder
 }
 
 func taskRunRequestCommand(ws string, parent *domain.DriverRun, owner execution.Owner, opts driverpkg.TaskRunRequestOptions) execution.RequestTaskRunCommand {

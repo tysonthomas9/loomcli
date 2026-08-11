@@ -111,6 +111,8 @@ type (
 	DaytonaProviderBroker                    = execution.DaytonaProviderBroker
 	ArtifactQueryAPI                         = artifacts.QueryAPI
 	SourceControlMaterializer                = sourcecontrol.Materializer
+	SourceControlStackBindingResolver        = sourcecontrol.StackBindingResolver
+	SourceControlTaskOutcomeRecorder         = sourcecontrol.TaskOutcomeRecorder
 	RepositoryAdmissionMaterializer          = sourcecontrol.RepositoryAdmissionMaterializer
 	WorkflowCatalogAPI                       = workflowcatalog.API
 	WorkflowCatalogVersionAuthoringAPI       = workflowcatalog.VersionAuthoringAPI

@@ -7,9 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr/admissionstore"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
-	"github.com/tysonthomas9/loomcli/internal/infra/workspacecatalog"
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
@@ -27,44 +25,23 @@ const (
 // synchronous WebUI admission seam and contributes restart recovery to the
 // platform runtime host while exposing neither FleetDB nor Source Control.
 type StoreBackedWorkspaceAdmissionOperations struct {
-	store          admissionstore.Store
 	workspace      workspacemodule.API
 	agentsCommands ManagedAgentsCommands
 	process        *repositoryAdmissionProcess
 }
 
 func NewStoreBackedWorkspaceAdmissionOperations(
-	store admissionstore.Store,
-	agentsCommands ManagedAgentsCommands,
-	admissions infrafleetdb.RepositoryAdmissionTransport,
-	journal *RepositoryAdmissionJournal,
-	materializer repositoryCheckoutMaterializer,
-) *StoreBackedWorkspaceAdmissionOperations {
-	if store == nil || agentsCommands == nil {
-		return nil
-	}
-	workspace, err := workspacecatalog.New(store.Workspaces(), store.Repos())
-	if err != nil {
-		return nil
-	}
-	return NewStoreBackedWorkspaceAdmissionOperationsWithWorkspace(
-		store, workspace, agentsCommands, admissions, journal, materializer,
-	)
-}
-
-func NewStoreBackedWorkspaceAdmissionOperationsWithWorkspace(
-	store admissionstore.Store,
 	workspace workspacemodule.API,
 	agentsCommands ManagedAgentsCommands,
 	admissions infrafleetdb.RepositoryAdmissionTransport,
 	journal *RepositoryAdmissionJournal,
 	materializer repositoryCheckoutMaterializer,
 ) *StoreBackedWorkspaceAdmissionOperations {
-	if store == nil || agentsCommands == nil {
+	if workspace == nil || agentsCommands == nil {
 		return nil
 	}
 	return &StoreBackedWorkspaceAdmissionOperations{
-		store: store, workspace: workspace, agentsCommands: agentsCommands,
+		workspace: workspace, agentsCommands: agentsCommands,
 		process: newRepositoryAdmissionProcess(admissions, journal, materializer),
 	}
 }
@@ -73,7 +50,7 @@ func (operations *StoreBackedWorkspaceAdmissionOperations) CreateWorkspace(
 	ctx context.Context,
 	req workspacecoord.WorkspaceCreateRequest,
 ) (workspacecoord.WorkspaceCreateResult, error) {
-	if operations == nil || operations.store == nil {
+	if operations == nil || operations.workspace == nil {
 		return workspacecoord.WorkspaceCreateResult{}, repositoryAdmissionUnavailable()
 	}
 	if req.Type == "clone" {
@@ -96,7 +73,7 @@ func (operations *StoreBackedWorkspaceAdmissionOperations) AddWorkspaceRepos(
 	ctx context.Context,
 	req workspacecoord.WorkspaceAddReposRequest,
 ) (workspacecoord.WorkspaceCreateResult, error) {
-	if operations == nil || operations.store == nil {
+	if operations == nil || operations.workspace == nil {
 		return workspacecoord.WorkspaceCreateResult{}, repositoryAdmissionUnavailable()
 	}
 	if operations.process == nil {
@@ -186,7 +163,7 @@ func (operations *StoreBackedWorkspaceAdmissionOperations) LookupJob(
 	if err != nil {
 		return nil, false, nil
 	}
-	local, err := operations.process.journal.GetByAdmission(ctx, jobID)
+	local, err := operations.process.journal.getByAdmission(ctx, jobID)
 	if errors.Is(err, errLocalRepositoryAdmissionNotFound) {
 		return nil, false, nil
 	}
@@ -318,7 +295,7 @@ func (operations *StoreBackedWorkspaceAdmissionOperations) recoverRepositoryAdmi
 	if err := operations.process.ensureMaterializationsRunning(); err != nil {
 		return err
 	}
-	locals, err := operations.process.journal.List(ctx)
+	locals, err := operations.process.journal.list(ctx)
 	if err != nil {
 		return err
 	}

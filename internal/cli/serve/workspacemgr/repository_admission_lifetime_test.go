@@ -320,7 +320,7 @@ func TestRepositoryAdmissionAuthorityDeadlineUsesShortFleetGrant(t *testing.T) {
 		t.Fatalf("new journal: %v", err)
 	}
 	workspacePath := filepath.Join(t.TempDir(), "workspace")
-	if _, err := journal.Prepare(t.Context(), localRepositoryAdmissionIntent{
+	if _, err := journal.prepare(t.Context(), localRepositoryAdmissionIntent{
 		OperationID:   previous.OperationID,
 		WorkspaceKey:  previous.WorkspaceKey,
 		WorkspacePath: workspacePath,
@@ -328,7 +328,7 @@ func TestRepositoryAdmissionAuthorityDeadlineUsesShortFleetGrant(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("prepare local admission: %v", err)
 	}
-	if _, err := journal.Bind(
+	if _, err := journal.bind(
 		t.Context(),
 		previous.OperationID,
 		previous.AdmissionID,
@@ -448,14 +448,14 @@ func TestRepositoryAdmissionBlockedCloneCancelsBeforeTakeoverAndCannotPublish(
 	if err != nil {
 		t.Fatalf("new second journal: %v", err)
 	}
-	first := NewStoreBackedWorkspaceAdmissionOperations(
+	first := newTestStoreBackedWorkspaceAdmissionOperations(t,
 		st,
 		managedAgentsForTest(st),
 		transport,
 		firstJournal,
 		transport,
 	)
-	second := NewStoreBackedWorkspaceAdmissionOperations(
+	second := newTestStoreBackedWorkspaceAdmissionOperations(t,
 		st,
 		managedAgentsForTest(st),
 		transport,
@@ -644,7 +644,7 @@ func TestRepositoryAdmissionLocalBatchFenceRetainsWorktreeWithoutPartialState(
 	t.Setenv("LOOM_CONFIG_DIR", loomDir)
 	st := memstore.New()
 	workspacePath := filepath.Join(loomDir, "workspaces", "local-batch")
-	if _, err := BuildStoreBackedCreateWorkspace(st, managedAgentsForTest(st))(
+	if _, err := buildTestCreateWorkspace(t, st)(
 		t.Context(),
 		workspacecoord.WorkspaceCreateRequest{
 			Name: "local-batch", Type: "empty", Path: workspacePath,
@@ -680,7 +680,7 @@ func TestRepositoryAdmissionLocalBatchFenceRetainsWorktreeWithoutPartialState(
 	if err != nil {
 		t.Fatalf("new journal: %v", err)
 	}
-	operations := NewStoreBackedWorkspaceAdmissionOperations(
+	operations := newTestStoreBackedWorkspaceAdmissionOperations(t,
 		st,
 		managedAgentsForTest(st),
 		transport,
@@ -759,7 +759,7 @@ func TestRepositoryAdmissionStopCancelsAndWaitsForBlockedClone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new journal: %v", err)
 	}
-	operations := NewStoreBackedWorkspaceAdmissionOperations(
+	operations := newTestStoreBackedWorkspaceAdmissionOperations(t,
 		st,
 		managedAgentsForTest(st),
 		transport,
@@ -822,7 +822,7 @@ func TestRepositoryAdmissionConcurrentBeginCannotEscapeStop(t *testing.T) {
 		if err != nil {
 			t.Fatalf("iteration %d: new journal: %v", iteration, err)
 		}
-		operations := NewStoreBackedWorkspaceAdmissionOperations(
+		operations := newTestStoreBackedWorkspaceAdmissionOperations(t,
 			st,
 			managedAgentsForTest(st),
 			transport,

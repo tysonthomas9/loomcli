@@ -32,7 +32,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/store/storetest"
+	"github.com/tysonthomas9/loomcli/internal/store/testdata/storetest"
 )
 
 func TestFleetDBAwaitConformanceRoundTrip(t *testing.T) {

@@ -1,6 +1,5 @@
-// Package clitest provides shared test utilities for cli subpackages.
-// This is a non-test package so it can be imported by _test.go files
-// in any cli subpackage.
+// Package clitest provides shared test utilities for CLI subpackages. Its
+// testdata location keeps these helpers outside production package topology.
 package clitest
 
 import (

@@ -96,6 +96,11 @@ type TaskWorker struct {
 	// SourceControl is the authority-free checkout materializer used by the
 	// default local task worktree resolver.
 	SourceControl sourcecontrol.Materializer
+	// StackBindings and TaskOutcomes are separately injected Source Control
+	// ports. Production composition must provide them explicitly; task execution
+	// never recovers broader capability surfaces with type assertions.
+	StackBindings sourcecontrol.StackBindingResolver
+	TaskOutcomes  sourcecontrol.TaskOutcomeRecorder
 	// WorktreeResolver resolves per-task-run local worktrees for bundled local
 	// task runners. Nil uses the machine-local workspace cache.
 	WorktreeResolver TaskWorktreeResolver
@@ -190,7 +195,6 @@ func (w *TaskWorker) runOnceInWorkspace(ctx context.Context, ws, workDir string)
 	}
 	executor := w.Executor
 	if executor == nil {
-		stacks := StackBindingResolverFor(w.SourceControl)
 		executor = HostBridgeTaskExecutor{
 			Store:               w.Store,
 			Artifacts:           w.Artifacts,
@@ -200,11 +204,11 @@ func (w *TaskWorker) runOnceInWorkspace(ctx context.Context, ws, workDir string)
 			LocalSettingsDir:    w.LocalSettingsDir,
 			WorktreeResolver: firstNonNilTaskWorktreeResolver(w.WorktreeResolver, LocalTaskWorktreeResolver{
 				Store:         w.Store,
-				Lineage:       StackLineageLookup{Bindings: stacks},
+				Lineage:       StackLineageLookup{Bindings: w.StackBindings},
 				SourceControl: w.SourceControl,
 			}),
-			StackBindings: stacks,
-			TaskOutcomes:  taskOutcomeRecorder(w.SourceControl),
+			StackBindings: w.StackBindings,
+			TaskOutcomes:  w.TaskOutcomes,
 		}
 	} else {
 		executor = withTaskWorkerArtifacts(executor, w.Artifacts, w.TaskRunAuthorities)

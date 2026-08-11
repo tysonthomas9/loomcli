@@ -61,6 +61,8 @@ type Deps struct {
 	DriverRunTokenKey              []byte
 	LocalSettingsDir               string
 	SourceControl                  sourcecontrol.Materializer
+	TaskStackBindings              sourcecontrol.StackBindingResolver
+	TaskOutcomes                   sourcecontrol.TaskOutcomeRecorder
 	Dispatcher                     connectorsmodule.Dispatcher
 	ConnectorBindingGrantLifecycle connectorsmodule.BindingGrantLifecycle
 	AutomationBindings             automation.BindingOperations

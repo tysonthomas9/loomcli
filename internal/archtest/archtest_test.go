@@ -85,7 +85,7 @@ func TestCheckedInManifestsAndRepository(t *testing.T) {
 	if got, want := report.MutationCommands, 107; got != want {
 		t.Fatalf("mutation commands = %d, want %d", got, want)
 	}
-	if got, want := report.DirectPersistenceWrites, 86; got != want {
+	if got, want := report.DirectPersistenceWrites, 94; got != want {
 		t.Fatalf("direct persistence-write rows = %d, want %d", got, want)
 	}
 	if got, want := report.RuntimeComponents, 71; got != want {
@@ -683,10 +683,13 @@ func TestRetiredHorizontalRootsCannotReturn(t *testing.T) {
 		"internal/backend/backendtest",
 		"internal/backendnames",
 		"internal/cli/backendapi",
+		"internal/cli/clitest",
 		"internal/cli/serve/serveadapter/daytonabroker",
+		"internal/cli/serve/workspacemgr/admissionstore",
 		"internal/cli/serve/workspacemgr/workspacematerialization",
 		"internal/connector",
 		"internal/driver/runtypes",
+		"internal/driver/taskworktree",
 		"internal/infra/agentsbootstrapstore",
 		"internal/infra/artifactcatalog",
 		"internal/infra/connectorscatalog",
@@ -708,6 +711,7 @@ func TestRetiredHorizontalRootsCannotReturn(t *testing.T) {
 		"internal/stacklineage",
 		"internal/stackpublish",
 		"internal/stackstore",
+		"internal/store/storetest",
 		"internal/trigger",
 		"internal/types",
 		"internal/webui/service",

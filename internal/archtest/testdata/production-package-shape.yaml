@@ -14,11 +14,11 @@ semantics:
     - vendor
     - worktrees
 ceilings:
-  total_packages: 164
+  total_packages: 160
   module_packages: 15
-  outside_module_packages: 149
-  one_file_packages: 43
-  one_or_two_file_packages: 65
+  outside_module_packages: 145
+  one_file_packages: 42
+  one_or_two_file_packages: 61
 packages:
   - internal/agenterr
   - internal/agentpolicy
@@ -49,7 +49,6 @@ packages:
   - internal/cli/automode
   - internal/cli/backends
   - internal/cli/cleanup
-  - internal/cli/clitest
   - internal/cli/cmdstore
   - internal/cli/config
   - internal/cli/connector
@@ -70,7 +69,6 @@ packages:
   - internal/cli/serve/serveadapter
   - internal/cli/serve/worker
   - internal/cli/serve/workspacemgr
-  - internal/cli/serve/workspacemgr/admissionstore
   - internal/cli/sessionfinalize
   - internal/cli/stack
   - internal/cli/trigger
@@ -82,7 +80,6 @@ packages:
   - internal/driver/daytonahost
   - internal/driver/nativearchive
   - internal/driver/sandbox
-  - internal/driver/taskworktree
   - internal/epicrunner
   - internal/events
   - internal/events/otelexport
@@ -138,7 +135,6 @@ packages:
   - internal/sessions/redact
   - internal/sessions/transcript
   - internal/store
-  - internal/store/storetest
   - internal/testutil
   - internal/usage
   - internal/webui

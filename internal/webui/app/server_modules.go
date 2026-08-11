@@ -139,6 +139,8 @@ func (app *Server) unifiedAgentModuleDeps() UnifiedAgentModuleDeps {
 		WorkflowCatalogOperator:        app.config.WorkflowCatalogOperator,
 		WorkflowTargetPreparation:      app.config.WorkflowTargetPreparation,
 		SourceControl:                  app.config.SourceControl,
+		TaskStackBindings:              app.config.TaskStackBindings,
+		TaskOutcomes:                   app.config.TaskOutcomes,
 	}
 	if app.config.BackendOps != nil {
 		deps.WorkflowBackendHealth = agentmodules.NewWorkflowBackendHealthQuery(

@@ -1,4 +1,4 @@
-package admissionstore
+package workspacemgr
 
 import (
 	"context"
@@ -36,11 +36,6 @@ var (
 	errLocalRepositoryAdmissionConflict = errors.New("local repository admission conflict")
 )
 
-var (
-	ErrLocalRepositoryAdmissionNotFound = errLocalRepositoryAdmissionNotFound
-	ErrLocalRepositoryAdmissionConflict = errLocalRepositoryAdmissionConflict
-)
-
 type localRepositoryAdmissionKind string
 
 const (
@@ -72,28 +67,16 @@ type localRepositoryAdmissionRecord struct {
 	UpdatedAt       time.Time                      `json:"updated_at"`
 }
 
-type (
-	LocalRepositoryAdmissionKind   = localRepositoryAdmissionKind
-	LocalRepositoryAdmissionIntent = localRepositoryAdmissionIntent
-	LocalRepositoryAdmissionRecord = localRepositoryAdmissionRecord
-)
-
-const (
-	LocalRepositoryAdmissionCreateWorkspace = localRepositoryAdmissionCreateWorkspace
-	LocalRepositoryAdmissionAddRepositories = localRepositoryAdmissionAddRepositories
-	LocalRepositoryAdmissionJournalFileName = localRepositoryAdmissionJournalFileName
-)
-
 type localRepositoryAdmissionJournalFile struct {
 	Version int                                       `json:"version"`
 	Records map[string]localRepositoryAdmissionRecord `json:"records"`
 }
 
-// RepositoryAdmissionCoordinate identifies one exact process-local
+// repositoryAdmissionCoordinate identifies one exact process-local
 // materialization authority. The durable journal is sufficient to recover an
 // admission after restart, but only a successful exact Fleet renewal in this
 // serve incarnation may authorize Source Control to materialize repositories.
-type RepositoryAdmissionCoordinate struct {
+type repositoryAdmissionCoordinate struct {
 	WorkspaceKey      string
 	AdmissionID       string
 	OperationID       string
@@ -102,10 +85,8 @@ type RepositoryAdmissionCoordinate struct {
 	SpecFingerprint   string
 }
 
-type repositoryAdmissionCoordinate = RepositoryAdmissionCoordinate
-
 type repositoryAdmissionMaterializationAuthority struct {
-	coordinate RepositoryAdmissionCoordinate
+	coordinate repositoryAdmissionCoordinate
 	deadline   time.Time
 }
 
@@ -157,19 +138,6 @@ func newLocalRepositoryAdmissionJournalAt(
 		authorities:  make(map[string]repositoryAdmissionMaterializationAuthority),
 		monotonicNow: time.Now,
 	}, nil
-}
-
-func NewRepositoryAdmissionJournalAt(
-	dir string,
-	now func() time.Time,
-) (*RepositoryAdmissionJournal, error) {
-	return newLocalRepositoryAdmissionJournalAt(dir, now)
-}
-
-// NormalizeLocalRepositoryAdmissionID validates and normalizes an admission ID
-// before it is used as a durable journal key.
-func NormalizeLocalRepositoryAdmissionID(value string) (string, error) {
-	return normalizeLocalRepositoryAdmissionID(value)
 }
 
 func validRepositoryAdmissionMaterializationCoordinate(
@@ -270,31 +238,7 @@ func (journal *RepositoryAdmissionJournal) deactivateAllMaterializationAuthoriti
 	journal.authorityMu.Unlock()
 }
 
-func (journal *RepositoryAdmissionJournal) ActivateMaterializationAuthority(
-	coordinate RepositoryAdmissionCoordinate,
-	deadline time.Time,
-) error {
-	return journal.activateMaterializationAuthority(coordinate, deadline)
-}
-
-func (journal *RepositoryAdmissionJournal) RenewMaterializationAuthority(
-	coordinate RepositoryAdmissionCoordinate,
-	deadline time.Time,
-) bool {
-	return journal.renewMaterializationAuthority(coordinate, deadline)
-}
-
-func (journal *RepositoryAdmissionJournal) DeactivateMaterializationAuthority(
-	coordinate RepositoryAdmissionCoordinate,
-) {
-	journal.deactivateMaterializationAuthority(coordinate)
-}
-
-func (journal *RepositoryAdmissionJournal) DeactivateAllMaterializationAuthorities() {
-	journal.deactivateAllMaterializationAuthorities()
-}
-
-func (journal *RepositoryAdmissionJournal) MaterializationAuthorityDeadline(
+func (journal *RepositoryAdmissionJournal) materializationAuthorityDeadline(
 	admissionID string,
 ) (time.Time, bool) {
 	if journal == nil {
@@ -306,7 +250,7 @@ func (journal *RepositoryAdmissionJournal) MaterializationAuthorityDeadline(
 	return authority.deadline, active
 }
 
-func (journal *RepositoryAdmissionJournal) MaterializationAuthorityCount() int {
+func (journal *RepositoryAdmissionJournal) materializationAuthorityCount() int {
 	if journal == nil {
 		return 0
 	}
@@ -315,14 +259,14 @@ func (journal *RepositoryAdmissionJournal) MaterializationAuthorityCount() int {
 	return len(journal.authorities)
 }
 
-// AcquireMaterializationLock serializes one durable admission and every local
+// acquireMaterializationLock serializes one durable admission and every local
 // checkout target it owns across serve processes. The admission lock prevents
 // two owner generations of the same process from overlapping; target locks
 // additionally prevent unrelated admissions from entering the same canonical
 // machine-local path if an upstream reservation invariant regresses.
 //
 //nolint:funlen // The lock acquisition must keep path containment, in-process exclusion, and OS-lock cleanup in one critical section.
-func (journal *RepositoryAdmissionJournal) AcquireMaterializationLock(
+func (journal *RepositoryAdmissionJournal) acquireMaterializationLock(
 	ctx context.Context,
 	admissionID string,
 	targets []string,
@@ -448,7 +392,7 @@ func canonicalMaterializationLockTarget(target string) (string, error) {
 	return filepath.Clean(resolved), nil
 }
 
-func (journal *RepositoryAdmissionJournal) Prepare(
+func (journal *RepositoryAdmissionJournal) prepare(
 	ctx context.Context,
 	intent localRepositoryAdmissionIntent,
 ) (localRepositoryAdmissionRecord, error) {
@@ -483,7 +427,7 @@ func (journal *RepositoryAdmissionJournal) Prepare(
 }
 
 //nolint:funlen // Journal binding atomically checks immutable intent, operation identity, and admission coordinates before persistence.
-func (journal *RepositoryAdmissionJournal) Bind(
+func (journal *RepositoryAdmissionJournal) bind(
 	ctx context.Context,
 	operationID,
 	admissionID,
@@ -546,7 +490,7 @@ func (journal *RepositoryAdmissionJournal) Bind(
 	return result, err
 }
 
-func (journal *RepositoryAdmissionJournal) GetByOperation(
+func (journal *RepositoryAdmissionJournal) getByOperation(
 	ctx context.Context,
 	operationID string,
 ) (localRepositoryAdmissionRecord, error) {
@@ -573,7 +517,7 @@ func (journal *RepositoryAdmissionJournal) GetByOperation(
 	return result, err
 }
 
-func (journal *RepositoryAdmissionJournal) GetByAdmission(
+func (journal *RepositoryAdmissionJournal) getByAdmission(
 	ctx context.Context,
 	admissionID string,
 ) (localRepositoryAdmissionRecord, error) {
@@ -610,7 +554,7 @@ func (journal *RepositoryAdmissionJournal) ResolveLocalRepositoryAdmission(
 		return sourcecontrol.RepositoryAdmissionLocalProjection{},
 			sourcecontrol.ErrRepositoryAdmissionNotFound
 	}
-	record, err := journal.GetByAdmission(ctx, admissionID)
+	record, err := journal.getByAdmission(ctx, admissionID)
 	if err != nil {
 		if errors.Is(err, errLocalRepositoryAdmissionNotFound) {
 			return sourcecontrol.RepositoryAdmissionLocalProjection{}, fmt.Errorf(
@@ -659,7 +603,7 @@ func (journal *RepositoryAdmissionJournal) ResolveLocalRepositoryAdmission(
 	}, nil
 }
 
-func (journal *RepositoryAdmissionJournal) List(
+func (journal *RepositoryAdmissionJournal) list(
 	ctx context.Context,
 ) ([]localRepositoryAdmissionRecord, error) {
 	if journal == nil {
@@ -682,7 +626,7 @@ func (journal *RepositoryAdmissionJournal) List(
 	return result, err
 }
 
-func (journal *RepositoryAdmissionJournal) Remove(
+func (journal *RepositoryAdmissionJournal) remove(
 	ctx context.Context,
 	operationID string,
 ) error {

@@ -79,6 +79,8 @@ type ServerConfig struct {
 	AgentsCapability          AgentsCapability
 	AgentProvisioning         AgentProvisioningCapability
 	SourceControl             SourceControlMaterializer
+	TaskStackBindings         SourceControlStackBindingResolver
+	TaskOutcomes              SourceControlTaskOutcomeRecorder
 	WorkspaceSourceControl    RepositoryAdmissionMaterializer
 	WorkspaceCatalog          WorkspaceAPI
 	InteractionCapability     InteractionCapability

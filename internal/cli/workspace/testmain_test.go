@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
+	"github.com/tysonthomas9/loomcli/internal/cli/testdata/clitest"
 )
 
 func TestMain(m *testing.M) {

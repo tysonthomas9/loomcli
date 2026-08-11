@@ -151,7 +151,7 @@ func (process *repositoryAdmissionProcess) beginMaterialization(
 	for _, repository := range record.Spec.Repositories {
 		targets = append(targets, filepath.Join(workspacePath, repository.Name))
 	}
-	unlock, err := process.journal.AcquireMaterializationLock(
+	unlock, err := process.journal.acquireMaterializationLock(
 		materializationCtx,
 		record.AdmissionID,
 		targets,

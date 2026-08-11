@@ -32,6 +32,7 @@ import (
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	serverhandler "github.com/tysonthomas9/loomcli/internal/webui/server/handler"
@@ -70,6 +71,8 @@ type Module struct {
 	worktreePath         string
 	localSettingsDir     string
 	sourceControl        SourceControl
+	stackBindings        sourcecontrol.StackBindingResolver
+	taskOutcomes         sourcecontrol.TaskOutcomeRecorder
 	localRepoPath        func(workspaceKey, repoName string) string
 	issueBackends        IssueBackendFactory
 	rolePrompts          RolePromptReader
@@ -112,6 +115,8 @@ func NewModule(cfg Config) *Module { //nolint:funlen // Operation registration i
 		worktreePath:         cfg.WorktreePath,
 		localSettingsDir:     strings.TrimSpace(cfg.LocalSettingsDir),
 		sourceControl:        cfg.SourceControl,
+		stackBindings:        cfg.StackBindings,
+		taskOutcomes:         cfg.TaskOutcomes,
 		localRepoPath:        cfg.LocalRepoPath,
 		issueBackends:        cfg.IssueBackends,
 		rolePrompts:          cfg.RolePrompts,

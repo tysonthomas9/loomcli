@@ -84,6 +84,8 @@ func newWorkspaceModules(deps Deps, automationModules automationRouteModules) []
 			RunTokenKey:      deps.DriverRunTokenKey,
 			LocalSettingsDir: deps.LocalSettingsDir, LocalRepoPath: storeadapter.ResolveRepoPath,
 			SourceControl:    deps.SourceControl,
+			StackBindings:    deps.TaskStackBindings,
+			TaskOutcomes:     deps.TaskOutcomes,
 			Dispatcher:       deps.Dispatcher,
 			WorkflowEventing: deps.AutomationEventing, EventAwaits: automationModules.EventAwaits,
 			Execution: deps.ExecutionDriverRuns, ExecutionAuthorities: deps.ExecutionDriverRunAuthorities,

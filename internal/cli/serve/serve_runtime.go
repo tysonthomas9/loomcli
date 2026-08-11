@@ -202,7 +202,8 @@ func startServeRuntime(
 		callbacks.repositoryRequiredBlocker, issueJournalSource, config.IssueJournal,
 	)
 	executionPasses, err := buildExecutionRuntimePasses(
-		storeHandle.Store, runOutcomes, cfg.ExecutionCapability, cfg.ArtifactsCapability, cfg.SourceControl, config,
+		storeHandle.Store, runOutcomes, cfg.ExecutionCapability, cfg.ArtifactsCapability,
+		cfg.SourceControl, cfg.TaskStackBindings, cfg.TaskOutcomes, config,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("compose Execution compatibility passes: %w", err)

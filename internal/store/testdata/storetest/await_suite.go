@@ -1,4 +1,4 @@
-// Package storetest exports store-agnostic conformance suites so every
+// Package storetest exports test-only store-agnostic conformance suites so every
 // store.Store backend (memstore in-process, fleet-db over HTTP) proves the
 // same semantics with the same cases — the await suite here is shared by
 // chunk AW4 (memstore) and the AW5 fleetdb client against AW2/AW3 storage.

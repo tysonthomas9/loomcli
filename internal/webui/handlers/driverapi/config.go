@@ -37,6 +37,8 @@ type Config struct {
 	WorktreePath     string
 	LocalSettingsDir string
 	SourceControl    SourceControl
+	StackBindings    sourcecontrol.StackBindingResolver
+	TaskOutcomes     sourcecontrol.TaskOutcomeRecorder
 	LocalRepoPath    func(workspaceKey, repoName string) string
 	IssueBackends    IssueBackendFactory
 	RolePrompts      RolePromptReader

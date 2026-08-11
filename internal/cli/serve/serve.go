@@ -728,6 +728,8 @@ func buildServerConfig(
 		capabilities.agents = agentsCapability
 		gitOps.WithAgentQueries(agentsCapability.AgentsAPI())
 		cfg.SourceControl = agentsCapability.SourceControlMaterializer()
+		cfg.TaskStackBindings = agentsCapability.TaskStackBindings()
+		cfg.TaskOutcomes = agentsCapability.TaskOutcomes()
 		cfg.WorkspaceSourceControl = agentsCapability.RepositoryAdmissionMaterializer()
 		if agentsCapability.AgentProvisioningCommands() != nil {
 			cfg.AgentProvisioning = agentsCapability
@@ -892,8 +894,7 @@ func applyWorkspaceConfigWithAdmission(
 	if storeHandle != nil && storeHandle.FleetDBClient() != nil {
 		admissions = storeHandle.FleetDBClient().RepositoryAdmissions()
 	}
-	operations := workspacemgr.NewStoreBackedWorkspaceAdmissionOperationsWithWorkspace(
-		cfg.Store,
+	operations := workspacemgr.NewStoreBackedWorkspaceAdmissionOperations(
 		cfg.WorkspaceCatalog,
 		agentsCommands,
 		admissions,

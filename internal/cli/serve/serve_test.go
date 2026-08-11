@@ -16,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/infra/workspacecatalog"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/testutil"
 	"github.com/tysonthomas9/loomcli/internal/webui"
@@ -280,7 +281,12 @@ func TestApplyWorkspaceConfig_NilStoreDoesNotWireWorkspaceFns(t *testing.T) {
 
 func TestApplyWorkspaceConfig_StoreWiresStoreBackedFns(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
-	cfg := webui.ServerConfig{Store: memstore.New()}
+	st := memstore.New()
+	workspace, err := workspacecatalog.New(st.Workspaces(), st.Repos())
+	if err != nil {
+		t.Fatalf("compose Workspace capability: %v", err)
+	}
+	cfg := webui.ServerConfig{Store: st, WorkspaceCatalog: workspace}
 
 	applyWorkspaceConfig(&cfg, workspaceAgentsCommandsStub{})
 

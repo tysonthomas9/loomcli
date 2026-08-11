@@ -1,7 +1,4 @@
-// Package taskworktree owns the machine-local preparation of a task-run
-// worktree together with the stack-lineage policy that selects and records its
-// base/output. Repository admission and selection remain outside this package.
-package taskworktree
+package driver
 
 import (
 	"context"
@@ -17,15 +14,14 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 )
 
-// Preparer holds the workspace-local state used throughout one task worktree
+// taskWorktreePreparer holds the workspace-local state used throughout one task worktree
 // preparation.
-type Preparer struct {
+type taskWorktreePreparer struct {
 	workspaceKey string
 	local        bootstrap.WorkspaceLocalState
 }
 
-// Open loads and validates the machine-local state for workspaceKey.
-func Open(workspaceKey string) (*Preparer, error) {
+func openTaskWorktreePreparer(workspaceKey string) (*taskWorktreePreparer, error) {
 	sc, err := bootstrap.LoadStateCache()
 	if err != nil {
 		return nil, fmt.Errorf("load local workspace state: %w", err)
@@ -40,13 +36,13 @@ func Open(workspaceKey string) (*Preparer, error) {
 	if strings.TrimSpace(local.Path) == "" {
 		return nil, fmt.Errorf("workspace %q has no local path in loom state", workspaceKey)
 	}
-	return &Preparer{workspaceKey: workspaceKey, local: local}, nil
+	return &taskWorktreePreparer{workspaceKey: workspaceKey, local: local}, nil
 }
 
 // Prepare creates taskRunID's detached worktree from a Source-Control-verified
 // checkout and local ref. This boundary performs no network or credential
 // resolution.
-func (p *Preparer) Prepare(
+func (p *taskWorktreePreparer) prepare(
 	ctx context.Context,
 	repo *workspacemodule.Repository,
 	repoPath string,

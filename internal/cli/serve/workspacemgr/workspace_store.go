@@ -11,8 +11,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
-	"github.com/tysonthomas9/loomcli/internal/infra/workspacecatalog"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
@@ -29,119 +27,6 @@ type repositoryCheckoutMaterializer interface {
 		context.Context,
 		sourcecontrol.RepositoryAdmissionCheckoutCommand,
 	) (*sourcecontrol.PreparedRepositoryCheckout, error)
-}
-
-// BuildStoreBackedCreateWorkspace returns a create function for fleet-db store
-// mode. Existing-dir ("empty") creation writes workspace/repo metadata to the
-// store as the source of truth and records only local checkout paths in
-// ~/.loom/state.json.
-func BuildStoreBackedCreateWorkspace(
-	s storepkg.Store,
-	agentsCommands ManagedAgentsCommands,
-) workspacecoord.WorkspaceCreateFn {
-	return BuildStoreBackedCreateWorkspaceWithSourceControl(s, agentsCommands, nil)
-}
-
-// BuildStoreBackedCreateWorkspaceWithSourceControl is the UI/runtime variant.
-// Clone requests fail closed without the owner materializer; raw remotes are
-// persisted only after Source Control validation and provider credentials
-// never cross this boundary.
-func BuildStoreBackedCreateWorkspaceWithSourceControl(
-	s storepkg.Store,
-	agentsCommands ManagedAgentsCommands,
-	materializer repositoryCheckoutMaterializer,
-) workspacecoord.WorkspaceCreateFn {
-	return BuildStoreBackedCreateWorkspaceWithAdmission(
-		s,
-		agentsCommands,
-		nil,
-		nil,
-		materializer,
-	)
-}
-
-// BuildStoreBackedCreateWorkspaceWithAdmission composes the production
-// restart-safe repository-admission process. FleetDB reserves the complete
-// repository batch before any checkout is published, while the local journal
-// binds that admission to this machine's checkout root.
-func BuildStoreBackedCreateWorkspaceWithAdmission(
-	s storepkg.Store,
-	agentsCommands ManagedAgentsCommands,
-	admissions infrafleetdb.RepositoryAdmissionTransport,
-	journal *RepositoryAdmissionJournal,
-	materializer repositoryCheckoutMaterializer,
-) workspacecoord.WorkspaceCreateFn {
-	catalog, err := workspacecatalog.New(s.Workspaces(), s.Repos())
-	if err != nil {
-		return nil
-	}
-	operations := NewStoreBackedWorkspaceAdmissionOperationsWithWorkspace(
-		s,
-		catalog,
-		agentsCommands,
-		admissions,
-		journal,
-		materializer,
-	)
-	if operations == nil {
-		return nil
-	}
-	return operations.CreateWorkspace
-}
-
-// BuildStoreBackedAddRepos returns a repo attachment function for fleet-db
-// store mode. It creates git worktrees, then registers those repos in the
-// store and local state cache as one rollback-aware operation.
-func BuildStoreBackedAddRepos(
-	s storepkg.Store,
-	agentsCommands ManagedAgentsCommands,
-) workspacecoord.WorkspaceAddReposFn {
-	return BuildStoreBackedAddReposWithSourceControl(s, agentsCommands, nil)
-}
-
-// BuildStoreBackedAddReposWithSourceControl is the UI/runtime variant. Local
-// worktree attachment remains Workspace-owned; remote checkout always crosses
-// the credential-free Source Control materializer.
-func BuildStoreBackedAddReposWithSourceControl(
-	s storepkg.Store,
-	agentsCommands ManagedAgentsCommands,
-	materializer repositoryCheckoutMaterializer,
-) workspacecoord.WorkspaceAddReposFn {
-	return BuildStoreBackedAddReposWithAdmission(
-		s,
-		agentsCommands,
-		nil,
-		nil,
-		materializer,
-	)
-}
-
-// BuildStoreBackedAddReposWithAdmission composes the same durable batch for
-// an existing Workspace. Neither local worktrees nor remote checkouts become
-// FleetDB Repo records until one owner-fenced Commit publishes the full set.
-func BuildStoreBackedAddReposWithAdmission(
-	s storepkg.Store,
-	agentsCommands ManagedAgentsCommands,
-	admissions infrafleetdb.RepositoryAdmissionTransport,
-	journal *RepositoryAdmissionJournal,
-	materializer repositoryCheckoutMaterializer,
-) workspacecoord.WorkspaceAddReposFn {
-	catalog, err := workspacecatalog.New(s.Workspaces(), s.Repos())
-	if err != nil {
-		return nil
-	}
-	operations := NewStoreBackedWorkspaceAdmissionOperationsWithWorkspace(
-		s,
-		catalog,
-		agentsCommands,
-		admissions,
-		journal,
-		materializer,
-	)
-	if operations == nil {
-		return nil
-	}
-	return operations.AddWorkspaceRepos
 }
 
 //nolint:cyclop,funlen,gocognit // Orchestrates filesystem, git, and store rollback steps for one workflow.

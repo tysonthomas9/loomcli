@@ -55,6 +55,8 @@ func buildExecutionRuntimePasses(
 	executionCapability webui.ExecutionCapability,
 	artifactsCapability webui.ArtifactsCapability,
 	sourceControl sourcecontrol.Materializer,
+	stackBindings sourcecontrol.StackBindingResolver,
+	taskOutcomes sourcecontrol.TaskOutcomeRecorder,
 	config serveRuntimeConfig,
 ) (serveadapter.ExecutionRuntimePasses, error) {
 	if err := validateExecutionRuntimePassCapabilities(st, executionCapability, artifactsCapability); err != nil {
@@ -73,9 +75,9 @@ func buildExecutionRuntimePasses(
 	if !config.DriverExecutorEnabled {
 		return passes, nil
 	}
-	if sourceControl == nil {
+	if sourceControl == nil || stackBindings == nil || taskOutcomes == nil {
 		return serveadapter.ExecutionRuntimePasses{}, fmt.Errorf(
-			"compose Execution task workers: Source Control materializer is required",
+			"compose Execution task workers: Source Control materializer, stack bindings, and task outcomes are required",
 		)
 	}
 	workDir, err := os.Getwd()
@@ -90,18 +92,39 @@ func buildExecutionRuntimePasses(
 	if !ok {
 		return serveadapter.ExecutionRuntimePasses{}, fmt.Errorf("compose Execution driver executor: sandbox configuration rejected")
 	}
-	taskWorkerTemplate := driverexecutor.TaskWorker{
+	taskWorkerTemplate := newExecutionTaskWorker(
+		st, executor, artifactsCapability, executionCapability,
+		sourceControl, stackBindings, taskOutcomes, config, workDir, nodeCapacity,
+	)
+	passes.DriverExecutor, passes.TaskWorkers = serveadapter.BuildSharedNodeExecutionRuntimePasses(executor, taskWorkerTemplate, nodeCapacity)
+	return passes, nil
+}
+
+func newExecutionTaskWorker(
+	st store.Store,
+	executor *driverexecutor.Executor,
+	artifactsCapability webui.ArtifactsCapability,
+	executionCapability webui.ExecutionCapability,
+	sourceControl sourcecontrol.Materializer,
+	stackBindings sourcecontrol.StackBindingResolver,
+	taskOutcomes sourcecontrol.TaskOutcomeRecorder,
+	config serveRuntimeConfig,
+	workDir string,
+	nodeCapacity int,
+) driverexecutor.TaskWorker {
+	return driverexecutor.TaskWorker{
 		Store: st, WorkspaceKey: executor.WorkspaceKey, WorkDir: workDir,
 		Artifacts: artifactsCapability.ArtifactsAPI(),
 		NodeID:    executor.NodeID, NodeCapacity: nodeCapacity, RunnerID: config.TaskWorkerRunnerID,
 		MaxAttempts: config.TaskRunMaxAttempts, APIBaseURL: config.DriverAPIBaseURL,
 		LocalSettingsDir: config.LocalSettingsDir, Execution: executionCapability.TaskRunWorkerAPI(),
-		SourceControl:      sourceControl,
-		TaskRunAuthorities: executionCapability.TaskRunAuthorityResolver(),
-		Convergence:        executionCapability.TaskRunConvergenceAPI(), ExecutionAuthorities: executionCapability.SystemAuthorityResolver(),
+		SourceControl:        sourceControl,
+		StackBindings:        stackBindings,
+		TaskOutcomes:         taskOutcomes,
+		TaskRunAuthorities:   executionCapability.TaskRunAuthorityResolver(),
+		Convergence:          executionCapability.TaskRunConvergenceAPI(),
+		ExecutionAuthorities: executionCapability.SystemAuthorityResolver(),
 	}
-	passes.DriverExecutor, passes.TaskWorkers = serveadapter.BuildSharedNodeExecutionRuntimePasses(executor, taskWorkerTemplate, nodeCapacity)
-	return passes, nil
 }
 
 // startOutboxDispatcher launches the always-on server-side outbox delivery
