@@ -14,6 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/triggerbindings"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
@@ -40,6 +41,7 @@ type Config struct {
 	Store                 agentProjectionStore
 	Hub                   *realtime.Hub
 	Bindings              automation.BindingOperations
+	BindingRuns           triggerbindings.RunQueries
 	OperatorAuthority     workflowcataloghttp.OperatorAuthorityResolver
 	Provisioning          agentprovisioning.Commands
 	ProvisioningAuthority workflowcataloghttp.OperatorAuthorityResolver
@@ -65,6 +67,7 @@ type Module struct {
 	store                 agentProjectionStore
 	hub                   *realtime.Hub
 	bindings              automation.BindingOperations
+	bindingRuns           triggerbindings.RunQueries
 	operatorAuthority     workflowcataloghttp.OperatorAuthorityResolver
 	provisioning          agentprovisioning.Commands
 	provisioningAuthority workflowcataloghttp.OperatorAuthorityResolver
@@ -90,7 +93,7 @@ func New(config Config) *Module {
 		agentRecordAuthority: config.AgentRecordAuthority,
 		sessionTranscripts:   config.SessionTranscripts,
 		store:                config.Store, hub: config.Hub,
-		bindings: config.Bindings, operatorAuthority: config.OperatorAuthority,
+		bindings: config.Bindings, bindingRuns: config.BindingRuns, operatorAuthority: config.OperatorAuthority,
 		provisioning: config.Provisioning, provisioningAuthority: config.ProvisioningAuthority,
 		prepareWorkflowTarget: config.PrepareWorkflowTarget,
 		agentLifecycle:        lifecycle,

@@ -24,7 +24,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
 
@@ -34,11 +33,11 @@ const (
 )
 
 // RunQueries is the consumer-owned read interface used for current run-history
-// responses and list health decoration. It deliberately omits run creation and
-// every execution lifecycle mutation.
+// responses and list health decoration. Implementations return at most limit
+// runs in deterministic newest-first order. The port deliberately omits storage
+// filters, run creation, and every execution lifecycle mutation.
 type RunQueries interface {
-	Get(ctx context.Context, workspaceKey, runID string) (*domain.DriverRun, error)
-	List(ctx context.Context, workspaceKey string, filter store.DriverRunFilter) ([]*domain.DriverRun, error)
+	ListByBinding(ctx context.Context, workspaceKey, bindingID string, limit int) ([]*domain.DriverRun, error)
 }
 
 // Config contains only the owner interfaces and narrow reads needed by this
@@ -205,13 +204,9 @@ func bindingRunHealth(ctx context.Context, runs RunQueries, workspace, bindingID
 	if runs == nil || strings.TrimSpace(bindingID) == "" {
 		return "", 0
 	}
-	items, err := runs.List(ctx, workspace, store.DriverRunFilter{BindingID: bindingID, Limit: bindingRunScanLimit})
+	items, err := runs.ListByBinding(ctx, workspace, bindingID, bindingRunScanLimit)
 	if err != nil || len(items) == 0 {
 		return "", 0
-	}
-	store.SortDriverRunsNewestFirst(items)
-	if len(items) > bindingRunScanLimit {
-		items = items[:bindingRunScanLimit]
 	}
 	lastStatus := string(items[0].Status)
 	consecutiveFailures := 0
@@ -656,12 +651,11 @@ func (m *Module) listBindingRuns(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	runs, err := m.runs.List(r.Context(), workspace, store.DriverRunFilter{BindingID: binding.BindingID, Limit: limit})
+	runs, err := m.runs.ListByBinding(r.Context(), workspace, binding.BindingID, limit)
 	if err != nil {
 		writeAutomationError(w, err, "list trigger binding runs failed")
 		return
 	}
-	runs = handler.SortAndTrim(runs, limit)
 	handler.WriteJSON(w, http.StatusOK, map[string]any{"binding_id": binding.BindingID, "runs": runs})
 }
 

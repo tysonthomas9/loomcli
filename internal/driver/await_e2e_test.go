@@ -313,7 +313,7 @@ func newAwaitFlowsServer(t *testing.T, st store.Store, runTokenKey []byte) (*htt
 		WorkflowCatalog: awaitE2EWorkflowCatalog{store: st},
 	}).Register(mux)
 	approvals.New(approvals.Config{
-		Store: st, Awaits: awaitMatcher, Journal: approvalJournal,
+		PendingAwaits: st.Awaits(), Awaits: awaitMatcher, Journal: approvalJournal,
 		Authority: awaitE2EApprovalAuthorityProvider{issuer: approvalIssuer},
 	}).Register(mux)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

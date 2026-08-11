@@ -20,6 +20,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
+	"github.com/tysonthomas9/loomcli/internal/webui/readprojection"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
@@ -683,6 +684,7 @@ func newTestAgentsModule(agentSvc agentcoord.AgentService, st store.Store, hub *
 		bindings := &testBindingOperations{store: st}
 		provisioning := newTestAgentProvisioning(st, bindings)
 		config.Bindings = bindings
+		config.BindingRuns = readprojection.NewBindingRunReader(st.DriverRuns())
 		config.BindingGrants = testBindingGrantCleanup{grants: st.Connectors()}
 		config.Provisioning = provisioning
 		config.ProvisioningAuthority = provisioning

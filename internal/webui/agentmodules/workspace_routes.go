@@ -25,6 +25,10 @@ import (
 func newWorkspaceModules(deps Deps, automationModules automationRouteModules) []interface{ Register(*http.ServeMux) } {
 	onboardingModule := onboarding.NewModule(deps.WorkItems, deps.Agents, deps.AgentsOperator)
 	taskWorkflowRuns := newTaskWorkflowRunReader(deps)
+	var pendingAwaits approvals.PendingAwaitQueries
+	if deps.Store != nil {
+		pendingAwaits = deps.Store.Awaits()
+	}
 
 	return []interface{ Register(*http.ServeMux) }{
 		agents.New(agents.Config{
@@ -33,6 +37,7 @@ func newWorkspaceModules(deps Deps, automationModules automationRouteModules) []
 			AgentRecords:       deps.Agents, AgentRecordAuthority: deps.AgentsOperator,
 			Store: deps.Store, Hub: deps.Hub,
 			Bindings: deps.AutomationBindings, OperatorAuthority: deps.AutomationOperator,
+			BindingRuns:  automationModules.BindingRuns,
 			Provisioning: deps.AgentProvisioning, ProvisioningAuthority: deps.AgentProvisioningOperator,
 			PrepareWorkflowTarget: deps.WorkflowTargetPreparation,
 			WorkspaceFromContext:  automationModules.WorkspaceFromContext,
@@ -63,7 +68,7 @@ func newWorkspaceModules(deps Deps, automationModules automationRouteModules) []
 		automationModules.TriggerBindings,
 		connectors.NewModule(deps.Store, deps.LocalSettingsDir, deps.AutomationBindings, deps.AutomationOperator),
 		approvals.New(approvals.Config{
-			Store: deps.Store, Awaits: automationModules.EventAwaits,
+			PendingAwaits: pendingAwaits, Awaits: automationModules.EventAwaits,
 			Journal: deps.AutomationApprovalJournal, Authority: deps.AutomationApprovalAuthority,
 		}),
 		taskrunapi.NewModule(taskrunapi.Config{

@@ -14,6 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/triggerbindings"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/webhooks"
+	"github.com/tysonthomas9/loomcli/internal/webui/readprojection"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
@@ -74,6 +75,7 @@ type automationRouteModules struct {
 	TriggerBindings      automationRouteModule
 	EventAwaits          eventAwaitDispatcher
 	BindingGrants        bindingGrantCleanup
+	BindingRuns          triggerbindings.RunQueries
 	WorkspaceFromContext func(context.Context) string
 }
 
@@ -87,6 +89,10 @@ func newAutomationRouteModules(deps automationRouteDeps) automationRouteModules 
 	if deps.Connectors != nil {
 		grantCleanup = connectorBindingGrantCleanup{lifecycle: deps.Connectors}
 	}
+	var runQueries triggerbindings.RunQueries
+	if deps.DriverRuns != nil {
+		runQueries = readprojection.NewBindingRunReader(deps.DriverRuns)
+	}
 	return automationRouteModules{
 		Webhooks: webhooks.New(webhooks.Config{
 			Workflow:   deps.Capabilities.AutomationWebhook,
@@ -98,11 +104,12 @@ func newAutomationRouteModules(deps automationRouteDeps) automationRouteModules 
 			Commands:       deps.Capabilities.AutomationBindings, Queries: deps.Capabilities.AutomationBindings,
 			ManualDispatch:       deps.Capabilities.AutomationBindings,
 			OperatorAuthority:    deps.Capabilities.AutomationOperator,
-			WorkspaceFromContext: middleware.WorkspaceFromContext, Runs: deps.DriverRuns,
+			WorkspaceFromContext: middleware.WorkspaceFromContext, Runs: runQueries,
 			Connectors: deps.Connectors, AgentIdentities: deps.AgentIdentities,
 		}),
 		EventAwaits:          eventAwaits,
 		BindingGrants:        grantCleanup,
+		BindingRuns:          runQueries,
 		WorkspaceFromContext: middleware.WorkspaceFromContext,
 	}
 }

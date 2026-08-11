@@ -20,6 +20,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/triggerbindings"
+	"github.com/tysonthomas9/loomcli/internal/webui/readprojection"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
 
@@ -771,7 +772,7 @@ func TestAgentEnableDisableFanoutAndBindingGuard(t *testing.T) {
 	triggerbindings.New(triggerbindings.Config{
 		Commands: &testBindingOperations{store: st}, Queries: &testBindingOperations{store: st},
 		ManualDispatch: &testBindingOperations{store: st}, OperatorAuthority: testOperatorAuthorityResolver{},
-		WorkspaceFromContext: func(context.Context) string { return agentRecordTestWS }, Runs: st.DriverRuns(),
+		WorkspaceFromContext: func(context.Context) string { return agentRecordTestWS }, Runs: readprojection.NewBindingRunReader(st.DriverRuns()),
 		Connectors: testTriggerConnectorLifecycle{grants: st.Connectors()},
 	}).Register(mux)
 	created := createPromptAgentForTest(t, mux)

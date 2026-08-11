@@ -22,6 +22,7 @@ import (
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/readprojection"
 )
 
 // seededMux returns a mux wired to a memstore that already has a workflow
@@ -65,7 +66,7 @@ func seededMux(t *testing.T) (*http.ServeMux, store.Store) {
 		CreateWorkflow: createWorkflow,
 		Commands:       automationAPI, Queries: automationAPI, ManualDispatch: automationAPI,
 		OperatorAuthority: testOperatorResolver{}, WorkspaceFromContext: func(context.Context) string { return "WS" },
-		Runs: s.DriverRuns(), Connectors: &testConnectorLifecycle{store: s},
+		Runs: readprojection.NewBindingRunReader(s.DriverRuns()), Connectors: &testConnectorLifecycle{store: s},
 		AgentIdentities: testAgentIdentityChecker{store: s},
 	}).Register(mux)
 	return mux, s
@@ -89,7 +90,7 @@ func muxWithIdentityChecker(
 		CreateWorkflow: createWorkflow,
 		Commands:       automationAPI, Queries: automationAPI, ManualDispatch: automationAPI,
 		OperatorAuthority: testOperatorResolver{}, WorkspaceFromContext: func(context.Context) string { return "WS" },
-		Runs: s.DriverRuns(), Connectors: &testConnectorLifecycle{store: s},
+		Runs: readprojection.NewBindingRunReader(s.DriverRuns()), Connectors: &testConnectorLifecycle{store: s},
 		AgentIdentities: checker,
 	}).Register(mux)
 	return mux
@@ -738,7 +739,7 @@ func TestCreateBinding_EnsureResolvesWorkflowBeforeReusingBinding(t *testing.T) 
 		CreateWorkflow: createWorkflow,
 		Commands:       automationAPI, Queries: automationAPI, ManualDispatch: automationAPI,
 		OperatorAuthority: testOperatorResolver{}, WorkspaceFromContext: func(context.Context) string { return "WS" },
-		Runs: st.DriverRuns(), Connectors: &testConnectorLifecycle{store: st},
+		Runs: readprojection.NewBindingRunReader(st.DriverRuns()), Connectors: &testConnectorLifecycle{store: st},
 		AgentIdentities: testAgentIdentityChecker{store: st},
 	}).Register(mux)
 
@@ -804,7 +805,7 @@ func TestCreateBinding_WorkflowTargetFreshStoreReturns201Then200(t *testing.T) {
 		CreateWorkflow: createWorkflow,
 		Commands:       automationAPI, Queries: automationAPI, ManualDispatch: automationAPI,
 		OperatorAuthority: testOperatorResolver{}, WorkspaceFromContext: func(context.Context) string { return "WS" },
-		Runs: st.DriverRuns(), Connectors: &testConnectorLifecycle{store: st},
+		Runs: readprojection.NewBindingRunReader(st.DriverRuns()), Connectors: &testConnectorLifecycle{store: st},
 		AgentIdentities: testAgentIdentityChecker{store: st},
 	}).Register(mux)
 	body := `{"workflow":"github-review-agent","source_kind":"cron","schedule":"*/10 * * * *","binding_id":"fresh-review","enabled":true}`

@@ -47,7 +47,6 @@ import (
 	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
@@ -73,15 +72,18 @@ const (
 
 // Module serves the workspace-scoped approval route.
 type Module struct {
-	store     approvalStore
-	awaits    AwaitDispatcher
-	journal   automation.ApprovalJournal
-	authority automation.ApprovalAuthorityProvider
-	logger    *slog.Logger
+	awaitQueries PendingAwaitQueries
+	awaits       AwaitDispatcher
+	journal      automation.ApprovalJournal
+	authority    automation.ApprovalAuthorityProvider
+	logger       *slog.Logger
 }
 
-type approvalStore interface {
-	Awaits() store.AwaitStore
+// PendingAwaitQueries is the approval transport's consumer-owned read port.
+// It exposes only the eligibility projection needed before journal dispatch;
+// approval handlers cannot reach await persistence or any mutation method.
+type PendingAwaitQueries interface {
+	ListAwaitsByPattern(context.Context, string, string) ([]*domain.AwaitInstance, error)
 }
 
 // AwaitDispatcher is the Execution-backed mutation surface used after the
@@ -92,14 +94,14 @@ type AwaitDispatcher interface {
 }
 
 type Config struct {
-	Store     approvalStore
-	Awaits    AwaitDispatcher
-	Journal   automation.ApprovalJournal
-	Authority automation.ApprovalAuthorityProvider
-	Logger    *slog.Logger
+	PendingAwaits PendingAwaitQueries
+	Awaits        AwaitDispatcher
+	Journal       automation.ApprovalJournal
+	Authority     automation.ApprovalAuthorityProvider
+	Logger        *slog.Logger
 }
 
-// New constructs the approvals module. Nil Store keeps route registration
+// New constructs the approvals module. Nil PendingAwaits keeps route registration
 // inert; nil Awaits leaves the registered route fail-closed with 503.
 func New(config Config) *Module {
 	logger := config.Logger
@@ -107,13 +109,13 @@ func New(config Config) *Module {
 		logger = slog.Default()
 	}
 	return &Module{
-		store: config.Store, awaits: config.Awaits, journal: config.Journal,
+		awaitQueries: config.PendingAwaits, awaits: config.Awaits, journal: config.Journal,
 		authority: config.Authority, logger: logger,
 	}
 }
 
 func (m *Module) Register(mux *http.ServeMux) {
-	if m.store == nil {
+	if m.awaitQueries == nil {
 		return
 	}
 	mux.HandleFunc("POST /api/workspaces/{ws}/approvals", m.postApproval)
@@ -291,7 +293,7 @@ func decodeApproval(w http.ResponseWriter, r *http.Request) (approvalParams, err
 // without await support surface errors.ErrUnsupported; other errors are
 // treated the same fail-closed way by the caller.
 func (m *Module) pendingAwaits(ctx context.Context, ws, subjectKey string) ([]*domain.AwaitInstance, error) {
-	pending, err := m.store.Awaits().ListAwaitsByPattern(ctx, ws, subjectKey)
+	pending, err := m.awaitQueries.ListAwaitsByPattern(ctx, ws, subjectKey)
 	if err != nil {
 		return nil, err
 	}

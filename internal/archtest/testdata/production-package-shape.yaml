@@ -16,7 +16,7 @@ ceilings:
   total_packages: 167
   module_packages: 15
   outside_module_packages: 152
-  one_file_packages: 47
+  one_file_packages: 46
   one_or_two_file_packages: 68
 packages:
   - internal/agenterr

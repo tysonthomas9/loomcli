@@ -148,7 +148,7 @@ func newApprovalsHarnessWithExecution(t *testing.T, executionAvailable bool) *ap
 	)
 	mux := http.NewServeMux()
 	New(Config{
-		Store: st, Awaits: awaits, Journal: journal,
+		PendingAwaits: st.Awaits(), Awaits: awaits, Journal: journal,
 		Authority: approvalsAuthorityProvider{issuer: issuer},
 	}).Register(mux)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
