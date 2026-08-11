@@ -14,7 +14,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/driver/runtypes"
 	"github.com/tysonthomas9/loomcli/internal/driver/sandbox"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -26,14 +25,36 @@ type Runner interface {
 	Run(ctx context.Context, req RunRequest) (RunResult, error)
 }
 
-// The driver's core run types and the SB1 sandbox seam live in the
-// internal/driver/sandbox subpackage (extracted so the run/orchestration types
-// and the sandbox launchers stop forming an import cycle). These aliases keep
-// driver.RunRequest / driver.SandboxLauncher / the §9.6 audit consts available
-// to in-package code, cross-package callers, and tests unchanged.
+// RunRequest is the Driver-owned input to one workflow runtime invocation.
+type RunRequest struct {
+	Run          *domain.DriverRun
+	Version      *workflowcatalog.DriverVersion
+	BundleRoot   string
+	WorkflowPath string
+	ServerPath   string
+	Manifest     map[string]string
+	// RunToken is the run-scoped bearer token minted at claim time and exported
+	// to the workflow runtime as LOOM_RUN_TOKEN. Runtime launch rejects an empty
+	// token, and the executor terminally fails a claimed run when minting is
+	// unavailable.
+	RunToken string
+	// TrustLevel is resolved server-side. Anything except trusted, including
+	// empty or unknown, refuses a non-isolating launcher.
+	TrustLevel workflowcatalog.DriverTrustLevel
+}
+
+// RunResult is the Driver-owned terminal result of one workflow invocation.
+type RunResult struct {
+	Status     domain.DriverRunStatus
+	Summary    string
+	ErrorClass string
+	Output     map[string]string
+}
+
+// The SB1 sandbox seam lives in a child package. These aliases keep the
+// Driver's public launcher surface stable without introducing a neutral DTO
+// package between the owner and its adapter.
 type (
-	RunRequest        = runtypes.RunRequest
-	RunResult         = runtypes.RunResult
 	SandboxLauncher   = sandbox.SandboxLauncher
 	IsolatingLauncher = sandbox.IsolatingLauncher
 	LaunchSpec        = sandbox.LaunchSpec
@@ -97,9 +118,8 @@ type Executor struct {
 	// notification, which is owned by Execution and remains store-backed.
 	RunOutcomes RunOutcomePublisher
 	// Execution is the Phase 4 owner of live DriverRun lifecycle mutations.
-	// Serve always supplies this API and its typed authority resolvers. Nil
-	// retains the legacy direct-store compatibility path for standalone CLI
-	// callers and existing isolated tests until their command family migrates.
+	// Serve and standalone composition must supply this API and its typed
+	// authority resolvers; RunOnce fails closed when any owner API is absent.
 	Execution                 execution.DriverRunAPI
 	RunOutcomeQueue           execution.DriverRunOutcomeAPI
 	TerminalWorkRecoveryQueue execution.TerminalDriverRunWorkRecoveryQueueAPI

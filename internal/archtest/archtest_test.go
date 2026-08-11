@@ -683,6 +683,7 @@ func TestRetiredHorizontalRootsCannotReturn(t *testing.T) {
 		"internal/backendnames",
 		"internal/cli/backendapi",
 		"internal/connector",
+		"internal/driver/runtypes",
 		"internal/infra/artifactcatalog",
 		"internal/infra/connectorscatalog",
 		"internal/infra/sessionstoreadapter",
@@ -761,6 +762,25 @@ func TestRetiredHorizontalRootsCannotReturn(t *testing.T) {
 				t.Fatalf("retired horizontal root callers = %v, want none", callers)
 			}
 		})
+	}
+}
+
+func TestRetiredDriverRunContractBridgeCannotReturn(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(filepath.Join(root, "internal", "driver", "executor.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{
+		"runtypes.",
+		"legacy direct-store compatibility path",
+	} {
+		if strings.Contains(string(content), forbidden) {
+			t.Errorf("retired Driver run-contract compatibility %q returned", forbidden)
+		}
 	}
 }
 

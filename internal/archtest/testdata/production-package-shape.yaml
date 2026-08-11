@@ -13,11 +13,11 @@ semantics:
     - vendor
     - worktrees
 ceilings:
-  total_packages: 171
+  total_packages: 170
   module_packages: 15
-  outside_module_packages: 156
-  one_file_packages: 51
-  one_or_two_file_packages: 72
+  outside_module_packages: 155
+  one_file_packages: 50
+  one_or_two_file_packages: 71
 packages:
   - internal/agenterr
   - internal/agentpolicy
@@ -83,7 +83,6 @@ packages:
   - internal/driver
   - internal/driver/daytonahost
   - internal/driver/nativearchive
-  - internal/driver/runtypes
   - internal/driver/sandbox
   - internal/driver/taskworktree
   - internal/epicrunner

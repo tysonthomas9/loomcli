@@ -229,8 +229,13 @@ func (r NodeRunner) runBuiltFlueServer(ctx context.Context, req RunRequest, node
 	// SB3 trust placement policy: an untrusted bundle never launches outside
 	// an isolating sandbox — the run fails sandbox_required with no process
 	// spawned, never a silent fallback.
-	if refusal, refused := sandbox.RefuseUntrustedPlacement(req, launcher); refused {
-		return refusal, nil
+	if refusal, refused := sandbox.RefuseUntrustedPlacement(req.Run.DriverID, req.TrustLevel, launcher); refused {
+		return RunResult{
+			Status:     domain.DriverRunFailed,
+			Summary:    refusal.Summary,
+			ErrorClass: refusal.ErrorClass,
+			Output:     refusal.Output,
+		}, nil
 	}
 	process, err := launcher.Launch(ctx, LaunchSpec{
 		BundleRoot: req.BundleRoot,
@@ -245,8 +250,8 @@ func (r NodeRunner) runBuiltFlueServer(ctx context.Context, req RunRequest, node
 	}
 	exit, waitErr := process.Wait()
 	result := flueRuntimeResult(ctx, req, exit.Stdout, exit.Stderr, waitErr)
-	sandbox.RecordSandboxPlacement(&result, process.Placement())
-	sandbox.RecordTrustPlacementDecision(&result, req.TrustLevel, sandbox.LauncherPlacementProvider(launcher))
+	result.Output = sandbox.RecordSandboxPlacement(result.Output, process.Placement())
+	result.Output = sandbox.RecordTrustPlacementDecision(result.Output, req.TrustLevel, sandbox.LauncherPlacementProvider(launcher))
 	return result, nil
 }
 
