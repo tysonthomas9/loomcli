@@ -11,8 +11,24 @@ import (
 // concrete implementation.
 type BackendOpsImpl struct{}
 
+var _ ops.BackendOps = (*BackendOpsImpl)(nil)
+
 // NewBackendOps creates a new BackendOpsImpl.
 func NewBackendOps() *BackendOpsImpl { return &BackendOpsImpl{} }
+
+// BackendHealth returns readiness for one configured runtime provider without
+// probing unrelated backends. It implements the Workflows HTTP adapter's
+// consumer-owned health-query port at serve composition.
+func (b *BackendOpsImpl) BackendHealth(name string) (ops.BackendHealth, bool) {
+	health, ok := backends.CheckBackendHealth(name)
+	if !ok {
+		return ops.BackendHealth{}, false
+	}
+	return ops.BackendHealth{
+		Name: name, Available: health.Healthy, Installed: health.Installed,
+		APIKeySet: health.APIKeySet, Version: health.Version, Message: health.Message,
+	}, true
+}
 
 // ListBackendsHealth returns health/availability status for all registered backends.
 func (b *BackendOpsImpl) ListBackendsHealth() ([]ops.BackendHealth, error) {

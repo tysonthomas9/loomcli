@@ -13,11 +13,11 @@ semantics:
     - vendor
     - worktrees
 ceilings:
-  total_packages: 182
+  total_packages: 181
   module_packages: 15
-  outside_module_packages: 167
-  one_file_packages: 62
-  one_or_two_file_packages: 83
+  outside_module_packages: 166
+  one_file_packages: 61
+  one_or_two_file_packages: 82
 packages:
   - internal/agenterr
   - internal/agentpolicy
@@ -145,7 +145,6 @@ packages:
   - internal/platform/runtime
   - internal/roleprompts
   - internal/runtimectx
-  - internal/runtimepreflight
   - internal/sessions
   - internal/sessions/eventstore
   - internal/sessions/redact

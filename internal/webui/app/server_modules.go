@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/agentmodules"
 	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
@@ -137,6 +138,14 @@ func (app *Server) unifiedAgentModuleDeps() UnifiedAgentModuleDeps {
 		WorkflowCatalogOperator:   app.config.WorkflowCatalogOperator,
 		WorkflowTargetPreparation: app.config.WorkflowTargetPreparation,
 		SourceControl:             app.config.SourceControl,
+	}
+	if app.config.BackendOps != nil {
+		deps.WorkflowBackendHealth = agentmodules.NewWorkflowBackendHealthQuery(
+			func(name string) (bool, bool, bool, string, bool) {
+				status, ok := app.config.BackendOps.BackendHealth(name)
+				return status.Available, status.Installed, status.APIKeySet, status.Message, ok
+			},
+		)
 	}
 	if transcripts, ok := app.sessSvc.(sessioncoord.AgentSessionTranscriptService); ok {
 		deps.AgentSessionTranscripts = transcripts

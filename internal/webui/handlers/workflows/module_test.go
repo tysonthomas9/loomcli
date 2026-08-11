@@ -282,6 +282,12 @@ func (adapter workflowRunStoreTestExecution) SubmitDriverRun(
 	}, nil
 }
 
+type backendHealthQueryFunc func(string) (BackendHealth, bool)
+
+func (query backendHealthQueryFunc) BackendHealth(name string) (BackendHealth, bool) {
+	return query(name)
+}
+
 func newWorkflowTestModule(st *memstore.Store) *Module {
 	catalog := &workflowRunStoreTestCatalog{store: st}
 	return NewModule(Config{
@@ -310,6 +316,11 @@ func newWorkflowTestModule(st *memstore.Store) *Module {
 		TaskWorkflowRuns: readprojection.NewTaskWorkflowRunReader(
 			st.TaskRuns(), st.TriggerEvents(), st.TriggerDeliveries(), st.DriverRuns(),
 		),
+		BackendHealth: backendHealthQueryFunc(func(string) (BackendHealth, bool) {
+			return BackendHealth{
+				Available: true, Installed: true, APIKeySet: true, Message: "ready",
+			}, true
+		}),
 	})
 }
 

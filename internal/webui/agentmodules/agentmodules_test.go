@@ -70,3 +70,16 @@ func TestNewPreservesRegistrationOrder(t *testing.T) {
 		t.Fatalf("module registration order = %v, want %v", got, want)
 	}
 }
+
+func TestWorkflowBackendHealthAdapterOwnsDeliveryModelAndFailsClosedWithoutComposition(t *testing.T) {
+	if got := NewWorkflowBackendHealthQuery(nil); got != nil {
+		t.Fatalf("nil backend operations produced query %#v", got)
+	}
+	query := NewWorkflowBackendHealthQuery(func(string) (bool, bool, bool, string, bool) {
+		return true, true, true, "ready", true
+	})
+	got, ok := query.BackendHealth("codex")
+	if !ok || !got.Available || !got.Installed || !got.APIKeySet || got.Message != "ready" {
+		t.Fatalf("mapped Workflows health = %#v, %v", got, ok)
+	}
+}

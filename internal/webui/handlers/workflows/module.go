@@ -45,6 +45,7 @@ type Module struct {
 	execution         execution.DriverRunAPI
 	operatorAuthority workflowcataloghttp.OperatorAuthorityResolver
 	taskWorkflowRuns  readprojection.TaskWorkflowRunReader
+	backendHealth     BackendHealthQuery
 }
 
 type workflowProjectionStore interface {
@@ -67,6 +68,7 @@ type Config struct {
 	Execution                execution.DriverRunAPI
 	OperatorAuthority        workflowcataloghttp.OperatorAuthorityResolver
 	TaskWorkflowRuns         readprojection.TaskWorkflowRunReader
+	BackendHealth            BackendHealthQuery
 }
 
 func NewModule(config Config) *Module {
@@ -75,6 +77,7 @@ func NewModule(config Config) *Module {
 		catalogAuthority: config.CatalogOperatorAuthority, prepareTarget: config.PrepareWorkflowTarget,
 		execution:         config.Execution,
 		operatorAuthority: config.OperatorAuthority, taskWorkflowRuns: config.TaskWorkflowRuns,
+		backendHealth: config.BackendHealth,
 	}
 }
 

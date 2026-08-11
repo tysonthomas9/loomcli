@@ -51,7 +51,7 @@ func newWorkspaceModules(deps Deps, automationModules automationRouteModules) []
 			CatalogOperatorAuthority: deps.WorkflowCatalogOperator,
 			PrepareWorkflowTarget:    deps.WorkflowTargetPreparation,
 			Execution:                deps.ExecutionDriverRuns, OperatorAuthority: deps.ExecutionOperator,
-			TaskWorkflowRuns: taskWorkflowRuns,
+			TaskWorkflowRuns: taskWorkflowRuns, BackendHealth: deps.WorkflowBackendHealth,
 		}),
 		executionmanagement.New(executionmanagement.Config{
 			WorkerProfiles: deps.ExecutionWorkerProfiles, Authority: deps.ExecutionOperator,
@@ -89,6 +89,34 @@ func newWorkspaceModules(deps Deps, automationModules automationRouteModules) []
 			InteractionChat: deps.InteractionChat,
 		}),
 	}
+}
+
+type workflowBackendHealthAdapter struct {
+	check BackendHealthCheck
+}
+
+// BackendHealthCheck is the composition input used to translate infrastructure
+// health into the Workflows delivery adapter's consumer-owned model.
+type BackendHealthCheck func(name string) (available, installed, apiKeySet bool, message string, ok bool)
+
+// NewWorkflowBackendHealthQuery closes the composition seam without exposing
+// the operations health model to Workflows.
+func NewWorkflowBackendHealthQuery(check BackendHealthCheck) workflows.BackendHealthQuery {
+	if check == nil {
+		return nil
+	}
+	return workflowBackendHealthAdapter{check: check}
+}
+
+func (adapter workflowBackendHealthAdapter) BackendHealth(name string) (workflows.BackendHealth, bool) {
+	available, installed, apiKeySet, message, ok := adapter.check(name)
+	if !ok {
+		return workflows.BackendHealth{}, false
+	}
+	return workflows.BackendHealth{
+		Available: available, Installed: installed,
+		APIKeySet: apiKeySet, Message: message,
+	}, true
 }
 
 func newTaskWorkflowRunReader(deps Deps) readprojection.TaskWorkflowRunReader {

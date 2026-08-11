@@ -20,6 +20,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/workflows"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
 )
@@ -81,6 +82,7 @@ type Deps struct {
 	WorkflowCatalogAuthoring      workflowcatalog.VersionAuthoringAPI
 	WorkflowCatalogOperator       workflowcataloghttp.OperatorAuthorityResolver
 	WorkflowTargetPreparation     func(context.Context, string, string) (*workflowcatalog.Driver, error)
+	WorkflowBackendHealth         workflows.BackendHealthQuery
 	Artifacts                     artifacts.API
 	ExecutionTaskRuns             execution.TaskRunAPI
 	DaytonaProvider               execution.DaytonaProviderBroker
