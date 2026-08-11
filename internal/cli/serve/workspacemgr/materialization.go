@@ -1,6 +1,4 @@
-// Package workspacematerialization owns the process and repository mechanics
-// used to attach local Git repositories to a Loom workspace.
-package workspacematerialization
+package workspacemgr
 
 import (
 	"context"

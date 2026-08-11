@@ -59,7 +59,7 @@ goroutine_launches:
   - {file: "internal/driver/stale_task_sweeper.go", function: "Executor.startHeartbeats", site: "go#1", callee: "heartbeatDriverRun", disposition: component, component_ids: [driver-run-heartbeat]}
   - {file: "internal/driver/stale_task_sweeper.go", function: "Executor.startHeartbeats", site: "go#2", callee: "heartbeatExecutorNode", disposition: component, component_ids: [executor-node-heartbeat]}
   - {file: "internal/driver/task_worker.go", function: "TaskWorker.startExecutionTaskRunHeartbeat", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [execution-task-run-heartbeat]}
-  - {file: "internal/harness/fakeharness/mock/main.go", function: "installSignalCleanup", site: "go#1", callee: "<anonymous>", disposition: helper, reason: "explicitly test-only fake-harness signal helper included by the all-source scan"}
+  - {file: "internal/harness/fakeharness/testdata/mock/main.go", function: "installSignalCleanup", site: "go#1", callee: "<anonymous>", disposition: helper, reason: "explicitly test-only fake-harness signal helper included by the all-source scan"}
   - {file: "internal/infra/interactionlead/codex_runtime.go", function: "RunCodexLeadRuntime", site: "go#1", callee: "discoverCodexLeadThread", disposition: component, component_ids: [codex-lead-thread-discovery]}
   - {file: "internal/infra/interactionlead/codex_runtime.go", function: "RunCodexLeadRuntime", site: "go#2", callee: "drainLeadMessageQueue", disposition: component, component_ids: [lead-message-delivery-drain]}
   - {file: "internal/infra/interactionlead/codex_runtime.go", function: "startCodexAppServer", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [codex-app-server-process-reaper]}

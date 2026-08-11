@@ -19,13 +19,13 @@ import (
 
 // buildFakeHarness compiles the in-tree fake-harness mock binary and
 // returns its absolute path. The binary lives at
-// internal/harness/fakeharness/mock and supports several scripted
+// internal/harness/fakeharness/testdata/mock and supports several scripted
 // behaviors (completed, failed, stuck, cost-limited, api-error) that
 // the wrapper classifier knows how to recognize.
 func buildFakeHarness(t *testing.T) string {
 	t.Helper()
 	bin := filepath.Join(t.TempDir(), "fakeharness")
-	cmd := exec.Command("go", "build", "-o", bin, "github.com/tysonthomas9/loomcli/internal/harness/fakeharness/mock")
+	cmd := exec.Command("go", "build", "-o", bin, "github.com/tysonthomas9/loomcli/internal/harness/fakeharness/testdata/mock")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("build fake harness: %v\n%s", err, out)
 	}

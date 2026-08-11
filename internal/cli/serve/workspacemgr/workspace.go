@@ -12,7 +12,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
-	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr/workspacematerialization"
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 )
@@ -82,7 +81,7 @@ func validateWorkspaceCreatePath(wsDir string) error {
 	}
 
 	parent := filepath.Dir(wsDir)
-	if workspacematerialization.PathContains(defaultWorkspaceBase(), wsDir) {
+	if PathContains(defaultWorkspaceBase(), wsDir) {
 		return nil
 	}
 	info, err := os.Stat(parent)
@@ -199,7 +198,7 @@ func addWorktreesWithRepoDefault(
 		}
 		worktree, err := createWorkspaceWorktree(repo, worktreePath, worktreeBranch)
 		if err != nil {
-			if errors.Is(err, workspacematerialization.ErrRepositoryNotUsable) {
+			if errors.Is(err, ErrRepositoryNotUsable) {
 				return created, nil, workspacemodule.NewCreateError(workspacemodule.GitFailed, fmt.Sprintf("source repo is not usable for %s", repo.name), err)
 			}
 			warnSkippedWorktree(ctx, repo.name, worktreePath, err)
@@ -244,7 +243,7 @@ func createWorkspaceWorktreeContext(
 	worktreePath,
 	branch string,
 ) (createdWorktree, error) {
-	created, err := workspacematerialization.CreateWorktreeContext(
+	created, err := CreateWorktreeContext(
 		ctx,
 		repo.path,
 		worktreePath,
@@ -261,7 +260,7 @@ func createWorkspaceWorktreeContext(
 }
 
 func workspaceWorktreeRecoveryBase(repoPath, targetBranch string) string {
-	return workspacematerialization.RecoveryBase(repoPath, targetBranch)
+	return RecoveryBase(repoPath, targetBranch)
 }
 
 func workspaceWorktreeRecoveryBaseContext(
@@ -269,11 +268,11 @@ func workspaceWorktreeRecoveryBaseContext(
 	repoPath,
 	targetBranch string,
 ) string {
-	return workspacematerialization.RecoveryBaseContext(ctx, repoPath, targetBranch)
+	return RecoveryBaseContext(ctx, repoPath, targetBranch)
 }
 
 func addWorkspaceWorktree(repoPath, worktreePath, branch, baseRef string, createBranch bool) error {
-	return workspacematerialization.AddWorktree(
+	return AddWorktree(
 		repoPath,
 		worktreePath,
 		branch,
@@ -290,7 +289,7 @@ func addWorkspaceWorktreeContext(
 	baseRef string,
 	createBranch bool,
 ) error {
-	return workspacematerialization.AddWorktreeContext(
+	return AddWorktreeContext(
 		ctx,
 		repoPath,
 		worktreePath,
@@ -305,7 +304,7 @@ func runWorkspaceGitContext(
 	dir string,
 	args ...string,
 ) (string, error) {
-	return workspacematerialization.RunGitContext(ctx, dir, args...)
+	return RunGitContext(ctx, dir, args...)
 }
 
 func warnSkippedWorktree(ctx context.Context, repoName, worktreePath string, err error) {

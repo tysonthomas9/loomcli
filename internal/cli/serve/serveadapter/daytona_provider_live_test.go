@@ -1,6 +1,6 @@
 //go:build e2e
 
-package daytonabroker
+package serveadapter
 
 import (
 	"context"

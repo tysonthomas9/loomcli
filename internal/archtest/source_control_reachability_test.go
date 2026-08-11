@@ -288,7 +288,7 @@ func TestPhase5CredentialContainmentRatchet(t *testing.T) {
 			"verifyLease",
 			"ExecuteDaytona",
 		},
-		"internal/cli/serve/serveadapter/daytonabroker/daytona_provider.go": {
+		"internal/cli/serve/serveadapter/daytona_provider.go": {
 			"UnsealRuntimeCredentialBytes",
 			"RunDaytonaProviderHost",
 		},
@@ -316,7 +316,7 @@ func TestPhase5CredentialContainmentRatchet(t *testing.T) {
 		`"daytona-execute":`,
 		"DaytonaProvider execution.DaytonaProviderBroker",
 	})
-	assertFileIncludes(t, root, "internal/cli/serve/serveadapter/daytonabroker/daytona_provider.go", []string{
+	assertFileIncludes(t, root, "internal/cli/serve/serveadapter/daytona_provider.go", []string{
 		"type DaytonaProviderBroker struct",
 		"localsettings.UnsealRuntimeCredentialBytes",
 		"driver.RunDaytonaProviderHost",

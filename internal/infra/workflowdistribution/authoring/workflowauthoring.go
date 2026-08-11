@@ -5,6 +5,7 @@ package authoring
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,6 +75,17 @@ func IsBuiltinWorkflow(name string) bool {
 
 func BuildBuiltinBundle(ctx context.Context, name, destDir string) (string, string, error) {
 	return workflowdistribution.BuildBuiltinBundle(ctx, name, destDir)
+}
+
+// ResolveDaytonaSDKRoot resolves the provider SDK shipped with the active Flue
+// runtime. Keeping runtime-layout discovery in the distribution adapter lets
+// host adapters consume one cohesive authoring and staging boundary.
+func ResolveDaytonaSDKRoot() (string, error) {
+	runtimeRoot, err := workflowdistribution.FlueRuntimeRoot()
+	if err != nil {
+		return "", fmt.Errorf("resolve Flue runtime: %w", err)
+	}
+	return workflowdistribution.DaytonaSDKRoot(runtimeRoot)
 }
 
 func SourceDigest(files map[string]string) (string, error) {

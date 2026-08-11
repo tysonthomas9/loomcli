@@ -1,4 +1,4 @@
-package daytonabroker
+package serveadapter
 
 import (
 	"context"

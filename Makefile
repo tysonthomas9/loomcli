@@ -541,7 +541,7 @@ test-e2e-daytona-broker: local-mode-daytona-build-check
 	  DAYTONA_SDK_ROOT="$(FLUE_SRC)/node_modules/.pnpm/node_modules/@daytona/sdk" \
 	  LOOM_REAL_FLUE_CMD_JSON='["node","$(FLUE_SRC)/packages/cli/bin/flue.mjs"]' \
 	  GOCACHE=$${GOCACHE:-/tmp/go-build-cache} \
-	  go test -count=1 -tags e2e -run TestE2EDaytonaProviderBroker ./internal/cli/serve/serveadapter/daytonabroker -timeout 15m
+	  go test -count=1 -tags e2e -run TestE2EDaytonaProviderBroker ./internal/cli/serve/serveadapter -timeout 15m
 
 # Compile + run the real GitHub stacked-PR publisher e2e (initial publish / re-run /
 # drop-a-unit / reorder). The test is //go:build e2e tagged, so this target is also the

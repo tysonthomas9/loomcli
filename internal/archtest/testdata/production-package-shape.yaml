@@ -9,15 +9,16 @@ semantics:
   excluded_directories:
     - .git
     - node_modules
+    - testdata
     - third_party
     - vendor
     - worktrees
 ceilings:
-  total_packages: 167
+  total_packages: 164
   module_packages: 15
-  outside_module_packages: 152
-  one_file_packages: 46
-  one_or_two_file_packages: 68
+  outside_module_packages: 149
+  one_file_packages: 43
+  one_or_two_file_packages: 65
 packages:
   - internal/agenterr
   - internal/agentpolicy
@@ -67,11 +68,9 @@ packages:
   - internal/cli/serve/metricscmd
   - internal/cli/serve/opsimpl
   - internal/cli/serve/serveadapter
-  - internal/cli/serve/serveadapter/daytonabroker
   - internal/cli/serve/worker
   - internal/cli/serve/workspacemgr
   - internal/cli/serve/workspacemgr/admissionstore
-  - internal/cli/serve/workspacemgr/workspacematerialization
   - internal/cli/sessionfinalize
   - internal/cli/stack
   - internal/cli/trigger
@@ -91,7 +90,6 @@ packages:
   - internal/gitauth
   - internal/gitbranch
   - internal/harness
-  - internal/harness/fakeharness/mock
   - internal/httpclient
   - internal/infra/automationruntime
   - internal/infra/connectorsproviders

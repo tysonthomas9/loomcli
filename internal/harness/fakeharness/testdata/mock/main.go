@@ -11,9 +11,8 @@
 //	cost-limited  prints a quota-exhausted message, exits with --exit-code
 //	api-error     prints --api-error-msg (optionally --api-error-repeat times) then either heartbeats until signal or, if --api-error-recover, continues to completed-style progress and exits 0
 //
-// This binary has no external dependencies on a particular consumer.
-// It's a standalone fake harness invoked as a subprocess by tests
-// under pkg/wrapper.
+// This testdata binary has no external dependencies on a particular consumer.
+// It is invoked only as a subprocess by harness integration tests.
 package main
 
 import (
