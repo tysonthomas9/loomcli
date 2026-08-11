@@ -78,6 +78,22 @@ func TestHandleCreateCarriesInteractiveKindAndPromptFile(t *testing.T) {
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("status = %d body = %s, want 201", rr.Code, rr.Body.String())
 	}
+	var wire map[string]json.RawMessage
+	if err := json.Unmarshal(rr.Body.Bytes(), &wire); err != nil {
+		t.Fatalf("decode created agent wire response: %v", err)
+	}
+	for _, field := range []string{"repos", "repo_groups", "cross_repo"} {
+		if _, ok := wire[field]; !ok {
+			t.Fatalf("created agent response missing required %q: %s", field, rr.Body.String())
+		}
+	}
+	for field, want := range map[string]string{
+		"repos": "[]", "repo_groups": "[]", "cross_repo": "false",
+	} {
+		if got := string(wire[field]); got != want {
+			t.Fatalf("%s = %s, want %s", field, got, want)
+		}
+	}
 	var created domain.Agent
 	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
 		t.Fatalf("decode created agent: %v", err)

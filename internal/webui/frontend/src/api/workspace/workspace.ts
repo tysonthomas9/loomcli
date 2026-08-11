@@ -114,6 +114,26 @@ export interface WorkspaceData {
   task_delivery_requirement?: TaskDeliveryRequirement;
 }
 
+function normalizeWorkspaceAgentInfo(
+  agent: WorkspaceAgentInfo,
+): WorkspaceAgentInfo {
+  return {
+    ...agent,
+    repos: Array.isArray(agent.repos) ? agent.repos : [],
+    repo_groups: Array.isArray(agent.repo_groups) ? agent.repo_groups : [],
+    cross_repo: agent.cross_repo === true,
+  };
+}
+
+function normalizeWorkspaceData(data: WorkspaceData): WorkspaceData {
+  return {
+    ...data,
+    agents: Array.isArray(data.agents)
+      ? data.agents.map(normalizeWorkspaceAgentInfo)
+      : [],
+  };
+}
+
 // ============= Response Types =============
 
 interface ApiSuccess<T> {
@@ -163,11 +183,15 @@ export async function fetchWorkspaceApi(
       params: { path: { ws: workspaceId } },
     });
     if (error) throw apiErrorFromResponse(error, response);
-    return unwrap(data as unknown as ApiResult<WorkspaceData>, response);
+    return normalizeWorkspaceData(
+      unwrap(data as unknown as ApiResult<WorkspaceData>, response),
+    );
   }
   const { data, error, response } = await api.GET("/api/workspaces/active");
   if (error) throw apiErrorFromResponse(error, response);
-  return unwrap(data as unknown as ApiResult<WorkspaceData>, response);
+  return normalizeWorkspaceData(
+    unwrap(data as unknown as ApiResult<WorkspaceData>, response),
+  );
 }
 
 /**
@@ -327,10 +351,12 @@ export async function createWorkspaceAgent(
   workspaceId: string,
   req: CreateAgentRequest,
 ): Promise<WorkspaceAgentInfo> {
-  return post<WorkspaceAgentInfo>(
-    `/api/workspaces/${encodeURIComponent(workspaceId)}/agents`,
-    req,
-    { timeout: 120_000 },
+  return normalizeWorkspaceAgentInfo(
+    await post<WorkspaceAgentInfo>(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/agents`,
+      req,
+      { timeout: 120_000 },
+    ),
   );
 }
 

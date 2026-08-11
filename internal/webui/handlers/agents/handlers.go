@@ -83,7 +83,17 @@ func HandleCreate(agentSvc service.AgentService, hub *realtime.Hub) http.Handler
 			return
 		}
 		broadcastAgentRefresh(hub, ws, created.Name, r.Header.Get("X-Actor"))
-		handler.WriteJSON(w, http.StatusCreated, created)
+		handler.WriteJSON(w, http.StatusCreated, workspaceAgentInfo(created))
+	}
+}
+
+func workspaceAgentInfo(agent *domain.Agent) dto.WorkspaceAgentInfo {
+	return dto.WorkspaceAgentInfo{
+		Name:       agent.Name,
+		RoleName:   agent.RoleName,
+		Repos:      append([]string{}, agent.Repos...),
+		RepoGroups: append([]string{}, agent.RepoGroups...),
+		CrossRepo:  agent.CrossRepo,
 	}
 }
 
