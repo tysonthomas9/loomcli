@@ -22,6 +22,7 @@
 - **Wave 9.18 implementation:** `7c179fada`
 - **Wave 9.19 implementation:** `c412c3f61`
 - **Wave 9.20 implementation:** `d34fb0ed1`
+- **Wave 9.21 implementation:** `fb16ce443`
 - **Stacked branches:** `modular-monolith-phase9-01-types-ratchet`, then
   `modular-monolith-phase9-02-shallow-seams`, then
   `modular-monolith-phase9-03-legacy-planes`, then
@@ -41,7 +42,8 @@
   `modular-monolith-phase9-17-durable-terminal-launch`, then
   `modular-monolith-phase9-18-driver-run-contract`, then
   `modular-monolith-phase9-19-local-node-state`, then
-  `modular-monolith-phase9-20-agents-bootstrap-composition`
+  `modular-monolith-phase9-20-agents-bootstrap-composition`, then
+  `modular-monolith-phase9-21-automation-owner-intents`
 - **Purpose:** Reduce the residual package surface toward 160 production Go
   packages without weakening capability ownership, consumer-owned ports, or
   independently replaceable adapters.
@@ -988,6 +990,61 @@ deleted. The exact row/site snapshot was tightened to 86/95, and the complete
 unchanged-source rerun passed. The subsequent full paired gate passed without
 adding an allowlist, compatibility constructor, persistence receiver, fallback
 path, or contract change.
+
+## Wave 9.21 result
+
+The twenty-first slice deletes the two remaining Automation composition
+compatibility adapters and their tests. Trigger-binding routes no longer
+reconstruct Connectors behavior over `store.TriggerBindingStore` and
+`connectors.ManagementStore`, and they no longer reconstruct Agent identity
+queries over `store.AgentServiceStore`. They consume the canonical Agents
+identity queries and a new Connectors-owned `BindingLifecycle` intent directly.
+
+Connectors now owns the complete operations for configuring one binding's
+privileged signing secret and converging its grants to revoked. The service
+validates canonical input and persisted grants, hides grant enumeration and
+idempotent revoke handling, and exposes no secret result or persistence
+interface. FleetDB and memstore implement the owner-private persistence port as
+the two real adapters. The FleetDB adapter uses the existing trigger-binding
+PATCH contract, while memstore preserves public redaction and exposes the
+secret only through its privileged resolver.
+
+Agent deletion retains a consumer-owned two-argument cleanup port instead of
+importing the Connectors command vocabulary. Composition performs the single
+translation into the owner command. This keeps the Agents handler at its exact
+19-import ceiling while tightening `agentmodules` from 38 imports to 37. The
+old `ConnectorCompatibility`, `UnattachedBindingIdentityChecker`,
+`BindingGrantCompatibility`, `DeleteBindingAndRevokeGrants`, and store-backed
+adapter symbols are physically absent and guarded against return. The duplicate
+legacy schedule decorator is also deleted in favor of Automation's canonical
+source-kind projection.
+
+This is a compatibility-deletion wave, not a package-deletion wave. Exact
+package shape remains `167 / 15 / 152 / 47 / 68`, and direct persistence
+remains `86 / 95`. The FleetDB client call-site ratchet moves from 237 to 238
+because the new owner adapter issues the already-inventoried PATCH route
+directly rather than depending on the horizontal trigger-binding store. The
+implementation is `fb16ce443`.
+
+## Wave 9.21 validation
+
+| Check | Result |
+|---|---|
+| Connectors owner behavior | PASS: canonical input validation, secret persistence, grant validation, idempotent revoke, and changed-row counting |
+| FleetDB and memstore adapters | PASS: exact PATCH request/response contract, owner-error mapping, privileged secret round trip, public redaction, and missing-binding mapping |
+| Trigger-binding, Agents, and route-composition suites | PASS |
+| Retired files/symbols, package shape, direct-write policy, and import fanout | PASS: four compatibility files absent; shape `167 / 15 / 152 / 47 / 68`; writes `86 / 95`; `agentmodules` fanout 37; Agents fanout 19 |
+| Measured architecture guard | PASS: 11/11 profiles, 10 capability roots, 19 live legacy-handler allowances, 86 direct-write rows, zero pending decisions, and 1,207.7 MiB peak process-tree RSS under 2,048 MiB |
+| Aggregate `make gate` against FleetDB `b71dec551` | PASS: all Go and frontend quality gates with the exact paired source and binary, sanitized Loom runtime variables, `GOMAXPROCS=4`, one Go test worker, two Vitest workers, and a 3 GiB Go soft memory limit |
+
+The first aggregate attempt exposed the lower `agentmodules` fanout and a new
+Agents type dependency. Composition was narrowed instead of raising the
+Agents exception, and the `agentmodules` ceiling was tightened to 37. The next
+attempt found one test-only staticcheck simplification. The subsequent race run
+reached the exact FleetDB client-call tripwire; the already-declared PATCH
+route and new direct owner-adapter call were reviewed, and the count moved to
+238. The final unchanged-source aggregate gate and measured architecture pass
+both succeeded.
 
 Later waves must update this document with the selected package candidates,
 the boundary reason retained or removed for each, exact shape changes, and

@@ -1,6 +1,6 @@
 # Modular Monolith Migration
 
-- **Status:** Phase 9 package consolidation in progress; its first twenty
+- **Status:** Phase 9 package consolidation in progress; its first twenty-one
   slices ratchet the modular monolith to 167 production packages
 - **Date:** 2026-08-11
 - **Scope:** `loom serve`, the operator CLI entry surfaces, the Vite frontend counterpart, and the fleet-db contracts those capabilities depend on
@@ -305,8 +305,15 @@ repair, and deletes the legacy Agents constructor and repair-specific
 persistence interface. It ratchets the exact shape to 167 packages, 152
 outside modules, 47 one-file packages, and 68 one-or-two-file packages while
 lowering direct persistence to 86 rows/95 sites and workspacemgr fanout to 14
-with no exception. The remaining waves delete the other horizontal
-handler/store edges and residual shallow packages; an empty
+with no exception. Wave 9.21 deletes the Automation composition adapters that
+reconstructed binding-secret, grant-cleanup, and Agent-identity behavior over
+horizontal stores. Trigger-binding routes now consume the Connectors-owned
+binding lifecycle and canonical Agents identity queries, the real FleetDB and
+memstore adapters implement the owner persistence seam, and `agentmodules`
+fanout tightens from 38 to 37 without increasing the Agents handler ceiling.
+The exact package and direct-write shapes remain unchanged. The remaining
+waves delete the other horizontal handler/store edges and residual shallow
+packages; an empty
 capability-graph `legacy_paths` list alone is not completion proof. See the
 [Phase 9 plan](16-phase-9-package-consolidation.md).
 
