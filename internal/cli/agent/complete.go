@@ -62,22 +62,20 @@ func runComplete(cmd *cobra.Command, args []string) {
 	// logged but do not block the completion signal below.
 	releaseClaimOnComplete(worktreePath)
 
-	// Write signal file to a safe location outside git's reach
-	signalFile := getSignalFilePath(worktreePath)
-	signalDir := filepath.Dir(signalFile)
-
-	if err := cli.EnsureSignalDir(signalDir); err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating signal directory: %v\n", err)
-		cli.ExitWithFlush(1)
-	}
-
-	// Write the worktree path to the signal file (for debugging/verification)
-	if err := os.WriteFile(signalFile, []byte(worktreePath), 0600); err != nil {
-		fmt.Fprintf(os.Stderr, "Error writing signal file: %v\n", err)
+	if err := writeCompletionSignal(worktreePath); err != nil {
+		fmt.Fprintf(os.Stderr, "Error writing completion signal: %v\n", err)
 		cli.ExitWithFlush(1)
 	}
 
 	fmt.Println("Task completion signaled")
+}
+
+func writeCompletionSignal(worktreePath string) error {
+	signalFile := getSignalFilePath(worktreePath)
+	if err := cli.EnsureSignalDir(filepath.Dir(signalFile)); err != nil {
+		return err
+	}
+	return os.WriteFile(signalFile, []byte(worktreePath), 0600)
 }
 
 // GetSignalFilePath returns the path to the signal file for a given worktree.

@@ -162,6 +162,16 @@ describe("sandboxLeakProbeCommand covers the full widened provider-cred set", ()
 });
 
 describe("daytona-task-runner stack lineage parity (Stage 5)", () => {
+  it("uses a frozen pull_request plan without the legacy flag", () => {
+    const req = {
+      task_run_id: "tr-policy",
+      task_id: "T-POLICY",
+      input: { deliveryPlan: { plan_id: "plan-1", requirement: "pull_request" } },
+    };
+    const plan = mod.deliveryPlan(req, { id: "T-POLICY" }, "tr-policy");
+    assert.equal(plan.openPullRequest, true);
+  });
+
   it("uses the injected lineage carrier as the canonical branch + base", () => {
     const req = {
       task_run_id: "tr-1",

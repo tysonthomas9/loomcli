@@ -578,7 +578,8 @@ process.on("message", (message) => {
       logsRef: "logs://" + message.payload.task_run_id,
       runtimeMetadata: {
         workflow: process.env.FLUE_CLI_NAME,
-        request_task_run: message.payload.task_run_id
+        request_task_run: message.payload.task_run_id,
+        files_changed: "0"
       }
     }
   });
@@ -866,8 +867,9 @@ func TestHostBridgeTaskExecutorHelperProcess(t *testing.T) {
 				},
 			},
 			"runtime_metadata": map[string]string{
-				"helper":       "host_bridge",
-				"flue_harness": "task-agent",
+				"helper":        "host_bridge",
+				"flue_harness":  "task-agent",
+				"files_changed": "0",
 			},
 		}
 		if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
