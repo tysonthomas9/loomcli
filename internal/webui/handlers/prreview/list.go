@@ -80,7 +80,7 @@ func (m *Module) listPullRequests(w http.ResponseWriter, r *http.Request) {
 // repo, accumulating per-repo warnings instead of failing the whole list.
 // attempted/failed let the caller distinguish "no repo was eligible" from
 // "the connector tried and failed everywhere".
-func (m *Module) connectorListPullRequests(r *http.Request, ws, state string, repos []*workspacemodule.Repository) (prs []ops.GitPullRequest, warnings []string, attempted, failed int) {
+func (m *Module) connectorListPullRequests(r *http.Request, ws, state string, repos []workspacemodule.Repository) (prs []ops.GitPullRequest, warnings []string, attempted, failed int) {
 	prs = []ops.GitPullRequest{}
 	for _, workspaceRepo := range repos {
 		owner, repo, ok := parseGitHubOwnerRepo(workspaceRepo.RemoteURL)

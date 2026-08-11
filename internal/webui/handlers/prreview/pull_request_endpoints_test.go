@@ -11,7 +11,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
 	providers "github.com/tysonthomas9/loomcli/internal/infra/connectorsproviders"
 	"github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
 	"github.com/tysonthomas9/loomcli/internal/modules/connectors"
@@ -25,13 +24,13 @@ func TestGetPullRequestDetail(t *testing.T) {
 		t.Fatalf("status = %d, want 200 (body %s)", status, raw)
 	}
 	var decoded struct {
-		Success bool                  `json:"success"`
-		Data    gen.PullRequestDetail `json:"data"`
+		Success bool              `json:"success"`
+		Data    pullRequestDetail `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		t.Fatalf("decode response: %v (body %s)", err, raw)
 	}
-	if !decoded.Success || decoded.Data.HeadSha != "headsha-123" {
+	if !decoded.Success || decoded.Data.HeadSHA != "headsha-123" {
 		t.Fatalf("response = %+v, want success with head_sha", decoded)
 	}
 	calls := h.github.snapshot()
@@ -671,8 +670,8 @@ func TestGetPullRequestDiff(t *testing.T) {
 		t.Fatalf("status = %d, want 200 (body %s)", status, raw)
 	}
 	var decoded struct {
-		Success bool                `json:"success"`
-		Data    gen.PullRequestDiff `json:"data"`
+		Success bool            `json:"success"`
+		Data    pullRequestDiff `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		t.Fatalf("decode response: %v (body %s)", err, raw)
@@ -721,13 +720,13 @@ func TestPostPullRequestReviewApprove(t *testing.T) {
 		t.Fatalf("status = %d, want 200 (body %s)", status, raw)
 	}
 	var decoded struct {
-		Success bool                        `json:"success"`
-		Data    gen.PullRequestReviewResult `json:"data"`
+		Success bool                    `json:"success"`
+		Data    pullRequestReviewResult `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		t.Fatalf("decode response: %v (body %s)", err, raw)
 	}
-	if !decoded.Success || decoded.Data.ReviewId == nil || *decoded.Data.ReviewId != 101 || decoded.Data.State == nil || *decoded.Data.State != "APPROVED" {
+	if !decoded.Success || decoded.Data.ReviewID == nil || *decoded.Data.ReviewID != 101 || decoded.Data.State == nil || *decoded.Data.State != "APPROVED" {
 		t.Fatalf("response = %+v, want success with review id/state", decoded)
 	}
 	calls := h.github.snapshot()

@@ -117,7 +117,7 @@ func (app *Server) buildInfraModules() {
 }
 
 func (app *Server) buildStoreBackedInfraModules() {
-	app.connectorDispatcher = app.buildConnectorDispatcher()
+	app.connectorDispatcher, app.connectorManagement, app.connectorSealer = app.buildConnectorCapabilities()
 	unifiedDeps := app.unifiedAgentModuleDeps()
 	app.wsModules = append(app.wsModules, NewUnifiedAgentModules(unifiedDeps)...)
 	app.buildPRReviewModule()
@@ -151,6 +151,9 @@ func (app *Server) unifiedAgentModuleDeps() UnifiedAgentModuleDeps {
 func (app *Server) buildPRReviewModule() {
 	prReviewModule := NewPRReviewModule(
 		app.config,
+		app.workspaceCatalog,
+		app.connectorManagement,
+		app.connectorSealer,
 		app.connectorDispatcher,
 		app.agentSvc,
 		app.termSvc,

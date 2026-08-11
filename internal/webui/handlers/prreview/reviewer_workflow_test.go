@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/app/prreviewer"
-	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	providers "github.com/tysonthomas9/loomcli/internal/infra/connectorsproviders"
@@ -139,8 +138,8 @@ func TestPostReviewerMessageQueuesPending(t *testing.T) {
 		t.Fatalf("status = %d, want 200 (body %s)", status, raw)
 	}
 	var decoded struct {
-		Success bool                      `json:"success"`
-		Data    gen.ReviewerMessageResult `json:"data"`
+		Success bool                  `json:"success"`
+		Data    reviewerMessageResult `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		t.Fatalf("decode response: %v (body %s)", err, raw)
@@ -502,14 +501,14 @@ func TestEnsureReviewerCreatesAgentWorktreeAndSeed(t *testing.T) {
 	}
 	assertGrantActions(t, h, prReadActions)
 	var decoded struct {
-		Success bool                     `json:"success"`
-		Data    gen.ReviewerEnsureResult `json:"data"`
+		Success bool                 `json:"success"`
+		Data    reviewerEnsureResult `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		t.Fatalf("decode response: %v (body %s)", err, raw)
 	}
 	agentName := reviewerAgentName("octocat", "hello", 7)
-	if !decoded.Success || decoded.Data.AgentName != agentName || decoded.Data.CheckedOutSha != headSHA || !decoded.Data.Seeded {
+	if !decoded.Success || decoded.Data.AgentName != agentName || decoded.Data.CheckedOutSHA != headSHA || !decoded.Data.Seeded {
 		t.Fatalf("response = %+v, want agent %s sha %s seeded", decoded, agentName, headSHA)
 	}
 	if got := h.reviewers.ensureCount(); got != 1 {
@@ -570,19 +569,10 @@ func TestEnsureReviewerCreatesAgentWorktreeAndSeed(t *testing.T) {
 }
 
 func TestEnsureReviewerFailsClosedBeforeEgressWithoutCanonicalAgents(t *testing.T) {
-	module := NewModule(
-		memstore.New(),
-		nil,
-		nil,
-		nil,
-		t.TempDir(),
-		nil,
-		nil,
-		nil,
-		nil,
-		nil,
-		nil,
-	)
+	st := memstore.New()
+	module := NewModule(Config{
+		Workspace: buildTestWorkspaceQueries(t, st), LocalSettingsDir: t.TempDir(),
+	})
 	mux := http.NewServeMux()
 	module.Register(mux)
 	recorder := httptest.NewRecorder()

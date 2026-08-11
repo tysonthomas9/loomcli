@@ -24,6 +24,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/infra/connectorsproviders"
 	"github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/infra/workspacecatalog"
 	"github.com/tysonthomas9/loomcli/internal/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
@@ -591,23 +592,16 @@ func newPRReviewHarnessWithCredential(
 	}
 	h.seedWorkspace(t)
 
-	var dispatcher connectors.Dispatcher
-	if withDispatcher {
-		dispatcher = buildTestConnectorDispatcher(t, h.store, h.dataDir)
+	dispatcher, connectorManagement, connectorSealer := buildTestConnectorCapabilities(t, h.store, h.dataDir)
+	if !withDispatcher {
+		dispatcher = nil
 	}
-	h.module = NewModule(
-		h.store,
-		dispatcher,
-		agentSvc,
-		nil,
-		h.dataDir,
-		h.reviewers,
-		h.reviewers,
-		h.materializer,
-		h.chat,
-		h.messenger,
-		h.chatAuthority,
-	)
+	h.module = NewModule(Config{
+		Workspace: buildTestWorkspaceQueries(t, h.store), ConnectorManagement: connectorManagement, ConnectorSealer: connectorSealer,
+		Dispatcher: dispatcher, AgentService: agentSvc, LocalSettingsDir: h.dataDir,
+		ReviewerProvisioning: h.reviewers, ReviewerAgents: h.reviewers, SourceControl: h.materializer,
+		InteractionChat: h.chat, InteractionMessenger: h.messenger, InteractionAuthority: h.chatAuthority,
+	})
 	h.module.Register(h.mux)
 	return h
 }
@@ -635,26 +629,23 @@ func (h *prReviewHarness) setSettingsGitHubToken(t *testing.T, token string) {
 
 func (h *prReviewHarness) rebuildWithDataDir(t *testing.T, dataDir string) {
 	t.Helper()
-	dispatcher := buildTestConnectorDispatcher(t, h.store, dataDir)
+	dispatcher, connectorManagement, connectorSealer := buildTestConnectorCapabilities(t, h.store, dataDir)
 	h.dataDir = dataDir
-	h.module = NewModule(
-		h.store,
-		dispatcher,
-		nil,
-		nil,
-		dataDir,
-		h.reviewers,
-		h.reviewers,
-		h.materializer,
-		h.chat,
-		h.messenger,
-		h.chatAuthority,
-	)
+	h.module = NewModule(Config{
+		Workspace: buildTestWorkspaceQueries(t, h.store), ConnectorManagement: connectorManagement, ConnectorSealer: connectorSealer,
+		Dispatcher: dispatcher, LocalSettingsDir: dataDir,
+		ReviewerProvisioning: h.reviewers, ReviewerAgents: h.reviewers, SourceControl: h.materializer,
+		InteractionChat: h.chat, InteractionMessenger: h.messenger, InteractionAuthority: h.chatAuthority,
+	})
 	h.mux = http.NewServeMux()
 	h.module.Register(h.mux)
 }
 
-func buildTestConnectorDispatcher(t *testing.T, st prReviewStore, dataDir string) connectors.Dispatcher {
+func buildTestConnectorCapabilities(
+	t *testing.T,
+	st store.Store,
+	dataDir string,
+) (connectors.Dispatcher, connectors.Management, connectors.CredentialSealer) {
 	t.Helper()
 	vault, err := connectorsvault.NewVaultFromEnvOrKeyFile(dataDir)
 	if err != nil {
@@ -669,7 +660,24 @@ func buildTestConnectorDispatcher(t *testing.T, st prReviewStore, dataDir string
 	if err != nil {
 		t.Fatalf("new connector dispatcher: %v", err)
 	}
-	return dispatcher
+	vaultAdapter, err := connectorsvault.New(vault)
+	if err != nil {
+		t.Fatalf("new connector credential vault: %v", err)
+	}
+	management, err := connectors.NewManagementWithCredentialVault(st.Connectors(), vaultAdapter, time.Now)
+	if err != nil {
+		t.Fatalf("new connector management: %v", err)
+	}
+	return dispatcher, management, vault
+}
+
+func buildTestWorkspaceQueries(t *testing.T, st store.Store) WorkspaceQueries {
+	t.Helper()
+	queries, err := workspacecatalog.New(st.Workspaces(), st.Repos())
+	if err != nil {
+		t.Fatalf("new workspace catalog: %v", err)
+	}
+	return queries
 }
 
 func (h *prReviewHarness) seedWorkspace(t *testing.T) {

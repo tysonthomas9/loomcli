@@ -9,9 +9,7 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
 	"github.com/tysonthomas9/loomcli/internal/localsettings"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 )
@@ -44,7 +42,7 @@ func (m *Module) ensureConnectorAndGrants(ctx context.Context, ws, owner, repo s
 		if _, done := m.seeded.Load(cacheKey); done && generation == m.credentialSeedGeneration.Load() {
 			return nil
 		}
-		token, sealer, sealed, err := m.prepareCredentialSeed(ws)
+		token, sealed, err := m.prepareCredentialSeed(ws)
 		if err != nil {
 			return err
 		}
@@ -57,7 +55,7 @@ func (m *Module) ensureConnectorAndGrants(ctx context.Context, ws, owner, repo s
 			m.credentialSeedMu.Unlock()
 			continue
 		}
-		err = m.seedConnectorAndGrants(ctx, ws, owner, repo, token, sealer, sealed, actions)
+		err = m.seedConnectorAndGrants(ctx, ws, owner, repo, token, sealed, actions)
 		if err == nil && generation == m.credentialSeedGeneration.Load() {
 			m.seeded.Store(cacheKey, struct{}{})
 		}
@@ -67,26 +65,24 @@ func (m *Module) ensureConnectorAndGrants(ctx context.Context, ws, owner, repo s
 	return errEgressUnavailable
 }
 
-func (m *Module) prepareCredentialSeed(ws string) (string, connectorsvault.Sealer, []byte, error) {
+func (m *Module) prepareCredentialSeed(ws string) (string, []byte, error) {
 	token, err := m.resolveGitHubToken()
 	if err != nil {
-		return "", nil, nil, err
+		return "", nil, err
 	}
-	sealer, err := connectorsvault.NewVaultFromEnvOrKeyFile(m.localSettingsDir)
+	if m == nil || m.connectorSealer == nil {
+		return "", nil, errEgressUnavailable
+	}
+	sealed, err := m.connectorSealer.Seal([]byte(token), connectorsmodule.CredentialAAD(ws, connectorID))
 	if err != nil {
-		return "", nil, nil, errEgressUnavailable
+		return "", nil, fmt.Errorf("seal webui github credential: %w", err)
 	}
-	sealed, err := sealer.Seal([]byte(token), connectorsvault.CredentialAAD(ws, connectorID))
-	if err != nil {
-		return "", nil, nil, fmt.Errorf("seal webui github credential: %w", err)
-	}
-	return token, sealer, sealed, nil
+	return token, sealed, nil
 }
 
 func (m *Module) seedConnectorAndGrants(
 	ctx context.Context,
 	ws, owner, repo, token string,
-	sealer connectorsvault.Sealer,
 	sealed []byte,
 	actions []string,
 ) error {
@@ -102,7 +98,7 @@ func (m *Module) seedConnectorAndGrants(
 		if !errors.Is(err, connectorsmodule.ErrAlreadyExists) {
 			return fmt.Errorf("seed webui github connector: %w", err)
 		}
-		if err := m.rotateConnectorCredentialIfChanged(ctx, ws, token, sealer); err != nil {
+		if err := m.rotateConnectorCredentialIfChanged(ctx, ws, token); err != nil {
 			return err
 		}
 	}
@@ -161,20 +157,9 @@ func (m *Module) githubTokenConfigured() bool {
 func (m *Module) rotateConnectorCredentialIfChanged(
 	ctx context.Context,
 	ws, token string,
-	sealer connectorsvault.Sealer,
 ) error {
-	vaultAdapter, err := connectorsvault.New(sealer)
-	if err != nil {
-		return fmt.Errorf("compose webui connector credential vault: %w", err)
-	}
-	management, err := connectorsmodule.NewManagementWithCredentialVault(
-		m.connectorManagementStore, vaultAdapter, time.Now,
-	)
-	if err != nil {
-		return fmt.Errorf("compose webui connector secret lifecycle: %w", err)
-	}
 	credential := []byte(token)
-	if _, err := management.SynchronizeConnectorCredential(ctx, connectorsmodule.SynchronizeConnectorCredentialCommand{
+	if _, err := m.connectorManagement.SynchronizeConnectorCredential(ctx, connectorsmodule.SynchronizeConnectorCredentialCommand{
 		WorkspaceKey: ws, ConnectorID: connectorID, DesiredCredential: credential,
 	}); err != nil {
 		return fmt.Errorf("synchronize webui github credential: %w", err)

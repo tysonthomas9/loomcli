@@ -5,12 +5,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/app/prreviewer"
 	"github.com/tysonthomas9/loomcli/internal/app/workitemmove"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
-	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
-	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
@@ -22,7 +19,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/issues"
 	locsettings "github.com/tysonthomas9/loomcli/internal/webui/handlers/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
-	"github.com/tysonthomas9/loomcli/internal/webui/handlers/prreview"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/taskrunapi"
 	hterminal "github.com/tysonthomas9/loomcli/internal/webui/handlers/terminal"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -117,39 +113,6 @@ func NewDiffModule(agentSvc agentcoord.AgentService, diffSvc sourcecontrolcoord.
 // NewFileModule creates the file operations module.
 func NewFileModule(fileSvc filecoord.FileService, accessCfg ...middleware.FileAccessConfig) interface{ Register(*http.ServeMux) } {
 	return misc.NewModule(fileSvc, accessCfg...)
-}
-
-// NewPRReviewModule creates the connector-backed pull request review module.
-// terminalSvc may be nil (no PTY manager); reviewer backend migration then
-// skips killing live reviewer terminals. localSettingsDir supplies the shared
-// GitHub credential and connector vault key location. Interaction owns all
-// reviewer conversation reads and message delivery.
-func newPRReviewRouteModule(
-	st store.Store,
-	dispatcher connectorsmodule.Dispatcher,
-	agentSvc agentcoord.AgentService,
-	terminalSvc terminal.TerminalService,
-	localSettingsDir string,
-	reviewerProvisioning prreviewer.Commands,
-	reviewerAgents agents.IdentityQueries,
-	sourceControl sourcecontrol.Materializer,
-	interactionChat interaction.ChatAPI,
-	interactionMessenger interaction.ChatMessenger,
-	interactionAuthority workflowcataloghttp.OperatorAuthorityResolver,
-) PRReviewModule {
-	return prreview.NewModule(
-		st,
-		dispatcher,
-		agentSvc,
-		terminalSvc,
-		localSettingsDir,
-		reviewerProvisioning,
-		reviewerAgents,
-		sourceControl,
-		interactionChat,
-		interactionMessenger,
-		interactionAuthority,
-	)
 }
 
 // NewLocalSettingsHandlers wires GitHub credential changes to the PR-review
