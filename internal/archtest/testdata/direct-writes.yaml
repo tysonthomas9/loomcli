@@ -1,15 +1,15 @@
 schema_version: 1
 status: complete
-source_head: 789a56af056d8bacb4f7dbcba9ccc9bb23069e6d
+source_head: 89d23035b2b50ea8f1ad0bcb5964f2df45543cc0
 adapter_roots:
   - internal/app
   - internal/cli
   - internal/driver
   - internal/infra/agentsbootstrapstore
-  - internal/infra/sessionstoreadapter
   - internal/infra/sourcecontrolstackstore
   - internal/infra/workspacecatalog
   - internal/modules
+  - internal/sessions/archive.go
   - internal/usage
   - internal/webui/handlers
 owner_adapters:
@@ -37,12 +37,12 @@ owner_adapters:
     aggregate_owner: workspace
   - path: internal/infra/agentsbootstrapstore
     aggregate_owner: agents
-  - path: internal/infra/sessionstoreadapter
-    aggregate_owner: interaction
   - path: internal/infra/sourcecontrolstackstore
     aggregate_owner: sourcecontrol
   - path: internal/infra/workspacecatalog
     aggregate_owner: workspace
+  - path: internal/sessions/archive.go
+    aggregate_owner: interaction
   - path: internal/usage
     aggregate_owner: read_projection
 analysis_profiles:
@@ -105,9 +105,6 @@ persistence_packages:
     receiver_suffixes: []
   - path: github.com/tysonthomas9/loomcli/internal/sessions
     receiver_names: [Session, Store]
-    receiver_suffixes: []
-  - path: github.com/tysonthomas9/loomcli/internal/sessions/eventstore
-    receiver_names: [Store]
     receiver_suffixes: []
   - path: github.com/tysonthomas9/loomcli/internal/store
     receiver_names: []
@@ -270,11 +267,8 @@ method_sets:
     read_only: [Observe, Prune, ReplayFromFile, Snapshot]
     mutating: []
   - name: session
-    read_only: [SessionID]
+    read_only: [Backend, SessionID, StartedAt, Status]
     mutating: [Finalize, SyncLatestClaudeTranscript, SyncLatestCodexRollout]
-  - name: session_event_store
-    read_only: [HasTranscript, Path, Read]
-    mutating: [AppendEnvelope, Compact]
   - name: session_history
     read_only: [Close, List, getHistory]
     mutating: [Add, Complete, saveHistory]
@@ -282,7 +276,9 @@ method_sets:
     read_only:
       - CountIndexEntries
       - Dir
+      - HasEventTranscript
       - ListSubagentTranscripts
+      - LoadEnvelopes
       - LoadMetadata
       - LoadNativeEvents
       - LoadTranscript
@@ -294,6 +290,7 @@ method_sets:
       - SessionsByTask
       - SubagentTranscriptPath
     mutating:
+      - AppendEnvelope
       - AppendTranscript
       - CompactIndex
       - CreateSession
@@ -434,10 +431,6 @@ receiver_surfaces:
   - receiver: "*github.com/tysonthomas9/loomcli/internal/sessions.Store"
     package: github.com/tysonthomas9/loomcli/internal/sessions
     method_set: session_store
-    capability_owner: interaction
-  - receiver: "*github.com/tysonthomas9/loomcli/internal/sessions/eventstore.Store"
-    package: github.com/tysonthomas9/loomcli/internal/sessions/eventstore
-    method_set: session_event_store
     capability_owner: interaction
   - receiver: "*github.com/tysonthomas9/loomcli/internal/usage.Store"
     package: github.com/tysonthomas9/loomcli/internal/usage
@@ -1201,11 +1194,11 @@ function_surfaces:
     access: read-only
     capability_owner: interaction
   - package: github.com/tysonthomas9/loomcli/internal/sessions
-    function: SumTranscriptUsage
+    function: OpenArchive
     access: read-only
     capability_owner: interaction
-  - package: github.com/tysonthomas9/loomcli/internal/sessions/eventstore
-    function: Open
+  - package: github.com/tysonthomas9/loomcli/internal/sessions
+    function: SumTranscriptUsage
     access: read-only
     capability_owner: interaction
   - package: github.com/tysonthomas9/loomcli/internal/store
@@ -1677,78 +1670,6 @@ writes:
       count: 1
       aggregate_owner: agents
       disposition: owner_adapter
-    - file: internal/infra/sessionstoreadapter/adapter.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Session'
-      method: Finalize
-      count: 1
-      aggregate_owner: interaction
-      disposition: owner_adapter
-    - file: internal/infra/sessionstoreadapter/adapter.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Session'
-      method: SyncLatestClaudeTranscript
-      count: 1
-      aggregate_owner: interaction
-      disposition: owner_adapter
-    - file: internal/infra/sessionstoreadapter/adapter.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Session'
-      method: SyncLatestCodexRollout
-      count: 1
-      aggregate_owner: interaction
-      disposition: owner_adapter
-    - file: internal/infra/sessionstoreadapter/adapter.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
-      method: CompactIndex
-      count: 1
-      aggregate_owner: interaction
-      disposition: owner_adapter
-    - file: internal/infra/sessionstoreadapter/adapter.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
-      method: CreateSession
-      count: 1
-      aggregate_owner: interaction
-      disposition: owner_adapter
-    - file: internal/infra/sessionstoreadapter/adapter.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
-      method: PurgeOlderThan
-      count: 1
-      aggregate_owner: interaction
-      disposition: owner_adapter
-    - file: internal/infra/sessionstoreadapter/adapter.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
-      method: ReIndex
-      count: 1
-      aggregate_owner: interaction
-      disposition: owner_adapter
-    - file: internal/infra/sessionstoreadapter/adapter.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
-      method: SaveMetadata
-      count: 1
-      aggregate_owner: interaction
-      disposition: owner_adapter
-    - file: internal/infra/sessionstoreadapter/adapter.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
-      method: SyncNativeTranscript
-      count: 1
-      aggregate_owner: interaction
-      disposition: owner_adapter
-    - file: internal/infra/sessionstoreadapter/adapter.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
-      method: SyncSubagentTranscript
-      count: 1
-      aggregate_owner: interaction
-      disposition: owner_adapter
-    - file: internal/infra/sessionstoreadapter/adapter.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions/eventstore.Store'
-      method: AppendEnvelope
-      count: 1
-      aggregate_owner: interaction
-      disposition: owner_adapter
-    - file: internal/infra/sessionstoreadapter/adapter.go
-      receiver: github.com/tysonthomas9/loomcli/internal/sessions
-      method: NewStore
-      count: 1
-      aggregate_owner: interaction
-      disposition: owner_adapter
     - file: internal/infra/sourcecontrolstackstore/stackstore.go
       receiver: '*github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore.LocalStore'
       method: save
@@ -1802,6 +1723,54 @@ writes:
       method: Update
       count: 3
       aggregate_owner: workspace
+      disposition: owner_adapter
+    - file: internal/sessions/archive.go
+      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
+      method: AppendEnvelope
+      count: 1
+      aggregate_owner: interaction
+      disposition: owner_adapter
+    - file: internal/sessions/archive.go
+      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
+      method: CompactIndex
+      count: 1
+      aggregate_owner: interaction
+      disposition: owner_adapter
+    - file: internal/sessions/archive.go
+      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
+      method: CreateSession
+      count: 1
+      aggregate_owner: interaction
+      disposition: owner_adapter
+    - file: internal/sessions/archive.go
+      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
+      method: PurgeOlderThan
+      count: 1
+      aggregate_owner: interaction
+      disposition: owner_adapter
+    - file: internal/sessions/archive.go
+      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
+      method: ReIndex
+      count: 1
+      aggregate_owner: interaction
+      disposition: owner_adapter
+    - file: internal/sessions/archive.go
+      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
+      method: SaveMetadata
+      count: 1
+      aggregate_owner: interaction
+      disposition: owner_adapter
+    - file: internal/sessions/archive.go
+      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
+      method: SyncNativeTranscript
+      count: 1
+      aggregate_owner: interaction
+      disposition: owner_adapter
+    - file: internal/sessions/archive.go
+      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
+      method: SyncSubagentTranscript
+      count: 1
+      aggregate_owner: interaction
       disposition: owner_adapter
     - file: internal/usage/projection.go
       receiver: '*github.com/tysonthomas9/loomcli/internal/usage.Store'

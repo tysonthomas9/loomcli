@@ -16,7 +16,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
-	"github.com/tysonthomas9/loomcli/internal/sessions/eventstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 )
@@ -1538,8 +1537,7 @@ func TestSessionServiceEventStoreSubagentsAreDiscoverable(t *testing.T) {
 		t.Fatalf("finalize session: %v", err)
 	}
 
-	es := eventstore.Open(sessStore.SessionDir(sessionID))
-	if err := es.AppendEnvelope(hwtranscript.EventEnvelope{
+	if err := sessStore.AppendEnvelope(sessionID, hwtranscript.EventEnvelope{
 		RunID: "run-1", Harness: "claude", HarnessSessionID: "agent-789", ParentSessionID: "parent-native",
 		Event: hwtranscript.Event{
 			Seq: 0, Timestamp: time.Unix(2, 0), Role: "assistant", Type: "text",

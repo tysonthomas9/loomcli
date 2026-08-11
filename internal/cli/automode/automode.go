@@ -17,7 +17,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/events"
-	"github.com/tysonthomas9/loomcli/internal/infra/sessionstoreadapter"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
@@ -144,7 +143,7 @@ type autoLoopCtx struct {
 	hasAvailableTasks func() (bool, error)
 	generatePrompt    func(string) string
 	usageStore        *usage.Projection
-	sessStore         *sessions.Store
+	sessStore         *sessions.Archive
 	updateState       func(string) error
 	clearTaskID       func() error
 	readLock          func() (*cli.LockInfo, error)
@@ -280,7 +279,7 @@ func initAutoLoop(parent context.Context, opts AutoModeOptions) *autoLoopCtx {
 	}
 	ctx.usageStore = usageStore
 
-	sessStore, sessErr := sessionstoreadapter.New(parent, cli.GetWorkspaceRuntimeDir())
+	sessStore, sessErr := sessions.OpenArchive(parent, cli.GetWorkspaceRuntimeDir())
 	if sessErr != nil {
 		log.Printf("[auto] Warning: session store unavailable: %v", sessErr)
 	}

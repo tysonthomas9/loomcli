@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/tysonthomas9/loomcli/internal/infra/sessionstoreadapter"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
@@ -27,7 +26,7 @@ func dispatchHookEvent(ctx context.Context, event *HookEvent, runtimeDir, sessio
 		return nil
 	}
 
-	store, err := sessionstoreadapter.New(ctx, runtimeDir)
+	archive, err := sessions.OpenArchive(ctx, runtimeDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "loom hook: failed to create session store: %v\n", err)
 		return nil
@@ -38,7 +37,9 @@ func dispatchHookEvent(ctx context.Context, event *HookEvent, runtimeDir, sessio
 	// calling on every hook event is safe and keeps the UI's view close to
 	// the agent's live progress.
 	if event.SessionRef != "" {
-		if err := sessionstoreadapter.SyncNativeTranscript(store, sessionID, event.SessionRef, sessions.TranscriptFormatRaw); err != nil {
+		if err := archive.Capture(sessions.TranscriptCapture{
+			SessionID: sessionID, SourcePath: event.SessionRef, Format: sessions.TranscriptFormatRaw,
+		}); err != nil {
 			fmt.Fprintf(os.Stderr, "loom hook: failed to sync native transcript: %v\n", err)
 		}
 	}
@@ -48,7 +49,9 @@ func dispatchHookEvent(ctx context.Context, event *HookEvent, runtimeDir, sessio
 	// sessions/<sid>/subagents/ so the UI can render nested subagent work.
 	if event.Type == HookSubagentEnd && event.SubagentID != "" && event.SessionRef != "" {
 		subPath := deriveSubagentPath(event.SessionRef, event.SubagentID)
-		if err := sessionstoreadapter.SyncSubagentTranscript(store, sessionID, event.SubagentID, subPath); err != nil {
+		if err := archive.Capture(sessions.TranscriptCapture{
+			SessionID: sessionID, SubagentID: event.SubagentID, SourcePath: subPath,
+		}); err != nil {
 			fmt.Fprintf(os.Stderr, "loom hook: failed to sync subagent transcript: %v\n", err)
 		}
 	}
@@ -56,7 +59,7 @@ func dispatchHookEvent(ctx context.Context, event *HookEvent, runtimeDir, sessio
 	// On SessionEnd, capture token usage from Claude's transcript and patch
 	// session metadata.
 	if event.Type == HookSessionEnd && event.SessionRef != "" {
-		captureTokenUsage(ctx, store, sessionID, event.SessionRef, event.Backend)
+		captureTokenUsage(ctx, archive, sessionID, event.SessionRef, event.Backend)
 	}
 
 	return nil
@@ -75,7 +78,7 @@ func deriveSubagentPath(parentTranscriptPath, subagentID string) string {
 
 // captureTokenUsage reads the Claude transcript, sums token usage, and
 // patches session metadata. Errors are logged to stderr and never propagated.
-func captureTokenUsage(ctx context.Context, store *sessions.Store, sessionID, transcriptPath, backend string) {
+func captureTokenUsage(ctx context.Context, archive *sessions.Archive, sessionID, transcriptPath, backend string) {
 	tok, err := sessions.SumTranscriptUsage(ctx, transcriptPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "loom hook: failed to sum transcript usage: %v\n", err)
@@ -86,7 +89,7 @@ func captureTokenUsage(ctx context.Context, store *sessions.Store, sessionID, tr
 		return
 	}
 
-	meta, err := store.LoadMetadata(sessionID)
+	meta, err := archive.LoadMetadata(sessionID)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "loom hook: failed to load metadata for token capture: %v\n", err)
 		return
@@ -105,7 +108,7 @@ func captureTokenUsage(ctx context.Context, store *sessions.Store, sessionID, tr
 		CacheWriteTokens: tok.CacheWriteTokens,
 	})
 
-	if err := sessionstoreadapter.SaveMetadata(store, sessionID, meta); err != nil {
+	if err := archive.UpdateMetadata(sessions.MetadataUpdate{SessionID: sessionID, Metadata: meta}); err != nil {
 		fmt.Fprintf(os.Stderr, "loom hook: failed to save metadata with token usage: %v\n", err)
 	}
 }

@@ -1,4 +1,4 @@
-// Package eventstore is loom's durable, authoritative record of a run's
+// The session event log is Loom's durable, authoritative record of a run's
 // transcript: ONE events.jsonl per logical run (the dir the caller supplies),
 // holding ALL of the run's EventEnvelopes — the parent conversation AND its
 // subagents, distinguished within the file by (HarnessSessionID,
@@ -16,7 +16,7 @@
 //     that can abort the harness is never blocked behind unrelated I/O.
 //   - the durable row persists Source/NativeID/SchemaVersion (the public Event
 //     JSON omits them); the authority filter + dedup depend on them.
-package eventstore
+package sessions
 
 import (
 	"bufio"
@@ -32,24 +32,43 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
 
-// EventsFile is the per-run events file name (sibling to the native archive).
-const EventsFile = "events.jsonl"
+const eventsFile = "events.jsonl"
 
-// Store is one run's events.jsonl, scoped to a directory the caller supplies
+// eventLog is one run's events.jsonl, scoped to a directory the caller supplies
 // (loom maps RunID → that dir). Concurrency across writers/readers/compaction is
 // guarded by an exclusive flock on the file itself.
-type Store struct {
+type eventLog struct {
 	path string
 }
 
-// Open returns a Store for the events.jsonl under dir. It does not create the
+// openEventLog returns an event log for the events.jsonl under dir. It does not create the
 // file; AppendEnvelope creates it on first write.
-func Open(dir string) *Store {
-	return &Store{path: filepath.Join(dir, EventsFile)}
+func openEventLog(dir string) *eventLog {
+	return &eventLog{path: filepath.Join(dir, eventsFile)}
+}
+
+// AppendEnvelope records one event in the session-scoped event log. The store
+// owns directory creation so acquisition callers cannot write session paths.
+func (s *Store) AppendEnvelope(sessionID string, envelope transcript.EventEnvelope) error {
+	sessionDir := s.SessionDir(sessionID)
+	if err := os.MkdirAll(sessionDir, sessDirPerm); err != nil {
+		return fmt.Errorf("create session event directory: %w", err)
+	}
+	return openEventLog(sessionDir).AppendEnvelope(envelope)
+}
+
+// LoadEnvelopes returns the deduplicated, ordered event log for one session.
+func (s *Store) LoadEnvelopes(sessionID string) ([]transcript.EventEnvelope, error) {
+	return openEventLog(s.SessionDir(sessionID)).Read()
+}
+
+// HasEventTranscript reports whether one session has event-log evidence.
+func (s *Store) HasEventTranscript(sessionID string) bool {
+	return openEventLog(s.SessionDir(sessionID)).HasTranscript()
 }
 
 // Path is the events.jsonl path (for diagnostics / siblings).
-func (s *Store) Path() string { return s.path }
+func (s *eventLog) Path() string { return s.path }
 
 // storedRow is the DURABLE wire form of an EventEnvelope: every field explicit
 // (incl. the internal Source/NativeID/SchemaVersion the public Event JSON omits).
@@ -106,7 +125,7 @@ func (r storedRow) dedupKey() string {
 // AppendEnvelope appends one envelope as a durable row under an exclusive flock.
 // It performs NO network/UI I/O. A duplicate (same dedupKey) is absorbed on read,
 // so the caller may deliver the same logical event more than once.
-func (s *Store) AppendEnvelope(env transcript.EventEnvelope) error {
+func (s *eventLog) AppendEnvelope(env transcript.EventEnvelope) error {
 	data, err := json.Marshal(toRow(env))
 	if err != nil {
 		return fmt.Errorf("eventstore: marshal row: %w", err)
@@ -133,7 +152,7 @@ func (s *Store) AppendEnvelope(env transcript.EventEnvelope) error {
 // identity) and ordered by (Timestamp, Seq, Event.ID()). Seq breaks ties for
 // live events that share a zero native timestamp (it is the orchestrator's
 // monotonic arrival order within this run). A missing file yields nil, nil.
-func (s *Store) Read() ([]transcript.EventEnvelope, error) {
+func (s *eventLog) Read() ([]transcript.EventEnvelope, error) {
 	rows, err := s.scan()
 	if err != nil {
 		return nil, err
@@ -160,7 +179,7 @@ func (s *Store) Read() ([]transcript.EventEnvelope, error) {
 }
 
 // HasTranscript reports whether the store holds at least one event.
-func (s *Store) HasTranscript() bool {
+func (s *eventLog) HasTranscript() bool {
 	rows, err := s.scan()
 	return err == nil && len(rows) > 0
 }
@@ -168,7 +187,7 @@ func (s *Store) HasTranscript() bool {
 // Compact rewrites the file collapsing superseded duplicate rows to one row per
 // identity (the latest), preserving file order of first appearance. Atomic
 // (temp + rename) under the same flock. A missing file is a no-op.
-func (s *Store) Compact() error {
+func (s *eventLog) Compact() error {
 	f, err := os.OpenFile(s.path, os.O_RDWR|os.O_CREATE, 0o600) //nolint:gosec // run dir is loom-owned
 	if err != nil {
 		return fmt.Errorf("eventstore: open for compact: %w", err)
@@ -237,7 +256,7 @@ func writeRowsAtomic(path string, order []string, latest map[string]storedRow) e
 
 // scan reads all rows under a shared-intent flock (we take exclusive for
 // simplicity; reads are short). A missing file yields nil.
-func (s *Store) scan() ([]storedRow, error) {
+func (s *eventLog) scan() ([]storedRow, error) {
 	f, err := os.Open(s.path) //nolint:gosec // run dir is loom-owned
 	if err != nil {
 		if os.IsNotExist(err) {

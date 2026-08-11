@@ -9,7 +9,7 @@ import (
 	"github.com/olesho/harness-wrapper/pkg/transcript"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/infra/sessionstoreadapter"
+	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
 // The loom-side P3 rollout flags (env-gated, default OFF so there is no behavior
@@ -70,19 +70,17 @@ func eventStoreSink(ctx context.Context, workDir string) (func(transcript.EventE
 	if runtimeDir == "" || sid == "" {
 		return nil, "" // standalone / no session ⇒ nothing to key the store by
 	}
-	// Resolve the session dir through the SAME source of truth the serving side
-	// reads from (sessions.Store.SessionDir), so writer + reader can't diverge.
-	store, err := sessionstoreadapter.New(ctx, runtimeDir)
+	// Open the same archive interface the serving side reads, so writer and
+	// reader cannot diverge.
+	archive, err := sessions.OpenArchive(ctx, runtimeDir)
 	if err != nil {
 		return nil, ""
-	}
-	sessionDir := store.SessionDir(sid)
-	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
-		return nil, "" // can't place the store; skip rather than fail the run
 	}
 	runID := sid // fallback when no lock RunID (e.g. standalone)
 	if info, err := cli.ReadLockFile(workDir); err == nil && info != nil && info.RunID != "" {
 		runID = info.RunID // stable across resume — the dedup/replay-collapse key
 	}
-	return sessionstoreadapter.EnvelopeAppender(store, sid), runID
+	return func(envelope transcript.EventEnvelope) error {
+		return archive.AppendEnvelope(sid, envelope)
+	}, runID
 }

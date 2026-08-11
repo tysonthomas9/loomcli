@@ -14,7 +14,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/git"
 	"github.com/tysonthomas9/loomcli/internal/cli/sessionfinalize"
 	"github.com/tysonthomas9/loomcli/internal/events"
-	"github.com/tysonthomas9/loomcli/internal/infra/sessionstoreadapter"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
@@ -22,7 +21,7 @@ func createAutoSession(ctx *autoLoopCtx, prompt string) *sessions.Session {
 	if ctx.sessStore == nil {
 		return nil
 	}
-	sess, _ := sessionstoreadapter.Create(ctx.sessStore, sessions.CreateOptions{
+	sess, _ := ctx.sessStore.Begin(sessions.CreateOptions{
 		AgentName: ctx.opts.AgentName, Backend: cli.ResolveBackendName(),
 		EpicID: ctx.opts.ParentID, Prompt: prompt, AttemptNum: ctx.state.TasksCompleted + 1,
 	})
@@ -61,7 +60,7 @@ func finalizeAutoSession(ctx *autoLoopCtx, sess *sessions.Session, beforeRef str
 		EstimatedCostUSD: estimatedCostUSD,
 	})
 	backends.ClearActiveSessionEnv()
-	go sessions.NotifyWebUI(ctx.ctx, backends.ResolveWebUIURL(), taskID, sess.SessionID(), sess.Meta.Status, backends.ResolveNotifyToken())
+	go sessions.NotifyWebUI(ctx.ctx, backends.ResolveWebUIURL(), taskID, sess.SessionID(), sess.Status(), backends.ResolveNotifyToken())
 }
 
 // maxSameTaskFailures is the consecutive same-task-ID failure threshold that

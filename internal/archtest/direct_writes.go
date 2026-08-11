@@ -242,10 +242,10 @@ func (i DirectWriteInventory) validateMetadata() error {
 		"internal/cli",
 		"internal/driver",
 		"internal/infra/agentsbootstrapstore",
-		"internal/infra/sessionstoreadapter",
 		"internal/infra/sourcecontrolstackstore",
 		"internal/infra/workspacecatalog",
 		"internal/modules",
+		"internal/sessions/archive.go",
 		"internal/usage",
 		"internal/webui/handlers",
 	}
@@ -800,11 +800,24 @@ func loadDirectWritePackagesWithEnvironment(
 		BuildFlags: profileBuildFlags(profile),
 	}
 	patterns := []string{}
+	loadedPatterns := make(map[string]struct{}, len(adapterRoots))
 	for _, sourceRoot := range adapterRoots {
-		if _, statErr := os.Stat(filepath.Join(root, filepath.FromSlash(sourceRoot))); statErr != nil {
+		info, statErr := os.Stat(filepath.Join(root, filepath.FromSlash(sourceRoot)))
+		if statErr != nil {
 			return nil, fmt.Errorf("inspect direct-write adapter root %q: %w", sourceRoot, statErr)
 		}
-		patterns = append(patterns, "./"+sourceRoot+"/...")
+		pattern := "./" + sourceRoot + "/..."
+		if !info.IsDir() {
+			if filepath.Ext(sourceRoot) != ".go" {
+				return nil, fmt.Errorf("direct-write adapter file %q must be Go source", sourceRoot)
+			}
+			pattern = "./" + filepath.ToSlash(filepath.Dir(sourceRoot))
+		}
+		if _, exists := loadedPatterns[pattern]; exists {
+			continue
+		}
+		loadedPatterns[pattern] = struct{}{}
+		patterns = append(patterns, pattern)
 	}
 	if len(patterns) == 0 {
 		return nil, nil

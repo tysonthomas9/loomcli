@@ -1,4 +1,4 @@
-package eventstore
+package sessions
 
 import (
 	"path/filepath"
@@ -21,7 +21,7 @@ func env(runID, hsid, parent, nativeID, text, source string, seq int, ts time.Ti
 }
 
 func TestAppendReadRoundTripPreservesInternalFields(t *testing.T) {
-	s := Open(t.TempDir())
+	s := openEventLog(t.TempDir())
 	in := env("run-1", "sess", "", "live:text:m:0", "hello", transcript.SourceLive, 0, time.Unix(100, 0))
 	if err := s.AppendEnvelope(in); err != nil {
 		t.Fatal(err)
@@ -44,7 +44,7 @@ func TestAppendReadRoundTripPreservesInternalFields(t *testing.T) {
 }
 
 func TestReadDedupsByIdentityLastWriterWins(t *testing.T) {
-	s := Open(t.TempDir())
+	s := openEventLog(t.TempDir())
 	// Same (RunID,HarnessSessionID,NativeID) appended twice with different text
 	// (e.g. a hooks re-parse / resume replay). Read keeps the LAST.
 	_ = s.AppendEnvelope(env("r", "sess", "", "tool-use:t1", "first", transcript.SourceFile, 0, time.Unix(1, 0)))
@@ -62,7 +62,7 @@ func TestReadDedupsByIdentityLastWriterWins(t *testing.T) {
 }
 
 func TestReadOrdersByTimestampThenSeq(t *testing.T) {
-	s := Open(t.TempDir())
+	s := openEventLog(t.TempDir())
 	// Out-of-order appends; distinct identities. Same timestamp pair disambiguated
 	// by Seq (live arrival order).
 	_ = s.AppendEnvelope(env("r", "s", "", "n3", "third", transcript.SourceLive, 2, time.Unix(0, 0)))
@@ -81,7 +81,7 @@ func TestReadOrdersByTimestampThenSeq(t *testing.T) {
 }
 
 func TestReadGroupsParentAndSubagent(t *testing.T) {
-	s := Open(t.TempDir())
+	s := openEventLog(t.TempDir())
 	_ = s.AppendEnvelope(env("r", "parent", "", "msg:p1", "parent says", transcript.SourceFile, 0, time.Unix(1, 0)))
 	_ = s.AppendEnvelope(env("r", "sub", "parent", "msg:s1", "subagent says", transcript.SourceFile, 0, time.Unix(2, 0)))
 	got, _ := s.Read()
@@ -101,7 +101,7 @@ func TestReadGroupsParentAndSubagent(t *testing.T) {
 }
 
 func TestHasTranscript(t *testing.T) {
-	s := Open(t.TempDir())
+	s := openEventLog(t.TempDir())
 	if s.HasTranscript() {
 		t.Error("empty store should report no transcript")
 	}
@@ -113,7 +113,7 @@ func TestHasTranscript(t *testing.T) {
 
 func TestCompactCollapsesDuplicates(t *testing.T) {
 	dir := t.TempDir()
-	s := Open(dir)
+	s := openEventLog(dir)
 	for i := 0; i < 5; i++ {
 		_ = s.AppendEnvelope(env("r", "s", "", "msg:dup", "v", transcript.SourceFile, 0, time.Unix(1, 0)))
 	}
@@ -137,7 +137,7 @@ func TestCompactCollapsesDuplicates(t *testing.T) {
 }
 
 func TestConcurrentAppendsNoTornRows(t *testing.T) {
-	s := Open(t.TempDir())
+	s := openEventLog(t.TempDir())
 	const n = 50
 	var wg sync.WaitGroup
 	for i := 0; i < n; i++ {
@@ -159,7 +159,7 @@ func TestConcurrentAppendsNoTornRows(t *testing.T) {
 }
 
 func TestReadMissingFileIsNil(t *testing.T) {
-	s := Open(filepath.Join(t.TempDir(), "nonexistent-run"))
+	s := openEventLog(filepath.Join(t.TempDir(), "nonexistent-run"))
 	got, err := s.Read()
 	if err != nil || got != nil {
 		t.Fatalf("missing file: got (%v,%v), want (nil,nil)", got, err)

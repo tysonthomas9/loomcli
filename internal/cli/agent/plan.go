@@ -19,7 +19,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/sessionfinalize"
 	"github.com/tysonthomas9/loomcli/internal/cli/workspace"
 	"github.com/tysonthomas9/loomcli/internal/events"
-	"github.com/tysonthomas9/loomcli/internal/infra/sessionstoreadapter"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
@@ -190,12 +189,12 @@ func runPlanSingleTask(ctx context.Context, deps *cli.Deps, worktreePath, agentN
 
 // createAgentSession creates a new session for tracking.
 func createAgentSession(ctx context.Context, agentName, parentID, prompt, phase string) *sessions.Session {
-	sessStore, sessErr := sessionstoreadapter.New(ctx, cli.GetWorkspaceRuntimeDir())
+	sessStore, sessErr := sessions.OpenArchive(ctx, cli.GetWorkspaceRuntimeDir())
 	if sessErr != nil {
 		log.Printf("[agent] Warning: session store unavailable: %v", sessErr)
 		return nil
 	}
-	sess, _ := sessionstoreadapter.Create(sessStore, sessions.CreateOptions{
+	sess, _ := sessStore.Begin(sessions.CreateOptions{
 		AgentName: agentName, Backend: cli.ResolveBackendName(),
 		EpicID: parentID, Prompt: prompt, Phase: phase,
 	})

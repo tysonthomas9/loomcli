@@ -2,12 +2,21 @@ package sessionfinalize
 
 import (
 	"log/slog"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli/git"
-	"github.com/tysonthomas9/loomcli/internal/infra/sessionstoreadapter"
 	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
+
+type localSession interface {
+	SessionID() string
+	Backend() string
+	StartedAt() time.Time
+	Finalize(sessions.FinalizeOptions) error
+	SyncLatestCodexRollout(string, time.Time) (string, error)
+	SyncLatestClaudeTranscript(string, string, time.Time) (string, error)
+}
 
 type WithWorktreeOptions struct {
 	WorktreePath string
@@ -34,7 +43,7 @@ type WithWorktreeResult struct {
 	HasDiffPatch bool
 }
 
-func WithWorktree(sess *sessions.Session, opts WithWorktreeOptions) (WithWorktreeResult, error) {
+func WithWorktree(sess localSession, opts WithWorktreeOptions) (WithWorktreeResult, error) {
 	gitStats := git.ComputeDiffStats(opts.WorktreePath, opts.BeforeRef)
 	result := WithWorktreeResult{
 		DiffStats: sessions.DiffStats{
@@ -55,7 +64,7 @@ func WithWorktree(sess *sessions.Session, opts WithWorktreeOptions) (WithWorktre
 		return result, nil
 	}
 	syncNativeTranscript(sess, opts)
-	return result, sessionstoreadapter.Finalize(sess, sessions.FinalizeOptions{
+	return result, sess.Finalize(sessions.FinalizeOptions{
 		TaskID:       opts.TaskID,
 		ExitCode:     opts.ExitCode,
 		ErrorClass:   opts.ErrorClass,
@@ -71,23 +80,23 @@ func WithWorktree(sess *sessions.Session, opts WithWorktreeOptions) (WithWorktre
 	})
 }
 
-func syncNativeTranscript(sess *sessions.Session, opts WithWorktreeOptions) {
-	if sess.Meta.Backend == platformruntime.ProviderCodex {
-		path, err := sessionstoreadapter.SyncLatestCodexRollout(sess, opts.WorktreePath, sess.Meta.StartedAt)
+func syncNativeTranscript(sess localSession, opts WithWorktreeOptions) {
+	if sess.Backend() == platformruntime.ProviderCodex {
+		path, err := sess.SyncLatestCodexRollout(opts.WorktreePath, sess.StartedAt())
 		if err != nil {
 			slog.Warn("codex transcript sync failed",
-				"session_id", sess.Meta.SessionID,
+				"session_id", sess.SessionID(),
 				"worktree", opts.WorktreePath,
 				"err", err,
 			)
 		} else if path == "" {
 			slog.Warn("codex transcript unavailable after run",
-				"session_id", sess.Meta.SessionID,
+				"session_id", sess.SessionID(),
 				"worktree", opts.WorktreePath,
 			)
 		}
 	}
-	if sess.Meta.Backend == platformruntime.ProviderClaude {
-		_, _ = sessionstoreadapter.SyncLatestClaudeTranscript(sess, opts.WorktreePath, opts.ClaudeSessionID, sess.Meta.StartedAt)
+	if sess.Backend() == platformruntime.ProviderClaude {
+		_, _ = sess.SyncLatestClaudeTranscript(opts.WorktreePath, opts.ClaudeSessionID, sess.StartedAt())
 	}
 }

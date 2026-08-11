@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/infra/sessionstoreadapter"
 	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/usage"
@@ -32,7 +31,7 @@ type orphanSession struct {
 // Claude Code hooks installed — and, with --fix, backfills agent_transcript.jsonl
 // plus token usage from Claude Code's own ~/.claude/projects transcript.
 func checkOrphanedTranscripts(ctx context.Context) CheckResult {
-	sessStore, err := sessionstoreadapter.New(ctx, cli.GetWorkspaceRuntimeDir())
+	sessStore, err := sessions.OpenArchive(ctx, cli.GetWorkspaceRuntimeDir())
 	if err != nil {
 		return CheckResult{} // skip — sessions store not available
 	}
@@ -65,7 +64,7 @@ func checkOrphanedTranscripts(ctx context.Context) CheckResult {
 
 // scanOrphanedClaudeSessions returns claude-backend sessions whose
 // agent_transcript.jsonl is absent.
-func scanOrphanedClaudeSessions(store *sessions.Store) ([]orphanSession, error) {
+func scanOrphanedClaudeSessions(store *sessions.Archive) ([]orphanSession, error) {
 	entries, err := os.ReadDir(store.Dir())
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -103,7 +102,7 @@ func scanOrphanedClaudeSessions(store *sessions.Store) ([]orphanSession, error) 
 // agent name + start time and backfills the transcript and token usage. Agents
 // run sequentially per worktree (lock-serialized), so matching the earliest
 // session to the earliest unclaimed transcript lines runs up reliably.
-func fixOrphanedTranscripts(ctx context.Context, store *sessions.Store, orphans []orphanSession) CheckResult {
+func fixOrphanedTranscripts(ctx context.Context, store *sessions.Archive, orphans []orphanSession) CheckResult {
 	workspaceToken := filepath.Base(cli.GetWorkspaceRuntimeDir())
 	claimed := make(map[string]bool)
 	fixed, unmatched := 0, 0
@@ -142,8 +141,10 @@ func fixOrphanedTranscripts(ctx context.Context, store *sessions.Store, orphans 
 
 // backfillSession mirrors the transcript into the session and records token
 // usage, mirroring the hook-based captureTokenUsage path.
-func backfillSession(ctx context.Context, store *sessions.Store, o orphanSession, srcPath string) error {
-	if err := sessionstoreadapter.SyncNativeTranscript(store, o.sessionID, srcPath, sessions.TranscriptFormatRaw); err != nil {
+func backfillSession(ctx context.Context, store *sessions.Archive, o orphanSession, srcPath string) error {
+	if err := store.Capture(sessions.TranscriptCapture{
+		SessionID: o.sessionID, SourcePath: srcPath, Format: sessions.TranscriptFormatRaw,
+	}); err != nil {
 		return err
 	}
 	tok, err := sessions.SumTranscriptUsage(ctx, srcPath)
@@ -168,10 +169,9 @@ func backfillSession(ctx context.Context, store *sessions.Store, o orphanSession
 		CacheReadTokens:  tok.CacheReadTokens,
 		CacheWriteTokens: tok.CacheWriteTokens,
 	})
-	if err := sessionstoreadapter.SaveMetadata(store, o.sessionID, meta); err != nil {
-		return err
-	}
-	return sessionstoreadapter.ReIndex(store, meta.SessionRecord)
+	return store.UpdateMetadata(sessions.MetadataUpdate{
+		SessionID: o.sessionID, Metadata: meta, ReIndex: true,
+	})
 }
 
 type transcriptCandidate struct {

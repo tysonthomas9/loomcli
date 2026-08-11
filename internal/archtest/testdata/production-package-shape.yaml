@@ -13,11 +13,11 @@ semantics:
     - vendor
     - worktrees
 ceilings:
-  total_packages: 173
+  total_packages: 171
   module_packages: 15
-  outside_module_packages: 158
-  one_file_packages: 53
-  one_or_two_file_packages: 74
+  outside_module_packages: 156
+  one_file_packages: 51
+  one_or_two_file_packages: 72
 packages:
   - internal/agenterr
   - internal/agentpolicy
@@ -105,7 +105,6 @@ packages:
   - internal/infra/interactionlead
   - internal/infra/localgit
   - internal/infra/memstore
-  - internal/infra/sessionstoreadapter
   - internal/infra/sourcecontrolpublisher
   - internal/infra/sourcecontrolstackstore
   - internal/infra/workflowdistribution
@@ -142,7 +141,6 @@ packages:
   - internal/platform/runtime
   - internal/roleprompts
   - internal/sessions
-  - internal/sessions/eventstore
   - internal/sessions/redact
   - internal/sessions/transcript
   - internal/store

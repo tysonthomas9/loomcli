@@ -1,13 +1,12 @@
 package backends
 
 import (
-	"path/filepath"
 	"testing"
 
 	hwharness "github.com/olesho/harness-wrapper/pkg/harness"
 	"github.com/olesho/harness-wrapper/pkg/transcript"
 
-	"github.com/tysonthomas9/loomcli/internal/sessions/eventstore"
+	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
 func TestTranscriptModeFromEnv(t *testing.T) {
@@ -84,7 +83,11 @@ func TestEventStoreSinkWritesToSessionDir(t *testing.T) {
 	if err := sink(env); err != nil {
 		t.Fatalf("sink append: %v", err)
 	}
-	got, err := eventstore.Open(filepath.Join(runtimeDir, "sessions", sid)).Read()
+	archive, err := sessions.OpenArchive(t.Context(), runtimeDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := archive.LoadEnvelopes(sid)
 	if err != nil {
 		t.Fatal(err)
 	}

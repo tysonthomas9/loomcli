@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/infra/sessionstoreadapter"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
@@ -183,7 +182,7 @@ func scanSessionDirs(sessDir string, indexedIDs map[string]bool) (sessionScanRes
 
 // queryIndexedSessionIDs returns all session IDs present in the index.
 // Also triggers auto-healing of stale running sessions as a side effect of Query.
-func queryIndexedSessionIDs(store *sessions.Store) (map[string]bool, error) {
+func queryIndexedSessionIDs(store *sessions.Archive) (map[string]bool, error) {
 	records, err := store.Query(sessions.Filter{})
 	if err != nil {
 		return nil, err
@@ -196,7 +195,7 @@ func queryIndexedSessionIDs(store *sessions.Store) (map[string]bool, error) {
 }
 
 func checkStaleSessionRecords(ctx context.Context) CheckResult {
-	sessStore, err := sessionstoreadapter.New(ctx, cli.GetWorkspaceRuntimeDir())
+	sessStore, err := sessions.OpenArchive(ctx, cli.GetWorkspaceRuntimeDir())
 	if err != nil {
 		return CheckResult{} // skip — sessions store not available
 	}
@@ -252,7 +251,7 @@ func formatSessionIssues(scan sessionScanResult) []string {
 	return details
 }
 
-func fixStaleSessionRecords(sessStore *sessions.Store, sessDir string, halfWritten, orphanedDirs, staleTmpFiles []string, details []string) CheckResult {
+func fixStaleSessionRecords(sessStore *sessions.Archive, sessDir string, halfWritten, orphanedDirs, staleTmpFiles []string, details []string) CheckResult {
 	fixed := 0
 	var failures []string
 
@@ -275,13 +274,7 @@ func fixStaleSessionRecords(sessStore *sessions.Store, sessDir string, halfWritt
 	}
 
 	for _, name := range orphanedDirs {
-		meta, loadErr := sessStore.LoadMetadata(name)
-		if loadErr != nil {
-			failures = append(failures, fmt.Sprintf("re-index %s: %v", name, loadErr))
-			continue
-		}
-		meta.NormalizeAfterLoad()
-		if appendErr := sessionstoreadapter.ReIndex(sessStore, meta.SessionRecord); appendErr != nil {
+		if appendErr := sessStore.RepairIndex(name); appendErr != nil {
 			failures = append(failures, fmt.Sprintf("re-index %s: %v", name, appendErr))
 		} else {
 			fixed++
