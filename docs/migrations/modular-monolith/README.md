@@ -289,8 +289,12 @@ session-name command protocol and frontend name-derived backend/agent
 classification, requires server-derived durable launch envelopes before
 WebSocket attachment, and removes the dead connect-seeding callback. It leaves
 the exact package count unchanged while eliminating the known executable
-compatibility path. The remaining waves delete the other horizontal
-handler/store edges and residual shallow packages; an empty
+compatibility path. Wave 9.18 deletes the neutral Driver run-types bridge,
+makes Driver own its invocation contract, leaves Sandbox with placement policy
+and launcher evidence only, and deletes Driver's stale import-fanout exception.
+It ratchets the exact shape to 170 packages, 155 outside modules, 50 one-file
+packages, and 71 one-or-two-file packages. The remaining waves delete the other
+horizontal handler/store edges and residual shallow packages; an empty
 capability-graph `legacy_paths` list alone is not completion proof. See the
 [Phase 9 plan](16-phase-9-package-consolidation.md).
 

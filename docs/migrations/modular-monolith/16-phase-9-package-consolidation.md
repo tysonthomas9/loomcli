@@ -19,6 +19,7 @@
 - **Wave 9.15 implementation:** `2ee3dfa2a`
 - **Wave 9.16 implementation:** `4c82d3781`
 - **Wave 9.17 implementation:** `92eeb4423`
+- **Wave 9.18 implementation:** `7c179fada`
 - **Stacked branches:** `modular-monolith-phase9-01-types-ratchet`, then
   `modular-monolith-phase9-02-shallow-seams`, then
   `modular-monolith-phase9-03-legacy-planes`, then
@@ -35,7 +36,8 @@
   `modular-monolith-phase9-14-session-ownership`, then
   `modular-monolith-phase9-15-native-parser-ownership`, then
   `modular-monolith-phase9-16-local-session-archive`, then
-  `modular-monolith-phase9-17-durable-terminal-launch`
+  `modular-monolith-phase9-17-durable-terminal-launch`, then
+  `modular-monolith-phase9-18-driver-run-contract`
 - **Purpose:** Reduce the residual package surface toward 160 production Go
   packages without weakening capability ownership, consumer-owned ports, or
   independently replaceable adapters.
@@ -868,6 +870,41 @@ attempt intentionally failed the FleetDB freshness guard because only the
 binary, not `FLEET_DB_REPO`, pointed at the Phase 7 companion. The final run
 pinned both inputs to the exact companion checkout and passed without changing
 a threshold, allowlist, contract snapshot, or compatibility behavior.
+
+## Wave 9.18 result
+
+The eighteenth slice deletes `internal/driver/runtypes`, a neutral 39-line DTO
+package introduced only to break an import cycle. It owned no policy, storage,
+protocol, or independently replaceable adapter. Driver now owns `RunRequest`
+and `RunResult` directly. The Sandbox child package owns only its launcher port,
+placement admission, and placement evidence; Driver projects a sandbox refusal
+into the Driver-owned terminal result.
+
+No equivalent neutral package or alias bridge replaces the deleted root. The
+stale executor comment claiming a nil direct-store compatibility path is also
+removed: the runtime already requires the Execution owner APIs and fails closed
+when they are absent. Architecture guards reject both the deleted import root
+and the retired compatibility claim.
+
+The exact package shape moves from 171 to 170 production packages. Module
+packages remain 15, packages outside `internal/modules` fall from 156 to 155,
+one-file packages fall from 51 to 50, and one-or-two-file packages fall from 72
+to 71. Removing the bridge also lowers Driver import fanout from 19 to the
+default ceiling of 18, so its exact exception is deleted rather than lowered.
+
+## Wave 9.18 validation
+
+| Check | Result |
+|---|---|
+| Driver and Sandbox behavior | PASS: complete package suites cover trusted/untrusted placement, launch, runtime result, cancellation, placement evidence, tokens, recovery, and worker flows |
+| All production `internal/...` packages | PASS: every package compiled after deleting the bridge |
+| Retired root, exact package shape, import fanout, and affected lint | PASS: shape `170 / 15 / 155 / 50 / 71`; Driver fanout 18 with no exception; zero affected lint issues |
+| Authoritative repository architecture snapshot | PASS in 385.875s at implementation `7c179fada` |
+| Aggregate `make gate` against FleetDB `b71dec551` | PASS: Go, frontend, race, coverage, dependency, contract, architecture, and build gates with the matching `816b0b0c…7ef0` OpenAPI snapshot and bounded workers/memory |
+
+The first aggregate attempt exposed the now-stale Driver fanout exception. The
+exception row was physically deleted, the focused guard passed at the normal
+threshold, and the unchanged full paired gate then passed.
 
 Later waves must update this document with the selected package candidates,
 the boundary reason retained or removed for each, exact shape changes, and
