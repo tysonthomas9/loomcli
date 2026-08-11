@@ -1,6 +1,7 @@
 package driver
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"reflect"
@@ -135,6 +136,9 @@ func wireExecutorTestExecution(executor *Executor, st store.Store) {
 
 func testExecutor(st store.Store, value Executor) *Executor {
 	executor := &value
+	if len(executor.RunTokenKey) == 0 {
+		executor.RunTokenKey = bytes.Repeat([]byte{0x42}, 32)
+	}
 	wireExecutorTestExecution(executor, st)
 	return executor
 }

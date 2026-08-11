@@ -77,17 +77,11 @@ type Executor struct {
 	LeaseID           string
 	Runner            Runner
 	HeartbeatInterval time.Duration
-	// APIBaseURL/APIToken configure the driver-op HTTP API exported to driver
-	// runtimes via the default NodeRunner (LOOM_DRIVER_API_URL/_TOKEN).
+	// APIBaseURL configures the driver-op HTTP API exported to driver runtimes.
 	APIBaseURL string
-	APIToken   string //nolint:gosec // G117: driver API bearer token intentionally stored in runtime config.
-	// RunTokenKey, when set, is the HS256 signing key used to mint the
+	// RunTokenKey is the required HS256 signing key used to mint the
 	// run-scoped bearer token injected into the workflow runtime as
-	// LOOM_RUN_TOKEN at claim time. Nil disables minting and keeps the
-	// legacy LOOM_DRIVER_API_TOKEN + identity-quad env authenticating (no
-	// flag-day). Token-carrying runs drop that legacy env once the
-	// deprecated LegacyDriverAuthEnvVar fallback is switched off. Must be
-	// the same key the serve driver-op API verifies with
+	// LOOM_RUN_TOKEN at claim time. It must be the same key the serve driver-op API verifies with
 	// (ResolveRunTokenSigningKey: one key per process).
 	RunTokenKey []byte
 	// SandboxLauncher, when set, launches workflow runtimes through the SB1
@@ -186,13 +180,17 @@ func (e *Executor) RunOnce(ctx context.Context) (*ExecutionResult, error) {
 func (e *Executor) runClaimed(ctx context.Context, workDir string, claimed *domain.DriverRun) RunResult {
 	runner := e.Runner
 	if runner == nil {
-		runner = NodeRunner{APIBaseURL: e.APIBaseURL, APIToken: e.APIToken, Launcher: e.SandboxLauncher}
+		runner = NodeRunner{APIBaseURL: e.APIBaseURL, Launcher: e.SandboxLauncher}
 	}
 	req, err := loadRunRequest(ctx, workDir, claimed, e.Store)
 	if err != nil {
 		return RunResult{Status: domain.DriverRunFailed, Summary: err.Error(), ErrorClass: "bundle_verification"}
 	}
-	req.RunToken = e.mintRunToken(ctx, claimed)
+	runToken, err := e.mintRunToken(claimed)
+	if err != nil {
+		return RunResult{Status: domain.DriverRunFailed, Summary: err.Error(), ErrorClass: "driver_auth"}
+	}
+	req.RunToken = runToken
 	runResult, runErr := runner.Run(ctx, req)
 	if runErr != nil && ctx.Err() != nil {
 		// The runner context was cancelled under it (cooperative cancel
@@ -212,19 +210,16 @@ func (e *Executor) runClaimed(ctx context.Context, workDir string, claimed *doma
 // the claims so fenced run verification doubles as revocation: a superseded
 // lease rejects the token regardless of expiry. TTL = maximum run duration
 // (LOOM_RUN_TOKEN_TTL, default 24h) per the locked step-9 decision — expiry
-// is the hard run-duration cap, not the lease window. Failures degrade to ""
-// with a warning rather than failing the claimed run: a token-less run keeps
-// the legacy LOOM_DRIVER_API_TOKEN + identity-quad env, which still
-// authenticates.
-func (e *Executor) mintRunToken(ctx context.Context, claimed *domain.DriverRun) string {
+// is the hard run-duration cap, not the lease window. Token issuance is
+// mandatory: a claimed run fails before workflow launch when signing is not
+// available.
+func (e *Executor) mintRunToken(claimed *domain.DriverRun) (string, error) {
 	if len(e.RunTokenKey) == 0 || claimed == nil {
-		return ""
+		return "", fmt.Errorf("driver run-token signing key and claimed run are required: %w", domain.ErrInvalid)
 	}
 	ttl, err := RunTokenTTL()
 	if err != nil {
-		slog.WarnContext(ctx, "driver run token TTL env invalid; using default",
-			"default", DefaultRunTokenTTL, "err", err)
-		ttl = DefaultRunTokenTTL
+		return "", fmt.Errorf("resolve driver run-token TTL: %w", err)
 	}
 	token, err := MintRunToken(RunTokenClaims{
 		WorkspaceKey: claimed.WorkspaceKey,
@@ -234,11 +229,9 @@ func (e *Executor) mintRunToken(ctx context.Context, claimed *domain.DriverRun) 
 		FencingToken: claimed.FencingToken,
 	}, e.RunTokenKey, ttl)
 	if err != nil {
-		slog.WarnContext(ctx, "mint driver run token failed; runtime falls back to legacy driver API auth",
-			"runID", claimed.RunID, "err", err)
-		return ""
+		return "", fmt.Errorf("mint driver run token for %s: %w", claimed.RunID, err)
 	}
-	return token
+	return token, nil
 }
 
 func (e *Executor) RecoverStaleOnce(ctx context.Context) (*store.StaleDriverRunRecoveryResult, error) {

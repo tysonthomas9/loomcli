@@ -25,7 +25,6 @@ test("LoomDriverClient sends camelCase task run requests without exposing a work
   }, async ({ apiUrl, calls }) => {
     const client = createLoomDriverClient({
       input: { epicId: "EPIC-1" },
-      apiToken: "api-token",
       env: {
         LOOM_DRIVER_WORKSPACE: "WS",
         LOOM_DRIVER_RUN_ID: "run-1",
@@ -33,6 +32,7 @@ test("LoomDriverClient sends camelCase task run requests without exposing a work
         LOOM_DRIVER_LEASE_ID: "lease-1",
         LOOM_DRIVER_FENCING_TOKEN: "7",
         LOOM_DRIVER_API_URL: apiUrl,
+        LOOM_RUN_TOKEN: "run-token-jwt",
         LOOM_TASK_RUN_LEASE_TOKEN: "same-run-token",
       },
     });
@@ -50,11 +50,8 @@ test("LoomDriverClient sends camelCase task run requests without exposing a work
 
     assert.equal(calls.length, 2);
     assert.equal(calls[0].url, "/api/workspaces/WS/driver/exec-task");
-    assert.equal(calls[0].headers["x-loom-driver-run-id"], "run-1");
-    assert.equal(calls[0].headers["x-loom-driver-node-id"], "node-1");
-    assert.equal(calls[0].headers["x-loom-driver-lease-id"], "lease-1");
-    assert.equal(calls[0].headers["x-loom-driver-fencing-token"], "7");
-    assert.equal(calls[0].headers.authorization, "Bearer api-token");
+    assert.equal(calls[0].headers.authorization, "Bearer run-token-jwt");
+    assertNoDriverIdentityHeaders(calls[0].headers, calls[0].url);
     assert.deepEqual(calls[0].body, {
       taskId: "TASK-1",
       runner: "local-task-runner",
@@ -99,7 +96,7 @@ test("LoomDriverClient.taskRuns.request puts the optional input payload (diff+ru
   }, async ({ apiUrl, calls }) => {
     const client = createLoomDriverClient({
       input: { epicId: "EPIC-1" },
-      env: { LOOM_DRIVER_WORKSPACE: "WS", LOOM_DRIVER_RUN_ID: "run-1", LOOM_DRIVER_API_URL: apiUrl },
+      env: { LOOM_DRIVER_WORKSPACE: "WS", LOOM_DRIVER_RUN_ID: "run-1", LOOM_DRIVER_API_URL: apiUrl, LOOM_RUN_TOKEN: "run-token-jwt" },
     });
 
     await client.taskRuns.request({
@@ -130,7 +127,7 @@ test("LoomDriverClient.taskRuns.request omits input from the wire when none is g
   }, async ({ apiUrl, calls }) => {
     const client = createLoomDriverClient({
       input: { epicId: "EPIC-1" },
-      env: { LOOM_DRIVER_WORKSPACE: "WS", LOOM_DRIVER_RUN_ID: "run-1", LOOM_DRIVER_API_URL: apiUrl },
+      env: { LOOM_DRIVER_WORKSPACE: "WS", LOOM_DRIVER_RUN_ID: "run-1", LOOM_DRIVER_API_URL: apiUrl, LOOM_RUN_TOKEN: "run-token-jwt" },
     });
 
     await client.taskRuns.request({ taskId: "TASK-1", runner: "local-task-runner" });
@@ -152,7 +149,7 @@ test("LoomDriverClient carries the retained-review claim from child request to f
     return notFound();
   }, async ({ apiUrl, calls }) => {
     const client = createLoomDriverClient({
-      env: { LOOM_DRIVER_WORKSPACE: "WS", LOOM_DRIVER_RUN_ID: "review-parent-1", LOOM_DRIVER_API_URL: apiUrl },
+      env: { LOOM_DRIVER_WORKSPACE: "WS", LOOM_DRIVER_RUN_ID: "review-parent-1", LOOM_DRIVER_API_URL: apiUrl, LOOM_RUN_TOKEN: "run-token-jwt" },
     });
 
     await client.taskRuns.request({
@@ -191,7 +188,7 @@ test("LoomDriverClient carries the retained-review claim from child request to f
 test("LoomDriverClient rejects incomplete review handoffs before HTTP", async () => {
   await withDriverServer(async () => notFound(), async ({ apiUrl, calls }) => {
     const client = createLoomDriverClient({
-      env: { LOOM_DRIVER_WORKSPACE: "WS", LOOM_DRIVER_RUN_ID: "review-parent-1", LOOM_DRIVER_API_URL: apiUrl },
+      env: { LOOM_DRIVER_WORKSPACE: "WS", LOOM_DRIVER_RUN_ID: "review-parent-1", LOOM_DRIVER_API_URL: apiUrl, LOOM_RUN_TOKEN: "run-token-jwt" },
     });
 
     await assert.rejects(client.tasks.handoffReview({ taskId: "TASK-1", status: "open" }), /requires taskRunId/);
@@ -256,7 +253,7 @@ test("LoomDriverClient serializes atomic Review annotations in camelCase", async
     return notFound();
   }, async ({ apiUrl, calls }) => {
     const client = createLoomDriverClient({
-      env: { LOOM_DRIVER_WORKSPACE: "WS", LOOM_DRIVER_RUN_ID: "review-parent-1", LOOM_DRIVER_API_URL: apiUrl },
+      env: { LOOM_DRIVER_WORKSPACE: "WS", LOOM_DRIVER_RUN_ID: "review-parent-1", LOOM_DRIVER_API_URL: apiUrl, LOOM_RUN_TOKEN: "run-token-jwt" },
     });
 
     await client.tasks.handoffReview({
@@ -290,7 +287,7 @@ test("LoomDriverClient.taskRuns.request serializes repoRef at both outgoing plac
   }, async ({ apiUrl, calls }) => {
     const client = createLoomDriverClient({
       input: { epicId: "EPIC-1" },
-      env: { LOOM_DRIVER_WORKSPACE: "WS", LOOM_DRIVER_RUN_ID: "run-1", LOOM_DRIVER_API_URL: apiUrl },
+      env: { LOOM_DRIVER_WORKSPACE: "WS", LOOM_DRIVER_RUN_ID: "run-1", LOOM_DRIVER_API_URL: apiUrl, LOOM_RUN_TOKEN: "run-token-jwt" },
     });
 
     await client.taskRuns.request({
@@ -324,7 +321,7 @@ test("LoomDriverClient.taskRuns.request replays the exact command after a commit
   }, async ({ apiUrl, calls }) => {
     const client = createLoomDriverClient({
       input: { epicId: "EPIC-1" },
-      env: { LOOM_DRIVER_WORKSPACE: "WS", LOOM_DRIVER_RUN_ID: "run-1", LOOM_DRIVER_API_URL: apiUrl },
+      env: { LOOM_DRIVER_WORKSPACE: "WS", LOOM_DRIVER_RUN_ID: "run-1", LOOM_DRIVER_API_URL: apiUrl, LOOM_RUN_TOKEN: "run-token-jwt" },
     });
 
     const result = await client.taskRuns.request({ taskId: "TASK-1", taskRunId: "task-run-1", runner: "local-task-runner" });
@@ -344,7 +341,7 @@ test("LoomDriverClient.taskRuns.request forwards closeTask=false verbatim (plann
   }, async ({ apiUrl, calls }) => {
     const client = createLoomDriverClient({
       input: { epicId: "EPIC-1" },
-      env: { LOOM_DRIVER_WORKSPACE: "WS", LOOM_DRIVER_RUN_ID: "run-1", LOOM_DRIVER_API_URL: apiUrl },
+      env: { LOOM_DRIVER_WORKSPACE: "WS", LOOM_DRIVER_RUN_ID: "run-1", LOOM_DRIVER_API_URL: apiUrl, LOOM_RUN_TOKEN: "run-token-jwt" },
     });
 
     await client.taskRuns.request({ taskId: "TASK-1", runner: "local-task-runner", closeTask: false });
@@ -377,7 +374,7 @@ test("LoomDriverClient.tasks.diff calls task-diff with taskId", async () => {
   }, async ({ apiUrl, calls }) => {
     const client = createLoomDriverClient({
       input: { epicId: "EPIC-1" },
-      env: { LOOM_DRIVER_WORKSPACE: "WS", LOOM_DRIVER_RUN_ID: "run-1", LOOM_DRIVER_API_URL: apiUrl },
+      env: { LOOM_DRIVER_WORKSPACE: "WS", LOOM_DRIVER_RUN_ID: "run-1", LOOM_DRIVER_API_URL: apiUrl, LOOM_RUN_TOKEN: "run-token-jwt" },
     });
 
     const result = await client.tasks.diff("TASK-1");
@@ -399,7 +396,7 @@ test("LoomDriverClient.taskRuns.request ignores legacy provider routing inputs",
   }, async ({ apiUrl, calls }) => {
     const client = createLoomDriverClient({
       input: { epicId: "EPIC-1" },
-      env: { LOOM_DRIVER_WORKSPACE: "WS", LOOM_DRIVER_RUN_ID: "run-1", LOOM_DRIVER_API_URL: apiUrl },
+      env: { LOOM_DRIVER_WORKSPACE: "WS", LOOM_DRIVER_RUN_ID: "run-1", LOOM_DRIVER_API_URL: apiUrl, LOOM_RUN_TOKEN: "run-token-jwt" },
     });
 
     await client.taskRuns.request({
@@ -452,6 +449,8 @@ test("LoomDriverClient exposes epic, agent, active run, and stale recovery helpe
         LOOM_DRIVER_WORKSPACE: "WS",
         LOOM_DRIVER_RUN_ID: "run-1",
         LOOM_DRIVER_API_URL: apiUrl,
+
+        LOOM_RUN_TOKEN: "run-token-jwt",
       },
     });
     assert.equal(client.messageLeadAgent, undefined);
@@ -519,6 +518,8 @@ test("LoomDriverClient task request enqueues and await polls terminal result", a
         LOOM_DRIVER_WORKSPACE: "WS",
         LOOM_DRIVER_RUN_ID: "run-1",
         LOOM_DRIVER_API_URL: apiUrl,
+
+        LOOM_RUN_TOKEN: "run-token-jwt",
       },
     });
 
@@ -571,6 +572,8 @@ test("LoomDriverClient can observe one child while another child is still pollin
         LOOM_DRIVER_WORKSPACE: "WS",
         LOOM_DRIVER_RUN_ID: "run-1",
         LOOM_DRIVER_API_URL: apiUrl,
+
+        LOOM_RUN_TOKEN: "run-token-jwt",
       },
     });
 
@@ -601,6 +604,7 @@ test("LoomDriverClient requires the driver HTTP API URL", async () => {
     env: {
       LOOM_DRIVER_WORKSPACE: "WS",
       LOOM_DRIVER_RUN_ID: "run-1",
+      LOOM_RUN_TOKEN: "run-token-jwt",
     },
   });
 
@@ -648,6 +652,8 @@ test("LoomDriverClient maps structured driver API errors", async () => {
         LOOM_DRIVER_WORKSPACE: "WS",
         LOOM_DRIVER_RUN_ID: "run-1",
         LOOM_DRIVER_API_URL: apiUrl,
+
+        LOOM_RUN_TOKEN: "run-token-jwt",
       },
     });
 
@@ -691,11 +697,8 @@ test("LoomDriverClient epics.watch yields snapshot then taskRun frames and stops
     assert.equal(calls.length, 1);
     assert.equal(calls[0].method, "GET");
     assert.equal(calls[0].url, "/api/workspaces/WS/driver/watch/epic?epicId=EPIC-1");
-    assert.equal(calls[0].headers["x-loom-driver-run-id"], "run-1");
-    assert.equal(calls[0].headers["x-loom-driver-node-id"], "node-1");
-    assert.equal(calls[0].headers["x-loom-driver-lease-id"], "lease-1");
-    assert.equal(calls[0].headers["x-loom-driver-fencing-token"], "7");
-    assert.equal(calls[0].headers.authorization, "Bearer api-token");
+    assert.equal(calls[0].headers.authorization, "Bearer run-token-jwt");
+    assertNoDriverIdentityHeaders(calls[0].headers, calls[0].url);
     assert.equal(calls[0].headers["last-event-id"], undefined);
   });
 });
@@ -798,11 +801,8 @@ test("LoomDriverClient connectors send camelCase connector-dispatch wire with ru
     assert.equal(calls.length, 1);
     assert.equal(calls[0].method, "POST");
     assert.equal(calls[0].url, "/api/workspaces/WS/driver/connector-dispatch");
-    assert.equal(calls[0].headers["x-loom-driver-run-id"], "run-1");
-    assert.equal(calls[0].headers["x-loom-driver-node-id"], "node-1");
-    assert.equal(calls[0].headers["x-loom-driver-lease-id"], "lease-1");
-    assert.equal(calls[0].headers["x-loom-driver-fencing-token"], "7");
-    assert.equal(calls[0].headers.authorization, "Bearer api-token");
+    assert.equal(calls[0].headers.authorization, "Bearer run-token-jwt");
+    assertNoDriverIdentityHeaders(calls[0].headers, calls[0].url);
     assert.deepEqual(calls[0].body, {
       connectorId: "gh-main",
       action: "github.merge",
@@ -993,11 +993,8 @@ test("LoomDriverClient events.await sends camelCase wire and derives awaitIndex 
     assert.equal(calls.length, 2);
     assert.equal(calls[0].method, "POST");
     assert.equal(calls[0].url, "/api/workspaces/WS/driver/events/await");
-    assert.equal(calls[0].headers["x-loom-driver-run-id"], "run-1");
-    assert.equal(calls[0].headers["x-loom-driver-node-id"], "node-1");
-    assert.equal(calls[0].headers["x-loom-driver-lease-id"], "lease-1");
-    assert.equal(calls[0].headers["x-loom-driver-fencing-token"], "7");
-    assert.equal(calls[0].headers.authorization, "Bearer api-token");
+    assert.equal(calls[0].headers.authorization, "Bearer run-token-jwt");
+    assertNoDriverIdentityHeaders(calls[0].headers, calls[0].url);
     assert.deepEqual(calls[0].body, {
       pattern: "approval:octo/hello#123@sha-1",
       actor: ["alice", "bob"],
@@ -1257,7 +1254,8 @@ test("LoomDriverClient events.list fetches the run's awaits without consuming a 
     assert.equal(listing.awaits.length, 2);
     assert.equal(calls[0].method, "GET");
     assert.equal(calls[0].url, "/api/workspaces/WS/driver/events/awaits");
-    assert.equal(calls[0].headers["x-loom-driver-run-id"], "run-1");
+	assert.equal(calls[0].headers.authorization, "Bearer run-token-jwt");
+	assertNoDriverIdentityHeaders(calls[0].headers, calls[0].url);
 
     // Listing consumed no await slot: the next await is still #1.
     const next = await client.events.await({ pattern: "p:1", timeoutMs: 1000 });
@@ -1281,10 +1279,8 @@ test("LoomDriverClient sends token-only auth when LOOM_RUN_TOKEN is set", async 
     }
     return notFound();
   }, async ({ apiUrl, calls }) => {
-    // The legacy header-quad env AND the static apiToken are deliberately
-    // present: the run token must win and the quad must NOT leak onto the
-    // wire (a conflicting X-Loom-Driver-Run-Id is a server-side 401
-    // identity_mismatch).
+	// Hostile identity env is deliberately present: only the signed run token
+	// may reach the wire.
     const client = tokenTestClient(apiUrl);
     assert.equal(client.runToken, "run-token-jwt");
 
@@ -1319,12 +1315,12 @@ test("LoomDriverClient token-only auth needs no LOOM_DRIVER_RUN_ID (identity rid
     assert.equal(calls[0].headers.authorization, "Bearer run-token-jwt");
     assertNoDriverIdentityHeaders(calls[0].headers, calls[0].url);
 
-    // Without either credential source the run id is still required.
-    const legacy = createLoomDriverClient({
+    // Without the run credential the client fails before issuing HTTP.
+    const missingToken = createLoomDriverClient({
       input: {},
       env: { LOOM_DRIVER_WORKSPACE: "WS", LOOM_DRIVER_API_URL: apiUrl },
     });
-    await assert.rejects(() => legacy.epics.get(), /LOOM_DRIVER_RUN_ID is required/);
+    await assert.rejects(() => missingToken.epics.get(), /LOOM_RUN_TOKEN is required/);
   });
 });
 
@@ -1394,12 +1390,11 @@ test("LoomDriverClient epics.watch is token-only with LOOM_RUN_TOKEN and treats 
   });
 });
 
-// tokenTestClient layers LOOM_RUN_TOKEN over the full legacy env (header quad
-// + static apiToken) so token-only tests prove precedence, not just presence.
+// tokenTestClient carries hostile identity env so tests prove it cannot mint
+// or override authority.
 function tokenTestClient(apiUrl) {
   return createLoomDriverClient({
     input: { epicId: "EPIC-1" },
-    apiToken: "api-token",
     env: {
       LOOM_DRIVER_WORKSPACE: "WS",
       LOOM_DRIVER_RUN_ID: "run-1",
@@ -1428,7 +1423,6 @@ function assertNoDriverIdentityHeaders(headers, context) {
 function watchTestClient(apiUrl) {
   return createLoomDriverClient({
     input: { epicId: "EPIC-1" },
-    apiToken: "api-token",
     env: {
       LOOM_DRIVER_WORKSPACE: "WS",
       LOOM_DRIVER_RUN_ID: "run-1",
@@ -1436,6 +1430,8 @@ function watchTestClient(apiUrl) {
       LOOM_DRIVER_LEASE_ID: "lease-1",
       LOOM_DRIVER_FENCING_TOKEN: "7",
       LOOM_DRIVER_API_URL: apiUrl,
+
+      LOOM_RUN_TOKEN: "run-token-jwt",
     },
   });
 }

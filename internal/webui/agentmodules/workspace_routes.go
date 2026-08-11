@@ -74,9 +74,9 @@ func newWorkspaceModules(deps Deps, automationModules automationRouteModules) []
 		}),
 		driverapi.NewModule(driverapi.Config{
 			Store: deps.Store, APIBaseURL: deps.DriverAPIBaseURL,
-			IssueBackends: deps.ExecutionIssueBackends,
-			RolePrompts:   roles.ReadPromptBody,
-			APIToken:      deps.DriverAPIToken, RunTokenKey: deps.DriverRunTokenKey,
+			IssueBackends:    deps.ExecutionIssueBackends,
+			RolePrompts:      roles.ReadPromptBody,
+			RunTokenKey:      deps.DriverRunTokenKey,
 			LocalSettingsDir: deps.LocalSettingsDir, LocalRepoPath: storeadapter.ResolveRepoPath,
 			SourceControl:    deps.SourceControl,
 			Dispatcher:       deps.Dispatcher,

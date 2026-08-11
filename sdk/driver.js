@@ -53,26 +53,20 @@ export function isWorkflowSuspended(err) {
 export class LoomDriverClient {
   static fromEnv(options = {}) {
     return new LoomDriverClient({
-      env: options.env || process.env,
-      input: options.input,
-      apiUrl: options.apiUrl,
-      apiToken: options.apiToken,
-      runToken: options.runToken,
+	  env: options.env || process.env,
+	  input: options.input,
+	  apiUrl: options.apiUrl,
+	  runToken: options.runToken,
     });
   }
 
   constructor(options = {}) {
     this.env = options.env || process.env;
-    this.input = options.input || {};
-    this.apiUrl = stripTrailingSlash(String(options.apiUrl || pickEnv(this.env, "LOOM_DRIVER_API_URL")));
-    this.apiToken = String(options.apiToken || pickEnv(this.env, "LOOM_DRIVER_API_TOKEN"));
-    // runToken is the run-scoped bearer token minted at claim (LOOM_RUN_TOKEN,
-    // injected by the executor). When present it is the ONLY credential the
-    // client sends: Authorization: Bearer <run token>, no X-Loom-Driver-*
-    // identity headers and no static apiToken — the server derives
-    // {run, node, lease, fence} from the verified claims. Without it the
-    // legacy transport (header quad + optional shared static token) is
-    // unchanged, so existing deployments keep working.
+	this.input = options.input || {};
+	this.apiUrl = stripTrailingSlash(String(options.apiUrl || pickEnv(this.env, "LOOM_DRIVER_API_URL")));
+	// runToken is the mandatory run-scoped bearer token minted at claim. It is
+	// the only credential the client sends; the server derives run ownership
+	// from its signed claims.
     this.runToken = String(options.runToken || pickEnv(this.env, "LOOM_RUN_TOKEN"));
     this.workspace = pickEnv(this.env, "LOOM_DRIVER_WORKSPACE");
     this.driverRunId = pickEnv(this.env, "LOOM_DRIVER_RUN_ID");
@@ -731,10 +725,8 @@ export class LoomDriverClient {
   }
 
   #requireHttpConfig() {
-    // With a run-scoped token the run identity travels inside the token
-    // claims, so the LOOM_DRIVER_RUN_ID env is not needed.
-    if (!this.driverRunId && !this.runToken) {
-      throw new Error("LOOM_DRIVER_RUN_ID is required (or LOOM_RUN_TOKEN for token-only auth)");
+	if (!this.runToken) {
+	  throw new Error("LOOM_RUN_TOKEN is required for the driver HTTP API");
     }
     if (!this.workspace) {
       throw new Error("LOOM_DRIVER_WORKSPACE is required for the driver HTTP API");
@@ -744,27 +736,9 @@ export class LoomDriverClient {
     }
   }
 
-  // #identityHeaders builds the per-request auth headers for both the JSON
-  // ops and the watch SSE transport. Token-only path first: with a run token
-  // the ONLY header is Authorization: Bearer <run token> — no X-Loom-Driver-*
-  // quad (the server derives identity from claims and treats a conflicting
-  // header as identity_mismatch) and the static apiToken is ignored. The
-  // legacy header-quad + static-token transport is byte-identical otherwise
-  // (CLI/ops transition path).
-  #identityHeaders() {
-    if (this.runToken) {
-      return { Authorization: "Bearer " + this.runToken };
-    }
-    const headers = {
-      "X-Loom-Driver-Run-Id": this.driverRunId,
-    };
-    setHeaderIfSet(headers, "X-Loom-Driver-Node-Id", pickEnv(this.env, "LOOM_DRIVER_NODE_ID"));
-    setHeaderIfSet(headers, "X-Loom-Driver-Lease-Id", pickEnv(this.env, "LOOM_DRIVER_LEASE_ID"));
-    setHeaderIfSet(headers, "X-Loom-Driver-Fencing-Token", pickEnv(this.env, "LOOM_DRIVER_FENCING_TOKEN"));
-    if (this.apiToken) {
-      headers.Authorization = "Bearer " + this.apiToken;
-    }
-    return headers;
+	// #identityHeaders builds the sole run-token credential for JSON and SSE.
+	#identityHeaders() {
+	  return { Authorization: "Bearer " + this.runToken };
   }
 
   async #httpCall(op, params, options = {}) {
@@ -840,7 +814,7 @@ export class LoomDriverClient {
 }
 
 export function createLoomDriverClient(options = {}) {
-  if (options && !("input" in options) && !("env" in options) && !("apiUrl" in options) && !("apiToken" in options)) {
+  if (options && !("input" in options) && !("env" in options) && !("apiUrl" in options) && !("runToken" in options)) {
     return LoomDriverClient.fromEnv({ input: options });
   }
   return LoomDriverClient.fromEnv(options);
@@ -1012,12 +986,6 @@ function throwIfSuspended(response, awaitIndex) {
 function stringList(values) {
   const list = Array.isArray(values) ? values : values ? [values] : [];
   return list.map(String).filter((value) => value.trim() !== "");
-}
-
-function setHeaderIfSet(headers, name, value) {
-  if (value) {
-    headers[name] = value;
-  }
 }
 
 function stripTrailingSlash(value) {

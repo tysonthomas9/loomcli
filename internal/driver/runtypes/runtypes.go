@@ -20,7 +20,8 @@ type RunRequest struct {
 	Manifest     map[string]string
 	// RunToken is the run-scoped bearer token minted at claim time, bound to
 	// this run's lease + fencing token, and exported to the workflow runtime
-	// as LOOM_RUN_TOKEN. Empty when minting is disabled (no RunTokenKey).
+	// as LOOM_RUN_TOKEN. Runtime launch rejects an empty token; the executor
+	// terminally fails the claimed run when minting is unavailable.
 	// Carried on the request — not the runner — so every launcher behind the
 	// SB1 sandbox seam injects it the same way.
 	RunToken string

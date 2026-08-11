@@ -1,7 +1,6 @@
 package driverapi
 
 import (
-	"crypto/subtle"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -12,19 +11,9 @@ import (
 
 // authenticate is the single credential gate for every driver-op route (the
 // generic {op} POST, the explicitly registered two-segment ops, and the watch
-// SSE GET). It resolves the request's auth in priority order:
-//
-//  1. Run-scoped token: when the Bearer credential parses as a run token
-//     signed with the module's key, the request is authenticated by the token
-//     ALONE — no shared API token, no header quad. The returned identity is
-//     built from the token claims; a conflicting X-Loom-Driver-Run-Id header
-//     or workspace path is a 401 identity_mismatch. An expired run token is a
-//     hard 401 token_expired (jwt/v5 verifies the signature before expiry, so
-//     the failure proves the token was ours).
-//  2. Legacy path: any other credential (including none) falls through to the
-//     optional shared static API token compare, exactly as before run tokens
-//     existed, so the CLI/ops header-quad transport keeps working during the
-//     transition. tokenID is nil: the caller resolves identity from headers.
+// SSE GET). A signed run-scoped bearer is the only accepted credential. The
+// returned identity is built from its claims; no static bearer or request
+// header can mint owner authority.
 //
 // Revocation needs no denylist: callers pass the claims-derived identity
 // through verifyParent (fenced heartbeat), which rejects terminal runs and
@@ -33,38 +22,37 @@ import (
 // On failure the structured error has been written and ok is false.
 func (m *Module) authenticate(w http.ResponseWriter, r *http.Request) (tokenID *driverIdentity, ok bool) {
 	bearer := bearerCredential(r)
-	if bearer != "" && len(m.runTokenKey) > 0 {
-		claims, err := driverpkg.ParseRunToken(bearer, m.runTokenKey)
-		switch {
-		case err == nil:
-			return m.identityFromRunToken(w, r, claims)
-		case driverpkg.IsRunTokenExpired(err):
-			writeOpError(w, http.StatusUnauthorized, "token_expired", "run token expired (max run duration reached)", false)
-			return nil, false
-		}
-		// Not parseable as our run token: fall through to the legacy
-		// static-token path unchanged.
-	}
-	if m.apiToken != "" && subtle.ConstantTimeCompare([]byte(bearer), []byte(m.apiToken)) != 1 {
-		writeOpError(w, http.StatusUnauthorized, "unauthenticated", "missing or invalid driver API token", false)
+	if bearer == "" || len(m.runTokenKey) == 0 {
+		writeOpError(w, http.StatusUnauthorized, "unauthenticated", "valid run token required", false)
 		return nil, false
 	}
-	return nil, true
+	claims, err := driverpkg.ParseRunToken(bearer, m.runTokenKey)
+	if err == nil {
+		return m.identityFromRunToken(w, r, claims)
+	}
+	if driverpkg.IsRunTokenExpired(err) {
+		writeOpError(w, http.StatusUnauthorized, "token_expired", "run token expired (max run duration reached)", false)
+		return nil, false
+	}
+	writeOpError(w, http.StatusUnauthorized, "unauthenticated", "missing or invalid run token", false)
+	return nil, false
 }
 
 // identityFromRunToken builds the request identity from validated run-token
-// claims, rejecting requests whose path workspace or driver-run header
-// disagrees with the token.
+// claims, rejecting requests whose path workspace disagrees with the token or
+// which carry any retired caller-supplied Driver identity header.
 func (m *Module) identityFromRunToken(w http.ResponseWriter, r *http.Request, claims *driverpkg.RunTokenClaims) (*driverIdentity, bool) {
 	if ws := r.PathValue("ws"); claims.WorkspaceKey != "" && ws != "" && claims.WorkspaceKey != ws {
 		writeOpError(w, http.StatusUnauthorized, "identity_mismatch",
 			fmt.Sprintf("run token is scoped to workspace %q, not %q", claims.WorkspaceKey, ws), false)
 		return nil, false
 	}
-	if headerRunID := strings.TrimSpace(r.Header.Get(HeaderDriverRunID)); headerRunID != "" && headerRunID != claims.RunID {
-		writeOpError(w, http.StatusUnauthorized, "identity_mismatch",
-			fmt.Sprintf("%s header %q does not match run token run %q", HeaderDriverRunID, headerRunID, claims.RunID), false)
-		return nil, false
+	for headerName := range r.Header {
+		if strings.HasPrefix(strings.ToLower(headerName), "x-loom-driver-") {
+			writeOpError(w, http.StatusUnauthorized, "identity_mismatch",
+				"caller-supplied Driver identity headers are not accepted", false)
+			return nil, false
+		}
 	}
 	id := driverIdentity{
 		RunID:   claims.RunID,
@@ -83,23 +71,13 @@ func (m *Module) identityFromRunToken(w http.ResponseWriter, r *http.Request, cl
 	return &id, true
 }
 
-// requestIdentity picks the per-request parent DriverRun identity: run-token
-// claims when the request authenticated with a token, the legacy header quad
-// otherwise. On failure the error has been written and ok is false.
-func requestIdentity(w http.ResponseWriter, r *http.Request, tokenID *driverIdentity) (driverIdentity, bool) {
+// requestIdentity returns the claims-derived parent DriverRun identity.
+func requestIdentity(w http.ResponseWriter, _ *http.Request, tokenID *driverIdentity) (driverIdentity, bool) {
 	if tokenID != nil {
 		return *tokenID, true
 	}
-	id := driverIdentityFromHeaders(r)
-	if id.RunID == "" {
-		writeOpError(w, http.StatusUnauthorized, "unauthenticated", HeaderDriverRunID+" header required", false)
-		return driverIdentity{}, false
-	}
-	if id.LeaseToken == "" {
-		writeOpError(w, http.StatusUnauthorized, "unauthenticated", HeaderDriverLeaseToken+" header required", false)
-		return driverIdentity{}, false
-	}
-	return id, true
+	writeOpError(w, http.StatusUnauthorized, "unauthenticated", "valid run token required", false)
+	return driverIdentity{}, false
 }
 
 // bearerCredential extracts the Bearer credential, "" when absent.

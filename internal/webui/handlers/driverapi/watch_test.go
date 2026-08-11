@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -151,41 +152,39 @@ func decodeWatchData(t *testing.T, frame sseFrame) map[string]any {
 func TestWatchEpicAuth(t *testing.T) {
 	tests := []struct {
 		name     string
-		apiToken string
 		headers  func(h *testHarness) map[string]string
 		query    string
 		wantCode string
 	}{
 		{
-			name:     "missing run id header",
+			name:     "missing run token",
 			headers:  func(*testHarness) map[string]string { return nil },
 			wantCode: "unauthenticated",
 		},
 		{
-			name:     "missing bearer token",
-			apiToken: "secret-token",
-			headers:  func(h *testHarness) map[string]string { return h.ownerHeaders() },
+			name:     "retired static bearer",
+			headers:  func(*testHarness) map[string]string { return bearer("secret-token") },
 			wantCode: "unauthenticated",
 		},
 		{
 			name: "foreign owner credentials",
 			headers: func(h *testHarness) map[string]string {
-				headers := h.ownerHeaders()
-				headers[HeaderDriverFencingToken] = "999999"
-				return headers
+				return bearer(h.mintToken(t, time.Hour, func(claims *driverpkg.RunTokenClaims) {
+					claims.FencingToken++
+				}))
 			},
 			wantCode: "not_owner",
 		},
 		{
 			name:     "invalid cursor",
-			headers:  func(h *testHarness) map[string]string { return h.ownerHeaders() },
+			headers:  func(h *testHarness) map[string]string { return h.ownerHeaders(t) },
 			query:    "afterSeq=not-a-number",
 			wantCode: "invalid",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := newTestHarness(t, tt.apiToken)
+			h := newTestHarness(t)
 			stream := openWatch(t, h, tt.query, tt.headers(h))
 			if stream.resp.StatusCode == http.StatusOK {
 				t.Fatalf("status = 200, want error for %s", tt.name)
@@ -202,12 +201,12 @@ func TestWatchEpicAuth(t *testing.T) {
 }
 
 func TestWatchEpicSnapshotFirstThenEvents(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	h.module.watchPollInterval = 5 * time.Millisecond
 	seq1 := appendWatchEvent(t, h, "task-run-1", domain.TaskRunEventQueued)
 	seq2 := appendWatchEvent(t, h, "task-run-1", domain.TaskRunEventClaimed)
 
-	stream := openWatch(t, h, "", h.ownerHeaders())
+	stream := openWatch(t, h, "", h.ownerHeaders(t))
 	if stream.resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", stream.resp.StatusCode)
 	}
@@ -278,7 +277,7 @@ func TestWatchEpicResumeSkipsSeenSeqs(t *testing.T) {
 		{
 			name: "Last-Event-ID header",
 			headers: func(h *testHarness, cursor string) map[string]string {
-				headers := h.ownerHeaders()
+				headers := h.ownerHeaders(t)
 				headers["Last-Event-ID"] = cursor
 				return headers
 			},
@@ -286,12 +285,12 @@ func TestWatchEpicResumeSkipsSeenSeqs(t *testing.T) {
 		{
 			name:    "afterSeq query",
 			query:   "afterSeq=%s",
-			headers: func(h *testHarness, _ string) map[string]string { return h.ownerHeaders() },
+			headers: func(h *testHarness, _ string) map[string]string { return h.ownerHeaders(t) },
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := newTestHarness(t, "")
+			h := newTestHarness(t)
 			h.module.watchPollInterval = 5 * time.Millisecond
 			appendWatchEvent(t, h, "task-run-1", domain.TaskRunEventQueued)
 			seq2 := appendWatchEvent(t, h, "task-run-1", domain.TaskRunEventClaimed)
@@ -328,11 +327,11 @@ func TestWatchEpicResumeSkipsSeenSeqs(t *testing.T) {
 }
 
 func TestWatchEpicClosesWhenParentFinishes(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	h.module.watchPollInterval = 5 * time.Millisecond
 	h.module.watchReconcileInterval = 20 * time.Millisecond
 
-	stream := openWatch(t, h, "", h.ownerHeaders())
+	stream := openWatch(t, h, "", h.ownerHeaders(t))
 	if stream.resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", stream.resp.StatusCode)
 	}

@@ -51,7 +51,7 @@ var frozenDriverOps = []string{
 }
 
 func TestContractDriverOpNamesFrozen(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	got := make([]string, 0, len(h.module.ops))
 	for op := range h.module.ops {
 		got = append(got, op)
@@ -66,7 +66,7 @@ func TestContractDriverOpNamesFrozen(t *testing.T) {
 // generic {op} pattern cannot match) stay registered under their frozen
 // paths: a request reaches the module handler instead of the mux 404.
 func TestContractExplicitRoutesFrozen(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	routes := []struct {
 		method string
 		path   string
@@ -82,7 +82,7 @@ func TestContractExplicitRoutesFrozen(t *testing.T) {
 		if err != nil {
 			t.Fatalf("new request %s: %v", route.path, err)
 		}
-		for name, value := range h.ownerHeaders() {
+		for name, value := range h.ownerHeaders(t) {
 			req.Header.Set(name, value)
 		}
 		resp, err := http.DefaultClient.Do(req)
@@ -101,10 +101,10 @@ func TestContractExplicitRoutesFrozen(t *testing.T) {
 // TestContractErrorEnvelopeFrozen pins the envelope key set: exactly
 // {code, message, retryable} plus the OPTIONAL additive details object.
 func TestContractErrorEnvelopeFrozen(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 
 	t.Run("details carries machine-readable context on unknown_op", func(t *testing.T) {
-		resp, decoded := h.do(t, opRequest{op: "definitely-not-an-op", headers: h.ownerHeaders()})
+		resp, decoded := h.do(t, opRequest{op: "definitely-not-an-op", headers: h.ownerHeaders(t)})
 		if resp.StatusCode != http.StatusNotFound {
 			t.Fatalf("status = %d, want 404", resp.StatusCode)
 		}
@@ -123,7 +123,7 @@ func TestContractErrorEnvelopeFrozen(t *testing.T) {
 	})
 
 	t.Run("details is omitted (not null) when absent", func(t *testing.T) {
-		resp, decoded := h.do(t, opRequest{op: "release-task", body: map[string]any{}, headers: h.ownerHeaders()})
+		resp, decoded := h.do(t, opRequest{op: "release-task", body: map[string]any{}, headers: h.ownerHeaders(t)})
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Fatalf("status = %d, want 400", resp.StatusCode)
 		}

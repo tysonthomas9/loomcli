@@ -4,14 +4,12 @@
 // subprocesses. New/v2 surface: camelCase JSON on the wire, structured
 // errors {code, message, retryable}.
 //
-// Authentication is run-scoped. The preferred credential is a short-lived
+// Authentication is run-scoped. The only credential is a short-lived
 // run-scoped Bearer token (see internal/driver run_token.go): the server
 // derives the parent DriverRun identity (run/node/lease/fencing) from the
 // token claims, so workflows never handle fencing headers or ambient creds.
-// The legacy transport — the X-Loom-Driver-* header quad plus the optional
-// shared static API token — keeps working for CLI subcommands and ops
-// tooling. Either way the resolved identity is verified through the same
-// fenced-heartbeat path the CLI uses, which is also what revokes tokens:
+// The resolved identity is verified through the same fenced-heartbeat path
+// the CLI uses, which is also what revokes tokens:
 // terminal runs and superseded leases reject regardless of token expiry.
 package driverapi
 
@@ -42,16 +40,6 @@ import (
 // maxDriverOpBodyBytes caps inbound driver-op payloads.
 const maxDriverOpBodyBytes = 8 << 20
 
-// Driver identity headers. Mirrors of the LOOM_DRIVER_* env vars the CLI
-// transport resolves.
-const (
-	HeaderDriverRunID        = "X-Loom-Driver-Run-Id"
-	HeaderDriverNodeID       = "X-Loom-Driver-Node-Id"
-	HeaderDriverLeaseID      = "X-Loom-Driver-Lease-Id"
-	HeaderDriverLeaseToken   = "X-Loom-Driver-Lease-Token"   //nolint:gosec // header name, not a credential value
-	HeaderDriverFencingToken = "X-Loom-Driver-Fencing-Token" //nolint:gosec // header name, not a credential
-)
-
 type IssueBackendFactory func(workspace, actor string) (backend.IssueBackend, error)
 
 // Store is the legacy read-only projection boundary still needed by the
@@ -77,7 +65,6 @@ type Store interface {
 // Module serves the workspace-scoped driver-op routes.
 type Module struct {
 	store                Store
-	apiToken             string
 	runTokenKey          []byte
 	apiBaseURL           string
 	worktreePath         string
@@ -120,7 +107,6 @@ func NewModule(cfg Config) *Module { //nolint:funlen // Operation registration i
 	}
 	m := &Module{
 		store:                cfg.Store,
-		apiToken:             strings.TrimSpace(cfg.APIToken),
 		runTokenKey:          cfg.RunTokenKey,
 		apiBaseURL:           strings.TrimSpace(cfg.APIBaseURL),
 		worktreePath:         cfg.WorktreePath,
@@ -252,8 +238,8 @@ func (m *Module) handleVerifyRun(w http.ResponseWriter, r *http.Request) {
 	m.serveAuthorizedOp(w, r, m.verifyRun, tokenID)
 }
 
-// driverIdentity is the per-request parent DriverRun identity resolved from
-// the request headers.
+// driverIdentity is the per-request parent DriverRun identity derived from
+// verified token claims.
 type driverIdentity struct {
 	RunID      string
 	NodeID     string
@@ -272,7 +258,7 @@ func (id driverIdentity) FencingToken() (int64, error) {
 		if err == nil {
 			err = domain.ErrInvalid
 		}
-		return 0, fmt.Errorf("parse %s: %w", HeaderDriverFencingToken, err)
+		return 0, fmt.Errorf("parse driver run fencing claim: %w", err)
 	}
 	return token, nil
 }
@@ -293,8 +279,7 @@ func (m *Module) handleOp(w http.ResponseWriter, r *http.Request) {
 
 // serveAuthorizedOp runs the shared post-authenticate op pipeline (body read,
 // identity resolution, handler dispatch, error envelope) for both the generic
-// {op} route and explicitly registered op paths (events/await). tokenID is
-// the run-token identity from authenticate, nil on the legacy header path.
+// {op} route and explicitly registered op paths (events/await).
 func (m *Module) serveAuthorizedOp(w http.ResponseWriter, r *http.Request, handler opHandler, tokenID *driverIdentity) {
 	ws := r.PathValue("ws")
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxDriverOpBodyBytes))
@@ -315,18 +300,6 @@ func (m *Module) serveAuthorizedOp(w http.ResponseWriter, r *http.Request, handl
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
-}
-
-// driverIdentityFromHeaders resolves the per-request parent DriverRun
-// identity from the driver headers.
-func driverIdentityFromHeaders(r *http.Request) driverIdentity {
-	return driverIdentity{
-		RunID:      strings.TrimSpace(r.Header.Get(HeaderDriverRunID)),
-		NodeID:     strings.TrimSpace(r.Header.Get(HeaderDriverNodeID)),
-		LeaseID:    strings.TrimSpace(r.Header.Get(HeaderDriverLeaseID)),
-		LeaseToken: strings.TrimSpace(r.Header.Get(HeaderDriverLeaseToken)),
-		fence:      r.Header.Get(HeaderDriverFencingToken),
-	}
 }
 
 type opHandler func(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error)

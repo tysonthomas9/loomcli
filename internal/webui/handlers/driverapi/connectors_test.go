@@ -11,7 +11,9 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
+	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
 	providers "github.com/tysonthomas9/loomcli/internal/infra/connectorsproviders"
@@ -131,8 +133,10 @@ func newConnectorHarness(t *testing.T) *connectorHarness {
 	if err != nil {
 		t.Fatalf("New connector dispatcher: %v", err)
 	}
+	runTokenKey := bytes.Repeat([]byte{0x42}, 32)
 	module := NewModule(Config{
 		Store:                st,
+		RunTokenKey:          runTokenKey,
 		Execution:            testDriverRunExecution{store: st},
 		ExecutionAuthorities: testDriverRunAuthorityResolver{},
 		Dispatcher:           dispatcher,
@@ -143,13 +147,14 @@ func newConnectorHarness(t *testing.T) *connectorHarness {
 	t.Cleanup(server.Close)
 	return &connectorHarness{
 		testHarness: &testHarness{
-			server:  server,
-			store:   st,
-			module:  module,
-			runID:   claimed.RunID,
-			nodeID:  claimed.NodeID,
-			leaseID: claimed.LeaseID,
-			fence:   claimed.FencingToken,
+			server:      server,
+			store:       st,
+			module:      module,
+			runID:       claimed.RunID,
+			nodeID:      claimed.NodeID,
+			leaseID:     claimed.LeaseID,
+			fence:       claimed.FencingToken,
+			runTokenKey: runTokenKey,
 		},
 		provider:  provider,
 		bindingID: "binding-1",
@@ -208,10 +213,12 @@ func (h *connectorHarness) auditRecords(t *testing.T) []*connectorsmodule.Connec
 
 func TestConnectorDispatchAuthRefusals(t *testing.T) {
 	h := newConnectorHarness(t)
-	staleOwner := h.ownerHeaders()
-	staleOwner[HeaderDriverLeaseID] = "lease-stolen"
-	unknownRun := h.ownerHeaders()
-	unknownRun[HeaderDriverRunID] = "run-unknown"
+	staleOwner := bearer(h.mintToken(t, time.Hour, func(claims *driverpkg.RunTokenClaims) {
+		claims.LeaseID = "lease-stolen"
+	}))
+	unknownRun := bearer(h.mintToken(t, time.Hour, func(claims *driverpkg.RunTokenClaims) {
+		claims.RunID = "run-unknown"
+	}))
 	cases := []struct {
 		name     string
 		headers  map[string]string
@@ -245,7 +252,7 @@ func TestConnectorDispatchAuthRefusals(t *testing.T) {
 
 func TestConnectorDispatchHappyPath(t *testing.T) {
 	h := newConnectorHarness(t)
-	status, raw := h.doRaw(t, h.dispatchBody("github.issues.comment"), h.ownerHeaders())
+	status, raw := h.doRaw(t, h.dispatchBody("github.issues.comment"), h.ownerHeaders(t))
 	if status != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (body %s)", status, raw)
 	}
@@ -298,7 +305,7 @@ func TestConnectorDispatchHappyPath(t *testing.T) {
 
 func TestConnectorDispatchGrantDenied(t *testing.T) {
 	h := newConnectorHarness(t)
-	status, raw := h.doRaw(t, h.dispatchBody("github.branch.create"), h.ownerHeaders())
+	status, raw := h.doRaw(t, h.dispatchBody("github.branch.create"), h.ownerHeaders(t))
 	if status != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403 (body %s)", status, raw)
 	}
@@ -315,12 +322,12 @@ func TestConnectorDispatchGrantDenied(t *testing.T) {
 func TestConnectorDispatchNoBindingDeniedWithoutAudit(t *testing.T) {
 	// A run with no trigger lineage has no binding, hence no grants:
 	// deny-by-default refuses before any dispatch or audit work.
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	dispatcher := unreachableConnectorDispatcher{} // never reached
 	h.module.dispatcher = dispatcher
 	resp, decoded := h.do(t, opRequest{
 		op:      "connector-dispatch",
-		headers: h.ownerHeaders(),
+		headers: h.ownerHeaders(t),
 		body: map[string]any{
 			"connectorId": "gh-main", "action": "github.issues.comment",
 			"resource": "repo:octocat/hello", "callSeq": 1,
@@ -344,7 +351,7 @@ func TestConnectorDispatchNoBindingDeniedWithoutAudit(t *testing.T) {
 func TestConnectorDispatchPreconditionRequired(t *testing.T) {
 	h := newConnectorHarness(t)
 	body := h.dispatchBody("github.merge") // granted, but no expectedHeadSha supplied
-	status, raw := h.doRaw(t, body, h.ownerHeaders())
+	status, raw := h.doRaw(t, body, h.ownerHeaders(t))
 	if status != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400 (body %s)", status, raw)
 	}
@@ -362,7 +369,7 @@ func TestConnectorDispatchPreconditionSatisfied(t *testing.T) {
 	h := newConnectorHarness(t)
 	body := h.dispatchBody("github.merge")
 	body["preconditions"] = map[string]any{"expectedHeadSha": "abc123"}
-	status, raw := h.doRaw(t, body, h.ownerHeaders())
+	status, raw := h.doRaw(t, body, h.ownerHeaders(t))
 	if status != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (body %s)", status, raw)
 	}
@@ -380,7 +387,7 @@ func TestConnectorDispatchStaleSubject(t *testing.T) {
 	}
 	body := h.dispatchBody("github.merge")
 	body["preconditions"] = map[string]any{"expectedHeadSha": "abc123"}
-	status, raw := h.doRaw(t, body, h.ownerHeaders())
+	status, raw := h.doRaw(t, body, h.ownerHeaders(t))
 	if status != http.StatusConflict {
 		t.Fatalf("status = %d, want 409 (body %s)", status, raw)
 	}
@@ -395,7 +402,7 @@ func TestConnectorDispatchRateLimited(t *testing.T) {
 	h := newConnectorHarness(t)
 	h.provider.result = providers.CallResult{Status: http.StatusTooManyRequests}
 	h.provider.err = &providers.RateLimited{Action: "github.issues.comment", Status: http.StatusTooManyRequests}
-	status, raw := h.doRaw(t, h.dispatchBody("github.issues.comment"), h.ownerHeaders())
+	status, raw := h.doRaw(t, h.dispatchBody("github.issues.comment"), h.ownerHeaders(t))
 	if status != http.StatusTooManyRequests {
 		t.Fatalf("status = %d, want 429 (body %s)", status, raw)
 	}
@@ -408,7 +415,7 @@ func TestConnectorDispatchUpstreamError(t *testing.T) {
 	h.provider.err = &providers.UpstreamError{
 		Action: "github.issues.comment", Class: providers.ClassServerError, Status: http.StatusBadGateway,
 	}
-	status, raw := h.doRaw(t, h.dispatchBody("github.issues.comment"), h.ownerHeaders())
+	status, raw := h.doRaw(t, h.dispatchBody("github.issues.comment"), h.ownerHeaders(t))
 	if status != http.StatusBadGateway {
 		t.Fatalf("status = %d, want 502 (body %s)", status, raw)
 	}
@@ -416,10 +423,10 @@ func TestConnectorDispatchUpstreamError(t *testing.T) {
 }
 
 func TestConnectorDispatchUnavailableWithoutDispatcher(t *testing.T) {
-	h := newTestHarness(t, "") // Config without Dispatcher: egress fails closed
+	h := newTestHarness(t) // Config without Dispatcher: egress fails closed
 	resp, decoded := h.do(t, opRequest{
 		op:      "connector-dispatch",
-		headers: h.ownerHeaders(),
+		headers: h.ownerHeaders(t),
 		body:    map[string]any{"connectorId": "gh-main", "action": "github.issues.comment", "resource": "r:x"},
 	})
 	if resp.StatusCode != http.StatusServiceUnavailable {
@@ -437,11 +444,11 @@ func TestConnectorDispatchNeverLeaksCredential(t *testing.T) {
 	h := newConnectorHarness(t)
 	var responses [][]byte
 
-	_, raw := h.doRaw(t, h.dispatchBody("github.issues.comment"), h.ownerHeaders())
+	_, raw := h.doRaw(t, h.dispatchBody("github.issues.comment"), h.ownerHeaders(t))
 	responses = append(responses, raw)
-	_, raw = h.doRaw(t, h.dispatchBody("github.branch.create"), h.ownerHeaders())
+	_, raw = h.doRaw(t, h.dispatchBody("github.branch.create"), h.ownerHeaders(t))
 	responses = append(responses, raw)
-	_, raw = h.doRaw(t, h.dispatchBody("github.merge"), h.ownerHeaders())
+	_, raw = h.doRaw(t, h.dispatchBody("github.merge"), h.ownerHeaders(t))
 	responses = append(responses, raw)
 
 	// A provider rudely echoing the credential upstream must still come back
@@ -454,7 +461,7 @@ func TestConnectorDispatchNeverLeaksCredential(t *testing.T) {
 	}
 	body := h.dispatchBody("github.issues.comment")
 	body["callSeq"] = 2
-	_, raw = h.doRaw(t, body, h.ownerHeaders())
+	_, raw = h.doRaw(t, body, h.ownerHeaders(t))
 	responses = append(responses, raw)
 
 	for i, resp := range responses {

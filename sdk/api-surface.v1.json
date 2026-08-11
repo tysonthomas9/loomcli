@@ -9,16 +9,7 @@
         "Authorization"
       ],
       "forbiddenHeaderPrefix": "x-loom-driver-"
-    },
-    "legacy": {
-      "headers": [
-        "X-Loom-Driver-Run-Id",
-        "X-Loom-Driver-Node-Id",
-        "X-Loom-Driver-Lease-Id",
-        "X-Loom-Driver-Fencing-Token",
-        "Authorization"
-      ]
-    }
+	}
   },
   "errorEnvelope": {
     "fields": [

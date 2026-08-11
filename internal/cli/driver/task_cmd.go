@@ -17,9 +17,6 @@ import (
 var (
 	driverClaimReadyWorkspaceKey string
 	driverClaimReadyDriverRunID  string
-	driverClaimReadyNodeID       string
-	driverClaimReadyLeaseID      string
-	driverClaimReadyFence        int64
 	driverClaimReadyEpicID       string
 	driverClaimReadyActor        string
 	driverClaimReadyLimit        int
@@ -27,18 +24,12 @@ var (
 
 	driverActiveTaskRunsWorkspaceKey string
 	driverActiveTaskRunsDriverRunID  string
-	driverActiveTaskRunsNodeID       string
-	driverActiveTaskRunsLeaseID      string
-	driverActiveTaskRunsFence        int64
 	driverActiveTaskRunsEpicID       string
 	driverActiveTaskRunsLimit        int
 	driverActiveTaskRunsJSON         bool
 
 	driverCompleteTaskWorkspaceKey string
 	driverCompleteTaskDriverRunID  string
-	driverCompleteTaskNodeID       string
-	driverCompleteTaskLeaseID      string
-	driverCompleteTaskFence        int64
 	driverCompleteTaskTaskID       string
 	driverCompleteTaskTaskRunID    string
 	driverCompleteTaskCompletionID string
@@ -50,9 +41,6 @@ var (
 
 	driverReleaseTaskWorkspaceKey string
 	driverReleaseTaskDriverRunID  string
-	driverReleaseTaskNodeID       string
-	driverReleaseTaskLeaseID      string
-	driverReleaseTaskFence        int64
 	driverReleaseTaskTaskID       string
 	driverReleaseTaskActor        string
 	driverReleaseTaskJSON         bool
@@ -109,9 +97,6 @@ var driverRecoverStaleTasksCmd = &cobra.Command{
 func bindDriverClaimReadyFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&driverClaimReadyWorkspaceKey, "workspace-key", "", "Workspace key (default: LOOM_DRIVER_WORKSPACE or active workspace)")
 	cmd.Flags().StringVar(&driverClaimReadyDriverRunID, "driver-run-id", "", "Parent DriverRun ID (default: LOOM_DRIVER_RUN_ID)")
-	cmd.Flags().StringVar(&driverClaimReadyNodeID, "node-id", "", "Parent DriverRun node ID")
-	cmd.Flags().StringVar(&driverClaimReadyLeaseID, "lease-id", "", "Parent DriverRun lease ID")
-	cmd.Flags().Int64Var(&driverClaimReadyFence, "fencing-token", 0, "Parent DriverRun fencing token")
 	cmd.Flags().StringVar(&driverClaimReadyEpicID, "epic-id", "", "Epic ID to scope ready tasks (default: parent DriverRun epic)")
 	cmd.Flags().StringVar(&driverClaimReadyActor, "actor", "", "Claim actor (default: driver-run:<driver-run-id>)")
 	cmd.Flags().IntVar(&driverClaimReadyLimit, "limit", 100, "Maximum ready tasks to inspect")
@@ -121,9 +106,6 @@ func bindDriverClaimReadyFlags(cmd *cobra.Command) {
 func bindDriverActiveTaskRunsFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&driverActiveTaskRunsWorkspaceKey, "workspace-key", "", "Workspace key (default: LOOM_DRIVER_WORKSPACE or active workspace)")
 	cmd.Flags().StringVar(&driverActiveTaskRunsDriverRunID, "driver-run-id", "", "Parent DriverRun ID (default: LOOM_DRIVER_RUN_ID)")
-	cmd.Flags().StringVar(&driverActiveTaskRunsNodeID, "node-id", "", "Parent DriverRun node ID")
-	cmd.Flags().StringVar(&driverActiveTaskRunsLeaseID, "lease-id", "", "Parent DriverRun lease ID")
-	cmd.Flags().Int64Var(&driverActiveTaskRunsFence, "fencing-token", 0, "Parent DriverRun fencing token")
 	cmd.Flags().StringVar(&driverActiveTaskRunsEpicID, "epic-id", "", "Epic ID metadata (default: parent DriverRun epic)")
 	cmd.Flags().IntVar(&driverActiveTaskRunsLimit, "limit", 100, "Maximum active task runs to return")
 	cmd.Flags().BoolVar(&driverActiveTaskRunsJSON, "json", false, "JSON output")
@@ -132,9 +114,6 @@ func bindDriverActiveTaskRunsFlags(cmd *cobra.Command) {
 func bindDriverCompleteTaskFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&driverCompleteTaskWorkspaceKey, "workspace-key", "", "Workspace key (default: LOOM_DRIVER_WORKSPACE or active workspace)")
 	cmd.Flags().StringVar(&driverCompleteTaskDriverRunID, "driver-run-id", "", "Parent DriverRun ID (default: LOOM_DRIVER_RUN_ID)")
-	cmd.Flags().StringVar(&driverCompleteTaskNodeID, "node-id", "", "Parent DriverRun node ID")
-	cmd.Flags().StringVar(&driverCompleteTaskLeaseID, "lease-id", "", "Parent DriverRun lease ID")
-	cmd.Flags().Int64Var(&driverCompleteTaskFence, "fencing-token", 0, "Parent DriverRun fencing token")
 	cmd.Flags().StringVar(&driverCompleteTaskTaskID, "task-id", "", "FleetDB task ID")
 	cmd.Flags().StringVar(&driverCompleteTaskTaskRunID, "task-run-id", "", "TaskRun ID to complete through FleetDB CompleteRun")
 	cmd.Flags().StringVar(&driverCompleteTaskCompletionID, "completion-id", "", "Completion idempotency key (default: complete-<task-run-id>)")
@@ -148,9 +127,6 @@ func bindDriverCompleteTaskFlags(cmd *cobra.Command) {
 func bindDriverReleaseTaskFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&driverReleaseTaskWorkspaceKey, "workspace-key", "", "Workspace key (default: LOOM_DRIVER_WORKSPACE or active workspace)")
 	cmd.Flags().StringVar(&driverReleaseTaskDriverRunID, "driver-run-id", "", "Parent DriverRun ID (default: LOOM_DRIVER_RUN_ID)")
-	cmd.Flags().StringVar(&driverReleaseTaskNodeID, "node-id", "", "Parent DriverRun node ID")
-	cmd.Flags().StringVar(&driverReleaseTaskLeaseID, "lease-id", "", "Parent DriverRun lease ID")
-	cmd.Flags().Int64Var(&driverReleaseTaskFence, "fencing-token", 0, "Parent DriverRun fencing token")
 	cmd.Flags().StringVar(&driverReleaseTaskTaskID, "task-id", "", "FleetDB task ID")
 	cmd.Flags().StringVar(&driverReleaseTaskActor, "actor", "", "Release actor (default: driver-run:<driver-run-id>)")
 	cmd.Flags().BoolVar(&driverReleaseTaskJSON, "json", false, "JSON output")
@@ -170,7 +146,6 @@ func bindDriverRecoverStaleTasksFlags(cmd *cobra.Command) {
 func runDriverClaimReady(cmd *cobra.Command, _ []string) error {
 	client, err := newDriverRuntimeClient(driverRuntimeClientOptions{
 		WorkspaceKey: driverClaimReadyWorkspaceKey, DriverRunID: driverClaimReadyDriverRunID,
-		NodeID: driverClaimReadyNodeID, LeaseID: driverClaimReadyLeaseID, FencingToken: driverClaimReadyFence,
 	})
 	if err != nil {
 		return err
@@ -196,7 +171,6 @@ func runDriverClaimReady(cmd *cobra.Command, _ []string) error {
 func runDriverActiveTaskRuns(cmd *cobra.Command, _ []string) error {
 	client, err := newDriverRuntimeClient(driverRuntimeClientOptions{
 		WorkspaceKey: driverActiveTaskRunsWorkspaceKey, DriverRunID: driverActiveTaskRunsDriverRunID,
-		NodeID: driverActiveTaskRunsNodeID, LeaseID: driverActiveTaskRunsLeaseID, FencingToken: driverActiveTaskRunsFence,
 	})
 	if err != nil {
 		return err
@@ -220,7 +194,6 @@ func runDriverCompleteTask(cmd *cobra.Command, _ []string) error {
 	}
 	client, err := newDriverRuntimeClient(driverRuntimeClientOptions{
 		WorkspaceKey: driverCompleteTaskWorkspaceKey, DriverRunID: driverCompleteTaskDriverRunID,
-		NodeID: driverCompleteTaskNodeID, LeaseID: driverCompleteTaskLeaseID, FencingToken: driverCompleteTaskFence,
 	})
 	if err != nil {
 		return err
@@ -249,7 +222,6 @@ func resolveDriverCompleteTaskLeaseToken() string {
 func runDriverReleaseTask(cmd *cobra.Command, _ []string) error {
 	client, err := newDriverRuntimeClient(driverRuntimeClientOptions{
 		WorkspaceKey: driverReleaseTaskWorkspaceKey, DriverRunID: driverReleaseTaskDriverRunID,
-		NodeID: driverReleaseTaskNodeID, LeaseID: driverReleaseTaskLeaseID, FencingToken: driverReleaseTaskFence,
 	})
 	if err != nil {
 		return err

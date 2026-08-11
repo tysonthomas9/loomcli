@@ -852,6 +852,46 @@ func TestRetiredSourceCompatibilityAPIsCannotReturn(t *testing.T) {
 	}
 }
 
+func TestRetiredDriverAuthenticationFallbackCannotReturn(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	forbidden := []string{
+		"LOOM_DRIVER_API_TOKEN", "LOOM_DRIVER_LEGACY_AUTH_ENV",
+		"HeaderDriverRunID", "HeaderDriverNodeID", "HeaderDriverLeaseID", "HeaderDriverLeaseToken", "HeaderDriverFencingToken",
+		"legacyDriverAuthEnv", "driverAPIToken",
+	}
+	err = filepath.WalkDir(filepath.Join(root, "internal"), func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			if entry.Name() == "archtest" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		content, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		for _, fragment := range forbidden {
+			if strings.Contains(string(content), fragment) {
+				relative, _ := filepath.Rel(root, path)
+				t.Errorf("retired Driver authentication fallback %q returned in %s", fragment, filepath.ToSlash(relative))
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestHandwrittenProductionAPIsDoNotRemainDeprecated(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {

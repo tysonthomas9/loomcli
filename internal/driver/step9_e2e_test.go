@@ -192,7 +192,6 @@ func (f *step9Fixture) executor(runID string, launcher driver.SandboxLauncher) *
 		LeaseID:                   "step9-lease-" + runID,
 		HeartbeatInterval:         -1,
 		APIBaseURL:                "http://127.0.0.1:7777",
-		APIToken:                  "node-shared-static-bearer",
 		RunTokenKey:               step9TokenKey,
 		SandboxLauncher:           launcher,
 		Execution:                 step9DriverRunAPI{DriverRunAPI: f.exec.DriverRunAPI()},
@@ -313,7 +312,6 @@ var step9EnvForbidden = []string{
 // seam: every key is allowlisted, the only credential is the run token minted
 // for THIS claim, and the static bearer + identity pair never appear.
 func TestStep9WorkflowEnvHoldsOnlyRunToken(t *testing.T) {
-	t.Setenv(driver.LegacyDriverAuthEnvVar, "0")
 	for _, hostile := range step9EnvForbidden {
 		t.Setenv(hostile, "hostile-parent-value")
 	}
@@ -425,7 +423,7 @@ func newStep9TwoRuns(t *testing.T) *step9TwoRuns {
 	rig.runA = rig.claimRunWithTaskRun(t, "run-a", "TEST-A", "node-a", "lease-a")
 	rig.runB = rig.claimRunWithTaskRun(t, "run-b", "TEST-B", "node-b", "lease-b")
 	module := driverapi.NewModule(driverapi.Config{
-		Store: f.st, APIToken: "ops-static-token", RunTokenKey: step9TokenKey,
+		Store: f.st, RunTokenKey: step9TokenKey,
 		Execution: f.exec.DriverRunAPI(), ExecutionAuthorities: f.exec.DriverRunAuthorityResolver(),
 		AgentIdentities: testutil.StaticAgentQueries{},
 		TaskRunRequests: f.exec.TaskRunRequestAPI(), TaskRunRecovery: f.exec.TaskRunRecoveryAPI(),
@@ -551,7 +549,7 @@ func TestStep9RunTokenScopedToOneRun(t *testing.T) {
 			body: `{}`,
 			headers: func() map[string]string {
 				headers := step9Bearer(tokenA)
-				headers[driverapi.HeaderDriverRunID] = rig.runB.RunID
+				headers["X-Loom-Driver-Run-Id"] = rig.runB.RunID
 				return headers
 			},
 			wantStatus: http.StatusUnauthorized, wantCode: "identity_mismatch",
@@ -584,10 +582,10 @@ func TestStep9RunTokenScopedToOneRun(t *testing.T) {
 			body: `{}`,
 			headers: func() map[string]string {
 				return map[string]string{
-					driverapi.HeaderDriverRunID:        rig.runA.RunID,
-					driverapi.HeaderDriverNodeID:       rig.runA.NodeID,
-					driverapi.HeaderDriverLeaseID:      rig.runA.LeaseID,
-					driverapi.HeaderDriverFencingToken: "1",
+					"X-Loom-Driver-Run-Id":        rig.runA.RunID,
+					"X-Loom-Driver-Node-Id":       rig.runA.NodeID,
+					"X-Loom-Driver-Lease-Id":      rig.runA.LeaseID,
+					"X-Loom-Driver-Fencing-Token": "1",
 				}
 			},
 			wantStatus: http.StatusUnauthorized, wantCode: "unauthenticated",

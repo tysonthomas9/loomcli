@@ -2,7 +2,6 @@ package driverapi
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"testing"
 
@@ -32,12 +31,12 @@ func startBody(workflowName, idempotencyKey string) map[string]any {
 }
 
 func TestDriverAPIWorkflowsStartIdempotent(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	activateWorkflow(t, h)
 	body := startBody("driver-1", "deploy")
 	body["input"] = map[string]any{"target": "staging"}
 
-	resp, decoded := h.do(t, opRequest{op: "workflows/start", headers: h.ownerHeaders(), body: body})
+	resp, decoded := h.do(t, opRequest{op: "workflows/start", headers: h.ownerHeaders(t), body: body})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d (%v), want 200", resp.StatusCode, decoded)
 	}
@@ -49,7 +48,7 @@ func TestDriverAPIWorkflowsStartIdempotent(t *testing.T) {
 
 	// The replayed start returns the same child, and exactly one child run
 	// exists.
-	resp, replay := h.do(t, opRequest{op: "workflows/start", headers: h.ownerHeaders(), body: body})
+	resp, replay := h.do(t, opRequest{op: "workflows/start", headers: h.ownerHeaders(t), body: body})
 	if resp.StatusCode != http.StatusOK || replay["childRunId"] != wantChild {
 		t.Fatalf("replay = %d %v, want same child %q", resp.StatusCode, replay, wantChild)
 	}
@@ -75,9 +74,9 @@ func TestDriverAPIWorkflowsStartValidation(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			h := newTestHarness(t, "")
+			h := newTestHarness(t)
 			activateWorkflow(t, h)
-			resp, decoded := h.do(t, opRequest{op: "workflows/start", headers: h.ownerHeaders(), body: tc.body})
+			resp, decoded := h.do(t, opRequest{op: "workflows/start", headers: h.ownerHeaders(t), body: tc.body})
 			if resp.StatusCode != tc.wantStatus {
 				t.Fatalf("status = %d (%v), want %d", resp.StatusCode, decoded, tc.wantStatus)
 			}
@@ -93,11 +92,11 @@ func TestDriverAPIWorkflowsStartValidation(t *testing.T) {
 // (claimed) child may not start a grandchild.
 func TestDriverAPIWorkflowsStartDepthCap(t *testing.T) {
 	t.Setenv(driverpkg.CompositionMaxDepthEnvVar, "1")
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	activateWorkflow(t, h)
 	ctx := context.Background()
 
-	resp, decoded := h.do(t, opRequest{op: "workflows/start", headers: h.ownerHeaders(), body: startBody("driver-1", "depth1")})
+	resp, decoded := h.do(t, opRequest{op: "workflows/start", headers: h.ownerHeaders(t), body: startBody("driver-1", "depth1")})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("depth-1 start = %d (%v), want 200", resp.StatusCode, decoded)
 	}
@@ -107,7 +106,7 @@ func TestDriverAPIWorkflowsStartDepthCap(t *testing.T) {
 		t.Fatalf("claim child: %v", err)
 	}
 
-	resp, decoded = h.do(t, opRequest{op: "workflows/start", headers: runHeaders(claimed), body: startBody("driver-1", "depth2")})
+	resp, decoded = h.do(t, opRequest{op: "workflows/start", headers: h.tokenHeadersForRun(t, claimed), body: startBody("driver-1", "depth2")})
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("depth-2 start = %d (%v), want 400", resp.StatusCode, decoded)
 	}
@@ -116,27 +115,16 @@ func TestDriverAPIWorkflowsStartDepthCap(t *testing.T) {
 	}
 }
 
-// runHeaders builds owner identity headers for an arbitrary claimed run.
-func runHeaders(run *domain.DriverRun) map[string]string {
-	return map[string]string{
-		HeaderDriverRunID:        run.RunID,
-		HeaderDriverNodeID:       run.NodeID,
-		HeaderDriverLeaseID:      run.LeaseID,
-		HeaderDriverLeaseToken:   "driver-test-token",
-		HeaderDriverFencingToken: fmt.Sprintf("%d", run.FencingToken),
-	}
-}
-
 func TestDriverAPIWorkflowsAwaitValidation(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	activateWorkflow(t, h)
 
-	resp, decoded := h.do(t, opRequest{op: "workflows/await", headers: h.ownerHeaders(),
+	resp, decoded := h.do(t, opRequest{op: "workflows/await", headers: h.ownerHeaders(t),
 		body: map[string]any{"timeoutMs": 60_000, "awaitIndex": 1}})
 	if resp.StatusCode != http.StatusBadRequest || errorCode(t, decoded) != "invalid" {
 		t.Fatalf("missing child = %d %v, want 400 invalid", resp.StatusCode, decoded)
 	}
-	resp, decoded = h.do(t, opRequest{op: "workflows/await", headers: h.ownerHeaders(),
+	resp, decoded = h.do(t, opRequest{op: "workflows/await", headers: h.ownerHeaders(t),
 		body: map[string]any{"childRunId": "run-nope", "timeoutMs": 60_000, "awaitIndex": 1}})
 	if resp.StatusCode != http.StatusNotFound || errorCode(t, decoded) != "not_found" {
 		t.Fatalf("unknown child = %d %v, want 404 not_found", resp.StatusCode, decoded)
@@ -145,12 +133,12 @@ func TestDriverAPIWorkflowsAwaitValidation(t *testing.T) {
 	// RULE 5 / RULE 3 still apply to composition awaits: a real child with a
 	// missing timeout or awaitIndex is rejected with the structured codes.
 	child := startChildViaAPI(t, h, "await-validation")
-	resp, decoded = h.do(t, opRequest{op: "workflows/await", headers: h.ownerHeaders(),
+	resp, decoded = h.do(t, opRequest{op: "workflows/await", headers: h.ownerHeaders(t),
 		body: map[string]any{"childRunId": child, "awaitIndex": 1}})
 	if resp.StatusCode != http.StatusBadRequest || errorCode(t, decoded) != domain.AwaitErrCodeTimeoutRequired {
 		t.Fatalf("missing timeout = %d %v, want 400 %s", resp.StatusCode, decoded, domain.AwaitErrCodeTimeoutRequired)
 	}
-	resp, decoded = h.do(t, opRequest{op: "workflows/await", headers: h.ownerHeaders(),
+	resp, decoded = h.do(t, opRequest{op: "workflows/await", headers: h.ownerHeaders(t),
 		body: map[string]any{"childRunId": child, "timeoutMs": 60_000}})
 	if resp.StatusCode != http.StatusBadRequest || errorCode(t, decoded) != domain.AwaitErrCodeInstanceKeyMalformed {
 		t.Fatalf("missing awaitIndex = %d %v, want 400 %s", resp.StatusCode, decoded, domain.AwaitErrCodeInstanceKeyMalformed)
@@ -158,7 +146,7 @@ func TestDriverAPIWorkflowsAwaitValidation(t *testing.T) {
 }
 
 func TestDriverAPIWorkflowsAwaitRejectsNonChild(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	activateWorkflow(t, h)
 	if _, err := h.store.DriverRuns().Create(context.Background(), store.DriverRunCreate{
 		WorkspaceKey: "WS", RunID: "run-detached", DriverID: "driver-1", DriverVersionID: "version-1",
@@ -166,7 +154,7 @@ func TestDriverAPIWorkflowsAwaitRejectsNonChild(t *testing.T) {
 		t.Fatalf("create detached run: %v", err)
 	}
 
-	resp, decoded := h.do(t, opRequest{op: "workflows/await", headers: h.ownerHeaders(),
+	resp, decoded := h.do(t, opRequest{op: "workflows/await", headers: h.ownerHeaders(t),
 		body: map[string]any{"childRunId": "run-detached", "timeoutMs": 60_000, "awaitIndex": 1}})
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("status = %d (%v), want 403", resp.StatusCode, decoded)
@@ -179,7 +167,7 @@ func TestDriverAPIWorkflowsAwaitRejectsNonChild(t *testing.T) {
 // startChildViaAPI starts a child over the wire and returns its run ID.
 func startChildViaAPI(t *testing.T, h *testHarness, key string) string {
 	t.Helper()
-	resp, decoded := h.do(t, opRequest{op: "workflows/start", headers: h.ownerHeaders(), body: startBody("driver-1", key)})
+	resp, decoded := h.do(t, opRequest{op: "workflows/start", headers: h.ownerHeaders(t), body: startBody("driver-1", key)})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("workflows/start = %d (%v), want 200", resp.StatusCode, decoded)
 	}
@@ -191,11 +179,11 @@ func startChildViaAPI(t *testing.T, h *testHarness, key string) string {
 }
 
 func TestDriverAPIWorkflowsAwaitSuspendsParent(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	activateWorkflow(t, h)
 	childID := startChildViaAPI(t, h, "slow")
 
-	resp, decoded := h.do(t, opRequest{op: "workflows/await", headers: h.ownerHeaders(),
+	resp, decoded := h.do(t, opRequest{op: "workflows/await", headers: h.ownerHeaders(t),
 		body: map[string]any{"childRunId": childID, "timeoutMs": 60_000, "awaitIndex": 1}})
 	if resp.StatusCode != http.StatusOK || decoded["status"] != driverpkg.AwaitOutcomeSuspended {
 		t.Fatalf("await = %d %v, want suspended", resp.StatusCode, decoded)
@@ -214,7 +202,7 @@ func TestDriverAPIWorkflowsAwaitSuspendsParent(t *testing.T) {
 // then awaits it: the journaled run.finished resolves inline and the response
 // carries the child's terminal outcome.
 func TestDriverAPIWorkflowsAwaitTerminalChildInline(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	activateWorkflow(t, h)
 	ctx := context.Background()
 	childID := startChildViaAPI(t, h, "fast")
@@ -236,7 +224,7 @@ func TestDriverAPIWorkflowsAwaitTerminalChildInline(t *testing.T) {
 		t.Fatalf("child = %+v, %v; want terminal", child, err)
 	}
 
-	resp, decoded := h.do(t, opRequest{op: "workflows/await", headers: h.ownerHeaders(),
+	resp, decoded := h.do(t, opRequest{op: "workflows/await", headers: h.ownerHeaders(t),
 		body: map[string]any{"childRunId": childID, "timeoutMs": 60_000, "awaitIndex": 1}})
 	if resp.StatusCode != http.StatusOK || decoded["status"] != string(domain.AwaitSatisfied) {
 		t.Fatalf("await = %d %v, want satisfied inline", resp.StatusCode, decoded)

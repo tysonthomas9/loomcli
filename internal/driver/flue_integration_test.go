@@ -82,6 +82,7 @@ export default defineWorkflow({
 	if err != nil {
 		t.Fatalf("loadRunRequest: %v", err)
 	}
+	req.RunToken = testWorkflowRunToken
 	result, err := (NodeRunner{}).Run(ctx, req)
 	if err != nil {
 		t.Fatalf("NodeRunner.Run: %v", err)
@@ -113,7 +114,6 @@ func TestRealFlueBuiltinEpicRunnerWatchLoopSmoke(t *testing.T) {
 	}
 	flueCommand := realFlueCommandForTest(t)
 	nodePath := nodePathForTest(t)
-	t.Setenv(LegacyDriverAuthEnvVar, "0")
 	runTokenKey := bytes.Repeat([]byte{0x42}, 32)
 
 	ctx := context.Background()

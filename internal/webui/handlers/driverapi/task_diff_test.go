@@ -14,7 +14,7 @@ import (
 
 func TestTaskDiffReturnsLocalBranchDiffFromFilesystemOrigin(t *testing.T) {
 	origin, head := createLocalBranchOrigin(t, "changed\n")
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	seedTaskDiffRepo(t, h, origin)
 	h.backend.epic = &backend.IssueDetailData{IssueData: backend.IssueData{
 		ID:          "TASK-1",
@@ -25,7 +25,7 @@ func TestTaskDiffReturnsLocalBranchDiffFromFilesystemOrigin(t *testing.T) {
 
 	resp, decoded := h.do(t, opRequest{
 		op:      "task-diff",
-		headers: h.ownerHeaders(),
+		headers: h.ownerHeaders(t),
 		body:    map[string]any{"taskId": "TASK-1"},
 	})
 
@@ -48,7 +48,7 @@ func TestTaskDiffReturnsLocalBranchDiffFromFilesystemOrigin(t *testing.T) {
 }
 
 func TestTaskDiffRejectsNonFilesystemOrigin(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	if _, err := h.store.Repos().Create(t.Context(), store.RepoCreate{
 		WorkspaceKey:  "WS",
 		Name:          "source-repo",
@@ -67,7 +67,7 @@ func TestTaskDiffRejectsNonFilesystemOrigin(t *testing.T) {
 
 	resp, decoded := h.do(t, opRequest{
 		op:      "task-diff",
-		headers: h.ownerHeaders(),
+		headers: h.ownerHeaders(t),
 		body:    map[string]any{"taskId": "TASK-1"},
 	})
 
@@ -81,7 +81,7 @@ func TestTaskDiffRejectsNonFilesystemOrigin(t *testing.T) {
 
 func TestTaskDiffReturnsLocalBranchDiffFromVerifiedWorkspaceCheckout(t *testing.T) {
 	checkout, head := createLocalBranchCheckout(t, "https://github.com/example/source-repo.git", "changed locally\n")
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	if _, err := h.store.Repos().Create(t.Context(), store.RepoCreate{
 		WorkspaceKey:  "WS",
 		Name:          "source-repo",
@@ -106,7 +106,7 @@ func TestTaskDiffReturnsLocalBranchDiffFromVerifiedWorkspaceCheckout(t *testing.
 
 	resp, decoded := h.do(t, opRequest{
 		op:      "task-diff",
-		headers: h.ownerHeaders(),
+		headers: h.ownerHeaders(t),
 		body:    map[string]any{"taskId": "TASK-1"},
 	})
 
@@ -124,7 +124,7 @@ func TestTaskDiffReturnsLocalBranchDiffFromVerifiedWorkspaceCheckout(t *testing.
 
 func TestTaskDiffReturnsLocalBranchDiffFromWorkspaceCheckoutWithoutOrigin(t *testing.T) {
 	checkout, head := createLocalBranchCheckout(t, "", "changed without origin\n")
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	if _, err := h.store.Repos().Create(t.Context(), store.RepoCreate{
 		WorkspaceKey:  "WS",
 		Name:          "source-repo",
@@ -148,7 +148,7 @@ func TestTaskDiffReturnsLocalBranchDiffFromWorkspaceCheckoutWithoutOrigin(t *tes
 
 	resp, decoded := h.do(t, opRequest{
 		op:      "task-diff",
-		headers: h.ownerHeaders(),
+		headers: h.ownerHeaders(t),
 		body:    map[string]any{"taskId": "TASK-1"},
 	})
 
@@ -168,7 +168,7 @@ func TestTaskDiffReturnsLocalBranchDiffFromWorkspaceCheckoutWithoutOrigin(t *tes
 func TestTaskDiffRejectsMissingConfiguredFilesystemOrigin(t *testing.T) {
 	missingOrigin := filepath.Join(t.TempDir(), "missing-origin.git")
 	checkout, head := createLocalBranchCheckout(t, missingOrigin, "changed locally\n")
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	if _, err := h.store.Repos().Create(t.Context(), store.RepoCreate{
 		WorkspaceKey:  "WS",
 		Name:          "source-repo",
@@ -193,7 +193,7 @@ func TestTaskDiffRejectsMissingConfiguredFilesystemOrigin(t *testing.T) {
 
 	resp, decoded := h.do(t, opRequest{
 		op:      "task-diff",
-		headers: h.ownerHeaders(),
+		headers: h.ownerHeaders(t),
 		body:    map[string]any{"taskId": "TASK-1"},
 	})
 
@@ -207,7 +207,7 @@ func TestTaskDiffRejectsMissingConfiguredFilesystemOrigin(t *testing.T) {
 
 func TestTaskDiffUsesRepoDefaultInsteadOfWorkspaceIsolationBranch(t *testing.T) {
 	origin, head := createLocalBranchOrigin(t, "changed through local delivery\n")
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	if _, err := h.store.Workspaces().Create(t.Context(), store.WorkspaceCreate{
 		Key:           "WS",
 		Name:          "WS",
@@ -233,7 +233,7 @@ func TestTaskDiffUsesRepoDefaultInsteadOfWorkspaceIsolationBranch(t *testing.T) 
 	}}
 	resp, decoded := h.do(t, opRequest{
 		op:      "task-diff",
-		headers: h.ownerHeaders(),
+		headers: h.ownerHeaders(t),
 		body:    map[string]any{"taskId": "TASK-1"},
 	})
 
@@ -251,7 +251,7 @@ func TestTaskDiffUsesRepoDefaultInsteadOfWorkspaceIsolationBranch(t *testing.T) 
 
 func TestTaskDiffRejectsWorkspaceCheckoutRemoteMismatch(t *testing.T) {
 	checkout, _ := createLocalBranchCheckout(t, "https://github.com/other/repo.git", "changed\n")
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	if _, err := h.store.Repos().Create(t.Context(), store.RepoCreate{
 		WorkspaceKey:  "WS",
 		Name:          "source-repo",
@@ -276,7 +276,7 @@ func TestTaskDiffRejectsWorkspaceCheckoutRemoteMismatch(t *testing.T) {
 
 	resp, decoded := h.do(t, opRequest{
 		op:      "task-diff",
-		headers: h.ownerHeaders(),
+		headers: h.ownerHeaders(t),
 		body:    map[string]any{"taskId": "TASK-1"},
 	})
 
@@ -290,7 +290,7 @@ func TestTaskDiffRejectsWorkspaceCheckoutRemoteMismatch(t *testing.T) {
 
 func TestTaskDiffEnforcesDiffSizeCap(t *testing.T) {
 	origin, head := createLocalBranchOrigin(t, strings.Repeat("x", taskDiffMaxBytes+2048)+"\n")
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	seedTaskDiffRepo(t, h, origin)
 	h.backend.epic = &backend.IssueDetailData{IssueData: backend.IssueData{
 		ID:          "TASK-1",
@@ -301,7 +301,7 @@ func TestTaskDiffEnforcesDiffSizeCap(t *testing.T) {
 
 	resp, decoded := h.do(t, opRequest{
 		op:      "task-diff",
-		headers: h.ownerHeaders(),
+		headers: h.ownerHeaders(t),
 		body:    map[string]any{"taskId": "TASK-1"},
 	})
 

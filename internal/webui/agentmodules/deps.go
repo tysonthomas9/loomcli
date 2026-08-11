@@ -57,7 +57,6 @@ type Deps struct {
 	FleetBaseURL                  string
 	ExecutionIssueBackends        func(workspace, actor string) (backend.IssueBackend, error)
 	DriverAPIBaseURL              string
-	DriverAPIToken                string
 	DriverRunTokenKey             []byte
 	LocalSettingsDir              string
 	SourceControl                 sourcecontrol.Materializer

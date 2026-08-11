@@ -34,6 +34,31 @@ func (h *testHarness) mintToken(t *testing.T, ttl time.Duration, mutate func(*dr
 	return token
 }
 
+func (h *testHarness) tokenHeadersForRun(t *testing.T, run *domain.DriverRun) map[string]string {
+	t.Helper()
+	claims := driverpkg.RunTokenClaims{
+		WorkspaceKey: run.WorkspaceKey,
+		RunID:        run.RunID,
+		NodeID:       run.NodeID,
+		LeaseID:      run.LeaseID,
+		FencingToken: run.FencingToken,
+	}
+	token, err := driverpkg.MintRunToken(claims, h.runTokenKey, time.Hour)
+	if err != nil {
+		t.Fatalf("MintRunToken: %v", err)
+	}
+	return bearer(token)
+}
+
+func (h *testHarness) ownerLeaseToken(t *testing.T) string {
+	t.Helper()
+	token, err := driverpkg.DeriveDriverRunLeaseToken(h.runTokenKey, "WS", h.runID, h.nodeID, h.leaseID)
+	if err != nil {
+		t.Fatalf("DeriveDriverRunLeaseToken: %v", err)
+	}
+	return token
+}
+
 func bearer(token string) map[string]string {
 	return map[string]string{"Authorization": "Bearer " + token}
 }
@@ -42,22 +67,25 @@ func bearer(token string) map[string]string {
 // authenticates with the run token ALONE — no header quad, no shared static
 // token — and the server derives the fenced identity from the claims.
 func TestDriverAPIRunTokenOnly(t *testing.T) {
-	tests := []struct {
-		name     string
-		apiToken string
-	}{
-		{name: "no static token configured", apiToken: ""},
-		{name: "static token configured but not sent", apiToken: "secret-token"},
+	h := newTestHarness(t)
+	token := h.mintToken(t, time.Minute, nil)
+	resp, decoded := h.do(t, opRequest{op: "list-agents", headers: bearer(token)})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d (%v), want 200", resp.StatusCode, decoded)
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			h := newTestHarness(t, tc.apiToken)
-			token := h.mintToken(t, time.Minute, nil)
-			resp, decoded := h.do(t, opRequest{op: "list-agents", headers: bearer(token)})
-			if resp.StatusCode != http.StatusOK {
-				t.Fatalf("status = %d (%v), want 200", resp.StatusCode, decoded)
-			}
-		})
+}
+
+func TestDriverAPIRejectsLegacyStaticBearerAndIdentityHeaders(t *testing.T) {
+	h := newTestHarness(t)
+	headers := h.ownerHeaders(t)
+	headers["Authorization"] = "Bearer secret-token"
+
+	resp, decoded := h.do(t, opRequest{op: "list-agents", headers: headers})
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d (%v), want 401", resp.StatusCode, decoded)
+	}
+	if code := errorCode(t, decoded); code != "unauthenticated" {
+		t.Fatalf("error code = %q, want unauthenticated", code)
 	}
 }
 
@@ -66,7 +94,6 @@ func TestDriverAPIRunTokenOnly(t *testing.T) {
 func TestDriverAPIRunTokenRejections(t *testing.T) {
 	tests := []struct {
 		name       string
-		apiToken   string
 		headers    func(h *testHarness) map[string]string
 		wantStatus int
 		wantCode   string
@@ -82,7 +109,7 @@ func TestDriverAPIRunTokenRejections(t *testing.T) {
 			wantCode:   "token_expired",
 		},
 		{
-			name: "forged signature falls through to legacy and fails",
+			name: "forged signature fails",
 			headers: func(h *testHarness) map[string]string {
 				forged, err := driverpkg.MintRunToken(driverpkg.RunTokenClaims{
 					WorkspaceKey: "WS",
@@ -100,8 +127,7 @@ func TestDriverAPIRunTokenRejections(t *testing.T) {
 			wantCode:   "unauthenticated",
 		},
 		{
-			name:     "forged signature with static token gate",
-			apiToken: "secret-token",
+			name: "forged signature resembling the retired static token fails",
 			headers: func(h *testHarness) map[string]string {
 				forged, err := driverpkg.MintRunToken(driverpkg.RunTokenClaims{RunID: h.runID},
 					bytes.Repeat([]byte{0x13}, 32), time.Minute)
@@ -114,10 +140,10 @@ func TestDriverAPIRunTokenRejections(t *testing.T) {
 			wantCode:   "unauthenticated",
 		},
 		{
-			name: "token run disagrees with run id header",
+			name: "retired identity header rejected even when it matches token",
 			headers: func(h *testHarness) map[string]string {
 				headers := bearer(h.mintToken(t, time.Minute, nil))
-				headers[HeaderDriverRunID] = "run-other"
+				headers["X-Loom-Driver-Run-Id"] = h.runID
 				return headers
 			},
 			wantStatus: http.StatusUnauthorized,
@@ -146,7 +172,7 @@ func TestDriverAPIRunTokenRejections(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			h := newTestHarness(t, tc.apiToken)
+			h := newTestHarness(t)
 			resp, decoded := h.do(t, opRequest{op: "list-agents", headers: tc.headers(h)})
 			if resp.StatusCode != tc.wantStatus {
 				t.Fatalf("status = %d (%v), want %d", resp.StatusCode, decoded, tc.wantStatus)
@@ -161,7 +187,7 @@ func TestDriverAPIRunTokenRejections(t *testing.T) {
 // TestDriverAPIRunTokenRevokedByFinish: revocation needs no denylist — a
 // token for a terminal run fails verifyParent regardless of expiry.
 func TestDriverAPIRunTokenRevokedByFinish(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	token := h.mintToken(t, time.Hour, nil)
 	if _, err := h.store.DriverRuns().Finish(context.Background(), "WS", h.runID, store.DriverRunFinish{
 		NodeID:       h.nodeID,
@@ -184,7 +210,7 @@ func TestDriverAPIRunTokenRevokedByFinish(t *testing.T) {
 // fencing token, so a token carrying the old lease fails the fenced
 // heartbeat inside verifyParent.
 func TestDriverAPIRunTokenRevokedByReclaim(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	ctx := context.Background()
 	stale := h.mintToken(t, time.Hour, nil)
 	// Full await cycle so the resume-eligibility gate grants the re-queue:
@@ -238,7 +264,7 @@ func TestDriverAPIRunTokenRevokedByReclaim(t *testing.T) {
 // TestDriverAPIRunTokenTwoSegmentOps covers the explicitly registered routes
 // that cannot ride the generic {op} pattern: they share the same token gate.
 func TestDriverAPIRunTokenTwoSegmentOps(t *testing.T) {
-	h := newTestHarness(t, "secret-token")
+	h := newTestHarness(t)
 	token := h.mintToken(t, time.Minute, nil)
 
 	req, err := http.NewRequest(http.MethodGet, h.server.URL+"/api/workspaces/WS/driver/events/awaits", nil)
@@ -266,7 +292,7 @@ func TestDriverAPIRunTokenTwoSegmentOps(t *testing.T) {
 
 // TestWatchEpicRunTokenAuth proves the watch SSE GET shares the token gate.
 func TestWatchEpicRunTokenAuth(t *testing.T) {
-	h := newTestHarness(t, "secret-token")
+	h := newTestHarness(t)
 
 	expired := h.mintToken(t, time.Nanosecond, nil)
 	time.Sleep(20 * time.Millisecond)

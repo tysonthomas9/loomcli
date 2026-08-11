@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/app/workfloweventing"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
@@ -98,12 +99,12 @@ func seedInternalBinding(t *testing.T, st store.Store, routeKey string) {
 }
 
 func TestDriverAPIEmitEventDispatchesLoopback(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	seedInternalBinding(t, h.store, "internal.issue.created")
 
 	resp, decoded := h.do(t, opRequest{
 		op:      "emit-event",
-		headers: h.ownerHeaders(),
+		headers: h.ownerHeaders(t),
 		body: map[string]any{
 			"eventId":    "wf-emit-1",
 			"eventType":  "issue.create",
@@ -144,7 +145,7 @@ func TestDriverAPIEmitEventDispatchesLoopback(t *testing.T) {
 }
 
 func TestDriverAPIEmitEventUsesNamedWorkflowAndPreservesCamelCaseWire(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	var (
 		providerCalls  int
 		admissionCalls int
@@ -180,7 +181,7 @@ func TestDriverAPIEmitEventUsesNamedWorkflowAndPreservesCamelCaseWire(t *testing
 
 	resp, decoded := h.do(t, opRequest{
 		op:      "emit-event",
-		headers: h.ownerHeaders(),
+		headers: h.ownerHeaders(t),
 		body: map[string]any{
 			"eventId": "wf-emit-authority", "eventType": "issue.create",
 			"subjectRef": "issue#42", "actorRef": "driver-run:attacker", "epicId": "ATTACKER-EPIC",
@@ -232,7 +233,7 @@ func TestDriverAPIEmitEventUsesNamedWorkflowAndPreservesCamelCaseWire(t *testing
 }
 
 func TestDriverAPIEmitEventDropHasNoDeliveryOrAwait(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	h.module.workflowEventing = mustWorkflowEventing(t,
 		driverEventAuthorityProviderFunc(func(context.Context, workfloweventing.VerifiedRun) (authority.ExecutionAuthority, error) {
 			return authority.ExecutionAuthority{}, nil
@@ -249,7 +250,7 @@ func TestDriverAPIEmitEventDropHasNoDeliveryOrAwait(t *testing.T) {
 	h.module.eventAwaits = awaits
 
 	resp, decoded := h.do(t, opRequest{
-		op: "emit-event", headers: h.ownerHeaders(),
+		op: "emit-event", headers: h.ownerHeaders(t),
 		body: map[string]any{"eventId": "wf-drop", "eventType": "issue.create"},
 	})
 	if resp.StatusCode != http.StatusOK || decoded["dropped"] != true || decoded["dropReason"] != "hop_limit" {
@@ -265,11 +266,11 @@ func TestDriverAPIEmitEventDropHasNoDeliveryOrAwait(t *testing.T) {
 }
 
 func TestDriverAPIEmitEventWithoutWorkflowIsInert(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	h.module.workflowEventing = nil
 
 	resp, decoded := h.do(t, opRequest{
-		op: "emit-event", headers: h.ownerHeaders(),
+		op: "emit-event", headers: h.ownerHeaders(t),
 		body: map[string]any{"eventId": "wf-no-fallback", "eventType": "issue.create"},
 	})
 	if resp.StatusCode != http.StatusServiceUnavailable || errorCode(t, decoded) != "unavailable" {
@@ -310,15 +311,15 @@ func TestDriverAPIEmitEventProductionFilesHaveNoLegacyFallback(t *testing.T) {
 func TestDriverAPIEmitEventRequiresRunOwnership(t *testing.T) {
 	tests := []struct {
 		name   string
-		mutate func(map[string]string)
+		mutate func(*driverpkg.RunTokenClaims)
 	}{
-		{name: "foreign node", mutate: func(headers map[string]string) { headers[HeaderDriverNodeID] = "node-attacker" }},
-		{name: "foreign lease", mutate: func(headers map[string]string) { headers[HeaderDriverLeaseID] = "lease-attacker" }},
-		{name: "stale fence", mutate: func(headers map[string]string) { headers[HeaderDriverFencingToken] = "999999" }},
+		{name: "foreign node", mutate: func(claims *driverpkg.RunTokenClaims) { claims.NodeID = "node-attacker" }},
+		{name: "foreign lease", mutate: func(claims *driverpkg.RunTokenClaims) { claims.LeaseID = "lease-attacker" }},
+		{name: "stale fence", mutate: func(claims *driverpkg.RunTokenClaims) { claims.FencingToken++ }},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			h := newTestHarness(t, "")
+			h := newTestHarness(t)
 			providerCalls := 0
 			h.module.workflowEventing = mustWorkflowEventing(t,
 				driverEventAuthorityProviderFunc(func(context.Context, workfloweventing.VerifiedRun) (authority.ExecutionAuthority, error) {
@@ -330,8 +331,7 @@ func TestDriverAPIEmitEventRequiresRunOwnership(t *testing.T) {
 					return nil, nil
 				}),
 			)
-			headers := h.ownerHeaders()
-			test.mutate(headers)
+			headers := bearer(h.mintToken(t, time.Hour, test.mutate))
 			resp, decoded := h.do(t, opRequest{
 				op:      "emit-event",
 				headers: headers,
@@ -351,10 +351,10 @@ func TestDriverAPIEmitEventRequiresRunOwnership(t *testing.T) {
 }
 
 func TestDriverAPIEmitEventValidatesParams(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	resp, decoded := h.do(t, opRequest{
 		op:      "emit-event",
-		headers: h.ownerHeaders(),
+		headers: h.ownerHeaders(t),
 		body:    map[string]any{"eventType": "issue.created"}, // no eventId
 	})
 	if resp.StatusCode != http.StatusBadRequest {

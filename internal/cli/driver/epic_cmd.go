@@ -15,17 +15,11 @@ import (
 var (
 	driverEpicGetWorkspaceKey string
 	driverEpicGetDriverRunID  string
-	driverEpicGetNodeID       string
-	driverEpicGetLeaseID      string
-	driverEpicGetFence        int64
 	driverEpicGetEpicID       string
 	driverEpicGetJSON         bool
 
 	driverEpicSnapshotWorkspaceKey string
 	driverEpicSnapshotDriverRunID  string
-	driverEpicSnapshotNodeID       string
-	driverEpicSnapshotLeaseID      string
-	driverEpicSnapshotFence        int64
 	driverEpicSnapshotEpicID       string
 	driverEpicSnapshotJSON         bool
 )
@@ -49,9 +43,6 @@ var driverEpicSnapshotCmd = &cobra.Command{
 func bindDriverEpicGetFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&driverEpicGetWorkspaceKey, "workspace-key", "", "Workspace key (default: LOOM_DRIVER_WORKSPACE or active workspace)")
 	cmd.Flags().StringVar(&driverEpicGetDriverRunID, "driver-run-id", "", "Parent DriverRun ID (default: LOOM_DRIVER_RUN_ID)")
-	cmd.Flags().StringVar(&driverEpicGetNodeID, "node-id", "", "Parent DriverRun node ID")
-	cmd.Flags().StringVar(&driverEpicGetLeaseID, "lease-id", "", "Parent DriverRun lease ID")
-	cmd.Flags().Int64Var(&driverEpicGetFence, "fencing-token", 0, "Parent DriverRun fencing token")
 	cmd.Flags().StringVar(&driverEpicGetEpicID, "epic-id", "", "Epic ID to read (default: parent DriverRun epic)")
 	cmd.Flags().BoolVar(&driverEpicGetJSON, "json", false, "JSON output")
 }
@@ -59,16 +50,13 @@ func bindDriverEpicGetFlags(cmd *cobra.Command) {
 func bindDriverEpicSnapshotFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&driverEpicSnapshotWorkspaceKey, "workspace-key", "", "Workspace key (default: LOOM_DRIVER_WORKSPACE or active workspace)")
 	cmd.Flags().StringVar(&driverEpicSnapshotDriverRunID, "driver-run-id", "", "Parent DriverRun ID (default: LOOM_DRIVER_RUN_ID)")
-	cmd.Flags().StringVar(&driverEpicSnapshotNodeID, "node-id", "", "Parent DriverRun node ID")
-	cmd.Flags().StringVar(&driverEpicSnapshotLeaseID, "lease-id", "", "Parent DriverRun lease ID")
-	cmd.Flags().Int64Var(&driverEpicSnapshotFence, "fencing-token", 0, "Parent DriverRun fencing token")
 	cmd.Flags().StringVar(&driverEpicSnapshotEpicID, "epic-id", "", "Epic ID to snapshot (default: parent DriverRun epic)")
 	cmd.Flags().BoolVar(&driverEpicSnapshotJSON, "json", false, "JSON output")
 }
 
 func runDriverEpicGet(_ *cobra.Command, _ []string) error {
 	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
-		ws, parent, err := resolveRunningDriverRun(ctx, h, driverEpicGetWorkspaceKey, driverEpicGetDriverRunID, driverEpicGetNodeID, driverEpicGetLeaseID, driverEpicGetFence)
+		ws, parent, err := resolveRunningDriverRun(ctx, h, driverEpicGetWorkspaceKey, driverEpicGetDriverRunID)
 		if err != nil {
 			return err
 		}
@@ -98,7 +86,7 @@ func runDriverEpicGet(_ *cobra.Command, _ []string) error {
 
 func runDriverEpicSnapshot(_ *cobra.Command, _ []string) error {
 	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
-		ws, parent, err := resolveRunningDriverRun(ctx, h, driverEpicSnapshotWorkspaceKey, driverEpicSnapshotDriverRunID, driverEpicSnapshotNodeID, driverEpicSnapshotLeaseID, driverEpicSnapshotFence)
+		ws, parent, err := resolveRunningDriverRun(ctx, h, driverEpicSnapshotWorkspaceKey, driverEpicSnapshotDriverRunID)
 		if err != nil {
 			return err
 		}

@@ -19,6 +19,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
+const testWorkflowRunToken = "test-run-scoped-token"
+
 func TestExecutorRunOnceClaimsVerifiesAndFinishes(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
@@ -319,6 +321,7 @@ func TestNodeRunnerRunsBuiltFlueServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadRunRequest: %v", err)
 	}
+	req.RunToken = testWorkflowRunToken
 	result, err := (NodeRunner{}).Run(ctx, req)
 	if err != nil {
 		t.Fatalf("NodeRunner.Run: %v", err)
@@ -363,6 +366,7 @@ func TestNodeRunnerRunsRegisteredNativeFlueArtifact(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadRunRequest: %v", err)
 	}
+	req.RunToken = testWorkflowRunToken
 	if req.WorkflowPath != "" {
 		t.Fatalf("WorkflowPath = %q, want no generated workflow path", req.WorkflowPath)
 	}
@@ -393,6 +397,7 @@ func TestNodeRunnerFailsWhenRuntimeReturnsNoResult(t *testing.T) {
 		ServerPath: filepath.Join(root, "dist", "server.mjs"),
 		Manifest:   map[string]string{"workflow_name": "epic-runner"},
 		TrustLevel: workflowcatalog.DriverTrustTrusted,
+		RunToken:   testWorkflowRunToken,
 	})
 	if err != nil {
 		t.Fatalf("NodeRunner.Run: %v", err)
@@ -417,6 +422,7 @@ func TestNodeRunnerFailsWhenWorkflowResultIsMissingTerminalStatus(t *testing.T) 
 		ServerPath: filepath.Join(root, "dist", "server.mjs"),
 		Manifest:   map[string]string{"workflow_name": "epic-runner"},
 		TrustLevel: workflowcatalog.DriverTrustTrusted,
+		RunToken:   testWorkflowRunToken,
 	})
 	if err != nil {
 		t.Fatalf("NodeRunner.Run: %v", err)
@@ -486,6 +492,7 @@ if (process.send) {
 			ServerPath: filepath.Join(dist, "server.mjs"),
 			Manifest:   map[string]string{"workflow_name": "epic-runner"},
 			TrustLevel: workflowcatalog.DriverTrustTrusted,
+			RunToken:   testWorkflowRunToken,
 		})
 		done <- struct {
 			result RunResult
@@ -571,6 +578,7 @@ if (process.send) {
 		ServerPath: filepath.Join(dist, "server.mjs"),
 		Manifest:   map[string]string{"workflow_name": "epic-runner"},
 		TrustLevel: workflowcatalog.DriverTrustTrusted,
+		RunToken:   testWorkflowRunToken,
 	})
 	if err != nil {
 		t.Fatalf("NodeRunner.Run: %v", err)
@@ -820,6 +828,7 @@ func TestNodeRunnerMapsWorkflowSuspensionToSuspendedResult(t *testing.T) {
 			if err != nil {
 				t.Fatalf("loadRunRequest: %v", err)
 			}
+			req.RunToken = testWorkflowRunToken
 			result, err := (NodeRunner{}).Run(ctx, req)
 			if err != nil {
 				t.Fatalf("NodeRunner.Run: %v", err)

@@ -898,7 +898,6 @@ func TestConnectorE2EWorkflowEnvNeverSeesSecrets(t *testing.T) {
 		NodePath:        stub,
 		ExecTaskCommand: []string{"loom-exec-task-stub"}, // explicit per the loomExecutablePath lesson
 		APIBaseURL:      "http://127.0.0.1:1",
-		APIToken:        "run-scoped-driver-token",
 	}
 	res, err := runner.Run(context.Background(), driver.RunRequest{
 		Run: &domain.DriverRun{
@@ -910,6 +909,7 @@ func TestConnectorE2EWorkflowEnvNeverSeesSecrets(t *testing.T) {
 		// The env seam is under test, not the SB3 trust gate: a trusted
 		// request passes the process launcher.
 		TrustLevel: workflowcatalog.DriverTrustTrusted,
+		RunToken:   "run-scoped-driver-token",
 	})
 	if err != nil {
 		t.Fatalf("NodeRunner.Run: %v", err)
@@ -925,11 +925,11 @@ func TestConnectorE2EWorkflowEnvNeverSeesSecrets(t *testing.T) {
 	env := string(dump)
 
 	// Positive controls: the dump is the real spawned env and carries the
-	// run-scoped identity + driver API token the workflow legitimately holds.
+	// run-scoped identity + run token the workflow legitimately holds.
 	for _, want := range []string{
 		"LOOM_DRIVER_RUN_ID=run-env-probe",
 		"LOOM_DRIVER_API_URL=http://127.0.0.1:1",
-		"LOOM_DRIVER_API_TOKEN=run-scoped-driver-token",
+		"LOOM_RUN_TOKEN=run-scoped-driver-token",
 	} {
 		if !strings.Contains(env, want) {
 			t.Fatalf("workflow env missing %q:\n%s", want, env)

@@ -23,8 +23,6 @@ var (
 	driverExecTaskParentSessionID    string
 	driverExecTaskNodeID             string
 	driverExecTaskRunnerID           string
-	driverExecTaskLeaseID            string
-	driverExecTaskFencingToken       int64
 	driverExecTaskSupportedProviders []string
 	driverExecTaskCapabilities       []string
 	driverExecTaskSandboxProvider    string
@@ -81,8 +79,6 @@ func bindDriverExecTaskFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&driverExecTaskParentSessionID, "parent-session-id", "", "Parent AgentSession ID")
 	cmd.Flags().StringVar(&driverExecTaskNodeID, "node-id", "", "Executor node ID")
 	cmd.Flags().StringVar(&driverExecTaskRunnerID, "runner-id", "", "Runner ID")
-	cmd.Flags().StringVar(&driverExecTaskLeaseID, "lease-id", "", "Parent DriverRun lease ID")
-	cmd.Flags().Int64Var(&driverExecTaskFencingToken, "fencing-token", 0, "Parent DriverRun fencing token")
 	cmd.Flags().StringSliceVar(&driverExecTaskSupportedProviders, "supported-provider", nil, "Supported task provider (repeatable)")
 	cmd.Flags().StringSliceVar(&driverExecTaskCapabilities, "capability", nil, "Runner capability (repeatable)")
 	cmd.Flags().StringVar(&driverExecTaskSandboxProvider, "sandbox-provider", "", "Sandbox provider")
@@ -118,7 +114,6 @@ func bindDriverWorkTaskRunFlags(cmd *cobra.Command) {
 func runDriverExecTask(cmd *cobra.Command, _ []string) error {
 	client, err := newDriverRuntimeClient(driverRuntimeClientOptions{
 		WorkspaceKey: driverExecTaskWorkspaceKey, DriverRunID: driverExecTaskDriverRunID,
-		NodeID: driverExecTaskNodeID, LeaseID: driverExecTaskLeaseID, FencingToken: driverExecTaskFencingToken,
 	})
 	if err != nil {
 		return err

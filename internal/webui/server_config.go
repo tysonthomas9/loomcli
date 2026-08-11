@@ -111,9 +111,8 @@ type ServerConfig struct {
 	// facades. Embedded mode captures its process-local service credential in
 	// this closure instead of exporting it through environment state.
 	ExecutionIssueBackends func(workspace, actor string) (IssueBackend, error)
-	DriverAPIToken         string                // Optional shared bearer token required by the driver-op HTTP API (LOOM_DRIVER_API_TOKEN)
 	DriverAPIBaseURL       string                // This serve process's own driver/task-run API base URL, required by task runners as LOOM_TASK_RUN_API_URL
-	DriverRunTokenKey      []byte                // HS256 signing key for run-scoped driver-op tokens (LOOM_RUN_TOKEN_SIGNING_KEY or ephemeral); nil disables the token auth path
+	DriverRunTokenKey      []byte                // Required HS256 signing key for run-scoped driver-op tokens (LOOM_RUN_TOKEN_SIGNING_KEY or ephemeral)
 	ExecutionCapability    ExecutionCapability   // Active Execution APIs and typed authority resolvers; nil fails mutating execution routes closed
 	DaytonaProvider        DaytonaProviderBroker // Host-owned, owner-fenced Daytona provider operation; nil fails closed.
 	ArtifactsCapability    ArtifactsCapability   // Active owner-fenced Artifact lifecycle; nil fails artifact mutations closed

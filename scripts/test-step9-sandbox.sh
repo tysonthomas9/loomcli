@@ -299,10 +299,8 @@ start_loom_serve() {
     LOOM_DISABLE_H2C=1 \
     LOOM_DRIVER_EXECUTOR=1 \
     LOOM_DRIVER_EXECUTOR_NODE_ID=step9-node \
-    LOOM_DRIVER_LEGACY_AUTH_ENV=0 \
-    LOOM_DRIVER_SANDBOX=container \
+	LOOM_DRIVER_SANDBOX=container \
     LOOM_DRIVER_SANDBOX_BINARY="$SANDBOX_BINARY" \
-    LOOM_DRIVER_API_TOKEN="step9-ops-static-bearer-must-never-reach-workflows" \
     LOOM_RUN_TOKEN_SIGNING_KEY="$signing_key" \
     LOOM_DRIVER_TASK_RUNNER_CMD_JSON="$task_runner_cmd_json" \
     LOOM_SDK_ROOT="$ROOT/sdk" \
