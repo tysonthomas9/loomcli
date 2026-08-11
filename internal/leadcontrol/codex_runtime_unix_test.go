@@ -15,7 +15,7 @@ import (
 func TestConfigureCodexAppServerProcessCreatesDedicatedGroup(t *testing.T) {
 	t.Parallel()
 
-	cmd := exec.Command("true")
+	cmd := exec.Command("true") //nolint:norawexec // Test-only command object; it is never started.
 	configureCodexAppServerProcess(cmd)
 	if cmd.SysProcAttr == nil || !cmd.SysProcAttr.Setpgid {
 		t.Fatal("Codex app-server process was not configured with Setpgid")
