@@ -163,19 +163,11 @@ func EnsureBuiltinWorkflow(ctx context.Context, st store.Store, ws, name string)
 		}
 		return nil
 	}
-	if _, _, err := BuildAndRegister(ctx, st, BuildAndRegisterOptions{
-		WorkspaceKey:  ws,
-		Name:          name,
-		Entrypoint:    spec.Entrypoint,
-		Files:         spec.Files,
-		Activate:      true,
-		SourceRef:     sourceRef,
-		SourceDigest:  digest,
-		CreatedBy:     "system",
-		WorkDir:       builtinWorkflowWorkDir(),
-		DeriveRunners: true,
-		Trust:         domain.DriverTrustTrusted,
-	}); err != nil {
+	opts := builtinRegistrationOptions(ws, name, spec, sourceRef, digest)
+	if registered, err := registerBundledBuiltin(ctx, st, opts); registered || err != nil {
+		return err
+	}
+	if _, _, err := BuildAndRegister(ctx, st, opts); err != nil {
 		if len(reuseMissingRunners) > 0 {
 			slog.Warn("builtin runner manifest is missing runners and re-register failed; reusing the registered version",
 				"workflow", name,
@@ -187,6 +179,64 @@ func EnsureBuiltinWorkflow(ctx context.Context, st store.Store, ws, name string)
 		return fmt.Errorf("register built-in workflow %q: %w", name, err)
 	}
 	return nil
+}
+
+func builtinRegistrationOptions(ws, name string, spec Spec, sourceRef, digest string) BuildAndRegisterOptions {
+	return BuildAndRegisterOptions{
+		WorkspaceKey:  ws,
+		Name:          name,
+		Entrypoint:    spec.Entrypoint,
+		Files:         spec.Files,
+		Activate:      true,
+		SourceRef:     sourceRef,
+		SourceDigest:  digest,
+		CreatedBy:     "system",
+		WorkDir:       builtinWorkflowWorkDir(),
+		DeriveRunners: true,
+		Trust:         domain.DriverTrustTrusted,
+	}
+}
+
+func registerBundledBuiltin(ctx context.Context, st store.Store, opts BuildAndRegisterOptions) (bool, error) {
+	distPath, ok := bundledBuiltinWorkflowDist(opts.Name)
+	if !ok {
+		return false, nil
+	}
+	if _, err := registerWorkflowDist(ctx, st, opts, distPath, "bundled desktop artifact"); err != nil {
+		return true, fmt.Errorf("register bundled workflow %q: %w", opts.Name, err)
+	}
+	return true, nil
+}
+
+// bundledBuiltinWorkflowDist resolves an app-owned prebuilt workflow artifact.
+// Packaged desktop builds ship these artifacts under Contents/Resources so a
+// user can run built-in workflows without a source checkout, @loom/sdk path,
+// or Flue build toolchain on the runtime machine. Source-tree and server builds
+// still fall back to BuildAndRegister when no bundled artifact is present.
+func bundledBuiltinWorkflowDist(name string) (string, bool) {
+	if _, ok := builtinWorkflows[name]; !ok {
+		return "", false
+	}
+	roots := []string{}
+	if root := strings.TrimSpace(os.Getenv("LOOM_BUILTIN_WORKFLOW_BUNDLES_DIR")); root != "" {
+		roots = append(roots, root)
+	}
+	if executable, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(executable)
+		roots = append(roots,
+			filepath.Join(exeDir, "workflows"),
+			filepath.Join(exeDir, "..", "Resources", "workflows"),
+			filepath.Join(exeDir, "..", "Resources", "resources", "workflows"),
+		)
+	}
+	for _, root := range roots {
+		dist := filepath.Clean(filepath.Join(root, name))
+		info, err := os.Stat(filepath.Join(dist, "server.mjs"))
+		if err == nil && !info.IsDir() {
+			return dist, true
+		}
+	}
+	return "", false
 }
 
 // builtinReuseDecision decides whether the currently-registered builtin can be
@@ -374,6 +424,22 @@ func BuildAndRegister(ctx context.Context, st store.Store, opts BuildAndRegister
 		return nil, "", err
 	}
 	output = RedactBuildDiagnostics(output)
+	result, err := registerWorkflowDist(ctx, st, opts, outputDir, output)
+	if err != nil {
+		return nil, output, err
+	}
+	return result, output, nil
+}
+
+func registerWorkflowDist(ctx context.Context, st store.Store, opts BuildAndRegisterOptions, outputDir, diagnostics string) (*driver.RegisterFlueResult, error) {
+	workDir := opts.WorkDir
+	if workDir == "" {
+		var err error
+		workDir, err = os.Getwd()
+		if err != nil {
+			return nil, fmt.Errorf("resolve work dir: %w", err)
+		}
+	}
 	result, err := driver.RegisterFlueDriver(ctx, st, driver.RegisterFlueOptions{
 		WorkspaceKey:     opts.WorkspaceKey,
 		WorkDir:          workDir,
@@ -386,13 +452,13 @@ func BuildAndRegister(ctx context.Context, st store.Store, opts BuildAndRegister
 		Activate:         opts.Activate,
 		RunnerSpecs:      workflowRunnerSpecs(opts),
 		Manifest:         opts.Manifest,
-		BuildDiagnostics: output,
+		BuildDiagnostics: diagnostics,
 		Trust:            submissionTrust(opts.Trust),
 	})
 	if err != nil {
-		return nil, output, err
+		return nil, err
 	}
-	return result, output, nil
+	return result, nil
 }
 
 // deprecatedWorkflowRunners are sibling runner files that must never be

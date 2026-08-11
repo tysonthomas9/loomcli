@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
-# Build the epic-runner workflow bundle from the embedded TS sources via the
+# Build one built-in workflow bundle from the embedded TS sources via the
 # sibling Flue CLI, and refresh source-digest.txt so it matches
 # SourceDigest(spec.Files). Generated bundle output is not committed; set
 # BUILTIN_DIST_DEST to choose a specific output directory.
 #
-# Run this whenever any of internal/workflows/builtin/{epic-runner,local-task-runner,
-# daytona-task-runner,openshell-task-runner}.ts changes.
+# Run this whenever any source under internal/workflows/builtin that belongs to
+# epic-runner or github-review-agent changes.
 #
 #   usage: scripts/rebuild-builtin-bundle.sh        (requires ../flue built)
-#   env:   FLUE_REPO=/path/to/flue  (default: ../flue)
+#   env:   BUILTIN_WORKFLOW=epic-runner|github-review-agent
+#          FLUE_REPO=/path/to/flue  (default: ../flue)
 #          BUILTIN_DIST_DEST=/path/to/output
 #
 # Note: DEST is replaced wholesale (rm -rf + copy) so content-hashed assets from
@@ -40,11 +41,22 @@ SRC="$ROOT/internal/workflows/builtin"
 # BUILTIN_DIST_DEST lets CI and local callers choose a scratch dir without
 # recreating deleted generated bundle files in the repo.
 DEST="${BUILTIN_DIST_DEST:-$(mktemp -d -t loom-builtin-dist.XXXXXX)}"
-# The 4 files that make up the epic-runner spec (builtinEpicRunnerSpec in workflows.go).
-SPEC_FILES=(epic-runner.ts local-task-runner.ts daytona-task-runner.ts openshell-task-runner.ts)
+BUILTIN_WORKFLOW="${BUILTIN_WORKFLOW:-epic-runner}"
+case "$BUILTIN_WORKFLOW" in
+  epic-runner)
+    SPEC_FILES=(epic-runner.ts local-task-runner.ts daytona-task-runner.ts openshell-task-runner.ts)
+    ;;
+  github-review-agent)
+    SPEC_FILES=(github-review-agent.ts github-review-task-runner.ts)
+    ;;
+  *)
+    echo "ERROR: unsupported built-in workflow: $BUILTIN_WORKFLOW" >&2
+    exit 1
+    ;;
+esac
 
 STAGE="$(mktemp -d -t loom-bundle-regen.XXXXXX)"
-echo "==> staging epic-runner workflow repo at $STAGE"
+echo "==> staging $BUILTIN_WORKFLOW workflow repo at $STAGE"
 mkdir -p "$STAGE/workflows"
 # shellcheck source=scripts/stage-builtin-modules.sh
 source "$ROOT/scripts/stage-builtin-modules.sh"
@@ -58,7 +70,7 @@ echo "==> flue build --target node --root $STAGE --output $STAGE/dist"
 
 # Digest = byte-exact mirror of workflows.SourceDigest over the spec files. The
 # file list comes from SPEC_FILES (single source of truth in this script) — it
-# must stay in sync with builtinEpicRunnerSpec() in internal/workflows/workflows.go.
+# must stay in sync with the corresponding builtin spec in workflows.go.
 DIGEST="$(node -e '
 const fs=require("fs"),crypto=require("crypto");
 const dir=process.argv[1], names=process.argv.slice(2);

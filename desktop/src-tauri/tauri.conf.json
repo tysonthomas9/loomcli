@@ -31,7 +31,8 @@
     "targets": ["app", "dmg"],
     "externalBin": ["binaries/loom", "binaries/fleet-db"],
     "resources": {
-      "resources/webui/": "webui/"
+      "resources/webui/": "webui/",
+      "resources/workflows/": "workflows/"
     },
     "macOS": {
       "minimumSystemVersion": "12.0"
