@@ -10,7 +10,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/localnodeconfig"
 )
 
 // RoleConfig defines an agent role (built-in like "plan"/"task", or custom).
@@ -119,7 +118,7 @@ func LoadRuntimeConfig(ctx context.Context, projectDir string) (*RuntimeConfig, 
 		}
 		return nil, fmt.Errorf("resolve active workspace: %w", err)
 	}
-	backend, err := localnodeconfig.RuntimeProvider(key)
+	backend, err := bootstrap.RuntimeProvider(key)
 	if err != nil {
 		return nil, fmt.Errorf("load local node runtime provider: %w", err)
 	}

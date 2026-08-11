@@ -11,7 +11,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/localnodeconfig"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -194,7 +193,7 @@ func loadSummaries(ctx context.Context, s WorkspaceTopologyReader, activeKey str
 		if repos, repoErr := s.Repos().List(ctx, ws.Key); repoErr == nil {
 			repoCount = len(repos)
 		}
-		backend, _ := localnodeconfig.RuntimeProvider(ws.Key)
+		backend, _ := bootstrap.RuntimeProvider(ws.Key)
 		out = append(out, ops.WorkspaceSummary{
 			ID:           ws.Key,
 			Name:         ws.Name,

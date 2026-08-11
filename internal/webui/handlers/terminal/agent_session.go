@@ -13,7 +13,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/localnodeconfig"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -373,7 +372,7 @@ func agentLaunchBackend(workspace string, agent *agents.RuntimeIdentity, role *d
 	// `loom agentdef add … --role lead` (no --backend) produced a terminal
 	// command of `loom lead` with no backend wired, so codex never started.
 	if backend == "" {
-		backend, _ = localnodeconfig.RuntimeProvider(workspace)
+		backend, _ = bootstrap.RuntimeProvider(workspace)
 	}
 	return backend
 }

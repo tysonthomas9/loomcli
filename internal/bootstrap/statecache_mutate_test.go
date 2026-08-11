@@ -89,3 +89,45 @@ func TestMutateStateCacheNilFn(t *testing.T) {
 		t.Fatal("MutateStateCache(nil) = nil error, want error")
 	}
 }
+
+func TestRuntimeProviderRoundTripPreservesWorkspaceLocalState(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	if err := MutateStateCache(func(sc *StateCache) error {
+		sc.Workspaces["A"] = WorkspaceLocalState{
+			Path:  "/tmp/a",
+			Repos: map[string]string{"loom": "/tmp/a/loom"},
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SetRuntimeProvider(" A ", " codex "); err != nil {
+		t.Fatalf("SetRuntimeProvider: %v", err)
+	}
+	provider, err := RuntimeProvider(" A ")
+	if err != nil {
+		t.Fatalf("RuntimeProvider: %v", err)
+	}
+	if provider != "codex" {
+		t.Fatalf("RuntimeProvider = %q, want codex", provider)
+	}
+
+	sc, err := LoadStateCache()
+	if err != nil {
+		t.Fatal(err)
+	}
+	local := sc.Workspaces["A"]
+	if local.Path != "/tmp/a" || local.Repos["loom"] != "/tmp/a/loom" {
+		t.Fatalf("SetRuntimeProvider replaced unrelated local state: %#v", local)
+	}
+}
+
+func TestRuntimeProviderRequiresWorkspaceKey(t *testing.T) {
+	if _, err := RuntimeProvider("  "); err == nil {
+		t.Fatal("RuntimeProvider(blank) = nil error, want validation error")
+	}
+	if err := SetRuntimeProvider("  ", "codex"); err == nil {
+		t.Fatal("SetRuntimeProvider(blank) = nil error, want validation error")
+	}
+}

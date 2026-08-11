@@ -8,15 +8,15 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/localnodeconfig"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 func setWorkflowRuntimeProvider(t *testing.T, backend string) {
 	t.Helper()
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
-	if err := localnodeconfig.SetRuntimeProvider("TEST", backend); err != nil {
+	if err := bootstrap.SetRuntimeProvider("TEST", backend); err != nil {
 		t.Fatalf("set runtime provider: %v", err)
 	}
 }

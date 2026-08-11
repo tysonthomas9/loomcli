@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/atomicfile"
 	"github.com/tysonthomas9/loomcli/internal/configlock"
@@ -166,6 +167,38 @@ func MutateWorkspaceLocalState(wsKey string, fn func(*WorkspaceLocalState) error
 			return err
 		}
 		sc.Workspaces[wsKey] = local
+		return nil
+	})
+}
+
+// RuntimeProvider returns the machine-local runtime-provider override for one
+// workspace. An empty result means the caller should apply its product
+// default; the value is never durable FleetDB workspace state.
+func RuntimeProvider(workspaceKey string) (string, error) {
+	workspaceKey = strings.TrimSpace(workspaceKey)
+	if workspaceKey == "" {
+		return "", errors.New("statecache: workspace key is required")
+	}
+	cache, err := LoadStateCache()
+	if err != nil {
+		return "", err
+	}
+	if cache == nil {
+		return "", nil
+	}
+	return strings.TrimSpace(cache.Workspaces[workspaceKey].DefaultRuntimeProvider), nil
+}
+
+// SetRuntimeProvider atomically changes one workspace's machine-local runtime
+// provider without replacing unrelated checkout or worktree state.
+func SetRuntimeProvider(workspaceKey, provider string) error {
+	workspaceKey = strings.TrimSpace(workspaceKey)
+	if workspaceKey == "" {
+		return errors.New("statecache: workspace key is required")
+	}
+	provider = strings.TrimSpace(provider)
+	return MutateWorkspaceLocalState(workspaceKey, func(local *WorkspaceLocalState) error {
+		local.DefaultRuntimeProvider = provider
 		return nil
 	})
 }

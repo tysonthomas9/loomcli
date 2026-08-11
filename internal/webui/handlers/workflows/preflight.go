@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/localnodeconfig"
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
 )
@@ -58,7 +58,7 @@ func runnerIsLocal(payload json.RawMessage) bool {
 
 func (m *Module) preflightLocalTaskRunner(workspace string) error {
 	backend := platformruntime.ProviderCodex
-	if configured, err := localnodeconfig.RuntimeProvider(workspace); err == nil && configured != "" {
+	if configured, err := bootstrap.RuntimeProvider(workspace); err == nil && configured != "" {
 		backend = configured
 	}
 	if m == nil || m.backendHealth == nil {

@@ -3,12 +3,12 @@ package driver
 import (
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/localnodeconfig"
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/localsettings"
 )
 
 func runtimeProvider(workspace string) string {
-	provider, _ := localnodeconfig.RuntimeProvider(workspace)
+	provider, _ := bootstrap.RuntimeProvider(workspace)
 	return strings.TrimSpace(provider)
 }
 

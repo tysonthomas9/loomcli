@@ -13,11 +13,11 @@ semantics:
     - vendor
     - worktrees
 ceilings:
-  total_packages: 170
+  total_packages: 169
   module_packages: 15
-  outside_module_packages: 155
-  one_file_packages: 50
-  one_or_two_file_packages: 71
+  outside_module_packages: 154
+  one_file_packages: 49
+  one_or_two_file_packages: 70
 packages:
   - internal/agenterr
   - internal/agentpolicy
@@ -110,7 +110,6 @@ packages:
   - internal/infra/workflowdistribution/authoring
   - internal/infra/workspacecatalog
   - internal/kv
-  - internal/localnodeconfig
   - internal/localsettings
   - internal/localworkspace
   - internal/lockfile

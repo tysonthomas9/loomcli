@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/localnodeconfig"
 	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/ops"
@@ -522,7 +522,7 @@ func (s *workspaceServiceImpl) GetWorkspaceBackend(ctx context.Context, wsID str
 	}
 	backend := ""
 	source := "default"
-	backend, err := localnodeconfig.RuntimeProvider(ws.Key)
+	backend, err := bootstrap.RuntimeProvider(ws.Key)
 	if err != nil {
 		return nil, ErrInternal("failed to load local node backend config", err)
 	}
@@ -573,7 +573,7 @@ func (s *workspaceServiceImpl) PatchWorkspaceBackend(ctx context.Context, wsID s
 	if serr != nil {
 		return nil, serr
 	}
-	if err := localnodeconfig.SetRuntimeProvider(ws.Key, backend); err != nil {
+	if err := bootstrap.SetRuntimeProvider(ws.Key, backend); err != nil {
 		return nil, ErrInternal("failed to save local node backend config", err)
 	}
 	s.invalidateWorkspaceCache()
