@@ -1167,9 +1167,61 @@ through the already-imported workflow-distribution authoring adapter, removing
 the extra edge instead of increasing the exact fanout exception. The complete
 unchanged-source gate then passed.
 
-Later waves must update this document with the selected package candidates,
-the boundary reason retained or removed for each, exact shape changes, and
-same-head evidence.
+## Wave 9.25 result
+
+The twenty-fifth slice deletes four more production package boundaries and the
+compatibility APIs that kept two of them alive:
+
+- `internal/cli/serve/workspacemgr/admissionstore` was a Workspace-internal
+  repository plane with one real consumer. Its journal now lives directly in
+  `workspacemgr`; the broad four-store interface, forwarding journal, old
+  constructor, and six `BuildStoreBacked*` compatibility wrappers are deleted.
+  Serve and the workspace CLI compose the Workspace owner API explicitly.
+- `internal/driver/taskworktree` was used only by its parent. Worktree
+  preparation and stack lineage now live in `driver`; production receives the
+  three Source Control ports explicitly instead of recovering two of them with
+  type assertions. A lineage lookup error now fails closed rather than silently
+  selecting the repository default branch.
+- `internal/cli/clitest` and `internal/store/storetest` contained only shared
+  test support. Both move under their owners' `testdata` trees, so Go continues
+  compiling their tests while production topology no longer counts them.
+
+All non-port journal methods made public by the former child package are now
+private. `ResolveLocalRepositoryAdmission` remains public because it implements
+the Source Control consumer-owned resolver port. The direct-write analyzer now
+honors an exact declared receiver without treating every function in the same
+mixed package as persistence. A regression proves that undeclared methods on
+that receiver fail closed while unrelated package helpers remain outside the
+classifier.
+
+Exact package shape falls from `164 / 15 / 149 / 43 / 65` to
+`160 / 15 / 145 / 42 / 61`. The retired-root guard prevents all four old paths
+from returning. The source-backed direct-write inventory changes from `86 / 95`
+to `94 / 112`: two forwarding-constructor rows disappear, while the analyzer
+now sees every actual private journal mutation rather than hiding the journal
+behind a package-wide declaration. This is stricter observation, not eight new
+persistence operations. Live handler allowances remain 16, capability roots
+remain 10, and no architecture exception is widened. The implementation is
+`9caddc7e5`.
+
+## Wave 9.25 validation
+
+| Check | Result |
+|---|---|
+| Workspace admission, local journal recovery/fencing, task worktree/lineage, moved CLI/store test support, serve composition, Driver API, automode, and paired FleetDB contract suites | PASS |
+| Exact topology, retired-root, Source Control reachability, exact-receiver default-deny, and direct-write ratchets | PASS: shape `160 / 15 / 145 / 42 / 61`; writes `94 / 112`; all four old package roots and all six wrapper constructors absent |
+| Measured `make check-architecture` | PASS: 11/11 profiles, 10 capability roots, 16 live legacy-handler allowances, 94 direct-write rows, 107 reviewed mutation commands, 71 runtime components, 80 goroutine launches, all six performance rows measured, zero pending decisions, and 1,159.4 MiB peak process-tree RSS under 2,048 MiB |
+| Aggregate `make gate` against FleetDB `9c1859a` | PASS: all Go and frontend quality gates with the exact paired source and binary, `GOMAXPROCS=4`, one Go test worker, two Vitest workers, and a 3 GiB Go soft memory limit |
+
+The initial aggregate attempts caught eight moved-import formatting changes and
+a three-line `funlen` overage after explicit Source Control port injection. The
+final source formats the imports and extracts task-worker construction; the
+linter reports zero issues and the uninterrupted aggregate rerun passes. No
+lint exception or topology allowance was added.
+
+Later waves must continue deleting executable legacy model, projection, and
+Store fallback paths. Reaching 160 packages is a progress metric, not the Phase
+9 completion criterion.
 
 ---
 
