@@ -19,19 +19,17 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
 )
 
-// BindingGrantCompatibility is the narrow Phase-3 connector seam needed by
-// agent deletion. Grant creation remains owned by the existing connector store
-// until the Connectors capability moves in Phase 5.
-type BindingGrantCompatibility interface {
-	RevokeBindingGrants(ctx context.Context, workspaceKey, bindingID string) (int, error)
+// BindingGrantCleanup is the consumer-owned Connectors intent needed by Agent
+// deletion. It cannot enumerate grants or reach persistence directly.
+type BindingGrantCleanup interface {
+	RevokeBindingGrants(context.Context, string, string) (int, error)
 }
 
 type agentSessionTranscriptEvents = sessioncoord.TranscriptEvents
 
 // Config composes the unified transport with the canonical Agents identity
 // surface and Automation bindings. The composite Store remains for
-// prompt-agent build/provisioning projections, connector
-// compatibility, and run history; public durable Agent identity reads and
+// prompt-agent build/provisioning projections and run history; public durable Agent identity reads and
 // mutations never use store.AgentServices directly.
 type Config struct {
 	AgentRecords          AgentRecordAPI
@@ -47,7 +45,7 @@ type Config struct {
 	ProvisioningAuthority workflowcataloghttp.OperatorAuthorityResolver
 	PrepareWorkflowTarget func(context.Context, string, string) (*workflowcatalog.Driver, error)
 	WorkspaceFromContext  func(context.Context) string
-	BindingGrants         BindingGrantCompatibility
+	BindingGrants         BindingGrantCleanup
 }
 
 type agentProjectionStore interface {
@@ -73,7 +71,7 @@ type Module struct {
 	prepareWorkflowTarget func(context.Context, string, string) (*workflowcatalog.Driver, error)
 	agentLifecycle        AgentLifecycleAPI
 	workspaceFromContext  func(context.Context) string
-	bindingGrants         BindingGrantCompatibility
+	bindingGrants         BindingGrantCleanup
 }
 
 // New constructs the Automation-aware agent HTTP module.

@@ -772,9 +772,7 @@ func TestAgentEnableDisableFanoutAndBindingGuard(t *testing.T) {
 		Commands: &testBindingOperations{store: st}, Queries: &testBindingOperations{store: st},
 		ManualDispatch: &testBindingOperations{store: st}, OperatorAuthority: testOperatorAuthorityResolver{},
 		WorkspaceFromContext: func(context.Context) string { return agentRecordTestWS }, Runs: st.DriverRuns(),
-		Connectors: testTriggerConnectorCompatibility{
-			testBindingGrantCompatibility{grants: st.Connectors()},
-		},
+		Connectors: testTriggerConnectorLifecycle{grants: st.Connectors()},
 	}).Register(mux)
 	created := createPromptAgentForTest(t, mux)
 	bindingID := created.Bindings[0].BindingID

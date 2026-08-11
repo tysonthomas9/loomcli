@@ -11,7 +11,9 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/app/workflowbinding"
+	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 )
@@ -89,15 +91,19 @@ func (s *stubBindingAPI) DispatchBinding(ctx context.Context, auth authority.Ope
 	return s.dispatch(ctx, auth, command)
 }
 
-type connectorCompatibilityStub struct {
-	configure func(context.Context, string, string, string, string) error
-	revoke    func(context.Context, string, string) (int, error)
+type connectorLifecycleStub struct {
+	configure func(context.Context, connectorsmodule.ConfigureBindingSecretCommand) error
+	revoke    func(context.Context, connectorsmodule.BindingGrantCleanupCommand) (int, error)
 }
 
 type allowUnattachedBindingIdentity struct{}
 
-func (allowUnattachedBindingIdentity) CheckUnattachedBindingID(context.Context, string, string) error {
-	return nil
+func (allowUnattachedBindingIdentity) GetAgent(context.Context, string, string) (*agentsmodule.Agent, error) {
+	return nil, agentsmodule.ErrNotFound
+}
+
+func (allowUnattachedBindingIdentity) ListAgents(context.Context, string, agentsmodule.AgentFilter) ([]*agentsmodule.Agent, error) {
+	return nil, nil
 }
 
 type unexpectedWorkflowTargetPreparer struct{}
@@ -106,21 +112,21 @@ func (unexpectedWorkflowTargetPreparer) PrepareWorkflowTarget(context.Context, s
 	panic("explicit driver request unexpectedly prepared a workflow target")
 }
 
-func (s *connectorCompatibilityStub) ConfigureBindingSecret(ctx context.Context, workspace, bindingID, sourceKind, secret string) error {
+func (s *connectorLifecycleStub) ConfigureBindingSecret(ctx context.Context, command connectorsmodule.ConfigureBindingSecretCommand) error {
 	if s.configure == nil {
 		return nil
 	}
-	return s.configure(ctx, workspace, bindingID, sourceKind, secret)
+	return s.configure(ctx, command)
 }
 
-func (s *connectorCompatibilityStub) RevokeBindingGrants(ctx context.Context, workspace, bindingID string) (int, error) {
+func (s *connectorLifecycleStub) RevokeBindingGrants(ctx context.Context, command connectorsmodule.BindingGrantCleanupCommand) (int, error) {
 	if s.revoke == nil {
 		return 0, nil
 	}
-	return s.revoke(ctx, workspace, bindingID)
+	return s.revoke(ctx, command)
 }
 
-func registerBoundaryModule(api *stubBindingAPI, resolver workflowcataloghttp.OperatorAuthorityResolver, connectors ConnectorCompatibility) *http.ServeMux {
+func registerBoundaryModule(api *stubBindingAPI, resolver workflowcataloghttp.OperatorAuthorityResolver, connectors connectorsmodule.BindingLifecycle) *http.ServeMux {
 	createWorkflow, err := workflowbinding.New(unexpectedWorkflowTargetPreparer{}, api)
 	if err != nil {
 		panic(err)
@@ -217,11 +223,11 @@ func TestCreateKeepsSecretOutOfAutomation(t *testing.T) {
 		},
 	}
 	var connectorSecret string
-	connectors := &connectorCompatibilityStub{configure: func(_ context.Context, workspace, bindingID, sourceKind, got string) error {
-		if workspace != "CANONICAL" || bindingID != "github-binding" || sourceKind != "github" {
-			t.Fatalf("connector scope = %q/%q/%q", workspace, bindingID, sourceKind)
+	connectors := &connectorLifecycleStub{configure: func(_ context.Context, command connectorsmodule.ConfigureBindingSecretCommand) error {
+		if command.WorkspaceKey != "CANONICAL" || command.BindingID != "github-binding" {
+			t.Fatalf("connector scope = %q/%q", command.WorkspaceKey, command.BindingID)
 		}
-		connectorSecret = got
+		connectorSecret = command.Secret
 		return nil
 	}}
 	resolver := operatorResolverFunc(func(*http.Request, string, authority.Action) (authority.OperatorAuthority, error) {
@@ -262,7 +268,7 @@ func TestDeleteDisablesRevokesThenDeletesAndCanResume(t *testing.T) {
 			return nil
 		},
 	}
-	connectors := &connectorCompatibilityStub{revoke: func(context.Context, string, string) (int, error) {
+	connectors := &connectorLifecycleStub{revoke: func(context.Context, connectorsmodule.BindingGrantCleanupCommand) (int, error) {
 		calls = append(calls, "revoke")
 		revokeAttempts++
 		if revokeAttempts == 1 {

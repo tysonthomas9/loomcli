@@ -62,6 +62,7 @@ type Deps struct {
 	LocalSettingsDir              string
 	SourceControl                 sourcecontrol.Materializer
 	Dispatcher                    connectorsmodule.Dispatcher
+	ConnectorBindingLifecycle     connectorsmodule.BindingLifecycle
 	AutomationBindings            automation.BindingOperations
 	WorkflowBinding               *workflowbinding.Workflow
 	AutomationAudit               automation.AuditQueries

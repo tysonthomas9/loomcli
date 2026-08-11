@@ -919,6 +919,42 @@ func TestRetiredConnectorCompatibilityConstructorsCannotReturn(t *testing.T) {
 	}
 }
 
+func TestRetiredAutomationCompositionCompatibilityCannotReturn(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, relative := range []string{
+		"internal/webui/agentmodules/automation_agent_identity_compat.go",
+		"internal/webui/agentmodules/automation_agent_identity_compat_test.go",
+		"internal/webui/agentmodules/automation_connector_compat.go",
+		"internal/webui/agentmodules/automation_connector_compat_test.go",
+	} {
+		if _, statErr := os.Stat(filepath.Join(root, filepath.FromSlash(relative))); !os.IsNotExist(statErr) {
+			t.Errorf("retired Automation compatibility file %s returned (stat error: %v)", relative, statErr)
+		}
+	}
+	for relative, forbidden := range map[string][]string{
+		"internal/webui/handlers/triggerbindings/module.go": {
+			"ConnectorCompatibility", "UnattachedBindingIdentityChecker", "DeleteBindingAndRevokeGrants",
+		},
+		"internal/webui/handlers/agents/module.go": {"BindingGrantCompatibility"},
+		"internal/webui/agentmodules/automation_routes.go": {
+			"storeConnectorCompatibility", "storeAgentIdentityCompatibility", "bindingGrantCompatibility",
+		},
+	} {
+		content, readErr := os.ReadFile(filepath.Join(root, filepath.FromSlash(relative)))
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		for _, fragment := range forbidden {
+			if strings.Contains(string(content), fragment) {
+				t.Errorf("retired Automation compatibility symbol %q returned in %s", fragment, relative)
+			}
+		}
+	}
+}
+
 func TestRetiredSourceCompatibilityAPIsCannotReturn(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {

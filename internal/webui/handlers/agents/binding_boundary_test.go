@@ -65,7 +65,7 @@ func TestLegacyBindingPatchIsNotAnAgentRoute(t *testing.T) {
 			return authority.OperatorAuthority{}, nil
 		}),
 		WorkspaceFromContext: func(context.Context) string { return agentRecordTestWS },
-		BindingGrants:        testBindingGrantCompatibility{grants: st.Connectors()},
+		BindingGrants:        testBindingGrantCleanup{grants: st.Connectors()},
 	})
 	mux := http.NewServeMux()
 	module.Register(mux)
@@ -113,7 +113,7 @@ func TestManagedBindingLifecycleUsesExactActions(t *testing.T) {
 		ProvisioningAuthority: provisioning,
 		PrepareWorkflowTarget: testWorkflowTargetPreparation(st),
 		WorkspaceFromContext:  func(context.Context) string { return agentRecordTestWS },
-		BindingGrants:         testBindingGrantCompatibility{grants: st.Connectors()},
+		BindingGrants:         testBindingGrantCleanup{grants: st.Connectors()},
 	})
 	mux := http.NewServeMux()
 	module.Register(mux)
@@ -224,7 +224,7 @@ func TestManagedAgentDeleteResumesAfterParkOrArchiveFailure(t *testing.T) {
 				AgentRecords:         &testAgentRecordAPI{store: faultStore},
 				AgentRecordAuthority: testOperatorAuthorityResolver{},
 				WorkspaceFromContext: func(context.Context) string { return agentRecordTestWS },
-				BindingGrants:        testBindingGrantCompatibility{grants: faultStore.Connectors()},
+				BindingGrants:        testBindingGrantCleanup{grants: faultStore.Connectors()},
 			})
 			mux := http.NewServeMux()
 			module.Register(mux)

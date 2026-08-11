@@ -239,7 +239,7 @@ func (m *Module) agentRecordDTOWithBindings(
 		if b == nil {
 			continue
 		}
-		dec := triggerbindings.DecorateBinding(ctx, m.store, ws, b, now)
+		dec := triggerbindings.DecorateBinding(ctx, m.store.DriverRuns(), ws, b, now)
 		decorators = append(decorators, dec)
 		out.Bindings = append(out.Bindings, recordBindingDTO{
 			Binding:             b,

@@ -628,19 +628,30 @@ func mapTestAgentRecordError(err error) error {
 	}
 }
 
-type testBindingGrantCompatibility struct {
+type testBindingGrantCleanup struct {
 	grants connectorsmodule.ManagementStore
 }
 
-type testTriggerConnectorCompatibility struct {
-	testBindingGrantCompatibility
+type testTriggerConnectorLifecycle struct {
+	grants connectorsmodule.ManagementStore
 }
 
-func (testTriggerConnectorCompatibility) ConfigureBindingSecret(context.Context, string, string, string, string) error {
+func (testTriggerConnectorLifecycle) ConfigureBindingSecret(context.Context, connectorsmodule.ConfigureBindingSecretCommand) error {
 	return nil
 }
 
-func (c testBindingGrantCompatibility) RevokeBindingGrants(ctx context.Context, workspace, bindingID string) (int, error) {
+func (c testTriggerConnectorLifecycle) RevokeBindingGrants(
+	ctx context.Context,
+	command connectorsmodule.BindingGrantCleanupCommand,
+) (int, error) {
+	return testBindingGrantCleanup(c).RevokeBindingGrants(
+		ctx,
+		command.WorkspaceKey,
+		command.BindingID,
+	)
+}
+
+func (c testBindingGrantCleanup) RevokeBindingGrants(ctx context.Context, workspace, bindingID string) (int, error) {
 	grants, err := c.grants.ListGrantRecordsByBinding(ctx, workspace, bindingID)
 	if err != nil {
 		return 0, err
@@ -672,7 +683,7 @@ func newTestAgentsModule(agentSvc agentcoord.AgentService, st store.Store, hub *
 		bindings := &testBindingOperations{store: st}
 		provisioning := newTestAgentProvisioning(st, bindings)
 		config.Bindings = bindings
-		config.BindingGrants = testBindingGrantCompatibility{grants: st.Connectors()}
+		config.BindingGrants = testBindingGrantCleanup{grants: st.Connectors()}
 		config.Provisioning = provisioning
 		config.ProvisioningAuthority = provisioning
 		config.PrepareWorkflowTarget = testWorkflowTargetPreparation(st)

@@ -133,6 +133,7 @@ func (app *Server) unifiedAgentModuleDeps() UnifiedAgentModuleDeps {
 		DriverRunTokenKey:      app.config.DriverRunTokenKey,
 		DaytonaProvider:        app.config.DaytonaProvider,
 		LocalSettingsDir:       app.config.LocalSettingsDir, Dispatcher: app.connectorDispatcher,
+		ConnectorBindingLifecycle: app.connectorManagement,
 		WorkflowCatalog:           app.config.WorkflowCatalogAPI,
 		WorkflowCatalogAuthoring:  app.config.WorkflowCatalogAuthoring,
 		WorkflowCatalogOperator:   app.config.WorkflowCatalogOperator,

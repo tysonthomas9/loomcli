@@ -41,6 +41,7 @@ type connectorCatalog struct {
 	*connectorStore
 	*connectorGrantStore
 	*connectorAuditStore
+	client *Client
 }
 
 var _ connectorsmodule.ManagementStore = (*connectorCatalog)(nil)
@@ -50,6 +51,7 @@ var _ connectorsmodule.ConnectorGrantStore = (*connectorCatalog)(nil)
 func (c *Client) Connectors() connectorsmodule.ManagementStore {
 	return &connectorCatalog{
 		connectorStore: c.connectors, connectorGrantStore: c.connectorGrants, connectorAuditStore: c.connectorCalls,
+		client: c,
 	}
 }
 
@@ -61,7 +63,28 @@ func (c *Client) ConnectorGrants() connectorsmodule.ConnectorGrantStore {
 	}
 	return &connectorCatalog{
 		connectorStore: c.connectors, connectorGrantStore: c.connectorGrants, connectorAuditStore: c.connectorCalls,
+		client: c,
 	}
+}
+
+func (catalog *connectorCatalog) ConfigureBindingSecretRecord(
+	ctx context.Context,
+	workspace, bindingID, secret string,
+) error {
+	if catalog == nil || catalog.client == nil {
+		return connectorsmodule.ErrUnavailable
+	}
+	var out struct {
+		BindingID string `json:"binding_id"`
+	}
+	path := "/api/v1/" + pathEscape(workspace) + "/trigger-bindings/" + pathEscape(bindingID)
+	if err := catalog.client.do(ctx, "PATCH", path, map[string]any{"webhook_secret": secret}, &out); err != nil {
+		return connectorOwnerError(err)
+	}
+	if out.BindingID != bindingID {
+		return connectorsmodule.ErrInvalidPersistedState
+	}
+	return nil
 }
 
 // --- sentinel remapping ---

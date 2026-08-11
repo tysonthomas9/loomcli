@@ -48,6 +48,7 @@ type GrantCommands interface {
 // surface. Results are transport-neutral owner projections and Connector
 // results never contain inbound secrets or sealed credential bytes.
 type Management interface {
+	BindingLifecycle
 	CreateConnector(context.Context, CreateConnectorCommand) (*Connector, error)
 	RotateConnector(context.Context, RotateConnectorCommand) (*Connector, error)
 	SynchronizeConnectorCredential(context.Context, SynchronizeConnectorCredentialCommand) (*Connector, error)
@@ -57,6 +58,14 @@ type Management interface {
 	RevokeGrant(context.Context, RevokeGrantCommand) error
 	ListGrants(context.Context, ListGrantsQuery) ([]*ConnectorGrant, error)
 	ListCalls(context.Context, ListCallsQuery) ([]*ConnectorCallRecord, error)
+}
+
+// BindingLifecycle owns Connector concerns attached to one Automation binding.
+// Secret material and grant cleanup stay behind this interface; callers never
+// receive the persistence ports or enumerate grant records themselves.
+type BindingLifecycle interface {
+	ConfigureBindingSecret(context.Context, ConfigureBindingSecretCommand) error
+	RevokeBindingGrants(context.Context, BindingGrantCleanupCommand) (int, error)
 }
 
 // Dispatcher is the credential-free public egress API. Implementations own

@@ -236,6 +236,17 @@ type RevokeGrantCommand struct {
 	GrantID      string
 }
 
+type ConfigureBindingSecretCommand struct {
+	WorkspaceKey string
+	BindingID    string
+	Secret       string
+}
+
+type BindingGrantCleanupCommand struct {
+	WorkspaceKey string
+	BindingID    string
+}
+
 type ListGrantsQuery struct {
 	WorkspaceKey string
 	BindingID    string

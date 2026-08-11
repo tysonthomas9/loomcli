@@ -148,7 +148,7 @@ func (m *Module) resolvePromptAgentDriverForCreate(
 	return nil, false
 }
 
-//nolint:funlen // Keep prompt-agent validation, authority resolution, provisioning, and compatibility projection in one compensating transaction.
+//nolint:funlen // Keep prompt-agent validation, authority resolution, provisioning, and response projection in one compensating transaction.
 func (m *Module) createPromptAgent(w http.ResponseWriter, r *http.Request, body []byte) {
 	if m.store == nil || m.provisioning == nil || m.provisioningAuthority == nil {
 		handler.HandleServiceError(w, apperrors.ErrUnavailable("fleet-db store not configured"))

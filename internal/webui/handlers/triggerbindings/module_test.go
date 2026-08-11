@@ -15,6 +15,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/app/workflowbinding"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
@@ -64,7 +65,7 @@ func seededMux(t *testing.T) (*http.ServeMux, store.Store) {
 		CreateWorkflow: createWorkflow,
 		Commands:       automationAPI, Queries: automationAPI, ManualDispatch: automationAPI,
 		OperatorAuthority: testOperatorResolver{}, WorkspaceFromContext: func(context.Context) string { return "WS" },
-		Runs: s.DriverRuns(), Connectors: &testConnectorCompatibility{store: s},
+		Runs: s.DriverRuns(), Connectors: &testConnectorLifecycle{store: s},
 		AgentIdentities: testAgentIdentityChecker{store: s},
 	}).Register(mux)
 	return mux, s
@@ -73,7 +74,7 @@ func seededMux(t *testing.T) (*http.ServeMux, store.Store) {
 func muxWithIdentityChecker(
 	t *testing.T,
 	s store.Store,
-	checker UnattachedBindingIdentityChecker,
+	checker agentsmodule.IdentityQueries,
 ) *http.ServeMux {
 	t.Helper()
 	automationAPI := &testAutomationAPI{store: s}
@@ -88,7 +89,7 @@ func muxWithIdentityChecker(
 		CreateWorkflow: createWorkflow,
 		Commands:       automationAPI, Queries: automationAPI, ManualDispatch: automationAPI,
 		OperatorAuthority: testOperatorResolver{}, WorkspaceFromContext: func(context.Context) string { return "WS" },
-		Runs: s.DriverRuns(), Connectors: &testConnectorCompatibility{store: s},
+		Runs: s.DriverRuns(), Connectors: &testConnectorLifecycle{store: s},
 		AgentIdentities: checker,
 	}).Register(mux)
 	return mux
@@ -117,16 +118,21 @@ type testAgentIdentityChecker struct {
 	store store.Store
 }
 
-func (checker testAgentIdentityChecker) CheckUnattachedBindingID(
+func (checker testAgentIdentityChecker) GetAgent(
 	ctx context.Context,
 	workspace, bindingID string,
-) error {
+) (*agentsmodule.Agent, error) {
 	if _, err := checker.store.AgentServices().Get(ctx, workspace, bindingID); err == nil {
-		return fmt.Errorf("trigger binding identifier %q is already used by a durable agent record: %w", bindingID, automation.ErrConflict)
-	} else if !errors.Is(err, domain.ErrNotFound) {
-		return err
+		return &agentsmodule.Agent{WorkspaceKey: workspace, AgentID: bindingID}, nil
+	} else if errors.Is(err, domain.ErrNotFound) {
+		return nil, agentsmodule.ErrNotFound
+	} else {
+		return nil, err
 	}
-	return nil
+}
+
+func (checker testAgentIdentityChecker) ListAgents(context.Context, string, agentsmodule.AgentFilter) ([]*agentsmodule.Agent, error) {
+	return nil, nil
 }
 
 type postCreateCollisionChecker struct {
@@ -135,10 +141,10 @@ type postCreateCollisionChecker struct {
 	calls int
 }
 
-func (checker *postCreateCollisionChecker) CheckUnattachedBindingID(
+func (checker *postCreateCollisionChecker) GetAgent(
 	ctx context.Context,
 	workspace, bindingID string,
-) error {
+) (*agentsmodule.Agent, error) {
 	checker.mu.Lock()
 	defer checker.mu.Unlock()
 	checker.calls++
@@ -147,10 +153,14 @@ func (checker *postCreateCollisionChecker) CheckUnattachedBindingID(
 			WorkspaceKey: workspace, ServiceID: bindingID, Name: bindingID, RoleName: "review",
 			Kind: domain.AgentServiceKindEvent, DesiredState: domain.AgentServiceDesiredRunning, MaxInstances: 1,
 		}); err != nil {
-			return fmt.Errorf("insert concurrent agent fixture: %w", err)
+			return nil, fmt.Errorf("insert concurrent agent fixture: %w", err)
 		}
 	}
-	return testAgentIdentityChecker{store: checker.store}.CheckUnattachedBindingID(ctx, workspace, bindingID)
+	return testAgentIdentityChecker{store: checker.store}.GetAgent(ctx, workspace, bindingID)
+}
+
+func (checker *postCreateCollisionChecker) ListAgents(context.Context, string, agentsmodule.AgentFilter) ([]*agentsmodule.Agent, error) {
+	return nil, nil
 }
 
 func (checker *postCreateCollisionChecker) callCount() int {
@@ -363,24 +373,24 @@ func mapTestAutomationError(err error) error {
 	}
 }
 
-type testConnectorCompatibility struct {
+type testConnectorLifecycle struct {
 	store   store.Store
 	mu      sync.Mutex
 	secrets map[string]string
 }
 
-func (c *testConnectorCompatibility) ConfigureBindingSecret(_ context.Context, workspace, bindingID, _ string, secret string) error {
+func (c *testConnectorLifecycle) ConfigureBindingSecret(_ context.Context, command connectorsmodule.ConfigureBindingSecretCommand) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.secrets == nil {
 		c.secrets = make(map[string]string)
 	}
-	c.secrets[workspace+"/"+bindingID] = secret
+	c.secrets[command.WorkspaceKey+"/"+command.BindingID] = command.Secret
 	return nil
 }
 
-func (c *testConnectorCompatibility) RevokeBindingGrants(ctx context.Context, workspace, bindingID string) (int, error) {
-	grants, err := c.store.Connectors().ListGrantRecordsByBinding(ctx, workspace, bindingID)
+func (c *testConnectorLifecycle) RevokeBindingGrants(ctx context.Context, command connectorsmodule.BindingGrantCleanupCommand) (int, error) {
+	grants, err := c.store.Connectors().ListGrantRecordsByBinding(ctx, command.WorkspaceKey, command.BindingID)
 	if err != nil {
 		return 0, err
 	}
@@ -389,7 +399,7 @@ func (c *testConnectorCompatibility) RevokeBindingGrants(ctx context.Context, wo
 		if grant == nil {
 			continue
 		}
-		if err := c.store.Connectors().RevokeGrantRecord(ctx, workspace, grant.GrantID); err != nil {
+		if err := c.store.Connectors().RevokeGrantRecord(ctx, command.WorkspaceKey, grant.GrantID); err != nil {
 			if errors.Is(err, connectorsmodule.ErrGrantRevoked) {
 				continue
 			}
@@ -728,7 +738,7 @@ func TestCreateBinding_EnsureResolvesWorkflowBeforeReusingBinding(t *testing.T) 
 		CreateWorkflow: createWorkflow,
 		Commands:       automationAPI, Queries: automationAPI, ManualDispatch: automationAPI,
 		OperatorAuthority: testOperatorResolver{}, WorkspaceFromContext: func(context.Context) string { return "WS" },
-		Runs: st.DriverRuns(), Connectors: &testConnectorCompatibility{store: st},
+		Runs: st.DriverRuns(), Connectors: &testConnectorLifecycle{store: st},
 		AgentIdentities: testAgentIdentityChecker{store: st},
 	}).Register(mux)
 
@@ -794,7 +804,7 @@ func TestCreateBinding_WorkflowTargetFreshStoreReturns201Then200(t *testing.T) {
 		CreateWorkflow: createWorkflow,
 		Commands:       automationAPI, Queries: automationAPI, ManualDispatch: automationAPI,
 		OperatorAuthority: testOperatorResolver{}, WorkspaceFromContext: func(context.Context) string { return "WS" },
-		Runs: st.DriverRuns(), Connectors: &testConnectorCompatibility{store: st},
+		Runs: st.DriverRuns(), Connectors: &testConnectorLifecycle{store: st},
 		AgentIdentities: testAgentIdentityChecker{store: st},
 	}).Register(mux)
 	body := `{"workflow":"github-review-agent","source_kind":"cron","schedule":"*/10 * * * *","binding_id":"fresh-review","enabled":true}`

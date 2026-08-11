@@ -56,6 +56,15 @@ func connectorTestServer(t *testing.T) *httptest.Server {
 	}
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/WS/trigger-bindings/binding-1":
+			var req struct {
+				WebhookSecret string `json:"webhook_secret"`
+			}
+			decodeJSONBody(t, r, &req)
+			if req.WebhookSecret != "binding-secret" {
+				t.Errorf("configure binding secret = %q", req.WebhookSecret)
+			}
+			writeJSON(t, w, map[string]any{"binding_id": "binding-1"})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/WS/connectors":
 			var req struct {
 				ConnectorID              string `json:"connector_id"`
@@ -207,6 +216,14 @@ func TestConnectorClientConnectorRoutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 6, 12, 10, 0, 0, 0, time.UTC)
+	if err := client.Connectors().ConfigureBindingSecretRecord(
+		t.Context(),
+		"WS",
+		"binding-1",
+		"binding-secret",
+	); err != nil {
+		t.Fatalf("ConfigureBindingSecretRecord: %v", err)
+	}
 
 	created, err := client.Connectors().CreateConnectorRecord(t.Context(), connectorsmodule.CreateConnectorMutation{
 		WorkspaceKey:             "WS",

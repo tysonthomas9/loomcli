@@ -7,6 +7,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/app/webhookingestion"
 	"github.com/tysonthomas9/loomcli/internal/app/workflowbinding"
 	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
@@ -32,16 +33,15 @@ type automationRouteCapabilities struct {
 	AutomationOperator workflowcataloghttp.OperatorAuthorityResolver
 }
 
-// Deps contains the Automation-owned workflows and narrow legacy ports needed
-// to compose webhook ingestion and trigger bindings.
+// Deps contains the owner interfaces needed to compose webhook ingestion and
+// trigger bindings.
 type automationRouteDeps struct {
 	Capabilities    automationRouteCapabilities
 	Awaits          store.AwaitStore
 	DriverRuns      store.DriverRunStore
 	AwaitResolver   store.AtomicAwaitStore
-	TriggerBindings store.TriggerBindingStore
-	Connectors      connectorsmodule.ManagementStore
-	AgentServices   store.AgentServiceStore
+	Connectors      connectorsmodule.BindingLifecycle
+	AgentIdentities agents.IdentityQueries
 }
 
 // eventAwaitDispatcher is the shared post-admission await notification seam.
@@ -49,10 +49,22 @@ type eventAwaitDispatcher interface {
 	Dispatch(context.Context, string, trigger.AwaitDispatchEvent) (*trigger.AwaitDispatchResult, error)
 }
 
-// bindingGrantCompatibility is the connector cleanup seam shared with agent
-// deletion while Connectors remains a later migration phase.
-type bindingGrantCompatibility interface {
+type bindingGrantCleanup interface {
 	RevokeBindingGrants(context.Context, string, string) (int, error)
+}
+
+type connectorBindingGrantCleanup struct {
+	lifecycle connectorsmodule.BindingLifecycle
+}
+
+func (cleanup connectorBindingGrantCleanup) RevokeBindingGrants(
+	ctx context.Context,
+	workspace, bindingID string,
+) (int, error) {
+	return cleanup.lifecycle.RevokeBindingGrants(ctx, connectorsmodule.BindingGrantCleanupCommand{
+		WorkspaceKey: workspace,
+		BindingID:    bindingID,
+	})
 }
 
 // Modules names each route group so the parent composition can preserve the
@@ -61,7 +73,7 @@ type automationRouteModules struct {
 	Webhooks             automationRouteModule
 	TriggerBindings      automationRouteModule
 	EventAwaits          eventAwaitDispatcher
-	BindingGrants        bindingGrantCompatibility
+	BindingGrants        bindingGrantCleanup
 	WorkspaceFromContext func(context.Context) string
 }
 
@@ -71,9 +83,10 @@ func newAutomationRouteModules(deps automationRouteDeps) automationRouteModules 
 	if deps.Awaits != nil && deps.DriverRuns != nil && deps.AwaitResolver != nil {
 		eventAwaits = trigger.NewAwaitMatcherWithResolver(deps.Awaits, deps.DriverRuns, deps.AwaitResolver)
 	}
-	connectorCompatibility := newStoreConnectorCompatibility(deps.TriggerBindings, deps.Connectors)
-	agentIdentityCompatibility := newStoreAgentIdentityCompatibility(deps.AgentServices)
-
+	var grantCleanup bindingGrantCleanup
+	if deps.Connectors != nil {
+		grantCleanup = connectorBindingGrantCleanup{lifecycle: deps.Connectors}
+	}
 	return automationRouteModules{
 		Webhooks: webhooks.New(webhooks.Config{
 			Workflow:   deps.Capabilities.AutomationWebhook,
@@ -86,10 +99,10 @@ func newAutomationRouteModules(deps automationRouteDeps) automationRouteModules 
 			ManualDispatch:       deps.Capabilities.AutomationBindings,
 			OperatorAuthority:    deps.Capabilities.AutomationOperator,
 			WorkspaceFromContext: middleware.WorkspaceFromContext, Runs: deps.DriverRuns,
-			Connectors: connectorCompatibility, AgentIdentities: agentIdentityCompatibility,
+			Connectors: deps.Connectors, AgentIdentities: deps.AgentIdentities,
 		}),
 		EventAwaits:          eventAwaits,
-		BindingGrants:        connectorCompatibility,
+		BindingGrants:        grantCleanup,
 		WorkspaceFromContext: middleware.WorkspaceFromContext,
 	}
 }
