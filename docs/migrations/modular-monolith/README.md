@@ -1,7 +1,7 @@
 # Modular Monolith Migration
 
-- **Status:** Phase 9 package consolidation in progress; its first ten slices
-  ratchet the modular monolith to 182 production packages
+- **Status:** Phase 9 package consolidation in progress; its first eleven
+  slices ratchet the modular monolith to 181 production packages
 - **Date:** 2026-08-10
 - **Scope:** `loom serve`, the operator CLI entry surfaces, the Vite frontend counterpart, and the fleet-db contracts those capabilities depend on
 - **Provenance:** [Phase 0 integration baseline](00-phase-0-baseline.md), final [Phase 1 evidence](06-phase-1-decisions-and-evidence.md) at Loom `7e8a6dd2`, [Phase 2 evidence](07-phase-2-decisions-and-evidence.md) at Loom `84cccb761` with FleetDB `430dce8d9`, [Phase 3 evidence](08-phase-3-decisions-and-evidence.md) at core implementation commits Loom `7f95b9bf1` and FleetDB `f1c4e1119`, final [Phase 4 evidence](09-phase-4-decisions-and-evidence.md) at Loom `53cbe2577` with FleetDB `afb688768`, and the appended reliability-validation record at Loom `67c45972f` with FleetDB `9ffa69f60`
@@ -242,10 +242,17 @@ shapes, injects a two-method Workspace query port, and composes Connector
 dispatch, management, and credential sealing once at the application root. It
 physically deletes the old positional constructor and forwarding-only route
 composition function, lowers live handler imports from 22 to 19, and tightens
-PR-review import fanout from 18 to 15. Package shape remains 182 production
-packages while the remaining waves delete the other horizontal handler/store
-edges and residual shallow packages; an empty capability-graph `legacy_paths`
-list alone is not completion proof. See the
+PR-review import fanout from 18 to 15. Wave 9.11 then absorbs the sole live
+runtime-preflight policy into its Workflows consumer, injects backend readiness
+through a consumer-owned port, deletes the horizontal package and global test
+hook, and ratchets the exact shape to 181 production packages, 166 packages
+outside modules, 61 one-file packages, and 82 one-or-two-file packages. The
+session-store facade remains a known migration target only because bypassing it
+would create 24 forbidden direct persistence writes; the later deletion wave
+must migrate the complete port and remove the facade together. The remaining
+waves delete the other horizontal handler/store edges and residual shallow
+packages; an empty capability-graph `legacy_paths` list alone is not completion
+proof. See the
 [Phase 9 plan](16-phase-9-package-consolidation.md).
 
 ## Approved architecture decisions

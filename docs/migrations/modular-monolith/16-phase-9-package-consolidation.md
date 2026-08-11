@@ -12,6 +12,7 @@
 - **Wave 9.8 implementation:** `3fdcd3669`
 - **Wave 9.9 implementation:** `520e8a9f8`
 - **Wave 9.10 implementation:** `97df6fd92`
+- **Wave 9.11 implementation:** `9e0306f37`
 - **Stacked branches:** `modular-monolith-phase9-01-types-ratchet`, then
   `modular-monolith-phase9-02-shallow-seams`, then
   `modular-monolith-phase9-03-legacy-planes`, then
@@ -21,7 +22,8 @@
   `modular-monolith-phase9-07-legacy-runtime`, then
   `modular-monolith-phase9-08-driver-auth`, then
   `modular-monolith-phase9-09-handler-ports`, then
-  `modular-monolith-phase9-10-prreview-ports`
+  `modular-monolith-phase9-10-prreview-ports`, then
+  `modular-monolith-phase9-11-shallow-runtime`
 - **Purpose:** Reduce the residual package surface toward 160 production Go
   packages without weakening capability ownership, consumer-owned ports, or
   independently replaceable adapters.
@@ -538,6 +540,58 @@ The first aggregate attempt failed closed because its exact import-fanout
 exceptions still recorded the pre-change values. Tightening app `41 -> 40` and
 PR-review `18 -> 15` made the focused fanout check and uninterrupted aggregate
 rerun pass. No threshold was raised and no exception was added.
+
+## Wave 9.11 result
+
+The eleventh slice deletes the horizontal `internal/runtimepreflight` package
+and moves its sole live policy into the Workflows HTTP delivery adapter that
+decides whether an epic workflow may enqueue the local task runner. The
+Workflows adapter owns a narrow `BackendHealthQuery` port and its readiness
+projection. Serve composition maps the existing backend operations result into
+that consumer-owned model; Workflows does not import CLI packages or the
+operations model.
+
+The deleted package's global test hook and package-wide `TestMain` health stub
+are also gone. Tests inject the Workflows port per module, and production fails
+closed when composition omits it, when the selected provider is unknown, when
+its CLI is absent, or when authentication is missing. The configured local
+runtime provider remains authoritative, with Codex as the ordinary default;
+explicit non-local runners bypass this local-only gate.
+
+The exact package shape moves from 182 to 181 production packages. Module
+packages remain 15, packages outside `internal/modules` fall from 167 to 166,
+one-file packages fall from 62 to 61, and one-or-two-file packages fall from 83
+to 82. Direct persistence remains exactly 93 rows across 102 sites, and the
+live legacy-handler allowance remains 19. `internal/runtimepreflight` is now a
+retired root, so neither recreating it nor importing it can pass architecture
+validation.
+
+`internal/infra/sessionstoreadapter` was evaluated in the same slice but was
+not mechanically bypassed. That experiment exposed 24 direct session-store
+writes outside the permitted ownership boundary. The change was discarded
+rather than replacing a facade with direct persistence. Its deletion requires
+a complete local-session port migration in a later wave, followed by physical
+removal of the adapter in that same wave; it is not an accepted compatibility
+layer in the Phase 9 target.
+
+## Wave 9.11 validation
+
+| Check | Result |
+|---|---|
+| Workflows preflight behavior, composition adapter, exact package shape, retired root, direct-write policy, import fanout, and all-`internal` compilation | PASS |
+| Lint, dependency guard, and control-plane topology guard | PASS: zero issues; exact fanout restored without raising an exception |
+| Authoritative repository architecture snapshot | PASS in 413.79s at the final implementation tree |
+| Aggregate `make gate` against FleetDB `b71dec551` | PASS: all Go and frontend quality gates with `GOMAXPROCS=4`, two Go test workers, one Vitest worker, and a 3 GiB Go soft memory limit |
+
+The aggregate proof required environment corrections but no source correction:
+the first invocation omitted the temporary Go build cache, the second selected
+an empty module cache while network access was unavailable, and the third
+sandboxed invocation reached architecture step 8 before its RSS monitor was
+denied `/bin/ps`. The final approved invocation reused the populated module
+cache, placed build output under `/tmp`, allowed the bounded RSS monitor, and
+passed uninterrupted. An earlier direct WebUI-to-CLI health import was also
+rejected by the dependency guard; the final tree uses the consumer-owned port
+and composition adapter described above.
 
 Later waves must update this document with the selected package candidates,
 the boundary reason retained or removed for each, exact shape changes, and
