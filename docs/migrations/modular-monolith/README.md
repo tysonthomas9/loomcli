@@ -318,8 +318,15 @@ consume exact read ports backed by the existing WebUI read-projection module;
 there is no handler fallback to the removed persistence paths. The live handler
 allowance falls from 19 to 17, while the exact package shape becomes
 `167 / 15 / 152 / 46 / 68` because `readprojection` is no longer a one-file
-package. Direct persistence remains `86 / 95`. The remaining waves delete the
-other horizontal handler/store edges and residual shallow
+package. Direct persistence remains `86 / 95`. Wave 9.23 then deletes the
+TriggerBinding secret plane across FleetDB and Loom. Connectors becomes the
+sole inbound-signing authority, the verifier consumes a narrow Automation
+route query and fails closed without a Connector, and the old field, route,
+permission, persistence column, CLI flag, compatibility verifier, and fallback
+resolver are absent. The handler allowance falls again to 16 and FleetDB
+client call sites fall from 238 to 236 without changing package shape or
+direct-write counts. The remaining waves delete the other horizontal
+handler/store edges and residual shallow
 packages; an empty
 capability-graph `legacy_paths` list alone is not completion proof. See the
 [Phase 9 plan](16-phase-9-package-consolidation.md).

@@ -1086,6 +1086,47 @@ The implementation review found that the new binding-history projection made
 then both the repository-scale architecture transaction and aggregate paired
 gate were rerun at the amended implementation head. No allowance was widened.
 
+## Wave 9.23 result
+
+The twenty-third slice deletes the executable TriggerBinding secret
+compatibility plane across both repositories. A trigger binding no longer
+accepts, stores, patches, redacts, resolves, or authorizes a webhook signing
+secret. FleetDB removes the field from its public model, OpenAPI contract,
+permission set, Redis/Lua persistence, Postgres reads and writes, and agent
+provisioning snapshots. Migration 081 drops the live Postgres column; the
+historical migration that introduced it remains immutable migration history,
+not an executable compatibility path. The retired create field is rejected and
+the retired secret endpoint returns 404.
+
+Connectors is now the only owner of inbound signing material. Loom's webhook
+verifier resolves the exact enabled route through a consumer-owned Automation
+query port and resolves current or in-window previous secrets through the
+Connectors secret source. A missing, disabled, deleted, ambiguous, or
+unsupported route/connector fails closed with the same 401 as a bad signature.
+There is no binding-secret fallback. Trigger-management JSON and CLI creation
+also drop `secret` and `--secret`; callers provision a Connector independently
+from the Automation binding.
+
+This is complete-plane deletion rather than package deletion. Exact package
+shape remains `167 / 15 / 152 / 46 / 68`, and direct persistence remains
+`86 / 95`. Removing the webhook handler's Store dependency lowers the live
+handler-import allowance from 17 to 16. Removing the FleetDB secret resolve and
+binding-secret update calls lowers the exact client call-site ratchet from 238
+to 236. No replacement facade, alias, dual-write, compatibility constructor, or
+fallback resolver is retained. The Loom implementation is `ce388df2d`; its
+paired FleetDB contract and migration implementation is `9c1859a`.
+
+## Wave 9.23 validation
+
+| Check | Result |
+|---|---|
+| FleetDB focused API, storage, authorization, and migration suites | PASS: retired field rejected, retired endpoint 404, migration 081 present, and both storage implementations compile and pass focused behavior tests |
+| Loom Automation, Connectors, verifier, trigger-management, composition, CLI, memstore, and FleetDB adapter suites | PASS, including build-tagged webhook E2E compilation |
+| Retired production symbols and exact contract snapshot | PASS: no binding secret field, resolver, endpoint, permission, CLI flag, compatibility verifier, or fallback remains; Loom's vendored OpenAPI is byte-identical to the paired FleetDB source |
+| Measured architecture guard | PASS: 11/11 profiles, 10 capability roots, 16 live legacy-handler allowances, 86 direct-write rows, zero pending decisions, and 1,198.8 MiB peak process-tree RSS under 2,048 MiB |
+| FleetDB aggregate `make gate` at `9c1859a` | PASS: static analysis, race/coverage, Redis and Postgres integration, migration/storage contracts, 80.8% total coverage, all 28 measured packages above the 50% floor, container E2E, crash/recovery, and harness evaluation against the explicit active Podman socket |
+| Loom aggregate `make gate` at `ce388df2d` against FleetDB `9c1859a` | PASS: all Go and frontend quality gates with byte-identical OpenAPI SHA-256 `54a75342…65733`, exact companion binary SHA-256 `8f963829…7c0f0`, `GOMAXPROCS=4`, one Go test worker, two Vitest workers, and a 3 GiB Go soft memory limit |
+
 Later waves must update this document with the selected package candidates,
 the boundary reason retained or removed for each, exact shape changes, and
 same-head evidence.
