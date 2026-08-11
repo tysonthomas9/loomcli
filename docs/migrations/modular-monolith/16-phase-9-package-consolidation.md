@@ -20,6 +20,7 @@
 - **Wave 9.16 implementation:** `4c82d3781`
 - **Wave 9.17 implementation:** `92eeb4423`
 - **Wave 9.18 implementation:** `7c179fada`
+- **Wave 9.19 implementation:** `c412c3f61`
 - **Stacked branches:** `modular-monolith-phase9-01-types-ratchet`, then
   `modular-monolith-phase9-02-shallow-seams`, then
   `modular-monolith-phase9-03-legacy-planes`, then
@@ -37,7 +38,8 @@
   `modular-monolith-phase9-15-native-parser-ownership`, then
   `modular-monolith-phase9-16-local-session-archive`, then
   `modular-monolith-phase9-17-durable-terminal-launch`, then
-  `modular-monolith-phase9-18-driver-run-contract`
+  `modular-monolith-phase9-18-driver-run-contract`, then
+  `modular-monolith-phase9-19-local-node-state`
 - **Purpose:** Reduce the residual package surface toward 160 production Go
   packages without weakening capability ownership, consumer-owned ports, or
   independently replaceable adapters.
@@ -905,6 +907,38 @@ default ceiling of 18, so its exact exception is deleted rather than lowered.
 The first aggregate attempt exposed the now-stale Driver fanout exception. The
 exception row was physically deleted, the focused guard passed at the normal
 threshold, and the unchanged full paired gate then passed.
+
+## Wave 9.19 result
+
+The nineteenth slice deletes `internal/localnodeconfig`, a 42-line wrapper
+whose only storage operations delegated directly to Bootstrap's state cache.
+Bootstrap now exposes the machine-local runtime-provider read and atomic update
+alongside the `WorkspaceLocalState.DefaultRuntimeProvider` field and transaction
+it already owns. CLI, Driver, workflow preflight, terminal launch, workspace
+coordination, and WebUI projections call that owner directly.
+
+This does not move machine-local configuration into FleetDB or a capability
+domain. Runtime-provider selection remains per-machine state in
+`~/.loom/state.json`; the change only removes a false module boundary around
+the existing adapter. Owner-level tests prove normalized round trips, blank-key
+rejection, and preservation of unrelated workspace checkout and repository
+state. The deleted root is guarded against return.
+
+The exact package shape moves from 170 to 169 production packages. Module
+packages remain 15, packages outside `internal/modules` fall from 155 to 154,
+one-file packages fall from 50 to 49, and one-or-two-file packages fall from 71
+to 70.
+
+## Wave 9.19 validation
+
+| Check | Result |
+|---|---|
+| Bootstrap state-cache behavior | PASS: runtime-provider normalization, atomic round trip, blank-key rejection, and unrelated local-state preservation |
+| Migrated consumers | PASS: CLI config, Driver, WebUI store adapter, workflow preflight, terminal launch, and workspace coordination complete suites |
+| All production `internal/...` packages | PASS: every package compiled after deleting the wrapper |
+| Retired root, exact package shape, import fanout, and affected lint | PASS: shape `169 / 15 / 154 / 49 / 70`; zero affected lint issues |
+| Authoritative repository architecture snapshot | PASS in 390.489s at implementation `c412c3f61` |
+| Aggregate `make gate` against FleetDB `b71dec551` | PASS: Go, frontend, race, coverage, dependency, contract, architecture, and build gates with the matching `816b0b0c…7ef0` OpenAPI snapshot and bounded workers/memory |
 
 Later waves must update this document with the selected package candidates,
 the boundary reason retained or removed for each, exact shape changes, and
