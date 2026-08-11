@@ -138,31 +138,14 @@ func runTaskDaemon(deps *cli.Deps, worktreePath, agentName string) {
 	// carried forward in the lock instead of cold-starting (guarded). Done BEFORE
 	// building the prompt so it can skip the redundant checkpoint context.
 	maybeResumeDaemonSession(worktreePath, assignedTaskID)
-	// Record the assigned task on the worktree lock (AFTER the resume decision)
-	// so a crash leaves a resumable remnant for the next restart's
+	// Record the assigned task after resume selection so a crash leaves a remnant for the next restart's
 	// detectRecovery — the agent's own `loom claim` is CWD-dependent and can't be
 	// relied on to set this.
 	persistAssignedTaskToLock(worktreePath, assignedTaskID)
 
-	ws, _ := config.ResolveActiveWorkspace()
-	prompt := GenerateTaskPrompt(agentName, ws, taskParentID, cli.GetBackendName())
-	var deliveryPlan taskdelivery.Plan
-	if assignedTaskID != "" {
-		var deliveryErr error
-		deliveryPlan, deliveryErr = resolveDaemonTaskDelivery(cmdstore.RootContext(), deps.IssueBackend, assignedTaskID)
-		if deliveryErr != nil {
-			fmt.Fprintf(os.Stderr, "Error: resolve task delivery: %v\n", deliveryErr)
-			cli.ExitWithFlush(1)
-			return
-		}
-		prompt = GenerateFleetTaskPromptForHostDelivery(agentName, assignedTaskID, ws, cli.GetBackendName(), deliveryPlan.Requirement)
-	}
+	prompt, deliveryPlan := mustResolveDaemonTaskPrompt(deps.IssueBackend, agentName, assignedTaskID)
 	sess := adoptOrCreateSession(agentName, taskParentID, prompt, "implementation")
-	if sess != nil && deliveryPlan.PlanID != "" {
-		sess.Meta.TaskDeliveryPlanID = deliveryPlan.PlanID
-		sess.Meta.TaskDeliveryRequirement = string(deliveryPlan.Requirement)
-		sess.Meta.TaskDeliveryPolicySource = string(deliveryPlan.PolicySource)
-	}
+	recordTaskDeliveryPlan(sess, deliveryPlan)
 
 	emitTaskClaimedFromEnv(agentName, assignedTaskID)
 
