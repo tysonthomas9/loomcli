@@ -49,6 +49,24 @@ jobs:
           path: fleet-db
           token: ${{ secrets.FLEET_DB_TOKEN || github.token }}
 
+      - name: Read pinned flue commit
+        id: flue-pin
+        run: |
+          set -euo pipefail
+          sha="$(tr -d '[:space:]' < internal/workflows/FLUE_COMMIT)"
+          if ! printf '%s' "$sha" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "ERROR: FLUE_COMMIT is not a 40-char hex SHA: '$sha'" >&2
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout pinned flue workflow toolchain
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.FLUE_REPOSITORY || 'withastro/flue' }}
+          ref: ${{ steps.flue-pin.outputs.sha }}
+          path: flue
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -57,7 +75,12 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: '11.1.1'
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -75,6 +98,9 @@ jobs:
       - name: Install desktop deps
         run: cd desktop && npm ci
 
+      - name: Build pinned Flue workflow toolchain
+        run: cd flue && pnpm install --frozen-lockfile && pnpm --filter @flue/runtime --filter @flue/cli build
+
       - name: Write App Store Connect API key
         env:
           APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
@@ -88,6 +114,9 @@ jobs:
         env:
           # Sidecar build: point prepare-sidecar.sh at the fleet-db checkout.
           FLEET_DB_REPO: ${{ github.workspace }}/fleet-db
+          # Built-in workflows are compiled once into app resources so the
+          # installed desktop does not need a source checkout or Flue compiler.
+          FLUE_REPO: ${{ github.workspace }}/flue
           # Code signing (imported into a temp keychain by tauri-action).
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}

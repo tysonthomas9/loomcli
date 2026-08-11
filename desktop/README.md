@@ -67,7 +67,11 @@ The Tauri config runs `scripts/prepare-sidecar.sh` before dev/build. That script
 builds the web UI into `src-tauri/resources/webui`, builds `../cmd/loom` into
 `src-tauri/binaries/loom-<target-triple>`, and, when the sibling FleetDB repo is
 available, builds `src-tauri/binaries/fleet-db-<target-triple>`. The
-`loom local service` entrypoint discovers the bundled FleetDB sibling and web UI
+script also builds the pinned built-in Flue workflows into app resources. Set
+`FLUE_REPO` to a checkout at `internal/workflows/FLUE_COMMIT` with the Flue CLI
+and runtime already built. Shipping prebuilt workflow artifacts keeps the
+installed app independent of a Loom source checkout or a runtime Flue compiler.
+The `loom local service` entrypoint discovers the bundled FleetDB sibling and web UI
 resources, then sets `FLEET_DB_BIN` and `LOOM_FRONTEND_DIR` for the local
 `loom serve` process.
 
