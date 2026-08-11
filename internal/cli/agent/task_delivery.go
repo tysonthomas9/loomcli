@@ -9,10 +9,42 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
+	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/taskdelivery"
 )
+
+func resolveDaemonTaskPrompt(ctx context.Context, issues backend.IssueBackend, agentName, taskID string, ws *config.WorkspaceConfig, backendName string) (string, taskdelivery.Plan, error) {
+	if taskID == "" {
+		return GenerateTaskPrompt(agentName, ws, taskParentID, backendName), taskdelivery.Plan{}, nil
+	}
+	plan, err := resolveDaemonTaskDelivery(ctx, issues, taskID)
+	if err != nil {
+		return "", taskdelivery.Plan{}, err
+	}
+	return GenerateFleetTaskPromptForHostDelivery(agentName, taskID, ws, backendName, plan.Requirement), plan, nil
+}
+
+func mustResolveDaemonTaskPrompt(issues backend.IssueBackend, agentName, taskID string) (string, taskdelivery.Plan) {
+	ws, _ := config.ResolveActiveWorkspace()
+	prompt, plan, err := resolveDaemonTaskPrompt(cmdstore.RootContext(), issues, agentName, taskID, ws, cli.GetBackendName())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: resolve task delivery: %v\n", err)
+		cli.ExitWithFlush(1)
+	}
+	return prompt, plan
+}
+
+func recordTaskDeliveryPlan(session *sessions.Session, plan taskdelivery.Plan) {
+	if session == nil || plan.PlanID == "" {
+		return
+	}
+	session.Meta.TaskDeliveryPlanID = plan.PlanID
+	session.Meta.TaskDeliveryRequirement = string(plan.Requirement)
+	session.Meta.TaskDeliveryPolicySource = string(plan.PolicySource)
+}
 
 func resolveDaemonTaskDelivery(ctx context.Context, issues backend.IssueBackend, taskID string) (taskdelivery.Plan, error) {
 	handle, err := cmdstore.OpenStore(ctx)
