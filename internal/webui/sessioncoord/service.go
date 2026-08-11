@@ -12,7 +12,6 @@ import (
 	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
-	"github.com/tysonthomas9/loomcli/internal/sessions/transcript/backends"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
@@ -801,7 +800,7 @@ func (s *sessionServiceImpl) GetSessionSubagentTranscript(ctx context.Context, w
 		}
 		return nil, apperrors.ErrInternal("stat subagent transcript", statErr)
 	}
-	events, parseErr := backends.ParseEventsFromFile(meta.Backend, path)
+	events, parseErr := sessions.ParseNativeEventsFromFile(meta.Backend, path)
 	if parseErr != nil {
 		return nil, apperrors.ErrInternal("parse subagent transcript", parseErr)
 	}

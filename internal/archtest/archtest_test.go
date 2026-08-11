@@ -692,6 +692,8 @@ func TestRetiredHorizontalRootsCannotReturn(t *testing.T) {
 		"internal/pathsec",
 		"internal/runtimectx",
 		"internal/runtimepreflight",
+		"internal/sessions/transcript/backends",
+		"internal/sessions/transcript/codex",
 		"internal/stacklineage",
 		"internal/stackpublish",
 		"internal/stackstore",

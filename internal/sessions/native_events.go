@@ -5,9 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
+	hwcodex "github.com/olesho/harness-wrapper/pkg/transcript/codex"
+
+	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
-	"github.com/tysonthomas9/loomcli/internal/sessions/transcript/backends"
+	"github.com/tysonthomas9/loomcli/internal/sessions/transcript/claude"
+	"github.com/tysonthomas9/loomcli/internal/sessions/transcript/opencode"
 )
 
 // LoadNativeEvents parses a session's captured native transcript into the
@@ -15,8 +20,8 @@ import (
 // session's metadata.json so callers don't need to know the format up front.
 //
 // Returns (nil, nil) if the session has no native transcript yet (e.g., the
-// first hook hasn't fired). Returns an error only for I/O failures or
-// malformed metadata.
+// first hook hasn't fired). Returns an error for I/O failures, malformed
+// metadata, or an unsupported recorded backend.
 func (s *Store) LoadNativeEvents(sessionID string) ([]transcript.Event, error) {
 	_, span := startSpan(s.ctx, "service.Sessions.LoadNativeEvents",
 		attrLoomSessionID(sessionID),
@@ -51,12 +56,55 @@ func (s *Store) LoadNativeEvents(sessionID string) ([]transcript.Event, error) {
 		span.SetAttributes(attrResultCount(len(events)))
 		return events, nil
 	}
-	events, err := backends.ParseEvents(meta.Backend, data)
+	events, err := parseNativeEvents(meta.Backend, data)
 	if err != nil {
 		recordErr(span, err)
 		return events, err
 	}
 	span.SetAttributes(attrResultCount(len(events)))
+	return events, nil
+}
+
+// ParseNativeEventsFromFile reads and parses a raw backend transcript. A
+// missing file has no events; an unknown backend fails closed instead of
+// guessing a wire format.
+func ParseNativeEventsFromFile(backend, path string) ([]transcript.Event, error) {
+	data, err := os.ReadFile(path) //nolint:gosec // caller supplies a session-owned transcript path
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read native transcript: %w", err)
+	}
+	return parseNativeEvents(backend, data)
+}
+
+func parseNativeEvents(backend string, data []byte) ([]transcript.Event, error) {
+	if len(data) == 0 {
+		return nil, nil
+	}
+	backend = strings.TrimSpace(backend)
+	switch backend {
+	case platformruntime.ProviderClaude:
+		return claude.Events(data)
+	case platformruntime.ProviderCodex:
+		return parseCodexEvents(data)
+	case platformruntime.ProviderOpenCode:
+		return opencode.Events(data)
+	default:
+		return nil, fmt.Errorf("unsupported native transcript backend %q", backend)
+	}
+}
+
+func parseCodexEvents(data []byte) ([]transcript.Event, error) {
+	wrapperEvents, err := hwcodex.Events(data)
+	if err != nil {
+		return nil, fmt.Errorf("parse Codex transcript: %w", err)
+	}
+	events := make([]transcript.Event, len(wrapperEvents))
+	for index, event := range wrapperEvents {
+		events[index] = transcript.FromWrapper(event)
+	}
 	return events, nil
 }
 
