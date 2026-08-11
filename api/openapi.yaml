@@ -497,6 +497,33 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/workspaces/{ws}/config/task-delivery:
+    patch:
+      operationId: patchWorkspaceTaskDelivery
+      tags: [config]
+      summary: Set the workspace task delivery requirement or a repository override
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkspaceTaskDeliveryPatchRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "400":
+          description: Invalid task delivery requirement
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/workspaces/{ws}/readyz:
     get:
       operationId: getWorkspaceRuntimeReady
@@ -5491,6 +5518,9 @@ components:
         design_format:
           type: string
           enum: [markdown, html]
+        task_delivery_requirement:
+          type: string
+          enum: [working_copy, pull_request]
 
     WorkspaceSummary:
       type: object
@@ -5527,6 +5557,9 @@ components:
           type: string
         source_repo_id:
           type: string
+        task_delivery_requirement:
+          type: string
+          enum: [working_copy, pull_request]
         groups:
           type: array
           items:
@@ -5573,6 +5606,18 @@ components:
         design_format:
           type: string
           enum: [markdown, html]
+
+    WorkspaceTaskDeliveryPatchRequest:
+      type: object
+      required: [task_delivery_requirement]
+      properties:
+        repository:
+          type: string
+          description: Repository name. Omit to update the workspace requirement.
+        task_delivery_requirement:
+          type: string
+          enum: [working_copy, pull_request, ""]
+          description: Empty is only valid for a repository and clears its override.
 
     # ── Config Schemas ──────────────────────────────────────────────────
     BackendConfigResponse:

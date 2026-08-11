@@ -16,10 +16,12 @@ import {
   useBackendConfig,
   useBackends,
   useLocalSettings,
+  useTaskDeliveryPolicy,
   useWorkspaceDesignFormat,
   useWorkspaceContext,
 } from "@/hooks/workspace";
 import type { BackendInfo } from "@/utils/workspace";
+import type { TaskDeliveryRequirement } from "@/api/workspace";
 import {
   useTerminalFont,
   FONT_FAMILY_OPTIONS,
@@ -106,6 +108,16 @@ export function SettingsView({
   );
   const { isSaving: isSavingDesignFormat, updateDesignFormat } =
     useWorkspaceDesignFormat();
+  const persistedTaskDelivery =
+    workspace?.task_delivery_requirement ?? "working_copy";
+  const [taskDelivery, setTaskDelivery] = useState<TaskDeliveryRequirement>(
+    persistedTaskDelivery,
+  );
+  const [repoTaskDelivery, setRepoTaskDelivery] = useState<
+    Record<string, TaskDeliveryRequirement | "">
+  >({});
+  const { savingScope: savingTaskDeliveryScope, updateRequirement } =
+    useTaskDeliveryPolicy();
 
   const { fontFamily, fontSize, setFontFamily, setFontSize } =
     useTerminalFont();
@@ -145,6 +157,18 @@ export function SettingsView({
   useEffect(() => {
     setDesignFormat(persistedDesignFormat);
   }, [persistedDesignFormat, workspaceId]);
+
+  useEffect(() => {
+    setTaskDelivery(persistedTaskDelivery);
+    setRepoTaskDelivery(
+      Object.fromEntries(
+        (workspace?.repos ?? []).map((repo) => [
+          repo.name,
+          repo.task_delivery_requirement ?? "",
+        ]),
+      ),
+    );
+  }, [persistedTaskDelivery, workspace?.repos, workspaceId]);
 
   const rootClassName = [styles.settingsView, className]
     .filter(Boolean)
@@ -222,6 +246,19 @@ export function SettingsView({
       ok
         ? "Design format updated successfully"
         : "Failed to update design format",
+      { type: ok ? "success" : "error" },
+    );
+  };
+
+  const handleTaskDeliverySave = async (
+    requirement: TaskDeliveryRequirement | "",
+    repository?: string,
+  ) => {
+    const ok = await updateRequirement(requirement, repository);
+    showToast(
+      ok
+        ? `${repository ?? "Workspace"} delivery policy updated`
+        : "Failed to update task delivery policy",
       { type: ok ? "success" : "error" },
     );
   };
@@ -505,6 +542,119 @@ export function SettingsView({
               {isSavingDesignFormat ? "Saving..." : "Save Design Format"}
             </button>
           </div>
+        </div>
+      </div>
+
+      {/* Task Delivery Policy */}
+      <div className={styles.panel} data-testid="task-delivery-panel">
+        <div className={styles.panelHeader}>
+          <h3 className={styles.panelTitle}>Task Delivery</h3>
+        </div>
+        <div className={styles.panelContent}>
+          <div className={styles.formGroup}>
+            <label className={styles.label} htmlFor="task-delivery-select">
+              Workspace requirement
+            </label>
+            <p className={styles.description}>
+              Working copy accepts a verified clean commit or applied patch.
+              Pull request requires Loom to verify a published PR before the
+              task can close. Repository overrides may only strengthen this
+              requirement.
+            </p>
+            <select
+              id="task-delivery-select"
+              className={styles.select}
+              value={taskDelivery}
+              onChange={(event) =>
+                setTaskDelivery(event.target.value as TaskDeliveryRequirement)
+              }
+              data-testid="task-delivery-select"
+            >
+              <option value="working_copy">Verified working copy</option>
+              <option value="pull_request">Published pull request</option>
+            </select>
+            <button
+              type="button"
+              className={styles.saveButton}
+              disabled={
+                !workspaceId ||
+                taskDelivery === persistedTaskDelivery ||
+                savingTaskDeliveryScope !== null
+              }
+              onClick={() => handleTaskDeliverySave(taskDelivery)}
+              data-testid="task-delivery-save-button"
+            >
+              {savingTaskDeliveryScope === "workspace"
+                ? "Saving..."
+                : "Save Task Delivery"}
+            </button>
+          </div>
+
+          {(workspace?.repos ?? []).length > 0 && (
+            <table
+              className={styles.agentTable}
+              data-testid="repo-task-delivery-table"
+            >
+              <thead>
+                <tr>
+                  <th>Repository</th>
+                  <th>Override</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(workspace?.repos ?? []).map((repo) => {
+                  const selected = repoTaskDelivery[repo.name] ?? "";
+                  const persisted = repo.task_delivery_requirement ?? "";
+                  return (
+                    <tr key={repo.name}>
+                      <td>{repo.name}</td>
+                      <td>
+                        <select
+                          className={styles.select}
+                          aria-label={`${repo.name} delivery override`}
+                          value={selected}
+                          onChange={(event) =>
+                            setRepoTaskDelivery((current) => ({
+                              ...current,
+                              [repo.name]: event.target.value as
+                                | TaskDeliveryRequirement
+                                | "",
+                            }))
+                          }
+                        >
+                          <option value="">Inherit workspace</option>
+                          <option value="working_copy">
+                            Verified working copy
+                          </option>
+                          <option value="pull_request">
+                            Published pull request
+                          </option>
+                        </select>
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className={styles.saveButton}
+                          disabled={
+                            selected === persisted ||
+                            savingTaskDeliveryScope !== null
+                          }
+                          onClick={() =>
+                            handleTaskDeliverySave(selected, repo.name)
+                          }
+                        >
+                          {savingTaskDeliveryScope === repo.name
+                            ? "Saving..."
+                            : "Save"}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
 

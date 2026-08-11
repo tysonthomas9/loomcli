@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
@@ -44,6 +45,7 @@ type mockWorkspaceService struct {
 	getWorkspaceBackendFn        func(ctx context.Context, wsID string) (*service.BackendConfigData, error)
 	patchWorkspaceBackendFn      func(ctx context.Context, wsID string, backend string) (*ops.WorkspaceData, error)
 	patchWorkspaceDesignFormatFn func(ctx context.Context, wsID string, designFormat string) (*ops.WorkspaceData, error)
+	patchWorkspaceTaskDeliveryFn func(ctx context.Context, wsID, repoName string, requirement domain.TaskDeliveryRequirement) (*ops.WorkspaceData, error)
 }
 
 func (m *mockWorkspaceService) GetActiveWorkspace(ctx context.Context) (*ops.WorkspaceData, error) {
@@ -133,6 +135,13 @@ func (m *mockWorkspaceService) PatchWorkspaceBackend(ctx context.Context, wsID s
 func (m *mockWorkspaceService) PatchWorkspaceDesignFormat(ctx context.Context, wsID string, designFormat string) (*ops.WorkspaceData, error) {
 	if m.patchWorkspaceDesignFormatFn != nil {
 		return m.patchWorkspaceDesignFormatFn(ctx, wsID, designFormat)
+	}
+	return nil, service.ErrUnavailable("not available")
+}
+
+func (m *mockWorkspaceService) PatchWorkspaceTaskDelivery(ctx context.Context, wsID, repoName string, requirement domain.TaskDeliveryRequirement) (*ops.WorkspaceData, error) {
+	if m.patchWorkspaceTaskDeliveryFn != nil {
+		return m.patchWorkspaceTaskDeliveryFn(ctx, wsID, repoName, requirement)
 	}
 	return nil, service.ErrUnavailable("not available")
 }

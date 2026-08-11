@@ -381,6 +381,44 @@ func TestPatchWorkspaceDesignFormat_RejectsInvalidFormat(t *testing.T) {
 	}
 }
 
+func TestPatchWorkspaceTaskDelivery_StoreBackedUpdatesScopes(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha Project"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := st.Repos().Create(ctx, store.RepoCreate{WorkspaceKey: "ALPHA", Name: "app"}); err != nil {
+		t.Fatalf("create repo: %v", err)
+	}
+
+	svc := NewWorkspaceService(WorkspaceServiceConfig{Store: st})
+	if _, err := svc.PatchWorkspaceTaskDelivery(ctx, "ALPHA", "", domain.TaskDeliveryPullRequest); err != nil {
+		t.Fatalf("patch workspace requirement: %v", err)
+	}
+	data, err := svc.PatchWorkspaceTaskDelivery(ctx, "ALPHA", "app", domain.TaskDeliveryWorkingCopy)
+	if err != nil {
+		t.Fatalf("patch repo requirement: %v", err)
+	}
+	if data.TaskDeliveryRequirement != "pull_request" || len(data.Repos) != 1 || data.Repos[0].TaskDeliveryRequirement != "working_copy" {
+		t.Fatalf("workspace data = %+v", data)
+	}
+
+	data, err = svc.PatchWorkspaceTaskDelivery(ctx, "ALPHA", "app", "")
+	if err != nil {
+		t.Fatalf("clear repo requirement: %v", err)
+	}
+	if data.Repos[0].TaskDeliveryRequirement != "" {
+		t.Fatalf("repo requirement = %q, want inherited", data.Repos[0].TaskDeliveryRequirement)
+	}
+}
+
+func TestPatchWorkspaceTaskDelivery_RejectsEmptyWorkspaceRequirement(t *testing.T) {
+	svc := NewWorkspaceService(WorkspaceServiceConfig{Store: memstore.New()})
+	if _, err := svc.PatchWorkspaceTaskDelivery(context.Background(), "ALPHA", "", ""); err == nil {
+		t.Fatal("expected validation error")
+	}
+}
+
 func TestSetDefaultWorkspace_Removed(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 

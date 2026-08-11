@@ -2,16 +2,17 @@ package ops
 
 // WorkspaceData represents the full workspace topology returned by the API.
 type WorkspaceData struct {
-	ID               string               `json:"id"`
-	Name             string               `json:"name"`
-	Path             string               `json:"path"`
-	Repos            []WorkspaceRepo      `json:"repos"`
-	Groups           []string             `json:"groups"`
-	Agents           []WorkspaceAgentInfo `json:"agents"`
-	Workspaces       []WorkspaceSummary   `json:"workspaces"`
-	WorkspaceOrder   []string             `json:"workspace_order,omitempty"`
-	DefaultWorkspace string               `json:"default_workspace"`
-	DesignFormat     string               `json:"design_format,omitempty"`
+	ID                      string               `json:"id"`
+	Name                    string               `json:"name"`
+	Path                    string               `json:"path"`
+	Repos                   []WorkspaceRepo      `json:"repos"`
+	Groups                  []string             `json:"groups"`
+	Agents                  []WorkspaceAgentInfo `json:"agents"`
+	Workspaces              []WorkspaceSummary   `json:"workspaces"`
+	WorkspaceOrder          []string             `json:"workspace_order,omitempty"`
+	DefaultWorkspace        string               `json:"default_workspace"`
+	DesignFormat            string               `json:"design_format,omitempty"`
+	TaskDeliveryRequirement string               `json:"task_delivery_requirement,omitempty"`
 }
 
 // WorkspaceSummary provides a lightweight summary of a configured workspace.
@@ -29,15 +30,16 @@ type WorkspaceSummary struct {
 
 // WorkspaceRepo represents a repository within a workspace.
 type WorkspaceRepo struct {
-	Name             string   `json:"name"`
-	Path             string   `json:"path"`
-	DefaultBranch    string   `json:"default_branch"`
-	CurrentBranch    string   `json:"current_branch,omitempty"`
-	Remote           string   `json:"remote"`
-	RemoteURL        string   `json:"remote_url,omitempty"`
-	SourceRepoID     string   `json:"source_repo_id,omitempty"`
-	Groups           []string `json:"groups"`
-	IsLinkedWorktree bool     `json:"is_linked_worktree,omitempty"`
+	Name                    string   `json:"name"`
+	Path                    string   `json:"path"`
+	DefaultBranch           string   `json:"default_branch"`
+	CurrentBranch           string   `json:"current_branch,omitempty"`
+	Remote                  string   `json:"remote"`
+	RemoteURL               string   `json:"remote_url,omitempty"`
+	SourceRepoID            string   `json:"source_repo_id,omitempty"`
+	Groups                  []string `json:"groups"`
+	IsLinkedWorktree        bool     `json:"is_linked_worktree,omitempty"`
+	TaskDeliveryRequirement string   `json:"task_delivery_requirement,omitempty"`
 }
 
 // WorkspaceAgentInfo represents an agent's repo/group assignments.

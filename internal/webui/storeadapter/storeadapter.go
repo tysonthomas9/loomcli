@@ -70,16 +70,17 @@ func BuildWorkspaceDataForKey(ctx context.Context, s store.Store, key string) (*
 	wsPath := resolveWorkspacePath(ws.Key)
 
 	return &ops.WorkspaceData{
-		ID:               ws.Key,
-		Name:             ws.Name,
-		Path:             wsPath,
-		Repos:            repos,
-		Groups:           groups,
-		Agents:           agents,
-		Workspaces:       summaries,
-		WorkspaceOrder:   nil, // TODO(.16): persist order in DaemonProfile or similar
-		DefaultWorkspace: "",
-		DesignFormat:     ws.DesignFormat,
+		ID:                      ws.Key,
+		Name:                    ws.Name,
+		Path:                    wsPath,
+		Repos:                   repos,
+		Groups:                  groups,
+		Agents:                  agents,
+		Workspaces:              summaries,
+		WorkspaceOrder:          nil, // TODO(.16): persist order in DaemonProfile or similar
+		DefaultWorkspace:        "",
+		DesignFormat:            ws.DesignFormat,
+		TaskDeliveryRequirement: string(ws.TaskDeliveryRequirement),
 	}, nil
 }
 
@@ -147,13 +148,14 @@ func loadRepos(ctx context.Context, s store.Store, wsKey string) ([]ops.Workspac
 			repoPath = filepath.Join(wsRoot, r.Name)
 		}
 		out = append(out, ops.WorkspaceRepo{
-			Name:          r.Name,
-			Path:          repoPath,
-			DefaultBranch: db,
-			Remote:        remote,
-			RemoteURL:     r.RemoteURL,
-			SourceRepoID:  r.SourceRepoID,
-			Groups:        r.Groups,
+			Name:                    r.Name,
+			Path:                    repoPath,
+			DefaultBranch:           db,
+			Remote:                  remote,
+			RemoteURL:               r.RemoteURL,
+			SourceRepoID:            r.SourceRepoID,
+			Groups:                  r.Groups,
+			TaskDeliveryRequirement: string(r.TaskDeliveryRequirement),
 		})
 		for _, g := range r.Groups {
 			groupSet[g] = true

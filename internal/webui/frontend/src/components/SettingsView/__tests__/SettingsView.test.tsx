@@ -35,6 +35,7 @@ vi.mock("@/hooks/workspace", async () => {
     useBackends: vi.fn(),
     useLocalSettings: vi.fn(),
     useWorkspaceDesignFormat: vi.fn(),
+    useTaskDeliveryPolicy: vi.fn(),
     useWorkspaceContext: vi.fn(),
   };
 });
@@ -66,6 +67,7 @@ import {
   useBackends,
   useLocalSettings,
   useWorkspaceDesignFormat,
+  useTaskDeliveryPolicy,
   useWorkspaceContext,
 } from "@/hooks/workspace";
 import { useTerminalFont } from "@/hooks/terminal";
@@ -75,6 +77,7 @@ const mockUseBackendConfig = vi.mocked(useBackendConfig);
 const mockUseBackends = vi.mocked(useBackends);
 const mockUseLocalSettings = vi.mocked(useLocalSettings);
 const mockUseWorkspaceDesignFormat = vi.mocked(useWorkspaceDesignFormat);
+const mockUseTaskDeliveryPolicy = vi.mocked(useTaskDeliveryPolicy);
 const mockUseWorkspaceContext = vi.mocked(useWorkspaceContext);
 const mockUseTerminalFont = vi.mocked(useTerminalFont);
 const mockUseToast = vi.mocked(useToast);
@@ -224,6 +227,11 @@ describe("SettingsView", () => {
       isSaving: false,
       error: null,
       updateDesignFormat: vi.fn().mockResolvedValue(true),
+    });
+    mockUseTaskDeliveryPolicy.mockReturnValue({
+      savingScope: null,
+      error: null,
+      updateRequirement: vi.fn().mockResolvedValue(true),
     });
   });
 
@@ -652,6 +660,64 @@ describe("SettingsView", () => {
         "Design format updated successfully",
         { type: "success" },
       );
+    });
+  });
+
+  describe("task delivery policy", () => {
+    it("saves workspace and repository requirements", async () => {
+      const updateRequirement = vi.fn().mockResolvedValue(true);
+      mockUseTaskDeliveryPolicy.mockReturnValue({
+        savingScope: null,
+        error: null,
+        updateRequirement,
+      });
+      mockUseWorkspaceContext.mockReturnValue({
+        workspaceId: "ALPHA",
+        workspace: {
+          id: "ALPHA",
+          name: "Alpha",
+          path: "/tmp/alpha",
+          repos: [
+            {
+              name: "app",
+              path: "/tmp/alpha/app",
+              default_branch: "main",
+              remote: "origin",
+              groups: [],
+            },
+          ],
+          groups: [],
+          agents: [],
+          workspaces: [],
+          default_workspace: "",
+          task_delivery_requirement: "working_copy",
+        },
+        refetch: vi.fn(),
+      } as ReturnType<typeof useWorkspaceContext>);
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+      render(<SettingsView />);
+
+      fireEvent.change(screen.getByTestId("task-delivery-select"), {
+        target: { value: "pull_request" },
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("task-delivery-save-button"));
+      });
+      expect(updateRequirement).toHaveBeenCalledWith("pull_request", undefined);
+
+      fireEvent.change(
+        screen.getByRole("combobox", { name: "app delivery override" }),
+        { target: { value: "pull_request" } },
+      );
+      await act(async () => {
+        fireEvent.click(
+          within(screen.getByTestId("repo-task-delivery-table")).getByRole(
+            "button",
+            { name: "Save" },
+          ),
+        );
+      });
+      expect(updateRequirement).toHaveBeenCalledWith("pull_request", "app");
     });
   });
 

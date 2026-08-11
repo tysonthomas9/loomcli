@@ -575,6 +575,38 @@ func (s *workspaceServiceImpl) PatchWorkspaceDesignFormat(ctx context.Context, w
 	return data, nil
 }
 
+func (s *workspaceServiceImpl) PatchWorkspaceTaskDelivery(ctx context.Context, wsID, repoName string, requirement domain.TaskDeliveryRequirement) (*ops.WorkspaceData, error) {
+	if !requirement.Valid() || (repoName == "" && requirement == "") {
+		return nil, ErrValidation("task delivery requirement must be working_copy or pull_request")
+	}
+	if s.store == nil {
+		return nil, ErrUnavailable("workspace store unavailable")
+	}
+	ws, serr := s.resolveStoreWorkspaceForDefault(ctx, wsID)
+	if serr != nil {
+		return nil, serr
+	}
+	if repoName == "" {
+		if _, err := s.store.Workspaces().Update(ctx, ws.Key, store.WorkspaceUpdate{TaskDeliveryRequirement: &requirement}); err != nil {
+			return nil, ErrInternal("failed to save workspace task delivery requirement", err)
+		}
+	} else {
+		if _, err := s.store.Repos().Update(ctx, ws.Key, repoName, store.RepoUpdate{TaskDeliveryRequirement: &requirement}); err != nil {
+			if errors.Is(err, domain.ErrNotFound) {
+				return nil, ErrNotFound("repository not found")
+			}
+			return nil, ErrInternal("failed to save repository task delivery requirement", err)
+		}
+	}
+	s.invalidateWorkspaceCache()
+	data, err := s.loadWorkspaceByID(ctx, ws.Key)
+	if err != nil {
+		return nil, ErrInternal("failed to load workspace data", err)
+	}
+	normalizeWorkspaceData(data)
+	return data, nil
+}
+
 func (s *workspaceServiceImpl) invalidateWorkspaceCache() {
 	if s.workspaceCache != nil {
 		s.workspaceCache.invalidateAll()

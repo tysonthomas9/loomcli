@@ -28,7 +28,10 @@ export interface RepoInfo {
   source_repo_id?: string;
   groups: string[];
   is_linked_worktree?: boolean;
+  task_delivery_requirement?: TaskDeliveryRequirement;
 }
+
+export type TaskDeliveryRequirement = "working_copy" | "pull_request";
 
 export interface WorkspaceAgentInfo {
   name: string;
@@ -108,6 +111,7 @@ export interface WorkspaceData {
   workspace_order?: string[];
   default_workspace: string;
   design_format?: "markdown" | "html";
+  task_delivery_requirement?: TaskDeliveryRequirement;
 }
 
 // ============= Response Types =============

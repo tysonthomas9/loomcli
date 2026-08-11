@@ -8,6 +8,9 @@ export type { UseBackendConfigReturn } from "./useBackendConfig";
 export { useWorkspaceDesignFormat } from "./useWorkspaceDesignFormat";
 export type { UseWorkspaceDesignFormatReturn } from "./useWorkspaceDesignFormat";
 
+export { useTaskDeliveryPolicy } from "./useTaskDeliveryPolicy";
+export type { UseTaskDeliveryPolicyReturn } from "./useTaskDeliveryPolicy";
+
 export { useLocalSettings } from "./useLocalSettings";
 export type { UseLocalSettingsReturn } from "./useLocalSettings";
 
