@@ -1046,6 +1046,46 @@ route and new direct owner-adapter call were reviewed, and the count moved to
 238. The final unchanged-source aggregate gate and measured architecture pass
 both succeeded.
 
+## Wave 9.22 result
+
+The twenty-second slice removes two more horizontal persistence dependencies
+from production HTTP adapters. The approval endpoint no longer accepts a
+composite Store or reaches `AwaitStore`; its consumer-owned
+`PendingAwaitQueries` port exposes only the pending-pattern projection required
+for eligibility before the Automation-owned journal and Execution-owned
+dispatch operations run. The trigger-binding endpoint likewise no longer
+imports `store.DriverRunStore`, `store.DriverRunFilter`, or Store-owned ordering
+helpers. Its `RunQueries` port expresses the exact bounded, newest-first
+binding-history query used by the UI.
+
+The existing WebUI read-projection module now implements the binding-history
+join at the composition boundary. It is shared by trigger-binding routes and
+Agents binding decoration, so filter translation and ordering policy are not
+duplicated or moved into another handler. Production code contains no fallback
+to the removed Store paths: missing ports preserve the existing inert or
+fail-closed route behavior.
+
+The exact live handler-import allowance falls from 19 to 17. Total package
+shape remains 167 production packages, 15 module packages, and 152 packages
+outside modules. Adding the second cohesive read-projection source file lowers
+the one-file-package ceiling from 47 to 46; one-or-two-file packages remain 68.
+Direct persistence remains `86 / 95`, and no FleetDB contract or client call
+site changes. The implementation is `22688c1c0`.
+
+## Wave 9.22 validation
+
+| Check | Result |
+|---|---|
+| Approval, trigger-binding, Agents, route-composition, read-projection, and Driver suites | PASS |
+| Removed handler dependencies and exact topology ratchets | PASS: production approval and trigger-binding packages contain no `internal/store` import; handler allowance `17`; shape `167 / 15 / 152 / 46 / 68`; writes `86 / 95` |
+| Measured architecture guard at implementation `22688c1c0` | PASS: 11/11 profiles, 10 capability roots, 17 live legacy-handler allowances, 86 direct-write rows, zero pending decisions, and 1,247.9 MiB peak process-tree RSS under 2,048 MiB |
+| Aggregate `make gate` at implementation `22688c1c0` against FleetDB `b71dec551` | PASS: all Go and frontend quality gates with the exact paired source and binary, sanitized Loom runtime variables, `GOMAXPROCS=4`, one Go test worker, two Vitest workers, and a 3 GiB Go soft memory limit |
+
+The implementation review found that the new binding-history projection made
+`readprojection` a two-file package. Its one-file ceiling was tightened to 46,
+then both the repository-scale architecture transaction and aggregate paired
+gate were rerun at the amended implementation head. No allowance was widened.
+
 Later waves must update this document with the selected package candidates,
 the boundary reason retained or removed for each, exact shape changes, and
 same-head evidence.

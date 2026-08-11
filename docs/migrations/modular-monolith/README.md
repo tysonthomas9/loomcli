@@ -311,8 +311,15 @@ horizontal stores. Trigger-binding routes now consume the Connectors-owned
 binding lifecycle and canonical Agents identity queries, the real FleetDB and
 memstore adapters implement the owner persistence seam, and `agentmodules`
 fanout tightens from 38 to 37 without increasing the Agents handler ceiling.
-The exact package and direct-write shapes remain unchanged. The remaining
-waves delete the other horizontal handler/store edges and residual shallow
+The exact package and direct-write shapes remain unchanged. Wave 9.22 removes
+the approval endpoint's composite Store/AwaitStore access and the
+trigger-binding endpoint's DriverRunStore/filter/ordering access. Both now
+consume exact read ports backed by the existing WebUI read-projection module;
+there is no handler fallback to the removed persistence paths. The live handler
+allowance falls from 19 to 17, while the exact package shape becomes
+`167 / 15 / 152 / 46 / 68` because `readprojection` is no longer a one-file
+package. Direct persistence remains `86 / 95`. The remaining waves delete the
+other horizontal handler/store edges and residual shallow
 packages; an empty
 capability-graph `legacy_paths` list alone is not completion proof. See the
 [Phase 9 plan](16-phase-9-package-consolidation.md).
