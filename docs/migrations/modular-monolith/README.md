@@ -1,7 +1,7 @@
 # Modular Monolith Migration
 
-- **Status:** Phase 9 package consolidation in progress; its first twenty-one
-  slices ratchet the modular monolith to 167 production packages
+- **Status:** Phase 9 package consolidation in progress; its first twenty-four
+  slices ratchet the modular monolith to 164 production packages
 - **Date:** 2026-08-11
 - **Scope:** `loom serve`, the operator CLI entry surfaces, the Vite frontend counterpart, and the fleet-db contracts those capabilities depend on
 - **Provenance:** [Phase 0 integration baseline](00-phase-0-baseline.md), final [Phase 1 evidence](06-phase-1-decisions-and-evidence.md) at Loom `7e8a6dd2`, [Phase 2 evidence](07-phase-2-decisions-and-evidence.md) at Loom `84cccb761` with FleetDB `430dce8d9`, [Phase 3 evidence](08-phase-3-decisions-and-evidence.md) at core implementation commits Loom `7f95b9bf1` and FleetDB `f1c4e1119`, final [Phase 4 evidence](09-phase-4-decisions-and-evidence.md) at Loom `53cbe2577` with FleetDB `afb688768`, and the appended reliability-validation record at Loom `67c45972f` with FleetDB `9ffa69f60`
@@ -325,7 +325,13 @@ route query and fails closed without a Connector, and the old field, route,
 permission, persistence column, CLI flag, compatibility verifier, and fallback
 resolver are absent. The handler allowance falls again to 16 and FleetDB
 client call sites fall from 238 to 236 without changing package shape or
-direct-write counts. The remaining waves delete the other horizontal
+direct-write counts. Wave 9.24 deletes three shallow package roots:
+Daytona's real host adapter is folded through `serveadapter`, workspace Git
+materialization is folded into its sole `workspacemgr` owner, and the
+fake-harness executable moves under Go-standard `testdata`. Exact package
+shape falls to `164 / 15 / 149 / 43 / 65`; retired-root guards prevent all
+three old paths from returning, with no owner, port, or external adapter
+removed. The remaining waves delete the other horizontal
 handler/store edges and residual shallow
 packages; an empty
 capability-graph `legacy_paths` list alone is not completion proof. See the

@@ -1127,6 +1127,46 @@ paired FleetDB contract and migration implementation is `9c1859a`.
 | FleetDB aggregate `make gate` at `9c1859a` | PASS: static analysis, race/coverage, Redis and Postgres integration, migration/storage contracts, 80.8% total coverage, all 28 measured packages above the 50% floor, container E2E, crash/recovery, and harness evaluation against the explicit active Podman socket |
 | Loom aggregate `make gate` at `ce388df2d` against FleetDB `9c1859a` | PASS: all Go and frontend quality gates with byte-identical OpenAPI SHA-256 `54a75342…65733`, exact companion binary SHA-256 `8f963829…7c0f0`, `GOMAXPROCS=4`, one Go test worker, two Vitest workers, and a 3 GiB Go soft memory limit |
 
+## Wave 9.24 result
+
+The twenty-fourth slice removes three package boundaries that no longer pass
+the boundary test while preserving their behavior in the owning package or
+test surface:
+
+- `internal/cli/serve/serveadapter/daytonabroker` had one production consumer,
+  while its parent contained only a type alias and forwarding constructor. The
+  real credential-isolating external adapter and its live proof now live in
+  `serveadapter`; no provider behavior, port, or fail-closed check was removed.
+- `internal/cli/serve/workspacemgr/workspacematerialization` had one consumer,
+  its parent `workspacemgr`, plus duplicated forwarding helpers. The Git
+  inspection, recovery, cancellation, worktree attachment, and rollback logic
+  now live directly with the workspace materialization workflow.
+- `internal/harness/fakeharness/mock` was a test executable, not a production
+  package. It now lives under `internal/harness/fakeharness/testdata/mock`, and
+  the package-shape scanner explicitly follows Go's `testdata` exclusion
+  convention while the integration test continues to compile and execute it.
+
+The three retired roots are in the cannot-return guard, and no imports target
+them. Exact package shape falls from `167 / 15 / 152 / 46 / 68` to
+`164 / 15 / 149 / 43 / 65`. Capability roots remain 10, live handler imports
+remain 16, and direct persistence remains `86 / 95`. The implementation is
+`015ff85ef`.
+
+## Wave 9.24 validation
+
+| Check | Result |
+|---|---|
+| Workspace materialization, Daytona host adapter, workflow-distribution authoring, backend, and harness suites | PASS |
+| Exact package topology, retired-root, source-control reachability, and import-fanout ratchets | PASS: shape `164 / 15 / 149 / 43 / 65`; all three old roots absent; `serveadapter` remains at its exact approved fanout |
+| Measured architecture guard | PASS: 11/11 profiles, 10 capability roots, 16 live legacy-handler allowances, 86 direct-write rows, zero pending decisions, and 1,165.1 MiB peak process-tree RSS under 2,048 MiB |
+| Aggregate `make gate` at `015ff85ef` against FleetDB `9c1859a` | PASS: all Go and frontend quality gates with the exact paired source and binary, `GOMAXPROCS=4`, one Go test worker, two Vitest workers, and a 3 GiB Go soft memory limit |
+
+The first aggregate run rejected a new twenty-eighth import on `serveadapter`.
+The corrected implementation consumes Daytona runtime layout and bundle staging
+through the already-imported workflow-distribution authoring adapter, removing
+the extra edge instead of increasing the exact fanout exception. The complete
+unchanged-source gate then passed.
+
 Later waves must update this document with the selected package candidates,
 the boundary reason retained or removed for each, exact shape changes, and
 same-head evidence.
