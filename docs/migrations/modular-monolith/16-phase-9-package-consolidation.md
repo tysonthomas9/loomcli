@@ -23,6 +23,11 @@
 - **Wave 9.19 implementation:** `c412c3f61`
 - **Wave 9.20 implementation:** `d34fb0ed1`
 - **Wave 9.21 implementation:** `fb16ce443`
+- **Wave 9.22 implementation:** `22688c1c0`
+- **Wave 9.23 implementation:** `ce388df2d`
+- **Wave 9.24 implementation:** `015ff85ef`
+- **Wave 9.25 implementation:** `9caddc7e5`
+- **Wave 9.26 implementation:** `cfe542420`
 - **Stacked branches:** `modular-monolith-phase9-01-types-ratchet`, then
   `modular-monolith-phase9-02-shallow-seams`, then
   `modular-monolith-phase9-03-legacy-planes`, then
@@ -43,7 +48,12 @@
   `modular-monolith-phase9-18-driver-run-contract`, then
   `modular-monolith-phase9-19-local-node-state`, then
   `modular-monolith-phase9-20-agents-bootstrap-composition`, then
-  `modular-monolith-phase9-21-automation-owner-intents`
+  `modular-monolith-phase9-21-automation-owner-intents`, then
+  `modular-monolith-phase9-22-handler-read-ports`, then
+  `modular-monolith-phase9-23-connector-inbound-secrets`, then
+  `modular-monolith-phase9-24-shallow-package-deletion`, then
+  `modular-monolith-phase9-25-legacy-package-deletion`, then
+  `modular-monolith-phase9-26-runtime-legacy-deletion`
 - **Purpose:** Reduce the residual package surface toward 160 production Go
   packages without weakening capability ownership, consumer-owned ports, or
   independently replaceable adapters.
@@ -1218,6 +1228,68 @@ a three-line `funlen` overage after explicit Source Control port injection. The
 final source formats the imports and extracts task-worker construction; the
 linter reports zero issues and the uninterrupted aggregate rerun passes. No
 lint exception or topology allowance was added.
+
+## Wave 9.26 result
+
+Wave 9.26 deletes executable compatibility behavior that remained inside the
+160-package topology. It does not rename those paths or preserve their policy in
+test-only copies:
+
+- Execution now owns DriverRun and TaskRun lifecycle mutation through its typed
+  APIs. Driver runtime, webhook ingestion, Workflow HTTP, retry/recovery, and
+  await completion callers no longer reconstruct the retired direct-Store
+  request/run/event implementations.
+- Automation owns internal-event admission, matching, scheduling, trigger
+  delivery, and provenance. The parallel trigger-route repository and
+  dispatcher plane, old runtime cron/delivery/internal-source implementations,
+  and duplicate FleetDB/memstore fanout fixtures are deleted.
+- Workflow Catalog owns builtin authoring and refresh. The old native/builtin
+  authoring implementation is gone; tests seed only the narrow catalog
+  projections they consume instead of copying the deleted production policy.
+- Task workflow history now projects canonical DriverRuns directly through
+  immutable `SourceRef` lineage rather than joining through the retired
+  TriggerDelivery representation or consulting Interaction shadows.
+- The issue-journal bridge requires durable cursors plus current Work Items
+  lookup, startup-ready reconciliation, and commit-time repository admission.
+  Missing ports fail composition; there is no journal-only dispatch or
+  in-memory cursor branch. FleetDB's retired `source_repo` journal alias is no
+  longer interpreted.
+- Runtime discovery no longer accepts a Node executable beside `loom`, and
+  repository selection no longer aliases a selector to an unrelated remote
+  basename. Explicit overrides, the packaged Desktop runtime, PATH installs,
+  exact repository identity, and the Work Items-owned single-repository
+  admission rule remain supported contracts rather than migration fallbacks.
+
+The implementation deletes 41 files and changes 217 total files, with 3,008
+insertions and 15,647 deletions: a net removal of 12,639 lines. New test support
+is consumer-scoped and delegates to the same Execution or Workflow Catalog
+contracts as production. Architecture tombstones prevent the deleted runtime
+implementations, selector helpers, TriggerRoute surface, and test-only legacy
+copies from returning.
+
+Package shape remains exactly `160 / 15 / 145 / 42 / 61`. This is intentional:
+the wave removes 12,639 net lines and several live horizontal planes from
+packages that still own other durable adapters. Direct persistence remains
+`94 / 112`, the live handler allowance remains 16, and all ten capability roots
+remain active. No package, handler, topology, or direct-write allowance grows.
+The implementation is `cfe542420`; the paired FleetDB contract source is
+`9c1859a`.
+
+## Wave 9.26 validation
+
+| Check | Result |
+|---|---|
+| Full production `internal/...` compile | PASS after deleting the old Driver, Automation runtime, trigger-route, and Workflow Catalog implementations |
+| Automation, Execution, serve composition, Workflow Catalog authoring, memstore/FleetDB adapters, WebUI app/handlers/hooks/projections/session coordination, trigger CLI, and full Driver suites | PASS against paired FleetDB `9c1859a` |
+| Webhook E2E-tag build | PASS; the deleted router integration fixture is not required to compile the current module boundary |
+| Exact retired-surface, topology, package-shape, and default-deny guards | PASS: shape `160 / 15 / 145 / 42 / 61`; writes `94 / 112`; 16 live handler allowances; deleted selectors and compatibility implementations absent |
+| Measured `make check-architecture` | PASS under the 2,048 MiB process-tree ceiling with all 11 profiles, ten capability roots, all six performance records measured, and zero pending decisions |
+| Aggregate `make gate` | PASS against FleetDB source `9c1859a` and a freshly built paired binary, with `GOMAXPROCS=4`, one Go test worker, two Vitest workers, and a 3 GiB Go soft memory limit |
+
+The gate was run after the final fail-closed journal composition change and the
+Node/repository selector deletions. `git diff --check` was clean before the
+implementation commit. No generated frontend output, runtime state, or test
+report was added to the source tree.
 
 Later waves must continue deleting executable legacy model, projection, and
 Store fallback paths. Reaching 160 packages is a progress metric, not the Phase

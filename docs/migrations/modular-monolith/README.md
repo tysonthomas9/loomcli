@@ -331,9 +331,19 @@ materialization is folded into its sole `workspacemgr` owner, and the
 fake-harness executable moves under Go-standard `testdata`. Exact package
 shape falls to `164 / 15 / 149 / 43 / 65`; retired-root guards prevent all
 three old paths from returning, with no owner, port, or external adapter
-removed. The remaining waves delete the other horizontal
-handler/store edges and residual shallow
-packages; an empty
+removed. Wave 9.25 deletes four more shallow package roots and six forwarding
+constructors, moving repository admission, local journal recovery, task
+worktree/lineage, and CLI test support into their actual consumers. Exact shape
+falls to `160 / 15 / 145 / 42 / 61`, while direct persistence remains
+`94 / 112`. Wave 9.26 then removes the executable compatibility behavior still
+hidden inside that topology: the parallel trigger-route and Automation runtime
+planes, direct-Store Driver lifecycle implementations, duplicate Workflow
+Catalog authoring, journal-only task dispatch, in-memory cursor substitution,
+the executable-sibling Node layout, and repository-basename alias matching. It
+deletes 41 files and 12,639 net lines without creating a replacement package;
+the exact shape stays 160 and all architecture and aggregate gates pass against
+paired FleetDB `9c1859a`. The remaining waves delete the other horizontal
+handler/store edges and residual shallow packages; an empty
 capability-graph `legacy_paths` list alone is not completion proof. See the
 [Phase 9 plan](16-phase-9-package-consolidation.md).
 
