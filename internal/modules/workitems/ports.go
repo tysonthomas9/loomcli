@@ -10,6 +10,7 @@ type Store interface {
 	Create(context.Context, CreateCommand) (*IssueSummary, error)
 	BlockRepositoryRequired(context.Context, string) (*RepositoryAdmissionResult, error)
 	List(context.Context, ListFilter) ([]IssueSummary, error)
+	Stats(context.Context) (*Stats, error)
 	Blocked(context.Context, AvailabilityQuery) ([]IssueSummary, error)
 	Ready(context.Context, AvailabilityQuery) ([]IssueSummary, error)
 	Deferred(context.Context, AvailabilityQuery) ([]IssueSummary, error)

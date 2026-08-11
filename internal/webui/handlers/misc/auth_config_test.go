@@ -1,6 +1,7 @@
 package misc
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -202,12 +203,33 @@ func TestNormalizeBackendName(t *testing.T) {
 	}
 }
 
-func TestHandleAuthConfig_IssueBackendFromEnv(t *testing.T) {
+func TestHandleAuthConfig_DoesNotUseLegacyBackendEnvFallback(t *testing.T) {
 	t.Setenv("LOOM_ISSUE_BACKEND", "fleet")
 
 	limiter := newAuthConfigLimiter(rate.Limit(5), 10, 5*time.Minute, 10*time.Minute)
 	defer limiter.Stop()
 	handler := HandleAuthConfig("", limiter, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	var resp authConfigResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.IssueBackend != "" {
+		t.Errorf("IssueBackend = %q, want empty without composed provider", resp.IssueBackend)
+	}
+}
+
+func TestHandleAuthConfig_UsesNarrowBackendNameProvider(t *testing.T) {
+	t.Setenv("LOOM_ISSUE_BACKEND", "api")
+
+	limiter := newAuthConfigLimiter(rate.Limit(5), 10, 5*time.Minute, 10*time.Minute)
+	defer limiter.Stop()
+	handler := HandleAuthConfig("", limiter, func(context.Context) string { return "fleet-db" })
 
 	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
 	req.RemoteAddr = "127.0.0.1:12345"

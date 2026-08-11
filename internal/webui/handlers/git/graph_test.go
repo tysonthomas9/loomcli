@@ -7,8 +7,40 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
+
+type narrowWorkItemQueries struct {
+	list    *workitems.ListResult
+	blocked []workitems.IssueSummary
+	detail  map[string]*workitems.IssueDetail
+}
+
+func (q *narrowWorkItemQueries) List(context.Context, workitems.ListQuery) (*workitems.ListResult, error) {
+	return q.list, nil
+}
+
+func (q *narrowWorkItemQueries) Get(_ context.Context, query workitems.GetQuery) (*workitems.IssueDetail, error) {
+	return q.detail[query.IssueID], nil
+}
+
+func (q *narrowWorkItemQueries) Blocked(context.Context, workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
+	return q.blocked, nil
+}
+
+func TestHandleGraphUsesWorkItemsOwnerQueries(t *testing.T) {
+	queries := &narrowWorkItemQueries{
+		list:   &workitems.ListResult{Issues: []workitems.ListItem{{IssueSummary: workitems.IssueSummary{ID: "TASK-1", Title: "task", Status: "open"}}}},
+		detail: map[string]*workitems.IssueDetail{"TASK-1": {ID: "TASK-1"}},
+	}
+	handler := HandleGraph(queries)
+	req := httptest.NewRequest(http.MethodGet, "/api/issues/graph", nil)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
+	}
+}
 
 // ---------------------------------------------------------------------------
 // handleBlocked tests
@@ -186,26 +218,21 @@ func TestParseGraphParams_TableDriven(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Backend tests — HandleGraphWithBackend
+// Work Items owner-query tests — HandleGraph
 // ---------------------------------------------------------------------------
 
-func TestHandleGraph_BackendWhenNoPool(t *testing.T) {
-	be := &stubGraphBackend{
-		list: []backend.IssueData{
-			{ID: "PARITY-1", Title: "Child A", Status: "open", Priority: 1, IssueType: "bug", Parent: "EPIC-1"},
-			{ID: "EPIC-1", Title: "Epic", Status: "open", Priority: 0, IssueType: "epic"},
-		},
-		details: map[string]*backend.IssueDetailData{
-			"PARITY-1": {
-				IssueData: backend.IssueData{ID: "PARITY-1"},
-				Dependencies: []backend.DependencyData{
-					{IssueID: "PARITY-1", DependsOnID: "BLOCKER-1", Type: "blocks"},
-				},
-			},
-			"EPIC-1": {IssueData: backend.IssueData{ID: "EPIC-1"}},
+func TestHandleGraph_WorkItemsOwnerQueries(t *testing.T) {
+	queries := &narrowWorkItemQueries{
+		list: &workitems.ListResult{Issues: []workitems.ListItem{
+			{IssueSummary: workitems.IssueSummary{ID: "PARITY-1", Title: "Child A", Status: "open", Priority: 1, IssueType: "bug", Parent: "EPIC-1"}},
+			{IssueSummary: workitems.IssueSummary{ID: "EPIC-1", Title: "Epic", Status: "open", Priority: 0, IssueType: "epic"}},
+		}},
+		detail: map[string]*workitems.IssueDetail{
+			"PARITY-1": {ID: "PARITY-1", Dependencies: []workitems.Dependency{{ID: "BLOCKER-1", DependencyType: "blocks"}}},
+			"EPIC-1":   {ID: "EPIC-1"},
 		},
 	}
-	handler := HandleGraphWithBackend(func(_ context.Context) backend.IssueBackend { return be })
+	handler := HandleGraph(queries)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/issues/graph", nil)
 	rr := httptest.NewRecorder()
@@ -252,16 +279,16 @@ func TestHandleGraph_BackendWhenNoPool(t *testing.T) {
 	}
 }
 
-func TestHandleGraph_BackendStatusFilter(t *testing.T) {
-	be := &stubGraphBackend{
-		list: []backend.IssueData{
-			{ID: "OPEN-1", Status: "open"},
-			{ID: "CLOSED-1", Status: "closed"},
-			{ID: "TOMB-1", Status: "tombstone"},
-		},
-		details: map[string]*backend.IssueDetailData{},
+func TestHandleGraph_WorkItemsStatusFilter(t *testing.T) {
+	queries := &narrowWorkItemQueries{
+		list: &workitems.ListResult{Issues: []workitems.ListItem{
+			{IssueSummary: workitems.IssueSummary{ID: "OPEN-1", Status: "open"}},
+			{IssueSummary: workitems.IssueSummary{ID: "CLOSED-1", Status: "closed"}},
+			{IssueSummary: workitems.IssueSummary{ID: "TOMB-1", Status: "tombstone"}},
+		}},
+		detail: map[string]*workitems.IssueDetail{},
 	}
-	handler := HandleGraphWithBackend(func(_ context.Context) backend.IssueBackend { return be })
+	handler := HandleGraph(queries)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/issues/graph?status=open", nil)
 	rr := httptest.NewRecorder()
@@ -281,7 +308,7 @@ func TestHandleGraph_BackendStatusFilter(t *testing.T) {
 }
 
 func TestHandleGraph_NoPoolNoBackendReturns503(t *testing.T) {
-	handler := HandleGraphWithBackend(nil)
+	handler := HandleGraph(nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/issues/graph", nil)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
@@ -291,34 +318,14 @@ func TestHandleGraph_NoPoolNoBackendReturns503(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Backend tests — HandleBlockedWithBackend
+// Work Items owner-query tests — HandleBlocked
 // ---------------------------------------------------------------------------
 
-// stubBlockedBackend implements backend.IssueBackend with just enough surface
-// to exercise the HandleBlockedWithBackend path in unit tests. Only
-// Blocked is functional; every other method returns a sentinel error so
-// unintended use shows up as a test failure rather than silent success.
-type stubBlockedBackend struct {
-	*stubGraphBackend
-	blocked []backend.IssueData
-	err     error
-}
-
-func (s *stubBlockedBackend) Blocked(_ context.Context, _ backend.BlockedOpts) ([]backend.IssueData, error) {
-	if s.err != nil {
-		return nil, s.err
+func TestHandleBlocked_WorkItemsOwnerQueries(t *testing.T) {
+	queries := &narrowWorkItemQueries{
+		blocked: []workitems.IssueSummary{{ID: "FLEET-1", Title: "fleet-only"}},
 	}
-	return s.blocked, nil
-}
-
-func TestHandleBlocked_BackendOnlyWhenNoPool(t *testing.T) {
-	be := &stubBlockedBackend{
-		stubGraphBackend: &stubGraphBackend{},
-		blocked: []backend.IssueData{
-			{ID: "FLEET-1", Title: "fleet-only"},
-		},
-	}
-	handler := HandleBlockedWithBackend(func(_ context.Context) backend.IssueBackend { return be })
+	handler := HandleBlocked(queries)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/blocked", nil)
 	rr := httptest.NewRecorder()
@@ -328,8 +335,8 @@ func TestHandleBlocked_BackendOnlyWhenNoPool(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
 	}
 	var env struct {
-		Success bool                `json:"success"`
-		Data    []backend.IssueData `json:"data"`
+		Success bool                     `json:"success"`
+		Data    []workitems.IssueSummary `json:"data"`
 	}
 	if err := json.NewDecoder(rr.Body).Decode(&env); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -340,7 +347,7 @@ func TestHandleBlocked_BackendOnlyWhenNoPool(t *testing.T) {
 }
 
 func TestHandleBlocked_NoPoolNoBackendReturns503(t *testing.T) {
-	handler := HandleBlockedWithBackend(nil)
+	handler := HandleBlocked(nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/blocked", nil)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)

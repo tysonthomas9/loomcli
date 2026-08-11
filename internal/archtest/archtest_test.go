@@ -70,7 +70,7 @@ func TestCheckedInManifestsAndRepository(t *testing.T) {
 	if got, want := len(report.CompositeStoreOutside), 0; got != want {
 		t.Fatalf("outside-composition Store file count = %d, want %d", got, want)
 	}
-	if got, want := len(report.LegacyHandlerImports), 25; got != want {
+	if got, want := len(report.LegacyHandlerImports), 22; got != want {
 		t.Fatalf("legacy handler imports = %d, want %d", got, want)
 	}
 	if got, want := report.ModuleRoots, checkedInModuleRoots; !slices.Equal(got, want) {
@@ -889,6 +889,61 @@ func TestRetiredDriverAuthenticationFallbackCannotReturn(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRetiredHandlerBackendCompatibilityCannotReturn(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]map[string]struct{}{
+		"internal/webui/app/workspace_routes.go": {
+			"WithIssueBackendFn": {},
+		},
+		"internal/webui/handlers/git/graph.go": {
+			"IssueBackendFn": {}, "HandleBlockedWithBackend": {}, "HandleGraphWithBackend": {},
+			"serveBlockedViaBackend": {}, "serveGraphViaBackend": {},
+		},
+		"internal/webui/handlers/health/health.go": {
+			"IssueBackendFn": {}, "HandleStatsWithBackend": {}, "serveStatsViaBackend": {},
+		},
+	}
+	for relative, forbidden := range files {
+		path := filepath.Join(root, filepath.FromSlash(relative))
+		parsed, parseErr := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+		if parseErr != nil {
+			t.Fatal(parseErr)
+		}
+		checkName := func(name string) {
+			if _, retired := forbidden[name]; retired {
+				t.Errorf("retired handler backend compatibility symbol %s returned in %s", name, relative)
+			}
+		}
+		for _, declaration := range parsed.Decls {
+			switch value := declaration.(type) {
+			case *ast.FuncDecl:
+				checkName(value.Name.Name)
+			case *ast.GenDecl:
+				for _, spec := range value.Specs {
+					switch named := spec.(type) {
+					case *ast.TypeSpec:
+						checkName(named.Name.Name)
+					case *ast.ValueSpec:
+						for _, name := range named.Names {
+							checkName(name.Name)
+						}
+					}
+				}
+			}
+		}
+	}
+	authConfig, err := os.ReadFile(filepath.Join(root, "internal", "webui", "handlers", "misc", "auth_config.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(authConfig), `os.Getenv("LOOM_ISSUE_BACKEND")`) {
+		t.Error("retired /api/config backend environment fallback returned")
 	}
 }
 

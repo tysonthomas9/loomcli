@@ -8,16 +8,12 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
-type stubIssueBackend struct {
-	backend.IssueBackend
-	stats *backend.StatsData
-	err   error
-}
+type statsQueryFunc func(context.Context) (*workitems.Stats, error)
 
-func (s *stubIssueBackend) Stats(context.Context) (*backend.StatsData, error) { return s.stats, s.err }
+func (query statsQueryFunc) Stats(ctx context.Context) (*workitems.Stats, error) { return query(ctx) }
 
 func runtimeReadyRequest(ws string) *http.Request {
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+ws+"/readyz", nil)
@@ -50,9 +46,9 @@ func TestWorkspaceRuntimeReadyRequiresBackend(t *testing.T) {
 }
 
 func TestWorkspaceRuntimeReadySurfacesBackendFailure(t *testing.T) {
-	h := HandleWorkspaceRuntimeReadyWithLocalPath(func(context.Context) backend.IssueBackend {
-		return &stubIssueBackend{err: errors.New("backend down")}
-	}, nil)
+	h := HandleWorkspaceRuntimeReadyWithLocalPath(statsQueryFunc(func(context.Context) (*workitems.Stats, error) {
+		return nil, errors.New("backend down")
+	}), nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, runtimeReadyRequest("LOOM"))
 	if rec.Code != http.StatusServiceUnavailable || decodeReady(t, rec).Reason != "backend down" {
@@ -61,9 +57,9 @@ func TestWorkspaceRuntimeReadySurfacesBackendFailure(t *testing.T) {
 }
 
 func TestWorkspaceRuntimeReadySuccess(t *testing.T) {
-	h := HandleWorkspaceRuntimeReadyWithLocalPath(func(context.Context) backend.IssueBackend {
-		return &stubIssueBackend{stats: &backend.StatsData{}}
-	}, func(string) string { return t.TempDir() })
+	h := HandleWorkspaceRuntimeReadyWithLocalPath(statsQueryFunc(func(context.Context) (*workitems.Stats, error) {
+		return &workitems.Stats{}, nil
+	}), func(string) string { return t.TempDir() })
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, runtimeReadyRequest("LOOM"))
 	body := decodeReady(t, rec)
@@ -74,10 +70,10 @@ func TestWorkspaceRuntimeReadySuccess(t *testing.T) {
 
 func TestWorkspaceRuntimeReadyRejectsMissingLocalPath(t *testing.T) {
 	called := false
-	h := HandleWorkspaceRuntimeReadyWithLocalPath(func(context.Context) backend.IssueBackend {
+	h := HandleWorkspaceRuntimeReadyWithLocalPath(statsQueryFunc(func(context.Context) (*workitems.Stats, error) {
 		called = true
-		return &stubIssueBackend{stats: &backend.StatsData{}}
-	}, func(string) string { return "" })
+		return &workitems.Stats{}, nil
+	}), func(string) string { return "" })
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, runtimeReadyRequest("LOOM"))
 	if rec.Code != http.StatusServiceUnavailable || called {

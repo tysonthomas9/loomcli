@@ -16,6 +16,12 @@ type claimOnlyBackend struct {
 	getCalls   int
 }
 
+type statsOnlyBackend struct{ backend.IssueBackend }
+
+func (*statsOnlyBackend) Stats(context.Context) (*backend.StatsData, error) {
+	return &backend.StatsData{TotalIssues: 9, ReadyIssues: 2}, nil
+}
+
 func (b *claimOnlyBackend) ClaimIssue(_ context.Context, id string, ttl time.Duration) error {
 	b.claimCalls++
 	if id != "TASK-1" || ttl != 0 {
@@ -80,5 +86,19 @@ func TestWorkItemsClaimUsesOneAtomicMutationThenRead(t *testing.T) {
 	}
 	if result.Status != "in_progress" || be.claimCalls != 1 || be.getCalls != 1 {
 		t.Fatalf("unexpected claim result=%#v claimCalls=%d getCalls=%d", result, be.claimCalls, be.getCalls)
+	}
+}
+
+func TestWorkItemsStatsMapsBackendProjectionAtComposition(t *testing.T) {
+	api, err := NewWorkItems(func(context.Context) backend.IssueBackend { return &statsOnlyBackend{} })
+	if err != nil {
+		t.Fatal(err)
+	}
+	stats, err := api.Stats(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats == nil || stats.TotalIssues != 9 || stats.ReadyIssues != 2 {
+		t.Fatalf("stats = %+v", stats)
 	}
 }

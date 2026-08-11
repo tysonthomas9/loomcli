@@ -56,7 +56,7 @@ type Server struct {
 	connectorDispatcher connectorsmodule.Dispatcher
 
 	// Service layer
-	workItems        workitems.API
+	workItems        *workitems.Service
 	workspaceCatalog workspace.API
 	workspaceStore   store.WorkspaceStore
 	workItemMover    workitemmove.Commands

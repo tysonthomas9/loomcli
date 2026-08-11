@@ -1,10 +1,8 @@
 package app
 
 import (
-	"context"
 	"net/http"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
@@ -21,8 +19,9 @@ type WorkspaceOpsModule struct {
 	workspaceCatalog    workspacemodule.API
 	workspaceProjection workspace.CatalogProjection
 	workItems           workitems.ReadyQueries
+	workItemStats       workitems.StatsQueries
+	workItemGraph       githandlers.WorkItemQueries
 	agentQueueH         http.HandlerFunc
-	issueBackendFn      func(ctx context.Context) backend.IssueBackend
 	localPathFn         healthhandlers.WorkspaceLocalPathFn
 }
 
@@ -31,18 +30,19 @@ func (m *WorkspaceOpsModule) WithWorkItems(queries workitems.ReadyQueries) *Work
 	return m
 }
 
-// NewWorkspaceOpsModule creates a WorkspaceOpsModule. Callers supply an
-// IssueBackend factory so issue query handlers use the configured durable
-// backend directly.
-func NewWorkspaceOpsModule(workspaceSvc workspacecoord.WorkspaceService, agentQueueH http.HandlerFunc) *WorkspaceOpsModule {
-	return &WorkspaceOpsModule{workspaceSvc: workspaceSvc, agentQueueH: agentQueueH}
+func (m *WorkspaceOpsModule) WithWorkItemStats(queries workitems.StatsQueries) *WorkspaceOpsModule {
+	m.workItemStats = queries
+	return m
 }
 
-// WithIssueBackendFn injects the IssueBackend factory used by handlers.
-// Returns the module for chaining.
-func (m *WorkspaceOpsModule) WithIssueBackendFn(fn func(ctx context.Context) backend.IssueBackend) *WorkspaceOpsModule {
-	m.issueBackendFn = fn
+func (m *WorkspaceOpsModule) WithWorkItemGraph(queries githandlers.WorkItemQueries) *WorkspaceOpsModule {
+	m.workItemGraph = queries
 	return m
+}
+
+// NewWorkspaceOpsModule creates a WorkspaceOpsModule.
+func NewWorkspaceOpsModule(workspaceSvc workspacecoord.WorkspaceService, agentQueueH http.HandlerFunc) *WorkspaceOpsModule {
+	return &WorkspaceOpsModule{workspaceSvc: workspaceSvc, agentQueueH: agentQueueH}
 }
 
 // WithLocalWorkspacePathFn injects the per-machine workspace path resolver used
@@ -66,15 +66,15 @@ func (m *WorkspaceOpsModule) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/workspaces/{ws}/repos", workspace.HandleCatalogRepositories(m.workspaceCatalog, m.workspaceProjection))
 	mux.HandleFunc("POST /api/workspaces/{ws}/repos", workspace.HandleAddWorkspaceRepos(m.workspaceSvc))
 	mux.HandleFunc("GET /api/workspaces/{ws}/stats",
-		healthhandlers.HandleStatsWithBackend(healthhandlers.IssueBackendFn(m.issueBackendFn)))
+		healthhandlers.HandleStats(m.workItemStats))
 	mux.HandleFunc("GET /api/workspaces/{ws}/ready",
 		issues.HandleReadyWorkItems(m.workItems))
 	mux.HandleFunc("GET /api/workspaces/{ws}/blocked",
-		githandlers.HandleBlockedWithBackend(githandlers.IssueBackendFn(m.issueBackendFn)))
+		githandlers.HandleBlocked(m.workItemGraph))
 	mux.HandleFunc("GET /api/workspaces/{ws}/issues/graph",
-		githandlers.HandleGraphWithBackend(githandlers.IssueBackendFn(m.issueBackendFn)))
+		githandlers.HandleGraph(m.workItemGraph))
 	mux.HandleFunc("GET /api/workspaces/{ws}/readyz",
-		healthhandlers.HandleWorkspaceRuntimeReadyWithLocalPath(healthhandlers.IssueBackendFn(m.issueBackendFn), m.localPathFn))
+		healthhandlers.HandleWorkspaceRuntimeReadyWithLocalPath(m.workItemStats, m.localPathFn))
 	mux.HandleFunc("GET /api/workspaces/{ws}/config/backend", workspace.HandleWorkspaceBackendGet(m.workspaceSvc))
 	if m.agentQueueH != nil {
 		mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/queue", m.agentQueueH)

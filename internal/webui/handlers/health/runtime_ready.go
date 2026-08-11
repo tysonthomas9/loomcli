@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
@@ -28,9 +29,9 @@ type RuntimeReadyResponse struct {
 // local agent runtimes require this per-machine path to exist.
 type WorkspaceLocalPathFn func(workspace string) string
 
-// HandleWorkspaceRuntimeReadyWithLocalPath reports whether the owned issue
-// backend and the optional machine-local workspace path are available.
-func HandleWorkspaceRuntimeReadyWithLocalPath(backendFn IssueBackendFn, localPathFn WorkspaceLocalPathFn) http.HandlerFunc {
+// HandleWorkspaceRuntimeReadyWithLocalPath reports whether Work Items and the
+// optional machine-local workspace path are available.
+func HandleWorkspaceRuntimeReadyWithLocalPath(stats workitems.StatsQueries, localPathFn WorkspaceLocalPathFn) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ws := r.PathValue("ws")
 		if ws == "" {
@@ -43,7 +44,7 @@ func HandleWorkspaceRuntimeReadyWithLocalPath(backendFn IssueBackendFn, localPat
 			handler.WriteJSON(w, http.StatusServiceUnavailable, resp)
 			return
 		}
-		resp = probeIssueBackend(r.Context(), backendFn, ws)
+		resp = probeWorkItems(r.Context(), stats, ws)
 		status := http.StatusOK
 		if !resp.Ready {
 			status = http.StatusServiceUnavailable
@@ -70,21 +71,16 @@ func localWorkspacePathNotReady(localPathFn WorkspaceLocalPathFn, ws string) str
 	return ""
 }
 
-func probeIssueBackend(ctx context.Context, backendFn IssueBackendFn, ws string) RuntimeReadyResponse {
+func probeWorkItems(ctx context.Context, stats workitems.StatsQueries, ws string) RuntimeReadyResponse {
 	resp := RuntimeReadyResponse{Mode: "workflow-catalog", Workspace: ws}
-	if backendFn == nil {
+	if stats == nil {
 		resp.Reason = "issue backend not configured"
 		return resp
 	}
 	ctx = middleware.WithWorkspace(ctx, ws)
-	be := backendFn(ctx)
-	if be == nil {
-		resp.Reason = "issue backend not configured"
-		return resp
-	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	if _, err := be.Stats(ctx); err != nil {
+	if _, err := stats.Stats(ctx); err != nil {
 		resp.Reason = err.Error()
 		return resp
 	}

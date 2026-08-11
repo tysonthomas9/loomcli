@@ -9,22 +9,23 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
 
-// IssueBackendFn returns the active backend.IssueBackend. Passed through to
-// handlers that serve pool-less fleet mode.
-//
-// ctx carries the per-request workspace ID so cloud-mode wirings can route
-// to a per-workspace fleet-db backend.
-type IssueBackendFn func(ctx context.Context) backend.IssueBackend
+// WorkItemQueries is the narrow owner query surface consumed by graph and
+// blocked-list delivery. It carries no Work Items mutation authority.
+type WorkItemQueries interface {
+	List(context.Context, workitems.ListQuery) (*workitems.ListResult, error)
+	Get(context.Context, workitems.GetQuery) (*workitems.IssueDetail, error)
+	Blocked(context.Context, workitems.AvailabilityQuery) ([]workitems.IssueSummary, error)
+}
 
 // BlockedResponse wraps the blocked issues data for JSON response.
 type BlockedResponse struct {
-	Success bool                `json:"success"`
-	Data    []backend.IssueData `json:"data,omitempty"`
-	Error   string              `json:"error,omitempty"`
+	Success bool                     `json:"success"`
+	Data    []workitems.IssueSummary `json:"data,omitempty"`
+	Error   string                   `json:"error,omitempty"`
 }
 
 // GraphDependency represents a dependency relationship for graph visualization.
@@ -53,32 +54,26 @@ type GraphResponse struct {
 	Error   string        `json:"error,omitempty"`
 }
 
-func HandleBlockedWithBackend(backendFn IssueBackendFn) http.HandlerFunc {
+func HandleBlocked(queries WorkItemQueries) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !serveBlockedViaBackend(w, r, backendFn) {
+		if !serveBlocked(w, r, queries) {
 			handler.WriteJSON(w, http.StatusServiceUnavailable, BlockedResponse{Success: false, Error: "issue backend not configured"})
 		}
 	}
 }
 
-func HandleGraphWithBackend(backendFn IssueBackendFn) http.HandlerFunc {
+func HandleGraph(queries WorkItemQueries) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !serveGraphViaBackend(w, r, backendFn) {
+		if !serveGraph(w, r, queries) {
 			handler.WriteJSON(w, http.StatusServiceUnavailable, GraphResponse{Success: false, Error: "issue backend not configured"})
 		}
 	}
 }
 
-// serveBlockedViaBackend materializes a BlockedResponse-style envelope from
-// the supplied IssueBackend and writes it to w. Returns true when it served
-// the request (including backend errors), false when no backend is wired so
-// the caller can fall through to the pool-error path.
-func serveBlockedViaBackend(w http.ResponseWriter, r *http.Request, backendFn IssueBackendFn) bool {
-	if backendFn == nil {
-		return false
-	}
-	be := backendFn(r.Context())
-	if be == nil {
+// serveBlocked materializes the owner projection. It returns false only when
+// the Work Items query capability is not composed.
+func serveBlocked(w http.ResponseWriter, r *http.Request, queries WorkItemQueries) bool {
+	if queries == nil {
 		return false
 	}
 	args, err := parseBlockedParams(r)
@@ -89,19 +84,15 @@ func serveBlockedViaBackend(w http.ResponseWriter, r *http.Request, backendFn Is
 		})
 		return true
 	}
-	opts := backend.BlockedOpts{
-		ParentID: args.ParentID,
-		Assignee: args.Assignee,
-		Priority: args.Priority,
-		Type:     args.Type,
-		Limit:    args.Limit,
-	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
-	issues, err := be.Blocked(ctx, opts)
+	issues, err := queries.Blocked(ctx, workitems.AvailabilityQuery{
+		ParentID: args.ParentID, Assignee: args.Assignee, Priority: args.Priority,
+		IssueType: args.Type, Limit: args.Limit,
+	})
 	if err != nil {
-		slog.Error("backend error in HandleBlocked", "err", err)
+		slog.Error("Work Items query error in HandleBlocked", "err", err)
 		handler.WriteJSON(w, http.StatusInternalServerError, map[string]any{
 			"success": false,
 			"error":   "failed to list blocked issues",
@@ -109,7 +100,7 @@ func serveBlockedViaBackend(w http.ResponseWriter, r *http.Request, backendFn Is
 		return true
 	}
 	if issues == nil {
-		issues = []backend.IssueData{}
+		issues = []workitems.IssueSummary{}
 	}
 	handler.WriteJSON(w, http.StatusOK, map[string]any{
 		"success": true,
@@ -118,18 +109,12 @@ func serveBlockedViaBackend(w http.ResponseWriter, r *http.Request, backendFn Is
 	return true
 }
 
-// serveGraphViaBackend materializes a GraphResponse from the supplied
-// IssueBackend and writes it to w. Returns true when it served the request
-// (success OR backend error), false when no backend is wired so the caller
-// can fall through to the pool-error path.
+// serveGraph materializes a GraphResponse from Work Items owner projections.
+// It returns false only when the query capability is not composed.
 //
-//nolint:funlen // Handler translates backend graph data into the established API shape.
-func serveGraphViaBackend(w http.ResponseWriter, r *http.Request, backendFn IssueBackendFn) bool {
-	if backendFn == nil {
-		return false
-	}
-	be := backendFn(r.Context())
-	if be == nil {
+//nolint:funlen // Handler translates Work Items projections into the established API shape.
+func serveGraph(w http.ResponseWriter, r *http.Request, queries WorkItemQueries) bool {
+	if queries == nil {
 		return false
 	}
 	status, includeClosed, _ := parseGraphParams(r)
@@ -144,9 +129,9 @@ func serveGraphViaBackend(w http.ResponseWriter, r *http.Request, backendFn Issu
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
-	list, err := be.List(ctx, backend.ListOpts{})
+	result, err := queries.List(ctx, workitems.ListQuery{})
 	if err != nil {
-		slog.Error("backend error in HandleGraph", "err", err)
+		slog.Error("Work Items query error in HandleGraph", "err", err)
 		handler.WriteJSON(w, http.StatusInternalServerError, GraphResponse{
 			Success: false,
 			Error:   "failed to list issues",
@@ -154,8 +139,13 @@ func serveGraphViaBackend(w http.ResponseWriter, r *http.Request, backendFn Issu
 		return true
 	}
 
+	list := []workitems.ListItem{}
+	if result != nil {
+		list = result.Issues
+	}
 	graphIssues := make([]*GraphIssue, 0, len(list))
-	for _, d := range list {
+	for _, item := range list {
+		d := item.IssueSummary
 		if !includeGraphIssue(d.Status, status, includeClosed) {
 			continue
 		}
@@ -167,20 +157,20 @@ func serveGraphViaBackend(w http.ResponseWriter, r *http.Request, backendFn Issu
 			IssueType: d.IssueType,
 			Labels:    d.Labels,
 		}
-		// Fetch detail to pull dependencies; issue backends populate
-		// DependencyData from a single Get. If Get fails, leave
+		// Fetch detail to pull dependencies from the Work Items owner.
+		// If Get fails, leave
 		// Dependencies empty so the node still appears without edges.
-		if detail, detErr := be.Get(ctx, d.ID); detErr == nil && detail != nil {
+		if detail, detErr := queries.Get(ctx, workitems.GetQuery{IssueID: d.ID}); detErr == nil && detail != nil {
 			deps := make([]*GraphDependency, 0, len(detail.Dependencies))
 			for _, dep := range detail.Dependencies {
 				deps = append(deps, &GraphDependency{
-					DependsOnID: dep.DependsOnID,
-					Type:        dep.Type,
+					DependsOnID: dep.ID,
+					Type:        dep.DependencyType,
 				})
 			}
 			gi.Dependencies = deps
 		}
-		// Synthesize a parent-child edge when the backend reports a parent but
+		// Synthesize a parent-child edge when the owner projection reports a parent but
 		// did not encode it in Dependencies. The FE treats parent-child as a
 		// first-class edge type.
 		if d.Parent != "" {
@@ -215,7 +205,7 @@ func serveGraphViaBackend(w http.ResponseWriter, r *http.Request, backendFn Issu
 }
 
 // includeGraphIssue applies the status filter used by parseGraphParams.
-// Mirrors the exclude-set logic in HandleGraphWithPool so the backend
+// Mirrors the established exclude-set logic so the owner projection
 // preserves filter semantics.
 func includeGraphIssue(issueStatus, filter string, includeClosed bool) bool {
 	if issueStatus == "tombstone" {

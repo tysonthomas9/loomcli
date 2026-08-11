@@ -15,14 +15,14 @@ import (
 func (app *Server) buildModules() {
 	storeBacked := app.config.Store != nil
 
-	// Core workspace operations use the workflow-catalog IssueBackend port.
-	opsModule := NewWorkspaceOpsModule(app.workspaceSvc, nil).WithWorkItems(app.workItems)
+	// Core workspace operations use owned capability ports.
+	opsModule := NewWorkspaceOpsModule(app.workspaceSvc, nil).
+		WithWorkItems(app.workItems).
+		WithWorkItemStats(app.workItems).
+		WithWorkItemGraph(app.workItems)
 	if app.workspaceCatalog != nil && app.workspaceStore != nil && app.workspaceSvc != nil {
 		workspaceProjection := NewWorkspaceHTTPProjection(app.workspaceStore, app.workspaceSvc)
 		opsModule = opsModule.WithWorkspaceCatalog(app.workspaceCatalog, workspaceProjection)
-	}
-	if app.config.IssueBackendFn != nil {
-		opsModule = opsModule.WithIssueBackendFn(app.config.IssueBackendFn)
 	}
 	if storeBacked {
 		// Healing variant: when readyz finds no local path, attempt a one-shot

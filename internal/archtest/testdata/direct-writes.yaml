@@ -403,7 +403,7 @@ method_sets:
     read_only: []
     mutating: [AuthorVersion]
   - name: workitems_port
-    read_only: [Blocked, Deferred, Get, List, ListComments, ListDependencies, ListEvents, Ready, RequireRepositoryAdmission, Search]
+    read_only: [Blocked, Deferred, Get, List, ListComments, ListDependencies, ListEvents, Ready, RequireRepositoryAdmission, Search, Stats]
     mutating: [AddComment, AddDependency, AssignRepository, BlockRepositoryRequired, Claim, Close, Create, Delete, Patch, RemoveDependency, Reopen]
   - name: workspace_admission_store
     read_only: [AgentServices, Agents, Repos, Roles, Workspaces]

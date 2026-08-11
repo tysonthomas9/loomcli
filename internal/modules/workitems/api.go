@@ -31,6 +31,19 @@ type ReadyQueries interface {
 	Ready(context.Context, AvailabilityQuery) ([]IssueSummary, error)
 }
 
+// StatsQueries is the narrow aggregate projection consumed by health and
+// readiness delivery adapters.
+type StatsQueries interface {
+	Stats(context.Context) (*Stats, error)
+}
+
+// BlockedQueries is the narrow blocked-work projection consumed by delivery
+// adapters. It does not force unrelated Work Items consumers to depend on
+// queue availability or mutation methods.
+type BlockedQueries interface {
+	Blocked(context.Context, AvailabilityQuery) ([]IssueSummary, error)
+}
+
 type ListQuery struct {
 	Filter         ListFilter
 	ExcludeStatus  []string

@@ -52,7 +52,7 @@ type HandlerDeps struct {
 	// IssueBackendFn returns the active backend.IssueBackend. Threaded
 	// into /api/config so clients can see which backend the server is
 	// talking to without peeking at LOOM_ISSUE_BACKEND on the host. Nil
-	// is safe — the response falls back to the env var, then empty.
+	// is safe and produces an empty label.
 	//
 	// ctx carries the per-request workspace ID so cloud-mode wirings can
 	// route to a per-workspace fleet-db backend; /api/config callers pass
@@ -71,7 +71,7 @@ func BuildHandlers(deps HandlerDeps) *Handlers {
 		Health:       healthhandlers.HandleHealth(),
 		APIHealth:    healthhandlers.HandleAPIHealth(),
 		ClientErrors: misc.HandleClientErrors(clientErrLimiter),
-		AuthConfig:   misc.HandleAuthConfig(deps.ExtAuthURL, authCfgLimiter, deps.IssueBackendFn),
+		AuthConfig:   misc.HandleAuthConfig(deps.ExtAuthURL, authCfgLimiter, backendNameProvider(deps.IssueBackendFn)),
 		Metrics:      healthhandlers.HandleMetrics(deps.Hub, deps.FleetTimeoutsFn, deps.ClaimMetrics),
 		GetTerminalConfig: hterminal.HandleGetTerminalConfig(hterminal.TerminalLifecycleConfig{
 			GracePeriodMS: deps.TerminalGraceMS,
@@ -90,4 +90,17 @@ func BuildHandlers(deps HandlerDeps) *Handlers {
 	}
 
 	return h
+}
+
+func backendNameProvider(provider func(context.Context) backend.IssueBackend) misc.BackendNameFn {
+	if provider == nil {
+		return nil
+	}
+	return func(ctx context.Context) string {
+		issueBackend := provider(ctx)
+		if issueBackend == nil {
+			return ""
+		}
+		return issueBackend.BackendName()
+	}
 }

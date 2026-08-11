@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/filecoord"
@@ -50,7 +50,7 @@ func setupTestRoutes(t *testing.T, app *Server) {
 
 // TestStatsResponse_SuccessSerialization tests successful healthhandlers.StatsResponse serialization.
 func TestStatsResponse_SuccessSerialization(t *testing.T) {
-	stats := &backend.StatsData{
+	stats := &workitems.Stats{
 		TotalIssues:      100,
 		OpenIssues:       50,
 		InProgressIssues: 20,
@@ -155,7 +155,7 @@ func TestStatsResponse_ErrorOmitsDataField(t *testing.T) {
 func TestStatsResponse_SuccessOmitsErrorField(t *testing.T) {
 	resp := healthhandlers.StatsResponse{
 		Success: true,
-		Data:    &backend.StatsData{TotalIssues: 10},
+		Data:    &workitems.Stats{TotalIssues: 10},
 	}
 
 	data, err := json.Marshal(resp)

@@ -20,6 +20,8 @@ type Service struct {
 }
 
 var _ API = (*Service)(nil)
+var _ StatsQueries = (*Service)(nil)
+var _ BlockedQueries = (*Service)(nil)
 
 func New(store Store) (*Service, error) {
 	if store == nil {
@@ -141,6 +143,31 @@ func (s *Service) List(ctx context.Context, query ListQuery) (*ListResult, error
 		}
 	}
 	return &ListResult{KanbanIssues: out}, nil
+}
+
+// Stats returns the owner projection without exposing the durable adapter.
+func (s *Service) Stats(ctx context.Context) (*Stats, error) {
+	stats, err := s.store.Stats(ctx)
+	if err != nil || stats == nil {
+		return stats, err
+	}
+	cloned := *stats
+	return &cloned, nil
+}
+
+// Blocked returns the owner projection without exposing the durable adapter.
+func (s *Service) Blocked(ctx context.Context, query AvailabilityQuery) ([]IssueSummary, error) {
+	if query.Limit < 0 {
+		return nil, fmt.Errorf("limit must be non-negative: %w", ErrInvalid)
+	}
+	query.Labels = append([]string(nil), query.Labels...)
+	query.LabelsAny = append([]string(nil), query.LabelsAny...)
+	query.SourceRepos = append([]string(nil), query.SourceRepos...)
+	values, err := s.store.Blocked(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	return validIssueSummaries(values)
 }
 
 func (s *Service) Ready(ctx context.Context, query AvailabilityQuery) ([]IssueSummary, error) {
