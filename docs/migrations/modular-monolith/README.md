@@ -1,7 +1,7 @@
 # Modular Monolith Migration
 
-- **Status:** Phase 9 package consolidation in progress; its first eleven
-  slices ratchet the modular monolith to 181 production packages
+- **Status:** Phase 9 package consolidation in progress; its first twelve
+  slices ratchet the modular monolith to 178 production packages
 - **Date:** 2026-08-10
 - **Scope:** `loom serve`, the operator CLI entry surfaces, the Vite frontend counterpart, and the fleet-db contracts those capabilities depend on
 - **Provenance:** [Phase 0 integration baseline](00-phase-0-baseline.md), final [Phase 1 evidence](06-phase-1-decisions-and-evidence.md) at Loom `7e8a6dd2`, [Phase 2 evidence](07-phase-2-decisions-and-evidence.md) at Loom `84cccb761` with FleetDB `430dce8d9`, [Phase 3 evidence](08-phase-3-decisions-and-evidence.md) at core implementation commits Loom `7f95b9bf1` and FleetDB `f1c4e1119`, final [Phase 4 evidence](09-phase-4-decisions-and-evidence.md) at Loom `53cbe2577` with FleetDB `afb688768`, and the appended reliability-validation record at Loom `67c45972f` with FleetDB `9ffa69f60`
@@ -28,6 +28,15 @@ tree has 189 production packages and 67 one-file packages. Phase 9 continues
 from that exact shape toward 160 packages by deleting residual horizontal
 models, repositories, and shallow composition seams without merging capability
 owners.
+
+Through Wave 9.12, Phase 9 has retired the residual `internal/types` plane,
+duplicate Connectors and Artifacts repository/model layers, forwarding-only
+owner adapters, runtime and authentication compatibility paths, horizontal
+handler dependencies, and three shallow vocabulary packages. The exact current
+shape is 178 production packages: 15 under `internal/modules`, 163 outside
+module roots, 58 one-file packages, and 79 one-or-two-file packages. Known
+runtime fallback or compatibility planes remain unfinished work, not accepted
+target architecture.
 
 ## Reading order
 

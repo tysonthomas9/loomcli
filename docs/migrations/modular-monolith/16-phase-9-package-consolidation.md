@@ -13,6 +13,7 @@
 - **Wave 9.9 implementation:** `520e8a9f8`
 - **Wave 9.10 implementation:** `97df6fd92`
 - **Wave 9.11 implementation:** `9e0306f37`
+- **Wave 9.12 implementation:** `a7cc649d7`
 - **Stacked branches:** `modular-monolith-phase9-01-types-ratchet`, then
   `modular-monolith-phase9-02-shallow-seams`, then
   `modular-monolith-phase9-03-legacy-planes`, then
@@ -23,7 +24,8 @@
   `modular-monolith-phase9-08-driver-auth`, then
   `modular-monolith-phase9-09-handler-ports`, then
   `modular-monolith-phase9-10-prreview-ports`, then
-  `modular-monolith-phase9-11-shallow-runtime`
+  `modular-monolith-phase9-11-shallow-runtime`, then
+  `modular-monolith-phase9-12-shallow-vocabulary`
 - **Purpose:** Reduce the residual package surface toward 160 production Go
   packages without weakening capability ownership, consumer-owned ports, or
   independently replaceable adapters.
@@ -592,6 +594,48 @@ cache, placed build output under `/tmp`, allowed the bounded RSS monitor, and
 passed uninterrupted. An earlier direct WebUI-to-CLI health import was also
 rejected by the dependency guard; the final tree uses the consumer-owned port
 and composition adapter described above.
+
+## Wave 9.12 result
+
+The twelfth slice deletes three one-file vocabulary packages that had no
+independently replaceable implementation or durable protocol seam:
+
+- `internal/authmode` contained only the `open` and `oidc` wire values and a
+  two-value validator. Deployment trust-mode vocabulary now lives with the
+  existing platform Authority owner.
+- `internal/backendnames` contained only the `claude` and `codex` provider
+  names. Provider identity now lives with the existing platform Runtime owner.
+- `internal/cli/backendapi` existed only to carry optional backend interfaces
+  and value shapes between the CLI package and its backend adapters. The CLI
+  consumer now owns those contracts directly; the backend adapters implement
+  them without a third package hop.
+
+The slice does not introduce replacement compatibility packages, alternate
+constants, environment fallbacks, or generic shared vocabulary. The three old
+roots are physically absent and are included in the retired-horizontal-root
+guard, so recreating a directory or importing an old path fails architecture
+validation.
+
+The exact package shape moves from 181 to 178 production packages. Module
+packages remain 15, packages outside `internal/modules` fall from 166 to 163,
+one-file packages fall from 61 to 58, and one-or-two-file packages fall from 82
+to 79. Direct persistence remains exactly 93 rows across 102 sites, and the
+live legacy-handler allowance remains 19. The change therefore removes three
+shallow seams without relabeling persistence or weakening a capability edge.
+
+## Wave 9.12 validation
+
+| Check | Result |
+|---|---|
+| Authority trust-mode behavior, CLI backend capability behavior, provider consumers, and all-`internal` compilation | PASS |
+| Retired-root, exact package-shape, direct-write, import-fanout, lint, and dependency guards | PASS: all three roots absent; exact shape `178 / 15 / 163 / 58 / 79`; zero lint issues |
+| Authoritative repository architecture snapshot | PASS in 544.35s at implementation `a7cc649d78a46f2bf3b4118263bd2bcc19c3b864` |
+| Aggregate `make gate` against FleetDB `b71dec551` | PASS: all Go and frontend quality gates with sanitized Loom runtime variables, `GOMAXPROCS=4`, two Go test workers, one Vitest worker, and a 3 GiB Go soft memory limit |
+
+The final aggregate invocation passed without a source correction. It reused
+the populated temporary Go build cache and ran outside the filesystem sandbox
+only because the architecture RSS monitor requires `/bin/ps`. No threshold,
+allowlist, fallback, or compatibility facade was added.
 
 Later waves must update this document with the selected package candidates,
 the boundary reason retained or removed for each, exact shape changes, and
