@@ -53,10 +53,8 @@ start_workspace_daemon() {
     export LOOM_WORKSPACE_ID="$ws_key"
     export LOOM_BACKEND="${LOOM_BACKEND:-codex}"
     export LOOM_ISSUE_BACKEND=fleetdb
-    export LOOM_FLEET_DB_URL="${LOOM_FLEET_DB_URL:-${LOOM_FLEET_URL:-http://fleet-db:8080}}"
-    export LOOM_FLEET_URL="${LOOM_FLEET_URL:-$LOOM_FLEET_DB_URL}"
-    export LOOM_FLEET_DB_ACTOR="${LOOM_FLEET_DB_ACTOR:-${LOOM_FLEET_ACTOR:-local-user}}"
-    export LOOM_FLEET_ACTOR="${LOOM_FLEET_ACTOR:-$LOOM_FLEET_DB_ACTOR}"
+    export LOOM_FLEET_DB_URL="${LOOM_FLEET_DB_URL:-http://fleet-db:8080}"
+    export LOOM_FLEET_DB_ACTOR="${LOOM_FLEET_DB_ACTOR:-local-user}"
     export LOOM_FLEET_REQUIRED="${LOOM_FLEET_REQUIRED:-1}"
     exec loom daemon
   ) >>"$log_file" 2>&1 &

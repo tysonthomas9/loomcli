@@ -104,7 +104,7 @@ services:
         condition: service_started
     environment:
       LOOM_ISSUE_BACKEND: fleet-db
-      LOOM_FLEET_URL: http://fleet-db:8080
+      LOOM_FLEET_DB_URL: http://fleet-db:8080
       LOOM_WORKSPACE: FLEETDB
       LOOM_BACKEND: codex
       CODEX_HOME: /root/.codex
@@ -113,7 +113,6 @@ services:
       # path enabled in this compose). Falls back to LOOM_AGENT_NAME, but
       # being explicit avoids a surprise if someone unsets the agent name.
       #
-      LOOM_FLEET_ACTOR: fleetdb-regression-harness@fixture.local
       LOOM_FLEET_DB_ACTOR: fleetdb-regression-harness@fixture.local
       # Fail fast if loom boots thinking it has a local reference backend.
       # Any fallback to an embedded reference path in fleet mode should surface
@@ -133,16 +132,16 @@ services:
         # Pre-flight: confirm fleet-db is reachable from inside this
         # container before starting loom. If fleet-db isn't responding,
         # stop now rather than letting loom come up with a broken backend.
-        echo "[loom-fleet] checking fleet-db reachability at $$LOOM_FLEET_URL ..."
+        echo "[loom-fleet] checking fleet-db reachability at $$LOOM_FLEET_DB_URL ..."
         for i in $$(seq 1 30); do
-          if wget -qO- "$$LOOM_FLEET_URL/healthz" > /dev/null 2>&1; then
+          if wget -qO- "$$LOOM_FLEET_DB_URL/healthz" > /dev/null 2>&1; then
             echo "[loom-fleet] fleet-db OK"
             break
           fi
           echo "[loom-fleet] waiting for fleet-db ($$i/30)"
           sleep 1
         done
-        wget -qO- "$$LOOM_FLEET_URL/healthz" > /dev/null || { echo "[loom-fleet] FATAL: fleet-db unreachable"; exit 1; }
+        wget -qO- "$$LOOM_FLEET_DB_URL/healthz" > /dev/null || { echo "[loom-fleet] FATAL: fleet-db unreachable"; exit 1; }
 
         # Bootstrap a minimal git repo + FLEETDB loom workspace so the
         # webui has something to render.

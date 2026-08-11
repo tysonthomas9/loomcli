@@ -642,7 +642,7 @@ func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimp
 		BackendOps:           opsimpl.NewBackendOps(),
 		NotifyTokenDir:       cli.GetWorkspaceRuntimeDir(),
 		SessionRuntimeDir:    cli.GetWorkspaceRuntimeDir(),
-		LocalSettingsDir:     bootstrap.LoomDir(),
+		LocalSettingsDir:     bootstrap.FleetDBSettingsDir(),
 		Logger:               slog.Default(),
 		SentryDSN:            serveSentryDSN,
 		// Wire the active IssueBackend (fleet / fleet-db / api) into

@@ -300,18 +300,18 @@ async function runAllChecks(): Promise<PreflightResult> {
     });
   }
 
-  // 5. loom-fleet env LOOM_FLEET_URL
+  // 5. loom-fleet env LOOM_FLEET_DB_URL
   try {
-    const v = dockerExec("loom-fleet", "printenv LOOM_FLEET_URL");
+    const v = dockerExec("loom-fleet", "printenv LOOM_FLEET_DB_URL");
     checks.push({
-      name: "loom-fleet env LOOM_FLEET_URL",
+      name: "loom-fleet env LOOM_FLEET_DB_URL",
       expected: "http://fleet-db:8080",
       actual: v || "(empty)",
       pass: v === "http://fleet-db:8080",
     });
   } catch (e: any) {
     checks.push({
-      name: "loom-fleet env LOOM_FLEET_URL",
+      name: "loom-fleet env LOOM_FLEET_DB_URL",
       expected: "http://fleet-db:8080",
       actual: "docker exec failed",
       pass: false,
@@ -423,11 +423,11 @@ async function runAllChecks(): Promise<PreflightResult> {
     all_passed: checks.every((c) => c.pass),
     checks,
     env_snapshot: {
-      LOOM_REFERENCE_URL: FLEETDB_URLS.reference,
-      LOOM_FLEET_URL: FLEETDB_URLS.fleet,
-      FLEET_DB_URL: FLEETDB_URLS.fleetDB,
-      FLEETDB_WORKSPACE: FLEETDB_URLS.workspace,
-      FLEETDB_MODE: FLEETDB_URLS.mode,
+      PLAYWRIGHT_REFERENCE_UI_URL: FLEETDB_URLS.reference,
+      PLAYWRIGHT_FLEET_UI_URL: FLEETDB_URLS.fleet,
+      PLAYWRIGHT_FLEET_DB_URL: FLEETDB_URLS.fleetDB,
+      PLAYWRIGHT_FLEETDB_WORKSPACE: FLEETDB_URLS.workspace,
+      PLAYWRIGHT_FLEETDB_MODE: FLEETDB_URLS.mode,
     },
   };
 }

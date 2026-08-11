@@ -107,9 +107,9 @@ test-fleetdb-supervisor:
 #   make test-fleetdb-ui
 #
 # Environment overrides accepted (see playwright.config.ts):
-#   LOOM_FLEET_URL   default http://localhost:8082
-#   FLEET_DB_URL     default http://localhost:8080
-#   FLEETDB_WORKSPACE default FLEETDB
+#   PLAYWRIGHT_FLEET_UI_URL default http://localhost:8082
+#   PLAYWRIGHT_FLEET_DB_URL default http://localhost:8080
+#   PLAYWRIGHT_FLEETDB_WORKSPACE default FLEETDB
 test-fleetdb-ui:
 	@echo "Running fleet-db-only UI regression suite (Playwright)..."
 	@cd test/fleetdb/ui && \
@@ -118,7 +118,7 @@ test-fleetdb-ui:
 	    npm install --no-audit --no-fund --silent || exit 1; \
 	    npx playwright install --with-deps chromium || exit 1; \
 	  fi && \
-	  FLEETDB_MODE=fleet-only npx playwright test
+	  PLAYWRIGHT_FLEETDB_MODE=fleet-only npx playwright test
 
 # CLI integration scenarios against the empty fleet-db stack.
 # Brings up the stack (or reuses a running one), runs workspace-resolution

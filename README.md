@@ -325,6 +325,11 @@ loom daemon profile unset --max-agents                   # Clear an int field
 `internal/infra/memstore` is test-only. It is not a local runtime, fallback,
 cache, or embedded Redis implementation.
 
+`LOOM_CONFIG_DIR` changes Loom's per-client state directory, but local embedded
+fleet-db runtime files remain host-level by default at `~/.loom/fleet-db`. Set
+`LOOM_FLEET_DB_RUNTIME_DIR` only when you intentionally need an isolated local
+fleet-db runtime, such as in tests or parallel development stacks.
+
 `~/.loom/state.json` is a per-user cache of local checkout paths and the last
 selected workspace hint. Runtime commands do not use it as an implicit default;
 set `LOOM_WORKSPACE` or pass `--workspace`. The cache is regenerable — not

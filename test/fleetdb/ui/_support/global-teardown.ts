@@ -18,7 +18,7 @@ export default async function globalTeardown(): Promise<void> {
   );
   if (report.missing.length === 0) return;
 
-  const waived = (process.env.FLEETDB_COVERAGE_WAIVE ?? "")
+  const waived = (process.env.PLAYWRIGHT_FLEETDB_COVERAGE_WAIVE ?? "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);

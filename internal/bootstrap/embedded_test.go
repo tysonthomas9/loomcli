@@ -211,6 +211,8 @@ func TestReuseEmbeddedRuntimeRejectsUnhealthyProcess(t *testing.T) {
 func TestOpenStoreLocalReusesHealthyEmbeddedRuntime(t *testing.T) {
 	t.Setenv(EnvFleetDBURL, "")
 	t.Setenv(EnvFleetDBBin, filepath.Join(t.TempDir(), "missing-fleet-db"))
+	runtimeDir := filepath.Join(t.TempDir(), "fleet-db")
+	t.Setenv(EnvFleetDBRuntimeDir, runtimeDir)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/healthz" {
 			http.NotFound(w, r)
@@ -221,8 +223,7 @@ func TestOpenStoreLocalReusesHealthyEmbeddedRuntime(t *testing.T) {
 	defer srv.Close()
 
 	dataDir := t.TempDir()
-	fleetDir := filepath.Join(dataDir, "fleet-db")
-	if err := writeEmbeddedRuntime(fleetDir, embeddedRuntimeInfo{
+	if err := writeEmbeddedRuntime(runtimeDir, embeddedRuntimeInfo{
 		PID: os.Getpid(),
 		URL: srv.URL,
 	}); err != nil {
@@ -239,5 +240,44 @@ func TestOpenStoreLocalReusesHealthyEmbeddedRuntime(t *testing.T) {
 	}
 	if h.embedded != nil {
 		t.Fatal("OpenStore started a new embedded process instead of reusing runtime")
+	}
+}
+
+func TestOpenStoreLocalReusesHostRuntimeAcrossConfigDirs(t *testing.T) {
+	t.Setenv(EnvFleetDBURL, "")
+	t.Setenv(EnvFleetDBBin, filepath.Join(t.TempDir(), "missing-fleet-db"))
+	runtimeDir := filepath.Join(t.TempDir(), "fleet-db")
+	t.Setenv(EnvFleetDBRuntimeDir, runtimeDir)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	ownerConfigDir := t.TempDir()
+	foreignConfigDir := t.TempDir()
+	if err := writeEmbeddedRuntime(runtimeDir, embeddedRuntimeInfo{
+		PID: os.Getpid(),
+		URL: srv.URL,
+	}); err != nil {
+		t.Fatalf("write runtime: %v", err)
+	}
+
+	h, err := OpenStore(context.Background(), foreignConfigDir, nil)
+	if err != nil {
+		t.Fatalf("OpenStore: %v", err)
+	}
+	defer h.Close()
+	if h.URL() != srv.URL {
+		t.Fatalf("URL = %q, want %q", h.URL(), srv.URL)
+	}
+	if _, err := os.Stat(filepath.Join(ownerConfigDir, "fleet-db", "runtime.json")); !os.IsNotExist(err) {
+		t.Fatalf("owner config dir should not hold FleetDB runtime metadata: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(foreignConfigDir, "fleet-db", "runtime.json")); !os.IsNotExist(err) {
+		t.Fatalf("foreign config dir should not hold FleetDB runtime metadata: %v", err)
 	}
 }
