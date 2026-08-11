@@ -17,6 +17,8 @@
 - **Wave 9.13 implementation:** `2eccf26e0`
 - **Wave 9.14 implementation:** `05bbf3ef3`
 - **Wave 9.15 implementation:** `2ee3dfa2a`
+- **Wave 9.16 implementation:** `4c82d3781`
+- **Wave 9.17 implementation:** `92eeb4423`
 - **Stacked branches:** `modular-monolith-phase9-01-types-ratchet`, then
   `modular-monolith-phase9-02-shallow-seams`, then
   `modular-monolith-phase9-03-legacy-planes`, then
@@ -31,7 +33,9 @@
   `modular-monolith-phase9-12-shallow-vocabulary`, then
   `modular-monolith-phase9-13-explicit-context`, then
   `modular-monolith-phase9-14-session-ownership`, then
-  `modular-monolith-phase9-15-native-parser-ownership`
+  `modular-monolith-phase9-15-native-parser-ownership`, then
+  `modular-monolith-phase9-16-local-session-archive`, then
+  `modular-monolith-phase9-17-durable-terminal-launch`
 - **Purpose:** Reduce the residual package surface toward 160 production Go
   packages without weakening capability ownership, consumer-owned ports, or
   independently replaceable adapters.
@@ -821,6 +825,49 @@ caches were removed, and the unchanged full-profile proof passed with a
 20-minute alarm. The subsequent aggregate gate passed without another source
 correction, threshold change, allowlist expansion, compatibility path, or
 fallback.
+
+## Wave 9.17 result
+
+The seventeenth slice deletes the executable terminal-launch compatibility
+protocol. WebSocket attachment no longer reconstructs a command from a tab's
+session name, supplies a launch for missing metadata, or treats a UUID-shaped
+name as a special migration boundary. Generic tab creation now requires a
+validated backend intent; the server derives and durably persists the exact
+argv and environment envelope before the frontend mounts a terminal instance.
+Every non-live attachment without that envelope fails closed. A backend-started
+setup PTY remains attachable only while that exact in-process session exists;
+after restart it is not replayed from a name.
+
+The frontend likewise stops parsing terminal names for backend or agent
+identity. Agent classification requires server-owned kind and agent ID
+metadata, and restored colors/issue tabs use the persisted backend. Tab
+creation, duplication, and issue seeding persist metadata before opening a
+WebSocket, closing the race in which attachment could outrun the PUT. The dead
+`trySeedOnConnect` no-op and its unused connection callback are deleted rather
+than retained as extension points.
+
+This is a compatibility-deletion wave, not a package-deletion wave. Exact
+package shape remains `171 / 15 / 156 / 51 / 72`, and direct persistence
+remains `89 / 98`. An architecture tombstone rejects the retired Go and
+TypeScript symbols and all name-derived agent/backend classification fragments.
+
+## Wave 9.17 validation
+
+| Check | Result |
+|---|---|
+| Terminal launch/store/attach behavior | PASS: server-derived shell and five AI-backend envelopes, missing store/metadata/envelope rejection, invalid backend rejection, setup live-only attach, and persisted envelope consumption |
+| Frontend terminal behavior | PASS: typecheck plus 169 focused tests covering persist-before-mount creation/restoration, issue seeding, agent classification, connection state, and metadata rollback |
+| Generated contracts and affected lint | PASS: Go and TypeScript OpenAPI outputs current; zero affected Go lint issues |
+| Retired compatibility tombstone and exact shape | PASS: name-derived launch/backend/agent inference and dead connect-seeding callbacks absent; exact shape `171 / 15 / 156 / 51 / 72` |
+| Measured architecture guard | PASS: 11/11 profiles, 10 capability roots, 89 direct-write rows, 19 live legacy-handler allowances, and 1,224.1 MiB peak process-tree RSS under 2,048 MiB |
+| Aggregate `make gate` against FleetDB `b71dec551` | PASS: Go, frontend, race, coverage, dependency, contract, architecture, and build gates with the matching `816b0b0c…7ef0` OpenAPI snapshot and bounded workers/memory |
+
+The first aggregate attempt found two new lint issues and led to a smaller PUT
+construction helper plus removal of a production-only test wrapper. The next
+attempt intentionally failed the FleetDB freshness guard because only the
+binary, not `FLEET_DB_REPO`, pointed at the Phase 7 companion. The final run
+pinned both inputs to the exact companion checkout and passed without changing
+a threshold, allowlist, contract snapshot, or compatibility behavior.
 
 Later waves must update this document with the selected package candidates,
 the boundary reason retained or removed for each, exact shape changes, and

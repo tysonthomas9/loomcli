@@ -280,9 +280,17 @@ shape to 175 packages, 160 outside modules, 55 one-file packages, and 76
 one-or-two-file packages. Wave 9.15 then deletes the remaining Claude and
 OpenCode transcript parser packages, keeps only owner-private parsing behavior
 in Sessions, and ratchets the exact shape to 173 packages, 158 outside modules,
-53 one-file
-packages, and 74 one-or-two-file packages. The remaining waves delete the other
-horizontal handler/store edges and residual shallow packages; an empty
+53 one-file packages, and 74 one-or-two-file packages. Wave 9.16 then deletes the
+forwarding-only session-store adapter and the separate session event-store
+package, moves archive and event-log policy behind the Sessions owner, and
+ratchets the exact shape to 171 packages, 156 outside modules, 51 one-file
+packages, and 72 one-or-two-file packages. Wave 9.17 deletes the terminal
+session-name command protocol and frontend name-derived backend/agent
+classification, requires server-derived durable launch envelopes before
+WebSocket attachment, and removes the dead connect-seeding callback. It leaves
+the exact package count unchanged while eliminating the known executable
+compatibility path. The remaining waves delete the other horizontal
+handler/store edges and residual shallow packages; an empty
 capability-graph `legacy_paths` list alone is not completion proof. See the
 [Phase 9 plan](16-phase-9-package-consolidation.md).
 
