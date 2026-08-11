@@ -14,6 +14,8 @@
 - **Wave 9.10 implementation:** `97df6fd92`
 - **Wave 9.11 implementation:** `9e0306f37`
 - **Wave 9.12 implementation:** `a7cc649d7`
+- **Wave 9.13 implementation:** `2eccf26e0`
+- **Wave 9.14 implementation:** `05bbf3ef3`
 - **Stacked branches:** `modular-monolith-phase9-01-types-ratchet`, then
   `modular-monolith-phase9-02-shallow-seams`, then
   `modular-monolith-phase9-03-legacy-planes`, then
@@ -25,7 +27,9 @@
   `modular-monolith-phase9-09-handler-ports`, then
   `modular-monolith-phase9-10-prreview-ports`, then
   `modular-monolith-phase9-11-shallow-runtime`, then
-  `modular-monolith-phase9-12-shallow-vocabulary`
+  `modular-monolith-phase9-12-shallow-vocabulary`, then
+  `modular-monolith-phase9-13-explicit-context`, then
+  `modular-monolith-phase9-14-session-ownership`
 - **Purpose:** Reduce the residual package surface toward 160 production Go
   packages without weakening capability ownership, consumer-owned ports, or
   independently replaceable adapters.
@@ -685,6 +689,43 @@ correctly failed the vendored-spec freshness guard. The final proof rebuilt the
 binary from the documented Phase 7 companion at `b71dec551`; its OpenAPI
 SHA-256 exactly matched the vendored `816b0b0c…7ef0` snapshot, the focused route
 contract passed, and the aggregate rerun completed without a source correction.
+
+## Wave 9.14 result
+
+The fourteenth slice deletes the shallow native-transcript dispatcher and
+Codex forwarding package under `internal/sessions/transcript`. Session
+ownership now includes selecting the recorded backend parser, while the Codex
+translation maps the external harness-wrapper representation directly into the
+existing canonical session event. The subagent transcript reader uses the same
+Sessions entry point rather than importing a parallel dispatcher.
+
+The deleted packages are guarded as retired roots. No generic parser port or
+replacement facade was introduced: these parsers are local implementation
+choices with no independently replaceable runtime boundary. The previous
+unknown-backend behavior silently selected the Claude wire format; it is gone.
+An unrecognized recorded backend now returns an explicit error, preserving the
+fail-closed runtime policy.
+
+The exact package shape moves from 177 to 175 production packages. Module
+packages remain 15, packages outside `internal/modules` fall from 162 to 160,
+one-file packages fall from 57 to 55, and one-or-two-file packages fall from 78
+to 76. The implementation removes 129 net repository lines, including the two
+production packages and their duplicate package-level tests.
+
+## Wave 9.14 validation
+
+| Check | Result |
+|---|---|
+| Sessions, WebUI session coordination, misc-handler bridge, platform-runtime, and all-`internal` compilation | PASS |
+| Claude, Codex, and OpenCode parsing plus unknown-backend fail-closed behavior | PASS at the Sessions owner surface |
+| Retired-root, exact package-shape, import-fanout, topology, and affected lint guards | PASS: both roots absent; exact shape `175 / 15 / 160 / 55 / 76`; zero affected lint issues |
+| Authoritative repository architecture snapshot | PASS in 433.841s at implementation `05bbf3ef3` |
+| Aggregate `make gate` against FleetDB `b71dec551` | PASS: all Go and frontend quality gates with sanitized Loom runtime variables, `GOMAXPROCS=4`, one Go test worker, two Vitest workers, and a 3 GiB Go soft memory limit |
+
+The full gate used the exact Phase 7 companion checkout and binary whose
+OpenAPI SHA-256 matches Loom's vendored `816b0b0c…7ef0` snapshot. The final
+race-and-coverage pass ran sequentially; no threshold, allowlist, compatibility
+path, or fallback was added to obtain the green result.
 
 Later waves must update this document with the selected package candidates,
 the boundary reason retained or removed for each, exact shape changes, and
