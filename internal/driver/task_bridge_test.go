@@ -126,8 +126,9 @@ func TestHostBridgeContinuesSameBackendSessionUntilCompositeChangesAreCommitted(
   *) printf 'changed\n' > repo-a/README.md ;;
 esac
 printf '%s\n' '{"status":"completed","exit_code":0,"session_id":"session-1"}'`
+	st := memstore.New()
 	executor := HostBridgeTaskExecutor{
-		Store: memstore.New(), WorktreePath: t.TempDir(),
+		Store: st, WorktreePath: t.TempDir(),
 		RootResolver: fixedTaskRootResolver{root: TaskRoot{
 			Path: root, ManifestPath: manifest,
 			Repositories: []TaskRootRepository{
@@ -149,6 +150,13 @@ printf '%s\n' '{"status":"completed","exit_code":0,"session_id":"session-1"}'`
 	}
 	if result.Status != domain.TaskRunCompleted || result.RuntimeMetadata["backend_session_ref"] != "session-1" || result.RuntimeMetadata["backend_continuation_count"] != "1" || result.RuntimeMetadata["review_task_run_id"] != req.TaskRunID+"-review-v1" {
 		t.Fatalf("continued result = %+v", result)
+	}
+	review, err := st.TaskRuns().Get(t.Context(), req.WorkspaceKey, req.TaskRunID+"-review-v1")
+	if err != nil {
+		t.Fatalf("get review TaskRun: %v", err)
+	}
+	if review.RuntimeMetadata["runner_trust_level"] != string(domain.DriverTrustTrusted) {
+		t.Fatalf("review runner trust = %q, want trusted implementation runner stamp", review.RuntimeMetadata["runner_trust_level"])
 	}
 	if status := strings.TrimSpace(testGitOutput(t, repoA, "status", "--porcelain")); status != "" {
 		t.Fatalf("repo-a remains dirty: %q", status)

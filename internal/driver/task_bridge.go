@@ -479,8 +479,15 @@ func (e HostBridgeTaskExecutor) enqueueTaskChangeReview(ctx context.Context, req
 		WorkerProfileID: req.WorkerProfileID, Runner: req.Runner, RunnerRef: req.RunnerRef,
 		RunnerKind: req.RunnerKind, RunnerEntrypoint: req.RunnerEntrypoint, RunnerVersionID: req.RunnerVersionID,
 		ProviderProfile: req.ProviderProfile, BackendKind: req.ProviderProfile, Status: domain.TaskRunQueued,
-		RuntimeMetadata: map[string]string{"review_of_task_run_id": req.TaskRunID, "change_set_version": strconv.Itoa(version)},
-		Input:           req.Input,
+		RuntimeMetadata: map[string]string{
+			"review_of_task_run_id": req.TaskRunID,
+			"change_set_version":    strconv.Itoa(version),
+			// Preserve the server-admitted trust of the exact runner version.
+			// Dropping this stamp makes the review look untrusted at claim time
+			// even though it reuses the implementation runner identity.
+			"runner_trust_level": string(taskRunnerTrustLevel(req.RunnerTrustLevel)),
+		},
+		Input: req.Input,
 	})
 	if err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
 		return "", fmt.Errorf("enqueue review TaskRun %s: %w", taskRunID, err)
