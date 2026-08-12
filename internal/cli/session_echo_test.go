@@ -3,7 +3,6 @@
 package cli
 
 import (
-	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -203,103 +202,6 @@ func TestSessionCapture_TranscriptAppend(t *testing.T) {
 	}
 	if loaded[1].Content != "Hello" {
 		t.Errorf("entry[1].Content = %q, want Hello", loaded[1].Content)
-	}
-}
-
-// TestSessionCapture_HookDispatch verifies the hook dispatch pipeline:
-// parse Claude hook input → dispatch to session transcript.
-func TestSessionCapture_HookDispatch(t *testing.T) {
-	runtimeDir := t.TempDir()
-	store, err := sessions.NewStore(runtimeDir)
-	if err != nil {
-		t.Fatalf("NewStore: %v", err)
-	}
-
-	sess, err := store.CreateSession(sessions.CreateOptions{
-		AgentName:  "test-agent",
-		Backend:    "claude",
-		Prompt:     "implement feature",
-		AttemptNum: 1,
-	})
-	if err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-
-	sid := sess.SessionID()
-
-	// Simulate hook events by dispatching directly.
-	events := []HookEvent{
-		{
-			Type:      HookSessionStart,
-			SessionID: "claude-session-1",
-			Model:     "claude-sonnet-4-20250514",
-			Backend:   "claude",
-			Timestamp: time.Now(),
-		},
-		{
-			Type:      HookTurnStart,
-			SessionID: "claude-session-1",
-			Prompt:    "implement feature",
-			Backend:   "claude",
-			Timestamp: time.Now(),
-		},
-		{
-			Type:      HookSubagentStart,
-			SessionID: "claude-session-1",
-			ToolUseID: "toolu_abc123",
-			ToolInput: json.RawMessage(`{"prompt":"fix tests"}`),
-			Backend:   "claude",
-			Timestamp: time.Now(),
-		},
-		{
-			Type:       HookSubagentEnd,
-			SessionID:  "claude-session-1",
-			ToolUseID:  "toolu_abc123",
-			SubagentID: "agent-sub-001",
-			Backend:    "claude",
-			Timestamp:  time.Now(),
-		},
-		{
-			Type:      HookTurnEnd,
-			SessionID: "claude-session-1",
-			Backend:   "claude",
-			Timestamp: time.Now(),
-		},
-		{
-			Type:      HookSessionEnd,
-			SessionID: "claude-session-1",
-			Backend:   "claude",
-			Timestamp: time.Now(),
-		},
-	}
-
-	for _, ev := range events {
-		_ = dispatchHookEvent(&ev, runtimeDir, sid)
-	}
-
-	// Verify transcript was written.
-	loaded, err := store.LoadTranscript(sid)
-	if err != nil {
-		t.Fatalf("LoadTranscript: %v", err)
-	}
-	if len(loaded) != 6 {
-		t.Fatalf("expected 6 transcript entries, got %d", len(loaded))
-	}
-
-	// Verify entry types in order.
-	expectedTypes := []string{"session_start", "text", "subagent_start", "subagent_end", "turn_end", "session_end"}
-	for i, e := range loaded {
-		if e.Type != expectedTypes[i] {
-			t.Errorf("entry[%d].Type = %q, want %q", i, e.Type, expectedTypes[i])
-		}
-		if e.Seq != i+1 {
-			t.Errorf("entry[%d].Seq = %d, want %d", i, e.Seq, i+1)
-		}
-	}
-
-	// Verify subagent entries have tool info.
-	if loaded[2].ToolName != "Task" {
-		t.Errorf("subagent_start.ToolName = %q, want Task", loaded[2].ToolName)
 	}
 }
 

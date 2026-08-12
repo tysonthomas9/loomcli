@@ -102,10 +102,18 @@ type doctorJSONCheck struct {
 	Detail  string `json:"detail,omitempty"`
 }
 
+// doctorJSONSummary mirrors the public doctor JSON contract without coupling
+// these composition-root subprocess tests to the doctor implementation package.
+type doctorJSONSummary struct {
+	Pass int `json:"pass"`
+	Warn int `json:"warn"`
+	Fail int `json:"fail"`
+}
+
 // doctorJSONOutput mirrors DoctorOutput for subprocess JSON parsing.
 type doctorJSONOutput struct {
 	Checks  []doctorJSONCheck `json:"checks"`
-	Summary DoctorSummary     `json:"summary"`
+	Summary doctorJSONSummary `json:"summary"`
 }
 
 // parseDoctorJSON parses the JSON output from loom doctor --json.

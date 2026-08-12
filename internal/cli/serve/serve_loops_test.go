@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	driverexecutor "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -165,4 +166,11 @@ func TestIssueBridgeStatePath(t *testing.T) {
 			t.Fatalf("issueBridgeStatePath() = %q, want %q", got, want)
 		}
 	})
+}
+
+func TestDriverStaleTaskMaxAgeMatchesSweeperDefault(t *testing.T) {
+	t.Setenv(envLoomDriverStaleTaskMaxAge, "")
+	if got := driverStaleTaskMaxAge(); got != driverexecutor.DefaultStaleTaskRunMaxAge {
+		t.Fatalf("driverStaleTaskMaxAge() = %v, want driver default %v", got, driverexecutor.DefaultStaleTaskRunMaxAge)
+	}
 }

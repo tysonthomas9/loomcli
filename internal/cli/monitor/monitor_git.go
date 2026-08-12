@@ -1,6 +1,7 @@
 package monitor
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -13,26 +14,28 @@ import (
 // monitor collection path. Prevents indefinite hangs from git index locks.
 const monitorGitTimeout = 10 * time.Second
 
-// runMonitorGit runs a git command with a timeout, scoped to monitor collection.
-// Runs through deps.Git so tests can mock git; enforces timeout via goroutine+timer.
+// runMonitorGit runs a cancellable git command with a timeout, scoped to
+// monitor collection. Requiring ContextGitRunner ensures a timed-out caller
+// does not leave an unbounded git subprocess behind.
 func runMonitorGit(deps *cli.Deps, path string, args ...string) (string, error) {
-	type result struct {
-		out string
-		err error
+	return runMonitorGitWithTimeout(deps, path, monitorGitTimeout, args...)
+}
+
+func runMonitorGitWithTimeout(deps *cli.Deps, path string, timeout time.Duration, args ...string) (string, error) {
+	runner, ok := deps.Git.(cli.ContextGitRunner)
+	if !ok {
+		return "", fmt.Errorf("git %s requires a context-aware runner", strings.Join(args, " "))
 	}
-	ch := make(chan result, 1)
-	go func() {
-		out, err := cli.RunGit(deps, path, args...)
-		ch <- result{out, err}
-	}()
-	timer := time.NewTimer(monitorGitTimeout)
-	defer timer.Stop()
-	select {
-	case r := <-ch:
-		return r.out, r.err
-	case <-timer.C:
-		return "", fmt.Errorf("git %s timed out after %v", strings.Join(args, " "), monitorGitTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	result := runner.RunContext(ctx, path, args...)
+	if result.Err != nil {
+		if ctx.Err() != nil {
+			return "", fmt.Errorf("git %s timed out after %v: %w", strings.Join(args, " "), timeout, ctx.Err())
+		}
+		return result.Stdout, result.Err
 	}
+	return result.Stdout, nil
 }
 
 func GetWorktreeGitSyncStatus(path, defaultBranch string, overrideBranch string) (ahead, behind int) {

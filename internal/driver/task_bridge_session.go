@@ -11,6 +11,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
+const flueTaskSessionFinalizeTimeout = 10 * time.Second
+
 // validateBridgeTaskRunnerResult mirrors §4.1/§4.2: a decoded runner result is
 // valid only when it carries a terminal status and — for completed — a zero
 // exit code. Empty/`{}`/`null` results decode to a zero struct whose status is
@@ -192,8 +194,28 @@ func (e HostBridgeTaskExecutor) startFlueTaskSession(ctx context.Context, req Ta
 		}
 	}
 	hbCtx, cancel := context.WithCancel(ctx)
-	go heartbeatFlueTaskSession(hbCtx, e.Store, req.WorkspaceKey, sessionID, 30*time.Second)
-	return &flueTaskSession{SessionID: sessionID, Metadata: metadata, cancel: cancel}, nil
+	heartbeatDone := startFlueTaskSessionHeartbeat(hbCtx, e.Store, req.WorkspaceKey, sessionID, 30*time.Second)
+	return &flueTaskSession{
+		SessionID:     sessionID,
+		Metadata:      metadata,
+		cancel:        cancel,
+		heartbeatDone: heartbeatDone,
+	}, nil
+}
+
+func startFlueTaskSessionHeartbeat(
+	ctx context.Context,
+	st store.Store,
+	workspaceKey string,
+	sessionID string,
+	interval time.Duration,
+) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		heartbeatFlueTaskSession(ctx, st, workspaceKey, sessionID, interval)
+	}()
+	return done
 }
 
 func heartbeatFlueTaskSession(ctx context.Context, st store.Store, workspaceKey, sessionID string, interval time.Duration) {
@@ -217,11 +239,17 @@ func (e HostBridgeTaskExecutor) finishFlueTaskSession(ctx context.Context, req T
 	if e.Store == nil || session == nil {
 		return nil
 	}
-	if session.cancel != nil {
-		session.cancel()
-	}
+	stopFlueTaskSessionHeartbeat(session)
+	// Execution cancellation is itself a normal terminal outcome. Once the
+	// heartbeat is drained, use an independent bounded context so a canceled
+	// task cannot leave its AgentSession running without further heartbeats.
+	finalizeCtx, cancelFinalize := context.WithTimeout(context.WithoutCancel(ctx), flueTaskSessionFinalizeTimeout)
+	defer cancelFinalize()
 	status := flueTaskSessionStatus(result, execErr)
 	metadata := mergeStringMaps(session.Metadata, result.RuntimeMetadata)
+	if metadata == nil {
+		metadata = make(map[string]string)
+	}
 	if runner != nil {
 		if sessionID := firstNonEmpty(runner.SessionID, runner.SessionIDCamel); sessionID != "" {
 			metadata["driver_runner_session_id"] = sessionID
@@ -251,7 +279,7 @@ func (e HostBridgeTaskExecutor) finishFlueTaskSession(ctx context.Context, req T
 	if status != domain.AgentSessionCompleted {
 		summary = firstNonEmpty(result.ErrorMessage, "task run failed")
 	}
-	return updateFlueAgentSession(ctx, e.Store, req.WorkspaceKey, session.SessionID, store.AgentSessionUpdate{
+	return updateFlueAgentSession(finalizeCtx, e.Store, req.WorkspaceKey, session.SessionID, store.AgentSessionUpdate{
 		Status:     &status,
 		FinishedAt: &finishedAtPtr,
 		Summary:    &summary,
@@ -259,6 +287,18 @@ func (e HostBridgeTaskExecutor) finishFlueTaskSession(ctx context.Context, req T
 		ExitCode:   &exitCodePtr,
 		Metadata:   &metadata,
 	})
+}
+
+func stopFlueTaskSessionHeartbeat(session *flueTaskSession) {
+	if session.cancel != nil {
+		session.cancel()
+	}
+	if session.heartbeatDone != nil {
+		// Heartbeat is a non-CAS read/modify/write in the Redis store. Drain an
+		// in-flight call before writing terminal state so a stale running record
+		// cannot be committed after completion.
+		<-session.heartbeatDone
+	}
 }
 
 func updateFlueAgentSession(ctx context.Context, st store.Store, workspaceKey, sessionID string, patch store.AgentSessionUpdate) error {

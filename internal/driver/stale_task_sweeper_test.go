@@ -16,6 +16,11 @@ import (
 // backdated by heartbeatAge.
 func seedSweeperFixture(t *testing.T, st *memstore.Store, ws string, driverRunStatus domain.DriverRunStatus, heartbeatAge time.Duration) {
 	t.Helper()
+	seedSweeperFixtureAt(t, st, ws, driverRunStatus, time.Now().UTC().Add(-heartbeatAge))
+}
+
+func seedSweeperFixtureAt(t *testing.T, st *memstore.Store, ws string, driverRunStatus domain.DriverRunStatus, heartbeatAt time.Time) {
+	t.Helper()
 	ctx := context.Background()
 	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
 		WorkspaceKey: ws,
@@ -60,9 +65,91 @@ func seedSweeperFixture(t *testing.T, st *memstore.Store, ws string, driverRunSt
 		t.Fatalf("Create task run: %v", err)
 	}
 	if _, err := st.TaskRuns().Heartbeat(ctx, ws, "task-run-1", store.TaskRunHeartbeat{
-		HeartbeatAt: time.Now().UTC().Add(-heartbeatAge),
+		HeartbeatAt: heartbeatAt,
 	}); err != nil {
 		t.Fatalf("Heartbeat task run: %v", err)
+	}
+}
+
+func TestStaleTaskSweeperUsesMonotonicElapsedTimeAcrossWallClockJumps(t *testing.T) {
+	t.Run("forward jump before first sweep cannot age a live heartbeat", func(t *testing.T) {
+		ctx, st, sweeper, wall, monotonic := newClockJumpSweeper(t)
+		*wall = wall.Add(2 * time.Hour)
+		*monotonic = 2 * time.Second
+
+		assertSweepResult(t, sweeper, ctx, 0, 1)
+		assertTaskRunStatus(t, st, domain.TaskRunRunning)
+	})
+
+	t.Run("forward jump cannot age a live heartbeat", func(t *testing.T) {
+		ctx, st, sweeper, wall, monotonic := newClockJumpSweeper(t)
+		assertSweepResult(t, sweeper, ctx, 0, 1)
+
+		*wall = wall.Add(2 * time.Hour)
+		*monotonic = 2 * time.Second
+		assertSweepResult(t, sweeper, ctx, 0, 1)
+		assertTaskRunStatus(t, st, domain.TaskRunRunning)
+	})
+
+	t.Run("backward jump protects a fresh heartbeat and recovery resumes", func(t *testing.T) {
+		ctx, st, sweeper, wall, monotonic := newClockJumpSweeper(t)
+		assertSweepResult(t, sweeper, ctx, 0, 1)
+
+		*wall = wall.Add(-2 * time.Hour)
+		*monotonic = 2 * time.Second
+		if _, err := st.TaskRuns().Heartbeat(ctx, "WS", "task-run-1", store.TaskRunHeartbeat{HeartbeatAt: *wall}); err != nil {
+			t.Fatalf("post-jump heartbeat: %v", err)
+		}
+		assertSweepResult(t, sweeper, ctx, 0, 1)
+
+		*wall = wall.Add(19 * time.Minute)
+		*monotonic += 19 * time.Minute
+		assertSweepResult(t, sweeper, ctx, 0, 1)
+
+		*wall = wall.Add(2 * time.Minute)
+		*monotonic += 2 * time.Minute
+		assertSweepResult(t, sweeper, ctx, 1, 0)
+		assertTaskRunStatus(t, st, domain.TaskRunFailed)
+	})
+}
+
+func newClockJumpSweeper(t *testing.T) (context.Context, *memstore.Store, *StaleTaskSweeper, *time.Time, *time.Duration) {
+	t.Helper()
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
+		t.Fatalf("Create workspace: %v", err)
+	}
+	wall := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
+	monotonic := time.Duration(0)
+	seedSweeperFixtureAt(t, st, "WS", domain.DriverRunRunning, wall.Add(-10*time.Minute))
+	sweeper := &StaleTaskSweeper{
+		Store: st, WorkspaceKey: "WS", MaxAge: 20 * time.Minute,
+		Now: func() time.Time { return wall }, MonotonicNow: func() time.Duration { return monotonic },
+		ClockOrigin: wall,
+	}
+	return ctx, st, sweeper, &wall, &monotonic
+}
+
+func assertSweepResult(t *testing.T, sweeper *StaleTaskSweeper, ctx context.Context, recovered, fresh int) {
+	t.Helper()
+	result, err := sweeper.RunOnce(ctx)
+	if err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if result.Recovered != recovered || result.SkippedFresh != fresh {
+		t.Fatalf("result = %+v, want recovered=%d skippedFresh=%d", result, recovered, fresh)
+	}
+}
+
+func assertTaskRunStatus(t *testing.T, st *memstore.Store, want domain.TaskRunStatus) {
+	t.Helper()
+	run, err := st.TaskRuns().Get(context.Background(), "WS", "task-run-1")
+	if err != nil {
+		t.Fatalf("Get task run: %v", err)
+	}
+	if run.Status != want {
+		t.Fatalf("task run status = %s, want %s", run.Status, want)
 	}
 }
 

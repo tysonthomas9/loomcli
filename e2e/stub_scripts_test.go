@@ -34,7 +34,7 @@ exit 0
 	writeExecutable(t, filepath.Join(binDir, "make"), "#!/bin/sh\nexit 0\n")
 	writeExecutable(t, filepath.Join(binDir, "git"), "#!/bin/sh\nexit 0\n")
 
-	cmd := exec.Command(filepath.Join(repoRoot(t), "e2e", "stubs", "codex"), "exec", "--json") //nolint:norawexec,gosec // executes this repo's deterministic test stub.
+	cmd := exec.Command(filepath.Join(sourceRepoRoot(t), "e2e", "stubs", "codex"), "exec", "--json") //nolint:norawexec,gosec // executes this repo's deterministic test stub.
 	cmd.Dir = tmp
 	cmd.Stdin = strings.NewReader("pre-assigned task: E2E-2\n")
 	cmd.Env = append(os.Environ(),
@@ -50,7 +50,7 @@ exit 0
 	}
 }
 
-func repoRoot(t *testing.T) string {
+func sourceRepoRoot(t *testing.T) string {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {

@@ -25,6 +25,14 @@ type GitRunner interface {
 	RunWithOutput(dir string, args ...string) error
 }
 
+// ContextGitRunner is implemented by GitRunner values that can terminate an
+// in-flight git subprocess when the caller's context is canceled. Callers
+// with a hard deadline should require this interface instead of wrapping
+// GitRunner.Run in a goroutine, which would leave the subprocess running.
+type ContextGitRunner interface {
+	RunContext(ctx context.Context, dir string, args ...string) CommandResult
+}
+
 // ExecRunner wraps arbitrary command execution.
 type ExecRunner interface {
 	Run(dir, name string, args ...string) CommandResult
@@ -83,6 +91,10 @@ type defaultGitRunner struct{}
 
 func (defaultGitRunner) Run(dir string, args ...string) CommandResult {
 	return ensureDefaultDeps().Exec.Run(dir, "git", args...)
+}
+
+func (defaultGitRunner) RunContext(ctx context.Context, dir string, args ...string) CommandResult {
+	return ensureDefaultDeps().ExecCtx.Run(ctx, dir, "git", args...)
 }
 
 func (defaultGitRunner) RunWithOutput(dir string, args ...string) error {

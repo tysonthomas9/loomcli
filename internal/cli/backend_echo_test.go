@@ -2,6 +2,8 @@
 
 package cli
 
+// The echo backend is selected only by the explicit testbackend build profile.
+
 import (
 	"context"
 	"errors"

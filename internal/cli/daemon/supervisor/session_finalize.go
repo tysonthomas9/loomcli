@@ -126,7 +126,14 @@ func (s *Supervisor) finalizeAgentSession(ap *AgentProcess, exitCode int) {
 	})
 }
 
+// takeAgentSessionForFinalize drains any in-flight heartbeat and retires the
+// session identifiers while holding the lifecycle barrier. It releases the
+// barrier before transcript, Git, artifact, and control-plane completion work:
+// queued heartbeat jobs re-check the cleared identifiers and become no-ops, so
+// terminal work remains protected without blocking a heartbeat pass deadline.
 func takeAgentSessionForFinalize(ap *AgentProcess) agentSessionFinalizeState {
+	ap.SessionHeartbeatMu.Lock()
+	defer ap.SessionHeartbeatMu.Unlock()
 	ap.Mu.Lock()
 	state := agentSessionFinalizeState{
 		session:    ap.Session,

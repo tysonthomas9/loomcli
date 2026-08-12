@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -40,6 +39,9 @@ const leadStoreOpTimeout = 10 * time.Second
 // --message flag.
 var leadMessage string
 var leadPromptFile string
+
+var registerLeadSession = registerLeadOrchestratorSession
+var runLeadShellCommand = func(cmd *exec.Cmd) error { return cmd.Run() }
 
 var leadCmd = &cobra.Command{
 	Use:     "lead",
@@ -111,7 +113,7 @@ func runLead(cmd *cobra.Command, args []string) {
 	// Best-effort: register this lead as an orchestrator session so workers
 	// the AI spawns via `loom agentdef add` are attributed back to it. Skips
 	// silently if there is no active workspace or fleet-db is unreachable.
-	registration := registerLeadOrchestratorSession(context.Background(), workDir)
+	registration := registerLeadSession(context.Background(), workDir)
 	defer registration.Finalize()
 
 	// Generate the terminal-agent prompt and append the user's initial request if provided.
@@ -405,8 +407,12 @@ func resolveLeadAgentID() string {
 // so observers can detect a stale lead (e.g. tmux force-killed). Stops on stopHB
 // close. Best-effort — heartbeat failures are logged at debug only.
 func heartbeatLeadSession(handle *bootstrap.StoreHandle, ws, sid string, stopHB <-chan struct{}, wg *sync.WaitGroup) {
+	heartbeatLeadSessionEvery(handle, ws, sid, stopHB, wg, leadHeartbeatInterval)
+}
+
+func heartbeatLeadSessionEvery(handle *bootstrap.StoreHandle, ws, sid string, stopHB <-chan struct{}, wg *sync.WaitGroup, interval time.Duration) {
 	defer wg.Done()
-	ticker := time.NewTicker(leadHeartbeatInterval)
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -422,26 +428,22 @@ func heartbeatLeadSession(handle *bootstrap.StoreHandle, ws, sid string, stopHB 
 	}
 }
 
-// execShell replaces the current process with an interactive shell.
-// Falls back to running the shell as a subprocess if exec fails.
+// execShell runs an interactive shell as a child process. Keeping the lead
+// process alive preserves its heartbeat while the recovery shell is open and
+// lets runLead's deferred session finalizer run when the shell exits.
 func execShell(workDir string) {
 	shell := os.Getenv("SHELL")
 	if shell == "" {
 		shell = "/bin/bash"
 	}
-	// Try to replace the process entirely so the terminal stays alive.
-	// The shell path is read from the user's own $SHELL env var (trusted),
-	// with a safe fallback to /bin/bash. This is an interactive drop-in,
-	// not a user-supplied command string.
+	// The shell path is read from the user's own $SHELL env var (trusted), with
+	// a safe fallback to /bin/bash. This is an interactive drop-in, not a
+	// user-supplied command string.
 	// #nosec G204 -- shell path is from $SHELL/static fallback, not user input
-	if err := syscall.Exec(shell, []string{shell}, os.Environ()); err != nil {
-		// Fallback: run as a child process.
-		// #nosec G204 -- shell path is from $SHELL/static fallback, not user input
-		cmd := exec.Command(shell)
-		cmd.Dir = workDir
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		_ = cmd.Run()
-	}
+	cmd := exec.Command(shell)
+	cmd.Dir = workDir
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	_ = runLeadShellCommand(cmd)
 }
